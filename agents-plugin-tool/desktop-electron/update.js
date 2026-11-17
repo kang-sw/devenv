@@ -8,7 +8,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const http = require('node:http');
 const https = require('node:https');
-const { execFile, spawn } = require('node:child_process');
+const { execFile, spawn, spawnSync } = require('node:child_process');
 
 const REPO = 'kang-sw/werkschaft';
 const FEED = 'https://api.github.com';
@@ -145,19 +145,39 @@ function stagedApp(platform, dir) {
   }
   return null;
 }
+function stagingLocation(platform, install, userData) {
+  return platform === 'win32' && install ? `${install}-update-staging` : path.join(userData, 'update');
+}
 // Why the staged update cannot be swapped in, or null.
-function applyProblem(platform, install, staging) {
+function applyProblem(platform, install, staging, io = fs) {
   if (!install) return 'this build cannot update itself (not a packaged app)';
   if (platform === 'darwin' && install.includes('/AppTranslocation/')) {
     return 'macOS runs this copy from a read-only location; move Werkschaft.app to Applications first';
   }
-  if (platform === 'win32' && path.parse(install).root.toLowerCase() !== path.parse(staging).root.toLowerCase()) {
-    return `the app folder ${install} is on a different drive than the update staging folder`;
+  if (platform === 'win32' && path.dirname(install).toLowerCase() !== path.dirname(staging).toLowerCase()) {
+    return 'the update staging folder must be beside the app folder';
   }
   try {
-    fs.accessSync(path.dirname(install), fs.constants.W_OK);
-    fs.accessSync(install, fs.constants.W_OK);
-  } catch { return `the app folder ${install} is not writable`; }
+    io.accessSync(path.dirname(install), fs.constants.W_OK);
+    io.accessSync(install, fs.constants.W_OK);
+    if (platform === 'win32') {
+      // W_OK does not check Windows ACLs. Exercise create/rename/delete on
+      // owned empty directories, never rename the running installation.
+      for (const folder of [install, path.dirname(install)]) {
+        let probe, renamed;
+        try {
+          probe = io.mkdtempSync(path.join(folder, '.werkschaft-update-probe-'));
+          renamed = probe + '-renamed';
+          io.renameSync(probe, renamed);
+          io.rmdirSync(renamed);
+        } finally {
+          for (const owned of [renamed, probe].filter(Boolean)) {
+            try { io.rmdirSync(owned); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+          }
+        }
+      }
+    }
+  } catch (error) { return `the app folder ${install} is not writable: ${error.message}`; }
   return null;
 }
 
@@ -190,12 +210,16 @@ exit $code
 // RelaunchArgs is base64 (UTF-8) of the app's command line, already quoted
 // for Windows by windowsCommandLine: one opaque token, so no argument text
 // is ever parsed by PowerShell. Empty command lines use the parameter default.
-const PS_HELPER = `param([int]$AppPid, [string]$Target, [string]$Staged, [string]$Backup, [string]$Staging, [int]$Relaunch, [string]$Log, [string]$RelaunchArgs = '-')
+const PS_HELPER = `param([int]$AppPid, [string]$Target, [string]$Staged, [string]$Backup, [string]$Staging, [int]$Relaunch, [string]$Log, [string]$RelaunchArgs = '-', [string]$Result = '')
+$ErrorActionPreference = 'Stop'
+function Finish([string]$Status, [string]$Message) {
+  Add-Content -LiteralPath $Log -Encoding UTF8 -Value $Message
+  if ($Result) { @{ status = $Status; message = $Message } | ConvertTo-Json -Compress | Set-Content -LiteralPath $Result -Encoding UTF8 }
+}
 try {
-  Add-Content -LiteralPath $Log -Value "helper started pid=$PID app=$AppPid"
-  $ErrorActionPreference = 'Stop'
+  Add-Content -LiteralPath $Log -Encoding UTF8 -Value "helper started pid=$PID app=$AppPid"
   try { Wait-Process -Id $AppPid -Timeout 120 -ErrorAction SilentlyContinue } catch {}
-  if (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) { Add-Content -LiteralPath $Log -Value 'app did not exit'; exit 1 }
+  if (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) { throw 'app did not exit within 120 seconds' }
   $moved = $false
   # Helper processes can hold files for a moment after the main process exits.
   for ($i = 0; $i -lt 50 -and -not $moved; $i++) {
@@ -203,19 +227,21 @@ try {
       if (Test-Path -LiteralPath $Backup) { Remove-Item -LiteralPath $Backup -Recurse -Force }
       Move-Item -LiteralPath $Target -Destination $Backup
       $moved = $true
-    } catch { Start-Sleep -Milliseconds 200 }
+    } catch { $moveError = $_; Start-Sleep -Milliseconds 200 }
   }
-  if (-not $moved) { Add-Content -LiteralPath $Log -Value 'could not move the old app aside'; exit 1 }
+  if (-not $moved) { throw "could not move the old app aside: $moveError" }
   try {
     Move-Item -LiteralPath $Staged -Destination $Target
-    Remove-Item -LiteralPath $Backup -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $Staging -Recurse -Force -ErrorAction SilentlyContinue
-    $code = 0; Add-Content -LiteralPath $Log -Value "updated $Target"
+    $code = 0; $message = "updated $Target"
   } catch {
     if (Test-Path -LiteralPath $Target) { Remove-Item -LiteralPath $Target -Recurse -Force -ErrorAction SilentlyContinue }
-    Move-Item -LiteralPath $Backup -Destination $Target
-    $code = 1; Add-Content -LiteralPath $Log -Value "update failed; restored the previous app: $_"
+    $swapError = $_
+    try { Move-Item -LiteralPath $Backup -Destination $Target }
+    catch { throw "update failed ($swapError); rollback failed; previous app backup is at $Backup; rollback error: $_" }
+    $code = 1; $message = "update failed; restored the previous app: $swapError"
   }
+  # Persist completion before launching: the new app may read it immediately.
+  if ($code -eq 0) { Finish 'success' $message } else { Finish 'error' $message }
   if ($Relaunch -eq 1) {
     $exe = Join-Path $Target 'Werkschaft.exe'
     if ($RelaunchArgs -and $RelaunchArgs -ne '-') {
@@ -224,13 +250,51 @@ try {
       Start-Process -FilePath $exe -ArgumentList $argLine
     } else { Start-Process -FilePath $exe }
   }
+  # Relaunch first: antivirus scanning the old tree must not delay the window.
+  if ($code -eq 0) {
+    Remove-Item -LiteralPath $Backup -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $Staging -Recurse -Force -ErrorAction SilentlyContinue
+  }
   exit $code
 } catch {
-  Add-Content -LiteralPath $Log -Value "helper failed: $_"
+  Finish 'error' "helper failed: $_"
   exit 1
 }
 `;
-function helperScript(platform) { return platform === 'win32' ? PS_HELPER : SH_HELPER; }
+// A rapid manual reopen yields its single-instance lock and executable locks
+// before this independent continuation launches the installed app. Unlike a
+// request-file handoff, its ownership survives the original helper completing.
+const PS_REOPEN = `param([int]$AppPid, [int]$OwnerPid, [string]$OwnerCreated, [string]$Target, [string]$Result, [string]$Log, [string]$RelaunchArgs = '-')
+$ErrorActionPreference = 'Stop'
+try {
+  Add-Content -LiteralPath $Log -Encoding UTF8 -Value "reopen helper started pid=$PID app=$AppPid"
+  try { Wait-Process -Id $AppPid -Timeout 120 -ErrorAction SilentlyContinue } catch {}
+  if (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) { throw 'reopening app did not exit' }
+  $deadline = (Get-Date).AddSeconds(180)
+  while ((Get-Date) -lt $deadline) {
+    if ($OwnerPid -gt 0) {
+      $owner = Get-Process -Id $OwnerPid -ErrorAction SilentlyContinue
+      if (-not $owner -or [string]$owner.StartTime.ToUniversalTime().Ticks -ne $OwnerCreated) { break }
+    } else {
+      try {
+        $outcome = Get-Content -LiteralPath $Result -Raw | ConvertFrom-Json
+        if ($outcome.status -eq 'success' -or $outcome.status -eq 'error') { break }
+      } catch {}
+    }
+    Start-Sleep -Milliseconds 200
+  }
+  $exe = Join-Path $Target 'Werkschaft.exe'
+  if ($RelaunchArgs -and $RelaunchArgs -ne '-') {
+    $argLine = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($RelaunchArgs))
+    Start-Process -FilePath $exe -ArgumentList $argLine
+  } else { Start-Process -FilePath $exe }
+  Add-Content -LiteralPath $Log -Encoding UTF8 -Value "reopened $Target"
+} catch {
+  Add-Content -LiteralPath $Log -Encoding UTF8 -Value "reopen helper failed: $_"
+  exit 1
+}
+`;
+function helperScript(platform, reopen = false) { return platform === 'win32' ? (reopen ? PS_REOPEN : PS_HELPER) : SH_HELPER; }
 // The arguments a relaunch repeats: the original ones (process.argv.slice(1)
 // in a packaged app) minus -psn_* (the process serial number older macOS
 // Launch Services adds; the new launch gets its own).
@@ -252,14 +316,18 @@ function windowsCommandLine(args) {
   }).join(' ');
 }
 function helperCommand(platform, script, { pid, target, staged, backup, staging, relaunch, args = [],
-  logFile = path.join(path.dirname(staging), 'update-apply.log') }, env = process.env) {
+  logFile = path.join(path.dirname(staging), 'update-apply.log'), resultFile, reopen = false, helper }, env = process.env) {
   const flag = relaunch ? '1' : '0';
   if (platform === 'win32') {
     const line = windowsCommandLine(args);
     return [path.join(env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script,
-        '-AppPid', String(pid), '-Target', target, '-Staged', staged, '-Backup', backup, '-Staging', staging, '-Relaunch', flag, '-Log', logFile,
-        ...(line ? ['-RelaunchArgs', Buffer.from(line, 'utf8').toString('base64')] : [])]];
+        '-AppPid', String(pid), '-Target', target,
+        ...(reopen ? ['-OwnerPid', String(helper?.pid || 0), '-OwnerCreated', helper?.created || '0']
+          : ['-Staged', staged, '-Backup', backup, '-Staging', staging, '-Relaunch', flag]),
+        '-Log', logFile,
+        ...(line ? ['-RelaunchArgs', Buffer.from(line, 'utf8').toString('base64')] : []),
+        ...(resultFile ? ['-Result', resultFile] : [])]];
   }
   return ['/bin/sh', [script, String(pid), target, staged, backup, staging, flag, ...args]];
 }
@@ -267,11 +335,42 @@ function helperCommand(platform, script, { pid, target, staged, backup, staging,
 function runFile(command, args) {
   return new Promise((resolve, reject) => execFile(command, args, { windowsHide: true }, error => error ? reject(error) : resolve()));
 }
-function spawnDetached(command, args, logFile) {
-  const out = fs.openSync(logFile, 'a');
+function windowsBootstrap(command, args, cwd) {
+  const quote = value => "'" + value.replace(/['\u2018-\u201B]/g, '$&$&') + "'";
+  // Windows PowerShell can exit 0 before -File when created with Node's
+  // detached/invalid-console handles. A short-lived, piped bootstrap uses
+  // ShellExecute (Start-Process) to give the hidden helper its own lifetime.
+  const script = `$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'; $child = Start-Process -FilePath ${quote(command)} -WindowStyle Hidden -WorkingDirectory ${quote(cwd)} -ArgumentList ${quote(windowsCommandLine(args))} -PassThru; @{ pid = $child.Id; created = [string]$child.StartTime.ToUniversalTime().Ticks } | ConvertTo-Json -Compress`;
+  return ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-OutputFormat', 'Text',
+    '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')];
+}
+function spawnDetached(command, args, logFile, platform = process.platform, launch = spawnSync) {
   // cwd outside the app folder: on Windows a child's cwd locks that folder.
-  try { spawn(command, args, { cwd: path.dirname(logFile), detached: true, stdio: ['ignore', out, out], windowsHide: true }).unref(); }
+  const cwd = path.dirname(logFile);
+  if (platform === 'win32') {
+    fs.appendFileSync(logFile, 'starting Windows update helper via Start-Process\n');
+    const result = launch(command, windowsBootstrap(command, args, cwd), {
+      cwd, windowsHide: true, encoding: 'utf8', timeout: 15000,
+    });
+    if (result.error || result.status !== 0) {
+      throw new Error(`helper launch failed: ${result.error?.message || result.stderr || `exit ${result.status}`}`);
+    }
+    return JSON.parse(result.stdout.trim());
+  }
+  const out = fs.openSync(logFile, 'a');
+  try { spawn(command, args, { cwd, detached: true, stdio: ['ignore', out, out], windowsHide: true }).unref(); }
   finally { fs.closeSync(out); }
+}
+
+// Query only the helper we created, including creation identity to reject PID
+// reuse. No process is signalled. Unknown observations conservatively keep its
+// stage until the bounded apply window has expired.
+function windowsHelperRunning(helper, launch = spawnSync) {
+  if (!helper || !Number.isSafeInteger(helper.pid) || helper.pid <= 0 || !/^\d+$/.test(helper.created)) return null;
+  const command = helperCommand('win32', '', { staging: '' })[0];
+  const script = `$p = Get-Process -Id ${helper.pid} -ErrorAction SilentlyContinue; if ($p -and [string]$p.StartTime.ToUniversalTime().Ticks -eq '${helper.created}') { exit 0 } else { exit 1 }`;
+  const result = launch(command, ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 5000 });
+  return result.error || ![0, 1].includes(result.status) ? null : result.status === 0;
 }
 
 // send(status) delivers { state, version, ..., phase } to the dashboard: the
@@ -283,26 +382,35 @@ function spawnDetached(command, args, logFile) {
 // app does not update itself (it then replaces [Update]).
 function createUpdater({ version, userData, packaged, platform = process.platform, arch = process.arch,
   execPath = process.execPath, argv = process.argv.slice(1), pid = process.pid, feed = process.env.WERKSCHAFT_UPDATE_FEED || FEED,
-  send = () => {}, log = message => console.error(message), run = runFile, detach = spawnDetached } = {}) {
-  const staging = path.join(userData, 'update');
-  // Windows never updates itself: the detached PowerShell swap helper fails
-  // silently once the app exits, so a Windows user installs by hand from
-  // DOWNLOAD_PAGE and nothing here downloads, stages, or spawns the helper.
-  const selfUpdate = platform !== 'win32';
+  send = () => {}, log = message => console.error(message), run = runFile, detach = spawnDetached,
+  isApplying = windowsHelperRunning, now = Date.now, locationProblem = applyProblem } = {}) {
+  const staging = stagingLocation(platform, installLocation(platform, execPath, packaged), userData);
+  const logFile = path.join(userData, 'update-apply.log');
+  const resultFile = path.join(userData, 'update-apply-result.json');
   const stateFile = path.join(userData, 'update-state.json');
   const stagedFile = path.join(staging, 'staged.json');
   let available = null, busy = false, phase = { phase: 'unchecked', version: null, skipped: false };
   const setPhase = (name, value = null, skipped = false) => { phase = { phase: name, version: value, skipped }; };
   const emit = status => send({ ...status, phase: { ...phase } });
-  const readJSON = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')) || {}; } catch { return {}; } };
+  const readJSON = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) || {}; } catch { return {}; } };
   const readState = () => readJSON(stateFile);
   function writeState(patch) {
     fs.mkdirSync(userData, { recursive: true });
     fs.writeFileSync(stateFile, JSON.stringify({ ...readState(), ...patch }));
   }
+  let applyFailure = readState().applyFailure || null;
+  const emitFailure = () => emit({ state: 'apply-error', ...applyFailure, downloadPage: DOWNLOAD_PAGE });
+  function acknowledgeFailure() {
+    if (applyFailure) { writeState({ applyFailure: null }); applyFailure = null; }
+  }
+  if (applyFailure && !isNewer(applyFailure.version, version)) acknowledgeFailure();
+  // Called only after main actually sends the queued failure to the dashboard.
+  function statusDelivered(status) {
+    if (applyFailure && status.state === 'apply-error' && status.version === applyFailure.version
+      && status.message === applyFailure.message) acknowledgeFailure();
+  }
   // A staged update newer than this app whose folder is still there.
   function staged() {
-    if (!selfUpdate) return null;
     const value = readJSON(stagedFile);
     return isNewer(value.version, version) && typeof value.app === 'string' && fs.existsSync(value.app) ? value : null;
   }
@@ -334,8 +442,9 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
     const skipped = readState().skipped === found.version;
     setPhase('available', found.version, skipped);
     if (skipped && !manual) return 'skipped';
-    emit({ state: 'available', version: found.version, current: version, skipped, manual,
-      ...(selfUpdate ? {} : { downloadPage: DOWNLOAD_PAGE }) });
+    const problem = platform === 'win32' ? locationProblem(platform, installLocation(platform, execPath, packaged), staging) : null;
+    emit({ state: problem ? 'apply-error' : 'available', version: found.version, current: version, skipped, manual,
+      ...(problem ? { downloadPage: DOWNLOAD_PAGE, message: problem } : {}) });
     return 'available';
   }
 
@@ -348,18 +457,17 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
 
   async function download() {
     if (busy || !available) return null;
-    if (!selfUpdate) {
-      // Only an older dashboard still offers [Update] here; it shows this message.
-      emit({ state: 'download-error', version: available.version, downloadPage: DOWNLOAD_PAGE,
-        message: `this app does not update itself on Windows; download v${available.version} from ${DOWNLOAD_PAGE}` });
-      return 'download-error';
-    }
     busy = true;
     const target = available;
     emit({ state: 'downloading', version: target.version });
     try {
       const install = installLocation(platform, execPath, packaged);
       if (!install) throw new Error('this build cannot update itself (not a packaged app)');
+      const initialProblem = locationProblem(platform, install, staging);
+      if (initialProblem) {
+        emit({ state: 'apply-error', version: target.version, message: initialProblem, downloadPage: DOWNLOAD_PAGE });
+        return 'apply-error';
+      }
       fs.rmSync(staging, { recursive: true, force: true });
       fs.mkdirSync(staging, { recursive: true });
       const zip = path.join(staging, target.asset);
@@ -372,7 +480,7 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
       if (!app) throw new Error(`${target.asset} holds no Werkschaft app`);
       fs.rmSync(zip, { force: true });
       fs.writeFileSync(stagedFile, JSON.stringify({ version: target.version, app }));
-      const problem = applyProblem(platform, install, staging);
+      const problem = locationProblem(platform, install, staging);
       // Keep the verified stage either way: fixing the folder lets a later quit apply it.
       if (!problem) setPhase('ready', target.version);
       emit(problem ? { state: 'apply-error', version: target.version, message: problem, downloadPage: DOWNLOAD_PAGE }
@@ -388,20 +496,38 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
 
   // Starts the detached swap helper for a verified stage; true when started.
   function apply(relaunch) {
-    if (!selfUpdate) return false;
     const stage = staged();
     if (!stage) return false;
     const install = installLocation(platform, execPath, packaged);
-    const problem = applyProblem(platform, install, staging);
+    const problem = locationProblem(platform, install, staging);
     if (problem) { log(`Update not applied: ${problem}`); return false; }
     const script = path.join(staging, platform === 'win32' ? 'apply.ps1' : 'apply.sh');
-    fs.writeFileSync(script, helperScript(platform));
-    const [command, args] = helperCommand(platform, script, {
-      pid, target: install, staged: stage.app, backup: `${install}-update-backup`, staging, relaunch,
-      args: relaunch ? relaunchArgs(argv) : [],
-    });
-    detach(command, args, path.join(userData, 'update-apply.log'));
-    return true;
+    try {
+      if (platform === 'win32') {
+        fs.rmSync(resultFile, { force: true });
+        writeState({ applyAttempt: { version: stage.version, startedAt: now(), target: install } });
+      }
+      fs.writeFileSync(script, helperScript(platform));
+      const [command, args] = helperCommand(platform, script, {
+        pid, target: install, staged: stage.app, backup: `${install}-update-backup`, staging, relaunch,
+        args: relaunch ? relaunchArgs(argv) : [], logFile,
+        ...(platform === 'win32' ? { resultFile } : {}),
+      });
+      const helper = detach(command, args, logFile);
+      if (platform === 'win32') {
+        const attempt = readState().applyAttempt;
+        if (attempt && attempt.target === install && attempt.version === stage.version) {
+          writeState({ applyAttempt: { ...attempt, helper } });
+        }
+      }
+      return true;
+    } catch (error) {
+      const message = `Update apply failed: ${error.message}`;
+      fs.appendFileSync(logFile, message + '\n');
+      if (platform === 'win32') fs.writeFileSync(resultFile, JSON.stringify({ status: 'error', message }));
+      emit({ state: 'apply-error', version: stage.version, message, downloadPage: DOWNLOAD_PAGE });
+      return false;
+    }
   }
   // The quit path: swap after exit. A plain full quit does not relaunch (the
   // user quit); restart() asks the main process to quit with relaunch.
@@ -411,9 +537,59 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
   // Launch path, before any window: a stage left by a reboot or an unclean
   // exit is swapped in and the new app relaunched. Only one launch attempt
   // per version, so a swap that keeps failing cannot loop.
+  function deferLaunch(attempt) {
+    try {
+      const script = path.join(userData, 'update-reopen.ps1');
+      fs.writeFileSync(script, helperScript('win32', true));
+      const [command, args] = helperCommand('win32', script, { pid, staging,
+        target: installLocation(platform, execPath, packaged), logFile, resultFile,
+        reopen: true, helper: attempt.helper, args: relaunchArgs(argv) });
+      detach(command, args, logFile);
+      return true;
+    } catch (error) {
+      const message = `Update reopen failed: ${error.message}`;
+      fs.appendFileSync(logFile, message + '\n');
+      emit({ state: 'apply-error', version: attempt.version, message, downloadPage: DOWNLOAD_PAGE });
+      return false;
+    }
+  }
   function applyOnLaunch() {
     const stage = staged();
     const state = readState();
+    if (platform === 'win32' && state.applyAttempt && (!state.applyAttempt.target ||
+      path.resolve(state.applyAttempt.target).toLowerCase() === path.resolve(installLocation(platform, execPath, packaged) || '').toLowerCase())) {
+      const attempt = state.applyAttempt;
+      let result = readJSON(resultFile);
+      // Reconcile completion after the synchronous liveness query: the helper
+      // can finish during that query. A live snapshot is not a relaunch ack.
+      const running = result.status ? false : isApplying(attempt.helper);
+      result = readJSON(resultFile);
+      const active = !result.status && (running === true || running === null && now() - attempt.startedAt < 180000);
+      // Legacy attempts have no target, so do not defer this install or
+      // discard a stage that their still-running helper may be using.
+      if (active) return attempt.target ? deferLaunch(attempt) : false;
+      if (result.status === 'success' && attempt.target && !attempt.deferred && isNewer(attempt.version, version)) {
+        // Persist before launching the continuation, so an older copy cannot loop.
+        writeState({ applyAttempt: { ...attempt, deferred: true } });
+        return deferLaunch(attempt);
+      }
+      writeState({ applyAttempt: null });
+      if (result.status === 'success' && attempt.deferred) return false;
+      if (result.status !== 'success') {
+        const message = result.status === 'error' && typeof result.message === 'string' ? result.message
+          : 'the previous update did not complete; see update-apply.log';
+        log(message);
+        fs.appendFileSync(logFile, message + '\n');
+        if (stage?.version === attempt.version) fs.rmSync(staging, { recursive: true, force: true });
+        if (isNewer(attempt.version, version)) {
+          applyFailure = { version: attempt.version, message };
+          writeState({ applyFailure });
+          emitFailure();
+          return false;
+        }
+      }
+    }
+    if (applyFailure) { emitFailure(); return false; }
     if (!stage) {
       if (fs.existsSync(staging) && !busy) fs.rmSync(staging, { recursive: true, force: true });
       if (state.launchAttempt) writeState({ launchAttempt: null });
@@ -427,7 +603,7 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
       return false;
     }
     // An unwritable folder keeps the stage (and no attempt is spent) and says so.
-    const problem = applyProblem(platform, installLocation(platform, execPath, packaged), staging);
+    const problem = locationProblem(platform, installLocation(platform, execPath, packaged), staging);
     if (problem) {
       emit({ state: 'apply-error', version: stage.version, message: problem, downloadPage: DOWNLOAD_PAGE });
       return false;
@@ -445,9 +621,9 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
   }
   const stop = () => { timers.forEach(clearTimeout); timers.forEach(clearInterval); timers = []; };
   return { check, skip, download, applyOnQuit, applyOnLaunch, canRestart, phase: () => ({ ...phase }),
-    schedule, stop, paths: { staging, stateFile } };
+    schedule, stop, statusDelivered, paths: { staging, stateFile } };
 }
 
 module.exports = { REPO, FEED, SUMS, DOWNLOAD_PAGE, USER_AGENT, INTERVAL, parseVersion, isNewer, assetName, parseSums,
-  selectRelease, allowedURL, readText, downloadTo, installLocation, extractCommand, stagedApp, applyProblem,
-  helperScript, helperCommand, relaunchArgs, windowsCommandLine, createUpdater };
+  selectRelease, allowedURL, readText, downloadTo, installLocation, extractCommand, stagedApp, stagingLocation, applyProblem,
+  helperScript, helperCommand, relaunchArgs, windowsCommandLine, windowsBootstrap, spawnDetached, windowsHelperRunning, createUpdater };

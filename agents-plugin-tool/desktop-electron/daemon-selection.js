@@ -127,7 +127,7 @@ function validateDaemonRoot(root, source, platform) {
     return { source, root, binary, contract, metadata, env: { WS_RSRC_ROOT: rsrc, WS_SKILLS_ROOT: skills } };
   } catch (error) { throw new Error(`Cannot use ${source} daemon at ${root}: ${error.message}`); }
 }
-function selectDaemon({ appRoot, userData, platform = process.platform }) {
+function selectDaemon({ appRoot, userData, platform = process.platform, packaged = true }) {
   if (!path.isAbsolute(appRoot) || !path.isAbsolute(userData)) throw new Error('Daemon app and user data paths must be absolute');
   const setting = path.join(userData, SETTING);
   // build.cjs unpacks the entire daemon tree. Use its physical path so even
@@ -143,6 +143,13 @@ function selectDaemon({ appRoot, userData, platform = process.platform }) {
       throw new Error(`Invalid daemon selection at ${setting}: expected absolute development root`);
     }
     root = selection.root; source = 'development';
+  } else if (!packaged && !fs.existsSync(root)) {
+    // The desktop assembler defaults to the wsflow package in the checkout.
+    root = path.resolve(appRoot, '../../agents-plugin-wsflow'); source = 'development';
+    try { return validateDaemonRoot(root, source, platform); }
+    catch (error) {
+      throw new Error(`${error.message}. To prepare a bundled input instead, run from the repository root: node agents-plugin-tool/desktop-electron/scripts/assemble-daemon-input.cjs --binary <absolute-path-to-ws-mcp> --out agents-plugin-tool/desktop-electron/daemon --platform ${platform} (with matching binary metadata).`);
+    }
   }
   return validateDaemonRoot(root, source, platform);
 }

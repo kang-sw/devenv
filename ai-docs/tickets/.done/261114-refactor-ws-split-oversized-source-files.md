@@ -1,5 +1,6 @@
 ---
 title: "Split oversized source files flagged by the git.merge size guard"
+completed: 2026-11-17
 ---
 
 # Split oversized source files flagged by the git.merge size guard
@@ -714,3 +715,8 @@ Merged to develop at 3137b3d85 (3 commits). `scripts/board-headless.mjs` went fr
 - Verification: only import/export scaffolding changed; declaration identity, no-argument usage output, all 21 stub scenarios, static names, syntax checks, and the split tests passed, and the split matches the map prototype exactly.
 - After all eight merges the lead ran `go build ./...` and `go vet ./...` (clean) and narrow tests for wswhiteboard, wsi18n, wsdashboard, mcp, wsagent payload, and wsrsrc mirror, all ok. Full CI run 43967536145 on 3137b3d85 is in progress (full CI pending).
 - The vendored `mermaid.min.js` was not split (owner decision recorded above).
+
+
+## Resolution (2026-11-17)
+
+All eight split phases merged to develop with per-phase Results. The first full CI after the merges (on 3137b3d85) went red on stale test assertions unrelated to the splits, from render-cost Phase 1 and an earlier folder-revision change; the test-only fix f9250dbc1 made the next full CI on develop green.

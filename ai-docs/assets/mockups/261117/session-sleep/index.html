@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>Sessions panel - sleep button mockup</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* Mockup only. Variables and rules are copied from the real dashboard:
+   wswhiteboard/assets/page.css (dark palette), wsdashboard/assets/dashboard-rail.css
+   (.rail, .rhd, .rref, .rs, .hi, .wsbar, .wthd, .rdeldlg, .pbtn) and dashboard-menus.css (.wstoast).
+   New in this mockup: .rsleep (shares .rref), #i-moon, .rsleepdlg list, .mk-* chrome. */
+:root {
+  --wb-bg: #141518; --wb-fg: #e7e7e4; --wb-card: #1e2024; --wb-muted: #2b2d32; --wb-muted-fg: #a2a6ad;
+  --wb-primary: #7aa2ff; --wb-primary-fg: #0c1424;
+  --wb-topic: #2a2d33; --wb-on-topic: #e4e5e8;
+  --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+  --wb-policy: #5b3a1c; --wb-on-policy: #f6d9bd;
+  --wb-accent-policy: #e0a36c;
+  --wb-ph-perm: #55400f; --wb-on-ph-perm: #f6dfae; --wb-perm-ink: var(--wb-on-ph-perm);
+  --wb-ok: #6cc39a; --wb-fail: #f0797e; --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+  --wb-radius: 12px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", "Malgun Gothic", sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--wb-bg); color: var(--wb-fg); font: 13px/1.4 var(--wb-sans); }
+button { font: inherit; color: inherit; }
+.i { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.chip { display: inline-flex; align-items: center; gap: 3px; height: 20px; font-size: 12px; font-weight: 700; line-height: 1; padding: 0 9px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+.chip.policy { background: var(--wb-policy); color: var(--wb-on-policy); }
+.chip .i { width: 12px; height: 12px; stroke-width: 2; }
+
+/* ---- mockup chrome ---- */
+.mk-bar { display: flex; align-items: center; gap: 6px; padding: 10px 24px; border-bottom: 1px solid var(--wb-muted); font-size: 12px; color: var(--wb-muted-fg); }
+.mk-bar b { color: var(--wb-fg); margin-right: 6px; }
+.mk-bar a { padding: 3px 11px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); text-decoration: none; font-weight: 700; }
+.mk-bar a.on { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.mk-main { display: flex; gap: 28px; align-items: flex-start; padding: 22px 24px; }
+.mk-notes { flex: 1; max-width: 330px; font-size: 12.5px; color: var(--wb-muted-fg); }
+.mk-notes h3 { margin: 0 0 6px; font-size: 13px; color: var(--wb-fg); }
+.mk-notes p { margin: 0 0 10px; }
+
+/* ---- rail (dashboard-rail.css) ---- */
+.rail { width: 400px; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); display: flex; flex-direction: column; overflow: hidden; }
+.rail .rhd { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); user-select: none; }
+.rail .rsp { flex: 1; }
+.rail .chip { height: 18px; font-size: 11px; padding: 0 7px; flex: none; }
+.rail .chip .i { width: 11px; height: 11px; }
+.rail .rref { position: relative; display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.rail .rref:hover, .rail .rref:focus-visible, .rail .rref.hov { color: var(--wb-primary); background: var(--wb-muted); outline: none; }
+/* NEW: the sleep button is a .rref sibling; disabled dims it like .spact:disabled */
+.rail .rref:disabled { cursor: default; color: var(--wb-muted-fg); background: transparent; }
+.rail .rref:disabled > .i { opacity: .4; }
+.rail .rref .tipbub { display: none; position: absolute; z-index: 5; top: calc(100% + 6px); right: -4px; padding: 3px 8px; border-radius: 4px; background: #3a3d44; color: var(--wb-fg); font: 12px/1.4 var(--wb-sans); font-weight: 400; white-space: nowrap; box-shadow: var(--wb-shadow-hi); pointer-events: none; }
+.rail .rref.hov .tipbub, .rail .rref.showtip .tipbub { display: block; }
+.rail .rlist { padding-bottom: 6px; }
+.rail .wsbar { display: flex; align-items: center; gap: 8px; padding: 3px 12px; min-height: 28px; background: var(--wb-topic); color: var(--wb-on-topic); user-select: none; }
+.rail .wsbar .wsi { display: inline-flex; flex: none; opacity: .8; margin-right: -2px; }
+.rail .wsbar .wsi .i { width: 12px; height: 12px; }
+.rail .wsbar .nm { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.rail .wsbar .pp { font-family: var(--wb-mono); font-size: 11px; opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+.rail .wsbar .ct { margin-left: auto; font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: rgb(127 127 127 / .28); flex: none; }
+.rail .rwt { padding: 4px 0 2px; }
+.rail .wthd { display: flex; align-items: center; gap: 6px; padding: 2px 12px 2px 28px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); min-width: 0; }
+.rail .wthd .i { width: 12px; height: 12px; }
+.rail .wthd .br { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); white-space: nowrap; }
+.rail .wthd .wf { font-weight: 500; white-space: nowrap; }
+.rail .rsessions { margin: 4px 8px 0 33px; border-left: 2px solid var(--wb-muted); }
+.rail .rs { position: relative; display: flex; align-items: flex-start; padding-left: 14px; border-radius: 6px; }
+.rail .rs:hover { background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
+.rail .drbody { flex: 1 1 auto; min-width: 0; }
+.rail .s1 { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rail .rl { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; padding: 5px 0; color: inherit; text-decoration: none; }
+.rail .drtail { flex: 1 1 0; align-self: stretch; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 5px 8px 5px 0; }
+.rail .drslot { flex: none; min-width: 44px; text-align: right; }
+.rail .drmsg { display: block; margin-top: -4px; padding: 0 8px 5px 0; }
+.rail .rid { font-family: var(--wb-sans); font-size: 12.5px; font-weight: 600; color: var(--wb-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rail .when { font-size: 11px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rail .s2 { display: block; margin-top: 1px; font-size: 12px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rail .hiw { position: relative; flex: none; display: inline-flex; height: 16px; }
+.rail .hi { position: relative; flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 3px; font-size: 10px; font-weight: 800; line-height: 1; color: #fff; background: #8a8f98; }
+.rail .hi.claude { background: #D97757; }
+.rail .hi.pi { background: #000; box-shadow: inset 0 0 0 1px #666; }
+.rail .hi.codex { background: #10A37F; }
+.rail .hi.perm { box-shadow: 0 0 0 2px var(--wb-perm-ink); }
+.rail .hi .orb { position: absolute; inset: -2px; padding: 1.5px; border-radius: 5px; overflow: hidden; pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+.rail .hi .rrun { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px; background: conic-gradient(var(--wb-primary) 0 24%, transparent 0); transform: rotate(120deg); }
+.rail .chip.perm { background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }
+/* the existing asleep look (.stopped): muted name, dimmed icon, no message line */
+.rail .rs.stopped .rid { color: var(--wb-muted-fg); }
+.rail .rs.stopped .hi { opacity: .55; }
+.rail .rs.stopped .s2 { display: none; }
+.rail .rs.stopped .drmsg { padding-bottom: 0; }
+
+/* ---- confirmation dialog (dialog.rdeldlg look) ---- */
+dialog.rsleepdlg { width: 460px; max-width: calc(100vw - 24px); padding: 14px 16px; border: 0; border-radius: 12px; background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); font-size: 12.5px; }
+dialog.rsleepdlg[open] { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+dialog.rsleepdlg::backdrop { background: rgb(0 0 0 / .35); }
+.rsleepdlg .rdhd { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 14px; font-weight: 800; }
+.rsleepdlg .rdhd .i { width: 15px; height: 15px; color: var(--wb-primary); }
+.rsleepdlg p { margin: 0; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.rsleepdlg p b { color: var(--wb-fg); font-weight: 700; }
+.rsleepdlg .rdfacts { margin: 0; padding: 4px 4px; list-style: none; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); max-height: 218px; overflow-y: auto; outline: none; }
+.rsleepdlg .rdfacts li { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 5px 6px; border-radius: 6px; }
+.rsleepdlg .rdfacts li + li { box-shadow: 0 -1px 0 var(--wb-muted); }
+.rsleepdlg .hi { width: 16px; height: 16px; display: inline-grid; place-items: center; border-radius: 3px; font-size: 10px; font-weight: 800; color: #fff; background: #8a8f98; flex: none; }
+.rsleepdlg .hi.claude { background: #D97757; } .rsleepdlg .hi.codex { background: #10A37F; } .rsleepdlg .hi.pi { background: #000; box-shadow: inset 0 0 0 1px #666; }
+.rsleepdlg .who { min-width: 0; flex: 1 1 auto; display: grid; }
+.rsleepdlg .who .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rsleepdlg .who .pj { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rsleepdlg .ago { flex: none; font-size: 11px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; }
+.rsleepdlg .rdnote { padding: 7px 10px; border-radius: 8px; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.rsleepdlg .rdrow { display: flex; justify-content: flex-end; gap: 6px; }
+.rsleepdlg .pbtn { white-space: nowrap; flex: none; font-size: 12px; font-weight: 700; border: 0; border-radius: 999px; padding: 3px 12px; cursor: pointer; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.rsleepdlg .pbtn.go { background: var(--wb-primary); color: var(--wb-primary-fg); display: inline-flex; align-items: center; gap: 5px; }
+.rsleepdlg .pbtn.go .i { width: 12px; height: 12px; }
+.rsleepdlg .pbtn:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+
+/* ---- toast (dashboard-menus.css .wstoast.summary) ---- */
+.wstoasts { position: fixed; z-index: 91; right: 16px; bottom: 18px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
+.wstoast { background: var(--wb-fg); color: var(--wb-card); border-radius: 8px; padding: 7px 12px; font-size: 12.5px; line-height: 1.4; box-shadow: var(--wb-shadow-hi); }
+.wstoast.summary .wst-body::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); margin-right: 7px; vertical-align: 1px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-reload" viewBox="0 0 16 16"><path d="M14.3 2.8v3.9h-3.9"/><path d="M13 10.2a5.4 5.4 0 1 1-1.3-5.6l2.6 2.1"/></symbol>
+  <!-- NEW: crescent, same 16 grid, round 1.7 stroke as the refresh icon (Lucide "moon" scaled 24 -> 16) -->
+  <symbol id="i-moon" viewBox="0 0 16 16"><path d="M8 2a4 4 0 0 0 6 6 6 6 0 1 1-6-6z"/></symbol>
+  <symbol id="i-ask" viewBox="0 0 16 16"><path d="M6 6.2a2 2 0 1 1 2.8 1.8c-.5.3-.8.7-.8 1.3v.4"/><circle cx="8" cy="12.3" r=".6" fill="currentColor"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 16 16"><rect x="3" y="7" width="10" height="7" rx="1.6"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></symbol>
+  <symbol id="i-repo" viewBox="0 0 16 16"><path d="M3.5 2.5h8.5v9H5a1.5 1.5 0 0 0-1.5 1.5z"/><path d="M3.5 13a1.5 1.5 0 0 0 1.5 1.5h7v-3"/><path d="M6 5h4"/></symbol>
+  <symbol id="i-branch" viewBox="0 0 16 16"><circle cx="4.5" cy="3.6" r="1.5"/><circle cx="4.5" cy="12.4" r="1.5"/><circle cx="11.5" cy="6" r="1.5"/><path d="M4.5 5.1v5.8M11.5 7.5c0 2.6-3.2 2.4-7 3.4"/></symbol>
+</svg>
+
+<div class="mk-bar" id="switch">
+  <b>세션 패널 절전 버튼 목업</b>
+  <a href="#a" data-s="a">a 기본</a><a href="#b" data-s="b">b 확인</a><a href="#c" data-s="c">c 완료</a><a href="#d" data-s="d">d 비활성</a>
+</div>
+
+<div class="mk-main">
+  <div class="rail" id="rail">
+    <div class="rhd">
+      <b class="rtitle">세션</b>
+      <span class="rsp"></span>
+      <span class="chip" title="실시간 세션">실시간 15</span>
+      <span class="chip policy" title="답변 대기"><svg class="i"><use href="#i-ask"/></svg>43</span>
+      <button type="button" class="rref rsleep" id="sleepbtn"><svg class="i" aria-hidden="true"><use href="#i-moon"/></svg><span class="tipbub" id="tipbub"></span></button>
+      <button type="button" class="rref" id="railref" title="워크트리 목록 다시 읽기" aria-label="워크트리 목록 다시 읽기"><svg class="i" aria-hidden="true"><use href="#i-reload"/></svg></button>
+    </div>
+    <div class="rlist" id="rlist"></div>
+  </div>
+  <div class="mk-notes" id="notes"></div>
+</div>
+
+<dialog class="rsleepdlg" id="dlg" aria-labelledby="dlgt">
+  <h2 class="rdhd"><svg class="i"><use href="#i-moon"/></svg><span id="dlgt"></span></h2>
+  <p>아래 세션의 <b>하네스 프로세스를 종료</b>하고 절전 상태로 전환합니다. 대화 기록은 그대로이며, 다음 메시지나 메일이 오면 이어서 다시 시작합니다.</p>
+  <ul class="rdfacts" id="dlglist"></ul>
+  <p class="rdnote" id="dlgnote"></p>
+  <div class="rdrow"><button type="button" class="pbtn" id="cancel" autofocus>취소</button><button type="button" class="pbtn go" id="go"><svg class="i"><use href="#i-moon"/></svg>절전</button></div>
+</dialog>
+<div class="wstoasts" id="toasts" role="status" aria-live="polite"></div>
+
+<script>
+// st: idle (lead alive, no turn, no approval, no bg tasks) | work | appr | asleep
+var WS = [
+  { name: "devenv", path: "D:\\Workspace\\Repos\\devenv", wts: [
+    { br: "develop", root: true, rows: [
+      { n: "대시보드 레일 정리", h: "claude", st: "idle", ago: "2분 전", m: "레일 헤더 검토 끝났습니다" },
+      { n: "릴리스 점검", h: "codex", st: "work", ago: "방금", m: "go test ./internal/wsdashboard" },
+      { n: "ws 설정 UI", h: "claude", st: "idle", ago: "14분 전", m: "설정 화면 초안을 정리했습니다" },
+      { n: "MCP 호환성 조사", h: "claude", st: "asleep", ago: "3시간 전" } ] },
+    { br: "feat/session-sleep", rows: [
+      { n: "절전 버튼 목업", h: "claude", st: "idle", ago: "5분 전", m: "목업 파일을 만들었습니다" },
+      { n: "tracker 회귀 분석", h: "pi", st: "work", ago: "방금", m: "Read tracker_store.go" },
+      { n: "승인 흐름 점검", h: "claude", st: "appr", ago: "1분 전", m: "Bash  git push origin develop" } ] },
+    { br: "fix/rail-geometry", rows: [
+      { n: "레일 레이아웃 측정", h: "codex", st: "idle", ago: "31분 전", m: "측정 결과를 정리했습니다" },
+      { n: "pill 지오메트리", h: "claude", st: "work", ago: "방금", m: "Edit dashboard-rail.js" } ] } ] },
+  { name: "ws-site", path: "D:\\Workspace\\Repos\\ws-site", wts: [
+    { br: "main", root: true, rows: [
+      { n: "문서 사이트 초안", h: "claude", st: "idle", ago: "52분 전", m: "초안 작성 완료" },
+      { n: "릴리스 노트", h: "claude", st: "asleep", ago: "어제" } ] } ] }
+];
+var H = { claude: "C", codex: "X", pi: "P" };
+function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+function icon(n) { return '<svg class="i" aria-hidden="true"><use href="#i-' + n + '"/></svg>'; }
+
+function each(fn) { WS.forEach(function (w) { w.wts.forEach(function (t) { t.rows.forEach(function (r) { fn(r, w, t); }); }); }); }
+
+// c and d show the list after sleeping: every idle row is drawn with the existing .stopped look
+function render(slept) {
+  var html = "";
+  WS.forEach(function (w) {
+    var live = 0; w.wts.forEach(function (t) { live += t.rows.length; });
+    html += '<section class="rws"><div class="wsbar"><span class="wsi">' + icon("repo") + '</span><span class="nm">' + esc(w.name) + '</span><span class="pp">' + esc(w.path) + '</span><span class="ct">' + live + '</span></div>';
+    w.wts.forEach(function (t) {
+      html += '<div class="rwt"><div class="wthd">' + icon("branch") + '<span class="br">' + esc(t.br) + '</span><span class="wf">· ' + (t.root ? "root" : "worktree") + '</span></div><div class="rsessions">';
+      t.rows.forEach(function (r) {
+        var st = (r.st === "idle" && slept) ? "asleep" : r.st;
+        var hic = "hi " + r.h + (st === "appr" ? " perm" : "");
+        var orb = st === "work" ? '<span class="orb"><span class="rrun"></span></span>' : "";
+        var tail = st === "appr" ? '<span class="chip perm">' + icon("lock") + '승인</span>' : "";
+        html += '<div class="rs' + (st === "asleep" ? " stopped" : "") + '"><div class="drbody"><div class="s1"><a class="rl"><span class="hiw"><span class="' + hic + '">' + H[r.h] + orb + '</span></span><span class="rid lbl">' + esc(r.n) + '</span></a><span class="drtail">' + tail + '<span class="drslot"><time class="when">' + esc(r.ago) + '</time></span></span></div><span class="drmsg"><span class="s2">' + esc(r.m || "") + '</span></span></div></div>';
+      });
+      html += '</div></div>';
+    });
+    html += '</section>';
+  });
+  document.getElementById("rlist").innerHTML = html;
+}
+
+function setup() {
+  var s = (location.hash || "#a").slice(1); if (!/^[abcd]$/.test(s)) s = "a";
+  var none = s === "c" || s === "d";   // c and d: nothing idle is left
+  render(none);
+  var idleRows = [], other = 0;
+  each(function (r, w, t) {
+    if (r.st === "idle") idleRows.push({ r: r, w: w, t: t });
+    else if (r.st === "work" || r.st === "appr") other++;
+  });
+  var n = idleRows.length;
+  var btn = document.getElementById("sleepbtn"), tip = document.getElementById("tipbub"), dlg = document.getElementById("dlg");
+  btn.disabled = none;
+  var label = none ? "유휴 세션 없음" : "유휴 세션 모두 절전";
+  btn.title = label; btn.setAttribute("aria-label", label); tip.textContent = label;
+  btn.classList.toggle("hov", s === "a");
+  btn.classList.toggle("showtip", s === "d");
+  document.querySelectorAll("#switch a").forEach(function (a) { a.classList.toggle("on", a.dataset.s === s); });
+
+  document.getElementById("dlgt").textContent = "유휴 세션 " + n + "개를 절전 상태로 전환";
+  document.getElementById("dlglist").innerHTML = idleRows.map(function (e) {
+    return '<li><span class="hi ' + e.r.h + '">' + H[e.r.h] + '</span><span class="who"><span class="nm">' + esc(e.r.n) + '</span><span class="pj">' + esc(e.w.name) + ' · ' + esc(e.t.br) + '</span></span><span class="ago">' + esc(e.r.ago) + '</span></li>';
+  }).join("");
+  document.getElementById("dlgnote").textContent = "작업 중이거나 승인 대기 중인 세션 " + other + "개는 그대로 유지됩니다.";
+
+  if (s === "b") dlg.showModal();
+  if (s === "c") document.getElementById("toasts").innerHTML = '<div class="wstoast summary"><span class="wst-body">세션 ' + n + '개를 절전 상태로 전환했습니다</span></div>';
+
+  var notes = {
+    a: ["a. 기본", "달 아이콘은 새로고침 버튼 왼쪽에 놓입니다. 유휴 세션이 있으면 활성이며, 마우스를 올리면 툴팁 \"유휴 세션 모두 절전\"이 뜹니다. 누르면 b로 갑니다."],
+    b: ["b. 확인 대화상자", "삭제 대화상자와 같은 모달입니다. 종료될 세션의 이름, 프로젝트(워크스페이스 · 브랜치), 마지막 활동을 보여 줍니다. \"절전\"을 누르면 c, \"취소\"는 a로 돌아갑니다."],
+    c: ["c. 완료", "토스트로 알리고, 해당 행은 기존 중지 스타일(.stopped: 흐린 이름, 어두운 아이콘, 메시지 줄 없음)로 바뀝니다. 실시간 칩의 수는 그대로입니다(중지된 행도 실시간 목록에 남음)."],
+    d: ["d. 유휴 세션 없음", "유휴 세션이 없으면 달 버튼이 비활성(투명도 40%)이고 툴팁은 \"유휴 세션 없음\"입니다."]
+  }[s];
+  document.getElementById("notes").innerHTML = "<h3>" + notes[0] + "</h3><p>" + notes[1] + "</p>";
+
+  btn.onclick = function () { location.hash = "#b"; };
+  document.getElementById("cancel").onclick = function () { dlg.close(); location.hash = "#a"; };
+  document.getElementById("go").onclick = function () { dlg.close(); location.hash = "#c"; };
+  dlg.addEventListener("cancel", function () { location.hash = "#a"; });
+}
+window.addEventListener("hashchange", function () { location.reload(); });
+setup();
+</script>
+</body>
+</html>

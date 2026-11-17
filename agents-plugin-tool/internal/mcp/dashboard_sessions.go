@@ -833,6 +833,28 @@ func (src *DashboardSessionSource) Counters() map[string]int64 {
 	return out
 }
 
+// invalidateSession expires presentation validation before an authoritative
+// ReadSession. The index session lane coalesces signals and serializes its
+// reads. Keep parsed records/history so unchanged files remain cheap; normal
+// page reads never invalidate these caches.
+func (src *DashboardSessionSource) invalidateSession(reg wsdashboard.Registration) {
+	src.mu.Lock()
+	keys := append([]string(nil), src.byReply[reg.ReplyID]...)
+	src.mu.Unlock()
+	if d, err := src.store.dirs(); err == nil {
+		for _, key := range keys {
+			src.records.InvalidateUnder(d.keyDir(key))
+			src.records.InvalidateUnder(d.legacyPath(key))
+		}
+	}
+	if path, err := wsmailbox.ReplyRegistryPath(); err == nil {
+		src.replies.InvalidateUnder(path)
+	}
+	if dir, err := src.resolveStateDir(); err == nil {
+		src.snapshots.Invalidate(dir, reg.ReplyID)
+	}
+}
+
 // ForgetSession drops what the source keeps of a session the daemon's index
 // dropped: its last fingerprint, its mailbox history entries, its board
 // renders, its cached record files, and its cached snapshot
@@ -895,6 +917,7 @@ const dashboardRescanAfter = 5 * time.Second
 // left out: it is derived from the clock, and a re-read that differs only
 // by the time is no change.
 func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (wsdashboard.SessionData, bool, error) {
+	src.invalidateSession(reg)
 	key, raw, record, ok, err := src.lookupRecord(reg)
 	if !ok || err != nil {
 		return wsdashboard.SessionData{}, false, err
@@ -915,7 +938,7 @@ func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (ws
 	}
 	io.WriteString(h, "\x00contacts")
 	if repliesOK {
-		for _, c := range src.contactsFrom(reg, replies) {
+		for _, c := range src.contactsFromRead(reg, replies, true) {
 			fmt.Fprintf(h, "\x00%s\x01%s\x01%s\x01%s", c.Address, c.ReplyID, c.LastExchange.UTC().Format(time.RFC3339), c.Cwd)
 		}
 	}

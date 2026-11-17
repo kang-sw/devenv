@@ -223,9 +223,6 @@ type TopicView struct {
 	StateDiagnostic *StateDiagnostic
 	// Closed marks a topic the lead closed.
 	Closed bool
-	// Result is the closed topic's close result, empty while the topic is
-	// open or when its close gave none (a store written before results).
-	Result string
 	// UpdatedAt is the topic's latest change, the newest change time among
 	// its items, body, recap, and stream entries (logs, panels, and the
 	// system events of closes, reopens, item and content changes) (RFC 3339,
@@ -327,12 +324,12 @@ func ticketBadges(stems []string, resolve TicketResolver, seen map[string]string
 }
 
 // HeadSummary reports whether the topic's head carries its summary line: an
-// open topic with a latest agent line or panel recap, or checks on the embed.
+// topic with a latest agent line or panel recap, or open checks on the embed.
 // The line holds that summary (never a legacy recap or system event) and, on the
 // embed only, the check pill heading its in-flow check list; the full page
 // stacks open checks at the bottom and carries no pill.
 func (t TopicView) HeadSummary() bool {
-	return !t.Closed && (t.Head != nil || (len(t.Checks) > 0 && !t.fullHistory))
+	return t.Head != nil || (!t.Closed && len(t.Checks) > 0 && !t.fullHistory)
 }
 
 // LegacyRecapOpen reports whether an open topic shows an unconverted legacy
@@ -361,7 +358,7 @@ func (t TopicView) Summary() string {
 
 // RecapFolded reports whether the recap folds with the body: it has one and
 // is closed.
-func (t TopicView) RecapFolded() bool { return t.Summary() != "" && t.Closed }
+func (t TopicView) RecapFolded() bool { return t.Head == nil && t.Recap != "" && t.Closed }
 
 // HasFold reports whether the topic renders the body's fold: it has a body,
 // or a recap folded into it.
@@ -717,11 +714,6 @@ func BuildView(state *State, in ViewInput) View {
 		}
 	}
 	stampUpdated(state, blocks, in.Location)
-	for _, block := range blocks {
-		if block.Closed {
-			block.Result = state.CloseResults[block.Name]
-		}
-	}
 
 	settledOrder := map[int]int{}
 	for _, item := range state.Items {
@@ -899,7 +891,9 @@ func stampUpdated(state *State, blocks map[string]*TopicView, loc *time.Location
 		touch(doc.Name, doc.ChangedAt)
 		touch(doc.Name, doc.RecapAt)
 		for _, entry := range doc.Entries {
-			touch(doc.Name, entry.At)
+			if !staleReceipt(entry) && !internalRevisionMarker(entry) {
+				touch(doc.Name, entry.At)
+			}
 		}
 		at, summary := doc.RecapAt, doc.Recap
 		if head := doc.LatestSummary(); head != nil {

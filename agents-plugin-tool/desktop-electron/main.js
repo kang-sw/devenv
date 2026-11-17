@@ -3,6 +3,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 const { connectDaemon } = require('./daemon-controller');
+const { selectDaemon } = require('./daemon-selection');
 const { cacheRoot, inspect, browserCookie, browserLoginLink } = require('./endpoint');
 const LOGIN_COPIED = 'werkschaft:login-copied';
 const { pythonAvailable } = require('./python');
@@ -49,8 +50,15 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     // The update status waits here until the attached dashboard subscribes.
     let updatePending = null, updateTarget = null;
     const sendUpdate = status => {
-      updatePending = status;
-      if (updateTarget && !updateTarget.isDestroyed()) { updateTarget.send(UPDATE.status, status); updatePending = null; }
+      if (updateTarget && !updateTarget.isDestroyed()) {
+        updateTarget.send(UPDATE.status, status);
+        updatePending = null;
+        updater.statusDelivered?.(status);
+      } else if (updatePending?.state !== 'apply-error' || status.state === 'apply-error') {
+        // Keep a failed apply visible to a late subscriber without stopping
+        // automatic feed checks or their standing phase updates.
+        updatePending = status;
+      }
     };
     const updater = createUpdater({ version: app.getVersion(), packaged: app.isPackaged,
       userData: app.getPath('userData'), platform, send: sendUpdate });
@@ -84,6 +92,27 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     const dashboardContents = () => dashboardView ? dashboardView.webContents : window.webContents;
     const wc = dashboardContents();
     let bar, applicationMenu, menuOpen = false, dialogOpen = false;
+    function toggleDashboardDevTools() {
+      if (!dashboardView) return wc.toggleDevTools();
+      if (wc.isDevToolsOpened()) wc.closeDevTools();
+      else wc.openDevTools({ mode: 'detach' });
+    }
+    function registerDevToolsShortcut(contents) {
+      contents.on('before-input-event', (event, input) => {
+        const f12 = input.key === 'F12' && !input.control && !input.shift && !input.alt && !input.meta;
+        const inspect = input.key.toLowerCase() === 'i' && (platform === 'darwin'
+          ? input.meta && input.alt && !input.control && !input.shift
+          : input.control && input.shift && !input.alt && !input.meta);
+        if (input.type === 'keyDown' && (f12 || inspect)) {
+          event.preventDefault();
+          if (!input.isAutoRepeat) {
+            console.log(`DevTools shortcut ${input.key}: source webContents=${contents.id}, dashboard webContents=${wc.id}`);
+            toggleDashboardDevTools();
+          }
+        }
+      });
+    }
+    registerDevToolsShortcut(wc);
     function focusDashboard(afterInteraction = false) {
       if (!dashboardView || window.isDestroyed() || wc.isDestroyed() || !window.isFocused()) return;
       if (menuOpen || dialogOpen || (!afterInteraction && bar?.view.webContents.isFocused())) return;
@@ -114,6 +143,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       wc.once('did-finish-load', () => focusDashboard());
       window.on('closed', () => { if (!wc.isDestroyed()) wc.close(); });
       window.setMenuBarVisibility(false);
+      registerDevToolsShortcut(bar.view.webContents);
       // Bare Alt opens the same menu as the hamburger, from either view.
       for (const contents of [wc, bar.view.webContents]) {
         let altOnly = false;
@@ -121,9 +151,6 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
           if (input.type === 'keyDown') {
             altOnly = input.key === 'Alt' && !input.control && !input.shift && !input.meta;
             if (altOnly) event.preventDefault();
-            if (input.key === 'F12' && !input.control && !input.shift && !input.alt && !input.meta) {
-              event.preventDefault(); wc.toggleDevTools();
-            }
           }
           if (input.key === 'Alt' && input.type === 'keyUp' && altOnly) {
             event.preventDefault(); altOnly = false; openMenu();
@@ -166,15 +193,19 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     // Initial iframe src loads do not reliably emit will-frame-navigate.
     // Enforce the pin at the network boundary too, including redirect hops.
     const localPages = ['connection.html', 'python-missing.html'].map(file => pathToFileURL(path.join(__dirname, file)).href);
+    // Only the connection page accepts diagnostics in its query; no new file authority.
+    const isLocalPage = url => localPages.includes(url) || url.split('?')[0] === localPages[0];
     wc.on('did-navigate', (_event, url) => {
       const target = navigation?.commitTarget;
       // Rollback belongs to the committed document, never another attempt's
       // provisional pin/title. A late promise settlement cannot advance it.
-      if (target && (target.pin ? destination(url, target.pin) === 'dashboard' : localPages.includes(url))) retained = target;
+      if (target && (target.pin ? destination(url, target.pin) === 'dashboard' : isLocalPage(url))) retained = target;
     });
     session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
+      // The DevTools frontend can load before its webContents identity is available.
+      if (/^(?:devtools|chrome-devtools):/i.test(details.url)) return callback({});
       if (details.resourceType !== 'mainFrame' && details.resourceType !== 'subFrame') return callback({});
-      if (details.resourceType === 'mainFrame' && localPages.includes(details.url)) return callback({});
+      if (details.resourceType === 'mainFrame' && isLocalPage(details.url)) return callback({});
       const action = destination(details.url, pin, details.resourceType === 'mainFrame');
       if (action === 'dashboard' || action === 'frame') return callback({});
       callback({ cancel: true });
@@ -252,13 +283,15 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       if (observed.url !== `${new URL(url).origin}/`) throw new Error('Dashboard connection changed; retry');
       return { root, observed };
     }
-    async function connect(replace = false) {
+    async function connect(replace = false, attachRunning = false) {
       if (connecting || window.isDestroyed()) return;
       const attempt = beginNavigation();
       connecting = true;
       setTitle('Werkschaft — Connecting…');
       try {
-        const available = await pythonAvailable();
+        // Windows starts the bundled native daemon directly. Python is only
+        // needed by optional holder features, never to start or attach here.
+        const available = platform === 'win32' || await pythonAvailable();
         if (!isCurrent(attempt)) return;
         if (!available) {
           pin = null;
@@ -269,7 +302,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
           return;
         }
         let url;
-        try { url = await connectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform, replace }, {
+        try { url = await connectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform, packaged: app.isPackaged, replace, ...(attachRunning ? { attachRunning: true } : {}) }, {
           onNotice: message => {
             if (window.isDestroyed()) return;
             dialogOpen = true;
@@ -284,7 +317,15 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
           const failureTitle = `Werkschaft — ${error.message} — ⌘R to retry`;
           setTitle(failureTitle);
           attempt.commitTarget = { pin: null, title: failureTitle };
-          await wc.loadFile(path.join(__dirname, 'connection.html'));
+          const logPath = path.join(app.getPath('userData'), 'daemon-start.log');
+          let log = `Error log: ${logPath}`;
+          try {
+            fs.mkdirSync(path.dirname(logPath), { recursive: true });
+            fs.appendFileSync(logPath, `${new Date().toISOString()} ${error.stack || error}\n`, { mode: 0o600 });
+          } catch (logError) { log = `Could not write ${logPath}: ${logError.message}`; }
+          await loadDocument(attempt, () => wc.loadFile(path.join(__dirname, 'connection.html'), {
+            query: { reason: error.message, log },
+          }));
           return;
         }
         if (!isCurrent(attempt)) return;
@@ -307,6 +348,21 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
         if (navigation === attempt) navigation = null;
       }
     }
+    const fromConnectionPage = event => event.sender === wc && event.senderFrame === wc.mainFrame &&
+      !pin && isLocalPage(event.senderFrame.url);
+    ipcMain.handle('werkschaft:daemon-availability', event => {
+      if (!fromConnectionPage(event)) return { available: false };
+      if (!['darwin', 'win32'].includes(platform)) return { available: false, reason: 'Daemon start is unavailable on this platform.' };
+      if (!app.isPackaged) {
+        try { selectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform, packaged: false }); }
+        catch (error) { return { available: false, reason: error.message }; }
+      }
+      return { available: true };
+    });
+    ipcMain.handle('werkschaft:daemon-start', async event => {
+      if (!fromConnectionPage(event) || connecting) return;
+      await connect(false, true);
+    });
     const fromDashboard = event => event.sender === wc && event.senderFrame === wc.mainFrame &&
       !!pin && destination(event.senderFrame.url, pin) === 'dashboard';
     wc.on('did-start-navigation', (_event, _url, inPlace, isMainFrame) => {
@@ -356,7 +412,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       { role: 'editMenu' },
       { label: 'View', submenu: [
         { role: 'togglefullscreen' },
-        { id: 'devtools', label: 'Toggle Developer Tools', accelerator: platform === 'darwin' ? 'Cmd+Alt+I' : 'Ctrl+Shift+I', click: () => dashboardContents().toggleDevTools() },
+        { id: 'devtools', label: 'Toggle Developer Tools', accelerator: platform === 'darwin' ? 'Cmd+Alt+I' : 'Ctrl+Shift+I', click: toggleDashboardDevTools },
         { type: 'separator' },
         { id: 'zoom_reset', label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: () => zoomBy('reset') },
         { id: 'zoom_in', label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: () => zoomBy('in') },

@@ -56,7 +56,7 @@ func staleBoard(t *testing.T) *State {
 	return st
 }
 
-const wantStaleInfo = "5 of 7 open topics unchanged for 60+ min (S, A, B, D, E); if finished, close them with wb:close and a one-line result."
+const wantStaleInfo = "5 of 7 open topics unchanged for 60+ min (S, A, B, D, E); if finished, close them with <wb:close/>."
 
 func TestStaleNudgeResearchingUsesUnchangedGeneralPolicy(t *testing.T) {
 	st := &State{}
@@ -67,17 +67,19 @@ func TestStaleNudgeResearchingUsesUnchangedGeneralPolicy(t *testing.T) {
 		t.Fatalf("research warned before stale threshold: %s", out.Info)
 	}
 	out := applyAt(t, st, "", testNow.Add(time.Hour))
-	if want := "5 of 5 open topics unchanged for 60+ min (A, B, C, D, E); if finished, close them with wb:close and a one-line result."; out.Info != want {
+	if want := "5 of 5 open topics unchanged for 60+ min (A, B, C, D, E); if finished, close them with <wb:close/>."; out.Info != want {
 		t.Fatalf("research exemption or threshold change: %q", out.Info)
 	}
 	if out := applyAt(t, st, "", testNow.Add(119*time.Minute)); out.Info != "" {
 		t.Fatalf("research stale debounce changed: %s", out.Info)
 	}
 	// Open asks, not StateWaiting, exclude a topic; agent activity refreshes age.
-	applyAt(t, st, `<wb:topic name="A"><wb:add class="check"><wb:title>Question</wb:title></wb:add></wb:topic><wb:topic name="B"><wb:log>Fresh evidence</wb:log></wb:topic>`, testNow.Add(119*time.Minute))
-	out = applyAt(t, st, "", testNow.Add(120*time.Minute))
-	if want := "3 of 5 open topics unchanged for 60+ min (C, D, E); if finished, close them with wb:close and a one-line result."; out.Info != want {
+	out = applyAt(t, st, `<wb:topic name="A"><wb:add class="check"><wb:title>Question</wb:title></wb:add></wb:topic><wb:topic name="B"><wb:log>Fresh evidence</wb:log></wb:topic>`, testNow.Add(119*time.Minute))
+	if want := "3 of 5 open topics unchanged for 60+ min (C, D, E); if finished, close them with <wb:close/>."; out.Info != want {
 		t.Fatalf("research altered open-item/activity criteria: %q", out.Info)
+	}
+	if out := applyAt(t, st, "", testNow.Add(120*time.Minute)); out.Info != "" {
+		t.Fatalf("unchanged revision repeated stale notice: %q", out.Info)
 	}
 }
 
@@ -104,7 +106,7 @@ func TestStaleNudgeNeedsFiveOpenTopics(t *testing.T) {
 	}
 	// Reopening the fifth makes it fresh, but the four stale ones now nudge.
 	out = applyAt(t, st, `<wb:topic name="E"><wb:body>reopened</wb:body></wb:topic>`, testNow.Add(2*time.Hour))
-	if want := "4 of 5 open topics unchanged for 60+ min (A, B, C, D); if finished, close them with wb:close and a one-line result."; nudgeOf(out) != want {
+	if want := "4 of 5 open topics unchanged for 60+ min (A, B, C, D); if finished, close them with <wb:close/>."; nudgeOf(out) != want {
 		t.Fatalf("info = %q\nwant  %q", nudgeOf(out), want)
 	}
 }
@@ -113,12 +115,12 @@ func TestStaleNudgeCapsListedNames(t *testing.T) {
 	st := &State{}
 	applyAt(t, st, bodies("A", "B", "C", "D", "E", "F", "G"), testNow)
 	out := applyAt(t, st, ``, testNow.Add(time.Hour))
-	if want := "7 of 7 open topics unchanged for 60+ min (A, B, C, D, E, ...); if finished, close them with wb:close and a one-line result."; nudgeOf(out) != want {
+	if want := "7 of 7 open topics unchanged for 60+ min (A, B, C, D, E, ...); if finished, close them with <wb:close/>."; nudgeOf(out) != want {
 		t.Fatalf("info = %q\nwant  %q", nudgeOf(out), want)
 	}
 }
 
-func TestStaleNudgeAtMostOncePerHour(t *testing.T) {
+func TestStaleNudgeOncePerBoardRevision(t *testing.T) {
 	st := staleBoard(t)
 	first := testNow.Add(61 * time.Minute)
 	if out := applyAt(t, st, ``, first); nudgeOf(out) == "" {
@@ -127,8 +129,8 @@ func TestStaleNudgeAtMostOncePerHour(t *testing.T) {
 	if out := applyAt(t, st, ``, first.Add(59*time.Minute)); nudgeOf(out) != "" {
 		t.Fatalf("a nudge within the hour must not repeat; info = %q", nudgeOf(out))
 	}
-	if out := applyAt(t, st, ``, first.Add(60*time.Minute)); nudgeOf(out) == "" {
-		t.Fatalf("after the hour the nudge must return")
+	if out := applyAt(t, st, ``, first.Add(60*time.Minute)); nudgeOf(out) != "" {
+		t.Fatalf("unchanged board must stay quiet; info = %q", nudgeOf(out))
 	}
 }
 

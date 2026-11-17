@@ -12,8 +12,8 @@ import (
 
 // SnapshotCache holds the parsed live snapshots of sessions (FileCache): a
 // page render, its refresh stamp, and a session re-read (HashLiveStores)
-// each read the snapshot of every session they name, and an unchanged one
-// then costs an identity stat, even inside the recent-write window. A hosted
+// each read the snapshot of every session they name. File validation is shared
+// across those readers at most once per second, even for recent files. A hosted
 // session's in-memory copy (SetLive) is served in place of its file, with no
 // stat, until ClearLive. The zero value is
 // ready; a nil cache reads every time.
@@ -77,6 +77,30 @@ func (c *SnapshotCache) read(path string) (parsedSnapshot, error) {
 		load = loadSnapshot
 	}
 	return c.files.LoadIdentity(path, load)
+}
+
+// FreshSnapshot reads current admission/capability evidence without trusting
+// the presentation cache or loading retained history. Hosted RAM still takes
+// precedence over disk. A disk read is not published to the presentation cache.
+func (c *SnapshotCache) FreshSnapshot(stateDir, replyID string) *wslive.Snapshot {
+	path := wslive.SnapshotPath(SessionDir(stateDir, replyID))
+	load := loadSnapshot
+	if c != nil {
+		c.liveMu.Lock()
+		p, ok := c.live[path]
+		c.liveMu.Unlock()
+		if ok {
+			return &p.snap
+		}
+		if c.load != nil {
+			load = c.load
+		}
+	}
+	p, err := load(path)
+	if err != nil {
+		return nil
+	}
+	return &p.snap
 }
 
 // lastKnown returns snapshot evidence already read by the index or a page,
@@ -179,6 +203,17 @@ func (c *SnapshotCache) Snapshot(stateDir, replyID string) *wslive.Snapshot {
 	}
 	observed.Load(dir).Overlay(&p.snap)
 	return &p.snap
+}
+
+// Invalidate expires disk snapshot and observed-evidence validation after a
+// change signal without discarding last-known evidence, hosted RAM, or history.
+func (c *SnapshotCache) Invalidate(stateDir, replyID string) {
+	if c == nil {
+		return
+	}
+	path := wslive.SnapshotPath(SessionDir(stateDir, replyID))
+	c.files.InvalidateUnder(path)
+	c.observed.Invalidate(SessionDir(stateDir, replyID))
 }
 
 // Forget drops the cached snapshot file of session replyID under stateDir;

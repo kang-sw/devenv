@@ -51,6 +51,8 @@ check("a size change morphs nothing", anims.length, 0);
 // turns into the top stack's capsule.
 topics(0); ro(); frame(); anims = [];
 board.scrollTop = 500; listeners.scroll(); frame();
+check("a scroll waits for destination layout", ghosts(), 0);
+frame();
 check("a scroll morphs at both edges", ghosts(), 2);
 process.stdout.write(bad.join("\n"));`
 	out, err := nodeScript(node, script).CombinedOutput()

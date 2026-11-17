@@ -132,6 +132,9 @@ func TestDashboardReplyRegistryKeysTheBoardByWhatItShows(t *testing.T) {
 	step := func(name string, rebuilds bool, fn func(st *wsmailbox.ReplyStore)) {
 		t.Helper()
 		edit(fn)
+		// A raw registry edit does not signal this standalone source. Check
+		// semantic memo invalidation after the permitted one-second TTL.
+		waitForDashboardValidation(t)
 		before := boardRenders(src)
 		readPageOK(t, src, reg)
 		if got := boardRenders(src) != before; got != rebuilds {

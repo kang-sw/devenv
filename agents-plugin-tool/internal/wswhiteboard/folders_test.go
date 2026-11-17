@@ -452,6 +452,10 @@ func TestFolderConversionAndRestart(t *testing.T) {
 	}
 	want.EntrySeq, want.PanelCounter = 3, 1
 	want.Topics[0].Entries = append(want.Topics[0].Entries, Entry{ID: "e3", Kind: EntryPanel, PanelID: "p1", LegacyContent: true, Recap: "Current content", Text: legacy.Topics[0].Body, At: legacy.Topics[0].ChangedAt, Imported: true})
+	want.EntrySeq = 5
+	want.Topics[1].Entries = append(want.Topics[1].Entries, Entry{ID: "e4", Kind: EntryAgent, Text: "Finished.", At: "2026-10-01T01:02:03Z"})
+	want.Topics = append(want.Topics, TopicDoc{Name: "empty closed", Entries: []Entry{{ID: "e5", Kind: EntryAgent, Text: "No items."}}})
+	want.CloseResults["recap-only"], want.CloseResults["empty closed"] = "", ""
 	if !reflect.DeepEqual(want, got) {
 		t.Fatalf("conversion lost snapshots\nwant %s\ngot  %s", folderJSON(want), folderJSON(got))
 	}
@@ -670,7 +674,7 @@ func TestFolderRecoveryRepeatedPartialAppend(t *testing.T) {
 		}
 	}
 	got := folderOpen(t, dir, nil)
-	if len(got.Topics[0].Entries) != 6 || got.EntrySeq != 7 {
+	if len(got.Topics[0].Entries) != 6 || got.EntrySeq != 9 {
 		t.Fatalf("duplicated entries: %s", folderJSON(got))
 	}
 }
@@ -819,7 +823,7 @@ func TestFolderConversionAdoptionIgnoresStaleCloseMapping(t *testing.T) {
 			dir := t.TempDir()
 			legacy := &State{
 				Topics:       []TopicDoc{{Name: "Old title", Body: "body", Recap: "imported history", RecapAt: "2026-11-01T01:02:03Z"}},
-				ClosedTopics: []string{"s"}, CloseResults: map[string]string{"s": "stale destination result"},
+				ClosedTopics: []string{"s"}, CloseResults: map[string]string{"s": ""},
 			}
 			converted := folderOpen(t, dir, legacy)
 			wantImport := []Entry{
@@ -869,7 +873,7 @@ func TestFolderConversionAdoptionIgnoresStaleCloseMapping(t *testing.T) {
 			var wantClosed []string
 			wantResult := ""
 			if closed {
-				wantClosed, wantResult = []string{"s"}, "source result"
+				wantClosed = []string{"s"}
 			}
 			if !reflect.DeepEqual(adopted.ClosedTopics, wantClosed) || len(adopted.CloseResults) != len(wantClosed) || adopted.CloseResults["s"] != wantResult {
 				t.Fatalf("adoption retained stale destination close state: %s", folderJSON(adopted))

@@ -3,6 +3,7 @@ package wsdashboard
 import (
 	"net/http"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -52,6 +53,11 @@ func TestIdleTouchesInboxGateKeepsReadThroughAdmission(t *testing.T) {
 func TestIdleTouchesExternalSnapshotRecoversThroughIndexToStream(t *testing.T) {
 	f := startPageFixture(t, withRefresh)
 	now := time.Now()
+	var clock atomic.Int64
+	clock.Store(now.UnixNano())
+	f.d.snapshots.files.mu.Lock()
+	f.d.snapshots.files.now = func() time.Time { return time.Unix(0, clock.Load()) }
+	f.d.snapshots.files.mu.Unlock()
 	reg := register(t, f.dir, "foreignagent", f.project, now)
 	reg.Agent = true
 	if err := WriteRegistration(f.dir, reg); err != nil {
@@ -65,6 +71,7 @@ func TestIdleTouchesExternalSnapshotRecoversThroughIndexToStream(t *testing.T) {
 	// No external nudge: the real index backstop discovers the liveness
 	// transition and propagates it to the stream.
 	writeSnapshot(t, f.dir, "foreignagent", &wslive.Snapshot{SchemaVersion: 1, Adapter: "pi", UpdatedAt: time.Now().UnixMilli(), HeartbeatMs: 30000})
+	clock.Add(int64(fileCacheValidationInterval))
 	f.d.Index().Refresh()
 	after, _ := f.d.Index().Session("foreignagent")
 	if after.Rev != before.Rev+1 {

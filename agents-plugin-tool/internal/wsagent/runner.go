@@ -164,6 +164,8 @@ type Options struct {
 	heartbeat time.Duration
 	// spawnListed observes global spawn-projection listings in tests.
 	spawnListed func(string)
+	// stateInboxRead observes state-held inbox scans in tests.
+	stateInboxRead func(string)
 	// closedSnapshotRead observes closed/handed-off snapshot reads in tests.
 	closedSnapshotRead func(string)
 }
@@ -958,6 +960,80 @@ func (r *Runner) Stop(id string) (State, error) {
 		c.stopProcess("")
 		return nil
 	})
+}
+
+// IdleLead is a lead session SleepIdle may stop: one JSON entry of the
+// idle list.
+type IdleLead struct {
+	ID      string `json:"id"`
+	Label   string `json:"label,omitempty"`
+	Backend string `json:"backend"`
+}
+
+// sleepable reports a lead conversation whose process may be stopped for
+// power saving: it runs, and no turn, replay, background task, active child
+// or approval prompt keeps it busy (the idle timer's own test, idleNow).
+// Run in the conversation's loop.
+func (c *conv) sleepable() bool {
+	return c.rec.Lead && !c.closed && c.proc != nil && len(c.approvals) == 0 && c.idleNow()
+}
+
+// IdleLeads lists the lead sessions with a running process that SleepIdle
+// would stop, and counts the other running ones (busy or waiting for an
+// approval), which it keeps.
+func (r *Runner) IdleLeads() (idle []IdleLead, kept int) {
+	idle = []IdleLead{}
+	r.mu.Lock()
+	convs := make([]*conv, 0, len(r.convs))
+	for _, c := range r.convs {
+		convs = append(convs, c)
+	}
+	r.mu.Unlock()
+	created := map[string]string{}
+	for _, c := range convs {
+		c.do(func() {
+			if !c.rec.Lead || c.closed || c.proc == nil {
+				return
+			}
+			if !c.sleepable() {
+				kept++
+				return
+			}
+			idle = append(idle, IdleLead{ID: c.rec.ReplyID, Label: c.rec.Label, Backend: c.rec.Backend})
+			created[c.rec.ReplyID] = c.rec.CreatedAt
+		})
+	}
+	sort.Slice(idle, func(i, j int) bool {
+		if a, b := created[idle[i].ID], created[idle[j].ID]; a != b {
+			return a < b
+		}
+		return idle[i].ID < idle[j].ID
+	})
+	return idle, kept
+}
+
+// SleepIdle stops each named lead session as Stop does, but only when it is
+// still idle in its own loop; one that became busy (or is no lead process
+// any more) is skipped. Held messages stay held and the next send resumes
+// a stopped session.
+func (r *Runner) SleepIdle(ids []string) (slept, skipped []string) {
+	slept, skipped = []string{}, []string{}
+	for _, id := range ids {
+		stopped := false
+		_, err := r.act(id, func(c *conv) error {
+			if c.sleepable() {
+				c.stopProcess("")
+				stopped = true
+			}
+			return nil
+		})
+		if err == nil && stopped {
+			slept = append(slept, id)
+		} else {
+			skipped = append(skipped, id)
+		}
+	}
+	return slept, skipped
 }
 
 // Restart ends a lead conversation's process and starts a new one on the

@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wslive"
 )
@@ -325,6 +326,11 @@ func TestCommandListReachesThePageOnlyWhenListed(t *testing.T) {
 		t.Error("the live page without a command list has data in its cmds region, or no region")
 	}
 	f.withCommands(t, wslive.SlashCommand{Name: "compact", Source: "builtin"})
+	// The page's command picker follows bounded presentation freshness.
+	clock := time.Now().Add(fileCacheValidationInterval)
+	f.d.snapshots.files.mu.Lock()
+	f.d.snapshots.files.now = func() time.Time { return clock }
+	f.d.snapshots.files.mu.Unlock()
 	_, page = get(t, f.base+"/s/livesession?frame=1")
 	if !strings.Contains(page, `<i data-name="compact" data-src="builtin"></i>`) {
 		t.Error("the live page does not carry the session's command list")

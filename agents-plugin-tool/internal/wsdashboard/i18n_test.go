@@ -97,9 +97,12 @@ func TestEveryPageHasSettingsWithTheLanguageItem(t *testing.T) {
 	} {
 		_, body := getLang(t, f.base+c.path, "ko", "")
 		assertSettingsOwner(t, body, c.settings)
-		// The scripts call wsT on load; a page without the table breaks them.
-		if !strings.Contains(body, "window.wsT") {
-			t.Errorf("%s: no client string table", c.name)
+		// The scripts call wsT on load; frames load the table externally.
+		client := frameDependencies(t, body)
+		for _, want := range []string{"window.wsT", `lang: "ko"`, `"js.ago":"{0} 전"`} {
+			if !strings.Contains(client, want) {
+				t.Errorf("%s: client string table lacks %q", c.name, want)
+			}
 		}
 		if !c.settings {
 			continue

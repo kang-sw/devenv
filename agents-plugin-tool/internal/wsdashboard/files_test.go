@@ -19,6 +19,7 @@ import (
 func TestFilesTabOnTheSessionPage(t *testing.T) {
 	f := startPageFixture(t)
 	_, live := get(t, f.base+"/s/livesession?frame=1")
+	live = frameDependencies(t, live)
 	for _, want := range []string{
 		`<div id="chead" class="thead chead"><nav id="ctabs" class="ctabs"`, `data-ctab="convo" aria-pressed="true"`, `data-ctab="files" aria-pressed="false"`,
 		`<span class="csum"></span><span class="fsum"></span></div>`,
@@ -38,7 +39,7 @@ func TestFilesTabOnTheSessionPage(t *testing.T) {
 	if strings.Contains(board, `id="ctabs"`) || strings.Contains(board, `id="files"`) {
 		t.Error("the board-first page, which has no conversation column, carries the Files tab")
 	}
-	if _, index := get(t, f.base+"/?frame=1"); strings.Contains(index, "window.WsFiles = {") {
+	if _, index := get(t, f.base+"/?frame=1"); strings.Contains(frameDependencies(t, index), "window.WsFiles = {") {
 		t.Error("the index page carries the file explorer")
 	}
 	css := mustAsset(t, "dashboard.css")

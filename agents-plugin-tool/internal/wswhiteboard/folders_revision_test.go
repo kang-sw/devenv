@@ -68,7 +68,7 @@ func TestFolderCacheRevisionIdentity(t *testing.T) {
 	fresh(&a, nil)
 }
 
-func TestFolderCacheRevisionAuthoritativeChangesAtSameSeq(t *testing.T) {
+func TestFolderCacheRevisionRootStampedChangesAtSameSeq(t *testing.T) {
 	f := FolderStore{Dir: t.TempDir()}
 	seed := &State{Seq: 7, EntrySeq: 2, PanelCounter: 1,
 		Topics: []TopicDoc{{Name: "topic", Entries: []Entry{
@@ -102,6 +102,10 @@ func TestFolderCacheRevisionAuthoritativeChangesAtSameSeq(t *testing.T) {
 			if err := os.Chtimes(path, at, at); err != nil {
 				t.Fatal(err)
 			}
+			// Leaf-only fault injection is not a folder-store commit. Signal
+			// the completed external change by atomically replacing the root
+			// receipt, without relying on the logical State.Seq or generation.
+			folderReplaceRootReceipt(t, f)
 			state, rev, err := cache.OpenRevision(f, nil)
 			if err != nil || state == nil || rev <= previous || state.Seq != seed.Seq {
 				t.Fatalf("changed authority at unchanged Seq: revision=%d previous=%d err=%v", rev, previous, err)

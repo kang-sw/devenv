@@ -184,8 +184,8 @@ func (d *Daemon) inboxSession(w http.ResponseWriter, r *http.Request, replyID st
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return s, false
 	}
-	// Freshness only: the overlay-free read skips the retained-evidence
-	// sweep, which nothing a write route answers depends on.
+	// Admission must read current authority, not the presentation TTL. The
+	// overlay-free read also skips retained history, which no write needs.
 	if !d.pages().adapterPresent(replyID, now) {
 		http.Error(w, "this session has no live host adapter: copy the answers into its terminal instead", http.StatusConflict)
 		return s, false
@@ -258,6 +258,9 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 		status, answer = d.inboxWrite(dir, route, raw, now)
 		d.inboxMu.Unlock()
 	}
+	if route == "message" && status == http.StatusOK {
+		d.scheduleAnswerReplay(s.Registration)
+	}
 	if route == "message" && status == http.StatusOK && s.Hosted {
 		if host, ok := d.agents.(AgentPageInputHost); ok {
 			if err := host.PageInput(replyID); err != nil {
@@ -267,6 +270,57 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 		}
 	}
 	d.inboxAnswered(w, s, status, answer)
+}
+
+// DashboardAnswerSource records a durable board revision after a successful
+// dashboard answer send. Implementations must tolerate repeated inbox IDs.
+type DashboardAnswerSource interface {
+	RecordDashboardAnswer(Registration, string, time.Time) error
+}
+
+// Replay is also kicked by the index on startup. A failed board write leaves
+// its journal copy intact and is retried; the stable original ID makes a
+// crash after the board write but before unlinking safe.
+func (d *Daemon) scheduleAnswerReplay(reg Registration) {
+	source, ok := d.source.(DashboardAnswerSource)
+	if !ok {
+		return
+	}
+	if _, loaded := d.answerReplay.LoadOrStore(reg.ReplyID, struct{}{}); loaded {
+		return
+	}
+	go func() {
+		for {
+			d.inboxMu.Lock()
+			err := wsinbox.ReplayAnswerJournal(sessionInbox(d.dir, reg.ReplyID), func(id string, entry wsinbox.Entry) error {
+				return source.RecordDashboardAnswer(reg, id, time.UnixMilli(entry.SentAt))
+			})
+			if err == nil {
+				// Delete under the send lock: a send either precedes this scan or
+				// schedules a fresh one after the old loop is removed.
+				d.answerReplay.Delete(reg.ReplyID)
+				d.inboxMu.Unlock()
+				return
+			}
+			d.inboxMu.Unlock()
+			fmt.Fprintf(d.log, "dashboard: record board answer revision: %v\n", err)
+			select {
+			case <-d.stop:
+				d.answerReplay.Delete(reg.ReplyID)
+				return
+			case <-time.After(30 * time.Second):
+			}
+		}
+	}()
+}
+
+func hasBoardAnswer(req messageRequest) bool {
+	for _, chip := range req.Chips {
+		if chip.Answer != "" || strings.TrimSpace(chip.Note) != "" {
+			return true
+		}
+	}
+	return len(req.Topics) != 0
 }
 
 // messageWrite performs the message route against the inbox at dir. It
@@ -326,7 +380,7 @@ func (d *Daemon) sendCommand(dir, replyID string, req messageRequest, local bool
 	if len(req.Images) > 0 || len(req.Refs) > 0 {
 		return http.StatusBadRequest, "a slash command carries no images"
 	}
-	snap := d.pages().readSnapshotWithoutObserved(replyID)
+	snap := d.pages().readFreshSnapshot(replyID)
 	if snap == nil || len(snap.Commands) == 0 {
 		return http.StatusConflict, "this session's host adapter runs no slash commands from the dashboard"
 	}
@@ -412,7 +466,13 @@ func (d *Daemon) sendMessage(dir string, req messageRequest, images []decodedIma
 		return http.StatusInternalServerError, "could not store the images"
 	}
 	entry := wsinbox.Entry{Parts: []string{req.Text}, Chips: req.Chips, Topics: req.Topics, Mentions: req.Mentions, CloseRequests: req.CloseRequests, Picks: req.Picks, Consoles: req.Consoles, Images: append(paths, written...), ImageNums: nums, UTCOffsetMinutes: req.UTCOffsetMinutes}
-	name, merged, err := wsinbox.Send(dir, entry, now)
+	var name string
+	var merged bool
+	if hasBoardAnswer(req) {
+		name, merged, err = wsinbox.SendJournaled(dir, entry, now)
+	} else {
+		name, merged, err = wsinbox.Send(dir, entry, now)
+	}
 	if err != nil {
 		removeFiles(written)
 		if errors.Is(err, wsinbox.ErrEmpty) || errors.Is(err, wsinbox.ErrInvalid) {

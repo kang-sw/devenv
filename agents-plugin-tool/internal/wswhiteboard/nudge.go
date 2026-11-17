@@ -1,6 +1,7 @@
 package wswhiteboard
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -17,8 +18,6 @@ const (
 	// staleNudgeAge is how long a topic's items, content, and stream must go
 	// unchanged before it counts as stale.
 	staleNudgeAge = 60 * time.Minute
-	// staleNudgeInterval is the least time between two nudges on one board.
-	staleNudgeInterval = 60 * time.Minute
 	// staleNudgeNames caps the topic names the nudge lists.
 	staleNudgeNames = 5
 )
@@ -46,13 +45,41 @@ func (s *State) stampChanges(mark int, now time.Time) {
 	}
 }
 
+// staleReceipt is internal bookkeeping, not a user-visible topic event.
+func staleReceipt(e Entry) bool {
+	if e.Kind != EntrySystem || e.Text != "Stale topic nudge sent" {
+		return false
+	}
+	var receipt struct {
+		StaleRevision string `json:"stale_revision"`
+	}
+	return json.Unmarshal(e.BoardNotice, &receipt) == nil && receipt.StaleRevision != ""
+}
+
 // staleNudge returns the nudge line for the board at now and records it as
 // the last nudge, or returns "" and records nothing. A topic is stale when it
 // is open, none of its items is open (an assumed item reads as settled), and
 // neither its items, content, legacy recap, nor stream changed for
 // staleNudgeAge; the stalest are listed first.
 func (s *State) staleNudge(now time.Time) string {
-	if last, err := time.Parse(time.RFC3339, s.LastNudgeAt); err == nil && now.Sub(last) < staleNudgeInterval {
+	revision := s.boardRevision()
+	lastID := 0
+	lastRevision := s.StaleNudgeRevision
+	// Migrate receipts written by the earlier entry-based implementation.
+	if lastRevision == "" {
+		for _, topic := range s.Topics {
+			for _, entry := range topic.Entries {
+				var receipt struct {
+					StaleRevision string `json:"stale_revision"`
+				}
+				id := folderNumber(entry.ID, "e")
+				if id > lastID && json.Unmarshal(entry.BoardNotice, &receipt) == nil && receipt.StaleRevision != "" {
+					lastID, lastRevision = id, receipt.StaleRevision
+				}
+			}
+		}
+	}
+	if lastRevision == revision {
 		return ""
 	}
 	var order []string
@@ -80,7 +107,11 @@ func (s *State) staleNudge(now time.Time) string {
 			touch(doc.Name, doc.RecapAt)
 		}
 		for _, entry := range doc.Entries {
-			touch(doc.Name, entry.At)
+			// Ordinary system events and receipts are not lead activity. Explicit
+			// state/dependency records, however, are authored board updates.
+			if entry.Kind != EntrySystem || len(entry.TopicState) != 0 || len(entry.WaitingOn) != 0 {
+				touch(doc.Name, entry.At)
+			}
 		}
 	}
 	open := 0
@@ -102,8 +133,9 @@ func (s *State) staleNudge(now time.Time) string {
 	if len(stale) > staleNudgeNames {
 		names += ", ..."
 	}
-	s.LastNudgeAt = now.UTC().Format(time.RFC3339)
-	return fmt.Sprintf("%d of %d open topics unchanged for %d+ min (%s); if finished, close them with wb:close and a one-line result.",
+	s.LastNudgeAt = now.UTC().Format(time.RFC3339) // older daemons retain their debounce
+	s.StaleNudgeRevision = revision
+	return fmt.Sprintf("%d of %d open topics unchanged for %d+ min (%s); if finished, close them with <wb:close/>.",
 		len(stale), open, int(staleNudgeAge/time.Minute), names)
 }
 

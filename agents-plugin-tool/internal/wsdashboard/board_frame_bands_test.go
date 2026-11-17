@@ -1,6 +1,7 @@
 package wsdashboard
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -22,9 +23,9 @@ import (
 // The cases execute under node when it is installed.
 func TestBoardFrameBands(t *testing.T) {
 	src := dashboardFuncs(t, "boardBands", "frameNear", "bandBoard", "bandTopic", "topicBand", "unmountFrames", "unmountFrame",
-		"frameShown", "mountFrame", "mountFrames", "mountFramesPaced", "mountSlice", "frameToggle")
+		"frameShown", "mountFrame", "mountFrames", "mountFramesPaced", "mountSlice", "frameToggle", "cvWatch")
 	runNode(t, "viewport bands", frameDOM+src+`
-var mountList = [], mountTask = false, NEAR = "100% 0px", FAR = "400% 0px", topicNear = {}, topicRO = null, frameSizes = new Map(), mpend = null;
+var mountList = [], mountTask = false, NEAR = "100% 0px", FAR = "400% 0px", topicNear = {}, topicRO = null, frameSizes = new Map(), mpend = null, cvRO = null;
 var clock = 0, timers = [];
 var performance = { now: function () { return clock; } };
 setTimeout = function (fn) { timers.push(fn); };
@@ -218,19 +219,42 @@ if (bad.length) console.log(bad.join("\n"));
 `)
 }
 
-// TestBoardTopicsDoNotSkipRendering pins owner (627)=a: board topics no
-// longer take content-visibility, so no stylesheet rule may skip a topic's
-// rendering. Overview's `content-visibility: visible` overrides
-// (261114-feat-ws-dashboard-board-toolbar-overview) are harmless and stay.
-func TestBoardTopicsDoNotSkipRendering(t *testing.T) {
+// TestBoardTopicSkipKeepsHeadsAndSheets pins where the board may skip
+// rendering. Owner (627)=a dropped content-visibility on whole topics; the
+// owner's 2026-11-17 visible-only directive brings it back on topic parts
+// only: a topic's head (sticky, carries the stuck shadow) and a card's head
+// never skip, nor does a maximized topic or one holding a focused editor,
+// and overview renders everything.
+func TestBoardTopicSkipKeepsHeadsAndSheets(t *testing.T) {
 	css, err := dashboardTestAsset("assets/dashboard.css")
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := string(css)
-	for _, banned := range []string{"content-visibility: auto", "content-visibility: hidden", "data-wbcv"} {
-		if strings.Contains(s, banned) {
-			t.Errorf("dashboard.css still holds %q; board topics must not skip rendering (627)", banned)
+	if strings.Contains(s, "content-visibility: hidden") {
+		t.Error("dashboard.css holds content-visibility: hidden")
+	}
+	rules := regexp.MustCompile(`\}([^{}]+)\{[^{}]*content-visibility: auto[^{}]*\}`).FindAllStringSubmatch(s, -1)
+	if len(rules) == 0 {
+		t.Fatal("board topic parts take no content-visibility: auto")
+	}
+	for _, r := range rules {
+		for _, sel := range strings.Split(r[1], ",") {
+			sel = strings.TrimSpace(sel)
+			if !strings.Contains(sel, ":not([data-max])") || !strings.Contains(sel, ":not(:focus-within)") {
+				t.Errorf("%q skips a maximized or focused topic", sel)
+			}
+			if !strings.Contains(sel, ":not(.tophead)") && !strings.HasSuffix(sel, "> .bc-body") {
+				t.Errorf("%q may skip a head", sel)
+			}
+		}
+	}
+	for _, want := range []string{
+		"section.topic[data-topic] > :not(.tophead) { contain-intrinsic-block-size: auto",
+		":root[data-overview] .r-board :is(section.topic > :not(.tophead), .bcard .bc-body) { content-visibility: visible !important; }",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("dashboard.css lacks %q", want)
 		}
 	}
 }

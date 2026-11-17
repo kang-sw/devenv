@@ -430,7 +430,12 @@
   function setLayout(v) {
     if (v !== "split" && v !== "tabs") v = "auto";
     layoutMode = v;
-    if (grid) grid.setAttribute("data-layout", v);
+    if (grid) {
+      grid.setAttribute("data-layout", v);
+      // The pin-edge hint lives outside the grid. Mirror layout state rather
+      // than a body :has() that invalidates the document on chip mutations.
+      doc.body.setAttribute("data-dashboard-layout", v);
+    }
     q(".gmenu [data-layout]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-layout") === v)); });
     if (live || worktree) revealPanes();
     if (cardBoard) window.WsCards.relayout();

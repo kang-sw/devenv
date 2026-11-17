@@ -333,7 +333,11 @@ func TestWhiteboardAgendaPanelTree(t *testing.T) {
 	if resp := f.call(t, "agenda.clear", map[string]any{"key": "round2"}); isToolError(resp) {
 		t.Fatalf("agenda.clear: %s", resp)
 	}
-	for name, page := range map[string]string{"disk": agendaPanelHTML(f.fullPage(t)), "served": served()} {
+	// Disk output is synchronous. This standalone presentation source gets
+	// no daemon signal and may retain its parsed agenda for one second.
+	disk := agendaPanelHTML(f.fullPage(t))
+	waitForDashboardValidation(t)
+	for name, page := range map[string]string{"disk": disk, "served": served()} {
 		if strings.Contains(page, "round2") || !strings.Contains(page, "agenda/overnight") || !strings.Contains(page, `<span class="chip">1</span>`) {
 			t.Errorf("%s agenda panel after clearing round2:\n%s", name, page)
 		}
@@ -341,7 +345,9 @@ func TestWhiteboardAgendaPanelTree(t *testing.T) {
 	if resp := f.call(t, "agenda.clear", map[string]any{"all": true}); isToolError(resp) {
 		t.Fatalf("agenda.clear all: %s", resp)
 	}
-	for name, page := range map[string]string{"disk": f.fullPage(t), "served": served()} {
+	disk = f.fullPage(t) // preserve the immediate disk-output assertion
+	waitForDashboardValidation(t)
+	for name, page := range map[string]string{"disk": disk, "served": served()} {
 		if strings.Contains(page, `id="p-agenda"`) {
 			t.Errorf("%s page keeps an agenda panel with no agenda", name)
 		}

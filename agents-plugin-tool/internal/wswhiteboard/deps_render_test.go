@@ -25,13 +25,13 @@ func TestDependencyPopoverRenderStates(t *testing.T) {
 			`class="nm" href="#topic-blocker"`, `class="nm">소유자</span>`,
 			`아직 열려 있음`, `직접 해제해야 함`, `알 수 없음`, `해결됨`,
 		}, []string{`class="dbtn green"`}},
-		{"ready", TopicView{WaitingReady: true, Closed: true, Result: "Done", Dependencies: []DependencyView{
+		{"ready", TopicView{WaitingReady: true, Closed: true, Dependencies: []DependencyView{
 			{Token: "topic:done", Label: "topic:Done", Resolved: true},
 			{Token: "owner", Label: "owner", Resolved: true},
 		}, Waiters: waiters}, []string{
 			`class="dbtn green"`, `class="sum green"`, `진행 가능 · 모든 대상 해결`,
 			`style="width:100%"`, `class="wb-dot r"`, `class="row res"`,
-			`class="tresult" title="주제의 결말">Done</span><span class="dw">`,
+			`class="tname" title="Work">Work</span><span class="dw">`,
 		}, []string{`class="dbtn amber"`, `class="wb-dot u"`, `class="wb-dot x"`}},
 		{"waiters-only", TopicView{Waiters: waiters}, []string{
 			`class="dbtn"`, `aria-label="이 토픽을 기다리는 곳 2"`,

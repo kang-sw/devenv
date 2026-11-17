@@ -86,7 +86,25 @@
       var c = readItem(item), id = item.getAttribute("data-id");
       if (c) putChip(c); else if (chips[id]) dropChip(id);
     });
-    renderChips();
+    if (!updateNoteChips()) renderChips();
+  }
+  // Typing changes note text, not the chip set. Keep the existing strip (and
+  // focused controls) intact; replacing its children also dirties :has() ancestors.
+  function updateNoteChips() {
+    var list = chipList(), notes = topicNotes();
+    var answers = q("[data-unchip]", cchips), topics = q("[data-tchip]", cchips);
+    if (answers.length !== list.length || topics.length !== notes.length) return false;
+    if (list.some(function (c, i) {
+      return answers[i].getAttribute("data-unchip") !== c.id || !!answers[i].parentNode.querySelector(".anote") !== !!c.note;
+    }) || notes.some(function (n, i) { return topics[i].getAttribute("data-tchip") !== n.topic; })) return false;
+    function text(node, value) { if (node.nodeValue !== value) node.nodeValue = value; }
+    list.forEach(function (c, i) {
+      var el = answers[i].parentNode;
+      text(el.childNodes[1], " " + (c.answer || "note"));
+      if (c.note) text(el.querySelector(".anote").firstChild, c.note);
+    });
+    notes.forEach(function (n, i) { text(topics[i].querySelector(".anote").firstChild, n.value.trim()); });
+    return true;
   }
   function renderChips() {
     if (!cchips) return;

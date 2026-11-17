@@ -67,7 +67,7 @@ func TestEdgePinZoneFitsTheStripRightOfThePage(t *testing.T) {
 	for _, want := range []string{
 		"@media (max-width: 1779.98px) { .bpzone { writing-mode: vertical-rl; padding: 12px 4px; } }",
 		`@media (min-width: 1780px) {
-  :root:not([data-pincol]):not([data-bdrag]) body:not(.tk-paged):not(:has(#grid[data-layout="tabs"])) .bpzone { display: grid;`,
+  :root:not([data-pincol]):not([data-bdrag]) body:not(.tk-paged):not([data-dashboard-layout="tabs"]) .bpzone { display: grid;`,
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("dashboard.css lacks %q", want)

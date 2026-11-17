@@ -78,7 +78,7 @@ new value survives intervening old writes.
   event changes take their tier from the actual reader/writer behavior, not
   from being called a protocol change.
 
-The current dispatcher refuses unknown tools (`mcp/server.go:2315–2316`),
+The current dispatcher refuses unknown tools (`mcp/server_dispatch.go:1662`),
 and the argument precheck refuses missing required or undeclared top-level
 arguments (`mcp/tool_arguments.go:65–128`). Thus discovery refresh or a migration
 hint is not a behavior-preserving alias. These are wire-call refusals; they
@@ -91,7 +91,7 @@ the new version, not reconnecting the transport.
 
 | # | Situation and direction | Reads/writes and reopen result | Grade and evidence |
 |---|---|---|---|
-| 1 | Pi updates a patch; Claude uses old skill text against the new daemon | The old caller sends legacy tool/argument names; the new dispatcher reads them. No store write occurs on precheck/unknown-tool refusal; reopen cannot restore a removed call. Compatible additions keep the legacy handlers' behavior | T0 for compatible additions; T3 for removal without alias. `mcp/server.go:2315–2316`, `mcp/tool_arguments.go:65–128` |
+| 1 | Pi updates a patch; Claude uses old skill text against the new daemon | The old caller sends legacy tool/argument names; the new dispatcher reads them. No store write occurs on precheck/unknown-tool refusal; reopen cannot restore a removed call. Compatible additions keep the legacy handlers' behavior | T0 for compatible additions; T3 for removal without alias. `mcp/server_dispatch.go:1662`, `mcp/tool_arguments.go:65–128` |
 | 2 | Claude updates a patch; Pi is older in the same minor | Pi reads the new daemon's version and tool list, then sends old calls to it. The version pin permits this direction; data/reopen consequences remain those of the called handlers in row 1 | T0 with compatible old calls; T3 with removals. `agents-plugin-pi/src/version-check.ts:39–57`, `agents-plugin-pi/src/bridge.ts:1072–1079`, row 1 |
 | 3 | Another harness replaces the daemon mid-session | The launcher forwards old requests to the successor; already-sent calls fail with unknown outcome and are not replayed. A handler may already have written data, so reconnect proves no rollback or reopen recovery. Discovery refresh alone says nothing about those writes | No standalone tier for replacement: grade each call/store path. Compatible discovery can be T0/T1 only under the mapping above; removed calls are T3. `agents-plugin/bin/ws-mcp-launcher.py:1473–1481,1642–1683`, row 1 |
 | 4 | Old plugin connects across a minor/protocol boundary | The daemon reads its hello and refuses before handing it to the session handler. No session/store write on this path; reopening stored data is not a remedy for connection refusal | T3. `wsdashboard/proxy.go:232–254` |

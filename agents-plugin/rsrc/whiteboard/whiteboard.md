@@ -59,16 +59,16 @@ agent log line, retaining a human current-state summary:
 Keep at most one open ask per topic, counting checks as asks; reuse or patch
 its item as the work changes. Close a topic only after the user's final answer
 when an ask exists, so unfinished work stays visible; a topic whose work is
-finished and that has no open ask is closed with a one-line `wb:close result`
-instead of left open. Moving a topic from implementing to awaiting confirmation
+finished and that has no open ask is closed with `wb:close` instead of left
+open. Moving a topic from implementing to awaiting confirmation
 or waiting with no open ask returns a nudge naming the topic: close it if
 finished, or add a check or question. These ask and summary obligations remain
 lead judgment alongside the machine state.
 
 A one-off report that asks the user nothing (a status breakdown, an
 investigation summary) is created and closed in the same batch: the report is
-a panel and the `wb:close` result is its one-line conclusion. A report that
-carries an ask stays open until the answer arrives, then closes.
+a panel and its recap or the last `wb:log` line is its one-line conclusion.
+A report that carries an ask stays open until the answer arrives, then closes.
 
 Approval of a concrete deliverable is execution authority: start the approved
 build or change rather than ask permission again. A request to build or change
@@ -96,7 +96,7 @@ batch may hold several `wb:topic` groups.
 | `wb:add` | `id?`, `class` | fields `wb:title`, `wb:option`..., `wb:recommend?`, `wb:why?`, `wb:link`... |
 | `wb:state` | `value`, `owner?`, `eta_minutes?`, `on?` | none |
 | `wb:eta` | `minutes`, `reason` | none |
-| `wb:close` | `result` | none |
+| `wb:close` | none | none |
 | `wb:answer` | `id` or `ids`, `value`, `assumed?` | the user's verbatim words |
 | `wb:patch` | `id`, `status?`, `class?`, `clear?` | any `wb:add` field, each replacing that field |
 | `wb:floor` | `id` | none |
@@ -125,7 +125,8 @@ Markdown up to the closing tag.
 <wb:answer ids="14 15" value="ok">14,15=ok</wb:answer>
 <wb:patch id="16" status="withdrawn"/>
 <wb:topic name="Old scope">
-<wb:close result="Folded into Rollout."/>
+<wb:log>Folded into Rollout.</wb:log>
+<wb:close/>
 </wb:topic>
 ```
 
@@ -274,15 +275,16 @@ Markdown up to the closing tag.
   that only edits `wb:why`, `wb:recommend`, or links, or resends the current
   title, class, or options, is not a re-ask; a title fix on an item the
   patch leaves settled stamps nothing.
-- `wb:close` requires an existing topic and a `result`: one sentence saying
-  how it ended. Closing withdraws every item still `open`; an `assumed`
-  item stays assumed. Put a batch's answers before its `wb:close`, since
-  an answer after the close finds the item withdrawn. Adding an item,
+- `wb:close` requires an existing topic. To add a closing line, write a
+  `wb:log` before `<wb:close/>` in the same batch. If an older daemon refuses
+  `<wb:close/>` because `result` is missing, resend only the refused
+  `wb:close` with `result="<one sentence>"`. Closing withdraws every
+  item still `open`; an `assumed` item stays assumed. Put a batch's answers
+  before its `wb:close`, since an answer after the close finds the item withdrawn. Adding an item,
   changing nonempty current content, or appending a panel or agent line reopens a
   closed topic without restoring withdrawn items. Server events alone do
   not reopen it. Closing clears the declared state and ends its run;
-  reopening restores neither state nor run. The next close replaces the
-  result, not the history.
+  reopening restores neither state nor run.
 - Current content: one body per topic, holding the durable current state,
   not the accumulating conversation. `wb:body` replaces content whole; empty
   clears it and the same content again is no change. `wb:edit` replaces one exact `wb:old`

@@ -68,9 +68,19 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
         setUserAgent: agent => { this.agent = agent; }, getUserAgent: () => 'Chromium',
         setWindowOpenHandler: handler => { this.popup = handler; },
         loadURL: async url => { roots.events?.push('navigate'); this.loads.push(url); this.currentURL = url; this.webContents.mainFrame.url = url; loaded(url); },
-        loadFile: async file => { this.loads.push(file); this.currentURL = file; loaded(pathToFileURL(file).href); },
+        loadFile: async (file, options) => {
+          this.loads.push(file); this.currentURL = file; this.fileOptions = options;
+          const url = pathToFileURL(file);
+          url.search = new URLSearchParams(options?.query).toString();
+          this.webContents.mainFrame.url = url.href;
+          loaded(url.href);
+        },
         setZoomFactor: zoom => { this.zoom = zoom; },
+        id: renderers.length + 1,
         toggleDevTools: () => { this.devtoolsToggles = (this.devtoolsToggles || 0) + 1; },
+        isDevToolsOpened: () => !!this.devtoolsOpen,
+        openDevTools: options => { this.devtoolsOptions = options; this.devtoolsOpen = true; this.devtoolsToggles = (this.devtoolsToggles || 0) + 1; },
+        closeDevTools: () => { this.devtoolsOpen = false; this.devtoolsToggles = (this.devtoolsToggles || 0) + 1; },
         executeJavaScript: async script => { this.themeScript = script; return null; },
         focus: () => { focusedContents = this.webContents; },
         isFocused: () => focusedContents === this.webContents,
@@ -96,6 +106,8 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
     setBounds(bounds) { this.bounds = bounds; }
   }
   const ipcMain = new EventEmitter(), nativeTheme = Object.assign(new EventEmitter(), { shouldUseDarkColors: false });
+  ipcMain.handlers = {};
+  ipcMain.handle = (channel, handler) => { ipcMain.handlers[channel] = handler; };
   let template, response = 0, popups = 0, menuCallback, onDialog;
   const opened = [], copied = [];
   start({ clipboard: { writeText: value => copied.push(value) }, app, BaseWindow: Base, BrowserWindow: Window, WebContentsView: View, ipcMain, nativeTheme, session,
@@ -115,6 +127,69 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
     onDialog: fn => { onDialog = fn; },
     menus, template, session: session.defaultSession, opened, copied, choose: n => { response = n; } };
 }
+test('connection page start uses the shared path, serializes requests and restricts IPC', async () => {
+  let calls = 0, release;
+  const f = await fixture(async options => {
+    calls++;
+    if (calls === 1) throw new Error('missing bundle');
+    assert.equal(options.attachRunning, true);
+    return new Promise(resolve => { release = resolve; });
+  }, 'win32', { packaged: true });
+  const wc = f.views[0].webContents;
+  const event = { sender: wc, senderFrame: wc.mainFrame };
+  assert.equal((await f.ipcMain.handlers['werkschaft:daemon-availability'](event)).available, true);
+  const start = f.ipcMain.handlers['werkschaft:daemon-start'];
+  const pending = start(event);
+  await tick();
+  await start(event);
+  assert.equal(calls, 2);
+  release('http://127.0.0.1:39418/');
+  await pending;
+  await start({ sender: {}, senderFrame: wc.mainFrame });
+  assert.equal(calls, 2);
+});
+test('manual start failure reloads the page with its reason for another attempt', async () => {
+  let calls = 0;
+  const f = await fixture(async () => { calls++; throw new Error('startup timeout'); }, 'win32', { packaged: true });
+  const content = f.views[0], wc = content.webContents;
+  await f.ipcMain.handlers['werkschaft:daemon-start']({ sender: wc, senderFrame: wc.mainFrame });
+  assert.equal(calls, 2);
+  assert.equal(content.fileOptions.query.reason, 'startup timeout');
+});
+test('dev mode uses the checkout candidate for autostart and the start button', async t => {
+  const source = daemonFixture(t, 'win32');
+  const appRoot = path.join(source.base, 'agents-plugin-tool', 'desktop-electron');
+  fs.mkdirSync(path.dirname(appRoot), { recursive: true });
+  fs.renameSync(source.appRoot, appRoot);
+  fs.rmSync(path.join(appRoot, 'daemon'), { recursive: true });
+  const repoRoot = path.join(source.base, 'agents-plugin-wsflow');
+  fs.renameSync(source.dev.root, repoRoot);
+  let launches = 0, running = false;
+  const deps = { env: { WS_CACHE_HOME: path.join(source.base, 'cache') },
+    discover: async () => { if (!running) throw Error('missing'); return 'http://127.0.0.1:39418/'; },
+    launch: async () => { if (++launches === 1) throw Error('first start failed'); running = true; } };
+  const f = await fixture(options => realConnectDaemon(options, deps), 'win32', { ...source, appRoot });
+  const wc = f.views[0].webContents, event = { sender: wc, senderFrame: wc.mainFrame };
+  assert.equal(launches, 1, 'autostart used the candidate');
+  assert.deepEqual(await f.ipcMain.handlers['werkschaft:daemon-availability'](event), { available: true });
+  await f.ipcMain.handlers['werkschaft:daemon-start'](event);
+  assert.equal(launches, 2);
+  assert.equal(f.views[0].loads.at(-1), 'http://127.0.0.1:39418/');
+  fs.rmSync(repoRoot, { recursive: true });
+  const g = await fixture(async () => { throw new Error('missing'); }, 'win32', { ...source, appRoot });
+  const gwc = g.views[0].webContents;
+  const result = await g.ipcMain.handlers['werkschaft:daemon-availability']({ sender: gwc, senderFrame: gwc.mainFrame });
+  assert.equal(result.available, false);
+  assert(result.reason.includes(repoRoot));
+  assert.match(result.reason, /assemble-daemon-input\.cjs/);
+});
+test('unsupported platform disables standalone start', async () => {
+  const f = await fixture(async () => { throw new Error('no daemon'); }, 'linux', { packaged: true });
+  const wc = f.window.webContents;
+  const result = await f.ipcMain.handlers['werkschaft:daemon-availability']({ sender: wc, senderFrame: wc.mainFrame });
+  assert.equal(result.available, false);
+  assert.match(result.reason, /platform/);
+});
 test('startup readiness, updater and BaseWindow failures report stack and log, show an error box and exit', async t => {
   const update = require('../update'), original = update.createUpdater;
   const stderr = [];
@@ -265,6 +340,22 @@ test('native navigation, redirect, initial subframe requests and popup policies'
   assert.deepEqual(w.popup({ url: 'https://example.com/popup' }), { action: 'deny' });
   assert.equal(f.opened.at(-1), 'https://example.com/popup');
 });
+test('session request guard allows internal DevTools schemes without ownership metadata', async () => {
+  const f = await fixture(undefined, 'win32');
+  const dashboard = f.views[0].webContents;
+  const request = (url, webContentsId, resourceType = 'mainFrame') => {
+    let decision;
+    f.session.webRequest.handler({ url, resourceType, webContentsId }, value => { decision = value; });
+    return decision;
+  };
+  const frontend = 'devtools://devtools/bundled/devtools_app.html?remoteBase=https://chrome-devtools-frontend.appspot.com/serve_file/@78eb7a08.../';
+  for (const id of [undefined, 99, dashboard.id]) {
+    assert.deepEqual(request(frontend, id), {});
+    assert.deepEqual(request('chrome-devtools://devtools/bundled/inspector.html', id, 'subFrame'), {});
+    assert.deepEqual(request('https://example.com/frame', id, 'subFrame'), { cancel: true });
+  }
+  assert.deepEqual(request('devtools-evil://devtools/bundled/devtools_app.html', undefined), { cancel: true });
+});
 test('native same-core action is one explicit attempt, never renderer IPC; refusal retains connection', async () => {
   const requests = [];
   const f = await fixture(async (options, deps) => {
@@ -288,7 +379,7 @@ test('overlapping retries are ignored and rediscovery replaces the pin', async (
   finish('http://127.0.0.1:39418/');
   await tick();
   const retry = f.menus.retry.click();
-  await tick(); // Python's asynchronous preflight precedes rediscovery.
+  await tick(); // Allow asynchronous rediscovery to begin.
   assert.equal(calls, 2);
   finish('http://127.0.0.1:39419/');
   await retry;
@@ -297,8 +388,8 @@ test('overlapping retries are ignored and rediscovery replaces the pin', async (
   assert.equal(canceled, true);
   assert.equal(f.window.loads.at(-1), 'http://127.0.0.1:39419/');
 });
-test('missing Python shows the local guide first; Retry probes again and proceeds once present', async () => {
-  for (const platform of ['darwin', 'win32']) {
+test('macOS missing Python shows the local guide first; Retry probes again and proceeds once present', async () => {
+  for (const platform of ['darwin']) {
     let available = false, probes = 0, connections = 0;
     const f = await fixture(async () => { connections++; return 'http://127.0.0.1:39418/'; }, platform, {
       pythonAvailable: async () => { probes++; return available; },
@@ -329,8 +420,8 @@ test('missing Python shows the local guide first; Retry probes again and proceed
     assert.equal(connections, 2);
   }
 });
-test('Retry Stay after Python disappears retains the dashboard document, title and authority', async () => {
-  for (const platform of ['darwin', 'win32']) {
+test('macOS Retry Stay after Python disappears retains the dashboard document, title and authority', async () => {
+  for (const platform of ['darwin']) {
     let available = true;
     const f = await fixture(undefined, platform, { pythonAvailable: async () => available });
     const content = f.views[0] || f.window, wc = content.webContents, originalURL = content.currentURL;
@@ -356,8 +447,8 @@ test('Retry Stay after Python disappears retains the dashboard document, title a
     assert.deepEqual(f.opened, []);
   }
 });
-test('genuine Python guide load failures and aborts without Stay still show the connection fallback', async () => {
-  for (const platform of ['darwin', 'win32']) {
+test('macOS genuine Python guide load failures and aborts without Stay still show the connection fallback', async () => {
+  for (const platform of ['darwin']) {
     for (const code of ['ERR_ABORTED', 'ERR_CONNECTION_REFUSED']) {
       let available = true;
       const f = await fixture(undefined, platform, { pythonAvailable: async () => available });
@@ -374,6 +465,74 @@ test('genuine Python guide load failures and aborts without Stay still show the 
       f.session.webRequest.handler({ url: originalURL + 's/frame', resourceType: 'subFrame' }, decision => assert.deepEqual(decision, { cancel: true }));
     }
   }
+});
+test('packaged Windows starts its unpacked bundled exe without Python, waits, retries and attaches without another spawn', async t => {
+  const source = daemonFixture(t, 'win32');
+  const appRoot = path.join(source.base, 'app.asar');
+  fs.renameSync(source.appRoot, appRoot + '.unpacked');
+  fs.writeFileSync(appRoot, 'archive placeholder; never executable input');
+  let healthy = false, launches = 0, ready;
+  const deps = { env: { WS_CACHE_HOME: path.join(source.base, 'isolated-cache') },
+    inspect: async () => {
+      if (!healthy) throw Error('missing');
+      return { url: 'http://127.0.0.1:39418/', health: { version: '0.50.1' } };
+    },
+    launch: async (binary, opts, args, wait) => {
+      launches++;
+      assert.equal(path.basename(binary), 'ws-mcp.exe');
+      assert.equal(opts.cwd, path.dirname(binary));
+      assert(opts.cwd.startsWith(path.join(source.userData, 'daemon-stages') + path.sep));
+      assert.equal(fs.readFileSync(binary, 'utf8'), 'fixture bytes, not an executable');
+      assert.deepEqual(args, ['daemon-start', '--require-independent-lifetime', '--start-wait', '13s']);
+      assert.equal(wait, true);
+      assert.equal(opts.logPath, path.join(source.userData, 'daemon-start.log'));
+      if (launches === 1) throw Error('OS refused breakaway <not markup>');
+      await new Promise(resolve => { ready = resolve; });
+      healthy = true;
+    } };
+  const f = await fixture(options => realConnectDaemon(options, deps), 'win32', {
+    ...source, appRoot, packaged: true,
+    pythonAvailable: () => assert.fail('Windows startup must not probe an interpreter'),
+  });
+  const page = f.views[0];
+  assert.equal(launches, 1);
+  assert.equal(path.basename(page.loads.at(-1)), 'connection.html');
+  assert.match(page.fileOptions.query.reason, /OS refused breakaway <not markup>/);
+  assert.equal(page.fileOptions.query.log, `Error log: ${path.join(source.userData, 'daemon-start.log')}`);
+  assert.match(fs.readFileSync(path.join(source.userData, 'daemon-start.log'), 'utf8'), /OS refused breakaway/);
+  const url = pathToFileURL(path.resolve(__dirname, '../connection.html'));
+  url.search = new URLSearchParams(page.fileOptions.query).toString();
+  f.session.webRequest.handler({ url: url.href, resourceType: 'mainFrame' }, decision => assert.deepEqual(decision, {}));
+  const retry = f.menus.retry.click();
+  await tick();
+  assert.equal(launches, 2);
+  assert.equal(path.basename(page.loads.at(-1)), 'connection.html', 'no dashboard before readiness');
+  ready();
+  await retry;
+  assert.equal(page.loads.at(-1), 'http://127.0.0.1:39418/');
+  await f.menus.retry.click();
+  assert.equal(launches, 2, 'healthy compatible daemon attaches without spawning');
+  f.app.emit('will-quit');
+  assert.equal(healthy, true, 'app exit does not shut down the independent daemon');
+});
+test('Windows attaches without Python even when no bundled candidate can be read', async () => {
+  let calls = 0;
+  const f = await fixture(async () => { calls++; return 'http://127.0.0.1:39418/'; }, 'win32', {
+    packaged: true, pythonAvailable: async () => false,
+  });
+  assert.equal(calls, 1);
+  assert.equal(f.views[0].loads.at(-1), 'http://127.0.0.1:39418/');
+});
+test('connection diagnostics render as text, never executable markup', () => {
+  const nodes = { reason: {}, log: {}, 'start-daemon': { addEventListener() {} }, 'start-status': {} };
+  const reason = '<script>alert(1)</script>', log = 'Error log: C:\\Users\\name\\daemon-start.log';
+  require('node:vm').runInNewContext(fs.readFileSync(path.resolve(__dirname, '../connection.js'), 'utf8'), {
+    URLSearchParams, location: { search: '?' + new URLSearchParams({ reason, log }) }, navigator: { language: 'en' },
+    window: { werkschaftDesktop: { daemon: { availability: () => new Promise(() => {}) } } },
+    document: { getElementById: id => nodes[id] },
+  });
+  assert.equal(nodes.reason.textContent, reason);
+  assert.equal(nodes.log.textContent, log);
 });
 test('discovery and immediate navigation failure show the bundled connection page', async () => {
   const f = await fixture(async () => { throw new Error('No readable dashboard endpoint'); });
@@ -714,8 +873,52 @@ test('Developer Tools menu targets dashboard contents in packaged and unpackaged
         assert.equal(f.menus.devtools.accelerator, platform === 'darwin' ? 'Cmd+Alt+I' : 'Ctrl+Shift+I');
         f.menus.devtools.click();
         assert.equal(dashboard.devtoolsToggles, 1);
-        if (platform === 'win32') assert.equal(f.views[1].devtoolsToggles, undefined);
+        if (platform === 'win32') {
+          assert.deepEqual(dashboard.devtoolsOptions, { mode: 'detach' });
+          assert.equal(dashboard.devtoolsOpen, true);
+          f.menus.devtools.click();
+          assert.equal(dashboard.devtoolsOpen, false);
+          assert.equal(dashboard.devtoolsToggles, 2);
+          assert.equal(f.views[1].devtoolsToggles, undefined);
+        }
       }
+    }
+  } finally { update.createUpdater = original; }
+});
+test('DevTools shortcuts target dashboard from every view in packaged and unpackaged startup', async t => {
+  const logs = [];
+  t.mock.method(console, 'log', message => logs.push(message));
+  const update = require('../update'), original = update.createUpdater;
+  update.createUpdater = () => ({ applyOnLaunch: () => false, schedule() {} });
+  try {
+    for (const platform of ['win32', 'linux', 'darwin']) for (const packaged of [false, true]) {
+      const f = await fixture(undefined, platform, { packaged });
+      const dashboard = f.views[0] || f.window;
+      for (const view of f.views.length ? f.views : [f.window]) {
+        const input = (key, type, modifiers = {}) => {
+          let prevented = false;
+          view.webContents.emit('before-input-event', { preventDefault() { prevented = true; } }, { key, type, ...modifiers });
+          return prevented;
+        };
+        const modifiers = platform === 'darwin' ? { meta: true, alt: true } : { control: true, shift: true };
+        const before = dashboard.devtoolsToggles || 0;
+        const logCount = logs.length;
+        assert(input('F12', 'keyDown'));
+        assert.equal(logs.at(-1), `DevTools shortcut F12: source webContents=${view.webContents.id}, dashboard webContents=${dashboard.webContents.id}`);
+        assert(input('I', 'keyDown', modifiers));
+        assert(input('i', 'keyDown', modifiers));
+        assert(input('F12', 'keyDown', { isAutoRepeat: true }));
+        assert(input('I', 'keyDown', { ...modifiers, isAutoRepeat: true }));
+        assert.equal(input('F12', 'keyUp'), false);
+        assert.equal(input('I', 'keyUp', modifiers), false);
+        assert.equal(input('F12', 'keyDown', { shift: true }), false);
+        assert.equal(input('I', 'keyDown', { ...modifiers, control: platform === 'darwin' }), false);
+        assert.equal(input('X', 'keyDown', modifiers), false);
+        assert.equal(dashboard.devtoolsToggles, before + 3);
+        assert.equal(logs.length, logCount + 3);
+        if (platform === 'win32') assert.deepEqual(dashboard.devtoolsOptions, { mode: 'detach' });
+      }
+      if (platform === 'win32') assert.equal(f.views[1].devtoolsToggles, undefined);
     }
   } finally { update.createUpdater = original; }
 });
@@ -891,12 +1094,13 @@ test('dashboard theme maps to both bar and overlay, with native fallback and res
 });
 test('update bridge: IPC only from the pinned dashboard main frame, status replay, apply on launch and quit', async () => {
   const update = require('../update'), original = update.createUpdater;
-  const calls = [];
+  const calls = [], delivered = [];
   let options, ready = false;
   update.createUpdater = opts => {
     options = opts;
     return { applyOnLaunch: () => false, applyOnQuit: relaunch => calls.push(`quit:${relaunch}`), schedule: () => calls.push('schedule'),
       phase: () => ({ phase: 'none', version: null, skipped: false }), canRestart: () => ready,
+      statusDelivered: status => delivered.push(status),
       check: manual => calls.push(`check:${manual}`), download: () => calls.push('download'), skip: v => calls.push(`skip:${v}`) };
   };
   let f;
@@ -934,6 +1138,18 @@ test('update bridge: IPC only from the pinned dashboard main frame, status repla
   f.ipcMain.emit('werkschaft:update-subscribe', from('http://127.0.0.1:39418/'));
   f.ipcMain.emit('werkschaft:update-subscribe', from('http://127.0.0.1:39418/'));
   assert.deepEqual(sent.at(-1), ['werkschaft:update-status', { state: 'phase', phase: { phase: 'none', version: null, skipped: false } }]);
+  // A failure stays pending while automatic checks continue, then is
+  // acknowledged exactly when delivered to a subscribed dashboard.
+  wc.emit('did-start-navigation', {}, 'http://127.0.0.1:39418/', false, true);
+  const failure = { state: 'apply-error', version: '9.0.0', message: 'swap failed' };
+  options.send(failure);
+  options.send({ state: 'available', version: '10.0.0' });
+  assert.equal(delivered.includes(failure), false);
+  f.ipcMain.emit('werkschaft:update-subscribe', from('http://127.0.0.1:39418/'));
+  assert.deepEqual(sent.at(-1), ['werkschaft:update-status', failure]);
+  assert.equal(delivered.filter(status => status === failure).length, 1);
+  options.send({ state: 'available', version: '10.0.0' });
+  assert.equal(sent.at(-1)[1].version, '10.0.0');
   // A plain full quit applies without relaunch.
   f.app.emit('will-quit');
   assert.equal(calls.at(-1), 'quit:false');

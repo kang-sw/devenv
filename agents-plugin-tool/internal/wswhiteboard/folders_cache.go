@@ -1,7 +1,6 @@
 package wswhiteboard
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -11,14 +10,19 @@ import (
 )
 
 // FolderCache keeps read-only opens in process. Each hit still acquires the
-// writer's flock and checks every authoritative file's identity, size, mode and
-// mtime. A pending intent always misses, so recovery and schema guards run under
-// the same lock as an uncached Open. The zero value is ready for use.
+// writer's flock and checks only the root meta/committed file stamps and pending
+// presence. Every store commit replaces both roots before removing pending; root
+// metadata also catches the external board-takeover edit without a new generation.
+// A pending intent always misses, so recovery and schema guards run under the same
+// lock as an uncached Open. The zero value is ready for use.
+// Leaf-only edits bypass the commit protocol: callers making them must Forget
+// the cached board (or use an uncached Open); they cannot invalidate a root stamp.
 // No writer uses this cache. Opens share read-only backing data; each caller
 // owns a small State header so mutation entry points can detach it safely.
 type FolderCache struct {
 	mu      sync.Mutex
 	entries map[string]*folderCacheSlot
+	stat    func(string) (os.FileInfo, error) // optional validation counter seam
 }
 
 type folderCacheSlot struct {
@@ -28,7 +32,7 @@ type folderCacheSlot struct {
 
 type folderCachedRead struct {
 	state    *State
-	files    map[string]os.FileInfo
+	stamp    folderRootStamp
 	revision uint64
 }
 
@@ -43,45 +47,33 @@ func newFolderReadRevision(state *State) uint64 {
 	return folderReadRevision.Add(1)
 }
 
-// unchanged needs no topic opens. Identity metadata catches ordinary atomic
-// replacements; equal metadata cannot prove that content is unchanged.
-func (e folderCachedRead) unchanged(dir string) bool {
+type folderRootStamp struct {
+	meta      os.FileInfo
+	committed os.FileInfo
+}
+
+// unchanged needs no topic probes. Identity metadata catches ordinary atomic
+// replacements, even at an unchanged generation/mtime; equal metadata cannot
+// prove unchanged bytes after an in-place edit that restores all metadata.
+func (e folderCachedRead) unchanged(dir string, stat func(string) (os.FileInfo, error)) bool {
 	if e.state == nil {
 		return false
 	}
-	if _, err := os.Stat(filepath.Join(dir, "pending.json")); !os.IsNotExist(err) {
+	if _, err := stat(filepath.Join(dir, "pending.json")); !os.IsNotExist(err) {
 		return false
 	}
-	for path, before := range e.files {
-		after, err := os.Stat(path)
-		if err != nil || !wsstate.SameFileMetadata(before, after) {
-			return false
-		}
-	}
-	return true
+	after, err := folderReadStamp(dir, stat)
+	return err == nil && wsstate.SameFileMetadata(e.stamp.meta, after.meta) &&
+		wsstate.SameFileMetadata(e.stamp.committed, after.committed)
 }
 
-func folderReadStamp(dir string) (map[string]os.FileInfo, error) {
-	files := map[string]os.FileInfo{}
-	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		// WalkDir does not follow linked directories. Keep such stores on
-		// the uncached path rather than overlooking a linked topic's files.
-		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("whiteboard read cache: symbolic link %s", path)
-		}
-		if entry.IsDir() || (filepath.Ext(path) != ".json" && filepath.Ext(path) != ".jsonl") {
-			return nil
-		}
-		info, err := os.Stat(path)
-		if err == nil {
-			files[path] = info
-		}
-		return err
-	})
-	return files, err
+func folderReadStamp(dir string, stat func(string) (os.FileInfo, error)) (folderRootStamp, error) {
+	meta, err := stat(filepath.Join(dir, "meta.json"))
+	if err != nil {
+		return folderRootStamp{}, err
+	}
+	committed, err := stat(filepath.Join(dir, "committed.json"))
+	return folderRootStamp{meta: meta, committed: committed}, err
 }
 
 // Open is FolderStore.Open with an opt-in read cache, bounded to 64 boards.
@@ -116,14 +108,18 @@ func (c *FolderCache) OpenRevision(f FolderStore, legacy *State) (*State, uint64
 	// A blocked board must not hold up reads of another session.
 	slot.mu.Lock()
 	defer slot.mu.Unlock()
-	if _, err := os.Stat(filepath.Join(f.Dir, "meta.json")); err != nil {
+	stat := c.stat
+	if stat == nil {
+		stat = os.Stat
+	}
+	if _, err := stat(filepath.Join(f.Dir, "meta.json")); err != nil {
 		slot.read = folderCachedRead{}
 		return uncached()
 	}
 	entry := slot.read
 	var hit bool
 	guard := func() error {
-		hit = entry.unchanged(f.Dir)
+		hit = entry.unchanged(f.Dir, stat)
 		if hit {
 			return nil
 		}
@@ -141,13 +137,13 @@ func (c *FolderCache) OpenRevision(f FolderStore, legacy *State) (*State, uint64
 		// Capture before reading: an out-of-band edit during load must not
 		// be cached under the stamp of its later bytes. Pending replay changes
 		// this stamp and is cached only on a subsequent clean open.
-		files, stampErr := folderReadStamp(f.Dir)
+		stamp, stampErr := folderReadStamp(f.Dir, stat)
 		var err error
 		out, _, err = f.load(legacy)
 		revision = newFolderReadRevision(out)
 		if err == nil && stampErr == nil && out != nil {
-			next := folderCachedRead{state: out, files: files, revision: revision}
-			if next.unchanged(f.Dir) {
+			next := folderCachedRead{state: out, stamp: stamp, revision: revision}
+			if next.unchanged(f.Dir, stat) {
 				out.shared = true
 				slot.read = next
 				out = out.sharedRead()

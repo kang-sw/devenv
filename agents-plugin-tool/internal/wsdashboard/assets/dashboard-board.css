@@ -77,6 +77,23 @@ section.topic[data-size="fold"]:not([data-max]) > :not(.tophead),
 section.topic[data-size="fold"]:not([data-max]) > .tophead > :not(.tbar),
 section.topic[data-size="fold"]:not([data-max]) > .tophead > .tbar > details > :not(summary) { display: none !important; }
 section.topic[data-size="fold"]:not([data-max]) > .tophead > .tbar { padding-right: 12px; }
+/* Visible-only rendering: a topic's body parts (every child but its head)
+   and a card's body skip style, layout and paint while far from the view
+   (content-visibility). The heads stay out, so they still stick and cast the
+   stuck shadow. A part is contained from the start, as content-visibility
+   contains it while rendered, so it is laid out at the same size skipped or
+   not (a margin inside it no longer collapses through its edge); it takes
+   content-visibility once laid out (data-wbcv, set by dashboard-frames.js
+   cvWatch), so a skipped part keeps its own last size (auto) rather than
+   the fallback, which only a part never laid out takes. A card's body has a
+   set height. Rendered in full: a maximized topic or card, and a part
+   holding a maximized panel (fixed to the window, which containment would
+   break), and a topic holding focus (a note being typed). A topic's
+   popovers open from its head, in the top layer. */
+section.topic[data-topic] > :not(.tophead) { contain-intrinsic-block-size: auto 480px; }
+section.topic:not([data-max]) > :not(.tophead):not(:has(details.entry-panel[data-max])) { contain: layout style paint; }
+section.topic:not([data-max]):not(:focus-within) > [data-wbcv]:not(.tophead):not(:has(details.entry-panel[data-max])),
+.bcard:not([data-max]):not(:focus-within) > .bc-in > .bc-body { content-visibility: auto; }
 /* a frame in the body would take the pointer mid-drag */
 .bcard.drag .bc-body { pointer-events: none; }
 .bcard.flash .bc-in { animation: bc-flash .9s ease-out; }
@@ -118,6 +135,7 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 :root[data-overview] body { background: color-mix(in srgb, var(--wb-bg) 28%, #000); }
 :root[data-overview] :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .dr-handle) { filter: brightness(.28) saturate(.4); }
 :root[data-overview] .r-board :is(section.topic, .bcard) { content-visibility: visible !important; cursor: pointer; }
+:root[data-overview] .r-board :is(section.topic > :not(.tophead), .bcard .bc-body) { content-visibility: visible !important; }
 :root[data-overview] .r-board section.topic:not([data-overview-motion]) > :not(.tophead),
 :root[data-overview] .r-board .tophead > .tnote,
 :root[data-overview] .r-board .bcard:not([data-overview-motion]) :is(.bc-body, .bc-grip, .bc-folded),
@@ -136,6 +154,7 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 :root[data-overview]:not([data-pincol]) .r-board > .bpins::before { filter: brightness(.28) saturate(.4); }
 :root[data-overview] .r-board > .bpins:not(:empty) { display: flow-root; }
 .r-board [data-overview-motion], .bpins [data-overview-motion] { content-visibility: visible !important; position: relative; }
+:is(.r-board, .bpins) [data-overview-motion] :is(section.topic > :not(.tophead), .bc-body) { content-visibility: visible !important; }
 :is(.r-board, .bpins) [data-overview-motion] :is(.tophead, .bc-hd) { position: static !important; }
 :is(.r-board, .bpins) [data-overview-motion] .trecap .rtext { display: block; overflow: hidden; }
 .overview-spacer, .overview-slot { flex: none; pointer-events: none; }

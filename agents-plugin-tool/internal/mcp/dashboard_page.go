@@ -519,6 +519,13 @@ func (src *DashboardSessionSource) MailPrint(reg wsdashboard.Registration) (stri
 
 // contactsFrom is readContacts over a reply registry already loaded.
 func (src *DashboardSessionSource) contactsFrom(reg wsdashboard.Registration, replies wsmailbox.ReplyStore) []wsdashboard.Contact {
+	return src.contactsFromRead(reg, replies, false)
+}
+
+// contactsFromRead validates only the scope stores this authoritative index
+// read actually resolves. Presentation reads retain shared TTL validation, and
+// the local stores map shares each scope's path resolution and validation.
+func (src *DashboardSessionSource) contactsFromRead(reg wsdashboard.Registration, replies wsmailbox.ReplyStore, authoritative bool) []wsdashboard.Contact {
 	sorted := wsmailbox.SortedContacts(replies.Entries[reg.ReplyID].Contacts)
 	if len(sorted) == 0 {
 		return nil
@@ -531,6 +538,9 @@ func (src *DashboardSessionSource) contactsFrom(reg wsdashboard.Registration, re
 		}
 		stores[scope] = nil
 		if path, err := wsmailbox.PathForScope(scope, reg.Project); err == nil {
+			if authoritative {
+				src.scopes.InvalidateUnder(path)
+			}
 			if store, err := src.scopes.LoadIdentity(path, wsmailbox.Load); err == nil {
 				stores[scope] = &store
 			}

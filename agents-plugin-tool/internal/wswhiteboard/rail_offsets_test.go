@@ -60,13 +60,13 @@ var board = new E("div", "bcol", { id: "bcol" }); board.name = "host"; board.h =
 var oqTop = board.appendChild(new E("div", "oq-wrap wb-oq-top")), oqBot = board.appendChild(new E("div", "oq-wrap wb-oq-bot")); oqTop.name = "oq-top"; oqBot.name = "oq-bot";
 function topic(key, y) { var t = board.appendChild(new E("section", "topic", { "data-topic": key })); t.y = y; t.h = 500; var head = t.appendChild(new E("div", "tophead")); head.name = "head-" + key; head.h = 30; head.y = y; var bar = head.appendChild(new E("div", "tbar")); bar.name = "bar-" + key; bar.h = 30; bar.y = y; bar.appendChild(new E("span", "tname")).textContent = key; return t; }
 ["a", "b", "c", "d", "e", "f"].forEach(function (k, i) { topic(k, i * 600); });
-var queue = [], ro = null;
+var queue = [], ro = null, frameID = 0, cancelled = {};
 var document = { body: new E("body"), getElementById: function (id) { return id === "bcol" ? board : null; }, querySelector: function () { return null; }, createElement: function (t) { return new E(t); } };
-var window = { requestAnimationFrame: function (f) { queue.push(f); return queue.length; }, innerHeight: 800, addEventListener: function () {}, removeEventListener: function () {}, ResizeObserver: function (cb) { ro = cb; this.observe = function () {}; this.disconnect = function () {}; } };
-var requestAnimationFrame = window.requestAnimationFrame, cancelAnimationFrame = function () {}, ResizeObserver = window.ResizeObserver;
+var window = { requestAnimationFrame: function (f) { var id = ++frameID; queue.push({ id: id, f: f }); return id; }, innerHeight: 800, addEventListener: function () {}, removeEventListener: function () {}, ResizeObserver: function (cb) { ro = cb; this.observe = function () {}; this.disconnect = function () {}; } };
+var requestAnimationFrame = window.requestAnimationFrame, cancelAnimationFrame = function (id) { cancelled[id] = true; }, ResizeObserver = window.ResizeObserver;
 var railOverflow = "auto", railInset = "";
 function getComputedStyle(e) { return { overflowY: e === board ? railOverflow : "visible", paddingTop: "0", getPropertyValue: function (k) { return e === board && k === "--wb-rail-inset" ? railInset : ""; } }; }
-function frame() { var q = queue; queue = []; q.forEach(function (f) { f(); }); }
+function frame() { var q = queue; queue = []; q.forEach(function (x) { if (!cancelled[x.id]) x.f(); }); }
 function hostWrites() { return writes.filter(function (w) { return w[0] === "host"; }); }
 `
 

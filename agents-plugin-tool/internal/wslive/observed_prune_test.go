@@ -333,7 +333,8 @@ func TestObservedPruneLateDifferentModelRedatesReturn(t *testing.T) {
 	}
 	writeFixture(t, dir, records)
 	want, _ := visibleModels(t, dir)
-	var cache ObservedCache
+	clock := time.Now()
+	cache := ObservedCache{now: func() time.Time { return clock }}
 	cache.Load(dir)
 	withoutPruneInterval(t)
 	pruneObserved(filepath.Join(dir, ObservedDirName))
@@ -363,6 +364,7 @@ func TestObservedPruneLateDifferentModelRedatesReturn(t *testing.T) {
 	if !reflect.DeepEqual(retained[""].Current, records[11].ModelObservation) || !reflect.DeepEqual(full.observed[""].Current, retained[""].Current) {
 		t.Fatal("late insertion changed latest Current")
 	}
+	clock = clock.Add(observedValidationInterval)
 	if got := cache.Load(dir); !reflect.DeepEqual(got.models, retained) {
 		t.Fatal("warm cache did not rebuild the accepted retained-history drift")
 	}
