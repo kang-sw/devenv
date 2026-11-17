@@ -1113,7 +1113,8 @@ func TestTopicRailBarCapsuleMotion(t *testing.T) {
 	for _, want := range []string{
 		`function motion() { return !!d.body.animate && !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches); }`,
 		`var pre = motion() && !fresh && member !== moved ? before(s) : null;`,
-		"if (pre) after(pre);\n    drawn = !!s;",
+		"if (pre) {\n      pendingMotion = pre;\n      motionRaf = requestAnimationFrame(function () {",
+		"if (pending) after(pending);\n      });\n    }\n    drawn = !!s;",
 		`if (!drawn || !s) return p;`,
 		`if (bnear && !s.down.some(function (i) { return topics[i] === bnear; })) p.bot = capGhost(slots.bot.near);`,
 		`else if (next && btns("bot").map(shown).indexOf(next) < 0) p.bot = barGhost(next, true);`,
