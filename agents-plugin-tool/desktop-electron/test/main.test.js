@@ -70,7 +70,11 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
         loadURL: async url => { roots.events?.push('navigate'); this.loads.push(url); this.currentURL = url; this.webContents.mainFrame.url = url; loaded(url); },
         loadFile: async file => { this.loads.push(file); this.currentURL = file; loaded(pathToFileURL(file).href); },
         setZoomFactor: zoom => { this.zoom = zoom; },
+        id: renderers.length + 1,
         toggleDevTools: () => { this.devtoolsToggles = (this.devtoolsToggles || 0) + 1; },
+        isDevToolsOpened: () => !!this.devtoolsOpen,
+        openDevTools: options => { this.devtoolsOptions = options; this.devtoolsOpen = true; this.devtoolsToggles = (this.devtoolsToggles || 0) + 1; },
+        closeDevTools: () => { this.devtoolsOpen = false; this.devtoolsToggles = (this.devtoolsToggles || 0) + 1; },
         executeJavaScript: async script => { this.themeScript = script; return null; },
         focus: () => { focusedContents = this.webContents; },
         isFocused: () => focusedContents === this.webContents,
@@ -714,12 +718,21 @@ test('Developer Tools menu targets dashboard contents in packaged and unpackaged
         assert.equal(f.menus.devtools.accelerator, platform === 'darwin' ? 'Cmd+Alt+I' : 'Ctrl+Shift+I');
         f.menus.devtools.click();
         assert.equal(dashboard.devtoolsToggles, 1);
-        if (platform === 'win32') assert.equal(f.views[1].devtoolsToggles, undefined);
+        if (platform === 'win32') {
+          assert.deepEqual(dashboard.devtoolsOptions, { mode: 'detach' });
+          assert.equal(dashboard.devtoolsOpen, true);
+          f.menus.devtools.click();
+          assert.equal(dashboard.devtoolsOpen, false);
+          assert.equal(dashboard.devtoolsToggles, 2);
+          assert.equal(f.views[1].devtoolsToggles, undefined);
+        }
       }
     }
   } finally { update.createUpdater = original; }
 });
-test('DevTools shortcuts target dashboard from every view in packaged and unpackaged startup', async () => {
+test('DevTools shortcuts target dashboard from every view in packaged and unpackaged startup', async t => {
+  const logs = [];
+  t.mock.method(console, 'log', message => logs.push(message));
   const update = require('../update'), original = update.createUpdater;
   update.createUpdater = () => ({ applyOnLaunch: () => false, schedule() {} });
   try {
@@ -734,7 +747,9 @@ test('DevTools shortcuts target dashboard from every view in packaged and unpack
         };
         const modifiers = platform === 'darwin' ? { meta: true, alt: true } : { control: true, shift: true };
         const before = dashboard.devtoolsToggles || 0;
+        const logCount = logs.length;
         assert(input('F12', 'keyDown'));
+        assert.equal(logs.at(-1), `DevTools shortcut F12: source webContents=${view.webContents.id}, dashboard webContents=${dashboard.webContents.id}`);
         assert(input('I', 'keyDown', modifiers));
         assert(input('i', 'keyDown', modifiers));
         assert(input('F12', 'keyDown', { isAutoRepeat: true }));
@@ -745,6 +760,8 @@ test('DevTools shortcuts target dashboard from every view in packaged and unpack
         assert.equal(input('I', 'keyDown', { ...modifiers, control: platform === 'darwin' }), false);
         assert.equal(input('X', 'keyDown', modifiers), false);
         assert.equal(dashboard.devtoolsToggles, before + 3);
+        assert.equal(logs.length, logCount + 3);
+        if (platform === 'win32') assert.deepEqual(dashboard.devtoolsOptions, { mode: 'detach' });
       }
       if (platform === 'win32') assert.equal(f.views[1].devtoolsToggles, undefined);
     }
