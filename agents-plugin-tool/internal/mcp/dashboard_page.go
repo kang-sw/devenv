@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -450,7 +449,7 @@ func servedViewInput(record sessionRecord, replyID string) wswhiteboard.ViewInpu
 				return ""
 			}
 			if info, err := os.Stat(docImagePath(record.Root, path)); err == nil {
-				src += "&v=" + strconv.FormatInt(info.ModTime().UnixNano(), 36) + "." + strconv.FormatInt(info.Size(), 36)
+				src += "&v=" + wsdashboard.ImageVersion(info)
 			}
 			return src
 		},
