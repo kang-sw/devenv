@@ -755,7 +755,9 @@ func writeEntryJournaled(dir string, entry Entry, journal bool) (string, error) 
 	if journal {
 		// The write is already visible; a sync error cannot safely be reported
 		// as a failed send without prompting a duplicate submission.
-		_ = syncInboxDir(dir)
+		if err := syncInboxDir(dir); err != nil {
+			fmt.Fprintf(os.Stderr, "wsinbox: sync published inbox entry: %v\n", err)
+		}
 	}
 	return name, nil
 }
