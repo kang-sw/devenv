@@ -119,7 +119,7 @@ func (n *WhiteboardNudges) identity(t nudgeTarget) (sessionRecord, bool) {
 func (n *WhiteboardNudges) discoveryIdentity(d sessionDirs, key string) (string, os.FileInfo, error) {
 	stat := n.stat
 	if stat == nil {
-		stat = os.Stat
+		stat = wsstate.Stat
 	}
 	path := d.partPath(key, partKey)
 	info, err := stat(path)
@@ -171,12 +171,12 @@ func (n *WhiteboardNudges) discover() map[nudgeTarget]time.Time {
 	d := n.dirs()
 	stat := n.stat
 	if stat == nil {
-		stat = os.Stat
+		stat = wsstate.Stat
 	}
 	n.boardStamps = map[nudgeTarget]os.FileInfo{}
 	keys := map[string]bool{}
 	for i, dir := range []string{d.sessions, d.legacy} {
-		entries, err := os.ReadDir(dir)
+		entries, err := wsstate.ReadDir(dir)
 		if err != nil {
 			if !os.IsNotExist(err) {
 				fmt.Fprintf(n.log, "whiteboard nudges: discovery: %v\n", err)

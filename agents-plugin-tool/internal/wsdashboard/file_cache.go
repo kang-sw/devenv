@@ -127,7 +127,7 @@ func (c *FileCache[T]) load(path string, load func(path string) (T, error), iden
 		return e.val, nil
 	}
 	if stat == nil {
-		stat = os.Stat
+		stat = wsstate.Stat
 	}
 	if elapsed := now.Sub(check.at); !checked || elapsed < 0 || elapsed >= fileCacheValidationInterval {
 		check.info, _ = stat(path)

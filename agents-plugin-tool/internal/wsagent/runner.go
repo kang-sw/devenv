@@ -263,7 +263,7 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 	if notify != nil {
 		r.notify = notify
 	}
-	entries, _ := os.ReadDir(filepath.Join(r.opts.Dir, "sessions"))
+	entries, _ := wsstate.ReadDir(filepath.Join(r.opts.Dir, "sessions"))
 	for _, e := range entries {
 		if !e.IsDir() || !wsdashboard.ValidReplyID(e.Name()) {
 			continue
@@ -629,7 +629,7 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 		return State{}, badRequest("root must be an absolute path; got %q", root)
 	}
 	root = filepath.Clean(root)
-	if info, err := os.Stat(root); err != nil || !info.IsDir() {
+	if info, err := wsstate.Stat(root); err != nil || !info.IsDir() {
 		return State{}, badRequest("root %s is not a directory", root)
 	}
 	rp, err := r.resolve(profile, root)
@@ -805,7 +805,7 @@ func (r *Runner) resolve(profile, root string) (ResolvedProfile, error) {
 		return ResolvedProfile{}, err
 	}
 	if path := rp.Definition.InstructionsPath(root); path != "" {
-		info, err := os.Stat(path)
+		info, err := wsstate.Stat(path)
 		if err != nil || !info.Mode().IsRegular() {
 			return ResolvedProfile{}, categorized(ErrInvalidProfile, badRequest("agent profile %q: instruction file %s does not exist", rp.Name, path))
 		}

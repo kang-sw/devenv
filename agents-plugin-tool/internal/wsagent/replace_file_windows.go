@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"golang.org/x/sys/windows"
 )
 
@@ -21,6 +22,7 @@ func replaceFile(tmp, path string) error {
 	deadline := time.Now().Add(2 * time.Second)
 	backoff := 5 * time.Millisecond
 	for {
+		wsstate.CountFileIO("atomic_replace")
 		err := os.Rename(tmp, path)
 		if err == nil || !isTransientReplaceError(err) || time.Now().After(deadline) {
 			return err
@@ -47,7 +49,7 @@ func readFile(path string) ([]byte, error) {
 	deadline := time.Now().Add(2 * time.Second)
 	backoff := 5 * time.Millisecond
 	for {
-		raw, err := os.ReadFile(path)
+		raw, err := wsstate.ReadFileOnce(path)
 		if err == nil || !isTransientReplaceError(err) || time.Now().After(deadline) {
 			return raw, err
 		}

@@ -20,6 +20,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // The browser write routes: POST /s/<reply-id>/message holds a message the
@@ -300,7 +301,7 @@ func (d *Daemon) scheduleAnswerReplay(reg Registration) {
 	pending, known := d.answerPending[reg.ReplyID]
 	if !known {
 		// Discover recovery journals once, not on every session event.
-		files, err := os.ReadDir(filepath.Join(sessionInbox(d.dir, reg.ReplyID), "answer-pending"))
+		files, err := wsstate.ReadDir(filepath.Join(sessionInbox(d.dir, reg.ReplyID), "answer-pending"))
 		pending = len(files) != 0 || (err != nil && !os.IsNotExist(err))
 		if d.answerPending == nil {
 			d.answerPending = make(map[string]bool)
@@ -338,7 +339,7 @@ func (d *Daemon) scheduleAnswerReplay(reg Registration) {
 				// schedules a fresh one after the old loop is removed.
 				// A send may have committed while the board lock was held.
 				// Re-scan under inboxMu before declaring the journal empty.
-				files, scanErr := os.ReadDir(filepath.Join(sessionInbox(d.dir, reg.ReplyID), "answer-pending"))
+				files, scanErr := wsstate.ReadDir(filepath.Join(sessionInbox(d.dir, reg.ReplyID), "answer-pending"))
 				if len(files) != 0 || (scanErr != nil && !os.IsNotExist(scanErr)) {
 					d.inboxMu.Unlock()
 					continue
@@ -557,7 +558,7 @@ func writeAttachments(attachDir string, images []decodedImage) ([]string, error)
 	var written []string
 	for i, img := range images {
 		path := filepath.Join(attachDir, fmt.Sprintf("%s-%d.%s", uploadID, i+1, img.ext))
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		f, err := wsstate.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
 			removeFiles(written)
 			return nil, err

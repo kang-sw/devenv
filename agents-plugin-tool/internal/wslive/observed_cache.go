@@ -189,7 +189,7 @@ func (c *ObservedCache) Load(dir string) *ObservedEvidence {
 func (c *ObservedCache) loadObserved(dir string, slot *observedRead, now time.Time) *ObservedEvidence {
 	stat := c.stat
 	if stat == nil {
-		stat = os.Stat
+		stat = wsstate.Stat
 	}
 	evidenceDir := filepath.Join(dir, ObservedDirName)
 	slot.checkedAt, slot.checked = now, true
@@ -197,7 +197,7 @@ func (c *ObservedCache) loadObserved(dir string, slot *observedRead, now time.Ti
 	if dirErr == nil && slot.trusted(dirInfo, now) {
 		return slot.evidence
 	}
-	entries, err := os.ReadDir(evidenceDir)
+	entries, err := wsstate.ReadDir(evidenceDir)
 	if err != nil {
 		slot.files = nil
 		slot.evidence = nil
@@ -247,7 +247,7 @@ func (c *ObservedCache) loadObserved(dir string, slot *observedRead, now time.Ti
 		}
 		open := c.open
 		if open == nil {
-			open = os.Open
+			open = wsstate.Open
 		}
 		c.opens.Add(1)
 		r, valid, err := readObservedRecord(path, open)

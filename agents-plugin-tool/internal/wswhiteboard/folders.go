@@ -147,7 +147,7 @@ func (f FolderStore) Open(legacy *State) (*State, error) {
 	if legacy == nil {
 		present := false
 		for _, name := range []string{"meta.json", "pending.json", "committed.json"} {
-			_, err := os.Stat(filepath.Join(f.Dir, name))
+			_, err := wsstate.Stat(filepath.Join(f.Dir, name))
 			if err == nil {
 				present = true
 				break
@@ -394,7 +394,7 @@ func (f FolderStore) load(legacy *State) (*State, *folderSession, error) {
 		}
 		return state, &meta, nil
 	}
-	if _, err := os.Stat(filepath.Join(f.Dir, "committed.json")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := wsstate.Stat(filepath.Join(f.Dir, "committed.json")); !errors.Is(err, os.ErrNotExist) {
 		if err != nil {
 			return nil, nil, err
 		}
@@ -936,7 +936,7 @@ func (f FolderStore) replay(intent *folderIntent) error {
 			return fmt.Errorf("whiteboard: invalid pending panel path")
 		}
 		path := filepath.Join(f.Dir, filepath.FromSlash(w.Path))
-		if data, err := os.ReadFile(path); err == nil {
+		if data, err := wsstate.ReadFileOnce(path); err == nil {
 			if !bytes.Equal(data, w.Data) {
 				return fmt.Errorf("whiteboard: immutable panel %s conflicts with intent", w.Path)
 			}
@@ -1022,7 +1022,7 @@ func (f FolderStore) append(a folderAppend) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	file, err := wsstate.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
 	}
@@ -1115,7 +1115,7 @@ func folderSyncDir(path string) error {
 	if runtime.GOOS == "windows" {
 		return nil
 	}
-	dir, err := os.Open(path)
+	dir, err := wsstate.Open(path)
 	if err != nil {
 		return err
 	}

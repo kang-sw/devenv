@@ -110,7 +110,7 @@ func (c *FolderCache) OpenRevision(f FolderStore, legacy *State) (*State, uint64
 	defer slot.mu.Unlock()
 	stat := c.stat
 	if stat == nil {
-		stat = os.Stat
+		stat = wsstate.Stat
 	}
 	if _, err := stat(filepath.Join(f.Dir, "meta.json")); err != nil {
 		slot.read = folderCachedRead{}

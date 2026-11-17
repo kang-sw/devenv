@@ -21,6 +21,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -459,7 +460,7 @@ func dashboardWriteRow(dir string, sess *dashboardSession, reg wsdashboard.Regis
 // write its own again and resume a conversation this harness holds. The
 // caller holds d.mu.
 func (s *Server) dashboardUnregister(dir string, sess *dashboardSession) {
-	if _, err := os.Stat(filepath.Join(wsdashboard.SessionDir(dir, sess.replyID), wsdashboard.AgentRecordFileName)); err != nil {
+	if _, err := wsstate.Stat(filepath.Join(wsdashboard.SessionDir(dir, sess.replyID), wsdashboard.AgentRecordFileName)); err != nil {
 		if err := wsdashboard.RemoveRegistration(dir, sess.replyID); err != nil {
 			s.debugEvent("dashboard.unregister_failed", map[string]any{"error": err.Error()})
 		}
@@ -989,7 +990,7 @@ var ticketBoardStatuses = []string{"ready", "todo"}
 // change.
 func ticketBoardPrint(h io.Writer, root string) {
 	for _, status := range ticketBoardStatuses {
-		entries, err := os.ReadDir(filepath.Join(root, "ai-docs", "tickets", status))
+		entries, err := wsstate.ReadDir(filepath.Join(root, "ai-docs", "tickets", status))
 		if err != nil {
 			fmt.Fprintf(h, "\x00tickets\x00%s\x00-", status)
 			continue
@@ -1150,12 +1151,12 @@ func (src *DashboardSessionSource) keysFor(d sessionDirs, replyID string, rescan
 // zero for a missing legacy root: a key added to or removed from either
 // changes one. Other stat errors must not masquerade as an absent identity.
 func keyStoreMods(d sessionDirs) ([2]time.Time, error) {
-	info, err := os.Stat(d.sessions)
+	info, err := wsstate.Stat(d.sessions)
 	if err != nil {
 		return [2]time.Time{}, err
 	}
 	mods := [2]time.Time{info.ModTime()}
-	if info, err := os.Stat(d.legacy); err == nil {
+	if info, err := wsstate.Stat(d.legacy); err == nil {
 		mods[1] = info.ModTime()
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return [2]time.Time{}, err

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // The conversation ring keeps a session's last RingHistoryCap finished
@@ -257,7 +259,7 @@ func trimRing(dir string) {
 
 // ringEntryNames lists dir's committed entry names, oldest first.
 func ringEntryNames(dir string) ([]string, error) {
-	dirEntries, err := os.ReadDir(dir)
+	dirEntries, err := wsstate.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +355,7 @@ func readRingEntry(dir, name string) (RingRecord, bool) {
 	if err != nil {
 		return RingRecord{}, false
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, name))
+	raw, err := wsstate.ReadFileOnce(filepath.Join(dir, name))
 	if err != nil {
 		return RingRecord{}, false
 	}

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // ReplayAnswerJournal records committed sends before discarding their journal
@@ -12,7 +14,7 @@ import (
 // A staging file still present means its send never reached the rename commit.
 func ReplayAnswerJournal(dir string, record func(id string, entry Entry) error) error {
 	journal := filepath.Join(dir, "answer-pending")
-	files, err := os.ReadDir(journal)
+	files, err := wsstate.ReadDir(journal)
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -31,7 +33,7 @@ func ReplayAnswerJournal(dir string, record func(id string, entry Entry) error) 
 		}
 		path := filepath.Join(journal, file.Name())
 		stage := filepath.Join(dir, temp)
-		if _, err := os.Stat(stage); err == nil {
+		if _, err := wsstate.Stat(stage); err == nil {
 			if err := os.Remove(path); err != nil {
 				return err
 			}

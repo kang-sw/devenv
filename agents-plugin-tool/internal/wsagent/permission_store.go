@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // readPermissionMembers distinguishes absence from an invalid existing selection.
@@ -14,7 +16,7 @@ func readPermissionMembers(dir string) (map[string]json.RawMessage, PermissionLe
 	raw, err := readFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		// A dangling link is an existing, unreadable selection, not omission.
-		if _, statErr := os.Lstat(path); errors.Is(statErr, os.ErrNotExist) {
+		if _, statErr := wsstate.Lstat(path); errors.Is(statErr, os.ErrNotExist) {
 			return nil, "", false, nil
 		}
 	}

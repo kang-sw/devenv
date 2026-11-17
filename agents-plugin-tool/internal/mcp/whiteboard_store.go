@@ -10,6 +10,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -53,7 +54,7 @@ func (src *DashboardSessionSource) openWhiteboard(record *sessionRecord, key str
 func openWhiteboardCached(record *sessionRecord, key string, raw io.Writer, cache *wswhiteboard.FolderCache) error {
 	folder := whiteboardFolder(record.Root, key)
 	if record.Whiteboard != nil {
-		if _, err := os.Stat(filepath.Join(folder.Dir, "meta.json")); os.IsNotExist(err) {
+		if _, err := wsstate.Stat(filepath.Join(folder.Dir, "meta.json")); os.IsNotExist(err) {
 			if err := registerWhiteboardExclude(wsgit.ExecRunner{}, record.Root, filepath.Dir(folder.Dir)); err != nil {
 				return err
 			}
