@@ -460,10 +460,10 @@ func childLevel(dir string) PermissionLevel {
 
 // awakeLocked reports an awake child for the width cap and its parent's
 // sleep: a process, a turn or background task, a held done turn, or input
-// it has not taken whose start was not refused. Under mu.
+// or claimed mail it has not taken whose start was not refused. Under mu.
 func (c *conv) awakeLocked() bool {
 	return !c.closed && (c.proc != nil || c.turn || c.bgTasks != 0 || c.holding ||
-		(!c.wakeRefused && c.sends > max(c.settled.mark, c.voided)))
+		(!c.wakeRefused && (c.sends > max(c.settled.mark, c.voided) || len(c.rec.Mail) > 0)))
 }
 
 // awakeChildren counts parent's open, awake direct children.
@@ -724,6 +724,23 @@ func (r *Runner) Deliver(id string, d Delivery) (State, error) {
 	return st, nil
 }
 
+// mailRelation is how sender, a reply-id, relates to rec through the
+// Runner spawn lineage (Record.Parent): "parent" for rec's parent, "child"
+// for a conversation rec spawned, else "peer"; "" for no sender (system
+// mail). It is computed at each delivery, never stored.
+func (r *Runner) mailRelation(rec Record, sender string) string {
+	switch {
+	case sender == "":
+		return ""
+	case rec.Parent != nil && rec.Parent.ReplyID == sender:
+		return "parent"
+	}
+	if s, ok := r.recordOf(sender); ok && s.Parent != nil && s.Parent.ReplyID == rec.ReplyID {
+		return "child"
+	}
+	return "peer"
+}
+
 // childWaitingExpiry is how long a child may wait before it is deleted:
 // agent.child_waiting_days, read once per runner.
 func (r *Runner) childWaitingExpiry() time.Duration {
@@ -745,11 +762,11 @@ func (r *Runner) childWaitingExpiry() time.Duration {
 }
 
 // childWaitingLocked reports a spawned child asleep with no turn and no
-// input about to start one (a refused wake's input does not count). Under
-// mu.
+// input or claimed mail about to start one (a refused wake's does not
+// count). Under mu.
 func (c *conv) childWaitingLocked() bool {
 	return !c.closed && !c.rec.Lead && c.rec.Parent != nil && c.proc == nil && !c.turn &&
-		(c.wakeRefused || c.sends <= max(c.settled.mark, c.voided))
+		(c.wakeRefused || c.sends <= max(c.settled.mark, c.voided) && len(c.rec.Mail) == 0)
 }
 
 // lastActive is a spawned record's expiry clock start.

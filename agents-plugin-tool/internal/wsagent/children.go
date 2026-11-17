@@ -785,7 +785,7 @@ func (c *conv) openChildOf(parent ParentRef) bool {
 	// Input a refused wake keeps (wakeRefused) is asleep: it holds no
 	// report of the parent's.
 	return c.rec.TurnOpen || len(c.rec.PendingReports) > 0 || c.holding ||
-		!c.wakeRefused && (len(c.rec.Queued) > 0 || c.sends > max(c.settled.mark, c.voided))
+		!c.wakeRefused && (len(c.rec.Queued) > 0 || len(c.rec.Mail) > 0 || c.sends > max(c.settled.mark, c.voided))
 }
 
 // releaseHeld reports the done turn held for the children (settleTurn)

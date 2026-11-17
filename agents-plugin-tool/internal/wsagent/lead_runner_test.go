@@ -491,16 +491,23 @@ func TestLeadMailIsDeliveredAsATurn(t *testing.T) {
 	h.holders.out(holder, turnLines("sess-1", "u1", "pong")...)
 	h.idle(id)
 
-	// Mail that arrives during a turn waits with the dashboard's message.
+	// Mail that arrives during a turn is steered into it; the dashboard's
+	// message waits for the turn's end.
 	h.send(id, "question")
 	h.holders.out(holder, stateLine(HarnessRunning), initLine("sess-1", "auto"))
 	h.sync(id, holder)
 	h.mail.deliver(key, "From b@x: more")
+	eventually(t, "the steered mail", func() bool {
+		return slices.Equal(h.userInputs(holder), []string{"From a@x: ping", h.envelope("question"), "From b@x: more"})
+	})
 	h.send(id, "also")
-	eventually(t, "both to be held", func() bool { return h.state(id).Held == 2 })
+	eventually(t, "the message to be held", func() bool { return h.state(id).Held == 1 })
+	if rec := h.record(id); len(rec.Mail) != 0 {
+		t.Fatalf("steered mail is not kept for the next turn: %+v", rec.Mail)
+	}
 	h.holders.out(holder, replyLine("u2", "answer"), resultLine(), stateLine(HarnessIdle))
-	eventually(t, "the merged turn", func() bool {
-		return slices.Equal(h.userInputs(holder), []string{"From a@x: ping", h.envelope("question"), h.envelope("also") + "\n\nFrom b@x: more"})
+	eventually(t, "the next turn", func() bool {
+		return slices.Equal(h.userInputs(holder), []string{"From a@x: ping", h.envelope("question"), "From b@x: more", h.envelope("also")})
 	})
 	if got := ringTexts(h.ring(id), wslive.RingUser); !slices.Equal(got, h.envelopes("question", "also")) {
 		t.Fatalf("ring user entries = %q", got)
@@ -513,8 +520,8 @@ func TestLeadMailIsDeliveredAsATurn(t *testing.T) {
 }
 
 // TestLeadMailClaimedDuringATurnTellsThePage: mail claimed while a turn
-// runs is not submitted until the turn ends, so the claim itself must tell
-// the page: its mail history and held count changed.
+// runs is steered into it and starts no turn, so the claim itself must
+// tell the page: its mail history changed.
 func TestLeadMailClaimedDuringATurnTellsThePage(t *testing.T) {
 	h := newLeadHarness(t)
 	h.opts.heartbeat = time.Hour // no heartbeat notification in this test
@@ -536,27 +543,28 @@ func TestLeadMailClaimedDuringATurnTellsThePage(t *testing.T) {
 		settled = now
 	}
 	h.mail.deliver(key, "From b@x: more")
-	eventually(t, "the claim to be held", func() bool { return h.state(id).Held == 1 })
+	eventually(t, "the claim to be steered", func() bool {
+		return slices.Equal(h.userInputs(holder), append(h.envelopes("question"), "From b@x: more"))
+	})
 	eventually(t, "the page to be told of the claim", func() bool { return h.notes.Load() > settled })
-	if got := h.userInputs(holder); !slices.Equal(got, h.envelopes("question")) {
-		t.Fatalf("mail claimed during a turn waits for its end: %q", got)
+	if st := h.state(id); st.Held != 0 {
+		t.Fatalf("steered mail is not held: %+v", st)
 	}
 }
 
-// TestLeadMailWaitsForTheRejoin: mail the session holds, and mail that
-// waits in its mailbox when a daemon starts, must not start a process
-// while the session's own still runs under its holder: it is delivered to
-// that process at the turn's end.
+// TestLeadMailWaitsForTheRejoin: mail that waits in the session's mailbox
+// when a daemon starts must not start a process while the session's own
+// still runs under its holder, and is not steered into a turn the replay
+// has not shown yet: it is delivered to that process at the turn's end.
 func TestLeadMailWaitsForTheRejoin(t *testing.T) {
 	h := newLeadHarness(t).start()
 	id, holder := h.runLead("one")
 	key := h.record(id).WSKey
 	h.holders.out(holder, stateLine(HarnessRunning), initLine("sess-1", "auto"))
 	h.sync(id, holder)
-	h.mail.deliver(key, "From a@x: ping")
-	eventually(t, "the mail to be claimed", func() bool { return slices.Equal(h.record(id).Mail, []string{"From a@x: ping"}) })
 	h.runner.Close()
 	h.holders.restart()
+	h.mail.deliver(key, "From a@x: ping")
 	h.mail.deliver(key, "From b@x: more")
 	h.start()
 	eventually(t, "the waiting mail to be claimed", func() bool {

@@ -84,8 +84,9 @@ type conv struct {
 	reconcileMode bool
 	lastReg       time.Time
 
-	// A lead's own, loop-owned. mailC (one slot) tells the loop the
-	// mailbox may hold mail (signalMail); stopMail ends the watch.
+	// A lead's or spawned child's own, loop-owned. mailC (one slot) tells
+	// the loop the mailbox may hold mail (signalMail); stopMail ends the
+	// watch.
 	mailC    chan struct{}
 	stopMail func()
 	// spawnC coalesces daemon-owned descendant changes for this writer.
@@ -244,37 +245,141 @@ func (c *conv) signalMail() {
 	}
 }
 
-// mailChanged claims the session's waiting mail into the record, so a
-// message taken from the mailbox survives until it is delivered, and
-// submits it with the held messages (kick). It runs in the loop.
+// mailChanged claims the session's waiting mail and delivers it: steered
+// into the running turn when the session takes a message mid-turn
+// (steersMail), else into the record, so a message taken from the mailbox
+// survives until it is delivered, and submitted with the held messages
+// (kick), which wakes a sleeping child past its parent's width cap. Mail a
+// sleeping child's refused wake keeps stays in the record, and each of its
+// senders is told once per claim (Options.WakeRefused). It runs in the
+// loop.
 func (c *conv) mailChanged() {
 	if c.closed || c.hidden || c.r.opts.Mail == nil {
 		return
 	}
-	// The claim and the check that the session is still the daemon's are
-	// one step: a terminal login that takes the row waits for the lock,
-	// and what was claimed before it goes back to the mailbox (release).
-	unlock, ok := c.lockRow()
-	if !ok {
-		return
+	rec := c.record()
+	relation := func(sender string) string { return c.r.mailRelation(rec, sender) }
+	var mail []ClaimedMail
+	var err error
+	if rec.Lead {
+		// The claim and the check that the session is still the daemon's
+		// are one step: a terminal login that takes the row waits for the
+		// lock, and what was claimed before it goes back to the mailbox
+		// (release).
+		unlock, ok := c.lockRow()
+		if !ok {
+			return
+		}
+		mail, err = c.r.opts.Mail.Drain(rec.Root, rec.WSKey, relation)
+		unlock()
+	} else {
+		// A child's row is never a terminal's: its claim touches no file.
+		mail, err = c.r.opts.Mail.Drain(rec.Root, rec.WSKey, relation)
 	}
-	texts, err := c.r.opts.Mail.Drain(c.rec.Root, c.rec.WSKey)
-	unlock()
 	if err != nil {
-		fmt.Fprintf(c.r.opts.Log, "agent %s: mailbox: %v\n", c.rec.ReplyID, err)
+		fmt.Fprintf(c.r.opts.Log, "agent %s: mailbox: %v\n", rec.ReplyID, err)
 	}
-	if len(texts) > 0 {
-		c.update(func(rec *Record) { rec.Mail = append(rec.Mail, texts...) })
+	var held []string
+	for _, m := range mail {
+		if !c.steerMail(m.Text) {
+			held = append(held, m.Text)
+		}
+	}
+	if len(held) > 0 {
+		c.update(func(rec *Record) {
+			rec.Mail = append(rec.Mail, held...)
+			if rec.Parent != nil {
+				// Any mail resets a spawned child's waiting expiry; a
+				// steered one rides a turn, whose settle resets it.
+				rec.LastActiveAt = c.r.opts.Now().UTC().Format(time.RFC3339)
+			}
+		})
+	}
+	if len(mail) > 0 {
 		// The claim changed the session's mail history and held count. A
 		// turn that runs submits nothing now, so nothing else would tell
 		// the page.
-		c.r.notify(c.rec.ReplyID, c.rec.Root)
+		c.r.notify(rec.ReplyID, rec.Root)
 	}
 	// Mail claimed earlier and not yet delivered (a start that failed, a
 	// daemon that ended) goes with it: nothing else would submit it.
 	if len(c.rec.Mail) > 0 {
 		c.kick()
 	}
+	if len(held) > 0 {
+		c.tellRefusedWake(mail)
+	}
+}
+
+// tellRefusedWake tells each sender of mail, claimed for a sleeping child
+// whose wake admission kick just refused, that its mail waits
+// (Options.WakeRefused), once per sender. It runs in the loop.
+func (c *conv) tellRefusedWake(mail []ClaimedMail) {
+	c.mu.Lock()
+	refused, reason := c.wakeRefused, c.lastErr
+	c.mu.Unlock()
+	if !refused || c.r.opts.WakeRefused == nil {
+		return
+	}
+	told := map[string]bool{}
+	for _, m := range mail {
+		if m.Sender == "" || told[m.Sender] {
+			continue
+		}
+		told[m.Sender] = true
+		c.r.opts.WakeRefused(m.Sender, c.rec.ReplyID, reason)
+	}
+}
+
+// steersMail reports whether a mail claimed now reaches the running turn
+// as a steer rather than waiting for the next turn: a turn runs that
+// takes a message mid-turn, and the harness's catalog profile, when it has
+// one and reported, does not grade steer unsupported. A lead steers
+// through its steer handle, a spawned child through the acknowledged
+// report path (reportSteerer) that keeps its report covering the message.
+func (c *conv) steersMail() bool {
+	if !c.turn || c.proc == nil || c.replaying || c.wrapHold || c.closed || c.hidden {
+		return false
+	}
+	c.mu.Lock()
+	caps := c.caps
+	c.mu.Unlock()
+	if caps != nil && !caps.Allows(ItemSteer) {
+		return false
+	}
+	ctl := controlsFor(c.proc)
+	if c.rec.Lead {
+		return ctl.steer != nil
+	}
+	return ctl.reports != nil
+}
+
+// steerMail steers one claimed mail into the running turn when the session
+// takes it now (steersMail), and reports whether it did; a failed steer
+// leaves it for the next turn. It runs in the loop.
+func (c *conv) steerMail(text string) bool {
+	if !c.steersMail() {
+		return false
+	}
+	ctl := controlsFor(c.proc)
+	if c.rec.Lead {
+		if err := ctl.steer.Steer(text); err != nil {
+			fmt.Fprintf(c.r.opts.Log, "agent %s: steer a mail: %v\n", c.rec.ReplyID, err)
+			return false
+		}
+		c.apply(*wakeEvent("mail", "mailbox", "", text).Live)
+		return true
+	}
+	if err := ctl.reports.Steer(text); err != nil {
+		fmt.Fprintf(c.r.opts.Log, "agent %s: steer a mail: %v\n", c.rec.ReplyID, err)
+		return false
+	}
+	c.steerSeq++
+	c.steered = append(c.steered, steeredReport{Text: text, Seq: c.steerSeq})
+	c.saveSteered()
+	c.apply(*wakeEvent("mail", "mailbox", "", text).Live)
+	c.changed(false)
+	return true
 }
 
 // inboxChanged takes the inbox's interrupt requests and submits the held

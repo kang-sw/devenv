@@ -64,20 +64,33 @@ type LeadSession struct {
 	Harness, Session, Cwd string
 }
 
-// LeadMail is a hosted lead session's ws mailbox as the runner uses it: the
-// daemon, not the session's own mailbox wait, delivers its mail.
+// LeadMail is the ws mailbox of the sessions the runner owns, hosted leads
+// and spawned children, as the runner uses it: the daemon, not the
+// session's own mailbox wait, delivers their mail. A child's address
+// (AgentAddress) is its key's reply-id queue, so mail to it lives in the
+// mailbox store's memory and restore ring, never in a file of the
+// runner's.
 type LeadMail interface {
 	// Watch calls changed whenever the mailbox of key may hold new mail,
 	// from any goroutine, until the returned stop is called. While watched,
 	// the session reads to its peers as listening.
 	Watch(root, key string, changed func()) (stop func())
 	// Drain claims every message waiting for key and returns each as the
-	// text the session's model reads for it.
-	Drain(root, key string) ([]string, error)
+	// text the session's model reads for it, oldest first. relation, when
+	// not nil, names how a sender (its reply-id) relates to the session
+	// ("parent", "child", "peer"; "" for none), for the message's head.
+	Drain(root, key string, relation func(sender string) string) ([]ClaimedMail, error)
 	// Return puts texts, mail a Drain claimed and the session never read,
 	// back in key's mailbox for its next claim: the session moved to a
 	// terminal harness, whose own mailbox wait delivers it.
 	Return(root, key string, texts []string) error
+}
+
+// ClaimedMail is one message Drain claimed: the text the session reads,
+// and its sender's reply-id, "" for system mail or a sender with none.
+type ClaimedMail struct {
+	Text   string
+	Sender string
 }
 
 // Env names the runner sets on a hosted lead session's harness. The flag
@@ -621,8 +634,10 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	// Do not expose a previous LastTurn while startup still reconciles the
 	// later TurnOpen. The loop reconciles before it accepts this request.
 	c.do(func() {})
-	if rec.Lead && r.opts.Mail != nil && !foreign {
+	if (rec.Lead || rec.Parent != nil) && r.opts.Mail != nil && !foreign {
 		// Mail that waited while no daemon ran is found by the first check.
+		// A spawned child is watched asleep too: mail to its address wakes
+		// it.
 		c.stopMail = r.opts.Mail.Watch(rec.Root, rec.WSKey, c.signalMail)
 		c.signalMail()
 	}

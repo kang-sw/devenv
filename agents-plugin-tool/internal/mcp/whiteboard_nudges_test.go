@@ -336,7 +336,7 @@ func TestWhiteboardNudgeActualMailboxWatchDrainAndManualRecv(t *testing.T) {
 			defer mail.server.Close()
 			received := make(chan []string, 1)
 			stop := mail.Watch(f.target.root, f.target.key, func() {
-				texts, err := mail.Drain(f.target.root, f.target.key)
+				texts, err := drainTexts(mail, f.target.root, f.target.key)
 				if err != nil {
 					t.Error(err)
 				}
@@ -357,7 +357,7 @@ func TestWhiteboardNudgeActualMailboxWatchDrainAndManualRecv(t *testing.T) {
 			if len(f.queue(t)) != 0 {
 				t.Fatal("watch did not claim queue")
 			}
-			again, err := mail.Drain(f.target.root, f.target.key)
+			again, err := drainTexts(mail, f.target.root, f.target.key)
 			if err != nil || len(again) != 0 {
 				t.Fatal("duplicate drain", err)
 			}
