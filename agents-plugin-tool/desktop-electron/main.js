@@ -302,7 +302,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
           return;
         }
         let url;
-        try { url = await connectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform, replace, ...(attachRunning ? { attachRunning: true } : {}) }, {
+        try { url = await connectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform, packaged: app.isPackaged, replace, ...(attachRunning ? { attachRunning: true } : {}) }, {
           onNotice: message => {
             if (window.isDestroyed()) return;
             dialogOpen = true;
@@ -354,8 +354,8 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       if (!fromConnectionPage(event)) return { available: false };
       if (!['darwin', 'win32'].includes(platform)) return { available: false, reason: 'Daemon start is unavailable on this platform.' };
       if (!app.isPackaged) {
-        try { selectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform }); }
-        catch { return { available: false, reason: 'Daemon start is unavailable in this development run.' }; }
+        try { selectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform, packaged: false }); }
+        catch (error) { return { available: false, reason: error.message }; }
       }
       return { available: true };
     });
