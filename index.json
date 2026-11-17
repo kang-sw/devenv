@@ -452,7 +452,14 @@
       "registered_at": "2026-11-17T08:21:27Z"
     },
     "261117-feat-ws-harness-capability-catalog": {
-      "registered_at": "2026-11-17T08:20:31Z"
+      "registered_at": "2026-11-17T08:20:31Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "track/agent-v2",
+        "phase": "active",
+        "touched_at": "2026-11-17T13:16:22Z"
+      }
     },
     "261117-feat-ws-hosted-antigravity-adapter": {
       "registered_at": "2026-11-17T08:21:47Z"
