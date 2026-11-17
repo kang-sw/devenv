@@ -112,7 +112,6 @@
 .gmenu .gk { font: 800 11px/20px var(--wb-mono); width: 26px; text-align: center; border-radius: 5px; background: var(--wb-muted); flex: none; }
 .gmenu .gs { display: block; font-size: 11.5px; color: var(--wb-muted-fg); font-weight: 400; }
 .gmenu select { width: 100%; box-sizing: border-box; border: 1px solid var(--wb-muted); background: var(--wb-card); color: inherit; font: inherit; font-size: 13px; border-radius: 8px; padding: 6px 8px; cursor: pointer; }
-.gmenu .gh { padding: 0 4px; }
 .gmenu .gn { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--wb-muted-fg); padding: 5px 4px 0; border-top: 1px solid var(--wb-muted); margin-top: 3px; line-height: 1.4; white-space: nowrap; }
 .gmenu .gn .settings-version { margin-left: auto; flex: none; }
 .gmenu .gn .d-settings-github { flex: none; display: inline-flex; margin-left: -2px; color: var(--wb-muted-fg); border-radius: 3px; }
