@@ -258,9 +258,22 @@
     var right = doc.documentElement.clientWidth - parseFloat(window.getComputedStyle(grid.closest(".dwrap")).paddingRight);
     filePreview.el.style.width = Math.max(0, right - board.left) + "px";
   }
+  function sizeFilesSheet() {
+    if (!filesSheet || filesSheet.el.hidden) return;
+    var sheet = filesSheet.el;
+    if (!splitFiles()) { sheet.removeAttribute("data-docked"); return; }
+    // The left column includes its header and composer, not just #convo.
+    var column = chead.getBoundingClientRect(), bounds = grid.getBoundingClientRect();
+    sheet.setAttribute("data-docked", "");
+    sheet.style.setProperty("--files-dock-left", column.left + "px");
+    sheet.style.setProperty("--files-dock-top", bounds.top + "px");
+    sheet.style.setProperty("--files-dock-width", column.width + "px");
+    sheet.style.setProperty("--files-dock-height", bounds.height + "px");
+  }
+  function sizeFileSurfaces() { sizeFilesSheet(); sizeFilePreview(); }
   function syncFilePreview() {
+    sizeFilesSheet();
     if (splitFiles()) {
-      if (window.WsCards) window.WsCards.dismissFiles();
       sizeFilePreview();
     } else if (filePreview && filePreview.current()) {
       var previous = filePreview.close();
@@ -300,7 +313,7 @@
     function createFiles(node, rootSlot, toolbar) {
       return window.WsFiles.create(node, Object.assign({}, fileHooks, {
         rootSlot: rootSlot,
-        preview: !toolbar && live && !worktree ? previewLeftFile : undefined,
+        preview: live && !worktree ? previewLeftFile : undefined,
         load: toolbar ? function (k) { return load("ws.dashboard.toolbar." + k); } : fileHooks.load,
         save: toolbar ? function (k, v) { save("ws.dashboard.toolbar." + k, v); } : fileHooks.save
       }));
@@ -315,20 +328,24 @@
     var sheetInstance = null;
     filesSheet = {
       el: sheet,
-      activate: function () {
-        if (!splitFiles()) return false;
-        window.WsCards.dismissFiles();
-        setCtab("files");
-        var search = fpane.querySelector(".fq");
-        if (search) search.focus();
-        return true;
-      },
       shown: function () {
+        sizeFilesSheet();
         if (!sheetInstance) sheetInstance = createFiles(sheet, null, true);
         sheetInstance.shown();
       },
-      hidden: function () { if (sheetInstance) sheetInstance.hidden(); }
+      hidden: function () {
+        if (sheetInstance) { sheetInstance.cancelPreview(); sheetInstance.hidden(); }
+        if (sheet.hasAttribute("data-docked") && filePreview) filePreview.close();
+        sheet.removeAttribute("data-docked");
+      }
     };
+    // Capture before explorer menus/inputs or pane chrome consume Escape.
+    // Sandboxed preview documents intentionally remain outside this handler.
+    doc.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape" || sheet.hidden || !sheet.hasAttribute("data-docked")) return;
+      e.preventDefault(); e.stopPropagation();
+      window.WsCards.dismissFiles();
+    }, true);
   }
   var cardBoard = mode !== "index" && window.WsCards ? region("board") : null;
   var PIN_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null, boardDragHeld = null, boardOverviewHeld = null;
@@ -359,12 +376,14 @@
       filePreview = window.WsPreview.createPane(previewPane, function (hadFocus) {
         root.removeAttribute("data-file-preview");
         if (filesTab) filesTab.cancelPreview();
+        if (sheetInstance) sheetInstance.cancelPreview();
         if (hadFocus && filePreviewBack && filePreviewBack.isConnected) filePreviewBack.focus({ preventScroll: true });
       });
       filePreview.el = previewPane;
       if (window.ResizeObserver) {
-        var previewResize = new ResizeObserver(sizeFilePreview);
+        var previewResize = new ResizeObserver(sizeFileSurfaces);
         previewResize.observe(grid);
+        if (chead) previewResize.observe(chead);
         if (dbody) previewResize.observe(dbody);
       }
     }
@@ -377,7 +396,8 @@
         files: worktree ? null : filesSheet
       },
       reveal: function () {
-        // Linked cards must not remain behind the explorer's reading pane.
+        // Linked/durable cards must not remain behind either explorer surface.
+        if (filesSheet && filesSheet.el.hasAttribute("data-docked")) window.WsCards.dismissFiles();
         if (filePreview) filePreview.close();
         if (live && !tabShown("board")) setTab("board");
       },
