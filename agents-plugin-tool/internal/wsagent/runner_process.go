@@ -411,7 +411,7 @@ func (c *conv) checkReattach() {
 					c.recoveryFailed("held process association does not match the worker record")
 					return
 				}
-				c.r.restoreToken(c.rec)
+				c.r.restoreToken(c.record())
 			}
 		}
 	}
