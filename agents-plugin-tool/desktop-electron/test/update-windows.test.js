@@ -5,23 +5,25 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const http = require('node:http');
 const u = require('../update');
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-update-windows-'));
-  const install = path.join(root, 'installed'), userData = path.join(root, 'userData');
-  const stage = path.join(userData, 'update', 'extract', 'new');
+  const install = path.join(root, 'Mike’s 한글 App'), userData = path.join(root, 'userData');
+  const staging = install + '-update-staging', stage = path.join(staging, 'extract', 'new');
   fs.mkdirSync(install);
+  fs.mkdirSync(userData);
   fs.mkdirSync(stage, { recursive: true });
   fs.writeFileSync(path.join(install, 'marker'), 'old');
   fs.writeFileSync(path.join(stage, 'marker'), 'new');
-  fs.writeFileSync(path.join(userData, 'update', 'staged.json'), JSON.stringify({ version: '0.51.0', app: stage }));
+  fs.writeFileSync(path.join(staging, 'staged.json'), JSON.stringify({ version: '0.51.0', app: stage }));
   const sent = [], detached = [];
   const make = (options = {}) => u.createUpdater({ version: '0.50.0', packaged: true, platform: 'win32',
     execPath: path.join(install, 'Werkschaft.exe'), userData, log: () => {}, send: s => sent.push(s),
     feed: 'http://127.0.0.1:1', isApplying: () => false,
     detach: (...args) => { detached.push(args); return { pid: 42, created: '12345' }; }, ...options });
-  return { root, userData, install, stage, sent, detached, make,
+  return { root, userData, install, staging, stage, sent, detached, make,
     cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
 
@@ -29,7 +31,7 @@ test('Windows bootstrap is piped, bounded and hidden, with literal PowerShell an
   const f = fixture();
   try {
     const command = 'C:\\Windows\\powershell.exe';
-    const args = ['-File', "C:\\O'Brien & friends\\apply.ps1", '-Target', 'C:\\app x\\'];
+    const args = ['-File', "C:\\O'Brien & friends\\apply.ps1", '-Target', 'C:\\Mike’s App\\Werkschaft', '-Log', 'C:\\‘‚‛\\log'];
     let called = false;
     u.spawnDetached(command, args, path.join(f.userData, 'update-apply.log'), 'win32', (exe, argv, options) => {
       called = true;
@@ -41,7 +43,7 @@ test('Windows bootstrap is piped, bounded and hidden, with literal PowerShell an
       assert.equal(options.timeout, 15000);
       const script = Buffer.from(argv.at(-1), 'base64').toString('utf16le');
       assert.match(script, /Start-Process .* -WindowStyle Hidden -WorkingDirectory/);
-      assert.ok(script.includes(u.windowsCommandLine(args).replace(/'/g, "''")));
+      assert.ok(script.includes(u.windowsCommandLine(args).replace(/['\u2018-\u201B]/g, '$&$&')));
       return { status: 0, stdout: '{"pid":42,"created":"12345"}' };
     });
     assert.equal(called, true);
@@ -51,7 +53,7 @@ test('Windows bootstrap is piped, bounded and hidden, with literal PowerShell an
   } finally { f.cleanup(); }
 });
 
-test('Windows failures survive automatic checks and launches until a manual dashboard action acknowledges them', async () => {
+test('Windows failures survive until dashboard delivery without blocking automatic feed checks', async () => {
   for (const outcome of ['pending', 'error', 'launch-error']) {
     const f = fixture();
     try {
@@ -78,15 +80,63 @@ test('Windows failures survive automatic checks and launches until a manual dash
       let pending;
       const next = f.make({ send: status => { pending = status; } });
       assert.equal(next.applyOnLaunch(), false);
-      assert.equal(await next.check(false), 'apply-error');
-      assert.equal(pending.state, 'apply-error', 'automatic check cannot replace the failure pending for a late subscriber');
+      assert.equal(await next.check(false), 'error', 'automatic feed check runs even while a failure awaits delivery');
+      assert.equal(pending.state, 'apply-error', 'failed automatic feed checks are quiet');
       assert.match(pending.message, /failed|did not complete|Access denied/);
-      await next.check(true); // An explicit connected-dashboard action acknowledges delivery.
+      next.statusDelivered(pending); // main acknowledges only actual dashboard delivery.
       assert.equal(JSON.parse(fs.readFileSync(path.join(f.userData, 'update-state.json'))).applyFailure, null);
       assert.equal(f.make().applyOnLaunch(), false);
       assert.deepEqual(f.sent, []);
     } finally { f.cleanup(); }
   }
+});
+
+test('obsolete failures are dropped after manual upgrade, including a late failed-attempt result', () => {
+  const f = fixture();
+  try {
+    for (const version of ['0.51.0', '0.52.0']) {
+      fs.writeFileSync(path.join(f.userData, 'update-state.json'), JSON.stringify({
+        applyFailure: { version: '0.51.0', message: 'old failure' },
+        applyAttempt: { version: '0.51.0', startedAt: 0 },
+      }));
+      fs.writeFileSync(path.join(f.userData, 'update-apply-result.json'), JSON.stringify({ status: 'error', message: 'old failure' }));
+      assert.equal(f.make({ version }).applyOnLaunch(), false);
+      assert.deepEqual(f.sent, []);
+      assert.equal(JSON.parse(fs.readFileSync(path.join(f.userData, 'update-state.json'))).applyFailure, null);
+    }
+  } finally { f.cleanup(); }
+});
+
+test('an undelivered failure does not prevent automatic discovery of a newer release', async () => {
+  const f = fixture();
+  let base, requests = 0;
+  const server = http.createServer((req, res) => {
+    requests++;
+    res.end(req.url === '/sums' ? `${'a'.repeat(64)}  Werkschaft-win32-x64.zip\n` : JSON.stringify({
+      tag_name: 'v0.52.0', assets: [
+        { name: 'Werkschaft-win32-x64.zip', browser_download_url: base + '/zip' },
+        { name: u.SUMS, browser_download_url: base + '/sums' },
+      ],
+    }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    fs.writeFileSync(path.join(f.userData, 'update-state.json'), JSON.stringify({ applyFailure: { version: '0.51.0', message: 'swap failed' } }));
+    const updater = f.make({ arch: 'x64', feed: base });
+    assert.equal(updater.applyOnLaunch(), false);
+    const failure = f.sent.at(-1);
+    assert.equal(await updater.check(false), 'available');
+    assert.equal(requests, 2);
+    assert.equal(f.sent.at(-1).version, '0.52.0');
+    assert.equal(updater.phase().version, '0.52.0');
+    updater.statusDelivered(failure);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(f.userData, 'update-state.json'))).applyFailure, null);
+    fs.rmSync(f.staging, { recursive: true });
+    f.sent.length = 0;
+    assert.equal(f.make().applyOnLaunch(), false);
+    assert.deepEqual(f.sent, [], 'delivered failure does not repeat on the next launch');
+  } finally { await new Promise(resolve => server.close(resolve)); f.cleanup(); }
 });
 
 test('successful Windows apply is consumed without an error; a leftover stage can still apply on launch', () => {
@@ -113,7 +163,8 @@ test('Windows unavailable location reports the reason and download-page fallback
     assert.equal(f.detached.length, 0);
     assert.equal(fs.existsSync(f.stage), true);
     if (process.platform === 'win32') {
-      assert.match(u.applyProblem('win32', 'C:\\Apps\\W', 'D:\\stage'), /different drive/);
+      assert.match(u.applyProblem('win32', 'C:\\Apps\\W', 'D:\\stage'), /beside the app/);
+      assert.equal(u.stagingLocation('win32', 'D:\\Apps\\W', 'C:\\Users\\u\\AppData'), 'D:\\Apps\\W-update-staging');
     }
   } finally { f.cleanup(); }
 });
@@ -200,12 +251,12 @@ test('helper liveness validates PID and creation identity without signalling any
 test('Windows write probe catches effective ACL denial in an existing install and cleans owned probes', () => {
   const f = fixture();
   try {
-    assert.equal(u.applyProblem('win32', f.install, f.stage), null);
+    assert.equal(u.applyProblem('win32', f.install, f.staging), null);
     assert.deepEqual(fs.readdirSync(f.install), ['marker']);
     assert.ok(!fs.readdirSync(f.root).some(name => name.startsWith('.werkschaft-update-probe-')));
     for (const operation of ['mkdtempSync', 'renameSync']) {
       const denied = { ...fs, [operation]: () => { const error = new Error('EACCES: ACL denies write'); error.code = 'EACCES'; throw error; } };
-      assert.match(u.applyProblem('win32', f.install, f.stage, denied), /not writable: EACCES: ACL denies write/);
+      assert.match(u.applyProblem('win32', f.install, f.staging, denied), /not writable: EACCES: ACL denies write/);
       assert.deepEqual(fs.readdirSync(f.install), ['marker'], 'no probe remains after a denied operation');
     }
   } finally { f.cleanup(); }
@@ -225,7 +276,7 @@ test('Windows reopen continuation waits for its Node caller before a marker-only
       fs.writeFileSync(script, u.helperScript('win32', true)
         .replace('Start-Process -FilePath $exe -ArgumentList $argLine', 'Add-Content -LiteralPath $Log -Value "fake launch $argLine"')
         .replace('Start-Process -FilePath $exe', 'Add-Content -LiteralPath $Log -Value "fake launch without args"'));
-      const opts = { target: f.install, staging: path.join(f.userData, 'update'), reopen: true,
+      const opts = { target: f.install, staging: f.staging, reopen: true,
         helper: { pid: 2147483647, created: '0' }, logFile,
         resultFile: path.join(f.userData, 'result.json'), args: ['--lang=ko', '--user-data-dir=C:\\x y'] };
       const parentScript = `const u=require(${JSON.stringify(require.resolve('../update'))});
@@ -258,14 +309,17 @@ test('Windows helper outlives its Node parent, swaps dummy folders, and records 
       const resultFile = path.join(f.userData, 'update-apply-result.json');
       const logFile = path.join(f.userData, 'update-apply.log');
       const script = path.join(f.userData, 'apply.ps1');
-      fs.writeFileSync(script, u.helperScript('win32'));
+      // Simulate relaunch with a marker and assert cleanup has not started.
+      fs.writeFileSync(script, u.helperScript('win32').replace('Start-Process -FilePath $exe }',
+        'if (-not (Test-Path -LiteralPath $Backup) -or -not (Test-Path -LiteralPath $Staging)) { throw "cleanup ran before relaunch" }; Add-Content -LiteralPath $Log -Encoding UTF8 -Value "fake relaunch before cleanup" }'));
       const opts = { target: f.install, staged: f.stage, backup: f.install + '-update-backup',
-        staging: path.join(f.userData, 'update'), relaunch: false, logFile, resultFile };
+        staging: f.staging, relaunch: true, logFile, resultFile };
       const parentScript = `const u=require(${JSON.stringify(require.resolve('../update'))});
         const [script, opts]=JSON.parse(process.argv[1]);
         const [command,args]=u.helperCommand('win32',script,{...opts,pid:process.pid});
         const helper=u.spawnDetached(command,args,opts.logFile);
-        if(!u.windowsHelperRunning(helper)) throw new Error('dummy helper identity did not remain live');`;
+        if(!u.windowsHelperRunning(helper)) throw new Error('dummy helper identity did not remain live');
+        console.log(JSON.stringify(helper));`;
       const parent = spawnSync(process.execPath, ['-e', parentScript, JSON.stringify([script, opts])], { encoding: 'utf8', timeout: 20000 });
       assert.equal(parent.status, 0, parent.stderr);
       const wait = async () => {
@@ -277,13 +331,24 @@ test('Windows helper outlives its Node parent, swaps dummy folders, and records 
       };
       const success = await wait();
       assert.equal(success.status, 'success', success.message);
+      const firstHelper = JSON.parse(parent.stdout.trim());
+      let firstRunning = true;
+      for (let i = 0; i < 20 && firstRunning !== false; i++) {
+        firstRunning = u.windowsHelperRunning(firstHelper);
+        if (firstRunning !== false) await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      assert.equal(firstRunning, false);
+      const successLog = fs.readFileSync(logFile, 'utf8');
+      assert.ok(successLog.includes(f.install), 'Korean and smart-quote paths remain UTF-8');
+      assert.ok(!successLog.includes('\uFFFD'));
+      assert.match(successLog, /fake relaunch before cleanup/);
       assert.equal(fs.readFileSync(path.join(f.install, 'marker'), 'utf8'), 'new');
       assert.match(fs.readFileSync(logFile, 'utf8'), /helper started.*\r?\nupdated /);
       assert.equal(fs.existsSync(opts.backup), false);
       fs.rmSync(resultFile);
       // Missing stage: moving the old app aside succeeds, installation fails,
       // and rollback must restore the old folder without touching other paths.
-      const [command, args] = u.helperCommand('win32', script, { ...opts, pid: 2147483647 });
+      const [command, args] = u.helperCommand('win32', script, { ...opts, pid: 2147483647, relaunch: false });
       const helper = u.spawnDetached(command, args, logFile);
       const failed = await wait();
       assert.equal(failed.status, 'error');

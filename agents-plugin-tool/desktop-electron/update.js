@@ -145,14 +145,17 @@ function stagedApp(platform, dir) {
   }
   return null;
 }
+function stagingLocation(platform, install, userData) {
+  return platform === 'win32' && install ? `${install}-update-staging` : path.join(userData, 'update');
+}
 // Why the staged update cannot be swapped in, or null.
 function applyProblem(platform, install, staging, io = fs) {
   if (!install) return 'this build cannot update itself (not a packaged app)';
   if (platform === 'darwin' && install.includes('/AppTranslocation/')) {
     return 'macOS runs this copy from a read-only location; move Werkschaft.app to Applications first';
   }
-  if (platform === 'win32' && path.parse(install).root.toLowerCase() !== path.parse(staging).root.toLowerCase()) {
-    return `the app folder ${install} is on a different drive than the update staging folder`;
+  if (platform === 'win32' && path.dirname(install).toLowerCase() !== path.dirname(staging).toLowerCase()) {
+    return 'the update staging folder must be beside the app folder';
   }
   try {
     io.accessSync(path.dirname(install), fs.constants.W_OK);
@@ -210,11 +213,11 @@ exit $code
 const PS_HELPER = `param([int]$AppPid, [string]$Target, [string]$Staged, [string]$Backup, [string]$Staging, [int]$Relaunch, [string]$Log, [string]$RelaunchArgs = '-', [string]$Result = '')
 $ErrorActionPreference = 'Stop'
 function Finish([string]$Status, [string]$Message) {
-  Add-Content -LiteralPath $Log -Value $Message
+  Add-Content -LiteralPath $Log -Encoding UTF8 -Value $Message
   if ($Result) { @{ status = $Status; message = $Message } | ConvertTo-Json -Compress | Set-Content -LiteralPath $Result -Encoding UTF8 }
 }
 try {
-  Add-Content -LiteralPath $Log -Value "helper started pid=$PID app=$AppPid"
+  Add-Content -LiteralPath $Log -Encoding UTF8 -Value "helper started pid=$PID app=$AppPid"
   try { Wait-Process -Id $AppPid -Timeout 120 -ErrorAction SilentlyContinue } catch {}
   if (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) { throw 'app did not exit within 120 seconds' }
   $moved = $false
@@ -229,13 +232,13 @@ try {
   if (-not $moved) { throw "could not move the old app aside: $moveError" }
   try {
     Move-Item -LiteralPath $Staged -Destination $Target
-    Remove-Item -LiteralPath $Backup -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $Staging -Recurse -Force -ErrorAction SilentlyContinue
     $code = 0; $message = "updated $Target"
   } catch {
     if (Test-Path -LiteralPath $Target) { Remove-Item -LiteralPath $Target -Recurse -Force -ErrorAction SilentlyContinue }
-    Move-Item -LiteralPath $Backup -Destination $Target
-    $code = 1; $message = "update failed; restored the previous app: $_"
+    $swapError = $_
+    try { Move-Item -LiteralPath $Backup -Destination $Target }
+    catch { throw "update failed ($swapError); rollback failed; previous app backup is at $Backup; rollback error: $_" }
+    $code = 1; $message = "update failed; restored the previous app: $swapError"
   }
   # Persist completion before launching: the new app may read it immediately.
   if ($code -eq 0) { Finish 'success' $message } else { Finish 'error' $message }
@@ -246,6 +249,11 @@ try {
       $argLine = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($RelaunchArgs))
       Start-Process -FilePath $exe -ArgumentList $argLine
     } else { Start-Process -FilePath $exe }
+  }
+  # Relaunch first: antivirus scanning the old tree must not delay the window.
+  if ($code -eq 0) {
+    Remove-Item -LiteralPath $Backup -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $Staging -Recurse -Force -ErrorAction SilentlyContinue
   }
   exit $code
 } catch {
@@ -259,7 +267,7 @@ try {
 const PS_REOPEN = `param([int]$AppPid, [int]$OwnerPid, [string]$OwnerCreated, [string]$Target, [string]$Result, [string]$Log, [string]$RelaunchArgs = '-')
 $ErrorActionPreference = 'Stop'
 try {
-  Add-Content -LiteralPath $Log -Value "reopen helper started pid=$PID app=$AppPid"
+  Add-Content -LiteralPath $Log -Encoding UTF8 -Value "reopen helper started pid=$PID app=$AppPid"
   try { Wait-Process -Id $AppPid -Timeout 120 -ErrorAction SilentlyContinue } catch {}
   if (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) { throw 'reopening app did not exit' }
   $deadline = (Get-Date).AddSeconds(180)
@@ -280,9 +288,9 @@ try {
     $argLine = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($RelaunchArgs))
     Start-Process -FilePath $exe -ArgumentList $argLine
   } else { Start-Process -FilePath $exe }
-  Add-Content -LiteralPath $Log -Value "reopened $Target"
+  Add-Content -LiteralPath $Log -Encoding UTF8 -Value "reopened $Target"
 } catch {
-  Add-Content -LiteralPath $Log -Value "reopen helper failed: $_"
+  Add-Content -LiteralPath $Log -Encoding UTF8 -Value "reopen helper failed: $_"
   exit 1
 }
 `;
@@ -328,7 +336,7 @@ function runFile(command, args) {
   return new Promise((resolve, reject) => execFile(command, args, { windowsHide: true }, error => error ? reject(error) : resolve()));
 }
 function windowsBootstrap(command, args, cwd) {
-  const quote = value => "'" + value.replace(/'/g, "''") + "'";
+  const quote = value => "'" + value.replace(/['\u2018-\u201B]/g, '$&$&') + "'";
   // Windows PowerShell can exit 0 before -File when created with Node's
   // detached/invalid-console handles. A short-lived, piped bootstrap uses
   // ShellExecute (Start-Process) to give the hidden helper its own lifetime.
@@ -376,7 +384,7 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
   execPath = process.execPath, argv = process.argv.slice(1), pid = process.pid, feed = process.env.WERKSCHAFT_UPDATE_FEED || FEED,
   send = () => {}, log = message => console.error(message), run = runFile, detach = spawnDetached,
   isApplying = windowsHelperRunning, now = Date.now, locationProblem = applyProblem } = {}) {
-  const staging = path.join(userData, 'update');
+  const staging = stagingLocation(platform, installLocation(platform, execPath, packaged), userData);
   const logFile = path.join(userData, 'update-apply.log');
   const resultFile = path.join(userData, 'update-apply-result.json');
   const stateFile = path.join(userData, 'update-state.json');
@@ -392,10 +400,14 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
   }
   let applyFailure = readState().applyFailure || null;
   const emitFailure = () => emit({ state: 'apply-error', ...applyFailure, downloadPage: DOWNLOAD_PAGE });
-  // A manual dashboard action acknowledges delivery. Automatic checks must
-  // not overwrite the only queued failure while the dashboard is connecting.
   function acknowledgeFailure() {
     if (applyFailure) { writeState({ applyFailure: null }); applyFailure = null; }
+  }
+  if (applyFailure && !isNewer(applyFailure.version, version)) acknowledgeFailure();
+  // Called only after main actually sends the queued failure to the dashboard.
+  function statusDelivered(status) {
+    if (applyFailure && status.state === 'apply-error' && status.version === applyFailure.version
+      && status.message === applyFailure.message) acknowledgeFailure();
   }
   // A staged update newer than this app whose folder is still there.
   function staged() {
@@ -404,8 +416,6 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
   }
 
   async function check(manual = false) {
-    if (applyFailure && !manual) { emitFailure(); return 'apply-error'; }
-    if (manual) acknowledgeFailure();
     let found;
     try {
       const release = JSON.parse(await readText(`${feed.replace(/\/+$/, '')}/repos/${REPO}/releases/latest`,
@@ -447,7 +457,6 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
 
   async function download() {
     if (busy || !available) return null;
-    acknowledgeFailure();
     busy = true;
     const target = available;
     emit({ state: 'downloading', version: target.version });
@@ -558,10 +567,12 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
         log(message);
         fs.appendFileSync(logFile, message + '\n');
         if (stage?.version === attempt.version) fs.rmSync(staging, { recursive: true, force: true });
-        applyFailure = { version: attempt.version, message };
-        writeState({ applyFailure });
-        emitFailure();
-        return false;
+        if (isNewer(attempt.version, version)) {
+          applyFailure = { version: attempt.version, message };
+          writeState({ applyFailure });
+          emitFailure();
+          return false;
+        }
       }
     }
     if (applyFailure) { emitFailure(); return false; }
@@ -596,9 +607,9 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
   }
   const stop = () => { timers.forEach(clearTimeout); timers.forEach(clearInterval); timers = []; };
   return { check, skip, download, applyOnQuit, applyOnLaunch, canRestart, phase: () => ({ ...phase }),
-    schedule, stop, paths: { staging, stateFile } };
+    schedule, stop, statusDelivered, paths: { staging, stateFile } };
 }
 
 module.exports = { REPO, FEED, SUMS, DOWNLOAD_PAGE, USER_AGENT, INTERVAL, parseVersion, isNewer, assetName, parseSums,
-  selectRelease, allowedURL, readText, downloadTo, installLocation, extractCommand, stagedApp, applyProblem,
+  selectRelease, allowedURL, readText, downloadTo, installLocation, extractCommand, stagedApp, stagingLocation, applyProblem,
   helperScript, helperCommand, relaunchArgs, windowsCommandLine, windowsBootstrap, spawnDetached, windowsHelperRunning, createUpdater };

@@ -49,8 +49,15 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     // The update status waits here until the attached dashboard subscribes.
     let updatePending = null, updateTarget = null;
     const sendUpdate = status => {
-      updatePending = status;
-      if (updateTarget && !updateTarget.isDestroyed()) { updateTarget.send(UPDATE.status, status); updatePending = null; }
+      if (updateTarget && !updateTarget.isDestroyed()) {
+        updateTarget.send(UPDATE.status, status);
+        updatePending = null;
+        updater.statusDelivered?.(status);
+      } else if (updatePending?.state !== 'apply-error' || status.state === 'apply-error') {
+        // Keep a failed apply visible to a late subscriber without stopping
+        // automatic feed checks or their standing phase updates.
+        updatePending = status;
+      }
     };
     const updater = createUpdater({ version: app.getVersion(), packaged: app.isPackaged,
       userData: app.getPath('userData'), platform, send: sendUpdate });

@@ -243,9 +243,12 @@ test('helper and extraction commands for both platforms', () => {
     '-AppPid', '42', '-Target', opts.target, '-Staged', opts.staged, '-Backup', opts.backup, '-Staging', opts.staging, '-Relaunch', '1', '-Log', path.join(path.dirname(opts.staging), 'update-apply.log')]);
   const ps1 = u.helperScript('win32');
   assert.match(ps1, /^param\(\[int\]\$AppPid, \[string\]\$Target, \[string\]\$Staged, \[string\]\$Backup, \[string\]\$Staging, \[int\]\$Relaunch, \[string\]\$Log, \[string\]\$RelaunchArgs = '-', \[string\]\$Result = ''\)/);
-  assert.match(ps1, /\ntry \{\n  Add-Content -LiteralPath \$Log -Value "helper started pid=\$PID app=\$AppPid"\n/);
+  assert.match(ps1, /\ntry \{\n  Add-Content -LiteralPath \$Log -Encoding UTF8 -Value "helper started pid=\$PID app=\$AppPid"\n/);
   assert.ok(ps1.indexOf('helper started') < ps1.indexOf('Wait-Process'));
   assert.ok(ps1.includes('$message = "updated $Target"'));
+  assert.ok(ps1.includes('rollback failed; previous app backup is at $Backup'));
+  assert.ok(ps1.indexOf('Start-Process -FilePath $exe') < ps1.lastIndexOf('Remove-Item -LiteralPath $Backup'));
+  for (const line of ps1.split('\n').filter(line => line.includes('Add-Content'))) assert.ok(line.includes('-Encoding UTF8'));
   assert.match(ps1, /\} catch \{\n  Finish 'error' "helper failed: \$_"\n  exit 1\n\}\n$/);
   for (const needle of ['Wait-Process -Id $AppPid', 'Move-Item -LiteralPath $Target -Destination $Backup',
     'Move-Item -LiteralPath $Staged -Destination $Target', 'Move-Item -LiteralPath $Backup -Destination $Target',
@@ -330,7 +333,8 @@ test('Windows downloads, verifies, stages and applies on quit with relaunch and 
     const install = path.join(root, 'Werkschaft-win32-x64'), userData = path.join(root, 'userData');
     fs.mkdirSync(install, { recursive: true });
     const sent = [], detached = [], extracted = [];
-    const stage = path.join(userData, 'update', 'extract', 'Werkschaft-win32-x64');
+    const staging = install + '-update-staging';
+    const stage = path.join(staging, 'extract', 'Werkschaft-win32-x64');
     const updater = u.createUpdater({ version: '0.50.0', userData, packaged: true, platform: 'win32', arch: 'x64',
       execPath: path.join(install, 'Werkschaft.exe'), argv: ORIGINAL, pid: 999999, feed: server.base,
       run: async (command, args) => {
@@ -355,7 +359,7 @@ test('Windows downloads, verifies, stages and applies on quit with relaunch and 
     const hits = server.hits.length;
     assert.equal(await blocked.download(), 'apply-error', 'an older dashboard cannot bypass the preflight');
     assert.equal(server.hits.length, hits, 'no download occurs for a protected existing folder');
-    assert.equal(fs.existsSync(path.join(blockedData, 'update')), false);
+    assert.equal(fs.existsSync(staging), false);
     assert.equal(updater.canRestart(), false);
     files[u.SUMS] = `${'0'.repeat(64)}  Werkschaft-win32-x64.zip\n`;
     await updater.check();
@@ -368,7 +372,7 @@ test('Windows downloads, verifies, stages and applies on quit with relaunch and 
     assert.equal(await updater.download(), 'ready');
     assert.equal(updater.canRestart(), true);
     assert.deepEqual(extracted[0].args.slice(0, 2), ['-x', '-f']);
-    assert.equal(JSON.parse(fs.readFileSync(path.join(userData, 'update/staged.json'))).app, stage);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(staging, 'staged.json'))).app, stage);
     assert.equal(updater.applyOnQuit(true), true);
     const { command, args } = detached.pop();
     assert.match(command, /powershell.exe$/);
