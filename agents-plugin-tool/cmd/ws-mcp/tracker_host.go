@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"html/template"
 	"net/url"
 	"time"
@@ -190,7 +191,12 @@ func (t *dashboardTracker) View(ctx context.Context, id string) (wsdashboard.Tra
 		return wsdashboard.TrackerView{}, redacted(err)
 	}
 	v.Redact()
-	raw, err := json.Marshal(dashboardView{StoreView: v, HTML: renderViewHTML(id, v)})
+	html := renderViewHTML(id, v)
+	raw, err := json.Marshal(dashboardView{StoreView: v, HTML: html})
+	if err != nil {
+		return wsdashboard.TrackerView{}, err
+	}
+	tag, err := dashboardViewTag(v, html)
 	if err != nil {
 		return wsdashboard.TrackerView{}, err
 	}
@@ -198,7 +204,31 @@ func (t *dashboardTracker) View(ctx context.Context, id string) (wsdashboard.Tra
 	if err != nil {
 		return wsdashboard.TrackerView{}, redacted(err)
 	}
-	return wsdashboard.TrackerView{View: raw, Seen: wsdashboard.TrackerSeen{Badge: seen.Badge, Read: seen.Read}}, nil
+	return wsdashboard.TrackerView{View: raw, Seen: wsdashboard.TrackerSeen{Badge: seen.Badge, Read: seen.Read}, Tag: tag}, nil
+}
+
+// dashboardViewTag is the view's wsdashboard.TrackerView.Tag: a hash of
+// the view JSON with its now cut to the hour. Every reload stamps a new
+// now, so a view read again unchanged within the hour keeps its tag, and
+// a page revalidating it keeps the now it holds: its relative times (the
+// sync line's "ago", the closed-items window) may lag by up to the hour,
+// while the due chips' date and the remote's syncedAt, which every poll
+// round moves, still change the tag. v's View is shared and is not
+// changed.
+func dashboardViewTag(v *wstrackerhost.StoreView, html viewHTML) (string, error) {
+	cp := *v
+	if v.View != nil && len(v.View.Now) > 13 {
+		inner := *v.View
+		inner.Now = inner.Now[:13] // "2006-01-02T15"
+		cp.View = &inner
+	}
+	raw, err := json.Marshal(dashboardView{StoreView: &cp, HTML: html})
+	if err != nil {
+		return "", err
+	}
+	h := fnv.New64a()
+	h.Write(raw)
+	return fmt.Sprintf("%016x", h.Sum64()), nil
 }
 
 // Search runs the search grammar over the same view the page reads, so
