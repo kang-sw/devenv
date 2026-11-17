@@ -4,10 +4,22 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { fixture } = require('./daemon-fixture.cjs');
-const { stageDaemon } = require('../daemon-stage');
+const { stageDaemon, isWithin } = require('../daemon-stage');
 const { selectDaemon, validateDaemonRoot } = require('../daemon-selection');
 const { build } = require('../scripts/build.cjs');
 
+test('Windows stage containment allows separate volumes and shares but rejects actual descendants', () => {
+  for (const [root, target, expected] of [
+    ['D:\\app\\resources\\app.asar', 'C:\\Users\\owner\\AppData\\Roaming\\Werkschaft\\daemon-stages', false],
+    ['D:\\app\\resources\\app.asar.unpacked\\daemon', 'C:\\Users\\owner\\daemon-stages', false],
+    ['D:\\app', 'D:\\other\\daemon-stages', false],
+    ['D:\\app', 'D:\\application\\daemon-stages', false],
+    ['D:\\app', 'D:\\app', true],
+    ['D:\\app', 'd:\\app\\user-data\\daemon-stages', true],
+    ['\\\\server\\apps\\Werkschaft', '\\\\server\\users\\owner\\daemon-stages', false],
+    ['\\\\server\\apps\\Werkschaft', '\\\\server\\apps\\Werkschaft\\daemon-stages', true],
+  ]) assert.equal(isWithin(root, target, path.win32), expected, `${root} -> ${target}`);
+});
 test('staging retains complete versions outside the app; cleans only its own failed partial', t => {
   const f = fixture(t, 'darwin');
   const selected = f.select();
