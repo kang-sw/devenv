@@ -1,6 +1,7 @@
 package wsdashboard
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"math"
@@ -40,6 +41,8 @@ type planUsageStore struct {
 	getenv      func(string) string
 	claude, gpt planUsageEntry
 	lastQuery   time.Time
+	// lastSaved holds the last successfully written cache bytes, guarded by mu.
+	lastSaved []byte
 	// probing marks the one background probe in flight; probes lets tests
 	// wait for it. Both are guarded by mu.
 	probing bool
@@ -97,8 +100,10 @@ func (s *planUsageStore) saveLocked() {
 		Claude planUsageEntry `json:"claude"`
 		GPT    planUsageEntry `json:"gpt"`
 	}{s.claude, s.gpt})
-	if err == nil {
-		_ = s.write(planUsageCache, raw)
+	if err == nil && !bytes.Equal(raw, s.lastSaved) {
+		if s.write(planUsageCache, raw) == nil {
+			s.lastSaved = raw
+		}
 	}
 }
 func validUsage(percent float64) bool {
