@@ -18,6 +18,8 @@ import (
 //	POST /agents/<id>/send        {text} holds a message for the next turn
 //	POST /agents/<id>/interrupt   stops the running turn; returns held text
 //	POST /agents/<id>/stop        ends the process (resumes on next send)
+//	GET  /agents/idle             the lead sessions a sleep would stop
+//	POST /agents/sleep-idle       {ids} stops each of those still idle
 //	POST /agents/<id>/close       ends the conversation for good
 //	POST /agents/<id>/settings    {model?, effort?} for the next turn
 //
@@ -70,6 +72,14 @@ const RoutePrefix = "/agents"
 // leadsRoute is the id segment the lead spawn route takes; no conversation
 // has it (an id is a reply-id).
 const leadsRoute = "leads"
+
+// idleRoute and sleepIdleRoute are the id segments of the power-save routes
+// (the idle list, and the stop of the listed sessions); no conversation has
+// them.
+const (
+	idleRoute      = "idle"
+	sleepIdleRoute = "sleep-idle"
+)
 
 // requestBodyLimit bounds a route's request body.
 const requestBodyLimit = 256 << 10
@@ -125,6 +135,10 @@ type leadRequest struct {
 	PluginIsolation string `json:"plugin_isolation"`
 }
 
+type sleepIdleRequest struct {
+	IDs []string `json:"ids"`
+}
+
 type approvalRequest struct {
 	Behavior string `json:"behavior"`
 	Message  string `json:"message"`
@@ -166,7 +180,7 @@ func (r *Runner) serve(w http.ResponseWriter, req *http.Request) {
 		}
 		return st
 	}
-	if req.Method == http.MethodPost && (id == leadsRoute || action == "settings/permission" || leadMove(action) || (r.IsLead(id) && leadControl(action))) {
+	if req.Method == http.MethodPost && (id == leadsRoute || id == sleepIdleRoute || action == "settings/permission" || leadMove(action) || (r.IsLead(id) && leadControl(action))) {
 		if !local {
 			http.Error(w, "unknown agent route", http.StatusNotFound)
 			return
@@ -183,6 +197,30 @@ func (r *Runner) serve(w http.ResponseWriter, req *http.Request) {
 			list[i] = view(list[i])
 		}
 		writeAnswer(w, http.StatusOK, map[string]any{"conversations": list}, nil)
+	case id == idleRoute && action == "":
+		if req.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// A viewer without the lead controls cannot stop any of them: they
+		// are counted, not offered.
+		idle, kept := r.IdleLeads()
+		offered, excluded := idle, 0
+		if !local {
+			offered, excluded = []IdleLead{}, len(idle)
+		}
+		writeAnswer(w, http.StatusOK, map[string]any{"sessions": offered, "kept": kept, "uncontrollable": excluded}, nil)
+	case id == sleepIdleRoute && action == "":
+		if req.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var body sleepIdleRequest
+		if !decode(w, req, &body) {
+			return
+		}
+		slept, skipped := r.SleepIdle(body.IDs)
+		writeAnswer(w, http.StatusOK, map[string]any{"slept": slept, "skipped": skipped}, nil)
 	case id == leadsRoute:
 		if req.Method != http.MethodPost || (action != "" && action != "permission") {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
