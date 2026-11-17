@@ -103,6 +103,31 @@ the installed plugin cache.
 
 For launcher and verification runbook steps, see `ai-docs/manuals/ws-mcp.md`.
 
+## App-Server Protocol (hosted backend)
+
+Probed 2026-11-17 against `codex-cli 0.160.0` (macOS). The hosted Codex lead
+drives a sustained `codex app-server` (stdio, newline-delimited JSON-RPC with
+the `jsonrpc` member omitted). The exact-version contract comes from
+`codex app-server generate-json-schema` / `generate-ts` of the installed
+binary. Recorded transcripts are
+`agents-plugin-tool/internal/wsagent/testdata/codex-<version>-*.jsonl`, pinned
+by `codex_fixture_test.go`. The capability matrix, admission evidence and
+known gaps are in ticket `261115-feat-ws-hosted-codex-adapter-contract`
+Phase 1 Result.
+
+Behaviours to keep in mind when reading the sections below:
+
+- `developerInstructions` on `thread/start` is additive and persists across
+  `thread/resume`. Unlike `model_instructions_file`, it does not replace the
+  built-in instructions.
+- An HTTP MCP server is injected per thread through
+  `config.mcp_servers.<name>.{url, bearer_token_env_var, required}`. The token
+  and URL are not written to the rollout, so they are re-passed on resume.
+- `config.agents.enabled=false` removes the native subagent tools.
+  `features.multi_agent=false` only makes spawning fail.
+- `turn/interrupt` can leave a tool item open. Its `item/completed` may arrive
+  during a later turn, still naming the interrupted `turnId`.
+
 ## Invocation
 
 ```bash
