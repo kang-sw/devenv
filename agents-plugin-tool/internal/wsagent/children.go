@@ -588,6 +588,7 @@ func (c *conv) steerWorker() {
 	// the drain and its coverage against Send, as kick does for prompts.
 	c.mu.Lock()
 	recs, _ := wsinbox.DrainSteer(c.inbox)
+	c.held = max(0, c.held-len(recs))
 	covered := c.sends
 	c.mu.Unlock()
 	var parts []string

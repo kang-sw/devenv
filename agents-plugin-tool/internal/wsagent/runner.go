@@ -179,12 +179,13 @@ type Runner struct {
 	// and process start. Ordinary conversations still resolve on every start.
 	fixedProfile *ResolvedProfile
 
-	mu     sync.Mutex
-	convs  map[string]*conv
-	closed map[string]Record
-	quit   chan struct{}
-	wg     sync.WaitGroup
-	once   sync.Once
+	mu            sync.Mutex
+	convs         map[string]*conv
+	closed        map[string]Record
+	childrenIndex map[ParentRef]map[string]bool // mu; parent identity is immutable
+	quit          chan struct{}
+	wg            sync.WaitGroup
+	once          sync.Once
 	// Separate from mu: held through summary mutation/write fencing without
 	// blocking the runner's ordinary List/Get or spawn snapshot reads.
 	summaryMu     sync.Mutex
@@ -281,6 +282,12 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 			// writes its row, watches its mail, or starts a process for it.
 			r.mu.Lock()
 			r.closed[rec.ReplyID] = rec
+			r.indexChildLocked(rec)
+			st := r.closedState(rec) // prime immutable presentation once at startup
+			if r.closedRows == nil {
+				r.closedRows = map[string]State{}
+			}
+			r.closedRows[rec.ReplyID] = st
 			r.mu.Unlock()
 		} else {
 			// A lead whose process may still run under its holder rejoins
@@ -438,7 +445,9 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		done:       make(chan struct{}),
 		settleC:    make(chan struct{}),
 	}
+	c.refreshHeld()
 	if rec.Lead {
+		_, _, _ = cachedPermissionSelection(dir)
 		r.summaryMu.Lock()
 		if r.summaryOwners == nil {
 			r.summaryOwners = map[string]*conv{}
@@ -517,6 +526,7 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	}
 	r.mu.Lock()
 	r.convs[rec.ReplyID] = c
+	r.indexChildLocked(rec)
 	delete(r.closed, rec.ReplyID)
 	delete(r.closedRows, rec.ReplyID)
 	r.wg.Add(1)
@@ -850,6 +860,7 @@ func (r *Runner) Get(id string) (State, error) {
 	r.mu.Unlock()
 	switch {
 	case open:
+		c.refreshHeld() // explicit API reads retain authoritative held counts
 		return c.state(), nil
 	case closed:
 		return st, nil
@@ -866,11 +877,11 @@ func (r *Runner) List() []State {
 		convs = append(convs, c)
 	}
 	for _, rec := range r.closed {
-		out = append(out, r.closedState(rec))
+		out = append(out, r.memoryClosedState(rec))
 	}
 	r.mu.Unlock()
 	for _, c := range convs {
-		out = append(out, c.state())
+		out = append(out, c.memoryState())
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].CreatedAt != out[j].CreatedAt {
@@ -918,6 +929,7 @@ func (r *Runner) Send(id, text string) (State, error) {
 		// After the write, under the lock kick drains with: a turn whose
 		// drain counted this send holds its message (Wait).
 		c.sends++
+		c.held++
 		c.rec.Sends = c.sends
 	}
 	rec := c.rec
@@ -940,7 +952,12 @@ func (r *Runner) Send(id, text string) (State, error) {
 func (r *Runner) Interrupt(id string) (State, []string, error) {
 	var returned []string
 	st, err := r.act(id, func(c *conv) error {
+		c.mu.Lock()
 		held, _, err := wsinbox.Interrupt(c.inbox, r.opts.Now())
+		if err == nil {
+			c.held = 0
+		}
+		c.mu.Unlock()
 		if err != nil {
 			return err
 		}
@@ -1134,6 +1151,10 @@ func (r *Runner) closeOne(id string) (State, error) {
 	if c, ok := r.convs[id]; ok {
 		delete(r.convs, id)
 		r.closed[id] = c.record()
+		if r.closedRows == nil {
+			r.closedRows = map[string]State{}
+		}
+		r.closedRows[id] = st
 	}
 	r.mu.Unlock()
 	return st, nil
@@ -1297,6 +1318,15 @@ type State struct {
 	// ActiveMs excludes the current turn; TurnStartedAt is set only while it runs.
 	ActiveMs      int64 `json:"active_ms,omitempty"`
 	TurnStartedAt int64 `json:"turn_started_at,omitempty"`
+}
+
+// memoryClosedState is a presentation-only read under r.mu. Explicit Get can
+// still refresh a handed-off terminal's evidence through closedState.
+func (r *Runner) memoryClosedState(rec Record) State {
+	if st, ok := r.closedRows[rec.ReplyID]; ok {
+		return st
+	}
+	return closedState(rec)
 }
 
 // closedState is the state of a record no loop serves: closed, or handed
