@@ -309,6 +309,12 @@ type Daemon struct {
 	proxyConns    map[*proxyConn]struct{}
 	proxyWG       sync.WaitGroup
 	proxyDraining bool
+	// httpSessions are ProxyHTTPPath's hosted sessions by token
+	// (proxy_http.go), each also one of proxyConns; httpReplay numbers
+	// their replayed initializes.
+	httpMu       sync.Mutex
+	httpSessions map[string]*httpMCPSession
+	httpReplay   atomic.Uint64
 	// web is the web card targets and their proxy listeners
 	// (webcard_proxy.go).
 	web *webRegistry
@@ -771,6 +777,9 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc("/auth/clipboard", d.handleAuthClipboard)
 	if d.proxy != nil {
 		mux.HandleFunc(ProxyPath, d.handleProxy)
+		if _, ok := d.agents.(AgentMCPTokenHost); ok {
+			mux.HandleFunc(ProxyHTTPPath, d.handleProxyHTTP)
+		}
 	}
 	mux.HandleFunc("/nudge", d.handleNudge)
 	mux.HandleFunc("/events", d.handleIndexEvents)

@@ -1543,6 +1543,30 @@ harness is detected from `initialize` as on stdio; the hello's `harness` is
 an optional hint. Closing the connection ends the session: its dashboard
 session, its mailbox presence, and any wait it holds.
 
+HTTP route (`internal/wsdashboard/proxy_http.go`): a session the agent runner
+hosts reaches the same server with no launcher, by MCP Streamable HTTP with
+JSON responses only. It exists only when the daemon hosts MCP sessions and its
+agent runner implements `AgentMCPTokenHost`. `POST /mcp/session` carries one
+JSON-RPC message with `Authorization: Bearer <per-session token>`, from a
+loopback peer with no `Origin` (403 otherwise); the token is resolved on every
+request (401 for a missing, unknown, or void one) to the hello a launcher would
+have sent, and other methods (a client's SSE `GET`, its exit `DELETE`) get 405.
+No `Mcp-Session-Id` is issued: the token is the session, one per token, built
+by the same `acceptProxy` and counted, drained, and closed with the stdio
+sessions; voiding the token (re-issue, process exit, close) cancels its calls
+in flight and ends it. A request
+is answered in its POST's body once the session writes the answer with that
+id; a notification or client response gets 202; a POST whose client goes away
+sends `notifications/cancelled` for its id; a session end answers `-32000`
+"ws-mcp session ended". A token's first message that is not `initialize` (its
+client initialized against a replaced daemon) is preceded by a replayed
+`initialize` (id `ws-mcp-http-replay-<n>`, `clientInfo` mapped from the
+hello's harness, answer dropped) and `notifications/initialized`. A body is
+limited to 65535 bytes (413), must be one JSON object (400: `-32700` invalid
+JSON, `-32600` batch), and is compacted to one line; a duplicate in-flight id
+gets `-32600`. A refused hello answers 403 and a draining daemon 503, each
+with a JSON-RPC error body.
+
 In `cli` mode the daemon dispatches the existing command argv in-process.
 An optional `stdin` string carries Codex Stop JSON or `git commit
 --description-file -` input; older hellos omit it. A relative `--root`
