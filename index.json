@@ -459,7 +459,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "track/agent-v2",
         "phase": "active",
-        "touched_at": "2026-11-17T15:29:19Z"
+        "touched_at": "2026-11-17T15:29:58Z",
+        "impl": {
+          "branch": "impl/track/agent-v2/wrath-crepe-croak"
+        }
       }
     },
     "261117-feat-ws-exec-mux-terminal": {
