@@ -170,16 +170,6 @@
     "261113-feat-ws-configurable-per-turn-lead-reminder": {
       "registered_at": "2026-11-13T04:59:31Z"
     },
-    "261113-feat-ws-dashboard-frontend-performance-profile-and-optimize": {
-      "registered_at": "2026-11-13T10:51:55Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-17T22:01:40Z"
-      }
-    },
     "261113-feat-ws-dashboard-harness-auth-slots": {
       "registered_at": "2026-11-13T08:05:31Z"
     },
@@ -258,16 +248,6 @@
     },
     "261114-feat-ws-dashboard-conversation-audit-view": {
       "registered_at": "2026-11-13T16:39:01Z"
-    },
-    "261114-feat-ws-dashboard-selection-mention-note": {
-      "registered_at": "2026-11-14T08:45:52Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-17T22:01:24Z"
-      }
     },
     "261114-feat-ws-live-reasoning-summary": {
       "registered_at": "2026-11-14T11:47:01Z"
@@ -426,16 +406,6 @@
         }
       }
     },
-    "261116-bug-ws-dashboard-hidden-cached-page-cost": {
-      "registered_at": "2026-11-17T22:01:32Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-17T22:01:32Z"
-      }
-    },
     "261116-bug-ws-native-pi-release-payload-staleness": {
       "registered_at": "2026-11-16T00:52:49Z"
     },
@@ -547,7 +517,14 @@
       "registered_at": "2026-11-17T08:21:19Z"
     },
     "261117-feat-ws-tracker-view-summary-delta": {
-      "registered_at": "2026-11-17T10:04:15Z"
+      "registered_at": "2026-11-17T10:04:15Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-17T22:06:24Z"
+      }
     },
     "261117-refactor-playbook-compression": {
       "registered_at": "2026-11-17T13:13:25Z"
