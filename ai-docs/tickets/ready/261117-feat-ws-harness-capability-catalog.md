@@ -388,6 +388,19 @@ registration (pinned by a test). Skill injection is `native` for Claude
 directories), since Decision 10 does not list it as unwired. Entry overlap is
 checked by a test-side validator, not at runtime.
 
+#### Edition (92b4c835b) - 2026-11-17
+
+Lite review fixes. Compaction is split by role: lead `native`, worker
+`unsupported`. A Claude worker reports no command list because the initialize
+ask and `leadInit` run only for leads, and a worker runs with
+`--disable-slash-commands` unless `Skills` is set, so the dashboard refuses
+its `/compact`. The "native both" line above therefore no longer includes
+compaction. The copy-isolation test now resolves twice from one shared
+profile. The range bounds are checked against the recorded fixtures'
+`claude_code_version` values. Open for Phase 3: the 2.1.319 fixtures are
+worker turns only and the lead fixtures are 2.1.322/2.1.323, so each role's
+grades at the Oldest bound still lack a fixture.
+
 ### Phase 2: HTTP MCP direct JSON-RPC with per-session token (admission condition)
 
 Hosted Claude sessions reach the daemon by HTTP direct JSON-RPC with a
