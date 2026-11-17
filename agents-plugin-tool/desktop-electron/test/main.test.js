@@ -1025,12 +1025,13 @@ test('dashboard theme maps to both bar and overlay, with native fallback and res
 });
 test('update bridge: IPC only from the pinned dashboard main frame, status replay, apply on launch and quit', async () => {
   const update = require('../update'), original = update.createUpdater;
-  const calls = [];
+  const calls = [], delivered = [];
   let options, ready = false;
   update.createUpdater = opts => {
     options = opts;
     return { applyOnLaunch: () => false, applyOnQuit: relaunch => calls.push(`quit:${relaunch}`), schedule: () => calls.push('schedule'),
       phase: () => ({ phase: 'none', version: null, skipped: false }), canRestart: () => ready,
+      statusDelivered: status => delivered.push(status),
       check: manual => calls.push(`check:${manual}`), download: () => calls.push('download'), skip: v => calls.push(`skip:${v}`) };
   };
   let f;
@@ -1068,6 +1069,18 @@ test('update bridge: IPC only from the pinned dashboard main frame, status repla
   f.ipcMain.emit('werkschaft:update-subscribe', from('http://127.0.0.1:39418/'));
   f.ipcMain.emit('werkschaft:update-subscribe', from('http://127.0.0.1:39418/'));
   assert.deepEqual(sent.at(-1), ['werkschaft:update-status', { state: 'phase', phase: { phase: 'none', version: null, skipped: false } }]);
+  // A failure stays pending while automatic checks continue, then is
+  // acknowledged exactly when delivered to a subscribed dashboard.
+  wc.emit('did-start-navigation', {}, 'http://127.0.0.1:39418/', false, true);
+  const failure = { state: 'apply-error', version: '9.0.0', message: 'swap failed' };
+  options.send(failure);
+  options.send({ state: 'available', version: '10.0.0' });
+  assert.equal(delivered.includes(failure), false);
+  f.ipcMain.emit('werkschaft:update-subscribe', from('http://127.0.0.1:39418/'));
+  assert.deepEqual(sent.at(-1), ['werkschaft:update-status', failure]);
+  assert.equal(delivered.filter(status => status === failure).length, 1);
+  options.send({ state: 'available', version: '10.0.0' });
+  assert.equal(sent.at(-1)[1].version, '10.0.0');
   // A plain full quit applies without relaunch.
   f.app.emit('will-quit');
   assert.equal(calls.at(-1), 'quit:false');
