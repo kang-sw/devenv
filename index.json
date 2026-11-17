@@ -419,6 +419,16 @@
         }
       }
     },
+    "261116-bug-ws-dashboard-hidden-cached-page-cost": {
+      "registered_at": "2026-11-17T22:01:32Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-17T22:01:32Z"
+      }
+    },
     "261116-bug-ws-native-pi-release-payload-staleness": {
       "registered_at": "2026-11-16T00:52:49Z"
     },
