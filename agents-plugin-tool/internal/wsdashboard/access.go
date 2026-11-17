@@ -7,11 +7,11 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -65,29 +65,59 @@ const (
 )
 
 // lanToken returns the LAN access token, minting and persisting one when its
-// file is missing or blank. It reads the file on every call, so deleting the
-// file rotates the token without a daemon restart.
+// file is missing or blank. Every call revalidates the file (persistedSecret),
+// so deleting it rotates the token without a daemon restart.
 func (d *Daemon) lanToken() (string, error) {
+	token, minted, err := d.persistedSecret(LANTokenFileName)
+	if minted {
+		fmt.Fprintf(d.log, "dashboard: issued a new LAN access token\n")
+	}
+	return token, err
+}
+
+// persistedSecret returns the secret in the state directory's file name,
+// minting and persisting a new one when the file is missing or blank; the
+// bool reports a mint. It runs on every guarded request, so a hit holds no
+// lock and opens no file: readSecret serves it from memory after one stat.
+// tokenMu serializes only minting, and the file is read again under it, so
+// concurrent first requests agree on one secret.
+func (d *Daemon) persistedSecret(name string) (string, bool, error) {
+	if secret, err := d.readSecret(name); err != nil || secret != "" {
+		return secret, false, err
+	}
 	d.tokenMu.Lock()
 	defer d.tokenMu.Unlock()
-	raw, err := os.ReadFile(filepath.Join(d.dir, LANTokenFileName))
-	switch {
-	case err == nil:
-		if token := strings.TrimSpace(string(raw)); token != "" {
-			return token, nil
-		}
-	case !errors.Is(err, fs.ErrNotExist):
-		return "", err
+	if secret, err := d.readSecret(name); err != nil || secret != "" {
+		return secret, false, err
 	}
-	token, err := newToken()
+	secret, err := newToken()
+	if err != nil {
+		return "", false, err
+	}
+	if err := writePrivateFile(d.dir, name, []byte(secret+"\n")); err != nil {
+		return "", false, err
+	}
+	return secret, true, nil
+}
+
+// readSecret returns the trimmed secret in the state directory's file name,
+// "" when the file is missing or blank. It is stat-revalidated
+// (wsstate.ReadFileCached): each call stats the file, and one replaced,
+// rewritten or deleted since the cached read is read again, so the next
+// request after a rotation sees the new secret or its absence. Only a
+// rewrite that keeps mode, size, mtime and file identity (an in-place edit
+// that restores the old stamp, as touch -r does) goes unseen; every writer
+// here replaces the file with a fresh mtime. Any other stat or read failure
+// is returned, and the caller refuses.
+func (d *Daemon) readSecret(name string) (string, error) {
+	raw, err := wsstate.ReadFileCached(filepath.Join(d.dir, name))
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
 	if err != nil {
 		return "", err
 	}
-	if err := writePrivateFile(d.dir, LANTokenFileName, []byte(token+"\n")); err != nil {
-		return "", err
-	}
-	fmt.Fprintf(d.log, "dashboard: issued a new LAN access token\n")
-	return token, nil
+	return strings.TrimSpace(string(raw)), nil
 }
 
 // accessGuard covers every mux route, including future additions.

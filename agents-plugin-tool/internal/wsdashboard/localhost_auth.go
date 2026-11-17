@@ -6,11 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io/fs"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -56,24 +53,13 @@ func (a *localhostAuth) clock() time.Time {
 	return time.Now()
 }
 
-// localhostCookieValue re-reads the persisted secret so deletion rotates it
-// immediately. Sharing tokenMu also serializes concurrent first-time minting.
+// localhostCookieValue derives the cookie from the persisted secret. Every
+// call revalidates the secret file (persistedSecret), so deleting it rotates
+// the cookie immediately.
 func (d *Daemon) localhostCookieValue() (string, error) {
-	d.tokenMu.Lock()
-	defer d.tokenMu.Unlock()
-	raw, err := os.ReadFile(filepath.Join(d.dir, localhostSecretFile))
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+	secret, _, err := d.persistedSecret(localhostSecretFile)
+	if err != nil {
 		return "", err
-	}
-	secret := strings.TrimSpace(string(raw))
-	if secret == "" {
-		secret, err = newToken()
-		if err != nil {
-			return "", err
-		}
-		if err := writePrivateFile(d.dir, localhostSecretFile, []byte(secret+"\n")); err != nil {
-			return "", err
-		}
 	}
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write([]byte("ws-dashboard-localhost-cookie-v1"))

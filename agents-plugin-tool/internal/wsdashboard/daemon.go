@@ -229,7 +229,8 @@ type Daemon struct {
 	// acks runs the answer checks (ack_check.go), nil without a session
 	// index.
 	acks *ackChecker
-	// lan is LAN mode; tokenMu serializes reading and minting the LAN token.
+	// lan is LAN mode; tokenMu serializes minting the LAN token and the
+	// localhost secret (persistedSecret).
 	lan     bool
 	tokenMu sync.Mutex
 	// auth holds bounded, ephemeral login codes and the exchange rate window.

@@ -271,7 +271,7 @@ func (src *DashboardSessionSource) renderBoardTopics(key string, record sessionR
 	// BuildView only reads the state: the served page never begins a render
 	// or writes a file, so the stored board and the static page are untouched.
 	// The ticket files the panels list, the ticket status directories the
-	// topic badges resolve against, and the images a topic body inlines
+	// topic badges resolve against, and the file images a topic body shows
 	// change without a nudge, so the page names them (PageContent.Watch).
 	watch := func(path string) {
 		out.watch = append(out.watch, path)
@@ -281,10 +281,10 @@ func (src *DashboardSessionSource) renderBoardTopics(key string, record sessionR
 	watchWhiteboardFiles(folder, func(path string) { out.watch = append(out.watch, path) })
 	in := servedViewInput(record, replyID)
 	in.Tickets = &whiteboardTickets{root: record.Root, watch: watch}
-	inline := in.DocImageSrc
+	docImageSrc := in.DocImageSrc
 	in.DocImageSrc = func(path string) string {
 		watch(docImagePath(record.Root, path))
-		return inline(path)
+		return docImageSrc(path)
 	}
 	in.Panels = servedWhiteboardPanels(record, key, replyID, lang, watch, func() ([]mailboxHistoryRecord, error) {
 		return src.history.read(replyID, key)
