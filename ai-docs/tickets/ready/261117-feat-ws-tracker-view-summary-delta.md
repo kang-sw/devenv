@@ -230,6 +230,81 @@ cursor, `reset` on an old or foreign-epoch cursor, a detail-only change
 (a verdict reason) appearing in the delta with a new detail version, and
 unchanged full-view 304/ETag behaviour; the Go bench rows of the verification constraint.
 
+### Result (a89ffd864) - 2026-11-18
+
+- **VERIFIED (source):** Phase 1 server implementation is committed on
+  `impl/develop/ember-bunny-cacti`. Additive `GET summary`, `GET
+  delta?since=<cursor>` and `GET detail?id=<item>&id=<item>` routes use the
+  optional `TrackerProjectionHost`; old hosts answer 404 on these routes.
+  The existing full-view handler and weak ETag path remain separate
+  (`agents-plugin-tool/internal/wsdashboard/tracker_delta.go:236`,
+  `agents-plugin-tool/internal/wsdashboard/tracker_routes.go`). Detail batches
+  are capped at 100 ids. Cursor epochs are store-scoped as well as
+  process-local so another store's equal-numbered generation cannot match.
+- **VERIFIED (source):** The 64-transition ring diffs item summaries,
+  detail versions and per-item seen marks; global fields are independently
+  replaceable so an event count change does not resend itemOrder. Detail
+  bundles capture the same immutable view as their row version; markdown
+  and detail JSON are built only for requested ids. The feed is bounded to
+  the latest 200 entries, while seen-key association covers all notifications
+  (`agents-plugin-tool/internal/wsdashboard/tracker_delta.go:110`,
+  `agents-plugin-tool/cmd/ws-mcp/tracker_projection.go:24`).
+- **VERIFIED (source):** Tracker refresh splices the changed dependency
+  closure into the retained causal order and resumes verdict checks/folding
+  from a bounded checkpoint. Checkpoints copy fold-owned state and save
+  prefix event annotations. Cold/far-back folds sample a coarse historical
+  prefix and a dense tail rather than constructing a deep copy at every
+  1024-event boundary
+  (`agents-plugin-tool/internal/wstracker/incremental.go:101`, `:281`,
+  `agents-plugin-tool/internal/wstracker/checkpoint_state.go:12`).
+- **VERIFIED (review artifact and diff):** One independent lite review of
+  `b6e0f63d7..30f8bda3d` found two Critical defects. Commit `a89ffd864`
+  separates causal-check verdicts from final-fold concurrency flags and
+  reconciles both dependency indexes when an existing event's Seen changes.
+  Explicit losing-claim/late-descendant and pending-key-style Seen-replacement
+  regressions were added alongside randomized clock/verdict/arrival tests
+  (`agents-plugin-tool/internal/wstracker/incremental_regression_test.go:42`,
+  `:72`). **INFERRED:** the fixes restore runtime equivalence; tests were not
+  executed, and lite allocates no second review. No clean review verdict or
+  runtime pass is claimed.
+- **VERIFIED (source compatibility):** T0 implementation: the new routes and
+  interface are additive, the legacy full-view response type is unchanged,
+  and all cursors/checkpoints/rings are memory-only. No event/schema or
+  on-disk writer change was made. **INFERRED:** cross-version runtime
+  compatibility remains to be exercised with the unrun tests.
+- **VERIFIED (command output):** `gofmt` completed and
+  `git diff --check b6e0f63d7..a89ffd864` produced no diagnostics. These are
+  formatting checks only, not compilation or behavioral verification.
+- **VERIFIED (source):** Opt-in 10k/30k-item, million-event harnesses cover
+  tail, near-tail remote and far-back insertion, before/after full-fold and
+  checkpoint paths including stateBefore checks, separate cold folds, and
+  authenticated full-view/summary/delta handler time and response-body bytes
+  (`agents-plugin-tool/internal/wstracker/incremental_bench_test.go:30`,
+  `:106`, `agents-plugin-tool/cmd/ws-mcp/tracker_projection_bench_test.go:47`).
+  **UNRUN:** all Go tests, race checks and benchmarks. The ticket forbids
+  local Go execution and this run forbids SSH; no allowed w5090 execution
+  path was available. No timing, response-byte measurement or performance
+  improvement is claimed. Checkpoint memory is bounded in count, not bytes;
+  cold-copy cost and peak memory still require measurement.
+
+Authorized-host verification commands, from `agents-plugin-tool/` (not run):
+
+```sh
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wstracker -run '^(TestStateCheckpoint.*|TestIncremental.*)$' -count=1
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsdashboard -run '^(TestTrackerSummaryDeltaDetailAndLegacyView|TestTrackerDelta.*|TestTrackerProjection.*|TestTrackerPageReadsAnswerFromMemory)$' -count=1
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./cmd/ws-mcp -run '^TestTrackerProjection.*$' -count=1
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wstracker -run '^$' -bench '^(BenchmarkTrackerIncrementalMillion|BenchmarkTrackerColdMillion)$' -benchtime=1x -count=1 -benchmem
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./cmd/ws-mcp -run '^$' -bench '^BenchmarkDashboardTrackerProjectionMillion$' -benchtime=1x -count=1 -benchmem
+```
+
+**Omitted:** Phase 2 browser changes and render-time/fallback/ordering
+verification, intentionally deferred by the lead. The benchmark uses real
+handler/auth paths over an in-memory tracker source, not real ledger/git I/O,
+socket/network latency or browser rendering. The ticket remains in `ready/`.
+The workflow_manual tool was not exposed in this worker's tool surface;
+AGENTS.md, the ticket, matching manuals, route verdict and bundled ticket
+conventions were read instead.
+
 ### Phase 2: Page on summary and deltas
 
 Switch the tracker page, handles and feed to the summary plus deltas with a
