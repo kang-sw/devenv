@@ -551,7 +551,10 @@
         "clone_id": "9091c57d68d03c76",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-17T08:16:56Z"
+        "touched_at": "2026-11-17T08:20:09Z",
+        "impl": {
+          "branch": "impl/develop/flip-cozy-cable"
+        }
       }
     },
     "261117-feat-ws-dashboard-wide-explorer-preview-pane": {
@@ -566,6 +569,9 @@
           "branch": "impl/develop/chump-gravy-both"
         }
       }
+    },
+    "261117-feat-ws-harness-capability-catalog": {
+      "registered_at": "2026-11-17T08:20:31Z"
     },
     "261117-research-werkschaft-tauri-shell-revisit": {
       "registered_at": "2026-11-17T01:03:40Z"
