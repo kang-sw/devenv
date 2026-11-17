@@ -114,9 +114,42 @@
   // included) under the bands, once each; frameNear bands a topic it meets
   // too.
   function bandBoard(root) {
-    if (!boardBands() || !root || root.nodeType !== 1) return;
-    (root.matches("section.topic[data-topic]") ? [root] : q("section.topic[data-topic]", root)).forEach(bandTopic);
+    if (!root || root.nodeType !== 1) return;
+    var list = root.matches("section.topic[data-topic]") ? [root] : q("section.topic[data-topic]", root);
+    list.forEach(cvWatch);
+    if (boardBands()) list.forEach(bandTopic);
   }
+  // --- visible-only rendering (content-visibility, dashboard-board.css) ------
+  // A topic's body part takes content-visibility (data-wbcv) only once it
+  // has been laid out at a size (cvRO's first report), so a part skipped far
+  // from the view keeps its own last size, not the stylesheet's fallback. A
+  // graft into a kept part drops the mark with the part's old attributes
+  // (frameGraft) and lays it out in full; the bandBoard after the graft
+  // watches it again.
+  var cvRO = window.ResizeObserver ? new ResizeObserver(function (list) {
+    list.forEach(function (e) {
+      if (!e.contentRect.height) return;
+      cvRO.unobserve(e.target);
+      e.target.setAttribute("data-wbcv", "");
+    });
+  }) : null;
+  function cvWatch(t) {
+    if (!cvRO) return;
+    Array.prototype.forEach.call(t.children, function (c) {
+      if (!c.classList.contains("tophead") && !c.hasAttribute("data-wbcv")) cvRO.observe(c);
+    });
+  }
+  // A skipped part whose content changed meanwhile (a frame's height landing
+  // in it) takes its new size only as it renders again, near the view: that
+  // size change counts as the bands' own (topicSettling) for two frames, so
+  // topicResized keeps the view when the topic stands above it. The event
+  // does not bubble.
+  doc.addEventListener("contentvisibilityautostatechange", function (e) {
+    var t = e.skipped ? null : e.target.parentNode;
+    if (!t || t.nodeType !== 1 || !t.matches("section.topic[data-topic]")) return;
+    t.wbUnskip = true;
+    requestAnimationFrame(function () { requestAnimationFrame(function () { t.wbUnskip = false; }); });
+  }, true);
   function bandTopic(t) {
     if (t.wbBand) return;
     var w = window.wbHistory;
@@ -201,9 +234,10 @@
   }
   // topicSettling tells whether topic t's last size change is the bands'
   // own: it holds a frame whose first height has just landed as a change
-  // (each one counts once).
+  // (each one counts once), or a part of it has just rendered again
+  // (wbUnskip).
   function topicSettling(t) {
-    var any = false;
+    var any = !!t.wbUnskip;
     q("iframe.doc-frame", t).forEach(function (f) {
       if (!f.wbLanded) return;
       f.wbLanded = false;

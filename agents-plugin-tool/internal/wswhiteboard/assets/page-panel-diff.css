@@ -12,8 +12,10 @@ li.pdg-b::before, li.pdg-gone::before { left: -30px; }
 .pdg-b.pdg-mod.pdg-hot { --pdg-tint: color-mix(in srgb, var(--pdg-mod) 8%, transparent); }
 .pdg-b.pdg-new.pdg-hot { --pdg-tint: color-mix(in srgb, var(--pdg-new) 8%, transparent); }
 .doc-body del.pdg-w, .doc-body .pdg-gone { display: none; }
-/* Hidden deletions must not change the current body's last-block spacing. */
-.doc-body:not(.pdg-diffview):has(+ .pdg-layer) > :nth-last-child(1 of :not(.pdg-gone)) { margin-bottom: 0; }
+/* Hidden deletions must not change the current body's last-block spacing.
+   panel-diff.js marks that block (pdg-end): a sibling :has() here made
+   every mutation anywhere on the page restyle the whole document. */
+.doc-body:not(.pdg-diffview) > .pdg-end { margin-bottom: 0; }
 .pdg-diffview del.pdg-w { display: inline; }
 del.pdg-w, .pdg-pop del { color: color-mix(in srgb, var(--pdg-del) 80%, var(--wb-fg)); background: color-mix(in srgb, var(--pdg-del) 14%, transparent); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--pdg-del) 70%, transparent); border-radius: 3px; }
 .pdg-diffview .pdg-gone { display: block; --pdg-tint: color-mix(in srgb, var(--pdg-del) 8%, transparent); color: var(--wb-muted-fg); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--pdg-del) 55%, transparent); }

@@ -11,11 +11,12 @@
 .dash.history .top { flex: none; }
 /* Session cards and files, without the session's conversation or agents. */
 .fattachment .btn[hidden] { display: none; }
+/* #bcol takes no containment: what it bought was unmeasurable, and the
+   :has() that released it for fixed sheets and popovers re-matched the whole
+   board on every DOM change (a style recalc per keystroke). The board's
+   topic parts are contained instead (dashboard-board.css). */
 /* The session page's two-column rule. The worktree page reads the same
    variables, so its Files panel is exactly as wide as the session's left panel. */
-#bcol { contain: layout style; }
-/* Maximized sheets and legacy fixed popovers must still use the viewport. */
-#bcol:has([data-max], .board-toolbar[data-files], .board-state-pop:not([hidden]), .dw .pop:not([hidden])) { contain: style; }
 .dgrid { --dgrid-cols: minmax(320px, 5fr) minmax(0, 7fr); --dgrid-gap: 16px; }
 .dgrid.worktree { flex: 1 1 0; min-width: 0; min-height: 0; display: grid; gap: 0 var(--dgrid-gap);
   grid-template-columns: var(--dgrid-cols); grid-template-rows: auto minmax(0, 1fr); }
