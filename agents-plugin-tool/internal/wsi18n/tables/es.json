@@ -456,6 +456,7 @@
   "js.wb.state.extended": "Ampliado {0} veces · inicialmente {1} min",
   "js.wb.state.eta.max": "/{0}m",
   "js.wb.state.estimate.short": "~{0}m",
+  "js.board.filter.asks": "Temas con preguntas pendientes",
   "js.board.filter.label": "Filtrar por estado del tema",
   "js.board.filter.all": "Todos",
   "js.board.filter.confirm": "Pendiente de confirmación",

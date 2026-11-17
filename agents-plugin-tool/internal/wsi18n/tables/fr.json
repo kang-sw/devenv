@@ -456,6 +456,7 @@
   "js.wb.state.extended": "Prolongé {0} fois · initialement {1} min",
   "js.wb.state.eta.max": "/{0}m",
   "js.wb.state.estimate.short": "~{0}m",
+  "js.board.filter.asks": "Sujets avec demandes ouvertes",
   "js.board.filter.label": "Filtrer par état du sujet",
   "js.board.filter.all": "Tous",
   "js.board.filter.confirm": "En attente de confirmation",
