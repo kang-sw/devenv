@@ -89,6 +89,7 @@
   }
   cardTab("worktrees");
   cardTab("holders");
+  cardTab("notes");
   // The worktrees and holders cards' nodes (wtLoad, hdLoad, below): set
   // here, ahead of the drawer's first drApply, which a drawer left open
   // calls on load.
@@ -178,6 +179,61 @@
     if (old) old.remove();
     ticketIdeaSync();
   }
+  // Notes are fetched only on a panels opening or an explicit refresh. A wait
+  // joins the server's existing worker rather than starting another read.
+  var notesSeq = 0;
+  function notesLoad(refresh) {
+    var list = $("noteslist"), button = $("notesrefresh");
+    if (!list) return;
+    var seq = ++notesSeq, url = "/s/" + rid + "/notes";
+    if (button) button.disabled = true;
+    function request(wait) {
+      return fetch(url + (wait ? "?wait=1" : ""), { method: refresh && !wait ? "POST" : "GET", credentials: "same-origin", cache: "no-store" }).then(function (r) {
+        if (!r.ok) throw new Error("notes");
+        return r.json();
+      }).then(function (data) {
+        if (seq !== notesSeq) return;
+        notesRender(data);
+        if (data.loading) return request(true);
+        if (button) button.disabled = false;
+      });
+    }
+    request(false).catch(function () {
+      if (seq !== notesSeq) return;
+      if (button) button.disabled = false;
+      notesRender({ layers: [], error: true });
+    });
+  }
+  function notesRender(data) {
+    var list = $("noteslist"); if (!list) return;
+    list.textContent = "";
+    function line(text, cls, parent) { var el = doc.createElement("div"); el.className = cls; el.textContent = text; (parent || list).appendChild(el); return el; }
+    if (data.local_only) line(wsT("js.notes.local"), "notes-hint");
+    if (data.error) line(wsT("js.notes.error"), "notes-hint");
+    if (data.loading) line(wsT("js.notes.loading"), "notes-hint");
+    var names = { machine: wsT("js.notes.machine"), clone: wsT("js.notes.clone"), repo: wsT("js.notes.repo"), worktree: wsT("js.notes.worktree") };
+    (data.layers || []).forEach(function (layer) {
+      var section = doc.createElement("section"); section.className = "notes-layer"; list.appendChild(section);
+      var rows = layer.notes || [];
+      line((names[layer.layer] || layer.layer) + " · " + rows.length, "notes-heading", section);
+      if (!rows.length) line(wsT("js.notes.empty"), "notes-hint", section);
+      rows.forEach(function (note) {
+        var row = doc.createElement("div"); row.className = "notes-row" + (note.visible === false ? " muted" : ""); section.appendChild(row);
+        line(String(note.priority), "notes-priority" + (note.priority === 0 ? " zero" : ""), row);
+        var content = doc.createElement("div"); content.className = "notes-content"; row.appendChild(content);
+        var head = doc.createElement("div"); head.className = "notes-row-head"; content.appendChild(head);
+        line(note.key, "notes-key", head);
+        if (note.visible === false) line(wsT("js.notes.muted"), "notes-muted", head);
+        var at = Date.parse(note.written_at);
+        if (isFinite(at)) { var age = line(glRel(at), "notes-age", head); age.title = new Date(at).toLocaleString(wsI18n.lang); }
+        var value = doc.createElement("button"); value.type = "button"; value.className = "notes-value"; value.textContent = note.value; value.setAttribute("aria-expanded", "false");
+        value.addEventListener("click", function () { var expanded = value.getAttribute("aria-expanded") !== "true"; value.setAttribute("aria-expanded", String(expanded)); });
+        content.appendChild(value);
+      });
+    });
+  }
+  var notesRefresh = $("notesrefresh");
+  if (notesRefresh) notesRefresh.addEventListener("click", function (e) { e.preventDefault(); notesLoad(true); });
   // drFill stretches cards into the empty cells of the panels grid's last
   // row: the card directly above each empty cell spans two rows. Cards keep
   // their DOM order (grid-auto-flow: dense would reorder them); a spanning
@@ -328,7 +384,7 @@
     var shown = drOpen ? drMode : "";
     if (shown !== drShown) {
       drShown = shown;
-      if (shown === "panels") { wtLoad(); hdLoad(); }
+      if (shown === "panels") { wtLoad(); hdLoad(); notesLoad(false); }
       else if (shown === "git") gitOpened();
       if (tkApi) { if (shown === "search") tkApi.openSearch(); else tkApi.closeSearch(); }
     }

@@ -39,6 +39,7 @@ class El {
   constructor(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.className = ''; this.attrs = {}; this.textContent = ''; this.listeners = {}; }
   appendChild(el) { el.parent = this; this.children.push(el); return el; }
   setAttribute(k, v) { this.attrs[k] = v; }
+  getAttribute(k) { return this.attrs[k]; }
   addEventListener(k, fn) { this.listeners[k] = fn; }
   querySelector(sel) {
     for (const el of this.children) {
@@ -90,6 +91,36 @@ test('ideas fetch only on demand; loading, retry, empty, swaps and safe file lin
   assert.equal(p.querySelector('.chip').textContent, '0');
 });
 
+test('notes load cached snapshot then wait, refresh by POST, and render server layers safely', async () => {
+  const list = new El('div'), button = new El('button'), requests = [], pending = [];
+  const c = vm.createContext({ doc: { createElement: tag => new El(tag) }, rid: 'session',
+    $: id => ({ noteslist: list, notesrefresh: button })[id], wsT: k => k,
+    glRel: () => 'ago', wsI18n: { lang: 'en' },
+    fetch: (url, opts) => { requests.push([url, opts]); return new Promise((resolve, reject) => pending.push({ resolve, reject })); } });
+  vm.runInContext(section('  var notesSeq =', '  // drFill stretches'), c);
+  assert.equal(requests.length, 0);
+  c.notesLoad(false);
+  assert.equal(requests[0][0], '/s/session/notes');
+  assert.equal(requests[0][1].method, 'GET');
+  pending.shift().resolve({ ok: true, json: async () => ({ layers: [], loading: true }) }); await tick();
+  assert.equal(requests[1][0], '/s/session/notes?wait=1');
+  pending.shift().resolve({ ok: true, json: async () => ({ local_only: true, layers: [{ layer: 'repo', notes: [
+    { key: '<unsafe>', value: '<value>', priority: 0, visible: false, written_at: '2026-01-01T00:00:00Z' }
+  ] }, { layer: 'clone', notes: [] }] }) }); await tick();
+  assert.equal(list.querySelector('.notes-key').textContent, '<unsafe>');
+  assert.equal(list.querySelector('.notes-muted').textContent, 'js.notes.muted');
+  assert.ok(list.querySelector('.zero'));
+  const value = list.querySelector('.notes-value');
+  assert.equal(value.textContent, '<value>'); value.listeners.click(); assert.equal(value.getAttribute('aria-expanded'), 'true');
+  assert.ok(list.children.some(el => el.textContent === 'js.notes.local'));
+  assert.equal(button.disabled, false);
+  button.listeners.click({ preventDefault() {} });
+  assert.equal(requests[2][1].method, 'POST');
+  pending.shift().reject(new Error('offline')); await tick();
+  assert.equal(button.disabled, false);
+  assert.ok(list.children.some(el => el.textContent === 'js.notes.error'));
+});
+
 test('wide ticket spans suppress the legacy last-row vertical fill', () => {
   const frames = [], cards = Array.from({ length: 5 }, () => ({ children: [], style: {} }));
   const body = { children: cards, hidden: false };
@@ -105,10 +136,11 @@ test('wide grid uses existing breakpoints and dense ticket span; narrow remains 
   assert.match(css, /@media \(min-width: 1600px\)[\s\S]*?width: min\(1280px,/);
   const wide = css.slice(css.indexOf('@media (min-width: 760px)'), css.indexOf('.d-ticket-more'));
   assert.match(wide, /grid-auto-flow: dense/);
-  for (const [id, order] of [['agenda', 1], ['tickets', 2], ['holders', 3], ['worktrees', 4], ['todo', 5], ['mailbox', 6]]) {
+  for (const [id, order] of [['agenda', 1], ['tickets', 2], ['holders', 3], ['worktrees', 4], ['todo', 5], ['mailbox', 6], ['notes', 7]]) {
     assert.ok(wide.includes(`#drbody #p-${id} { order: ${order};`));
   }
   assert.match(wide, /#p-tickets \{ order: 2; grid-column: span 2;/);
+  assert.match(wide, /#p-notes \{ order: 7; grid-column: span 2;/);
   assert.match(wide, /\.lanes \{ grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(wide, /\.csub \{[^}]*text-align: right/);
   assert.match(css, /@media \(max-width: 759px\) \{\s*#drbody \{ display: flex; flex-direction: column; \}\s*\.dr-body details.panel \{ flex: none; overflow: hidden; \}\s*\.dr-body details.panel > summary \{ position: static; \}/);

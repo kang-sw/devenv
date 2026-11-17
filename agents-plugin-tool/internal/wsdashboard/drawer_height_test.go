@@ -230,7 +230,7 @@ function drMax() { return 600; }
 function drClamp(h) { return h; }
 function drHeight() { return drH; }
 function drSetH(h) { drH = h; }
-function ghSync() {} function drTitle() {} function drFill() {} function wtLoad() {} function hdLoad() {} function gitOpened() {} function drDot() {} function drAnnounce() {}
+function ghSync() {} function drTitle() {} function drFill() {} function wtLoad() {} function hdLoad() {} function notesLoad() {} function gitOpened() {} function drDot() {} function drAnnounce() {}
 var stored = {};
 function save(k, v) { stored[k] = v; }
 function wsT(k) { return k; }

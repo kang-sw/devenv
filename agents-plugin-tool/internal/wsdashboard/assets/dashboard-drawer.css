@@ -45,6 +45,7 @@
   #drbody #p-worktrees { order: 4; }
   #drbody #p-todo { order: 5; }
   #drbody #p-mailbox { order: 6; }
+  #drbody #p-notes { order: 7; grid-column: span 2; }
   #p-tickets .lanes { grid-template-columns: minmax(0, 1fr); gap: 6px; }
   #p-tickets .lane { background: transparent; padding: 0; }
   #p-tickets .lane h4 { padding: 6px 2px 0; text-transform: none; letter-spacing: 0; }
@@ -54,6 +55,24 @@
   #p-tickets .ctitle a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #p-tickets .csub { flex: 1 1 0; min-width: 0; text-align: right; }
 }
+.notes-refresh { margin-left: auto; height: 26px; padding: 0 10px; font-size: 12px; }
+.notes-refresh:disabled { opacity: .5; cursor: progress; }
+.notescard .body { display: grid; gap: 8px; }
+.notes-layer { display: grid; gap: 3px; }
+.notes-heading { color: var(--wb-muted-fg); font-size: 11.5px; font-weight: 800; }
+.notes-hint { color: var(--wb-muted-fg); font-size: 12px; }
+.notes-row { display: flex; gap: 8px; padding: 4px 6px; min-width: 0; }
+.notes-row.muted { opacity: .55; }
+.notes-row.muted .notes-key { text-decoration: line-through; }
+.notes-priority { flex: none; align-self: start; border-radius: 4px; padding: 1px 5px; color: var(--wb-primary); background: var(--wb-muted); font-size: 11px; font-weight: 700; }
+.notes-priority.zero { color: var(--wb-muted-fg); }
+.notes-content { min-width: 0; flex: 1; }
+.notes-row-head { display: flex; align-items: baseline; gap: 8px; }
+.notes-key { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 700 12px var(--wb-mono); }
+.notes-muted, .notes-age { color: var(--wb-muted-fg); font-size: 11px; }
+.notes-age { margin-left: auto; white-space: nowrap; }
+.notes-value { display: block; width: 100%; padding: 2px 0; border: 0; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 12px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.notes-value[aria-expanded="true"] { white-space: pre-wrap; overflow-wrap: anywhere; }
 .d-ticket-more { width: 100%; justify-content: center; margin-top: 4px; }
 .d-ticket-more:disabled { opacity: .6; cursor: progress; }
 @media (max-width: 759px) {
