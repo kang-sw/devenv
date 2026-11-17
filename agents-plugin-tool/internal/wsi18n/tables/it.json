@@ -56,6 +56,8 @@
   "js.usage.estimated": "Nessuna registrazione (stimato)",
   "agent.context": "contesto: {0} token",
   "agent.done": "completato",
+  "agent.sleep": "inattivo",
+  "agent.deleted": "eliminato",
   "agent.effort": "sforzo: {0}",
   "agent.failed": "fallito",
   "agent.model": "modello: {0}",
