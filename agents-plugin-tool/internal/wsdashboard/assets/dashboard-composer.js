@@ -1305,6 +1305,8 @@
   // what the daemon confirmed). A post that fails, or stays unanswered for
   // OUTBOX_WAIT, takes back its message and every later queued one into the
   // composer, in order, ahead of what was typed since; none showed as sent.
+  // A row and a bubble each carry the held bubble's cancel (outboxCancel,
+  // cancelEntry); a bubble also its steer.
   var outbox = [], outboxPosting = false, outboxRows = null, OUTBOX_LINGER = 30000, OUTBOX_WAIT = 30000;
   function outboxUnsent() { return outbox.some(function (m) { return !m.acked; }); }
   // A batch (sends the session read in one turn) carries its key on its
@@ -1313,16 +1315,30 @@
     var us = q("#r-entries .msg.user[data-entry], #r-entries .user-batch[data-entry]");
     return us.length ? us[us.length - 1].getAttribute("data-entry") : "";
   }
+  // heldAct is a copy of the server held bubble's steer or cancel button
+  // (kind) for id, cloned from the composer's heldacts template; none on a
+  // page without one.
+  function heldAct(kind, id) {
+    var tpl = doc.querySelector("#heldacts"), b = tpl && tpl.content.querySelector("[data-" + kind + "]");
+    if (!b) return null;
+    b = b.cloneNode(true);
+    b.setAttribute("data-" + kind, id);
+    return b;
+  }
   // outboxRow is an unanswered send's place in the composer: its text on
-  // one line, or its image markers when it has no text.
+  // one line, or its image markers when it has no text, and its cancel.
   function outboxRow(m) {
-    var el = doc.createElement("div"), spin = doc.createElement("span"), text = doc.createElement("span");
+    var el = doc.createElement("div"), spin = doc.createElement("span"), text = doc.createElement("span"), cancel = heldAct("cancel", "");
     el.className = "d-outbox-row";
     spin.className = "spin";
     text.className = "d-outbox-text";
     text.textContent = m.back.text || m.pics.map(function (p) { return marker(p.n); }).join(" ");
     el.appendChild(spin);
     el.appendChild(text);
+    if (cancel) {
+      cancel.addEventListener("click", function () { outboxCancel(m); });
+      el.appendChild(cancel);
+    }
     return el;
   }
   function outboxShowRows() {
@@ -1334,7 +1350,7 @@
       row.parentNode.insertBefore(outboxRows, row);
     }
     if (!outboxRows) return;
-    outbox.forEach(function (m) { if (!m.acked && m.row.parentNode !== outboxRows) outboxRows.appendChild(m.row); });
+    outbox.forEach(function (m) { if (!m.acked && !m.cancel && m.row.parentNode !== outboxRows) outboxRows.appendChild(m.row); });
     outboxRows.hidden = !outboxRows.firstChild;
   }
   function outboxUnrow(m) {
@@ -1343,16 +1359,21 @@
   }
   // outboxBubble is the held bubble the server will render, built from what
   // was sent: the page's own origin and held labels (the first rendered
-  // ones), the text as typed, and the image thumbnails. Its cancel and
-  // steer buttons come with the server's render.
+  // ones), the text as typed, the image thumbnails, and the held bubble's
+  // steer and cancel buttons for the id its post returned (a send is never
+  // steered yet), which the conversation's click wiring handles as the
+  // server's.
   function outboxBubble(m) {
     var el = doc.createElement("div"), mh = doc.createElement("div"), bub = doc.createElement("div");
     var src = doc.querySelector("#convo .msg .src.wb"), tag = doc.querySelector("#r-convlive .heldtag:not(.steertag)");
+    var steer = heldAct("steer", m.id), cancel = heldAct("cancel", m.id);
     el.className = "msg user held";
     el.setAttribute("data-entry", m.id);
     mh.className = "mh";
     if (src) mh.appendChild(src.cloneNode(true));
     if (tag) mh.appendChild(tag.cloneNode(true));
+    if (steer) mh.appendChild(steer);
+    if (cancel) mh.appendChild(cancel);
     el.appendChild(mh);
     bub.className = "bub";
     if (m.back.text) {
@@ -1395,6 +1416,7 @@
     var m = outbox.filter(function (x) { return !x.acked; })[0];
     if (!m) return;
     outboxPosting = true;
+    m.sent = true;
     var wait = 0, settled = false;
     var settle = function (ok, res) {
       if (settled) return;
@@ -1412,6 +1434,10 @@
     m.acked = true;
     m.id = id;
     m.at = Date.now();
+    // A row cancelled while its post was out cancels now that it has an
+    // id; its bubble shows only if the cancel is refused. An OK without an
+    // id leaves nothing to cancel, so the bubble shows.
+    if (!id) m.cancel = false;
     outboxUnrow(m);
     m.el = outboxBubble(m);
     boardFlushViewed(false);
@@ -1423,6 +1449,7 @@
     if (!outboxUnsent()) clearDraft();
     outboxSync();
     followConvo();
+    if (m.cancel) cancelEntry(id, function () { m.cancel = false; outboxSync(); followConvo(); });
   }
   function outboxDrop(m) {
     var i = outbox.indexOf(m);
@@ -1432,16 +1459,44 @@
     m.pics.forEach(function (p) { if (imgs.indexOf(p) < 0 && imgTrash[p.n] !== p) release(p); });
   }
   function outboxFail(res) {
-    var back = outbox.filter(function (m) { return !m.acked; });
+    outboxReturn(outbox.filter(function (m) { return !m.acked; }));
+    noteWarn(wsT("js.send.fail", res));
+  }
+  // outboxReturn takes unanswered sends out of the outbox and back into the
+  // composer, in order, ahead of what was typed since.
+  function outboxReturn(back) {
+    back.forEach(function (m) { outbox.splice(outbox.indexOf(m), 1); });
     back.forEach(function (m) {
-      outbox.splice(outbox.indexOf(m), 1);
       outboxUnrow(m);
-      m.own.forEach(function (k) { delete boardOwn[k]; });
+      // A topic a send still in the outbox names stays its own.
+      m.own.forEach(function (k) { if (!outbox.some(function (o) { return o.own.indexOf(k) >= 0; })) delete boardOwn[k]; });
       m.pics.forEach(function (p) { if (imgs.indexOf(p) < 0) imgs.push(p); });
     });
     restoreHeld(back.map(function (m) { return m.back; }));
     queueDraft();
-    noteWarn(wsT("js.send.fail", res));
+  }
+  // outboxCancel is an unanswered send's cancel: one not posted yet comes
+  // straight back into the composer; one whose post is out leaves its row
+  // and cancels on the daemon once the OK names its id (outboxAcked), or
+  // comes back with the failure if the post fails.
+  function outboxCancel(m) {
+    if (m.acked || m.cancel || outbox.indexOf(m) < 0) return;
+    if (m.sent) { m.cancel = true; outboxUnrow(m); return; }
+    outboxReturn([m]);
+    noteOk(wsT("js.cancel.ok"));
+    ctext.focus();
+  }
+  // cancelEntry takes the held message id back from the daemon into the
+  // composer and drops the outbox bubble for it, so no sync puts it back.
+  // A refusal (the session already received it) runs failed and warns.
+  function cancelEntry(id, failed) {
+    post("cancel", { id: id }, function (ok, res) {
+      if (!ok) { failed(); noteWarn(wsT("js.cancel.fail", res)); return; }
+      outbox.filter(function (m) { return m.acked && m.id === id; }).forEach(outboxDrop);
+      restoreHeld([res]);
+      noteOk(wsT("js.cancel.ok"));
+      ctext.focus();
+    });
   }
   // outboxSync drops the bubbles a render now shows (by id) or the session
   // already received, and puts the rest back, in send order, after the
@@ -1458,6 +1513,8 @@
       return false;
     });
     if (!c) return;
+    // A bubble whose cancel is out stays hidden (outboxAcked).
+    shown = shown.filter(function (m) { return !m.cancel; });
     var at = kids.filter(function (k) { return k.classList.contains("sentdata"); })[0] || null;
     if (shown.some(function (m) { return m.el.parentNode !== c; })) shown.forEach(function (m) { c.insertBefore(m.el, at); });
   }
@@ -1606,12 +1663,7 @@
   }
   function cancelHeld(btn) {
     btn.disabled = true;
-    post("cancel", { id: btn.getAttribute("data-cancel") }, function (ok, res) {
-      if (!ok) { btn.disabled = false; noteWarn(wsT("js.cancel.fail", res)); return; }
-      restoreHeld([res]);
-      noteOk(wsT("js.cancel.ok"));
-      ctext.focus();
-    });
+    cancelEntry(btn.getAttribute("data-cancel"), function () { btn.disabled = false; });
   }
   // --- interrupt badge ---------------------------------------------------------
   // The badge on the border between the conversation and the composer shows

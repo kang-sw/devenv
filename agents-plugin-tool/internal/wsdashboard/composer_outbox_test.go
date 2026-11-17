@@ -2,6 +2,7 @@ package wsdashboard
 
 import (
 	"encoding/json"
+	"net/http"
 	"regexp"
 	"strings"
 	"testing"
@@ -11,7 +12,8 @@ import (
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
-// outboxDOM is the page the outbox reads in TestComposerOutboxLeavesOnDelivery:
+// outboxDOM is the page the outbox reads in TestComposerOutboxLeavesOnDelivery
+// and TestComposerOutboxCancel:
 // a convlive region of fake elements the client bubbles go into, and a q
 // that answers "#r-entries <classes>[data-entry]" selectors (comma lists
 // too) from the server's rendered entries markup in entriesHTML.
@@ -125,4 +127,129 @@ outboxSync();
 check("the delivered message replaces its bubble", bubbles(), []);
 process.stdout.write(bad.join("\n"));
 `)
+}
+
+// outboxActsDOM extends outboxDOM with the composer's heldacts template: a
+// steer and a cancel button prototype whose clones record click listeners
+// (click runs them), and a post whose message answers a case can hold.
+const outboxActsDOM = `
+function protoBtn(kind) {
+  return { cloneNode: function () {
+    var b = fakeEl(), on = [];
+    b.className = "btn mini h" + kind;
+    b.setAttribute("data-" + kind, "");
+    b.addEventListener = function (ev, fn) { if (ev === "click") on.push(fn); };
+    b.click = function () { on.forEach(function (fn) { fn(); }); };
+    return b;
+  } };
+}
+var protos = { steer: protoBtn("steer"), cancel: protoBtn("cancel") };
+var heldacts = { content: { querySelector: function (sel) { var m = /^\[data-(\w+)\]$/.exec(sel); return m ? protos[m[1]] || null : null; } } };
+var pageQuery = doc.querySelector;
+doc.querySelector = function (sel) { return sel === "#heldacts" ? heldacts : pageQuery(sel); };
+var calls = [], holding = false, held = [], cancelAnswer = [true, {}], restored = [], holdCancel = false, cancels = [];
+post = function (route, body, done) {
+  calls.push(route === "cancel" ? [route, body.id] : [route, body.text]);
+  if (route !== "message") { if (holdCancel) cancels.push(done); else done(cancelAnswer[0], cancelAnswer[1]); return; }
+  if (holding) held.push(done); else done(true, { id: "h" + (++posted) });
+};
+restoreHeld = function (list) { restored.push(list.map(function (r) { return r.text; })); };
+var crow = fakeEl(), composer = fakeEl();
+composer.appendChild(crow);
+ctext.closest = function (sel) { return sel === ".crow" ? crow : null; };
+function rows() { return composer.children[0].children.map(function (r) { return r.children[1].textContent; }); }
+function bubbleOf(id) { return clive.children.filter(function (c) { return c.getAttribute("data-entry") === id; })[0]; }
+function actsOf(el) { return el.children.filter(function (c) { return /\bh(steer|cancel)\b/.test(c.className); }).map(function (c) { return [c.className, c.getAttribute("data-steer") || c.getAttribute("data-cancel")]; }); }
+function cancelOf(el) { return el.children.filter(function (c) { return c.classList.contains("hcancel"); })[0]; }
+`
+
+// TestComposerOutboxCancel pins the outbox's cancel: the bubble an
+// acknowledged send shows carries the server held bubble's steer and cancel
+// buttons for its id, and its cancel takes the message back and drops the
+// bubble so no sync puts it back; a refused cancel leaves the bubble. A row
+// still waiting for its post comes back without a post; a row whose post is
+// out cancels on the daemon once the OK names its id. The cases execute
+// under node when it is installed.
+func TestComposerOutboxCancel(t *testing.T) {
+	src := mustAsset(t, "dashboard.js")
+	notes := regexp.MustCompile(`(?s)\n  function noteWarn\(text\) \{[^\n]*\n  function noteOk\(text\) \{[^\n]*\n`).FindString(src)
+	if notes == "" {
+		t.Fatal("dashboard.js holds no noteWarn / noteOk pair")
+	}
+	runNode(t, "composer outbox cancel", selectionCodecSource(t)+composerToastPrelude+notes+"var sending = false;\n"+composerSendSource(t, src)+composerFunc(t, src, "cancelHeld")+outboxDOM+outboxActsDOM+`
+ctext.value = "one"; sendMessage();
+check("an acknowledged send's bubble carries the held buttons", actsOf(bubbleOf("h1").children[0]), [["btn mini hsteer", "h1"], ["btn mini hcancel", "h1"]]);
+cancelAnswer = [true, { id: "h1", text: "one" }];
+cancelHeld(cancelOf(bubbleOf("h1").children[0]));
+check("the bubble's cancel posts its id", calls.slice(-1), [["cancel", "h1"]]);
+check("a cancelled bubble leaves", bubbles(), []);
+check("a cancelled bubble leaves the outbox", outbox.length, 0);
+check("a cancel restores the daemon's copy", restored.slice(-1), [["one"]]);
+outboxSync();
+check("no sync puts a cancelled bubble back", bubbles(), []);
+
+holding = true; calls = []; restored = []; toasts = [];
+ctext.value = "first"; sendMessage();
+ctext.value = "second"; sendMessage();
+check("only the first send posts", calls, [["message", "first"]]);
+check("both unanswered sends show as rows", rows(), ["first", "second"]);
+cancelOf(outbox[1].row).click();
+check("a queued row's cancel posts nothing", calls, [["message", "first"]]);
+check("a queued row's cancel restores its text", restored, [["second"]]);
+check("a queued row's cancel leaves the outbox", outbox.map(function (m) { return m.back.text; }), ["first"]);
+check("a queued row's cancel confirms", toasts, [["js.cancel.ok", "info"]]);
+check("a queued row's cancel removes its row", rows(), ["first"]);
+cancelOf(outbox[0].row).click();
+check("an in-flight row's cancel waits for the OK", calls, [["message", "first"]]);
+check("an in-flight row's cancel removes its row", rows(), []);
+holdCancel = true;
+held.shift()(true, { id: "h9" });
+check("the OK cancels the in-flight send by its id", calls, [["message", "first"], ["cancel", "h9"]]);
+check("an in-flight send whose cancel is out shows no bubble", bubbles(), []);
+outboxSync();
+check("no sync shows a bubble whose cancel is out", bubbles(), []);
+holdCancel = false;
+cancels.shift()(true, { id: "h9", text: "first" });
+check("the cancelled in-flight send shows no bubble", bubbles(), []);
+check("the cancelled in-flight send leaves the outbox", outbox.length, 0);
+check("the cancelled in-flight send comes back", restored, [["second"], ["first"]]);
+check("the queued cancelled send never posts", held.length, 0);
+
+holding = false; toasts = [];
+ctext.value = "two"; sendMessage();
+var two = bubbles()[0], btn2 = cancelOf(bubbleOf(two).children[0]);
+cancelAnswer = [false, "delivered"];
+cancelHeld(btn2);
+check("a refused cancel keeps the bubble", bubbles(), [two]);
+check("a refused cancel re-enables its button", btn2.disabled, false);
+check("a refused cancel warns", toasts, [["js.cancel.fail:delivered", "warn"]]);
+
+holding = true; toasts = [];
+ctext.value = "three"; sendMessage();
+cancelOf(outbox[outbox.length - 1].row).click();
+held.shift()(true, { id: "h8" });
+check("an in-flight send whose cancel is refused shows its bubble", bubbles(), [two, "h8"]);
+check("an in-flight send whose cancel is refused warns", toasts, [["js.cancel.fail:delivered", "warn"]]);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
+// TestComposerHeldActsTemplate pins the live composer's heldacts template
+// the outbox clones its buttons from: the held bubble's own steer and cancel
+// markup, with an empty id for the client to fill.
+func TestComposerHeldActsTemplate(t *testing.T) {
+	f := startPageFixture(t)
+	code, live := get(t, f.base+"/s/livesession?frame=1")
+	if code != http.StatusOK {
+		t.Fatalf("GET /s/livesession = %d", code)
+	}
+	m := regexp.MustCompile(`<template id="heldacts">(.*?)</template>`).FindStringSubmatch(live)
+	if m == nil {
+		t.Fatal("live composer has no heldacts template")
+	}
+	for _, want := range []string{`<button class="btn mini hsteer" data-steer=""`, `<button class="btn mini hcancel" data-cancel=""`} {
+		if !strings.Contains(m[1], want) {
+			t.Errorf("heldacts template lacks %s:\n%s", want, m[1])
+		}
+	}
 }
