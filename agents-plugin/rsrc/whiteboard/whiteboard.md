@@ -276,7 +276,9 @@ Markdown up to the closing tag.
   title, class, or options, is not a re-ask; a title fix on an item the
   patch leaves settled stamps nothing.
 - `wb:close` requires an existing topic. To add a closing line, write a
-  `wb:log` before `<wb:close/>` in the same batch. Closing withdraws every
+  `wb:log` before `<wb:close/>` in the same batch. If an older daemon refuses
+  `<wb:close/>` because `result` is missing, retry the batch with
+  `result="<one sentence>"`. Closing withdraws every
   item still `open`; an `assumed` item stays assumed. Put a batch's answers
   before its `wb:close`, since an answer after the close finds the item withdrawn. Adding an item,
   changing nonempty current content, or appending a panel or agent line reopens a
