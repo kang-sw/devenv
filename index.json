@@ -363,7 +363,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "track/agent-v2",
         "phase": "active",
-        "touched_at": "2026-11-17T13:27:08Z"
+        "touched_at": "2026-11-17T13:27:49Z",
+        "impl": {
+          "branch": "impl/track/agent-v2/envy-mud-crepe"
+        }
       }
     },
     "261115-feat-ws-permission-profile": {
