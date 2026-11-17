@@ -511,12 +511,12 @@ idle point with a new token on the new route (`runner_process.go` 295-301,
   tools fail until its process restarts, and since Claude keeps reporting the
   HTTP server connected, the old daemon's MCP recovery does not restart it.
   The old daemon writes no new data and loses none; a process it later starts
-  uses the stdio bundle, and the kept `mcp_*` members then describe a dead
-  token, which the new daemon on rejoin either restores harmlessly (same URL)
-  or answers with one idle-point restart (other URL). Reopening with the new
-  version recovers fully. This is a functional degradation on the downgrade
-  path with no data loss; it is not a display-only T1, and the tier is left
-  for the lead to confirm.
+  uses the stdio bundle under a new holder (v0.50.2 `runner.go` 2492), and
+  the kept `mcp_*` members then name a dead token, which the new daemon on
+  rejoin forgets (see the Edition below). Reopening with the new version
+  recovers fully. This is a functional degradation on the downgrade path with
+  no data loss; it is not a display-only T1. Tier: pending owner decision
+  (board).
 - Older-daemon launch, new-daemon reattach: the record has no token, so the
   process keeps its stdio server (`runner_process.go` 302): T0.
 
@@ -568,6 +568,62 @@ Claude; a Pi client's experimental capability would be lost there once Pi
 moves to HTTP. Voiding a token cancels its in-flight calls, a `git.commit`
 included; that is the intended end of a process's session.
 
+#### Edition (539ef4ad8) - 2026-11-18
+
+Phase 2 lite review fixes (review of 9d65742c7..4e8add8d3; the replayDone
+narrowing in e4a0dda94 is covered by the Phase 3 review):
+
+- Rejoin no longer resolves the ws-mcp command. The record keeps the hello's
+  ws-mcp environment (`mcp_env`) and the holder the token was drawn for
+  (`mcp_holder_id`) beside `mcp_token_secret` / `mcp_url` (`record.go`
+  142-151, written with the holder at start, `runner_process.go` 372). A
+  rejoin restores the recorded token and hello (310); a token without a
+  recorded hello, or on another route, restarts the process at its first
+  idle point (303), so an unresolvable package at rejoin can no longer leave
+  a process silently calling a token nobody accepts.
+- First start loads the bundle its hello describes: the lead's ws-mcp command
+  now names its bundle (`MCPCommand.Plugin`, `cmd/ws-mcp/agent_mcp.go`), and
+  `claudeLeadPluginArgs` uses that root and note instead of resolving the
+  selection again (`claude_lead_plugins.go` 30, `runner_process.go` 321).
+- A record whose holder differs from the token's (a daemon without the route
+  started the process again over stdio, keeping the members it does not know)
+  forgets the token and restarts nothing (`runner_process.go` 298).
+- `restartIfDue` reports a restart only when a new process runs
+  (`runner_recovery.go`); after a failed one, `replayDone` falls through and
+  held input starts a process as with none.
+- Route: the replay's pending id is registered when the session is built,
+  before it is published to its token's other requests or runs, so a
+  session that ends at once can no longer panic on a nil map with `writeMu`
+  held, and concurrent first requests cannot write the map together (the
+  first version of this fix moved the write after publication; the Phase 3
+  review caught it and a98a31f86 fixed it, with
+  `TestProxyHTTPConcurrentFirstRequestsShareOneReplay` failing under `-race`
+  before); a token whose void channel is already closed when it resolves is
+  refused (`proxy_http.go` 96).
+- Tests added: `TestClaudeLeadLoadsTheBundleItsHelloDescribes`,
+  `TestClaudeLeadRejoinWithoutItsHelloRestarts`,
+  `TestClaudeLeadRejoinForgetsATokenAnotherStartLeft`,
+  `TestClaudeLeadMCPRouteMovedRestartsAfterItsTurn` (stale route deferred
+  while a turn runs), `TestClaudeLeadStaleRouteFailedRestart` (a restart
+  that cannot start leaves no process; the next message starts one on the
+  new route), `TestClaudeLeadTokenVoidOnFailedStartAndClose` (spawn
+  failure and close), `TestClaudeHTTPVariantConcurrentBuilds` (eight
+  concurrent builds, one variant, no stage left),
+  `TestProxyHTTPRouteRefusesAForeignHost` (rebound Host), the body limit at
+  exactly `httpMCPBodyLimit` and one byte over in
+  `TestProxyHTTPBodyLimitsAndShapes`; the void steps of
+  `TestProxyHTTPRouteRefusesAMissingUnknownOrVoidToken` and
+  `TestHostedWorkerOverHTTPSeesOnlyItsProfile` now keep the token resolvable
+  with a closed void channel, so they fail without the route's own void
+  check (mutation-checked, as were the bundle, forget and deferred-restart
+  tests). Not covered by a test: the start path that revokes a token when
+  the backend returns a process without a holder.
+- Forward (not fixed): `.stage-*` directories of a crashed build and variants
+  of retired bundles are never removed; a variant build failure fails the
+  lead start rather than falling back to stdio; a session ending under a
+  request answers "ended" rather than a retry hint; the token is inherited by
+  the harness's own subprocesses (same user, no escalation).
+
 ### Phase 3: Startup version/init-shape check, loud nearest-profile policy, fixtures and compaction command
 
 Implement the startup read of harness version plus the light init-shape check,
@@ -586,3 +642,112 @@ below-range versions and for an init-shape mismatch; a profile-less harness (Pi)
 showing no demotion, hiding or warning (Decision 13); a dashboard check that the
 warning shows; compaction pushed from chat reaches a hosted Claude session and is
 not a harness-internal feature.
+
+### Result (a98a31f86) - 2026-11-18
+
+Commits: 6dc2607b7 (catalog resolution, init-shape check, command gating,
+fixtures), 4667ac2e2 (dashboard notice), a98a31f86 (Phase 3 review fix).
+
+**Version read and resolution.** The Claude mapper reports, for each init, the
+`claude_code_version` and the items its init shape does not support
+(`HarnessReport`, `claude.go` `harnessReport`); for a lead it is the first
+event of `leadInit`, for a worker it follows the unchanged fatal
+`checkClaudeInit`. The runner resolves the backend's profile at that version
+(`Catalog.Resolve`), demotes the reported items to `unsupported`, and shows
+the result as `State.Capabilities` (`runner_events.go` `harnessReported`): in
+memory only, rebuilt from the held stream on rejoin, unchanged reports are
+no-ops. A version outside the guaranteed range runs on the nearest bound's
+grades with `unverified` set; nothing errors on version alone.
+
+**Guaranteed range: 2.1.322 (lower) to 2.1.326 (upper)** (`catalog.go`
+`ClaudeCatalog` Oldest/Newest). Each bound has a recorded worker and lead
+fixture: `claude-worker-turn-2.1.322.jsonl`, `claude-lead-slash-commands.jsonl`
+(2.1.322), `claude-worker-turn-2.1.326.jsonl`, `claude-lead-turn-2.1.326.jsonl`;
+the new ones were recorded with the installed 2.1.322 and 2.1.326 binaries
+(worker argv as `claudeArgs` builds it, lead argv as `claudeLeadArgs` without
+`--plugin-dir`) and sanitized like the existing ones. 2.1.319 (the older
+`claude-tool-turn.jsonl`) was not taken as the lower bound because no lead
+fixture exists for it; it now serves as the below-range case.
+`TestClaudeCatalogValues` requires a recorded fixture of each role at
+each bound.
+
+**Init-field to item mapping that gates demotion** (`claudeInitShape`; the
+catalog's header comment points to it):
+
+| init field | item(s) | demoted when |
+|---|---|---|
+| `tools` | `tool_removal`, `subagent_removal` | the list is absent, or a profile tool (or its legacy name, Agent/Task) is missing |
+| `permissionMode` | `approval` | empty |
+| `slash_commands` | `compaction` | the list is present and lacks `compact`; an absent list (older harness) changes nothing |
+| `model` | `model_effort` | empty |
+| `mcp_servers` | none | admission condition, never demoted (a worker's out-of-profile server stays `checkClaudeInit`'s fatal error) |
+| `plugins` | none | (workers: `checkClaudeInit`; leads: no check) |
+
+Items with no init field (steer, interrupt, follow-up, resume, usage query,
+skills, rewind, reasoning stream) are gated by version only. Only items graded
+better than `unsupported` are listed as demoted.
+
+**Compaction.** The catalog item is `native` for a Claude lead and
+`unsupported` for a Claude worker (Phase 1 edition). The existing path is
+unchanged: dashboard `/compact` -> `wsinbox.Command` -> the lead's command
+turn (`TestClaudeLeadCommandSplitsTheDrain`: `/compact keep the names` reaches
+the hosted session's input from chat). The offered command list now passes
+through `allowedCommands`: a command whose item resolves `unsupported` (only
+`compact` -> `compaction` is mapped) is dropped, and the dashboard intake
+refuses a command not in the list. Pi keeps its `/compact` path handle-only
+(no profile, Decision 13).
+
+**Dashboard warning** (4667ac2e2): a hosted session whose
+`capabilities.unverified` is set, or whose `demoted` list is non-empty, shows a
+status notice under the banner (`dashboard-leads.js` `harnessDraw`): "Harness
+version X is outside the verified range A–B; running on the capabilities of
+B." and "Unavailable on this harness version: ...". No capabilities, or
+neither condition, or a closed/handed-off session shows nothing. New i18n keys
+`js.lead.harness.unverified`, `js.lead.harness.unreported`,
+`js.lead.harness.demoted` in all 11 tables; the vendored lucide
+`triangle-alert` icon.
+
+**Profile-less harness.** A backend without a catalog profile (Pi) gets no
+`State.Capabilities`, so nothing is demoted, hidden or warned
+(`TestProfilelessBackendStaysHandleOnly`).
+
+**Compatibility.** `State.Capabilities` is a new omitempty member of the
+in-memory State JSON the dashboard reads; an older dashboard asset ignores it
+(T0). Nothing is persisted (`agent.json` is untouched by this phase). The
+offered command list may now omit `compact` for a session whose init lacks it;
+that is the intended demotion. The Phase 2 tier for the new-daemon launch /
+older-daemon reattach path remains pending owner decision (board).
+
+**Tests:** `TestClaudeFixturesResolveByVersion` (in range at both bounds for
+both roles, 2.1.319 below and 2.1.399 above, run on the nearest bound marked
+unverified, nothing demoted), `TestClaudeInitShapeDemotes` (each field's
+mismatch, the Agent/Task alias, absent command list, worker check still
+fatal), `TestAllowedCommands`, `TestLeadCapabilitiesFromItsInit`,
+`TestLeadOffersNoCommandOfAnUnsupportedItem`,
+`TestProfilelessBackendStaysHandleOnly`, the catalog bound/fixture tests in
+`catalog_test.go`, and the harness-notice block of `lead-popover.test.cjs`
+(run by `TestLeadPopoverLaunchBehavior`: unverified with and without a
+version, demoted alone and together, cleared on absent capabilities and on a
+closed session). Runs on this Mac (go test, `-count=1`): `./internal/wsagent/`
+ok at a98a31f86 (273 s); the other suites ran at 539ef4ad8, whose only later
+change is the route fix, after which the `TestProxyHTTP*` tests, the
+lead-popover and lucide tests and `TestHostedWorkerOverHTTPSeesOnlyItsProfile`
+were rerun and pass: `./cmd/ws-mcp/` ok (164 s);
+`./internal/wsi18n/` ok; `./internal/wsdashboard/` fails only
+`TestSearchPaletteRenderedEntries`, `TestSearchPaletteBehavior` and
+`TestBoardStateFilterAsks`, all three failing the same way on a tree from
+before these phases; `./internal/mcp/` (`-timeout 30m`, 1009 s) fails
+`TestDashboardNotesUsesHostedCallerStoreIdentity` (pre-existing) and, under
+the load of concurrent suites, `TestHostedLiveBusyTurnFlushesEachHeartbeat`
+and `TestIntakeStopsWithinRecheckOfARemovedKey` (a TempDir cleanup race),
+both of which pass when rerun alone three times. The route tests also pass
+under `-race`.
+
+**Review.** Phase 3 lite review (4e8add8d3..539ef4ad8, covering the
+e4a0dda94 replayDone narrowing and the Phase 2 fix commit): one Important, a
+concurrent map write on the replay's pending id introduced by 539ef4ad8,
+fixed in a98a31f86; one Minor (failed stale restart untested), answered with
+`TestClaudeLeadStaleRouteFailedRestart`.
+
+**Left open:** the session-menu copy of the warning (optional in the brief)
+was not added; the notice was checked in the VM test, not in a browser.
