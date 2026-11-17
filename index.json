@@ -372,17 +372,7 @@
       "registered_at": "2026-11-15T02:02:38Z"
     },
     "261115-feat-ws-session-hire-approval": {
-      "registered_at": "2026-11-15T05:41:00Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "exec5/session-hire-p1",
-        "phase": "active",
-        "touched_at": "2026-11-15T07:41:30Z",
-        "impl": {
-          "branch": "impl/exec5/session-hire-p1/swarm-straw-lens"
-        }
-      }
+      "registered_at": "2026-11-15T05:41:00Z"
     },
     "261115-feat-ws-whiteboard-agent-card": {
       "registered_at": "2026-11-15T08:26:47Z"
