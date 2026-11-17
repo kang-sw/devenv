@@ -34,11 +34,7 @@ func TestWaitReturnsImmediatelyOnReplyIDUnread(t *testing.T) {
 
 	const sessionKey = "amber-tide-fox"
 	replyID := ReplyID(sessionKey)
-	replyPath, err := ReplyRegistryPath()
-	if err != nil {
-		t.Fatalf("ReplyRegistryPath: %v", err)
-	}
-	if err := WithReplyLock(replyPath, func(store *ReplyStore) error {
+	if err := (Paths{}).Store().WithReplyLock(func(store *ReplyStore) error {
 		store.Queues = AppendQueue(store.Queues, replyID, Envelope{Content: "hi", SentAt: "2026-09-13T00:00:00Z"})
 		return nil
 	}); err != nil {
@@ -70,7 +66,7 @@ func TestWaitReturnsImmediatelyOnNamedInboxUnreadWhenOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MachinePath: %v", err)
 	}
-	if err := WithLock(path, func(store *StoreFile) error {
+	if err := (Paths{}).Store().WithLock(path, func(store *StoreFile) error {
 		store.Presence["alice"] = Presence{Name: "alice", Scope: ScopeMachine, Owner: sessionKey, LastSeen: "2026-09-13T00:00:00Z"}
 		store.Queues = AppendQueue(store.Queues, "alice", Envelope{Content: "run ticket X", SentAt: "2026-09-13T00:00:00Z"})
 		return nil
@@ -96,7 +92,7 @@ func TestWaitIgnoresNamedInboxWhenNotOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MachinePath: %v", err)
 	}
-	if err := WithLock(path, func(store *StoreFile) error {
+	if err := (Paths{}).Store().WithLock(path, func(store *StoreFile) error {
 		store.Presence["alice"] = Presence{Name: "alice", Scope: ScopeMachine, Owner: "someone-else-key", LastSeen: "2026-09-13T00:00:00Z"}
 		store.Queues = AppendQueue(store.Queues, "alice", Envelope{Content: "not yours", SentAt: "2026-09-13T00:00:00Z"})
 		return nil
@@ -122,10 +118,6 @@ func TestWaitBlocksThenReturnsOnArrivalDuringSleep(t *testing.T) {
 
 	const sessionKey = "amber-tide-fox"
 	replyID := ReplyID(sessionKey)
-	replyPath, err := ReplyRegistryPath()
-	if err != nil {
-		t.Fatalf("ReplyRegistryPath: %v", err)
-	}
 
 	clock := &fakeClock{now: time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC)}
 	clock.onSleep = func(time.Duration) {
@@ -133,7 +125,7 @@ func TestWaitBlocksThenReturnsOnArrivalDuringSleep(t *testing.T) {
 			// Deposit mail "during" the second simulated block, so the third
 			// peek (right after this Sleep call returns) finds it — exercising
 			// arrival-while-waiting rather than the immediate level-trigger.
-			_ = WithReplyLock(replyPath, func(store *ReplyStore) error {
+			_ = (Paths{}).Store().WithReplyLock(func(store *ReplyStore) error {
 				store.Queues = AppendQueue(store.Queues, replyID, Envelope{Content: "arrived", SentAt: "2026-09-13T00:00:03Z"})
 				return nil
 			})
@@ -237,7 +229,7 @@ func TestNamedInboxStatusReportsPresenceAndOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MachinePath: %v", err)
 	}
-	if err := WithLock(path, func(store *StoreFile) error {
+	if err := (Paths{}).Store().WithLock(path, func(store *StoreFile) error {
 		store.Presence["alice"] = Presence{Name: "alice", Scope: ScopeMachine, Owner: "someone-else-key", LastSeen: "2026-09-13T00:00:00Z"}
 		return nil
 	}); err != nil {
@@ -262,7 +254,7 @@ func TestWaitEnvLessTargetsOwnReplyIDOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MachinePath: %v", err)
 	}
-	if err := WithLock(path, func(store *StoreFile) error {
+	if err := (Paths{}).Store().WithLock(path, func(store *StoreFile) error {
 		store.Presence["alice"] = Presence{Name: "alice", Scope: ScopeMachine, Owner: "someone-else-key", LastSeen: "2026-09-13T00:00:00Z"}
 		return nil
 	}); err != nil {
@@ -271,11 +263,7 @@ func TestWaitEnvLessTargetsOwnReplyIDOnly(t *testing.T) {
 
 	const sessionKey = "amber-tide-fox"
 	replyID := ReplyID(sessionKey)
-	replyPath, err := ReplyRegistryPath()
-	if err != nil {
-		t.Fatalf("ReplyRegistryPath: %v", err)
-	}
-	if err := WithReplyLock(replyPath, func(store *ReplyStore) error {
+	if err := (Paths{}).Store().WithReplyLock(func(store *ReplyStore) error {
 		store.Queues = AppendQueue(store.Queues, replyID, Envelope{Content: "reply", SentAt: "2026-09-13T00:00:00Z"})
 		return nil
 	}); err != nil {
@@ -297,11 +285,7 @@ func TestWaitEnvLessTargetsOwnReplyIDOnly(t *testing.T) {
 
 func seedWaitReplyMail(t *testing.T, sessionKey, content string) {
 	t.Helper()
-	replyPath, err := ReplyRegistryPath()
-	if err != nil {
-		t.Fatalf("ReplyRegistryPath: %v", err)
-	}
-	if err := WithReplyLock(replyPath, func(store *ReplyStore) error {
+	if err := (Paths{}).Store().WithReplyLock(func(store *ReplyStore) error {
 		store.Queues = AppendQueue(store.Queues, ReplyID(sessionKey), Envelope{Content: content, SentAt: "2026-09-13T00:00:00Z"})
 		return nil
 	}); err != nil {

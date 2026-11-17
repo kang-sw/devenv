@@ -58,7 +58,7 @@ func seedWorktreeInbox(t *testing.T, env []string, root, name, ownerKey, content
 	if err != nil {
 		t.Fatalf("WorktreePath(%s): %v", root, err)
 	}
-	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+	if err := (wsmailbox.Paths{}).Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 		store.Presence[name] = wsmailbox.Presence{Name: name, Scope: wsmailbox.ScopeWorktree, Owner: ownerKey, LastSeen: "2026-09-13T00:00:00Z"}
 		store.Queues = wsmailbox.AppendQueue(store.Queues, name, wsmailbox.Envelope{Content: content, SentAt: "2026-09-13T00:00:00Z"})
 		return nil

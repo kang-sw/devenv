@@ -178,12 +178,8 @@ func (f *lifecycleFixture) post(path, body, origin string) *httptest.ResponseRec
 }
 func lifecycleQueued(t *testing.T, s *Server, id string) int {
 	t.Helper()
-	path, err := s.mailboxPaths().ReplyRegistry()
-	if err != nil {
-		t.Fatal(err)
-	}
 	n := 0
-	if err := wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error { n = len(store.Queues[id]); return nil }); err != nil {
+	if err := s.mailboxPaths().Store().WithReplyLock(func(store *wsmailbox.ReplyStore) error { n = len(store.Queues[id]); return nil }); err != nil {
 		t.Fatal(err)
 	}
 	return n

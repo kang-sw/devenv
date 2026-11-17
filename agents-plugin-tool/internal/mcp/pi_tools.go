@@ -513,12 +513,8 @@ func PiTurnReporter(log io.Writer) func(wsagent.TurnReport) {
 		if rep.Parent.Kind != wsagent.ParentLead {
 			return
 		}
-		path, err := wsmailbox.Paths{}.ReplyRegistry()
-		if err == nil {
-			content := fmt.Sprintf("Reply with pi.send(id: %s), not mailbox.send.\n%s", rep.Result.ID, wsagent.ReportText(rep))
-			err = wsmailbox.PostSystem(path, rep.Parent.ReplyID, "pi:"+rep.Result.ID, content, time.Now())
-		}
-		if err != nil {
+		content := fmt.Sprintf("Reply with pi.send(id: %s), not mailbox.send.\n%s", rep.Result.ID, wsagent.ReportText(rep))
+		if err := (wsmailbox.Paths{}).Store().PostSystem(rep.Parent.ReplyID, "pi:"+rep.Result.ID, content, time.Now()); err != nil {
 			if log != nil {
 				fmt.Fprintf(log, "agent %s: report to %s: %v\n", rep.Result.ID, rep.Parent.ReplyID, err)
 			}

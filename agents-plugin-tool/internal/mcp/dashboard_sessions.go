@@ -795,18 +795,15 @@ type DashboardSessionSource struct {
 
 	// boards memoizes each session's board render (dashboard_page.go).
 	boards boardMemo
-	// records, replies, scopes, and snapshots serve the unchanged files a
-	// re-read and a page read read again and again, each costing a stat
-	// (wsdashboard.FileCache): the session record's part files (with their
-	// bytes, which the fingerprint hashes), the machine reply registry, the
-	// named scopes' mailbox stores, and the live snapshots HashLiveStores
-	// folds. Parsed values are shared: the source only reads them.
+	// records and snapshots serve the unchanged files a re-read and a page
+	// read read again and again, each costing a stat (wsdashboard.FileCache):
+	// the session record's part files (with their bytes, which the
+	// fingerprint hashes) and the live snapshots HashLiveStores folds.
+	// Parsed values are shared: the source only reads them. The mailbox
+	// state (reply registry, scope stores, history) is read from the
+	// memory-first mailbox store, which needs no cache.
 	records   wsdashboard.FileCache[recordFile]
-	replies   wsdashboard.FileCache[wsmailbox.ReplyStore]
-	scopes    wsdashboard.FileCache[wsmailbox.StoreFile]
 	snapshots wsdashboard.SnapshotCache
-	// history caches the mailbox history entries the pages read.
-	history mailboxHistoryCache
 
 	// prints is each session's last ReadSession fingerprint, which tells a
 	// changed re-read from an unchanged one for the counters; guarded by mu.
@@ -838,8 +835,6 @@ func (src *DashboardSessionSource) Counters() map[string]int64 {
 		"session_reads_unchanged": src.readsUnchanged.Load(),
 	}
 	out["record_cache_hits"], out["record_cache_misses"] = src.records.Counts()
-	out["reply_registry_cache_hits"], out["reply_registry_cache_misses"] = src.replies.Counts()
-	out["scope_store_cache_hits"], out["scope_store_cache_misses"] = src.scopes.Counts()
 	out["source_snapshot_cache_hits"], out["source_snapshot_cache_misses"] = src.snapshots.Counts()
 	return out
 }
@@ -858,16 +853,13 @@ func (src *DashboardSessionSource) invalidateSession(reg wsdashboard.Registratio
 			src.records.InvalidateUnder(d.legacyPath(key))
 		}
 	}
-	if path, err := wsmailbox.ReplyRegistryPath(); err == nil {
-		src.replies.InvalidateUnder(path)
-	}
 	if dir, err := src.resolveStateDir(); err == nil {
 		src.snapshots.Invalidate(dir, reg.ReplyID)
 	}
 }
 
 // ForgetSession drops what the source keeps of a session the daemon's index
-// dropped: its last fingerprint, its mailbox history entries, its board
+// dropped: its last fingerprint, its board
 // renders, its cached record files, and its cached snapshot
 // (wsdashboard.SessionForgetter).
 func (src *DashboardSessionSource) ForgetSession(replyID string) {
@@ -875,7 +867,6 @@ func (src *DashboardSessionSource) ForgetSession(replyID string) {
 	delete(src.prints, replyID)
 	keys := src.byReply[replyID]
 	src.mu.Unlock()
-	src.history.forget(replyID)
 	src.boards.forget(replyID)
 	if d, err := src.store.dirs(); err == nil {
 		for _, key := range keys {
@@ -950,15 +941,14 @@ func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (ws
 		src.nonLiveRead("mailbox-history")
 	}
 	io.WriteString(h, "\x00history")
-	if dir, err := mailboxHistoryDir("", key); err == nil {
-		names, _ := mailboxHistoryEntryNames(dir)
-		for _, name := range names {
-			io.WriteString(h, "\x00"+name)
+	if history, err := readMailboxHistory("", key); err == nil {
+		for _, r := range history {
+			io.WriteString(h, "\x00"+r.Name)
 		}
 	}
 	io.WriteString(h, "\x00contacts")
 	if repliesOK {
-		for _, c := range src.contactsFromRead(reg, replies, true) {
+		for _, c := range src.contactsFrom(reg, replies) {
 			fmt.Fprintf(h, "\x00%s\x01%s\x01%s\x01%s", c.Address, c.ReplyID, c.LastExchange.UTC().Format(time.RFC3339), c.Cwd)
 		}
 	}

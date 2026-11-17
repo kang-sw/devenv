@@ -3,7 +3,6 @@ package wsmailbox
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -16,20 +15,23 @@ var errNoUndelivered = errors.New("no undelivered mail")
 // UndeliveredRetryInterval retains the former failed-delivery retry cadence.
 const UndeliveredRetryInterval = 30 * time.Second
 
-// QueueStore is one authoritative queue file. An empty scope names the reply
-// registry; other scopes are the existing named mailbox tiers.
+// QueueStore is one queue store, named by its legacy file path. An empty
+// scope names the reply registry; other scopes are the named mailbox tiers.
 type QueueStore struct {
 	Path  string
 	Scope Scope
 }
 
-// UndeliveredSweep resolves its authority once. It keeps no queue contents:
-// every due/changed store is rechecked under its existing writer lock.
+// UndeliveredSweep resolves its authority once and sweeps the memory store.
 type UndeliveredSweep struct {
+	store                 Store
 	reply, machine, cache string
 }
 
 func NewUndeliveredSweep(p Paths) (*UndeliveredSweep, error) {
+	// The store first: it settles the cache root the paths below resolve
+	// under (Paths.Store).
+	store := p.Store()
 	reply, err := p.ReplyRegistry()
 	if err != nil {
 		return nil, err
@@ -42,26 +44,20 @@ func NewUndeliveredSweep(p Paths) (*UndeliveredSweep, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &UndeliveredSweep{reply: reply, machine: machine, cache: cache}, nil
+	return &UndeliveredSweep{store: store, reply: filepath.Clean(reply), machine: filepath.Clean(machine), cache: cache}, nil
 }
 
-// Stores is startup/safety discovery, including queues whose sessions exited.
-// Fixed absent paths are harmless: Sweep never creates an absent source store.
+// Stores is startup/safety discovery: the reply registry and every named
+// store the memory store holds, including queues whose sessions exited.
 func (s *UndeliveredSweep) Stores() ([]QueueStore, error) {
-	stores := []QueueStore{{Path: s.reply}, {Path: s.machine, Scope: ScopeMachine}}
-	for _, tier := range []struct {
-		pattern string
-		scope   Scope
-	}{
-		{filepath.Join(s.cache, "proj", "*", storeFileName), ScopeWorktree},
-		{filepath.Join(s.cache, "proj", "*", "shared", storeFileName), ScopeClone},
-	} {
-		paths, err := filepath.Glob(tier.pattern)
-		if err != nil {
-			return nil, err
-		}
-		for _, path := range paths {
-			stores = append(stores, QueueStore{Path: path, Scope: tier.scope})
+	_, named, err := s.store.QueuePaths()
+	if err != nil {
+		return nil, err
+	}
+	stores := []QueueStore{{Path: s.reply}}
+	for _, path := range named {
+		if target, ok := s.Target(path); ok {
+			stores = append(stores, target)
 		}
 	}
 	return stores, nil
@@ -92,24 +88,13 @@ func (s *UndeliveredSweep) Target(path string) (QueueStore, bool) {
 }
 
 // Sweep handles one changed/due store and returns its earliest remaining
-// deadline. Zero means no pending notice. Receipts and side effects keep the
-// same lock ordering as the former whole-cache sweep.
+// deadline. Zero means no pending notice. The marks and the notices commit
+// in one transaction; a notice that could not be placed leaves its message
+// unmarked for the next sweep.
 func (s *UndeliveredSweep) Sweep(target QueueStore, now time.Time, threshold time.Duration) (posted int, next time.Time, err error) {
 	valid, ok := s.Target(target.Path)
 	if !ok || valid != target {
 		return 0, time.Time{}, fmt.Errorf("undelivered mail: store is outside this sweep")
-	}
-	if _, err := os.Stat(target.Path); err != nil {
-		if os.IsNotExist(err) {
-			return 0, time.Time{}, nil
-		}
-		return 0, time.Time{}, err
-	}
-	postNamed := func(path, name, content string) error {
-		return WithLock(path, func(store *StoreFile) error {
-			store.Queues = postSystem(store.Queues, name, content, now)
-			return nil
-		})
 	}
 	var errs []error
 	record := func(e error) {
@@ -117,11 +102,24 @@ func (s *UndeliveredSweep) Sweep(target QueueStore, now time.Time, threshold tim
 			errs = append(errs, e)
 		}
 	}
-	if target.Scope == "" {
-		record(WithReplyLock(target.Path, func(store *ReplyStore) error {
-			err := sweepQueues(store.Queues, now, threshold, func(name string) string { return ReplyIDPrefix + name }, func(sender Address, content string) error {
+	record(s.store.Update("sweep", func(tx *Tx) error {
+		postNamed := func(path, name, content string) error {
+			store, err := tx.Named(path)
+			if err != nil {
+				return err
+			}
+			store.Queues = postSystem(store.Queues, name, content, now)
+			return nil
+		}
+		postReply := func(replyID, content string) {
+			reply := tx.Reply()
+			reply.Queues = postSystem(reply.Queues, replyID, content, now)
+		}
+		if target.Scope == "" {
+			reply := tx.Reply()
+			err := sweepQueues(reply.Queues, now, threshold, func(name string) string { return ReplyIDPrefix + name }, func(sender Address, content string) error {
 				if sender.Kind == AddressReplyID {
-					store.Queues = postSystem(store.Queues, sender.ReplyID, content, now)
+					postReply(sender.ReplyID, content)
 				} else if sender.Scope == ScopeMachine {
 					if err := postNamed(s.machine, sender.Name, content); err != nil {
 						return err
@@ -132,32 +130,31 @@ func (s *UndeliveredSweep) Sweep(target QueueStore, now time.Time, threshold tim
 				posted++
 				return nil
 			}, record)
-			next = nextUndelivered(store.Queues, now, threshold)
+			next = nextUndelivered(reply.Queues, now, threshold)
 			return err
-		}))
-	} else {
-		record(WithLock(target.Path, func(store *StoreFile) error {
-			err := sweepQueues(store.Queues, now, threshold, func(name string) string { return name + "@" + string(target.Scope) }, func(sender Address, content string) error {
-				if sender.Kind == AddressReplyID {
-					if err := PostSystem(s.reply, sender.ReplyID, "", content, now); err != nil {
-						return err
-					}
-				} else if sender.Scope == target.Scope {
-					store.Queues = postSystem(store.Queues, sender.Name, content, now)
-				} else if sender.Scope == ScopeMachine {
-					if err := postNamed(s.machine, sender.Name, content); err != nil {
-						return err
-					}
-				} else {
-					return fmt.Errorf("undelivered mail: named queue has incompatible sender scope")
+		}
+		store, err := tx.Named(target.Path)
+		if err != nil {
+			return err
+		}
+		err = sweepQueues(store.Queues, now, threshold, func(name string) string { return name + "@" + string(target.Scope) }, func(sender Address, content string) error {
+			if sender.Kind == AddressReplyID {
+				postReply(sender.ReplyID, content)
+			} else if sender.Scope == target.Scope {
+				store.Queues = postSystem(store.Queues, sender.Name, content, now)
+			} else if sender.Scope == ScopeMachine {
+				if err := postNamed(s.machine, sender.Name, content); err != nil {
+					return err
 				}
-				posted++
-				return nil
-			}, record)
-			next = nextUndelivered(store.Queues, now, threshold)
-			return err
-		}))
-	}
+			} else {
+				return fmt.Errorf("undelivered mail: named queue has incompatible sender scope")
+			}
+			posted++
+			return nil
+		}, record)
+		next = nextUndelivered(store.Queues, now, threshold)
+		return err
+	}))
 	return posted, next, errors.Join(errs...)
 }
 

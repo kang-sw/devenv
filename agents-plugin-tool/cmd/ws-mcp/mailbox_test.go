@@ -164,9 +164,12 @@ func TestMailboxWaitListeningMarkerLifecycle(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", cacheHomeFromEnv(t, env))
 
 	const sessionKey = "amber-tide-fox"
-	markerPath, err := wsmailbox.ListeningMarkerPath(sessionKey)
-	if err != nil {
-		t.Fatalf("ListeningMarkerPath: %v", err)
+	armed := func() bool {
+		_, ok, err := wsmailbox.ReadListeningMarker(sessionKey)
+		if err != nil {
+			t.Fatalf("ReadListeningMarker: %v", err)
+		}
+		return ok
 	}
 
 	cmd := exec.Command(bin, "mailbox", "wait", "--session-key", sessionKey, "--timeout", "3s")
@@ -177,12 +180,12 @@ func TestMailboxWaitListeningMarkerLifecycle(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if _, statErr := os.Stat(markerPath); statErr == nil {
+		if armed() {
 			break
 		}
 		if time.Now().After(deadline) {
 			_ = cmd.Process.Kill()
-			t.Fatalf("listening marker not written within 2s at %s", markerPath)
+			t.Fatalf("listening marker not written within 2s")
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -193,8 +196,8 @@ func TestMailboxWaitListeningMarkerLifecycle(t *testing.T) {
 		t.Fatalf("mailbox wait ended unexpectedly (want timeout exit %d): err=%v", mailboxWaitExitTimeout, waitErr)
 	}
 
-	if _, statErr := os.Stat(markerPath); !os.IsNotExist(statErr) {
-		t.Fatalf("listening marker still present after mailbox wait exited: err=%v", statErr)
+	if armed() {
+		t.Fatalf("listening marker still present after mailbox wait exited")
 	}
 }
 
@@ -497,7 +500,7 @@ func seedNamedInbox(t *testing.T, env []string, name, ownerKey, content string) 
 	if err != nil {
 		t.Fatalf("MachinePath: %v", err)
 	}
-	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+	if err := (wsmailbox.Paths{}).Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 		store.Presence[name] = wsmailbox.Presence{Name: name, Scope: wsmailbox.ScopeMachine, Owner: ownerKey, LastSeen: "2026-09-13T00:00:00Z"}
 		store.Queues = wsmailbox.AppendQueue(store.Queues, name, wsmailbox.Envelope{Content: content, SentAt: "2026-09-13T00:00:00Z"})
 		return nil
@@ -515,11 +518,7 @@ func seedReplyMail(t *testing.T, env []string, sessionKey, content string) {
 	t.Setenv("WS_CACHE_HOME", cacheHomeFromEnv(t, env))
 
 	replyID := wsmailbox.ReplyID(sessionKey)
-	path, err := wsmailbox.ReplyRegistryPath()
-	if err != nil {
-		t.Fatalf("ReplyRegistryPath: %v", err)
-	}
-	if err := wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error {
+	if err := (wsmailbox.Paths{}).Store().WithReplyLock(func(store *wsmailbox.ReplyStore) error {
 		store.Queues = wsmailbox.AppendQueue(store.Queues, replyID, wsmailbox.Envelope{Content: content, SentAt: "2026-09-13T00:00:00Z"})
 		return nil
 	}); err != nil {

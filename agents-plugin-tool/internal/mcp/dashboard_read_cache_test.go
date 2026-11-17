@@ -105,13 +105,9 @@ func TestDashboardReplyRegistryKeysTheBoardByWhatItShows(t *testing.T) {
 	}
 	reg := wsdashboard.Registration{ReplyID: replyB, Project: recB.Root}
 	src := dashboardPageSource(t, nil)
-	replyPath, err := wsmailbox.ReplyRegistryPath()
-	if err != nil {
-		t.Fatal(err)
-	}
 	edit := func(fn func(st *wsmailbox.ReplyStore)) {
 		t.Helper()
-		if err := wsmailbox.WithReplyLock(replyPath, func(st *wsmailbox.ReplyStore) error {
+		if err := (wsmailbox.Paths{}).Store().WithReplyLock(func(st *wsmailbox.ReplyStore) error {
 			fn(st)
 			return nil
 		}); err != nil {

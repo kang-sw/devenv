@@ -323,7 +323,7 @@ func TestDashboardOffWritesNothing(t *testing.T) {
 			}
 		}
 	}
-	if names := historyEntryFiles(t, f.keyA); len(names) != 1 {
+	if names := historyEntryNames(t, f.keyA); len(names) != 1 {
 		t.Fatalf("mailbox history changed with the dashboard off: %v", names)
 	}
 }
@@ -782,7 +782,6 @@ func gitCmd(t *testing.T, dir string, args ...string) {
 func TestLiveSessionSurvivesAnUnreadableRecord(t *testing.T) {
 	f := newLiveFixture(t, true)
 	fastLive(t, 20*time.Millisecond)
-	resetMailboxHistoryClock(t)
 	advance := intakeClock(f.server)
 	d, err := f.server.sessions.dirs()
 	if err != nil {

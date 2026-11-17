@@ -79,7 +79,7 @@ func TestPathsAreSiblingsOfNoteStores(t *testing.T) {
 
 func TestLoadMissingFileReturnsEmptyStore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mailbox.json")
-	store, err := Load(path)
+	store, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestLoadMissingFileReturnsEmptyStore(t *testing.T) {
 func TestWithLockRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mailbox.json")
 
-	err := WithLock(path, func(store *StoreFile) error {
+	err := WithFileLock(path, func(store *StoreFile) error {
 		store.Presence["alice"] = Presence{Name: "alice", Scope: ScopeMachine, LastSeen: "2026-09-13T00:00:00Z"}
 		store.Queues = AppendQueue(store.Queues, "alice", Envelope{Content: "hi", SentAt: "2026-09-13T00:00:00Z"})
 		return nil
@@ -103,7 +103,7 @@ func TestWithLockRoundTrip(t *testing.T) {
 		t.Fatalf("WithLock: %v", err)
 	}
 
-	store, err := Load(path)
+	store, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestLoadRejectsCorruptStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store, err := Load(path)
+	store, err := LoadFile(path)
 	if err == nil {
 		t.Fatalf("Load(corrupt) returned nil error; a malformed store must surface a parse error, not silently zero out")
 	}
@@ -180,7 +180,7 @@ func TestWithLockTimesOutWhenLockHeld(t *testing.T) {
 	defer holder.Unlock() //nolint:errcheck
 
 	start := time.Now()
-	err = WithLock(path, func(*StoreFile) error {
+	err = WithFileLock(path, func(*StoreFile) error {
 		t.Fatalf("WithLock body ran while the lock was held by another handle")
 		return nil
 	})

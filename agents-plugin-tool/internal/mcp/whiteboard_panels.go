@@ -200,11 +200,9 @@ func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	if in.mailbox.owner {
 		named = in.mailbox.identity.address()
 	}
-	if in.watch != nil {
-		if dir, err := mailboxHistoryDir(in.cacheHome, in.sessionKey); err == nil {
-			in.watch(dir)
-		}
-	}
+	// The mailbox state is in the memory store, not a watched file: a
+	// served page learns of its changes from the mail print
+	// (DashboardSessionSource.MailPrint) and the store's queue hints.
 	readHistory := in.history
 	if readHistory == nil {
 		readHistory = func() ([]mailboxHistoryRecord, error) { return readMailboxHistory(in.cacheHome, in.sessionKey) }
@@ -221,26 +219,19 @@ func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	unread := 0
 	if named != "" {
 		if path, err := in.paths.ForScope(in.mailbox.identity.Scope, in.root); err == nil {
-			if in.watch != nil {
-				in.watch(path)
-			}
-			if store, err := wsmailbox.Load(path); err == nil {
-				unread += len(store.Queues[in.mailbox.identity.Name])
+			if _, _, queue, err := in.paths.Store().NamedQueue(path, in.mailbox.identity.Name); err == nil {
+				unread += len(queue)
 			}
 		}
 	}
-	// The reply registry is not watched: a served board's memo keys on the
-	// part of it the panel shows (replyPrint), so a rewrite for another
-	// session or a heartbeat rebuilds no board.
+	// A served board's memo keys on the part of the reply registry the
+	// panel shows (replyPrint), so a change for another session or a
+	// heartbeat rebuilds no board.
 	var entry wsmailbox.ReplyEntry
 	readReplies := in.replies
 	if readReplies == nil {
 		readReplies = func() (wsmailbox.ReplyStore, bool) {
-			path, err := in.paths.ReplyRegistry()
-			if err != nil {
-				return wsmailbox.ReplyStore{}, false
-			}
-			store, err := wsmailbox.LoadReplyStore(path)
+			store, err := in.paths.Store().LoadReply()
 			return store, err == nil
 		}
 	}
@@ -255,11 +246,6 @@ func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 		return panel, true
 	}
 
-	if in.watch != nil {
-		if path, err := in.paths.ListeningMarker(in.sessionKey); err == nil {
-			in.watch(path)
-		}
-	}
 	if whiteboardMailboxListening(in.paths, in.sessionKey) {
 		status = wsi18n.T(in.lang, "panel.mail.unread.wait", unread)
 	}

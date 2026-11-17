@@ -203,16 +203,12 @@ func (m *LeadMailbox) Return(root, key string, texts []string) error {
 	if _, found := m.server.lookupSession(key); !found {
 		return fmt.Errorf("mailbox: unknown session key")
 	}
-	path, err := m.server.mailboxPaths().ReplyRegistry()
-	if err != nil {
-		return err
-	}
 	returned := make([]wsmailbox.Envelope, 0, len(texts))
 	for _, text := range texts {
 		returned = append(returned, parseMailText(text))
 	}
 	replyID := m.server.mailboxReplyID(key)
-	if err := wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error {
+	if err := m.server.mailboxPaths().Store().WithReplyLock(func(store *wsmailbox.ReplyStore) error {
 		if store.Queues == nil {
 			store.Queues = map[string][]wsmailbox.Envelope{}
 		}

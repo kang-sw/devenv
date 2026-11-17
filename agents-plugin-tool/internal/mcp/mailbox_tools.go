@@ -67,19 +67,21 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 
 	// Universal send + always-on reply-id (Decision 11): every send opens/
 	// refreshes the sender's own return channel, regardless of whether it
-	// also holds a durable slug. The same locked write records the target as
-	// one of the caller's correspondents; a slug target's presence metadata
-	// is read here, before the reply lock.
+	// also holds a durable slug, and records the target as one of the
+	// caller's correspondents. That, the enqueue, and the sender's history
+	// entry are one store transaction: one ring record.
 	counterparty := wsmailbox.ReplyIDPrefix + addr.ReplyID
+	var targetPath string
 	if addr.Kind == wsmailbox.AddressSlug {
 		counterparty = addr.Name + "@" + string(addr.Scope)
+		path, perr := s.mailboxPaths().ForScope(addr.Scope, entry.root)
+		if perr != nil {
+			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, perr))
+		}
+		targetPath = path
 	}
-	replyID, err := s.publishReplyID(sessionKey, entry.root, ownNamed, mailboxContactFor(s.mailboxPaths(), counterparty, entry.root))
-	if err != nil {
-		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
-	}
-	s.markMailboxReplyOpened(sessionKey)
-
+	contact := mailboxContactFor(s.mailboxPaths(), counterparty, entry.root)
+	replyID := s.mailboxReplyID(sessionKey)
 	now := mailboxNowString()
 
 	replyTo := ""
@@ -90,31 +92,34 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 		content = stampPeerLeadNote(content, s.currentHarness(), s.runtimeNamespace())
 	}
 	envelope := wsmailbox.Envelope{From: from, ReplyTo: replyTo, Content: content, SentAt: now}
+	sent := []mailboxHistoryEntry{{Direction: mailboxHistorySent, Counterparty: counterparty, Body: envelope.Content}}
 
-	switch addr.Kind {
-	case wsmailbox.AddressSlug:
-		path, perr := s.mailboxPaths().ForScope(addr.Scope, entry.root)
-		if perr != nil {
-			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, perr))
-		}
-		if werr := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+	var historyNames []string
+	werr := s.mailboxPaths().Store().Update("send", func(tx *wsmailbox.Tx) error {
+		reply := tx.Reply()
+		s.publishReplyEntry(reply, sessionKey, entry.root, ownNamed, contact)
+		switch addr.Kind {
+		case wsmailbox.AddressSlug:
+			store, err := tx.Named(targetPath)
+			if err != nil {
+				return err
+			}
 			store.Queues = wsmailbox.AppendQueue(store.Queues, addr.Name, envelope)
-			return nil
-		}); werr != nil {
-			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, werr))
+		case wsmailbox.AddressReplyID:
+			reply.Queues = wsmailbox.AppendQueue(reply.Queues, addr.ReplyID, envelope)
 		}
-	case wsmailbox.AddressReplyID:
-		path, perr := s.mailboxPaths().ReplyRegistry()
-		if perr != nil {
-			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, perr))
+		// A failed history stamp is logged, never surfaced: the mail goes.
+		names, herr := appendMailboxHistoryTx(tx, sessionKey, sent)
+		if herr != nil {
+			s.debugEvent("mailbox.history_write_error", map[string]any{"error": herr.Error()})
 		}
-		if werr := wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error {
-			store.Queues = wsmailbox.AppendQueue(store.Queues, addr.ReplyID, envelope)
-			return nil
-		}); werr != nil {
-			return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, werr))
-		}
+		historyNames = names
+		return nil
+	})
+	if werr != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, werr))
 	}
+	s.markMailboxReplyOpened(sessionKey)
 
 	// The send is enqueued: wake the mailbox waits. One this process hosts
 	// (a daemon-hosted server) sees the in-process signal; on the direct
@@ -123,11 +128,7 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 	if s.live.host == nil {
 		s.dashboardMailNudge(sessionKey, entry.root)
 	}
-
-	// The send is enqueued: record it in the caller's history ring. A failed
-	// ring write is logged inside, never surfaced.
-	sent := []mailboxHistoryEntry{{Direction: mailboxHistorySent, Counterparty: counterparty, Body: envelope.Content}}
-	s.recordLiveMail(sessionKey, sent, s.recordMailboxHistory(sessionKey, sent))
+	s.recordLiveMail(sessionKey, sent[:len(historyNames)], historyNames)
 
 	stampLabel, stampValue := "reply_to", replyTo
 	if from != "" {
@@ -176,8 +177,9 @@ func (s *Server) handleMailboxRecv(id json.RawMessage, args map[string]any) resp
 // claimMail removes every message waiting for sessionKey from the queues it
 // may drain (its owned named inbox and its own reply-id queue), oldest
 // first, and records the claim: the senders as correspondents and one
-// received entry per message in the session's mail history. history and
-// keys are those entries and their file names (recordMailboxHistory), for
+// received entry per message in the session's mail history, all in one
+// store transaction, so mail leaves its queue only together with its
+// history entry. history and keys are those entries and their names, for
 // the caller's mail lines in the conversation ring. mailbox.recv and the
 // dashboard daemon's delivery to a session it hosts (LeadMailbox) both
 // claim through it, so a message one of them took is gone for the other.
@@ -185,66 +187,93 @@ func (s *Server) claimMail(sessionKey string, entry sessionEntry) (drained []wsm
 	var readErrs []error
 
 	// Named-inbox drain: only when this session currently holds the owner
-	// pointer (server-layer caller==owner gate, Decision 3). The tentative
-	// drain is accumulated in a block-local slice and only merged into the
-	// result after WithLock's write (temp+rename) has actually succeeded:
-	// merging it beforehand — while the closure return value is still
-	// pending the real disk write — risks reporting a message as delivered
-	// while it is still sitting in the on-disk queue, causing a duplicate
-	// delivery on the next recv.
-	ownNamed := ""
-	if isOwner, identity, oerr := s.mailboxOwnerCheck(sessionKey, entry.root); oerr != nil {
+	// pointer (server-layer caller==owner gate, Decision 3).
+	ownNamed, namedPath := "", ""
+	var identity mailboxIdentity
+	if isOwner, id, oerr := s.mailboxOwnerCheck(sessionKey, entry.root); oerr != nil {
 		readErrs = append(readErrs, fmt.Errorf("named-inbox owner check: %w", oerr))
 	} else if isOwner {
+		identity = id
 		ownNamed = identity.address()
 		if path, perr := s.mailboxPaths().ForScope(identity.Scope, entry.root); perr != nil {
 			readErrs = append(readErrs, fmt.Errorf("named-inbox path: %w", perr))
 		} else {
-			var ownerDrained []wsmailbox.Envelope
-			now := mailboxNowString()
-			werr := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
-				ownerDrained = append(ownerDrained, store.Queues[identity.Name]...)
-				delete(store.Queues, identity.Name)
-				if p, ok := store.Presence[identity.Name]; ok {
-					p.LastSeen = now
-					store.Presence[identity.Name] = p
-				}
-				return nil
-			})
-			if werr != nil {
-				readErrs = append(readErrs, fmt.Errorf("named-inbox drain: %w", werr))
-			} else {
-				drained = append(drained, ownerDrained...)
-			}
+			namedPath = path
 		}
 	}
 
 	// Own reply-id queue: always drained, authorized intrinsically by the
 	// caller's own session_key (Decision 3's carve-out), independent of
-	// owner status. Same drain-after-confirmed-write discipline as above.
+	// owner status.
 	replyID := s.mailboxReplyID(sessionKey)
-	if path, perr := s.mailboxPaths().ReplyRegistry(); perr != nil {
-		readErrs = append(readErrs, fmt.Errorf("reply-id registry path: %w", perr))
-	} else {
-		var replyDrained []wsmailbox.Envelope
-		werr := wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error {
-			replyDrained = append(replyDrained, store.Queues[replyID]...)
-			delete(store.Queues, replyID)
-			return nil
-		})
-		if werr != nil {
-			readErrs = append(readErrs, fmt.Errorf("reply-id drain: %w", werr))
-		} else {
-			drained = append(drained, replyDrained...)
+	paths := s.mailboxPaths()
+	werr := paths.Store().Update("recv", func(tx *wsmailbox.Tx) error {
+		drained, history, keys = nil, nil, nil
+		if namedPath != "" {
+			if store, nerr := tx.Named(namedPath); nerr != nil {
+				readErrs = append(readErrs, fmt.Errorf("named-inbox drain: %w", nerr))
+			} else {
+				drained = append(drained, store.Queues[identity.Name]...)
+				delete(store.Queues, identity.Name)
+				if p, ok := store.Presence[identity.Name]; ok {
+					p.LastSeen = mailboxNowString()
+					store.Presence[identity.Name] = p
+				}
+			}
 		}
+		reply := tx.Reply()
+		drained = append(drained, reply.Queues[replyID]...)
+		delete(reply.Queues, replyID)
+		if len(drained) == 0 {
+			return nil
+		}
+		sort.SliceStable(drained, func(i, j int) bool { return drained[i].SentAt < drained[j].SentAt })
+
+		// Each drained envelope's counterparty (its From, else its ReplyTo:
+		// the handle recv displays and replies to) becomes one of the
+		// caller's correspondents; publishReplyEntry skips the caller's own
+		// reply-id and owned named inbox.
+		seen := map[string]bool{}
+		var contacts []mailboxContact
+		for _, m := range drained {
+			handle := m.From
+			if handle == "" {
+				handle = m.ReplyTo
+			}
+			if handle == "" || seen[handle] {
+				continue
+			}
+			seen[handle] = true
+			contacts = append(contacts, mailboxContactInTx(tx, paths, handle, entry.root))
+		}
+		if len(contacts) > 0 {
+			s.publishReplyEntry(reply, sessionKey, entry.root, ownNamed, contacts...)
+		}
+
+		// One received history entry per message, in the order recv
+		// returns them. A failed stamp is logged, never surfaced: the
+		// drained mail must still be returned.
+		history = make([]mailboxHistoryEntry, 0, len(drained))
+		for _, m := range drained {
+			history = append(history, mailboxHistoryEntry{Direction: mailboxHistoryRecv, Counterparty: mailboxSender(m), Body: m.Content})
+		}
+		names, herr := appendMailboxHistoryTx(tx, sessionKey, history)
+		if herr != nil {
+			s.debugEvent("mailbox.history_write_error", map[string]any{"error": herr.Error()})
+		}
+		history, keys = history[:len(names)], names
+		return nil
+	})
+	if werr != nil {
+		// Nothing committed: every message is still queued.
+		return nil, nil, nil, fmt.Errorf("mailbox drain: %w", werr)
 	}
 
 	// A genuine storage error must not be reported as "no unread mail": that
 	// would silently hide mail the caller cannot currently reach behind an
 	// indistinguishable empty-inbox response. Partial success (one queue
 	// drained, the other errored) still returns what was actually drained,
-	// with the error only logged — failing the whole call would discard
-	// mail that *was* successfully retrieved.
+	// with the error only logged.
 	if len(readErrs) > 0 {
 		if len(drained) == 0 {
 			return nil, nil, nil, readErrs[0]
@@ -253,54 +282,7 @@ func (s *Server) claimMail(sessionKey string, entry sessionEntry) (drained []wsm
 			s.debugEvent("mailbox.recv_partial_error", map[string]any{"error": rerr.Error()})
 		}
 	}
-
-	sort.SliceStable(drained, func(i, j int) bool { return drained[i].SentAt < drained[j].SentAt })
-	s.recordMailboxRecvContacts(sessionKey, entry.root, ownNamed, drained)
-	history, keys = s.recordMailboxRecvHistory(sessionKey, drained)
 	return drained, history, keys, nil
-}
-
-// recordMailboxRecvContacts records each drained envelope's counterparty
-// (its From, else its ReplyTo — the handle recv displays and replies to) as
-// one of the caller's correspondents; publishReplyID skips the caller's own
-// reply-id and owned named inbox. Nothing drained records nothing and
-// creates no reply-id entry. A failed write is logged, never surfaced: the
-// drained mail has already left its queue and must still be returned.
-func (s *Server) recordMailboxRecvContacts(sessionKey, root, ownNamed string, drained []wsmailbox.Envelope) {
-	seen := map[string]bool{}
-	var contacts []mailboxContact
-	for _, m := range drained {
-		handle := m.From
-		if handle == "" {
-			handle = m.ReplyTo
-		}
-		if handle == "" || seen[handle] {
-			continue
-		}
-		seen[handle] = true
-		contacts = append(contacts, mailboxContactFor(s.mailboxPaths(), handle, root))
-	}
-	if len(contacts) == 0 {
-		return
-	}
-	if _, err := s.publishReplyID(sessionKey, root, ownNamed, contacts...); err != nil {
-		s.debugEvent("mailbox.recv_contact_error", map[string]any{"error": err.Error()})
-	}
-}
-
-// recordMailboxRecvHistory appends each drained envelope to the caller's
-// history ring, one entry per message in the order recv returns them (each
-// queue's order is kept: the SentAt sort is stable). drained holds only mail
-// whose drain write was confirmed. A failed ring write is logged inside, never
-// surfaced: the drained mail must still be returned. It returns the entries
-// and their history file names, which become mail lines in the session's
-// conversation ring.
-func (s *Server) recordMailboxRecvHistory(sessionKey string, drained []wsmailbox.Envelope) ([]mailboxHistoryEntry, []string) {
-	entries := make([]mailboxHistoryEntry, 0, len(drained))
-	for _, m := range drained {
-		entries = append(entries, mailboxHistoryEntry{Direction: mailboxHistoryRecv, Counterparty: mailboxSender(m), Body: m.Content})
-	}
-	return entries, s.recordMailboxHistory(sessionKey, entries)
 }
 
 // mailboxPeerOut is lookup_peers' per-peer JSON/text shape.
@@ -349,7 +331,7 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 	if perr != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, perr))
 	}
-	store, lerr := wsmailbox.Load(path)
+	store, lerr := s.mailboxPaths().Store().Load(path)
 	if lerr != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, lerr))
 	}
@@ -454,13 +436,11 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 	// (delivery, not enumeration): other sessions' reply-ids stay
 	// undiscoverable.
 	correspondents := []mailboxCorrespondentOut{}
-	if path, perr := s.mailboxPaths().ReplyRegistry(); perr == nil {
-		if registry, lerr := wsmailbox.LoadReplyStore(path); lerr == nil {
-			for _, c := range wsmailbox.SortedContacts(registry.Entries[s.mailboxReplyID(sessionKey)].Contacts) {
-				correspondents = append(correspondents, mailboxCorrespondentOut{
-					Address: c.Address, LastExchange: c.LastExchange, Harness: c.Harness, Cwd: c.Cwd,
-				})
-			}
+	if registry, lerr := s.mailboxPaths().Store().LoadReply(); lerr == nil {
+		for _, c := range wsmailbox.SortedContacts(registry.Entries[s.mailboxReplyID(sessionKey)].Contacts) {
+			correspondents = append(correspondents, mailboxCorrespondentOut{
+				Address: c.Address, LastExchange: c.LastExchange, Harness: c.Harness, Cwd: c.Cwd,
+			})
 		}
 	}
 
@@ -590,8 +570,8 @@ func (s *Server) mailboxPiggybackBadge(sessionKey string) string {
 		s.refreshMailboxPresenceHeartbeat(record.Root)
 		if isOwner, _, oerr := s.mailboxOwnerCheck(sessionKey, record.Root); oerr == nil && isOwner {
 			if path, perr := s.mailboxPaths().ForScope(identity.Scope, record.Root); perr == nil {
-				if store, lerr := wsmailbox.Load(path); lerr == nil {
-					if queue := store.Queues[identity.Name]; len(queue) > 0 {
+				if _, _, queue, lerr := s.mailboxPaths().Store().NamedQueue(path, identity.Name); lerr == nil {
+					if len(queue) > 0 {
 						unread += len(queue)
 						senders = append(senders, mailboxSenderLabels(queue)...)
 					}
@@ -602,13 +582,9 @@ func (s *Server) mailboxPiggybackBadge(sessionKey string) string {
 
 	if checkReply {
 		replyID := s.mailboxReplyID(sessionKey)
-		if path, perr := s.mailboxPaths().ReplyRegistry(); perr == nil {
-			if store, lerr := wsmailbox.LoadReplyStore(path); lerr == nil {
-				if queue := store.Queues[replyID]; len(queue) > 0 {
-					unread += len(queue)
-					senders = append(senders, mailboxSenderLabels(queue)...)
-				}
-			}
+		if queue, lerr := s.mailboxPaths().Store().ReplyQueue(replyID); lerr == nil && len(queue) > 0 {
+			unread += len(queue)
+			senders = append(senders, mailboxSenderLabels(queue)...)
 		}
 	}
 
@@ -619,7 +595,7 @@ func (s *Server) mailboxPiggybackBadge(sessionKey string) string {
 }
 
 // mailboxSystemSender labels a message the ws runtime posted itself
-// (wsmailbox.PostSystem): one with neither a From nor a ReplyTo, which has
+// (wsmailbox.Store.PostSystem): one with neither a From nor a ReplyTo, which has
 // no address to answer.
 const mailboxSystemSender = "system"
 

@@ -224,7 +224,7 @@ func TestHostedServersReadOnlyTheirOwnEnvironment(t *testing.T) {
 	if filepath.Dir(path) != alpha.configHome {
 		t.Fatalf("alpha's machine store = %s, want under %s", path, alpha.configHome)
 	}
-	store, err := wsmailbox.Load(path)
+	store, err := (wsmailbox.Paths{}).Store().Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestHostedServersReadOnlyTheirOwnEnvironment(t *testing.T) {
 		t.Fatalf("presence PID = %d, want owner PID %d (process %d)", presence.PID, os.Getppid(), os.Getpid())
 	}
 	if procPath, err := wsmailbox.MachinePath(); err == nil {
-		if procStore, err := wsmailbox.Load(procPath); err == nil {
+		if procStore, err := (wsmailbox.Paths{}).Store().Load(procPath); err == nil {
 			if _, leaked := procStore.Presence["alpha"]; leaked {
 				t.Fatalf("alpha's presence landed in the process config home's store %s", procPath)
 			}
@@ -328,7 +328,7 @@ func TestHostedReconnectAdoptsOnlyLiveSamePIDRecords(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+		if err := (wsmailbox.Paths{}).Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 			if store.Presence == nil {
 				store.Presence = map[string]wsmailbox.Presence{}
 			}
@@ -396,7 +396,7 @@ func TestHostedReconnectAdoptsOnlyLiveSamePIDRecords(t *testing.T) {
 			if got := s.mailboxIdentityResolved().Name; got != "alpha-stem" {
 				t.Fatalf("server %d adopted %q, want alpha-stem", i, got)
 			}
-			store, err := wsmailbox.Load(path)
+			store, err := (wsmailbox.Paths{}).Store().Load(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -484,7 +484,7 @@ func TestHostedReconnectKeepsMailboxOwnershipAndAutoStem(t *testing.T) {
 			if second.mailboxHasConflict() {
 				t.Fatal("the owner's own record was taken for a conflict")
 			}
-			if store, err := wsmailbox.Load(path); err == nil {
+			if store, err := (wsmailbox.Paths{}).Store().Load(path); err == nil {
 				for name, p := range store.Presence {
 					if p.PID == os.Getppid() && name != identity.Name {
 						t.Fatalf("a second record %q was minted for the same owner: %+v", name, store.Presence)

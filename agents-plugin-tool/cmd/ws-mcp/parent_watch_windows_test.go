@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // Env keys that turn a re-executed test binary into the wait's helper parent.
@@ -54,11 +55,11 @@ func TestMailboxWait_EndsWhenParentExits(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", cacheHomeFromEnv(t, env))
 
 	const sessionKey = "amber-tide-fox"
-	markerPath, err := wsmailbox.ListeningMarkerPath(sessionKey)
+	cacheRoot, err := wsstate.CacheRoot(wsstate.Options{})
 	if err != nil {
-		t.Fatalf("ListeningMarkerPath: %v", err)
+		t.Fatalf("CacheRoot: %v", err)
 	}
-	lifecycleLog := filepath.Join(filepath.Dir(filepath.Dir(markerPath)), "crash", "mcp-lifecycle.log")
+	lifecycleLog := filepath.Join(cacheRoot, "crash", "mcp-lifecycle.log")
 
 	helper := exec.Command(os.Args[0], "-test.run=^TestMailboxWaitParentHelperProcess$")
 	helper.Env = append(env, waitParentHelperBinEnv+"="+bin, waitParentHelperKeyEnv+"="+sessionKey,
@@ -80,7 +81,7 @@ func TestMailboxWait_EndsWhenParentExits(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("listening marker not written within 10s at %s (err=%v)", markerPath, rerr)
+			t.Fatalf("listening marker not written within 10s (err=%v)", rerr)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -116,8 +117,8 @@ func TestMailboxWait_EndsWhenParentExits(t *testing.T) {
 	if code != mailboxWaitExitInterrupted {
 		t.Fatalf("mailbox wait exit code = %d, want the interrupted exit %d", code, mailboxWaitExitInterrupted)
 	}
-	if _, statErr := os.Stat(markerPath); !os.IsNotExist(statErr) {
-		t.Fatalf("listening marker still present after the orphaned wait exited: err=%v", statErr)
+	if _, ok, rerr := wsmailbox.ReadListeningMarker(sessionKey); rerr != nil || ok {
+		t.Fatalf("listening marker still present after the orphaned wait exited: ok=%v err=%v", ok, rerr)
 	}
 	raw, err := os.ReadFile(lifecycleLog)
 	if err != nil {

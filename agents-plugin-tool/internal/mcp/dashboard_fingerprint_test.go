@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -102,12 +103,8 @@ func TestDashboardFingerprintReadsNoTicket(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	replyPath, err := wsmailbox.ReplyRegistryPath()
-	if err != nil {
-		t.Fatal(err)
-	}
 	step("an unread reply-id message", func() {
-		if err := wsmailbox.WithReplyLock(replyPath, func(st *wsmailbox.ReplyStore) error {
+		if err := (wsmailbox.Paths{}).Store().WithReplyLock(func(st *wsmailbox.ReplyStore) error {
 			st.Queues = wsmailbox.AppendQueue(st.Queues, f.replyID(), wsmailbox.Envelope{From: "id:peer", Content: "hi", SentAt: now.UTC().Format(time.RFC3339)})
 			return nil
 		}); err != nil {
@@ -128,11 +125,12 @@ func TestDashboardFingerprintReadsNoTicket(t *testing.T) {
 	}
 }
 
-// TestDashboardHistoryCacheReadsEachEntryOnce pins the served page's
-// mailbox history cache: page reads parse each history entry once, a new
-// entry once more, the session keeps only the entries the ring holds, and
-// ForgetSession drops everything the source kept of the session.
-func TestDashboardHistoryCacheReadsEachEntryOnce(t *testing.T) {
+// TestDashboardPageServesHistoryFromStore pins the served page's mailbox
+// history: page reads take each entry's body from the memory store's
+// window, a new entry shows at the next read, the page shows only the
+// window, and ForgetSession drops everything the source kept of the
+// session.
+func TestDashboardPageServesHistoryFromStore(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	src := dashboardPageSource(t, nil)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
@@ -141,35 +139,22 @@ func TestDashboardHistoryCacheReadsEachEntryOnce(t *testing.T) {
 		t.Helper()
 		entries := make([]mailboxHistoryEntry, n)
 		for i := range entries {
-			entries[i] = mailboxHistoryEntry{Direction: mailboxHistorySent, Counterparty: "id:peer", Body: "message body"}
+			entries[i] = mailboxHistoryEntry{Direction: mailboxHistorySent, Counterparty: "id:peer", Body: fmt.Sprintf("message body %d", i)}
 		}
 		if _, err := appendMailboxHistory("", f.key, entries); err != nil {
 			t.Fatal(err)
 		}
 	}
-	parsed := func() int {
-		src.history.mu.Lock()
-		defer src.history.mu.Unlock()
-		return src.history.parsed
-	}
 	appendEntries(2)
 
 	page := readPageOK(t, src, reg)
-	if got := parsed(); got != 2 {
-		t.Fatalf("the first page read parsed %d history entries, want 2", got)
-	}
 	if len(page.MailBodies) != 2 {
 		t.Fatalf("mail bodies = %v", page.MailBodies)
 	}
-	readPageOK(t, src, reg)
-	readFingerprint(t, src, reg)
-	if got := parsed(); got != 2 {
-		t.Fatalf("re-reads parsed %d history entries again", got-2)
-	}
 	appendEntries(1)
 	page = readPageOK(t, src, reg)
-	if got := parsed(); got != 3 || len(page.MailBodies) != 3 {
-		t.Fatalf("a new entry: parsed %d (want 3), %d bodies", got, len(page.MailBodies))
+	if len(page.MailBodies) != 3 {
+		t.Fatalf("a new entry: %d bodies, want 3", len(page.MailBodies))
 	}
 	want, err := readMailboxHistory("", f.key)
 	if err != nil {
@@ -177,31 +162,24 @@ func TestDashboardHistoryCacheReadsEachEntryOnce(t *testing.T) {
 	}
 	for _, r := range want {
 		if page.MailBodies[r.Name] != r.Body {
-			t.Fatalf("the cached body of %s = %q, want %q", r.Name, page.MailBodies[r.Name], r.Body)
+			t.Fatalf("the body of %s = %q, want %q", r.Name, page.MailBodies[r.Name], r.Body)
 		}
 	}
 
 	appendEntries(mailboxHistoryCap + 3)
-	readPageOK(t, src, reg)
-	src.history.mu.Lock()
-	kept := len(src.history.sessions[reg.ReplyID].byName)
-	src.history.mu.Unlock()
-	if kept != mailboxHistoryCap {
-		t.Fatalf("the session keeps %d history entries, want the ring's %d", kept, mailboxHistoryCap)
+	if page = readPageOK(t, src, reg); len(page.MailBodies) != mailboxHistoryCap {
+		t.Fatalf("the page shows %d history entries, want the window's %d", len(page.MailBodies), mailboxHistoryCap)
 	}
 
 	src.ForgetSession(reg.ReplyID)
-	src.history.mu.Lock()
-	_, history := src.history.sessions[reg.ReplyID]
-	src.history.mu.Unlock()
 	src.mu.Lock()
 	_, print := src.prints[reg.ReplyID]
 	src.mu.Unlock()
 	src.boards.mu.Lock()
 	boards := len(src.boards.entries)
 	src.boards.mu.Unlock()
-	if history || print || boards != 0 {
-		t.Fatalf("ForgetSession kept history %t, fingerprint %t, %d board renders", history, print, boards)
+	if print || boards != 0 {
+		t.Fatalf("ForgetSession kept fingerprint %t, %d board renders", print, boards)
 	}
 }
 

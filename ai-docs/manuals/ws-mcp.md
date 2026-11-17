@@ -49,6 +49,32 @@ executable version/capability probes or direct server/CLI fallbacks.
 `ai-docs/`, and `AGENTS.md`; downstream projects should rely on MCP tools for
 bundled conventions rather than repository-local source paths.
 
+### Mailbox store
+
+Mailbox state lives in memory, one store per cache root
+(`internal/wsmailbox/memstore.go`): every scope's presence and queues, the
+reply-id registry, each session's ten-entry history window, and the
+armed-wait listening markers. The daemon holds it for its life. A committed
+change (a send, a recv, a heartbeat) is one JSONL record appended to the
+restore ring `<cache root>/mailbox-ring/` before the call returns, so mail
+survives a killed daemon; there is no fsync, so an OS crash may lose the
+tail. The ring keeps ten segments of about 1 MiB, each opening with a
+snapshot of the whole live state; a rotation reaps idle history windows and
+expired reply entries, never live mail. The ring is read only at open; a
+torn last record is cut.
+
+The per-scope `mailbox.json` files, `mailbox-replyids.json`, and the
+`mailbox-history/` entry files are the layout a previous ws-mcp version
+uses. The store imports them at open (then clears their queues, so nothing
+is delivered twice) and writes them back at a graceful daemon shutdown, so a
+downgrade keeps its mail; the old version's changes are imported at the next
+open. `mailbox-listening/` is no longer read or written.
+
+The daemon holds the ring's lock. A directly run ws-mcp binary may still
+read the ring (lock-free: every committed call is already in it), but its
+mailbox writes fail while the daemon runs: direct mailbox calls are
+unsupported, like direct `serve --stdio`.
+
 ### Session key store
 
 Each session key is a directory, `<cache root>/sessions/<key>/`, holding
@@ -264,10 +290,9 @@ under `<cache root>/dashboard/`:
   `internal/wsagent/permission.go:98-111`).
 
 After a store write the serving ws-mcp sends `POST /nudge {reply_id,
-project}`. A mailbox send by a legacy ws-mcp outside the daemon
-nudges too, registered or not, because the daemon wakes every `mailbox wait`
-it hosts on each nudge before it checks the named session (at most one
-recheck per wait per second, plus a trailing one). A server the daemon
+project}`. The daemon wakes every `mailbox wait` it hosts on each nudge,
+registered or not, before it checks the named session (at most one recheck
+per wait per second, plus a trailing one). A server the daemon
 hosts (Daemon-Hosted MCP below) instead hands each live snapshot to the
 daemon in memory (`wsdashboard.HostedSlot`): the daemon serves that copy in
 place of `snapshot.json` and wakes the session's pages with a live-only
@@ -287,12 +312,12 @@ record, board, tickets, mailbox history and contacts. A nudge, periodic safety
 refresh or board poke reads both parts. Known inbox-only changes on boardless
 sessions list only the inbox stores; unknown runner writes still list every
 live store. A re-read builds no panel; the board renders only when a page
-reads the changed session. Ring, drained-inbox, and
-mailbox-history entry files are parsed once per daemon and kept by name for
-the window the page shows. The small files every read and render re-reads
-(session snapshots, the session record's part files, the reply registry,
-the named scopes' mailbox stores) share parsed values and stat validation
-for up to one second per path. Recent files are reread at validation until
+reads the changed session. Ring and drained-inbox entry files are parsed
+once per daemon and kept by name for the window the page shows; mailbox
+history, contacts, and unread counts come from the memory store (Mailbox
+store below) with no file read. The small files every read and render
+re-reads (session snapshots, the session record's part files) share parsed
+values and stat validation for up to one second per path. Recent files are reread at validation until
 outside the two-second timestamp ambiguity window. Explicit session change
 signals expire the targeted source and snapshot validation before the index
 reads, and write admission/capability checks read current evidence rather than

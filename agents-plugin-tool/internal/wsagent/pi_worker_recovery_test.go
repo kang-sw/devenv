@@ -21,6 +21,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsholder"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // Substitute only the executable at the real holder's spawn boundary. The
@@ -168,7 +169,7 @@ func (h *piRecoveryHarness) start() {
 		Report: func(rep TurnReport) {
 			if rep.Parent.Kind == ParentLead {
 				// The same append used by PiTurnReporter, without importing mcp.
-				if err := wsmailbox.PostSystem(filepath.Join(h.base, "mailbox.json"), rep.Parent.ReplyID, "pi:"+rep.Result.ID, ReportText(rep), time.Now()); err != nil {
+				if err := h.mailStore().PostSystem(rep.Parent.ReplyID, "pi:"+rep.Result.ID, ReportText(rep), time.Now()); err != nil {
 					h.t.Errorf("completion mail: %v", err)
 				}
 			}
@@ -213,9 +214,14 @@ func (h *piRecoveryHarness) awaitFile(path string) {
 	eventually(h.t, filepath.Base(path), func() bool { _, err := os.Stat(path); return err == nil })
 }
 
+// mailStore is the harness's own mailbox store, under its base directory.
+func (h *piRecoveryHarness) mailStore() wsmailbox.Store {
+	return (wsmailbox.Paths{State: wsstate.Options{CacheHome: filepath.Join(h.base, "mail-cache")}}).Store()
+}
+
 func (h *piRecoveryHarness) mail() []wsmailbox.Envelope {
 	h.t.Helper()
-	store, err := wsmailbox.LoadReplyStore(filepath.Join(h.base, "mailbox.json"))
+	store, err := h.mailStore().LoadReply()
 	if err != nil {
 		h.t.Fatal(err)
 	}

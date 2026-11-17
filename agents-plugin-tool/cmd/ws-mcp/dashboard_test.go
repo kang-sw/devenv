@@ -19,6 +19,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/mcp"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wstrackerhost"
 )
 
@@ -116,6 +117,11 @@ func dashboardTestEnv(t *testing.T) (env []string, dir string) {
 	t.Cleanup(func() {
 		if ep, err := wsdashboard.ReadEndpoint(dir); err == nil {
 			_ = wsdashboard.RequestShutdown(context.Background(), dashboardTestClient, ep)
+			// The daemon writes the mailbox's legacy files on its way out:
+			// let it finish before the temp dirs go.
+			for end := time.Now().Add(10 * time.Second); time.Now().Before(end) && wsstate.ProcessAlive(ep.PID); {
+				time.Sleep(20 * time.Millisecond)
+			}
 		}
 	})
 	return env, dir

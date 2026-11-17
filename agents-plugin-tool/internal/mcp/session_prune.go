@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // maybePrune removes stale session key records from both layouts of the key
@@ -23,8 +26,8 @@ import (
 // never harmful (deletes are keyed on mtime, which is idempotent to
 // re-derive).
 //
-// The same pass reaps mailbox history directories idle past the same age
-// (pruneMailboxHistory), so stored message bodies do not outlive the key
+// The same pass reaps legacy mailbox history directories idle past the same
+// age (pruneMailboxHistory), so stored message bodies do not outlive the key
 // records that could reach them.
 //
 // Pruning is mtime-only: a record's JSON body is never parsed to decide
@@ -115,15 +118,17 @@ func pruneLegacyRecords(dir string, now time.Time) {
 	}
 }
 
-// pruneMailboxHistory removes per-session mailbox history directories whose
-// mtime is older than keyRetentionAge, mtime-only like the key records:
-// creating, renaming, and removing entry files refresh the directory's mtime,
-// so an active ring is never reaped. Errors are ignored.
+// pruneMailboxHistory removes legacy per-session mailbox history
+// directories (the layout a graceful daemon shutdown exports for a previous
+// version, wsmailbox legacy.go) whose mtime is older than keyRetentionAge,
+// mtime-only like the key records. The live window is in the memory store,
+// which reaps an idle session's window itself. Errors are ignored.
 func pruneMailboxHistory(cacheHome string, now time.Time) {
-	root, err := mailboxHistoryRoot(cacheHome)
+	cacheRoot, err := wsstate.CacheRoot(wsstate.Options{CacheHome: cacheHome})
 	if err != nil {
 		return
 	}
+	root := filepath.Join(cacheRoot, wsmailbox.HistoryDirName)
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return

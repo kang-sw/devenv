@@ -3,7 +3,9 @@ package wsmailbox
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -86,10 +88,14 @@ func SortedContacts(contacts map[string]Contact) []ContactRecord {
 
 // RecordContact upserts address into e.Contacts and trims the history to
 // the MaxContacts most recent entries.
+//
+// The map is replaced, never written in place: the memory store shares an
+// entry's Contacts map between its committed state and a transaction's
+// working copy (memstore.go), so an in-place write would leak into both.
 func (e *ReplyEntry) RecordContact(address string, c Contact) {
-	if e.Contacts == nil {
-		e.Contacts = map[string]Contact{}
-	}
+	contacts := make(map[string]Contact, len(e.Contacts)+1)
+	maps.Copy(contacts, e.Contacts)
+	e.Contacts = contacts
 	e.Contacts[address] = c
 	if len(e.Contacts) <= MaxContacts {
 		return
@@ -102,9 +108,11 @@ func (e *ReplyEntry) RecordContact(address string, c Contact) {
 // ReplyStore is the machine-tier reply-id registry: one entry + one queue
 // per reply-id, keyed by the readable ReplyID string.
 type ReplyStore struct {
-	SchemaVersion int                   `json:"schema_version"`
-	Entries       map[string]ReplyEntry `json:"entries,omitempty"`
-	Queues        map[string][]Envelope `json:"queues,omitempty"`
+	SchemaVersion int `json:"schema_version"`
+	// ExportMark: see StoreFile.ExportMark.
+	ExportMark string                `json:"memory_store_export,omitempty"`
+	Entries    map[string]ReplyEntry `json:"entries,omitempty"`
+	Queues     map[string][]Envelope `json:"queues,omitempty"`
 }
 
 // ReplyRegistry resolves the machine-tier reply-id registry file path
@@ -120,9 +128,9 @@ func (p Paths) ReplyRegistry() (string, error) {
 // ReplyRegistryPath is Paths{}.ReplyRegistry: this process's environment.
 func ReplyRegistryPath() (string, error) { return Paths{}.ReplyRegistry() }
 
-// LoadReplyStore reads the reply-id registry. A missing file returns an
-// empty, non-nil ReplyStore.
-func LoadReplyStore(path string) (ReplyStore, error) {
+// LoadReplyFile reads the legacy reply-id registry file. A missing file
+// returns an empty, non-nil ReplyStore. Live reads go through Store.
+func LoadReplyFile(path string) (ReplyStore, error) {
 	raw, err := readFile(path)
 	if os.IsNotExist(err) {
 		return emptyReplyStore(), nil
@@ -147,33 +155,16 @@ func emptyReplyStore() ReplyStore {
 	return ReplyStore{SchemaVersion: schemaVersion, Entries: map[string]ReplyEntry{}, Queues: map[string][]Envelope{}}
 }
 
-// PostSystem appends a system message to reply-id replyID's queue in the
-// reply registry at path: one the ws runtime itself sends (a spawned
-// agent's turn report), from no session, so it carries neither From nor
-// ReplyTo and has no address to answer. label is display-only (empty is valid).
-// Every mailbox send but this one
-// goes through the mailbox.send tool, whose From stamp needs the sender's
-// own identity. The caller wakes the waits.
-func PostSystem(path, replyID, label, content string, sentAt time.Time) error {
-	if replyID == "" {
-		return fmt.Errorf("post system message: empty reply-id")
-	}
-	return WithReplyLock(path, func(store *ReplyStore) error {
-		store.Queues = AppendQueue(store.Queues, replyID, Envelope{Label: label, Content: content, SentAt: sentAt.UTC().Format(time.RFC3339)})
-		return nil
-	})
-}
-
 // postSystem is also used by the sweep while it already holds the destination
 // store's lock; calling PostSystem there would try to acquire that lock twice.
 func postSystem(queues map[string][]Envelope, name, content string, sentAt time.Time) map[string][]Envelope {
 	return AppendQueue(queues, name, Envelope{Content: content, SentAt: sentAt.UTC().Format(time.RFC3339)})
 }
 
-// WithReplyLock performs an flock-serialized read-modify-write on the
-// reply-id registry at path, mirroring WithLock's store.go pattern exactly
-// (separate function only because the payload type differs).
-func WithReplyLock(path string, fn func(*ReplyStore) error) error {
+// WithReplyFileLock performs an flock-serialized read-modify-write on the
+// legacy reply-id registry file at path, mirroring WithFileLock. Live writes
+// go through Store; this serves the import, the export, and fixtures.
+func WithReplyFileLock(path string, fn func(*ReplyStore) error) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create mailbox reply registry dir: %w", err)
 	}
@@ -190,12 +181,14 @@ func WithReplyLock(path string, fn func(*ReplyStore) error) error {
 	}
 	defer fl.Unlock() //nolint:errcheck
 
-	current, err := LoadReplyStore(path)
+	current, err := LoadReplyFile(path)
 	if err != nil {
 		return err
 	}
-	before := copyQueues(current.Queues)
 	if err := fn(&current); err != nil {
+		if errors.Is(err, errSkipWrite) {
+			return nil
+		}
 		return err
 	}
 	if current.SchemaVersion == 0 {
@@ -228,6 +221,24 @@ func WithReplyLock(path string, fn func(*ReplyStore) error) error {
 		os.Remove(tmpName)
 		return fmt.Errorf("atomic rename mailbox reply registry: %w", rerr)
 	}
-	publishQueueChange(path, before, current.Queues)
 	return nil
+}
+
+// ReplyRetention bounds how long an idle, empty-queue reply-id entry
+// survives before reaping deletes it (Decision 11's lazy expiry).
+const ReplyRetention = 30 * 24 * time.Hour
+
+// ReapReplyEntries deletes Entries whose LastSeen exceeds ReplyRetention and
+// whose queue is empty: undelivered mail is never dropped, only the
+// bookkeeping of a channel nobody touched in a long time.
+func ReapReplyEntries(store *ReplyStore, now time.Time) {
+	for id, entry := range store.Entries {
+		if len(store.Queues[id]) > 0 {
+			continue
+		}
+		last, err := time.Parse(time.RFC3339, entry.LastSeen)
+		if err != nil || now.Sub(last) > ReplyRetention {
+			delete(store.Entries, id)
+		}
+	}
 }
