@@ -388,17 +388,7 @@
       }
     },
     "261115-feat-ws-claude-reasoning-summary-producer": {
-      "registered_at": "2026-11-15T09:31:58Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "active",
-        "touched_at": "2026-11-15T10:16:33Z",
-        "impl": {
-          "branch": "impl/develop/empty-taps-agile"
-        }
-      }
+      "registered_at": "2026-11-15T09:31:58Z"
     },
     "261115-feat-ws-daemon-release-auto-update": {
       "registered_at": "2026-11-15T01:40:22Z"
