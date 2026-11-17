@@ -50,7 +50,27 @@ func TestPlanUsageClaudeStaleGuardAndPersistence(t *testing.T) {
 	}
 }
 
-func TestPlanUsageClaudeDropsAbsentWindow(t *testing.T) {
+// usageWriteCounter counts writes per usage file through the store's seam.
+func usageWriteCounter(s *planUsageStore) map[string]int {
+	writes := map[string]int{}
+	s.writeFile = func(dir, name string, data []byte) error {
+		writes[name]++
+		return writePrivateFile(dir, name, data)
+	}
+	return writes
+}
+
+func claudeKinds(s *planUsageStore) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kinds := []string{}
+	for _, w := range s.claude.Windows {
+		kinds = append(kinds, w.Kind)
+	}
+	return kinds
+}
+
+func TestPlanUsageClaudeKeepsLiveAbsentWindow(t *testing.T) {
 	s := usageTestStore(t)
 	now := time.Now().UnixMilli()
 	five := wslive.UsageLimit{Kind: wslive.LimitFiveHour, Percent: 40, ResetsAt: now + 100000}
@@ -59,15 +79,115 @@ func TestPlanUsageClaudeDropsAbsentWindow(t *testing.T) {
 		s.pushClaude(&wslive.Snapshot{Adapter: "claude", UpdatedAt: at, Usage: &wslive.Usage{Limits: limits}})
 	}
 	push(now, five, week)
-	push(now+1, week) // unchanged weekly value, but the set changed
-	push(now, five, week) // an older session cannot resurrect the removed window
-	push(now+2)           // no limits is not a complete report
+	writes := usageWriteCounter(s)
+	push(now+1, week) // a report without the five-hour window does not end a live one
+	push(now + 2)     // no limits is not a complete report
 	push(now+2, wslive.UsageLimit{Kind: wslive.LimitFiveHour, Percent: -1})
 	for _, store := range []*planUsageStore{s, newPlanUsageStore(s.dir, s.home, s.getenv)} {
 		entries := store.entries()
-		if len(entries) != 1 || len(entries[0].Windows) != 1 || entries[0].Windows[0].Kind != wslive.LimitSevenDay || entries[0].AsOf != now+1 {
-			t.Fatalf("expected only persisted weekly window: %+v", entries)
+		if len(entries) != 1 || len(entries[0].Windows) != 2 || entries[0].AsOf != now {
+			t.Fatalf("live five-hour window lost or asOf refreshed: %+v", entries)
 		}
+	}
+	if len(writes) != 0 {
+		t.Fatalf("absent-window report rewrote usage files: %v", writes)
+	}
+	// Once its reset passes, a report without it ends the window.
+	s.mu.Lock()
+	s.claude.Windows[0].ResetsAt = now - 1
+	s.mu.Unlock()
+	push(now+3, week)
+	if writes[planUsageCache] != 1 || writes[planUsageHistoryCache] != 0 {
+		t.Fatalf("dropping the expired window: writes %v, want one latest and no history", writes)
+	}
+	// The production flap: a stale session keeps reporting the expired window
+	// while a fresh one omits it. Nothing changes after the single drop.
+	gone := wslive.UsageLimit{Kind: wslive.LimitFiveHour, Percent: 40, ResetsAt: now - 1}
+	push(now+4, gone, week)
+	push(now+5, week)
+	push(now+1, five, week) // a snapshot older than the stored asOf is rejected outright
+	if got := claudeKinds(s); len(got) != 1 || got[0] != wslive.LimitSevenDay || writes[planUsageCache] != 1 || writes[planUsageHistoryCache] != 0 {
+		t.Fatalf("expired absent window kept or flapped: %v, writes %v", got, writes)
+	}
+	if entries := newPlanUsageStore(s.dir, s.home, s.getenv).entries(); len(entries) != 1 || len(entries[0].Windows) != 1 || entries[0].AsOf != now+3 {
+		t.Fatalf("expected only persisted weekly window: %+v", entries)
+	}
+}
+
+func TestPlanUsageClaudeIgnoresExpiredReportedWindow(t *testing.T) {
+	s := usageTestStore(t)
+	now := time.Now().UnixMilli()
+	expired := wslive.UsageLimit{Kind: wslive.LimitFiveHour, Percent: 80, ResetsAt: now - 1000}
+	week := wslive.UsageLimit{Kind: wslive.LimitSevenDay, Percent: 20, ResetsAt: now + 200000}
+	push := func(at int64, limits ...wslive.UsageLimit) {
+		s.pushClaude(&wslive.Snapshot{Adapter: "claude", UpdatedAt: at, Usage: &wslive.Usage{Limits: limits}})
+	}
+	push(now, expired, week)
+	if got := claudeKinds(s); len(got) != 1 || got[0] != wslive.LimitSevenDay {
+		t.Fatalf("expired reported window stored: %v", got)
+	}
+	if p := s.history(now); len(p.Samples) != 1 || p.Samples[0].Kind != wslive.LimitSevenDay {
+		t.Fatalf("expired reported window entered history: %+v", p)
+	}
+	// The flap: a stale session keeps reporting the expired window while a
+	// fresh one reports none. Neither changes anything, so nothing is written.
+	writes := usageWriteCounter(s)
+	for i := int64(1); i <= 5; i++ {
+		push(now+2*i-1, expired, week)
+		push(now+2*i, week)
+	}
+	if len(writes) != 0 || len(claudeKinds(s)) != 1 || len(s.history(now).Samples) != 1 {
+		t.Fatalf("expired window flapped: writes %v, kinds %v", writes, claudeKinds(s))
+	}
+}
+
+func TestPlanUsageClaudeNewerWindowReplacesAtBoundary(t *testing.T) {
+	s := usageTestStore(t)
+	now := time.Now().UnixMilli()
+	push := func(at int64, percent float64, reset int64) {
+		s.pushClaude(&wslive.Snapshot{Adapter: "claude", UpdatedAt: at, Usage: &wslive.Usage{Limits: []wslive.UsageLimit{{Kind: wslive.LimitFiveHour, Percent: percent, ResetsAt: reset}}}})
+	}
+	first := now + 100000
+	push(now, 90, first)
+	// The first window's reset passes; the next report carries the new window.
+	s.mu.Lock()
+	s.claude.Windows[0].ResetsAt = now - 1
+	s.mu.Unlock()
+	next := now + 5*3600000
+	push(now+1, 3, next)
+	s.mu.Lock()
+	got := append([]planUsageWindow(nil), s.claude.Windows...)
+	s.mu.Unlock()
+	if len(got) != 1 || got[0].ResetsAt != next || got[0].Percent != 3 || got[0].AsOf != now+1 {
+		t.Fatalf("newer window did not replace the old one: %+v", got)
+	}
+	if p := s.history(now); len(p.Samples) != 2 || p.Samples[1].ResetsAt != next {
+		t.Fatalf("newer window missing from history: %+v", p)
+	}
+}
+
+func TestPlanUsageUnchangedPushWritesNothing(t *testing.T) {
+	s := usageTestStore(t)
+	now := time.Now().UnixMilli()
+	limits := []wslive.UsageLimit{{Kind: wslive.LimitFiveHour, Percent: 40, ResetsAt: now + 100000}, {Kind: wslive.LimitSevenDay, Percent: 20, ResetsAt: now + 200000}}
+	writes := usageWriteCounter(s)
+	s.pushClaude(&wslive.Snapshot{Adapter: "claude", UpdatedAt: now, Usage: &wslive.Usage{Limits: limits}})
+	if writes[planUsageCache] != 1 || writes[planUsageHistoryCache] != 1 {
+		t.Fatalf("first push: %v", writes)
+	}
+	for i := int64(0); i < 3; i++ {
+		s.pushClaude(&wslive.Snapshot{Adapter: "claude", UpdatedAt: now + i, Usage: &wslive.Usage{Limits: limits}})
+	}
+	if writes[planUsageCache] != 1 || writes[planUsageHistoryCache] != 1 {
+		t.Fatalf("unchanged pushes wrote: %v", writes)
+	}
+	// An accepted sample the prune drops at once leaves the history as read.
+	old := historySample(now-planUsageHistoryAge.Milliseconds()-1, 10)
+	s.mu.Lock()
+	s.appendHistoryLocked([]planUsageSample{old}, now)
+	s.mu.Unlock()
+	if writes[planUsageHistoryCache] != 1 {
+		t.Fatalf("pruned-at-once sample rewrote the history: %v", writes)
 	}
 }
 

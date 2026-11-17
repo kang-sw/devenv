@@ -25,9 +25,9 @@ function environment(now = Date.UTC(2026, 10, 15), locale = 'en') {
   const footer = new Element('div'); footer.className = 'rfoot'; footer.appendChild(gear); footer.appendChild(button);
   const rail = new Element('aside'); rail.appendChild(footer);
   const doc = { hidden: false, events: {}, createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag), addEventListener(key, fn) { this.events[key] = fn; } };
-  const calls = [], ticks = [];
+  const calls = [], ticks = [], timers = [];
   let payload = { entries: [], warnPercent: 80, critPercent: 95 }, fail = false;
-  const window = { setInterval(fn, ms) { ticks.push({ fn, ms }); }, fetch(url, options) { calls.push({ url, options }); return fail ? Promise.reject(new Error('fake failure')) : Promise.resolve({ ok: true, json: () => Promise.resolve(payload) }); } };
+  const window = { setInterval(fn, ms) { ticks.push({ fn, ms }); }, setTimeout(fn, ms) { timers.push({ fn, ms, live: true }); return timers.length; }, clearTimeout(id) { if (timers[id - 1]) timers[id - 1].live = false; }, fetch(url, options) { calls.push({ url, options }); return fail ? Promise.reject(new Error('fake failure')) : Promise.resolve({ ok: true, json: () => Promise.resolve(payload) }); } };
   window.wsI18n = { lang: locale, t: JSON.parse(fs.readFileSync(__dirname + '/../wsi18n/tables/' + locale + '.json', 'utf8')) };
   window.wsT = function (key, ...args) {
     assert.ok(Object.hasOwn(window.wsI18n.t, key), key);
@@ -35,7 +35,7 @@ function environment(now = Date.UTC(2026, 10, 15), locale = 'en') {
   };
   class Clock extends Date { static now() { return now; } }
   vm.runInNewContext(fs.readFileSync(__dirname + '/assets/usage.js', 'utf8'), { window, Date: Clock });
-  return { window, rail, doc, button, gear, footer, calls, ticks, now(value) { now = value; }, set(value) { payload = value; }, fail() { fail = true; } };
+  return { window, rail, doc, button, gear, footer, calls, ticks, timers, now(value) { now = value; }, set(value) { payload = value; }, fail() { fail = true; } };
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 function nodes(root, tagOrClass) {
@@ -382,6 +382,27 @@ test('history composes into the single coalesced viewer request', async () => {
   assert.equal(env.calls[1].url, '/rail/usage?history=1&refresh=1');
   assert.equal(env.calls[1].options.cache, 'no-store');
   await flush();
+});
+
+test('a forced refresh refetches while the popover is open, so the background probe result shows', async () => {
+  const at = Date.UTC(2026, 10, 15), env = environment(at);
+  const entry = percent => ({ entries: [{ harness: 'codex', asOf: at, windows: [{ kind: 'seven_day', percent, asOf: at, resetsAt: at + 86400000 }] }] });
+  env.set(entry(10));
+  const mounted = env.window.WsUsage.mount(env.doc, env.rail); await flush();
+  assert.equal(env.timers.length, 0); // an ordinary poll schedules no follow-up
+  const pop = mounted.makePopover(() => {}, () => {}); pop.open(); await flush();
+  assert.equal(env.calls.at(-1).url, '/rail/usage?history=1&refresh=1');
+  assert.deepEqual(env.timers.map(t => t.ms), [2000, 11000]);
+  env.set(entry(42)); // the daemon's background probe lands
+  env.timers[0].fn(); await flush();
+  assert.equal(env.calls.at(-1).url, '/rail/usage?history=1');
+  assert.ok(pop.el.textContent.includes('42%'));
+  assert.equal(env.button.querySelector('.usage-number').textContent, '42%');
+  pop.open(); await flush(); // reopening replaces, not stacks, the follow-ups
+  assert.deepEqual(env.timers.filter(t => t.live).map(t => t.ms), [2000, 11000]);
+  const before = env.calls.length;
+  pop.close(); env.timers.at(-1).fn(); await flush();
+  assert.equal(env.calls.length, before); // a closed popover does not refetch
 });
 
 test('footer redraw and sync preserve the sibling settings gear', async () => {
