@@ -202,7 +202,8 @@ func (c *conv) mcpRestartDue() bool {
 
 // restartIfDue restarts the process when a broken MCP connection or a
 // stale ws-mcp route (mcpStale) asked for it and the session stands at an
-// idle point with no background task, and reports whether it did.
+// idle point with no background task, and reports whether a new process
+// runs; a failed start leaves none, with its error on the session.
 func (c *conv) restartIfDue() bool {
 	if !(c.mcpStale || c.mcpRestartDue()) || c.proc == nil || !c.idleNow() {
 		return false
@@ -220,6 +221,7 @@ func (c *conv) restartIfDue() bool {
 	}
 	if err := c.restartProcess(); err != nil {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: restart: %v\n", c.rec.ReplyID, err)
+		return false
 	}
 	return true
 }

@@ -88,8 +88,16 @@ func (d *Daemon) handleProxyHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	// Resolved on every request: a voided token stops at once.
+	// Resolved on every request: a voided token stops at once, one voided
+	// right after it resolved too.
 	hello, void, ok := tokens.ResolveMCPToken(token)
+	if ok {
+		select {
+		case <-void:
+			ok = false
+		default:
+		}
+	}
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -224,14 +232,17 @@ func (d *Daemon) httpSession(token string, hello ProxyHello, void <-chan struct{
 	d.httpSessions[token] = s
 	d.httpMu.Unlock()
 	fmt.Fprintf(d.log, "dashboard: MCP HTTP session opened (pid %d, root %s)\n", hello.OwnerPID, hello.ProjectRoot)
+	var replayID []byte
+	if replay {
+		// Its answer is dropped. Registered before the session runs, which
+		// may end at once and take its pending map with it.
+		replayID, _ = json.Marshal("ws-mcp-http-replay-" + strconv.FormatUint(d.httpReplay.Add(1), 10))
+		s.pending[compactID(replayID)] = nil
+	}
 	go s.readAnswers()
 	go s.serve()
 	go s.watchVoid(void)
 	if replay {
-		replayID, _ := json.Marshal("ws-mcp-http-replay-" + strconv.FormatUint(d.httpReplay.Add(1), 10))
-		s.mu.Lock()
-		s.pending[compactID(replayID)] = nil
-		s.mu.Unlock()
 		initialize, _ := json.Marshal(map[string]any{
 			"jsonrpc": "2.0",
 			"id":      json.RawMessage(replayID),

@@ -133,9 +133,17 @@ func TestHostedWorkerOverHTTPSeesOnlyItsProfile(t *testing.T) {
 		t.Fatalf("a tool outside the profile is refused: %+v", r)
 	}
 
+	// The token goes void; it still resolves here, as a resolution that
+	// raced the void would, and the route refuses it and ends its session.
 	close(agents.void)
-	agents.token = ""
-	if code, _ := post("worker-session-token", `{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}`); code != http.StatusUnauthorized {
+	if code, _ := post(agents.token, `{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}`); code != http.StatusUnauthorized {
 		t.Fatalf("a void token: %d, want 401", code)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for d.ProxySessions() != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := d.ProxySessions(); n != 0 {
+		t.Fatalf("the void token's session is still open: %d sessions", n)
 	}
 }

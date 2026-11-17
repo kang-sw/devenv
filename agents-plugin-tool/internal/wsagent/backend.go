@@ -84,6 +84,11 @@ type LeadSpec struct {
 	PluginWarning func(string)
 	// WSMCP resolves the bundled MCP launcher if Pi needs its bridge fallback.
 	WSMCP func() (MCPCommand, error)
+	// Plugin, when set, is the hosted bundle this start already resolved
+	// (with PluginNote its fallback warning): a Claude lead attached over
+	// HTTP loads the bundle its ws-mcp hello was built from. Empty
+	// resolves the selected bundle at launch.
+	Plugin, PluginNote string
 	// VariantDir is where a Claude lead attached over HTTP keeps its
 	// bundle's HTTP variants (claude_hosted_variant.go).
 	VariantDir string
@@ -95,10 +100,12 @@ type LeadSpec struct {
 // MCPCommand is a stdio MCP server's launch command.
 type MCPCommand struct {
 	// PluginWarning is a runtime-only package fallback notice for this launch.
-	PluginWarning string            `json:"-"`
-	Command       string            `json:"command"`
-	Args          []string          `json:"args,omitempty"`
-	Env           map[string]string `json:"env,omitempty"`
+	PluginWarning string `json:"-"`
+	// Plugin is the hosted bundle the launcher belongs to, when known.
+	Plugin  string            `json:"-"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
 }
 
 // Process is one running backend process. Its methods are safe to call from

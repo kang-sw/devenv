@@ -36,6 +36,7 @@ func agentMCPCommand(root, daemonVersion string) (wsagent.MCPCommand, error) {
 	return wsagent.MCPCommand{
 		Command:       python,
 		PluginWarning: warning,
+		Plugin:        plugin,
 		// --root would disable the launcher's exact serve --stdio proxy
 		// match. Override the daemon's inherited project root in env instead.
 		Args: append(prefix, launcher, "serve", "--stdio"),

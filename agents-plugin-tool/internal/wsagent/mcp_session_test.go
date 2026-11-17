@@ -3,11 +3,13 @@ package wsagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -433,5 +435,212 @@ func TestClaudeLeadMCPRouteMovedRestarts(t *testing.T) {
 	}
 	if _, _, ok := h.runner.ResolveMCPToken(fresh); !ok {
 		t.Fatal("the new token resolves")
+	}
+}
+
+// leadLauncher is a ws-mcp command resolver whose launcher belongs to
+// bundle, counting its calls.
+func leadLauncher(bundle string, calls *atomic.Int32) func(string) (MCPCommand, error) {
+	return func(root string) (MCPCommand, error) {
+		calls.Add(1)
+		return MCPCommand{Command: "python3", Args: []string{"launcher.py", "serve", "--stdio"}, Plugin: bundle, PluginWarning: "launcher note",
+			Env: map[string]string{"WS_RSRC_ROOT": filepath.Join(bundle, "rsrc"), "WS_MCP_PROJECT_ROOT": root}}, nil
+	}
+}
+
+// editRecord rewrites id's record on disk as another daemon's write would,
+// while no runner holds it.
+func (h *leadHarness) editRecord(id string, edit func(members map[string]any)) {
+	h.t.Helper()
+	path := recordPath(wsdashboard.SessionDir(h.dir, id))
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	var members map[string]any
+	if err := json.Unmarshal(raw, &members); err != nil {
+		h.t.Fatal(err)
+	}
+	edit(members)
+	if raw, err = json.Marshal(members); err != nil {
+		h.t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// TestClaudeLeadLoadsTheBundleItsHelloDescribes: a lead attached over HTTP
+// loads the bundle its ws-mcp command was resolved from, not one selected
+// again at launch; its record keeps that hello's environment, and a later
+// daemon rejoining the process restores it as recorded without resolving
+// the command again (which may fail by then, or select another bundle).
+func TestClaudeLeadLoadsTheBundleItsHelloDescribes(t *testing.T) {
+	shortStartWait(t)
+	leadBundledFixture(t, "wsflow") // the bundle a launch-time resolution selects
+	launched := t.TempDir()
+	writeLeadPluginFixture(t, filepath.Join(launched, ".claude-plugin", "plugin.json"), `{"name":"ws","version":"`+hostedPluginTestVersion+`"}`)
+	h := newLeadHarness(t)
+	var calls atomic.Int32
+	h.opts.WSMCP = leadLauncher(launched, &calls)
+	const endpoint = "http://127.0.0.1:1"
+	h.startAt(endpoint)
+	id, holder := h.runLead("one")
+	dir, _ := flagValue(h.holders.spawned(holder).Argv, "--plugin-dir")
+	if !strings.HasPrefix(filepath.Base(dir), "ws-") {
+		t.Fatalf("the lead loads the variant of the bundle its hello describes: --plugin-dir %q", dir)
+	}
+	rec := h.record(id)
+	if rec.PluginWarning != "launcher note" || rec.MCPEnv["WS_RSRC_ROOT"] != filepath.Join(launched, "rsrc") || rec.MCPHolder != holder {
+		t.Fatalf("the record keeps the launch's bundle note, hello and holder: %+v", rec)
+	}
+	h.holders.out(holder, mcpTurn("u1", MCPConnected)...)
+	h.idle(id)
+
+	h.runner.Close()
+	h.holders.restart()
+	before := calls.Load()
+	h.opts.WSMCP = func(string) (MCPCommand, error) { return MCPCommand{}, errors.New("selection unreadable") }
+	h.startAt(endpoint)
+	eventually(t, "the token to be restored", func() bool {
+		hello, _, ok := h.runner.ResolveMCPToken(rec.MCPToken)
+		return ok && hello.Env["WS_RSRC_ROOT"] == filepath.Join(launched, "rsrc") && hello.OwnerPID == rec.HostPID
+	})
+	h.quiesce(id)
+	if calls.Load() != before || h.holders.opCount("launch") != 1 || h.holders.opCount("stop") != 0 {
+		t.Fatalf("a rejoin resolves nothing and starts nothing: %v", h.holders.opList())
+	}
+}
+
+// TestClaudeLeadRejoinWithoutItsHelloRestarts: a recorded token whose
+// hello the record does not hold is not restored; the process restarts at
+// its first idle point with a new token.
+func TestClaudeLeadRejoinWithoutItsHelloRestarts(t *testing.T) {
+	shortStartWait(t)
+	bundle := leadBundledFixture(t, "wsflow")
+	h := newLeadHarness(t)
+	var calls atomic.Int32
+	h.opts.WSMCP = leadLauncher(bundle, &calls)
+	const endpoint = "http://127.0.0.1:1"
+	h.startAt(endpoint)
+	id, holder := h.runLead("one")
+	h.holders.out(holder, mcpTurn("u1", MCPConnected)...)
+	h.idle(id)
+	token := h.record(id).MCPToken
+
+	h.runner.Close()
+	h.holders.restart()
+	h.editRecord(id, func(m map[string]any) { delete(m, "mcp_env") })
+	h.startAt(endpoint)
+	eventually(t, "the restart", func() bool { return h.holders.opCount("stop "+holder) == 1 && h.holders.opCount("launch") == 2 })
+	eventually(t, "the new process", func() bool { st := h.state(id); return st.Process && h.holder(id) != holder })
+	if fresh := h.record(id).MCPToken; fresh == "" || fresh == token {
+		t.Fatalf("the new process has a new token: %q", fresh)
+	}
+	if _, _, ok := h.runner.ResolveMCPToken(token); ok {
+		t.Fatal("a token without its hello is not restored")
+	}
+}
+
+// TestClaudeLeadRejoinForgetsATokenAnotherStartLeft: a daemon that keeps
+// the record's ws-mcp members without knowing them started the process
+// again over the bundle's stdio server; the token they name was drawn for
+// an earlier process, so a rejoin forgets it and restarts nothing.
+func TestClaudeLeadRejoinForgetsATokenAnotherStartLeft(t *testing.T) {
+	shortStartWait(t)
+	bundle := leadBundledFixture(t, "wsflow")
+	h := newLeadHarness(t)
+	var calls atomic.Int32
+	h.opts.WSMCP = leadLauncher(bundle, &calls)
+	const endpoint = "http://127.0.0.1:1"
+	h.startAt(endpoint)
+	id, holder := h.runLead("one")
+	h.holders.out(holder, mcpTurn("u1", MCPConnected)...)
+	h.idle(id)
+	token := h.record(id).MCPToken
+
+	h.runner.Close()
+	h.holders.restart()
+	h.editRecord(id, func(m map[string]any) { m["mcp_holder_id"] = "holder-of-an-earlier-process" })
+	h.startAt(endpoint)
+	eventually(t, "the record to forget the token", func() bool {
+		rec := h.record(id)
+		return rec.MCPToken == "" && rec.MCPURL == "" && rec.MCPEnv == nil && rec.MCPHolder == ""
+	})
+	h.quiesce(id)
+	if _, _, ok := h.runner.ResolveMCPToken(token); ok {
+		t.Fatal("the earlier process's token is not restored")
+	}
+	if h.holders.opCount("launch") != 1 || h.holders.opCount("stop") != 0 || !h.state(id).Process {
+		t.Fatalf("the process runs on, not restarted: %v", h.holders.opList())
+	}
+}
+
+// TestClaudeLeadMCPRouteMovedRestartsAfterItsTurn: a stale route found at
+// a rejoin while the process runs a turn restarts it once that turn ends,
+// not before.
+func TestClaudeLeadMCPRouteMovedRestartsAfterItsTurn(t *testing.T) {
+	shortStartWait(t)
+	bundle := leadBundledFixture(t, "wsflow")
+	h := newLeadHarness(t)
+	var calls atomic.Int32
+	h.opts.WSMCP = leadLauncher(bundle, &calls)
+	h.startAt("http://127.0.0.1:1")
+	id, holder := h.runLead("one")
+	h.holders.out(holder, stateLine(HarnessRunning), mcpInitLine(MCPConnected))
+	eventually(t, "the turn", func() bool { return h.state(id).Status == StatusRunning })
+	h.quiesce(id)
+
+	h.runner.Close()
+	h.holders.restart()
+	h.startAt("http://127.0.0.1:2")
+	eventually(t, "the rejoin", func() bool { st := h.state(id); return st.Process && st.Status == StatusRunning })
+	h.quiesce(id)
+	if h.holders.opCount("stop") != 0 || h.holders.opCount("launch") != 1 {
+		t.Fatalf("a running turn is not cut short: %v", h.holders.opList())
+	}
+	h.holders.out(holder, replyLine("u1", "ok"), resultLine(), stateLine(HarnessIdle))
+	eventually(t, "the restart", func() bool { return h.holders.opCount("stop "+holder) == 1 && h.holders.opCount("launch") == 2 })
+}
+
+// TestClaudeLeadTokenVoidOnFailedStartAndClose: a start whose process
+// never runs voids the token it drew, and so does closing the
+// conversation, which also forgets it in the record.
+func TestClaudeLeadTokenVoidOnFailedStartAndClose(t *testing.T) {
+	shortStartWait(t)
+	bundle := leadBundledFixture(t, "wsflow")
+	h := newLeadHarness(t)
+	var calls atomic.Int32
+	h.opts.WSMCP = leadLauncher(bundle, &calls)
+	h.startAt("http://127.0.0.1:1")
+	tokens := func() int {
+		h.runner.mu.Lock()
+		defer h.runner.mu.Unlock()
+		return len(h.runner.mcpTokens)
+	}
+
+	h.holders.set(func() { h.holders.spawnErr = errors.New("no room") })
+	failed := h.lead(BackendClaude, LeadOptions{}).ID
+	h.send(failed, "one")
+	eventually(t, "the failed start", func() bool { return calls.Load() == 1 && h.state(failed).Error != "" })
+	h.quiesce(failed)
+	if n := tokens(); n != 0 {
+		t.Fatalf("a failed start leaves %d live tokens", n)
+	}
+	h.holders.set(func() { h.holders.spawnErr = nil })
+
+	id, _ := h.runLead("two")
+	token := h.record(id).MCPToken
+	_, void, ok := h.runner.ResolveMCPToken(token)
+	if !ok {
+		t.Fatal("the running lead's token resolves")
+	}
+	if _, err := h.runner.CloseConversation(id); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the close to void the token", func() bool { return isClosed(void) })
+	eventually(t, "the record to forget it", func() bool { return h.record(id).MCPToken == "" })
+	if n := tokens(); n != 0 {
+		t.Fatalf("a closed lead leaves %d live tokens", n)
 	}
 }

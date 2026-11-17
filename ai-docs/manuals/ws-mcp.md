@@ -1575,10 +1575,16 @@ token; the harness gets the URL and token in `WS_MCP_SESSION_URL` and
 bundle (`<daemon dir>/hosted-bundles/<package>-<hash>`, one per bundle
 content, never removed) whose only MCP entry is the same `ws` key over HTTP,
 so the lead still has exactly one ws server named `plugin:<package>:<package>`.
-A held lead's token and URL are kept in its `agent.json` (`mcp_token_secret`,
-`mcp_url`) so a daemon that rejoins the process restores the token; when the
-recorded URL is not the rejoining daemon's (it listens on another port), the
-process restarts at its first idle point with a new token. With no endpoint
+A held lead's token is kept in its `agent.json` (`mcp_token_secret`) with its
+URL (`mcp_url`), the ws-mcp environment its hello was built from (`mcp_env`:
+the bundle the lead loaded, which is also the one that hello describes) and
+the holder it was drawn for (`mcp_holder_id`), so a daemon that rejoins the
+process restores the token and its hello without resolving the package again.
+When the recorded URL is not the rejoining daemon's (it listens on another
+port) or the hello is missing, the process restarts at its first idle point
+with a new token; when the record names another holder (a daemon without
+this route started the process again over stdio), the token is forgotten and
+nothing restarts. With no endpoint
 the stdio launcher serves as before. A daemon without this route (an older
 one rejoining an HTTP lead) answers its calls `401 login_required` until the
 process restarts.

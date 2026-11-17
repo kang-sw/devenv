@@ -27,9 +27,13 @@ func claudeLeadPluginArgs(spec StartSpec) ([]string, error) {
 	if isolation != "" && isolation != "default" && isolation != "isolated" {
 		return nil, fmt.Errorf("claude lead: invalid plugin isolation %q", isolation)
 	}
-	root, warning, err := ResolveHostedPlugin(spec.Lead.DaemonVersion)
-	if err != nil {
-		return nil, fmt.Errorf("claude lead: %w", err)
+	root, warning := spec.Lead.Plugin, spec.Lead.PluginNote
+	if root == "" {
+		var err error
+		root, warning, err = ResolveHostedPlugin(spec.Lead.DaemonVersion)
+		if err != nil {
+			return nil, fmt.Errorf("claude lead: %w", err)
+		}
 	}
 	if spec.MCPSession != nil {
 		// The bundle with its stdio server replaced by the HTTP session.

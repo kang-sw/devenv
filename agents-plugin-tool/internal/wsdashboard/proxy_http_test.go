@@ -40,12 +40,17 @@ func (a *tokenAgents) issue(token string, hello ProxyHello) {
 	a.tokens[token] = tokenGrant{hello: hello, void: make(chan struct{})}
 }
 
+// voidToken closes token's void channel and keeps resolving it, as a
+// resolution that raced the void would: the route must refuse it itself.
 func (a *tokenAgents) voidToken(token string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if g, ok := a.tokens[token]; ok {
-		close(g.void)
-		delete(a.tokens, token)
+		select {
+		case <-g.void:
+		default:
+			close(g.void)
+		}
 	}
 }
 
@@ -315,6 +320,33 @@ func TestProxyHTTPRouteRefusesAMissingUnknownOrVoidToken(t *testing.T) {
 	}
 }
 
+// TestProxyHTTPRouteRefusesAForeignHost: the route's access exemption
+// holds for a loopback peer that addressed a loopback Host only; a
+// rebound name gets the access guard's refusal and opens no session.
+func TestProxyHTTPRouteRefusesAForeignHost(t *testing.T) {
+	d, h, a := startHTTPProxyDaemon(t)
+	a.issue("tok-a", httpTestHello("claude"))
+	serve := func(host string) int {
+		req := httptest.NewRequest(http.MethodPost, ProxyHTTPPath, strings.NewReader(initializeBody))
+		req.Host = host
+		req.RemoteAddr = "127.0.0.1:50000"
+		req.Header.Set("Authorization", "Bearer tok-a")
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		localhostTestHandler(t, d).ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if code := serve("evil.example"); code == http.StatusOK {
+		t.Fatal("a rebound Host reached the MCP route")
+	}
+	if h.count() != 0 {
+		t.Fatal("a foreign Host opened a session")
+	}
+	if code := serve("127.0.0.1:" + strconv.Itoa(d.Endpoint().Port)); code != http.StatusOK {
+		t.Fatalf("a loopback Host: %d, want 200", code)
+	}
+}
+
 func TestProxyHTTPRouteRefusesABrowserOriginAndANonLoopbackPeer(t *testing.T) {
 	d, h, a := startHTTPProxyDaemon(t)
 	a.issue("tok-a", httpTestHello("claude"))
@@ -502,8 +534,18 @@ func TestProxyHTTPBodyLimitsAndShapes(t *testing.T) {
 	if status, body, _ := mcpPost(t, context.Background(), d, http.MethodPost, "tok-a", initializeBody); status != http.StatusOK {
 		t.Fatalf("initialize: %d %s", status, body)
 	}
-	big := `{"jsonrpc":"2.0","id":2,"method":"ping","params":{"pad":"` + strings.Repeat("x", bufio.MaxScanTokenSize) + `"}}`
-	status, body, _ := mcpPost(t, context.Background(), d, http.MethodPost, "tok-a", big)
+	// A body of exactly the limit reaches the session as one line (the
+	// limit leaves room for its newline in the session's line reader); one
+	// byte more is refused.
+	padded := func(n int) string {
+		head, tail := `{"jsonrpc":"2.0","id":2,"method":"ping","params":{"pad":"`, `"}}`
+		return head + strings.Repeat("x", n-len(head)-len(tail)) + tail
+	}
+	status, body, _ := mcpPost(t, context.Background(), d, http.MethodPost, "tok-a", padded(httpMCPBodyLimit))
+	if r := decodeReply(t, body); status != http.StatusOK || string(r.ID) != "2" || r.Result.Method != "ping" {
+		t.Fatalf("at the limit: %d %.200s, want the session's answer", status, body)
+	}
+	status, body, _ = mcpPost(t, context.Background(), d, http.MethodPost, "tok-a", padded(httpMCPBodyLimit+1))
 	if r := decodeReply(t, body); status != http.StatusRequestEntityTooLarge || r.Error == nil || string(r.ID) != "null" {
 		t.Fatalf("too large: %d %s, want 413 with an id-null error", status, body)
 	}
@@ -525,8 +567,8 @@ func TestProxyHTTPBodyLimitsAndShapes(t *testing.T) {
 	if last := got[len(got)-1]; last != `{"jsonrpc":"2.0","id":4,"method":"echo","params":{"text":"a\nb"}}` {
 		t.Fatalf("session line = %q", last)
 	}
-	if len(got) != 2 {
-		t.Fatalf("session saw %d lines, want 2 (refused bodies never forwarded): %q", len(got), got)
+	if len(got) != 3 {
+		t.Fatalf("session saw %d lines, want 3 (refused bodies never forwarded)", len(got))
 	}
 	// A duplicate in-flight id is refused without reaching the session.
 	held := make(chan string, 1)
@@ -534,7 +576,7 @@ func TestProxyHTTPBodyLimitsAndShapes(t *testing.T) {
 		_, body, _ := mcpPost(t, context.Background(), d, http.MethodPost, "tok-a", `{"jsonrpc":"2.0","id":5,"method":"hold"}`)
 		held <- body
 	}()
-	h.session(t, 0).waitLines(t, 3)
+	h.session(t, 0).waitLines(t, 4)
 	status, body, _ = mcpPost(t, context.Background(), d, http.MethodPost, "tok-a", `{"jsonrpc":"2.0","id":5,"method":"ping"}`)
 	if r := decodeReply(t, body); status != http.StatusOK || r.Error == nil || r.Error.Code != -32600 || r.Error.Message != "request id already in flight" {
 		t.Fatalf("duplicate id: %d %s", status, body)
@@ -543,8 +585,8 @@ func TestProxyHTTPBodyLimitsAndShapes(t *testing.T) {
 	if r := decodeReply(t, <-held); r.Result.How != "released" {
 		t.Fatalf("held request answer = %+v", r)
 	}
-	if n := len(h.session(t, 0).lines()); n != 4 {
-		t.Fatalf("session saw %d lines, want 4 (the duplicate is never forwarded)", n)
+	if n := len(h.session(t, 0).lines()); n != 5 {
+		t.Fatalf("session saw %d lines, want 5 (the duplicate is never forwarded)", n)
 	}
 }
 

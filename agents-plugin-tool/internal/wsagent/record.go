@@ -139,10 +139,16 @@ type Record struct {
 
 	// MCPToken is a held lead process's ws-mcp session token
 	// (mcp_session.go), kept so a later daemon rejoining the process
-	// accepts the token it still sends; MCPURL is the route the process
-	// sends it to, which that daemon may no longer serve.
-	MCPToken string `json:"mcp_token_secret,omitempty"`
-	MCPURL   string `json:"mcp_url,omitempty"`
+	// accepts the token it still sends. MCPURL is the route the process
+	// sends it to, which that daemon may no longer serve; MCPEnv the ws-mcp
+	// entry's environment its hello was built from (the bundle the process
+	// loaded, whatever is selected now); MCPHolder the holder the token was
+	// drawn for, so a token a later start (by a daemon that keeps the
+	// members without knowing them) left behind is told from a live one.
+	MCPToken  string            `json:"mcp_token_secret,omitempty"`
+	MCPURL    string            `json:"mcp_url,omitempty"`
+	MCPEnv    map[string]string `json:"mcp_env,omitempty"`
+	MCPHolder string            `json:"mcp_holder_id,omitempty"`
 
 	// ActiveMs is the accumulated duration of closed child turns.
 	ActiveMs     int64           `json:"active_ms,omitempty"`

@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -159,4 +160,37 @@ func anyStrings(v any) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+// TestClaudeHTTPVariantConcurrentBuilds: starts that build the same
+// variant at once all get it, and no stage directory outlives its build.
+func TestClaudeHTTPVariantConcurrentBuilds(t *testing.T) {
+	root, dir := variantBundle(t), filepath.Join(t.TempDir(), HostedVariantsDir)
+	const n = 8
+	got, errs := make([]string, n), make([]error, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got[i], errs[i] = claudeHTTPVariant(root, dir)
+		}()
+	}
+	wg.Wait()
+	for i := range n {
+		if errs[i] != nil || got[i] != got[0] {
+			t.Fatalf("build %d = %q, %v; want %q", i, got[i], errs[i], got[0])
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != filepath.Base(got[0]) {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("the variants directory holds %v, want the variant alone", names)
+	}
 }
