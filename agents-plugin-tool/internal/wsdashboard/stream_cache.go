@@ -109,10 +109,12 @@ type pageSource struct {
 	// render renders the page; live is nil for a full render (every read
 	// afresh).
 	render func(live *liveRender) pageRender
-	// compareReads offers the previous render even on a full read. Such a
-	// source must freshly read all inputs before comparing; unlike a session
-	// live render it may not reuse stale store reads (the rail does this).
+	// compareReads offers the previous render even on a full read, so a
+	// source can skip templates when its current view is unchanged.
 	compareReads bool
+	// minInterval overrides the default page cadence (the shared rail uses
+	// one second). Waiting under the page lock preserves a trailing pass.
+	minInterval time.Duration
 	// stamp hashes, at call time, what in may have changed with no wake;
 	// ok false means the page has inputs the stamp cannot cover, so every
 	// refresh tick re-renders it.
@@ -221,11 +223,15 @@ func (c *pageCache) getSince(p *sharedPage, src pageSource, refresh bool, genera
 		c.stats.Shared.Add(1)
 		return p.r, p.at
 	}
-	if !current && p.rendered {
+	if p.rendered && (!current || src.minInterval > 0) {
 		// Keep one pending render under the page lock, not one timer/job per
 		// subscriber. Take its sequence and read inputs only after the wait,
 		// folding all intervening changes into that render.
-		if delay := sseMinInterval - c.now().Sub(p.completed); delay > 0 {
+		interval := src.minInterval
+		if interval <= 0 {
+			interval = sseMinInterval
+		}
+		if delay := interval - c.now().Sub(p.completed); delay > 0 {
 			c.wait(delay)
 		}
 	}
