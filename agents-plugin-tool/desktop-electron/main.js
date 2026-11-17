@@ -185,17 +185,19 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     // Initial iframe src loads do not reliably emit will-frame-navigate.
     // Enforce the pin at the network boundary too, including redirect hops.
     const localPages = ['connection.html', 'python-missing.html'].map(file => pathToFileURL(path.join(__dirname, file)).href);
+    // Only the connection page accepts diagnostics in its query; no new file authority.
+    const isLocalPage = url => localPages.includes(url) || url.split('?')[0] === localPages[0];
     wc.on('did-navigate', (_event, url) => {
       const target = navigation?.commitTarget;
       // Rollback belongs to the committed document, never another attempt's
       // provisional pin/title. A late promise settlement cannot advance it.
-      if (target && (target.pin ? destination(url, target.pin) === 'dashboard' : localPages.includes(url))) retained = target;
+      if (target && (target.pin ? destination(url, target.pin) === 'dashboard' : isLocalPage(url))) retained = target;
     });
     session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
       // The DevTools frontend can load before its webContents identity is available.
       if (/^(?:devtools|chrome-devtools):/i.test(details.url)) return callback({});
       if (details.resourceType !== 'mainFrame' && details.resourceType !== 'subFrame') return callback({});
-      if (details.resourceType === 'mainFrame' && localPages.includes(details.url)) return callback({});
+      if (details.resourceType === 'mainFrame' && isLocalPage(details.url)) return callback({});
       const action = destination(details.url, pin, details.resourceType === 'mainFrame');
       if (action === 'dashboard' || action === 'frame') return callback({});
       callback({ cancel: true });
@@ -279,7 +281,9 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       connecting = true;
       setTitle('Werkschaft — Connecting…');
       try {
-        const available = await pythonAvailable();
+        // Windows starts the bundled native daemon directly. Python is only
+        // needed by optional holder features, never to start or attach here.
+        const available = platform === 'win32' || await pythonAvailable();
         if (!isCurrent(attempt)) return;
         if (!available) {
           pin = null;
@@ -305,7 +309,15 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
           const failureTitle = `Werkschaft — ${error.message} — ⌘R to retry`;
           setTitle(failureTitle);
           attempt.commitTarget = { pin: null, title: failureTitle };
-          await wc.loadFile(path.join(__dirname, 'connection.html'));
+          const logPath = path.join(app.getPath('userData'), 'daemon-start.log');
+          let log = `Error log: ${logPath}`;
+          try {
+            fs.mkdirSync(path.dirname(logPath), { recursive: true });
+            fs.appendFileSync(logPath, `${new Date().toISOString()} ${error.stack || error}\n`, { mode: 0o600 });
+          } catch (logError) { log = `Could not write ${logPath}: ${logError.message}`; }
+          await loadDocument(attempt, () => wc.loadFile(path.join(__dirname, 'connection.html'), {
+            query: { reason: error.message, log },
+          }));
           return;
         }
         if (!isCurrent(attempt)) return;

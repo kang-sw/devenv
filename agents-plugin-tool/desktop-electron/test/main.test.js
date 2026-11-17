@@ -68,7 +68,12 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
         setUserAgent: agent => { this.agent = agent; }, getUserAgent: () => 'Chromium',
         setWindowOpenHandler: handler => { this.popup = handler; },
         loadURL: async url => { roots.events?.push('navigate'); this.loads.push(url); this.currentURL = url; this.webContents.mainFrame.url = url; loaded(url); },
-        loadFile: async file => { this.loads.push(file); this.currentURL = file; loaded(pathToFileURL(file).href); },
+        loadFile: async (file, options) => {
+          this.loads.push(file); this.currentURL = file; this.fileOptions = options;
+          const url = pathToFileURL(file);
+          url.search = new URLSearchParams(options?.query).toString();
+          loaded(url.href);
+        },
         setZoomFactor: zoom => { this.zoom = zoom; },
         id: renderers.length + 1,
         toggleDevTools: () => { this.devtoolsToggles = (this.devtoolsToggles || 0) + 1; },
@@ -308,7 +313,7 @@ test('overlapping retries are ignored and rediscovery replaces the pin', async (
   finish('http://127.0.0.1:39418/');
   await tick();
   const retry = f.menus.retry.click();
-  await tick(); // Python's asynchronous preflight precedes rediscovery.
+  await tick(); // Allow asynchronous rediscovery to begin.
   assert.equal(calls, 2);
   finish('http://127.0.0.1:39419/');
   await retry;
@@ -317,8 +322,8 @@ test('overlapping retries are ignored and rediscovery replaces the pin', async (
   assert.equal(canceled, true);
   assert.equal(f.window.loads.at(-1), 'http://127.0.0.1:39419/');
 });
-test('missing Python shows the local guide first; Retry probes again and proceeds once present', async () => {
-  for (const platform of ['darwin', 'win32']) {
+test('macOS missing Python shows the local guide first; Retry probes again and proceeds once present', async () => {
+  for (const platform of ['darwin']) {
     let available = false, probes = 0, connections = 0;
     const f = await fixture(async () => { connections++; return 'http://127.0.0.1:39418/'; }, platform, {
       pythonAvailable: async () => { probes++; return available; },
@@ -349,8 +354,8 @@ test('missing Python shows the local guide first; Retry probes again and proceed
     assert.equal(connections, 2);
   }
 });
-test('Retry Stay after Python disappears retains the dashboard document, title and authority', async () => {
-  for (const platform of ['darwin', 'win32']) {
+test('macOS Retry Stay after Python disappears retains the dashboard document, title and authority', async () => {
+  for (const platform of ['darwin']) {
     let available = true;
     const f = await fixture(undefined, platform, { pythonAvailable: async () => available });
     const content = f.views[0] || f.window, wc = content.webContents, originalURL = content.currentURL;
@@ -376,8 +381,8 @@ test('Retry Stay after Python disappears retains the dashboard document, title a
     assert.deepEqual(f.opened, []);
   }
 });
-test('genuine Python guide load failures and aborts without Stay still show the connection fallback', async () => {
-  for (const platform of ['darwin', 'win32']) {
+test('macOS genuine Python guide load failures and aborts without Stay still show the connection fallback', async () => {
+  for (const platform of ['darwin']) {
     for (const code of ['ERR_ABORTED', 'ERR_CONNECTION_REFUSED']) {
       let available = true;
       const f = await fixture(undefined, platform, { pythonAvailable: async () => available });
@@ -394,6 +399,71 @@ test('genuine Python guide load failures and aborts without Stay still show the 
       f.session.webRequest.handler({ url: originalURL + 's/frame', resourceType: 'subFrame' }, decision => assert.deepEqual(decision, { cancel: true }));
     }
   }
+});
+test('packaged Windows starts its unpacked bundled exe without Python, waits, retries and attaches without another spawn', async t => {
+  const source = daemonFixture(t, 'win32');
+  const appRoot = path.join(source.base, 'app.asar');
+  fs.renameSync(source.appRoot, appRoot + '.unpacked');
+  fs.writeFileSync(appRoot, 'archive placeholder; never executable input');
+  let healthy = false, launches = 0, ready;
+  const deps = { env: { WS_CACHE_HOME: path.join(source.base, 'isolated-cache') },
+    inspect: async () => {
+      if (!healthy) throw Error('missing');
+      return { url: 'http://127.0.0.1:39418/', health: { version: '0.50.1' } };
+    },
+    launch: async (binary, opts, args, wait) => {
+      launches++;
+      assert.equal(path.basename(binary), 'ws-mcp.exe');
+      assert.equal(opts.cwd, path.dirname(binary));
+      assert(opts.cwd.startsWith(path.join(source.userData, 'daemon-stages') + path.sep));
+      assert.equal(fs.readFileSync(binary, 'utf8'), 'fixture bytes, not an executable');
+      assert.deepEqual(args, ['daemon-start', '--require-independent-lifetime', '--start-wait', '13s']);
+      assert.equal(wait, true);
+      assert.equal(opts.logPath, path.join(source.userData, 'daemon-start.log'));
+      if (launches === 1) throw Error('OS refused breakaway <not markup>');
+      await new Promise(resolve => { ready = resolve; });
+      healthy = true;
+    } };
+  const f = await fixture(options => realConnectDaemon(options, deps), 'win32', {
+    ...source, appRoot, packaged: true,
+    pythonAvailable: () => assert.fail('Windows startup must not probe an interpreter'),
+  });
+  const page = f.views[0];
+  assert.equal(launches, 1);
+  assert.equal(path.basename(page.loads.at(-1)), 'connection.html');
+  assert.match(page.fileOptions.query.reason, /OS refused breakaway <not markup>/);
+  assert.equal(page.fileOptions.query.log, `Error log: ${path.join(source.userData, 'daemon-start.log')}`);
+  assert.match(fs.readFileSync(path.join(source.userData, 'daemon-start.log'), 'utf8'), /OS refused breakaway/);
+  const url = pathToFileURL(path.resolve(__dirname, '../connection.html'));
+  url.search = new URLSearchParams(page.fileOptions.query).toString();
+  f.session.webRequest.handler({ url: url.href, resourceType: 'mainFrame' }, decision => assert.deepEqual(decision, {}));
+  const retry = f.menus.retry.click();
+  await tick();
+  assert.equal(launches, 2);
+  assert.equal(path.basename(page.loads.at(-1)), 'connection.html', 'no dashboard before readiness');
+  ready();
+  await retry;
+  assert.equal(page.loads.at(-1), 'http://127.0.0.1:39418/');
+  await f.menus.retry.click();
+  assert.equal(launches, 2, 'healthy compatible daemon attaches without spawning');
+  f.app.emit('will-quit');
+  assert.equal(healthy, true, 'app exit does not shut down the independent daemon');
+});
+test('Windows attaches without Python even when no bundled candidate can be read', async () => {
+  let calls = 0;
+  const f = await fixture(async () => { calls++; return 'http://127.0.0.1:39418/'; }, 'win32', {
+    packaged: true, pythonAvailable: async () => false,
+  });
+  assert.equal(calls, 1);
+  assert.equal(f.views[0].loads.at(-1), 'http://127.0.0.1:39418/');
+});
+test('connection diagnostics render as text, never executable markup', () => {
+  const nodes = { reason: {}, log: {} }, reason = '<script>alert(1)</script>', log = 'Error log: C:\\Users\\name\\daemon-start.log';
+  require('node:vm').runInNewContext(fs.readFileSync(path.resolve(__dirname, '../connection.js'), 'utf8'), {
+    URLSearchParams, location: { search: '?' + new URLSearchParams({ reason, log }) },
+    document: { getElementById: id => nodes[id] },
+  });
+  assert.deepEqual(nodes, { reason: { textContent: reason }, log: { textContent: log } });
 });
 test('discovery and immediate navigation failure show the bundled connection page', async () => {
   const f = await fixture(async () => { throw new Error('No readable dashboard endpoint'); });

@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self'">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Werkschaft — Connect</title>
 <style>
@@ -11,12 +11,14 @@
   kbd { border: 1px solid #888; border-radius: .25rem; padding: .1rem .35rem; }
 </style>
 <h1>Connect to your dashboard</h1>
-<p>Werkschaft attaches to a healthy local dashboard. On macOS, if none answers,
-it starts a selected, validated daemon from a per-user snapshot.</p>
-<p>On Windows, starting a daemon is unavailable until independent lifetime can
-be guaranteed. Start it through a supported independent launcher, then choose
-<strong>Connection → Retry</strong> (<kbd>⌘R</kbd>).</p>
-<p>Werkschaft never stops or replaces a running daemon. Closing the window does
-not shut it down. The window title explains why a connection failed.</p>
-<p>The window title shows the current connection status.</p>
+<p>Werkschaft connects to a healthy local dashboard or starts its bundled daemon
+automatically on Windows and macOS.</p>
+<p id="reason" role="alert"></p>
+<p id="log"></p>
+<p>Choose <strong>Connection → Retry</strong> (<kbd>Ctrl+R</kbd> on Windows,
+<kbd>⌘R</kbd> on macOS) to try connecting and starting the daemon again.</p>
+<p>Closing the window does not explicitly shut down the daemon. If Windows
+refuses job breakaway, the daemon may end when its containing launcher or terminal job closes.
+Replacement is available through <strong>Connection → Replace daemon (same core)</strong>.</p>
+<script src="connection.js"></script>
 </html>

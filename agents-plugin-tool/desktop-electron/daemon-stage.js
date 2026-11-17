@@ -40,6 +40,12 @@ function copyPackage(root, destination, source, platform) {
   }
   return validateDaemonRoot(destination, source, platform);
 }
+function isWithin(root, target, paths = path) {
+  const rel = paths.relative(root, target);
+  // Different Windows volumes (or UNC shares) yield an absolute path, not
+  // a '..' path. They are outside the source, not nested inside it.
+  return !paths.isAbsolute(rel) && rel !== '..' && !rel.startsWith('..' + paths.sep);
+}
 function stageDaemon(selected, userData, platform = process.platform, appRoot) {
   if (!path.isAbsolute(userData)) throw new Error('Daemon user data path must be absolute');
   const container = path.join(userData, 'daemon-stages');
@@ -48,8 +54,7 @@ function stageDaemon(selected, userData, platform = process.platform, appRoot) {
   // Resolve both sides after creating the container, before allocating a stage.
   const actualContainer = fs.realpathSync(container);
   for (const origin of [selected.root, appRoot].filter(Boolean)) {
-    const rel = path.relative(fs.realpathSync(origin), actualContainer);
-    if (!rel.startsWith('..' + path.sep) && rel !== '..') throw new Error('Daemon stage must be outside the app and its source');
+    if (isWithin(fs.realpathSync(origin), actualContainer)) throw new Error('Daemon stage must be outside the app and its source');
   }
   const safeVersion = selected.metadata.version.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/\.{2,}/g, '_').slice(0, 80);
   const name = `${selected.contract.plugin}-${safeVersion}-${selected.metadata.binary_sha256.slice(0, 16)}`;
@@ -63,4 +68,4 @@ function stageDaemon(selected, userData, platform = process.platform, appRoot) {
     throw error;
   }
 }
-module.exports = { copyPackage, stageDaemon };
+module.exports = { copyPackage, stageDaemon, isWithin };
