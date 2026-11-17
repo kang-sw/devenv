@@ -186,6 +186,35 @@ func TestFormatSageRecordBlockRecovery(t *testing.T) {
 	}
 }
 
+func TestSageBlockedReviewersSelectsBlockedStages(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		posture      map[string]string
+		design       bool
+		completeness bool
+	}{
+		{"design", map[string]string{"sage-review-design": "blocked", "sage-review-completeness": "completed"}, true, false},
+		{"completeness", map[string]string{"sage-review-design": "completed", "sage-review-completeness": "blocked"}, false, true},
+		{"combined", map[string]string{"sage-review-design": "blocked", "sage-review-completeness": "blocked"}, true, true},
+		{"unknown", nil, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stages := strings.Fields(sageBlockedReviewers(wsdoc.SageRecordResult{Posture: tc.posture}))
+			has := func(stage string) bool {
+				for _, token := range stages {
+					if token == stage {
+						return true
+					}
+				}
+				return false
+			}
+			if has("design") != tc.design || has("completeness") != tc.completeness {
+				t.Fatalf("selected stage identifiers: %v", stages)
+			}
+		})
+	}
+}
+
 // A concern can carry autonomous issues without missing issues.
 func TestFormatSageRecordConcernWithoutMissing(t *testing.T) {
 	out := formatSageRecord(wsdoc.SageRecordResult{
@@ -193,7 +222,7 @@ func TestFormatSageRecordConcernWithoutMissing(t *testing.T) {
 		Posture:    map[string]string{"sage-review-design": "completed"},
 		Autonomous: 2,
 	})
-	if !strings.Contains(out, "verdict: concern") || !strings.Contains(out, "autonomous_issues: 2") || strings.Contains(out, "missing_issues:") {
+	if !strings.Contains(out, "verdict: concern") || !strings.Contains(out, "autonomous_issues: 2") || !strings.Contains(out, "missing_issues: 0") {
 		t.Fatalf("concern issue fields:\n%s", out)
 	}
 }
@@ -219,7 +248,7 @@ func TestFormatSageRecordIssueRouting(t *testing.T) {
 		Posture:    map[string]string{"sage-review-completeness": "completed"},
 		Autonomous: 3,
 	})
-	if !strings.Contains(autonomousOnly, "autonomous_issues: 3") || strings.Contains(autonomousOnly, "missing_issues:") || !strings.Contains(autonomousOnly, "ws/tickets.sage_stamp") {
+	if !strings.Contains(autonomousOnly, "autonomous_issues: 3") || !strings.Contains(autonomousOnly, "missing_issues: 0") || !strings.Contains(autonomousOnly, "ws/tickets.sage_stamp") {
 		t.Fatalf("formatSageRecord autonomous-only fields:\n%s", autonomousOnly)
 	}
 
@@ -228,7 +257,7 @@ func TestFormatSageRecordIssueRouting(t *testing.T) {
 		Posture: map[string]string{"sage-review-design": "completed"},
 		Missing: 1,
 	})
-	if !strings.Contains(missingOnly, "missing_issues: 1") || strings.Contains(missingOnly, "autonomous_issues:") || !strings.Contains(missingOnly, "next_instruction:") {
+	if !strings.Contains(missingOnly, "missing_issues: 1") || !strings.Contains(missingOnly, "autonomous_issues: 0") || !strings.Contains(missingOnly, "next_instruction:") {
 		t.Fatalf("formatSageRecord missing-only fields:\n%s", missingOnly)
 	}
 }
