@@ -545,7 +545,14 @@
       "registered_at": "2026-11-17T05:54:39Z"
     },
     "261117-feat-ws-dashboard-wide-drawer-tickets-notes": {
-      "registered_at": "2026-11-17T07:28:08Z"
+      "registered_at": "2026-11-17T07:28:08Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "9091c57d68d03c76",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-17T08:16:56Z"
+      }
     },
     "261117-feat-ws-dashboard-wide-explorer-preview-pane": {
       "registered_at": "2026-11-17T07:16:01Z",
