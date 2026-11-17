@@ -80,6 +80,9 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, r
       notify('Cannot determine daemon core from REST health; keeping the current connection. Update the plugin before retrying.');
       return running.url;
     }
+    // A compatible Windows daemon is already sufficient for startup. Only
+    // the explicit Replace action may stage or spawn a same-minor successor.
+    if (platform === 'win32' && !replace && sameMinorCandidate(selected.metadata.version, running.health.version)) return running.url;
     if (relation < 0 || relation === 0 && !replace) return running.url;
     // Current REST does not enumerate connected hello versions/protocols. A
     // cross-minor swap would strand unknown clients, even when requested.

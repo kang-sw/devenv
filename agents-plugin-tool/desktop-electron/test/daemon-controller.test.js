@@ -86,6 +86,32 @@ test('approved OS-accepted macOS creation precedes drain without claiming lock r
   assert.equal(await connectDaemon({ ...config(f), replace: true }, deps), URL);
   assert.deepEqual(order, ['created', 'drained']);
 });
+test('Windows ordinary startup attaches an older compatible patch without staging or spawning; explicit Replace still works', async t => {
+  const f = fixture(t, 'win32');
+  let live = { pid: 120, version: '0.50.0', started_at: 'incumbent', lan: true };
+  const incumbent = { ...live };
+  let stages = 0, launches = 0;
+  const deps = { env: env(f),
+    inspect: async () => ({ url: URL, endpoint: { pid: live.pid, port: 32000 }, health: { ...live } }),
+    stage: (...args) => { stages++; return require('../daemon-stage').stageDaemon(...args); },
+    shutdown: () => assert.fail('Windows native starter owns explicit drain'),
+    launch: async (_binary, _options, args, wait) => {
+      launches++;
+      assert.deepEqual(args, ['daemon-start', '--require-independent-lifetime', '--start-wait', '13s', '--replace']);
+      assert.equal(wait, true);
+      live = { ...live, pid: 121, version: '0.50.1', started_at: 'explicit successor' };
+    } };
+  const options = { ...config(f), platform: 'win32' };
+  assert.equal(await connectDaemon(options, deps), URL);
+  assert.equal(stages, 0);
+  assert.equal(launches, 0);
+  assert.deepEqual(live, incumbent);
+  assert.equal(fs.existsSync(path.join(f.userData, 'daemon-stages')), false);
+  assert.equal(await connectDaemon({ ...options, replace: true }, deps), URL);
+  assert.equal(stages, 1);
+  assert.equal(launches, 1);
+  assert.equal(live.pid, 121);
+});
 test('Windows strict starter attaches a newer cross-minor winner without a second spawn or drain', async t => {
   const f = fixture(t, 'win32');
   let live = { pid: 120, version: '0.50.1', lan: true, started_at: 'old' };
