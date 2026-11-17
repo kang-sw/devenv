@@ -178,7 +178,7 @@ func TestAgentLeadPassesItsCallerAndMapsErrors(t *testing.T) {
 
 	args := map[string]any{"prompt": "Fix it\nthen report", "tier": "pi.small", "authority": "read-only", "system_prompt_path": "p.md", "worktree": "wt", "label": "fixer"}
 	out := callToolWithKey(t, f.server, 2, f.key, "agent.spawn", args)
-	for _, want := range []string{"spawned agent id:kid1 (starting)", "completion mail", "pi.send(id: kid1)"} {
+	for _, want := range []string{"spawned agent id:kid1 (starting)", "completion mail", `mailbox.send(to: "id:kid1")`} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("agent.spawn lacks %q: %q", want, out)
 		}
@@ -345,7 +345,7 @@ func TestAgentWorkerForwardsOnItsToken(t *testing.T) {
 	}
 
 	out := callToolWithKey(t, s, 2, key, "agent.spawn", map[string]any{"prompt": "sub task", "tier": "small", "authority": "read-only", "system_prompt": "sys", "cwd": "sub", "label": "sub"})
-	if !strings.Contains(out, "spawned agent id:kid9 (starting)") || !strings.Contains(out, "steered into your running turn") || strings.Contains(out, "pi.send") {
+	if !strings.Contains(out, "spawned agent id:kid9 (starting)") || !strings.Contains(out, "steered into your running turn") || !strings.Contains(out, `mailbox.send(to: "id:kid9")`) || strings.Contains(out, "pi.send") {
 		t.Fatalf("agent.spawn = %q", out)
 	}
 	call := route.last()

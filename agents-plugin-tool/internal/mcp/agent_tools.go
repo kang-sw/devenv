@@ -210,10 +210,10 @@ func agentFailure(id json.RawMessage, tool string, err error) response {
 	return toolTextResponse(id, "", err)
 }
 
-// agentFollowUp is how a caller sends a child a follow-up until mailbox
-// delivery to a child's address lands; delete it then, with its uses.
+// agentFollowUp is how a caller sends a child a follow-up: mail to its
+// address, which the daemon routes to the child it owns.
 func agentFollowUp(address string) string {
-	return fmt.Sprintf("Until mail to a child's address is delivered, send it a follow-up with pi.send(id: %s).", strings.TrimPrefix(address, "id:"))
+	return fmt.Sprintf("Send it a follow-up with mailbox.send(to: %q): a running turn takes it as a steer where its harness allows one, else its next turn does; a sleeping child wakes for it.", address)
 }
 
 func formatAgentSpawn(res wsagent.AgentSpawnResult, worker bool) string {
@@ -221,9 +221,9 @@ func formatAgentSpawn(res wsagent.AgentSpawnResult, worker bool) string {
 	fmt.Fprintf(&b, "spawned agent %s (%s); its first turn runs now.\n", res.Address, res.Status)
 	if worker {
 		b.WriteString("Its report (status and final message) comes to you when each turn ends: steered into your running turn, or as your next message when you are idle. Your own report to your parent waits until every open child's report has reached you, so you may end your turn while it works.\n")
-		return b.String()
+	} else {
+		b.WriteString("Its completion mail (status and final message) arrives in this session's mailbox when each turn ends: end your turn and let it arrive. It sleeps after its idle timer and wakes on its next message.\n")
 	}
-	b.WriteString("Its completion mail (status and final message) arrives in this session's mailbox when each turn ends: end your turn and let it arrive. It sleeps after its idle timer and wakes on its next message.\n")
 	b.WriteString(agentFollowUp(res.Address) + "\n")
 	return b.String()
 }
@@ -398,15 +398,13 @@ func agentSpawnDescription(worker bool) string {
 	}
 	if worker {
 		parts = append(parts,
-			"Each time its turn ends or fails, its report (status and final message) comes to you: steered into your running turn, or as your next message when you are idle. Your own report to your parent waits until every open child's report has reached you, so you may end your turn while they work.",
-			"The child sleeps after its idle timer and wakes on its next message.")
-		return strings.Join(parts, " ")
+			"Each time its turn ends or fails, its report (status and final message) comes to you: steered into your running turn, or as your next message when you are idle. Your own report to your parent waits until every open child's report has reached you, so you may end your turn while they work.")
+	} else {
+		parts = append(parts,
+			"Each time its turn ends or fails, a completion mail (status and final message) arrives in this session's mailbox: end your turn and let it arrive.")
 	}
 	parts = append(parts,
-		"Each time its turn ends or fails, a completion mail (status and final message) arrives in this session's mailbox: end your turn and let it arrive.",
-		"The child sleeps after its idle timer and wakes on its next message.",
-		// Until mailbox delivery to a child's address lands; delete then.
-		`Until mail to a child's address is delivered, send it a follow-up with pi.send(id: <its address without the "id:" prefix>).`)
+		"Follow up with mailbox.send to its address: a running turn takes the mail as a steer where its harness allows one, else its next turn does. The child sleeps after its idle timer and wakes on its next mail.")
 	return strings.Join(parts, " ")
 }
 

@@ -78,13 +78,12 @@ func (s *Server) filteredTools() []map[string]any {
 		if permanentlyHiddenTool(name) {
 			continue
 		}
-		if isPiTool(name) && !s.piListed() {
-			// Listed only where they can run (piUnavailable); a call that
-			// comes anyway refuses with the reason.
+		if isPiTool(name) {
+			// Never listed: agent.* and mailbox.send replace them. Their
+			// handlers still answer (piUnavailable gates a call), so a
+			// session started on an older plugin keeps working until they
+			// are deleted.
 			continue
-		}
-		if isPiTool(name) && s.piForwards() {
-			tool = piWorkerTool(tool)
 		}
 		if isAgentTool(name) {
 			// Listed where a runner answers them, the daemon's or the token

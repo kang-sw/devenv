@@ -119,19 +119,8 @@ func TestPiWorkerForwardsPiToolsOnItsToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := listedPiTools(s); strings.Join(got, ",") != strings.Join(piToolNames, ",") {
-		t.Fatalf("listed = %v", got)
-	}
-	for _, tool := range s.filteredTools() {
-		if name, _ := tool["name"].(string); name == "pi.spawn" {
-			if desc, _ := tool["description"].(string); !strings.Contains(desc, "Spawn a Pi subagent of your own") || strings.Contains(desc, "mailbox") {
-				t.Fatalf("pi.spawn reads as a worker's: %q", desc)
-			}
-			props, _ := tool["inputSchema"].(map[string]any)["properties"].(map[string]any)
-			if cwd := props["cwd"].(map[string]string)["description"]; !strings.Contains(cwd, "relative to your own working directory") || strings.Contains(cwd, "root") {
-				t.Fatalf("pi.spawn's cwd reads as a worker's: %q", cwd)
-			}
-		}
+	if got := listedPiTools(s); len(got) != 0 {
+		t.Fatalf("pi.* is never listed, even to a token's worker: %v", got)
 	}
 
 	out := callToolWithKey(t, s, 3, key, "pi.spawn", map[string]any{"prompt": "sub task", "tier": "small", "cwd": "sub", "label": "sub"})

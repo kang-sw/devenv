@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -109,8 +110,9 @@ func terminologyForHarness(harness, namespace string) map[string]string {
 	return table
 }
 
-// playbookTerminology selects daemon Pi idioms only for a caller whose
-// client and effective tool surface permit them.
+// playbookTerminology selects the daemon agent idioms (agent.spawn and
+// mailbox.send) only for a Pi caller whose client and effective tool
+// surface permit them.
 func playbookTerminology(harness string, piAvailable bool, namespace string) map[string]string {
 	if piAvailable {
 		return piMCPOnlyTerminology(namespace)
@@ -159,21 +161,18 @@ func (s *Server) callerPiMCPOnly(key string) bool {
 	if def == nil {
 		return false
 	}
-	hasSpawn, hasSend := false, false
-	for _, tool := range def.WSTools {
-		hasSpawn = hasSpawn || tool == "pi.spawn"
-		hasSend = hasSend || tool == "pi.send"
-	}
-	return hasSpawn && hasSend
+	return slices.Contains(def.WSTools, "agent.spawn") && slices.Contains(def.WSTools, "mailbox.send")
 }
 
-// piMCPOnlyTerminology names daemon Pi tools using the runtime namespace.
-// ContinueIdiom has no backticks because delegationTip wraps it in a code span.
+// piMCPOnlyTerminology names the daemon's agent tools, which a Pi session
+// without the native extension delegates through, using the runtime
+// namespace. ContinueIdiom has no backticks because delegationTip wraps it
+// in a code span.
 func piMCPOnlyTerminology(namespace string) map[string]string {
 	return map[string]string{
-		"ExploreAgent":  "a `" + namespace + "/pi.spawn` subagent with profile explore and tier small",
-		"SpawnIdiom":    "`" + namespace + "/pi.spawn` (tier: the resolved capability tier, not a model name)",
-		"ContinueIdiom": namespace + "/pi.send to the same subagent id",
+		"ExploreAgent":  "a `" + namespace + "/agent.spawn` subagent at tier small with read-only authority",
+		"SpawnIdiom":    "`" + namespace + "/agent.spawn` (tier: the resolved capability tier, not a model name; authority: at most your own)",
+		"ContinueIdiom": namespace + "/mailbox.send to the address agent.spawn returned",
 	}
 }
 
@@ -972,7 +971,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 func renderPlaybookBodyForCaller(s *Server, callerKey, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
 	harness := s.currentHarness()
 	piClient := (harness == "pi" && s.clientPiDaemonAgents()) || s.callerPiMCPOnly(callerKey)
-	piAvailable := piClient && s.piListed() && s.toolAllowed("pi.spawn") && s.toolAllowed("pi.send")
+	piAvailable := piClient && s.agentListed() && s.toolAllowed("agent.spawn") && s.toolAllowed("mailbox.send")
 	terminology := playbookTerminology(harness, piAvailable, s.runtimeNamespace())
 
 	// Load once with nil vars so the MCP playbook layer can add reserved

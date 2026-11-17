@@ -86,21 +86,20 @@ func TestHostedCLIWorkerTokenRouting(t *testing.T) {
 	hello.Env[wsagent.EnvPiToken] = tokenA
 	hello.Env["WS_MCP_ALLOWED_TOOLS"] = "pi.spawn,pi.list,pi.transcript,pi.wait"
 	host := &proxyHost{agents: runner, logw: io.Discard}
-	out, stderr, code := hostedCLIResultWithHost(t, host, hello, "tools", "pi.spawn")
-	if code != 0 || !strings.Contains(out, "Your own ws session key") || !strings.Contains(out, "relative to your own working directory") {
-		t.Fatalf("worker schema: %q %q %d", out, stderr, code)
-	}
-	hello.Env[wsagent.EnvPiToken] = "  "
-	leadSchema, stderr, code := hostedCLIResultWithHost(t, host, hello, "tools", "pi.spawn")
-	if strings.Contains(leadSchema, "Your own ws session key") || (code != 0 && !strings.Contains(stderr, "tool not found: pi.spawn")) {
-		t.Fatalf("lead schema: %q %q %d", leadSchema, stderr, code)
+	// pi.* is never listed, to a worker or a lead; its calls still answer.
+	for _, token := range []string{tokenA, "  "} {
+		hello.Env[wsagent.EnvPiToken] = token
+		out, stderr, code := hostedCLIResultWithHost(t, host, hello, "tools", "pi.spawn")
+		if code == 0 || !strings.Contains(stderr, "tool not found: pi.spawn") {
+			t.Fatalf("schema with token %q: %q %q %d", token, out, stderr, code)
+		}
 	}
 	hello.Env[wsagent.EnvPiToken] = tokenA
 	call := func(tool, args string) (string, string, int) {
 		t.Helper()
 		return hostedCLIResultWithHost(t, host, hello, "call", tool, args)
 	}
-	out, stderr, code = call("pi.spawn", fmt.Sprintf(`{"session_key":%q,"prompt":"child","tier":"small","format":"json"}`, key))
+	out, stderr, code := call("pi.spawn", fmt.Sprintf(`{"session_key":%q,"prompt":"child","tier":"small","format":"json"}`, key))
 	if code != 0 {
 		t.Fatalf("spawn: %q %q %d", out, stderr, code)
 	}

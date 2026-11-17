@@ -991,7 +991,7 @@ func (c *conv) parentWaitTakes(mark uint64) bool {
 // the child and how its turn ended, then its final assistant message.
 func ReportText(rep TurnReport) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[Pi subagent %s", rep.Result.ID)
+	fmt.Fprintf(&b, "[subagent %s", AgentAddress(rep.Result.ID))
 	if label := rep.Child.Label; label != "" {
 		fmt.Fprintf(&b, " %q", label)
 	}

@@ -14,15 +14,16 @@ import (
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
-// A Pi session without the native ws Pi extension renders the ws MCP Pi
-// tools as its idioms; a native Pi session keeps the extension's tools. These
+// A Pi session without the native ws Pi extension renders the daemon's
+// agent tools (agent.spawn and mailbox.send) as its idioms; a native Pi
+// session keeps the extension's tools. These
 // tests pin both rows and drive the switch from the caller's session key
 // through the daemon's conversation record to the rendered playbook.
 
 const (
-	piMCPOnlySpawn    = "`ws/pi.spawn` (tier: the resolved capability tier, not a model name)"
-	piMCPOnlyExplore  = "a `ws/pi.spawn` subagent with profile explore and tier small"
-	piMCPOnlyContinue = "ws/pi.send to the same subagent id"
+	piMCPOnlySpawn    = "`ws/agent.spawn` (tier: the resolved capability tier, not a model name; authority: at most your own)"
+	piMCPOnlyExplore  = "a `ws/agent.spawn` subagent at tier small with read-only authority"
+	piMCPOnlyContinue = "ws/mailbox.send to the address agent.spawn returned"
 )
 
 func TestPlaybookTerminologyPiMCPOnlyRow(t *testing.T) {
@@ -90,14 +91,14 @@ func (f *piRecordFixture) record(t *testing.T, key string, rec wsagent.Record) {
 }
 
 // spawnedKey mints a Pi subagent's key as the runner's key store does and
-// records it as a pi-worker conversation with profile def.
+// records it as an agent.spawn child's conversation with profile def.
 func (f *piRecordFixture) spawnedKey(t *testing.T, def *wsagent.Profile) string {
 	t.Helper()
 	key, err := NewAgentKeyStore().Mint(f.root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.record(t, key, wsagent.Record{Backend: wsagent.BackendPi, Profile: wsagent.PiWorkerProfile, ResolvedDefinition: def})
+	f.record(t, key, wsagent.Record{Backend: wsagent.BackendPi, Profile: wsagent.AgentWorkerProfile(wsagent.BackendPi), ResolvedDefinition: def})
 	return key
 }
 
@@ -138,25 +139,25 @@ func assertPiMCPOnlyBody(t *testing.T, body string) {
 			t.Errorf("rendered body missing %q:\n%s", want, body)
 		}
 	}
-	for _, banned := range []string{"ws-agent-spawn", "ws-agent-send", "the `explore` researcher", "Agent({"} {
+	for _, banned := range []string{"ws-agent-spawn", "ws-agent-send", "the `explore` researcher", "Agent({", "pi.spawn", "pi.send"} {
 		if strings.Contains(body, banned) {
 			t.Errorf("rendered body names %q, a tool an MCP-only Pi session lacks", banned)
 		}
 	}
 }
 
-// TestPlaybookRenderPiSpawnedCallerUsesMCPOnlyIdioms: a pi.spawn child (no
-// extension, so its connection is not detected as pi) rendering the elevated
-// worker playbook is told pi.spawn with the resolved tier.
+// TestPlaybookRenderPiSpawnedCallerUsesMCPOnlyIdioms: an agent.spawn Pi
+// child (no extension, so its connection is not detected as pi) rendering
+// the elevated worker playbook is told agent.spawn with the resolved tier.
 func TestPlaybookRenderPiSpawnedCallerUsesMCPOnlyIdioms(t *testing.T) {
 	f := newPiRecordFixture(t)
-	key := f.spawnedKey(t, &wsagent.Profile{Backend: wsagent.BackendPi, WSTools: []string{"pi.spawn", "pi.send"}})
+	key := f.spawnedKey(t, &wsagent.Profile{Backend: wsagent.BackendPi, WSTools: []string{"agent.spawn", "mailbox.send"}})
 	assertPiMCPOnlyBody(t, renderedBody(t, f.s, key, "ticket-worker-elevated"))
 }
 
 // TestPlaybookRenderPiSpawnedCallerWithoutSnapshotResolvesProfile: a record
 // written before the launched-profile snapshot falls back to its profile
-// name, whose builtin pi-worker loads no extension.
+// name, whose builtin Pi agent worker loads no extension.
 func TestPlaybookRenderPiSpawnedCallerWithoutSnapshotResolvesProfile(t *testing.T) {
 	f := newPiRecordFixture(t)
 	key := f.spawnedKey(t, nil)
@@ -181,8 +182,8 @@ func TestPlaybookRenderHostedPiLeadSwitchesOnBridgeFallback(t *testing.T) {
 			t.Errorf("native Pi lead body missing native %s %q", name, native[name])
 		}
 	}
-	if strings.Contains(body, "pi.spawn") {
-		t.Errorf("unmarked Pi lead body names pi.spawn:\n%s", body)
+	if strings.Contains(body, "agent.spawn") {
+		t.Errorf("unmarked Pi lead body names agent.spawn:\n%s", body)
 	}
 }
 
@@ -191,8 +192,8 @@ func TestPlaybookRenderHostedPiLeadSwitchesOnBridgeFallback(t *testing.T) {
 func TestPlaybookRenderUnrecordedCallerKeepsHarnessRow(t *testing.T) {
 	f := newPiRecordFixture(t)
 	body := renderedBody(t, f.s, f.leadKey, "ticket-worker-elevated")
-	if strings.Contains(body, "pi.spawn") {
-		t.Errorf("unrecorded caller body names pi.spawn:\n%s", body)
+	if strings.Contains(body, "agent.spawn") {
+		t.Errorf("unrecorded caller body names agent.spawn:\n%s", body)
 	}
 	if !strings.Contains(body, terminologyForHarness("", "ws")["SpawnIdiom"]) {
 		t.Errorf("unrecorded caller body missing the host-neutral SpawnIdiom")
@@ -203,7 +204,7 @@ func TestPlaybookRenderUnrecordedCallerKeepsHarnessRow(t *testing.T) {
 // caller key to the terminology switch as playbook.render does.
 func TestPlaybookReadPiSpawnedCallerUsesMCPOnlyIdioms(t *testing.T) {
 	f := newPiRecordFixture(t)
-	key := f.spawnedKey(t, &wsagent.Profile{Backend: wsagent.BackendPi, WSTools: []string{"pi.spawn", "pi.send"}})
+	key := f.spawnedKey(t, &wsagent.Profile{Backend: wsagent.BackendPi, WSTools: []string{"agent.spawn", "mailbox.send"}})
 	resp := callToolOnce(t, f.s, 2, "playbook.read", map[string]any{"name": "ticket-worker-elevated", "session_key": key})
 	if toolIsError(t, resp) {
 		t.Fatalf("playbook.read returned error: %s", resp)
