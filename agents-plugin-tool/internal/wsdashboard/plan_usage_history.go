@@ -257,6 +257,11 @@ func (s *planUsageStore) appendHistoryLocked(samples []planUsageSample, now int6
 		return
 	}
 	h.Records = prunePlanUsageHistory(h.Records, now)
+	// An accepted sample the prune drops at once (past the age or the cap)
+	// leaves the content as read: compare in memory and skip the write.
+	if sameHistoryRecords(h.Records, current.Records) {
+		return
+	}
 	records := make([]map[string]json.RawMessage, 0, len(h.Records))
 	for _, r := range h.Records {
 		records = append(records, r.Fields)
@@ -267,7 +272,7 @@ func (s *planUsageStore) appendHistoryLocked(samples []planUsageSample, now int6
 		return
 	}
 	raw, err := json.Marshal(h.Fields)
-	if err != nil || writePrivateFile(s.dir, planUsageHistoryCache, raw) != nil {
+	if err != nil || s.write(planUsageHistoryCache, raw) != nil {
 		return
 	}
 	// Adopt what was just written so the next read costs one stat; without a
@@ -279,6 +284,21 @@ func (s *planUsageStore) appendHistoryLocked(samples []planUsageSample, now int6
 	}
 	s.hist.ok, s.hist.stat, s.hist.file, s.hist.err = true, stat, h, nil
 	s.hist.rev++
+}
+
+// sameHistoryRecords reports whether two record lists hold the same samples in
+// the same order. A record's Fields change only alongside its Sample (see
+// appendHistoryLocked), so equal samples mean equal written content.
+func sameHistoryRecords(a, b []planUsageHistoryRecord) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Sample != b[i].Sample {
+			return false
+		}
+	}
+	return true
 }
 
 // history is the full pruned history; viewers get historyView.
