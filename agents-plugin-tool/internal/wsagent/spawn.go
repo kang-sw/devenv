@@ -443,7 +443,8 @@ func (r *Runner) indexChildLocked(rec Record) {
 // Runner.Send had sent it when Wait was called settles, and returns how it
 // settled; a turn that settled so before the call is returned at once. It
 // returns TurnRunning when timeout passes or ctx ends first, and TurnClosed
-// for a closed conversation. A turn the conversation's harness began on its
+// for a closed conversation whose last turn does not answer it
+// (closedTurn). A turn the conversation's harness began on its
 // own holds no new message, so it never answers a wait for a sent one.
 func (r *Runner) Wait(ctx context.Context, id string, timeout time.Duration) (TurnResult, error) {
 	return r.wait(ctx, id, timeout, false)

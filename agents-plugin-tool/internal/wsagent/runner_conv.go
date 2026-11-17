@@ -151,6 +151,9 @@ type conv struct {
 	// retry (kick) and cleared by the next send that succeeds; a send that
 	// fails again meanwhile waits for the next inbox or mail signal.
 	sendRetried bool
+	// autoClosing is set while a close of this finished Pi child is
+	// dispatched (closeWhenDone) and not yet run; loop-owned.
+	autoClosing bool
 
 	// Turn settles (spawn.go). sends counts Runner.Send's messages and
 	// settled is the last settled turn, settleC closed and replaced at each
@@ -415,6 +418,7 @@ func (c *conv) loop() {
 		if c.settle() {
 			return
 		}
+		c.closeWhenDone()
 	}
 }
 
