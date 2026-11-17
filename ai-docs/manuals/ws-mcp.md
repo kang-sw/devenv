@@ -523,21 +523,24 @@ copy-only path link in its place, and its link offers the copies only; for
 a viewer on this machine its menu offers open in new tab and open in native
 app, not open in system browser. On a served page each topic body on the board
 renders in its own sandboxed `srcdoc` frame (`allow-scripts allow-popups
-allow-popups-to-escape-sandbox`, an opaque origin that sends no cookie), so
-its images are inlined as `data:` URLs up to 2 MiB under the same containment
-(`wsdashboard.ImageDataURL`); a larger image falls back to the image route,
-which a LAN viewer's frame cannot load. An absolute image path outside the
-root is never inlined (the frame's content is the same for every viewer):
-it stays path text marked `data-relay` with its image route URL, and the
-frame element lists those URLs as its own `data-relay`. The frame cannot load
+allow-popups-to-escape-sandbox`, an opaque origin that sends no cookie). No
+server response inlines an image as a `data:` URL: each file image in a
+topic body, inside the root or outside it, stays path text marked
+`data-relay` with its image route URL, and the frame element lists those
+URLs as its own `data-relay`. The frame cannot load
 that route itself (its opaque origin's requests are `Sec-Fetch-Site:
 cross-site`, which the route 404s), so it asks the page by `postMessage`;
 the page's relay handler accepts the request only from one of its own body
 frames and only for a URL on that frame's list that is this session's image
 route for an image name, fetches it same-origin (served only to a loopback
-viewer), and posts the frame an image `Blob`, which the frame shows in the
-path text's place once it decodes. A LAN viewer's fetch 404s and the path
-text stays. The served board renders the 30 most
+viewer when outside the root), and posts the frame an image `Blob`, which
+the frame shows in the path text's place once it decodes. A LAN viewer's
+fetch of an outside image 404s and the path text stays. The route streams
+the file as is with an ETag of its size and modification time, and caches
+a URL whose `&v=` matches that version as immutable. A loopback viewer is
+also served a message attachment by its absolute path in a session's inbox
+attachments directory, which the credential deny set otherwise refuses with
+the rest of the daemon's state directory. The served board renders the 30 most
 recently closed topics (with nothing waiting on the user) and a show-more
 control; `GET /s/<reply-id>/closed?from=<index>&n=<count>` (from at least 1,
 n default 30, at most 300) answers `{html}` with the next closed topics in

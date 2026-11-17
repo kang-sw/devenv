@@ -17,9 +17,9 @@ import (
 
 // TestRawImgTagRelayBrowser: a raw <img src> with a file path in a topic
 // body or a panel payload shows its image in the sandboxed frame, as
-// ![](path) does: an in-root path inlined, an outside one relayed through
-// the host page. WS_RAWIMG_SHOT, when set, is where the script saves a
-// screenshot of the topic before it asserts.
+// ![](path) does: relayed through the host page, inside the root or out.
+// WS_RAWIMG_SHOT, when set, is where the script saves a screenshot of the
+// topic before it asserts.
 func TestRawImgTagRelayBrowser(t *testing.T) {
 	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
 		t.Skip("set WS_PLAYWRIGHT_MODULE to run Chromium acceptance")
@@ -51,7 +51,7 @@ func TestRawImgTagRelayBrowser(t *testing.T) {
 	view := wswhiteboard.BuildView(st, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutFull, ReplyID: reply,
 		FileText:     func(p string) string { return p },
 		ImageSrc:     func(p string) string { return ImageSrc(f.project, reply, p) },
-		DocImageSrc:  func(p string) string { return ImageDataURL(f.project, p) },
+		DocImageSrc:  func(string) string { return "" },
 		FileActions:  FileActions(f.project, reply),
 		OutsideImage: OutsideImage(f.project, reply),
 	})

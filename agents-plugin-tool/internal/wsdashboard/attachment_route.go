@@ -2,7 +2,6 @@ package wsdashboard
 
 import (
 	"net/http"
-	"os"
 	"path/filepath"
 
 	"github.com/kang-sw/devenv/internal/wsinbox"
@@ -37,24 +36,12 @@ func (d *Daemon) handleAttachment(w http.ResponseWriter, r *http.Request, replyI
 		http.Error(w, "attachment not found", http.StatusNotFound)
 		return
 	}
-	path := filepath.Join(wsinbox.AttachmentsDir(sessionInbox(d.dir, replyID)), name)
-	// Lstat before opening: a symlink is refused, and opening a FIFO would
-	// block the handler.
-	if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
-		http.Error(w, "attachment not found", http.StatusNotFound)
-		return
-	}
-	f, err := os.Open(path)
-	if err != nil {
+	f, info, ok := openAttachment(filepath.Join(wsinbox.AttachmentsDir(sessionInbox(d.dir, replyID)), name))
+	if !ok {
 		http.Error(w, "attachment not found", http.StatusNotFound)
 		return
 	}
 	defer f.Close()
-	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() {
-		http.Error(w, "attachment not found", http.StatusNotFound)
-		return
-	}
 	h := w.Header()
 	h.Set("Content-Type", ctype)
 	h.Set("X-Content-Type-Options", "nosniff")

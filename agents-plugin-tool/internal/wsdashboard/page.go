@@ -84,10 +84,10 @@ type PageContent struct {
 	// Watch names every file and directory the read took page content from
 	// that a writer may change without a nudge, so no session fingerprint
 	// catches it within a stream's refresh interval: the ticket directories
-	// and ticket files the panels list, and each image a topic body inlines
-	// (a missing one included, since its appearance changes the page), and
-	// the mailbox stores, history directory, and listening marker the
-	// mailbox panel reads. A
+	// and ticket files the panels list, and each image a topic body shows,
+	// whose version its URL carries (a missing one included, since its
+	// appearance changes the page), and the mailbox stores, history
+	// directory, and listening marker the mailbox panel reads. A
 	// stream's refresh tick skips its re-read only while every one of them
 	// stats the same (stream_cache.go), so a source that reads such a file
 	// and leaves it out shows a stale page until the session's next change.

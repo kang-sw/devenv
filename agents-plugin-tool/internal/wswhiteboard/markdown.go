@@ -482,7 +482,6 @@ func (p *pageData) fileTarget(path, suffix string, image bool) target {
 	}
 	if image && p.ImageSrc != nil {
 		if src := p.ImageSrc(path); src != "" {
-			// The inline limit was exceeded (or the file could not be read).
 			// An opaque frame cannot load a protected route itself; ask its
 			// same-origin host, just as for an outside-root image.
 			if p.framing && p.DocImageSrc != nil && daemonPath(src) {
