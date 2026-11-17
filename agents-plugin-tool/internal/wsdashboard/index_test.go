@@ -247,11 +247,11 @@ func TestPruneRegistrationsAgesRetiredLeadsByTheirRow(t *testing.T) {
 	}
 }
 
-// A closed spawned Pi child ages from the row its close wrote last, as a
-// retired lead does, though its row is an agent's; an open one, and a
-// closed agent conversation that is no Pi child, keep the runner's
-// lifetime.
-func TestPruneRegistrationsAgesClosedPiChildrenByTheirRow(t *testing.T) {
+// A closed spawned child (any backend: a Pi child or an agent.spawn
+// child) ages from the row its close wrote last, as a retired lead does,
+// though its row is an agent's; an open one, and a closed agent
+// conversation with no spawn parent, keep the runner's lifetime.
+func TestPruneRegistrationsAgesClosedSpawnedChildrenByTheirRow(t *testing.T) {
 	dir := t.TempDir()
 	old := testNow.Add(-RegistryRetention - time.Hour)
 	recent := testNow.Add(-time.Hour)
@@ -279,10 +279,10 @@ func TestPruneRegistrationsAgesClosedPiChildrenByTheirRow(t *testing.T) {
 	session("claudechild", `{"backend":"claude","parent":{"kind":"lead","reply_id":"someleadid"},"closed_at":"2026-10-01T00:00:00Z"}`, old, true)
 	session("pinoparent", `{"backend":"pi","closed_at":"2026-10-01T00:00:00Z"}`, old, true)
 
-	if n := PruneRegistrations(dir, testNow, RegistryRetention); n != 1 {
-		t.Errorf("pruned %d, want 1", n)
+	if n := PruneRegistrations(dir, testNow, RegistryRetention); n != 2 {
+		t.Errorf("pruned %d, want 2", n)
 	}
-	for id, want := range map[string]bool{"childold": false, "childrecent": true, "childopen": true, "claudechild": true, "pinoparent": true} {
+	for id, want := range map[string]bool{"childold": false, "childrecent": true, "childopen": true, "claudechild": false, "pinoparent": true} {
 		_, err := os.Stat(SessionDir(dir, id))
 		if exists := err == nil; exists != want {
 			t.Errorf("%s exists = %v, want %v", id, exists, want)
