@@ -194,6 +194,24 @@ Forward: eight Node failures reproduced at base `c79cdf133` (lifecycle
 `headDirty`, history `kit.seen`, six usage-chart assertions); the exact-name
 exclusion check passed 48/48. Repair those baseline contracts separately.
 
+### Result (77fd0f74e) - 2026-11-17
+
+Implemented the dense wide grid, 2-column Tickets, 1280px sheet cap, 60vh
+uncustomized wide default, uncapped todo and on-demand idea stack. Stored
+heights and the narrow stack retain their previous behavior. Missing ticket
+boards now show an empty demand entry instead of returning an error.
+
+Verification: full remote MCP passed (463.724s), wsdashboard passed
+(273.208s), wsi18n passed (1.878s); targeted post-review regressions passed
+(0.257s). Local Node passed 48/48 with the checkpoint's base-proven exclusions.
+R1's Important is fixed; fixes-only R2 clean. No local Go tests ran.
+
+Captures pending by lead authorization (2026-11-17 18:55): combine both
+phases' LOOK at the end of Phase 2 instead of blocking this Result. Imported
+only the sibling's harness regression/fix commits as `d3ae80b0a` and
+`bae7372c3` (Windows .exe name and authenticated readiness); their four Node
+regressions pass. No sibling dashboard changes were imported.
+
 ### Phase 2: Notes panel
 
 Depends on Phase 1's grid. Implement Decisions 6-8, 12-13: the daemon notes cache
