@@ -78,11 +78,14 @@ Stage 2 (hosted-first migration, reference implementation Claude):
 - `261117-feat-ws-exec-tools` - `ws/exec.*` under the single holder; native
   process-tool removal; never-auto-terminate rule. Prerequisite:
   `261117-feat-ws-single-session-holder`.
+- `261117-feat-ws-exec-mux-terminal` - stage 2, after exec tools: PTY screen
+  sessions (`exec.shell(mux: true)`, `exec.mux.read`) ((51)=a). Prerequisite:
+  `261117-feat-ws-exec-tools`.
 - `261117-feat-ws-hosted-prompt-assembly` - application layer 2, 3, B, C
   ((28)=a): daemon-owned workflow manual and playbook body, per-turn ambient
-  injection replacing plugin hooks, server-side `agent.spawn` playbook
-  rendering with tier-to-model resolution, and the `{{NativeToolScheme}}`
-  render variable. Prerequisite: `261117-feat-ws-harness-capability-catalog`.
+  injection replacing plugin hooks, `agent.spawn` delivering a system prompt
+  path/text and resolving tier server-side (spawn is playbook-unaware), and the
+  `{{NativeToolScheme}}` render variable. Prerequisite: `261117-feat-ws-harness-capability-catalog`.
 - `261117-feat-ws-hosted-compaction-lifecycle` - application layer 1, A
   ((28)=a): daemon compaction nudge, session-state restore replacing the
   lead-revive ritual, and `ws/compact` ((31)=a), for leads and children.
@@ -190,7 +193,7 @@ Board IDs `(NN)` refer to the 2026-11-17 lead-discuss session; earlier IDs
   `agent.spawn` / `agent.stop` / `agent.list`; no `wait`, `transcript` or
   `agent.send`; a single `mailbox.send`. Daemon-owned agent addresses route in
   memory. Relation is computed from lineage at delivery, not stored. Hire stays
-  separate; worker-profile caps apply; `pi.*` stays as an alias. No depth cap
+  separate; worker-profile caps apply; `pi.*` alias wording superseded: hidden now, handlers removed next minor (owner 19:16, (54)=b). No depth cap
   (`MaxSpawnDepth` removed); a per-root-tree concurrent-agent cap config key
   bounds runaway. Native subagents are removed in hosted sessions (leads and
   workers) (29)=ok.
@@ -212,8 +215,9 @@ Board IDs `(NN)` refer to the 2026-11-17 lead-discuss session; earlier IDs
   the done common interface; audit waits for the interface's Phase 2 (682), not
   for all harnesses, voice or authority UI. Its backend/API/UI ordering and
   approvals 594-611 survive.
-- **Compatibility.** New tools and endpoints are additive (T0); `pi.*` and the 8
-  old `exec.*` tools stay as aliases (T0); relation computed, not stored, is T0.
+- **Compatibility.** New tools and endpoints are additive (T0); the 8
+  old `exec.*` tools stay as aliases (T0); `pi.*` hidden from `tools/list` (T0) supersedes
+  its alias (owner 19:16, (54)=b); relation computed, not stored, is T0.
   The mailbox store ships as a patch with its T1/T2 downgrade judgment in-ticket.
   The holder protocol is versioned and the new daemon speaks the old holder
   protocol. Removing `MaxSpawnDepth` and blocking native tools in hosted sessions

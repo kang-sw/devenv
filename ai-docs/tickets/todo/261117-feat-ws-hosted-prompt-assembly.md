@@ -1,9 +1,9 @@
 ---
-title: "Hosted prompt assembly: daemon-owned workflow manual, playbook body, ambient injection and server-side agent.spawn rendering"
+title: "Hosted prompt assembly: daemon-owned workflow manual, playbook body, ambient injection and renderable agent-facing playbooks"
 parent: 261114-epic-ws-common-session-foundation
 related:
   261117-feat-ws-harness-capability-catalog: "prerequisite for the native-subagent render variable (the catalog's native subagent removability item per harness); also skill list/injection items"
-  261117-feat-ws-agent-tools-mailbox-routing: "agent.spawn surface (candidate C renders the playbook for it); Decision 6 pairs native-tool removal with this ticket's Never-use steer"
+  261117-feat-ws-agent-tools-mailbox-routing: "agent.spawn surface (candidate C: spawn delivers a system prompt and resolves tier; rendering stays in playbook.render); Decision 6 pairs native-tool removal with this ticket's Never-use steer"
   261117-feat-ws-hosted-compaction-lifecycle: "sibling stage-2 child; shares the daemon injection path (nudge and restore bundle ride the same assembly)"
   261116-research-ws-hosted-session-first-tier: "evidence and Confirmed Decisions"
 ---
@@ -22,8 +22,10 @@ assembly") by (28)=a:
   removing today's double pointer (skill invocation, then `playbook.read`);
 - B (lead addition, accepted as a candidate by (28)=a): per-turn ambient
   injection by the daemon replaces plugin hooks;
-- C (same): `agent.spawn` renders the playbook server-side and resolves
-  tier to model.
+- C (same, revised by owner 18:56): `agent.spawn` is playbook-unaware; it
+  delivers `system_prompt_path`/`system_prompt` as an appended system prompt
+  ((39), (44)) and resolves tier server-side ((38)=d). Rendering stays only in
+  `playbook.render`, which returns the path plus the recommended tier.
 
 It also adds the `{{NativeToolScheme}}` render variable from (29)=ok's owner
 addition. Today the shipped playbooks steer delegation toward whatever spawn
@@ -100,7 +102,7 @@ the shared delegation playbooks. The daemon inserts the playbook body directly
 into a hosted session's prompt when a skill/command is invoked, removing the
 skill-invocation-to-`playbook.read` double pointer.
 
-Deferred: ambient injection, `agent.spawn` rendering.
+Deferred: ambient injection, `agent.spawn` system prompt delivery.
 
 Verification: Go tests on remote w5090 for variable resolution per harness and
 tier (hosted renders the tool name, CLI renders empty), and for body insertion
@@ -127,13 +129,19 @@ Verification: tests on remote w5090 per replaced hook (injected content
 equivalent, no duplicate when a plugin is also loaded); measured syscalls/s
 shows no new per-turn file writes.
 
-### Phase 4: Server-side `agent.spawn` rendering and tier-to-model resolution
+### Phase 4: Renderable agent-facing playbooks for `agent.spawn`
 
-`agent.spawn` renders the child's playbook server-side and resolves
-tier to model, so a lead names a playbook and tier rather than composing the
-prompt. Depends on `261117-feat-ws-agent-tools-mailbox-routing#phase1` (the
-`agent.spawn` surface).
+No rendering happens inside `agent.spawn` (playbook-unaware, owner 18:56).
+`agent.spawn` delivers `system_prompt_path`/`system_prompt` as an appended system
+prompt and resolves tier server-side ((39), (44), (38)=d); that surface is owned
+by `261117-feat-ws-agent-tools-mailbox-routing` (phase 1). This phase makes the
+agent-facing builtin profile instructions (explore.md) renderable playbooks so
+`playbook.render` can supply their path and recommended tier ((52)=a), including
+the `{{NativeToolScheme}}` line for the target harness. Recommendations use bare
+tiers only (49). Depends on `261117-feat-ws-agent-tools-mailbox-routing#phase1`.
 
-Verification: tests on remote w5090 that a spawned child receives the rendered
-playbook (including the `{{NativeToolScheme}}` line for its harness) and the
-resolved model for each tier, with worker-profile caps still applied.
+Verification: tests on remote w5090 that `playbook.render` for each agent-facing
+playbook returns a path and bare-tier recommendation, that a child spawned with
+that path and tier receives the rendered text (including the
+`{{NativeToolScheme}}` line for its harness) as appended system prompt, with
+tier-rank and authority caps still applied.

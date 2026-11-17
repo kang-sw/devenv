@@ -270,6 +270,9 @@ resolved Open Questions are mapped by content.
 - (29)=ok (2026-11-17): native subagent removal extends to hosted workers;
   playbooks also state 'Never use {{NativeToolScheme}}' per harness
   (261117-feat-ws-hosted-prompt-assembly).
+- Owner 2026-11-17 19:16: pi.* spawn tools are removed rather than kept as
+  aliases; supersedes the alias part of (11); hidden now, handlers removed next
+  minor ((54)=b).
 - (07) ok, (08)=c, (20)-(22), (24) The common harness interface is a
   declarative capability catalog promoting the existing `wsagent` optional
   controls into an explicit table (items declared `native` / `ws-substitute` /

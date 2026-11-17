@@ -2,6 +2,7 @@
 title: "Pi subagents: a blocking shell command moves to a background shell after 30 seconds"
 related:
   260920-bug-pi-tool-call-timeout-and-process-cleanup: neighbouring problem (bounded tool calls and subprocess cleanup); this ticket keeps a long command running instead of bounding it
+dropped: 2026-11-17
 ---
 
 # Pi subagents: a blocking shell command moves to a background shell after 30 seconds
@@ -59,3 +60,8 @@ Not yet settled; captured verbatim in substance for the Open Decision Queue.
 ### Phase 1: Auto-background long shell commands in Pi subagents
 
 To be settled at capture through the Open Decision Queue.
+
+
+## Resolution (2026-11-17)
+
+Absorbed into 261117-feat-ws-exec-tools ((43), 2026-11-17).

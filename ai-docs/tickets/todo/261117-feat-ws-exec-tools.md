@@ -3,7 +3,8 @@ title: "ws/exec tools: daemon-owned command execution with async conversion, com
 parent: 261114-epic-ws-common-session-foundation
 related:
   261117-feat-ws-single-session-holder: prerequisite
-  261112-feat-pi-subagent-long-shell-auto-background: "origin of the exec concept (owner, 2026-11-13); not edited from here"
+  261112-feat-pi-subagent-long-shell-auto-background: "absorbed; dropped (43); origin of the exec concept (owner, 2026-11-13)"
+  261117-feat-ws-exec-mux-terminal: "owns the PTY mux direction split out of this ticket (51)=a"
   261114-feat-ws-conversation-audit-event-store: "future consumer of daemon-visible exec I/O"
   261115-feat-ws-permission-profile: "permission-profile caps are enforced here"
   261117-feat-ws-harness-capability-catalog: "default tool removal range and native subagent removability items"
@@ -29,13 +30,26 @@ tools; this ticket generalizes them. Prerequisite: the single session holder
 ## Decisions
 
 1. **Surface (16), (18).**
-   - `exec.run(shell, args[], cwd?, exe, async?)`: with `async` it returns
-     immediately with `exec_<three words>`; otherwise it waits synchronously up to
-     30 s (a config key, the same for leads and children), then converts to async
-     and returns "converted to async, exec id" without starting a new turn. Job
-     completion pushes a system mail that starts a new turn. No `wait`.
+   - `exec.run(exe, args[], cwd?, env?, stdin?, async?)`: direct execution
+     without a shell (old `exec.spawn` aliases to it). `exec.shell(cmd, cwd?,
+     env?, stdin?, async?)`: one shell line (old `exec.shell` stays, its `shell`
+     arg accepted only on the alias). Origin: the owner concept in
+     `261112-feat-pi-subagent-long-shell-auto-background`; (40) name `exec.run`
+     kept; (42) ok with the owner note splitting run and shell (single `cmd`
+     argument because AI writes Bash best).
+   - With `async` either returns immediately with `exec_<three words>`; otherwise
+     it waits synchronously up to 30 s (a config key, the same for leads and
+     children), then converts to async and returns "converted to async, exec id"
+     without starting a new turn. Job completion pushes a system mail that starts
+     a new turn. No `wait`.
    - `exec.stop` (process-tree kill; Windows `taskkill /T`), `exec.tail` (last
-     output slice), `exec.list` (the session's running and recent jobs).
+     output slice), `exec.list` (the session's running and recent jobs), and new
+     `exec.write(exec_id, data)` for pipe stdin to a running job ((51)=a).
+   - (50) `exec.shell` has no shell argument; the shell comes from a config
+     default (bash; Git Bash on Windows); another shell runs via
+     `exec.run(exe: "pwsh", ...)`. Rejected: per-call shell selection.
+   - (51)=a: mux (PTY screen sessions) is out of scope here, owned by
+     `261117-feat-ws-exec-mux-terminal`.
 2. **Runs under the single holder (17)=a**, surviving daemon replacement.
 3. **Built on `internal/execjob`:** the foreground window changes from 5 s to the
    30 s config key, polling becomes completion push, per-job files become the
@@ -91,15 +105,19 @@ concrete verdict cites source lines for which version writes and reads what, per
 
 ### Phase 1: exec.run/stop/tail/list over the holder, push completion, approval
 
-Implement the four tools on top of `internal/execjob` and the single holder with
+Implement `exec.run`, `exec.shell`, `exec.stop`, `exec.tail`, `exec.list` and
+`exec.write` (pipe stdin) on top of `internal/execjob` and the single holder with
 the 30 s config-key window, async conversion, completion system mail, process-tree
 kill, holder-memory output, and the old 8 tools as aliases; daemon-owned approval
 via ws command rules then the dashboard UI, with permission-profile caps; verify
 whether Claude raises `can_use_tool` for MCP tools and allowlist `ws/exec.*`
-accordingly.
+accordingly. Carried from 261112's open questions: Windows shell resolution (Git
+Bash default for `exec.shell`) and output encoding on Windows.
 
 Verification: Go tests on remote w5090 for sync, async, convert-to-async without a
-new turn, completion push starting a turn, stop killing the process tree
+new turn, `exec.write` to a running job, the `exec.spawn`/`exec.shell` alias
+parity (including the alias-only `shell` arg), Windows shell resolution and
+output encoding, completion push starting a turn, stop killing the process tree
 (including Windows `taskkill /T`), tail, list, alias parity, approval paths and
 cap enforcement; a recorded answer on `can_use_tool` for MCP tools; syscalls/s
 showing no per-job files.

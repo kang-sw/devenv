@@ -30,11 +30,12 @@ The surface below supersedes an earlier draft that had `agent.transcript` and
 ## Decisions
 
 1. **Surface (06)=a, (09)=a.**
-   - `agent.spawn` (prompt, profile, harness?, tier/model/effort?,
-     cwd/worktree?, label?) returns the child's mailbox address and status.
-   - `agent.stop` closes deepest-first (existing behavior kept).
-   - `agent.list` returns child states plus the last report summary (a superset
-     of `pi.list`).
+   - `agent.spawn(prompt, tier, system_prompt_path? | system_prompt?,
+     authority?, cwd? | worktree?, label?) -> {address, status}`.
+   - `agent.stop(address)` closes deepest-first (existing behavior kept).
+   - `agent.list()` returns child states plus the last report summary (a
+     superset of `pi.list`).
+   - `agent.tiers()` (new) lists the valid `tier` values (Decision 11).
    - No `wait` and no `transcript`: completion arrives by push (a system mail
      starts a new turn); humans read transcripts in the dashboard.
    - No `agent.send`: a single `mailbox.send(to: <address>)` serves children,
@@ -71,10 +72,80 @@ The surface below supersedes an earlier draft that had `agent.transcript` and
 8. **Hire stays separate (11).** `session.request_hire` (peer, no lineage) is not
    merged into `agent.spawn` (child, lineage); the hire ticket rejected lineage
    authority (768=c, 775=a).
-9. **Worker-profile caps apply.** A child never exceeds its parent's tier or
-   permission (1014); this holds for `agent.spawn`.
-10. **`pi.*` stays as a behavior-preserving alias (11)**; `agent.list` is a
-    superset of `pi.list`.
+9. **Caps by tier rank and authority (46), (52)=a.** A child never exceeds its
+   parent's tier or authority (1014). The tier cap compares rank
+   (small<medium<large<xlarge) regardless of harness; aliases resolve to
+   `harness.tier` first (existing rank check, search `children.go` for the tier
+   rank check). The authority cap: a child's `authority` never exceeds the
+   parent's.
+10. **`pi.*` spawn tools are removed, not aliased** (`pi.spawn`, `pi.send`,
+    `pi.list`, `pi.stop`, `pi.wait`, `pi.transcript`; owner 2026-11-17 19:16,
+    reversing (11)'s alias decision). (54)=b: hidden from `tools/list` now
+    (T0: new sessions never see them, old installed-plugin sessions keep working
+    because the handlers still answer) and the handlers are deleted in the next
+    minor. Rejected: removing the handlers in the same release with a T3
+    boundary/minor bump. `agent.*` replaces them and shipped playbook/skill
+    references to `pi.*` move to `agent.*` in the same change.
+    The Pi backend remains reachable as `agent.spawn(tier: "pi.small")`.
+11. **Tier namespace (38)=d, (45), (47), (48), (49).**
+    - `tier` is one string: bare `small|medium|large|xlarge` = the parent's
+      harness; `<harness>.<tier>` with harness in claude|codex|agy|pi (for
+      example `pi.small`, `codex.large`); or a user alias defined in user
+      settings and editable in the dashboard (for example `mockup` ->
+      `agy.large`).
+    - Resolved server-side to model/effort through per-harness tier tables,
+      generalizing today's pi bucket `wsconfig.HarnessTiers`
+      (`ResolveAgentTierForHarness`, `config.go`).
+    - No model or effort arguments at all (45); pinning a specific model is done
+      only through a user alias. Rejected: an override object {harness, model,
+      effort} ((38) option a), a separate `agent.spawn_ex` (b), flat optional
+      harness/model/effort (c).
+    - `agent.tiers()` returns native (bare tiers on the parent harness), ext
+      (`<harness>.<tier>` entries usable now: harness installed and the catalog
+      grades the worker role available) and aliases with their resolution.
+      Spawning an unknown or unusable tier fails with the valid list. Rejected:
+      a static list (47).
+    - The alias map is a new user-scope config key, dashboard-editable (48);
+      compatibility expected T0 (old binary ignores the unknown key).
+    - Shipped playbooks and `playbook.render` recommendations use bare tiers
+      only; aliases and `harness.tier` are for lead/user choice (49,
+      Architecture Rule 4).
+12. **System prompt source (39), (44).** At most one of `system_prompt_path` or
+    `system_prompt`, delivered through the harness's append-system-prompt (not
+    the first user message as the Pi spawn path does today, search `spawn.go`; not full
+    replacement). Spawn is playbook-unaware (owner 18:56): `playbook.render`
+    keeps rendering and returns the path plus the recommended tier, which the
+    caller passes as `tier`. Rejected: a `playbook`/`context` argument on spawn.
+    Spawn reads `system_prompt_path` once at spawn and keeps the text in memory
+    for re-injection when a new harness segment opens (ws/compact) (44).
+    Rejected: re-reading the path per segment (render outputs are temporary;
+    file-touch rule).
+13. **`authority` replaces `profile` (52)=a.** `authority?: read-only |
+    workdir-write | full`; default workdir-write; capped by the parent's
+    authority. The enum is the common permission intent of
+    `261115-feat-ws-permission-profile` (reused; that ticket unchanged).
+    Harness/model come only from tier, instructions only from the system
+    prompt. Each level maps to a daemon-defined ws tool set; per-harness native
+    tool lists derive through the catalog's tool-removal value range. Existing
+    `agent.profile.<name>` profiles stay internal: hosted leads (lead-claude/pi),
+    dashboard features (search-answer-*, tracker-support-*). Agent-facing builtins are expressible: pi-worker = `pi.<tier>` +
+    workdir-write; explore = read-only + explore.md as system prompt;
+    pi-mini-lead = full. Rejected: renaming to `authority_profile` with today's
+    contents (conflicts with (38)=d because a profile fixes backend/model, and
+    duplicates the system prompt source); keeping `profile`.
+
+## Open Decision Queue
+
+Last ID: (54)
+
+(53) [open] [policy] Whether `agent.spawn` gets a named `preset?` (config-defined {tier, authority, system_prompt_path} bundle).
+- Context: explicit args would override the preset; the three agent-facing builtins (pi-worker, explore, pi-mini-lead) would ship as default presets and be listed with `agent.tiers`.
+- Option a: no presets; builtins become "playbook.render + spawn args" recipes.
+- Option b: presets, for convenience.
+- Recommendation: a (keeps spawn without an instruction source, per owner 18:56); b acceptable.
+- Lead reading of the owner's 19:16 reply: a (no presets; with pi.* removed no old-name resolution remains) - awaiting confirmation.
+
+(54) settled as b by the owner at 19:18; moved to Decision 10.
 
 ## Constraints
 
@@ -95,12 +166,17 @@ The surface below supersedes an earlier draft that had `agent.transcript` and
 - Removing `MaxSpawnDepth` and blocking native tools in hosted sessions
   (leads and workers) are observable behavior changes, already owner-confirmed
   by (06), (10), (18), (29).
-- `pi.*` and old tools remain as aliases; the Claude CLI tier is frozen and keeps
+- `pi.*` spawn tools are hidden now and deleted next minor (Decision 10); the Claude CLI tier is frozen and keeps
   its native spawn.
 
 ## Compatibility
 
-New `agent.*` tools are additive (T0). `pi.*` stays as an alias (T0). Relation
+New `agent.*` tools are additive (T0), including `agent.tiers` (T0). The alias
+map is a new user-scope config key (T0 expected: the old binary ignores the
+unknown key; verdict with source lines in Phase 1's Result (48)). Hiding
+`pi.*` from `tools/list` is T0 for this release ((54)=b: handlers still answer,
+so old sessions keep working); the handler deletion next minor is judged in that
+release. The source-line verdict is recorded in Phase 1's Result. Relation
 computed at delivery rather than stored is T0 (no new Envelope field, so no
 whole-file loss on an old binary). The concrete verdict cites source lines for
 which version writes and reads what, per
@@ -112,19 +188,26 @@ behavior changes owner-confirmed as above.
 
 ### Phase 1: agent.spawn/stop/list, mailbox routing and relation delivery
 
-Add `agent.spawn`, `agent.stop`, `agent.list` over the existing Runner spawn path
-generalized to harness-selected backends with profile/tier resolution; route
+Add `agent.spawn`, `agent.stop`, `agent.list`, `agent.tiers` over the existing
+Runner spawn path generalized to harness-selected backends with server-side tier
+namespace resolution (bare, `<harness>.<tier>`, user alias via the new
+user-scope alias config key and per-harness tier tables), `authority` mapped to
+daemon tool sets, and system prompt delivery through the harness's
+append-system-prompt (path read once, text kept in memory for re-injection); route
 daemon-owned addresses in memory via the Runner; accept `mailbox.send` to a
 daemon-owned address; compute relation from lineage at delivery with the timing
-rules and the report-hold rule; apply worker-profile caps; keep `pi.*` as an
-alias; remove `MaxSpawnDepth` and add the per-root-tree concurrent-agent cap
+rules and the report-hold rule; apply tier-rank and authority caps; hide the `pi.*` spawn tools from `tools/list` (handlers deleted next minor,
+(54)=b) and move shipped playbook/skill `pi.*` references to `agent.*`; remove `MaxSpawnDepth` and add the per-root-tree concurrent-agent cap
 config key with a default chosen by measurement (record the measurement).
 
 Deferred: exec tools, single holder, any stage-3 harness backend.
 
 Verification: Go tests on remote w5090 covering spawn/stop deepest-first/list,
-mail between parent, child and peer with each timing, the report-hold rule, cap
-enforcement and caps inheritance, `pi.*` alias parity, and no mailbox file write
+tier resolution (bare, `harness.tier`, alias, unknown/unusable failing with the
+valid list), `agent.tiers` output, system prompt delivery via append-system-prompt
+and re-injection from memory on a new segment, mail between parent, child and
+peer with each timing, the report-hold rule, tier-rank and authority cap
+enforcement and caps inheritance, `pi.*` absent from `tools/list` but still callable, with no shipped text referencing `pi.*`, and no mailbox file write
 for daemon-owned addresses; the recorded cap-default measurement.
 
 ### Phase 2: Native subagent removal in hosted Claude leads and workers
