@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,8 +94,12 @@ func TestEnsureElectronPreflightAndFreshHealth(t *testing.T) {
 		defer cancel()
 		opts := ensureOpts(dir, "0.48.0", func([]string) error { t.Fatal("unexpected spawn"); return nil })
 		opts.SpawnBeforeShutdown = true
-		if outcome, err := Ensure(ctx, opts); outcome != OutcomeUnavailable || err == nil {
+		outcome, err := Ensure(ctx, opts)
+		if outcome != OutcomeUnavailable || err == nil {
 			t.Fatalf("Ensure = %s, %v", outcome, err)
+		}
+		if !strings.Contains(err.Error(), "launcher start lock:") || strings.Contains(err.Error(), "<nil>") {
+			t.Fatalf("unexpected launcher lock diagnostic: %v", err)
 		}
 	})
 }

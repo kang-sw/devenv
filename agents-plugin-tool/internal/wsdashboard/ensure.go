@@ -7,10 +7,10 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
-
-	"github.com/gofrs/flock"
 	"strconv"
 	"time"
+
+	"github.com/gofrs/flock"
 )
 
 // Outcome is what Ensure found or did.
@@ -131,8 +131,11 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 	if opts.SpawnBeforeShutdown {
 		lock := flock.New(filepath.Join(opts.Dir, "launcher-start.lock"))
 		ok, err := lock.TryLockContext(ctx, 50*time.Millisecond)
-		if err != nil || !ok {
+		if err != nil {
 			return OutcomeUnavailable, fmt.Errorf("dashboard: launcher start lock: %v", err)
+		}
+		if !ok {
+			return OutcomeUnavailable, errors.New("dashboard: launcher start lock: not acquired")
 		}
 		defer lock.Unlock() // Never unlink: concurrent waiters may already hold the inode.
 	}
