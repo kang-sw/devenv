@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// Drive the real hydration and navigation paths with independently controlled
-// name/target responses. This fixture does not share the eager-history mock.
-func TestHistoryLazyTargetAfterConcurrentPrefetchUnderNode(t *testing.T) {
+// This fixture does not share the eager-history mock.
+func runLazyHistoryScript(t *testing.T, cases string) {
+	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node not installed")
@@ -55,8 +55,18 @@ require('vm').runInThisContext(` + string(encoded) + `, {filename:'stream.js'});
 function gap(lazy, rows){return '<div class="history-gap" '+(lazy?'data-lazy ':'')+'data-count="3" data-from="a" data-to="b"><span class="gap-label"></span><span class="gap-range"></span><button data-load="down"></button><template data-history-gap>'+rows+'</template></div>';}
 function row(i){return '<div class="timeline-row" data-row="e'+i+'"><article class="wb-entry agent" data-entry="e'+i+'" id="e'+i+'"></article></div>';}
 function topic(lazy,rows){return '<section class="topic" data-topic="t"><div class="wb-history" data-history="t"><div class="history-live">'+gap(lazy,rows)+row(4)+'</div></div></section>';}
-async function drain(){for(var i=0;i<12;i++)await Promise.resolve();}
-(async function(){
+async function drain(){for(var i=0;i<24;i++)await Promise.resolve();}
+var scriptDone=false;
+process.on('beforeExit',function(){if(!scriptDone){console.error('async history test did not complete');process.exitCode=1;}});
+` + cases
+	if out, err := nodeScript(node, script).CombinedOutput(); err != nil {
+		t.Fatalf("lazy history: %v\n%s", err, out)
+	}
+}
+
+// Drive real hydration/navigation with independently controlled name/target responses.
+func TestHistoryLazyTargetAfterConcurrentPrefetchUnderNode(t *testing.T) {
+	runLazyHistoryScript(t, `(async function(){
   for(var claimed of [false,true]){
     root=templates(parse(topic(true,'')));watches=[];requests=[];jumps=[];
     window.wbHistory.init(root);
@@ -84,10 +94,7 @@ async function drain(){for(var i=0;i<12;i++)await Promise.resolve();}
   await drain();requests[0].resolve([{name:'t',html:topic(false,row(1)+row(2)+row(3))}]);
   check('unknown target is not a successful wait',await missing,null);
   check('unknown target does not navigate',jumps,[]);
+  scriptDone=true;
   if(bad.length)throw Error(bad.join('\n'));
-})().catch(e=>{console.error(e);process.exitCode=1;});
-`
-	if out, err := nodeScript(node, script).CombinedOutput(); err != nil {
-		t.Fatalf("lazy target race: %v\n%s", err, out)
-	}
+})().catch(e=>{console.error(e);process.exitCode=1;});`)
 }
