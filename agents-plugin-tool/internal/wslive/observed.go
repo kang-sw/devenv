@@ -273,7 +273,7 @@ func AppendObserved(dir string, records []ObservedRecord) error {
 	for _, r := range records {
 		sum := sha256.Sum256([]byte(observationKey(r)))
 		path := filepath.Join(dir, hex.EncodeToString(sum[:])+".json")
-		if _, err := os.Stat(path); err == nil {
+		if _, err := wsstate.Stat(path); err == nil {
 			continue
 		}
 		data, err := json.Marshal(r)
