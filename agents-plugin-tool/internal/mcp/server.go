@@ -3044,7 +3044,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	appendKnob(autoAckEntry, tuningKnob{
 		ID:          autoAckEntry.Key,
 		Kind:        "workflow_preference",
-		Description: "Open Decision Queue confirmation of review-raised items during ticket settlement (builtin on). on lets the ticket-handler confirm, on its own judgment, an announced default or technical decision raised by a fact-populator decision gap or by a reviewer issue marked autonomous, and list it as auto-confirmed in the round's settlement report; policy questions, reversals, and reviewer issues marked missing are still asked. off asks the caller to confirm every such item, adding one user round trip before ready/ promotion. Takes effect at the next lead-ticket playbook read.",
+		Description: "Open Decision Queue confirmation of review-raised items during ticket settlement (builtin on). on lets the ticket-handler confirm, on its own judgment, an announced default or technical decision raised by a fact-populator decision gap or by a reviewer issue marked autonomous, and list it as auto-confirmed in the round's settlement report; policy questions, reversals, and reviewer issues marked missing are still asked. off asks the caller to confirm every such item, adding one caller round trip before ready/ promotion. Takes effect at the next ticket-handler playbook read or render.",
 		Writer:      tuningWriter{Tool: autoAckEntry.WriterTool, FixedArguments: map[string]string{"key": autoAckEntry.Key}},
 		Reset: &tuningWriter{
 			Tool:           autoAckEntry.ResetTool,
