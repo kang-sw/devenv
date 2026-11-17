@@ -76,12 +76,12 @@ const (
 	// review is an opt-in for users who hand most work to agents.
 	ItemSageReviewDesign = "sage_review_design"
 
-	// ItemTicketReviewAutoAck gates whether the lead-ticket playbook lets the
-	// lead confirm, without a user acknowledgement round, an announced or
+	// ItemTicketReviewAutoAck gates whether the ticket-handler playbook can
+	// auto-confirm, without a caller round, an announced or
 	// technical Open Decision Queue item raised by a fact-populator decision
 	// gap or by a reviewer issue marked autonomous. Values: "on" (builtin
 	// default) or "off", which restores the acknowledgement rule for those
-	// items. Read at playbook.read render time through the session resolver,
+	// items. Read by shared playbook rendering through the session resolver,
 	// so session, project, and repo scopes apply.
 	ItemTicketReviewAutoAck = "ticket_review_auto_ack"
 

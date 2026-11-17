@@ -759,11 +759,41 @@ func scanOverridePoints(rsrcRoot string) ([]overridePointDecl, error) {
 // malformed committed repo file) is reported here, before any render.
 func buildOverrideLookup(s *Server, sessionKey string) (overrideLookupFn, error) {
 	capturedKey := strings.TrimSpace(sessionKey)
+	// The final bucket alone supplies knob fallbacks: an earlier answer would
+	// hide a stored prompt override in a later bucket. Resolve lazily so a
+	// keyless render without these points gains no config dependency.
+	knobFallback := func(pointId, harness string) (string, bool) {
+		if harness != "all" {
+			return "", false
+		}
+		switch pointId {
+		case "TicketHandlerPersistConfirmation", "TicketHandlerReviewAutoAck":
+			enabled, err := s.ticketReviewAutoAckEnabled(capturedKey)
+			if err != nil || enabled {
+				return "", false
+			}
+			if pointId == "TicketHandlerPersistConfirmation" {
+				return "- The lead's replies are the confirmation record. Persist only what they\n  confirm.", true
+			}
+			return "- No auto-confirm: every announced or technical item,\n" +
+				"  including one from a populator `decision_gaps:` item or a reviewer issue,\n" +
+				"  gets a lead round.", true
+		case "TicketQueueWhiteboard":
+			resolver := s.sessionResolver(capturedKey, builtinConfigDefaults())
+			enabled, err := s.whiteboardEnabled(&resolver, capturedKey)
+			if err == nil && enabled {
+				return withNamespace(lineTicketQueueBoard, s.runtimeNamespace()), true
+			}
+		}
+		return "", false
+	}
 	if capturedKey == "" {
 		builtins := builtinPromptOverrideDefaults()
 		return func(pointId, harness string) (string, bool) {
-			v := builtins[harnessBucketKey("prompt."+pointId, harness)]
-			return v, v != ""
+			if v := builtins[harnessBucketKey("prompt."+pointId, harness)]; v != "" {
+				return v, true
+			}
+			return knobFallback(pointId, harness)
 		}, nil
 	}
 	resolver := s.sessionResolver(capturedKey, builtinPromptOverrideDefaults())
@@ -779,7 +809,10 @@ func buildOverrideLookup(s *Server, sessionKey string) (overrideLookupFn, error)
 			return preferences, true
 		}
 		rv, _ := resolver.Get(capturedKey, harnessBucketKey("prompt."+pointId, harness))
-		return rv.Value, rv.Value != ""
+		if rv.Value != "" {
+			return rv.Value, true
+		}
+		return knobFallback(pointId, harness)
 	}, nil
 }
 
@@ -1188,14 +1221,6 @@ func renderPlaybookWithPlan(s *Server, callerKey, profile, rsrcRoot, worktreeRoo
 	body, recommendedTier, err := renderPlaybookBodyForCaller(s, callerKey, profile, rsrcRoot, name, templateContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup, tierOverride)
 	if err != nil {
 		return "", "", "", err
-	}
-	if _, shaped := ticketReviewAutoAckVariants[name]; shaped {
-		// playbook.read applies the same knob after its print (server.go).
-		autoAck, err := s.ticketReviewAutoAckEnabled(callerKey)
-		if err != nil {
-			return "", "", "", fmt.Errorf("resolve %s: %w", wsconfig.ItemTicketReviewAutoAck, err)
-		}
-		body = applyTicketReviewAutoAckVariant(name, body, autoAck)
 	}
 	body = appendRenderContext(body, renderContext)
 	manager := wsstate.NewManager(s.stateOptions())

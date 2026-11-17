@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 2c1d66eaf4952306
 sage-review-completeness-reviewed: 2c1d66eaf4952306
+completed: 2026-11-17
 ---
 
 # Fill the gaps left by the lead-ticket / ticket-handler split
@@ -311,3 +312,81 @@ Verification:
   ticket-handler and lead-ticket with the knob on and off, through both
   `playbook.read` and `playbook.render`, shows the seed and the off text at
   each marker and no appended trailing paragraphs.
+
+### Result (420ed45e9) - 2026-11-17
+
+Implemented G1/G2 marker resolution, G4 caller-neutral tool guidance, G5 explicit
+worktree targeting, and G6 ownership/layout cleanup. G3 and the handler report
+protocol remain with the foundation ticket as decided. The handler points are
+`TicketHandlerPersistConfirmation` and `TicketHandlerReviewAutoAck`; the lead's
+empty whiteboard extension is `TicketQueueWhiteboard`. Knob fallbacks answer only
+in the final `all` bucket, after stored prompt overrides miss, and resolve lazily
+with config defaults. Auto-ack retains plain layered resolution; whiteboard
+retains harness buckets. Sentence substitutions, their append fallback, and the
+affected prose pins are gone. Canonical resource/skills manifests were regenerated
+on w5090 and fetched back; wsflow/Pi resource mirrors match canonical bytes.
+
+Verification:
+- w5090, job `67b0cc19b3a54328bf745de95fdf85ae`:
+  `go test ./internal/mcp/... ./internal/wsrsrc/... ./internal/wsdoc/...` passed
+  (mcp 230.154s; wsrsrc/wsdoc cached). This is the closing full Go check.
+  Earlier runs exposed stale wsdoc prose checks, then a separate incorrect
+  zero-counter assumption introduced by their structural cleanup; both were
+  fixed in tests, not by changing correct production behavior.
+- Python: 179 tests passed on w5090 (3 platform/process skips), excluding the
+  pre-existing daemon-workflow bundle suite and the Git-dependent neutrality
+  suite. The latter ran locally: 7 passed. wsflow package suite locally:
+  22 tests passed (1 platform skip). Remote source sync deliberately carries no
+  `.git`, so the Git-dependent suite's initial remote setup error was an
+  environment limitation, not a product failure.
+- Throwaway w5090 inspection, job `ddda238721944d1e872ca36796ae194f`:
+  both playbooks, both `playbook.read`/`playbook.render`, both knob settings.
+  Handler seed/off rules resolve in place; the lead queue bullet appears only
+  with whiteboard on; all eight outputs have zero remaining markers and no
+  appended trailing knob paragraphs. Inspection was uncommitted and removed.
+- Acceptance read: `root_override` appears for revise and occupied-root
+  rendering; the forbidden stale phrases are absent from canonical rsrc and
+  skills and `On: Reviewer Spawn` is absent from MCP Go code. The wsdoc stamp
+  instructions use the move environment's namespace. Lead skill Layouts opens
+  with coverage rather than Identity. `git diff --check` passed.
+- Independent lite R1 found lost blocked-stage selection coverage. R2 was
+  fixes-only and accepted the restored identifier-based stage tests plus the
+  explicit decision not to introduce a recovery-decision abstraction solely
+  to test English prose. Fresh-versus-same wording has intentionally reduced
+  assertion coverage under the no-prose-pin directive; routing logic is
+  unchanged. No unresolved review finding remains.
+
+Compatibility: **T1, patch permitted**. At both d25bdfcc4 and this result,
+`internal/mcp/config_registry.go:593-594` accepts dynamic `prompt.<pointId>`
+keys; `server.go:1194-1200` writes their existing bucketed string values through
+the resolver, and `internal/wsconfig/resolver.go:204-206,331-346` updates the
+existing override map without discarding other pointIds. The old lookup
+(`d25bdfcc4:internal/mcp/playbook_tools.go:760-783`) reads only marker points
+present in the loaded text; a stored override for an unknown point is retained
+but unused with old text. The new lookup (`playbook_tools.go:760-819`) and marker
+pass (`:838-929`) read those same values; reopening matched new code/text restores
+the override, without a data migration. Connection-specific resource selection
+is `internal/mcp/process_env.go:222-234` (`EnvRsrcRoot`), so daemon/text skew
+remains possible: new daemon + old text has no knob markers; old daemon + new
+text can append old knob-off paragraphs after its sentence anchors miss
+(`d25bdfcc4:ticket_review_text.go:26-76`). Neither path rewrites stored prompt
+values. Reopening matched versions fixes rendering. Tool response changes are
+wording only, with session namespace substitution at `server.go:2144,2168` and
+move-warning namespace selection at `internal/wsdoc/tickets_mutate.go:691-720`;
+no tool, argument, config key, or storage shape changed.
+
+Forward: The pre-existing `test_daemon_workflow_bundle` Python suite was excluded
+rather than investigated. At base `17a588f28`, its archive-path test fails for
+`back\\slash` on Windows and the following concurrent materialization case
+exceeded a 90-second cap; the initial full Windows suite also exceeded 2100
+seconds. This is one deferred packaging/platform verification issue, not a
+split-gap implementation failure.
+
+Workflow substitutions: unavailable `workflow_manual`/todo/convention tools were
+replaced by AGENTS, bundled manuals/conventions, and the route verdict. Branch
+creation used plain Git; prompt floors/review wrappers used `playbook.read`
+rather than render to keep local temporary artifacts under
+`D:/Temp/split-gaps/`; delegates used Pi spawn/send. No local Go tests, merges,
+pushes, co-author trailers, or implementer markings were used. The final
+acceptance read corrected the knob description's remaining lead-ticket wording
+to ticket-handler read/render after the closing check; this was text-only.

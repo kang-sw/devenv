@@ -16,29 +16,11 @@ func TestPlaybookReadLeadTicketReviewAutoAckFollowsKnob(t *testing.T) {
 		if isToolError(resp) {
 			t.Fatalf("playbook.read(%s): %s", name, resp)
 		}
-		body := toolText(t, resp)
-		if strings.TrimSpace(body) == "" {
-			t.Fatalf("playbook.read(%s): empty document", name)
-		}
-		return body
+		return toolText(t, resp)
 	}
-
 	f := newWhiteboardFixture(t)
-	on := read(t, f, "lead-ticket")
-	offFixture := newWhiteboardFixture(t)
-	if resp := offFixture.call(t, "config.tune", map[string]any{"key": wsconfig.ItemTicketReviewAutoAck, "value": "off", "scope": "session"}); isToolError(resp) {
-		t.Fatalf("config.tune off: %s", resp)
-	}
-	wantOff := read(t, offFixture, "lead-ticket")
-	if wantOff == on {
-		t.Fatalf("knob off must change the rendered lead-ticket text")
-	}
-	for _, v := range ticketReviewAutoAckVariants["lead-ticket"] {
-		if !strings.Contains(on, v.on) || strings.Contains(wantOff, v.on) || !strings.Contains(wantOff, v.off) {
-			t.Fatalf("knob off must replace the lead-ticket text in place:\n%s", v.on)
-		}
-	}
-
+	on := read(t, f, "ticket-handler")
+	leadOn := read(t, f, "lead-ticket")
 	discussOn := read(t, f, "lead-discuss")
 	for _, scope := range []string{"session", "project", "repo"} {
 		t.Run(scope, func(t *testing.T) {
@@ -50,8 +32,11 @@ func TestPlaybookReadLeadTicketReviewAutoAckFollowsKnob(t *testing.T) {
 			if !strings.Contains(toolText(t, resp), "[scope:"+scope+"]") {
 				t.Fatalf("knob write must land in %s scope: %s", scope, resp)
 			}
-			if got := read(t, g, "lead-ticket"); got != wantOff {
-				t.Fatalf("%s-scope off: rendered lead-ticket differs from the knob-off text:\n%s", scope, got)
+			if got := read(t, g, "ticket-handler"); got == on {
+				t.Fatalf("%s-scope off must change the handler", scope)
+			}
+			if got := read(t, g, "lead-ticket"); got != leadOn {
+				t.Fatalf("%s-scope off must leave the lead's relay unchanged", scope)
 			}
 			if got := read(t, g, "lead-discuss"); got != discussOn {
 				t.Fatalf("%s-scope off must leave other playbooks unchanged", scope)
@@ -60,66 +45,120 @@ func TestPlaybookReadLeadTicketReviewAutoAckFollowsKnob(t *testing.T) {
 	}
 }
 
-// Each knob-off substitution anchors on shipped text: every on-text occurs
-// exactly once in its playbook in both packages, so a later edit of that
-// text fails here instead of silently appending the knob-off text.
-func TestTicketReviewAutoAckOnTextsPinShippedPlaybooks(t *testing.T) {
-	for _, pkg := range []string{"agents-plugin", "agents-plugin-wsflow"} {
-		for name, variants := range ticketReviewAutoAckVariants {
-			data, err := os.ReadFile(filepath.Join("..", "..", "..", pkg, "rsrc", name, name+".md"))
-			if err != nil {
-				t.Fatalf("%s/%s: %v", pkg, name, err)
-			}
-			for _, v := range variants {
-				if n := strings.Count(string(data), v.on); n != 1 {
-					t.Errorf("%s/%s: on-text occurs %d times, want 1:\n%s", pkg, name, n, v.on)
+func TestTicketHandlerReviewAutoAckFollowsKnobOnRenderAndRead(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	for _, method := range []string{"playbook.read", "playbook.render"} {
+		t.Run(method, func(t *testing.T) {
+			body := func() string {
+				t.Helper()
+				resp := f.call(t, method, map[string]any{"name": "ticket-handler"})
+				if isToolError(resp) {
+					t.Fatalf("%s: %s", method, resp)
 				}
+				text := toolText(t, resp)
+				if method == "playbook.render" {
+					data, err := os.ReadFile(strings.TrimSpace(strings.SplitN(text, "\n", 2)[0]))
+					if err != nil {
+						t.Fatal(err)
+					}
+					// The render-minted credential block changes on every call.
+					_, text, _ = strings.Cut(string(data), "---\n\n")
+				}
+				if strings.TrimSpace(text) == "" || strings.Contains(text, "<!-- ws:override:") {
+					t.Fatalf("%s: empty body or unresolved markers", method)
+				}
+				return text
 			}
-		}
+			if resp := f.call(t, "config.tune", map[string]any{"key": wsconfig.ItemTicketReviewAutoAck, "value": "off", "scope": "session"}); isToolError(resp) {
+				t.Fatal(resp)
+			}
+			off := body()
+			if resp := f.call(t, "config.tune", map[string]any{"key": wsconfig.ItemTicketReviewAutoAck, "value": "on", "scope": "session"}); isToolError(resp) {
+				t.Fatal(resp)
+			}
+			if on := body(); on == off {
+				t.Fatalf("%s: knob on/off must differ beyond credentials", method)
+			}
+		})
 	}
 }
 
-// ticket-handler is a rendered worker playbook: playbook.render applies the
-// knob-off text as playbook.read does.
-func TestTicketHandlerReviewAutoAckFollowsKnobOnRenderAndRead(t *testing.T) {
-	handler := ticketReviewAutoAckVariants["ticket-handler"]
-	render := func(t *testing.T, f *whiteboardFixture) string {
-		t.Helper()
-		resp := f.call(t, "playbook.render", map[string]any{"name": "ticket-handler"})
-		if isToolError(resp) {
-			t.Fatalf("playbook.render: %s", resp)
-		}
-		data, err := os.ReadFile(strings.TrimSpace(strings.SplitN(toolText(t, resp), "\n", 2)[0]))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(data)
+func TestTicketKnobOverridePoints(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	points := map[string]string{
+		"TicketHandlerPersistConfirmation": "ticket-handler",
+		"TicketHandlerReviewAutoAck":       "ticket-handler",
+		"TicketQueueWhiteboard":            "lead-ticket",
 	}
-	read := func(t *testing.T, f *whiteboardFixture) string {
-		t.Helper()
-		resp := f.call(t, "playbook.read", map[string]any{"name": "ticket-handler"})
-		if isToolError(resp) {
-			t.Fatalf("playbook.read: %s", resp)
-		}
-		return toolText(t, resp)
-	}
-	on := newWhiteboardFixture(t)
-	for _, body := range []string{render(t, on), read(t, on)} {
-		for _, v := range handler {
-			if !strings.Contains(body, v.on) {
-				t.Fatalf("knob on: ticket-handler lacks its shipped text:\n%s", v.on)
+	for point, name := range points {
+		t.Run(point, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join("..", "..", "..", "agents-plugin", "rsrc", name, name+".md"))
+			if err != nil {
+				t.Fatal(err)
 			}
-		}
-	}
-	off := newWhiteboardFixture(t)
-	if resp := off.call(t, "config.tune", map[string]any{"key": wsconfig.ItemTicketReviewAutoAck, "value": "off", "scope": "session"}); isToolError(resp) {
-		t.Fatalf("config.tune off: %s", resp)
-	}
-	for _, body := range []string{render(t, off), read(t, off)} {
-		for _, v := range handler {
-			if strings.Contains(body, v.on) || !strings.Contains(body, v.off) {
-				t.Fatalf("knob off: ticket-handler must carry the knob-off text in place:\n%s", v.off)
+			if strings.Count(string(data), "<!-- ws:override:"+point+" -->") != 1 ||
+				strings.Count(string(data), "<!-- ws:/override:"+point+" -->") != 1 {
+				t.Fatal("expected one marker pair")
 			}
-		}
+			knob, value := wsconfig.ItemTicketReviewAutoAck, "off"
+			if point == "TicketQueueWhiteboard" {
+				knob, value = wsconfig.ItemWorkflowWhiteboardEnabled, "on"
+			}
+			if resp := f.call(t, "config.tune", map[string]any{"key": knob, "value": value, "scope": "session"}); isToolError(resp) {
+				t.Fatal(resp)
+			}
+			lookup, err := buildOverrideLookup(f.s, f.key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block := "<!-- ws:override:" + point + " -->\nSEED\n<!-- ws:/override:" + point + " -->"
+			if got := applyOverrideMarkers(block, "claude", lookup); got == "SEED" || strings.Contains(got, "<!-- ws:") {
+				t.Fatal("knob fallback must resolve the point in place")
+			}
+			// A later all-bucket user override must beat the knob fallback,
+			// even when the harness-specific bucket misses.
+			for _, bucket := range []string{"*", "claude"} {
+				resp := f.call(t, "config.tune", map[string]any{"key": "prompt." + point, "harness": bucket, "scope": "session", "value": "OVERRIDE-" + bucket})
+				if isToolError(resp) {
+					t.Fatal(resp)
+				}
+				lookup, err = buildOverrideLookup(f.s, f.key)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := applyOverrideMarkers(block, "claude", lookup); got != "OVERRIDE-"+bucket {
+					t.Fatalf("stored %s override lost: %q", bucket, got)
+				}
+			}
+			keyless, err := buildOverrideLookup(f.s, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := applyOverrideMarkers(block, "claude", keyless); got != "SEED" {
+				t.Fatalf("keyless render must use config defaults, not session overrides: %q", got)
+			}
+		})
+	}
+}
+
+func TestTicketWhiteboardOverrideKeepsHarnessBuckets(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	if resp := f.call(t, "config.tune", map[string]any{"key": wsconfig.ItemWorkflowWhiteboardEnabled, "harness": "claude", "value": "on", "scope": "session"}); isToolError(resp) {
+		t.Fatal(resp)
+	}
+	lookup, err := buildOverrideLookup(f.s, f.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := lookup("TicketQueueWhiteboard", "all"); !ok {
+		t.Fatal("claude's whiteboard bucket must enable the fallback")
+	}
+	f.s.sessionHarness = "codex"
+	lookup, err = buildOverrideLookup(f.s, f.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := lookup("TicketQueueWhiteboard", "all"); ok {
+		t.Fatal("claude's whiteboard bucket must not enable codex")
 	}
 }

@@ -266,7 +266,7 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 			// implementation of "which stage(s) are non-terminal", shared
 			// with tickets_verify.go's hard guardrail.
 			designRequired, completenessRequired := sageReviewStageRequirement(stem)
-			readySageWarning = readySagePostureWarning(readyPostureProblems(designRequired, postures.Design, completenessRequired, postures.Completeness))
+			readySageWarning = readySagePostureWarning(readyPostureProblems(designRequired, postures.Design, completenessRequired, postures.Completeness), opts.Env)
 		} else if err := blockedUpwardMoveError(postures); err != nil {
 			// Epic idea -> todo settlement keeps its blocked-design guard.
 			// prepareSageReviewForUpwardMove already wrote the resolved
@@ -389,7 +389,7 @@ func missingRouteFacts(ticketAbsPath, stem string) bool {
 
 // openDecisionQueueRefusal is the tickets.move refusal text; the sage_gate
 // stop instruction states the same remedy.
-const openDecisionQueueRefusal = "ticket has a pending ## Open Decision Queue section; its items are unsettled working state, not decisions. Settle the queue with the user (announced defaults and technical decisions acknowledged, every policy question settled), move each settled item into its home section, and delete the section before promoting"
+const openDecisionQueueRefusal = "ticket has a pending ## Open Decision Queue section; its items are unsettled working state, not decisions. Settle the queue (announced defaults and technical decisions acknowledged, every policy question settled), move each settled item into its home section, and delete the section before promoting"
 
 // hasOpenDecisionQueue reports whether a ticket carries a pending
 // `## Open Decision Queue` section. The match is the exact level-2 line
@@ -688,24 +688,40 @@ func readyPostureProblems(designRequired bool, design string, completenessRequir
 // stop_blocked before any resolution logic), so only ws/tickets.sage_stamp
 // with a non-block verdict can clear that state. Naming an escape no tool can
 // perform would reproduce the dead end this warning exists to remove.
-func readySagePostureWarning(problems []readyPostureProblem) string {
+func readySagePostureWarning(problems []readyPostureProblem, envs ...[]string) string {
 	if len(problems) == 0 {
 		return ""
+	}
+	var env []string
+	if len(envs) > 0 {
+		env = envs[0]
+		if env == nil {
+			env = os.Environ()
+		}
+	}
+	namespace := "ws"
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "WS_MCP_NAMESPACE=") {
+			namespace = strings.TrimSpace(strings.TrimPrefix(entry, "WS_MCP_NAMESPACE="))
+			if namespace == "" {
+				namespace = "ws"
+			}
+		}
 	}
 	first := problems[0]
 	var state, instruction string
 	if first.Blocked {
 		state = "blocked (a prior review found unresolved issues)"
 		instruction = "Address the blocker, then re-run the review and record a non-block verdict via " +
-			"ws/tickets.sage_stamp(stem, stage, verdicts) to resolve it — ws/tickets.sage_gate cannot clear a blocked posture"
+			namespace + "/tickets.sage_stamp(stem, stage, verdicts) to resolve it — " + namespace + "/tickets.sage_gate cannot clear a blocked posture"
 	} else {
 		state = "unreviewed (posture " + first.Posture + "; review has not run yet)"
-		instruction = "Call ws/tickets.sage_gate(stem, landing: \"ready\") to resolve it"
+		instruction = "Call " + namespace + "/tickets.sage_gate(stem, landing: \"ready\") to resolve it"
 	}
 	return fmt.Sprintf(
-		"%s is %s; ws/git.commit will fail on guardrail ready-sage-posture until this resolves. "+
+		"%s is %s; %s/git.commit will fail on guardrail ready-sage-posture until this resolves. "+
 			"%s; %s",
-		first.Field, state, instruction, sageReviewNonWaivableAdvisory,
+		first.Field, state, namespace, instruction, strings.ReplaceAll(sageReviewNonWaivableAdvisory, "ws/", namespace+"/"),
 	)
 }
 
