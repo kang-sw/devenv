@@ -24,7 +24,8 @@ type BackendRegistration struct {
 }
 
 // BackendRegistrations exposes the runner's admitted set to in-process config
-// readers. The returned map and slices are copies; backend instances are shared.
+// readers. The returned map and slices are copies; backend instances and
+// catalogs are shared and read-only.
 func (r *Runner) BackendRegistrations() map[string]BackendRegistration {
 	out := make(map[string]BackendRegistration, len(r.opts.Backends))
 	for name, reg := range r.opts.Backends {

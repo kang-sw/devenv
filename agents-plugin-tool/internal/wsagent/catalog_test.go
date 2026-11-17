@@ -2,6 +2,9 @@ package wsagent
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"testing"
 )
@@ -197,11 +200,19 @@ func TestResolveFillsEveryItem(t *testing.T) {
 	if got := (Capabilities{}).Grade(ItemSteer); got != GradeUnsupported {
 		t.Errorf("zero Capabilities grade = %s, want unsupported", got)
 	}
-	// The resolved value range is a copy: a reader cannot edit the profile.
+}
+
+// TestResolveCopiesValues: one profile is shared by every reader through
+// its registration, so a resolved value range must not alias its entries.
+func TestResolveCopiesValues(t *testing.T) {
+	p := fixtureCatalog()
+	caps := p.Resolve(RoleWorker, "1.3.0")
 	caps.Items[ItemToolRemoval].Values[0] = "edited"
-	again := fixtureCatalog().Resolve(RoleWorker, "1.3.0")
-	if got := again.Items[ItemToolRemoval].Values; !slices.Equal(got, []string{"a", "b"}) {
-		t.Errorf("values = %v after editing a resolved copy", got)
+	if got := p.Entries[3].Values; !slices.Equal(got, []string{"a", "b"}) {
+		t.Errorf("profile values = %v after editing a resolved copy", got)
+	}
+	if got := p.Resolve(RoleWorker, "1.3.0").Items[ItemToolRemoval].Values; !slices.Equal(got, []string{"a", "b"}) {
+		t.Errorf("re-resolved values = %v after editing a resolved copy", got)
 	}
 }
 
@@ -261,7 +272,7 @@ func TestClaudeCatalogValues(t *testing.T) {
 			ItemReasoningStream: GradeUnsupported, ItemUsageQuery: GradeNative,
 		},
 		RoleWorker: {
-			ItemSkillList: GradeUnsupported, ItemSkillInjection: GradeNative, ItemCompaction: GradeNative,
+			ItemSkillList: GradeUnsupported, ItemSkillInjection: GradeNative, ItemCompaction: GradeUnsupported,
 			ItemRewind: GradeUnsupported, ItemToolRemoval: GradeNative, ItemSubagentRemoval: GradeNative,
 			ItemModelEffort: GradeNative, ItemApproval: GradeUnsupported, ItemSteer: GradeUnsupported,
 			ItemInterrupt: GradeNative, ItemFollowUp: GradeSubstitute, ItemResume: GradeNative,
@@ -298,8 +309,33 @@ func TestClaudeCatalogValues(t *testing.T) {
 			}
 		}
 	}
-	// The guaranteed range lies within the recorded fixtures' versions.
-	if _, ok := parseHarnessVersion(p.Oldest); !ok {
-		t.Errorf("oldest %q unreadable", p.Oldest)
+	// Each bound of the guaranteed range is a recorded fixture's version.
+	recorded := claudeFixtureVersions(t)
+	for _, bound := range []string{p.Oldest, p.Newest} {
+		if !recorded[bound] {
+			t.Errorf("bound %s has no recorded fixture; recorded %v", bound, recorded)
+		}
 	}
+}
+
+// claudeFixtureVersions collects the claude_code_version values of the
+// recorded Claude stream fixtures.
+func claudeFixtureVersions(t *testing.T) map[string]bool {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join("testdata", "claude-*.jsonl"))
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("no Claude fixtures: %v", err)
+	}
+	re := regexp.MustCompile(`"claude_code_version":"([^"]+)"`)
+	out := map[string]bool{}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range re.FindAllSubmatch(data, -1) {
+			out[string(m[1])] = true
+		}
+	}
+	return out
 }
