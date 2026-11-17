@@ -33,9 +33,11 @@ type AgentHost interface {
 }
 
 // AgentPageInputHost distinguishes an explicit composer send from passive
-// inbox notifications. Archive restoration must not be inferred from a nudge.
+// inbox notifications. PageInput admits write against the conversation's
+// in-memory lifetime, then asynchronously restores a hidden session only if
+// write committed. Archive restoration must not be inferred from a nudge.
 type AgentPageInputHost interface {
-	PageInput(replyID string) error
+	PageInput(replyID string, write func() bool) error
 }
 
 // AgentEndpointHost is an AgentHost whose conversations call back on the

@@ -258,7 +258,18 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 	var status int
 	var answer any
 	if route == "message" {
-		status, answer = d.messageWrite(dir, replyID, raw, localViewer(r), now)
+		write := func() bool {
+			status, answer = d.messageWrite(dir, replyID, raw, localViewer(r), now)
+			return status == http.StatusOK
+		}
+		if host, ok := d.agents.(AgentPageInputHost); ok && s.Hosted {
+			if err := host.PageInput(replyID, write); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		} else {
+			write()
+		}
 	} else {
 		d.inboxMu.Lock()
 		status, answer = d.inboxWrite(dir, route, raw, now)
@@ -266,14 +277,6 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 	}
 	if route == "message" && status == http.StatusOK {
 		d.scheduleAnswerReplay(s.Registration)
-	}
-	if route == "message" && status == http.StatusOK && s.Hosted {
-		if host, ok := d.agents.(AgentPageInputHost); ok {
-			if err := host.PageInput(replyID); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
 	}
 	d.inboxAnswered(w, s, status, answer)
 }
