@@ -283,8 +283,10 @@
     Array.from(root.querySelectorAll('section.topic[data-topic]')).forEach(function (t) { if (lazyIn(t)) names.add(t.getAttribute('data-topic')); });
     Array.from(root.querySelectorAll('template[data-history-topic][data-lazy]')).forEach(function (t) { names.add(t.getAttribute('data-history-topic')); });
     if (!names.size) return Promise.resolve(0);
-    var query = Array.from(names).map(function (n) { return 'name=' + encodeURIComponent(n); }).join('&');
-    return fetchTopics(query).then(function (topics) { return hydrateWith(root, topics); });
+    // The route answers at most 512 names a request.
+    var list = Array.from(names), queries = [];
+    for (var i = 0; i < list.length; i += 256) queries.push(list.slice(i, i + 256).map(function (n) { return 'name=' + encodeURIComponent(n); }).join('&'));
+    return Promise.all(queries.map(fetchTopics)).then(function (all) { return hydrateWith(root, [].concat.apply([], all)); });
   }
   // unfilled holds, by history key, the snapshot a rehydrate is still
   // fetching for: a capture taken meanwhile (another update) merges it, so
@@ -500,8 +502,10 @@
     for (var i = kids.length - 1; i >= 0; i--) {
       var n = kids[i];
       if (n.matches('.history-gap')) {
-        // Lazy history appears on expand only: the window stops at it.
-        if (acc >= WINDOW_PX || lazy(n)) break;
+        if (acc >= WINDOW_PX) break;
+        // The window resumes past lazy history once its topic, near the
+        // view, has fetched it.
+        if (lazy(n)) { fillLater(h); break; }
         var op = { gap: n, direction: 'up', fallback: null, height: acc, row: null };
         h._wbHistoryPending.push(op);
         progress(h, op);
@@ -516,6 +520,24 @@
       }
     }
     h._wbHistoryFilling = false;
+  }
+  // fillLater fetches the history of h's topic when the topic comes within
+  // 800px of the view, then lets fill() take the rest of its window, so a
+  // topic shows the rows an eager page would while a page far from the
+  // view fetches nothing.
+  function fillLater(h) {
+    if (h._wbFillWatch) return;
+    var topic = h.closest('section.topic') || h;
+    h._wbFillWatch = kit.watch(topic, { margin: '800px', onChange: function (r) {
+      if (!r.visible || !h._wbFillWatch) return;
+      kit.unwatch(h._wbFillWatch);
+      hydrateTopic(topic).then(function (n) {
+        h._wbFillWatch = null;
+        if (!n || h.isConnected === false || h._wbHistoryPending.length) return;
+        h._wbHistoryFilling = true;
+        fill(h);
+      });
+    } });
   }
   function init(root) {
     if (window.wbAgo) window.wbAgo(root || document);
