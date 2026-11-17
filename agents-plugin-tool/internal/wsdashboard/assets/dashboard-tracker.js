@@ -419,7 +419,7 @@
       });
       // An entry in history the page has not fetched yet: pick again once
       // its topic arrives.
-      var waiting = !entry && !waited && window.wbHistory.loading && window.wbHistory.loading(row.entry);
+      var waiting = !entry && !waited && window.wbHistory && window.wbHistory.loading && window.wbHistory.loading(row.entry);
       if (waiting) { waited = true; waiting.then(entryPick); return; }
       if (!entry) { palettePick({ kind: "board-topic", topic: row.topic }, o); return; }
       // History owns disclosure, flash and viewport landing. In particular,

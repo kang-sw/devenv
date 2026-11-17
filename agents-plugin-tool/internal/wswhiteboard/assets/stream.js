@@ -258,17 +258,18 @@
       return section.isConnected === false ? 0 : hydrateWith(section, topics);
     });
   }
-  // targets holds the lazy loadTarget misses in flight by id. loading(id),
-  // asked right after loadTarget returned null, is the promise of that load
-  // (true once the target's topic arrived, null otherwise) and hands the
-  // landing to the caller, which then runs its own jump again; unasked, the
+  // targets holds the lazy loadTarget misses in flight by id, one per root
+  // asked (a jump tries every board box). loading(id), asked right after
+  // loadTarget returned null, is the promise of those loads (true once the
+  // target's topic arrived in some root, null otherwise) and hands the
+  // landing to the caller, which then runs its own jump again; unasked, a
   // load lands by itself.
   var targets = new Map();
   function loading(id) {
-    var t = targets.get(id);
-    if (!t) return null;
-    t.claimed = true;
-    return t.promise;
+    var list = targets.get(id);
+    if (!list) return null;
+    list.forEach(function (t) { t.claimed = true; });
+    return Promise.all(list.map(function (t) { return t.promise; })).then(function (r) { return r.some(Boolean) || null; });
   }
   function hydrateTarget(root, id) {
     return fetchTopics('target=' + encodeURIComponent(id)).then(function (topics) {
@@ -296,8 +297,8 @@
     var scope = root || document;
     unfilled.set(saved.key, saved);
     fetchTopics('name=' + encodeURIComponent(saved.key)).then(function (topics) {
-      if (scope.isConnected === false) return;
       if (unfilled.get(saved.key) === saved) unfilled.delete(saved.key);
+      if (scope.isConnected === false) return;
       // The first restore already ran this snapshot's pending loads.
       if (hydrateWith(scope, topics)) restore(scope, [Object.assign({}, saved, { pending: [] })]);
     });
@@ -366,14 +367,16 @@
     if (!node) {
       // A target in history the page has not fetched yet resolves once its
       // topic arrives; this call returns null, as for an unknown target.
-      if (!fetched && lazyIn(root || document) && !targets.has(id)) {
-        var t = {};
-        t.promise = hydrateTarget(root || document, id).then(function (n) {
-          targets.delete(id);
+      var list = targets.get(id) || [], scope = root || document;
+      if (!fetched && lazyIn(scope) && !list.some(function (t) { return t.root === scope; })) {
+        var t = { root: scope };
+        t.promise = hydrateTarget(scope, id).then(function (n) {
+          var rest = (targets.get(id) || []).filter(function (x) { return x !== t; });
+          if (rest.length) targets.set(id, rest); else targets.delete(id);
           if (!n) return null;
           return t.claimed ? true : loadTarget(root, id, beforeGeometry, true);
         });
-        targets.set(id, t);
+        targets.set(id, list.concat([t]));
       }
       return null;
     }
@@ -531,9 +534,11 @@
     h._wbFillWatch = kit.watch(topic, { margin: '800px', onChange: function (r) {
       if (!r.visible || !h._wbFillWatch) return;
       kit.unwatch(h._wbFillWatch);
-      hydrateTopic(topic).then(function (n) {
+      hydrateTopic(topic).then(function () {
         h._wbFillWatch = null;
-        if (!n || h.isConnected === false || h._wbHistoryPending.length) return;
+        // Another path may have fetched the topic first; fill once no gap
+        // is still lazy.
+        if (h.isConnected === false || h._wbHistoryPending.length || h.querySelector('.history-gap[data-lazy]')) return;
         h._wbHistoryFilling = true;
         fill(h);
       });
