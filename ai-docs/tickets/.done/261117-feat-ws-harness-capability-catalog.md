@@ -14,6 +14,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: c08c786a8356c83b
 sage-review-completeness-reviewed: c08c786a8356c83b
+completed: 2026-11-18
 ---
 
 # Harness capability catalog
@@ -751,3 +752,22 @@ fixed in a98a31f86; one Minor (failed stale restart untested), answered with
 
 **Left open:** the session-menu copy of the warning (optional in the brief)
 was not added; the notice was checked in the VM test, not in a browser.
+
+
+## Resolution (2026-11-18)
+
+All three phases are implemented on impl/track/agent-v2/rust-stank-cedar.
+- Phase 1: the catalog schema and the Claude values, plus the Pi HTTP MCP probe.
+- Phase 2: hosted Claude workers and leads reach ws-mcp over the daemon's HTTP route with a per-session token. A lead loads an HTTP variant of its bundle. A held lead's token, URL, hello environment and holder persist so a later daemon can rejoin it.
+- Phase 3: each process's init yields its harness version and its init-shape demotions. The runner resolves State.Capabilities from them, in memory only.
+  - The guaranteed range is 2.1.322..2.1.326, with a fixture for each role at each bound. A version outside it runs on the nearest bound, marked unverified.
+  - The dashboard shows a notice for an unverified version or demoted items.
+  - The offered command list drops any command whose item is unsupported.
+
+Pending owner decision (board): the compatibility tier of the new-daemon launch / older-daemon reattach path.
+
+Forward items are in the Phase 2 edition (539ef4ad8):
+- stage directories and old variants are never cleaned up;
+- a failed variant build has no stdio fallback;
+- a dying session answers with "ended";
+- the token is inherited by the harness's own subprocesses.
