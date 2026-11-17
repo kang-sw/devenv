@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 921bf96d73b6af2e
 sage-review-completeness-reviewed: 921bf96d73b6af2e
+completed: 2026-11-17
 ---
 
 # Dashboard wide view: file explorer in the left column, file preview in a dedicated right-hand pane
