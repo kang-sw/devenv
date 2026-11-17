@@ -63,7 +63,10 @@ func (f *fakeTokenRoute) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		answer(kid)
 	case "list":
 		answer(map[string]any{"conversations": []wsagent.State{kid}})
-	case "send", "stop":
+	case "send":
+		answer(kid)
+	case "stop":
+		kid.Status = wsagent.StatusClosed
 		answer(kid)
 	case "transcript":
 		answer(map[string]any{"records": []any{map[string]any{"kind": "reply", "text": "kid says hi", "at": "2026-11-13T00:00:00Z"}}})
@@ -134,6 +137,7 @@ func TestPiWorkerForwardsPiToolsOnItsToken(t *testing.T) {
 		}
 	}
 
+	writePiTestSession(t, s, "kid1")
 	out := callToolWithKey(t, s, 3, key, "pi.spawn", map[string]any{"prompt": "sub task", "tier": "small", "cwd": "sub", "label": "sub"})
 	if !strings.Contains(out, "spawned Pi subagent kid1 (tier small: prov/small, effort low)") || !strings.Contains(out, "steered into your running turn") {
 		t.Fatalf("pi.spawn = %q", out)
@@ -178,7 +182,7 @@ func TestPiWorkerForwardsPiToolsOnItsToken(t *testing.T) {
 	}
 }
 
-func TestPiForwardShowsSleep(t *testing.T) {
+func TestPiForwardShowsSleepAndDeleted(t *testing.T) {
 	setupMailboxTestEnv(t)
 	st := wsagent.State{ID: "kid", Status: wsagent.StatusClosed, Root: "/repo"}
 	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -199,34 +203,42 @@ func TestPiForwardShowsSleep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tool := range []string{"pi.spawn", "pi.list", "pi.send", "pi.stop", "pi.wait"} {
-		args := map[string]any{"format": "json"}
-		switch tool {
-		case "pi.spawn":
-			args["prompt"], args["tier"] = "work", "small"
-		case "pi.send":
-			args["id"], args["message"] = st.ID, "more"
-		case "pi.stop", "pi.wait":
-			args["id"] = st.ID
-		}
-		raw := callToolWithKey(t, s, 1, key, tool, args)
-		var out piChildOut
-		if tool == "pi.list" {
-			var list []piChildOut
-			if err := json.Unmarshal([]byte(raw), &list); err != nil || len(list) != 1 {
-				t.Fatalf("%s = %q: %v", tool, raw, err)
+	file := writePiTestSession(t, s, st.ID)
+	for _, want := range []string{"sleep", "deleted"} {
+		if want == "deleted" {
+			if err := os.Remove(file); err != nil {
+				t.Fatal(err)
 			}
-			out = list[0]
-		} else if err := json.Unmarshal([]byte(raw), &out); err != nil {
-			t.Fatal(err)
 		}
-		if out.Status != "sleep" {
-			t.Fatalf("%s status = %s", tool, out.Status)
-		}
-		delete(args, "format")
-		text := callToolWithKey(t, s, 2, key, tool, args)
-		if strings.Contains(text, "closed") || tool != "pi.send" && !strings.Contains(text, "sleep") {
-			t.Fatalf("%s text = %q", tool, text)
+		for _, tool := range []string{"pi.spawn", "pi.list", "pi.send", "pi.stop", "pi.wait"} {
+			args := map[string]any{"format": "json"}
+			switch tool {
+			case "pi.spawn":
+				args["prompt"], args["tier"] = "work", "small"
+			case "pi.send":
+				args["id"], args["message"] = st.ID, "more"
+			case "pi.stop", "pi.wait":
+				args["id"] = st.ID
+			}
+			raw := callToolWithKey(t, s, 1, key, tool, args)
+			var out piChildOut
+			if tool == "pi.list" {
+				var list []piChildOut
+				if err := json.Unmarshal([]byte(raw), &list); err != nil || len(list) != 1 {
+					t.Fatalf("%s = %q: %v", tool, raw, err)
+				}
+				out = list[0]
+			} else if err := json.Unmarshal([]byte(raw), &out); err != nil {
+				t.Fatal(err)
+			}
+			if out.Status != want {
+				t.Fatalf("%s status = %s, want %s", tool, out.Status, want)
+			}
+			delete(args, "format")
+			text := callToolWithKey(t, s, 2, key, tool, args)
+			if strings.Contains(text, "closed") || (tool == "pi.list" || tool == "pi.stop" || tool == "pi.wait") && !strings.Contains(text, want) {
+				t.Fatalf("%s text = %q, want %s", tool, text, want)
+			}
 		}
 	}
 }
@@ -705,6 +717,8 @@ func TestPiForwardDrivesTheRealTokenRoute(t *testing.T) {
 	t.Setenv(wsagent.EnvPiEndpoint, endpoint)
 	s := NewServer(root, "test")
 	defer s.Close()
+	// The fake daemon's runner uses dir rather than the fixture's cache path.
+	s.dashboard.dir = func() (string, error) { return dir, nil }
 	key, err := s.sessions.mint(root, roleDelegate, "")
 	if err != nil {
 		t.Fatal(err)
