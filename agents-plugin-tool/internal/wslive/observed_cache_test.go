@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -18,14 +20,21 @@ func TestObservedCacheUnchangedOpensAndProjection(t *testing.T) {
 	if err := AppendObserved(dir, []ObservedRecord{observedCacheRecord("one", "first")}); err != nil {
 		t.Fatal(err)
 	}
-	opens, stats := 0, 0
+	opens, stats, dirStats := 0, 0, 0
 	// The clock runs well past every file time, so the directory stat is
 	// trusted between sweeps; the test advances it to force one.
 	clock := time.Now().Add(time.Hour)
 	cache := ObservedCache{
 		open: func(path string) (*os.File, error) { opens++; return os.Open(path) },
-		stat: func(path string) (os.FileInfo, error) { stats++; return os.Stat(path) },
-		now:  func() time.Time { return clock },
+		stat: func(path string) (os.FileInfo, error) {
+			if filepath.Base(path) == ObservedDirName {
+				dirStats++
+			} else {
+				stats++
+			}
+			return os.Stat(path)
+		},
+		now: func() time.Time { return clock },
 	}
 	first := cache.Load(dir)
 	if opens != 1 || stats != 1 {
@@ -36,8 +45,8 @@ func TestObservedCacheUnchangedOpensAndProjection(t *testing.T) {
 			t.Fatal("unchanged projection rebuilt")
 		}
 	}
-	if opens != 1 || stats != 1 {
-		t.Fatalf("unchanged files opened %d times, stat'ed %d times", opens-1, stats-1)
+	if opens != 1 || stats != 1 || dirStats != 1 {
+		t.Fatalf("unchanged opens=%d record stats=%d directory stats=%d, want 1 each", opens, stats, dirStats)
 	}
 	files, _ := filepath.Glob(filepath.Join(dir, ObservedDirName, "*.json"))
 	path := files[0]
@@ -108,16 +117,19 @@ func TestObservedCacheUnchangedOpensAndProjection(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
+	clock = clock.Add(observedValidationInterval)
 	if got := cache.Load(dir); len(got.models) != 0 || opens != 3 {
 		t.Fatal("deleted evidence retained or opened")
 	}
 	settle()
+	clock = clock.Add(observedValidationInterval)
 	if got := cache.Load(dir); len(got.models) != 0 || opens != 3 {
 		t.Fatal("a backdated empty directory re-read records")
 	}
 	if err := AppendObserved(dir, []ObservedRecord{observedCacheRecord("two", "new")}); err != nil {
 		t.Fatal(err)
 	}
+	clock = clock.Add(observedValidationInterval)
 	cache.Load(dir)
 	if opens != 4 {
 		t.Fatal("new record not read")
@@ -134,7 +146,7 @@ func TestObservedCacheDirectoryGate(t *testing.T) {
 	if err := AppendObserved(dir, []ObservedRecord{observedCacheRecord("one", "first")}); err != nil {
 		t.Fatal(err)
 	}
-	stats, opens := 0, 0
+	stats, opens, dirStats := 0, 0, 0
 	clock := time.Now()
 	// Keep directory writes on the injected clock's timeline. Otherwise a
 	// real Windows mtime tick can cover both append and removal while the
@@ -148,15 +160,22 @@ func TestObservedCacheDirectoryGate(t *testing.T) {
 	stamp(clock)
 	cache := ObservedCache{
 		open: func(path string) (*os.File, error) { opens++; return os.Open(path) },
-		stat: func(path string) (os.FileInfo, error) { stats++; return os.Stat(path) },
-		now:  func() time.Time { return clock },
+		stat: func(path string) (os.FileInfo, error) {
+			if filepath.Base(path) == ObservedDirName {
+				dirStats++
+			} else {
+				stats++
+			}
+			return os.Stat(path)
+		},
+		now: func() time.Time { return clock },
 	}
-	// A directory mtime inside the racy window of its stat costs a listing,
-	// never a record stat.
+	// A directory mtime inside the racy window of its stat costs a listing
+	// once per validation interval, never a known record stat.
 	cache.Load(dir)
 	cache.Load(dir)
-	if stats != 1 || opens != 1 {
-		t.Fatalf("racy listing stat'ed known records: stats=%d opens=%d", stats, opens)
+	if stats != 1 || opens != 1 || dirStats != 1 {
+		t.Fatalf("racy listing: record stats=%d opens=%d directory stats=%d", stats, opens, dirStats)
 	}
 	// Once the mtime is old enough, an unchanged directory is trusted.
 	clock = clock.Add(time.Second * 3)
@@ -248,7 +267,8 @@ func TestObservedCacheMatchesUncachedValidationAndOverlay(t *testing.T) {
 		t.Fatal(err)
 	}
 	OverlayObserved(&want, retained)
-	var cache ObservedCache
+	clock := time.Now()
+	cache := ObservedCache{now: func() time.Time { return clock }}
 	for i := 0; i < 3; i++ {
 		got := base
 		cache.Load(dir).Overlay(&got)
@@ -263,14 +283,139 @@ func TestObservedCacheMatchesUncachedValidationAndOverlay(t *testing.T) {
 	if err := os.RemoveAll(evidenceDir); err != nil {
 		t.Fatal(err)
 	}
+	clock = clock.Add(observedValidationInterval)
 	if cache.Load(dir) != nil {
 		t.Fatal("removed directory served cached evidence")
 	}
 	if err := AppendObserved(dir, []ObservedRecord{observedCacheRecord("new", "restored")}); err != nil {
 		t.Fatal(err)
 	}
+	clock = clock.Add(observedValidationInterval)
 	if got := cache.Load(dir); got.models[""].Current.Model != "restored" {
 		t.Fatal("directory recreation missed")
+	}
+}
+
+func TestObservedCacheMissingDirectoryValidation(t *testing.T) {
+	dir := t.TempDir()
+	clock := time.Now()
+	var stats atomic.Int64
+	cache := ObservedCache{
+		now: func() time.Time { return clock },
+		stat: func(path string) (os.FileInfo, error) {
+			stats.Add(1)
+			return os.Stat(path)
+		},
+	}
+	burst := func() {
+		t.Helper()
+		var wg sync.WaitGroup
+		for i := 0; i < 64; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if cache.Load(dir) != nil {
+					t.Error("missing directory returned evidence")
+				}
+			}()
+		}
+		wg.Wait()
+	}
+	burst()
+	clock = clock.Add(observedValidationInterval - time.Nanosecond)
+	burst()
+	if stats.Load() != 1 {
+		t.Fatalf("missing burst: stats=%d, want 1", stats.Load())
+	}
+	clock = clock.Add(time.Nanosecond)
+	burst()
+	if stats.Load() != 2 {
+		t.Fatalf("missing validation: stats=%d, want 2", stats.Load())
+	}
+	if err := AppendObserved(dir, []ObservedRecord{observedCacheRecord("one", "new")}); err != nil {
+		t.Fatal(err)
+	}
+	burst() // Creation shares the previous missing result until validation.
+	cache.Forget(dir)
+	if got := cache.Load(dir); got == nil || got.models[""].Current.Model != "new" || stats.Load() != 4 {
+		t.Fatalf("Forget did not expose new evidence: stats=%d", stats.Load())
+	}
+}
+
+func TestObservedCacheValidationSharedAcrossReaders(t *testing.T) {
+	dir := t.TempDir()
+	appendRecord := func(id, model string, at int64) {
+		t.Helper()
+		r := observedCacheRecord(id, model)
+		r.At = at
+		if err := AppendObserved(dir, []ObservedRecord{r}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendRecord("one", "first", 1000)
+	clock := time.Now()
+	var dirStats, recordStats atomic.Int64
+	cache := ObservedCache{
+		now: func() time.Time { return clock },
+		stat: func(path string) (os.FileInfo, error) {
+			if filepath.Base(path) == ObservedDirName {
+				dirStats.Add(1)
+			} else {
+				recordStats.Add(1)
+			}
+			return os.Stat(path)
+		},
+	}
+	burst := func(want string) {
+		t.Helper()
+		var wg sync.WaitGroup
+		for i := 0; i < 64; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if got := cache.Load(dir); got == nil || got.models[""].Current.Model != want {
+					t.Errorf("concurrent load did not return %s", want)
+				}
+			}()
+		}
+		wg.Wait()
+	}
+	burst("first")
+	first := cache.Load(dir)
+	clock = clock.Add(observedValidationInterval - time.Nanosecond)
+	burst("first")
+	if dirStats.Load() != 1 || recordStats.Load() != 1 || cache.Opens() != 1 {
+		t.Fatalf("within interval: directory=%d record=%d opens=%d", dirStats.Load(), recordStats.Load(), cache.Opens())
+	}
+	clock = clock.Add(time.Nanosecond)
+	burst("first")
+	if dirStats.Load() != 2 || recordStats.Load() != 1 {
+		t.Fatalf("boundary: directory=%d record=%d", dirStats.Load(), recordStats.Load())
+	}
+	appendRecord("two", "second", 2000)
+	burst("first") // External appends wait for the next shared validation.
+	clock = clock.Add(observedValidationInterval)
+	burst("second")
+	if dirStats.Load() != 3 || recordStats.Load() != 2 || cache.Opens() != 2 {
+		t.Fatalf("append: directory=%d record=%d opens=%d", dirStats.Load(), recordStats.Load(), cache.Opens())
+	}
+	second := cache.Load(dir)
+	cache.Invalidate(dir)
+	if cache.Load(dir) != second || dirStats.Load() != 4 || recordStats.Load() != 2 || cache.Opens() != 2 {
+		t.Fatalf("unchanged invalidation discarded decoded evidence: directory=%d record=%d opens=%d", dirStats.Load(), recordStats.Load(), cache.Opens())
+	}
+	appendRecord("three", "third", 3000)
+	// Keep the directory stamp on the fake clock, including coarse-mtime hosts.
+	if err := os.Chtimes(filepath.Join(dir, ObservedDirName), clock, clock); err != nil {
+		t.Fatal(err)
+	}
+	cache.Invalidate(dir)
+	burst("third") // Explicit invalidation bypasses the interval, retaining reads.
+	if dirStats.Load() != 5 || recordStats.Load() != 3 || cache.Opens() != 3 {
+		t.Fatalf("Invalidate: directory=%d record=%d opens=%d", dirStats.Load(), recordStats.Load(), cache.Opens())
+	}
+	if first.models[""].Current.Model != "first" {
+		t.Fatal("published evidence mutated")
 	}
 }
 

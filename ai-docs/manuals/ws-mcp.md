@@ -289,9 +289,12 @@ only when a page reads the changed session. Ring, drained-inbox, and
 mailbox-history entry files are parsed once per daemon and kept by name for
 the window the page shows. The small files every read and render re-reads
 (session snapshots, the session record's part files, the reply registry,
-the named scopes' mailbox stores) are kept parsed while a stat shows the
-same size and modification time; a file modified within the last 2 seconds
-is not kept, and a session's entries drop when it leaves the index. A
+the named scopes' mailbox stores) share parsed values and stat validation
+for up to one second per path. Recent files are reread at validation until
+outside the two-second timestamp ambiguity window. Explicit session change
+signals expire the targeted source and snapshot validation before the index
+reads, and write admission/capability checks read current evidence rather than
+the presentation cache. A session's entries drop when it leaves the index. A
 page's refresh stamp and the board memo stamp a ticket status directory by
 its listing rather than each ticket file, and key the board on the
 session's own reply-registry contacts and unread count rather than the

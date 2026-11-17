@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sort"
 	"testing"
+	"time"
 )
 
 func retentionRecords(agent string, n int) []ObservedRecord {
@@ -108,10 +109,15 @@ func TestObservedRetentionInOrderAppendOracle(t *testing.T) {
 	dir := t.TempDir()
 	all := append(retentionRecords("", 12), retentionRecords("child-a", 12)...)
 	writeFixture(t, dir, all)
-	var cache ObservedCache
+	clock := time.Now()
+	cache := ObservedCache{now: func() time.Time { return clock }}
 	cache.Load(dir)
 	check := func() {
 		t.Helper()
+		clock = clock.Add(observedValidationInterval)
+		if err := os.Chtimes(filepath.Join(dir, ObservedDirName), clock, clock); err != nil {
+			t.Fatal(err)
+		}
 		oracle := NewState("")
 		oracle.SeedObserved(all)
 		wantSnap := Snapshot{Agents: []Agent{{ID: "child-a"}, {ID: "child-b"}}}

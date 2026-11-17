@@ -932,11 +932,16 @@ func (r pageReader) readSnapshotWithoutObserved(replyID string) *wslive.Snapshot
 	return r.snapshots.snapshotWithoutObserved(r.dir, replyID)
 }
 
+// readFreshSnapshot bypasses presentation TTLs for decisions that write to a
+// session. Hosted RAM remains authoritative when the daemon owns the session.
+func (r pageReader) readFreshSnapshot(replyID string) *wslive.Snapshot {
+	return r.snapshots.FreshSnapshot(r.dir, replyID)
+}
+
 // Write-route admission keeps its read-through check. Refresh stamps use
 // adapterStamp instead, so bounded presentation evidence is not authority.
 func (r pageReader) adapterPresent(replyID string, now time.Time) bool {
-	p, err := r.snapshots.read(wslive.SnapshotPath(SessionDir(r.dir, replyID)))
-	return err == nil && adapterPresent(&p.snap, now)
+	return adapterPresent(r.readFreshSnapshot(replyID), now)
 }
 
 // adapterStamp ages already-read evidence without probing disk. Include the

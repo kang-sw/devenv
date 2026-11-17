@@ -351,6 +351,8 @@ type liveWriter struct {
 	slot           wsdashboard.HostedSlot
 	// The last successfully written disk projection, without its timestamp.
 	lastSnapshot []byte
+	// writeSnapshotFile is the atomic writer, replaceable for deterministic IO counts.
+	writeSnapshotFile func(string, []byte, os.FileMode) error
 	// Only an observed holder agent_start supplies this real identity.
 	summarySource     string
 	summaryNaturalEnd bool
@@ -378,7 +380,7 @@ func newLiveWriter(dir, key, adapter string, now func() time.Time, log io.Writer
 			_, _ = st.Apply(wslive.Event{Kind: wslive.KindCommands, Commands: prev.Commands}, now().UnixMilli())
 		}
 	}
-	return &liveWriter{dir: dir, st: st, now: now, log: log}
+	return &liveWriter{dir: dir, st: st, now: now, log: log, writeSnapshotFile: writeFileAtomic}
 }
 
 // apply applies ev and writes what it changed; it reports whether anything
@@ -493,20 +495,21 @@ func (w *liveWriter) flushSnapshot(heartbeat bool) {
 	snap := w.st.Snapshot(w.now().UnixMilli())
 	w.publishSnapshot(snap)
 	disk := snap.ForDisk()
-	raw, err := json.Marshal(disk)
 	disk.UpdatedAt = 0
-	var content []byte
+	content, err := json.Marshal(disk)
+	// Coalesce identical projections for file-only workers too. Timestamp-only
+	// changes stay in RAM until the heartbeat, which still reaches legacy readers.
+	if err == nil && !heartbeat && bytes.Equal(content, w.lastSnapshot) {
+		return
+	}
+	var raw []byte
 	if err == nil {
-		content, err = json.Marshal(disk)
+		disk.UpdatedAt = snap.UpdatedAt
+		raw, err = json.Marshal(disk)
 	}
 	if err == nil {
 		err = w.withOwner(func() error {
-			// Only a hosted slot can serve the fresh timestamp in memory.
-			// Do not elide the periodic disk heartbeat or a failed write retry.
-			if !heartbeat && w.slot != nil && bytes.Equal(content, w.lastSnapshot) {
-				return nil
-			}
-			if err := writeFileAtomic(wslive.SnapshotPath(w.dir), raw, 0o644); err != nil {
+			if err := w.writeSnapshotFile(wslive.SnapshotPath(w.dir), raw, 0o644); err != nil {
 				return err
 			}
 			w.lastSnapshot = content
@@ -514,7 +517,6 @@ func (w *liveWriter) flushSnapshot(heartbeat bool) {
 		})
 	}
 	if err != nil {
-		w.lastSnapshot = nil
 		fmt.Fprintf(w.log, "agent %s: snapshot write: %v\n", w.st.ReplyID(), err)
 	}
 }

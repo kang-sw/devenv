@@ -184,8 +184,8 @@ func (d *Daemon) inboxSession(w http.ResponseWriter, r *http.Request, replyID st
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return s, false
 	}
-	// Freshness only: the overlay-free read skips the retained-evidence
-	// sweep, which nothing a write route answers depends on.
+	// Admission must read current authority, not the presentation TTL. The
+	// overlay-free read also skips retained history, which no write needs.
 	if !d.pages().adapterPresent(replyID, now) {
 		http.Error(w, "this session has no live host adapter: copy the answers into its terminal instead", http.StatusConflict)
 		return s, false
@@ -380,7 +380,7 @@ func (d *Daemon) sendCommand(dir, replyID string, req messageRequest, local bool
 	if len(req.Images) > 0 || len(req.Refs) > 0 {
 		return http.StatusBadRequest, "a slash command carries no images"
 	}
-	snap := d.pages().readSnapshotWithoutObserved(replyID)
+	snap := d.pages().readFreshSnapshot(replyID)
 	if snap == nil || len(snap.Commands) == 0 {
 		return http.StatusConflict, "this session's host adapter runs no slash commands from the dashboard"
 	}

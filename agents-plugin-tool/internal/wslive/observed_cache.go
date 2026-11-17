@@ -14,6 +14,8 @@ const (
 	// observedResweep bounds how long a load may trust the evidence
 	// directory's own stat: past it, the next load stats every record again.
 	observedResweep = 15 * time.Second
+	// observedValidationInterval shares directory checks across concurrent loads.
+	observedValidationInterval = time.Second
 	// observedRacyWindow is how recent a directory mtime may be, relative to
 	// the sweep that recorded it, and still be distrusted: an entry added on a
 	// filesystem with coarse timestamps can keep the directory mtime equal.
@@ -23,8 +25,10 @@ const (
 // ObservedCache retains immutable decoded evidence and its derived model
 // histories. Evidence files are write-once (AppendObserved links a synced temp
 // file into place and skips an existing name), so every legitimate change
-// adds or removes a directory entry and moves the directory's mtime. A load
-// therefore trusts the directory's own stat while it is unchanged and its
+// adds or removes a directory entry and moves the directory's mtime. Loads
+// validate at most once per second per session; Invalidate and Forget bypass
+// that delay.
+// Validation trusts the directory's own stat while it is unchanged and its
 // mtime is older than the racy window (observedRacyWindow) of the stat that
 // recorded it. Otherwise it lists the directory, reuses each known name
 // without a stat, and stats and reads only new names; a vanished name drops.
@@ -58,6 +62,8 @@ type observedSlot struct {
 	// before the last full sweep.
 	dirInfo        os.FileInfo
 	dirAt, sweptAt time.Time
+	checkedAt      time.Time // last directory validation, including failures
+	checked        bool
 }
 
 // sweepDue reports that a load at clock now must stat every record.
@@ -100,7 +106,7 @@ func (e *ObservedEvidence) Overlay(snap *Snapshot) {
 // Load reuses each unchanged record and extends immutable histories for new,
 // chronologically trailing evidence. Deletions, replacements, earlier duplicate
 // winners and late arrivals rebuild from retained records. Failure to list is
-// retried on the next load.
+// retried at the next validation. All loads share validation for one second.
 func (c *ObservedCache) Load(dir string) *ObservedEvidence {
 	if c == nil {
 		records, _ := ReadObserved(dir)
@@ -130,7 +136,11 @@ func (c *ObservedCache) Load(dir string) *ObservedEvidence {
 	}
 	evidenceDir := filepath.Join(dir, ObservedDirName)
 	now := clock()
-	dirInfo, dirErr := os.Stat(evidenceDir)
+	if elapsed := now.Sub(slot.checkedAt); slot.checked && elapsed >= 0 && elapsed < observedValidationInterval {
+		return slot.evidence
+	}
+	slot.checkedAt, slot.checked = now, true
+	dirInfo, dirErr := stat(evidenceDir)
 	if dirErr == nil && slot.trusted(dirInfo, now) {
 		return slot.evidence
 	}
@@ -298,6 +308,22 @@ func (s *observedSlot) extend(files map[string]observedFile, names []string) boo
 	}
 	s.evidence = &ObservedEvidence{models: models}
 	return true
+}
+
+// Invalidate expires directory validation after a change signal while retaining
+// decoded records and immutable histories for reuse by the next load.
+func (c *ObservedCache) Invalidate(dir string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	slot := c.sessions[dir]
+	c.mu.Unlock()
+	if slot != nil {
+		slot.mu.Lock()
+		slot.checked = false
+		slot.mu.Unlock()
+	}
 }
 
 // Forget drops session-local evidence when it leaves the dashboard index.

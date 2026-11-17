@@ -69,7 +69,13 @@ type agentSessions struct {
 }
 
 func (s agentSessions) ReadSession(reg Registration) (SessionData, bool, error) {
+	// This is an authoritative index read, already coalesced under its lane,
+	// not a presentation read. Refresh the daemon's snapshot owner even for
+	// leads whose fingerprint uses the inner source's separate cache: one
+	// nudge must not disappear behind either owner's presentation TTL.
+	s.snaps.Invalidate(s.dir, reg.ReplyID)
 	if !reg.Agent {
+		s.snaps.snapshotWithoutObserved(s.dir, reg.ReplyID)
 		return s.inner.ReadSession(reg)
 	}
 	if _, err := os.Stat(SessionDir(s.dir, reg.ReplyID)); err != nil {

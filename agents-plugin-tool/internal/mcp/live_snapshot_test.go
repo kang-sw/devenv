@@ -463,6 +463,10 @@ func TestDashboardSessionSourceTracksLiveStores(t *testing.T) {
 		if err := os.WriteFile(path, raw, 0o644); err != nil {
 			t.Fatal(err)
 		}
+		// Direct file rewrites bypass the Index's normal invalidation. Age
+		// and canonical content must refresh within the one-second TTL;
+		// advancing the domain clock alone does not expire this cache.
+		waitForDashboardValidation(t)
 	}
 
 	first := read()
