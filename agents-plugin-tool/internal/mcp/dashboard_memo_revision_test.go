@@ -81,7 +81,8 @@ func TestDashboardBoardMemoFolderRevision(t *testing.T) {
 			previous = rec
 		})
 	}
-	// A forgotten or independent cache read cannot collide with a held memo.
+	// Forget must change identity; independent dashboard sources now share
+	// one immutable folder read rather than assigning competing revisions.
 	wswhiteboard.SharedFolderCache.Forget(folder.Dir)
 	reopened := read()
 	if base(reopened) == base(previous) {
@@ -89,8 +90,8 @@ func TestDashboardBoardMemoFolderRevision(t *testing.T) {
 	}
 	other := dashboardPageSource(t, nil)
 	_, _, independent, ok, err := other.lookupRecord(reg)
-	if err != nil || !ok || base(independent) == base(reopened) {
-		t.Fatalf("independent cache collided with held memo: %v", err)
+	if err != nil || !ok || base(independent) != base(reopened) {
+		t.Fatalf("shared folder cache did not share read identity: %v", err)
 	}
 	// The unexported identity must never enter session persistence or raw JSON.
 	raw, err := json.Marshal(reopened)
