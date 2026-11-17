@@ -108,6 +108,157 @@ Deliverables: the completed matrix, the admission evidence, the removability ver
 
 Verification: every claimed supported capability has a matching version-ranged source and a recorded fixture or a finite planned-fixture expectation, with explicit unknowns; planned fixtures are distinguished from recorded ones; both admission conditions carry probe evidence.
 
+### Result (6a44e921d) - 2026-11-17
+
+Probed the installed `codex-cli 0.160.0` (macOS arm64, the owner's ChatGPT
+login, default `CODEX_HOME`) by driving `codex app-server` (default
+`--listen stdio://`) from a stdlib Python client, with a loopback
+streamable-HTTP MCP server standing in for the daemon. No login, logout,
+account switch, credential or `config.toml` write. Probe threads ran in a
+scratch git repo under an already-trusted home path, and the probe client
+removed `WS_*`/`CLAUDE*`/`ORCA_*`/`PI_*` from the child environment.
+
+**Evidence sources.**
+- Exact-version contract: `codex app-server generate-json-schema` and
+  `generate-ts` from the installed binary. Official documentation states
+  that this output is "specific to the Codex version you ran".
+- Official prose: `developers.openai.com/codex/app-server` (redirects to
+  `learn.chatgpt.com/docs/app-server`) and `.../codex/config-reference`
+  (redirects to `learn.chatgpt.com/docs/config-file/config-reference`),
+  fetched 2026-11-17.
+- Recorded fixtures: `agents-plugin-tool/internal/wsagent/testdata/codex-0.160.0-*.jsonl`
+  (nine files). They use the claude-lead `>> ` client-line convention, and
+  `codex_fixture_test.go` pins the protocol facts cited below.
+
+**Fixture index (recorded).**
+- `handshake`: a request before `initialize` gets `-32600 Not initialized`, and a second `initialize` gets `Already initialized`.
+- `lead-session`: covers thread/start with HTTP MCP and `developerInstructions`, then six turns:
+  - T1: MCP tool approval through `mcpServer/elicitation/request`, declined.
+  - T2: command approval, declined.
+  - T3: `turn/interrupt` during `sleep 30`.
+  - T4: steer (stale id error, accepted steer, ZEBRA in the reply).
+  - Steer while idle (error).
+  - T6: tool self-report. During T6 the interrupted T3 item also completes late.
+- `resume`: covers these cases:
+  - Resume of a missing thread fails.
+  - Resume with a re-issued token works.
+  - `developerInstructions` persist across the resume.
+  - An accepted MCP elicitation, followed by the tool result.
+  - `features.multi_agent=false` on resume does not remove subagents: `subAgentActivity` and `collabAgentToolCall` items still appear.
+  - `thread/turns/list` works.
+  - A required HTTP MCP server answering 401 makes `thread/start` fail.
+- `stale-approval`: resume with `agents.enabled=false` (answer `NO-SUBAGENT-TOOL`). An interrupt while an approval waits gives `turn/completed` (interrupted), then `serverRequest/resolved`. Two late answers get no reply, and the file is not created.
+- `subagent-baseline` (ephemeral; spawns one), `subagent-removed` (`agents.enabled=false`), `multi-agent-feature-off` (`features.multi_agent=false` plus `features.shell_tool=false`: no shell; the subagent tool is still advertised but spawn fails).
+- `ws-mcp-shadow`: a thread `mcp_servers.ws` HTTP entry replaces the plugin's `ws` server for that thread.
+- `plugin-mcp-block`: bare `mcp_servers.ws.enabled=false` is refused with `invalid transport`. Disabling the plugin drops the `ws` startup.
+
+**Admission conditions (catalog Decision 2): both pass at 0.160.0.**
+- (0) Headless JSON event streaming: app-server stdio is newline-delimited JSON-RPC 2.0 with the `jsonrpc` member omitted on the wire (all fixtures). It is sustained and bidirectional: client requests and notifications, plus server notifications and server requests.
+- (3) HTTP MCP injection: `thread/start` / `thread/resume` `config.mcp_servers.<name> = {url, bearer_token_env_var, required: true}`. The probe server saw `Authorization: Bearer` on every POST with Host `127.0.0.1` (`lead-session`, `resume`).
+  - A wrong token on a `required` server fails `thread/start` with `-32603 ... required MCP servers failed to initialize ... HTTP 401` (`resume`), so the failure is loud.
+  - A re-issued token on the next process start works (`resume`).
+  - Neither the token nor the MCP url is written to the rollout (grep of the thread's rollout file: 0 hits), so the MCP config is re-passed on every resume.
+  - Static `http_headers` also exist (doc), but they would carry the token in config. `bearer_token_env_var` keeps it in the child environment only.
+
+**Capability matrix: catalog values for the Phase 2 Codex profile.**
+- Shape: verbatim the `catalog.go` schema landed at `d20202cd6` (branch `impl/track/agent-v2/rust-stank-cedar`, read only).
+- Profile range: `Oldest: "0.160.0", Newest: "0.160.0"`, the only version with fixtures. Entries carry no `Since`/`Until`, like `ClaudeCatalog`. `Resolve` already pins out-of-range versions to the nearest bound, marked unverified.
+- Version source: `thread/start`/`thread/resume` response `thread.cliVersion` (`"0.160.0"`). The raw `codex --version` line `codex-cli 0.160.0` does not parse with `parseHarnessVersion`, which cuts at the first space.
+- Roles: every entry is `Role: RoleLead`. Worker is left undeclared, so it resolves `unsupported`, because Phase 2 is lead-only (C2).
+- Grades follow catalog Decision 10 (what the ws adapter will deliver once Phase 2 wires it). Until Phase 2 registers the backend, there is no Codex profile.
+
+| Item | Grade (lead) | Values | Evidence (0.160.0) | Fixture |
+|---|---|---|---|---|
+| `skill_list` | unsupported | - | `skills/list` exists (schema). No ws wiring in the lead slice. | schema only |
+| `skill_injection` | native if the ws plugin stays loaded (mechanism B below); unsupported if the plugin is disabled (A) | - | Codex plugin skills; `UserInput {type:"skill"}` (schema) | planned: Phase 2 lead with the plugin loaded |
+| `compaction` | native (planned) | - | `thread/compact/start` request + `thread/compacted` notification (schema). Not probed. | planned: `/compact` -> `thread/compact/start` -> `thread/compacted` -> turn end |
+| `rewind` | unsupported | - | `thread/revert` exists (schema). `thread/rollback` was removed (doc). No ws wiring. | none |
+| `tool_removal` | unsupported (lead keeps the user's tool setup, as `ClaudeCatalog` does) | evidence for a later worker row: `shell` (`features.shell_tool=false`), `web_search` (`web_search="disabled"`), `view_image` (`features.view_image`, doc) | `multi-agent-feature-off`: `NO-SHELL-TOOL`, no `commandExecution` item | recorded (shell); others doc only |
+| `subagent_removal` | native | `spawn_agent` (the `collaboration` namespace: `spawn_agent`, `send_message`, `wait_agent`, `followup_task`, `interrupt_agent`, `list_agents`) | `agents.enabled=false` in `thread/start` and in `thread/resume` config removes it. `features.multi_agent=false` (thread config or `--disable multi_agent`) does **not**: the tool stays advertised and spawn fails. | `subagent-removed`, `stale-approval` (resume), vs `subagent-baseline` |
+| `model_effort` | native | choices from `model/list` via ChoiceLister (not catalog) | `turn/start` `model`/`effort` override "this turn and subsequent turns", so SetModel/SetEffort apply on the next `turn/start` in-stream with no restart. The effort override persisted into the resumed thread (`reasoningEffort: "low"`). | recorded (effort); planned (model switch) |
+| `approval` | native (binary allow/deny; see interface gap E1) | modes stay in `BackendRegistration.PermissionModes` (`approvalPolicy` x `sandbox`) | `item/commandExecution/requestApproval` -> answer -> `serverRequest/resolved` -> `item/completed` (`declined`). MCP tool approval arrives as `mcpServer/elicitation/request` with `_meta.codex_approval_kind: "mcp_tool_call"`. | `lead-session`, `resume`, `stale-approval` |
+| `steer` | native | - | `turn/steer {threadId, input, expectedTurnId}` -> `{turnId}`. The steered text becomes a `userMessage` item in the same turn, with no new `turn/started`. A wrong id gets `-32600 expected active turn id ...`. Idle gets `no active turn to steer`. Schema error `activeTurnNotSteerable` covers review/compact turns. | `lead-session` |
+| `interrupt` | native | - | `turn/interrupt {threadId, turnId}` -> `{}`, then `turn/completed` `status: "interrupted"` | `lead-session`, `stale-approval` |
+| `follow_up` | ws-substitute | - | The runner holds the message and sends it at turn end (`Runner.Send`). The experimental `thread/queue/*` is not used. | n/a (runner) |
+| `resume` | native | - | `thread/resume {threadId}` with config re-passed. A missing thread gets `-32600 no rollout found for thread id ...`. Needs a non-ephemeral thread. | `resume`; planned: resume across Codex versions (only one installed) |
+| `reasoning_stream` | unsupported | - | Codex streams `item/reasoning/summaryTextDelta` and `reasoning` items (summaries were empty at `effort: low`). No ws wiring; owned by the reasoning-summary line. | none |
+| `usage_query` | native (pushed) | - | `thread/tokenUsage/updated {tokenUsage: {total, last, modelContextWindow}}` after every model response, plus `account/rateLimits/updated`. Nothing is asked (see schema gap G2). | `lead-session` |
+
+**Non-catalog event and recovery contract (for the Phase 2 mapper).**
+- Turn lifecycle:
+  - `turn/start` response (`inProgress`) -> `turn/started` -> items -> `turn/completed {turn.status: completed|interrupted|failed, turn.error}`.
+  - `thread/status/changed` maps to the harness state: `idle`, `active` (running), `active` with `activeFlags: ["waitingOnApproval"]` (`HarnessWaiting`).
+  - Items: `item/started` / `item/completed` with types `agentMessage` (streamed through `item/agentMessage/delta`; the final message is marked `phase: "final_answer"`), `commandExecution`, `mcpToolCall`, `fileChange`, `reasoning`, `userMessage`, `subAgentActivity`, `collabAgentToolCall`, and others (schema `ThreadItem`).
+  - An unknown notification is ignored.
+  - `error {error, willRetry}` with `codexErrorInfo` (`usageLimitExceeded`, `unauthorized`, ...) maps to Retry/Alert.
+- Interrupt leaves items open: the interrupted turn's `commandExecution` item gets no `item/completed` before `turn/completed`. Its completion arrives later, during the next turn, and still names the old `turnId` (`TestCodexInterruptLeavesItemOpenFixture`). The mapper must close open items at turn end and attribute every item event by `turnId`, never by "the current turn".
+- Approvals: correlation is the server's JSON-RPC request id, which maps to `ApprovalRequest.ID` as a string. `serverRequest/resolved {requestId}` maps to `ApprovalDone`. On interrupt the order is turn end, then resolved. Stale or duplicate answers get no reply and have no effect (`TestCodexStaleApprovalFixture`).
+- Unhandled server requests: every server request the adapter does not handle must get a JSON-RPC error reply, never be dropped, or the turn stalls. Schema set at 0.160.0: `item/fileChange/requestApproval`, `item/permissions/requestApproval`, `item/tool/requestUserInput`, `item/tool/call`, `account/chatgptAuthTokens/refresh`, `attestation/generate`, legacy `applyPatchApproval`/`execCommandApproval`.
+- Holder reattach: the holder keeps the app-server's stdio, as for Claude and Pi. Client request ids are client-chosen (`RequestId` is string or integer), so a reattaching daemon must not reuse an in-flight id. Planned: string ids with a per-attach prefix.
+  - Planned fixtures: reattach mid-turn; reattach with an approval pending; ring gap. On a gap, `thread/turns/list` / `thread/read` can rebuild the last turn's final message and status (`resume` records a `thread/turns/list` reply).
+- Instructions / workflow access: `developerInstructions` on `thread/start` is additive and persists across resume (`resume` T1 answers the marker without re-sending it).
+  - `baseInstructions` / `model_instructions_file` replace the built-in instructions and are not used.
+  - Project `AGENTS.md` loads natively (`instructionSources`).
+- Config / account home: `initialize` reports `codexHome` (the user's `~/.codex`). Auth, rollouts and logs live there, and the lead keeps them, as the Claude lead keeps user settings.
+  - The user's `config.toml` defaults apply (the thread opened at `reasoningEffort: "high"` from user config).
+  - The user's `hooks.json` hooks fire in app-server (`hook/started`/`hook/completed`), and `features.hooks=false` suppresses them (`resume`).
+  - The process is the harness PID (stdio). With HTTP MCP there is no ws-mcp child.
+- Subagent telemetry, if not removed: `subAgentActivity {kind: started|completed, agentThreadId, agentPath}` and `collabAgentToolCall` (`resume`, `subagent-baseline`).
+
+**Removability verdict (08)=c: removable.** At 0.160.0, `config.agents.enabled=false` on `thread/start` and on `thread/resume` removes the native subagent tools. Evidence:
+- The model reports `NO-SUBAGENT-TOOL` twice on fresh threads and once on a resumed one.
+- No `subAgentActivity` / `collabAgentToolCall` item appears with the setting, while the same prompt spawns one on the ephemeral baseline.
+
+`features.multi_agent=false` is not a removal: the tool stays visible and calls fail. The tool list is not in any init event, so this item is gated by version only (no init-shape demotion source). Phase 2 applies the removal for the hosted lead, because delegation is `ws/agent.*` (Decision 7).
+
+**Compatibility verdict (Decision 8).**
+- Phase 1 surfaces are T0: test-only fixtures and a `_test.go` file, with no shipped, stored or protocol change.
+- Phase 2 surfaces, as verdicts to confirm at implementation:
+  - The Codex catalog profile is in-code daemon data, so T0.
+  - The thread id is stored in the existing `Record.SessionID`. Phase 2 must add no new `Record` field: the old binary's `readRecord` + `writeRecord` round trip (`agents-plugin-tool/internal/wsagent/record.go:281-305`) drops unknown fields, which would make any such field at best T2.
+  - The old-daemon scenario is **T1**, not T0. The old binary reads a hosted Record with `backend: "codex"` without validating the backend (`record.go:281-294`). `Runner.Start` -> `startConv` -> `reattach` (`runner.go:266-304`, `runner.go:607-616`) reaches `startLead` -> `startBackend` -> `Runner.backend`, which returns `ErrBackendUnavailable` (`runner.go:924-929`). `reattach` only logs it and keeps `HolderID` in the record (`runner_process.go:378-381`). The row is listed but the old daemon cannot drive the session, and nothing in the record changes. Reopening with the new daemon reattaches the same holder.
+  - The HTTP MCP endpoint and token verdict belongs to catalog Phase 2.
+
+**Interface gaps returned to the lead (no common-interface change made).**
+- E1, approval expressiveness: `approvalAnswerer.AnswerApproval(req, allow bool, message)` (`backend.go`) is binary. Codex offers richer decisions:
+  - Commands: `accept`, `acceptForSession`, `acceptWithExecpolicyAmendment`, `applyNetworkPolicyAmendment`, `decline`, `cancel`.
+  - File changes: `accept`, `acceptForSession`, `decline`, `cancel`.
+  - Permissions: a granted subset plus `scope: turn|session`.
+  - MCP elicitation: `accept`/`decline`/`cancel` with `persist: ["session","always"]`.
+
+  Phase 2 can map allow to `accept` and deny to `decline` (`{permissions:{}, scope:"turn"}` for permissions), with stable correlation. Every other choice would be listed unsupported, which is a loss of expressiveness that Decision 3 asks the lead to settle. The alternative is an extension: offered choices on `ApprovalRequest`, and an answer that names one.
+- E2, user questions: the default tool set includes `request_user_input`, which arrives as the server request `item/tool/requestUserInput`. No `Event`/`Process` form exists for it. Phase 2 options: answer with an error (the model sees a failed tool), or extend the interface. Whether that tool can be removed was not probed.
+- Everything else fits the existing shape without extension:
+  - `Send` -> `turn/start`
+  - `Interrupt` -> `turn/interrupt` (the process tracks the active turn id)
+  - `Steer` -> `turn/steer`
+  - `SetModel`/`SetEffort` -> next `turn/start` overrides
+  - server requests -> `Event.Approval`, `serverRequest/resolved` -> `ApprovalDone`
+
+**Schema gaps (catalog `d20202cd6`).**
+- G1: `parseHarnessVersion` cannot read `codex-cli 0.160.0`. Phase 2 passes `thread.cliVersion` instead (no schema change needed).
+- G2: `ItemUsageQuery` reads "ws asks the harness". Codex pushes usage and is never asked. It is graded native on delivery, which the lead may want to re-word.
+- G3: the item list has no slot for the approval decision set (E1) or the user-question request (E2).
+- Admission conditions are not items (by design). Their evidence is recorded above.
+
+**Decisions taken (for veto).**
+- The ws-plugin MCP block mechanism (the analogue of catalog Decision 12) is a recommendation for Phase 2 to settle by probe:
+  - (B, recommended) shadow the plugin server by injecting the HTTP entry under the plugin's server name (`ws`; `wsflow` for that package). This keeps the plugin's skills and hooks.
+  - (A) `plugins."<id>".enabled=false`, which drops the whole plugin and needs the installation-specific `<plugin>@<marketplace>` key.
+
+  `ws-mcp-shadow` shows the HTTP server took the handshake and a single `ws` startup. Not verified: whether the plugin's stdio `ws-mcp` process was also spawned. Phase 2 checks the process count.
+- Hooks stay user-controlled (Claude-lead parity). `features.hooks=false` is available, if the lead prefers isolation.
+- The probe thread `01a1e9b5-2c24-7f90-b6f3-4b7d0c71a317` remains in the user's `~/.codex/sessions/2026/11/17/`. It was left in place rather than deleted (`thread/delete`), to avoid a further write to the Codex home.
+
+**Unknowns (explicit).**
+- Resume across Codex versions.
+- `thread/compact/start` behaviour.
+- Mid-turn model change.
+- Holder reattach and gap fixtures.
+- Whether `request_user_input` can be removed.
+- Whether the stdio ws-mcp is spawned under mechanism B.
+- Behaviour below 0.160.0. No older binary was available, so the lower bound is 0.160.0 by fixture.
+
 ### Phase 2: Implement one hosted lead conversation after the foundation gate
 
 Depends on this ticket's settled Phase 1 and the capability catalog ticket's Phases 1-3 (`261117-feat-ws-harness-capability-catalog`); execution approval is granted (Decision 4). Implement only the agreed hosted-lead slice through the existing Runner/backend/holder boundary, the catalog profile and the startup version/init-shape check. Preserve truthful unsupported controls, one input/mail owner, approvals, identity and ordered recovery. No implicit native-child, multi-account or terminal-handoff parity expansion. The backend serves the lead role only: it must not make `codex.<tier>` spawnable as an `agent.spawn` worker (batch-review coherence C2; the tier listing rule lives in `261117-feat-ws-agent-tools-mailbox-routing`).
