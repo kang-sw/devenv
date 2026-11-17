@@ -305,6 +305,9 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 		// A Pi subagent's own pi.* calls (the token route) need a usable
 		// Pi, as a lead's do.
 		ChildCheck: mcp.PiReady,
+		// A message that cannot wake its sleeping agent stays queued; its
+		// sender hears why once.
+		WakeRefused: mcp.AgentWakeRefused(logw),
 	})
 }
 
