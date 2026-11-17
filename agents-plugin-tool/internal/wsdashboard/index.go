@@ -31,6 +31,10 @@ type SessionData struct {
 	// Fingerprint changes whenever anything the source read changed, so the
 	// index can tell a re-read that found a change from one that did not.
 	Fingerprint string
+	// NonLiveFingerprint and LiveStores retain the two independent fingerprint
+	// parts for a live-only reread. They are in-memory evidence, never persisted.
+	NonLiveFingerprint string
+	LiveStores         LiveStoreFingerprint
 	// SnapshotUpdatedAt is the live snapshot's updatedAt (its writer's last
 	// write or heartbeat); zero when the session has no readable snapshot.
 	SnapshotUpdatedAt time.Time
@@ -49,6 +53,13 @@ type SessionData struct {
 // the next polling backstop, even when that entry is ended.
 type SessionSource interface {
 	ReadSession(reg Registration) (data SessionData, ok bool, err error)
+}
+
+// LiveSessionSource refreshes only live stores, retaining the last full read's
+// record/board/mailbox evidence. The index supplies a previous successful read;
+// cold sessions and changed registration identities still use ReadSession.
+type LiveSessionSource interface {
+	ReadLiveSession(reg Registration, previous SessionData, stores LiveStores) (SessionData, bool, error)
 }
 
 // SessionForgetter is an optional interface of a SessionSource that keeps
@@ -112,6 +123,13 @@ type Index struct {
 	lanes    map[string]*lane
 	inflight int
 	idle     *sync.Cond
+	// lastScheduled survives idle drain workers, so separate bursts still obey
+	// the per-session one-second limit. Guarded by lanesMu; dropped on removal.
+	lastScheduled map[string]time.Time
+	// Instance-local scheduler clock/wait seams; nil uses wall time. Separate
+	// from Now, which may be a fixed evidence clock in tests.
+	scheduledNow  func() time.Time
+	scheduledWait func(time.Duration)
 
 	mu         sync.Mutex
 	sessions   map[string]*indexEntry
@@ -141,11 +159,14 @@ type lane struct {
 	refs    int
 	running bool
 	queued  bool
+	full    bool
+	stores  LiveStores
 }
 
 type indexEntry struct {
 	session         Session
 	fingerprint     string
+	data            SessionData
 	retry           bool // bypass endedApplied until a successful read
 	snapshotStaleAt time.Time
 	snapshotStale   bool
@@ -280,26 +301,43 @@ func (x *Index) Nudge(replyID, project string) bool {
 	reg, err := ReadRegistration(x.opts.Dir, replyID)
 	if err != nil {
 		if (errors.Is(err, os.ErrNotExist) || errors.Is(err, errRegistrationMismatch)) && x.holds(replyID) {
-			x.schedule(replyID)
+			x.schedule(replyID, true, AllLiveStores)
 		}
 		return false
 	}
 	if filepath.Clean(reg.Project) != filepath.Clean(project) {
 		return false
 	}
-	x.schedule(replyID)
+	x.schedule(replyID, true, AllLiveStores)
 	return true
 }
 
-// Reread schedules a re-read of one session off the caller: the session's
-// registration and stores are read again on a worker of that session's
-// own, and the change hook runs there. Requests that arrive while the
-// session's re-read runs fold into one more re-read; sessions re-read in
-// parallel. A malformed reply-id is ignored.
+// Reread schedules a full re-read off the caller. Scheduled reads start at
+// most once per second per session, with a trailing read for requests arriving
+// during a read or its cooldown. Different sessions still read in parallel.
+// A malformed reply-id is ignored.
 func (x *Index) Reread(replyID string) {
 	if ValidReplyID(replyID) {
-		x.schedule(replyID)
+		x.schedule(replyID, true, AllLiveStores)
 	}
+}
+
+// RereadLive schedules a runner write without refreshing record, board, ticket
+// or mailbox evidence. A caller that knows the changed store can name it;
+// unknown writes conservatively refresh all live stores. Full requests win
+// when coalesced with live-only requests.
+func (x *Index) RereadLive(replyID string, stores ...LiveStores) {
+	if !ValidReplyID(replyID) {
+		return
+	}
+	changed := AllLiveStores
+	if len(stores) > 0 {
+		changed = 0
+		for _, store := range stores {
+			changed |= store
+		}
+	}
+	x.schedule(replyID, false, changed)
 }
 
 // SetSnapshotUpdatedAt sets the indexed session's SnapshotUpdatedAt in
@@ -384,16 +422,18 @@ func (x *Index) unhold(replyID string, l *lane) {
 
 // schedule asks for one more re-read of replyID, starting the session's
 // drain worker when none runs.
-func (x *Index) schedule(replyID string) {
+func (x *Index) schedule(replyID string, full bool, stores LiveStores) {
 	x.lanesMu.Lock()
 	defer x.lanesMu.Unlock()
 	l := x.lanes[replyID]
 	if l != nil && l.running {
 		l.queued = true
+		l.full = l.full || full
+		l.stores |= stores
 		return
 	}
 	l = x.hold(replyID)
-	l.running, l.queued = true, true
+	l.running, l.queued, l.full, l.stores = true, true, full, stores
 	x.inflight++
 	go x.drain(replyID, l)
 }
@@ -402,6 +442,7 @@ func (x *Index) schedule(replyID string) {
 // queued, then ends.
 func (x *Index) drain(replyID string, l *lane) {
 	for {
+		l.mu.Lock()
 		x.lanesMu.Lock()
 		if !l.queued {
 			l.running = false
@@ -411,11 +452,32 @@ func (x *Index) drain(replyID string, l *lane) {
 				x.idle.Broadcast()
 			}
 			x.lanesMu.Unlock()
+			l.mu.Unlock()
 			return
 		}
-		l.queued = false
+		now := time.Now()
+		if x.scheduledNow != nil {
+			now = x.scheduledNow()
+		}
+		if delay := x.lastScheduled[replyID].Add(time.Second).Sub(now); delay > 0 {
+			x.lanesMu.Unlock()
+			l.mu.Unlock()
+			wait := time.Sleep
+			if x.scheduledWait != nil {
+				wait = x.scheduledWait
+			}
+			wait(delay)
+			continue // keep folding requests until the trailing read starts
+		}
+		full, stores := l.full, l.stores
+		l.queued, l.full, l.stores = false, false, 0
+		if x.lastScheduled == nil {
+			x.lastScheduled = map[string]time.Time{}
+		}
+		x.lastScheduled[replyID] = now
 		x.lanesMu.Unlock()
-		x.readLane(replyID, l)
+		x.readLaneLocked(replyID, full, stores)
+		l.mu.Unlock()
 	}
 }
 
@@ -424,7 +486,7 @@ func (x *Index) reread(replyID string) {
 	x.lanesMu.Lock()
 	l := x.hold(replyID)
 	x.lanesMu.Unlock()
-	x.readLane(replyID, l)
+	x.readLane(replyID, l, true, AllLiveStores)
 	x.lanesMu.Lock()
 	x.unhold(replyID, l)
 	x.lanesMu.Unlock()
@@ -432,14 +494,18 @@ func (x *Index) reread(replyID string) {
 
 // readLane confirms registration absence under the session lane. An
 // unreadable registration retains the entry for the next polling backstop.
-func (x *Index) readLane(replyID string, l *lane) {
+func (x *Index) readLane(replyID string, l *lane, full bool, stores LiveStores) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	x.readLaneLocked(replyID, full, stores)
+}
+
+func (x *Index) readLaneLocked(replyID string, full bool, stores LiveStores) {
 	reg, err := ReadRegistration(x.opts.Dir, replyID)
 	var changed bool
 	switch {
 	case err == nil:
-		changed = x.apply(replyID, &reg)
+		changed = x.applyRead(replyID, &reg, full, stores)
 	case errors.Is(err, os.ErrNotExist) || errors.Is(err, errRegistrationMismatch):
 		changed = x.apply(replyID, nil)
 	default:
@@ -454,10 +520,21 @@ func (x *Index) readLane(replyID string, l *lane) {
 // apply re-reads one session from its registration (nil when it has none)
 // and its stores, and reports whether the index entry changed.
 func (x *Index) apply(replyID string, reg *Registration) bool {
+	return x.applyRead(replyID, reg, true, AllLiveStores)
+}
+
+func (x *Index) applyRead(replyID string, reg *Registration, full bool, stores LiveStores) bool {
 	// A hosted heartbeat can publish while the source read is in flight.
 	// Its newer clock handoff must not be rolled back by that older read.
 	x.mu.Lock()
 	liveGeneration := x.liveClocks[replyID].generation
+	var previous SessionData
+	if entry := x.sessions[replyID]; entry != nil && reg != nil &&
+		!entry.retry && entry.session.Project == reg.Project && entry.session.Agent == reg.Agent {
+		previous = entry.data
+	} else {
+		full = true
+	}
 	x.mu.Unlock()
 	var data SessionData
 	keep := reg != nil
@@ -470,7 +547,11 @@ func (x *Index) apply(replyID string, reg *Registration) bool {
 	var hidden bool
 	if keep {
 		var err error
-		data, keep, err = x.opts.Source.ReadSession(*reg)
+		if live, ok := x.opts.Source.(LiveSessionSource); ok && !full {
+			data, keep, err = live.ReadLiveSession(*reg, previous, stores)
+		} else {
+			data, keep, err = x.opts.Source.ReadSession(*reg)
+		}
 		if err != nil {
 			x.retry(replyID)
 			fmt.Fprintf(x.opts.Log, "dashboard: read session %s: %v\n", replyID, err)
@@ -494,6 +575,9 @@ func (x *Index) apply(replyID string, reg *Registration) bool {
 	entry, known := x.sessions[replyID]
 	if !keep {
 		delete(x.liveClocks, replyID)
+		x.lanesMu.Lock()
+		delete(x.lastScheduled, replyID)
+		x.lanesMu.Unlock()
 		if !known {
 			return false
 		}
@@ -509,11 +593,12 @@ func (x *Index) apply(replyID string, reg *Registration) bool {
 	next := Session{Registration: *reg, Live: reg.Live(now), HasBoard: data.HasBoard, CountPolicy: data.CountPolicy, Resumable: data.Resumable, Label: label, SnapshotUpdatedAt: data.SnapshotUpdatedAt, Hidden: hidden, Lifecycle: DeriveSessionLifecycle(*reg, hidden, now)}
 	if !known {
 		next.Rev = 1
-		x.sessions[replyID] = &indexEntry{session: next, fingerprint: data.Fingerprint, snapshotStaleAt: data.SnapshotStaleAt, snapshotStale: snapshotStale}
+		x.sessions[replyID] = &indexEntry{session: next, data: data, fingerprint: data.Fingerprint, snapshotStaleAt: data.SnapshotStaleAt, snapshotStale: snapshotStale}
 		fmt.Fprintf(x.opts.Log, "dashboard: session %s added (project %s)\n", replyID, reg.Project)
 		return true
 	}
 	entry.retry = false
+	entry.data = data
 	sameClock := entry.snapshotStale == snapshotStale
 	entry.snapshotStaleAt, entry.snapshotStale = data.SnapshotStaleAt, snapshotStale
 	next.Rev = entry.session.Rev

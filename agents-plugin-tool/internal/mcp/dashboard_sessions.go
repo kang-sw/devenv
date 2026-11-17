@@ -780,6 +780,9 @@ type DashboardSessionSource struct {
 	// listKeys replaces the key store's listing, so a test can hold a
 	// rescan; nil lists the store.
 	listKeys func(d sessionDirs) ([]string, error)
+	// nonLiveRead is an instance-local test counter for authoritative read
+	// groups, separate from parsed-file cache hit/miss counters.
+	nonLiveRead func(part string)
 
 	// boards memoizes each session's board render (dashboard_page.go).
 	boards boardMemo
@@ -808,8 +811,9 @@ type DashboardSessionSource struct {
 }
 
 var (
-	_ wsdashboard.CounterSource    = (*DashboardSessionSource)(nil)
-	_ wsdashboard.SessionForgetter = (*DashboardSessionSource)(nil)
+	_ wsdashboard.CounterSource     = (*DashboardSessionSource)(nil)
+	_ wsdashboard.LiveSessionSource = (*DashboardSessionSource)(nil)
+	_ wsdashboard.SessionForgetter  = (*DashboardSessionSource)(nil)
 )
 
 // recordFile is one session record file as the record cache holds it: its
@@ -918,16 +922,25 @@ const dashboardRescanAfter = 5 * time.Second
 // by the time is no change.
 func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (wsdashboard.SessionData, bool, error) {
 	src.invalidateSession(reg)
+	if src.nonLiveRead != nil {
+		src.nonLiveRead("record")
+		src.nonLiveRead("board")
+	}
 	key, raw, record, ok, err := src.lookupRecord(reg)
 	if !ok || err != nil {
 		return wsdashboard.SessionData{}, false, err
 	}
 	h := sha256.New()
 	h.Write(raw)
-	updatedAt, staleAt := src.hashLiveStores(h, reg.ReplyID)
 	replies, repliesOK := src.loadReplies()
 	if record.Whiteboard != nil {
+		if src.nonLiveRead != nil {
+			src.nonLiveRead("tickets")
+		}
 		boardPrint(h, key, record, reg.ReplyID, replies, repliesOK)
+	}
+	if src.nonLiveRead != nil {
+		src.nonLiveRead("mailbox-history")
 	}
 	io.WriteString(h, "\x00history")
 	if dir, err := mailboxHistoryDir("", key); err == nil {
@@ -942,6 +955,24 @@ func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (ws
 			fmt.Fprintf(h, "\x00%s\x01%s\x01%s\x01%s", c.Address, c.ReplyID, c.LastExchange.UTC().Format(time.RFC3339), c.Cwd)
 		}
 	}
+	return src.ReadLiveSession(reg, wsdashboard.SessionData{
+		HasBoard:           record.Whiteboard != nil,
+		CountPolicy:        record.Whiteboard.OpenAskCount(),
+		Resumable:          record.HarnessSession != "" && record.HarnessCwd != "",
+		NonLiveFingerprint: hex.EncodeToString(h.Sum(nil)[:16]),
+	}, wsdashboard.AllLiveStores)
+}
+
+// ReadLiveSession keeps the last authoritative record/board/ticket/mailbox
+// fingerprint. Runner writes touch only snapshot, ring and inbox evidence;
+// a Nudge, Refresh or board poke still calls ReadSession for both halves.
+func (src *DashboardSessionSource) ReadLiveSession(reg wsdashboard.Registration, previous wsdashboard.SessionData, stores wsdashboard.LiveStores) (wsdashboard.SessionData, bool, error) {
+	h := sha256.New()
+	io.WriteString(h, previous.NonLiveFingerprint)
+	if dir, err := src.resolveStateDir(); err == nil {
+		src.snapshots.Invalidate(dir, reg.ReplyID)
+		previous.LiveStores, previous.SnapshotUpdatedAt, previous.SnapshotStaleAt = src.snapshots.ReadLiveStoresClock(h, dir, reg.ReplyID, src.clock(), previous.LiveStores, stores)
+	}
 	fp := hex.EncodeToString(h.Sum(nil)[:16])
 	src.mu.Lock()
 	prev, had := src.prints[reg.ReplyID]
@@ -955,14 +986,8 @@ func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (ws
 	} else {
 		src.readsChanged.Add(1)
 	}
-	return wsdashboard.SessionData{
-		HasBoard:          record.Whiteboard != nil,
-		CountPolicy:       record.Whiteboard.OpenAskCount(),
-		Resumable:         record.HarnessSession != "" && record.HarnessCwd != "",
-		Fingerprint:       fp,
-		SnapshotUpdatedAt: updatedAt,
-		SnapshotStaleAt:   staleAt,
-	}, true, nil
+	previous.Fingerprint = fp
+	return previous, true, nil
 }
 
 // boardPrint folds into h the inputs of the served board's panels that
@@ -1064,17 +1089,6 @@ func (src *DashboardSessionSource) clock() time.Time {
 		return src.now()
 	}
 	return time.Now()
-}
-
-// hashLiveStores folds the session's live stores into h and returns the
-// snapshot's updatedAt and in-memory expiry (under this source's state dir,
-// clock, and snapshot cache). Reading the expiry adds no filesystem probe.
-func (src *DashboardSessionSource) hashLiveStores(h io.Writer, replyID string) (time.Time, time.Time) {
-	dir, err := src.resolveStateDir()
-	if err != nil {
-		return time.Time{}, time.Time{}
-	}
-	return src.snapshots.HashLiveStoresClock(h, dir, replyID, src.clock())
 }
 
 // resolveStateDir resolves the daemon state directory.

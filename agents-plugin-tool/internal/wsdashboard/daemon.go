@@ -625,7 +625,8 @@ func (d *Daemon) sessionChanged(replyID string) {
 // any, wakes it again when it lands.
 func (d *Daemon) agentChanged(replyID, _ string) {
 	if d.index != nil {
-		d.index.Reread(replyID)
+		// The runner changes live stores, not ws-mcp's record/board/mailbox.
+		d.index.RereadLive(replyID)
 	}
 	d.stats.WakeAgent.Add(1)
 	d.broker.wake(replyID)
