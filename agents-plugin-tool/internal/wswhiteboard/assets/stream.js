@@ -370,11 +370,14 @@
       var list = targets.get(id) || [], scope = root || document;
       if (!fetched && lazyIn(scope) && !list.some(function (t) { return t.root === scope; })) {
         var t = { root: scope };
-        t.promise = hydrateTarget(scope, id).then(function (n) {
+        t.promise = hydrateTarget(scope, id).then(function () {
           var rest = (targets.get(id) || []).filter(function (x) { return x !== t; });
           if (rest.length) targets.set(id, rest); else targets.delete(id);
-          if (!n) return null;
-          return t.claimed ? true : loadTarget(root, id, beforeGeometry, true);
+          if (scope.isConnected === false) return null;
+          // A concurrent prefetch may already have filled every placeholder.
+          // Resolve the actual target, not this response's fill count; a fill
+          // of some other content likewise does not prove the target exists.
+          return t.claimed ? (materialize(scope, id, beforeGeometry) ? true : null) : loadTarget(scope, id, beforeGeometry, true);
         });
         targets.set(id, list.concat([t]));
       }
