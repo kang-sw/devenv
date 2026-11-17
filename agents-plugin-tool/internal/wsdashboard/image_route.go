@@ -431,8 +431,9 @@ func (d *Daemon) handleImage(w http.ResponseWriter, r *http.Request, replyID str
 	}
 	path := r.URL.Query().Get("path")
 	file, ctype, ok := containedImage(s.Project, path)
+	deny := newDenySet()
 	if localViewer(r) {
-		_, real, allowed := localPath(s.Project, path)
+		_, real, allowed := deny.localPath(s.Project, path)
 		if !allowed {
 			ok = false
 		} else if !ok {
@@ -448,7 +449,7 @@ func (d *Daemon) handleImage(w http.ResponseWriter, r *http.Request, replyID str
 	}
 	open := openContained
 	if localViewer(r) {
-		open = openLocalContained
+		open = deny.openLocal
 	}
 	f, _, info, ok := open(filepath.Dir(file), filepath.Base(file))
 	if !ok {

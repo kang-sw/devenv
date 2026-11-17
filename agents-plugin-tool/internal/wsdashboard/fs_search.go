@@ -185,13 +185,14 @@ func (d *Daemon) browseCandidates(root string) []fileCandidate {
 
 // handleFSFind serves the name search.
 func (d *Daemon) handleFSFind(w http.ResponseWriter, r *http.Request, replyID string) {
-	root, session, ok := d.browseRoot(r, replyID)
+	deny := newDenySet()
+	root, session, ok := d.browseRootWith(r, replyID, deny)
 	q := r.URL.Query().Get("q")
 	if !ok || len(q) > filesQueryMax || strings.ContainsRune(q, 0) {
 		fsNotFound(w)
 		return
 	}
-	items := rankRoot(viewerCandidates(r, root, d.browseCandidates(root)), q)
+	items := rankRoot(viewerCandidates(r, deny, root, d.browseCandidates(root)), q)
 	if items == nil {
 		items = []fileItem{}
 	}
@@ -201,7 +202,8 @@ func (d *Daemon) handleFSFind(w http.ResponseWriter, r *http.Request, replyID st
 // handleFSSearch serves the content search. A text that does not compile
 // as a regular expression answers 400 with the reason.
 func (d *Daemon) handleFSSearch(w http.ResponseWriter, r *http.Request, replyID string) {
-	root, session, ok := d.browseRoot(r, replyID)
+	deny := newDenySet()
+	root, session, ok := d.browseRootWith(r, replyID, deny)
 	query := r.URL.Query()
 	q := query.Get("q")
 	if !ok || len(q) > fsSearchQueryMax || strings.ContainsRune(q, 0) {
@@ -219,10 +221,10 @@ func (d *Daemon) handleFSSearch(w http.ResponseWriter, r *http.Request, replyID 
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), fsSearchTimeout)
 	defer cancel()
-	list := viewerCandidates(r, root, d.browseCandidates(root))
+	list := viewerCandidates(r, deny, root, d.browseCandidates(root))
 	if localViewer(r) {
 		a := searchFilesRead(ctx, list, re, func(path string) (string, bool) {
-			f, _, info, ok := openLocalContained(root, path)
+			f, _, info, ok := deny.openLocal(root, path)
 			if !ok {
 				return "", false
 			}

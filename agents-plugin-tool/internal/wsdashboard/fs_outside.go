@@ -165,36 +165,15 @@ func homeDirs() []string {
 	return homes
 }
 
-// atOrBelow reports whether path is base or an entry under it, without
-// regard to case: a case-insensitive volume reads ~/.SSH as ~/.ssh.
-func atOrBelow(base, path string) bool {
-	rel, err := filepath.Rel(strings.ToLower(base), strings.ToLower(path))
-	return err == nil && (rel == "." || insideRel(rel))
-}
-
 // alwaysDenied reports a cleaned absolute path at or under an always-denied
 // folder of a home in homes. String checks are only the fast path: file
 // identities also cover filesystem aliases that EvalSymlinks leaves intact
 // (Unicode folding and macOS firmlinks). Without a home, deny these names
 // anywhere in the path. Linux process environments are denied separately.
+// It computes a deny set of its own; a request checking several paths shares
+// one (denySet.denied).
 func alwaysDenied(path string, homes []string) bool {
-	if deniedProcEnviron(path) {
-		return true
-	}
-	if len(homes) == 0 {
-		slashed := "/" + strings.ToLower(filepath.ToSlash(path)) + "/"
-		for _, name := range outsideDenied {
-			if strings.Contains(slashed, "/"+strings.ToLower(name)+"/") {
-				return true
-			}
-		}
-	}
-	for _, base := range deniedBasePaths(homes) {
-		if atOrBelow(base, path) {
-			return true
-		}
-	}
-	return deniedFileIdentity(path, homes)
+	return denySetFor(homes).denied(path)
 }
 
 // wideFolder reports a resolved folder too wide to grant: a volume root, a
@@ -219,7 +198,7 @@ func wideFolder(dir string, homes []string) bool {
 // grantOutside is what a link to the absolute path abs opens (see the file
 // comment); false when it opens nothing: no plain absolute path, an
 // always-denied one, or no regular file.
-func grantOutside(abs string) (outsideGrant, bool) {
+func grantOutside(deny *denySet, abs string) (outsideGrant, bool) {
 	if abs == "" || len(abs) > openTargetMax || strings.ContainsRune(abs, 0) || networkPath(abs) {
 		return outsideGrant{}, false
 	}
@@ -228,12 +207,11 @@ func grantOutside(abs string) (outsideGrant, bool) {
 		return outsideGrant{}, false
 	}
 	clean := filepath.Clean(native)
-	homes := homeDirs()
-	if deviceElement(clean) || alwaysDenied(clean, homes) {
+	if deviceElement(clean) || deny.lexical(clean) {
 		return outsideGrant{}, false
 	}
 	real, err := filepath.EvalSymlinks(clean)
-	if err != nil || networkPath(real) || !driveOrRootPath(real) || alwaysDenied(real, homes) {
+	if err != nil || networkPath(real) || !driveOrRootPath(real) || deny.lexical(real) || deny.identityAtOrAbove(real) {
 		return outsideGrant{}, false
 	}
 	// Stat before opening: opening a FIFO would block the handler.
@@ -244,7 +222,7 @@ func grantOutside(abs string) (outsideGrant, bool) {
 	if len(g.Root)+len(g.Name) > fsOutsidePathMax {
 		return outsideGrant{}, false
 	}
-	g.Only = wideFolder(g.Root, homes)
+	g.Only = wideFolder(g.Root, deny.homeDirs())
 	return g, true
 }
 
@@ -369,12 +347,13 @@ func (d *Daemon) handleFSOutside(w http.ResponseWriter, r *http.Request, replyID
 		http.Error(w, "malformed request", http.StatusBadRequest)
 		return
 	}
-	g, ok := grantOutside(homePath(req.Path))
+	deny := newDenySet()
+	g, ok := grantOutside(deny, homePath(req.Path))
 	if !ok {
 		fsNotFound(w)
 		return
 	}
-	f, rel, info, ok := openLocalContained(g.Root, g.Name)
+	f, rel, info, ok := deny.openLocal(g.Root, g.Name)
 	if !ok {
 		fsNotFound(w)
 		return
@@ -462,7 +441,8 @@ func (d *Daemon) handleFSOutsideCapability(w http.ResponseWriter, r *http.Reques
 		fsNotFound(w)
 		return
 	}
-	f, rel, info, ok := openLocalContained(g.Root, path)
+	deny := newDenySet()
+	f, rel, info, ok := deny.openLocal(g.Root, path)
 	if !ok {
 		fsNotFound(w)
 		return
@@ -475,8 +455,7 @@ func (d *Daemon) handleFSOutsideCapability(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	full := filepath.Join(g.Root, rel)
-	homes := homeDirs()
-	if real, err := filepath.EvalSymlinks(full); err != nil || alwaysDenied(full, homes) || alwaysDenied(real, homes) {
+	if real, err := filepath.EvalSymlinks(full); err != nil || deny.lexical(full) || deny.lexical(real) || deny.identityAtOrAbove(real) {
 		fsNotFound(w)
 		return
 	}
