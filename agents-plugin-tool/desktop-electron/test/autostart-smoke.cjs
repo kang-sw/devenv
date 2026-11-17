@@ -29,10 +29,17 @@ async function waitFor(check, label, timeout = 60000) {
   }
   throw new Error(`Timed out: ${label}`);
 }
+function browserAddress() {
+  // Electron's app userData and Chromium's --user-data-dir can differ.
+  // The browser endpoint printed by this owned process is authoritative.
+  const matches = fs.readFileSync(path.join(evidence, 'app.log'), 'utf8').matchAll(/DevTools listening on (ws:\/\/127\.0\.0\.1:\d+\/devtools\/browser\/[^\s]+)/g);
+  return [...matches].at(-1)?.[1];
+}
 async function targets() {
   try {
-    const port = fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0];
-    return await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+    const address = browserAddress();
+    if (!address) return [];
+    return await (await fetch(`http://127.0.0.1:${new URL(address).port}/json/list`)).json();
   } catch { return []; }
 }
 async function launch() {
@@ -53,8 +60,7 @@ async function launch() {
 }
 async function closeApp() {
   if (!app || app.exitCode !== null) return;
-  const lines = fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').trim().split('\n');
-  const socket = new WebSocket(`ws://127.0.0.1:${lines[0]}${lines[1]}`);
+  const socket = new WebSocket(browserAddress());
   try {
     await new Promise((resolve, reject) => {
       socket.addEventListener('open', resolve, { once: true });
@@ -86,6 +92,19 @@ async function closeApp() {
     await closeApp();
   } catch (error) { failure = error; console.error(error.stack); }
   finally {
+    const pages = await targets();
+    fs.writeFileSync(path.join(evidence, 'targets.json'), JSON.stringify(pages, null, 2));
+    for (const page of pages) {
+      if (!page.url.startsWith('file:')) continue;
+      const diagnostic = new URL(page.url).searchParams;
+      const diagnosticLog = diagnostic.get('log');
+      if (diagnosticLog?.startsWith('Error log: ')) {
+        const source = diagnosticLog.slice('Error log: '.length);
+        if (path.basename(source) === 'daemon-start.log' && fs.existsSync(source)) {
+          fs.copyFileSync(source, path.join(evidence, 'daemon-start.log'));
+        }
+      }
+    }
     // Only this test's isolated endpoint is eligible for authenticated cleanup.
     try { await closeApp(); } catch { if (app?.exitCode === null) app.kill(); }
     try { if (observed) await shutdown(cache, observed); } catch (error) { console.error('Cleanup:', error.message); }
