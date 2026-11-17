@@ -663,3 +663,35 @@ func TestMemStoreExportRewritesHistoryAPruneRemoved(t *testing.T) {
 		t.Fatalf("history after a prune and an export = %v %v, want the entry rewritten", names, err)
 	}
 }
+
+// TestMemStoreInPlaceContactWritePersists: a transaction that writes a
+// contact into an entry's existing Contacts map in place (legal against the
+// legacy decode-per-call store) records the change in the ring, so a
+// daemon restart still sees it.
+func TestMemStoreInPlaceContactWritePersists(t *testing.T) {
+	f := newMemFixture(t)
+	d := f.open()
+	if err := f.paths.Store().WithReplyLock(func(st *ReplyStore) error {
+		st.Entries["owner"] = ReplyEntry{Contacts: map[string]Contact{"peer@worktree": {Cwd: "/before"}}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.paths.Store().WithReplyLock(func(st *ReplyStore) error {
+		c := st.Entries["owner"].Contacts["peer@worktree"]
+		c.Cwd = "/after"
+		st.Entries["owner"].Contacts["peer@worktree"] = c
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.kill(d)
+	f.open()
+	got, err := f.paths.Store().LoadReply()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cwd := got.Entries["owner"].Contacts["peer@worktree"].Cwd; cwd != "/after" {
+		t.Fatalf("contact cwd after a restart = %q, want /after", cwd)
+	}
+}

@@ -347,7 +347,7 @@ func reconcileStore(cur, base, file StoreFile) StoreFile {
 // state's last write), keeping the newer LastSeen and merging contacts by
 // their newest exchange.
 func reconcileReplyStore(cur, base, file ReplyStore) ReplyStore {
-	next := cloneReply(cur, false)
+	next := cloneReply(cur)
 	for id, e := range file.Entries {
 		if b, ok := base.Entries[id]; ok && entryEqual(b, e) {
 			continue

@@ -364,7 +364,7 @@ func (s Store) Load(path string) (StoreFile, error) {
 func (s Store) LoadReply() (ReplyStore, error) {
 	var out ReplyStore
 	err := s.read(func(in *instance) error {
-		out = cloneReply(in.st.Reply, true)
+		out = cloneReply(in.st.Reply)
 		return nil
 	})
 	return out, err
@@ -436,7 +436,7 @@ func (tx *Tx) Named(path string) (*StoreFile, error) {
 // Reply returns the working copy of the reply-id registry.
 func (tx *Tx) Reply() *ReplyStore {
 	if tx.reply == nil {
-		working := cloneReply(tx.in.st.Reply, false)
+		working := cloneReply(tx.in.st.Reply)
 		tx.reply = &working
 	}
 	return tx.reply
@@ -706,10 +706,11 @@ func cloneStore(s StoreFile, _ bool) StoreFile {
 	return out
 }
 
-// cloneReply copies r. A working copy shares each entry's Contacts map
-// with the committed state (RecordContact replaces it, never writes it);
-// deep also copies those maps, for a caller that owns the result.
-func cloneReply(r ReplyStore, deep bool) ReplyStore {
+// cloneReply copies r, each entry's Contacts map included: a transaction's
+// fn may write a contact in place, and a shared map would change the
+// committed state behind the diff, so the change would never reach the
+// ring.
+func cloneReply(r ReplyStore) ReplyStore {
 	out := ReplyStore{SchemaVersion: r.SchemaVersion, Entries: maps.Clone(r.Entries), Queues: copyQueues(r.Queues)}
 	if out.SchemaVersion == 0 {
 		out.SchemaVersion = schemaVersion
@@ -717,11 +718,9 @@ func cloneReply(r ReplyStore, deep bool) ReplyStore {
 	if out.Entries == nil {
 		out.Entries = map[string]ReplyEntry{}
 	}
-	if deep {
-		for id, e := range out.Entries {
-			e.Contacts = maps.Clone(e.Contacts)
-			out.Entries[id] = e
-		}
+	for id, e := range out.Entries {
+		e.Contacts = maps.Clone(e.Contacts)
+		out.Entries[id] = e
 	}
 	return out
 }
@@ -955,7 +954,7 @@ func (st *state) reap(now time.Time) {
 		}
 	}
 	st.History = history
-	reply := cloneReply(st.Reply, false)
+	reply := cloneReply(st.Reply)
 	ReapReplyEntries(&reply, now)
 	st.Reply = reply
 }

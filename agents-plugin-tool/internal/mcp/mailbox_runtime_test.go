@@ -124,7 +124,13 @@ func exitedChildPID(t *testing.T) int {
 
 func loadPresence(t *testing.T, path, name string) wsmailbox.Presence {
 	t.Helper()
-	store, err := (wsmailbox.Paths{}).Store().Load(path)
+	return loadPresenceIn(t, (wsmailbox.Paths{}).Store(), path, name)
+}
+
+// loadPresenceIn is loadPresence against store.
+func loadPresenceIn(t *testing.T, ms wsmailbox.Store, path, name string) wsmailbox.Presence {
+	t.Helper()
+	store, err := ms.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}

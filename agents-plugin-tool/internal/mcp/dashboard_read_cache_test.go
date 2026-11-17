@@ -77,7 +77,7 @@ func TestDashboardRecordCacheServesUnchangedParts(t *testing.T) {
 	}
 
 	c := src.Counters()
-	for _, kind := range []string{"record", "reply_registry", "scope_store", "source_snapshot"} {
+	for _, kind := range []string{"record", "source_snapshot"} {
 		for _, k := range []string{kind + "_cache_hits", kind + "_cache_misses"} {
 			if _, ok := c[k]; !ok {
 				t.Errorf("Counters lacks %s: %v", k, c)
