@@ -1,6 +1,7 @@
 package wslive
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -8,12 +9,14 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 const (
 	// observedResweep bounds how long a load may trust the evidence
-	// directory's own stat: past it, the next load stats every record again.
-	observedResweep = 15 * time.Second
+	// directory's own stat: past it, a rare recovery sweep checks records.
+	observedResweep = 5 * time.Minute
 	// observedValidationInterval shares directory checks across concurrent loads.
 	observedValidationInterval = time.Second
 	// observedRacyWindow is how recent a directory mtime may be, relative to
@@ -33,7 +36,7 @@ const (
 // recorded it. Otherwise it lists the directory, reuses each known name
 // without a stat, and stats and reads only new names; a vanished name drops.
 // A full sweep, which stats every record (following symlinks) and re-reads
-// one whose SameFile, size, mode or mtime moved, runs at least every
+// one whose identity metadata, size, mode or mtime moved, runs every
 // observedResweep and whenever the directory stat is unusable: it bounds the
 // staleness of an in-place child edit, a same-name replacement, or a
 // coarse-mtime collision. The prior per-load full sweep cost one stat per
@@ -51,7 +54,13 @@ type ObservedCache struct {
 }
 
 type observedSlot struct {
-	mu       sync.Mutex
+	mu         sync.Mutex
+	loading    chan struct{} // one private sweep; warm readers never wait for it
+	generation uint64        // invalidations during a sweep must not be lost
+	read       observedRead
+}
+
+type observedRead struct {
 	files    map[string]observedFile
 	evidence *ObservedEvidence
 	// winners records lexical first-write precedence for normalized producer
@@ -67,14 +76,14 @@ type observedSlot struct {
 }
 
 // sweepDue reports that a load at clock now must stat every record.
-func (s *observedSlot) sweepDue(now time.Time) bool {
+func (s *observedRead) sweepDue(now time.Time) bool {
 	d := now.Sub(s.sweptAt)
 	return s.evidence == nil || s.dirInfo == nil || d < 0 || d >= observedResweep
 }
 
 // trusted reports that the slot's last listing still describes the directory
 // now stat'ed as info at clock now.
-func (s *observedSlot) trusted(info os.FileInfo, now time.Time) bool {
+func (s *observedRead) trusted(info os.FileInfo, now time.Time) bool {
 	prev := s.dirInfo
 	if s.sweepDue(now) || info == nil || !info.IsDir() || info.ModTime().IsZero() {
 		return false
@@ -82,7 +91,7 @@ func (s *observedSlot) trusted(info os.FileInfo, now time.Time) bool {
 	if !info.ModTime().Before(s.dirAt.Add(-observedRacyWindow)) {
 		return false
 	}
-	return os.SameFile(prev, info) && prev.Size() == info.Size() && prev.Mode() == info.Mode() && prev.ModTime().Equal(info.ModTime())
+	return wsstate.SameFileMetadata(prev, info)
 }
 
 type observedFile struct {
@@ -103,7 +112,9 @@ func (e *ObservedEvidence) Overlay(snap *Snapshot) {
 	}
 }
 
-// Load reuses each unchanged record and extends immutable histories for new,
+// Load returns the prior immutable evidence while a warm refresh is in flight.
+// Cold readers share the first sweep, without blocking invalidation.
+// It reuses each unchanged record and extends immutable histories for new,
 // chronologically trailing evidence. Deletions, replacements, earlier duplicate
 // winners and late arrivals rebuild from retained records. Failure to list is
 // retried at the next validation. All loads share validation for one second.
@@ -124,21 +135,63 @@ func (c *ObservedCache) Load(dir string) *ObservedEvidence {
 		c.sessions[dir] = slot
 	}
 	c.mu.Unlock()
-	slot.mu.Lock()
-	defer slot.mu.Unlock()
-	stat := c.stat
-	if stat == nil {
-		stat = os.Stat
-	}
+	shared := slot
 	clock := time.Now
 	if c.now != nil {
 		clock = c.now
 	}
-	evidenceDir := filepath.Join(dir, ObservedDirName)
-	now := clock()
-	if elapsed := now.Sub(slot.checkedAt); slot.checked && elapsed >= 0 && elapsed < observedValidationInterval {
-		return slot.evidence
+	var work observedRead
+	var generation uint64
+	for {
+		shared.mu.Lock()
+		if shared.loading != nil {
+			if shared.read.evidence != nil {
+				evidence := shared.read.evidence
+				shared.mu.Unlock()
+				return evidence
+			}
+			// Only cold readers wait for the first usable projection. No
+			// mutex is held, so Invalidate and Forget still return at once.
+			done := shared.loading
+			shared.mu.Unlock()
+			<-done
+			continue
+		}
+		now := clock()
+		if elapsed := now.Sub(shared.read.checkedAt); shared.read.checked && elapsed >= 0 && elapsed < observedValidationInterval {
+			evidence := shared.read.evidence
+			shared.mu.Unlock()
+			return evidence
+		}
+		work, generation = shared.read, shared.generation
+		shared.loading = make(chan struct{})
+		shared.mu.Unlock()
+		break
 	}
+	// All filesystem work and projection building happen on a private copy.
+	// Only publication takes the slot lock; a slow AV scan cannot stall the
+	// index's invalidation or queue every warm render behind this sweep.
+	work.winners = maps.Clone(work.winners)
+	slotRead := &work
+	defer func() {
+		shared.mu.Lock()
+		if shared.generation != generation {
+			work.checked = false
+		}
+		shared.read = work
+		close(shared.loading)
+		shared.loading = nil
+		shared.mu.Unlock()
+	}()
+	return c.loadObserved(dir, slotRead, clock())
+}
+
+func (c *ObservedCache) loadObserved(dir string, slot *observedRead, now time.Time) *ObservedEvidence {
+	stat := c.stat
+	if stat == nil {
+		stat = os.Stat
+	}
+	evidenceDir := filepath.Join(dir, ObservedDirName)
 	slot.checkedAt, slot.checked = now, true
 	dirInfo, dirErr := stat(evidenceDir)
 	if dirErr == nil && slot.trusted(dirInfo, now) {
@@ -182,7 +235,7 @@ func (c *ObservedCache) Load(dir string) *ObservedEvidence {
 			continue
 		}
 		prev, ok := slot.files[entry.Name()]
-		if ok && os.SameFile(prev.info, info) && prev.info.Size() == info.Size() && prev.info.Mode() == info.Mode() && prev.info.ModTime().Equal(info.ModTime()) {
+		if ok && wsstate.SameFileMetadata(prev.info, info) {
 			files[entry.Name()] = prev
 			continue
 		}
@@ -246,7 +299,7 @@ func (c *ObservedCache) Load(dir string) *ObservedEvidence {
 // retained records. Nothing published is modified: touched models own new
 // histories, and untouched producers keep their existing immutable projections.
 // Less common changes fall back to the canonical retained-record rebuild.
-func (s *observedSlot) extend(files map[string]observedFile, names []string) bool {
+func (s *observedRead) extend(files map[string]observedFile, names []string) bool {
 	var additions []ObservedRecord
 	winners := make(map[string]string, len(names))
 	for _, name := range names { // ReadDir's lexical order
@@ -321,7 +374,8 @@ func (c *ObservedCache) Invalidate(dir string) {
 	c.mu.Unlock()
 	if slot != nil {
 		slot.mu.Lock()
-		slot.checked = false
+		slot.read.checked = false
+		slot.generation++
 		slot.mu.Unlock()
 	}
 }

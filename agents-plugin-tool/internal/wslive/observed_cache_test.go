@@ -368,6 +368,12 @@ func TestObservedCacheValidationSharedAcrossReaders(t *testing.T) {
 	}
 	burst := func(want string) {
 		t.Helper()
+		// Warm concurrent readers may use the prior immutable evidence while
+		// a refresh is in flight. Complete the refresh before pinning the
+		// new projection for this validation-sharing assertion.
+		if got := cache.Load(dir); got == nil || got.models[""].Current.Model != want {
+			t.Fatalf("refresh did not return %s", want)
+		}
 		var wg sync.WaitGroup
 		for i := 0; i < 64; i++ {
 			wg.Add(1)
