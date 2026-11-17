@@ -60,6 +60,9 @@ type conv struct {
 	// failure and mcpBroken are State.Failure and State.MCPBroken.
 	failure   *wslive.Notice
 	mcpBroken []string
+	// heldKinds memoizes refreshHeld's reads under mu: held entry name ->
+	// whether it is a message (not an interrupt entry).
+	heldKinds map[string]bool
 
 	// loop-owned.
 	events      <-chan Event
@@ -435,15 +438,38 @@ func (c *conv) settle() bool {
 }
 
 // refreshHeld reads only this conversation's inbox, never a global listing.
+// It lists the inbox on every call, since another process may add or claim
+// an entry, but opens only names it has not read yet: a held entry file is
+// never rewritten (wsinbox.ReadHeld), so a known name's kind stays valid.
+// The count is what wsinbox.Held would return: readable non-interrupt
+// entries. An unreadable entry is not remembered and is retried next time.
 func (c *conv) refreshHeld() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.r.opts.stateInboxRead != nil {
 		c.r.opts.stateInboxRead(c.rec.ReplyID)
 	}
-	if held, err := wsinbox.Held(c.inbox); err == nil {
-		c.held = len(held)
+	names, err := wsinbox.Names(c.inbox)
+	if err != nil {
+		return
 	}
+	kinds := make(map[string]bool, len(names))
+	held := 0
+	for _, name := range names {
+		message, known := c.heldKinds[name]
+		if !known {
+			entry, err := wsinbox.ReadHeld(c.inbox, name)
+			if err != nil {
+				continue
+			}
+			message = !entry.Interrupt
+		}
+		kinds[name] = message
+		if message {
+			held++
+		}
+	}
+	c.heldKinds, c.held = kinds, held
 }
 
 func (c *conv) state() State { return c.stateWithKeyCheck(true) }
