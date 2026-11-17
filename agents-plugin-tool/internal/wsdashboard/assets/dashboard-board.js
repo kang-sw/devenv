@@ -252,8 +252,11 @@
   }
   function sizeFilePreview() {
     if (!filePreview || !filePreview.current()) return;
-    var board = $("bcol").getBoundingClientRect(), area = grid.closest(".dbody").getBoundingClientRect();
-    filePreview.el.style.width = Math.max(0, Math.max(area.right, grid.getBoundingClientRect().right) - board.left) + "px";
+    var board = $("bcol").getBoundingClientRect();
+    // The closed board's .dwrap is capped at 1680px without a pin column.
+    // Reading space reaches the viewport gutter even while that cap remains.
+    var right = doc.documentElement.clientWidth - parseFloat(window.getComputedStyle(grid.closest(".dwrap")).paddingRight);
+    filePreview.el.style.width = Math.max(0, right - board.left) + "px";
   }
   function syncFilePreview() {
     if (splitFiles()) {
