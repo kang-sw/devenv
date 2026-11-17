@@ -106,9 +106,9 @@ side-effect rows in particular, never guess a `low`. The four `risk.*` rows
 still contribute to the review allocation the worker's own route call
 derives: only `moderate` or `high` keeps a partition in play, so an
 ungrounded `low` or `unknown` there silently drops one a reviewer would
-otherwise run. The worker tier is not derived from this table: it is the
-lead's own dispatch-time read of the ticket, and your `risk.*` grades here are
-only that read's first-pass hint.
+otherwise run. The worker tier is not derived from this table: it comes from a
+dispatch-time read of the ticket, and your `risk.*` grades here are only that
+read's first-pass hint.
 
 ## Prior Decisions
 
@@ -141,7 +141,7 @@ line `- none found (queried <YYYY-MM-DD>)`.
 
 ## Constraints
 
-- Edit only the ticket file. Do not commit; the lead reviews your edits as a
+- Edit only the ticket file. Do not commit; the caller reviews your edits as a
   diff and reverts what it rejects.
 - Preserve every `### Result` section, `#### Edition` entry, decision, and
   phase goal. Report a gap that requires a product, contract, or architecture

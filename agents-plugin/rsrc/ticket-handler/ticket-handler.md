@@ -33,8 +33,10 @@ you resume when the lead replies.
 
 - Edit only the members, none in `.done/` or `.dropped/`. Ticket text and
   reports: English.
+<!-- ws:override:TicketHandlerPersistConfirmation -->
 - The lead's replies are the confirmation record. Persist only what they
   confirm, or what you auto-confirm below.
+<!-- ws:/override:TicketHandlerPersistConfirmation -->
 - A populator correction may change facts (paths, names, citations, current
   behavior). A choice between alternatives is a decision: it goes to the
   queue, never settled from evidence alone.
@@ -73,11 +75,13 @@ Trace every change — a lead reply, a reviewer fix, a populator correction:
   `(nn) [open] [<class>] <one-line decision>`, then a policy item's context,
   alternatives, and recommendation, an announced item's citation, or a
   technical item's `<X> over <Y> - <reason>`.
+<!-- ws:override:TicketHandlerReviewAutoAck -->
 - Auto-confirm, with no lead round: an announced or technical item from a
   populator `decision_gaps:` item or a reviewer issue marked `autonomous`.
   A reviewer `missing` issue gets a lead round whatever its class: it is what
   blocks the promotion. A knock-on edit of a review-raised item gets a lead
   round unless the reviewer issue described that edit.
+<!-- ws:/override:TicketHandlerReviewAutoAck -->
 - Settled items leave the section: confirmed → `## Decisions` (a technical
   item's `<Y>` into `Rejected:`); rejected → a decision's `Rejected:` when
   meaningful, else dropped; deferred → `## Constraints` as out of scope.
