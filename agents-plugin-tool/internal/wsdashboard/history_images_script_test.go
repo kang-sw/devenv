@@ -24,13 +24,7 @@ function q(){return [];}
 function boardKeep(){return null;}
 function watchBoard(){} function bandBoard(){} function restoreOpen(){} function bindCapsuleNotes(){} function mermaid(){}
 var btn={disabled:false,getAttribute:function(){return '30';},parentNode:{replaceChild:function(page){installed.push(page.version);}}};
-function fetch(){return new Promise(resolve=>requests.push(resolve));}
-function frag(html){return {firstElementChild:{version:html}};}
-function q(){return [];}
-function boardKeep(){return null;} function watchBoard(){} function bandBoard(){}
-function restoreOpen(){} function bindCapsuleNotes(){} function mermaid(){}
 function boardTopicPresent(){return false;}
-` + whiteboardBridgeFunctions(t, string(asset), "boardImageStamp", "loadClosed") + `
 async function drain(){for(var i=0;i<12;i++)await Promise.resolve();}
 (async function(){
   var pending=loadClosed(btn);stamp='two';
