@@ -539,6 +539,7 @@
   "js.preview.none": "This file can't be shown here: {0}",
   "js.preview.openext": "Open in the default app",
   "js.preview.reload": "Reload",
+  "js.preview.keep": "Keep as card",
   "js.preview.sandbox": "Runs in a sandbox, isolated from the dashboard",
   "js.preview.source.note": "Shown as source: HTML and SVG render only under the session root",
   "js.web.kind": "Web",

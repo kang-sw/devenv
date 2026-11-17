@@ -897,9 +897,9 @@
       if (destroyed || g !== gen || navigation !== navAttempt || attempt !== previewAttempt) return;
       if (answer.kind === "none" && answer.reason_code === "binary") { rowActions(); return; }
       o.answer = answer;
-      window.WsPreview.open(path, o);
+      (h.preview || window.WsPreview.open)(path, o);
     }, function () {
-      if (!destroyed && g === gen && navigation === navAttempt && attempt === previewAttempt) window.WsPreview.open(path, o);
+      if (!destroyed && g === gen && navigation === navAttempt && attempt === previewAttempt) (h.preview || window.WsPreview.open)(path, o);
     });
   }
   // activate is a click or Enter on a row: a folder opens or closes, a file

@@ -539,6 +539,7 @@
   "js.preview.none": "Este archivo no se puede mostrar aquí: {0}",
   "js.preview.openext": "Abrir en la aplicación predeterminada",
   "js.preview.reload": "Recargar",
+  "js.preview.keep": "Conservar como tarjeta",
   "js.preview.sandbox": "Se ejecuta en un entorno aislado del panel",
   "js.preview.source.note": "Se muestra como código fuente: HTML y SVG solo se renderizan bajo la raíz de la sesión",
   "js.web.kind": "Web",
