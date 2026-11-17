@@ -327,7 +327,9 @@ func (f FolderStore) load(legacy *State) (*State, *folderSession, error) {
 			return nil, nil, err
 		}
 		work := state.clone()
-		if work.migrateLegacyContent() {
+		contentChanged := work.migrateLegacyContent()
+		closeChanged := work.migrateCloseResults()
+		if contentChanged || closeChanged {
 			intent, err := f.plan(&meta, state, work)
 			if err != nil {
 				return nil, nil, err
@@ -366,6 +368,7 @@ func (f FolderStore) load(legacy *State) (*State, *folderSession, error) {
 		d.Recap, d.RecapAt, d.RecapChanged = "", "", 0
 	}
 	work.migrateLegacyContent()
+	work.migrateCloseResults()
 	if err := f.hit("conversion"); err != nil {
 		return nil, nil, err
 	}
@@ -377,6 +380,56 @@ func (f FolderStore) load(legacy *State) (*State, *folderSession, error) {
 		return nil, nil, err
 	}
 	return work, &intent.Session, nil
+}
+
+// migrateCloseResults moves historical close text into the append-only stream.
+// The enclosing folder intent commits the appended log and cleared metadata as
+// one recoverable operation, including on an interrupted first conversion.
+func (s *State) migrateCloseResults() bool {
+	changed := false
+	for _, topic := range s.ClosedTopics {
+		result := s.CloseResults[topic]
+		if result == "" {
+			continue
+		}
+		doc := s.topicDoc(topic)
+		at := ""
+		for i := len(doc.Entries) - 1; i >= 0; i-- {
+			e := doc.Entries[i]
+			if e.Kind == EntrySystem && e.ItemID == 0 && !e.Imported && (strings.HasPrefix(e.Text, "Topic closed: ") || strings.HasPrefix(e.Text, "Topic close result updated: ")) {
+				if _, err := time.Parse(time.RFC3339Nano, e.At); err == nil {
+					at = e.At
+					break
+				}
+			}
+		}
+		if at == "" {
+			// Older snapshots may have no close event. The latest recorded
+			// topic time is the best available bound, not an invented clock.
+			var latest time.Time
+			consider := func(value string) {
+				if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil && (at == "" || parsed.After(latest)) {
+					latest, at = parsed, value
+				}
+			}
+			consider(doc.ChangedAt)
+			consider(doc.RecapAt)
+			for _, e := range doc.Entries {
+				consider(e.At)
+			}
+			for _, item := range s.Items {
+				if item.Topic == topic {
+					consider(item.ChangedAt)
+					consider(item.AnsweredAt)
+				}
+			}
+		}
+		s.EntrySeq++
+		doc.Entries = append(doc.Entries, Entry{ID: fmt.Sprintf("e%d", s.EntrySeq), Kind: EntryAgent, Text: result, At: at})
+		s.CloseResults[topic] = ""
+		changed = true
+	}
+	return changed
 }
 
 func folderNumber(id, prefix string) int {

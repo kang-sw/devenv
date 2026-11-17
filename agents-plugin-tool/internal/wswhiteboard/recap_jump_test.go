@@ -14,7 +14,7 @@ import (
 func TestRecapJumpButtonNamesItsLogRow(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, `<wb:topic name="open"><wb:log>old</wb:log><wb:log>latest [see](https://example.com)</wb:log></wb:topic>`+
-		`<wb:topic name="done"><wb:log>final</wb:log><wb:close result="Shipped."/></wb:topic>`+
+		`<wb:topic name="done"><wb:log>final</wb:log><wb:close/></wb:topic>`+
 		addXML(ClassTechnical, "quiet", "no log yet"))
 	// Each created topic gets a default state event right after its creating
 	// log: open is e1 old, e2 default, e3 latest; done is e4 final, e5

@@ -32,7 +32,7 @@ var grammar = wsxmlcmd.Grammar{
 		"panel":     {Kind: wsxmlcmd.Leaf, Attrs: []string{"id", "name", "recap"}, Wrapper: "change", Fields: []string{"old", "new"}, Scoped: true},
 		"log":       {Kind: wsxmlcmd.Leaf, Scoped: true},
 		"add":       {Kind: wsxmlcmd.Container, Attrs: []string{"id", "class"}, Fields: itemFieldNames, DecodeFields: itemFieldNames, Scoped: true},
-		"close":     {Kind: wsxmlcmd.Empty, Attrs: []string{"result"}, Scoped: true},
+		"close":     {Kind: wsxmlcmd.Empty, HiddenAttrs: []string{"result"}, Scoped: true},
 		"state":     {Kind: wsxmlcmd.Empty, Attrs: []string{"value", "owner", "eta_minutes", "on"}, Scoped: true},
 		"eta":       {Kind: wsxmlcmd.Empty, Attrs: []string{"minutes", "reason"}, Scoped: true},
 		"answer":    {Kind: wsxmlcmd.Leaf, Attrs: []string{"id", "ids", "value", "assumed"}},

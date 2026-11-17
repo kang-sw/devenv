@@ -338,8 +338,8 @@ func TestTopicHeadHoldsTheSummaryLine(t *testing.T) {
 
 	closed := &State{}
 	mustApply(t, closed, `<wb:topic name="c"><wb:log>end</wb:log><wb:close result="ok"/></wb:topic>`)
-	if page := render(t, BuildView(closed, ViewInput{Layout: LayoutFull, ReplyID: "r"})); strings.Contains(page, `class="tsub"`) {
-		t.Error("a closed topic's head carries the summary line")
+	if page := render(t, BuildView(closed, ViewInput{Layout: LayoutFull, ReplyID: "r"})); !strings.Contains(page, `class="tsub"`) || !strings.Contains(page, `title="ok">ok</div>`) {
+		t.Error("a closed topic's head must carry the latest summary line")
 	}
 
 	legacy := &State{Topics: []TopicDoc{{Name: "l", Recap: "old recap", Changed: 1}}}

@@ -8,65 +8,17 @@ import (
 	"time"
 )
 
-// The topic header: the close result, the updated time, the topic note, and
-// the closed-topic cap.
+// The topic header: the recap, updated time, topic note, and closed-topic cap.
 
-// TestCloseRequiresAResult pins wb:close's result: a close without one (or
-// with a blank one) is refused, a close stores it, closing a closed topic
-// again replaces it in place, and a reopen keeps it in the store.
-func TestCloseRequiresAResult(t *testing.T) {
+// Closed topics show their latest recap in the head on both board layouts.
+func TestClosedTopicRendersLatestRecap(t *testing.T) {
 	st := &State{}
-	mustApply(t, st, addXML(ClassTechnical, "a", "x")+addXML(ClassTechnical, "b", "y"))
-	wantProblems(t, refused(t, st, `<wb:topic name="a"><wb:close/></wb:topic>`), `command 1 <wb:close> (line 1) result: required`)
-	wantProblems(t, refused(t, st, `<wb:topic name="a"><wb:close result="  "/></wb:topic>`), `result: must be non-empty`)
-
-	mustApply(t, st, `<wb:topic name="a"><wb:close result="Shipped as planned."/></wb:topic><wb:topic name="b"><wb:close result="Dropped."/></wb:topic>`)
-	if st.CloseResults["a"] != "Shipped as planned." || st.CloseResults["b"] != "Dropped." {
-		t.Fatalf("close results = %v", st.CloseResults)
-	}
-	mustApply(t, st, `<wb:topic name="a"><wb:close result="Shipped, then patched."/></wb:topic>`)
-	if st.CloseResults["a"] != "Shipped, then patched." || strings.Join(st.ClosedTopics, ",") != "a,b" {
-		t.Fatalf("a second close: results %v, close order %v", st.CloseResults, st.ClosedTopics)
-	}
-
-	mustApply(t, st, addXML(ClassTechnical, "a", "again"))
-	if st.topicClosed("a") || st.CloseResults["a"] != "Shipped, then patched." {
-		t.Fatalf("a reopen: closed %v, results %v", st.topicClosed("a"), st.CloseResults)
-	}
-	mustApply(t, st, `<wb:topic name="a"><wb:close result="Closed for good."/></wb:topic>`)
-	if st.CloseResults["a"] != "Closed for good." || strings.Join(st.ClosedTopics, ",") != "b,a" {
-		t.Fatalf("a re-close: results %v, close order %v", st.CloseResults, st.ClosedTopics)
-	}
-}
-
-// TestCloseResultRendersBesideTheName pins where the result shows: dimmed
-// beside a closed topic's name, on both layouts; hidden once the topic
-// reopens; the new one after a re-close; and none on a topic closed before
-// results existed.
-func TestCloseResultRendersBesideTheName(t *testing.T) {
-	const result = `<span class="tresult" title="how the topic ended">`
-	st := &State{}
-	mustApply(t, st, addXML(ClassTechnical, "t", "x")+`<wb:answer id="1" value="ok">ok</wb:answer>`+`<wb:topic name="t"><wb:close result="Went with **plan b**."/></wb:topic>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:log>Earlier line</wb:log><wb:panel recap="Latest recap">Panel content</wb:panel><wb:close/></wb:topic>`)
 	for _, layout := range layouts() {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		wantAll(t, out, `<span class="tname" title="t">t</span>`+result+`Went with <strong>plan b</strong>.</span>`)
+		wantAll(t, out, `<span class="tname" title="t">t</span>`, `Latest recap`, `class="tsub"`)
+		wantNone(t, out, `class="tresult"`)
 	}
-
-	mustApply(t, st, addXML(ClassTechnical, "t", "reopened"))
-	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantNone(t, out, result)
-	wantAll(t, out, "plan b") // The old close event remains immutable history.
-
-	mustApply(t, st, `<wb:answer id="2" value="ok">ok</wb:answer><wb:topic name="t"><wb:close result="Second ending."/></wb:topic>`)
-	out = render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, result+`Second ending.</span>`)
-	wantAll(t, out, "plan b") // A new result does not erase the earlier event.
-
-	// A store from before close results: closed, with no result to show.
-	old := &State{Seq: 2, Items: []Item{{ID: 1, Class: ClassTechnical, Topic: "legacy", Title: "x", Status: StatusAnswered, Answer: "ok", Settled: 1}}, ClosedTopics: []string{"legacy"}}
-	out = render(t, BuildView(old, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<span class="tlead"><span class="tname" title="legacy">legacy</span></span>`)
-	wantNone(t, out, `class="tresult"`)
 }
 
 // TestTopicBarShowsItsLatestChange pins the updated time: the newest change
@@ -246,7 +198,7 @@ func TestClosedTopicCapRenders(t *testing.T) {
 	if !strings.HasPrefix(rest, `<div class="closed-page"><section class="topic`) || strings.Count(rest, `<section class="topic`) != 5 {
 		t.Errorf("show-more answer:\n%.400s", rest)
 	}
-	wantAll(t, rest, `<span class="tname" title="c5">c5</span><span class="tresult" title="how the topic ended">Ending 5.</span>`, `class="btn mini tnote-toggle"`)
+	wantAll(t, rest, `<span class="tname" title="c5">c5</span>`, `Ending 5.`, `class="btn mini tnote-toggle"`)
 	wantNone(t, rest, `data-closed-next`, `id="reply-text"`)
 
 	html, err = RenderClosedTopics(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r", Closed: &ClosedWindow{From: 30, N: 2}}))

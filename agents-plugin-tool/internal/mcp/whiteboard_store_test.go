@@ -140,7 +140,7 @@ func TestWhiteboardLegacyConversionThroughReadersAndRestart(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if rec.Whiteboard.Counter != 42 || rec.Whiteboard.Seq != 9 || len(rec.Whiteboard.Items) != 1 || len(rec.Whiteboard.Topics) != 3 || rec.Whiteboard.EntrySeq != 5 || rec.Whiteboard.PanelCounter != 2 {
+				if rec.Whiteboard.Counter != 42 || rec.Whiteboard.Seq != 9 || len(rec.Whiteboard.Items) != 1 || len(rec.Whiteboard.Topics) != 3 || rec.Whiteboard.EntrySeq != 6 || rec.Whiteboard.PanelCounter != 2 {
 					t.Fatalf("conversion lost snapshot or fabricated history: %+v", rec.Whiteboard)
 				}
 				item := rec.Whiteboard.Items[0]
@@ -151,6 +151,13 @@ func TestWhiteboardLegacyConversionThroughReadersAndRestart(t *testing.T) {
 					wantEntries := 1
 					if doc.Body != "" {
 						wantEntries = 2
+					}
+					if doc.Name == "closed" {
+						wantEntries++
+						last := doc.Entries[len(doc.Entries)-1]
+						if last.Kind != wswhiteboard.EntryAgent || last.Text != "done" {
+							t.Fatalf("close result not migrated: %+v", last)
+						}
 					}
 					if doc.Recap != "" || len(doc.Entries) != wantEntries {
 						t.Fatalf("recap was not converted exactly once: %+v", doc)
@@ -169,7 +176,7 @@ func TestWhiteboardLegacyConversionThroughReadersAndRestart(t *testing.T) {
 				if doc := rec.Whiteboard.Topics[0]; doc.Name != "stemless / CON: .." || doc.Body != "original content\n" || doc.Entries[0].Text != "imported decision" || doc.Entries[0].At != "2026-11-01T09:00:00Z" {
 					t.Fatalf("stemless topic changed: %+v", doc)
 				}
-				if len(rec.Whiteboard.ClosedTopics) != 1 || rec.Whiteboard.ClosedTopics[0] != "closed" || rec.Whiteboard.CloseResults["closed"] != "done" {
+				if len(rec.Whiteboard.ClosedTopics) != 1 || rec.Whiteboard.ClosedTopics[0] != "closed" || rec.Whiteboard.CloseResults["closed"] != "" {
 					t.Fatalf("conversion lost closed state: %+v", rec.Whiteboard)
 				}
 

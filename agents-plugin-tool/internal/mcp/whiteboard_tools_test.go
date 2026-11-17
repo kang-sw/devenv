@@ -688,7 +688,7 @@ func TestWhiteboardUpdateResultCarriesStaleTopicNudge(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := f.update(t, ``)
-	want := "5 of 5 open topics unchanged for 60+ min (alpha, beta, gamma, delta, epsilon); if finished, close them with wb:close and a one-line result."
+	want := "5 of 5 open topics unchanged for 60+ min (alpha, beta, gamma, delta, epsilon); if finished, close them with <wb:close/>."
 	if got := resultLine(t, text, "info: "); got != want+" "+warning {
 		t.Fatalf("info line = %q\nwant        %q", got, want+" "+warning)
 	}

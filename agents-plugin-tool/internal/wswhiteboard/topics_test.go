@@ -25,7 +25,7 @@ func TestStemmedTopicCreateAddressRename(t *testing.T) {
 	// The label addresses the topic too (a stem first, then a stemless key,
 	// then a label).
 	mustApply(t, st, `<wb:topic name="Release gate"><wb:close result="shipped"/></wb:topic>`)
-	if !st.topicClosed("ship-gate") || st.CloseResults["ship-gate"] != "shipped" || item(t, st, 1).Status != StatusWithdrawn {
+	if !st.topicClosed("ship-gate") || st.CloseResults["ship-gate"] != "" || st.Topics[st.topicDocIndex("ship-gate")].LatestSummary().Text != "shipped" || item(t, st, 1).Status != StatusWithdrawn {
 		t.Fatalf("addressed by label: %+v", st)
 	}
 	if len(st.Items) != 2 || st.topicKnown("Release gate") {
@@ -40,7 +40,7 @@ func TestStemAdoptsAStemlessTopicByLabel(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, `<wb:topic name="Long old title"><wb:add class="technical"><wb:title>one</wb:title></wb:add><wb:body>b</wb:body><wb:close result="done"/></wb:topic>`)
 	mustApply(t, st, `<wb:topic name="old" label="Long old title"/>`)
-	if item(t, st, 1).Topic != "old" || st.TopicBody("old") != "b" || !st.topicClosed("old") || st.CloseResults["old"] != "done" {
+	if item(t, st, 1).Topic != "old" || st.TopicBody("old") != "b" || !st.topicClosed("old") || st.CloseResults["old"] != "" || st.Topics[st.topicDocIndex("old")].LatestSummary().Text != "done" {
 		t.Fatalf("adoption did not move the topic: %+v", st)
 	}
 	if st.topicKnown("Long old title") || st.topicClosed("Long old title") || st.CloseResults["Long old title"] != "" {
@@ -169,7 +169,7 @@ func TestPreStemStoreLoads(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	mustApply(t, &st, `<wb:topic name="Old topic"><wb:add class="technical"><wb:title>next</wb:title></wb:add></wb:topic><wb:topic name="Done topic"><wb:close result="still over"/></wb:topic>`)
-	if item(t, &st, 3).Topic != "Old topic" || st.CloseResults["Done topic"] != "still over" || st.TopicLabel("Old topic") != "Old topic" {
+	if item(t, &st, 3).Topic != "Old topic" || st.CloseResults["Done topic"] != "" || st.Topics[st.topicDocIndex("Done topic")].LatestSummary().Text != "still over" || st.TopicLabel("Old topic") != "Old topic" {
 		t.Fatalf("pre-stem store: %+v", st)
 	}
 	if strings.Contains(string(mustMarshal(t, &st)), `"labels"`) {

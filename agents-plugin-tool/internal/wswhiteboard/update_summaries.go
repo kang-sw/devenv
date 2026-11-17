@@ -256,7 +256,7 @@ func (u *topicUpdates) summaries(before, after *State) []string {
 func summaryTags(t *topicUpdate, effects []Effect, before, after *State) []string {
 	added, answered, patched, commented := map[int]bool{}, map[int]bool{}, map[int]bool{}, map[int]bool{}
 	panels, logs := map[string]bool{}, map[string]bool{}
-	body, tickets, closed, reopened, result := false, false, false, false, false
+	body, tickets, closed, reopened := false, false, false, false
 	for _, e := range effects {
 		switch e.Kind {
 		case "item":
@@ -287,8 +287,6 @@ func summaryTags(t *topicUpdate, effects []Effect, before, after *State) []strin
 				tickets = true
 			case "closed":
 				closed, reopened = e.After == "closed", e.After == ""
-			case "result":
-				result = true
 			}
 		}
 	}
@@ -311,8 +309,6 @@ func summaryTags(t *topicUpdate, effects []Effect, before, after *State) []strin
 		tags = append(tags, "closed")
 	} else if reopened {
 		tags = append(tags, "reopened")
-	} else if result && before.topicClosed(t.key) {
-		tags = append(tags, "result")
 	}
 	return tags
 }

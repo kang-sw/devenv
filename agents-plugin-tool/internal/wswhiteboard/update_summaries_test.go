@@ -192,7 +192,7 @@ func TestTopicUpdateLegacyAdoptionRenameAndLifecycle(t *testing.T) {
 func TestTopicUpdateNetChangesFirstTouchAndRootAnswers(t *testing.T) {
 	s := &State{}
 	stateApply(t, s, `<wb:topic name="a" label="A"><wb:add class="check"><wb:title>One</wb:title></wb:add><wb:add class="check"><wb:title>Two</wb:title></wb:add><wb:body>Original</wb:body></wb:topic><wb:topic name="b"><wb:add class="check"><wb:title>Three</wb:title></wb:add></wb:topic>`, stateNow)
-	out := stateApply(t, s, `<wb:topic name="b"><wb:body/></wb:topic><wb:answer ids="1 3 2" value="yes">Yes.</wb:answer><wb:topic name="a"><wb:close result="Done"/></wb:topic>`, stateNow)
+	out := stateApply(t, s, `<wb:topic name="b"><wb:body/></wb:topic><wb:answer ids="1 3 2" value="yes">Yes.</wb:answer><wb:topic name="a"><wb:close/></wb:topic>`, stateNow)
 	wantSummaries(t, out, "topic updated: b (answered 1)", "topic updated: a (answered 2, closed)")
 	out = stateApply(t, s, `<wb:answer ids="1 2 3" value="yes">Yes.</wb:answer>`, stateNow)
 	wantSummaries(t, out)
@@ -265,7 +265,7 @@ func TestTopicUpdateClosedAdoptionDeduplicatesConvergingTouches(t *testing.T) {
 	before := s.clone()
 	out := stateApply(t, s, `<wb:topic name="new"><wb:body/></wb:topic><wb:topic name="Old"><wb:body/></wb:topic><wb:topic name="new" label="Old"/>`, stateNow)
 	wantSummaries(t, out, "topic updated: new (renamed from Old)")
-	if !s.topicClosed("new") || s.CloseResults["new"] != "Done" || !reflect.DeepEqual(before.Topics[0].Entries, s.Topics[0].Entries) || s.TopicStates()["new"].State != nil {
+	if !s.topicClosed("new") || s.CloseResults["new"] != "" || !reflect.DeepEqual(before.Topics[0].Entries, s.Topics[0].Entries) || s.TopicStates()["new"].State != nil {
 		t.Fatal("closed adoption changed lifecycle/history")
 	}
 }

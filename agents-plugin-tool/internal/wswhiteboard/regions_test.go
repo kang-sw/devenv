@@ -363,9 +363,8 @@ func TestServedBoardFramesEveryBodySeparately(t *testing.T) {
 	// The name (its &amp; decoded on input) reaches the attribute escaped, so
 	// it cannot end the attribute.
 	wantAll(t, string(regions.Board), `data-topic="say &#34;hi&#34; &amp; &lt;go&gt;"`)
-	// Migrated bodies use panel folds; the closed topic's extra fold holds
-	// only its new head recap, never a duplicate document payload.
-	wantAll(t, string(regions.Board), `<details class="entry-panel`, `<div class="tdoc"><div class="trecap" data-entry=`)
+	// Migrated bodies use panel folds; the closed topic's recap is in its head.
+	wantAll(t, string(regions.Board), `<details class="entry-panel`, `<div class="tsub"><div class="trecap" data-entry=`)
 	wantNone(t, string(regions.Board), `data-key="doc:closed"`, "has-doc")
 }
 

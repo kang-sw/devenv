@@ -78,7 +78,7 @@ func TestSemanticEffectsImplicitWithdrawalReopenAdoptionAndEviction(t *testing.T
 	out := mustApply(t, s, `<wb:topic name="Old"><wb:close result="Finished"/></wb:topic>`)
 	wantEffect(t, out.Effects, "item", "status", StatusOpen, StatusWithdrawn)
 	wantEffect(t, out.Effects, "topic", "closed", "", "closed")
-	wantEffect(t, out.Effects, "topic", "result", "", "Finished")
+	wantEffect(t, out.Effects, "log", "text", "", "Finished")
 	out = mustApply(t, s, `<wb:topic name="new" label="Old"><wb:log>Reopened</wb:log></wb:topic>`)
 	wantEffect(t, out.Effects, "item", "topic", "Old", "new")
 	wantEffect(t, out.Effects, "topic", "closed", "closed", "")

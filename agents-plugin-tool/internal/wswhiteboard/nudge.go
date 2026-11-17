@@ -103,7 +103,7 @@ func (s *State) staleNudge(now time.Time) string {
 		names += ", ..."
 	}
 	s.LastNudgeAt = now.UTC().Format(time.RFC3339)
-	return fmt.Sprintf("%d of %d open topics unchanged for %d+ min (%s); if finished, close them with wb:close and a one-line result.",
+	return fmt.Sprintf("%d of %d open topics unchanged for %d+ min (%s); if finished, close them with <wb:close/>.",
 		len(stale), open, int(staleNudgeAge/time.Minute), names)
 }
 
