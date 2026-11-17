@@ -248,7 +248,10 @@ Markdown up to the closing tag.
   literal text. References are citations, not user-selected mentions or
   answers; a `wb:answer` body, the user's verbatim words, is never resolved.
 - `wb:answer`: `value` is, for a policy item, its option letter, optionally
-  followed by `, <text>`; for a technical, announced, or check item, `ok`,
+  followed by `, <text>`, or empty for the user's note without a choice,
+  which marks the item `commented` and drops it from the open asks: answer
+  the note in the topic, then re-ask the item with `wb:patch status="open"`
+  or settle it; for a technical, announced, or check item, `ok`,
   `no`, or short text. A later answer replaces an earlier one. The body, required, is
   the user's verbatim words for this item. `ids="14 15"` records the same
   value and words on each listed item. `assumed="true"` records your reading
@@ -257,8 +260,8 @@ Markdown up to the closing tag.
   stays in its topic's check list). Record the user's
   later confirming or correcting words as another `wb:answer` on that ID
   without `assumed`.
-- Status: an item starts `open`; `wb:answer` sets `answered`, or `assumed`
-  with `assumed="true"`; `wb:patch status` sets `open`, `withdrawn`, or
+- Status: an item starts `open`; `wb:answer` sets `answered`, `assumed`
+  with `assumed="true"`, or `commented` with an empty policy value; `wb:patch status` sets `open`, `withdrawn`, or
   `superseded`. Answered, withdrawn, and superseded items are settled, and an
   assumed item shows among them: the page keeps the 10 most recently settled
   expanded and the rest behind their topic's count chip. Options and `class`
@@ -527,7 +530,8 @@ meaning 44 through 46, all taking the same value; the value is the option
 letter, `ok`, `no`, or short text; the note follows the first `^`, with
 `\n` a line break and `\\` a backslash, and `19=^<note>` is a note alone.
 Record each item through `wb:answer`, its body that item's line:
-`64=a^<note>` records the value `a, <note>`, and `44..46,51=ok` records `ok`
+`64=a^<note>` records the value `a, <note>`, `19=^<note>` on a policy item
+records an empty value, and `44..46,51=ok` records `ok`
 on all four with one `ids="44 45 46 51"` command quoting the whole line (an
 `assumed` policy item records its option letter again). A `[<topic>]^<note>`
 line is the user's comment or question about that topic, from its note pen,
