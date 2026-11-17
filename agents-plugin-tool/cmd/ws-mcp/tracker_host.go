@@ -8,6 +8,9 @@ import (
 	"hash/fnv"
 	"html/template"
 	"net/url"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
@@ -71,6 +74,8 @@ type dashboardTracker struct {
 	h            *wstrackerhost.Host
 	err          error
 	unregistered func()
+	// renders keeps the view's rendered texts between builds.
+	renders viewRenders
 }
 
 var (
@@ -149,6 +154,9 @@ func (t *dashboardTracker) Unregister(ctx context.Context, id, confirm string) e
 	ctx, cancel := context.WithTimeout(ctx, dashboardUnregisterTimeout)
 	defer cancel()
 	err := t.h.Unregister(ctx, id, confirm)
+	if err == nil {
+		t.renders.forget(id)
+	}
 	if err == nil && t.unregistered != nil {
 		t.unregistered()
 	}
@@ -191,7 +199,7 @@ func (t *dashboardTracker) View(ctx context.Context, id string) (wsdashboard.Tra
 		return wsdashboard.TrackerView{}, redacted(err)
 	}
 	v.Redact()
-	html := renderViewHTML(id, v)
+	html := t.renders.view(id, v)
 	raw, err := json.Marshal(dashboardView{StoreView: v, HTML: html})
 	if err != nil {
 		return wsdashboard.TrackerView{}, err
@@ -290,21 +298,78 @@ type viewHTML struct {
 	Comments map[string]template.HTML `json:"comments"`
 }
 
+// renderViewHTML renders every item body and comment text of v, the view
+// of store id.
 func renderViewHTML(id string, v *wstrackerhost.StoreView) viewHTML {
+	return renderViewTexts(v, func(body string, oids []string) template.HTML {
+		return trackerText(body, ownAttachments(id, oids))
+	})
+}
+
+// renderViewTexts is renderViewHTML through render, which renders one text
+// given its own attachment oids.
+func renderViewTexts(v *wstrackerhost.StoreView, render func(body string, oids []string) template.HTML) viewHTML {
 	out := viewHTML{Items: map[string]template.HTML{}, Comments: map[string]template.HTML{}}
 	if v == nil || v.View == nil {
 		return out
 	}
 	for iid, it := range v.Items {
 		if it.Body != "" {
-			out.Items[iid] = trackerText(it.Body, ownAttachments(id, attachmentOIDs(it.Attachments)))
+			out.Items[iid] = render(it.Body, attachmentOIDs(it.Attachments))
 		}
 	}
 	for cid, c := range v.Comments {
 		if c.Body != "" && c.Hidden == nil {
-			out.Comments[cid] = trackerText(c.Body, ownAttachments(id, attachmentOIDs(c.Attachments)))
+			out.Comments[cid] = render(c.Body, attachmentOIDs(c.Attachments))
 		}
 	}
+	return out
+}
+
+// viewRenders keeps each store's rendered texts from its last view, so a
+// view built again renders only the texts that changed: rendering every
+// body and comment is most of a view build's time
+// (BenchmarkDashboardTrackerViewMiss). A text's rendering depends only on
+// the store, the text, and its own attachment oids (renderViewHTML), which
+// make its key; each store keeps only what its last view used, until it is
+// unregistered here. The zero value is ready.
+type viewRenders struct {
+	mu sync.Mutex
+	// stores maps a store id to its last view's renderings by key. A map
+	// stored here is never written again, so it is read without mu.
+	stores map[string]map[string]template.HTML
+}
+
+// forget drops store id's renderings, once it is unregistered.
+func (c *viewRenders) forget(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.stores, id)
+}
+
+// view is renderViewHTML(id, v), reusing the renderings of id's last view.
+func (c *viewRenders) view(id string, v *wstrackerhost.StoreView) viewHTML {
+	c.mu.Lock()
+	last := c.stores[id]
+	c.mu.Unlock()
+	used := map[string]template.HTML{}
+	out := renderViewTexts(v, func(body string, oids []string) template.HTML {
+		key := strconv.Itoa(len(body)) + ":" + body + strings.Join(oids, ",")
+		h, ok := used[key]
+		if !ok {
+			if h, ok = last[key]; !ok {
+				h = trackerText(body, ownAttachments(id, oids))
+			}
+			used[key] = h
+		}
+		return h
+	})
+	c.mu.Lock()
+	if c.stores == nil {
+		c.stores = map[string]map[string]template.HTML{}
+	}
+	c.stores[id] = used
+	c.mu.Unlock()
 	return out
 }
 
