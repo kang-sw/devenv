@@ -3,6 +3,7 @@ package wsagent
 import (
 	"encoding/json"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -33,14 +34,19 @@ type codexMsg struct {
 }
 
 func (m codexMsg) str(path ...string) string {
+	s, _ := jsonAt(m.Params, path...).(string)
+	return s
+}
+
+// jsonAt reads the value at path in raw; nil when any step is missing.
+func jsonAt(raw json.RawMessage, path ...string) any {
 	var v any
-	_ = json.Unmarshal(m.Params, &v)
+	_ = json.Unmarshal(raw, &v)
 	for _, k := range path {
 		obj, _ := v.(map[string]any)
 		v = obj[k]
 	}
-	s, _ := v.(string)
-	return s
+	return v
 }
 
 func readCodexFixture(t *testing.T, name string) []codexMsg {
@@ -69,6 +75,9 @@ func responseTo(t *testing.T, msgs []codexMsg, id string) codexMsg {
 	return codexMsg{}
 }
 
+// codexFixtureLeak matches an e-mail address or an unredacted credit balance.
+var codexFixtureLeak = regexp.MustCompile(`[\w.+-]+@[\w-]+\.[\w.]+|"balance":"[0-9]`)
+
 func TestCodexFixturesScrubbed(t *testing.T) {
 	names, err := filepath.Glob("testdata/codex-*.jsonl")
 	if err != nil || len(names) == 0 {
@@ -76,10 +85,13 @@ func TestCodexFixturesScrubbed(t *testing.T) {
 	}
 	for _, path := range names {
 		for _, line := range readLeadFixture(t, filepath.Base(path)) {
-			for _, leak := range []string{"/Users/", "@gmail", "wsprobe-token-", "orca-agent-hook"} {
+			for _, leak := range []string{"/Users/", "/private/", "/var/folders/", "wsprobe-token-", "orca-agent-hook", "Bearer "} {
 				if strings.Contains(string(line.raw), leak) {
 					t.Errorf("%s carries unscrubbed %q", path, leak)
 				}
+			}
+			if m := codexFixtureLeak.Find(line.raw); m != nil && string(m) != "user@example.com" {
+				t.Errorf("%s carries unscrubbed %q", path, m)
 			}
 		}
 	}
@@ -212,7 +224,9 @@ func TestCodexCommandApprovalFixture(t *testing.T) {
 }
 
 // An interrupt while an approval waits ends the turn, then resolves the
-// request; answers sent after that (twice) get no reply and change nothing.
+// request. The recording ends with the client's two late answers to the
+// resolved request: the probe saw no reply and no file written, which the
+// recording itself cannot show, so this pins only the order up to them.
 func TestCodexStaleApprovalFixture(t *testing.T) {
 	msgs := readCodexFixture(t, "codex-0.160.0-stale-approval.jsonl")
 	ended, resolved, answers := -1, -1, 0
@@ -224,8 +238,6 @@ func TestCodexStaleApprovalFixture(t *testing.T) {
 			resolved = i
 		case m.in && m.Method == "" && resolved >= 0:
 			answers++
-		case !m.in && answers > 0:
-			t.Fatalf("server answered a stale approval answer: %s %s", m.Method, m.Result)
 		}
 	}
 	if ended < 0 || resolved < ended || answers != 2 {
@@ -238,8 +250,18 @@ func TestCodexResumeAndAdmissionFixture(t *testing.T) {
 	if r := responseTo(t, msgs, "2"); r.Error == nil || !strings.Contains(r.Error.Message, "no rollout found") {
 		t.Fatalf("resume of a missing thread: %+v", r.Error)
 	}
-	if r := responseTo(t, msgs, "3"); r.Error != nil {
+	r := responseTo(t, msgs, "3")
+	if r.Error != nil {
 		t.Fatalf("resume: %+v", r.Error)
+	}
+	// The version source the catalog resolves at (parseHarnessVersion cannot
+	// read `codex --version`'s "codex-cli 0.160.0"), and the effort a
+	// turn/start override left on the thread.
+	if v := jsonAt(r.Result, "thread", "cliVersion"); v != "0.160.0" {
+		t.Fatalf("thread.cliVersion = %v", v)
+	}
+	if e := jsonAt(r.Result, "thread", "reasoningEffort"); e != "low" {
+		t.Fatalf("resumed reasoningEffort = %v, want the earlier turn/start override", e)
 	}
 	last := msgs[0]
 	for _, m := range msgs {
@@ -247,30 +269,169 @@ func TestCodexResumeAndAdmissionFixture(t *testing.T) {
 			last = m
 		}
 	}
-	if r := responseTo(t, msgs, string(last.ID)); r.Error == nil || !strings.Contains(r.Error.Message, "required MCP servers failed to initialize") {
-		t.Fatalf("required HTTP MCP server refusing the token: %+v", r.Error)
+	bad := responseTo(t, msgs, string(last.ID))
+	if bad.Error == nil || !strings.Contains(bad.Error.Message, "required MCP servers failed to initialize") || !strings.Contains(bad.Error.Message, "HTTP 401") {
+		t.Fatalf("required HTTP MCP server refusing the token: %+v", bad.Error)
+	}
+	if jsonAt(last.Params, "config", "mcp_servers", "wsprobe", "required") != true || jsonAt(last.Params, "config", "mcp_servers", "wsprobe", "bearer_token_env_var") == nil {
+		t.Fatalf("admission probe config: %s", last.Params)
 	}
 }
 
-// agents.enabled=false removes the native subagent tool; features.multi_agent
-// does not (the baseline spawns one in the same prompt).
-func TestCodexSubagentRemovalFixture(t *testing.T) {
-	subagentItems := func(name string) int {
-		n := 0
-		for _, m := range readCodexFixture(t, name) {
-			if m.Method == "item/started" {
-				switch m.str("item", "type") {
-				case "subAgentActivity", "collabAgentToolCall":
-					n++
-				}
+// subagentItems counts the native subagent items a fixture's stream started.
+func subagentItems(msgs []codexMsg) int {
+	n := 0
+	for _, m := range msgs {
+		if m.Method == "item/started" {
+			switch m.str("item", "type") {
+			case "subAgentActivity", "collabAgentToolCall":
+				n++
 			}
 		}
-		return n
 	}
-	if subagentItems("codex-0.160.0-subagent-baseline.jsonl") == 0 {
+	return n
+}
+
+// firstIn returns the first client line calling method.
+func firstIn(t *testing.T, msgs []codexMsg, method string) codexMsg {
+	t.Helper()
+	for _, m := range msgs {
+		if m.in && m.Method == method {
+			return m
+		}
+	}
+	t.Fatalf("no %s request", method)
+	return codexMsg{}
+}
+
+// finalText is the agent text of the last completed turn.
+func finalText(msgs []codexMsg) string {
+	text := ""
+	for _, m := range msgs {
+		if m.Method != "turn/completed" {
+			continue
+		}
+		items, _ := jsonAt(m.Params, "turn", "items").([]any)
+		for _, it := range items {
+			if obj, _ := it.(map[string]any); obj["type"] == "agentMessage" {
+				text, _ = obj["text"].(string)
+			}
+		}
+	}
+	return text
+}
+
+// agents.enabled=false removes the native subagent tool; the same prompt
+// spawns one on the baseline. features.multi_agent=false does not remove it:
+// on a resumed thread a subagent still ran.
+func TestCodexSubagentRemovalFixture(t *testing.T) {
+	base := readCodexFixture(t, "codex-0.160.0-subagent-baseline.jsonl")
+	removed := readCodexFixture(t, "codex-0.160.0-subagent-removed.jsonl")
+	if subagentItems(base) == 0 {
 		t.Fatal("baseline spawned no subagent")
 	}
-	if n := subagentItems("codex-0.160.0-subagent-removed.jsonl"); n != 0 {
+	if n := subagentItems(removed); n != 0 {
 		t.Fatalf("agents.enabled=false still ran %d subagent items", n)
+	}
+	if v := jsonAt(firstIn(t, removed, "thread/start").Params, "config", "agents", "enabled"); v != false {
+		t.Fatalf("removed fixture config agents.enabled = %v", v)
+	}
+	if v := jsonAt(firstIn(t, base, "thread/start").Params, "config", "agents"); v != nil {
+		t.Fatalf("baseline config sets agents: %v", v)
+	}
+	prompt := func(msgs []codexMsg) any { return jsonAt(firstIn(t, msgs, "turn/start").Params, "input") }
+	if p1, p2 := prompt(base), prompt(removed); !jsonEqual(p1, p2) {
+		t.Fatalf("baseline and removed prompts differ: %v vs %v", p1, p2)
+	}
+	if !strings.Contains(finalText(removed), "NO-SUBAGENT-TOOL") {
+		t.Fatalf("removed reply: %q", finalText(removed))
+	}
+
+	resume := readCodexFixture(t, "codex-0.160.0-resume.jsonl")
+	// The first resume is the missing-thread probe; the last is the real one.
+	var resumed codexMsg
+	for _, m := range resume {
+		if m.in && m.Method == "thread/resume" {
+			resumed = m
+		}
+	}
+	if v := jsonAt(resumed.Params, "config", "features", "multi_agent"); v != false {
+		t.Fatalf("resume config features.multi_agent = %v", v)
+	}
+	if subagentItems(resume) == 0 {
+		t.Fatal("features.multi_agent=false on resume: no subagent ran, so the fixture no longer shows it is not a removal")
+	}
+	off := readCodexFixture(t, "codex-0.160.0-multi-agent-feature-off.jsonl")
+	if v := jsonAt(firstIn(t, off, "thread/start").Params, "config", "features", "shell_tool"); v != false {
+		t.Fatalf("feature-off config shell_tool = %v", v)
+	}
+	for _, m := range off {
+		if m.Method == "item/started" && m.str("item", "type") == "commandExecution" {
+			t.Fatal("features.shell_tool=false still ran a command")
+		}
+	}
+
+	// A resumed lead's stream also carries the spawned subagent's own thread
+	// notifications (another threadId), interleaved inside the lead's turn: a
+	// mapper scopes every notification by threadId.
+	leadThread := jsonAt(resumed.Params, "threadId")
+	foreign := 0
+	for _, m := range resume {
+		if !m.in && (m.Method == "turn/started" || m.Method == "turn/completed" || m.Method == "thread/status/changed") {
+			if id := jsonAt(m.Params, "threadId"); id != nil && id != leadThread {
+				foreign++
+			}
+		}
+	}
+	if foreign == 0 {
+		t.Fatal("no subagent-thread notification on the lead's stream")
+	}
+}
+
+func jsonEqual(a, b any) bool {
+	x, _ := json.Marshal(a)
+	y, _ := json.Marshal(b)
+	return string(x) == string(y)
+}
+
+// Stream facts the catalog grades and the mapper rely on.
+func TestCodexStreamFactsFixture(t *testing.T) {
+	lead := readCodexFixture(t, "codex-0.160.0-lead-session.jsonl")
+	usage, waiting := false, false
+	for _, m := range lead {
+		if m.Method == "thread/tokenUsage/updated" && jsonAt(m.Params, "tokenUsage", "modelContextWindow") != nil && jsonAt(m.Params, "tokenUsage", "total", "totalTokens") != nil {
+			usage = true
+		}
+		if m.Method == "thread/status/changed" && strings.Contains(string(m.Params), `"waitingOnApproval"`) {
+			waiting = true
+		}
+	}
+	if !usage || !waiting {
+		t.Fatalf("pushed token usage %v, waitingOnApproval status %v", usage, waiting)
+	}
+
+	block := readCodexFixture(t, "codex-0.160.0-plugin-mcp-block.jsonl")
+	refused := false
+	for _, m := range block {
+		if !m.in && m.Error != nil && strings.Contains(m.Error.Message, "invalid transport") {
+			refused = true
+		}
+	}
+	if !refused {
+		t.Fatal("bare mcp_servers.ws.enabled=false was not refused")
+	}
+
+	shadow := readCodexFixture(t, "codex-0.160.0-ws-mcp-shadow.jsonl")
+	if v := jsonAt(firstIn(t, shadow, "thread/start").Params, "config", "mcp_servers", "ws", "url"); v == nil {
+		t.Fatal("shadow fixture injects no ws url")
+	}
+	starting := 0
+	for _, m := range shadow {
+		if m.Method == "mcpServer/startupStatus/updated" && m.str("name") == "ws" && m.str("status") == "starting" {
+			starting++
+		}
+	}
+	if starting != 1 {
+		t.Fatalf("ws server starts %d times on the shadowed thread, want 1", starting)
 	}
 }

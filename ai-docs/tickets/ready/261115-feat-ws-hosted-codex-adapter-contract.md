@@ -129,6 +129,10 @@ removed `WS_*`/`CLAUDE*`/`ORCA_*`/`PI_*` from the child environment.
 - Recorded fixtures: `agents-plugin-tool/internal/wsagent/testdata/codex-0.160.0-*.jsonl`
   (nine files). They use the claude-lead `>> ` client-line convention, and
   `codex_fixture_test.go` pins the protocol facts cited below.
+- Probe-side observations that are not in the fixtures carry the label
+  *(probe log)*. They come from the probe MCP server's request log and a
+  grep of the rollout file, which were not committed because they hold the
+  bearer token.
 
 **Fixture index (recorded).**
 - `handshake`: a request before `initialize` gets `-32600 Not initialized`, and a second `initialize` gets `Already initialized`.
@@ -141,23 +145,23 @@ removed `WS_*`/`CLAUDE*`/`ORCA_*`/`PI_*` from the child environment.
   - T6: tool self-report. During T6 the interrupted T3 item also completes late.
 - `resume`: covers these cases:
   - Resume of a missing thread fails.
-  - Resume with a re-issued token works.
+  - Resume with a re-issued token works. The fixture shows a resume under the same `bearer_token_env_var` name; that the value was new is *(probe log)*.
   - `developerInstructions` persist across the resume.
   - An accepted MCP elicitation, followed by the tool result.
   - `features.multi_agent=false` on resume does not remove subagents: `subAgentActivity` and `collabAgentToolCall` items still appear.
   - `thread/turns/list` works.
   - A required HTTP MCP server answering 401 makes `thread/start` fail.
-- `stale-approval`: resume with `agents.enabled=false` (answer `NO-SUBAGENT-TOOL`). An interrupt while an approval waits gives `turn/completed` (interrupted), then `serverRequest/resolved`. Two late answers get no reply, and the file is not created.
+- `stale-approval`: resume with `agents.enabled=false` (answer `NO-SUBAGENT-TOOL`). An interrupt while an approval waits gives `turn/completed` (interrupted), then `serverRequest/resolved`. The recording ends with two late answers. That they got no reply and created no file is *(probe log)*.
 - `subagent-baseline` (ephemeral; spawns one), `subagent-removed` (`agents.enabled=false`), `multi-agent-feature-off` (`features.multi_agent=false` plus `features.shell_tool=false`: no shell; the subagent tool is still advertised but spawn fails).
-- `ws-mcp-shadow`: a thread `mcp_servers.ws` HTTP entry replaces the plugin's `ws` server for that thread.
+- `ws-mcp-shadow`: a thread `mcp_servers.ws` HTTP entry replaces the plugin's `ws` server for that thread. The stream shows one `ws` `starting` and two `ready` events. That the HTTP server took the handshake is *(probe log)*.
 - `plugin-mcp-block`: bare `mcp_servers.ws.enabled=false` is refused with `invalid transport`. Disabling the plugin drops the `ws` startup.
 
 **Admission conditions (catalog Decision 2): both pass at 0.160.0.**
 - (0) Headless JSON event streaming: app-server stdio is newline-delimited JSON-RPC 2.0 with the `jsonrpc` member omitted on the wire (all fixtures). It is sustained and bidirectional: client requests and notifications, plus server notifications and server requests.
-- (3) HTTP MCP injection: `thread/start` / `thread/resume` `config.mcp_servers.<name> = {url, bearer_token_env_var, required: true}`. The probe server saw `Authorization: Bearer` on every POST with Host `127.0.0.1` (`lead-session`, `resume`).
+- (3) HTTP MCP injection: `thread/start` / `thread/resume` `config.mcp_servers.<name> = {url, bearer_token_env_var, required: true}`. The probe server saw `Authorization: Bearer` on every POST with Host `127.0.0.1` *(probe log)*.
   - A wrong token on a `required` server fails `thread/start` with `-32603 ... required MCP servers failed to initialize ... HTTP 401` (`resume`), so the failure is loud.
   - A re-issued token on the next process start works (`resume`).
-  - Neither the token nor the MCP url is written to the rollout (grep of the thread's rollout file: 0 hits), so the MCP config is re-passed on every resume.
+  - Neither the token nor the MCP url is written to the rollout (grep of the thread's rollout file: 0 hits, *(probe log)*), so the MCP config is re-passed on every resume.
   - Static `http_headers` also exist (doc), but they would carry the token in config. `bearer_token_env_var` keeps it in the child environment only.
 
 **Capability matrix: catalog values for the Phase 2 Codex profile.**
@@ -170,21 +174,30 @@ removed `WS_*`/`CLAUDE*`/`ORCA_*`/`PI_*` from the child environment.
 | Item | Grade (lead) | Values | Evidence (0.160.0) | Fixture |
 |---|---|---|---|---|
 | `skill_list` | unsupported | - | `skills/list` exists (schema). No ws wiring in the lead slice. | schema only |
-| `skill_injection` | native if the ws plugin stays loaded (mechanism B below); unsupported if the plugin is disabled (A) | - | Codex plugin skills; `UserInput {type:"skill"}` (schema) | planned: Phase 2 lead with the plugin loaded |
-| `compaction` | native (planned) | - | `thread/compact/start` request + `thread/compacted` notification (schema). Not probed. | planned: `/compact` -> `thread/compact/start` -> `thread/compacted` -> turn end |
+| `skill_injection` | native | - | Codex plugin skills, which stay loaded under the recommended block mechanism B (below). Under mechanism A it becomes `unsupported` until prompt assembly. `UserInput {type:"skill"}` exists (schema). | planned: Phase 2 lead with the plugin loaded |
+| `compaction` | native | - | Planned, not probed: `thread/compact/start` request + `thread/compacted` notification (schema). | planned: `/compact` -> `thread/compact/start` -> `thread/compacted` -> turn end |
 | `rewind` | unsupported | - | `thread/revert` exists (schema). `thread/rollback` was removed (doc). No ws wiring. | none |
-| `tool_removal` | unsupported (lead keeps the user's tool setup, as `ClaudeCatalog` does) | evidence for a later worker row: `shell` (`features.shell_tool=false`), `web_search` (`web_search="disabled"`), `view_image` (`features.view_image`, doc) | `multi-agent-feature-off`: `NO-SHELL-TOOL`, no `commandExecution` item | recorded (shell); others doc only |
+| `tool_removal` | unsupported | - | The lead keeps the user's tool setup, as `ClaudeCatalog` does. Removable set, for a later worker row: `shell` (`features.shell_tool=false`; `multi-agent-feature-off`: `NO-SHELL-TOOL`, no `commandExecution` item), `web_search` (`web_search="disabled"`, doc), `view_image` (`features.view_image`, doc). | recorded (shell); others doc only |
 | `subagent_removal` | native | `spawn_agent` (the `collaboration` namespace: `spawn_agent`, `send_message`, `wait_agent`, `followup_task`, `interrupt_agent`, `list_agents`) | `agents.enabled=false` in `thread/start` and in `thread/resume` config removes it. `features.multi_agent=false` (thread config or `--disable multi_agent`) does **not**: the tool stays advertised and spawn fails. | `subagent-removed`, `stale-approval` (resume), vs `subagent-baseline` |
 | `model_effort` | native | choices from `model/list` via ChoiceLister (not catalog) | `turn/start` `model`/`effort` override "this turn and subsequent turns", so SetModel/SetEffort apply on the next `turn/start` in-stream with no restart. The effort override persisted into the resumed thread (`reasoningEffort: "low"`). | recorded (effort); planned (model switch) |
-| `approval` | native (binary allow/deny; see interface gap E1) | modes stay in `BackendRegistration.PermissionModes` (`approvalPolicy` x `sandbox`) | `item/commandExecution/requestApproval` -> answer -> `serverRequest/resolved` -> `item/completed` (`declined`). MCP tool approval arrives as `mcpServer/elicitation/request` with `_meta.codex_approval_kind: "mcp_tool_call"`. | `lead-session`, `resume`, `stale-approval` |
+| `approval` | native | modes stay in `BackendRegistration.PermissionModes` (`approvalPolicy` x `sandbox`) | `item/commandExecution/requestApproval` -> answer -> `serverRequest/resolved` -> `item/completed` (`declined`). Delivered binary (allow/deny), per interface gap E1. MCP tool approval arrives as `mcpServer/elicitation/request` with `_meta.codex_approval_kind: "mcp_tool_call"`. | `lead-session`, `resume`, `stale-approval` |
 | `steer` | native | - | `turn/steer {threadId, input, expectedTurnId}` -> `{turnId}`. The steered text becomes a `userMessage` item in the same turn, with no new `turn/started`. A wrong id gets `-32600 expected active turn id ...`. Idle gets `no active turn to steer`. Schema error `activeTurnNotSteerable` covers review/compact turns. | `lead-session` |
 | `interrupt` | native | - | `turn/interrupt {threadId, turnId}` -> `{}`, then `turn/completed` `status: "interrupted"` | `lead-session`, `stale-approval` |
 | `follow_up` | ws-substitute | - | The runner holds the message and sends it at turn end (`Runner.Send`). The experimental `thread/queue/*` is not used. | n/a (runner) |
 | `resume` | native | - | `thread/resume {threadId}` with config re-passed. A missing thread gets `-32600 no rollout found for thread id ...`. Needs a non-ephemeral thread. | `resume`; planned: resume across Codex versions (only one installed) |
 | `reasoning_stream` | unsupported | - | Codex streams `item/reasoning/summaryTextDelta` and `reasoning` items (summaries were empty at `effort: low`). No ws wiring; owned by the reasoning-summary line. | none |
-| `usage_query` | native (pushed) | - | `thread/tokenUsage/updated {tokenUsage: {total, last, modelContextWindow}}` after every model response, plus `account/rateLimits/updated`. Nothing is asked (see schema gap G2). | `lead-session` |
+| `usage_query` | native | - | `thread/tokenUsage/updated {tokenUsage: {total, last, modelContextWindow}}` after every model response, plus `account/rateLimits/updated`. Nothing is asked (see schema gap G2). | `lead-session` |
 
 **Non-catalog event and recovery contract (for the Phase 2 mapper).**
+- Scope every notification by `threadId`. One app-server stream carries the
+  lead thread and any subagent thread it spawned. In `resume`, the subagent's
+  own `thread/status/changed` (`idle`), `turn/started` and `turn/completed`
+  (another `threadId`) interleave inside the lead's running turn
+  (`TestCodexSubagentRemovalFixture`). A mapper that skips this check
+  would report the lead idle mid-turn, or end the lead's turn on the
+  subagent's turn end. This also applies to `hook/*`, `thread/goal/*` and
+  item events. Removing subagents (below) lowers the risk, but the rule
+  stays.
 - Turn lifecycle:
   - `turn/start` response (`inProgress`) -> `turn/started` -> items -> `turn/completed {turn.status: completed|interrupted|failed, turn.error}`.
   - `thread/status/changed` maps to the harness state: `idle`, `active` (running), `active` with `activeFlags: ["waitingOnApproval"]` (`HarnessWaiting`).
@@ -192,7 +205,7 @@ removed `WS_*`/`CLAUDE*`/`ORCA_*`/`PI_*` from the child environment.
   - An unknown notification is ignored.
   - `error {error, willRetry}` with `codexErrorInfo` (`usageLimitExceeded`, `unauthorized`, ...) maps to Retry/Alert.
 - Interrupt leaves items open: the interrupted turn's `commandExecution` item gets no `item/completed` before `turn/completed`. Its completion arrives later, during the next turn, and still names the old `turnId` (`TestCodexInterruptLeavesItemOpenFixture`). The mapper must close open items at turn end and attribute every item event by `turnId`, never by "the current turn".
-- Approvals: correlation is the server's JSON-RPC request id, which maps to `ApprovalRequest.ID` as a string. `serverRequest/resolved {requestId}` maps to `ApprovalDone`. On interrupt the order is turn end, then resolved. Stale or duplicate answers get no reply and have no effect (`TestCodexStaleApprovalFixture`).
+- Approvals: correlation is the server's JSON-RPC request id, which maps to `ApprovalRequest.ID` as a string. `serverRequest/resolved {requestId}` maps to `ApprovalDone`. On interrupt the order is turn end, then resolved. Stale or duplicate answers got no reply and had no effect *(probe log)*. `TestCodexStaleApprovalFixture` pins the order up to the late answers.
 - Unhandled server requests: every server request the adapter does not handle must get a JSON-RPC error reply, never be dropped, or the turn stalls. Schema set at 0.160.0: `item/fileChange/requestApproval`, `item/permissions/requestApproval`, `item/tool/requestUserInput`, `item/tool/call`, `account/chatgptAuthTokens/refresh`, `attestation/generate`, legacy `applyPatchApproval`/`execCommandApproval`.
 - Holder reattach: the holder keeps the app-server's stdio, as for Claude and Pi. Client request ids are client-chosen (`RequestId` is string or integer), so a reattaching daemon must not reuse an in-flight id. Planned: string ids with a per-attach prefix.
   - Planned fixtures: reattach mid-turn; reattach with an approval pending; ring gap. On a gap, `thread/turns/list` / `thread/read` can rebuild the last turn's final message and status (`resume` records a `thread/turns/list` reply).
@@ -246,7 +259,7 @@ removed `WS_*`/`CLAUDE*`/`ORCA_*`/`PI_*` from the child environment.
   - (B, recommended) shadow the plugin server by injecting the HTTP entry under the plugin's server name (`ws`; `wsflow` for that package). This keeps the plugin's skills and hooks.
   - (A) `plugins."<id>".enabled=false`, which drops the whole plugin and needs the installation-specific `<plugin>@<marketplace>` key.
 
-  `ws-mcp-shadow` shows the HTTP server took the handshake and a single `ws` startup. Not verified: whether the plugin's stdio `ws-mcp` process was also spawned. Phase 2 checks the process count.
+  `ws-mcp-shadow` shows a single `ws` `starting` event, and *(probe log)* shows the HTTP server took the handshake. Not verified: whether the plugin's stdio `ws-mcp` process was also spawned. Phase 2 checks the process count.
 - Hooks stay user-controlled (Claude-lead parity). `features.hooks=false` is available, if the lead prefers isolation.
 - The probe thread `01a1e9b5-2c24-7f90-b6f3-4b7d0c71a317` remains in the user's `~/.codex/sessions/2026/11/17/`. It was left in place rather than deleted (`thread/delete`), to avoid a further write to the Codex home.
 
