@@ -32,6 +32,8 @@ type fakePiAgents struct {
 	watchN   int
 	waited   []time.Duration
 	waitRes  wsagent.TurnResult
+	// agent is the agent.* side (agent_tools_test.go).
+	agent fakeAgentSide
 }
 
 func newFakePiAgents() *fakePiAgents {

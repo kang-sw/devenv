@@ -43,6 +43,8 @@ type PiAgents interface {
 	Wait(ctx context.Context, id string, timeout time.Duration) (wsagent.TurnResult, error)
 	Watch(fn func(wsagent.State)) (stop func())
 	Transcript(id string) ([]wslive.RingRecord, error)
+	// The agent.* tools (agent_tools.go) use the same runner.
+	AgentRunner
 }
 
 // DashboardPiSpawnKey lists the pi.* tools (with a daemon handle and a Pi
