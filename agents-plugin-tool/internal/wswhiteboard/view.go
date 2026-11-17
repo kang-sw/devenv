@@ -40,6 +40,13 @@ type View struct {
 	// ClosedMore counts the closed topics past the ones Topics holds, in close
 	// order; ClosedNext is the index (ClosedWindow.From) of the first of them.
 	ClosedMore, ClosedNext int
+	// LazyHistory leaves history out of a framed render: capped closed
+	// topics become empty marked templates, timeline gaps keep their shell
+	// with an empty payload, and earlier panel versions keep their fold with
+	// an empty body, each marked data-lazy. The served dashboard fetches the
+	// complete topic on demand (stream.js hydrate). Pages written to disk
+	// never set it: they have nothing to fetch from.
+	LazyHistory bool
 	// Panels come from the section providers, in registration order.
 	Panels []Panel
 	// BulkAck shows the reply bar's bulk checkbox: the board holds an open
@@ -569,6 +576,8 @@ type ViewInput struct {
 	// the served page's show-more fetch; nil builds the whole board with the
 	// first ClosedCap of them.
 	Closed *ClosedWindow
+	// LazyHistory is copied to the View.
+	LazyHistory bool
 	// Location is the time zone of UpdatedClock; nil is the local zone.
 	Location *time.Location
 }
@@ -595,6 +604,7 @@ func BuildView(state *State, in ViewInput) View {
 		DocImageSrc:   in.DocImageSrc,
 		FileActions:   in.FileActions,
 		OutsideImage:  in.OutsideImage,
+		LazyHistory:   in.LazyHistory,
 	}
 	if view.FullBoardLink == "" {
 		view.FullBoardLink = in.ReplyID + "/index.html"

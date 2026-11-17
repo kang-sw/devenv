@@ -142,7 +142,7 @@
   function effectJump(topicID, id, done) {
     if (typeof topicID !== "string" || !/^topic-(?:[0-9a-f]{2})+$/.test(topicID) ||
         typeof id !== "string" || (id !== topicID && !/^(?:item-[1-9][0-9]{0,5}|[ep][1-9][0-9]*)$/.test(id))) return;
-    var epoch = ++effectJumpEpoch, seen = Object.create(null);
+    var epoch = ++effectJumpEpoch, seen = Object.create(null), waited = false;
     if (doc.body.classList.contains("tk-paged") && tkApi) tkApi.leavePage();
     if (grid && !tabShown("board")) setTab("board");
     function result(topic, exact) { if (epoch === effectJumpEpoch && done) done(topic, exact); }
@@ -173,6 +173,10 @@
           else target = /^item-/.test(id) ? topic.querySelector('[id="' + id + '"]') : null;
           if (!target || target.id !== id || !inBoard(target) || target.closest("section.topic[data-topic]") !== topic ||
               (/^item-/.test(id) && !target.matches(".card.policy[data-id], .arow[data-id], .ckrow[data-id], .srow"))) target = null;
+          // A target in history the page has not fetched yet: decide once
+          // its topic arrives.
+          var waiting = !target && !waited && window.wbHistory && window.wbHistory.loading && window.wbHistory.loading(id);
+          if (waiting) { waited = true; waiting.then(reveal); return; }
         }
         var exact = !!target;
         if (!target) target = topic;

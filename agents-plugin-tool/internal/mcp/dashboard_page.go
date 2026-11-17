@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,8 +25,9 @@ import (
 // the board and its panels rendered with the static page's templates under
 // the served-page link rule (a file link is an action link for the page's
 // link menu, opening the file view inside the session's project root; a
-// board image inside the root is the image route's URL, inlined as a data:
-// URL in a topic body's sandboxed frame, and path text otherwise), the mail
+// board image inside the root is the image route's URL, relayed through the
+// host page into a topic body's sandboxed frame, and path text otherwise),
+// the mail
 // correspondents, and the mailbox history bodies.
 // Everything here reaches a browser, so no returned field may carry the
 // session key.
@@ -352,6 +355,35 @@ func (src *DashboardSessionSource) ReadClosedTopics(reg wsdashboard.Registration
 	return html, true
 }
 
+var _ wsdashboard.TopicHistorySource = (*DashboardSessionSource)(nil)
+
+// ReadTopicHistory renders the named topics, or the one topic holding
+// target, with their complete history (wswhiteboard.RenderTopicFragments)
+// under the served page's link rule: what the served board's lazy history
+// leaves out, fetched when the viewer expands it. false when the session is
+// gone or has no board.
+func (src *DashboardSessionSource) ReadTopicHistory(reg wsdashboard.Registration, lang string, names []string, target string) ([]wswhiteboard.TopicFragment, bool) {
+	_, _, record, ok, err := src.lookupRecord(reg)
+	if !ok || err != nil || record.Whiteboard == nil {
+		return nil, false
+	}
+	if target != "" {
+		name, found := record.Whiteboard.TargetTopic(target)
+		if !found {
+			return nil, true
+		}
+		names = []string{name}
+	}
+	view := wswhiteboard.BuildView(record.Whiteboard, servedViewInput(record, reg.ReplyID))
+	view.Lang = lang
+	topics, err := wswhiteboard.RenderTopicFragments(view, names)
+	if err != nil {
+		appendDebugEvent("dashboard.page_render_failed", map[string]any{"error": err.Error()})
+		return nil, false
+	}
+	return topics, true
+}
+
 var _ wsdashboard.OutsideLinkSource = (*DashboardSessionSource)(nil)
 
 // ReadOutsideLinks lists the files outside the session root that the board
@@ -371,6 +403,8 @@ func (src *DashboardSessionSource) ReadOutsideLinks(reg wsdashboard.Registration
 	var links []string
 	in := servedViewInput(record, reg.ReplyID)
 	in.DocImageSrc = nil
+	// Every link counts, including those in history the page fetches later.
+	in.LazyHistory = false
 	in.FileActions, in.OutsideImage = wsdashboard.RecordOutsideLinks(in.FileActions, in.OutsideImage, func(abs string) { links = append(links, abs) })
 	if _, err := wswhiteboard.RenderRegions(wswhiteboard.BuildView(record.Whiteboard, in)); err != nil {
 		appendDebugEvent("dashboard.page_render_failed", map[string]any{"error": err.Error()})
@@ -389,20 +423,32 @@ func servedViewInput(record sessionRecord, replyID string) wswhiteboard.ViewInpu
 		Layout:   wswhiteboard.LayoutFull,
 		ReplyID:  replyID,
 		FileText: servedFileText(record.Root),
+		// The image's version (&v=, which the route ignores) changes the
+		// rendered page when the file changes, so an edited image reaches a
+		// page that already shows it: a frame remounts and relays it again.
 		ImageSrc: func(path string) string {
-			return wsdashboard.ImageSrc(record.Root, replyID, path)
+			src := wsdashboard.ImageSrc(record.Root, replyID, path)
+			if src == "" {
+				return ""
+			}
+			if info, err := os.Stat(docImagePath(record.Root, path)); err == nil {
+				src += "&v=" + strconv.FormatInt(info.ModTime().UnixNano(), 36) + "." + strconv.FormatInt(info.Size(), 36)
+			}
+			return src
 		},
 		// A topic body renders in a sandboxed frame that sends no cookie, so
-		// its images are inlined rather than loaded through the image route.
-		DocImageSrc: func(path string) string {
-			return wsdashboard.ImageDataURL(record.Root, path)
-		},
+		// its file images are never inlined: an empty src relays ImageSrc's
+		// cookie-gated image URL through the same-origin host page
+		// (wswhiteboard fileTarget, framedDoc's data-relay allowlist).
+		DocImageSrc: func(string) string { return "" },
 		FileActions: wsdashboard.FileActions(record.Root, replyID),
 		// An item field's absolute image path outside the root loads, for a
 		// loopback viewer, through the image route; a topic body's frame asks
 		// the page to fetch it there (wswhiteboard.View OutsideImage).
 		OutsideImage: wsdashboard.OutsideImage(record.Root, replyID),
 		Tickets:      &whiteboardTickets{root: record.Root},
+		// The served board fetches history on demand (ReadTopicHistory).
+		LazyHistory: true,
 	}
 }
 

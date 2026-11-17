@@ -1,14 +1,13 @@
 package mcp
 
 import (
-	"encoding/base64"
 	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -43,6 +42,11 @@ func TestDashboardBoardTopicCacheRetainsImageWatch(t *testing.T) {
 	if !slices.Contains(page.Watch, path) {
 		t.Fatal("cache hit lost image watch")
 	}
+	version := regexp.MustCompile(`shots%2Fa\.png&(?:amp;)*v=([0-9a-z.]+)`)
+	old := version.FindStringSubmatch(string(page.Board.Board))
+	if old == nil {
+		t.Fatalf("the image relay carries no version:\n%.1200s", page.Board.Board)
+	}
 	mustWrite(t, f.root, "shots/a.png", "replacement-image-two")
 	at := time.Now().Add(time.Second)
 	if err := os.Chtimes(path, at, at); err != nil {
@@ -51,8 +55,9 @@ func TestDashboardBoardTopicCacheRetainsImageWatch(t *testing.T) {
 	// The external image edit sends no signal; its watch stamp may be
 	// reused for one second, but must then invalidate the retained topic.
 	waitForDashboardValidation(t)
+	// The relayed image's version changes, so its frame remounts.
 	page = readPageOK(t, src, reg)
-	if !strings.Contains(string(page.Board.Board), base64.StdEncoding.EncodeToString([]byte("replacement-image-two"))) {
+	if next := version.FindStringSubmatch(string(page.Board.Board)); next == nil || next[1] == old[1] {
 		t.Fatal("image edit was hidden by topic cache")
 	}
 }

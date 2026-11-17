@@ -42,6 +42,16 @@ type ClosedTopicsSource interface {
 	ReadClosedTopics(reg Registration, lang string, from, n int) (html template.HTML, ok bool)
 }
 
+// TopicHistorySource is a PageSource that also renders board topics with
+// the complete history the served board leaves out (View.LazyHistory): the
+// topics named, or, when target is set, the one topic that holds that eN,
+// pN, or item-N target, shown or capped closed. Lang is a wsi18n code, as
+// for LangPageSource; ok is false when the session no longer exists or has
+// no board. A name or target no topic matches yields no fragment.
+type TopicHistorySource interface {
+	ReadTopicHistory(reg Registration, lang string, names []string, target string) (topics []wswhiteboard.TopicFragment, ok bool)
+}
+
 // PageContent is what a PageSource reads for one session.
 type PageContent struct {
 	// HasBoard reports whether the session has a whiteboard; Board is empty

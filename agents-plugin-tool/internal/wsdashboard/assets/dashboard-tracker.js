@@ -293,7 +293,7 @@
   function paletteRows(update) {
     // The board caps its initially rendered closed topics. Reuse its existing
     // show-more path so older hits are searchable and already mounted to jump to.
-    if (update) paletteClosed(update);
+    if (update) { paletteClosed(update); paletteHistory(update); }
     var rows = [];
     q("#rail .rs[data-rid]", framed ? shParentDoc() : doc).forEach(function (el) {
       var label = el.querySelector(".rid"), link = el.querySelector("a.rl");
@@ -372,12 +372,20 @@
     }
     capsuleTopicLoad.then(done);
   }
+  // Lazy board history leaves older entries out of the page; fetch them so
+  // the entry search stays complete.
+  function paletteHistory(update) {
+    var w = window.wbHistory;
+    if (!w || !w.hydrateAll) return;
+    w.hydrateAll(doc).then(function (n) { if (n) update(paletteRows()); });
+  }
   function paletteClosed(update) {
     var more = boardQ("button.closed-more[data-closed-next]")[0];
     if (!more || more.disabled) return;
     loadClosed(more).then(function (loaded) {
       if (!loaded) return;
       update(paletteRows());
+      paletteHistory(update);
       paletteClosed(update);
     });
   }
@@ -396,6 +404,7 @@
       if (doc.body.classList.contains("tk-paged") && tkApi) tkApi.leavePage();
       if (live && !tabShown("board")) setTab("board");
     }
+    var waited = false;
     function entryPick() {
       if (window.wbPill && window.wbPill.apply && !window.wbPill.apply(entryPick)) return;
       // Overview releases held board swaps before after callbacks; look up
@@ -408,6 +417,10 @@
         prepared = true;
         prepare(owner);
       });
+      // An entry in history the page has not fetched yet: pick again once
+      // its topic arrives.
+      var waiting = !entry && !waited && window.wbHistory && window.wbHistory.loading && window.wbHistory.loading(row.entry);
+      if (waiting) { waited = true; waiting.then(entryPick); return; }
       if (!entry) { palettePick({ kind: "board-topic", topic: row.topic }, o); return; }
       // History owns disclosure, flash and viewport landing. In particular,
       // scrollIntoView would scroll its clipped box and break bottom anchoring.

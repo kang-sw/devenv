@@ -544,7 +544,11 @@ func (p *pageData) MermaidFile() string {
 // body inside a sandboxed frame (framedDoc).
 func newPageData(view View, a *pageAssets, framed bool) *pageData {
 	p := pageDataBase(view, a, framed)
-	for _, t := range append(append([]TopicView(nil), view.Topics...), view.DeferredTopics...) {
+	topics := view.Topics
+	if !view.LazyHistory {
+		topics = append(append([]TopicView(nil), view.Topics...), view.DeferredTopics...)
+	}
+	for _, t := range topics {
 		p.prepareTopic(t, a)
 	}
 	return p
@@ -604,11 +608,14 @@ func pageDataBase(view View, a *pageAssets, framed bool) *pageData {
 // prepareTopic runs only after board-wide reference targets are complete.
 func (p *pageData) prepareTopic(t TopicView, a *pageAssets) {
 	if p.Full {
+		// A lazy render emits only the current bodies of live rows; gap rows
+		// and earlier versions come with the complete topic on demand.
+		live := lazyLiveEntries(t, p.LazyHistory)
 		pages := append([]EntryPage{t.Stream}, t.Older...)
 		for _, page := range pages {
 			for _, run := range page.Runs {
 				e := run.Entry
-				if e.Kind == EntryPanel && e.HasBody() {
+				if e.Kind == EntryPanel && e.HasBody() && (live == nil || live[e.ID] && !e.Historical) {
 					p.entries[e.ID] = p.panelHTML(t.Name, e, p.DocFramed, a)
 				}
 			}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 // AgentHost is the daemon's agent runner (internal/wsagent), which hosts
@@ -216,6 +217,15 @@ func (s agentSessions) ReadClosedTopics(reg Registration, lang string, from, n i
 		return cs.ReadClosedTopics(reg, lang, from, n)
 	}
 	return "", false
+}
+
+// ReadTopicHistory forwards to the configured source; an agent conversation
+// has no board.
+func (s agentSessions) ReadTopicHistory(reg Registration, lang string, names []string, target string) ([]wswhiteboard.TopicFragment, bool) {
+	if hs, ok := s.inner.(TopicHistorySource); ok && !reg.Agent {
+		return hs.ReadTopicHistory(reg, lang, names, target)
+	}
+	return nil, false
 }
 
 // ReadOutsideLinks forwards to the configured source; an agent conversation
