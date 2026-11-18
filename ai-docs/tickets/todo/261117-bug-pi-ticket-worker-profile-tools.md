@@ -13,6 +13,11 @@ related:
 
 ## Background
 
+On hold (owner, 2026-11-18): the agent-management rework on
+`track/agent-v2` (`ws/agent.*` with an authority enum replacing `pi.spawn`
+profiles) is expected to supersede the decisions below; revisit after it
+lands instead of settling (15)-(20) against `pi.spawn`.
+
 When the implementation harness is Pi, `lead-run` step 6 tells the lead to
 spawn the ticket worker through `{{.SpawnIdiom}}`. For Pi that idiom renders
 as `<ns>/pi.spawn (tier: ...)` with no `profile`
