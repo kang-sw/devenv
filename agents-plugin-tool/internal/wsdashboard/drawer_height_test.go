@@ -216,13 +216,22 @@ check('a fold click on a closed drawer does nothing', drOpen, false);
 
 // A keyboard open hides the focused opener: focus moves to the fold button
 // in its slot, not to the body, and the fold hands it back.
-[['panels', drhandle], ['git', ghandleEl], ['search', shandle]].forEach(function (c) {
+[['panels', drhandle], ['git', ghandleEl]].forEach(function (c) {
   doc.activeElement = c[1];
   drSetOpen(true, c[0]);
   check(c[0] + ' keyboard open focuses the fold button', [shown(), doc.activeElement && doc.activeElement.id], [c[0], 'drfold']);
   drFold();
   check(c[0] + ' fold hands focus back to its opener', doc.activeElement && doc.activeElement.id, c[1].id);
 });
+// Opening search focuses its input (tkApi.openSearch, inside drApply): the
+// handoff leaves that focus alone, from the keyboard or a mouse click.
+var tkqin = el('tkqin');
+tkApi = { openSearch: function () { tkqin.focus(); }, closeSearch: function () {} };
+doc.activeElement = shandle;
+drSetOpen(true, 'search');
+check('search open keeps focus on the search input', [shown(), doc.activeElement && doc.activeElement.id], ['search', 'tkqin']);
+drSetOpen(false);
+tkApi = null;
 
 // The tracker's store handles: each in a slot with its fold button.
 (function () {
@@ -244,7 +253,8 @@ check('a fold click on a closed drawer does nothing', drOpen, false);
   function syncNow(n) { calls.push('sync ' + n); }
   function bringUp() {}
   function keepItemDraft() {}
-  function render() { renderHandles(); }
+  var steal = null;
+  function render() { renderHandles(); if (steal) steal.focus(); }
   var order = [], vss = {}, AD = { stores: function () { return ['A', 'B']; }, error: function () { return ''; } };
 `+handles+toggle+`
   syncHandles();
@@ -271,6 +281,9 @@ check('a fold click on a closed drawer does nothing', drOpen, false);
   document.activeElement = $('tkh-A');
   openStore('A');
   check('a keyboard open focuses the store fold button, not the body', [ui.open, document.activeElement.id], ['A', 'tkf-A']);
+  steal = node('tkqin'); document.activeElement = $('tkh-B');
+  openStore('B');
+  check('a render that moves focus keeps it', [ui.open, document.activeElement.id], ['B', 'tkqin']);
 })();
 
 process.stdout.write(bad.join("\n"));
