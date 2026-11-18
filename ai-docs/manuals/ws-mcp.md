@@ -675,8 +675,11 @@ conversation for good; later writes get 409), and `/settings {model?,
 effort?}` (from the next turn). Every POST needs a JSON body
 (`Content-Type: application/json`) and either no `Origin` (a client on this
 machine) or the daemon's own, so no other web page can drive an agent. After
-a daemon restart the runner re-registers each conversation with no process
-and starts one at its next send. An attached ws-mcp gets
+a daemon restart or replace, hosted leads (Claude or Pi) and non-lead Pi
+conversations reattach to their surviving session holders, keeping the same
+process and running turn. Non-lead Claude conversations, and Pi conversations
+run without a holder manager, instead start a process at their next send.
+An attached ws-mcp gets
 `WS_MCP_ALLOWED_TOOLS` (the profile's ws tools) and `WS_MCP_NO_DASHBOARD`,
 and no mailbox identity. Its command is Python plus the selected hosted plugin's
 `bin/ws-mcp-launcher.py serve --stdio`, never the daemon's staged executable.
@@ -703,10 +706,12 @@ profile, root, optional cwd, model, effort, label, and parent `{kind,
 reply_id}`) and steers by its id; its record keeps `cwd`, `label`, and
 `parent`, and it is unlisted like a support conversation. Each turn settles
 once: done, failed (the harness's error, its process ending under it, or a
-process that could not start or take the message), or interrupted (a turn
-the daemon's exit cut off, which the record's `turn_open` marks, settled
-when the next daemon loads it). A settle of a conversation with a parent
-goes to the runner's `Options.Report`; closing one settles nothing.
+process that could not start or take the message), or interrupted (an open
+turn the next daemon cannot recover because its holder/process is gone,
+or it ran without a holder; the record's `turn_open` marks it). A daemon
+replace alone does not interrupt a holder-backed Pi turn. A settle of a
+conversation with a parent goes to the runner's `Options.Report`; closing
+one settles nothing.
 `Runner.Wait` waits for a turn that took every message sent before the
 wait (a message the page cancelled before a drain counts for no turn, and
 a slash command's turn covers none of the text drained behind it); the
@@ -745,10 +750,28 @@ not `mailbox.send`. For other senderless system mail without a label,
 mail covers it without an extra turn. A steer refused or not taken before
 the turn ends is cleared from Pi's queue and sent as the next turn instead.
 The stop itself mails nothing; a turn started by a later `pi.send` reports
-as usual. A child whose process died, including across a daemon restart,
-already resumes through the ordinary lazy-start path; no second spawn or
-record is needed. The parent's reply-id is derived from its session key,
-so restarting a lead with the same key keeps its children addressable.
+as usual. Pi subagents run under session holders, not as the daemon's own
+child processes: a running Pi turn survives a daemon restart or replace.
+The successor rejoins the same process and replays its output, including a
+completion produced while no daemon ran; completion mail follows the ordinary
+settled-turn path, not an interruption report. `pi.list` keeps an open turn
+`running` during rejoin, then reflects its recovered settlement. A `pi.send`
+accepted during rejoin waits in the inbox until replay finishes, then steers
+the still-running turn or starts the next one; already-taken steers retain
+their turn coverage across the swap.
+
+This needs a surviving holder and child, and a successor using the same state
+directory that can reattach. A live but unreachable or incompatible holder
+leaves input waiting; `running` during rejoin is not proof of fresh progress.
+If replay has gaps, Pi RPC recovery reconciles the turn; a failed recovery
+ends the process and reports failure. A process crash or an explicit stop
+ends the running turn, and a Windows holder marked not restart-safe may die
+with its starter's job object. A runner without a holder manager cannot
+preserve the process; a configured holder that fails to start refuses the
+launch rather than falling back to an unheld child. If the process is gone, a later `pi.send` resumes the saved Pi session
+through the ordinary lazy-start path; no second spawn or record is needed.
+The parent's reply-id is derived from its session key, so restarting a lead
+with the same key keeps its children addressable.
 `tools/list` shows the tools only
 when `dashboard.pi_spawn_enabled` is on (ws on, wsflow and Pi off; read
 once per server, so a change applies at the next reconnect), the server is
@@ -782,10 +805,13 @@ owns the whole tree:
   (`WS_MCP_PI_TOKEN`) and the daemon's loopback base URL
   (`WS_MCP_PI_ENDPOINT`, set by `ws-mcp dashboard` through
   `Runner.SetEndpoint` before `Start`) in its attached ws-mcp's environment.
-  The token is drawn at every process start, never written to disk, and void
-  once that process ends or the conversation closes. A conversation opened
-  through `POST /agents`, or spawned with no tier, gets none. Its session key
-  stays a parent-less delegate key: the token authorizes `pi.*` alone, so
+  The token is drawn at every actual process launch and void once that
+  process ends or the conversation closes. A holder-backed Pi worker keeps it
+  in its record; the successor restores it only after checking the recorded
+  holder association, so reattachment does not revoke a surviving worker's
+  ability to call `pi.*`. A conversation opened through `POST /agents`, or
+  spawned with no tier, gets none. Its session key stays a parent-less
+  delegate key: the token authorizes `pi.*` alone, so
   every other lead-only tool stays refused.
 - **Forwarding.** A ws-mcp with no runner and both variables set lists the
   `pi.*` tools with the worker's descriptions and forwards each call to
@@ -797,7 +823,11 @@ owns the whole tree:
   id). `dashboard.pi_spawn_enabled` is checked only at the root, on the
   lead's `pi.spawn`; the Pi version is the daemon's check on every call
   (`Options.ChildCheck`, the version probed once per daemon process). The
-  worker's own server checks neither.
+  worker's own server checks neither. Forwarded calls rediscover the current
+  daemon endpoint. A disconnected `pi.wait` retries within its deadline;
+  `spawn`, `send`, and `stop` do not automatically retry, since they may have
+  taken effect before the connection broke. A failed call during replacement
+  does not by itself mean the Pi process stopped.
 - **Cwd.** A worker's empty `cwd` is the worker's own working directory
   (its record's `cwd`, else its root), and a relative one resolves against
   it, so a worker in a worktree spawns into that worktree. Both a lead's
@@ -838,10 +868,12 @@ owns the whole tree:
   wait answer) while a child of its own is open: from a message it was sent
   until its report has reached the worker, or it closes. A failed or
   interrupted turn goes up at once. Pending and kept reports are in the
-  records, so a daemon restart delivers them; a child the restart
-  interrupted reports that, which resumes its parent. The interrupted turn
-  settles before the restart sends the input the record kept for the next
-  turn, so that next turn stays open.
+  records, so a daemon restart delivers them. A holder-backed Pi child's
+  running turn survives the restart and reports its eventual result. Only an
+  unrecovered open turn (no surviving holder/process, or no holder manager)
+  reports interruption, which resumes its parent; it settles before the
+  successor sends the input the record kept for the next turn, so that next
+  turn stays open.
 - **Close.** Closing a conversation closes its open descendants first,
   deepest first; closing a hosted lead also closes the Pi children it
   spawned. A Pi child closes on its own once a turn settled done, its
@@ -1291,7 +1323,11 @@ reading the route; compare two samples over the same observation interval.
 
 Session holders: a holder is a small Python process (standard library only,
 3.10 or newer) that owns one child process, over pipes or a PTY (ConPTY on
-Windows), and outlives the daemon, so the child survives a daemon restart.
+Windows), and outlives the daemon, so the child survives a daemon restart
+or replace while the holder and child remain alive (Windows holders marked
+not restart-safe have no such guarantee). Hosted leads of either backend,
+non-lead Pi conversations including `pi.spawn` subagents, and dashboard
+terminals use holders; non-lead Claude conversations do not.
 The script is embedded in `ws-mcp` (`internal/wsholder/holder.py`, whose
 module docstring is the descriptor and protocol reference) and staged to
 `<dashboard dir>/holders/bin/holder-<content hash>.py` before a holder
@@ -1309,7 +1345,7 @@ while the child lives.
 The daemon scans the holders directory at start and every 3 minutes,
 attaches to every holder over loopback TCP with the descriptor's token, and
 replays the holder's output ring (sequenced; 4 MiB for a terminal holder,
-32 MiB for a hosted lead conversation's holder, `leadRingBytes`, so a rejoin
+32 MiB for a hosted lead or Pi worker's holder, `leadRingBytes`, so a rejoin
 rebuilds a long turn whole; a reattach within one
 daemon process continues after the last sequence it saw, a new daemon
 process replays the whole ring). The newest authenticated attach takes over,
