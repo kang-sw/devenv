@@ -197,8 +197,8 @@
   }
 
   // The add-worktree popover for one repository workspace: a new branch
-  // (from a base, the root's current branch preselected) or an existing one
-  // no worktree has checked out, and the folder (the daemon's default, or a
+  // (from a base, the root's current branch preselected), an existing one
+  // no worktree has checked out, or a detached HEAD from that base, and the folder (the daemon's default, or a
   // custom absolute path). The options load when it opens; a failure, and a
   // refused or failed add, show in its error line and keep it open.
   function rpWtMake() {
@@ -211,7 +211,7 @@
     var seg = bsec.appendChild(mk("div", "spseg"));
     seg.setAttribute("role", "radiogroup");
     seg.setAttribute("aria-label", wsT("js.rail.wt.branch"));
-    var modes = { "new": rpBtn("", wsT("js.rail.wt.new")), old: rpBtn("", wsT("js.rail.wt.old")) };
+    var modes = { "new": rpBtn("", wsT("js.rail.wt.new")), old: rpBtn("", wsT("js.rail.wt.old")), detached: rpBtn("", wsT("js.rail.wt.detached")) };
     Object.keys(modes).forEach(function (k) { modes[k].setAttribute("role", "radio"); modes[k].setAttribute("data-mode", k); seg.appendChild(modes[k]); });
     var lnew = bsec.appendChild(mk("div", "spline"));
     var name = lnew.appendChild(rpInput("spq mono", wsT("js.rail.wt.name")));
@@ -245,13 +245,14 @@
     function setErr(text) { err.textContent = text || ""; err.hidden = !text; }
     function sync() {
       Object.keys(modes).forEach(function (k) { modes[k].setAttribute("aria-checked", String(P.mode === k)); });
-      lnew.hidden = P.mode !== "new";
+      lnew.hidden = P.mode === "old";
+      name.hidden = P.mode === "detached";
       lold.hidden = P.mode !== "old";
       def.hidden = P.custom;
       own.hidden = !P.custom;
       tog.textContent = wsT(P.custom ? "js.rail.wt.usedefault" : "js.rail.wt.custom");
       find.disabled = !P.opts || !P.opts.free.length;
-      go.disabled = P.busy || !P.opts || (P.mode === "new" ? !name.value.trim() : !P.pick);
+      go.disabled = P.busy || !P.opts || (P.mode === "new" ? !name.value.trim() : P.mode === "old" && !P.pick);
     }
     // drawList lists the free branches matching the search, keeping the
     // pick when it still matches, else picking the first match.
@@ -288,7 +289,7 @@
       if (P.mode === m) return;
       P.mode = m;
       edited();
-      (m === "new" ? name : find).focus();
+      (m === "new" ? name : m === "old" ? find : base).focus();
     }
     function submit() {
       sync();

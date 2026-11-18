@@ -1847,6 +1847,7 @@
   "js.rail.ws.select": "Selecionar pasta",
   "js.rail.wt.title": "Adicionar worktree",
   "js.rail.wt.branch": "Branch",
+  "js.rail.wt.detached": "Sem branch",
   "js.rail.wt.new": "Novo branch",
   "js.rail.wt.old": "Branch existente",
   "js.rail.wt.name": "Nome do novo branch",
