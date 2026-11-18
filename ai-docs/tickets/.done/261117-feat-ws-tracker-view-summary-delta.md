@@ -641,6 +641,82 @@ host-specific performance/open-large-panel/peak-memory gates remain unrun;
 no new benchmark or allocation-cost improvement is claimed for the owned
 payload copies. No daemon replacement, Electron, SSH or develop merge ran.
 
+#### Edition (40cf4dfd0) - 2026-11-18
+
+**Re-review correction — final interactive registration I/O:** the prior
+Edition's one-stat-per-Seen implementation was **not sufficient** for Rule 6
+or the performance manual. This Edition supersedes that acceptance and the
+prior assertion that finding 3 was fully fixed.
+
+- `Host.New` recovers a registration snapshot. Successful local registry
+  edit/add/remove/restore operations publish a new owned snapshot before
+  returning. Existing `StartWatch` → `watchStamps` → `Stores` refreshes
+  out-of-process changes **before** calling the daemon's change callback.
+- `Seen` resolves its registration through an RWMutex/map-only `memoryEntry`;
+  it never calls `Entry`, `Stores`, `Stat` or `ReadFileCached`. The dashboard
+  store-list adapter also uses the new ordered `StoreSnapshot`, closing the
+  HTTP projection guard's list-cache-miss path. Warm projection registration
+  and seen metadata reads perform **zero file operations**, even when
+  `stores.json` was just modified inside the two-second timestamp window.
+- A separate I/O mutex orders disk refresh and successful local publication,
+  so an old watcher read cannot overwrite a newer local write. The snapshot
+  mutex is not held over filesystem operations, and interactive readers never
+  wait on the I/O mutex. Snapshot lists are caller-owned copies in registration
+  order. Failed writes never publish an unpersisted snapshot.
+- Mutation paths still use `Entry`/`Stores` for immediate cross-process
+  registration and nonce validation. A stale page snapshot cannot permit a
+  write into an externally removed registration. Page reads see external
+  registration changes at the **existing watch boundary** (normally 10 s),
+  rather than polling files per request. No new watcher or performance
+  Rule 8 exception is needed. Persistence/wire formats are unchanged: **T0**.
+- New/updated regressions assert zero instrumented reads, stats and total
+  file operations for warm Seen and the actual dashboard store-list adapter
+  plus projection mark read. They cover recent external file modification,
+  local publication, startup recovery, ordered-list ownership, failed writes,
+  real watcher notifications, external removal safety and reads while the
+  registry I/O mutex is held. Seen's existing once-per-registration recovery
+  remains outside the warm-read measurement; ledger/background-reload I/O is
+  not claimed eliminated.
+
+**VERIFIED — final gates**, all Go commands prefixed with
+`GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`; the dashboard gate used the existing
+Playwright module/browser-cache environment recorded above:
+
+```text
+go test -race ./internal/wstrackerhost -count=1
+  ok github.com/kang-sw/devenv/internal/wstrackerhost 333.005s
+go test -race ./cmd/ws-mcp -run Tracker -count=1
+  ok github.com/kang-sw/devenv/cmd/ws-mcp 16.669s
+go test ./internal/wsdashboard -run Tracker -count=1 (including Chromium)
+  ok github.com/kang-sw/devenv/internal/wsdashboard 9.253s
+go test -race ./cmd/ws-mcp -run '^TestTrackerPageRegistrationAndSeenReadsHaveZeroIO$' -count=1 -v
+  five warm projection metadata reads: stat=0 read_file=0 total=0
+  PASS; ok github.com/kang-sw/devenv/cmd/ws-mcp 1.929s
+go test -race ./internal/wstrackerhost -run '^TestTrackerReadStateCache' -count=1 -v
+  memory reads: read_file=0 stat=0 total=0
+  PASS; ok github.com/kang-sw/devenv/internal/wstrackerhost 1.426s
+git diff --check
+  no diagnostics
+```
+
+The first full host-race run exposed an existing timing-dependent fixture in
+`TestLateReloadSignalsOnlyAChangedView`: stamp-cache hits can skip git, so
+`slowRunner` alone does not guarantee that a reload exceeds the page wait.
+The same failure reproduced at the prior commit `1a80700f8` using a temporary
+Go source overlay (`host-sync.json change ... got 0`). The fixture now holds
+the actual reload lock until the page has returned its old snapshot, ensuring
+that the tested reload is genuinely late. All original signal/count assertions
+are retained. The focused corrected test passes under race (`5.376s`), followed
+by the passing full host-race run above; no implementation was slowed to meet
+a test's timing assumption.
+
+A fresh read-only source review found no actionable defect in the snapshot,
+watch/write ordering, adapter integration or zero-I/O regression. No finding
+from this re-review remains unfixed. The prior platform-specific performance,
+large-open-panel and peak-memory gates remain unrun; the zero counters above
+are component operation measurements, not Windows-heavy-AV latency or a full
+projection syscall trace. The branch is retained and pushed, not merged.
+
 ## Sage Review Round 1 (2026-11-17)
 
 ### Design Reviewer — block
