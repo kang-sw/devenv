@@ -722,17 +722,16 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 
 	vw.Items = map[string]ItemView{}
 	status := map[string]string{}
+	visibleChildren := map[string][]*item{}
 	for _, id := range S.iorder {
-		status[id] = r.itemStatus(S.items[id])
+		it := S.items[id]
+		status[id] = r.itemStatus(it)
+		if !it.hidden {
+			visibleChildren[it.parent] = append(visibleChildren[it.parent], it)
+		}
 	}
 	subtasks := func(id string) []*item {
-		var out []*item
-		for _, k := range S.iorder {
-			if c := S.items[k]; c.parent == id && !c.hidden {
-				out = append(out, c)
-			}
-		}
-		return out
+		return visibleChildren[id]
 	}
 	for _, id := range S.iorder {
 		it := S.items[id]
