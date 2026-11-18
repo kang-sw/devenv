@@ -180,3 +180,53 @@ in this session; these pointers are not an exhaustive rationale-index result.
   - Live check after the lead's daemon swap: the dialog lists Codex and agy
     models right after a restart, and a `bypass` agy lead runs a shell
     command with no prompt.
+
+## Implementation Handoff - 2026-11-18
+
+Implementation is committed at `795074e21`; Phase 1 is not closed pending the
+lead's independent review and post-swap live check.
+
+- Added session-less Codex cache parsing and bounded `agy models` listing.
+  Support retains the existing success/failure TTLs. Native session reports
+  immediately override cached fallbacks, including cached errors. Synthetic
+  tests cover cache expiry, parsing, privacy, environment/command parity,
+  per-harness error isolation and a session report arriving during a listing.
+- Added top-level `Record.agy_bypass` intent, native `default` launch/control
+  projection and `bypass` settings projection. Auto-allow uses the normal
+  tracked answer path, including already-waiting requests when enabled and
+  unanswered requests recovered by holder replay. Tests cover default lead
+  prompts, enable/disable, native reports, stop/resume, holder reattach,
+  duplicate-answer refusal and a typed older-decoder rewrite.
+- Compatibility remains **T1** for bypass and **T0** for choices. At base
+  `07b96092f`, `record.go:182-214` reads known fields and retains unknown
+  top-level raw members, `record.go:219-236` overlays those members on write,
+  and `record.go:304-327` uses that decoder/encoder for record persistence.
+  Current `record.go:185-237` preserves the same mechanism while recognizing
+  the optional field. An older daemon still uses native `PermissionMode`
+  (`runner_process.go` at base, line 294), preserves the unknown bypass flag,
+  and prompts; a new daemon's `agy_bypass.go:33-38` and
+  `runner_process.go:294` restore native default plus ws auto-allow.
+- Local Mac verification passed:
+  - `cd agents-plugin-tool && go build ./...`
+  - `go vet ./internal/wsagent ./cmd/ws-mcp`
+  - `go test -timeout 30m ./internal/wsagent ./cmd/ws-mcp`
+    (`118.173s`, `175.313s`).
+  - Focused new tests passed, then passed with `-race -count=10` (`3.409s`).
+  - Changed-file `gofmt -l` and `git diff --check` were clean.
+  - Initial focused failures were test-harness errors: a Claude-only stream
+    barrier and an assertion before asynchronous native mode reporting.
+    Both were corrected without changing the required behavior.
+- Performance evidence: the listing seam tests count one agy process per
+  cache window and zero additional processes on cached requests. Codex tests
+  remove the synthetic file after listing and retain choices until expiry.
+  Source-level incremental budget is one file read or one listing spawn per
+  uncached fallback, zero on cached/session-reported choices, no added render
+  I/O. No Windows syscall or latency measurement is claimed.
+- Tooling blocker: this worker session exposes no `workflow_manual`,
+  `route.resolve_implement`, `tickets.acquire`, delegation/render/review or
+  `tickets.close` tools. Bundled workflow/ticket guidance was read, but no
+  route allocation or independent review can be claimed. The lead must run
+  the missing workflow/review steps and record the final Result/closure.
+- Deliberately omitted: shared daemon operations and the post-swap live check
+  (lead-owned); account/login/logout commands; reading any actual Codex cache;
+  dashboard assets; push and merge. No approved visual reference is linked.
