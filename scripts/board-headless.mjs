@@ -3,7 +3,7 @@
 // dashboard board's motion and scroll behaviour. Not shipped with any plugin
 // package.
 //
-//     node scripts/board-headless.mjs serve [--topics N] [--pending N] [--history-entries N] [--mermaid] [--keep-tmp]
+//     node scripts/board-headless.mjs serve [--topics N] [--pending N] [--history-entries N] [--mermaid] [--keep-tmp] [--dev-assets]
 //     node scripts/board-headless.mjs <scenario> --url <session page> [--width W] [--height H] [--headed] [--trace]
 //
 // Scenarios run in headless Chromium, 1440x900 by default. Each checks every
@@ -89,8 +89,9 @@
 //
 //   - `serve` (this file): builds ws-mcp from agents-plugin-tool into a temp
 //     directory and runs an isolated dashboard daemon there (its own
-//     WS_CACHE_HOME and WS_CONFIG_HOME, port chosen by the OS, assets read
-//     from this tree through WS_MCP_DASHBOARD_DEV_SOURCE). It seeds two
+//     WS_CACHE_HOME and WS_CONFIG_HOME, port chosen by the OS, current assets
+//     embedded in the freshly built binary). Pass --dev-assets to read assets
+//     live from this tree through WS_MCP_DASHBOARD_DEV_SOURCE. It seeds two
 //     sessions, one with a live adapter snapshot and one without, each with a
 //     board several viewports tall, prints both page URLs, and runs until
 //     killed (Ctrl-C), then stops the daemon and removes the temp directory.
@@ -391,7 +392,7 @@ async function serve(args) {
     const out = fs.openSync(path.join(tmp, "daemon.log"), "a");
     daemon = spawn(bin, ["dashboard", "--port", "0"], {
       cwd: tmp, stdio: ["ignore", out, out],
-      env: childEnv(tmp, { WS_MCP_DASHBOARD_DEV_SOURCE: TOOL_DIR }),
+      env: childEnv(tmp, args['dev-assets'] ? { WS_MCP_DASHBOARD_DEV_SOURCE: TOOL_DIR } : undefined),
     });
     daemon.on("exit", (code) => { if (!stopping) { console.error(`board-headless: daemon exited (${code}); log: ${path.join(tmp, "daemon.log")}`); stop(1); } });
     const ep = await waitFor(() => {
@@ -1215,7 +1216,7 @@ async function main() {
   const name = args._[0];
   if (name === "serve") return serve(args);
   if (!name || !SCENARIOS[name] || !args.url || args.url === true) {
-    console.error("usage: node scripts/board-headless.mjs serve [--topics N] [--pending N] [--history-entries N] [--mermaid] [--keep-tmp]");
+    console.error("usage: node scripts/board-headless.mjs serve [--topics N] [--pending N] [--history-entries N] [--mermaid] [--keep-tmp] [--dev-assets]");
     console.error(`       node scripts/board-headless.mjs <${Object.keys(SCENARIOS).join("|")}> --url <session or full file page> [--width W] [--height H] [--headed] [--artifacts DIR]`);
     process.exit(2);
   }
