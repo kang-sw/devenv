@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Rail attention flag mockup</title>
+<style>
+/* ---- theme variables: verbatim from wswhiteboard/assets/page.css (light = :root, dark = data-theme) ---- */
+:root {
+  --wb-bg:#f3f3f0; --wb-fg:#1b1d21; --wb-card:#ffffff; --wb-muted:#e9e8e3; --wb-muted-fg:#5f646b; --wb-primary:#2b62d9;
+  --wb-accent-policy:#b25000; --wb-on-accent-policy:#ffffff;
+  --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
+  --wb-radius:12px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  --wb-warn:#c27a00; --wb-warn-ink:#a35f00; --wb-perm-ink:#a35f00; --wb-fail:#c0262d;
+  --star:#c98a00;
+}
+:root[data-theme="dark"] {
+  --wb-bg:#141518; --wb-fg:#e7e7e4; --wb-card:#1e2024; --wb-muted:#2b2d32; --wb-muted-fg:#a2a6ad; --wb-primary:#7aa2ff;
+  --wb-accent-policy:#e0a36c; --wb-on-accent-policy:#1f150b;
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-warn:#e0a36c; --wb-warn-ink:#e0a36c; --wb-perm-ink:#f6dfae; --wb-fail:#f0797e;
+  --star:#f2b632;
+}
+body { margin:0; padding:24px; background:var(--wb-bg); color:var(--wb-fg); font:14px/1.5 var(--wb-sans); }
+/* ---- rail rules: verbatim from dashboard-rail.css (trimmed to rows) ---- */
+.rail { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+.rail .rsessions { margin: 0 8px 0 33px; padding-left: 0; border-left: 2px solid var(--wb-muted); }
+.rail .rs { position: relative; display: flex; align-items: flex-start; gap: 0; padding-left: 14px; border-radius: 6px; }
+.rail .rs:hover { background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
+.rail .rs.cur { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
+.rail .rs { -webkit-user-select: none; user-select: none; }
+.rail .drbody { flex: 1 1 auto; min-width: 0; }
+.rail .rl { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; padding: 5px 0; color: inherit; text-decoration: none; border-radius: 6px; }
+.rail .s1 { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rail .drtail { flex: 1 1 0; align-self: stretch; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 5px 8px 5px 0; color: inherit; text-decoration: none; }
+.rail .drmsg { display: block; margin-top: -4px; padding: 0 8px 5px 0; color: inherit; text-decoration: none; }
+.rail .drslot { flex: none; min-width: 44px; text-align: right; }
+.rail .rid { font-family: var(--wb-mono); font-size: 12.5px; font-weight: 700; color: var(--wb-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
+.rail .rid.lbl { font-family: var(--wb-sans); font-weight: 600; }
+.rail .rs.cur .rid { color: var(--wb-fg); }
+.rail .when { font-size: 11px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
+.rail .s2 { display: block; margin-top: 1px; font-size: 12px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rail .s2 .who { font-weight: 700; margin-right: 4px; }
+.rail .hi { position: relative; flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; box-sizing: border-box; border-radius: 3px; font-size: 10px; font-weight: 800; line-height: 1; color: #fff; background: #8a8f98; cursor: default; }
+.rail .hi.claude { background: #D97757; }
+.rail .hi.codex { background: #10A37F; }
+.rail .hiw { position: relative; flex: none; display: inline-flex; height: 16px; }
+.rail .rs { --rs-ground: var(--wb-card); }
+.rail .rs:hover { --rs-ground: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
+.rail .rs.cur { --rs-ground: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
+.rail .qdot { position: absolute; z-index: 2; top: -3px; left: -3px; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-accent-policy); box-shadow: 0 0 0 1.5px var(--wb-card); }
+.rail .rs:hover .qdot { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
+.rail .rs.cur .qdot { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
+
+/* ---- NEW: one-shot attention flag (.attn on the row, independent of .qdot) ----
+   Overlay tint on the row (::before, over the row ground); ring around the harness icon on .hiw::after. */
+.rail .rs.attn::before { content:""; position:absolute; inset:0; border-radius:6px; pointer-events:none; background: var(--wb-accent-policy); opacity:0; }
+.rail .rs.attn .hiw::after { content:""; position:absolute; left:0; top:0; width:16px; height:16px; border-radius:3px; pointer-events:none; box-shadow:0 0 0 0 transparent; }
+/* Variant A: pulse until visited */
+body[data-v="a"] .rs.attn::before { animation: attn-pulse 1.8s ease-in-out infinite; }
+body[data-v="a"] .rs.attn .hiw::after { animation: attn-ring 1.8s ease-in-out infinite; }
+@keyframes attn-pulse { 0%,100% { opacity:.04; } 50% { opacity:.22; } }
+@keyframes attn-ring { 0%,100% { box-shadow:0 0 0 0 transparent; } 50% { box-shadow:0 0 0 3px color-mix(in srgb, var(--wb-accent-policy) 55%, transparent); } }
+/* Variant B: flash 3 x 0.6s, then steady tint + ring */
+body[data-v="b"] .rs.attn::before { opacity:.12; animation: attn-flash .6s ease-in-out 3; }
+body[data-v="b"] .rs.attn .hiw::after { box-shadow:0 0 0 2px color-mix(in srgb, var(--wb-accent-policy) 45%, transparent); animation: attn-flash-ring .6s ease-in-out 3; }
+@keyframes attn-flash { 0% { opacity:0; } 50% { opacity:.38; } 100% { opacity:.12; } }
+@keyframes attn-flash-ring { 0% { box-shadow:0 0 0 0 transparent; } 50% { box-shadow:0 0 0 4px var(--wb-accent-policy); } 100% { box-shadow:0 0 0 2px color-mix(in srgb, var(--wb-accent-policy) 45%, transparent); } }
+/* settled / reduced motion: steady highlight only */
+body[data-v="b-settled"] .rs.attn::before, body[data-v="reduced"] .rs.attn::before { opacity:.12; animation:none; }
+body[data-v="b-settled"] .rs.attn .hiw::after, body[data-v="reduced"] .rs.attn .hiw::after { box-shadow:0 0 0 2px color-mix(in srgb, var(--wb-accent-policy) 45%, transparent); animation:none; }
+@media (prefers-reduced-motion: reduce) {
+  .rail .rs.attn::before, .rail .rs.attn .hiw::after { animation:none !important; }
+  .rail .rs.attn::before { opacity:.12; }
+  .rail .rs.attn .hiw::after { box-shadow:0 0 0 2px color-mix(in srgb, var(--wb-accent-policy) 45%, transparent); }
+}
+
+/* ---- mockup chrome ---- */
+.wrap { display:flex; gap:32px; align-items:flex-start; }
+.rail { width:340px; padding:8px 0 10px; }
+.rail h4 { margin:6px 14px 6px; font-size:11px; font-weight:800; color:var(--wb-muted-fg); }
+.rail .rsessions { margin-top:2px; }
+.side { max-width:380px; font-size:13px; color:var(--wb-muted-fg); }
+.side .sw { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 12px; }
+.side button { font:inherit; font-size:12px; padding:3px 10px; border-radius:999px; border:1px solid var(--wb-line); background:var(--wb-card); color:var(--wb-fg); cursor:pointer; }
+.side button[aria-pressed="true"] { background:var(--wb-primary); color:var(--wb-card); border-color:transparent; }
+.side dl { margin:0; } .side dt { font-weight:700; color:var(--wb-fg); margin-top:8px; }
+.side dd { margin:0; }
+body.shot .side { display:none; } body.shot { padding:0; }
+</style></head>
+<body data-v="a">
+<div class="wrap">
+<nav class="rail" id="rail" aria-label="Sessions">
+  <h4>SESSIONS</h4>
+  <div class="rsessions">
+    <!-- 1: current (selected) -->
+    <div class="rs cur"><div class="drbody"><div class="s1"><a class="rl"><span class="hiw"><span class="hi claude">C</span></span><span class="rid lbl">attention-flag design</span></a><span class="drtail"><span class="drslot"><span class="when">now</span></span></span></div><a class="drmsg"><span class="s2"><span class="who">lead</span>Comparing pulse variants</span></a></div></div>
+    <!-- 2: open-ask dot only -->
+    <div class="rs"><div class="drbody"><div class="s1"><a class="rl"><span class="hiw"><span class="hi claude">C</span><span class="qdot" role="img" aria-label="2 open questions"></span></span><span class="rid lbl">release gate rework</span></a><span class="drtail"><span class="drslot"><span class="when">4m</span></span></span></div><a class="drmsg"><span class="s2"><span class="who">lead</span>Two asks are open on the board</span></a></div></div>
+    <!-- 3: dot + attention flag -->
+    <div class="rs attn" data-attn="1"><div class="drbody"><div class="s1"><a class="rl"><span class="hiw"><span class="hi codex">X</span><span class="qdot" role="img" aria-label="1 open question"></span></span><span class="rid lbl">mailbox wake-up</span></a><span class="drtail"><span class="drslot"><span class="when">just now</span></span></span></div><a class="drmsg"><span class="s2"><span class="who">lead</span>New ask: which wake path wins?</span></a></div></div>
+    <!-- 4: idle -->
+    <div class="rs"><div class="drbody"><div class="s1"><a class="rl"><span class="hiw"><span class="hi claude">C</span></span><span class="rid lbl">docs cleanup</span></a><span class="drtail"><span class="drslot"><span class="when">1h</span></span></span></div><a class="drmsg"><span class="s2"><span class="who">lead</span>Done, waiting for review</span></a></div></div>
+    <!-- 5: attention flag, dot also exists (older asks + new one) -->
+    <div class="rs attn" data-attn="1"><div class="drbody"><div class="s1"><a class="rl"><span class="hiw"><span class="hi claude">C</span><span class="qdot" role="img" aria-label="3 open questions"></span></span><span class="rid lbl">tracker migration</span></a><span class="drtail"><span class="drslot"><span class="when">2m</span></span></span></div><a class="drmsg"><span class="s2"><span class="who">lead</span>3 asks, newest arrived while away</span></a></div></div>
+  </div>
+</nav>
+<div class="side">
+  <div class="sw" id="vsw">
+    <button data-s="a">A pulse</button><button data-s="b">B flash</button><button data-s="b-settled">B settled</button><button data-s="reduced">Reduced motion</button>
+  </div>
+  <div class="sw"><button id="th" aria-pressed="false">Light theme</button><button id="replay">Replay</button></div>
+  <dl>
+    <dt>Rows</dt><dd>1 current, 2 dot only, 3 dot + flag, 4 idle, 5 dot + flag.</dd>
+    <dt>A</dt><dd>Row tint and icon ring pulse (1.8s) until the session is opened.</dd>
+    <dt>B</dt><dd>Row tint and ring flash 3 x 0.6s, then a steady subtle tint and ring until visited.</dd>
+    <dt>Reduced</dt><dd>No animation; steady highlight as B settled.</dd>
+    <dt>Hash</dt><dd>#a, #b, #b-settled, #reduced; add +light for light theme (e.g. #b+light).</dd>
+  </dl>
+</div>
+</div>
+<script>
+(function(){
+  var V=["a","b","b-settled","reduced"], b=document.body, root=document.documentElement;
+  function cur(){ var h=(location.hash||"#a").slice(1).split("+"); var v=h[0]==="light"?"a":h[0]; if(V.indexOf(v)<0) v="a"; return {v:v, l:h.indexOf("light")>=0, shot:h.indexOf("shot")>=0}; }
+  function apply(){
+    var c=cur();
+    b.setAttribute("data-v",c.v); root.setAttribute("data-theme",c.l?"light":"dark");
+    if(c.shot) b.classList.add("shot");
+    document.querySelectorAll("#vsw button").forEach(function(x){x.setAttribute("aria-pressed",String(x.dataset.s===c.v))});
+    document.getElementById("th").setAttribute("aria-pressed",String(c.l));
+  }
+  function set(v,l){ location.hash=v+(l?"+light":""); }
+  document.querySelectorAll("#vsw button").forEach(function(x){x.onclick=function(){set(x.dataset.s,cur().l)}});
+  document.getElementById("th").onclick=function(){var c=cur(); set(c.v,!c.l)};
+  document.getElementById("replay").onclick=function(){var v=b.getAttribute("data-v");b.setAttribute("data-v","");void b.offsetWidth;b.setAttribute("data-v",v)};
+  window.addEventListener("hashchange",apply); apply();
+})();
+</script>
+</body></html>
