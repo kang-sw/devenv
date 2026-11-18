@@ -5,17 +5,17 @@
    tracker's row) sit at the window's right edge; both sheets are 1280px
    at most, anchored right under the handles (they may cover the rail's
    column below 1668px). The clip reveals the sheet from
-   the header's bottom (--drtop) and the handle rides its bottom edge, or
-   hangs from the page's top edge while closed. The page script sets the
-   clip height, the sheet height, the handle's top, and --drhw (the handle's
-   own width, which follows its icons). .anim animates a click's open or
-   close, never a drag or a resize. The sheet shows every present panel as a
+   the header's bottom (--drtop) to above the composer, or the viewport
+   bottom without one. The active sheet's opener hides while open; the fold
+   button takes its header slot. The page script sets the clip and sheet
+   heights and --drhw (the handle's width, which follows its icons).
+   .anim animates a click's open or close, never a resize. The sheet shows every present panel as a
    card in a wrapping grid (below), or the git sheet (gitbody). */
 :root { --drhw: 0px; --dpad: 16px; }
 .drawer { position: fixed; top: 0; left: 0; right: 0; height: 0; z-index: var(--z-panels); pointer-events: none; }
 .dr-in { position: relative; max-width: 1680px; margin: 0; }
 .dr-clip { position: absolute; top: var(--drtop, 48px); left: var(--dpad); right: var(--dpad); height: 0; overflow: hidden; pointer-events: auto; visibility: hidden; border-radius: 0 0 var(--wb-radius) var(--wb-radius); box-shadow: var(--wb-shadow-hi); }
-.drawer.open .dr-clip, .drawer.drag .dr-clip { visibility: visible; }
+.drawer.open .dr-clip { visibility: visible; }
 .drawer.anim .dr-clip { transition: height .18s ease-out, visibility 0s linear .18s; }
 .drawer.anim.open .dr-clip { transition: height .18s ease-out, visibility 0s; }
 @media (min-width: 1600px) {
@@ -142,7 +142,7 @@
 .hdrow.hdfail { grid-template-areas: "dot msg msg age"; background: color-mix(in srgb, var(--wb-fail) 10%, var(--wb-card)); }
 .hdfail .wtdot { background: var(--wb-fail); opacity: 1; }
 .hdmsg { grid-area: msg; font-size: 12px; color: var(--wb-fail); overflow-wrap: anywhere; }
-.dr-handle { position: absolute; top: 0; right: var(--dpad); height: 34px; padding: 2px 9px 0; border: 0; border-radius: 0 0 8px 8px; pointer-events: auto; cursor: grab; touch-action: none; display: flex; align-items: center; justify-content: flex-end; gap: 7px; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: var(--wb-shadow-hi); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.dr-handle { position: absolute; top: 0; right: var(--dpad); height: 34px; padding: 2px 9px 0; border: 0; border-radius: 0 0 8px 8px; pointer-events: auto; cursor: pointer; display: flex; align-items: center; justify-content: flex-end; gap: 7px; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: var(--wb-shadow-hi); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .dr-handle[hidden] { display: none; }
 .dr-search-handle { right: calc(var(--dpad) + var(--shr, 0px)); width: 35px; padding: 2px 0 0; justify-content: center; }
 .dr-search-handle .li { width: 17px; height: 17px; }
@@ -153,19 +153,19 @@
 .dr-handle::before { content: ""; position: absolute; left: 0; bottom: 0; width: 10px; height: 10px; border-radius: 0 0 0 8px; background: linear-gradient(45deg, var(--wb-bg) 50%, var(--wb-muted) 50%); }
 .dr-handle:hover { color: var(--wb-fg); }
 .dr-handle:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
-.drawer.drag .dr-handle { cursor: grabbing; }
-.drawer.anim .dr-handle { transition: top .18s ease-out; }
 .dr-handle > .i { width: 17px; height: 17px; flex: none; }
-.drawer.open .dr-handle { color: var(--wb-fg); }
+/* Keep slot measurements (and composer clearance) stable while hiding the
+   active opener, including from keyboard focus and pointer input. */
+.drawer.open.panels #drhandle, .drawer.open.search #shandle, .drawer.open.git #r-git { visibility: hidden; pointer-events: none; }
 /* one hamburger; the dot on its corner says some section has something new */
 .dr-handle .tdot { position: absolute; top: 6px; right: 5px; box-shadow: 0 0 0 1.5px var(--wb-card); }
 .dr-wait { display: none; align-items: center; color: var(--wb-perm-ink); }
 .dr-wait .i { width: 13px; height: 13px; }
-/* an approval is waiting: an open drawer can cover the agents tree's row */
+/* an approval is waiting: the closed opener carries the signal */
 .dr-handle.wait { background: color-mix(in srgb, var(--wb-ph-perm) 22%, var(--wb-card)); color: var(--wb-fg); }
 .dr-handle.wait .dr-wait { display: inline-flex; }
 /* the fold button (#drfold): while a sheet shows, it fills the slot its
-   riding handle left at the top, in the handles' shape at that handle's
+   opener occupies while closed, in the handles' shape at that handle's
    width (--drw for the panels handle, --ghw for the git one, set by the page
    script), quieter than a handle; a click closes the sheet */
 .dr-fold { position: absolute; top: 0; right: var(--dpad); width: var(--drw, 34px); height: 34px; padding: 2px 0 0; border: 0; border-radius: 0 0 8px 8px; pointer-events: auto; cursor: pointer; display: flex; align-items: center; justify-content: center; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: var(--wb-shadow-hi); animation: dr-fold-in .18s ease-out; }
@@ -180,15 +180,12 @@
    (--ghr, set by the page script, is that handle's width and the gap), in its
    shape: the branch abbreviated (a hammer for an impl branch, a gold trophy
    for a goal one), the ahead and behind counts, and a dot for a dirty tree.
-   It rides the sheet's bottom edge while the frame shows the git sheet. */
+   It hides while the frame shows the git sheet. */
 :root { --gh-gold: #b8860b; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gh-gold: #e3b341; } }
 :root[data-theme="dark"] { --gh-gold: #e3b341; }
 .dr-in > .r-git { position: absolute; top: 0; right: calc(var(--dpad) + var(--ghr, 0px)); }
 .dr-in > .r-git:empty { display: none; }
-.drawer.anim .r-git { transition: top .18s ease-out; }
-.r-git .gh { cursor: grab; touch-action: none; }
-.drawer.drag .r-git .gh { cursor: grabbing; }
 .gh { position: relative; height: 34px; max-width: min(320px, 46vw); padding: 2px 10px 0; border: 0; border-radius: 0 0 8px 8px; pointer-events: auto; cursor: pointer; display: flex; align-items: center; gap: 6px; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: var(--wb-shadow-hi); font: inherit; font-size: 12px; font-weight: 700; white-space: nowrap; }
 .gh:hover, .gh.open { color: var(--wb-fg); }
 .gh.open { box-shadow: inset 0 -2px 0 var(--wb-primary), var(--wb-shadow-hi); }

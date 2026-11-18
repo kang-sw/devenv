@@ -8,60 +8,18 @@
     document.documentElement.style.setProperty('--tkhw', (w ? w + 6 : 0) + 'px');
     $('tkdrawer').style.setProperty('--tktop', Math.max(0, Math.round(O.header.getBoundingClientRect().bottom)) + 'px');
   }
-  // The drawer's height is the user's, and one for every store: dragging any store's
-  // handle sets it, clamped between DR_MIN and 80% of the window like the dashboard drawer
-  // when it shows. It is the host's drawer height when the host gives opts.drawerHeight
-  // (so the host's drawers and every store open alike), else this renderer's own, kept as
-  // display state; never set, it is DR_DEF, not the content's height, so a fresh browser
-  // shows one height too. Panels scroll inside whatever the height is.
-  var DR_MIN = 160, DR_DEF = 320, DR_SHUT = 80;
-  function drMax() { return Math.round(window.innerHeight * 0.8); }
-  function drClamp(h) { var hi = drMax(); return Math.max(Math.min(DR_MIN, hi), Math.min(hi, h)); }
-  function drHeight() { var h = O.drawerHeight ? +O.drawerHeight.get() : ui.drh; return h > 0 ? h : DR_DEF; }
-  function drSetHeight(h) {
-    if (O.drawerHeight) { O.drawerHeight.set(h); return; }
-    ui.drh = h; dsSave('drawer.height', { h: h });
-  }
-  function fitDrawer() { $('tkdrawer').style.setProperty('--tkh', drClamp(drHeight()) + 'px'); }
-  // The drag: the handle follows the pointer; the clip and the handle track the pointer's
-  // extent (--tkext) while the sheet keeps at least DR_MIN, so a short drag reveals the
-  // sheet rather than squashing it. The release sets the height, or closes short of
-  // DR_SHUT. A press that never moves is a click.
-  var drDrag = null, drDragged = false;
-  function drDragStart(e) {
-    var b = e.target.closest && e.target.closest('.tk-handle[data-handle]');
-    if (!b || (e.button !== undefined && e.button !== 0)) return;
-    drDrag = { name: b.getAttribute('data-handle'), y0: e.clientY, off: e.clientY - b.getBoundingClientRect().top, moved: false, ext: 0 };
-    try { b.setPointerCapture(e.pointerId); } catch (x) { /* no capture: the moves still land */ }
-  }
-  function drDragMove(e) {
-    var d = drDrag;
-    if (!d || (!d.moved && Math.abs(e.clientY - d.y0) < 5)) return;
-    if (!d.moved) { d.moved = true; if (ui.open !== d.name) openStore(d.name); } // dragging a closed handle opens its store
-    var max = drMax(), top = Math.max(0, Math.round(O.header.getBoundingClientRect().bottom)), dr = $('tkdrawer');
-    d.ext = Math.max(0, Math.min(max, e.clientY - d.off - top));
-    dr.classList.add('drag');
-    dr.style.setProperty('--tkh', Math.max(Math.min(DR_MIN, max), d.ext) + 'px');
-    dr.style.setProperty('--tkext', d.ext + 'px');
-  }
-  function drDragEnd() {
-    var d = drDrag;
-    drDrag = null;
-    if (!d || !d.moved) return;
-    drDragged = true;
-    setTimeout(function () { drDragged = false; }, 0);
-    $('tkdrawer').classList.remove('drag');
-    $('tkdrawer').style.removeProperty('--tkext');
-    if (d.ext < DR_SHUT) { fitDrawer(); if (ui.open) collapse(); return; }
-    drSetHeight(drClamp(d.ext));
-    fitDrawer();
+  // Every store fills the available space below the header. A host can supply its
+  // maximum (including composer clearance); standalone pages use the viewport.
+  function fitDrawer() {
+    var h = O.drawerHeight ? O.drawerHeight() : window.innerHeight - Math.max(0, Math.round(O.header.getBoundingClientRect().bottom));
+    $('tkdrawer').style.setProperty('--tkh', Math.max(0, h) + 'px');
   }
 
   // One handle per store, stacking leftward from the host's handle in stores() order, then
   // (with adapter.register) the "+ store" handle, also with no store at all; the row is
   // rebuilt when the store list changes. Each store's handle sits in a slot with its fold
-  // button (tkf-<store>), which fills the slot while that store's drawer is open (the
-  // handle rides the drawer's bottom edge then) and closes it as a click on the handle does.
+  // button (tkf-<store>), which fills the slot while that store's drawer is open
+  // (the handle stays hidden without changing its width) and closes the drawer.
   var handleSig = null;
   function syncHandles() {
     order = (AD.stores() || []).slice();
@@ -935,7 +893,7 @@
 
   // ------------------------------------------------------------- display state
 
-  // Per-card view modes, the drawer height, the recently-closed fold, and the tree folds persist under
+  // Per-card view modes, the recently-closed fold, and the tree folds persist under
   // opts.storagePrefix; everything else lasts the page. Storage may throw (a locked-down
   // browser): then the values last the page.
   function dsLoad(k) {

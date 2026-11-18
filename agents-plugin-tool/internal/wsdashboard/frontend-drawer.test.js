@@ -11,28 +11,80 @@ function section(start, end) {
   return js.slice(a, b);
 }
 
-test('only an uncustomized wide panels drawer defaults to 60vh', () => {
-  const stored = {};
+test('every sheet fills the available room, ignores stale heights and follows geometry', () => {
+  let headerBottom = 48, composerTop = 1020, composerVisible = true;
   const c = vm.createContext({ window: { innerWidth: 1920, innerHeight: 1080 },
-    load: () => null, save: (k, v) => { stored[k] = v; }, drMax: () => 700 });
+    load: () => { throw Error('height must not be read'); }, save: () => { throw Error('height must not be written'); },
+    drheader: { getBoundingClientRect: () => ({ bottom: headerBottom }) },
+    drhandle: { offsetHeight: 34 }, $: () => ({ getBoundingClientRect: () => ({ top: composerTop }) }),
+    visible: () => composerVisible });
   vm.runInContext(section('  var DR_OPEN =', '  var sbody ='), c);
-  vm.runInContext(section('  function drClamp(h)', '  // drApply lays'), c);
-  assert.equal(c.drHeight(), 648);
-  assert.equal(c.drClamp(c.drHeight()), 648);
-  c.window.innerWidth = 759;
-  assert.equal(c.drHeight(), 320);
-  c.window.innerWidth = 760;
-  assert.equal(c.drHeight(), 648);
-  c.drMode = 'git'; assert.equal(c.drHeight(), 320);
-  c.drMode = 'search'; assert.equal(c.drHeight(), 320);
-  c.drMode = 'panels'; c.drSetH(400);
-  assert.equal(c.drHeight(), 400);
-  c.window.innerWidth = 420; assert.equal(c.drHeight(), 400);
-  assert.equal(stored['ws.dashboard.drawer.h'], '400');
-  const saved = vm.createContext({ load: () => '275', window: c.window });
-  vm.runInContext(section('  var DR_OPEN =', '  var sbody ='), saved);
-  vm.runInContext(section('  function drHeight()', '  // drApply lays'), saved);
-  assert.equal(saved.drHeight(), 275);
+  vm.runInContext(section('  function drHeaderBottom()', '  // drApply lays'), c);
+  for (const width of [1920, 760, 759, 420]) {
+    c.window.innerWidth = width;
+    for (const mode of ['panels', 'git', 'search']) {
+      c.drMode = mode;
+      assert.equal(c.drMax(), 932, `${mode} at ${width}px keeps composer clearance without an 80vh cap`);
+    }
+  }
+  composerTop = 800; assert.equal(c.drMax(), 712, 'composer growth');
+  headerBottom = 80; assert.equal(c.drMax(), 680, 'header wrapping');
+  composerVisible = false; assert.equal(c.drMax(), 1000, 'no composer reaches viewport bottom');
+  c.window.innerHeight = 900; assert.equal(c.drMax(), 820, 'window resize');
+  composerVisible = true; composerTop = 90; assert.equal(c.drMax(), 0, 'no negative room');
+  assert.doesNotMatch(js, /ws\.dashboard\.drawer\.h|drDrag|drSetH|DR_DEF|DR_MIN/);
+  assert.match(js, /drGeometry\.observe\(\$\("composer"\)\)/);
+  assert.match(js, /var h = drMax\(\)/);
+});
+
+test('only the active sheet opener hides; closed handle signals remain in place', () => {
+  assert.match(css, /\.drawer\.open\.panels #drhandle, \.drawer\.open\.search #shandle, \.drawer\.open\.git #r-git \{ visibility: hidden; pointer-events: none; \}/);
+  assert.doesNotMatch(css, /cursor: grab|touch-action: none|\.drawer\.drag/);
+  assert.match(css, /\.dr-handle\.wait \.dr-wait \{ display: inline-flex; \}/);
+  assert.match(js, /drhandle\.addEventListener\("click", function \(\) \{\s*drSetOpen\(!\(drOpen && drMode === "panels"\), "panels"\)/);
+  assert.match(js, /drhandle\.setAttribute\("aria-label", t\)/);
+  assert.match(js, /drBadge \|\| drSwap/);
+});
+
+test('closed opener clicks open full sheets and the fold closes back to that opener', () => {
+  function node() {
+    const classes = new Set();
+    return { style: { setProperty() {} }, attrs: {}, listeners: {}, hidden: false,
+      classList: { toggle(k, on) { if (on) classes.add(k); else classes.delete(k); }, contains: k => classes.has(k) },
+      setAttribute(k, v) { this.attrs[k] = v; }, addEventListener(k, fn) { this.listeners[k] = fn; },
+      contains: () => false, focus() { c.doc.activeElement = this; } };
+  }
+  const nodes = Object.fromEntries(['drawer', 'drsheet', 'drclip', 'drbody', 'gbody', 'sbody', 'drhandle', 'shandle', 'gitRegion', 'drfold'].map(k => [k, node()]));
+  const git = node(), documentClicks = [], saved = [];
+  const c = vm.createContext({ ...nodes, doc: { activeElement: null, addEventListener: (type, fn) => documentClicks.push(fn) },
+    ghandle: () => git, drHeaderBottom: () => 48, drMax: () => 812,
+    ghSync() {}, drTitle() {}, drFill() {}, wtLoad() {}, hdLoad() {}, notesLoad() {}, gitOpened() {}, drDot() {}, drAnnounce() {},
+    wsT: k => k, save: (k, v) => saved.push([k, v]), tkApi: null });
+  vm.runInContext(section('  var DR_OPEN =', '  var sbody ='), c);
+  c.drHas = true; c.drfold = nodes.drfold;
+  vm.runInContext(section('  function drFoldShow(mode)', '  function drTitle()'), c);
+  vm.runInContext(section('  function drApply(anim)', '  // ghSync marks'), c);
+  vm.runInContext(section('  function drSetOpen(open, mode)', '  if (drawer) {'), c);
+  vm.runInContext(section('    drhandle.addEventListener("click"', '    // A card\'s title bar'), c);
+  for (const [mode, opener, click] of [
+    ['panels', nodes.drhandle, () => nodes.drhandle.listeners.click()],
+    ['git', git, () => documentClicks[0]({ target: { closest: () => git } })],
+    ['search', nodes.shandle, () => nodes.shandle.listeners.click()]
+  ]) {
+    click();
+    assert.equal(c.drOpen, true, `${mode} closed opener works`);
+    assert.equal(c.drMode, mode);
+    assert.equal(nodes.drsheet.style.height, '812px');
+    assert.equal(nodes.drclip.style.height, '812px');
+    assert.equal(nodes.drawer.classList.contains(mode), true, 'active opener hiding selector is enabled');
+    assert.equal(nodes.drfold.hidden, false);
+    c.doc.activeElement = nodes.drfold; c.drFold();
+    assert.equal(c.drOpen, false);
+    assert.equal(nodes.drclip.style.height, '0px');
+    assert.equal(nodes.drfold.hidden, true);
+    assert.equal(c.doc.activeElement, opener, 'fold returns keyboard focus to the visible opener');
+  }
+  assert.ok(saved.every(([key]) => key !== 'ws.dashboard.drawer.h'));
 });
 
 class El {

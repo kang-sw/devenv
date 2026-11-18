@@ -6,34 +6,24 @@
   // four panels are the first entries: views onto the one panels region,
   // read again after each swap, so a later entry registers here without
   // reworking the frame. The sheet shows every present entry's card at once
-  // and the handle holds one icon per present entry. Open state and height
-  // are this browser's (ws.dashboard.drawer*).
+  // and the handle holds one icon per present entry. Open state is this
+  // browser's (ws.dashboard.drawer*); height always fills the available room.
   //
   // The git handle (the git region, left of the handle) opens the same frame
   // on the git drawer's sheet (#gbody) instead of the panels: drMode is the
   // sheet the frame shows, "panels" or "git", and only the handle of the
-  // shown sheet rides its bottom edge. The git sheet's open state is never
-  // kept. Both handles drag (drDragStart, below).
+  // shown sheet is hidden. The git sheet's open state is never kept.
   //
-  // One height for every drawer: drH is the height the panels, the git
-  // sheet, and each tracker store's drawer open at (the tracker reads and
-  // sets it through its drawerHeight option), so dragging any of their
-  // handles sets it for all. Each drawer clamps it with its own limits when
-  // it shows; the stored value is the drag's result.
-  //
-  // While a sheet shows, the fold button (#drfold, built below) sits in the
-  // slot its riding handle left at the top, at that handle's width (--drw,
-  // --ghw), and closes the sheet as a click on the handle does.
+  // Every drawer fills from the header bottom to above the composer (or
+  // the viewport bottom without one), including the tracker's store sheets.
+  // While a sheet shows, the fold button (#drfold, built below) replaces its
+  // opener at the top, at that handle's width (--drw, --ghw), and closes it.
   var drawer = $("drawer"), drclip = $("drclip"), drsheet = $("drsheet"), drbody = $("drbody");
   var drhandle = $("drhandle"), drheader = doc.querySelector(".dwrap > .top");
   var gbody = $("gbody"), gitRegion = region("git");
-  var DR_OPEN = "ws.dashboard.drawer", DR_H = "ws.dashboard.drawer.h", DR_SEARCH = "ws.dashboard.drawer.search";
-  var DR_MIN = 160, DR_DEF = 320, DR_SHUT = 80;
-  var drRoomW = -1, drGhOff = -1, drEntries = [], drWant = false, drOpen = false, drHas = false, drH = DR_DEF, drTop = 0;
-  var drMode = "panels", drShown = "", drfold = null, drFoldW = -1, drFoldGw = -1, drHSet = false;
-  // The stored height is read with or without the frame: a page with no
-  // session drawer still shares it with the tracker's store drawers.
-  (function () { var h = parseFloat(load(DR_H)); if (isFinite(h) && h > 0) { drH = h; drHSet = true; } })();
+  var DR_OPEN = "ws.dashboard.drawer", DR_SEARCH = "ws.dashboard.drawer.search";
+  var drRoomW = -1, drGhOff = -1, drEntries = [], drWant = false, drOpen = false, drHas = false, drTop = 0;
+  var drMode = "panels", drShown = "", drfold = null, drFoldW = -1, drFoldGw = -1;
   var sbody = null, shandle = null;
   if (drawer) {
     sbody = doc.createElement("div"); sbody.id = "sbody"; sbody.className = "dr-search"; sbody.hidden = true;
@@ -321,8 +311,8 @@
     drhandle.title = t;
     drhandle.setAttribute("aria-label", t);
   }
-  // drawerWait marks the handle while an approval waits, open or closed:
-  // an open drawer can cover the agents tree's approval row. The tree
+  // drawerWait keeps the opener's approval signal current even while hidden.
+  // The tree
   // region's hidden compact roster (.ag-source) does not count: it repeats
   // this tree's running rows and adds linked delegate sessions' agents,
   // whose approvals are not this session's to wait on.
@@ -339,45 +329,30 @@
   function drHeaderBottom() {
     return drheader ? Math.max(0, Math.round(drheader.getBoundingClientRect().bottom)) : 0;
   }
-  function drMeasure() {
-    drTop = drHeaderBottom();
-    drawer.style.setProperty("--drtop", drTop + "px");
-  }
-  // drMax is the tallest sheet: 80% of the window, and short of the
-  // composer with the handle below it.
+  // One maximum for every sheet. Retain the composer's existing clearance;
+  // without a visible composer the sheet reaches the viewport bottom.
   function drMax() {
-    var m = Math.round(window.innerHeight * 0.8), c = $("composer");
-    if (visible(c)) m = Math.min(m, Math.round(c.getBoundingClientRect().top) - drTop - drhandle.offsetHeight - 6);
+    var top = drHeaderBottom(), m = window.innerHeight - top, c = $("composer");
+    if (visible(c)) m = Math.min(m, Math.round(c.getBoundingClientRect().top) - top - drhandle.offsetHeight - 6);
     return Math.max(0, m);
   }
-  function drClamp(h) { var hi = drMax(); return Math.max(Math.min(DR_MIN, hi), Math.min(hi, h)); }
-  // drSetH sets the one drawer height (a drag's release, here or on a
-  // tracker store's handle) and keeps it.
-  function drSetH(h) { drH = h; drHSet = true; save(DR_H, String(h)); }
-  // Only an untouched wide panels sheet gets the taller default. Narrow,
-  // git/search and tracker drawers keep 320px; every dragged height wins.
-  function drHeight() { return !drHSet && drMode === "panels" && window.innerWidth >= 760 ? Math.round(window.innerHeight * 0.6) : drH; }
   // drApply lays the drawer out for its state; anim animates a click's
   // toggle only.
   function drApply(anim) {
     if (!drawer) return;
     drTop = drHeaderBottom();
-    var h = drClamp(drHeight()), git = drMode === "git", search = drMode === "search";
+    var h = drMax(), git = drMode === "git", search = drMode === "search";
     drawer.style.setProperty("--drtop", drTop + "px");
     drawer.classList.toggle("anim", !!anim);
     drawer.classList.toggle("open", drOpen);
+    ["panels", "git", "search"].forEach(function (mode) { drawer.classList.toggle(mode, drMode === mode); });
     drbody.hidden = git || search;
     if (gbody) gbody.hidden = !git;
     if (sbody) sbody.hidden = !search;
     drsheet.setAttribute("aria-label", wsT(search ? "js.tk.qs.tip" : "js.drawer.open"));
     drsheet.style.height = h + "px";
     drclip.style.height = (drOpen ? h : 0) + "px";
-    drhandle.style.top = (drOpen && !git && !search ? drTop + h : 0) + "px";
-    if (shandle) {
-      shandle.style.top = (drOpen && search ? drTop + h : 0) + "px";
-      shandle.setAttribute("aria-expanded", String(drOpen && search));
-    }
-    if (gitRegion) gitRegion.style.top = (drOpen && git ? drTop + h : 0) + "px";
+    if (shandle) shandle.setAttribute("aria-expanded", String(drOpen && search));
     drhandle.setAttribute("aria-expanded", String(drOpen && !git && !search));
     drFoldShow(drOpen ? drMode : "");
     ghSync();
@@ -432,13 +407,13 @@
   // on its handle closes it, and keyboard focus goes to that handle, since
   // the button hides.
   function drFold() {
-    if (drDragged || !drOpen) return;
+    if (!drOpen) return;
     var back = drMode === "search" && shandle || drMode === "git" && ghandle() || drhandle, kb = doc.activeElement === drfold;
     drSetOpen(false);
     if (kb) back.focus();
   }
   if (drawer) {
-    // The fold button, ahead of the handles so a riding handle passes over it.
+    // The fold button replaces the active sheet's opener.
     drfold = doc.createElement("button");
     drfold.type = "button";
     drfold.className = "dr-fold";
@@ -453,92 +428,16 @@
     drWant = load(DR_OPEN) === "1";
     drawerSync();
     drawerWait();
-    // drag: either handle follows the pointer (the git handle with its
-    // region); past the header's bottom the sheet comes with it, and the
-    // release sets the one height or, short of DR_SHUT, closes. A press that
-    // never moves is a click. The git handle is found per press, since a
-    // region swap replaces it, and the moves and the release are heard on
-    // the document.
-    var drDrag = null, drDragged = false;
-    function drDragStart(e) {
-      var h = e.target.closest && e.target.closest("#drhandle, #ghandle, #shandle");
-      if (!h || (e.button !== undefined && e.button !== 0)) return;
-      var git = h.id === "ghandle", search = h.id === "shandle", rider = git ? gitRegion : search ? shandle : drhandle;
-      drMeasure();
-      drDrag = { mode: git ? "git" : search ? "search" : "panels", rider: rider, id: e.pointerId, y0: e.clientY, off: e.clientY - rider.getBoundingClientRect().top, moved: false, ext: 0 };
-      if (!git) try { h.setPointerCapture(e.pointerId); } catch (x) { /* no capture: the moves still land */ }
-    }
-    function drDragMove(e) {
-      var d = drDrag;
-      if (!d) return;
-      // A move with the primary button up is a release this document never
-      // heard: a flick on the git handle, before its drag takes capture, can
-      // send the first move and the release to a topic frame. The drag ends
-      // there and the sheet goes back as it stood, since that release's
-      // position is unknown.
-      if (e.buttons !== undefined && (e.buttons & 1) === 0) { drAbort(); return; }
-      if (!d.moved && Math.abs(e.clientY - d.y0) < 5) return;
-      // The git drag captures on its region once it moves: the region
-      // outlives a swap of the handle, which would drop a capture on the
-      // handle and leave the moves to whatever is under the pointer (a topic
-      // body's frame keeps them). A press that never moves keeps its click
-      // on the handle.
-      if (!d.moved && d.mode === "git") try { d.rider.setPointerCapture(d.id); } catch (x) { /* no capture: the moves still land */ }
-      if (!d.moved && !drOpen) drAnnounce();
-      // Dragging one sheet's handle over the other open sheet brings its
-      // own sheet in that one's place.
-      if (!d.moved && drMode !== d.mode) { drMode = d.mode; drApply(false); }
-      if (!d.moved) drFoldShow(d.mode);
-      d.moved = true;
-      var y = e.clientY - d.off, max = drMax(), ext = Math.max(0, Math.min(max, y - drTop));
-      d.ext = ext;
-      drawer.classList.remove("anim");
-      drawer.classList.add("drag");
-      drsheet.style.height = Math.max(Math.min(DR_MIN, max), ext) + "px";
-      drclip.style.height = ext + "px";
-      d.rider.style.top = (ext > 0 ? drTop + ext : Math.max(0, Math.min(y, drTop))) + "px";
-    }
-    // drAbort ends a drag without its release: a moved one restores the
-    // layout drApply draws for the state before the drag.
-    function drAbort() {
-      var d = drDrag;
-      drDrag = null;
-      if (!d || !d.moved) return;
-      drawer.classList.remove("drag");
-      drApply(false);
-    }
-    function drEnd() {
-      var d = drDrag;
-      drDrag = null;
-      if (!d || !d.moved) return; // a press that stayed put is a click
-      drawer.classList.remove("drag");
-      drDragged = true;
-      setTimeout(function () { drDragged = false; }, 0);
-      if (d.ext < DR_SHUT) { drSetOpen(false); return; }
-      drSetH(drClamp(d.ext));
-      drMode = d.mode;
-      drOpen = true;
-      drWant = d.mode === "panels";
-      save(DR_OPEN, drWant ? "1" : null);
-      save(DR_SEARCH, d.mode === "search" ? "1" : null);
-      if (drWant) { drSwap = false; drDot(); }
-      drApply(false);
-    }
-    doc.addEventListener("pointerdown", drDragStart);
-    doc.addEventListener("pointermove", drDragMove);
-    doc.addEventListener("pointerup", drEnd);
-    doc.addEventListener("pointercancel", drEnd);
     drhandle.addEventListener("click", function () {
-      if (drDragged) return;
       drSetOpen(!(drOpen && drMode === "panels"), "panels");
     });
     shandle.addEventListener("click", function () {
-      if (!drDragged) drSetOpen(!(drOpen && drMode === "search"), "search");
+      drSetOpen(!(drOpen && drMode === "search"), "search");
     });
     // The git handle toggles the git sheet, or brings it in place of the
     // panels; it is looked up per click, since a swap replaces it.
     doc.addEventListener("click", function (e) {
-      if (drDragged || !e.target.closest || !e.target.closest("#ghandle")) return;
+      if (!e.target.closest || !e.target.closest("#ghandle")) return;
       drSetOpen(!(drOpen && drMode === "git"), "git");
     });
     // A card's title bar is not a toggle: every card stays open.
@@ -566,14 +465,18 @@
     // opens counts as inside.
     doc.addEventListener("click", function (e) {
       var t = e.target;
-      if (!drOpen || drDragged || !t || !t.closest) return;
+      if (!drOpen || !t || !t.closest) return;
       if (t.closest("#drclip, #drhandle, #shandle, #drfold, #r-git, .lmenu, .gwin-back")) return;
       drSetOpen(false);
     }, true);
     // The header can wrap or change height (a chip appears): the sheet
-    // follows its bottom edge. A resize re-clamps the height without saving.
+    // follows its bottom edge, and composer growth keeps the clearance.
     window.addEventListener("resize", function () { drApply(false); });
-    if (window.ResizeObserver && drheader) new ResizeObserver(function () { drApply(false); }).observe(drheader);
+    if (window.ResizeObserver) {
+      var drGeometry = new ResizeObserver(function () { drApply(false); });
+      if (drheader) drGeometry.observe(drheader);
+      if ($("composer")) drGeometry.observe($("composer"));
+    }
     // The handles' widths follow their contents; the header pads clear of
     // them. Padding changes the shallower header's observed content box:
     // write it next frame, not during this native resize delivery.
@@ -601,7 +504,7 @@
       if (drScrollFrame || !(drHas || ghandle())) return;
       drScrollFrame = requestAnimationFrame(function () {
         drScrollFrame = 0;
-        if (!drDrag && drHeaderBottom() !== drTop) drApply(false);
+        if (drHeaderBottom() !== drTop) drApply(false);
       });
     }, { passive: true });
     drOpen = drHas && drWant;
