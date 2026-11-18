@@ -76,8 +76,12 @@
     if (/^item\.(assign|accept|decline|return|handoff|unassign)$/.test(t)) return 'assign';
     return 'item';
   }
+  function historyLoading() {
+    return '<p role="status">' + esc(AD.historyError && AD.historyError(ui.store) || wsT('js.tk.loading')) + '</p>';
+  }
   function activityBody() {
-    var f = ui.act, rows = VS.events.filter(function (n) {
+    if (AD.history && !AD.history(ui.store)) return historyLoading();
+    var f = ui.act, rows = (VS.historyEvents || VS.events).filter(function (n) {
       return (f.family === 'all' || family(n.type) === f.family) && (f.member === 'all' || n.member === f.member) &&
         (!f.flagged || n.status !== 'applied') && (!f.conc || n.markers.length);
     }).slice().sort(function (a, b) { return String(b.ts) < String(a.ts) ? -1 : String(b.ts) > String(a.ts) ? 1 : 0; });
@@ -223,6 +227,7 @@
   // The status popover: the clone ref, the remote state, the store's counts, the unpushed
   // batch contents, the host's syncTools, and the apply button.
   function syncPopHtml() {
+    if (AD.history) AD.history(ui.store);
     var vs = VS, s = vs.sync, remote = vs.store.remote, events = unpushedN(vs), tools = X.syncTools ? X.syncTools(ui.store, vs, H) || '' : '';
     var nMem = Object.keys(vs.members).filter(function (id) { return !vs.members[id].removed; }).length;
     var h = '<div class="mh"><b>' + esc(vs.store.label) + '</b></div><div class="spop">';
@@ -238,7 +243,7 @@
       h += '<div class="sbatch"><b>' + wsT("js.tk.sync.list", s.unpushed.map(function (c) { return c.open ? wsT("js.tk.sync.openn", c.events.length) : wsT("js.tk.sync.commitn", c.events.length); }).join(', ')) + '</b><ul class="plain">' +
         s.unpushed.map(function (c) {
           return '<li><b>' + (c.open ? wsT("js.tk.flag.open") : wsT("js.tk.sync.closed")) + '</b> <span class="muted">' + esc(fmtTs(c.ts)) + '</span>: ' + c.events.map(function (id) {
-            var n = EV[id]; return esc(alias(id)) + (n ? ' ' + esc(n.type) : '');
+            var n = EV[id] || (VS.historyEvents || []).filter(function (e) { return e.id === id; })[0]; return esc(alias(id)) + (n ? ' ' + esc(n.type) : '');
           }).join(', ') + '</li>';
         }).join('') + '</ul><p class="muted">' + wsT("js.tk.sync.batchnote") + '</p></div>';
     }
@@ -275,8 +280,8 @@
   function tabSig(k, v) {
     if (k === 'items') return VS.my.badge.join(',');
     if (k === 'notify') { var rm = readMap(); return feedEntries(v).filter(function (x) { return !rm[x.key]; }).map(function (x) { return x.key; }).join(','); }
-    if (k === 'activity') return String(VS.events.length);
-    if (k === 'org') return VS.events.filter(function (e) { return /^roles\./.test(e.type); }).length + '|' + Object.keys(VS.members).length;
+    if (k === 'activity') return String(VS.stats.events);
+    if (k === 'org') return JSON.stringify([VS.members, VS.labels]);
     return '';
   }
   function tabSeen() { return (ui.tabSeen[seenKey(ui.store)] = ui.tabSeen[seenKey(ui.store)] || {}); }

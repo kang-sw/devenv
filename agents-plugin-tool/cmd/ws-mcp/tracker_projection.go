@@ -54,6 +54,7 @@ type trackerItemProjection struct {
 	Notices     []wstracker.Notice               `json:"notices"`
 	CCNotices   []wstracker.CCNotice             `json:"ccNotices"`
 	Time        trackerItemTime                  `json:"time"`
+	Flagged     int                              `json:"flagged"`
 }
 
 // Time makes browser-derived due chips and the 14-day recently-closed fold
@@ -90,6 +91,7 @@ type trackerFeedEntry struct {
 	TS          string   `json:"ts"`
 	Event       *string  `json:"ev"`
 	By          string   `json:"by,omitempty"`
+	Author      string   `json:"author,omitempty"`
 	To          string   `json:"to,omitempty"`
 	From        string   `json:"from,omitempty"`
 	EndedBy     string   `json:"endedBy,omitempty"`
@@ -136,6 +138,25 @@ func projectTracker(id string, v *wstrackerhost.StoreView, seen wsdashboard.Trac
 		// timestamp for the page's Date.parse(now) closed-window arithmetic.
 		globals["now"] = v.Now[:13] + ":00:00Z"
 	}
+	// Removed labels still have names in historical thread lines. Carry only
+	// the derived names, not the global roles-event payloads.
+	labelNames := map[string]string{}
+	for _, e := range v.Events {
+		if e.Status != "applied" {
+			continue
+		}
+		var p struct{ Label, Name string }
+		if e.Type == "roles.add_label" || e.Type == "roles.edit_label" {
+			if json.Unmarshal(e.Payload, &p) == nil {
+				key := e.ID
+				if e.Type == "roles.edit_label" {
+					key = p.Label
+				}
+				labelNames[key] = p.Name
+			}
+		}
+	}
+	globals["labelNames"] = labelNames
 	for k, value := range globals {
 		raw, err := json.Marshal(value)
 		if err != nil {
@@ -212,10 +233,32 @@ func projectTracker(id string, v *wstrackerhost.StoreView, seen wsdashboard.Trac
 		}
 	}
 	for iid, in := range inputs {
+		// The item window also renders incoming comment references and reply
+		// parents. Include them in this bundle AND its version, so an edit to
+		// another thread cannot leave this window's snippet stale.
+		for _, cid := range in.Item.Backrefs {
+			if c, ok := v.Comments[cid]; ok {
+				in.Comments[cid] = c
+			}
+		}
+		parents := []string{}
+		for _, c := range in.Comments {
+			parents = append(parents, trackerString(c.ReplyTo))
+		}
+		for _, cid := range parents {
+			if parent, ok := v.Comments[cid]; ok {
+				in.Comments[parent.ID] = parent
+			}
+		}
 		flags := map[string][2]bool{}
 		for _, eid := range in.Item.Thread {
 			if e, ok := events[eid]; ok {
 				in.Events = append(in.Events, e)
+				if e.Status == "flagged" && trackerString(e.Thread) == iid {
+					row := rows[iid]
+					row.Flagged++
+					rows[iid] = row
+				}
 				flags[eid] = [2]bool{local[eid], open[eid]}
 			}
 		}
@@ -493,6 +536,11 @@ func trackerProjectionFeed(v *wstrackerhost.StoreView, events map[string]wstrack
 		if it, ok := v.Items[e.Item]; ok && !it.Hidden {
 			if eid != "" {
 				e.Event = &eid
+				if c, ok := v.Comments[eid]; ok {
+					e.Author = c.Author
+				} else {
+					e.Author = events[eid].Member
+				}
 			}
 			e.Snippet = trackerFeedSnippet(e.Snippet)
 			out = append(out, e)

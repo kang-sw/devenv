@@ -7,7 +7,7 @@
   // (in the product the daemon keeps it per clone on the local filesystem).
   var NK = { assigned: "js.tk.nk.assigned", pending: "js.tk.nk.pending", answer: "js.tk.nk.answer", reference: "js.tk.nk.reference", done: "js.tk.nk.done", blocked: "js.tk.nk.blocked", dropped: "js.tk.nk.dropped",
     confirm: "js.tk.nk.confirm", reply: "js.tk.nk.reply", due: "js.tk.nk.due", mention: "js.tk.nk.mention", request: "js.tk.nk.request", cc: "js.tk.nk.cc" };
-  function snippet(s) { s = String(s || ''); return '&ldquo;' + esc(s.length > 80 ? s.slice(0, 77) + '...' : s) + '&rdquo;'; }
+  function snippet(s) { var chars = Array.from(String(s || '')); return '&ldquo;' + esc(chars.length > 80 ? chars.slice(0, 77).join('') + '...' : chars.join('')) + '&rdquo;'; }
   // Every entry also carries `ev`, the event it is about (none for a due date, which has
   // none), so a click can open the item window at what the entry refers to (focusTarget).
   var STATUS_EV = { 'item.status': 1, 'item.close': 1, 'item.confirm': 1, 'item.reject': 1, 'item.reopen': 1 };
@@ -30,7 +30,34 @@
     var txt = x.type === 'item.status' ? (x.by === x.to ? wsT("js.tk.feed.cc.status.own", by, esc(stLabel(x.status))) : wsT("js.tk.feed.cc.status", by, to, esc(stLabel(x.status)))) : wsT(CC_KEY[x.type], by, to);
     return txt + (p.note ? wsT("js.tk.ev.tail", snippet(p.note)) : '');
   }
+  // The bounded summary feed carries plain strings, never HTML or details.
+  function projectedFeedTxt(x, v) {
+    var by = esc(nm(x.by)), to = esc(nm(x.to)), txt;
+    switch (x.kind) {
+    case 'assigned': return x.inherited && x.ruleLevels != null ? wsT("js.tk.feed.assigned.all", by, esc(x.ruleLevels)) : wsT("js.tk.feed.assigned", by);
+    case 'due': return x.overdue ? wsT("js.tk.feed.overdue", esc(x.due)) : wsT("js.tk.due.today");
+    case 'pending': return wsT(x.handoff ? "js.tk.feed.pending.handoff" : "js.tk.feed.pending", by);
+    case 'request': txt = x.to === v ? wsT("js.tk.feed.request", by) : wsT("js.tk.feed.request.of", by, to); break;
+    case 'done': txt = wsT("js.tk.feed.finished", to); break;
+    case 'blocked': txt = wsT("js.tk.feed.blocked", to); break;
+    case 'dropped': txt = wsT("js.tk.feed.dropped", to, esc(nm(x.statusBy || x.to))); break;
+    case 'answer': txt = x.noticeKind === 'declined' ? wsT("js.tk.feed.declined", to) : wsT(x.handoff ? "js.tk.feed.returned.handoff" : "js.tk.feed.returned", esc(nm(x.endedBy)), to); break;
+    case 'reference': txt = x.noticeKind === 'handoff' ? wsT("js.tk.feed.tookover", to, esc(nm(x.from))) : x.handoff ? wsT("js.tk.feed.accepted.handoff", to) : wsT("js.tk.feed.accepted", to, by); break;
+    case 'confirm': return wsT("js.tk.feed.confirm", to);
+    case 'reply': return wsT("js.tk.feed.reply", by, snippet(x.snippet));
+    case 'mention': return x.bodyMention ? wsT("js.tk.feed.mention.body", by) : wsT("js.tk.feed.mention", by, snippet(x.snippet));
+    case 'cc':
+      if (x.type === 'comment.add') return wsT("js.tk.feed.cc.comment", by, snippet(x.snippet));
+      if (!CC_KEY[x.type]) return null;
+      txt = x.type === 'item.status' ? (x.by === x.to ? wsT("js.tk.feed.cc.status.own", by, esc(stLabel(x.status))) : wsT("js.tk.feed.cc.status", by, to, esc(stLabel(x.status)))) : wsT(CC_KEY[x.type], by, to); break;
+    default: return null;
+    }
+    return txt + (x.snippet ? wsT("js.tk.ev.tail", snippet(x.snippet)) : '');
+  }
   function feedEntries(v) {
+    if (Array.isArray(VS.feed)) return VS.feed.map(function (x) {
+      return { key: x.key, kind: x.kind, item: x.item, ts: String(x.ts || ''), html: projectedFeedTxt(x, v), ev: x.ev || null, author: x.author || '' };
+    }).filter(function (x) { return x.html != null && VS.items[x.item] && !VS.items[x.item].hidden; });
     var out = [], t = today();
     function add(key, kind, item, ts, html, ev) {
       if (VS.items[item] && !VS.items[item].hidden) out.push({ key: key, kind: kind, item: item, ts: String(ts || ''), html: html, ev: ev || null });
@@ -263,9 +290,15 @@
     var t = it.assignments.map(A).filter(function (r) { return r.state === 'live' && wrapped(r.status); }).map(function (r) { return String(r.lastUpdate); }).sort().pop();
     return t || String(it.lastActivity);
   }
-  function addClosed(ts, n, html) {
+  function recentlyClosed(item, rec) {
+    var time = (VS.itemTime || {})[item];
+    if (time) return rec ? !!time.recentAssignments[rec.id] : time.recentlyClosed;
+    var ts = rec ? rec.lastUpdate : closeTs(VS.items[item]);
+    return Date.parse(VS.now) - Date.parse(ts) <= CLOSED_DAYS * 86400000;
+  }
+  function addClosed(ts, n, html, recent) {
     if (!CLOSED) return;
-    if (SQ || Date.parse(VS.now) - Date.parse(ts) <= CLOSED_DAYS * 86400000) CLOSED.entries.push({ ts: ts, n: n, html: html });
+    if (SQ || (recent == null ? Date.parse(VS.now) - Date.parse(ts) <= CLOSED_DAYS * 86400000 : recent)) CLOSED.entries.push({ ts: ts, n: n, html: html });
     else CLOSED.older += n;
   }
   function closedHtml() {
@@ -360,7 +393,7 @@
   function listMine() {
     var mine = VS.my.assignments.map(A).filter(keepRec), open = mine.filter(function (r) { return !wrapped(r.status); }), done = mine.filter(function (r) { return wrapped(r.status); });
     var created = VS.my.created.filter(keepItem);
-    done.forEach(function (r) { addClosed(String(r.lastUpdate), 1, irow({ rk: 'mine:' + r.id, item: r.item, rec: r, closed: true })); });
+    done.forEach(function (r) { addClosed(String(r.lastUpdate), 1, irow({ rk: 'mine:' + r.id, item: r.item, rec: r, closed: true }), recentlyClosed(r.item, r)); });
     if (FILT && !mine.length && !created.length) return filterEmpty();
     var h = open.length ? treeRows(open.map(function (r) { return { rk: 'mine:' + r.id, item: r.item, rec: r }; }), 'mine:') : TF ? '' : SQ ? (created.length ? '' : '<p class="muted">' + wsT("js.tk.list.nomatch") + '</p>') : '<p class="muted">' + wsT("js.tk.list.mine.none") + '</p>';
     if (created.length) h += sub(wsT("js.tk.list.mine.created"), created.length) + treeRows(created.map(function (id) { return { rk: 'mine:c:' + id, item: id }; }), 'mine:c:');
@@ -392,7 +425,7 @@
   // would hold (related.closed) go to the recently-closed section like any scope's closed rows.
   function listRelated() {
     var R = VS.my.related || {}, cc = listOf(R.cc).filter(keepItem), mn = listOf(R.mentioned).filter(keepItem);
-    listOf(R.closed).filter(keepItem).forEach(function (id) { addClosed(closeTs(VS.items[id]), 1, irow({ rk: 'rel:x:' + id, item: id, closed: true })); });
+    listOf(R.closed).filter(keepItem).forEach(function (id) { addClosed(closeTs(VS.items[id]), 1, irow({ rk: 'rel:x:' + id, item: id, closed: true }), recentlyClosed(id)); });
     if (FILT && !cc.length && !mn.length) return filterEmpty();
     return relSecHtml('cc', wsT("js.tk.list.rel.cc"), cc, wsT("js.tk.list.rel.cc.none")) + relSecHtml('mentioned', wsT("js.tk.list.rel.mentioned"), mn, wsT("js.tk.list.rel.mentioned.none"));
   }
@@ -414,7 +447,7 @@
         return '<b>' + esc(nm(r.to)) + '</b>' + (r.depth ? ' <span class="muted">L' + r.depth + '</span>' : '') + ' ' + esc(SI.info(stKey(VS.items[id], r)).label) + (r.forced ? '' : ' <span class="muted">' + (r.handoffOf ? wsT("js.tk.list.given.handoff") : wsT("js.tk.list.given.sent")) + '</span>') +
           (r.note ? ' &ldquo;' + esc(r.note) + '&rdquo;' : '');
       });
-      if (wrapped(VS.items[id].status)) return addClosed(closeTs(VS.items[id]), 1, irow({ rk: 'given:' + id, item: id, more: lines.join('<br>'), closed: true }));
+      if (wrapped(VS.items[id].status)) return addClosed(closeTs(VS.items[id]), 1, irow({ rk: 'given:' + id, item: id, more: lines.join('<br>'), closed: true }), recentlyClosed(id));
       open.push({ rk: 'given:' + id, item: id, more: lines.join('<br>') });
     });
     return open.length ? treeRows(open, 'given:') : '<p class="muted">' + wsT("js.tk.list.given.none") + '</p>';
@@ -531,12 +564,13 @@
     function parentOf(id) { var par = base[id].parent; return par && base[par] ? par : null; }
     function size(id) { return 1 + kidsOf(id).reduce(function (a, k) { return a + size(k); }, 0); }
     function latest(id) { return kidsOf(id).reduce(function (a, k) { var t = latest(k); return t > a ? t : a; }, isClosed(id) ? closeTs(base[id]) : ''); }
+    function unitRecent(id) { return recentlyClosed(id) || kidsOf(id).some(unitRecent); }
     function unitRows(id, depth) {
       return irow({ rk: 'all:' + id, item: id, depth: depth, closed: true }) + kidsOf(id).map(function (k) { return unitRows(k, depth + 1); }).join('');
     }
     if (FILT) {
       var main = order.filter(function (id) { return inTree(id) && keepItem(id); }), shut = order.filter(function (id) { return isUnit(id) && keepItem(id); });
-      shut.forEach(function (id) { addClosed(closeTs(base[id]), 1, irow({ rk: 'all:' + id, item: id, closed: true })); });
+      shut.forEach(function (id) { addClosed(closeTs(base[id]), 1, irow({ rk: 'all:' + id, item: id, closed: true }), recentlyClosed(id)); });
       return bar + (main.length ? treeRows(main.map(function (id) { return { rk: 'all:' + id, item: id, closed: isClosed(id) }; }), 'all:', { keep: keepKind }) : shut.length ? '<p class="muted">' + wsT("js.tk.list.nomatch") + '</p>' : filterEmpty());
     }
     // the tree's matches are the open items and the greyed closed parents; a node's closed units are its "closed N" row
@@ -548,7 +582,7 @@
     }
     var tree = order.filter(inTree).map(function (id) { return { rk: 'all:' + id, item: id, closed: isClosed(id) }; });
     order.forEach(function (id) {
-      if (isUnit(id) && !(parentOf(id) && (isUnit(parentOf(id)) || inTree(parentOf(id))))) addClosed(latest(id), size(id), unitRows(id, 0));
+      if (isUnit(id) && !(parentOf(id) && (isUnit(parentOf(id)) || inTree(parentOf(id))))) addClosed(latest(id), size(id), unitRows(id, 0), unitRecent(id));
     });
     return bar + (tree.length ? treeHtml(ctxTree(tree, { kids: function (id) { return base[id] ? kidsOf(id).filter(function (k) { return inTree(k) || isUnit(k); }) : []; }, rest: closedRow, keep: function (id) { return !!base[id]; } }), 'all:') :
       '<div class="empty">' + wsT("js.tk.list.all.none") + '</div>');

@@ -63,6 +63,69 @@ func mustProjectTracker(t *testing.T, v *wstrackerhost.StoreView) wsdashboard.Tr
 	return p
 }
 
+func TestTrackerProjectionPageMetadataAndRelatedDetail(t *testing.T) {
+	v := projectionFixture()
+	it := v.Items["i"]
+	it.Backrefs = []string{"external"}
+	v.Items["i"] = it
+	v.Comments["external"] = wstracker.CommentView{ID: "external", Item: "other-item", Author: "other", Body: "incoming reference", ReplyTo: projectionString("parent")}
+	v.Comments["parent"] = wstracker.CommentView{ID: "parent", Item: "other-item", Body: "quoted parent"}
+	a := v.Assignments["a"]
+	a.Ended = &wstracker.Ended{ID: "removed", Type: "roles.remove_member"}
+	v.Assignments["a"] = a
+	v.Events[0].Status = "flagged"
+	v.Events = append(v.Events,
+		wstracker.EventView{ID: "removed", Type: "roles.remove_member", Status: "applied"},
+		wstracker.EventView{ID: "label", Type: "roles.add_label", Status: "applied", Payload: json.RawMessage(`{"name":"old name"}`)},
+		wstracker.EventView{ID: "rename", Type: "roles.edit_label", Status: "applied", Payload: json.RawMessage(`{"label":"label","name":"historical name"}`)},
+	)
+	p := mustProjectTracker(t, v)
+	var row trackerItemProjection
+	if err := json.Unmarshal(p.Items["i"].Data, &row); err != nil {
+		t.Fatal(err)
+	}
+	if row.Flagged != 1 || row.Assignments["a"].Ended.Type != "roles.remove_member" {
+		t.Fatalf("page metadata = %+v", row)
+	}
+	if !bytes.Contains(p.Globals["labelNames"], []byte("historical name")) {
+		t.Fatalf("label names = %s", p.Globals["labelNames"])
+	}
+	bundles, err := p.Detail(context.Background(), []string{"i"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d trackerDetailData
+	if err := json.Unmarshal(bundles["i"], &d); err != nil {
+		t.Fatal(err)
+	}
+	if d.Comments["external"].Body != "incoming reference" || d.Comments["parent"].Body != "quoted parent" {
+		t.Fatalf("related comments missing: %+v", d.Comments)
+	}
+	var feed []trackerFeedEntry
+	if err := json.Unmarshal(p.Feed, &feed); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range feed {
+		if e.Event != nil && *e.Event == "c" && e.Author != "other" {
+			t.Fatalf("comment actor = %q", e.Author)
+		}
+	}
+	before := p.Items["i"].DetailVersion
+	c := v.Comments["external"]
+	c.Body = "edited incoming reference"
+	v.Comments["external"] = c
+	if next := mustProjectTracker(t, v); next.Items["i"].DetailVersion == before {
+		t.Fatal("external snippet edit did not invalidate referencing detail")
+	}
+	// Map iteration may not change which reply ancestors the bundle contains.
+	for range 10 {
+		next := mustProjectTracker(t, v)
+		if next.Items["i"].DetailVersion != mustProjectTracker(t, v).Items["i"].DetailVersion {
+			t.Fatal("unstable detail version")
+		}
+	}
+}
+
 func TestTrackerProjectionSummaryContract(t *testing.T) {
 	v := projectionFixture()
 	p := mustProjectTracker(t, v)

@@ -579,7 +579,7 @@ function wsT(k, a, b) { return k + (a != null ? '(' + a + ')' : '') + (b != null
 function wsTn(k, n, a) { return k + '(' + n + ')(' + a + ')'; }
 var SI = { info: function (s) { return { label: s }; } };
 `+trackerFn(t, `function esc\(s\)`, false)+trackerFn(t, `function attr\(k, v\)`, true)+trackerFn(t, `function tipAttr\(text\)`, true)+trackerFn(t, `function partHtml\(cls, tip, inner, it, step\)`, false)+
-		trackerFn(t, `function partIcon\(icon\)`, true)+trackerFn(t, `var ENDED = `, true)+trackerFn(t, `function dueHtml\(it, st, ed\)`, false)+trackerFn(t, `function dayNum\(d\)`, true)+trackerFn(t, `function today\(\)`, true)+`
+		trackerFn(t, `function partIcon\(icon\)`, true)+trackerFn(t, `var ENDED = `, true)+trackerFn(t, `function itemDueState\(it\)`, false)+trackerFn(t, `function dueHtml\(it, st, ed\)`, false)+trackerFn(t, `function dayNum\(d\)`, true)+trackerFn(t, `function today\(\)`, true)+`
 function has(s, x) { return s.indexOf(x) >= 0; }
 var so = dueHtml({ id: 'a', kind: 'task', start: '2026-11-20', due: '' }, 'todo', true);
 check('start only: "from" in the neutral badge, opening the picker', [has(so, 'class="due2 from rp" data-act="due"'), has(so, '>js.tk.due.from(11-20)<'), has(so, 'data-tip="js.tk.due.tip.from(2026-11-20)"')], [true, true, true]);
@@ -587,6 +587,10 @@ check('start only without the edit right: a plain badge', has(dueHtml({ id: 'a',
 var both = dueHtml({ id: 'b', kind: 'task', start: '2026-11-10', due: '2026-11-16' }, 'todo', true);
 check('both ends: the due\'s D-N form, marked as a range, the start in the tooltip', [has(both, 'class="due2 soon rng rp"'), has(both, '>js.tk.due.dminus(3)<'), has(both, 'data-tip="js.tk.due.tip.from(2026-11-10) · ')], [true, true, true]);
 check('due only is unchanged', has(dueHtml({ id: 'c', kind: 'task', due: '2026-11-16' }, 'todo', true), 'class="due2 soon rp"'), true);
+VS.itemTime = { b: { dueState: 'future' } };
+check('matching projected time keeps the range badge', dueHtml({ id: 'b', kind: 'task', start: '2026-11-10', due: '2026-11-16' }, 'todo', true), both);
+VS.itemTime.b.dueState = 'today';
+check('projected time owns the due boundary', has(dueHtml({ id: 'b', kind: 'task', due: '2026-11-16' }, 'todo', true), 'class="due2 now rp"'), true);
 done();
 `)
 }
