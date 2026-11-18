@@ -357,7 +357,7 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "track/agent-v2",
         "phase": "active",
-        "touched_at": "2026-11-18T11:47:38Z",
+        "touched_at": "2026-11-18T11:59:25Z",
         "impl": {
           "branch": "impl/track/agent-v2/envy-mud-crepe"
         }
@@ -525,19 +525,6 @@
     },
     "261117-feat-ws-single-session-holder": {
       "registered_at": "2026-11-17T08:21:19Z"
-    },
-    "261117-feat-ws-tracker-view-summary-delta": {
-      "registered_at": "2026-11-17T10:04:15Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "active",
-        "touched_at": "2026-11-17T22:07:06Z",
-        "impl": {
-          "branch": "impl/develop/ember-bunny-cacti"
-        }
-      }
     },
     "261117-refactor-playbook-compression": {
       "registered_at": "2026-11-17T13:13:25Z"
