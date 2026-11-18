@@ -189,12 +189,12 @@ func TestCodexLeadSyntheticCreateControlsAndResume(t *testing.T) {
 	if jsonAt(p, "cwd") != h.root || jsonAt(p, "model") != "synthetic-model" || jsonAt(p, "sandbox") != "read-only" || jsonAt(p, "approvalPolicy") != "on-request" || jsonAt(p, "config", "agents", "enabled") != false {
 		t.Fatalf("thread configuration: %s", p)
 	}
-	for _, name := range []string{"ws", "wsflow"} {
-		server := jsonAt(p, "config", "mcp_servers", name)
-		want := map[string]any{"url": codexSyntheticEndpoint + wsdashboard.ProxyHTTPPath, "bearer_token_env_var": EnvMCPSessionToken, "required": true}
-		if !reflect.DeepEqual(server, want) {
-			t.Fatalf("HTTP shadow for %s: %v, want %v", name, server, want)
-		}
+	wantServers := map[string]any{
+		"ws":     map[string]any{"url": codexSyntheticEndpoint + wsdashboard.ProxyHTTPPath, "bearer_token_env_var": EnvMCPSessionToken, "required": true},
+		"wsflow": map[string]any{"url": codexSyntheticEndpoint + wsdashboard.ProxyHTTPPath, "enabled": false},
+	}
+	if servers := jsonAt(p, "config", "mcp_servers"); !reflect.DeepEqual(servers, wantServers) {
+		t.Fatalf("start must enable only ws and disable the wsflow shadow: %v, want %v", servers, wantServers)
 	}
 	if jsonAt(p, "baseInstructions") != nil || jsonAt(p, "config", "features") != nil || jsonAt(p, "config", "plugins") != nil {
 		t.Fatalf("must not replace defaults, disable hooks or disable plugins: %s", p)
@@ -258,6 +258,9 @@ func TestCodexLeadSyntheticCreateControlsAndResume(t *testing.T) {
 	resumes := h.holders.acpInputs(fresh, "thread/resume")
 	if fresh == holder || len(resumes) != 1 || jsonAt(resumes[0], "threadId") != "codex-s1" || h.record(id).MCPToken == rec.MCPToken || jsonAt(resumes[0], "config", "agents", "enabled") != false || jsonAt(resumes[0], "config", "mcp_servers", "ws") == nil {
 		t.Fatalf("resume re-passes identity and config: %s %+v", resumes, h.record(id))
+	}
+	if servers := jsonAt(resumes[0], "config", "mcp_servers"); !reflect.DeepEqual(servers, wantServers) {
+		t.Fatalf("resume must enable only ws and disable the wsflow shadow: %v, want %v", servers, wantServers)
 	}
 	h.holders.out(fresh, codexSyntheticEnd("t3", "resumed", "completed"))
 	h.idle(id)
