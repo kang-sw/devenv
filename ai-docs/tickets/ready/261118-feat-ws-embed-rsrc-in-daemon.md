@@ -384,6 +384,87 @@ were not performed. No shared daemon rebuild/restart/replacement, installed
 plugin mutation, credential operation, merge or push occurred. Phase 2 remains
 unimplemented; no last-running-executable record or registry retirement landed.
 
+#### Edition (b37c0a643) - 2026-11-19
+
+Applied the independent review's three Important findings and one Minor finding
+under the lead's explicit decisions; **Phase 1 only**, with no change to the
+original T1 compatibility verdict or Phase 2 scope.
+
+- Pi's shared cold-start/child-contract builder now runs package generation
+  before Go compilation (`agents-plugin-pi/src/local-devenv.ts:241`), using
+  its existing `python3` interpreter choice, the tool-directory cwd and the
+  launcher's 120-second timeout. Generation failure prevents compilation and
+  preserves its error; the real async seam honors the timeout and identifies
+  generation errors (`src/bridge.ts:623`). Unit/integration stubs distinguish
+  the two commands. `npm ci --ignore-scripts` avoided prepare-hook rewrites;
+  `npm run bundle` deliberately refreshed the distributed extension. Workflow
+  archives and both native first-party copies were refreshed with their own
+  producers, without changing the dependency closure.
+- Failed Pi-stage publication now checks a concurrent winner through the same
+  validator used for warm reuse; valid winners are accepted and our temp is
+  discarded, while invalid/unverifiable winners fail
+  (`agents-plugin-tool/internal/wsagent/pi_payload_stage.go:124,135`).
+  Deterministic tests cover valid, corrupt, missing-file, non-directory and
+  absent targets. Best-effort cleanup removes only sibling `.stage-*`
+  directories older than one hour (`:155`); recent temps, settled hash
+  directories and the zero-I/O same-process cache path are retained.
+- The generator's stat-only `package_input_paths` owns selection for both
+  generation and fingerprinting (`agents-plugin-tool/scripts/generate-package-assets.py:40`).
+  Launcher fingerprints use canonical relative path, size and mtime only;
+  they neither open asset contents nor inspect generated output. Canonical
+  additions/deletions and metadata edits still count, while generation cannot
+  churn the stamp. Both product launchers and the Pi mirror remain identical;
+  tests exercise both product copies with asset opens forbidden.
+
+**File-open measurement.** Python's audit hook around one controlled
+inspection-mode launcher `main` call, after module import, with the marker
+contract and healthy daemon probe supplied in memory: **355 asset content
+opens / 22,327,088 bytes before; 0 opens / 0 bytes after**. All controlled-main
+open attempts fell from 361 to 5, including imports and missing-file attempts.
+The measurement never connected to or started a real daemon. This is macOS
+supporting evidence, not a Windows antivirus latency measurement; canonical
+stat/directory operations remain.
+
+**Final verification.** Go commands below ran from `agents-plugin-tool/`;
+Go test subprocesses removed inherited `WS_*` settings and set
+`WS_TEST_EMBEDDED_PACKAGES=1`.
+
+- `gofmt -d internal/wsagent/pi_payload_stage{,_test}.go`: empty;
+  `go vet ./...`: pass.
+- `go test -p 1 ./internal/wspackage ./internal/wsrsrc ./internal/wsdoc ./internal/wsagent ./cmd/ws-mcp -count=1 -timeout 45m`:
+  pass (0.590s / 1.251s / 7.474s / 118.973s / 182.835s).
+- `go test ./internal/mcp -count=1 -timeout 45m`: pass, 898.814s.
+  `go test -race ./internal/wsagent -run 'TestPiInputStage' -count=1 -timeout 5m`:
+  pass. The initial broad run inherited tool/profile/dashboard restrictions
+  and stale intermediate assets; final isolated runs supersede it.
+- Repository root: `python3 -m unittest discover agents-plugin/tests`:
+  201 tests, 198 pass / 3 platform-only skips;
+  `python3 -m unittest discover agents-plugin-wsflow/tests`:
+  22 tests, 20 pass / 2 Windows-only skips;
+  `python3 -m unittest discover -s agents-plugin-tool/scripts -p test_generate_package_assets.py -v`:
+  9 pass. No missing dependency was skipped.
+- `npm test --prefix agents-plugin-pi`: 2,689 tests, 2,668 pass / **17
+  pre-existing failures** / 4 skips. A separately installed, standalone
+  `origin/develop` (`ee1e4de51971751370af6617fea319c2cbca54ff`) snapshot ran
+  2,688 tests, 2,667 pass / 17 fail / 4 skips. The final failing test-name
+  sets are exactly equal. Targeted local-devenv, child-wiring and mailbox-daemon
+  suites pass 46/46 using npm's environment sanitization.
+- Generator `--check`, workflow-bundle `--check`, both materializers'
+  `--check-source`, launcher `cmp`, and `git diff --check`: pass.
+
+**Verification incident and boundaries.** An initial baseline invocation
+incorrectly passed the real repository's `GIT_DIR`/scratch `GIT_WORK_TREE` into
+npm's Git-fixture subprocesses. They injected a shared `core.worktree`, test
+Git identity and 16 empty `init` commits on this implementation branch. Reflog
+and tree comparison proved the commits had exactly the original `1ebd8b02e`
+tree; the injected settings were removed and the branch pointer restored by
+compare-and-swap, preserving the implementation files and index. Authoritative
+npm comparison and affected-package verification were repeated after recovery,
+with no inherited Git redirection. The final branch/config checks are clean.
+No credential store, shared daemon lifecycle, push or Phase 2 operation occurred.
+The 17 baseline Pi failures and native Windows latency/live checks remain outside
+this bounded correction.
+
 ### Phase 2: Move hosted sessions off the plugin copy and retire the registry
 
 Goal: a hosted lead or worker starts with no installed plugin copy, and the
