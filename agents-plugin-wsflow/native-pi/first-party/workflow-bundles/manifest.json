@@ -1,6 +1,6 @@
 {
   "ws": {
-    "archive_sha256": "ed6ec022de07caba19da7796d116d47587f0e2eb5b50c5fb828b942c96f71dfe",
+    "archive_sha256": "1c5acb7498039c6d462ad4dc4f04984bb0cad6a9ec4e2eee3ec3ecdd745b504d",
     "files": {
       ".claude-plugin/plugin.json": "5998568b76e8c19521bf4f38d5c04de19f549fe47f37567f7cceea54e9b56300",
       ".codex-plugin/hooks.json": "e3f3ea60f82fb0795c63bf54b9208647f39cb3779f050d1c755fabdc8a434490",
@@ -54,7 +54,7 @@
       "rsrc/lead-delegate/lead-delegate.md": "bf7782cd88db2976b46d838b3f4a7faaea8b95d0e066a1f8e896503421f59ffc",
       "rsrc/lead-discuss/lead-discuss.md": "3cf8920dd6cfa765e67ad7be9fbfc7f51cd75c7efa880874028d9556df696f8e",
       "rsrc/lead-review/lead-review.md": "f83408c859023a0a38e2d043871900e809ca6fe22595cfb71455982534499dad",
-      "rsrc/lead-run/lead-run.md": "2c117d022d87a827abb2424130768db4204cfa2fa958fdaa6bd207d0377e8724",
+      "rsrc/lead-run/lead-run.md": "2a0caeb589bc87a81fb0e3895e19c60fc098174cb987fca538cd073f17070ca0",
       "rsrc/lead-ship/lead-ship.md": "0d93b718edc2a9a1dd86682e98f3e96cf06dbc15438f9fbd27a9c5bb858c265f",
       "rsrc/lead-ticket/lead-ticket.md": "0a3bf65b662cf451445c81420786e6eeb6708c2fde835f7d90f5f9533ee6edf0",
       "rsrc/lead-tune/lead-tune.md": "947b10ec5df377e79807206f5fe5e793ab2e9fa01683b0588896f946f5ec617c",
@@ -67,7 +67,7 @@
       "rsrc/lead-workflow-manual/native-spawn-binding.claude.md": "fc7258226abd15ad2baef2ef8a361f6777d8390868a595853f61812def0cf310",
       "rsrc/lead-workflow-manual/native-spawn-binding.codex.md": "ea1977984de016a95df292c3384e93982aa67b12bbd5e8850c7ed792acbdf284",
       "rsrc/lead-workflow-manual/native-spawn-binding.md": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "rsrc/manifest.json": "80ee2d4d14b18effe9566f0f3a0388977204c6940c2bf05ea5b0d20a08550428",
+      "rsrc/manifest.json": "9a205eca1ea3fb7642b251aeae13e175a6256a585614166c0261b940fcd9b4ef",
       "rsrc/reference-discovery/reference-discovery.md": "4492f45ecff14ec454754cd9af4775b33a0df1f9cd5cf705b3f75bad75defba2",
       "rsrc/reviewer/reviewer.md": "4f898165b33c7ecf010c1129d90640aabccd2a106dcedf4d5a83207bbfc67835",
       "rsrc/risk-rubric.md": "abbe290cf2538cf4b3b8ac387062d690770d5d818685ae06f0d133d6e7452012",
@@ -85,7 +85,7 @@
       "rsrc/ticket-worker/ticket-worker.md": "8764420ae7acc6e1fa2cee1e385a1493225207d68179ca1fa9ee6332a4c4ff44",
       "rsrc/tracker/tracker.md": "5bcd627f9630252ba25e5b6c3a604490db2bc92c97eb9d93bb997ec9b12bad4f",
       "rsrc/whiteboard/whiteboard.md": "6023a90b7a87b137e076f007c3792b94a483aa1816c4c56e0b19991ec14bc56d",
-      "rsrc/worker-stop-protocol.md": "a41c2a5d3ea2f4e310213e32821ac289ca51471139fb617ebd06fd27e55582a3",
+      "rsrc/worker-stop-protocol.md": "7870e882ebe7d0938b15fb0643369c77c947d1919293ae5e125855ce86200e2d",
       "runtime.json": "2bc9641391030a929bf7e672f8c3b8d159dfd606241f521a125c1ad24f652dc0",
       "skills/lead-audit-doc/SKILL.md": "910af43a6f9921271580584d590e14c76effba51350a502197c6fa307971df67",
       "skills/lead-bootstrap/AGENTS.template.md": "0d110240d487ceb39258a57fc0050d5b9d726d5d8f171c25f77fc150490be383",
@@ -106,7 +106,7 @@
     }
   },
   "wsflow": {
-    "archive_sha256": "4fa6b8abf1c47d44979eefb55fde7813b7df2e254a323525088e2a2dd3f11e67",
+    "archive_sha256": "8a101138bdbbb9941e2bcd999b42a6f87359d0ed084f60c222b71c85563083c7",
     "files": {
       ".claude-plugin/plugin.json": "cb7c1456b34e5302b9727f2b1802927a4181d5a28498162635ebddd0e363389c",
       ".codex-plugin/plugin.json": "b68d1ce2f56e06c7563a674f40ebd28fa7f313d319eef61b6d6209f2563a5fc0",
@@ -159,7 +159,7 @@
       "rsrc/lead-delegate/lead-delegate.md": "bf7782cd88db2976b46d838b3f4a7faaea8b95d0e066a1f8e896503421f59ffc",
       "rsrc/lead-discuss/lead-discuss.md": "3cf8920dd6cfa765e67ad7be9fbfc7f51cd75c7efa880874028d9556df696f8e",
       "rsrc/lead-review/lead-review.md": "f83408c859023a0a38e2d043871900e809ca6fe22595cfb71455982534499dad",
-      "rsrc/lead-run/lead-run.md": "2c117d022d87a827abb2424130768db4204cfa2fa958fdaa6bd207d0377e8724",
+      "rsrc/lead-run/lead-run.md": "2a0caeb589bc87a81fb0e3895e19c60fc098174cb987fca538cd073f17070ca0",
       "rsrc/lead-ship/lead-ship.md": "0d93b718edc2a9a1dd86682e98f3e96cf06dbc15438f9fbd27a9c5bb858c265f",
       "rsrc/lead-ticket/lead-ticket.md": "0a3bf65b662cf451445c81420786e6eeb6708c2fde835f7d90f5f9533ee6edf0",
       "rsrc/lead-tune/lead-tune.md": "947b10ec5df377e79807206f5fe5e793ab2e9fa01683b0588896f946f5ec617c",
@@ -172,7 +172,7 @@
       "rsrc/lead-workflow-manual/native-spawn-binding.claude.md": "fc7258226abd15ad2baef2ef8a361f6777d8390868a595853f61812def0cf310",
       "rsrc/lead-workflow-manual/native-spawn-binding.codex.md": "ea1977984de016a95df292c3384e93982aa67b12bbd5e8850c7ed792acbdf284",
       "rsrc/lead-workflow-manual/native-spawn-binding.md": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "rsrc/manifest.json": "80ee2d4d14b18effe9566f0f3a0388977204c6940c2bf05ea5b0d20a08550428",
+      "rsrc/manifest.json": "9a205eca1ea3fb7642b251aeae13e175a6256a585614166c0261b940fcd9b4ef",
       "rsrc/reference-discovery/reference-discovery.md": "4492f45ecff14ec454754cd9af4775b33a0df1f9cd5cf705b3f75bad75defba2",
       "rsrc/reviewer/reviewer.md": "4f898165b33c7ecf010c1129d90640aabccd2a106dcedf4d5a83207bbfc67835",
       "rsrc/risk-rubric.md": "abbe290cf2538cf4b3b8ac387062d690770d5d818685ae06f0d133d6e7452012",
@@ -190,7 +190,7 @@
       "rsrc/ticket-worker/ticket-worker.md": "8764420ae7acc6e1fa2cee1e385a1493225207d68179ca1fa9ee6332a4c4ff44",
       "rsrc/tracker/tracker.md": "5bcd627f9630252ba25e5b6c3a604490db2bc92c97eb9d93bb997ec9b12bad4f",
       "rsrc/whiteboard/whiteboard.md": "6023a90b7a87b137e076f007c3792b94a483aa1816c4c56e0b19991ec14bc56d",
-      "rsrc/worker-stop-protocol.md": "a41c2a5d3ea2f4e310213e32821ac289ca51471139fb617ebd06fd27e55582a3",
+      "rsrc/worker-stop-protocol.md": "7870e882ebe7d0938b15fb0643369c77c947d1919293ae5e125855ce86200e2d",
       "runtime.json": "d394e759d558decababe9493d0aa1d1e8da60ed6691d6b8afccafe428273290a",
       "skills/lead-audit-doc/SKILL.md": "a42494d1687900d3cd18bdccda893182b4f8a323338f4d913ed4e0fe9469b715",
       "skills/lead-bootstrap/AGENTS.template.md": "61ee71602aeec9b0b17cf4ee9fd30ad724c5e2f0edc0ec62b1a8bff0b72415fc",

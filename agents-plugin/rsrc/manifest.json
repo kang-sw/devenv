@@ -22,7 +22,7 @@
     "lead-delegate/lead-delegate.md": "bf7782cd88db2976b46d838b3f4a7faaea8b95d0e066a1f8e896503421f59ffc",
     "lead-discuss/lead-discuss.md": "3cf8920dd6cfa765e67ad7be9fbfc7f51cd75c7efa880874028d9556df696f8e",
     "lead-review/lead-review.md": "f83408c859023a0a38e2d043871900e809ca6fe22595cfb71455982534499dad",
-    "lead-run/lead-run.md": "2c117d022d87a827abb2424130768db4204cfa2fa958fdaa6bd207d0377e8724",
+    "lead-run/lead-run.md": "2a0caeb589bc87a81fb0e3895e19c60fc098174cb987fca538cd073f17070ca0",
     "lead-ship/lead-ship.md": "0d93b718edc2a9a1dd86682e98f3e96cf06dbc15438f9fbd27a9c5bb858c265f",
     "lead-ticket/lead-ticket.md": "0a3bf65b662cf451445c81420786e6eeb6708c2fde835f7d90f5f9533ee6edf0",
     "lead-tune/lead-tune.md": "947b10ec5df377e79807206f5fe5e793ab2e9fa01683b0588896f946f5ec617c",
@@ -52,6 +52,6 @@
     "ticket-worker/ticket-worker.md": "8764420ae7acc6e1fa2cee1e385a1493225207d68179ca1fa9ee6332a4c4ff44",
     "tracker/tracker.md": "5bcd627f9630252ba25e5b6c3a604490db2bc92c97eb9d93bb997ec9b12bad4f",
     "whiteboard/whiteboard.md": "6023a90b7a87b137e076f007c3792b94a483aa1816c4c56e0b19991ec14bc56d",
-    "worker-stop-protocol.md": "a41c2a5d3ea2f4e310213e32821ac289ca51471139fb617ebd06fd27e55582a3"
+    "worker-stop-protocol.md": "7870e882ebe7d0938b15fb0643369c77c947d1919293ae5e125855ce86200e2d"
   }
 }
