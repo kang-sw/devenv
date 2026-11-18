@@ -42,17 +42,34 @@ daemon is fully self-contained.
   rebuild. Rejected: `WS_RSRC_ROOT` winning when set (every plugin launcher
   sets it, so the embedded tree would go unused); the newer of the caller's
   plugin and the daemon winning.
-- (176)=b, 2026-11-18: the work lands on `develop`, through the main session,
-  which owns develop and the shipped rsrc. Rejected: carrying it on
-  track/agent-v2.
+- (176)=b, 2026-11-18, superseded by the owner at 23:14 the same day: the
+  ticket now goes to track/agent-v2 and starts after that track's current
+  work wraps up, because Phase 2 rewrites the hosted launch path that
+  agent-v2 owns ("이건 지금 거기서 하는 일이 마무리된 후에 넣기 좋은 작업으로
+  보여서요"). Rejected: landing it on develop through the main session.
+- Scope widened, owner 2026-11-18 23:14: hosted sessions stop depending on an
+  installed plugin copy. After the agent-v2 work, skills, hooks and
+  `claude-agents` are expected to be deprecated, so the only plugin-copy
+  inputs left are the launcher (`bin/ws-mcp-launcher.py`), the `native-pi`
+  payload (`internal/wsagent/pi_payload.go:42`) and the package manifests
+  (`config-manifest.json`, `dashboard-config-manifest.json`,
+  `runtime.json`). The owner called the registry fallback
+  (`hosted-plugin-roots.json` plus the same-minor check in
+  `ResolveHostedPlugin`, `internal/wsagent/hosted_plugins.go`) "duct tape".
+  The work runs in two phases. Phase 1 embeds the rsrc tree, the per-package
+  manifests (both packages, as in (174)) and the `native-pi` payload.
+  Phase 2 starts hosted sessions on the daemon's own executable instead of
+  Python plus the plugin launcher, and retires the registry and its
+  same-minor fallback. Rejected: rsrc only; one combined phase.
 - (177), 2026-11-18 (technical, owner ack): compatibility target T1 or
   better. The worker gives the verdict with cited read and write lines and
   stops above T2. The visible change is that an older plugin session
   connected to a newer daemon receives the daemon's playbook text; the worker
   checks that older skill shims still resolve every playbook name and
   variable they pass. Rejected: settling a tier before the source read.
-- Related deferral: owner (171), 2026-11-18, holds refreshing the installed
-  plugin copy until this ticket lands.
+- Owner (171), 2026-11-18, had deferred refreshing the installed plugin copy
+  until this ticket lands. Superseded at 23:14 the same day: the owner ran
+  `./install.sh` so the new playbooks reach sessions now.
 
 ## Constraints
 
@@ -65,9 +82,25 @@ daemon is fully self-contained.
 - The desktop build (`agents-plugin-tool/desktop-electron/scripts/assemble-daemon-input.cjs`)
   stages a full plugin package beside the binary today; settle at promotion
   whether it still stages rsrc.
+- Phase 2 must first establish why `ai-docs/manuals/ws-mcp.md` says a hosted
+  command is "never the daemon's staged executable", and why 260611 Phase 6b
+  (`6873b4800`) retired the earlier `wsprompt` go:embed bundle, before it
+  replaces the launcher.
+- Removing the registry fallback deletes functionality, so its exact removal
+  set is confirmed with the owner at promotion.
+- External Claude Code and Codex sessions keep connecting through their own
+  plugin's launcher; this ticket does not change that path.
 
 ## Phases
 
 ### Phase 1: Embed and serve the rsrc tree from the build
 
-- Phase text (file layout, the dev override env name, the launcher and desktop staging changes, tests) is settled at promotion to `ready/` on develop.
+- Phase text (file layout, the dev override env name, manifest and
+  `native-pi` embedding, desktop staging changes, tests) is settled at
+  promotion to `ready/` on track/agent-v2.
+
+### Phase 2: Start hosted sessions on the daemon's own executable
+
+- Phase text (launch command, hello and version handling now done by the
+  launcher, registry and same-minor fallback removal, tests) is settled at
+  promotion.
