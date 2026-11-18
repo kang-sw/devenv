@@ -564,7 +564,14 @@
       "registered_at": "2026-11-18T04:59:11Z"
     },
     "261118-feat-ws-xmlcmd-raw-element": {
-      "registered_at": "2026-11-18T05:18:35Z"
+      "registered_at": "2026-11-18T05:18:35Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "9091c57d68d03c76",
+        "track": "track/playbook",
+        "phase": "active",
+        "touched_at": "2026-11-18T06:20:59Z"
+      }
     }
   }
 }
