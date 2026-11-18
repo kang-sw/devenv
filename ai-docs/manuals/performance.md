@@ -56,9 +56,9 @@ prior to that work.
 
 Each segment's first line is a full snapshot, so recovery replays only the
 newest segment. A graceful close writes the legacy files once, so an older
-version can still read the store after a downgrade. This one-time whole-file write at shutdown is an
-owner-approved exception to Rule 2 under Rule 8, made for downgrade
-compatibility and off the interactive path.
+version can still read the store after a downgrade. This one-time whole-file write at shutdown is an owner-approved
+exception to Rule 2 under Rule 8, made for downgrade compatibility and off the
+interactive path.
 
 ## Measuring
 
