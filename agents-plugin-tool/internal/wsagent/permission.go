@@ -230,6 +230,9 @@ func (c *conv) setNativePermissionMode(mode string, user bool) error {
 	if !rec.Lead || len(c.r.opts.Backends[rec.Backend].PermissionModes) == 0 {
 		return categorized(ErrUnsupported, badRequest("the permission mode applies to a claude lead session only"))
 	}
+	if rec.Backend == BackendAgy && mode == "bypass" && !rec.agyBypass() && !user {
+		return &requestError{status: http.StatusForbidden, msg: "only the user may enable agy bypass through permission_mode"}
+	}
 	// Extension/native-only registrations retain their historical mode contract.
 	if c.r.supportsLeadPermission(rec.Backend, PermissionReadOnly) {
 		current, source, err := c.r.leadPermission(rec, c.dir)

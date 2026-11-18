@@ -2,6 +2,8 @@ package wsagent
 
 import (
 	"encoding/json"
+	"errors"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -115,15 +117,33 @@ func TestAgyDefaultLeadPromptsAndBypassToggle(t *testing.T) {
 	if agyBypassAnswers(h, holder, "req-waiting") != 0 || h.record(id).AgyBypass {
 		t.Fatal("default lead auto-allowed")
 	}
-	if st, err := h.runner.SetPermissionMode(id, "bypass"); err != nil || st.PermissionMode != "bypass" {
-		t.Fatalf("enable bypass: %+v %v", st, err)
+	// Non-user entry must fail before it changes intent or answers the
+	// waiting request. The trusted user seam is the settings route's same
+	// local && own decision, not a caller-supplied permission field.
+	_, err := h.runner.SetPermissionMode(id, "bypass")
+	var denied *requestError
+	if !errors.As(err, &denied) || denied.status != http.StatusForbidden || denied.msg != "only the user may enable agy bypass through permission_mode" {
+		t.Fatalf("non-user bypass entry: %v; want user-only 403", err)
+	}
+	h.quiesce(id)
+	if rec := h.record(id); rec.AgyBypass || rec.PermissionMode != "default" || len(rec.Answered) != 0 {
+		t.Fatalf("refused bypass changed the record: %+v", rec)
+	}
+	if st := h.state(id); st.PermissionMode != "default" || len(st.Approvals) != 1 || agyBypassAnswers(h, holder, "req-waiting") != 0 {
+		t.Fatalf("refused bypass auto-allowed a waiting request: %+v", st)
+	}
+	if st, err := h.runner.setPermissionMode(id, "bypass", true); err != nil || st.PermissionMode != "bypass" {
+		t.Fatalf("user enable bypass: %+v %v", st, err)
 	}
 	eventually(t, "release existing approval", func() bool { return agyBypassAnswers(h, holder, "req-waiting") == 1 })
 	if rec := h.record(id); !rec.AgyBypass || rec.PermissionMode != "default" {
 		t.Fatal("toggle persisted ws mode as native")
 	}
-	if _, err := h.runner.SetPermissionMode(id, "default"); err != nil {
-		t.Fatal(err)
+	if st, err := h.runner.SetPermissionMode(id, "bypass"); err != nil || st.PermissionMode != "bypass" {
+		t.Fatalf("non-user reselect existing bypass: %+v %v", st, err)
+	}
+	if st, err := h.runner.SetPermissionMode(id, "default"); err != nil || st.PermissionMode != "default" {
+		t.Fatalf("non-user leave bypass: %+v %v", st, err)
 	}
 	h.holders.out(holder, agyBypassAsk("manual-again", "req-manual"))
 	eventually(t, "manual again", func() bool { return len(h.state(id).Approvals) == 1 })
