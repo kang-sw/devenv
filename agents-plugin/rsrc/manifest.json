@@ -44,14 +44,14 @@
     "subagent-rules.md": "ef426a9d54e63ac8325c6ab7d3f65b1a57ef0174239df9fcb9c28c081135d2c5",
     "ticket-batch-selector/ticket-batch-selector.md": "ab9bef6c390bb3cf356996f9decc16a6d05eed60842d2c94c2f72b7d78e2f773",
     "ticket-fact-populator/ticket-fact-populator.md": "14257e430d8f6d6617ff10b2018bbb35bb24a786936278d04fcaa3aaf298a452",
-    "ticket-handler/ticket-handler.md": "eba0939b1eef22d4a326f9549c545775f392d0c4573a32216e6aa1bb135e3b20",
+    "ticket-handler/ticket-handler.md": "8d43cc1e4e07f7664e741c971939cbf140bc0017aaa3725c3ad93d6aad03f4b5",
     "ticket-reviewer-completeness/ticket-reviewer-completeness.md": "12efbce33b5311810a162974d99702252549639f1a064fd84331005328c60b37",
     "ticket-reviewer-design/ticket-reviewer-design.md": "1991aff08b2ba709a37910451dee6e2c5f2c5b189a27696b337220279a9f8f32",
     "ticket-selector/ticket-selector.md": "e547c5031d733a6546a99fb139cd11d9db3e80744cdc39787be961187993d9fd",
     "ticket-worker-elevated/ticket-worker-elevated.md": "8f5b8c4c1d3c7305b507d61f5d01431080df7108379dc673e1f883bc307b26d3",
     "ticket-worker/ticket-worker.md": "8764420ae7acc6e1fa2cee1e385a1493225207d68179ca1fa9ee6332a4c4ff44",
     "tracker/tracker.md": "5bcd627f9630252ba25e5b6c3a604490db2bc92c97eb9d93bb997ec9b12bad4f",
-    "whiteboard/whiteboard.md": "6023a90b7a87b137e076f007c3792b94a483aa1816c4c56e0b19991ec14bc56d",
+    "whiteboard/whiteboard.md": "45667e300252a8bcafd6971543cde8daecbe93f38c3d35ac26171536ad5e7b07",
     "worker-stop-protocol.md": "7870e882ebe7d0938b15fb0643369c77c947d1919293ae5e125855ce86200e2d"
   }
 }

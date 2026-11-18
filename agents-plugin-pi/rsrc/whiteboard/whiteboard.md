@@ -66,7 +66,7 @@ it.
   <wb:panel name="state" recap="Parser lands first">**Markdown**. a &lt; b is escaped here.</wb:panel>
   <wb:panel name="mockup" recap="Toolbar mockup"><wb:raw><div class="bar"><b>a < b</b></div></wb:raw></wb:panel>
   <wb:panel name="state">
-    <wb:change><wb:old>lands first</wb:old><wb:new>landed</wb:new></wb:change>
+    <wb:change><wb:old>escaped</wb:old><wb:new>decoded</wb:new></wb:change>
   </wb:panel>
   <wb:log>In review: parser branch, waiting on CI</wb:log>
   <wb:add class="policy">
