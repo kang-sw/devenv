@@ -1,6 +1,6 @@
 {
   "ws": {
-    "archive_sha256": "61b06713b15512b0834d587d7ea0e6dd70558331e4c78dfe68dc18d2116ad12d",
+    "archive_sha256": "b9d59cabe36625ebfe2e89cac0167cba92d53989e4b5931c9c12ce5325849337",
     "files": {
       ".claude-plugin/plugin.json": "5998568b76e8c19521bf4f38d5c04de19f549fe47f37567f7cceea54e9b56300",
       ".codex-plugin/hooks.json": "e3f3ea60f82fb0795c63bf54b9208647f39cb3779f050d1c755fabdc8a434490",
@@ -8,7 +8,7 @@
       ".mcp.json": "0c539c6ffda88a73160b899fee0ca7c78da29393fdf030f25afda86b2fa99c47",
       "bin/ws-cli": "64969b4f3f810a6628e43876c0ee67856c9e0abf9bb19d7dd31540c156dd7fcc",
       "bin/ws-cli.cmd": "747815bea96b806398e052dfb790318cb4f370d59f6ac3519a417ae56bf38917",
-      "bin/ws-mcp-launcher.py": "caf49e0da0067b60ddf9b23438757e2e6f7b5c715730b59df74af6b4b4b9f0c7",
+      "bin/ws-mcp-launcher.py": "2a9441d63efd040767f97b688dda88ffadd6f89672ca4de2e43755dc699f45c2",
       "bin/ws-pi-payload.py": "b92624cbdc40b83aa4b5d5333cff5c36754023fbf1b21c1deb9bf8f26c292d05",
       "claude-agents/effort-high.md": "b7e9af1395b845dc064ea1d756ff97ad265c554de5340f831f911ac12848131a",
       "claude-agents/effort-low.md": "1d9a75d393e24f1f08024f5ecbc39dbafc957ccd056b84f7b00b35a1c70f8539",
@@ -104,12 +104,12 @@
     }
   },
   "wsflow": {
-    "archive_sha256": "9eea70b486206db5e0b36a9ad46f62edbac6cf8351beec57cfc53fbc39789c5f",
+    "archive_sha256": "3b56b8caa7debcdd8017a08b6bec15c53681519f7f82896d10820507d7bd2807",
     "files": {
       ".claude-plugin/plugin.json": "cb7c1456b34e5302b9727f2b1802927a4181d5a28498162635ebddd0e363389c",
       ".codex-plugin/plugin.json": "b68d1ce2f56e06c7563a674f40ebd28fa7f313d319eef61b6d6209f2563a5fc0",
       ".mcp.json": "371c883b87a4b8eaeab3e1b329fa2074dfd5343572bd8a6782d7add3169a8eb4",
-      "bin/ws-mcp-launcher.py": "caf49e0da0067b60ddf9b23438757e2e6f7b5c715730b59df74af6b4b4b9f0c7",
+      "bin/ws-mcp-launcher.py": "2a9441d63efd040767f97b688dda88ffadd6f89672ca4de2e43755dc699f45c2",
       "bin/ws-pi-payload.py": "b92624cbdc40b83aa4b5d5333cff5c36754023fbf1b21c1deb9bf8f26c292d05",
       "bin/wsflow-cli": "d7a402167e761e6a34da62cef67d5d184b763e127b30fffcd53efd060f8a6957",
       "bin/wsflow-cli.cmd": "f249ab84c899265b5f914a5bfa80e785b6ffd30b46ff14e4ffaa03ad15cc453f",
