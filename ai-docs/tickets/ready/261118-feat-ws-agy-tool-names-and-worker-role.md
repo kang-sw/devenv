@@ -193,6 +193,19 @@ Two gaps stand in the way:
   the w5090-only rule applies to the owner's Windows office PC. Rejected:
   routing this phase's tests to w5090, which has no agy CLI for the live
   check.
+- **Phase 2 compatibility verdict, 2026-11-18: T0 for the agy tier bucket.**
+  Against pre-change `b397590c2`, `internal/wsconfig/config.go:52` stores
+  unrestricted nested maps, `:108-121` decodes them, `:159-170` merges every
+  harness key, `:330-332` removes only the selected leaf/empty parent, and
+  `:423` edits only the selected leaf. `:777-795` retains and serializes
+  those maps. Old normalization (`:713-723`) cannot resolve agy but never
+  filters its stored bucket; new reopen (`config.go:153-155,159-170`)
+  overlays retained mappings on defaults. No recovery from lost bytes is
+  needed. Project/global preservation tests also passed against the exact
+  old source through a temporary Go overlay. This verdict covers existing
+  `AgentTier` fields, not arbitrary future JSON members. The descriptor,
+  worker connection hint and catalog add no persisted field or hello/tool
+  argument change; existing dotted calls remain accepted.
 
 ## Constraints
 
@@ -334,6 +347,65 @@ in this session; these pointers are not an exhaustive rationale-index result.
   `agy.small`..`agy.xlarge`, each worker reporting back through the mailbox.
   The live check runs on a scratch daemon with isolated state; the shared
   daemon is swapped only after this phase lands ((103), owner 2026-11-18).
+
+### Result (b3e2e5e65) - 2026-11-18
+
+- Landed: descriptor-driven `WorkerCapable`, `WorkerProfile`,
+  `WorkerHTTPMCP`, and `WorkerAutoApprove`; Claude/Pi retain their worker
+  roles and transports. agy admits all four builtin tiers, launches the
+  default ACP agent in the user's home without a holder, appends the worker
+  instructions, and auto-allows permission requests through the ordinary
+  traced `AnswerApproval` path. Native child tools remain available but the
+  appended instructions forbid their use and name `agent.spawn` and
+  `mailbox.send` instead. No custom-agent file or knob was added.
+- Worker HTTP MCP advertises/reverse-maps underscore aliases through the
+  same backend descriptor. `WS_MCP_AGENT_SESSION_KEY` identifies the worker's
+  record for spelling only: it grants neither lead authority nor omitted-key
+  substitution. Canonical allowlists and the existing authority admission
+  on each wake remain enforced. Worker tokens stay in memory, rotate on
+  resume, and are revoked on process/daemon exit.
+- Base model IDs and separate effort land in `3aebdf29a`. Launch prefers
+  acknowledged `thought_level`, otherwise an offered suffixed config/ACP
+  model ID, and logs the honored mechanism. Unsupported or ignored worker
+  effort fails loudly; leads retain an unavailable effort for their next
+  model. A base-only selection without explicit effort selects the
+  harness's offered variant. Compatibility evidence is in Decisions above.
+- Implementation decisions: reserve the complete `agent-worker-` namespace
+  in compatibility spawn guards rather than keep a second backend map;
+  declare worker catalog entries because a lead-only catalog otherwise
+  disables the new worker's controls. Both changes have executable tests.
+- Verification on macOS: per-file `gofmt -l` clean and `go build ./...` pass;
+  `go vet ./internal/wsagent ./internal/wsconfig ./internal/mcp ./cmd/ws-mcp`
+  passes. `go test -timeout 30m ./internal/wsagent ./internal/wsconfig
+  ./internal/mcp ./cmd/ws-mcp` passes (128.032s, 19.740s, 918.028s,
+  170.099s respectively; `/tmp/agy-worker-unit-final.log`). The initial
+  broad run found two stale profile/namespace test expectations (corrected)
+  and exceeded MCP's default 10-minute package timeout, not a failing test
+  case. New tests exercise actual provider-free ACP subprocesses, approval
+  answers, HTTP token/PID context, resume/revocation, alias allowlists,
+  effort mechanisms and refusals, and config preservation.
+- Live verification: `/tmp/ws-agy-phase2.20t3eN/live.py` used separate
+  `WS_CACHE_HOME`, `WS_CONFIG_HOME`, a scratch Git root and an OS-assigned
+  port. Calls over a real hosted agy lead's MCP connection spawned
+  `agy.small..xlarge` and `claude.small..xlarge`; all eight workers completed
+  and each sent a mailbox message received by the lead. All agy tiers
+  honored `thought_level` with the required base models/efforts. Evidence:
+  `live-output.log` and sanitized `summary.json` in that scratch directory.
+  Every worker had no holder or persisted MCP token. Scratch sessions and
+  daemon were closed; the shared daemon and account credentials were not
+  changed, and nothing was pushed.
+- Independent one-pass lite review of `b397590c2..b3e2e5e65`: clean, no
+  findings (`/tmp/agy-phase2-lite-review.md`).
+- I/O scope: no custom-agent file, new recovery file, or hot-path file
+  operation; descriptor identity is read once per connection, and agy reads
+  the existing composed instructions once per process launch. No Windows
+  AV baseline measurement was run under this macOS-only verification.
+- Omitted: Phase 3 and its custom-agent quality A/B, the owner's shared
+  daemon swap, and a repository-wide test sweep beyond the four affected
+  packages. The worker profile does not expose `workflow_manual`; the
+  attempted call was refused, so repository manuals and the rendered worker
+  contract supplied workflow context. No implementation/review finding
+  remains. The ticket stays in `ready/` for Phase 3.
 
 ### Phase 3: Custom-agent path for the agy worker behind a knob
 
