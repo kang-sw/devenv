@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -320,11 +321,11 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: a valid session_key is required"))
 	}
 
-	// 1b. A hosted session is held to its daemon-minted key: any other key -
-	//     the FRESH sentinel, an unknown key, another parent-less key - is
-	//     refused before anything renders or mints. A key that carries a
-	//     parent passes: it is a child key a subagent on this connection
-	//     holds, and its worker playbooks read this manual.
+	// 1b. A hosted session is held to its daemon-minted key and its
+	//     descendant sessions' keys (hostedDescendant): any other key - the
+	//     FRESH sentinel, an unknown key, another lead's, a key a ferrule
+	//     call minted under the hosted key - is refused before anything
+	//     renders or mints.
 	if _, err := s.resolveSession(sessionAccess{mode: sessionAccessManual, key: key}); err != nil {
 		return toolTextResponse(id, "", err)
 	}
@@ -531,4 +532,43 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	}
 
 	return toolTextResponse(id, workflowManualReadFullNotice+"\n\n"+body+"\n", nil)
+}
+
+// RenderLeadManual renders the workflow manual of the hosted lead whose key
+// is key, as workflow_manual returns it on that session's own connection:
+// env is the environment its ws-mcp serves under (the selected package's
+// resource tree and policy), root its project root, and harness the harness
+// its connection is detected as ("" for none). The daemon appends the result
+// to the lead's system prompt at each launch, so the session reads the
+// manual from its first turn. The render serves no harness process, so it is
+// never a hosted session itself.
+func RenderLeadManual(env []string, root, harness, key string) (string, error) {
+	kept := make([]string, 0, len(env))
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		switch strings.ToUpper(name) {
+		case envHostedSession, envHostedSessionKey, envHostedSessionRow, envHarnessPID:
+			continue
+		}
+		kept = append(kept, kv)
+	}
+	s := NewServerWithOptions(ServerOptions{Root: root, Env: kept, Harness: harness, Diag: io.Discard})
+	// The render may start the session-start tracker check (a background
+	// fetch); this throwaway server is released once that settles, without
+	// holding up the launch.
+	defer func() { go func() { s.tracker.checks.Wait(); s.Close() }() }()
+	if _, ok := s.sessions.lookup(key); !ok {
+		return "", fmt.Errorf("workflow manual: session key %q has no record", key)
+	}
+	resp := s.handleWorkflowManual(nil, map[string]any{"session_key": key})
+	text := ""
+	if result, ok := resp.Result.(map[string]any); ok {
+		if content, ok := result["content"].([]map[string]string); ok && len(content) > 0 {
+			text = content[0]["text"]
+		}
+	}
+	if responseIsError(resp) {
+		return "", fmt.Errorf("workflow manual: %s", text)
+	}
+	return strings.TrimSpace(strings.TrimPrefix(text, workflowManualReadFullNotice)), nil
 }

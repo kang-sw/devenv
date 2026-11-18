@@ -134,11 +134,18 @@ func piLeadLaunch(command string, pre []string, spec StartSpec) (string, []strin
 
 // writePiLeadBridge adds the hosted identity to the effective prompt without
 // --append-system-prompt, which would suppress the user's APPEND_SYSTEM.md.
-// Native MCP does not fill session_key or expose the hosted key to the model.
+// Native MCP does not fill session_key or expose the hosted key to the model,
+// and no extension delivers the workflow manual, so the MCP fallback (servers
+// set) appends both: the key and the manual the daemon rendered
+// (LeadSpec.Manual). A native extension appends its own manual.
 func writePiLeadBridge(spec StartSpec, servers map[string]any, warning string) (string, error) {
 	key := spec.Lead.Env[EnvHostedSessionKey]
 	if len(servers) > 0 && key == "" {
 		return "", fmt.Errorf("pi lead MCP fallback requires a hosted session key")
+	}
+	manual := ""
+	if len(servers) > 0 && spec.Lead.Manual != nil {
+		manual = spec.Lead.Manual()
 	}
 	raw, err := json.Marshal(servers)
 	if err != nil {
@@ -146,7 +153,9 @@ func writePiLeadBridge(spec StartSpec, servers map[string]any, warning string) (
 	}
 	keyJSON, _ := json.Marshal(key)
 	warningJSON, _ := json.Marshal(warning)
-	source := "const servers = " + string(raw) + ";\nconst sessionKey = " + string(keyJSON) + ";\nconst launchWarning = " + string(warningJSON) + ";\n" + piLeadBridgeSource
+	manualJSON, _ := json.Marshal(manual)
+	source := "const servers = " + string(raw) + ";\nconst sessionKey = " + string(keyJSON) + ";\nconst launchWarning = " + string(warningJSON) +
+		";\nconst workflowManual = " + string(manualJSON) + ";\n" + piLeadBridgeSource
 	path := filepath.Join(piDir(spec.Dir), piBridgeFile)
 	return path, writeFileAtomic(path, []byte(source), 0o600)
 }

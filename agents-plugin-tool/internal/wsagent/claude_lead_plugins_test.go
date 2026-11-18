@@ -11,12 +11,15 @@ import (
 	"testing"
 )
 
+// claudePluginLeadSpec is a hosted Claude lead's start with the daemon's
+// ws-mcp over stdio and empty settings sources.
 func claudePluginLeadSpec(t *testing.T) StartSpec {
 	t.Helper()
 	return StartSpec{
-		Root: t.TempDir(),
-		Env:  []string{"CLAUDE_CONFIG_DIR=" + t.TempDir()},
-		Lead: &LeadSpec{DaemonVersion: hostedPluginTestVersion},
+		Root:  t.TempDir(),
+		Env:   []string{"CLAUDE_CONFIG_DIR=" + t.TempDir()},
+		WSMCP: &MCPCommand{Command: "/bin/ws-mcp"},
+		Lead:  &LeadSpec{DaemonVersion: hostedPluginTestVersion},
 	}
 }
 
@@ -40,8 +43,12 @@ func claudePluginOverrides(t *testing.T, args []string) map[string]bool {
 	return plugins
 }
 
+// TestClaudeLeadPluginArgsModes: a hosted Claude lead loads no ws package
+// in any isolation mode: every installed ws and wsflow copy the merged
+// settings enable is turned off, unrelated plugins (a ws-prefixed one
+// included) stay as the user set them, and no bundle directory is loaded.
+// The daemon's ws-mcp is the lead's ws server instead, allowed last.
 func TestClaudeLeadPluginArgsModes(t *testing.T) {
-	bundle := leadBundledFixture(t, "wsflow")
 	spec := claudePluginLeadSpec(t)
 	configDir := strings.TrimPrefix(spec.Env[0], "CLAUDE_CONFIG_DIR=")
 	writeLeadPluginFixture(t, filepath.Join(configDir, "settings.json"), `{
@@ -57,9 +64,11 @@ func TestClaudeLeadPluginArgsModes(t *testing.T) {
 	spec.Lead.PermissionMode = "plan"
 	spec.Model, spec.Effort, spec.SessionID = "opus", "high", "resume-id"
 	spec.Instructions = "/sess/instructions.md"
-	spec.WSMCP = &MCPCommand{Command: "/must/not/replace/user/mcp"}
+	spec.WSMCP = &MCPCommand{Command: "/bin/ws-mcp", Args: []string{"serve", "--stdio"}, Env: map[string]string{"WS_MCP_PROJECT_ROOT": spec.Root}}
 	spec.RemoveSubagents = RemovesSubagents(Record{Backend: BackendClaude, Lead: true})
-	for _, mode := range []string{"", "default", "isolated"} {
+	// The record's isolation no longer applies to a Claude lead, so not
+	// even an unknown value changes or refuses its launch.
+	for _, mode := range []string{"", "default", "isolated", "unknown"} {
 		t.Run("mode="+mode, func(t *testing.T) {
 			spec.Lead.PluginIsolation = mode
 			args, err := claudeArgs(spec)
@@ -67,17 +76,11 @@ func TestClaudeLeadPluginArgsModes(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := map[string]bool{"wsflow@project-market": false, "ws@local-market": false}
-			if mode == "isolated" {
-				want["clangd@tools"], want["ws-extra@tools"] = false, false
-				for _, id := range claudeLeadBuiltinPlugins {
-					want[id] = false
-				}
-			}
 			if got := claudePluginOverrides(t, args); !reflect.DeepEqual(got, want) {
 				t.Fatalf("plugin overrides = %v, want %v", got, want)
 			}
 			for flag, value := range map[string]string{
-				"--plugin-dir": bundle, "--permission-mode": "plan", "--permission-prompt-tool": "stdio",
+				"--permission-mode": "plan", "--permission-prompt-tool": "stdio",
 				"--model": "opus", "--effort": "high", "--resume": "resume-id",
 				"--input-format": "stream-json", "--output-format": "stream-json",
 				// Every isolation mode removes the native subagent tool alone.
@@ -88,15 +91,58 @@ func TestClaudeLeadPluginArgsModes(t *testing.T) {
 					t.Errorf("%s = %q (present %v), want %q", flag, got, ok, value)
 				}
 			}
-			if n := slices.Index(args, "--plugin-dir"); n < 0 || slices.Contains(args[n+1:], "--plugin-dir") {
-				t.Fatalf("want one bundled plugin directory: %v", args)
+			server := leadMCPServer(t, args)
+			if server["type"] != "stdio" || server["command"] != "/bin/ws-mcp" || !reflect.DeepEqual(server["args"], []any{"serve", "--stdio"}) ||
+				!reflect.DeepEqual(server["env"], map[string]any{"WS_MCP_PROJECT_ROOT": spec.Root}) {
+				t.Fatalf("the ws server is the daemon's stdio ws-mcp: %v", server)
 			}
-			for _, banned := range []string{"--setting-sources", "--strict-mcp-config", "--mcp-config", "--tools", "--allowedTools", "--disable-slash-commands", "--append-system-prompt", "--system-prompt", "--bare"} {
+			// The option takes every following argument: the ws rule is
+			// its only one, and nothing follows it.
+			if n := len(args); n < 2 || !slices.Equal(args[n-2:], []string{"--allowedTools", "mcp__ws"}) || slices.Index(args, "--allowedTools") != n-2 {
+				t.Fatalf("the ws allow rule must close the command line, alone: %v", args)
+			}
+			for _, banned := range []string{"--plugin-dir", "--setting-sources", "--strict-mcp-config", "--tools", "--disable-slash-commands", "--append-system-prompt", "--system-prompt", "--bare"} {
 				if slices.Contains(args, banned) {
-					t.Errorf("lead must preserve settings, hooks, memory, and MCP: found %s", banned)
+					t.Errorf("lead must load no bundle and preserve settings, hooks, memory, and MCP: found %s", banned)
 				}
 			}
 		})
+	}
+}
+
+// TestClaudeLeadMCPArgs: a hosted Claude lead's ws server is the daemon's
+// HTTP route when the start has a session (over the stdio command it also
+// carries), the daemon's stdio ws-mcp without one; with neither, its
+// command line is refused, naming the missing ws-mcp.
+func TestClaudeLeadMCPArgs(t *testing.T) {
+	spec := claudePluginLeadSpec(t)
+	spec.WSMCP = &MCPCommand{Command: "/bin/ws-mcp", Args: []string{"serve", "--stdio"}}
+	spec.MCPSession = &MCPSession{URL: "http://127.0.0.1:1/mcp", Token: "secret-token"}
+	args, err := claudeArgs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if server := leadMCPServer(t, args); !reflect.DeepEqual(server, map[string]any{"type": "http", "url": "http://127.0.0.1:1/mcp",
+		"headers": map[string]any{"Authorization": "Bearer ${" + EnvMCPSessionToken + "}"}}) {
+		t.Fatalf("with a session the ws server is the HTTP route: %v", server)
+	}
+	if strings.Contains(strings.Join(args, " "), "secret-token") {
+		t.Fatalf("the token stays out of argv: %v", args)
+	}
+
+	spec.MCPSession = nil
+	args, err = claudeArgs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if server := leadMCPServer(t, args); server["type"] != "stdio" || server["command"] != "/bin/ws-mcp" {
+		t.Fatalf("without a session the ws server is the stdio ws-mcp: %v", server)
+	}
+
+	// Start's refusal: TestClaudeLeadStartRefusesPluginResolutionErrors.
+	spec.WSMCP = nil
+	if args, err := claudeArgs(spec); err == nil || args != nil || !strings.Contains(err.Error(), "no ws-mcp to attach") {
+		t.Fatalf("a lead with no ws-mcp must be refused: %v, %v", args, err)
 	}
 }
 
@@ -225,17 +271,16 @@ func TestClaudeLeadPluginSettingsDoNotWalkNonGitAncestors(t *testing.T) {
 }
 
 func TestClaudeLeadPluginArgsEmptySettings(t *testing.T) {
-	bundle := leadBundledFixture(t, "ws")
 	spec := claudePluginLeadSpec(t)
 	args, err := claudeArgs(spec)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := claudePluginOverrides(t, args); len(got) != 0 {
-		t.Fatalf("default mode disables no builtins or unrelated plugins: %v", got)
+		t.Fatalf("a lead disables no builtins or unrelated plugins: %v", got)
 	}
-	if got, _ := flagValue(args, "--plugin-dir"); got != bundle {
-		t.Fatalf("bundled plugin missing with empty settings: %v", args)
+	if slices.Contains(args, "--plugin-dir") {
+		t.Fatalf("a lead loads no bundle with empty settings: %v", args)
 	}
 }
 

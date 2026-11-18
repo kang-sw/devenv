@@ -827,13 +827,63 @@ func newLeadHarness(t *testing.T) *leadHarness {
 		Holders:       h.holders,
 		LeadKeys:      h.keys,
 		Mail:          h.mail,
-		heartbeat:     50 * time.Millisecond,
+		// A Claude lead runs the daemon's ws-mcp as its ws server and is
+		// refused a start without one.
+		WSMCP:     hostedLeadLauncher(hostedPluginTestVersion),
+		heartbeat: 50 * time.Millisecond,
 	}
 	// Every harness PID a test writes (4002, 9001, ...) is dead unless the
 	// test marks it alive: the real process table of a CI runner can hold
 	// any of them.
 	h.opts.Alive = (&processTable{}).check
 	return h
+}
+
+// hostedLeadLauncher stands in for the daemon's ws-mcp command
+// (agentMCPCommand in cmd/ws-mcp): the hosted package resolved for version
+// at each call, its launcher, its fallback warning, and its resource tree.
+// The command names no real file; the holders are fakes.
+func hostedLeadLauncher(version string) func(string) (MCPCommand, error) {
+	return func(root string) (MCPCommand, error) {
+		plugin, warning, err := ResolveHostedPlugin(version)
+		if err != nil {
+			return MCPCommand{}, err
+		}
+		return MCPCommand{Command: "/opt/harness/python3", Args: []string{filepath.Join(plugin, "bin", "ws-mcp-launcher.py"), "serve", "--stdio"},
+			Plugin: plugin, PluginWarning: warning, Env: map[string]string{"WS_RSRC_ROOT": filepath.Join(plugin, "rsrc"), "WS_MCP_PROJECT_ROOT": root}}, nil
+	}
+}
+
+// leadMCPServer is the ws server entry of a Claude lead's --mcp-config.
+func leadMCPServer(t *testing.T, argv []string) map[string]any {
+	t.Helper()
+	raw, ok := flagValue(argv, "--mcp-config")
+	if !ok {
+		t.Fatalf("a Claude lead's launch carries no --mcp-config: %v", argv)
+	}
+	var cfg struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.MCPServers) != 1 || cfg.MCPServers[ReservedMCPServer] == nil {
+		t.Fatalf("--mcp-config must hold the ws server alone: %s", raw)
+	}
+	return cfg.MCPServers[ReservedMCPServer]
+}
+
+// leadLauncherPlugin is the hosted package whose launcher a Claude lead's
+// stdio ws server runs (hostedLeadLauncher).
+func leadLauncherPlugin(t *testing.T, argv []string) string {
+	t.Helper()
+	server := leadMCPServer(t, argv)
+	args, _ := server["args"].([]any)
+	if server["type"] != "stdio" || len(args) == 0 {
+		t.Fatalf("the lead's ws server is not the stdio launcher: %v", server)
+	}
+	launcher, _ := args[0].(string)
+	return filepath.Dir(filepath.Dir(launcher))
 }
 
 // start starts a runner over the harness's directory and holders, as a

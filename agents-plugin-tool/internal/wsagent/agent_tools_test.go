@@ -673,6 +673,24 @@ func TestAgentSystemPromptReachesEveryStart(t *testing.T) {
 	agentRefused(t, err, http.StatusBadRequest, "system_prompt_path")
 }
 
+// TestAgentChildPromptCarriesNoLeadManual: an agent.spawn child's
+// appended prompt is its system prompt, its profile text, and its key
+// sentence, as before the lead manual: the daemon's lead manual render is
+// never called for it and none of its text reaches the child.
+func TestAgentChildPromptCarriesNoLeadManual(t *testing.T) {
+	manual := &leadManualRender{text: "# Lead workflow manual sentinel"}
+	h, _ := agentHarness(t, func(o *Options) { o.LeadManual = manual.render })
+	a, _ := h.agentRunning(h.leadCaller(), AgentSpawnRequest{Prompt: "go", Tier: "small", Authority: "read-only", SystemPrompt: "You are the cache probe."})
+	text := instructionsOf(t, h.backend.start(0))
+	want := "You are the cache probe.\n\nYour ws session key is `" + h.record(a).WSKey + "`. Pass it as the `session_key` argument of every ws tool call.\n"
+	if text != want {
+		t.Fatalf("the child's appended prompt = %q, want %q", text, want)
+	}
+	if calls := manual.list(); len(calls) != 0 {
+		t.Fatalf("a child start rendered the lead manual: %v", calls)
+	}
+}
+
 func TestAgentSpawnCapsAuthorityAndTier(t *testing.T) {
 	h, _ := agentHarness(t, nil)
 	lead := h.leadCaller()

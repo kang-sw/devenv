@@ -56,14 +56,13 @@ type StartSpec struct {
 	// allowlist; nil when the profile allows no ws tool.
 	WSMCP *MCPCommand
 	// MCPSession, when set, attaches the ws-mcp over the daemon's HTTP
-	// route (mcp_session.go) in place of WSMCP's command, or, for a lead,
-	// of its bundled plugin's stdio server.
+	// route (mcp_session.go) in place of WSMCP's command.
 	MCPSession *MCPSession
 	// Env is the environment the child starts from; the backend removes the
 	// harness variables an inherited parent session leaves behind.
 	Env []string
 	// Lead is set for a lead conversation (Profile.Lead): user settings stay
-	// active, while the daemon selects its bundled plugin.
+	// active, while the daemon supplies its ws-mcp and workflow manual.
 	Lead *LeadSpec
 	// Holder selects durable transport independently of lead privileges.
 	Holder *holderChild
@@ -89,14 +88,16 @@ type LeadSpec struct {
 	PluginWarning func(string)
 	// WSMCP resolves the bundled MCP launcher if Pi needs its bridge fallback.
 	WSMCP func() (MCPCommand, error)
-	// Plugin, when set, is the hosted bundle this start already resolved
-	// (with PluginNote its fallback warning): a Claude lead attached over
-	// HTTP loads the bundle its ws-mcp hello was built from. Empty
-	// resolves the selected bundle at launch.
-	Plugin, PluginNote string
-	// VariantDir is where a Claude lead attached over HTTP keeps its
-	// bundle's HTTP variants (claude_hosted_variant.go).
-	VariantDir string
+	// WSMCPErr is why WSMCP gave this start no command, which a Claude
+	// lead's refusal names (claudeLeadMCPArgs).
+	WSMCPErr error
+	// PluginNote is the package fallback warning of the ws-mcp this start
+	// resolved, which a Claude lead reports through PluginWarning.
+	PluginNote string
+	// Manual is the workflow manual the lead reads from its first turn
+	// (Options.LeadManual), "" when there is none; Pi's bridge fallback
+	// appends it, as the native extension it stands in for would.
+	Manual func() string
 	// Env is set on the child over the backend's own scrub: the
 	// hosted-session variables.
 	Env map[string]string

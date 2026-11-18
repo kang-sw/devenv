@@ -315,6 +315,8 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 		WSMCP: func(root string) (wsagent.MCPCommand, error) {
 			return agentMCPCommand(root, version)
 		},
+		// A hosted lead's launch appends its workflow manual to its prompt.
+		LeadManual:     renderLeadManual,
 		Log:            logw,
 		TrackerChanged: trackerChanged,
 		// A spawned Pi subagent's settled turns go to its lead's mailbox.

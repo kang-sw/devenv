@@ -336,10 +336,10 @@ func (h *leadHarness) startAt(endpoint string) {
 	h.t.Cleanup(h.runner.Close)
 }
 
-// TestClaudeLeadMCPOverHTTP: a hosted Claude lead loads the HTTP variant
-// of its bundle, its token lives in its environment and its record, a
-// later daemon that rejoins the process restores the token, and the
-// process's end voids and forgets it.
+// TestClaudeLeadMCPOverHTTP: a hosted Claude lead loads no bundle; its ws
+// server is the daemon's HTTP route, its token lives in its environment
+// and its record, a later daemon that rejoins the process restores the
+// token, and the process's end voids and forgets it.
 func TestClaudeLeadMCPOverHTTP(t *testing.T) {
 	shortStartWait(t)
 	bundle := leadBundledFixture(t, "wsflow")
@@ -352,12 +352,11 @@ func TestClaudeLeadMCPOverHTTP(t *testing.T) {
 	h.startAt(endpoint)
 	id, holder := h.runLead("one")
 	spawn := h.holders.spawned(holder)
-	dir, _ := flagValue(spawn.Argv, "--plugin-dir")
-	if filepath.Dir(dir) != filepath.Join(h.dir, HostedVariantsDir) || !strings.HasPrefix(filepath.Base(dir), "wsflow-") {
-		t.Fatalf("the lead loads its bundle's HTTP variant: --plugin-dir %q", dir)
+	if server := leadMCPServer(t, spawn.Argv); server["type"] != "http" || server["url"] != endpoint+wsdashboard.ProxyHTTPPath {
+		t.Fatalf("the lead's ws server is the daemon's HTTP route: %v", server)
 	}
-	if slices.Contains(spawn.Argv, "--mcp-config") || slices.Contains(spawn.Argv, "--strict-mcp-config") {
-		t.Fatalf("a lead's own setup stays; the variant carries ws: %q", spawn.Argv)
+	if slices.Contains(spawn.Argv, "--plugin-dir") || slices.Contains(spawn.Argv, "--strict-mcp-config") {
+		t.Fatalf("a lead loads no bundle and keeps its own MCP servers: %q", spawn.Argv)
 	}
 	token := spawn.Env[EnvMCPSessionToken]
 	if len(token) != 64 || spawn.Env[EnvMCPSessionURL] != endpoint+wsdashboard.ProxyHTTPPath || strings.Contains(strings.Join(spawn.Argv, " "), token) {
@@ -470,12 +469,13 @@ func (h *leadHarness) editRecord(id string, edit func(members map[string]any)) {
 	}
 }
 
-// TestClaudeLeadLoadsTheBundleItsHelloDescribes: a lead attached over HTTP
-// loads the bundle its ws-mcp command was resolved from, not one selected
-// again at launch; its record keeps that hello's environment, and a later
-// daemon rejoining the process restores it as recorded without resolving
-// the command again (which may fail by then, or select another bundle).
-func TestClaudeLeadLoadsTheBundleItsHelloDescribes(t *testing.T) {
+// TestClaudeLeadRecordsTheHelloItsLaunchResolved: a lead attached over
+// HTTP runs the ws-mcp its command was resolved for, with that command's
+// package note, and loads no bundle selected again at launch; its record
+// keeps that hello's environment, and a later daemon rejoining the process
+// restores it as recorded without resolving the command again (which may
+// fail by then, or select another bundle).
+func TestClaudeLeadRecordsTheHelloItsLaunchResolved(t *testing.T) {
 	shortStartWait(t)
 	leadBundledFixture(t, "wsflow") // the bundle a launch-time resolution selects
 	launched := t.TempDir()
@@ -486,9 +486,8 @@ func TestClaudeLeadLoadsTheBundleItsHelloDescribes(t *testing.T) {
 	const endpoint = "http://127.0.0.1:1"
 	h.startAt(endpoint)
 	id, holder := h.runLead("one")
-	dir, _ := flagValue(h.holders.spawned(holder).Argv, "--plugin-dir")
-	if !strings.HasPrefix(filepath.Base(dir), "ws-") {
-		t.Fatalf("the lead loads the variant of the bundle its hello describes: --plugin-dir %q", dir)
+	if argv := h.holders.spawned(holder).Argv; slices.Contains(argv, "--plugin-dir") || leadMCPServer(t, argv)["type"] != "http" {
+		t.Fatalf("the lead loads no bundle; its ws server is the HTTP route: %q", argv)
 	}
 	rec := h.record(id)
 	if rec.PluginWarning != "launcher note" || rec.MCPEnv["WS_RSRC_ROOT"] != filepath.Join(launched, "rsrc") || rec.MCPHolder != holder {

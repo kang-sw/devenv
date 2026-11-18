@@ -3,6 +3,7 @@ package wsagent
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -84,12 +85,13 @@ func TestHostedPluginSelectionIndependentOfStarter(t *testing.T) {
 				if err != nil || got != roots[want] || warning != "" {
 					t.Fatalf("selected %q: %q, %q, %v", selected, got, warning, err)
 				}
+				// A Claude lead loads no package whichever is selected: the
+				// selection reaches it as its ws-mcp's launcher.
 				spec := claudePluginLeadSpec(t)
-				var launchWarning string
+				launchWarning := "unreported"
 				spec.Lead.PluginWarning = func(text string) { launchWarning = text }
 				args, err := claudeLeadPluginArgs(spec)
-				plugin, _ := flagValue(args, "--plugin-dir")
-				if err != nil || plugin != got || launchWarning != "" {
+				if err != nil || slices.Contains(args, "--plugin-dir") || launchWarning != "" {
 					t.Fatalf("Claude selected %q: %v, %q, %v", selected, args, launchWarning, err)
 				}
 			}
@@ -160,7 +162,7 @@ func TestHostedPluginWarningPersistsAndSettingWaitsForProcessStart(t *testing.T)
 	if !strings.Contains(warning, "wsflow") || !strings.Contains(warning, "daemon package ws at ") || h.state(id).PluginWarning != warning {
 		t.Fatalf("warning not persisted/exposed: %q", warning)
 	}
-	if got, _ := flagValue(h.holders.spawned(holder).Argv, "--plugin-dir"); got != ws {
+	if got := leadLauncherPlugin(t, h.holders.spawned(holder).Argv); got != ws {
 		t.Fatalf("fallback plugin = %q", got)
 	}
 	if st := h.state(id); !st.Process || st.Error != "" {
@@ -181,7 +183,7 @@ func TestHostedPluginWarningPersistsAndSettingWaitsForProcessStart(t *testing.T)
 	if got := h.holder(id); got != holder {
 		t.Fatalf("reattach replaced holder: %q -> %q", holder, got)
 	}
-	if got, _ := flagValue(h.holders.spawned(holder).Argv, "--plugin-dir"); got != ws {
+	if got := leadLauncherPlugin(t, h.holders.spawned(holder).Argv); got != ws {
 		t.Fatalf("reattach changed plugin to %q", got)
 	}
 	if got := h.record(id).PluginWarning; got != warning {
@@ -195,7 +197,7 @@ func TestHostedPluginWarningPersistsAndSettingWaitsForProcessStart(t *testing.T)
 	}
 	h.send(id, "next process")
 	next := h.holder(id)
-	if got, _ := flagValue(h.holders.spawned(next).Argv, "--plugin-dir"); got != wsflow {
+	if got := leadLauncherPlugin(t, h.holders.spawned(next).Argv); got != wsflow {
 		t.Fatalf("next start plugin = %q, want %q", got, wsflow)
 	}
 	if got := h.record(id).PluginWarning; got != "" {

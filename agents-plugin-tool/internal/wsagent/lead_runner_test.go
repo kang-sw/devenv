@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -170,6 +171,164 @@ func TestClaudeLeadPromptCarriesHostedKey(t *testing.T) {
 		t.Fatalf("the next process resumes the session: %v", argv)
 	}
 	check(prompt(argv))
+}
+
+// leadManualRender is a fake Options.LeadManual: every call renders text
+// (or fails with err) and is kept with its arguments.
+type leadManualRender struct {
+	mu    sync.Mutex
+	calls [][3]string
+	text  string
+	err   error
+}
+
+func (m *leadManualRender) render(backend, dir, key string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, [3]string{backend, dir, key})
+	return m.text, m.err
+}
+
+func (m *leadManualRender) list() [][3]string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.calls)
+}
+
+// appendedPrompt is the instruction file a Claude lead's launch appends to
+// its system prompt.
+func appendedPrompt(t *testing.T, argv []string) string {
+	t.Helper()
+	path, ok := flagValue(argv, "--append-system-prompt-file")
+	if !ok {
+		t.Fatalf("a Claude lead's launch appends no instruction file: %v", argv)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+// leadKeySentence opens every hosted lead's appended prompt.
+func leadKeySentence(key string) string {
+	return "Your ws session key is `" + key + "`. Pass it as the `session_key` argument of every ws tool call. " +
+		"This hosted session already has a key; do not mint a replacement (no ferrule call, no fresh-bootstrap key). "
+}
+
+// leadManualOnly closes the appended prompt of a lead whose launch has no
+// rendered manual: the lead is told to call for it.
+const leadManualOnly = "At session start and after any compaction, call the workflow_manual tool with this key and follow it.\n"
+
+// TestClaudeLeadPromptCarriesTheWorkflowManual: a hosted Claude lead's
+// appended prompt holds its key sentence, the binding-manual sentence,
+// and the manual the daemon rendered for its harness, working directory,
+// and key. The render runs once per process start, a resume included: a
+// later turn and a rejoin render nothing.
+func TestClaudeLeadPromptCarriesTheWorkflowManual(t *testing.T) {
+	h := newLeadHarness(t)
+	manual := &leadManualRender{text: "\n# Workflow Manual\n\n## Session Key\nrendered\n\n"}
+	h.opts.LeadManual = manual.render
+	h.start()
+	id, holder := h.runLead("one")
+	key := h.record(id).WSKey
+	check := func(argv []string) {
+		t.Helper()
+		text := appendedPrompt(t, argv)
+		if !strings.HasPrefix(text, leadKeySentence(key)+"The workflow manual below is binding;") ||
+			!strings.Contains(text, "After any compaction, or when you need fresh session state, call the workflow_manual tool with this key and follow it.") ||
+			!strings.HasSuffix(text, ".\n\n# Workflow Manual\n\n## Session Key\nrendered\n") || strings.Contains(text, leadManualOnly) {
+			t.Fatalf("the appended prompt is not the key sentence and the manual:\n%s", text)
+		}
+	}
+	check(h.holders.spawned(holder).Argv)
+	calls := manual.list()
+	if len(calls) != 1 || calls[0][0] != BackendClaude || !sameDir(calls[0][1], h.root) || calls[0][2] != key {
+		t.Fatalf("the manual renders once, for the lead's harness, directory, and key: %v", calls)
+	}
+
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	h.idle(id)
+	h.restart()
+	if got := h.holder(id); got != holder {
+		t.Fatalf("the rejoin replaced the process: %q -> %q", holder, got)
+	}
+	h.send(id, "two")
+	eventually(t, "the second message", func() bool { return len(h.userInputs(holder)) == 2 })
+	if n := len(manual.list()); n != 1 {
+		t.Fatalf("a rejoin or a turn rendered the manual again: %d renders", n)
+	}
+
+	h.holders.out(holder, turnLines("sess-1", "u2", "second")...)
+	h.idle(id)
+	if _, err := h.runner.Stop(id); err != nil {
+		t.Fatal(err)
+	}
+	h.send(id, "three")
+	var second string
+	eventually(t, "a new holder", func() bool { second = h.record(id).HolderID; return second != "" && second != holder })
+	check(h.holders.spawned(second).Argv)
+	if n := len(manual.list()); n != 2 {
+		t.Fatalf("the next process start renders the manual again: %d renders", n)
+	}
+}
+
+// TestLeadPromptWithoutAManualKeepsTheKeySentence: a lead whose manual
+// does not render (the render fails, or renders nothing) starts with its
+// key sentence and the call to fetch the manual, and the failure is
+// logged, not a launch error.
+func TestLeadPromptWithoutAManualKeepsTheKeySentence(t *testing.T) {
+	for name, manual := range map[string]*leadManualRender{
+		"error": {text: "partial", err: errors.New("manual render broke")},
+		"blank": {text: " \n\t\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newLeadHarness(t)
+			h.opts.LeadManual = manual.render
+			h.start()
+			id, holder := h.runLead("one")
+			if text := appendedPrompt(t, h.holders.spawned(holder).Argv); text != leadKeySentence(h.record(id).WSKey)+leadManualOnly {
+				t.Fatalf("the appended prompt is not the key sentence alone:\n%s", text)
+			}
+			if st := h.state(id); !st.Process || st.Error != "" {
+				t.Fatalf("a manual that did not render is no launch error: %+v", st)
+			}
+			if logged := strings.Contains(h.log.String(), "workflow manual not rendered, the lead's prompt carries its key alone: manual render broke"); logged != (manual.err != nil) {
+				t.Fatalf("render failure logged = %v:\n%s", logged, h.log.String())
+			}
+		})
+	}
+}
+
+// TestClaudeLeadWithoutWSMCPIsRefused: a Claude lead loads no ws plugin,
+// so a start the daemon has no ws-mcp for (no launcher configured, or one
+// that does not resolve) is refused before any process runs, its reason
+// logged and shown.
+func TestClaudeLeadWithoutWSMCPIsRefused(t *testing.T) {
+	for name, launcher := range map[string]func(string) (MCPCommand, error){
+		"none":       nil,
+		"unresolved": func(string) (MCPCommand, error) { return MCPCommand{}, errors.New("launcher unresolvable") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newLeadHarness(t)
+			h.opts.WSMCP = launcher
+			h.start()
+			id := h.lead(BackendClaude, LeadOptions{}).ID
+			h.send(id, "one")
+			eventually(t, "the refused start", func() bool { return strings.Contains(h.state(id).Error, "no ws-mcp to attach") })
+			h.quiesce(id)
+			if n := h.holders.opCount("spawn"); n != 0 || h.state(id).Process {
+				t.Fatalf("a refused start runs no process: %v", h.holders.opList())
+			}
+			if !strings.Contains(h.log.String(), "ws-mcp unavailable, the start is refused") {
+				t.Fatalf("the refusal is not logged:\n%s", h.log.String())
+			}
+			// The shown refusal names why the ws-mcp did not resolve.
+			if launcher != nil && !strings.Contains(h.state(id).Error, "launcher unresolvable") {
+				t.Fatalf("the refusal hides its cause: %q", h.state(id).Error)
+			}
+		})
+	}
 }
 
 // TestLeadProfileEnvSetsSessionStateEvents: a claude lead's harness is
