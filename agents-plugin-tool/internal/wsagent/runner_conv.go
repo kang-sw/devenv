@@ -710,7 +710,7 @@ func (c *conv) writeRegistration() bool {
 	reg.SchemaVersion = 1
 	var previousRow *wsdashboard.Registration
 	if rec.Lead {
-		unlock, ok := c.lockRow()
+		unlock, previous, ok := c.lockRowRead()
 		if !ok {
 			return false
 		}
@@ -718,8 +718,8 @@ func (c *conv) writeRegistration() bool {
 		reg.HostStopped = rec.HostPID == 0 && !c.spawning
 		// The holder manager writes the last exit independently of the
 		// runner's heartbeat; a regenerated row must not discard it.
-		if previous, err := wsdashboard.ReadRegistration(c.r.opts.Dir, rec.ReplyID); err == nil {
-			previousRow = &previous
+		if previous != nil {
+			previousRow = previous
 			reg.HostExitCode = previous.HostExitCode
 			reg.HostExitSignal = previous.HostExitSignal
 			reg.HostExitReason = previous.HostExitReason
@@ -751,7 +751,11 @@ func (c *conv) writeRegistration() bool {
 // daemon's ran rewrote it (a hand to the terminal). A missing or unreadable
 // row is the daemon's to write.
 func rowForeign(dir, replyID string) bool {
-	row, err := wsdashboard.ReadRegistration(dir, replyID)
+	return isForeignRow(wsdashboard.ReadRegistration(dir, replyID))
+}
+
+// isForeignRow is rowForeign's test of a row as read.
+func isForeignRow(row wsdashboard.Registration, err error) bool {
 	// An agent row is no terminal's either, since a terminal login never
 	// writes Agent: a daemon of a release that knew no hosted lead served
 	// the session as an agent conversation while it ran, and its row is
@@ -766,20 +770,33 @@ func rowForeign(dir, replyID string) bool {
 // loop lets the session go), or the lock could not be taken (logged; the
 // caller's next try asks again).
 func (c *conv) lockRow() (unlock func(), ok bool) {
+	unlock, _, ok = c.lockRowRead()
+	return unlock, ok
+}
+
+// lockRowRead is lockRow that also returns the row it checked under the
+// lock (nil when missing or unreadable), so a caller that needs the row
+// reads it once per lock: the live writer takes this lock for every ring
+// and snapshot write (lockSummaryWriter).
+func (c *conv) lockRowRead() (unlock func(), row *wsdashboard.Registration, ok bool) {
 	if c.foreignRow {
-		return nil, false
+		return nil, nil, false
 	}
 	unlock, err := wsdashboard.LockRegistration(c.r.opts.Dir, c.rec.ReplyID)
 	if err != nil {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: %v\n", c.rec.ReplyID, err)
-		return nil, false
+		return nil, nil, false
 	}
-	if rowForeign(c.r.opts.Dir, c.rec.ReplyID) {
+	read, err := wsdashboard.ReadRegistration(c.r.opts.Dir, c.rec.ReplyID)
+	if isForeignRow(read, err) {
 		unlock()
 		c.foreignRow = true
-		return nil, false
+		return nil, nil, false
 	}
-	return unlock, true
+	if err == nil {
+		row = &read
+	}
+	return unlock, row, true
 }
 
 // checkRow reads a lead session's row between its own writes, without the

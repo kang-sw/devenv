@@ -61,9 +61,6 @@ type ServerOptions struct {
 	// snapshot file only for recovery (live_snapshot.go). nil is the direct
 	// path, a ws-mcp in its own process, which writes the file and nudges.
 	Live wsdashboard.LiveHost
-	// LoginLink mints a browser login URL for a same-origin dashboard path.
-	// It runs in process, never over HTTP. nil keeps plain dashboard URLs.
-	LoginLink func(string) (string, error)
 	// Agents is the dashboard daemon's agent runner, where the pi.* tools
 	// spawn the session's Pi subagents (pi_tools.go); nil on the direct
 	// path, where they refuse.
@@ -134,7 +131,6 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 	}
 	s := &Server{root: filepath.Clean(opts.Root), version: opts.Version, sourceCommit: commit, ownerPID: opts.OwnerPID, diag: diag, dispatchBlock: wsdoc.DispatchBlockForEnv}
 	s.live.host = opts.Live
-	s.loginLink = opts.LoginLink
 	s.notes = opts.Notes
 	if opts.Env != nil {
 		s.env = newProcEnv(opts.Env)

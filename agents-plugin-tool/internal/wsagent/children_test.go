@@ -162,7 +162,9 @@ func TestCapabilityTokenGoesToSpawnedWorkersOnly(t *testing.T) {
 	if rec := h.record(w.ID); rec.Tier != "medium" || h.state(w.ID).Tier != "medium" {
 		t.Fatalf("the tier is recorded: %+v", rec)
 	}
-	raw, err := os.ReadFile(recordPath(wsdashboard.SessionDir(h.dir, w.ID)))
+	// readFile, not os.ReadFile: it retries the Windows sharing violation
+	// a concurrent record replace briefly causes, as production readers do.
+	raw, err := readFile(recordPath(wsdashboard.SessionDir(h.dir, w.ID)))
 	if err != nil || strings.Contains(string(raw), first) {
 		t.Fatalf("the token is never persisted: %v", err)
 	}
