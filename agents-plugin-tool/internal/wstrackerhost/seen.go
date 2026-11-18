@@ -83,12 +83,14 @@ func readSeen(dir string) (Seen, error) {
 	return Seen{Badge: sortedUnion(doc.Badge), Read: sortedUnion(doc.Read)}, nil
 }
 
-// Seen returns store id's seen marks; a store with no ui-seen.json has
-// none. An unregistered id is an error.
+// Seen returns store id's seen marks from memory after recovery; a store
+// with no ui-seen.json has none. Registration comes from the startup/local-
+// write/watcher snapshot, never a per-read file validation. External registry
+// changes follow the watch notification boundary. An unregistered id is an error.
 func (h *Host) Seen(id string) (Seen, error) {
 	h.seenMu.Lock()
 	defer h.seenMu.Unlock()
-	e, err := h.Entry(id)
+	e, err := h.memoryEntry(id)
 	if err != nil {
 		return Seen{}, err
 	}

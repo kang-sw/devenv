@@ -81,6 +81,14 @@ type Host struct {
 	// reload calls it too. nil when no watch runs.
 	onChange func()
 
+	// registryLoadMu orders disk refreshes and successful local publications.
+	// Registry readers in Seen take only registryMu, never the I/O mutex.
+	registryLoadMu  sync.Mutex
+	registryMu      sync.RWMutex
+	registryEntries map[string]StoreEntry
+	registryStores  []StoreEntry
+	registryErr     error
+
 	// seenMu guards the clone-local marks, loaded once per registration.
 	// Only this daemon writes ui-seen.json; writes update this memory copy.
 	seenMu sync.Mutex
@@ -164,6 +172,10 @@ func New(opts Options) (*Host, error) {
 		h.checkInterval = DefaultCheckInterval
 	}
 	h.sweepRemoved()
+	// Recover the registration snapshot before serving interactive reads. Keep
+	// a load error in the snapshot (as Stores/Entry historically report it),
+	// rather than turning a malformed registry into a constructor failure.
+	_, _ = h.Stores()
 	return h, nil
 }
 

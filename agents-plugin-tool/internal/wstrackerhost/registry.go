@@ -109,10 +109,9 @@ func readJSON(path string, v any) error {
 	return decodeLocalJSON(path, data, err, v)
 }
 
-// Registry readers share the existing stat-validated small-file cache. The
-// writer paths below still read under the cross-process root lock. A replaced
-// registration (including its nonce) is never hidden by a process-local memo;
-// recent/coarse-timestamp files retain ReadFileCached's conservative reread.
+// Authoritative/background registry reads use the stat-validated small-file
+// cache. Interactive Seen reads never call this helper: they resolve the
+// snapshot recovered at startup and published by the watcher/local writers.
 func readCachedJSON(path string, v any) error {
 	data, err := wsstate.ReadFileCached(path)
 	return decodeLocalJSON(path, data, err, v)
@@ -176,13 +175,76 @@ func (h *Host) withRootLock(fn func() error) error {
 	return fn()
 }
 
-// Stores lists the registered stores in registration order.
+// Stores refreshes the registered stores in registration order. The watcher
+// calls it before notifying the daemon of external registration changes, and
+// write paths use it for immediate cross-process registration/nonce checks.
+// Interactive Seen reads use memoryEntry instead.
 func (h *Host) Stores() ([]StoreEntry, error) {
+	h.registryLoadMu.Lock()
+	defer h.registryLoadMu.Unlock()
 	var doc registryDoc
-	if err := readCachedJSON(filepath.Join(h.root, registryFile), &doc); err != nil {
+	err := readCachedJSON(filepath.Join(h.root, registryFile), &doc)
+	h.publishRegistry(doc.Stores, err)
+	if err != nil {
 		return nil, err
 	}
 	return doc.Stores, nil
+}
+
+// publishRegistry swaps a fully owned snapshot without holding registryMu
+// across file operations. Caller holds registryLoadMu so a stale refresh cannot
+// publish after a newer local write. Interactive Seen never waits on this I/O mutex.
+func (h *Host) publishRegistry(stores []StoreEntry, err error) {
+	entries := make(map[string]StoreEntry, len(stores))
+	for _, e := range stores {
+		entries[e.ID] = e
+	}
+	h.registryMu.Lock()
+	h.registryEntries, h.registryStores, h.registryErr = entries, append([]StoreEntry(nil), stores...), err
+	h.registryMu.Unlock()
+}
+
+// StoreSnapshot returns the ordered registration list published at startup,
+// after a successful local write or before a watch notification. It is for
+// interactive page reads: no file operations, and returned entries are owned
+// by the caller. Operations requiring immediate cross-process authority must
+// use Stores/Entry instead.
+func (h *Host) StoreSnapshot() ([]StoreEntry, error) {
+	h.registryMu.RLock()
+	defer h.registryMu.RUnlock()
+	if h.registryErr != nil {
+		return nil, h.registryErr
+	}
+	return append([]StoreEntry(nil), h.registryStores...), nil
+}
+
+// memoryEntry is the page-read registration lookup: zero stat/read/open/lock
+// file operations. External changes become visible when the existing watcher
+// refreshes Stores, before its change notification; local writes publish before
+// returning. Writes still use Entry's immediate cross-process validation.
+func (h *Host) memoryEntry(id string) (StoreEntry, error) {
+	h.registryMu.RLock()
+	defer h.registryMu.RUnlock()
+	if h.registryErr != nil {
+		return StoreEntry{}, h.registryErr
+	}
+	if e, ok := h.registryEntries[id]; ok {
+		return e, nil
+	}
+	return StoreEntry{}, fmt.Errorf("%w %q", ErrNotRegistered, id)
+}
+
+// writeRegistry publishes only a successfully persisted registry. Ordering the
+// I/O here with Stores prevents an older watcher read from regressing memory;
+// memoryEntry remains available throughout the disk operation.
+func (h *Host) writeRegistry(doc registryDoc) error {
+	h.registryLoadMu.Lock()
+	defer h.registryLoadMu.Unlock()
+	if err := writeJSON(filepath.Join(h.root, registryFile), doc); err != nil {
+		return err
+	}
+	h.publishRegistry(doc.Stores, nil)
+	return nil
 }
 
 // Entry returns the registered store id.
@@ -219,7 +281,7 @@ func (h *Host) editEntry(id string, edit func(*StoreEntry) error) (StoreEntry, e
 			}
 			out = doc.Stores[i]
 			doc.Version = 1
-			return writeJSON(path, doc)
+			return h.writeRegistry(doc)
 		}
 		return fmt.Errorf("%w %q", ErrNotRegistered, id)
 	})
@@ -270,7 +332,7 @@ func (h *Host) removeEntry(id, nonce string) (int, error) {
 				at = i
 				doc.Stores = append(doc.Stores[:i], doc.Stores[i+1:]...)
 				doc.Version = 1
-				return writeJSON(path, doc)
+				return h.writeRegistry(doc)
 			}
 		}
 		return fmt.Errorf("%w %q", ErrNotRegistered, id)
@@ -297,7 +359,7 @@ func (h *Host) restoreEntry(e StoreEntry, at int) error {
 		}
 		doc.Stores = append(doc.Stores[:at], append([]StoreEntry{e}, doc.Stores[at:]...)...)
 		doc.Version = 1
-		return writeJSON(path, doc)
+		return h.writeRegistry(doc)
 	})
 }
 
@@ -316,7 +378,7 @@ func (h *Host) addEntry(e StoreEntry) error {
 		}
 		doc.Version = 1
 		doc.Stores = append(doc.Stores, e)
-		return writeJSON(path, doc)
+		return h.writeRegistry(doc)
 	})
 }
 

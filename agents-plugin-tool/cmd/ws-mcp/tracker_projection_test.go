@@ -5,17 +5,79 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wstracker"
 	"github.com/kang-sw/devenv/internal/wstrackerhost"
 )
 
 func projectionString(s string) *string { return &s }
+
+func TestTrackerPageRegistrationAndSeenReadsHaveZeroIO(t *testing.T) {
+	root := t.TempDir()
+	entry := wstrackerhost.StoreEntry{ID: "store", Label: "initial", Dir: t.TempDir(), Member: "me", Nonce: "one"}
+	path := filepath.Join(root, "stores.json")
+	write := func(entries []wstrackerhost.StoreEntry) {
+		t.Helper()
+		raw, err := json.Marshal(map[string]any{"version": 1, "stores": entries})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write([]wstrackerhost.StoreEntry{entry})
+	h, err := wstrackerhost.New(wstrackerhost.Options{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	adapter := &dashboardTracker{h: h}
+	// Recover clone-local marks once, as before measuring warm projections.
+	if _, err := h.Seen(entry.ID); err != nil {
+		t.Fatal(err)
+	}
+	// A very recent external write must not make a page registration lookup
+	// enter ReadFileCached's stat/racy-read path. The watch owns that refresh.
+	external := entry
+	external.Label = "external"
+	write([]wstrackerhost.StoreEntry{external})
+	before := wsstate.FileIOCounters()
+	for range 5 {
+		stores, err := adapter.Stores() // the HTTP projection guard's store list
+		if err != nil || len(stores) != 1 || stores[0].Label != "initial" {
+			t.Fatalf("store snapshot = %+v, %v", stores, err)
+		}
+		if _, err := h.Seen(entry.ID); err != nil {
+			t.Fatal(err)
+		} // Projection's mark read
+	}
+	after := wsstate.FileIOCounters()
+	for operation, count := range after {
+		if delta := count - before[operation]; delta != 0 {
+			t.Errorf("warm page metadata %s = %d, want 0", operation, delta)
+		}
+	}
+	t.Logf("five warm projection metadata reads: stat=%d read_file=%d total=%d",
+		after["file_io_stat"]-before["file_io_stat"], after["file_io_read_file"]-before["file_io_read_file"], after["file_io_total"]-before["file_io_total"])
+	// Explicit/background refresh publishes external changes before the
+	// daemon is notified; the page then reads the new list without I/O.
+	if _, err := h.Stores(); err != nil {
+		t.Fatal(err)
+	}
+	stores, err := adapter.Stores()
+	if err != nil || len(stores) != 1 || stores[0].Label != "external" {
+		t.Fatalf("refreshed snapshot = %+v, %v", stores, err)
+	}
+}
 
 func projectionFixture() *wstrackerhost.StoreView {
 	const oid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
