@@ -319,7 +319,8 @@ func TestTicketsQueryPaginationSchemaDocumentsContract(t *testing.T) {
 	}
 
 	entry := toolEntryTextByName(t, list, "tickets.query")
-	for _, want := range []string{"status-rank and ticket-stem order", "defaults to 50", "1 through 200", "offset + limit"} {
+	// The default and range live in the schema above; the text names the paging.
+	for _, want := range []string{"paginated by offset and limit"} {
 		if !strings.Contains(entry, want) {
 			t.Fatalf("tickets.query schema/description missing %q:\n%s", want, entry)
 		}
