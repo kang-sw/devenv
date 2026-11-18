@@ -1637,7 +1637,7 @@ Current launcher inputs:
 | `WS_MCP_BOOTSTRAP_URL` | Download a prebuilt binary when no runtime binary exists. |
 | `WS_MCP_BOOTSTRAP_SHA256` | Optional SHA-256 checksum for `WS_MCP_BOOTSTRAP_URL`. |
 | `WS_MCP_RELEASE_REPOSITORY` | Override the GitHub release repository from `runtime.json`. |
-| `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.50.7`. |
+| `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.50.8`. |
 | `WS_MCP_RELEASE_BASE_URL` | Override the full release asset base URL; useful for local file or HTTP smoke tests. |
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
 | `WS_MCP_LAUNCHER_DIRECT` | Obsolete; ignored. It never enables executable fallback. |
@@ -1696,7 +1696,7 @@ The helper updates plugin manifests, runtime contracts, Go runtime development
 defaults, release workflow references, build script defaults, selected
 documentation references, and the `agents-plugin-pi/` mirrors (`runtime.json`,
 `bin/ws-mcp-launcher.py`, `rsrc/`, resynced byte-for-byte from `agents-plugin/`,
-plus both `ws-pi-bridge` `package.json` versions). Development binaries such as `0.50.7-dev` satisfy the
+plus both `ws-pi-bridge` `package.json` versions). Development binaries such as `0.50.8-dev` satisfy the
 plugin version the helper just set; older or newer minor releases are stale. The
 concrete range lives in `runtime.json.required_mcp` — read it there rather than
 restating a version here, which froze at `0.29.2` for seven minor releases
@@ -1870,7 +1870,7 @@ Level 2 validates local release assets:
 
 ```bash
 cd agents-plugin-tool
-scripts/build-release-assets.sh 0.50.7-dev
+scripts/build-release-assets.sh 0.50.8-dev
 python3 ../agents-plugin/bin/ws-mcp-launcher.py version
 cd dist
 shasum -a 256 -c SHA256SUMS
