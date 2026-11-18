@@ -46,6 +46,22 @@ test('only the active sheet opener hides; closed handle signals remain in place'
   assert.match(js, /drBadge \|\| drSwap/);
 });
 
+test('the fold button carries the approval wait while the panels sheet hides the handle', () => {
+  const classes = () => ({ set: new Set(), toggle(k, on) { if (on) this.set.add(k); else this.set.delete(k); }, contains(k) { return this.set.has(k); } });
+  const drhandle = { classList: classes() }, drfold = { classList: classes() };
+  let found = [];
+  const row = inSource => ({ closest: s => s === '.ag-source' && inSource ? {} : null });
+  const c = vm.createContext({ drhandle, drfold, drTitle() {}, q: () => found });
+  vm.runInContext(section('  function drawerWait()', '  // A panels change'), c);
+  for (const [what, rows, want] of [['a waiting row', [row(false)], true], ['the hidden roster alone', [row(true)], false]]) {
+    found = rows; c.drawerWait();
+    assert.equal(drfold.classList.contains('wait'), want, 'fold wait: ' + what);
+    assert.equal(drhandle.classList.contains('wait'), want, 'handle wait: ' + what);
+  }
+  assert.match(css, /\.drawer\.panels \.dr-fold\.wait \.dr-wait \{ display: inline-flex; \}/);
+  assert.match(js, /drFoldWait\.appendChild\(gIcon\("lock"\)\);\s*drfold\.appendChild\(drFoldWait\)/);
+});
+
 test('closed opener clicks open full sheets and the fold closes back to that opener', () => {
   function node() {
     const classes = new Set();

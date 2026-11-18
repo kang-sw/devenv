@@ -95,7 +95,7 @@ function el(inSource) { return { closest(s) { return s === '.ag-source' && inSou
 let found = [], selector = '';
 const handle = { classList: { toggle(k, v) { handle[k] = v; } } };
 // doc.querySelector answers as a selector-only check would: the first match.
-const dctx = vm.createContext({ drhandle: handle, drTitle() {}, doc: { querySelector(sel) { selector = sel; return found[0] || null; } }, q(sel) { selector = sel; return found; } });
+const dctx = vm.createContext({ drhandle: handle, drfold: null, drTitle() {}, doc: { querySelector(sel) { selector = sel; return found[0] || null; } }, q(sel) { selector = sel; return found; } });
 vm.runInContext(drawerWait[0], dctx);
 for (const [what, els, want] of [
   ['no approval', [], false],
