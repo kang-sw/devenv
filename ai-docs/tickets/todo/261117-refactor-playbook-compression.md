@@ -141,7 +141,15 @@ How each playbook's diet runs, so a later session resumes it as is:
   the Go route's goal code paths and other worker playbooks' goal mentions
   are still removed by the epic's run-split ticket. No Go or Pi parser
   rejects the new report fields.
-- Next: `ticket-handler`, `lead-review`, `lead-ship`.
+- `ticket-handler`: done (9cc6f86bd), 1549 → 1444 words; semantics-preserving
+  ((124)=a, (126)=ok). The `### Result` freeze and title-language lines now
+  come from `ticket-conventions`; both override marker blocks are verbatim.
+  Not changed: the Report shape (lead-ticket already asks `items:` in its
+  Response format) and the Open Decision Queue format, which lives only in
+  this file and `lead-ticket` (moving it into a convention is an ask-first
+  change outside this pass). The same commit fixed the `whiteboard.md`
+  Commands example, whose `wb:change` operand was absent from the payload.
+- Next: `lead-review`, `lead-ship`.
 
 ## Phases
 
