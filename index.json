@@ -357,7 +357,7 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "track/agent-v2",
         "phase": "active",
-        "touched_at": "2026-11-17T13:27:49Z",
+        "touched_at": "2026-11-18T11:46:49Z",
         "impl": {
           "branch": "impl/track/agent-v2/envy-mud-crepe"
         }
@@ -550,19 +550,6 @@
     },
     "261117-research-ws-dashboard-data-only-client-assembly": {
       "registered_at": "2026-11-17T03:50:30Z"
-    },
-    "261118-bug-ws-windows-npm-claude-exe-shim-refused": {
-      "registered_at": "2026-11-18T08:50:16Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "9091c57d68d03c76",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-18T09:32:28Z",
-        "impl": {
-          "branch": "impl/develop/tray-could-dill"
-        }
-      }
     },
     "261118-feat-ws-agy-tool-names-and-worker-role": {
       "registered_at": "2026-11-18T07:33:38Z"
