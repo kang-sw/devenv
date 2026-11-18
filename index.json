@@ -546,6 +546,9 @@
     },
     "261118-feat-ws-exec-intent-filter": {
       "registered_at": "2026-11-18T03:48:52Z"
+    },
+    "261118-feat-ws-hosted-child-connection-identity": {
+      "registered_at": "2026-11-18T04:26:20Z"
     }
   }
 }
