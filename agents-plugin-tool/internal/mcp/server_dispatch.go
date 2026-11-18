@@ -91,6 +91,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if isNoteMutationTool(params.Name) && !entry.isTopLevelLead() {
 				return errorResponse(req.ID, -32601, noteReadOnlyDenial(params.Name))
 			}
+			if params.Name == whiteboardLoadTool && !entry.isTopLevelLead() {
+				return errorResponse(req.ID, -32601, whiteboardLeadOnlyDenial(params.Name))
+			}
 			if isWhiteboardTool(params.Name) && !entry.isTopLevelLead() {
 				board, marked := s.subleadBoardFor(keyStr, entry)
 				if !marked {
@@ -152,7 +155,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			}
 		}()
 	}
-	if whiteboardDirtyingTool(params.Name) {
+	if whiteboardDirtyingTool(params.Name) || params.Name == whiteboardLoadTool {
 		defer func() { s.refreshWhiteboardAfter(params.Arguments, resp) }()
 	}
 
@@ -1074,6 +1077,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return s.handleWhiteboardUpdate(req.ID, params.Arguments, sublead)
 	case "whiteboard.query":
 		return s.handleWhiteboardQuery(req.ID, params.Arguments)
+	case whiteboardLoadTool:
+		return s.handleWhiteboardLoad(req.ID, params.Arguments)
 	case "tracker.update":
 		return s.handleTrackerUpdate(ctx, req.ID, params.Arguments)
 	case trackerShowTool:

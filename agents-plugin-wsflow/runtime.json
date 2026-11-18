@@ -39,6 +39,7 @@
     "note.query": ">=0.50.5-dev <0.51.0",
     "whiteboard.update": ">=0.50.5-dev <0.51.0",
     "whiteboard.query": ">=0.50.5-dev <0.51.0",
+    "whiteboard.load": ">=0.50.5-dev <0.51.0",
     "tracker.update": ">=0.50.5-dev <0.51.0",
     "tracker.query": ">=0.50.5-dev <0.51.0",
     "wiki.query": ">=0.50.5-dev <0.51.0",

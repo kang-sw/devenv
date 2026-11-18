@@ -85,7 +85,7 @@ const LIVE_TOOL_NAMES = [
   "workflow_state", "playbook.read", "playbook.render", "rationale.query", "git.followups",
   "worktree.acquire", "worktree.release", "worktree.remove", "worktree.list",
   "mailbox.history", "dashboard.inbox_drain", "dashboard.intake",
-  "tracker.query", "tracker.update", "whiteboard.query", "whiteboard.update",
+  "tracker.query", "tracker.update", "whiteboard.query", "whiteboard.update", "whiteboard.load",
   "wiki.query", "wiki.update",
   "pi.spawn", "pi.send", "pi.list", "pi.stop", "pi.transcript", "pi.wait",
 ];

@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 1ea0b934edac17da
 sage-review-completeness-reviewed: 1ea0b934edac17da
+completed: 2026-11-18
 ---
 
 # 화이트보드 zip 다운로드와 whiteboard.load로 보드 인계하기
@@ -243,3 +244,56 @@ Acceptance:
 
 Verification: Go round-trip and refusal tests on w5090; the dashboard
 frontend test for the toolbar action.
+
+### Result (a75e50eeb) - 2026-11-18
+
+Landed in 75e35cf60 (Go spine), 5fa4a80f2 (dashboard toolbar), 094127aff
+(review fix), a75e50eeb (toolbar hook pin).
+
+- `wswhiteboard.FolderStore.ExportArchive` zips the board under its `.lock`
+  after pending replay: root files, the topic folders `meta.json`
+  references, and the revision receipts; no `.lock`, `pending.json`,
+  dot-named temp files, or unreferenced topic folders. No board is
+  `os.ErrNotExist` and creates nothing.
+- `FolderStore.LoadArchive(path, now)` extracts into a temp folder (refusing
+  absolute, `..`, backslash, colon, non-clean, non-regular, and duplicate
+  entries; caps 50,000 entries and 128 MiB counted as inflated bytes),
+  validates through `Open`, scrubs the three embed keys, then `replace`s
+  under one destination lock: plan a fresh-board intent against a synthetic
+  prior board carrying only the old generation and `NextTopic`, copy the
+  current board to `<reply-id>.bak-<YYMMDD_hhmm>` (`-2`, `-3`, ... on
+  collision), commit through the pending-intent protocol, then remove the
+  old topic folders best effort. Installed topic folders are numbered after
+  the old `NextTopic`, so a later topic never collides with an installed or
+  leftover folder (confirmed in code and by test). A reviewer's
+  crash-injection probe at every commit stage replayed to the loaded board.
+- Dashboard: `GET /s/<reply-id>/board.zip` through `BoardArchiveSource`
+  (agent conversations have none), 404 without a board, file name
+  `whiteboard_<repo>_<branch>_<label|reply-id>_<YYMMDD_hhmm>.zip` with
+  filename-unsafe characters as `-`. The toolbar search button became a
+  download button (Lucide `download` icon, 11 languages), absent on the
+  worktree page and hidden by CSS while the board region shows `.empty`.
+- MCP `whiteboard.load(session_key, path)`: top-level lead only (sub-leads
+  and children refused before the sub-lead board rewrite); relative paths
+  resolve against the session root; a missing file names the resolved
+  host path; success names the topic count and the backup folder (or
+  none); afterwards cache `Forget`, knob enable, page refresh, and the
+  dashboard nudge. `runtime.json` tool entries added for ws, wsflow, pi
+  and the Pi bridge tool-list fixture. Compatibility T0.
+
+Verification (w5090): `go test -count=1 ./internal/wswhiteboard
+./internal/mcp ./internal/wsdashboard ./internal/wsi18n ./cmd/ws-mcp` -
+mcp, wsi18n, cmd/ws-mcp ok; wsdashboard's one failure
+(TestToolbarPageActionHooks, a pin of the retired search hook) fixed in
+a75e50eeb and rerun ok; wswhiteboard fails only
+TestTopicStateBadgeResearchingMetadata and ...ClockAndReconciliation with
+"node required" (w5090 has no Node; unchanged files, pre-existing).
+Locally under node: the cards.js toolbar placement script from
+TestBoardToolbarPlacementAndCounts passes; all 11 i18n tables parse.
+Not run: the Playwright browser fixtures edited for `.board-download`
+(they need the Go daemon plus Node), and the Pi TypeScript bridge test
+(its list and the manifest were updated together).
+
+Decisions: the zip carries derived root files (index page, stamp, mermaid
+script) as part of "the board folder's files"; the destination's revision
+receipts floor the loaded ones; the topic count counts every topic key.

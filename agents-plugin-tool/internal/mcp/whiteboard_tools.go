@@ -439,6 +439,64 @@ func (s *Server) handleWhiteboardQuery(id json.RawMessage, args map[string]any) 
 	return toolTextResponse(id, wswhiteboard.FormatQuery(result), nil)
 }
 
+// whiteboardLoadTool replaces the caller's board with a board zip (the
+// dashboard's board download). It is top-level-lead-only with no sub-lead
+// pass-through, so it is not an isWhiteboardTool name: that gate would
+// rewrite a sub-lead key onto its lead's board.
+const whiteboardLoadTool = "whiteboard.load"
+
+// handleWhiteboardLoad loads the zip at args' path into the caller's board
+// folder through the store (wswhiteboard.FolderStore.LoadArchive), keeping
+// the previous board as a backup folder beside it. Afterwards it behaves like
+// a successful whiteboard.update: the cached board is dropped, the board knob
+// turns on, and the dispatcher refreshes the page and nudges the dashboard.
+func (s *Server) handleWhiteboardLoad(id json.RawMessage, args map[string]any) response {
+	key, err := sessionStateKey(whiteboardLoadTool, args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	raw, _ := args["path"].(string)
+	if strings.TrimSpace(raw) == "" {
+		return toolTextResponse(id, "", fmt.Errorf("%s: path is required", whiteboardLoadTool))
+	}
+	rec, err := s.sessions.readStateWithError(key, partKey)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", whiteboardLoadTool, err))
+	}
+	// The path is read on the machine running this server; a relative one
+	// resolves against the session root.
+	path := raw
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(rec.Root, path)
+	}
+	if info, err := os.Stat(path); err != nil || info.IsDir() {
+		return toolTextResponse(id, "", fmt.Errorf("%s: no board zip at %s on the host running ws-mcp", whiteboardLoadTool, path))
+	}
+	folder := whiteboardFolder(rec.Root, key)
+	if err := registerWhiteboardExclude(s.gitRunner(), rec.Root, filepath.Dir(folder.Dir)); err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: register %s in the git exclude file: %w", whiteboardLoadTool, whiteboardDirRel, err))
+	}
+	backup, topics, err := folder.LoadArchive(path, time.Now())
+	wswhiteboard.SharedFolderCache.Forget(folder.Dir)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %s: %w", whiteboardLoadTool, path, err))
+	}
+	if s.whiteboardChanged != nil {
+		s.whiteboardChanged(s.getenv(wsstate.EnvCacheHome), rec.Root, key)
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "loaded: %d topics from %s\n", topics, path)
+	if backup != "" {
+		sb.WriteString("backup: the previous board is in " + backup + "\n")
+	} else {
+		sb.WriteString("backup: none; this session had no board\n")
+	}
+	if err := s.enableWhiteboardKnobForSession(key); err != nil {
+		sb.WriteString("warning: " + err.Error() + "\n")
+	}
+	return toolTextResponse(id, sb.String(), nil)
+}
+
 // whiteboardRefusal lists problems with a compact playbook pointer for update,
 // or the playbook's query section for query. Command retries add their complete
 // rejected payloads separately; the central argument precheck has no such context.
