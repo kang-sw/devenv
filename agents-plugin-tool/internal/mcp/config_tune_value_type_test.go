@@ -18,7 +18,8 @@ func TestConfigTuneValueSchemaIsStringOrObject(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 
 	server := NewServer(root, "test")
-	props := toolPropertiesByName(t, callToolsList(t, server), "config.tune")
+	list := callToolsList(t, server)
+	props := toolPropertiesByName(t, list, "config.tune")
 	value, ok := props["value"].(map[string]any)
 	if !ok {
 		t.Fatalf("config.tune schema missing value property: %v", props)
@@ -26,9 +27,10 @@ func TestConfigTuneValueSchemaIsStringOrObject(t *testing.T) {
 	if _, hasType := value["type"]; hasType {
 		t.Fatalf("config.tune value must carry its types in anyOf, not an outer type: %v", value)
 	}
-	description, _ := value["description"].(string)
-	if !strings.Contains(description, "agents.tier") || !strings.Contains(description, "scalar knobs") {
-		t.Fatalf("config.tune value description not preserved: %q", description)
+	// The value's per-key shapes are stated once, in the tool description.
+	entry := toolEntryTextByName(t, list, "config.tune")
+	if !strings.Contains(entry, "agents.tier") || !strings.Contains(entry, "scalar knobs") {
+		t.Fatalf("config.tune no longer states the value shapes: %s", entry)
 	}
 	want := []any{
 		map[string]any{"type": "string"},

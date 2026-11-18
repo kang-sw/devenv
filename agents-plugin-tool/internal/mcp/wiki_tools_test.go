@@ -257,15 +257,18 @@ func TestWikiToolsHTMLPages(t *testing.T) {
 	if !strings.Contains(refused, "HTML page cannot show images") {
 		t.Errorf("an html write with images must be refused: %s", refused)
 	}
-	for _, name := range []string{wikiQueryTool, wikiUpdateTool} {
-		var desc string
-		for _, tool := range tools() {
-			if tool["name"] == name {
-				desc, _ = tool["description"].(string)
+	// The schemas name HTML pages; wiki.update also says how they show and
+	// that images belong to Markdown pages.
+	list := callToolsList(t, f.s)
+	for name, wants := range map[string][]string{
+		wikiQueryTool:  {".html"},
+		wikiUpdateTool: {".html", "sandboxed", "attachment:"},
+	} {
+		entry := toolEntryTextByName(t, list, name)
+		for _, want := range wants {
+			if !strings.Contains(entry, want) {
+				t.Errorf("%s schema does not describe HTML pages (missing %q): %s", name, want, entry)
 			}
-		}
-		if !strings.Contains(desc, ".html") || !strings.Contains(desc, "sandboxed frame") || !strings.Contains(desc, "attachment:") {
-			t.Errorf("%s description does not describe HTML pages: %s", name, desc)
 		}
 	}
 }
