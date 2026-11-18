@@ -64,6 +64,17 @@ board knob is on), `lead-run.md` 1786, `lead-workflow-manual.md` 1631,
   delegation instead of lead-run; the user's yes runs it, and the lead closes
   the ticket citing the commit. Landed in `lead-delegate`; `lead-run`'s entry
   gets the matching pointer in its diet. (85)
+- **lead-review split.** `lead-review` keeps the target, the blocked-path
+  stop, the user's decisions, and the ledger commit; a new render-kind worker
+  `review-handler` runs the reviewers, grades findings (the Minor re-grade),
+  and stamps the ledger for a range, including the cleared-prefix search; a
+  new print playbook `review-config` holds the rarely needed Setup and config
+  template. The lead commits the ledger because `git.commit`'s `followups`
+  argument is root-lead only. Fixed verdict words are dropped for the
+  situations they named (owner: they reach the user as prose anyway). New
+  behavior: a `block` stamp with no ticket stem makes the handler ask. T0,
+  playbook text only. (127)=a, (129)=ok. Rejected: relaxing the Go
+  `followups` gate so the worker commits; splitting only the template.
 - **Placement.** One epic child ticket tracks the pass. (79). Rejected:
   folding it into `261117-feat-role-scoped-workflow-context` - compression
   preserves meaning, modularization changes structure, and this pass touches
@@ -149,7 +160,13 @@ How each playbook's diet runs, so a later session resumes it as is:
   this file and `lead-ticket` (moving it into a convention is an ask-first
   change outside this pass). The same commit fixed the `whiteboard.md`
   Commands example, whose `wb:change` operand was absent from the payload.
-- Next: `lead-review`, `lead-ship`.
+- `lead-review`: done (this commit), split per the Decision above. 1162
+  words became `lead-review` 450, `review-handler` 665, `review-config`
+  273. `lead-delegate`'s NEEDS FIX line and the skill description follow.
+  Forward: `agents-plugin-tool/internal/wsreview/config.go:34` cites a
+  lead-review sentence that no longer exists; `playbook_golden_test.go`'s
+  lead-review comment still names the ledger stamp and config schema.
+- Next: `lead-ship`.
 
 ## Phases
 
