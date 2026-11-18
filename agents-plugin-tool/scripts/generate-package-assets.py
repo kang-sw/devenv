@@ -38,11 +38,12 @@ def tree_files(root):
                 yield path
 
 
-def package_files(repo):
+def package_input_paths(repo):
+    """List canonical inputs by embedded name using only directory/stat metadata."""
     # Checkout ancestors may be platform aliases (/var on macOS). Reject
     # symlinks within selected package paths, not outside the checkout.
     repo = repo.resolve()
-    result = {PLACEHOLDER: (json.dumps(PACKAGES, sort_keys=True, separators=(",", ":")) + "\n").encode()}
+    result = {}
     for product, folder in PACKAGES.items():
         root = repo / folder
         for name in FILES + (("bin/ws-pi-payload.py",) if product == "ws" else ()):
@@ -51,10 +52,16 @@ def package_files(repo):
             if any((repo / Path(*path.relative_to(repo).parts[:i])).is_symlink()
                    for i in range(1, len(path.relative_to(repo).parts) + 1)) or not path.is_file():
                 raise ValueError(f"missing regular input file: {path}")
-            result[f"{product}/{name}"] = path.read_bytes()
+            result[f"{product}/{name}"] = path
         for tree in TREES + (("native-pi",) if product == "ws" else ()):
             for path in tree_files(root / tree):
-                result[f"{product}/{path.relative_to(root).as_posix()}"] = path.read_bytes()
+                result[f"{product}/{path.relative_to(root).as_posix()}"] = path
+    return result
+
+
+def package_files(repo):
+    result = {PLACEHOLDER: (json.dumps(PACKAGES, sort_keys=True, separators=(",", ":")) + "\n").encode()}
+    result.update((name, path.read_bytes()) for name, path in package_input_paths(repo).items())
     return result
 
 

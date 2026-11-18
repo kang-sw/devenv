@@ -116,6 +116,7 @@ async function session(opts: { marker: boolean }) {
   const { launcher, installs } = writeLauncher(pluginDir);
   const builds: string[][] = [];
   const runBuild = async (argv: string[]) => {
+    if (argv[0] === "python3") return; // Asset generation is separate from Go compilation.
     builds.push(argv);
     writeFileSync(argv[argv.indexOf("-o") + 1], "fake-ws-mcp", { mode: 0o755 });
   };

@@ -217,13 +217,20 @@ describe("buildLocalDevenvBootstrap", () => {
       const notifications: string[] = [];
       const inFlight: Array<{ argv: string[]; cwd: string; finish: () => void }> = [];
       const deps: LocalDevenvBuildDeps = {
-        runBuild: (argv, opts) => new Promise<void>((resolve) => {
-          const generation = inFlight.length + 1;
-          inFlight.push({ argv, cwd: opts.cwd, finish: () => {
-            writeFileSync(argv[argv.indexOf("-o") + 1], `fake-binary-${generation}`);
-            resolve();
-          } });
-        }),
+        runBuild: (argv, opts) => {
+          assert.deepEqual(opts, { cwd: toolDir, timeout: 120_000 });
+          if (argv[0] === "python3") {
+            assert.deepEqual(argv, ["python3", join(toolDir, "scripts", "generate-package-assets.py")]);
+            return;
+          }
+          return new Promise<void>((resolve) => {
+            const generation = inFlight.length + 1;
+            inFlight.push({ argv, cwd: opts.cwd, finish: () => {
+              writeFileSync(argv[argv.indexOf("-o") + 1], `fake-binary-${generation}`);
+              resolve();
+            } });
+          });
+        },
         notify: (m) => notifications.push(m),
         now: (() => {
           let t = 1000;
@@ -233,6 +240,7 @@ describe("buildLocalDevenvBootstrap", () => {
 
       const firstStart = buildLocalDevenvBootstrap(dir, "0.45.2", deps);
       const secondStart = buildLocalDevenvBootstrap(dir, "0.45.2", deps);
+      await new Promise(resolve => setImmediate(resolve));
       assert.equal(inFlight.length, 2, "both go builds must be in flight before either completes");
       const [firstBuild, secondBuild] = inFlight;
       const firstTmp = firstBuild.argv[firstBuild.argv.indexOf("-o") + 1];
@@ -278,6 +286,32 @@ describe("buildLocalDevenvBootstrap", () => {
     }
   });
 
+  test("generator completes before Go; failure propagates unchanged without compiling or leaving artifacts", async () => {
+    const dir = tempDir("ws-pi-generator-");
+    try {
+      const toolDir = makeToolDir(dir);
+      const go = makeExecutableStub(dir);
+      writeMarker(dir, { schema_version: 1, source_root: makeSourceRoot(dir), tool_dir: toolDir, go });
+      const calls: string[][] = [];
+      const error = new Error("generator: original failure");
+      let release!: () => void;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      const pending = buildLocalDevenvBootstrap(dir, "0.50.0", {
+        runBuild: async (argv, opts) => {
+          calls.push(argv);
+          assert.deepEqual(opts, { cwd: toolDir, timeout: 120_000 });
+          await gate;
+          throw error;
+        },
+      });
+      assert.deepEqual(calls, [["python3", join(toolDir, "scripts", "generate-package-assets.py")]]);
+      release();
+      await assert.rejects(pending, err => err === error);
+      assert.equal(calls.length, 1, "failed generation must prevent Go compilation");
+      assert.deepEqual(readdirSync(join(dir, ".runtime", "local-devenv")), []);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
   test("runBuild throwing propagates unchanged and cleans up the partial temp build artifact (fail loud, no cache fallback)", async () => {
     const dir = tempDir("ws-pi-local-devenv-bootstrap-fail-");
     try {
@@ -290,6 +324,7 @@ describe("buildLocalDevenvBootstrap", () => {
       let tmpPathUsed: string | undefined;
       const deps: LocalDevenvBuildDeps = {
         runBuild: (argv) => {
+          if (argv[0] === "python3") return;
           // Simulate a partial/interrupted build: `go build -o <tmp>` writes
           // a (possibly incomplete) file at the declared temp path before
           // the failure is reported — the review fix's whole point is that
@@ -350,12 +385,13 @@ else:
 `;
     writeFileSync(launcherPath, `if __name__ != '__main__':\n import runpy\n globals().update(runpy.run_path(${JSON.stringify(realLauncher)}))\nelse:\n${fake.split("\n").map(line => " " + line).join("\n")}`);
     const builds: string[][] = [];
+    const commands: string[] = [];
     const notices: string[] = [];
     const deps: LocalDevenvBuildDeps = {
-      runBuild: argv => { builds.push(argv); writeFileSync(argv[argv.indexOf("-o") + 1], "fake built runtime"); },
+      runBuild: (argv, opts) => { commands.push(argv[0] === "python3" ? "generate" : "go"); assert.equal(opts.timeout, 120_000); assert.equal(opts.cwd, readLocalDevenvMarker(pluginDir)!.tool_dir); if (argv[0] === "python3") return; builds.push(argv); writeFileSync(argv[argv.indexOf("-o") + 1], "fake built runtime"); },
       notify: message => notices.push(message),
     };
-    return { dir, pluginDir, launcherPath, runtimeJsonPath, runtimePath, contract, builds, notices, deps };
+    return { dir, pluginDir, launcherPath, runtimeJsonPath, runtimePath, contract, builds, commands, notices, deps };
   }
 
   test("source drift reuses hash-bound selected bytes; missing, corrupt and incompatible runtimes build only through the injected seam", async () => {
@@ -390,6 +426,7 @@ else:
         assert.ok(built?.env.WS_MCP_BOOTSTRAP_BINARY);
       }
       assert.equal(f.builds.length, 3);
+      assert.deepEqual(f.commands, ["generate", "go", "generate", "go", "generate", "go"]);
     } finally {
       if (oldRuntimeDir === undefined) delete process.env.WS_MCP_RUNTIME_DIR; else process.env.WS_MCP_RUNTIME_DIR = oldRuntimeDir;
       rmSync(f.dir, { recursive: true, force: true });
@@ -607,6 +644,7 @@ describe("createChildRuntimeEnsurer: lead reinstalls ws-mcp on runtime.json drif
     const runtimeJsonPath = join(dir, "runtime.json");
     writeFileSync(runtimeJsonPath, BASE_CONTRACT);
     const builds: string[][] = [];
+    const commands: string[] = [];
     const launches: Array<{ args: string[]; env: Record<string, string>; builtExisted: boolean }> = [];
     const state = {
       buildError: undefined as Error | undefined,
@@ -618,7 +656,10 @@ describe("createChildRuntimeEnsurer: lead reinstalls ws-mcp on runtime.json drif
       pluginDir: dir,
       runtimeJsonPath,
       baselineHash: runtimeContractHash(BASE_CONTRACT),
-      runBuild: async (argv) => {
+      runBuild: async (argv, opts) => {
+        commands.push(argv[0] === "python3" ? "generate" : "go");
+        assert.deepEqual(opts, { cwd: readLocalDevenvMarker(dir)!.tool_dir, timeout: 120_000 });
+        if (argv[0] === "python3") return;
         builds.push(argv);
         if (state.buildGate) await state.buildGate;
         if (state.buildError) throw state.buildError;
@@ -634,6 +675,7 @@ describe("createChildRuntimeEnsurer: lead reinstalls ws-mcp on runtime.json drif
       dir,
       deps,
       builds,
+      commands,
       launches,
       state,
       bump: (text = BUMPED_CONTRACT) => writeFileSync(runtimeJsonPath, text),
@@ -658,6 +700,7 @@ describe("createChildRuntimeEnsurer: lead reinstalls ws-mcp on runtime.json drif
       f.bump();
       await ensure();
       assert.equal(f.builds.length, 1);
+      assert.deepEqual(f.commands, ["generate", "go"]);
       assert.match(f.builds[0][f.builds[0].indexOf("-ldflags") + 1], /^-X main\.version=0\.46\.33 /, "the rebuild reads plugin_version fresh, not the startup contract");
       assert.equal(f.launches.length, 1);
       assert.deepEqual(f.launches[0].args, ["version"], "a subcommand that exits, never the blocking stdio server");
@@ -777,6 +820,7 @@ describe("createChildRuntimeEnsurer: lead reinstalls ws-mcp on runtime.json drif
         baselineHash: runtimeContractHash(baseText),
         // A fake ws-mcp stamped like `go build -X main.version=...`.
         runBuild: (argv) => {
+          if (argv[0] === "python3") return;
           writeFileSync(
             argv[argv.indexOf("-o") + 1],
             `#!/usr/bin/env python3\nopen(${JSON.stringify(executed)}, 'w').write('executed')\nraise SystemExit(1)\n`,
@@ -844,6 +888,7 @@ describe("createChildRuntimeEnsurer: lead reinstalls ws-mcp on runtime.json drif
         baselineHash: runtimeContractHash(baseText),
         // A sentinel ws-mcp, its staged daemon copy included: any execution journals its argv.
         runBuild: (argv) => {
+          if (argv[0] === "python3") return;
           writeFileSync(
             argv[argv.indexOf("-o") + 1],
             `#!/usr/bin/env python3\nimport sys\nopen(${JSON.stringify(executed)}, 'a').write(' '.join(sys.argv) + '\\n')\nraise SystemExit(1)\n`,

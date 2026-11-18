@@ -92,7 +92,10 @@ async function sourcePlugin(root: string): Promise<Plugin> {
   // What the bridge does at session start: build (the seam writes the
   // sentinel), let the launcher install it, then release the bootstrap.
   const bootstrap = await buildLocalDevenvBootstrap(plugin.pluginDir, PLUGIN_VERSION, {
-    runBuild: (argv) => writeFileSync(argv[argv.indexOf("-o") + 1]!, sentinel(plugin.executions), { mode: 0o755 }),
+    runBuild: (argv) => {
+      if (argv[0] === "python3") return;
+      writeFileSync(argv[argv.indexOf("-o") + 1]!, sentinel(plugin.executions), { mode: 0o755 });
+    },
   });
   assert.ok(bootstrap, "the marker is valid");
   // Asynchronous: the fake daemon answers /health from this event loop.

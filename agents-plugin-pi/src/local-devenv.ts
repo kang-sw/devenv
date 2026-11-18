@@ -22,8 +22,8 @@
  * `execute-gateway.ts`'s `tryGit` shape, except failures here propagate
  * instead of degrading to `undefined` — the marker is opt-in, so once it
  * exists, brokenness is a bug to surface, not a condition to paper over).
- * Runtime inspection executes Python helpers; the actual `go build` invocation
- * is an injected dependency (`LocalDevenvBuildDeps.runBuild`), so this module — and its build-success
+ * Runtime inspection executes Python helpers; asset generation and `go build`
+ * use an injected dependency (`LocalDevenvBuildDeps.runBuild`), so this module — and its build-success
  * path — can be exercised by `npm test` with no `go` binary installed.
  */
 
@@ -49,7 +49,7 @@ export interface LocalDevenvContext {
 
 export interface LocalDevenvBuildDeps {
   /** Injected build seam — the only IO in this module that must not run for real under `npm test`. */
-  runBuild: (argv: string[], opts: { cwd: string }) => void | Promise<void>;
+  runBuild: (argv: string[], opts: { cwd: string; timeout: number }) => void | Promise<void>;
   notify?: (message: string) => void;
   now?: () => number;
 }
@@ -196,7 +196,7 @@ export function readLocalDevenvMarker(pluginDir: string): LocalDevenvMarker | un
 /**
  * `undefined` when no marker exists (inert). Otherwise: reads `source_root`'s
  * short HEAD, composes the version/commit ldflags stamp, runs the injected
- * `deps.runBuild` to build `ws-mcp` into a unique temp path under
+ * `deps.runBuild` to generate package assets first, then build `ws-mcp` into a unique temp path under
  * `<pluginDir>/.runtime/local-devenv/`, atomically renames it to a unique
  * bootstrap path on success, and returns the launcher-child env fragment plus the
  * context `bridge.ts` threads into a launch-failure rewrap.
@@ -237,7 +237,9 @@ export async function buildLocalDevenvBootstrap(
   notify(`building ws-mcp from \`${marker.source_root}\` @\`${shortCommit}\``);
   const startedAt = now();
   try {
-    await deps.runBuild([marker.go, "build", "-ldflags", ldflags, "-o", tmpPath, "./cmd/ws-mcp"], { cwd: marker.tool_dir });
+    // Match the launcher's generate_package_assets timeout and Python interpreter.
+    await deps.runBuild(["python3", join(marker.tool_dir, "scripts", "generate-package-assets.py")], { cwd: marker.tool_dir, timeout: 120_000 });
+    await deps.runBuild([marker.go, "build", "-ldflags", ldflags, "-o", tmpPath, "./cmd/ws-mcp"], { cwd: marker.tool_dir, timeout: 120_000 });
   } catch (err) {
     // Best-effort cleanup of a partial/failed build artifact before
     // rethrowing unchanged — the build already failed, so a cleanup error
