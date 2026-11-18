@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 960c324adc71f580
 sage-review-completeness-reviewed: 960c324adc71f580
+completed: 2026-11-18
 ---
 
 # Windows npm-installed Claude is refused because its cmd-shim launches an exe, not node
@@ -167,3 +168,17 @@ Constraints:
 - Manuals that apply: `ai-docs/manuals/shipped-surface-boundary.md` (the error text reaches users), `ai-docs/manuals/release-compatibility.md`, `ai-docs/manuals/performance.md` (one shim read per start; no new file touches on interactive paths).
 - No local `go test`, Go tools, gofmt, ws/ws-mcp executables, launchers, or Electron on the dev PC; Go runs on w5090 only.
 - Rejected in 261112 and still rejected: matching an ancestor PID in ws-mcp or the Pi extension, and finding cmd.exe's child after spawn.
+
+### Result (8218d3d1e) - 2026-11-18
+
+Landed:
+- `cmdShimArgv` (`internal/wsagent/backend.go`) tries the npm node-shim match first, then a strict exe match `cmdShimExe`: a line that starts with a quoted `"%dp0%\<relative>.exe"` (case-insensitive extension), ends with `%*`, has only spaces/tabs between, and may end with a CR. It refuses a target with a `..` segment, a volume (`:`), or a rooted path. The exe must exist. It is returned as the program with no leading args.
+- Shape refusals wrap the sentinel `errShimRefused`; `harnessCommand` appends a harness-aware remedy (`shimRemedy`): for `claude`, install Claude Code's native build or put the directory holding the native `claude.exe` (for example `%USERPROFILE%\.local\bin`) ahead of the shim's directory on PATH; for any other harness, a neutral equivalent. A node shim with no node on PATH keeps its own error.
+- Fixture `testdata/npm-cmd-shim-claude.cmd`: the owner-supplied shim byte-for-byte, CRLF (`git ls-files --eol`: `i/crlf w/crlf attr/-text`).
+- Tests in `cmdshim_test.go`: `TestCmdShimArgvUnwrapsTheExeShim` (CRLF, LF, `.EXE`), `TestCmdShimArgvRefusesExeShimEdges` (parent segment, volume, rooted, extra args, non-exe, no `%dp0%`, missing target), the end-to-end unwrap of the npm `claude.cmd` through `harnessCommand`, and `TestHarnessCommandRefusalNamesARemedy` (claude vs pi wording). The existing refusal test now also asserts `errShimRefused`.
+
+Verification (w5090): `go vet ./internal/wsagent/...` OK; `go test ./internal/wsagent/...` ok; the 9 cmd-shim/harnessCommand tests PASS with `-count=1 -v`. `gofmt -l ./internal/wsagent` lists only `wake_test.go`, which is untouched by this change and pre-existing. The Windows CI legs and the owner's post-release check on an affected npm install (Decision 5) are still outstanding.
+
+Decisions:
+- The remedy names the shim's actual directory instead of the literal `%APPDATA%\npm`. For npm global installs it is that directory, and it stays accurate for other prefixes.
+- Lite review left one Minor open: the exe match is per-line, so a hand-written `.cmd` that has extra setup lines before an npm-shaped exe launch line would also be unwrapped. The node-shim match is per-line in the same way, so this is consistent and low-risk. Left as is.
