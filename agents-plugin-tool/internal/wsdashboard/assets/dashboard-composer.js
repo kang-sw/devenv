@@ -1723,7 +1723,7 @@
     // The session page's badge opens the agents popover, so it shows there
     // whether or not the session is live and anything runs.
     var popover = !!$("agpop");
-    subBadge(sbadge, doc.querySelector("#r-convlive .clive"), liveMode || popover, popover);
+    subBadge(sbadge, popover ? doc.querySelector("#r-tree .ag-source") : doc.querySelector("#r-convlive .clive"), liveMode || popover, popover);
     bgBadge(doc.querySelector("#r-convlive .clive"));
     if (!ibadge) return;
     var on = liveMode && leadWorking();
@@ -1737,9 +1737,10 @@
   // --- subagent badge --------------------------------------------------------
   // Beside the interrupt badge: a spinner, the robot icon, and "N(+M)"
   // (the word "subagents" is the title and accessible name) while the session runs subagents, whether or not its lead
-  // works. N is a convlive region's data-sub (its running direct children),
-  // M its data-subdeep (every running agent below them), counted by the
-  // server; "(+M)" shows only when M is above zero. on gates it: the
+  // works. N is data-sub (its running direct children), M data-subdeep
+  // (every running agent below them), counted by the
+  // server. The session reads the tree source; tracker chat reads convlive.
+  // "(+M)" shows only when M is above zero. on gates it: the
   // session page's live mode, or the support chat card's open conversation.
   // stay keeps it shown, quiet (idle), while nothing runs.
   var sbadge = $("sbadge");
@@ -1829,11 +1830,10 @@
     if (!agisland || !agcompact || !agidle) return;
     var tree = region("tree");
     if (!tree) return;
-    // Query each agent once, not each group descendant's descendants. The
-    // root lead and agents in peers are not this session's subagents.
-    var all = q(".tgroup .agent", tree), agents = all.filter(function (agent) { return agent.classList.contains("running"); });
+    // The source and counts are rendered together, including linked sessions.
+    var all = q(".ag-source .compact-agent", tree), agents = all;
     var done = tree.querySelector(".thead .cdone"), peers = tree.querySelector(".pgroup .pghead"), peerCount = peers && peers.querySelector(".chip");
-    var firstSeen = !agSeen && all.length > 0;
+    var firstSeen = !agSeen && (all.length > 0 || q(".tgroup .agent", tree).length > 0);
     if (firstSeen) agSeen = true;
     agRunning = agents.length;
     agcompact.textContent = "";
@@ -1851,7 +1851,7 @@
       phase.className = "phase " + kind;
       phase.textContent = kind === "tool" && (!sourcePhase || !sourcePhase.classList.contains("tool")) ? agisland.getAttribute("data-tool-label") : sourcePhase.textContent;
       if (time) { var copy = time.cloneNode(true); elapsed.appendChild(copy); fmtTime(copy, Date.now()); }
-      else if (am) { var spans = q("span", am); if (spans.length > 2) elapsed.textContent = spans[spans.length - 1].textContent; }
+      else if (am) { var spans = q("span", am); if (spans.length) elapsed.textContent = spans[spans.length - 1].textContent; }
       [mark, name, phase, elapsed].forEach(function (el) { row.appendChild(el); });
       agcompact.appendChild(row);
     });
@@ -1870,6 +1870,7 @@
     if (!agpop) return;
     q("details[data-key]", agpop).forEach(function (d) { d.classList.toggle("d-full", !!agFull[d.getAttribute("data-key")]); });
     agProject();
+    syncBadge();
   }
   if (agpop && sbadge && agpin) {
     sbadge.addEventListener("click", function () { agDismissed = !agpop.hidden; agOpen(agpop.hidden); });

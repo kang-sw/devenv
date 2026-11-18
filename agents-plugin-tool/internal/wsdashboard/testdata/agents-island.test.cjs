@@ -34,8 +34,8 @@ peers.map = { '.chip': node('', '1') };
 const tree = node(); tree.map = { '.thead .cdone': node('', 'Done 2'), '.pgroup .pghead': peers };
 const doc = node(); doc.createElement = () => node(); doc.activeElement = null;
 const ctx = vm.createContext({ $: id => els[id], sbadge: badge, doc, window: node(),
-  region: () => tree, q: (s, n) => s === '.tgroup .agent' ? agents : [],
-  fmtTime(t) { t.textContent = 'live'; }, save() {}, load() { return '1'; }, setTimeout(fn) { fn(); }, Date });
+  region: () => tree, q: (s, n) => s === '.ag-source .compact-agent' ? agents.filter(a => a.className.includes('running')) : s === '.tgroup .agent' ? agents : s === 'span' ? n.children : [],
+  syncBadge() { badge.synced = (badge.synced || 0) + 1; }, fmtTime(t) { t.textContent = 'live'; }, save() {}, load() { return '1'; }, setTimeout(fn) { fn(); }, Date });
 vm.runInContext(code, ctx);
 assert.equal(island.hidden, true, 'persisted pin does not reveal an unseen island');
 assert.equal(pop.hidden, true);
@@ -44,6 +44,7 @@ doc.listeners.keydown({ key: 'Escape', defaultPrevented: false });
 assert.equal(island.hidden, true, 'collapsing unseen island hides it again');
 agents = [agent('parent','thinking','1s'), agent('nested',null,'2s'), agent('other','permission','3s')];
 ctx.agSwapped();
+assert.equal(badge.synced, 1, 'tree swaps refresh the session badge');
 assert.equal(island.hidden, false);
 assert.equal(island.attrs['data-mode'], 'compact');
 assert.equal(island.style.height, '50px', 'measured height is a pixel transition target');
@@ -53,6 +54,10 @@ assert.equal(compact.children.length, 4);
 assert.deepEqual(compact.children.slice(0,3).map(r => r.children[2].className), ['phase thinking','phase tool','phase tool']);
 assert.equal(compact.children[1].children[2].textContent, 'localized tool');
 assert.equal(compact.children[0].children[3].children[0].textContent, 'live');
+const staticAgent = agent('delegate child', 'tool', null);
+staticAgent.map['summary.ahead'].map['.am'].appendChild(node('t', '12s'));
+agents.push(staticAgent); ctx.agSwapped();
+assert.equal(compact.children[3].children[3].textContent, '12s', 'static elapsed span is retained');
 compact.listeners.click(); assert.equal(island.attrs['data-mode'], 'full');
 assert.equal(pin.attrs['aria-pressed'], 'true');
 doc.listeners.keydown({ key: 'Escape', defaultPrevented: false });
