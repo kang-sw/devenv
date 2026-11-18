@@ -133,6 +133,35 @@ Two gaps stand in the way:
   hosted agy lead live: a Gemini model first, then a Claude model calling a
   dotted ws tool through its alias.
 
+### Result (e69a4a620) - 2026-11-18
+
+- Landed: `ToolNameScheme` and `ManualHarness` on `BackendRegistration`
+  (`internal/wsagent/registration.go`, with `ApplyToolNameScheme`); Claude
+  declares harness `claude`, agy declares harness `agy` and `sanitize`, Pi
+  declares neither. One generic `buildToolAliasTable`
+  (`internal/mcp/tool_aliases.go`) refuses a collision; the connection's
+  descriptor is read once through the hosted lead record's `Backend` and
+  `s.pi.agents.BackendRegistrations()`. `filteredTools` advertises aliases,
+  `callTool` maps an alias back, `renderLeadManual` takes the harness from
+  the descriptor (`newAgentRunner` builds the registry once). A note on the
+  descriptor is in `ai-docs/manuals/ws-mcp.md`.
+- Deviations: (a) the alias is mapped before `hostedSessionKeyRule`, since
+  that rule fills an omitted `session_key` by canonical tool name; (b) the
+  declared harness is a separate `playbookHarness()` for playbook render, not
+  the connection's detected harness, because "agy" in `currentHarness()`
+  would break a harness-defaulted `config.tune` (harness enum) and enter the
+  harness buckets; `normalizedHarness` and `server_harness.go` gain no agy
+  case; (c) alias spelling follows (137) with the `ws__` prefix, not the bare
+  `tickets_query` of (106).
+- w5090: `go build ./...`, `go vet` and `go test` of `cmd/ws-mcp`,
+  `internal/mcp`, `internal/wsagent` pass; the new tests cover the alias round
+  trip over the real inventory, collision refusal, identity, an alias call
+  without `session_key`, and the descriptor-driven render.
+- Forward (Phase 2): `WorkerCapable` and the worker profile go on the same
+  descriptor; the registry literal now lives in `newAgentRunner`'s `backends`
+  variable. The live agy check (Gemini, then a Claude model through an alias)
+  is still the owner's after the daemon swap.
+
 ### Phase 2: agy worker role
 
 - Replace the global `agentWorkerBackends` map
