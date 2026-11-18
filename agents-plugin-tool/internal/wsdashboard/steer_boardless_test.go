@@ -26,6 +26,7 @@ func TestSteerBoardlessAndPlainEntries(t *testing.T) {
 		{"agent tagged chip without board", true, false, true, &stale, http.StatusOK},
 		{"missing board plain", false, false, false, &stale, http.StatusOK},
 		{"unopened board plain", false, true, false, &stale, http.StatusOK},
+		{"lagging index stale chip", false, false, true, &stale, http.StatusConflict},
 		{"board stale chip", false, true, true, &stale, http.StatusConflict},
 		{"board legacy chip", false, true, true, nil, http.StatusOK},
 	} {
@@ -69,6 +70,12 @@ func TestSteerBoardlessAndPlainEntries(t *testing.T) {
 			}
 			if tc.want == http.StatusConflict && (answer != "board-replaced" || held[0].Name != name) {
 				t.Fatalf("stale board entry was not restored: %v, %s", answer, held[0].Name)
+			}
+			if tc.agent {
+				status, answer := d.messageWrite(dir, reg.ReplyID, []byte(`{"text":"plain untagged agent send"}`), true, time.Now())
+				if status != http.StatusOK {
+					t.Fatalf("plain agent send = %d, %v", status, answer)
+				}
 			}
 		})
 	}
