@@ -364,6 +364,9 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
         let url;
         try { url = await connectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform, packaged: app.isPackaged, replace, ...(attachRunning ? { attachRunning: true } : {}) }, {
           onNotice: message => {
+            // An automatic upgrade runs on every startup and recovery connect;
+            // only the explicit menu replace may block on a modal.
+            if (!replace) { logShell('daemon-notice', { message }); return; }
             if (window.isDestroyed()) return;
             dialogOpen = true;
             try { dialog.showMessageBoxSync(window, {

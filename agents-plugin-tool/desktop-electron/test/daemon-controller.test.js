@@ -446,3 +446,56 @@ test('Windows strict missing start uses only injected starter, then attaches a h
     select: () => assert.fail('healthy attach never selects'), launch: () => assert.fail('healthy attach never executes') }), URL);
   assert.equal(launches, 1);
 });
+test('Windows starter that exits nonzero recovers by re-probing before it fails', async t => {
+  // Models an endpoint file held unreadable past the Go start wait while a
+  // daemon serves: the starter reports unavailable, then the daemon answers.
+  const f = fixture(t, 'win32'); // Bundled core 0.50.1 (-dev suffix).
+  const options = { ...config(f), platform: 'win32' };
+  const failed = Error('daemon-start exited with status 1: {"outcome":"unavailable"}');
+  const run = async ({ incumbent, after, hidden = 2, maxPolls }) => {
+    let live = incumbent, probes = 0, launched = false, sleeps = 0;
+    const notices = [];
+    const deps = { env: env(f), onNotice: s => notices.push(s), sleep: async () => { sleeps++; }, maxPolls,
+      shutdown: () => assert.fail('Windows native starter owns drain'),
+      inspect: async () => {
+        if (launched && probes++ < hidden) throw Error('endpoint unreadable');
+        if (!live) throw Error('no endpoint');
+        return { url: URL, endpoint: { pid: live.pid, port: 32000 }, health: { ...live } };
+      },
+      launch: async () => { launched = true; live = after; throw failed; } };
+    const result = await connectDaemon(options, deps).then(url => ({ url }), error => ({ error }));
+    return { ...result, notices, sleeps };
+  };
+  const successor = { pid: 121, version: '0.50.1-dev', started_at: 'successor', lan: false };
+  // No daemon before the launch: an equal or newer daemon that answers attaches.
+  for (const after of [successor, { ...successor, version: '0.50.6-dev' }]) {
+    const r = await run({ incumbent: null, after });
+    assert.equal(r.url, URL, after.version);
+    assert.deepEqual(r.notices, []);
+    assert.equal(r.sleeps, 2);
+  }
+  // Nothing answers within the window: today's error.
+  let r = await run({ incumbent: null, after: null, maxPolls: 3 });
+  assert.match(r.error.message, /^Cannot start dashboard daemon: daemon-start exited with status 1/);
+  // An older incumbent being upgraded: the new daemon attaches silently.
+  const old = { pid: 120, version: '0.50.0', started_at: 'incumbent', lan: false };
+  r = await run({ incumbent: old, after: successor });
+  assert.equal(r.url, URL);
+  assert.deepEqual(r.notices, []);
+  // The upgrade did not happen: attach the incumbent with a notice.
+  r = await run({ incumbent: old, after: old });
+  assert.equal(r.url, URL);
+  assert.match(r.notices.at(-1), /did not drain the incumbent: daemon-start exited with status 1/);
+  // A third daemon newer than the incumbent but older than the bundle attaches.
+  r = await run({ incumbent: { ...old, version: '0.49.0' }, after: { pid: 122, version: '0.50.0', started_at: 'third', lan: false } });
+  assert.equal(r.url, URL);
+  assert.match(r.notices.at(-1), /at least as new as the incumbent but older than this app/);
+  // One older than the incumbent, or unidentified, still refuses.
+  for (const version of ['0.48.0', 'unknown']) {
+    r = await run({ incumbent: { ...old, version: '0.49.0' }, after: { pid: 122, version, started_at: 'third', lan: false } });
+    assert.match(r.error.message, /older or unidentified daemon won/, version);
+  }
+  // No daemon answers after the incumbent changed: availability is uncertain.
+  r = await run({ incumbent: old, after: null, maxPolls: 3 });
+  assert.match(r.error.message, /availability is uncertain: daemon-start exited with status 1/);
+});
