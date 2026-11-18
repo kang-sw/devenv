@@ -393,19 +393,6 @@
     "261115-ws-dashboard-worktree-detection-approval": {
       "registered_at": "2026-11-15T02:27:24Z"
     },
-    "261116-bug-ticket-handler-split-gaps": {
-      "registered_at": "2026-11-16T07:47:51Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "9091c57d68d03c76",
-        "track": "track/playbook",
-        "phase": "closed",
-        "touched_at": "2026-11-17T02:43:21Z",
-        "impl": {
-          "branch": "impl/track/playbook/brick-user-swell"
-        }
-      }
-    },
     "261116-bug-ws-native-pi-release-payload-staleness": {
       "registered_at": "2026-11-16T00:52:49Z"
     },
@@ -569,34 +556,11 @@
     "261118-feat-ws-hosted-child-connection-identity": {
       "registered_at": "2026-11-18T04:26:20Z"
     },
+    "261118-feat-ws-hosted-model-list-and-agy-bypass": {
+      "registered_at": "2026-11-18T13:38:23Z"
+    },
     "261118-feat-ws-remote-chat-bridge": {
       "registered_at": "2026-11-18T07:11:45Z"
-    },
-    "261118-feat-ws-whiteboard-zip-handoff": {
-      "registered_at": "2026-11-18T04:59:11Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "9091c57d68d03c76",
-        "track": "track/playbook",
-        "phase": "closed",
-        "touched_at": "2026-11-18T06:46:19Z",
-        "impl": {
-          "branch": "impl/track/playbook/truce-area-brook"
-        }
-      }
-    },
-    "261118-feat-ws-xmlcmd-raw-element": {
-      "registered_at": "2026-11-18T05:18:35Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "9091c57d68d03c76",
-        "track": "track/playbook",
-        "phase": "closed",
-        "touched_at": "2026-11-18T06:21:43Z",
-        "impl": {
-          "branch": "impl/track/playbook/slab-rhyme-rule"
-        }
-      }
     },
     "261118-refactor-ws-harness-name-branches": {
       "registered_at": "2026-11-18T07:53:02Z"
