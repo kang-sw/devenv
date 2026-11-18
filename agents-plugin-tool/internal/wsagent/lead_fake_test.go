@@ -820,7 +820,7 @@ func newLeadHarness(t *testing.T) *leadHarness {
 		DaemonVersion: hostedPluginTestVersion,
 		Now:           func() time.Time { return now },
 		Dir:           h.dir,
-		Backends:      map[string]BackendRegistration{BackendClaude: {Backend: ClaudeBackend{Command: "/opt/harness/claude"}, LeadProfile: LeadProfileClaude, PermissionModes: LeadPermissionModes}, BackendPi: {Backend: PiBackend{Command: "/opt/harness/pi"}, LeadProfile: LeadProfilePi}},
+		Backends:      map[string]BackendRegistration{BackendClaude: {Backend: ClaudeBackend{Command: "/opt/harness/claude"}, LeadProfile: LeadProfileClaude, PermissionModes: LeadPermissionModes, WorkerCapable: true, WorkerProfile: AgentWorkerProfile(BackendClaude), WorkerHTTPMCP: true}, BackendPi: {Backend: PiBackend{Command: "/opt/harness/pi"}, LeadProfile: LeadProfilePi, WorkerCapable: true, WorkerProfile: AgentWorkerProfile(BackendPi)}},
 		Keys:          &fakeKeys{},
 		Config:        testConfig(t),
 		Log:           h.log,

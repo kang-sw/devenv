@@ -64,7 +64,7 @@ func (t *toolAliasTable) canonical(name string) string {
 	return name
 }
 
-// connectionDescriptor is what a hosted lead's backend registration says
+// connectionDescriptor is what a hosted conversation's backend registration says
 // about the connection: its tool-name aliases and the harness its workflow
 // manual renders under. The zero value is an ordinary connection.
 type connectionDescriptor struct {
@@ -73,24 +73,32 @@ type connectionDescriptor struct {
 }
 
 // connectionDescriptor reads the descriptor of the backend registration the
-// connection's hosted lead record names (wsagent.Record.Backend), through the
-// runner that hosts it. It is resolved once; a hosted connection whose record
-// is not readable yet is asked again at its next call. A connection that is
-// not a hosted lead's, or has no runner, is the zero descriptor.
+// connection's record names (wsagent.Record.Backend), through the runner
+// that hosts it. A worker carries its own delegate key in its MCP environment;
+// that identity selects spelling only, never the hosted-lead key rule. It is
+// resolved once, retrying only while the record is not readable yet.
 func (s *Server) connectionDescriptor() connectionDescriptor {
 	s.descriptorMu.Lock()
 	defer s.descriptorMu.Unlock()
 	if s.descriptorResolved {
 		return s.descriptor
 	}
-	hosted := s.hostedSessionKey()
-	if hosted == "" {
+	key := s.hostedSessionKey()
+	worker := key == ""
+	if worker {
+		key = s.getenv(wsagent.EnvAgentSessionKey)
+	}
+	if key == "" {
 		s.descriptorResolved = true
 		return s.descriptor
 	}
-	rec, ok := s.callerRecord(hosted)
+	rec, ok := s.callerRecord(key)
 	if !ok {
 		return connectionDescriptor{}
+	}
+	if worker && rec.Lead {
+		s.descriptorResolved = true
+		return s.descriptor
 	}
 	s.descriptorResolved = true
 	registrations := s.agentBackends()

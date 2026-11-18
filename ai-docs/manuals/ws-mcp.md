@@ -952,7 +952,7 @@ from a support conversation:
   A Pi lead's extension appends its own manual; its bridge fallback appends
   the daemon's render beside the key.
 - **Backend descriptor.** What differs per harness here is data on the
-  backend's `BackendRegistration`, read through the hosted lead record's
+  backend's `BackendRegistration`, read through the conversation record's
   `Backend`; common code names no backend. `ManualHarness` is the harness the
   lead's manual renders under (claude, agy; Pi declares none).
   `ToolNameScheme` is how its connection's `tools/list` spells ws's dotted
@@ -962,7 +962,18 @@ from a support conversation:
   dotted names. A call by alias maps back to the canonical name first in
   `callTool`, so allowlists, the session-key rule, and dispatch see dotted
   names; the dotted name stays accepted. The alias table refuses a collision
-  when it is built.
+  when it is built. Workers identify their own record with
+  `WS_MCP_AGENT_SESSION_KEY` in the attached MCP environment; this selects
+  spelling only, without the hosted lead's implicit-key rule or authority.
+  `WorkerCapable` and `WorkerProfile` admit worker tiers; `WorkerHTTPMCP`
+  selects HTTP attachment. Claude and agy use HTTP, Pi keeps its bridge.
+  agy's `WorkerAutoApprove` answers requests through `AnswerApproval`,
+  preserving the permission trace. Its workers use the default agent with
+  an appended instruction to use `agent.spawn`, never native subagents;
+  unlike hosted leads, they end with the daemon and are not holder-held.
+  agy tier models are base ids with separate effort: launch uses
+  `thought_level` when offered, otherwise a suffixed model id, and logs the
+  mechanism honored. An unhonored worker effort refuses the launch.
 - **No ws plugin (Claude).** A Claude lead loads no ws bundle: the installed
   `ws` and `wsflow` plugins are turned off for the launch (`--settings`
   `enabledPlugins`), its ws-mcp is the `--mcp-config` server `ws` (no

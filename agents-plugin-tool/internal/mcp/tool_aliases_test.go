@@ -217,6 +217,45 @@ func TestRenderLeadManualUnderDeclaredHarness(t *testing.T) {
 	}
 }
 
+// TestAgyWorkerConnectionSeesAliases pins worker spelling without granting
+// the hosted lead's key substitution or widening the canonical allowlist.
+func TestAgyWorkerConnectionSeesAliases(t *testing.T) {
+	_, f := hostedBackendConnection(t, wsagent.BackendAgy, descriptorRegistrations())
+	t.Setenv(envHostedSession, "")
+	t.Setenv(wsagent.EnvAgentSessionKey, f.child)
+	t.Setenv(envAllowedTools, "git.status,agent.tiers")
+	s := NewServer(f.root, "test")
+	s.pi.agents = wsagent.NewRunner(wsagent.Options{Backends: descriptorRegistrations()})
+	dir, err := s.dashboard.stateDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := wsagent.Record{
+		ReplyID: wsmailbox.ReplyID(f.child), WSKey: f.child, Root: f.root, CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		Backend: wsagent.BackendAgy, Profile: wsagent.AgentWorkerProfile(wsagent.BackendAgy),
+		Parent: &wsagent.ParentRef{Kind: wsagent.ParentLead, ReplyID: wsmailbox.ReplyID(f.hosted)},
+	}
+	if err := wsagent.WriteRecordForTest(dir, rec); err != nil {
+		t.Fatal(err)
+	}
+	listed := listedToolNames(t, s)
+	if !listed["git_status"] || !listed["agent_tiers"] || listed["git.status"] || listed["git_commit"] || listed["workflow_manual"] {
+		t.Fatalf("worker's aliased allowlist: %v", listed)
+	}
+	if s.hostedSessionKey() != "" {
+		t.Fatal("a worker must not become a hosted lead")
+	}
+	if resp := callToolOnce(t, s, 1, "git_status", map[string]any{}); !toolIsError(t, resp) {
+		t.Fatalf("a worker still needs an explicit delegate key: %s", resp)
+	}
+	if resp := callToolOnce(t, s, 2, "git_status", map[string]any{"session_key": f.child}); toolIsError(t, resp) {
+		t.Fatalf("worker alias dispatch: %s", resp)
+	}
+	if resp := callToolOnce(t, s, 3, "git_commit", map[string]any{"session_key": f.child}); !strings.Contains(resp, "not available") {
+		t.Fatalf("reverse mapping must not bypass the allowlist: %s", resp)
+	}
+}
+
 // TestRegistrationToolNameSchemes: the descriptor's scheme names resolve
 // to the Pi bridge's spelling, the empty scheme is the identity, and an
 // unknown scheme is not silently identity.

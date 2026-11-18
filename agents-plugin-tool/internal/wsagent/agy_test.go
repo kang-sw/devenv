@@ -601,9 +601,14 @@ func TestAgyCatalogValues(t *testing.T) {
 			}
 		}
 	}
-	for _, e := range p.Entries {
-		if e.Role != RoleLead {
-			t.Errorf("entry %s declares role %q: agy hosts leads only", e.Item, e.Role)
+	worker := p.Resolve(RoleWorker, p.Newest)
+	for _, item := range CatalogItems {
+		grade := want[item]
+		if item == ItemApproval {
+			grade = GradeSubstitute
+		}
+		if got := worker.Grade(item); got != grade {
+			t.Errorf("worker %s = %s, want %s", item, got, grade)
 		}
 	}
 }

@@ -22,7 +22,8 @@ func TestRemovesSubagentsScope(t *testing.T) {
 		{Record{Backend: BackendClaude, Profile: SearchAnswerProfileClaude}, false},
 		{Record{Backend: BackendPi, Profile: PiWorkerProfile}, false},
 		{Record{Backend: BackendPi, Profile: PiMiniLeadProfile}, false},
-		{Record{Backend: BackendClaude, Profile: "agent-worker-codex"}, false},
+		{Record{Backend: BackendClaude, Profile: "agent-worker-codex"}, true},
+		{Record{Backend: BackendAgy, Profile: AgentWorkerProfile(BackendAgy)}, true},
 	} {
 		if got := RemovesSubagents(tc.rec); got != tc.want {
 			t.Errorf("RemovesSubagents(%s lead=%v %s) = %v, want %v", tc.rec.Backend, tc.rec.Lead, tc.rec.Profile, got, tc.want)

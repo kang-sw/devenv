@@ -293,14 +293,14 @@ func trackerStoreRoot(h *wstrackerhost.Host, newErr error) func(id string) (stri
 func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *wsholder.Manager) *wsagent.Runner {
 	keys := mcp.NewAgentKeyStore()
 	backends := map[string]wsagent.BackendRegistration{
-		wsagent.BackendClaude: {Backend: wsagent.ClaudeBackend{}, LeadProfile: wsagent.LeadProfileClaude, PermissionModes: wsagent.LeadPermissionModes, PermissionLevels: wsagent.LeadPermissionLevels(), Catalog: wsagent.ClaudeCatalog(), ManualHarness: "claude"},
+		wsagent.BackendClaude: {Backend: wsagent.ClaudeBackend{}, LeadProfile: wsagent.LeadProfileClaude, PermissionModes: wsagent.LeadPermissionModes, PermissionLevels: wsagent.LeadPermissionLevels(), Catalog: wsagent.ClaudeCatalog(), ManualHarness: "claude", WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendClaude), WorkerHTTPMCP: true},
 		// Pi has no catalog profile until its port of the Codex adapter:
 		// it stays handle-only.
-		wsagent.BackendPi: {Backend: wsagent.PiBackend{}, LeadProfile: wsagent.LeadProfilePi, PermissionLevels: wsagent.LeadPermissionLevels()},
-		// agy hosts leads only: no agent-worker profile, so no agy tier
-		// is spawnable. It maps no common permission level yet. Its host
-		// cannot take dotted tool names, so its connection sees aliases.
-		wsagent.BackendAgy: {Backend: wsagent.AgyBackend{}, LeadProfile: wsagent.LeadProfileAgy, PermissionModes: wsagent.AgyPermissionModes, Catalog: wsagent.AgyCatalog(), ToolNameScheme: wsagent.ToolNameSchemeSanitize, ManualHarness: wsagent.BackendAgy},
+		wsagent.BackendPi: {Backend: wsagent.PiBackend{}, LeadProfile: wsagent.LeadProfilePi, PermissionLevels: wsagent.LeadPermissionLevels(), WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendPi)},
+		// agy workers use the default agent and auto-allow its permission
+		// requests. It maps no common lead permission level yet. Both
+		// roles use HTTP MCP and underscore tool-name aliases.
+		wsagent.BackendAgy: {Backend: wsagent.AgyBackend{}, LeadProfile: wsagent.LeadProfileAgy, PermissionModes: wsagent.AgyPermissionModes, Catalog: wsagent.AgyCatalog(), ToolNameScheme: wsagent.ToolNameSchemeSanitize, ManualHarness: wsagent.BackendAgy, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendAgy), WorkerHTTPMCP: true, WorkerAutoApprove: true},
 	}
 	return wsagent.NewRunner(wsagent.Options{
 		Dir:           dir,
