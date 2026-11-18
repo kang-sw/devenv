@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 960c324adc71f580
 sage-review-completeness-reviewed: 960c324adc71f580
+completed: 2026-11-18
 ---
 
 # Windows npm-installed Claude is refused because its cmd-shim launches an exe, not node
