@@ -190,7 +190,9 @@ process.stdout.write(bad.join("\n"));
 func TestToolbarPageActionHooks(t *testing.T) {
 	js := mustAsset(t, "dashboard.js")
 	for _, want := range []string{
-		`search: function (e) { var b = $("tkqs"); if (b) { e.stopPropagation(); b.click(); } }`,
+		// The download saves the session board's zip; worktree pages have no session board.
+		`download: worktree ? null : function () {`,
+		`a.href = "/s/" + rid + "/board.zip"; a.download = "";`,
 		// Worktree pages carry their own Files pane, so their toolbar omits the files sheet (d384c5136).
 		`files: worktree ? null : filesSheet`,
 		`filesTab = createFiles(fpane, chead && chead.querySelector(".fsum"), false)`,
