@@ -107,4 +107,25 @@ for (const [what, els, want] of [
   assert.equal(handle.wait, want, 'drawer wait: ' + what);
 }
 for (const src of ['#r-convlive .permwait', '#r-tree .phase.permission', '#r-tree .brow.perm']) assert(selector.includes(src), 'drawer wait reads ' + src);
+
+// The tab title's approval count (tlPerms) leaves the roster out too: a
+// roster copy sits outside any .agent, so counting it adds a lead wait.
+const streamSrc = readAssetSource('wsdashboard', 'dashboard-stream.js');
+const tlPerms = streamSrc.match(/\n  function tlPerms\(\) \{[\s\S]*?\n  \}\n/);
+assert(tlPerms, 'dashboard-stream.js holds tlPerms');
+function pill(agent, inSource) { return { closest(s) { return s === '.ag-source' ? (inSource ? {} : null) : agent; } }; }
+const rootAgent = {}, waiting = {};
+let treePills = [], convWait = false;
+const treeRoot = { querySelector(s) { return s === '.agent.root' ? rootAgent : null; } };
+const convRoot = { querySelector(s) { return s === '.permwait' && convWait ? {} : null; } };
+const tctx = vm.createContext({ tlRoot: name => name === 'tree' ? treeRoot : name === 'convlive' ? convRoot : null, q: () => treePills });
+vm.runInContext(tlPerms[0], tctx);
+for (const [what, pills, conv, want] of [
+  ['one waiting subagent and its roster copy', [pill(waiting, false), pill(null, true)], false, 1],
+  ["a linked delegate's wait in the roster alone", [pill(null, true)], false, 0],
+  ['a lead conversation wait beside a roster copy', [pill(null, true)], true, 1],
+]) {
+  treePills = pills; convWait = conv;
+  assert.equal(tctx.tlPerms(), want, 'title approvals: ' + what);
+}
 console.log('agents island contract ok');
