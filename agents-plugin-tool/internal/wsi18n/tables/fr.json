@@ -1847,6 +1847,7 @@
   "js.rail.ws.select": "Sélectionner le dossier",
   "js.rail.wt.title": "Ajouter un worktree",
   "js.rail.wt.branch": "Branche",
+  "js.rail.wt.detached": "Sans branche",
   "js.rail.wt.new": "Nouvelle branche",
   "js.rail.wt.old": "Branche existante",
   "js.rail.wt.name": "Nom de la nouvelle branche",

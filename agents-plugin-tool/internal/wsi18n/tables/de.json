@@ -1847,6 +1847,7 @@
   "js.rail.ws.select": "Ordner auswählen",
   "js.rail.wt.title": "Worktree hinzufügen",
   "js.rail.wt.branch": "Branch",
+  "js.rail.wt.detached": "Ohne Branch",
   "js.rail.wt.new": "Neuer Branch",
   "js.rail.wt.old": "Vorhandener Branch",
   "js.rail.wt.name": "Name des neuen Branches",

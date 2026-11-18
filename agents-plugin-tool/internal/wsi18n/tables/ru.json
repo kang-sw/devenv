@@ -1847,6 +1847,7 @@
   "js.rail.ws.select": "Выбрать папку",
   "js.rail.wt.title": "Добавить worktree",
   "js.rail.wt.branch": "Ветка",
+  "js.rail.wt.detached": "Без ветки",
   "js.rail.wt.new": "Новая ветка",
   "js.rail.wt.old": "Существующая ветка",
   "js.rail.wt.name": "Имя новой ветки",
