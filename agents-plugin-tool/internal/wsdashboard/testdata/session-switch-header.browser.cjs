@@ -87,6 +87,36 @@ const [base, shots] = process.argv.slice(2);
           console.log(JSON.stringify({ width, theme, navigation: cold ? 'cold' : 'cached', frames: samples.length, ranges }));
         }
         assert.deepEqual(errors, []);
+        if (width === 1280 && theme === 'light') {
+          for (const broken of ['404', 'script']) {
+            const rid = 'headerless' + broken;
+            await page.route(`**/s/${rid}?frame=1`, route => route.fulfill({
+              status: broken === '404' ? 404 : 200, contentType: 'text/html',
+              body: `<p id="headerless">${broken} destination</p>` +
+                (broken === 'script' ? '<script>throw new Error("header fixture failure")</script>' : '')
+            }));
+            const start = Date.now();
+            await page.evaluate(rid => {
+              const a = document.createElement('a');
+              a.href = '/s/' + rid; document.body.appendChild(a); a.click(); a.remove();
+            }, rid);
+            await page.waitForFunction(rid => {
+              const frame = document.querySelector('.sframe.on');
+              return frame && frame.contentWindow.location.pathname === '/s/' + rid;
+            }, rid, { timeout: 3000 });
+            await page.frameLocator('.sframe.on').locator('#headerless').waitFor();
+            const elapsed = Date.now() - start;
+            assert.ok(elapsed < 3000, 'headerless navigation must not hang');
+            console.log(`${broken} never-posts-head: destination visible after ${elapsed}ms`);
+            assert.deepEqual(errors, broken === 'script' ? ['header fixture failure'] : []);
+            errors.length = 0;
+            await page.goBack();
+            await page.waitForFunction(() => {
+              const frame = document.querySelector('.sframe.on');
+              return frame && frame.contentWindow.location.pathname === '/s/livesession';
+            });
+          }
+        }
         await context.close();
       }
     }
