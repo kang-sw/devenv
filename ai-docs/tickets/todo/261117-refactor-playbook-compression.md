@@ -75,6 +75,21 @@ board knob is on), `lead-run.md` 1786, `lead-workflow-manual.md` 1631,
   behavior: a `block` stamp with no ticket stem makes the handler ask. T0,
   playbook text only. (127)=a, (129)=ok. Rejected: relaxing the Go
   `followups` gate so the worker commits; splitting only the template.
+- **lead-ship split.** `lead-ship` keeps the config loading, the whole
+  release gate, the user confirmation, publish with the cleared-head pin and
+  re-check, the tag push, and post-ship; a new render worker `ship-handler`
+  (role `delegate`, tier `small`, includes `delegate-report`) runs pre-flight,
+  version derivation, the version-bump commit carrying the follow-up
+  `resolves`, the unpushed tag, build, and the cut-point Cut, ancestor check,
+  and release-target merge; a new print playbook `ship-config` holds the No
+  config questions and the template. A lead-only step the handler reaches
+  stops it as `blocked` and the lead resumes it with the step's output. A
+  failing pre-flight check stops the handler. Gate step 4's "clearing
+  verdict" is lead-review's outcome `clear`. Publish and post-ship stay with
+  the lead, since the pin and re-check must sit right before the merge. T0,
+  playbook text only. (131)=a, (133)-(136)=ok, (137)=a. Rejected: compressing
+  without a split; handing publish and post-ship to the handler after the
+  confirmation.
 - **Placement.** One epic child ticket tracks the pass. (79). Rejected:
   folding it into `261117-feat-role-scoped-workflow-context` - compression
   preserves meaning, modularization changes structure, and this pass touches
@@ -166,7 +181,16 @@ How each playbook's diet runs, so a later session resumes it as is:
   Forward: `agents-plugin-tool/internal/wsreview/config.go:34` cites a
   lead-review sentence that no longer exists; `playbook_golden_test.go`'s
   lead-review comment still names the ledger stamp and config schema.
-- Next: `lead-ship`.
+- `lead-ship`: done (this commit), split per the Decision above. 1269 words
+  became `lead-ship` 853, `ship-handler` 242, `ship-config` 227. The
+  `delegate-report` floor test also renders `ship-handler` (no plan, carries
+  the report). Fresh-read audit edits applied (the tag-push stop now names
+  the publish confirmation as its cover; the marker sentence no longer
+  contradicts the bootstrap override).
+- All seven diets are done. Next (owner handoff 2026-11-18): merge `develop`
+  into the track (Pi bundle regen; forward
+  `agents-plugin-pi/test/fixtures/workflow-manual-static-body.txt`), ask about
+  a review sweep, then merge the track into `develop`.
 
 ## Phases
 

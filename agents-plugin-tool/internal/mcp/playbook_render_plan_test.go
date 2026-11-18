@@ -210,6 +210,29 @@ func TestPlaybookRenderDelegateReportFloor(t *testing.T) {
 			if !strings.Contains(string(report), body) || !strings.Contains(string(impl), body) {
 				t.Fatalf("both floors must carry the delegate-report body")
 			}
+
+			// ship-handler mutates the repository (version bump, tag) but is
+			// not delegate-implementer: it reserves no plan and still ends
+			// with the shared report.
+			shipLines := renderLines(t, callToolOnce(t, s, 4, "playbook.render", map[string]any{
+				"name":        "ship-handler",
+				"session_key": key,
+			}))
+			if !strings.HasSuffix(shipLines[0], "-ship-handler.md") {
+				t.Fatalf("ship-handler render output shape = %q", shipLines)
+			}
+			for _, line := range shipLines {
+				if strings.HasPrefix(line, "plan-path:") {
+					t.Fatalf("ship-handler must reserve no plan: %q", shipLines)
+				}
+			}
+			ship, err := os.ReadFile(shipLines[0])
+			if err != nil {
+				t.Fatalf("read rendered ship-handler: %v", err)
+			}
+			if !strings.Contains(string(ship), body) {
+				t.Fatalf("ship-handler must carry the delegate-report body")
+			}
 		})
 	}
 }
