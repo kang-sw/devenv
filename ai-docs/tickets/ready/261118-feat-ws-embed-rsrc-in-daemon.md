@@ -151,6 +151,11 @@ daemon is fully self-contained.
   playbook diff and adds a tracked copy of the roughly 10 MB `native-pi`
   payload.
 
+- Phase 1 implementation verdict, 2026-11-19: **T1** (display/content change
+  only for existing same-minor callers); no protocol, tool/argument, resource
+  schema or authoritative-store format change. The directional reader/writer
+  and older-shim evidence is recorded in Phase 1's Result.
+
 ## Constraints
 
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
@@ -261,6 +266,123 @@ changes the text it is served.
   wsflow connections get their own package's text; the dev override reads the
   checkout; a drift guard fails when the embedded set differs from the
   canonical trees; `go vet` and the existing wsrsrc mirror tests pass.
+
+### Result (b8b1278f7) - 2026-11-19
+
+Implemented in `b8b1278f7`, with lead-directed verification fixes in
+`451f13f9f`. **Phase 1 only**; the ticket remains ready for Phase 2.
+
+- `wspackage` embeds the generated package filesystems; `wsrsrc` serves through
+  `fs.FS`, preserving schema/hash/variant/include checks and retaining on-disk
+  adapters for authoring. MCP playbooks, command-syntax parts, prompt-override
+  discovery, bootstrap-template reads and package-aware `infra.read` use the
+  build-owned inputs. Caller resource roots no longer select served text;
+  namespace `wsflow` selects wsflow, unset/custom display namespaces select ws.
+- The explicit daemon-process `WS_RSRC_DEV_CHECKOUT` override reads live
+  canonical package inputs and logs its use. A hello cannot set that authority.
+  Both packages' manifests, workflow skills/template and launcher are embedded;
+  the native Pi payload/helper are embedded once under ws. Native preparation
+  stages shared payload bytes plus selected-package overlays by content hash,
+  retaining settled stages, then runs the existing offline Python validator.
+- One generator owns the ignored asset set, drift check and directory mapping.
+  The small tracked `generated/PLACEHOLDER` is now a generated JSON package
+  index, also hash-covered by the inventory: bare builds compile and can use
+  the explicit dev checkout without tracking a second resource/payload tree.
+  Every named build entry generates before compilation. The local fingerprint
+  includes canonical inputs before generation and generated content. Desktop
+  assembly checks the prebuilt binary's canonical inventory; it cannot retrofit
+  an older binary by generating files after compilation.
+- Lead continuation decisions resolved both verification stops: cold-build
+  tests accept any nonempty alternating generator/Go sequence with per-call
+  timeout checks; helper exceptions propagate through `try/finally` to main's
+  pre-existing stderr handler. No retry change, new stderr path or scanner
+  allowlist was added. Launcher/workflow/native-first-party mirrors are current.
+
+**Desktop reader search and retained inputs.** No staged input is dropped in
+this phase. References below are under `agents-plugin-tool/desktop-electron/`
+unless qualified:
+
+- `rsrc/` and `skills/`: `daemon-selection.js:123-126` still validates both;
+  Pi's outside-daemon selected-workflow skill resolution remains at
+  `agents-plugin-pi/src/skills-dir.ts:20-29`. Removing them now breaks readers.
+- `.claude-plugin/plugin.json`, `claude-agents/`, `bin/ws-mcp-launcher.py`,
+  `config-manifest.json`, `dashboard-config-manifest.json`:
+  `daemon-selection.js:73-100` reads identity and the manifest-declared file
+  references; `daemon-controller.js:66-67` still exports config paths.
+  `runtime.json`, binary and metadata remain read at
+  `daemon-selection.js:108-122`.
+- The remainder of the finite package closure (`.mcp.json`, `.codex-plugin/`,
+  hooks, other bin/skill files) remains part of the existing producer contract
+  at `agents-plugin-pi/scripts/prepare-workflow-bundles.py:10-36` and the
+  outside-daemon inventory/copy/byte-equality reader at
+  `daemon-stage.js:8-38`. Shrinking that closure while hosted package discovery
+  is retained would change another consumer contract, not remove an unused
+  directory safely. Phase 2's registry/hosted-launch rewrite was not started.
+
+**Compatibility: T1, no data migration.** Abbreviated `internal/...` Go paths
+below are relative to `agents-plugin-tool/`; other paths are repository-relative.
+`77a778437:` denotes the pre-implementation daemon.
+
+- Old same-minor plugin callers still send their roots (the new launcher keeps
+  setting them at `agents-plugin/bin/ws-mcp-launcher.py:894-917`). The new
+  reader selects namespace-owned FS at
+  `agents-plugin-tool/internal/mcp/process_env.go:231-236` and
+  `internal/wsrsrc/package.go:11-35`; `internal/wspackage/package.go:51-88`
+  reads only the process dev override or embedded bytes. This changes guidance,
+  not caller data. The hello protocol remains 1 and the existing same-minor
+  admission remains unchanged (`internal/wsdashboard/proxy.go:36,251-254`).
+  Resource schema remains 1 (`internal/wsrsrc/wsrsrc.go:11`), with schema and
+  content checks at `manifest.go:22-36`, `loader.go:286-304`.
+- Audited the v0.50.0 ws/wsflow skill shims: their playbook calls pass no context
+  variables, only names and optional session keys; wsflow's `lead-proceed`
+  targets `lead-run` (`v0.50.0:agents-plugin-wsflow/skills/lead-proceed/SKILL.md:8-10`).
+  `internal/mcp/embedded_resources_test.go:10-36` exercises all 13 historical
+  targets against both embedded packages through actual `playbook.read`, with
+  stale caller roots and no process dev override; every target resolves without
+  unresolved variables. Runtime-owned mailbox substitution is preserved.
+- New writes are disposable hash-named native input stages
+  (`internal/wsagent/pi_payload_stage.go:86-130`), not an authoritative store.
+  The old daemon reads its plugin helper and `<cache>/native-pi`, never that new
+  stage namespace (`77a778437:agents-plugin-tool/internal/wsagent/pi_payload.go:20-42`).
+  Materializer schema 3, complete content keys, verification and publication
+  remain unchanged (`agents-plugin/bin/ws-pi-payload.py:17,283-309,329-340`).
+  Old/new builds therefore use matching entries or distinct content hashes;
+  neither rewrites the other's authoritative history. Reopening either build
+  serves its own resources; reopening the new build needs no reconstruction.
+
+**Verification (full output read).** From `agents-plugin-tool/` unless noted:
+
+- `WS_TEST_EMBEDDED_PACKAGES=1 go test -p 1 ./internal/wspackage ./internal/wsrsrc ./internal/wsdoc ./internal/wsagent ./cmd/ws-mcp -count=1 -timeout 45m`:
+  pass (0.357s / 0.844s / 7.330s / 116.090s / 176.185s), including mirror,
+  isolation, native-payload and no-resource-root hello tests.
+- `WS_TEST_EMBEDDED_PACKAGES=1 go test ./internal/mcp -count=1 -timeout 45m`:
+  pass, 851.729s, including embedded older-shim and prompt-override coverage.
+- `go vet ./...`, generated build to a scratch binary, generator `--check`,
+  both materializers' `--check-source`, archive freshness, launcher `cmp`, and
+  `git diff --check`: pass. Actual placeholder-only compilation and full
+  wspackage/wsrsrc/wsdoc tests also pass; MCP/wsagent/cmd compile with only
+  that retained index. Generated inputs were restored and drift-checked.
+  Offline desktop assembly with the actual newly built binary succeeds for
+  both ws and wsflow (no executable probe or daemon launch).
+- Repository-root Python suites: generator 8 tests; dev helpers 24; plugin 201
+  tests (198 pass, 3 Windows/remote-only skips); wsflow 22 tests (20 pass,
+  2 Windows-only skips). No missing dependency was skipped.
+- `npm test --prefix agents-plugin-tool/desktop-electron`: 174 tests,
+  170 pass / 4 Windows-only skips. No installed application or shared daemon
+  was used. Initial fixture/diagnostic failures are fixed; unchanged tracker
+  publication/expiry timing failures passed their subsequent isolated/full
+  reruns without editing those implementations.
+- One fresh independent lite reviewer inspected `77a778437..b8b1278f7` and
+  archive contents: clean, no findings. Subsequent fixes follow the lead's
+  explicit decisions; no second review was run under the one-pass allocation.
+
+**Boundaries.** Production resource FS operations are in-memory (zero resource
+file opens); warm same-process native-input staging writes nothing. These are
+source-level operation counts, not a Windows antivirus/latency measurement.
+Native Windows execution and live installed-plugin/desktop lifecycle checks
+were not performed. No shared daemon rebuild/restart/replacement, installed
+plugin mutation, credential operation, merge or push occurred. Phase 2 remains
+unimplemented; no last-running-executable record or registry retirement landed.
 
 ### Phase 2: Move hosted sessions off the plugin copy and retire the registry
 
