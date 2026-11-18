@@ -1,5 +1,6 @@
 ---
 title: "Tracker view: summary first, deltas since a revision, incremental server view"
+completed: 2026-11-18
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0bf72dad2df626bb
@@ -425,6 +426,131 @@ the fallback against a daemon without the new routes; and detail ordering
 tests where a newer bundle arrives before its summary delta and an older
 bundle arrives after it, asserting that neither mismatched bundle is used
 and the row shows the matching detail once it arrives.
+
+### Result (c0ceb4518) - 2026-11-18
+
+- **VERIFIED:** merged `origin/develop` into the retained implementation branch
+  with `--no-ff` (`6629e21b8`), without conflicts or generated-bundle edits.
+  The requested Phase 1 lead gates passed after the merge:
+  `cmd/ws-mcp -run Tracker -count=1` (`ok .../cmd/ws-mcp 13.871s`) and
+  `internal/wstracker/...` (`ok .../internal/wstracker 23.667s`).
+- **VERIFIED (implementation and tests):** the page, handles and localized
+  bounded feed now start from `/summary`, then apply `/delta?since=` to a
+  keyed in-memory model. Equal-cursor 304s redraw nothing; resets replace
+  the model inline; removed/hidden stores retire their pending reads.
+  Concurrent answers cannot regress the cursor or resurrect a hidden store.
+  Missing summary, delta or detail routes select the retained legacy
+  full-view/ETag path, including sibling-frame lending.
+- **VERIFIED (Chromium and Node):** visible rows use clipped intersection
+  observation and batched detail requests of at most 100 ids. Expanded items
+  show loading/error/reload controls until the bundle's version equals the
+  row's. Neither future-before-delta nor late-old-after-delta bodies,
+  comments, events or HTML enter the rendered model. Matching held detail is
+  installed with its delta. Failed reads do not spin; explicit retry works.
+- **VERIFIED (Chromium):** canonical keyed-row reconciliation retains an
+  unchanged row and its title node with **zero mutations**, keyboard focus,
+  and an unsent composer across an unrelated delta. Correction `5673ea6ba`
+  also preserves draft/caret/scroll across an invalidating detail-loading
+  gap, and resumes a waiting editor from the matching post-reset body/base.
+  **Boundary:** open panels still generate and parse their full HTML before
+  reconciliation; this is changed-DOM redraw, not O(changed-items) render CPU.
+- **Decision — preserve non-list functionality:** global Activity and sync
+  history explicitly request the retained `/view` only when opened. These
+  global events are not in per-item bundles and never satisfy an item's
+  detail gate. Dispatch obtains actual event verdicts from item bundles,
+  falling back to history for global/missing events instead of guessing
+  `applied`. Failed Activity history offers an explicit same-cursor reload.
+- **Decision — complete the page contract:** additive summary fields carry
+  flagged-thread counts, historical label names and feed actors. Detail
+  bundles include incoming comment references and direct reply parents,
+  with those comments included in the version hash, so referenced snippets
+  invalidate correctly. The summary still excludes bodies and thread-event
+  payloads. Existing assignment `ended.type` supplies removed-member text.
+  Per-item time projections drive due/recently-closed flags.
+- **VERIFIED (independent lite review):** the one-pass review of
+  `6629e21b8..c0ceb4518` found C1 (active search cached by the stable view
+  object), I1 (history errors without retry), and I2 (color-only label edits
+  erasing historical names). `5673ea6ba` fixes all three with regressions:
+  search tracks the cursor and drops overtaken answers; history has bounded
+  explicit retry; only actual string name edits replace historical names.
+  Lite allocates no re-review; **no independent clean post-fix verdict is
+  claimed**. The draft/loading and reset-editor fixes were self-review.
+- **VERIFIED (compatibility/performance boundary):** T0 remains additive:
+  legacy full-view routes and writes are unchanged; old daemons get the
+  full-view fallback; cursor, models, bundles and new metadata are memory
+  only. No persistence, filesystem operation or process spawn was added to
+  a tracker read. Existing memory-answer host-call tests passed. **UNMEASURED:**
+  syscall/file-activity counts and visible latency on Windows with heavy AV;
+  source reasoning and host-call counters are not that measurement.
+
+**Final verification at `5673ea6ba`:** every Go command used
+`GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local` (the current task explicitly
+superseded the historical no-local-Go constraint). Browser commands also used
+`PLAYWRIGHT_BROWSERS_PATH=$HOME/Library/Caches/ms-playwright` and the existing
+`WS_PLAYWRIGHT_MODULE=$HOME/.npm/_npx/705bc6b22212b352/node_modules/playwright`.
+
+```text
+node --test tracker_projection_adapter.test.js tracker_projection_render.test.js
+  tests 14; pass 14; fail 0; skipped 0
+node testdata/tracker-projection.browser.cjs
+  PASS tracker browser: summary/visible batches/keyed unchanged row + focus/draft
+  PASS tracker browser: new page / old daemon full-view fallback
+  PASS tracker browser: future-before-delta / old-after-delta / matching detail only / draft and caret across loading gap
+go test ./cmd/ws-mcp -run Tracker -count=1
+  ok github.com/kang-sw/devenv/cmd/ws-mcp 14.554s
+go test ./internal/wsdashboard -run Tracker -count=1 (including Chromium)
+  ok github.com/kang-sw/devenv/internal/wsdashboard 8.902s
+go test ./internal/wstracker/...
+  ok github.com/kang-sw/devenv/internal/wstracker (cached)
+git diff --check
+  no diagnostics
+```
+
+Earlier failed checks were diagnosed and corrected, not waived: extracted-JS
+harnesses needed the real new helper dependencies; a new Go fixture used
+`Ref` where `Ended` was required; live hover positioning initially caused an
+unchanged-row mutation, fixed by comparing canonical row markup. The final
+commands above passed after those corrections.
+
+**Browser measurement — supporting Mac evidence only:** opt-in
+`WS_TRACKER_BROWSER_BENCH=1` ran disposable Chromium on the Mac worker host
+against baseline renderer `6629e21b8` and the Phase 2 checkpoint. Synthetic
+10k/30k-item models each carry **1,000,000 events**. One sample per row, timing
+synchronous changed-response **JSON parse + model apply + closed-handle render**;
+fixture generation/stringification and network/server time are excluded.
+The after path parses one changed summary row, not the full event history.
+This is neither open-drawer/paint latency nor w5090/Windows-AV measurement.
+
+| Items | Events | Before (ms) | After (ms) | Surface |
+|---|---:|---:|---:|---|
+| 10k | 1,000,000 | 677.8 | 0.2 | closed handles |
+| 30k | 1,000,000 | 656.2 | 0.1 | closed handles |
+
+**Forward / remaining verification:**
+
+1. `globals.my` wholesale replacement on assignment/today reorder remains the
+   Phase 1 **O(N) delta-payload gap**. Phase 2 consumes it unchanged; fixing it
+   is not required for the page contract. Full-view/projection derivation is
+   still O(items), as recorded in the Phase 1 Edition.
+2. Large open-drawer/window render CPU (including full HTML generation and
+   parsing), peak memory/checkpoint bytes, the specifically required w5090
+   million-event measurements, and Windows heavy-AV file-operation/latency
+   measurements remain **UNRUN**. SSH was forbidden; the local supporting
+   measurements do not satisfy those host-specific gates. Lead/owner retains
+   performance sign-off before release.
+3. Global Activity/sync history still transfers a legacy full view on demand;
+   a bounded global-history projection is future work, not silently removed
+   functionality.
+
+**Omitted:** no daemon replacement/build, Electron launch, SSH, broad
+`internal/wsdashboard`/`internal/mcp` package run, or merge into develop.
+`workflow_manual`, route resolution, acquire/close and playbook-render tools
+were not exposed; bundled reviewer/ticket conventions and the declared
+manuals were read instead. Phase 2 implementation is complete; ticket closure
+uses the documented Git-move fallback. The retained branch is pushed for the
+lead's review/integration, not merged. Ticket guardrails pass; the advisory
+Sage-freshness warning is accepted for this Result/completion-date-only
+update, with no phase-plan or settled-decision edits.
 
 ## Sage Review Round 1 (2026-11-17)
 
