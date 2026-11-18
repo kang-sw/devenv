@@ -232,6 +232,10 @@ func applyPanel(p *problems, work *State, origins bodyOrigins, cmd command, topi
 			if !hasOld || old == "" || !hasNew {
 				continue
 			}
+			if change.LiteralAmbiguous("wb:old", body) {
+				p.Add("%s: <wb:old> is ambiguous: its entities decode, and its text as written also occurs in panel %s; wrap the operand in <wb:raw>...</wb:raw> to match that literal text, or write the decoded characters directly", change.Label(), id)
+				continue
+			}
 			match := strings.Index(body, old)
 			switch {
 			case match < 0:

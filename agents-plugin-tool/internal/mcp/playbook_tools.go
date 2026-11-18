@@ -1101,6 +1101,12 @@ func renderPlaybookBodyForCaller(s *Server, callerKey, profile string, rsrcRoot 
 	// before product-mode blocks are stripped. A nil lookup skips this pass and
 	// every override-point renders its inline seed default.
 	body = applyOverrideMarkers(body, harness, overrideLookup)
+	// A pre-marker (0.50.7) lead-ticket resource states the auto-ack rule as
+	// plain text that no override marker reaches.
+	body, err = s.applyLegacyLeadTicketAutoAck(callerKey, name, body)
+	if err != nil {
+		return "", "", err
+	}
 
 	return renderProductModePlaybookBody(body, s.noAgentMode()), recommendedTier, nil
 }

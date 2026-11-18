@@ -1,10 +1,19 @@
 package mcp
 
 import (
+	"path/filepath"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
+
+// LockBoardIncarnation uses trusted index identity and the folder's live gate,
+// not lookupRecord (which would add file reads to interactive admission).
+func (src *DashboardSessionSource) LockBoardIncarnation(reg wsdashboard.Registration, token string) (func(), bool) {
+	folder := wswhiteboard.FolderStore{Dir: filepath.Join(reg.Project, filepath.FromSlash(whiteboardDirRel), reg.ReplyID)}
+	return folder.LockIncarnation(token)
+}
 
 // RecordDashboardAnswer resolves the registered lead using the same identity
 // checks as dashboard board reads before writing its answer-arrival marker.

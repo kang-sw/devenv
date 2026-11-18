@@ -442,6 +442,9 @@ func (s *sessionStore) claimKey(d sessionDirs, key string, payload []byte) (bool
 		os.RemoveAll(dir) // do not leave a half-written claim behind
 		return false, err
 	}
+	// A fresh claim carries no sub-lead marker yet; drop any answer cached
+	// for a pruned key of the same name.
+	s.sublead.Delete(key)
 	return true, nil
 }
 

@@ -105,6 +105,7 @@
     var prefix = selectionPrefix(bselections);
     var shift = function (r) { return Object.assign({}, r, { start: r.start + prefix.length, end: r.end + prefix.length }); };
     var d = {
+      boardIncarnation: typeof boardIncarnation === "string" ? boardIncarnation : null,
       text: prefix + (ctext ? ctext.value : ""),
       capsules: ctext && ctext.wsc ? ctext.wsc.snapshot().map(shift) : [],
       cmd: cmdSel ? { name: cmdSel.name, args: cmdSel.args } : null,
@@ -144,8 +145,15 @@
     draftStore.clear(rid);
     queueDraft();
   }
+  function boardDraft(d) {
+    if (d && typeof d.boardIncarnation === "string" && d.boardIncarnation !== boardIncarnation) {
+      // Keep free text and image references, never reattach replaced IDs.
+      return Object.assign({}, d, { boardIncarnation: boardIncarnation, answers: {}, chips: [], bmentions: [], closeRequests: [] });
+    }
+    return d;
+  }
   function restoreDraft() {
-    var d = draftStore && draftStore.load(rid);
+    var d = draftStore && boardDraft(draftStore.load(rid));
     if (!d) return;
     restoring = true;
     try {

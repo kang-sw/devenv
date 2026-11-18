@@ -77,8 +77,9 @@ type SessionView struct {
 	// when the page follows the OS. Set per request, like Lang.
 	Theme string
 
-	HasBoard bool
-	Seq      int
+	HasBoard         bool
+	Seq              int
+	BoardIncarnation string
 	// CountPolicy and CountAcks are the board's open items: policy and
 	// check items, then technical and announced ones.
 	CountPolicy, CountAcks int
@@ -636,25 +637,26 @@ func harnessRunning(reg Registration, now time.Time) bool {
 func buildSessionView(in pageInputs) SessionView {
 	reg := in.Session.Registration
 	v := SessionView{
-		ReplyID:        reg.ReplyID,
-		Label:          in.Session.Label,
-		Project:        reg.Project,
-		ProjectName:    filepath.Base(reg.Project),
-		Harness:        reg.Harness,
-		Live:           reg.Live(in.Now),
-		ProcessRunning: harnessRunning(reg, in.Now),
-		Adapter:        adapterPresent(in.Snapshot, in.Now),
-		Hosted:         reg.Hosted,
-		HandedOff:      in.HandedOff && !reg.Hosted && !reg.Live(in.Now),
-		Version:        in.Version,
-		HasBoard:       in.Page.HasBoard,
-		Seq:            in.Page.Seq,
-		CountPolicy:    in.Page.Board.CountPolicy,
-		CountAcks:      in.Page.Board.CountAcks,
-		Board:          in.Page.Board.Board,
-		BoardUnits:     in.Page.BoardUnits,
-		Panels:         in.Page.Board.Panels,
-		Mermaid:        in.Page.Board.Mermaid,
+		ReplyID:          reg.ReplyID,
+		Label:            in.Session.Label,
+		Project:          reg.Project,
+		ProjectName:      filepath.Base(reg.Project),
+		Harness:          reg.Harness,
+		Live:             reg.Live(in.Now),
+		ProcessRunning:   harnessRunning(reg, in.Now),
+		Adapter:          adapterPresent(in.Snapshot, in.Now),
+		Hosted:           reg.Hosted,
+		HandedOff:        in.HandedOff && !reg.Hosted && !reg.Live(in.Now),
+		Version:          in.Version,
+		HasBoard:         in.Page.HasBoard,
+		Seq:              in.Page.Seq,
+		BoardIncarnation: in.Page.BoardIncarnation,
+		CountPolicy:      in.Page.Board.CountPolicy,
+		CountAcks:        in.Page.Board.CountAcks,
+		Board:            in.Page.Board.Board,
+		BoardUnits:       in.Page.BoardUnits,
+		Panels:           in.Page.Board.Panels,
+		Mermaid:          in.Page.Board.Mermaid,
 	}
 	if in.Snapshot != nil {
 		if o := in.Snapshot.Lead.Observed; o != nil {

@@ -862,6 +862,12 @@ func sendEntry(dir string, add Entry, now time.Time, journal bool) (name string,
 // message the agent reads. It returns ErrGone when the entry is no longer
 // held, or is an interrupt entry, which it leaves in place.
 func Steer(dir, name string) (string, error) {
+	return SteerWithAdmission(dir, name, nil)
+}
+
+// SteerWithAdmission checks the already-read, exclusively claimed entry before
+// rewriting it. A refusal restores the original entry. Admission adds no read.
+func SteerWithAdmission(dir, name string, admit func(Entry) error) (string, error) {
 	if !entryNamePattern.MatchString(name) {
 		return "", ErrGone
 	}
@@ -873,6 +879,12 @@ func Steer(dir, name string) (string, error) {
 	if err == nil && entry.Interrupt {
 		_ = rename(claimed, filepath.Join(dir, name))
 		return "", ErrGone
+	}
+	if err == nil && admit != nil {
+		if err := admit(entry); err != nil {
+			_ = rename(claimed, filepath.Join(dir, name))
+			return "", err
+		}
 	}
 	if err != nil || entry.Steer {
 		// Leave an unreadable or already steered entry held as it was.
