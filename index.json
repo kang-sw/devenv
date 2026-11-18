@@ -585,7 +585,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "9091c57d68d03c76",
         "track": "track/playbook",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-18T06:21:43Z",
         "impl": {
           "branch": "impl/track/playbook/slab-rhyme-rule"
