@@ -33,9 +33,8 @@ fewest file touches per user action.
    last line instead of relying on `fsync`. Why: a scanned write on the
    interactive path is user-visible latency. Pattern: update memory, append,
    return.
-6. **Minimize process spawns.** Why: a new process is scanned at launch and
-   pays every file touch of its own startup. Pattern: do the work in the
-   long-lived process; spawn only when no in-process route exists.
+6. **Spawn a process only when no in-process route exists.** Why: a new
+   process is scanned at launch and pays every file touch of its own startup.
 7. **Decide by measurement.** Follow `## Measuring`.
 8. **Exceptions need the owner's approval.** A change that breaks a rule above
    states which rule, why, and its measured cost, and waits for that approval.
@@ -57,7 +56,9 @@ prior to that work.
 
 Each segment's first line is a full snapshot, so recovery replays only the
 newest segment. A graceful close writes the legacy files once, so an older
-version can still read the store after a downgrade.
+version can still read the store after a downgrade. This one-time whole-file write at shutdown is an
+owner-approved exception to Rule 2 under Rule 8, made for downgrade
+compatibility and off the interactive path.
 
 ## Measuring
 
