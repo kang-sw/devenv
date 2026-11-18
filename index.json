@@ -585,6 +585,9 @@
           "branch": "impl/track/playbook/slab-rhyme-rule"
         }
       }
+    },
+    "261118-research-ws-agy-custom-agent-prompt": {
+      "registered_at": "2026-11-18T07:09:55Z"
     }
   }
 }
