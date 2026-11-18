@@ -1784,50 +1784,99 @@
     taskBadge(bgbadge, clive, "data-bg", bgTitle);
     taskBadge(monbadge, clive, "data-monitors", monTitle);
   }
-  // --- agents popover ----------------------------------------------------------
-  // The subagent badge opens the session's agents (agpop: the agents region
-  // over the conversation). Esc or a press outside closes it unless it is
-  // pinned; the pin is remembered in the browser, so a pinned popover opens
-  // again on the next load, and the close button closes and unpins. An
-  // expanded row shows its newest batches until its full-output action;
-  // which rows show everything survives the region's swaps (agSwapped).
-  var agpop = $("agpop"), agpin = $("agpin"), AGPIN_KEY = "ws.dashboard.agpop.pin", agFull = {};
+  // --- agents island ---------------------------------------------------------
+  // The streamed tree is authoritative; compact rows are projections, never
+  // moved nodes, so expanding details and full-output state stay intact.
+  var agpop = $("agpop"), agpin = $("agpin"), agisland = $("agisland"), agcompact = $("agcompact"), agidle = $("agidle");
+  var AGPIN_KEY = "ws.dashboard.agpop.pin", agFull = {}, agRunning = 0, agSeen = false, agDismissed = false;
+  function agSize() {
+    if (!agisland || agisland.hidden) return;
+    var mode = agisland.getAttribute("data-mode"), view = mode === "full" ? agpop : mode === "compact" ? agcompact : agidle;
+    // Measure at the destination width without painting the temporary auto
+    // height. Restore the current interpolated box before setting pixel targets,
+    // so both dimensions can transition even during a streaming update.
+    var box = agisland.getBoundingClientRect(), transition = agisland.style.transition;
+    agisland.style.transition = "none";
+    agisland.style.width = mode === "idle" ? "100%" : mode === "full" ? "500px" : "320px";
+    agisland.style.height = "auto";
+    var width = agisland.offsetWidth;
+    if (mode === "idle") width = Math.min(width, view.offsetWidth);
+    else agisland.style.setProperty(mode === "full" ? "--ag-fw" : "--ag-cw", width + "px");
+    var height = view.offsetHeight;
+    agisland.style.width = box.width + "px";
+    agisland.style.height = box.height + "px";
+    void agisland.offsetWidth;
+    agisland.style.transition = transition;
+    agisland.style.width = width + "px";
+    agisland.style.height = height + "px";
+  }
   function agOpen(open) {
+    if (!agpop) return;
     agpop.hidden = !open;
-    sbadge.setAttribute("aria-expanded", open ? "true" : "false");
+    if (agisland) {
+      agisland.hidden = !open && !agSeen;
+      agisland.setAttribute("data-mode", open ? "full" : agRunning ? "compact" : "idle");
+    }
+    [sbadge, agcompact, agidle].forEach(function (el) { if (el) el.setAttribute("aria-expanded", open ? "true" : "false"); });
+    agSize();
   }
   function agPinned() { return agpin.getAttribute("aria-pressed") === "true"; }
   function agPin(on) {
     agpin.setAttribute("aria-pressed", on ? "true" : "false");
     save(AGPIN_KEY, on ? "1" : null);
   }
+  function agProject() {
+    if (!agisland || !agcompact || !agidle) return;
+    var tree = region("tree");
+    if (!tree) return;
+    // Query each agent once, not each group descendant's descendants. The
+    // root lead and agents in peers are not this session's subagents.
+    var all = q(".tgroup .agent", tree), agents = all.filter(function (agent) { return agent.classList.contains("running"); });
+    var done = tree.querySelector(".thead .cdone"), peers = tree.querySelector(".pgroup .pghead"), peerCount = peers && peers.querySelector(".chip");
+    var firstSeen = !agSeen && all.length > 0;
+    if (firstSeen) agSeen = true;
+    agRunning = agents.length;
+    agcompact.textContent = "";
+    agents.forEach(function (agent) {
+      var head = agent.querySelector("summary.ahead"), row = doc.createElement("div");
+      if (!head) return;
+      row.className = "agrow";
+      var mark = doc.createElement("span"), name = doc.createElement("span"), phase = doc.createElement("span"), elapsed = doc.createElement("span");
+      mark.className = "agmark"; name.className = "agname"; elapsed.className = "agelapsed";
+      var sourceMark = head.querySelector(".amk"), sourceName = head.querySelector(".aname"), sourcePhase = head.querySelector(".aline .phase"), time = head.querySelector(".am time[data-ms]"), am = head.querySelector(".am");
+      if (sourceMark) mark.appendChild(sourceMark.cloneNode(true));
+      if (sourceName) { name.textContent = sourceName.textContent; name.title = sourceName.textContent; }
+      var kind = sourcePhase && (sourcePhase.classList.contains("thinking") ? "thinking" : sourcePhase.classList.contains("replying") ? "replying" : "tool");
+      kind = kind || "tool";
+      phase.className = "phase " + kind;
+      phase.textContent = kind === "tool" && (!sourcePhase || !sourcePhase.classList.contains("tool")) ? agisland.getAttribute("data-tool-label") : sourcePhase.textContent;
+      if (time) { var copy = time.cloneNode(true); elapsed.appendChild(copy); fmtTime(copy, Date.now()); }
+      else if (am) { var spans = q("span", am); if (spans.length > 2) elapsed.textContent = spans[spans.length - 1].textContent; }
+      [mark, name, phase, elapsed].forEach(function (el) { row.appendChild(el); });
+      agcompact.appendChild(row);
+    });
+    var summary = doc.createElement("div"); summary.className = "agsummary";
+    var peerTitle = peers ? Array.prototype.map.call(peers.childNodes, function (n) { return n.nodeType === 3 ? n.nodeValue : ""; }).join("").trim() : "";
+    var peerText = [peerTitle, peerCount && peerCount.textContent].filter(Boolean).join(" ");
+    summary.textContent = [done && done.textContent, peerText].filter(Boolean).join(" · ");
+    if (summary.textContent) agcompact.appendChild(summary);
+    var idleLabel = agidle.querySelector(".agidle-label");
+    if (!idleLabel) { idleLabel = doc.createElement("span"); idleLabel.className = "agidle-label"; agidle.appendChild(idleLabel); }
+    idleLabel.textContent = done ? done.textContent : "";
+    if (firstSeen && agPinned() && !agDismissed && agpop.hidden) agOpen(true);
+    else if (agpop.hidden) agOpen(false); else agSize();
+  }
   function agSwapped() {
     if (!agpop) return;
     q("details[data-key]", agpop).forEach(function (d) { d.classList.toggle("d-full", !!agFull[d.getAttribute("data-key")]); });
+    agProject();
   }
   if (agpop && sbadge && agpin) {
-    // Hover previews the same panel (mouse/pen only, never touch): a short
-    // intent delay opens it, a grace after leaving badge and panel closes it.
-    // Only a hover-opened panel auto-closes; a click makes it click-owned.
-    var hoverOpen = false, hoverTimer = 0, canHover = function (e) { return e.pointerType !== "touch" && (!window.matchMedia || matchMedia("(hover: hover)").matches); };
-    function hoverIn(e) {
-      if (!canHover(e)) return;
-      clearTimeout(hoverTimer);
-      if (!agpop.hidden) return;
-      hoverTimer = setTimeout(function () { if (agpop.hidden) { agOpen(true); hoverOpen = true; } }, 150);
-    }
-    function hoverOut(e) {
-      if (!canHover(e)) return;
-      clearTimeout(hoverTimer);
-      if (!hoverOpen) return;
-      hoverTimer = setTimeout(function () { if (hoverOpen && !agPinned()) { hoverOpen = false; agOpen(false); } }, 200);
-    }
-    [sbadge, agpop].forEach(function (n) { n.addEventListener("pointerenter", hoverIn); n.addEventListener("pointerleave", hoverOut); });
-    sbadge.addEventListener("click", function () {
-      clearTimeout(hoverTimer);
-      if (hoverOpen && !agpop.hidden) { hoverOpen = false; return; }
-      hoverOpen = false;
-      agOpen(agpop.hidden);
+    sbadge.addEventListener("click", function () { agDismissed = !agpop.hidden; agOpen(agpop.hidden); });
+    [agcompact, agidle].forEach(function (el) {
+      if (!el) return;
+      el.addEventListener("click", function () { agOpen(true); });
+      el.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); agOpen(true); } });
     });
     agpin.addEventListener("click", function () { agPin(!agPinned()); });
     $("agclose").addEventListener("click", function () { agPin(false); agOpen(false); sbadge.focus(); });
@@ -1836,18 +1885,25 @@
       if (!d) return;
       agFull[d.getAttribute("data-key")] = true;
       d.classList.add("d-full");
+      setTimeout(agSize, 0);
     });
+    agpop.addEventListener("toggle", function () { setTimeout(agSize, 0); }, true);
     doc.addEventListener("keydown", function (e) {
-      if (e.key !== "Escape" || e.defaultPrevented || agpop.hidden || agPinned()) return;
+      if (e.key !== "Escape" || e.defaultPrevented || agpop.hidden) return;
       var inside = agpop.contains(doc.activeElement);
+      agDismissed = true;
       agOpen(false);
       if (inside) sbadge.focus();
     });
     doc.addEventListener("pointerdown", function (e) {
-      if (agpop.hidden || agPinned() || agpop.contains(e.target) || sbadge.contains(e.target)) return;
+      if (agpop.hidden || agPinned() || (agisland || agpop).contains(e.target) || sbadge.contains(e.target)) return;
       agOpen(false);
     }, true);
-    if (load(AGPIN_KEY) === "1") { agPin(true); agOpen(true); }
+    window.addEventListener("resize", agSize);
+    if (agisland) agisland.hidden = true;
+    if (load(AGPIN_KEY) === "1") agPin(true);
+    agProject();
+    if (!agisland && agPinned()) agOpen(true);
   }
   function interruptTurn() {
     if (interrupting) return;
