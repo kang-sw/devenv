@@ -545,7 +545,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "track/agent-v2",
         "phase": "active",
-        "touched_at": "2026-11-18T12:01:05Z"
+        "touched_at": "2026-11-18T12:02:12Z",
+        "impl": {
+          "branch": "impl/track/agent-v2/duke-raven-jab"
+        }
       }
     },
     "261118-feat-ws-daemon-version-arbitration": {
