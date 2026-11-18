@@ -14,15 +14,16 @@ import (
 
 // Adding a worktree from the session rail: git worktree add in a workspace
 // the rail shows, on a new branch (from a local branch of the repository)
-// or on an existing local branch no worktree has checked out. The folder is
+// on an existing local branch no worktree has checked out, or detached at a
+// resolved commit. The folder is
 // the default one beside the root or one the user names, which must be
 // absent or empty. An add only adds: it never removes or prunes a worktree
 // (the rail's delete is railworktreedelete.go), and never deletes or
 // renames a branch. Every name a
 // request carries is checked before it reaches git's command line, and none
 // can read as an option: a branch is a valid branch name that does not
-// start with "-", a base goes in as refs/heads/<base>, and the folder
-// follows "--".
+// start with "-", a branch base goes in as refs/heads/<base>, a detached
+// base is resolved to an object ID, and the folder follows "--".
 
 const (
 	// worktreeAddDir is the folder beside a root that holds its default
@@ -63,10 +64,11 @@ type worktreeOptions struct {
 // worktreeRequest is one add.
 type worktreeRequest struct {
 	// Branch is the branch the worktree checks out; New creates it from
-	// Base (the root's current branch when empty).
-	Branch string
-	New    bool
-	Base   string
+	// Base (HEAD when empty). Detached instead checks out Base without a branch.
+	Branch   string
+	New      bool
+	Detached bool
+	Base     string
 	// Folder is the worktree's folder, already read as a path; empty takes
 	// the default.
 	Folder string
@@ -188,11 +190,21 @@ func emptyOrAbsent(path string) bool {
 // with a nil error and names the reason; err is git's failure, its message
 // git's first meaningful line. On success it returns the worktree's folder.
 func addWorktree(ctx context.Context, root string, req worktreeRequest, now time.Time) (folder string, refusal worktreeRefusal, err error) {
-	if !validBranchName(ctx, root, req.Branch) {
-		return "", worktreeBadBranch, nil
-	}
 	base := "HEAD"
-	if req.New {
+	if req.Detached {
+		if req.Base != "" {
+			base = req.Base
+		}
+		// Resolve to an object ID before passing it to worktree add: this also
+		// rejects options and non-commit objects without creating anything.
+		resolved, err := gitOutput(ctx, root, "rev-parse", "--verify", "--quiet", "--end-of-options", base+"^{commit}")
+		if err != nil {
+			return "", worktreeNoBase, nil
+		}
+		base = resolved
+	} else if !validBranchName(ctx, root, req.Branch) {
+		return "", worktreeBadBranch, nil
+	} else if req.New {
 		if branchExists(ctx, root, req.Branch) {
 			return "", worktreeBranchTaken, nil
 		}
@@ -225,7 +237,9 @@ func addWorktree(ctx context.Context, root string, req worktreeRequest, now time
 	// An existing branch goes in by its short name: git checks out a branch
 	// named so, and detaches HEAD at a full ref.
 	args := []string{"worktree", "add", "--", folder, req.Branch}
-	if req.New {
+	if req.Detached {
+		args = []string{"worktree", "add", "--detach", "--", folder, base}
+	} else if req.New {
 		args = []string{"worktree", "add", "-b", req.Branch, "--", folder, base}
 	}
 	if err := runGitAction(ctx, root, args...); err != nil {

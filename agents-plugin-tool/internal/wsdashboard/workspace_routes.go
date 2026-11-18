@@ -314,6 +314,7 @@ type worktreeAddRequest struct {
 	Workspace string `json:"workspace"`
 	Branch    string `json:"branch"`
 	New       bool   `json:"new"`
+	Detached  bool   `json:"detached"`
 	Base      string `json:"base"`
 	Folder    string `json:"folder"`
 }
@@ -362,7 +363,7 @@ func (d *Daemon) handleWorktreeAdd(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown workspace", http.StatusNotFound)
 		return
 	}
-	add := worktreeRequest{Branch: req.Branch, New: req.New, Base: req.Base}
+	add := worktreeRequest{Branch: req.Branch, New: req.New, Detached: req.Detached, Base: req.Base}
 	if req.Folder != "" {
 		folder, refusal := normalizeWorkspacePath(req.Folder, d.pathHost)
 		if refusal != "" {
@@ -388,12 +389,20 @@ func (d *Daemon) handleWorktreeAdd(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, worktreeRefusalText(lang, refusal, req, add.Folder), http.StatusConflict)
 		return
 	}
-	admissionErr := d.recordUserWorktree(root, folder, req.Branch)
+	branch, label := req.Branch, req.Branch
+	if req.Detached {
+		branch = ""
+		label = req.Base
+		if label == "" {
+			label = "HEAD"
+		}
+	}
+	admissionErr := d.recordUserWorktree(root, folder, branch)
 	d.rail.reread(root)
 	d.broker.wake(railListRepoKey)
 	if admissionErr != nil {
 		http.Error(w, "Worktree was created at "+folder+" but admission could not be saved; refresh and approve it: "+admissionErr.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, worktreeAddAnswer{Path: folder, Branch: req.Branch, Message: wsi18n.T(lang, "rail.wt.added", req.Branch, folder)})
+	writeJSON(w, http.StatusOK, worktreeAddAnswer{Path: folder, Branch: branch, Message: wsi18n.T(lang, "rail.wt.added", label, folder)})
 }
