@@ -64,10 +64,12 @@ Two gaps stand in the way:
   `agents-plugin-pi/src/bridge.ts` `sanitizeToolName` (L567); a collision is
   refused when the alias table is built, pinned by a test. Rejected: a new
   agy-specific naming scheme (two naming rules across harnesses).
-- **(138), 2026-11-18: harness detection in Phase 1.** An agy case in
-  `server_harness.go` and a `renderLeadManual` render with harness agy land
-  with the aliases, since (102)=a ordered tool names (G2) and harness
-  detection (G3) together.
+- **(138), 2026-11-18, reworded by (145): harness detection in Phase 1.**
+  The hosted agy lead's harness (the server's harness for that connection
+  and the `renderLeadManual` render) lands with the aliases, since (102)=a
+  ordered tool names (G2) and harness detection (G3) together. Per (145) it
+  comes from the descriptor's `ManualHarness` ((143)), not from a new agy
+  case in `server_harness.go`'s clientInfo list.
 - **(139), 2026-11-18: Phase 1 is compatibility tier T0.** Aliases exist only
   in the agy connection's `tools/list` and are reverse-mapped server-side; no
   stored shape, hello field, or tool argument changes, and non-agy callers
@@ -83,6 +85,15 @@ Two gaps stand in the way:
   later tightens every backend uniformly. Rejected: holding Phase 2 for that
   ticket's workdir-write cap.
 
+- **(143)=a, 2026-11-18: agy behavior lives in a harness descriptor.** A
+  small descriptor on `BackendRegistration` (`internal/wsagent/registration.go`
+  L14-24) carries `ToolNameScheme`, `ManualHarness`, and `WorkerCapable` plus
+  the worker profile; the common layer reads it, so the new work adds no
+  `agy` branch to common code. A code read on 2026-11-18 found the existing
+  seams (the launch-only `Backend` interface, `BackendRegistration`, the
+  capability catalog) and about 50 harness-name branches in common code; those
+  stay, captured in `261118-refactor-ws-harness-name-branches`. Rejected:
+  adding an `agy` branch at each site, the existing leak pattern.
 ## Constraints
 
 - Manuals for the touched paths: `ai-docs/manuals/ws-mcp.md`,
@@ -99,28 +110,41 @@ Two gaps stand in the way:
 
 ### Phase 1: Underscore tool-name aliases and agy harness detection
 
+- Add the harness descriptor fields `ToolNameScheme` and `ManualHarness` to
+  `BackendRegistration` ((143)); the agy registration declares the sanitize
+  scheme and harness `agy`, the Claude registration declares harness
+  `claude`, and every other registration keeps the identity scheme.
 - `advertisedToolName` (`agents-plugin-tool/internal/mcp/server_inventory.go`
-  L174-176, today an identity stub) returns the underscore alias on an agy
-  connection and the dotted name elsewhere.
+  L174-176, today an identity stub) reads the connection's alias table, built
+  by one generic collision-refusing builder from the connection's
+  `ToolNameScheme` ((137)); a connection without a hosted lead record keeps
+  dotted names.
 - `callTool` (`server_dispatch.go`, about L36-71) maps an alias back to its
   dotted name after `hostedSessionKeyRule` and before `toolAllowed`, so
   allowlists and dispatch keep seeing canonical names.
-- Harness detection names agy for the hosted agy lead, and the lead manual
-  renders with that harness.
+- The hosted lead's `Backend` ((136)) selects its descriptor; `renderLeadManual`
+  (`cmd/ws-mcp/agent_mcp.go` L71-100) takes the harness from `ManualHarness`
+  in place of its `if backend == BackendClaude` line, so the agy lead's manual
+  renders with harness agy. Common code gains no `agy` branch.
 - Verification: unit tests for the alias table (round trip, collision refusal,
-  non-agy connection unchanged) and for the agy harness render, run on w5090.
+  identity scheme unchanged), for the descriptor-driven harness render
+  (Claude unchanged, agy new), run on w5090.
   Then the owner swaps the daemon to the track build once ((132)) and checks a
   hosted agy lead live: a Gemini model first, then a Claude model calling a
   dotted ws tool through its alias.
 
 ### Phase 2: agy worker role
 
-- Add an `agent-worker-agy` profile and `BackendAgy` to `agentWorkerBackends`,
-  so `agent.spawn agy.<tier>` is accepted and `agent.tiers()` lists agy tiers
-  under the C2 rule of `261117-feat-ws-agent-tools-mailbox-routing`.
-- Settle the three prerequisites the adapter ticket deferred: the ws-written
-  agy agent file, the worker permission posture, and system-prompt
-  replacement for workers.
+- Replace the global `agentWorkerBackends` map
+  (`internal/wsagent/agent_tools.go` L44-47) with a `WorkerCapable` descriptor
+  field plus the worker profile on `BackendRegistration` ((143)); the Claude
+  and Pi registrations declare it, and the agy registration declares it with
+  a new `agent-worker-agy` profile, so `agent.spawn agy.<tier>` is accepted
+  and `agent.tiers()` lists agy tiers under the C2 rule of
+  `261117-feat-ws-agent-tools-mailbox-routing`.
+- The agy worker runs with the posture of (141). The ws-written agy agent
+  file and system-prompt replacement for workers come from the probes of
+  (140) and are written into this phase before it is promoted.
 - Replace `TestAgyIsLeadOnly` with tests that pin the worker role.
 - Verification: unit tests on w5090, then one live `agent.spawn agy.<tier>`
   from a hosted lead on the owner's agy machine, with the worker reporting
