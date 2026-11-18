@@ -62,7 +62,10 @@ func (s *Server) handleAgentTool(ctx context.Context, id json.RawMessage, tool s
 	if !found {
 		return toolTextResponse(id, "", fmt.Errorf("%s: unknown_session: session key not found", tool))
 	}
-	caller := wsagent.LeadCaller(s.mailboxReplyID(key), entry.root, s.currentHarness(), s.sessionConfigOptions(key))
+	// Hosted backends may declare a harness without entering connection
+	// detection (and its config defaults). Use the same fallback as renders
+	// so agent.tiers and bare agent.spawn tiers agree.
+	caller := wsagent.LeadCaller(s.mailboxReplyID(key), entry.root, s.playbookHarness(), s.sessionConfigOptions(key))
 	runner := s.pi.agents
 	switch tool {
 	case "agent.spawn":
@@ -336,13 +339,13 @@ func agentToolDefinitions() []map[string]any {
 				"properties": map[string]any{
 					"session_key":        key,
 					"prompt":             stringProperty("The child's first message."),
-					"tier":               stringProperty("A bare tier (small, medium, large, xlarge) on this session's own harness, <harness>.<tier> (for example pi.small) for another harness, or an alias from the agent.tier_aliases config knob. agent.tiers lists what is spawnable now."),
-					"system_prompt":      stringProperty("Optional text appended to the harness's own system prompt. Give at most one of system_prompt and system_prompt_path."),
-					"system_prompt_path": stringProperty("Optional file whose text is appended to the harness's own system prompt, read once at spawn: absolute, or relative to the session's root. Give at most one of system_prompt and system_prompt_path."),
-					"authority":          stringProperty("Required: read-only, workdir-write, or full; at most this session's own permission level."),
-					"cwd":                stringProperty("Optional directory the child works in: absolute, or relative to the session's root. Default: the session's root. Give at most one of cwd and worktree."),
-					"worktree":           stringProperty("Optional root of an existing git worktree this session acquired: absolute, or relative to the session's root. The child runs there, with it as its project root. Give at most one of cwd and worktree."),
-					"label":              stringProperty("Optional one-line name for the child's dashboard row and its completion mail; default: the prompt's first line."),
+					"tier":               stringProperty("small, medium, large or xlarge on your harness; harness.tier or a user alias. See agent.tiers."),
+					"system_prompt":      stringProperty("Append to the harness system prompt. Excludes system_prompt_path."),
+					"system_prompt_path": stringProperty("File read once at spawn and appended to the harness system prompt. Excludes system_prompt. Absolute, or relative to the session's root."),
+					"authority":          stringProperty("read-only, workdir-write or full; capped at your own permission level."),
+					"cwd":                stringProperty("Absolute, or relative to the session's root. Default: the session's root. Excludes worktree."),
+					"worktree":           stringProperty("Acquired existing git worktree: working and project root. Absolute, or relative to the session's root. Excludes cwd."),
+					"label":              stringProperty("One-line dashboard and completion-mail label; default: prompt's first line."),
 					"format":             format,
 				},
 				"required": []string{"session_key", "prompt", "tier", "authority"},
@@ -350,7 +353,7 @@ func agentToolDefinitions() []map[string]any {
 		},
 		{
 			"name":        "agent.interrupt",
-			"description": "Interrupt the running turn of one of this session's child agents. The child stays: the messages it had not taken yet are handed back in the answer, and its next message starts a new turn. An address this session did not spawn directly is refused.",
+			"description": "Interrupt a direct child's running turn. The child stays; unconsumed messages return to you, and its next message starts a new turn. Refuses an address you did not spawn directly. Text by default; format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -363,7 +366,7 @@ func agentToolDefinitions() []map[string]any {
 		},
 		{
 			"name":        "agent.list",
-			"description": "List the child agents this session spawned directly: address, state (running, starting, idle, waiting: asleep with no turn, or closed), tier as <harness>.<tier>, authority, model and effort, working directory, label, held messages, the last error, and the last report (its status and first line).",
+			"description": "List your direct child agents. State waiting means asleep with no turn. Send follow-ups with mailbox.send to the child's address. Text by default; format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -375,7 +378,7 @@ func agentToolDefinitions() []map[string]any {
 		},
 		{
 			"name":        "agent.tiers",
-			"description": "List the tiers agent.spawn accepts now, each with the model and effort it resolves to: native (bare tiers on this session's own harness), ext (<harness>.<tier> on each harness that can run a spawned agent now), and the aliases of the agent.tier_aliases config knob. A harness or alias that cannot spawn now says why.",
+			"description": "List tiers agent.spawn accepts now: native bare tiers on your harness, ext harness.tier names, and user aliases. Unavailable harnesses and aliases say why they cannot spawn. Text by default; format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -390,21 +393,19 @@ func agentToolDefinitions() []map[string]any {
 
 func agentSpawnDescription(worker bool) string {
 	parts := []string{
-		"Spawn a child agent: a headless agent the dashboard daemon runs for you, working in cwd or in worktree. prompt is its first message.",
-		"tier picks its harness and model: a bare tier (small, medium, large, xlarge) on your own harness, <harness>.<tier> for another harness, or a user alias from the agent.tier_aliases config knob; agent.tiers lists what is spawnable now, and an unusable tier is refused with that list.",
-		"authority is required: read-only, workdir-write, or full, capped at your own permission level; a read-only child's ws tools refuse commits and ticket changes.",
-		"system_prompt or system_prompt_path (at most one) is appended to the harness's own system prompt. Give at most one of cwd and worktree; worktree is the root of an existing git worktree you acquired, and the child runs there.",
-		"Returns the child's address (id:<id>): its mailbox address and the key agent.interrupt and agent.list take.",
+		"Spawn a child agent. Unusable tiers are refused with available tiers. Read-only blocks ws commits and ticket changes.",
+		"Use its address for mailbox.send and agent.interrupt.",
 	}
 	if worker {
 		parts = append(parts,
-			"Each time its turn ends or fails, its report (status and final message) comes to you: steered into your running turn, or as your next message when you are idle. Your own report to your parent waits until every open child's report has reached you, so you may end your turn while they work.")
+			"Each ended or failed turn reports by steer if you are running, else next turn. Your report waits for all open child reports; you may end your turn.")
 	} else {
 		parts = append(parts,
-			"Each time its turn ends or fails, a completion mail (status and final message) arrives in this session's mailbox: end your turn and let it arrive.")
+			"Each ended or failed turn mails you a report; end your turn and let it arrive.")
 	}
 	parts = append(parts,
-		"Follow up with mailbox.send to its address: a running turn takes the mail as a steer where its harness allows one, else its next turn does. The child sleeps after its idle timer and wakes on its next mail.")
+		"Mail steers a running turn if supported, else waits for next turn. Idle children sleep; mail wakes them.",
+		"Text by default; format=json for structured output.")
 	return strings.Join(parts, " ")
 }
 
