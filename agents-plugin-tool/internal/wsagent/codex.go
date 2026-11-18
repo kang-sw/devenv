@@ -171,15 +171,20 @@ func (p *codexProcess) open(spec StartSpec) error {
 	}
 
 	// Shadow both distributed plugin server names, not the plugins: their
-	// skills and user-controlled hooks stay loaded. No stdio ws is injected.
+	// skills and user-controlled hooks stay loaded. Only ws opens a client:
+	// one HTTP session per bearer means two clients would collide on request
+	// IDs. Disabled wsflow still needs a transport for Codex to accept it.
 	server := map[string]any{
 		"url": spec.MCPSession.URL, "bearer_token_env_var": EnvMCPSessionToken, "required": true,
 	}
 	params := map[string]any{
 		"cwd": spec.workDir(),
 		"config": map[string]any{
-			"agents":      map[string]any{"enabled": false},
-			"mcp_servers": map[string]any{"ws": server, "wsflow": server},
+			"agents": map[string]any{"enabled": false},
+			"mcp_servers": map[string]any{
+				"ws":     server,
+				"wsflow": map[string]any{"url": spec.MCPSession.URL, "enabled": false},
+			},
 		},
 	}
 	if spec.Instructions != "" {
