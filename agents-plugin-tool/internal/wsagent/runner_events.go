@@ -283,11 +283,11 @@ func (c *conv) addApproval(a ApprovalRequest, quiet bool) {
 	c.setStatus(func() { c.approvals = append(c.approvals, a) })
 	c.checkAction(quiet)
 	c.showApprovals(quiet)
-	if !quiet && !c.rec.Lead && c.r.opts.Backends[c.rec.Backend].WorkerAutoApprove {
+	if !quiet && (c.rec.agyBypass() || (!c.rec.Lead && c.r.opts.Backends[c.rec.Backend].WorkerAutoApprove)) {
 		// Use the same answer path as a user, including at-most-once
 		// tracking and a fatal write failure. The request remains traced.
 		if err := c.answerApproval(a.ID, true, ""); err != nil {
-			fmt.Fprintf(c.r.opts.Log, "agent %s: auto-allow worker permission: %v\n", c.rec.ReplyID, err)
+			fmt.Fprintf(c.r.opts.Log, "agent %s: auto-allow permission: %v\n", c.rec.ReplyID, err)
 		}
 	}
 }
@@ -733,7 +733,7 @@ func (c *conv) applySettings() {
 		// The accepted native target is already in Record. Common selection
 		// writes its mapping there; a permitted native control keeps its literal
 		// mode. Only an actual new launch remaps explicit common intent.
-		if err := controls.setPermissionMode(rec.PermissionMode); err != nil {
+		if err := controls.setPermissionMode(rec.launchPermissionMode()); err != nil {
 			if reconcile {
 				fmt.Fprintf(c.r.opts.Log, "agent %s: permission reconciliation: %v\n", rec.ReplyID, err)
 				c.permissionNudge(level, false, c.activeMode)

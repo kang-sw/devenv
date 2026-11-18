@@ -254,11 +254,14 @@ func (c *conv) setNativePermissionMode(mode string, user bool) error {
 			}
 		}
 	}
-	if mode != rec.PermissionMode {
-		c.update(func(rec *Record) { rec.PermissionMode = mode })
+	if mode != rec.selectedPermissionMode() {
+		c.update(func(rec *Record) { rec.selectPermissionMode(mode) })
 		c.dirtyMode, c.reconcileMode = true, false
 		if !c.turn {
 			c.applySettings()
+		}
+		if err := c.allowAgyBypassPending(); err != nil {
+			return err
 		}
 	}
 	return nil

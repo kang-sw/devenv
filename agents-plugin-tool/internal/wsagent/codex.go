@@ -35,18 +35,16 @@ func (b CodexBackend) Executable() string {
 	return "codex"
 }
 
-// codexChoices holds model/list from the last opened process. Merely opening
-// the dashboard must not start a process or create a thread in Codex's home.
+// codexChoices holds model/list from the last opened process. Session reports
+// take precedence over the session-less cache file listing.
 var codexChoices struct {
 	sync.Mutex
 	models  []ModelChoice
 	efforts []string
 }
 
-func (CodexBackend) Choices(context.Context) ([]ModelChoice, []string, error) {
-	codexChoices.Lock()
-	defer codexChoices.Unlock()
-	return slices.Clone(codexChoices.models), slices.Clone(codexChoices.efforts), nil
+func (b CodexBackend) Choices(context.Context) ([]ModelChoice, []string, error) {
+	return b.hostedChoices()
 }
 
 // codexEnv removes parent-session identities, but keeps the harness-owned

@@ -291,7 +291,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		RemoveSubagents: RemovesSubagents(rec),
 		Lead: &LeadSpec{
 			DaemonVersion:   c.r.opts.DaemonVersion,
-			PermissionMode:  rec.PermissionMode,
+			PermissionMode:  rec.launchPermissionMode(),
 			PluginIsolation: leadPluginIsolation(rec.PluginIsolation),
 			PluginWarning: func(warning string) {
 				c.update(func(rec *Record) { rec.PluginWarning = warning })
@@ -583,6 +583,9 @@ func (c *conv) replayDone(lost bool) {
 		}
 	}
 	c.reconcileLeadPermission()
+	if err := c.allowAgyBypassPending(); err != nil {
+		fmt.Fprintf(c.r.opts.Log, "agent %s: auto-allow replayed permission: %v\n", c.rec.ReplyID, err)
+	}
 	c.checkAction(false)
 	c.live.writeSnapshot()
 	c.r.notify(c.rec.ReplyID, c.rec.Root)
