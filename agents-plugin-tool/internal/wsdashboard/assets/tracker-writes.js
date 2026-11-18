@@ -713,6 +713,14 @@
   }
   // The item window's edit mode and a comment's edit in place.
   function startEdit(id) {
+    if (AD.detailReady && !AD.detailReady(ui.store, id)) {
+      var store = ui.store;
+      showItem(id);
+      AD.detail(store, [id], function () {
+        if (ui.store === store && ui.win && ui.item === id) { render(); startEdit(id); }
+      });
+      return;
+    }
     var it = VS.items[id];
     if (!it) return;
     if (!(ui.win && ui.item === id)) showItem(id);
