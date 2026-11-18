@@ -591,9 +591,10 @@ under the inbox lock, answering `{held: [{id, text, chips, topics, images, nums}
 in queue order (steered first, then the rest), each shaped as a cancel's answer. All four require an `Origin` equal to the daemon's own,
 and a session without a fresh adapter snapshot gets 409. `whiteboard.update`'s
 `full:` line names the session's dashboard URL once its last nudge was answered,
-and the page path otherwise. A daemon-hosted server adds a single-use login code
-with a ten-minute expiry through an in-process hook; a server without that hook
-keeps the plain URL.
+and the page path otherwise. The URL never carries a login code, because tool
+results land in transcripts; a browser without the localhost cookie gets the
+login gate, whose clipboard button mints the single-use link out of band when
+the host has a native clipboard writer.
 
 The daemon creates one tracker host (`wstrackerhost.New`) before it starts
 serving, shared by the tracker's background poll and the tracker routes, and
@@ -1195,8 +1196,8 @@ paste. This route accepts only a loopback peer and Host with its own Origin and
 same-origin fetch metadata when present; it is rate-limited and returns no
 credential. Unavailable native writers hide the
 action, while runtime write failures allow retry. Nothing reads or writes the
-clipboard on page load. Agent links, Settings and the desktop Connection menu
-provide additional explicit login-link paths. Electron sets its native cookie
+clipboard on page load. Settings and the desktop Connection menu provide
+additional explicit login-link paths. Electron sets its native cookie
 before navigation. A same-origin status probe recovers a Strict-cookie browser
 that followed a cross-site link, retaining the requested fragment.
 
