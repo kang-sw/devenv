@@ -1,5 +1,6 @@
 ---
 title: "playbook 자원을 daemon binary에 넣어 self-contained로 만들기"
+completed: 2026-11-19
 related:
   261116-feat-ws-daemon-plugin-package-select: "its setting-driven hosted package choice (wsconfig.HostedPluginPackageKey) stays; Phase 2 removes its registry fallback"
   261117-feat-ws-hosted-prompt-assembly: "hosted Claude sessions already launch without the ws/wsflow plugins; Phase 2 extends that to the hosted MCP launcher"
@@ -521,3 +522,134 @@ registry with its same-minor fallback is gone.
   launcher from the recorded executable; a daemon replace leaves the hosted
   session's launcher reading the new endpoint; ws and wsflow hosted packages
   each get their own env.
+
+### Result (11f975fb7) - 2026-11-19
+
+Phase 2 landed in `a085da0a8` and `11f975fb7`; Phase 1 and its Edition were
+left unchanged. Both phases are complete.
+
+- Hosted package selection reads the global setting (default wsflow), not
+  caller roots, installed copies or a registry. `wspackage.StageHosted`
+  retains exactly the launcher and four manifests under
+  `hosted-packages/<package>/<sha256>/`. Package env comes from embedded
+  `plugin.json`, with staged paths substituted. Hosted stdio still runs
+  holder Python plus the launcher; HTTP transports are unchanged.
+- Pi leads stage their selected workflow skills, rsrc, config and owner
+  manifest from embedded inputs, alongside the already embedded native
+  payload. Workers resolve the selected package name without an installed
+  root. Native Pi and attached MCP launchers carry the hosted marker.
+- Removed the registry writer/reader, `ResolveHostedPlugin`, both installed
+  root helpers and their callers. A malformed leftover registry is ignored
+  byte-for-byte. Invalid global selection warns and uses wsflow.
+- The singleton-owning daemon retains its build on every platform and
+  publishes the private last-running-executable record once at startup.
+  Hosted launchers follow healthy daemons; after proven absence and starter
+  coordination they reread/validate that record and restart its retained
+  build. Missing/corrupt records fail without plugin repair/download. The
+  hosted marker is removed from the daemon starter's environment. External
+  launchers retain their own runtime path.
+- Settled stages are immutable and retained; corrupt cold-reuse/publication
+  winners fail without overwrite. Production warm hosted staging is memory
+  only. Unlike that immutable production cache, the explicit dev checkout
+  rehashes five inputs at each launch, preventing stale staged manifests from
+  disagreeing with live package env. Launcher/workflow/native mirrors and the
+  operational runbook are current. Desktop's outside-daemon package closure
+  remains unchanged; its retained readers are listed in Phase 1's Result.
+
+**Compatibility: Phase 2 T0; whole ticket T1.** Paths abbreviated below are
+under `agents-plugin-tool/` unless otherwise qualified.
+
+- New writes are additive/disposable: the startup writer
+  `internal/wsdashboard/running_executable.go:25-42` stages the executable
+  and atomically writes schema 1 evidence through the private 0600 writer
+  (`endpoint.go:99-122`), under the singleton (`daemon.go:404-410`). The
+  Python reader validates shape, retained-bin path and content SHA-256
+  (`agents-plugin/bin/ws-mcp-launcher.py:1036-1060`), and reads afresh for
+  every necessary restart (`:1717-1730`). No tool, hello, manifest schema or
+  authoritative-history format changes.
+- The old `489a3ff4e` daemon knows only endpoint/last-port lifecycle files
+  (`internal/wsdashboard/endpoint.go:31-59,72-95,125-141`) and its separate
+  registry (`internal/wsagent/hosted_plugins.go:17,28-91`). It does not read,
+  reject or rewrite the new record or hosted-package stages; settled binary
+  pruning was already a no-op (`internal/wsdashboard/spawn.go:87-95`). An
+  older daemon started after the new record therefore runs normally and
+  leaves it/retained bytes intact. The new reopen publishes its own build
+  again; no reconstruction or migration is needed. The lock-owner test
+  (`running_executable_test.go:11`) covers unchanged evidence across a
+  simulated pre-record startup and successor publication. This is additive
+  coexistence, not a claim that old daemons gain plugin-free launch support.
+- The old version may continue writing its registry (`489a3ff4e:
+  internal/wsagent/hosted_plugins.go:28-73`). The new reader selects only
+  config plus build-owned package inputs (`internal/wsagent/hosted_plugins.go:
+  20-45`); no production registry reader/writer remains. New reopen ignores
+  any old registry writes, and neither version loses authoritative data.
+  Existing minor/protocol admission is unchanged; Phase 1's content-only T1
+  assessment remains the ticket's highest tier.
+
+**Verification (full output read by each executing agent).** Go commands ran
+from `agents-plugin-tool/`; test environments removed inherited `GIT_DIR`,
+`GIT_WORK_TREE` and `WS_*`, then set `WS_TEST_EMBEDDED_PACKAGES=1` for Go.
+
+- `go test -p 1 ./internal/wspackage ./internal/wsrsrc ./internal/wsdoc ./internal/wsagent ./internal/wsdashboard ./cmd/ws-mcp -count=1 -timeout 45m`:
+  pass (0.690 / 1.341 / 9.085 / 114.730 / 305.872 / 200.674 seconds).
+  After the live-dev cache refinement, full wspackage, native-Pi package
+  matrix and `go vet ./...` passed again. `go build ./...` and
+  `go test -race ./internal/wspackage -count=1 -timeout 5m`: pass.
+- Separately, `go test ./internal/mcp -count=1 -timeout 45m`: pass,
+  **846.576 seconds**. No dependency absence was skipped.
+- The real lifecycle test runs ws and wsflow with isolated cache/config and
+  five-file stages: one persistent stdio launcher follows a newer-core
+  successor, then restarts that successor after a kill with both original
+  build paths deleted. Subsequent tool reads succeed on a distinct healthy
+  PID. Package/runner fixtures cover Claude launch construction, native Pi
+  lead materialization and worker payload/MCP wiring without installed roots;
+  these are not live model turns.
+- Python plugin suite: **205 tests, 202 pass / 3 platform-or-remote skips**;
+  wsflow: **22 tests, 20 pass / 2 Windows skips**. Generator `--check`,
+  workflow-bundle `--check`, both materializers' `--check-source .`, launcher
+  byte comparisons and `git diff --check`: pass. Two initial materializer
+  check invocations had incorrect CLI arguments; corrected repository-root
+  invocations passed without any implementation/test change.
+- Pi `npm test`: **2,689 tests, 2,668 pass / 17 pre-existing failures /
+  4 skips**. Independently installed `origin/develop`
+  (`ee1e4de51971751370af6617fea319c2cbca54ff`) ran 2,688 tests,
+  2,667 pass / 17 fail / 4 skips; sorted failing names match exactly.
+  Desktop: **174 tests, 170 pass / 4 Windows skips**. Missing dependencies
+  were installed with `npm ci --ignore-scripts`. Full logs and comparison:
+  `node_modules/phase2-verification/report.md`. Non-authoritative baseline
+  setup attempts (Node's node_modules TypeScript restriction, enclosing Git
+  discovery and producer identity) are documented there; final baseline Git
+  metadata is isolated and no real-repository Git redirection was inherited.
+- Fresh independent one-pass Lite review of `489a3ff4e..11f975fb7`: **clean**.
+  Reviewer independently reran both real lifecycle cases, hosted/native-Pi
+  tests, launcher start/proxy suites and mirror guards. Detailed ignored
+  report: `node_modules/phase2-verification/independent-review.md`.
+
+**File-open evidence and boundaries.** A Python audit hook around controlled
+healthy-launcher `main` after imports measured **4 -> 2 open attempts** versus
+`489a3ff4e`: hosted startup no longer attempts two plugin runtime metadata
+reads; its two runtime-contract reads remain. Network/client handling was
+supplied in memory and no daemon started. Production warm staging writes zero
+files; cold staging publishes five package files once. The restart record is
+written once per daemon startup, never per session/tool/heartbeat. These are
+macOS supporting evidence/source counts, not native Windows antivirus latency
+measurements.
+
+**Unresolved/outside this phase.** External harness skill discovery still reads
+its installed package (`agents-plugin-pi/src/skills-dir.ts:20-29`, and Claude/
+Codex's own plugin discovery); external connection config manifests still read
+caller paths (`internal/mcp/process_env.go:148`, `config_manifest.go:172-174`).
+Phase 2's hosted-launch/removal text does not cover those external paths, so
+neither was expanded. The 17 baseline Pi failures, native Windows execution/
+latency and live Claude/Pi model-session acceptance remain unverified here.
+No shared daemon build/restart/replacement, installed plugin or credential
+mutation, develop merge or push occurred.
+
+**Workflow tooling.** `workflow_manual`, `route.resolve_implement`,
+`tickets.acquire`, `playbook.render` and `tickets.close` were unavailable in
+this session profile. Used the bundled manual/reviewer fallback and the
+already-assigned implementation branch; chose the same one-pass Lite review
+as Phase 1. Closure uses the documented native move fallback. The ticket's
+Sage freshness warning is accepted: additions record implementation decisions
+and evidence, not a changed approved phase plan. The lead retains merge/push
+and merge-confirm authority.
