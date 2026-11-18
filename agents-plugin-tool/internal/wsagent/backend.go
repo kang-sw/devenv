@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -481,11 +482,13 @@ var hostWindows = runtime.GOOS == "windows"
 
 // harnessCommand resolves the program and leading arguments a harness
 // start runs: command when set, else name from PATH. On Windows an npm
-// cmd-shim (.cmd/.bat) is unwrapped to node and its script, because
-// Windows runs a .cmd through cmd.exe: the started PID would be cmd.exe's,
-// not the harness's, and a hosted session's host PID must be the harness
-// process itself (ws-mcp and the Pi extension compare it with their own
-// parent / own PID). Elsewhere a set command passes through untouched.
+// cmd-shim (.cmd/.bat) is unwrapped to node and its script, or to the
+// native exe it runs, because Windows runs a .cmd through cmd.exe: the
+// started PID would be cmd.exe's, not the harness's, and a hosted session's
+// host PID must be the harness process itself (ws-mcp and the Pi extension
+// compare it with their own parent / own PID). A shim it will not unwrap is
+// refused with a remedy for name. Elsewhere a set command passes through
+// untouched.
 func harnessCommand(command, name string) (string, []string, error) {
 	if command == "" || hostWindows {
 		if command == "" {
@@ -509,7 +512,20 @@ func harnessCommand(command, name string) (string, []string, error) {
 	if err != nil {
 		return "", nil, fmt.Errorf("read %s: %w", command, err)
 	}
-	return cmdShimArgv(command, string(text), fileExists)
+	prog, pre, err := cmdShimArgv(command, string(text), fileExists)
+	if errors.Is(err, errShimRefused) {
+		return "", nil, fmt.Errorf("%w; %s", err, shimRemedy(command, name))
+	}
+	return prog, pre, err
+}
+
+// shimRemedy tells the user how to get a refused shim out of the way of
+// harness name.
+func shimRemedy(shim, name string) string {
+	if name == "claude" {
+		return fmt.Sprintf(`install Claude Code's native build, or put the directory holding the native claude.exe (for example %%USERPROFILE%%\.local\bin) ahead of %s on PATH`, filepath.Dir(shim))
+	}
+	return fmt.Sprintf("install %s's native build, or put the directory holding its real executable ahead of %s on PATH", name, filepath.Dir(shim))
 }
 
 // fileExists reports whether path names an existing file.
@@ -527,16 +543,38 @@ var cmdShimLine = regexp.MustCompile(`(?m)"%_prog%"\s+"%dp0%\\([^"]+)"\s+%\*\s*$
 // a shim for another interpreter does not have it.
 var cmdShimNode = regexp.MustCompile(`(?m)^\s*SET "_prog=node"\s*$`)
 
+// cmdShimExe is the launch line of an npm cmd-shim for a native binary
+// (e.g. @anthropic-ai/claude-code): `"%dp0%\<path>.exe"   %*`, the exe
+// relative to the shim's directory and run with no leading arguments.
+var cmdShimExe = regexp.MustCompile(`(?m)^[ \t]*"%dp0%\\([^"]+\.(?i:exe))"[ \t]+%\*[ \t]*\r?$`)
+
+// errShimRefused marks a .cmd/.bat that cmdShimArgv will not unwrap.
+var errShimRefused = errors.New("a .cmd would run under cmd.exe, whose PID is not the harness's")
+
 // cmdShimArgv unwraps the npm cmd-shim at shim, whose content is text, to
-// the program and leading arguments it runs: node.exe beside the shim when
-// exists says it is there, else node from PATH, then the script. A .cmd that
-// is not a node cmd-shim is refused rather than run through cmd.exe.
+// the program and leading arguments it runs. A node shim runs node.exe
+// beside the shim when exists says it is there, else node from PATH, then
+// the script; a native-binary shim runs its exe, which exists must find.
+// Any other .cmd is refused (errShimRefused) rather than run through
+// cmd.exe.
 func cmdShimArgv(shim, text string, exists func(string) bool) (string, []string, error) {
+	dir := filepath.Dir(shim)
 	m := cmdShimLine.FindStringSubmatch(text)
 	if m == nil || !cmdShimNode.MatchString(text) {
-		return "", nil, fmt.Errorf("%s is not an npm cmd-shim for node; a .cmd would run under cmd.exe, whose PID is not the harness's", shim)
+		e := cmdShimExe.FindStringSubmatch(text)
+		if e == nil {
+			return "", nil, fmt.Errorf("%s is not an npm cmd-shim that can be started directly; %w", shim, errShimRefused)
+		}
+		rel := strings.ReplaceAll(e[1], `\`, "/")
+		if strings.HasPrefix(rel, "/") || strings.Contains(rel, ":") || slices.Contains(strings.Split(rel, "/"), "..") {
+			return "", nil, fmt.Errorf("%s runs %s, which is not inside the shim's directory; %w", shim, e[1], errShimRefused)
+		}
+		exe := filepath.Join(dir, filepath.FromSlash(rel))
+		if !exists(exe) {
+			return "", nil, fmt.Errorf("%s runs %s, which does not exist; %w", shim, exe, errShimRefused)
+		}
+		return exe, nil, nil
 	}
-	dir := filepath.Dir(shim)
 	// %dp0% ends in a separator and the shim adds another; Join cleans both.
 	script := filepath.Join(dir, filepath.FromSlash(strings.ReplaceAll(m[1], `\`, "/")))
 	node := filepath.Join(dir, "node.exe")

@@ -2067,6 +2067,7 @@
   "entry.whiteboard.panel": "패널",
   "entry.whiteboard.norecap": "요약 없음",
   "entry.whiteboard.open": "보드에서 열기",
+  "js.whiteboard.jump.itemmissing": "이 화이트보드 항목은 더 이상 사용할 수 없습니다.",
   "js.whiteboard.jump.missing": "이 토픽은 더 이상 사용할 수 없습니다.",
   "js.whiteboard.jump.elementmissing": "해당 요소를 사용할 수 없어 토픽을 표시합니다.",
   "entry.whiteboard": "화이트보드 업데이트 확정됨",

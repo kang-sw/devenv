@@ -40,6 +40,9 @@ function tkFetch(path, body, done) {
 var tkSubs = [function () { log.push("notify:" + (tkViews.fast ? tkViews.fast.v : "-") + "," + (tkViews.slow ? tkViews.slow.v : "-")); }];
 ` + block + `
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
+// These cases pin the retained legacy multi-store path; projection cases
+// are exercised by tracker_projection_adapter.test.js.
+tkLegacy = { fast: true, slow: true };
 tkViews.slow = { v: "old" };
 tkReadAll(function (status) { log.push("listed:" + status); }, function () { log.push("done"); });
 check("before any view", log, ["listed:200"]);

@@ -2067,6 +2067,7 @@
   "entry.whiteboard.panel": "Панель",
   "entry.whiteboard.norecap": "Краткое описание недоступно",
   "entry.whiteboard.open": "Открыть на доске",
+  "js.whiteboard.jump.itemmissing": "Этот элемент доски больше недоступен.",
   "js.whiteboard.jump.missing": "Эта тема больше недоступна.",
   "js.whiteboard.jump.elementmissing": "Точный элемент недоступен; показана его тема.",
   "entry.whiteboard": "Изменение доски зафиксировано",

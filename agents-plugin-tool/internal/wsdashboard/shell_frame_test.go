@@ -66,6 +66,9 @@ function boardInputFull() { return null; }
 function trackerLost() {}
 function trackerNudge(rev) { log.push("nudge:" + rev); }
 function swap(name, hash, html) { log.push("swap:" + name + "." + hash); }
+// The board's shell-return window is pinned by testdata/board-home-ack.test.cjs.
+function boardReturnShown() {}
+function boardReturnEnd() {}
 function tlHold(name) { log.push("hold:" + name); }
 function tlCount() {}
 function tlShown() {}

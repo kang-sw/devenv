@@ -19,6 +19,9 @@ import (
 //
 //	GET  /tracker/stores                 {"stores": [...], "rev": N, "support": B}
 //	GET  /tracker/stores/<id>/view       {"view": ..., "seen": {"badge", "read"}}
+//	GET  /tracker/stores/<id>/summary    {"cursor", "reset", "items", "removed", "globals", "feed"}
+//	GET  /tracker/stores/<id>/delta?since=<cursor>  changed rows/global fields, or inline reset; equal cursor 304
+//	GET  /tracker/stores/<id>/detail?id=<item>&id=<item>  versioned bundles from the same published snapshot
 //	GET  /tracker/stores/<id>/search?q=<query>[&excerpts=1]
 //	                                     {"ids": [...]}: the items passing the search, in tree order;
 //	                                     with excerpts=1 also "hits": [...], one per place an item
@@ -483,6 +486,9 @@ type TrackerRegisterResult struct {
 // /tracker/stores/<id>/wiki/<name>/attachments/<oid> is "wiki-image".
 var trackerStoreOps = map[string]string{
 	"view":        http.MethodGet,
+	"summary":     http.MethodGet,
+	"delta":       http.MethodGet,
+	"detail":      http.MethodGet,
 	"search":      http.MethodGet,
 	"dispatch":    http.MethodPost,
 	"check":       http.MethodPost,
@@ -657,7 +663,7 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 	rev := d.trackerRev.Load()
 	data := d.trackerData.Load()
 	now := time.Now()
-	page := method == http.MethodGet && (rest == "stores" || op == "view")
+	page := method == http.MethodGet && (rest == "stores" || op == "view" || op == "summary" || op == "delta" || op == "detail")
 	var stores []TrackerStore
 	cached := false
 	if page {
@@ -716,6 +722,8 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 		}
 		d.TrackerChanged()
 		writeJSON(w, http.StatusOK, res)
+	case op == "summary" || op == "delta" || op == "detail":
+		d.trackerProjectionRead(w, r, storeID, op, data, now)
 	case op == "view":
 		if a, ok := d.trackerAnswers.view(storeID, data, now); ok {
 			writeTrackerAnswer(w, r, a.body, a.etag)
@@ -977,6 +985,7 @@ func (d *Daemon) trackerRegistryWrite(ctx context.Context, w http.ResponseWriter
 	}
 	d.TrackerChanged()
 	if op == "unregister" {
+		d.trackerAnswers.forgetProjection(id)
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}

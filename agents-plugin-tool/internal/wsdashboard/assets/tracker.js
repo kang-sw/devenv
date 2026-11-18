@@ -12,6 +12,16 @@
 //                        not loaded or could not be read. Synchronous. The viewer
 //                        is view.viewer (stream, member); "today" is
 //                        view.now.slice(0, 10). The renderer keeps no viewer.
+//   detail(id, ids, done?) -> optional: request visible/expanded bundles; returns
+//                        whether all ids have detail matching their summary row.
+//                        done runs when matching detail is installed. view(id)
+//                        exposes no mismatched body/comments/events/HTML.
+//   detailReady(id, item), detailError(id), retryDetail(id, item)
+//                        optional matching-detail state and explicit retry.
+//   history(id)       -> optional: request global event history for Activity/sync;
+//                        true when view.historyEvents is current. Does not install
+//                        unversioned history as item detail.
+//   historyError(id), retryHistory(id) -> optional history error/retry hooks.
 //   error(id)         -> the reason string when view(id) is null, else null
 //   dispatch(id, events, done)
 //                        events = [{type, payload, origin}]. A payload's item,
@@ -405,9 +415,13 @@
     return '<span class="chip pr pr-' + it.priorityLevel + '" title="' + wsT("js.tk.pri.tip", it.priorityLevel, VS.priority.names.length - 1) +
       priStored(it) + '">' + esc(it.priorityName) + '</span>';
   }
+  function itemDueState(it) {
+    var time = (VS.itemTime || {})[it.id];
+    return time ? time.dueState : !it.due ? '' : it.due < today() ? 'over' : it.due === today() ? 'today' : 'future';
+  }
   function dueChip(it) {
     if (!it || !it.due) return '';
-    var over = it.due < today() && !wrapped(it.status), now = it.due === today() && !wrapped(it.status);
+    var state = itemDueState(it), over = state === 'over' && !wrapped(it.status), now = state === 'today' && !wrapped(it.status);
     return '<span class="chip due' + (over ? ' over' : now ? ' now' : '') + '" title="' + (over ? wsT("js.tk.due.tip.over", esc(it.due)) : now ? wsT("js.tk.due.tip.now", esc(it.due)) : wsT("js.tk.due.on", esc(it.due))) + '">' +
       (now ? wsT("js.tk.due.today") : wsT("js.tk.due.on", esc(it.due.slice(5)))) + '</span>';
   }
@@ -416,7 +430,8 @@
   // A removed label is gone from view.labels; the activity log still names it, by its add
   // event and its applied renames (EV, the events by id).
   function labelName(id) {
-    var l = labelOf(id), n = EV[id] && EV[id].type === 'roles.add_label' ? EV[id].payload.name : null;
+    var l = labelOf(id), n = VS.labelNames && VS.labelNames[id];
+    if (n == null) n = EV[id] && EV[id].type === 'roles.add_label' ? EV[id].payload.name : null;
     if (l) return l.name;
     VS.events.forEach(function (e) { if (e.type === 'roles.edit_label' && e.status === 'applied' && e.payload.label === id && typeof e.payload.name === 'string') n = e.payload.name; });
     return typeof n === 'string' ? n : alias(id);
@@ -471,7 +486,10 @@
   }
   var END_KEY = { declined: "js.tk.end.declined", returned: "js.tk.end.returned", handed: "js.tk.end.handed", unassigned: "js.tk.end.unassigned", withdrawn: "js.tk.end.withdrawn" };
   function endText(s) { return END_KEY[s] ? wsT(END_KEY[s]) : ''; }
-  function endedBy(r) { return r.ended && VS.events.filter(function (e) { return e.id === r.ended.id; }).map(function (e) { return e.type === 'roles.remove_member' ? ' ' + wsT("js.tk.end.removed") : ''; })[0] || ''; }
+  function endedBy(r) {
+    if (r.ended && r.ended.type === 'roles.remove_member') return ' ' + wsT('js.tk.end.removed');
+    return r.ended && VS.events.filter(function (e) { return e.id === r.ended.id; }).map(function (e) { return e.type === 'roles.remove_member' ? ' ' + wsT("js.tk.end.removed") : ''; })[0] || '';
+  }
   // Where an assignment stands: not accepted yet, accepted (then how it ended), or how it ended; '' when none applies.
   function standing(r) {
     if (r.state === 'pending') return wsT("js.tk.src.pending");
@@ -736,7 +754,12 @@
     if (!it || it.kind === 'topic') return '<span class="due2"></span>';
     if (!it.due && it.start) return partHtml('due2 from', wsT("js.tk.due.tip.from", it.start), esc(wsT("js.tk.due.from", it.start.slice(5))), it, ed ? 'due' : null);
     if (!it.due) return ed ? partHtml('due2 rpe', wsT("js.tk.menu.due"), partIcon('calendar'), it, 'due') : '<span class="due2"></span>';
-    var n = dayNum(it.due) - dayNum(today()), t, c, tip;
+    var state = itemDueState(it), n = dayNum(it.due) - dayNum(today()), t, c, tip;
+    // The projection owns the boundary; the hourly global clock still supplies
+    // the day distance (its UTC date is unchanged by hourly truncation).
+    if (state === 'today') n = 0;
+    else if (state === 'over') n = Math.min(-1, n);
+    else if (state === 'future') n = Math.max(1, n);
     if (ENDED[st]) { t = it.due.slice(5); c = 'ended'; tip = wsT("js.tk.due.tip.ended", it.due, SI.info(st).label); }
     else if (n < 0) { t = wsT("js.tk.due.dplus", -n); c = 'over'; tip = wsTn("js.tk.due.tip.overby", -n, it.due); }
     else if (n === 0) { t = wsT("js.tk.due.dday"); c = 'now'; tip = wsT("js.tk.due.tip.today", it.due); }

@@ -2067,6 +2067,7 @@
   "entry.whiteboard.panel": "Panel",
   "entry.whiteboard.norecap": "Zusammenfassung nicht verfügbar",
   "entry.whiteboard.open": "Auf dem Board öffnen",
+  "js.whiteboard.jump.itemmissing": "Dieses Whiteboard-Element ist nicht mehr verfügbar.",
   "js.whiteboard.jump.missing": "Dieses Thema ist nicht mehr verfügbar.",
   "js.whiteboard.jump.elementmissing": "Das genaue Element ist nicht verfügbar; sein Thema wird angezeigt.",
   "entry.whiteboard": "Whiteboard-Änderung übernommen",

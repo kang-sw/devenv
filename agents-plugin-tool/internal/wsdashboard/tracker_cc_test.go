@@ -84,9 +84,13 @@ function panelState() { return ps; }
 function wsT(k) { return k; }
 function attr(k, v) { return ' data-' + k + '="' + v + '"'; }
 function treeRows(rows, pre) { return '[' + pre + rows.map(function (r) { return r.rk; }).join(',') + ']'; }
-` + block + `
+` + trackerFn(t, `var CLOSED_DAYS = `, true) + trackerFn(t, `function recentlyClosed\(item, rec\)`, false) + block + `
 function secs(h) { var out = [], re = /data-rsec="([a-z]+)"[^>]*>[\s\S]*?<span class="subn">(\d+)<\/span><\/button>([\s\S]*?)<\/section>/g, m; while ((m = re.exec(h))) out.push([m[1], +m[2], m[3]]); return out; }
-VS = { items: { 'x#3': { ts: '2026-11-01T00:00:00Z' } }, my: { related: { cc: ['x#1'], mentioned: ['x#2'], closed: ['x#3'] } } };
+VS = { now: '2026-11-06T12:00:00Z', items: { 'x#3': { ts: '2026-11-01T00:00:00Z' } }, my: { related: { cc: ['x#1'], mentioned: ['x#2'], closed: ['x#3'] } } };
+check('legacy recently closed uses the clock', recentlyClosed('x#3'), true);
+VS.itemTime = { 'x#3': { recentlyClosed: false, recentAssignments: {} } };
+check('projected recently closed overrides the clock', recentlyClosed('x#3'), false);
+delete VS.itemTime;
 var h = listRelated();
 check('sections in order, open, with rows', secs(h), [['cc', 1, '[rel:cc:rel:cc:x#1]'], ['mentioned', 1, '[rel:mentioned:rel:mentioned:x#2]']]);
 check('both open', (h.match(/class="rsec open"/g) || []).length, 2);

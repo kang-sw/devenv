@@ -75,6 +75,8 @@ type PageContent struct {
 	// epoch milliseconds (wswhiteboard.State.ReaskTimes); the page's sent
 	// marks drop answers sent before it. Nil when no item was re-asked.
 	Reasked map[int]int64
+	// BoardTargets maps item/entry/panel anchors to topics from loaded state.
+	BoardTargets map[string]string `json:"-"`
 	// Contacts are the session's mail correspondents, newest exchange first.
 	Contacts []Contact
 	// MailBodies maps a mailbox history entry name (a conversation ring mail
