@@ -244,14 +244,34 @@ button.sbadge[aria-expanded="true"] { box-shadow: inset 0 0 0 1.5px var(--wb-pri
 button.sbadge:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 2px; }
 .sbadge .sword { font-size: 11px; font-weight: 600; color: var(--wb-muted-fg); }
 .sbadge.idle { color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-muted-fg) 35%, transparent), var(--wb-shadow-hi); }
-.sbadge.idle .spin { display: none; }
-/* The agents popover (agpop): the agents region over the conversation, above
-   the badge, on the rail popovers' surface. The header stays; only the list
-   scrolls. It is at most 500px wide and shrinks to the composer's width on a
-   narrow screen. */
-.agpop { position: absolute; z-index: var(--z-popovers); right: 10px; bottom: calc(100% + 26px); width: min(500px, calc(100% - 20px)); max-height: 60vh; max-height: 60dvh; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden;
-  background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); }
-.agpop[hidden] { display: none; }
+.sbadge.idle .spin, .sbadge.idle .sword { display: none; }
+/* The island overlays the conversation grid cell, not its scrolling content. */
+.dgrid.live > .agisland { grid-area: convo; position: relative; z-index: var(--z-popovers); align-self: start; justify-self: end; margin: 8px; min-width: 0; max-width: calc(100% - 16px); overflow: hidden; box-sizing: border-box; background: var(--wb-card); color: var(--wb-fg); border-radius: 16px; box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); transition: width .2s ease, height .2s ease, border-radius .2s ease; }
+.dgrid.live > .agisland[hidden] { display: none !important; }
+.dgrid.live[data-tab="board"] > .agisland, .dgrid.live[data-ctab="files"] > .agisland { display: none; }
+@media (min-width: 760px) { .dgrid.live[data-layout="split"][data-tab="board"]:not([data-ctab="files"]) > .agisland { display: block; } }
+@media (min-width: 1100px) { .dgrid.live:not([data-layout="tabs"])[data-tab="board"]:not([data-ctab="files"]) > .agisland { display: block; } }
+.agisland[data-mode="idle"] { width: 48px; height: 30px; border-radius: 999px; }
+.agisland[data-mode="compact"] { width: 320px; }
+.agisland[data-mode="full"] { width: 500px; border-radius: 10px; }
+.agview, .agpop { position: absolute; top: 0; right: 0; box-sizing: border-box; opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .12s ease, visibility 0s linear .12s; }
+.agisland[data-mode="compact"] > .agcompact, .agisland[data-mode="idle"] > .agidle, .agisland[data-mode="full"] > .agpop { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity .12s ease .06s, visibility 0s; }
+.agview { cursor: pointer; }
+.agview:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -3px; }
+.agcompact { width: var(--ag-cw, 320px); padding: 7px 12px 6px; }
+.agcompact .agrow { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto auto; align-items: center; gap: 7px; height: 23px; }
+.agcompact .agmark { display: grid; place-items: center; color: var(--wb-primary); }
+.agcompact .pibadge { padding: 2px 4px; border: 0; border-radius: 4px; background: #3d2f6b; color: #ddd3fb; font-size: 9.5px; }
+.agcompact .agname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+.agcompact .phase { height: 18px; padding: 0 7px; font-size: 10.5px; }
+.agcompact .agelapsed { min-width: 42px; text-align: right; color: var(--wb-muted-fg); font-size: 11px; font-variant-numeric: tabular-nums; }
+.agcompact .agsummary { margin-top: 3px; padding-top: 4px; color: var(--wb-muted-fg); font-size: 11px; box-shadow: 0 -1px 0 var(--wb-line); }
+.agidle { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 13px 0 11px; white-space: nowrap; color: var(--wb-muted-fg); font-size: 11.5px; font-weight: 700; }
+.agidle .i { width: 13px; height: 13px; }
+@media (prefers-reduced-motion: reduce) { .agisland, .agview, .agpop { transition: none !important; } }
+/* Keep the hidden full view measurable for the island's size transition;
+   data-mode controls its visibility and the hidden attribute remains JS state. */
+.agpop, .agpop[hidden] { width: var(--ag-fw, 500px); max-height: 60vh; max-height: 60dvh; display: flex; flex-direction: column; overflow: hidden; }
 .agpop > .r-tree { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 /* The title keeps one line; the chips wrap below one another instead. */
 .agpop .thead { white-space: nowrap; background: var(--wb-card); box-shadow: 0 1px 0 var(--wb-line); }

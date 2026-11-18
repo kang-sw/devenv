@@ -298,8 +298,8 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 			t.Errorf("live session page still carries %q", gone)
 		}
 	}
-	if i, j, k := strings.Index(live, `<div id="composer" class="composer">`), strings.Index(live, `id="sbadge"`), strings.Index(live, `<div class="agpop" id="agpop" role="dialog" aria-label="Agents" hidden><div id="r-tree" class="region r-tree" data-region="tree"`); i < 0 || j < i || k < j {
-		t.Errorf("the agents tree is not in the popover after the composer's badge")
+	if i, j, k := strings.Index(live, `<div class="agpop" id="agpop" role="dialog" aria-label="Agents" hidden><div id="r-tree" class="region r-tree" data-region="tree"`), strings.Index(live, `<div id="composer" class="composer">`), strings.Index(live, `id="sbadge"`); i < 0 || j < i || k < j {
+		t.Errorf("the agents tree is not in the island above the composer badge")
 	}
 	if strings.Contains(live, `id="splitter"`) || !strings.Contains(live, `<div id="convo" class="convo"><div id="r-entries"`) {
 		t.Errorf("the conversation wrapper does not hold the entries region without a splitter")

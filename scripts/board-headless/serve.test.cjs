@@ -81,7 +81,7 @@ for (const platform of ['win32', 'linux']) test('serve uses ' + platform + ' bin
   assert.deepEqual(seeds.map(e => e.slice(1)), [[expectedBin, 'adapter', 3], [expectedBin, 'board', 3]]);
   const spawn = f.events.find(e => e[0] === 'spawn');
   assert.deepEqual(spawn.slice(1, 3), [expectedBin, ['dashboard', '--port', '0']]);
-  assert.equal(spawn[3].env.WS_MCP_DASHBOARD_DEV_SOURCE, '/repo/agents-plugin-tool');
+  assert.equal(spawn[3].env.WS_MCP_DASHBOARD_DEV_SOURCE, undefined, 'embedded assets are the default');
   assert.deepEqual(Array.from(spawn[3].stdio), ['ignore', 99, 99]);
   const requests = f.events.filter(e => e[0] === 'fetch');
   assert.deepEqual(requests.map(e => e[1].slice(f.base.length)), ['/health', '/auth/cookie', '/nudge', '/nudge', '/s/adapter-rid?frame=1', '/s/board-rid?frame=1']);
@@ -104,6 +104,13 @@ for (const platform of ['win32', 'linux']) test('serve uses ' + platform + ' bin
   assert.ok(f.events.some(e => e[0] === 'kill' && e[1] === 'SIGTERM'));
   assert.ok(f.events.some(e => e[0] === 'clear-interval' && e[1] === 'heartbeat'));
   assert.ok(f.events.some(e => e[0] === 'remove-temp'));
+});
+
+test('serve --dev-assets opts in to live dashboard assets', async () => {
+  const f = fixture(); await f.serve({ 'dev-assets': true });
+  const spawn = f.events.find(e => e[0] === 'spawn');
+  assert.equal(spawn[3].env.WS_MCP_DASHBOARD_DEV_SOURCE, '/repo/agents-plugin-tool');
+  f.handlers.SIGINT(); await Promise.resolve();
 });
 
 test('cookie refusal reports HTTP/body plus only the last 20 daemon log lines and stops before readiness', async () => {
