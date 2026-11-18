@@ -315,8 +315,8 @@
   // session drawer's handle; the store page takes the page's place. On a
   // session page it goes into the body beside the rail, where it takes the
   // hidden grid's column; appended to the wrap instead, it would stack below
-  // the rail's column on a wide screen. The store drawers open at the one
-  // drawer height (drH) and a drag of a store's handle sets it.
+  // the rail's column on a wide screen. Store drawers use the host's maximum
+  // height, including its composer clearance, without storing a height.
   // --- search palette: the rendered rail and this session's board only -----
   function paletteText(el) {
     if (!el) return "";
@@ -562,7 +562,7 @@
     header.classList.add("tk-room");
     if (tkSupport) tkAdapter.ext = supExt();
     tkApi = window.WsTracker.mount(tkAdapter, paletteSearch(paletteFiles({ header: header, qsSlot: slot, pageParent: wrap.querySelector(":scope > .dbody") || wrap, storagePrefix: "ws.tracker.", onRender: tlTracker,
-      drawerHeight: { get: function () { return drH; }, set: drSetH }, searchRows: paletteRows, searchPick: palettePick })));
+      drawerHeight: drMax, drawerBoundary: $("composer"), searchRows: paletteRows, searchPick: palettePick })));
     if (load(DR_SEARCH) === "1" || tkWantSearch) tkApi.openSearch();
     tkWantSearch = false;
   }

@@ -33,175 +33,126 @@ process.stdout.write(bad.join("\n"));
 `)
 }
 
-// TestDrawersShareOneHeight pins the one drawer height (dashboard.js drH,
-// drSetH, the drawer drag; tracker.js drHeight, fitDrawer, the store
-// handle drag): the shared baseline is DR_DEF (320px), with the wide
-// panels sheet's untouched 60vh default covered by frontend-drawer.test.js;
-// dragging the git handle opens the git sheet in the panels' place and
-// sets the one height; a store handle's drag sets the height the panels
-// drawer and every other store open at, through the host's drawerHeight
-// option; without that option the renderer keeps one height for all its
-// stores, not one per store.
-func TestDrawersShareOneHeight(t *testing.T) {
-	vars := dashboardJSBlock(t, "\n  var DR_OPEN = \"ws.dashboard.drawer\"", "\n  var sbody = null, shandle = null;")
-	clamp := dashboardJSBlock(t, "\n  function drClamp(h) {", "\n  // drApply lays the drawer out")
-	drag := dashboardJSBlock(t, "\n    var drDrag = null, drDragged = false;\n    function drDragStart(e) {", "\n    drhandle.addEventListener(\"click\"")
-	tk := trackerJSBlock(t, "\n  var DR_MIN = 160, DR_DEF = 320, DR_SHUT = 80;", "\n  // One handle per store")
-	runTrackerNode(t, "drawer height", `
-var bad = [], stored = {};
+// TestDrawersUseFixedMaximum pins the shared read-only maximum, standalone
+// viewport fallback, resize/display updates and active-handle CSS contract.
+func TestDrawersUseFixedMaximum(t *testing.T) {
+	runTrackerNode(t, "drawer fixed maximum", drawerFixedMaxNode)
+}
+
+// Also runnable without Go: node testdata/drawer-height.test.cjs
+// The standalone runner executes these fixtures without spawning child processes.
+const drawerFixedMaxNode = `
+var fs = require('fs'), vm = require('vm'), bad = [];
+function read(name) { return fs.readFileSync('assets/' + name, 'utf8'); }
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ': got ' + JSON.stringify(got) + ', want ' + JSON.stringify(want)); }
-function setTimeout(fn) { fn(); }
-var window = { innerHeight: 1000 };
-function el(id) {
+function funcs(src, names) {
+  return names.map(function (name) {
+    var re = new RegExp('\\n  function ' + name + '\\([^\\n]*\\{[^\\n]*\\}\\n|\\n  function ' + name + '\\([\\s\\S]*?\\n  \\}\\n');
+    var m = src.match(re);
+    if (!m) throw new Error('missing function ' + name);
+    return m[0];
+  }).join('\n');
+}
+function el() {
   var cls = {};
-  return { id: id, style: { props: {}, setProperty: function (k, v) { this.props[k] = v; }, removeProperty: function (k) { delete this.props[k]; } },
-    classList: { add: function (c) { cls[c] = true; }, remove: function (c) { delete cls[c]; }, toggle: function (c, on) { if (on) cls[c] = true; else delete cls[c]; } },
-    top: 0, getBoundingClientRect: function () { return { top: this.top, bottom: this.top + 34 }; }, setPointerCapture: function () {} };
+  return { hidden: false, offsetHeight: 34, style: { props: {}, setProperty: function (k, v) { this.props[k] = v; } },
+    classList: { toggle: function (k, on) { cls[k] = !!on; }, contains: function (k) { return !!cls[k]; } }, setAttribute: function () {} };
 }
-function press(target, y) { return { target: { closest: function () { return target; } }, clientY: y, button: 0, pointerId: 1 }; }
-
-// The tracker renderer in its own scope: it has its own drClamp and DR_* names.
-function tracker(O, saved) {
-  var ui = { store: 'A', open: null, drh: saved || 0 }, dsaves = [], tkdrawer = el('tkdrawer');
-  function $(id) { return id === 'tkdrawer' ? tkdrawer : null; }
-  function dsSave(k, m) { dsaves.push([k, m]); }
-  function openStore(n) { ui.open = n; ui.store = n; }
-  function collapse() { ui.open = null; }
-  O.header = { getBoundingClientRect: function () { return { bottom: 40 }; } };
-`+tk+`
-  return {
-    ui: ui, dsaves: dsaves,
-    shown: function (store) { ui.store = store; fitDrawer(); return tkdrawer.style.props['--tkh']; },
-    drag: function (store, to) {
-      var h = el('tkh-' + store); h.getAttribute = function () { return store; };
-      drDragStart(press(h, 0)); drDragMove({ clientY: 3 }); drDragMove({ clientY: to }); drDragEnd();
-    }
-  };
+var dash = read('dashboard-drawer.js'), render = read('tracker-render.js'), mount = read('tracker-mount.js');
+var headerBottom = 40, composerTop = 800, composerVisible = true;
+var header = { getBoundingClientRect: function () { return { bottom: headerBottom }; } };
+var composer = { getBoundingClientRect: function () { return { top: composerTop }; } };
+var win = { innerHeight: 1000 }, ctx = {
+  window: win, drheader: header, drhandle: el(), drawer: el(), drsheet: el(), drclip: el(), drbody: el(), gbody: el(), sbody: el(), shandle: el(), gitRegion: el(),
+  drMode: 'panels', drOpen: true, drShown: '', drTop: -500, tkApi: null,
+  $: function (id) { return id === 'composer' ? composer : null; }, visible: function () { return composerVisible; },
+  wsT: function (s) { return s; }, ghSync: function () {}, drTitle: function () {}, drFill: function () {},
+  drFoldShow: function () {}, wtLoad: function () {}, hdLoad: function () {}, notesLoad: function () {}, gitOpened: function () {}
+};
+vm.createContext(ctx);
+vm.runInContext(funcs(dash, ['drHeaderBottom', 'drMax', 'drApply']), ctx);
+var tkdrawer = el(), tk = { window: win, O: { header: header, drawerHeight: ctx.drMax }, ui: { store: 'A', page: null },
+  $: function () { return tkdrawer; } };
+vm.createContext(tk);
+vm.runInContext(funcs(render, ['fitDrawer']), tk);
+function allHeights(label, want) {
+  ['panels', 'git', 'search'].forEach(function (mode) {
+    ctx.drMode = mode; ctx.drApply(false);
+    check(label + ' ' + mode, [ctx.drsheet.style.height, ctx.drclip.style.height], [want + 'px', want + 'px']);
+    check(label + ' active mode', ['panels', 'git', 'search'].filter(function (k) { return ctx.drawer.classList.contains(k); }), [mode]);
+  });
+  ['A', 'B'].forEach(function (store) { tk.ui.store = store; tk.fitDrawer(); check(label + ' store ' + store, tkdrawer.style.props['--tkh'], want + 'px'); });
 }
+check('host reads the header rather than stale drTop', ctx.drMax(), 720);
+allHeights('composer clearance retains 34px + 6px', 720);
+composerTop = 980;
+allHeights('no vh cap', 900);
+composerVisible = false;
+allHeights('hidden composer uses viewport minus header', 960);
+headerBottom = 100;
+check('host maximum follows header before dashboard apply', ctx.drMax(), 900);
+allHeights('header wraps', 900);
+win.innerHeight = 700;
+allHeights('viewport shrinks', 600);
+composerVisible = true; composerTop = 125;
+allHeights('no space never goes negative', 0);
+composerTop = 650;
+allHeights('composer reappears', 510);
+ctx.drOpen = false; ctx.drApply(false);
+check('closed clip remains collapsed', ctx.drclip.style.height, '0px');
+delete tk.O.drawerHeight;
+tk.fitDrawer(); check('standalone full viewport below header', tkdrawer.style.props['--tkh'], '600px');
+headerBottom = 800; tk.fitDrawer(); check('standalone short viewport', tkdrawer.style.props['--tkh'], '0px');
+headerBottom = -10; tk.fitDrawer(); check('standalone negative header bottom', tkdrawer.style.props['--tkh'], '700px');
 
-// The dashboard's drawer: its variables, height, and drag, with the frame stubbed.
-var loadVal = null;
-function load(k) { return k === 'ws.dashboard.drawer.h' ? loadVal : null; }
-function save(k, v) { stored[k] = v; }
-`+vars+`
-check('never-set dashboard height', drH, 320);
-`+clamp+`
-function drMax() { return 600; }
-var drawer = el('drawer'), drsheet = el('drsheet'), drclip = el('drclip'), drhandle = el('drhandle'), gitRegion = el('r-git');
-var ghandleEl = el('ghandle'), shandle = el('shandle'), applied = [], announced = 0, closed = 0;
-function drMeasure() { drTop = 40; }
-function drAnnounce() { announced++; }
-function drApply() { applied.push(drMode + ':' + drOpen + ':' + drH); }
-function drSetOpen(open) { if (!open) { drOpen = false; closed++; } }
-function drDot() {}
-function drFoldShow() {}
-var doc = { addEventListener: function () {} };
-`+drag+`
+// Exercise the actual mount observer without a browser or a window resize.
+var start = mount.indexOf('    if (window.ResizeObserver) {'), end = mount.indexOf("    window.addEventListener('scroll', wkFramePlace", start);
+if (start < 0 || end < 0) throw new Error('missing tracker boundary observer');
+var frames = [], watched = [], delivery, measures = 0, placements = 0;
+tk.window.ResizeObserver = true;
+tk.O.drawerHeight = ctx.drMax; tk.O.drawerBoundary = composer;
+tk.ResizeObserver = function (fn) { delivery = fn; this.observe = function (n) { watched.push(n); }; };
+tk.requestAnimationFrame = function (fn) { frames.push(fn); return frames.length; };
+tk.measure = function () { measures++; };
+tk.wkFramePlace = function () { placements++; };
+vm.runInContext(mount.slice(start, end), tk);
+check('header and composer observed', [watched[0] === header, watched[1] === composer], [true, true]);
+headerBottom = 40; composerTop = 650;
+delivery(); delivery(); check('observer coalesces callbacks outside delivery', [frames.length, measures], [1, 0]);
+frames[0](); check('observer refits after header change', [tkdrawer.style.props['--tkh'], measures, placements], ['570px', 1, 1]);
+composerVisible = false; delivery(); frames[1]();
+check('observer refits after display none', tkdrawer.style.props['--tkh'], '660px');
+composerVisible = true; composerTop = 600; delivery(); frames[2]();
+check('observer refits after composer resize/show', tkdrawer.style.props['--tkh'], '520px');
+tk.ui.page = 'A'; composerTop = 500; delivery(); frames[3]();
+check('store page does not refit hidden drawer', tkdrawer.style.props['--tkh'], '520px');
 
-// Search shares the frame, height key and drag mechanics with panels/git.
-drOpen = false;
-drDragStart(press(shandle, 0)); drDragMove({ clientY: 360 }); drEnd();
-check('search drag opens its own sheet', [drMode, drOpen, drWant], ['search', true, false]);
-check('search uses the shared height', [drH, stored['ws.dashboard.drawer.h']], [320, '320']);
-check('search open is persisted independently', stored['ws.dashboard.drawer.search'], '1');
-check('search handle rides the sheet', shandle.style.top, '360px');
-applied = [];
-
-// A never-set height is DR_DEF in every store, host option or not.
-var host = tracker({ drawerHeight: { get: function () { return 0; }, set: function () { bad.push('set on a show'); } } });
-check('never-set store A (host)', host.shown('A'), '320px');
-check('never-set store B (host)', host.shown('B'), '320px');
-var own = tracker({});
-check('never-set store (no host)', own.shown('A'), '320px');
-
-// The git handle drags: past the threshold it opens the git sheet in the
-// panels' place, rides its region, and the release sets the one height.
-drOpen = true; drMode = 'panels'; drWant = true;
-drDragStart(press(ghandleEl, 10));
-drDragMove({ clientY: 12 });
-check('a move under the threshold is no drag', applied.length, 0);
-drDragMove({ clientY: 300 });
-check('git drag brings the git sheet', drMode, 'git');
-check('git drag moves the git region', gitRegion.style.top, '290px');
-check('git drag leaves the panels handle', drhandle.style.top, undefined);
-drEnd();
-check('git drag sets the height', [drH, stored['ws.dashboard.drawer.h']], [250, '250']);
-check('git drag leaves the git sheet open', [drMode, drOpen, drWant, stored['ws.dashboard.drawer']], ['git', true, false, null]);
-check('a drag is no click', drDragged, false);
-
-// A press on the git handle that never moves stays a click.
-applied = [];
-drDragStart(press(ghandleEl, 10)); drEnd();
-check('a press stays a click', [applied.length, drH], [0, 250]);
-
-// A flick whose release lands elsewhere: the next move carries no primary
-// button, which ends the drag with the sheet back as it stood, its height
-// unset; later buttonless moves drag nothing.
-applied = [];
-drDragStart(press(ghandleEl, 10));
-drDragMove({ clientY: 300, buttons: 1 });
-gitRegion.style.top = 'dragged';
-drDragMove({ clientY: 320, buttons: 0 });
-check('a buttonless move ends the drag', [drDrag, applied, drH, stored['ws.dashboard.drawer.h']], [null, ['git:true:250'], 250, '250']);
-drDragMove({ clientY: 500, buttons: 0 });
-check('a later buttonless move drags nothing', [gitRegion.style.top, applied.length], ['dragged', 1]);
-drDragStart(press(ghandleEl, 10));
-drDragMove({ clientY: 10, buttons: 0 });
-check('an unmoved buttonless press ends quietly', [drDrag, applied.length], [null, 1]);
-
-// The panels handle over the open git sheet brings the panels; a release
-// short of DR_SHUT closes.
-drDragStart(press(drhandle, 0));
-drDragMove({ clientY: 100 });
-check('panels drag brings the panels', drMode, 'panels');
-drDragMove({ clientY: 50 });
-drEnd();
-check('a short release closes', [closed, drH], [1, 250]);
-
-// A store handle's drag sets the host's one height: the panels drawer and
-// every other store open at it.
-host = tracker({ drawerHeight: { get: function () { return drH; }, set: drSetH } });
-check('store B opens at the dashboard height', host.shown('B'), '250px');
-host.drag('A', 440);
-check('store drag sets the dashboard height', [drH, stored['ws.dashboard.drawer.h']], [400, '400']);
-check('store drag keeps no own height', host.dsaves, []);
-check('store B opens at the dragged height', host.shown('B'), '400px');
-drOpen = false; drMode = 'panels'; applied = [];
-drDragStart(press(drhandle, 0)); drDragMove({ clientY: 3 }); drDragMove({ clientY: 440 }); drEnd();
-check('panels drag after a store drag', drH, 400);
-
-// Without the host option the renderer keeps one height for all stores.
-own = tracker({});
-own.drag('A', 340);
-check('own height stored once', own.dsaves, [['drawer.height', { h: 300 }]]);
-check('own height in store B', own.shown('B'), '300px');
-check('a saved own height', tracker({}, 280).shown('C'), '280px');
-
-// The dashboard reads its stored height at load.
-loadVal = '275';
-(function () {
-`+vars+`
-check('stored dashboard height', drH, 275);
-})();
-
-process.stdout.write(bad.join("\n"));
-`)
+function cssContract(src, selector, label) {
+  var rules = src.replace(/\/\*[\s\S]*?\*\//g, '').match(/[^{}]+\{[^{}]*\}/g) || [];
+  var rule = rules.filter(function (r) { return r.slice(0, r.indexOf('{')).split(',').some(function (s) { return s.trim() === selector; }); })[0] || '';
+  check(label + ' hidden but measurable', /visibility:\s*hidden/.test(rule) && /pointer-events:\s*none/.test(rule) && !/display:\s*none/.test(rule), true);
 }
+var css = read('tracker.css'), dashboardCSS = read('dashboard-drawer.css');
+cssContract(css, '.tk .tk-handle.open', 'active tracker opener');
+['.drawer.open.panels #drhandle', '.drawer.open.git #r-git', '.drawer.open.search #shandle'].forEach(function (s) { cssContract(dashboardCSS, s, s); });
+check('tracker clip uses maximum directly', /\.tk\.tk-drawer\.open \.tk-dr-clip\s*\{\s*height:\s*var\(--tkh\)/.test(css), true);
+check('tracker has no drawer drag CSS', /--tkext|\.tk-drawer\.drag/.test(css), false);
+check('tracker no longer loads or writes a height or wires handle drags', /drawer\.height|ui\.drh|drDrag|drSetHeight|drClamp/.test(render + mount + read('tracker.js')), false);
+check('dashboard no longer persists or drags a height', /\bdrH\b|\bDR_H\b|drClamp|drHeight|drDragged|drDrag|drSetH/.test(dash), false);
+var adapter = read('dashboard-tracker.js');
+check('dashboard passes read-only maximum and composer boundary', /drawerHeight:\s*drMax,\s*drawerBoundary:\s*\$\("composer"\)/.test(adapter), true);
+process.stdout.write(bad.join('\n'));
+if (bad.length) process.exitCode = 1;
+`
 
-// TestDrawerFoldButtons pins the fold button in a riding handle's slot
-// (dashboard.js drFoldShow, drFold, the drawer drag; tracker.js the store
-// handles' slots, foldStore): it shows only while its drawer is open, in
-// the panels or the git handle's slot by the sheet shown (from a drag's
-// first move too, gone after a release short of DR_SHUT); a click on it
-// closes the drawer as a click on the handle does, the click animation
-// with it, and hands keyboard focus to that handle. A tracker store's
-// fold button sits in its handle's slot, shows only while that store's
-// drawer is open, never on the store page, and closes the drawer.
+// TestDrawerFoldButtons pins the fold button in the hidden active handle's
+// slot. It shows only for the open sheet, closes with the click animation,
+// and restores keyboard focus to its opener. Tracker fold buttons never
+// show on the store page, and closing preserves the handle's signals.
 func TestDrawerFoldButtons(t *testing.T) {
 	fold := dashboardJSBlock(t, "\n  function drFoldShow(mode) {", "\n  function drTitle() {")
 	apply := dashboardJSBlock(t, "\n  function drApply(anim) {", "\n  // ghSync marks")
 	setOpen := dashboardJSBlock(t, "\n  function drSetOpen(open, mode) {", "\n  if (drawer) {")
-	drag := dashboardJSBlock(t, "\n    var drDrag = null, drDragged = false;\n    function drDragStart(e) {", "\n    drhandle.addEventListener(\"click\"")
 	handles := trackerJSBlock(t, "\n  var handleSig = null;", "\n  // The item window makes")
 	toggle := trackerJSBlock(t, "\n  function collapse() {", "\n  // openItemWindow(storeId")
 	runTrackerNode(t, "drawer fold buttons", `
@@ -211,37 +162,33 @@ function setTimeout(fn) { fn(); }
 var window = { innerHeight: 1000 };
 function el(id) {
   var cls = {};
-  return { id: id, hidden: false, attrs: {}, style: { setProperty: function () {} },
+  return { id: id, hidden: false, attrs: {}, style: { props: {}, setProperty: function (k, v) { this.props[k] = v; } },
     classList: { add: function (c) { cls[c] = true; }, remove: function (c) { delete cls[c]; }, toggle: function (c, on) { if (on) cls[c] = true; else delete cls[c]; }, contains: function (c) { return !!cls[c]; } },
-    setAttribute: function (k, v) { this.attrs[k] = v; }, getBoundingClientRect: function () { return { top: 0 }; }, setPointerCapture: function () {},
+    setAttribute: function (k, v) { this.attrs[k] = v; },
     contains: function () { return false; }, focus: function () { doc.activeElement = this; } };
 }
-function press(target, y) { return { target: { closest: function () { return target; } }, clientY: y, button: 0, pointerId: 1 }; }
-
 // The dashboard's drawer, the frame stubbed.
 var doc = { activeElement: null, addEventListener: function () {} };
 var drawer = el('drawer'), drbody = el('drbody'), gbody = el('gbody'), sbody = el('sbody'), shandle = el('shandle'), drsheet = el('drsheet'), drclip = el('drclip');
 var drhandle = el('drhandle'), gitRegion = el('r-git'), ghandleEl = el('ghandle'), drfold = el('drfold');
 var drheader = {getBoundingClientRect:function(){return {bottom:40};}};
-var drOpen = false, drMode = 'panels', drWant = false, drH = 320, drTop = 40, drShown = '', drHas = true, drSwap = false, DR_MIN = 160, DR_SHUT = 80, DR_OPEN = 'k', DR_SEARCH = 'search', tkApi = null;
+var drOpen = false, drMode = 'panels', drWant = false, drTop = 40, drShown = '', drHas = true, drSwap = false, DR_OPEN = 'k', DR_SEARCH = 'search', tkApi = null;
 function ghandle() { return ghandleEl; }
 function drMeasure() {}
 function drMax() { return 600; }
-function drClamp(h) { return h; }
-function drHeight() { return drH; }
-function drSetH(h) { drH = h; }
 function ghSync() {} function drTitle() {} function drFill() {} function wtLoad() {} function hdLoad() {} function notesLoad() {} function gitOpened() {} function drDot() {} function drAnnounce() {}
 var stored = {};
 function save(k, v) { stored[k] = v; }
 function wsT(k) { return k; }
-`+dashboardFuncs(t, "drHeaderBottom")+fold+apply+setOpen+drag+`
+`+dashboardFuncs(t, "drHeaderBottom")+fold+apply+setOpen+`
 function shown() { return drfold.hidden ? '' : drfold.classList.contains('git') ? 'git' : drfold.classList.contains('search') ? 'search' : 'panels'; }
 
 drApply(false);
 check('a closed drawer has no fold button', shown(), '');
 drSetOpen(true, 'panels');
 check('the panels sheet: the fold button in the panels slot', shown(), 'panels');
-check('the handle clears the measured header', drhandle.style.top, '360px');
+check('the panels sheet fills the maximum below the header', [drsheet.style.height, drclip.style.height, drawer.style.props['--drtop']], ['600px', '600px', '40px']);
+check('panels keeps its open state', [stored[DR_OPEN], stored[DR_SEARCH]], ['1', null]);
 drSetOpen(true, 'git');
 check('the git sheet: the fold button in the git slot', shown(), 'git');
 
@@ -267,25 +214,6 @@ check('focus goes to the panels handle', doc.activeElement && doc.activeElement.
 drFold();
 check('a fold click on a closed drawer does nothing', drOpen, false);
 
-// A drag: the first move shows the fold button in the dragged handle's
-// slot; a release short of DR_SHUT closes and hides it.
-drDragStart(press(drhandle, 0));
-drDragMove({ clientY: 300 });
-check('a drag-open shows the fold button', shown(), 'panels');
-drDragMove({ clientY: 60 });
-drEnd();
-check('a short release hides it', [drOpen, shown()], [false, '']);
-drDragStart(press(ghandleEl, 0));
-drDragMove({ clientY: 300 });
-drEnd();
-check('a git drag-open keeps it in the git slot', [drOpen, drMode, shown()], [true, 'git', 'git']);
-
-drDragStart(press(shandle, 0));
-drDragMove({ clientY: 360 });
-check('search drag shows its fold slot immediately', shown(), 'search');
-drEnd();
-check('search drag persists shared height and open state', [drH, drMode, drOpen, stored[DR_SEARCH]], [320, 'search', true, '1']);
-
 // The tracker's store handles: each in a slot with its fold button.
 (function () {
   var nodes = {}, ui = { store: 'A', open: null, page: null }, calls = [];
@@ -301,10 +229,11 @@ check('search drag persists shared height and open state', [drH, drMode, drOpen,
   function esc(s) { return String(s); }
   function attr(k, v) { return ' data-' + k + '="' + esc(v) + '"'; }
   function wsT(k) { return k; }
-  function newKeys() { return []; }
+  function newKeys() { return ['unread']; }
   function storeTitle(st) { return st.name; }
   function syncNow(n) { calls.push('sync ' + n); }
   function bringUp() {}
+  function keepItemDraft() {}
   function render() { renderHandles(); }
   var order = [], vss = {}, AD = { stores: function () { return ['A', 'B']; }, error: function () { return ''; } };
 `+handles+toggle+`
@@ -316,6 +245,7 @@ check('search drag persists shared height and open state', [drH, drMode, drOpen,
   check('closed stores: no fold button', [$('tkf-A').hidden, $('tkf-B').hidden], [true, true]);
   openStore('A');
   check('store A open: its fold button only', [$('tkf-A').hidden, $('tkf-B').hidden], [false, true]);
+  check('only the active store handle gets the hidden-open CSS class', [$('tkh-A').className, $('tkh-B').className], ['tk-handle on open', 'tk-handle']);
   ui.page = 'A'; renderHandles();
   check('the store page: no fold button', $('tkf-A').hidden, true);
   ui.page = null; renderHandles();
@@ -325,6 +255,9 @@ check('search drag persists shared height and open state', [drH, drMode, drOpen,
   foldStore('A');
   check('the fold closes the drawer through the collapse', [ui.open, $('tkf-A').hidden, calls.indexOf('sync A') >= 0], [null, true, true]);
   check('focus goes to the store handle', document.activeElement.id, 'tkh-A');
+  check('closed handle keeps selection, unread badge and expansion meaning', [$('tkh-A').className, $('tkh-A').attrs['aria-expanded'], $('tkh-A').querySelector('.tk-badge').hidden, $('tkh-A').querySelector('.tk-badge').textContent], ['tk-handle on', 'false', false, 1]);
+  openStore('B');
+  check('another store opens without hiding the selected closed opener', [$('tkh-A').className, $('tkh-B').className], ['tk-handle', 'tk-handle on open']);
 })();
 
 process.stdout.write(bad.join("\n"));

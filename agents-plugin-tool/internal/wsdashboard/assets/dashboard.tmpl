@@ -140,9 +140,10 @@ Layout/input preferences also remain available before a session is selected. */}
 The panels region keeps arriving whole; the page script registers an entry per
 panel it shows, and the sheet shows every present panel at once as a card. The
 handle hangs from the top edge at the header's right end (the header pads its
-right side clear of it), holds one icon per present panel, and rides the
-sheet's bottom edge while open. The git handle (the git region) hangs left of
-it and opens the same frame on the git drawer's sheet (gitbody) instead. */}}
+right side clear of it), holds one icon per present panel, and hides while
+open, replaced by the top fold button. The sheet fills down to above the
+composer. The git handle (the git region) hangs left of it and opens the
+same frame on the git drawer's sheet (gitbody) instead. */}}
 {{define "drawer"}}<div class="drawer" id="drawer"><div class="dr-in"><div class="dr-clip" id="drclip"><div class="dr-sheet" id="drsheet" role="region" aria-label="{{t "drawer.panels"}}"><div class="dr-body" id="drbody">{{region . "panels"}}{{template "drcards" .}}</div>{{if .Git}}{{template "gitbody"}}{{end}}</div></div><button type="button" class="dr-handle" id="drhandle" aria-controls="drsheet" aria-expanded="false" title="{{t "js.drawer.open"}}" hidden><span class="dr-wait" title="{{t "js.drawer.waiting"}}">{{icon "lock"}}</span>{{icon "menu"}}<span class="tdot"></span></button>{{region . "git"}}</div></div>{{end}}
 
 {{/* The git drawer's sheet (gitdrawer.go, gitlog.go, gitpush.go): the

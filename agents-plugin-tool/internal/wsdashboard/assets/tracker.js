@@ -175,13 +175,13 @@
 //   pageParent       where the store page node goes; while a store page shows, the
 //                    body carries the class tk-paged and the host's CSS hides its
 //                    own conversation column and session drawer
-//   storagePrefix    browser-storage key prefix for display state (view modes, drawer
-//                    height, recently-closed fold, tree folds); default "ws.tracker."
-//   drawerHeight     {get() -> px, set(px)}: the host's own drawer height, so every
-//                    store drawer opens at the height the host's drawers do and a
-//                    store handle's drag sets it for all (get answering 0 or less
-//                    means the default, 320px); without it the renderer keeps one
-//                    height for all its stores under storagePrefix
+//   storagePrefix    browser-storage key prefix for display state (view modes,
+//                    recently-closed fold, tree folds); default "ws.tracker."
+//   drawerHeight()   optional read-only maximum height in px, including the host's
+//                    composer clearance; without it drawers fill the viewport
+//                    below the header. Heights are never persisted.
+//   drawerBoundary   optional host geometry element (e.g. the composer) observed
+//                    alongside header to refit drawers on resize or display changes
 //   onRender(u)      called after every render with the rendered store's unread
 //                    notifications, u = api.unread()
 //
@@ -309,7 +309,6 @@
     item: null, win: false, last: null, replyTo: null,
     winReturn: null,      // selector of the element that opened the item window; focus returns there on close
     aopen: null,          // id of the item whose assignee fold is expanded; the fold resets when another item opens
-    drh: 0,               // the one drawer height in px of every store, set by dragging a handle (display state, stored; 0: DR_DEF); unused with opts.drawerHeight
     tab: {},              // store -> { side: tab key of the tab pane, narrow: tab key of the narrow layout }
     tabSeen: {},          // "store|stream" -> { tab key -> signature last shown }: a hidden tab whose signature moved shows a dot
     layout: null,         // 'a' | 'd' | 'narrow', from the window width
