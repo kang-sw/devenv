@@ -1698,14 +1698,14 @@ them against its own cwd.
 The daemon answers one line, `{"ok": true, "version": "<daemon version>",
 "pid": <daemon pid>}` or `{"ok": false, "reason": "..."}` (a protocol other
 than 1, an unknown mode, an empty `cwd`, a missing `env` or `owner_pid`, a
-version outside the daemon's minor, an MCP hello without `WS_RSRC_ROOT`, or
-a malformed CLI hello), closing the connection after a refusal. After `ok` the stream is the MCP session in `mcp` mode: the daemon
+version outside the daemon's minor, or a malformed CLI hello), closing the connection after a refusal. After `ok` the stream is the MCP session in `mcp` mode: the daemon
 builds one `mcp.Server` from the hello (`NewServerWithOptions`: the hello's
 environment is the server's whole environment and that of every subprocess
 its tools start, `owner_pid` is its PID for mailbox presence and listening
-markers, the debug event ring and `WS_MCP_DEBUG_LOG` are its own, resource
-and skills roots come from `WS_RSRC_ROOT`/`WS_SKILLS_ROOT` in the hello with
-no executable-relative fallback, and startup diagnostics such as a rejected
+markers, the debug event ring and `WS_MCP_DEBUG_LOG` are its own, while
+resource and workflow-skill/template reads select the daemon's embedded package
+by `WS_MCP_NAMESPACE` (`wsflow`, otherwise `ws`). Hello resource paths and
+hello `WS_RSRC_DEV_CHECKOUT` do not redirect those reads. Startup diagnostics such as a rejected
 config manifest go to the daemon log and the connection's debug events). The
 harness is detected from `initialize` as on stdio; the hello's `harness` is
 an optional hint. Closing the connection ends the session: its dashboard
@@ -1808,6 +1808,7 @@ Current launcher inputs:
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
 | `WS_MCP_LAUNCHER_DIRECT` | Obsolete; ignored. It never enables executable fallback. |
 | `WS_MCP_PROJECT_ROOT` | Project root default for root-aware tools and CLI commands when no higher-priority root exists. |
+| `WS_RSRC_DEV_CHECKOUT` | Explicit daemon-process-only repository checkout for package inputs (rsrc, workflow skills/templates, manifests and native Pi). Uses the package's canonical directory, logs the override, and permits live playbook edits. Never honored from a connection hello. Production embeds always win over `WS_RSRC_ROOT`. |
 | `WS_MCP_DASHBOARD_DEV_SOURCE` | Read by `ws-mcp dashboard`: the `agents-plugin-tool` source root the daemon serves dashboard and whiteboard page assets from instead of the embedded copies (see Dashboard daemon, Dev assets). Unset is off. |
 | `WS_MCP_DASHBOARD_PPROF` | Read by `ws-mcp dashboard`: `1`/`true`/`yes`/`on` serves `net/http/pprof` under `/debug/pprof/` to loopback viewers only, never to a LAN-token request (see Dashboard daemon, Profiling). Unset is off: the routes do not exist. |
 | `WS_MCP_HOLDER_PYTHON` | Read by `ws-mcp dashboard`: the Python interpreter that runs session holders (see Dashboard daemon, Session holders). The launcher sets it to its own interpreter on the daemon-start step unless it is already set; unset, the daemon uses `python3` on PATH. |
@@ -1820,7 +1821,7 @@ Current launcher inputs:
 | `WS_MCP_ALLOWED_TOOLS` | Comma list of ws tool names; when set, `tools/list` advertises and `tools/call` accepts only these. The agent runner sets it to a profile's ws tools. `tracker.show`, `tracker.ui`, and `git.search` are listed and callable only when it names them. |
 | `WS_MCP_PI_TOKEN` | Set by the agent runner on the ws-mcp of a spawned conversation that may spawn Pi subagents: its capability token for the daemon's `POST /agents/by-token/<op>` route, drawn at each process start and void when that process ends. With `WS_MCP_PI_ENDPOINT` and no runner of its own, this ws-mcp forwards `agent.*` and legacy `pi.*` to that route (see Dashboard daemon, the Pi spawn tree). Unset, `pi.*` is lead-only. |
 | `WS_MCP_PI_ENDPOINT` | Set beside `WS_MCP_PI_TOKEN`: the dashboard daemon's loopback base URL, for example `http://127.0.0.1:29417`. |
-| `WS_MCP_NAMESPACE` | User-facing MCP namespace text override; empty or unset defaults to `ws`. |
+| `WS_MCP_NAMESPACE` | MCP namespace and embedded package identity: `wsflow` selects wsflow assets; empty/unset or a custom display namespace selects ws. |
 | `WS_MCP_SETUP_TOOL` | Advertised setup tool name override; empty or unset defaults to `ws.setup`. |
 | `WS_MCP_CONFIG_MANIFESTS` | Adapter config key manifests, separated by the platform path-list separator (`:` POSIX, `;` Windows); `;` is accepted on every platform, which the static launcher configs use. Declared keys become `config.tune`-writable, cataloged by `config.list`, and typed in `config.get`; a rejected manifest is logged to stderr and listed by `config.list`. The ws and wsflow packages each ship their own `config-manifest.json` (namespace `claude.`; the same keys, differing only in `default`, pinned by `TestShippedClaudeManifestsDifferOnlyInDefaults`) and set it in both launch configs: `.mcp.json` (Codex) as `./config-manifest.json`, resolved against `cwd: "."` (the plugin root), and `.claude-plugin/plugin.json` as `${CLAUDE_PLUGIN_ROOT}/config-manifest.json`. Each package (ws, wsflow, Pi) also lists its `dashboard-config-manifest.json` (namespace `dashboard.`: `dashboard.enabled`, default on in every package; `dashboard.port`, default 29417; `dashboard.lan_enabled`, global-only and default off in every package; `dashboard.pi_spawn_enabled`, which gates legacy `pi.*` calls, default on in ws and off in wsflow and Pi) beside its own manifest; the Pi bridge joins the two with the platform separator. A path that does not resolve fails nothing: the keys stay undeclared, so check `config.list` after changing either. |
 | `WS_MCP_CLI_NAME` | Declared `ws-cli` / `wsflow-cli` shim or Python launcher command used in printed mailbox wait and re-arm guidance when it matches the supported safe form. The launcher sets it unless already set; an absent or unrecognized value uses an illustrative Python launcher path, never the runtime binary. |
@@ -1896,6 +1897,19 @@ SHA256SUMS
 The launcher verifies the matching checksum line before installation or daemon start. Offline or
 proxy failures should keep stdout clean and report the URL or runtime directory
 that needs manual repair.
+
+Every supported build entry generates the gitignored embedded package set
+before Go compilation. For a direct source build/test, run
+`python3 scripts/generate-package-assets.py` from `agents-plugin-tool` first;
+`--check` verifies drift. Bare `go build` compiles with a placeholder but cannot
+serve playbooks without generation or the explicit dev checkout. Text-only
+production edits require a rebuilt daemon; the rsrc schema version tracks
+shape, not content. Skills still ship in the external plugin for harness discovery.
+
+Desktop assembly consumes an already-built binary and checks its embedded
+inventory against canonical inputs; generating assets after compilation cannot
+repair that binary. It still stages the complete external package in Phase 1
+for desktop validation, launcher/config and hosted Pi readers.
 
 The local build script is:
 

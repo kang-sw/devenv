@@ -2,7 +2,9 @@ package wsrsrc
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -60,8 +62,15 @@ func ResolveSkillsRoot() (string, error) {
 // manifest integrity and applies no override-marker pass — skills are not
 // hash-checked the way rsrc playbooks are.
 func LoadSkillBody(root, name string) (string, error) {
-	path := filepath.Join(root, name, "SKILL.md")
-	data, err := os.ReadFile(path)
+	return LoadSkillBodyFS(os.DirFS(root), name)
+}
+
+// LoadSkillBodyFS reads a skill from a skills-root filesystem.
+func LoadSkillBodyFS(root fs.FS, name string) (string, error) {
+	if !isBareStem(name) {
+		return "", fmt.Errorf("invalid skill name %q", name)
+	}
+	data, err := fs.ReadFile(root, path.Join(name, "SKILL.md"))
 	if err != nil {
 		return "", fmt.Errorf("read skill %s: %w", name, err)
 	}
@@ -109,6 +118,12 @@ func IsProfileName(name string) bool {
 //     ErrUnprovidedVar is returned. Declared variables not appearing in the body
 //     are silently ignored when absent from vars.
 func Load(root, name, harness, profile string, vars map[string]string) (LoadedPlaybook, error) {
+	return LoadFS(os.DirFS(root), name, harness, profile, vars)
+}
+
+// LoadFS loads and verifies a playbook from a resource filesystem. Load is the
+// on-disk authoring/inspection adapter; daemon callers use LoadFS.
+func LoadFS(root fs.FS, name, harness, profile string, vars map[string]string) (LoadedPlaybook, error) {
 	if !isBareStem(name) {
 		return LoadedPlaybook{}, fmt.Errorf("invalid playbook name %q: must be a bare stem", name)
 	}
@@ -116,8 +131,8 @@ func Load(root, name, harness, profile string, vars map[string]string) (LoadedPl
 		return LoadedPlaybook{}, fmt.Errorf("invalid playbook profile %q: must be one of %s", profile, strings.Join(ProfileNames, ", "))
 	}
 
-	// Read and validate manifest (schema-version checked inside ReadManifest).
-	manifest, err := ReadManifest(root)
+	// Read and validate manifest (schema-version checked inside ReadManifestFS).
+	manifest, err := ReadManifestFS(root)
 	if err != nil {
 		return LoadedPlaybook{}, err
 	}
@@ -177,14 +192,19 @@ func Load(root, name, harness, profile string, vars map[string]string) (LoadedPl
 // a part holds no {{.Name}} placeholder. A part is not loadable through Load:
 // neither <root>/<part>/<part>.md nor a flat <root>/<part>.md names it.
 func LoadPart(root, playbook, part string) (string, error) {
+	return LoadPartFS(os.DirFS(root), playbook, part)
+}
+
+// LoadPartFS reads and verifies a playbook-local part from a resource FS.
+func LoadPartFS(root fs.FS, playbook, part string) (string, error) {
 	if !isBareStem(playbook) || !isBareStem(part) {
 		return "", fmt.Errorf("invalid part %q of playbook %q: both must be bare stems", part, playbook)
 	}
-	manifest, err := ReadManifest(root)
+	manifest, err := ReadManifestFS(root)
 	if err != nil {
 		return "", err
 	}
-	data, err := loadAndVerify(root, filepath.Join(root, playbook, part+".md"), manifest)
+	data, err := loadAndVerify(root, path.Join(playbook, part+".md"), manifest)
 	if err != nil {
 		return "", err
 	}
@@ -204,15 +224,15 @@ const (
 // resolvePlaybookPath returns the playbook file to load and which variant it
 // is: the profile variant, else the harness overlay, else the base file (see
 // Load).
-func resolvePlaybookPath(root, name, harness, profile string) (string, fileVariant, error) {
-	dir := filepath.Join(root, name)
+func resolvePlaybookPath(root fs.FS, name, harness, profile string) (string, fileVariant, error) {
+	dir := name
 	if harness != "" && !isBareStem(harness) {
 		return "", variantBase, fmt.Errorf("invalid harness %q: must be a bare stem", harness)
 	}
-	if path, variant, ok := variantPath(dir, name, harness, profile); ok {
+	if path, variant, ok := variantPath(root, dir, name, harness, profile); ok {
 		return path, variant, nil
 	}
-	basePath := filepath.Join(dir, name+".md")
+	basePath := path.Join(dir, name+".md")
 	// Flat-playbook fallback: when no subdir playbook exists at
 	// <root>/<name>/<name>.md, fall back to a flat root-level file at
 	// <root>/<name>.md. This lets a var-free flat dep (e.g. code-reviewer,
@@ -221,9 +241,9 @@ func resolvePlaybookPath(root, name, harness, profile string) (string, fileVaria
 	// "code-reviewer" stem resolves through here. Subdir playbooks always win
 	// (checked first) so existing resolution is unchanged; the fallback only
 	// fires when the subdir base file is absent.
-	if _, err := os.Stat(basePath); err != nil {
-		flatPath := filepath.Join(root, name+".md")
-		if _, flatErr := os.Stat(flatPath); flatErr == nil {
+	if _, err := fs.Stat(root, basePath); err != nil {
+		flatPath := name + ".md"
+		if _, flatErr := fs.Stat(root, flatPath); flatErr == nil {
 			return flatPath, variantBase, nil
 		}
 	}
@@ -232,7 +252,7 @@ func resolvePlaybookPath(root, name, harness, profile string) (string, fileVaria
 
 // variantPath returns dir/<stem>.<profile>.md, else dir/<stem>.<harness>.md,
 // whichever exists first; ok is false when neither is set or exists.
-func variantPath(dir, stem, harness, profile string) (string, fileVariant, bool) {
+func variantPath(root fs.FS, dir, stem, harness, profile string) (string, fileVariant, bool) {
 	for _, candidate := range []struct {
 		suffix  string
 		variant fileVariant
@@ -240,24 +260,19 @@ func variantPath(dir, stem, harness, profile string) (string, fileVariant, bool)
 		if candidate.suffix == "" {
 			continue
 		}
-		path := filepath.Join(dir, stem+"."+candidate.suffix+".md")
-		if _, err := os.Stat(path); err == nil {
-			return path, candidate.variant, true
+		candidatePath := path.Join(dir, stem+"."+candidate.suffix+".md")
+		if _, err := fs.Stat(root, candidatePath); err == nil {
+			return candidatePath, candidate.variant, true
 		}
 	}
 	return "", variantBase, false
 }
 
-func checkPlaybookExists(root, name, filePath string, manifest Manifest) error {
-	relPath, err := filepath.Rel(root, filePath)
-	if err != nil {
-		return fmt.Errorf("resolve relpath for %q: %w", filePath, err)
-	}
-	relPath = filepath.ToSlash(relPath)
+func checkPlaybookExists(root fs.FS, name, relPath string, manifest Manifest) error {
 	if _, ok := manifest.Files[relPath]; ok {
 		return nil
 	}
-	if _, err := os.Stat(filePath); err == nil {
+	if _, err := fs.Stat(root, relPath); err == nil {
 		return nil
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("stat %q: %w", relPath, err)
@@ -268,19 +283,14 @@ func checkPlaybookExists(root, name, filePath string, manifest Manifest) error {
 // loadAndVerify reads filePath, computes its hash, and verifies it matches the
 // manifest entry. Returns ErrHashMismatch on mismatch, ErrFileMissing if the
 // file is not listed in the manifest.
-func loadAndVerify(root, filePath string, manifest Manifest) ([]byte, error) {
-	relPath, err := filepath.Rel(root, filePath)
-	if err != nil {
-		return nil, fmt.Errorf("resolve relpath for %q: %w", filePath, err)
-	}
-	relPath = filepath.ToSlash(relPath)
+func loadAndVerify(root fs.FS, relPath string, manifest Manifest) ([]byte, error) {
 
 	expectedHash, ok := manifest.Files[relPath]
 	if !ok {
 		return nil, ErrFileMissing{RelPath: relPath}
 	}
 
-	data, err := os.ReadFile(filePath)
+	data, err := fs.ReadFile(root, relPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, ErrFileMissing{RelPath: relPath}
@@ -343,7 +353,7 @@ func metaFromFrontmatter(fm map[string]any) PlaybookMeta {
 //   - <root>/<include>.md
 //
 // Includes are NOT recursively resolved. This avoids include cycles by design.
-func resolveIncludes(root, playbookName, harness, profile string, names []string, manifest Manifest) (string, error) {
+func resolveIncludes(root fs.FS, playbookName, harness, profile string, names []string, manifest Manifest) (string, error) {
 	if len(names) == 0 {
 		return "", nil
 	}
@@ -365,19 +375,18 @@ func resolveIncludes(root, playbookName, harness, profile string, names []string
 	return strings.Join(parts, "\n\n"), nil
 }
 
-func resolveIncludePath(root, playbookName, includeName, harness, profile string) (string, string) {
-	if path, _, ok := variantPath(filepath.Join(root, playbookName), includeName, harness, profile); ok {
-		return path, filepath.ToSlash(filepath.Join(playbookName, filepath.Base(path)))
+func resolveIncludePath(root fs.FS, playbookName, includeName, harness, profile string) (string, string) {
+	if file, _, ok := variantPath(root, playbookName, includeName, harness, profile); ok {
+		return file, file
 	}
 
-	localRel := filepath.ToSlash(filepath.Join(playbookName, includeName+".md"))
-	localPath := filepath.Join(root, filepath.FromSlash(localRel))
-	if _, err := os.Stat(localPath); err == nil {
-		return localPath, localRel
+	localRel := path.Join(playbookName, includeName+".md")
+	if _, err := fs.Stat(root, localRel); err == nil {
+		return localRel, localRel
 	}
 
 	rootRel := includeName + ".md"
-	return filepath.Join(root, rootRel), rootRel
+	return rootRel, rootRel
 }
 
 // substituteVars replaces {{.Name}} placeholders in body.

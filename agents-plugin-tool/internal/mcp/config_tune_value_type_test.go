@@ -47,7 +47,7 @@ func TestConfigTuneValueSchemaIsStringOrObject(t *testing.T) {
 func TestConfigTuneRejectsNonStringValueForStringKeys(t *testing.T) {
 	useLeadProfile(t)
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	useResourceFixture(t, rsrcRoot)
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
 	initGit(t, root)

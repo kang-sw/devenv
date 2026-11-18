@@ -3,6 +3,7 @@ package wsagent
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,7 +24,19 @@ func piLeadFixture(t *testing.T) (StartSpec, string) {
 	if err := os.MkdirAll(piDir(spec.Dir), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	return spec, filepath.Join(base, "agents-plugin-pi")
+	payload := filepath.Join(base, "agents-plugin-pi")
+	// Launch tests inject a prepared-payload boundary through an explicit
+	// fixture checkout, never through installed plugin bytes or live HOME.
+	t.Setenv("WS_CACHE_HOME", filepath.Join(base, "cache"))
+	usePreparedPiFixture(t, base, payload)
+	return spec, payload
+}
+
+func usePreparedPiFixture(t *testing.T, checkout, payload string) {
+	t.Helper()
+	t.Setenv("WS_RSRC_DEV_CHECKOUT", checkout)
+	piLeadFile(t, filepath.Join(checkout, "agents-plugin-wsflow", ".keep"), "")
+	piLeadFile(t, filepath.Join(checkout, "agents-plugin", "bin", "ws-pi-payload.py"), fmt.Sprintf("print(%q)\n", payload))
 }
 
 func piLeadFile(t *testing.T, path, text string) {
@@ -57,13 +70,13 @@ func piLeadDeps(t *testing.T, dir string) {
 func TestPiLeadBundledEntries(t *testing.T) {
 	_, root := piLeadFixture(t)
 	entry := piLeadBundle(t, root)
-	entries, err := piBundledEntries(hostedPluginTestVersion)
+	entries, err := piEntriesAt(root)
 	if err != nil || !slices.Equal(entries, []string{entry}) {
 		t.Fatalf("manifest entry = %v, %v", entries, err)
 	}
 	for _, text := range []string{`{`, `{}`, `{"pi":{"extensions":["../escape.ts"]}}`, `{"pi":{"extensions":[""]}}`, `{"pi":{"extensions":["gone.ts"]}}`} {
 		piLeadFile(t, filepath.Join(root, "package.json"), text)
-		if got, err := piBundledEntries(hostedPluginTestVersion); err == nil {
+		if got, err := piEntriesAt(root); err == nil {
 			t.Fatalf("%s: accepted %v", text, got)
 		}
 	}

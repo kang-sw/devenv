@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -72,8 +73,12 @@ func readInstalledVersionState(path string) (version int, parsed, markerPresent 
 // lead-bootstrap AGENTS.template.md under skillsRoot. skillsRoot is already
 // package-scoped (ws vs wsflow) via wsrsrc.ResolveSkillsRoot, so no explicit
 // package branching is needed here.
-func latestKnownTemplateVersion(skillsRoot string) (int, bool) {
-	return readTemplateVersion(filepath.Join(skillsRoot, "lead-bootstrap", "AGENTS.template.md"))
+func latestKnownTemplateVersion(skillsRoot fs.FS) (int, bool) {
+	data, err := fs.ReadFile(skillsRoot, "lead-bootstrap/AGENTS.template.md")
+	if err != nil {
+		return 0, false
+	}
+	return parseTemplateVersionTag(string(data))
 }
 
 // bootstrapStalenessWarning computes the session-bootstrap staleness/skew
@@ -96,7 +101,7 @@ func latestKnownTemplateVersion(skillsRoot string) (int, bool) {
 //   - installed > latest: new "above-head" warning.
 //   - Template Version marker present but its value does not parse as
 //     `vNNNN`: new "unrecognized tag" warning.
-func bootstrapStalenessWarning(root, skillsRoot string, resolver *wsconfig.Resolver, sessionKey string) string {
+func bootstrapStalenessWarning(root string, skillsRoot fs.FS, resolver *wsconfig.Resolver, sessionKey string) string {
 	rv, err := resolver.Get(sessionKey, wsconfig.ItemBootstrapAlarm)
 	if err == nil && rv.Value == "off" {
 		return ""

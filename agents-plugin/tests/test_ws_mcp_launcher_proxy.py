@@ -1014,13 +1014,19 @@ class LauncherProxyTest(unittest.TestCase):
             if allow_lifecycle:
                 processes["run"].return_value = subprocess.CompletedProcess([], lifecycle_code, '{"outcome":"failed"}\n' if lifecycle_code else '{"outcome":"replaced"}\n', "starter failed" if lifecycle_code else "")
             if allow_build:
-                processes["run"].side_effect = self.launcher.subprocess.TimeoutExpired(["fake-go", "build"], 0.05)
+                def build_timeout(command, **kwargs):
+                    if command[0] == "fake-go":
+                        raise self.launcher.subprocess.TimeoutExpired(command, 0.05)
+                    self.assertEqual(command[0], sys.executable)
+                    self.assertTrue(command[1].endswith("generate-package-assets.py"))
+                    return subprocess.CompletedProcess(command, 0)
+                processes["run"].side_effect = build_timeout
             code = self.launcher.main()
             for name, process in processes.items():
                 if allow_build and name == "run":
                     self.assertTrue(process.called)
+                    self.assertEqual([call.args[0][0] for call in process.call_args_list], [sys.executable, "fake-go"])
                     for call in process.call_args_list:
-                        self.assertEqual(call.args[0][0], "fake-go")
                         self.assertEqual(call.kwargs["timeout"], self.launcher.RUNTIME_BUILD_TIMEOUT)
                 elif allow_lifecycle and name == "run":
                     process.assert_called_once()

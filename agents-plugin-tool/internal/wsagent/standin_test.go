@@ -46,6 +46,11 @@ func TestMain(m *testing.M) {
 			_ = os.Setenv("WS_RSRC_ROOT", rsrc)
 		}
 	}
+	checkout, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		panic(err)
+	}
+	_ = os.Setenv("WS_RSRC_DEV_CHECKOUT", checkout)
 	// Hosted package resolution reads machine-global config and daemon state.
 	// Never let test launches consult the developer's actual package registry.
 	home, err := os.MkdirTemp("", "wsagent-test-homes-")

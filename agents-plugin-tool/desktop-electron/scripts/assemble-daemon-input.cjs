@@ -16,7 +16,11 @@
  * --version/--source-commit as the binary's build ldflags. Never infer
  * the identity of an arbitrary binary by stamping it with today's source version.
  * --platform defaults to the runner OS; architecture comes from the supplied
- * binary (not inspected/executed here), and must match the later desktop build.
+ * binary (architecture not inspected/executed here), and must match the later desktop build.
+ * The prebuilt binary must contain this checkout's exact generated inventory.
+ * This is a minimum build-provenance check, not a signature/authenticity check;
+ * the existing metadata gate separately binds identity to the binary hash.
+ * Assembly NEVER generates assets into, or recompiles, the supplied binary.
  * PYTHON may name a Python 3 executable; defaults: python on Windows, python3
  * elsewhere. Reuses prepare-workflow-bundles.py's package_files producer: copies
  * the generated rsrc manifest and generates the missing wsflow skills manifest
@@ -53,6 +57,13 @@ function assemble({ binary, out, package: product = 'wsflow', metadata, platform
   metadata = path.resolve(metadata || binary + '.metadata.json');
   for (const file of [binary, metadata]) {
     if (!fs.lstatSync(file).isFile()) throw new Error(`Expected a regular file (not a link): ${file}`);
+  }
+  // go:embed stores inventory.json verbatim. Require the canonical inventory
+  // in the prebuilt bytes: generating files now cannot repair an old binary.
+  const inventory = execFileSync(python, [path.join(repo, 'agents-plugin-tool', 'scripts',
+    'generate-package-assets.py'), '--inventory'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  if (!fs.readFileSync(binary).includes(inventory)) {
+    throw new Error('Prebuilt binary lacks the current embedded package inventory; generate assets BEFORE rebuilding it');
   }
   const source = path.join(repo, product === 'ws' ? 'agents-plugin' : 'agents-plugin-wsflow');
   const relative = path.relative(source, out);

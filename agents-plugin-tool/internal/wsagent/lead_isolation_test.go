@@ -185,6 +185,7 @@ func TestLegacyPiLeadWithoutSDKStartsIsolated(t *testing.T) {
 			piBundledPluginRoot = func(string) (string, string, error) { return bundle, "", nil }
 			t.Cleanup(func() { piBundledPluginRoot = restore })
 			entry := piLeadBundle(t, filepath.Join(filepath.Dir(bundle), "agents-plugin-pi"))
+			usePreparedPiFixture(t, filepath.Dir(bundle), filepath.Join(filepath.Dir(bundle), "agents-plugin-pi"))
 			command := filepath.Join(t.TempDir(), "pi")
 			if withSDK {
 				pkg := filepath.Join(t.TempDir(), "host-pi")

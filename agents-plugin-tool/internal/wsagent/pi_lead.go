@@ -160,10 +160,8 @@ func writePiLeadBridge(spec StartSpec, servers map[string]any, warning string) (
 	return path, writeFileAtomic(path, []byte(source), 0o600)
 }
 
-// piBundledEntries prefers the owning workflow package's prepared payload.
-// Source checkouts use the sibling when their valid payload is stale against
-// source inputs (the helper logs why). Invalid local payloads remain errors;
-// only source drift, never failed archive validation, permits that substitution.
+// piBundledEntries keeps the Phase 1 hosted package resolver, but the native
+// extension and its materializer always come from the daemon's build.
 func piBundledEntries(daemonVersion string) ([]string, error) {
 	root, _, err := piBundledPluginRoot(daemonVersion)
 	if err != nil {
@@ -173,15 +171,19 @@ func piBundledEntries(daemonVersion string) ([]string, error) {
 }
 
 func piBundledEntriesFrom(root string) ([]string, error) {
-	var err error
-	if _, localErr := os.Stat(filepath.Join(root, "native-pi")); !os.IsNotExist(localErr) {
-		root, err = piPreparedPayload(root)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		root = filepath.Join(filepath.Dir(root), "agents-plugin-pi")
+	name, err := bundledPluginName(root)
+	if err != nil {
+		return nil, err
 	}
+	prepared, err := piPreparedPayload(name)
+	if err != nil {
+		return nil, err
+	}
+	return piEntriesAt(prepared)
+}
+
+// piEntriesAt validates a prepared extension's manifest and load dependencies.
+func piEntriesAt(root string) ([]string, error) {
 	raw, err := os.ReadFile(filepath.Join(root, "package.json"))
 	if err != nil {
 		return nil, err

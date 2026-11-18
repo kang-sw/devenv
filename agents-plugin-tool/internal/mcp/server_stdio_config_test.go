@@ -551,7 +551,7 @@ func TestServeStdioConfigAgentsTierRoundTripsArbitraryEffortLabels(t *testing.T)
 		"model-pb/model-pb.md":   modelAliasPlaybookContent,
 		"effort-pb/effort-pb.md": "---\nkind: print\ndelegates: false\n---\n# Effort Playbook\n\nEffort: {{.MediumTierReasoningEffort}}\nEnd of effort.\n",
 	})
-	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	useResourceFixture(t, rsrcRoot)
 
 	server := NewServer(root, "test")
 	server.observeHarness("test", "codex")

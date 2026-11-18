@@ -5,10 +5,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { execFileSync } = require('node:child_process');
 const { assemble } = require('../scripts/assemble-daemon-input.cjs');
 const { selectDaemon } = require('../daemon-selection');
 const { copyPackage } = require('../daemon-stage');
 const repo = path.resolve(__dirname, '../../..');
+const inventory = execFileSync(process.env.PYTHON || (process.platform === 'win32' ? 'python' : 'python3'),
+  [path.join(repo, 'agents-plugin-tool/scripts/generate-package-assets.py'), '--inventory']);
 
 for (const product of ['wsflow', 'ws']) for (const platform of ['darwin', 'win32']) {
   test(`assemble real ${product} package for ${platform} from non-executable bytes`, t => {
@@ -21,7 +24,7 @@ for (const product of ['wsflow', 'ws']) for (const platform of ['darwin', 'win32
     const binary = path.join(base, 'release-asset');
     const metadata = product === 'ws' ? binary + '.metadata.json' : path.join(base, 'identity.json');
     // Not an executable, including when testing Windows inputs on macOS.
-    const bytes = Buffer.from('fake ws-mcp bytes; never execute');
+    const bytes = Buffer.concat([Buffer.from('fake ws-mcp bytes; never execute'), inventory]);
     fs.writeFileSync(binary, bytes);
     const identity = { schema_version: 1, version: contract.plugin_version,
       binary_sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
@@ -52,6 +55,17 @@ for (const product of ['wsflow', 'ws']) for (const platform of ['darwin', 'win32
     assert.equal(copy.contract.plugin, product);
     assert.throws(() => assemble(options), /EEXIST/);
     assert.deepEqual(fs.readFileSync(selected.binary), bytes, 'existing output was not removed');
+
+    // Missing/stale embedded provenance is refused before making an output;
+    // assembly cannot retrofit a supplied binary, even with valid metadata.
+    fs.writeFileSync(binary, 'old binary without embedded inventory');
+    assert.throws(() => assemble({ ...options, out: path.join(base, 'missing-assets') }), /generate assets BEFORE/);
+    assert.equal(fs.existsSync(path.join(base, 'missing-assets')), false);
+    const stale = Buffer.from(bytes);
+    stale[stale.length - 2] ^= 1;
+    fs.writeFileSync(binary, stale);
+    assert.throws(() => assemble({ ...options, out: path.join(base, 'stale-assets') }), /generate assets BEFORE/);
+    fs.writeFileSync(binary, bytes);
 
     // Both the assembly gate and the app's own selector refuse a wrong core.
     identity.version = '99.0.0'; save();

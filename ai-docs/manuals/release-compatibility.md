@@ -17,9 +17,12 @@ change's compatibility tier during discussion and record it in the ticket's
   regardless of suffix, build time or content, unless LAN mode changes or an
   explicit `daemon-start --replace` requests one swap (`wsdashboard/ensure.go`,
   `keepRunning` and `Ensure`).
-- **Binary and text come from different places.** Hosted MCP tools run in the
-  daemon binary, while skills and playbooks come from the connecting plugin's
-  directory (`WS_RSRC_ROOT`). Old skill text can therefore call a newer binary.
+- **Daemon-owned playbooks, plugin-owned skills.** The daemon serves its
+  embedded package's playbooks, manifests and includes, selecting wsflow from
+  `WS_MCP_NAMESPACE` and ws otherwise. Caller `WS_RSRC_ROOT` no longer selects
+  text. Harnesses still discover skills in their plugin directories, so old
+  skill shims can call a newer daemon. `WS_RSRC_DEV_CHECKOUT` is an explicit
+  daemon-process-only source override.
 - **Connection guards are strict today.** The hello accepts only its exact
   protocol and, when supplied, the daemon's major.minor
   (`wsdashboard/proxy.go:232–254`). Pi additionally requires the server to be

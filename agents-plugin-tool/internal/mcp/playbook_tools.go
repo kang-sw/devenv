@@ -2,8 +2,8 @@ package mcp
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -736,16 +736,16 @@ func builtinPromptOverrideDefaults() map[string]string {
 // file for override open markers, and returns the declared override-points
 // deduped by pointId (the first non-empty desc wins) sorted by PointId. It is a
 // pure function (root in, data out) so it unit-tests without a Server.
-func scanOverridePoints(rsrcRoot string) ([]overridePointDecl, error) {
+func scanOverridePoints(rsrcRoot fs.FS) ([]overridePointDecl, error) {
 	descByPoint := map[string]string{}
-	err := filepath.Walk(rsrcRoot, func(path string, info os.FileInfo, err error) error {
+	err := fs.WalkDir(rsrcRoot, ".", func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		data, err := fs.ReadFile(rsrcRoot, path)
 		if err != nil {
 			return err
 		}
@@ -983,12 +983,11 @@ func selectProductModeBlocks(body string, noAgent bool) string {
 	return strings.Join(filtered, "\n")
 }
 
-// resolveRsrcRoot resolves the plugin resource tree (WS_RSRC_ROOT or the
-// executable-derived bundle). A non-empty override is reserved for resource
-// inspection; playbook.render's worktree override must not select this root.
-func (s *Server) resolveRsrcRoot(rsrcRootOverride string) (string, error) {
+// resolveRsrcRoot selects build-owned resources. The internal explicit path is
+// only for authoring inspection; connection environment never selects it.
+func (s *Server) resolveRsrcRoot(rsrcRootOverride string) (fs.FS, error) {
 	if strings.TrimSpace(rsrcRootOverride) != "" {
-		return rsrcRootOverride, nil
+		return os.DirFS(rsrcRootOverride), nil
 	}
 	return s.rsrcRoot()
 }
@@ -1023,7 +1022,7 @@ func (s *Server) resolveRsrcRoot(rsrcRootOverride string) (string, error) {
 // Returns (body, recommendedTier, error): recommendedTier is the first-class tier
 // declared in the playbook frontmatter, or tierOverride when supplied, surfaced
 // so the caller can pick the delegate's model from one render call.
-func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
+func renderPlaybookBody(s *Server, rsrcRoot fs.FS, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
 	return renderPlaybookBodyForCaller(s, "", "", rsrcRoot, name, callerContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup, tierOverride)
 }
 
@@ -1032,7 +1031,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 // only the connection's detected harness, selects its terminology row (see
 // playbookTerminology). profile is the caller's playbook profile ("" for the
 // base files; see callerPlaybookProfile).
-func renderPlaybookBodyForCaller(s *Server, callerKey, profile, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
+func renderPlaybookBodyForCaller(s *Server, callerKey, profile string, rsrcRoot fs.FS, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
 	harness := s.playbookHarness()
 	daemonAgentClient := (harness == "pi" && s.clientPiDaemonAgents()) || s.callerDaemonAgents(callerKey)
 	daemonAgents := daemonAgentClient && s.agentListed() && s.toolAllowed("agent.spawn") && s.toolAllowed("mailbox.send")
@@ -1048,7 +1047,7 @@ func renderPlaybookBodyForCaller(s *Server, callerKey, profile, rsrcRoot, name s
 
 	// Load once with nil vars so the MCP playbook layer can add reserved
 	// namespace variables without teaching product-mode semantics to wsrsrc.
-	pb, err := wsrsrc.Load(rsrcRoot, name, loadHarness, profile, nil)
+	pb, err := wsrsrc.LoadFS(rsrcRoot, name, loadHarness, profile, nil)
 	if err != nil {
 		return "", "", err
 	}
@@ -1189,13 +1188,13 @@ func workflowPreferSubagentEnabled(configOpts wsconfig.Options) (bool, error) {
 // configOpts controls config-backed model alias resolution.
 // overrideLookup: when non-nil, the session-keyed closure for resolving prompt
 // override-point values; pass nil to render every override-point with its seed.
-func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
+func printPlaybook(s *Server, rsrcRoot fs.FS, name string, callerContext map[string]string, configOpts wsconfig.Options, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
 	return printPlaybookForCaller(s, "", "", rsrcRoot, name, callerContext, configOpts, workflowLang, overrideLookup)
 }
 
 // printPlaybookForCaller is printPlaybook for the caller holding callerKey
 // and selecting profile (see renderPlaybookBodyForCaller).
-func printPlaybookForCaller(s *Server, callerKey, profile, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
+func printPlaybookForCaller(s *Server, callerKey, profile string, rsrcRoot fs.FS, name string, callerContext map[string]string, configOpts wsconfig.Options, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
 	// playbook.read exposes no tier_override arg — always "" (frontmatter tier).
 	body, recommendedTier, err := renderPlaybookBodyForCaller(s, callerKey, profile, rsrcRoot, name, callerContext, configOpts, "", "", workflowLang, overrideLookup, "")
 	if err != nil {
@@ -1225,7 +1224,7 @@ func printPlaybookForCaller(s *Server, callerKey, profile, rsrcRoot, name string
 // tierOverride: when non-empty, replaces the playbook's frontmatter tier for
 // this render only — see renderPlaybookBody and resolveEffectiveTier. Pass ""
 // to leave frontmatter-tier behavior unchanged.
-func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
+func renderPlaybook(s *Server, rsrcRoot fs.FS, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
 	path, _, recommendedTier, err := renderPlaybookWithPlan(s, "", "", rsrcRoot, worktreeRoot, name, callerContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup, tierOverride, "")
 	return path, recommendedTier, err
 }
@@ -1239,7 +1238,7 @@ func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContex
 // later commit could pick up as a false contract. callerKey is the render
 // caller's session key and profile its playbook profile (see
 // renderPlaybookBodyForCaller).
-func renderPlaybookWithPlan(s *Server, callerKey, profile, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string, planStem string) (promptPath string, planPath string, recommendedTier string, err error) {
+func renderPlaybookWithPlan(s *Server, callerKey, profile string, rsrcRoot fs.FS, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string, planStem string) (promptPath string, planPath string, recommendedTier string, err error) {
 	templateContext := callerContext
 	var renderContext map[string]string
 	if s.noAgentMode() && wsflowRenderEligibleStems[name] && len(callerContext) > 0 {
@@ -1312,8 +1311,8 @@ func renderPlanStem(name string, callerContext map[string]string, topLevelLead b
 	return callerContext, stem
 }
 
-func declaredPlaybookVariables(s *Server, rsrcRoot, name, profile string) (map[string]bool, error) {
-	pb, err := wsrsrc.Load(rsrcRoot, name, s.playbookHarness(), profile, nil)
+func declaredPlaybookVariables(s *Server, rsrcRoot fs.FS, name, profile string) (map[string]bool, error) {
+	pb, err := wsrsrc.LoadFS(rsrcRoot, name, s.playbookHarness(), profile, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -11,13 +11,28 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // Use the launcher's stdlib-only validator/materializer. It checks every byte
 // before publishing a content-addressed closure; no npm or network
 // is involved. Python is already a workflow package runtime prerequisite.
-func piPreparedPayload(plugin string) (string, error) {
+func piPreparedPayload(packageName string) (string, error) {
+	stateDir, err := wsdashboard.Dir("")
+	if err != nil {
+		return "", err
+	}
+	plugin, err := stagePiPayloadInputs(stateDir, packageName)
+	if err != nil {
+		return "", fmt.Errorf("stage native Pi build inputs: %w", err)
+	}
+	return materializePiPayload(plugin)
+}
+
+// materializePiPayload is the on-disk Python boundary, kept separately testable
+// from the build-owned package selection.
+func materializePiPayload(plugin string) (string, error) {
 	cache, err := wsstate.CacheRoot(wsstate.Options{})
 	if err != nil {
 		return "", err
@@ -39,7 +54,7 @@ func piPreparedPayload(plugin string) (string, error) {
 	// stages after one hour, well beyond this budget.
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
-	args := append(pre, "-I", filepath.Join(plugin, "bin", "ws-pi-payload.py"), "--plugin", plugin, "--materialize", filepath.Join(cache, "native-pi"), "--prefer-source")
+	args := append(pre, "-I", filepath.Join(plugin, "bin", "ws-pi-payload.py"), "--plugin", plugin, "--materialize", filepath.Join(cache, "native-pi"))
 	cmd := exec.CommandContext(ctx, python, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

@@ -2,21 +2,20 @@ package mcp
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// writeTemplateVersionFixture writes a skills-root fixture at
-// <skillsRoot>/lead-bootstrap/AGENTS.template.md carrying the given tag, and
-// points WS_SKILLS_ROOT/WS_RSRC_ROOT at it for the duration of the test (per
-// wsrsrc.ResolveRoot's env-override resolution order).
+// writeTemplateVersionFixture selects a daemon checkout with a synthetic
+// bootstrap template and the canonical resource tree.
 func writeTemplateVersionFixture(t *testing.T, latest int) string {
 	t.Helper()
-	skillsRoot := t.TempDir()
+	useResourceFixture(t, shippedRsrcRootForTest())
+	skillsRoot := filepath.Join(os.Getenv("WS_RSRC_DEV_CHECKOUT"), "agents-plugin", "skills")
 	mustWrite(t, skillsRoot, filepath.Join("lead-bootstrap", "AGENTS.template.md"),
 		fmt.Sprintf("# Template\n\n<!-- Template Version: v%04d -->\n", latest))
-	t.Setenv("WS_SKILLS_ROOT", skillsRoot)
 	return skillsRoot
 }
 

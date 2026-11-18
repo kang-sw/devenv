@@ -248,7 +248,11 @@ func TestProjectTreeSkipsGitIgnoredEntries(t *testing.T) {
 }
 
 func TestReadInfraRequiresBareName(t *testing.T) {
-	t.Setenv("WS_RSRC_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))
+	checkout, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WS_RSRC_DEV_CHECKOUT", checkout)
 	got, err := ReadInfra("impl-playbook")
 	if err != nil {
 		t.Fatalf("ReadInfra returned error: %v", err)
