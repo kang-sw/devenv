@@ -14,8 +14,8 @@ publishes.
 
 ## Inputs
 
-Task block: config path, cut point or none, follow-up ids to resolve or none,
-and the output of each step the lead ran itself.
+Task block: config path, cut point or none, and follow-up ids to resolve or
+none.
 
 ## Steps
 

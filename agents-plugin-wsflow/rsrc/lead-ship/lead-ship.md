@@ -74,24 +74,22 @@ Runs when the project's `AGENTS.md` `### Review Policy` declares
 
 ## Execute
 
-1. A config step that needs a capability only you hold, such as a lead-only
-   tool (a delegate's call is refused) → run it yourself, in the config's
-   order, and give its output to the handler.
-2. `{{.McpNamespace}}/playbook.render(name: "ship-handler", session_key:
+1. `{{.McpNamespace}}/playbook.render(name: "ship-handler", session_key:
    <your key>)`; spawn it at the returned tier with:
 
    ```text
    Read <rendered-path> as your system prompt.
    Config: <path>. Cut point: <sha> | none. Resolves: <follow-up ids> | none.
-   Lead outputs: <step: output, one per line> | none.
    ```
 
-   It returns version, tag, and each command's full output. `blocked` on a
-   lead-only step → run it, send the output to the same agent.
-3. Confirm with the user: version, tag, publish targets; for a cut-point
+   It runs the config's steps in the config's order and returns version,
+   tag, and each command's full output. `blocked` on a step that needs a
+   capability only you hold, such as a lead-only tool → run that step, send
+   its output to the same agent, and it continues from there.
+2. Confirm with the user: version, tag, publish targets; for a cut-point
    release, the cut point and the release branch. Wait for explicit
    approval.
-4. Publish per the config:
+3. Publish per the config:
    - A step that promotes one branch into another → pin the head the gate
      cleared and re-check the source branch tip right before the merge;
      moved → abort and re-run the gate over the delta.
@@ -99,7 +97,7 @@ Runs when the project's `AGENTS.md` `### Review Policy` declares
      its ledger commit included.
    - Gate not applied → nothing to re-check.
    - Cut-point release → no re-check; run the config's Promote step.
-5. Push the tag when the config's `Tag` section asks; the step-3
+4. Push the tag when the config's `Tag` section asks; the step-2
    confirmation covers that push. Run the post-ship steps; a cut-point
    release runs the config's Merge back.
 

@@ -142,9 +142,9 @@ naming a model.
 
 - An operation has a {{.McpNamespace}} Git primitive → use it. Unsupported
   operation or read-only diagnosis → native Git.
-- Branch integration (impl → parent, goal → parent, epic → review track) is
-  lead-owned, through `{{.McpNamespace}}/git.merge`. Apply the goal approval
-  gate and the project's release gate at their boundaries.
+- Branch integration (impl → parent, epic → review track) is lead-owned,
+  through `{{.McpNamespace}}/git.merge`. Apply the project's release gate at
+  its boundary.
 - Root `HEAD` is on an `impl/*` branch → it is the worker's until the lead
   restores it (the occupied-root banner names the parent branch); a commit or
   ticket move there lands on the worker's branch. Housekeeping meanwhile:

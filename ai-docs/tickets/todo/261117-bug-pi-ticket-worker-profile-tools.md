@@ -18,6 +18,12 @@ On hold (owner, 2026-11-18): the agent-management rework on
 profiles) is expected to supersede the decisions below; revisit after it
 lands instead of settling (15)-(20) against `pi.spawn`.
 
+The same gap covers `review-handler` and `ticket-handler` (playbook diet,
+v0.50.8 release sweep): their playbooks call ledger and Sage tools no Pi
+profile allows, and they spawn large-tier reviewers above their own medium
+tier. Until this ticket lands, `lead-review` and `lead-ticket` tell a lead on
+such a host to perform the rendered handler prompt itself.
+
 When the implementation harness is Pi, `lead-run` step 6 tells the lead to
 spawn the ticket worker through `{{.SpawnIdiom}}`. For Pi that idiom renders
 as `<ns>/pi.spawn (tier: ...)` with no `profile`
