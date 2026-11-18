@@ -168,7 +168,8 @@ N.prototype.querySelector = function (s) { return (this.sel[s] || [])[0] || null
 N.prototype.getAttribute = function (k) { return k in this.attrs ? this.attrs[k] : null; };
 N.prototype.hasAttribute = function (k) { return k in this.attrs; };
 N.prototype.setAttribute = function (k, v) { this.attrs[k] = String(v); };
-N.prototype.closest = function () { return this.up; };
+// No fake node sits in the tree's hidden compact roster (.ag-source).
+N.prototype.closest = function (s) { return s === ".ag-source" ? null : this.up; };
 var title = "sess - Werkschaft (alpha)";
 var doc = { hidden: false };
 var shell = false, framed = false, shHidden = false;

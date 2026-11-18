@@ -322,10 +322,14 @@
     drhandle.setAttribute("aria-label", t);
   }
   // drawerWait marks the handle while an approval waits, open or closed:
-  // an open drawer can cover the agents tree's approval row.
+  // an open drawer can cover the agents tree's approval row. The tree
+  // region's hidden compact roster (.ag-source) does not count: it repeats
+  // this tree's running rows and adds linked delegate sessions' agents,
+  // whose approvals are not this session's to wait on.
   function drawerWait() {
     if (!drhandle) return;
-    drhandle.classList.toggle("wait", !!doc.querySelector("#r-convlive .permwait, #r-tree .phase.permission, #r-tree .brow.perm"));
+    var wait = q("#r-convlive .permwait, #r-tree .phase.permission, #r-tree .brow.perm").some(function (el) { return !el.closest(".ag-source"); });
+    drhandle.classList.toggle("wait", wait);
     drTitle();
   }
   // A panels change the drawer is closed over lights the handle's dot.
