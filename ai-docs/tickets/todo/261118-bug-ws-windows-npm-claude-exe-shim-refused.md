@@ -32,9 +32,23 @@ npm-installed Pi (a node shim) and reasoned that Claude's native installer
 yields `claude.exe`, which passes through unchanged (backend.go:475-479).
 
 Current `@anthropic-ai/claude-code` npm releases ship a native binary, so npm's
-cmd-shim generator writes a shim whose launch line runs the target directly
-(`"%dp0%\node_modules\@anthropic-ai\claude-code\...\claude.exe" %*`, no
-`_prog`). That shape is inferred: the dev PC has only the native install
+cmd-shim generator writes a shim whose launch line runs the target directly,
+with no `_prog`. The owner supplied the real file from an affected install
+(2026-11-18 17:58 KST), verbatim:
+
+```bat
+@ECHO off
+GOTO start
+:find_dp0
+SET dp0=%~dp0
+EXIT /b
+:start
+SETLOCAL
+CALL :find_dp0
+"%dp0%\node_modules\@anthropic-ai\claude-code\bin\claude.exe"   %*
+```
+
+The dev PC itself has only the native install
 (`%USERPROFILE%\.local\bin\claude.exe`) and no npm `claude.cmd`. The only
 Claude spawn path is `ClaudeBackend.Start` (`internal/wsagent/claude.go:329`),
 used for both hosted leads and child agents; the dashboard registers
@@ -46,7 +60,7 @@ Last ID: (1383)
 
 (1378) [open] [announced] The fix extends the shim unwrap in `harnessCommand`/`cmdShimArgv` (`internal/wsagent/backend.go`) so every harness start (Claude and Pi, leads and children) keeps one resolution path - 261112 placed the unwrap there and its tests (`internal/wsagent/cmdshim_test.go`) pin that path.
 (1379) [open] [technical] Recognize a cmd-shim whose launch line runs a quoted `%dp0%`-relative `.exe` target followed by `%*`, and start that exe directly with the caller's args, over falling back to a PATH scan for some `claude.exe` - the shim's own target is the install the user's PATH chose, and parsing it is deterministic where a PATH scan could start a different install.
-(1380) [open] [technical] The new test fixture is produced by the cmd-shim generator bundled with the locally installed npm (offline, `node_modules/npm/node_modules/cmd-shim`) for an `.exe` target, kept CRLF like the existing `testdata/npm-cmd-shim-pi.cmd`, over a hand-written guess - no real npm `claude.cmd` exists on the dev PC, and the generator's output is the shape users actually have.
+(1380) [open] [technical] The new test fixture `testdata/npm-cmd-shim-claude.cmd` is the owner-supplied real shim in `## Background`, byte-for-byte (three spaces before `%*`), stored CRLF like the existing `testdata/npm-cmd-shim-pi.cmd`, over a hand-written or regenerated approximation - it is the exact file affected users have.
 (1381) [open] [announced] Compatibility tier T0: the change is local process spawning; no MCP tool, hello, store shape, tracker event, or manifest field changes - AGENTS.md `### Compatibility Tiers` lists the cross-version surfaces and none is touched.
 (1382) [open] [announced] Verification is Go unit tests on w5090 plus the Windows legs of ws-mcp CI, and after release the owner confirms on an affected npm install; no local `go test`, ws exes, or live Claude start on the dev PC - the owner's antivirus rule (no local go test or ws executables) and the dev PC having no npm `claude.cmd`.
 (1383) [open] [policy] Which shim shapes the unwrap accepts beyond today's node shim.
@@ -61,9 +75,8 @@ Last ID: (1383)
 ### Phase 1: Unwrap exe-target cmd-shims
 
 Goals:
-- Confirm the real shim shape: read `npm view @anthropic-ai/claude-code bin version` (registry metadata only) and generate the shim with the local npm's bundled cmd-shim for that bin target; record both in the Result.
 - Extend `cmdShimArgv` per the settled decisions so the npm-installed Claude starts as the exe itself (its PID is the harness's), keeping the node-shim behavior and the refusal for shapes outside the settled scope.
-- Add the generated fixture and tests beside the existing ones in `internal/wsagent/cmdshim_test.go`: the exe-target shim unwraps (CRLF and LF, case-insensitive extension), a missing exe target is refused, and the existing node-shim and refusal tests still pass.
+- Add the owner-supplied fixture and tests beside the existing ones in `internal/wsagent/cmdshim_test.go`: the exe-target shim unwraps (CRLF and LF, case-insensitive extension), a missing exe target is refused, and the existing node-shim and refusal tests still pass.
 
 Verification: `go vet` and `go test ./internal/wsagent/...` on w5090 (accepted pre-existing reds elsewhere only: TestTopicStateBadgeResearchingMetadata, TestTopicStateBadgeClockAndReconciliation); Windows CI legs green at release.
 
