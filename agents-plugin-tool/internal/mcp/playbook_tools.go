@@ -996,7 +996,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 // only the connection's detected harness, selects its terminology row (see
 // playbookTerminology).
 func renderPlaybookBodyForCaller(s *Server, callerKey, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
-	harness := s.currentHarness()
+	harness := s.playbookHarness()
 	daemonAgentClient := (harness == "pi" && s.clientPiDaemonAgents()) || s.callerDaemonAgents(callerKey)
 	daemonAgents := daemonAgentClient && s.agentListed() && s.toolAllowed("agent.spawn") && s.toolAllowed("mailbox.send")
 	terminology := playbookTerminology(harness, daemonAgents, s.runtimeNamespace())
@@ -1270,7 +1270,7 @@ func renderPlanStem(name string, callerContext map[string]string, topLevelLead b
 }
 
 func declaredPlaybookVariables(s *Server, rsrcRoot, name string) (map[string]bool, error) {
-	pb, err := wsrsrc.Load(rsrcRoot, name, s.currentHarness(), nil)
+	pb, err := wsrsrc.Load(rsrcRoot, name, s.playbookHarness(), nil)
 	if err != nil {
 		return nil, err
 	}

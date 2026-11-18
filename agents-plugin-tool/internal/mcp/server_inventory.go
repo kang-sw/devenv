@@ -50,7 +50,6 @@ func leadToolNames(getenv func(string) string) []string {
 	names := make([]string, 0, len(tools()))
 	for _, tool := range tools() {
 		name, _ := tool["name"].(string)
-		name = advertisedToolName(name)
 		if permanentlyHiddenTool(name) {
 			continue
 		}
@@ -70,11 +69,11 @@ func leadToolNames(getenv func(string) string) []string {
 
 func (s *Server) filteredTools() []map[string]any {
 	namespace := s.runtimeNamespace()
+	aliases := s.connectionDescriptor().aliases
 	base := tools()
 	filtered := make([]map[string]any, 0, len(base))
 	for _, tool := range base {
 		name, _ := tool["name"].(string)
-		name = advertisedToolName(name)
 		if permanentlyHiddenTool(name) {
 			continue
 		}
@@ -97,7 +96,7 @@ func (s *Server) filteredTools() []map[string]any {
 			}
 		}
 		if s.toolAllowed(name) {
-			filtered = append(filtered, publicToolDefinition(tool, name, namespace))
+			filtered = append(filtered, publicToolDefinition(tool, aliases.advertised(name), namespace))
 		}
 	}
 	return filtered
@@ -169,10 +168,6 @@ func roleAllowsTool(role toolRole, name string) bool {
 	default:
 		return false
 	}
-}
-
-func advertisedToolName(name string) string {
-	return name
 }
 
 func namespaceText(text, namespace string) string {

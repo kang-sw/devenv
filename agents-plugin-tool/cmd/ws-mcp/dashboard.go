@@ -292,19 +292,21 @@ func trackerStoreRoot(h *wstrackerhost.Host, newErr error) func(id string) (stri
 // trackerChanged runs after a conversation's successful tracker write.
 func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *wsholder.Manager) *wsagent.Runner {
 	keys := mcp.NewAgentKeyStore()
+	backends := map[string]wsagent.BackendRegistration{
+		wsagent.BackendClaude: {Backend: wsagent.ClaudeBackend{}, LeadProfile: wsagent.LeadProfileClaude, PermissionModes: wsagent.LeadPermissionModes, PermissionLevels: wsagent.LeadPermissionLevels(), Catalog: wsagent.ClaudeCatalog(), ManualHarness: "claude"},
+		// Pi has no catalog profile until its port of the Codex adapter:
+		// it stays handle-only.
+		wsagent.BackendPi: {Backend: wsagent.PiBackend{}, LeadProfile: wsagent.LeadProfilePi, PermissionLevels: wsagent.LeadPermissionLevels()},
+		// agy hosts leads only: no agent-worker profile, so no agy tier
+		// is spawnable. It maps no common permission level yet. Its host
+		// cannot take dotted tool names, so its connection sees aliases.
+		wsagent.BackendAgy: {Backend: wsagent.AgyBackend{}, LeadProfile: wsagent.LeadProfileAgy, PermissionModes: wsagent.AgyPermissionModes, Catalog: wsagent.AgyCatalog(), ToolNameScheme: wsagent.ToolNameSchemeSanitize, ManualHarness: wsagent.BackendAgy},
+	}
 	return wsagent.NewRunner(wsagent.Options{
 		Dir:           dir,
 		DaemonVersion: version,
-		Backends: map[string]wsagent.BackendRegistration{
-			wsagent.BackendClaude: {Backend: wsagent.ClaudeBackend{}, LeadProfile: wsagent.LeadProfileClaude, PermissionModes: wsagent.LeadPermissionModes, PermissionLevels: wsagent.LeadPermissionLevels(), Catalog: wsagent.ClaudeCatalog()},
-			// Pi has no catalog profile until its port of the Codex adapter:
-			// it stays handle-only.
-			wsagent.BackendPi: {Backend: wsagent.PiBackend{}, LeadProfile: wsagent.LeadProfilePi, PermissionLevels: wsagent.LeadPermissionLevels()},
-			// agy hosts leads only: no agent-worker profile, so no agy tier
-			// is spawnable. It maps no common permission level yet.
-			wsagent.BackendAgy: {Backend: wsagent.AgyBackend{}, LeadProfile: wsagent.LeadProfileAgy, PermissionModes: wsagent.AgyPermissionModes, Catalog: wsagent.AgyCatalog()},
-		},
-		Keys: keys,
+		Backends:      backends,
+		Keys:          keys,
 		// A lead session's process runs under a session holder with a lead
 		// key of its own.
 		Holders:  wsagent.ManagerHost{Manager: holders},
@@ -316,7 +318,9 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 			return agentMCPCommand(root, version)
 		},
 		// A hosted lead's launch appends its workflow manual to its prompt.
-		LeadManual:     renderLeadManual,
+		LeadManual: func(backend, dir, key string) (string, error) {
+			return renderLeadManual(backends[backend].ManualHarness, dir, key)
+		},
 		Log:            logw,
 		TrackerChanged: trackerChanged,
 		// A spawned Pi subagent's settled turns go to its lead's mailbox.

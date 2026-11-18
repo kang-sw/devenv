@@ -21,6 +21,32 @@ type BackendRegistration struct {
 	// over the instance handles, never a replacement for them. Nil keeps
 	// the backend handle-only: no hiding, demotion, or version warning.
 	Catalog *HarnessProfile
+	// ToolNameScheme names how this backend's host must spell ws's dotted
+	// tool names on a connection of its hosted lead (ToolNameSchemeSanitize
+	// below); "" keeps the dotted names. Common code reads it through
+	// ApplyToolNameScheme and never names a backend.
+	ToolNameScheme string
+	// ManualHarness is the harness name the hosted lead's workflow manual
+	// renders under; "" renders with none.
+	ManualHarness string
+}
+
+// ToolNameSchemeSanitize spells a dotted ws tool name the way the Pi bridge
+// registers it (agents-plugin-pi/src/bridge.ts sanitizeToolName): a "ws__"
+// prefix and each "." flattened to "_", which fits the
+// ^[a-zA-Z0-9_-]{1,128}$ names an Anthropic API tool accepts.
+const ToolNameSchemeSanitize = "sanitize"
+
+// ApplyToolNameScheme spells raw under scheme; ok is false for a scheme
+// no one defines. The empty scheme is the identity.
+func ApplyToolNameScheme(scheme, raw string) (name string, ok bool) {
+	switch scheme {
+	case "":
+		return raw, true
+	case ToolNameSchemeSanitize:
+		return "ws__" + strings.ReplaceAll(raw, ".", "_"), true
+	}
+	return "", false
 }
 
 // BackendRegistrations exposes the runner's admitted set to in-process config

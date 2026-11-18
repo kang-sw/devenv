@@ -63,6 +63,11 @@ type Server struct {
 	// first hostedSessionKey call.
 	hostedOnce sync.Once
 	hostedKey  string
+	// descriptor is the connection's backend descriptor (tool_aliases.go),
+	// resolved once under descriptorMu.
+	descriptorMu       sync.Mutex
+	descriptorResolved bool
+	descriptor         connectionDescriptor
 	// inflight counts the requests being handled; draining refuses new
 	// ones, and inflightDone closes once a draining server goes idle
 	// (Drain).

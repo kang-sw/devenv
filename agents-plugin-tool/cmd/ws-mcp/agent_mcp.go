@@ -73,9 +73,9 @@ func agentMCPPython(preferred string, windows bool, lookPath func(string) (strin
 // its ws-mcp gets (the daemon's own, the configured hosted package's, and no
 // mailbox identity, as agentMCPCommand and the lead's launch give it) and
 // resolved against dir as a hello from that ws-mcp would be (callerHello).
-// A Claude lead's connection is detected as claude; agy and a Pi lead on
-// its MCP fallback are detected as no harness.
-func renderLeadManual(backend, dir, key string) (string, error) {
+// harness is the lead backend's declared ManualHarness (wsagent.BackendRegistration),
+// "" for a backend that declares none, such as a Pi lead on its MCP fallback.
+func renderLeadManual(harness, dir, key string) (string, error) {
 	plugin, _, err := wsagent.ResolveHostedPlugin(version)
 	if err != nil {
 		return "", err
@@ -96,9 +96,5 @@ func renderLeadManual(backend, dir, key string) (string, error) {
 	env["WS_MCP_PROJECT_ROOT"] = dir
 	env["WS_MAILBOX"], env["WS_MAILBOX_AUTO"] = "", ""
 	hello := callerHello(wsdashboard.ProxyHello{Env: env, Cwd: dir})
-	harness := ""
-	if backend == wsagent.BackendClaude {
-		harness = "claude"
-	}
 	return mcp.RenderLeadManual(mcp.EnvFromMap(hello.Env), dir, harness, key)
 }

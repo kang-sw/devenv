@@ -30,6 +30,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	if params.Arguments == nil {
 		params.Arguments = map[string]any{}
 	}
+	// A host that cannot take dotted tool names calls the alias its tool
+	// list showed; everything below sees the canonical name. It maps before
+	// the key rule, which reads the tool's schema by canonical name.
+	params.Name = s.connectionDescriptor().aliases.canonical(params.Name)
 	// A hosted lead connection's session_key: omitted is the connection's
 	// own, and any key but its own or a descendant's is refused. It runs
 	// first, so everything below reads the key the call resolves to.

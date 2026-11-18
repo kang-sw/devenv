@@ -538,7 +538,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 // is key, as workflow_manual returns it on that session's own connection:
 // env is the environment its ws-mcp serves under (the selected package's
 // resource tree and policy), root its project root, and harness the harness
-// its connection is detected as ("" for none). The daemon appends the result
+// its backend registration declares for the manual ("" for none). The daemon appends the result
 // to the lead's system prompt at each launch, so the session reads the
 // manual from its first turn. The render serves no harness process, so it is
 // never a hosted session itself.
@@ -553,6 +553,10 @@ func RenderLeadManual(env []string, root, harness, key string) (string, error) {
 		kept = append(kept, kv)
 	}
 	s := NewServerWithOptions(ServerOptions{Root: root, Env: kept, Harness: harness, Diag: io.Discard})
+	// The render serves no harness process, so its harness is declared here,
+	// not detected: a name the detection list does not know (agy) still
+	// selects the manual's overlay.
+	s.descriptor, s.descriptorResolved = connectionDescriptor{manualHarness: harness}, true
 	// The render may start the session-start tracker check (a background
 	// fetch); this throwaway server is released once that settles, without
 	// holding up the launch.

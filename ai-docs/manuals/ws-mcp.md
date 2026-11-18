@@ -951,6 +951,17 @@ from a support conversation:
   connection). A failed render leaves the key sentence alone and is logged.
   A Pi lead's extension appends its own manual; its bridge fallback appends
   the daemon's render beside the key.
+- **Backend descriptor.** What differs per harness here is data on the
+  backend's `BackendRegistration`, read through the hosted lead record's
+  `Backend`; common code names no backend. `ManualHarness` is the harness the
+  lead's manual renders under (claude, agy; Pi declares none).
+  `ToolNameScheme` is how its connection's `tools/list` spells ws's dotted
+  tool names: agy declares `sanitize` (the Pi bridge's `ws__tickets_query`
+  spelling, since the Anthropic API refuses dots), every other backend keeps
+  dotted names. A call by alias maps back to the canonical name first in
+  `callTool`, so allowlists, the session-key rule, and dispatch see dotted
+  names; the dotted name stays accepted. The alias table refuses a collision
+  when it is built.
 - **No ws plugin (Claude).** A Claude lead loads no ws bundle: the installed
   `ws` and `wsflow` plugins are turned off for the launch (`--settings`
   `enabledPlugins`), its ws-mcp is the `--mcp-config` server `ws` (no
