@@ -19,6 +19,7 @@ import (
 // host adapter drains it at the end of a turn, or at the next tool boundary
 // once promoted to steering, and can be cancelled until then.
 type HeldView struct {
+	BoardTargets map[string]string
 	// ID is the inbox entry's ID, which the cancel and steer controls name.
 	ID string
 	// Steer is set once the user promoted the message to steering; the

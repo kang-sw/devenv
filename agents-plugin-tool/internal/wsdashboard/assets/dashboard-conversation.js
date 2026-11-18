@@ -210,6 +210,7 @@
   function effectJumpClick(e) {
     var t = e.target, box = entriesBox();
     if (!t || !t.closest || !box || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (t.closest("[data-wb-nav]")) return;
     var card = t.closest(".wbupdate-topic[data-wb-topic]");
     if (!card || !box.contains(card)) return;
     var link = t.closest("a[data-wb-jump]");
@@ -226,6 +227,25 @@
     });
   }
   doc.addEventListener("click", effectJumpClick);
+
+  // User chips and references in committed previews share the card jump owner.
+  // Delegation also covers held bubbles and subsequently paged conversation rows.
+  function conversationBoardActivate(e) {
+    if (e.type === "keydown" ? e.key !== "Enter" : e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var link = e.target && e.target.closest && e.target.closest("[data-wb-nav]");
+    var box = entriesBox(), held = region("convlive");
+    if (!link || !((box && box.contains(link)) || (held && held.contains(link)))) return;
+    var selection = window.getSelection && window.getSelection();
+    if (e.type !== "keydown" && selection && !selection.isCollapsed) return;
+    e.preventDefault();
+    var topic = link.getAttribute("data-wb-topic"), target = link.getAttribute("data-wb-nav");
+    if (!topic) { toast(wsT("js.whiteboard.jump.itemmissing")); return; }
+    effectJump(topic, target, function (found, exact) {
+      if (!found || !exact) toast(wsT("js.whiteboard.jump.itemmissing"));
+    });
+  }
+  doc.addEventListener("click", conversationBoardActivate);
+  doc.addEventListener("keydown", conversationBoardActivate);
 
   // --- chat block actions (msgacts, dashboard.tmpl) ---------------------------
   // Copy fetches the block's stored text from the entry text route

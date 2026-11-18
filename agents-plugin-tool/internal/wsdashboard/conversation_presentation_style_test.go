@@ -73,6 +73,7 @@ func TestConversationPresentationTranslationContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	keys := map[string]bool{
+		"js.whiteboard.jump.itemmissing":    true,
 		"js.whiteboard.jump.missing":        true,
 		"js.whiteboard.jump.elementmissing": true,
 	}
