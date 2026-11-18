@@ -11,6 +11,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 1f03b99ebfd35647
 sage-review-completeness-reviewed: 1f03b99ebfd35647
+completed: 2026-11-18
 ---
 
 # Codex hosted adapter contract and first lead slice
@@ -314,3 +315,98 @@ removed `WS_*`/`CLAUDE*`/`ORCA_*`/`PI_*` from the child environment.
 Depends on this ticket's settled Phase 1 and the capability catalog ticket's Phases 1-3 (`261117-feat-ws-harness-capability-catalog`); execution approval is granted (Decision 4). Implement only the agreed hosted-lead slice through the existing Runner/backend/holder boundary, the catalog profile and the startup version/init-shape check. Preserve truthful unsupported controls, one input/mail owner, approvals, identity and ordered recovery. No implicit native-child, multi-account or terminal-handoff parity expansion. The backend serves the lead role only: it must not make `codex.<tier>` spawnable as an `agent.spawn` worker (batch-review coherence C2; the tier listing rule lives in `261117-feat-ws-agent-tools-mailbox-routing`). Decision 9 settles the Phase 1 gaps (E1, E2, G1-G3), the ws-plugin MCP block mechanism and hooks; apply the Phase 1 removal verdict (`config.agents.enabled=false` on `thread/start` and `thread/resume`) for the hosted lead.
 
 Verification: isolated protocol and real-adapter/fake-holder fixtures for create/resume/send/interrupt, ordered content/tools/usage/errors, approvals, unknown events, holder reattach/replay gaps and no duplicate input. Run Pi/Claude regressions against the exact candidate. A real hosted Codex lead conversation on the installed CLI with the owner's login is the acceptance check; no fixture result is invented.
+
+### Result (74050c752) - 2026-11-18
+
+Implemented the bounded hosted-lead slice, retaining the catalog/profile seam
+`9e1084cfa` and replacing the previous worker's unparseable drafts with normal,
+gofmt-clean `codex.go` and `codex_mapper.go`. Implementation and verification
+commits: `602b27823`, `27c3bd7bc`, `315929aac`, `0176e6de4`, `74050c752`.
+
+**Delivered.** One sustained app-server beneath the existing Runner and Python
+holder; initialize, thread create/resume, send, interrupt, steer, native compact,
+and next-turn model/effort/native sandbox settings. The catalog resolves
+`thread.cliVersion`, demotes missing model/approval init shape, and retains its
+nearest-profile unverified-version warning. Model/list supplies actual model
+names and effort choices without starting a process on a dashboard read.
+
+Approvals preserve raw numeric/string request IDs and the settled binary
+accept/decline boundary, with turn-scoped permission grants. Duplicate/stale
+answers are refused; unsupported server requests receive an error, and user
+questions use the existing Claude chat-only wording. Session grants, policy
+amendments, cancel and elicitation persistence remain unsupported. HTTP MCP
+shadows both distributed server names, retains plugin skills and user hooks,
+keeps the token out of argv/config payloads, and preserves harness-owned
+CODEX_HOME while scrubbing parent identities (including WS_PI_). Native
+subagents are removed on create and resume. Codex remains lead-only, with no
+worker tier, common permission-level mapping, or terminal takeover/handoff.
+Aggregate background telemetry stays unknown, not zero.
+
+**Ordering/recovery.** Thread AND turn identity gate notifications; interrupted
+open tools close before turn end, and late old-turn completions cannot mutate
+newer work. Per-attach random request epochs avoid in-flight ID reuse. A holder
+reattach performs no handshake or duplicate send. Lost-ring history recovery
+emits missing final output before releasing held input. Stable native
+thread/turn/item identities in the existing reply-ring `source` member, read
+once at reattach, prevent already-persisted final answers being appended again;
+identical text from a different native turn still recovers.
+
+**Verification (local macOS arm64, Go 1.26.2).**
+- `gofmt -l` clean and `go build ./...` passed after each changed Go file.
+- Final `go test ./internal/wsagent -count=1 -timeout=10m`: pass, 111.973s;
+  includes Pi/Claude regressions. Full `./cmd/ws-mcp` on the identical final
+  production code: pass, 165.259s.
+- Final `go test -race ./internal/wsagent -run '^TestCodex' -count=10
+  -timeout=2m`: pass, 11.753s. Recorded-stream tests and explicitly synthetic
+  real-backend/fake-holder cases cover protocol/error/approval negatives,
+  create/resume/controls/EOF, mid-turn and pending-approval reattach, replay
+  gaps, persisted-reply loss, and held-input order without duplicate delivery.
+- Final relevant MCP suite, `go test ./internal/mcp -run
+  'Test.*(Agent|Profile|Hosted|Harness|Lead|Permission|Codex)' -count=1
+  -timeout=5m`: pass, 58.706s. Stale profile-inventory fixtures were updated;
+  no production assertion was weakened to match broken behavior.
+- `go vet ./internal/wsagent ./internal/mcp ./cmd/ws-mcp`: pass.
+- Installed `codex-cli 0.160.0`, owner's existing login:
+  `WS_CODEX_LIVE=1 go test ./internal/wsagent -run
+  '^TestCodexInstalledAcceptance$' -count=1 -v -timeout=9m`: final pass,
+  24.91s. Real Runner, real Python holder, real account-backed Codex and an
+  isolated loopback HTTP MCP stand-in: echo tool call, native compaction,
+  full-history recovery read, stop/resume on the same thread with a new token,
+  eight model choices and six effort values. Process-tree inspection during
+  the actual MCP call found **zero descendant stdio ws-mcp launchers**.
+- `testdata/codex-0.160.0-hosted-lead.jsonl` is recorded from that real adapter
+  acceptance (paths, ws keys/tokens and credit balance scrubbed), not synthetic.
+  `codex_acceptance_fixture_test.go` replays it, including model/list and
+  compaction; existing Phase 1 streams continue to pass.
+- The broad full MCP run exceeded its aggregate 10-minute budget in unrelated
+  `TestTrackerUpdateWritesEveryEventCommand` (20s into that test). It is not
+  claimed green; the relevant focused suite above passed. Full all-module
+  tests, cross-version resume and other platforms were not run.
+
+**Review.** One independent lite pass reported no Critical and one Important:
+persisted final replies could duplicate after their holder records left the
+ring. Fixed in `0176e6de4`, with regressions for persisted output and genuinely
+missed identical text. No re-review, per the allocated one-pass lite policy.
+
+**Compatibility and file touches.** No Record or API field/schema was added.
+Catalog/registration/launch additions are T0. Reply identity reuses existing
+`wslive.RingEntry.Source` (`internal/wslive/ring.go:80`); old readers read the
+same immutable entries and never rewrite them (`ReadRingPage`, line 312), so
+this metadata is T0. The already-settled old daemon/unknown Codex backend case
+remains T1: Record decode/encode (`internal/wsagent/record.go:182,219,304,319`)
+retains data, backend lookup (`runner.go:956`) refuses unavailable Codex, and
+reattach (`runner_process.go:466`) keeps the holder for a capable successor.
+No new persisted restoration dependency was introduced.
+
+Adapter-owned file API count by source inspection: send/steer/interrupt/event
+mapping add zero; a fresh process reads its composed instructions once;
+reattach adds one ring directory listing and at most RingHistoryCap existing
+entry reads. Reply identity piggybacks the existing ring write
+(`record.go:428`), with no extra checkpoint write, heartbeat, or per-message
+reread. These are static API counts, not Windows syscall/latency measurements;
+no Windows machine was available in this authorized macOS run.
+
+No shared daemon swap, credential/account/config change, release/version bump,
+push, or merge. Ordinary Codex acceptance threads/rollouts remain in its home;
+none was deleted. Unsupported native telemetry, richer manual approvals,
+cross-version behavior and terminal transfers were not expanded.

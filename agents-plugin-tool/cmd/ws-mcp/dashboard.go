@@ -297,6 +297,8 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 		// Pi has no catalog profile until its port of the Codex adapter:
 		// it stays handle-only.
 		wsagent.BackendPi: {Backend: wsagent.PiBackend{}, LeadProfile: wsagent.LeadProfilePi, PermissionLevels: wsagent.LeadPermissionLevels(), WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendPi)},
+		// Codex is lead-only; its tiers remain unavailable to agent.spawn.
+		wsagent.BackendCodex: {Backend: wsagent.CodexBackend{}, LeadProfile: wsagent.LeadProfileCodex, PermissionModes: wsagent.CodexPermissionModes, Catalog: wsagent.CodexCatalog(), ManualHarness: wsagent.BackendCodex},
 		// agy workers use the default agent and auto-allow its permission
 		// requests. It maps no common lead permission level yet. Both
 		// roles use HTTP MCP and underscore tool-name aliases.

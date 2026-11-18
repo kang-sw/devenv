@@ -78,6 +78,11 @@ func (r *Runner) TakeOver(id string) (State, error) {
 	if backend == "" {
 		backend = row.Harness
 	}
+	// Codex's first hosted slice does not adopt terminal conversations.
+	// Registering its lead profile must not implicitly grant that parity.
+	if backend == BackendCodex {
+		return State{}, badRequest("codex terminal takeover is not supported; create a hosted lead instead")
+	}
 	profile := LeadProfileFor(backend, r.opts.Backends)
 	if profile == "" {
 		return State{}, badRequest("only a claude or pi session can be taken over; this one ran under %q", backend)
@@ -195,6 +200,9 @@ func (r *Runner) HandOff(id string) (State, error) {
 func (c *conv) handOff() error {
 	if !c.rec.Lead {
 		return badRequest("hand to terminal applies to a lead session only")
+	}
+	if c.rec.Backend == BackendCodex {
+		return badRequest("codex terminal handoff is not supported")
 	}
 	if resumeCommand(c.record(), c.dir) == "" {
 		return conflict("the session has no conversation yet, so there is nothing to resume in a terminal; close it instead")

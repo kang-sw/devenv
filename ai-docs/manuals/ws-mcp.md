@@ -908,14 +908,14 @@ Pi calls share this route; the Pi-specific legacy behavior follows:
   does not cascade, and a child's report resumes the stopped parent. A report
   to a closed parent stays in the child's record.
 
-The runner also hosts lead sessions: a headless Claude Code, Pi, or agy
+The runner also hosts lead sessions: a headless Claude Code, Pi, agy, or Codex
 process that loads the user's own harness setup (no profile allowlist or
 plugins of the runner's; a Claude lead gets one appended daemon-written
 instruction file with its session key and the `workflow_manual` instruction,
 so a machine that blocks some plugin hooks still teaches it), started from
-the built-in `lead-claude`, `lead-pi`, or `lead-agy` profile.
+the built-in `lead-claude`, `lead-pi`, `lead-agy`, or `lead-codex` profile.
 `POST /agents` refuses a lead profile; a lead is spawned
-by `POST /agents/leads {root, harness: "claude"|"pi", model?, effort?,
+by `POST /agents/leads {root, harness: <registered lead harness>, model?, effort?,
 permission_mode?, plugin_isolation?}` (201 with the state; `root` must be
 inside git, since the session key is minted at the canonical root).
 `plugin_isolation` accepts `default` (the default, replace ws only) or
@@ -942,10 +942,10 @@ from a support conversation:
   `WS_HOSTED_*`, and `WS_PI_*` variables are not passed on. A ws-mcp that is
   not the hosted harness's never writes, heartbeats, removes, or end-marks a
   row that carries `hosted: true`, whatever key it is given.
-- **Prompt.** Each launch (a `--resume` included) of a Claude or agy lead
+- **Prompt.** Each launch (a resume included) of a Claude, agy, or Codex lead
   appends `<session dir>/instructions.md` to the harness's own system
   prompt (Claude `--append-system-prompt-file`, agy's
-  `_meta.antigravity.systemPrompt.append`): the session key, and the
+  `_meta.antigravity.systemPrompt.append`, Codex `developerInstructions`): the session key, and the
   workflow manual the daemon renders for it as of that launch (the daemon's
   `LeadManual`, the same render as `workflow_manual` on the session's own
   connection). A failed render leaves the key sentence alone and is logged.
@@ -954,7 +954,7 @@ from a support conversation:
 - **Backend descriptor.** What differs per harness here is data on the
   backend's `BackendRegistration`, read through the conversation record's
   `Backend`; common code names no backend. `ManualHarness` is the harness the
-  lead's manual renders under (claude, agy; Pi declares none).
+  lead's manual renders under (claude, agy, codex; Pi declares none).
   `ToolNameScheme` is how its connection's `tools/list` spells ws's dotted
   tool names: agy declares `sanitize` (each `.` becomes `_`, as `tickets_query`:
   the Pi bridge's character mapping without its `ws__` prefix, since agy adds
@@ -981,6 +981,24 @@ from a support conversation:
   `--allowedTools mcp__ws` rule, and a launch with no ws-mcp at all is
   refused. Its ws tools are `mcp__ws__*`, not `mcp__plugin_<pkg>_<pkg>__*`,
   so user permission rules written for the plugin names do not match them.
+- **Codex app-server.** A hosted Codex lead uses one sustained `codex
+  app-server` under the existing holder, with thread/start or thread/resume
+  and thread.cliVersion as the catalog version. It shadows the installed
+  plugins' `ws` and `wsflow` MCP servers with required HTTP entries, with
+  the bearer token only in the child's environment; skills and the user's
+  hooks remain enabled. `agents.enabled=false` removes native subagents;
+  delegation is through `agent.*`, and Codex has no spawnable worker tier.
+  Send, steer, interrupt, next-turn model/effort and native sandbox mode
+  changes, and `/compact` use app-server controls. Approvals stay binary:
+  allow accepts, deny declines, permission grants last one turn; session
+  grants, policy amendments, cancel and elicitation persistence are not
+  offered. User-question requests get a chat-only error. Output is scoped
+  by thread and turn, so late interrupted items cannot finish newer work.
+  After a lost holder ring, thread/read recovers status and final output
+  before held input is released. Native reply identities in the existing
+  conversation-ring `source` member prevent already-persisted replies from
+  being appended again; they are read once at reattach, not per message.
+  Missing aggregate background telemetry stays unknown, never known zero.
 - **Key rule.** On a hosted lead connection, a tool call that omits
   `session_key` (or leaves it blank) runs with the connection's key when the
   tool declares one; an explicit key must be the connection's own or the
@@ -1218,7 +1236,9 @@ backend's `ChoiceLister` implementation. A harness is unavailable when the
 daemon lacks the backend or, for a `ChoiceLister`, its executable is not on
 PATH; Claude's models are the CLI's
 version-less aliases `opus`, `sonnet`, `haiku`, `fable` and its efforts the
-Claude levels, Pi's models come from `pi --offline --no-approve
+Claude levels, Codex's models and effort choices come from `model/list` on
+its last opened app-server process (empty before one opens, with no account
+probe on a dashboard read), Pi's models come from `pi --offline --no-approve
 --list-models` (`provider/model`, cached five minutes) and its efforts from
 `--thinking`; a listing failure is that harness's `error` alone), `GET
 /support/stores/<store>` (`{store, conversation: State|null, selection}`),

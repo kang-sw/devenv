@@ -421,6 +421,17 @@ func (w *liveWriter) apply(ev wslive.Event) bool {
 	} else {
 		res, err = w.st.Apply(ev, w.now().UnixMilli())
 	}
+	// A backend may attach a stable native identity to a finished reply.
+	// Keep it in the existing ring source member, in the same write as the
+	// text, so lost-holder-ring recovery can distinguish persisted output
+	// from a genuinely missed reply without a second checkpoint file.
+	if ev.Kind == wslive.KindReply && ev.Final && ev.Source != "" {
+		for i := range res.Ring {
+			if res.Ring[i].Kind == wslive.RingReply {
+				res.Ring[i].Source = ev.Source
+			}
+		}
+	}
 	changed := w.write(res, err, ev.Kind)
 	if w.owner != nil {
 		w.retrySummaries()

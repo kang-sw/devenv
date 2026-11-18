@@ -249,7 +249,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 			return fmt.Errorf("ws session key: %w", err)
 		}
 		c.setStatus(func() { c.rejoinKeyPending = false })
-		if rec.Backend == BackendClaude || rec.Backend == BackendAgy {
+		if rec.Backend == BackendClaude || rec.Backend == BackendAgy || rec.Backend == BackendCodex {
 			// Written on every launch, --resume included, so each process
 			// carries the key and the manual in its prompt. Pi leads get
 			// them from their extension, or from its bridge fallback
@@ -351,17 +351,17 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		// (restartIfDue).
 		fmt.Fprintf(c.r.opts.Log, "agent %s: the process's ws-mcp route %s is not this daemon's; it restarts at its first idle point\n", rec.ReplyID, rec.MCPURL)
 		c.mcpStale = true
-	case attach && rec.MCPToken == "" && rec.Backend == BackendAgy:
-		// An agy start the last daemon did not finish: Spawned named the
-		// process before its token was recorded. agy has no stdio
-		// fallback, so its ws tools are gone; it restarts before it takes
-		// input, as for a stale route.
-		fmt.Fprintf(c.r.opts.Log, "agent %s: the agy process's start did not finish; it restarts at its first idle point\n", rec.ReplyID)
+	case attach && rec.MCPToken == "" && (rec.Backend == BackendAgy || rec.Backend == BackendCodex):
+		// A start the last daemon did not finish: Spawned named the
+		// process before its token was recorded. These HTTP-only backends
+		// have no stdio fallback; restart at a known-safe idle point,
+		// as for a stale route.
+		fmt.Fprintf(c.r.opts.Log, "agent %s: the %s process's start did not finish; it restarts at its first known idle point\n", rec.ReplyID, rec.Backend)
 		c.mcpStale = true
 	case attach && rec.MCPToken != "":
 		// The recorded token and hello, as the process was started with.
 		spec.MCPSession = c.r.attachMCP(rec.ReplyID, rec.MCPToken, rec.MCPEnv, rec.workDir(), rec.HostPID)
-	case (rec.Backend == BackendClaude || rec.Backend == BackendAgy) && !attach:
+	case (rec.Backend == BackendClaude || rec.Backend == BackendAgy || rec.Backend == BackendCodex) && !attach:
 		// The lead's ws-mcp goes over the daemon's HTTP route with a new
 		// token. Without a route a Claude lead runs the same server over
 		// stdio (its --mcp-config entry); an agy lead has no stdio
@@ -754,10 +754,10 @@ func composeInstructions(dir string, rec Record, p Profile, system string) (stri
 }
 
 // composeLeadInstructions writes the instruction file a hosted lead (Claude,
-// agy) appends to its system prompt: the session key the daemon minted for
-// it and, when one rendered, its workflow manual. The harness loads no ws
-// plugin, so this prompt is where the session learns both, from its first
-// turn and without calling a tool. The manual is a snapshot of this launch.
+// agy, Codex) appends to its system prompt: the session key the daemon minted for
+// it and, when one rendered, its workflow manual. This prompt teaches both
+// from the first turn without depending on a plugin or a tool call. The
+// manual is a snapshot of this launch.
 func composeLeadInstructions(dir string, rec Record, manual string) (string, error) {
 	text := fmt.Sprintf("Your ws session key is `%s`. Pass it as the `session_key` argument of every ws tool call. "+
 		"This hosted session already has a key; do not mint a replacement (no ferrule call, no fresh-bootstrap key). ", rec.WSKey)
