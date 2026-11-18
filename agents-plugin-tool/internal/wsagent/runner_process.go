@@ -351,10 +351,10 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: the process's ws-mcp route %s is not this daemon's; it restarts at its first idle point\n", rec.ReplyID, rec.MCPURL)
 		c.mcpStale = true
 	case attach && rec.MCPToken == "" && (rec.Backend == BackendAgy || rec.Backend == BackendCodex):
-		// An agy start the last daemon did not finish: Spawned named the
-		// process before its token was recorded. agy has no stdio
-		// fallback, so its ws tools are gone; it restarts before it takes
-		// input, as for a stale route.
+		// A start the last daemon did not finish: Spawned named the
+		// process before its token was recorded. These HTTP-only backends
+		// have no stdio fallback; restart at a known-safe idle point,
+		// as for a stale route.
 		fmt.Fprintf(c.r.opts.Log, "agent %s: the %s process's start did not finish; it restarts at its first known idle point\n", rec.ReplyID, rec.Backend)
 		c.mcpStale = true
 	case attach && rec.MCPToken != "":
@@ -754,9 +754,9 @@ func composeInstructions(dir string, rec Record, p Profile, system string) (stri
 
 // composeLeadInstructions writes the instruction file a hosted lead (Claude,
 // agy, Codex) appends to its system prompt: the session key the daemon minted for
-// it and, when one rendered, its workflow manual. The harness loads no ws
-// plugin, so this prompt is where the session learns both, from its first
-// turn and without calling a tool. The manual is a snapshot of this launch.
+// it and, when one rendered, its workflow manual. This prompt teaches both
+// from the first turn without depending on a plugin or a tool call. The
+// manual is a snapshot of this launch.
 func composeLeadInstructions(dir string, rec Record, manual string) (string, error) {
 	text := fmt.Sprintf("Your ws session key is `%s`. Pass it as the `session_key` argument of every ws tool call. "+
 		"This hosted session already has a key; do not mint a replacement (no ferrule call, no fresh-bootstrap key). ", rec.WSKey)

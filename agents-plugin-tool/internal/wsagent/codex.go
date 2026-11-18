@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsinbox"
+	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 // CodexBackend drives one sustained `codex app-server` process over stdio.
@@ -84,6 +85,20 @@ func (b CodexBackend) Start(_ context.Context, spec StartSpec) (Process, error) 
 	cmd.Dir = spec.workDir()
 	cmd.Env = codexEnv(spec)
 	mapper := newCodexMapper(spec.SessionID)
+	if attach {
+		// The holder may have dropped a reply the earlier daemon already
+		// wrote. Read its durable identity once at reattach; steady-state
+		// send, mapping and recovery stay entirely in memory.
+		page, err := wslive.ReadRingPage(wslive.RingDir(spec.Dir), "", wslive.RingHistoryCap)
+		if err != nil {
+			return nil, fmt.Errorf("codex backend: read persisted reply identities: %w", err)
+		}
+		for _, entry := range page.Records {
+			if entry.Kind == wslive.RingReply && entry.Source != "" {
+				mapper.persisted[entry.Source] = true
+			}
+		}
+	}
 	stream, err := startChild(spec, cmd, mapper, codexProtocol{})
 	if err != nil {
 		return nil, err

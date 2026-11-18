@@ -81,6 +81,9 @@ type codexMapper struct {
 	texts     map[string]string
 	started   map[string]bool
 	finished  map[string]bool
+	// persisted contains native reply identities read once from the durable
+	// conversation ring before reattach, not merely from the holder replay.
+	persisted map[string]bool
 	approvals map[string]*codexPendingApproval
 	compact   bool
 	retry     int
@@ -93,6 +96,7 @@ func newCodexMapper(session string) *codexMapper {
 		texts:     map[string]string{},
 		started:   map[string]bool{},
 		finished:  map[string]bool{},
+		persisted: map[string]bool{},
 		approvals: map[string]*codexPendingApproval{},
 	}
 }
@@ -208,9 +212,9 @@ func (m *codexMapper) mapLine(line []byte, replies lineReplies) []Event {
 			{Live: &wslive.Event{Kind: wslive.KindReply, Text: m.texts[p.ItemID]}},
 		}
 	case "item/started":
-		return m.item(p.Item, false, now)
+		return m.item(p.TurnID, p.Item, false, now)
 	case "item/completed":
-		return m.item(p.Item, true, now)
+		return m.item(p.TurnID, p.Item, true, now)
 	case "thread/tokenUsage/updated":
 		return codexUsage(msg.Params)
 	}
@@ -287,7 +291,7 @@ func codexPresent(raw json.RawMessage) bool {
 	return len(raw) > 0 && string(raw) != "null"
 }
 
-func (m *codexMapper) item(item codexItem, done bool, now int64) []Event {
+func (m *codexMapper) item(turn string, item codexItem, done bool, now int64) []Event {
 	if item.ID == "" || m.finished[item.ID] || (!done && m.started[item.ID]) {
 		return nil
 	}
@@ -302,11 +306,12 @@ func (m *codexMapper) item(item codexItem, done bool, now int64) []Event {
 			return nil
 		}
 		delete(m.texts, item.ID)
-		if strings.TrimSpace(item.Text) == "" {
+		source := "codex/" + m.sessionID + "/" + turn + "/" + item.ID
+		if strings.TrimSpace(item.Text) == "" || m.persisted[source] {
 			return nil
 		}
 		return []Event{
-			{Live: &wslive.Event{Kind: wslive.KindReply, Text: item.Text, Final: true}},
+			{Live: &wslive.Event{Kind: wslive.KindReply, Text: item.Text, Final: true, Source: source}},
 			{RetryEnd: true},
 		}
 	case "commandExecution", "mcpToolCall", "fileChange", "webSearch", "imageView":
@@ -351,7 +356,7 @@ func (m *codexMapper) endTurn(turn codexTurn, now int64) []Event {
 	// the holder ring. Already completed messages are not emitted twice.
 	for _, item := range turn.Items {
 		if item.Type == "agentMessage" {
-			out = append(out, m.item(item, true, now)...)
+			out = append(out, m.item(turn.ID, item, true, now)...)
 		}
 	}
 	if event := m.batches.finish(now, true); event != nil {
