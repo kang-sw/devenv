@@ -1,0 +1,492 @@
+---
+title: "Hosted prompt assembly: daemon-owned workflow manual, playbook body, ambient injection and renderable agent-facing playbooks"
+parent: 261114-epic-ws-common-session-foundation
+related:
+  261117-feat-ws-harness-capability-catalog: "landed (85ef24622); value source for the native-subagent steer (its native subagent tool name per harness) and the skill list/injection items"
+  261117-feat-ws-hosted-antigravity-adapter: "its Phase 2 Forward names this ticket as the fix for a keyless agy lead"
+  261117-feat-ws-agent-tools-mailbox-routing: "agent.spawn surface (candidate C: spawn delivers a system prompt and resolves tier; rendering stays in playbook.render); Decision 6 pairs native-tool removal with this ticket's Never-use steer"
+  261117-feat-ws-hosted-compaction-lifecycle: "sibling stage-2 child; shares the daemon injection path (nudge and restore bundle ride the same assembly)"
+  261116-research-ws-hosted-session-first-tier: "evidence and Confirmed Decisions"
+  261116-feat-ws-daemon-plugin-package-select: "hosted-lead plugin package selection; Decision 12 removes the plugin bundle from hosted Claude, which then runs the daemon's own package ws-mcp (Phase 1)"
+  261115-bug-ws-pi-bootstrap-elides-undelivered-manual: "Pi extension manual-injection readiness, which Decision 21 relies on"
+  261115-feat-ws-worker-profile-session-spawn: "ready; owner-created worker-profile sessions keep its short worker manual and are exempt from native-subagent removal"
+  261115-feat-ws-whiteboard-agent-card: "ready; card children keep its fixed card bootstrap; its keyless-attempt tests meet Decision 10"
+  261115-feat-ws-hosted-codex-adapter-contract: "ready; recommends keeping plugin skills and hooks in hosted Codex, the opposite of Decision 12, outside this ticket's scope (Decision 15)"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-completeness-reviewed: 1e60dd1b53252259
+sage-review-design-reviewed: 1e60dd1b53252259
+---
+
+# Hosted prompt assembly
+
+## Background
+
+Owner 18:35 proposed an "application layer" on top of the common harness
+interface: the daemon, not the harness plugin, assembles what a hosted session
+reads. This ticket carries four of its parts, placed in stage 2 ("hosted prompt
+assembly") by (28)=a:
+
+- (2) the daemon owns the workflow manual;
+- (3) the daemon owns the skill body: it inserts the playbook body directly,
+  removing today's double pointer (skill invocation, then `playbook.read`);
+- B (lead addition, accepted as a candidate by (28)=a): per-turn ambient
+  injection by the daemon replaces plugin hooks;
+- C (same, revised by owner 18:56): `agent.spawn` is playbook-unaware; it
+  delivers `system_prompt_path`/`system_prompt` as an appended system prompt
+  ((39), (44)) and resolves tier server-side ((38)=d). Rendering stays only in
+  `playbook.render`, which returns the path plus the recommended tier.
+
+It also adds the native-subagent "Never use" steer from (29)=ok's owner
+addition, delivered through daemon-injected text (Decision 24). Today the shipped playbooks steer delegation toward whatever spawn
+tool the CLI plugin offers; once hosted workers lose their native subagent tool
+too, sessions must still be steered away from a native subagent tool that cannot
+be removed (Codex and Antigravity removability is unprobed, (08)=c, stage 3)
+toward `ws/agent.*`.
+
+## Decisions
+
+Confirmed (cite IDs; no other behavior is decided here). Decisions 4 and 5 were
+queued and acknowledged by the owner on 2026-11-17 ("32..37=ok").
+
+1. **Application layer parts 2, 3, B, C are stage-2 children (28)=a**, owner
+   proposal 18:35. Parts 2 and 3 are the daemon-owned manual and daemon-owned
+   skill body; B and C were lead additions accepted as candidates by (28)=a.
+2. **Native subagent tool removal extends from hosted leads to hosted workers
+   (29)=ok**, a consequence of (06) "delegation is always `ws/agent.*`
+   regardless of harness". The removal itself is delivered in
+   `261117-feat-ws-agent-tools-mailbox-routing` (Decision 6, its Phase 3,
+   `ai-docs/tickets/.done/261117-feat-ws-agent-tools-mailbox-routing.md#L825-L846`;
+   its Phase 2 is mailbox routing).
+3. **Playbooks state, per harness, "Never use {{NativeToolScheme}}" (owner
+   addition with (29)).** Mechanism superseded by Decision 24 (the steer is
+   daemon-injected text, not a playbook render variable); the steer itself
+   stands. As first settled, `{{NativeToolScheme}}` was a render variable naming
+   that harness's native subagent tool, so harnesses whose native subagent
+   tools cannot be removed are still steered to `ws/agent.*`. Its source is the
+   catalog's native-subagent item per harness; the catalog ticket is therefore a
+   prerequisite.
+4. **(32), owner ack 2026-11-17: the "Never use {{NativeToolScheme}}" line
+   renders only in hosted sessions; the CLI tier renders it empty.** Narrowed
+   by Decision 23 and carried by Decision 24's daemon-injected text, which the
+   CLI tier never receives. Rejected:
+   rendering it everywhere, because the CLI plugin is frozen and CLI-tier leads
+   still delegate through the native Agent tool on the shared playbooks.
+5. **(33), owner ack 2026-11-17: (28)=a's single "hosted prompt assembly" child
+   is split into two tickets:** prompt assembly (2, 3, B, C; this ticket) and
+   compaction lifecycle (1, A, ws/compact;
+   `261117-feat-ws-hosted-compaction-lifecycle`). Rejected: one ticket, because
+   ws/compact is a separate runtime mechanism (session replacement, segment
+   chain, record-shape compatibility tier) with different verification.
+
+Decisions 6-17 were settled through the Open Decision Queue on 2026-11-18
+(owner answers "(107) ok", "(108)", "109=a", "110", "116,117=a",
+"111..114,118..120=ok").
+
+6. **(107) Phase order: the daemon-delivered session key and workflow manual
+   come first (Phase 1); the native-subagent steer and daemon-owned playbook
+   body follow (Phase 2).** No code dependency orders them (the catalog has
+   landed; the steer is unused by the manual work), and the owner
+   prioritized the hosted-lead key gap ((102)=a). Rejected: the original order.
+7. **(108) Hosted sessions get the full keyed workflow manual injected always,
+   through the launch-time appended system prompt**: Claude
+   `--append-system-prompt-file`, agy `_meta.antigravity.systemPrompt.append`.
+   A Pi lead already meets this: its extension appends the manual on every
+   `before_agent_start` (`agents-plugin-pi/src/lead-bootstrap.ts#L335-L350`)
+   and takes its key from the hosted key env; only the bridge's fallback path
+   (extension failed to load, `pi_lead_bridge.mjs#L50-L56`) lacks the manual,
+   so the daemon adds it there (Decision 21). Owner note: the manual is "how to work" itself and must
+   not depend on whether the model happens to call a tool. The injected text is
+   a launch-time snapshot; the session calls `workflow_manual` again for fresh
+   session state. Rejected: a short card plus first-turn pull; MCP initialize
+   `instructions` (unprobed per harness).
+8. **(118), revised by (123)=a on 2026-11-18: children get no lead workflow
+   manual.** An `agent.spawn` child's "how to work" is its rendered playbook,
+   which `agent.spawn` already delivers always as an appended system prompt,
+   plus the key sentence `composeInstructions` adds today
+   (`agents-plugin-tool/internal/wsagent/runner_process.go#L717-L742`); this
+   meets the owner's (108) intent that a subagent's how-to-work arrives
+   always, never through a tool call. Owner-created worker-profile sessions
+   and card children keep the manuals their ready tickets define
+   (`261115-feat-ws-worker-profile-session-spawn`,
+   `261115-feat-ws-whiteboard-agent-card`). Rejected: appending the manual
+   `workflow_manual` renders for the child's key (it is the lead-only
+   orchestration manual, `internal/mcp/server_inventory.go#L30`, and
+   `agent.spawn` children hold parent-less delegate keys that cannot re-read
+   it); a new short delegate manual for every child (a new shipped artifact
+   to maintain).
+9. **(120) No fixed byte budget for the injected manual.** Manual-size
+   optimization is separate work; this settles research Open Question 10 for
+   this ticket.
+10. **(109) On a hosted lead connection, a tool call that omits `session_key`
+    resolves server-side to that connection's hosted key.** Rejected: relying
+    on the prompt text alone.
+11. **(117) `session_key` stays an optional argument with a permission check.**
+    On a hosted lead connection: omitted resolves to the connection's key
+    (10); an explicit key must be the connection's own key or a key of one of
+    its descendant sessions; any other key (a peer lead's, or a peer's
+    descendant's) is refused with an error naming the rule. Scope per (124)=a
+    (2026-11-18): these rules apply to hosted lead connections only, because
+    child connections carry no hosted identity
+    (`agents-plugin-tool/internal/wsagent/runner_process.go#L140-L163`,
+    `#L309-L317`) and a lead has no parent; refusing a child's use of its
+    parent's key needs a child-connection identity and is
+    `261118-feat-ws-hosted-child-connection-identity`. Rejected for now:
+    giving child connections a hosted identity in this ticket. The CLI path is
+    unchanged (frozen tier). Rejected:
+    dropping `session_key` from every tool schema, which breaks the CLI and
+    older plugins (effectively T3 with a minor bump).
+12. **(110) Hosted Claude sessions launch without the ws/wsflow plugins** and
+    use the agent-v2 adapter path like agy and Pi: the daemon injects the
+    manual and key (7), and skills are exposed through a playbook whitelist plus
+    a dashboard-injected slash-command list (14). The Claude plugin and the
+    `kang-sw-devenv` marketplace stay as they are for the CLI path. Rejected:
+    keeping the plugin's mod in hosted Claude alongside daemon injection.
+    This owner direction supersedes, for hosted Claude, the catalog's rejection
+    of "dropping the bundle entirely" (`261117-feat-ws-harness-capability-catalog`
+    Decision 12, owner (65)) and the daemon-bundled plugin of
+    `261113-feat-ws-hosted-lead-bundled-plugin-only`: the hosted Claude lead
+    gets no `--plugin-dir` bundle, and the record's `plugin_isolation` field
+    stays in place but no longer affects hosted Claude launches (removing it is
+    out of scope). The mod's in-process `mcp__ws__request_*` tools (such as
+    `request_compaction`) leave with the plugin; hosted compaction belongs to
+    `261117-feat-ws-hosted-compaction-lifecycle` (ws/compact).
+13. **(116) The plugin leaves hosted Claude in Phase 1, together with manual
+    and key injection.** Until Phase 2 lands, hosted Claude has no skill
+    shortcuts (the injected manual still names `playbook.read`), and until
+    Phase 3 lands it has no plugin-hook ambient context. Both gaps stay inside
+    `track/agent-v2`, whose develop merge is held ((115)=b) until the
+    follow-up work accumulates. Rejected: removing the plugin at the end of
+    Phase 3, which needs throwaway dedupe code while the mod and the daemon
+    both inject the manual.
+14. **(119) Skill exposure folds into Phase 2**: the playbook whitelist, the
+    dashboard slash-command list, and the daemon's expansion of a command into
+    its playbook body are the same command-to-body mechanism as the
+    daemon-owned playbook body. Rejected: a separate phase.
+15. **(111) Harness scope is hosted Claude, agy, and Pi.** Codex is excluded:
+    it is not a registered hosted backend; its adapter is separate work.
+16. **(113) No separate injection seam.** Implement the launch-time append
+    only; ws/compact segment restarts refill the same `StartSpec.Instructions`
+    field (a restart is a launch), and Phase 3 ambient text rides the
+    harness's per-turn input, since `StartSpec.Instructions` applies only at
+    process start (design review 2026-11-18). Rejected: a general injection layer
+    now, which is speculative while the reuse point exists.
+17. **(112) Compatibility tiers.**
+    - Lead `StartSpec.Instructions` is in memory only: T0. No record, store,
+      event, `/mcp` hello, or tool-argument shape changes.
+    - `session_key` fallback and permission check (10, 11): argument shape
+      unchanged, T0. Calls a hosted connection made with a peer's or parent's
+      key now fail by design.
+    - Hosted Claude launch without plugins (12): launch arguments are built in
+      memory per start, T0. Downgrade direction: a plugin-less lead launched by
+      a new daemon and rejoined by an older one keeps running, but the old
+      lead result mapper accepts only `plugin:<pkg>:<pkg>` servers
+      (`agents-plugin-tool/internal/wsagent/claude.go#L1500-L1511`), so its
+      result-carrying ws tools (tracker, cards, UI) lose their mapped display:
+      T1, which still permits a patch.
+    - A lead launched by an older daemon and rejoined by a newer one stays
+      keyless until restart: accepted T0 caveat. Rejected: persisting the
+      injected text in the record.
+    - Phase 2 whitelist: if it adds a manifest field, the field is optional
+      and an old binary ignores it (T0); a required field is out of bounds.
+      The dashboard slash list is served by the same daemon, T0.
+
+Decisions 18-21 close the fact populator's decision gaps of 2026-11-18 on the
+lead's technical judgment (no owner round; implementation detail under the
+already-confirmed Decisions 7-12).
+
+18. **A plugin-less hosted Claude lead reaches ws through a daemon-supplied
+    `--mcp-config` without `--strict-mcp-config`, server name `ws`**, the same
+    shape children use (`claudeMCPConfig`, `agents-plugin-tool/internal/wsagent/claude.go#L232-L245`),
+    so the user's other plugins and MCP servers keep loading. The lead result
+    mapper (`claudeMapper.resultTool`, `claude.go#L1500-L1511`), which today
+    maps result-carrying ws tools for leads only from `plugin:<pkg>:<pkg>`,
+    also accepts the `ws` server for hosted leads. Rejected: a plugin-style
+    server name (needs a fake plugin wrapper); `--strict-mcp-config` (drops
+    every user and claude.ai server, catalog Phase 2 probe).
+19. **The descendant check walks the Runner lineage (`Record.Parent`, the
+    authority parent of epic (84)=a) from the presented key's session up to
+    the connection's session**, read through the caller-record path
+    internal/mcp already uses (`callerRecord`, 6f4da285d); key-record parents
+    are not the source, because `agent.spawn` and worker-profile keys are
+    minted with an empty key parent (`runner.go#L793`, `agent_keys.go#L28`).
+    It applies to every key-taking tool
+    on a hosted lead connection, including `workflow_manual`, whose current gate
+    admits any parent-carrying key (`agents-plugin-tool/internal/mcp/session_context.go#L118-L123`).
+    The fallback and check sit at the top of `callTool`
+    (`server_dispatch.go#L21-L89`) using `Server.hostedSessionKey()`
+    (`process_env.go#L276-L279`). An omitted key or the connection's own key
+    short-circuits by string comparison; only an explicit other key pays for
+    the walk's record reads, so the common dispatch path does no file I/O.
+    For hosted lead connections this supersedes ff312f48's allowance for
+    keys minted through `ferrule(parent_session_key: <connection key>)`:
+    such a key has no Runner record and is refused (no current caller: hosted
+    Claude leads have native Agent removed, Pi children are not hosted
+    connections). Rejected: a children index (new state to
+    keep consistent; chains are short); the key-record parent chain (misses
+    `agent.spawn` children).
+20. **The lead manual render reaches the lead `StartSpec` through an injected
+    `RunnerOptions` function supplied by the daemon**, next to `WSMCP`
+    (`agents-plugin-tool/internal/wsagent/runner.go#L134`), because
+    `internal/mcp` imports `internal/wsagent` and not the reverse. It serves
+    leads only (Decision 8). Rejected: moving the render into
+    `internal/wsagent` (pulls the server's session and config state across the
+    package boundary).
+21. **Pi keeps its extension's manual injection; the daemon adds the manual
+    only on the bridge's fallback path**, where it already appends the key
+    (`pi_lead_bridge.mjs#L50-L56`). Rejected: a daemon copy on every Pi lead
+    plus suppressing the extension's block under `hostedMode()`, which changes
+    `agents-plugin-pi/src` for no behavior gain and still needs dedupe.
+
+Decisions 22-23 apply the design review's `autonomous` findings of 2026-11-18
+on the lead's judgment.
+
+22. **A plugin-less hosted Claude lead gets a daemon allow rule for the `ws`
+    server's tools**, the same rule children get (`claudeAllowedRules`,
+    `agents-plugin-tool/internal/wsagent/claude.go#L197-L225`), so ws calls do
+    not each turn into a dashboard prompt under a non-auto permission mode.
+    The tool names change from `mcp__plugin_<pkg>_<pkg>__*` to `mcp__ws__*`,
+    so a user's allow, ask, or deny rule written against the plugin names no
+    longer matches in hosted Claude leads; this is accepted and stated in the
+    Phase 1 Result. Rejected: translating user rules into the new names
+    (reads and rewrites user settings at every launch for a corner case).
+23. **The "Never use" steer keys on the session's native-subagent policy,
+    not on "hosted"**: a session under the removal policy
+    (`wsagent.RemovesSubagents`, `internal/wsagent/agent_tools.go#L59`, which
+    is harness-independent; not the Claude-only `subagentRemovedRecord`,
+    `internal/mcp/playbook_tools.go#L162`) gets it,
+    including on a harness whose native tool cannot be physically removed;
+    exempt hosted sessions such as owner-created worker-profile sessions
+    (`261117-feat-ws-agent-tools-mailbox-routing` Decision 6 exemption) and
+    the CLI tier get none. This narrows Decision 4's "hosted".
+
+Decisions 24-25 were settled through the Open Decision Queue on 2026-11-18
+(owner answers "121,123,124=a", "122=ok"; Decision 8 and Decisions 10-11
+above carry (123) and (124)).
+
+24. **(121) The native-subagent "Never use" steer is daemon-injected text, not
+    a playbook render variable**: the lead gets it in its Phase 1 appended
+    manual, an `agent.spawn` child in its appended prompt next to the key
+    sentence, keyed on Decision 23's policy and naming the harness's native
+    subagent tool from the catalog's per-harness item. No shared playbook text
+    changes, so the steer is T0. Rejected: a `{{.NativeToolScheme}}` render
+    variable in shared playbooks, because playbook text comes from the
+    connecting plugin and an older same-minor daemon fails closed on an
+    unknown or unprovided variable (`ErrUndeclaredVar`/`ErrUnprovidedVar`,
+    `agents-plugin-tool/internal/mcp/playbook_tools.go#L1085-L1125`; skew per
+    `ai-docs/manuals/release-compatibility.md#L14-L26`); shipping daemon
+    support first and the text later (still fails closed under skew); a minor
+    bump (T3).
+25. **(122) Phase 4 is T0**: `playbook.render` already returns the path plus
+    `recommended-tier`/`recommended-model`/`recommended-reasoning-effort`
+    (`playbook_tools.go#L529-L565`); a new playbook resource that uses only
+    variables older binaries know loads on them (no name allowlist,
+    `internal/wsrsrc/loader.go#L90-L114`); the embedded builtin profile text
+    (`internal/wsagent/instructions/explore.md`, `builtin.go#L139-L146`) stays
+    the fallback when the plugin lacks the playbook. Rejected: replacing the
+    embedded text, which would drop the profile for an old plugin under a new
+    daemon.
+
+## Constraints
+
+- Go tests run on remote w5090 only, never local `go test`.
+- Shipped playbooks stay harness-neutral: per-harness differences are resolved
+  by the daemon (the native-subagent steer is daemon-injected text, Decision
+  24), never harness names in playbook text. Shipped text must not depend on anything only this
+  repository has.
+- Read before editing playbooks, skills, `agents-plugin/rsrc/` or
+  `agents-plugin-wsflow/`: `ai-docs/manuals/shipped-surface-boundary.md`,
+  `ai-docs/manuals/skill-authoring.md` (apply its invariant checklist to every
+  changed Invariants/Constraints line) and `ai-docs/manuals/wsflow-mirroring.md`.
+- Read before editing `agents-plugin-tool/`: `ai-docs/manuals/shipped-surface-boundary.md`
+  and `ai-docs/manuals/release-compatibility.md`; for `agents-plugin-tool/internal/mcp/`
+  also `ai-docs/manuals/ws-mcp.md`.
+- Release-gate file-touch rule (owner, 2026-11-17): minimize daemon file touches
+  at the root; no per-turn file writes or per-event O(N) rereads for injection;
+  interactive paths never wait on file I/O. Related, not edited from here:
+  `261117-research-ws-daemon-file-touch-map`.
+- The Claude CLI tier is frozen: keep current features, add none. Hosted-only
+  behavior must not change what the CLI plugin renders.
+- Any cross-version surface touched (an MCP tool or argument, the `/mcp` hello,
+  a render-variable manifest field) states its compatibility tier in
+  `## Decisions` before `ready/` (AGENTS.md `### Compatibility Tiers`).
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin-wsflow/rsrc/, agents-plugin-wsflow/skills/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin/hooks/, agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for agents-plugin-tool/internal/)
+
+## Prior Decisions
+
+- 261117-feat-ws-harness-capability-catalog (2026-11-17, Decisions 12): "Rejected: adding HTTP alongside the plugin's stdio server (two ws servers); dropping the bundle entirely (hooks and skills vanish before prompt assembly replaces them)." — bearing: contradiction-candidate
+- 261117-feat-ws-harness-capability-catalog (2026-11-17, commit 4e8add8d, Phase 2 Result): "`--strict-mcp-config` (option 3) drops every plugin, user and claude.ai MCP server ... (option 2) names the server `ws`, not `plugin:ws:ws`" — bearing: constrains
+- 261113-feat-ws-hosted-lead-bundled-plugin-only (2026-11-13, commit 876dd14b0, Background): "dashboard-hosted sessions (Claude and Pi) should use the ws/wsflow plugin bundled with the daemon and exclude any user-installed ws/wsflow copy" — bearing: contradiction-candidate
+- 261110-feat-ws-hosted-session-mode-flag (2026-11-11, commit ff312f48): "workflow_manual lets a key whose record carries a parent through under the hosted flag ... child mints keep working for subagents on the same connection" — bearing: constrains
+- 261113-bug-ws-hosted-session-sentinel-bootstrap-mints-foreign-key (2026-11-15, Resolution): "Hosted sessions already reject other keys in workflow_manual; ff312f485." — bearing: constrains
+- 261018-feat-claude-mod-ws-manual-injection (2026-10-18, commit 04ee5872): "user chose (11)=D, minting a per-conversation lead key at session start ... key-less playbook_read render differs from the keyed manual (User preferences overrides), so a plain cut would drop key-specific text" — bearing: constrains
+- 260904-feat-pi-lead-bootstrap-system-prompt (2026-09-04, Decisions): "### 2. Bridge session-key normalization — narrow, mechanical" — bearing: supports
+- 261117-feat-ws-hosted-antigravity-adapter (2026-11-18, commit e83316ae): "No Record field added (an old binary drops unknown fields): T0 for the daemon's stores; an old daemon reading an agy row is T1." — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | whole ticket (Phases 1-4): agents-plugin-tool/internal/wsagent/runner_process.go, claude.go, claude_lead_plugins.go, agy.go, pi_lead_bridge.mjs; agents-plugin-tool/internal/mcp/server_dispatch.go, session_context.go, workflow_manual.go; agents-plugin-pi/src/lead-bootstrap.ts (Pi dedupe); Phase 2-3 add agents-plugin/rsrc/, agents-plugin-wsflow/, agents-plugin/hooks/, wsdashboard composer; phase text is a plausible breakdown refined at ready promotion |
+| scope.surface | cross-module | internal/mcp imports internal/wsagent and not the reverse (agent_tools.go#L11; search for internal/mcp in wsagent non-test files returned nothing), so the manual render handleWorkflowManual (workflow_manual.go#L311-L493) reaches wsagent only through a new injected RunnerOptions seam beside WSMCP (runner.go#L134) and LeadKeyStore (runner.go#L36-L48); also touches the Pi package and the dashboard |
+| scope.new_public_symbol | unknown | Phase 1 likely adds an exported runner option for the lead manual render (Decision 20) and a hosted-key fallback in callTool; neither is named; no new playbook render variable (Decision 24) |
+| scope.new_type_contract | unknown | the render-seam signature, the descendant-key rule (session_key admitted today for any parent-carrying key under the hosted flag, session_context.go#L118-L123, not only descendants) and the Phase 2 whitelist manifest field are unsettled |
+| scope.test_surface | new-files | existing hosted tests agents-plugin-tool/internal/mcp/hosted_session_test.go, internal/wsagent/lead_claude_test.go, lead_http_test.go, lead_isolation_test.go, lead_bundled_plugin_test.go cover launch args and hosted keys; Phase 1 permission cases extend them, Phase 2 variable and whitelist tests and Phase 4 render tests are new; Go tests run on w5090 only |
+| complexity.reuse_points | confirmed | StartSpec.Instructions is delivered by agy.go#L248-L254 and, for children only, claude.go#L193-L194 (claudeLeadArgs, claude.go#L103-L136, has none); composeInstructions (runner_process.go#L717-L742) already writes the child key sentence; AgentKeyStore.MintLead (mcp/agent_keys.go#L38-L44) mints the lead key; hostedSessionKey (mcp/process_env.go#L276-L279) is the per-connection hosted identity; claudeMCPConfig (claude.go#L232-L245) and enabledPlugins false (claude_lead_plugins.go#L53-L64) exist; dashboard slash lists already come from adapters (claude.go#L1194-L1229, agy.go#L957-L971, pi.go#L1099-L1106) |
+| complexity.side_effect_risk | high | hosted Claude without the plugin: the lead mapper maps result-carrying ws tools only from plugin:<pkg>:<pkg> servers (claude.go#L1500-L1511) so a daemon-supplied server named ws loses tracker/card/UI results for leads; the mod's in-process mcp__ws__request_* tools (claude-lead-compaction.jsonl fixture) go with it; the central callTool fallback (server_dispatch.go#L21-L89) touches every hosted call |
+| risk.correctness | high | new descendant check on an explicit session_key and a keyless fallback in the one central dispatch, plus exactly-one-manual dedupe across Claude plugin mod, Pi extension (lead-bootstrap.ts#L335-L350 already injects the static manual on every turn) and daemon copy |
+| risk.fit | moderate | Decision 12 reverses the catalog's owner (65) Decision 12 rejection of dropping the bundle before prompt assembly lands, deliberately (owner (110), (116)=a) with the gap accepted in Decision 13; MCP name, mapper, permission walk and render seam settled in Decisions 18-21 |
+| risk.test | moderate | launch-arg and permission-matrix tests are unit-reachable; first-turn agent.spawn needs a live hosted harness per kind, agy needs an account-backed smoke, and a no-plugin Claude launch needs a version probe |
+| risk.security_or_contract | high | the permission check changes which keys a hosted connection may use (peer and parent refused), the lead key goes into model-visible prompt text, and a plugin-less launch changes which MCP servers and hooks a user's Claude loads |
+
+## Phases
+
+### Phase 1: Daemon-delivered session key and workflow manual
+
+The daemon, not a harness plugin, gives every hosted session its session key
+and workflow manual from the first turn (Decisions 7-13, 15-17).
+
+- Hosted Claude and agy leads: the lead's `StartSpec.Instructions` carries
+  the full workflow manual rendered for the lead's own key, minted by
+  `Runner.CreateLead` / `AgentKeyStore.MintLead`
+  (`agents-plugin-tool/internal/mcp/agent_keys.go#L38-L44`), through the
+  daemon-supplied render function (Decision 20). Claude delivers it with
+  `--append-system-prompt-file`: the develop hotfix merge 5c7797981 (impl
+  fff872331, v0.50.7, synced into the track before this phase starts) already
+  has `startLead` write a key-only `instructions.md` through
+  `composeLeadInstructions` and `claudeLeadArgs` pass it with that flag, so
+  this phase replaces that text with the rendered manual (the key sentence
+  stays in it) rather than adding the flag. agy delivers it with
+  `_meta.antigravity.systemPrompt.append` (`agy.go#L248-L254`).
+- Hosted Pi leads (Decision 21): unchanged where the bundled extension loads
+  (it appends the manual on every `before_agent_start`,
+  `agents-plugin-pi/src/lead-bootstrap.ts#L335-L350`, and takes the key from
+  the hosted key env, `agents-plugin-pi/src/bridge.ts#L1018-L1021`); on the
+  bridge's fallback path (`pi_lead_bridge.mjs#L50-L56`, extension failed to
+  load) the bridge appends the daemon-rendered manual next to the key it
+  appends today. Each hosted session ends up with exactly one copy.
+- Child sessions: unchanged by this phase; `agent.spawn` children keep the
+  key sentence plus their appended playbook prompt (Decision 8).
+- Hosted Claude launches without the ws/wsflow plugins (Decisions 12-13, 18):
+  no `--plugin-dir` bundle, so no plugin skills, hooks, mod, or mod
+  in-process `request_*` tools; installed ws/wsflow copies stay disabled with
+  the existing `--settings` `enabledPlugins` false
+  (`claude_lead_plugins.go#L53-L64`). ws tools reach the session through a
+  daemon-supplied `--mcp-config` server named `ws`, without
+  `--strict-mcp-config`, and the lead result mapper accepts that server
+  (`claude.go#L1500-L1511`). That server runs the daemon's own package
+  ws-mcp, the same `RunnerOptions.WSMCP` children use. Every launch through
+  `claudeLeadArgs` is plugin-less, including owner-created worker-profile
+  sessions (`Runner.CreateLead` with a non-lead mint); confirm their
+  short-manual delivery (`261115-feat-ws-worker-profile-session-spawn`) does
+  not depend on the plugin mod, and report it if it does. The user's CLI installation, the Claude plugin,
+  and the `kang-sw-devenv` marketplace are not modified. If a live launch on
+  the installed Claude version does not expose the `ws` server alongside the
+  user's other MCP servers, stop and report what it does instead of choosing
+  another mechanism.
+- `session_key` on a hosted lead connection (Decisions 10-11, 19): omitted
+  resolves to the connection's key; an explicit key must be the connection's
+  own or a descendant session's (Runner lineage walk); any other key is
+  refused with an error naming the rule, `workflow_manual` included. Child
+  and non-hosted connections behave as today.
+
+Dogfood evidence (2026-11-18, track/agent-v2): a hosted lead starts with no
+session key and no workflow manual (true of an agy lead and of a Claude lead
+whose bundled plugin does not deliver them: the daemon builds a lead's
+`StartSpec` with no `Instructions`, `agents-plugin-tool/internal/wsagent/runner_process.go#L265-L326`,
+and `agy.go#L248-L254` appends only `spec.Instructions`; a native-extension Pi lead gets
+its key from the hosted key env and re-login (`agents-plugin-pi/src/bridge.ts#L1018-L1021`,
+`#L1258-L1261`) and a fallback Pi lead from `pi_lead_bridge.mjs#L52-L53`, a Claude lead with the plugin loaded adopts it
+through the mod, `agents-plugin/hooks/claude-mod/manual.ts#L555-L568`). On a scratch daemon a hosted Claude lead's
+`agent.spawn` failed with "session_key is required", and the agy Phase 2 live
+lead recovered only by calling `ferrule` itself
+(`261117-feat-ws-hosted-antigravity-adapter` Phase 2 Result, Forward).
+
+Deferred: skill shortcuts in hosted Claude (Phase 2), plugin-hook ambient
+context (Phase 3).
+
+Verification:
+
+- Go tests on remote w5090: each hosted lead kind's start carries the keyed
+  manual in its appended prompt; a child's appended prompt is unchanged; the
+  hosted Claude launch arguments load no ws/wsflow plugin
+  and carry the `ws` `--mcp-config`; the lead mapper maps results from it;
+  a fallback-path Pi lead's bridge prompt carries the manual;
+  `session_key` omitted, own, descendant (an `agent.spawn` child), and peer
+  cases on a hosted lead connection, and unchanged child and non-hosted
+  connections; the ws allow rule (Decision 22) is present.
+- A live hosted lead per available harness (Claude, Pi; agy when an account is
+  available) calls `agent.spawn` successfully on its first turn without
+  calling `ferrule` and without passing `session_key`.
+- No per-turn file writes: the manual is written at most once per session
+  start.
+
+### Phase 2: Native-subagent steer, daemon-owned playbook body, and skill exposure
+
+Add the native-subagent "Never use <tool>" steer to the daemon-injected text
+(Decisions 23-24): the lead's appended manual and an `agent.spawn` child's
+appended prompt, for sessions under the removal policy, naming the harness's
+native subagent tool from the catalog's per-harness item (harnesses without a
+catalog value yet get none until their stage-3 values land). No shared
+playbook text changes. Update the catalog's agy lead-row `Source` text,
+which still says a per-harness playbook line covers the steer
+(`internal/wsagent/catalog.go#L420-L421`), to name the daemon-injected text.
+
+The daemon inserts a playbook body directly into a hosted session's prompt
+when a command is invoked, removing the skill-invocation-to-`playbook.read`
+double pointer. Skill exposure uses the same mechanism (Decision 14): a
+whitelist of user-invocable playbooks, the dashboard composer offering that
+whitelist as a slash-command list for hosted sessions, and the daemon
+expanding a sent command into its playbook body plus the user's arguments.
+The whitelist is the package's user-invocable lead skills (the `lead-*` skill
+shims the CLI plugin exposes), held daemon-side; it follows Decision 17's tier
+rule. Only user-sent commands lose the double pointer: a playbook the model
+chooses to use mid-turn is still read through `playbook.read`.
+
+Deferred: ambient injection, `agent.spawn` system prompt delivery.
+
+Verification: Go tests on remote w5090 for the steer per harness and policy
+(a removal-policy lead and child carry it with their harness's tool name; an
+exempt worker-profile session and the CLI tier carry none), for whitelist
+resolution, and for command expansion into the body without a
+`playbook.read` round trip; playbook mirroring/shim drift tests per
+`wsflow-mirroring.md`; a recorded hosted turn (Claude without plugins) showing
+a slash command from the dashboard list expanded into its body.
+
+### Phase 3: Per-turn ambient injection replacing plugin hooks
+
+The daemon injects the per-turn ambient context that plugin hooks supply today,
+driven from stream events, so a hosted session needs no plugin hooks. Which
+hooks are replaced is enumerated in planning from the plugin's hook inventory
+(the claude-mod's per-turn injections); the SessionStart(compact) revive nudge
+in `agents-plugin/hooks/hooks.json` is excluded, because
+`261117-feat-ws-hosted-compaction-lifecycle` owns it. The injected text rides
+the harness's per-turn input, since `StartSpec.Instructions` applies only at
+process start, with no new injection layer (Decision 16).
+
+Verification: tests on remote w5090 per replaced hook (injected content
+equivalent to the hook's; no duplicate where a harness still loads a ws
+package); measured syscalls/s shows no new per-turn file writes.
+
+### Phase 4: Renderable agent-facing playbooks for `agent.spawn`
+
+No rendering happens inside `agent.spawn` (playbook-unaware, owner 18:56).
+`agent.spawn` delivers `system_prompt_path`/`system_prompt` as an appended system
+prompt and resolves tier server-side ((39), (44), (38)=d); that surface is owned
+by `261117-feat-ws-agent-tools-mailbox-routing` (phase 1). This phase makes the
+agent-facing builtin profile instructions (explore.md) renderable playbooks so
+`playbook.render` can supply their path and recommended tier ((52)=a), using
+only variables older binaries know; the embedded profile text stays the
+fallback (Decision 25), and the native-subagent steer arrives through the
+daemon-injected child prompt (Decision 24), not the playbook. Recommendations
+use bare tiers only (49). Depends on `261117-feat-ws-agent-tools-mailbox-routing#phase1`.
+
+Verification: tests on remote w5090 that `playbook.render` for each agent-facing
+playbook returns a path and bare-tier recommendation, that a child spawned with
+that path and tier receives the rendered text as appended system prompt, with
+tier-rank and authority caps still applied, and that a daemon without the
+plugin's playbook falls back to the embedded profile text.
