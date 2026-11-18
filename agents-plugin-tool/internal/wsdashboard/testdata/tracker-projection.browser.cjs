@@ -1,5 +1,6 @@
 'use strict';
 const assert = require('node:assert/strict');
+const { test } = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
@@ -47,9 +48,25 @@ function detail(f, iid, version, body) {
 }
 const html = '<!doctype html><html><head><style>body{margin:0} header{height:50px} button{font:inherit}</style></head><body><header id="head"><span id="slot"></span></header><main id="main"></main></body></html>';
 const translations = 'window.wsT=(k,...a)=>k+ (a.length?" "+a.join(" "):"");window.wsTn=window.wsT;';
-async function setup(browser, { legacy = false, details = true, missing = '' } = {}) {
+async function setup(browser, { legacy = false, details = true, missing = '', multipleAssignees = false } = {}) {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } }), errors = [], requests = [], pendingDetails = [], pendingViews = [];
-  const f = fixture(); let current = f.summary;
+  const f = fixture();
+  if (multipleAssignees) {
+    const row = f.summary.items.i0;
+    row.data.item.due = '2026-11-20';
+    row.data.assignments = {};
+    row.data.item.assignments = ['alice-assignment', 'bob-assignment'];
+    f.v.my.assignments = f.v.my.assignments.filter(id => id !== 'a0');
+    f.v.my.today.work = f.v.my.today.work.filter(id => id !== 'a0');
+    f.v.my.given = ['i0'];
+    f.v.my.team = ['alice', 'bob'].map((id, i) => {
+      f.v.members[id] = { id, name: id === 'alice' ? 'Alice' : 'Bob', profile: { given: id === 'alice' ? 'Alice' : 'Bob' }, leads: ['me'], keys: [], revoked: [] };
+      const aid = id + '-assignment';
+      row.data.assignments[aid] = { ...f.v.assignments.a0, id: aid, to: id, status: i ? 'doing' : 'todo' };
+      return { id, open: [aid], pending: [], waiting: [], load: 1, stale: 0, overdue: 0 };
+    });
+  }
+  let current = f.summary;
   page.on('pageerror', e => errors.push(e.message));
   await page.route('http://tracker.test/**', async route => {
     const u = new URL(route.request().url()); requests.push(u.pathname + u.search);
@@ -182,27 +199,67 @@ async function acceptance(browser) {
   console.log('PASS tracker browser: future-before-delta / old-after-delta / matching detail only / draft and caret across loading gap');
   await race.page.close();
 }
+async function assignmentRows(browser, scope, mode) {
+  const h = await setup(browser, { multipleAssignees: true, details: false }), { page } = h;
+  try {
+    await page.evaluate(({ scope, mode }) => {
+      tkApi.openStore('s');
+      const ui = window.__tracker.ui;
+      ui.panel.s.scope = scope; ui.panel.s.modes[scope] = mode; ui.calMonth[scope] = '2026-11';
+      tkApi.refresh();
+    }, { scope, mode });
+    const selector = mode === 'gantt' ? '.grow-row[data-item="i0"]' : '.citem[data-item="i0"]';
+    assert.equal(await page.locator(selector).count(), 2, 'both assignments initially render');
+    await page.evaluate(selector => { window.assignmentNodes = Array.from(document.querySelectorAll(selector)); }, selector);
+    // Exercise the shipped adapter and reconciler, not replacement innerHTML.
+    await page.evaluate(() => {
+      const changed = structuredClone(tkProjections.s.rows.i0);
+      changed.data.assignments['alice-assignment'].status = 'blocked';
+      tkTakeProjection('s', { cursor: 'epoch.2', items: { i0: changed }, globals: {}, removed: [] });
+      tkApi.refresh();
+    });
+    const rows = await page.locator(selector).evaluateAll(nodes => nodes.map((n, i) => ({
+      key: n.getAttribute('data-rk'),
+      status: n.querySelector('.sti').getAttribute('data-tip'),
+      who: n.classList.contains('citem') ? n.getAttribute('data-tip') : n.querySelector('.muted').textContent,
+      retained: n === window.assignmentNodes[i]
+    })));
+    assert.equal(rows.length, 2, 'updating Alice must not remove either assignment row');
+    assert.equal(new Set(rows.map(r => r.key)).size, 2, 'assignment keys are distinct');
+    for (const [i, who, status] of [[0, 'Alice', 'blocked'], [1, 'Bob', 'doing']]) {
+      assert(rows[i].who.includes(who), JSON.stringify(rows));
+      assert(rows[i].status.includes('js.tk.st.' + status), JSON.stringify(rows));
+      assert(rows[i].retained, 'assignment row identity survives reconciliation');
+    }
+    assert.deepEqual(h.errors, []);
+  } finally { await page.close(); }
+}
 async function benchmark(browser) {
   const baseline = names.map(n => execFileSync('git', ['show', '6629e21b8:agents-plugin-tool/internal/wsdashboard/assets/' + n], { cwd: dir, encoding: 'utf8' })).join('\n');
   for (const n of [10000, 30000]) {
     const row = { items: n, events: 1000000, surface: 'closed handles', samples: 1 };
-    for (const [label, script, modern] of [['before_ms', baseline, false], ['after_ms', renderer, true]]) {
+    for (const [label, script, modern] of [['before', baseline, false], ['after', renderer, true]]) {
       const page = await browser.newPage();
       await page.route('http://tracker.test/', route => route.fulfill({ contentType: 'text/html', body: html }));
-      await page.goto('http://tracker.test/'); await page.addScriptTag({ content: translations + script });
+      await page.goto('http://tracker.test/'); await page.addScriptTag({ content: translations + script + (modern ? '\n' + adapter : '') });
       row[label] = await page.evaluate(({ factory, n, modern }) => {
         const { v, summary } = new Function('return (' + factory + ')')()(n, 1000000);
         let current = v;
-        if (modern) {
-          current = { ...summary.globals, projection: true, items: {}, assignments: v.assignments, requests: {}, rules: {}, notices: [], comments: {}, events: [], itemFlags: {}, feed: [] };
-          for (const id of v.itemOrder) current.items[id] = summary.items[id].data.item;
-        }
-        const api = WsTracker.mount({ stores: () => ['s'], view: () => current, error: () => null, seen: () => ({ badge: {}, read: {} }), markSeen() {}, onChange() {} }, { header: document.getElementById('head'), qsSlot: document.getElementById('slot'), pageParent: document.getElementById('main') });
+        if (modern) { tkOrder = ['s']; tkTakeProjection('s', summary); }
+        const legacyAdapter = { stores: () => ['s'], view: () => current, error: () => null, seen: () => ({ badge: {}, read: {} }), markSeen() {}, onChange() {} };
+        const api = WsTracker.mount(modern ? tkAdapter : legacyAdapter, { header: document.getElementById('head'), qsSlot: document.getElementById('slot'), pageParent: document.getElementById('main') });
         const wire = JSON.stringify(modern ? { cursor: 'epoch.2', reset: false, items: { i0: { ...summary.items.i0, data: { ...summary.items.i0.data, item: { ...summary.items.i0.data.item, title: 'changed' } } } }, globals: {} } : { ...v, items: { ...v.items, i0: { ...v.items.i0, title: 'changed' } } });
-        const t = performance.now(), answer = JSON.parse(wire);
-        if (modern) current.items.i0 = answer.items.i0.data.item; else current = answer;
+        // Time the actual changed-response path, including tkDetailIndexes'
+        // all-row notice scan. Initial summary/fixture/stringification stay out.
+        const t = performance.now(), answer = JSON.parse(wire), parsed = performance.now();
+        if (modern) tkTakeProjection('s', answer); else current = answer;
+        const applied = performance.now();
         api.refresh();
-        return +(performance.now() - t).toFixed(2);
+        const rendered = performance.now();
+        const model = modern ? tkViews.s : current;
+        if (model.items.i0.title !== 'changed' || Object.keys(model.items).length !== n) throw Error('benchmark delta was not applied');
+        const ms = x => +x.toFixed(2);
+        return { parse_ms: ms(parsed - t), model_apply_ms: ms(applied - parsed), render_ms: ms(rendered - applied), total_ms: ms(rendered - t) };
       }, { factory: fixture.toString(), n, modern });
       await page.close();
     }
@@ -210,8 +267,13 @@ async function benchmark(browser) {
   }
 }
 async function assertEventually(fn) { for (let i = 0; i < 100; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 20)); } throw Error('timed out waiting for request'); }
-(async () => {
+test('tracker projection browser', async t => {
   const browser = await chromium.launch();
-  try { await acceptance(browser); if (process.env.WS_TRACKER_BROWSER_BENCH === '1') await benchmark(browser); }
-  finally { await browser.close(); }
-})().catch(e => { console.error(e); process.exitCode = 1; });
+  try {
+    await t.test('summary, detail ordering and legacy fallback', () => acceptance(browser));
+    for (const scope of ['given', 'team']) for (const mode of ['gantt', 'calendar']) {
+      await t.test(scope + ' ' + mode + ' retains multiple assignments on one item', () => assignmentRows(browser, scope, mode));
+    }
+    if (process.env.WS_TRACKER_BROWSER_BENCH === '1') await benchmark(browser);
+  } finally { await browser.close(); }
+});
