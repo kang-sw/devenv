@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>agents island mockup</title>
+<style>
+/* tokens copied from the dashboard dark theme */
+:root{
+  --wb-bg:#141518; --wb-fg:#e7e7e4; --wb-card:#1e2024; --wb-muted:#2b2d32; --wb-muted-fg:#a2a6ad; --wb-primary:#7aa2ff;
+  --wb-line:color-mix(in srgb,var(--wb-fg) 16%,transparent);
+  --wb-shadow-hi:0 8px 24px rgb(0 0 0 / .45),0 2px 6px rgb(0 0 0 / .35);
+  --wb-radius:12px;
+  --wb-ph-think:#3d2f6b; --wb-on-ph-think:#ddd3fb;
+  --wb-ph-reply:#1b4a4f; --wb-on-ph-reply:#c5ecef;
+  --wb-ph-tool:#26385e;  --wb-on-ph-tool:#d2dcf6;
+  --wb-ph-perm:#55400f;  --wb-on-ph-perm:#f6dfae;
+  --wb-ok:#6cc39a; --wb-fail:#f0797e;
+  --dur:.2s;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--wb-bg);color:var(--wb-fg);font:13px/1.5 system-ui,"Segoe UI","Malgun Gothic",sans-serif;overflow:hidden}
+.li,.i{width:13px;height:13px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;vertical-align:-2px}
+
+/* demo chrome: state switcher + captions */
+.demo{position:fixed;left:50%;bottom:6px;transform:translateX(-50%);z-index:50;display:flex;gap:4px;padding:3px;border-radius:8px;background:#0b0c0e;box-shadow:0 0 0 1px var(--wb-line);font-size:11px}
+.demo a{color:var(--wb-muted-fg);text-decoration:none;padding:2px 8px;border-radius:6px;white-space:nowrap}
+.demo a.on{background:var(--wb-primary);color:#10141f}
+.cap{position:absolute;z-index:40;font-size:11.5px;line-height:1.45;color:var(--wb-muted-fg);background:#0b0c0e;border-radius:8px;padding:6px 10px;box-shadow:0 0 0 1px var(--wb-line);max-width:260px}
+.cap b{color:var(--wb-fg)}
+.cap.arrow-cap{color:var(--wb-primary);box-shadow:0 0 0 1px color-mix(in srgb,var(--wb-primary) 50%,transparent)}
+.cap[hidden]{display:none}
+
+/* page: one conversation column */
+.page{height:100vh;display:flex;justify-content:center;padding:10px 10px 40px}
+.col{position:relative;width:100%;max-width:760px;display:flex;flex-direction:column;min-height:0}
+.chead{flex:none;display:flex;align-items:center;gap:4px;height:36px;padding:0 4px;box-shadow:0 1px 0 var(--wb-line)}
+.tab{padding:5px 12px;border-radius:8px;color:var(--wb-muted-fg);font-weight:600}
+.tab.on{background:var(--wb-muted);color:var(--wb-fg)}
+.chead .sum{margin-left:auto;display:flex;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:600;color:var(--wb-muted-fg);box-shadow:inset 0 0 0 1px var(--wb-line)}
+.convo{position:relative;flex:1 1 0;min-height:0}
+.scroll{position:absolute;inset:0;overflow:auto;padding:14px 6px 24px;display:flex;flex-direction:column;gap:14px}
+.msg{max-width:88%}
+.msg .mh{font-size:11.5px;color:var(--wb-muted-fg);margin-bottom:3px;display:flex;gap:6px;align-items:center}
+.msg .mh b{color:var(--wb-fg)}
+.bub{background:var(--wb-card);border-radius:10px;padding:8px 12px;box-shadow:inset 0 0 0 1px var(--wb-line)}
+.msg.user{align-self:flex-end}
+.msg.user .bub{background:color-mix(in srgb,var(--wb-primary) 16%,var(--wb-card))}
+.bub code{background:var(--wb-muted);padding:0 4px;border-radius:4px;font-size:12px}
+
+/* composer + badges (as today) */
+.composer{position:relative;flex:none;margin-top:10px;background:var(--wb-card);border-radius:var(--wb-radius);box-shadow:var(--wb-shadow-hi);padding:8px 10px}
+.composer .box{min-height:44px;color:var(--wb-muted-fg);padding:4px 2px}
+.cbadges{position:absolute;z-index:3;left:10px;right:10px;top:-5px;transform:translateY(-50%);display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:8px;align-items:center;pointer-events:none}
+.cbadges>*{pointer-events:auto}
+.ibadge{grid-column:1;justify-self:start;display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 12px 0 10px;border:0;border-radius:999px;font:inherit;font-size:11.5px;font-weight:800;letter-spacing:.03em;line-height:1;color:var(--wb-fail);background:var(--wb-card);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--wb-fail) 55%,transparent),var(--wb-shadow-hi)}
+.istop{width:8px;height:8px;border-radius:2px;background:currentColor}
+.sbadge{grid-column:2;justify-self:end;display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 11px 0 9px;border:0;border-radius:999px;white-space:nowrap;font:inherit;font-size:11.5px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;color:var(--wb-primary);background:var(--wb-card);cursor:pointer;box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--wb-primary) 45%,transparent),var(--wb-shadow-hi)}
+.sbadge:hover,.sbadge[aria-expanded=true]{background:color-mix(in srgb,var(--wb-primary) 12%,var(--wb-card))}
+.sbadge .sword{font-size:11px;font-weight:600;color:var(--wb-muted-fg)}
+.sbadge.idle{color:var(--wb-muted-fg);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--wb-muted-fg) 35%,transparent),var(--wb-shadow-hi)}
+.sbadge.idle .spin,.sbadge.idle .sword{display:none}
+.sbadge.hl{outline:2px solid var(--wb-primary);outline-offset:3px}
+.spin{width:10px;height:10px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:spin .8s steps(12) infinite;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.pulse{width:8px;height:8px;border-radius:50%;background:var(--wb-primary);animation:pulse 1.4s ease-in-out infinite;flex:none}
+@keyframes pulse{50%{opacity:.35;transform:scale(.8)}}
+.pibadge{font-size:9.5px;font-weight:800;line-height:1;padding:2px 4px;border-radius:4px;background:#3d2f6b;color:#ddd3fb;flex:none}
+.phase{display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:999px;font-size:10.5px;font-weight:700;white-space:nowrap;flex:none}
+.phase.thinking{background:var(--wb-ph-think);color:var(--wb-on-ph-think)}
+.phase.replying{background:var(--wb-ph-reply);color:var(--wb-on-ph-reply)}
+.phase.tool{background:var(--wb-ph-tool);color:var(--wb-on-ph-tool)}
+.phase.perm{background:var(--wb-ph-perm);color:var(--wb-on-ph-perm)}
+
+/* ===== the island ===== */
+.island{position:absolute;z-index:20;top:8px;right:8px;overflow:hidden;background:var(--wb-card);color:var(--wb-fg);
+  border-radius:16px;box-shadow:var(--wb-shadow-hi),inset 0 0 0 1px var(--wb-line);
+  width:320px;height:100px;cursor:pointer;
+  transition:width var(--dur) ease,height var(--dur) ease,border-radius var(--dur) ease}
+.island[data-mode=full]{cursor:default;border-radius:10px}
+.island[data-mode=idle]{border-radius:999px}
+.view{position:absolute;top:0;right:0;opacity:0;pointer-events:none;transition:opacity calc(var(--dur) * .6) ease}
+.island[data-mode=compact] .v-compact,.island[data-mode=idle] .v-idle,.island[data-mode=full] .v-full{opacity:1;pointer-events:auto;transition-delay:calc(var(--dur) * .3)}
+
+/* compact view */
+.v-compact{width:var(--cw,320px);padding:7px 12px 6px}
+.crow{display:grid;grid-template-columns:14px minmax(0,1fr) auto auto;align-items:center;gap:7px;height:23px}
+.crow .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;font-weight:600}
+.crow .el{font-size:11px;color:var(--wb-muted-fg);font-variant-numeric:tabular-nums;min-width:42px;text-align:right}
+.crow .mk{display:grid;place-items:center}
+.csum{margin-top:3px;padding-top:4px;font-size:11px;color:var(--wb-muted-fg);box-shadow:0 -1px 0 var(--wb-line)}
+/* idle view */
+.v-idle{display:flex;align-items:center;gap:6px;height:30px;padding:0 13px 0 11px;white-space:nowrap;font-size:11.5px;font-weight:700;color:var(--wb-muted-fg)}
+
+/* full view = today's agpop content */
+.v-full{width:var(--fw,500px);max-height:var(--fh,60vh);display:flex;flex-direction:column}
+.v-full .rtree{overflow:auto;min-height:0;flex:1 1 auto;overscroll-behavior:contain}
+.thead{display:flex;align-items:center;gap:6px;padding:6px 12px;white-space:nowrap;background:var(--wb-card);box-shadow:0 1px 0 var(--wb-line);position:sticky;top:0;z-index:1;font-weight:700;font-size:12.5px;min-height:34px}
+.thead .sum{display:flex;gap:5px;margin-left:6px;margin-right:78px}
+.thead .chip{box-shadow:inset 0 0 0 1px var(--wb-line)}
+.chip.crun{color:var(--wb-primary);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--wb-primary) 45%,transparent)}
+.chip.cdone{color:var(--wb-ok);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--wb-ok) 45%,transparent)}
+.chip.cfail{color:var(--wb-fail);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--wb-fail) 45%,transparent)}
+.agctl{position:absolute;z-index:3;top:3px;right:6px;display:flex;gap:2px}
+.agctl button{width:28px;height:28px;display:grid;place-items:center;padding:0;border:0;border-radius:8px;background:transparent;color:var(--wb-muted-fg);font:inherit;font-size:18px;line-height:1;cursor:pointer}
+.agctl button:hover{background:var(--wb-muted);color:var(--wb-fg)}
+.agctl .li{transform:rotate(45deg);width:15px;height:15px}
+.tree{padding:4px 12px 8px}
+.pghead{display:flex;align-items:center;gap:6px;padding:4px 0 2px;font-size:11.5px;font-weight:700;color:var(--wb-muted-fg)}
+.tgroup{margin-top:6px}
+.agent{padding:2px 0}
+.ahead{display:flex;align-items:center;gap:7px;min-height:26px;font-size:12px}
+.ahead .amk{width:18px;display:grid;place-items:center;flex:none;color:var(--wb-ok)}
+.aname{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
+.arid{font-size:10.5px;color:var(--wb-primary);font-family:ui-monospace,Consolas,monospace;flex:none}
+.astat{display:flex;gap:6px;font-size:10.5px;color:var(--wb-muted-fg);white-space:nowrap;margin-left:auto;flex:none}
+.am{display:flex;gap:7px;font-size:11px;color:var(--wb-muted-fg);white-space:nowrap;font-variant-numeric:tabular-nums;flex:none}
+.am .ok{color:var(--wb-ok)}
+.brows{list-style:none;margin:2px 0 4px 25px;padding:4px 10px;border-radius:8px;background:var(--wb-muted)}
+.brow{display:flex;align-items:center;gap:7px;min-height:22px;font-size:11.5px}
+.brow .tool{font-weight:700;flex:none}.brow .args{color:var(--wb-muted-fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.brow .bm{color:var(--wb-muted-fg);font-size:11px;flex:none;font-variant-numeric:tabular-nums}
+.live-slot{list-style:none;margin:0 0 2px 25px;padding:0}
+.peer{display:flex;align-items:center;gap:7px;min-height:26px;font-size:12px}
+.peer .pdot{width:7px;height:7px;border-radius:50%;background:var(--wb-ok);margin:0 5.5px;flex:none}
+.peer .pname{font-weight:600}
+.agfoot{flex:none;padding:7px 12px;font-size:11px;color:var(--wb-muted-fg);box-shadow:0 -1px 0 var(--wb-line)}
+
+@media (prefers-reduced-motion:reduce){.island,.view{transition:none!important}.pulse,.spin{animation:none}}
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="robot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 4v4M9 13v1M15 13v1"/><circle cx="12" cy="3.5" r=".8"/></symbol>
+<symbol id="mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></symbol>
+<symbol id="pin" viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3z"/></symbol>
+<symbol id="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+</defs></svg>
+
+<div class="page"><div class="col" id="col">
+  <div class="chead">
+    <span class="tab on">대화</span><span class="tab">파일</span>
+    <span class="sum"><span class="chip">사용자 3</span><span class="chip"><svg class="i"><use href="#mail"/></svg>8</span></span>
+  </div>
+  <div class="convo">
+    <div class="scroll">
+      <div class="msg user"><div class="mh"><b>사용자</b> 14:02</div><div class="bub">에이전트 패널을 입력창 배지가 아니라 화면 위쪽에서도 바로 볼 수 있게 할 수 있을까요?</div></div>
+      <div class="msg"><div class="mh"><svg class="i"><use href="#robot"/></svg><b>리드</b> 14:03</div><div class="bub">네. 대화 열 오른쪽 위에 작은 섬 형태로 띄우고, 실행 중인 에이전트의 상태와 경과 시간만 한 줄씩 보여주는 방향을 제안합니다. 클릭하면 기존 패널 내용으로 펼쳐집니다.</div></div>
+      <div class="msg user"><div class="mh"><b>사용자</b> 14:05</div><div class="bub">대화 내용을 밀어내지는 않았으면 좋겠어요. 입력창 배지에 마우스를 올려도 더는 열리지 않게 하고요.</div></div>
+      <div class="msg"><div class="mh"><svg class="i"><use href="#robot"/></svg><b>리드</b> 14:06</div><div class="bub">섬은 대화 위에 떠 있고 레이아웃에 영향을 주지 않습니다. 배지는 클릭할 때만 패널을 펼칩니다. 지금 <code>Implement</code> 작업자 3명이 돌고 있어서 결과가 나오는 대로 정리해 드릴게요.</div></div>
+      <div class="msg user"><div class="mh"><b>사용자</b> 14:08</div><div class="bub">좋아요, 좁은 화면에서도 이름이 잘리더라도 상태와 시간은 보이면 좋겠습니다.</div></div>
+    </div>
+
+    <div class="island" id="island" data-mode="compact" role="button" tabindex="0" aria-label="에이전트">
+      <!-- compact: one line per running agent -->
+      <div class="view v-compact" id="vc">
+        <div class="crow"><span class="mk"><span class="pulse"></span></span><span class="nm">Implement: worktree detached</span><span class="phase tool">실행 중</span><span class="el">4m 12s</span></div>
+        <div class="crow"><span class="mk"><span class="pulse"></span></span><span class="nm">Explore: agents badge</span><span class="phase thinking">생각 중</span><span class="el">1m 08s</span></div>
+        <div class="crow"><span class="mk"><span class="pibadge">pi</span></span><span class="nm">Review: wide drawer</span><span class="phase replying">작성 중</span><span class="el">37s</span></div>
+        <div class="csum">끝남 2 · 피어 1</div>
+      </div>
+      <!-- idle: nothing running -->
+      <div class="view v-idle" id="vi"><svg class="i"><use href="#robot"/></svg>끝남 2</div>
+      <!-- full: today's agpop content -->
+      <div class="view v-full" id="vf" role="dialog" aria-label="에이전트">
+        <div class="rtree">
+          <div class="thead"><svg class="i"><use href="#robot"/></svg>에이전트<span class="sum"><span class="chip crun">실행 중 3</span><span class="chip cdone">끝남 2</span><span class="chip cfail">실패 0</span><span class="chip"><svg class="i"><use href="#mail"/></svg>1</span></span></div>
+          <div class="tree">
+            <div class="agent"><div class="ahead"><span class="amk"><span class="pulse"></span></span><span class="aname">리드</span><span class="phase replying">작성 중</span><span class="am" style="margin-left:auto"><span>1m 02s</span><span>배치 14</span><svg class="i"><use href="#chev"/></svg></span></div></div>
+
+            <div class="tgroup"><div class="pghead">실행 중 3</div>
+              <div class="agent">
+                <div class="ahead"><span class="amk"><span class="pulse"></span></span><span class="aname">Implement: worktree detached</span><span class="arid">a3f9c1</span><span class="phase tool">실행 중</span><span class="astat"><span>opus-4</span><span>high</span><span>86k</span></span><span class="am"><span class="ok">✓ 31</span><span>✗ 0</span><span>4m 12s</span></span></div>
+                <ul class="brows">
+                  <li class="brow"><span class="tool">Edit</span><span class="args">internal/wsdashboard/assets/dashboard.tmpl</span><span class="bm">✓ 3 · 2.1s</span></li>
+                  <li class="brow"><span class="tool">Bash</span><span class="args">go test ./internal/wsdashboard/...</span><span class="bm">✓ 1 · 18s</span></li>
+                </ul>
+                <ul class="live-slot"><li class="brow"><span class="spin" style="color:var(--wb-primary)"></span><span class="tool">Read</span><span class="args">dashboard-conversation.css</span><span class="bm">+1 · 3s</span></li></ul>
+              </div>
+              <div class="agent"><div class="ahead"><span class="amk"><span class="pulse"></span></span><span class="aname">Explore: agents badge</span><span class="arid">b71e04</span><span class="phase thinking">생각 중</span><span class="astat"><span>sonnet-4</span><span>med</span><span>41k</span></span><span class="am"><span class="ok">✓ 12</span><span>✗ 0</span><span>1m 08s</span></span></div></div>
+              <div class="agent"><div class="ahead"><span class="amk"><span class="pibadge">pi</span></span><span class="aname">Review: wide drawer</span><span class="arid">c20d88</span><span class="phase replying">작성 중</span><span class="astat"><span>gpt-5</span><span>high</span><span>120k</span></span><span class="am"><span class="ok">✓ 7</span><span>✗ 0</span><span>37s</span></span></div></div>
+            </div>
+
+            <div class="tgroup"><div class="pghead">끝남 2</div>
+              <div class="agent"><div class="ahead"><span class="amk">✓</span><span class="aname">Implement: composer badge click</span><span class="arid">91d2e7</span><span class="astat"><span>opus-4</span><span>high</span><span>3분 전</span></span><span class="am"><span class="ok">✓ 44</span><span>✗ 0</span><span>6m 40s</span></span></div></div>
+              <div class="agent"><div class="ahead"><span class="amk">✓</span><span class="aname">Explore: popover anchoring</span><span class="arid">5e10aa</span><span class="astat"><span>sonnet-4</span><span>med</span><span>9분 전</span></span><span class="am"><span class="ok">✓ 18</span><span>✗ 0</span><span>2m 15s</span></span></div></div>
+            </div>
+
+            <div class="tgroup"><div class="pghead"><svg class="i"><use href="#mail"/></svg>피어 <span class="chip">1</span></div>
+              <div class="peer"><span class="pdot"></span><span class="pname">docs-lead</span><span class="phase thinking">생각 중</span><span class="am" style="margin-left:auto"><span><svg class="i"><use href="#mail"/></svg> 2분 전</span></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="agctl"><button type="button" title="고정"><svg class="li"><use href="#pin"/></svg></button><button type="button" id="agclose" title="닫기">×</button></div>
+        <div class="agfoot">섬 바깥을 누르거나 Esc를 누르면 접힙니다.</div>
+      </div>
+    </div>
+    <div class="cap" id="cap-full" hidden style="right:524px;top:14px"><b>상호작용</b><br>섬 클릭 또는 입력창 배지 클릭 → 펼침<br>바깥 클릭 · Esc → 접힘<br>배지에 마우스를 올려도 열리지 않음</div>
+    <div class="cap arrow-cap" id="cap-badge" hidden style="right:14px;bottom:18px;z-index:41;max-width:320px">&#8595; 입력창의 실행 중 배지를 클릭해 열었음. 마우스를 올리는 것만으로는 열리지 않음.</div>
+  </div>
+
+  <div class="composer">
+    <div class="cbadges">
+      <span class="ibadge"><span class="istop"></span>중단</span>
+      <button type="button" class="sbadge" id="sbadge" aria-haspopup="dialog" aria-expanded="false"><span class="spin"></span><svg class="i"><use href="#robot"/></svg><span class="slabel">3(+1)</span><span class="sword">실행 중</span></button>
+    </div>
+    <div class="box">메시지를 입력하세요</div>
+  </div>
+</div></div>
+
+<nav class="demo" id="demo"></nav>
+
+<script>
+(function(){
+  var island=document.getElementById('island'), col=document.getElementById('col'),
+      sbadge=document.getElementById('sbadge'), demo=document.getElementById('demo');
+  var vc=document.getElementById('vc'), vi=document.getElementById('vi'), vf=document.getElementById('vf');
+  var STATES=['compact','compact-idle','full','from-badge','narrow'];
+  var base='compact'; // collapsed mode of the current state: compact or idle
+
+  // island box = measured size of the active view, so width/height can transition
+  function size(){
+    var cw=col.clientWidth-16;
+    vc.style.setProperty('--cw',Math.min(320,cw)+'px');
+    vf.style.setProperty('--fw',Math.min(500,cw)+'px');
+    vf.style.setProperty('--fh',Math.round(innerHeight*.6)+'px');
+    var v={compact:vc,idle:vi,full:vf}[island.dataset.mode];
+    island.style.width=v.offsetWidth+'px';
+    island.style.height=v.offsetHeight+'px';
+  }
+  function setMode(m){
+    island.dataset.mode=m;
+    sbadge.setAttribute('aria-expanded',m==='full');
+    size(); syncCaps();
+  }
+  function syncCaps(){
+    var h=location.hash.slice(1), full=island.dataset.mode==='full';
+    document.getElementById('cap-full').hidden=!(full&&(h==='full'||h==='from-badge'));
+    document.getElementById('cap-badge').hidden=!(full&&h==='from-badge');
+    sbadge.classList.toggle('hl',h==='from-badge'&&full);
+  }
+  function apply(){
+    var h=location.hash.slice(1); if(STATES.indexOf(h)<0)h='compact';
+    base=h==='compact-idle'?'idle':'compact';
+    sbadge.classList.toggle("idle",base==="idle");sbadge.querySelector(".slabel").textContent=base==="idle"?"0":"3(+1)";
+    setMode(h==='full'||h==='from-badge'?'full':base);
+    [].forEach.call(demo.children,function(a){a.classList.toggle('on',a.dataset.s===h)});
+  }
+  STATES.forEach(function(s){var a=document.createElement('a');a.href='#'+s;a.textContent='#'+s;a.dataset.s=s;demo.appendChild(a)});
+
+  island.addEventListener('click',function(e){ if(island.dataset.mode!=='full'){setMode('full');e.stopPropagation()} });
+  island.addEventListener('keydown',function(e){ if((e.key==='Enter'||e.key===' ')&&island.dataset.mode!=='full'){e.preventDefault();setMode('full')} });
+  document.getElementById('agclose').addEventListener('click',function(e){e.stopPropagation();setMode(base)});
+  sbadge.addEventListener('click',function(e){e.stopPropagation();setMode(island.dataset.mode==='full'?base:'full')});
+  document.addEventListener('click',function(e){ if(island.dataset.mode==='full'&&!island.contains(e.target))setMode(base) });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&island.dataset.mode==='full')setMode(base) });
+  addEventListener('hashchange',apply);
+  addEventListener('resize',size);
+  apply();
+})();
+</script>
+</body></html>
