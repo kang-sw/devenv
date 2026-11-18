@@ -15,8 +15,7 @@ import (
 
 const (
 	lineDiscussionNoCounter = "- Discussion keeps no counter. After compaction, continue from the highest ID\n" +
-		"  the summary shows; a collision with an ID the summary dropped is accepted,\n" +
-		"  since nothing in discussion persists."
+		"  the summary shows; a collision with an ID the summary dropped is accepted."
 	lineDiscussionStoreCounter = "- Discussion IDs come from the whiteboard store: an item gets its ID when\n" +
 		"  `{{ns}}/whiteboard.update` adds it, and the store keeps the counter across\n" +
 		"  compaction. When a ticket queue you have read has a last-ID line above the\n" +

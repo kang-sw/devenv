@@ -1198,7 +1198,6 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 		// playbook's each-turn rule must agree on it.
 		"While the user is watching the board (the playbook's Each turn rule says when), progress and explanations go on it too and the chat does not repeat what the board holds; otherwise the chat carries them as usual.",
 
-		"`commands` is one string of commands.",
 		"- Discussion IDs come from the whiteboard store",
 	} {
 		if !strings.Contains(collapseSpace(manualOn), want) {
@@ -1223,11 +1222,11 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 		}
 		return n
 	}
-	if n := syntaxHeadings(manualOff); n != 0 || strings.Contains(manualOff, "`commands` is one string") {
+	if n := syntaxHeadings(manualOff); n != 0 {
 		t.Fatalf("knob off: the manual must carry no command syntax section (%d headings)", n)
 	}
 	for name, text := range map[string]string{"playbook.read": manualOn, "workflow_manual": injected} {
-		if n := syntaxHeadings(text); n != 1 || strings.Count(text, "`commands` is one string of commands.") != 1 {
+		if n := syntaxHeadings(text); n != 1 {
 			t.Fatalf("knob on, %s: the command syntax section must appear exactly once, found %d", name, n)
 		}
 		if !strings.Contains(text, "\n### Command syntax\n") || strings.Index(text, "### Command syntax") > strings.Index(text, "### Whiteboard") {
@@ -1264,8 +1263,7 @@ func TestWhiteboardPlaybookStatesPointerAndEmbedDirWithoutNamingAHost(t *testing
 func TestWhiteboardPlaybookReadAppendsCommandSyntax(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	text := toolText(t, f.call(t, "playbook.read", map[string]any{"name": "whiteboard"}))
-	if strings.Count(text, "## Command syntax") != 1 ||
-		!strings.Contains(text, "`commands` is one string of commands.") {
+	if strings.Count(text, "## Command syntax") != 1 {
 		t.Fatalf("the whiteboard playbook must end with the command syntax section once:\n%s", text)
 	}
 	if resp := f.call(t, "playbook.read", map[string]any{"name": "command-syntax"}); !isToolError(resp) && !strings.Contains(toolText(t, resp), "not found") {

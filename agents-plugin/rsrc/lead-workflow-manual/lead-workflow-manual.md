@@ -73,8 +73,7 @@ IDs, unique within the conversation so the user can cite any item:
   every ticket queue you have read (its IDs and its last-ID line); `(01)`
   when none. An item keeps its ID when it moves into a ticket queue.
 - Discussion keeps no counter. After compaction, continue from the highest ID
-  the summary shows; a collision with an ID the summary dropped is accepted,
-  since nothing in discussion persists.
+  the summary shows; a collision with an ID the summary dropped is accepted.
 - A ticket queue from an earlier conversation keeps its IDs. One collides
   with an ID used in this conversation → renumber that ticket's still-open
   items to fresh IDs in every ticket carrying them, update the last-ID line,
@@ -103,7 +102,7 @@ naming a model.
 - medium: ordinary engineering with a clear target and approach — a scoped
   change or investigation, across modules if needed.
 - large: demanding work — ambiguous diagnosis, design-sensitive changes or
-  drafting, broad cross-cutting changes. Most hard tasks belong here.
+  drafting, broad cross-cutting changes.
 - xlarge: research-grade work — an open problem with no known approach, or
   novel design where a wrong call reshapes the system.
 - Unsure between small, medium, and large → the higher one; xlarge only when
@@ -153,17 +152,15 @@ naming a model.
      "housekeeping")` → a pooled ai-docs-only checkout of the parent branch,
      and the key to commit with there.
   2. Release it with `{{.McpNamespace}}/worktree.release(key: <that key>)`
-     before anything checks the parent branch out elsewhere: Git holds one
-     checkout per branch, and `{{.McpNamespace}}/git.merge` into a branch
-     still held there is refused, not stolen.
+     before anything checks the parent branch out elsewhere;
+     `{{.McpNamespace}}/git.merge` into a branch still held there is refused.
 - Every `{{.McpNamespace}}/worktree.acquire` names a profile from the
   resolved list below. Worker → `full`, unless a listed project profile
   describes the work: the builtin `housekeeping` materializes only
   `ai-docs`, so a worker there cannot build. A pooled worktree is reused only
   by an acquire naming the same profile.
-- An acquire result carries `nudge` entries → relay each to the user; they
-  are the only report of pooled worktrees left idle or holding large
-  artifacts. Removing one (`{{.McpNamespace}}/worktree.remove(path)`) is the
+- An acquire result carries `nudge` entries → relay each to the user.
+  Removing one (`{{.McpNamespace}}/worktree.remove(path)`) is the
   user's call.
 
 ### Worktree-based work mode
@@ -174,21 +171,19 @@ Only when the user asks (the housekeeping worktree above excepted):
   `{{.McpNamespace}}/git.resolve_impl_branch` returns), instead of moving
   this worktree's branch.
 - Release that worktree before merging its branch, or when the unit ends
-  unmerged: a worktree holding a branch blocks `{{.McpNamespace}}/git.merge`
-  and every other checkout of it.
+  unmerged.
 
 #### Parallel mode
 
 - Order units only by a strict dependency: `blocked-by:`, a prerequisite
   `related:` or `parent:`, or a body-stated need-first. Overlapping files
-  never defer a unit; the conflicts that matter are semantic and are checked
-  at merge.
+  never defer a unit; the merge step below checks interactions.
 - Merge finished units one at a time.
 - Earlier merges moved the target → first diff the target against the tree
   `git -c merge.directoryRenames=false merge-tree --write-tree <target>
   <branch>` prints, looking for interactions. The option matches
-  `{{.McpNamespace}}/git.merge`, which disables directory-rename detection,
-  so a status directory the branch emptied raises no false conflict.
+  `{{.McpNamespace}}/git.merge`, so a status
+  directory the branch emptied raises no false conflict.
 - An interaction or a merge conflict → `{{.SkillNamespace}}:lead-delegate`,
   which reruns the affected verification; the user sees it only when the
   delegate cannot settle it.

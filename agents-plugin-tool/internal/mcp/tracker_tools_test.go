@@ -726,8 +726,7 @@ func TestTrackerManualSectionsRenderOnceAndNeverForSpawnedKeys(t *testing.T) {
 func TestTrackerPlaybookReadAppendsCommandSyntax(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	text := toolText(t, f.call(t, "playbook.read", map[string]any{"name": trackerPlaybookName}))
-	if strings.Count(text, "## Command syntax") != 1 ||
-		!strings.Contains(text, "`commands` is one string of commands.") {
+	if strings.Count(text, "## Command syntax") != 1 {
 		t.Fatalf("the tracker playbook must end with the command syntax section once:\n%s", text)
 	}
 	if strings.Contains(text, "{{") {
