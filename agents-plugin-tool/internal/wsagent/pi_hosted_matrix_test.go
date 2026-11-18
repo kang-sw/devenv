@@ -1,69 +1,80 @@
 package wsagent
 
 import (
-	"fmt"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"slices"
 	"testing"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
-	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
-func TestPiHostedPackageRegistrySettingMatrix(t *testing.T) {
+func TestPiHostedEmbeddedPackageMatrix(t *testing.T) {
 	dir := hostedPluginHomes(t)
-	base := t.TempDir()
-	roots := map[string]string{}
-	for _, owner := range []string{"ws", "wsflow"} {
-		root := filepath.Join(base, owner)
-		roots[owner] = root
-		noAgent := ""
-		if owner == "wsflow" {
-			noAgent = "1"
-		}
-		piLeadFile(t, filepath.Join(root, ".claude-plugin", "plugin.json"), fmt.Sprintf(`{"name":%q,"version":"0.50.1","mcpServers":{%q:{"env":{"WS_MCP_NAMESPACE":%q,"WS_MCP_NO_AGENT":%q,"WS_MCP_CONFIG_MANIFESTS":"${CLAUDE_PLUGIN_ROOT}/config-manifest.json;${CLAUDE_PLUGIN_ROOT}/dashboard-config-manifest.json"}}}}`, owner, owner, owner, noAgent))
-		if err := RegisterHostedPlugin(dir, filepath.Join(root, "rsrc"), hostedPluginTestVersion); err != nil {
-			t.Fatal(err)
-		}
+	if os.Getenv("WS_TEST_EMBEDDED_PACKAGES") == "1" {
+		t.Setenv("WS_RSRC_DEV_CHECKOUT", "")
 	}
-	payload := filepath.Join(base, "agents-plugin-pi")
-	entry := piLeadBundle(t, payload)
-	usePreparedPiFixture(t, base, payload)
-	for _, starter := range []string{"ws", "wsflow"} {
-		for _, setting := range []string{"", "ws", "wsflow"} {
-			t.Run(starter+"/"+setting, func(t *testing.T) {
-				t.Setenv(wsrsrc.EnvRsrcRoot, filepath.Join(roots[starter], "rsrc"))
-				if setting == "" {
-					r := wsconfig.NewResolver(wsconfig.Options{}, nil, nil, nil)
-					if err := r.Unset(wsconfig.HostedPluginPackageKey, wsconfig.SetOptions{}); err != nil {
-						t.Fatal(err)
-					}
-				} else {
-					setHostedPackage(t, setting)
+	t.Setenv("WS_RSRC_ROOT", filepath.Join(t.TempDir(), "missing", "rsrc"))
+	writeLeadPluginFixture(t, filepath.Join(dir, "hosted-plugin-roots.json"), `{stale registry`)
+	for _, setting := range []string{"", "ws", "wsflow"} {
+		t.Run(setting, func(t *testing.T) {
+			r := wsconfig.NewResolver(wsconfig.Options{}, nil, nil, nil)
+			if setting == "" {
+				if err := r.Unset(wsconfig.HostedPluginPackageKey, wsconfig.SetOptions{}); err != nil {
+					t.Fatal(err)
 				}
-				want := setting
-				if want == "" {
-					want = "wsflow"
+			} else {
+				setHostedPackage(t, setting)
+			}
+			want := setting
+			if want == "" {
+				want = "wsflow"
+			}
+			spec := StartSpec{Root: t.TempDir(), Dir: t.TempDir(), Lead: &LeadSpec{PluginIsolation: "isolated"}}
+			piLeadFile(t, filepath.Join(piDir(spec.Dir), ".keep"), "")
+			warning := "stale"
+			spec.Lead.PluginWarning = func(text string) { warning = text }
+			_, args, err := piLeadLaunch("pi", nil, spec)
+			if err != nil || warning != "" {
+				t.Fatalf("launch: %v %q %v", args, warning, err)
+			}
+			if spec.Lead.Env["WS_MCP_HOSTED_PACKAGE"] != "1" {
+				t.Fatal("native Pi launcher must restart from the retained daemon, not install a plugin runtime")
+			}
+			workflow := spec.Lead.Env["WS_PI_WORKFLOW_ROOT"]
+			if workflow == "" {
+				t.Fatal("missing staged workflow owner")
+			}
+			var owner struct {
+				Name string `json:"name"`
+			}
+			raw, err := os.ReadFile(filepath.Join(workflow, ".claude-plugin", "plugin.json"))
+			if err != nil || json.Unmarshal(raw, &owner) != nil || owner.Name != want {
+				t.Fatalf("workflow owner: %s %v", raw, err)
+			}
+			for _, path := range []string{"config-manifest.json", "dashboard-config-manifest.json", "rsrc/manifest.json", "skills/lead-run/SKILL.md"} {
+				if _, err := os.Stat(filepath.Join(workflow, filepath.FromSlash(path))); err != nil {
+					t.Fatal(err)
 				}
-				spec := StartSpec{Root: base, Dir: t.TempDir(), Lead: &LeadSpec{DaemonVersion: hostedPluginTestVersion, PluginIsolation: "isolated"}}
-				piLeadFile(t, filepath.Join(piDir(spec.Dir), ".keep"), "")
-				warning := "stale"
-				spec.Lead.PluginWarning = func(text string) { warning = text }
-				_, args, err := piLeadLaunch("pi", nil, spec)
-				if err != nil || !slices.Contains(args, entry) || warning != "" {
-					t.Fatalf("launch args %v, warning %q, error %v", args, warning, err)
+			}
+			policy, err := HostedPluginEnvironment(want, workflow)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for key, value := range policy {
+				if spec.Lead.Env[key] != value {
+					t.Fatalf("%s = %q want %q", key, spec.Lead.Env[key], value)
 				}
-				if got := spec.Lead.Env["WS_PI_WORKFLOW_ROOT"]; got != roots[want] {
-					t.Fatalf("selected root %q, want %q", got, roots[want])
-				}
-				if got := spec.Lead.Env["WS_MCP_NAMESPACE"]; got != want {
-					t.Fatalf("namespace %q, want %q", got, want)
-				}
-				manifests := filepath.Join(roots[want], "config-manifest.json") + ";" + filepath.Join(roots[want], "dashboard-config-manifest.json")
-				if got := spec.Lead.Env["WS_MCP_CONFIG_MANIFESTS"]; got != manifests {
-					t.Fatalf("manifest policy %q, want %q", got, manifests)
-				}
-			})
-		}
+			}
+			// Workers prepare the real native extension using only the selected name.
+			entries, err := piBundledEntries("ignored old version")
+			if err != nil || len(entries) != 1 || !slices.Contains(args, entries[0]) {
+				t.Fatalf("worker entries %v %v; lead %v", entries, err, args)
+			}
+			if !fileExists(entries[0]) {
+				t.Fatal("worker entry missing")
+			}
+		})
 	}
 }

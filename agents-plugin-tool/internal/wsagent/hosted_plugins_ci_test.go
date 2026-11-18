@@ -7,7 +7,9 @@ import (
 
 func TestHostedPluginEnvironmentUsesNativeTemplatePaths(t *testing.T) {
 	root := t.TempDir()
-	writeLeadPluginFixture(t, filepath.Join(root, ".claude-plugin", "plugin.json"), `{
+	checkout := t.TempDir()
+	t.Setenv("WS_RSRC_DEV_CHECKOUT", checkout)
+	writeLeadPluginFixture(t, filepath.Join(checkout, "agents-plugin-wsflow", ".claude-plugin", "plugin.json"), `{
 		"name":"wsflow",
 		"mcpServers":{"wsflow":{"env":{
 			"WS_MCP_CONFIG_MANIFESTS":"${CLAUDE_PLUGIN_ROOT}/config-manifest.json;${CLAUDE_PLUGIN_ROOT}/nested/dashboard-config-manifest.json",
@@ -16,7 +18,7 @@ func TestHostedPluginEnvironmentUsesNativeTemplatePaths(t *testing.T) {
 			"WS_MCP_NAMESPACE":"wsflow"
 		}}}
 	}`)
-	env, err := HostedPluginEnvironment(root)
+	env, err := HostedPluginEnvironment("wsflow", root)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -65,6 +65,10 @@ type DaemonOptions struct {
 	// ContentHash is the daemon executable's sha256 (ExecutableContentHash),
 	// reported by /health; empty is unknown and is omitted.
 	ContentHash string
+	// Executable is this daemon's executable, when supplied by the command
+	// layer. Startup retains it and records its identity under the singleton
+	// lock so hosted launchers can restart without a plugin installation.
+	Executable string
 	// Proxy builds the MCP sessions the daemon hosts for the launchers
 	// that connect to ProxyPath (proxy.go); nil leaves the route off.
 	Proxy ProxyHandler
@@ -396,6 +400,13 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		_ = listener.Close()
 		_ = lock.Unlock()
 		return nil, err
+	}
+	if opts.Executable != "" {
+		if err := recordRunningExecutable(opts.Dir, opts.Executable, opts.Version, opts.BuildTime); err != nil {
+			_ = listener.Close()
+			_ = lock.Unlock()
+			return nil, fmt.Errorf("record running executable: %w", err)
+		}
 	}
 	if opts.Pprof {
 		enableContentionProfiles()

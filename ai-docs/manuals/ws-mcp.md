@@ -129,11 +129,14 @@ session's pages exist follows `dashboard.enabled` per session; the daemon
 runs either way, and the MCP tools never depend on its pages. Its state lives
 under `<cache root>/dashboard/`:
 
-- `hosted-plugin-roots.json` - manifest-validated roots for hosted workflow
-  packages (`ws`, `wsflow`), retained across daemon replacement. Equal/newer
-  hello versions replace the remembered root; older hellos cannot downgrade a
-  still-valid stored install. This daemon-owned registry is independent of
-  session records and the global config overrides.
+- `last-running-executable.json` - owner-only restart evidence written once by
+  the lock-owning daemon: schema 1, retained executable path, version, SHA-256
+  and build time. Hosted launchers reread and validate it only when a daemon
+  start is needed. Older daemons ignore it; settled binaries remain available.
+  The retired `hosted-plugin-roots.json` registry is ignored, not migrated.
+- `hosted-packages/<ws|wsflow>/<hash>/` - retained launcher plus that package's
+  four embedded manifests. Native Pi's separate content-addressed input stage
+  supplies its workflow skills, resources and package-owner manifest.
 - `dashboard.lock` - the single-instance OS file lock; `endpoint.json` - port,
   pid, version, and the shutdown token; `launcher-start.lock` - the persistent
   advisory lock updated Python launchers hold across a necessary daemon start;
@@ -706,19 +709,17 @@ process and running turn. Non-lead Claude conversations, and Pi conversations
 run without a holder manager, instead start a process at their next send.
 An attached ws-mcp gets
 `WS_MCP_ALLOWED_TOOLS` (the profile's ws tools) and `WS_MCP_NO_DASHBOARD`,
-and no mailbox identity. Its command is Python plus the selected hosted plugin's
-`bin/ws-mcp-launcher.py serve --stdio`, never the daemon's staged executable.
+and no mailbox identity. Its command is Python plus the selected build-owned
+package's staged `bin/ws-mcp-launcher.py serve --stdio`, never the daemon's
+staged executable as a stdio server.
 The built-in global-only `hosted.plugin_package` key (`config.tune`, values
 `ws` or `wsflow`, fixed default `wsflow`, visible with no-agent) selects the
 whole package for hosted Claude/Pi leads and this attached MCP. Each process
 start reads the setting; running and holder-reattached processes stay unchanged.
-The daemon prefers its own package beside `WS_RSRC_ROOT` when that is the
-selection; otherwise it resolves roots learned from hellos, revalidating their
-manifest name and requiring its own major.minor. Missing or version-skewed roots
-fall back to its own package with a visible `plugin_warning` (including both
-versions on skew). An invalid hand-edited selection warns and uses `wsflow`.
-A missing fallback launcher still refuses the start. Non-hosted connections keep
-their own package. The launcher's interpreter (`WS_MCP_HOLDER_PYTHON`) is reused
+Both packages come from the daemon's embedded inputs (or its explicit process
+source override), never a connected plugin root or registry. An invalid
+hand-edited selection warns and uses `wsflow`; missing/corrupt build inputs
+refuse the launch. Non-hosted connections keep their own package identity. The launcher's interpreter (`WS_MCP_HOLDER_PYTHON`) is reused
 when known, else `python3` on PATH (Windows: `py -3` fallback). The conversation's
 root overrides `WS_MCP_PROJECT_ROOT` in that command's environment, keeping
 proxy mode's exact arguments and preventing the daemon's lead root leaking
@@ -1405,12 +1406,10 @@ An isolated probe daemon needs both `WS_CACHE_HOME` (state directory, session
 keys, mailboxes) and `WS_CONFIG_HOME` (global config, the stored workspace
 list, which sits beside the config file) pointed at scratch directories, and
 its own `-port`: with only the cache home moved, the rail's workspace routes
-write the real `~/.ws/dashboard/workspaces.json`. A harness the probe daemon
-hosts loads the installed plugin, whose launcher may start the installed
-runtime as the daemon when the probe daemon stops; put a `claude` first on
-`PATH` that `exec`s the real one with the plugin under test (an `exec`
-keeps the PID the hosted-session check compares) and
-`WS_MCP_BOOTSTRAP_BINARY` set to the probe binary.
+write the real `~/.ws/dashboard/workspaces.json`. Hosted harnesses use the probe daemon's embedded packages and retained restart
+record. Keep their cache/config environment isolated too, so their staged
+launcher restarts only the probe daemon. External harness/plugin tests retain
+their own runtime path; use an explicit scratch bootstrap binary for those.
 
 Profiling: with `WS_MCP_DASHBOARD_PPROF=1` (also `true`/`yes`/`on`) in the
 environment of `ws-mcp dashboard`, the daemon serves `net/http/pprof` under
@@ -1600,7 +1599,17 @@ Finding and starting the daemon (`DaemonLink` in the launcher):
    that answers: when that is still the older daemon (it refused to stop,
    or won the lock race), the adapter diagnoses the failed replacement and
    retries; no second server is launched.
-4. The current hello rejects another minor. A newer same-minor daemon is
+4. Hosted stdio launches set `WS_MCP_HOSTED_PACKAGE=1`: they neither repair nor
+   download a plugin runtime and do not wait for a local rsrc tree. Healthy
+   daemons are followed without package-contract-driven replacement. After
+   absence is proven and starter coordination is acquired, the launcher reads
+   `last-running-executable.json`, validates its retained path/content hash,
+   and starts that build. Each later restart rereads the record, so a launcher
+   surviving replacement never pins its original build. A missing/corrupt record
+   refuses restart rather than falling back to an installed plugin. Native Pi
+   leads carry the same marker for their extension's launcher. External plugin
+   launchers keep their own runtime/repair path.
+5. The current hello rejects another minor. A newer same-minor daemon is
    used as is, with no mandatory local binary or metadata upgrade. The
    mixed-version guards ticket separately owns cross-minor acceptance,
    notices, schema guards, and tool-list refresh.
@@ -1798,7 +1807,8 @@ Current launcher inputs:
 | Variable | Purpose |
 |----------|---------|
 | `WS_MCP_RUNTIME_DIR` | Override the runtime binary directory; defaults to plugin-local `.runtime/<os>-<arch>`. |
-| `WS_MCP_RUNTIME_BINARY` | Exact repaired runtime binary path exported by the launcher for async worker recovery. |
+| `WS_MCP_RUNTIME_BINARY` | Exact repaired runtime binary path exported by an external plugin launcher for async worker recovery. Hosted launchers choose the retained executable only at necessary daemon restart. |
+| `WS_MCP_HOSTED_PACKAGE` | Internal hosted-launch marker (`1`): the staged launcher has no plugin runtime and restarts from the daemon's last-running-executable record. Cleared from the daemon starter's environment. |
 | `WS_MCP_BOOTSTRAP_BINARY` | Copy a prebuilt local binary into the runtime directory. |
 | `WS_MCP_BOOTSTRAP_URL` | Download a prebuilt binary when no runtime binary exists. |
 | `WS_MCP_BOOTSTRAP_SHA256` | Optional SHA-256 checksum for `WS_MCP_BOOTSTRAP_URL`. |
@@ -1908,8 +1918,9 @@ shape, not content. Skills still ship in the external plugin for harness discove
 
 Desktop assembly consumes an already-built binary and checks its embedded
 inventory against canonical inputs; generating assets after compilation cannot
-repair that binary. It still stages the complete external package in Phase 1
-for desktop validation, launcher/config and hosted Pi readers.
+repair that binary. It still stages the complete external package for its
+outside-daemon validation/launcher/config readers. Hosted sessions no longer
+use that copy.
 
 The local build script is:
 

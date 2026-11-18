@@ -16,6 +16,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsholder"
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wspackage"
 )
 
 // fakeStream is one holder connection: what it carries (the holder's
@@ -840,12 +841,20 @@ func newLeadHarness(t *testing.T) *leadHarness {
 }
 
 // hostedLeadLauncher stands in for the daemon's ws-mcp command
-// (agentMCPCommand in cmd/ws-mcp): the hosted package resolved for version
-// at each call, its launcher, its fallback warning, and its resource tree.
+// (agentMCPCommand in cmd/ws-mcp): the selected package staged from build inputs
+// at each process start, its launcher and its selection warning.
 // The command names no real file; the holders are fakes.
 func hostedLeadLauncher(version string) func(string) (MCPCommand, error) {
 	return func(root string) (MCPCommand, error) {
-		plugin, warning, err := ResolveHostedPlugin(version)
+		name, warning, err := ResolveHostedPackage()
+		if err != nil {
+			return MCPCommand{}, err
+		}
+		stateDir, err := wsdashboard.Dir("")
+		if err != nil {
+			return MCPCommand{}, err
+		}
+		plugin, err := wspackage.StageHosted(name, stateDir)
 		if err != nil {
 			return MCPCommand{}, err
 		}

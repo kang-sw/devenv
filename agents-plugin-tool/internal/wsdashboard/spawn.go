@@ -7,11 +7,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
-// stagedBinDir holds the copies a daemon runs from on Windows.
+// stagedBinDir holds retained, content-addressed daemon executables.
 const stagedBinDir = "bin"
 
 // SpawnDetached starts exe with args as a process detached from the caller:
@@ -48,15 +47,10 @@ func SpawnDetachedStrict(exe string, args []string, dir string) error {
 	return nil
 }
 
-// DaemonExecutable returns the binary a daemon should run from. On Windows a
-// running executable locks its file and directory, which would block removal
-// of a versioned plugin cache that holds ws-mcp, so the binary is copied into
-// the daemon's state directory and the copy runs instead. Elsewhere exe is
-// returned unchanged.
+// DaemonExecutable returns a retained copy outside the starter's installation.
+// Hosted launchers can restart it after that installation disappears. On Windows
+// this also avoids locking the starter's versioned plugin directory.
 func DaemonExecutable(exe, dir string) (string, error) {
-	if runtime.GOOS != "windows" {
-		return exe, nil
-	}
 	return StageExecutable(exe, filepath.Join(dir, stagedBinDir))
 }
 

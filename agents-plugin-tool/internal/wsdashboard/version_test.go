@@ -3,7 +3,6 @@ package wsdashboard
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 )
@@ -135,11 +134,20 @@ func TestExecutableContentHashIsTheFileSHA256(t *testing.T) {
 	}
 }
 
-func TestDaemonExecutableIsUnchangedOffWindows(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows stages a copy; covered by TestStageExecutableCopiesAndPrunes")
+func TestDaemonExecutableIsRetainedOnEveryPlatform(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "ws-mcp")
+	if err := os.WriteFile(src, []byte("daemon"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if got, err := DaemonExecutable("/opt/ws-mcp", t.TempDir()); err != nil || got != "/opt/ws-mcp" {
+	dir := t.TempDir()
+	got, err := DaemonExecutable(src, dir)
+	if err != nil || filepath.Dir(got) != filepath.Join(dir, stagedBinDir) {
 		t.Fatalf("DaemonExecutable = %s, %v", got, err)
+	}
+	if err := os.Remove(src); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(got); err != nil || string(data) != "daemon" {
+		t.Fatalf("retained executable = %q, %v", data, err)
 	}
 }
