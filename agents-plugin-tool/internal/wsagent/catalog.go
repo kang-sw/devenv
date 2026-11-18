@@ -357,7 +357,7 @@ func ClaudeCatalog() *HarnessProfile {
 			{Item: ItemSkillList, Grade: GradeUnsupported,
 				Source: "the init's skills field is not parsed (claudeInit)"},
 			{Item: ItemSkillInjection, Grade: GradeNative,
-				Source: "Claude Code's own skills: a lead's bundled plugin (claudeLeadPluginArgs), a worker profile's plugin directories with Skills set (claudeArgs)"},
+				Source: "Claude Code's own skills: a lead keeps the user's plugins except the ws packages, whose manual arrives in its prompt (claudeLeadPluginArgs, composeLeadInstructions); a worker profile's plugin directories with Skills set (claudeArgs)"},
 			{Item: ItemCompaction, Role: RoleLead, Grade: GradeNative,
 				Source: "the dashboard's /compact reaches the harness as its typed line (processControls.runCommand); the mapper reads the compaction (claudeMapper)"},
 			{Item: ItemCompaction, Role: RoleWorker, Grade: GradeUnsupported,

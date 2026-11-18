@@ -163,7 +163,7 @@ test("fallback bridge preserves effective prompt and supplies hosted session ide
   const source = readFileSync(new URL("../pi_lead_bridge.mjs", import.meta.url), "utf8");
   const servers = { ws: { command: "bundled-ws", exposure: "direct" } };
   const sessionKey = 'lead-key-"quoted"';
-  const prelude = `const servers = ${JSON.stringify(servers)}; const sessionKey = ${JSON.stringify(sessionKey)}; const launchWarning = "[ws Pi] EXTENSION NOT LOADED";\n`;
+  const prelude = `const servers = ${JSON.stringify(servers)}; const sessionKey = ${JSON.stringify(sessionKey)}; const launchWarning = "[ws Pi] EXTENSION NOT LOADED"; const workflowManual = "# Workflow Manual (daemon render)";\n`;
   const { default: register } = await import("data:text/javascript;base64," + Buffer.from(prelude + source).toString("base64"));
   const registered = {};
   let handler;
@@ -173,6 +173,7 @@ test("fallback bridge preserves effective prompt and supplies hosted session ide
   assert(result.systemPrompt.startsWith("Pi defaults\nUser APPEND_SYSTEM.md\nProject instructions\n\n"));
   assert(result.systemPrompt.includes(JSON.stringify(sessionKey)));
   assert(result.systemPrompt.includes("Pass it as session_key"));
+  assert(result.systemPrompt.includes("# Workflow Manual (daemon render)"));
 });
 
 test("real npm-bin startup restores ambient extensions using the CLI's own SDK graph", { skip: !process.env.WS_PI_TEST_SDK }, (t) => {

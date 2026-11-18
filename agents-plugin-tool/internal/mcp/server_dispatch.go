@@ -30,6 +30,12 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	if params.Arguments == nil {
 		params.Arguments = map[string]any{}
 	}
+	// A hosted lead connection's session_key: omitted is the connection's
+	// own, and any key but its own or a descendant's is refused. It runs
+	// first, so everything below reads the key the call resolves to.
+	if refusal := s.hostedSessionKeyRule(params.Name, params.Arguments); refusal != "" {
+		return toolErrorTextResponse(req.ID, refusal)
+	}
 	// Central mailbox piggyback wrapper (Decision: one interception point):
 	// every reply this call produces gets a chance at an unread-mail badge,
 	// regardless of which case below built it. See mailbox_tools.go.

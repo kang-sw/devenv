@@ -2,49 +2,25 @@ package wsagent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 )
 
-// Claude enables these plugins without an enabledPlugins entry. Keep this
-// separate from the child profile's builtin policy: only isolated leads
-// disable all builtins, including ones the CLI may not allow turning off.
-var claudeLeadBuiltinPlugins = []string{
-	"cc-plugin-agents-md@builtin",
-	"cc-plugin-plugin-authoring@builtin",
-	"cc-plugin-privacy@builtin",
-	"cc-plugin-telemetry@builtin",
-}
-
-// claudeLeadPluginArgs overrides only plugin enablement. Leaving setting
-// sources and MCP configuration alone preserves permissions, hooks, memory,
-// non-plugin MCP servers, and (in default mode) unrelated plugins.
+// claudeLeadPluginArgs keeps every ws package out of a hosted lead: the
+// daemon supplies its ws-mcp (claudeLeadMCPArgs) and its workflow manual
+// (the instruction file), so the user's installed ws and wsflow plugins are
+// turned off for this launch and no bundle is loaded. It overrides only
+// plugin enablement; setting sources stay, so permissions, hooks, memory,
+// MCP servers, and unrelated plugins are the user's own. The record's
+// plugin isolation does not apply to a Claude lead.
 func claudeLeadPluginArgs(spec StartSpec) ([]string, error) {
-	isolation := spec.Lead.PluginIsolation
-	if isolation != "" && isolation != "default" && isolation != "isolated" {
-		return nil, fmt.Errorf("claude lead: invalid plugin isolation %q", isolation)
-	}
-	root, warning := spec.Lead.Plugin, spec.Lead.PluginNote
-	if root == "" {
-		var err error
-		root, warning, err = ResolveHostedPlugin(spec.Lead.DaemonVersion)
-		if err != nil {
-			return nil, fmt.Errorf("claude lead: %w", err)
-		}
-	}
-	if spec.MCPSession != nil {
-		// The bundle with its stdio server replaced by the HTTP session.
-		variant, err := claudeHTTPVariant(root, spec.Lead.VariantDir)
-		if err != nil {
-			return nil, fmt.Errorf("claude lead: hosted bundle variant: %w", err)
-		}
-		root = variant
-	}
 	if spec.Lead.PluginWarning != nil {
-		spec.Lead.PluginWarning(warning)
+		spec.Lead.PluginWarning(spec.Lead.PluginNote)
 	}
 	enabled, err := claudeLeadEnabledPlugins(spec)
 	if err != nil {
@@ -53,7 +29,7 @@ func claudeLeadPluginArgs(spec StartSpec) ([]string, error) {
 	disabled := map[string]bool{}
 	for id, on := range enabled {
 		name, _, _ := strings.Cut(id, "@")
-		if on && (isolation == "isolated" || name == "ws" || name == "wsflow") {
+		if on && slices.Contains(hostedPluginPackages, name) {
 			disabled[id] = false
 		}
 	}
@@ -61,13 +37,35 @@ func claudeLeadPluginArgs(spec StartSpec) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude lead plugin settings: %w", err)
 	}
-	return []string{"--settings", string(settings), "--plugin-dir", root}, nil
+	return []string{"--settings", string(settings)}, nil
+}
+
+// claudeLeadMCPArgs adds the daemon's ws-mcp to a hosted lead as the MCP
+// server ReservedMCPServer: over the daemon's HTTP route when the start has
+// a session, else the same server over stdio. There is no
+// --strict-mcp-config, so the user's own MCP servers load beside it. A lead
+// with neither is refused: without a ws plugin it would have no ws tools.
+func claudeLeadMCPArgs(spec StartSpec) ([]string, error) {
+	var entry map[string]any
+	switch {
+	case spec.MCPSession != nil:
+		entry = claudeHTTPServer(spec.MCPSession.URL)
+	case spec.WSMCP != nil:
+		entry = map[string]any{"type": "stdio", "command": spec.WSMCP.Command, "args": spec.WSMCP.Args, "env": spec.WSMCP.Env}
+	default:
+		return nil, errors.New("claude lead: no ws-mcp to attach (the daemon's MCP route and the bundled launcher are both unavailable)")
+	}
+	raw, err := json.Marshal(map[string]any{"mcpServers": map[string]any{ReservedMCPServer: entry}})
+	if err != nil {
+		return nil, err
+	}
+	return []string{"--mcp-config", string(raw)}, nil
 }
 
 // claudeLeadEnabledPlugins merges plugin entries in Claude's user, project,
 // local precedence order, including explicit false overrides. Read errors
 // other than an absent settings file refuse launch: ignoring one could load
-// the installed ws copy alongside the bundled plugin.
+// an installed ws copy beside the daemon's ws-mcp.
 func claudeLeadEnabledPlugins(spec StartSpec) (map[string]bool, error) {
 	env := map[string]string{}
 	for _, kv := range claudeLeadEnv(spec) {
@@ -106,9 +104,6 @@ func claudeLeadEnabledPlugins(spec StartSpec) (map[string]bool, error) {
 		paths = append(paths, filepath.Join(root, ".claude", "settings.local.json"))
 	}
 	enabled := map[string]bool{}
-	for _, id := range claudeLeadBuiltinPlugins {
-		enabled[id] = true
-	}
 	for _, path := range paths {
 		raw, err := os.ReadFile(path)
 		if os.IsNotExist(err) {

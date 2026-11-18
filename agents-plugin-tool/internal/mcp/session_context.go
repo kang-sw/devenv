@@ -116,10 +116,10 @@ func (s *Server) resolveSession(in sessionAccess) (sessionContext, error) {
 			return sessionContext{}, err
 		}
 	case sessionAccessManual:
-		if hosted != "" && in.key != hosted {
-			if entry, ok := s.sessions.lookup(in.key); !ok || entry.parent == "" {
-				return sessionContext{}, hostedKeyRefusal("workflow_manual", hosted, in.key)
-			}
+		// The connection's own key, or a descendant session's
+		// (hostedSessionKeyRule, which callTool already applied).
+		if hosted != "" && in.key != hosted && !s.hostedDescendant(hosted, in.key) {
+			return sessionContext{}, hostedDescendantRefusal("workflow_manual", hosted, in.key)
 		}
 	case sessionAccessMint:
 		key, err := s.sessions.mint(in.root, in.scope, in.parent)

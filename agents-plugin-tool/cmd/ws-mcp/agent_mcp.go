@@ -8,7 +8,9 @@ import (
 	goruntime "runtime"
 	"strings"
 
+	"github.com/kang-sw/devenv/internal/mcp"
 	"github.com/kang-sw/devenv/internal/wsagent"
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsholder"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
@@ -64,4 +66,39 @@ func agentMCPPython(preferred string, windows bool, lookPath func(string) (strin
 		}
 	}
 	return "", nil, fmt.Errorf("no Python interpreter for ws-mcp launcher: %s is unset and python3 (or py on Windows) is not on PATH", wsholder.PythonEnv)
+}
+
+// renderLeadManual is the daemon's wsagent.Options.LeadManual: the workflow
+// manual of the hosted lead whose key is key, rendered under the environment
+// its ws-mcp gets (the daemon's own, the configured hosted package's, and no
+// mailbox identity, as agentMCPCommand and the lead's launch give it) and
+// resolved against dir as a hello from that ws-mcp would be (callerHello).
+// A Claude lead's connection is detected as claude; agy and a Pi lead on
+// its MCP fallback are detected as no harness.
+func renderLeadManual(backend, dir, key string) (string, error) {
+	plugin, _, err := wsagent.ResolveHostedPlugin(version)
+	if err != nil {
+		return "", err
+	}
+	pkg, err := wsagent.HostedPluginEnvironment(plugin)
+	if err != nil {
+		return "", err
+	}
+	env := map[string]string{}
+	for _, kv := range os.Environ() {
+		if name, value, ok := strings.Cut(kv, "="); ok {
+			env[name] = value
+		}
+	}
+	for name, value := range pkg {
+		env[name] = value
+	}
+	env["WS_MCP_PROJECT_ROOT"] = dir
+	env["WS_MAILBOX"], env["WS_MAILBOX_AUTO"] = "", ""
+	hello := callerHello(wsdashboard.ProxyHello{Env: env, Cwd: dir})
+	harness := ""
+	if backend == wsagent.BackendClaude {
+		harness = "claude"
+	}
+	return mcp.RenderLeadManual(mcp.EnvFromMap(hello.Env), dir, harness, key)
 }

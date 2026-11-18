@@ -907,16 +907,16 @@ Pi calls share this route; the Pi-specific legacy behavior follows:
   does not cascade, and a child's report resumes the stopped parent. A report
   to a closed parent stays in the child's record.
 
-The runner also hosts lead sessions: a headless Claude Code or Pi process
-that loads the user's own harness setup (no profile allowlist, plugins, or
-system prompt of the runner's), started from the built-in `lead-claude` or
-`lead-pi` profile. `POST /agents` refuses a lead profile; a lead is spawned
+The runner also hosts lead sessions: a headless Claude Code, Pi, or agy
+process that loads the user's own harness setup (no profile allowlist),
+started from the built-in `lead-claude`, `lead-pi`, or `lead-agy` profile.
+`POST /agents` refuses a lead profile; a lead is spawned
 by `POST /agents/leads {root, harness: "claude"|"pi", model?, effort?,
 permission_mode?, plugin_isolation?}` (201 with the state; `root` must be
 inside git, since the session key is minted at the canonical root).
 `plugin_isolation` accepts `default` (the default, replace ws only) or
-`isolated` (bundled plugins only). Differences from a support
-conversation:
+`isolated` (bundled plugins only); a Claude lead ignores it. Differences
+from a support conversation:
 
 - **Process.** The harness runs under a session holder (`internal/wsholder`,
   pipe mode), not as the daemon's child, so it outlives the daemon. The
@@ -937,6 +937,29 @@ conversation:
   `WS_HOSTED_*`, and `WS_PI_*` variables are not passed on. A ws-mcp that is
   not the hosted harness's never writes, heartbeats, removes, or end-marks a
   row that carries `hosted: true`, whatever key it is given.
+- **Prompt.** Each launch (a `--resume` included) of a Claude or agy lead
+  appends `<session dir>/instructions.md` to the harness's own system
+  prompt (Claude `--append-system-prompt-file`, agy's
+  `_meta.antigravity.systemPrompt.append`): the session key, and the
+  workflow manual the daemon renders for it as of that launch (the daemon's
+  `LeadManual`, the same render as `workflow_manual` on the session's own
+  connection). A failed render leaves the key sentence alone and is logged.
+  A Pi lead's extension appends its own manual; its bridge fallback appends
+  the daemon's render beside the key.
+- **No ws plugin (Claude).** A Claude lead loads no ws bundle: the installed
+  `ws` and `wsflow` plugins are turned off for the launch (`--settings`
+  `enabledPlugins`), its ws-mcp is the `--mcp-config` server `ws` (no
+  `--strict-mcp-config`, so the user's own servers still load) with an
+  `--allowedTools mcp__ws` rule, and a launch with no ws-mcp at all is
+  refused. Its ws tools are `mcp__ws__*`, not `mcp__plugin_<pkg>_<pkg>__*`,
+  so user permission rules written for the plugin names do not match them.
+- **Key rule.** On a hosted lead connection, a tool call that omits
+  `session_key` (or leaves it blank) runs with the connection's key when the
+  tool declares one; an explicit key must be the connection's own or the
+  key of one of its descendant sessions (a runner conversation whose
+  `Record.Parent` chain reaches the lead), and any other is refused naming
+  the rule. A key a `ferrule` call minted under the hosted key has no runner
+  record and is refused. Child and non-hosted connections are unchanged.
 - **One holder.** A conversation is the daemon's or a terminal harness's,
   never both, and the registration row says which. The adapters report the
   harness conversation at login (`ferrule`'s unadvertised `harness_session`
@@ -1630,22 +1653,23 @@ with a JSON-RPC error body.
 Who uses it (`internal/wsagent/mcp_session.go`): a hosted Claude process the
 runner starts while it knows its daemon endpoint. Every start draws a new
 token; the harness gets the URL and token in `WS_MCP_SESSION_URL` and
-`WS_MCP_SESSION_TOKEN`, never in argv or a file. A worker's inline
-`--mcp-config` entry is the HTTP server; a lead loads a hosted variant of its
-bundle (`<daemon dir>/hosted-bundles/<package>-<hash>`, one per bundle
-content, never removed) whose only MCP entry is the same `ws` key over HTTP,
-so the lead still has exactly one ws server named `plugin:<package>:<package>`.
+`WS_MCP_SESSION_TOKEN`, never in argv or a file. A worker's and a lead's
+inline `--mcp-config` entry `ws` is the HTTP server; a lead loads no ws
+bundle, so it has exactly one ws server, named `ws`. (A lead an older daemon
+started ran a hosted variant of its bundle under `<daemon
+dir>/hosted-bundles/`, whose server is `plugin:<package>:<package>`; the lead
+result mapper still accepts those names for a rejoined process.)
 A held lead's token is kept in its `agent.json` (`mcp_token_secret`) with its
 URL (`mcp_url`), the ws-mcp environment its hello was built from (`mcp_env`:
-the bundle the lead loaded, which is also the one that hello describes) and
+the package its ws-mcp was resolved from) and
 the holder it was drawn for (`mcp_holder_id`), so a daemon that rejoins the
 process restores the token and its hello without resolving the package again.
 When the recorded URL is not the rejoining daemon's (it listens on another
 port) or the hello is missing, the process restarts at its first idle point
 with a new token; when the record names another holder (a daemon without
 this route started the process again over stdio), the token is forgotten and
-nothing restarts. With no endpoint
-the stdio launcher serves as before. A daemon without this route (an older
+nothing restarts. With no endpoint the `ws` entry is the bundled stdio
+launcher instead. A daemon without this route (an older
 one rejoining an HTTP lead) answers its calls `401 login_required` until the
 process restarts.
 
@@ -1704,7 +1728,7 @@ Current launcher inputs:
 | `WS_MCP_HOLDER_PYTHON` | Read by `ws-mcp dashboard`: the Python interpreter that runs session holders (see Dashboard daemon, Session holders). The launcher sets it to its own interpreter on the daemon-start step unless it is already set; unset, the daemon uses `python3` on PATH. |
 | `WS_MCP_NO_AGENT` | Product-mode gate for agentless distributions such as wsflow. |
 | `WS_MCP_NO_DASHBOARD` | `1`/`true`/`yes`/`on` turns the dashboard off for this ws-mcp whatever `dashboard.enabled` resolves: no session registration, no prune (the daemon itself is started by the launcher, never by this ws-mcp). The agent runner sets it on the ws-mcp it attaches to a conversation. |
-| `WS_HOSTED_SESSION` | `1`/`true`/`yes`/`on` marks a session the dashboard daemon hosts; the daemon sets it, with `WS_HOSTED_SESSION_KEY` and `WS_HOSTED_SESSION_ROW`, on the harness it spawns. Every process below that harness inherits the three, so each reader (this ws-mcp, the Claude mod, the Pi extension) honours them only when the row names its own harness process (see `WS_HOSTED_SESSION_ROW`), resolves that once, and never becomes hosted later. Hosted, this ws-mcp neither registers, heartbeats, nor prunes (the daemon writes the session's registration) but still nudges the daemon and names the daemon's page in `whiteboard.update`; `ferrule` returns the hosted key for a parent-less lead bootstrap and refuses a re-login with any other key, and `workflow_manual` refuses any other key except a parent-carrying child key; child mints are unchanged. Set without a key, it changes nothing here. Unset is off. |
+| `WS_HOSTED_SESSION` | `1`/`true`/`yes`/`on` marks a session the dashboard daemon hosts; the daemon sets it, with `WS_HOSTED_SESSION_KEY` and `WS_HOSTED_SESSION_ROW`, on the harness it spawns. Every process below that harness inherits the three, so each reader (this ws-mcp, the Claude mod, the Pi extension) honours them only when the row names its own harness process (see `WS_HOSTED_SESSION_ROW`), resolves that once, and never becomes hosted later. Hosted, this ws-mcp neither registers, heartbeats, nor prunes (the daemon writes the session's registration) but still nudges the daemon and names the daemon's page in `whiteboard.update`; `ferrule` returns the hosted key for a parent-less lead bootstrap and refuses a re-login with any other key; every tool call that omits `session_key` runs with the hosted key, and one that passes a key other than the hosted key or a descendant session's (Key rule above) is refused, `workflow_manual` included; child mints are unchanged. Set without a key, it changes nothing here. Unset is off. |
 | `WS_HOSTED_SESSION_KEY` | The parent-less lead key the daemon minted for the session it hosts, read only while `WS_HOSTED_SESSION` is on; the session's key stays fixed to it. |
 | `WS_HOSTED_SESSION_ROW` | Absolute path of the hosted session's `registration.json`. Its `host_pid` is the one harness process the flag holds for: equal to the reader's harness PID, hosted; another nonzero PID, an ordinary session, silently (a nested harness, a CLI call from the session's shell); 0, absent, or unreadable, read again about every 100 ms for about 3 s, then an ordinary session with one warning. Unset (an older daemon, a stray flag) is not hosted. The harness PID is `WS_MCP_HARNESS_PID` for ws-mcp (with a Windows `cmd.exe` wrapper skipped, see that row), the mod's own process for Claude (read as the parent of a host command; on Windows, when that parent is the `cmd.exe` shell the host command ran through, that shell's parent, by the same one-level rule), and the extension's process for Pi. |
 | `WS_MCP_HARNESS_PID` | Set by the launcher on every start to its own parent PID, over any inherited value: the harness that started this ws-mcp. The runtime reads it as that harness's PID, except on Windows when that process is a `cmd.exe` (the wrapper a harness commonly starts a stdio server through): then its parent. Exactly one level is skipped, so a harness nested under another still tells itself from the outer one, and a failed process lookup keeps the PID as set. It reaches the runtime on both paths (the direct child's environment, and the hello's `env` for a daemon-hosted connection, so it is per caller). A ws-mcp started without the launcher has none and is never hosted; `ws-mcp dashboard` drops it, with the three `WS_HOSTED_SESSION*` variables, from its own environment at start, so the conversations it spawns inherit no session's. |

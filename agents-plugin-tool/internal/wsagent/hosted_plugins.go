@@ -16,8 +16,9 @@ import (
 
 const hostedPluginRootsFile = "hosted-plugin-roots.json"
 
-// hostedPluginPackages are the packages a hosted lead's bundle may be
-// (ResolveHostedPlugin).
+// hostedPluginPackages are the ws packages: the bundle whose ws-mcp a
+// hosted lead runs (ResolveHostedPlugin), and the installed plugins a
+// hosted Claude lead turns off (claudeLeadPluginArgs).
 var hostedPluginPackages = []string{"ws", "wsflow"}
 
 // RegisterHostedPlugin remembers only manifest-validated runtime evidence from a

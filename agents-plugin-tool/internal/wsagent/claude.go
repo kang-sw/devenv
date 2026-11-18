@@ -96,13 +96,18 @@ func claudeLeadEnv(spec StartSpec) []string {
 
 // claudeLeadArgs is the command line of a lead conversation: print mode
 // with stream-json both ways, user/project settings, hooks, memory, and MCP
-// servers. Plugin overrides replace installed ws copies with the configured
-// hosted bundle, or disable all other plugins in isolated mode. Tool permission
-// prompts come to the daemon (--permission-prompt-tool stdio). The user's
-// tools stay, less the native subagent tool (claudeRemovedTools). The
-// instruction file, when there is one, appends to the default system prompt.
+// servers. No ws plugin loads (claudeLeadPluginArgs): the daemon's ws-mcp is
+// the MCP server ReservedMCPServer (claudeLeadMCPArgs), whose tools run
+// without a prompt, and the instruction file carries the key and the
+// workflow manual, appended to the default system prompt. Other tool
+// permission prompts come to the daemon (--permission-prompt-tool stdio).
+// The user's tools stay, less the native subagent tool (claudeRemovedTools).
 func claudeLeadArgs(spec StartSpec) ([]string, error) {
 	plugins, err := claudeLeadPluginArgs(spec)
+	if err != nil {
+		return nil, err
+	}
+	servers, err := claudeLeadMCPArgs(spec)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +141,11 @@ func claudeLeadArgs(spec StartSpec) ([]string, error) {
 	if removed := claudeRemovedTools(spec); len(removed) > 0 {
 		args = append(args, "--disallowedTools", strings.Join(removed, ","))
 	}
-	return append(args, plugins...), nil
+	args = append(append(args, plugins...), servers...)
+	// The allowlist goes last: the option takes every following argument.
+	// The rule names the whole server, as a worker's rules name its own
+	// servers (claudeAllowedRules).
+	return append(args, "--allowedTools", "mcp__"+claudeNamePart(ReservedMCPServer)), nil
 }
 
 // claudeRemovedTools are the built-in tools spec's launch removes with
@@ -1496,14 +1505,13 @@ func (m *claudeMapper) toolResults(raw json.RawMessage, now int64) []Event {
 }
 
 // resultTool is resultTool under the name the attached ws-mcp's server has
-// in this process: a worker's inline server is ReservedMCPServer; a lead's
-// is its hosted bundle's own plugin server, plugin:<package>:<package>,
-// whether that server is the bundle's stdio entry or the HTTP entry a
-// hosted variant of the bundle puts under the same name. A rejoined lead
-// may run either package's bundle, so both names are accepted.
+// in this process: ReservedMCPServer, for a worker and a lead alike. A lead
+// an older daemon started, and this one rejoined, runs a hosted bundle
+// instead, whose server is plugin:<package>:<package> for either package,
+// so a lead accepts those names too.
 func (m *claudeMapper) resultTool(name string) string {
-	if !m.lead() {
-		return resultTool(name, claudeMCPToolName)
+	if tool := resultTool(name, claudeMCPToolName); tool != "" || !m.lead() {
+		return tool
 	}
 	for _, pkg := range hostedPluginPackages {
 		server := claudePluginServer(pkg, pkg)

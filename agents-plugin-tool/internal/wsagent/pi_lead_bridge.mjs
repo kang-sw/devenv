@@ -1,4 +1,5 @@
-// servers, sessionKey and launchWarning are JSON constants prepended by Go.
+// servers, sessionKey, launchWarning and workflowManual are JSON constants
+// prepended by Go.
 // Keep this watchdog independent of the bundle and all npm dependencies.
 import { readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -51,7 +52,9 @@ export default function (pi) {
     const warning = health(ctx);
     const identity = fallback ? "Your ws session key is " + JSON.stringify(sessionKey) +
       ". Pass it as session_key in ws tool calls. This hosted session already has a key; do not mint a replacement." : "";
-    const extra = [warning, identity].filter(Boolean).join("\n\n");
+    // The fallback stands in for the extension, which appends the manual itself.
+    const manual = fallback ? workflowManual : "";
+    const extra = [warning, identity, manual].filter(Boolean).join("\n\n");
     return extra ? { systemPrompt: event.systemPrompt + "\n\n" + extra } : undefined;
   });
 }

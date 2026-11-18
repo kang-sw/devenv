@@ -132,6 +132,15 @@ type Options struct {
 	// WSMCP is the stdio ws-mcp command serving root, without the runner's
 	// environment; nil refuses profiles that allow ws tools.
 	WSMCP func(root string) (MCPCommand, error)
+	// LeadManual renders the workflow manual of a hosted lead for its lead
+	// key, as the session's own ws-mcp would serve it from the selected
+	// package: backend is the lead's harness, dir its working directory.
+	// The lead's launch appends it to the harness's system prompt
+	// (composeLeadInstructions), so the session reads it from its first
+	// turn. internal/mcp renders the manual and imports this package, so the
+	// daemon supplies the function; nil, or an error, leaves the prompt
+	// with the key sentence alone.
+	LeadManual func(backend, dir, key string) (string, error)
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
 	// Timer starts the lever hold's cap timer (leverHoldCap): a channel

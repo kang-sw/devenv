@@ -248,11 +248,12 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 			return fmt.Errorf("ws session key: %w", err)
 		}
 		c.setStatus(func() { c.rejoinKeyPending = false })
-		if rec.Backend == BackendClaude {
+		if rec.Backend == BackendClaude || rec.Backend == BackendAgy {
 			// Written on every launch, --resume included, so each process
-			// carries the key in its prompt. Pi leads get it from their
-			// bridge extension (writePiLeadBridge).
-			if instructions, err = composeLeadInstructions(c.dir, rec); err != nil {
+			// carries the key and the manual in its prompt. Pi leads get
+			// them from their extension, or from its bridge fallback
+			// (writePiLeadBridge, LeadSpec.Manual).
+			if instructions, err = composeLeadInstructions(c.dir, rec, c.leadManual(rec)); err != nil {
 				return err
 			}
 		}
@@ -326,7 +327,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 				EnvHostedSessionKey: rec.WSKey,
 				EnvHostedSessionRow: wsdashboard.RegistrationPath(c.r.opts.Dir, rec.ReplyID),
 			},
-			VariantDir: filepath.Join(c.r.opts.Dir, HostedVariantsDir),
+			Manual: func() string { return c.leadManual(rec) },
 			Spawned: func(holderID string, pid int) {
 				spawned = true
 				c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = holderID, pid, 0 })
@@ -361,20 +362,19 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		spec.MCPSession = c.r.attachMCP(rec.ReplyID, rec.MCPToken, rec.MCPEnv, rec.workDir(), rec.HostPID)
 	case (rec.Backend == BackendClaude || rec.Backend == BackendAgy) && !attach:
 		// The lead's ws-mcp goes over the daemon's HTTP route with a new
-		// token, from the bundle it then loads; without a session the
-		// bundle's stdio server serves. An agy lead loads no bundle and has
-		// no stdio fallback: its backend refuses a start without a session.
+		// token. Without a route a Claude lead runs the same server over
+		// stdio (its --mcp-config entry); an agy lead has no stdio
+		// fallback. Neither loads a plugin, so a start without any ws-mcp
+		// is refused by its backend.
 		cmd, err := spec.Lead.WSMCP()
 		if err != nil {
-			fallback := "the bundle's stdio server serves"
-			if rec.Backend == BackendAgy {
-				fallback = "the agy start is refused"
-			}
-			fmt.Fprintf(c.r.opts.Log, "agent %s: ws-mcp over HTTP unavailable, %s: %v\n", rec.ReplyID, fallback, err)
-		} else if spec.MCPSession = c.r.attachMCP(rec.ReplyID, "", cmd.Env, rec.workDir(), 0); spec.MCPSession != nil {
-			if rec.Backend == BackendClaude {
-				spec.Lead.Plugin, spec.Lead.PluginNote = cmd.Plugin, cmd.PluginWarning
-			}
+			fmt.Fprintf(c.r.opts.Log, "agent %s: ws-mcp unavailable, the start is refused: %v\n", rec.ReplyID, err)
+			break
+		}
+		if rec.Backend == BackendClaude {
+			spec.WSMCP, spec.Lead.PluginNote = &cmd, cmd.PluginWarning
+		}
+		if spec.MCPSession = c.r.attachMCP(rec.ReplyID, "", cmd.Env, rec.workDir(), 0); spec.MCPSession != nil {
 			mcpEnv = cmd.Env
 		}
 	}
@@ -751,18 +751,38 @@ func composeInstructions(dir string, rec Record, p Profile, system string) (stri
 	return path, nil
 }
 
-// composeLeadInstructions writes the instruction file a hosted Claude lead
-// appends to its system prompt: the session key the daemon minted for it.
-// The plugin's own hooks deliver the same key, but a policy that blocks
-// those hooks leaves the prompt as the only place the lead can learn it;
-// when both run, the duplicate line is harmless.
-func composeLeadInstructions(dir string, rec Record) (string, error) {
+// composeLeadInstructions writes the instruction file a hosted lead (Claude,
+// agy) appends to its system prompt: the session key the daemon minted for
+// it and, when one rendered, its workflow manual. The harness loads no ws
+// plugin, so this prompt is where the session learns both, from its first
+// turn and without calling a tool. The manual is a snapshot of this launch.
+func composeLeadInstructions(dir string, rec Record, manual string) (string, error) {
 	text := fmt.Sprintf("Your ws session key is `%s`. Pass it as the `session_key` argument of every ws tool call. "+
-		"This hosted session already has a key; do not mint a replacement (no ferrule call, no fresh-bootstrap key). "+
-		"At session start and after any compaction, call the workflow_manual tool with this key and follow it.", rec.WSKey)
+		"This hosted session already has a key; do not mint a replacement (no ferrule call, no fresh-bootstrap key). ", rec.WSKey)
+	if manual = strings.TrimSpace(manual); manual != "" {
+		text += "The workflow manual below is binding; its session state is as of this session's start. " +
+			"After any compaction, or when you need fresh session state, call the workflow_manual tool with this key and follow it.\n\n" + manual
+	} else {
+		text += "At session start and after any compaction, call the workflow_manual tool with this key and follow it."
+	}
 	path := filepath.Join(dir, "instructions.md")
 	if err := writeFileAtomic(path, []byte(text+"\n"), 0o600); err != nil {
 		return "", err
 	}
 	return path, nil
+}
+
+// leadManual is the workflow manual rec's lead reads from its first turn
+// (Options.LeadManual), or "" when the daemon supplies no renderer or the
+// render failed, which is logged: the lead then starts with its key alone.
+func (c *conv) leadManual(rec Record) string {
+	if c.r.opts.LeadManual == nil {
+		return ""
+	}
+	text, err := c.r.opts.LeadManual(rec.Backend, rec.workDir(), rec.WSKey)
+	if err != nil {
+		fmt.Fprintf(c.r.opts.Log, "agent %s: workflow manual not rendered, the lead's prompt carries its key alone: %v\n", rec.ReplyID, err)
+		return ""
+	}
+	return text
 }
