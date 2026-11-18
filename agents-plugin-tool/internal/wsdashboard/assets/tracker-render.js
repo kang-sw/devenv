@@ -236,15 +236,16 @@
   }
   function openStore(name) {
     if (ui.open === name) { collapse(); return; }
-    var kb = document.activeElement === $('tkh-' + name);
+    var opener = $('tkh-' + name), kb = !!opener && document.activeElement === opener;
     if (ui.open) syncNow(ui.open, true); // switching to another store while one is open applies it
     if (ui.store !== name) { keepItemDraft(); ui.iedit = null; ui.item = null; ui.win = false; ui.last = null; ui.itemChanged = true; $('tkbody').scrollTop = 0; }
     ui.store = name; ui.open = name;
     bringUp(name);
     render();
-    // the focused handle hides while its drawer is open: focus moves to the fold button in its slot
+    // the focused handle hides while its drawer is open: focus moves to the fold button in its
+    // slot, unless the render already moved it elsewhere
     var fold = $('tkf-' + name);
-    if (kb && fold && !fold.hidden) fold.focus();
+    if (kb && fold && !fold.hidden && document.activeElement === opener) fold.focus();
     document.dispatchEvent(new CustomEvent('tk:drawer-open', { detail: { store: name } }));
   }
   // openItemWindow(storeId, itemId): the one entry point that opens an item, from a row, a

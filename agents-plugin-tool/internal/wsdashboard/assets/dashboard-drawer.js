@@ -310,6 +310,12 @@
     if (drhandle.classList.contains("wait")) t += "; " + wsT("js.drawer.waiting");
     drhandle.title = t;
     drhandle.setAttribute("aria-label", t);
+    // The fold button announces the wait it shows (in the panels slot only).
+    if (!drfold) return;
+    var f = wsT("js.drawer.fold");
+    if (drMode === "panels" && drfold.classList.contains("wait")) f += "; " + wsT("js.drawer.waiting");
+    drfold.title = f;
+    drfold.setAttribute("aria-label", f);
   }
   // drawerWait keeps the opener's approval signal current even while hidden;
   // the fold button mirrors it, since it shows in place of the hidden panels
@@ -395,7 +401,7 @@
   function drSetOpen(open, mode) {
     mode = mode || drMode;
     if (open && !(mode === "git" ? ghandle() : mode === "search" ? shandle : drHas)) return;
-    var kb = open && doc.activeElement === (mode === "search" && shandle || mode === "git" && ghandle() || drhandle);
+    var opener = mode === "search" && shandle || mode === "git" && ghandle() || drhandle, kb = open && doc.activeElement === opener;
     if (open && !drOpen) drAnnounce();
     if (!open && drsheet.contains(doc.activeElement)) (drMode === "search" && shandle || drMode === "git" && ghandle() || drhandle).focus();
     drMode = mode;
@@ -406,8 +412,9 @@
     if (drWant) { drSwap = false; drDot(); }
     drApply(true);
     // The focused opener hides while its sheet shows: focus moves to the fold
-    // button in its slot instead of falling to the body.
-    if (kb && drfold) drfold.focus();
+    // button in its slot instead of falling to the body, only while it is
+    // still on that opener (opening search focuses its input in drApply).
+    if (kb && drfold && doc.activeElement === opener) drfold.focus();
   }
   // drFold is a click on the fold button: the shown sheet closes as a click
   // on its handle closes it, and keyboard focus goes to that handle, since

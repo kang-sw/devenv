@@ -48,16 +48,23 @@ test('only the active sheet opener hides; closed handle signals remain in place'
 
 test('the fold button carries the approval wait while the panels sheet hides the handle', () => {
   const classes = () => ({ set: new Set(), toggle(k, on) { if (on) this.set.add(k); else this.set.delete(k); }, contains(k) { return this.set.has(k); } });
-  const drhandle = { classList: classes() }, drfold = { classList: classes() };
+  const labelled = () => ({ classList: classes(), attrs: {}, getAttribute(k) { return this.attrs[k]; }, setAttribute(k, v) { this.attrs[k] = v; } });
+  const drhandle = labelled(), drfold = labelled();
   let found = [];
   const row = inSource => ({ closest: s => s === '.ag-source' && inSource ? {} : null });
-  const c = vm.createContext({ drhandle, drfold, drTitle() {}, q: () => found });
+  const c = vm.createContext({ drhandle, drfold, drOpen: true, drMode: 'panels', wsT: k => k, q: () => found });
+  vm.runInContext(section('  function drTitle()', '  // drawerWait keeps'), c);
   vm.runInContext(section('  function drawerWait()', '  // A panels change'), c);
+  const waitLabel = 'js.drawer.fold; js.drawer.waiting';
   for (const [what, rows, want] of [['a waiting row', [row(false)], true], ['the hidden roster alone', [row(true)], false]]) {
     found = rows; c.drawerWait();
     assert.equal(drfold.classList.contains('wait'), want, 'fold wait: ' + what);
     assert.equal(drhandle.classList.contains('wait'), want, 'handle wait: ' + what);
+    assert.equal(drfold.attrs['aria-label'], want ? waitLabel : 'js.drawer.fold', 'fold label announces the wait: ' + what);
+    assert.equal(drfold.title, drfold.attrs['aria-label']);
   }
+  found = [row(false)]; c.drMode = 'git'; c.drawerWait();
+  assert.equal(drfold.attrs['aria-label'], 'js.drawer.fold', 'the git slot fold does not show or announce the wait');
   assert.match(css, /\.drawer\.panels \.dr-fold\.wait \.dr-wait \{ display: inline-flex; \}/);
   assert.match(js, /drFoldWait\.appendChild\(gIcon\("lock"\)\);\s*drfold\.appendChild\(drFoldWait\)/);
 });
