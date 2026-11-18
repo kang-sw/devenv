@@ -18,6 +18,7 @@ func builtinConfigDefaults() map[string]string {
 		wsconfig.ItemWorkflowPreferSubagent:    "off",
 		wsconfig.ItemWorkflowWhiteboardEnabled: "off",
 		wsconfig.ItemWorkflowTrackerEnabled:    "off",
+		wsconfig.ItemWorkflowProfile:           "direct",
 		wsconfig.ItemSageReview:                "auto",
 		wsconfig.ItemSageReviewDesign:          "off",
 		wsconfig.ItemTicketReviewAutoAck:       "on",
@@ -376,6 +377,21 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		Current:     currentWorkflowPreference(resolver, sessionKey, hostedPackageEntry.Key),
 	})
 
+	workflowProfileEntry := registryEntryByKey(wsconfig.ItemWorkflowProfile)
+	appendKnob(workflowProfileEntry, tuningKnob{
+		ID:          workflowProfileEntry.Key,
+		Kind:        "workflow_preference",
+		Description: "Lead playbook profile (builtin direct), per harness. direct reads the base lead playbooks; orchestrate selects the orchestrate variant of each lead playbook that has one, from the next workflow-manual or playbook load, and the lead then works through sub-leads, which run tickets through workers that delegate and explore. It applies to top-level lead sessions only; a sub-lead or worker always reads the base playbooks. orchestrate needs a host that supports nested subagent spawn (lead -> sub-lead -> worker -> delegate -> explore); config.tune warns when a harness it is set for is not verified to. A write lands in the session's harness bucket unless harness names another (* for every harness), and in global scope (all of the user's projects) unless scope names another. A read takes the session's harness bucket from any scope first, then the * bucket from any scope. Cost: orchestrate spends more agents per ticket and keeps the lead's own context lean; direct spawns fewer agents and keeps more work in the lead's context.",
+		Writer:      tuningWriter{Tool: workflowProfileEntry.WriterTool, FixedArguments: map[string]string{"key": workflowProfileEntry.Key}},
+		Reset: &tuningWriter{
+			Tool:           workflowProfileEntry.ResetTool,
+			FixedArguments: map[string]string{"key": workflowProfileEntry.Key, "reset": "true"},
+		},
+		SelectorFields: workflowProfileEntry.SelectorFields,
+		ValueFields:    workflowProfileEntry.ValueFields,
+		Current:        currentHarnessBucketedValue(resolver, sessionKey, workflowProfileEntry.Key, harness),
+	})
+
 	bootstrapEntry := registryEntryByKey(wsconfig.ItemBootstrapAlarm)
 	appendKnob(bootstrapEntry, tuningKnob{
 		ID:          "bootstrap_alarm",
@@ -438,7 +454,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	appendKnob(autoAckEntry, tuningKnob{
 		ID:          autoAckEntry.Key,
 		Kind:        "workflow_preference",
-		Description: "Open Decision Queue confirmation of review-raised items during ticket settlement (builtin on). on lets the lead confirm, on its own judgment, an announced default or technical decision raised by a fact-populator decision gap or by a reviewer issue marked autonomous, and list it as auto-confirmed in the round's settlement report; policy questions, reversals, and reviewer issues marked missing are still asked. off asks the user to acknowledge every such item, adding one user round trip before ready/ promotion. Takes effect at the next lead-ticket playbook read.",
+		Description: "Open Decision Queue confirmation of review-raised items during ticket settlement (builtin on). on lets the ticket-handler confirm, on its own judgment, an announced default or technical decision raised by a fact-populator decision gap or by a reviewer issue marked autonomous, and list it as auto-confirmed in the round's settlement report; policy questions, reversals, and reviewer issues marked missing are still asked. off asks the caller to confirm every such item, adding one caller round trip before ready/ promotion. Takes effect at the next ticket-handler playbook read or render.",
 		Writer:      tuningWriter{Tool: autoAckEntry.WriterTool, FixedArguments: map[string]string{"key": autoAckEntry.Key}},
 		Reset: &tuningWriter{
 			Tool:           autoAckEntry.ResetTool,

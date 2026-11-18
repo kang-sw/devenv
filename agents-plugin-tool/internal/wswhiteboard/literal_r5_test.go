@@ -84,12 +84,12 @@ func TestLiteralR5SpanOriginsFollowAcceptedQuotes(t *testing.T) {
 
 // Derived from the review's stated shape, not its unavailable generator source.
 // Every input is structurally clean: 1-3 panels, 0-3 complete changes per panel,
-// raw delimiter runs/fences and CDATA, with parent closes/nested wrapper text in
+// raw delimiter runs/fences, CDATA and raw elements, with parent closes/nested wrapper text in
 // operands. Attribute-CDATA panic variants are separate exact fixtures, since
 // their unknown attributes deliberately violate this generator's precondition.
 func literalR5StructuredInput(rng *rand.Rand) string {
-	raw := []string{"", "a", "`", "``", "```", "~~~xml\n", "```xml\n", "\n~~~\n", "\n```\n", "\n", " ", "<![CDATA[`</wb:panel>]]>", "<![CDATA[``]]>", "&#96;"}
-	operand := append(append([]string{}, raw...), "</wb:panel>", "<wb:change>", "</wb:change>", "<wb:foo>", "</wb:foo>", "<![CDATA[</wb:old></wb:new>]]>")
+	raw := []string{"", "a", "`", "``", "```", "~~~xml\n", "```xml\n", "\n~~~\n", "\n```\n", "\n", " ", "<![CDATA[`</wb:panel>]]>", "<![CDATA[``]]>", "&#96;", "<wb:raw>`</wb:panel>]]></wb:raw>", "<wb:raw>``</wb:raw>"}
+	operand := append(append([]string{}, raw...), "</wb:panel>", "<wb:change>", "</wb:change>", "<wb:foo>", "</wb:foo>", "<![CDATA[</wb:old></wb:new>]]>", "<wb:raw></wb:old><![CDATA[</wb:new></wb:raw>")
 	body := func(tokens []string) string {
 		var b strings.Builder
 		for n := 1 + rng.Intn(4); n > 0; n-- {

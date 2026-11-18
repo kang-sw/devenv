@@ -310,6 +310,11 @@ type Env struct {
 	IsDir func(path string) bool
 	// IsAbs reports whether path is absolute on the server's platform.
 	IsAbs func(path string) bool
+	// StatusAuthor, when non-empty, makes the call a sub-lead's status-only
+	// write (status.go): only wb:log and new wb:panel commands inside an
+	// existing open topic are accepted, and each log line and panel recap
+	// is stored behind the attribution prefix naming StatusAuthor.
+	StatusAuthor string
 }
 
 // Outcome reports accepted work and rejected payloads from an update.
@@ -702,6 +707,9 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 		topics := commandTopics(work, cmd, topicOf)
 		id, withdrawn := 0, []int(nil)
 		key := ""
+		if len(cp.List) == 0 && env.StatusAuthor != "" {
+			statusProblems(cp, work, cmd, topicOf)
+		}
 		if len(cp.List) == 0 && cmd.Tag == "wb:close" {
 			for _, topic := range topics {
 				if failedTopics[topic] {
@@ -728,9 +736,9 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 			case "wb:edit":
 				applyEdit(p, work, origins, cmd, topicOf, mark, env.Now)
 			case "wb:panel":
-				applyPanel(p, work, origins, cmd, topicOf, mark, env.Now)
+				applyPanel(p, work, origins, statusCommand(cmd, env), topicOf, mark, env.Now)
 			case "wb:log":
-				applyLog(p, work, cmd, topicOf, env.Now)
+				applyLog(p, work, statusCommand(cmd, env), topicOf, env.Now)
 			case "wb:state":
 				applyTopicState(p, work, cmd, topicOf, env.Now)
 			case "wb:eta":

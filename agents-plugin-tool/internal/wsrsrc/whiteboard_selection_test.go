@@ -31,7 +31,7 @@ func TestWhiteboardSelectionGuidance(t *testing.T) {
 					if pkg == "agents-plugin-pi" {
 						harness = "pi"
 					}
-					pb, err := Load(resolved, "whiteboard", harness, nil)
+					pb, err := Load(resolved, "whiteboard", harness, "", nil)
 					if err != nil {
 						t.Fatal(err)
 					}

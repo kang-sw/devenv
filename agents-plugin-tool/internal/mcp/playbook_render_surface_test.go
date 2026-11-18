@@ -61,6 +61,8 @@ func TestChildRoleForPlaybookRole(t *testing.T) {
 		{"leaf", roleLeaf, true},
 		{"worker", roleLead, true},
 		{"Worker", roleLead, true}, // case-insensitive
+		{"sublead", roleLead, true},
+		{" SubLead ", roleLead, true},
 		{"lead", "", false},
 		{"", "", false},
 		{"bogus", "", false},

@@ -42,6 +42,13 @@ type ClosedTopicsSource interface {
 	ReadClosedTopics(reg Registration, lang string, from, n int) (html template.HTML, ok bool)
 }
 
+// BoardArchiveSource is a PageSource that also exports a session's board
+// folder as a zip (wswhiteboard.FolderStore.ExportArchive), for the board
+// toolbar's download. ok is false when the session has no board.
+type BoardArchiveSource interface {
+	BoardArchive(reg Registration) (zip []byte, ok bool, err error)
+}
+
 // TopicHistorySource is a PageSource that also renders board topics with
 // the complete history the served board leaves out (View.LazyHistory): the
 // topics named, or, when target is set, the one topic that holds that eN,

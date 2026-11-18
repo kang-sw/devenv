@@ -402,7 +402,11 @@
       toolbar: {
         overview: function () { if (window.WsOverview) window.WsOverview.toggle(); },
         filter: function (run) { if (window.WsOverview) window.WsOverview.filter(run); else run(); },
-        search: function (e) { var b = $("tkqs"); if (b) { e.stopPropagation(); b.click(); } },
+        download: worktree ? null : function () {
+          var a = doc.createElement("a");
+          a.href = "/s/" + rid + "/board.zip"; a.download = "";
+          doc.body.appendChild(a); a.click(); a.remove();
+        },
         files: worktree ? null : filesSheet
       },
       reveal: function () {
@@ -449,7 +453,7 @@
       var label = doc.createElement("span"); label.className = "board-label";
       label.textContent = wsT("js.worktree.explorer"); explorer.appendChild(label);
       explorer.addEventListener("click", function () { window.WsFiles.open({ root: worktree, dir: "" }); });
-      tools.insertBefore(explorer, tools.querySelector(".board-search"));
+      tools.appendChild(explorer);
     }
     // wbForm creates wbHistory near the end of page startup. Mount overview
     // after that, not here while only the card framework exists.

@@ -259,7 +259,7 @@ func TestManifestFileHashStability(t *testing.T) {
 
 func TestLoaderBase(t *testing.T) {
 	root := buildMinimalTree(t)
-	pb, err := Load(root, "sample", "", map[string]string{"Name": "World"})
+	pb, err := Load(root, "sample", "", "", map[string]string{"Name": "World"})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestLoaderParsesRoleAndTier(t *testing.T) {
 	if err := WriteManifest(root, m); err != nil {
 		t.Fatalf("WriteManifest: %v", err)
 	}
-	pb, err := Load(root, "impl", "", nil)
+	pb, err := Load(root, "impl", "", "", nil)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestLoaderFlatPlaybook(t *testing.T) {
 	if err := WriteManifest(root, m); err != nil {
 		t.Fatalf("WriteManifest: %v", err)
 	}
-	pb, err := Load(root, "code-reviewer", "", nil)
+	pb, err := Load(root, "code-reviewer", "", "", nil)
 	if err != nil {
 		t.Fatalf("Load flat playbook: %v", err)
 	}
@@ -341,7 +341,7 @@ func TestLoaderSubdirWinsOverFlat(t *testing.T) {
 	if err := WriteManifest(root, m); err != nil {
 		t.Fatalf("WriteManifest: %v", err)
 	}
-	pb, err := Load(root, "dup", "", nil)
+	pb, err := Load(root, "dup", "", "", nil)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -352,7 +352,7 @@ func TestLoaderSubdirWinsOverFlat(t *testing.T) {
 
 func TestLoaderHarnessVariant(t *testing.T) {
 	root := buildMinimalTree(t)
-	pb, err := Load(root, "sample", "codex", map[string]string{"Name": "Agent"})
+	pb, err := Load(root, "sample", "codex", "", map[string]string{"Name": "Agent"})
 	if err != nil {
 		t.Fatalf("Load codex: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestLoaderHarnessVariant(t *testing.T) {
 func TestLoaderHarnessFallsBackToBase(t *testing.T) {
 	root := buildMinimalTree(t)
 	// "unknown" harness overlay does not exist; should fall back to base.
-	pb, err := Load(root, "sample", "unknown", map[string]string{"Name": "X"})
+	pb, err := Load(root, "sample", "unknown", "", map[string]string{"Name": "X"})
 	if err != nil {
 		t.Fatalf("Load with unknown harness: %v", err)
 	}
@@ -379,7 +379,7 @@ func TestLoaderHarnessFallsBackToBase(t *testing.T) {
 func TestLoaderNilVarsNoSubstitution(t *testing.T) {
 	root := buildMinimalTree(t)
 	// nil vars → no substitution; placeholder is preserved in body.
-	pb, err := Load(root, "sample", "", nil)
+	pb, err := Load(root, "sample", "", "", nil)
 	if err != nil {
 		t.Fatalf("Load with nil vars: %v", err)
 	}
@@ -475,7 +475,7 @@ func TestSubstituteNoDoubleExpansion(t *testing.T) {
 
 func TestAutoIncludeConcatenated(t *testing.T) {
 	root := buildTreeWithIncludes(t)
-	pb, err := Load(root, "pb", "", nil)
+	pb, err := Load(root, "pb", "", "", nil)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -502,7 +502,7 @@ func TestAutoIncludePrefersPlaybookLocalHarness(t *testing.T) {
 		t.Fatalf("WriteManifest: %v", err)
 	}
 
-	pb, err := Load(root, "pb", "codex", nil)
+	pb, err := Load(root, "pb", "codex", "", nil)
 	if err != nil {
 		t.Fatalf("Load codex: %v", err)
 	}
@@ -528,7 +528,7 @@ func TestAutoIncludeFallsBackToPlaybookLocalBaseBeforeRoot(t *testing.T) {
 		t.Fatalf("WriteManifest: %v", err)
 	}
 
-	pb, err := Load(root, "pb", "claude", nil)
+	pb, err := Load(root, "pb", "claude", "", nil)
 	if err != nil {
 		t.Fatalf("Load claude: %v", err)
 	}
@@ -548,7 +548,7 @@ func TestAutoIncludeDangling(t *testing.T) {
 	if err := WriteManifest(root, m); err != nil {
 		t.Fatalf("WriteManifest: %v", err)
 	}
-	_, err := Load(root, "pb", "", nil)
+	_, err := Load(root, "pb", "", "", nil)
 	if err == nil {
 		t.Fatal("expected error for dangling include, got nil")
 	}
@@ -578,7 +578,7 @@ func TestAutoIncludeCRLFNoFrontmatter(t *testing.T) {
 		t.Fatalf("WriteManifest: %v", err)
 	}
 
-	pb, err := Load(root, "pb", "", nil)
+	pb, err := Load(root, "pb", "", "", nil)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -602,7 +602,7 @@ func TestLoaderHashMismatch(t *testing.T) {
 	// Corrupt a file after manifest generation.
 	writeFile(t, root, "sample/sample.md", "---\nkind: print\ndelegates: false\nvariables:\n  - Name\n---\nCORRUPTED\n")
 
-	_, err := Load(root, "sample", "", nil)
+	_, err := Load(root, "sample", "", "", nil)
 	var target ErrHashMismatch
 	if !asError(err, &target) {
 		t.Errorf("expected ErrHashMismatch, got %T: %v", err, err)
@@ -614,7 +614,7 @@ func TestLoaderManifestMissing(t *testing.T) {
 	writeFile(t, root, "pb/pb.md", "---\nkind: print\n---\nbody\n")
 	// No manifest.json written.
 
-	_, err := Load(root, "pb", "", nil)
+	_, err := Load(root, "pb", "", "", nil)
 	var target ErrManifestMissing
 	if !asError(err, &target) {
 		t.Errorf("expected ErrManifestMissing, got %T: %v", err, err)
@@ -626,7 +626,7 @@ func TestLoaderSchemaMismatch(t *testing.T) {
 	writeFile(t, root, "pb/pb.md", "---\nkind: print\n---\nbody\n")
 	writeFile(t, root, "manifest.json", `{"schema_version":999,"files":{"pb/pb.md":"deadbeef"}}`)
 
-	_, err := Load(root, "pb", "", nil)
+	_, err := Load(root, "pb", "", "", nil)
 	var target ErrSchemaMismatch
 	if !asError(err, &target) {
 		t.Errorf("expected ErrSchemaMismatch, got %T: %v", err, err)
@@ -639,7 +639,7 @@ func TestLoaderPlaybookNotFound(t *testing.T) {
 		t.Fatalf("WriteManifest: %v", err)
 	}
 
-	_, err := Load(root, "missing", "", nil)
+	_, err := Load(root, "missing", "", "", nil)
 	var target ErrPlaybookNotFound
 	if !asError(err, &target) {
 		t.Fatalf("expected ErrPlaybookNotFound, got %T: %v", err, err)
@@ -658,7 +658,7 @@ func TestLoaderFileMissingFromManifest(t *testing.T) {
 	// Write manifest that doesn't list pb/pb.md.
 	writeFile(t, root, "manifest.json", `{"schema_version":1,"files":{}}`)
 
-	_, err := Load(root, "pb", "", nil)
+	_, err := Load(root, "pb", "", "", nil)
 	var target ErrFileMissing
 	if !asError(err, &target) {
 		t.Errorf("expected ErrFileMissing, got %T: %v", err, err)
@@ -669,7 +669,7 @@ func TestLoaderManifestListedFileMissing(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "manifest.json", `{"schema_version":1,"files":{"pb/pb.md":"deadbeef"}}`)
 
-	_, err := Load(root, "pb", "", nil)
+	_, err := Load(root, "pb", "", "", nil)
 	var target ErrFileMissing
 	if !asError(err, &target) {
 		t.Errorf("expected ErrFileMissing, got %T: %v", err, err)
@@ -823,7 +823,7 @@ func TestValidateSkipsPlaybookLocalIncludeFragments(t *testing.T) {
 	if err := Validate(root); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	pb, err := Load(root, "pb", "", map[string]string{"Name": "World"})
+	pb, err := Load(root, "pb", "", "", map[string]string{"Name": "World"})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}

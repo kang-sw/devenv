@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"os"
@@ -371,6 +372,20 @@ func (src *DashboardSessionSource) ReadClosedTopics(reg wsdashboard.Registration
 		return "", false
 	}
 	return html, true
+}
+
+var _ wsdashboard.BoardArchiveSource = (*DashboardSessionSource)(nil)
+
+// BoardArchive zips the session's board folder for the dashboard's board
+// download; false when the session has no board. The folder is the one
+// whiteboardFolder names: the reply-id under the registered root.
+func (src *DashboardSessionSource) BoardArchive(reg wsdashboard.Registration) ([]byte, bool, error) {
+	folder := wswhiteboard.FolderStore{Dir: filepath.Join(reg.Project, filepath.FromSlash(whiteboardDirRel), reg.ReplyID)}
+	data, err := folder.ExportArchive()
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
+	}
+	return data, err == nil, err
 }
 
 var _ wsdashboard.TopicHistorySource = (*DashboardSessionSource)(nil)

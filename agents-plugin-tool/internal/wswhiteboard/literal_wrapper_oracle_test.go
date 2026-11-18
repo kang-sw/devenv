@@ -10,7 +10,7 @@ import (
 
 // Owner (1208)=b: crossing candidates are structural, without exceptions.
 // Normalize only local D-A wrapper-opening quotes in the reference reading;
-// inline/fenced spans must contain no own raw close outside CDATA. All other
+// inline/fenced spans must contain no own close outside CDATA/raw. All other
 // commands, operands and bytes remain structural comparisons, never skipped.
 func literalStructuralExpected(input string) ([]map[string]any, bool) {
 	g0 := grammar
@@ -86,12 +86,10 @@ func literalSkipWrapper(input string, at int, wrapper string) int {
 		if input[end-2] != '/' {
 			close = "</" + input[at+1:nameEnd] + ">"
 			for end < len(input) && !strings.HasPrefix(input[end:], close) {
-				if strings.HasPrefix(input[end:], "<![CDATA[") {
-					stop := strings.Index(input[end+9:], "]]>")
-					if stop < 0 {
-						return -1
-					}
-					end += 9 + stop + 3
+				if stop := literalOracleVerbatimEnd(input, end); stop < 0 {
+					return -1
+				} else if stop > end {
+					end = stop
 				} else {
 					end++
 				}
@@ -105,10 +103,24 @@ func literalSkipWrapper(input string, at int, wrapper string) int {
 	}
 }
 
+// literalOracleVerbatimEnd is the end of the CDATA section or raw element
+// opening at at, at itself when none opens there, or -1 when it is unclosed.
+func literalOracleVerbatimEnd(s string, at int) int {
+	for _, pair := range [][2]string{{"<![CDATA[", "]]>"}, {"<wb:raw>", "</wb:raw>"}} {
+		if strings.HasPrefix(s[at:], pair[0]) {
+			if stop := strings.Index(s[at+len(pair[0]):], pair[1]); stop >= 0 {
+				return at + len(pair[0]) + stop + len(pair[1])
+			}
+			return -1
+		}
+	}
+	return at
+}
+
 func literalOracleRawClose(s string, start, end int, closing string) bool {
 	for at := start; at < end; at++ {
-		if strings.HasPrefix(s[at:], "<![CDATA[") {
-			at += 9 + strings.Index(s[at+9:], "]]>") + 2
+		if stop := literalOracleVerbatimEnd(s, at); stop > at {
+			at = stop - 1
 		} else if strings.HasPrefix(s[at:], closing) {
 			return true
 		}
@@ -132,8 +144,8 @@ func literalWrapperMasks(input string, structural []command) map[int]bool {
 		wrapper, closing := grammar.Prefix+spec.Wrapper, "</"+c.Tag+">"
 		bodyStart := literalOpeningEnd(input, start)
 		for at := bodyStart; at < sourceAt && !strings.HasPrefix(input[at:], closing); {
-			if strings.HasPrefix(input[at:], "<![CDATA[") {
-				at += 9 + strings.Index(input[at+9:], "]]>") + 3
+			if stop := literalOracleVerbatimEnd(input, at); stop > at {
+				at = stop
 				continue
 			}
 			if literalSourceOpening(input, at, wrapper) {
@@ -178,11 +190,11 @@ func literalWrapperMasks(input string, structural []command) map[int]bool {
 				}
 			}
 			if end > at && !literalOracleRawClose(input, at, end, closing) {
-				// CDATA is consumed atomically even when a span ends in it.
+				// CDATA and raw are consumed atomically even when a span ends in one.
 				for pos := at; pos < end; pos++ {
-					if strings.HasPrefix(input[pos:], "<![CDATA[") {
-						pos += 9 + strings.Index(input[pos+9:], "]]>") + 2
-						end = max(end, pos+1)
+					if stop := literalOracleVerbatimEnd(input, pos); stop > pos {
+						pos = stop - 1
+						end = max(end, stop)
 					} else if literalSourceOpening(input, pos, wrapper) {
 						masks[pos] = true
 					}

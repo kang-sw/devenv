@@ -142,7 +142,7 @@ func TestWorkflowManualFreshModeWithRoot(t *testing.T) {
 	server := NewServer(root, "test")
 
 	// Fresh-with-root mode: sentinel key + root supplied. The handler must mint a
-	// lead session key inline, strip the fresh-only block, and return Session Key
+	// lead session key inline and return Session Key
 	// and Session State sections.
 	resp := callToolWithKey(t, server, 5010, freshBootstrapKey, "workflow_manual", map[string]any{
 		"root": root,

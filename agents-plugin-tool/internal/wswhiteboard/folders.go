@@ -145,19 +145,8 @@ func (f FolderStore) revisionReceipt(meta *folderSession) (int, folderRevisionRe
 // Legacy is copied, never modified or written back.
 func (f FolderStore) Open(legacy *State) (*State, error) {
 	if legacy == nil {
-		present := false
-		for _, name := range []string{"meta.json", "pending.json", "committed.json"} {
-			_, err := wsstate.Stat(filepath.Join(f.Dir, name))
-			if err == nil {
-				present = true
-				break
-			}
-			if !errors.Is(err, os.ErrNotExist) {
-				return nil, err
-			}
-		}
-		if !present {
-			return nil, nil
+		if ok, err := f.present(); err != nil || !ok {
+			return nil, err
 		}
 	}
 	var out *State

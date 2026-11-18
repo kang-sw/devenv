@@ -239,6 +239,7 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .board-action:hover, .board-action:focus-visible { border-color: var(--wb-muted-fg); }
 .board-action[aria-pressed="true"], .tnew[aria-expanded="true"], .wnew[aria-expanded="true"] { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); color: var(--wb-primary); border-color: color-mix(in srgb, var(--wb-primary) 45%, transparent); }
 .board-action kbd { font: 600 10.5px ui-monospace, Menlo, monospace; color: var(--wb-muted-fg); border: 1px solid var(--wb-line); border-radius: 4px; padding: 0 4px; }
+.r-board:has(> .empty) .board-download { display: none; }
 /* Visibility is view state only: topics, framework cards, frames and pin order stay intact. */
 [data-state-filtered] { display: none !important; }
 .board-state-filter { margin-left: auto; position: relative; display: flex; flex: none; --state-color: var(--wb-fg); }

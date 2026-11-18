@@ -181,7 +181,9 @@ When workflow skills, MCP tools, or Claude compatibility commands are unavailabl
 1. Read `AGENTS.md`, this guide, and the relevant current docs.
 2. Use existing nearby tickets and manuals as formatting examples.
 3. Prefer conservative, append-only changes when parser behavior is uncertain.
-4. Keep generated AI docs and commit messages in English unless a human-facing
-   product string requires another language.
+4. A ticket's frontmatter `title:` uses `workflow.lang` when set, otherwise
+   English; the rest of the ticket is English. Keep other generated AI docs and
+   commit messages in English unless a human-facing product string requires
+   another language.
 5. Verify with plain Git and shell commands, then re-run plugin verification
    tools when they become available.
