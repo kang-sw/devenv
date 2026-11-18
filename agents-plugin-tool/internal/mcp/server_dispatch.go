@@ -1077,7 +1077,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return toolTextResponse(req.ID, text, err)
 	case "infra.read":
 		name, _ := params.Arguments["name"].(string)
-		text, err := wsdoc.ReadInfra(name)
+		text, err := wsdoc.ReadInfraForPackage(name, s.getenv("WS_MCP_NAMESPACE"))
 		return toolTextResponse(req.ID, text, err)
 	case "convention.read":
 		name, _ := params.Arguments["name"].(string)

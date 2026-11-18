@@ -102,7 +102,7 @@ func TestWorkflowPreferSubagentResetRestoresBuiltin(t *testing.T) {
 func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
 	useLeadProfile(t)
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	useResourceFixture(t, rsrcRoot)
 	t.Setenv("WS_SKILLS_ROOT", filepath.Join(t.TempDir(), "missing-skills"))
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
@@ -171,7 +171,7 @@ func TestWorkflowPreferSubagentWorkflowManualPrintProductionPath(t *testing.T) {
 func TestWorkflowPreferSubagentWorkflowManualClaudeGetsInvocationHint(t *testing.T) {
 	useLeadProfile(t)
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	useResourceFixture(t, rsrcRoot)
 	t.Setenv("WS_SKILLS_ROOT", filepath.Join(t.TempDir(), "missing-skills"))
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))

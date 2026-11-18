@@ -70,23 +70,23 @@ func TestPiLeadPrefersFreshBundle(t *testing.T) {
 	_, root := piLeadFixture(t)
 	bundle := piBundlePackage(t, root, true)
 	// No node_modules anywhere: the bundle inlines its deps.
-	entries, err := piBundledEntries(hostedPluginTestVersion)
+	entries, err := piEntriesAt(root)
 	if err != nil || !slices.Equal(entries, []string{bundle}) {
 		t.Fatalf("fresh bundle entries = %v, %v", entries, err)
 	}
 	// Editing a source without regenerating must not run the old bundle.
 	piLeadFile(t, filepath.Join(root, "src", "util.ts"), "export const changed = 1;")
-	if entries, err := piBundledEntries(hostedPluginTestVersion); err == nil || !strings.Contains(err.Error(), "stale") {
+	if entries, err := piEntriesAt(root); err == nil || !strings.Contains(err.Error(), "stale") {
 		t.Fatalf("stale bundle without deps = %v, %v", entries, err)
 	}
 	piLeadDeps(t, filepath.Dir(root))
-	if entries, err := piBundledEntries(hostedPluginTestVersion); err == nil || !strings.Contains(err.Error(), "stale") {
+	if entries, err := piEntriesAt(root); err == nil || !strings.Contains(err.Error(), "stale") {
 		t.Fatalf("stale bundle must not silently switch to source even with deps = %v, %v", entries, err)
 	}
 	if err := os.Remove(bundle); err != nil {
 		t.Fatal(err)
 	}
-	if entries, err := piBundledEntries(hostedPluginTestVersion); err == nil {
+	if entries, err := piEntriesAt(root); err == nil {
 		t.Fatalf("missing bundle must not silently switch to source = %v", entries)
 	}
 }

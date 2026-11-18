@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"fmt"
+	"io/fs"
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsrsrc"
@@ -24,8 +25,8 @@ func commandSyntaxEnabled(whiteboardOn, trackerOn bool) bool {
 
 // commandSyntaxSection is the shared section as the part holds it, headed
 // "## Command syntax".
-func commandSyntaxSection(rsrcRoot string) (string, error) {
-	section, err := wsrsrc.LoadPart(rsrcRoot, workflowManualPlaybookName, commandSyntaxPart)
+func commandSyntaxSection(rsrcRoot fs.FS) (string, error) {
+	section, err := wsrsrc.LoadPartFS(rsrcRoot, workflowManualPlaybookName, commandSyntaxPart)
 	if err != nil {
 		return "", fmt.Errorf("read %s/%s: %w", workflowManualPlaybookName, commandSyntaxPart, err)
 	}
@@ -34,7 +35,7 @@ func commandSyntaxSection(rsrcRoot string) (string, error) {
 
 // commandSyntaxManualSection is the shared section with its headings demoted
 // one level, to sit beside the manual's other ### sections.
-func commandSyntaxManualSection(rsrcRoot string) (string, error) {
+func commandSyntaxManualSection(rsrcRoot fs.FS) (string, error) {
 	section, err := commandSyntaxSection(rsrcRoot)
 	if err != nil {
 		return "", err
@@ -55,7 +56,7 @@ func commandSyntaxManualSection(rsrcRoot string) (string, error) {
 // appendCommandSyntax appends the shared section to a command-language
 // tool's playbook as playbook.read prints it, so the playbook alone states
 // the whole input format.
-func appendCommandSyntax(rsrcRoot, body string) (string, error) {
+func appendCommandSyntax(rsrcRoot fs.FS, body string) (string, error) {
 	section, err := commandSyntaxSection(rsrcRoot)
 	if err != nil {
 		return "", err

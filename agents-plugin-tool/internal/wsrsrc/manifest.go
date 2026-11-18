@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,11 +15,15 @@ import (
 // Returns ErrManifestMissing when the file is absent.
 // Returns ErrSchemaMismatch when the schema version is not SupportedSchemaVersion.
 func ReadManifest(root string) (Manifest, error) {
-	path := filepath.Join(root, "manifest.json")
-	data, err := os.ReadFile(path)
+	return ReadManifestFS(os.DirFS(root))
+}
+
+// ReadManifestFS checks the schema of the resource filesystem's manifest.
+func ReadManifestFS(root fs.FS) (Manifest, error) {
+	data, err := fs.ReadFile(root, "manifest.json")
 	if err != nil {
 		if os.IsNotExist(err) {
-			return Manifest{}, ErrManifestMissing{Root: root}
+			return Manifest{}, ErrManifestMissing{Root: fmt.Sprint(root)}
 		}
 		return Manifest{}, fmt.Errorf("read manifest: %w", err)
 	}

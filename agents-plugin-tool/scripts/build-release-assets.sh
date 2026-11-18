@@ -27,6 +27,9 @@ for artifact in native-pi/closure-manifest.json native-pi/closure.zip native-pi/
 done
 diff -r "$repo_dir/agents-plugin/native-pi/first-party" "$repo_dir/agents-plugin-wsflow/native-pi/first-party"
 
+python3 "$script_dir/generate-package-assets.py"
+python3 "$script_dir/generate-package-assets.py" --check
+
 dist_dir=$tool_dir/dist
 rm -rf "$dist_dir"
 mkdir -p "$dist_dir"

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -224,29 +225,15 @@ func (s *Server) gitRunner() wsgit.ExecRunner {
 	return wsgit.ExecRunner{Environ: s.environ}
 }
 
-// rsrcRoot is the caller's resource tree. A hosted server takes it from
-// the caller's WS_RSRC_ROOT alone: the daemon's own executable lives in its
-// state directory, beside no resource tree, so the executable-derived
-// fallback would resolve to nothing meaningful.
-func (s *Server) rsrcRoot() (string, error) {
-	if s.env == nil {
-		return wsrsrc.ResolveRoot()
-	}
-	if root := s.getenv(wsrsrc.EnvRsrcRoot); root != "" {
-		return root, nil
-	}
-	return "", fmt.Errorf("%s not set for this connection", wsrsrc.EnvRsrcRoot)
+// rsrcRoot selects build-owned resources using package identity, never the
+// caller's resource path. The dev checkout is read from the daemon process by
+// wspackage, not from this connection's environment.
+func (s *Server) rsrcRoot() (fs.FS, error) {
+	return wsrsrc.PackageResources(s.getenv("WS_MCP_NAMESPACE"))
 }
 
-// skillsRoot is the caller's skills tree, resolved as rsrcRoot is.
-func (s *Server) skillsRoot() (string, error) {
-	if s.env == nil {
-		return wsrsrc.ResolveSkillsRoot()
-	}
-	if root := s.getenv(wsrsrc.EnvSkillsRoot); root != "" {
-		return root, nil
-	}
-	return "", fmt.Errorf("%s not set for this connection", wsrsrc.EnvSkillsRoot)
+func (s *Server) skillsRoot() (fs.FS, error) {
+	return wsrsrc.PackageSkills(s.getenv("WS_MCP_NAMESPACE"))
 }
 
 func envFlagOn(value string) bool {

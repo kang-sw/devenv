@@ -16,12 +16,14 @@ import (
 	"github.com/kang-sw/devenv/internal/mcp"
 )
 
-// TestMain defaults WS_RSRC_ROOT to the shipped rsrc tree so CLI paths that
-// resolve bundled resources find them without a per-test override.
+// TestMain selects canonical build inputs for bare go test independently of
+// legacy caller resource roots.
 func TestMain(m *testing.M) {
-	if os.Getenv("WS_RSRC_ROOT") == "" {
-		_ = os.Setenv("WS_RSRC_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))
+	checkout, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		panic(err)
 	}
+	_ = os.Setenv("WS_RSRC_DEV_CHECKOUT", checkout)
 	os.Exit(runTestMain(m))
 }
 

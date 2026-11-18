@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -259,7 +260,7 @@ func TestRenderSubleadPlaybookMintsMarkedLeadKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _, err := renderPlaybookBody(s, root, "sublead-pb", nil, wsconfig.Options{}, "/work/tree-a", parent, "", nil, "")
+	body, _, err := renderPlaybookBody(s, os.DirFS(root), "sublead-pb", nil, wsconfig.Options{}, "/work/tree-a", parent, "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -271,7 +272,7 @@ func TestRenderSubleadPlaybookMintsMarkedLeadKey(t *testing.T) {
 	if author, ok := s.sessions.subleadPlaybook(key); !ok || author != "sublead-pb" {
 		t.Fatalf("sub-lead marker = %q, %v; want the minting playbook", author, ok)
 	}
-	workerBody, _, err := renderPlaybookBody(s, root, "worker-pb", nil, wsconfig.Options{}, "/work/tree-a", parent, "", nil, "")
+	workerBody, _, err := renderPlaybookBody(s, os.DirFS(root), "worker-pb", nil, wsconfig.Options{}, "/work/tree-a", parent, "", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

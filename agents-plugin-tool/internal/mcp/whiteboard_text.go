@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"fmt"
+	"io/fs"
 	"strings"
 )
 
@@ -69,7 +70,7 @@ func replaceOrAppend(body, old, replacement string) string {
 // section once (commandSyntaxEnabled), then the whiteboard section, then the
 // tracker section; another playbook gets its whiteboard variants. Off knobs
 // return body unchanged.
-func applyKnobVariants(s *Server, rsrcRoot, name, body string, whiteboardOn, trackerOn bool) (string, error) {
+func applyKnobVariants(s *Server, rsrcRoot fs.FS, name, body string, whiteboardOn, trackerOn bool) (string, error) {
 	if name == workflowManualPlaybookName && commandSyntaxEnabled(whiteboardOn, trackerOn) {
 		section, err := commandSyntaxManualSection(rsrcRoot)
 		if err != nil {
@@ -95,7 +96,7 @@ func applyKnobVariants(s *Server, rsrcRoot, name, body string, whiteboardOn, tra
 // playbook when enabled (see Server.whiteboardEnabled); a disabled knob or
 // another playbook returns body unchanged. The shared command syntax section
 // ahead of it is applyKnobVariants'.
-func applyWhiteboardVariants(s *Server, rsrcRoot, name, body string, enabled bool) (string, error) {
+func applyWhiteboardVariants(s *Server, rsrcRoot fs.FS, name, body string, enabled bool) (string, error) {
 	if !enabled {
 		return body, nil
 	}
@@ -116,7 +117,7 @@ func applyWhiteboardVariants(s *Server, rsrcRoot, name, body string, enabled boo
 // whiteboardManualSection is the manual's knob-on section: the mandate, then
 // the whiteboard playbook's own content (its title dropped, its headings
 // demoted under the section), so the lead needs no extra read.
-func whiteboardManualSection(s *Server, rsrcRoot string) (string, error) {
+func whiteboardManualSection(s *Server, rsrcRoot fs.FS) (string, error) {
 	playbook, _, err := renderPlaybookBody(s, rsrcRoot, whiteboardPlaybookName, nil, s.configOptions(), "", "", "", nil, "")
 	if err != nil {
 		return "", fmt.Errorf("render %s playbook: %w", whiteboardPlaybookName, err)

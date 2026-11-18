@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"sort"
 	"strconv"
 	"strings"
@@ -278,7 +279,7 @@ type tuningAgentTierCurrent struct {
 
 // harness selects the bucket a harness-bucketed knob's current value is
 // resolved for (the session's detected harness; empty reads only all).
-func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey, harness string, noAgentMode bool, configOpts wsconfig.Options, registries ...map[string]wsagent.BackendRegistration) (tuningCatalog, error) {
+func buildTuningCatalog(rsrcRoot fs.FS, resolver *wsconfig.Resolver, sessionKey, harness string, noAgentMode bool, configOpts wsconfig.Options, registries ...map[string]wsagent.BackendRegistration) (tuningCatalog, error) {
 	points, err := scanOverridePoints(rsrcRoot)
 	if err != nil {
 		return tuningCatalog{}, err

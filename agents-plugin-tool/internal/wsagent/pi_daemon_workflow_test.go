@@ -118,7 +118,9 @@ print(json.dumps(module.reader_fixture(pathlib.Path(sys.argv[2]), sys.argv[3])))
 					t.Fatalf("wrong owning Claude assets/defaults: %s", name)
 				}
 			}
-			entries, err := piBundledEntries(hostedPluginTestVersion)
+			// Exercise the legacy prepared extension reader directly; runtime
+			// selection now uses the daemon's build-owned payload instead.
+			entries, err := piEntriesAt(filepath.Join(filepath.Dir(root), "agents-plugin-pi"))
 			if err != nil || len(entries) != 1 {
 				t.Fatalf("old Pi reader must return a real entry, not the MCP bridge: %v, %v", entries, err)
 			}

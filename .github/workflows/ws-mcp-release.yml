@@ -116,6 +116,9 @@ jobs:
           done
           diff -r ../agents-plugin/native-pi/first-party ../agents-plugin-wsflow/native-pi/first-party
 
+      - name: Generate embedded workflow packages
+        run: python3 scripts/generate-package-assets.py
+
       - name: Build release assets
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -171,6 +174,8 @@ jobs:
       - name: Build Windows executable
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
+          python scripts/generate-package-assets.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go build -trimpath -ldflags "-s -w -X main.version=0.50.7-dev" -o dist/ws-mcp-windows-amd64.exe ./cmd/ws-mcp
           python scripts/write-runtime-metadata.py dist/ws-mcp-windows-amd64.exe --version 0.50.7-dev
 

@@ -87,9 +87,6 @@ func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySessi
 	env := mcp.EnvFromMap(hello.Env)
 	switch hello.Mode {
 	case wsdashboard.ProxyModeMCP:
-		if strings.TrimSpace(hello.Env[wsrsrc.EnvRsrcRoot]) == "" {
-			return nil, fmt.Errorf("hello carries no %s: a hosted session reads its resources from the launcher's plugin, never from the daemon's", wsrsrc.EnvRsrcRoot)
-		}
 		root := hello.ProjectRoot
 		if root == "" {
 			root = defaultRootFrom(".", func(key string) string { return hello.Env[key] })

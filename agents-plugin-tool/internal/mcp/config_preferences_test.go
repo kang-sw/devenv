@@ -13,7 +13,9 @@ func TestPreferenceSlotsTuneAndRender(t *testing.T) {
 		t.Run(pkg, func(t *testing.T) {
 			useLeadProfile(t)
 			t.Setenv("WS_RSRC_ROOT", filepath.Join("..", "..", "..", pkg, "rsrc"))
+			t.Setenv(envNamespace, "ws")
 			if pkg == "agents-plugin-wsflow" {
+				t.Setenv(envNamespace, "wsflow")
 				t.Setenv("WS_MCP_NO_AGENT", "1")
 			}
 			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))

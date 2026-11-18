@@ -20,7 +20,7 @@ func TestPlaybookPrintGoldenDelegateSampleClaudeHarness(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "delegate-sample", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "delegate-sample", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestPlaybookPrintGoldenDelegateSampleCodexHarness(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "codex")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "delegate-sample", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "delegate-sample", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestPlaybookPrintGoldenDelegateSampleUnknownHarness(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "") // host-neutral
 
-	body, _, err := printPlaybook(s, rsrcRoot, "delegate-sample", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "delegate-sample", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -94,9 +94,10 @@ func TestPlaybookPrintGoldenSamplePlaybookNoDelegation(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "sample-playbook",
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "sample-playbook",
 		map[string]string{"WorktreeID": "wt-golden"},
 		wsconfig.Options{}, "", nil)
+
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -116,7 +117,7 @@ func TestPlaybookPrintGoldenExploreClaudeHarness(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "explore", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -144,7 +145,7 @@ func TestPlaybookPrintGoldenExploreCodexHarness(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "codex")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "explore", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -172,7 +173,7 @@ func TestPlaybookPrintGoldenExploreUnknownHarness(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "") // host-neutral
 
-	body, _, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "explore", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -199,7 +200,7 @@ func TestPlaybookPrintGoldenExploreJunkHarness(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "junk-harness-xyz") // unrecognized → neutral
 
-	body, _, err := printPlaybook(s, rsrcRoot, "explore", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "explore", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -287,7 +288,7 @@ func TestPlaybookPrintGoldenLeadCheckBlockers(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-check-blockers", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-check-blockers", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -312,7 +313,7 @@ func TestPlaybookPrintRetiredSpecStemsGone(t *testing.T) {
 		"lead-forge-mental-model", "lead-backfill-docs",
 		"mental-model-updater", "doc-gap-discovery",
 	} {
-		if _, _, err := printPlaybook(s, rsrcRoot, name, nil, wsconfig.Options{}, "", nil); err == nil {
+		if _, _, err := printPlaybook(s, os.DirFS(rsrcRoot), name, nil, wsconfig.Options{}, "", nil); err == nil {
 			t.Errorf("printPlaybook(%q) still resolves a retired playbook", name)
 		}
 	}
@@ -324,7 +325,7 @@ func TestPlaybookPrintGoldenLeadWorkflowManual(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -352,7 +353,7 @@ func TestPlaybookPrintGoldenLeadTicket(t *testing.T) {
 		t.Run(harness, func(t *testing.T) {
 			s := newTestServerWithHarness(t, harness)
 
-			body, _, err := printPlaybook(s, rsrcRoot, "lead-ticket", nil, wsconfig.Options{}, "", nil)
+			body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-ticket", nil, wsconfig.Options{}, "", nil)
 			if err != nil {
 				t.Fatalf("printPlaybook: %v", err)
 			}
@@ -390,12 +391,12 @@ func TestRetiredLeadPlaybooksNoLongerResolve(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	for _, retired := range []string{"lead-proceed", "lead-implement", "lead-write-ticket", "lead-verify-discussion"} {
-		if _, _, err := printPlaybook(s, rsrcRoot, retired, nil, wsconfig.Options{}, "", nil); err == nil {
+		if _, _, err := printPlaybook(s, os.DirFS(rsrcRoot), retired, nil, wsconfig.Options{}, "", nil); err == nil {
 			t.Errorf("%s must no longer resolve as an rsrc playbook", retired)
 		}
 	}
 	for _, replacement := range []string{"lead-run", "lead-ticket", "ticket-worker"} {
-		if _, _, err := printPlaybook(s, rsrcRoot, replacement, nil, wsconfig.Options{}, "", nil); err != nil {
+		if _, _, err := printPlaybook(s, os.DirFS(rsrcRoot), replacement, nil, wsconfig.Options{}, "", nil); err != nil {
 			t.Errorf("replacement playbook %s must resolve: %v", replacement, err)
 		}
 	}
@@ -407,7 +408,7 @@ func TestPlaybookPrintGoldenLeadShip(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-ship", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-ship", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -429,14 +430,14 @@ func TestPlaybookDocumentAuditProducts(t *testing.T) {
 			rsrcRoot := filepath.Join("..", "..", "..", packageDir, "rsrc")
 			s := newTestServerWithHarness(t, "codex")
 			opts := isolatedPlaybookConfigOptions(t)
-			body, _, err := printPlaybook(s, rsrcRoot, "lead-audit-doc", nil, opts, "", nil)
+			body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-audit-doc", nil, opts, "", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if !strings.Contains(body, product+"/playbook.render") {
 				t.Error("lead render missing substituted namespace")
 			}
-			if _, _, err := printPlaybook(s, rsrcRoot, "lead-add-rule", nil, opts, "", nil); err == nil {
+			if _, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-add-rule", nil, opts, "", nil); err == nil {
 				t.Fatal("retired playbook still resolves")
 			}
 			// A downstream target needs only its document and the installed bundle.
@@ -445,7 +446,7 @@ func TestPlaybookDocumentAuditProducts(t *testing.T) {
 			if err := os.WriteFile(target, []byte("# Project\n\nUse the existing conventions.\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "fresh-read-doc-auditor", map[string]string{"TargetFiles": target}, opts, "", "", "", nil, "")
+			path, tier, err := renderPlaybook(s, os.DirFS(rsrcRoot), worktreeRoot, "fresh-read-doc-auditor", map[string]string{"TargetFiles": target}, opts, "", "", "", nil, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -479,7 +480,7 @@ func TestPlaybookPrintGoldenLeadDiscuss(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-discuss", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-discuss", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -503,7 +504,7 @@ func TestPlaybookPrintGoldenLeadReview(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-review", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-review", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -532,7 +533,7 @@ func TestSkillAuthoringRelocatedOutOfRsrc(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	if _, _, err := printPlaybook(s, rsrcRoot, "lead-skill-authoring", nil, wsconfig.Options{}, "", nil); err == nil {
+	if _, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-skill-authoring", nil, wsconfig.Options{}, "", nil); err == nil {
 		t.Error("lead-skill-authoring must no longer resolve as an rsrc playbook")
 	}
 
@@ -581,7 +582,7 @@ func TestSkillsCallEnterTools(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.playbook, func(t *testing.T) {
-			body, _, err := renderPlaybookBody(s, rsrcRoot, tc.playbook, nil, wsconfig.Options{}, "", "", "", nil, "")
+			body, _, err := renderPlaybookBody(s, os.DirFS(rsrcRoot), tc.playbook, nil, wsconfig.Options{}, "", "", "", nil, "")
 			if err != nil {
 				t.Fatalf("renderPlaybookBody(%q): %v", tc.playbook, err)
 			}
@@ -639,7 +640,7 @@ func TestPlaybookPrintGoldenLeadBootstrap(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-bootstrap", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-bootstrap", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -677,7 +678,7 @@ func TestRenderMintsLeadScopedChildKeyForWorkerPlaybook(t *testing.T) {
 	mintRoot := "/work/tree-a"
 	parentKey := "parent-key-fixture"
 
-	body, _, err := renderPlaybookBody(s, root, "worker-pb", nil, wsconfig.Options{}, mintRoot, parentKey, "", nil, "")
+	body, _, err := renderPlaybookBody(s, os.DirFS(root), "worker-pb", nil, wsconfig.Options{}, mintRoot, parentKey, "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -716,7 +717,7 @@ func TestPlaybookRenderGoldenTicketWorker(t *testing.T) {
 					s := newTestServerWithHarness(t, "claude")
 					mintRoot := "/work/tree-a"
 
-					body, tier, err := renderPlaybookBody(s, rsrcRoot, tc.name, nil, wsconfig.Options{}, mintRoot, "", "", nil, "")
+					body, tier, err := renderPlaybookBody(s, os.DirFS(rsrcRoot), tc.name, nil, wsconfig.Options{}, mintRoot, "", "", nil, "")
 					if err != nil {
 						t.Fatalf("renderPlaybookBody: %v", err)
 					}
@@ -755,7 +756,7 @@ func TestPlaybookPrintLeadRunWorkerTierPolicy(t *testing.T) {
 			packageDir := map[string]string{"ws": "agents-plugin", "wsflow": "agents-plugin-wsflow"}[product]
 			root := filepath.Join("..", "..", "..", packageDir, "rsrc")
 			s := newTestServerWithHarness(t, "codex")
-			body, _, err := printPlaybook(s, root, "lead-run", nil, isolatedPlaybookConfigOptions(t), "", nil)
+			body, _, err := printPlaybook(s, os.DirFS(root), "lead-run", nil, isolatedPlaybookConfigOptions(t), "", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -845,7 +846,7 @@ func TestClaudeSpawnIdiomRendersAtEverySite(t *testing.T) {
 			}
 			s := newTestServerWithHarness(t, "claude")
 			for _, name := range spawnIdiomSites {
-				body, _, err := printPlaybook(s, rsrcRoot, name, nil, isolatedPlaybookConfigOptions(t), "", nil)
+				body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), name, nil, isolatedPlaybookConfigOptions(t), "", nil)
 				if err != nil {
 					t.Fatalf("printPlaybook(%s): %v", name, err)
 				}
@@ -912,7 +913,7 @@ func TestLeadWorkflowManualClaudeSpawnBindingOverlay(t *testing.T) {
 		t.Run(namespace, func(t *testing.T) {
 			t.Setenv(envNamespace, namespace)
 			s := newTestServerWithHarness(t, "claude")
-			body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
+			body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
 			if err != nil {
 				t.Fatalf("printPlaybook: %v", err)
 			}
@@ -938,7 +939,7 @@ func TestNonClaudeRendersOmitEffortAgents(t *testing.T) {
 	for _, harness := range []string{"codex", "pi", ""} {
 		s := newTestServerWithHarness(t, harness)
 		for _, name := range names {
-			body, _, err := printPlaybook(s, rsrcRoot, name, nil, isolatedPlaybookConfigOptions(t), "", nil)
+			body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), name, nil, isolatedPlaybookConfigOptions(t), "", nil)
 			if err != nil {
 				t.Fatalf("printPlaybook(%s, %q): %v", name, harness, err)
 			}

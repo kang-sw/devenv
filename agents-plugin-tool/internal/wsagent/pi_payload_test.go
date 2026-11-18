@@ -8,8 +8,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
 func copyPiOwner(t *testing.T, source, dest string) {
@@ -62,6 +60,28 @@ func copyPiSourceInputs(t *testing.T, owner, repo string) string {
 	return sibling
 }
 
+func preparedPiEntries(t *testing.T, owner string) ([]string, error) {
+	t.Helper()
+	prepared, err := materializePiPayload(owner)
+	if err != nil {
+		return nil, err
+	}
+	return piEntriesAt(prepared)
+}
+
+// Runtime selection reads these fixture packages through the daemon-only
+// checkout override; the installed owner remains an authoring/materializer input.
+func usePiPayloadCheckout(t *testing.T, owner string) {
+	t.Helper()
+	checkout := t.TempDir()
+	for _, pkg := range []string{"agents-plugin", "agents-plugin-wsflow"} {
+		if err := os.CopyFS(filepath.Join(checkout, pkg), os.DirFS(owner)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("WS_RSRC_DEV_CHECKOUT", checkout)
+}
+
 func TestPiPreparedPackageOnlyLayouts(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("Python 3 unavailable")
@@ -85,8 +105,11 @@ func TestPiPreparedPackageOnlyLayouts(t *testing.T) {
 				}
 				owner := filepath.Join(base, filepath.FromSlash(layout), product, "0.50.0")
 				copyPiOwner(t, source, owner)
-				t.Setenv(wsrsrc.EnvRsrcRoot, filepath.Join(owner, "rsrc"))
-				entries, err := piBundledEntries(hostedPluginTestVersion)
+				// Phase 1 retains installed package identity/registry selection;
+				// only resource and payload bytes are build-owned.
+				t.Setenv("WS_RSRC_ROOT", filepath.Join(owner, "rsrc"))
+				usePiPayloadCheckout(t, owner)
+				entries, err := preparedPiEntries(t, owner)
 				if err != nil || len(entries) != 1 {
 					t.Fatalf("package-only native entries: %v, %v", entries, err)
 				}
@@ -99,12 +122,12 @@ func TestPiPreparedPackageOnlyLayouts(t *testing.T) {
 				if !strings.HasPrefix(root, filepath.Join(base, "cache", "native-pi")) || !strings.HasSuffix(entries[0], filepath.FromSlash(piBundleFile)) {
 					t.Fatalf("not a prepared native entry: %v", entries)
 				}
-				if got, err := piBundledEntries(hostedPluginTestVersion); err != nil || !slices.Equal(got, entries) {
+				if got, err := preparedPiEntries(t, owner); err != nil || !slices.Equal(got, entries) {
 					t.Fatalf("unchanged second consumption: %v, %v", got, err)
 				}
 				// A valid source sibling must not displace the package-local payload.
 				copyPiSourceInputs(t, owner, filepath.Dir(owner))
-				if got, err := piBundledEntries(hostedPluginTestVersion); err != nil || !slices.Equal(got, entries) {
+				if got, err := preparedPiEntries(t, owner); err != nil || !slices.Equal(got, entries) {
 					t.Fatalf("local-first selection: %v, %v", got, err)
 				}
 				for _, isolation := range []string{"default", "isolated"} {
@@ -122,6 +145,7 @@ func TestPiPreparedPackageOnlyLayouts(t *testing.T) {
 				}
 				// Invalid local output takes the visible bridge path, never the sibling.
 				piLeadFile(t, filepath.Join(owner, "native-pi", "closure.zip"), "broken")
+				usePiPayloadCheckout(t, owner)
 				spec := StartSpec{Root: base, Cwd: base, Dir: filepath.Join(base, "fallback"), Lead: &LeadSpec{PluginIsolation: "isolated", Env: map[string]string{EnvHostedSessionKey: "test-key"}}}
 				warning := ""
 				spec.Lead.PluginWarning = func(text string) { warning = text }

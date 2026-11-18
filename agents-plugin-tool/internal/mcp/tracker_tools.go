@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"sort"
 	"strconv"
 	"strings"
@@ -1602,7 +1603,7 @@ func (s *Server) trackerPlaybookSection(heading string) string {
 // trackerManualSection is the workflow manual's knob-on tracker section:
 // the tracker playbook's content under "### Tracker" (its title dropped,
 // its headings demoted under the section), so the lead needs no extra read.
-func trackerManualSection(s *Server, rsrcRoot string) (string, error) {
+func trackerManualSection(s *Server, rsrcRoot fs.FS) (string, error) {
 	playbook, _, err := renderPlaybookBody(s, rsrcRoot, trackerPlaybookName, nil, s.configOptions(), "", "", "", nil, "")
 	if err != nil {
 		return "", fmt.Errorf("render %s playbook: %w", trackerPlaybookName, err)

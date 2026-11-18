@@ -436,7 +436,8 @@ func TestHostedConnectionSeeingALANChangeReplacesTheDaemon(t *testing.T) {
 	// The next session sees the new global value; the daemon replaces
 	// itself and drains the sessions it hosts.
 	trigger := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeMCP, []string{"serve", "--stdio"}, os.Getpid(), nil))
-	trigger.call("initialize", map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{}})
+	// Accept itself triggers replacement. The stream may already be draining
+	// when its hello is acknowledged; initialize is not guaranteed to survive.
 	triggeredAt := time.Now()
 
 	// The blocked CLI wait is cancelled at once: its final frame carries

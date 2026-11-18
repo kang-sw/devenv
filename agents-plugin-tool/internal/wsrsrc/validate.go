@@ -147,11 +147,11 @@ func validatePlaybookFile(root, playbookName, filePath string, manifest Manifest
 		if !isBareStem(inc) {
 			return fmt.Errorf("playbook %q: include name %q must be a bare stem", playbookName, inc)
 		}
-		incPath, incRelPath := resolveIncludePath(root, playbookName, inc, harness, profile)
+		incPath, incRelPath := resolveIncludePath(os.DirFS(root), playbookName, inc, harness, profile)
 		if _, ok := manifest.Files[incRelPath]; !ok {
 			return fmt.Errorf("playbook %q: include %q (%q) is not listed in manifest", playbookName, inc, incRelPath)
 		}
-		if _, err := os.Stat(incPath); os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(incPath))); os.IsNotExist(err) {
 			return fmt.Errorf("playbook %q: dangling include %q: file not found at %s", playbookName, inc, incPath)
 		}
 	}

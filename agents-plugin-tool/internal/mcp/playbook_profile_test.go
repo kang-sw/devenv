@@ -56,7 +56,7 @@ func newProfileFixture(t *testing.T) *whiteboardFixture {
 	if err := wsrsrc.WriteManifest(root, m); err != nil {
 		t.Fatalf("WriteManifest: %v", err)
 	}
-	t.Setenv("WS_RSRC_ROOT", root)
+	useResourceFixture(t, root)
 	return f
 }
 

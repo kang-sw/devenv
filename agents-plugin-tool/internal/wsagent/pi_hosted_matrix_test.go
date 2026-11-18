@@ -26,7 +26,9 @@ func TestPiHostedPackageRegistrySettingMatrix(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	entry := piLeadBundle(t, filepath.Join(base, "agents-plugin-pi"))
+	payload := filepath.Join(base, "agents-plugin-pi")
+	entry := piLeadBundle(t, payload)
+	usePreparedPiFixture(t, base, payload)
 	for _, starter := range []string{"ws", "wsflow"} {
 		for _, setting := range []string{"", "ws", "wsflow"} {
 			t.Run(starter+"/"+setting, func(t *testing.T) {
