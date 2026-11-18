@@ -205,8 +205,8 @@ func TestMessageCarriesTopicNotesAndAnswersShowAsCapsules(t *testing.T) {
 	}
 	_, page := get(t, f.base+"/s/livesession?frame=1")
 	for _, want := range []string{
-		`<div class="bub"><div class="hchips"><span class="achip"><b>(03)</b> a</span><span class="achip tchip" title="why?"><b>[ship-gate]</b><span class="anote">why?</span></span></div><div class="hpart">hello</div></div>`,
-		`<div class="bub"><div class="hchips"><span class="achip"><b>(124..126)</b> ok</span><span class="achip" title="line` + "\n" + `two"><b>(130)</b> b<span class="anote">line` + "\n" + `two</span></span><span class="achip tchip" title="later"><b>[plan]</b><span class="anote">later</span></span></div>user &lt;words&gt;</div>`,
+		`<div class="bub"><div class="hchips"><span class="achip" role="link" tabindex="0" data-wb-nav="item-3" data-wb-topic=""><b>(03)</b> a</span><span class="achip tchip" title="why?" role="link" tabindex="0" data-wb-nav="topic-736869702d67617465" data-wb-topic="topic-736869702d67617465"><b>[ship-gate]</b><span class="anote">why?</span></span></div><div class="hpart">hello</div></div>`,
+		`<div class="bub"><div class="hchips"><span class="achip" role="link" tabindex="0" data-wb-nav="item-124" data-wb-topic=""><b>(124)</b> ok</span><span class="achip" role="link" tabindex="0" data-wb-nav="item-125" data-wb-topic=""><b>(125)</b> ok</span><span class="achip" role="link" tabindex="0" data-wb-nav="item-126" data-wb-topic=""><b>(126)</b> ok</span><span class="achip" title="line` + "\n" + `two" role="link" tabindex="0" data-wb-nav="item-130" data-wb-topic=""><b>(130)</b> b<span class="anote">line` + "\n" + `two</span></span><span class="achip tchip" title="later" role="link" tabindex="0" data-wb-nav="topic-706c616e" data-wb-topic="topic-706c616e"><b>[plan]</b><span class="anote">later</span></span></div>user &lt;words&gt;</div>`,
 		`<div class="bub">&lt;wb:answers&gt;` + "\n" + `1=a b` + "\n" + `&lt;/wb:answers&gt;` + "\n\n" + `broken</div>`,
 	} {
 		if !strings.Contains(page, want) {
@@ -253,8 +253,8 @@ func TestMessageCarriesMentionsAsCapsules(t *testing.T) {
 	}
 	_, page := get(t, f.base+"/s/livesession?frame=1")
 	for _, want := range []string{
-		`<div class="bub"><div class="hchips"><span class="achip"><b>(03)</b> a</span><span class="achip mchip" title="a &lt; b"><b>[ship-gate] (03)</b><span class="anote">a &lt; b</span></span><span class="achip mchip" title="whole topic"><b>[plan]</b><span class="anote">whole topic</span></span></div><div class="hpart">see these</div></div>`,
-		`<div class="bub"><div class="hchips"><span class="achip mchip" title="x &amp; &lt;y&gt;"><b>[plan] (7)</b><span class="anote">x &amp; &lt;y&gt;</span></span></div>user words</div>`,
+		`<div class="bub"><div class="hchips"><span class="achip" role="link" tabindex="0" data-wb-nav="item-3" data-wb-topic=""><b>(03)</b> a</span><span class="achip mchip" title="a &lt; b" role="link" tabindex="0" data-wb-nav="item-3" data-wb-topic=""><b>[ship-gate] (03)</b><span class="anote">a &lt; b</span></span><span class="achip mchip" title="whole topic" role="link" tabindex="0" data-wb-nav="topic-706c616e" data-wb-topic="topic-706c616e"><b>[plan]</b><span class="anote">whole topic</span></span></div><div class="hpart">see these</div></div>`,
+		`<div class="bub"><div class="hchips"><span class="achip mchip" title="x &amp; &lt;y&gt;" role="link" tabindex="0" data-wb-nav="item-7" data-wb-topic=""><b>[plan] (7)</b><span class="anote">x &amp; &lt;y&gt;</span></span></div>user words</div>`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("session page lacks %q", want)
@@ -402,9 +402,9 @@ func TestMessageSelectionNoteBundlesSurviveRouteLifecycle(t *testing.T) {
 		t.Fatalf("delivered conversation = %+v", conversation)
 	}
 	_, page := get(t, f.base+"/s/livesession?frame=1")
-	capsules := `<span class="achip mchip" title="` + html.EscapeString(firstMentions[0].Text) + `"><b>[topic] (3)</b><span class="anote">` + html.EscapeString(firstMentions[0].Text) + `</span></span>` +
-		`<span class="achip mchip" title="next excerpt"><b>[topic]</b><span class="anote">next excerpt</span></span>` +
-		`<span class="achip mchip" title="distinct excerpt"><b>[other] (4)</b><span class="anote">distinct excerpt</span></span>`
+	capsules := `<span class="achip mchip" title="` + html.EscapeString(firstMentions[0].Text) + `" role="link" tabindex="0" data-wb-nav="e7" data-wb-topic="topic-746f706963"><b>[topic] (3)</b><span class="anote">` + html.EscapeString(firstMentions[0].Text) + `</span></span>` +
+		`<span class="achip mchip" title="next excerpt" role="link" tabindex="0" data-wb-nav="e8" data-wb-topic="topic-746f706963"><b>[topic]</b><span class="anote">next excerpt</span></span>` +
+		`<span class="achip mchip" title="distinct excerpt" role="link" tabindex="0" data-wb-nav="e9" data-wb-topic="topic-6f74686572"><b>[other] (4)</b><span class="anote">distinct excerpt</span></span>`
 	if want := `<div class="bub"><div class="hchips">` + capsules + `</div>` + html.EscapeString(wantText) + `</div>`; !strings.Contains(page, want) {
 		t.Errorf("delivered page lacks exact escaped mentions and ordinary text %q", want)
 	}

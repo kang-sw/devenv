@@ -419,22 +419,23 @@ func TestAgyLeadRefusesAStartWithoutWSTools(t *testing.T) {
 	})
 }
 
-// TestAgyIsLeadOnly: agy has a builtin lead profile and no agent-worker
-// profile, so no agy tier is spawnable.
-func TestAgyIsLeadOnly(t *testing.T) {
+// TestAgyWorkerProfile keeps the default agent, adds ws's common worker
+// tools and child-work instructions, and refuses a launch without HTTP MCP.
+func TestAgyWorkerProfile(t *testing.T) {
 	if LeadProfileFor(BackendAgy) != LeadProfileAgy {
 		t.Fatalf("lead profile %q", LeadProfileFor(BackendAgy))
 	}
-	if agentWorkerBackends[BackendAgy] {
-		t.Fatal("agy is not a worker backend")
+	p, err := ParseProfile(BuiltinProfiles()[ProfilePrefix+AgentWorkerProfile(BackendAgy)])
+	if err != nil || p.Lead || p.Backend != BackendAgy || !slices.Equal(p.WSTools, AgentWSTools) {
+		t.Fatalf("worker profile: %+v, %v", p, err)
 	}
-	for name, raw := range BuiltinProfiles() {
-		var p Profile
-		if json.Unmarshal(raw, &p) == nil && p.Backend == BackendAgy && !p.Lead {
-			t.Fatalf("builtin %s is a non-lead agy profile", name)
+	text, ok := p.BuiltinInstructions()
+	for _, want := range []string{"agent.spawn", "mailbox.send", "Do not use", "invoke_subagent", "define_subagent", "manage_subagents"} {
+		if !ok || !strings.Contains(text, want) {
+			t.Errorf("worker instructions lack %q: %q", want, text)
 		}
 	}
-	if _, err := (AgyBackend{}).Start(context.Background(), StartSpec{}); err == nil || !strings.Contains(err.Error(), "lead") {
-		t.Fatalf("a non-lead start is refused: %v", err)
+	if _, err := (AgyBackend{}).Start(context.Background(), StartSpec{}); err == nil || !strings.Contains(err.Error(), "HTTP MCP route") {
+		t.Fatalf("a worker without ws tools is refused: %v", err)
 	}
 }

@@ -224,6 +224,7 @@ function tkFetch(path, body, done) {
 }
 `+block+`
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
+tkLegacy.vis = true;
 tkViews.hid = { v: "old" }; tkErrs.gone = "x"; tkSeen.hid = { badge: {}, read: {} };
 var done = 0;
 tkReadAll(function () {}, function () { done++; });

@@ -21,7 +21,7 @@ var (
 	reviewPhaseEnum       = []string{"off", "lite", "full"}
 	agentsTierEnum        = []string{"small", "medium", "large", "xlarge"}
 	promptHarnessEnum     = []string{"claude", "codex", "pi", "*"}
-	agentsTierHarnessEnum = []string{"claude", "codex", "pi", "default"}
+	agentsTierHarnessEnum = []string{"claude", "codex", "pi", "agy", "default"}
 	agentsTierScopeEnum   = []string{"project", "global"}
 )
 

@@ -237,6 +237,16 @@ func TestLateReloadSignalsOnlyAChangedView(t *testing.T) {
 			_, _ = daemon.ViewWithin(context.Background(), "team", 0, wait)
 		}()
 	}
+	// A metadata-stamp cache hit may skip git entirely, so slowRunner alone
+	// does not guarantee a late read. Hold the real reload lock until the page
+	// has returned its old snapshot; the signal's follow-up read stays normal.
+	readLate := func(what string) {
+		t.Helper()
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		read()
+		waitFor(t, 20*time.Second, "page to stop waiting for "+what, func() bool { return inflight.Load() == 0 })
+	}
 	// The page: every change signal makes it read again.
 	stop := daemon.StartWatch(time.Hour, func() { changes.inc(); read() })
 	defer stop()
@@ -259,7 +269,7 @@ func TestLateReloadSignalsOnlyAChangedView(t *testing.T) {
 
 	// Unchanged: the late reload lands with the view the read was handed.
 	base := daemon.ReloadStats()
-	read()
+	readLate("the unchanged reload")
 	settle("the unchanged late reload")
 	stats := daemon.ReloadStats()
 	if stats.Late-base.Late == 0 {
@@ -293,7 +303,7 @@ func TestLateReloadSignalsOnlyAChangedView(t *testing.T) {
 		tc.write()
 		base := daemon.ReloadStats()
 		before := reads.Load()
-		read()
+		readLate(tc.name)
 		settle("the late reload after a " + tc.name)
 		if n := changes.reset(); n != 1 {
 			t.Fatalf("%s: the late reload must call the change callback once, got %d", tc.name, n)

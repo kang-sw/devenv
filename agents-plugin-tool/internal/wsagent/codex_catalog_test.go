@@ -92,8 +92,10 @@ func TestCodexHasNoWorkerAdmission(t *testing.T) {
 			t.Fatalf("unexpected Codex profile: %s", name)
 		}
 	}
-	if agentWorkerBackends[BackendCodex] || isAgentWorkerProfile(AgentWorkerProfile(BackendCodex)) {
-		t.Fatal("Codex must not acquire worker admission")
+	// The compatibility guard reserves the entire internal namespace;
+	// recognizing this spelling does not grant descriptor worker admission.
+	if !isAgentWorkerProfile(AgentWorkerProfile(BackendCodex)) {
+		t.Fatal("the internal worker namespace must stay reserved for Codex too")
 	}
 	r := &Runner{opts: Options{Backends: map[string]BackendRegistration{
 		BackendCodex: {Backend: PiBackend{}, LeadProfile: LeadProfileCodex},

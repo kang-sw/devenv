@@ -1,6 +1,7 @@
 package wstracker
 
 import (
+	"bytes"
 	"encoding/json"
 	"sort"
 	"time"
@@ -452,6 +453,16 @@ func nz(s string) *string {
 	return &s
 }
 
+// viewCopy detaches a published field from mutable fold/node storage. Refresh
+// may update existing nodes while a previous view is being encoded.
+func viewCopy[T any](p *T) *T {
+	if p == nil {
+		return nil
+	}
+	value := *p
+	return &value
+}
+
 func ref(n *node) *Ref {
 	if n == nil {
 		return nil
@@ -555,7 +566,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 	// events
 	for _, n := range r.nodes {
 		e := EventView{ID: n.id, Alias: n.alias, Stream: n.stream, Member: n.member, Seq: n.seq, TS: ts(n.ts),
-			Type: n.typ, Origin: n.origin, Payload: n.ev.Payload, Status: n.status, Reason: nz(n.reason),
+			Type: n.typ, Origin: n.origin, Payload: bytes.Clone(n.ev.Payload), Status: n.status, Reason: nz(n.reason),
 			Ignored: n.ignored, Markers: []Marker{}, Superseded: []Superseded{}, Thread: nz(n.thread),
 			ParentThread: nz(n.parentThread)}
 		if len(e.Payload) == 0 || string(e.Payload) == "null" {
@@ -564,7 +575,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 		for _, m := range n.markers {
 			mk := Marker{Kind: m.kind, Field: m.field, Other: m.other, Winner: m.winner, Mine: nz(m.mine), Theirs: nz(m.theirs)}
 			if o := r.byID[m.other]; o != nil {
-				mk.OtherMember = &o.member
+				mk.OtherMember = viewCopy(&o.member)
 			}
 			e.Markers = append(e.Markers, mk)
 		}
@@ -591,10 +602,10 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 			AnswerNote: nz(x.answerNote), Restored: ref(x.restored), Restores: nz(x.restores), Accepted: ref(x.accepted),
 			LeadAtAccept: nz(x.leadAtAccept), StatusBy: nz(x.noteBy), LastUpdate: ts(last), lastUpdate: last, Fallback: x.fallback}
 		if ru := S.ruleByID[x.rule]; ru != nil {
-			a.Rule, a.RuleRequest, a.RuleLevels = &ru.id, x.ruleRequest, ruleLevels(ru)
+			a.Rule, a.RuleRequest, a.RuleLevels = viewCopy(&ru.id), x.ruleRequest, ruleLevels(ru)
 		}
 		if q := S.asg[x.handoffOf]; x.handoffOf != "" && q != nil {
-			a.HandoffFrom = &q.to
+			a.HandoffFrom = viewCopy(&q.to)
 		}
 		if x.ended != nil {
 			a.Ended = &Ended{ID: x.ended.id, Type: x.ended.typ, TS: ts(x.ended.ts), By: x.ended.member}
@@ -608,7 +619,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 		if x.last != nil {
 			for _, w := range x.writes {
 				if w == x.last {
-					a.StatusOrigin = &x.last.origin
+					a.StatusOrigin = viewCopy(&x.last.origin)
 					break
 				}
 			}
@@ -722,17 +733,16 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 
 	vw.Items = map[string]ItemView{}
 	status := map[string]string{}
+	visibleChildren := map[string][]*item{}
 	for _, id := range S.iorder {
-		status[id] = r.itemStatus(S.items[id])
+		it := S.items[id]
+		status[id] = r.itemStatus(it)
+		if !it.hidden {
+			visibleChildren[it.parent] = append(visibleChildren[it.parent], it)
+		}
 	}
 	subtasks := func(id string) []*item {
-		var out []*item
-		for _, k := range S.iorder {
-			if c := S.items[k]; c.parent == id && !c.hidden {
-				out = append(out, c)
-			}
-		}
-		return out
+		return visibleChildren[id]
 	}
 	for _, id := range S.iorder {
 		it := S.items[id]
@@ -762,7 +772,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 		}
 		lv := S.prio.level(it.priority)
 		iv := ItemView{ID: id, Alias: it.alias, Kind: it.kind, Title: it.title, Body: it.body, BodyRev: S.bodyRev(id), Project: it.project, Labels: S.liveLabels(it.labels),
-			Due: it.due, Start: it.start, Priority: it.priority, PriorityLevel: lv, PriorityName: S.prio.names[lv], Author: it.author,
+			Due: viewCopy(it.due), Start: viewCopy(it.start), Priority: it.priority, PriorityLevel: lv, PriorityName: S.prio.names[lv], Author: it.author,
 			TS: ts(it.ts), Hidden: it.hidden, Edited: ref(it.edited), Status: nz(status[id]),
 			Counted: r.counted(it, status[id]), Children: []string{}, Assignments: orEmpty(recIDs), Pending: orEmpty(pend),
 			Thread: orEmpty(threads[id]), Depth: len(chain) - 1,
@@ -783,7 +793,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 			}
 		}
 		if it.parent != "" && S.items[it.parent] != nil {
-			iv.Parent = &it.parent
+			iv.Parent = viewCopy(&it.parent)
 		}
 		iv.LastActivity = ts(it.ts)
 		if t, ok := lastAct[id]; ok {
@@ -863,7 +873,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 			Edited: ref(q.edited), Mentions: append([]string{}, q.mentions...), Attachments: attachmentViews(q.attachments),
 			Refs: append([]string{}, q.refs...)}
 		if q.hiddenBy != nil {
-			cv.Hidden = &q.hiddenBy.id
+			cv.Hidden = viewCopy(&q.hiddenBy.id)
 		}
 		vw.Comments[id] = cv
 	}
@@ -880,10 +890,10 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 			mv.Revoked = append(mv.Revoked, RevokedKey{Key: k.key.text, By: k.by.id})
 		}
 		if m.removed != nil {
-			mv.Removed = &m.removed.id
+			mv.Removed = viewCopy(&m.removed.id)
 		}
 		if m.joined != nil {
-			mv.Joined = &m.joined.id
+			mv.Joined = viewCopy(&m.joined.id)
 		}
 		if d, ok := R[id]; ok {
 			mv.Depth = &d

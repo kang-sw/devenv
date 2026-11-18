@@ -156,6 +156,8 @@ function tkFetch(path, body, done, keepalive, signal, tag) {
 }
 `+block+`
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
+// Pin legacy ETag/lending separately from summary cursor tests.
+tkLegacy.s = true;
 answers["/tracker/stores"] = [200, { rev: 1, stores: [{ id: "s" }] }, 'W/"l1"'];
 answers["/tracker/stores/s/view"] = [200, { view: { v: 1 }, seen: { badge: ["b"], read: [] } }, 'W/"v1"'];
 tkReload();

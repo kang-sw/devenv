@@ -55,8 +55,8 @@ func TestBuiltinSupportProfilesResolve(t *testing.T) {
 	}
 	resolver := wsconfig.NewResolver(opts, nil, nil, nil)
 	all, err := ResolveProfiles(&resolver)
-	if err != nil || len(all) != len(BuiltinProfiles()) {
-		t.Fatalf("ResolveProfiles with no config should list every builtin profile: %+v, %v", all, err)
+	if err != nil || len(all) != 14 {
+		t.Fatalf("ResolveProfiles with no config should list all fourteen builtin profiles: %+v, %v", all, err)
 	}
 }
 
@@ -64,7 +64,7 @@ func TestBuiltinSupportProfilesResolve(t *testing.T) {
 // agent-worker profile with the common ws loadout: agent.* and
 // mailbox.send in place of pi.*.
 func TestBuiltinAgentWorkerProfiles(t *testing.T) {
-	for backend, tools := range map[string][]string{BackendClaude: AgentClaudeTools, BackendPi: PiWorkerTools} {
+	for backend, tools := range map[string][]string{BackendClaude: AgentClaudeTools, BackendPi: PiWorkerTools, BackendAgy: nil} {
 		name := AgentWorkerProfile(backend)
 		rp, err := ResolveProfile(testConfig(t), t.TempDir(), name)
 		if err != nil {
@@ -88,8 +88,8 @@ func TestBuiltinAgentWorkerProfiles(t *testing.T) {
 			t.Errorf("%s is not recognized as an agent-worker profile", name)
 		}
 	}
-	if isAgentWorkerProfile(AgentWorkerProfile("codex")) || isAgentWorkerProfile(PiWorkerProfile) {
-		t.Error("only claude and pi have agent-worker profiles")
+	if !isAgentWorkerProfile(AgentWorkerProfile("future")) || isAgentWorkerProfile(PiWorkerProfile) {
+		t.Error("the internal namespace is reserved even before a backend is registered")
 	}
 }
 

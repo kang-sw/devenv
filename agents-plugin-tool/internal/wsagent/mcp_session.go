@@ -37,6 +37,9 @@ const (
 	EnvMCPSessionURL = "WS_MCP_SESSION_URL"
 	// EnvMCPSessionToken is the session's bearer token on that route.
 	EnvMCPSessionToken = "WS_MCP_SESSION_TOKEN"
+	// EnvAgentSessionKey identifies a worker's connection for descriptor
+	// lookup only. It grants no hosted-lead authority or key substitution.
+	EnvAgentSessionKey = "WS_MCP_AGENT_SESSION_KEY"
 )
 
 // mcpStartWait bounds how long a token's first resolution waits for its

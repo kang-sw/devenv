@@ -37,6 +37,10 @@ type trackerAnswers struct {
 	mu sync.Mutex
 	// views holds each store's last view answer by store id.
 	views map[string]trackerViewAnswer
+	// projections retain each store's immutable summary and 64-generation
+	// change ring independently of the legacy full-view answer cache.
+	projections map[string]*trackerProjectionState
+	seen        map[string]TrackerSeen // daemon-local overlay; no host reread on seen
 	// stores is the last store list, valid while storesOK.
 	stores   []TrackerStore
 	storesAt trackerStamp
@@ -84,6 +88,16 @@ func (c *trackerAnswers) putStoreList(stores []TrackerStore, at trackerStamp) {
 		return
 	}
 	c.stores, c.storesAt, c.storesOK = stores, at, true
+	registered := make(map[string]bool, len(stores))
+	for _, store := range stores {
+		registered[store.ID] = true
+	}
+	for id := range c.projections {
+		if !registered[id] {
+			delete(c.projections, id)
+			delete(c.seen, id)
+		}
+	}
 }
 
 // view returns store id's cached view answer when it was built at data.
@@ -134,6 +148,11 @@ func (c *trackerAnswers) addSeen(id string, add TrackerSeen) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.seenGen++
+	if c.seen == nil {
+		c.seen = map[string]TrackerSeen{}
+	}
+	marks := c.seen[id]
+	c.seen[id] = TrackerSeen{Badge: sortedMarks(marks.Badge, add.Badge), Read: sortedMarks(marks.Read, add.Read)}
 	a, ok := c.views[id]
 	if !ok {
 		return

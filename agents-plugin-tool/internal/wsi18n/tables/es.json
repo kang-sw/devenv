@@ -2067,6 +2067,7 @@
   "entry.whiteboard.panel": "Panel",
   "entry.whiteboard.norecap": "Resumen no disponible",
   "entry.whiteboard.open": "Abrir en el tablero",
+  "js.whiteboard.jump.itemmissing": "Este elemento de la pizarra ya no está disponible.",
   "js.whiteboard.jump.missing": "Este tema ya no está disponible.",
   "js.whiteboard.jump.elementmissing": "El elemento exacto no está disponible; se muestra su tema.",
   "entry.whiteboard": "Actualización de la pizarra confirmada",

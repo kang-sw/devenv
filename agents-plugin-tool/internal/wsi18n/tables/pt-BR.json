@@ -2067,6 +2067,7 @@
   "entry.whiteboard.panel": "Painel",
   "entry.whiteboard.norecap": "Resumo indisponível",
   "entry.whiteboard.open": "Abrir no quadro",
+  "js.whiteboard.jump.itemmissing": "Este item do quadro branco não está mais disponível.",
   "js.whiteboard.jump.missing": "Este tópico não está mais disponível.",
   "js.whiteboard.jump.elementmissing": "O elemento exato está indisponível; mostrando seu tópico.",
   "entry.whiteboard": "Atualização do quadro branco confirmada",

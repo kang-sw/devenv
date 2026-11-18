@@ -135,6 +135,7 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		env[EnvAllowedTools] = strings.Join(def.WSTools, ",")
 		env[EnvNoDashboard] = "1"
 		env[EnvPermissionLevel] = string(level)
+		env[EnvAgentSessionKey] = rec.WSKey
 		// The daemon may inherit a lead's mailbox identity; the agent's
 		// ws-mcp must never claim that inbox's presence. Blank is inert.
 		for _, name := range mailboxIdentityEnv {
@@ -156,7 +157,7 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		}
 		cmd.Env = env
 		spec.WSMCP = &cmd
-		if rec.Backend == BackendClaude {
+		if c.r.opts.Backends[rec.Backend].WorkerHTTPMCP {
 			// Over the daemon's HTTP route when it has one; a worker is
 			// never held, so its token is never persisted.
 			spec.MCPSession = c.r.attachMCP(rec.ReplyID, "", env, rec.workDir(), 0)

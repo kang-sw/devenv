@@ -2067,6 +2067,7 @@
   "entry.whiteboard.panel": "Panel",
   "entry.whiteboard.norecap": "Recap unavailable",
   "entry.whiteboard.open": "Open on board",
+  "js.whiteboard.jump.itemmissing": "This whiteboard item is no longer available.",
   "js.whiteboard.jump.missing": "This topic is no longer available.",
   "js.whiteboard.jump.elementmissing": "The exact element is unavailable; showing its topic.",
   "entry.whiteboard": "Committed whiteboard update",

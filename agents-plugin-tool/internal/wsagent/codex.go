@@ -18,7 +18,7 @@ import (
 )
 
 // CodexBackend drives one sustained `codex app-server` process over stdio.
-// It serves hosted leads only; agentWorkerBackends does not admit Codex.
+// It serves hosted leads only; its registration does not admit workers.
 // The holder owns its pipes across daemon replacement, as for agy and Claude.
 type CodexBackend struct {
 	// Command is the Codex executable; empty looks up "codex" on PATH.

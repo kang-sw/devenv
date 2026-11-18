@@ -267,7 +267,7 @@ function childEnv(tmp, extra) {
   return Object.assign(env, extra || {});
 }
 function run(cmd, args, opts) {
-  const r = spawnSync(cmd, args, Object.assign({ encoding: "utf8" }, opts));
+  const r = spawnSync(cmd, args, Object.assign({ encoding: "utf8", windowsHide: true }, opts));
   if (r.status !== 0) throw new Error(`${cmd} ${args.join(" ")} failed (${r.status}): ${(r.stderr || "") + (r.stdout || "")}`.slice(0, 4000));
   return r.stdout;
 }
@@ -391,7 +391,7 @@ async function serve(args) {
     const dashDir = path.join(tmp, "cache", "dashboard");
     const out = fs.openSync(path.join(tmp, "daemon.log"), "a");
     daemon = spawn(bin, ["dashboard", "--port", "0"], {
-      cwd: tmp, stdio: ["ignore", out, out],
+      cwd: tmp, stdio: ["ignore", out, out], windowsHide: true,
       env: childEnv(tmp, args['dev-assets'] ? { WS_MCP_DASHBOARD_DEV_SOURCE: TOOL_DIR } : undefined),
     });
     daemon.on("exit", (code) => { if (!stopping) { console.error(`board-headless: daemon exited (${code}); log: ${path.join(tmp, "daemon.log")}`); stop(1); } });
@@ -733,7 +733,7 @@ async function scenarioHistory(ctx) {
       '--case', 'arrival', '--verify-ref', ctx.args['baseline-ref'], '--artifacts', artifacts];
     assert(ctx.args['baseline-ref'], 'history --baseline-url requires an explicit --baseline-ref');
     if (ctx.args['face-width']) argv.push('--face-width', String(ctx.args['face-width']));
-    const result = spawnSync(process.execPath, argv, { encoding: 'utf8', timeout: 60000 });
+    const result = spawnSync(process.execPath, argv, { encoding: 'utf8', timeout: 60000, windowsHide: true });
     fs.writeFileSync(path.join(artifacts, 'command-output.log'), (result.stdout || '') + (result.stderr || ''));
     assert(result.status === 0 || result.status === 1, 'baseline history probe failed to execute');
     arrivalBaseline = JSON.parse(fs.readFileSync(path.join(artifacts, 'measurements.json'), 'utf8'));

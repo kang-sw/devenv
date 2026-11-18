@@ -89,8 +89,21 @@ settle the design from its results.
   research; the reason is user reputation about agy's default prompt quality.
 - "Quality" is judged as ws procedure compliance plus the coding result,
   default agent versus custom agent, side by side.
+- (105)=a, 2026-11-18: the agy worker ships on agy's default agent with the
+  ws instructions as a system-prompt append; the custom-agent path is tested
+  later behind a knob (owner: "기본 에이전트 경로 + 서브에이전트로 두고,
+  knob를 둬서 나중에 custom agent 경로를 추가로 테스트해보는 방향으로
+  갑시다"). The placement of that later path is queued as (156) in
+  `261118-feat-ws-agy-tool-names-and-worker-role`. Probe 4 is held.
 
 ### Proposals
+
+- Offset the `call_mcp_tool` gateway's lazy discovery by writing the
+  schemas of the ws tools the agent may call into the custom agent body
+  (owner, 2026-11-18). This removes the schema-cache read and the
+  name/argument guessing; arguments are still validated only by the ws
+  server, not by provider-side schema decoding, and the schema text adds
+  prompt tokens in proportion to the tool set.
 
 ### Open Questions
 

@@ -187,9 +187,8 @@ func TestAgentMCPPythonResolution(t *testing.T) {
 	}
 }
 
-// TestAgentRunnerCatalogs pins which daemon backends carry a capability
-// catalog: Claude, the reference profile; Pi stays handle-only until it
-// has a profile of its own.
+// TestAgentRunnerCatalogs pins the independent lead catalogs and worker
+// descriptors. Pi stays handle-only until it has a catalog of its own.
 func TestAgentRunnerCatalogs(t *testing.T) {
 	holders := wsholder.New(wsholder.Options{Dir: t.TempDir()})
 	defer holders.Close()
@@ -201,5 +200,25 @@ func TestAgentRunnerCatalogs(t *testing.T) {
 	}
 	if regs[wsagent.BackendPi].Catalog != nil {
 		t.Errorf("pi has a catalog profile; it stays handle-only until its own profile")
+	}
+	if !reflect.DeepEqual(regs[wsagent.BackendCodex].Catalog, wsagent.CodexCatalog()) {
+		t.Error("codex must retain its lead-only catalog")
+	}
+	if !reflect.DeepEqual(regs[wsagent.BackendAgy].Catalog, wsagent.AgyCatalog()) {
+		t.Error("agy must retain its lead and worker catalog")
+	}
+	for _, want := range []struct {
+		backend, lead, worker string
+		capable, http, auto   bool
+	}{
+		{wsagent.BackendClaude, wsagent.LeadProfileClaude, wsagent.AgentWorkerProfile(wsagent.BackendClaude), true, true, false},
+		{wsagent.BackendPi, wsagent.LeadProfilePi, wsagent.AgentWorkerProfile(wsagent.BackendPi), true, false, false},
+		{wsagent.BackendAgy, wsagent.LeadProfileAgy, wsagent.AgentWorkerProfile(wsagent.BackendAgy), true, true, true},
+		{wsagent.BackendCodex, wsagent.LeadProfileCodex, "", false, false, false},
+	} {
+		reg := regs[want.backend]
+		if reg.LeadProfile != want.lead || reg.WorkerProfile != want.worker || reg.WorkerCapable != want.capable || reg.WorkerHTTPMCP != want.http || reg.WorkerAutoApprove != want.auto {
+			t.Errorf("%s descriptor = %+v; want %+v", want.backend, reg, want)
+		}
 	}
 }
