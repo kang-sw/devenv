@@ -1,10 +1,10 @@
 {
   "ws": {
-    "archive_sha256": "b9d59cabe36625ebfe2e89cac0167cba92d53989e4b5931c9c12ce5325849337",
+    "archive_sha256": "408b7eea6ef55fb8cfe977870a52a3344c63ed7e2627b0427b8981a3f241ee25",
     "files": {
-      ".claude-plugin/plugin.json": "5998568b76e8c19521bf4f38d5c04de19f549fe47f37567f7cceea54e9b56300",
+      ".claude-plugin/plugin.json": "cfe07e7642a091d747378a3f77c7ba55a0a5848f51a48692e8cf62485da62e5a",
       ".codex-plugin/hooks.json": "e3f3ea60f82fb0795c63bf54b9208647f39cb3779f050d1c755fabdc8a434490",
-      ".codex-plugin/plugin.json": "e9b8f1fe21c9e814926e16e0c064b487d4e7736a8b3fb688e38336605afdaa5b",
+      ".codex-plugin/plugin.json": "29daf4228afe60523bda01c7412ec3294cfca8aa276e43bd6a64bb16b20d43fd",
       ".mcp.json": "0c539c6ffda88a73160b899fee0ca7c78da29393fdf030f25afda86b2fa99c47",
       "bin/ws-cli": "64969b4f3f810a6628e43876c0ee67856c9e0abf9bb19d7dd31540c156dd7fcc",
       "bin/ws-cli.cmd": "747815bea96b806398e052dfb790318cb4f370d59f6ac3519a417ae56bf38917",
@@ -84,7 +84,7 @@
       "rsrc/tracker/tracker.md": "5bcd627f9630252ba25e5b6c3a604490db2bc92c97eb9d93bb997ec9b12bad4f",
       "rsrc/whiteboard/whiteboard.md": "e32657ea47d1ebafaf10c3e8247d61a603c200f30cae80af796b968c249d7d2e",
       "rsrc/worker-stop-protocol.md": "a41c2a5d3ea2f4e310213e32821ac289ca51471139fb617ebd06fd27e55582a3",
-      "runtime.json": "2bc9641391030a929bf7e672f8c3b8d159dfd606241f521a125c1ad24f652dc0",
+      "runtime.json": "9b1e56221d04fd78f795935363ff572b90365cf953d48677b71cdb15e4cb6e52",
       "skills/lead-audit-doc/SKILL.md": "910af43a6f9921271580584d590e14c76effba51350a502197c6fa307971df67",
       "skills/lead-bootstrap/AGENTS.template.md": "77205a45cb8e699fc92a58154c42851b82507890e6d9d0668e5fa58c337ffb55",
       "skills/lead-bootstrap/SKILL.md": "4348b34724245c3d7de35c4cae2ee0a447c81131551932e388cfcf973149ddc2",
@@ -104,10 +104,10 @@
     }
   },
   "wsflow": {
-    "archive_sha256": "3b56b8caa7debcdd8017a08b6bec15c53681519f7f82896d10820507d7bd2807",
+    "archive_sha256": "bf73ec707bd9d542fcf651085508d2056ace5edfa1040fbc88cc91e28482bc2e",
     "files": {
-      ".claude-plugin/plugin.json": "cb7c1456b34e5302b9727f2b1802927a4181d5a28498162635ebddd0e363389c",
-      ".codex-plugin/plugin.json": "b68d1ce2f56e06c7563a674f40ebd28fa7f313d319eef61b6d6209f2563a5fc0",
+      ".claude-plugin/plugin.json": "f884a6b860a66bc767e8ab9ac8907ca831bd1e1dbe77f80de4880075dff737af",
+      ".codex-plugin/plugin.json": "ac12e6d4eac8882aaaa379fb5d3c8f34fc463f27340a46494f45d6bd3845c16e",
       ".mcp.json": "371c883b87a4b8eaeab3e1b329fa2074dfd5343572bd8a6782d7add3169a8eb4",
       "bin/ws-mcp-launcher.py": "2a9441d63efd040767f97b688dda88ffadd6f89672ca4de2e43755dc699f45c2",
       "bin/ws-pi-payload.py": "b92624cbdc40b83aa4b5d5333cff5c36754023fbf1b21c1deb9bf8f26c292d05",
@@ -187,7 +187,7 @@
       "rsrc/tracker/tracker.md": "5bcd627f9630252ba25e5b6c3a604490db2bc92c97eb9d93bb997ec9b12bad4f",
       "rsrc/whiteboard/whiteboard.md": "e32657ea47d1ebafaf10c3e8247d61a603c200f30cae80af796b968c249d7d2e",
       "rsrc/worker-stop-protocol.md": "a41c2a5d3ea2f4e310213e32821ac289ca51471139fb617ebd06fd27e55582a3",
-      "runtime.json": "d394e759d558decababe9493d0aa1d1e8da60ed6691d6b8afccafe428273290a",
+      "runtime.json": "41b0c15436092e0157633e95450c333d13ed51c87142bf2bb522bba4685419c1",
       "skills/lead-audit-doc/SKILL.md": "a42494d1687900d3cd18bdccda893182b4f8a323338f4d913ed4e0fe9469b715",
       "skills/lead-bootstrap/AGENTS.template.md": "5a91d0f62a443d071e41b29eee1ba78d9b62f7708e585b1759c4911b7a6e48c5",
       "skills/lead-bootstrap/SKILL.md": "04719ed8a7f27d73cc5a7fa82461930060f66918870e92662406aed9fb1176fe",
