@@ -485,6 +485,7 @@
   "js.board.filter.closed": "Закрыты",
   "js.board.filter.cards": "Карточки",
   "js.board.hold.pill": "Обновления доски",
+  "js.board.hold.pull": "Применить изменения без прокрутки",
   "js.board.hold.pill.title": "Наверх",
   "js.board.hold.moved": "перемещено ↑",
   "js.board.hold.closed": "закрыто",
