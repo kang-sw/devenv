@@ -552,6 +552,95 @@ lead's review/integration, not merged. Ticket guardrails pass; the advisory
 Sage-freshness warning is accepted for this Result/completion-date-only
 update, with no phase-plan or settled-decision edits.
 
+#### Edition (07ebb9c91) - 2026-11-18
+
+**Independent-review corrections:** all four findings from the review of
+`79383b9ee..1fcc5c50b` are fixed on the retained implementation branch.
+
+1. **Critical — published-view ownership:** incremental refresh can replace
+   existing node fields while the previous view is encoded. `view.go` now
+   copies `Assignment.StatusOrigin` and every other borrowed fold/node
+   pointer field, including dates, parent and membership references, plus
+   event payload bytes. Returned snapshots own their data; calls on Tracker
+   itself still require caller serialization. New tests assert snapshot
+   stability after status replacement/direct fold mutation and concurrently
+   encode a published view during repeated refreshes. The full wstracker
+   package passes under `-race`.
+2. **Important — store mutex across socket writes:** summary, delta, detail
+   and 304 status/header/body construction finishes under the store lock;
+   every HTTP write runs after unlock. A deterministic blocked-writer test
+   holds the first response at a socket boundary while a second request
+   publishes a new generation for that same store. It also verifies the
+   first payload remains detached from the new maps. Normal and race runs
+   pass.
+3. **Important — recovery rereads on projection misses:** registration reads
+   now reuse the existing stat/file-identity-validated small-file cache;
+   registry writers retain fresh reads under the cross-process root lock.
+   Seen state is recovered once per registration directory/nonce, returned
+   as copied slices, and updated in memory only after successful persistence.
+   Registration replacement cannot inherit the old clone's marks. Tests
+   cover external relabel/hide/removal/re-registration, caller mutation,
+   restart recovery, failed recovery retry and failed-write isolation.
+   **Correction to the earlier Result's I/O assessment:** projection misses
+   did reread both `stores.json` and `ui-seen.json`; that read chain was not
+   I/O-free. This Edition fixes those repeated recovery reads, not all ledger
+   or host-sync I/O. Registry validation still performs a stat, and the
+   existing cache conservatively rereads recently modified/coarse-timestamp
+   registry files; seen reads need no file touch after recovery, including
+   immediately after this daemon writes new marks.
+4. **Important — downgrade loading gap:** selecting legacy mode retains the
+   summary model and its detail gate until a valid full view is installed.
+   A slow or failed `/view` cannot expose an unloaded item's absent
+   attachments/events to the window renderer. Explicit retry remains safe;
+   all editor continuations, including those added while waiting, settle
+   only after installation. Node and Chromium regressions cover both a
+   missing delta route and a missing detail route, delayed/failed legacy
+   reads, opening an unloaded item while waiting and eventual full windows
+   without exceptions.
+
+**VERIFIED — supporting file-operation measurement:** fixture counters run
+five instances of the former Seen recovery-read path and five warm production
+Seen calls. Before: **10 `ReadFile` attempts**. After: **0 `ReadFile` attempts
+and 5 registry-validation `Stat` attempts** (two reads per call → zero reads
+plus one stat). The post-write read also performs no recovery reread. These
+are instrumented Go operation attempts for this component, not a whole-delta
+kernel syscall trace, Windows-heavy-AV measurement or visible-latency claim.
+The persistence format and legacy readers/writers are unchanged: **T0**.
+
+**VERIFIED — final narrow gates:** every Go command used
+`GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`; Chromium used the browser cache
+and existing Playwright module recorded in the Phase 2 Result.
+
+```text
+go test -race ./internal/wstracker/... -count=1
+  ok github.com/kang-sw/devenv/internal/wstracker 74.654s
+go test ./cmd/ws-mcp -run Tracker -count=1
+  ok github.com/kang-sw/devenv/cmd/ws-mcp 13.696s
+go test ./internal/wsdashboard -run Tracker -count=1 (including Chromium)
+  ok github.com/kang-sw/devenv/internal/wsdashboard 8.999s
+go test -race ./internal/wsdashboard -run '^TestTrackerProjectionSlowSocketDoesNotBlockSameStore$' -count=1
+  ok github.com/kang-sw/devenv/internal/wsdashboard 2.058s
+go test -race ./internal/wstrackerhost -run 'TestTrackerReadStateCache|TestSeen' -count=1 -v
+  PASS; ok github.com/kang-sw/devenv/internal/wstrackerhost 5.125s
+node --test internal/wsdashboard/tracker*.test.js
+  tests 22; pass 22; fail 0; skipped 0
+node internal/wsdashboard/testdata/tracker-projection.browser.cjs
+  PASS summary/visible batches/keyed unchanged row + focus/draft
+  PASS new page / old daemon full-view fallback
+  PASS missing delta / delayed legacy view / unloaded window gated / failed read retry / full window without exceptions
+  PASS missing detail / delayed legacy view / unloaded window gated / failed read retry / full window without exceptions
+  PASS future-before-delta / old-after-delta / matching detail only / draft and caret across loading gap
+git diff --check
+  no diagnostics
+```
+
+A fresh read-only source audit of the ownership and metadata-cache changes
+found no remaining correctness defect in that targeted scope; the auditor
+ran no tests. **Unfixed findings: none.** The earlier Forward work and
+host-specific performance/open-large-panel/peak-memory gates remain unrun;
+no new benchmark or allocation-cost improvement is claimed for the owned
+payload copies. No daemon replacement, Electron, SSH or develop merge ran.
+
 ## Sage Review Round 1 (2026-11-17)
 
 ### Design Reviewer — block
