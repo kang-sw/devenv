@@ -28,6 +28,9 @@ type SessionData struct {
 	// "answer needed" count), which the sessions index shows beside the
 	// board link; zero without a board.
 	CountPolicy int
+	// OpenAskIDs is the space-separated set of currently open policy/check
+	// IDs from the same board read. A string keeps Session comparable.
+	OpenAskIDs string
 	// Fingerprint changes whenever anything the source read changed, so the
 	// index can tell a re-read that found a change from one that did not.
 	Fingerprint string
@@ -82,6 +85,8 @@ type Session struct {
 	Lifecycle SessionLifecycle
 	// CountPolicy is SessionData.CountPolicy as of the last read.
 	CountPolicy int
+	// OpenAskIDs is SessionData.OpenAskIDs as of the last read.
+	OpenAskIDs string
 	// Resumable is SessionData.Resumable as of the last read.
 	Resumable bool
 	// Label is the session's display label as of the last read
@@ -590,7 +595,7 @@ func (x *Index) applyRead(replyID string, reg *Registration, full bool, stores L
 		data.SnapshotStaleAt = clock.staleAt
 	}
 	snapshotStale := !data.SnapshotStaleAt.IsZero() && !now.Before(data.SnapshotStaleAt)
-	next := Session{Registration: *reg, Live: reg.Live(now), HasBoard: data.HasBoard, CountPolicy: data.CountPolicy, Resumable: data.Resumable, Label: label, SnapshotUpdatedAt: data.SnapshotUpdatedAt, Hidden: hidden, Lifecycle: DeriveSessionLifecycle(*reg, hidden, now)}
+	next := Session{Registration: *reg, Live: reg.Live(now), HasBoard: data.HasBoard, CountPolicy: data.CountPolicy, OpenAskIDs: data.OpenAskIDs, Resumable: data.Resumable, Label: label, SnapshotUpdatedAt: data.SnapshotUpdatedAt, Hidden: hidden, Lifecycle: DeriveSessionLifecycle(*reg, hidden, now)}
 	if !known {
 		next.Rev = 1
 		x.sessions[replyID] = &indexEntry{session: next, data: data, fingerprint: data.Fingerprint, snapshotStaleAt: data.SnapshotStaleAt, snapshotStale: snapshotStale}

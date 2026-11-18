@@ -388,7 +388,7 @@
     // Use its immutable canonical input, never the mounted/staged/pinned DOM.
     var boardHeld = hiddenRegions.board || boardLatest;
     var boardInput = withoutBoard || !boardHeld ? null : (typeof boardHeld.html === "string" ? boardInputFull(boardHeld.html) : boardHeld.html);
-    var railInput = null, treeInput = null, entryInput = null, panelInput = null;
+    var railInput = null, treeInput = null, entryInput = null, panelInput = null, railBaseline = true;
     // The shell streams the rail alone; a framed session page streams its
     // session without the rail.
     var path = shell ? "/rail/events" : mode === "index" || worktree ? "/events" : "/s/" + rid + "/events";
@@ -491,6 +491,10 @@
       receiveRegion({ name: "board", hash: ev.hash, html: next });
     }
     function receiveRegion(ev) {
+      // Observe even held updates: an ask may open and close while hidden
+      // or during a drag. Reconnect's first full rail silently baselines.
+      if (ev.name === "rail" && railAttention) railAttention.observe(q(".rs", frag(WsRail.rowInputHTML(ev.html))), rid, railBaseline);
+      if (ev.name === "rail") railBaseline = false;
       // A hidden tab keeps only each region's newest update and applies none;
       // showing the tab applies them (showRegions). The stream stays open, so
       // the light events (tracker) still arrive and act.

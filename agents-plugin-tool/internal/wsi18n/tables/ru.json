@@ -1675,6 +1675,7 @@
   "rail.root": "корень",
   "rail.star": "Избранное",
   "js.rail.starred": "Избранное",
+  "js.rail.attention": "Новый вопрос",
   "js.rail.menu.star": "Добавить в избранное",
   "js.rail.menu.unstar": "Удалить из избранного",
   "rail.copy": "Скопировать адрес почтового ящика",

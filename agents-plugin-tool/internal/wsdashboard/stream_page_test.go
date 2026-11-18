@@ -44,7 +44,7 @@ doc.removeEventListener = function (type, fn) { doc.listeners[type] = (doc.liste
 doc.dispatchEvent = function (e) { (doc.listeners[e.type] || []).slice().forEach(function (fn) { fn(e); }); };
 // The page stands alone: no shell around it, no shell above it.
 var shell = false, framed = false, shHidden = false, shTrackerRev = null;
-var boardLatest = null;
+var boardLatest = null, railAttention = null;
 function shDrafts() { return false; }
 ` + dashboardFuncs(t, "pageHidden")
 }

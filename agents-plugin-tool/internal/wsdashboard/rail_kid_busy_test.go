@@ -91,9 +91,9 @@ func TestRailMarkupKidBusy(t *testing.T) {
 // count) opening its second line, an empty message link after it when it
 // has no message; and a child row with no second line, badges or not.
 func TestRailMarkupAvatarBadges(t *testing.T) {
-	kid := RailRow{ReplyID: "kid", Harness: "pi", Live: true, Child: true, Group: "/w/folder", CountPolicy: 1, Subagents: 1, Message: "child text"}
+	kid := RailRow{ReplyID: "kid", Harness: "pi", Live: true, Child: true, Group: "/w/folder", CountPolicy: 1, OpenAskIDs: "40", Subagents: 1, Message: "child text"}
 	par := RailRow{ReplyID: "par", Harness: "claude", Live: true, HasChildren: true, Children: []RailRow{kid}, KidBusy: 1}
-	q := RailRow{ReplyID: "q", Harness: "claude", Live: true, CountPolicy: 2, Subagents: 3, Message: "last reply"}
+	q := RailRow{ReplyID: "q", Harness: "claude", Live: true, CountPolicy: 2, OpenAskIDs: "12 15", Subagents: 3, Message: "last reply"}
 	p := RailRow{ReplyID: "p", Harness: "codex", Live: true, Message: "plain"}
 	view := RailView{Workspaces: []RailWorkspace{{Name: "folder", Path: "/w/folder", Repo: true, Worktrees: []RailWorktree{{Path: "/w/folder", Sessions: []RailRow{par, q, p}}}}}}
 	region, err := renderRailRegion(view, "en")
@@ -124,6 +124,15 @@ func TestRailMarkupAvatarBadges(t *testing.T) {
 	}
 	if row := rowOf("kid"); strings.Contains(row, "drmeta") || strings.Contains(row, "drmsg") || !strings.Contains(row, `aria-label="1 item to answer"`) || !strings.Contains(row, `<span class="sbn" title="1 subagents running">1</span>`) {
 		t.Errorf("a child row is one line with its badges on the icon:\n%s", row)
+	}
+	for _, want := range []string{
+		`data-rid="q" data-asks="12 15"`,
+		`data-rid="kid" data-asks="40"`,
+		`data-rid="p" data-asks=""`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("the rail lacks ask-ID attribute %s", want)
+		}
 	}
 	for _, gone := range []string{`class="bots"`, `chip policy`, `#i-robot`} {
 		if strings.Contains(html, gone) {
