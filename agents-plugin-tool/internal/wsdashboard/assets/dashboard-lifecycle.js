@@ -503,6 +503,9 @@
     railMarks();
   }
   function shShow(ent, from) {
+    // load can precede the frame's first rAF/header message. Keep the old
+    // page and header together until the destination's chrome is ready.
+    if (!ent.loaded || !ent.head) return;
     var was = shOn;
     if (was === ent) return;
     // Async tool/draft callbacks can change eligibility during a cold load.
@@ -616,7 +619,11 @@
       var m = window.WsShell.message(e.data), ent = m && shEnt(e.source), on = !!ent && ent === shOn;
       if (!ent) return;
       switch (m.wsShell) {
-        case "head": ent.head = m; if (on) shHead(ent); break;
+        case "head":
+          ent.head = m;
+          if (on) shHead(ent);
+          else if (ent === shWant) shShow(ent);
+          break;
         case "title": ent.title = m.title; if (on) doc.title = m.title; break;
         case "nav": if (on) shOpen(m.href, true); break;
         case "stay": shStay(ent, m.attempt); break;

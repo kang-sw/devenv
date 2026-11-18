@@ -34,10 +34,17 @@ function fixture(cacheLimit = 0) {
     var OriginalFrame = Frame;
     Frame = function (src) { return cacheSafety(new OriginalFrame(src)); };
     Frame.prototype = OriginalFrame.prototype;
+    var originalLoad = Frame.prototype.load;
+    Frame.prototype.load = function () {
+      if (!this.holdHeader && this.pending !== 'about:blank')
+        from(this.contentWindow, {wsShell: 'head', html: '', qs: '', pad: 0, top: 40});
+      originalLoad.call(this);
+    };
     cacheSafety(first);
   ` + '\n(function () {\n' + glue + init + `
     first.contentDocument.readyState = 'complete';
     shShellInit();
+    shOn.head = {html: '', qs: '', pad: 0, top: 40};
     window.testShell = {
       open: shOpen,
       count: function () { return shFrames.length; },
@@ -432,10 +439,29 @@ function testCacheAdmissionExpiry() {
     }
   }
 }
-function run() { runBase(); testCancelledLeave(); testHistoryCancellation(); testStorageFailure(); testAcceptedBlankWins(); testRestoreTimeout(); testCacheReuse(); testCacheEvictionAndRaces(); testUnsafeCacheFallback(); testCacheAdmissionExpiry(); }
+function testHeaderReadiness() {
+  for (const headFirst of [false, true]) {
+    const c = fixture(5), s = c.window.testShell, a = c.first;
+    c.from(a.contentWindow, {wsShell: 'head', html: '<b>old</b>', qs: '', pad: 0, top: 40});
+    c.click('/s/b');
+    const b = s.pending();
+    b.holdHeader = true;
+    const header = {wsShell: 'head', html: '<b>new</b>', qs: '', pad: 0, top: 40};
+    if (headFirst) c.from(b.contentWindow, header); else b.load();
+    assert.equal(s.current(), a, 'both document load and header are required');
+    assert.equal(c.top.style.minHeight, '40px');
+    assert.equal(c.log.at(-1), 'swap:head:<b>old</b>', 'do not clear the old header');
+    if (headFirst) b.load(); else c.from(b.contentWindow, header);
+    assert.equal(s.current(), b);
+    assert.equal(c.log.includes('swap:head:<b>new</b>'), true);
+    assert.equal(a.got.at(-1), 'shown:false');
+  }
+}
+function run() { testHeaderReadiness(); runBase(); testCancelledLeave(); testHistoryCancellation(); testStorageFailure(); testAcceptedBlankWins(); testRestoreTimeout(); testCacheReuse(); testCacheEvictionAndRaces(); testUnsafeCacheFallback(); testCacheAdmissionExpiry(); }
 module.exports = run;
 if (require.main === module) {
   const test = require('node:test');
+  test('header handoff waits for load and head in either arrival order', testHeaderReadiness);
   test('fresh session frames, drafts, races and history', runBase);
   test('I1: Stay clears leave intent before same-session routes and rail clicks', testCancelledLeave);
   test('I2: cancelled Back restores position and double Back preserves entries', testHistoryCancellation);
