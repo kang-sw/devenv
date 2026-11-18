@@ -1,11 +1,75 @@
 package wstrackerhost
 
 import (
+	"context"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/gofrs/flock"
 
 	"github.com/kang-sw/devenv/internal/wstracker"
 )
+
+// TestViewWithinReadersRedactApart: concurrent ViewWithin readers each get
+// their own view to Redact, both when they join one reload and when they
+// are served the last folded state, so a page's redaction never writes a
+// view another reader holds (go test -race reports it if one does).
+func TestViewWithinReadersRedactApart(t *testing.T) {
+	w := newWorld(t)
+	h := w.machine("ada")
+	res := w.register(h, "team", "ada", &wstracker.Profile{Given: "Ada"})
+	_ = within(t, h, "team")
+
+	readers := func(round string) {
+		t.Helper()
+		views := make([]*StoreView, 8)
+		var wg sync.WaitGroup
+		for i := range views {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				v, err := h.ViewWithin(context.Background(), "team", 0, pageWait)
+				if err != nil {
+					t.Errorf("%s: view within: %v", round, err)
+					return
+				}
+				v.Redact()
+				views[i] = v
+			}()
+		}
+		wg.Wait()
+		for i, v := range views {
+			for _, other := range views[:i] {
+				if v != nil && v == other {
+					t.Fatalf("%s: two readers were handed one view", round)
+				}
+			}
+		}
+	}
+	readers("joined reload")
+
+	// With the store's lock held, every read stops waiting and is served
+	// the last folded state. A reload the first round left running holds
+	// that lock while it reads, so wait for it to land first.
+	st, err := h.store("team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "the first round's reloads to land", func() bool {
+		st.viewMu.Lock()
+		defer st.viewMu.Unlock()
+		return st.cur == nil && st.next == nil
+	})
+	lock := flock.New(filepath.Join(res.Entry.Dir, "lock"))
+	if ok, err := lock.TryLock(); err != nil || !ok {
+		t.Fatalf("take the store lock: %v %v", ok, err)
+	}
+	defer lock.Unlock()
+	readers("last folded state")
+}
 
 func TestRedactsRemoteCredentials(t *testing.T) {
 	for in, want := range map[string]string{

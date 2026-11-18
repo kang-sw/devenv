@@ -15,13 +15,13 @@ func (c *conv) lockSummaryWriter() (func(), bool) {
 	if !rec.Lead {
 		return nil, false
 	}
-	unlock, ok := c.lockRow()
+	// The row tested is the one lockRowRead checked under the lock.
+	unlock, row, ok := c.lockRowRead()
 	if !ok {
 		return nil, false
 	}
 	c.r.summaryMu.Lock()
-	row, err := wsdashboard.ReadRegistration(c.r.opts.Dir, rec.ReplyID)
-	if c.r.summaryOwners[rec.ReplyID] != c || err != nil || !row.Hosted || row.HostPID != rec.HostPID || row.Harness != rec.Backend {
+	if c.r.summaryOwners[rec.ReplyID] != c || row == nil || !row.Hosted || row.HostPID != rec.HostPID || row.Harness != rec.Backend {
 		c.r.summaryMu.Unlock()
 		unlock()
 		return nil, false
