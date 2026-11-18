@@ -520,6 +520,8 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		d.agents.Start(d.agentChanged)
 	}
 	if err := writeEndpoint(opts.Dir, d.endpoint); err != nil {
+		// A detached daemon's returned error has no reader; the log does.
+		fmt.Fprintf(logw, "dashboard: write endpoint file: %v\n", err)
 		if d.agents != nil {
 			d.agents.Close()
 		}

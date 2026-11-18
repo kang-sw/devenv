@@ -106,7 +106,7 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, p
     let latest;
     try { latest = await find(root); }
     catch { notify('Dashboard health became uncertain during staging; keeping the current connection. Retry later.'); return running.url; }
-    if (!sameDaemon(latest, running)) return attachWinner(selected.metadata.version, latest);
+    if (!sameDaemon(latest, running)) return attachWinner(selected.metadata.version, latest, running, notify);
     const refreshed = version(selected.metadata.version, latest.health.version);
     if (refreshed === null) {
       notify('Cannot determine daemon core after staging; keeping the current connection. Retry later.');
@@ -123,13 +123,12 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, p
         await (deps.launch || launch)(staged.binary, options,
           ['daemon-start', '--require-independent-lifetime', '--start-wait', '13s', ...(replace ? ['--replace'] : [])], true);
       } catch (error) {
-        let still;
-        try { still = await find(root); } catch { /* A late failure can leave no daemon. */ }
+        const still = await settle(find, root, deps);
         if (still && sameDaemon(still, latest)) {
           notify(`Replacement did not drain the incumbent: ${error.message}. Retry after checking daemon health.`);
           return still.url;
         }
-        if (still) return attachWinner(selected.metadata.version, still);
+        if (still) return attachWinner(selected.metadata.version, still, latest, notify);
         throw new Error(`Replacement starter failed after the incumbent changed; availability is uncertain: ${error.message}`);
       }
       const still = await find(root).catch(() => null);
@@ -153,7 +152,7 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, p
         notify('Authenticated drain failed or the daemon changed; outcome is uncertain. Check dashboard health before retrying.');
         const still = await find(root).catch(() => null);
         if (still && sameDaemon(still, latest)) return still.url;
-        if (still) return attachWinner(selected.metadata.version, still);
+        if (still) return attachWinner(selected.metadata.version, still, latest, notify);
         throw new Error('Authenticated drain outcome uncertain; no daemon can be attached — retry after inspecting health');
       }
     }
@@ -171,15 +170,40 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, p
   try { await (deps.launch || launch)(staged.binary, { cwd: staged.root, env: launchEnv(env, staged, root), logPath: path.join(userData, 'daemon-start.log') },
     platform === 'win32' ? ['daemon-start', '--require-independent-lifetime', '--start-wait', '13s'] : ['dashboard'],
     platform === 'win32'); }
-  catch (error) { throw new Error(`Cannot start dashboard daemon: ${error.message}`); }
+  catch (error) {
+    // Nothing was drained here, so any daemon that now answers is what a
+    // successful start would have attached (see waitForDaemon).
+    const answer = await settle(find, root, deps);
+    if (answer) return answer.url;
+    throw new Error(`Cannot start dashboard daemon: ${error.message}`);
+  }
   return waitForDaemon(find, root, deps);
 }
-function attachWinner(candidate, answer) {
-  const relation = version(candidate, answer.health?.version);
-  if (relation === null || relation > 0) {
-    throw new Error('An older or unidentified daemon won the handoff; retry after inspecting the current connection');
+// A starter can exit nonzero while a daemon serves: on Windows under heavy
+// antivirus the endpoint file has stayed unreadable past the Go start wait.
+// Re-probe for a bounded window before reporting the launch failure.
+async function settle(find, root, deps) {
+  const sleep = deps.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  const deadline = Date.now() + 15000;
+  for (let i = 0; i < (deps.maxPolls || 75); i++) {
+    const answer = await find(root).catch(() => null);
+    if (answer) return answer;
+    if (Date.now() >= deadline) break;
+    await sleep(200);
   }
-  return answer.url;
+  return null;
+}
+function attachWinner(candidate, answer, incumbent, notify) {
+  const relation = version(candidate, answer.health?.version);
+  if (relation !== null && relation <= 0) return answer.url;
+  // A third daemon at least as new as the incumbent is no downgrade; the
+  // bundled core can wait for the next start instead of failing this one.
+  const floor = relation === null || !incumbent ? null : version(incumbent.health?.version, answer.health.version);
+  if (floor !== null && floor <= 0) {
+    notify?.('A daemon at least as new as the incumbent but older than this app is serving; attaching to it. The bundled daemon is offered again at the next start.');
+    return answer.url;
+  }
+  throw new Error('An older or unidentified daemon won the handoff; retry after inspecting the current connection');
 }
 async function waitForDaemon(find, root, deps, predecessor, candidateVersion, candidateHash, notify) {
   const sleep = deps.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
@@ -193,8 +217,10 @@ async function waitForDaemon(find, root, deps, predecessor, candidateVersion, ca
       if (!sameDaemon(answer, predecessor)) {
         // An unrelated plugin may win the lock. Attach only if its numeric
         // core is at least our candidate's; never attribute its bytes to ours.
-        const url = attachWinner(candidateVersion, answer);
-        if (answer.health?.content_hash && answer.health.content_hash !== candidateHash) {
+        const url = attachWinner(candidateVersion, answer, predecessor, notify);
+        // A below-candidate winner already carried attachWinner's notice.
+        if (version(candidateVersion, answer.health?.version) <= 0 &&
+            answer.health?.content_hash && answer.health.content_hash !== candidateHash) {
           notify?.('A different daemon won the handoff; attaching to its verified REST identity, not attributing it to the selected package.');
         }
         return url;
