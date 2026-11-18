@@ -70,7 +70,9 @@ func (t *Tracker) Refresh() bool {
 }
 
 // View refreshes and returns the view state at now; staleDays <= 0 means
-// DefaultStaleDays, a zero now turns stale off.
+// DefaultStaleDays, a zero now turns stale off. The returned snapshot owns
+// its data and can be read/encoded during later Refresh calls. Calls on the
+// Tracker itself still require caller serialization.
 func (t *Tracker) View(now time.Time, staleDays int) *View {
 	t.Refresh()
 	return t.r.view(t.stream, now, staleDays)

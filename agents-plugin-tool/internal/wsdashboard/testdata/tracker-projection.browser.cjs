@@ -47,8 +47,8 @@ function detail(f, iid, version, body) {
 }
 const html = '<!doctype html><html><head><style>body{margin:0} header{height:50px} button{font:inherit}</style></head><body><header id="head"><span id="slot"></span></header><main id="main"></main></body></html>';
 const translations = 'window.wsT=(k,...a)=>k+ (a.length?" "+a.join(" "):"");window.wsTn=window.wsT;';
-async function setup(browser, { legacy = false, details = true } = {}) {
-  const page = await browser.newPage({ viewport: { width: 1400, height: 900 } }), errors = [], requests = [], pendingDetails = [];
+async function setup(browser, { legacy = false, details = true, missing = '' } = {}) {
+  const page = await browser.newPage({ viewport: { width: 1400, height: 900 } }), errors = [], requests = [], pendingDetails = [], pendingViews = [];
   const f = fixture(); let current = f.summary;
   page.on('pageerror', e => errors.push(e.message));
   await page.route('http://tracker.test/**', async route => {
@@ -57,11 +57,15 @@ async function setup(browser, { legacy = false, details = true } = {}) {
     const json = data => route.fulfill({ contentType: 'application/json', body: JSON.stringify(data) });
     if (u.pathname === '/tracker/stores') return json({ rev: 1, stores: [{ id: 's' }] });
     if (u.pathname.endsWith('/summary')) return legacy ? route.fulfill({ status: 404 }) : json(current);
-    if (u.pathname.endsWith('/delta')) return u.searchParams.get('since') === current.cursor ? route.fulfill({ status: 304 }) : json(current);
-    if (u.pathname.endsWith('/view')) return json({ view: f.v, seen: { badge: [], read: [] } });
+    if (u.pathname.endsWith('/delta')) return missing === 'delta' ? route.fulfill({ status: 404 }) : u.searchParams.get('since') === current.cursor ? route.fulfill({ status: 304 }) : json(current);
+    if (u.pathname.endsWith('/view')) {
+      if (missing) { pendingViews.push(route); return; }
+      return json({ view: f.v, seen: { badge: [], read: [] } });
+    }
     if (u.pathname.endsWith('/check')) return json({});
     if (u.pathname.endsWith('/seen') || u.pathname.endsWith('/sync')) return json({});
     if (u.pathname.endsWith('/detail')) {
+      if (missing === 'detail') return route.fulfill({ status: 404 });
       if (!details) { pendingDetails.push({ route, ids: u.searchParams.getAll('id') }); return; }
       return json({ items: Object.fromEntries(u.searchParams.getAll('id').map(id => [id, detail(f, id, current.items[id]?.detailVersion || 'v1', 'body ' + id)])) });
     }
@@ -74,7 +78,7 @@ async function setup(browser, { legacy = false, details = true } = {}) {
 function tkMount(){ if(!tkApi) tkApi=WsTracker.mount(tkAdapter,{header:document.getElementById('head'),qsSlot:document.getElementById('slot'),pageParent:document.getElementById('main')}); }
 tkReload();` });
   await page.waitForFunction(() => tkViews.s?.items?.i0 && window.__tracker);
-  return { page, f, errors, requests, pendingDetails, setCurrent(a) { current = a; } };
+  return { page, f, errors, requests, pendingDetails, pendingViews, setCurrent(a) { current = a; } };
 }
 async function acceptance(browser) {
   const h = await setup(browser), { page } = h;
@@ -115,6 +119,34 @@ async function acceptance(browser) {
   assert.deepEqual(old.errors, []);
   console.log('PASS tracker browser: new page / old daemon full-view fallback');
   await old.page.close();
+
+  for (const missing of ['delta', 'detail']) {
+    const down = await setup(browser, { missing });
+    await down.page.evaluate(missing => {
+      if (missing === 'delta') tkReload();
+      else tkAdapter.detail('s', ['i0']);
+    }, missing);
+    await assertEventually(() => down.pendingViews.length === 1);
+    // Open a different, unloaded item while the downgrade's /view is blocked.
+    await down.page.evaluate(() => tkApi.openItemWindow('s', 'i1'));
+    await down.page.locator('#tkwinbody [role="status"]').waitFor();
+    assert.equal(await down.page.evaluate(() => tkAdapter.detailReady('s', 'i1')), false);
+    assert.deepEqual(down.errors, []);
+    await down.pendingViews.shift().fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'legacy busy' }) });
+    await down.page.waitForFunction(() => document.querySelector('#tkwinbody [role="status"]')?.textContent === 'legacy busy');
+    assert.equal(await down.page.evaluate(() => tkAdapter.detailReady('s', 'i1')), false);
+    assert.equal(down.pendingViews.length, 0, 'failed fallback does not automatically retry');
+    await down.page.locator('#tkwinbody [data-act="detail-retry"]').click();
+    await assertEventually(() => down.pendingViews.length === 1);
+    await down.pendingViews.shift().fulfill({ contentType: 'application/json', body: JSON.stringify({ view: down.f.v, seen: { badge: [], read: [] } }) });
+    await down.page.locator('#tkwinbody .iw-thread').waitFor();
+    assert((await down.page.locator('#tkwinbody').textContent()).includes('body 1'));
+    await down.page.locator('#cbox').fill('full legacy composer');
+    assert.equal(await down.page.evaluate(() => tkProjections.s), undefined);
+    assert.deepEqual(down.errors, []);
+    console.log('PASS tracker browser: missing ' + missing + ' / delayed legacy view / unloaded window gated / failed read retry / full window without exceptions');
+    await down.page.close();
+  }
 
   const race = await setup(browser, { details: false });
   await race.page.evaluate(() => tkApi.openItemWindow('s', 'i0'));

@@ -247,77 +247,99 @@ func (d *Daemon) trackerProjectionRead(w http.ResponseWriter, r *http.Request, i
 		}
 	}
 	p := d.trackerAnswers.projection(id)
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	built := false
-	if !p.ready || !p.stamp.valid(data, now) {
-		snapshot, err := host.Projection(r.Context(), id)
+	// Serialize against one generation, then release the store before any
+	// socket write (including headers). A slow client must not stall readers.
+	header := make(http.Header)
+	status := http.StatusOK
+	var body []byte
+	reply := func(code int, value any) {
+		status = code
+		var err error
+		body, err = json.Marshal(value)
 		if err != nil {
-			if errors.Is(err, ErrTrackerBusy) {
-				trackerBusy(w, err)
-			} else {
-				trackerError(w, http.StatusInternalServerError, err.Error())
+			status = http.StatusInternalServerError
+			body, _ = json.Marshal(map[string]string{"error": err.Error()})
+		}
+		body = append(body, '\n')
+		header.Set("Content-Type", "application/json")
+		header.Set("X-Content-Type-Options", "nosniff")
+	}
+	func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		built := false
+		if !p.ready || !p.stamp.valid(data, now) {
+			snapshot, err := host.Projection(r.Context(), id)
+			if err != nil {
+				code := http.StatusInternalServerError
+				if errors.Is(err, ErrTrackerBusy) {
+					code = http.StatusServiceUnavailable
+					header.Set("Retry-After", trackerBusyRetry)
+				}
+				reply(code, map[string]string{"error": err.Error()})
+				return
 			}
-			return
+			p.snapshot, p.stamp, p.ready = snapshot, trackerStamp{data: data, at: now}, true
+			built = true
 		}
-		p.snapshot, p.stamp, p.ready = snapshot, trackerStamp{data: data, at: now}, true
-		built = true
-	}
-	seen, seenGen := d.trackerAnswers.projectionSeen(id)
-	if built || seenGen != p.seenGeneration {
-		p.publish(seen)
-		p.seenGeneration = seenGen
-	}
-	cursor := p.cursor(p.generation)
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("ETag", `W/"`+cursor+`"`)
-	if op == "detail" {
-		if p.snapshot.Detail == nil {
-			trackerError(w, http.StatusNotFound, "not found")
-			return
+		seen, seenGen := d.trackerAnswers.projectionSeen(id)
+		if built || seenGen != p.seenGeneration {
+			p.publish(seen)
+			p.seenGeneration = seenGen
 		}
-		wanted, missing := []string{}, []string{}
-		for _, iid := range ids {
-			if _, ok := p.items[iid]; ok {
-				wanted = append(wanted, iid)
-			} else {
-				missing = append(missing, iid)
+		cursor := p.cursor(p.generation)
+		header.Set("Cache-Control", "no-cache")
+		header.Set("ETag", `W/"`+cursor+`"`)
+		if op == "detail" {
+			if p.snapshot.Detail == nil {
+				reply(http.StatusNotFound, map[string]string{"error": "not found"})
+				return
 			}
-		}
-		raw, err := p.snapshot.Detail(r.Context(), wanted)
-		if err != nil {
-			trackerError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		bundles := map[string]TrackerDetailBundle{}
-		for _, iid := range wanted {
-			if body, ok := raw[iid]; ok {
-				bundles[iid] = TrackerDetailBundle{DetailVersion: p.items[iid].DetailVersion, Data: body}
-			} else {
-				missing = append(missing, iid)
+			wanted, missing := []string{}, []string{}
+			for _, iid := range ids {
+				if _, ok := p.items[iid]; ok {
+					wanted = append(wanted, iid)
+				} else {
+					missing = append(missing, iid)
+				}
 			}
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"cursor": cursor, "items": bundles, "missing": missing})
-		return
-	}
-	if op == "summary" {
-		if etagMatches(r.Header.Get("If-None-Match"), `W/"`+cursor+`"`) {
-			w.WriteHeader(http.StatusNotModified)
+			raw, err := p.snapshot.Detail(r.Context(), wanted)
+			if err != nil {
+				reply(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			bundles := map[string]TrackerDetailBundle{}
+			for _, iid := range wanted {
+				if data, ok := raw[iid]; ok {
+					bundles[iid] = TrackerDetailBundle{DetailVersion: p.items[iid].DetailVersion, Data: data}
+				} else {
+					missing = append(missing, iid)
+				}
+			}
+			reply(http.StatusOK, map[string]any{"cursor": cursor, "items": bundles, "missing": missing})
 			return
 		}
-		answer, _ := p.answer("")
-		body, err := json.Marshal(answer)
-		if err != nil {
-			trackerError(w, http.StatusInternalServerError, err.Error())
+		if op == "summary" {
+			if etagMatches(r.Header.Get("If-None-Match"), `W/"`+cursor+`"`) {
+				status = http.StatusNotModified
+				return
+			}
+			answer, _ := p.answer("")
+			reply(http.StatusOK, answer)
 			return
 		}
-		writeTrackerAnswer(w, r, append(body, '\n'), `W/"`+cursor+`"`)
-		return
+		answer, unchanged := p.answer(r.URL.Query().Get("since"))
+		if unchanged {
+			status = http.StatusNotModified
+			return
+		}
+		reply(http.StatusOK, answer)
+	}()
+	for key, values := range header {
+		w.Header()[key] = values
 	}
-	answer, unchanged := p.answer(r.URL.Query().Get("since"))
-	if unchanged {
-		w.WriteHeader(http.StatusNotModified)
-		return
+	w.WriteHeader(status)
+	if len(body) != 0 {
+		_, _ = w.Write(body)
 	}
-	writeJSON(w, http.StatusOK, answer)
 }

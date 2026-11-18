@@ -135,6 +135,41 @@ test('old daemon fallback keeps legacy ETag and missing delta/detail fall back t
   }
 });
 
+test('downgrade keeps unloaded detail gated through delayed and failed legacy reads, then settles all waiters', () => {
+  for (const missing of ['delta', 'detail']) {
+    const h = harness(), c = h.c;
+    c.tkTakeProjection('s', answer());
+    let early = 0, late = 0;
+    c.tkNeedDetails('s', ['a'], () => early++); h.flush();
+    const detailRead = h.requests.shift();
+    if (missing === 'delta') {
+      c.tkLoadView('s', () => {}); h.requests.shift().done(404, {});
+    } else detailRead.done(404, {});
+    const legacy = h.requests.shift();
+    assert(legacy.path.endsWith('/view'));
+    assert.equal(c.tkAdapter.detailReady('s', 'b'), false, 'unloaded item remains gated during downgrade');
+    assert.equal(c.tkAdapter.detail('s', ['b'], () => late++), false);
+    h.flush(); assert.equal(h.requests.length, 0, 'no new missing-route reads during downgrade');
+    if (missing === 'delta') detailRead.done(200, { items: { a: bundle('v1', 'overtaken') } });
+    assert.equal(early, 0, 'in-flight detail cannot settle downgraded model');
+    legacy.done(503, { error: 'legacy busy' });
+    assert.equal(c.tkAdapter.detailReady('s', 'b'), false);
+    assert.equal(c.tkAdapter.detailError('s'), 'legacy busy');
+    assert(c.tkViews.s.projection, 'failed fallback retains safe summary');
+    assert.equal(early + late, 0);
+    c.tkAdapter.detail('s', ['b']); h.flush();
+    assert.equal(h.requests.length, 0, 'failed legacy read does not spin');
+    c.tkAdapter.retryDetail('s', 'b');
+    const retry = h.requests.shift(); assert(retry.path.endsWith('/view'));
+    assert.equal(retry.tag, '', 'summary must not satisfy a legacy 304');
+    retry.done(200, { view: { items: { a: { body: 'full a' }, b: { body: 'full b', attachments: [], thread: [] } } } });
+    assert.equal(c.tkProjections.s, undefined);
+    assert.equal(c.tkAdapter.detailReady('s', 'b'), true);
+    assert.equal(c.tkViews.s.items.b.body, 'full b');
+    assert.equal(early, 1); assert.equal(late, 1);
+  }
+});
+
 test('concurrent reads and hidden-store responses cannot regress or resurrect a model', () => {
   const h = harness(), c = h.c;
   c.tkTakeProjection('s', answer());

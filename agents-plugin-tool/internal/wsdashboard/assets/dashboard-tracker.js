@@ -82,6 +82,11 @@
       tkErrs[id] = null;
       tkAddMarks(id, v.seen && v.seen.badge, v.seen && v.seen.read);
       if (answer) tkAnswers[id] = answer; else delete tkAnswers[id];
+      // Only the installed full view can retire the projection's detail gate.
+      // Waiters added while /view was in flight must also see that full view.
+      var p = tkProjections[id];
+      delete tkProjections[id];
+      if (p) Object.keys(p.waiters).forEach(function (iid) { p.waiters[iid].forEach(function (fn) { fn(); }); });
     }
     tkFetch(tkUrl(id, "view"), undefined, function (status, v, tag, text) {
       if (tkReads[id] !== read) { done(false); return; }
@@ -95,8 +100,9 @@
       }
       if (status === 200 && v.view) take(v, tag ? { tag: tag, text: text } : null);
       else {
-        tkViews[id] = null;
         tkErrs[id] = tkErrText(status, v);
+        if (tkProjections[id]) tkProjections[id].detailError = tkErrs[id];
+        else tkViews[id] = null;
         delete tkAnswers[id];
       }
       done(true);
@@ -186,10 +192,8 @@
     tkDetailWaiters(id, p);
   }
   function tkUseLegacy(id, done) {
-    var waiters = tkProjections[id] && tkProjections[id].waiters || {};
-    tkLegacy[id] = true; delete tkProjections[id]; delete tkAnswers[id];
+    tkLegacy[id] = true; delete tkAnswers[id];
     tkLoadLegacyView(id, function (changed) {
-      if (tkViews[id]) Object.keys(waiters).forEach(function (iid) { waiters[iid].forEach(function (fn) { fn(); }); });
       tkNotify(); if (done) done(changed);
     });
   }
@@ -229,7 +233,7 @@
       if (!p.rows[iid] || tkDetailReady(id, iid)) return;
       ready = false;
       if (done) (p.waiters[iid] || (p.waiters[iid] = [])).push(settled);
-      if (!p.busy[iid] && p.tried[iid] !== p.rows[iid].detailVersion) {
+      if (!tkLegacy[id] && !p.busy[iid] && p.tried[iid] !== p.rows[iid].detailVersion) {
         (tkDetailQueue[id] || (tkDetailQueue[id] = {}))[iid] = true;
       }
     });
@@ -241,13 +245,13 @@
     tkDetailTimer = 0;
     var queue = tkDetailQueue; tkDetailQueue = {};
     Object.keys(queue).forEach(function (id) {
-      var p = tkProjections[id]; if (!p) return;
+      var p = tkProjections[id]; if (!p || tkLegacy[id]) return;
       var ids = Object.keys(queue[id]).filter(function (iid) { return p.rows[iid] && !p.busy[iid] && !tkDetailReady(id, iid); });
       while (ids.length) {
         (function (batch) {
           batch.forEach(function (iid) { p.busy[iid] = true; p.tried[iid] = p.rows[iid].detailVersion; });
           tkFetch(tkUrl(id, 'detail?' + batch.map(function (iid) { return 'id=' + encodeURIComponent(iid); }).join('&')), undefined, function (status, answer) {
-            if (tkProjections[id] !== p) return; // reset/hidden/unregistered while in flight
+            if (tkProjections[id] !== p || tkLegacy[id]) return; // retired or downgrading while in flight
             batch.forEach(function (iid) { delete p.busy[iid]; });
             if (status === 404 || status === 405 || status === 501) { tkUseLegacy(id); return; }
             var mismatch = false;
@@ -372,7 +376,10 @@
     detail: tkNeedDetails,
     detailReady: tkDetailReady,
     detailError: function (id) { var p = tkProjections[id]; return p && p.detailError || ''; },
-    retryDetail: function (id, iid) { var p = tkProjections[id]; if (p) delete p.tried[iid]; tkNeedDetails(id, [iid]); },
+    retryDetail: function (id, iid) {
+      if (tkLegacy[id]) { tkUseLegacy(id); return; }
+      var p = tkProjections[id]; if (p) delete p.tried[iid]; tkNeedDetails(id, [iid]);
+    },
     history: tkHistory,
     retryHistory: function (id) { var p = tkProjections[id]; if (p) delete p.historyAttempt; tkHistory(id); },
     historyError: function (id) { var p = tkProjections[id]; return p && p.historyError || ''; },

@@ -105,7 +105,20 @@ func (p SavedProfiles) LastProfile() (wstracker.Profile, bool) {
 
 // readJSON decodes path into v; a missing file leaves v as it is.
 func readJSON(path string, v any) error {
-	data, err := os.ReadFile(path)
+	data, err := wsstate.ReadFileOnce(path)
+	return decodeLocalJSON(path, data, err, v)
+}
+
+// Registry readers share the existing stat-validated small-file cache. The
+// writer paths below still read under the cross-process root lock. A replaced
+// registration (including its nonce) is never hidden by a process-local memo;
+// recent/coarse-timestamp files retain ReadFileCached's conservative reread.
+func readCachedJSON(path string, v any) error {
+	data, err := wsstate.ReadFileCached(path)
+	return decodeLocalJSON(path, data, err, v)
+}
+
+func decodeLocalJSON(path string, data []byte, err error, v any) error {
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -166,7 +179,7 @@ func (h *Host) withRootLock(fn func() error) error {
 // Stores lists the registered stores in registration order.
 func (h *Host) Stores() ([]StoreEntry, error) {
 	var doc registryDoc
-	if err := readJSON(filepath.Join(h.root, registryFile), &doc); err != nil {
+	if err := readCachedJSON(filepath.Join(h.root, registryFile), &doc); err != nil {
 		return nil, err
 	}
 	return doc.Stores, nil

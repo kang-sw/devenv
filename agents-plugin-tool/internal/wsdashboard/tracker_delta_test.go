@@ -80,6 +80,87 @@ func summaryGet(t *testing.T, d *Daemon, path string) (trackerSummaryAnswer, *ht
 	return answer, r
 }
 
+// Block at a deterministic socket boundary without delaying host work.
+type trackerBlockedWriter struct {
+	*httptest.ResponseRecorder
+	started, release chan struct{}
+	headersOnly      bool
+}
+
+func (w *trackerBlockedWriter) WriteHeader(status int) {
+	if w.headersOnly {
+		close(w.started)
+		<-w.release
+	}
+	w.ResponseRecorder.WriteHeader(status)
+}
+
+func (w *trackerBlockedWriter) Write(body []byte) (int, error) {
+	close(w.started)
+	<-w.release
+	return w.ResponseRecorder.Write(body)
+}
+
+func TestTrackerProjectionSlowSocketDoesNotBlockSameStore(t *testing.T) {
+	for _, op := range []string{"summary", "delta?since=foreign.1", "detail?id=one", "delta?since=current"} {
+		t.Run(op, func(t *testing.T) {
+			f := newProjectionTracker()
+			d := startTrackerDaemon(t, f)
+			first, _ := summaryGet(t, d, "summary")
+			headersOnly := strings.HasSuffix(op, "current")
+			path := strings.ReplaceAll(op, "current", first.Cursor)
+			w := &trackerBlockedWriter{httptest.NewRecorder(), make(chan struct{}), make(chan struct{}), headersOnly}
+			var releaseOnce sync.Once
+			release := func() { releaseOnce.Do(func() { close(w.release) }) }
+			defer release()
+			finished := make(chan struct{})
+			go func() {
+				d.trackerProjectionRead(w, httptest.NewRequest(http.MethodGet, "/"+path, nil), "team", strings.SplitN(op, "?", 2)[0], 1, time.Now())
+				close(finished)
+			}()
+			select {
+			case <-w.started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("first response did not reach socket write")
+			}
+			// Publish a different generation while the first writer is blocked.
+			// This also proves its serialized body is detached from mutable maps.
+			f.setProjection("v2", `{"title":"next"}`, false)
+			next := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				rec := httptest.NewRecorder()
+				d.trackerProjectionRead(rec, httptest.NewRequest(http.MethodGet, "/", nil), "team", "summary", 2, time.Now())
+				next <- rec
+			}()
+			select {
+			case rec := <-next:
+				if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "next") {
+					t.Fatalf("concurrent projection: %d %s", rec.Code, rec.Body.String())
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("same-store projection waited for slow socket")
+			}
+			select {
+			case <-finished:
+				t.Fatal("slow writer unexpectedly finished before release")
+			default:
+			}
+			release()
+			<-finished
+			wantStatus := http.StatusOK
+			if headersOnly {
+				wantStatus = http.StatusNotModified
+			}
+			if w.Code != wantStatus || w.Header().Get("ETag") != `W/"`+first.Cursor+`"` {
+				t.Fatalf("blocked response status/headers changed: %d %v", w.Code, w.Header())
+			}
+			if strings.Contains(w.Body.String(), "next") || strings.Contains(w.Body.String(), "v2") {
+				t.Fatalf("blocked response changed after publication: %s", w.Body.String())
+			}
+		})
+	}
+}
+
 func TestTrackerSummaryDeltaDetailAndLegacyView(t *testing.T) {
 	f := newProjectionTracker()
 	d := startTrackerDaemon(t, f)

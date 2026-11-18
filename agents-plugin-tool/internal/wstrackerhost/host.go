@@ -81,9 +81,10 @@ type Host struct {
 	// reload calls it too. nil when no watch runs.
 	onChange func()
 
-	// seenMu serializes this process's reads and writes of the stores'
-	// ui-seen.json files (seen.go).
+	// seenMu guards the clone-local marks, loaded once per registration.
+	// Only this daemon writes ui-seen.json; writes update this memory copy.
 	seenMu sync.Mutex
+	seen   map[string]seenCache
 
 	// reloads, lateReloads, and lateChanges count ViewWithin's background
 	// reloads (ReloadStats).
