@@ -156,6 +156,27 @@ daemon is fully self-contained.
   schema or authoritative-store format change. The directional reader/writer
   and older-shim evidence is recorded in Phase 1's Result.
 
+- Phase 2 implementation decisions, 2026-11-19: stages live at
+  `<state dir>/hosted-packages/<package>/<sha256>/`; corrupt settled stages
+  fail without overwrite. Production warm staging uses memory only; the
+  explicit dev checkout rehashes its five inputs at each launch so live env
+  and staged manifests cannot disagree.
+- Phase 2 restart record, 2026-11-19: owner-only
+  `last-running-executable.json`, schema 1, holds the retained absolute
+  executable path, version, SHA-256 and build time. Only the singleton owner
+  publishes it at startup. The internal `WS_MCP_HOSTED_PACKAGE=1` marker makes
+  hosted launchers follow healthy daemons and reread that record for a needed
+  restart; no plugin runtime repair/download or mtime-based newest selection.
+  External plugin launchers keep their own runtime selection.
+- Phase 2 compatibility verdict, 2026-11-19: **T0** for the additive restart
+  record, disposable staging and ignored registry; the whole ticket remains
+  **T1** due to Phase 1's served-content change. Directional source evidence
+  and the older-daemon-after-newer-record scenario are in Phase 2's Result.
+- Phase 2 scope check, 2026-11-19: external skill discovery and external
+  connection manifest loading remain outside the phase's hosted-launch and
+  registry removal set. Hosted manifests now read staged build-owned files;
+  external plugin skill/manifest paths are not changed in this run.
+
 ## Constraints
 
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)

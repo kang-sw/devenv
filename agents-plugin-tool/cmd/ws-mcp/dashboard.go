@@ -116,6 +116,7 @@ func dashboardCommand(args []string) {
 		Version:     version,
 		BuildTime:   *buildTime,
 		ContentHash: contentHash,
+		Executable:  exe,
 		LockWait:    *lockWait,
 		Log:         logw,
 		Proxy:       host,
@@ -159,8 +160,7 @@ func dashboardCommand(args []string) {
 		}
 	})
 	wsdashboard.LogDevAssets(logw, devRoot)
-	// Holding the lock, this daemon is the one the staged copies were for;
-	// every copy but its own is unused now.
+	// Settled copies remain available for surviving launchers and rollback.
 	if exe != "" {
 		wsdashboard.PruneStagedExecutables(dir, exe)
 	}

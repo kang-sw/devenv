@@ -23,16 +23,27 @@ var hostedStages = struct {
 
 // StageHosted publishes the build-owned launcher and four manifests under the
 // daemon state directory. Successful same-process calls do zero filesystem I/O.
-// The explicit process dev override participates in the cache identity; edits
-// within the same override require a daemon restart, just like embedded edits.
+// The explicit dev checkout stays live: rehash its five inputs at each launch
+// so staged manifests cannot lag behind the live package environment.
 func StageHosted(name, stateDir string) (string, error) {
-	key := stateDir + "\x00" + name + "\x00" + os.Getenv(EnvDevCheckout)
+	return stageHostedPackage(name, stateDir, os.Getenv(EnvDevCheckout), Open)
+}
+
+func stageHostedPackage(name, stateDir, checkout string, open func(string) (fs.FS, error)) (string, error) {
+	if checkout != "" {
+		source, err := open(name)
+		if err != nil {
+			return "", err
+		}
+		return stageHosted(name, stateDir, source, os.Rename)
+	}
+	key := stateDir + "\x00" + name
 	hostedStages.Lock()
 	defer hostedStages.Unlock()
 	if root := hostedStages.roots[key]; root != "" {
 		return root, nil
 	}
-	source, err := Open(name)
+	source, err := open(name)
 	if err != nil {
 		return "", err
 	}

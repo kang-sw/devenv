@@ -68,6 +68,7 @@ func piLeadLaunch(command string, pre []string, spec StartSpec) (string, []strin
 		spec.Lead.Env["WS_RSRC_ROOT"] = filepath.Join(root, "rsrc")
 		spec.Lead.Env["WS_SKILLS_ROOT"] = filepath.Join(root, "skills")
 		spec.Lead.Env["WS_PI_WORKFLOW_ROOT"] = root
+		spec.Lead.Env["WS_MCP_HOSTED_PACKAGE"] = "1"
 		entries, bundleErr = piBundledEntriesFrom(name)
 	}
 	// PluginWarning holds one value: every warning of this launch is joined

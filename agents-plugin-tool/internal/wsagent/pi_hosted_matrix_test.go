@@ -39,6 +39,9 @@ func TestPiHostedEmbeddedPackageMatrix(t *testing.T) {
 			if err != nil || warning != "" {
 				t.Fatalf("launch: %v %q %v", args, warning, err)
 			}
+			if spec.Lead.Env["WS_MCP_HOSTED_PACKAGE"] != "1" {
+				t.Fatal("native Pi launcher must restart from the retained daemon, not install a plugin runtime")
+			}
 			workflow := spec.Lead.Env["WS_PI_WORKFLOW_ROOT"]
 			if workflow == "" {
 				t.Fatal("missing staged workflow owner")

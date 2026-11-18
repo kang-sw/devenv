@@ -927,6 +927,7 @@ DEFAULT_CACHE_DIR_NAME = "ws@kang-sw-devenv"  # wsstate.defaultCacheDirName
 DAEMON_DIR_NAME = "dashboard"  # wsdashboard.dirName
 DAEMON_ENDPOINT_FILE = "endpoint.json"
 DAEMON_BIN_DIR_NAME = "bin"
+DAEMON_RUNNING_EXECUTABLE_FILE = "last-running-executable.json"
 PROXY_PATH = "/mcp"
 PROXY_UPGRADE = "ws-mcp"
 PROXY_PROTOCOL = 1
@@ -1030,6 +1031,29 @@ def stage_daemon_binary(binary: Path, bin_dir: Path) -> Path:
     if metadata is not None:
         write_runtime_metadata(target, metadata)
     return target
+
+
+def read_running_executable(daemon_dir: Path) -> dict:
+    """Read the last lock-owning daemon's retained build, only for restart.
+
+    Never select by directory order/mtime, and never fall back to a download or
+    a plugin runtime. A replacement updates this record, so a surviving old
+    launcher must reread it at each necessary start.
+    """
+    payload = json.loads((daemon_dir / DAEMON_RUNNING_EXECUTABLE_FILE).read_text(encoding="utf-8"))
+    if (not isinstance(payload, dict) or type(payload.get("schema_version")) is not int
+            or payload["schema_version"] != 1 or not isinstance(payload.get("executable"), str)
+            or not isinstance(payload.get("version"), str) or version_tuple(payload["version"]) is None
+            or not isinstance(payload.get("binary_sha256"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", payload["binary_sha256"]) is None
+            or type(payload.get("build_time")) is not int or payload["build_time"] < 0):
+        raise ValueError("invalid last-running executable record")
+    binary = Path(payload["executable"])
+    expected = daemon_dir / DAEMON_BIN_DIR_NAME / staged_daemon_name(binary, payload["binary_sha256"])
+    if (not binary.is_absolute() or binary.is_symlink() or binary.resolve() != expected.resolve()
+            or not binary.is_file() or sha256_file(binary) != payload["binary_sha256"]):
+        raise ValueError("last-running executable is missing, corrupt or outside the retained bin directory")
+    return payload
 
 
 def parse_daemon_version(value: str) -> tuple[tuple[int, int, int], str] | None:
@@ -1400,6 +1424,7 @@ def pi_daemon_workflow_root(pi: Path) -> Path:
 def daemon_start_env(env: dict, cwd: str) -> dict:
     """Keep hello/caller resources intact; select workflow bytes only for start."""
     out = hello_env(env, cwd)
+    out.pop("WS_MCP_HOSTED_PACKAGE", None)
     rsrc = Path(out.get("WS_RSRC_ROOT", ""))
     pi = rsrc.parent
     # Explicit alternate/invalid roots keep their original meaning. Old Pi
@@ -1603,21 +1628,24 @@ class DaemonLink:
         self.allow_start = allow_start
         self.repair_runtime = repair_runtime
         self.daemon_dir = proxy_daemon_dir(env)
+        self.hosted_package = env.get("WS_MCP_HOSTED_PACKAGE") == "1"
         extra = 10.0 if os_name == "windows" else 5.0
         # Each connection/start attempt is bounded; failed attempts never
         # select another executable server.
         self.answer_budget = extra if answer_budget is None else answer_budget
         self.start_budget = DAEMON_DEFAULT_START_WAIT + extra if start_budget is None else start_budget
-        try:
-            self.build_time = binary.stat().st_mtime_ns // 1_000_000
-        except OSError:
-            self.build_time = 0
+        self.build_time = 0
+        if not self.hosted_package:
+            try:
+                self.build_time = binary.stat().st_mtime_ns // 1_000_000
+            except OSError:
+                pass
         self._content_hash: str | None = None
         self.started = False
         self.start_error = ""
         self.start_output = ""
         self.start_returncode: int | None = None
-        metadata = read_runtime_metadata(binary)
+        metadata = None if self.hosted_package else read_runtime_metadata(binary)
         self.binary_version = metadata["version"] if metadata is not None else runtime_version
         if metadata is None:
             self.build_time = 0
@@ -1679,29 +1707,44 @@ class DaemonLink:
         Equal cores stay regardless of suffix, timestamp or content hash.
         Explicit replacement is handled by daemon-start, not this shortcut.
         """
+        # A hosted launcher follows the running daemon, not the embedded
+        # package's old runtime contract. Only absence authorizes its restart.
+        if self.hosted_package:
+            return False
         version = str(health.get("version", ""))
         return not same_core(version, self.binary_version) and compare_daemon_versions(version, self.binary_version) < 0
 
     def start_daemon(self, lifecycle_argv: list[str] | None = None, *, deadline: float | None = None) -> bool:
         """Run daemon-start while the caller holds the launcher starter lock."""
-        # Healthy peers do not need a local candidate. Repair only when a
-        # start/replacement is actually required, including after reconnect.
-        if self.repair_runtime is not None and not self.repair_runtime():
-            self.start_error = "runtime repair failed; no verified runtime available to start the daemon"
-            return False
-        metadata = read_runtime_metadata(self.binary)
-        if metadata is None:
-            self.start_error = "no verified runtime metadata available to start the daemon"
-            return False
-        self.binary_version = metadata["version"]
-        self.build_time = self.binary.stat().st_mtime_ns // 1_000_000
-        self._content_hash = None
-        try:
-            staged = stage_daemon_binary(self.binary, self.daemon_dir / DAEMON_BIN_DIR_NAME)
-        except OSError as exc:
-            self.start_error = f"staging the daemon binary failed: {exc}"
-            note(self.start_error)
-            return False
+        if self.hosted_package:
+            try:
+                record = read_running_executable(self.daemon_dir)
+            except (OSError, ValueError) as exc:
+                self.start_error = f"hosted daemon restart unavailable: {exc}"
+                note(self.start_error)
+                return False
+            staged = self.binary = Path(record["executable"])
+            self.binary_version = record["version"]
+            self.build_time = record["build_time"]
+            self._content_hash = record["binary_sha256"]
+        else:
+            # External plugins keep their own repair/runtime selection.
+            if self.repair_runtime is not None and not self.repair_runtime():
+                self.start_error = "runtime repair failed; no verified runtime available to start the daemon"
+                return False
+            metadata = read_runtime_metadata(self.binary)
+            if metadata is None:
+                self.start_error = "no verified runtime metadata available to start the daemon"
+                return False
+            self.binary_version = metadata["version"]
+            self.build_time = self.binary.stat().st_mtime_ns // 1_000_000
+            self._content_hash = None
+            try:
+                staged = stage_daemon_binary(self.binary, self.daemon_dir / DAEMON_BIN_DIR_NAME)
+            except OSError as exc:
+                self.start_error = f"staging the daemon binary failed: {exc}"
+                note(self.start_error)
+                return False
         argv = [str(staged), *(lifecycle_argv if lifecycle_argv is not None else ["daemon-start", "--build-time", str(self.build_time)])]
         budget = 2 * DAEMON_DEFAULT_START_WAIT + self.start_budget
         if deadline is not None:
@@ -2229,7 +2272,9 @@ def main() -> int:
     os_name = host_os()
     arch_name = host_arch()
     platform_name = f"{os_name}-{arch_name}"
-    runtime_dir = Path(os.environ.get("WS_MCP_RUNTIME_DIR", str(plugin_dir / ".runtime" / platform_name)))
+    hosted = os.environ.get("WS_MCP_HOSTED_PACKAGE") == "1"
+    runtime_dir = (proxy_daemon_dir(os.environ) / "launcher" if hosted else
+                   Path(os.environ.get("WS_MCP_RUNTIME_DIR", str(plugin_dir / ".runtime" / platform_name))))
     set_breadcrumb_dir(runtime_dir)
     binary_name = runtime_binary_name(contract, contract_path, os_name)
     binary = runtime_dir / binary_name
@@ -2238,9 +2283,9 @@ def main() -> int:
     argv = sys.argv[1:]
     mode = proxy_mode(argv)
     inspection = argv in (["version"], ["runtime", "info"], ["runtime", "capabilities"])
-    bootstrap_forced = bootstrap_runtime_forced()
-    local_enabled = local_devenv_runtime_enabled(plugin_dir, os_name)
-    install_forced = runtime_install_forced(plugin_dir, os_name, local_enabled=local_enabled)
+    bootstrap_forced = not hosted and bootstrap_runtime_forced()
+    local_enabled = not hosted and local_devenv_runtime_enabled(plugin_dir, os_name)
+    install_forced = not hosted and runtime_install_forced(plugin_dir, os_name, local_enabled=local_enabled)
     source_fingerprint = local_devenv_source_fingerprint(plugin_dir, os_name) if local_enabled else None
 
     detect_project_root(plugin_dir)
@@ -2263,7 +2308,11 @@ def main() -> int:
         compare_daemon_versions(str(health["version"]), link.runtime_version) >= 0 or same_core(str(health["version"]), link.runtime_version))
     cli_uses_daemon = mode == "cli" and not inspection
     need_install = False
-    if cli_uses_daemon:
+    if hosted:
+        # Staged packages have no plugin runtime. Restart reads the daemon's
+        # last-running record under starter coordination instead.
+        pass
+    elif cli_uses_daemon:
         # CLI proxies have no repair/start authority even on a cold cache.
         pass
     elif bootstrap_forced:
@@ -2330,9 +2379,10 @@ def main() -> int:
         else:
             print(json.dumps(dict(health, outcome="kept")))
         return 0
-    wait_for_rsrc_tree(plugin_dir)
-    apply_rsrc_root_env(plugin_dir, os.environ)
-    apply_skills_root_env(plugin_dir, os.environ)
+    if not hosted:
+        wait_for_rsrc_tree(plugin_dir)
+        apply_rsrc_root_env(plugin_dir, os.environ)
+        apply_skills_root_env(plugin_dir, os.environ)
     clear_launch_breadcrumb()
     if mode == "mcp":
         return proxy_serve(link, argv, sys.stdin.buffer, sys.stdout.buffer, sys.stderr)

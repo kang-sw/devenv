@@ -150,37 +150,59 @@ func TestHostedStageConcurrentPublicationValidatesWinner(t *testing.T) {
 }
 
 func TestHostedStageWarmCacheDoesNotTouchFilesystem(t *testing.T) {
-	checkout, dir := t.TempDir(), t.TempDir()
-	source := hostedFixture()
-	for _, path := range hostedFiles {
-		dest := filepath.Join(checkout, "agents-plugin", filepath.FromSlash(path))
-		if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
-			t.Fatal(err)
+	dir, source := t.TempDir(), hostedFixture()
+	opens := 0
+	open := func(string) (fs.FS, error) {
+		opens++
+		if opens != 1 {
+			t.Fatal("warm production launch reopened source assets")
 		}
-		if err := os.WriteFile(dest, source[path].Data, 0o600); err != nil {
-			t.Fatal(err)
-		}
+		return source, nil
 	}
-	t.Setenv(EnvDevCheckout, checkout)
-	root, err := StageHosted("ws", dir)
+	root, err := stageHostedPackage("ws", dir, "", open)
 	if err != nil {
 		t.Fatal(err)
 	}
 	checkHostedFiles(t, root, source)
-	// Both the source and destination disappear. A warm call must use only
-	// memory, not reopen source assets, validate the stage or recreate it.
-	if err := os.RemoveAll(checkout); err != nil {
-		t.Fatal(err)
-	}
+	// A warm production call must use only memory, not reopen source assets,
+	// validate the stage or recreate a removed destination.
 	if err := os.RemoveAll(root); err != nil {
 		t.Fatal(err)
 	}
-	again, err := StageHosted("ws", dir)
+	again, err := stageHostedPackage("ws", dir, "", open)
 	if err != nil || again != root {
 		t.Fatalf("warm stage %q %v", again, err)
 	}
 	if _, err := os.Stat(root); !os.IsNotExist(err) {
 		t.Fatal("warm call recreated the stage")
+	}
+}
+
+func TestHostedDevCheckoutEditsTakeEffectAtNextLaunch(t *testing.T) {
+	checkout, dir := t.TempDir(), t.TempDir()
+	for path, file := range hostedFixture() {
+		dest := filepath.Join(checkout, "agents-plugin", filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dest, file.Data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv(EnvDevCheckout, checkout)
+	first, err := StageHosted("ws", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "agents-plugin", "runtime.json"), []byte("live edit"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	next, err := StageHosted("ws", dir)
+	if err != nil || next == first {
+		t.Fatalf("live dev input not restaged: %s %v", next, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(next, "runtime.json")); err != nil || string(data) != "live edit" {
+		t.Fatalf("staged dev input = %q %v", data, err)
 	}
 }
 
