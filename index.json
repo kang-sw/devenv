@@ -498,7 +498,14 @@
       "registered_at": "2026-11-17T09:49:15Z"
     },
     "261117-feat-ws-hosted-prompt-assembly": {
-      "registered_at": "2026-11-17T09:48:35Z"
+      "registered_at": "2026-11-17T09:48:35Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "9091c57d68d03c76",
+        "track": "track/agent-v2",
+        "phase": "active",
+        "touched_at": "2026-11-18T04:53:01Z"
+      }
     },
     "261117-feat-ws-mailbox-memory-first-store": {
       "registered_at": "2026-11-17T08:21:40Z",
