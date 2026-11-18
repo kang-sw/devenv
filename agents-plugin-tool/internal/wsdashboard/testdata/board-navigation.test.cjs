@@ -142,6 +142,17 @@ test('direct Overview target selection applies before landing on its fresh ident
   assert.deepEqual(events, ['apply', 'scroll:topic-aa', 'focus:topic-aa']);
 });
 
+for (const overview of [false, true]) test('pull-in-place button applies without home navigation; overview=' + overview, () => {
+  const { context, events } = environment(true);
+  context.st = context.window.wbPill;
+  context.st.home = () => { throw Error('pull must not navigate home'); };
+  context.window.WsOverview = { holding: () => overview, after: () => { throw Error('refused pull must leave the pill alone'); } };
+  vm.runInContext(func(readAssetSource('wswhiteboard', 'pill.js'), 'click'), context);
+  context.click('top')({ target: { closest: selector => selector === '.oq-pull' ? {} : null } });
+  assert.deepEqual(events, overview ? [] : ['apply'], 'no scroll, focus jump, or home navigation');
+  assert.equal(context.window.wbPill.pending, overview ? 1 : 0);
+});
+
 test('pill segment rematerializes an applied history target rather than scrolling a detached node', () => {
   const { context, nodes, events } = environment(true);
   const old = { id: 'item-44', isConnected: true };

@@ -485,6 +485,7 @@
   "js.board.filter.closed": "종료",
   "js.board.filter.cards": "카드",
   "js.board.hold.pill": "보드 업데이트",
+  "js.board.hold.pull": "제자리에서 변경 받아오기",
   "js.board.hold.pill.title": "맨 위로",
   "js.board.hold.moved": "이동됨 ↑",
   "js.board.hold.closed": "닫힘",

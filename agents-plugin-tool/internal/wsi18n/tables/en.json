@@ -485,6 +485,7 @@
   "js.board.filter.closed": "Closed",
   "js.board.filter.cards": "Cards",
   "js.board.hold.pill": "Board updates",
+  "js.board.hold.pull": "Pull changes in place",
   "js.board.hold.pill.title": "Back to top",
   "js.board.hold.moved": "moved ↑",
   "js.board.hold.closed": "closed",

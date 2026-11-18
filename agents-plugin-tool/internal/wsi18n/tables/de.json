@@ -485,6 +485,7 @@
   "js.board.filter.closed": "Geschlossen",
   "js.board.filter.cards": "Karten",
   "js.board.hold.pill": "Board-Updates",
+  "js.board.hold.pull": "Änderungen an Ort und Stelle übernehmen",
   "js.board.hold.pill.title": "Nach oben",
   "js.board.hold.moved": "verschoben ↑",
   "js.board.hold.closed": "geschlossen",

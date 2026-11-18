@@ -485,6 +485,7 @@
   "js.board.filter.closed": "已关闭",
   "js.board.filter.cards": "卡片",
   "js.board.hold.pill": "看板更新",
+  "js.board.hold.pull": "在当前位置应用更改",
   "js.board.hold.pill.title": "返回顶部",
   "js.board.hold.moved": "已移动 ↑",
   "js.board.hold.closed": "已关闭",

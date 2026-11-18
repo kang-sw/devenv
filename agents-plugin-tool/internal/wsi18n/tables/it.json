@@ -485,6 +485,7 @@
   "js.board.filter.closed": "Chiusi",
   "js.board.filter.cards": "Schede",
   "js.board.hold.pill": "Aggiornamenti bacheca",
+  "js.board.hold.pull": "Applica le modifiche senza scorrere",
   "js.board.hold.pill.title": "Torna in alto",
   "js.board.hold.moved": "spostato ↑",
   "js.board.hold.closed": "chiuso",
