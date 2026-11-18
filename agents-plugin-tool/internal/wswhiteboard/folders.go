@@ -961,8 +961,16 @@ func (f FolderStore) replay(intent *folderIntent) error {
 	if !exists && intent.BaseGeneration != 0 || exists && current.Generation != intent.BaseGeneration && current.Generation != intent.Session.Generation {
 		return fmt.Errorf("whiteboard: pending generation does not follow committed metadata")
 	}
-	if exists && current.Generation == intent.Session.Generation && !bytes.Equal(folderJSON(current), folderJSON(intent.Session)) {
-		return fmt.Errorf("whiteboard: pending metadata conflicts with committed generation")
+	if exists && current.Generation == intent.Session.Generation {
+		// v0.50.7 can publish this intent, dropping LoadedAt from meta,
+		// then stop before removing pending. Reconcile only that missing,
+		// recoverable field; every other same-generation conflict still fails.
+		if current.State.LoadedAt == "" {
+			current.State.LoadedAt = intent.Session.State.LoadedAt
+		}
+		if !bytes.Equal(folderJSON(current), folderJSON(intent.Session)) {
+			return fmt.Errorf("whiteboard: pending metadata conflicts with committed generation")
+		}
 	}
 	for _, w := range intent.Panels {
 		if !folderIntentPath(w.Path, "panel") {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -182,4 +183,71 @@ func TestArchiveLoadFloorCapturedAfterLockWait(t *testing.T) {
 		t.Fatalf("LoadedAt = %q, want locked swap time %q", got.LoadedAt, want)
 	}
 	assertOldAnswerExcluded(t, got, answerAt)
+}
+
+func TestArchiveLoadFloorInterruptedOldReplay(t *testing.T) {
+	root := t.TempDir()
+	source := archiveSource(t, filepath.Join(root, "source"))
+	data, err := source.ExportArchive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	zipPath := writeArchive(t, filepath.Join(root, "b.zip"), data)
+	for _, conflict := range []string{"none", "sequence", "nonempty load time"} {
+		t.Run(conflict, func(t *testing.T) {
+			dest := archiveDestination(t, filepath.Join(t.TempDir(), "dest"))
+			dest.Fault = func(stage string) error {
+				if stage == "cleanup" {
+					return folderCrash
+				}
+				return nil
+			}
+			if _, _, err := dest.LoadArchive(zipPath, archiveNow); !errors.Is(err, folderCrash) {
+				t.Fatalf("load = %v", err)
+			}
+			dest.Fault = nil
+			// Exactly v0.50.7 replay stopping between meta/receipt publication
+			// and pending removal: same generation, field lost only in meta,
+			// pending still carries LoadedAt and the exact floor-log append.
+			rewriteWithoutLoadTime(t, dest.Dir)
+			var meta folderSession
+			var pending folderIntent
+			if ok, err := folderDecode(filepath.Join(dest.Dir, "pending.json"), &pending); err != nil || !ok {
+				t.Fatalf("pending = %v, %v", ok, err)
+			}
+			if _, err := folderDecode(filepath.Join(dest.Dir, "meta.json"), &meta); err != nil {
+				t.Fatal(err)
+			}
+			if meta.Generation != pending.Session.Generation || meta.State.LoadedAt != "" || pending.Session.State.LoadedAt == "" {
+				t.Fatal("fixture did not reproduce interrupted old replay")
+			}
+			switch conflict {
+			case "sequence":
+				meta.State.Seq++
+			case "nonempty load time":
+				meta.State.LoadedAt = archiveNow.Add(-time.Hour).UTC().Format(reaskLayout)
+			}
+			if err := os.WriteFile(filepath.Join(dest.Dir, "meta.json"), folderJSON(meta), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			got, err := dest.Open(nil)
+			if conflict != "none" {
+				if err == nil || !strings.Contains(err.Error(), "pending metadata conflicts") {
+					t.Fatalf("unrelated conflict was not refused: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			at, err := time.Parse(time.RFC3339Nano, pending.Session.State.LoadedAt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertOldAnswerExcluded(t, got, at.UnixMilli()-1)
+			if _, err := os.Stat(filepath.Join(dest.Dir, "pending.json")); !os.IsNotExist(err) {
+				t.Fatalf("recovery left pending: %v", err)
+			}
+		})
+	}
 }
