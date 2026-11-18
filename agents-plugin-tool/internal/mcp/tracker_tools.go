@@ -127,10 +127,9 @@ var trackerEventAttrs = []string{"origin"}
 
 // trackerEventSpec is an event command: scoped, so it sits in the batch's
 // tk:store group, which names its store. Its body (an item body, a comment,
-// or a note) is shown as plain text, never as raw HTML, and matched against
-// nothing, so an escaped body is decoded like the attributes.
+// or a note) decodes like every command body (package wsxmlcmd).
 func trackerEventSpec(kind wsxmlcmd.Kind, attrs ...string) wsxmlcmd.Spec {
-	return wsxmlcmd.Spec{Kind: kind, Attrs: append(append([]string{}, trackerEventAttrs...), attrs...), DecodeBody: true, Scoped: true}
+	return wsxmlcmd.Spec{Kind: kind, Attrs: append(append([]string{}, trackerEventAttrs...), attrs...), Scoped: true}
 }
 
 // trackerCommands is the command table, keyed by name without the prefix:

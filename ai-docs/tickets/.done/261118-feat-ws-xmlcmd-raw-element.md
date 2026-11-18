@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: f721956f2aa46e67
 sage-review-completeness-reviewed: f721956f2aa46e67
+completed: 2026-11-18
 ---
 
 # 명령 문자열을 표준 XML로: raw 요소와 본문 엔티티 디코딩 통일
@@ -264,3 +265,46 @@ Acceptance (behavior tests in `wsxmlcmd` plus one end-to-end case each for
 
 Verification: `go test ./...` in `agents-plugin-tool` on w5090; regenerate
 rsrc only if a rsrc file changed.
+
+### Result (55fb1b81a) - 2026-11-18
+
+- `wsxmlcmd`: `<prefix:raw>` is a third `bodySegment` kind beside text and
+  CDATA. One probe, `verbatimEnd`, recognizes CDATA or raw for every scanner:
+  `readContent` (rejected-group and wrapper paths included), the literal-code
+  fast-path check, `firstBodyClose` (now a tokenizer method),
+  `literalOperandCrossing`, and the wrapper-tail walk. The raw tags come from
+  `Grammar.Prefix` (`rawTags` on the tokenizer). `joinBody` decodes every
+  text segment and never trims inside a raw segment at an edge. An unclosed
+  raw element fails like unclosed CDATA. `skipUnknown` ends a refused
+  `<prefix:raw>` at its first close in both readers.
+- `Spec.DecodeBody` and `Spec.DecodeFields` are removed, with their call
+  sites in `wswhiteboard/commands.go` and `mcp/tracker_tools.go`. The
+  package, `commands.go`, and tracker comments now state the new grammar.
+  Crossing guidance names `<prefix:raw>...</prefix:raw>` instead of CDATA.
+- Tests:
+  - New behavior tests in `wsxmlcmd`, plus `wb:` end-to-end tests in
+    `commands_test.go`: raw panel, raw markers, mixed body, escaped text in
+    panel/log/item/answer/`wb:old`/`wb:new`, old-style input, unclosed raw,
+    and the playbook's indented `## Commands` example.
+  - One `tk:` end-to-end case in `tracker_tools_test.go`.
+  - Tests that pinned the old exemptions now expect decoded text.
+  - The literal oracles and fuzz generators treat raw like CDATA. The v0.50
+    differential (I1) also excludes inputs with `&` or `<wb:raw>`.
+  - The historical-writer harness strips the archived `DecodeFields` option
+    after hash verification.
+- No rsrc change: `command-syntax.md` already matches the parser.
+- Verification on w5090:
+  - Final full run, `go test -count=1 ./internal/wsxmlcmd
+    ./internal/wswhiteboard ./internal/mcp ./internal/wsrsrc`: wsxmlcmd,
+    mcp, and wsrsrc ok.
+  - `./internal/wswhiteboard`: every test passes except
+    `TestTopicStateBadge*`, which fails for the environment ("node required";
+    w5090 has no Node).
+- Decisions:
+  - An empty raw segment at a body edge still counts as edge content, so the
+    text beside it keeps its newline. This is an unpinned degenerate case,
+    raised as a minor finding by the lite review.
+  - The playbook example applies only once its `wb:change` operand names text
+    from the payload: `lands first` appears only in the recap. The test
+    applies a copy with the operand corrected. The playbook text was left
+    as is.

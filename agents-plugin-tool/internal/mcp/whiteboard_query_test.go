@@ -44,7 +44,8 @@ func TestWhiteboardQueryFreshSessionConversionAndRecoverySmoke(t *testing.T) {
 			}
 
 			const payload = "\n<svg><text>payload &amp; exact</text></svg>\n\n"
-			f.update(t, `<wb:topic name="`+topic+`"><wb:panel recap="smoke panel">`+"\n"+payload+"\n"+`</wb:panel><wb:log>current agent line</wb:log><wb:add class="policy"><wb:title>new question</wb:title><wb:option>Yes</wb:option><wb:option>No</wb:option></wb:add></wb:topic><wb:answer id="43" value="a">owner exact words</wb:answer>`)
+			const rawPayload = "<wb:raw>" + payload + "</wb:raw>"
+			f.update(t, `<wb:topic name="`+topic+`"><wb:panel recap="smoke panel">`+"\n"+rawPayload+"\n"+`</wb:panel><wb:log>current agent line</wb:log><wb:add class="policy"><wb:title>new question</wb:title><wb:option>Yes</wb:option><wb:option>No</wb:option></wb:add></wb:topic><wb:answer id="43" value="a">owner exact words</wb:answer>`)
 			rec, err := f.s.sessions.readWhiteboard(f.key)
 			if err != nil {
 				t.Fatal(err)
@@ -84,7 +85,7 @@ func TestWhiteboardQueryFreshSessionConversionAndRecoverySmoke(t *testing.T) {
 			}
 
 			// Payload retrieval supports full repost, not a panel-targeted edit.
-			f.update(t, `<wb:topic name="`+topic+`"><wb:panel id="p3" recap="full repost">`+"\n"+payload+"\n"+`</wb:panel></wb:topic>`)
+			f.update(t, `<wb:topic name="`+topic+`"><wb:panel id="p3" recap="full repost">`+"\n"+rawPayload+"\n"+`</wb:panel></wb:topic>`)
 			page := string(readFileForTest(t, f.pagePath()))
 			if !strings.Contains(page, "full repost") || !strings.Contains(page, "current agent line") {
 				t.Fatal("committed state did not render")

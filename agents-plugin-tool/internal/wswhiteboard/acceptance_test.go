@@ -232,7 +232,7 @@ func TestCommandAcceptanceParserPayloadsAndScopes(t *testing.T) {
 			break
 		}
 	}
-	if s.PanelCounter != 3 || s.TopicLabel("g") != "Title & More" || payload != "\t<div>raw &amp; <wb:like>HTML</wb:like></div>\nown </wb:panel> closing text" {
+	if s.PanelCounter != 3 || s.TopicLabel("g") != "Title & More" || payload != "\t<div>raw & <wb:like>HTML</wb:like></div>\nown </wb:panel> closing text" {
 		t.Fatal("corrected source payload changed", s.Topics[1])
 	}
 	// A recoverable parse error is local even without failed metadata.
@@ -455,7 +455,7 @@ func TestPolicyCommentLifecycleBookkeepingAndViews(t *testing.T) {
 	comment := `<wb:answer id="1" value="" assumed="true">  note &amp; <b>literal</b>  </wb:answer>`
 	out := mustApply(t, s, comment)
 	it := item(t, s, 1)
-	if it.Status != StatusCommented || it.Answer != "" || it.AnswerQuote != "  note &amp; <b>literal</b>  " || it.AnsweredAt == "" || it.Changed != s.Seq || it.ChangedAt == "" || it.Settled != 1 || s.AnswerSeq != s.Seq || s.OpenAskCount() != 0 || IsSettled(it.Status) {
+	if it.Status != StatusCommented || it.Answer != "" || it.AnswerQuote != "  note & <b>literal</b>  " || it.AnsweredAt == "" || it.Changed != s.Seq || it.ChangedAt == "" || it.Settled != 1 || s.AnswerSeq != s.Seq || s.OpenAskCount() != 0 || IsSettled(it.Status) {
 		t.Fatalf("comment mapping: %+v %+v", it, s)
 	}
 	if strings.Contains(fmt.Sprint(out.Summaries), "answered") || !strings.Contains(fmt.Sprint(out.Summaries), "commented 1") {

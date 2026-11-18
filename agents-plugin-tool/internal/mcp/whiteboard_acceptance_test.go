@@ -74,7 +74,7 @@ func TestWhiteboardCommandAcceptanceFirstTextRetryAndSequence(t *testing.T) {
 	if retried.Counter != after.Counter || retried.PanelCounter != after.PanelCounter || publications != 3 {
 		t.Fatal("corrected retry duplicated accepted work")
 	}
-	if retried.Items[0].Rationale != "  full rationale & text  " || !strings.Contains(retried.TopicBody("t"), "  full &amp; <b>replacement</b>  ") {
+	if retried.Items[0].Rationale != "  full rationale & text  " || !strings.Contains(retried.TopicBody("t"), "  full & <b>replacement</b>  ") {
 		t.Fatal("retry lost raw fields/body")
 	}
 	// Refusals (including an unpartitionable valid prefix) preserve all bytes,
