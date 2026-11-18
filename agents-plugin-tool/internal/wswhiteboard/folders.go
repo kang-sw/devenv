@@ -420,6 +420,13 @@ func (f FolderStore) load(legacy *State) (*State, *folderSession, error) {
 		if err != nil {
 			return nil, nil, err
 		}
+		loadedAt, _, err := f.loadFloor(meta.Generation)
+		if err != nil {
+			return nil, nil, err
+		}
+		if loadedAt != "" {
+			state.LoadedAt = loadedAt
+		}
 		state.MetadataRevision = max(state.MetadataRevision, revision.MetadataRevision)
 		if revision.StaleNudgeRevision != "" {
 			state.StaleNudgeRevision = revision.StaleNudgeRevision
@@ -1073,7 +1080,8 @@ func (f FolderStore) append(a folderAppend) error {
 	}
 	rest := a.Data[int(written):]
 	// Splitting deliberately exposes the real partial-append recovery path.
-	if len(rest) > 1 {
+	// The load-only recovery record has a one-write budget.
+	if len(rest) > 1 && a.Path != folderLoadFloorLog {
 		half := len(rest) / 2
 		if _, err := file.Write(rest[:half]); err != nil {
 			return err
