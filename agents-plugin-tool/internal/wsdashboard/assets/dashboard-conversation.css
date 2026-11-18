@@ -244,7 +244,7 @@ button.sbadge[aria-expanded="true"] { box-shadow: inset 0 0 0 1.5px var(--wb-pri
 button.sbadge:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 2px; }
 .sbadge .sword { font-size: 11px; font-weight: 600; color: var(--wb-muted-fg); }
 .sbadge.idle { color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-muted-fg) 35%, transparent), var(--wb-shadow-hi); }
-.sbadge.idle .spin { display: none; }
+.sbadge.idle .spin, .sbadge.idle .sword { display: none; }
 /* The island overlays the conversation grid cell, not its scrolling content. */
 .dgrid.live > .agisland { grid-area: convo; position: relative; z-index: var(--z-popovers); align-self: start; justify-self: end; margin: 8px; min-width: 0; max-width: calc(100% - 16px); overflow: hidden; box-sizing: border-box; background: var(--wb-card); color: var(--wb-fg); border-radius: 16px; box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); transition: width .2s ease, height .2s ease, border-radius .2s ease; }
 .dgrid.live > .agisland[hidden] { display: none !important; }
@@ -261,6 +261,7 @@ button.sbadge:focus-visible { outline: 1.5px solid var(--wb-primary); outline-of
 .agcompact { width: var(--ag-cw, 320px); padding: 7px 12px 6px; }
 .agcompact .agrow { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto auto; align-items: center; gap: 7px; height: 23px; }
 .agcompact .agmark { display: grid; place-items: center; color: var(--wb-primary); }
+.agcompact .pibadge { padding: 2px 4px; border: 0; border-radius: 4px; background: #3d2f6b; color: #ddd3fb; font-size: 9.5px; }
 .agcompact .agname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
 .agcompact .phase { height: 18px; padding: 0 7px; font-size: 10.5px; }
 .agcompact .agelapsed { min-width: 42px; text-align: right; color: var(--wb-muted-fg); font-size: 11px; font-variant-numeric: tabular-nums; }
