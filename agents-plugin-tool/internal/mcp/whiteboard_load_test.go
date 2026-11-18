@@ -37,6 +37,9 @@ func TestWhiteboardLoadReplacesTheCallersBoard(t *testing.T) {
 	if q := toolText(t, f.call(t, "whiteboard.query", map[string]any{"session_key": other})); !strings.Contains(q, "handoff") {
 		t.Fatalf("loaded board query = %s", q)
 	}
+	if v, ok := f.s.sessions.getOverride(other, "workflow.whiteboard_enabled.claude"); !ok || v != "on" {
+		t.Fatalf("the load did not turn the session's board knob on: %q, %v", v, ok)
+	}
 	dir := filepath.Join(f.root, filepath.FromSlash(whiteboardDirRel), wsmailbox.ReplyID(other))
 	if _, err := os.Stat(filepath.Join(dir, "index.html")); err != nil {
 		t.Fatalf("the load did not render the page: %v", err)

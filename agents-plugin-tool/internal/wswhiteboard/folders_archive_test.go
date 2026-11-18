@@ -328,3 +328,54 @@ func TestArchiveLoadRefusalsLeaveTheDestination(t *testing.T) {
 		t.Fatal("a missing zip loaded")
 	}
 }
+
+// A replace that stops after its commit leaves the replaced board's topic
+// folders behind; they are no board's, so the next export and backup leave
+// them out.
+func TestArchiveLeavesOutUnreferencedTopicFolders(t *testing.T) {
+	root := t.TempDir()
+	source := archiveSource(t, filepath.Join(root, "source"))
+	data, err := source.ExportArchive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	zipPath := writeArchive(t, filepath.Join(root, "b.zip"), data)
+	dest := archiveDestination(t, filepath.Join(root, "dest"))
+	crashing := dest
+	crashing.Fault = func(stage string) error {
+		if stage == "complete" {
+			return folderCrash
+		}
+		return nil
+	}
+	if _, _, err := crashing.LoadArchive(zipPath, archiveNow); !errors.Is(err, folderCrash) {
+		t.Fatalf("LoadArchive = %v, want the injected crash", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest.Dir, "t1")); err != nil {
+		t.Fatalf("fixture must leave the old t1 behind: %v", err)
+	}
+	var meta folderSession
+	if _, err := folderDecode(filepath.Join(dest.Dir, "meta.json"), &meta); err != nil {
+		t.Fatal(err)
+	}
+	held := map[string]bool{folderRevisionDir: true}
+	for _, ref := range meta.Topics {
+		held[ref.Dir] = true
+	}
+	export, err := dest.ExportArchive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name := range unzip(t, export) {
+		if top, _, nested := strings.Cut(name, "/"); nested && !held[top] {
+			t.Errorf("export carries unreferenced %s", name)
+		}
+	}
+	backup, _, err := dest.LoadArchive(zipPath, archiveNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(backup, "t1")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("backup carries the unreferenced t1: %v", err)
+	}
+}

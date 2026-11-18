@@ -22,11 +22,12 @@ import (
 )
 
 // Zip-bomb guard for a loaded archive. The largest real board measured held
-// about 420 files and 9 MB; these caps stay two orders of magnitude above it.
+// about 420 files and 9 MB; these caps stay an order of magnitude or more
+// above it, while bounding what the daemon holds in memory for one load.
 // Variables only so tests can lower them.
 var (
 	archiveMaxEntries       = 50000
-	archiveMaxBytes   int64 = 512 << 20
+	archiveMaxBytes   int64 = 128 << 20
 )
 
 // present reports whether the folder holds any root authority file, without
@@ -56,14 +57,14 @@ func (f FolderStore) ExportArchive() ([]byte, error) {
 	}
 	var buf bytes.Buffer
 	err := f.withLock(false, func() error {
-		state, _, err := f.load(nil)
+		state, meta, err := f.load(nil)
 		if err != nil {
 			return err
 		}
 		if state == nil {
 			return os.ErrNotExist
 		}
-		files, err := f.boardFiles()
+		files, err := f.boardFiles(meta)
 		if err != nil {
 			return err
 		}
@@ -89,24 +90,31 @@ func (f FolderStore) ExportArchive() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// boardFiles lists the folder's regular files as slash paths, without the
-// lock file, a pending intent, or dot-named temp files. The caller holds the
-// lock: on Windows the held .lock cannot be read through a second handle.
-func (f FolderStore) boardFiles() ([]string, error) {
+// boardFiles lists the board's regular files as slash paths: the root files
+// and the topic folders meta references, plus the revision receipts. It
+// leaves out the lock file, a pending intent, dot-named temp files, and
+// unreferenced topic folders (a replaced board's, when their removal failed),
+// so they never travel or get backed up. The caller holds the lock: on
+// Windows the held .lock cannot be read through a second handle.
+func (f FolderStore) boardFiles(meta *folderSession) ([]string, error) {
+	held := map[string]bool{folderRevisionDir: true}
+	for _, ref := range meta.Topics {
+		held[ref.Dir] = true
+	}
 	var out []string
 	err := filepath.WalkDir(f.Dir, func(p string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
-		}
-		if entry.IsDir() || !entry.Type().IsRegular() || strings.HasPrefix(entry.Name(), ".") {
-			return nil
 		}
 		rel, err := filepath.Rel(f.Dir, p)
 		if err != nil {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
-		if rel == "pending.json" {
+		if top, _, nested := strings.Cut(rel, "/"); entry.IsDir() && rel != "." && !nested && !held[top] {
+			return fs.SkipDir
+		}
+		if entry.IsDir() || !entry.Type().IsRegular() || strings.HasPrefix(entry.Name(), ".") || rel == "pending.json" {
 			return nil
 		}
 		out = append(out, rel)
@@ -120,7 +128,9 @@ func (f FolderStore) boardFiles() ([]string, error) {
 // pending replay, consistency checks) before the destination is touched, so
 // a refused archive leaves the destination as it was and creates no backup.
 // The render bookkeeping (embed folder, embeds, last embed sequence) is
-// cleared; every other value, the ID counters included, stays as loaded.
+// cleared; every other value, the ID counters included, stays as loaded,
+// except the revision receipts (metadata and stale-nudge revisions), which
+// the destination's receipt floors because viewers compare them.
 // backup is the folder now holding the previous board ("" when there was
 // none), named <dir>.bak-<YYMMDD_hhmm> in now's time zone, with -2, -3, ... on
 // a collision.
@@ -236,7 +246,7 @@ func (f FolderStore) replace(next *State, backupBase string) (backup string, top
 			return err
 		}
 		if meta != nil {
-			if backup, err = f.backupTo(backupBase); err != nil {
+			if backup, err = f.backupTo(backupBase, meta); err != nil {
 				return err
 			}
 		}
@@ -266,8 +276,8 @@ func (f FolderStore) replace(next *State, backupBase string) (backup string, top
 // backupTo copies the board's files (boardFiles' set) to a new folder named
 // base, or base-2, base-3, ... when taken. An existing backup is never
 // overwritten. Called under the board lock.
-func (f FolderStore) backupTo(base string) (string, error) {
-	files, err := f.boardFiles()
+func (f FolderStore) backupTo(base string, meta *folderSession) (string, error) {
+	files, err := f.boardFiles(meta)
 	if err != nil {
 		return "", err
 	}
