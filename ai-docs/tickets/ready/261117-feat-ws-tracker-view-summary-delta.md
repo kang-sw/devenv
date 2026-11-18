@@ -324,6 +324,94 @@ conventions were read instead.
   the fixture correction resolves the two reported failures; the lead's
   rerun remains outstanding.
 
+#### Edition (6f8c528c0) - 2026-11-18
+
+**Verification status update — VERIFIED (lead-provided results):** this
+Edition supersedes the historical Go-test/benchmark **UNRUN** statements and
+pending rerun in the frozen Result and earlier Edition. At `6f8c528c0`, the
+lead reports PASS for the full `internal/wstracker` package,
+`internal/wsdashboard -run Tracker`, and `cmd/ws-mcp -run Tracker`, including
+resolution of the two feed-fixture failures. The earlier lead-reported
+build/vet and scoped wstracker race passes were at `dff9e8dfb`; they are not
+claimed as newly rerun at this revision. This worker ran no Go commands.
+
+**Measurement provenance — VERIFIED (lead-provided):** benchmarks ran on the
+Mac lead host, **Apple M3 Max, darwin/arm64, `-benchtime=1x` — NOT w5090**.
+These are single-iteration observations, not statistical estimates or a
+projection of owner-PC/antivirus performance. They do not satisfy the
+Constraint's specifically named w5090-host measurement. The handler fixture
+uses an in-memory source; times/bytes exclude real ledger/git I/O, socket
+latency and browser rendering. MB/KB below retain the lead's reported units.
+
+**VERIFIED (lead-provided): `BenchmarkTrackerIncrementalMillion`**, synthetic
+million-event stores; seconds/op, before zero-fold + view versus after
+checkpoint + view, with the visible-children index in `6f8c528c0`:
+
+| Items | Arrival | Before (s/op) | After (s/op) |
+|---|---|---:|---:|
+| 10k | tail append | 24.08 | 1.30 |
+| 10k | near-tail remote | 25.95 | 1.30 |
+| 10k | far-back remote | 25.93 | 25.10 |
+| 30k | tail append | 15.01 | 3.90 |
+| 30k | near-tail remote | 14.24 | 3.56 |
+| 30k | far-back remote | 15.42 | 13.75 |
+
+**VERIFIED (lead-provided historical comparison):** before the children index,
+`8ee9ed984` after/checkpoint + view tail rows were 4.41 s at 10k and 40.00 s
+at 30k; the 30k before/zero-fold + view row was 48.0 s. The lead's profile
+identified the pre-existing `subtasks` scan over every item for each item as
+O(items²). Commit `6f8c528c0` replaces that repeated scan with one per-view
+parent-to-visible-children index, retaining fold order and hidden filtering.
+These historical rows and the table above are separate 1x runs.
+
+**VERIFIED (lead-provided): `BenchmarkTrackerColdMillion`**, pre-index run,
+seconds/op. Cold fold has no view stage, so these rows do not measure the
+children-index change:
+
+| Items | Before zero fold (s/op) | After checkpoint cold fold (s/op) |
+|---|---:|---:|
+| 10k | 23.59 | 24.20 |
+| 30k | 11.33 | 12.79 |
+
+**VERIFIED (lead-provided): `BenchmarkDashboardTrackerProjectionMillion`**,
+authenticated handler time and response-body size:
+
+| Items | Arrival | Route/path | Time (s/op) | Response body |
+|---|---|---|---:|---:|
+| 10k | tail append | before zero-fold view | 28.77 | 422.4 MB |
+| 10k | tail append | checkpoint view | 4.73 | 422.4 MB |
+| 10k | tail append | summary | 5.65 | 33.7 MB |
+| 10k | tail append | delta | 5.55 | 759 KB |
+| 10k | far-back remote | delta | 28.75 | 3.6 KB |
+| 30k | tail append | before zero-fold view | 19.30 | 495.8 MB |
+| 30k | tail append | checkpoint view | 8.33 | 495.8 MB |
+| 30k | tail append | summary | 9.41 | 67.6 MB |
+| 30k | tail append | delta | 9.15 | 2.36 MB |
+| 30k | far-back remote | delta | 19.69 | 2.5 KB |
+
+**Forward — remaining work, not implemented in this Edition:**
+
+1. **VERIFIED (source and read-only size reconstruction; lead confirms the
+   payload diagnosis):** `globals.my` is replaced wholesale when
+   `my.assignments` / `my.today.work` reorder. Those two complete fallback-ID
+   arrays account for approximately all tail-delta bytes: reconstructed
+   755,578 bytes at 10k and 2,355,578 bytes at 30k. A tail status changes the
+   first item's rank from blocked to doing; a far-back status loses to later
+   writes, leaving these arrays unchanged. This is an **O(N) payload-scaling
+   gap**, a Phase 2/follow-up candidate, not extra changed-item rows or detail
+   payload leakage (`agents-plugin-tool/cmd/ws-mcp/tracker_projection.go:132`,
+   `agents-plugin-tool/internal/wstracker/view.go:1214-1219`,
+   `agents-plugin-tool/internal/wsdashboard/tracker_delta.go:202`).
+2. **INFERRED (lead's remaining-cost assessment):** per-change server work
+   still includes full view derivation and summary projection across the
+   items, **O(items)** work that the checkpoint does not remove. The
+   checkpoint saves prefix verdict checks/folding, not these full-view
+   stages. Further server-time reduction remains a follow-up candidate.
+3. **UNMEASURED:** browser render time remains a Phase 2 verification gate.
+   No page/fallback/detail-ordering implementation or Phase 2 plan change is
+   included here. w5090-specific measurements and peak-memory measurement
+   also remain outstanding; the Mac results above are not substitutes.
+
 ### Phase 2: Page on summary and deltas
 
 Switch the tracker page, handles and feed to the summary plus deltas with a
