@@ -205,6 +205,31 @@ func TestCloseReleasesThePort(t *testing.T) {
 	}
 }
 
+// BeforeUnlock (the mailbox export for a previous version) runs while the
+// lock is still held, so no successor serves during it; the lock is free
+// once Close returns.
+func TestCloseRunsBeforeUnlockWhileTheLockIsHeld(t *testing.T) {
+	dir := t.TempDir()
+	var ran bool
+	var lockedErr error
+	d, err := StartDaemon(DaemonOptions{Dir: dir, Version: "1.0.0", LockWait: 100 * time.Millisecond, BeforeUnlock: func() {
+		ran = true
+		_, lockedErr = StartDaemon(DaemonOptions{Dir: dir, Version: "1.0.0", LockWait: 50 * time.Millisecond})
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	waitDone(t, d)
+	if !ran {
+		t.Fatal("BeforeUnlock did not run")
+	}
+	if !errors.Is(lockedErr, ErrLocked) {
+		t.Fatalf("a start inside BeforeUnlock err = %v, want ErrLocked", lockedErr)
+	}
+	startTestDaemon(t, dir, "1.0.0")
+}
+
 func TestTakenPortFallsBackToAnOSAssignedPort(t *testing.T) {
 	busy, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

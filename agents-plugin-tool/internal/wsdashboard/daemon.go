@@ -88,6 +88,11 @@ type DaemonOptions struct {
 		Start()
 		Close()
 	}
+	// BeforeUnlock runs in Close after the daemon has stopped serving and
+	// before the cache-root lock is released, so work a successor must not
+	// overlap (the mailbox export for a previous version) finishes while
+	// the lock is still held. Nil runs nothing.
+	BeforeUnlock func()
 	// Tracker is the tracker host the tracker routes serve (tracker_routes.go);
 	// nil serves no tracker route and sends no tracker stream event.
 	Tracker TrackerHost
@@ -288,6 +293,8 @@ type Daemon struct {
 	hireInLoop bool // guarded by hireMu
 	hireWake   chan struct{}
 	hireDone   chan struct{}
+	// beforeUnlock is DaemonOptions.BeforeUnlock.
+	beforeUnlock func()
 	// files caches each session root's file list for the files route
 	// (files_route.go).
 	files *fileListCache
@@ -401,6 +408,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		log:             logw,
 		agents:          opts.Agents,
 		leadNudges:      opts.LeadNudges,
+		beforeUnlock:    opts.BeforeUnlock,
 		mailWake:        opts.MailWake,
 		tracker:         opts.Tracker,
 		broker:          newBroker(stats),
@@ -734,6 +742,9 @@ func (d *Daemon) Close() {
 			d.holders.Close()
 		}
 		d.foreign.close()
+		if d.beforeUnlock != nil {
+			d.beforeUnlock()
+		}
 		removeEndpointIfOwned(d.dir, d.endpoint.Token)
 		_ = d.lock.Unlock()
 		fmt.Fprintf(d.log, "dashboard: stopped (pid %d)\n", d.endpoint.PID)

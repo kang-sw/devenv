@@ -85,6 +85,9 @@ func dashboardCommand(args []string) {
 	// StartDaemon starts the runner before it returns the daemon, so the
 	// runner's tracker-changed callback is bound once the daemon exists.
 	var trackerChanged lateFunc
+	// Bound once the mailbox sweep runs; Close calls it before releasing
+	// the dashboard lock.
+	var exportMailbox lateFunc
 	// The holders a predecessor left running are found in the state
 	// directory; the interpreter for a new one is the launcher's own. The
 	// runner takes the manager first: it rejoins its lead sessions'
@@ -127,6 +130,7 @@ func dashboardCommand(args []string) {
 		Tracker:        &dashboardTracker{h: tracker, err: trackerErr, unregistered: func() { support.CloseUnregistered() }},
 		Holders:        holders,
 		Support:        support,
+		BeforeUnlock:   exportMailbox.call,
 	})
 	if errors.Is(err, wsdashboard.ErrLocked) {
 		closeTracker()
@@ -144,6 +148,16 @@ func dashboardCommand(args []string) {
 		fmt.Fprintf(logw, "dashboard: mailbox store: %v\n", err)
 	}
 	stopMailboxSweep := startMailboxSweep(logw)
+	// The export for a previous version runs under the dashboard lock: an
+	// older daemon that takes the lock after it never has its own mail
+	// overwritten by it. The sweep stops first, so it makes no store call
+	// once the persistent mode is off.
+	exportMailbox.set(func() {
+		stopMailboxSweep()
+		if err := wsmailbox.ClosePersistent(); err != nil {
+			fmt.Fprintf(logw, "dashboard: mailbox store close: %v\n", err)
+		}
+	})
 	wsdashboard.LogDevAssets(logw, devRoot)
 	// Holding the lock, this daemon is the one the staged copies were for;
 	// every copy but its own is unused now.
@@ -171,10 +185,10 @@ func dashboardCommand(args []string) {
 		daemon.Close()
 	case <-daemon.Done():
 	}
+	// Close already exported the mailbox under the lock; this is the
+	// fallback for a Close that ran before the export was bound, and a
+	// no-op after it (stopMailboxSweep and ClosePersistent are idempotent).
 	stopMailboxSweep()
-	// Export the mailbox for a previous version and release the ring for
-	// the successor before lingering on hosted calls; one that still runs
-	// goes on transient.
 	if err := wsmailbox.ClosePersistent(); err != nil {
 		fmt.Fprintf(logw, "dashboard: mailbox store close: %v\n", err)
 	}
