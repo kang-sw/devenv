@@ -92,9 +92,6 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, p
       notify('Cannot determine daemon core from REST health; keeping the current connection. Update the plugin before retrying.');
       return running.url;
     }
-    // A compatible Windows daemon is already sufficient for startup. Only
-    // the explicit Replace action may stage or spawn a same-minor successor.
-    if (platform === 'win32' && !replace && sameMinorCandidate(selected.metadata.version, running.health.version)) return running.url;
     if (relation < 0 || relation === 0 && !replace) return running.url;
     // Current REST does not enumerate connected hello versions/protocols. A
     // cross-minor swap would strand unknown clients, even when requested.
@@ -124,9 +121,11 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, p
     if (platform === 'win32') {
       // Go prestart Ensure holds launcher-start.lock and repeats the LAN,
       // compatibility and numeric-core guards at its fresh REST observation.
+      // An automatic newer-patch upgrade omits --replace so Ensure still
+      // keeps an equal core that raced in; only the explicit action swaps one.
       try {
         await (deps.launch || launch)(staged.binary, options,
-          ['daemon-start', '--require-independent-lifetime', '--start-wait', '13s', '--replace'], true);
+          ['daemon-start', '--require-independent-lifetime', '--start-wait', '13s', ...(replace ? ['--replace'] : [])], true);
       } catch (error) {
         let still;
         try { still = await find(root); } catch { /* A late failure can leave no daemon. */ }

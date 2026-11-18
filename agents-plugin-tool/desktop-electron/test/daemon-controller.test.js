@@ -95,31 +95,61 @@ test('approved OS-accepted macOS creation precedes drain without claiming lock r
   assert.equal(await connectDaemon({ ...config(f), replace: true }, deps), URL);
   assert.deepEqual(order, ['created', 'drained']);
 });
-test('Windows ordinary startup attaches an older compatible patch without staging or spawning; explicit Replace still works', async t => {
-  const f = fixture(t, 'win32');
-  let live = { pid: 120, version: '0.50.0', started_at: 'incumbent', lan: true };
-  const incumbent = { ...live };
-  let stages = 0, launches = 0;
-  const deps = { env: env(f),
+test('Windows ordinary startup upgrades an older same-minor patch through the strict starter; equal, older-bundle and cross-minor attach', async t => {
+  const f = fixture(t, 'win32'); // Bundled core 0.50.1 (-dev suffix).
+  let live, stages = 0, launches = [], notices = [];
+  const deps = { env: env(f), onNotice: s => notices.push(s),
     inspect: async () => ({ url: URL, endpoint: { pid: live.pid, port: 32000 }, health: { ...live } }),
     stage: (...args) => { stages++; return require('../daemon-stage').stageDaemon(...args); },
-    shutdown: () => assert.fail('Windows native starter owns explicit drain'),
-    launch: async (_binary, _options, args, wait) => {
-      launches++;
-      assert.deepEqual(args, ['daemon-start', '--require-independent-lifetime', '--start-wait', '13s', '--replace']);
+    shutdown: () => assert.fail('Windows native starter owns drain'),
+    launch: async (_binary, opts, args, wait) => {
+      launches.push(args);
       assert.equal(wait, true);
-      live = { ...live, pid: 121, version: '0.50.1', started_at: 'explicit successor' };
+      assert(opts.cwd.startsWith(path.join(f.userData, 'daemon-stages')));
+      live = { ...live, pid: live.pid + 1, version: '0.50.1-dev', started_at: 'successor' };
     } };
   const options = { ...config(f), platform: 'win32' };
-  assert.equal(await connectDaemon(options, deps), URL);
-  assert.equal(stages, 0);
-  assert.equal(launches, 0);
-  assert.deepEqual(live, incumbent);
+  const attaches = async (version, notice) => {
+    live = { pid: 120, version, started_at: 'incumbent', lan: true };
+    const incumbent = { ...live }, before = notices.length;
+    assert.equal(await connectDaemon(options, deps), URL);
+    assert.deepEqual(live, incumbent, version);
+    assert.equal(stages, 0, version);
+    assert.equal(launches.length, 0, version);
+    if (notice) assert.match(notices.at(-1), notice);
+    else assert.equal(notices.length, before, version);
+  };
+  await attaches('0.50.1-dev');
+  await attaches('0.50.1');
+  await attaches('0.50.4');
+  await attaches('0.51.0');
+  await attaches('0.49.9', /attached client versions are unknown.*update connected plugins/i);
   assert.equal(fs.existsSync(path.join(f.userData, 'daemon-stages')), false);
-  assert.equal(await connectDaemon({ ...options, replace: true }, deps), URL);
+  live = { pid: 120, version: '0.50.0', started_at: 'incumbent', lan: true };
+  assert.equal(await connectDaemon(options, deps), URL);
   assert.equal(stages, 1);
-  assert.equal(launches, 1);
+  assert.deepEqual(launches, [['daemon-start', '--require-independent-lifetime', '--start-wait', '13s']],
+    'automatic upgrade leaves Ensure keeping an equal core that raced in');
   assert.equal(live.pid, 121);
+  assert.equal(await connectDaemon(options, deps), URL);
+  assert.equal(launches.length, 1, 'the upgraded equal core stays');
+  assert.equal(await connectDaemon({ ...options, replace: true }, deps), URL);
+  assert.equal(stages, 2);
+  assert.deepEqual(launches.at(-1), ['daemon-start', '--require-independent-lifetime', '--start-wait', '13s', '--replace']);
+  assert.equal(live.pid, 122);
+  assert.equal(notices.length, 1);
+});
+test('Windows ordinary startup keeps the incumbent when the strict starter refuses an automatic upgrade', async t => {
+  const f = fixture(t, 'win32');
+  const live = { pid: 120, version: '0.50.0', started_at: 'incumbent', lan: true };
+  let notice, launches = 0;
+  const deps = { env: env(f), onNotice: s => { notice = s; },
+    inspect: async () => ({ url: URL, endpoint: { pid: live.pid, port: 32000 }, health: { ...live } }),
+    shutdown: () => assert.fail('Windows native starter owns drain'),
+    launch: async (_binary, _opts, args) => { launches++; assert(!args.includes('--replace')); } };
+  assert.equal(await connectDaemon({ ...config(f), platform: 'win32' }, deps), URL);
+  assert.equal(launches, 1);
+  assert.match(notice, /refused by the starter; keeping the current connection/);
 });
 test('Windows strict starter attaches a newer cross-minor winner without a second spawn or drain', async t => {
   const f = fixture(t, 'win32');
