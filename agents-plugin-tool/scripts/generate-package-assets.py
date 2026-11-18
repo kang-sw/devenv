@@ -16,6 +16,8 @@ PACKAGES = {"ws": "agents-plugin", "wsflow": "agents-plugin-wsflow"}
 TREES = ("rsrc", "skills")
 FILES = ("runtime.json", "config-manifest.json", "dashboard-config-manifest.json",
          ".claude-plugin/plugin.json", "bin/ws-mcp-launcher.py")
+# Retain this small generated index in Git: a placeholder-only Go build can
+# still resolve an explicit dev checkout without embedding a second asset tree.
 PLACEHOLDER = "PLACEHOLDER"
 
 
@@ -40,7 +42,7 @@ def package_files(repo):
     # Checkout ancestors may be platform aliases (/var on macOS). Reject
     # symlinks within selected package paths, not outside the checkout.
     repo = repo.resolve()
-    result = {}
+    result = {PLACEHOLDER: (json.dumps(PACKAGES, sort_keys=True, separators=(",", ":")) + "\n").encode()}
     for product, folder in PACKAGES.items():
         root = repo / folder
         for name in FILES + (("bin/ws-pi-payload.py",) if product == "ws" else ()):
@@ -72,7 +74,7 @@ def generate(repo, output, check=False):
         for path in output.rglob("*"):
             if path.is_symlink():
                 actual[path.relative_to(output).as_posix()] = None
-            elif path.is_file() and path.relative_to(output).as_posix() != PLACEHOLDER:
+            elif path.is_file():
                 actual[path.relative_to(output).as_posix()] = path.read_bytes()
     drift = sorted(name for name in expected.keys() | actual.keys()
                    if name not in expected or name not in actual or expected[name] != actual[name])

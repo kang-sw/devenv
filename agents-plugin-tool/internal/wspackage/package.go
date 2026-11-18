@@ -3,6 +3,7 @@ package wspackage
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
@@ -21,14 +22,28 @@ var assets embed.FS
 var logged sync.Map
 
 func packageDir(name string) (string, error) {
-	switch name {
-	case "ws":
-		return "agents-plugin", nil
-	case "wsflow":
-		return "agents-plugin-wsflow", nil
-	default:
-		return "", fmt.Errorf("unknown workflow package %q (expected ws or wsflow)", name)
+	return packageDirIn(assets, name)
+}
+
+func packageDirIn(source fs.FS, name string) (string, error) {
+	// The generator owns this small index as well as the full asset set. Its
+	// retained placeholder lets a bare build resolve the explicit dev override.
+	data, err := fs.ReadFile(source, "generated/PLACEHOLDER")
+	if err != nil {
+		return "", fmt.Errorf("embedded workflow package index unavailable; regenerate package assets and rebuild: %w", err)
 	}
+	var directories map[string]string
+	if err := json.Unmarshal(data, &directories); err != nil {
+		return "", fmt.Errorf("invalid embedded workflow package index: %w", err)
+	}
+	dir, ok := directories[name]
+	if !ok {
+		return "", fmt.Errorf("unknown workflow package %q", name)
+	}
+	if name == "." || !fs.ValidPath(name) || dir == "." || !fs.ValidPath(dir) {
+		return "", fmt.Errorf("invalid workflow package index entry %q", name)
+	}
+	return dir, nil
 }
 
 // Open returns a package-root FS, using only the explicit process dev override
@@ -61,7 +76,7 @@ func Embedded(name string) (fs.FS, error) {
 }
 
 func embedded(source fs.FS, name string) (fs.FS, error) {
-	if _, err := packageDir(name); err != nil {
+	if _, err := packageDirIn(source, name); err != nil {
 		return nil, err
 	}
 	if _, err := fs.Stat(source, "generated/inventory.json"); err != nil {

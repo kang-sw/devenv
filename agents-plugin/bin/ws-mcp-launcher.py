@@ -696,9 +696,6 @@ def build_local_devenv_runtime(runtime_dir: Path, binary: Path, contract: dict, 
             return True
         note(f"local devenv build failed or produced incompatible runtime: exit={proc.returncode}")
         return False
-    except (OSError, ValueError, subprocess.SubprocessError) as exc:
-        note(f"local devenv generation/build failed: {exc}")
-        return False
     finally:
         tmp.unlink(missing_ok=True)
         runtime_metadata_path(tmp).unlink(missing_ok=True)

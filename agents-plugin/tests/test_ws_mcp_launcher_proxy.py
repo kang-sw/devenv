@@ -1025,7 +1025,11 @@ class LauncherProxyTest(unittest.TestCase):
             for name, process in processes.items():
                 if allow_build and name == "run":
                     self.assertTrue(process.called)
-                    self.assertEqual([call.args[0][0] for call in process.call_args_list], [sys.executable, "fake-go"])
+                    commands = [call.args[0][0] for call in process.call_args_list]
+                    self.assertGreaterEqual(len(commands), 2)
+                    self.assertEqual(len(commands) % 2, 0)
+                    self.assertEqual(commands[::2], [sys.executable] * (len(commands) // 2))
+                    self.assertEqual(commands[1::2], ["fake-go"] * (len(commands) // 2))
                     for call in process.call_args_list:
                         self.assertEqual(call.kwargs["timeout"], self.launcher.RUNTIME_BUILD_TIMEOUT)
                 elif allow_lifecycle and name == "run":

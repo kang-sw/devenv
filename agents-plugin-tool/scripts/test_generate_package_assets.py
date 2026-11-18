@@ -1,4 +1,6 @@
+import hashlib
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -64,6 +66,25 @@ class GenerationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.generate(check=True)
                 self.generate()
+                self.generate(check=True)
+
+    def test_package_mapping_is_generated_and_drift_checked(self):
+        self.generate()
+        index = self.output / generator.PLACEHOLDER
+        self.assertEqual(json.loads(index.read_bytes()), generator.PACKAGES)
+        inventory = json.loads((self.output / 'inventory.json').read_bytes())
+        self.assertEqual(inventory['files'][generator.PLACEHOLDER], hashlib.sha256(index.read_bytes()).hexdigest())
+        # Move canonical input without changing any package bytes: only the
+        # generated directory mapping (and its inventory hash) should drift.
+        (self.repo / 'agents-plugin').rename(self.repo / 'relocated-workflow')
+        with mock.patch.dict(generator.PACKAGES, {'ws': 'relocated-workflow'}):
+            with self.assertRaisesRegex(ValueError, 'PLACEHOLDER'):
+                self.generate(check=True)
+            self.generate()
+            self.generate(check=True)
+            self.assertEqual(json.loads(index.read_bytes())['ws'], 'relocated-workflow')
+            index.write_bytes(b'{}')
+            with self.assertRaisesRegex(ValueError, 'PLACEHOLDER'):
                 self.generate(check=True)
 
     def test_deterministic_no_rewrites_selection_and_junk(self):
@@ -163,8 +184,9 @@ class GenerationTests(unittest.TestCase):
         self.assertTrue(events[0][1].endswith('generate-package-assets.py'))
         self.assertEqual(events[1][1], 'build')
         with mock.patch.object(launcher.subprocess, 'run', side_effect=subprocess.CalledProcessError(1, 'generator')) as run:
-            self.assertFalse(launcher.build_local_devenv_runtime(runtime, runtime / 'ws-mcp', {},
-                {'tool_dir': self.repo / 'agents-plugin-tool', 'go': self.repo / 'go'}, 'linux'))
+            with self.assertRaises(subprocess.CalledProcessError):
+                launcher.build_local_devenv_runtime(runtime, runtime / 'ws-mcp', {},
+                    {'tool_dir': self.repo / 'agents-plugin-tool', 'go': self.repo / 'go'}, 'linux')
         self.assertEqual(run.call_count, 1, 'generation failure must prevent Go compilation')
 
 

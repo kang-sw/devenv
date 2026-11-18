@@ -1,2 +1,1 @@
-Build inputs are generated here by scripts/generate-package-assets.py.
-This placeholder permits a bare Go compile, not production resource reads.
+{"ws":"agents-plugin","wsflow":"agents-plugin-wsflow"}
