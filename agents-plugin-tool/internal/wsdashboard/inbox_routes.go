@@ -300,9 +300,11 @@ func (d *Daemon) lockBoardIncarnation(replyID string, token *string) (func(), bo
 	if !found {
 		return nil, false
 	}
-	if session.Agent || !session.HasBoard {
+	if session.Agent {
 		return func() {}, true
 	}
+	// HasBoard is presentation state and may lag a rendered/replaced board.
+	// Tagged board-bearing input must consult the live incarnation gate.
 	source, supported := d.source.(BoardInputSource)
 	if !supported {
 		return nil, false

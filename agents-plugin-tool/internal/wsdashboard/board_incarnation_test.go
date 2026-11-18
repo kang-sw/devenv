@@ -16,7 +16,16 @@ import (
 
 type incarnationSource struct {
 	SessionSource
-	folder wswhiteboard.FolderStore
+	folder   wswhiteboard.FolderStore
+	indexLag bool
+}
+
+func (s incarnationSource) ReadSession(reg Registration) (SessionData, bool, error) {
+	data, ok, err := s.SessionSource.ReadSession(reg)
+	if s.indexLag {
+		data.HasBoard = false // render remains current while the index lags
+	}
+	return data, ok, err
 }
 
 func (s incarnationSource) LockBoardIncarnation(_ Registration, token string) (func(), bool) {
@@ -28,6 +37,15 @@ func (s incarnationSource) ReadPage(reg Registration) (PageContent, bool, error)
 }
 
 func TestBoardIncarnationSendAdmission(t *testing.T) {
+	testBoardIncarnationSendAdmission(t, false)
+}
+
+func TestBoardIncarnationSendAdmissionWithIndexLag(t *testing.T) {
+	testBoardIncarnationSendAdmission(t, true)
+}
+
+func testBoardIncarnationSendAdmission(t *testing.T, indexLag bool) {
+	t.Helper()
 	root := t.TempDir()
 	board := func(dir string) wswhiteboard.FolderStore {
 		t.Helper()
@@ -58,7 +76,7 @@ func TestBoardIncarnationSendAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := startPageFixture(t, func(o *DaemonOptions) {
-		o.Sessions = incarnationSource{SessionSource: o.Sessions, folder: dest}
+		o.Sessions = incarnationSource{SessionSource: o.Sessions, folder: dest, indexLag: indexLag}
 	})
 	dir := sessionInbox(f.dir, "livesession")
 	send := func(token *string) int {
@@ -94,6 +112,9 @@ func TestBoardIncarnationSendAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if session, ok := f.d.index.Session("livesession"); !ok || session.HasBoard == indexLag {
+		t.Fatalf("fixture did not establish index lag=%v: %+v, %v", indexLag, session, ok)
+	}
 	// Refusal does not even touch the inbox or board files.
 	before := wsstate.FileIOCounters()["file_io_total"]
 	if got := send(&old.LoadedAt); got != http.StatusConflict {
@@ -117,8 +138,16 @@ func TestBoardIncarnationSendAdmission(t *testing.T) {
 	if !strings.Contains(html, `data-board-incarnation="`+current.LoadedAt+`"`) {
 		t.Fatal("rendered page omitted the board incarnation")
 	}
+	wantHeld := 3
+	if indexLag {
+		status, answer := f.d.messageWrite(dir, "livesession", []byte(`{"text":"plain untagged during index lag"}`), true, time.Now())
+		if status != http.StatusOK {
+			t.Fatalf("plain untagged send during index lag = %d, %v", status, answer)
+		}
+		wantHeld++
+	}
 	held, err := wsinbox.Held(dir)
-	if err != nil || len(held) != 3 {
+	if err != nil || len(held) != wantHeld {
 		t.Fatalf("held = %d, %v; stale sends must record nothing", len(held), err)
 	}
 	code, _, refusal = postJSON(t, f.base+"/s/livesession/steer", f.base, fmt.Sprintf(`{"id":%q,"boardIncarnation":%q}`, held[0].ID(), old.LoadedAt))
