@@ -41,14 +41,10 @@ import (
 // of backend runs.
 func AgentWorkerProfile(backend string) string { return "agent-worker-" + backend }
 
-// agentWorkerBackends are the backends with an agent-worker profile: the
-// worker role. A registered backend outside it is lead-only and its tiers
-// are not spawnable.
-var agentWorkerBackends = map[string]bool{BackendClaude: true, BackendPi: true}
-
 func isAgentWorkerProfile(name string) bool {
-	backend, ok := strings.CutPrefix(name, "agent-worker-")
-	return ok && agentWorkerBackends[backend]
+	// Reserve the internal namespace even for an unregistered backend:
+	// compatibility spawn paths must never bypass agent.spawn admission.
+	return strings.HasPrefix(name, "agent-worker-")
 }
 
 // RemovesSubagents reports whether rec's launches remove the harness's
@@ -240,7 +236,7 @@ func (r *Runner) spawnableHarness(harness string) string {
 	if !ok || reg.Backend == nil {
 		return fmt.Sprintf("harness %q is not registered in this daemon", harness)
 	}
-	if !agentWorkerBackends[harness] {
+	if !reg.WorkerCapable || reg.WorkerProfile == "" {
 		return fmt.Sprintf("harness %q is registered for hosted leads only, not for spawned workers", harness)
 	}
 	if ok, why := supportBackendAvailability(harness, reg.Backend); !ok {
@@ -257,8 +253,8 @@ func (r *Runner) spawnableHarness(harness string) string {
 // workerHarnesses are the registered worker-role backends, sorted.
 func (r *Runner) workerHarnesses() []string {
 	var out []string
-	for name := range r.opts.Backends {
-		if agentWorkerBackends[name] {
+	for name, reg := range r.opts.Backends {
+		if reg.WorkerCapable && reg.WorkerProfile != "" {
 			out = append(out, name)
 		}
 	}
@@ -583,7 +579,7 @@ func (r *Runner) AgentSpawn(caller AgentCaller, req AgentSpawnRequest) (AgentSpa
 	}
 	parent := caller.Parent
 	st, err := r.Spawn(SpawnSpec{
-		Profile:      AgentWorkerProfile(harness),
+		Profile:      r.opts.Backends[harness].WorkerProfile,
 		Root:         root,
 		Cwd:          cwd,
 		Model:        mapping.Model,

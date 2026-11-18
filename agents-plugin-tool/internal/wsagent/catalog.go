@@ -397,14 +397,15 @@ func ClaudeCatalog() *HarnessProfile {
 	}
 }
 
-// AgyCatalog is what the ws adapter delivers for an Antigravity (agy) lead:
-// every entry is lead-only, because agy has no agent-worker profile. The
-// guaranteed range runs over the versions the recorded ACP sessions report
+// AgyCatalog is what the ws adapter delivers for Antigravity's default
+// agent. Leads and workers share ACP controls; workers auto-allow approvals
+// and cannot remove native subagent tools. The guaranteed range runs over
+// the versions the recorded ACP sessions report
 // (testdata/agy-*.jsonl, agentInfo.version: the lead session's is 1.5.10,
 // the handshake's 1.5.9); the mapper's HarnessReport
 // (agyMapper.initialized) demotes what a session's shape lacks.
 func AgyCatalog() *HarnessProfile {
-	return &HarnessProfile{
+	p := &HarnessProfile{
 		Oldest: "1.5.9",
 		Newest: "1.5.10",
 		Entries: []CapabilityEntry{
@@ -437,4 +438,13 @@ func AgyCatalog() *HarnessProfile {
 				Source: "agy pushes usage_update after each model call; nothing is asked (agyMapper.update)"},
 		},
 	}
+	for _, entry := range slices.Clone(p.Entries) {
+		entry.Role = RoleWorker
+		if entry.Item == ItemApproval {
+			entry.Grade = GradeSubstitute
+			entry.Source = "worker requests are auto-allowed through AnswerApproval by the registration's WorkerAutoApprove posture"
+		}
+		p.Entries = append(p.Entries, entry)
+	}
+	return p
 }

@@ -19,9 +19,9 @@ import (
 )
 
 // agy.go is the Antigravity backend: `agy acp`, the Agent Client Protocol
-// (v1: JSON-RPC 2.0 over stdio, one message per line). It serves a hosted
-// lead only; agy has no agent-worker profile, so no agy tier is spawnable
-// (agentWorkerBackends).
+// (v1: JSON-RPC 2.0 over stdio, one message per line). Hosted leads run
+// under a holder; workers are daemon-owned processes using the default
+// agent with their instructions appended to its system prompt.
 //
 // The wire facts it relies on are pinned by agy_fixture_test.go against
 // the recorded agy-<version>-*.jsonl fixtures:
@@ -130,38 +130,47 @@ func agyEnv(spec StartSpec) []string {
 // session/resume with the ws MCP server, then the conversation's model,
 // effort and mode.
 func (b AgyBackend) Start(ctx context.Context, spec StartSpec) (Process, error) {
-	if spec.Lead == nil || spec.Holder == nil {
-		return nil, errors.New("agy backend: agy runs hosted lead sessions only")
+	if spec.Lead != nil && spec.Holder == nil {
+		return nil, errors.New("agy backend: a hosted lead requires a session holder")
 	}
-	attach := spec.Holder.id != ""
+	if spec.Lead == nil && spec.Holder != nil {
+		return nil, errors.New("agy backend: workers are not holder-held")
+	}
+	attach := spec.Holder != nil && spec.Holder.id != ""
 	if !attach && spec.MCPSession == nil {
-		return nil, errors.New("agy backend: an agy lead reaches ws tools only over the daemon's HTTP MCP route, and none is available; no lead was started without ws tools")
+		return nil, errors.New("agy backend: agy reaches ws tools only over the daemon's HTTP MCP route, and none is available; no process was started without ws tools")
 	}
 	command, pre, err := harnessCommand(b.Command, "agy")
 	if err != nil {
 		return nil, fmt.Errorf("agy backend: %w", err)
 	}
-	// A rejoin attaches to the running process; startChild ignores cmd.
+	// Both roles use the user's agy home and default agent. A rejoin
+	// attaches to the running process; startChild ignores cmd.
 	cmd := exec.Command(command, append(pre, "acp", "--process-per-session")...)
 	cmd.Dir = spec.workDir()
 	cmd.Env = agyEnv(spec)
-	spec.Holder.ringSkip = agyRingSkip
+	if spec.Holder != nil {
+		spec.Holder.ringSkip = agyRingSkip
+	}
 	m := newAgyMapper(spec.SessionID)
 	sp, err := startChild(spec, cmd, m, agyProtocol{})
 	if err != nil {
 		return nil, err
 	}
-	p := &agyProcess{streamProcess: sp, m: m, epoch: strconv.FormatInt(time.Now().UnixNano(), 36)}
+	p := &agyProcess{streamProcess: sp, m: m, worker: spec.Lead == nil, epoch: strconv.FormatInt(time.Now().UnixNano(), 36)}
 	holder, pid, _ := sp.HolderInfo()
+	if cmd.Process != nil {
+		pid = cmd.Process.Pid
+	}
 	if s := spec.MCPSession; s != nil && s.Started != nil {
 		s.Started(cmd.Env, pid)
 	}
 	if attach {
 		return p, nil
 	}
-	// agy connects ws-mcp inside its session request, and ws-mcp takes
-	// the session as hosted only once the registration names this process.
-	if spec.Lead.Spawned != nil {
+	// agy connects ws-mcp inside its session request. A lead's row must
+	// name this process first; a worker has no hosted-lead registration.
+	if spec.Lead != nil && spec.Lead.Spawned != nil {
 		spec.Lead.Spawned(holder, pid)
 	}
 	if err := p.open(spec); err != nil {
@@ -212,6 +221,8 @@ type agyProcess struct {
 	seq   atomic.Int64
 	// effort is the thought level the conversation asked for last.
 	effort atomic.Pointer[string]
+	model  atomic.Pointer[string]
+	worker bool
 }
 
 func (p *agyProcess) processControls() processControls {
@@ -229,11 +240,15 @@ func (p *agyProcess) call(kind, method string, params map[string]any, timeout ti
 
 // open runs a new process's handshake.
 func (p *agyProcess) open(spec StartSpec) error {
+	version := ""
+	if spec.Lead != nil {
+		version = spec.Lead.DaemonVersion
+	}
 	init, err := p.call(agyKindInit, "initialize", map[string]any{
 		"protocolVersion": 1,
 		// Without fs or terminal capabilities agy runs its own tools.
 		"clientCapabilities": map[string]any{"fs": map[string]any{"readTextFile": false, "writeTextFile": false}, "terminal": false},
-		"clientInfo":         map[string]any{"name": "ws", "title": "ws", "version": spec.Lead.DaemonVersion},
+		"clientInfo":         map[string]any{"name": "ws", "title": "ws", "version": version},
 	}, agyInitTimeout)
 	if err != nil {
 		return fmt.Errorf("initialize: %w", err)
@@ -266,22 +281,27 @@ func (p *agyProcess) open(spec StartSpec) error {
 		case <-p.exited:
 			return errors.New("agy exited while it opened its session")
 		case <-time.After(agyMCPConnectWait):
-			return fmt.Errorf("agy did not reach the ws MCP route within %s of opening its session (a refused token only hides the ws tools), so the lead was not started without them", agyMCPConnectWait)
+			return fmt.Errorf("agy did not reach the ws MCP route within %s of opening its session (a refused token only hides the ws tools), so the process was not started without them", agyMCPConnectWait)
 		}
+	}
+	if spec.Effort != "" {
+		p.effort.Store(&spec.Effort)
 	}
 	if spec.Model != "" {
 		if err := p.SetModel(spec.Model); err != nil {
 			return fmt.Errorf("model: %w", err)
 		}
 	}
-	if spec.Effort != "" {
+	if spec.Model == "" && spec.Effort != "" {
 		if err := p.SetEffort(spec.Effort); err != nil {
 			return fmt.Errorf("effort: %w", err)
 		}
 	}
-	if mode := spec.Lead.PermissionMode; mode != "" && mode != p.m.mode() {
-		if err := p.SetPermissionMode(mode); err != nil {
-			return fmt.Errorf("permission mode: %w", err)
+	if spec.Lead != nil {
+		if mode := spec.Lead.PermissionMode; mode != "" && mode != p.m.mode() {
+			if err := p.SetPermissionMode(mode); err != nil {
+				return fmt.Errorf("permission mode: %w", err)
+			}
 		}
 	}
 	return nil
@@ -334,28 +354,100 @@ func (p *agyProcess) SetModel(model string) error {
 	if model == "" {
 		return ErrUnsupported
 	}
-	if err := p.setConfig("model", model); err != nil {
+	base, suffix := agyBaseModel(model)
+	if suffix != "" && p.effort.Load() == nil {
+		p.effort.Store(&suffix)
+	}
+	if !p.m.offersValue("model", base) {
+		if p.effort.Load() == nil {
+			if level := p.m.defaultModelEffort(base); level != "" {
+				p.effort.Store(&level)
+			}
+		}
+		if effort := p.effort.Load(); effort != nil {
+			if ok, err := p.setModelVariant(base, *effort); ok || err != nil {
+				if err == nil {
+					p.model.Store(&base)
+				}
+				return err
+			}
+		}
+	}
+	if err := p.setConfig("model", base); err != nil {
 		return err
 	}
+	p.model.Store(&base)
 	if effort := p.effort.Load(); effort != nil && *effort != "" {
 		return p.SetEffort(*effort)
 	}
 	return nil
 }
 
-// SetEffort sets the session's thought level. Only some models offer one
-// (agy drops the option for the others), and a level the current model
-// does not take is kept for the next model that does rather than refused,
-// so a start or a switch never fails on it.
+// SetEffort uses thought_level when offered, otherwise a suffixed model id.
+// A worker fails rather than silently running at another tier's effort. A
+// lead keeps an unavailable effort for its next model, as before.
 func (p *agyProcess) SetEffort(effort string) error {
 	if effort == "" {
 		return ErrUnsupported
 	}
 	p.effort.Store(&effort)
-	if !p.m.offersValue("thought_level", effort) {
+	if p.m.offersValue("thought_level", effort) {
+		if err := p.setConfig("thought_level", effort); err != nil {
+			return err
+		}
+		p.emit(Event{Notice: "agy honored effort " + effort + " via thought_level"})
 		return nil
 	}
-	return p.setConfig("thought_level", effort)
+	model := p.m.modelName()
+	if requested := p.model.Load(); requested != nil {
+		model = *requested
+	}
+	base, _ := agyBaseModel(model)
+	if ok, err := p.setModelVariant(base, effort); ok || err != nil {
+		return err
+	}
+	if p.worker {
+		return fmt.Errorf("agy offers neither thought_level %q nor model variant %q", effort, base+"-"+effort)
+	}
+	p.emit(Event{Notice: "agy did not offer effort " + effort + "; retained for the next model"})
+	return nil
+}
+
+// agyBaseModel separates the thinking axis from agy's model vocabulary.
+func agyBaseModel(model string) (string, string) {
+	for _, effort := range []string{"xhigh", "high", "medium", "low"} {
+		if base, ok := strings.CutSuffix(model, "-"+effort); ok {
+			return base, effort
+		}
+	}
+	return model, ""
+}
+
+func (p *agyProcess) setModelVariant(base, effort string) (bool, error) {
+	variant := base + "-" + effort
+	if p.m.offersValue("model", variant) {
+		if err := p.setConfig("model", variant); err != nil {
+			return true, err
+		}
+	} else if p.m.hasModel(variant) {
+		body, err := p.call(agyKindConfig, "session/set_model", map[string]any{"sessionId": p.m.session(), "modelId": variant}, agyControlTimeout)
+		if err != nil {
+			return true, err
+		}
+		var reply struct {
+			Models struct {
+				CurrentModelID string `json:"currentModelId"`
+			} `json:"models"`
+		}
+		_ = json.Unmarshal(body, &reply)
+		if got := reply.Models.CurrentModelID; got != "" && got != variant {
+			return true, fmt.Errorf("agy kept model %q after it was set to %q", got, variant)
+		}
+	} else {
+		return false, nil
+	}
+	p.emit(Event{Notice: "agy honored effort " + effort + " via suffixed model id " + variant})
+	return true, nil
 }
 
 // setConfig sets one config option and checks that agy took the value: a
@@ -440,6 +532,9 @@ type agyMapper struct {
 	// options are the config options the session offers now, by id, with
 	// the values each takes.
 	options map[string][]string
+	// models are the ACP variant ids; model is the current config value.
+	models []string
+	model  string
 	// initDemoted and sessionDemoted are the items the initialize answer
 	// and the session's own reports show a mismatched shape for.
 	initDemoted    []CapabilityItem
@@ -493,6 +588,32 @@ func (m *agyMapper) offersValue(id, value string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.options == nil || slices.Contains(m.options[id], value)
+}
+
+func (m *agyMapper) modelName() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.model
+}
+
+// defaultModelEffort selects an offered variant when the caller chose a
+// base model from Choices without an explicit effort. Prefer the current
+// variant, otherwise the harness's own offered order.
+func (m *agyMapper) defaultModelEffort(base string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, model := range append(append([]string{m.model}, m.options["model"]...), m.models...) {
+		if name, effort := agyBaseModel(model); name == base && effort != "" {
+			return effort
+		}
+	}
+	return ""
+}
+
+func (m *agyMapper) hasModel(model string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Contains(m.models, model)
 }
 
 func (m *agyMapper) mode() string {
@@ -698,7 +819,13 @@ func (m *agyMapper) harnessReport() Event {
 func (m *agyMapper) opened(result json.RawMessage) []Event {
 	var r struct {
 		SessionID string `json:"sessionId"`
-		Modes     *struct {
+		Models    struct {
+			CurrentModelID  string `json:"currentModelId"`
+			AvailableModels []struct {
+				ModelID string `json:"modelId"`
+			} `json:"availableModels"`
+		} `json:"models"`
+		Modes *struct {
 			CurrentModeID  string            `json:"currentModeId"`
 			AvailableModes []json.RawMessage `json:"availableModes"`
 		} `json:"modes"`
@@ -712,6 +839,11 @@ func (m *agyMapper) opened(result json.RawMessage) []Event {
 		m.sessionID = r.SessionID
 		out = append(out, Event{SessionID: r.SessionID})
 	}
+	m.models = nil
+	for _, model := range r.Models.AvailableModels {
+		m.models = append(m.models, model.ModelID)
+	}
+	m.model = r.Models.CurrentModelID
 	m.configOptions(result)
 	// The thought level is per model (agy drops the option for a model
 	// without one), so only a missing model option is a shape mismatch.
@@ -749,11 +881,19 @@ func (m *agyMapper) configOptions(body json.RawMessage) {
 	}
 	var models []ModelChoice
 	var efforts []string
+	seen := map[string]bool{}
 	for _, o := range r.ConfigOptions {
+		if o.ID == "model" {
+			m.model = o.CurrentValue
+		}
 		for _, v := range o.Options {
 			switch o.ID {
 			case "model":
-				models = append(models, ModelChoice{ID: v.Value})
+				base, _ := agyBaseModel(v.Value)
+				if !seen[base] {
+					models = append(models, ModelChoice{ID: base})
+					seen[base] = true
+				}
 			case "thought_level":
 				efforts = append(efforts, v.Value)
 			}

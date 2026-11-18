@@ -1,5 +1,5 @@
 // Package wsagent is the dashboard daemon's agent runner: it starts headless
-// harness processes (Claude Code, Pi) from named profiles, feeds them user
+// harness processes (Claude Code, Pi, Antigravity) from named profiles, feeds them user
 // turns, and records their output in a dashboard session directory through
 // internal/wslive, so the daemon's conversation renderer and SSE serve them
 // unchanged. Consumers drive conversations over the daemon's REST routes
@@ -39,8 +39,7 @@ const ProfilePrefix = "agent.profile."
 const (
 	BackendClaude = "claude"
 	BackendPi     = "pi"
-	// BackendAgy is Antigravity's CLI (AgyBackend), lead-only: it has no
-	// agent-worker profile.
+	// BackendAgy is Antigravity's CLI (AgyBackend).
 	BackendAgy = "agy"
 )
 
@@ -78,7 +77,7 @@ var leadKeyMintingTools = map[string]bool{
 // server, no plugin, no skill.
 type Profile struct {
 	Description string `json:"description,omitempty"`
-	// Backend is the harness: BackendClaude or BackendPi.
+	// Backend is the registered harness.
 	Backend string `json:"backend"`
 	// Model and Effort are the conversation's starting values; empty leaves
 	// the harness default.

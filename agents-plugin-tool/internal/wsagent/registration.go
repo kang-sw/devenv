@@ -15,6 +15,16 @@ type BackendRegistration struct {
 	Backend         Backend
 	LeadProfile     string
 	PermissionModes []string
+	// WorkerCapable admits agent.spawn on this backend. WorkerProfile is
+	// the internal profile it launches; both must be set to expose tiers.
+	WorkerCapable bool
+	WorkerProfile string
+	// WorkerHTTPMCP attaches a worker's ws tools through the daemon's
+	// HTTP route rather than a stdio launcher. Workers never persist it.
+	WorkerHTTPMCP bool
+	// WorkerAutoApprove answers worker permission requests through the
+	// ordinary approval path, retaining their trace. Leads still ask.
+	WorkerAutoApprove bool
 	// PermissionLevels advertises supported lead selection paths only.
 	PermissionLevels []PermissionLevel
 	// Catalog is the backend's capability catalog (catalog.go): a ceiling
@@ -22,7 +32,7 @@ type BackendRegistration struct {
 	// the backend handle-only: no hiding, demotion, or version warning.
 	Catalog *HarnessProfile
 	// ToolNameScheme names how this backend's host must spell ws's dotted
-	// tool names on a connection of its hosted lead (ToolNameSchemeSanitize
+	// tool names on a connection of its hosted lead or worker (ToolNameSchemeSanitize
 	// below); "" keeps the dotted names. Common code reads it through
 	// ApplyToolNameScheme and never names a backend.
 	ToolNameScheme string

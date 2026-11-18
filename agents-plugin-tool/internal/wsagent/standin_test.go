@@ -20,6 +20,10 @@ const standinOutEnv = "WSAGENT_STANDIN_OUT"
 // reads its input to EOF. A shell script would do the same on Unix only;
 // Windows cannot execute one as a harness command.
 func TestMain(m *testing.M) {
+	if path := os.Getenv(agyWorkerTestEnv); path != "" {
+		agyWorkerStandin(path)
+		os.Exit(0)
+	}
 	if out := os.Getenv(standinOutEnv); out != "" {
 		write := func(name, body string) {
 			if err := os.WriteFile(filepath.Join(out, name), []byte(body), 0o644); err != nil {
