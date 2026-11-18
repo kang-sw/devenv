@@ -136,13 +136,17 @@ const base = process.env.TREE_ROWS_BASE;
     assert.deepEqual(await expanded(), { open: true, full: true, batches: 7 }, 'simultaneous replacements retain full disclosure');
 
     // Pin/close controls are outside the replaced region. An ordinary delta
-    // keeps their nodes and state; Esc/outside click still follow the pin.
+    // keeps their nodes and state; an outside click follows the pin, and Esc
+    // collapses the island while the pin stays.
     await frame.click('#agpin');
     assert.deepEqual(deltaKeys(await update('parent', 'pinned-three')), ['agent-parent']);
     await waitText('pinned-three');
+    await frame.click('#convo', { position: { x: 60, y: 120 } });
+    assert(await frame.isVisible('#agpop'), 'pin survives row updates and an outside click');
     await page.keyboard.press('Escape');
-    assert.equal(await frame.locator('#agpin').getAttribute('aria-pressed'), 'true');
-    assert(await frame.isVisible('#agpop'), 'pin survives row updates and Esc');
+    assert.equal(await frame.locator('#agpin').getAttribute('aria-pressed'), 'true', 'Esc keeps the pin');
+    await frame.waitForFunction(() => document.getElementById('agpop').hidden);
+    await frame.click('#sbadge');
     await frame.click('#agclose');
     assert.deepEqual(deltaKeys(await update('child', 'closed-four')), ['agent-child']);
     await waitText('closed-four');
@@ -169,10 +173,12 @@ const base = process.env.TREE_ROWS_BASE;
     // wait too: a stale count after a row replacement is a regression.
     await update('permission');
     await frame.waitForFunction(() => /^\(1\) /.test(document.title));
-    assert.equal(await frame.locator('#r-tree .phase.permission').count(), 1);
+    // The hidden compact roster (.ag-source) repeats the waiting agent's pill.
+    const treePerms = () => frame.evaluate(() => [...document.querySelectorAll('#r-tree .phase.permission')].filter(el => !el.closest('.ag-source')).length);
+    assert.equal(await treePerms(), 1);
     await update('clear');
     await frame.waitForFunction(() => !/^\(\d+\) /.test(document.title));
-    assert.equal(await frame.locator('#r-tree .phase.permission').count(), 0);
+    assert.equal(await treePerms(), 0);
 
     // Shell change deliberately takes the old full-swap path and must retain
     // open/full state, pin and pane scroll just as the row delta path does.
