@@ -15,14 +15,17 @@ import (
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
-// The session's agents live in a popover over the conversation, opened by the
-// running-agent badge on the composer border, in place of a panel above it.
-// The script checks open and close (badge, Esc, outside click, the close
-// button), the pin and its reload persistence, the group order (lead,
-// running, ended, background, peers), a row's recent output and its full
-// output action, the narrow fit, the board tab, the muted zero-running badge
+// The session's agents live in an island at the top right of the
+// conversation grid cell, whose full view the running-agent badge on the
+// composer border (or a click on the compact island) opens. The script checks
+// the island's placement, open and collapse (badge, Esc, outside click, the
+// close button), the pin (an outside click keeps the island open, Esc still
+// collapses it) and its reload persistence, the group order (lead, running,
+// ended, background, peers), a row's recent output and its full output
+// action, the narrow fit, the board tab hiding the island with the
+// conversation cell in the one-column layout, the muted zero-running badge
 // (including a non-live page retained for a draft), and that every row the
-// agents region renders is inside the popover. WS_AGPOP_SHOTS=<dir> saves
+// agents region renders is inside the full view. WS_AGPOP_SHOTS=<dir> saves
 // screenshots. Needs WS_PLAYWRIGHT_MODULE.
 func TestAgentBadgePopoverBrowser(t *testing.T) {
 	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {

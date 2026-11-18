@@ -404,7 +404,7 @@
     if (slot && !WKF.key) { L.innerHTML = st.doc.html; WKF.key = key; }
     WKF.slot = slot;
     L.hidden = !slot;
-    // the slot moves and resizes with the drawer's drag and opening, the layout, and the window
+    // the slot moves and resizes with the drawer's opening, the layout, and the window
     // (an outer frame resizing this page fires its resize), not only with a draw
     if (WKF.ro) WKF.ro.disconnect();
     if (slot && window.ResizeObserver) {
@@ -642,9 +642,10 @@
       (kindOnly ? '' : ' ' + wsT("js.tk.filter.status") + ' ' + sel('f-status', ui.status, [['all', wsT("js.tk.filter.all")], ['open', wsT("js.tk.filter.open")], ['idea', stLabel('idea')], ['blocked', stLabel('blocked')], ['in-review', stLabel('in-review')], ['done', stLabel('done')], ['dropped', stLabel('dropped')], ['hidden', wsT("js.tk.chip.hidden")]]));
   }
   function cardActivity() {
+    if (AD.history && !AD.history(ui.store)) return card(wsT('js.tk.tab.activity'), '', historyLoading(), '', 'card-activity');
     var chip = wsT("js.tk.activity.chip", VS.stats.events, VS.stats.flagged) + (VS.stats.concurrent ? ', ' + wsT("js.tk.row.nconcurrent", VS.stats.concurrent) : ''), m = modeOf('activity');
     if (m !== 'list') return card(wsT("js.tk.tab.activity"), chip, modeBody('activity', m), picker('activity'), 'card-activity', m);
-    var rows = VS.events.filter(function (n) { return (!ui.act.flagged || n.status !== 'applied') && (!ui.act.conc || n.markers.length); }), cap = 50, shown = rows.slice(-cap).reverse();
+    var rows = (VS.historyEvents || VS.events).filter(function (n) { return (!ui.act.flagged || n.status !== 'applied') && (!ui.act.conc || n.markers.length); }), cap = 50, shown = rows.slice(-cap).reverse();
     var h = lastWrite();
     h += '<div class="toolbar">' + actChips() + '<span class="grow"></span><span class="muted">' + wsT("js.tk.activity.shown", shown.length, rows.length) + '</span></div>';
     h += shown.length ? '<ul class="plain">' + shown.map(function (n) { return evLine(n, false); }).join('') + '</ul>' : '<div class="empty">' + wsT("js.tk.activity.empty") + '</div>';

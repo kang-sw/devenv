@@ -8,60 +8,18 @@
     document.documentElement.style.setProperty('--tkhw', (w ? w + 6 : 0) + 'px');
     $('tkdrawer').style.setProperty('--tktop', Math.max(0, Math.round(O.header.getBoundingClientRect().bottom)) + 'px');
   }
-  // The drawer's height is the user's, and one for every store: dragging any store's
-  // handle sets it, clamped between DR_MIN and 80% of the window like the dashboard drawer
-  // when it shows. It is the host's drawer height when the host gives opts.drawerHeight
-  // (so the host's drawers and every store open alike), else this renderer's own, kept as
-  // display state; never set, it is DR_DEF, not the content's height, so a fresh browser
-  // shows one height too. Panels scroll inside whatever the height is.
-  var DR_MIN = 160, DR_DEF = 320, DR_SHUT = 80;
-  function drMax() { return Math.round(window.innerHeight * 0.8); }
-  function drClamp(h) { var hi = drMax(); return Math.max(Math.min(DR_MIN, hi), Math.min(hi, h)); }
-  function drHeight() { var h = O.drawerHeight ? +O.drawerHeight.get() : ui.drh; return h > 0 ? h : DR_DEF; }
-  function drSetHeight(h) {
-    if (O.drawerHeight) { O.drawerHeight.set(h); return; }
-    ui.drh = h; dsSave('drawer.height', { h: h });
-  }
-  function fitDrawer() { $('tkdrawer').style.setProperty('--tkh', drClamp(drHeight()) + 'px'); }
-  // The drag: the handle follows the pointer; the clip and the handle track the pointer's
-  // extent (--tkext) while the sheet keeps at least DR_MIN, so a short drag reveals the
-  // sheet rather than squashing it. The release sets the height, or closes short of
-  // DR_SHUT. A press that never moves is a click.
-  var drDrag = null, drDragged = false;
-  function drDragStart(e) {
-    var b = e.target.closest && e.target.closest('.tk-handle[data-handle]');
-    if (!b || (e.button !== undefined && e.button !== 0)) return;
-    drDrag = { name: b.getAttribute('data-handle'), y0: e.clientY, off: e.clientY - b.getBoundingClientRect().top, moved: false, ext: 0 };
-    try { b.setPointerCapture(e.pointerId); } catch (x) { /* no capture: the moves still land */ }
-  }
-  function drDragMove(e) {
-    var d = drDrag;
-    if (!d || (!d.moved && Math.abs(e.clientY - d.y0) < 5)) return;
-    if (!d.moved) { d.moved = true; if (ui.open !== d.name) openStore(d.name); } // dragging a closed handle opens its store
-    var max = drMax(), top = Math.max(0, Math.round(O.header.getBoundingClientRect().bottom)), dr = $('tkdrawer');
-    d.ext = Math.max(0, Math.min(max, e.clientY - d.off - top));
-    dr.classList.add('drag');
-    dr.style.setProperty('--tkh', Math.max(Math.min(DR_MIN, max), d.ext) + 'px');
-    dr.style.setProperty('--tkext', d.ext + 'px');
-  }
-  function drDragEnd() {
-    var d = drDrag;
-    drDrag = null;
-    if (!d || !d.moved) return;
-    drDragged = true;
-    setTimeout(function () { drDragged = false; }, 0);
-    $('tkdrawer').classList.remove('drag');
-    $('tkdrawer').style.removeProperty('--tkext');
-    if (d.ext < DR_SHUT) { fitDrawer(); if (ui.open) collapse(); return; }
-    drSetHeight(drClamp(d.ext));
-    fitDrawer();
+  // Every store fills the available space below the header. A host can supply its
+  // maximum (including composer clearance); standalone pages use the viewport.
+  function fitDrawer() {
+    var h = O.drawerHeight ? O.drawerHeight() : window.innerHeight - Math.max(0, Math.round(O.header.getBoundingClientRect().bottom));
+    $('tkdrawer').style.setProperty('--tkh', Math.max(0, h) + 'px');
   }
 
   // One handle per store, stacking leftward from the host's handle in stores() order, then
   // (with adapter.register) the "+ store" handle, also with no store at all; the row is
   // rebuilt when the store list changes. Each store's handle sits in a slot with its fold
-  // button (tkf-<store>), which fills the slot while that store's drawer is open (the
-  // handle rides the drawer's bottom edge then) and closes it as a click on the handle does.
+  // button (tkf-<store>), which fills the slot while that store's drawer is open
+  // (the handle stays hidden without changing its width) and closes the drawer.
   var handleSig = null;
   function syncHandles() {
     order = (AD.stores() || []).slice();
@@ -114,10 +72,84 @@
   }
   // renderDue: a change notification asked for a render that has not run yet (see mount); any
   // render meets it, so a synchronous render() takes the pending one's place.
-  var renderDue = false, changeTimer = 0;
+  var renderDue = false, changeTimer = 0, windowHold = null;
   // UNREADS: the rendered store's unread notifications as api.unread() returns them,
   // rebuilt by every render. afterRender runs the host's hooks once a render is done.
   var UNREADS = { store: null, ready: false, entries: [] };
+  // Reconcile the keyed local model into existing DOM. Unchanged rows (and
+  // their focus, scroll, editor and disclosure state) are never replaced.
+  // Keys are sibling-scoped: the same item may appear in several panels.
+  var trackerRowHTML = new WeakMap();
+  function patchTrackerHTML(root, html) {
+    var t = document.createElement('template'); t.innerHTML = html;
+    function key(n) {
+      if (n.nodeType !== 1) return '';
+      var attrs = ['id', 'data-rk', 'data-nkey', 'data-rec', 'data-ev', 'data-kcol', 'data-tab'];
+      for (var i = 0; i < attrs.length; i++) if (n.hasAttribute(attrs[i])) return n.nodeName + ':' + attrs[i] + ':' + n.getAttribute(attrs[i]);
+      return '';
+    }
+    function compatible(a, b) { return a && a.nodeType === b.nodeType && a.nodeName === b.nodeName && key(a) === key(b); }
+    function row(n) { return n.nodeType === 1 && (n.hasAttribute('data-rk') || n.hasAttribute('data-nkey')); }
+    function remember(n) {
+      if (n.nodeType !== 1) return;
+      if (row(n)) trackerRowHTML.set(n, n.outerHTML);
+      Array.prototype.forEach.call(n.querySelectorAll('[data-rk], [data-nkey]'), function (r) { trackerRowHTML.set(r, r.outerHTML); });
+    }
+    function children(a, b) {
+      var keyed = new Map();
+      Array.prototype.forEach.call(a.childNodes, function (n) { var k = key(n); if (k) keyed.set(k, n); });
+      var cursor = a.firstChild;
+      Array.prototype.forEach.call(b.childNodes, function (fresh) {
+        var k = key(fresh), old = k ? keyed.get(k) : compatible(cursor, fresh) ? cursor : null;
+        if (!compatible(old, fresh)) old = null;
+        if (!old) { old = fresh.cloneNode(true); remember(old); a.insertBefore(old, cursor); }
+        else {
+          if (old !== cursor) a.insertBefore(old, cursor);
+          // Compare canonical row markup, not the live DOM: positioning a
+          // hover preview must not make an unchanged row look server-dirty.
+          var rowHTML = row(fresh) ? fresh.outerHTML : null;
+          if (rowHTML !== null && trackerRowHTML.get(old) === rowHTML) { cursor = old.nextSibling; return; }
+          if (!old.isEqualNode(fresh)) {
+            if (old.nodeType === 1) {
+              Array.prototype.slice.call(old.attributes).forEach(function (x) { if (!fresh.hasAttribute(x.name)) old.removeAttribute(x.name); });
+              Array.prototype.forEach.call(fresh.attributes, function (x) { if (old.getAttribute(x.name) !== x.value) old.setAttribute(x.name, x.value); });
+              children(old, fresh);
+            } else if (old.nodeValue !== fresh.nodeValue) old.nodeValue = fresh.nodeValue;
+          }
+          if (rowHTML !== null) trackerRowHTML.set(old, rowHTML);
+          if (old.nodeType === 1 && /^(INPUT|TEXTAREA|SELECT)$/.test(old.nodeName) && old.value !== fresh.value) old.value = fresh.value;
+        }
+        cursor = old.nextSibling;
+      });
+      while (cursor) { var next = cursor.nextSibling; a.removeChild(cursor); cursor = next; }
+    }
+    children(root, t.content);
+  }
+  // IntersectionObserver is clipped by the drawer/card scrollports. Merely
+  // mounting handles never loads bodies; visible rows batch on the adapter's
+  // next tick. Existing observed rows need re-requesting after a version delta.
+  var detailObserver = null, detailNodes = new Set(), visibleDetails = new Set();
+  function observeDetails(body) {
+    if (!AD.detail || !VS || !VS.projection) return;
+    if (!detailObserver && typeof IntersectionObserver === 'function') detailObserver = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) { if (entry.isIntersecting) visibleDetails.add(entry.target); else visibleDetails.delete(entry.target); });
+      requestVisibleDetails();
+    });
+    detailNodes.forEach(function (n) { if (!n.isConnected || !body.contains(n)) { if (detailObserver) detailObserver.unobserve(n); detailNodes.delete(n); visibleDetails.delete(n); } });
+    Array.prototype.forEach.call(body.querySelectorAll('.irow[data-item], .kcard[data-item], .citem[data-item]'), function (n) {
+      if (detailNodes.has(n)) return;
+      detailNodes.add(n);
+      if (detailObserver) detailObserver.observe(n);
+      // Older browsers still fetch an explicitly expanded item's detail.
+    });
+    requestVisibleDetails();
+  }
+  function requestVisibleDetails() {
+    if (!AD.detail || !VS || !VS.projection || !viewing()) return;
+    var ids = {};
+    visibleDetails.forEach(function (n) { if (n.isConnected) ids[n.getAttribute('data-item')] = true; });
+    AD.detail(ui.store, Object.keys(ids));
+  }
   function afterRender(name) {
     if (X.rendered) X.rendered(name, VS, H);
     if (O.onRender) O.onRender(UNREADS);
@@ -152,14 +184,14 @@
     VS.events.forEach(function (e) { EV[e.id] = e; });
     if (ui.item && !VS.items[ui.item]) { ui.item = null; ui.win = false; }
     // per-render row marks: flagged writes in an item's own thread, unread notification entries per item
-    FLAGGED = {}; UNREAD = {};
-    VS.events.forEach(function (e) { if (e.status === 'flagged' && e.thread && VS.items[e.thread]) FLAGGED[e.thread] = (FLAGGED[e.thread] || 0) + 1; });
+    FLAGGED = VS.itemFlags || {}; UNREAD = {};
+    if (!VS.projection) VS.events.forEach(function (e) { if (e.status === 'flagged' && e.thread && VS.items[e.thread]) FLAGGED[e.thread] = (FLAGGED[e.thread] || 0) + 1; });
     var rm = readMap();
     UNREADS.ready = true;
     feedEntries(v).forEach(function (x) {
       if (rm[x.key]) return;
       UNREAD[x.item] = (UNREAD[x.item] || 0) + 1;
-      var src = x.ev && (VS.comments[x.ev] || EV[x.ev]), who = src && (src.author || src.member);
+      var src = x.ev && (VS.comments[x.ev] || EV[x.ev]), who = x.author || src && (src.author || src.member);
       UNREADS.entries.push({ store: name, item: x.item, ev: x.ev, key: x.key, kind: x.kind, label: wsT(NK[x.kind]), title: VS.items[x.item].title || alias(x.item), author: who ? nm(who) : '' });
     });
     // With no drawer, store page, or item window open, nothing of the store shows but its
@@ -180,7 +212,8 @@
       return;
     }
 
-    var draft = $('cbox') ? $('cbox').value : '';
+    if (windowHold && (windowHold.store !== name || windowHold.item !== ui.item || ui.itemChanged || ui.clearDraft)) windowHold = null;
+    var draft = $('cbox') ? $('cbox').value : windowHold ? windowHold.draft : '';
     // cards scroll inside; keep each card's scroll and the focused row across the re-render
     var scrolls = {}, fa = document.activeElement, focusRk = fa && fa.closest && body.contains(fa) && fa.closest('[data-rk]');
     focusRk = focusRk && focusRk.getAttribute('data-rk');
@@ -196,7 +229,8 @@
     Array.prototype.forEach.call(body.querySelectorAll('.card[id] > .cbody'), function (c) { scrolls[c.parentNode.id] = c.scrollTop; });
     hideTip();
     insPar(null); HV = null;
-    body.innerHTML = drawerHtml(name, v);
+    var drawer = drawerHtml(name, v);
+    if (VS.projection) patchTrackerHTML(body, drawer); else body.innerHTML = drawer;
     placeSub(); placeNew();
     if (!ui.page) fitDrawer();
     Array.prototype.forEach.call(body.querySelectorAll('.card[id] > .cbody'), function (c) { if (scrolls[c.parentNode.id]) c.scrollTop = scrolls[c.parentNode.id]; });
@@ -216,7 +250,16 @@
     setInert(open);
     dropEditorState(open);
     if (open) {
-      sb.innerHTML = windowHtml(v, VS.items[ui.item]);
+      var ready = !AD.detail || AD.detail(name, [ui.item]);
+      // A summary invalidates the old detail before its replacement arrives.
+      // Preserve the draft/caret/scroll across that loading gap, not just a
+      // synchronous redraw. Item switches and successful posts still clear it.
+      if (!ready && !windowHold) windowHold = { store: name, item: ui.item, draft: draft, focus: focusKeep, top: top2 };
+      if (ready && windowHold) { draft = windowHold.draft; focusKeep = focusKeep || windowHold.focus; top2 = windowHold.top; windowHold = null; }
+      var windowBody = ready ? windowHtml(v, VS.items[ui.item]) :
+        '<h2 id="iw-title">' + esc(VS.items[ui.item].title) + '</h2><p role="status">' + esc(AD.detailError && AD.detailError(name) || wsT('js.tk.loading')) + '</p>' +
+        btn('detail-retry', wsT('js.preview.reload'), {}) + btn('win-close', wsT('js.tk.win.close'), {});
+      if (VS.projection) patchTrackerHTML(sb, windowBody); else sb.innerHTML = windowBody;
       wkMarkLinks(sb);
       if (!ui.itemChanged && !ui.clearDraft && $('cbox')) $('cbox').value = draft;
       sb.scrollTop = ui.itemChanged ? 0 : top2;
@@ -226,10 +269,10 @@
         fx.classList.add('fx-mark');
         if (ui.focus.flash) { fx.classList.add('fx-flash'); fx.scrollIntoView({ block: 'center' }); }
       }
-      if (ui.focus) ui.focus.flash = false;
+      if (ui.focus && ready) ui.focus.flash = false;
       var wf = focusFk && lastInput === 'key' && sb.querySelector('[data-fk="' + CSS.escape(focusFk) + '"]');
       if (wf) wf.focus({ preventScroll: true });
-    } else sb.innerHTML = '';
+    } else { sb.innerHTML = ''; windowHold = null; }
     if (open) placeSub();
     var fk2 = focusKeep && $(focusKeep[0]);
     if (fk2) { fk2.focus({ preventScroll: true }); try { fk2.setSelectionRange(focusKeep[1], focusKeep[2]); } catch (x) { /* not a text field */ } }
@@ -243,6 +286,7 @@
       if (mIn) { var mf = $('tkmenu').querySelector('button'); if (mf) mf.focus({ preventScroll: true }); }
     } else if (MN && mnStale()) closeMenu(false, true);
     ui.itemChanged = false; ui.clearDraft = false;
+    observeDetails(body);
     afterRender(name);
     measure();
     wkFrameSync(body); // after measure: the drawer hangs where the header ends
@@ -278,11 +322,16 @@
   }
   function openStore(name) {
     if (ui.open === name) { collapse(); return; }
+    var opener = $('tkh-' + name), kb = !!opener && document.activeElement === opener;
     if (ui.open) syncNow(ui.open, true); // switching to another store while one is open applies it
     if (ui.store !== name) { keepItemDraft(); ui.iedit = null; ui.item = null; ui.win = false; ui.last = null; ui.itemChanged = true; $('tkbody').scrollTop = 0; }
     ui.store = name; ui.open = name;
     bringUp(name);
     render();
+    // the focused handle hides while its drawer is open: focus moves to the fold button in its
+    // slot, unless the render already moved it elsewhere
+    var fold = $('tkf-' + name);
+    if (kb && fold && !fold.hidden && document.activeElement === opener) fold.focus();
     document.dispatchEvent(new CustomEvent('tk:drawer-open', { detail: { store: name } }));
   }
   // openItemWindow(storeId, itemId): the one entry point that opens an item, from a row, a
@@ -346,7 +395,7 @@
     if (cmd.op === 'focus') {
       var iid = findAlias(Object.keys(sv.items), cmd.arg);
       if (!iid) return false;
-      var cid = cmd.comment ? findAlias(listOf(sv.items[iid].thread).filter(function (k) { return sv.comments[k]; }), cmd.comment) : null;
+      var cid = cmd.comment ? findAlias(listOf(sv.items[iid].thread).filter(function (k) { return sv.projection || sv.comments[k]; }), cmd.comment) : null;
       return openItemWindow(id, iid, cid ? { focus: cid } : null);
     }
     VS = sv; // scopeList reads the viewer's team from the shown view
@@ -935,7 +984,7 @@
 
   // ------------------------------------------------------------- display state
 
-  // Per-card view modes, the drawer height, the recently-closed fold, and the tree folds persist under
+  // Per-card view modes, the recently-closed fold, and the tree folds persist under
   // opts.storagePrefix; everything else lasts the page. Storage may throw (a locked-down
   // browser): then the values last the page.
   function dsLoad(k) {

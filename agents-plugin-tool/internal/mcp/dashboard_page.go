@@ -71,6 +71,7 @@ func (src *DashboardSessionSource) ReadPageLang(reg wsdashboard.Registration, la
 	page.HasBoard = true
 	page.Seq = record.Whiteboard.Seq
 	page.Reasked = record.Whiteboard.ReaskTimes()
+	page.BoardTargets = wsdashboard.BoardNavigationTargets(record.Whiteboard)
 	board, ok := src.renderBoard(key, record, reg.ReplyID, lang, page.Reasked)
 	if !ok {
 		return wsdashboard.PageContent{}, false, fmt.Errorf("render session board failed")

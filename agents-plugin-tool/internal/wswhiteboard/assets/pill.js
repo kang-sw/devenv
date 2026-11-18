@@ -86,6 +86,14 @@
         updates.hidden = true;
         updates.title = arr.title;
         p.appendChild(updates);
+        var pull = d.createElement("button");
+        pull.type = "button";
+        pull.className = "oq-pull";
+        pull.hidden = true;
+        pull.title = wsT("js.board.hold.pull");
+        pull.setAttribute("aria-label", pull.title);
+        pull.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg>';
+        p.appendChild(pull);
       }
       KINDS.forEach(function (k) {
         var b = d.createElement("button");
@@ -163,6 +171,8 @@
       var updates = p.querySelector(".oq-updates");
       if (updates.hidden !== !pending) updates.hidden = !pending;
       if (updates.textContent !== label) updates.textContent = label;
+      var pull = p.querySelector(".oq-pull");
+      if (pull.hidden !== !pending) pull.hidden = !pending;
     }
     Array.prototype.forEach.call(p.querySelectorAll(".oq-seg"), function (b) {
       var k = b.getAttribute("data-k"), g = groups[k] || [];
@@ -270,6 +280,10 @@
 
   function click(edge) {
     return function activate(e) {
+      if (edge === "top" && e.target.closest && e.target.closest(".oq-pull")) {
+        if (st.apply) st.apply();
+        return;
+      }
       if (edge === "top" && e.target.closest && e.target.closest(".oq-arr, .oq-updates")) {
         if (st.home) st.home();
         else if (window.wbHistory && window.wbHistory.jump) window.wbHistory.jump(pills.top, { top: 0, behavior: "smooth" });

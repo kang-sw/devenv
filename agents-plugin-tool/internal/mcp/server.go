@@ -22,7 +22,6 @@ type Server struct {
 	version           string
 	sourceCommit      string
 	whiteboardChanged func(cacheHome, root, key string)
-	loginLink         func(string) (string, error)
 	notes             *wsnote.Cache
 	noteBindings      sync.Map // session keys already bound on this connection
 	rootMu            sync.RWMutex

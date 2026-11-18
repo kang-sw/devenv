@@ -74,31 +74,221 @@
   // tkLoadView reads store id's view and seen marks into the cache; done
   // gets whether the cache changed (a 304 for the view held changes nothing).
   // noLend reads without a sibling frame's answer.
-  function tkLoadView(id, done, noLend) {
+  function tkLoadLegacyView(id, done, noLend) {
+    var read = tkReads[id] = ++tkReadSeq;
     var own = tkViews[id] && tkAnswers[id] ? tkAnswers[id] : null, held = own || (noLend ? null : tkLent(id));
     function take(v, answer) {
       tkViews[id] = v.view;
       tkErrs[id] = null;
       tkAddMarks(id, v.seen && v.seen.badge, v.seen && v.seen.read);
       if (answer) tkAnswers[id] = answer; else delete tkAnswers[id];
+      // Only the installed full view can retire the projection's detail gate.
+      // Waiters added while /view was in flight must also see that full view.
+      var p = tkProjections[id];
+      delete tkProjections[id];
+      if (p) Object.keys(p.waiters).forEach(function (iid) { p.waiters[iid].forEach(function (fn) { fn(); }); });
     }
     tkFetch(tkUrl(id, "view"), undefined, function (status, v, tag, text) {
+      if (tkReads[id] !== read) { done(false); return; }
       if (status === 304 && own) { done(false); return; }
       if (status === 304 && held) {
         var lent = null;
         try { lent = JSON.parse(held.text); } catch (e) { lent = null; }
         if (lent && lent.view) { take(lent, held); done(true); return; }
-        tkLoadView(id, done, true); // an unreadable lent answer: read the view itself
+        tkLoadLegacyView(id, done, true); // an unreadable lent answer: read the view itself
         return;
       }
       if (status === 200 && v.view) take(v, tag ? { tag: tag, text: text } : null);
       else {
-        tkViews[id] = null;
         tkErrs[id] = tkErrText(status, v);
+        if (tkProjections[id]) tkProjections[id].detailError = tkErrs[id];
+        else tkViews[id] = null;
         delete tkAnswers[id];
       }
       done(true);
     }, false, null, held ? held.tag : "");
+  }
+  // Projection models live only in memory. Rows own their flattened records;
+  // replacing one never copies/reparses the rest of the store. A detail can be
+  // ahead of OR behind its row, so equality (not arrival order) is the gate.
+  var tkProjections = {}, tkLegacy = {}, tkReads = {}, tkReadSeq = 0;
+  function tkProjection(id) {
+    return { cursor: '', rows: {}, bundles: {}, held: {}, busy: {}, tried: {}, waiters: {},
+      view: { projection: true, items: {}, assignments: {}, requests: {}, rules: {},
+        comments: {}, events: [], notices: [], itemTime: {}, itemFlags: {}, html: { items: {}, comments: {} }, feed: [] } };
+  }
+  function tkDetailReady(id, iid) {
+    var p = tkProjections[id], row = p && p.rows[iid], b = p && p.bundles[iid];
+    return !p || !!(row && b && row.detailVersion === b.detailVersion);
+  }
+  function tkDetailOverlay(p, iid) {
+    var row = p.rows[iid], b = p.bundles[iid];
+    if (!row) return;
+    var it = Object.assign({}, row.data.item);
+    if (b && b.detailVersion === row.detailVersion) {
+      it.body = b.data.body; it.bodyRev = b.data.bodyRev || []; it.attachments = b.data.attachments || [];
+    }
+    p.view.items[iid] = it;
+  }
+  function tkDetailIndexes(p) {
+    var v = p.view;
+    v.comments = {}; v.events = []; v.html = { items: {}, comments: {} };
+    var events = {};
+    Object.keys(p.bundles).forEach(function (iid) {
+      var b = p.bundles[iid], row = p.rows[iid];
+      if (!row || row.detailVersion !== b.detailVersion) return;
+      var d = b.data;
+      Object.assign(v.comments, d.comments || {});
+      (d.events || []).forEach(function (e) { if (!events[e.id]) { events[e.id] = true; v.events.push(e); } });
+      Object.assign(v.html.items, d.html && d.html.items || {});
+      Object.assign(v.html.comments, d.html && d.html.comments || {});
+    });
+    v.notices = [];
+    Object.keys(p.rows).forEach(function (iid) { v.notices.push.apply(v.notices, p.rows[iid].data.notices || []); });
+  }
+  function tkDetailWaiters(id, p) {
+    Object.keys(p.waiters).forEach(function (iid) {
+      if (!tkDetailReady(id, iid)) return;
+      var fns = p.waiters[iid]; delete p.waiters[iid];
+      fns.forEach(function (fn) { fn(); });
+    });
+  }
+  function tkTakeProjection(id, answer) {
+    var p = tkProjections[id];
+    if (!p || answer.reset) {
+      var old = p;
+      p = tkProjections[id] = tkProjection(id);
+      // Waiters belong to the user's open editor, not the daemon epoch.
+      if (old) { p.waiters = old.waiters; p.held = old.held; }
+    }
+    var v = p.view;
+    function drop(iid) {
+      var old = p.rows[iid];
+      if (old) ['assignments', 'requests', 'rules'].forEach(function (k) {
+        Object.keys(old.data[k] || {}).forEach(function (key) { delete v[k][key]; });
+      });
+      delete p.rows[iid]; delete p.bundles[iid]; delete p.held[iid]; delete p.tried[iid];
+      delete v.items[iid]; delete v.itemTime[iid]; delete v.itemFlags[iid];
+    }
+    (answer.removed || []).forEach(drop);
+    Object.keys(answer.items || {}).forEach(function (iid) {
+      var row = answer.items[iid], b = p.bundles[iid], held = p.held[iid];
+      drop(iid); p.rows[iid] = row;
+      ['assignments', 'requests', 'rules'].forEach(function (k) { Object.assign(v[k], row.data[k] || {}); });
+      v.itemTime[iid] = row.data.time; v.itemFlags[iid] = row.data.flagged || 0;
+      if (held && held.detailVersion === row.detailVersion) p.bundles[iid] = held;
+      else if (b && b.detailVersion === row.detailVersion) p.bundles[iid] = b;
+      tkDetailOverlay(p, iid);
+      tkAddMarks(id, row.seen && row.seen.badge, row.seen && row.seen.read);
+    });
+    Object.keys(answer.globals || {}).forEach(function (k) {
+      if (answer.globals[k] === null) delete v[k]; else v[k] = answer.globals[k];
+    });
+    if (Object.prototype.hasOwnProperty.call(answer, 'feed')) v.feed = answer.feed || [];
+    p.cursor = answer.cursor; v.projectionCursor = answer.cursor;
+    delete p.history; delete v.historyEvents;
+    tkDetailIndexes(p);
+    tkViews[id] = v; tkErrs[id] = null; delete tkAnswers[id];
+    tkDetailWaiters(id, p);
+  }
+  function tkUseLegacy(id, done) {
+    tkLegacy[id] = true; delete tkAnswers[id];
+    tkLoadLegacyView(id, function (changed) {
+      tkNotify(); if (done) done(changed);
+    });
+  }
+  function tkLoadView(id, done) {
+    if (tkLegacy[id]) { tkLoadLegacyView(id, done); return; }
+    var p = tkProjections[id], cursor = p && p.cursor, read = tkReads[id] = ++tkReadSeq;
+    tkFetch(tkUrl(id, cursor ? 'delta?since=' + encodeURIComponent(cursor) : 'summary'), undefined, function (status, v) {
+      if (tkReads[id] !== read) { done(false); return; }
+      if (tkLegacy[id] || (p ? tkProjections[id] !== p || p.cursor !== cursor : !!tkProjections[id])) {
+        // Another check/dispatch/read already advanced this keyed model. An
+        // older request may finish last; never regress its opaque cursor.
+        done(false); tkReload(); return;
+      }
+      if (status === 404 || status === 405 || status === 501) { tkUseLegacy(id, done); return; }
+      if (status === 304 && p) { done(false); return; }
+      if (status === 200 && v.cursor && v.items && v.globals) {
+        tkTakeProjection(id, v); done(true); return;
+      }
+      // Keep a good model on transient failure, just as a busy store keeps
+      // its last published server snapshot. A first failure shows an error.
+      tkErrs[id] = tkErrText(status, v);
+      done(!tkViews[id]);
+    });
+  }
+  // Visible/expanded ids arrive together on the next tick, at most 100 per
+  // request. One request per row version; an unmatched future bundle waits
+  // for the delta (a nudge also covers a detail overtaking the stream).
+  var tkDetailQueue = {}, tkDetailTimer = 0;
+  function tkNeedDetails(id, ids, done) {
+    var p = tkProjections[id];
+    if (!p) { if (done) done(); return true; }
+    var ready = true, called = false;
+    function settled() {
+      if (!called && (ids || []).every(function (iid) { return tkDetailReady(id, iid); })) { called = true; done(); }
+    }
+    (ids || []).forEach(function (iid) {
+      if (!p.rows[iid] || tkDetailReady(id, iid)) return;
+      ready = false;
+      if (done) (p.waiters[iid] || (p.waiters[iid] = [])).push(settled);
+      if (!tkLegacy[id] && !p.busy[iid] && p.tried[iid] !== p.rows[iid].detailVersion) {
+        (tkDetailQueue[id] || (tkDetailQueue[id] = {}))[iid] = true;
+      }
+    });
+    if (ready && done) settled();
+    if (!tkDetailTimer && Object.keys(tkDetailQueue).length) tkDetailTimer = setTimeout(tkFlushDetails, 0);
+    return ready;
+  }
+  function tkFlushDetails() {
+    tkDetailTimer = 0;
+    var queue = tkDetailQueue; tkDetailQueue = {};
+    Object.keys(queue).forEach(function (id) {
+      var p = tkProjections[id]; if (!p || tkLegacy[id]) return;
+      var ids = Object.keys(queue[id]).filter(function (iid) { return p.rows[iid] && !p.busy[iid] && !tkDetailReady(id, iid); });
+      while (ids.length) {
+        (function (batch) {
+          batch.forEach(function (iid) { p.busy[iid] = true; p.tried[iid] = p.rows[iid].detailVersion; });
+          tkFetch(tkUrl(id, 'detail?' + batch.map(function (iid) { return 'id=' + encodeURIComponent(iid); }).join('&')), undefined, function (status, answer) {
+            if (tkProjections[id] !== p || tkLegacy[id]) return; // retired or downgrading while in flight
+            batch.forEach(function (iid) { delete p.busy[iid]; });
+            if (status === 404 || status === 405 || status === 501) { tkUseLegacy(id); return; }
+            var mismatch = false;
+            if (status === 200) {
+              p.detailError = '';
+              Object.keys(answer.items || {}).forEach(function (iid) {
+                var b = answer.items[iid], row = p.rows[iid]; if (!row || !b.data) return;
+                if (b.detailVersion === row.detailVersion) { p.bundles[iid] = b; tkDetailOverlay(p, iid); }
+                else { p.held[iid] = b; mismatch = true; }
+              });
+              if ((answer.missing || []).length) mismatch = true;
+              tkDetailIndexes(p); tkDetailWaiters(id, p);
+            } else p.detailError = tkErrText(status, answer);
+            tkNotify();
+            if (mismatch) tkReload();
+          });
+        })(ids.splice(0, 100));
+      }
+    });
+  }
+  // Activity and sync inspect global ledger events, which the per-item detail
+  // contract deliberately omits. Keep the legacy read only for those explicit
+  // history surfaces; its events NEVER satisfy an item's detail-version gate.
+  function tkHistory(id) {
+    var p = tkProjections[id];
+    if (!p || p.history === p.cursor) return true;
+    if (p.historyBusy || p.historyAttempt === p.cursor) return false;
+    p.historyBusy = true; var cursor = p.cursor; p.historyAttempt = cursor; p.historyError = '';
+    tkFetch(tkUrl(id, 'view'), undefined, function (status, answer) {
+      if (tkProjections[id] !== p) return;
+      p.historyBusy = false;
+      if (cursor !== p.cursor) { tkNotify(); return; }
+      if (status === 200 && answer.view) { p.view.historyEvents = answer.view.events || []; p.history = cursor; }
+      else p.historyError = tkErrText(status, answer);
+      tkNotify();
+    });
+    return false;
   }
   // tkReadAll reads the store list, calls listed(status), and with a list
   // reads every store's view in parallel before done(). The renderer, once
@@ -131,7 +321,7 @@
         });
         var keep = {};
         tkOrder.forEach(function (id) { keep[id] = true; });
-        [tkViews, tkErrs, tkSeen, tkAnswers].forEach(function (m) { Object.keys(m).forEach(function (id) { if (!keep[id]) delete m[id]; }); });
+        [tkViews, tkErrs, tkSeen, tkAnswers, tkProjections, tkLegacy, tkReads].forEach(function (m) { Object.keys(m).forEach(function (id) { if (!keep[id]) delete m[id]; }); });
       }
       listed(status);
       var left = status === 200 ? tkOrder.length : 0;
@@ -183,6 +373,16 @@
   var tkAdapter = {
     stores: function () { return tkOrder.slice(); },
     view: function (id) { return tkViews[id] || null; },
+    detail: tkNeedDetails,
+    detailReady: tkDetailReady,
+    detailError: function (id) { var p = tkProjections[id]; return p && p.detailError || ''; },
+    retryDetail: function (id, iid) {
+      if (tkLegacy[id]) { tkUseLegacy(id); return; }
+      var p = tkProjections[id]; if (p) delete p.tried[iid]; tkNeedDetails(id, [iid]);
+    },
+    history: tkHistory,
+    retryHistory: function (id) { var p = tkProjections[id]; if (p) delete p.historyAttempt; tkHistory(id); },
+    historyError: function (id) { var p = tkProjections[id]; return p && p.historyError || ''; },
     error: function (id) { return tkViews[id] ? null : tkErrs[id] || null; },
     hostError: function () { return tkHostErr; },
     hidden: function () { return tkHidden.slice(); },
@@ -204,13 +404,41 @@
         if (status !== 200) { done({ ok: false, error: tkErrText(status, v), refusal: null }); return; }
         var ids = Array.isArray(v.ids) ? v.ids : [];
         tkLoadView(id, function () {
-          var byId = {};
-          ((tkViews[id] && tkViews[id].events) || []).forEach(function (e) { byId[e.id] = e; });
-          done({ ok: true, results: ids.map(function (eid, i) {
-            var e = byId[eid];
-            if (e) return { id: e.id, alias: e.alias, type: e.type, status: e.status, reason: e.reason || "" };
-            return { id: eid, alias: String(eid).replace("#", "-"), type: events[i] ? events[i].type : "", status: "applied", reason: "" };
-          }) });
+          function finish() {
+            var byId = {};
+            ((tkViews[id] && tkViews[id].events) || []).forEach(function (e) { byId[e.id] = e; });
+            // Global/role writes have no item bundle; read their verdicts from
+            // the explicit history view, never invent an applied verdict.
+            if (ids.some(function (eid) { return !byId[eid]; })) {
+              tkFetch(tkUrl(id, 'view'), undefined, function (code, full) {
+                if (code === 200 && full.view) (full.view.events || []).forEach(function (e) { byId[e.id] = e; });
+                report(byId);
+              });
+            } else report(byId);
+          }
+          function report(byId) {
+            done({ ok: true, results: ids.map(function (eid, i) {
+              var e = byId[eid];
+              return e ? { id: e.id, alias: e.alias, type: e.type, status: e.status, reason: e.reason || '' } :
+                { id: eid, alias: String(eid).replace('#', '-'), type: events[i] ? events[i].type : '', status: 'unknown', reason: 'Verdict unavailable' };
+            }) });
+          }
+          var p = tkProjections[id], wanted = [];
+          if (p) Object.keys(p.rows).some(function (iid) {
+            if ((p.rows[iid].data.item.thread || []).some(function (eid) { return ids.indexOf(eid) >= 0; })) wanted.push(iid);
+            return wanted.length === 100;
+          });
+          if (!wanted.length) finish();
+          else tkFetch(tkUrl(id, 'detail?' + wanted.map(function (iid) { return 'id=' + encodeURIComponent(iid); }).join('&')), undefined, function (code, answer) {
+            var byId = {};
+            if (code === 200) Object.keys(answer.items || {}).forEach(function (iid) {
+              (answer.items[iid].data.events || []).forEach(function (e) { byId[e.id] = e; });
+            });
+            // Verdict reporting is not rendering: read returned event ids even
+            // when the bundle overtook the summary. Never install it as detail.
+            if (ids.every(function (eid) { return !!byId[eid]; })) report(byId);
+            else finish();
+          });
         });
       });
     },
@@ -315,8 +543,8 @@
   // session drawer's handle; the store page takes the page's place. On a
   // session page it goes into the body beside the rail, where it takes the
   // hidden grid's column; appended to the wrap instead, it would stack below
-  // the rail's column on a wide screen. The store drawers open at the one
-  // drawer height (drH) and a drag of a store's handle sets it.
+  // the rail's column on a wide screen. Store drawers use the host's maximum
+  // height, including its composer clearance, without storing a height.
   // --- search palette: the rendered rail and this session's board only -----
   function paletteText(el) {
     if (!el) return "";
@@ -562,7 +790,7 @@
     header.classList.add("tk-room");
     if (tkSupport) tkAdapter.ext = supExt();
     tkApi = window.WsTracker.mount(tkAdapter, paletteSearch(paletteFiles({ header: header, qsSlot: slot, pageParent: wrap.querySelector(":scope > .dbody") || wrap, storagePrefix: "ws.tracker.", onRender: tlTracker,
-      drawerHeight: { get: function () { return drH; }, set: drSetH }, searchRows: paletteRows, searchPick: palettePick })));
+      drawerHeight: drMax, drawerBoundary: $("composer"), searchRows: paletteRows, searchPick: palettePick })));
     if (load(DR_SEARCH) === "1" || tkWantSearch) tkApi.openSearch();
     tkWantSearch = false;
   }

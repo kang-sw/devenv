@@ -17,7 +17,7 @@ func viewedHarness(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(data) + dashboardFuncs(t, "topicKey", "topicSeen", "boardExposed", "boardPanelNodes", "boardPanelKey", "boardRenderBlockers", "boardOwnerSnapshot", "boardStagePaged", "boardStageInput", "boardStageOrder", "boardRecordPending", "boardPendingBadge", "boardFlushViewed", "boardWithSnap", "boardScroller", "boardLivePanels", "boardPanelMap", "boardViewedPanels", "boardStageSnap", "boardExposureUnits", "boardReleaseDue", "boardPendingNames", "boardHome", "boardStageTop")
+	return string(data) + dashboardFuncs(t, "topicKey", "topicSeen", "boardExposed", "boardPanelNodes", "boardPanelKey", "boardRenderBlockers", "boardOwnerSnapshot", "boardStagePaged", "boardStageInput", "boardStageOrder", "boardRecordPending", "boardPendingBadge", "boardApplyPending", "boardFlushViewed", "boardWithSnap", "boardScroller", "boardLivePanels", "boardPanelMap", "boardViewedPanels", "boardStageSnap", "boardExposureUnits", "boardReleaseDue", "boardPendingNames", "boardHome", "boardStageTop")
 }
 
 func TestBoardViewedCrossTopicInsertion(t *testing.T) {

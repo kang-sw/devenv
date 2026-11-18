@@ -30,7 +30,8 @@
     var el = region(name);
     if (!el) return;
     var board = name === "board";
-    if (el.getAttribute("data-h") === hash && !(board && Object.keys(boardPending).length)) { if (board) deferred = null; if (name === "rail") { if (railGate) railGate.forget(); if (typeof html !== "string") railRendered = html; } if (name === "tree" && typeof html !== "string") treeRendered = html; if (name === "entries" && typeof html !== "string") entryRendered = html; if (name === "panels" && typeof html !== "string") panelRendered = html; return; }
+    if (board && boardReturnTimer) still = true;
+    if (el.getAttribute("data-h") === hash && !(board && Object.keys(boardPending).length)) { if (board) { deferred = null; boardReturnApply(); } if (name === "rail") { if (railGate) railGate.forget(); if (typeof html !== "string") railRendered = html; } if (name === "tree" && typeof html !== "string") treeRendered = html; if (name === "entries" && typeof html !== "string") entryRendered = html; if (name === "panels" && typeof html !== "string") panelRendered = html; return; }
     if (board && window.WsOverview && window.WsOverview.holding()) { boardOverviewHeld = { hash: hash, html: html }; return; }
     if (board && editing()) { deferred = { hash: hash, html: html }; return; }
     if (board && window.WsCards && window.WsCards.dragging && window.WsCards.dragging()) { boardDragHeld = { hash: hash, html: html }; return; }
@@ -173,6 +174,7 @@
       scroll.forEach(function (p) { if ((p[0] === $('bcol') || p[0] === doc.scrollingElement) && p[1] > 4 && p[0].scrollTop <= 4) boardHomeWrites.add(p[0]); });
       boardRecordPending(); boardPendingBadge(); boardHoldIndicators();
       boardExposedUnits = Object.keys(boardPending).length ? boardWithSnap(boardExposureUnits) : null;
+      if (!boardRelease) boardReturnApply();
     }
     if (pin) pinConvo();
     if (live && TAB[name] && !tabShown(TAB[name])) {
@@ -211,6 +213,7 @@
   var boardChanges = [], boardOffered = null, boardReleaseFrame = 0, boardScrollTimer = 0, boardHomeWrites = new WeakSet();
   var boardPaged = Object.create(null), boardPagedEdits = [];
   var boardTopHeld = Object.create(null), boardTopOrder = null;
+  var boardReturnTimer = 0, boardReturnFresh = false;
   function topicKey(n) {
     return n.nodeType === 1 && n.tagName === "SECTION" && n.classList.contains("topic") && n.hasAttribute("data-topic") ? n.getAttribute("data-topic") : null;
   }
@@ -1330,17 +1333,35 @@
     pill.home = boardHome;
     // Explicit board navigation acknowledges the same staged snapshot as home,
     // without starting a competing scroll-to-top operation.
-    pill.apply = function (retry) {
-      if (!Object.keys(boardPending).length) return true;
-      var overview = window.WsOverview;
-      if (overview && overview.holding()) {
-        if (retry) overview.after(retry);
-        return false;
-      }
-      boardFlushViewed(true);
-      return true;
-    };
+    pill.apply = boardApplyPending;
     if (pill.update) pill.update();
+  }
+  function boardApplyPending(retry) {
+    if (!Object.keys(boardPending).length) return true;
+    var overview = window.WsOverview;
+    if (overview && overview.holding()) {
+      if (retry) overview.after(retry);
+      return false;
+    }
+    boardFlushViewed(true);
+    return true;
+  }
+  // Only a cached shell frame's return gets this exemption, not a browser
+  // tab visibility change. Restore may apply old held bytes first; keep the
+  // window for the reconnect's first snapshot (or a bounded no-change wait).
+  function boardReturnShown() {
+    boardReturnEnd();
+    boardReturnTimer = setTimeout(boardReturnEnd, 1500);
+    boardReturnApply();
+  }
+  function boardReturnEnd() {
+    clearTimeout(boardReturnTimer);
+    boardReturnTimer = 0;
+    boardReturnFresh = false;
+  }
+  function boardReturnApply() {
+    if (!boardReturnTimer) return;
+    if (boardApplyPending(boardReturnApply) && boardReturnFresh && !Object.keys(boardPending).length) boardReturnEnd();
   }
   function boardFlash(names, inView) {
     boardBoxes().forEach(function (box) {

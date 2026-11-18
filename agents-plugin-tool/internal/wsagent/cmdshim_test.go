@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +19,24 @@ var piShimScript = filepath.Join("node_modules", "@earendil-works", "pi-coding-a
 func readPiShim(t *testing.T) string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", "npm-cmd-shim-pi.cmd"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "\r\n") {
+		t.Fatal("the fixture lost its CRLF line endings")
+	}
+	return string(b)
+}
+
+// claudeShimExe is where the Claude fixture shim's exe resolves, relative
+// to the shim's directory.
+var claudeShimExe = filepath.Join("node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe")
+
+// readClaudeShim reads the fixture: a verbatim npm-generated claude.cmd for
+// the native-binary @anthropic-ai/claude-code package.
+func readClaudeShim(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", "npm-cmd-shim-claude.cmd"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,12 +103,63 @@ func TestCmdShimArgvRefusesWhatIsNotANodeShim(t *testing.T) {
 		"other interpreter": strings.ReplaceAll(readPiShim(t), `SET "_prog=node"`, `SET "_prog=sh"`),
 		"no launch line":    strings.ReplaceAll(readPiShim(t), "%*", ""),
 	} {
-		if _, _, err := cmdShimArgv(shim, text, func(string) bool { return true }); err == nil || !strings.Contains(err.Error(), shim) {
+		if _, _, err := cmdShimArgv(shim, text, func(string) bool { return true }); !errors.Is(err, errShimRefused) || !strings.Contains(err.Error(), shim) {
 			t.Errorf("%s: want a refusal naming %s, got %v", name, shim, err)
 		}
 	}
 	if _, _, err := cmdShimArgv(shim, readPiShim(t), never); err == nil || !strings.Contains(err.Error(), shim) {
 		t.Errorf("a shim with no node beside it or on PATH: want a refusal naming %s, got %v", shim, err)
+	}
+}
+
+func TestCmdShimArgvUnwrapsTheExeShim(t *testing.T) {
+	setLookPath(t, func(string) (string, error) { return "", exec.ErrNotFound })
+	dir := t.TempDir()
+	shim := filepath.Join(dir, "claude.cmd")
+	exe := filepath.Join(dir, claudeShimExe)
+	crlf := readClaudeShim(t)
+	for name, text := range map[string]string{
+		"crlf":      crlf,
+		"lf":        strings.ReplaceAll(crlf, "\r\n", "\n"),
+		"upper ext": strings.ReplaceAll(crlf, "claude.exe", "claude.EXE"),
+	} {
+		want := exe
+		if name == "upper ext" {
+			want = filepath.Join(dir, strings.TrimSuffix(claudeShimExe, ".exe")+".EXE")
+		}
+		exists := func(path string) bool { return path == want }
+		prog, args, err := cmdShimArgv(shim, text, exists)
+		if err != nil || prog != want || args != nil {
+			t.Errorf("%s: got %q %q %v, want %q and no leading args", name, prog, args, err, want)
+		}
+	}
+}
+
+// TestCmdShimArgvRefusesExeShimEdges: an exe shim is unwrapped only when its
+// target exists inside the shim's directory and runs with exactly %*.
+func TestCmdShimArgvRefusesExeShimEdges(t *testing.T) {
+	setLookPath(t, func(string) (string, error) { return "", exec.ErrNotFound })
+	shim := filepath.Join(t.TempDir(), "claude.cmd")
+	always := func(string) bool { return true }
+	launch := `"%dp0%\node_modules\@anthropic-ai\claude-code\bin\claude.exe"   %*`
+	if !strings.Contains(readClaudeShim(t), launch) {
+		t.Fatal("the fixture lost its launch line")
+	}
+	for name, line := range map[string]string{
+		"parent segment": `"%dp0%\..\claude.exe" %*`,
+		"volume":         `"%dp0%\C:\claude.exe" %*`,
+		"rooted":         `"%dp0%\\server\claude.exe" %*`,
+		"extra args":     `"%dp0%\claude.exe" --flag %*`,
+		"not an exe":     `"%dp0%\claude.js" %*`,
+		"no dp0":         `"C:\bin\claude.exe" %*`,
+	} {
+		text := strings.ReplaceAll(readClaudeShim(t), launch, line)
+		if _, _, err := cmdShimArgv(shim, text, always); !errors.Is(err, errShimRefused) || !strings.Contains(err.Error(), shim) {
+			t.Errorf("%s: want a refusal naming %s, got %v", name, shim, err)
+		}
+	}
+	if _, _, err := cmdShimArgv(shim, readClaudeShim(t), func(string) bool { return false }); !errors.Is(err, errShimRefused) || !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("a missing exe target: want a refusal, got %v", err)
 	}
 }
 
@@ -123,6 +193,41 @@ func TestHarnessCommandOnWindowsUnwrapsAShim(t *testing.T) {
 	}
 	if prog, pre, err := harnessCommand("", "claude"); err != nil || prog != exe || pre != nil {
 		t.Errorf("an .exe passes through, got %q %q %v", prog, pre, err)
+	}
+	claudeShim := filepath.Join(dir, "claude.cmd")
+	if err := os.WriteFile(claudeShim, []byte(readClaudeShim(t)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, claudeShimExe)
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if prog, pre, err := harnessCommand(claudeShim, "claude"); err != nil || prog != target || pre != nil {
+		t.Errorf("the npm claude.cmd unwraps to its exe, got %q %q %v, want %q", prog, pre, err, target)
+	}
+}
+
+// TestHarnessCommandRefusalNamesARemedy: a refused shim's error names the
+// shim and a remedy for the harness being started; only Claude's names
+// claude.exe.
+func TestHarnessCommandRefusalNamesARemedy(t *testing.T) {
+	setHostWindows(t, true)
+	setLookPath(t, func(name string) (string, error) { return name, nil })
+	dir := t.TempDir()
+	bad := filepath.Join(dir, "harness.cmd")
+	if err := os.WriteFile(bad, []byte("@echo off\r\nharness.exe %*\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := harnessCommand(bad, "claude")
+	if err == nil || !strings.Contains(err.Error(), bad) || !strings.Contains(err.Error(), "native claude.exe") || !strings.Contains(err.Error(), "ahead of "+dir+" on PATH") {
+		t.Errorf("claude: want a refusal naming %s and the claude.exe remedy, got %v", bad, err)
+	}
+	_, _, err = harnessCommand(bad, "pi")
+	if err == nil || !strings.Contains(err.Error(), bad) || !strings.Contains(err.Error(), "install pi's native build") || strings.Contains(err.Error(), "claude") {
+		t.Errorf("pi: want a refusal naming %s with a neutral remedy, got %v", bad, err)
 	}
 }
 

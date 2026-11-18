@@ -1171,8 +1171,9 @@ func TestClaudeLeadArgs(t *testing.T) {
 	spec.Env = []string{"CLAUDE_CONFIG_DIR=" + t.TempDir()}
 	spec.Lead.PermissionMode = "plan"
 	spec.Model, spec.Effort, spec.SessionID = "opus", "high", "sess-1"
-	// What a profile conversation holds back must not reach a lead's
-	// command line even when the spec carries it.
+	// The instruction file (the hosted key) appends to the lead's prompt;
+	// the MCP config a profile conversation replaces must not reach a
+	// lead's command line even when the spec carries it.
 	spec.Instructions = "/sess/instructions.md"
 	spec.WSMCP = &MCPCommand{Command: "/bin/ws-mcp"}
 	args, err := claudeArgs(spec)
@@ -1180,7 +1181,7 @@ func TestClaudeLeadArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, banned := range []string{"--setting-sources", "--strict-mcp-config", "--mcp-config", "--tools", "--allowedTools", "--disable-slash-commands",
-		"--append-system-prompt-file", "--bare", "--system-prompt", "--dangerously-skip-permissions", "--no-session-persistence"} {
+		"--append-system-prompt", "--bare", "--system-prompt", "--system-prompt-file", "--dangerously-skip-permissions", "--no-session-persistence"} {
 		if slices.Contains(args, banned) {
 			t.Fatalf("a lead's args must not carry %s: %v", banned, args)
 		}
@@ -1195,6 +1196,7 @@ func TestClaudeLeadArgs(t *testing.T) {
 		"--permission-prompt-tool": "stdio", "--permission-mode": "plan",
 		"--model": "opus", "--effort": "high", "--resume": "sess-1",
 		"--plugin-dir": bundle, "--settings": `{"enabledPlugins":{}}`,
+		"--append-system-prompt-file": "/sess/instructions.md",
 	} {
 		if got, ok := flagValue(args, flag); !ok || got != want {
 			t.Fatalf("%s = %q (present %v), want %q", flag, got, ok, want)
@@ -1213,7 +1215,7 @@ func TestClaudeLeadArgs(t *testing.T) {
 	if got, _ := flagValue(plain, "--permission-prompt-tool"); got != "stdio" {
 		t.Fatalf("--permission-prompt-tool = %q", got)
 	}
-	for _, absent := range []string{"--resume", "--model", "--effort"} {
+	for _, absent := range []string{"--resume", "--model", "--effort", "--append-system-prompt-file"} {
 		if slices.Contains(plain, absent) {
 			t.Fatalf("a new lead session with no choices carries no %s: %v", absent, plain)
 		}

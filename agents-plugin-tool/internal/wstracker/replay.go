@@ -27,6 +27,7 @@ type node struct {
 	succs                 []*node
 
 	status, reason       string // applied | flagged | waiting
+	causalStatus         string // verdict before final-fold concurrency flags
 	ignored              bool
 	clash                bool // flagged only by the fold-order label-name clash; still in later causal-past checks
 	markers              []marker
@@ -104,6 +105,7 @@ type replayed struct {
 	structPos             []int // item.create and item.move: the item tree
 	threadPos, commentPos map[string][]int
 	rolesOnly             bool // judge and fold only roles and identity events
+	memo                  *foldMemo
 }
 
 // replay validates and folds the events one clone holds. conc is the
@@ -119,6 +121,10 @@ func replayRoles(events []wsledger.Event, genesisRaw json.RawMessage, conc func(
 }
 
 func replayWith(events []wsledger.Event, genesisRaw json.RawMessage, conc func(a, b wsledger.EventID) bool, rolesOnly bool) *replayed {
+	return replayBuild(events, genesisRaw, conc, rolesOnly, false)
+}
+
+func replayBuild(events []wsledger.Event, genesisRaw json.RawMessage, conc func(a, b wsledger.EventID) bool, rolesOnly, tracked bool) *replayed {
 	r := &replayed{g: parseGenesis(genesisRaw), byID: map[string]*node{}, heads: map[string]int{},
 		threadPos: map[string][]int{}, commentPos: map[string][]int{}, rolesOnly: rolesOnly}
 	r.hb = func(x, y *node) bool {
@@ -148,10 +154,15 @@ func replayWith(events []wsledger.Event, genesisRaw json.RawMessage, conc func(a
 	}
 	r.linearize(all, streams)
 	r.verdicts(all)
-	r.S = newState(r.g, r.hb, true)
-	for _, n := range r.order {
-		if n.status == "applied" {
-			r.S.apply(n)
+	if tracked {
+		r.memo = newFoldMemo(r)
+		r.foldFrom(0, nil)
+	} else {
+		r.S = newState(r.g, r.hb, true)
+		for _, n := range r.order {
+			if n.status == "applied" {
+				r.S.apply(n)
+			}
 		}
 	}
 	r.threads()
@@ -234,6 +245,12 @@ func (r *replayed) linearize(all []*node, streams map[string]map[int]*node) {
 			i++
 		}
 	}
+	r.indexOrder()
+}
+
+func (r *replayed) indexOrder() {
+	r.rolesPos, r.assignPos, r.structPos = nil, nil, nil
+	r.threadPos, r.commentPos = map[string][]int{}, map[string][]int{}
 	for _, n := range r.order {
 		switch {
 		case isRoles(n.typ):
@@ -261,21 +278,31 @@ func (r *replayed) linearize(all []*node, streams map[string]map[int]*node) {
 // Valid stands; a protocol-Valid domain event is judged against the state
 // folded from its causal past.
 func (r *replayed) verdicts(all []*node) {
+	r.verdictsFrom(all, 0)
+}
+
+func (r *replayed) verdictsFrom(all []*node, start int) {
 	// lf folds only the applied label-list events, in fold order: a label
 	// name two admins add or rename to concurrently passes both causal
 	// checks, and the later one in fold order is flagged here, so the list
 	// never holds a name twice.
 	lf := newState(r.g, r.hb, false)
-	for _, n := range r.order {
+	for _, n := range r.order[:start] {
+		if n.causalStatus == "applied" && isLabelList(n.typ) {
+			lf.apply(n)
+		}
+	}
+	for _, n := range r.order[start:] {
+		n.status, n.reason, n.ignored, n.clash = "", "", false, false
 		if r.rolesOnly && !isRoles(n.typ) {
-			n.status = "skipped"
+			n.status, n.causalStatus = "skipped", "skipped"
 			continue
 		}
 		switch n.ev.Verdict {
 		case wsledger.Valid:
 			n.status = "applied"
 			if !isIdentity(n.typ) {
-				if rej := r.stateBefore(n).check(n); rej != "" {
+				if rej := r.stateBeforeMode(n, true).check(n); rej != "" {
 					n.status, n.reason = "flagged", string(rej)
 				} else if isLabelList(n.typ) {
 					if rej := lf.labelClash(n); rej != "" {
@@ -290,11 +317,13 @@ func (r *replayed) verdicts(all []*node) {
 		default:
 			n.status, n.reason = "flagged", n.ev.Reason
 		}
+		n.causalStatus = n.status
 	}
 	for _, n := range all {
 		if n.pos >= 0 {
 			continue
 		}
+		n.ignored, n.clash = false, false
 		switch n.ev.Verdict {
 		case wsledger.Waiting:
 			n.status, n.reason = "waiting", n.ev.Reason
@@ -305,6 +334,7 @@ func (r *replayed) verdicts(all []*node) {
 			n.status, n.reason = "flagged", n.ev.Reason
 			n.ignored = n.ev.Verdict == wsledger.Ignored
 		}
+		n.causalStatus = n.status
 	}
 }
 
@@ -317,6 +347,14 @@ func (r *replayed) verdicts(all []*node) {
 // flagged only by the fold-order name clash folds here too: n's writer saw
 // it, and only the list drops it.
 func (r *replayed) stateBefore(n *node) *state {
+	return r.stateBeforeMode(n, false)
+}
+
+// Causal checks run before the final fold in a zero replay. A resumed
+// check must likewise see the prefix's causal verdicts, not foldFlag's
+// later rejections of concurrent claims, approvals, openings or moves.
+// Other callers retain stateBefore's existing final-verdict semantics.
+func (r *replayed) stateBeforeMode(n *node, causal bool) *state {
 	rel := map[string]bool{}
 	var lists [][]int
 	lists = append(lists, r.rolesPos, r.assignPos)
@@ -360,7 +398,11 @@ func (r *replayed) stateBefore(n *node) *state {
 		}
 		last = pos
 		x := r.order[pos]
-		if x.status != "applied" && !x.clash {
+		status := x.status
+		if causal {
+			status = x.causalStatus
+		}
+		if status != "applied" && !x.clash {
 			continue
 		}
 		if x.typ == TypeItemAssign && !rel[x.p.str("item")] {

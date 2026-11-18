@@ -112,7 +112,7 @@ func (t *dashboardTracker) Stores() ([]wsdashboard.TrackerStore, error) {
 	if t.err != nil {
 		return nil, redacted(t.err)
 	}
-	entries, err := t.h.Stores()
+	entries, err := t.h.StoreSnapshot()
 	if err != nil {
 		return nil, redacted(err)
 	}

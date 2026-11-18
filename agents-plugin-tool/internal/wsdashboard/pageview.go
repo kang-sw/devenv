@@ -201,6 +201,8 @@ type TreeView struct {
 	// Running, Finished, and Failed count the agents by status.
 	Running, Finished, Failed int
 	Peers                     PeerGroup
+	CompactAgents             []AgentNode
+	Subagents                 SubagentCount
 }
 
 // RunningAgents and EndedAgents split the top-level subagents into the
@@ -437,7 +439,14 @@ type SubagentCount struct {
 // session's running agents, at every depth and through its own delegates,
 // to Deep; a session already counted (self included) is not counted again.
 func subagentCounts(self string, agents []wslive.Agent, lookup sessionLookup, now time.Time) SubagentCount {
+	c, _ := subagentProjection(self, agents, lookup, now)
+	return c
+}
+
+// subagentProjection keeps the compact roster and its badge counts in lockstep.
+func subagentProjection(self string, agents []wslive.Agent, lookup sessionLookup, now time.Time) (SubagentCount, []AgentNode) {
 	var c SubagentCount
+	var rows []AgentNode
 	visited := map[string]bool{self: true}
 	var linked func(agents []wslive.Agent)
 	linked = func(agents []wslive.Agent) {
@@ -453,6 +462,7 @@ func subagentCounts(self string, agents []wslive.Agent, lookup sessionLookup, no
 				for _, b := range snap.Agents {
 					if b.Status == wslive.StatusRunning {
 						c.Deep++
+						rows = append(rows, AgentNode{Agent: b})
 					}
 				}
 				linked(snap.Agents)
@@ -467,6 +477,7 @@ func subagentCounts(self string, agents []wslive.Agent, lookup sessionLookup, no
 		if a.Status != wslive.StatusRunning {
 			continue
 		}
+		rows = append(rows, AgentNode{Agent: a})
 		if a.ParentID != "" && a.ParentID != a.ID && known[a.ParentID] {
 			c.Deep++
 		} else {
@@ -474,12 +485,14 @@ func subagentCounts(self string, agents []wslive.Agent, lookup sessionLookup, no
 		}
 	}
 	linked(agents)
-	return c
+	return c, rows
 }
 
 // ConvEntry is one conversation ring entry as the page shows it.
 type ConvEntry struct {
 	wslive.RingEntry
+	// BoardTargets is render-only attribution from the current in-memory board.
+	BoardTargets map[string]string
 	// Key is the ring entry's file name, the element key the page keeps an
 	// expanded mail line open by.
 	Key string
@@ -675,6 +688,7 @@ func buildSessionView(in pageInputs) SessionView {
 			contacts := resolvedContacts(in.Page.Contacts, reg.ReplyID)
 			v.Conversation = conversation(wslive.Lead{}, in.Ring, in.Page.MailBodies, contacts, in.Lookup, replyMarkdown(reg.Project, reg.ReplyID), reg.ReplyID)
 			splitUserEntries(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
+			attributeBoardNavigation(&v.Conversation, in.Page.BoardTargets)
 		}
 		return v
 	}
@@ -700,8 +714,10 @@ func buildSessionView(in pageInputs) SessionView {
 	v.Conversation = conversation(in.Snapshot.Lead, in.Ring, in.Page.MailBodies, contacts, lookup, replyMarkdown(reg.Project, reg.ReplyID), reg.ReplyID)
 	splitUserEntries(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
 	v.Conversation.Held = heldViews(in.Held, in.AttachDir, reg.ReplyID)
+	attributeBoardNavigation(&v.Conversation, in.Page.BoardTargets)
 	v.Conversation.Sent = sentMarks(in.Drained, in.Held, in.Page.Reasked, settledTurnStart(in.Ring))
-	v.Conversation.Subagents = subagentCounts(reg.ReplyID, in.Snapshot.Agents, lookup, in.Now)
+	v.Tree.Subagents, v.Tree.CompactAgents = subagentProjection(reg.ReplyID, in.Snapshot.Agents, lookup, in.Now)
+	v.Conversation.Subagents = v.Tree.Subagents
 	return v
 }
 

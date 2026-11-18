@@ -1,4 +1,5 @@
-// The session's agents popover (agpop) in Chromium, through the shell page.
+// The session's agents island (agisland, top-right in the conversation
+// cell; its full view is agpop) in Chromium, through the shell page.
 // env: AGPOP_BASE (daemon), AGPOP_UPDATES (swaps the agents region with a new
 // caption or state=zero/nonlive fixture), AGPOP_ROWS ({keys, peers}: every row the agents region renders),
 // AGPOP_SHOTS (optional screenshot directory).
@@ -18,20 +19,28 @@ async function open(b, { width, scheme = 'dark', height = 900, ctx }) {
   await tab.waitForTimeout(500);
   return { ctx, tab, frame, errors };
 }
-const state = (frame) => frame.evaluate(() => {
-  const pop = document.getElementById('agpop'), badge = document.getElementById('sbadge');
-  const r = pop.getBoundingClientRect(), br = badge.getBoundingClientRect();
-  return { open: !pop.hidden, expanded: badge.getAttribute('aria-expanded'), pinned: document.getElementById('agpin').getAttribute('aria-pressed'),
-    rect: { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width }, badgeTop: br.top, vw: innerWidth, vh: innerHeight, label: badge.textContent.trim() };
-});
+// open is the full view's state; island and convo are the island's visible
+// box and the conversation grid cell it overlays, after its size transition.
+const state = async (frame) => {
+  await frame.waitForTimeout(300);
+  return frame.evaluate(() => {
+    const pop = document.getElementById('agpop'), badge = document.getElementById('sbadge'), island = document.getElementById('agisland');
+    const box = el => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width }; };
+    return { open: !pop.hidden, mode: island.getAttribute('data-mode'), expanded: badge.getAttribute('aria-expanded'), pinned: document.getElementById('agpin').getAttribute('aria-pressed'),
+      island: box(island), shown: island.getClientRects().length > 0, convo: box(document.getElementById('convo')), vw: innerWidth, vh: innerHeight, label: badge.textContent.trim() };
+  });
+};
 const shot = async (tab, name) => {
   if (!shots) return;
   await tab.mouse.move(1, 1);
   await tab.screenshot({ path: `${shots}/${name}.png` });
 };
 const fits = (s, what) => {
-  assert(s.rect.left >= 0 && s.rect.right <= s.vw && s.rect.top >= 0, `${what}: popover leaves the viewport ${JSON.stringify(s)}`);
-  assert(s.rect.bottom <= s.badgeTop, `${what}: popover covers the badge ${JSON.stringify(s)}`);
+  const i = s.island, c = s.convo;
+  assert(s.shown && s.mode === 'full', `${what}: the island is shown in full ${JSON.stringify(s)}`);
+  assert(i.left >= 0 && i.right <= s.vw && i.top >= 0 && i.bottom <= s.vh, `${what}: island leaves the viewport ${JSON.stringify(s)}`);
+  assert(i.left >= c.left - 1 && i.right <= c.right + 1 && i.top >= c.top - 1, `${what}: island leaves the conversation cell ${JSON.stringify(s)}`);
+  assert(c.right - i.right <= 12 && i.top - c.top <= 12, `${what}: island sits away from the cell's top-right corner ${JSON.stringify(s)}`);
 };
 
 (async () => {
@@ -49,12 +58,12 @@ const fits = (s, what) => {
       assert(!s.open && s.expanded === 'false', 'closed at load');
       assert.match(s.label, /^2\(\+1\)\s*실행 중$/, 'badge shows the running count');
       await shot(tab, `closed-${scheme}-1440`);
-      // Open: popover above the badge, in the viewport.
+      // Open: the island expands to full, top-right in the conversation cell.
       await frame.click('#sbadge');
       s = await state(frame);
-      assert(s.open && s.expanded === 'true', 'badge opens the popover');
+      assert(s.open && s.expanded === 'true', 'badge opens the island');
       fits(s, scheme + ' 1440');
-      // Every row the agents region renders is in the popover, and none outside.
+      // Every row the agents region renders is in the island's full view, and none outside.
       const loss = await frame.evaluate((rows) => ({
         missing: rows.keys.filter(k => !document.querySelector(`#agpop details[data-key="${k}"]`)),
         outside: [...document.querySelectorAll('details[data-key^="agent-"]')].filter(d => !d.closest('#agpop')).length,
@@ -110,8 +119,8 @@ const fits = (s, what) => {
       await frame.waitForFunction((c) => document.getElementById('r-tree').textContent.includes(c), scheme + '-swap');
       assert.equal(await frame.evaluate(() => document.querySelector('#agpop details[data-key="agent-a1"]').open), true, 'row stays open across a swap');
       assert.equal(await shown(), 7, 'full output survives a swap');
-      assert.equal((await state(frame)).open, true, 'popover stays open across a swap');
-      // Esc, outside click and the close button close it.
+      assert.equal((await state(frame)).open, true, 'island stays open across a swap');
+      // Esc, outside click and the close button collapse it.
       await tab.keyboard.press('Escape');
       assert.equal((await state(frame)).open, false, 'Esc closes');
       await frame.click('#sbadge');
@@ -123,15 +132,18 @@ const fits = (s, what) => {
       await frame.click('#sbadge');
       await frame.click('#agclose');
       assert.equal((await state(frame)).open, false, 'close button closes');
-      // Pin: Esc and outside clicks leave it open; it opens again on reload.
+      // Pin: an outside click leaves it open, Esc still collapses it, and it
+      // opens again on reload.
       await frame.click('#sbadge');
       await frame.click('#agpin');
       assert.notEqual(await frame.evaluate(() => getComputedStyle(document.querySelector('#agpin svg')).fill), 'none', 'a pinned pushpin is filled');
       await shot(tab, `pinned-${scheme}-1440`);
-      await tab.keyboard.press('Escape');
       await frame.click('#convo', { position: { x: 60, y: 120 } });
       s = await state(frame);
-      assert(s.open && s.pinned === 'true', 'pinned popover stays open: ' + JSON.stringify(s));
+      assert(s.open && s.pinned === 'true', 'pinned island stays open on an outside click: ' + JSON.stringify(s));
+      await tab.keyboard.press('Escape');
+      s = await state(frame);
+      assert(!s.open && s.pinned === 'true', 'Esc collapses a pinned island and keeps the pin: ' + JSON.stringify(s));
       await tab.close();
       let again = await open(b, { width: 1440, scheme, ctx });
       s = await state(again.frame);
@@ -145,8 +157,9 @@ const fits = (s, what) => {
       await ctx.close();
       out[scheme] = 'ok';
     }
-    // Narrow screens: the same popover shrunk to the viewport; the board tab
-    // keeps the badge and the popover.
+    // Narrow screens: the same island shrunk to the conversation cell. The
+    // board tab keeps the badge, but in the one-column layout the island
+    // overlays the conversation cell, which that tab hides, so it hides too.
     for (const [width, scheme] of [[700, 'dark'], [700, 'light'], [420, 'dark']]) {
       const { ctx, tab, frame } = await open(b, { width, scheme });
       await shot(tab, `closed-${scheme}-${width}`);
@@ -154,9 +167,10 @@ const fits = (s, what) => {
       let s = await state(frame);
       assert(s.open, `${width}: opens`);
       fits(s, `${scheme} ${width}`);
-      assert(s.rect.width <= s.vw - 16, `${width}: popover narrower than the viewport ${JSON.stringify(s.rect)}`);
+      assert(s.island.width <= s.vw - 16, `${width}: island narrower than the viewport ${JSON.stringify(s.island)}`);
+      out[width + scheme] = { width: Math.round(s.island.width), vw: s.vw };
       // The title text node follows the header icon.
-      assert.equal(await frame.evaluate(() => { const r = document.createRange(); r.selectNodeContents(document.querySelector('#agpop .thead').childNodes[1]); return r.getClientRects().length; }), 1, `${width}: the popover title stays on one line`);
+      assert.equal(await frame.evaluate(() => { const r = document.createRange(); r.selectNodeContents(document.querySelector('#agpop .thead').childNodes[1]); return r.getClientRects().length; }), 1, `${width}: the island title stays on one line`);
       await frame.click('#agpop details[data-key="agent-a1"] > summary');
       await shot(tab, `open-${scheme}-${width}`);
       await frame.click('#agclose');
@@ -165,14 +179,12 @@ const fits = (s, what) => {
         assert(await frame.isVisible('#sbadge'), `${width}: board tab keeps the badge`);
         await frame.click('#sbadge');
         s = await state(frame);
-        assert(s.open, `${width}: board tab opens the popover`);
-        fits(s, `${scheme} ${width} board`);
+        assert(s.open && !s.shown, `${width}: the board tab hides the island with the conversation cell ${JSON.stringify(s)}`);
         if (scheme === 'dark') await shot(tab, `board-open-${scheme}-${width}`);
       }
-      out[width + scheme] = { width: Math.round(s.rect.width), vw: s.vw };
       await ctx.close();
     }
-    // No running subagents: the badge remains a muted, usable popover
+    // No running subagents: the badge remains a muted, usable island
     // trigger. A draft retains the same DOM when the adapter goes away,
     // exercising syncBadge with liveMode=false rather than reloading it.
     {
@@ -196,7 +208,7 @@ const fits = (s, what) => {
         assert.equal((await state(frame)).open, false, `${what}: starts closed`);
         await frame.click('#sbadge');
         const s = await state(frame);
-        assert(s.open && s.expanded === 'true', `${what}: zero badge opens the popover`);
+        assert(s.open && s.expanded === 'true', `${what}: zero badge opens the island`);
         assert(await frame.isVisible('#agpop details[data-key="agent-ended"]'), `${what}: ended agent is accessible`);
         fits(s, what);
         await shot(tab, `${what}-1440`);
