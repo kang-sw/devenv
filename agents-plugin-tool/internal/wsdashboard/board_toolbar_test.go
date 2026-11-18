@@ -33,7 +33,7 @@ func TestBoardToolbarPlacementAndCounts(t *testing.T) {
 	cards, _ := json.Marshal(mustAsset(t, "cards.js"))
 	runNode(t, "board toolbar", "var CARDS = "+string(cards)+";\n"+cardsDOM+`
 var A, B, X, moreBtn, calls = [], options = { toolbar: {
-  overview: function () { calls.push("overview"); }, search: function () { calls.push("search"); }, files: function () { calls.push("files"); }
+  overview: function () { calls.push("overview"); }, download: function () { calls.push("download"); }, files: function () { calls.push("files"); }
 } };
 function served() {
   A = topic("a", 300); B = topic("b", 200); X = topic("x", 0, true);
@@ -48,10 +48,10 @@ check("separate count removed", bar.querySelector(".board-count"), null);
 first("toolbar first on a narrow board");
 check("toolbar precedes pins", bar.nextSibling === pins, true);
 check("not a card or rail item", [page.W.is(bar), bar.hasAttribute("data-rail"), bar.querySelectorAll(".tpin, .bc-hd").length], [false, false, 0]);
-check("button order and terminal slot", bar.querySelector(".board-tools").children.map(function (n) { return n.className; }), ["board-action board-overview", "board-term-slot", "board-web-slot", "board-action board-search", "board-action board-files", "board-state-filter"]);
+check("button order and terminal slot", bar.querySelector(".board-tools").children.map(function (n) { return n.className; }), ["board-action board-overview", "board-term-slot", "board-web-slot", "board-action board-download", "board-action board-files", "board-state-filter"]);
 check("overview starts unpressed", bar.querySelector(".board-overview").getAttribute("aria-pressed"), "false");
-["overview", "search", "files"].forEach(function (name) { bar.querySelector(".board-" + name).fire("click", {}); });
-check("overview and search use mount callbacks; Files without an explorer is inert", calls, ["overview", "search"]);
+["overview", "download", "files"].forEach(function (name) { bar.querySelector(".board-" + name).fire("click", {}); });
+check("overview and download use mount callbacks; Files without an explorer is inert", calls, ["overview", "download"]);
 check("open topics plus closed shown and remainder", count(), "open 2 · closed 8");
 var insert = page.board.insertBefore, remove = page.board.removeChild;
 page.board.insertBefore = function (n, ref) { if (n === bar) moves++; return insert.call(this, n, ref); };

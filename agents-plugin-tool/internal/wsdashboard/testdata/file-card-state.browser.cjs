@@ -137,7 +137,7 @@ const route = '/w/' + root.replace(/^\//, '').split('/').map(encodeURIComponent)
     });
     await page.locator('#fixture-board-link').click();
     const boardPreview = await wait('worktree_page.go', 'preview');
-    await page.locator('.board-search').click();
+    await page.locator('#tkqs').click();
     await page.locator('#tkqin').fill('worktree_page_test');
     const result = page.locator('[data-qs="files"][data-qi]').filter({ hasText: 'worktree_page_test.go' });
     await result.first().click().catch(async e => {
