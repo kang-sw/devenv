@@ -134,8 +134,14 @@ How each playbook's diet runs, so a later session resumes it as is:
   `cutStaticBody` tests (Node) anchor on removed text. The last
   `internal/mcp` run after the final test edit was the targeted
   `Whiteboard|Tracker|Playbook|Manual` subset only.
-- Next: `lead-run` (add the trivial-ticket pointer), `ticket-handler`,
-  `lead-review`, `lead-ship`.
+- `lead-run`: done (6a285f281), 1786 → 1342 words; `worker-stop-protocol.md`
+  1123 → 1134. Trivial-ticket pointer (85) added. The worker report gained
+  `blocker`, `ask`, `tell_user`, and `resume`, which the lead relays in the
+  user's language ((120)=a). Goal-run text removed from both files ((123)=a);
+  the Go route's goal code paths and other worker playbooks' goal mentions
+  are still removed by the epic's run-split ticket. No Go or Pi parser
+  rejects the new report fields.
+- Next: `ticket-handler`, `lead-review`, `lead-ship`.
 
 ## Phases
 
