@@ -146,6 +146,7 @@ func (f FolderStore) LoadArchive(path string, now time.Time) (backup string, top
 	// Opening the extraction memoizes its topic logs in the process-wide
 	// memo; removing the folder does not free them.
 	defer forgetFolderMemo(tmp)
+	defer boardIncarnations.Delete(tmp)
 	if err := extractArchive(path, tmp); err != nil {
 		return "", 0, err
 	}
@@ -238,6 +239,9 @@ func extractEntry(zf *zip.File, target string, budget int64, total *int64) error
 // far is at most the committed sequence, so an open page sees a new stamp
 // and reloads even when the loaded board's sequence is lower.
 func (f FolderStore) replace(next *State, backupBase string) (backup string, topics int, err error) {
+	finish := f.beginIncarnationLoad()
+	var token string
+	defer func() { finish(token, err) }()
 	err = f.locked(func() error {
 		prior, meta, err := f.load(nil)
 		if err != nil {
@@ -275,6 +279,7 @@ func (f FolderStore) replace(next *State, backupBase string) (backup string, top
 		if err := f.commit(intent); err != nil {
 			return err
 		}
+		token = intent.Session.State.LoadedAt
 		topics = len(intent.Session.Topics)
 		if meta != nil {
 			// Best effort: an unreferenced folder a reader still holds open
