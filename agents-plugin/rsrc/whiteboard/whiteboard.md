@@ -462,17 +462,9 @@ idle-turn injection; do not rely on a timer to resume work there.
 
 ## Each turn
 
-After an update, give one terminal line naming its `full:` URL or path and
-any new ask IDs from that turn; omit the ` - ...` suffix when there were no
-new asks. Do not make an update or emit a status line just to fill this
-template on an unchanged turn:
-
-```text
-Whiteboard: <full> - (102), (103)
-```
-
-When the host's instructions give an embed syntax, emit the host's embed line
-for the returned `embed:` in place of the `Whiteboard:` line.
+When the host's instructions give an embed syntax and the turn made an update,
+end the turn with the host's embed line for the returned `embed:`. Do not make
+an update just to emit it.
 
 **While the user is watching the board, put as much of the conversation as practical on it, and do not repeat what the update wrote there in the terminal or chat. The user is watching when their current message starts with `[user message from the {{.McpNamespace}} whiteboard]` or carries a `<ws:user>` envelope, a `<wb:answers>` block, a `<wb:selection>` block, `<wb:mention>` elements or `<wb:close-request>` elements, when the host embeds the board inline in the conversation, or when they say they are watching. Otherwise the chat carries the conversation as usual.** A successful update's result ends with an `info:` line saying the board already shows the content; its text is not repeated in the conversation.
 
