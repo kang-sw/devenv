@@ -62,6 +62,9 @@ type Record struct {
 	Lead bool `json:"lead,omitempty"`
 	// PermissionMode is the permission mode the next process launches in.
 	PermissionMode string `json:"permission_mode,omitempty"`
+	// AgyBypass is ws-side approval intent; PermissionMode stays native.
+	// Keep it top-level so older Record writers retain it as unknown data.
+	AgyBypass bool `json:"agy_bypass,omitempty"`
 	// PluginIsolation selects the lead's plugin loadout across restarts.
 	PluginIsolation string `json:"plugin_isolation,omitempty"`
 	// PluginWarning records a bundled-plugin fallback warning, if any.

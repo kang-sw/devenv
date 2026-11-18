@@ -298,6 +298,12 @@ func (s *Support) listChoices(ctx context.Context, hs []SupportHarness) {
 		if !ok {
 			continue
 		}
+		if reported, ok := cl.(sessionChoiceLister); ok {
+			if models, efforts := reported.sessionChoices(); len(models) > 0 {
+				h.Models, h.Efforts, h.Error = models, efforts, ""
+				continue
+			}
+		}
 		if c, ok := s.cache[h.Harness]; ok && c.fresh(s.opts.Now()) {
 			h.Models, h.Efforts, h.Error = c.models, c.efforts, c.err
 			continue

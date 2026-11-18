@@ -50,9 +50,9 @@ type AgyBackend struct {
 	Command string
 }
 
-// AgyPermissionModes are agy's session modes (session/set_mode): what the
-// dashboard offers a hosted agy lead.
-var AgyPermissionModes = []string{"default", "accept-edits", "auto", "plan"}
+// AgyPermissionModes are the hosted lead choices. bypass is ws-side intent;
+// the process still runs in agy's native default mode.
+var AgyPermissionModes = []string{"default", "accept-edits", "auto", "plan", "bypass"}
 
 // agyEfforts are the thought_level values agy 1.5.9 offers; Choices falls
 // back to them before any session reported its own.
@@ -89,26 +89,17 @@ func (b AgyBackend) Executable() string {
 	return "agy"
 }
 
-// agyChoices holds the model and thought-level values the last opened agy
-// session reported: agy lists its models only inside a session, and
-// listing them by opening one would leave a conversation in the user's
-// agy home.
+// agyChoices holds the last session's model and thought-level report,
+// which wins over the session-less `agy models` listing.
 var agyChoices struct {
 	mu      sync.Mutex
 	models  []ModelChoice
 	efforts []string
 }
 
-// Choices lists the models and thought levels the last agy session
-// reported; before any did, no model and agy 1.5.9's levels.
-func (AgyBackend) Choices(context.Context) ([]ModelChoice, []string, error) {
-	agyChoices.mu.Lock()
-	defer agyChoices.mu.Unlock()
-	efforts := agyChoices.efforts
-	if len(efforts) == 0 {
-		efforts = agyEfforts
-	}
-	return slices.Clone(agyChoices.models), slices.Clone(efforts), nil
+// Choices uses the last session's report, else a session-less listing.
+func (b AgyBackend) Choices(ctx context.Context) ([]ModelChoice, []string, error) {
+	return b.hostedChoices(ctx)
 }
 
 // agyEnv is a lead's environment: the daemon's without the parent harness
@@ -465,7 +456,7 @@ func (p *agyProcess) setConfig(option, value string) error {
 
 // SetPermissionMode sets the session's mode.
 func (p *agyProcess) SetPermissionMode(mode string) error {
-	if !slices.Contains(AgyPermissionModes, mode) {
+	if mode == "bypass" || !slices.Contains(AgyPermissionModes, mode) {
 		return fmt.Errorf("agy has no permission mode %q; its modes are %s", mode, strings.Join(AgyPermissionModes, ", "))
 	}
 	_, err := p.call(agyKindMode, "session/set_mode", map[string]any{"sessionId": p.m.session(), "modeId": mode}, agyControlTimeout)
