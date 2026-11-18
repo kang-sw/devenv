@@ -557,7 +557,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "track/agent-v2",
         "phase": "active",
-        "touched_at": "2026-11-18T14:58:20Z"
+        "touched_at": "2026-11-18T15:00:05Z",
+        "impl": {
+          "branch": "impl/track/agent-v2/yummy-jelly-buzz"
+        }
       }
     },
     "261118-feat-ws-exec-intent-filter": {
