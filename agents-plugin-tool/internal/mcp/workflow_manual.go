@@ -553,6 +553,10 @@ func RenderLeadManual(env []string, root, harness, key string) (string, error) {
 		kept = append(kept, kv)
 	}
 	s := NewServerWithOptions(ServerOptions{Root: root, Env: kept, Harness: harness, Diag: io.Discard})
+	// The render may start the session-start tracker check (a background
+	// fetch); this throwaway server is released once that settles, without
+	// holding up the launch.
+	defer func() { go func() { s.tracker.checks.Wait(); s.Close() }() }()
 	if _, ok := s.sessions.lookup(key); !ok {
 		return "", fmt.Errorf("workflow manual: session key %q has no record", key)
 	}

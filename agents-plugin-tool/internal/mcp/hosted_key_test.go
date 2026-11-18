@@ -112,7 +112,7 @@ func TestHostedSessionKeyFillsAnOmittedKey(t *testing.T) {
 	f := newHostedKeyFixture(t)
 	s := f.connect(t)
 
-	for _, args := range []map[string]any{{}, {"session_key": ""}, {"session_key": " \t "}} {
+	for _, args := range []map[string]any{{}, {"session_key": nil}, {"session_key": ""}, {"session_key": " \t "}} {
 		if refusal := s.hostedSessionKeyRule("todo.list", args); refusal != "" || args["session_key"] != f.hosted {
 			t.Fatalf("todo.list: refusal %q, session_key %q; want the hosted key filled in", refusal, args["session_key"])
 		}

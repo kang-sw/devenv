@@ -16,7 +16,7 @@ const hostedLineageDepth = 16
 
 // hostedSessionKeyRule holds a hosted lead connection's calls to its own
 // session, before anything else reads the call's session_key: an omitted
-// (or blank) session_key is the connection's key, filled in for a tool
+// (or null, or blank) session_key is the connection's key, filled in for a tool
 // whose schema declares one; an explicit key must be the connection's own
 // or a key of one of its descendant sessions (hostedDescendant). It returns
 // the refusal for any other key, "" to proceed. Every other connection,
@@ -30,7 +30,8 @@ func (s *Server) hostedSessionKeyRule(tool string, args map[string]any) string {
 	}
 	raw, present := args["session_key"]
 	key, isString := raw.(string)
-	if !present || (isString && strings.TrimSpace(key) == "") {
+	// A JSON null is how many clients send an optional argument they omit.
+	if !present || raw == nil || (isString && strings.TrimSpace(key) == "") {
 		if toolDeclaresSessionKey(tool) {
 			args["session_key"] = hosted
 		}
