@@ -45,7 +45,7 @@ function environment(pending) {
     loadClosed() { throw Error('applied topic must exist before closed-page lookup'); },
     go() { throw Error('not a session navigation'); }
   });
-  vm.runInContext(['boardPendingNames', 'boardPendingBadge', 'boardFlushViewed', 'boardJump', 'effectTopic', 'effectJump', 'palettePick', 'focusTopicNote'].map(name => func(dashboard, name)).join('') + '\nboardPendingBadge();', context);
+  vm.runInContext(['boardPendingNames', 'boardPendingBadge', 'boardApplyPending', 'boardFlushViewed', 'boardJump', 'effectTopic', 'effectJump', 'palettePick', 'focusTopicNote'].map(name => func(dashboard, name)).join('') + '\nboardPendingBadge();', context);
   context.window.wbHistory = { loadTarget(root, id) {
     assert.equal(Object.keys(context.boardPending).length, 0, 'apply before materialization');
     events.push('load:' + id); return nodes[id] || null;
