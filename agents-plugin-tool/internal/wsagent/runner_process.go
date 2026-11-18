@@ -369,6 +369,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		cmd, err := spec.Lead.WSMCP()
 		if err != nil {
 			fmt.Fprintf(c.r.opts.Log, "agent %s: ws-mcp unavailable, the start is refused: %v\n", rec.ReplyID, err)
+			spec.Lead.WSMCPErr = err
 			break
 		}
 		if rec.Backend == BackendClaude {

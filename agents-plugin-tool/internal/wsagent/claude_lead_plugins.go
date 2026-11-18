@@ -44,7 +44,8 @@ func claudeLeadPluginArgs(spec StartSpec) ([]string, error) {
 // server ReservedMCPServer: over the daemon's HTTP route when the start has
 // a session, else the same server over stdio. There is no
 // --strict-mcp-config, so the user's own MCP servers load beside it. A lead
-// with neither is refused: without a ws plugin it would have no ws tools.
+// with neither is refused, naming why its ws-mcp did not resolve
+// (LeadSpec.WSMCPErr): without a ws plugin it would have no ws tools.
 func claudeLeadMCPArgs(spec StartSpec) ([]string, error) {
 	var entry map[string]any
 	switch {
@@ -53,7 +54,11 @@ func claudeLeadMCPArgs(spec StartSpec) ([]string, error) {
 	case spec.WSMCP != nil:
 		entry = map[string]any{"type": "stdio", "command": spec.WSMCP.Command, "args": spec.WSMCP.Args, "env": spec.WSMCP.Env}
 	default:
-		return nil, errors.New("claude lead: no ws-mcp to attach (the daemon's MCP route and the bundled launcher are both unavailable)")
+		cause := spec.Lead.WSMCPErr
+		if cause == nil {
+			cause = errors.New("the daemon's MCP route and the bundled launcher are both unavailable")
+		}
+		return nil, fmt.Errorf("claude lead: no ws-mcp to attach: %w", cause)
 	}
 	raw, err := json.Marshal(map[string]any{"mcpServers": map[string]any{ReservedMCPServer: entry}})
 	if err != nil {

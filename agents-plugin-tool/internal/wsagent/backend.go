@@ -88,6 +88,9 @@ type LeadSpec struct {
 	PluginWarning func(string)
 	// WSMCP resolves the bundled MCP launcher if Pi needs its bridge fallback.
 	WSMCP func() (MCPCommand, error)
+	// WSMCPErr is why WSMCP gave this start no command, which a Claude
+	// lead's refusal names (claudeLeadMCPArgs).
+	WSMCPErr error
 	// PluginNote is the package fallback warning of the ws-mcp this start
 	// resolved, which a Claude lead reports through PluginWarning.
 	PluginNote string
