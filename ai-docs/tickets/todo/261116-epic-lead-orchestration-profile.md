@@ -42,6 +42,9 @@ related:
 - `261117-feat-role-scoped-workflow-context` - todo; role-scoped manual
   modules and subagent-visible notes and agenda, discussed before foundation
   Phase 2 (22).
+- `261118-feat-ship-gate-facts` - todo; the release gate's mechanical checks
+  move into Go and the follow-up re-check into `ship-handler`, ahead of the
+  ship child. (139)
 - Planned: run - `ticket-runner` and `integrator`; `lead-run` direct and
   orchestrate entries; goal-run removal.
 - Planned: review - `review-runner`, reusing `integrator`.
