@@ -570,7 +570,10 @@
         "clone_id": "9091c57d68d03c76",
         "track": "track/playbook",
         "phase": "active",
-        "touched_at": "2026-11-18T06:20:59Z"
+        "touched_at": "2026-11-18T06:21:43Z",
+        "impl": {
+          "branch": "impl/track/playbook/slab-rhyme-rule"
+        }
       }
     }
   }
