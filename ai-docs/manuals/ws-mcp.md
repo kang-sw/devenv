@@ -281,7 +281,8 @@ under `<cache root>/dashboard/`:
   working root, backend session id, model and effort, the conversation's ws
   session key), the composed instruction file appended to the harness's
   system prompt (owner-only; it carries the session key when the profile
-  allows ws tools), and for the pi backend its session file and MCP bridge.
+  allows ws tools, and a Claude lead's file always carries the key and the
+  `workflow_manual` instruction), and for the pi backend its session file and MCP bridge.
   The daemon reads the conversation from its live stores alone, since no
   ws-mcp serves it and it has no session record.
 - `sessions/<reply-id>/permission.json` - a hosted lead's explicit common
@@ -908,8 +909,11 @@ Pi calls share this route; the Pi-specific legacy behavior follows:
   to a closed parent stays in the child's record.
 
 The runner also hosts lead sessions: a headless Claude Code, Pi, or agy
-process that loads the user's own harness setup (no profile allowlist),
-started from the built-in `lead-claude`, `lead-pi`, or `lead-agy` profile.
+process that loads the user's own harness setup (no profile allowlist or
+plugins of the runner's; a Claude lead gets one appended daemon-written
+instruction file with its session key and the `workflow_manual` instruction,
+so a machine that blocks some plugin hooks still teaches it), started from
+the built-in `lead-claude`, `lead-pi`, or `lead-agy` profile.
 `POST /agents` refuses a lead profile; a lead is spawned
 by `POST /agents/leads {root, harness: "claude"|"pi", model?, effort?,
 permission_mode?, plugin_isolation?}` (201 with the state; `root` must be
@@ -933,7 +937,8 @@ from a support conversation:
   the registration itself (`hosted: true`, `host_pid`), heartbeats it, and
   end-marks it at close. The harness gets `WS_HOSTED_SESSION`,
   `WS_HOSTED_SESSION_KEY`, and `WS_HOSTED_SESSION_ROW` (Environment below);
-  the daemon's own `CLAUDE*`, `WS_MAILBOX*`, `WS_MCP_*`, `WS_RSRC*`,
+  a Claude lead's appended instruction file (`instructions.md`) is a second
+  route for the key; the daemon's own `CLAUDE*`, `WS_MAILBOX*`, `WS_MCP_*`, `WS_RSRC*`,
   `WS_HOSTED_*`, and `WS_PI_*` variables are not passed on. A ws-mcp that is
   not the hosted harness's never writes, heartbeats, removes, or end-marks a
   row that carries `hosted: true`, whatever key it is given.

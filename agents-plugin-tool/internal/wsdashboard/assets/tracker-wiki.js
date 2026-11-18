@@ -404,7 +404,7 @@
     if (slot && !WKF.key) { L.innerHTML = st.doc.html; WKF.key = key; }
     WKF.slot = slot;
     L.hidden = !slot;
-    // the slot moves and resizes with the drawer's drag and opening, the layout, and the window
+    // the slot moves and resizes with the drawer's opening, the layout, and the window
     // (an outer frame resizing this page fires its resize), not only with a draw
     if (WKF.ro) WKF.ro.disconnect();
     if (slot && window.ResizeObserver) {

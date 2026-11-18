@@ -14,6 +14,11 @@ button.oq-arr { flex: none; display: grid; place-items: center; width: 22px; hei
 button.oq-arr svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 button.oq-arr:hover { color: var(--wb-fg); background: var(--wb-muted); }
 .oq-updates { flex: none; height: 22px; padding: 0 5px 0 1px; border: 0; background: transparent; color: var(--board-amber); font: inherit; font-weight: 800; font-variant-numeric: tabular-nums; cursor: pointer; }
+.oq-pull { position: relative; flex: none; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: color-mix(in srgb, var(--board-amber) 18%, transparent); color: var(--board-amber); cursor: pointer; transition: color .2s, background-color .2s; }
+.oq-pull[hidden] { display: none; }
+.oq-pull svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.oq-pull:hover { color: var(--wb-fg); background: color-mix(in srgb, var(--board-amber) 34%, transparent); }
+.oq-pull:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
 .oq-pill.board-updated { background: color-mix(in srgb, var(--board-amber) 12%, var(--wb-card)); box-shadow: 0 0 0 2px var(--wb-bg), 0 0 0 3px color-mix(in srgb, var(--board-amber) 50%, transparent), var(--wb-shadow-hi); animation: board-pill-sway 2.6s steps(8) .3s infinite; }
 .oq-pill.board-updated .oq-arr { color: var(--board-amber); }
 .oq-pill.board-updated .oq-seg { height: 18px; padding: 0 6px; gap: 0; font-size: 11px; font-weight: 600; }

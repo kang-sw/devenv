@@ -370,8 +370,8 @@
     // Browser-hidden tabs retain their stream; only cached frames stop it.
     if (shHidden === mainPaused) return;
     mainPaused = shHidden;
-    if (mainPaused) { stopMainStream(); connected(false); trackerLost(); }
-    else connect();
+    if (mainPaused) { boardReturnEnd(); stopMainStream(); connected(false); trackerLost(); }
+    else { boardReturnShown(); connect(); }
   }
   doc.addEventListener("ws-page-visibility", syncMainStream);
   function connect(withoutBoard) {
@@ -501,6 +501,7 @@
         if (ev.name === "rail" || ev.name === "sessions") apScan(frag(ev.name === "rail" && WsRail ? WsRail.rowInputHTML(ev.html) : ev.html));
         return;
       }
+      if (ev.name === "board" && boardReturnTimer) boardReturnFresh = true;
       swap(ev.name, ev.hash, ev.html);
     }
     // A frame the shell hides reads the tracker once it shows (shShown).

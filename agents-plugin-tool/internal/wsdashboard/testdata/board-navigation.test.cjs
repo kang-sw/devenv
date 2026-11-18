@@ -45,7 +45,7 @@ function environment(pending) {
     loadClosed() { throw Error('applied topic must exist before closed-page lookup'); },
     go() { throw Error('not a session navigation'); }
   });
-  vm.runInContext(['boardPendingNames', 'boardPendingBadge', 'boardFlushViewed', 'boardJump', 'effectTopic', 'effectJump', 'palettePick', 'focusTopicNote'].map(name => func(dashboard, name)).join('') + '\nboardPendingBadge();', context);
+  vm.runInContext(['boardPendingNames', 'boardPendingBadge', 'boardApplyPending', 'boardFlushViewed', 'boardJump', 'effectTopic', 'effectJump', 'palettePick', 'focusTopicNote'].map(name => func(dashboard, name)).join('') + '\nboardPendingBadge();', context);
   context.window.wbHistory = { loadTarget(root, id) {
     assert.equal(Object.keys(context.boardPending).length, 0, 'apply before materialization');
     events.push('load:' + id); return nodes[id] || null;
@@ -140,6 +140,17 @@ test('direct Overview target selection applies before landing on its fresh ident
   assert.deepEqual(events, []); assert.equal(callbacks.length, 1);
   holding = false; context.on = false; callbacks.shift()();
   assert.deepEqual(events, ['apply', 'scroll:topic-aa', 'focus:topic-aa']);
+});
+
+for (const overview of [false, true]) test('pull-in-place button applies without home navigation; overview=' + overview, () => {
+  const { context, events } = environment(true);
+  context.st = context.window.wbPill;
+  context.st.home = () => { throw Error('pull must not navigate home'); };
+  context.window.WsOverview = { holding: () => overview, after: () => { throw Error('refused pull must leave the pill alone'); } };
+  vm.runInContext(func(readAssetSource('wswhiteboard', 'pill.js'), 'click'), context);
+  context.click('top')({ target: { closest: selector => selector === '.oq-pull' ? {} : null } });
+  assert.deepEqual(events, overview ? [] : ['apply'], 'no scroll, focus jump, or home navigation');
+  assert.equal(context.window.wbPill.pending, overview ? 1 : 0);
 });
 
 test('pill segment rematerializes an applied history target rather than scrolling a detached node', () => {
