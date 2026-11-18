@@ -177,25 +177,34 @@ func (s *State) OpenAskCount() int {
 }
 
 // ReaskTimes maps each re-asked item's ID to its latest re-ask time in epoch
-// milliseconds; an item never re-asked, or with an unreadable time, is
-// absent. A nil state has none.
+// milliseconds, floored by the board's load time (LoadedAt) for every item of
+// a loaded board; an item never re-asked on a board never loaded, or with an
+// unreadable time, is absent. A nil state has none.
 func (s *State) ReaskTimes() map[int]int64 {
 	if s == nil {
 		return nil
 	}
+	parse := func(text string) (int64, bool) {
+		if text == "" {
+			return 0, false
+		}
+		at, err := time.Parse(time.RFC3339Nano, text)
+		return at.UnixMilli(), err == nil
+	}
+	loaded, isLoaded := parse(s.LoadedAt)
 	var out map[int]int64
 	for _, item := range s.Items {
-		if item.ReaskedAt == "" {
-			continue
+		at, ok := parse(item.ReaskedAt)
+		if isLoaded && (!ok || at < loaded) {
+			at, ok = loaded, true
 		}
-		at, err := time.Parse(time.RFC3339Nano, item.ReaskedAt)
-		if err != nil {
+		if !ok {
 			continue
 		}
 		if out == nil {
 			out = map[int]int64{}
 		}
-		out[item.ID] = at.UnixMilli()
+		out[item.ID] = at
 	}
 	return out
 }
@@ -301,6 +310,11 @@ type State struct {
 	MetadataRevision uint64 `json:"metadata_revision,omitempty"`
 	// StaleNudgeRevision is a receipt, not authored topic history.
 	StaleNudgeRevision string `json:"stale_nudge_revision,omitempty"`
+	// LoadedAt is when whiteboard.load installed this board (reaskLayout);
+	// empty when it never was. It is the board's incarnation boundary: a
+	// dashboard answer sent before it answered the replaced board, whose item
+	// IDs the loaded board reuses, so ReaskTimes floors every item by it.
+	LoadedAt string `json:"loaded_at,omitempty"`
 }
 
 // Env carries the side effects Apply needs, so the store stays testable.
@@ -1291,6 +1305,10 @@ func applyEdit(p *problems, work *State, base bodyOrigins, cmd command, topicOf 
 		return
 	}
 	body := work.Topics[i].Body
+	if cmd.LiteralAmbiguous("wb:old", body) {
+		p.Add("%s: <wb:old> is ambiguous: its entities decode, and its text as written also occurs in topic %q's body; wrap the operand in <wb:raw>...</wb:raw> to match that literal text, or write the decoded characters directly", cmd.Label(), name)
+		return
+	}
 	switch n := strings.Count(body, old); {
 	case n == 0:
 		p.Add("%s: <wb:old> matches nothing in topic %q's body", cmd.Label(), name)

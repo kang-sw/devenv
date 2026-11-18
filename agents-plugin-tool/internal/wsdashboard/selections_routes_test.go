@@ -101,7 +101,7 @@ func TestSelectionTextTransportLifecycle(t *testing.T) {
 			seen[path] = true
 		}
 	}
-	code, answer := d.inboxWrite(dir, "cancel", []byte(`{"id":"`+ids[1]+`"}`), now)
+	code, answer := d.inboxWrite(dir, "", "cancel", []byte(`{"id":"`+ids[1]+`"}`), now)
 	if code != http.StatusOK {
 		t.Fatalf("cancel = %d: %v", code, answer)
 	}
@@ -120,7 +120,7 @@ func TestSelectionTextTransportLifecycle(t *testing.T) {
 	ids[1] = post(messageRequest{Text: two, Refs: cancelled["images"].([]string), RefNums: cancelled["nums"].([]int)}, resendAt)
 	steer := func(id string) string {
 		t.Helper()
-		code, answer := d.inboxWrite(dir, "steer", []byte(`{"id":"`+id+`"}`), now)
+		code, answer := d.inboxWrite(dir, "", "steer", []byte(`{"id":"`+id+`"}`), now)
 		if code != http.StatusOK {
 			t.Fatalf("steer = %d: %v", code, answer)
 		}
@@ -135,7 +135,7 @@ func TestSelectionTextTransportLifecycle(t *testing.T) {
 	if ids[0] <= ids[2] {
 		t.Fatal("later promotion did not join the steering tail")
 	}
-	if code, _ := d.inboxWrite(dir, "cancel", []byte(`{"id":"`+oldFirst+`"}`), now); code != http.StatusConflict {
+	if code, _ := d.inboxWrite(dir, "", "cancel", []byte(`{"id":"`+oldFirst+`"}`), now); code != http.StatusConflict {
 		t.Fatal("stale pre-steer ID remained cancellable")
 	}
 	held, err = wsinbox.Held(dir)
@@ -148,7 +148,7 @@ func TestSelectionTextTransportLifecycle(t *testing.T) {
 	if !reflect.DeepEqual(held[2].Entry.Images, paths[1]) {
 		t.Fatal("cancel/resend moved the second message's image")
 	}
-	code, answer = d.inboxWrite(dir, "interrupt", nil, now)
+	code, answer = d.inboxWrite(dir, "", "interrupt", nil, now)
 	if code != http.StatusOK {
 		t.Fatalf("interrupt = %d: %v", code, answer)
 	}

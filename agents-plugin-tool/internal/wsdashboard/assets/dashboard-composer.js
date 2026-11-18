@@ -431,13 +431,21 @@
   // answer, or the server's refusal text. A route is the session's own
   // unless it starts with "/", a daemon-wide route.
   function post(route, body, done) {
+    if (route === "steer" && typeof boardIncarnation === "string") body.boardIncarnation = boardIncarnation;
     if (!window.fetch) { done(false, wsT("js.post.nobrowser")); return; }
     fetch(route.charAt(0) === "/" ? route : "/s/" + rid + "/" + route, {
       method: "POST", credentials: "same-origin", cache: "no-store",
       headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
     }).then(function (r) {
       return r.text().then(function (s) {
-        if (!r.ok) { done(false, s.trim() || "HTTP " + r.status); return; }
+        if (!r.ok) {
+          var refusal = s.trim() || "HTTP " + r.status;
+          done(false, refusal);
+          if (route === "steer" && refusal === "board-replaced") {
+            saveDraft(); clearTimeout(draftTimer); window.location.reload();
+          }
+          return;
+        }
         var v = {};
         try { v = JSON.parse(s); } catch (e) { v = {}; }
         done(true, v);
@@ -1244,6 +1252,7 @@
     if (!t && !list.length && !pics.length && !notes.length && !said.length && !wp.length && !wc.length && !closing.length) { noteWarn(wsT("js.send.empty")); return; }
     if (pics.some(function (p) { return !p.ref && p.data === null; })) { noteWarn(wsT("js.send.reading")); return; }
     var body = { utcOffsetMinutes: -new Date().getTimezoneOffset(), text: t, chips: list, topics: notes.map(function (n) { return { topic: n.topic, note: n.value.trim() }; }), mentions: said };
+    if (typeof boardIncarnation === "string") body.boardIncarnation = boardIncarnation;
     if (closing.length) body.closeRequests = closing.map(function (r) { return { topic: r.topic, reason: r.reason }; });
     if (wp.length) body.picks = wp;
     if (wc.length) body.consoles = wc;
@@ -1494,6 +1503,12 @@
   function outboxFail(res) {
     outboxReturn(outbox.filter(function (m) { return !m.acked; }));
     noteWarn(wsT("js.send.fail", res));
+    if (res === "board-replaced") {
+      // Preserve returned text; boardDraft strips stale IDs after reload.
+      saveDraft();
+      clearTimeout(draftTimer);
+      window.location.reload();
+    }
   }
   // outboxReturn takes unanswered sends out of the outbox and back into the
   // composer, in order, ahead of what was typed since.
@@ -1590,6 +1605,11 @@
   function restoreHeldNow(list) {
     var cmd = null, astext = 0;
     list = list.map(function (res) {
+      if (typeof boardIncarnation === "string" && +res.sentAt < Date.parse(boardIncarnation)) {
+        // A cancelled pre-load send must not reattach its reused IDs.
+        res = Object.assign({}, res, { chips: [], topics: [], mentions: [], closeRequests: [] });
+        noteWarn(wsT("js.send.fail", "board-replaced"));
+      }
       var c = res.command;
       if (!c || !c.name) return res;
       if (!cmdSel && !cmd) { cmd = c; return {}; }

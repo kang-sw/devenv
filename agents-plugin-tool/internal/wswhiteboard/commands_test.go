@@ -439,6 +439,50 @@ func TestEveryBodyDecodesEntities(t *testing.T) {
 	}
 }
 
+// A caller of an older manual wrote an entity meaning the entity text
+// itself. When the stored text holds both the decoded and the as-written
+// spelling of a <wb:old>, the edit is refused rather than patching the wrong
+// one; <wb:raw> matches the literal spelling.
+func TestEscapedOldOperandRefusesWhenBothSpellingsOccur(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, `<wb:topic name="t"><wb:body>tag <wb:raw><b> and &lt;b&gt;</wb:raw></wb:body></wb:topic>`)
+	for _, edit := range []string{
+		`<wb:topic name="t"><wb:edit><wb:old>&lt;b&gt;</wb:old><wb:new>X</wb:new></wb:edit></wb:topic>`,
+		`<wb:topic name="t"><wb:edit replace_all="true"><wb:old>&lt;b<wb:raw>&gt;</wb:raw></wb:old><wb:new>X</wb:new></wb:edit></wb:topic>`,
+	} {
+		problems := refused(t, st, edit)
+		if len(problems) != 1 || !strings.Contains(problems[0], "<wb:old> is ambiguous") || !strings.Contains(problems[0], "<wb:raw>...</wb:raw>") {
+			t.Fatalf("problems = %v", problems)
+		}
+	}
+	mustApply(t, st, `<wb:topic name="t"><wb:edit><wb:old><wb:raw>&lt;b&gt;</wb:raw></wb:old><wb:new>L</wb:new></wb:edit></wb:topic>`)
+	if got := st.TopicBody("t"); got != "tag <b> and L" {
+		t.Fatalf("raw edit body = %q", got)
+	}
+	// Only the decoded spelling remains: the escaped operand applies as before.
+	mustApply(t, st, `<wb:topic name="t"><wb:edit><wb:old>&lt;b&gt;</wb:old><wb:new>D</wb:new></wb:edit></wb:topic>`)
+	if got := st.TopicBody("t"); got != "tag D and L" {
+		t.Fatalf("decoded edit body = %q", got)
+	}
+
+	mustApply(t, st, `<wb:topic name="t"><wb:panel name="m" recap="r"><wb:raw><b> and &lt;b&gt;</wb:raw></wb:panel></wb:topic>`)
+	change := func(old string) string {
+		return `<wb:topic name="t"><wb:panel name="m"><wb:change><wb:old>` + old + `</wb:old><wb:new>X</wb:new></wb:change></wb:panel></wb:topic>`
+	}
+	problems := refused(t, st, change(`&lt;b&gt;`))
+	if len(problems) != 1 || !strings.Contains(problems[0], "<wb:old> is ambiguous") {
+		t.Fatalf("panel problems = %v", problems)
+	}
+	mustApply(t, st, change(`<wb:raw>&lt;b&gt;</wb:raw>`))
+	if got := lastPanelText(t, st, "t"); got != "<b> and X" {
+		t.Fatalf("raw panel change = %q", got)
+	}
+	mustApply(t, st, change(`&lt;b&gt;`))
+	if got := lastPanelText(t, st, "t"); got != "X and X" {
+		t.Fatalf("decoded panel change = %q", got)
+	}
+}
+
 // lastPanelText is the payload of the topic's latest panel entry.
 func lastPanelText(t *testing.T, st *State, topic string) string {
 	t.Helper()

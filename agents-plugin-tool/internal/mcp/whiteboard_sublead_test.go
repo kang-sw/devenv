@@ -225,9 +225,13 @@ func TestSubleadWriteNudgesTopLevelLeadDashboard(t *testing.T) {
 	if resp := dashCall(t, s, "todo.list", map[string]any{"session_key": key}); isToolError(resp) {
 		t.Fatalf("register: %s", resp)
 	}
+	// Registration nudges asynchronously; take the baseline only after that
+	// nudge arrived and the stream went quiet, so a late registration nudge
+	// cannot stand in for the one the sub-lead write must send.
+	waitForNudge(t, fake, wsmailbox.ReplyID(key))
 	seedLeadBoard(t, s, key, subleadSeed)
 	sub := mintSublead(t, s, loginRoot, key, "ticket-runner")
-	before := len(fake.received())
+	before := quietNudgeCount(fake)
 	if resp := dashCall(t, s, "whiteboard.update", map[string]any{"session_key": sub, "commands": `<wb:topic name="work"><wb:log>status</wb:log></wb:topic>`}); isToolError(resp) {
 		t.Fatalf("sub-lead write: %s", resp)
 	}
@@ -279,4 +283,17 @@ func TestRenderSubleadPlaybookMintsMarkedLeadKey(t *testing.T) {
 	if _, ok := s.sessions.subleadPlaybook(extractSplicedKey(t, workerBody)); ok {
 		t.Fatal("a role: worker render must not mark its key")
 	}
+}
+
+// quietNudgeCount waits until no nudge has arrived for 200ms and returns the
+// count received so far.
+func quietNudgeCount(fake *fakeDaemon) int {
+	n := len(fake.received())
+	for stable := time.Now(); time.Since(stable) < 200*time.Millisecond; {
+		time.Sleep(10 * time.Millisecond)
+		if m := len(fake.received()); m != n {
+			n, stable = m, time.Now()
+		}
+	}
+	return n
 }
