@@ -112,7 +112,6 @@ func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySessi
 		}
 		if d := h.live.Load(); d != nil {
 			opts.Live = d
-			opts.LoginLink = d.LoginLink
 		}
 		// A worker now connects through the launcher too. Its capability
 		// token, not a lead runner handle, scopes its nested pi.* calls.
@@ -431,7 +430,6 @@ func daemonStartWithEnsure(args []string, ensure func(context.Context, wsdashboa
 		Replace:             *replace,
 		SpawnBeforeShutdown: *independent,
 		PreserveRunningLAN:  *independent,
-		RefuseCrossMinor:    *independent,
 		Port:                settings.Port,
 		LAN:                 lan,
 		Spawn:               spawn,

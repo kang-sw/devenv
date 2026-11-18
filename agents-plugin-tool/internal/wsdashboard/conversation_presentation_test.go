@@ -3,7 +3,9 @@ package wsdashboard
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -19,6 +21,84 @@ func presentationHTML(t *testing.T, ring []wslive.RingRecord, page PageContent, 
 		t.Fatal(err)
 	}
 	return string(set[regionEntries].HTML)
+}
+
+func TestConversationBoardNavigationAttribution(t *testing.T) {
+	state := &wswhiteboard.State{Items: []wswhiteboard.Item{{ID: 44, Topic: "plan"}, {ID: 45, Topic: "other"}, {ID: 46, Topic: "plan"}, {ID: 51, Topic: "other"}}, Topics: []wswhiteboard.TopicDoc{{Name: "history", Entries: []wswhiteboard.Entry{{ID: "e8", PanelID: "p2"}}}}}
+	targets := BoardNavigationTargets(state)
+	if targets["item-45"] != boardTopicTarget("other") || targets["e8"] != boardTopicTarget("history") || targets["p2"] != boardTopicTarget("history") {
+		t.Fatalf("targets: %v", targets)
+	}
+	e := ConvEntry{Answers: []wsinbox.AnswerLine{{IDs: "44..46,51", Value: "ok"}}, Mentions: []wsinbox.Mention{{Topic: "old", ID: "44", Entry: "e8"}, {Topic: "old", ID: "45"}, {Topic: "plan"}, {Topic: "old", ID: "999"}}}
+	cv := ConversationView{Entries: []ConvEntry{{UserBlocks: []ConvEntry{e}}}, Held: []HeldView{{Chips: []wsinbox.Chip{{ID: "44", Answer: "ok"}}}}}
+	attributeBoardNavigation(&cv, targets)
+	e = cv.Entries[0].UserBlocks[0]
+	var ids []string
+	for _, c := range e.AnswerChips() {
+		ids = append(ids, c.IDs)
+		if c.TopicTarget != targets[c.Target] {
+			t.Fatalf("chip: %+v", c)
+		}
+	}
+	if !reflect.DeepEqual(ids, []string{"44", "45", "46", "51"}) {
+		t.Fatal(ids)
+	}
+	mentions := e.MentionChips()
+	if mentions[0].Target != "e8" || mentions[0].TopicTarget != targets["e8"] || mentions[1].Target != "item-45" || mentions[1].TopicTarget != targets["item-45"] || mentions[2].Target != boardTopicTarget("plan") || mentions[3].TopicTarget != "" {
+		t.Fatalf("mentions: %+v", mentions)
+	}
+	if cv.Held[0].AnswerChips()[0].TopicTarget != targets["item-44"] {
+		t.Fatal("held attribution missing")
+	}
+	key := entryCacheKey(e)
+	e.BoardTargets = map[string]string{"item-44": boardTopicTarget("moved")}
+	if entryCacheKey(e) == key {
+		t.Fatal("moved/deleted reference retained stale entry cache")
+	}
+	e.BoardTargets = BoardNavigationTargets(state)
+	e.BoardTargets["item-100"] = boardTopicTarget("unrelated")
+	if entryCacheKey(e) != key {
+		t.Fatal("unrelated board item invalidated entry cache")
+	}
+}
+
+func TestConversationBoardReferenceTokenizer(t *testing.T) {
+	targets := map[string]string{"item-58": boardTopicTarget("plan"), "p2": boardTopicTarget("other")}
+	parts := conversationBoardTextParts(`<script>x</script> {{58}} {{0058}} {{p2}} {{p0}} {{e8}} {{x}} {{0}} {{9999999999999999999999}}`, targets)
+	var links []string
+	var text strings.Builder
+	for _, p := range parts {
+		text.WriteString(p.Text)
+		if p.Target != "" {
+			links = append(links, p.Target)
+			if p.TopicTarget != targets[p.Target] {
+				t.Fatalf("part: %+v", p)
+			}
+		}
+	}
+	if !reflect.DeepEqual(links, []string{"item-58", "item-58", "p2"}) || !strings.Contains(text.String(), "{{e8}} {{x}} {{0}}") {
+		t.Fatalf("parts: %+v", parts)
+	}
+}
+
+func TestConversationBadgeNavigationNode(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	targets := map[string]string{"item-44": boardTopicTarget("plan"), "item-45": boardTopicTarget("other"), "item-46": boardTopicTarget("plan"), "item-51": boardTopicTarget("other"), "item-58": boardTopicTarget("plan"), "e8": boardTopicTarget("other")}
+	e := ConvEntry{Answers: []wsinbox.AnswerLine{{IDs: "44..46,51", Value: "ok"}}, Mentions: []wsinbox.Mention{{Topic: "plan", ID: "44", Entry: "e8", Text: "selected board text"}}, BoardTargets: targets}
+	card := effectPresentation(t, wswhiteboard.Effect{Kind: "log", Topic: "plan", EntryID: "e7", Field: "text", After: `<script>x</script> {{58}} {{999}} {{x}}`})
+	card.BoardTargets = targets
+	fixture, err := json.Marshal(map[string]string{"chips": renderNamed(t, "achips", e), "card": renderNamed(t, "whiteboardentry", card)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(node, "testdata/badge-navigation.test.cjs", string(fixture)).CombinedOutput()
+	if err != nil {
+		t.Fatalf("badge navigation: %v\n%s", err, out)
+	}
+	t.Log(string(out))
 }
 
 func TestConversationPresentationMailKeepsAmbiguousAndRepeatedRecords(t *testing.T) {
@@ -153,7 +233,7 @@ func TestConversationPresentationInboxUserKeepsAnswersTextAndImage(t *testing.T)
 				html := string(set[regionEntries].HTML)
 				for _, want := range []string{
 					`class="msg user" data-entry="` + ring[0].Name,
-					`<span class="achip" title="keep visible"><b>(781)</b> ok<span class="anote">keep visible</span></span>`,
+					`<span class="achip" title="keep visible" role="link" tabindex="0" data-wb-nav="item-781" data-wb-topic=""><b>(781)</b> ok<span class="anote">keep visible</span></span>`,
 					`ordinary &lt;words&gt; <span class="imgtag"`,
 					`<img src="/s/self/attachment/0123456789abcdef-1.png"`,
 					`<span class="tnum">#1</span>`,

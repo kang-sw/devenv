@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>Board pull in place - mockup</title>
+<style>
+/* ---- verbatim from wswhiteboard/assets/page.css (theme vars, light + dark) ---- */
+:root {
+  --wb-bg: var(--background, #f3f3f0);
+  --wb-fg: var(--foreground, #1b1d21);
+  --wb-card: var(--card, #ffffff);
+  --wb-muted: var(--muted, #e9e8e3);
+  --wb-muted-fg: var(--muted-foreground, #5f646b);
+  --wb-primary: var(--primary, #2b62d9);
+  --wb-topic: #2c3038;
+  --wb-on-topic: #ffffff;
+  --wb-policy: #b25000;      --wb-on-policy: #ffffff;
+  --wb-announced: #1d7348;   --wb-on-announced: #ffffff;
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .16), 0 6px 18px rgb(0 0 0 / .10);
+  --wb-radius: 12px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  color-scheme: light dark;
+}
+:root[data-theme="dark"] {
+  --wb-bg: var(--background, #141518);
+  --wb-fg: var(--foreground, #e7e7e4);
+  --wb-card: var(--card, #1e2024);
+  --wb-muted: var(--muted, #2b2d32);
+  --wb-muted-fg: var(--muted-foreground, #a2a6ad);
+  --wb-primary: var(--primary, #7aa2ff);
+  --wb-topic: #2a2d33;
+  --wb-on-topic: #e4e5e8;
+  --wb-policy: #5b3a1c;      --wb-on-policy: #f6d9bd;
+  --wb-announced: #1f4433;   --wb-on-announced: #c6ead6;
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+* { box-sizing: border-box; }
+/* topic card (page-items.css 2-3 subset) */
+.topic { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); margin-bottom: 16px; overflow: hidden; }
+.tbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 12px; min-height: 30px; background: var(--wb-topic); color: var(--wb-on-topic); font-weight: 700; font-size: 13px; }
+.tsum { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px/1.45 var(--wb-mono); color: var(--wb-muted-fg); }
+
+/* ---- verbatim from wswhiteboard/assets/page-sticky.css (pill) ---- */
+.oq-wrap { position: sticky; height: 0; z-index: 4; pointer-events: none; text-align: center; }
+.oq-wrap.wb-oq-top { top: calc(10px + var(--wb-rail-h, 0px)); }
+.oq-pill { --board-amber: #9a5b00; position: absolute; left: 50%; translate: -50% 0; pointer-events: auto; display: inline-flex; align-items: center; gap: 3px; box-sizing: border-box; height: 28px; padding: 3px; border-radius: 999px; background: var(--wb-card); color: var(--wb-fg); box-shadow: 0 0 0 2px var(--wb-bg), var(--wb-shadow-hi); font-family: system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif; font-size: 12.5px; font-weight: 700; line-height: 1; white-space: nowrap; transition: background-color .3s, box-shadow .3s; }
+:root[data-theme="dark"] .oq-pill { --board-amber: #f2b632; }
+.oq-pill[hidden], .oq-seg[hidden], .oq-updates[hidden] { display: none; }
+.oq-wrap.wb-oq-top .oq-pill { top: 0; }
+.oq-arr { color: var(--wb-muted-fg); }
+button.oq-arr { flex: none; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; font: inherit; font-size: 18px; font-weight: 400; line-height: 1; cursor: pointer; transition: color .2s, background-color .2s; }
+button.oq-arr svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+button.oq-arr:hover { color: var(--wb-fg); background: var(--wb-muted); }
+.oq-updates { flex: none; height: 22px; padding: 0 5px 0 1px; border: 0; background: transparent; color: var(--board-amber); font: inherit; font-weight: 800; font-variant-numeric: tabular-nums; cursor: pointer; }
+.oq-pill.board-updated { background: color-mix(in srgb, var(--board-amber) 12%, var(--wb-card)); box-shadow: 0 0 0 2px var(--wb-bg), 0 0 0 3px color-mix(in srgb, var(--board-amber) 50%, transparent), var(--wb-shadow-hi); }
+.oq-pill.board-updated .oq-arr { color: var(--board-amber); }
+.oq-seg:focus-visible, .oq-arr:focus-visible, .oq-updates:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+
+/* ---- NEW: pull-in-place round button (derived from button.oq-arr; same 22px circle) ---- */
+.oq-pull { position: relative; flex: none; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: color-mix(in srgb, var(--board-amber) 18%, transparent); color: var(--board-amber); cursor: pointer; transition: color .2s, background-color .2s; }
+.oq-pull[hidden] { display: none; }
+.oq-pull svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.oq-pull:hover, .oq-pull.hov { color: var(--wb-fg); background: color-mix(in srgb, var(--board-amber) 34%, transparent); }
+.oq-pull:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+/* mockup-only tooltip stand-in for the native title attribute */
+.oq-pull .tip { display: none; position: absolute; top: calc(100% + 9px); left: 50%; transform: translateX(-50%); padding: 4px 8px; border-radius: 4px; background: var(--wb-fg); color: var(--wb-bg); font-size: 11.5px; font-weight: 500; white-space: nowrap; pointer-events: none; }
+.oq-pull:hover .tip, .oq-pull.hov .tip { display: block; }
+
+/* ---- mockup chrome ---- */
+body { margin: 0; font-family: var(--wb-sans); background: var(--wb-bg); color: var(--wb-fg); }
+#sw { position: fixed; top: 6px; right: 6px; z-index: 50; display: flex; gap: 4px; font: 11px system-ui; }
+#sw a { padding: 3px 8px; border-radius: 6px; background: var(--wb-muted); color: var(--wb-fg); text-decoration: none; }
+#sw a.on { background: var(--wb-primary); color: var(--wb-bg); }
+#bcol { width: 520px; height: 420px; margin: 40px auto 0; overflow: hidden; padding: 0 12px; position: relative; background: var(--wb-bg); }
+#bcol .inner { margin-top: -70px; padding-top: 10px; }
+.body { padding: 10px 12px; font-size: 12.5px; line-height: 1.5; }
+.body p { margin: 0 0 6px; }
+</style>
+</head>
+<body>
+<div id="sw"></div>
+<div id="bcol">
+  <div class="oq-wrap wb-oq-top"><div class="oq-pill board-updated" id="pill">
+    <button type="button" class="oq-arr" title="맨 위로" aria-label="맨 위로"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+    <button type="button" class="oq-updates">보드 업데이트 2</button>
+    <button type="button" class="oq-pull" id="pull" title="제자리에서 변경 받아오기" aria-label="제자리에서 변경 받아오기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg><span class="tip">제자리에서 변경 받아오기</span></button>
+  </div></div>
+  <div class="inner">
+    <section class="topic"><div class="tbar">토픽: 릴리스 게이트 정리</div><div class="body"><p>검토 범위를 develop 기준으로 정리했고 남은 항목은 두 가지입니다.</p><p>나머지 로그는 아래 이력에 이어서 기록됩니다.</p><div class="tsum">review watermark: 5c77979 -> clear</div></div></section>
+    <section class="topic"><div class="tbar">토픽: 대시보드 보드 홀드</div><div class="body"><p>사용자가 읽는 동안 갱신은 보류되고, 위쪽 알약이 보류 개수를 알립니다.</p><p>알약을 누르면 보류된 변경이 적용되고 맨 위로 이동합니다.</p><div class="tsum">board-hold-pill.browser.cjs</div></div></section>
+    <section class="topic"><div class="tbar">토픽: i18n 키 정리</div><div class="body"><p>js.board.hold.pill 과 title 키를 추가합니다.</p><div class="tsum">wsi18n/tables/*.json</div></div></section>
+  </div>
+</div>
+<script>
+var states = ["none","held","hover"], themes = ["dark","light"];
+function apply() {
+  var parts = (location.hash || "#held").slice(1).split(",");
+  var st = parts.filter(function (p) { return states.indexOf(p) >= 0; })[0] || "held";
+  var th = parts.filter(function (p) { return themes.indexOf(p) >= 0; })[0] || "dark";
+  document.documentElement.dataset.theme = th;
+  document.getElementById("pill").hidden = st === "none";
+  document.getElementById("pull").classList.toggle("hov", st === "hover");
+  document.getElementById("sw").innerHTML = states.map(function (s) { return '<a href="#' + s + "," + th + '"' + (s === st ? ' class="on"' : "") + ">#" + s + "</a>"; }).join("") +
+    themes.map(function (t) { return '<a href="#' + st + "," + t + '"' + (t === th ? ' class="on"' : "") + ">#" + t + "</a>"; }).join("");
+}
+addEventListener("hashchange", apply); apply();
+</script>
+</body>
+</html>

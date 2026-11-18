@@ -119,14 +119,6 @@
   }
 
   function listen() {
-    // dragging a handle sets the drawer height; a drag's trailing click is swallowed
-    var hs = $('tkhandles');
-    hs.addEventListener('pointerdown', drDragStart);
-    hs.addEventListener('pointermove', drDragMove);
-    hs.addEventListener('pointerup', drDragEnd);
-    hs.addEventListener('pointercancel', drDragEnd);
-    hs.addEventListener('click', function (e) { if (drDragged) e.stopPropagation(); }, true);
-
     document.addEventListener('click', function (e) {
       var t = e.target;
       if (qs.open && !(t.closest && t.closest('#tkqpop, #tkqs')) && !(O.searchHost && O.searchHost.contains(t))) qClose();
@@ -529,6 +521,22 @@
     });
     // the layout follows the width: re-render when it crosses a breakpoint, else refit
     window.addEventListener('resize', function () { if (qs.open) { var qw = qStepOf($('tkqpop').getBoundingClientRect().width); if (qw !== qs.step) { qs.step = qw; qRender(); } } if (MN) closeMenu(false); if (MP) mentionSync(); if (layoutOf() !== ui.layout) render(); else { if (!ui.page) fitDrawer(); measure(); wkFramePlace(); } });
+    // Header wrapping and composer resize/display changes need no window resize.
+    // Measure outside the observer callback: header padding can itself resize it.
+    if (window.ResizeObserver) {
+      var drawerFitFrame = 0;
+      var drawerObserver = new ResizeObserver(function () {
+        if (drawerFitFrame) return;
+        drawerFitFrame = requestAnimationFrame(function () {
+          drawerFitFrame = 0;
+          measure();
+          if (!ui.page) fitDrawer();
+          wkFramePlace();
+        });
+      });
+      drawerObserver.observe(O.header);
+      if (O.drawerBoundary) drawerObserver.observe(O.drawerBoundary);
+    }
     window.addEventListener('scroll', wkFramePlace, true); // any scroller moving the wiki frame's slot (capture: scroll does not bubble)
     // the store page route: reload on #/<storeId> restores the page; back and forward follow the hash
     window.addEventListener('pagehide', keepItemDraft);
@@ -542,7 +550,7 @@
     if (api) return api;
     AD = adapter; CAPS = adapter.caps || {}; X = adapter.ext || {}; O = opts || {};
     PFX = O.storagePrefix || 'ws.tracker.';
-    ui.drh = +dsLoad('drawer.height').h || 0; ui.cmodes = dsLoad('card.modes'); ui.pmodes = dsLoad('panel.modes'); ui.closedOpen = dsLoad('closed'); ui.tfold = dsLoad('tree.fold');
+    ui.cmodes = dsLoad('card.modes'); ui.pmodes = dsLoad('panel.modes'); ui.closedOpen = dsLoad('closed'); ui.tfold = dsLoad('tree.fold');
     mergeTabs();
     H = { esc: esc, attr: attr, btn: btn, card: card, fld: fld, fmtTs: fmtTs, fmtSize: fmtSize, nm: nm, nmo: nmo, memberOpts: memberOpts,
       profileFields: profileFields, profileText: profileText, asciiId: asciiId, crefHtml: crefHtml, uiCommand: uiCommand,

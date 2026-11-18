@@ -18,9 +18,10 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 )
 
-// Exercise the hook through Accept, not a second HTTP minting client: the
-// hosted whiteboard tool prints a code the daemon exchanges exactly once.
-func TestProxyWhiteboardLoginLink(t *testing.T) {
+// A hosted session's whiteboard.update names the daemon page without a login
+// code (tool results land in transcripts); a cookieless browser navigating it
+// gets the login gate, which is how a fresh browser signs in.
+func TestProxyWhiteboardLinkHasNoLoginCode(t *testing.T) {
 	cache, config, root := t.TempDir(), t.TempDir(), t.TempDir()
 	t.Setenv("WS_CACHE_HOME", cache)
 	t.Setenv("WS_CONFIG_HOME", config)
@@ -68,42 +69,35 @@ func TestProxyWhiteboardLoginLink(t *testing.T) {
 	defer func() { _ = client.Close(); <-done }()
 	conn := &hostedConn{t: t, conn: client, r: bufio.NewReader(client)}
 	key := conn.login(root)
-	var link string
+	var link, text string
 	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		resp := conn.tool("whiteboard.update", map[string]any{"session_key": key, "commands": ""})
-		for _, line := range strings.Split(toolText(t, resp), "\n") {
+	for time.Now().Before(deadline) && link == "" {
+		text = toolText(t, conn.tool("whiteboard.update", map[string]any{"session_key": key, "commands": ""}))
+		for _, line := range strings.Split(text, "\n") {
 			if strings.HasPrefix(line, "full: http://") {
 				link = strings.TrimPrefix(line, "full: ")
 			}
 		}
-		if strings.Contains(link, "login=") {
-			break
+		if link == "" {
+			time.Sleep(10 * time.Millisecond)
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 	u, err := url.Parse(link)
-	if err != nil || u.Query().Get("login") == "" || !strings.HasPrefix(u.Path, "/s/") {
-		t.Fatalf("whiteboard full link = %q, err = %v", link, err)
+	if err != nil || u.RawQuery != "" || !strings.HasPrefix(u.Path, "/s/") || strings.Contains(text, "login=") {
+		t.Fatalf("whiteboard full link = %q, err = %v, output carries a login code: %v", link, err, strings.Contains(text, "login="))
 	}
-	httpClient := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	for i, want := range []int{http.StatusSeeOther, http.StatusUnauthorized} {
-		req, err := http.NewRequest(http.MethodGet, link, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		req.Header.Set("Accept", "text/html")
-		resp, err := httpClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-		if resp.StatusCode != want {
-			t.Fatalf("exchange %d = %d, want %d", i+1, resp.StatusCode, want)
-		}
-		if i == 0 && (len(resp.Cookies()) == 0 || resp.Header.Get("Location") != u.Path) {
-			t.Fatalf("exchange did not set cookie and clean URL: %v", resp.Header)
-		}
+	req, err := http.NewRequest(http.MethodGet, link, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Accept", "text/html")
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized || len(resp.Cookies()) != 0 {
+		t.Fatalf("cookieless navigation = %d with %d cookies, want the login gate (401, none)", resp.StatusCode, len(resp.Cookies()))
 	}
 }

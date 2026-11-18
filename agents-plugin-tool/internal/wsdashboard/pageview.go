@@ -201,6 +201,8 @@ type TreeView struct {
 	// Running, Finished, and Failed count the agents by status.
 	Running, Finished, Failed int
 	Peers                     PeerGroup
+	CompactAgents             []AgentNode
+	Subagents                 SubagentCount
 }
 
 // RunningAgents and EndedAgents split the top-level subagents into the
@@ -229,7 +231,9 @@ type AgentNode struct {
 	// Linked reports that the delegate's reply-id is a session this daemon
 	// serves with a page (a board, or an agent runner's conversation), so
 	// its label links to that page.
-	Linked     bool
+	Linked bool
+	// PiDeleted is display-only; the live snapshot keeps its legacy status.
+	PiDeleted  bool
 	Running    *wslive.RunningView
 	Generating *wslive.GeneratingView
 	// Finished is the agent's finished batches, oldest first; the page shows
@@ -257,6 +261,21 @@ type LiveSlot struct {
 
 // IsRunning reports a running agent.
 func (a AgentNode) IsRunning() bool { return a.Status == wslive.StatusRunning }
+
+// EndedStatus is the localized status key suffix for an ended row. Pi
+// children sleep between turns; native Claude/Codex rows still finish done.
+func (a AgentNode) EndedStatus() string {
+	if a.AgentKind == wslive.AgentKindPi && a.Status == wslive.StatusDone {
+		if a.PiDeleted {
+			return "deleted"
+		}
+		return "sleep"
+	}
+	if a.Status == wslive.StatusFailed {
+		return "failed"
+	}
+	return "done"
+}
 
 // ModelText is the agent's model and reasoning effort joined by a space
 // ("<model> <effort>"), either alone when only one is known; empty when
@@ -420,7 +439,14 @@ type SubagentCount struct {
 // session's running agents, at every depth and through its own delegates,
 // to Deep; a session already counted (self included) is not counted again.
 func subagentCounts(self string, agents []wslive.Agent, lookup sessionLookup, now time.Time) SubagentCount {
+	c, _ := subagentProjection(self, agents, lookup, now)
+	return c
+}
+
+// subagentProjection keeps the compact roster and its badge counts in lockstep.
+func subagentProjection(self string, agents []wslive.Agent, lookup sessionLookup, now time.Time) (SubagentCount, []AgentNode) {
 	var c SubagentCount
+	var rows []AgentNode
 	visited := map[string]bool{self: true}
 	var linked func(agents []wslive.Agent)
 	linked = func(agents []wslive.Agent) {
@@ -436,6 +462,7 @@ func subagentCounts(self string, agents []wslive.Agent, lookup sessionLookup, no
 				for _, b := range snap.Agents {
 					if b.Status == wslive.StatusRunning {
 						c.Deep++
+						rows = append(rows, AgentNode{Agent: b})
 					}
 				}
 				linked(snap.Agents)
@@ -450,6 +477,7 @@ func subagentCounts(self string, agents []wslive.Agent, lookup sessionLookup, no
 		if a.Status != wslive.StatusRunning {
 			continue
 		}
+		rows = append(rows, AgentNode{Agent: a})
 		if a.ParentID != "" && a.ParentID != a.ID && known[a.ParentID] {
 			c.Deep++
 		} else {
@@ -457,12 +485,14 @@ func subagentCounts(self string, agents []wslive.Agent, lookup sessionLookup, no
 		}
 	}
 	linked(agents)
-	return c
+	return c, rows
 }
 
 // ConvEntry is one conversation ring entry as the page shows it.
 type ConvEntry struct {
 	wslive.RingEntry
+	// BoardTargets is render-only attribution from the current in-memory board.
+	BoardTargets map[string]string
 	// Key is the ring entry's file name, the element key the page keeps an
 	// expanded mail line open by.
 	Key string
@@ -562,6 +592,8 @@ type sessionLookup struct {
 	// observed is needed only by non-compact peer child hovers. Counts and
 	// compact peer rows use snapshot, which need not sweep retained history.
 	observed func(replyID string) *wslive.Snapshot
+	// piDeleted checks revival only for settled Pi rows, never native rows.
+	piDeleted func(replyID string) bool
 }
 
 // get returns a session this daemon serves.
@@ -656,6 +688,7 @@ func buildSessionView(in pageInputs) SessionView {
 			contacts := resolvedContacts(in.Page.Contacts, reg.ReplyID)
 			v.Conversation = conversation(wslive.Lead{}, in.Ring, in.Page.MailBodies, contacts, in.Lookup, replyMarkdown(reg.Project, reg.ReplyID), reg.ReplyID)
 			splitUserEntries(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
+			attributeBoardNavigation(&v.Conversation, in.Page.BoardTargets)
 		}
 		return v
 	}
@@ -681,8 +714,10 @@ func buildSessionView(in pageInputs) SessionView {
 	v.Conversation = conversation(in.Snapshot.Lead, in.Ring, in.Page.MailBodies, contacts, lookup, replyMarkdown(reg.Project, reg.ReplyID), reg.ReplyID)
 	splitUserEntries(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
 	v.Conversation.Held = heldViews(in.Held, in.AttachDir, reg.ReplyID)
+	attributeBoardNavigation(&v.Conversation, in.Page.BoardTargets)
 	v.Conversation.Sent = sentMarks(in.Drained, in.Held, in.Page.Reasked, settledTurnStart(in.Ring))
-	v.Conversation.Subagents = subagentCounts(reg.ReplyID, in.Snapshot.Agents, lookup, in.Now)
+	v.Tree.Subagents, v.Tree.CompactAgents = subagentProjection(reg.ReplyID, in.Snapshot.Agents, lookup, in.Now)
+	v.Conversation.Subagents = v.Tree.Subagents
 	return v
 }
 
@@ -774,6 +809,9 @@ func agentTree(agents []wslive.Agent, lookup sessionLookup) []AgentNode {
 				node.Slots = liveSlots(node.Permission, node.Finished, node.Running, node.Generating)
 			}
 			if a.ReplyID != "" {
+				if a.AgentKind == wslive.AgentKindPi && a.Status == wslive.StatusDone && lookup.piDeleted != nil {
+					node.PiDeleted = lookup.piDeleted(a.ReplyID)
+				}
 				// A conversation the agent runner hosts (a spawned Pi
 				// subagent) has a page and no board.
 				if s, ok := lookup.get(a.ReplyID); ok && (s.HasBoard || s.Agent) {

@@ -17,9 +17,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to embed in ws-mcp binaries, for example 0.50.5-dev"
+        description: "Version to embed in ws-mcp binaries, for example 0.50.7-dev"
         required: false
-        default: "0.50.5-dev"
+        default: "0.50.7-dev"
       desktop_dry_run:
         description: "Build both desktop zips as workflow artifacts only; never publish a release"
         type: boolean
@@ -123,7 +123,7 @@ jobs:
           elif [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
             scripts/build-release-assets.sh "${GITHUB_REF_NAME}"
           else
-            scripts/build-release-assets.sh 0.50.5-dev
+            scripts/build-release-assets.sh 0.50.7-dev
           fi
 
       - name: Verify release asset checksums
@@ -171,8 +171,8 @@ jobs:
       - name: Build Windows executable
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          go build -trimpath -ldflags "-s -w -X main.version=0.50.5-dev" -o dist/ws-mcp-windows-amd64.exe ./cmd/ws-mcp
-          python scripts/write-runtime-metadata.py dist/ws-mcp-windows-amd64.exe --version 0.50.5-dev
+          go build -trimpath -ldflags "-s -w -X main.version=0.50.7-dev" -o dist/ws-mcp-windows-amd64.exe ./cmd/ws-mcp
+          python scripts/write-runtime-metadata.py dist/ws-mcp-windows-amd64.exe --version 0.50.7-dev
 
       - name: Run Windows executable smoke
         shell: pwsh

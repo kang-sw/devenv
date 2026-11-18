@@ -83,6 +83,10 @@ files for plugin or tooling code unless a ticket changes the layout.
    convention docs, read `ai-docs/manuals/skill-authoring.md`
    and apply its invariant checklist to every changed Invariants/Constraints
    line.
+6. **File-touch budget.** Targets are Windows PCs with heavy antivirus, where
+   every file touch is scanned. Keep live state in memory, persist only
+   appended deltas for recovery, and keep interactive paths off file I/O;
+   follow `ai-docs/manuals/performance.md` and count file operations per action.
 
 ## Workflow
 
@@ -118,13 +122,17 @@ before release, not discovered there.
 - T4 unreadable history: the new binary cannot read old data. Never ship it;
   migration must lower the change to T3 or below.
 
-T0–T2 permit patches. Prefer them to a T3 boundary: a minor bump currently
-locks out installed-plugin sessions on the previous minor when a dev rebuild
-replaces the shared daemon. Every concrete verdict cites source lines for
-which version writes and reads what, and whether reopening the new version
-recovers it. Whole-file loss of unknown fields is not T2 without that recovery;
-preserve the fields or enforce a T3 boundary. A behavior-preserving alias is
-normally T0; a tool-list refresh alone does not make broken old calls compatible.
+T0–T2 permit patches. Prefer them to a T3 boundary. A minor bump currently
+locks out installed-plugin sessions on the previous minor when a newer-minor
+daemon replaces theirs (a dev rebuild, an upgraded plugin's start, or
+Werkschaft). 0.50+ launchers have no direct fallback; from 0.50.6 they fail
+each call at once with an "update this plugin" error, and recovery needs the
+updated plugin and a session restart. Every concrete verdict cites source
+lines for which version writes and reads what, and whether reopening the new
+version recovers it. Whole-file loss of unknown fields is not T2 without that
+recovery; preserve the fields or enforce a T3 boundary. A behavior-preserving
+alias is normally T0; a tool-list refresh alone does not make broken old calls
+compatible.
 
 Scenario sheet and enforcement: `ai-docs/manuals/release-compatibility.md`.
 
@@ -179,6 +187,7 @@ proceed fact normalizes to `n/a`.
 | `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin/hooks/`, `agents-plugin-wsflow/` | `ai-docs/manuals/wsflow-mirroring.md` |
 | `agents-plugin-tool/internal/mcp/` | `ai-docs/manuals/ws-mcp.md` |
 | `agents-plugin-tool/internal/` | `ai-docs/manuals/release-compatibility.md` |
+| `agents-plugin-tool/` | `ai-docs/manuals/performance.md` |
 
 Each row's manual is read before editing a file its `paths` cover. This is a
 live obligation, not a pointer list: the worker playbook reads every matching
@@ -297,8 +306,8 @@ ai-docs/tickets/.dropped/
   agents, plugin packaging, helper commands, MCP tooling, and dev-environment
   templates. Tickets and manuals here describe the workflow system itself;
   downstream application material belongs in downstream projects. Active plugin
-  package: `agents-plugin/` (`ws@0.50.5`). Conservative-default
-  distribution: `agents-plugin-wsflow/` (`wsflow@0.50.5`). Native
+  package: `agents-plugin/` (`ws@0.50.7`). Conservative-default
+  distribution: `agents-plugin-wsflow/` (`wsflow@0.50.7`). Native
   MCP/tooling source: `agents-plugin-tool/`. Retired Claude source material:
   `ai-docs/ref/claude-home-legacy.md` and git history.
 - **Project map / topology.**

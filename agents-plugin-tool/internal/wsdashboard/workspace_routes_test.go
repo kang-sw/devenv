@@ -352,6 +352,59 @@ func TestWorktreeAddRoute(t *testing.T) {
 	release()
 }
 
+// TestWorktreeAddDetachedRoute exercises the detached request through HTTP.
+func TestWorktreeAddDetachedRoute(t *testing.T) {
+	base, root := worktreeRepo(t)
+	f := startPageFixture(t, withWorkspaces(t), func(o *DaemonOptions) { o.Worktrees = gitWorktreeSource{} })
+	if _, err := f.d.workspaces.add(root, false); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, root, "tag", "start")
+	gitRun(t, root, "commit", "-q", "--allow-empty", "-m", "second")
+	post := func(req worktreeAddRequest) (int, string) {
+		t.Helper()
+		req.Workspace = root
+		raw, err := json.Marshal(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		code, _, body := postJSONWith(t, &http.Client{Timeout: 30 * time.Second, Transport: localhostTestHTTPTransport()}, f.base+worktreeAddRoute, f.base, string(raw))
+		return code, body
+	}
+	for _, tc := range []struct{ name, base, want string }{
+		{"current", "", "HEAD"},
+		{"held-branch", "main", "main"},
+		{"tag", "start", "start"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			folder := filepath.Join(base, "detached-"+tc.name)
+			code, body := post(worktreeAddRequest{Detached: true, Base: tc.base, Folder: folder})
+			var answer worktreeAddAnswer
+			if err := json.Unmarshal([]byte(body), &answer); code != http.StatusOK || err != nil {
+				t.Fatalf("add = %d %s (%v)", code, body, err)
+			}
+			if answer.Path != folder || answer.Branch != "" || answer.Message == "" || revParse(t, folder, "HEAD") != revParse(t, root, tc.want) {
+				t.Errorf("detached answer = %+v", answer)
+			}
+			if err := exec.Command("git", "-C", folder, "symbolic-ref", "-q", "HEAD").Run(); err == nil {
+				t.Error("HEAD is not detached")
+			}
+		})
+	}
+	for _, invalid := range []string{"missing", "--detach", "start^{tree}"} {
+		folder := filepath.Join(base, "refused-"+strings.ReplaceAll(invalid, "/", "_"))
+		if code, body := post(worktreeAddRequest{Detached: true, Base: invalid, Folder: folder}); code != http.StatusConflict || strings.TrimSpace(body) == "" {
+			t.Errorf("base %q = %d %q, want 409", invalid, code, body)
+		}
+		if _, err := os.Stat(folder); !os.IsNotExist(err) {
+			t.Errorf("base %q created a folder or stat failed: %v", invalid, err)
+		}
+	}
+	if got := headBranch(t, root); got != "main" {
+		t.Errorf("root branch = %q, want main", got)
+	}
+}
+
 // TestAddWorktreeDefaultFolder: the default folder is
 // <root>/../.ws-dashboard-worktrees/<root-dir-name>/<YYMMDD-HHMM>, and adds
 // in the same minute take -2, -3.

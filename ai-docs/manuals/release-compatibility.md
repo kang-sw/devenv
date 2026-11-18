@@ -24,8 +24,15 @@ change's compatibility tier during discussion and record it in the ticket's
   protocol and, when supplied, the daemon's major.minor
   (`wsdashboard/proxy.go:232–254`). Pi additionally requires the server to be
   at least its bundled version in that minor
-  (`agents-plugin-pi/src/version-check.ts:39–57`). A minor mismatch does not
-  create a second server.
+  (`agents-plugin-pi/src/version-check.ts:39–57`). Since 0.50 a minor
+  mismatch does not create a second server: when any starter (dev rebuild,
+  upgraded plugin, Werkschaft) replaces the daemon with a newer minor,
+  previous-minor sessions fail their calls until the updated plugin's session
+  restarts. 0.48/0.49 launchers instead fell back to a direct server.
+  0.50.0–0.50.5 launchers fail each call only after a 75 s wait; from 0.50.6
+  the launcher fails at once with an "update this plugin and restart this
+  session" error and logs it once (`agents-plugin/bin/ws-mcp-launcher.py`,
+  `DaemonNewerMinor`).
 - **Reconnect is not compatibility negotiation.** The launcher replays
   initialization, not sent requests or tool discovery
   (`agents-plugin/bin/ws-mcp-launcher.py:1473–1481,1656–1683`). Pi discovers
@@ -95,6 +102,7 @@ the new version, not reconnecting the transport.
 | 2 | Claude updates a patch; Pi is older in the same minor | Pi reads the new daemon's version and tool list, then sends old calls to it. The version pin permits this direction; data/reopen consequences remain those of the called handlers in row 1 | T0 with compatible old calls; T3 with removals. `agents-plugin-pi/src/version-check.ts:39–57`, `agents-plugin-pi/src/bridge.ts:1072–1079`, row 1 |
 | 3 | Another harness replaces the daemon mid-session | The launcher forwards old requests to the successor; already-sent calls fail with unknown outcome and are not replayed. A handler may already have written data, so reconnect proves no rollback or reopen recovery. Discovery refresh alone says nothing about those writes | No standalone tier for replacement: grade each call/store path. Compatible discovery can be T0/T1 only under the mapping above; removed calls are T3. `agents-plugin/bin/ws-mcp-launcher.py:1473–1481,1642–1683`, row 1 |
 | 4 | Old plugin connects across a minor/protocol boundary | The daemon reads its hello and refuses before handing it to the session handler. No session/store write on this path; reopening stored data is not a remedy for connection refusal | T3. `wsdashboard/proxy.go:232–254` |
+| 4a | A newer-minor starter (dev rebuild, upgraded plugin, Werkschaft) replaces a previous-minor daemon | Ensure drains any older numeric core, never a newer one. The previous-minor launcher then finds a healthy newer-minor daemon. It sends no hello, writes nothing, and starts nothing. From 0.50.6 it errors each MCP request at once, logs once, and exits a CLI call non-zero at once; it reconnects if a same-minor daemon returns. Reopen does not apply: no data is touched | T0 behaviour over the row 4 boundary; recovery is the updated plugin plus a session restart. `wsdashboard/ensure.go:210–217`, `desktop-electron/daemon-controller.js:95–98`, `agents-plugin/bin/ws-mcp-launcher.py:1530,1773–1776,1831–1843,1904–1905,1988–1990,2003,2116–2118` |
 | 5 | Equal numeric core, different release/dev build | Ordinary connection retains the healthy daemon regardless of suffix, build time or hash. Explicit replacement and LAN changes still use authenticated drain. Selection is not a shared-data writer; reopening cannot establish handler compatibility | No independent grade from the version label; grade the content change. `wsdashboard/ensure.go`, `keepRunning` and `Ensure` |
 | 6 | Local source changes without a version change | The launcher reads source stat metadata, including embedded assets, into its fingerprint. Drift is advisory while a compatible runtime exists; reuse retains the old source stamp. No shared-store write or recovery path changes | No standalone tier; grade any explicitly selected build's content. `agents-plugin/bin/ws-mcp-launcher.py`, `local_devenv_source_fingerprint` and `main` |
 | 7 | New tracker event reaches an older reader on another machine | The new writer appends an event; the older domain reader flags its unknown type in a derived view without rewriting the event. New reopen reads and replays retained events; restoration of a particular new value is unverified until its new handler and intervening writes are traced | T1 for this read-only unknown-event display, not an automatic T2/T3 event rule. `wstracker/check.go:1471–1473`, `wstracker/replay.go:263–294`, `wsledger/store.go:725–763,1455–1472`, `wstracker/tracker.go:33–64` |

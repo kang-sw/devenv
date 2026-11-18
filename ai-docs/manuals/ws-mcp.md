@@ -255,7 +255,8 @@ under `<cache root>/dashboard/`:
   working root, backend session id, model and effort, the conversation's ws
   session key), the composed instruction file appended to the harness's
   system prompt (owner-only; it carries the session key when the profile
-  allows ws tools), and for the pi backend its session file and MCP bridge.
+  allows ws tools, and a Claude lead's file always carries the key and the
+  `workflow_manual` instruction), and for the pi backend its session file and MCP bridge.
   The daemon reads the conversation from its live stores alone, since no
   ws-mcp serves it and it has no session record.
 - `sessions/<reply-id>/permission.json` - a hosted lead's explicit common
@@ -591,9 +592,10 @@ under the inbox lock, answering `{held: [{id, text, chips, topics, images, nums}
 in queue order (steered first, then the rest), each shaped as a cancel's answer. All four require an `Origin` equal to the daemon's own,
 and a session without a fresh adapter snapshot gets 409. `whiteboard.update`'s
 `full:` line names the session's dashboard URL once its last nudge was answered,
-and the page path otherwise. A daemon-hosted server adds a single-use login code
-with a ten-minute expiry through an in-process hook; a server without that hook
-keeps the plain URL.
+and the page path otherwise. The URL never carries a login code, because tool
+results land in transcripts; a browser without the localhost cookie gets the
+login gate, whose clipboard button mints the single-use link out of band when
+the host has a native clipboard writer.
 
 The daemon creates one tracker host (`wstrackerhost.New`) before it starts
 serving, shared by the tracker's background poll and the tracker routes, and
@@ -857,8 +859,10 @@ owns the whole tree:
   parent. A report to a closed parent stays in the child's record.
 
 The runner also hosts lead sessions: a headless Claude Code or Pi process
-that loads the user's own harness setup (no profile allowlist, plugins, or
-system prompt of the runner's), started from the built-in `lead-claude` or
+that loads the user's own harness setup (no profile allowlist or plugins of
+the runner's; a Claude lead gets one appended daemon-written instruction file
+with its session key and the `workflow_manual` instruction, so a machine that
+blocks some plugin hooks still teaches it), started from the built-in `lead-claude` or
 `lead-pi` profile. `POST /agents` refuses a lead profile; a lead is spawned
 by `POST /agents/leads {root, harness: "claude"|"pi", model?, effort?,
 permission_mode?, plugin_isolation?}` (201 with the state; `root` must be
@@ -882,7 +886,8 @@ conversation:
   the registration itself (`hosted: true`, `host_pid`), heartbeats it, and
   end-marks it at close. The harness gets `WS_HOSTED_SESSION`,
   `WS_HOSTED_SESSION_KEY`, and `WS_HOSTED_SESSION_ROW` (Environment below);
-  the daemon's own `CLAUDE*`, `WS_MAILBOX*`, `WS_MCP_*`, `WS_RSRC*`,
+  a Claude lead's appended instruction file (`instructions.md`) is a second
+  route for the key; the daemon's own `CLAUDE*`, `WS_MAILBOX*`, `WS_MCP_*`, `WS_RSRC*`,
   `WS_HOSTED_*`, and `WS_PI_*` variables are not passed on. A ws-mcp that is
   not the hosted harness's never writes, heartbeats, removes, or end-marks a
   row that carries `hosted: true`, whatever key it is given.
@@ -1195,8 +1200,8 @@ paste. This route accepts only a loopback peer and Host with its own Origin and
 same-origin fetch metadata when present; it is rate-limited and returns no
 credential. Unavailable native writers hide the
 action, while runtime write failures allow retry. Nothing reads or writes the
-clipboard on page load. Agent links, Settings and the desktop Connection menu
-provide additional explicit login-link paths. Electron sets its native cookie
+clipboard on page load. Settings and the desktop Connection menu provide
+additional explicit login-link paths. Electron sets its native cookie
 before navigation. A same-origin status probe recovers a Strict-cookie browser
 that followed a cross-site link, retaining the requested fragment.
 
@@ -1596,7 +1601,7 @@ Current launcher inputs:
 | `WS_MCP_BOOTSTRAP_URL` | Download a prebuilt binary when no runtime binary exists. |
 | `WS_MCP_BOOTSTRAP_SHA256` | Optional SHA-256 checksum for `WS_MCP_BOOTSTRAP_URL`. |
 | `WS_MCP_RELEASE_REPOSITORY` | Override the GitHub release repository from `runtime.json`. |
-| `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.50.5`. |
+| `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.50.7`. |
 | `WS_MCP_RELEASE_BASE_URL` | Override the full release asset base URL; useful for local file or HTTP smoke tests. |
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
 | `WS_MCP_LAUNCHER_DIRECT` | Obsolete; ignored. It never enables executable fallback. |
@@ -1655,7 +1660,7 @@ The helper updates plugin manifests, runtime contracts, Go runtime development
 defaults, release workflow references, build script defaults, selected
 documentation references, and the `agents-plugin-pi/` mirrors (`runtime.json`,
 `bin/ws-mcp-launcher.py`, `rsrc/`, resynced byte-for-byte from `agents-plugin/`,
-plus both `ws-pi-bridge` `package.json` versions). Development binaries such as `0.50.5-dev` satisfy the
+plus both `ws-pi-bridge` `package.json` versions). Development binaries such as `0.50.7-dev` satisfy the
 plugin version the helper just set; older or newer minor releases are stale. The
 concrete range lives in `runtime.json.required_mcp` — read it there rather than
 restating a version here, which froze at `0.29.2` for seven minor releases
@@ -1829,7 +1834,7 @@ Level 2 validates local release assets:
 
 ```bash
 cd agents-plugin-tool
-scripts/build-release-assets.sh 0.50.5-dev
+scripts/build-release-assets.sh 0.50.7-dev
 python3 ../agents-plugin/bin/ws-mcp-launcher.py version
 cd dist
 shasum -a 256 -c SHA256SUMS

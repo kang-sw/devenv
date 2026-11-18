@@ -61,10 +61,13 @@
     if (c) q(".sentdata i[data-id]", c).forEach(function (i) { sent[i.getAttribute("data-id")] = 1; });
     return q(TL_ASK, b).filter(function (el) { var id = el.getAttribute("data-id"); return !drafted[id] && !sent[id]; }).length;
   }
+  // The tree's hidden compact roster (.ag-source) does not count: it repeats
+  // this tree's running rows outside any .agent and adds linked delegate
+  // sessions' agents, so it would add a lead wait that is not there.
   function tlPerms() {
     var t = tlRoot("tree"), c = tlRoot("convlive"), units = [];
     function add(u) { if (units.indexOf(u) < 0) units.push(u); }
-    if (t) q(".phase.permission, .brow.perm", t).forEach(function (el) { add(el.closest(".agent, .peer") || "lead"); });
+    if (t) q(".phase.permission, .brow.perm", t).forEach(function (el) { if (!el.closest(".ag-source")) add(el.closest(".agent, .peer") || "lead"); });
     if (c && c.querySelector(".permwait")) add((t && t.querySelector(".agent.root")) || "lead");
     return units.length;
   }
@@ -367,8 +370,8 @@
     // Browser-hidden tabs retain their stream; only cached frames stop it.
     if (shHidden === mainPaused) return;
     mainPaused = shHidden;
-    if (mainPaused) { stopMainStream(); connected(false); trackerLost(); }
-    else connect();
+    if (mainPaused) { boardReturnEnd(); stopMainStream(); connected(false); trackerLost(); }
+    else { boardReturnShown(); connect(); }
   }
   doc.addEventListener("ws-page-visibility", syncMainStream);
   function connect(withoutBoard) {
@@ -498,6 +501,7 @@
         if (ev.name === "rail" || ev.name === "sessions") apScan(frag(ev.name === "rail" && WsRail ? WsRail.rowInputHTML(ev.html) : ev.html));
         return;
       }
+      if (ev.name === "board" && boardReturnTimer) boardReturnFresh = true;
       swap(ev.name, ev.hash, ev.html);
     }
     // A frame the shell hides reads the tracker once it shows (shShown).

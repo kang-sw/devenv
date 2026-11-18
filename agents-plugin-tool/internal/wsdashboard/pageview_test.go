@@ -263,8 +263,19 @@ func TestSubagentCounts(t *testing.T) {
 		"self parent ignored": {[]wslive.Agent{run("a", "a", "")}, SubagentCount{Direct: 1}},
 	}
 	for name, c := range cases {
-		if got := subagentCounts("self", c.agents, lookup, now); got != c.want {
+		got, rows := subagentProjection("self", c.agents, lookup, now)
+		if got != c.want {
 			t.Errorf("%s: counts = %+v, want %+v", name, got, c.want)
+		}
+		if len(rows) != got.Direct+got.Deep {
+			t.Errorf("%s: %d compact rows for %+v", name, len(rows), got)
+		}
+		seen := map[string]bool{}
+		for _, row := range rows {
+			if row.Status != wslive.StatusRunning || seen[row.ID] {
+				t.Errorf("%s: unexpected or duplicate row %q", name, row.ID)
+			}
+			seen[row.ID] = true
 		}
 	}
 }
@@ -284,6 +295,9 @@ func TestConvLiveCarriesSubagentCounts(t *testing.T) {
 	set, err := renderSessionRegions(v, newEntryCache())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if html := string(set[regionTree].HTML); !strings.Contains(html, `class="ag-source" hidden data-sub="1" data-subdeep="2"`) || strings.Count(html, `class="compact-agent"`) != 3 {
+		t.Errorf("tree lacks matching counts and compact rows:\n%s", html)
 	}
 	if html := string(set[regionConvLive].HTML); !strings.Contains(html, `<div class="conv clive" data-phase="" data-sub="1" data-subdeep="2" data-bg="0" data-monitors="0">`) {
 		t.Errorf("convlive lacks the subagent counts:\n%s", html)
@@ -1151,6 +1165,8 @@ func TestPiAgentRowBlinksAPiBadgeAndLinks(t *testing.T) {
 	runner.HasBoard, runner.Agent, runner.Unlisted = false, true, true
 	v := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: snap, Now: now, Lookup: lookupOf(map[string]Session{"childone": runner}, nil)})
 	html := renderTree(t, v)
+	// The compact source repeats presentation marks, not full-tree rows.
+	html = html[strings.Index(html, `<div class="thead">`):]
 	if n := strings.Count(html, `<span class="pibadge"`); n != 1 {
 		t.Fatalf("pi badges = %d, want the running pi row's alone: %s", n, html)
 	}
