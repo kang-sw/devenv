@@ -146,9 +146,10 @@ if (bad.length) process.exitCode = 1;
 `
 
 // TestDrawerFoldButtons pins the fold button in the hidden active handle's
-// slot. It shows only for the open sheet, closes with the click animation,
-// and restores keyboard focus to its opener. Tracker fold buttons never
-// show on the store page, and closing preserves the handle's signals.
+// slot. It shows only for the open sheet, takes focus from a keyboard-opened
+// opener, closes with the click animation, and restores keyboard focus to
+// its opener. Tracker fold buttons never show on the store page, and closing
+// preserves the handle's signals.
 func TestDrawerFoldButtons(t *testing.T) {
 	fold := dashboardJSBlock(t, "\n  function drFoldShow(mode) {", "\n  function drTitle() {")
 	apply := dashboardJSBlock(t, "\n  function drApply(anim) {", "\n  // ghSync marks")
@@ -174,7 +175,6 @@ var drhandle = el('drhandle'), gitRegion = el('r-git'), ghandleEl = el('ghandle'
 var drheader = {getBoundingClientRect:function(){return {bottom:40};}};
 var drOpen = false, drMode = 'panels', drWant = false, drTop = 40, drShown = '', drHas = true, drSwap = false, DR_OPEN = 'k', DR_SEARCH = 'search', tkApi = null;
 function ghandle() { return ghandleEl; }
-function drMeasure() {}
 function drMax() { return 600; }
 function ghSync() {} function drTitle() {} function drFill() {} function wtLoad() {} function hdLoad() {} function notesLoad() {} function gitOpened() {} function drDot() {} function drAnnounce() {}
 var stored = {};
@@ -213,6 +213,16 @@ check('the fold closes the panels sheet', [drOpen, shown()], [false, '']);
 check('focus goes to the panels handle', doc.activeElement && doc.activeElement.id, 'drhandle');
 drFold();
 check('a fold click on a closed drawer does nothing', drOpen, false);
+
+// A keyboard open hides the focused opener: focus moves to the fold button
+// in its slot, not to the body, and the fold hands it back.
+[['panels', drhandle], ['git', ghandleEl], ['search', shandle]].forEach(function (c) {
+  doc.activeElement = c[1];
+  drSetOpen(true, c[0]);
+  check(c[0] + ' keyboard open focuses the fold button', [shown(), doc.activeElement && doc.activeElement.id], [c[0], 'drfold']);
+  drFold();
+  check(c[0] + ' fold hands focus back to its opener', doc.activeElement && doc.activeElement.id, c[1].id);
+});
 
 // The tracker's store handles: each in a slot with its fold button.
 (function () {
@@ -258,6 +268,9 @@ check('a fold click on a closed drawer does nothing', drOpen, false);
   check('closed handle keeps selection, unread badge and expansion meaning', [$('tkh-A').className, $('tkh-A').attrs['aria-expanded'], $('tkh-A').querySelector('.tk-badge').hidden, $('tkh-A').querySelector('.tk-badge').textContent], ['tk-handle on', 'false', false, 1]);
   openStore('B');
   check('another store opens without hiding the selected closed opener', [$('tkh-A').className, $('tkh-B').className], ['tk-handle', 'tk-handle on open']);
+  document.activeElement = $('tkh-A');
+  openStore('A');
+  check('a keyboard open focuses the store fold button, not the body', [ui.open, document.activeElement.id], ['A', 'tkf-A']);
 })();
 
 process.stdout.write(bad.join("\n"));

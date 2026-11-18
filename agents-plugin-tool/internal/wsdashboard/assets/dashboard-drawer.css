@@ -175,6 +175,10 @@
 .dr-fold:hover { color: var(--wb-fg); }
 .dr-fold:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
 .dr-fold .li { width: 17px; height: 17px; }
+/* the panels sheet hides the waiting handle and covers the waiting rows: the
+   fold button in its slot carries the handle's approval signal (drawerWait) */
+.drawer.panels .dr-fold.wait { gap: 7px; background: color-mix(in srgb, var(--wb-ph-perm) 22%, var(--wb-card)); color: var(--wb-fg); }
+.drawer.panels .dr-fold.wait .dr-wait { display: inline-flex; }
 @keyframes dr-fold-in { from { opacity: 0; } }
 /* the git handle (the git region, gitbadge.go): left of the panels handle
    (--ghr, set by the page script, is that handle's width and the gap), in its
