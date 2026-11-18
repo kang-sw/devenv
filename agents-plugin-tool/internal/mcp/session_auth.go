@@ -197,6 +197,10 @@ type sessionStore struct {
 	// sessionsMade is the split root dirs last created (a string), so a
 	// keyed call does not stat it again.
 	sessionsMade atomic.Value
+
+	// sublead memoizes each key's sub-lead marker read (key ->
+	// subleadCacheEntry); see subleadPlaybook.
+	sublead sync.Map
 }
 
 func newSessionStore() *sessionStore {
