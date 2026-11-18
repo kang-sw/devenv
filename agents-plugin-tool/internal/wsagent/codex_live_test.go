@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -258,9 +257,76 @@ func (c *codexLiveCapture) save(t *testing.T, path string, replacements map[stri
 	}
 	// macOS may report the canonical /private spelling of a temp cwd.
 	text = strings.ReplaceAll(text, "/private/work/", "/work/")
-	text = regexp.MustCompile(`"balance"\s*:\s*"[^"]*"`).ReplaceAllString(text, `"balance":"<redacted>"`)
+	text, err := sanitizeCodexCapture(text)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Keep protocol structure and opaque conversation ids, not account state or
+// machine identity. The substituted account/limit values are deliberately
+// synthetic; they are not evidence of the recording account's subscription.
+func sanitizeCodexCapture(text string) (string, error) {
+	var out strings.Builder
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		prefix := ""
+		if strings.HasPrefix(line, ">> ") {
+			prefix, line = ">> ", strings.TrimPrefix(line, ">> ")
+		}
+		var message map[string]any
+		if err := json.Unmarshal([]byte(line), &message); err != nil {
+			return "", err
+		}
+		if message["method"] == "remoteControl/status/changed" {
+			if params, ok := message["params"].(map[string]any); ok {
+				message["params"] = map[string]any{"status": params["status"]}
+			}
+		}
+		sanitizeCodexCaptureValue(message)
+		raw, err := json.Marshal(message)
+		if err != nil {
+			return "", err
+		}
+		out.WriteString(prefix)
+		out.Write(raw)
+		out.WriteByte('\n')
+	}
+	return out.String(), nil
+}
+
+func sanitizeCodexCaptureValue(value any) {
+	switch value := value.(type) {
+	case map[string]any:
+		for key, child := range value {
+			normalized := strings.ToLower(strings.ReplaceAll(key, "_", ""))
+			switch normalized {
+			case "cwd", "hostname", "accountid", "email", "installationid", "environmentid", "projectid",
+				"codexhome", "runtimeworkspaceroots", "sourcepath", "path", "gitinfo", "instructionsources",
+				"credits", "individuallimit", "spendcontrolreached", "ratelimitreachedtype", "availableaccessprograms":
+				delete(value, key)
+			case "plantype":
+				value[key] = "synthetic-plan"
+			case "authmode":
+				value[key] = "synthetic-auth"
+			case "usedpercent":
+				value[key] = float64(42)
+			case "resetsat":
+				value[key] = float64(2_000_000_000)
+			case "balance":
+				value[key] = "<redacted>"
+			case "useragent":
+				value[key] = "synthetic-agent"
+			default:
+				sanitizeCodexCaptureValue(child)
+			}
+		}
+	case []any:
+		for _, child := range value {
+			sanitizeCodexCaptureValue(child)
+		}
 	}
 }
 
