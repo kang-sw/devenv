@@ -117,9 +117,10 @@ func TestHostedPluginVersionFallbackWarningPersists(t *testing.T) {
 	}
 	h := newLeadHarness(t)
 	h.opts.DaemonVersion = "0.51.0"
+	h.opts.WSMCP = hostedLeadLauncher("0.51.0")
 	h.start()
 	id, holder := h.runLead("start with compatible fallback")
-	if got, _ := flagValue(h.holders.spawned(holder).Argv, "--plugin-dir"); got != own {
+	if got := leadLauncherPlugin(t, h.holders.spawned(holder).Argv); got != own {
 		t.Fatalf("launched plugin %q, want fallback %q", got, own)
 	}
 	warning := h.record(id).PluginWarning

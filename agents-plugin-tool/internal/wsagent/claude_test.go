@@ -190,28 +190,25 @@ func TestHarnessEnvDropsParentSession(t *testing.T) {
 	}
 }
 
-// A failed lead plugin plan must reach Start's caller before any process is
-// spawned; it must never retry with the user's installed ws/wsflow copy.
+// A failed lead plugin plan, or a lead with no ws-mcp to attach, must reach
+// Start's caller before any process is spawned; it must never retry with
+// the user's installed ws/wsflow copy.
 func TestClaudeLeadStartRefusesPluginResolutionErrors(t *testing.T) {
-	leadBundledFixture(t, "wsflow")
 	restore := lookPath
 	lookPath = func(string) (string, error) { return "/never-start-claude.exe", nil }
 	t.Cleanup(func() { lookPath = restore })
-	for _, failure := range []string{"bundle", "settings", "isolation"} {
+	for _, failure := range []string{"ws-mcp", "settings"} {
 		t.Run(failure, func(t *testing.T) {
 			spec := claudePluginLeadSpec(t)
 			want := ""
 			switch failure {
-			case "bundle":
-				t.Setenv("WS_RSRC_ROOT", filepath.Join(t.TempDir(), "missing", "rsrc"))
-				want = "bundled plugin"
+			case "ws-mcp":
+				spec.WSMCP, spec.MCPSession = nil, nil
+				want = "no ws-mcp to attach"
 			case "settings":
 				path := filepath.Join(spec.Root, ".claude", "settings.local.json")
 				writeLeadPluginFixture(t, path, `{`)
 				want = path
-			case "isolation":
-				spec.Lead.PluginIsolation = "unknown"
-				want = "invalid plugin isolation"
 			}
 			proc, err := (ClaudeBackend{Command: "/never-start-claude.exe"}).Start(context.Background(), spec)
 			if proc != nil {
@@ -663,15 +660,20 @@ func TestLiveWriterEndAgents(t *testing.T) {
 }
 
 // TestClaudeMapperReadsResultsUnderTheAttachedServer: a result-reading ws
-// tool is read under the name its server has in the process: a worker's
-// inline ws server; a lead's hosted bundle's plugin server, either
-// package's, never the bare server name a lead does not have.
+// tool is read under the name its server has in the process: the inline
+// ws server, a worker's and a hosted lead's alike (the lead's --mcp-config
+// server); for a lead an older daemon started on a hosted bundle, also
+// that bundle's plugin server, either package's. A worker never has a
+// plugin server.
 func TestClaudeMapperReadsResultsUnderTheAttachedServer(t *testing.T) {
 	worker := newClaudeMapper(claudeSpec(t, `{"backend":"claude"}`))
 	lead := newClaudeMapper(leadSpec())
 	for name, want := range map[string][2]string{
-		"mcp__ws__tracker_update":                    {TrackerWriteTool, ""},
-		"mcp__ws__tracker_show":                      {CardTool, ""},
+		"mcp__ws__tracker_update":                    {TrackerWriteTool, TrackerWriteTool},
+		"mcp__ws__tracker_show":                      {CardTool, CardTool},
+		"mcp__ws__tracker_ui":                        {UITool, UITool},
+		"mcp__ws__tickets_query":                     {"", ""},
+		"mcp__other__tracker_update":                 {"", ""},
 		"mcp__plugin_ws_ws__tracker_update":          {"", TrackerWriteTool},
 		"mcp__plugin_ws_ws__tracker_ui":              {"", UITool},
 		"mcp__plugin_wsflow_wsflow__tracker_show":    {"", CardTool},

@@ -165,6 +165,64 @@ func TestPiLeadMissingBundleFallback(t *testing.T) {
 	}
 }
 
+// TestPiLeadBridgeCarriesTheManualOnItsFallback: on the MCP bridge
+// fallback (servers set) the bridge source embeds the daemon-rendered
+// manual (LeadSpec.Manual) as a JSON string beside the key, read once per
+// write; with the native extension loaded (no servers) the manual is left
+// empty and never rendered, since the extension appends its own.
+func TestPiLeadBridgeCarriesTheManualOnItsFallback(t *testing.T) {
+	const manual = "# Workflow Manual\n\n## Session Key\nlead-key \"quoted\" `code` </script>"
+	spec, _ := piLeadFixture(t)
+	spec.Lead.Env = map[string]string{EnvHostedSessionKey: "lead-key"}
+	renders := 0
+	spec.Lead.Manual = func() string { renders++; return manual }
+	embedded := func(t *testing.T, servers map[string]any) string {
+		t.Helper()
+		path, err := writePiLeadBridge(spec, servers, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(raw)
+		const prefix = "\nconst workflowManual = "
+		start := strings.Index(text, prefix)
+		if start < 0 {
+			t.Fatalf("the bridge declares no workflowManual:\n%s", text)
+		}
+		end := strings.Index(text[start+len(prefix):], ";\n")
+		var got string
+		if err := json.Unmarshal([]byte(text[start+len(prefix):start+len(prefix)+end]), &got); err != nil {
+			t.Fatalf("workflowManual is not a JSON string: %v", err)
+		}
+		return got
+	}
+	if got := embedded(t, map[string]any{ReservedMCPServer: map[string]any{"command": "/bundled/ws"}}); got != manual || renders != 1 {
+		t.Fatalf("the fallback bridge embeds %q after %d renders, want the manual once", got, renders)
+	}
+	if got := embedded(t, nil); got != "" || renders != 1 {
+		t.Fatalf("a native-extension bridge embeds %q after %d renders, want none", got, renders)
+	}
+
+	// The fallback launch itself carries it.
+	spec.Lead.PluginIsolation = "isolated"
+	spec.Lead.PluginWarning = func(string) {}
+	spec.Lead.WSMCP = func() (MCPCommand, error) { return MCPCommand{Command: "/bundled/ws"}, nil }
+	if _, _, err := piLeadLaunch("pi", nil, spec); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(piDir(spec.Dir), piBridgeFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manualJSON, _ := json.Marshal(manual)
+	if !strings.Contains(string(raw), "\nconst workflowManual = "+string(manualJSON)+";\n") || renders != 2 {
+		t.Fatalf("the fallback launch's bridge lacks the manual (%d renders):\n%s", renders, raw)
+	}
+}
+
 func TestPiLeadSDKMatchesCLIBuild(t *testing.T) {
 	for _, build := range []string{"dist", "dist/bundle"} {
 		t.Run(build, func(t *testing.T) {

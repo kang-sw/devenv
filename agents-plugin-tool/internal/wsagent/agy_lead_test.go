@@ -329,6 +329,49 @@ func TestAgyLeadRejoinOfAnUnfinishedStartRestarts(t *testing.T) {
 	}
 }
 
+// TestAgyLeadPromptCarriesTheWorkflowManual: a hosted agy lead's session
+// request appends its key sentence and the manual the daemon rendered for
+// agy, its directory, and its key to agy's system prompt
+// (_meta.antigravity.systemPrompt.append); with no manual it appends the
+// key sentence and the call to fetch it.
+func TestAgyLeadPromptCarriesTheWorkflowManual(t *testing.T) {
+	for name, manual := range map[string]*leadManualRender{
+		"manual":    {text: "# Workflow Manual\n\n## Session Key\nrendered"},
+		"no manual": nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, f := newAgyLeadHarness(t)
+			if manual != nil {
+				h.opts.LeadManual = manual.render
+			}
+			h.startAt("http://127.0.0.1:1")
+			id := h.lead(BackendAgy, LeadOptions{}).ID
+			f.replyID = id
+			h.send(id, "hello")
+			holder := h.holder(id)
+			eventually(t, "the first prompt", func() bool { return len(agyPromptIDs(h, holder)) == 1 })
+			key := h.record(id).WSKey
+			news := h.holders.acpInputs(holder, "session/new")
+			if len(news) != 1 {
+				t.Fatalf("one session request: %d", len(news))
+			}
+			text, _ := acpField(t, news[0], "_meta", "antigravity", "systemPrompt", "append").(string)
+			want := leadKeySentence(key) + leadManualOnly
+			if manual != nil {
+				want = leadKeySentence(key) + "The workflow manual below is binding; its session state is as of this session's start. " +
+					"After any compaction, or when you need fresh session state, call the workflow_manual tool with this key and follow it.\n\n" +
+					manual.text + "\n"
+				if calls := manual.list(); len(calls) != 1 || calls[0][0] != BackendAgy || !sameDir(calls[0][1], h.root) || calls[0][2] != key {
+					t.Fatalf("the manual renders once, for agy, the lead's directory, and its key: %v", calls)
+				}
+			}
+			if text != want {
+				t.Fatalf("session/new appends %q, want %q", text, want)
+			}
+		})
+	}
+}
+
 // TestAgyLeadRefusesAStartWithoutWSTools: a start with no HTTP MCP route,
 // or one whose session never reaches the route with its token (agy only
 // drops a refused server), fails loudly instead of running a lead without
