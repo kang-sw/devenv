@@ -122,8 +122,20 @@ How each playbook's diet runs, so a later session resumes it as is:
   ferrule guidance removed; lead-revive passes root ((91)=a); Explore names
   the tier only (no model names; the tier-model golden test was retargeted
   to the Explore agent term).
-- Next: `whiteboard`, `lead-run` (add the trivial-ticket pointer),
-  `ticket-handler`, `lead-review`, `lead-ship`.
+- `whiteboard`: done (292dc5c66), 610 → 201 lines; doc-only semantic diet
+  ((95)=a), with `command-syntax.md` rewritten to standard XML plus
+  `<prefix:raw>` ((96)=a). The parser support lands with
+  261118-feat-ws-xmlcmd-raw-element. The folder takeover recipe became the
+  two lines under "Handing a board to another session", which name
+  `whiteboard.load`; that tool lands with 261118-feat-ws-whiteboard-zip-handoff.
+  Both tickets must land before this track merges to `develop`.
+- Forward: `agents-plugin-pi/test/fixtures/workflow-manual-static-body.txt`
+  still snapshots the pre-diet manual body; regenerate it if the Pi
+  `cutStaticBody` tests (Node) anchor on removed text. The last
+  `internal/mcp` run after the final test edit was the targeted
+  `Whiteboard|Tracker|Playbook|Manual` subset only.
+- Next: `lead-run` (add the trivial-ticket pointer), `ticket-handler`,
+  `lead-review`, `lead-ship`.
 
 ## Phases
 
