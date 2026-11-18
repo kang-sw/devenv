@@ -5,43 +5,38 @@ summary: Required before changing how native tooling or the daemon touches files
 # Performance
 
 Target machines are corporate Windows PCs with heavy security software
-(antivirus such as AhnLab V3), slower than a developer PC. The scanner runs on
-every file touch, so each file syscall costs 10-100x what it costs on a clean
-machine. The goal is the fewest file touches per user action: files exist only
-for backup and restoration.
+(antivirus such as AhnLab V3). The scanner runs on every file touch, so each
+file syscall costs 10-100x what it costs on a clean machine. The goal is the
+fewest file touches per user action.
 
 ## Rules
 
 1. **Memory is the source of truth; files are for recovery.** Reads come from
    memory only; files are read once, at startup. Why: a per-call or per-event
-   reread makes every action O(N) in file I/O. Pattern: load at startup, serve
-   every read from the in-memory state.
-2. **Changes are delta appends.** One change is one appended line; no
-   whole-file rewrite, and nothing is written when nothing changed. Why: a
-   rewrite-and-rename touches the file, a temp file, and the directory on every
-   change, and a heartbeat rewrite repeats that with no new data. Pattern: a
-   JSONL log with one `write()` per change.
-3. **Retention deletes whole files.** Never edit a live file to drop old
-   records. Make each file self-sufficient for recovery, with a full snapshot
-   as its first line, so recovery reads one file. Why: per-record files or
-   in-place pruning cost a directory listing and deletes on every add. Pattern:
-   a ring of fixed-size segments; rotation writes the snapshot line into the
-   new segment and deletes the oldest segment.
-4. **Keep handles and locks open.** Hold them for the process lifetime. No
-   per-call open/lock/close, reread, or `stat`. Why: each of those is a scanned
-   file touch. Pattern: open and lock once at startup, close at shutdown.
+   reread makes every action O(N) in file I/O.
+2. **Changes are delta appends.** One change is one appended line; an
+   unchanged state writes nothing. Why: a rewrite-and-rename touches the file, a
+   temp file, and the directory on every change, and a heartbeat rewrite
+   repeats that with no new data. Pattern: a JSONL log with one `write()` per
+   change.
+3. **Retention deletes whole files.** Make each file self-sufficient for
+   recovery, with a full snapshot as its first line, so recovery reads one
+   file. Why: per-record files cost a directory listing and deletes on every
+   add; in-place pruning rewrites the live file. Pattern: a ring of fixed-size
+   segments; rotation writes the snapshot line into the new segment and
+   deletes the oldest segment.
+4. **Keep handles and locks open.** Open and lock once at startup and hold
+   them until shutdown; no per-call open, lock, or `stat`. Why: each is a
+   scanned file touch.
 5. **Interactive paths do not wait on file I/O.** Chat send -> delivery ->
    processing start, and page load, complete from memory. Recovery trims a torn
    last line instead of relying on `fsync`. Why: a scanned write on the
    interactive path is user-visible latency. Pattern: update memory, append,
-   return; on restart, drop an incomplete final line.
+   return.
 6. **Minimize process spawns.** Why: a new process is scanned at launch and
    pays every file touch of its own startup. Pattern: do the work in the
    long-lived process; spawn only when no in-process route exists.
-7. **Decide by measurement.** Count file operations per action before and
-   after, with a heavy-AV Windows PC as the baseline (see `## Measuring`).
-   Why: fixture CPU time and Linux timings hide the scanner cost that
-   dominates on target machines.
+7. **Decide by measurement.** Follow `## Measuring`.
 8. **Exceptions need the owner's approval.** A change that breaks a rule above
    states which rule, why, and its measured cost, and waits for that approval.
 
@@ -69,7 +64,8 @@ version can still read the store after a downgrade.
 - **Unit:** file operations per user action (one send, one page load), counted
   before and after the change with a syscall or file-activity tracer.
 - **Baseline:** a Windows PC running heavy security software. A clean machine,
-  Linux, or fixture CPU time is supporting evidence only.
+  Linux, or fixture CPU time hides the scanner cost and is supporting
+  evidence only.
 - **Latency:** time from the action to its visible effect (send -> delivery ->
   processing start; request -> rendered page) on that same baseline.
 - **Report:** the before/after counts and latency in the commit or ticket
