@@ -61,7 +61,7 @@ func codexEnv(spec StartSpec) []string {
 	if spec.MCPSession != nil {
 		set[EnvMCPSessionToken] = spec.MCPSession.Token
 	}
-	drop := append([]string{"CLAUDE", "CODEX_", "PI_", "ORCA_"}, leadDropEnv...)
+	drop := append([]string{"CLAUDE", "CODEX_", "PI_", "ORCA_", "WS_PI_"}, leadDropEnv...)
 	return harnessEnv(spec.Env, drop, map[string]bool{"CODEX_HOME": true}, set)
 }
 

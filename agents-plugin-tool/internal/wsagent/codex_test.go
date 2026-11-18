@@ -46,7 +46,7 @@ func feedCodexFixture(t *testing.T, name string) *codexRun {
 		}
 		if line.in {
 			if msg.Method != "" && len(msg.ID) > 0 {
-				kind := map[string]string{"initialize": "init", "thread/start": "open", "thread/resume": "open", "model/list": "models", "turn/start": "turn"}[msg.Method]
+				kind := map[string]string{"initialize": "init", "thread/start": "open", "thread/resume": "open", "model/list": "models", "turn/start": "turn", "thread/read": "recover"}[msg.Method]
 				if kind == "" {
 					kind = "control"
 				}
