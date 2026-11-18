@@ -558,7 +558,10 @@
         "clone_id": "9091c57d68d03c76",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-18T09:31:57Z"
+        "touched_at": "2026-11-18T09:32:28Z",
+        "impl": {
+          "branch": "impl/develop/tray-could-dill"
+        }
       }
     },
     "261118-feat-ws-agy-tool-names-and-worker-role": {
