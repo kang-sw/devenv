@@ -271,63 +271,64 @@ const optionNames = sel => sel.children.map(n => n.value);
   });
 }
 
-// The harness notice: a hosted session whose state says its harness version
-// is unverified, or that names demoted items, shows one notice under the
-// banner; a state without either (or without capabilities) shows none.
+// Harness warnings use translated warning toasts, once per distinct notice
+// for the page lifetime, without inserting a persistent element.
 {
   const table = {
     'js.lead.harness.unverified': 'Harness version {0} is outside the verified range {1}; running on the capabilities of {2}.',
     'js.lead.harness.unreported': 'unreported',
-    'js.lead.harness.demoted': 'Unavailable on this harness version: {0}.'
+    'js.lead.harness.demoted': 'Unavailable in this session: {0}.'
   };
   const wsT = (k, ...a) => (table[k] || k).replace(/\{(\d+)\}/g, (m, i) => String(a[Number(i)]));
-  const host = { children: [], insertBefore(n, ref) { n.parentNode = this; if (n.parentNode.children.includes(n)) this.children.splice(this.children.indexOf(n), 1); const i = ref ? this.children.indexOf(ref) : this.children.length; this.children.splice(i, 0, n); } };
-  const banner = { parentNode: host, nextSibling: null };
-  host.children.push(banner);
-  const mkNode = (tag, cls, text) => {
-    const n = { tag, cls, text: text || '', children: [], attrs: {},
-      setAttribute(k, v) { this.attrs[k] = v; },
-      appendChild(c) { this.children.push(c); return c; },
-      remove() { const i = host.children.indexOf(this); if (i >= 0) host.children.splice(i, 1); } };
-    return n;
-  };
+  const calls = [];
+  const noDOM = () => assert.fail('harness warnings must not access or insert DOM elements');
+  const window = { WsToast: { show(text, opts) { calls.push({ text, kind: opts.kind }); } } };
   const leadsSource = readAssetSource('wsdashboard', 'dashboard-leads.js');
-  const ctx = vm.createContext({ wsT, mk: mkNode, luIcon: name => mkNode('svg', 'i li', name), $: id => id === 'dash-banner' ? banner : null });
+  const ctx = vm.createContext({ wsT, window, mk: noDOM, luIcon: noDOM, $: noDOM, document: { createElement: noDOM } });
   vm.runInContext(leadsSource.match(/  function leadGone\(st\) \{.*\}\n/)[0] +
-    leadsSource.match(/  var harnessEl = null;\n  function harnessDraw\(st\) \{[\s\S]*?\n  \}\n/)[0], ctx);
-  const notes = () => host.children.filter(n => n.cls === 'harnessnote');
-  const texts = n => n.children[1].children.map(c => c.text);
+    leadsSource.match(/  var harnessNotices = new Set\(\);\n  function harnessDraw\(st\) \{[\s\S]*?\n  \}\n/)[0], ctx);
   const caps = extra => ({ status: 'running', capabilities: Object.assign({ role: 'lead', profile_version: '2.1.326', oldest: '2.1.322', newest: '2.1.326' }, extra) });
 
   ctx.harnessDraw({ status: 'running' });
-  assert.equal(notes().length, 0, 'a state without capabilities shows no notice');
   ctx.harnessDraw(caps({ version: '2.1.326' }));
-  assert.equal(notes().length, 0, 'verified and not demoted shows no notice');
   ctx.harnessDraw(caps({ version: '2.1.326', demoted: [] }));
-  assert.equal(notes().length, 0, 'an empty demoted list shows no notice');
+  ctx.harnessDraw({ status: 'closed', capabilities: { unverified: true, demoted: ['closed-only'] } });
+  assert.equal(calls.length, 0, 'missing capabilities, clean and closed states are silent');
 
-  ctx.harnessDraw(caps({ version: '2.1.399', unverified: true }));
-  assert.equal(notes().length, 1);
-  assert.equal(host.children[1], notes()[0], 'the notice sits right under the banner');
-  assert.deepEqual(texts(notes()[0]), ['Harness version 2.1.399 is outside the verified range 2.1.322–2.1.326; running on the capabilities of 2.1.326.']);
-  ctx.harnessDraw(caps({ version: '2.1.399', unverified: true }));
-  assert.equal(notes().length, 1, 'an unchanged state keeps one notice');
+  const a = caps({ version: '2.1.399', unverified: true });
+  const b = caps({ unverified: true, demoted: ['compaction', 'rewind'] });
+  ctx.harnessDraw(a);
+  assert.deepEqual(calls, [{
+    text: 'Harness version 2.1.399 is outside the verified range 2.1.322–2.1.326; running on the capabilities of 2.1.326.', kind: 'warn'
+  }]);
+  ctx.harnessDraw(a);
+  assert.equal(calls.length, 1, 'unchanged state emits only once');
 
-  ctx.harnessDraw(caps({ unverified: true, demoted: ['compaction', 'rewind'] }));
-  assert.equal(notes().length, 1);
-  assert.deepEqual(texts(notes()[0]), [
-    'Harness version unreported is outside the verified range 2.1.322–2.1.326; running on the capabilities of 2.1.326.',
-    'Unavailable on this harness version: compaction, rewind.']);
+  ctx.harnessDraw(b);
+  assert.deepEqual(calls[1], {
+    text: 'Harness version unreported is outside the verified range 2.1.322–2.1.326; running on the capabilities of 2.1.326. Unavailable in this session: compaction, rewind.',
+    kind: 'warn'
+  }, 'translated lines are joined with a space in one warning toast');
+  ctx.harnessDraw(a);
+  assert.equal(calls.length, 2, 'A -> B -> A does not repeat A');
 
-  ctx.harnessDraw(caps({ version: '2.1.326', demoted: ['skill_list'] }));
-  assert.deepEqual(texts(notes()[0]), ['Unavailable on this harness version: skill_list.'], 'demotion alone shows its own line');
-
+  const demoted = caps({ version: '2.1.326', demoted: ['skill_list'] });
+  ctx.harnessDraw(demoted);
+  assert.deepEqual(calls[2], { text: 'Unavailable in this session: skill_list.', kind: 'warn' }, 'demotion alone warns');
   ctx.harnessDraw(caps({ version: '2.1.326' }));
-  assert.equal(notes().length, 0, 'the notice goes when the state clears');
-  ctx.harnessDraw(caps({ unverified: true, version: '2.1.399' }));
   ctx.harnessDraw({ status: 'running' });
-  assert.equal(notes().length, 0, 'capabilities gone takes the notice away');
-  ctx.harnessDraw(caps({ unverified: true, version: '2.1.399' }));
-  ctx.harnessDraw({ status: 'closed', capabilities: { unverified: true } });
-  assert.equal(notes().length, 0, 'a closed session shows no notice');
+  ctx.harnessDraw({ status: 'closed', capabilities: { unverified: true, demoted: ['closed-only'] } });
+  ctx.harnessDraw(a);
+  ctx.harnessDraw(b);
+  ctx.harnessDraw(demoted);
+  assert.equal(calls.length, 3, 'clearing or closing does not reset page-lifetime deduplication');
+
+  delete window.WsToast;
+  const late = caps({ demoted: ['late-toast'] });
+  ctx.harnessDraw(late);
+  window.WsToast = { show(text, opts) { calls.push({ text, kind: opts.kind }); } };
+  ctx.harnessDraw(late);
+  ctx.harnessDraw(late);
+  assert.deepEqual(calls[3], { text: 'Unavailable in this session: late-toast.', kind: 'warn' });
+  assert.equal(calls.length, 4, 'an unavailable toast API does not consume the notice key');
 }

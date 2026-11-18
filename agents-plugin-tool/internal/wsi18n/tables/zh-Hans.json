@@ -2033,7 +2033,7 @@
   "js.lead.restart.note": "MCP 已断开：{0}。结束进程，并在新进程中继续对话。",
   "js.lead.harness.unverified": "harness 版本 {0} 不在已验证范围 {1} 内；按 {2} 的能力运行。",
   "js.lead.harness.unreported": "未上报",
-  "js.lead.harness.demoted": "此 harness 版本不可用：{0}。",
+  "js.lead.harness.demoted": "此会话中不可用：{0}。",
   "js.lead.stop.confirm.one": "停止此会话？正在运行的 {0} 个后台任务将随进程一同结束。",
   "js.lead.stop.confirm.other": "停止此会话？正在运行的 {0} 个后台任务将随进程一同结束。",
   "js.lead.restart.confirm.one": "重启此会话？正在运行的 {0} 个后台任务将随进程一同结束。",

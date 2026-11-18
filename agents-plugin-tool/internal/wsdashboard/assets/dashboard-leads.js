@@ -655,13 +655,9 @@
     banner.parentNode.insertBefore(el, banner.nextSibling);
     handedEl = el;
   }
-  // harnessDraw shows, under the banner like the handed notice, what the
-  // state's capabilities say about the session's harness: a version outside
-  // the verified range (it runs on the nearest verified profile) and the
-  // items turned off for this session. A state without capabilities, or
-  // with neither, takes the notice away. It is outside the regions, so an
-  // update leaves it, and apart from the approval box, so it hides no card.
-  var harnessEl = null;
+  // Warn once per distinct harness notice for the lifetime of this page,
+  // even when state updates clear a notice and later bring it back.
+  var harnessNotices = new Set();
   function harnessDraw(st) {
     var c = !leadGone(st) && st.capabilities, lines = [];
     if (c && c.unverified) {
@@ -669,21 +665,11 @@
       lines.push(wsT("js.lead.harness.unverified", c.version ? String(c.version) : wsT("js.lead.harness.unreported"), range, String(c.profile_version || "")));
     }
     if (c && Array.isArray(c.demoted) && c.demoted.length) lines.push(wsT("js.lead.harness.demoted", c.demoted.map(String).join(", ")));
-    if (!lines.length) { if (harnessEl) { harnessEl.remove(); harnessEl = null; } return; }
-    var key = lines.join("\n");
-    if (harnessEl && harnessEl.wsKey === key) return;
-    var banner = $("dash-banner");
-    if (!banner) return;
-    var el = mk("div", "harnessnote");
-    el.wsKey = key;
-    el.title = key;
-    el.setAttribute("role", "status");
-    el.appendChild(luIcon("triangle-alert"));
-    var body = el.appendChild(mk("div", "hnbody"));
-    lines.forEach(function (l) { body.appendChild(mk("span", null, l)); });
-    if (harnessEl) harnessEl.remove();
-    banner.parentNode.insertBefore(el, banner.nextSibling);
-    harnessEl = el;
+    if (!lines.length || !window.WsToast) return;
+    var key = lines.join(" ");
+    if (harnessNotices.has(key)) return;
+    window.WsToast.show(key, { kind: "warn" });
+    harnessNotices.add(key);
   }
   // leadKey is the conversation's permission line as the state follows it:
   // its tool, arguments, and stamp; empty when the session waits on none.
