@@ -22,7 +22,7 @@ Apply before dispatch, and again when scope changes.
   named in the ticket, one commit) → propose delegating it instead; delegate
   on the user's yes, then close the ticket with
   `{{.McpNamespace}}/tickets.close`, citing the commit.
-- A local NEEDS FIX repair from {{.SkillNamespace}}:lead-review → this gate.
+- A local repair of {{.SkillNamespace}}:lead-review findings → this gate.
 - Needing review is no reason for a ticket: review follows the commit. With a
   `review-track` in the project's `AGENTS.md` `### Review Policy`, its sweep
   covers the commits; otherwise offer {{.SkillNamespace}}:lead-review once

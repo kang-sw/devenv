@@ -4,156 +4,66 @@ kind: print
 
 # Review
 
-Reviewing work you did not write: a contributor branch, or a commit range (the
-release gate's sweep). Reviewers read the diff, from git; you resolve the
-target, adjudicate their findings, and carry the decisions.
+You review work you did not write: a contributor branch, or a commit range
+(the release gate's sweep). A `review-handler` worker runs the reviewers and
+stamps the ledger; you resolve the target and carry the decisions to the
+user.
 
 ## Target
 
-- `range: <base>..<head>` is the range scenario: no checkout, config
-  optional; without `ai-docs/_review.local.md` use the config template's
-  Review Phases below as the built-in default.
-- `branch` or no argument is the branch scenario: load
-  `ai-docs/_review.local.md` (go to **Setup** if absent), record the current
-  branch, fetch and check out the target per the config's Remote section, and
-  offer to restore the branch afterwards.
-- Both given: range wins.
-- A configured blocked path in the diff is BLOCKED: report the paths, stop,
-  and offer removal from the branch or abandoning the review.
+- `range: <base>..<head>` → range scenario: no checkout; config optional.
+- `branch`, or no argument → branch scenario: load
+  `ai-docs/_review.local.md` (absent → follow
+  `{{.McpNamespace}}/playbook.read(name: "review-config")` first), record the
+  current branch, fetch and check out the target per the config's Remote
+  section, and offer to restore the branch afterwards. Its range is
+  `<merge-base>..<head>`.
+- Both given → range wins.
+- `{{.McpNamespace}}/git.diff(mode: "stat")` (a range:
+  `git.diff(range, mode: "stat")`) shows a configured blocked path → report
+  the paths, stop, and offer removing them from the branch or abandoning the
+  review.
+- Config checklist items → the user, in one response.
 
 ## Review
 
-1. Scope: `{{.McpNamespace}}/git.diff(mode: "stat")`; range scenario
-   `git.diff(range, mode: "stat")` and `git.log(range)` for the commits.
-2. Reviewers: render `reviewer` (full scope) or, when the config's Deep Review
-   section or the stat's size calls for it, the `code-review-correctness`,
-   `code-review-fit`, and `code-review-test` partitions, each with
-   `{{.McpNamespace}}/playbook.render(name, session_key: <your key>)`; spawn
-   each with the rendered path, the range (`<merge-base>..<head>` for a
-   branch), the config path, and the review authority — the ticket or inline
-   contract the change names, when there is one. Each plan file the range adds
-   under `ai-docs/.plans/` is the contract for the changes committed with it,
-   and for the same delegate's later commits in the range read together with
-   their `## AI Context`, where a lead-directed follow-up is recorded rather
-   than a deviation from the plan; pass those paths with the authority. A
-   commit with no plan is judged from its diff and `## AI Context`; a missing
-   plan never blocks the review. Each returns severity-graded findings and an
-   `omitted:` field.
-3. Range scenario adds the Landing Lens phase — the config's section, or the
-   built-in default in the template below — plus a test change alongside every
-   behavior change.
-4. Config checklist items go to the user in one response.
-5. Verdict from the aggregate: BLOCKED, LGTM, NEEDS FIX, or OPEN. First
-   re-grade as Important, counting toward NEEDS FIX, each reviewer Minor
-   describing a defect a caller or user can hit today (a crash, wrong output,
-   a refused call that should succeed, data loss) with a plausible current
-   trigger, because the release gate lists `minor` follow-ups only and lets
-   them age out of later ranges; only coverage gaps and tidy-ups stay
-   acceptable as `minor` follow-ups.
-6. Range scenario only: `{{.McpNamespace}}/review.marker(bootstrap: true)`
-   seeds an empty ledger, then `{{.McpNamespace}}/review.stamp(base, head,
-   verdict, ref)` with the invocation's own `<base>` and `<head>` verbatim
-   (LGTM → `pass`; NEEDS FIX → `concern` or `block` by severity; OPEN →
-   `concern`; `ref` is the routed ticket stem, required on `block`). Never
-   pass the marker entry's base: it drifts to the bootstrap commit. This step
-   is the ledger's only writer.
-   A NEEDS FIX that stamps `block` first looks for a cleared prefix, so a
-   blocking merge late in the range does not hold back the commits before it.
-   Map each Critical and Important finding to the first-parent segment that
-   introduced it (`git log --first-parent <base>..<head> -- <path>`; a path
-   several segments touch maps to the earliest of them); a finding with no
-   path, or with a path no segment touched, leaves no prefix. The candidate
-   cut is the first parent of the earliest mapped segment; there is no prefix
-   when that is `<base>`. Run the reviewers once more over `<base>..<cut>` as
-   its own range, because they judge the head state of a range and the
-   aggregate findings cannot vouch for an earlier state. When that review's
-   verdict maps to `pass` or `concern`, stamp `<base>..<cut>` with it, then
-   the full range as `block`; otherwise stamp only the full range and report
-   `<base>..<head>` as uncleared, with no further search.
-7. Range scenario only: commit the stamped ledger with
-   `{{.McpNamespace}}/git.commit`, recording every finding the verdict (and a
-   step-6 prefix review's verdict) accepts without a fix as a `followups`
-   entry of category `review`: an
-   accepted Minor at level `minor`, an overridden Important at level
-   `important`, content `<path>:<line> <one-line summary>`. Otherwise an
-   accepted finding survives only in the untracked review cache;
-   `{{.McpNamespace}}/git.followups` reads these back at the next release
+1. `{{.McpNamespace}}/playbook.render(name: "review-handler", session_key:
+   <your key>)`; spawn it at the returned tier, in a form that can spawn
+   children, with:
+
+   ```text
+   Read <rendered-path> as your system prompt.
+   Scenario: range | branch. Range: <base>..<head>. Config: <path> | none.
+   Authority: <the ticket or inline contract the change names> | none.
+   Block ticket: <stem the fix routes to> | none.
+   ```
+
+2. Its report → relay the outcome and `findings` in the user's language.
+   `ask-user` → put `ask` to the user and resume it with the answer.
+3. Range scenario → commit the ledger it stamped with
+   `{{.McpNamespace}}/git.commit`, recording as `followups` entries of
+   category `review`, content `<path>:<line> <one-line summary>`: each
+   reported `followups:` line at its level, and each Important you or the
+   user accept without a fix at level `important`.
+   `{{.McpNamespace}}/git.followups` reads them back at the next release
    gate.
 
-## Verdict
+## Outcome
 
-- **BLOCKED**: the blocked-path stop in **Target** already ran; nothing is
-  reviewed and nothing is stamped.
-- **LGTM**: branch scenario merges per the config's Merge Approval Method,
-  else asks "Merge?" and merges on confirmation, then notifies per the
-  config's Notification Method; a range scenario ends at the step-7 commit.
-- **NEEDS FIX**: write the findings to
-  `{{.McpNamespace}}/path.generate(kind: "review", stems: ["findings"])`
-  and ask: fix locally, or post to the contributor. Locally →
-  `{{.SkillNamespace}}:lead-delegate` with the findings path and the reviewed
-  target for a bounded repair. If its routing gate requires a ticket, invoke
-  `{{.SkillNamespace}}:lead-ticket` with those inputs, then
-  `{{.SkillNamespace}}:lead-run` with the ready ticket. After either local
-  repair route completes, invoke `{{.SkillNamespace}}:lead-review` again on
-  the repaired target; for a range, retain the original base and include the
-  repair commits in the head so the findings and range are independently
-  verified; after a step-6 prefix stamp, the cut is that base.
-  Contributor → the config's Comment Method, else hand over the path.
-- **OPEN**: judgment needed before a fix decision →
-  `{{.SkillNamespace}}:lead-discuss` with the findings path.
-
-## Setup
-
-Branch scenario with no config: ask for remote, branch naming, review phases,
-checklist, blocked paths, comment, merge-approval, and notification methods,
-contributor workflow, and deep review; write `ai-docs/_review.local.md` from
-the config template and confirm it before reviewing.
-
-### Review Config Template
-
-```markdown
-# Review: <project>
-
-## Remote
-<how to list and fetch MR/PR branches>
-
-## Branch Naming                       ← optional
-<prefix or regex pattern, e.g. feature/, fix/, TICKET-[0-9]+>
-
-## Review Phases
-### intent
-Commit messages and ## AI Context match the stated ticket or MR purpose.
-### alignment
-Diff is consistent with the ticket's stated contract and the project's declared conventions.
-### risk
-No breaking changes, security issues, or missing tests without justification.
-
-## Landing Lens                        ← optional to customize; range scenario always runs it (built-in default below if omitted); branch scenario never runs it
-Diff follows the repo's own conventions (`AGENTS.md` and any authoring manual it
-names). A document the change contradicts is updated in the same range — the
-document whose own function the change invalidates, not just "any doc touched."
-
-## Checklist                           ← optional
-- [ ] <gate item>
-
-## Blocked Paths                       ← optional
-- <path pattern>
-
-## Comment Method                      ← optional
-<glab mr note / GitLab Web UI / none>
-
-## Merge Approval Method               ← optional
-<local merge → push / push → web approve → merge>
-
-## Notification Method                 ← optional
-<post-merge contributor notification method>
-
-## Contributor Workflow                ← optional; default: mixed
-mixed
-
-## Deep Review                         ← optional
-threshold: 20 files / 500 lines
-```
+- `clear` → branch scenario: merge per the config's Merge Approval Method,
+  else ask "Merge?" and merge on confirmation; then notify per its
+  Notification Method. Range scenario: ends at the step-3 commit.
+- `fix` → ask: fix locally, or post to the contributor.
+  - Locally → `{{.SkillNamespace}}:lead-delegate` with the findings path and
+    the reviewed target, as a bounded repair. Its routing gate requires a
+    ticket → `{{.SkillNamespace}}:lead-ticket` with those inputs, then
+    `{{.SkillNamespace}}:lead-run` with the ready ticket.
+  - Either repair done → `{{.SkillNamespace}}:lead-review` again on the
+    repaired target. A range keeps its original base (the cut, when the
+    report stamped a cleared prefix) and its head includes the repair
+    commits.
+  - Contributor → the config's Comment Method, else hand over the path.
+- `judgment` → `{{.SkillNamespace}}:lead-discuss` with the findings path.
 
 ## Stops
 
@@ -161,5 +71,5 @@ Merging; pushing or modifying a remote branch; the checklist response.
 
 ## Output
 
-The verdict, the findings path, the merge decision, and the branch restored
+The outcome, the findings path, the merge decision, and the branch restored
 or the user's decision not to. All written artifacts in English.
