@@ -45,6 +45,9 @@ doc.dispatchEvent = function (e) { (doc.listeners[e.type] || []).slice().forEach
 // The page stands alone: no shell around it, no shell above it.
 var shell = false, framed = false, shHidden = false, shTrackerRev = null;
 var boardLatest = null;
+// No shell session return is open (dashboard-board.js boardReturnShown);
+// receiveRegion reads this window on every board update.
+var boardReturnTimer = 0, boardReturnFresh = false;
 function shDrafts() { return false; }
 ` + dashboardFuncs(t, "pageHidden")
 }
