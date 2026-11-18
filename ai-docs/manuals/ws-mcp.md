@@ -956,8 +956,9 @@ from a support conversation:
   `Backend`; common code names no backend. `ManualHarness` is the harness the
   lead's manual renders under (claude, agy; Pi declares none).
   `ToolNameScheme` is how its connection's `tools/list` spells ws's dotted
-  tool names: agy declares `sanitize` (the Pi bridge's `ws__tickets_query`
-  spelling, since the Anthropic API refuses dots), every other backend keeps
+  tool names: agy declares `sanitize` (each `.` becomes `_`, as `tickets_query`:
+  the Pi bridge's character mapping without its `ws__` prefix, since agy adds
+  `mcp_ws_` itself and the Anthropic API refuses dots), every other backend keeps
   dotted names. A call by alias maps back to the canonical name first in
   `callTool`, so allowlists, the session-key rule, and dispatch see dotted
   names; the dotted name stays accepted. The alias table refuses a collision

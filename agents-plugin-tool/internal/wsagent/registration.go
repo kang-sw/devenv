@@ -32,9 +32,11 @@ type BackendRegistration struct {
 }
 
 // ToolNameSchemeSanitize spells a dotted ws tool name the way the Pi bridge
-// registers it (agents-plugin-pi/src/bridge.ts sanitizeToolName): a "ws__"
-// prefix and each "." flattened to "_", which fits the
-// ^[a-zA-Z0-9_-]{1,128}$ names an Anthropic API tool accepts.
+// registers it (agents-plugin-pi/src/bridge.ts sanitizeToolName): each "."
+// flattened to "_", which fits the ^[a-zA-Z0-9_-]{1,128}$ names an Anthropic
+// API tool accepts. The bridge's "ws__" prefix is not applied: it separates
+// Pi's one flat tool namespace, while agy already prefixes a forwarded tool
+// with its server name (mcp_ws_).
 const ToolNameSchemeSanitize = "sanitize"
 
 // ApplyToolNameScheme spells raw under scheme; ok is false for a scheme
@@ -44,7 +46,7 @@ func ApplyToolNameScheme(scheme, raw string) (name string, ok bool) {
 	case "":
 		return raw, true
 	case ToolNameSchemeSanitize:
-		return "ws__" + strings.ReplaceAll(raw, ".", "_"), true
+		return strings.ReplaceAll(raw, ".", "_"), true
 	}
 	return "", false
 }

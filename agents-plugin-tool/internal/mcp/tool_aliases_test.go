@@ -13,6 +13,9 @@ import (
 
 var anthropicToolName = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
 
+// agyServerPrefix is what agy puts before a ws tool name it forwards.
+const agyServerPrefix = "mcp_ws_"
+
 func canonicalToolNames() []string {
 	var names []string
 	for _, tool := range tools() {
@@ -33,13 +36,17 @@ func TestToolAliasTableRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the real tool inventory has no alias collision: %v", err)
 	}
-	if got := table.advertised("tickets.query"); got != "ws__tickets_query" {
+	if got := table.advertised("tickets.query"); got != "tickets_query" {
 		t.Fatalf("tickets.query is advertised as %q", got)
 	}
 	for _, name := range names {
 		alias := table.advertised(name)
 		if !anthropicToolName.MatchString(alias) {
 			t.Errorf("%q is advertised as %q, which the API refuses", name, alias)
+		}
+		// agy forwards the tool as mcp_ws_<alias>; that must fit too.
+		if len(agyServerPrefix+alias) > 128 {
+			t.Errorf("%q as forwarded by agy is %d characters", name, len(agyServerPrefix+alias))
 		}
 		if back := table.canonical(alias); back != name {
 			t.Errorf("%q -> %q -> %q does not round trip", name, alias, back)
@@ -67,8 +74,8 @@ func TestToolAliasTableIdentity(t *testing.T) {
 // refused when the table is built.
 func TestToolAliasTableRefusesCollisions(t *testing.T) {
 	for name, names := range map[string][]string{
-		"shared alias":         {"a.b", "a_b"},
-		"alias is a real name": {"x", "ws__x"},
+		"shared alias":          {"a.b", "a_b"},
+		"shared alias reversed": {"a_b", "a.b"},
 	} {
 		if _, err := buildToolAliasTable(wsagent.ToolNameSchemeSanitize, names); err == nil {
 			t.Errorf("%s: %v built a table", name, names)
@@ -120,7 +127,7 @@ func listedToolNames(t *testing.T, s *Server) map[string]bool {
 }
 
 // TestHostedAgyConnectionSeesAliases: an agy lead's connection lists every
-// ws tool under its alias only, accepts a call by alias (the omitted
+// dotted ws tool under its alias only, accepts a call by alias (the omitted
 // session_key still fills in, so the alias is mapped before the key rule),
 // still accepts the canonical name, and renders playbooks under harness
 // agy.
@@ -128,7 +135,7 @@ func TestHostedAgyConnectionSeesAliases(t *testing.T) {
 	s, f := hostedBackendConnection(t, wsagent.BackendAgy, descriptorRegistrations())
 
 	listed := listedToolNames(t, s)
-	if !listed["ws__todo_list"] || listed["todo.list"] {
+	if !listed["todo_list"] || listed["todo.list"] {
 		t.Fatalf("todo.list must be listed as its alias alone: %v", listed)
 	}
 	for name := range listed {
@@ -137,18 +144,18 @@ func TestHostedAgyConnectionSeesAliases(t *testing.T) {
 		}
 	}
 
-	if resp := callToolOnce(t, s, 1, "ws__todo_list", map[string]any{}); toolIsError(t, resp) || strings.Contains(resp, `"error"`) {
+	if resp := callToolOnce(t, s, 1, "todo_list", map[string]any{}); toolIsError(t, resp) || strings.Contains(resp, `"error"`) {
 		t.Fatalf("an alias call without session_key: %s", resp)
 	}
 	if resp := callToolOnce(t, s, 2, "todo.list", map[string]any{}); toolIsError(t, resp) || strings.Contains(resp, `"error"`) {
 		t.Fatalf("the canonical name is still accepted: %s", resp)
 	}
-	resp := callToolOnce(t, s, 3, "ws__workflow_manual", map[string]any{})
+	resp := callToolOnce(t, s, 3, "workflow_manual", map[string]any{})
 	if toolIsError(t, resp) {
-		t.Fatalf("workflow_manual by alias: %s", resp)
+		t.Fatalf("workflow_manual: %s", resp)
 	}
 	if text := toolText(t, resp); !strings.Contains(text, "## Session Key\n"+f.hosted) {
-		t.Fatalf("the aliased workflow_manual is not the hosted session's: %.200s", text)
+		t.Fatalf("workflow_manual is not the hosted session's: %.200s", text)
 	}
 	if got := s.playbookHarness(); got != "agy" {
 		t.Fatalf("playbook harness %q, want agy", got)
@@ -166,10 +173,10 @@ func TestHostedAgyConnectionSeesAliases(t *testing.T) {
 func TestHostedIdentityConnectionKeepsDottedNames(t *testing.T) {
 	s, f := hostedBackendConnection(t, wsagent.BackendClaude, descriptorRegistrations())
 	listed := listedToolNames(t, s)
-	if !listed["todo.list"] || listed["ws__todo_list"] {
+	if !listed["todo.list"] || listed["todo_list"] {
 		t.Fatalf("a claude lead lists dotted names: %v", listed)
 	}
-	if resp := callToolOnce(t, s, 1, "ws__todo_list", map[string]any{}); !strings.Contains(resp, `"error"`) {
+	if resp := callToolOnce(t, s, 1, "todo_list", map[string]any{}); !strings.Contains(resp, `"error"`) {
 		t.Fatalf("an alias must stay unknown on a claude connection: %s", resp)
 	}
 	if got := s.playbookHarness(); got != "claude" {
@@ -180,7 +187,7 @@ func TestHostedIdentityConnectionKeepsDottedNames(t *testing.T) {
 	t.Setenv(envHostedSession, "")
 	plain := NewServer(f.root, "test")
 	plain.pi.agents = wsagent.NewRunner(wsagent.Options{Backends: descriptorRegistrations()})
-	if listed := listedToolNames(t, plain); !listed["todo.list"] || listed["ws__todo_list"] {
+	if listed := listedToolNames(t, plain); !listed["todo.list"] || listed["todo_list"] {
 		t.Fatalf("an ordinary connection lists dotted names: %v", listed)
 	}
 	if got := plain.playbookHarness(); got != "" {
@@ -214,7 +221,7 @@ func TestRenderLeadManualUnderDeclaredHarness(t *testing.T) {
 // to the Pi bridge's spelling, the empty scheme is the identity, and an
 // unknown scheme is not silently identity.
 func TestRegistrationToolNameSchemes(t *testing.T) {
-	if name, ok := wsagent.ApplyToolNameScheme(wsagent.ToolNameSchemeSanitize, "tickets.sage_stamp"); !ok || name != "ws__tickets_sage_stamp" {
+	if name, ok := wsagent.ApplyToolNameScheme(wsagent.ToolNameSchemeSanitize, "tickets.sage_stamp"); !ok || name != "tickets_sage_stamp" {
 		t.Fatalf("sanitize: %q %v", name, ok)
 	}
 	if name, ok := wsagent.ApplyToolNameScheme("", "tickets.query"); !ok || name != "tickets.query" {
