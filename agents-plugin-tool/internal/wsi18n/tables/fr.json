@@ -2033,7 +2033,7 @@
   "js.lead.restart.note": "MCP rompu : {0}. Termine le processus et reprend la conversation dans un nouveau.",
   "js.lead.harness.unverified": "La version {0} du harness est hors de la plage vérifiée {1} ; les capacités de {2} sont utilisées.",
   "js.lead.harness.unreported": "non signalée",
-  "js.lead.harness.demoted": "Indisponible sur cette version du harness : {0}.",
+  "js.lead.harness.demoted": "Indisponible dans cette session : {0}.",
   "js.lead.stop.confirm.one": "Arrêter cette session ? Sa {0} tâche en arrière-plan en cours s'arrête avec le processus.",
   "js.lead.stop.confirm.other": "Arrêter cette session ? Ses {0} tâches en arrière-plan en cours s'arrêtent avec le processus.",
   "js.lead.restart.confirm.one": "Redémarrer cette session ? Sa {0} tâche en arrière-plan en cours s'arrête avec le processus.",

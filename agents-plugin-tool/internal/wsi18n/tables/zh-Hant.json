@@ -2033,7 +2033,7 @@
   "js.lead.restart.note": "MCP 已中斷：{0}。結束處理程序，並在新的處理程序中繼續對話。",
   "js.lead.harness.unverified": "harness 版本 {0} 不在已驗證範圍 {1} 內；以 {2} 的能力執行。",
   "js.lead.harness.unreported": "未回報",
-  "js.lead.harness.demoted": "此 harness 版本不可用：{0}。",
+  "js.lead.harness.demoted": "此工作階段中不可用：{0}。",
   "js.lead.stop.confirm.one": "停止此工作階段？正在執行的 {0} 個背景工作將隨處理程序一同結束。",
   "js.lead.stop.confirm.other": "停止此工作階段？正在執行的 {0} 個背景工作將隨處理程序一同結束。",
   "js.lead.restart.confirm.one": "重新啟動此工作階段？正在執行的 {0} 個背景工作將隨處理程序一同結束。",

@@ -2033,7 +2033,7 @@
   "js.lead.restart.note": "MCP getrennt: {0}. Beendet den Prozess und setzt die Unterhaltung in einem neuen fort.",
   "js.lead.harness.unverified": "Harness-Version {0} liegt außerhalb des geprüften Bereichs {1}; es laufen die Fähigkeiten von {2}.",
   "js.lead.harness.unreported": "nicht gemeldet",
-  "js.lead.harness.demoted": "Bei dieser Harness-Version nicht verfügbar: {0}.",
+  "js.lead.harness.demoted": "In dieser Sitzung nicht verfügbar: {0}.",
   "js.lead.stop.confirm.one": "Diese Sitzung stoppen? Ihre {0} laufende Hintergrundaufgabe endet mit dem Prozess.",
   "js.lead.stop.confirm.other": "Diese Sitzung stoppen? Ihre {0} laufenden Hintergrundaufgaben enden mit dem Prozess.",
   "js.lead.restart.confirm.one": "Diese Sitzung neu starten? Ihre {0} laufende Hintergrundaufgabe endet mit dem Prozess.",
