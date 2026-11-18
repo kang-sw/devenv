@@ -7,10 +7,10 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
-
-	"github.com/gofrs/flock"
 	"strconv"
 	"time"
+
+	"github.com/gofrs/flock"
 )
 
 // Outcome is what Ensure found or did.
@@ -58,8 +58,6 @@ type EnsureOptions struct {
 	SpawnBeforeShutdown bool
 	// PreserveRunningLAN uses each fresh healthy observation, not an earlier probe.
 	PreserveRunningLAN bool
-	// RefuseCrossMinor leaves a healthy incompatible incumbent untouched.
-	RefuseCrossMinor bool
 	// Port is the configured dashboard.port, passed to a started daemon as
 	// its --port flag.
 	Port int
@@ -131,8 +129,11 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 	if opts.SpawnBeforeShutdown {
 		lock := flock.New(filepath.Join(opts.Dir, "launcher-start.lock"))
 		ok, err := lock.TryLockContext(ctx, 50*time.Millisecond)
-		if err != nil || !ok {
+		if err != nil {
 			return OutcomeUnavailable, fmt.Errorf("dashboard: launcher start lock: %v", err)
+		}
+		if !ok {
+			return OutcomeUnavailable, errors.New("dashboard: launcher start lock: not acquired")
 		}
 		defer lock.Unlock() // Never unlink: concurrent waiters may already hold the inode.
 	}
@@ -144,10 +145,6 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 			info, err := Health(ctx, client, previous)
 			if err == nil && opts.PreserveRunningLAN {
 				opts.LAN = info.LAN
-			}
-			if err == nil && opts.RefuseCrossMinor && !SameMinor(info.Version, opts.Version) {
-				fmt.Fprintf(logw, "dashboard: refusing cross-minor replacement of %s by %s (attached versions unknown)\n", info.Version, opts.Version)
-				return OutcomeRunning, nil
 			}
 			switch {
 			case err == nil && (keepRunning(info, opts) || spawns >= maxSpawns):
@@ -185,7 +182,7 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 			opts.Replace = false // Explicit request is consumed by the first spawn.
 			// The successor was already created. A late child/lock/health failure
 			// is unavailable, never evidence that the predecessor survived.
-			if !waitForSuccessor(ctx, client, opts, previous.Token) {
+			if !waitForSuccessor(ctx, client, opts, previous.Token, logw) {
 				return OutcomeUnavailable, nil
 			}
 			continue
@@ -200,7 +197,7 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 		if err := opts.Spawn(DaemonArgs(opts.Port, opts.LAN, opts.BuildTime)); err != nil {
 			return OutcomeUnavailable, fmt.Errorf("dashboard: start daemon: %w", err)
 		}
-		if !waitForSuccessor(ctx, client, opts, previous.Token) {
+		if !waitForSuccessor(ctx, client, opts, previous.Token, logw) {
 			return OutcomeUnavailable, nil
 		}
 	}
@@ -220,8 +217,11 @@ func keepRunning(info HealthInfo, opts EnsureOptions) bool {
 }
 
 // waitForSuccessor polls the endpoint file until it names a healthy daemon
-// other than the one carrying previousToken, or the start wait ends.
-func waitForSuccessor(ctx context.Context, client *http.Client, opts EnsureOptions, previousToken string) bool {
+// other than the one carrying previousToken, or the start wait ends. A wait
+// that ends unmet logs its last endpoint-read and health errors: a daemon can
+// serve while its endpoint file stays unreadable to others (seen under heavy
+// antivirus on Windows), and only these lines tell that apart from no daemon.
+func waitForSuccessor(ctx context.Context, client *http.Client, opts EnsureOptions, previousToken string, logw io.Writer) bool {
 	wait := opts.StartWait
 	if wait <= 0 {
 		wait = DefaultStartWait
@@ -234,17 +234,31 @@ func waitForSuccessor(ctx context.Context, client *http.Client, opts EnsureOptio
 	defer deadline.Stop()
 	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
+	var readErr error
+	healthErr := errors.New("not attempted")
+	unmet := func(reason string) bool {
+		fmt.Fprintf(logw, "dashboard: successor wait ended (%s); last endpoint read: %v\n", reason, readErr)
+		fmt.Fprintf(logw, "dashboard: successor wait ended (%s); last health check: %v\n", reason, healthErr)
+		return false
+	}
 	for {
-		if ep, err := ReadEndpoint(opts.Dir); err == nil && ep.Token != "" && ep.Token != previousToken {
-			if _, err := Health(ctx, client, ep); err == nil {
+		ep, err := ReadEndpoint(opts.Dir)
+		switch {
+		case err != nil:
+			readErr = err
+		case ep.Token == "" || ep.Token == previousToken:
+			readErr = errors.New("endpoint file names no successor yet")
+		default:
+			readErr = nil
+			if _, healthErr = Health(ctx, client, ep); healthErr == nil {
 				return true
 			}
 		}
 		select {
 		case <-ctx.Done():
-			return false
+			return unmet(ctx.Err().Error())
 		case <-deadline.C:
-			return false
+			return unmet("timeout " + wait.String())
 		case <-ticker.C:
 		}
 	}

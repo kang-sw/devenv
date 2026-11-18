@@ -118,13 +118,17 @@ before release, not discovered there.
 - T4 unreadable history: the new binary cannot read old data. Never ship it;
   migration must lower the change to T3 or below.
 
-T0–T2 permit patches. Prefer them to a T3 boundary: a minor bump currently
-locks out installed-plugin sessions on the previous minor when a dev rebuild
-replaces the shared daemon. Every concrete verdict cites source lines for
-which version writes and reads what, and whether reopening the new version
-recovers it. Whole-file loss of unknown fields is not T2 without that recovery;
-preserve the fields or enforce a T3 boundary. A behavior-preserving alias is
-normally T0; a tool-list refresh alone does not make broken old calls compatible.
+T0–T2 permit patches. Prefer them to a T3 boundary. A minor bump currently
+locks out installed-plugin sessions on the previous minor when a newer-minor
+daemon replaces theirs (a dev rebuild, an upgraded plugin's start, or
+Werkschaft). 0.50+ launchers have no direct fallback; from 0.50.6 they fail
+each call at once with an "update this plugin" error, and recovery needs the
+updated plugin and a session restart. Every concrete verdict cites source
+lines for which version writes and reads what, and whether reopening the new
+version recovers it. Whole-file loss of unknown fields is not T2 without that
+recovery; preserve the fields or enforce a T3 boundary. A behavior-preserving
+alias is normally T0; a tool-list refresh alone does not make broken old calls
+compatible.
 
 Scenario sheet and enforcement: `ai-docs/manuals/release-compatibility.md`.
 
@@ -297,8 +301,8 @@ ai-docs/tickets/.dropped/
   agents, plugin packaging, helper commands, MCP tooling, and dev-environment
   templates. Tickets and manuals here describe the workflow system itself;
   downstream application material belongs in downstream projects. Active plugin
-  package: `agents-plugin/` (`ws@0.50.2`). Conservative-default
-  distribution: `agents-plugin-wsflow/` (`wsflow@0.50.2`). Native
+  package: `agents-plugin/` (`ws@0.50.5`). Conservative-default
+  distribution: `agents-plugin-wsflow/` (`wsflow@0.50.5`). Native
   MCP/tooling source: `agents-plugin-tool/`. Retired Claude source material:
   `ai-docs/ref/claude-home-legacy.md` and git history.
 - **Project map / topology.**

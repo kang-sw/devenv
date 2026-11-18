@@ -112,7 +112,7 @@ test('Windows packaging consumes only the pinned cached x64 zip and ships the ap
       assert.equal(options.icon, path.join(options.dir, 'icons/icon.ico'));
       assert.equal(options.appBundleId, 'dev.werkschaft.desktop');
       staged = options.dir;
-      assert.deepEqual(fs.readdirSync(staged).sort(), ['connection.html', 'connection.js', 'daemon', 'daemon-controller.js', 'daemon-selection.js', 'daemon-stage.js', 'daemon-version.js', 'dashboard-preload.js', 'endpoint.js', 'icons', 'main.js', 'package.json', 'policy.js', 'python-missing.html', 'python.js', 'titlebar-preload.js', 'titlebar-renderer.js', 'titlebar.html', 'titlebar.js', 'update.js']);
+      assert.deepEqual(fs.readdirSync(staged).sort(), ['connection.html', 'connection.js', 'daemon', 'daemon-controller.js', 'daemon-selection.js', 'daemon-stage.js', 'daemon-version.js', 'dashboard-preload.js', 'endpoint.js', 'icons', 'main.js', 'package.json', 'policy.js', 'python-missing.html', 'python.js', 'recovery.js', 'shell-log.js', 'titlebar-preload.js', 'titlebar-renderer.js', 'titlebar.html', 'titlebar.js', 'update.js']);
       assert.deepEqual(fs.readdirSync(path.join(staged, 'icons')).sort(), ['icon.ico', 'icon.png']);
       for (const file of ['icon.png', 'icon.ico']) {
         assert.deepEqual(fs.readFileSync(path.join(staged, 'icons', file)), fs.readFileSync(path.resolve(__dirname, '../icons', file)));

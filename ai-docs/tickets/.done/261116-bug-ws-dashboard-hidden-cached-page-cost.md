@@ -6,6 +6,7 @@ related:
   261113-feat-ws-dashboard-frontend-performance-profile-and-optimize: "P1 render transaction and P4 composer evidence; coordinate visibility/render integration"
   261113-feat-ws-whiteboard-board-frontend-performance: "landed board performance work; retain frame laziness, history and draft guarantees"
   261116-bug-werkschaft-electron-high-resolution-lag-diagnostics: "native presentation hypothesis remains separate"
+completed: 2026-11-18
 ---
 
 # P3: Remove the hidden session-iframe cache
@@ -480,3 +481,8 @@ Forward (R1; deliberately not implemented in this fixes-only pass):
 
 The prior byte table describes the initial Phase 2 snapshot, not this larger
 anchor-hardening script. No new measured latency/cache-hit claim is made.
+
+
+## Resolution (2026-11-18)
+
+Both phases landed (Phase 2 merged in 55cd8f6fd). Phase 1's no-cache direction was then reversed by owner (1244) = a: 62b168e34 restored a bounded five-document session iframe cache and verified that hidden pages stay quiet. The numeric latency-bound question is moot under that design.

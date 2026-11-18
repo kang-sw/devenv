@@ -41,7 +41,7 @@ func TestDaemonStartStrictLifetimeFlagWiring(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(root, "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(root, "config"))
 	daemonStartWithEnsure([]string{"--require-independent-lifetime", "--replace"}, func(_ context.Context, opts wsdashboard.EnsureOptions) (wsdashboard.Outcome, error) {
-		if !opts.SpawnBeforeShutdown || !opts.PreserveRunningLAN || !opts.RefuseCrossMinor || !opts.Replace {
+		if !opts.SpawnBeforeShutdown || !opts.PreserveRunningLAN || !opts.Replace {
 			t.Fatalf("strict options = %+v", opts)
 		}
 		return wsdashboard.OutcomeRunning, nil

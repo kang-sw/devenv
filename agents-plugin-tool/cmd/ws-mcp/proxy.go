@@ -431,7 +431,6 @@ func daemonStartWithEnsure(args []string, ensure func(context.Context, wsdashboa
 		Replace:             *replace,
 		SpawnBeforeShutdown: *independent,
 		PreserveRunningLAN:  *independent,
-		RefuseCrossMinor:    *independent,
 		Port:                settings.Port,
 		LAN:                 lan,
 		Spawn:               spawn,

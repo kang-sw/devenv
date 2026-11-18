@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wswake"
@@ -211,7 +213,7 @@ func TestPiSendDescribesNativeSteeringWithoutChangingArguments(t *testing.T) {
 		}
 		for _, tool := range []map[string]any{def, piWorkerTool(def)} {
 			desc := tool["description"].(string)
-			for _, want := range []string{"With no turn running it starts the next turn now", "steers that running turn at the next tool boundary", "without cancelling in-flight tool calls", "no extra turn", "closed subagent resumes on its existing session file with the same id and settings", "missing file is refused"} {
+			for _, want := range []string{"With no turn running it starts the next turn now", "steers that running turn at the next tool boundary", "without cancelling in-flight tool calls", "no extra turn", "sleeping subagent resumes on its existing session file with the same id and settings", "missing, inaccessible, or non-regular file is refused"} {
 				if !strings.Contains(desc, want) {
 					t.Errorf("pi.send description lacks %q: %s", want, desc)
 				}
@@ -367,7 +369,7 @@ func TestPiSpawnResolvesThePiTierAndCwd(t *testing.T) {
 		t.Fatal(err)
 	}
 	out = callToolWithKey(t, f.server, 4, f.key, "pi.spawn", map[string]any{"prompt": "Fix the build\nthen report", "tier": "small", "cwd": "sub"})
-	if !strings.Contains(out, "spawned Pi subagent child1 (tier small: openai-codex/luna, effort high)") || !strings.Contains(out, "completion mail") {
+	if !strings.Contains(out, "spawned Pi subagent child1 (tier small: openai-codex/luna, effort high)") || !strings.Contains(out, "completion mail") || !strings.Contains(out, "Finished children sleep; pi.send resumes the same conversation") {
 		t.Fatalf("pi.spawn = %q", out)
 	}
 	spec := agents.specs[0]
@@ -439,11 +441,191 @@ func TestPiToolsScopeToTheCallingLead(t *testing.T) {
 		t.Fatalf("a timed-out wait = %q", out)
 	}
 
-	if out := callToolWithKey(t, f.server, 12, f.key, "pi.stop", map[string]any{"id": "child1"}); !strings.Contains(out, "closed Pi subagent child1") {
+	writePiTestSession(t, f.server, "child1")
+	if out := callToolWithKey(t, f.server, 12, f.key, "pi.stop", map[string]any{"id": "child1"}); !strings.Contains(out, "Pi subagent child1: sleep") || !strings.Contains(out, "its process stopped; pi.send resumes the same conversation") {
 		t.Fatalf("pi.stop = %q", out)
 	}
 	if st, _ := agents.Get("child1"); st.Status != wsagent.StatusClosed {
 		t.Fatalf("pi.stop closes the child: %+v", st)
+	}
+}
+
+// writePiTestSession stands in for the session file a real Pi process writes.
+func writePiTestSession(t *testing.T, s *Server, id string) string {
+	t.Helper()
+	dir, err := s.dashboard.stateDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(wsdashboard.SessionDir(dir, id), "pi", "session.jsonl")
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("persisted conversation\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return file
+}
+
+func TestPiChildStatusIsDisplayOnly(t *testing.T) {
+	for _, tc := range []struct {
+		status  string
+		process bool
+		file    string
+		want    string
+	}{
+		{wsagent.StatusIdle, true, "missing", wsagent.StatusIdle},
+		{wsagent.StatusIdle, false, "missing", "sleep"},
+		{wsagent.StatusIdle, false, "regular", "sleep"},
+		{wsagent.StatusRunning, true, "missing", wsagent.StatusRunning},
+		{wsagent.StatusClosed, false, "regular", "sleep"},
+		{wsagent.StatusClosed, false, "missing", "deleted"},
+		{wsagent.StatusClosed, false, "directory", "deleted"},
+	} {
+		t.Run(fmt.Sprintf("%s/process=%v/file=%v", tc.status, tc.process, tc.file), func(t *testing.T) {
+			dir := t.TempDir()
+			s := &Server{}
+			s.dashboard.dir = func() (string, error) { return dir, nil }
+			if tc.file != "missing" {
+				file := writePiTestSession(t, s, "kid")
+				if tc.file == "directory" {
+					if err := os.Remove(file); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Mkdir(file, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			st := wsagent.State{ID: "kid", Status: tc.status, Process: tc.process, Root: "/repo", ClosedAt: "2026-11-17T00:00:00Z"}
+			want := tc.want
+			out := s.piChild(st)
+			if out.Status != want || out.Closed != st.ClosedAt {
+				t.Fatalf("child output = %+v, want status %s with unchanged closed_at", out, want)
+			}
+			if got := s.formatPiList([]wsagent.State{st}); !strings.Contains(got, "kid  "+want+"  ") {
+				t.Fatalf("pi.list = %q, want %s", got, want)
+			}
+			if st.Status != tc.status || st.Process != tc.process {
+				t.Fatal("MCP formatting changed runner state")
+			}
+		})
+	}
+}
+
+func TestPiToolsShowSleepAndDeleted(t *testing.T) {
+	setPiVersion(t, "1.0.4", nil)
+	agents := newFakePiAgents()
+	f := newPiFixture(t, wsManifests(), agents)
+	parent := f.server.piParent(f.key)
+	st, err := agents.Spawn(wsagent.SpawnSpec{Root: f.root, Parent: &parent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents.set(st.ID, func(st *wsagent.State) { st.Status = wsagent.StatusClosed })
+	file := writePiTestSession(t, f.server, st.ID)
+	for _, want := range []string{"sleep", "deleted"} {
+		if want == "deleted" {
+			if err := os.Remove(file); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if out := callToolWithKey(t, f.server, 2, f.key, "pi.list", nil); !strings.Contains(out, st.ID+"  "+want+"  ") {
+			t.Fatalf("pi.list = %q", out)
+		}
+		for _, tool := range []string{"pi.list", "pi.send", "pi.stop"} {
+			args := map[string]any{"format": "json"}
+			if tool != "pi.list" {
+				args["id"] = st.ID
+			}
+			if tool == "pi.send" {
+				args["message"] = "more"
+			}
+			raw := callToolWithKey(t, f.server, 3, f.key, tool, args)
+			var out piChildOut
+			if tool == "pi.list" {
+				var list []piChildOut
+				if err := json.Unmarshal([]byte(raw), &list); err != nil || len(list) != 1 {
+					t.Fatalf("%s = %q: %v", tool, raw, err)
+				}
+				out = list[0]
+			} else if err := json.Unmarshal([]byte(raw), &out); err != nil {
+				t.Fatal(err)
+			}
+			if out.Status != want {
+				t.Fatalf("%s status = %s, want %s", tool, out.Status, want)
+			}
+		}
+		if text := callToolWithKey(t, f.server, 4, f.key, "pi.stop", map[string]any{"id": st.ID}); !strings.Contains(text, ": "+want+"; its process stopped") {
+			t.Fatalf("pi.stop text = %q, want %s", text, want)
+		}
+	}
+	if got, _ := agents.Get(st.ID); got.Status != wsagent.StatusClosed {
+		t.Fatalf("runner status changed: %+v", got)
+	}
+}
+
+func TestPiWaitShowsSleepWithoutChangingTurnOutcomes(t *testing.T) {
+	dir := t.TempDir()
+	s := &Server{}
+	s.dashboard.dir = func() (string, error) { return dir, nil }
+	writePiTestSession(t, s, "kid")
+	for _, status := range []string{wsagent.TurnClosed, wsagent.TurnDone, wsagent.TurnFailed, wsagent.TurnInterrupted, wsagent.TurnRunning} {
+		res := wsagent.TurnResult{ID: "kid", Status: status}
+		want := status
+		if status == wsagent.TurnClosed {
+			want = "sleep"
+		}
+		if out := s.piWaitResult(res); out.Status != want || res.Status != status {
+			t.Fatalf("wait display changed outcome or runner result: %+v, %+v", out, res)
+		}
+		if out := s.formatPiWait(res, "report later"); !strings.Contains(out, want) {
+			t.Fatalf("wait text = %q, want %s", out, want)
+		}
+	}
+	setPiVersion(t, "1.0.4", nil)
+	agents := newFakePiAgents()
+	f := newPiFixture(t, wsManifests(), agents)
+	parent := f.server.piParent(f.key)
+	st, err := agents.Spawn(wsagent.SpawnSpec{Root: f.root, Parent: &parent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents.waitRes = wsagent.TurnResult{Status: wsagent.TurnClosed}
+	file := writePiTestSession(t, f.server, st.ID)
+	for _, want := range []string{"sleep", "deleted"} {
+		if want == "deleted" {
+			if err := os.Remove(file); err != nil {
+				t.Fatal(err)
+			}
+		}
+		raw := callToolWithKey(t, f.server, 1, f.key, "pi.wait", map[string]any{"id": st.ID, "format": "json"})
+		var out wsagent.TurnResult
+		if err := json.Unmarshal([]byte(raw), &out); err != nil || out.Status != want {
+			t.Fatalf("pi.wait = %q, want %s: %v", raw, want, err)
+		}
+		if text := callToolWithKey(t, f.server, 2, f.key, "pi.wait", map[string]any{"id": st.ID}); !strings.Contains(text, ": "+want+" (no turn result)") {
+			t.Fatalf("pi.wait text = %q, want %s", text, want)
+		}
+	}
+}
+
+func TestPiDescriptionsExplainSleep(t *testing.T) {
+	for _, def := range piToolDefinitions() {
+		for _, tool := range []map[string]any{def, piWorkerTool(def)} {
+			name := tool["name"].(string)
+			desc := tool["description"].(string)
+			switch name {
+			case "pi.list":
+				if !strings.Contains(desc, "status (idle, running, sleep, or deleted)") || !strings.Contains(desc, "Other resume prerequisites are not checked") {
+					t.Errorf("%s description = %s", name, desc)
+				}
+			case "pi.spawn", "pi.send", "pi.stop", "pi.transcript":
+				if !strings.Contains(desc, "sleep") || strings.Contains(desc, "closed") {
+					t.Errorf("%s description = %s", name, desc)
+				}
+			}
+		}
 	}
 }
 
@@ -468,7 +650,7 @@ func TestPiTurnReporterMailsTheParent(t *testing.T) {
 	}
 	report(wsagent.TurnReport{
 		Parent: wsagent.ParentRef{Kind: wsagent.ParentLead, ReplyID: wsmailbox.ReplyID(key)},
-		Child:  wsagent.State{ID: "childone", Label: "worker"},
+		Child:  wsagent.State{ID: "childone", Label: "worker", Status: wsagent.StatusClosed},
 		Result: wsagent.TurnResult{ID: "childone", Status: wsagent.TurnDone, Message: "all green"},
 	})
 	select {

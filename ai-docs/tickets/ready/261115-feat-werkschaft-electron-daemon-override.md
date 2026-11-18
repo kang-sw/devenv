@@ -55,6 +55,9 @@ failure it asks the user to start the dashboard normally
   cross-minor compatibility. Any new T3 boundary requires a minor release and
   explicit owner approval; T4 must not ship
   (`ai-docs/manuals/release-compatibility.md:27-51,80-91,108-119`).
+  Since the 2026-11-18 cross-minor reversal below, an ordinary connect
+  deliberately drains an older-minor daemon across that existing boundary;
+  this adds no new T3.
 
 - **Development selection (technical, delegated by the coordinating lead):**
   select an existing hash-bound binary and its matching runtime contract,
@@ -70,7 +73,8 @@ failure it asks the user to start the dashboard normally
   shell-bundled updates, derived from (867)/(868). Numeric-newer core wins;
   equal-core replacement requires an explicit swap. This ticket implements no
   downloader. Rejected: implicitly retiring the already-confirmed updater.
-- **Cross-boundary replacement (announced default, owner board 2026-11-16):**
+- **Cross-boundary replacement (announced default, owner board 2026-11-16;
+  superseded 2026-11-18 by the cross-minor reversal below):**
   reuse (868): one confirmation lists affected sessions and plugin-update steps
   before a bundled/dev swap across a minor/protocol boundary. Cancel attaches
   to the existing daemon. If attached hello versions cannot be discovered,
@@ -109,7 +113,9 @@ failure it asks the user to start the dashboard normally
   (owner 2026-11-16 11:14):** retain the separate downloader ticket without
   implementing it here; show affected sessions and plugin-update guidance once
   for a cross-minor/protocol swap, cancel attaches existing, and unknown session
-  versions prevent automatic replacement with an explicit reason.
+  versions prevent automatic replacement with an explicit reason. The
+  cross-boundary half is superseded 2026-11-18 by the cross-minor reversal
+  below; the downloader half stands.
 - **Current REST evidence (technical, source validated):** `/health` exposes
   daemon identity only (`wsdashboard/daemon.go`, HealthInfo/handleHealth);
   `/agents` lists runner conversations without attached launcher hello versions
@@ -119,6 +125,32 @@ failure it asks the user to start the dashboard normally
   interfaces cannot enumerate affected client versions. Cross-boundary automatic
   replacement must keep the existing connection and explain the unknown-version
   reason plus plugin-update guidance, not invent a list or add an endpoint.
+  (The REST facts stand; the keep-the-connection rule is superseded
+  2026-11-18 by the entry below.)
+- **Cross-minor reversal (owner 2026-11-18):** (1343)=a at 09:15: always
+  upgrade to the newest core. At 09:27: replace across minors too. (1346)=b at
+  09:50: the plugin launcher fails fast against a newer-minor daemon.
+  Automatic replacement of an older numeric core across patch, minor or major
+  on ordinary connect, with no dialog, is accepted on Windows and macOS
+  (`desktop-electron/daemon-controller.js:95-98`; commits 6b91aff4e,
+  96253c58e). The cross-boundary confirmation, cancel-attaches and
+  fail-closed-on-unknown-session-versions rules above are retired. Never
+  downgrade stays (`daemon-controller.js:98`, `wsdashboard/ensure.go:210-217`
+  `keepRunning`). Phase 4 acceptance judges this contract, not the retired
+  confirmation. Rejected: keeping the dialog (owner: the "for safety" refusal
+  is inconvenient in real use).
+  - **Tier: T0 behaviour.** No wire, endpoint, store, hello or manifest
+    change. The previous-minor lockout is the existing hello boundary
+    (`wsdashboard/proxy.go:251-252`; release-compatibility row 4), not a new
+    T3. 0.48/0.49 launchers fall back to a direct server. 0.50.0-0.50.5
+    launchers have no fallback and fail each call after the 75 s budget. From
+    0.50.6, the launcher fails fast: `DaemonLink.connect` raises
+    `DaemonNewerMinor` (`agents-plugin/bin/ws-mcp-launcher.py:1773-1776`).
+    MCP requests get an immediate error and one stderr line
+    (`ws-mcp-launcher.py:1831-1843,1904-1905,1988-1990,2116-2118`), and CLI
+    calls exit at once (`ws-mcp-launcher.py:1530`). Those sessions must update
+    the plugin and restart. A later same-minor daemon still reconnects
+    (`ws-mcp-launcher.py:2003`).
 
 ## Prior parking and current coordination (2026-11-16)
 
@@ -222,7 +254,7 @@ no new T3 boundary is authorized.
 | New shell starts a daemon; old launcher reconnects | Existing daemon writes the same endpoint fields atomically (`internal/wsdashboard/endpoint.go:48-94`); both Go endpoint readers and the shell consume identity without rewriting it. Shutdown is authenticated with the retained token (`client.go:53-69`). | Preserve endpoint, lock, health and authenticated-drain meanings. No endpoint migration or new field required. |
 | New starter / old starter | Existing `daemon-start` parses flags before constructing the server or invoking Ensure (`cmd/ws-mcp/proxy.go:365-374`). New optional strict lifetime behavior must leave the absent-flag path unchanged; an old selected binary must reject the unknown flag before any drain. | T0 additive CLI behavior for existing callers; unsupported strict-lifetime candidates fail explicitly, never fall back to unsafe launch. |
 | Old compatible session calls new daemon after a swap | Hello still checks proxy protocol and same major.minor (`internal/wsdashboard/proxy.go:232-254`). Launcher replays initialization and unsent calls, not already-sent requests (`agents-plugin/bin/ws-mcp-launcher.py:1636-1662`). | No MCP tool or argument removal, protocol change or handler-store change. Report uncertain in-flight outcomes; do not call reconnect a rollback. |
-| Old-minor session meets new-minor daemon | Existing hello rejects before handing the session to the handler (`internal/wsdashboard/proxy.go:232-254`); no handler/store write occurs and reopening cannot repair the refusal. | Existing T3 boundary remains; warning/confirmation or refusal must precede a shell-triggered cross-boundary swap. |
+| Old-minor session meets new-minor daemon | Existing hello rejects before handing the session to the handler (`internal/wsdashboard/proxy.go:232-254`); no handler/store write occurs and reopening cannot repair the refusal. | Existing T3 boundary remains. Superseded 2026-11-18 (Decisions, cross-minor reversal): no warning or refusal precedes the swap; previous-minor sessions fail fast from 0.50.6 (`agents-plugin/bin/ws-mcp-launcher.py:1773-1776`) and must update the plugin and restart. |
 | Old daemon / new daemon shared holder records | Shutdown detaches only (`internal/wsdashboard/daemon.go:653-695`); Manager.Close closes attach connections without killing holders, and Scan reattaches from the same descriptors (`internal/wsholder/manager.go:235-264`). | No descriptor/store format change; preserve holder and child PIDs across compatible replacement. Reopening the new daemon reads the same retained records. |
 | New shell selection and staged provenance / old shell or launcher | New shell-only files must use distinct app-user-data names; existing launchers do not read or write that namespace. Binary metadata remains schema 1 with a SHA256 binding (`agents-plugin/bin/ws-mcp-launcher.py:196-240`); optional protocol/inventories follow the existing gate (`:730-752`). | No shared accepted-build writer or config-manifest field. Old readers neither overwrite nor lose these private files; new reopening validates retained bytes again. |
 
@@ -378,6 +410,25 @@ actually satisfied; real packaged Windows/macOS acceptance remains Phase 4.
 - Corrected Phase 3 winner attachment: a REST-verified numerically newer daemon is attachable even when another actor won across a minor/major boundary. Unknown connected client versions still prohibit **initiating** a cross-boundary drain, not observing a newer winner. Older/unidentified raced winners remain refused. Staging, failed macOS drain, failed Windows strict starter and successor-wait paths now share that rule; successor detection uses endpoint generation (including token fingerprint), not only PID/start time. Guidance notes that connected plugins may need updates after a newer winner; no further spawn/drain is attempted for that winner.
 - Corrected the Phase 3 remote Go verification citation: the previously printed anchored regex `^(TestEnsure|TestKeepRunning|...)$` did not select suffixed `TestEnsure*` functions. The coordinating lead independently reran the correctly selected **remote w5090** gate `go test` with `-run '^(TestEnsure.*|TestKeepRunning.*|TestProxyCompatibleClientReconnectsAfterDrain|TestProxyRefusedHelloGetsAReasonLine|TestProxyDrainFinishesCallsInFlightAndCancelsLongWaits|TestDaemonRestartReattachesToARunningHolder)$' -count=1 -v` via sys_lock: all passed, including all six `TestEnsureElectronPreflightAndFreshHealth` subtests and representative Linux holder restart/proxy reconnect (2.003s). This replacement worker made no Go edits and did not rerun Go tests.
 - Verification after the follow-up: `TMPDIR=TEMP=TMP=D:/Temp/exec3-electron` with `sys_lock.sh run exec3-electron 3 -- node --test` scoped to `daemon-controller.test.js`, `endpoint.test.js`, `main.test.js`: **56 pass, 0 fail**. Injected spawn and assigned-port fake REST cover newer cross-major winner, older/unidentified refusals, Windows-starter failure, failed drain, staging race and same-PID/start-time token rotation. Narrow independent read-only lite review: clean; `git diff --check` passed. No Windows/macOS packaged or actual client/holder acceptance was run; Phase 4 remains open.
+
+#### Edition (302f38aac) - 2026-11-18
+
+- The owner reversed the cross-boundary contract (Decisions, cross-minor
+  reversal). The Phase 3 plan's "refuse automatic cross-boundary replacement"
+  and the Result's "Ensure ... refuses unknown-client-version cross-minor
+  replacement" no longer describe shipped behaviour. That frozen text stays
+  as the record.
+- 6b91aff4e (merge of e96b63c2d): Werkschaft on Windows upgrades an older
+  same-minor daemon on ordinary startup.
+- 302f38aac (merge of 96253c58e): Werkschaft replaces any older numeric core,
+  across minors too, with no dialog. The Go starter drops `RefuseCrossMinor`.
+  Never downgrade stays.
+- The launcher fail-fast change on `impl/develop/launcher-minor-fastfail`
+  makes a previous-minor plugin session fail each call at once with
+  "update this plugin and restart this session" instead of waiting 75 s.
+- Phase 4 acceptance judges this contract: an older core is replaced with no
+  confirmation, an older bundle never downgrades, and previous-minor sessions
+  fail fast.
 
 ### Phase 4: Packaged acceptance
 

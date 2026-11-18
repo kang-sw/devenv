@@ -281,8 +281,20 @@ func TestGitIdentityIsRememberedPerTopLevelAndRevalidatedByItsDotGit(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(dotGit, raw, 0o644); err != nil { // same bytes, new mtime
+	// Git for Windows hides .git. Open the existing file without O_CREATE:
+	// Go 1.23 maps create+truncate to CREATE_ALWAYS with normal attributes,
+	// which Windows refuses for an existing hidden file.
+	file, err := os.OpenFile(dotGit, os.O_WRONLY|os.O_TRUNC, 0)
+	if err != nil {
 		t.Fatal(err)
+	}
+	_, writeErr := file.Write(raw) // same bytes, new mtime
+	closeErr := file.Close()      // close before git revalidates the file
+	if writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	if closeErr != nil {
+		t.Fatal(closeErr)
 	}
 	if _, _, _, err := noGit.Resolve(worktreePath); err == nil {
 		t.Fatal("Resolve after a .git change answered without running git")

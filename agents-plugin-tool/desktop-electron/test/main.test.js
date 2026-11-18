@@ -243,7 +243,8 @@ test('dev mode uses the checkout candidate for autostart and the start button', 
   let launches = 0, running = false;
   const deps = { env: { WS_CACHE_HOME: path.join(source.base, 'cache') },
     discover: async () => { if (!running) throw Error('missing'); return 'http://127.0.0.1:39418/'; },
-    launch: async () => { if (++launches === 1) throw Error('first start failed'); running = true; } };
+    launch: async () => { if (++launches === 1) throw Error('first start failed'); running = true; },
+    sleep: async () => {}, maxPolls: 1 };
   const f = await fixture(options => realConnectDaemon(options, deps), 'win32', { ...source, appRoot });
   const wc = f.views[0].webContents, event = { sender: wc, senderFrame: wc.mainFrame };
   assert.equal(launches, 1, 'autostart used the candidate');
@@ -436,7 +437,7 @@ test('native same-core action is one explicit attempt, never renderer IPC; refus
   const requests = [];
   const f = await fixture(async (options, deps) => {
     requests.push(options.replace);
-    if (options.replace) deps.onNotice('Unknown client versions; update plugins.');
+    if (options.replace) deps.onNotice('Replacement preflight failed; the incumbent was not drained. Retry later.');
     return 'http://127.0.0.1:39418/';
   });
   await f.menus.replace_daemon.click();
@@ -446,6 +447,26 @@ test('native same-core action is one explicit attempt, never renderer IPC; refus
   await f.menus.retry.click();
   assert.deepEqual(requests, [false, true, false]);
   assert.equal(f.ipcMain.listenerCount('werkschaft:replace-daemon'), 0);
+});
+test('automatic upgrade notices go to the shell log, never a modal; menu replace keeps the dialog', async t => {
+  const root = fs.mkdtempSync(path.join(userData, 'notice-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  let dialogs = 0;
+  const f = await fixture(async (options, deps) => {
+    deps.onNotice(options.replace ? 'menu notice' : 'Replacement did not drain the incumbent: starter failed.');
+    return 'http://127.0.0.1:39418/';
+  }, 'win32', { userData: root });
+  f.onDialog(() => { dialogs++; });
+  assert.equal(dialogs, 0, 'startup connect must not block on a modal');
+  await f.menus.retry.click();
+  assert.equal(dialogs, 0, 'recovery connect must not block on a modal');
+  assert.equal(f.views[0].loads.at(-1), 'http://127.0.0.1:39418/');
+  const lines = fs.readFileSync(path.join(root, 'logs', 'shell.log'), 'utf8').trim().split('\n').map(JSON.parse)
+    .filter(line => line.event === 'daemon-notice');
+  assert.equal(lines.length, 2);
+  assert.match(lines[0].message, /did not drain the incumbent/);
+  await f.menus.replace_daemon.click();
+  assert.equal(dialogs, 1, 'explicit replace keeps its dialog');
 });
 test('overlapping retries are ignored and rediscovery replaces the pin', async () => {
   let finish, calls = 0;
@@ -565,7 +586,7 @@ test('packaged Windows starts its unpacked bundled exe without Python, waits, re
       if (launches === 1) throw Error('OS refused breakaway <not markup>');
       await new Promise(resolve => { ready = resolve; });
       healthy = true;
-    } };
+    }, sleep: async () => {}, maxPolls: 1 };
   const f = await fixture(options => realConnectDaemon(options, deps), 'win32', {
     ...source, appRoot, packaged: true,
     pythonAvailable: () => assert.fail('Windows startup must not probe an interpreter'),

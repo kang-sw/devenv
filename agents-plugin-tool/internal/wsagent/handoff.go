@@ -196,7 +196,7 @@ func (c *conv) handOff() error {
 	if !c.rec.Lead {
 		return badRequest("hand to terminal applies to a lead session only")
 	}
-	if resumeCommand(c.rec, c.dir) == "" {
+	if resumeCommand(c.record(), c.dir) == "" {
 		return conflict("the session has no conversation yet, so there is nothing to resume in a terminal; close it instead")
 	}
 	c.stopProcess("")

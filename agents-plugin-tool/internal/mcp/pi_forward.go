@@ -167,9 +167,9 @@ func (s *Server) handlePiForward(ctx context.Context, id json.RawMessage, tool s
 			return fail(err)
 		}
 		if wantsJSON(args) {
-			return toolJSONResponse(id, piChild(st), nil)
+			return toolJSONResponse(id, s.piChild(st), nil)
 		}
-		return toolTextResponse(id, fmt.Sprintf("spawned Pi subagent %s (tier %s: %s, effort %s) in %s; its first turn runs now.\nIts report (status and final message) comes to you when the turn ends: steered into your running turn, or as your next message when you are idle. Your own report to your parent waits until every open subagent's report has reached you, so you may end your turn while it works. Steer it with pi.send; close it with pi.stop.\n", st.ID, orDash(st.Tier), orDash(st.Model), orDash(st.Effort), piCwd(st)), nil)
+		return toolTextResponse(id, fmt.Sprintf("spawned Pi subagent %s (tier %s: %s, effort %s) in %s; its first turn runs now.\nIts report (status and final message) comes to you when the turn ends: steered into your running turn, or as your next message when you are idle. Your own report to your parent waits until every open subagent's report has reached you, so you may end your turn while it works. Finished children sleep; pi.send resumes the same conversation if its session file still exists. Steer it with pi.send; stop it with pi.stop.\n", st.ID, orDash(st.Tier), orDash(st.Model), orDash(st.Effort), piCwd(st)), nil)
 	case "pi.list":
 		var answer struct {
 			Conversations []wsagent.State `json:"conversations"`
@@ -180,11 +180,11 @@ func (s *Server) handlePiForward(ctx context.Context, id json.RawMessage, tool s
 		if wantsJSON(args) {
 			out := make([]piChildOut, 0, len(answer.Conversations))
 			for _, st := range answer.Conversations {
-				out = append(out, piChild(st))
+				out = append(out, s.piChild(st))
 			}
 			return toolJSONResponse(id, out, nil)
 		}
-		return toolTextResponse(id, formatPiList(answer.Conversations), nil)
+		return toolTextResponse(id, s.formatPiList(answer.Conversations), nil)
 	}
 	child, err := stringArg(tool, "id", args)
 	if err != nil {
@@ -204,7 +204,7 @@ func (s *Server) handlePiForward(ctx context.Context, id json.RawMessage, tool s
 			return fail(err)
 		}
 		if wantsJSON(args) {
-			return toolJSONResponse(id, piChild(st), nil)
+			return toolJSONResponse(id, s.piChild(st), nil)
 		}
 		return toolTextResponse(id, fmt.Sprintf("sent to Pi subagent %s: starts a turn if idle, otherwise steers its running turn at the next tool boundary. That turn's report covers the message.\n", child), nil)
 	case "pi.stop":
@@ -213,9 +213,9 @@ func (s *Server) handlePiForward(ctx context.Context, id json.RawMessage, tool s
 			return fail(err)
 		}
 		if wantsJSON(args) {
-			return toolJSONResponse(id, piChild(st), nil)
+			return toolJSONResponse(id, s.piChild(st), nil)
 		}
-		return toolTextResponse(id, fmt.Sprintf("closed Pi subagent %s and its own subagents: its process stopped; pi.send resumes the same conversation if its session file still exists, and pi.transcript still reads it.\n", child), nil)
+		return toolTextResponse(id, fmt.Sprintf("Pi subagent %s and its own subagents: %s; its process stopped; pi.send resumes the same conversation if its session file still exists, and pi.transcript still reads it.\n", child, s.piChildStatus(st)), nil)
 	case "pi.transcript":
 		var answer struct {
 			Records []wslive.RingRecord `json:"records"`
@@ -249,9 +249,9 @@ func (s *Server) handlePiForward(ctx context.Context, id json.RawMessage, tool s
 			return fail(err)
 		}
 		if wantsJSON(args) {
-			return toolJSONResponse(id, res, nil)
+			return toolJSONResponse(id, s.piWaitResult(res), nil)
 		}
-		return toolTextResponse(id, formatPiWait(res, "its report comes to you when the turn ends"), nil)
+		return toolTextResponse(id, s.formatPiWait(res, "its report comes to you when the turn ends"), nil)
 	}
 	return toolTextResponse(id, "", fmt.Errorf("unknown tool: %s", tool))
 }
@@ -260,11 +260,11 @@ func (s *Server) handlePiForward(ctx context.Context, id json.RawMessage, tool s
 // reads them (piForwards), by name.
 func piWorkerDescriptions() map[string]string {
 	return map[string]string{
-		"pi.spawn":      "Spawn a Pi subagent of your own: a headless Pi coding agent the dashboard daemon runs for you, working in cwd. profile names any resolvable non-lead Pi agent profile; omitted means pi-worker (coding and ws git tools), while pi-mini-lead adds bounded ticket workflow tools. The child's resolved ws_tools, tools, and mcp_servers must be within your launched profile's tools; escalation is refused naming both profiles and the excess tools. prompt is its first message; a rendered playbook prompt works as it does for a native subagent. tier picks the model from the pi bucket of agents.tier alone and may not be above your own tier. The spawn tree is at most two levels below the lead, so a subagent of yours gets a refusal naming the cap when it tries to spawn. Returns the subagent's id at once while its turn runs. Each time a turn ends or fails, its report (the id, the status, and the final assistant message) comes to you: steered into your running turn, or as your next message when you are idle. Your own report to your parent waits until every open subagent's report has reached you, so you may end your turn while they work. Steer it with pi.send, read it with pi.transcript, list yours with pi.list, and close one with pi.stop.",
-		"pi.send":       "Send one of your Pi subagents a follow-up message. A closed subagent resumes on its existing session file with the same id and settings; a missing file is refused. With no turn running it starts the next turn now; during a turn it steers that running turn at the next tool boundary, without cancelling in-flight tool calls. That turn's report covers the steered message; no extra turn is queued after it is taken.",
-		"pi.list":       "List the Pi subagents you spawned, open and closed: id, status (idle, running, or closed), model and effort, working directory, label, held messages, and the last error.",
-		"pi.stop":       "Close one of your Pi subagents and, first, its own subagents: its process stops and a running turn ends with it. No report follows. Its record stays: pi.list shows it closed, pi.transcript still reads it, and pi.send resumes it if its session file still exists.",
-		"pi.transcript": "Read one of your Pi subagents' conversation, oldest first: the messages it was sent, its replies, its tool calls by tool, and its turn ends. Works for a closed subagent too.",
+		"pi.spawn":      "Spawn a Pi subagent of your own: a headless Pi coding agent the dashboard daemon runs for you, working in cwd. profile names any resolvable non-lead Pi agent profile; omitted means pi-worker (coding and ws git tools), while pi-mini-lead adds bounded ticket workflow tools. The child's resolved ws_tools, tools, and mcp_servers must be within your launched profile's tools; escalation is refused naming both profiles and the excess tools. prompt is its first message; a rendered playbook prompt works as it does for a native subagent. tier picks the model from the pi bucket of agents.tier alone and may not be above your own tier. The spawn tree is at most two levels below the lead, so a subagent of yours gets a refusal naming the cap when it tries to spawn. Returns the subagent's id at once while its turn runs. Each time a turn ends or fails, its report (the id, the status, and the final assistant message) comes to you: steered into your running turn, or as your next message when you are idle. Your own report to your parent waits until every open subagent's report has reached you, so you may end your turn while they work. Steer it with pi.send, read it with pi.transcript, list yours with pi.list, and stop one with pi.stop. Finished children sleep; pi.send resumes the same conversation if its session file still exists.",
+		"pi.send":       "Send one of your Pi subagents a follow-up message. A sleeping subagent resumes on its existing session file with the same id and settings; a missing, inaccessible, or non-regular file is refused when reopening a retired child, shown as deleted by pi.list. With no turn running it starts the next turn now; during a turn it steers that running turn at the next tool boundary, without cancelling in-flight tool calls. That turn's report covers the steered message; no extra turn is queued after it is taken.",
+		"pi.list":       "List the Pi subagents you spawned: id, status (idle, running, sleep, or deleted), model and effort, working directory, label, held messages, and the last error. Sleep means no process runs. Deleted means a retired child's session file is missing, inaccessible, or not regular; pi.send cannot revive it on that file. Other resume prerequisites are not checked by this list.",
+		"pi.stop":       "Stop one of your Pi subagents and, first, its own subagents: its process stops and a running turn ends with it. No report follows. Its record stays: pi.list shows sleep (or deleted if its session file is unavailable), pi.transcript still reads it, and pi.send resumes it if its session file still exists.",
+		"pi.transcript": "Read one of your Pi subagents' conversation, oldest first: the messages it was sent, its replies, its tool calls by tool, and its turn ends. Works for a sleeping subagent too.",
 		"pi.wait":       fmt.Sprintf("Use only when you must have your own child's result before continuing; otherwise end your turn and let its report arrive. Block until the turn of one of your Pi subagents that took your last pi.send (or pi.spawn's prompt) ends or fails, and return its status and final assistant message; it never returns an earlier turn's message, and a turn that already ended returns at once. The answer is that turn's report: it is not also steered into your turn. A turn whose report already reached you before the wait returns its status alone, saying so. timeout_s defaults to %d and is capped at %d; when it passes first the status is running, and the report comes to you as usual.", int(piWaitDefault/time.Second), int(piWaitMax/time.Second)),
 	}
 }

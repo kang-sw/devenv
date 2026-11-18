@@ -921,6 +921,15 @@ class DaemonRequestSent(DaemonUnavailable):
     """A CLI hello may have executed its command; never retry it."""
 
 
+class DaemonNewerMinor(DaemonUnavailable):
+    """The healthy daemon is a newer minor: waiting cannot help this session.
+
+    The daemon refuses another minor's hello, and an older plugin never
+    replaces a newer daemon, so requests fail at once instead of waiting
+    DAEMON_RETRY_SECONDS for a daemon that will not come.
+    """
+
+
 def proxy_cache_root(env: dict) -> Path:
     """The cache root wsstate.CacheRoot resolves for env.
 
@@ -1518,7 +1527,7 @@ def wait_daemon_connection(link, hello: dict):
     deadline = time.monotonic() + DAEMON_RETRY_SECONDS
     try:
         return link.connect(hello, allow_start=False)
-    except DaemonRequestSent:
+    except (DaemonRequestSent, DaemonNewerMinor):
         raise
     except (DaemonUnavailable, DaemonHung) as exc:
         failure = exc
@@ -1762,6 +1771,9 @@ class DaemonLink:
         endpoint, health = self.ensure_healthy(grace=grace, allow_start=allow_start)
         version = str(health.get("version", ""))
         if not same_minor(version, self.runtime_version):
+            if compare_daemon_versions(version, self.runtime_version) > 0:
+                raise DaemonNewerMinor(f"the shared daemon is version {version}, a newer minor than this plugin "
+                                       f"({self.runtime_version}); update this plugin and restart this session")
             raise DaemonUnavailable(f"daemon {version} is outside this plugin's minor ({self.runtime_version})")
         return daemon_upgrade(endpoint, hello, self.answer_budget)
 
@@ -1786,7 +1798,8 @@ class McpProxy:
     under an id of its own (dropping that answer) and
     `notifications/initialized`, and answers every request still in flight
     with an error. While disconnected, unsent requests wait up to 75 seconds
-    for recovery. Requests already sent are never replayed.
+    for recovery, unless the daemon is a newer minor: then they fail at once
+    while recovery keeps probing. Requests already sent are never replayed.
     """
 
     def __init__(self, link: DaemonLink, hello: dict, stdin, stdout, stderr) -> None:
@@ -1812,6 +1825,22 @@ class McpProxy:
         # PROXY_QUICK_CLOSE_SECONDS of being made (a daemon in a crash loop).
         self.connected_at = time.monotonic()
         self.quick_closes = 0
+        # Set while the daemon is a newer minor: unsent requests fail with it.
+        self.newer_minor: str | None = None
+
+    def set_newer_minor(self, message: str) -> None:
+        """Fail every unsent request now; log once per distinct message."""
+        message = f"dashboard daemon not reachable: {message}"
+        with self.pending_done:
+            if message != self.newer_minor:
+                print(f"ws-mcp-launcher: {message}", file=self.stderr, flush=True)
+            self.newer_minor = message
+            pending = list(self.pending.values())
+            self.pending.clear()
+            for _, request, timer in pending:
+                timer.cancel()
+                self.error(request["id"], message)
+            self.pending_done.notify_all()
 
     def run(self, stream) -> int:
         self.stream = stream
@@ -1872,7 +1901,9 @@ class McpProxy:
             message = parse_jsonrpc_line(line)
             request = message is not None and message.get("method") is not None and "id" in message
             with self.lock:
-                if request and self.stream is None:
+                if request and self.stream is None and self.newer_minor is not None:
+                    self.error(message["id"], self.newer_minor)
+                elif request and self.stream is None:
                     # Each request has its own budget, even when a client sends
                     # several concurrently. None has attempted a socket write.
                     key = json_id_key(message["id"])
@@ -1954,7 +1985,12 @@ class McpProxy:
             return None
         try:
             stream = self.link.connect(self.hello, grace=DAEMON_SWAP_GRACE_SECONDS)
+        except DaemonNewerMinor as exc:
+            self.set_newer_minor(str(exc))
+            return None
         except (DaemonUnavailable, DaemonHung) as exc:
+            with self.lock:
+                self.newer_minor = None  # no longer the reason: requests wait again
             print(f"ws-mcp-launcher: dashboard daemon not reachable: {exc}", file=self.stderr, flush=True)
             return None
         self.replay_into(stream)
@@ -1964,6 +2000,7 @@ class McpProxy:
     def replay_into(self, stream) -> None:
         with self.lock:
             self.stream = stream
+            self.newer_minor = None
             if self.stdin_closed:
                 # The client left while we reconnected: nobody will close
                 # this stream for us, so end the session now.
@@ -2073,12 +2110,16 @@ def proxy_mode(argv: list[str]) -> str:
 
 def proxy_serve(link: DaemonLink, argv: list[str], stdin, stdout, stderr) -> int:
     hello = proxy_hello("mcp", argv, link.env, link.runtime_version)
+    proxy = McpProxy(link, hello, stdin, stdout, stderr)
     try:
         stream = link.connect(hello)
+    except DaemonNewerMinor as exc:
+        proxy.set_newer_minor(str(exc))
+        stream = None
     except (DaemonUnavailable, DaemonHung) as exc:
         print(f"ws-mcp-launcher: dashboard daemon not reachable: {exc}", file=stderr, flush=True)
         stream = None
-    return McpProxy(link, hello, stdin, stdout, stderr).run(stream)
+    return proxy.run(stream)
 
 
 def write_bytes(stream, text: str) -> None:

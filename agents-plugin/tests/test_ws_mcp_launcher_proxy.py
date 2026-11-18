@@ -470,10 +470,70 @@ class LauncherProxyTest(unittest.TestCase):
         code = self.launcher.proxy_serve(self.link(), ["serve", "--stdio"], io.BytesIO(), io.BytesIO(), stderr)
         self.assertEqual(code, 1)
         self.assertIn("dashboard daemon not reachable", stderr.getvalue())
-        self.assertIn("outside this plugin's minor", stderr.getvalue())
+        self.assertIn("the shared daemon is version 0.49.0, a newer minor than this plugin (0.48.16); "
+                      "update this plugin and restart this session", stderr.getvalue())
         self.assertEqual(self.runtime_log(), [])
         self.assertEqual(stderr.getvalue().count("\n"), 1)
         self.assertEqual(daemon.hellos, [])
+
+    def test_a_newer_minor_daemon_fails_requests_at_once_until_a_same_minor_one_returns(self):
+        # A budget no assertion below could meet: every failure must be at once.
+        self.launcher.DAEMON_RETRY_SECONDS = 30.0
+        newer = self.daemon(name="newer", version="0.49.0")
+        newer.write_endpoint(self.daemon_dir)
+        client = ProxyClient(self.launcher, self.link())
+        started = time.monotonic()
+        init_id = client.send("initialize")
+        answer = client.recv()
+        self.assertLess(time.monotonic() - started, 2.0)
+        self.assertEqual(answer["id"], init_id)
+        self.assertEqual(answer["error"]["code"], -32000)
+        self.assertIn("a newer minor than this plugin (0.48.16); update this plugin and restart this session",
+                      answer["error"]["message"])
+        # Recovery keeps probing every poll, but the reason is logged once.
+        time.sleep(0.5)
+        self.assertEqual(client.stderr.getvalue().count("newer minor"), 1, client.stderr.getvalue())
+        self.assertEqual(newer.hellos, [], "a newer minor is refused before any hello")
+        same = self.daemon(name="same")
+        same.write_endpoint(self.daemon_dir)
+        self.wait_for_hello(same)
+        # The hello lands before the proxy takes the stream: a ping in that
+        # window still fails fast, so retry until the reconnect completes.
+        deadline = time.monotonic() + 2.0
+        while True:
+            ping_id = client.send("ping")
+            answer = client.recv()
+            self.assertEqual(answer["id"], ping_id)
+            if "result" in answer or time.monotonic() >= deadline:
+                break
+            self.assertIn("newer minor", answer["error"]["message"])
+            time.sleep(0.05)
+        self.assertEqual(answer["result"]["served_by"], "same")
+        self.assertEqual(client.close(), 0)
+        self.assertEqual(self.runtime_log(), [], "an older plugin never starts or replaces a newer daemon")
+
+    def test_a_newer_minor_successor_mid_session_fails_requests_at_once(self):
+        self.launcher.DAEMON_RETRY_SECONDS = 30.0
+        old = self.daemon(name="old")
+        old.write_endpoint(self.daemon_dir)
+        client = ProxyClient(self.launcher, self.link())
+        client.send("initialize")
+        client.recv()
+        newer = self.daemon(name="newer", version="0.49.0")
+        newer.write_endpoint(self.daemon_dir)
+        old.close()
+        deadline = time.monotonic() + 5.0
+        while "newer minor" not in client.stderr.getvalue() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        started = time.monotonic()
+        ping_id = client.send("ping")
+        answer = client.recv()
+        self.assertLess(time.monotonic() - started, 2.0)
+        self.assertEqual(answer["id"], ping_id)
+        self.assertIn("update this plugin and restart this session", answer["error"]["message"])
+        self.assertEqual(client.close(), 1)
+        self.assertEqual(newer.hellos, [])
+        self.assertEqual(self.runtime_log(), [])
 
     def test_a_refused_hello_errors_without_exe_fallback(self):
         daemon = self.daemon(refuse_reason="hello carries no WS_RSRC_ROOT")
@@ -787,6 +847,19 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(now[0], 0.3)
         self.assertIn(b"(waited 0.3s for the dashboard daemon)", stderr.getvalue())
+
+    def test_cli_against_a_newer_minor_daemon_fails_without_waiting(self):
+        daemon = self.daemon(version="0.49.0")
+        daemon.write_endpoint(self.daemon_dir)
+        now = [0.0]
+        stderr = io.BytesIO()
+        with mock.patch.object(self.launcher.time, "monotonic", side_effect=lambda: now[0]), \
+             mock.patch.object(self.launcher.time, "sleep", side_effect=lambda seconds: now.__setitem__(0, now[0] + seconds)):
+            code = self.launcher.proxy_cli(self.link(allow_start=False), ["tools"], io.BytesIO(), stderr)
+        self.assertEqual(code, 1)
+        self.assertEqual(now[0], 0.0, "a newer-minor daemon must not spend the retry budget")
+        self.assertIn(b"a newer minor than this plugin (0.48.16); update this plugin and restart this session", stderr.getvalue())
+        self.assertEqual(daemon.hellos, [])
 
     def test_cli_failure_after_hello_is_not_retried(self):
         for refuse in (False, True):
