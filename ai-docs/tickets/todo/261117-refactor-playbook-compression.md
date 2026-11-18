@@ -117,9 +117,13 @@ How each playbook's diet runs, so a later session resumes it as is:
 
 - `lead-delegate`: done (0aca7a448), 852 → 410 words; added
   `delegate-report.md` (151) and the manual's tier rule.
-- Next: `lead-workflow-manual` (also unify the Explore section's model names
-  onto the tier rule), then `whiteboard`, `lead-run` (add the trivial-ticket
-  pointer), `ticket-handler`, `lead-review`, `lead-ship`.
+- `lead-workflow-manual`: done, 1754 → 1383 words (`wc -w`; 1631 at the
+  start plus the tier-rule section added by the lead-delegate commit). Session setup
+  ferrule guidance removed; lead-revive passes root ((91)=a); Explore names
+  the tier only (no model names; the tier-model golden test was retargeted
+  to the Explore agent term).
+- Next: `whiteboard`, `lead-run` (add the trivial-ticket pointer),
+  `ticket-handler`, `lead-review`, `lead-ship`.
 
 ## Phases
 

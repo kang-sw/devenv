@@ -20,7 +20,8 @@ import (
 //
 // Under playbook.read the markers surface verbatim as inert HTML comments
 // (invisible when Markdown renders), preserving backward compatibility.
-// The ONLY consumer is stripModeGatedRegion in this file.
+// The ONLY consumer is stripModeGatedRegion in this file. The shipped manual
+// carries no gated region today; the helper stays as the generic mechanism.
 const (
 	freshOnlyStart = "<!-- ws:fresh-only:start -->"
 	freshOnlyEnd   = "<!-- ws:fresh-only:end -->"
@@ -304,8 +305,8 @@ func (s *Server) handleWorkflowState(id json.RawMessage, args map[string]any) re
 
 // handleWorkflowManual implements the ws.workflow_manual tool. A valid
 // session_key is required; keyless calls receive a hard error. Behaviour by key:
-//   - reserved freshBootstrapKey sentinel -> FRESH (manual + gated bootstrap line);
-//   - resolves to a record -> CONTINUE (manual, bootstrap stripped, + Session State);
+//   - reserved freshBootstrapKey sentinel -> FRESH (with root: mints a lead key and renders the manual; without: the bare manual);
+//   - resolves to a record -> CONTINUE (manual + Session State);
 //   - syntactically valid but unresolvable, non-sentinel -> FAIL-LOUD: a minimal
 //     no-restore notice with NO manual body rendered (see below), never minting.
 func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) response {
@@ -331,11 +332,11 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 
 	// 2. FAIL-LOUD up front, BEFORE rendering: a syntactically valid but
 	//    unresolvable, non-sentinel key must NOT receive the manual body at all.
-	//    The body's always-shown per-root rule names ws.ferrule (the lead
-	//    self-bootstrap call); any unregistered key bypasses the lead-only keyed
-	//    gate via lookup-miss, so a non-lead caller reaching this path could read
-	//    that mention to discover the escalation. Return only a no-restore notice
-	//    naming lead-revive (a skill, not the ferrule/sentinel surface). NEVER mint.
+	//    Any unregistered key bypasses the lead-only keyed gate via lookup-miss,
+	//    so a non-lead caller reaching this path must not read the manual (or
+	//    anything in it that names the lead bootstrap surface). Return only a
+	//    no-restore notice naming lead-revive (a skill, not the ferrule/sentinel
+	//    surface). NEVER mint.
 	rec, err := s.sessions.readStateWithError(key, partAgenda|partTodos|partWhiteboard)
 	if key != freshBootstrapKey && err != nil {
 		if !errors.Is(err, errSessionNotFound) || errors.Is(err, errSessionUnreadable) {
@@ -423,9 +424,10 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	// sentinel first so it never depends on a (non-existent) sentinel record.
 	if key == freshBootstrapKey {
 		if root != "" {
-			// 3a. FRESH with root (canonicalized above): mint a lead key, strip
-			//     the fresh-only block (caller already has a root — no need to
-			//     instruct them to call ferrule), and return the key inline.
+			// 3a. FRESH with root (canonicalized above): mint a lead key and
+			//     return it inline. This is how a lead with no key bootstraps:
+			//     the lead skills pass the sentinel plus root, and the body
+			//     carries no ferrule instruction.
 			// Resolved before the mint, so a bad profile fails the call without
 			// leaving a minted key the caller never received.
 			profileOpts := s.configOptions()
@@ -479,7 +481,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			}
 			return toolTextResponse(id, workflowManualReadFullNotice+"\n\n"+body+"\n", nil)
 		}
-		// 3b. FRESH (sentinel, no root): keep the gated bootstrap line; strip only markers.
+		// 3b. FRESH (sentinel, no root): keep any gated region; strip only markers.
 		body = stripModeGatedRegion(body, true)
 		if skepticalPosture {
 			body = injectSkepticalPosture(body)

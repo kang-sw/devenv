@@ -8,5 +8,5 @@ description: Post-compaction recovery. If this session was compacted or continue
 Recover your ws `session_key` from the compaction summary, then call
 `ws/workflow_manual(session_key: <recovered key>)` and execute the returned
 reference inline. If no key is recoverable (genuinely fresh start), call
-`ws/workflow_manual(session_key: "obsidian-latch")` to bootstrap.
+`ws/workflow_manual(session_key: "obsidian-latch", root: <absolute worktree path>)` to bootstrap.
 If the result is truncated or saved to a file, read it in full before any other action, so no session rules are missed.
