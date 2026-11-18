@@ -1,5 +1,5 @@
 {{define "session"}}<!DOCTYPE html>
-<html data-mode="{{.Mode}}" data-rid="{{.ReplyID}}" data-board-incarnation="{{.BoardIncarnation}}"{{with .Worktree}} data-worktree="{{.}}"{{end}} data-assets="{{.Assets.ID}}" data-wb-titlehost data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .SysOpen}} data-sysopen="1"{{end}}{{if .Hosted}} data-hosted="1"{{end}}{{if .HandedOff}} data-handed="1"{{end}}{{with .Terminal}} data-term="{{.}}"{{end}}{{if .Frame}} data-frame="1"{{end}}>
+<html data-mode="{{.Mode}}" data-rid="{{.ReplyID}}"{{if .HasBoard}} data-board-incarnation="{{.BoardIncarnation}}"{{end}}{{with .Worktree}} data-worktree="{{.}}"{{end}} data-assets="{{.Assets.ID}}" data-wb-titlehost data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .SysOpen}} data-sysopen="1"{{end}}{{if .Hosted}} data-hosted="1"{{end}}{{if .HandedOff}} data-handed="1"{{end}}{{with .Terminal}} data-term="{{.}}"{{end}}{{if .Frame}} data-frame="1"{{end}}>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{pwa .Theme}}
 <title>{{if .Worktree}}{{.Workspace}} · {{.WorktreeBranch}} - Werkschaft (alpha){{else}}{{template "stitle" .}}{{end}}</title>
 {{if .Frame}}<link rel="stylesheet" href="/s/{{.Assets.FrameWhiteboardFile}}">{{if .Terminal}}
