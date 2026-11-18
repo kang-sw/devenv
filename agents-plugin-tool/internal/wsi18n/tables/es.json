@@ -1847,6 +1847,7 @@
   "js.rail.ws.select": "Seleccionar carpeta",
   "js.rail.wt.title": "Añadir worktree",
   "js.rail.wt.branch": "Rama",
+  "js.rail.wt.detached": "Sin rama",
   "js.rail.wt.new": "Rama nueva",
   "js.rail.wt.old": "Rama existente",
   "js.rail.wt.name": "Nombre de la rama nueva",

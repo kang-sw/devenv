@@ -1847,6 +1847,7 @@
   "js.rail.ws.select": "フォルダーを選択",
   "js.rail.wt.title": "Worktree を追加",
   "js.rail.wt.branch": "ブランチ",
+  "js.rail.wt.detached": "ブランチなし",
   "js.rail.wt.new": "新しいブランチ",
   "js.rail.wt.old": "既存のブランチ",
   "js.rail.wt.name": "新しいブランチ名",

@@ -117,3 +117,5 @@ Current blocks (develop `6b91aff4e`):
 - the tests and the w5090 result;
 - the commit;
 - anything left alone.
+
+Correction (2026-11-18): the "falls back to the direct path" premise above holds only for 0.48/0.49 launchers; since 0.50.0 there is no fallback (see commit 96253c58e).

@@ -1847,6 +1847,7 @@
   "js.rail.ws.select": "选择文件夹",
   "js.rail.wt.title": "添加工作树",
   "js.rail.wt.branch": "分支",
+  "js.rail.wt.detached": "无分支",
   "js.rail.wt.new": "新分支",
   "js.rail.wt.old": "已有分支",
   "js.rail.wt.name": "新分支名",
