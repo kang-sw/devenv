@@ -83,6 +83,10 @@ files for plugin or tooling code unless a ticket changes the layout.
    convention docs, read `ai-docs/manuals/skill-authoring.md`
    and apply its invariant checklist to every changed Invariants/Constraints
    line.
+6. **File-touch budget.** Targets are Windows PCs with heavy antivirus, where
+   every file touch is scanned. Keep live state in memory, persist only
+   appended deltas for recovery, and keep interactive paths off file I/O;
+   follow `ai-docs/manuals/performance.md` and count file operations per action.
 
 ## Workflow
 
@@ -183,6 +187,7 @@ proceed fact normalizes to `n/a`.
 | `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin/hooks/`, `agents-plugin-wsflow/` | `ai-docs/manuals/wsflow-mirroring.md` |
 | `agents-plugin-tool/internal/mcp/` | `ai-docs/manuals/ws-mcp.md` |
 | `agents-plugin-tool/internal/` | `ai-docs/manuals/release-compatibility.md` |
+| `agents-plugin-tool/` | `ai-docs/manuals/performance.md` |
 
 Each row's manual is read before editing a file its `paths` cover. This is a
 live obligation, not a pointer list: the worker playbook reads every matching

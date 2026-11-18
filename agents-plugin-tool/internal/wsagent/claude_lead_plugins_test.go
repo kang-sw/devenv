@@ -56,7 +56,7 @@ func TestClaudeLeadPluginArgsModes(t *testing.T) {
 	}`)
 	spec.Lead.PermissionMode = "plan"
 	spec.Model, spec.Effort, spec.SessionID = "opus", "high", "resume-id"
-	spec.Instructions = "/must/not/append"
+	spec.Instructions = "/sess/instructions.md"
 	spec.WSMCP = &MCPCommand{Command: "/must/not/replace/user/mcp"}
 	spec.RemoveSubagents = RemovesSubagents(Record{Backend: BackendClaude, Lead: true})
 	for _, mode := range []string{"", "default", "isolated"} {
@@ -81,7 +81,8 @@ func TestClaudeLeadPluginArgsModes(t *testing.T) {
 				"--model": "opus", "--effort": "high", "--resume": "resume-id",
 				"--input-format": "stream-json", "--output-format": "stream-json",
 				// Every isolation mode removes the native subagent tool alone.
-				"--disallowedTools": "Agent,Task",
+				"--disallowedTools":           "Agent,Task",
+				"--append-system-prompt-file": "/sess/instructions.md",
 			} {
 				if got, ok := flagValue(args, flag); !ok || got != value {
 					t.Errorf("%s = %q (present %v), want %q", flag, got, ok, value)
@@ -90,7 +91,7 @@ func TestClaudeLeadPluginArgsModes(t *testing.T) {
 			if n := slices.Index(args, "--plugin-dir"); n < 0 || slices.Contains(args[n+1:], "--plugin-dir") {
 				t.Fatalf("want one bundled plugin directory: %v", args)
 			}
-			for _, banned := range []string{"--setting-sources", "--strict-mcp-config", "--mcp-config", "--tools", "--allowedTools", "--disable-slash-commands", "--append-system-prompt-file", "--bare"} {
+			for _, banned := range []string{"--setting-sources", "--strict-mcp-config", "--mcp-config", "--tools", "--allowedTools", "--disable-slash-commands", "--append-system-prompt", "--system-prompt", "--bare"} {
 				if slices.Contains(args, banned) {
 					t.Errorf("lead must preserve settings, hooks, memory, and MCP: found %s", banned)
 				}

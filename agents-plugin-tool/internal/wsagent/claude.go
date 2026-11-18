@@ -99,7 +99,8 @@ func claudeLeadEnv(spec StartSpec) []string {
 // servers. Plugin overrides replace installed ws copies with the configured
 // hosted bundle, or disable all other plugins in isolated mode. Tool permission
 // prompts come to the daemon (--permission-prompt-tool stdio). The user's
-// tools stay, less the native subagent tool (claudeRemovedTools).
+// tools stay, less the native subagent tool (claudeRemovedTools). The
+// instruction file, when there is one, appends to the default system prompt.
 func claudeLeadArgs(spec StartSpec) ([]string, error) {
 	plugins, err := claudeLeadPluginArgs(spec)
 	if err != nil {
@@ -128,6 +129,9 @@ func claudeLeadArgs(spec StartSpec) ([]string, error) {
 	}
 	if spec.SessionID != "" {
 		args = append(args, "--resume", spec.SessionID)
+	}
+	if spec.Instructions != "" {
+		args = append(args, "--append-system-prompt-file", spec.Instructions)
 	}
 	if removed := claudeRemovedTools(spec); len(removed) > 0 {
 		args = append(args, "--disallowedTools", strings.Join(removed, ","))

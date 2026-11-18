@@ -3,6 +3,7 @@ package wsagent
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -124,6 +125,51 @@ func TestLeadSpawnRunsUnderAHolder(t *testing.T) {
 	if got := h.record(st.ID).SessionID; got != "sess-1" {
 		t.Fatalf("recorded backend session = %q", got)
 	}
+}
+
+// TestClaudeLeadPromptCarriesHostedKey: a hosted Claude lead learns its
+// session key from its own system prompt, not only from the plugin's hooks
+// (which a policy may block): every launch, the resume included, appends
+// an instruction file naming the key and the workflow manual call.
+func TestClaudeLeadPromptCarriesHostedKey(t *testing.T) {
+	h := newLeadHarness(t).start()
+	id, holder := h.runLead("one")
+	key := h.record(id).WSKey
+	prompt := func(argv []string) string {
+		t.Helper()
+		path, ok := flagValue(argv, "--append-system-prompt-file")
+		if !ok {
+			t.Fatalf("a Claude lead's launch appends no instruction file: %v", argv)
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	check := func(text string) {
+		t.Helper()
+		for _, want := range []string{"`" + key + "`", "`session_key`", "do not mint a replacement", "workflow_manual", "after any compaction"} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("instruction file lacks %q:\n%s", want, text)
+			}
+		}
+	}
+	check(prompt(h.holders.spawned(holder).Argv))
+
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	h.idle(id)
+	if _, err := h.runner.Stop(id); err != nil {
+		t.Fatal(err)
+	}
+	h.send(id, "two")
+	var second string
+	eventually(t, "a new holder", func() bool { second = h.record(id).HolderID; return second != "" && second != holder })
+	argv := h.holders.spawned(second).Argv
+	if got, ok := flagValue(argv, "--resume"); !ok || got != "sess-1" {
+		t.Fatalf("the next process resumes the session: %v", argv)
+	}
+	check(prompt(argv))
 }
 
 // TestLeadProfileEnvSetsSessionStateEvents: a claude lead's harness is

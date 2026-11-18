@@ -1720,7 +1720,7 @@
     return (c && c.getAttribute("data-turn")) || "";
   }
   function syncBadge() {
-    // The session page's badge opens the agents popover, so it shows there
+    // The session page's badge opens the agents island's full view, so it shows there
     // whether or not the session is live and anything runs.
     var popover = !!$("agpop");
     subBadge(sbadge, popover ? doc.querySelector("#r-tree .ag-source") : doc.querySelector("#r-convlive .clive"), liveMode || popover, popover);
@@ -1846,10 +1846,12 @@
       var sourceMark = head.querySelector(".amk"), sourceName = head.querySelector(".aname"), sourcePhase = head.querySelector(".aline .phase"), time = head.querySelector(".am time[data-ms]"), am = head.querySelector(".am");
       if (sourceMark) mark.appendChild(sourceMark.cloneNode(true));
       if (sourceName) { name.textContent = sourceName.textContent; name.title = sourceName.textContent; }
-      var kind = sourcePhase && (sourcePhase.classList.contains("thinking") ? "thinking" : sourcePhase.classList.contains("replying") ? "replying" : "tool");
-      kind = kind || "tool";
-      phase.className = "phase " + kind;
-      phase.textContent = kind === "tool" && (!sourcePhase || !sourcePhase.classList.contains("tool")) ? agisland.getAttribute("data-tool-label") : sourcePhase.textContent;
+      // One status pill per row: a copy of the full panel's own pill (tphase),
+      // so thinking, tool, and replying, and equally permission, compacting,
+      // and idle, keep that pill's label, class, and mark; a waiting approval
+      // must read as one here, not as a tool call.
+      if (sourcePhase) phase = sourcePhase.cloneNode(true);
+      else { phase.className = "phase tool"; phase.textContent = agisland.getAttribute("data-tool-label"); }
       if (time) { var copy = time.cloneNode(true); elapsed.appendChild(copy); fmtTime(copy, Date.now()); }
       else if (am) { var spans = q("span", am); if (spans.length) elapsed.textContent = spans[spans.length - 1].textContent; }
       [mark, name, phase, elapsed].forEach(function (el) { row.appendChild(el); });

@@ -235,6 +235,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 	}
 	host := c.r.opts.Holders
 	holder := &holderChild{host: host, table: &c.r.holders, session: holderSession{Kind: holderKindLead, ReplyID: rec.ReplyID, Cwd: rec.workDir(), Label: rec.Profile}}
+	instructions := ""
 	if attach {
 		holder.id, holder.skipTo = rec.HolderID, rec.HolderSeq
 	} else {
@@ -247,6 +248,14 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 			return fmt.Errorf("ws session key: %w", err)
 		}
 		c.setStatus(func() { c.rejoinKeyPending = false })
+		if rec.Backend == BackendClaude {
+			// Written on every launch, --resume included, so each process
+			// carries the key in its prompt. Pi leads get it from their
+			// bridge extension (writePiLeadBridge).
+			if instructions, err = composeLeadInstructions(c.dir, rec); err != nil {
+				return err
+			}
+		}
 		// One step with the check that the session is still the daemon's:
 		// the row written here names no process and is not stopped, so a
 		// terminal login is refused from now until the process it gets has
@@ -263,16 +272,17 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 	// spawned: the backend recorded its process before Start returned (LeadSpec.Spawned).
 	var spawned bool
 	spec := StartSpec{
-		Root:        rec.Root,
-		Dir:         c.dir,
-		Profile:     def,
-		Model:       rec.Model,
-		Effort:      rec.Effort,
-		SessionID:   rec.SessionID,
-		Cwd:         rec.Cwd,
-		SessionFile: rec.SessionFile,
-		Env:         environ(),
-		Holder:      holder,
+		Root:         rec.Root,
+		Dir:          c.dir,
+		Profile:      def,
+		Model:        rec.Model,
+		Effort:       rec.Effort,
+		SessionID:    rec.SessionID,
+		Cwd:          rec.Cwd,
+		SessionFile:  rec.SessionFile,
+		Instructions: instructions,
+		Env:          environ(),
+		Holder:       holder,
 		// A hosted lead delegates through agent.spawn only. A rejoin builds
 		// no command line; the replayed init's shape shows whether the
 		// running process was started without the tool.
@@ -736,6 +746,22 @@ func composeInstructions(dir string, rec Record, p Profile, system string) (stri
 	}
 	path := filepath.Join(dir, "instructions.md")
 	if err := writeFileAtomic(path, []byte(strings.Join(parts, "\n\n")+"\n"), 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// composeLeadInstructions writes the instruction file a hosted Claude lead
+// appends to its system prompt: the session key the daemon minted for it.
+// The plugin's own hooks deliver the same key, but a policy that blocks
+// those hooks leaves the prompt as the only place the lead can learn it;
+// when both run, the duplicate line is harmless.
+func composeLeadInstructions(dir string, rec Record) (string, error) {
+	text := fmt.Sprintf("Your ws session key is `%s`. Pass it as the `session_key` argument of every ws tool call. "+
+		"This hosted session already has a key; do not mint a replacement (no ferrule call, no fresh-bootstrap key). "+
+		"At session start and after any compaction, call the workflow_manual tool with this key and follow it.", rec.WSKey)
+	path := filepath.Join(dir, "instructions.md")
+	if err := writeFileAtomic(path, []byte(text+"\n"), 0o600); err != nil {
 		return "", err
 	}
 	return path, nil
