@@ -97,6 +97,7 @@ func (e ConvEntry) MailPreview() string {
 
 type conversationEffectRow struct {
 	Kind, Target, ID, Text string
+	Parts                  []conversationBoardText
 }
 
 type conversationEffectTopic struct {
@@ -167,6 +168,12 @@ func (e ConvEntry) WhiteboardCard() conversationEffectCard {
 			if effect.Field == "label" && effect.After != "" {
 				topic.Label = effect.After
 			}
+		}
+	}
+	for i := range card.Topics {
+		for j := range card.Topics[i].Rows {
+			row := &card.Topics[i].Rows[j]
+			row.Parts = conversationBoardTextParts(row.Text, e.BoardTargets)
 		}
 	}
 	return card

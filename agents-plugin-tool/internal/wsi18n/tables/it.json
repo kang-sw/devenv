@@ -2064,6 +2064,7 @@
   "entry.whiteboard.panel": "Pannello",
   "entry.whiteboard.norecap": "Riepilogo non disponibile",
   "entry.whiteboard.open": "Apri sulla bacheca",
+  "js.whiteboard.jump.itemmissing": "Questo elemento della lavagna non è più disponibile.",
   "js.whiteboard.jump.missing": "Questo argomento non è più disponibile.",
   "js.whiteboard.jump.elementmissing": "L’elemento esatto non è disponibile; viene mostrato il suo argomento.",
   "entry.whiteboard": "Aggiornamento della lavagna confermato",

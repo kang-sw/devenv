@@ -491,6 +491,8 @@ func subagentProjection(self string, agents []wslive.Agent, lookup sessionLookup
 // ConvEntry is one conversation ring entry as the page shows it.
 type ConvEntry struct {
 	wslive.RingEntry
+	// BoardTargets is render-only attribution from the current in-memory board.
+	BoardTargets map[string]string
 	// Key is the ring entry's file name, the element key the page keeps an
 	// expanded mail line open by.
 	Key string
@@ -686,6 +688,7 @@ func buildSessionView(in pageInputs) SessionView {
 			contacts := resolvedContacts(in.Page.Contacts, reg.ReplyID)
 			v.Conversation = conversation(wslive.Lead{}, in.Ring, in.Page.MailBodies, contacts, in.Lookup, replyMarkdown(reg.Project, reg.ReplyID), reg.ReplyID)
 			splitUserEntries(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
+			attributeBoardNavigation(&v.Conversation, in.Page.BoardTargets)
 		}
 		return v
 	}
@@ -711,6 +714,7 @@ func buildSessionView(in pageInputs) SessionView {
 	v.Conversation = conversation(in.Snapshot.Lead, in.Ring, in.Page.MailBodies, contacts, lookup, replyMarkdown(reg.Project, reg.ReplyID), reg.ReplyID)
 	splitUserEntries(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
 	v.Conversation.Held = heldViews(in.Held, in.AttachDir, reg.ReplyID)
+	attributeBoardNavigation(&v.Conversation, in.Page.BoardTargets)
 	v.Conversation.Sent = sentMarks(in.Drained, in.Held, in.Page.Reasked, settledTurnStart(in.Ring))
 	v.Tree.Subagents, v.Tree.CompactAgents = subagentProjection(reg.ReplyID, in.Snapshot.Agents, lookup, in.Now)
 	v.Conversation.Subagents = v.Tree.Subagents

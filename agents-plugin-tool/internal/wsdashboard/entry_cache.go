@@ -50,6 +50,7 @@ func newEntryCache() *entryCache { return &entryCache{sessions: map[string]*sess
 func entryCacheKey(e ConvEntry) string {
 	var b strings.Builder
 	b.WriteString(e.Lang + "\x00" + e.Key + "\x00" + strconv.FormatBool(e.HasBody) + "\x00" + strconv.FormatBool(e.PeerLinked) + "\x00" + e.PeerReplyID + "\x00" + e.PeerLabel)
+	b.WriteString(boardNavigationKey(e))
 	b.WriteString("\x00" + strconv.FormatBool(e.MailWakeSuppressed) + "\x00" + strconv.FormatBool(e.MatchedMailWake()) + "\x00" + e.BoardNudgeState())
 	for _, img := range e.Images {
 		b.WriteString("\x00" + img.Src)
