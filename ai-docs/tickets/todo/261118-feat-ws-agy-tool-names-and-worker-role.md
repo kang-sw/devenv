@@ -162,6 +162,14 @@ Two gaps stand in the way:
   variable. The live agy check (Gemini, then a Claude model through an alias)
   is still the owner's after the daemon swap.
 
+#### Edition (d902c66b8) - 2026-11-18
+
+- The alias drops the `ws__` prefix: `tickets.query` is `tickets_query`.
+  agy supplies `mcp_ws_` itself and (106) names the bare form; the character
+  mapping, collision refusal, and API-pattern check of (137) are unchanged,
+  and a test pins that every alias plus `mcp_ws_` fits 128 characters.
+  Deviation (c) of the Result above is superseded.
+
 ### Phase 2: agy worker role
 
 - Replace the global `agentWorkerBackends` map
