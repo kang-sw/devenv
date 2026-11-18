@@ -97,7 +97,9 @@ func TestPiSpawnDisplayRefreshesAfterSessionRemoval(t *testing.T) {
 	if err := os.Remove(file); err != nil {
 		t.Fatal(err)
 	}
-	stampWatchedSince(&after, inputs.watch, time.Now())
+	// A later look: on Windows time.Now() can repeat within a clock tick,
+	// and a stamp taken at or after since is reused (watchedStampCache.write).
+	stampWatchedSince(&after, inputs.watch, time.Now().Add(time.Hour))
 	if before.String() == after.String() {
 		t.Fatal("session-file deletion did not change the refresh stamp")
 	}
