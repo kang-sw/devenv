@@ -54,14 +54,18 @@ func (f FolderStore) planLoadFloor(intent *folderIntent) error {
 	if intent.Session.NextTopic >= folderRevisionDirNumber {
 		return fmt.Errorf("whiteboard: reserved revision directory conflicts with topic allocation")
 	}
-	_, offset, err := f.loadFloor(intent.BaseGeneration)
+	prior, offset, err := f.loadFloor(intent.BaseGeneration)
 	if err != nil {
 		return err
 	}
 	// Called at the swap, under the lock, after backup and allocation cleanup.
 	// Inbox times have millisecond precision: the next millisecond excludes
 	// even an old-board answer sent in the same millisecond as this capture.
-	at := time.UnixMilli(archiveLoadNow().UnixMilli() + 1).UTC().Format(reaskLayout)
+	now := archiveLoadNow().UnixMilli() + 1
+	if previous, err := time.Parse(time.RFC3339Nano, prior); err == nil {
+		now = max(now, previous.UnixMilli()+1)
+	}
+	at := time.UnixMilli(now).UTC().Format(reaskLayout)
 	intent.Session.State.LoadedAt = at
 	intent.Logs = append(intent.Logs, folderAppend{
 		Path: folderLoadFloorLog, Offset: offset,

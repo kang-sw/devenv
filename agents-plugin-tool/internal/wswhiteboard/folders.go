@@ -431,6 +431,7 @@ func (f FolderStore) load(legacy *State) (*State, *folderSession, error) {
 		if revision.StaleNudgeRevision != "" {
 			state.StaleNudgeRevision = revision.StaleNudgeRevision
 		}
+		f.rememberIncarnation(state.LoadedAt)
 		work := state.clone()
 		contentChanged := work.migrateLegacyContent()
 		closeChanged := work.migrateCloseResults()
@@ -484,6 +485,7 @@ func (f FolderStore) load(legacy *State) (*State, *folderSession, error) {
 	if err := f.commit(intent); err != nil {
 		return nil, nil, err
 	}
+	f.rememberIncarnation(work.LoadedAt)
 	return work, &intent.Session, nil
 }
 

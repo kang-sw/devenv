@@ -47,6 +47,8 @@
   // load (luIcon, below).
   var SVGNS = "http://www.w3.org/2000/svg";
   var rid = root.getAttribute("data-rid");
+  // Freeze the rendered incarnation: live swaps must not re-label old chips.
+  var boardIncarnation = root.getAttribute("data-board-incarnation");
   var worktree = root.getAttribute("data-worktree") || "", cardIdentity = worktree ? "wt:" + worktree : rid;
   // Browser identity and transport authority are deliberately separate.
   function browsePost(route, body, done) { post("/s/host0/" + route, body, done); }

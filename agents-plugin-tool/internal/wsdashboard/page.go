@@ -42,6 +42,12 @@ type ClosedTopicsSource interface {
 	ReadClosedTopics(reg Registration, lang string, from, n int) (html template.HTML, ok bool)
 }
 
+// BoardInputSource admits a tagged send from memory through inbox enqueue.
+// Missing-field legacy sends do not use this optional interface.
+type BoardInputSource interface {
+	LockBoardIncarnation(Registration, string) (unlock func(), ok bool)
+}
+
 // BoardArchiveSource is a PageSource that also exports a session's board
 // folder as a zip (wswhiteboard.FolderStore.ExportArchive), for the board
 // toolbar's download. ok is false when the session has no board.
@@ -66,6 +72,8 @@ type PageContent struct {
 	HasBoard bool
 	// Seq is the board's update sequence number.
 	Seq int
+	// BoardIncarnation is the recovered load boundary, unchanged by edits.
+	BoardIncarnation string
 	// Board is the session's whiteboard board and panels, rendered by the
 	// static page's templates (wswhiteboard.RenderRegions) with the served
 	// page's link rule: a file link renders as an action link titled with

@@ -83,6 +83,9 @@ var messageBodyLimit = inboxBodyLimit + webBodyAllowance + wsinbox.MaxImages*bas
 
 // messageRequest is the message route's body. Unknown fields are ignored.
 type messageRequest struct {
+	// nil preserves older pages' send behavior; an empty string names a
+	// board that has never been loaded.
+	BoardIncarnation *string             `json:"boardIncarnation"`
 	UTCOffsetMinutes *int                `json:"utcOffsetMinutes,omitempty"`
 	Text             string              `json:"text"`
 	Chips            []wsinbox.Chip      `json:"chips"`
@@ -147,7 +150,8 @@ func sessionInbox(dir, replyID string) string {
 
 // cancelRequest is the cancel and steer routes' body: the held message's id.
 type cancelRequest struct {
-	ID string `json:"id"`
+	ID               string  `json:"id"`
+	BoardIncarnation *string `json:"boardIncarnation"`
 }
 
 // sameOrigin reports whether r carries an Origin equal to the daemon's own
@@ -273,6 +277,19 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 			write()
 		}
 	} else {
+		if route == "steer" {
+			var req cancelRequest
+			if json.Unmarshal(raw, &req) != nil {
+				http.Error(w, "malformed steer", http.StatusBadRequest)
+				return
+			}
+			unlock, admitted := d.lockBoardIncarnation(replyID, req.BoardIncarnation)
+			if !admitted {
+				http.Error(w, "board-replaced", http.StatusConflict)
+				return
+			}
+			defer unlock()
+		}
 		d.inboxMu.Lock()
 		status, answer = d.inboxWrite(dir, route, raw, now)
 		d.inboxMu.Unlock()
@@ -281,6 +298,21 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 		d.scheduleAnswerReplay(s.Registration)
 	}
 	d.inboxAnswered(w, s, status, answer)
+}
+
+func (d *Daemon) lockBoardIncarnation(replyID string, token *string) (func(), bool) {
+	if token == nil {
+		return func() {}, true // legacy page, unchanged admission
+	}
+	source, supported := d.source.(BoardInputSource)
+	if !supported || d.index == nil {
+		return nil, false
+	}
+	session, found := d.index.Session(replyID)
+	if !found {
+		return nil, false
+	}
+	return source.LockBoardIncarnation(session.Registration, *token)
 }
 
 // DashboardAnswerSource records a durable board revision after a successful
@@ -408,6 +440,13 @@ func (d *Daemon) messageWrite(dir, replyID string, raw []byte, local bool, now t
 			return status, msg
 		}
 		images = append(images, img)
+	}
+	if req.BoardIncarnation != nil && (len(req.Chips)+len(req.Topics)+len(req.Mentions)+len(req.CloseRequests) != 0) {
+		unlock, admitted := d.lockBoardIncarnation(replyID, req.BoardIncarnation)
+		if !admitted {
+			return http.StatusConflict, "board-replaced"
+		}
+		defer unlock() // compare and enqueue serialize with load, memory only
 	}
 	if req.Command != "" {
 		return d.sendCommand(dir, replyID, req, local, now)
