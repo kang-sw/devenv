@@ -76,6 +76,7 @@ m["files"]["dist/index.js"] = hashlib.sha256(bundle.read_bytes()).hexdigest()
 		t.Fatalf("fixture: %v: %s", err, out)
 	}
 	usePiPayloadCheckout(t, owner)
+	setHostedPackage(t, "ws")
 	warning := ""
 	spec := StartSpec{Root: base, Dir: filepath.Join(base, "session"), Lead: &LeadSpec{PluginIsolation: "isolated", Env: map[string]string{EnvHostedSessionKey: "fixture-key"}}}
 	spec.Lead.PluginWarning = func(text string) { warning = text }

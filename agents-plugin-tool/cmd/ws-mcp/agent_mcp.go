@@ -12,29 +12,35 @@ import (
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsholder"
-	"github.com/kang-sw/devenv/internal/wsrsrc"
+	"github.com/kang-sw/devenv/internal/wspackage"
 )
 
 // agentMCPCommand uses the configured hosted package, not the daemon's staged
 // executable or the worker's project directory. The starter supplies Python.
-func agentMCPCommand(root, daemonVersion string) (wsagent.MCPCommand, error) {
-	plugin, warning, err := wsagent.ResolveHostedPlugin(daemonVersion)
+func agentMCPCommand(root, _ string) (wsagent.MCPCommand, error) {
+	name, warning, err := wsagent.ResolveHostedPackage()
 	if err != nil {
 		return wsagent.MCPCommand{}, fmt.Errorf("cannot resolve ws-mcp launcher: %w", err)
 	}
-	launcher := filepath.Join(plugin, "bin", "ws-mcp-launcher.py")
-	if info, err := os.Stat(launcher); err != nil || !info.Mode().IsRegular() {
-		return wsagent.MCPCommand{}, fmt.Errorf("cannot resolve ws-mcp launcher at %s (from %s); start the daemon through the plugin's bin/ws-mcp-launcher.py", launcher, wsrsrc.EnvRsrcRoot)
+	stateDir, err := wsdashboard.Dir("")
+	if err != nil {
+		return wsagent.MCPCommand{}, err
 	}
+	plugin, err := wspackage.StageHosted(name, stateDir)
+	if err != nil {
+		return wsagent.MCPCommand{}, fmt.Errorf("cannot stage ws-mcp launcher: %w", err)
+	}
+	launcher := filepath.Join(plugin, "bin", "ws-mcp-launcher.py")
 	python, prefix, err := agentMCPPython(os.Getenv(wsholder.PythonEnv), goruntime.GOOS == "windows", exec.LookPath)
 	if err != nil {
 		return wsagent.MCPCommand{}, err
 	}
-	env, err := wsagent.HostedPluginEnvironment(plugin)
+	env, err := wsagent.HostedPluginEnvironment(name, plugin)
 	if err != nil {
 		return wsagent.MCPCommand{}, err
 	}
 	env["WS_MCP_PROJECT_ROOT"] = root
+	env["WS_MCP_HOSTED_PACKAGE"] = "1"
 	return wsagent.MCPCommand{
 		Command:       python,
 		PluginWarning: warning,
@@ -76,11 +82,19 @@ func agentMCPPython(preferred string, windows bool, lookPath func(string) (strin
 // harness is the lead backend's declared ManualHarness (wsagent.BackendRegistration),
 // "" for a backend that declares none, such as a Pi lead on its MCP fallback.
 func renderLeadManual(harness, dir, key string) (string, error) {
-	plugin, _, err := wsagent.ResolveHostedPlugin(version)
+	name, _, err := wsagent.ResolveHostedPackage()
 	if err != nil {
 		return "", err
 	}
-	pkg, err := wsagent.HostedPluginEnvironment(plugin)
+	stateDir, err := wsdashboard.Dir("")
+	if err != nil {
+		return "", err
+	}
+	plugin, err := wspackage.StageHosted(name, stateDir)
+	if err != nil {
+		return "", err
+	}
+	pkg, err := wsagent.HostedPluginEnvironment(name, plugin)
 	if err != nil {
 		return "", err
 	}

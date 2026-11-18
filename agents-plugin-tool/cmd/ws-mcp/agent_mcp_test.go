@@ -17,12 +17,13 @@ import (
 
 	"github.com/kang-sw/devenv/internal/mcp"
 	"github.com/kang-sw/devenv/internal/wsagent"
+	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsholder"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
-func TestAgentMCPCommandUsesTheStartingPackagesLauncher(t *testing.T) {
+func TestAgentMCPCommandUsesEmbeddedLauncherWithoutPlugin(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", t.TempDir())
 	t.Setenv("WS_CONFIG_HOME", t.TempDir())
 	python := filepath.Join(t.TempDir(), "chosen python")
@@ -35,60 +36,44 @@ func TestAgentMCPCommandUsesTheStartingPackagesLauncher(t *testing.T) {
 	t.Setenv(wsholder.PythonEnv, python)
 	t.Setenv("WS_MCP_PROJECT_ROOT", filepath.Join(t.TempDir(), "lead"))
 	root := filepath.Join(t.TempDir(), "worker worktree")
-	for _, name := range []string{"ws", "wsflow", "pi"} {
+	if os.Getenv("WS_TEST_EMBEDDED_PACKAGES") == "1" {
+		t.Setenv("WS_RSRC_DEV_CHECKOUT", "")
+	}
+	for _, name := range []string{"ws", "wsflow"} {
 		t.Run(name, func(t *testing.T) {
-			plugin := filepath.Join(t.TempDir(), name+" package")
-			launcher := filepath.Join(plugin, "bin", "ws-mcp-launcher.py")
-			if err := os.MkdirAll(filepath.Dir(launcher), 0o755); err != nil {
+			r := wsconfig.NewResolver(wsconfig.Options{}, nil, nil, nil)
+			if err := r.Set(wsconfig.HostedPluginPackageKey, name, wsconfig.SetOptions{}); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(launcher, nil, 0o644); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.MkdirAll(filepath.Join(plugin, ".claude-plugin"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			manifestName := name
-			if name == "pi" {
-				manifestName = "ws"
-			}
-			if err := os.WriteFile(filepath.Join(plugin, ".claude-plugin", "plugin.json"), []byte(`{"name":"`+manifestName+`","version":"0.50.1"}`), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			rsrc := filepath.Join(plugin, "rsrc")
-			t.Setenv(wsrsrc.EnvRsrcRoot, rsrc)
+			t.Setenv(wsrsrc.EnvRsrcRoot, filepath.Join(t.TempDir(), "missing", "rsrc"))
 			cmd, err := agentMCPCommand(root, "0.50.1")
 			if err != nil {
 				t.Fatal(err)
 			}
+			launcher := filepath.Join(cmd.Plugin, "bin", "ws-mcp-launcher.py")
 			if want := []string{launcher, "serve", "--stdio"}; cmd.Command != python || !reflect.DeepEqual(cmd.Args, want) {
 				t.Fatalf("worker MCP = %+v, want %s %v", cmd, python, want)
 			}
-			if cmd.Env["WS_MCP_PROJECT_ROOT"] != root || cmd.Env[wsrsrc.EnvRsrcRoot] != rsrc {
+			if _, err := os.Stat(launcher); err != nil {
+				t.Fatal(err)
+			}
+			if cmd.Env["WS_MCP_HOSTED_PACKAGE"] != "1" {
+				t.Fatal("missing launch-only hosted marker")
+			}
+			if cmd.Env["WS_MCP_PROJECT_ROOT"] != root || cmd.Env[wsrsrc.EnvRsrcRoot] != filepath.Join(cmd.Plugin, "rsrc") {
 				t.Fatalf("worker MCP env = %v; root and package must override the daemon's inherited values", cmd.Env)
 			}
 		})
 	}
 }
 
-func TestAgentMCPCommandFailsWithoutALauncher(t *testing.T) {
-	for _, name := range []string{"unset resource root", "missing launcher", "launcher is a directory"} {
-		t.Run(name, func(t *testing.T) {
-			rsrc := filepath.Join(t.TempDir(), "rsrc")
-			if name == "unset resource root" {
-				rsrc = ""
-			}
-			if name == "launcher is a directory" {
-				if err := os.MkdirAll(filepath.Join(filepath.Dir(rsrc), "bin", "ws-mcp-launcher.py"), 0o755); err != nil {
-					t.Fatal(err)
-				}
-			}
-			t.Setenv(wsrsrc.EnvRsrcRoot, rsrc)
-			cmd, err := agentMCPCommand(t.TempDir(), "0.50.1")
-			if err == nil || !strings.Contains(err.Error(), "cannot resolve ws-mcp launcher") || cmd.Command != "" {
-				t.Fatalf("must refuse, never fall back to the daemon executable: command=%+v, error=%v", cmd, err)
-			}
-		})
+func TestAgentMCPCommandFailsWithoutBuildInputs(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", t.TempDir())
+	t.Setenv("WS_CONFIG_HOME", t.TempDir())
+	t.Setenv("WS_RSRC_DEV_CHECKOUT", t.TempDir())
+	cmd, err := agentMCPCommand(t.TempDir(), "0.50.1")
+	if err == nil || !strings.Contains(err.Error(), "cannot stage ws-mcp launcher") || cmd.Command != "" {
+		t.Fatalf("must refuse, never use daemon executable: %+v, %v", cmd, err)
 	}
 }
 

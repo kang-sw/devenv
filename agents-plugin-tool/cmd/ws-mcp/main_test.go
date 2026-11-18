@@ -23,7 +23,9 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	_ = os.Setenv("WS_RSRC_DEV_CHECKOUT", checkout)
+	if os.Getenv("WS_TEST_EMBEDDED_PACKAGES") != "1" {
+		_ = os.Setenv("WS_RSRC_DEV_CHECKOUT", checkout)
+	}
 	os.Exit(runTestMain(m))
 }
 

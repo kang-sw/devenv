@@ -38,21 +38,15 @@ func TestMain(m *testing.M) {
 		_, _ = io.Copy(io.Discard, os.Stdin)
 		os.Exit(0)
 	}
-	// The daemon resolves its bundled plugin only through the resource root;
-	// a test binary has no bundle beside it, so tests that start a lead use
-	// this checkout's ws package unless the environment names one.
-	if os.Getenv("WS_RSRC_ROOT") == "" {
-		if rsrc, err := filepath.Abs(filepath.Join("..", "..", "..", "agents-plugin", "rsrc")); err == nil {
-			_ = os.Setenv("WS_RSRC_ROOT", rsrc)
-		}
-	}
 	checkout, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
 		panic(err)
 	}
-	_ = os.Setenv("WS_RSRC_DEV_CHECKOUT", checkout)
+	if os.Getenv("WS_TEST_EMBEDDED_PACKAGES") != "1" {
+		_ = os.Setenv("WS_RSRC_DEV_CHECKOUT", checkout)
+	}
 	// Hosted package resolution reads machine-global config and daemon state.
-	// Never let test launches consult the developer's actual package registry.
+	// Never let test launches consult the developer's actual configuration.
 	home, err := os.MkdirTemp("", "wsagent-test-homes-")
 	if err != nil {
 		panic(err)

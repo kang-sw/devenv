@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 )
 
 //go:embed pi_lead.mjs
@@ -16,7 +18,7 @@ var piLeadAdapter string
 //go:embed pi_lead_bridge.mjs
 var piLeadBridgeSource string
 
-var piBundledPluginRoot = ResolveHostedPlugin
+var piHostedPackage = ResolveHostedPackage
 
 // preparePiLeadLaunch is replaced by runner tests whose holders never execute
 // their fictitious Pi command. Resource discovery itself stays inside Pi: a
@@ -37,12 +39,20 @@ const piNoSDKWarning = "Pi has no JavaScript SDK beside its CLI, so default plug
 
 func piLeadLaunch(command string, pre []string, spec StartSpec) (string, []string, error) {
 	args := append(piLeadArgs(spec), "--no-extensions")
-	root, packageWarning, bundleErr := piBundledPluginRoot(spec.Lead.DaemonVersion)
+	name, packageWarning, bundleErr := piHostedPackage()
 	var entries []string
+	var root string
 	if bundleErr == nil {
-		// Keep the selected package's policy even when the native extension
-		// comes from the shared source sibling instead of a prepared payload.
-		packageEnv, err := HostedPluginEnvironment(root)
+		stateDir, err := wsdashboard.Dir("")
+		if err != nil {
+			return "", nil, err
+		}
+		root, bundleErr = stagePiPayloadInputs(stateDir, name)
+	}
+	if bundleErr == nil {
+		// Pi needs real build-owned workflow skills, owner and config inputs,
+		// separate from the native extension's prepared payload.
+		packageEnv, err := HostedPluginEnvironment(name, root)
 		if err != nil {
 			return "", nil, fmt.Errorf("pi workflow environment: %w", err)
 		}
@@ -58,7 +68,7 @@ func piLeadLaunch(command string, pre []string, spec StartSpec) (string, []strin
 		spec.Lead.Env["WS_RSRC_ROOT"] = filepath.Join(root, "rsrc")
 		spec.Lead.Env["WS_SKILLS_ROOT"] = filepath.Join(root, "skills")
 		spec.Lead.Env["WS_PI_WORKFLOW_ROOT"] = root
-		entries, bundleErr = piBundledEntriesFrom(root)
+		entries, bundleErr = piBundledEntriesFrom(name)
 	}
 	// PluginWarning holds one value: every warning of this launch is joined
 	// into it, and an empty one clears a stale warning.
@@ -160,21 +170,16 @@ func writePiLeadBridge(spec StartSpec, servers map[string]any, warning string) (
 	return path, writeFileAtomic(path, []byte(source), 0o600)
 }
 
-// piBundledEntries keeps the Phase 1 hosted package resolver, but the native
-// extension and its materializer always come from the daemon's build.
-func piBundledEntries(daemonVersion string) ([]string, error) {
-	root, _, err := piBundledPluginRoot(daemonVersion)
+// Workers need only the selected name; no installed workflow root is resolved.
+func piBundledEntries(_ string) ([]string, error) {
+	name, _, err := piHostedPackage()
 	if err != nil {
 		return nil, err
 	}
-	return piBundledEntriesFrom(root)
+	return piBundledEntriesFrom(name)
 }
 
-func piBundledEntriesFrom(root string) ([]string, error) {
-	name, err := bundledPluginName(root)
-	if err != nil {
-		return nil, err
-	}
+func piBundledEntriesFrom(name string) ([]string, error) {
 	prepared, err := piPreparedPayload(name)
 	if err != nil {
 		return nil, err
