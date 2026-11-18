@@ -123,9 +123,10 @@ func (f *fenceIndex) next(after, run int) int {
 	return 0
 }
 
-// firstBodyClose does no tag or quote lexing: only CDATA can hide the exact
-// close of a raw body. In particular, an HTML quote cannot cross that close.
-func firstBodyClose(s string, at, end int, closing string) int {
+// firstBodyClose does no tag or quote lexing: only CDATA and raw elements can
+// hide the exact close of a body. In particular, an HTML quote cannot cross
+// that close.
+func (t *tokenizer) firstBodyClose(s string, at, end int, closing string) int {
 	for at < end {
 		next := strings.IndexByte(s[at:end], '<')
 		if next < 0 {
@@ -135,14 +136,12 @@ func firstBodyClose(s string, at, end int, closing string) int {
 		if strings.HasPrefix(s[at:], closing) {
 			return at
 		}
-		if strings.HasPrefix(s[at:], "<![CDATA[") {
-			stop := strings.Index(s[at+9:], "]]>")
-			if stop < 0 {
-				return -1
-			}
-			at += 9 + stop + 3
-		} else {
+		if stop, ok := t.verbatimEnd(s, at); !ok {
 			at++
+		} else if stop < 0 {
+			return -1
+		} else {
+			at = stop
 		}
 	}
 	return -1
@@ -165,7 +164,7 @@ func (t *tokenizer) codeLiteralEnd(at, bodyStart, lineStart int, closing string,
 	if *limit < end {
 		first = *limit
 	} else {
-		first = firstBodyClose(t.s, at, end, closing)
+		first = t.firstBodyClose(t.s, at, end, closing)
 	}
 	if first >= 0 {
 		*limit = first
@@ -182,8 +181,8 @@ func (t *tokenizer) codeLiteralEnd(at, bodyStart, lineStart int, closing string,
 // A panel-level quote may contain whole wrapper examples or a quoted opener,
 // but it must not end halfway through a structural operand or wrapper. Otherwise
 // the raw payload can silently replace a patch instead of leaving a refusal.
-// Skip operand bodies by their own raw close (and CDATA), just as structural
-// reading does. A bare quoted opener stays legal without a structural tail.
+// Skip operand bodies by their own close (and CDATA and raw elements), just
+// as structural reading does. A bare quoted opener stays legal without a structural tail.
 func (t *tokenizer) literalOperandCrossing(at, end, lineStart int, wrapper *bodyWrapper, closing string, tail *literalWrapperTail) (field string, structural bool) {
 	s, start, tailStart := t.s, at, end
 	inside, fieldsStart := false, 0
@@ -194,19 +193,17 @@ func (t *tokenizer) literalOperandCrossing(at, end, lineStart int, wrapper *body
 		}
 		at += next
 		rest := s[at:end]
-		if strings.HasPrefix(rest, "<![CDATA[") {
-			close := strings.Index(rest[9:], "]]>")
-			if close < 0 {
-				// CDATA still owns the bytes after the literal ends. Only
-				// content after its real close can continue this wrapper.
-				close = strings.Index(s[at+9:], "]]>")
-				if close < 0 {
-					return "", false
-				}
-				tailStart = at + 9 + close + 3
+		if stop, ok := t.verbatimEnd(s, at); ok {
+			if stop < 0 {
+				return "", false
+			}
+			if stop > end {
+				// CDATA or raw still owns the bytes after the literal ends.
+				// Only content after its real close can continue this wrapper.
+				tailStart = stop
 				break
 			}
-			at += 9 + close + 3
+			at = stop
 			continue
 		}
 		if inside && strings.HasPrefix(rest, "</"+wrapper.tag+">") {
@@ -237,7 +234,7 @@ func (t *tokenizer) literalOperandCrossing(at, end, lineStart int, wrapper *body
 		}
 		if !tag.selfClosing {
 			closing := "</" + tag.name + ">"
-			close := firstBodyClose(s, at, end, closing)
+			close := t.firstBodyClose(s, at, end, closing)
 			if close < 0 {
 				return tag.name, true
 			}
@@ -276,14 +273,14 @@ func (tail *literalWrapperTail) continues(t *tokenizer, at, fieldsStart, lineSta
 	if tail.commandClose < at {
 		// A quote must never gain ownership of a later command's fields.
 		// Cache this raw boundary too: fresh wrappers may precede it many times.
-		tail.commandClose = firstBodyClose(s, at, len(s), closing)
+		tail.commandClose = t.firstBodyClose(s, at, len(s), closing)
 		if tail.commandClose < 0 {
 			tail.commandClose = len(s)
 		}
 		tail.fieldCloses = nil
 	}
 	// Lookahead shares the delimiter index, but not diagnostic/crossing state.
-	probe := tokenizer{s: s, literals: t.literals}
+	probe := tokenizer{s: s, literals: t.literals, raw: t.raw}
 	defer func() { t.literals = probe.literals }()
 	advance := func(end int) {
 		if newline := strings.LastIndexByte(s[at:end], '\n'); newline >= 0 {
@@ -299,20 +296,24 @@ func (tail *literalWrapperTail) continues(t *tokenizer, at, fieldsStart, lineSta
 		at += next
 		if s[at] != '<' {
 			end := probe.codeLiteralEnd(at, bodyStart, lineStart, closing, &limit)
-			// Body parsing unwraps CDATA even within a code literal. If
-			// that literal ends inside CDATA, resume after its real close.
+			// Body parsing unwraps CDATA and raw elements even within a code
+			// literal. If that literal ends inside one, resume after its close.
 			for pos := at; pos < end; {
-				next := strings.Index(s[pos:end], "<![CDATA[")
+				next := strings.IndexByte(s[pos:end], '<')
 				if next < 0 {
 					break
 				}
-				pos += next + 9
-				close := strings.Index(s[pos:], "]]>")
-				if close < 0 {
+				pos += next
+				stop, ok := t.verbatimEnd(s, pos)
+				if !ok {
+					pos++
+					continue
+				}
+				if stop < 0 {
 					end = len(s)
 					break
 				}
-				pos += close + 3
+				pos = stop
 				end = max(end, pos)
 			}
 			advance(max(at+1, end))
@@ -324,12 +325,11 @@ func (tail *literalWrapperTail) continues(t *tokenizer, at, fieldsStart, lineSta
 			tail.lastField = 0
 			return false, false
 		}
-		if strings.HasPrefix(rest, "<![CDATA[") {
-			close := strings.Index(rest[9:], "]]>")
-			if close < 0 {
+		if stop, ok := t.verbatimEnd(s, at); ok {
+			if stop < 0 {
 				break
 			}
-			advance(at + 9 + close + 3)
+			advance(stop)
 			continue
 		}
 		if openingTagPrefix(rest, wrapper.tag) {
@@ -338,9 +338,9 @@ func (tail *literalWrapperTail) continues(t *tokenizer, at, fieldsStart, lineSta
 		}
 		if strings.HasPrefix(rest, "</"+wrapper.tag+">") {
 			end := at + len(wrapper.tag) + 3
-			trial := tokenizer{s: s[fieldsStart:end], p: &Problems{}, literalCode: t.literalCode, ordered: t.ordered}
+			trial := tokenizer{s: s[fieldsStart:end], p: &Problems{}, literalCode: t.literalCode, ordered: t.ordered, raw: t.raw}
 			child := Command{Tag: wrapper.tag}
-			structural := trial.readFields(&child, wrapper.fields, nil, wrapper.refuseOpenings, "")
+			structural := trial.readFields(&child, wrapper.fields, wrapper.refuseOpenings, "")
 			tail.at, tail.refuse, tail.structural = at, true, structural
 			return true, structural
 		}
@@ -361,7 +361,7 @@ func (tail *literalWrapperTail) continues(t *tokenizer, at, fieldsStart, lineSta
 				}
 				close, cached := tail.fieldCloses[field]
 				if !cached || close >= 0 && close < end {
-					close = firstBodyClose(s, end, tail.commandClose, "</"+field+">")
+					close = t.firstBodyClose(s, end, tail.commandClose, "</"+field+">")
 					tail.fieldCloses[field] = close
 				}
 				if close < 0 {

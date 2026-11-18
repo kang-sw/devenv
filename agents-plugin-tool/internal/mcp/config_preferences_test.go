@@ -77,10 +77,14 @@ func TestPreferenceSlotsTuneAndRender(t *testing.T) {
 			if got := section(); got != "Default\n\n"+wantOthers {
 				t.Fatalf("default first = %q", got)
 			}
+			langInstruction := resolveWorkflowLangVar("Korean")
+			if langInstruction == "" {
+				t.Fatal("configured language produced no instruction")
+			}
 			tune("workflow.lang", "Korean", "global")
 			tune("preference.default", "", "session")
 			got := section()
-			if !strings.HasPrefix(got, wantOthers+"\n") || strings.Contains(got, "Default") || strings.Contains(got, "legacy") || strings.Count(got, "Respond to the user in Korean") != 1 {
+			if !strings.HasPrefix(got, wantOthers+"\n") || strings.Contains(got, "Default") || strings.Contains(got, "legacy") || strings.Count(got, langInstruction) != 1 {
 				t.Fatalf("clear/language = %q", got)
 			}
 			tune("preference.a", "", "session")
@@ -93,11 +97,11 @@ func TestPreferenceSlotsTuneAndRender(t *testing.T) {
 			}
 			reset("preference.default", "session")
 			reset("preference.default", "global")
-			if got := section(); !strings.HasPrefix(got, "Harness legacy\n\n") || !strings.Contains(got, "Respond to the user in Korean") {
+			if got := section(); !strings.HasPrefix(got, "Harness legacy\n\n") || !strings.Contains(got, langInstruction) {
 				t.Fatalf("legacy/lang = %q", got)
 			}
 			reset("workflow.lang", "global")
-			if got := section(); strings.Contains(got, "Respond to the user in") {
+			if got := section(); strings.Contains(got, langInstruction) {
 				t.Fatalf("unset lang = %q", got)
 			}
 			catalog := parseTuningCatalogResponse(t, keyedCall(t, s, 900801, key, "config.list", map[string]any{"format": "json"}))
@@ -125,14 +129,14 @@ func TestPreferenceSlotsTuneAndRender(t *testing.T) {
 				reset("preference."+row.slot, row.scope)
 			}
 			tune("workflow.lang", "Korean", "global")
-			if got := section(); !strings.HasPrefix(got, "Harness legacy\n") || strings.Count(got, "Respond to the user in Korean") != 1 {
+			if got := section(); !strings.HasPrefix(got, "Harness legacy\n") || strings.Count(got, langInstruction) != 1 {
 				t.Fatalf("legacy-only language = %q", got)
 			}
 			tune("preference.default", "", "session")
-			if got := section(); strings.Contains(got, seed) || strings.Contains(got, "legacy") || !strings.HasPrefix(got, "Respond to the user in Korean") {
+			if got := section(); strings.Contains(got, seed) || strings.Contains(got, "legacy") || !strings.HasPrefix(got, langInstruction) {
 				t.Fatalf("all slots hidden = %q", got)
 			}
-			if body := call("workflow_manual", nil); !strings.Contains(body, "Respond to the user in Korean") || strings.Contains(body, "Harness legacy") {
+			if body := call("workflow_manual", nil); !strings.Contains(body, langInstruction) || strings.Contains(body, "Harness legacy") {
 				t.Fatalf("workflow_manual slots/language = %q", body)
 			}
 			// The stored scalar text is not trimmed or lowercased.

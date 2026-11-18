@@ -57,6 +57,15 @@ const (
 	// Builtin default: off, held on the bare key only.
 	ItemWorkflowTrackerEnabled = "workflow.tracker_enabled"
 
+	// ItemWorkflowProfile selects the lead playbook profile: direct reads the
+	// base playbooks, orchestrate selects the <name>.orchestrate.md profile
+	// variants where present, for top-level lead keys only. It is
+	// harness-bucketed like ItemWorkflowWhiteboardEnabled: values are stored
+	// under ItemWorkflowProfile+"."+<claude|codex|pi|all>, and a value under
+	// this bare key is a legacy value read in the all position.
+	// Builtin default: direct, held on the bare key only.
+	ItemWorkflowProfile = "workflow.profile"
+
 	// ItemSageReview is the layered config key for the completeness stage of the
 	// sage review gate at actionable ready/ promotion. Value "auto" requires the
 	// completeness reviewer; "ask" recommends it; absent/empty/"off" skips it.
@@ -71,12 +80,12 @@ const (
 	// review is an opt-in for users who hand most work to agents.
 	ItemSageReviewDesign = "sage_review_design"
 
-	// ItemTicketReviewAutoAck gates whether the lead-ticket playbook lets the
-	// lead confirm, without a user acknowledgement round, an announced or
+	// ItemTicketReviewAutoAck gates whether the ticket-handler playbook can
+	// auto-confirm, without a caller round, an announced or
 	// technical Open Decision Queue item raised by a fact-populator decision
 	// gap or by a reviewer issue marked autonomous. Values: "on" (builtin
 	// default) or "off", which restores the acknowledgement rule for those
-	// items. Read at playbook.read render time through the session resolver,
+	// items. Read by shared playbook rendering through the session resolver,
 	// so session, project, and repo scopes apply.
 	ItemTicketReviewAutoAck = "ticket_review_auto_ack"
 
@@ -206,6 +215,12 @@ func init() {
 	RegisterDefaultScope(ItemWorkflowTrackerEnabled, ScopeGlobal)
 	for _, bucket := range []string{"claude", "codex", "pi", "all"} {
 		RegisterDefaultScope(ItemWorkflowTrackerEnabled+"."+bucket, ScopeGlobal)
+	}
+	// workflow.profile is the same cross-project habit, so it takes the same
+	// global default on the bare key and every bucket key.
+	RegisterDefaultScope(ItemWorkflowProfile, ScopeGlobal)
+	for _, bucket := range []string{"claude", "codex", "pi", "all"} {
+		RegisterDefaultScope(ItemWorkflowProfile+"."+bucket, ScopeGlobal)
 	}
 	RegisterGlobalOnly(ItemWorkflowSkepticalPosture)
 	RegisterGlobalOnly(ItemBootstrapAlarm)

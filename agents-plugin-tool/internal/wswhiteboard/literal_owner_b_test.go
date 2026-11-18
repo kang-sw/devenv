@@ -59,6 +59,7 @@ func TestLiteralOwnerBStructuralReadingAndGuidance(t *testing.T) {
 		{"fatal-structure", "<wb:topic name=\"t\"><wb:panel recap=\"r\">`</wb:panel>`<wb:panel recap='", true},
 		{"unrelated-later-problem", "<wb:topic name=\"t\"><wb:panel recap=\"a\">a `</wb:panel><wb:panel recap=\"b\">b `</wb:panel></wb:topic><wb:unknown/>", false},
 		{"CDATA-own-close", "<wb:topic name=\"t\"><wb:panel recap=\"r\">`<![CDATA[</wb:panel>]]>`</wb:panel></wb:topic>", false},
+		{"raw-own-close", "<wb:topic name=\"t\"><wb:panel recap=\"r\">`<wb:raw></wb:panel></wb:raw>`</wb:panel></wb:topic>", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g0 := grammar
@@ -78,7 +79,7 @@ func TestLiteralOwnerBStructuralReadingAndGuidance(t *testing.T) {
 					t.Fatalf("ordered=%v structural=%+v literal=%+v problems=%v/%v complete=%v/%v", ordered, baseline, got, p.List, q.List, wantComplete, complete)
 				}
 				text := strings.Join(q.List, "\n")
-				if strings.Contains(text, "CDATA") != tc.guidance || tc.guidance && (!strings.Contains(text, "split") || !strings.Contains(text, "]]>")) {
+				if strings.Contains(text, "<wb:raw>...</wb:raw>") != tc.guidance || strings.Contains(text, "CDATA") {
 					t.Fatalf("guidance=%v problems=%v", tc.guidance, q.List)
 				}
 			}

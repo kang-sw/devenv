@@ -118,8 +118,10 @@
     var web = mk("span", "board-web-slot");
     web.id = "board-web-slot";
     row.appendChild(web);
-    var search = action("board-search", "search", wsT("js.board.toolbar.search"), actions.search);
-    search.appendChild(mk("kbd", "", "Ctrl K"));
+    if (actions.download) {
+      var download = action("board-download", "download", wsT("js.board.toolbar.download"), actions.download);
+      download.title = wsT("js.board.toolbar.download.title");
+    }
     if (actions.files) {
       var files = action("board-files", "folder-open", wsT("js.board.toolbar.files"), function () {
         var owner = actions.files;
@@ -1494,8 +1496,8 @@
     // drag starts or ends: board updates wait meanwhile); split (optional)
     // is the grid whose conversation column the split handle sizes, where
     // it stands beside the board. toolbar supplies
-    // overview(), search(), and optional files: {el, shown(), hidden()}
-    // for the page-owned, independent toolbar explorer sheet.
+    // overview(), optional download(), and optional files: {el, shown(),
+    // hidden()} for the page-owned, independent toolbar explorer sheet.
     mount: function (el, o) {
       board = el;
       opt = o;

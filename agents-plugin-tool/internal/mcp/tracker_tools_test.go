@@ -726,8 +726,7 @@ func TestTrackerManualSectionsRenderOnceAndNeverForSpawnedKeys(t *testing.T) {
 func TestTrackerPlaybookReadAppendsCommandSyntax(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	text := toolText(t, f.call(t, "playbook.read", map[string]any{"name": trackerPlaybookName}))
-	if strings.Count(text, "## Command syntax") != 1 ||
-		!strings.Contains(text, "`commands` is one string of commands.") {
+	if strings.Count(text, "## Command syntax") != 1 {
 		t.Fatalf("the tracker playbook must end with the command syntax section once:\n%s", text)
 	}
 	if strings.Contains(text, "{{") {
@@ -758,9 +757,9 @@ func TestParseTrackerID(t *testing.T) {
 	}
 }
 
-// Every tk: attribute and body is plain text, so an escaped one is decoded:
-// a title and project, an item body, a note, and a comment; CDATA stays
-// literal.
+// Every tk: attribute and body decodes like any command body: a title and
+// project, an item body, a note, and a comment; CDATA and a <tk:raw>
+// segment stay literal.
 func TestTrackerUpdateDecodesEscapedText(t *testing.T) {
 	var problems wsxmlcmd.Problems
 	b := planTrackerBatch(&problems, `<tk:store name="team"><tk:item.create kind="task" title="Parse &lt;key&gt; &amp; value" project="a&#38;b">body &lt;b&gt;</tk:item.create>`+
@@ -768,7 +767,8 @@ func TestTrackerUpdateDecodesEscapedText(t *testing.T) {
 		`<tk:item.status item="$1" status="doing">waiting on &lt;key&gt;</tk:item.status>`+
 		`<tk:item.close item="$1">done &amp; dusted <![CDATA[&lt;kept&gt;]]></tk:item.close>`+
 		`<tk:comment.add item="$1">see &lt;b&gt;</tk:comment.add>`+
-		`<tk:comment.edit comment="$5">edit &lt;b&gt;</tk:comment.edit></tk:store>`,
+		`<tk:comment.edit comment="$5">edit &lt;b&gt;</tk:comment.edit>`+
+		`<tk:comment.add item="$1">a &lt; b <tk:raw><i>&amp;</i> </tk:comment.add></tk:raw></tk:comment.add></tk:store>`,
 		[]wstrackerhost.StoreEntry{{ID: "team"}}, trackerTestReach)
 	if len(problems.List) > 0 {
 		t.Fatalf("problems: %q", problems.List)
@@ -780,6 +780,7 @@ func TestTrackerUpdateDecodesEscapedText(t *testing.T) {
 		{"note": "done & dusted &lt;kept&gt;"},
 		{"body": "see <b>"},
 		{"body": "edit <b>"},
+		{"body": "a < b <i>&amp;</i> </tk:comment.add>"},
 	}
 	for i, fields := range want {
 		for k, v := range fields {

@@ -75,7 +75,7 @@ func TestLoadPartReadsAVerifiedPartThatIsNoPlaybook(t *testing.T) {
 		t.Fatalf("part body = %q", body)
 	}
 	var notFound ErrPlaybookNotFound
-	if _, err := Load(root, "command-syntax", "", nil); !errors.As(err, &notFound) {
+	if _, err := Load(root, "command-syntax", "", "", nil); !errors.As(err, &notFound) {
 		t.Fatalf("Load(command-syntax) = %v, want ErrPlaybookNotFound", err)
 	}
 	if _, err := LoadPart(root, "lead-workflow-manual", "missing"); err == nil {

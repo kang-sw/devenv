@@ -498,8 +498,7 @@ func TestPlaybookPrintGoldenLeadDiscuss(t *testing.T) {
 }
 
 // TestPlaybookPrintGoldenLeadReview verifies lead-review resolves from the
-// real rsrc tree, keeps the single-writer ledger stamp rule, and still
-// carries the review config schema no tool owns. delegates:false — no tip.
+// real rsrc tree. delegates:false — no tip.
 func TestPlaybookPrintGoldenLeadReview(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
@@ -822,7 +821,7 @@ title: Risk fixture
 // ---------------------------------------------------------------------------
 
 // spawnIdiomSites are the real playbooks that substitute {{.SpawnIdiom}}.
-var spawnIdiomSites = []string{"lead-run", "ticket-worker", "ticket-worker-elevated", "explore", "delegate-sample"}
+var spawnIdiomSites = []string{"lead-run", "ticket-worker", "ticket-worker-elevated", "ticket-handler", "review-handler", "explore", "delegate-sample"}
 
 // wantClaudeSpawnIdiom is the hardcoded Claude SpawnIdiom per namespace, so a
 // wrong claudeSpawnIdiom cannot agree with itself in a derived assertion.

@@ -104,6 +104,12 @@ func buildHistoricalWriter(t *testing.T) string {
 			t.Fatalf("historical source changed: %s", header.Name)
 		}
 		delete(want, header.Name)
+		if header.Name == "commands.go" {
+			// The archived grammar names Spec.DecodeFields, which the shared
+			// parser no longer has (every body decodes now); drop the option so
+			// the archived writer builds against the current parser.
+			data = bytes.ReplaceAll(data, []byte(", DecodeFields: itemFieldNames"), nil)
+		}
 		path := filepath.Join(dir, "historical", filepath.FromSlash(header.Name))
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			t.Fatal(err)

@@ -116,9 +116,10 @@ they are not rules.
 
 Directives at the top, no doctrine at the bottom.
 
-**Lead skill** (thin): Identity → what the lead does here (converse, manage the
-ticket inventory, spawn, handle first-line escalation) → the stops it surfaces
-to the user → Output. It carries no procedure a worker executes.
+**Lead skill** (thin): what the playbook covers → what the lead does here
+(converse, manage the ticket inventory, spawn, handle first-line escalation) →
+the stops it surfaces to the user → Output. It carries no procedure a worker
+executes.
 
 **Worker playbook** (`kind: render`): Identity and addressee (a worker holding
 a lead-capability key, reporting to the lead, never waiting for a human) →

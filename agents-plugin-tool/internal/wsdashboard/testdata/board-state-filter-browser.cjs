@@ -143,7 +143,7 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
       async function geometry(name, oneRow) {
         const result = await page.locator('.board-toolbar').evaluate(toolbar => {
           const rect = n => { const r = n.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom }; };
-          const actions = [...toolbar.querySelectorAll('.board-overview,.tnew,.wnew,.board-search,.board-files')].map(n => {
+          const actions = [...toolbar.querySelectorAll('.board-overview,.tnew,.wnew,.board-download,.board-files')].map(n => {
             const r = rect(n), hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
             return { label: n.getAttribute('aria-label'), rect: r, hit: !!hit && n.contains(hit), clipped: n.scrollWidth > n.clientWidth + 1 };
           });

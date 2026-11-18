@@ -246,6 +246,15 @@ func (s agentSessions) ReadClosedTopics(reg Registration, lang string, from, n i
 	return "", false
 }
 
+// BoardArchive forwards to the configured source; an agent conversation has
+// no board.
+func (s agentSessions) BoardArchive(reg Registration) ([]byte, bool, error) {
+	if bs, ok := s.inner.(BoardArchiveSource); ok && !reg.Agent {
+		return bs.BoardArchive(reg)
+	}
+	return nil, false, nil
+}
+
 // ReadTopicHistory forwards to the configured source; an agent conversation
 // has no board.
 func (s agentSessions) ReadTopicHistory(reg Registration, lang string, names []string, target string) ([]wswhiteboard.TopicFragment, bool) {

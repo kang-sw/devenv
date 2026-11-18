@@ -213,7 +213,7 @@ For a batch, replace the single-ticket output with these fields:
   `affected_stems` naming only eligible members. A blocking coherence issue
   pauses the entire batch, but changes design verdicts only for those stems.
   Keep cross-ticket issues here, separate from ticket-local design issues;
-  the lead maps them into affected tickets' stamps.
+  the caller maps them into affected tickets' stamps.
 - `follow_up_findings`: newly noticed concerns outside the delta boundary,
   or `none`; these do not change any current verdict.
 - `omitted`: checks or evidence not obtained and why, or `none`.

@@ -206,6 +206,12 @@ func literalDifferentialCorpus() []string {
 		"<wb:topic name=\"t\"><wb:panel recap=\"r\">a `</wb:panel><wb:add class=\"technical\"><wb:title>literal </wb:add> `</wb:title></wb:add><wb:panel recap=\"s\">two</wb:panel></wb:topic>",
 		"<wb:topic name=\"t\"><wb:log>close with `<![CDATA[</wb:log>]]>` tag</wb:log></wb:topic>",
 	)
+	// Raw elements hide a close from code the way CDATA does (outside I1).
+	out = append(out,
+		"<wb:topic name=\"t\"><wb:panel recap=\"r\">`<wb:raw></wb:panel></wb:raw>` <wb:raw>`</wb:raw> tail `x`</wb:panel><wb:log>a `<wb:raw></wb:log>`</wb:raw> b</wb:log></wb:topic>",
+		"<wb:topic name=\"t\"><wb:add class=\"technical\"><wb:title><wb:raw>`</wb:title>`</wb:raw></wb:title><wb:why>\n<wb:raw>\n``\n</wb:raw>\n</wb:why></wb:add></wb:topic>",
+		"<wb:topic name=\"t\"><wb:panel recap=\"r\">```\n<wb:raw></wb:panel>\n```\n</wb:raw>\n```\nplain</wb:panel></wb:topic>",
+	)
 	// Prior-round variants use the same enclosing-close trap in other leaves.
 	out = append(out,
 		"<wb:topic name=\"t\"><wb:body>Writing ` <wb:body> is how</wb:body><wb:log>done ` ok</wb:log><wb:panel recap=\"s\">two</wb:panel></wb:topic>",
@@ -307,7 +313,7 @@ func TestLiteralCodeV050Differential(t *testing.T) {
 	old := oldLiteralSnapshots(t, binary, corpus)
 	checked := 0
 	violates := func(input string, baseline literalSnapshot) bool {
-		if strings.Contains(input, "<wb:change") || baseline.Problems != 0 || !baseline.Complete {
+		if literalOutsideV050(input) || baseline.Problems != 0 || !baseline.Complete {
 			return false
 		}
 		for _, ordered := range []bool{false, true} {
@@ -326,8 +332,7 @@ func TestLiteralCodeV050Differential(t *testing.T) {
 		return false
 	}
 	for i, input := range corpus {
-		// P5 wrapper syntax is deliberately outside the old-parser comparison.
-		if strings.Contains(input, "<wb:change") || old[i].Problems != 0 || !old[i].Complete {
+		if literalOutsideV050(input) || old[i].Problems != 0 || !old[i].Complete {
 			continue
 		}
 		checked++
@@ -337,6 +342,13 @@ func TestLiteralCodeV050Differential(t *testing.T) {
 		}
 	}
 	t.Logf("I1 corpus=%d old-valid=%d violations=0 elapsed=%s", len(corpus), checked, time.Since(start))
+}
+
+// P5 wrapper syntax and raw elements are deliberately outside the old-parser
+// comparison, and so is any entity: v0.50 decoded item fields only, while
+// every body decodes now. I1 pins code-delimiter behavior, not the codec.
+func literalOutsideV050(input string) bool {
+	return strings.Contains(input, "<wb:change") || strings.Contains(input, "<wb:raw>") || strings.Contains(input, "&")
 }
 
 type literalRawSpan struct{ start, end int }
@@ -365,28 +377,35 @@ func literalOpeningEnd(source string, at int) int {
 // Normalize a candidate raw field span independently of code recognition.
 // Comparing with the reader's returned Field.Body identifies its actual close,
 // including repeated fields and code-quoted earlier occurrences of that close.
-func literalRawFieldBody(raw string, decode bool) (string, bool) {
+func literalRawFieldBody(raw string) (string, bool) {
 	type segment struct {
-		text  string
-		cdata bool
+		text            string
+		verbatim, isRaw bool
 	}
 	var segments []segment
 	for len(raw) > 0 {
-		at := strings.Index(raw, "<![CDATA[")
+		at, open, close := strings.Index(raw, "<![CDATA["), "<![CDATA[", "]]>"
+		if r := strings.Index(raw, "<wb:raw>"); r >= 0 && (at < 0 || r < at) {
+			at, open, close = r, "<wb:raw>", "</wb:raw>"
+		}
 		if at < 0 {
 			segments = append(segments, segment{text: raw})
 			break
 		}
 		segments = append(segments, segment{text: raw[:at]})
-		raw = raw[at+9:]
-		end := strings.Index(raw, "]]>")
+		raw = raw[at+len(open):]
+		end := strings.Index(raw, close)
 		if end < 0 {
 			return "", false
 		}
-		segments = append(segments, segment{text: raw[:end], cdata: true})
-		raw = raw[end+3:]
+		segments = append(segments, segment{text: raw[:end], verbatim: true, isRaw: open == "<wb:raw>"})
+		raw = raw[end+len(close):]
 	}
+	// Edge newlines are trimmed outside raw segments only.
 	for i := range segments {
+		if segments[i].isRaw {
+			break
+		}
 		if segments[i].text != "" {
 			if strings.HasPrefix(segments[i].text, "\r\n") {
 				segments[i].text = segments[i].text[2:]
@@ -397,6 +416,9 @@ func literalRawFieldBody(raw string, decode bool) (string, bool) {
 		}
 	}
 	for i := len(segments) - 1; i >= 0; i-- {
+		if segments[i].isRaw {
+			break
+		}
 		if segments[i].text != "" {
 			if strings.HasSuffix(segments[i].text, "\r\n") {
 				segments[i].text = strings.TrimSuffix(segments[i].text, "\r\n")
@@ -408,7 +430,7 @@ func literalRawFieldBody(raw string, decode bool) (string, bool) {
 	}
 	var out strings.Builder
 	for _, s := range segments {
-		if decode && !s.cdata {
+		if !s.verbatim {
 			out.WriteString(wsxmlcmd.Decode(s.text))
 		} else {
 			out.WriteString(s.text)
@@ -442,12 +464,6 @@ func literalRawSpans(c command) []literalRawSpan {
 			continue
 		}
 		closing := "</" + f.Tag + ">"
-		decode := false
-		for _, name := range spec.DecodeFields {
-			if f.Tag == grammar.Prefix+name {
-				decode = true
-			}
-		}
 		search := start
 		for {
 			at := strings.Index(source[search:], closing)
@@ -455,7 +471,7 @@ func literalRawSpans(c command) []literalRawSpan {
 				panic("missing field source close")
 			}
 			at += search
-			if body, valid := literalRawFieldBody(source[start:at], decode); valid && body == f.Body {
+			if body, valid := literalRawFieldBody(source[start:at]); valid && body == f.Body {
 				spans = append(spans, literalRawSpan{start, at})
 				cursor = at + len(closing)
 				break

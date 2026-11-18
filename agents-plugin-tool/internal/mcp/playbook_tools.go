@@ -333,7 +333,7 @@ func resolveWorkflowLangVar(lang string) string {
 		return ""
 	}
 	return "Respond to the user in " + strings.TrimSpace(lang) +
-		". Keep all internal reasoning, subagent prompts, code comments, and AI-authored artifacts in English."
+		". Write ticket frontmatter titles in that language. Keep all internal reasoning, subagent prompts, code comments, and other AI-authored artifacts in English."
 }
 
 func resolveNamespaceVars(namespace string) map[string]string {
@@ -590,6 +590,9 @@ func formatEffortForText(effort string) string {
 //     note.mute, and note.unmute are denied to every key that is not a
 //     top-level lead (see isNoteMutationTool), so a worker hands a note to its
 //     lead through its report.
+//   - "sublead" → roleLead, like "worker", and the render also writes the
+//     sub-lead marker naming the playbook (writeSubleadMarker), which admits
+//     the key to a status-only path onto its top-level lead's whiteboard.
 //   - "lead", "", unknown → ("", false): lead playbooks never mint child keys.
 func childRoleForPlaybookRole(role string) (toolRole, bool) {
 	switch strings.ToLower(strings.TrimSpace(role)) {
@@ -597,7 +600,7 @@ func childRoleForPlaybookRole(role string) (toolRole, bool) {
 		return roleDelegate, true
 	case "leaf":
 		return roleLeaf, true
-	case "worker":
+	case "worker", subleadPlaybookRole:
 		return roleLead, true
 	default:
 		return "", false
@@ -782,11 +785,41 @@ func scanOverridePoints(rsrcRoot string) ([]overridePointDecl, error) {
 // malformed committed repo file) is reported here, before any render.
 func buildOverrideLookup(s *Server, sessionKey string) (overrideLookupFn, error) {
 	capturedKey := strings.TrimSpace(sessionKey)
+	// The final bucket alone supplies knob fallbacks: an earlier answer would
+	// hide a stored prompt override in a later bucket. Resolve lazily so a
+	// keyless render without these points gains no config dependency.
+	knobFallback := func(pointId, harness string) (string, bool) {
+		if harness != "all" {
+			return "", false
+		}
+		switch pointId {
+		case "TicketHandlerPersistConfirmation", "TicketHandlerReviewAutoAck":
+			enabled, err := s.ticketReviewAutoAckEnabled(capturedKey)
+			if err != nil || enabled {
+				return "", false
+			}
+			if pointId == "TicketHandlerPersistConfirmation" {
+				return "- The lead's replies are the confirmation record. Persist only what they\n  confirm.", true
+			}
+			return "- No auto-confirm: every announced or technical item,\n" +
+				"  including one from a populator `decision_gaps:` item or a reviewer issue,\n" +
+				"  gets a lead round.", true
+		case "TicketQueueWhiteboard":
+			resolver := s.sessionResolver(capturedKey, builtinConfigDefaults())
+			enabled, err := s.whiteboardEnabled(&resolver, capturedKey)
+			if err == nil && enabled {
+				return withNamespace(lineTicketQueueBoard, s.runtimeNamespace()), true
+			}
+		}
+		return "", false
+	}
 	if capturedKey == "" {
 		builtins := builtinPromptOverrideDefaults()
 		return func(pointId, harness string) (string, bool) {
-			v := builtins[harnessBucketKey("prompt."+pointId, harness)]
-			return v, v != ""
+			if v := builtins[harnessBucketKey("prompt."+pointId, harness)]; v != "" {
+				return v, true
+			}
+			return knobFallback(pointId, harness)
 		}, nil
 	}
 	resolver := s.sessionResolver(capturedKey, builtinPromptOverrideDefaults())
@@ -802,7 +835,10 @@ func buildOverrideLookup(s *Server, sessionKey string) (overrideLookupFn, error)
 			return preferences, true
 		}
 		rv, _ := resolver.Get(capturedKey, harnessBucketKey("prompt."+pointId, harness))
-		return rv.Value, rv.Value != ""
+		if rv.Value != "" {
+			return rv.Value, true
+		}
+		return knobFallback(pointId, harness)
 	}, nil
 }
 
@@ -988,14 +1024,15 @@ func (s *Server) resolveRsrcRoot(rsrcRootOverride string) (string, error) {
 // declared in the playbook frontmatter, or tierOverride when supplied, surfaced
 // so the caller can pick the delegate's model from one render call.
 func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
-	return renderPlaybookBodyForCaller(s, "", rsrcRoot, name, callerContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup, tierOverride)
+	return renderPlaybookBodyForCaller(s, "", "", rsrcRoot, name, callerContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup, tierOverride)
 }
 
 // renderPlaybookBodyForCaller is renderPlaybookBody for the caller holding
 // callerKey (empty for a keyless render): the caller's own launch record, not
 // only the connection's detected harness, selects its terminology row (see
-// playbookTerminology).
-func renderPlaybookBodyForCaller(s *Server, callerKey, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
+// playbookTerminology). profile is the caller's playbook profile ("" for the
+// base files; see callerPlaybookProfile).
+func renderPlaybookBodyForCaller(s *Server, callerKey, profile, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
 	harness := s.playbookHarness()
 	daemonAgentClient := (harness == "pi" && s.clientPiDaemonAgents()) || s.callerDaemonAgents(callerKey)
 	daemonAgents := daemonAgentClient && s.agentListed() && s.toolAllowed("agent.spawn") && s.toolAllowed("mailbox.send")
@@ -1011,7 +1048,7 @@ func renderPlaybookBodyForCaller(s *Server, callerKey, rsrcRoot, name string, ca
 
 	// Load once with nil vars so the MCP playbook layer can add reserved
 	// namespace variables without teaching product-mode semantics to wsrsrc.
-	pb, err := wsrsrc.Load(rsrcRoot, name, loadHarness, nil)
+	pb, err := wsrsrc.Load(rsrcRoot, name, loadHarness, profile, nil)
 	if err != nil {
 		return "", "", err
 	}
@@ -1044,6 +1081,11 @@ func renderPlaybookBodyForCaller(s *Server, callerKey, rsrcRoot, name string, ca
 				return "", "", fmt.Errorf("mint child session key: %w", err)
 			}
 			childKey := resolved.key
+			if strings.ToLower(strings.TrimSpace(pb.Meta.Role)) == subleadPlaybookRole {
+				if err := s.sessions.writeSubleadMarker(childKey, name); err != nil {
+					return "", "", fmt.Errorf("mark sub-lead session key: %w", err)
+				}
+			}
 			// Splice a clearly-delimited credential block into the body so the
 			// delegate's ws calls are pre-keyed. Prepended so the delegate sees
 			// the key before any procedure text.
@@ -1148,14 +1190,14 @@ func workflowPreferSubagentEnabled(configOpts wsconfig.Options) (bool, error) {
 // overrideLookup: when non-nil, the session-keyed closure for resolving prompt
 // override-point values; pass nil to render every override-point with its seed.
 func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
-	return printPlaybookForCaller(s, "", rsrcRoot, name, callerContext, configOpts, workflowLang, overrideLookup)
+	return printPlaybookForCaller(s, "", "", rsrcRoot, name, callerContext, configOpts, workflowLang, overrideLookup)
 }
 
 // printPlaybookForCaller is printPlaybook for the caller holding callerKey
-// (see renderPlaybookBodyForCaller).
-func printPlaybookForCaller(s *Server, callerKey, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
+// and selecting profile (see renderPlaybookBodyForCaller).
+func printPlaybookForCaller(s *Server, callerKey, profile, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
 	// playbook.read exposes no tier_override arg — always "" (frontmatter tier).
-	body, recommendedTier, err := renderPlaybookBodyForCaller(s, callerKey, rsrcRoot, name, callerContext, configOpts, "", "", workflowLang, overrideLookup, "")
+	body, recommendedTier, err := renderPlaybookBodyForCaller(s, callerKey, profile, rsrcRoot, name, callerContext, configOpts, "", "", workflowLang, overrideLookup, "")
 	if err != nil {
 		return "", "", err
 	}
@@ -1184,7 +1226,7 @@ func printPlaybookForCaller(s *Server, callerKey, rsrcRoot, name string, callerC
 // this render only — see renderPlaybookBody and resolveEffectiveTier. Pass ""
 // to leave frontmatter-tier behavior unchanged.
 func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
-	path, _, recommendedTier, err := renderPlaybookWithPlan(s, "", rsrcRoot, worktreeRoot, name, callerContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup, tierOverride, "")
+	path, _, recommendedTier, err := renderPlaybookWithPlan(s, "", "", rsrcRoot, worktreeRoot, name, callerContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup, tierOverride, "")
 	return path, recommendedTier, err
 }
 
@@ -1195,21 +1237,22 @@ func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContex
 // reserved only after the body rendered, and removed again when the prompt
 // cannot be written, so a failed render never leaves an orphan plan that a
 // later commit could pick up as a false contract. callerKey is the render
-// caller's session key (see renderPlaybookBodyForCaller).
-func renderPlaybookWithPlan(s *Server, callerKey, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string, planStem string) (promptPath string, planPath string, recommendedTier string, err error) {
+// caller's session key and profile its playbook profile (see
+// renderPlaybookBodyForCaller).
+func renderPlaybookWithPlan(s *Server, callerKey, profile, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string, planStem string) (promptPath string, planPath string, recommendedTier string, err error) {
 	templateContext := callerContext
 	var renderContext map[string]string
 	if s.noAgentMode() && wsflowRenderEligibleStems[name] && len(callerContext) > 0 {
 		// Phase 2 of wsflow convergence: legacy wsflow delegate callers pass
 		// arbitrary context as prompt data. Preserve that behavior for undeclared
 		// keys while allowing declared variables to render normally.
-		declared, err := declaredPlaybookVariables(s, rsrcRoot, name)
+		declared, err := declaredPlaybookVariables(s, rsrcRoot, name, profile)
 		if err != nil {
 			return "", "", "", err
 		}
 		templateContext, renderContext = splitDeclaredRenderContext(callerContext, declared)
 	}
-	body, recommendedTier, err := renderPlaybookBodyForCaller(s, callerKey, rsrcRoot, name, templateContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup, tierOverride)
+	body, recommendedTier, err := renderPlaybookBodyForCaller(s, callerKey, profile, rsrcRoot, name, templateContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup, tierOverride)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -1269,8 +1312,8 @@ func renderPlanStem(name string, callerContext map[string]string, topLevelLead b
 	return callerContext, stem
 }
 
-func declaredPlaybookVariables(s *Server, rsrcRoot, name string) (map[string]bool, error) {
-	pb, err := wsrsrc.Load(rsrcRoot, name, s.playbookHarness(), nil)
+func declaredPlaybookVariables(s *Server, rsrcRoot, name, profile string) (map[string]bool, error) {
+	pb, err := wsrsrc.Load(rsrcRoot, name, s.playbookHarness(), profile, nil)
 	if err != nil {
 		return nil, err
 	}

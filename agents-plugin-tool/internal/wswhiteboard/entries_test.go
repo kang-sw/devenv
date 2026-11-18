@@ -37,7 +37,7 @@ func TestEntryStreamPanelsLogsAndDurableIDs(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, panelXML("a", "  First &amp; recap  ", "  payload &amp; <b>raw</b>  ")+logXML("a", "**ready**; {{1}}")+panelXML("b", "Second", ""))
 	want := []Entry{
-		{ID: "e1", Kind: EntryPanel, PanelID: "p1", Recap: "First & recap", Text: "  payload &amp; <b>raw</b>  ", At: testNow.Format(time.RFC3339)},
+		{ID: "e1", Kind: EntryPanel, PanelID: "p1", Recap: "First & recap", Text: "  payload & <b>raw</b>  ", At: testNow.Format(time.RFC3339)},
 		{ID: "e2", Kind: EntrySystem, Text: "Panel [p1](#p1) added: First & recap", At: testNow.Format(time.RFC3339)},
 		{ID: "e3", Kind: EntrySystem, Text: "Topic state: discussing", At: testNow.Format(time.RFC3339), TopicState: json.RawMessage(`{"v":1,"op":"set","value":"discussing"}`)},
 		{ID: "e4", Kind: EntryAgent, Text: "**ready**; {{1}}", At: testNow.Format(time.RFC3339)},
@@ -151,7 +151,8 @@ func TestPanelChangesUseSequentialWorkingPayload(t *testing.T) {
 	for _, tc := range []struct{ name, initial, changes, want string }{
 		{"preceding result overlaps", "abcd", panelChangeXML("ab", "XY") + panelChangeXML("Yc", "Z"), "XZd"},
 		{"delete and anchored insert", "start remove anchor", panelChangeXML("remove ", "") + panelChangeXML("anchor", "anchor plus inserted"), "start anchor plus inserted"},
-		{"raw operands", "A &amp; B <b>raw</b>", panelChangeXML("&amp;", "&lt;") + panelChangeXML("<b>raw</b>", "<i>new</i>"), "A &lt; B <i>new</i>"},
+		{"decoded operands", "A &amp; B <b>raw</b>", panelChangeXML("&amp;", "&lt;") + panelChangeXML("<b>raw</b>", "<i>new</i>"), "A < B <i>new</i>"},
+		{"raw operands", "A <wb:raw></wb:panel> &amp;</wb:raw> B", panelChangeXML("<wb:raw></wb:panel> &amp;</wb:raw>", "x"), "A x B"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			st := &State{}
@@ -241,7 +242,7 @@ func TestAgentLogIsInlineOnly(t *testing.T) {
 		st := &State{}
 		mustApply(t, st, logXML("t", line))
 		want := []Entry{
-			{ID: "e1", Kind: EntryAgent, Text: line, At: testNow.Format(time.RFC3339)},
+			{ID: "e1", Kind: EntryAgent, Text: strings.Replace(line, "&amp;", "&", 1), At: testNow.Format(time.RFC3339)},
 			{ID: "e2", Kind: EntrySystem, Text: "Topic state: discussing", At: testNow.Format(time.RFC3339), TopicState: json.RawMessage(`{"v":1,"op":"set","value":"discussing"}`)},
 		}
 		if got := entries(t, st, "t"); !reflect.DeepEqual(got, want) {

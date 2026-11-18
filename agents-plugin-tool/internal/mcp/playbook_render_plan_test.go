@@ -169,3 +169,70 @@ func TestPlaybookRenderPlanStemIsNotConsumedForOtherPlaybooks(t *testing.T) {
 	}
 	assertNoPlans(t, root)
 }
+
+// delegate-report is the report floor for a delegate that does not mutate the
+// repository: a top-level lead renders it directly, it reserves no plan, and
+// delegate-implementer carries the same report through its include.
+func TestPlaybookRenderDelegateReportFloor(t *testing.T) {
+	for _, namespace := range []string{"ws", "wsflow"} {
+		t.Run(namespace, func(t *testing.T) {
+			s, root, key := setupPlanRenderServer(t, namespace)
+			lines := renderLines(t, callToolOnce(t, s, 2, "playbook.render", map[string]any{
+				"name":        "delegate-report",
+				"session_key": key,
+			}))
+			if len(lines) != 1 || !strings.HasSuffix(lines[0], "-delegate-report.md") {
+				t.Fatalf("render output shape = %q", lines)
+			}
+			assertNoPlans(t, root)
+			report, err := os.ReadFile(lines[0])
+			if err != nil {
+				t.Fatalf("read rendered report floor: %v", err)
+			}
+
+			implLines := renderLines(t, callToolOnce(t, s, 3, "playbook.render", map[string]any{
+				"name":        "delegate-implementer",
+				"session_key": key,
+			}))
+			impl, err := os.ReadFile(implLines[0])
+			if err != nil {
+				t.Fatalf("read rendered implementer floor: %v", err)
+			}
+			src, err := os.ReadFile(filepath.Join("..", "..", "..", "agents-plugin", "rsrc", "delegate-report.md"))
+			if err != nil {
+				t.Fatalf("read delegate-report source: %v", err)
+			}
+			_, body, ok := strings.Cut(string(src), "\n---\n")
+			if !ok {
+				t.Fatalf("delegate-report source has no frontmatter")
+			}
+			body = strings.TrimSpace(body)
+			if !strings.Contains(string(report), body) || !strings.Contains(string(impl), body) {
+				t.Fatalf("both floors must carry the delegate-report body")
+			}
+
+			// ship-handler mutates the repository (version bump, tag) but is
+			// not delegate-implementer: it reserves no plan and still ends
+			// with the shared report.
+			shipLines := renderLines(t, callToolOnce(t, s, 4, "playbook.render", map[string]any{
+				"name":        "ship-handler",
+				"session_key": key,
+			}))
+			if !strings.HasSuffix(shipLines[0], "-ship-handler.md") {
+				t.Fatalf("ship-handler render output shape = %q", shipLines)
+			}
+			for _, line := range shipLines {
+				if strings.HasPrefix(line, "plan-path:") {
+					t.Fatalf("ship-handler must reserve no plan: %q", shipLines)
+				}
+			}
+			ship, err := os.ReadFile(shipLines[0])
+			if err != nil {
+				t.Fatalf("read rendered ship-handler: %v", err)
+			}
+			if !strings.Contains(string(ship), body) {
+				t.Fatalf("ship-handler must carry the delegate-report body")
+			}
+		})
+	}
+}

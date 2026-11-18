@@ -15,10 +15,10 @@ var itemFieldNames = []string{"title", "option", "recommend", "why", "link"}
 // name is written once per batch; its optional label attribute makes the
 // name a stem and sets the topic's label (applyLabel), its optional tickets
 // attribute replaces the topic's linked ticket stems (applyGroup), and a
-// group carrying either may hold no commands. Item fields are plain text, so an escaped
-// one is decoded; topic/panel payloads, log text, wb:edit's old and new
-// (matched against a stored body), and an answer (the
-// user's verbatim words) are not.
+// group carrying either may hold no commands. Every body decodes the same
+// way (package wsxmlcmd): the decoded text is what is stored and what
+// wb:edit's and wb:change's old operand matches, and a <wb:raw> segment goes
+// in exactly as written.
 var grammar = wsxmlcmd.Grammar{
 	Prefix:              "wb:",
 	RefuseFieldOpenings: true,
@@ -31,12 +31,12 @@ var grammar = wsxmlcmd.Grammar{
 		"edit":      {Kind: wsxmlcmd.Container, Attrs: []string{"replace_all"}, Fields: []string{"old", "new"}, Scoped: true},
 		"panel":     {Kind: wsxmlcmd.Leaf, Attrs: []string{"id", "name", "recap"}, Wrapper: "change", Fields: []string{"old", "new"}, Scoped: true},
 		"log":       {Kind: wsxmlcmd.Leaf, Scoped: true},
-		"add":       {Kind: wsxmlcmd.Container, Attrs: []string{"id", "class"}, Fields: itemFieldNames, DecodeFields: itemFieldNames, Scoped: true},
+		"add":       {Kind: wsxmlcmd.Container, Attrs: []string{"id", "class"}, Fields: itemFieldNames, Scoped: true},
 		"close":     {Kind: wsxmlcmd.Empty, HiddenAttrs: []string{"result"}, Scoped: true},
 		"state":     {Kind: wsxmlcmd.Empty, Attrs: []string{"value", "owner", "eta_minutes", "on"}, Scoped: true},
 		"eta":       {Kind: wsxmlcmd.Empty, Attrs: []string{"minutes", "reason"}, Scoped: true},
 		"answer":    {Kind: wsxmlcmd.Leaf, Attrs: []string{"id", "ids", "value", "assumed"}},
-		"patch":     {Kind: wsxmlcmd.Container, Attrs: []string{"id", "status", "class", "clear"}, Fields: itemFieldNames, DecodeFields: itemFieldNames},
+		"patch":     {Kind: wsxmlcmd.Container, Attrs: []string{"id", "status", "class", "clear"}, Fields: itemFieldNames},
 		"floor":     {Kind: wsxmlcmd.Empty, Attrs: []string{"id"}},
 		"embed-dir": {Kind: wsxmlcmd.Empty, Attrs: []string{"path"}},
 	},

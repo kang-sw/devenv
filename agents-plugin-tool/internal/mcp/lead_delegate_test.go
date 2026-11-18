@@ -23,7 +23,7 @@ func TestLeadDelegateReadContract(t *testing.T) {
 			if strings.TrimSpace(body) == "" {
 				t.Fatal("lead-delegate playbook is empty")
 			}
-			for _, token := range []string{namespace + ":lead-discuss", namespace + ":lead-ticket", namespace + ":lead-review", namespace + ":lead-ship", namespace + ":lead-run", namespace + "/playbook.render"} {
+			for _, token := range []string{namespace + ":lead-ticket", namespace + ":lead-review", namespace + ":lead-run", namespace + "/playbook.render", namespace + "/tickets.close"} {
 				if !strings.Contains(body, token) {
 					t.Errorf("render missing namespace token %q", token)
 				}

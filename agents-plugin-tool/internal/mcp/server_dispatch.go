@@ -80,11 +80,15 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// read-only, and its denial names the report hand-off instead of the
 	// generic profile text. The whiteboard tools sit beside it for the same
 	// reason: the board is the top-level lead's channel to its user, so a
-	// spawned key can neither write nor read it.
+	// spawned key can neither write nor read it. A marked sub-lead key alone
+	// passes (subleadBoardFor): its call is rewritten onto its top-level
+	// lead's key, so the write, the board refresh, and the dashboard nudge
+	// all target that board, and handleWhiteboardUpdate admits status only.
 	//
 	// dashboard.intake alone resolves its key from the intake cache
 	// (intakeSession), so its call rate reads no key.json; a removed key
 	// still passes here for up to intakeRecheck, for that tool only.
+	var sublead *subleadBoard
 	if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
 		lookup := s.lookupSession
 		if params.Name == dashboardIntakeTool {
@@ -100,8 +104,21 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if isNoteMutationTool(params.Name) && !entry.isTopLevelLead() {
 				return errorResponse(req.ID, -32601, noteReadOnlyDenial(params.Name))
 			}
-			if isWhiteboardTool(params.Name) && !entry.isTopLevelLead() {
+			if params.Name == whiteboardLoadTool && !entry.isTopLevelLead() {
 				return errorResponse(req.ID, -32601, whiteboardLeadOnlyDenial(params.Name))
+			}
+			if isWhiteboardTool(params.Name) && !entry.isTopLevelLead() {
+				board, marked := s.subleadBoardFor(keyStr, entry)
+				if !marked {
+					return errorResponse(req.ID, -32601, whiteboardLeadOnlyDenial(params.Name))
+				}
+				sublead = &board
+				onBoard := make(map[string]any, len(params.Arguments))
+				for name, value := range params.Arguments {
+					onBoard[name] = value
+				}
+				onBoard["session_key"] = board.boardKey
+				params.Arguments = onBoard
 			}
 			// A store's support conversation passes like a top-level lead for
 			// the tracker and wiki tools its profile names (its writes are
@@ -151,7 +168,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			}
 		}()
 	}
-	if whiteboardDirtyingTool(params.Name) {
+	if whiteboardDirtyingTool(params.Name) || params.Name == whiteboardLoadTool {
 		defer func() { s.refreshWhiteboardAfter(params.Arguments, resp) }()
 	}
 
@@ -384,7 +401,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			}
 		}
 		// Harness: load-bearing for harness-applicable keys (the harness-bucketed
-		// prompt.*, workflow.whiteboard_enabled and workflow.tracker_enabled, and agents.tier); accepted
+		// prompt.*, workflow.whiteboard_enabled, workflow.tracker_enabled and workflow.profile, and agents.tier); accepted
 		// but ignored (warning-only, Decision 5) for keys that do not vary by
 		// harness.
 		harness, _ := params.Arguments["harness"].(string)
@@ -578,6 +595,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				text += fmt.Sprintf("warning: effective value unreadable: %v\n", err)
 			} else if effective.Scope != resolvedScope || answeredKey != storeKey {
 				text += fmt.Sprintf("shadowed: effective %s: %s [scope:%s]\n", answeredKey, effective.Value, effective.Scope)
+			}
+			if entry.Key == wsconfig.ItemWorkflowProfile && value == "orchestrate" {
+				text += orchestrateWhitelistWarning(harness)
 			}
 			return toolTextResponse(req.ID, text, nil)
 		}
@@ -1074,9 +1094,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	case "note.query":
 		return s.handleNoteSearch(req.ID, params.Arguments, params.Meta)
 	case "whiteboard.update":
-		return s.handleWhiteboardUpdate(req.ID, params.Arguments)
+		return s.handleWhiteboardUpdate(req.ID, params.Arguments, sublead)
 	case "whiteboard.query":
 		return s.handleWhiteboardQuery(req.ID, params.Arguments)
+	case whiteboardLoadTool:
+		return s.handleWhiteboardLoad(req.ID, params.Arguments)
 	case "tracker.update":
 		return s.handleTrackerUpdate(ctx, req.ID, params.Arguments)
 	case trackerShowTool:
@@ -1415,7 +1437,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		return toolTextResponse(req.ID, formatTicketCreate(result)+s.indexPiggyback(root, wsindex.OpRegister, strings.TrimSuffix(filepath.Base(result.Path), ".md"), nil), nil)
+		return toolTextResponse(req.ID, strings.ReplaceAll(formatTicketCreate(result), "ws/", s.runtimeNamespace()+"/")+s.indexPiggyback(root, wsindex.OpRegister, strings.TrimSuffix(filepath.Base(result.Path), ".md"), nil), nil)
 	case "tickets.template":
 		typeStr, _ := params.Arguments["type"].(string)
 		text, err := wsdoc.TicketTemplate(typeStr)
@@ -1459,7 +1481,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// co-located real edits under a message that describes only the flip.
 		// The write rides the caller's own next ordinary ws/git.commit, the
 		// same guarded chokepoint every other ticket commit uses.
-		return toolTextResponse(req.ID, formatSageGate(result), nil)
+		return toolTextResponse(req.ID, strings.ReplaceAll(formatSageGate(result), "ws/", s.runtimeNamespace()+"/"), nil)
 	case "tickets.sage_stamp":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -1483,7 +1505,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		return toolTextResponse(req.ID, formatSageRecord(result)+s.indexPiggyback(root, wsindex.OpRegister, stem, nil), nil)
+		return toolTextResponse(req.ID, strings.ReplaceAll(formatSageRecord(result), "ws/", s.runtimeNamespace()+"/")+s.indexPiggyback(root, wsindex.OpRegister, stem, nil), nil)
 	case "tickets.verify":
 		if hasSpecStemArgument(params.Arguments) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("tickets tools use ticket_stem, not spec_stem"))
@@ -1545,13 +1567,16 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		body, recommendedTier, err := printPlaybookForCaller(s, strings.TrimSpace(keyStr), rsrcRoot, name, callerContext, s.configOptions(), printWorkflowLangRV.Value, printOverrideLookup)
+		printProfile, err := s.callerPlaybookProfile(keyStr)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		// printPlaybook carries no session key, so the session-resolved
-		// workflow.whiteboard_enabled and ticket_review_auto_ack variants are
-		// applied here.
+		body, recommendedTier, err := printPlaybookForCaller(s, strings.TrimSpace(keyStr), printProfile, rsrcRoot, name, callerContext, s.configOptions(), printWorkflowLangRV.Value, printOverrideLookup)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		// The remaining manual/discussion knob variants run after rendering;
+		// ticket knob markers resolve in the shared render core.
 		knobResolver := s.sessionResolver(keyStr, builtinConfigDefaults())
 		whiteboardOn, err := s.whiteboardEnabled(&knobResolver, keyStr)
 		if err != nil {
@@ -1576,11 +1601,6 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				return toolTextResponse(req.ID, "", err)
 			}
 		}
-		autoAck, err := s.ticketReviewAutoAckEnabled(keyStr)
-		if err != nil {
-			return toolTextResponse(req.ID, "", fmt.Errorf("resolve %s: %w", wsconfig.ItemTicketReviewAutoAck, err))
-		}
-		body = applyTicketReviewAutoAckVariant(name, body, autoAck)
 		return toolTextResponse(req.ID, withRecommendedTier(body, recommendedTier)+"\n", nil)
 
 	case "playbook.render":
@@ -1656,7 +1676,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		path, planPath, recommendedTier, err := renderPlaybookWithPlan(s, strings.TrimSpace(renderSessionKey), rsrcRoot, worktreeRoot, name, callerContext, s.configOptions(), mintRoot, parentKey, renderWorkflowLangRV.Value, renderOverrideLookup, tierOverride, planStem)
+		renderProfile, err := s.callerPlaybookProfile(renderSessionKey)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		path, planPath, recommendedTier, err := renderPlaybookWithPlan(s, strings.TrimSpace(renderSessionKey), renderProfile, rsrcRoot, worktreeRoot, name, callerContext, s.configOptions(), mintRoot, parentKey, renderWorkflowLangRV.Value, renderOverrideLookup, tierOverride, planStem)
 		text := withRecommendedRenderBinding(path, s.currentHarness(), recommendedTier, s.configOptions())
 		if planPath != "" {
 			text += "\n" + planPathLinePrefix + planPath

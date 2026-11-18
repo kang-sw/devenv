@@ -4,179 +4,119 @@ kind: print
 
 # Ticket
 
-You are the lead managing the ticket inventory; every ticket write routes
-here. The ticket is the plan: what it settles, the worker executes without
-asking, so judgment is spent here and not at run time.
+Every lead-side ticket write: drafting, settling decisions with the user, and handing
+promotion, epic design review, and revision of a broken `ready/` ticket to a
+`ticket-handler` worker. A ticket is the
+plan a worker executes without asking, so whatever it leaves unsettled
+becomes a guess at run time.
 
 ## Inputs
 
 - `{{.McpNamespace}}/convention.read(name: "ticket-conventions")` once per
-  session; `{{.McpNamespace}}/tickets.template(type: <category>)` for a new
-  ticket's skeleton; `{{.McpNamespace}}/tickets.checklist(type, phase)` for
-  the capture and intent checklists, both satisfied against the written text.
-- The target ticket, and only those graph tickets (parent and `related:`) whose decisions constrain it.
+  session.
+- New ticket: `{{.McpNamespace}}/tickets.template(type: <category>)`.
+  Checklists: `{{.McpNamespace}}/tickets.checklist(type, phase)`, satisfied
+  against the written text.
+- The target ticket, and only the graph tickets (parent, `related:`) whose
+  decisions constrain it.
 
 ## Write
 
-- Persist only decisions the user confirmed. Research tickets may preserve explicitly non-authoritative proposals and open questions in their Outcome Ledger.
-- Outside those research ledger entries, any mechanism decision, rejected
-  alternative, future-scope hint, or cleanup the user has not explicitly
-  confirmed goes through the **Open Decision Queue** first. Never write a
-  draft decision for later correction.
-- The queue's temporary `## Open Decision Queue` section is the one exception
-  to both rules above: it is non-authoritative working state, not a persisted
-  decision. Persisting means the commit and any `ready/` move; editing the
-  ticket file before them is working state. The capture and intent
-  checklists are satisfied against the text after the section is deleted.
-- Capture enough that a fresh worker recovers intent without inventing a
-  product, API, or verification decision: decisions with their rejected
-  alternatives, constraints, verification expectations, and the manuals that
-  apply.
-- When the user approved a visual reference for the work, prefer a text form such as HTML or SVG over a binary image; link text mockups at their tracked `ai-docs/assets/mockups/YYMMDD/<topic name>/` location rather than copying them, and store binary references in the tracked `<ticket root>/assets/<stem>/` folder. Keep existing ticket asset folders in place. Link the reference's path in the ticket and require a side-by-side comparison of a result capture against it in verification; do not promote to `ready/` without the link and comparison, so the approved reference is not lost.
-- Epics stay board-level; implementation detail goes into the child, as a
-  separate invocation.
-- Plan text with a `### Result` is frozen; append `#### Edition (<hash>) -
-  <date>` for later changes.
-- Create through `{{.McpNamespace}}/tickets.create_empty`, move through
-  `tickets.move` and `tickets.close`; `git mv` only when the tool errors.
-- Nothing under `.done/` or `.dropped/` is edited or moved.
-- All ticket text is English.
+Persist:
+- Only user-confirmed decisions and any items in the handler's
+  `auto_confirmed:` report field. Exception: a research Outcome Ledger may
+  keep entries labeled non-authoritative (Proposals, Open Questions).
+- Anything unconfirmed (mechanism, rejected alternative, future-scope hint,
+  cleanup) goes through the Open Decision Queue first. Never put an
+  unconfirmed decision into `## Decisions`, even as working state.
+- Persisted = the commit or the `ready/` move. Editing the file before them is
+  working state.
+
+Capture, so a fresh worker invents no product, API, or verification decision:
+- decisions with their rejected alternatives
+- constraints
+- verification expectations
+- the manuals that apply
+- an approved visual reference: prefer text (HTML, SVG); link mockups at their
+  tracked `ai-docs/assets/mockups/YYMMDD/<topic name>/` location, store
+  binaries in `<ticket root>/assets/<stem>/`; verification compares a result
+  capture against it side by side
+
+Rules:
+- Epic: board-level only; detail goes into a child, as a separate invocation.
+- Plan text with a `### Result` is frozen; later changes append
+  `#### Edition (<hash>) - <date>`.
+- Create: `{{.McpNamespace}}/tickets.create_empty`. Move: `tickets.move`,
+  `tickets.close`; `git mv` only when the tool errors.
+- `.done/`, `.dropped/`: never edited or moved.
+- Ticket frontmatter `title:` uses `workflow.lang` when set, otherwise English;
+  the rest, including the H1, is English. Keep the stem ASCII English.
 
 ## Open Decision Queue
 
-For settlement, queue every unconfirmed item that could change ticket text,
-one item per decision. Reconcile item by item; where an answer's reach is
-unclear, state your reading on its own line and leave the item open until the
-user confirms it. The settle point is reached when the announced defaults and
-technical decisions are acknowledged or auto-confirmed (see
-`### Item classes`) and every policy question is confirmed, rejected, or
-explicitly deferred. At the settle point, persist without showing the
-confirmed set again for approval: the acknowledgement already showed every
-item it confirmed, the settlement report lists every auto-confirmed item, and
-the trace below and the Sage reviewers guard against interacting decisions.
+Queue every unconfirmed item that could change ticket text, one item per
+decision. Where an answer's reach is unclear, state your reading on its own
+line and keep the item open until the user confirms it.
 
-Research entries explicitly labeled as non-authoritative Proposals or Open
-Questions may be preserved without settlement; they do not open a queue item
-unless a decision is needed.
+Classes: the workflow manual's `### Asking the user`, plus:
+- A documentation-placement choice (link, epic child or standalone, absorb or
+  rewrite, initial status, stem, which commit): announced default when a
+  neighbouring ticket or convention gives it (cite it); otherwise technical.
+- A consequence of a policy question still open this round is held, and joins
+  the next round's announced defaults once that answer lands.
 
-### Item classes
-
-Each item is an announced default, a technical decision, or a policy
-question, as the workflow manual's `### Asking the user` defines them; ticket
-work adds:
-
-- A documentation-placement choice (parent or `related:` link, epic child or
-  standalone, absorb or rewrite, initial status, stem naming, which commit
-  carries the edit) is an announced default when a neighbouring ticket or
-  convention gives the placement, and its line names the placement and cites
-  that source; with nothing to cite, it is a technical decision.
-- A consequence of a policy question still open in the same round is not yet
-  a consequence of an already-confirmed decision: hold it, and add it to the
-  next round's announced defaults once that answer lands.
-- A fact-populator decision gap or a reviewer issue is classed by the same
-  rules as any other item.
-
-Announced defaults and technical decisions are still shown and confirmed,
-because items a lead treats as settled are sometimes materially revised once
-actually asked:
-
+Acknowledgement:
 - One explicit user acknowledgement confirms the announced and technical
-  groups together; it may arrive in the same turn as the policy answers.
-  Silence is not consent: when the user answers the policy questions without
-  that acknowledgement, the announced and technical items stay `[open]` and
-  are re-shown unchanged, one line each, under a single acknowledgement re-ask
-  for both groups.
-- An announced or technical item the user objects to becomes a policy question
-  under its existing ID. So does an already-acknowledged announced or
-  technical item that a later policy answer undercuts.
-- Announced or technical items raised later in the same settlement need
-  their own acknowledgement, except review-raised ones: an announced or
-  technical item that comes from a fact-populator `decision_gaps:` item or
-  from a reviewer issue marked `autonomous` is confirmed on your own
-  judgment, with no acknowledgement round, and reported as auto-confirmed.
-  A reviewer issue marked `missing` gets a user round whatever class you
-  give it, because it is what blocks the promotion and the user sees what
-  cleared the block. A trace knock-on of a review-raised item needs its own
-  acknowledgement unless the reviewer issue itself named it.
+  groups together; it may arrive with the policy answers.
+- Answers without it leave those items `[open]`; re-show them one line each
+  under one re-ask.
+- An item the user objects to, or one a later policy answer undercuts,
+  becomes a policy question under its existing ID.
+- Items raised later in the settlement need their own acknowledgement.
 
-### Queue state
+Settle point: announced and technical items acknowledged, every policy
+question confirmed, rejected, or explicitly deferred. Persist then without
+re-showing the confirmed set.
 
-The queue lives in a temporary `## Open Decision Queue` section of the target
-ticket, so it survives your own compaction; create the ticket with
-`{{.McpNamespace}}/tickets.create_empty` first when it does not exist yet.
-Research tickets do not use the section; their Outcome Ledger holds their
-non-authoritative entries.
+Section — `## Open Decision Queue` in the target ticket, so it survives
+compaction (create the ticket first with
+`{{.McpNamespace}}/tickets.create_empty`):
+- The line under the heading: the last ID used.
+- Item: `(01) [open] [policy] <one-line decision>`. Status: `[open]`
+  `[confirmed]` `[rejected]` `[deferred]`. Class: `[announced]`
+  `[technical]` `[policy]`. The one-line decision is the decision itself, not
+  a label.
+- Policy item: its Response format block. Announced: its citation. Technical:
+  `<X> over <Y> - <technical reason>`.
+- An item spanning tickets: the same ID in every affected ticket.
+- Settled: confirmed → `## Decisions` (a technical item's `<Y>` into
+  `Rejected:`); rejected → a decision's `Rejected:` when meaningful, else
+  dropped; deferred → `## Constraints` as out of scope.
+- Correction, objection, or reclass: back to `[open]` under its ID, out of
+  `## Decisions` if it had moved.
+- Delete the section only at the settle point.
+- Research tickets: no section; the Outcome Ledger holds their entries.
+<!-- ws:override:TicketQueueWhiteboard -->
+<!-- ws:/override:TicketQueueWhiteboard -->
 
-- Keep the heading line exactly `## Open Decision Queue`; the line under it
-  records the last ID used, so the next number survives compaction and the
-  departure of settled items. IDs otherwise follow the workflow manual's
-  `### Asking the user`, including its renumbering of a resumed queue on a
-  collision.
-- Each item records its ID, status tag, class tag, and one-line decision, with
-  the tags after the ID: `(01) [open] [policy] <one-line decision>`. Status
-  tags are `[open]`, `[confirmed]`, `[rejected]`, and `[deferred]`; class tags
-  are `[announced]`, `[technical]`, and `[policy]`. A policy question also
-  records its context, alternatives, and your recommendation as the policy
-  block of the **Response format** below; an announced default records its
-  citation in their place, and a technical decision records its one line
-  `<X> over <Y> - <technical reason>`, the reason standing where the
-  citation stands. An announced or technical item that becomes a policy
-  question changes its class tag and gains the policy block. Section text is
-  English, like the rest of the ticket.
-- The one-line decision is the decision itself, self-describing, not a label.
-- An item that affects several tickets (a batch coherence issue, a gap
-  spanning members) is recorded under the same ID in the section of every
-  affected ticket, so each stays gated until it settles.
-- A settled item leaves the section: a confirmed item moves into
-  `## Decisions`, a technical decision carrying its `<Y>` into that
-  decision's `Rejected:` text; a rejected item moves into the relevant decision's
-  `Rejected:` text when it is a meaningful alternative and is otherwise
-  dropped; a deferred item moves into `## Constraints` as out of scope.
-- A correction, an objection, or a reclass to a policy question returns its
-  item to `[open]` under its existing ID, back from `## Decisions` into the
-  section if it had moved there, and it is reconciled like any other open
-  item.
-- Delete the section only at the settle point. `ready/` promotion and design
-  review refuse a ticket that still carries it, whatever its item statuses.
-  An invocation that queued no item (a drop, a stamp-only commit) has no
-  settlement step.
-- A reviewer `missing` issue enters the section as a new item; after it
-  settles and the section is deleted, fix and re-stamp as the stamp result
-  directs.
-
-### Trace a change before writing it
-
-Before a change enters the ticket - a user correction, pushback, or change of
-direction; a proposal of your own; an item the fact populator or a reviewer
-brings in; or the initial draft - trace it: apply the change to the ticket as
-written and follow its consequences through `## Decisions`, `## Constraints`,
-the phases, the verification expectations, `## Prior Decisions`, and the rules
-of any workflow document the ticket changes. Untraced, a settlement chains
-through review rounds as each change's contradictions surface one round later.
-
-- Resolve contradictions before the change is reflected, and raise every new
-  decision the resolution needs as a new item in the same response. The trace
-  precedes recording the change anywhere in the ticket, including as a new
-  queue item.
-- While knock-on items the trace raised are open, the triggering item stays in
-  the section as `[confirmed]` rather than moving into `## Decisions`.
-- A resolution that would alter an already-confirmed decision is raised as a
-  reopened item, never applied on your own.
+Trace before writing — any change: a user correction or redirect, your own
+proposal, the initial draft. Untraced, contradictions surface one review
+round later.
+- Check it against the ticket as written, tracing it through `## Decisions`,
+  `## Constraints`, the phases, verification, `## Prior Decisions`, and the
+  rules of any workflow document the ticket changes.
+- Resolve contradictions before recording the change anywhere, including as a
+  queue item; raise each new decision the resolution needs in the same
+  response.
+- While its knock-on items are open, the triggering item keeps its status and
+  stays in the section, not moved to `## Decisions`.
+- A resolution that alters a confirmed decision is a reopened item, never
+  applied on your own.
 
 ### Response format
 
-The `# Open Decision Queue` heading, the three bold group label names, and the
-status tags stay in English; the explanation after each group label follows the
-user's conversation language, as item content does.
-The skeleton's connecting words, such as "over", are written in the
-conversation language like the rest of the item content.
-
-Each response asks every item still awaiting an answer, in three groups:
-announced defaults, then technical decisions, then the policy questions under
-their visible label, so the items that need an answer sit closest to the
-reply. Omit a group that has no item this round. A response shows an item
-by its `(nn)` ID; the status and class tags stay in the section, apart from a
-re-ask's status tag.
+The heading, the three bold group labels, and the status tags stay English;
+everything else follows the user's language.
 
 ```text
 # Open Decision Queue
@@ -194,187 +134,90 @@ re-ask's status tag.
 > <recommendation and why>
 ```
 
-- An announced default or a technical decision is one line and asks no
-  per-item answer. A technical decision's line names the losing alternative
-  and why it lost, so a reviewer can check the call without asking.
-- A policy question's first presentation is the full block, including an item
-  added mid-settlement and an announced or technical item that became a policy
-  question.
-  The recommendation lives only in the trailing `>` line of its block.
-- A policy question already presented is re-asked as one line,
-  `(nn) [open] <one-line decision>`; re-print its context only when the user
-  asks, or point at the ticket section.
-- Report the items settled this round in one line, such as
-  `(01), (02) confirmed · (04) deferred`; items settled in earlier rounds are not
-  repeated. This per-round settlement report is not the announced or
-  technical group. It also lists each item you auto-confirmed this round
-  with its one-line decision, since the user has not seen it:
-  `(05) auto-confirmed - <one-line decision>`. The report may first reach the
-  user in the turn that moves the ticket to `ready/`.
+- Ask every item still awaiting an answer, groups in that order, empty groups
+  omitted; label each item with its `(nn)` ID. Status and class tags stay in
+  the section.
+- A policy question's first showing is the full block; later re-asks are one
+  line, `(nn) [open] <one-line decision>`.
+- Report items settled this round in one line, e.g.
+  `(01), (02) confirmed · (04) deferred`, plus any items in the handler's
+  `auto_confirmed:` report field: `(05) auto-confirmed - <one-line decision>`.
 
 ## Derive actionable work from research
 
-When deriving actionable work from research, treat the Outcome Ledger as the sole authority: use `Verified Findings` as evidence and `Confirmed Decisions` as contract; read the narrative only as supporting context, and never promote `Proposals`, `Open Questions`, or unlisted narrative into the child.
+- The Outcome Ledger is the sole authority: `Verified Findings` are evidence,
+  `Confirmed Decisions` the contract. Never carry `Proposals`,
+  `Open Questions`, or unlisted narrative into the child.
+- No Outcome Ledger: stop and ask whether to add one or settle the child's
+  decisions through the queue.
 
-If the research has no Outcome Ledger, stop and ask whether to add one or settle the child’s decisions directly through the Open Decision Queue.
+## Promote, review an epic, or revise
 
-## Ground: fact population
+When:
+- `ready/` promotion of actionable tickets; a batch of related tickets,
+  prerequisites first (a lone promotion is a batch of one).
+- Epic design review, on your judgment when the epic's cross-child design has
+  drifted materially; never a status step. A material cross-child change
+  makes the epic's design stamp stale: run `epic-review` again before
+  promoting a child that depends on the changed design.
+- `revise`: a `{{.SkillNamespace}}:lead-run` worker stopped on a broken
+  ticket contract (stop (c)); the handler applies its `proposed_resolution:`
+  under a design review.
+- Not: ordinary `todo/` creation and edits, epic or actionable. Epics and
+  research never enter `ready/`.
 
-Run at actionable promotion to `ready/`, or before you run epic design
-review. Ordinary actionable `todo/` creation and repeated editing run neither
-fact population nor Sage review; research remains ungated. Ground before moving
-or reviewing, so the stamp covers the facts the reviewers read:
-
-1. `{{.McpNamespace}}/playbook.render(name: "ticket-fact-populator",
-   session_key: <your key>)`; pass the path on without reading the file, which
-   is the delegate's prompt and not yours.
-2. Spawn a delegate at the tier the render recommends: `Read <rendered-path>
-   as your system prompt.
-   Ticket path: <path>.`
-3. It returns evidence-backed corrections, a `relations:` table, and
-   `decision_gaps:`, and edits the ticket file itself where its own contract
-   says it does. Review any edit as `git diff -- <ticket path>` and revert any
-   hunk you reject; apply by hand a correction it reported but did not write.
-   Send each `decision_gaps:` item to the Open Decision Queue rather than
-   resolving it from the populator's evidence alone; `### Item classes` says
-   which of them you confirm without asking.
-4. Run it again only when an applied correction proved wrong or an unverified
-   claim became checkable, and stop as soon as a round returns no fewer
-   corrections than the round before; whatever is still unverified goes to the
-   queue.
-
-Ordinary epic `todo/` edits do not spawn reviewers. A material change to
-cross-child decisions leaves its prior digest stale; explicitly re-settle the
-revised design before a child relies on it.
-
-## Review epic design
-
-An epic is a living board: it accretes child and follow-up tickets over time and
-is never itself an execution target, so it never enters `ready/` (nor does a
-research ticket; the move is barred either way). Its design review is not pinned
-to a status boundary — run it on your judgment, when the epic's cross-child
-design has drifted materially, not as a promotion step. It runs regardless of
-`sage_review_design`.
-
-When you judge a review is due, run **Ground: fact population** first, settle
-any queue it opened to the settle point and delete the section, then call
-`{{.McpNamespace}}/tickets.sage_gate(stem, landing: "todo")` (design only;
-completeness never applies to an epic). Render and spawn the design reviewer when
-the gate requests it, passing the ticket path and populator's `relations:` table;
-record its verdict with `{{.McpNamespace}}/tickets.sage_stamp`. A block leaves the
-design unsettled; report it before a child relies on it. Commit after stamping.
-
-## Promote to `ready/`
-
-Promotion is a batch of related tickets, prerequisites first; a lone
-promotion is a batch of one.
-
-1. Dependency closure over the whole batch first: a ticket lands in `ready/`
-   only when every ticket its earliest unfinished phase block-depends on is
-   in `ready/`, `.done/`, or the same batch, recorded as `related: <stem>:
-   prerequisite` or a prerequisite `parent:`. Otherwise name the blocking
-   stem and stop before any move.
-2. Refuse the move for any member whose approved visual reference is not
-   linked by path in the ticket, or whose verification lacks the side-by-side
-   comparison of a result capture against it; fix the ticket first, since a
-   promoted ticket whose reference is missing reaches the worker without the
-   look it must match. A member with no approved visual reference is
-   unaffected.
-3. For every actionable member, run **Ground: fact population** before any
-   reviewer reads the batch, then settle any queue it opened to the settle
-   point and delete each member's section. Resolve each
-   `{{.McpNamespace}}/tickets.sage_gate(stem, landing: "ready")` while tickets
-   remain at their original paths, including configured recommendations,
-   freshness decisions, and existing blocks. Retain the stage selections. The
-   design stage follows the `sage_review_design` knob and the completeness
-   stage the `sage_review` knob, so a stage the gate resolves `skipped` gets no
-   reviewer.
-4. A single-ticket promotion uses the existing single-ticket reviewer path:
-   render the selected reviewers, pass its path and `relations:` table, and
-   record their verdicts. For multiple actionable tickets, use **Batch design
-   review** below in place of isolated design dispatches. Completeness review
-   remains per ticket, only for stages the gate selected.
-5. The lead maps results into `{{.McpNamespace}}/tickets.sage_stamp` per ticket.
-   Use `combined` when both stages have current verdicts, including a retained
-   completeness verdict whose premises are unchanged on a design-only retry;
-   this clears both postures after a combined block without another completeness
-   review. Otherwise stamp the reviewed stage alone. Preserve
-   skipped stages by excluding their verdicts and stamps. A batch coherence
-   block pauses the whole batch, but only its `affected_stems` receive that
-   blocked design verdict. Keep cross-ticket issue titles prefixed with
-   `Cross-ticket [<affected_stems>]:` under the design verdict; completeness
-   issues remain in the completeness verdict so blocked diagnostics distinguish
-   them. Retain the individual reviewer outcomes as the next round's baseline,
-   even when combined stamping marks both stages blocked.
-6. Move with `{{.McpNamespace}}/tickets.move(stem, to: "ready")` in dependency
-   order only after all reviews settle. Any unresolved block leaves the whole
-   batch at its original statuses; report the blocker and affected stems.
-   If a move fails after earlier moves succeeded, restore those members to
-   their original statuses before reporting the failure.
-7. Stamps leave files uncommitted. One `{{.McpNamespace}}/git.commit` carries
-   the batch, its `## AI Context` naming the order.
-
-The stamp digests the body, so any `## Route Facts` the populator wrote are
-covered. Stamp only the reviewed body; review substantive edits before stamping
-them. Stamp-generated diagnostics and their archival headings may be carried
-forward without a new design sweep. After fixes, use the delta boundary below
-for design and re-review changed completeness premises per ticket.
-
-### Batch design review
-
-Render `ticket-reviewer-design` once for the batch. Pass all member paths and
-their populated `relations:` tables, plus explicit `review_eligible_stems` and
-`context_only_stems`. Members whose effective design posture is `skipped` are
-context only: they receive no design verdict or stamp. Resolve recommendations
-before dispatch; previously completed, current design reviews are eligible
-baseline context whose cross-ticket compatibility still participates in the
-first batch review. If every design stage is skipped, omit design dispatch.
-Batch design verdicts also replace eligible members' prior completed design
-stamps; combine them with completeness when that stage has fresh or retained,
-still-valid review evidence.
-
-On the first review pass `review_round: initial` and the complete batch. Require
-one verdict per eligible stem and a separate coherence verdict; validate exact
-stem coverage and that every coherence issue's nonempty `affected_stems` is a
-subset of eligible stems before stamping. Combine each ticket's own design
-issues with only the coherence issues naming it, using the reviewer's verdict
-thresholds. A malformed or incomplete result pauses promotion for correction.
-
-On follow-up pass `review_round: delta`, `changed_stems`,
-`previously_passed_stems`, and the prior report alongside the current paths.
-Include changed context-only members in `changed_stems`. Review changed tickets
-and their dependency or collision edges; previously passed tickets are accepted
-baseline context. A reversal must name the changed ticket or relation, cite the
-passed ticket's concrete premise, and explain its invalidation. Reject a
-reversal lacking that evidence; unrelated newly noticed concerns go into
-`follow_up_findings` without changing this batch's verdict. Retain prior passes
-and carry still-unresolved findings forward so a retry neither starts a fresh
-sweep nor drops a blocker. Settle cross-ticket findings separately from
-completeness findings before moving any member.
+Handler loop:
+1. Settle any open queue first; the handler takes tickets with no
+   `## Open Decision Queue` section.
+2. `{{.McpNamespace}}/playbook.render(name: "ticket-handler", session_key:
+   <your key>)`; for `revise`, pass `root_override: <worktree>` for the
+   stopped worker's worktree. Pass the path on without reading it. Spawn at
+   the tier the render returns: `Read <rendered-path> as your system prompt.` plus the task block:
+   operation (`promote`, `epic-review`, or `revise`), the stems, and the
+   branch to commit on (`revise`: the worker's impl branch); `revise` adds the
+   worker's `proposed_resolution:` verbatim and the worker's tier.
+3. Act on each report by its `status`:
+   - `decisions`: the handler wrote its items into the tickets' queue
+     sections, in the same ID space. Ask them in Response format, in the
+     user's language; the Acknowledgement rules apply unchanged. Send the
+     user's answers back as a digest: per ID, confirmed, rejected, deferred,
+     or corrected (the item reopens with the user's correction), each with the
+     user's stated reason, and the acknowledgement when given.
+   - `awaiting-confirmation`: read every ticket in full and check the user's
+     confirmed intent is there. Send corrections back; never edit the ticket
+     yourself, since the stamp digests the body. No corrections: send
+     `confirm`. This check is yours; it needs no fresh user round.
+   - `done`: relay the settlement report and auto-confirmed items; after
+     `revise`, return to `{{.SkillNamespace}}:lead-run` to resume the worker.
+   - `blocked`: relay the blocker and the affected stems.
+4. Continue the same handler across rounds; it holds the review baseline.
 
 ## Drop and close
 
-Drop: `{{.McpNamespace}}/tickets.close(stem, status: "dropped")`. Closing to
-`.done/` is the worker's on completion; do it here only when the user asks.
+- Drop: `{{.McpNamespace}}/tickets.close(stem, status: "dropped")`.
+- Closing to `.done/` is the worker's on completion; here only when the user
+  asks.
 
 ## Stops
 
-- Persisting discussion output before the user has explicitly agreed to
-  persist.
-- Any Open Decision Queue item the user has not settled, including an
-  announced default or technical decision not yet acknowledged, apart from
-  one auto-confirmed under `### Item classes`.
-- A `block` verdict at a settlement boundary.
-- Dependency closure failing.
+- Persisting discussion output before the user explicitly agreed to persist
+  it. Reaching the settle point is that agreement for the queued items.
+- An unsettled queue item, apart from any in the handler's `auto_confirmed:`
+  report field.
+- A handler `blocked` report.
 
 ## Output
 
-Commit edited paths with `{{.McpNamespace}}/git.commit(paths, title,
-ai_context, expected_branch)`, one logical unit. `expected_branch` is the branch
-you remember working on; the commit is refused if the checkout has since moved.
-A root occupied by a worker (`HEAD` on `impl/*`) takes no ticket write:
-author and commit in the sparse worktree the workflow manual's `### Git`
-section describes, with the key it returns. Suggest the next action: a child ticket for an
-epic; `{{.SkillNamespace}}:lead-run` for an actionable ticket now
-in `ready/`. End with `Ticket: ai-docs/tickets/<status>/<stem>.md` per ticket
-written, the last of them on its own final line.
+- Writes outside the handler: one logical unit via
+  `{{.McpNamespace}}/git.commit(paths, title, ai_context, expected_branch)`;
+  `expected_branch` is the branch you remember working on (refused if the
+  checkout moved). The handler commits its own work.
+- Root occupied by a worker (`HEAD` on `impl/*`): no ticket write there.
+  Author and commit in the sparse worktree the workflow manual's `### Git`
+  describes, and render the handler with `root_override: <worktree>` for that
+  worktree. Exception: `revise` writes the stopped worker's ticket on its impl
+  branch, which the worker resumes from.
+- Suggest the next action: a child ticket for an epic;
+  `{{.SkillNamespace}}:lead-run` for a ticket now in `ready/`.
+- End with `Ticket: ai-docs/tickets/<status>/<stem>.md` per ticket written,
+  the last on its own final line.

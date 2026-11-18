@@ -300,16 +300,16 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.tune",
-			"description": "Write one ws config knob, selected by its key (e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>, worktree.profile.<name>). Call config.list first for each key's exact value domain, scope rules, and harness applicability. value is a string for scalar knobs, an object ({tier, backend, model, effort}) for agents.tier, and a whole profile object (config.list value_schema) for worktree.profile.<name>; agents.tier reset takes value: {tier} only. scope is optional and backstops to the key's declared default; scope repo writes the committed .ws-workflow/config.json in the session's worktree without staging it, so include the reported path in your next git.commit paths; harness is load-bearing for harness-applicable keys (config.list lists a harness selector for them: prompt.*, workflow.whiteboard_enabled, workflow.tracker_enabled, agents.tier) and warning-only (ignored) for keys that do not vary by harness. reset: true drops a knob's override back to its builtin/inherited default (only for keys that support reset). session_key is required at dispatch for lead-authority keys and prompt.* keys. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
+			"description": "Write one ws config knob, selected by its key (e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>, worktree.profile.<name>). Call config.list first for each key's exact value domain, scope rules, and harness applicability. value is a string for scalar knobs, an object ({tier, backend, model, effort}) for agents.tier, and a whole profile object (config.list value_schema) for worktree.profile.<name>; agents.tier reset takes value: {tier} only. scope is optional and backstops to the key's declared default; scope repo writes the committed .ws-workflow/config.json in the session's worktree without staging it, so include the reported path in your next git.commit paths; harness is load-bearing for harness-applicable keys (config.list lists a harness selector for them: prompt.*, workflow.whiteboard_enabled, workflow.tracker_enabled, workflow.profile, agents.tier) and warning-only (ignored) for keys that do not vary by harness. reset: true drops a knob's override back to its builtin/inherited default (only for keys that support reset). session_key is required at dispatch for lead-authority keys and prompt.* keys. Lead-only: delegate and leaf keys are blocked by the config.* prefix gate.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"key":         stringProperty("Config knob key to write, e.g. workflow.prefer_subagent, bootstrap_alarm, agents.tier, prompt.<pointId>, worktree.profile.<name>, or an adapter-declared key. See config.list for the supported set."),
 					"value":       stringOrObjectProperty("New value. A string for scalar knobs (e.g. on/off), an object {tier, backend, model, effort} for agents.tier, or a profile object for worktree.profile.<name>. For agents.tier reset pass only {tier}; omit for other resets."),
 					"scope":       enumStringProperty("Optional storage scope. When omitted the write lands in the key's declared default scope. repo writes the committed .ws-workflow/config.json in the session's worktree (session_key required) and leaves staging to your next git.commit. Global-only keys reject non-global scopes; agents.tier supports project and global scopes; worktree.profile.<name> supports project, repo, and global.", wsconfig.ScopeSchemaEnum()),
-					"harness":     stringProperty("Optional harness selector. Load-bearing for prompt.*, workflow.whiteboard_enabled and workflow.tracker_enabled (claude, codex, pi, or * for all) and agents.tier (alias key); ignored for keys that do not vary by harness. When omitted for a harness-applicable key, defaults to the current session's detected harness."),
+					"harness":     stringProperty("Optional harness selector. Load-bearing for prompt.*, workflow.whiteboard_enabled, workflow.tracker_enabled and workflow.profile (claude, codex, pi, or * for all) and agents.tier (alias key); ignored for keys that do not vary by harness. When omitted for a harness-applicable key, defaults to the current session's detected harness."),
 					"reset":       boolProperty("When true, drop the key's override and fall back to its builtin/inherited default instead of writing an explicit value. Mutually exclusive with value except agents.tier, which requires value: {tier}; only valid for keys that support reset."),
-					"session_key": stringProperty("Caller's lead ws session key. Required at dispatch for lead-authority keys (global-only workflow preferences and alarms, workflow.whiteboard_enabled and workflow.tracker_enabled) and for prompt.* keys; also the target session for a session-scope write."),
+					"session_key": stringProperty("Caller's lead ws session key. Required at dispatch for lead-authority keys (global-only workflow preferences and alarms, workflow.whiteboard_enabled, workflow.tracker_enabled and workflow.profile) and for prompt.* keys; also the target session for a session-scope write."),
 				},
 				"required": []string{"key"},
 			},
@@ -667,6 +667,18 @@ func tools() []map[string]any {
 					"payload":     objectProperty("Defined by the whiteboard playbook."),
 				},
 				"required": []string{"session_key"},
+			},
+		},
+		{
+			"name":        "whiteboard.load",
+			"description": "Lead-only. Replace your whiteboard with a board zip downloaded from the dashboard board toolbar; the previous board is kept as a backup folder beside it.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"path":        stringProperty("The board zip's path on the host running ws-mcp; a relative path resolves against the session root."),
+				},
+				"required": []string{"session_key", "path"},
 			},
 		},
 		{
