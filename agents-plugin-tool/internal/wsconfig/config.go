@@ -643,21 +643,25 @@ func defaultModelAliases(tiers map[string]AgentTier) map[string]map[string]Agent
 			"default": tierOrDefault(tiers, "small", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "high"}),
 			"codex":   tierOrDefault(tiers, "small", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "high"}),
 			"claude":  {Backend: "claude", Model: "haiku", Effort: "high"},
+			"agy":     {Backend: "agy", Model: "gemini-4-hydrogen", Effort: "medium"},
 		},
 		"medium": {
 			"default": tierOrDefault(tiers, "medium", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "xhigh"}),
 			"codex":   tierOrDefault(tiers, "medium", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "xhigh"}),
 			"claude":  {Backend: "claude", Model: "sonnet", Effort: "high"},
+			"agy":     {Backend: "agy", Model: "gemini-4-hydrogen", Effort: "high"},
 		},
 		"large": {
 			"default": tierOrDefault(tiers, "large", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "high"}),
 			"codex":   tierOrDefault(tiers, "large", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "high"}),
 			"claude":  {Backend: "claude", Model: "opus", Effort: "high"},
+			"agy":     {Backend: "agy", Model: "gemini-4-argon", Effort: "high"},
 		},
 		"xlarge": {
 			"default": tierOrDefault(tiers, "xlarge", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "xhigh"}),
 			"codex":   tierOrDefault(tiers, "xlarge", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "xhigh"}),
 			"claude":  {Backend: "claude", Model: "opus", Effort: "xhigh"},
+			"agy":     {Backend: "agy", Model: "gemini-4-carbon", Effort: "high"},
 		},
 	}
 }
@@ -718,6 +722,8 @@ func normalizedHarness(value string) string {
 		return "claude"
 	case "pi":
 		return "pi"
+	case "agy":
+		return "agy"
 	default:
 		return ""
 	}
@@ -731,7 +737,7 @@ func aliasTargetKey(harness string) (string, error) {
 	if key := normalizedHarness(value); key != "" {
 		return key, nil
 	}
-	return "", fmt.Errorf("harness must be codex, claude, pi, or default")
+	return "", fmt.Errorf("harness must be codex, claude, pi, agy, or default")
 }
 
 func normalizeOptionalEffort(values ...string) (string, bool, error) {
