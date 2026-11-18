@@ -96,7 +96,7 @@ const (
 	ItemResume CapabilityItem = "resume"
 	// ItemReasoningStream: the model's reasoning reaches the conversation.
 	ItemReasoningStream CapabilityItem = "reasoning_stream"
-	// ItemUsageQuery: ws asks the harness for its usage figures.
+	// ItemUsageQuery: ws obtains the harness's usage (asked or pushed).
 	ItemUsageQuery CapabilityItem = "usage_query"
 )
 
@@ -393,6 +393,52 @@ func ClaudeCatalog() *HarnessProfile {
 				Source: "the get_context_usage control (claudeMapper.askContextUsage, asked from leadInit)"},
 			{Item: ItemUsageQuery, Role: RoleWorker, Grade: GradeUnsupported,
 				Source: "a worker's usage comes only from its result lines; nothing asks"},
+		},
+	}
+}
+
+// CodexPermissionModes are the app-server sandbox names offered to a hosted
+// Codex lead. read-only and workspace-write use approvalPolicy on-request;
+// danger-full-access explicitly disables approvals with approvalPolicy never.
+var CodexPermissionModes = []string{"read-only", "workspace-write", "danger-full-access"}
+
+// CodexCatalog is the lead-only app-server contract at the version with
+// recorded fixtures (testdata/codex-0.160.0-*.jsonl). Worker entries are absent
+// intentionally: Codex is not admitted for agent.spawn workers. Sources name
+// the protocol wiring the hosted lead adapter must deliver, including the
+// forthcoming compaction mapper.
+func CodexCatalog() *HarnessProfile {
+	return &HarnessProfile{
+		Oldest: "0.160.0",
+		Newest: "0.160.0",
+		Entries: []CapabilityEntry{
+			{Item: ItemSkillList, Role: RoleLead, Grade: GradeUnsupported,
+				Source: "skills/list exists but has no ws wiring"},
+			{Item: ItemSkillInjection, Role: RoleLead, Grade: GradeNative,
+				Source: "Codex plugin skills stay loaded while the plugin's stdio ws MCP entry is shadowed by HTTP MCP"},
+			{Item: ItemCompaction, Role: RoleLead, Grade: GradeNative,
+				Source: "the dashboard's /compact maps to thread/compact/start and thread/compacted (forthcoming mapper)"},
+			{Item: ItemRewind, Role: RoleLead, Grade: GradeUnsupported, Source: "no ws wiring"},
+			{Item: ItemToolRemoval, Role: RoleLead, Grade: GradeUnsupported,
+				Source: "the lead keeps the user's tool setup"},
+			{Item: ItemSubagentRemoval, Role: RoleLead, Grade: GradeNative, Values: []string{"spawn_agent"},
+				Source: "agents.enabled=false on thread/start and thread/resume removes the collaboration namespace"},
+			{Item: ItemModelEffort, Role: RoleLead, Grade: GradeNative,
+				Source: "turn/start model and effort overrides apply to subsequent turns; choices come from model/list"},
+			{Item: ItemApproval, Role: RoleLead, Grade: GradeNative,
+				Source: "server approval requests receive binary accept/decline answers (permissions use a turn-scoped subset); richer choices are unsupported; native modes select approvalPolicy and sandbox"},
+			{Item: ItemSteer, Role: RoleLead, Grade: GradeNative,
+				Source: "turn/steer with expectedTurnId delivers input to the active turn"},
+			{Item: ItemInterrupt, Role: RoleLead, Grade: GradeNative,
+				Source: "turn/interrupt followed by turn/completed with interrupted status"},
+			{Item: ItemFollowUp, Role: RoleLead, Grade: GradeSubstitute,
+				Source: "the ws inbox holds the message and the runner sends it when the turn ends (Runner.Send)"},
+			{Item: ItemResume, Role: RoleLead, Grade: GradeNative,
+				Source: "thread/resume of the recorded thread id with MCP config re-passed"},
+			{Item: ItemReasoningStream, Role: RoleLead, Grade: GradeUnsupported,
+				Source: "reasoning summaries have no ws wiring"},
+			{Item: ItemUsageQuery, Role: RoleLead, Grade: GradeNative,
+				Source: "thread/tokenUsage/updated and account/rateLimits/updated push usage"},
 		},
 	}
 }

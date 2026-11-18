@@ -113,6 +113,8 @@ func permissionModes(backend string, registries []map[string]BackendRegistration
 		return LeadPermissionModes
 	case BackendAgy:
 		return AgyPermissionModes
+	case BackendCodex:
+		return CodexPermissionModes
 	}
 	return nil
 }

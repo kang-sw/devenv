@@ -58,6 +58,7 @@ const (
 	LeadProfileClaude = "lead-claude"
 	LeadProfilePi     = "lead-pi"
 	LeadProfileAgy    = "lead-agy"
+	LeadProfileCodex  = "lead-codex"
 )
 
 // LeadProfileFor is the builtin lead profile of a harness, "" for a harness
@@ -242,6 +243,7 @@ func BuiltinProfiles() map[string]json.RawMessage {
 		LeadProfileClaude: {Backend: BackendClaude, PermissionMode: DefaultLeadPermissionMode},
 		LeadProfilePi:     {Backend: BackendPi},
 		LeadProfileAgy:    {Backend: BackendAgy},
+		LeadProfileCodex:  {Backend: BackendCodex},
 	} {
 		p.Lead = true
 		p.Description = fmt.Sprintf("Hosted lead session (%s): a headless session the dashboard spawns on a worktree, with the user's own harness setup.", p.Backend)
