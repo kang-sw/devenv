@@ -52,6 +52,36 @@ settle the design from its results.
 
 - (08)=c probe facts listed in `## Background`, from
   `261117-feat-ws-hosted-antigravity-adapter`.
+- Probes 1-3, agy 1.5.10, 2026-11-18 (direct ACP:
+  `agy acp --process-per-session --gemini-dir <scratch> --agent <name>`,
+  isolated state, a scratch MCP server standing in for ws; scratch evidence
+  under `/tmp/agy-cap2/`, not tracked). Question 4 was not run.
+  - Q1: a valid custom agent (frontmatter with `name` and `description`, no
+    `tools` allowlist) keeps session-injected MCP tools as direct
+    `mcp_ws_*` calls, with and without `excludeDefaultComponents: true`; no
+    `call_mcp_tool` appeared. A frontmatter-less body-only file is not a
+    custom agent: agy logs `Agent "<name>" not found, falling back to
+    default`.
+  - Q2: `excludeDefaultComponents: true` reduced paired first-request input
+    from 3,689 to 883 tokens (tools plus context, not an isolated
+    system-prompt measure). Without an allowlist, neither custom variant
+    offered file-write, shell or subagent tools (model self-report, not a
+    schema dump). With `excludeDefaultComponents: true`, an explicit `tools`
+    list (`read_file`, `write_file`, `edit_file`, `run_command`,
+    `invoke_subagent`, `define_subagent`, `manage_subagents`,
+    `ask_question`) and `mcpServers: [{name: ws}]`, a file edit, a shell
+    command, a native child run and an MCP call all succeeded, but MCP went
+    through `call_mcp_tool` in that configuration.
+  - Q3: both `<workspace>/.agents/agents/<name>.md` and
+    `<gemini-dir>/config/agents/<name>.md` are discovered; the home-scoped
+    file loads from any workspace. An absolute path passed to `--agent`
+    falls back. A malformed file (`mcpServers: [ws]`) gives successful ACP
+    responses with no selected-agent or fallback field (`session/new`
+    carries `sessionId`, `models`, `modes`, `configOptions`, `_meta`); only
+    agy's log distinguishes it: the fallback warning plus
+    `Creating new cascade trajectory (agentScript=false)`, versus
+    `agentScript=true` for a valid selection. First-request input of
+    9,315/9,372 tokens (default/malformed) versus 3,689 (valid) corroborates.
 
 ### Confirmed Decisions
 
@@ -63,6 +93,18 @@ settle the design from its results.
 ### Proposals
 
 ### Open Questions
+
+- Whether any configuration combines the full native lead tool set with
+  direct (not `call_mcp_tool`) MCP tools; probes 1-3 found either direct MCP
+  without native write/shell/subagent tools, or native tools with gateway
+  MCP.
+- Which prompt sections `excludeDefaultComponents` removes exactly, and
+  whether post-invocation hooks survive it live (the bundled changelog says
+  they do; not tested).
+- Fail-loud plumbing for the silent fallback: the only observed signal is
+  agy's own log (`agentScript=false` / the fallback warning), which ties the
+  daemon to a version-pinned log line; resume behavior and location
+  precedence are untested.
 
 - Whether a custom agent subsumes or changes the rendered-manual delivery of
   `261117-feat-ws-hosted-prompt-assembly` for the agy lead (system-prompt
