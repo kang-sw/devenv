@@ -36,6 +36,43 @@ The ticket was first captured on 2026-11-14 as a docs-only plan while the owner 
 7. **Delegation is `ws/agent.*` (06).** Hosted sessions delegate through `ws/agent.*`, not native subagents. Owner (08)=c: whether a harness's native subagents can be removed is decided per harness at stage 3, so Phase 1 probes and records it for Codex.
 8. **Compatibility target: T0.** Preserve current Pi/Claude controls, native integrations, identities, readable state and existing API/holder/event semantics. Phase 1 records the concrete tier verdict for every new descriptor/config/serialization surface in its `### Result`, with source lines, including an old daemon reopening a hosted Record whose new Codex `Backend` value it does not know. T2, root-key policy changes and a store/protocol rewrite are not authorized.
 
+9. **Phase 2 settlements of the Phase 1 gaps (owner, 2026-11-18).**
+   - (101)=a, E1: approvals stay binary. Allow maps to `accept` and deny to
+     `decline` (`{permissions:{}, scope:"turn"}` for a permissions request),
+     with stable correlation. `acceptForSession`, the policy amendments,
+     `cancel` and elicitation `persist` are reported unsupported, never
+     mapped onto another choice. Rejected: (b) offered choices on
+     `ApprovalRequest` with a dashboard UI change in Phase 2, a cross-harness
+     change outside this slice. The owner plans permission bypass as the
+     usual default for Codex and agy, with a later ws-side auto-mode hook
+     (for example a decision model) rather than a richer manual choice set;
+     the richer set is follow-up work, not this ticket.
+   - (95), E2: `item/tool/requestUserInput` is answered with an error
+     telling the model to write the question as plain chat text and end the
+     turn, the same wording the Claude hosted lead uses for `AskUserQuestion`
+     (`agents-plugin-tool/internal/wsagent/claude.go` L616-621, L1311); the
+     dashboard has no question form.
+   - (96): an old daemon reopening a hosted Record with `backend: "codex"` is
+     T1, the Phase 1 verdict above; T1 permits a patch.
+   - (97), G1: the version comes from `thread.cliVersion`;
+     `parseHarnessVersion` is not widened to strip `codex-cli `. Rejected:
+     widening the shared parser, which touches every harness for a value the
+     protocol already supplies.
+   - (98), G2: the catalog's `usage_query` text is reworded to "ws obtains
+     the harness's usage (asked or pushed)", and Codex grades native by push.
+     Rejected: a separate push-only item.
+   - G3 follows (101)=a and (95): no catalog slot for the approval decision
+     set or the user-question request, since neither adds a capability the
+     adapter offers.
+   - (99): the ws plugin's stdio MCP is blocked by shadowing - the HTTP entry
+     is injected under the plugin's server name (`ws`; `wsflow` for that
+     package). Rejected: `plugins."<id>".enabled=false`, which drops the
+     plugin's skills and hooks and needs the installation-specific key.
+     Phase 2 verifies by process count that no stdio `ws-mcp` is spawned.
+   - (100): Codex hooks stay user-controlled (Claude-lead parity); the
+     adapter does not set `features.hooks=false`. Rejected: disabling hooks,
+     which silently drops user-configured behavior only in hosted leads.
+
 ## Capability Matrix (range-based)
 
 Current target protocol: **Codex app-server** (Decision 2); installed version `codex-cli 0.160.0` (`codex --version`). The supported version range and per-row evidence are **not yet verified** (Phase 1). This is the finite contract matrix to complete, not a declaration of API support. Each completed row maps to a catalog item and carries the version range (`since` / `until`) it holds for, official contract citation, fixture identity and `native` / `ws-substitute` / `unsupported` classification. Historical versions below are evidence labels, not the chosen hosted target.
@@ -274,6 +311,6 @@ removed `WS_*`/`CLAUDE*`/`ORCA_*`/`PI_*` from the child environment.
 
 ### Phase 2: Implement one hosted lead conversation after the foundation gate
 
-Depends on this ticket's settled Phase 1 and the capability catalog ticket's Phases 1-3 (`261117-feat-ws-harness-capability-catalog`); execution approval is granted (Decision 4). Implement only the agreed hosted-lead slice through the existing Runner/backend/holder boundary, the catalog profile and the startup version/init-shape check. Preserve truthful unsupported controls, one input/mail owner, approvals, identity and ordered recovery. No implicit native-child, multi-account or terminal-handoff parity expansion. The backend serves the lead role only: it must not make `codex.<tier>` spawnable as an `agent.spawn` worker (batch-review coherence C2; the tier listing rule lives in `261117-feat-ws-agent-tools-mailbox-routing`).
+Depends on this ticket's settled Phase 1 and the capability catalog ticket's Phases 1-3 (`261117-feat-ws-harness-capability-catalog`); execution approval is granted (Decision 4). Implement only the agreed hosted-lead slice through the existing Runner/backend/holder boundary, the catalog profile and the startup version/init-shape check. Preserve truthful unsupported controls, one input/mail owner, approvals, identity and ordered recovery. No implicit native-child, multi-account or terminal-handoff parity expansion. The backend serves the lead role only: it must not make `codex.<tier>` spawnable as an `agent.spawn` worker (batch-review coherence C2; the tier listing rule lives in `261117-feat-ws-agent-tools-mailbox-routing`). Decision 9 settles the Phase 1 gaps (E1, E2, G1-G3), the ws-plugin MCP block mechanism and hooks; apply the Phase 1 removal verdict (`config.agents.enabled=false` on `thread/start` and `thread/resume`) for the hosted lead.
 
 Verification: isolated protocol and real-adapter/fake-holder fixtures for create/resume/send/interrupt, ordered content/tools/usage/errors, approvals, unknown events, holder reattach/replay gaps and no duplicate input. Run Pi/Claude regressions against the exact candidate. A real hosted Codex lead conversation on the installed CLI with the owner's login is the acceptance check; no fixture result is invented.
