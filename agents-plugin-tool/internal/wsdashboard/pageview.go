@@ -229,7 +229,9 @@ type AgentNode struct {
 	// Linked reports that the delegate's reply-id is a session this daemon
 	// serves with a page (a board, or an agent runner's conversation), so
 	// its label links to that page.
-	Linked     bool
+	Linked bool
+	// PiDeleted is display-only; the live snapshot keeps its legacy status.
+	PiDeleted  bool
 	Running    *wslive.RunningView
 	Generating *wslive.GeneratingView
 	// Finished is the agent's finished batches, oldest first; the page shows
@@ -257,6 +259,21 @@ type LiveSlot struct {
 
 // IsRunning reports a running agent.
 func (a AgentNode) IsRunning() bool { return a.Status == wslive.StatusRunning }
+
+// EndedStatus is the localized status key suffix for an ended row. Pi
+// children sleep between turns; native Claude/Codex rows still finish done.
+func (a AgentNode) EndedStatus() string {
+	if a.AgentKind == wslive.AgentKindPi && a.Status == wslive.StatusDone {
+		if a.PiDeleted {
+			return "deleted"
+		}
+		return "sleep"
+	}
+	if a.Status == wslive.StatusFailed {
+		return "failed"
+	}
+	return "done"
+}
 
 // ModelText is the agent's model and reasoning effort joined by a space
 // ("<model> <effort>"), either alone when only one is known; empty when
@@ -562,6 +579,8 @@ type sessionLookup struct {
 	// observed is needed only by non-compact peer child hovers. Counts and
 	// compact peer rows use snapshot, which need not sweep retained history.
 	observed func(replyID string) *wslive.Snapshot
+	// piDeleted checks revival only for settled Pi rows, never native rows.
+	piDeleted func(replyID string) bool
 }
 
 // get returns a session this daemon serves.
@@ -774,6 +793,9 @@ func agentTree(agents []wslive.Agent, lookup sessionLookup) []AgentNode {
 				node.Slots = liveSlots(node.Permission, node.Finished, node.Running, node.Generating)
 			}
 			if a.ReplyID != "" {
+				if a.AgentKind == wslive.AgentKindPi && a.Status == wslive.StatusDone && lookup.piDeleted != nil {
+					node.PiDeleted = lookup.piDeleted(a.ReplyID)
+				}
 				// A conversation the agent runner hosts (a spawned Pi
 				// subagent) has a page and no board.
 				if s, ok := lookup.get(a.ReplyID); ok && (s.HasBoard || s.Agent) {

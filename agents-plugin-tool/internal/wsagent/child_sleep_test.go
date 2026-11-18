@@ -140,6 +140,37 @@ func TestFinishedPiWorkerSleepsAfterItsReportAndSendWakesIt(t *testing.T) {
 	eventuallyAsleep(t, h, w.ID)
 }
 
+// Revival admits its first message under the same fence as explicit close.
+func TestPiRevivalFencesMessageAdmission(t *testing.T) {
+	h, _ := childHarness(t)
+	w, _ := finishableWorker(t, h)
+	if _, err := h.runner.CloseConversation(w.ID); err != nil {
+		t.Fatal(err)
+	}
+	h.runner.Close()
+	admissions := 0
+	h.config.sendAdmitting = func(id string) {
+		if id == w.ID {
+			admissions++
+			if h.runner.resumeMu.TryLock() {
+				h.runner.resumeMu.Unlock()
+				t.Error("revival admitted a message outside the close fence")
+			}
+		}
+	}
+	h.start()
+	starts := h.backend.startCount()
+	if _, err := h.runner.Send(w.ID, "follow-up"); err != nil {
+		t.Fatal(err)
+	}
+	if admissions != 1 {
+		t.Fatalf("revival needed %d admissions, want 1", admissions)
+	}
+	if text := h.backend.waitProc(t, starts).nextSent(t); text != h.envelope("follow-up") {
+		t.Fatalf("revived turn = %q", text)
+	}
+}
+
 // A child whose report its parent has not taken yet keeps it, however long
 // the parent's loop is busy; once the parent takes it, the child stays open.
 func TestPiChildReportReachesItsBusyParentAndTheChildStaysOpen(t *testing.T) {
@@ -338,6 +369,46 @@ func TestClosingALeadClosesItsPiChildren(t *testing.T) {
 	eventually(t, "the child's holder stopped", func() bool { return h.holders.opCount("stop "+holder) == 1 })
 	if st := h.state(other.ID); st.Status == StatusClosed {
 		t.Fatalf("another lead's Pi child closed: %+v", st)
+	}
+}
+
+// A lead close can finish its descendant snapshot while a ParentLead
+// spawn is still minting its key. Releasing that spawn only after the close
+// forces registration past the snapshot, without timing-dependent sleeps.
+func TestLeadCloseFencesConcurrentPiSpawn(t *testing.T) {
+	h, _ := newFakePiRecoveryHarness(t)
+	lead := h.lead(BackendPi, LeadOptions{})
+	parent := ParentRef{Kind: ParentLead, ReplyID: lead.ID}
+	mint := h.opts.Keys.(*fakeKeys).gateMint(t, h.root)
+	type result struct {
+		st  State
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		st, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "work", Tier: "small", Parent: &parent})
+		done <- result{st, err}
+	}()
+	mint.awaitEntered(t)
+	if _, err := h.runner.CloseConversation(lead.ID); err != nil {
+		t.Fatal(err)
+	}
+	mint.release()
+	select {
+	case got := <-done:
+		if got.err != errClosed {
+			t.Fatalf("spawn registered after lead close = %+v, %v; want errClosed", got.st, got.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("spawn did not finish after lead close")
+	}
+	for _, child := range h.runner.Children(parent) {
+		if child.Status != StatusClosed {
+			t.Fatalf("closed lead left a live Pi child: %+v", child)
+		}
+		if c := h.runner.conv(child.ID); c != nil {
+			t.Fatalf("closed lead left a child loop registered: %s", child.ID)
+		}
 	}
 }
 

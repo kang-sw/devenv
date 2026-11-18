@@ -8,6 +8,7 @@ related:
   261116-bug-ws-dashboard-hidden-cached-page-cost: "P3: cache removal and fresh-switch load follow-up; clocks dropped after measured trace"
   261116-bug-werkschaft-electron-high-resolution-lag-diagnostics: "P2: isolate native high-resolution presentation from shared renderer costs"
   261111-bug-ws-dashboard-daemon-idle-cpu-windows: "backend profile/discovery costs, measured separately"
+dropped: 2026-11-18
 ---
 
 # ws dashboard frontend performance - profile and optimize
@@ -418,3 +419,8 @@ push. Fixes-only R2 and the owner live re-trace remain pending.
 
 The earlier content-visibility:auto/virtualization Forward remains ordered
 AFTER hidden-measurement guard landing and owner re-tracing; neither is added.
+
+
+## Resolution (2026-11-18)
+
+Superseded by scoped successors. This umbrella profiling ticket's Phase 1 work landed in 838fd96f4, and the remaining frontend cost was fixed by narrower tickets (8c3687d9c idle and session-switch cost; ec3c287c5 lazy board targets; the render-cost and visible-only board rendering merges before v0.50.3).

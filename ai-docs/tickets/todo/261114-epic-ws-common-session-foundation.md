@@ -208,9 +208,12 @@ Board IDs `(NN)` refer to the 2026-11-17 lead-discuss session; earlier IDs
   additive). Whether Pi supports HTTP MCP natively without the extension is
   verified first, because the Pi extension retirement premise depends on it.
 - **Delegation is always `ws/agent.*` (06)=a, (09)=a, (10)=c, (11), (12).**
-  `agent.spawn` / `agent.interrupt` / `agent.list` / `agent.tiers` ((60)=a
-  removed `agent.stop`); no `wait`, `transcript` or
-  `agent.send`; a single `mailbox.send`. Daemon-owned agent addresses route in
+  `agent.spawn` / `agent.interrupt` / `agent.list` / `agent.tiers`; no `wait`,
+  `transcript` or `agent.send`; a single `mailbox.send`. Child
+  `261117-feat-ws-agent-tools-mailbox-routing` Decision 1 ((60)=a) removes
+  `agent.stop`: interrupt ends the current turn, then the child sleeps by TTL;
+  permanent close is human-only in the dashboard, cascading deepest-first.
+  Daemon-owned agent addresses route in
   memory. Relation is computed from lineage at delivery, not stored. Hire stays
   separate; worker-profile caps apply; `pi.*` alias wording superseded: hidden now, handlers removed next minor (owner 19:16, (54)=b). Spawn tree
   bounds ((72), owner 22:27, reversing (10)=c; (77)-(79)): depth cap 4 (lead =

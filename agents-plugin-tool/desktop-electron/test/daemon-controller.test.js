@@ -40,7 +40,7 @@ test('manual start attaches a healthy older daemon without selecting or spawning
     launch: () => assert.fail('must not launch'),
   }), URL);
 });
-test('numeric REST core precedence, explicit one-shot equal swap, and cross-boundary refusal', async t => {
+test('numeric REST core precedence and explicit one-shot equal swap', async t => {
   const f = fixture(t, 'darwin');
   let live = { pid: 120, version: '0.50.1', lan: true, started_at: 'old', content_hash: 'old' };
   let launches = [], drains = 0, notices = [];
@@ -69,10 +69,43 @@ test('numeric REST core precedence, explicit one-shot equal swap, and cross-boun
   assert.equal(await connectDaemon({ ...config(f), replace: true }, deps), URL);
   assert.match(notices.at(-1), /different daemon won/);
   assert.equal(drains, 2);
-  live.version = '0.49.9';
-  assert.equal(await connectDaemon(config(f), deps), URL);
-  assert.equal(launches.length, 2, 'unknown cross-minor clients keep incumbent');
-  assert.match(notices.at(-1), /attached client versions are unknown.*update connected plugins/i);
+});
+test('ordinary connect decision table: a newer core replaces across patch and minor, never downgrades', async t => {
+  // Bundled core is 0.50.1-dev; suffixes never order equal cores.
+  const rows = [
+    ['0.49.9', false, 'replace', 'newer minor'],
+    ['0.50.0', false, 'replace', 'newer patch'],
+    ['0.50.1', false, 'attach', 'equal core'],
+    ['0.50.1-dev', false, 'attach', 'equal core with -dev'],
+    ['0.50.4', false, 'attach', 'older bundle patch'],
+    ['0.51.0', false, 'attach', 'older bundle minor'],
+    ['0.50.1', true, 'replace', 'explicit equal-core replace'],
+    ['0.51.0', true, 'attach', 'explicit replace never downgrades'],
+  ];
+  for (const platform of ['win32', 'darwin']) {
+    const f = fixture(t, platform);
+    for (const [running, replace, want, name] of rows) {
+      const label = `${platform} ${name} (${running}${replace ? ', menu' : ''})`;
+      let live = { pid: 120, version: running, started_at: 'incumbent', lan: false };
+      const launches = [], notices = [];
+      const successor = () => { live = { pid: 121, version: '0.50.1-dev', started_at: 'successor', lan: false }; };
+      const deps = { env: env(f), onNotice: s => notices.push(s), sleep: async () => {},
+        inspect: async () => ({ url: URL, endpoint: { pid: live.pid, port: 32000 }, health: { ...live } }),
+        launch: async (_binary, _opts, args) => { launches.push(args); if (platform === 'win32') successor(); },
+        shutdown: async () => { assert.notEqual(platform, 'win32', 'Windows native starter owns drain'); successor(); } };
+      assert.equal(await connectDaemon({ ...config(f), platform, replace }, deps), URL, label);
+      assert.deepEqual(notices, [], label);
+      if (want === 'attach') {
+        assert.deepEqual(launches, [], label);
+        assert.equal(live.pid, 120, label);
+        continue;
+      }
+      assert.equal(live.pid, 121, label);
+      assert.deepEqual(launches, [platform === 'win32'
+        ? ['daemon-start', '--require-independent-lifetime', '--start-wait', '13s', ...(replace ? ['--replace'] : [])]
+        : ['dashboard', '--port', '32000', '--lock-wait', '8s']], label);
+    }
+  }
 });
 test('macOS detached creation failure leaves incumbent serving before drain', async t => {
   const f = fixture(t, 'darwin');
@@ -95,31 +128,60 @@ test('approved OS-accepted macOS creation precedes drain without claiming lock r
   assert.equal(await connectDaemon({ ...config(f), replace: true }, deps), URL);
   assert.deepEqual(order, ['created', 'drained']);
 });
-test('Windows ordinary startup attaches an older compatible patch without staging or spawning; explicit Replace still works', async t => {
-  const f = fixture(t, 'win32');
-  let live = { pid: 120, version: '0.50.0', started_at: 'incumbent', lan: true };
-  const incumbent = { ...live };
-  let stages = 0, launches = 0;
-  const deps = { env: env(f),
+test('Windows ordinary startup upgrades an older patch through the strict starter; equal and older-bundle attach', async t => {
+  const f = fixture(t, 'win32'); // Bundled core 0.50.1 (-dev suffix).
+  let live, stages = 0, launches = [], notices = [];
+  const deps = { env: env(f), onNotice: s => notices.push(s),
     inspect: async () => ({ url: URL, endpoint: { pid: live.pid, port: 32000 }, health: { ...live } }),
     stage: (...args) => { stages++; return require('../daemon-stage').stageDaemon(...args); },
-    shutdown: () => assert.fail('Windows native starter owns explicit drain'),
-    launch: async (_binary, _options, args, wait) => {
-      launches++;
-      assert.deepEqual(args, ['daemon-start', '--require-independent-lifetime', '--start-wait', '13s', '--replace']);
+    shutdown: () => assert.fail('Windows native starter owns drain'),
+    launch: async (_binary, opts, args, wait) => {
+      launches.push(args);
       assert.equal(wait, true);
-      live = { ...live, pid: 121, version: '0.50.1', started_at: 'explicit successor' };
+      assert(opts.cwd.startsWith(path.join(f.userData, 'daemon-stages')));
+      live = { ...live, pid: live.pid + 1, version: '0.50.1-dev', started_at: 'successor' };
     } };
   const options = { ...config(f), platform: 'win32' };
-  assert.equal(await connectDaemon(options, deps), URL);
-  assert.equal(stages, 0);
-  assert.equal(launches, 0);
-  assert.deepEqual(live, incumbent);
+  const attaches = async (version, notice) => {
+    live = { pid: 120, version, started_at: 'incumbent', lan: true };
+    const incumbent = { ...live }, before = notices.length;
+    assert.equal(await connectDaemon(options, deps), URL);
+    assert.deepEqual(live, incumbent, version);
+    assert.equal(stages, 0, version);
+    assert.equal(launches.length, 0, version);
+    if (notice) assert.match(notices.at(-1), notice);
+    else assert.equal(notices.length, before, version);
+  };
+  await attaches('0.50.1-dev');
+  await attaches('0.50.1');
+  await attaches('0.50.4');
+  await attaches('0.51.0');
   assert.equal(fs.existsSync(path.join(f.userData, 'daemon-stages')), false);
-  assert.equal(await connectDaemon({ ...options, replace: true }, deps), URL);
+  live = { pid: 120, version: '0.50.0', started_at: 'incumbent', lan: true };
+  assert.equal(await connectDaemon(options, deps), URL);
   assert.equal(stages, 1);
-  assert.equal(launches, 1);
+  assert.deepEqual(launches, [['daemon-start', '--require-independent-lifetime', '--start-wait', '13s']],
+    'automatic upgrade leaves Ensure keeping an equal core that raced in');
   assert.equal(live.pid, 121);
+  assert.equal(await connectDaemon(options, deps), URL);
+  assert.equal(launches.length, 1, 'the upgraded equal core stays');
+  assert.equal(await connectDaemon({ ...options, replace: true }, deps), URL);
+  assert.equal(stages, 2);
+  assert.deepEqual(launches.at(-1), ['daemon-start', '--require-independent-lifetime', '--start-wait', '13s', '--replace']);
+  assert.equal(live.pid, 122);
+  assert.equal(notices.length, 0);
+});
+test('Windows ordinary startup keeps the incumbent when the strict starter refuses an automatic upgrade', async t => {
+  const f = fixture(t, 'win32');
+  const live = { pid: 120, version: '0.50.0', started_at: 'incumbent', lan: true };
+  let notice, launches = 0;
+  const deps = { env: env(f), onNotice: s => { notice = s; },
+    inspect: async () => ({ url: URL, endpoint: { pid: live.pid, port: 32000 }, health: { ...live } }),
+    shutdown: () => assert.fail('Windows native starter owns drain'),
+    launch: async (_binary, _opts, args) => { launches++; assert(!args.includes('--replace')); } };
+  assert.equal(await connectDaemon({ ...config(f), platform: 'win32' }, deps), URL);
+  assert.equal(launches, 1);
+  assert.match(notice, /refused by the starter; keeping the current connection/);
 });
 test('Windows strict starter attaches a newer cross-minor winner without a second spawn or drain', async t => {
   const f = fixture(t, 'win32');
@@ -136,7 +198,7 @@ test('Windows strict starter attaches a newer cross-minor winner without a secon
       else live = { pid: 123, version: '0.50.1', lan: true, started_at: 'successor' };
     } };
   assert.equal(await connectDaemon({ ...config(f), platform: 'win32', replace: true }, deps), URL);
-  assert.match(notice, /newer daemon won.*update connected plugins/i);
+  assert.equal(notice, undefined);
   assert.equal(calls, 1);
   assert.equal(live.version, '0.51.0'); // A plugin may win; never claim it was our successor.
   assert.equal(await connectDaemon({ ...config(f), platform: 'win32', replace: true }, deps), URL);
@@ -145,7 +207,7 @@ test('Windows strict starter attaches a newer cross-minor winner without a secon
   assert.equal(await connectDaemon({ ...config(f), platform: 'win32', replace: true }, deps), URL);
   assert.equal(calls, 2);
   assert.equal(live.pid, 123);
-  assert.match(notice, /newer daemon won/);
+  assert.equal(notice, undefined);
 });
 test('Windows strict starter failure attaches only a verified newer raced winner', async t => {
   const f = fixture(t, 'win32');
@@ -155,7 +217,7 @@ test('Windows strict starter failure attaches only a verified newer raced winner
     launch: async () => { calls++; live = { pid: 121, version: '1.0.0', started_at: 'raced' }; throw Error('starter failed'); },
     shutdown: () => assert.fail('Go owns drain') };
   assert.equal(await connectDaemon({ ...config(f), platform: 'win32', replace: true }, deps), URL);
-  assert.match(notice, /newer daemon won.*update connected plugins/i);
+  assert.equal(notice, undefined);
   assert.equal(calls, 1);
   live = { pid: 120, version: '0.50.1', started_at: 'old' };
   deps.launch = async () => { calls++; live = { pid: 122, version: '0.49.9', started_at: 'older' }; throw Error('starter failed'); };
@@ -170,7 +232,7 @@ test('failed macOS drain attaches a newer winner but refuses an older or unident
     launch: async () => {}, onNotice: text => { notice = text; },
     shutdown: async () => { live = { pid: 121, version: '0.51.0', lan: true, started_at: 'raced' }; throw Error('stale endpoint'); } };
   assert.equal(await connectDaemon({ ...config(f), replace: true }, deps), URL);
-  assert.match(notice, /newer daemon won.*update connected plugins/i);
+  assert.match(notice, /outcome is uncertain/);
   live = { pid: 120, version: '0.50.1', lan: false, started_at: 'old' };
   deps.shutdown = async () => { live = { pid: 121, version: '0.49.9', started_at: 'older' }; throw Error('stale endpoint'); };
   await assert.rejects(connectDaemon({ ...config(f), replace: true }, deps), /older or unidentified daemon won/);
@@ -186,7 +248,7 @@ test('successor wait attaches numerically newer cross-major winner without anoth
     launch: async () => {}, shutdown: async () => { drains++; live = { pid: 121, version: '1.0.0', started_at: 'winner' }; } };
   assert.equal(await connectDaemon({ ...config(f), replace: true }, deps), URL);
   assert.equal(drains, 1);
-  assert.match(notices.at(-1), /newer daemon won.*update connected plugins/i);
+  assert.deepEqual(notices, []);
 });
 test('successor wait recognizes same-PID/start-time endpoint token rotation', async t => {
   const f = fixture(t, 'darwin');
@@ -206,7 +268,7 @@ test('successor wait recognizes same-PID/start-time endpoint token rotation', as
     shutdown: async () => { drains++; token = 'b'.repeat(64); version = '1.0.0'; writeEndpoint(); } };
   assert.equal(await connectDaemon({ ...config(f), replace: true }, deps), `http://127.0.0.1:${server.address().port}/`);
   assert.equal(drains, 1);
-  assert.match(notice, /newer daemon won.*update connected plugins/i);
+  assert.equal(notice, undefined);
 });
 test('failed preflight leaves incumbent serving, failed drain and late successor failure are distinct', async t => {
   const f = fixture(t, 'darwin');
@@ -264,7 +326,7 @@ test('staging race attaches newer but refuses older or unidentified winners with
       return { url: URL, endpoint: { pid: live.pid, port: 32000 }, health: { ...live } }; },
     launch: () => assert.fail('raced winner must not launch'), shutdown: () => assert.fail('raced winner must not drain') };
   assert.equal(await connectDaemon({ ...config(f), replace: true }, deps), URL);
-  assert.match(notice, /newer daemon won.*update connected plugins/i);
+  assert.equal(notice, undefined);
   for (const version of ['0.49.9', 'unknown']) {
     live = { pid: 120, version: '0.50.1', started_at: 'old' }; checks = 0;
     deps.inspect = async () => { if (++checks === 2) live = { pid: 121, version, started_at: 'raced' };

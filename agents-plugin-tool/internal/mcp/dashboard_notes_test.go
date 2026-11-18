@@ -23,7 +23,11 @@ func TestDashboardNotesUsesHostedCallerStoreIdentity(t *testing.T) {
 	env[wsstate.EnvCacheHome] = filepath.Join(t.TempDir(), "caller-cache")
 	env[wsconfig.EnvConfigHome] = filepath.Join(t.TempDir(), "caller-config")
 	s := NewServerWithOptions(ServerOptions{Root: t.TempDir(), Version: "test", Env: EnvFromMap(env), Notes: cache})
-	root, key := mintRootKey(t, s, 1)
+	root := t.TempDir()
+	initGit(t, root)
+	// Registration uses login's canonical root, not the temp path's spelling:
+	// symlinks on macOS and drive casing/separators on Windows may differ.
+	key, root := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
 	caller, err := wsnote.ReadPaths(root, s.configOptions(), s.stateOptions())
 	if err != nil {
 		t.Fatal(err)

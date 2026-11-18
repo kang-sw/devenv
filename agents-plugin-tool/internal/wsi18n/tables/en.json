@@ -56,6 +56,8 @@
   "js.usage.estimated": "No record (estimated)",
   "agent.context": "context: {0} tokens",
   "agent.done": "done",
+  "agent.sleep": "sleep",
+  "agent.deleted": "deleted",
   "agent.effort": "effort: {0}",
   "agent.failed": "failed",
   "agent.model": "model: {0}",

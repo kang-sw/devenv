@@ -155,6 +155,14 @@ func piDir(dir string) string { return filepath.Join(dir, "pi") }
 
 func piSessionFile(dir string) string { return filepath.Join(piDir(dir), "session.jsonl") }
 
+// PiSessionAvailable reports whether a conversation's session directory holds
+// the regular Pi session file required to revive a closed child. Stat errors,
+// including inaccessible files, fail the same check as a missing file.
+func PiSessionAvailable(sessionDir string) bool {
+	info, err := os.Stat(piSessionFile(sessionDir))
+	return err == nil && info.Mode().IsRegular()
+}
+
 var piNameUnsafe = regexp.MustCompile(`[^A-Za-z0-9_]`)
 
 // piMCPToolName is Pi's name for an MCP server's tool: mcp__<server>__<tool>

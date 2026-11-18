@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -354,12 +353,8 @@ func (r *Runner) ownChild(tool, id string, parent ParentRef) error {
 // spawned Pi child is revivable: its identity and launch settings stay in
 // the same record, and the ordinary lazy-start path resumes its Pi file.
 // Open children whose process died already use that same lazy-start path.
+// The caller holds resumeMu through both revival and message admission.
 func (r *Runner) resumePiChild(id string) (*conv, error) {
-	if c, err := r.open(id); err == nil {
-		return c, nil
-	}
-	r.resumeMu.Lock()
-	defer r.resumeMu.Unlock()
 	// A concurrent send may have reopened it while this one waited.
 	c, err := r.open(id)
 	if err == nil {
@@ -381,7 +376,7 @@ func (r *Runner) resumePiChild(id string) (*conv, error) {
 	}
 	dir := wsdashboard.SessionDir(r.opts.Dir, id)
 	file := piSessionFile(dir)
-	if info, statErr := os.Stat(file); statErr != nil || !info.Mode().IsRegular() {
+	if !PiSessionAvailable(dir) {
 		return nil, conflict("cannot resume Pi subagent %s: its session file is missing, inaccessible, or not a regular file: %s", id, file)
 	}
 	rec.ClosedAt = ""

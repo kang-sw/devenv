@@ -374,10 +374,14 @@
     return boardQ("section.topic[data-topic]").some(function (shown) { return shown.getAttribute("data-topic") === name; }) ||
       !!(window.WsCards && window.WsCards.pinnedTopic(name));
   }
+  function boardImageStamp() {
+    var marker = doc.querySelector('template[data-history-images]');
+    return marker && marker.getAttribute('data-history-images');
+  }
   function loadClosed(btn) {
     if (!window.fetch || btn.disabled) return;
     btn.disabled = true;
-    var from = +btn.getAttribute("data-closed-next");
+    var from = +btn.getAttribute("data-closed-next"), images = boardImageStamp();
     return fetch("/s/" + rid + "/closed?from=" + from, { credentials: "same-origin", cache: "no-store" }).then(function (r) {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
@@ -387,6 +391,7 @@
       // names (a topic closed or reopened): the page fetched may not follow
       // what shows now, and the control is clicked again.
       if (!btn.parentNode || !page || +btn.getAttribute("data-closed-next") !== from) { btn.disabled = false; return; }
+      if (images !== boardImageStamp()) { btn.disabled = false; return loadClosed(btn); }
       // Pinned topics and closed topics materialized by a panel jump already
       // stand on the board; slots retain their place in the page count.
       q("section.topic[data-topic]", page).forEach(function (t) {

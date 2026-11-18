@@ -85,8 +85,8 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 	}
 
 	// A board without file targets: the regions are what the static full
-	// page shows, but for the topic bar's count chips, bulk-answer buttons
-	// on the served page only (wswhiteboard.StaticCountChips).
+	// page shows, but for the topic bar's bulk-answer count chips and the
+	// served-only lazy-history image stamp.
 	f.call(t, "todo.add", map[string]any{"key": "step", "title": "a step"})
 	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>a question</wb:title><wb:why>plain reason</wb:why></wb:add></wb:topic>`)
 	page = readPageOK(t, src, reg)
@@ -94,7 +94,18 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 		t.Fatalf("board page = %+v", page)
 	}
 	static := f.fullPage(t)
-	if !strings.Contains(static, wswhiteboard.StaticCountChips(string(page.Board.Board))) {
+	// The stamp is transport metadata, not board content. Even a board
+	// without images carries the empty dependency stamp on the served page;
+	// the standalone page has no image route or lazy-history fetch to refresh.
+	servedBoard := string(page.Board.Board)
+	imageStamp := `<template data-history-images="` + boardWatchStamp(nil) + `"></template>`
+	if !strings.HasSuffix(servedBoard, imageStamp) {
+		t.Fatal("served board lacks the empty history image stamp")
+	}
+	if strings.Contains(static, `<template data-history-images=`) {
+		t.Error("static page carries a served-only history image stamp")
+	}
+	if !strings.Contains(static, wswhiteboard.StaticCountChips(strings.TrimSuffix(servedBoard, imageStamp))) {
 		t.Errorf("the static page does not hold the served board:\n%.600s", page.Board.Board)
 	}
 	// The served drawer keeps an empty ticket card for the idea demand
@@ -237,7 +248,9 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 		t.Fatalf("pages written to disk = %v, want the full page and an embed", written)
 	}
 	for _, name := range written {
-		if page := readPage(t, filepath.Join(f.dir(), name)); strings.Contains(page, "data-relay") || strings.Contains(page, "/image?path=") {
+		// Shared history code can name the attribute; standalone content
+		// must never carry a relay attribute or a protected image URL.
+		if page := readPage(t, filepath.Join(f.dir(), name)); strings.Contains(page, `data-relay="`) || strings.Contains(page, "/image?path=") {
 			t.Errorf("%s carries a relay or the image route", name)
 		}
 	}

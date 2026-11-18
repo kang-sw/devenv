@@ -60,6 +60,46 @@ func usageWriteCounter(s *planUsageStore) map[string]int {
 	return writes
 }
 
+func TestPlanUsageSaveSkipsUnchangedAndRetriesFailedWrite(t *testing.T) {
+	s := usageTestStore(t)
+	writes := 0
+	fail := false
+	s.writeFile = func(dir, name string, data []byte) error {
+		writes++
+		if fail {
+			return os.ErrPermission
+		}
+		return writePrivateFile(dir, name, data)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.saveLocked()
+	s.saveLocked()
+	if writes != 1 {
+		t.Fatalf("identical saves: got %d writes, want 1", writes)
+	}
+	s.gpt.Status = "usage unavailable"
+	s.saveLocked()
+	if writes != 2 {
+		t.Fatalf("changed entry: got %d writes, want 2", writes)
+	}
+	s.gpt.Status = "Pi token expired - open Pi to refresh"
+	fail = true
+	s.saveLocked()
+	if writes != 3 {
+		t.Fatalf("failed save: got %d writes, want 3", writes)
+	}
+	fail = false
+	s.saveLocked()
+	if writes != 4 {
+		t.Fatalf("retry: got %d writes, want 4", writes)
+	}
+	s.saveLocked()
+	if writes != 4 {
+		t.Fatalf("unchanged after retry: got %d writes, want 4", writes)
+	}
+}
+
 func claudeKinds(s *planUsageStore) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

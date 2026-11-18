@@ -11,6 +11,7 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -1019,6 +1020,7 @@ func (r pageReader) lookup() sessionLookup {
 			}
 			return snap
 		},
+		piDeleted: func(id string) bool { return piChildDeleted(r.dir, id) },
 		observed: func(id string) *wslive.Snapshot {
 			snap, read := observed[id]
 			if !read {
@@ -1115,6 +1117,16 @@ func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChan
 			},
 			snapshot: lookup.snap,
 			observed: lookup.observedSnap,
+			piDeleted: func(id string) bool {
+				if !ValidReplyID(id) {
+					return false
+				}
+				// Refresh the owner's row when a closed child loses its
+				// revival file, even without another runner event.
+				dir := SessionDir(r.dir, id)
+				inputs.watch = append(inputs.watch, filepath.Join(dir, AgentRecordFileName), filepath.Join(dir, "pi", "session.jsonl"))
+				return lookup.piDeleted(id)
+			},
 		}
 		inputs.watch = append(inputs.watch, in.AttachDir)
 		inputs.contacts = len(page.Contacts) > 0

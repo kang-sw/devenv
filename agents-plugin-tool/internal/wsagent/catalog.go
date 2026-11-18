@@ -418,7 +418,7 @@ func AgyCatalog() *HarnessProfile {
 			{Item: ItemToolRemoval, Role: RoleLead, Grade: GradeUnsupported,
 				Source: "the lead keeps the user's tool setup; only a custom main agent removes tools"},
 			{Item: ItemSubagentRemoval, Role: RoleLead, Grade: GradeUnsupported,
-				Source: "the lead keeps agy's subagent tools (ticket 261117-feat-ws-hosted-antigravity-adapter, (89)=a); the per-harness playbook line covers it"},
+				Source: "the lead keeps agy's subagent tools; the per-harness playbook line covers it"},
 			{Item: ItemModelEffort, Role: RoleLead, Grade: GradeNative,
 				Source: "session/set_config_option of the model and thought_level options (agyProcess.SetModel, SetEffort); choices from the session's configOptions (AgyBackend.Choices)"},
 			{Item: ItemApproval, Role: RoleLead, Grade: GradeNative,

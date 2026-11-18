@@ -41,7 +41,7 @@ const (
 		"The whiteboard is your primary channel for what you ask the user. Every item\n" +
 		"you ask of the user (discussion items and Open Decision Queue items) goes on\n" +
 		"the whiteboard through `{{ns}}/whiteboard.update`. Durable current state goes\n" +
-		"in topic content; substantial discussion goes in panels. While the user is watching the board (the\n" +
+		"in a topic's `state` panel; substantial discussion goes in other panels. While the user is watching the board (the\n" +
 		"playbook's Each turn rule says when), progress and explanations go on it\n" +
 		"too and the chat does not repeat what the board holds; otherwise the chat\n" +
 		"carries them as usual.\n\n" +

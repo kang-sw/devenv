@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -91,6 +90,8 @@ type boardRender struct {
 	units         *wsdashboard.BoardUnits
 	watch         []string
 	externalWatch []string
+	imagePaths    []string
+	imageRevision uint64
 	pids          []int
 }
 
@@ -172,7 +173,11 @@ func (src *DashboardSessionSource) renderBoard(key string, record sessionRecord,
 		shared += boardWatchStamp(prev.board.externalWatch)
 	}
 	topics := map[string]boardTopicMemo{}
-	board, ok := src.renderBoardTopics(key, record, replyID, lang, func(out *boardRender) wswhiteboard.TopicReuse {
+	images := prev.board.imagePaths
+	if !had || prev.board.imageRevision != record.boardRevision {
+		images = servedImagePaths(record)
+	}
+	board, ok := src.renderBoardTopics(key, record, replyID, lang, images, func(out *boardRender) wswhiteboard.TopicReuse {
 		return func(id, revision string, render func() (wswhiteboard.TopicUnit, error)) (wswhiteboard.TopicUnit, error) {
 			if old, found := prev.topics[id]; found && prev.shared == shared && old.revision == revision {
 				topics[id] = old
@@ -261,14 +266,14 @@ func boardWatchStamp(watch []string) string {
 // renderBoardNow renders the board and panels of record under the served
 // page's link rule.
 func (src *DashboardSessionSource) renderBoardNow(key string, record sessionRecord, replyID, lang string) (boardRender, bool) {
-	return src.renderBoardTopics(key, record, replyID, lang, nil)
+	return src.renderBoardTopics(key, record, replyID, lang, servedImagePaths(record), nil)
 }
 
-func (src *DashboardSessionSource) renderBoardTopics(key string, record sessionRecord, replyID, lang string, reuse func(*boardRender) wswhiteboard.TopicReuse) (boardRender, bool) {
+func (src *DashboardSessionSource) renderBoardTopics(key string, record sessionRecord, replyID, lang string, images []string, reuse func(*boardRender) wswhiteboard.TopicReuse) (boardRender, bool) {
 	src.boards.mu.Lock()
 	src.boards.renders++
 	src.boards.mu.Unlock()
-	var out boardRender
+	out := boardRender{imagePaths: images, imageRevision: record.boardRevision}
 	// BuildView only reads the state: the served page never begins a render
 	// or writes a file, so the stored board and the static page are untouched.
 	// The ticket files the panels list, the ticket status directories the
@@ -277,6 +282,9 @@ func (src *DashboardSessionSource) renderBoardTopics(key string, record sessionR
 	watch := func(path string) {
 		out.watch = append(out.watch, path)
 		out.externalWatch = append(out.externalWatch, path)
+	}
+	for _, path := range images {
+		watch(path)
 	}
 	folder := whiteboardFolder(record.Root, key).Dir
 	watchWhiteboardFiles(folder, func(path string) { out.watch = append(out.watch, path) })
@@ -306,6 +314,15 @@ func (src *DashboardSessionSource) renderBoardTopics(key string, record sessionR
 	if err != nil {
 		appendDebugEvent("dashboard.page_render_failed", map[string]any{"error": err.Error()})
 		return boardRender{}, false
+	}
+	// Lazy history has no image URLs in the initial board to change. The
+	// client uses this deterministic stamp to refresh retained image frames,
+	// including after reconnecting to a replacement daemon.
+	marker := template.HTML(fmt.Sprintf(`<template data-history-images="%s"></template>`, boardWatchStamp(images)))
+	regions.Board += marker
+	if units != nil {
+		units.Board = regions.Board
+		units.Shell += marker
 	}
 	out.regions = regions
 	out.units = wsdashboard.NewBoardUnits(units)
@@ -433,7 +450,7 @@ func servedViewInput(record sessionRecord, replyID string) wswhiteboard.ViewInpu
 				return ""
 			}
 			if info, err := os.Stat(docImagePath(record.Root, path)); err == nil {
-				src += "&v=" + strconv.FormatInt(info.ModTime().UnixNano(), 36) + "." + strconv.FormatInt(info.Size(), 36)
+				src += "&v=" + wsdashboard.ImageVersion(info)
 			}
 			return src
 		},

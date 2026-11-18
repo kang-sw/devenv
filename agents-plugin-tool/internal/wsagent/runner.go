@@ -187,6 +187,8 @@ type Options struct {
 	stateInboxRead func(string)
 	// closedSnapshotRead observes closed/handed-off snapshot reads in tests.
 	closedSnapshotRead func(string)
+	// sendAdmitting observes the revival admission fence in tests.
+	sendAdmitting func(string)
 }
 
 // Runner hosts the agent conversations of one dashboard daemon.
@@ -1041,9 +1043,20 @@ func (r *Runner) Send(id, text string) (State, error) {
 }
 
 func (r *Runner) send(id, text string) (State, error) {
-	c, err := r.resumePiChild(id)
+	c, err := r.open(id)
 	if err != nil {
-		return State{}, err
+		// Keep revival and admission in one fence against explicit close.
+		// Open sends do not take resumeMu, so a slow manual close still
+		// refuses them promptly rather than blocking behind its cascade.
+		r.resumeMu.Lock()
+		defer r.resumeMu.Unlock()
+		c, err = r.resumePiChild(id)
+		if err != nil {
+			return State{}, err
+		}
+	}
+	if r.opts.sendAdmitting != nil {
+		r.opts.sendAdmitting(id)
 	}
 	c.wmu.Lock()
 	defer c.wmu.Unlock()

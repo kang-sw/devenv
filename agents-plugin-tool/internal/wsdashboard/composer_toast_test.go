@@ -26,6 +26,7 @@ var doc = typeof doc !== "undefined" ? doc : { querySelector: function () { retu
 var q = typeof q !== "undefined" ? q : function () { return []; };
 var marker = typeof marker !== "undefined" ? marker : function (n) { return "[Image #" + n + "]"; };
 var queueDraft = typeof queueDraft !== "undefined" ? queueDraft : function () {};
+var saveDraft = typeof saveDraft !== "undefined" ? saveDraft : function () {};
 var restoreHeld = typeof restoreHeld !== "undefined" ? restoreHeld : function () {};
 var boardOwn = typeof boardOwn !== "undefined" ? boardOwn : {};
 var imgTrash = typeof imgTrash !== "undefined" ? imgTrash : {};

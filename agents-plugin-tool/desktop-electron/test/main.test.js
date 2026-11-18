@@ -310,8 +310,8 @@ test('startup still shows an error box and exits when the error log cannot be wr
   start({ app, dialog: { showErrorBox: (_title, message) => boxes.push(message) } }, 'win32');
   await tick();
   assert.deepEqual(exits, [1]);
-  assert.equal(stderr[0][0], failure.stack);
-  assert.match(stderr[1][0], /Could not write startup error log/);
+  assert(stderr.some(args => args[0] === failure.stack), 'the startup exception is reported');
+  assert(stderr.some(args => /Could not write startup error log/.test(args[0])), 'the log write failure is reported');
   assert.equal(boxes.length, 1);
   assert(boxes[0].includes(failure.message));
   assert(boxes[0].includes(path.join(directory, 'startup-error.log')));
@@ -436,7 +436,7 @@ test('native same-core action is one explicit attempt, never renderer IPC; refus
   const requests = [];
   const f = await fixture(async (options, deps) => {
     requests.push(options.replace);
-    if (options.replace) deps.onNotice('Unknown client versions; update plugins.');
+    if (options.replace) deps.onNotice('Replacement preflight failed; the incumbent was not drained. Retry later.');
     return 'http://127.0.0.1:39418/';
   });
   await f.menus.replace_daemon.click();

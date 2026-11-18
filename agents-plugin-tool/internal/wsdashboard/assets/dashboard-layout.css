@@ -160,6 +160,10 @@
    Visibility (not removal) preserves their scroll, placement and drop owners. */
 .file-preview-pane { grid-area: board; z-index: 3; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; }
 .file-preview-pane[hidden] { display: none; }
+/* Both reading surfaces stay interactive above the shared sheet scrim. */
+body:has(#toolbar-files[data-max][data-docked]) .file-preview-pane { z-index: var(--z-modal); }
+#toolbar-files[data-max][data-docked] { top: var(--files-dock-top); left: var(--files-dock-left); right: auto; bottom: auto; width: var(--files-dock-width); height: var(--files-dock-height); }
+body:has(#toolbar-files[data-max][data-docked]) .board-toolbar .sheet-width { display: none; }
 .file-preview-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--wb-line); flex: none; }
 .file-preview-head > strong { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-preview-head > button { flex: none; }

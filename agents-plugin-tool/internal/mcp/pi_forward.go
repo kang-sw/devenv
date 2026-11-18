@@ -167,9 +167,9 @@ func (s *Server) handlePiForward(ctx context.Context, id json.RawMessage, tool s
 			return fail(err)
 		}
 		if wantsJSON(args) {
-			return toolJSONResponse(id, piChild(st), nil)
+			return toolJSONResponse(id, s.piChild(st), nil)
 		}
-		return toolTextResponse(id, fmt.Sprintf("spawned Pi subagent %s (tier %s: %s, effort %s) in %s; its first turn runs now.\nIts report (status and final message) comes to you when the turn ends: steered into your running turn, or as your next message when you are idle. Your own report to your parent waits until every open subagent's report has reached you, so you may end your turn while it works. Steer it with pi.send; close it with pi.stop.\n", st.ID, orDash(st.Tier), orDash(st.Model), orDash(st.Effort), piCwd(st)), nil)
+		return toolTextResponse(id, fmt.Sprintf("spawned Pi subagent %s (tier %s: %s, effort %s) in %s; its first turn runs now.\nIts report (status and final message) comes to you when the turn ends: steered into your running turn, or as your next message when you are idle. Your own report to your parent waits until every open subagent's report has reached you, so you may end your turn while it works. Finished children sleep; pi.send resumes the same conversation if its session file still exists. Steer it with pi.send; stop it with pi.stop.\n", st.ID, orDash(st.Tier), orDash(st.Model), orDash(st.Effort), piCwd(st)), nil)
 	case "pi.list":
 		var answer struct {
 			Conversations []wsagent.State `json:"conversations"`
@@ -180,11 +180,11 @@ func (s *Server) handlePiForward(ctx context.Context, id json.RawMessage, tool s
 		if wantsJSON(args) {
 			out := make([]piChildOut, 0, len(answer.Conversations))
 			for _, st := range answer.Conversations {
-				out = append(out, piChild(st))
+				out = append(out, s.piChild(st))
 			}
 			return toolJSONResponse(id, out, nil)
 		}
-		return toolTextResponse(id, formatPiList(answer.Conversations), nil)
+		return toolTextResponse(id, s.formatPiList(answer.Conversations), nil)
 	}
 	child, err := stringArg(tool, "id", args)
 	if err != nil {
@@ -204,7 +204,7 @@ func (s *Server) handlePiForward(ctx context.Context, id json.RawMessage, tool s
 			return fail(err)
 		}
 		if wantsJSON(args) {
-			return toolJSONResponse(id, piChild(st), nil)
+			return toolJSONResponse(id, s.piChild(st), nil)
 		}
 		return toolTextResponse(id, fmt.Sprintf("sent to Pi subagent %s: starts a turn if idle, otherwise steers its running turn at the next tool boundary. That turn's report covers the message.\n", child), nil)
 	case "pi.stop":
@@ -213,9 +213,9 @@ func (s *Server) handlePiForward(ctx context.Context, id json.RawMessage, tool s
 			return fail(err)
 		}
 		if wantsJSON(args) {
-			return toolJSONResponse(id, piChild(st), nil)
+			return toolJSONResponse(id, s.piChild(st), nil)
 		}
-		return toolTextResponse(id, fmt.Sprintf("closed Pi subagent %s and its own subagents: its process stopped; pi.send resumes the same conversation if its session file still exists, and pi.transcript still reads it.\n", child), nil)
+		return toolTextResponse(id, fmt.Sprintf("Pi subagent %s and its own subagents: %s; its process stopped; pi.send resumes the same conversation if its session file still exists, and pi.transcript still reads it.\n", child, s.piChildStatus(st)), nil)
 	case "pi.transcript":
 		var answer struct {
 			Records []wslive.RingRecord `json:"records"`
@@ -249,9 +249,9 @@ func (s *Server) handlePiForward(ctx context.Context, id json.RawMessage, tool s
 			return fail(err)
 		}
 		if wantsJSON(args) {
-			return toolJSONResponse(id, res, nil)
+			return toolJSONResponse(id, s.piWaitResult(res), nil)
 		}
-		return toolTextResponse(id, formatPiWait(res, "its report comes to you when the turn ends"), nil)
+		return toolTextResponse(id, s.formatPiWait(res, "its report comes to you when the turn ends"), nil)
 	}
 	return toolTextResponse(id, "", fmt.Errorf("unknown tool: %s", tool))
 }

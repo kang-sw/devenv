@@ -432,6 +432,23 @@ func (r agentRecordEnd) retired() bool {
 	return (r.Lead || r.Parent != nil) && (r.ClosedAt != "" || r.HandedOffAt != "")
 }
 
+// piChildDeleted is a presentation-only revival check for an already settled
+// Pi spawn row. An open record may still be creating its first session file.
+// A removed record/directory, like a closed record without a regular session
+// file, cannot revive. Keep the file check aligned with wsagent.PiSessionAvailable.
+func piChildDeleted(dir, id string) bool {
+	if !ValidReplyID(id) {
+		return false
+	}
+	sessionDir := SessionDir(dir, id)
+	record, hosted := readAgentRecordEnd(sessionDir)
+	if hosted && record.ClosedAt == "" {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(sessionDir, "pi", "session.jsonl"))
+	return err != nil || !info.Mode().IsRegular()
+}
+
 // readAgentRecordEnd reads sessionDir's agent record; hosted is false when
 // the directory holds none. An unreadable record is hosted and not
 // retired, so it is never pruned.

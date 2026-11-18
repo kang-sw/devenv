@@ -227,10 +227,13 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
 
     def test_stamp_binds_hash_and_actual_accepted_version(self):
         launcher = load_launcher()
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory() as temp_dir, \
+             mock.patch.object(launcher.time, "time_ns") as clock:
             root = Path(temp_dir)
             binary = root / "ws-mcp"
             binary.write_bytes(b"first")
+            # Keep same-mtime rewrites inside the racy window even on slow CI.
+            clock.return_value = binary.stat().st_mtime_ns
             contract = self.capability_contract()
             contract_path = root / "runtime.json"
             contract_path.write_text(json.dumps(contract), encoding="utf-8")

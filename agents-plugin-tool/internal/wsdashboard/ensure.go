@@ -7,10 +7,10 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
-
-	"github.com/gofrs/flock"
 	"strconv"
 	"time"
+
+	"github.com/gofrs/flock"
 )
 
 // Outcome is what Ensure found or did.
@@ -58,8 +58,6 @@ type EnsureOptions struct {
 	SpawnBeforeShutdown bool
 	// PreserveRunningLAN uses each fresh healthy observation, not an earlier probe.
 	PreserveRunningLAN bool
-	// RefuseCrossMinor leaves a healthy incompatible incumbent untouched.
-	RefuseCrossMinor bool
 	// Port is the configured dashboard.port, passed to a started daemon as
 	// its --port flag.
 	Port int
@@ -131,8 +129,11 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 	if opts.SpawnBeforeShutdown {
 		lock := flock.New(filepath.Join(opts.Dir, "launcher-start.lock"))
 		ok, err := lock.TryLockContext(ctx, 50*time.Millisecond)
-		if err != nil || !ok {
+		if err != nil {
 			return OutcomeUnavailable, fmt.Errorf("dashboard: launcher start lock: %v", err)
+		}
+		if !ok {
+			return OutcomeUnavailable, errors.New("dashboard: launcher start lock: not acquired")
 		}
 		defer lock.Unlock() // Never unlink: concurrent waiters may already hold the inode.
 	}
@@ -144,10 +145,6 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 			info, err := Health(ctx, client, previous)
 			if err == nil && opts.PreserveRunningLAN {
 				opts.LAN = info.LAN
-			}
-			if err == nil && opts.RefuseCrossMinor && !SameMinor(info.Version, opts.Version) {
-				fmt.Fprintf(logw, "dashboard: refusing cross-minor replacement of %s by %s (attached versions unknown)\n", info.Version, opts.Version)
-				return OutcomeRunning, nil
 			}
 			switch {
 			case err == nil && (keepRunning(info, opts) || spawns >= maxSpawns):
