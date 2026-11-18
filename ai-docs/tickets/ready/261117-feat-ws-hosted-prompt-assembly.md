@@ -425,6 +425,75 @@ Verification:
 - No per-turn file writes: the manual is written at most once per session
   start.
 
+### Result (f4ff30388) - 2026-11-18
+
+Commits:
+- c7e7b3114: the spine.
+- 00e68753a: the refusal names its ws-mcp cause.
+- 2ede7478b: tests.
+- f4ff30388: lite-review fixes.
+
+Design record:
+
+- Render path (Decision 20).
+  - `wsagent.Options.LeadManual` (`runner.go:143`) is supplied by the daemon as `renderLeadManual` (`cmd/ws-mcp/agent_mcp.go:78`).
+  - It resolves the hosted package env the same way `agentMCPCommand` does:
+    - the daemon env, plus the package env, plus `WS_MCP_PROJECT_ROOT`;
+    - mailbox identity cleared;
+    - `callerHello` defaults applied.
+  - It calls `mcp.RenderLeadManual` (`workflow_manual.go:545`). That function strips the hosted-session variables and the harness PID, so the render is never a hosted session itself, and it returns the CONTINUE manual without the read-full notice.
+  - The harness is detected as `claude` for a Claude lead and as none otherwise.
+  - The throwaway server is closed once its session-start tracker check settles.
+- Lead prompt (Decisions 7, 8, 16).
+  - `startLead` writes `instructions.md` through `composeLeadInstructions(dir, rec, manual)` (`runner_process.go:256,760`). This happens on every non-attach Claude and agy launch, `--resume` included, before `writeRegistration`.
+  - The file holds the key sentence, then "The workflow manual below is binding; its session state is as of this session's start", then the manual.
+  - A render error or an empty render keeps the old key-only text and is logged (`leadManual`, `:779`).
+  - Claude passes the file with `--append-system-prompt-file`; agy passes it as `_meta.antigravity.systemPrompt.append` (unchanged code).
+  - A Pi lead on the bridge fallback embeds `LeadSpec.Manual()` as `workflowManual` (`pi_lead.go:141`, `pi_lead_bridge.mjs`). The native-extension path neither renders nor embeds it (Decision 21).
+  - Children's prompts are unchanged.
+  - The render happens once per process start, so there are no per-turn writes.
+- Plugin-less hosted Claude (Decisions 12, 18, 22).
+  - `claudeLeadPluginArgs` (`claude_lead_plugins.go:21`) now only disables enabled `ws`/`wsflow` ids through `--settings`. There is no `--plugin-dir` bundle.
+  - The hosted HTTP-variant code is deleted (`claude_hosted_variant.go`), along with the builtin-plugin seed.
+  - `claudeLeadMCPArgs` (`:49`) adds `--mcp-config {"mcpServers":{"ws":…}}`, without `--strict-mcp-config`:
+    - the HTTP route when the start has a session;
+    - otherwise the daemon's stdio ws-mcp (`spec.WSMCP`, set in `startLead` from `Lead.WSMCP`).
+  - `claudeLeadArgs` ends with `--allowedTools mcp__ws` (`claude.go:148`).
+  - `claudeMapper.resultTool` (`claude.go:1512`) maps `mcp__ws__*` for leads. It still accepts `plugin:<pkg>:<pkg>` for a lead an older daemon started.
+- Key rule (Decisions 10, 11, 19).
+  - `hostedSessionKeyRule` (`mcp/hosted_key.go:26`) runs first in `callTool` (`server_dispatch.go:36`), on hosted lead connections only.
+  - An omitted, null, or blank `session_key` is filled with the connection's key when the tool's schema declares the argument (`ferrule` does not).
+  - An explicit key passes when it is the connection's own key or a Runner-lineage descendant's (`hostedDescendant`, `:72`). The walk follows `Record.Parent` reply-ids through `callerRecord`/`ReadRecord`, bounded at 16 levels and failing closed.
+  - Any other key is refused with an error naming the tool, both keys, `WS_HOSTED_SESSION_KEY`, and the descendant rule.
+  - `workflow_manual`'s gate (`session_context.go:121`) applies the same rule.
+  - A key minted by `ferrule(parent_session_key: <hosted>)` has no Runner record and is refused on the hosted connection.
+  - Omitted and own keys are settled by string comparison and read no file.
+- Tiers, as Decision 17 settled them: T0 for the prompt, the key rule, and the launch args; T1 for the downgrade display (an older daemon's mapper on a rejoined plugin-less lead).
+
+Worker decisions (veto points):
+
+- A Claude lead with no ws-mcp at all (no HTTP route and no resolvable launcher) is refused with `claude lead: no ws-mcp to attach: <cause>`. It is not started without ws tools. This follows the agy precedent.
+- `plugin_isolation` no longer applies to a Claude lead. With no bundle, the only plugin override left is disabling the installed ws packages. `isolated` no longer disables the user's other plugins or the builtins, and an unknown value no longer refuses the launch.
+- Per Decision 22, a user's allow, ask, or deny rule written against `mcp__plugin_<pkg>_<pkg>__*` no longer matches in a hosted Claude lead. The tools are now `mcp__ws__*`, and the daemon allows the whole `ws` server.
+- Worker-profile sessions (`261115-feat-ws-worker-profile-session-spawn`) are not in code yet. Their planned short-manual delivery is the same daemon-side prompt path, not the plugin mod, so they do not depend on the plugin.
+- An agy lead keeps its native subagents (`RemovesSubagents` is honored only by Claude). A child minted through `ferrule(parent_session_key: <hosted>)` on its connection is now refused (Decision 19), so Decision 19's "no current caller" premise holds for Claude and Pi but not agy.
+
+Verification:
+
+- On w5090:
+  - `go build ./...` passed.
+  - `go vet` of `internal/wsagent`, `internal/mcp`, and `cmd/ws-mcp` passed.
+  - `go test ./internal/wsagent/... ./internal/mcp/... ./cmd/ws-mcp/... -count=1` passed for all three trees at 2ede7478b. A targeted mcp rerun (`Hosted|RenderLead|WorkflowManual|ResolveSession|Tracker`) passed at f4ff30388.
+- The Pi bridge JS tests (`pi-lead.test.mjs`, `pi-lead-health.test.mjs`) passed under local node.
+- Lite review: clean with 5 minors. Two of them are fixed in f4ff30388.
+- Not done: the live hosted-lead check per harness (first-turn `agent.spawn` with no `ferrule` and no `session_key`), and the check that the installed Claude exposes the `ws` server alongside the user's other MCP servers. The owner rule forbids running ws executables on the worker's PC.
+
+Forward:
+
+- Run the live check before Phase 2 builds on the plugin-less launch. Phase 1's stop rule applies if the `ws` server is not exposed.
+- The render consumes one-shot manual nudges (the review-track nudge and the daily cleanup slot) even when the launch is then refused.
+- On the no-HTTP stdio fallback, the ws-mcp env (which includes `WS_HOSTED_SESSION_KEY`) appears in the `--mcp-config` argv. This is the same shape as a worker's inline server.
+
 ### Phase 2: Native-subagent steer, daemon-owned playbook body, and skill exposure
 
 Add the native-subagent "Never use <tool>" steer to the daemon-injected text
