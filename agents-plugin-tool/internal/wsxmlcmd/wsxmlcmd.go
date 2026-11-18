@@ -165,6 +165,12 @@ type Field struct {
 	Tag  string
 	Line int
 	Body string
+	// Literal is Body as written, before entity decoding: CDATA and raw
+	// segments contribute their content, every other segment its source
+	// text. It equals Body when decoding changed nothing. An exact-match
+	// operand uses it to detect a caller who wrote an entity meaning the
+	// entity text itself (see LiteralAmbiguous).
+	Literal string
 }
 
 // Scope is the group a command sits in.
@@ -280,6 +286,20 @@ func (c Command) FieldsOf(tag string) []string {
 		}
 	}
 	return out
+}
+
+// LiteralAmbiguous reports whether the first field tag named tag is an
+// exact-match operand whose entities decoded to different text while its
+// as-written spelling also occurs in stored. Such an operand meant either
+// spelling, so applying it could patch the wrong occurrence; the caller
+// refuses it and points at the raw element.
+func (c Command) LiteralAmbiguous(tag, stored string) bool {
+	for _, f := range c.Fields {
+		if f.Tag == tag {
+			return f.Literal != f.Body && strings.Contains(stored, f.Literal)
+		}
+	}
+	return false
 }
 
 // Single returns the one field tag named tag; more than one is a problem.
@@ -407,7 +427,7 @@ func (r *parser) command(tag openTag, scope *Scope) bool {
 			if spec.Wrapper != "" {
 				wrapper = &bodyWrapper{tag: r.g.Prefix + spec.Wrapper, fields: r.g.fieldTags(spec), children: &cmd.Children, refuseOpenings: r.g.RefuseFieldOpenings, parent: cmd}
 			}
-			body, ok := r.readContent(tag.name, tag.at, bodyFieldRules{}, "", wrapper, nil)
+			body, _, ok := r.readContent(tag.name, tag.at, bodyFieldRules{}, "", wrapper, nil)
 			if !ok {
 				return false
 			}
@@ -755,7 +775,8 @@ type bodySegment struct {
 // sections and raw elements through, strips the one newline at each end, and
 // decodes the text outside them.
 func (t *tokenizer) readBody(name string, from int, fields []string, label string) (string, bool) {
-	return t.readContent(name, from, bodyFieldRules{tags: fields, refuseOpenings: len(fields) != 0}, label, nil, nil)
+	body, _, ok := t.readContent(name, from, bodyFieldRules{tags: fields, refuseOpenings: len(fields) != 0}, label, nil, nil)
+	return body, ok
 }
 
 // Field boundaries are grammar metadata even when skipped content suppresses
@@ -779,10 +800,12 @@ type bodyWrapper struct {
 // comments, CDATA, raw elements and command payloads cannot introduce a
 // nested group.
 func (t *tokenizer) readBodyContent(name string, from int, fields []string, label string, group *Grammar) (string, bool) {
-	return t.readContent(name, from, bodyFieldRules{tags: fields, refuseOpenings: len(fields) != 0}, label, nil, group)
+	body, _, ok := t.readContent(name, from, bodyFieldRules{tags: fields, refuseOpenings: len(fields) != 0}, label, nil, group)
+	return body, ok
 }
 
-func (t *tokenizer) readContent(name string, from int, fields bodyFieldRules, label string, wrapper *bodyWrapper, group *Grammar) (string, bool) {
+// readContent returns the decoded body and its as-written literal (Field.Literal).
+func (t *tokenizer) readContent(name string, from int, fields bodyFieldRules, label string, wrapper *bodyWrapper, group *Grammar) (string, string, bool) {
 	bodyStart, lineStart := t.i, t.i
 	literalUntil, literalLimit := t.i, len(t.s)
 	var wrapperTail literalWrapperTail
@@ -811,7 +834,7 @@ func (t *tokenizer) readContent(name string, from int, fields bodyFieldRules, la
 	for {
 		if t.i >= len(t.s) {
 			t.fail(from, "<%s> has no closing %s", name, closing)
-			return "", false
+			return "", "", false
 		}
 		if t.literalCode && t.i >= literalUntil {
 			literalUntil = t.codeLiteralEnd(t.i, bodyStart, lineStart, closing, &literalLimit)
@@ -849,7 +872,7 @@ func (t *tokenizer) readContent(name string, from int, fields bodyFieldRules, la
 			end := strings.Index(rest[9:], "]]>")
 			if end < 0 {
 				t.fail(t.i, "<%s>: a CDATA section has no closing ]]>", name)
-				return "", false
+				return "", "", false
 			}
 			flush()
 			segs = append(segs, bodySegment{text: rest[9 : 9+end], cdata: true})
@@ -859,7 +882,7 @@ func (t *tokenizer) readContent(name string, from int, fields bodyFieldRules, la
 			end := strings.Index(rest[open:], t.raw.close)
 			if end < 0 {
 				t.fail(t.i, "<%s>: a %s element has no closing %s", name, t.raw.open, t.raw.close)
-				return "", false
+				return "", "", false
 			}
 			flush()
 			segs = append(segs, bodySegment{text: rest[open : open+end], raw: true})
@@ -870,12 +893,13 @@ func (t *tokenizer) readContent(name string, from int, fields bodyFieldRules, la
 		case strings.HasPrefix(rest, closing):
 			t.i += len(closing)
 			flush()
-			return joinBody(segs), true
+			decoded, literal := joinBody(segs)
+			return decoded, literal, true
 		case wrapper != nil && openingTagPrefix(rest, wrapper.tag):
 			start := t.i
 			tag, ok := t.readOpen()
 			if !ok {
-				return "", false
+				return "", "", false
 			}
 			child := Command{Pos: wrapper.parent.Pos, Line: t.lineAt(tag.at), Tag: tag.name, Scope: wrapper.parent.Scope}
 			childLabel := child.Label()
@@ -884,7 +908,7 @@ func (t *tokenizer) readContent(name string, from int, fields bodyFieldRules, la
 			}
 			checkAttrs(t.p, childLabel, tag.attrs, nil)
 			if !tag.selfClosing && !t.readFields(&child, wrapper.fields, wrapper.refuseOpenings, childLabel) {
-				return "", false
+				return "", "", false
 			}
 			*wrapper.children = append(*wrapper.children, child)
 			end := t.i
@@ -898,7 +922,7 @@ func (t *tokenizer) readContent(name string, from int, fields bodyFieldRules, la
 					close := strings.Index(rest[4:], "-->")
 					if close < 0 {
 						t.fail(t.i, "<%s>: a comment has no closing -->", name)
-						return "", false
+						return "", "", false
 					}
 					end = 4 + close + 3
 				} else {
@@ -908,7 +932,7 @@ func (t *tokenizer) readContent(name string, from int, fields bodyFieldRules, la
 					tagName = rest[1:end]
 					if group.isGroup(tagName) {
 						t.fail(t.i, "<%s> inside %s; groups do not nest", name, label)
-						return "", false
+						return "", "", false
 					}
 					if end > 1 {
 						var quote byte
@@ -925,7 +949,7 @@ func (t *tokenizer) readContent(name string, from int, fields bodyFieldRules, la
 								quote = c
 							} else if c == '<' {
 								t.fail(t.i+end, "<%s>: uncertain tag boundary in rejected group body", name)
-								return "", false
+								return "", "", false
 							} else if c == '>' {
 								end++
 								break
@@ -944,18 +968,18 @@ func (t *tokenizer) readContent(name string, from int, fields bodyFieldRules, la
 						// Preserve raw field boundaries while attributing diagnostics
 						// to the rejected group, not a synthetic command position.
 						if !t.readFields(&cmd, group.fieldTags(spec), false, skippedLabel) {
-							return "", false
+							return "", "", false
 						}
 					} else if known && spec.Wrapper != "" {
 						// Wrapped operands have the same boundary authority while
 						// skipping a rejected group as in an accepted command.
 						wrapped := &bodyWrapper{label: skippedLabel, tag: group.Prefix + spec.Wrapper, fields: group.fieldTags(spec), children: &cmd.Children, parent: cmd}
-						if _, ok := t.readContent(tagName, start-end, bodyFieldRules{}, skippedLabel, wrapped, nil); !ok {
-							return "", false
+						if _, _, ok := t.readContent(tagName, start-end, bodyFieldRules{}, skippedLabel, wrapped, nil); !ok {
+							return "", "", false
 						}
 					} else if _, ok := t.readBody(tagName, start-end, nil, ""); !ok {
 						// Leaves and unknown commands have CDATA- and raw-aware bodies.
-						return "", false
+						return "", "", false
 					}
 					text.WriteString(t.s[start:t.i])
 					end := t.i
@@ -985,8 +1009,10 @@ func openingTagPrefix(s, tag string) bool {
 
 // joinBody strips the body's one newline at each end before decoding, so a
 // decoded &#10; is never mistaken for the newline after the opening tag. A
-// raw segment at either edge keeps its own newlines.
-func joinBody(segs []bodySegment) string {
+// raw segment at either edge keeps its own newlines. It returns the decoded
+// body and the same body with no entity decoded; the two are one string
+// when decoding changed nothing.
+func joinBody(segs []bodySegment) (string, string) {
 	for i := range segs {
 		if segs[i].text != "" || segs[i].raw {
 			if !segs[i].raw {
@@ -1003,15 +1029,23 @@ func joinBody(segs []bodySegment) string {
 			break
 		}
 	}
-	var b strings.Builder
+	var b, literal strings.Builder
+	changed := false
 	for _, seg := range segs {
+		literal.WriteString(seg.text)
 		if !seg.cdata && !seg.raw {
-			b.WriteString(Decode(seg.text))
+			decoded := Decode(seg.text)
+			changed = changed || decoded != seg.text
+			b.WriteString(decoded)
 		} else {
 			b.WriteString(seg.text)
 		}
 	}
-	return b.String()
+	if !changed {
+		body := b.String()
+		return body, body
+	}
+	return b.String(), literal.String()
 }
 
 func stripLeadingNewline(s string) string {
@@ -1236,11 +1270,11 @@ func (t *tokenizer) readFields(cmd *Command, fields []string, refuseOpenings boo
 		checkAttrs(t.p, fmt.Sprintf("%s field <%s>", label, tag.name), tag.attrs, nil)
 		f := Field{Tag: tag.name, Line: line}
 		if !tag.selfClosing {
-			body, ok := t.readContent(tag.name, tag.at, bodyFieldRules{tags: fields, refuseOpenings: refuseOpenings}, label, nil, nil)
+			body, literal, ok := t.readContent(tag.name, tag.at, bodyFieldRules{tags: fields, refuseOpenings: refuseOpenings}, label, nil, nil)
 			if !ok {
 				return false
 			}
-			f.Body = body
+			f.Body, f.Literal = body, literal
 		}
 		cmd.Fields = append(cmd.Fields, f)
 	}

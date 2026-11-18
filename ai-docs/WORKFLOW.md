@@ -182,6 +182,7 @@ When workflow skills, MCP tools, or Claude compatibility commands are unavailabl
 2. Use existing nearby tickets and manuals as formatting examples.
 3. Prefer conservative, append-only changes when parser behavior is uncertain.
 4. Keep generated AI docs and commit messages in English unless a human-facing
-   product string requires another language.
+   product string requires another language; a ticket's frontmatter `title:`
+   follows `workflow.lang` when it is set.
 5. Verify with plain Git and shell commands, then re-run plugin verification
    tools when they become available.

@@ -59,6 +59,22 @@ func TestCallerPrefixAndTableDecideTheTags(t *testing.T) {
 	}
 }
 
+// A field keeps its as-written spelling beside the decoded body, so an
+// exact-match operand can detect that an entity may have meant itself.
+func TestFieldLiteralKeepsEntitiesAsWritten(t *testing.T) {
+	cmds, problems := parse(testGrammar, "<tr:set id=\"1\"><tr:name>\n&lt;b&gt; <tr:raw>&amp;</tr:raw> <![CDATA[&gt;]]>\n</tr:name><tr:tag>plain</tr:tag></tr:set>")
+	if len(problems) > 0 || len(cmds) != 1 {
+		t.Fatalf("commands = %+v, problems %q", cmds, problems)
+	}
+	name, tag := cmds[0].Fields[0], cmds[0].Fields[1]
+	if name.Body != "<b> &amp; &gt;" || name.Literal != "&lt;b&gt; &amp; &gt;" || tag.Body != "plain" || tag.Literal != "plain" {
+		t.Fatalf("fields = %+v", cmds[0].Fields)
+	}
+	if !cmds[0].LiteralAmbiguous("tr:name", "x <b> &lt;b&gt; &amp; &gt;") || cmds[0].LiteralAmbiguous("tr:name", "<b> &amp; &gt;") || cmds[0].LiteralAmbiguous("tr:tag", "plain") {
+		t.Fatal("LiteralAmbiguous misjudged")
+	}
+}
+
 func TestLiteralCodeAndWrappedFieldsAreGrammarOptIns(t *testing.T) {
 	input := "<tr:note>`</tr:note>` tail</tr:note>"
 	cmds, problems := parse(testGrammar, input)

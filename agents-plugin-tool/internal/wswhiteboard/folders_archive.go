@@ -130,7 +130,10 @@ func (f FolderStore) boardFiles(meta *folderSession) ([]string, error) {
 // The render bookkeeping (embed folder, embeds, last embed sequence) is
 // cleared; every other value, the ID counters included, stays as loaded,
 // except the revision receipts (metadata and stale-nudge revisions), which
-// the destination's receipt floors because viewers compare them.
+// the destination's receipt floors because viewers compare them, the render
+// sequence, which replace raises past the destination's, and LoadedAt, set
+// to now, so dashboard answers sent to the replaced board attach to none of
+// the loaded board's reused item IDs.
 // backup is the folder now holding the previous board ("" when there was
 // none), named <dir>.bak-<YYMMDD_hhmm> in now's time zone, with -2, -3, ... on
 // a collision.
@@ -140,6 +143,9 @@ func (f FolderStore) LoadArchive(path string, now time.Time) (backup string, top
 		return "", 0, err
 	}
 	defer os.RemoveAll(tmp)
+	// Opening the extraction memoizes its topic logs in the process-wide
+	// memo; removing the folder does not free them.
+	defer forgetFolderMemo(tmp)
 	if err := extractArchive(path, tmp); err != nil {
 		return "", 0, err
 	}
@@ -151,6 +157,7 @@ func (f FolderStore) LoadArchive(path string, now time.Time) (backup string, top
 		return "", 0, fmt.Errorf("the archive holds no board")
 	}
 	board.EmbedDir, board.Embeds, board.LastEmbedSeq = "", nil, 0
+	board.LoadedAt = now.UTC().Format(reaskLayout)
 	return f.replace(board, f.Dir+".bak-"+now.Format("060102_1504"))
 }
 
@@ -201,7 +208,7 @@ func extractEntry(zf *zip.File, target string, budget int64, total *int64) error
 		return err
 	}
 	defer in.Close()
-	out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	out, err := wsstate.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("the archive entry %q: %w", zf.Name, err)
 	}
@@ -227,12 +234,18 @@ func extractEntry(zf *zip.File, target string, budget int64, total *int64) error
 // loaded counters may be lower than the ones they replace. Its topic folders
 // are numbered after the old NextTopic and the new NextTopic counts them, so
 // a topic minted later never reuses an installed folder or an old one whose
-// removal failed.
+// removal failed. The render sequence is raised past the current board's:
+// the published change stamp derives from it, and every stamp published so
+// far is at most the committed sequence, so an open page sees a new stamp
+// and reloads even when the loaded board's sequence is lower.
 func (f FolderStore) replace(next *State, backupBase string) (backup string, topics int, err error) {
 	err = f.locked(func() error {
-		_, meta, err := f.load(nil)
+		prior, meta, err := f.load(nil)
 		if err != nil {
 			return err
+		}
+		if prior != nil {
+			next.Seq = max(next.Seq, prior.Seq+1)
 		}
 		var intent *folderIntent
 		if meta == nil {

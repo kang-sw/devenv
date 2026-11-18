@@ -117,10 +117,12 @@ func unzip(t *testing.T, data []byte) map[string][]byte {
 }
 
 // archiveComparable drops the revision receipts, monotonic bookkeeping the
-// destination's own receipt floors; they are not board content or ID counters.
+// destination's own receipt floors, and the render sequence and load time a
+// load sets; they are not board content or ID counters.
 func archiveComparable(s *State) *State {
 	c := s.clone()
 	c.MetadataRevision, c.StaleNudgeRevision = 0, ""
+	c.Seq, c.LoadedAt = 0, ""
 	return c
 }
 
@@ -180,8 +182,10 @@ func TestArchiveExportThenLoadReplacesTheBoardWithABackup(t *testing.T) {
 		t.Fatal("export or load changed the source board")
 	}
 
-	// The installed topic folders are all the board references; the old
-	// ones are gone, and a new topic gets a folder of its own.
+	// The installed topic folders are all the board references. Removing the
+	// old ones is best-effort (a reader or antivirus can hold one open on
+	// Windows), so a leftover is allowed only while nothing references it,
+	// no archive carries it, and no new topic reuses it.
 	var meta folderSession
 	if _, err := folderDecode(filepath.Join(dest.Dir, "meta.json"), &meta); err != nil {
 		t.Fatal(err)
@@ -194,9 +198,21 @@ func TestArchiveExportThenLoadReplacesTheBoardWithABackup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	leftover := map[string]bool{}
 	for _, e := range entries {
 		if e.IsDir() && folderDirID(e.Name()) && e.Name() != folderRevisionDir && !installed[e.Name()] {
-			t.Errorf("old topic folder %s left behind", e.Name())
+			leftover[e.Name()] = true
+		}
+	}
+	if len(leftover) > 0 {
+		exported, err := dest.ExportArchive()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name := range unzip(t, exported) {
+			if leftover[strings.SplitN(filepath.ToSlash(name), "/", 2)[0]] {
+				t.Fatalf("archive carries the unreferenced leftover %s", name)
+			}
 		}
 	}
 	archiveUpdate(t, dest, archiveApply(`<wb:topic name="after-load"><wb:log>new</wb:log><wb:add class="check"><wb:title>next</wb:title></wb:add></wb:topic>`))
@@ -209,8 +225,8 @@ func TestArchiveExportThenLoadReplacesTheBoardWithABackup(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, ref := range next.Topics {
-		if ref.Key == "after-load" && installed[ref.Dir] {
-			t.Fatalf("new topic reuses installed folder %s", ref.Dir)
+		if ref.Key == "after-load" && (installed[ref.Dir] || leftover[ref.Dir]) {
+			t.Fatalf("new topic reuses an existing folder %s", ref.Dir)
 		}
 	}
 
@@ -377,5 +393,124 @@ func TestArchiveLeavesOutUnreferencedTopicFolders(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(backup, "t1")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("backup carries the unreferenced t1: %v", err)
+	}
+}
+
+// A load raises the render sequence past the replaced board's, so the change
+// stamp an open page polls (derived from it) differs from every stamp
+// published before, even when the loaded board's sequence is lower; and it
+// stamps the load time, which floors every item's re-ask time so dashboard
+// answers sent to the replaced board attach to none of the loaded items.
+func TestArchiveLoadStartsANewBoardIncarnation(t *testing.T) {
+	root := t.TempDir()
+	source := archiveSource(t, filepath.Join(root, "source"))
+	dest := archiveDestination(t, filepath.Join(root, "dest"))
+	data, err := source.ExportArchive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, original := folderOpen(t, source.Dir, nil), folderOpen(t, dest.Dir, nil)
+	if loaded.Seq >= original.Seq {
+		t.Fatalf("fixture must lower the render sequence: loaded %d, replaced %d", loaded.Seq, original.Seq)
+	}
+	if _, _, err := dest.LoadArchive(writeArchive(t, filepath.Join(root, "b.zip"), data), archiveNow); err != nil {
+		t.Fatal(err)
+	}
+	got := folderOpen(t, dest.Dir, nil)
+	if got.Seq <= original.Seq {
+		t.Fatalf("render sequence after the load %d, want past the replaced board's %d", got.Seq, original.Seq)
+	}
+	if want := archiveNow.UTC().Format(reaskLayout); got.LoadedAt != want {
+		t.Fatalf("LoadedAt = %q, want %q", got.LoadedAt, want)
+	}
+	reasked := got.ReaskTimes()
+	if len(got.Items) == 0 || len(reasked) != len(got.Items) {
+		t.Fatalf("ReaskTimes = %v for %d items, want every item floored", reasked, len(got.Items))
+	}
+	for _, item := range got.Items {
+		if reasked[item.ID] != archiveNow.UnixMilli() {
+			t.Fatalf("item %d re-ask floor %d, want the load time %d", item.ID, reasked[item.ID], archiveNow.UnixMilli())
+		}
+	}
+	// A later re-ask still wins over the load floor.
+	later := archiveNow.Add(time.Minute)
+	got.Items[0].ReaskedAt = later.UTC().Format(reaskLayout)
+	if at := got.ReaskTimes()[got.Items[0].ID]; at != later.UnixMilli() {
+		t.Fatalf("re-ask after the load = %d, want %d", at, later.UnixMilli())
+	}
+
+	// Loading into a session with no board keeps the archive's sequence.
+	empty := FolderStore{Dir: filepath.Join(root, "empty")}
+	if _, _, err := empty.LoadArchive(filepath.Join(root, "b.zip"), archiveNow); err != nil {
+		t.Fatal(err)
+	}
+	if got := folderOpen(t, empty.Dir, nil); got.Seq != loaded.Seq {
+		t.Fatalf("render sequence into no board %d, want the archive's %d", got.Seq, loaded.Seq)
+	}
+}
+
+// archiveMemoEntries counts the folder memo entries under load extractions.
+func archiveMemoEntries() int {
+	folderMemo.mu.Lock()
+	defer folderMemo.mu.Unlock()
+	n := 0
+	for path := range folderMemo.files {
+		if strings.Contains(path, "ws-whiteboard-load-") {
+			n++
+		}
+	}
+	for path := range folderMemo.logs {
+		if strings.Contains(path, "ws-whiteboard-load-") {
+			n++
+		}
+	}
+	return n
+}
+
+// Validating an archive opens its extraction as a board, which fills the
+// process-wide topic memo; every load, accepted or refused, forgets those
+// entries, so repeated imports do not pile payload copies up in the daemon.
+func TestArchiveLoadForgetsTheExtractionMemo(t *testing.T) {
+	root := t.TempDir()
+	source := archiveSource(t, filepath.Join(root, "source"))
+	data, err := source.ExportArchive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	zipPath := writeArchive(t, filepath.Join(root, "b.zip"), data)
+	baseline := archiveMemoEntries()
+	dest := archiveDestination(t, filepath.Join(root, "dest"))
+	if _, _, err := dest.LoadArchive(zipPath, archiveNow); err != nil {
+		t.Fatal(err)
+	}
+	if got := archiveMemoEntries(); got != baseline {
+		t.Fatalf("memo entries after a load %d, want the baseline %d", got, baseline)
+	}
+
+	// Refused after the extraction opened as a board: the destination fails.
+	refused := archiveDestination(t, filepath.Join(root, "refused"))
+	refused.Fault = func(stage string) error {
+		if stage == "complete" {
+			return folderCrash
+		}
+		return nil
+	}
+	if _, _, err := refused.LoadArchive(zipPath, archiveNow); !errors.Is(err, folderCrash) {
+		t.Fatalf("LoadArchive = %v, want the injected crash", err)
+	}
+	if got := archiveMemoEntries(); got != baseline {
+		t.Fatalf("memo entries after a refused load %d, want the baseline %d", got, baseline)
+	}
+
+	// Refused while opening: the second topic's log is broken after the
+	// first decoded.
+	files := unzip(t, data)
+	files["t2/log.jsonl"] = []byte("garbage\n")
+	broken := writeArchive(t, filepath.Join(root, "broken.zip"), zipOf(t, files))
+	if _, _, err := dest.LoadArchive(broken, archiveNow); err == nil || !strings.Contains(err.Error(), "not a valid board") {
+		t.Fatalf("LoadArchive = %v, want a refusal", err)
+	}
+	if got := archiveMemoEntries(); got != baseline {
+		t.Fatalf("memo entries after a refused open %d, want the baseline %d", got, baseline)
 	}
 }
