@@ -550,6 +550,9 @@
     "261118-feat-ws-display-transcript-memory-first": {
       "registered_at": "2026-11-18T07:34:06Z"
     },
+    "261118-feat-ws-embed-rsrc-in-daemon": {
+      "registered_at": "2026-11-18T13:51:44Z"
+    },
     "261118-feat-ws-exec-intent-filter": {
       "registered_at": "2026-11-18T03:48:52Z"
     },
