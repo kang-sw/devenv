@@ -58,8 +58,6 @@ type EnsureOptions struct {
 	SpawnBeforeShutdown bool
 	// PreserveRunningLAN uses each fresh healthy observation, not an earlier probe.
 	PreserveRunningLAN bool
-	// RefuseCrossMinor leaves a healthy incompatible incumbent untouched.
-	RefuseCrossMinor bool
 	// Port is the configured dashboard.port, passed to a started daemon as
 	// its --port flag.
 	Port int
@@ -147,10 +145,6 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 			info, err := Health(ctx, client, previous)
 			if err == nil && opts.PreserveRunningLAN {
 				opts.LAN = info.LAN
-			}
-			if err == nil && opts.RefuseCrossMinor && !SameMinor(info.Version, opts.Version) {
-				fmt.Fprintf(logw, "dashboard: refusing cross-minor replacement of %s by %s (attached versions unknown)\n", info.Version, opts.Version)
-				return OutcomeRunning, nil
 			}
 			switch {
 			case err == nil && (keepRunning(info, opts) || spawns >= maxSpawns):

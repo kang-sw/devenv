@@ -16,7 +16,7 @@ func TestEnsureElectronPreflightAndFreshHealth(t *testing.T) {
 		dir := t.TempDir()
 		old := startTestDaemon(t, dir, "0.48.0")
 		opts := ensureOpts(dir, "0.48.0", func([]string) error { return errors.New("breakaway refused") })
-		opts.Replace, opts.SpawnBeforeShutdown, opts.RefuseCrossMinor = true, true, true
+		opts.Replace, opts.SpawnBeforeShutdown = true, true
 		outcome, err := Ensure(context.Background(), opts)
 		if outcome != OutcomeUnavailable || err == nil {
 			t.Fatalf("Ensure = %s, %v", outcome, err)
@@ -36,7 +36,7 @@ func TestEnsureElectronPreflightAndFreshHealth(t *testing.T) {
 			}
 			return sp.spawn(args)
 		})
-		opts.Replace, opts.SpawnBeforeShutdown, opts.RefuseCrossMinor = true, true, true
+		opts.Replace, opts.SpawnBeforeShutdown = true, true
 		outcome, err := Ensure(context.Background(), opts)
 		if err != nil || outcome != OutcomeReplaced || len(sp.calls) != 1 {
 			t.Fatalf("Ensure = %s, %v, %d spawns", outcome, err, len(sp.calls))
@@ -71,11 +71,24 @@ func TestEnsureElectronPreflightAndFreshHealth(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	t.Run("raced cross-minor winner is not drained", func(t *testing.T) {
+	t.Run("older-minor daemon is replaced without an explicit request", func(t *testing.T) {
+		dir := t.TempDir()
+		old := startTestDaemon(t, dir, "0.49.3")
+		sp := &inProcessSpawner{t: t, dir: dir, versions: []string{"0.50.1"}}
+		defer sp.closeAll()
+		opts := ensureOpts(dir, "0.50.1", sp.spawn)
+		opts.SpawnBeforeShutdown, opts.PreserveRunningLAN = true, true
+		outcome, err := Ensure(context.Background(), opts)
+		if err != nil || outcome != OutcomeReplaced || len(sp.calls) != 1 {
+			t.Fatalf("Ensure = %s, %v, %d spawns", outcome, err, len(sp.calls))
+		}
+		waitDone(t, old)
+	})
+	t.Run("raced newer-minor winner is not drained, even on explicit replace", func(t *testing.T) {
 		dir := t.TempDir()
 		old := startTestDaemon(t, dir, "0.49.0")
 		opts := ensureOpts(dir, "0.48.1", func([]string) error { t.Fatal("unexpected spawn"); return nil })
-		opts.Replace, opts.SpawnBeforeShutdown, opts.RefuseCrossMinor = true, true, true
+		opts.Replace, opts.SpawnBeforeShutdown = true, true
 		if outcome, err := Ensure(context.Background(), opts); outcome != OutcomeRunning || err != nil {
 			t.Fatalf("Ensure = %s, %v", outcome, err)
 		}

@@ -436,7 +436,7 @@ test('native same-core action is one explicit attempt, never renderer IPC; refus
   const requests = [];
   const f = await fixture(async (options, deps) => {
     requests.push(options.replace);
-    if (options.replace) deps.onNotice('Unknown client versions; update plugins.');
+    if (options.replace) deps.onNotice('Replacement preflight failed; the incumbent was not drained. Retry later.');
     return 'http://127.0.0.1:39418/';
   });
   await f.menus.replace_daemon.click();

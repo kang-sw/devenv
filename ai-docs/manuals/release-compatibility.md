@@ -24,8 +24,11 @@ change's compatibility tier during discussion and record it in the ticket's
   protocol and, when supplied, the daemon's major.minor
   (`wsdashboard/proxy.go:232–254`). Pi additionally requires the server to be
   at least its bundled version in that minor
-  (`agents-plugin-pi/src/version-check.ts:39–57`). A minor mismatch does not
-  create a second server.
+  (`agents-plugin-pi/src/version-check.ts:39–57`). Since 0.50 a minor
+  mismatch does not create a second server: when any starter (dev rebuild,
+  upgraded plugin, Werkschaft) replaces the daemon with a newer minor,
+  previous-minor sessions fail their calls until the updated plugin's session
+  restarts. 0.48/0.49 launchers instead fell back to a direct server.
 - **Reconnect is not compatibility negotiation.** The launcher replays
   initialization, not sent requests or tool discovery
   (`agents-plugin/bin/ws-mcp-launcher.py:1473–1481,1656–1683`). Pi discovers

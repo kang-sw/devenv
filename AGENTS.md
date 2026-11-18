@@ -119,8 +119,10 @@ before release, not discovered there.
   migration must lower the change to T3 or below.
 
 T0–T2 permit patches. Prefer them to a T3 boundary: a minor bump currently
-locks out installed-plugin sessions on the previous minor when a dev rebuild
-replaces the shared daemon. Every concrete verdict cites source lines for
+locks out installed-plugin sessions on the previous minor when a newer-minor
+daemon replaces theirs (a dev rebuild, an upgraded plugin's start, or
+Werkschaft); 0.50+ launchers have no direct fallback, so recovery needs the
+updated plugin and a session restart. Every concrete verdict cites source lines for
 which version writes and reads what, and whether reopening the new version
 recovers it. Whole-file loss of unknown fields is not T2 without that recovery;
 preserve the fields or enforce a T3 boundary. A behavior-preserving alias is
