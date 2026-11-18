@@ -76,7 +76,7 @@ export interface BridgeOptions {
   toolPreviewTuiRef: ToolPreviewTuiRef;
   ui?: ExtensionUIContext;
   /**
-   * The local-devenv `go build` seam, used by both the startup build and the
+   * The local-devenv asset-generation / `go build` seam, used by both the startup build and the
    * child-runtime ensurer. Defaults to `runGoBuild`; production callers leave
    * it unset, and tests pass a stand-in so the shipped wiring runs with no
    * `go` toolchain.
@@ -620,13 +620,13 @@ export function wrapLaunchErrorWithLocalDevenvContext(err: unknown, context: Loc
  * letting the queued render (and the rest of the event loop) run while the
  * build is in flight.
  */
-function runGoBuild(argv: string[], opts: { cwd: string }): Promise<void> {
+function runGoBuild(argv: string[], opts: { cwd: string; timeout: number }): Promise<void> {
   return new Promise((resolve, reject) => {
-    execFile(argv[0], argv.slice(1), { cwd: opts.cwd, encoding: "buffer" }, (err, stdout, stderr) => {
+    execFile(argv[0], argv.slice(1), { cwd: opts.cwd, timeout: opts.timeout, encoding: "buffer" }, (err, stdout, stderr) => {
       if (err) {
         const stdoutText = stdout ? stdout.toString() : "";
         const stderrText = stderr ? stderr.toString() : "";
-        reject(new Error(`ws-pi-bridge: go build failed (${err.message})\n--- stdout ---\n${stdoutText}\n--- stderr ---\n${stderrText}`));
+        reject(new Error(`ws-pi-bridge: ${argv[0] === "python3" ? "package asset generation" : "go build"} failed (${err.message})\n--- stdout ---\n${stdoutText}\n--- stderr ---\n${stderrText}`));
         return;
       }
       resolve();

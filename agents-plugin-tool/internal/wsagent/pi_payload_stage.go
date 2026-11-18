@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wspackage"
 )
@@ -70,6 +71,10 @@ func stagePiPayloadInputs(stateDir, name string) (string, error) {
 }
 
 func stagePiFiles(stateDir string, files map[string][]byte) (string, error) {
+	return stagePiFilesWithRename(stateDir, files, os.Rename)
+}
+
+func stagePiFilesWithRename(stateDir string, files map[string][]byte, rename func(string, string) error) (string, error) {
 	names := make([]string, 0, len(files))
 	for name := range files {
 		if !fs.ValidPath(name) || strings.ContainsAny(name, `\:`) {
@@ -89,24 +94,16 @@ func stagePiFiles(stateDir string, files map[string][]byte) (string, error) {
 	if root := piPayloadStages.paths[target]; root != "" {
 		return root, nil
 	}
+	parent := filepath.Dir(target)
+	reclaimPiInputStages(parent, time.Now())
 	// Verify a previous daemon's staged input once. A partial/corrupt directory
 	// is refused rather than mutating files a surviving process may still use.
-	if info, err := os.Lstat(target); err == nil {
-		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return "", fmt.Errorf("invalid native Pi input directory: %s", target)
-		}
-		for _, name := range names {
-			data, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(name)))
-			if err != nil || string(data) != string(files[name]) {
-				return "", fmt.Errorf("staged native Pi input %s is corrupt", name)
-			}
-		}
+	if err := validatePiInputStage(target, names, files); err == nil {
 		piPayloadStages.paths[target] = target
 		return target, nil
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
-	parent := filepath.Dir(target)
 	if err := os.MkdirAll(parent, 0o700); err != nil {
 		return "", err
 	}
@@ -124,9 +121,49 @@ func stagePiFiles(stateDir string, files map[string][]byte) (string, error) {
 			return "", err
 		}
 	}
-	if err := os.Rename(tmp, target); err != nil {
-		return "", err
+	if err := rename(tmp, target); err != nil {
+		// Another daemon may have published the same hash after our initial
+		// check. Accept its directory only under the same checks as warm reuse.
+		if verifyErr := validatePiInputStage(target, names, files); verifyErr != nil {
+			return "", fmt.Errorf("publish native Pi inputs: %w (target validation: %v)", err, verifyErr)
+		}
 	}
 	piPayloadStages.paths[target] = target
 	return target, nil
+}
+
+func validatePiInputStage(target string, names []string, files map[string][]byte) error {
+	info, err := os.Lstat(target)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("invalid native Pi input directory: %s", target)
+	}
+	for _, name := range names {
+		data, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(name)))
+		if err != nil || string(data) != string(files[name]) {
+			return fmt.Errorf("staged native Pi input %s is corrupt", name)
+		}
+	}
+	return nil
+}
+
+// Crashed preparations are disposable; settled hash directories are retained.
+// Cleanup is best effort and runs only before uncached preparation, never on
+// the same-process warm path.
+func reclaimPiInputStages(parent string, now time.Time) {
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), ".stage-") {
+			continue
+		}
+		info, err := entry.Info()
+		if err == nil && now.Sub(info.ModTime()) > time.Hour {
+			_ = os.RemoveAll(filepath.Join(parent, entry.Name()))
+		}
+	}
 }
