@@ -78,6 +78,8 @@ func TestTrackerProjectionPageMetadataAndRelatedDetail(t *testing.T) {
 		wstracker.EventView{ID: "removed", Type: "roles.remove_member", Status: "applied"},
 		wstracker.EventView{ID: "label", Type: "roles.add_label", Status: "applied", Payload: json.RawMessage(`{"name":"old name"}`)},
 		wstracker.EventView{ID: "rename", Type: "roles.edit_label", Status: "applied", Payload: json.RawMessage(`{"label":"label","name":"historical name"}`)},
+		wstracker.EventView{ID: "color", Type: "roles.edit_label", Status: "applied", Payload: json.RawMessage(`{"label":"label","color":"#cc0000"}`)},
+		wstracker.EventView{ID: "remove-label", Type: "roles.remove_label", Status: "applied", Payload: json.RawMessage(`{"label":"label"}`)},
 	)
 	p := mustProjectTracker(t, v)
 	var row trackerItemProjection

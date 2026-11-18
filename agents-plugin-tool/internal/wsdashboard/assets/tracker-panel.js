@@ -232,26 +232,29 @@
     ui.sel = null;
     render();
   }
-  // a store's search state: want / wantView, the query and view object the last request was
+  // a store's search state: want / wantView / wantVersion, the query and view identity the last request was
   // made for; seq, the request counter (an answer to an older request is dropped); q, ids, err,
   // the last answer; timer, the pending debounced request; now, the next changed query was set
   // whole (a support chat's search command), not typed, so it skips the debounce
   function searchState(n) { return (ui.psr[n] = ui.psr[n] || { seq: 0, want: null, wantView: null, q: null, ids: null, err: '', timer: null, now: false }); }
   // Called by each render of the panel with the trimmed query: (re)sends the request when the
-  // query or the view object changed since the last one, debounced when the query was typed.
+  // query or view generation changed since the last one, debounced when the query was typed.
   function searchFor(n, q) {
     var st = searchState(n), now = st.now;
     st.now = false;
     if (!q) { clearTimeout(st.timer); ui.psr[n] = null; return; }
-    if (st.want === q && st.wantView === VS) return;
+    var version = VS.projectionCursor || null;
+    if (st.want === q && st.wantView === VS && st.wantVersion === version) return;
     var typed = st.want !== q && !now;
-    st.want = q; st.wantView = VS;
+    st.want = q; st.wantView = VS; st.wantVersion = version;
     clearTimeout(st.timer);
+    // Invalidate an old answer as soon as another query/generation is
+    // scheduled, not only when its debounce timer starts the next request.
+    var seq = ++st.seq;
     st.timer = setTimeout(function () {
       st.timer = null;
-      var seq = ++st.seq;
       AD.search(n, q, function (res) {
-        if (ui.psr[n] !== st || seq !== st.seq) return;
+        if (ui.psr[n] !== st || seq !== st.seq || (version && AD.view && (AD.view(n) || {}).projectionCursor !== version)) return;
         st.q = q;
         if (res && res.ok) { st.err = ''; st.ids = {}; (res.ids || []).forEach(function (id) { st.ids[id] = true; }); }
         else { st.err = String((res && res.error) || ''); st.ids = null; }

@@ -179,7 +179,7 @@
       if (answer.globals[k] === null) delete v[k]; else v[k] = answer.globals[k];
     });
     if (Object.prototype.hasOwnProperty.call(answer, 'feed')) v.feed = answer.feed || [];
-    p.cursor = answer.cursor;
+    p.cursor = answer.cursor; v.projectionCursor = answer.cursor;
     delete p.history; delete v.historyEvents;
     tkDetailIndexes(p);
     tkViews[id] = v; tkErrs[id] = null; delete tkAnswers[id];
@@ -275,7 +275,7 @@
     var p = tkProjections[id];
     if (!p || p.history === p.cursor) return true;
     if (p.historyBusy || p.historyAttempt === p.cursor) return false;
-    p.historyBusy = true; var cursor = p.cursor; p.historyAttempt = cursor;
+    p.historyBusy = true; var cursor = p.cursor; p.historyAttempt = cursor; p.historyError = '';
     tkFetch(tkUrl(id, 'view'), undefined, function (status, answer) {
       if (tkProjections[id] !== p) return;
       p.historyBusy = false;
@@ -374,6 +374,7 @@
     detailError: function (id) { var p = tkProjections[id]; return p && p.detailError || ''; },
     retryDetail: function (id, iid) { var p = tkProjections[id]; if (p) delete p.tried[iid]; tkNeedDetails(id, [iid]); },
     history: tkHistory,
+    retryHistory: function (id) { var p = tkProjections[id]; if (p) delete p.historyAttempt; tkHistory(id); },
     historyError: function (id) { var p = tkProjections[id]; return p && p.historyError || ''; },
     error: function (id) { return tkViews[id] ? null : tkErrs[id] || null; },
     hostError: function () { return tkHostErr; },

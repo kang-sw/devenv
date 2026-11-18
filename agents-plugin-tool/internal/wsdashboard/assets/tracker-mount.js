@@ -156,6 +156,7 @@
         else if (k.indexOf('wk-') === 0) wkAct(k, a);
         else if (k === 'win-close') closeItemWindow();
         else if (k === 'detail-retry' && AD.retryDetail) AD.retryDetail(ui.store, ui.item);
+        else if (k === 'history-retry' && AD.retryHistory) AD.retryHistory(ui.store);
         else if (k === 'page-back') leavePage();
         else if (k === 'afold') { ui.aopen = ui.aopen === ui.item ? null : ui.item; render(); }
         else if (k === 'menu') itemMenu(d.item, a);

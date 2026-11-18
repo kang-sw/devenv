@@ -72,7 +72,7 @@
   }
   // renderDue: a change notification asked for a render that has not run yet (see mount); any
   // render meets it, so a synchronous render() takes the pending one's place.
-  var renderDue = false, changeTimer = 0;
+  var renderDue = false, changeTimer = 0, windowHold = null;
   // UNREADS: the rendered store's unread notifications as api.unread() returns them,
   // rebuilt by every render. afterRender runs the host's hooks once a render is done.
   var UNREADS = { store: null, ready: false, entries: [] };
@@ -212,7 +212,8 @@
       return;
     }
 
-    var draft = $('cbox') ? $('cbox').value : '';
+    if (windowHold && (windowHold.store !== name || windowHold.item !== ui.item || ui.itemChanged || ui.clearDraft)) windowHold = null;
+    var draft = $('cbox') ? $('cbox').value : windowHold ? windowHold.draft : '';
     // cards scroll inside; keep each card's scroll and the focused row across the re-render
     var scrolls = {}, fa = document.activeElement, focusRk = fa && fa.closest && body.contains(fa) && fa.closest('[data-rk]');
     focusRk = focusRk && focusRk.getAttribute('data-rk');
@@ -250,9 +251,14 @@
     dropEditorState(open);
     if (open) {
       var ready = !AD.detail || AD.detail(name, [ui.item]);
+      // A summary invalidates the old detail before its replacement arrives.
+      // Preserve the draft/caret/scroll across that loading gap, not just a
+      // synchronous redraw. Item switches and successful posts still clear it.
+      if (!ready && !windowHold) windowHold = { store: name, item: ui.item, draft: draft, focus: focusKeep, top: top2 };
+      if (ready && windowHold) { draft = windowHold.draft; focusKeep = focusKeep || windowHold.focus; top2 = windowHold.top; windowHold = null; }
       var windowBody = ready ? windowHtml(v, VS.items[ui.item]) :
         '<h2 id="iw-title">' + esc(VS.items[ui.item].title) + '</h2><p role="status">' + esc(AD.detailError && AD.detailError(name) || wsT('js.tk.loading')) + '</p>' +
-        btn('detail-retry', wsT('js.tk.sync.now'), {}) + btn('win-close', wsT('js.tk.win.close'), {});
+        btn('detail-retry', wsT('js.preview.reload'), {}) + btn('win-close', wsT('js.tk.win.close'), {});
       if (VS.projection) patchTrackerHTML(sb, windowBody); else sb.innerHTML = windowBody;
       wkMarkLinks(sb);
       if (!ui.itemChanged && !ui.clearDraft && $('cbox')) $('cbox').value = draft;
@@ -266,7 +272,7 @@
       if (ui.focus && ready) ui.focus.flash = false;
       var wf = focusFk && lastInput === 'key' && sb.querySelector('[data-fk="' + CSS.escape(focusFk) + '"]');
       if (wf) wf.focus({ preventScroll: true });
-    } else sb.innerHTML = '';
+    } else { sb.innerHTML = ''; windowHold = null; }
     if (open) placeSub();
     var fk2 = focusKeep && $(focusKeep[0]);
     if (fk2) { fk2.focus({ preventScroll: true }); try { fk2.setSelectionRange(focusKeep[1], focusKeep[2]); } catch (x) { /* not a text field */ } }

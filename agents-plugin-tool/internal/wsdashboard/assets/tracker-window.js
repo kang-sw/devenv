@@ -77,7 +77,8 @@
     return 'item';
   }
   function historyLoading() {
-    return '<p role="status">' + esc(AD.historyError && AD.historyError(ui.store) || wsT('js.tk.loading')) + '</p>';
+    var error = AD.historyError && AD.historyError(ui.store);
+    return '<p role="status">' + esc(error || wsT('js.tk.loading')) + '</p>' + (error && AD.retryHistory ? btn('history-retry', wsT('js.preview.reload'), {}) : '');
   }
   function activityBody() {
     if (AD.history && !AD.history(ui.store)) return historyLoading();

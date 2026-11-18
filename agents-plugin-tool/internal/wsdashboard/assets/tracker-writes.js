@@ -716,7 +716,9 @@
     if (AD.detailReady && !AD.detailReady(ui.store, id)) {
       var store = ui.store;
       showItem(id);
-      AD.detail(store, [id], function () { if (ui.store === store && ui.win && ui.item === id) startEdit(id); });
+      AD.detail(store, [id], function () {
+        if (ui.store === store && ui.win && ui.item === id) { render(); startEdit(id); }
+      });
       return;
     }
     var it = VS.items[id];

@@ -97,6 +97,22 @@ test('per-item recent boundaries override hourly skew, legacy fallback and searc
   assert.equal(c.CLOSED.entries.length, 1);
 });
 
+test('an editor resumed across an epoch reset pins the newly matching body and revision', () => {
+  const c = harness(), writes = fs.readFileSync(path.join(__dirname, 'assets/tracker-writes.js'), 'utf8');
+  vm.runInContext(writes.slice(writes.indexOf('  function startEdit('), writes.indexOf('  function endEdit(')), c);
+  c.VS.items.i = { id: 'i', title: 'old', body: 'stale', bodyRev: ['old'], labels: [] };
+  c.ui = { store: 's', item: 'i', win: true, edpv: {}, eatt: {} };
+  let ready = false, continuation;
+  const replacement = { items: { i: { id: 'i', title: 'new', body: 'matching new', bodyRev: ['new'], labels: [] } } };
+  c.AD = { detailReady: () => ready, detail: (s, ids, done) => { continuation = done; } };
+  c.showItem = () => {}; c.$ = () => null; c.render = () => { c.VS = replacement; };
+  c.startEdit('i');
+  assert.equal(c.ui.iedit, undefined);
+  ready = true; continuation();
+  assert.equal(c.ui.iedit.body, 'matching new');
+  assert.equal(c.ui.iedit.base[0], 'new');
+});
+
 test('due chips and row dates are equivalent with projections and legacy clock', () => {
   const c = harness();
   for (const [due, state] of [['2026-11-17', 'over'], ['2026-11-18', 'today'], ['2026-11-20', 'future']]) {

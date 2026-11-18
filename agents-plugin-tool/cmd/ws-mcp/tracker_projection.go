@@ -145,14 +145,17 @@ func projectTracker(id string, v *wstrackerhost.StoreView, seen wsdashboard.Trac
 		if e.Status != "applied" {
 			continue
 		}
-		var p struct{ Label, Name string }
+		var p struct {
+			Label string
+			Name  *string
+		}
 		if e.Type == "roles.add_label" || e.Type == "roles.edit_label" {
-			if json.Unmarshal(e.Payload, &p) == nil {
+			if json.Unmarshal(e.Payload, &p) == nil && p.Name != nil {
 				key := e.ID
 				if e.Type == "roles.edit_label" {
 					key = p.Label
 				}
-				labelNames[key] = p.Name
+				labelNames[key] = *p.Name
 			}
 		}
 	}

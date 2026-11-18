@@ -13,12 +13,13 @@ function harness() {
     tkSupport: false, wsT: x => x, tkMount() {},
     tkUrl: (id, op) => '/tracker/stores/' + id + '/' + op,
     tkFetch(path, body, done, keep, signal, tag) { requests.push({ path, body, done, tag }); },
-    setTimeout(fn) { timers.push(fn); return timers.length; }, window: { parent: { frames: [] } }
+    setTimeout(fn) { const t = { fn }; timers.push(t); return t; },
+    clearTimeout(t) { if (t) t.cancelled = true; }, window: { parent: { frames: [] } }
   };
   vm.createContext(c); vm.runInContext(block + source.slice(source.indexOf('  // tkRegistryWrite posts'), source.indexOf('  // The drawer hangs from the header')), c);
   let nudges = 0, notes = 0;
   c.tkReload = () => nudges++; c.tkSubs.push(() => notes++);
-  return { c, requests, flush() { while (timers.length) timers.shift()(); }, nudges: () => nudges, notes: () => notes };
+  return { c, requests, flush() { while (timers.length) { const t = timers.shift(); if (!t.cancelled) t.fn(); } }, nudges: () => nudges, notes: () => notes };
 }
 function row(id, version = 'v1', extra = {}) {
   return { detailVersion: version, data: { item: { id, title: id, thread: ['e-' + id] },
@@ -169,6 +170,32 @@ test('dispatch reports actual item and global verdicts, not a guessed applied st
   assert.equal(result.results[0].reason, 'global reason');
 });
 
+test('active search follows in-place projection generations and rejects overtaken answers', () => {
+  const h = harness(), c = h.c;
+  c.tkTakeProjection('s', answer({ a: row('a') }));
+  c.VS = c.tkViews.s; c.ui = { store: 's', psr: {} }; c.AD = c.tkAdapter;
+  vm.runInContext(fs.readFileSync(__dirname + '/assets/tracker-panel.js', 'utf8'), c);
+  c.render = () => { c.SQ = 'needle'; c.SIDS = c.ui.psr.s.ids; };
+  c.searchFor('s', 'needle'); h.flush(); h.requests.shift().done(200, { ids: [] });
+  assert.equal(c.matchItem(c.VS.items.a), false);
+  const changed = row('a', 'v2'); changed.data.item.title = 'needle';
+  c.tkTakeProjection('s', answer({ a: changed }, 'epoch.2', false, {}));
+  c.searchFor('s', 'needle'); h.flush();
+  assert(h.requests[0].path.endsWith('/search?q=needle'), 'constant query reissues after delta');
+  h.requests.shift().done(200, { ids: ['a'] });
+  assert.equal(c.matchItem(c.VS.items.a), true);
+  c.tkTakeProjection('s', answer({ a: row('a', 'v3') }, 'epoch.3', false, {}));
+  c.searchFor('s', 'needle'); h.flush(); const old = h.requests.shift();
+  c.tkTakeProjection('s', answer({ a: row('a', 'v4') }, 'epoch.4', false, {}));
+  old.done(200, { ids: ['b'] });
+  assert.deepEqual(copy(c.ui.psr.s.ids), { a: true }, 'response overtaken before render is ignored');
+  c.searchFor('s', 'needle');
+  old.done(200, { ids: ['b'] });
+  assert.deepEqual(copy(c.ui.psr.s.ids), { a: true }, 'response overtaken before new timer fires is ignored');
+  h.flush(); h.requests.shift().done(200, { ids: [] });
+  assert.equal(c.matchItem(c.VS.items.a), false, 'changed membership is displayed');
+});
+
 test('errors retry only explicitly; history remains demand-only and separate from detail', () => {
   const h = harness(), c = h.c;
   c.tkTakeProjection('s', answer({ a: row('a') }));
@@ -179,6 +206,11 @@ test('errors retry only explicitly; history remains demand-only and separate fro
   c.tkNeedDetails('s', ['a']); h.flush(); assert.equal(h.requests.length, 1);
   h.requests.shift().done(200, { items: { a: bundle('v1', 'detail') } });
   assert.equal(c.tkHistory('s'), false);
+  h.requests.shift().done(503, { error: 'history busy' });
+  assert.equal(c.tkHistory('s'), false); assert.equal(h.requests.length, 0, 'history failure must not spin');
+  assert.equal(c.tkAdapter.historyError('s'), 'history busy');
+  c.tkAdapter.retryHistory('s');
+  assert.equal(h.requests.length, 1);
   h.requests.shift().done(200, { view: { events: [{ id: 'roles', payload: { secret: 'history' } }] } });
   assert.equal(c.tkHistory('s'), true);
   assert.equal(c.tkViews.s.historyEvents[0].id, 'roles');

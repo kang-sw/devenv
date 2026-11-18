@@ -128,6 +128,8 @@ async function acceptance(browser) {
   race.setCurrent({ cursor: 'epoch.2', reset: false, items: { i0: nextRow }, removed: [], globals: {} });
   await race.page.evaluate(() => tkReload());
   await race.page.waitForFunction(() => document.getElementById('tkwinbody').textContent.includes('future body'));
+  await race.page.locator('#cbox').fill('draft across detail gap');
+  await race.page.evaluate(() => document.getElementById('cbox').setSelectionRange(2, 6));
   const newer = structuredClone(nextRow); newer.detailVersion = 'v3';
   race.setCurrent({ cursor: 'epoch.3', reset: false, items: { i0: newer }, removed: [], globals: {} });
   await race.page.evaluate(() => tkReload());
@@ -142,8 +144,10 @@ async function acceptance(browser) {
   await assertEventually(() => race.pendingDetails.length > 0);
   await race.pendingDetails.shift().route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: { i0: detail(race.f, 'i0', 'v3', 'matching body') } }) });
   await race.page.waitForFunction(() => document.getElementById('tkwinbody').textContent.includes('matching body'));
+  assert.equal(await race.page.locator('#cbox').inputValue(), 'draft across detail gap');
+  assert.deepEqual(await race.page.evaluate(() => { const c = document.getElementById('cbox'); return [document.activeElement === c, c.selectionStart, c.selectionEnd]; }), [true, 2, 6]);
   assert.deepEqual(race.errors, []);
-  console.log('PASS tracker browser: future-before-delta / old-after-delta / matching detail only');
+  console.log('PASS tracker browser: future-before-delta / old-after-delta / matching detail only / draft and caret across loading gap');
   await race.page.close();
 }
 async function benchmark(browser) {

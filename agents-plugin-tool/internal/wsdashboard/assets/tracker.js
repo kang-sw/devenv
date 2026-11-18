@@ -21,7 +21,7 @@
 //   history(id)       -> optional: request global event history for Activity/sync;
 //                        true when view.historyEvents is current. Does not install
 //                        unversioned history as item detail.
-//   historyError(id)  -> optional history request error text.
+//   historyError(id), retryHistory(id) -> optional history error/retry hooks.
 //   error(id)         -> the reason string when view(id) is null, else null
 //   dispatch(id, events, done)
 //                        events = [{type, payload, origin}]. A payload's item,
