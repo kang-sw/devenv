@@ -670,6 +670,18 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "whiteboard.load",
+			"description": "Lead-only. Replace your whiteboard with a board zip downloaded from the dashboard board toolbar; the previous board is kept as a backup folder beside it.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
+					"path":        stringProperty("The board zip's path on the host running ws-mcp; a relative path resolves against the session root."),
+				},
+				"required": []string{"session_key", "path"},
+			},
+		},
+		{
 			// The tracker tools follow the whiteboard's shape: always listed
 			// with a pointer to their playbook, and a string command batch
 			// for the same \u-escape reason.

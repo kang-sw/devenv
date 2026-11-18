@@ -585,7 +585,7 @@ func (s *Server) startDashboardHeartbeat(ctx context.Context) <-chan struct{} {
 // store the dashboard renders: the whiteboard and the tools that dirty one
 // of its panels.
 func dashboardNudgingTool(name string) bool {
-	return name == "whiteboard.update" || whiteboardDirtyingTool(name)
+	return name == "whiteboard.update" || name == whiteboardLoadTool || whiteboardDirtyingTool(name)
 }
 
 // dashboardNudge tells the daemon, fire and forget, that a store of the

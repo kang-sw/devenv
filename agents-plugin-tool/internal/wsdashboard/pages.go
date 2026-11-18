@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"mime"
 	"net/http"
 	"path/filepath"
 	"regexp"
@@ -1437,6 +1438,8 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		d.handleClosedTopics(w, r, replyID)
 	case sub == "topic":
 		d.handleTopicHistory(w, r, replyID)
+	case sub == "board.zip":
+		d.handleBoardArchive(w, r, replyID)
 	case sub == "tickets/idea":
 		d.handleTicketIdeas(w, r, replyID)
 	case sub == "worktrees":
@@ -1665,6 +1668,71 @@ func (d *Daemon) handleClosedTopics(w http.ResponseWriter, r *http.Request, repl
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = w.Write(raw)
+}
+
+// handleBoardArchive serves /s/<reply-id>/board.zip: the session's board
+// folder as a zip download, named by boardArchiveName. A session without a
+// board answers not found.
+func (d *Daemon) handleBoardArchive(w http.ResponseWriter, r *http.Request, replyID string) {
+	src, has := d.source.(BoardArchiveSource)
+	var s Session
+	ok := has && d.index != nil && ValidReplyID(replyID)
+	if ok {
+		s, ok = d.index.Session(replyID)
+	}
+	var data []byte
+	if ok {
+		var err error
+		data, ok, err = src.BoardArchive(s.Registration)
+		if err != nil {
+			http.Error(w, "board unavailable: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	if !ok {
+		http.Error(w, "no board", http.StatusNotFound)
+		return
+	}
+	var branch string
+	if b := d.git.badge(s.Project); b != nil && b.State == gitOK && !b.Detached {
+		branch = b.Branch
+	}
+	name := boardArchiveName(s, branch, time.Now())
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(data)
+}
+
+// boardArchiveName is whiteboard_<repository>_<branch>_<label>_<YYMMDD_hhmm>.zip:
+// the main repository's directory name (a linked worktree's branch already
+// tells it apart), the branch, dropped with its separator when there is
+// none, the display label or else the reply-id, and now in the daemon's
+// local time. Filename-unsafe characters become "-".
+func boardArchiveName(s Session, branch string, now time.Time) string {
+	repo := railRepoRoot(s.Registration)
+	if repo == "" {
+		repo = s.Project
+	}
+	label := s.Label
+	if label == "" {
+		label = s.ReplyID
+	}
+	parts := []string{"whiteboard", filepath.Base(filepath.Clean(repo))}
+	if branch != "" {
+		parts = append(parts, branch)
+	}
+	parts = append(parts, label)
+	for i, part := range parts {
+		parts[i] = strings.Map(func(r rune) rune {
+			if r < 0x20 || r == 0x7f || strings.ContainsRune(`/\:*?"<>|`, r) {
+				return '-'
+			}
+			return r
+		}, part)
+	}
+	return strings.Join(parts, "_") + "_" + now.Format("060102_1504") + ".zip"
 }
 
 // serveMermaid serves the shared mermaid script. Its name carries its hash,
