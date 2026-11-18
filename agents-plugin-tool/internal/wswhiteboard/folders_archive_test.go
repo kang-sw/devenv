@@ -402,6 +402,9 @@ func TestArchiveLeavesOutUnreferencedTopicFolders(t *testing.T) {
 // stamps the load time, which floors every item's re-ask time so dashboard
 // answers sent to the replaced board attach to none of the loaded items.
 func TestArchiveLoadStartsANewBoardIncarnation(t *testing.T) {
+	clock := archiveLoadNow
+	archiveLoadNow = func() time.Time { return archiveNow.Add(-time.Millisecond) }
+	t.Cleanup(func() { archiveLoadNow = clock })
 	root := t.TempDir()
 	source := archiveSource(t, filepath.Join(root, "source"))
 	dest := archiveDestination(t, filepath.Join(root, "dest"))

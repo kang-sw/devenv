@@ -132,8 +132,8 @@ func (f FolderStore) boardFiles(meta *folderSession) ([]string, error) {
 // except the revision receipts (metadata and stale-nudge revisions), which
 // the destination's receipt floors because viewers compare them, the render
 // sequence, which replace raises past the destination's, and LoadedAt, set
-// to now, so dashboard answers sent to the replaced board attach to none of
-// the loaded board's reused item IDs.
+// at the locked swap (not the backup-name time now), so answers sent to the
+// replaced board attach to none of the loaded board's reused item IDs.
 // backup is the folder now holding the previous board ("" when there was
 // none), named <dir>.bak-<YYMMDD_hhmm> in now's time zone, with -2, -3, ... on
 // a collision.
@@ -157,7 +157,6 @@ func (f FolderStore) LoadArchive(path string, now time.Time) (backup string, top
 		return "", 0, fmt.Errorf("the archive holds no board")
 	}
 	board.EmbedDir, board.Embeds, board.LastEmbedSeq = "", nil, 0
-	board.LoadedAt = now.UTC().Format(reaskLayout)
 	return f.replace(board, f.Dir+".bak-"+now.Format("060102_1504"))
 }
 
@@ -269,6 +268,9 @@ func (f FolderStore) replace(next *State, backupBase string) (backup string, top
 			if err := os.RemoveAll(filepath.Join(f.Dir, ref.Dir)); err != nil {
 				return err
 			}
+		}
+		if err := f.planLoadFloor(intent); err != nil {
+			return err
 		}
 		if err := f.commit(intent); err != nil {
 			return err
