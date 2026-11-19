@@ -512,6 +512,9 @@
     "261119-bug-ws-agent-v2-dogfood-surprises": {
       "registered_at": "2026-11-19T13:16:47Z"
     },
+    "261119-epic-ws-conversation-audit": {
+      "registered_at": "2026-11-19T14:04:20Z"
+    },
     "261119-epic-ws-daemon-sqlite-storage": {
       "registered_at": "2026-11-19T12:55:07Z"
     },
