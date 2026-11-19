@@ -40,7 +40,7 @@ than unused knobs, so each needs re-verification before the owner confirms it.
   file, or committed repo config that still carries a removed key must load
   and resolve normally: the removed key is ignored, never a parse or
   resolution error. Target tier T0/T1 (`ai-docs/manuals/release-compatibility.md`);
-  the grade is settled through (1353) and recorded in `## Decisions` before
+  the grade is settled through (1719) and recorded in `## Decisions` before
   release. Evidence at drafting time: overrides are a free `map[string]string`
   (`agents-plugin-tool/internal/wsconfig/config.go:40`) that every writer
   round-trips whole (`config.go:783-805`), and resolution reads only the key
@@ -98,29 +98,29 @@ re-verified in Phase 1 and removed only after owner confirmation.
 
 ## Open Decision Queue
 
-Last ID used: (1359)
+Last ID used: (1725)
 
-(1353) [open] [announced] Compatibility tier T0/T1. A stored value of a removed key is ignored by the new binary (resolution never asks for it; writers keep the map entry, `config.go:40,783-805`), so the file still loads (T1 for the user whose tuned value stops applying, no data change). An older binary on the same machine serves its own embedded manifests and registry and keeps honoring the value (T0 for the old side). Settled in `## Decisions` once confirmed together with (1354).
+(1719) [open] [announced] Compatibility tier T0/T1. A stored value of a removed key is ignored by the new binary (resolution never asks for it; writers keep the map entry, `config.go:40,783-805`), so the file still loads (T1 for the user whose tuned value stops applying, no data change). An older binary on the same machine serves its own embedded manifests and registry and keeps honoring the value (T0 for the old side). Settled in `## Decisions` once confirmed together with (1720).
 
-(1354) [open] [policy] What `config.tune`, `config.unset`, and `config.get` do for a removed key from an older caller (old skill or playbook text, Claude mod, Pi extension).
+(1720) [open] [policy] What `config.tune`, `config.unset`, and `config.get` do for a removed key from an older caller (old skill or playbook text, Claude mod, Pi extension).
 - Context: today `config.tune` refuses a key it does not know (`internal/mcp/server_dispatch.go:422`), while `config.get` reports an unknown key as unset (`internal/mcp/config_manifest.go:507,566-569`); so plain removal turns an older caller's tune into an error, and a removed call or argument without an alias is T3 (`release-compatibility.md` Tools and Protocol Mapping). Precedent: `261113-refactor-ws-dashboard-drop-lan-serving` accepts and warns for one minor, then deletes.
 - Alternative a: for one minor, accept the key with a deprecation warning (tune writes nothing; get returns the code default), then refuse it from the next minor with owner approval.
 - Alternative b: refuse immediately on removal.
 > a: keeps the release patch-safe and matches the LAN-serving precedent; b is a T3 boundary for every removed key.
 
-(1355) [open] [policy] Outcome vocabulary for the per-key confirmation.
+(1721) [open] [policy] Outcome vocabulary for the per-key confirmation.
 - Context: three candidates are repo-level constructs rather than unused knobs (`worktree.profile.<name>`, `git.merge_size_*`, `ticket-assignee-aware`); the triage reason is that they belong in the committed repo config, not that they are unused. `worktree.profile.<name>` carries live worktree-pool behavior and hooks.
 - Alternative a: each key gets one of remove / restrict to repo scope / keep, chosen by the owner.
 - Alternative b: remove or keep only; restriction becomes a separate ticket.
 > a: the triage reason for those three is scope, not disuse; removal would delete working repo configuration.
 
-(1356) [open] [technical] Dead constants `sage_review_design_tier` and `sage_review_completeness_tier` (registered in `wsconfig/scope.go`, never read or written by the triage's account) are deleted outright after Phase 1 re-confirms there is no reader, since no code default exists to keep.
+(1722) [open] [technical] Dead constants `sage_review_design_tier` and `sage_review_completeness_tier` (registered in `wsconfig/scope.go`, never read or written by the triage's account) are deleted outright after Phase 1 re-confirms there is no reader, since no code default exists to keep.
 
-(1357) [open] [technical] Phase 1 re-verification records per key: every reader on current `develop` (Go, Claude mod, Pi extension, playbook/rsrc splices, tests), the fallback each reader takes on an unset value, every doc or skill line that tells a user to tune the key, and whether its removal touches a manifest copy; the owner receives that table.
+(1723) [open] [technical] Phase 1 re-verification records per key: every reader on current `develop` (Go, Claude mod, Pi extension, playbook/rsrc splices, tests), the fallback each reader takes on an unset value, every doc or skill line that tells a user to tune the key, and whether its removal touches a manifest copy; the owner receives that table.
 
-(1358) [open] [technical] Removed keys still present in a loaded config file produce one warning in `config.list` output naming the key and file, so a user whose tune stopped applying can see why; no rewrite of the file.
+(1724) [open] [technical] Removed keys still present in a loaded config file produce one warning in `config.list` output naming the key and file, so a user whose tune stopped applying can see why; no rewrite of the file.
 
-(1359) [open] [technical] The internal splice points `prompt.TicketHandlerPersistConfirmation.*`, `prompt.TicketHandlerReviewAutoAck.*`, and `prompt.TicketQueueWhiteboard.*` leave the user-facing `prompt.<pointId>` override surface but keep their playbook defaults, which remain driven by `ticket_review_auto_ack` and `workflow.whiteboard_enabled`.
+(1725) [open] [technical] The internal splice points `prompt.TicketHandlerPersistConfirmation.*`, `prompt.TicketHandlerReviewAutoAck.*`, and `prompt.TicketQueueWhiteboard.*` leave the user-facing `prompt.<pointId>` override surface but keep their playbook defaults, which remain driven by `ticket_review_auto_ack` and `workflow.whiteboard_enabled`.
 
 ## Phases
 
@@ -129,21 +129,21 @@ Last ID used: (1359)
 No code change.
 
 - Re-verify every candidate in `## Unconfirmed Candidates` against current
-  `develop` per (1357).
-- Post the per-key list with a recommended outcome per key ((1355)) to the
+  `develop` per (1723).
+- Post the per-key list with a recommended outcome per key ((1721)) to the
   owner, and record the confirmed list in `## Decisions`.
 - Verification: every candidate has a recorded reader set and an owner
   outcome; keys the owner did not confirm stay unchanged.
 
 ### Phase 2: Remove confirmed keys from the user-facing surface
 
-Depends on Phase 1 and on (1353)/(1354) being settled.
+Depends on Phase 1 and on (1719)/(1720) being settled.
 
 - For each confirmed key: take it off the registry/catalog, `config.tune` and
   `config.list`, every manifest copy, and user-facing docs and skill text;
   keep the code default (Decision 1); apply the older-caller behavior from
-  (1354).
+  (1720).
 - Verification: a fixture config file carrying every removed key loads and
   resolves without error and with the code defaults in effect; manifest parity
   tests pass for ws and wsflow; older-caller `config.tune`/`config.get` of a
-  removed key behaves per (1354); remaining keys resolve unchanged.
+  removed key behaves per (1720); remaining keys resolve unchanged.
