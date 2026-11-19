@@ -31,12 +31,12 @@ The update result reports `full:` as the daemon URL when a daemon serves the ses
 
 Code that exists only for the disk pages:
 
-- `RenderPage` (`internal/wswhiteboard/render.go:308`) and the `.Full`/`.Embed` branches of `internal/wswhiteboard/assets/page.tmpl` (lines 1-12 onward).
+- `RenderPage` (`internal/wswhiteboard/render.go:308`) and the `.Full` branches of `internal/wswhiteboard/assets/page.tmpl` (lines 1-12 onward). The `.Embed` branches of `page.tmpl` moved to `261119-feat-ws-whiteboard-retire-embed-snapshot` (`(1818)`, `(1821)`); only that ticket claims their deletion.
 - `live.js` stamp polling and the standalone viewer/change-mark script bundle (`render.go:550-554`, `chgWire` at `:524`).
 - `StampFile`, `FileLink`, `FullBoardLink` (`internal/wswhiteboard/view.go:33-60`; `fileHref`, `markdown.go:577-585`).
 - The unframed branches under `DocFramed=false` (`render.go:607,617-626`, `:825`).
 - The `served:false` panel variants (`whiteboard_tools.go:105-114`).
-- Embed eviction and orphan GC (`evictWhiteboardEmbeds`, `:642`; `whiteboardGCCadence` and the once-a-day marker, `:39-43,741`).
+- Orphan GC (`whiteboardGCCadence` and the once-a-day marker, `:39-43,741`). The embed decision `(1820)=a` in `261119-feat-ws-whiteboard-retire-embed-snapshot` relies on this GC and its `<reply-id>-<hash>.html` pattern to remove leftover embed files, so retiring the GC must keep or replace that cleanup. Embed eviction (`evictWhiteboardEmbeds`, `:642`) moved to `261119-feat-ws-whiteboard-retire-embed-snapshot` (`(1818)`, `(1821)`); only that ticket claims its deletion.
 - i18n subsetting for static pages (`render.go:154-176`).
 - About 19 `wswhiteboard` test files call `RenderPage`.
 

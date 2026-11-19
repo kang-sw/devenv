@@ -6,6 +6,10 @@ related:
   261119-feat-ws-whiteboard-retire-embed-snapshot: "sibling child; removes the per-update embed render this store would otherwise carry (see (1815))"
   261116-feat-ws-whiteboard-retire-disk-pages: "derived index.html / index.stamp.js stay files here; their retirement is that ticket's scope"
   261117-research-ws-daemon-file-touch-map: "storage audit background (whiteboard rows)"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: e86e61719a409f61
+sage-review-completeness-reviewed: e86e61719a409f61
 ---
 
 # Whiteboard 2PC folder store -> one SQLite database per board
@@ -20,7 +24,8 @@ The owner chose this store as the epic's pilot child (2026-11-19, 23:06), so
 it also sets the pattern later children follow.
 
 Go paths below are relative to `agents-plugin-tool/internal/`. Line numbers
-were read on `develop` at `9f43a8f00`; they drift.
+were read on `develop` at `9f43a8f00` and `7c26b7b0a`. They drift: re-check
+each one against the implementation base before editing.
 
 ### Current store inventory
 
@@ -158,15 +163,23 @@ Phase 1 replaces it with the measured value.
   as the epic's pilot. There is no Windows AhnLab V3 benchmark for now (the
   owner is away from that PC). Owner: "whatever it is, the files must avoid
   the currently known performance-degrading factors." So
-  `ai-docs/manuals/performance.md` rules 1-5 are hard design constraints here:
-  1. Reads come from memory only. The DB serves recovery and history.
-  2. One change is one transaction, which is one WAL append. An unchanged state
-     writes nothing.
-  3. `PRAGMA synchronous=NORMAL` in WAL mode, so there is no fsync per commit.
-     Checkpoints are rare and run off the interactive path.
-  4. Handles are held: no per-call open, lock, or `stat`.
-  5. `whiteboard.update` latency waits on nothing beyond that single WAL
-     append.
+  `ai-docs/manuals/performance.md` rules 1-5 are hard design constraints here.
+  The numbers below are that manual's own rule numbers; Phase 3's gap list
+  cites them:
+  1. Rule 1, memory first: reads come from memory only. The DB serves recovery
+     and history.
+  2. Rule 2, delta appends: one change is one transaction, which is one WAL
+     append. An unchanged state writes nothing.
+  3. Rule 3, whole-file retention: one DB per board holds the board's recovery
+     state, so recovery reads one board DB (the DB plus its `-wal`; there is
+     no `-shm` under `(1807)`), and deleting a board deletes one folder
+     (`(1325)=a`, `(1808)`). There are no per-record files and no
+     in-place pruning of the live file.
+  4. Rule 4, held handles: no per-call open, lock, or `stat`.
+  5. Rule 5, I/O-free interactive paths: `PRAGMA synchronous=NORMAL` in WAL
+     mode, so there is no fsync per commit and none on the response path.
+     Checkpoints are rare and run off the interactive path. `whiteboard.update`
+     latency waits on nothing beyond that single WAL append.
 - **Measurement (owner, 2026-11-19 23:06):** before/after file-operation counts
   per `whiteboard.update` on macOS, using a tracer (`fs_usage`/`dtruss`) or
   Go-level counting (`wsstate.FileIOCounters`,
@@ -177,8 +190,8 @@ Phase 1 replaces it with the measured value.
 - **SQLite precedent (epic Cross-Child Decisions):** build on
   `wsstore/store.go` (`modernc.org/sqlite`, `journal_mode=WAL`,
   `SetMaxOpenConns(1)`, `busy_timeout`, `SQLITE_BUSY`/`SQLITE_LOCKED` retry per
-  `6539b0c01`). Rule 3 above overrides the precedent's default `synchronous`
-  setting (`wsstore/store.go:209-224` sets none).
+  `6539b0c01`). Rule 5 above (`synchronous=NORMAL`) overrides the precedent's
+  default `synchronous` setting (`wsstore/store.go:209-224` sets none).
 - **Compatibility tier T3 with a minor bump, `(1805)=a` (owner, direct,
   2026-11-19 23:22):** the one-way import adds a sentinel `pending.json` with
   `schema_version: 3` to the legacy board folder. An older binary refuses that
@@ -203,7 +216,10 @@ confirms them before this work merges to `develop`.
 - **Tier reasoning per `release-compatibility.md`** (owner-assumed 2026-11-19
   under (1802)=b; owner confirms in the morning). T3 is the highest affected
   path. Release Rule 2 requires a minor bump and explicit owner approval; the
-  owner approved on 2026-11-19 at 23:22.
+  owner approved on 2026-11-19 at 23:22. That approval covers the `(1805)=a`
+  sentinel. `(1806)`'s direct-CLI refusal is a second T3 path, and the owner's
+  morning confirmation of `(1806)` is the explicit approval Release Rule 2
+  requires for it.
   1. Old folder, new binary: the first open imports through the retained
      `FolderStore.Open` (`folders.go:143-159`, `:400-490`). That covers pending
      replay, the schema guard, and v1 conversion. No T4.
@@ -235,7 +251,8 @@ confirms them before this work merges to `develop`.
   - On first start the new binary imports the legacy board folder into the DB
     through the existing `FolderStore.Open`, commits it, and then adds the
     `(1805)=a` sentinel.
-  - A DB found without the sentinel gets it on open.
+  - A DB found without the sentinel gets it on open, after the generation
+    check of `(1825)`.
   - After the import commit there is no write to the legacy folder, apart
     from what `Open` itself replays or migrates: a leftover `pending.json`,
     content and close-result migrations, and the `.lock` file
@@ -249,18 +266,68 @@ confirms them before this work merges to `develop`.
   2026-11-19 under (1802)=b; owner confirms in the morning):
   - A direct `ws-mcp` CLI or `serve` process refuses board calls with an
     error naming the daemon as the board owner.
+  - The refusal keys on an explicit board-owner option: a `BoardOwner bool`
+    field on the mcp server options, next to `ServerOptions.Live`. Only the
+    daemon sets it: the proxy host, the dashboard source, and the daemon's
+    hosted one-shot CLI path (`cmd/ws-mcp/hosted_cli.go:74-80`; the implementer
+    confirms that path). Every process without it refuses board calls BEFORE it
+    opens the DB. The refusal does not rely on `SQLITE_BUSY`. The refusal text
+    is the implementer's, under `shipped-surface-boundary.md`.
+  - `ServerOptions.Live` stays ruled out as the owner signal: it is nil for a
+    connection accepted before the dashboard binds (`cmd/ws-mcp/proxy.go:101-103`).
   - Rejected: routing board calls to the daemon. No proxy exists in
     `cmd/ws-mcp`, so it would be new work, and 0.50+ launchers always go
     through the daemon.
   - Rejected: concurrent WAL access from a second process, because it brings
     back cross-process locking and per-call revalidation (rules 1 and 4).
-- **Sentinel write failure does not block the open, `(1823)`** (technical,
+  - Rejected: detecting the second process by `SQLITE_BUSY` alone. A direct
+    process that starts first would take the exclusive lock (`(1807)`) and lock
+    the daemon out of its own board.
+- **Sentinel write failure does not block the open, `(1828)`** (technical,
   lead ruling 2026-11-19):
   - When the sentinel write fails after the import commit (read-only folder,
     I/O error), the DB still opens.
-  - The sentinel is retried on the next open, and the failure is logged.
+  - The sentinel is retried on the next open, and the failure is logged. The
+    retry runs inside the same locked step as the generation check of
+    `(1825)`, which closes the window a missing sentinel leaves open.
   - Rejected: refusing to open, because it strands a board whose data is
     already safely in the DB.
+- **The import holds the legacy lock through the sentinel and records the
+  imported generation, `(1825)`** (technical, lead ruling 2026-11-19; amends
+  `(1828)`):
+  - The import holds the legacy folder's `.lock` from the import load through
+    the sentinel write, so no legacy writer can append between the read and the
+    sentinel.
+  - The DB records the imported legacy generation.
+  - An open that finds the DB but no sentinel (a `(1828)` failed write, or an
+    older daemon that ran meanwhile) takes the folder's `.lock` and, under it:
+    1. reads `committed.json` (`folders.go:93-96`) and any schema-2
+       `pending.json`, which is an older daemon's unreplayed commit;
+    2. logs a divergence (board, both generations) if either is ahead of the
+       recorded imported generation. For a pending intent the log names the
+       intent that the sentinel overwrites;
+    3. writes the sentinel (the `(1828)` retry), and only then releases the
+       lock.
+  - The sentinel replaces `pending.json`. Replaying a schema-2 intent would
+    remove that file (`folders.go:1038-1040`), the same path the sentinel
+    takes, so an unreplayed intent is not replayed and the log is its only
+    trace. The DB stays the board, per the owner's one-way directive.
+  - Rejected: re-importing the diverged folder, because it would overwrite
+    DB-side updates.
+  - Rejected: refusing to open, for the reason `(1828)` gives.
+- **A missing or corrupt DB under a sentinel, or a corrupt DB without one, is
+  an explicit error, `(1826)`** (technical, lead ruling 2026-11-19):
+  - When `.board.sqlite` is missing or corrupt but the folder has its sentinel,
+    the open returns an explicit error. It names the missing or unreadable DB
+    and the manual rollback of `(1816)=a` (delete `pending.json` and
+    `.board.sqlite`, which hands the board back as it stood at import). The
+    text is shipped text.
+  - A corrupt or unreadable `.board.sqlite` with NO sentinel (possible after a
+    failed sentinel write under `(1828)`) is the same explicit error. A missing
+    DB with no sentinel is a first import, not an error.
+  - The new binary never silently re-imports the stale folder.
+  - Rejected: falling through to the `FolderStore` guard, whose "newer
+    schema_version 3" message is misleading for the new binary.
 - **Post-embed measurement baseline, `(1824)`** (technical, lead ruling
   2026-11-19):
   - The "before" baseline for this ticket is taken on the post-embed base,
@@ -270,9 +337,21 @@ confirms them before this work merges to `develop`.
 - **`PRAGMA locking_mode=EXCLUSIVE` before the first WAL access, `(1807)`**
   (owner-assumed 2026-11-19 under (1802)=b; owner confirms in the morning):
   - No `-shm` file and no per-transaction lock calls.
-  - A second opener gets `SQLITE_BUSY`, which `(1806)`'s refusal maps to its
-    error.
+  - A second opener gets `SQLITE_BUSY`. That is a backstop only: `(1806)`
+    refuses non-owner processes before they open the DB, so `SQLITE_BUSY` is
+    left to the daemon-to-daemon handoff that `(1827)` covers.
   - Rejected: NORMAL locking as in `wsstore`.
+- **Board DBs close on drain, and open retries `SQLITE_BUSY` briefly,
+  `(1827)`** (technical, lead ruling 2026-11-19):
+  - Every open board DB closes on daemon drain or shutdown.
+  - An open retries `SQLITE_BUSY` within a short bound before it maps the
+    failure to an error. Phase 1 chooses the bound and records it in its
+    Result.
+  - This covers the replace handoff under `locking_mode=EXCLUSIVE` (`(1807)`)
+    and the long-lived handles of `(1347)=c`, where a draining daemon may still
+    hold a board for a moment.
+  - Rejected: failing the open at the first `SQLITE_BUSY`, because a normal
+    daemon replacement would then error on its first board access.
 - **DB at `ai-docs/whiteboards/<reply-id>/.board.sqlite`, `(1808)`**
   (owner-assumed 2026-11-19 under (1802)=b; owner confirms in the morning):
   - Deleting the board stays one folder, and the existing git exclude covers it
@@ -288,6 +367,11 @@ confirms them before this work merges to `develop`.
     plus revision-receipt and load-floor rows.
   - One update commits `plan`'s delta (`folders.go:742-895`) as one
     transaction. Exact columns and indexes are left to Phase 1.
+  - The topic row carries `TopicDoc` whole (`wswhiteboard/store.go:242`), for
+    example a document column holding the doc minus entries, so optional
+    `TopicDoc` fields survive a round trip. Example: the proof field of ready
+    ticket `261114-feat-ws-content-change-relative-hover`. A topic-row schema
+    with one column per current field would drop such a field.
   - Rejected: one whole-state blob, which rewrites O(board) pages per update.
 - **Checkpoint and cache pragmas, `(1810)`** (owner-assumed 2026-11-19 under
   (1802)=b; owner confirms in the morning):
@@ -360,13 +444,30 @@ confirms them before this work merges to `develop`.
   result strings are shipped text), `ai-docs/manuals/ws-mcp.md` (for
   `internal/mcp/`).
 - Release: T3, so this change ships only in a new minor version (Release Rule
-  2; `(1805)=a`).
+  2; `(1805)=a`). The minor version bump is NOT part of this ticket. It happens
+  at release, through the ship flow, with the owner's approval.
 - The derived `index.html` / `index.stamp.js` stay files while `file://` links
   remain (epic Non-Scope). Their retirement belongs to
   `261116-feat-ws-whiteboard-retire-disk-pages`.
 - The `whiteboard.update`, `whiteboard.query`, and `whiteboard.load` tool
-  surfaces (arguments, result lines, refusal semantics) do not change in this
-  ticket. Embed changes belong to the sibling child.
+  surfaces keep their arguments and result lines. Embed changes belong to the
+  sibling child. Refusal semantics change in exactly these same-version ways,
+  each graded under `release-compatibility.md`:
+  - `(1812)` removes the synchronous "board committed; ... fix the output
+    problem" error (`mcp/whiteboard_tools.go:788`). A publish failure becomes a
+    debug event. Tier: T0. The call succeeds where it used to fail, and no
+    stored data changes.
+  - `(1806)` adds the direct-CLI refusal. Tier: T3. A call that worked now
+    refuses. It rides the minor bump of `(1805)=a`, but the 23:22 approval
+    covered only the `(1805)=a` sentinel. The owner's morning confirmation of
+    `(1806)` is the explicit approval Release Rule 2 requires for this T3.
+  - New open and sentinel error strings (`(1828)`, `(1825)`, `(1826)`,
+    `(1827)`) are shipped text under `shipped-surface-boundary.md`. Tier: T0.
+    They apply only to board states the new binary creates, so no old behavior
+    changes.
+- Topic rows carry `TopicDoc` whole, for example a document column minus
+  entries, so optional `TopicDoc` fields survive (`(1809)`). Example: the proof
+  field of ready ticket `261114-feat-ws-content-change-relative-hover`.
 - Existing invariants carry over unchanged: append-only entries, monotonic
   entry/panel counters, immutable panel versions, the board-revision and
   stale-nudge receipts, the load floor, and committed-before-publish ordering
@@ -409,16 +510,36 @@ confirms them before this work merges to `develop`.
 
 ### Phase 1: Board DB store, one-way import, and legacy-layout zip (not wired)
 
+Prerequisite: `261119-feat-ws-whiteboard-retire-embed-snapshot` has landed
+(`(1815)`, the `blocked-by` frontmatter key). The "before" baseline and the
+store both start from that post-embed base (`(1824)`), so no embed state or
+embed render passes through the new store.
+
 Build the per-board SQLite store as a new type beside `FolderStore`. Nothing
 in the daemon uses it yet.
 
 - Open it with the settled pragmas (Decisions; `(1807)`, `(1810)`), the
   schema `(1809)`, and the whole-board memory model `(1811)`.
+- Choose the checkpoint thresholds of `(1810)`: the idle time and the WAL size
+  that trigger a background PASSIVE checkpoint. Record both in the Result.
+- Open retries `SQLITE_BUSY` within a short bound (`(1827)`). Choose the bound
+  and record it in the Result.
 - Commit path: one update is one transaction holding only the changed rows.
   An unchanged state opens no transaction.
-- One-way import (`(1804)`): import the legacy folder into the DB through
-  `FolderStore.Open` and commit. Then add the `(1805)=a` sentinel
-  `pending.json` (schema 3). A DB without the sentinel gets it on open.
+- One-way import (`(1804)`, `(1825)`): import the legacy folder into the DB
+  through `FolderStore.Open` and commit, holding the folder's `.lock` from the
+  import load through the sentinel write. Record the imported legacy
+  generation in the DB. Then add the `(1805)=a` sentinel `pending.json`
+  (schema 3).
+- An open WITHOUT a sentinel (`(1825)`) takes the folder `.lock`, reads
+  `committed.json` and any schema-2 `pending.json` (an older daemon's
+  unreplayed commit), logs a divergence if either is ahead of the recorded
+  imported generation (naming the overwritten intent), writes the sentinel,
+  and only then releases the lock. The `(1828)` sentinel-write retry runs
+  inside that same locked step.
+- A sentinel with a missing or corrupt `.board.sqlite`, or a corrupt one
+  without a sentinel, returns the explicit error of `(1826)`; the open never
+  falls through to a re-import.
 - Legacy-layout zip export and `whiteboard.load` backup through
   `plan(nil, nil, state)` (`(1813)`). Old-layout zip load goes through the
   import path.
@@ -435,13 +556,44 @@ Verification:
   `pending.json`, content and close-result migrations, the `.lock` file);
   the fixtures cover each case. Then only the sentinel is added.
 - A failed sentinel write still opens the DB, logs the failure, and the next
-  open retries it (`(1823)`).
+  open retries it (`(1828)`).
+- The lock is held through the sentinel (`(1825)`): a legacy-layout writer that
+  starts during the import waits on `.lock`, and once the sentinel exists it
+  meets the schema-3 refusal, so nothing lands between the import read and the
+  sentinel.
+- A divergence is logged on a sentinel-less open (`(1825)`): a DB with no
+  sentinel and a folder whose committed generation is ahead of the recorded one
+  logs the board and both generations, stamps the sentinel, and leaves the DB
+  content unchanged (no re-import). A fixture with a schema-2 `pending.json`
+  (an older daemon's unreplayed commit) logs the overwritten intent, writes the
+  sentinel over it, and does not replay it.
+- A legacy writer holds `.lock` while the sentinel-less open waits (`(1825)`).
+  After the writer releases the lock, either its commit is counted by the
+  divergence check, or the writer meets the sentinel and refuses. No legacy
+  commit lands unseen between the check and the sentinel. A sentinel-write
+  retry (`(1828)`) runs inside the same locked step.
+- A sentinel with a missing or corrupt `.board.sqlite` returns the `(1826)`
+  error and neither re-imports nor writes the folder.
+- A corrupt or unreadable `.board.sqlite` with no sentinel (a fixture of a
+  failed sentinel write followed by corruption) returns the same `(1826)`
+  error and never re-imports the stale folder.
+- A round-trip fixture whose topic carries an optional `TopicDoc` field (for
+  example the relative-hover proof field) keeps that field through commit,
+  close, and reopen. A column-per-field topic schema would fail it
+  (`(1809)`).
 - An unchanged update writes zero WAL frames.
 - A torn or killed transaction recovers to the last commit.
 - A kill between the import commit and the sentinel write ends with the
   sentinel present after the next open.
+- A PASSIVE checkpoint runs at close (`(1810)`), and the chosen thresholds are
+  recorded in the Result.
 - An exported zip equals the source folder's file set and bytes under the
-  `boardFiles` rules.
+  `boardFiles` rules. `boardFiles` is `FolderStore.boardFiles`
+  (`wswhiteboard/folders_archive.go:93-124`, used at `:67` and `:300`): the root
+  files and the topic folders `meta.json` references, plus the revision
+  receipts, leaving out `.lock`, a pending intent, dot-named files, and
+  unreferenced topic folders. So `.board.sqlite` and the sentinel
+  `pending.json` stay out of the zip.
 
 Deferred: wiring and the "after" measurement.
 
@@ -457,7 +609,10 @@ the board DB store:
   nudges, zip export, and `whiteboard.load` with its backup.
 - In-process change notification (`(1814)`).
 - Handle lifetime per `(1347)=c`: long idle close, reopen on next access.
-- Direct-CLI refusal naming the daemon as board owner per `(1806)`.
+- Direct-CLI refusal naming the daemon as board owner per `(1806)`, keyed on
+  the `BoardOwner` option that only the daemon sets, and made before the DB is
+  opened.
+- Close every board DB on daemon drain and shutdown (`(1827)`).
 
 Verification:
 
@@ -467,7 +622,19 @@ Verification:
   (Release Rule 2).
 - An old binary loads a zip exported by the new one, and the new one loads an
   old-layout zip.
-- A second process's open fails with the `(1806)` error.
+- A non-owner process's board call fails with the `(1806)` error before the DB
+  file is opened, without relying on `SQLITE_BUSY`.
+- A direct process starts first, then the daemon still opens the board
+  (`(1806)`).
+- A replacing daemon opens a board that the draining daemon still held: the
+  open succeeds within the `(1827)` bound once the drain closes the DB, and an
+  open that outlasts the bound returns an explicit error.
+- The dashboard and the nudge see an update through in-process notification,
+  with no stat of board files (`(1814)`). Here "board files" excludes the
+  derived `index.html` and `index.stamp.js`, whose writes are Phase 3's
+  concern.
+- An idle close followed by a reopen keeps the board's state intact
+  (`(1347)=c`).
 
 Deferred: async derived publish and the measured report.
 
@@ -481,4 +648,24 @@ Depends on Phase 2 and on `(1815)` (the embed sibling has landed).
 - Report before and after in the Result, and record the Windows V3
   measurement as deferred.
 - List any remaining rule 1-5 gap with its measured cost for the owner
-  (rule 8).
+  (rule 8), citing `performance.md`'s rule numbers (`(1346)`).
+
+The trace measures the store path separately from the derived publish. The
+`(1812)` coalescing writer still rewrites `index.html` and `index.stamp.js`
+through temp file and rename, so it is a known Rule 2 and Rule 4 gap owned by
+`261116-feat-ws-whiteboard-retire-disk-pages`. List it in the Result with its
+measured cost. It is not a phase failure.
+
+Verification, on a traced single `whiteboard.update` (the Phase 1 scenario):
+
+- No per-call open, flock, or stat of board files (Rule 4). "Board files"
+  excludes the derived `index.html` and `index.stamp.js` writes.
+- One WAL append per update, and nothing written for an unchanged state
+  (Rule 2).
+- No fsync on the response path (Rule 5).
+- Publish (`(1812)`): a publish failure becomes a debug event while the update
+  still succeeds; the stamp is written after the page; under coalescing the
+  latest state wins.
+- Every remaining gap other than the derived publish above is listed per
+  Rule 8 with its measured cost. A gap fails the phase unless the owner
+  approves it.

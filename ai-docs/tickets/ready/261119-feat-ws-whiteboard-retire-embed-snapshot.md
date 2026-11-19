@@ -4,6 +4,10 @@ parent: 261119-epic-ws-daemon-sqlite-storage
 related:
   261119-refactor-ws-whiteboard-sqlite-board-store: "sibling child; takes blocked-by on this ticket so the store switch never carries embed state (see (1815))"
   261116-feat-ws-whiteboard-retire-disk-pages: "its open questions on `embed:` and `wb:embed-dir` are this ticket's scope (see (1818)); full-page retirement stays there"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 6f1ef5c65ba130a5
+sage-review-completeness-reviewed: 6f1ef5c65ba130a5
 ---
 
 # Retire the whiteboard's per-update embed HTML snapshot
@@ -24,7 +28,8 @@ now be dropped. On 2026-11-16 (23:02, quoted in
 dropped too, it is a path nobody uses anymore.
 
 Go paths below are relative to `agents-plugin-tool/internal/`. Line numbers
-were read on `develop` at `9f43a8f00`.
+were read on `develop` at `9f43a8f00` and `7c26b7b0a`. They drift: re-check
+each one against the implementation base before editing.
 
 ### Producers and state
 
@@ -59,7 +64,17 @@ were read on `develop` at `9f43a8f00`.
     `mcp/whiteboard_panels.go:150-158`, `:244`).
   - The embed body class checks in `assets/form.js`, `pill.js`, `rail.js`.
   - The `chip.fresh` string "new since the previous embed"
-    (`wsi18n/tables/en.json:90` and the other locales).
+    (`wsi18n/tables/en.json:90` and the other 10 locales, 11 in all).
+  - Template and CSS pieces that exist only for the embed:
+    - the `.Embed` branches of `wswhiteboard/assets/page.tmpl` (lines 8, 37,
+      and 54, plus the other `.Page.Embed` branches that a search for
+      `.Embed` finds);
+    - the `newdot` template (`page.tmpl:100`), whose only condition is
+      `IsNew` (`wswhiteboard/render.go:957`, `d.Page.Embed && d.New`);
+    - the `.chip.fresh` rules (`wswhiteboard/assets/page.css:138-139`).
+  - Fields with embed-only uses: `Fresh`, `DocNew`, `IsNew`, and
+    `LastEmbedSeq` (`wswhiteboard/view.go:662`, `:699`;
+    `wswhiteboard/render.go:592`, `CountFresh`).
 - Orphan GC: the daily scan deletes dead sessions' `<reply-id>-<hash>.html`
   files (`mcp/whiteboard_tools.go:51-53`, `:927-967`).
 
@@ -137,11 +152,26 @@ confirms them before this work merges to `develop`.
   - Rejected: b, a one-time sweep at first start.
 - **Embed-only code goes with the producer, `(1821)`** (owner-assumed 2026-11-19 under (1802)=b; owner confirms in the morning):
   - Remove the `LayoutEmbed` view and render branches, the embed panel
-    variants, the embed body-class script checks, `chip.fresh` in every
-    locale, the embed hash and eviction, and `EmbedRetention`.
+    variants, the embed body-class script checks, `chip.fresh` in all 11
+    locales, the embed hash and eviction, and `EmbedRetention`.
+  - Also remove the embed-only template and CSS pieces named in Background:
+    the `page.tmpl` embed branches (lines 8, 37, 54), the `newdot` template
+    (line 100) with `IsNew` (`render.go:957`), and `.chip.fresh`
+    (`page.css:138-139`). Remove the fields that only the embed uses:
+    `Fresh`, `DocNew`, `IsNew`, `LastEmbedSeq` (`view.go:662`, `:699`;
+    `render.go:592`).
+  - Keep `"embed-dir"` in `EffectFields("setting")`
+    (`wswhiteboard/effects.go:52`). `wslive` validates stored effects against
+    that list (`wslive/whiteboard_effects.go:161-166`), so removing the field
+    would drop older stored `setting` effects. Stop only the emission. The pin
+    at `wslive/whiteboard_effects_test.go:79` stays and joins the test surface.
   - Keep the GC filename pattern, which `(1820)=a` relies on.
   - Tests that pinned embed output are deleted or rewritten to assert behavior.
+    A test loop over `{LayoutFull, LayoutEmbed}` is rewritten to drop the
+    embed case and keep its full-layout assertions; it is not deleted.
   - Rejected: keeping dead layout code.
+  - Rejected: removing `"embed-dir"` from `EffectFields`, because stored older
+    effects would stop decoding in `wslive`.
 - **Playbook edit procedure, `(1822)`** (owner-assumed 2026-11-19 under (1802)=b; owner confirms in the morning):
   - Edit `agents-plugin/rsrc/whiteboard/whiteboard.md`.
   - Regenerate the wsflow copy byte-identical and the Pi archives in the same
@@ -169,6 +199,10 @@ confirms them before this work merges to `develop`.
   mode (`261116-feat-ws-whiteboard-retire-disk-pages`), and the board store
   itself (`261119-refactor-ws-whiteboard-sqlite-board-store`).
 - `whiteboard.update` keeps its arguments and its `full:` line.
+- `"embed-dir"` stays in `EffectFields("setting")`
+  (`wswhiteboard/effects.go:52`) so stored older `setting` effects still decode
+  in `wslive` (`wslive/whiteboard_effects.go:161-166`). Only the emission
+  stops (`(1821)`).
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
 - Convention: ai-docs/manuals/skill-authoring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/rsrc/`, `agents-plugin-wsflow/skills/`, `agents-plugin-tool/internal/wsdoc/conventions/`)
 - Convention: ai-docs/manuals/wsflow-mirroring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin/hooks/`, `agents-plugin-wsflow/`)
@@ -202,7 +236,7 @@ confirms them before this work merges to `develop`.
 | scope.surface | cross-module | `embed:` result line and `wb:embed-dir` command are shipped tool surface; playbook text ships in three packages |
 | scope.new_public_symbol | no | none; exported `LayoutEmbed`, `EmbedRetention`, `Embed`, `State.EmbedDir` are removed or ignored |
 | scope.new_type_contract | no | none; `wb:embed-dir` becomes an accepted no-op with an info line |
-| scope.test_surface | existing | tests pinning embed output in mcp/whiteboard_tools_test.go, whiteboard_panels_test.go, wswhiteboard/render_test.go, store_test.go, commands_test.go, effects_test.go, folders_test.go; compat harness wswhiteboard/testdata/compat-old |
+| scope.test_surface | existing | tests pinning embed output in mcp/whiteboard_tools_test.go, whiteboard_panels_test.go, wswhiteboard/render_test.go, store_test.go, commands_test.go, effects_test.go, folders_test.go; wslive/whiteboard_effects_test.go:79 (the `embed-dir` effect pin stays); compat harness wswhiteboard/testdata/compat-old |
 | complexity.reuse_points | confirmed | existing GC pattern `whiteboardFilePattern` (whiteboard_tools.go:53) and compat-old harness are reused |
 | complexity.side_effect_risk | moderate | removes persisted State fields read by folders meta.json, the effect list, the metadata revision and a refusal path; stale `embed_dir` boards must keep loading |
 | risk.correctness | moderate | embed-only branches span view, render, panels and three JS assets; leftover fields must be ignored without a schema refusal (no DisallowUnknownFields found) |
@@ -224,12 +258,30 @@ Apply `(1817)=A` to:
 Also apply `(1819)` to persisted state and `(1821)` to the code. Leftover
 files follow `(1820)=a`: there is no new deletion path.
 
+Test loops over `{LayoutFull, LayoutEmbed}` are rewritten to drop the embed
+case and keep their full-layout assertions; they are not deleted. Examples:
+`recap_test.go:92`, `panel_identity_test.go:91`, `acceptance_test.go:480`,
+`dashboard_answer_revision_test.go:31`, `stream_script_test.go:160` (all under
+`wswhiteboard/`). Find the rest by searching for `LayoutEmbed` in tests.
+
 Verification:
 
 - A top-level lead `whiteboard.update` writes no `<reply-id>-<hash>.html` and
   no host-folder file.
+- A successful top-level update's result no longer carries an `embed:` line.
+  Its `full:` line is unchanged.
 - `<wb:embed-dir path="...">` is accepted and stores nothing. A board that
   carries a stale `embed_dir` from an older version no longer refuses updates.
+- The `wb:embed-dir` deprecation `info:` sentence joins the result through
+  `joinInfo` (`wswhiteboard/store.go:882`, `:945`) and follows
+  `ai-docs/manuals/shipped-surface-boundary.md` (no repository ticket, commit,
+  or layout named).
+- The wsflow playbook copy is byte-identical and the Pi archives are
+  regenerated (`(1822)`).
+- The daily GC still removes leftover `<reply-id>-<hash>.html` files of dead
+  sessions (`(1820)`).
+- A stored older `setting` effect with field `embed-dir` still decodes in
+  `wslive` (`wslive/whiteboard_effects_test.go:79` still passes).
 - Each graded path in the table behaves as recorded. Where the old binary is
   involved, use the `wswhiteboard/testdata/compat-old` harness.
 - Before/after file operations and wall time per `whiteboard.update` on macOS,
