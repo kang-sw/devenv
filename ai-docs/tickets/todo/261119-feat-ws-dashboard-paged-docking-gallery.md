@@ -3,10 +3,10 @@ title: "대시보드 고정 패널을 Paged Docking Gallery(2D 스플릿·바운
 related:
   261112-feat-ws-dashboard-pin-column: the pinned column and vertical pin stack this ticket replaces with a gallery
   261115-bug-ws-dashboard-pinned-deeplink-under-topic-header: sticky-header occlusion in stacked pins; the full-bleed default removes that case by construction, and whether 261115 then closes is settled at ready promotion
-  261117-feat-ws-dashboard-wide-drawer-tickets-notes: wide-drawer sheets for tickets, notes, and git; open question (08) decides whether they become dockable pages
+  261117-feat-ws-dashboard-wide-drawer-tickets-notes: wide-drawer sheets for tickets, notes, and git; kept separate from dockable gallery pages per settled decision (08)=a
 ---
 
-# 대시보드 고정 패널을 Paged Docking Gallery(2D 스플릿·바운스-스냅)로 전환
+# Replace the Dashboard Pinned Panel with a Paged Docking Gallery (2D Splits and Bounce-Snap)
 
 ## Background
 
@@ -24,11 +24,10 @@ the top of the board column. The stack has three known costs:
 
 The concept was worked through on the whiteboard topic
 `right-pinned-panel-concept`. The owner confirmed decisions `(05)=ok` and
-`(06)=ok`, and approved the interactive mockup
-`ai-docs/assets/mockups/261119/right-pinned-panel-concept/paged-docking-gallery-v4.html`.
-This ticket records the confirmed decisions and the three questions still open.
-The ticket is not ready for implementation. The open items must settle before
-promotion to `ready/`.
+`(06)=ok`, approved the interactive mockup
+`ai-docs/assets/mockups/261119/right-pinned-panel-concept/paged-docking-gallery-v4.html`,
+and settled the remaining scope choices `(07)=c`, `(08)=a`, and `(09)=a` on
+whiteboard topic `pdg-promote`.
 
 ## Decisions
 
@@ -98,6 +97,21 @@ mockup `ai-docs/assets/mockups/261119/right-pinned-panel-concept/paged-docking-g
   no-remount invariant in `cards.js`. The gallery does not use
   `content-visibility` to hide inactive pages, per
   `261117-bug-ws-dashboard-pwa-renderer-crash-content-visibility`.
+- **Four-edge split only; no center drop action (`(07)=c`).** Dropping a pane
+  onto a docked pane only exposes top, bottom, left, and right edge split
+  zones; there is no center drop action. *Rejected:* tab stack inside the cell
+  (`a`) and swapping positions with the target pane (`b`), to keep the Phase 2
+  2D split layout tree simple and bounded.
+- **Dockable target scope (`(08)=a`).** Only existing whiteboard topics
+  (`.topic`) and board cards (explorer, terminal, web) are dockable.
+  *Rejected:* docking individual whiteboard panels (`.entry-panel`, `b`) and
+  unifying `261117-feat-ws-dashboard-wide-drawer-tickets-notes` sheets
+  (tickets, notes, git) as dockable pages (`c`), both kept out of scope so
+  `wide-drawer` stays independent.
+- **Rail dot indicator style (`(09)=a`).** Each docked-page dot shows its pane
+  count (`1`, `2`, ...), with `⌂` for the narrow Main Board (Page 0) and `+`
+  for the trailing empty page, matching mockup v4. *Rejected:* plain dots with
+  count and layout preview shown only on hover (`b`).
 
 ## Constraints
 
@@ -112,8 +126,10 @@ mockup `ai-docs/assets/mockups/261119/right-pinned-panel-concept/paged-docking-g
   `agents-plugin-tool/internal/wsdashboard/assets/dashboard-rail.css`,
   `dashboard-board.js`, `cards.js`, `dashboard-layout.css`. Existing tests:
   `pincol_width_test.go`, `cards_test.go`, `whiteboard_bridge_test.go`.
-- Dockable scope in Phase 1 is the current board cards and topics only (explorer,
-  terminal, web). Options (08) change that scope and are not decided here.
+- Dockable scope is limited to existing whiteboard topics (`.topic`) and board
+  cards (explorer, terminal, web). Individual whiteboard `.entry-panel` cards
+  and `261117-feat-ws-dashboard-wide-drawer-tickets-notes` sheets (tickets,
+  notes, git) are out of scope per `(08)=a`.
 
 ## Phases
 
@@ -142,8 +158,8 @@ Verification:
 
 Each page holds a split tree. Edge drop zones show a preview overlay. Draggable
 dividers set split ratios. A header drag unpins a pane or moves it to another
-page. The last pane's removal removes its page. Center drop-zone behavior waits
-on `(07)`.
+page. The last pane's removal removes its page. Only four-edge split zones are
+supported; there is no center drop action (`(07)=c`).
 
 Verification: unit coverage for layout-tree split, remove, and normalize
 operations, run via `~/.local/bin/ws-rgo`; live captures of two-pane and
@@ -159,21 +175,3 @@ their own wheel events are excluded.
 Verification: scripted wheel-event timing tests for each threshold, plus a check
 that terminals and iframes do not flip pages. Performance check per
 `ai-docs/manuals/performance.md`.
-
-## Open Decision Queue
-
-Last ID: (09)
-
-(07) [open] [policy] Center drop zone inside a docked pane. Options:
-- a: tab stack inside the cell
-- b: swap positions with the target pane
-- c: four-edge split only, with no center action
-
-(08) [open] [policy] Dockable target scope and coexistence with `wide-drawer`. Options:
-- a: keep existing topics and board cards (explorer, terminal, web) only
-- b: also allow docking individual whiteboard panels (`entry-panel`)
-- c: also unify with the `261117-feat-ws-dashboard-wide-drawer-tickets-notes` sheets (tickets, notes, git) as dockable pages
-
-(09) [open] [policy] Rail dot indicator style. Options:
-- a: show the pane count inside each dot (`1`, `2`, ...), with `⌂` for the narrow Main Board and `+` for the trailing empty page, as in mockup v4
-- b: plain dots, with count and layout preview shown only on hover
