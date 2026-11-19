@@ -12,8 +12,8 @@ func TestAgyBuiltinTiers(t *testing.T) {
 	opts := Options{CacheHome: t.TempDir(), ConfigHome: t.TempDir()}
 	want := map[string]AgentTier{
 		"small":  {Backend: "agy", Model: "gemini-4-hydrogen", Effort: "medium"},
-		"medium": {Backend: "agy", Model: "gemini-4-hydrogen", Effort: "high"},
-		"large":  {Backend: "agy", Model: "gemini-4-argon", Effort: "high"},
+		"medium": {Backend: "agy", Model: "gemini-4-neon", Effort: "high"},
+		"large":  {Backend: "agy", Model: "gemini-4-neon", Effort: "xhigh"},
 		"xlarge": {Backend: "agy", Model: "gemini-4-carbon", Effort: "high"},
 	}
 	got, err := HarnessTiers(opts, " AGY ")
@@ -45,7 +45,7 @@ func TestAgyTierOverlayAndReset(t *testing.T) {
 	check := func(want AgentTier) {
 		t.Helper()
 		got, err := HarnessTiers(opts, "agy")
-		if err != nil || got["small"] != want || got["large"] != (AgentTier{Backend: "agy", Model: "gemini-4-argon", Effort: "high"}) {
+		if err != nil || got["small"] != want || got["large"] != (AgentTier{Backend: "agy", Model: "gemini-4-neon", Effort: "xhigh"}) {
 			t.Fatalf("overlay = %v, %v; want small %v and builtin large", got, err, want)
 		}
 	}

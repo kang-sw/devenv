@@ -649,13 +649,13 @@ func defaultModelAliases(tiers map[string]AgentTier) map[string]map[string]Agent
 			"default": tierOrDefault(tiers, "medium", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "xhigh"}),
 			"codex":   tierOrDefault(tiers, "medium", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "xhigh"}),
 			"claude":  {Backend: "claude", Model: "sonnet", Effort: "high"},
-			"agy":     {Backend: "agy", Model: "gemini-4-hydrogen", Effort: "high"},
+			"agy":     {Backend: "agy", Model: "gemini-4-neon", Effort: "high"},
 		},
 		"large": {
 			"default": tierOrDefault(tiers, "large", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "high"}),
 			"codex":   tierOrDefault(tiers, "large", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "high"}),
 			"claude":  {Backend: "claude", Model: "opus", Effort: "high"},
-			"agy":     {Backend: "agy", Model: "gemini-4-argon", Effort: "high"},
+			"agy":     {Backend: "agy", Model: "gemini-4-neon", Effort: "xhigh"},
 		},
 		"xlarge": {
 			"default": tierOrDefault(tiers, "xlarge", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "xhigh"}),

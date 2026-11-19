@@ -407,6 +407,11 @@ in this session; these pointers are not an exhaustive rationale-index result.
   contract supplied workflow context. No implementation/review finding
   remains. The ticket stays in `ready/` for Phase 3.
 
+#### Edition (a5bc02ce0) - 2026-11-19
+
+Owner directive: medium is now `gemini-4-neon`/`high` and large is
+`gemini-4-neon`/`xhigh`; small and xlarge remain unchanged.
+
 ### Phase 3: Custom-agent path for the agy worker behind a knob
 
 - A config knob selects the agy worker's agent: the default agent (default)
