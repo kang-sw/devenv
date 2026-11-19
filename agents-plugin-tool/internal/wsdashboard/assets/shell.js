@@ -31,6 +31,10 @@
   //     stay    {attempt}             the native leave guard kept this frame
   //     key     {key}                 a key the shell acts on, pressed in
   //                                   the frame: "rail" (Ctrl+`), "esc"
+  //     press   {}                    a pointer went down in the frame: the
+  //                                   shell's open rail popover or menu
+  //                                   closes (a click in a frame never
+  //                                   reaches the shell's own listeners)
   //     layout  {pincol, dim, popover?} the frame shows the pinned column
   //                                   (the rail then overlays below 2200px),
   //                                   and the alpha of the backdrop it shows
@@ -64,6 +68,7 @@
     nav: { href: "string" },
     stay: { attempt: "number" },
     key: { key: "string" },
+    press: {},
     layout: { pincol: "boolean", dim: "number" },
     scroll: { y: "number" },
     hash: { hash: "string" },

@@ -1193,6 +1193,17 @@
       if (rp.P.el.contains(t) || t.closest(".radd, .rnew, .hbtn, .usage-toggle, .settings-toggle")) return;
       railPopClose(false);
     }, true);
+    // A press inside an iframe never reaches the listener above (the shell's
+    // own frames post "press"; a frame of a frame, a card's web page, does
+    // not): the window blurs when focus moves into one, which closes it.
+    // Checked a tick later, once activeElement names the frame; a blur
+    // to another application leaves the popover.
+    window.addEventListener("blur", function () {
+      setTimeout(function () {
+        var a = doc.activeElement;
+        if (rp.P && a && a.tagName === "IFRAME") railPopClose(false);
+      }, 0);
+    });
     window.addEventListener("resize", railPopPlace);
     doc.addEventListener("scroll", function () { if (rp.P) railPopPlace(); }, true);
     if (RAIL_WIDE && RAIL_WIDE.addEventListener) RAIL_WIDE.addEventListener("change", function () { railPopClose(false); });
