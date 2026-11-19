@@ -92,8 +92,8 @@
    colors live here, keyed by data-h; a harness not listed reads "??". A
    running badge holds a .hbr child, the spinner ring: 2px, one color, drawn
    over the badge and around it. */
-.hb { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; box-sizing: border-box; width: 30px; height: 18px; border-radius: 6px; font: 800 12px/1 "WsHarnessBadge", ui-rounded, "Arial Rounded MT Bold", sans-serif; background: #3a3b3f; color: #9a9a9a; }
-.hb.sm { width: 22px; height: 14px; border-radius: 4.5px; font-size: 9.5px; }
+.hb { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: none; box-sizing: border-box; width: 24px; height: 15px; border-radius: 4.5px; font: 800 10px/1 "WsHarnessBadge", ui-rounded, "Arial Rounded MT Bold", sans-serif; background: #3a3b3f; color: #9a9a9a; }
+.hb.sm { width: 19px; height: 12px; border-radius: 3.5px; font-size: 8px; }
 .hb::before { content: "??"; }
 .hb[data-h="claude"] { background: #d97757; color: #fff; }
 .hb[data-h="claude"]::before { content: "Cl"; }
@@ -104,9 +104,9 @@
 .hb[data-h="agy"] { background: #3b7be8; color: #fff; }
 .hb[data-h="agy"]::before { content: "Ag"; }
 @property --hba { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
-.hb .hbr { position: absolute; inset: -2px; box-sizing: border-box; padding: 2px; border-radius: 8px; z-index: 2; pointer-events: none; background: conic-gradient(from var(--hba), #d6dde8 0 100deg, transparent 100deg 360deg);
+.hb .hbr { position: absolute; inset: -2px; box-sizing: border-box; padding: 2px; border-radius: 6.5px; z-index: 2; pointer-events: none; background: conic-gradient(from var(--hba), #d6dde8 0 100deg, transparent 100deg 360deg);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); animation: hbspin 1.1s linear infinite; }
-.hb.sm .hbr { border-radius: 6.5px; }
+.hb.sm .hbr { border-radius: 5.5px; }
 @keyframes hbspin { to { --hba: 360deg; } }
 .host { font-size: 11px; font-weight: 800; letter-spacing: .04em; padding: 1px 7px; border-radius: 4px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
 .host.sm { font-size: 10px; padding: 0 5px; flex: none; }
