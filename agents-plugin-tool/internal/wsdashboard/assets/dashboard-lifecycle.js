@@ -654,6 +654,7 @@
           if (m.key === "rail") railKey();
           else if (m.key === "esc" && railShown()) railOpen(false);
           break;
+        case "press": if (on) railPopClose(false); break;
         case "layout": ent.pincol = m.pincol; ent.dim = m.dim; ent.popover = m.popover === true; if (on) shLayout(ent); break;
         case "scroll": ent.y = m.y; if (on) shScroll(ent); break;
         case "hash": if (on && !shLeaving && shRestoring === null && location.hash !== m.hash) history.replaceState(history.state, "", ent.f.path + m.hash); ent.f.hash = m.hash; break;
@@ -802,6 +803,9 @@
       if (e.code === "Backquote" && e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && !e.isComposing) { e.preventDefault(); railKey(); }
       else if (e.key === "Escape" && !e.defaultPrevented) shPost("key", { key: "esc" });
     });
+    // A press in the page reaches the shell, whose rail popovers and row
+    // menu close on one (capture: the page's own handlers may stop it).
+    doc.addEventListener("pointerdown", function () { shPost("press"); }, true);
     window.addEventListener("message", function (e) {
       if (e.source !== window.parent || e.origin !== location.origin) return;
       var m = window.WsShell.message(e.data);
