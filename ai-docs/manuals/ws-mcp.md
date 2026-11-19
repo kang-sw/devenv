@@ -30,6 +30,22 @@ this - `toolTextResponse` and `toolJSONResponse` are equally available at every
 dispatch site in `agents-plugin-tool/internal/mcp/server_dispatch.go:21` - so it has to be
 applied when the tool is written.
 
+## Hidden Call Summaries
+
+Every tool accepts optional top-level `summary`, `toolSummary`, or
+`tool_summary` metadata without advertising those fields in its schema. The
+precheck harvests the first nonblank string in that order and strips all
+undeclared aliases before argument validation, including inner calls through
+`call`. A tool-declared property with one of those names remains its own input.
+Harvested descriptions are recorded as `tools.call.summary` debug events;
+harness-stream previews use the same key list and prefer the description in
+running and completed tool rows, with the existing masking and display limits.
+
+This is T0 for existing calls: no summary is required and no store shape
+changes. It does not make old binaries accept metadata: their precheck rejects
+undeclared arguments, so callers targeting an older server must omit the
+optional metadata or retry without it.
+
 ## Process Model
 
 One dashboard daemon per cache root hosts the MCP servers and one-shot CLI

@@ -51,8 +51,8 @@ func cleanToolName(name string) string {
 	return "tool"
 }
 
-// flattenArgs is a tool call's arguments as preview text: object entries as
-// "key: value" in key order (strings raw, everything else JSON). The caller
+// flattenArgs prefers an optional call summary, else previews object entries
+// as "key: value" in key order (strings raw, everything else JSON). The caller
 // scrubs it before cleanLine caps it, so the cap never cuts a key in half.
 func flattenArgs(args any) string {
 	var text string
@@ -61,6 +61,9 @@ func flattenArgs(args any) string {
 	case string:
 		text = v
 	case map[string]any:
+		if summary := ToolInputSummary(v, nil); summary != "" {
+			return summary
+		}
 		keys := make([]string, 0, len(v))
 		for k := range v {
 			keys = append(keys, k)
