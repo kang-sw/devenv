@@ -23,6 +23,7 @@ var rawTextKey = parser.NewContextKey()
 type htmlBlockState struct {
 	depth   int
 	raw     string
+	pending string
 	comment bool
 }
 
@@ -32,7 +33,10 @@ var (
 	rawTextOpen  = regexp.MustCompile(`(?i)<(script|style|pre|textarea)(?:[\s/>]|$)`)
 	rawTextClose = map[string]*regexp.Regexp{}
 	htmlTag      = regexp.MustCompile(`(?i)^<(/?)([a-z][a-z0-9-]*)(?:\s+(?:[^>"']|"[^"]*"|'[^']*')*)?\s*/?>`)
-	voidTags     = map[string]bool{"area": true, "base": true, "br": true, "col": true, "embed": true, "hr": true, "img": true, "input": true, "link": true, "meta": true, "source": true, "track": true, "wbr": true}
+	htmlTagStart = regexp.MustCompile(`(?i)^</?[a-z][a-z0-9-]*(?:[\s/>]|$)`)
+	// Optional-end-tag elements, like void elements, must not hold a block open.
+	voidTags = map[string]bool{"area": true, "base": true, "br": true, "col": true, "embed": true, "hr": true, "img": true, "input": true, "link": true, "meta": true, "source": true, "track": true, "wbr": true,
+		"p": true, "li": true, "dt": true, "dd": true, "option": true, "optgroup": true, "tr": true, "td": true, "th": true, "thead": true, "tbody": true, "tfoot": true, "rt": true, "rp": true, "colgroup": true, "caption": true}
 )
 
 func init() {
@@ -64,7 +68,8 @@ func rawTextOpenAfter(line []byte, open string) string {
 
 // scanHTMLBlock ignores comments and raw-text contents when counting tags.
 func scanHTMLBlock(line []byte, state htmlBlockState) htmlBlockState {
-	s := string(line)
+	s := state.pending + string(line)
+	state.pending = ""
 	for len(s) > 0 {
 		if state.comment {
 			i := strings.Index(s, "-->")
@@ -93,6 +98,27 @@ func scanHTMLBlock(line []byte, state htmlBlockState) htmlBlockState {
 		}
 		m := htmlTag.FindStringSubmatch(s)
 		if m == nil {
+			if htmlTagStart.MatchString(s) {
+				var quote byte
+				complete := false
+				for i := 1; i < len(s); i++ {
+					c := s[i]
+					if quote != 0 {
+						if c == quote {
+							quote = 0
+						}
+					} else if c == '\'' || c == '"' {
+						quote = c
+					} else if c == '>' {
+						complete = true
+						break
+					}
+				}
+				if !complete {
+					state.pending = s
+					break
+				}
+			}
 			s = s[1:]
 			continue
 		}
@@ -141,7 +167,8 @@ func (b rawTextHTMLBlock) Continue(node ast.Node, reader text.Reader, pc parser.
 	line, segment := reader.PeekLine()
 	st := b.track(pc)
 	open := st[node]
-	if (open.depth > 0 || open.raw != "" || open.comment) && util.IsBlank(line) {
+	if (open.depth > 0 || open.raw != "" || open.comment || open.pending != "") && util.IsBlank(line) {
+		st[node] = scanHTMLBlock(line, open)
 		node.Lines().Append(segment)
 		reader.AdvanceToEOL()
 		return parser.Continue | parser.NoChildren

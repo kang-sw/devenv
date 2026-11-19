@@ -14,6 +14,8 @@ func TestPanelHTMLBlockBalance(t *testing.T) {
 		{"void and self closing", "<div><br><img><input><hr><meta><link><area><base><col><embed><source><track><wbr><x/></div>\n\n**after**", []string{"<strong>after</strong>"}, nil},
 		{"unclosed", "<div>\n\n    <b>child</b>\n\n**not markdown**", []string{"<b>child</b>", "**not markdown**"}, []string{"<pre><code>", "<strong>not markdown</strong>"}},
 		{"already balanced", "<p>x</p>\n\n**after**", []string{"<strong>after</strong>"}, nil},
+		{"optional end tag", "<li>a\n\n**after**", []string{"<strong>after</strong>"}, nil},
+		{"multiline opening tag", "<div\n  class=\"a\">\n\n    <b>x</b>\n</div>\n\n**after**", []string{"    <b>x</b>", "<strong>after</strong>"}, []string{"<pre><code>"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
