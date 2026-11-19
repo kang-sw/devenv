@@ -9,8 +9,8 @@ import (
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
-// hostedLineageDepth bounds hostedDescendant's walk up a key's Runner
-// lineage: real chains are short (a lead, its children, theirs), and a
+// hostedLineageDepth bounds hostedDescendant's lineage walks: real chains
+// are short (a lead, its children, theirs), and a
 // corrupt cycle must still end.
 const hostedLineageDepth = 16
 
@@ -62,34 +62,50 @@ func toolDeclaresSessionKey(tool string) bool {
 	return ok
 }
 
-// hostedDescendant reports whether key belongs to a session below the
-// hosted session whose key is hosted: a conversation of the daemon's runner
-// (callerRecord) whose authority parents (wsagent.Record.Parent, by
-// reply-id) reach the hosted session's reply-id. Key-record parents are not
-// the source, since agent.spawn keys are minted with none; so a key with no
-// Runner record, such as one a ferrule call minted under the hosted key, is
-// no descendant.
+// hostedDescendant checks runner authority first (agent.spawn keys have no
+// key-record parent), then the session-key parent chain for keys minted by
+// tools such as playbook.render and worktree.acquire.
 func (s *Server) hostedDescendant(hosted, key string) bool {
-	rec, ok := s.callerRecord(key)
-	if !ok {
-		return false
+	cacheKey := [2]string{hosted, key}
+	if _, ok := s.hostedDescendants.Load(cacheKey); ok {
+		return true
 	}
-	dir, err := s.dashboard.stateDir()
-	if err != nil {
+	if func() bool {
+		rec, ok := s.callerRecord(key)
+		if !ok {
+			return false
+		}
+		dir, err := s.dashboard.stateDir()
+		if err != nil {
+			return false
+		}
+		target := wsmailbox.ReplyID(hosted)
+		for depth := 0; rec.Parent != nil && depth < hostedLineageDepth; depth++ {
+			parent := rec.Parent.ReplyID
+			if parent == target {
+				return true
+			}
+			if !wsdashboard.ValidReplyID(parent) {
+				return false
+			}
+			if rec, err = wsagent.ReadRecord(dir, parent); err != nil {
+				return false
+			}
+		}
 		return false
+	}() {
+		return true
 	}
-	target := wsmailbox.ReplyID(hosted)
-	for depth := 0; rec.Parent != nil && depth < hostedLineageDepth; depth++ {
-		parent := rec.Parent.ReplyID
-		if parent == target {
+	for depth := 0; depth < hostedLineageDepth; depth++ {
+		entry, ok := s.lookupSession(key)
+		if !ok || entry.parent == "" {
+			return false
+		}
+		if entry.parent == hosted {
+			s.hostedDescendants.Store(cacheKey, struct{}{})
 			return true
 		}
-		if !wsdashboard.ValidReplyID(parent) {
-			return false
-		}
-		if rec, err = wsagent.ReadRecord(dir, parent); err != nil {
-			return false
-		}
+		key = entry.parent
 	}
 	return false
 }

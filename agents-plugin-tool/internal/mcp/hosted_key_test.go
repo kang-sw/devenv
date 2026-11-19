@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -170,8 +171,7 @@ func TestHostedSessionKeyAdmitsItsOwnAndDescendants(t *testing.T) {
 // key outside the hosted session's lineage is refused before the tool
 // runs, with an error naming the tool, both keys, the rule, and the
 // hosted-key variable: a peer lead's key, a peer's descendant's, an
-// unknown key, a ferrule-minted child of the hosted key (no Runner
-// record), and a lineage that loops without reaching the hosted session.
+// unknown key and a lineage that loops without reaching the hosted session.
 func TestHostedSessionKeyRefusesOtherSessions(t *testing.T) {
 	f := newHostedKeyFixture(t)
 	s := NewServer(f.root, "test")
@@ -190,11 +190,10 @@ func TestHostedSessionKeyRefusesOtherSessions(t *testing.T) {
 
 	id := 1
 	for name, key := range map[string]string{
-		"peer lead":     f.peer,
-		"peer child":    f.peerChild,
-		"unknown":       "never-minted-key",
-		"ferrule child": f.ferruleChild,
-		"lineage loop":  loopA,
+		"peer lead":    f.peer,
+		"peer child":   f.peerChild,
+		"unknown":      "never-minted-key",
+		"lineage loop": loopA,
 	} {
 		for _, tool := range []string{"todo.list", "workflow_manual"} {
 			id++
@@ -212,6 +211,83 @@ func TestHostedSessionKeyRefusesOtherSessions(t *testing.T) {
 	}
 	if after := sessionKeyFileCount(t, s); after != before {
 		t.Fatalf("refused calls minted keys: before=%d after=%d", before, after)
+	}
+}
+
+func TestHostedSessionKeyRecordLineage(t *testing.T) {
+	f := newHostedKeyFixture(t)
+	s := f.connect(t)
+	mint := func(parent string, scope toolRole) string {
+		t.Helper()
+		key, err := s.sessions.mint(f.root, scope, parent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return key
+	}
+	renderChild := mint(f.hosted, roleDelegate)
+	workerChild := mint(f.hosted, roleLead)
+	grandchild := mint(renderChild, roleDelegate)
+	atCap := f.hosted
+	for i := 0; i < hostedLineageDepth; i++ {
+		atCap = mint(atCap, roleDelegate)
+	}
+	tooDeep := mint(atCap, roleDelegate)
+	unrelated := mint(f.peer, roleDelegate)
+	for _, key := range []string{f.ferruleChild, renderChild, workerChild, grandchild, atCap} {
+		if refusal := s.hostedSessionKeyRule("todo.list", map[string]any{"session_key": key}); refusal != "" {
+			t.Fatalf("key %q refused: %s", key, refusal)
+		}
+		if resp := callToolOnce(t, s, 1, "todo.list", map[string]any{"session_key": key}); toolIsError(t, resp) {
+			t.Fatalf("todo.list(%q) refused: %s", key, resp)
+		}
+	}
+	for _, key := range []string{unrelated, tooDeep} {
+		got := s.hostedSessionKeyRule("todo.list", map[string]any{"session_key": key})
+		want := hostedDescendantRefusal("todo.list", f.hosted, key).Error()
+		if got != want {
+			t.Fatalf("key %q: refusal %q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestHostedSessionKeyCachesOnlyProvenRecordLineage(t *testing.T) {
+	f := newHostedKeyFixture(t)
+	s := f.connect(t)
+	key, err := s.sessions.mint(f.root, roleDelegate, f.hosted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirs, err := s.sessions.dirs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dirs.sessions, key, "key.json")
+	record, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	args := map[string]any{"session_key": key}
+	if refusal := s.hostedSessionKeyRule("todo.list", args); refusal == "" {
+		t.Fatal("missing key should be refused")
+	}
+	if err := os.WriteFile(path, record, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if refusal := s.hostedSessionKeyRule("todo.list", args); refusal != "" {
+		t.Fatalf("restored key refused: %s", refusal)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if refusal := s.hostedSessionKeyRule("todo.list", args); refusal != "" {
+		t.Fatalf("proven key was read again: %s", refusal)
+	}
+	if _, ok := s.lookupSession(key); ok {
+		t.Fatal("downstream lookup must still reject the deleted key")
 	}
 }
 
