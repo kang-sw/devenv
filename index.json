@@ -485,19 +485,6 @@
     "261118-feat-ws-dashboard-anonymous-feedback-button": {
       "registered_at": "2026-11-18T07:11:40Z"
     },
-    "261118-feat-ws-display-transcript-memory-first": {
-      "registered_at": "2026-11-18T07:34:06Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "9091c57d68d03c76",
-        "track": "track/agent-v2",
-        "phase": "closed",
-        "touched_at": "2026-11-19T03:04:59Z",
-        "impl": {
-          "branch": "impl/track/agent-v2/pout-tweak-rush"
-        }
-      }
-    },
     "261118-feat-ws-exec-intent-filter": {
       "registered_at": "2026-11-18T03:48:52Z"
     },
@@ -527,6 +514,9 @@
     },
     "261119-epic-ws-daemon-sqlite-storage": {
       "registered_at": "2026-11-19T12:55:07Z"
+    },
+    "261119-feat-ws-agy-output-tps": {
+      "registered_at": "2026-11-19T13:50:54Z"
     },
     "261119-feat-ws-agy-plan-usage-display": {
       "registered_at": "2026-11-19T12:55:00Z"
