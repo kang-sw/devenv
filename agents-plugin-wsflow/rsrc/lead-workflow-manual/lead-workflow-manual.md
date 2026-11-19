@@ -9,34 +9,27 @@ variables:
 ---
 # Workflow Manual
 
-> **Session invariant:** Preserve the `session_key` verbatim across compaction.
-> Before any other workflow action after compaction or continuation, invoke
-> `{{.SkillNamespace}}:lead-revive` once with the preserved key to restore
-> session state and reload this manual.
+> **Session invariant:** keep `session_key` verbatim across compaction. After
+> compaction or continuation, before any other workflow action, invoke
+> `{{.SkillNamespace}}:lead-revive` once with that key.
 
 ## On: invoke
 
-Load this manual as the current workflow reference, then continue the invoking
-skill without a standalone acknowledgement.
+Load this manual as the workflow reference, then continue the invoking skill
+without a standalone acknowledgement.
 
 ---
 
 ## Available workflow primitives
 
-Treat MCP tool schemas as the authority for arguments and response fields.
-Read any tool result the host truncates or saves to a file in full before acting on it, so no returned instructions are missed.
+- Arguments and response fields: the MCP tool schema is the authority.
+- A tool result the host truncated or saved to a file: read all of it before
+  acting.
 
 ### Session setup
 
-<!-- ws:fresh-only:start -->
-You have no session key yet. To mint your lead key, call the MCP primitive
-`ferrule(root: "<absolute-working-directory>")` for this Git worktree and retain
-the returned value.
-<!-- ws:fresh-only:end -->
-A workflow track is one independently managed work stream. Its session key
-belongs to one Git worktree; reuse it for root-aware calls and after compaction.
-`ferrule` creates a new empty session, so call it again only to start an
-independent track, including another track in the same worktree.
+- One key = one workflow track in one Git worktree. Reuse it for every
+  root-aware call and after compaction.
 
 ### User preferences
 
@@ -47,176 +40,150 @@ Use the project's terminology and communication style.
 
 ### Asking the user
 
-Every decision item you put to the user, in discussion or in a ticket's Open
-Decision Queue, is one of three classes, so the user answers only the choices
-that depend on their preferences and can review the rest at the depth they
-choose.
+Each item you put to the user, in discussion or in a ticket's Open Decision
+Queue, has one class, so the user answers only what depends on them:
 
-- **Announced default**: the item has one answer, and you can cite the reason
-  its alternatives lose. The citation is one of: a language or platform
-  constraint; a prior commit or ticket decision; an established project
-  convention; a direct consequence of an already-confirmed decision.
-- **Technical decision**: the item has no such citation, and its answer does
-  not hinge on the user's preferences or priorities: you pick it on technical
-  reasoning (simpler, fewer moving parts, a clearer failure mode) and state
-  that reasoning. Your own uncertainty about a technical call keeps it a
-  technical decision: state the reasoning and the uncertainty, since as a
-  policy question it would hand the user a call they cannot judge.
-- **Policy question**: the answer depends on the user's preferences,
-  priorities, or product direction, such as the audience or scale a default
-  assumes, scope in or out, cost or risk tolerance, or a trade-off in
-  downstream-observable behavior.
-- **Check** (a fourth kind of ask, a gate rather than a decision class, for
-  asks outside a ticket's Open Decision Queue, which keeps the three
-  classes): you ask the user to look at, verify, or confirm
-  a finished artifact, or an action whose choice is already settled, such as
-  "OK this draft and I'll proceed". It is the user's judgment, not a choice
-  among options and not your own call, so it is never an announced default or
-  a technical call. Any "should we do X?" or "which one?" ask, a yes/no one
-  included, is a policy question with options, not a check, since a check
-  offers nothing to choose between.
-  Write each check as one verifiable thing, never several bundled, so the
-  user answers each individually.
-- An item you raise that reverses a prior decision is a policy question, even
-  when you can cite a reason for the reversal; a reversal the user states is
-  their answer, not a new question.
-- The classes never turn an ask a skill or the project reserves for the user
-  into a default or a technical call: the next-step handoff of
-  `{{.SkillNamespace}}:lead-review`, the publish confirmation of
-  `{{.SkillNamespace}}:lead-ship`, and the project's Approval Protocol "Ask
-  first" and "Always ask" items stay asks.
+- Announced default: one answer, and you can cite why the alternatives lose:
+  a language or platform constraint, a prior commit or ticket decision, a
+  project convention, or a consequence of a confirmed decision.
+- Technical decision: no such citation, and the answer does not hinge on the
+  user's preferences. Pick it on technical grounds (simpler, fewer moving
+  parts, clearer failure) and state the reasoning. Uncertain → still
+  technical; state the uncertainty.
+- Policy question: the answer depends on the user's preferences, priorities,
+  or product direction: audience or scale, scope in or out, cost or risk
+  tolerance, a downstream-visible trade-off.
+- Check (a gate, never in an Open Decision Queue): ask the user to look at,
+  verify, or confirm a finished artifact or an already-settled action ("OK
+  this draft and I'll proceed"). One verifiable thing per check.
 
-Every item carries an ID unique within the conversation, so the user can cite
-any earlier item by number:
+Rules:
+- "Should we do X?" or "which one?", yes/no included → a policy question with
+  options, never a check.
+- You raise an item that reverses a prior decision → policy question, even
+  with a reason. A reversal the user states is their answer.
+- Asks a skill or the project reserves for the user stay asks: the
+  `{{.SkillNamespace}}:lead-review` next-step handoff, the
+  `{{.SkillNamespace}}:lead-ship` publish confirmation, and the project's
+  Approval Protocol "Ask first" and "Always ask" items.
 
-- Write it `(nn)`, zero-padded to two digits (`(03)`; three digits past 99).
-  A new item takes one past the highest ID already used in the conversation,
-  counting the IDs and the last-ID line of every ticket queue you have read,
-  `(01)` when none; an item keeps its ID when it moves from discussion into a
-  ticket's queue.
+IDs, unique within the conversation so the user can cite any item:
+- Format `(nn)`, zero-padded to two digits (three past 99).
+- New item → one past the highest ID used in the conversation, counting
+  every ticket queue you have read (its IDs and its last-ID line); `(01)`
+  when none. An item keeps its ID when it moves into a ticket queue.
 - Discussion keeps no counter. After compaction, continue from the highest ID
-  the summary shows; a collision with an ID the summary dropped is accepted,
-  since nothing in discussion persists.
-- A ticket queue left open from an earlier conversation keeps its IDs. Only
-  when one collides with an ID already used in this conversation are the
-  items still in that ticket's queue renumbered to fresh IDs, in every ticket
-  that carries them, with the last-ID line updated; state the old-to-new
-  mapping once, in one line: `(04) -> (15), (05) -> (16)`.
+  the summary shows; a collision with an ID the summary dropped is accepted.
+- A ticket queue from an earlier conversation keeps its IDs. One collides
+  with an ID used in this conversation → renumber that ticket's still-open
+  items to fresh IDs in every ticket carrying them, update the last-ID line,
+  and state the mapping once: `(04) -> (15), (05) -> (16)`.
 
-### Workflow tuning
+### Spawning helpers
 
-For lead-owned tuning of delegation posture or other workflow knobs, use the `{{.SkillNamespace}}:lead-tune` skill.
+- Bounded evidence gathering that benefits from an independent read →
+  {{.ExploreAgent}} at the tier the question needs (`### Choosing a tier`).
+  English prompt with the scoped question; require cited evidence, gaps, and
+  follow-ups. Run independent questions in parallel; synthesize once the
+  decision has enough evidence.
+- Bundled delegate prompt → `{{.McpNamespace}}/playbook.render` with the lead
+  `session_key`; give the subagent the returned path and spawn it with the
+  tier and bindings the render returns. Delegate works in another worktree →
+  select that worktree at render time.
 
-### Scoped Exploration (native Explore)
+### Choosing a tier
 
-Use {{.ExploreAgent}} when bounded evidence gathering materially benefits from
-an independent read. Choose {{.SmallTierModel}} by default and
-{{.MediumTierModel}} for ambiguous evidence, trade-off analysis, or
-cross-source synthesis; pass the chosen model explicitly. Give it an English
-prompt with the scoped question and require cited evidence, gaps, and follow-up
-needs. Parallelize independent questions when that reduces elapsed time, and
-synthesize once the decision has the evidence it needs.
+Pass the tier to `{{.McpNamespace}}/config.resolve_agent(tier)` rather than
+naming a model.
 
-### Delegate prompts
+- A rendered playbook → the tier its render recommends.
+- small: well-specified work with no design calls — mechanical edits,
+  running and reading commands, lookups, straightforward investigation.
+- medium: ordinary engineering with a clear target and approach — a scoped
+  change or investigation, across modules if needed.
+- large: demanding work — ambiguous diagnosis, design-sensitive changes or
+  drafting, broad cross-cutting changes.
+- xlarge: research-grade work — an open problem with no known approach, or
+  novel design where a wrong call reshapes the system.
+- Unsure between small, medium, and large → the higher one; xlarge only when
+  the task plainly meets its bar.
 
-Render a bundled delegate prompt with `{{.McpNamespace}}/playbook.render` and
-give the returned path to the native subagent. Pass the lead `session_key` so
-the rendered prompt carries the delegate's session context. Use the dispatch
-tier and bindings reported by the render when spawning.
-When delegating into another worktree, select that worktree at render time so
-the prompt artifact and session context follow the delegate.
+### Lookups and artifacts
 
-### Artifact paths
+- Large generated workflow artifact → `{{.McpNamespace}}/path.generate`;
+  relay the path with a brief conclusion and the next action.
+- A step depends on an optional runtime or harness capability →
+  `{{.McpNamespace}}/runtime.read`; otherwise do not call it.
+- Ticket path, stem, or status unknown → `{{.McpNamespace}}/tickets.query`
+  before native search; known path → read it directly. Include terminal
+  inventory only when the question needs history.
+- Local API documentation → `{{.McpNamespace}}/api.list`. External API
+  question → official documentation for the exact library and version
+  (scoped exploration when sources must be combined); cite it.
+- Workflow knobs or delegation posture → `{{.SkillNamespace}}:lead-tune`.
 
-Use `{{.McpNamespace}}/path.generate` for large generated workflow artifacts.
-Relay the returned path with a brief conclusion and requested next action.
+### Notes and agenda
 
-### Runtime metadata
-
-Call `{{.McpNamespace}}/runtime.read` only when a step depends on optional
-runtime or harness capabilities.
-
-### Reference discovery
-
-When a ticket path, stem, or status is unknown, use
-`{{.McpNamespace}}/tickets.query` before native search. Read a known path
-directly. Include terminal inventory only when the question requires history.
-
-### Notes / durable memory
-
-A note persists beyond this session until erased; the agenda is this
-session's own state, restored with its key and cleared when its work ends. A
-pending question, a next step, or a finding the current work will consume goes
-in the agenda (`{{.McpNamespace}}/agenda.set`), not a note.
-
-Write a durable note when a future session would otherwise re-derive a
-non-obvious fact with no better home. Use the narrowest layer that reaches its
-readers: `worktree` by default, `clone` or `machine` only when a session in
-another worktree (`clone`) or another project (`machine`) would fail without
-the fact. A spawned worker writes no notes; it puts such a fact in its final
-report for the lead to write. Repository facts, commit rationale, and ticket
-state belong in the source tree, `## AI Context`, and the ticket respectively.
-Query notes when the ambient block omits needed context.
+- Agenda (`{{.McpNamespace}}/agenda.set`): this session's state: a pending
+  question, a next step, a finding the current work will consume. Restored
+  with the key; cleared when the work ends.
+- Note: a non-obvious fact a future session would otherwise re-derive, with
+  no better home. Persists until erased.
+- Note layer → the narrowest that reaches its readers: `worktree` by
+  default; `clone` only if a session in another worktree would fail without
+  it; `machine` only if a session in another project would.
+- Spawned worker → writes no notes; puts the fact in its final report for
+  the lead to write.
+- Not notes: repository facts (the source tree), commit rationale
+  (`## AI Context`), ticket state (the ticket).
+- The ambient notes block lacks what you need → query notes.
 
 ### Git
 
-Use a {{.McpNamespace}} Git primitive when one exists for the operation. Use
-native Git for unsupported operations or read-only diagnosis.
-
-Branch integration is lead-owned through `{{.McpNamespace}}/git.merge`,
-including impl-to-parent, goal-to-parent, and epic-to-review-track promotion.
-Apply the goal approval gate and the project's release gate at their respective
-boundaries.
-
-A root whose `HEAD` is on an `impl/*` branch is a worker's until the lead
-restores it (the occupied-root banner names the parent branch): a commit or
-ticket move there lands on the worker's branch. Housekeeping meanwhile goes
-through `{{.McpNamespace}}/worktree.acquire(base: <parent branch>,
-profile: "housekeeping")`, which checks the parent branch out in a pooled
-ticket-housekeeping worktree and returns the key to commit with there; release
-it with `{{.McpNamespace}}/worktree.release(key: <that key>)` before anything
-checks the parent branch out elsewhere, because Git holds one checkout per
-branch: a `{{.McpNamespace}}/git.merge` into a branch still held that way is
-refused, not stolen.
-
-Every `{{.McpNamespace}}/worktree.acquire` names a profile from the resolved
-list below. For a worker, pass `full` unless a listed project profile
-describes that work's checkout, because the builtin `housekeeping`
-materializes only `ai-docs` and a worker there cannot build; a pooled worktree
-is reused only by an acquire naming the same profile.
-
-Relay every `nudge` entry an acquire result carries to the user, because it is
-the only report of pooled worktrees left idle or holding large preserved
-artifacts; removing one with `{{.McpNamespace}}/worktree.remove(path: ...)` is
-the user's call.
+- An operation has a {{.McpNamespace}} Git primitive → use it. Unsupported
+  operation or read-only diagnosis → native Git.
+- Branch integration (impl → parent, epic → review track) is lead-owned,
+  through `{{.McpNamespace}}/git.merge`. Apply the project's release gate at
+  its boundary.
+- Root `HEAD` is on an `impl/*` branch → it is the worker's until the lead
+  restores it (the occupied-root banner names the parent branch); a commit or
+  ticket move there lands on the worker's branch. Housekeeping meanwhile:
+  1. `{{.McpNamespace}}/worktree.acquire(base: <parent branch>, profile:
+     "housekeeping")` → a pooled ai-docs-only checkout of the parent branch,
+     and the key to commit with there.
+  2. Release it with `{{.McpNamespace}}/worktree.release(key: <that key>)`
+     before anything checks the parent branch out elsewhere;
+     `{{.McpNamespace}}/git.merge` into a branch still held there is refused.
+- Every `{{.McpNamespace}}/worktree.acquire` names a profile from the
+  resolved list below. Worker → `full`, unless a listed project profile
+  describes the work: the builtin `housekeeping` materializes only
+  `ai-docs`, so a worker there cannot build. A pooled worktree is reused only
+  by an acquire naming the same profile.
+- An acquire result carries `nudge` entries → relay each to the user.
+  Removing one (`{{.McpNamespace}}/worktree.remove(path)`) is the
+  user's call.
 
 ### Worktree-based work mode
 
-Only when the user asks (the `### Git` housekeeping worktree excepted), work
-in worktrees instead of moving the current worktree's branch: per unit, pass
-a new branch as `target_branch` to `{{.McpNamespace}}/worktree.acquire` (for
-a ticket, the one `{{.McpNamespace}}/git.resolve_impl_branch` returns).
-Release that worktree before merging its branch or when the unit ends
-unmerged; a worktree that keeps a branch checked out blocks
-`{{.McpNamespace}}/git.merge` and every other checkout of it.
+Only when the user asks (the housekeeping worktree above excepted):
+- Per unit → `{{.McpNamespace}}/worktree.acquire` with a new branch as
+  `target_branch` (for a ticket, the one
+  `{{.McpNamespace}}/git.resolve_impl_branch` returns), instead of moving
+  this worktree's branch.
+- Release that worktree before merging its branch, or when the unit ends
+  unmerged.
 
 #### Parallel mode
 
-Only a strict dependency (`blocked-by:`, a prerequisite `related:` or
-`parent:`, or a body-stated need-first) orders units; overlapping files never
-defer one, because the conflicts that matter are semantic and are checked at
-merge. Merge units one at a time as they finish. When earlier merges moved the
-target, first diff the target against the tree
-`git -c merge.directoryRenames=false merge-tree --write-tree <target> <branch>`
-prints, looking for interactions with those merges; the option previews the
-merge `{{.McpNamespace}}/git.merge` makes, which disables directory-rename
-detection, so a status directory the branch emptied raises no false conflict. An interaction or a merge conflict goes to
-`{{.SkillNamespace}}:lead-delegate`, which reruns the affected verification;
-the user sees it only when the delegate cannot settle it.
-
-### API documentation
-
-Use `{{.McpNamespace}}/api.list` to inspect local API documentation cache domains.
-For external API questions, consult official documentation for the exact
-library and version; use scoped exploration when cross-source evidence is
-needed. Cite the evidence.
+- Order units only by a strict dependency: `blocked-by:`, a prerequisite
+  `related:` or `parent:`, or a body-stated need-first. Overlapping files
+  never defer a unit; the merge step below checks interactions.
+- Merge finished units one at a time.
+- Earlier merges moved the target → first diff the target against the tree
+  `git -c merge.directoryRenames=false merge-tree --write-tree <target>
+  <branch>` prints, looking for interactions. The option matches
+  `{{.McpNamespace}}/git.merge`, so a status
+  directory the branch emptied raises no false conflict.
+- An interaction or a merge conflict → `{{.SkillNamespace}}:lead-delegate`,
+  which reruns the affected verification; the user sees it only when the
+  delegate cannot settle it.

@@ -145,19 +145,8 @@ func (f FolderStore) revisionReceipt(meta *folderSession) (int, folderRevisionRe
 // Legacy is copied, never modified or written back.
 func (f FolderStore) Open(legacy *State) (*State, error) {
 	if legacy == nil {
-		present := false
-		for _, name := range []string{"meta.json", "pending.json", "committed.json"} {
-			_, err := wsstate.Stat(filepath.Join(f.Dir, name))
-			if err == nil {
-				present = true
-				break
-			}
-			if !errors.Is(err, os.ErrNotExist) {
-				return nil, err
-			}
-		}
-		if !present {
-			return nil, nil
+		if ok, err := f.present(); err != nil || !ok {
+			return nil, err
 		}
 	}
 	var out *State
@@ -431,10 +420,18 @@ func (f FolderStore) load(legacy *State) (*State, *folderSession, error) {
 		if err != nil {
 			return nil, nil, err
 		}
+		loadedAt, _, err := f.loadFloor(meta.Generation)
+		if err != nil {
+			return nil, nil, err
+		}
+		if loadedAt != "" {
+			state.LoadedAt = loadedAt
+		}
 		state.MetadataRevision = max(state.MetadataRevision, revision.MetadataRevision)
 		if revision.StaleNudgeRevision != "" {
 			state.StaleNudgeRevision = revision.StaleNudgeRevision
 		}
+		f.rememberIncarnation(state.LoadedAt)
 		work := state.clone()
 		contentChanged := work.migrateLegacyContent()
 		closeChanged := work.migrateCloseResults()
@@ -488,6 +485,7 @@ func (f FolderStore) load(legacy *State) (*State, *folderSession, error) {
 	if err := f.commit(intent); err != nil {
 		return nil, nil, err
 	}
+	f.rememberIncarnation(work.LoadedAt)
 	return work, &intent.Session, nil
 }
 
@@ -965,8 +963,16 @@ func (f FolderStore) replay(intent *folderIntent) error {
 	if !exists && intent.BaseGeneration != 0 || exists && current.Generation != intent.BaseGeneration && current.Generation != intent.Session.Generation {
 		return fmt.Errorf("whiteboard: pending generation does not follow committed metadata")
 	}
-	if exists && current.Generation == intent.Session.Generation && !bytes.Equal(folderJSON(current), folderJSON(intent.Session)) {
-		return fmt.Errorf("whiteboard: pending metadata conflicts with committed generation")
+	if exists && current.Generation == intent.Session.Generation {
+		// v0.50.7 can publish this intent, dropping LoadedAt from meta,
+		// then stop before removing pending. Reconcile only that missing,
+		// recoverable field; every other same-generation conflict still fails.
+		if current.State.LoadedAt == "" {
+			current.State.LoadedAt = intent.Session.State.LoadedAt
+		}
+		if !bytes.Equal(folderJSON(current), folderJSON(intent.Session)) {
+			return fmt.Errorf("whiteboard: pending metadata conflicts with committed generation")
+		}
 	}
 	for _, w := range intent.Panels {
 		if !folderIntentPath(w.Path, "panel") {
@@ -1084,7 +1090,8 @@ func (f FolderStore) append(a folderAppend) error {
 	}
 	rest := a.Data[int(written):]
 	// Splitting deliberately exposes the real partial-append recovery path.
-	if len(rest) > 1 {
+	// The load-only recovery record has a one-write budget.
+	if len(rest) > 1 && a.Path != folderLoadFloorLog {
 		half := len(rest) / 2
 		if _, err := file.Write(rest[:half]); err != nil {
 			return err

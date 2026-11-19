@@ -346,7 +346,7 @@ done();
 func TestTrackerItemEditLabelPicks(t *testing.T) {
 	runTrackerCases(t, "item edit label picks", trackerCheckJS+`
 var VS = { items: { i1: { id: 'i1', title: 'T', body: '', project: '', labels: ['L1'] } }, labels: [{ id: 'L1' }, { id: 'L2' }, { id: 'L3' }] };
-var ui = { win: true, item: 'i1', edpv: {}, eatt: {} }, sent = [];
+var ui = { win: true, item: 'i1', edpv: {}, eatt: {} }, sent = [], AD = {};
 function wsT(k) { return k; }
 function showItem() {}
 function keepItemDraft() {}
@@ -928,7 +928,7 @@ func TestTrackerRowPartsOpenTheirPickers(t *testing.T) {
 		trackerFn(t, `function labelOf\(id\)`, true) + trackerFn(t, `function labelChip\(l, act, extra\)`, false) + trackerFn(t, `function labelChips\(it, act\)`, false) +
 		trackerFn(t, `function partHtml\(cls, tip, inner, it, step\)`, false) + trackerFn(t, `function partIcon\(icon\)`, true) +
 		trackerFn(t, `function whoHtml\(it, ed\)`, false) + trackerFn(t, `function priHtml\(it, ed\)`, false) + trackerFn(t, `var ENDED = `, true) +
-		trackerFn(t, `function dueHtml\(it, st, ed\)`, false) + trackerFn(t, `function labelEdHtml\(it\)`, false) + trackerFn(t, `function dayNum\(d\)`, true) +
+		trackerFn(t, `function itemDueState\(it\)`, false) + trackerFn(t, `function dueHtml\(it, st, ed\)`, false) + trackerFn(t, `function labelEdHtml\(it\)`, false) + trackerFn(t, `function dayNum\(d\)`, true) +
 		trackerFn(t, `function today\(\)`, true) + trackerFn(t, `function titleEdHtml\(it\)`, false) + irow + trackerFn(t, `function rowClick\(row, t\)`, false) + trackerFn(t, `function labelStepRedraw\(\)`, false) +
 		trackerFn(t, `function openerMoved\(\)`, false)
 	if !strings.Contains(trackerBlock(t, `document\.addEventListener\('scroll', function \(e\) \{`, `\n    \}, true\);`), "&& openerMoved()) closeMenu(false);") {

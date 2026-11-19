@@ -57,16 +57,22 @@ func (t *Tracker) Refresh() bool {
 	if !reset && len(evs) == 0 && t.r != nil {
 		return false
 	}
-	list := make([]wsledger.Event, len(t.order))
-	for i, id := range t.order {
-		list[i] = t.events[id]
+	if reset || t.r == nil {
+		list := make([]wsledger.Event, len(t.order))
+		for i, id := range t.order {
+			list[i] = t.events[id]
+		}
+		t.r = replayBuild(list, t.genesis, t.src.Concurrent, false, true)
+	} else {
+		t.r.update(evs)
 	}
-	t.r = replay(list, t.genesis, t.src.Concurrent)
 	return true
 }
 
 // View refreshes and returns the view state at now; staleDays <= 0 means
-// DefaultStaleDays, a zero now turns stale off.
+// DefaultStaleDays, a zero now turns stale off. The returned snapshot owns
+// its data and can be read/encoded during later Refresh calls. Calls on the
+// Tracker itself still require caller serialization.
 func (t *Tracker) View(now time.Time, staleDays int) *View {
 	t.Refresh()
 	return t.r.view(t.stream, now, staleDays)

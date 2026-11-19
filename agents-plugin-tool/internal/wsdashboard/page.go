@@ -42,6 +42,19 @@ type ClosedTopicsSource interface {
 	ReadClosedTopics(reg Registration, lang string, from, n int) (html template.HTML, ok bool)
 }
 
+// BoardInputSource admits a tagged send from memory through inbox enqueue.
+// Missing-field legacy sends do not use this optional interface.
+type BoardInputSource interface {
+	LockBoardIncarnation(Registration, string) (unlock func(), ok bool)
+}
+
+// BoardArchiveSource is a PageSource that also exports a session's board
+// folder as a zip (wswhiteboard.FolderStore.ExportArchive), for the board
+// toolbar's download. ok is false when the session has no board.
+type BoardArchiveSource interface {
+	BoardArchive(reg Registration) (zip []byte, ok bool, err error)
+}
+
 // TopicHistorySource is a PageSource that also renders board topics with
 // the complete history the served board leaves out (View.LazyHistory): the
 // topics named, or, when target is set, the one topic that holds that eN,
@@ -59,6 +72,8 @@ type PageContent struct {
 	HasBoard bool
 	// Seq is the board's update sequence number.
 	Seq int
+	// BoardIncarnation is the recovered load boundary, unchanged by edits.
+	BoardIncarnation string
 	// Board is the session's whiteboard board and panels, rendered by the
 	// static page's templates (wswhiteboard.RenderRegions) with the served
 	// page's link rule: a file link renders as an action link titled with
@@ -75,6 +90,8 @@ type PageContent struct {
 	// epoch milliseconds (wswhiteboard.State.ReaskTimes); the page's sent
 	// marks drop answers sent before it. Nil when no item was re-asked.
 	Reasked map[int]int64
+	// BoardTargets maps item/entry/panel anchors to topics from loaded state.
+	BoardTargets map[string]string `json:"-"`
 	// Contacts are the session's mail correspondents, newest exchange first.
 	Contacts []Contact
 	// MailBodies maps a mailbox history entry name (a conversation ring mail

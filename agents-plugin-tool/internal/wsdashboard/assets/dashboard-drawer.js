@@ -310,16 +310,24 @@
     if (drhandle.classList.contains("wait")) t += "; " + wsT("js.drawer.waiting");
     drhandle.title = t;
     drhandle.setAttribute("aria-label", t);
+    // The fold button announces the wait it shows (in the panels slot only).
+    if (!drfold) return;
+    var f = wsT("js.drawer.fold");
+    if (drMode === "panels" && drfold.classList.contains("wait")) f += "; " + wsT("js.drawer.waiting");
+    drfold.title = f;
+    drfold.setAttribute("aria-label", f);
   }
-  // drawerWait keeps the opener's approval signal current even while hidden.
-  // The tree
-  // region's hidden compact roster (.ag-source) does not count: it repeats
-  // this tree's running rows and adds linked delegate sessions' agents,
-  // whose approvals are not this session's to wait on.
+  // drawerWait keeps the opener's approval signal current even while hidden;
+  // the fold button mirrors it, since it shows in place of the hidden panels
+  // handle while the sheet covers the waiting rows. The tree region's hidden
+  // compact roster (.ag-source) does not count: it repeats this tree's
+  // running rows and adds linked delegate sessions' agents, whose approvals
+  // are not this session's to wait on.
   function drawerWait() {
     if (!drhandle) return;
     var wait = q("#r-convlive .permwait, #r-tree .phase.permission, #r-tree .brow.perm").some(function (el) { return !el.closest(".ag-source"); });
     drhandle.classList.toggle("wait", wait);
+    if (drfold) drfold.classList.toggle("wait", wait);
     drTitle();
   }
   // A panels change the drawer is closed over lights the handle's dot.
@@ -393,6 +401,7 @@
   function drSetOpen(open, mode) {
     mode = mode || drMode;
     if (open && !(mode === "git" ? ghandle() : mode === "search" ? shandle : drHas)) return;
+    var opener = mode === "search" && shandle || mode === "git" && ghandle() || drhandle, kb = open && doc.activeElement === opener;
     if (open && !drOpen) drAnnounce();
     if (!open && drsheet.contains(doc.activeElement)) (drMode === "search" && shandle || drMode === "git" && ghandle() || drhandle).focus();
     drMode = mode;
@@ -402,6 +411,10 @@
     save(DR_SEARCH, open && mode === "search" ? "1" : null);
     if (drWant) { drSwap = false; drDot(); }
     drApply(true);
+    // The focused opener hides while its sheet shows: focus moves to the fold
+    // button in its slot instead of falling to the body, only while it is
+    // still on that opener (opening search focuses its input in drApply).
+    if (kb && drfold && doc.activeElement === opener) drfold.focus();
   }
   // drFold is a click on the fold button: the shown sheet closes as a click
   // on its handle closes it, and keyboard focus goes to that handle, since
@@ -422,6 +435,11 @@
     drfold.title = wsT("js.drawer.fold");
     drfold.setAttribute("aria-label", drfold.title);
     drfold.setAttribute("aria-controls", "drsheet");
+    var drFoldWait = doc.createElement("span");
+    drFoldWait.className = "dr-wait";
+    drFoldWait.title = wsT("js.drawer.waiting");
+    drFoldWait.appendChild(gIcon("lock"));
+    drfold.appendChild(drFoldWait);
     drfold.appendChild(luIcon("chevron-up"));
     drhandle.parentNode.insertBefore(drfold, drhandle);
     drfold.addEventListener("click", drFold);

@@ -273,6 +273,7 @@ function region(name){return name==="board"?boardEl:treeEl;}
 function $(){return main;}
 function q(){return [];}
 var boardPending={}, boardFrozen=[], boardPagedEdits=["paged"], boardLatest=null, boardRendered=null, boardOffered=null;
+var boardRelease=false, boardReturnTimer=0, boardReturnFresh=false;
 var boardHomeWrites=new WeakSet(), ctext=null, mpend=null, live=false, TL_REGIONS={}, convo=null, stick=false;
 var treeRendered={html:"previous"}, mergeRows=true;
 function editing(){return false;}
@@ -305,7 +306,7 @@ function mergeTreeRows(el,previous,next){
   doc.activeElement=null;treePane.scrollTop=0;log.push("tree-merge");return mergeRows?[row]:null;
 }
 function drawerWait(){log.push("wait");} function agSwapped(){log.push("agents");}
-`+whiteboardBridgeFunctions(t, string(data), "swap", "captureBoardHistory", "boardKeep")+dashboardJSBlock(t, "\n  var scrollRestore =", "\n  [\"wheel\"")+`
+`+whiteboardBridgeFunctions(t, string(data), "swap", "captureBoardHistory", "boardKeep", "boardReturnApply")+dashboardJSBlock(t, "\n  var scrollRestore =", "\n  [\"wheel\"")+`
 var numericRestore=restoreScroll;
 restoreScroll=function(s){log.push("scroll");numericRestore(s);};
 swap("board","new-board","board-html",true);

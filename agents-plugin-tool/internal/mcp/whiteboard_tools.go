@@ -68,6 +68,10 @@ func isWhiteboardTool(name string) bool {
 	return name == "whiteboard.update" || name == "whiteboard.query"
 }
 
+// whiteboardStatusPlaybookName is the print playbook teaching a sub-lead the
+// status-only subset of the board grammar; refusals to a sub-lead key name it.
+const whiteboardStatusPlaybookName = "whiteboard-status"
+
 func whiteboardLeadOnlyDenial(name string) string {
 	return fmt.Sprintf("%s is not available to a spawned session: the whiteboard is the top-level lead's channel to its user. Put what the user should see in your final report; your lead decides what reaches the board.", name)
 }
@@ -224,17 +228,32 @@ func whiteboardDirtyingTool(name string) bool {
 	return false
 }
 
-func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any) response {
+// handleWhiteboardUpdate applies a whiteboard.update call to the board of
+// args' session_key. sublead is non-nil for a marked sub-lead's call, which
+// callTool already rewrote onto its top-level lead's key: Apply then admits
+// status commands only and attributes them (wswhiteboard.Env.StatusAuthor),
+// refusals name the whiteboard-status playbook, and success is one
+// acknowledgement line. A sub-lead write never enables the lead's board knob
+// and never returns the lead directives (the page URLs, the applied info);
+// it renders no embed, since the lead embeds its own board, and it stamps no
+// user inputs, which the lead's own next entry answers.
+func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any, sublead *subleadBoard) response {
 	const tool = "whiteboard.update"
 	key, err := sessionStateKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
+	refusal := func(problems []string) string {
+		if sublead != nil {
+			return s.commandRefusal(tool, problems, whiteboardStatusPlaybookName)
+		}
+		return s.whiteboardRefusal(tool, problems)
+	}
 	// The JSON payload object was replaced by the command string; the
 	// precheck defers a call carrying it here (handlerOwnedArguments), so the
 	// refusal names the replacement instead of a generic unknown argument.
 	if _, present := args["payload"]; present {
-		return toolErrorTextResponse(id, s.whiteboardRefusal(tool, []string{
+		return toolErrorTextResponse(id, refusal([]string{
 			"payload: no longer accepted; whiteboard.update takes commands, one string of wb: commands",
 		}))
 	}
@@ -242,7 +261,7 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 	if raw, present := args["commands"]; present {
 		str, ok := raw.(string)
 		if !ok {
-			return toolErrorTextResponse(id, s.whiteboardRefusal(tool, []string{
+			return toolErrorTextResponse(id, refusal([]string{
 				"commands: must be a string of wb: commands, not a JSON value",
 			}))
 		}
@@ -267,15 +286,20 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 			},
 			IsAbs: filepath.IsAbs,
 		}
+		if sublead != nil {
+			env.StatusAuthor = sublead.author
+		}
 		root = rec.Root
 		beforeEntry := rec.Whiteboard.EntrySeq
 		outcome, problems = wswhiteboard.Apply(rec.Whiteboard, commands, env)
 		if len(problems) > 0 && (outcome.Accepted == 0 || outcome.Unpartitioned) {
 			return errWhiteboardRefused
 		}
-		s.stampBoardInputs(key, rec.Whiteboard, beforeEntry)
+		if sublead == nil {
+			s.stampBoardInputs(key, rec.Whiteboard, beforeEntry)
+		}
 		var renderErr error
-		render, renderErr = s.renderWhiteboard(rec, key, true)
+		render, renderErr = s.renderWhiteboard(rec, key, sublead == nil)
 		return renderErr
 	}, &observed)
 	// A successful Apply is not a commit. Conversely a failed replay or
@@ -287,7 +311,7 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 	}
 	s.debugEvent("whiteboard.commit_outcome", map[string]any{"committed": observed.Committed, "html_published": observed.Published})
 	if errors.Is(err, errWhiteboardRefused) {
-		text := s.whiteboardRefusal(tool, problems)
+		text := refusal(problems)
 		if outcome.Unpartitioned {
 			text += "\nWhole input refused without writes; command boundaries or rendering prerequisites are not safe for partial application.\n"
 		} else {
@@ -313,6 +337,9 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 	}
 	if s.whiteboardChanged != nil {
 		s.whiteboardChanged(s.getenv(wsstate.EnvCacheHome), root, key)
+	}
+	if sublead != nil {
+		return s.subleadWhiteboardResult(id, outcome, problems)
 	}
 	var sb strings.Builder
 	if len(problems) > 0 {
@@ -350,6 +377,24 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 		return toolErrorTextResponse(id, sb.String())
 	}
 	return toolTextResponse(id, sb.String(), nil)
+}
+
+// subleadWhiteboardResult is a committed sub-lead write's result: one
+// acknowledgement line, or, when some commands failed, the accepted count,
+// the problems, the whiteboard-status pointer, and the failed commands to
+// resend.
+func (s *Server) subleadWhiteboardResult(id json.RawMessage, out wswhiteboard.Outcome, problems []string) response {
+	if len(problems) == 0 {
+		return toolTextResponse(id, fmt.Sprintf("posted: %d status commands to your lead's whiteboard.\n", out.Accepted), nil)
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "posted: %d status commands to your lead's whiteboard; the failed commands were not applied. Problems:\n", out.Accepted)
+	for _, problem := range problems {
+		sb.WriteString("- " + problem + "\n")
+	}
+	fmt.Fprintf(&sb, "\nSyntax and commands: the `%s` playbook (%s/playbook.read).\n", whiteboardStatusPlaybookName, s.runtimeNamespace())
+	sb.WriteString(whiteboardFailedRetry(out))
+	return toolErrorTextResponse(id, sb.String())
 }
 
 func whiteboardFailedRetry(out wswhiteboard.Outcome) string {
@@ -392,6 +437,64 @@ func (s *Server) handleWhiteboardQuery(id json.RawMessage, args map[string]any) 
 		return toolErrorTextResponse(id, s.whiteboardRefusal(tool, problems))
 	}
 	return toolTextResponse(id, wswhiteboard.FormatQuery(result), nil)
+}
+
+// whiteboardLoadTool replaces the caller's board with a board zip (the
+// dashboard's board download). It is top-level-lead-only with no sub-lead
+// pass-through, so it is not an isWhiteboardTool name: that gate would
+// rewrite a sub-lead key onto its lead's board.
+const whiteboardLoadTool = "whiteboard.load"
+
+// handleWhiteboardLoad loads the zip at args' path into the caller's board
+// folder through the store (wswhiteboard.FolderStore.LoadArchive), keeping
+// the previous board as a backup folder beside it. Afterwards it behaves like
+// a successful whiteboard.update: the cached board is dropped, the board knob
+// turns on, and the dispatcher refreshes the page and nudges the dashboard.
+func (s *Server) handleWhiteboardLoad(id json.RawMessage, args map[string]any) response {
+	key, err := sessionStateKey(whiteboardLoadTool, args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
+	raw, _ := args["path"].(string)
+	if strings.TrimSpace(raw) == "" {
+		return toolTextResponse(id, "", fmt.Errorf("%s: path is required", whiteboardLoadTool))
+	}
+	rec, err := s.sessions.readStateWithError(key, partKey)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", whiteboardLoadTool, err))
+	}
+	// The path is read on the machine running this server; a relative one
+	// resolves against the session root.
+	path := raw
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(rec.Root, path)
+	}
+	if info, err := os.Stat(path); err != nil || info.IsDir() {
+		return toolTextResponse(id, "", fmt.Errorf("%s: no board zip at %s on the host running ws-mcp", whiteboardLoadTool, path))
+	}
+	folder := whiteboardFolder(rec.Root, key)
+	if err := registerWhiteboardExclude(s.gitRunner(), rec.Root, filepath.Dir(folder.Dir)); err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: register %s in the git exclude file: %w", whiteboardLoadTool, whiteboardDirRel, err))
+	}
+	backup, topics, err := folder.LoadArchive(path, time.Now())
+	wswhiteboard.SharedFolderCache.Forget(folder.Dir)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %s: %w", whiteboardLoadTool, path, err))
+	}
+	if s.whiteboardChanged != nil {
+		s.whiteboardChanged(s.getenv(wsstate.EnvCacheHome), rec.Root, key)
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "loaded: %d topics from %s\n", topics, path)
+	if backup != "" {
+		sb.WriteString("backup: the previous board is in " + backup + "\n")
+	} else {
+		sb.WriteString("backup: none; this session had no board\n")
+	}
+	if err := s.enableWhiteboardKnobForSession(key); err != nil {
+		sb.WriteString("warning: " + err.Error() + "\n")
+	}
+	return toolTextResponse(id, sb.String(), nil)
 }
 
 // whiteboardRefusal lists problems with a compact playbook pointer for update,

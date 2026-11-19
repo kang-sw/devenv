@@ -77,7 +77,8 @@ const route = p => '/w/' + p.replace(/\\/g, '/').replace(/^\//, '').split('/').m
     const explorerID = (await cards('explorer'))[0].id;
     const tid0 = await makeTerminal(paths[0]);
     // Search has index-page scope, not host0/session file or answer hooks.
-    await page.locator('.board-search').click();
+    assert.equal(await page.locator('.board-download').count(), 0, 'worktree page has no board zip to download');
+    await page.locator('#tkqs').click();
     await page.locator('#tkqpop').waitFor({ state: 'visible' });
     await page.locator('#tkqin').press('Escape');
     await page.locator('#tkqpop').waitFor({ state: 'hidden' });

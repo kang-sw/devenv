@@ -105,6 +105,7 @@
     var prefix = selectionPrefix(bselections);
     var shift = function (r) { return Object.assign({}, r, { start: r.start + prefix.length, end: r.end + prefix.length }); };
     var d = {
+      boardIncarnation: typeof boardIncarnation === "string" ? boardIncarnation : null,
       text: prefix + (ctext ? ctext.value : ""),
       capsules: ctext && ctext.wsc ? ctext.wsc.snapshot().map(shift) : [],
       cmd: cmdSel ? { name: cmdSel.name, args: cmdSel.args } : null,
@@ -144,8 +145,15 @@
     draftStore.clear(rid);
     queueDraft();
   }
+  function boardDraft(d) {
+    if (d && typeof d.boardIncarnation === "string" && d.boardIncarnation !== boardIncarnation) {
+      // Keep free text and image references, never reattach replaced IDs.
+      return Object.assign({}, d, { boardIncarnation: boardIncarnation, answers: {}, chips: [], bmentions: [], closeRequests: [] });
+    }
+    return d;
+  }
   function restoreDraft() {
-    var d = draftStore && draftStore.load(rid);
+    var d = draftStore && boardDraft(draftStore.load(rid));
     if (!d) return;
     restoring = true;
     try {
@@ -368,6 +376,7 @@
     try { return !!(ent.el.contentWindow.wsCanCacheSession && ent.el.contentWindow.wsCanCacheSession()); } catch (e) { return false; }
   }
   function shDrop(ent) {
+    clearTimeout(ent.headTimer); ent.headTimer = null;
     try {
       if (ent.el.contentWindow.wsSaveSessionDraft) ent.el.contentWindow.wsSaveSessionDraft();
       if (ent.el.contentWindow.wsSaveSessionView) ent.el.contentWindow.wsSaveSessionView();
@@ -399,6 +408,7 @@
         if (blank) {
           var next = ent.leave;
           ent.leave = null; shLeaving = null;
+          clearTimeout(ent.headTimer); ent.headTimer = null;
           shFrames.splice(shFrames.indexOf(ent), 1);
           if (shOn === ent) shOn = null;
           if (shWant === ent) shWant = null;
@@ -479,6 +489,7 @@
     if (cached) {
       if (cached.f.hash !== f.hash) try { cached.el.contentWindow.location.hash = f.hash; } catch (e) {}
       cached.f = f;
+      shWant = cached;
       shShow(cached, from);
       return;
     }
@@ -503,6 +514,19 @@
     railMarks();
   }
   function shShow(ent, from) {
+    // load can precede the frame's first rAF/header message. Keep the old
+    // page and header together until the destination's chrome is ready,
+    // but never strand navigation on an error/login page or broken script.
+    if (!ent.loaded) return;
+    if (!ent.head && !ent.headWaitDone) {
+      if (!ent.headTimer) ent.headTimer = setTimeout(function () {
+        ent.headTimer = null;
+        ent.headWaitDone = true;
+        if (shWant === ent) shShow(ent, from);
+      }, 400);
+      return;
+    }
+    clearTimeout(ent.headTimer); ent.headTimer = null;
     var was = shOn;
     if (was === ent) return;
     // Async tool/draft callbacks can change eligibility during a cold load.
@@ -558,7 +582,8 @@
     }
     if (qs && qs.innerHTML !== (m ? m.qs : "")) qs.innerHTML = m ? m.qs : "";
     shTop.style.paddingRight = m ? m.pad + "px" : "";
-    shTop.style.minHeight = m ? m.top + "px" : "";
+    // Headerless fallback clears stale session controls, not their box.
+    if (m) shTop.style.minHeight = m.top + "px";
     railRenameNew();
   }
   // shLayout takes the shown frame's pinned column (the rail overlays
@@ -616,7 +641,11 @@
       var m = window.WsShell.message(e.data), ent = m && shEnt(e.source), on = !!ent && ent === shOn;
       if (!ent) return;
       switch (m.wsShell) {
-        case "head": ent.head = m; if (on) shHead(ent); break;
+        case "head":
+          ent.head = m;
+          if (on) shHead(ent);
+          else if (ent === shWant) shShow(ent);
+          break;
         case "title": ent.title = m.title; if (on) doc.title = m.title; break;
         case "nav": if (on) shOpen(m.href, true); break;
         case "stay": shStay(ent, m.attempt); break;

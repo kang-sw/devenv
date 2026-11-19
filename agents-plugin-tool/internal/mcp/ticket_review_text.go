@@ -1,28 +1,22 @@
 package mcp
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 )
 
-// Knob-off lead-ticket text for ticket_review_auto_ack. The shipped rsrc text
-// states the default-on rule (the lead confirms review-raised announced and
-// technical items on its own judgment); when the knob resolves off, the
-// playbook.read render substitutes the acknowledgement rule below, so the rsrc
-// mirrors stay byte-identical. Each pair names the shipped text it replaces;
-// when a prompt override or a later edit removed that text, the knob-off text
-// is appended instead of lost (replaceOrAppend, the whiteboard precedent).
-// A test pins every on-text to occur exactly once in the rendered playbook.
-
 const ticketReviewAutoAckOnValue = "on"
 
-type textVariant struct {
-	on  string
-	off string
-}
-
-var ticketReviewAutoAckVariants = []textVariant{
+// legacyLeadTicketAutoAckVariants is the 0.50.7 knob-off text for a lead-ticket
+// resource that predates the TicketHandler* override markers: an older plugin's
+// rsrc rendered by this daemon states the auto-confirm rule as plain text, so
+// ticket_review_auto_ack off is honored only by substituting it. Current
+// resources carry none of these on-texts, so the substitution never fires on
+// them (replace-only, never append). Remove once no supported plugin ships the
+// 0.50.7 lead-ticket text.
+var legacyLeadTicketAutoAckVariants = []struct{ on, off string }{
 	{
 		on: "The settle point is reached when the announced defaults and\n" +
 			"technical decisions are acknowledged or auto-confirmed (see\n" +
@@ -80,17 +74,35 @@ var ticketReviewAutoAckVariants = []textVariant{
 	},
 }
 
-// applyTicketReviewAutoAckVariant returns body with the knob-off text
-// substituted when name is lead-ticket and enabled is false; otherwise body
-// is returned unchanged.
-func applyTicketReviewAutoAckVariant(name, body string, enabled bool) string {
-	if name != "lead-ticket" || enabled {
-		return body
+// applyLegacyLeadTicketAutoAck substitutes the knob-off text into a
+// marker-less (0.50.7) lead-ticket body when ticket_review_auto_ack resolves
+// off for sessionKey. The knob is resolved only when the body carries legacy
+// text, so current resources gain no config dependency.
+func (s *Server) applyLegacyLeadTicketAutoAck(sessionKey, name, body string) (string, error) {
+	if name != "lead-ticket" {
+		return body, nil
 	}
-	for _, v := range ticketReviewAutoAckVariants {
-		body = replaceOrAppend(body, v.on, v.off)
+	legacy := false
+	for _, v := range legacyLeadTicketAutoAckVariants {
+		if strings.Contains(body, v.on) {
+			legacy = true
+			break
+		}
 	}
-	return body
+	if !legacy {
+		return body, nil
+	}
+	enabled, err := s.ticketReviewAutoAckEnabled(sessionKey)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", wsconfig.ItemTicketReviewAutoAck, err)
+	}
+	if enabled {
+		return body, nil
+	}
+	for _, v := range legacyLeadTicketAutoAckVariants {
+		body = strings.Replace(body, v.on, v.off, 1)
+	}
+	return body, nil
 }
 
 // ticketReviewAutoAckEnabled resolves ticket_review_auto_ack for sessionKey

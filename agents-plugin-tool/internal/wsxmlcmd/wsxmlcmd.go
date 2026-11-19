@@ -5,9 +5,9 @@
 // every problem it finds, and offers the shared value checks a caller's batch
 // validation uses; what a command means stays with the caller.
 //
-// The language is not XML: Go's encoding/xml is strict and would make every
-// `<` and `&` in a body an escape, which is the cost the format exists to
-// avoid. The rules this tokenizer implements:
+// The language is standard XML text with a tolerant reader: Go's
+// encoding/xml would refuse every bare `<` and `&` a caller still writes
+// from an older manual. The rules this tokenizer implements:
 //
 //   - Every command and field tag carries the grammar's literal prefix
 //     ("wb:" for the whiteboard); there is no namespace declaration and no
@@ -19,23 +19,27 @@
 //     group holds at least one command, unless the grammar declares
 //     optional extra group attributes (Group.Extras) and the group carries
 //     one.
-//   - A body is raw text up to the first exact closing tag of its element
-//     (`</wb:why>`), so `<`, `&`, inline HTML, and mermaid are written as is.
-//     A CDATA section (`<![CDATA[...]]>`) passes its content through
-//     literally, for a body that must contain its own closing tag. A grammar
-//     may also opt into inert Markdown code spans/fences (Grammar.LiteralCode),
-//     provided a candidate contains no raw close of its own body outside CDATA.
+//   - A body runs to the first exact closing tag of its element
+//     (`</wb:why>`). The entities Decode knows are decoded in every body and
+//     every attribute value; the decoded text is what a caller stores.
+//   - A raw element (`<wb:raw>...</wb:raw>`, the grammar's prefix plus
+//     "raw") is a text segment taken exactly as written up to its first
+//     closing tag: no decoding, CDATA markers and tags kept. It may appear
+//     anywhere body text may, any number of times; where a command or field
+//     is expected it is refused as an unknown one. Only the exact forms
+//     `<wb:raw>` and `</wb:raw>` are raw tags.
+//   - Older input stays accepted: a `<` or `&` that starts no known tag,
+//     CDATA section, raw element, or entity is literal text, and a CDATA
+//     section (`<![CDATA[...]]>`) passes its content through undecoded.
+//     A grammar may also opt into inert Markdown code spans/fences
+//     (Grammar.LiteralCode), provided a candidate contains no close of its
+//     own body outside CDATA and raw segments; both still open inside code.
 //   - A body loses one newline right after its opening tag and one right
 //     before its closing tag, so a body written on its own lines keeps its
-//     text exactly; nothing else is trimmed.
+//     text exactly; a raw segment at either edge keeps its own newlines, and
+//     nothing else is trimmed.
 //   - An attribute value is quoted with " or ' and runs to the matching
 //     quote.
-//   - Escaping is never required, but an agent escapes anyway, so the
-//     entities Decode knows are decoded in every attribute value and in each
-//     body the grammar marks as plain text (Spec.DecodeBody,
-//     Spec.DecodeFields), outside CDATA. Every other body is kept exactly as
-//     written: it may carry HTML whose entities are meant, or be an operand
-//     matched against stored text.
 //   - An unknown tag or attribute is a problem; so is text between commands
 //     (inside a group too) or between a command's fields. A leaf may declare
 //     an alternative of repeated wrapped field sets (Spec.Wrapper).
@@ -56,7 +60,7 @@ import (
 type Kind int
 
 const (
-	// Leaf takes a raw text body (or none, when self-closing).
+	// Leaf takes a text body (or none, when self-closing).
 	Leaf Kind = iota
 	// Container takes field tags, each a leaf without attributes.
 	Container
@@ -75,12 +79,6 @@ type Spec struct {
 	// Fields are a Container's field tag names without the prefix, in the
 	// order a problem lists them.
 	Fields []string
-	// DecodeBody marks a Leaf's body as plain text: its entities are
-	// decoded (Decode), outside CDATA.
-	DecodeBody bool
-	// DecodeFields are the Container fields, without the prefix, whose
-	// bodies are plain text and decoded like a DecodeBody body.
-	DecodeFields []string
 	// Scoped marks a command that sits only inside the grammar's group and
 	// takes the group's attribute from it (Command.Scoped).
 	Scoped bool
@@ -157,14 +155,6 @@ func (g Grammar) fieldTags(spec Spec) []string {
 	return tags
 }
 
-func (g Grammar) decodeFieldTags(spec Spec) map[string]bool {
-	tags := map[string]bool{}
-	for _, f := range spec.DecodeFields {
-		tags[g.Prefix+f] = true
-	}
-	return tags
-}
-
 // Attr is one attribute of a command tag.
 type Attr struct {
 	Name, Value string
@@ -175,6 +165,12 @@ type Field struct {
 	Tag  string
 	Line int
 	Body string
+	// Literal is Body as written, before entity decoding: CDATA and raw
+	// segments contribute their content, every other segment its source
+	// text. It equals Body when decoding changed nothing. An exact-match
+	// operand uses it to detect a caller who wrote an entity meaning the
+	// entity text itself (see LiteralAmbiguous).
+	Literal string
 }
 
 // Scope is the group a command sits in.
@@ -292,6 +288,20 @@ func (c Command) FieldsOf(tag string) []string {
 	return out
 }
 
+// LiteralAmbiguous reports whether the first field tag named tag is an
+// exact-match operand whose entities decoded to different text while its
+// as-written spelling also occurs in stored. Such an operand meant either
+// spelling, so applying it could patch the wrong occurrence; the caller
+// refuses it and points at the raw element.
+func (c Command) LiteralAmbiguous(tag, stored string) bool {
+	for _, f := range c.Fields {
+		if f.Tag == tag {
+			return f.Literal != f.Body && strings.Contains(stored, f.Literal)
+		}
+	}
+	return false
+}
+
 // Single returns the one field tag named tag; more than one is a problem.
 func (c Command) Single(p *Problems, tag string) (string, bool) {
 	bodies := c.FieldsOf(tag)
@@ -314,7 +324,7 @@ func (c Command) Single(p *Problems, tag string) (string, bool) {
 // still returned, so the caller's validation lists as much as it can in one
 // refusal.
 func Parse(p *Problems, g Grammar, s string) []Command {
-	r := &parser{tokenizer: tokenizer{s: s, p: p}, g: g}
+	r := &parser{tokenizer: tokenizer{s: s, p: p, raw: newRawTags(g.Prefix)}, g: g}
 	r.read()
 	return r.out
 }
@@ -323,7 +333,7 @@ func Parse(p *Problems, g Grammar, s string) []Command {
 // false when boundaries are uncertain: a caller must not apply even the prefix.
 // Parse keeps its existing whole-batch validation contract for other callers.
 func ParseOrdered(p *Problems, g Grammar, s string) (commands []Command, complete bool) {
-	r := &parser{tokenizer: tokenizer{s: s, p: p, ordered: true}, g: g}
+	r := &parser{tokenizer: tokenizer{s: s, p: p, ordered: true, raw: newRawTags(g.Prefix)}, g: g}
 	r.read()
 	return r.out, !r.fatal
 }
@@ -417,7 +427,7 @@ func (r *parser) command(tag openTag, scope *Scope) bool {
 			if spec.Wrapper != "" {
 				wrapper = &bodyWrapper{tag: r.g.Prefix + spec.Wrapper, fields: r.g.fieldTags(spec), children: &cmd.Children, refuseOpenings: r.g.RefuseFieldOpenings, parent: cmd}
 			}
-			body, ok := r.readContent(tag.name, tag.at, spec.DecodeBody, bodyFieldRules{}, "", wrapper, nil)
+			body, _, ok := r.readContent(tag.name, tag.at, bodyFieldRules{}, "", wrapper, nil)
 			if !ok {
 				return false
 			}
@@ -432,7 +442,7 @@ func (r *parser) command(tag openTag, scope *Scope) bool {
 				r.skipUnknown(tag)
 			}
 		case Container:
-			if !r.readFields(&cmd, r.g.fieldTags(spec), r.g.decodeFieldTags(spec), r.g.RefuseFieldOpenings, cmd.Label()) {
+			if !r.readFields(&cmd, r.g.fieldTags(spec), r.g.RefuseFieldOpenings, cmd.Label()) {
 				return false
 			}
 		}
@@ -514,7 +524,7 @@ func (r *parser) group(tag openTag) {
 		}
 		if commands == 0 && (rest[0] != '<' || !strings.HasPrefix(rest[1:], r.g.Prefix) && !strings.HasPrefix(rest, "</")) {
 			if r.ordered {
-				body, ok := r.readBodyContent(tag.name, tag.at, false, nil, scope.Label(), &r.g)
+				body, ok := r.readBodyContent(tag.name, tag.at, nil, scope.Label(), &r.g)
 				if ok {
 					r.problem(r.i, "%s: text before its first command: %q%s", scope.Label(), excerpt(body), hint)
 				}
@@ -595,6 +605,7 @@ type tokenizer struct {
 	fatal                       bool
 	ordered                     bool
 	literalCode                 bool
+	raw                         rawTags
 	literals                    *literalIndex
 	linePos                     int
 	lineCount                   int
@@ -613,12 +624,42 @@ func (t *tokenizer) lineAt(i int) int {
 	return strings.Count(t.s[:i], "\n") + 1
 }
 
-const crossingGuidance = "; code containing its own closing tag is structural text: use <![CDATA[...]]> for the literal example; split any ]]> across adjacent CDATA sections"
+// rawTags are a grammar's raw element: its name and its exact opening and
+// closing tags.
+type rawTags struct{ tag, open, close string }
+
+func newRawTags(prefix string) rawTags {
+	tag := prefix + "raw"
+	return rawTags{tag: tag, open: "<" + tag + ">", close: "</" + tag + ">"}
+}
+
+// verbatimEnd reports whether s[at:] opens a CDATA section or a raw element,
+// whose content no tag, entity, or code delimiter affects, and the offset
+// just past its close: -1 when it has none.
+func (t *tokenizer) verbatimEnd(s string, at int) (int, bool) {
+	open, close := "<![CDATA[", "]]>"
+	if !strings.HasPrefix(s[at:], open) {
+		if t.raw.open == "" || !strings.HasPrefix(s[at:], t.raw.open) {
+			return 0, false
+		}
+		open, close = t.raw.open, t.raw.close
+	}
+	end := strings.Index(s[at+len(open):], close)
+	if end < 0 {
+		return -1, true
+	}
+	return at + len(open) + end + len(close), true
+}
+
+func (t *tokenizer) crossingGuidance() string {
+	return "; code containing its own closing tag is structural text: wrap the literal example in " + t.raw.open + "..." + t.raw.close
+}
 
 func (t *tokenizer) guideProblems(from int) {
+	guidance := t.crossingGuidance()
 	for i := from; i < len(t.p.List); i++ {
-		if !strings.Contains(t.p.List[i], crossingGuidance) {
-			t.p.List[i] += crossingGuidance
+		if !strings.Contains(t.p.List[i], guidance) {
+			t.p.List[i] += guidance
 		}
 	}
 }
@@ -722,18 +763,20 @@ func (t *tokenizer) readOpen() (openTag, bool) {
 	}
 }
 
-// bodySegment is one run of a body: text as written, or a CDATA section's
-// content.
+// bodySegment is one run of a body: text as written, a CDATA section's
+// content, or a raw element's content.
 type bodySegment struct {
 	text  string
 	cdata bool
+	raw   bool
 }
 
-// readBody reads raw text up to the exact closing tag of name, passing CDATA
-// sections through, and strips the one newline at each end; with decode, it
-// then decodes the text outside CDATA.
-func (t *tokenizer) readBody(name string, from int, decode bool, fields []string, label string) (string, bool) {
-	return t.readContent(name, from, decode, bodyFieldRules{tags: fields, refuseOpenings: len(fields) != 0}, label, nil, nil)
+// readBody reads text up to the exact closing tag of name, passing CDATA
+// sections and raw elements through, strips the one newline at each end, and
+// decodes the text outside them.
+func (t *tokenizer) readBody(name string, from int, fields []string, label string) (string, bool) {
+	body, _, ok := t.readContent(name, from, bodyFieldRules{tags: fields, refuseOpenings: len(fields) != 0}, label, nil, nil)
+	return body, ok
 }
 
 // Field boundaries are grammar metadata even when skipped content suppresses
@@ -754,12 +797,15 @@ type bodyWrapper struct {
 
 // A rejected group body still needs structural boundaries: unlike a command's
 // raw body, a nested group makes its closing tag ambiguous. Quoted attributes,
-// comments, CDATA and command payloads cannot introduce a nested group.
-func (t *tokenizer) readBodyContent(name string, from int, decode bool, fields []string, label string, group *Grammar) (string, bool) {
-	return t.readContent(name, from, decode, bodyFieldRules{tags: fields, refuseOpenings: len(fields) != 0}, label, nil, group)
+// comments, CDATA, raw elements and command payloads cannot introduce a
+// nested group.
+func (t *tokenizer) readBodyContent(name string, from int, fields []string, label string, group *Grammar) (string, bool) {
+	body, _, ok := t.readContent(name, from, bodyFieldRules{tags: fields, refuseOpenings: len(fields) != 0}, label, nil, group)
+	return body, ok
 }
 
-func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyFieldRules, label string, wrapper *bodyWrapper, group *Grammar) (string, bool) {
+// readContent returns the decoded body and its as-written literal (Field.Literal).
+func (t *tokenizer) readContent(name string, from int, fields bodyFieldRules, label string, wrapper *bodyWrapper, group *Grammar) (string, string, bool) {
 	bodyStart, lineStart := t.i, t.i
 	literalUntil, literalLimit := t.i, len(t.s)
 	var wrapperTail literalWrapperTail
@@ -788,7 +834,7 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 	for {
 		if t.i >= len(t.s) {
 			t.fail(from, "<%s> has no closing %s", name, closing)
-			return "", false
+			return "", "", false
 		}
 		if t.literalCode && t.i >= literalUntil {
 			literalUntil = t.codeLiteralEnd(t.i, bodyStart, lineStart, closing, &literalLimit)
@@ -798,13 +844,13 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 					if wrapper.label != "" {
 						owner = wrapper.label
 					}
-					t.problem(t.i, "%s: code span/fence starting at line %d ends inside <%s> of <%s>; use <![CDATA[...]]> for a literal wrapper example", owner, t.lineAt(t.i), field, wrapper.tag)
+					t.problem(t.i, "%s: code span/fence starting at line %d ends inside <%s> of <%s>; wrap a literal wrapper example in %s...%s", owner, t.lineAt(t.i), field, wrapper.tag, t.raw.open, t.raw.close)
 					if structural {
 						literalUntil = t.i // keep a readable wrapper and its operands structural
 					}
 				}
 			}
-			if literalUntil > t.i && !strings.Contains(t.s[t.i:literalUntil], "<![CDATA[") {
+			if literalUntil > t.i && !strings.Contains(t.s[t.i:literalUntil], "<![CDATA[") && (t.raw.open == "" || !strings.Contains(t.s[t.i:literalUntil], t.raw.open)) {
 				text.WriteString(t.s[t.i:literalUntil])
 				advance(literalUntil)
 				continue
@@ -820,29 +866,40 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 		}
 		rest := t.s[t.i:]
 		switch {
-		// CDATA always unwraps, including inside code. Keep its segment raw
-		// for DecodeBody callers and retain source offsets for retry trees.
+		// CDATA and raw elements always unwrap, including inside code. Their
+		// segments stay undecoded; source offsets are retained for retry trees.
 		case strings.HasPrefix(rest, "<![CDATA["):
 			end := strings.Index(rest[9:], "]]>")
 			if end < 0 {
 				t.fail(t.i, "<%s>: a CDATA section has no closing ]]>", name)
-				return "", false
+				return "", "", false
 			}
 			flush()
 			segs = append(segs, bodySegment{text: rest[9 : 9+end], cdata: true})
 			advance(t.i + 9 + end + 3)
+		case t.raw.open != "" && strings.HasPrefix(rest, t.raw.open):
+			open := len(t.raw.open)
+			end := strings.Index(rest[open:], t.raw.close)
+			if end < 0 {
+				t.fail(t.i, "<%s>: a %s element has no closing %s", name, t.raw.open, t.raw.close)
+				return "", "", false
+			}
+			flush()
+			segs = append(segs, bodySegment{text: rest[open : open+end], raw: true})
+			advance(t.i + open + end + len(t.raw.close))
 		case t.i < literalUntil:
 			text.WriteByte('<')
 			t.i++
 		case strings.HasPrefix(rest, closing):
 			t.i += len(closing)
 			flush()
-			return joinBody(segs, decode), true
+			decoded, literal := joinBody(segs)
+			return decoded, literal, true
 		case wrapper != nil && openingTagPrefix(rest, wrapper.tag):
 			start := t.i
 			tag, ok := t.readOpen()
 			if !ok {
-				return "", false
+				return "", "", false
 			}
 			child := Command{Pos: wrapper.parent.Pos, Line: t.lineAt(tag.at), Tag: tag.name, Scope: wrapper.parent.Scope}
 			childLabel := child.Label()
@@ -850,8 +907,8 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 				childLabel = wrapper.label + " <" + tag.name + ">"
 			}
 			checkAttrs(t.p, childLabel, tag.attrs, nil)
-			if !tag.selfClosing && !t.readFields(&child, wrapper.fields, nil, wrapper.refuseOpenings, childLabel) {
-				return "", false
+			if !tag.selfClosing && !t.readFields(&child, wrapper.fields, wrapper.refuseOpenings, childLabel) {
+				return "", "", false
 			}
 			*wrapper.children = append(*wrapper.children, child)
 			end := t.i
@@ -865,7 +922,7 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 					close := strings.Index(rest[4:], "-->")
 					if close < 0 {
 						t.fail(t.i, "<%s>: a comment has no closing -->", name)
-						return "", false
+						return "", "", false
 					}
 					end = 4 + close + 3
 				} else {
@@ -875,7 +932,7 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 					tagName = rest[1:end]
 					if group.isGroup(tagName) {
 						t.fail(t.i, "<%s> inside %s; groups do not nest", name, label)
-						return "", false
+						return "", "", false
 					}
 					if end > 1 {
 						var quote byte
@@ -892,7 +949,7 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 								quote = c
 							} else if c == '<' {
 								t.fail(t.i+end, "<%s>: uncertain tag boundary in rejected group body", name)
-								return "", false
+								return "", "", false
 							} else if c == '>' {
 								end++
 								break
@@ -910,19 +967,19 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 					if known && spec.Kind == Container {
 						// Preserve raw field boundaries while attributing diagnostics
 						// to the rejected group, not a synthetic command position.
-						if !t.readFields(&cmd, group.fieldTags(spec), nil, false, skippedLabel) {
-							return "", false
+						if !t.readFields(&cmd, group.fieldTags(spec), false, skippedLabel) {
+							return "", "", false
 						}
 					} else if known && spec.Wrapper != "" {
 						// Wrapped operands have the same boundary authority while
 						// skipping a rejected group as in an accepted command.
 						wrapped := &bodyWrapper{label: skippedLabel, tag: group.Prefix + spec.Wrapper, fields: group.fieldTags(spec), children: &cmd.Children, parent: cmd}
-						if _, ok := t.readContent(tagName, start-end, false, bodyFieldRules{}, skippedLabel, wrapped, nil); !ok {
-							return "", false
+						if _, _, ok := t.readContent(tagName, start-end, bodyFieldRules{}, skippedLabel, wrapped, nil); !ok {
+							return "", "", false
 						}
-					} else if _, ok := t.readBody(tagName, start-end, false, nil, ""); !ok {
-						// Leaves and unknown commands have raw, CDATA-aware bodies.
-						return "", false
+					} else if _, ok := t.readBody(tagName, start-end, nil, ""); !ok {
+						// Leaves and unknown commands have CDATA- and raw-aware bodies.
+						return "", "", false
 					}
 					text.WriteString(t.s[start:t.i])
 					end := t.i
@@ -951,29 +1008,44 @@ func openingTagPrefix(s, tag string) bool {
 }
 
 // joinBody strips the body's one newline at each end before decoding, so a
-// decoded &#10; is never mistaken for the newline after the opening tag.
-func joinBody(segs []bodySegment, decode bool) string {
+// decoded &#10; is never mistaken for the newline after the opening tag. A
+// raw segment at either edge keeps its own newlines. It returns the decoded
+// body and the same body with no entity decoded; the two are one string
+// when decoding changed nothing.
+func joinBody(segs []bodySegment) (string, string) {
 	for i := range segs {
-		if segs[i].text != "" {
-			segs[i].text = stripLeadingNewline(segs[i].text)
+		if segs[i].text != "" || segs[i].raw {
+			if !segs[i].raw {
+				segs[i].text = stripLeadingNewline(segs[i].text)
+			}
 			break
 		}
 	}
 	for i := len(segs) - 1; i >= 0; i-- {
-		if segs[i].text != "" {
-			segs[i].text = stripTrailingNewline(segs[i].text)
+		if segs[i].text != "" || segs[i].raw {
+			if !segs[i].raw {
+				segs[i].text = stripTrailingNewline(segs[i].text)
+			}
 			break
 		}
 	}
-	var b strings.Builder
+	var b, literal strings.Builder
+	changed := false
 	for _, seg := range segs {
-		if decode && !seg.cdata {
-			b.WriteString(Decode(seg.text))
+		literal.WriteString(seg.text)
+		if !seg.cdata && !seg.raw {
+			decoded := Decode(seg.text)
+			changed = changed || decoded != seg.text
+			b.WriteString(decoded)
 		} else {
 			b.WriteString(seg.text)
 		}
 	}
-	return b.String()
+	if !changed {
+		body := b.String()
+		return body, body
+	}
+	return b.String(), literal.String()
 }
 
 func stripLeadingNewline(s string) string {
@@ -1070,10 +1142,11 @@ func (t *tokenizer) skipUnknown(tag openTag) {
 	if tag.selfClosing {
 		return
 	}
-	if t.ordered {
-		// Even rejected commands/fields retain raw-body CDATA boundaries.
+	if t.ordered && tag.name != t.raw.tag {
+		// Even rejected commands/fields retain CDATA and raw boundaries.
 		// Otherwise a quoted closing tag could expose payload as commands.
-		t.readBody(tag.name, tag.at, false, nil, "")
+		// A refused raw element ends at its first close, like raw content.
+		t.readBody(tag.name, tag.at, nil, "")
 		return
 	}
 	closing := "</" + tag.name + ">"
@@ -1150,9 +1223,9 @@ func checkAttrs(p *Problems, label string, attrs []Attr, known []string, hidden 
 }
 
 // readFields reads a container command's field tags (fields, full tags) up
-// to its closing tag, decoding the bodies of the tags in decode. label names
-// the command or the rejected group that owns skipped field diagnostics.
-func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]bool, refuseOpenings bool, label string) bool {
+// to its closing tag. label names the command or the rejected group that
+// owns skipped field diagnostics.
+func (t *tokenizer) readFields(cmd *Command, fields []string, refuseOpenings bool, label string) bool {
 	closing := "</" + cmd.Tag + ">"
 	for {
 		t.skipSpace()
@@ -1197,11 +1270,11 @@ func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]
 		checkAttrs(t.p, fmt.Sprintf("%s field <%s>", label, tag.name), tag.attrs, nil)
 		f := Field{Tag: tag.name, Line: line}
 		if !tag.selfClosing {
-			body, ok := t.readContent(tag.name, tag.at, decode[tag.name], bodyFieldRules{tags: fields, refuseOpenings: refuseOpenings}, label, nil, nil)
+			body, literal, ok := t.readContent(tag.name, tag.at, bodyFieldRules{tags: fields, refuseOpenings: refuseOpenings}, label, nil, nil)
 			if !ok {
 				return false
 			}
-			f.Body = body
+			f.Body, f.Literal = body, literal
 		}
 		cmd.Fields = append(cmd.Fields, f)
 	}

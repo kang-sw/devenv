@@ -83,6 +83,9 @@ var messageBodyLimit = inboxBodyLimit + webBodyAllowance + wsinbox.MaxImages*bas
 
 // messageRequest is the message route's body. Unknown fields are ignored.
 type messageRequest struct {
+	// nil preserves older pages' send behavior; an empty string names a
+	// board that has never been loaded.
+	BoardIncarnation *string             `json:"boardIncarnation"`
 	UTCOffsetMinutes *int                `json:"utcOffsetMinutes,omitempty"`
 	Text             string              `json:"text"`
 	Chips            []wsinbox.Chip      `json:"chips"`
@@ -147,7 +150,8 @@ func sessionInbox(dir, replyID string) string {
 
 // cancelRequest is the cancel and steer routes' body: the held message's id.
 type cancelRequest struct {
-	ID string `json:"id"`
+	ID               string  `json:"id"`
+	BoardIncarnation *string `json:"boardIncarnation"`
 }
 
 // sameOrigin reports whether r carries an Origin equal to the daemon's own
@@ -274,13 +278,38 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 		}
 	} else {
 		d.inboxMu.Lock()
-		status, answer = d.inboxWrite(dir, route, raw, now)
+		status, answer = d.inboxWrite(dir, replyID, route, raw, now)
 		d.inboxMu.Unlock()
 	}
 	if route == "message" && status == http.StatusOK {
 		d.scheduleAnswerReplay(s.Registration)
 	}
 	d.inboxAnswered(w, s, status, answer)
+}
+
+var errBoardReplaced = errors.New("board-replaced")
+
+func (d *Daemon) lockBoardIncarnation(replyID string, token *string) (func(), bool) {
+	if token == nil {
+		return func() {}, true // legacy page, unchanged admission
+	}
+	if d.index == nil {
+		return nil, false
+	}
+	session, found := d.index.Session(replyID)
+	if !found {
+		return nil, false
+	}
+	if session.Agent {
+		return func() {}, true
+	}
+	// HasBoard is presentation state and may lag a rendered/replaced board.
+	// Tagged board-bearing input must consult the live incarnation gate.
+	source, supported := d.source.(BoardInputSource)
+	if !supported {
+		return nil, false
+	}
+	return source.LockBoardIncarnation(session.Registration, *token)
 }
 
 // DashboardAnswerSource records a durable board revision after a successful
@@ -421,6 +450,13 @@ func (d *Daemon) messageWrite(dir, replyID string, raw []byte, local bool, now t
 	}
 	d.inboxMu.Lock()
 	defer d.inboxMu.Unlock()
+	if req.BoardIncarnation != nil && (len(req.Chips)+len(req.Topics)+len(req.Mentions)+len(req.CloseRequests) != 0) {
+		unlock, admitted := d.lockBoardIncarnation(replyID, req.BoardIncarnation)
+		if !admitted {
+			return http.StatusConflict, "board-replaced"
+		}
+		defer unlock() // send and steer both use inbox -> incarnation order
+	}
 	status, answer := d.sendMessage(dir, req, images, now)
 	if status == http.StatusOK && hasBoardAnswer(req) {
 		if d.answerPending == nil {
@@ -634,7 +670,7 @@ func heldAnswer(dir string, entry wsinbox.Entry) map[string]any {
 // inbox at dir; d.inboxMu is held, so the daemon's own sends, cancels,
 // steers, and interrupts never race each other or the attachment sweep, and
 // the inbox's claims settle a race with the adapter's drain.
-func (d *Daemon) inboxWrite(dir, route string, raw []byte, now time.Time) (int, any) {
+func (d *Daemon) inboxWrite(dir, replyID, route string, raw []byte, now time.Time) (int, any) {
 	switch route {
 	case "cancel":
 		var req cancelRequest
@@ -663,7 +699,28 @@ func (d *Daemon) inboxWrite(dir, route string, raw []byte, now time.Time) (int, 
 		if !ok {
 			return http.StatusBadRequest, "malformed message id"
 		}
-		steered, err := wsinbox.Steer(dir, name)
+		var unlock func()
+		defer func() {
+			if unlock != nil {
+				unlock()
+			}
+		}()
+		steered, err := wsinbox.SteerWithAdmission(dir, name, func(entry wsinbox.Entry) error {
+			if req.BoardIncarnation == nil || len(entry.Chips)+len(entry.Topics)+len(entry.Mentions)+len(entry.CloseRequests) == 0 {
+				return nil
+			}
+			// Match send's inbox -> incarnation order and retain both locks
+			// through publication. Reuse Steer's existing entry read.
+			var admitted bool
+			unlock, admitted = d.lockBoardIncarnation(replyID, req.BoardIncarnation)
+			if !admitted {
+				return errBoardReplaced
+			}
+			return nil
+		})
+		if errors.Is(err, errBoardReplaced) {
+			return http.StatusConflict, "board-replaced"
+		}
 		if errors.Is(err, wsinbox.ErrGone) {
 			return http.StatusConflict, "the session already received this message"
 		}

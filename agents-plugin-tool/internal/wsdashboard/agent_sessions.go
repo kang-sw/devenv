@@ -145,6 +145,13 @@ func (s agentSessions) ReadContacts(reg Registration) ([]Contact, bool) {
 	return nil, false
 }
 
+func (s agentSessions) LockBoardIncarnation(reg Registration, token string) (func(), bool) {
+	if source, ok := s.inner.(BoardInputSource); ok && !reg.Agent {
+		return source.LockBoardIncarnation(reg, token)
+	}
+	return nil, false
+}
+
 // RecordDashboardAnswer forwards board-answer arrivals for lead sessions.
 func (s agentSessions) RecordDashboardAnswer(reg Registration, id string, now time.Time) error {
 	if reg.Agent {
@@ -233,6 +240,15 @@ func (s agentSessions) ReadClosedTopics(reg Registration, lang string, from, n i
 		return cs.ReadClosedTopics(reg, lang, from, n)
 	}
 	return "", false
+}
+
+// BoardArchive forwards to the configured source; an agent conversation has
+// no board.
+func (s agentSessions) BoardArchive(reg Registration) ([]byte, bool, error) {
+	if bs, ok := s.inner.(BoardArchiveSource); ok && !reg.Agent {
+		return bs.BoardArchive(reg)
+	}
+	return nil, false, nil
 }
 
 // ReadTopicHistory forwards to the configured source; an agent conversation

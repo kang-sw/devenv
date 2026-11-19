@@ -198,25 +198,34 @@ func (s *State) OpenAskIDs() string {
 }
 
 // ReaskTimes maps each re-asked item's ID to its latest re-ask time in epoch
-// milliseconds; an item never re-asked, or with an unreadable time, is
-// absent. A nil state has none.
+// milliseconds, floored by the board's load time (LoadedAt) for every item of
+// a loaded board; an item never re-asked on a board never loaded, or with an
+// unreadable time, is absent. A nil state has none.
 func (s *State) ReaskTimes() map[int]int64 {
 	if s == nil {
 		return nil
 	}
+	parse := func(text string) (int64, bool) {
+		if text == "" {
+			return 0, false
+		}
+		at, err := time.Parse(time.RFC3339Nano, text)
+		return at.UnixMilli(), err == nil
+	}
+	loaded, isLoaded := parse(s.LoadedAt)
 	var out map[int]int64
 	for _, item := range s.Items {
-		if item.ReaskedAt == "" {
-			continue
+		at, ok := parse(item.ReaskedAt)
+		if isLoaded && (!ok || at < loaded) {
+			at, ok = loaded, true
 		}
-		at, err := time.Parse(time.RFC3339Nano, item.ReaskedAt)
-		if err != nil {
+		if !ok {
 			continue
 		}
 		if out == nil {
 			out = map[int]int64{}
 		}
-		out[item.ID] = at.UnixMilli()
+		out[item.ID] = at
 	}
 	return out
 }
@@ -322,6 +331,11 @@ type State struct {
 	MetadataRevision uint64 `json:"metadata_revision,omitempty"`
 	// StaleNudgeRevision is a receipt, not authored topic history.
 	StaleNudgeRevision string `json:"stale_nudge_revision,omitempty"`
+	// LoadedAt is when whiteboard.load installed this board (reaskLayout);
+	// empty when it never was. It is the board's incarnation boundary: a
+	// dashboard answer sent before it answered the replaced board, whose item
+	// IDs the loaded board reuses, so ReaskTimes floors every item by it.
+	LoadedAt string `json:"loaded_at,omitempty"`
 }
 
 // Env carries the side effects Apply needs, so the store stays testable.
@@ -331,6 +345,11 @@ type Env struct {
 	IsDir func(path string) bool
 	// IsAbs reports whether path is absolute on the server's platform.
 	IsAbs func(path string) bool
+	// StatusAuthor, when non-empty, makes the call a sub-lead's status-only
+	// write (status.go): only wb:log and new wb:panel commands inside an
+	// existing open topic are accepted, and each log line and panel recap
+	// is stored behind the attribution prefix naming StatusAuthor.
+	StatusAuthor string
 }
 
 // Outcome reports accepted work and rejected payloads from an update.
@@ -723,6 +742,9 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 		topics := commandTopics(work, cmd, topicOf)
 		id, withdrawn := 0, []int(nil)
 		key := ""
+		if len(cp.List) == 0 && env.StatusAuthor != "" {
+			statusProblems(cp, work, cmd, topicOf)
+		}
 		if len(cp.List) == 0 && cmd.Tag == "wb:close" {
 			for _, topic := range topics {
 				if failedTopics[topic] {
@@ -749,9 +771,9 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 			case "wb:edit":
 				applyEdit(p, work, origins, cmd, topicOf, mark, env.Now)
 			case "wb:panel":
-				applyPanel(p, work, origins, cmd, topicOf, mark, env.Now)
+				applyPanel(p, work, origins, statusCommand(cmd, env), topicOf, mark, env.Now)
 			case "wb:log":
-				applyLog(p, work, cmd, topicOf, env.Now)
+				applyLog(p, work, statusCommand(cmd, env), topicOf, env.Now)
 			case "wb:state":
 				applyTopicState(p, work, cmd, topicOf, env.Now)
 			case "wb:eta":
@@ -1304,6 +1326,10 @@ func applyEdit(p *problems, work *State, base bodyOrigins, cmd command, topicOf 
 		return
 	}
 	body := work.Topics[i].Body
+	if cmd.LiteralAmbiguous("wb:old", body) {
+		p.Add("%s: <wb:old> is ambiguous: its entities decode, and its text as written also occurs in topic %q's body; wrap the operand in <wb:raw>...</wb:raw> to match that literal text, or write the decoded characters directly", cmd.Label(), name)
+		return
+	}
 	switch n := strings.Count(body, old); {
 	case n == 0:
 		p.Add("%s: <wb:old> matches nothing in topic %q's body", cmd.Label(), name)

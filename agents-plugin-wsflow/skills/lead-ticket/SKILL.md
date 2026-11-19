@@ -1,6 +1,6 @@
 ---
 name: lead-ticket
-description: Create, edit, promote, drop, or close a workflow ticket. Owns the Open Decision Queue, cheap-tier fact population, and the design-review gate into `ready/`.
+description: Create, edit, promote, drop, or close a workflow ticket. Owns the Open Decision Queue and delegates promotion, epic review, and revision to a ticket handler.
 ---
 
 <ws-preload playbook="lead-ticket">

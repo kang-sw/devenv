@@ -75,6 +75,15 @@ func canonicalCommands(cmds []command) []map[string]any {
 		_ = json.Unmarshal(raw, &m)
 		delete(m, "Source")
 		delete(m, "Problems")
+		// Literal is newer than the v0.50 parser the differential compares
+		// against; it differs from Body only when an entity decoded.
+		if fields, ok := m["Fields"].([]any); ok {
+			for _, f := range fields {
+				if field, ok := f.(map[string]any); ok {
+					delete(field, "Literal")
+				}
+			}
+		}
 		if scope, ok := m["Scope"].(map[string]any); ok {
 			delete(scope, "Source")
 			delete(scope, "Problems")

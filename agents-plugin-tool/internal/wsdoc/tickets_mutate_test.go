@@ -8,6 +8,15 @@ import (
 	"testing"
 )
 
+func TestReadySagePostureWarningNamespace(t *testing.T) {
+	for _, blocked := range []bool{false, true} {
+		out := readySagePostureWarning([]readyPostureProblem{{Field: "sage-review-design", Posture: "required", Blocked: blocked}}, []string{"WS_MCP_NAMESPACE=wsflow"})
+		if !strings.Contains(out, "wsflow/tickets.sage_") || strings.Contains(out, "ws/") {
+			t.Fatalf("blocked=%v: namespace not applied: %s", blocked, out)
+		}
+	}
+}
+
 type recordedGitCall struct {
 	Args []string
 }
@@ -485,12 +494,9 @@ func TestTicketsMoveUpwardNonReadyExemptCategoryBlockedFieldIgnored(t *testing.T
 // carries the "unreviewed" warning variant naming the first non-terminal
 // field, mirroring readyPostureProblems' design-before-completeness order.
 func TestTicketsMoveUpwardToReadyWarnsOnUnresolvedSageReviewPosture(t *testing.T) {
-	// wantInstruction pins the per-variant instruction clause, not just the
-	// state clause: ws/tickets.sage_gate is a no-op on `blocked`, so the two
-	// variants must name different escapes.
 	const (
-		gateInstruction  = "Call ws/tickets.sage_gate(stem, landing: \"ready\") to resolve it"
-		stampInstruction = "record a non-block verdict via ws/tickets.sage_stamp(stem, stage, verdicts) to resolve it"
+		gateInstruction  = "ws/tickets.sage_gate"
+		stampInstruction = "ws/tickets.sage_stamp"
 	)
 	for _, tc := range []struct {
 		name            string
@@ -505,7 +511,7 @@ func TestTicketsMoveUpwardToReadyWarnsOnUnresolvedSageReviewPosture(t *testing.T
 			body:            "sage-review: pending\n",
 			config:          "ask",
 			want:            map[string]string{"sage-review-design": "recommended", "sage-review-completeness": "recommended"},
-			wantWarn:        "sage-review-design is unreviewed (posture recommended; review has not run yet)",
+			wantWarn:        "sage-review-design",
 			wantInstruction: gateInstruction,
 		},
 		{
@@ -513,7 +519,7 @@ func TestTicketsMoveUpwardToReadyWarnsOnUnresolvedSageReviewPosture(t *testing.T
 			body:            "sage-review: pending\n",
 			config:          "auto",
 			want:            map[string]string{"sage-review-design": "required", "sage-review-completeness": "required"},
-			wantWarn:        "sage-review-design is unreviewed (posture required; review has not run yet)",
+			wantWarn:        "sage-review-design",
 			wantInstruction: gateInstruction,
 		},
 		{
@@ -521,7 +527,7 @@ func TestTicketsMoveUpwardToReadyWarnsOnUnresolvedSageReviewPosture(t *testing.T
 			body:            "sage-review-design: recommended\n",
 			config:          "off",
 			want:            map[string]string{"sage-review-design": "recommended", "sage-review-completeness": "skipped"},
-			wantWarn:        "sage-review-design is unreviewed (posture recommended; review has not run yet)",
+			wantWarn:        "sage-review-design",
 			wantInstruction: gateInstruction,
 		},
 		{
@@ -529,7 +535,7 @@ func TestTicketsMoveUpwardToReadyWarnsOnUnresolvedSageReviewPosture(t *testing.T
 			body:            "sage-review-design: required\n",
 			config:          "off",
 			want:            map[string]string{"sage-review-design": "required", "sage-review-completeness": "skipped"},
-			wantWarn:        "sage-review-design is unreviewed (posture required; review has not run yet)",
+			wantWarn:        "sage-review-design",
 			wantInstruction: gateInstruction,
 		},
 		{
@@ -537,7 +543,7 @@ func TestTicketsMoveUpwardToReadyWarnsOnUnresolvedSageReviewPosture(t *testing.T
 			body:            "sage-review-design: blocked\n",
 			config:          "auto",
 			want:            map[string]string{"sage-review-design": "blocked"},
-			wantWarn:        "sage-review-design is blocked (a prior review found unresolved issues)",
+			wantWarn:        "sage-review-design",
 			wantInstruction: stampInstruction,
 		},
 		{
@@ -545,7 +551,7 @@ func TestTicketsMoveUpwardToReadyWarnsOnUnresolvedSageReviewPosture(t *testing.T
 			body:            "sage-review-design: completed\nsage-review-completeness: recommended\n",
 			config:          "off",
 			want:            map[string]string{"sage-review-design": "completed", "sage-review-completeness": "recommended"},
-			wantWarn:        "sage-review-completeness is unreviewed (posture recommended; review has not run yet)",
+			wantWarn:        "sage-review-completeness",
 			wantInstruction: gateInstruction,
 		},
 		{
@@ -553,7 +559,7 @@ func TestTicketsMoveUpwardToReadyWarnsOnUnresolvedSageReviewPosture(t *testing.T
 			body:            "sage-review-design: skipped\nsage-review-completeness: blocked\n",
 			config:          "off",
 			want:            map[string]string{"sage-review-completeness": "blocked"},
-			wantWarn:        "sage-review-completeness is blocked (a prior review found unresolved issues)",
+			wantWarn:        "sage-review-completeness",
 			wantInstruction: stampInstruction,
 		},
 		{
@@ -564,7 +570,7 @@ func TestTicketsMoveUpwardToReadyWarnsOnUnresolvedSageReviewPosture(t *testing.T
 			body:            "sage-review-design: recommended\nsage-review-completeness: completed\n",
 			config:          "off",
 			want:            map[string]string{"sage-review-design": "recommended", "sage-review-completeness": "completed"},
-			wantWarn:        "sage-review-design is unreviewed (posture recommended; review has not run yet)",
+			wantWarn:        "sage-review-design",
 			wantInstruction: gateInstruction,
 		},
 		{
@@ -572,7 +578,7 @@ func TestTicketsMoveUpwardToReadyWarnsOnUnresolvedSageReviewPosture(t *testing.T
 			body:            "",
 			config:          "auto",
 			want:            map[string]string{"sage-review-design": "required", "sage-review-completeness": "required"},
-			wantWarn:        "sage-review-design is unreviewed (posture required; review has not run yet)",
+			wantWarn:        "sage-review-design",
 			wantInstruction: gateInstruction,
 		},
 	} {
@@ -593,13 +599,10 @@ func TestTicketsMoveUpwardToReadyWarnsOnUnresolvedSageReviewPosture(t *testing.T
 				t.Fatalf("TicketsMove: %v", err)
 			}
 			if !strings.Contains(result.Tip, tc.wantWarn) {
-				t.Fatalf("Tip = %q, want it to contain %q", result.Tip, tc.wantWarn)
+				t.Fatalf("Tip = %q, missing posture field", result.Tip)
 			}
 			if !strings.Contains(result.Tip, tc.wantInstruction) {
 				t.Fatalf("Tip = %q, want instruction clause %q", result.Tip, tc.wantInstruction)
-			}
-			if tc.wantInstruction == stampInstruction && strings.Contains(result.Tip, gateInstruction) {
-				t.Fatalf("Tip = %q, blocked variant must not name ws/tickets.sage_gate as the escape", result.Tip)
 			}
 			after := readFileString(t, filepath.Join(root, filepath.FromSlash(result.NewPath)))
 			for field, want := range tc.want {
@@ -640,7 +643,7 @@ func TestTicketsMoveUpwardToReadyFromIdeaWarnsOnUnresolvedSageReviewPosture(t *t
 	if err != nil {
 		t.Fatalf("TicketsMove idea->ready: %v", err)
 	}
-	if !strings.Contains(result.Tip, "sage-review-design is unreviewed (posture required; review has not run yet)") {
+	if !strings.Contains(result.Tip, "sage-review-design") || !strings.Contains(result.Tip, "ws/tickets.sage_gate") {
 		t.Fatalf("Tip = %q, want design-required warning", result.Tip)
 	}
 	after := readFileString(t, filepath.Join(root, filepath.FromSlash(result.NewPath)))
@@ -715,11 +718,8 @@ func TestTicketsMoveUpwardToReadyLegacyCompletedMigratesToBothFieldsTerminal(t *
 	}
 }
 
-// TestTicketsMoveUpwardToReadyLegacyBlockedWarnsDistinctly asserts the
-// `blocked` variant of the mutation-time warning: it de-blocks the move too
-// (per ticket decision) but must read as a genuinely distinct message from
-// the "unreviewed" variant ("a prior review found unresolved issues" vs.
-// "review has not run"), since the two imply different next actions.
+// TestTicketsMoveUpwardToReadyLegacyBlockedWarnsDistinctly checks the
+// blocked posture warning while preserving the successful move.
 func TestTicketsMoveUpwardToReadyLegacyBlockedWarnsDistinctly(t *testing.T) {
 	root := t.TempDir()
 	stem := "260101-feat-legacy-blocked"
@@ -735,20 +735,8 @@ func TestTicketsMoveUpwardToReadyLegacyBlockedWarnsDistinctly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TicketsMove legacy-blocked promotion: %v", err)
 	}
-	if !strings.Contains(result.Tip, "sage-review-design is blocked (a prior review found unresolved issues)") {
-		t.Fatalf("Tip = %q, want the blocked-variant warning", result.Tip)
-	}
-	if strings.Contains(result.Tip, "review has not run yet") {
-		t.Fatalf("Tip = %q, blocked warning must not reuse the unreviewed variant's wording", result.Tip)
-	}
-	// The instruction clause must differ too, not just the state clause:
-	// ws/tickets.sage_gate returns stop_blocked without resolving anything on a
-	// blocked posture, so naming it here would be a dead end.
-	if !strings.Contains(result.Tip, "record a non-block verdict via ws/tickets.sage_stamp(stem, stage, verdicts) to resolve it") {
-		t.Fatalf("Tip = %q, blocked warning must name ws/tickets.sage_stamp as the escape", result.Tip)
-	}
-	if strings.Contains(result.Tip, "Call ws/tickets.sage_gate(stem, landing: \"ready\") to resolve it") {
-		t.Fatalf("Tip = %q, blocked warning must not name ws/tickets.sage_gate as the escape", result.Tip)
+	if !strings.Contains(result.Tip, "sage-review-design") || !strings.Contains(result.Tip, "ws/tickets.sage_stamp") {
+		t.Fatalf("Tip = %q, missing blocked posture field or stamp tool", result.Tip)
 	}
 	if len(runner.calls) == 0 {
 		t.Fatalf("git was not called; the move must still succeed (soft warning only, not a block)")

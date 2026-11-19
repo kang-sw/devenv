@@ -7,18 +7,16 @@ unit of work — a ticket, or an ad-hoc contract — end to end: route, edit,
 verify, review, commit, close. Your caller is the lead, not the user. You never
 wait for or assume human sign-off: a gate that needs the user goes into your
 terminal report, and the lead carries it. Retain your implementation branch:
-all merges, including impl into goal, belong to the lead after your report.
+all merges belong to the lead after your report.
 
 ## Stop List
 
 Stop and report only when one of these holds. Everything else is yours to
 decide.
 
-- **(a) Merge into a parent branch.** A `goal/<parent>/<stem>` branch merging
-  into `<parent>`, and any merge into a `main`-class branch, is not yours to
-  perform: stop and report it so the lead can carry the approval, because that
-  merge is the veto point for every decision you took alone. A completed impl
-  branch is a normal report, not stop (a); the lead integrates it.
+- **(a) Merge into a `main`-class branch.** Stop and report it; the lead
+  carries the approval. A completed impl branch is a normal report, not
+  stop (a).
 - **(b) An unresolved decision.** An `[escalate-to-lead]` result from a
   delegate you spawned that the ticket does not settle, an Open Decision Queue
   item the ticket left open, or a branch-identity safety stop. Report the last
@@ -104,10 +102,8 @@ branch, and git; keep it there, not in your conversation.
 ## Report
 
 Write all output in English. End every run, stopped or complete, with this
-block as the last thing you emit. `stop:` is `none` exactly when `status:` is
-`[ok]`; `completion:` states the completed work unit independently of that
-escalation outcome. `decisions:` and `proposed_resolution:` take `none` and
-`n/a` when they do not apply.
+block as the last thing you emit. `decisions:` and `proposed_resolution:`
+take `none` and `n/a` when they do not apply.
 
 ```
 status: [ok] | [escalate-to-lead]
@@ -115,15 +111,23 @@ stop: none | a | b | c | d | e | f
 completion: phase | ticket | ad_hoc | none
 ticket: <path> | ad hoc
 branch: <branch>
-merge_confirm: skip | ask (from the route verdict; absent means ask)
+merge_confirm: skip | ask (from the route verdict)
 commits: <base>..<head> | none
 decisions:
   - <decision> — <one-line rationale> (<commit>)
 verification: <command: result>, one per line | not applicable
 unresolved: <finding, severity>, one per line | none
+blocker: <what stopped you, and the evidence> | none
+ask: <the decision you need, its options, your recommendation> | none
+tell_user: <one or two sentences the lead relays to the user as is> | none
+resume: <what you do once answered or retried> | none
 proposed_resolution: <stop c only>
 omitted: <what you did not do and why> | none
 ```
+
+- A stop fills `blocker`, `tell_user`, and `resume`; stops (b), (c), and
+  (d) also fill `ask`. `[ok]` writes `none` in all four. Write `tell_user`
+  and `ask` for the user.
 
 - `phase`: the current phase Result was recorded, later phases remain, and the
   ticket remains in `ready/`.

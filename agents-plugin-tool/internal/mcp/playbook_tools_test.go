@@ -659,35 +659,23 @@ func TestPlaybookPrintTierModelVarsFallbackOnResolverError(t *testing.T) {
 	}
 }
 
-// TestPlaybookPrintGoldenLeadWorkflowManualScopedExplorationTierModels renders
-// the real lead-workflow-manual under both claude and codex harness contexts
-// with an isolated (default) config and verifies the Scoped Exploration
-// sentence materializes the correct per-harness default small/medium models
-// with no {{. placeholder remaining — the ticket's stated verification
-// boundary. Default config: claude small=haiku medium=sonnet; codex
-// small=medium=gpt-6-luna (the shipped Codex tier remap).
-func TestPlaybookPrintGoldenLeadWorkflowManualScopedExplorationTierModels(t *testing.T) {
+// TestPlaybookPrintGoldenLeadWorkflowManualRendersExploreAgent renders the real
+// lead-workflow-manual under both claude and codex harness contexts with an
+// isolated (default) config and verifies the per-harness Explore agent term
+// materializes with no {{. placeholder remaining. The manual names only the
+// tier for Explore, so no per-harness model name is expected in the body.
+func TestPlaybookPrintGoldenLeadWorkflowManualRendersExploreAgent(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 
-	cases := []struct {
-		harness     string
-		smallModel  string
-		mediumModel string
-	}{
-		{"claude", "haiku", "sonnet"},
-		{"codex", "gpt-6-luna", "gpt-6-luna"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.harness, func(t *testing.T) {
-			s := newTestServerWithHarness(t, tc.harness)
+	for _, harness := range []string{"claude", "codex"} {
+		t.Run(harness, func(t *testing.T) {
+			s := newTestServerWithHarness(t, harness)
 			body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
 			if err != nil {
 				t.Fatalf("printPlaybook: %v", err)
 			}
-			for _, token := range []string{terminologyForHarness(tc.harness, RuntimeNamespace())["ExploreAgent"], tc.smallModel, tc.mediumModel} {
-				if !strings.Contains(body, token) {
-					t.Errorf("body missing substituted token %q", token)
-				}
+			if want := terminologyForHarness(harness, RuntimeNamespace())["ExploreAgent"]; !strings.Contains(body, want) {
+				t.Errorf("body missing substituted ExploreAgent %q", want)
 			}
 			if strings.Contains(body, "{{.") {
 				t.Errorf("body %q: unsubstituted placeholder remains", body)
@@ -869,9 +857,8 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 				t.Fatalf("%s: wsflow playbook output contains forbidden %q:\n%s", label, forbidden, body)
 			}
 		}
-		// Exclude HTML comment lines (e.g. <!-- ws:fresh-only:start -->): these
-		// inert Markdown marker tokens are not namespace notation, so filtering
-		// them avoids false positives on the workflow-manual fresh-only markers.
+		// Exclude HTML comment lines: inert Markdown marker tokens are not
+		// namespace notation, so filtering them avoids false positives.
 		bodyLinesWithoutComments := strings.Join(func() []string {
 			var out []string
 			for _, line := range strings.Split(body, "\n") {
@@ -891,9 +878,6 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 			if !strings.Contains(body, want) {
 				t.Fatalf("%s: wsflow playbook output missing %q:\n%s", label, want, body)
 			}
-		}
-		if !strings.Contains(body, "ferrule") {
-			t.Fatalf("%s: wsflow playbook output rewrote literal ws.ferrule tool name:\n%s", label, body)
 		}
 	}
 

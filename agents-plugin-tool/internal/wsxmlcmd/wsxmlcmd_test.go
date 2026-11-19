@@ -59,6 +59,22 @@ func TestCallerPrefixAndTableDecideTheTags(t *testing.T) {
 	}
 }
 
+// A field keeps its as-written spelling beside the decoded body, so an
+// exact-match operand can detect that an entity may have meant itself.
+func TestFieldLiteralKeepsEntitiesAsWritten(t *testing.T) {
+	cmds, problems := parse(testGrammar, "<tr:set id=\"1\"><tr:name>\n&lt;b&gt; <tr:raw>&amp;</tr:raw> <![CDATA[&gt;]]>\n</tr:name><tr:tag>plain</tr:tag></tr:set>")
+	if len(problems) > 0 || len(cmds) != 1 {
+		t.Fatalf("commands = %+v, problems %q", cmds, problems)
+	}
+	name, tag := cmds[0].Fields[0], cmds[0].Fields[1]
+	if name.Body != "<b> &amp; &gt;" || name.Literal != "&lt;b&gt; &amp; &gt;" || tag.Body != "plain" || tag.Literal != "plain" {
+		t.Fatalf("fields = %+v", cmds[0].Fields)
+	}
+	if !cmds[0].LiteralAmbiguous("tr:name", "x <b> &lt;b&gt; &amp; &gt;") || cmds[0].LiteralAmbiguous("tr:name", "<b> &amp; &gt;") || cmds[0].LiteralAmbiguous("tr:tag", "plain") {
+		t.Fatal("LiteralAmbiguous misjudged")
+	}
+}
+
 func TestLiteralCodeAndWrappedFieldsAreGrammarOptIns(t *testing.T) {
 	input := "<tr:note>`</tr:note>` tail</tr:note>"
 	cmds, problems := parse(testGrammar, input)
@@ -95,7 +111,7 @@ func TestLiteralCodeAndWrappedFieldsAreGrammarOptIns(t *testing.T) {
 		t.Fatalf("wrapped fields: %+v, %q", cmds, problems)
 	}
 	children := cmds[0].Children
-	if children[0].FieldsOf("x:old")[0] != "`<x:new></x:old>`" || children[1].FieldsOf("x:old")[0] != "<x:new></x:old>" || children[1].FieldsOf("x:new")[0] != " &amp; " {
+	if children[0].FieldsOf("x:old")[0] != "`<x:new></x:old>`" || children[1].FieldsOf("x:old")[0] != "<x:new></x:old>" || children[1].FieldsOf("x:new")[0] != " & " {
 		t.Fatalf("operand bytes changed: %+v", children)
 	}
 	// Undeclared wrapper spellings and code/CDATA examples remain raw payload.
@@ -279,7 +295,7 @@ func TestLiteralCodeQuotedWrapperTailRawFields(t *testing.T) {
 				} else {
 					cmds = Parse(p, g, input)
 				}
-				if !complete || len(cmds) != 2 || cmds[1].Body != "keep" || !strings.Contains(strings.Join(p.List, " "), "use <![CDATA[...]]>") {
+				if !complete || len(cmds) != 2 || cmds[1].Body != "keep" || !strings.Contains(strings.Join(p.List, " "), "wrap a literal wrapper example in <x:raw>...</x:raw>") {
 					t.Fatalf("ordered=%v: commands=%+v complete=%v problems=%v", ordered, cmds, complete, p.List)
 				}
 				if ordered && (len(cmds[0].Problems) == 0 || len(cmds[1].Problems) != 0) {
@@ -318,15 +334,18 @@ func TestLiteralCodeDoesNotPairAcrossStructuralBodies(t *testing.T) {
 	if len(problems) != 0 || len(cmds) != 1 || len(cmds[0].Fields) != 2 || cmds[0].FieldsOf("x:old")[0] != "a `" || cmds[0].FieldsOf("x:new")[0] != "b `" {
 		t.Fatalf("cross-operand code pairing: %+v, %q", cmds, problems)
 	}
-	// Owner-b requires CDATA for examples containing their own raw close.
+	// Owner-b requires a raw element (or CDATA) for examples containing their
+	// own close.
 	body := "`<x:text>one</x:text><x:text>two</x:text>`"
 	cmds, problems = parse(g, "<x:text>"+body+"</x:text>")
-	if len(problems) == 0 || !strings.Contains(strings.Join(problems, " "), "CDATA") {
-		t.Fatalf("raw own-close example was not structural: %+v, %q", cmds, problems)
+	if len(problems) == 0 || !strings.Contains(strings.Join(problems, " "), "<x:raw>...</x:raw>") {
+		t.Fatalf("own-close example was not structural: %+v, %q", cmds, problems)
 	}
-	cmds, problems = parse(g, "<x:text><![CDATA["+body+"]]></x:text>")
-	if len(problems) != 0 || len(cmds) != 1 || cmds[0].Body != body {
-		t.Fatalf("CDATA example: %+v, %q", cmds, problems)
+	for _, wrapped := range []string{"<x:raw>" + body + "</x:raw>", "<![CDATA[" + body + "]]>"} {
+		cmds, problems = parse(g, "<x:text>"+wrapped+"</x:text>")
+		if len(problems) != 0 || len(cmds) != 1 || cmds[0].Body != body {
+			t.Fatalf("wrapped example %q: %+v, %q", wrapped, cmds, problems)
+		}
 	}
 }
 
@@ -526,19 +545,10 @@ func TestDecode(t *testing.T) {
 	}
 }
 
-// Attributes are always decoded; a body only where the grammar marks it,
-// and never inside CDATA.
-func TestGrammarDecidesWhichBodiesDecode(t *testing.T) {
-	g := Grammar{
-		Prefix: "tr:",
-		Commands: map[string]Spec{
-			"note": {Kind: Leaf, Attrs: []string{"id"}, DecodeBody: true},
-			"raw":  {Kind: Leaf, Attrs: []string{"id"}},
-			"set":  {Kind: Container, Fields: []string{"name", "tag"}, DecodeFields: []string{"name"}},
-		},
-	}
-	cmds, problems := parse(g, `<tr:note id="&lt;1&gt;">a &lt;b&gt; <![CDATA[&lt;c&gt;]]> &amp;d</tr:note>`+
-		`<tr:raw id="x &amp; y">a &lt;b&gt;</tr:raw>`+
+// Attributes and every body decode the same way; CDATA and raw segments
+// do not.
+func TestEveryBodyDecodes(t *testing.T) {
+	cmds, problems := parse(testGrammar, `<tr:note id="&lt;1&gt;">a &lt;b&gt; <![CDATA[&lt;c&gt;]]> &amp;d</tr:note>`+
 		`<tr:set><tr:name>&lt;n&gt;</tr:name><tr:tag>&lt;t&gt;</tr:tag></tr:set>`+
 		"<tr:note>\n&#10;x&#10;\n</tr:note>")
 	if len(problems) > 0 {
@@ -547,16 +557,91 @@ func TestGrammarDecidesWhichBodiesDecode(t *testing.T) {
 	if id, _ := cmds[0].Attr("id"); id != "<1>" || cmds[0].Body != "a <b> &lt;c&gt; &d" {
 		t.Errorf("decoded leaf = %+v", cmds[0])
 	}
-	if id, _ := cmds[1].Attr("id"); id != "x & y" || cmds[1].Body != "a &lt;b&gt;" {
-		t.Errorf("verbatim leaf = %+v", cmds[1])
-	}
-	if name, tag := cmds[2].FieldsOf("tr:name"), cmds[2].FieldsOf("tr:tag"); name[0] != "<n>" || tag[0] != "&lt;t&gt;" {
-		t.Errorf("fields = %+v", cmds[2].Fields)
+	if name, tag := cmds[1].FieldsOf("tr:name"), cmds[1].FieldsOf("tr:tag"); name[0] != "<n>" || tag[0] != "<t>" {
+		t.Errorf("fields = %+v", cmds[1].Fields)
 	}
 	// The body's own newlines are stripped before decoding, so a decoded
 	// newline at either end stays.
-	if cmds[3].Body != "\nx\n" {
-		t.Errorf("decoded newlines = %q", cmds[3].Body)
+	if cmds[2].Body != "\nx\n" {
+		t.Errorf("decoded newlines = %q", cmds[2].Body)
+	}
+	// Older input stays accepted: a bare < or & that starts nothing is text.
+	cmds, problems = parse(testGrammar, `<tr:note>a <b>bold</b> & c &nope; <![CDATA[<i>]]></tr:note>`)
+	if len(problems) > 0 || cmds[0].Body != "a <b>bold</b> & c &nope; <i>" {
+		t.Fatalf("old-style body = %+v, %q", cmds, problems)
+	}
+}
+
+// A raw element is a text segment taken exactly as written up to its first
+// close, anywhere text may go, mixed with decoded text.
+func TestRawElementIsVerbatimTextSegment(t *testing.T) {
+	for name, tc := range map[string]struct{ in, want string }{
+		"html":      {`<tr:raw><div><b>a < b</b></div></tr:raw>`, `<div><b>a < b</b></div>`},
+		"markers":   {`<tr:raw><![CDATA[x]]> ]]> </tr:note> &lt; <tr:note></tr:raw>`, `<![CDATA[x]]> ]]> </tr:note> &lt; <tr:note>`},
+		"mixed":     {`a &lt; b <tr:raw><i>c</i></tr:raw> d <tr:raw>&amp;</tr:raw>`, `a < b <i>c</i> d &amp;`},
+		"in-cdata":  {`<![CDATA[<tr:raw>]]>&lt;<tr:raw>&lt;</tr:raw>`, `<tr:raw><&lt;`},
+		"edges":     {"\n<tr:raw>\nx\n</tr:raw>\n", "\nx\n"},
+		"edge-text": {"\nx<tr:raw>y</tr:raw>\n", "xy"},
+		"not-raw":   {`<tr:raw a="1">x</tr:raw> <tr:raw/> < tr:raw>`, `<tr:raw a="1">x</tr:raw> <tr:raw/> < tr:raw>`},
+		"escaped":   {`&lt;/tr:raw>`, `</tr:raw>`},
+	} {
+		cmds, problems := parse(testGrammar, "<tr:note>"+tc.in+"</tr:note>")
+		if len(problems) > 0 || len(cmds) != 1 || cmds[0].Body != tc.want {
+			t.Errorf("%s: %+v, %q; want body %q", name, cmds, problems, tc.want)
+		}
+	}
+	cmds, problems := parse(testGrammar, `<tr:set><tr:name><tr:raw></tr:name></tr:raw></tr:name><tr:tag>t</tr:tag></tr:set>`)
+	if len(problems) > 0 || cmds[0].FieldsOf("tr:name")[0] != "</tr:name>" || cmds[0].FieldsOf("tr:tag")[0] != "t" {
+		t.Fatalf("raw field: %+v, %q", cmds, problems)
+	}
+
+	// Unclosed: refused like an unclosed CDATA section, at its position.
+	_, problems = parse(testGrammar, "<tr:note>\nx <tr:raw>never closed</tr:note>")
+	if !slices.Equal(problems, []string{"line 2: <tr:note>: a <tr:raw> element has no closing </tr:raw>"}) {
+		t.Fatalf("unclosed raw = %q", problems)
+	}
+
+	// Where a command or field is expected, a raw element is unknown; a
+	// refused one ends at its first close in both readers.
+	for _, ordered := range []bool{false, true} {
+		p := &Problems{}
+		input := `<tr:raw><tr:raw></tr:raw><tr:set><tr:raw>x</tr:raw></tr:set><tr:drop id="1"/>`
+		var cmds []Command
+		if ordered {
+			cmds, _ = ParseOrdered(p, testGrammar, input)
+		} else {
+			cmds = Parse(p, testGrammar, input)
+		}
+		want := []string{
+			"command 1 <tr:raw> (line 1): unknown command (commands: tr:drop, tr:note, tr:set)",
+			"command 2 <tr:set> (line 1): unknown field <tr:raw> (fields: tr:name, tr:tag)",
+		}
+		if !slices.Equal(p.List, want) || cmds[len(cmds)-1].Tag != "tr:drop" {
+			t.Errorf("ordered=%v refused raw: %+v, %q", ordered, cmds, p.List)
+		}
+	}
+}
+
+// Inside code, a raw element opens exactly where CDATA does, and hides a
+// body close from the literal candidate like CDATA.
+func TestRawElementInsideLiteralCode(t *testing.T) {
+	g := Grammar{Prefix: "x:", LiteralCode: true, Commands: map[string]Spec{
+		"text": {Kind: Leaf},
+	}}
+	for in, want := range map[string]string{
+		"`<x:raw></x:text></x:raw>` &lt;":         "`</x:text>` <",
+		"```\n<x:raw>&amp;</x:raw> &amp;\n```":    "```\n&amp; &\n```",
+		"`<![CDATA[<x:raw>]]>` <x:raw>`</x:raw>`": "`<x:raw>` ``",
+	} {
+		cmds, problems := parse(g, "<x:text>"+in+"</x:text>")
+		if len(problems) > 0 || len(cmds) != 1 || cmds[0].Body != want {
+			t.Errorf("%q: %+v, %q; want %q", in, cmds, problems, want)
+		}
+	}
+	// A code example crossing its own close is guided to the raw element.
+	_, problems := parse(g, "<x:text>`</x:text>`</x:text>")
+	if len(problems) == 0 || !strings.Contains(strings.Join(problems, " "), "<x:raw>...</x:raw>") || strings.Contains(strings.Join(problems, " "), "CDATA") {
+		t.Fatalf("guidance = %q", problems)
 	}
 }
 
@@ -688,15 +773,18 @@ func TestParseOrderedStrayFragmentLabels(t *testing.T) {
 
 func TestParseOrderedRejectedGroupContainerFields(t *testing.T) {
 	prefix := `<tr:drop id="1"/>`
-	rejected := `<tr:in name="outer">junk<tr:set><tr:name></tr:set></tr:in><tr:in name="literal"><![CDATA[</tr:name></tr:set><tr:in>]]></tr:name></tr:set></tr:in>`
 	suffix := `<tr:drop id="2"/>`
-	p := &Problems{}
-	cmds, complete := ParseOrdered(p, groupGrammar, prefix+rejected+suffix)
-	if !complete || len(p.List) != 1 || len(cmds) != 3 {
-		t.Fatalf("field payload escaped rejected group: complete=%v commands=%+v problems=%v", complete, cmds, p.List)
-	}
-	if cmds[0].Source != prefix || cmds[1].Source != rejected || cmds[2].Source != suffix || len(cmds[1].Scope.Problems) != 1 {
-		t.Fatalf("lost source boundaries/diagnostics: %+v", cmds)
+	for _, verbatim := range []string{"<![CDATA[%s]]>", "<tr:raw>%s</tr:raw>"} {
+		quoted := fmt.Sprintf(verbatim, `</tr:name></tr:set><tr:in>`)
+		rejected := `<tr:in name="outer">junk<tr:set><tr:name></tr:set></tr:in><tr:in name="literal">` + quoted + `</tr:name></tr:set></tr:in>`
+		p := &Problems{}
+		cmds, complete := ParseOrdered(p, groupGrammar, prefix+rejected+suffix)
+		if !complete || len(p.List) != 1 || len(cmds) != 3 {
+			t.Fatalf("field payload escaped rejected group: complete=%v commands=%+v problems=%v", complete, cmds, p.List)
+		}
+		if cmds[0].Source != prefix || cmds[1].Source != rejected || cmds[2].Source != suffix || len(cmds[1].Scope.Problems) != 1 {
+			t.Fatalf("lost source boundaries/diagnostics: %+v", cmds)
+		}
 	}
 }
 
@@ -736,6 +824,8 @@ func TestParseOrderedRejectedGroupTruncation(t *testing.T) {
 		`<tr:set><![CDATA[`,
 		`<tr:set><tr:name attr="`,
 		`<tr:set><tr:name><![CDATA[`,
+		`<tr:raw>`,
+		`<tr:set><tr:name><tr:raw></tr:name>`,
 		`<tr:set><tr:name></tr:set><tr:in name="literal">`,
 	} {
 		t.Run(suffix, func(t *testing.T) {

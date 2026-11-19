@@ -2,6 +2,7 @@ package wswhiteboard
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -22,11 +23,13 @@ func mustParse(t *testing.T, s string) []command {
 	return cmds
 }
 
-// A body is raw text: Korean, HTML, mermaid, and & come out as written, and
-// an item field, a topic body, and an answer quote all read the same way.
+// Old-style text stays accepted: Korean, HTML, mermaid, and a bare < or &
+// come out as written, entities decode, and an item field, a topic body,
+// and an answer quote all read the same way.
 func TestBodiesAreRawText(t *testing.T) {
-	body := "## 배경\n\n<details><summary>접기</summary>\n<option value=\"a\">옵션 & <b>굵게</b></option>\n</details>\n\n```mermaid\ngraph TD; A-->B\n```\n\n1 < 2 && 3 > 2, &amp; &lt;"
-	cmds := mustParse(t, `<wb:topic name="화이트보드 재설계"><wb:body>`+"\n"+body+"\n"+`</wb:body></wb:topic>`)
+	text := "## 배경\n\n<details><summary>접기</summary>\n<option value=\"a\">옵션 & <b>굵게</b></option>\n</details>\n\n```mermaid\ngraph TD; A-->B\n```\n\n1 < 2 && 3 > 2, "
+	input, body := text+"&amp; &lt;", text+"& <"
+	cmds := mustParse(t, `<wb:topic name="화이트보드 재설계"><wb:body>`+"\n"+input+"\n"+`</wb:body></wb:topic>`)
 	if len(cmds) != 1 || cmds[0].Tag != "wb:body" || cmds[0].Body != body {
 		t.Fatalf("body command = %+v", cmds)
 	}
@@ -45,7 +48,7 @@ func TestBodiesAreRawText(t *testing.T) {
 <wb:link>261107-epic-ws-dashboard-messenger-round2</wb:link>
 </wb:add></wb:topic>
 <wb:answer id="195" value="a">(195) a, 한글 <b>그대로</b></wb:answer>
-`+topicXML("화이트보드 재설계", "\n"+body+"\n"))
+`+topicXML("화이트보드 재설계", "\n"+input+"\n"))
 	got := item(t, st, 195)
 	if got.Title != "화이트보드 입력을 XML 커맨드 목록으로 바꾼다" || got.Options[1] != "연산별 도구로 쪼갠다" ||
 		got.Rationale != "본문에 <details>나 <option>이 있어도 안전하다. A & B" || got.AnswerQuote != "(195) a, 한글 <b>그대로</b>" {
@@ -393,11 +396,10 @@ func TestAttributeValuesAreQuotedAndDecoded(t *testing.T) {
 	}
 }
 
-// An escaped item field is decoded, since an item field is plain text; a
-// topic body (raw HTML), log text, wb:edit's operands
-// (matched against a stored body), and an answer (the user's verbatim words)
-// keep their entities.
-func TestItemFieldsDecodeEntitiesOtherBodiesDoNot(t *testing.T) {
+// Every body decodes the same way: item fields, a topic body, log text,
+// wb:edit's operands (matched against the stored, decoded body), and an
+// answer. CDATA and a raw element keep their entities.
+func TestEveryBodyDecodesEntities(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, `<wb:topic name="t"><wb:add id="1" class="policy">
 <wb:title>Key &amp; value</wb:title>
@@ -407,8 +409,8 @@ func TestItemFieldsDecodeEntitiesOtherBodiesDoNot(t *testing.T) {
 <wb:why>x &lt; y</wb:why>
 <wb:link>see &apos;notes&apos;</wb:link>
 </wb:add></wb:topic>
-<wb:topic name="t"><wb:body>raw &lt;b&gt; in HTML</wb:body><wb:log>a &amp; b</wb:log></wb:topic>`)
-	if latest, ok := st.LatestAgent("t"); !ok || latest.Text != "a &amp; b" {
+<wb:topic name="t"><wb:body>raw &lt;b&gt; in <wb:raw>&lt;HTML&gt;</wb:raw></wb:body><wb:log>a &amp; b</wb:log></wb:topic>`)
+	if latest, ok := st.LatestAgent("t"); !ok || latest.Text != "a & b" {
 		t.Fatalf("latest log = %+v, %v", latest, ok)
 	}
 	got := item(t, st, 1)
@@ -420,19 +422,177 @@ func TestItemFieldsDecodeEntitiesOtherBodiesDoNot(t *testing.T) {
 	if got := item(t, st, 1); got.Rationale != "p > q" {
 		t.Fatalf("patched why = %q", got.Rationale)
 	}
-	if st.TopicBody("t") != "raw &lt;b&gt; in HTML" {
+	if st.TopicBody("t") != "raw <b> in &lt;HTML&gt;" {
 		t.Fatalf("topic body = %q", st.TopicBody("t"))
 	}
 	cmds := mustParse(t, `<wb:topic name="t"><wb:edit><wb:old>&lt;b&gt;</wb:old><wb:new>&lt;i&gt;</wb:new></wb:edit></wb:topic><wb:answer id="1" value="a &amp; b">(1) &lt;a&gt;</wb:answer>`)
-	if cmds[0].FieldsOf("wb:old")[0] != "&lt;b&gt;" || cmds[0].FieldsOf("wb:new")[0] != "&lt;i&gt;" {
+	if cmds[0].FieldsOf("wb:old")[0] != "<b>" || cmds[0].FieldsOf("wb:new")[0] != "<i>" {
 		t.Fatalf("edit fields = %+v", cmds[0].Fields)
 	}
-	if v, _ := cmds[1].Attr("value"); v != "a & b" || cmds[1].Body != "(1) &lt;a&gt;" {
+	if v, _ := cmds[1].Attr("value"); v != "a & b" || cmds[1].Body != "(1) <a>" {
 		t.Fatalf("answer = %+v", cmds[1])
 	}
+	// An escaped wb:old matches the stored text holding <.
 	mustApply(t, st, `<wb:topic name="t"><wb:edit><wb:old>&lt;b&gt;</wb:old><wb:new>&lt;i&gt;</wb:new></wb:edit></wb:topic>`)
-	if st.TopicBody("t") != "raw &lt;i&gt; in HTML" {
+	if st.TopicBody("t") != "raw <i> in &lt;HTML&gt;" {
 		t.Fatalf("edited topic body = %q", st.TopicBody("t"))
+	}
+}
+
+// A caller of an older manual wrote an entity meaning the entity text
+// itself. When the stored text holds both the decoded and the as-written
+// spelling of a <wb:old>, the edit is refused rather than patching the wrong
+// one; <wb:raw> matches the literal spelling.
+func TestEscapedOldOperandRefusesWhenBothSpellingsOccur(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, `<wb:topic name="t"><wb:body>tag <wb:raw><b> and &lt;b&gt;</wb:raw></wb:body></wb:topic>`)
+	for _, edit := range []string{
+		`<wb:topic name="t"><wb:edit><wb:old>&lt;b&gt;</wb:old><wb:new>X</wb:new></wb:edit></wb:topic>`,
+		`<wb:topic name="t"><wb:edit replace_all="true"><wb:old>&lt;b<wb:raw>&gt;</wb:raw></wb:old><wb:new>X</wb:new></wb:edit></wb:topic>`,
+	} {
+		problems := refused(t, st, edit)
+		if len(problems) != 1 || !strings.Contains(problems[0], "<wb:old> is ambiguous") || !strings.Contains(problems[0], "<wb:raw>...</wb:raw>") {
+			t.Fatalf("problems = %v", problems)
+		}
+	}
+	mustApply(t, st, `<wb:topic name="t"><wb:edit><wb:old><wb:raw>&lt;b&gt;</wb:raw></wb:old><wb:new>L</wb:new></wb:edit></wb:topic>`)
+	if got := st.TopicBody("t"); got != "tag <b> and L" {
+		t.Fatalf("raw edit body = %q", got)
+	}
+	// Only the decoded spelling remains: the escaped operand applies as before.
+	mustApply(t, st, `<wb:topic name="t"><wb:edit><wb:old>&lt;b&gt;</wb:old><wb:new>D</wb:new></wb:edit></wb:topic>`)
+	if got := st.TopicBody("t"); got != "tag D and L" {
+		t.Fatalf("decoded edit body = %q", got)
+	}
+
+	mustApply(t, st, `<wb:topic name="t"><wb:panel name="m" recap="r"><wb:raw><b> and &lt;b&gt;</wb:raw></wb:panel></wb:topic>`)
+	change := func(old string) string {
+		return `<wb:topic name="t"><wb:panel name="m"><wb:change><wb:old>` + old + `</wb:old><wb:new>X</wb:new></wb:change></wb:panel></wb:topic>`
+	}
+	problems := refused(t, st, change(`&lt;b&gt;`))
+	if len(problems) != 1 || !strings.Contains(problems[0], "<wb:old> is ambiguous") {
+		t.Fatalf("panel problems = %v", problems)
+	}
+	mustApply(t, st, change(`<wb:raw>&lt;b&gt;</wb:raw>`))
+	if got := lastPanelText(t, st, "t"); got != "<b> and X" {
+		t.Fatalf("raw panel change = %q", got)
+	}
+	mustApply(t, st, change(`&lt;b&gt;`))
+	if got := lastPanelText(t, st, "t"); got != "X and X" {
+		t.Fatalf("decoded panel change = %q", got)
+	}
+}
+
+// lastPanelText is the payload of the topic's latest panel entry.
+func lastPanelText(t *testing.T, st *State, topic string) string {
+	t.Helper()
+	list := entries(t, st, topic)
+	for i := len(list) - 1; i >= 0; i-- {
+		if list[i].Kind == EntryPanel {
+			return list[i].Text
+		}
+	}
+	t.Fatalf("no panel in %q", topic)
+	return ""
+}
+
+// A <wb:raw> segment goes in exactly as written, anywhere text may, mixed
+// with decoded text; escaped text decodes in every body.
+func TestRawElementAndEscapedTextApply(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, `<wb:topic name="t"><wb:panel name="m" recap="r"><wb:raw><div><b>a < b</b></div></wb:raw></wb:panel></wb:topic>`)
+	if got := lastPanelText(t, st, "t"); got != `<div><b>a < b</b></div>` {
+		t.Fatalf("raw panel = %q", got)
+	}
+	mustApply(t, st, `<wb:topic name="t"><wb:panel name="m" recap="r"><wb:raw><![CDATA[x]]> ]]> </wb:panel> &lt;</wb:raw></wb:panel></wb:topic>`)
+	if got := lastPanelText(t, st, "t"); got != `<![CDATA[x]]> ]]> </wb:panel> &lt;` {
+		t.Fatalf("raw markers = %q", got)
+	}
+	mustApply(t, st, `<wb:topic name="t"><wb:panel name="m" recap="r">a &lt; b <wb:raw><i>c</i></wb:raw> d</wb:panel></wb:topic>`)
+	if got := lastPanelText(t, st, "t"); got != `a < b <i>c</i> d` {
+		t.Fatalf("mixed = %q", got)
+	}
+
+	escaped := "&lt;b&gt;x&lt;/b&gt;"
+	mustApply(t, st, `<wb:topic name="e"><wb:panel name="p" recap="r">`+escaped+` tail</wb:panel><wb:log>x &lt; y &amp; z</wb:log>`+
+		`<wb:add id="1" class="policy"><wb:title>`+escaped+`</wb:title><wb:option>`+escaped+`</wb:option><wb:option>b</wb:option><wb:why>`+escaped+`</wb:why></wb:add></wb:topic>`+
+		`<wb:answer id="1" value="a">`+escaped+`</wb:answer>`)
+	if got := lastPanelText(t, st, "e"); got != "<b>x</b> tail" {
+		t.Fatalf("panel = %q", got)
+	}
+	if log, _ := st.LatestAgent("e"); log.Text != "x < y & z" {
+		t.Fatalf("log = %q", log.Text)
+	}
+	if it := item(t, st, 1); it.Title != "<b>x</b>" || it.Options[0] != "<b>x</b>" || it.Rationale != "<b>x</b>" || it.AnswerQuote != "<b>x</b>" {
+		t.Fatalf("item = %+v", it)
+	}
+	// An escaped wb:old matches stored text holding <, and wb:new decodes.
+	mustApply(t, st, `<wb:topic name="e"><wb:panel name="p"><wb:change><wb:old>`+escaped+`</wb:old><wb:new>&lt;i&gt;y&lt;/i&gt;</wb:new></wb:change></wb:panel></wb:topic>`)
+	if got := lastPanelText(t, st, "e"); got != "<i>y</i> tail" {
+		t.Fatalf("changed panel = %q", got)
+	}
+
+	// Old-style input stores what it stored before.
+	mustApply(t, st, `<wb:topic name="o"><wb:panel name="p" recap="r">a <b>bold</b> & c <![CDATA[</wb:panel>]]></wb:panel></wb:topic>`)
+	if got := lastPanelText(t, st, "o"); got != "a <b>bold</b> & c </wb:panel>" {
+		t.Fatalf("old-style = %q", got)
+	}
+
+	// An unclosed raw element refuses the batch with its position and line.
+	_, problems := Apply(st, "<wb:topic name=\"t\">\n<wb:log>x <wb:raw>open</wb:log></wb:topic>", testEnv())
+	wantProblems(t, problems, "line 2: <wb:log>: a <wb:raw> element has no closing </wb:raw>")
+}
+
+// The indented example in the whiteboard playbook's commands section: the
+// whitespace between commands and between fields is ignored.
+func TestPlaybookCommandsExampleParses(t *testing.T) {
+	example := `<wb:topic name="rollout" label="Rollout">
+  <wb:panel name="state" recap="Parser lands first">**Markdown**. a &lt; b is escaped here.</wb:panel>
+  <wb:panel name="mockup" recap="Toolbar mockup"><wb:raw><div class="bar"><b>a < b</b></div></wb:raw></wb:panel>
+  <wb:panel name="state">
+    <wb:change><wb:old>lands first</wb:old><wb:new>landed</wb:new></wb:change>
+  </wb:panel>
+  <wb:log>In review: parser branch, waiting on CI</wb:log>
+  <wb:add class="policy">
+    <wb:title>Ship the ` + "`parser`" + ` before the renderer?</wb:title>
+    <wb:option>Parser first</wb:option>
+    <wb:option>Both at once</wb:option>
+    <wb:recommend>a: smaller review</wb:recommend>
+    <wb:link>supersedes {{12}}</wb:link>
+  </wb:add>
+</wb:topic>
+<wb:answer ids="14 15" value="ok">14,15=ok</wb:answer>
+<wb:patch id="16" status="withdrawn"/>
+<wb:topic name="old-scope">
+  <wb:log>Folded into Rollout.</wb:log>
+  <wb:close/>
+</wb:topic>`
+	cmds := mustParse(t, example)
+	var tags []string
+	for _, c := range cmds {
+		tags = append(tags, c.Tag)
+	}
+	if got := strings.Join(tags, " "); got != "wb:topic wb:panel wb:panel wb:panel wb:log wb:add wb:answer wb:patch wb:log wb:close" {
+		t.Fatalf("commands = %s", got)
+	}
+	if cmds[1].Body != "**Markdown**. a < b is escaped here." || cmds[2].Body != `<div class="bar"><b>a < b</b></div>` || len(cmds[3].Children) != 1 {
+		t.Fatalf("payloads = %+v", cmds[1:4])
+	}
+	if got := cmds[5].FieldsOf("wb:option"); len(got) != 2 || got[1] != "Both at once" {
+		t.Fatalf("options = %q", got)
+	}
+	// Applied against a board that holds the items it answers and the
+	// panel text its change edits.
+	st := &State{}
+	for i := 0; i < 16; i++ {
+		mustApply(t, st, addXML(ClassCheck, "seed", fmt.Sprintf("check %d", i+1)))
+	}
+	mustApply(t, st, strings.Replace(example, "<wb:old>lands first</wb:old>", "<wb:old>escaped here</wb:old>", 1))
+	if got := lastPanelText(t, st, "rollout"); got != "**Markdown**. a < b is landed." {
+		t.Fatalf("state panel = %q", got)
+	}
+	if item(t, st, 14).Answer != "ok" || item(t, st, 16).Status != StatusWithdrawn || !st.topicClosed("old-scope") {
+		t.Fatalf("answers/patch/close: %+v", st.Items)
 	}
 }
 

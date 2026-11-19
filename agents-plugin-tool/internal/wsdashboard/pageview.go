@@ -77,8 +77,9 @@ type SessionView struct {
 	// when the page follows the OS. Set per request, like Lang.
 	Theme string
 
-	HasBoard bool
-	Seq      int
+	HasBoard         bool
+	Seq              int
+	BoardIncarnation string
 	// CountPolicy and CountAcks are the board's open items: policy and
 	// check items, then technical and announced ones.
 	CountPolicy, CountAcks int
@@ -491,6 +492,8 @@ func subagentProjection(self string, agents []wslive.Agent, lookup sessionLookup
 // ConvEntry is one conversation ring entry as the page shows it.
 type ConvEntry struct {
 	wslive.RingEntry
+	// BoardTargets is render-only attribution from the current in-memory board.
+	BoardTargets map[string]string
 	// Key is the ring entry's file name, the element key the page keeps an
 	// expanded mail line open by.
 	Key string
@@ -634,25 +637,26 @@ func harnessRunning(reg Registration, now time.Time) bool {
 func buildSessionView(in pageInputs) SessionView {
 	reg := in.Session.Registration
 	v := SessionView{
-		ReplyID:        reg.ReplyID,
-		Label:          in.Session.Label,
-		Project:        reg.Project,
-		ProjectName:    filepath.Base(reg.Project),
-		Harness:        reg.Harness,
-		Live:           reg.Live(in.Now),
-		ProcessRunning: harnessRunning(reg, in.Now),
-		Adapter:        adapterPresent(in.Snapshot, in.Now),
-		Hosted:         reg.Hosted,
-		HandedOff:      in.HandedOff && !reg.Hosted && !reg.Live(in.Now),
-		Version:        in.Version,
-		HasBoard:       in.Page.HasBoard,
-		Seq:            in.Page.Seq,
-		CountPolicy:    in.Page.Board.CountPolicy,
-		CountAcks:      in.Page.Board.CountAcks,
-		Board:          in.Page.Board.Board,
-		BoardUnits:     in.Page.BoardUnits,
-		Panels:         in.Page.Board.Panels,
-		Mermaid:        in.Page.Board.Mermaid,
+		ReplyID:          reg.ReplyID,
+		Label:            in.Session.Label,
+		Project:          reg.Project,
+		ProjectName:      filepath.Base(reg.Project),
+		Harness:          reg.Harness,
+		Live:             reg.Live(in.Now),
+		ProcessRunning:   harnessRunning(reg, in.Now),
+		Adapter:          adapterPresent(in.Snapshot, in.Now),
+		Hosted:           reg.Hosted,
+		HandedOff:        in.HandedOff && !reg.Hosted && !reg.Live(in.Now),
+		Version:          in.Version,
+		HasBoard:         in.Page.HasBoard,
+		Seq:              in.Page.Seq,
+		BoardIncarnation: in.Page.BoardIncarnation,
+		CountPolicy:      in.Page.Board.CountPolicy,
+		CountAcks:        in.Page.Board.CountAcks,
+		Board:            in.Page.Board.Board,
+		BoardUnits:       in.Page.BoardUnits,
+		Panels:           in.Page.Board.Panels,
+		Mermaid:          in.Page.Board.Mermaid,
 	}
 	if in.Snapshot != nil {
 		if o := in.Snapshot.Lead.Observed; o != nil {
@@ -686,6 +690,7 @@ func buildSessionView(in pageInputs) SessionView {
 			contacts := resolvedContacts(in.Page.Contacts, reg.ReplyID)
 			v.Conversation = conversation(wslive.Lead{}, in.Ring, in.Page.MailBodies, contacts, in.Lookup, replyMarkdown(reg.Project, reg.ReplyID), reg.ReplyID)
 			splitUserEntries(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
+			attributeBoardNavigation(&v.Conversation, in.Page.BoardTargets)
 		}
 		return v
 	}
@@ -711,6 +716,7 @@ func buildSessionView(in pageInputs) SessionView {
 	v.Conversation = conversation(in.Snapshot.Lead, in.Ring, in.Page.MailBodies, contacts, lookup, replyMarkdown(reg.Project, reg.ReplyID), reg.ReplyID)
 	splitUserEntries(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
 	v.Conversation.Held = heldViews(in.Held, in.AttachDir, reg.ReplyID)
+	attributeBoardNavigation(&v.Conversation, in.Page.BoardTargets)
 	v.Conversation.Sent = sentMarks(in.Drained, in.Held, in.Page.Reasked, settledTurnStart(in.Ring))
 	v.Tree.Subagents, v.Tree.CompactAgents = subagentProjection(reg.ReplyID, in.Snapshot.Agents, lookup, in.Now)
 	v.Conversation.Subagents = v.Tree.Subagents

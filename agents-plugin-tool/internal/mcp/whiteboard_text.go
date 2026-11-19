@@ -15,8 +15,7 @@ import (
 
 const (
 	lineDiscussionNoCounter = "- Discussion keeps no counter. After compaction, continue from the highest ID\n" +
-		"  the summary shows; a collision with an ID the summary dropped is accepted,\n" +
-		"  since nothing in discussion persists."
+		"  the summary shows; a collision with an ID the summary dropped is accepted."
 	lineDiscussionStoreCounter = "- Discussion IDs come from the whiteboard store: an item gets its ID when\n" +
 		"  `{{ns}}/whiteboard.update` adds it, and the store keeps the counter across\n" +
 		"  compaction. When a ticket queue you have read has a last-ID line above the\n" +
@@ -28,8 +27,7 @@ const (
 	// lead-discuss variant; a test pins the two together.
 	whiteboardCaptureLine = "Confirmed decisions reach a ticket only through `{{ns}}:lead-ticket`, once the user moves to capture. Authoritative topic folders remain after the session key expires; do not treat key expiry as board deletion."
 
-	lineTicketQueueStateEnd = "\n\n### Trace a change before writing it"
-	lineTicketQueueBoard    = "- When you open or resume a queue, put its open items on the whiteboard:\n" +
+	lineTicketQueueBoard = "- When you open or resume a queue, put its open items on the whiteboard:\n" +
 		"  `{{ns}}/whiteboard.query` with `ids` set to the queue's item IDs, then in one\n" +
 		"  `{{ns}}/whiteboard.update` `wb:add` each open queue item\n" +
 		"  the query does not return, under its ticket ID (`id`), with\n" +
@@ -111,13 +109,6 @@ func applyWhiteboardVariants(s *Server, rsrcRoot, name, body string, enabled boo
 		body = strings.TrimRight(body, "\n") + "\n\n" + section
 	case "lead-discuss":
 		body = replaceOrAppend(body, lineDiscussNotPersisted, "No block format and no queue.\n  "+withNamespace(whiteboardCaptureLine, s.runtimeNamespace()))
-	case "lead-ticket":
-		bullet := withNamespace(lineTicketQueueBoard, s.runtimeNamespace())
-		if strings.Contains(body, lineTicketQueueStateEnd) {
-			body = strings.Replace(body, lineTicketQueueStateEnd, "\n"+bullet+lineTicketQueueStateEnd, 1)
-		} else {
-			body = strings.TrimRight(body, "\n") + "\n\n" + bullet
-		}
 	}
 	return body, nil
 }
