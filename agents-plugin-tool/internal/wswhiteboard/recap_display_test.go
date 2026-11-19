@@ -43,6 +43,22 @@ func TestRecapDisplayPanelTitleIsNotClipped(t *testing.T) {
 	}
 }
 
+func TestPanelHeaderCapAndResponsiveMetaFold(t *testing.T) {
+	data, err := whiteboardTestAsset("page.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(data)
+	wantAll(t, css,
+		`.entry-panel:not(.msg) > summary { padding: 5px 8px 5px 10px; border-left: 3px solid var(--wb-primary); border-radius: 8px;`,
+		`.entry-panel[open]:not(.msg) > summary { border-radius: 8px 8px 0 0;`,
+		`.entry-panel > .entry-body.doc-body { margin: 0; padding: 9px 0 4px 12px; border-left: 3px solid color-mix(in srgb, var(--wb-primary) 26%, var(--wb-line));`,
+		`@container (max-width: 660px)`,
+		`@container (max-width: 440px)`,
+		`word-break: keep-all;`,
+	)
+}
+
 func TestRecapDisplayFullTextTitles(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, `<wb:topic name="agent"><wb:log>agent "full" text</wb:log></wb:topic><wb:topic name="current"><wb:log>old log</wb:log><wb:panel recap="panel &quot;full&quot; &amp; text">body</wb:panel><wb:panel id="p1" recap="new &quot;panel&quot; &amp; text">new body</wb:panel></wb:topic>`)
