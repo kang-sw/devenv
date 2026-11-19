@@ -422,6 +422,29 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   ctx.qClose();
   assert.deepEqual(hostOpen, [true, false], 'renderer delegates sheet open/close to host');
 
+  // Session pages omit #tkqs when #shandle/searchHost owns the search trigger;
+  // qOpen, qClose, and item-window openers must not throw when #tkqs is absent.
+  const prevDollar = ctx.$, prevBack = ctx.document.activeElement;
+  const fallbackEvents = [];
+  const shandleNode = { id: 'shandle', isConnected: true, focus() { fallbackEvents.push(['focus', 'shandle']); } };
+  ctx.$ = id => id === 'tkqs' ? null : id === 'shandle' ? shandleNode : node(id);
+  ctx.document.activeElement = { isConnected: false, focus() { fallbackEvents.push(['focus', 'stale']); } };
+  ctx.qOpen();
+  ctx.qClose();
+  assert.deepEqual(fallbackEvents, [['focus', 'shandle']], 'qClose falls back to #shandle when #tkqs is absent and opener is disconnected');
+  ctx.qOpenHit({ store: 'store', item: 'a' });
+  assert.equal(events.filter(x => x[0] === 'item').pop()[3].opener.id, 'shandle', 'qOpenHit falls back to #shandle opener');
+  ctx.qPickEntry({ slot: 'tracker', row: { store: 'store', item: 'a' } }, true);
+  assert.equal(events.filter(x => x[0] === 'item').pop()[3].opener.id, 'shandle', 'qPickEntry tracker row falls back to #shandle opener');
+  // Also safe when neither #tkqs nor #shandle exists (isolated fixtures).
+  ctx.$ = id => (id === 'tkqs' || id === 'shandle') ? null : node(id);
+  ctx.qOpen();
+  ctx.qClose();
+  ctx.qOpenHit({ store: 'store', item: 'a' });
+  assert.equal(events.filter(x => x[0] === 'item').pop()[3].opener, null, 'qOpenHit passes null opener when neither trigger exists');
+  ctx.$ = prevDollar;
+  ctx.document.activeElement = prevBack;
+
   await hostCases();
   if (process.argv[2]) require('./search-palette-dom.cjs')(dashboard, JSON.parse(fs.readFileSync(process.argv[2], 'utf8')));
   console.log('search palette: scorer, slots, ids, generations, keys, picks, path mode, and host hooks passed');

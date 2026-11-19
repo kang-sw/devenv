@@ -72,7 +72,7 @@
     b.appendChild(el('div', { class: 'tk tk-menu', id: 'tkmenu', role: 'menu', hidden: '' }));
     // the range and label pickers' discard capsule: outside the menu, which clips its children
     b.appendChild(el('button', { type: 'button', class: 'tk tk-mcap', id: 'tkcap', hidden: '' }, '<svg class="i"><use href="#tki-trash"/></svg><span>' + wsT("js.tk.menu.discard") + '</span>'));
-    O.qsSlot.appendChild(el('span', { class: 'tk tk-qswrap' },
+    if (O.qsSlot && !O.searchHost) O.qsSlot.appendChild(el('span', { class: 'tk tk-qswrap' },
       '<button class="btn tk-qsbtn" id="tkqs" title="' + wsT("js.tk.qs.tip") + ' (Ctrl+K / Ctrl+Space / /)" aria-label="' + wsT("js.tk.qs.tip") + '" aria-controls="tkqpop" aria-expanded="false"><svg class="i"><use href="#tki-search"/></svg></button>'));
     (O.searchHost ? O.searchHost.parent : b).appendChild(el('section', { class: 'tk tk-palette dr-search-palette', id: 'tkqpop', role: 'region', 'aria-label': wsT("js.tk.qs.tip"), hidden: '' },
       '<label class="tk-qlabel" for="tkqin">' + wsT("js.tk.qs.tip") + '</label>' +

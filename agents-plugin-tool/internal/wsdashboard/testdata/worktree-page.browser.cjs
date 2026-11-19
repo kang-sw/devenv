@@ -78,7 +78,9 @@ const route = p => '/w/' + p.replace(/\\/g, '/').replace(/^\//, '').split('/').m
     const tid0 = await makeTerminal(paths[0]);
     // Search has index-page scope, not host0/session file or answer hooks.
     assert.equal(await page.locator('.board-download').count(), 0, 'worktree page has no board zip to download');
-    await page.locator('#tkqs').click();
+    assert.equal(await page.locator('#tkqs').count(), 0, 'worktree session page omits duplicate #tkqs button');
+    assert.equal(await tab.locator('#tkqs').count(), 0, 'shell header mirrors no #tkqs button on worktree page');
+    await page.locator('#shandle').click();
     await page.locator('#tkqpop').waitFor({ state: 'visible' });
     await page.locator('#tkqin').press('Escape');
     await page.locator('#tkqpop').waitFor({ state: 'hidden' });
