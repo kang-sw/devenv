@@ -504,7 +504,12 @@ func TestCompactionNeverWedgesOnPiUnknownEndTurnOrTimeout(t *testing.T) {
 		})
 	}
 
-	// 1d: watchdog timeout clears stuck compaction, publishes CompactFailed, re-arms idle and kicks.
+	// 1d: watchdog timeout (10m) stops the stalled process (including after Claude
+	// status:compacting / TurnStart), publishes CompactFailed, isolates late completion,
+	// and lets the next turn restart and resume cleanly.
+	if compactCommandTimeout != 10*time.Minute {
+		t.Fatalf("compactCommandTimeout = %s, want 10m", compactCommandTimeout)
+	}
 	timers := &leverTimers{}
 	wh := newLeadHarness(t)
 	reg := wh.opts.Backends[BackendClaude]
@@ -516,7 +521,6 @@ func TestCompactionNeverWedgesOnPiUnknownEndTurnOrTimeout(t *testing.T) {
 	wh.holders.out(wholder, turnLines("sess-2", "u1", "first")...)
 	wh.idle(wid)
 	wc := wh.runner.conv(wid)
-	wc.do(func() { wc.idleAfter = time.Hour })
 	resume := false
 	if got := wh.runner.Compact(wh.record(wid).WSKey, "", &resume); got.Status != "queued" {
 		t.Fatal(got)
@@ -525,27 +529,50 @@ func TestCompactionNeverWedgesOnPiUnknownEndTurnOrTimeout(t *testing.T) {
 		started, _ := timers.counts()
 		return started == 1 && timers.durs[0] == compactCommandTimeout
 	})
-	timers.fire(t, 0)
-	eventually(t, "watchdog cleared compaction and re-armed idle", func() bool {
+	// Feed Claude status:compacting (emits TurnStart + CompactStart) before watchdog fires.
+	wh.holders.out(wholder, `{"type":"system","subtype":"status","status":"compacting"}`)
+	eventually(t, "claude compaction turn active", func() bool {
 		ok := false
-		wc.do(func() { ok = !wc.compacting && !wc.compactCommand && wc.idle != nil })
+		wc.do(func() { ok = wc.turn && wc.compacting && wc.compactCommand })
 		return ok
 	})
-	wc.do(func() { wc.stopIdle(); wc.idleAfter = 0 })
-	wh.send(wid, "after-watchdog")
-	eventually(t, "queued work unblocked after watchdog", func() bool {
-		got := wh.userInputs(wholder)
-		return len(got) == 3 && strings.Contains(got[2], "after-watchdog")
+	timers.fire(t, 0)
+	eventually(t, "watchdog stopped stalled process and cleared turn/compaction state", func() bool {
+		ok := false
+		wc.do(func() { ok = wc.proc == nil && !wc.turn && !wc.compacting && !wc.compactCommand })
+		return ok && !wh.state(wid).Process && wh.state(wid).Status == StatusIdle
 	})
-	foundFailed := false
+	// Stalled holder was stopped (no late completion can arrive on it).
+	if got := wh.holders.opCount("stop " + wholder); got != 1 {
+		t.Fatalf("expected stalled holder %s to be stopped once, got %d (%v)", wholder, got, wh.holders.opList())
+	}
+	wh.send(wid, "after-watchdog")
+	eventually(t, "next turn restarts new holder after watchdog stop", func() bool {
+		nh := wh.record(wid).HolderID
+		if nh == "" || nh == wholder {
+			return false
+		}
+		got := wh.userInputs(nh)
+		return len(got) == 1 && strings.Contains(got[0], "after-watchdog")
+	})
+	foundFailed, foundSuccess := false, false
 	for _, entry := range wh.ring(wid) {
-		if entry.Kind == wslive.RingCompact && entry.CompactFailed {
-			foundFailed = true
+		if entry.Kind == wslive.RingCompact {
+			if entry.CompactFailed {
+				foundFailed = true
+			} else {
+				foundSuccess = true
+			}
 		}
 	}
-	if !foundFailed {
-		t.Fatalf("watchdog did not publish CompactFailed: %+v", wh.ring(wid))
+	if !foundFailed || foundSuccess {
+		t.Fatalf("watchdog ring entries wrong (failed=%v success=%v): %+v", foundFailed, foundSuccess, wh.ring(wid))
 	}
+	wc.do(func() {
+		if wc.compactNote != "" {
+			t.Fatalf("late completion queued restore note after watchdog stop: %q", wc.compactNote)
+		}
+	})
 }
 
 func TestCompactionNudgesAndMidTurnAutoDoNotStartContinueTurn(t *testing.T) {
@@ -702,5 +729,85 @@ func TestCompactionWorkerRestoreUsesSystemPromptNotLeadManual(t *testing.T) {
 	}
 	if strings.Contains(c.compactNote, "LEAD MANUAL MUST NOT APPEAR") {
 		t.Fatalf("worker restore leaked leadManual: %q", c.compactNote)
+	}
+}
+
+func TestCompactionStopProcessWithLiveProcessReleasesHeldReport(t *testing.T) {
+	h, got := newFakePiRecoveryHarness(t)
+	reg := h.runner.opts.Backends[BackendPi]
+	reg.NativeCompaction = PiCompaction()
+	h.runner.opts.Backends[BackendPi] = reg
+	lead := h.lead(BackendClaude, LeadOptions{})
+	child, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "work", Parent: &ParentRef{Kind: ParentLead, ReplyID: lead.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder := h.holder(child.ID)
+	h.holders.out(holder, `{"type":"agent_start"}`)
+	eventually(t, "worker running", func() bool { return h.state(child.ID).Status == StatusRunning })
+	if res := h.runner.Compact(h.record(child.ID).WSKey, "", nil); res.Status != "queued" {
+		t.Fatal(res)
+	}
+	h.holders.out(holder,
+		`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"pre-compact"}]}}`,
+		`{"type":"agent_settled"}`,
+	)
+	eventually(t, "worker compact dispatched", func() bool { return len(h.holders.inputs(holder, "compact")) == 1 })
+	if reps := got.list(); len(reps) != 0 {
+		t.Fatalf("parent settled before stopProcess: %+v", reps)
+	}
+	// Stop the live worker process while turn-1 report is held for compaction resume.
+	c := h.runner.conv(child.ID)
+	c.do(func() {
+		if c.proc == nil {
+			t.Fatal("expected live process before stopProcess")
+		}
+		c.stopProcess("test_stop")
+	})
+	eventually(t, "parent receives held turn-1 report after stopProcess", func() bool { return len(got.list()) == 1 })
+	reps := got.list()
+	if len(reps) != 1 || reps[0].Result.Status != TurnDone || reps[0].Result.Message != "pre-compact" {
+		t.Fatalf("unexpected parent reports after stopProcess: %+v", reps)
+	}
+}
+
+func TestCompactionBeginTurnPreservesHeldReportOnCompactFailure(t *testing.T) {
+	h, got := newFakePiRecoveryHarness(t)
+	reg := h.runner.opts.Backends[BackendPi]
+	reg.NativeCompaction = PiCompaction()
+	h.runner.opts.Backends[BackendPi] = reg
+	lead := h.lead(BackendClaude, LeadOptions{})
+	child, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "work", Parent: &ParentRef{Kind: ParentLead, ReplyID: lead.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder := h.holder(child.ID)
+	h.holders.out(holder, `{"type":"agent_start"}`)
+	eventually(t, "worker running", func() bool { return h.state(child.ID).Status == StatusRunning })
+	if res := h.runner.Compact(h.record(child.ID).WSKey, "", nil); res.Status != "queued" {
+		t.Fatal(res)
+	}
+	h.holders.out(holder,
+		`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"turn-1-work"}]}}`,
+		`{"type":"agent_settled"}`,
+	)
+	eventually(t, "worker compact dispatched", func() bool { return len(h.holders.inputs(holder, "compact")) == 1 })
+	// Compaction emits TurnStart while compactCommand is true: held turn-1 report must survive.
+	h.holders.out(holder, `{"type":"agent_start"}`)
+	c := h.runner.conv(child.ID)
+	eventually(t, "compaction TurnStart observed with held report preserved", func() bool {
+		ok := false
+		c.do(func() { ok = c.turn && c.compactCommand && c.heldRes != nil })
+		return ok
+	})
+	if h.record(child.ID).HeldTurn == nil {
+		t.Fatal("beginTurn cleared rec.HeldTurn during compaction command")
+	}
+	// Compaction turn ends without CompactEnd (failure): parent must receive the held turn-1 report.
+	h.holders.out(holder, `{"type":"agent_settled"}`)
+	eventually(t, "parent receives held turn-1 report after failed compaction", func() bool { return len(got.list()) == 1 })
+	reps := got.list()
+	if len(reps) != 1 || reps[0].Result.Status != TurnDone || reps[0].Result.Message != "turn-1-work" {
+		t.Fatalf("unexpected parent reports after failed compaction: %+v", reps)
 	}
 }

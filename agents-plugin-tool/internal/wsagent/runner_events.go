@@ -245,12 +245,14 @@ func (c *conv) beginTurn(quiet bool) {
 		// Not the runner's send: the turn holds no new message, so it
 		// keeps the last turn's mark.
 		c.reply = ""
-		c.hold(nil)
-		if c.rec.Parent != nil {
-			c.update(func(rec *Record) {
-				rec.TurnOpen, rec.HeldTurn = true, nil
-				rec.TurnStartSeq = c.seq
-			})
+		if !c.compactCommand {
+			c.hold(nil)
+			if c.rec.Parent != nil {
+				c.update(func(rec *Record) {
+					rec.TurnOpen, rec.HeldTurn = true, nil
+					rec.TurnStartSeq = c.seq
+				})
+			}
 		}
 		c.watched()
 	}
@@ -528,6 +530,10 @@ func (c *conv) approvalFailed(err error) {
 // processExited handles a process whose output ended without the runner
 // stopping it.
 func (c *conv) processExited() {
+	if c.turn && c.compactCommand {
+		c.setStatus(func() { c.turn = false })
+		c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
+	}
 	if c.compacting {
 		c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
 		c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
@@ -661,6 +667,10 @@ func (c *conv) releaseHolder(proc Process) {
 
 // stopProcess ends the process, if any; a running turn ends with it.
 func (c *conv) stopProcess(reason string) {
+	if c.turn && c.compactCommand {
+		c.setStatus(func() { c.turn = false })
+		c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
+	}
 	if c.compacting {
 		c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
 		c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
@@ -700,6 +710,9 @@ func (c *conv) stopProcess(reason string) {
 	}
 	c.replaying, c.replayAsked = false, false
 	c.processEnded()
+	if !c.closed && !c.quitting {
+		c.releaseHeld()
+	}
 }
 
 // letGo is the daemon's shutdown: a lead's process runs on under its

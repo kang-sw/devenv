@@ -14,8 +14,8 @@ import (
 )
 
 // compactCommandTimeout bounds how long a dispatched native compact command
-// may wait without a harness response before clearing state and unblocking.
-const compactCommandTimeout = 5 * time.Minute
+// may wait without a harness response before stopping the stalled process.
+const compactCommandTimeout = 10 * time.Minute
 
 func (r BackendRegistration) CompactionProtocol() CompactionProtocol {
 	if r.NativeCompaction != nil {
@@ -275,21 +275,13 @@ func (c *conv) compactTimedOut() {
 	if !c.compacting && !c.compactCommand {
 		return
 	}
-	if c.turn && !c.compactCommand {
-		// Dashboard /compact ran as a command turn; end it so queued work unblocks.
-		c.setStatus(func() { c.turn = false })
-		c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
-	}
-	c.compactCommand = false
 	c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
 	c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed, Text: "compaction timed out"})
 	c.setStatus(func() { c.lastErr = "compaction timed out" })
+	c.stopProcess("compaction_timeout")
 	c.changed(false)
 	c.kick()
 	c.releaseHeld()
-	if !c.turn && !c.compacting && !c.compactCommand {
-		c.armIdle()
-	}
 }
 
 func (c *conv) compactEvent(ev wslive.Event) {
