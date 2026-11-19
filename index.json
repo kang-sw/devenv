@@ -439,12 +439,12 @@
       "registered_at": "2026-11-17T09:48:35Z",
       "lease": {
         "email": "ki6080@gmail.com",
-        "clone_id": "9091c57d68d03c76",
-        "track": "track/agent-v2",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-19T01:43:17Z",
+        "touched_at": "2026-11-19T13:16:07Z",
         "impl": {
-          "branch": "impl/track/agent-v2/prize-pupil-anger"
+          "branch": "impl/develop/tickets-post-v2"
         }
       }
     },
