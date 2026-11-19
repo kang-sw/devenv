@@ -6,6 +6,7 @@ related:
   261114-feat-ws-dashboard-board-toolbar-overview: "sibling darkroom: overview dims the page through the iframe shell's layout.dim field; this ticket's wide-view darkroom uses the same field for the shell's rail and header"
   261113-feat-ws-dashboard-iframe-shell: "landed (0586a4289): session pages are shell frames; layout.dim and the shell's Esc and Ctrl+K forwarding shape the key rules here"
   261114-refactor-ws-split-oversized-source-files: "dashboard.js is on its list; the audit view goes to new assets/audit.js and audit.css (approved contract (603))"
+dropped: 2026-11-19
 ---
 
 # Dashboard: a conversation audit view - per-call rows, hidden harness events, an audit window, and conversation-wide search
@@ -324,3 +325,8 @@ Depends on this ticket's Phase 2.
 Verification: headless search over the fixture store, covering a hit inside a
 truncated body (it pages to the line), a regex hit, a hit on a subagent event
 (it routes through `parent_id`), and the empty state.
+
+
+## Resolution (2026-11-19)
+
+Superseded by `261119-epic-ws-conversation-audit` (owner (1331)=a, 2026-11-19). Its approved interaction is carried unchanged into `261119-feat-ws-dashboard-audit-view`: (550)=ok with the wide-view darkroom note, (602)-(610), (681), "all audit data via the API", the call-ID fallback display, the responsive criteria and the side-by-side capture verification. The approved mockup v2 stays at its tracked path, `ai-docs/tickets/assets/261114-feat-ws-dashboard-conversation-audit-view/conversation-audit-mockup-v2.html`, and the new ticket links it there. Two stale parts are realigned in the new ticket. The standalone `audit.js`/`audit.css` form of (603) predates the dashboard's assembled fragment files. The mockup's surroundings predate the shell topbar/rail redesign. (682)'s gate becomes the new epic's dependency chain.
