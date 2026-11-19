@@ -20,6 +20,7 @@ type HostedRender struct {
 	PlaybookCommands bool
 	ToolNameScheme   string
 	CallFallback     bool
+	DirectTools      []string
 }
 
 // hostedRenderServer is a throwaway server that renders for the hosted lead
@@ -50,7 +51,7 @@ func hostedRenderServer(env []string, root string, render HostedRender, key stri
 		s.Close()
 		return nil, nil, err
 	}
-	s.descriptor = connectionDescriptor{manualHarness: render.Harness, playbookCommands: render.PlaybookCommands, aliases: aliases, callFallback: render.CallFallback, leadRender: true}
+	s.descriptor = connectionDescriptor{manualHarness: render.Harness, playbookCommands: render.PlaybookCommands, aliases: aliases, callFallback: render.CallFallback, directTools: render.DirectTools, leadRender: true}
 	s.descriptorResolved = true
 	// A render may start the session-start tracker check (a background
 	// fetch); the server is released once that settles, without holding up
