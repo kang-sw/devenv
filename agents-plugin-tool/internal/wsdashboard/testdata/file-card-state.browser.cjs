@@ -137,7 +137,9 @@ const route = '/w/' + root.replace(/^\//, '').split('/').map(encodeURIComponent)
     });
     await page.locator('#fixture-board-link').click();
     const boardPreview = await wait('worktree_page.go', 'preview');
-    await page.locator('#tkqs').click();
+    assert.equal(await page.locator('#tkqs').count(), 0, 'session page omits duplicate #tkqs button');
+    assert.equal(await tab.locator('#tkqs').count(), 0, 'shell header mirrors no #tkqs button on session page');
+    await page.locator('#shandle').click();
     await page.locator('#tkqin').fill('worktree_page_test');
     const result = page.locator('[data-qs="files"][data-qi]').filter({ hasText: 'worktree_page_test.go' });
     await result.first().click().catch(async e => {

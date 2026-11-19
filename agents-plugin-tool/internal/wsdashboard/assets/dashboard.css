@@ -83,6 +83,10 @@
    only the stage column (dashboard-rail.css). */
 :root { --toph: 34px; --topgap: 12px; }
 .top { gap: 10px; margin-bottom: 10px; }
+/* Floor under the strip so it never shrinks below the drawer handles when
+   #tkqs is absent on session pages (the fixed --toph height below normally
+   governs). */
+.dwrap > .top { min-height: 28px; }
 .dwrap > .top { box-sizing: border-box; height: var(--toph); margin-bottom: var(--topgap); display: flex; flex-wrap: nowrap; align-items: flex-start; gap: 6px; min-width: 0; }
 .r-head { display: contents; }
 .dwrap > .top > .back, .tph, .tcen > .usage-toggle { flex: none; box-sizing: border-box; height: var(--toph); display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 0; border: 0; border-radius: 0 0 8px 8px; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: var(--wb-shadow-hi); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -164,8 +168,9 @@
 .hb.sm .hbr { border-radius: 5.5px; }
 @keyframes hbspin { to { --hba: 360deg; } }
 .host { font-size: 11px; font-weight: 800; letter-spacing: .04em; padding: 1px 7px; border-radius: 4px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+.top .host { display: inline-flex; align-items: center; box-sizing: border-box; height: 20px; line-height: 1; }
 .host.sm { font-size: 10px; padding: 0 5px; flex: none; }
-.nolive, .ended-chip { font-size: 11.5px; color: var(--wb-muted-fg); border: 1px dashed var(--wb-muted-fg); border-radius: 999px; padding: 0 8px; white-space: nowrap; }
+.nolive, .ended-chip { display: inline-flex; align-items: center; box-sizing: border-box; height: 20px; line-height: 1; font-size: 11.5px; color: var(--wb-muted-fg); border: 1px dashed var(--wb-muted-fg); border-radius: 999px; padding: 0 8px; white-space: nowrap; }
 .ended-chip { border-style: solid; }
 .sse { display: inline-flex; align-items: center; white-space: nowrap; }
 .sse .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--wb-ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-ok) 25%, transparent); }

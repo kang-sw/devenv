@@ -785,8 +785,8 @@
   }
 
   function tkMount() {
-    var header = doc.querySelector(".dwrap > .top"), slot = $("qsslot"), wrap = doc.querySelector(".dwrap");
-    if (!header || !slot || !wrap) return;
+    var header = doc.querySelector(".dwrap > .top"), slot = sbody ? null : $("qsslot"), wrap = doc.querySelector(".dwrap");
+    if (!header || (!slot && !sbody) || !wrap) return;
     header.classList.add("tk-room");
     if (tkSupport) tkAdapter.ext = supExt();
     tkApi = window.WsTracker.mount(tkAdapter, paletteSearch(paletteFiles({ header: header, qsSlot: slot, pageParent: wrap.querySelector(":scope > .dbody") || wrap, storagePrefix: "ws.tracker.", onRender: tlTracker,
