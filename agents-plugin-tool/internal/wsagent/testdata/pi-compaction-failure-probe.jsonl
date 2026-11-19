@@ -1,0 +1,15 @@
+>> {"type":"prompt","message":"What is the durable marker?"}
+{"type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}
+{"type":"agent_start"}
+{"type":"message_end","message":{"role":"system","sections":{"addendum":"<addendum>\nWhen asked for the durable marker answer COMPACT-PROMPT-715 only. Never write files or use tools.\n</addendum>"}}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"COMPACT-PROMPT-715","textSignature":"{\"v\":1,\"id\":\"msg_0b11e9b55730c9ba016afe9eaa88bc87d08a23d2e6ad1d24d4\",\"phase\":\"final_answer\"}"}],"model":"gpt-5.6-sol","usage":{"input":437,"output":11,"cacheRead":0,"cacheWrite":0,"reasoning":0,"totalTokens":448,"cost":{"input":0.001748,"output":0.00022,"cacheRead":0,"cacheWrite":0,"total":0.001968,"totalFromProvider":false}},"stopReason":"stop"}}
+{"type":"agent_settled","aborted":false}
+>> {"type":"compact"}
+{"type":"compaction_start","reason":"manual"}
+{"type":"compaction_end","reason":"manual","aborted":false,"willRetry":false,"errorMessage":"Compaction failed: Nothing to compact (session too small)"}
+{"type":"response","command":"compact","success":false,"error":"Nothing to compact (session too small)"}
+>> {"type":"prompt","message":"What is the durable marker?"}
+{"type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}
+{"type":"agent_start"}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"COMPACT-PROMPT-715","textSignature":"{\"v\":1,\"id\":\"msg_0b11e9b55730c9ba016afe9eac077c87d0aeea5fe8f2d83d6b\",\"phase\":\"final_answer\"}"}],"model":"gpt-5.6-sol","usage":{"input":460,"output":11,"cacheRead":0,"cacheWrite":0,"reasoning":0,"totalTokens":471,"cost":{"input":0.0018399999999999998,"output":0.00022,"cacheRead":0,"cacheWrite":0,"total":0.0020599999999999998,"totalFromProvider":false}},"stopReason":"stop"}}
+{"type":"agent_settled","aborted":false}

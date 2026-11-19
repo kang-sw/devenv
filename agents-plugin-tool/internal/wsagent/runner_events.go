@@ -58,7 +58,16 @@ func (c *conv) handle(ev Event) {
 		if ev.Live.Kind == wslive.KindReply && ev.Live.Final && !(quiet && c.rec.Parent != nil && ev.Seq <= c.rec.TurnStartSeq) {
 			c.reply = ev.Live.Text
 		}
+		if !quiet {
+			c.compactEvent(*ev.Live)
+		}
 		c.apply(*ev.Live, quiet)
+		if !quiet && ev.Live.Kind == wslive.KindStatus && !c.turn && !c.replaying {
+			c.compactIdle()
+		}
+		if !quiet && ev.Live.Kind == wslive.KindCompact && ev.Live.Phase != wslive.CompactStart {
+			c.kick()
+		}
 	case ev.Card != nil:
 		if !quiet {
 			c.live.card(*ev.Card)
@@ -143,6 +152,13 @@ func (c *conv) handle(ev Event) {
 	case ev.UserTaken != "":
 		c.steerTaken(ev.UserTaken)
 	case ev.CommandError != "":
+		if !quiet && c.compactCommand {
+			c.compactCommand = false
+		}
+		if !quiet && c.compacting {
+			c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
+			c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
+		}
 		// Replay rebuilds lifecycle state, not transient command diagnostics.
 		if !quiet {
 			c.setStatus(func() { c.lastErr = ev.CommandError })
@@ -224,13 +240,21 @@ func (c *conv) beginTurn(quiet bool) {
 // endTurn closes the running turn, applies settings changed during it, and
 // submits the messages held meanwhile.
 func (c *conv) endTurn(turnErr string, quiet bool) {
+	compactCommand := c.compactCommand
+	if !quiet {
+		c.compactCommand = false
+	}
+	if !quiet && turnErr != "" && c.compacting {
+		c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
+		c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed, Text: turnErr})
+	}
 	if c.wrapHold && !c.rec.Lead && c.rec.Parent != nil && !quiet {
 		// A gap while streaming is reconciled at agent_settled, not left
 		// dependent on acknowledgements that may have left the ring.
 		c.probeWorkerRecovery()
 		return
 	}
-	if !c.turn && !c.rec.Lead {
+	if !c.turn && !c.rec.Lead && !compactCommand {
 		return
 	}
 	ran := c.turn
@@ -250,7 +274,7 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 	if turnErr != "" {
 		c.setStatus(func() { c.lastErr = turnErr })
 	}
-	if ran && !c.replaying {
+	if ran && !c.replaying && !compactCommand {
 		status := TurnDone
 		if turnErr != "" {
 			status = TurnFailed
@@ -483,6 +507,12 @@ func (c *conv) approvalFailed(err error) {
 // processExited handles a process whose output ended without the runner
 // stopping it.
 func (c *conv) processExited() {
+	if c.compacting {
+		c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
+		c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
+	}
+	c.compactPending = nil
+	c.compactCommand = false
 	rejoining, proc := c.replaying, c.proc
 	c.events = nil
 	// No compaction follows from a process that is gone.
@@ -607,6 +637,11 @@ func (c *conv) releaseHolder(proc Process) {
 
 // stopProcess ends the process, if any; a running turn ends with it.
 func (c *conv) stopProcess(reason string) {
+	if c.compacting {
+		c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
+		c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
+	}
+	c.compactPending, c.compactCommand = nil, false
 	c.stopIdle()
 	if c.proc == nil {
 		return

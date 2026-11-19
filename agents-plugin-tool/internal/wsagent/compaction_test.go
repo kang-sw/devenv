@@ -1,0 +1,417 @@
+package wsagent
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wsstate"
+)
+
+type compactionRootKeys struct {
+	KeyStore
+	root string
+}
+
+func (k compactionRootKeys) Root(string) (string, bool) { return k.root, true }
+
+func TestCompactionUsesTheKeysConfigRoot(t *testing.T) {
+	root := t.TempDir()
+	cfg := wsconfig.Options{CacheHome: t.TempDir(), ConfigHome: t.TempDir(), RepoRoot: root}
+	resolver := wsconfig.NewResolver(cfg, nil, nil, nil)
+	if err := resolver.Set("compaction.worker_hard.pi", "65%", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeRepo}); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRunner(Options{Config: cfg, Keys: compactionRootKeys{root: root}, Backends: map[string]BackendRegistration{BackendPi: {NativeCompaction: PiCompaction()}}})
+	c := &conv{r: r, rec: Record{Root: t.TempDir(), WSKey: "key", Backend: BackendPi}}
+	c.loadCompaction()
+	if c.compactHard.Percent != 65 {
+		t.Fatalf("nudge ignored the key's repo config: %+v", c.compactHard)
+	}
+}
+
+func TestCompactionAdvisoryOptOutKeepsHardThreshold(t *testing.T) {
+	cfg := wsconfig.Options{CacheHome: t.TempDir(), ConfigHome: t.TempDir()}
+	resolver := wsconfig.NewResolver(cfg, nil, nil, nil)
+	if err := resolver.Set("claude.compaction_advisory_enabled", "false", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeGlobal}); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRunner(Options{Config: cfg, Backends: map[string]BackendRegistration{BackendClaude: {Catalog: ClaudeCatalog()}}})
+	c := &conv{r: r, rec: Record{Root: t.TempDir(), WSKey: "key", Backend: BackendClaude, Lead: true}}
+	c.loadCompaction()
+	if c.compactAdvisoryEnabled || c.compactHard.Percent != 80 {
+		t.Fatalf("opt-out affected hard compaction: enabled=%v hard=%+v", c.compactAdvisoryEnabled, c.compactHard)
+	}
+}
+
+func TestCompactionDescriptors(t *testing.T) {
+	for _, tc := range []struct {
+		h                     string
+		p                     CompactionProtocol
+		lead, worker, signals bool
+	}{{BackendClaude, ClaudeCatalog().Compaction, true, false, true}, {BackendPi, *PiCompaction(), true, true, true}, {BackendCodex, CodexCatalog().Compaction, true, true, false}, {BackendAgy, AgyCatalog().Compaction, true, true, false}} {
+		t.Run(tc.h, func(t *testing.T) {
+			if tc.p.LeadCommand != tc.lead || tc.p.WorkerCommand != tc.worker || tc.p.Lifecycle != tc.signals {
+				t.Fatal(tc.p)
+			}
+			if tc.signals && !tc.p.PromptPersists {
+				t.Fatal("verified appended prompt must survive")
+			}
+			if tc.p.LegacyKey("compaction.worker_advisory") != "" || tc.p.LegacyKey("compaction.worker_hard") != "" {
+				t.Fatal("lead legacy mapped to worker")
+			}
+		})
+	}
+}
+
+func TestCompactionMeasuredMissingSignals(t *testing.T) {
+	for _, attempt := range []int{1, 2} {
+		msgs := readCodexFixture(t, fmt.Sprintf("agy-1.5.12-compaction-probe-%d.jsonl", attempt))
+		prompts := acpPrompts(msgs)
+		if len(prompts) != 4 {
+			t.Fatal(len(prompts))
+		}
+		compact := prompts[1]
+		end := acpResponseAt(t, msgs, compact)
+		for _, m := range msgs[compact:end] {
+			if strings.Contains(acpUpdate(m), "compact") {
+				t.Fatalf("a new lifecycle signal requires descriptor review: %+v", m)
+			}
+		}
+		if !strings.Contains(acpText(msgs, prompts[2], acpResponseAt(t, msgs, prompts[2])), "COMPACT-PROMPT-715") {
+			t.Fatal("appended prompt did not survive")
+		}
+		if r := responseTo(t, msgs, "6"); r.Error == nil || r.Error.Code != -32602 {
+			t.Fatal(r.Error)
+		}
+		codex := readCodexFixture(t, fmt.Sprintf("codex-0.170.0-compaction-probe-%d.jsonl", attempt))
+		if r := responseTo(t, codex, "3"); r.Error == nil || !strings.Contains(r.Error.Message, "invalid transport") {
+			t.Fatal(r.Error)
+		}
+	}
+}
+
+func TestCompactionLiveNativeFixtures(t *testing.T) {
+	for _, lead := range []bool{false, true} {
+		for _, name := range []string{"claude-compaction-probe.jsonl", "pi-compaction-probe.jsonl", "pi-compaction-failure-probe.jsonl"} {
+			t.Run(fmt.Sprintf("%s/lead=%v", name, lead), func(t *testing.T) {
+				spec := StartSpec{}
+				if lead {
+					spec.Lead = &LeadSpec{}
+				}
+				pi, cl := newPiMapper(spec), newClaudeMapper(spec)
+				r := &recordedReplies{}
+				counts := map[string]int{}
+				for _, line := range readLeadFixture(t, name) {
+					if line.in {
+						continue
+					}
+					var evs []Event
+					if strings.HasPrefix(name, "pi-") {
+						evs = pi.mapLine(line.raw, r)
+					} else {
+						evs = cl.mapLine(line.raw, r)
+					}
+					for _, ev := range evs {
+						if ev.Live != nil && ev.Live.Kind == wslive.KindCompact {
+							counts[ev.Live.Phase]++
+						}
+					}
+				}
+				end := wslive.CompactEnd
+				if strings.Contains(name, "failure") {
+					end = wslive.CompactFailed
+				}
+				if counts[wslive.CompactStart] != 1 || counts[end] != 1 {
+					t.Fatal(counts)
+				}
+			})
+		}
+	}
+}
+
+func compactionHarness(t *testing.T) *leadHarness {
+	h := newLeadHarness(t)
+	reg := h.opts.Backends[BackendClaude]
+	reg.Catalog = ClaudeCatalog()
+	h.opts.Backends[BackendClaude] = reg
+	return h.start()
+}
+func compactBoundary(h *leadHarness, id, holder string) {
+	h.holders.out(holder, `{"type":"system","subtype":"status","status":"compacting"}`, `{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":"manual"}}`, resultLine(), stateLine(HarnessIdle))
+	h.sync(id, holder)
+}
+
+func TestCompactionIdleRestoreOrderingAndResume(t *testing.T) {
+	for _, resume := range []bool{false, true} {
+		t.Run(fmt.Sprint(resume), func(t *testing.T) {
+			h := compactionHarness(t)
+			id, holder := h.runLead("one")
+			key := h.record(id).WSKey
+			out := h.runner.Compact(key, "", &resume)
+			if out.Status != "queued" {
+				t.Fatal(out)
+			}
+			if got := h.userInputs(holder); len(got) != 1 {
+				t.Fatalf("mid-turn compact: %q", got)
+			}
+			h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+			eventually(t, "native compact at idle", func() bool { got := h.userInputs(holder); return len(got) == 2 && got[1] == "/compact" })
+			h.send(id, "after")
+			compactBoundary(h, id, holder)
+			eventually(t, "restoration before queued work", func() bool {
+				got := h.userInputs(holder)
+				return len(got) >= 3 && strings.Contains(got[2], "Context was compacted")
+			})
+			got := h.userInputs(holder)
+			if !strings.Contains(got[2], key) || !strings.Contains(got[2], "workflow_state") {
+				t.Fatal(got)
+			}
+			if resume && !strings.Contains(got[2], "Continue the work") {
+				t.Fatal(got)
+			}
+			if !resume && !strings.Contains(got[2], "after") {
+				t.Fatal(got)
+			}
+			h.runner.conv(id).do(func() {
+				c := h.runner.conv(id)
+				c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd})
+				if c.compactNote != "" {
+					t.Error("duplicate restoration")
+				}
+			})
+		})
+	}
+}
+
+func TestCompactionAutoDoesNotStartContinue(t *testing.T) {
+	h := compactionHarness(t)
+	id, holder := h.runLead("one")
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	h.idle(id)
+	compactBoundary(h, id, holder)
+	h.idle(id)
+	if got := h.userInputs(holder); len(got) != 1 {
+		t.Fatalf("native auto started a turn: %q", got)
+	}
+	h.send(id, "after")
+	eventually(t, "ordinary input carries note", func() bool {
+		got := h.userInputs(holder)
+		return len(got) == 2 && strings.Contains(got[1], "Context was compacted") && strings.Contains(got[1], "after")
+	})
+}
+
+func TestCompactionThresholdLatchAndStaleUsage(t *testing.T) {
+	h := compactionHarness(t)
+	id, holder := h.runLead("one")
+	c := h.runner.conv(id)
+	observe := func(tokens *int64) {
+		c.do(func() {
+			c.apply(wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: tokens, Window: 100000}})
+		})
+	}
+	high := int64(90000)
+	observe(&high)
+	if len(h.userInputs(holder)) != 1 {
+		t.Fatal("hard compact during active turn")
+	}
+	observe(nil) // Never trigger from the preceding stale reading.
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	h.idle(id)
+	if len(h.userInputs(holder)) != 1 {
+		t.Fatal("stale usage triggered compaction")
+	}
+	observe(&high)
+	c.do(func() { c.kick() })
+	eventually(t, "hard before advisory", func() bool { return len(h.userInputs(holder)) == 2 })
+	if got := h.userInputs(holder)[1]; got != "/compact" {
+		t.Fatal(got)
+	}
+	compactBoundary(h, id, holder)
+	h.idle(id)
+	c.do(func() {
+		if c.compactAdvised || c.compactHardIssued || c.compactUsageFresh {
+			t.Error("success did not reset crossings")
+		}
+	})
+	observe(&high)
+	c.do(func() {
+		c.kick()
+		if c.compactUsageFresh || c.compacting {
+			t.Error("stale pre-compaction stats re-triggered hard compaction")
+		}
+		c.observeCompaction(wslive.Event{Kind: wslive.KindTurnStart})
+	})
+	low := int64(10000)
+	observe(&low)
+	c.do(func() {
+		c.compactHardIssued, c.compactAdvised = true, true
+		c.observeCompaction(wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &low, Window: 100000}})
+		if c.compactAdvised || c.compactHardIssued {
+			t.Error("falling usage did not reset")
+		}
+	})
+}
+
+func TestCompactionFailureLatchesUntilExplicitRetry(t *testing.T) {
+	h := compactionHarness(t)
+	id, holder := h.runLead("one")
+	c := h.runner.conv(id)
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	h.idle(id)
+	h.holders.failInputs("user", 1)
+	resume := false
+	if got := h.runner.Compact(h.record(id).WSKey, "", &resume); got.Status != "error" {
+		t.Fatal(got)
+	}
+	c.do(func() {
+		n := int64(90000)
+		for i := 0; i < 5; i++ {
+			c.observeCompaction(wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &n, Window: 100000}})
+			c.compactIdle()
+		}
+		if c.compacting || c.compactNote != "" {
+			t.Error("failure restored or retried")
+		}
+	})
+	if len(h.userInputs(holder)) != 1 {
+		t.Fatal("failure was retried")
+	}
+	if got := h.runner.Compact(h.record(id).WSKey, "", &resume); got.Status != "queued" {
+		t.Fatal(got)
+	}
+	eventually(t, "explicit retry delivered", func() bool { return len(h.userInputs(holder)) == 2 })
+}
+
+func TestCompactionRestoreRespectsPromptDescriptor(t *testing.T) {
+	h := newLeadHarness(t)
+	reg := h.opts.Backends[BackendClaude]
+	reg.Catalog = ClaudeCatalog()
+	reg.Catalog.Compaction.PromptPersists = false
+	h.opts.Backends[BackendClaude] = reg
+	manual := &leadManualRender{text: "RESTORED MANUAL"}
+	h.opts.LeadManual = manual.render
+	h.start()
+	id, holder := h.runLead("one")
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	h.idle(id)
+	compactBoundary(h, id, holder)
+	h.idle(id)
+	h.runner.conv(id).do(func() {
+		c := h.runner.conv(id)
+		if !strings.Contains(c.compactNote, "RESTORED MANUAL") {
+			t.Error(c.compactNote)
+		}
+		c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd})
+		if strings.Count(c.compactNote, "RESTORED MANUAL") != 1 {
+			t.Error("manual duplicated")
+		}
+	})
+}
+
+func TestCompactionPiWorkerTargetAndResponseOrdering(t *testing.T) {
+	h, _ := newFakePiRecoveryHarness(t)
+	reg := h.runner.opts.Backends[BackendPi]
+	reg.NativeCompaction = PiCompaction()
+	h.runner.opts.Backends[BackendPi] = reg
+	lead := h.lead(BackendClaude, LeadOptions{})
+	child, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "work", Parent: &ParentRef{Kind: ParentLead, ReplyID: lead.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder := h.holder(child.ID)
+	h.holders.out(holder, `{"type":"agent_start"}`, `{"type":"agent_settled"}`)
+	h.idle(child.ID)
+	key := h.record(child.ID).WSKey
+	parent := h.record(child.ID).Parent
+	if got := h.runner.Compact(key, h.record(lead.ID).WSKey, nil); got.Status != "error" {
+		t.Fatal("child controlled ancestor", got)
+	}
+	if got := h.runner.Compact(h.record(lead.ID).WSKey, AgentAddress(child.ID), nil); got.Status != "queued" {
+		t.Fatal(got)
+	}
+	eventually(t, "worker RPC compact", func() bool { return len(h.holders.inputs(holder, "compact")) == 1 })
+	h.holders.out(holder, `{"type":"compaction_start","reason":"manual"}`, `{"type":"compaction_end","reason":"manual"}`)
+	eventually(t, "worker completion awaits response", func() bool {
+		ready := false
+		h.runner.conv(child.ID).do(func() { c := h.runner.conv(child.ID); ready = c.compactNote != "" && c.compactCommand })
+		return ready
+	})
+	if len(h.holders.inputs(holder, "prompt")) != 1 {
+		t.Fatal("continue sent before command response")
+	}
+	h.holders.out(holder, `{"type":"response","command":"compact","success":true}`)
+	eventually(t, "targeted compact response consumed", func() bool {
+		ready := false
+		h.runner.conv(child.ID).do(func() {
+			c := h.runner.conv(child.ID)
+			ready = !c.compactCommand && !c.compacting && c.compactNote != ""
+		})
+		return ready
+	})
+	h.idle(child.ID)
+	if len(h.holders.inputs(holder, "prompt")) != 1 {
+		t.Fatal("targeted compact defaulted resume to true")
+	}
+	if got := h.runner.Compact(key, "", nil); got.Status != "queued" {
+		t.Fatal(got)
+	}
+	eventually(t, "second worker RPC compact", func() bool { return len(h.holders.inputs(holder, "compact")) == 2 })
+	h.holders.out(holder, `{"type":"compaction_start","reason":"manual"}`, `{"type":"compaction_end","reason":"manual"}`, `{"type":"response","command":"compact","success":true}`)
+	eventually(t, "one self continue", func() bool { return len(h.holders.inputs(holder, "prompt")) == 2 })
+	got := h.holders.inputs(holder, "prompt")[1]
+	if !strings.Contains(got, "Context was compacted") || !strings.Contains(got, "Continue the work") {
+		t.Fatal(got)
+	}
+	rec := h.record(child.ID)
+	if rec.WSKey != key || rec.Parent == nil || *rec.Parent != *parent {
+		t.Fatal("identity or lineage changed")
+	}
+}
+
+func TestCompactionPiFailureSignals(t *testing.T) {
+	for _, lead := range []bool{false, true} {
+		spec := StartSpec{}
+		if lead {
+			spec.Lead = &LeadSpec{}
+		}
+		m := newPiMapper(spec)
+		r := &recordedReplies{}
+		for _, line := range []string{`{"type":"compaction_end","reason":"manual","aborted":true}`, `{"type":"compaction_end","reason":"threshold","errorMessage":"failed"}`} {
+			evs := m.mapLine([]byte(line), r)
+			found := false
+			for _, ev := range evs {
+				if ev.Live != nil && ev.Live.Kind == wslive.KindCompact && ev.Live.Phase == wslive.CompactFailed {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("role lead=%v: no failure for %s: %+v", lead, line, evs)
+			}
+		}
+	}
+}
+
+// Observe only the memory state: token events add no file operations. The
+// ordinary projection's persistence remains covered by transcript I/O tests.
+func TestCompactionObservationMemoryOnly(t *testing.T) {
+	c := &conv{compactAdvisory: wsconfig.Threshold{Percent: 50}, compactHard: wsconfig.Threshold{Percent: 80}}
+	n := int64(60000)
+	before := wsstate.FileIOCounters()
+	start := time.Now()
+	for i := 0; i < 100000; i++ {
+		c.observeCompaction(wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &n, Window: 100000}})
+	}
+	if !c.compactUsageFresh {
+		t.Fatal("not observed")
+	}
+	for site, n := range wsstate.FileIOCounters() {
+		if n != before[site] {
+			t.Fatalf("observation touched files: %s +%d", site, n-before[site])
+		}
+	}
+	t.Logf("100000 memory observations in %s; zero instrumented file operations", time.Since(start))
+}

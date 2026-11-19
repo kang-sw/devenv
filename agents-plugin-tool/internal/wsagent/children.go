@@ -424,6 +424,17 @@ func (r *Runner) serveToken(w http.ResponseWriter, req *http.Request, op string)
 		writeAnswer(w, 0, nil, err)
 		return
 	}
+	if op == "compact" {
+		var body struct {
+			Target string `json:"target"`
+			Resume *bool  `json:"resume"`
+		}
+		if !decode(w, req, &body) {
+			return
+		}
+		writeAnswer(w, http.StatusOK, r.Compact(caller.record().WSKey, body.Target, body.Resume), nil)
+		return
+	}
 	if strings.HasPrefix(op, "agent.") {
 		// agent.* checks each harness it spawns on itself (spawnableHarness).
 		r.serveAgentToken(w, req, caller, op)
@@ -627,7 +638,7 @@ func (c *conv) takeReport(text string) {
 }
 
 func (c *conv) takeSteer(text string, mark uint64) {
-	if st := controlsFor(c.proc).reports; st != nil && c.turn && !c.rec.Lead && !c.replaying && !c.wrapHold {
+	if st := controlsFor(c.proc).reports; st != nil && c.turn && !c.rec.Lead && !c.replaying && !c.wrapHold && !c.compacting && !c.compactCommand {
 		err := st.Steer(text)
 		if err == nil {
 			c.steerSeq++

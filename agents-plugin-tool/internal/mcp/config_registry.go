@@ -139,8 +139,11 @@ func (e configKeyEntry) RepoKey() string {
 // resolver-backed: its structured per-harness values have their own writer,
 // so it never takes the bucket path.
 func (e configKeyEntry) HarnessBucketed() bool {
-	return e.HarnessApplicable && e.ResolverBacked
+	return e.HarnessStored() && !isCompactionKey(e.Key)
 }
+
+// HarnessStored is the write axis; compaction reads layer-major instead.
+func (e configKeyEntry) HarnessStored() bool { return e.HarnessApplicable && e.ResolverBacked }
 
 // harnessBuckets is the fixed set of harness buckets a harness-bucketed knob
 // stores values under, in listing order. "all" is the stored spelling of the
@@ -243,6 +246,10 @@ func resolveHarnessBucketed(resolver *wsconfig.Resolver, sessionKey, key, harnes
 // family is not represented here — it is generated per discovered override
 // point by promptKnobEntry at catalog-build time (see buildTuningCatalog).
 var configRegistry = []configKeyEntry{
+	compactionKeyEntry("compaction.lead_advisory"),
+	compactionKeyEntry("compaction.lead_hard"),
+	compactionKeyEntry("compaction.worker_advisory"),
+	compactionKeyEntry("compaction.worker_hard"),
 	{
 		Key:        wsconfig.HostedPluginPackageKey,
 		WriterTool: "config.tune",
