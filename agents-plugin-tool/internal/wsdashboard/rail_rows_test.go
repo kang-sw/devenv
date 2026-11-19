@@ -83,7 +83,7 @@ func TestRailRowsClockOnlyLiveness(t *testing.T) {
 	for _, r := range patch.Rows {
 		if r.Key == "livesession" {
 			found = true
-			if strings.Contains(r.HTML, `class="rrun"`) {
+			if strings.Contains(r.HTML, `class="hbr"`) {
 				t.Fatal("clock-stale row still working")
 			}
 		}

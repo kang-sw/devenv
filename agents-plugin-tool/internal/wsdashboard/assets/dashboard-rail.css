@@ -326,33 +326,23 @@ html:not([data-sysopen]) .rail .rsleep { display: none; }
 .rail .when { font-size: 11px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
 .rail .s2 { display: block; margin-top: 1px; font-size: 12px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .rail .s2 .who { font-weight: 700; margin-right: 4px; }
-/* status: the harness icon (a 16px letter square) stays still while the lead
-   works and a blue line travels around its border; it wobbles and hops while
+/* status: the harness badge (.hb, dashboard.css) stays still while the lead
+   works and the spinner ring (.hbr) turns around it; it wobbles and hops while
    it waits on an approval (a static ring stays) and wears a static ring when
-   it has failed. The wrap (.hiw) fits the icon and any running-subagent
+   it has failed. The wrap (.hiw) fits the badge and any running-subagent
    count: the count flows just past the working ring at bottom-right and
    pushes the name right only while present. Open policy items are a 7px
    dot at top-left; favorites are a 10px star at bottom-left, ringed in the
-   row's ground so the badge parts from icon and ring. */
-.rail .hi { position: relative; flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; box-sizing: border-box; border-radius: 3px; font-size: 10px; font-weight: 800; line-height: 1; color: #fff; background: #8a8f98; cursor: default; }
-.rail .hi.claude { background: #D97757; }
-.rail .hi.pi { background: #000; box-shadow: inset 0 0 0 1px #666; }
-.rail .hi.codex { background: #10A37F; }
+   row's ground so the badge parts from badge and ring. */
+.rail .hb { cursor: default; }
 /* a stopped (sleeping) session, one with no harness process: the title muted
-   and the harness icon dimmed, and no second line */
+   and the harness badge dimmed, and no second line */
 .rail .rs.stopped .rid { color: var(--wb-muted-fg); }
-.rail .rs.stopped .hi { opacity: .55; }
+.rail .rs.stopped .hb { opacity: .55; }
 .rail .rs.stopped .s2 { display: none; }
-/* The travelling line: a wedge of a conic fill turning (transform only, so it
-   runs on the compositor) behind a mask that keeps just a thin band around
-   the icon's border. */
-.rail .hi .orb { position: absolute; inset: -2px; padding: 1.5px; border-radius: 5px; overflow: hidden; pointer-events: none;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
-.rail .hi .rrun { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px; background: conic-gradient(var(--wb-primary) 0 24%, transparent 0); animation: rail-orbit 1.3s steps(12) infinite; }
-.rail .hi.perm { box-shadow: 0 0 0 2px var(--wb-perm-ink); animation: rail-nudge 1.5s steps(4) infinite; }
-.rail .hi.err { box-shadow: 0 0 0 2px var(--wb-fail); }
-.rail .hiw { position: relative; flex: none; display: inline-flex; height: 16px; }
+.rail .hb.perm { outline: 2px solid var(--wb-perm-ink); animation: rail-nudge 1.5s steps(4) infinite; }
+.rail .hb.err { outline: 2px solid var(--wb-fail); }
+.rail .hiw { position: relative; flex: none; display: inline-flex; align-items: center; }
 .rail .sbn { position: relative; bottom: -3px; align-self: flex-end; margin-left: 2.5px; font-size: 9px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; color: var(--wb-primary); cursor: default; animation: rail-blink 1.4s steps(4) infinite; }
 .rail .rs { --rs-ground: var(--wb-card); }
 .rail .rs:hover { --rs-ground: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
@@ -366,7 +356,7 @@ html:not([data-sysopen]) .rail .rsleep { display: none; }
    The question dot's z-index keeps it above both overlays. Only the node
    first flagged gets .attn-flash; server replacements are settled. */
 .rail .rs.attn::before { content: ""; position: absolute; inset: 0; border-radius: 6px; pointer-events: none; background: var(--wb-accent-policy); opacity: .12; }
-.rail .rs.attn .hiw::after { content: ""; position: absolute; left: 0; top: 0; width: 16px; height: 16px; border-radius: 3px; pointer-events: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-accent-policy) 45%, transparent); }
+.rail .rs.attn .hiw::after { content: ""; position: absolute; inset: 0; border-radius: 6px; pointer-events: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-accent-policy) 45%, transparent); }
 .rail .rs.attn.attn-flash::before { animation: attn-flash .6s ease-in-out 3; }
 .rail .rs.attn.attn-flash .hiw::after { animation: attn-flash-ring .6s ease-in-out 3; }
 @keyframes attn-flash { 0% { opacity: 0; } 50% { opacity: .38; } 100% { opacity: .12; } }
@@ -374,7 +364,6 @@ html:not([data-sysopen]) .rail .rsleep { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .rail .rs.attn::before, .rail .rs.attn .hiw::after { animation: none !important; }
 }
-@keyframes rail-orbit { to { transform: rotate(360deg); } }
 @keyframes rail-nudge { 0%, 56%, 100% { transform: none; } 10% { transform: translateY(-3px) rotate(-10deg); } 22% { transform: translateY(0) rotate(10deg); } 34% { transform: translateY(-2px) rotate(-8deg); } 46% { transform: translateY(0) rotate(6deg); } }
 @keyframes rail-blink { 50% { opacity: .25; } }
 .rail .rfoot { flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-top: 1px solid var(--wb-muted); font-size: 12px; }
@@ -392,10 +381,6 @@ html:not([data-sysopen]) .rail .rsleep { display: none; }
 .rpop.shp { position: fixed; z-index: calc(var(--z-popovers, 60) + 1); width: 320px; box-sizing: border-box; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); overflow: auto; gap: 9px; pointer-events: none; }
 .rpop.shp * { pointer-events: none; }
 .rpop.shp[hidden] { display: none; }
-.shp .hi { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; border-radius: 4px; font: 800 11px/1 var(--wb-mono, monospace); color: #fff; }
-.shp .hi.claude { background: #D97757; }
-.shp .hi.codex { background: #10A37F; }
-.shp .hi.pi { background: #000; box-shadow: inset 0 0 0 1px #666; }
 .shp-hd { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .shp-nm { font-size: 13px; font-weight: 800; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shp-hd .phase, .shp-hd .chip { margin-left: auto; height: 18px; font-size: 11px; padding: 0 7px 0 6px; gap: 5px; flex: none; }
@@ -531,10 +516,6 @@ dialog.rsleepdlg { line-height: 1.4; }
 .rsleepdlg .rdsleeplist { margin: 0; padding: 4px; list-style: none; max-height: 218px; overflow-y: auto; overscroll-behavior: contain; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); }
 .rsleepdlg .rdsleeplist li { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 5px 6px; border-radius: 6px; }
 .rsleepdlg .rdsleeplist li + li { box-shadow: 0 -1px 0 var(--wb-muted); }
-.rsleepdlg .hi { width: 16px; height: 16px; display: inline-grid; place-items: center; flex: none; border-radius: 3px; font-size: 10px; font-weight: 800; line-height: 1; color: #fff; background: #8a8f98; }
-.rsleepdlg .hi.claude { background: #D97757; }
-.rsleepdlg .hi.codex { background: #10A37F; }
-.rsleepdlg .hi.pi { background: #000; box-shadow: inset 0 0 0 1px #666; }
 .rsleepdlg .who { min-width: 0; flex: 1 1 auto; display: grid; }
 .rsleepdlg .who .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rsleepdlg .who .pj { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -662,7 +643,7 @@ html:not([data-sysopen]) .rail .drarch { display: none; }
   .rail, .rail-open .rail, .rscrim { transition: none; }
   .bgbadge { animation: none; }
   .rail .sbn { animation: none; }
-  .rail .hi .rrun, .rail .hi.perm { animation: none; }
+  .hb .hbr, .rail .hb.perm { animation: none; }
   .rail .kidtog .i { transition: none; }
   .rail .drkwork { animation: none; }
 }

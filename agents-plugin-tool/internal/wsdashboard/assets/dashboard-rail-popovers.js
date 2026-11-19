@@ -1088,8 +1088,7 @@
     function text(el) { return el ? el.textContent : ""; }
     function entry(s) {
       var id = String(s.id || ""), r = rowOf(id), li = mk("li");
-      var cls = s.backend === "claude" || s.backend === "pi" || s.backend === "codex" ? s.backend : "unk";
-      li.appendChild(mk("span", "hi " + cls, { claude: "C", pi: "P", codex: "X" }[cls] || "?"));
+      li.appendChild(mk("span", "hb")).setAttribute("data-h", String(s.backend || ""));
       var who = li.appendChild(mk("span", "who"));
       who.appendChild(mk("span", "nm", text(r && r.querySelector(".rid")) || String(s.label || id)));
       var ws = r && r.closest(".rws"), wt = r && r.closest(".rwt");

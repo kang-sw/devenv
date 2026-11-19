@@ -1,0 +1,53 @@
+<style>
+.hbm{background:#1e1f22;color:#e6e6e6;font:13px system-ui,sans-serif;padding:14px;border-radius:8px;display:flex;gap:28px;flex-wrap:wrap}
+.hbm h4{margin:0 0 8px;font-size:12px;color:#9a9a9a;font-weight:600}
+.hb{display:inline-flex;align-items:center;justify-content:center;width:24px;height:15px;border-radius:4px;font:700 10px/1 ui-monospace,Consolas,monospace;letter-spacing:.2px;flex:none;box-sizing:border-box}
+.hb[data-h=claude]{background:#d97757;color:#fff}
+.hb[data-h=pi]{background:#0b0b0c;color:#e6e6e6;border:1px solid #5a5a5a}
+.hb[data-h=codex]{background:#f2f2f2;color:#1e1f22}
+.hb[data-h=agy]{background:#3b7be8;color:#fff}
+.hb[data-h=unknown]{background:#3a3b3f;color:#9a9a9a}
+.hb.lg{width:30px;height:18px;font-size:12px;border-radius:5px}
+.rail{width:190px;border:1px solid #444;border-radius:6px;padding:6px}
+.row{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:5px}
+.row.sel{background:#2b2d31}
+.row .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+.row .s{font-size:11px;color:#9a9a9a}
+.gut{width:210px;border:1px solid #444;border-radius:6px;padding:6px}
+.g{display:flex;align-items:center;gap:6px;padding:3px 4px;font-size:12px}
+.g .ind{width:12px;color:#666}
+.dot{width:7px;height:7px;border-radius:50%;background:#5cc46a;flex:none}
+.dot.idle{background:#555}
+.old{display:inline-flex;width:18px;height:18px;border-radius:5px;align-items:center;justify-content:center;font:700 11px system-ui;color:#fff}
+</style>
+<div class="hbm">
+ <div><h4>공유 배지 정의 (harness → 라벨·색)</h4>
+  <div class="row"><span class="hb lg" data-h="claude">Cl</span> claude</div>
+  <div class="row"><span class="hb lg" data-h="pi">Pi</span> pi</div>
+  <div class="row"><span class="hb lg" data-h="codex">Co</span> codex</div>
+  <div class="row"><span class="hb lg" data-h="agy">Ag</span> agy</div>
+  <div class="row"><span class="hb lg" data-h="unknown">??</span> 알 수 없음</div>
+ </div>
+ <div><h4>왼쪽 세션 목록</h4>
+  <div class="rail">
+   <div class="row sel"><span class="hb" data-h="claude">Cl</span><span class="t">에이전트v2 리드</span></div>
+   <div class="row"><span class="hb" data-h="codex">Co</span><span class="t">코덱스리드개밥</span><span class="s">2</span></div>
+   <div class="row"><span class="hb" data-h="agy">Ag</span><span class="t">AGY개밥-3</span></div>
+   <div class="row"><span class="hb" data-h="claude">Cl</span><span class="t">에이전트v2클로드개밥</span></div>
+  </div>
+ </div>
+ <div><h4>서브에이전트 gutter</h4>
+  <div class="gut">
+   <div class="g"><span class="dot"></span><span class="hb" data-h="pi">Pi</span>ws call 도구</div>
+   <div class="g"><span class="ind">└</span><span class="dot idle"></span><span class="hb" data-h="pi">Pi</span>리뷰: call 권한</div>
+   <div class="g"><span class="dot"></span><span class="hb" data-h="codex">Co</span>codex.medium 워커</div>
+   <div class="g"><span class="dot idle"></span><span class="hb" data-h="claude">Cl</span>Explore (haiku)</div>
+   <div class="g"><span class="dot"></span><span class="hb" data-h="agy">Ag</span>agy 서브에이전트</div>
+  </div>
+ </div>
+ <div><h4>현재 → 변경</h4>
+  <div class="row"><span class="old" style="background:#d97757">C</span> → <span class="hb" data-h="claude">Cl</span></div>
+  <div class="row"><span class="old" style="background:#2e7d4f">X</span> → <span class="hb" data-h="codex">Co</span></div>
+  <div class="row"><span class="old" style="background:#555">?</span> → <span class="hb" data-h="agy">Ag</span></div>
+ </div>
+</div>

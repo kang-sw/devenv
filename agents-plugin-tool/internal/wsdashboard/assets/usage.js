@@ -99,7 +99,7 @@
       if (text !== undefined) n.textContent = text;
       return n;
     }
-    function icon(entry) { return el("span", "hi " + (entry.harness === "claude" ? "claude" : "codex"), entry.harness === "claude" ? "C" : "X"); }
+    function icon(entry) { var n = el("span", "hb"); n.setAttribute("data-h", String(entry.harness || "")); return n; }
     function clock() {
       var svg = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
       svg.setAttribute("class", "usage-clock"); svg.setAttribute("viewBox", "0 0 16 16"); svg.setAttribute("aria-hidden", "true");
