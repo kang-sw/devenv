@@ -1144,7 +1144,7 @@ func TestPlaybookRenderReturnsResolvedNativeBindings(t *testing.T) {
 	if len(lines) != 4 || !strings.HasSuffix(lines[0], "-model-pb.md") {
 		t.Fatalf("render metadata path/tier shape = %q", responseText)
 	}
-	if got, want := strings.Join(lines[1:], "\n"), "recommended-tier: medium\nrecommended-model: gpt-6-luna\nrecommended-reasoning-effort: xhigh"; got != want {
+	if got, want := strings.Join(lines[1:], "\n"), "recommended-tier: medium\nrecommended-model: gpt-6.1-terra\nrecommended-reasoning-effort: high"; got != want {
 		t.Fatalf("render metadata = %q, want %q", got, want)
 	}
 

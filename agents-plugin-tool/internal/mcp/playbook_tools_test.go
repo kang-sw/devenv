@@ -581,8 +581,8 @@ func TestPlaybookPrintModelAliasPiHarnessFallsBackToDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	if !strings.Contains(body, "gpt-6-luna") {
-		t.Errorf("body %q: expected seeded default medium-tier model gpt-6-luna", body)
+	if !strings.Contains(body, "gpt-6.1-terra") {
+		t.Errorf("body %q: expected seeded default medium-tier model gpt-6.1-terra", body)
 	}
 }
 
