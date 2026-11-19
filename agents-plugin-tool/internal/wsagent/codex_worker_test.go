@@ -18,6 +18,7 @@ import (
 )
 
 const codexWorkerTestEnv = "WSAGENT_CODEX_WORKER_LOG"
+const codexWorkerForceApprovalEnv = "WSAGENT_CODEX_WORKER_FORCE_APPROVAL"
 
 // codexWorkerStandin is the test binary's app-server mode, with no provider
 // access. It logs every input line and behaves as Codex does where the
@@ -81,7 +82,7 @@ func codexWorkerStandin(path string) {
 			turn = fmt.Sprintf("t%d", turns)
 			reply(msg.ID, map[string]any{"turn": map[string]any{"id": turn, "status": "inProgress"}})
 			notify("turn/started", map[string]any{"threadId": sid, "turn": map[string]any{"id": turn, "status": "inProgress"}})
-			if msg.Params.ApprovalPolicy == "never" {
+			if msg.Params.ApprovalPolicy == "never" && os.Getenv(codexWorkerForceApprovalEnv) != "1" {
 				complete()
 				continue
 			}
@@ -130,7 +131,13 @@ func TestCodexWorkerLaunchAuthorityAndApproval(t *testing.T) {
 		t.Run(tc.authority, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "app-server.jsonl")
 			restore := environ
-			environ = func() []string { return append(os.Environ(), codexWorkerTestEnv+"="+path) }
+			environ = func() []string {
+				env := append(os.Environ(), codexWorkerTestEnv+"="+path)
+				if tc.authority == string(PermissionReadOnly) {
+					env = append(env, codexWorkerForceApprovalEnv+"=1")
+				}
+				return env
+			}
 			t.Cleanup(func() { environ = restore })
 			h, got := agentHarness(t, nil)
 			h.runner.Close()
@@ -197,14 +204,20 @@ func TestCodexWorkerLaunchAuthorityAndApproval(t *testing.T) {
 			if len(turn) != 1 || turn[0]["approvalPolicy"] != tc.policy || turn[0]["sandboxPolicy"].(map[string]any)["type"] != tc.kind {
 				t.Fatalf("turn/start: %v", turn)
 			}
-			answered := false
+			answered, declined := false, false
 			for _, line := range agyWorkerLog(t, path) {
 				var raw string
 				_ = json.Unmarshal(line["id"], &raw)
-				answered = answered || (strings.HasPrefix(raw, "req-") && strings.Contains(string(line["result"]), `"accept"`))
+				if strings.HasPrefix(raw, "req-") {
+					answered = answered || strings.Contains(string(line["result"]), `"accept"`)
+					declined = declined || len(line["error"]) > 0 && string(line["error"]) != "null"
+				}
 			}
 			if answered != tc.approved {
 				t.Fatalf("auto-allowed approval = %v, want %v", answered, tc.approved)
+			}
+			if declined != (tc.authority == string(PermissionReadOnly)) {
+				t.Fatalf("declined approval = %v, want %v", declined, tc.authority == string(PermissionReadOnly))
 			}
 
 			// A wake resumes the thread under the same authority.
