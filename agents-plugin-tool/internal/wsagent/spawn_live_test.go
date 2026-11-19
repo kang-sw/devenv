@@ -8,8 +8,50 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
+
+func TestAgentSpawnHostedWorkerRows(t *testing.T) {
+	h := newLeadHarness(t)
+	h.opts.Now = time.Now
+	host := &summarySnapshotHost{}
+	h.opts.LiveHost = host
+	backend := &fakeBackend{}
+	h.opts.Backends[BackendCodex] = BackendRegistration{Backend: backend, LeadProfile: LeadProfileCodex, WorkerCapable: true, WorkerProfile: AgentWorkerProfile(BackendCodex)}
+	h.opts.WSMCP = func(string) (MCPCommand, error) { return MCPCommand{Command: "/unused/ws-mcp"}, nil }
+	if _, err := wsconfig.SetGlobalAgentsTierForHarness(h.opts.Config, "small", "", "codex-small", BackendCodex, "high"); err != nil {
+		t.Fatal(err)
+	}
+	h.start()
+	h.runner.SetEndpoint("http://127.0.0.1:1")
+	lead := h.lead(BackendClaude, LeadOptions{})
+	h.send(lead.ID, "work")
+	h.holder(lead.ID)
+	res, err := h.runner.AgentSpawn(LeadCaller(lead.ID, h.root, BackendClaude, h.opts.Config), AgentSpawnRequest{Prompt: "work", Tier: "codex.small", Authority: "read-only"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := agentID(res.Address)
+	proc := backend.waitProc(t, 0)
+	proc.nextSent(t)
+	waitStatus := func(status string) {
+		t.Helper()
+		eventually(t, "spawn row "+status, func() bool {
+			snap, _ := host.snapshot(wsdashboard.SessionDir(h.dir, lead.ID))
+			for _, row := range snap.Agents {
+				if row.ID == "pi:"+id && row.Status == status {
+					return true
+				}
+			}
+			return false
+		})
+	}
+	waitStatus(wslive.StatusRunning)
+	proc.reply("done")
+	waitStatus(wslive.StatusDone)
+}
 
 // The hosted Claude lead has no intake-fed live session: only its runner's
 // writer can publish these rows. Exercise real spawn/watch/replay plumbing.
