@@ -345,6 +345,10 @@ type Env struct {
 	IsDir func(path string) bool
 	// IsAbs reports whether path is absolute on the server's platform.
 	IsAbs func(path string) bool
+	// SourceRoot is the session's project root, the base a wb:panel
+	// src="..." path resolves against and may not leave (ReadPanelSource).
+	// Empty refuses every src.
+	SourceRoot string
 	// StatusAuthor, when non-empty, makes the call a sub-lead's status-only
 	// write (status.go): only wb:log and new wb:panel commands inside an
 	// existing open topic are accepted, and each log line and panel recap
@@ -771,7 +775,7 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 			case "wb:edit":
 				applyEdit(p, work, origins, cmd, topicOf, mark, env.Now)
 			case "wb:panel":
-				applyPanel(p, work, origins, statusCommand(cmd, env), topicOf, mark, env.Now)
+				applyPanel(p, work, origins, statusCommand(cmd, env), topicOf, mark, env.Now, env.SourceRoot)
 			case "wb:log":
 				applyLog(p, work, statusCommand(cmd, env), topicOf, env.Now)
 			case "wb:state":

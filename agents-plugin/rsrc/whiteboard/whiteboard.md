@@ -26,7 +26,8 @@ The whiteboard is the context a top-level lead shares with its user.
 - The user approved a deliverable → build it without re-asking.
 - Text mockups (HTML/SVG) → save under
   `ai-docs/assets/mockups/YYMMDD/<topic name>/` and include them in your next
-  commit.
+  commit. Write a large mockup as a file there and post it with
+  `wb:panel src="<path>"`; never pass mockup HTML bodies between agents.
 - Confirmed decisions reach a ticket only through
   `{{.SkillNamespace}}:lead-ticket`, once the user moves to capture.
 
@@ -49,7 +50,7 @@ it.
 | command | attributes | content |
 |---|---|---|
 | `wb:topic` | `name`, `label?`, `tickets?` | group; none with `label` or `tickets` alone |
-| `wb:panel` | `recap?`, `id?`, `name?` | payload, or `wb:change` bundles |
+| `wb:panel` | `recap?`, `id?`, `name?`, `src?` | payload, `wb:change` bundles, or none with `src` |
 | `wb:change` | none | one `wb:old` and one `wb:new` |
 | `wb:log` | none | one line of inline Markdown |
 | `wb:add` | `id?`, `class` | `wb:title`, `wb:option`..., `wb:recommend?`, `wb:why?`, `wb:link`... |
@@ -122,6 +123,10 @@ it.
 - A new post needs a `recap`. Same `name` (or `id="pN"`) in the topic → a new
   full version. `wb:change` bundles patch the latest version: `wb:old` must
   match exactly once; empty `wb:new` deletes.
+- `src="<path>"` (empty element, with `recap`) → the server reads the file
+  once and stores its content as the payload; later edits need a new post.
+  Path: in the project, `.html`, `.htm`, `.svg`, or `.md`, at most 2 MiB, a
+  fragment, not a full document. Not with inline content or `wb:change`.
 - Payload: block Markdown with inline HTML, SVG, or canvas script; no full
   HTML document and nothing external. Images: `![alt](path)`, local files.
   A standalone document → a `{{.McpNamespace}}/path.generate` file, linked.

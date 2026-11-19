@@ -284,6 +284,9 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any,
 				return err == nil && info.IsDir()
 			},
 			IsAbs: filepath.IsAbs,
+			// wb:panel src reads inside the session's project root, the root
+			// board images resolve against.
+			SourceRoot: rec.Root,
 		}
 		if sublead != nil {
 			env.StatusAuthor = sublead.author
