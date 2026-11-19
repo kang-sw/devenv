@@ -207,7 +207,7 @@ func TestRenderLeadManualUnderDeclaredHarness(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, harness := range []string{"claude", "agy", ""} {
-		text, err := RenderLeadManual(os.Environ(), root, harness, key)
+		text, err := RenderLeadManual(os.Environ(), root, HostedRender{Harness: harness}, key)
 		if err != nil {
 			t.Fatalf("harness %q: %v", harness, err)
 		}

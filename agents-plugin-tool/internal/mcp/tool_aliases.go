@@ -65,11 +65,19 @@ func (t *toolAliasTable) canonical(name string) string {
 }
 
 // connectionDescriptor is what a hosted conversation's backend registration says
-// about the connection: its tool-name aliases and the harness its workflow
-// manual renders under. The zero value is an ordinary connection.
+// about the connection: its tool-name aliases, the harness its workflow
+// manual renders under, and whether its sessions run without ws's plugin
+// skills (wsagent.BackendRegistration.PlaybookCommands), so that text
+// rendered for it names the ws server and playbook commands. The zero value
+// is an ordinary connection.
 type connectionDescriptor struct {
-	aliases       *toolAliasTable
-	manualHarness string
+	aliases          *toolAliasTable
+	manualHarness    string
+	playbookCommands bool
+	// leadRender marks the throwaway server of a daemon-side render for a
+	// hosted lead (hostedRenderServer): it serves no connection, but renders
+	// as the lead's own daemon-hosted connection would.
+	leadRender bool
 }
 
 // connectionDescriptor reads the descriptor of the backend registration the
@@ -110,6 +118,7 @@ func (s *Server) connectionDescriptor() connectionDescriptor {
 		return s.descriptor
 	}
 	s.descriptor.manualHarness = reg.ManualHarness
+	s.descriptor.playbookCommands = reg.PlaybookCommands
 	names := make([]string, 0, len(tools()))
 	for _, tool := range tools() {
 		if name, _ := tool["name"].(string); name != "" {

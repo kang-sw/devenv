@@ -39,6 +39,14 @@ type BackendRegistration struct {
 	// ManualHarness is the harness name the hosted lead's workflow manual
 	// renders under; "" renders with none.
 	ManualHarness string
+	// PlaybookCommands marks a backend whose hosted sessions run without
+	// ws's plugin skills and reach ws only as the ReservedMCPServer server.
+	// Its hosted lead offers the package's lead playbooks as dashboard
+	// commands (Options.PlaybookCommands), which the runner expands into
+	// the playbook body (Options.ExpandCommand), and text ws renders for
+	// its sessions names that server and those commands instead of the
+	// package's tool and skill namespace.
+	PlaybookCommands bool
 }
 
 // ToolNameSchemeSanitize spells a dotted ws tool name the way the Pi bridge

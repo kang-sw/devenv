@@ -355,12 +355,38 @@ func (s *Server) GlobalConfigPath() (string, error) {
 // noAgentMode reports whether the caller runs the agentless profile.
 func (s *Server) noAgentMode() bool { return envFlagOn(s.getenv(envNoAgent)) }
 
-// runtimeNamespace is the caller's tool namespace, "ws" by default.
+// runtimeNamespace is the caller's tool namespace, "ws" by default. A
+// connection whose sessions reach ws only as the daemon's own server
+// (connectionDescriptor.playbookCommands) names that server, whatever
+// package serves it: its host lists the tools under that name.
 func (s *Server) runtimeNamespace() string {
+	if s.connectionDescriptor().playbookCommands {
+		return wsagent.ReservedMCPServer
+	}
 	if value := strings.TrimSpace(s.getenv(envNamespace)); value != "" {
 		return value
 	}
 	return "ws"
+}
+
+// skillRef names the lead skill name as the caller invokes it: the
+// namespaced skill (ws:lead-run), or, on a connection whose sessions have no
+// ws skills (connectionDescriptor.playbookCommands), the dashboard command
+// that runs its playbook (/lead-run).
+func (s *Server) skillRef(name string) string {
+	if s.connectionDescriptor().playbookCommands {
+		return "/" + name
+	}
+	return s.runtimeNamespace() + ":" + name
+}
+
+// namespaced resolves a "{{ns}}" text (whiteboard_text.go): "{{ns}}:<skill>"
+// through skillRef, every other "{{ns}}" to the runtime namespace.
+func (s *Server) namespaced(text string) string {
+	if s.connectionDescriptor().playbookCommands {
+		text = strings.ReplaceAll(text, "{{ns}}:", "/")
+	}
+	return withNamespace(text, s.runtimeNamespace())
 }
 
 // cliCommandName is CLICommandName for the caller process.

@@ -22,7 +22,7 @@ import (
 
 const (
 	piMCPOnlySpawn    = "`ws/agent.spawn` (tier: the resolved capability tier, not a model name; authority: at most your own)"
-	piMCPOnlyExplore  = "a `ws/agent.spawn` subagent at tier small with read-only authority"
+	piMCPOnlyExplore  = "a read-only `ws/agent.spawn` subagent"
 	piMCPOnlyContinue = "ws/mailbox.send to the address agent.spawn returned"
 )
 

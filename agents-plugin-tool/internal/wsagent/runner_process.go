@@ -98,7 +98,7 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 			c.systemPrompt = string(raw)
 		}
 		var err error
-		instructions, err = composeInstructions(c.dir, rec, def, c.systemPrompt)
+		instructions, err = composeInstructions(c.dir, rec, def, c.systemPrompt, c.r.subagentSteer(rec))
 		if err != nil {
 			return err
 		}
@@ -254,7 +254,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 			// carries the key and the manual in its prompt. Pi leads get
 			// them from their extension, or from its bridge fallback
 			// (writePiLeadBridge, LeadSpec.Manual).
-			if instructions, err = composeLeadInstructions(c.dir, rec, c.leadManual(rec)); err != nil {
+			if instructions, err = composeLeadInstructions(c.dir, rec, c.leadManual(rec), c.r.subagentSteer(rec), c.r.opts.Backends[rec.Backend].PlaybookCommands); err != nil {
 				return err
 			}
 		}
@@ -725,9 +725,10 @@ func (c *conv) persistSeq() {
 // composeInstructions writes the instruction file a process appends to the
 // harness's own system prompt: agent.spawn's system prompt, the profile's
 // instruction file or builtin text and, when the profile allows ws tools,
-// the conversation's ws session key. It returns "" when there is nothing
-// to append.
-func composeInstructions(dir string, rec Record, p Profile, system string) (string, error) {
+// the conversation's ws session key followed by steer, the native-subagent
+// line (Runner.subagentSteer; "" for none). It returns "" when there is
+// nothing to append.
+func composeInstructions(dir string, rec Record, p Profile, system, steer string) (string, error) {
 	var parts []string
 	if text := strings.TrimSpace(system); text != "" {
 		parts = append(parts, text)
@@ -742,7 +743,11 @@ func composeInstructions(dir string, rec Record, p Profile, system string) (stri
 		parts = append(parts, strings.TrimSpace(string(raw)))
 	}
 	if len(p.WSTools) > 0 {
-		parts = append(parts, fmt.Sprintf("Your ws session key is `%s`. Pass it as the `session_key` argument of every ws tool call.", rec.WSKey))
+		key := fmt.Sprintf("Your ws session key is `%s`. Pass it as the `session_key` argument of every ws tool call.", rec.WSKey)
+		if steer != "" {
+			key += " " + steer
+		}
+		parts = append(parts, key)
 	}
 	if len(parts) == 0 {
 		return "", nil
@@ -758,11 +763,26 @@ func composeInstructions(dir string, rec Record, p Profile, system string) (stri
 // agy, Codex) appends to its system prompt: the session key the daemon minted for
 // it and, when one rendered, its workflow manual. This prompt teaches both
 // from the first turn without depending on a plugin or a tool call. The
-// manual is a snapshot of this launch.
-func composeLeadInstructions(dir string, rec Record, manual string) (string, error) {
+// manual is a snapshot of this launch. steer is the native-subagent line
+// (Runner.subagentSteer; "" for none). commands marks a lead whose backend
+// has BackendRegistration.PlaybookCommands: it has no ws skills, so the
+// prompt says what a `/lead-*` reference is, and the manual it carries is
+// the only copy it is told to read.
+func composeLeadInstructions(dir string, rec Record, manual, steer string, commands bool) (string, error) {
 	text := fmt.Sprintf("Your ws session key is `%s`. Pass it as the `session_key` argument of every ws tool call. "+
 		"This hosted session already has a key; do not mint a replacement (no ferrule call, no fresh-bootstrap key). ", rec.WSKey)
-	if manual = strings.TrimSpace(manual); manual != "" {
+	if steer != "" {
+		text += steer + " "
+	}
+	if commands {
+		text += "This session has no ws skills: a `/<name>` reference such as `/lead-run` names a workflow playbook. " +
+			"The user runs one as that dashboard command, which sends you its playbook; you run one by reading it with the ws `playbook.read` tool and following it. "
+	}
+	if manual = strings.TrimSpace(manual); manual != "" && commands {
+		text += "The workflow manual below is binding; its session state is as of this session's start. " +
+			"It stays in this prompt, compactions included, so do not read it again with the workflow_manual tool: " +
+			"for fresh session state, and where the manual says to invoke `/lead-revive`, call the ws `workflow_state` tool with this key.\n\n" + manual
+	} else if manual != "" {
 		text += "The workflow manual below is binding; its session state is as of this session's start. " +
 			"After any compaction, or when you need fresh session state, call the workflow_manual tool with this key and follow it.\n\n" + manual
 	} else {

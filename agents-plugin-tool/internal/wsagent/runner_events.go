@@ -42,11 +42,12 @@ func (c *conv) handle(ev Event) {
 		c.harnessReported(*ev.Harness, quiet)
 	case ev.Live != nil:
 		if ev.Live.Kind == wslive.KindCommands {
-			// The list is offered without the commands of unsupported items;
-			// the dashboard runs only a command the list holds.
+			// The list is offered without the commands of unsupported items
+			// and with the lead's playbook commands; the dashboard runs only
+			// a command the list holds.
 			live := *ev.Live
 			c.commands = slices.Clone(live.Commands)
-			live.Commands = allowedCommands(live.Commands, c.caps)
+			live.Commands = c.r.withPlaybookCommands(c.rec, allowedCommands(live.Commands, c.caps))
 			ev.Live = &live
 		}
 		if !quiet && ev.Live.Kind == wslive.KindCompact && ev.Live.Phase == wslive.CompactStart {
@@ -889,10 +890,10 @@ func (c *conv) harnessReported(report HarnessReport, quiet bool) {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: harness version %q (verified %s..%s) runs on %s's capabilities; demoted by its init: %v\n",
 			c.rec.ReplyID, report.Version, caps.Oldest, caps.Newest, caps.ProfileVersion, caps.Demoted)
 	}
-	before := allowedCommands(c.commands, c.caps)
+	before := c.r.withPlaybookCommands(c.rec, allowedCommands(c.commands, c.caps))
 	c.setStatus(func() { c.caps = &caps })
 	if c.commands != nil {
-		if after := allowedCommands(c.commands, c.caps); !slices.Equal(after, before) {
+		if after := c.r.withPlaybookCommands(c.rec, allowedCommands(c.commands, c.caps)); !slices.Equal(after, before) {
 			c.apply(wslive.Event{Kind: wslive.KindCommands, Commands: after}, quiet)
 		}
 	}

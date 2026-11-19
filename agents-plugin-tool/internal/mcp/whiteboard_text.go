@@ -102,14 +102,14 @@ func applyWhiteboardVariants(s *Server, rsrcRoot fs.FS, name, body string, enabl
 	}
 	switch name {
 	case workflowManualPlaybookName:
-		body = replaceOrAppend(body, lineDiscussionNoCounter, withNamespace(lineDiscussionStoreCounter, s.runtimeNamespace()))
+		body = replaceOrAppend(body, lineDiscussionNoCounter, s.namespaced(lineDiscussionStoreCounter))
 		section, err := whiteboardManualSection(s, rsrcRoot)
 		if err != nil {
 			return "", err
 		}
 		body = strings.TrimRight(body, "\n") + "\n\n" + section
 	case "lead-discuss":
-		body = replaceOrAppend(body, lineDiscussNotPersisted, "No block format and no queue.\n  "+withNamespace(whiteboardCaptureLine, s.runtimeNamespace()))
+		body = replaceOrAppend(body, lineDiscussNotPersisted, "No block format and no queue.\n  "+s.namespaced(whiteboardCaptureLine))
 	}
 	return body, nil
 }
@@ -123,7 +123,7 @@ func whiteboardManualSection(s *Server, rsrcRoot fs.FS) (string, error) {
 		return "", fmt.Errorf("render %s playbook: %w", whiteboardPlaybookName, err)
 	}
 	var sb strings.Builder
-	sb.WriteString(withNamespace(whiteboardManualMandate, s.runtimeNamespace()))
+	sb.WriteString(s.namespaced(whiteboardManualMandate))
 	inFence := false
 	for _, line := range strings.Split(strings.TrimSpace(playbook), "\n") {
 		if strings.HasPrefix(line, "```") {

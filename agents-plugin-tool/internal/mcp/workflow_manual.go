@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
 
@@ -546,45 +545,3 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	return toolTextResponse(id, workflowManualReadFullNotice+"\n\n"+body+"\n", nil)
 }
 
-// RenderLeadManual renders the workflow manual of the hosted lead whose key
-// is key, as workflow_manual returns it on that session's own connection:
-// env is the environment its ws-mcp serves under (the selected package's
-// resource tree and policy), root its project root, and harness the harness
-// its backend registration declares for the manual ("" for none). The daemon appends the result
-// to the lead's system prompt at each launch, so the session reads the
-// manual from its first turn. The render serves no harness process, so it is
-// never a hosted session itself.
-func RenderLeadManual(env []string, root, harness, key string) (string, error) {
-	kept := make([]string, 0, len(env))
-	for _, kv := range env {
-		name, _, _ := strings.Cut(kv, "=")
-		switch strings.ToUpper(name) {
-		case envHostedSession, envHostedSessionKey, envHostedSessionRow, envHarnessPID:
-			continue
-		}
-		kept = append(kept, kv)
-	}
-	s := NewServerWithOptions(ServerOptions{Root: root, Env: kept, Harness: harness, Diag: io.Discard})
-	// The render serves no harness process, so its harness is declared here,
-	// not detected: a name the detection list does not know (agy) still
-	// selects the manual's overlay.
-	s.descriptor, s.descriptorResolved = connectionDescriptor{manualHarness: harness}, true
-	// The render may start the session-start tracker check (a background
-	// fetch); this throwaway server is released once that settles, without
-	// holding up the launch.
-	defer func() { go func() { s.tracker.checks.Wait(); s.Close() }() }()
-	if _, ok := s.sessions.lookup(key); !ok {
-		return "", fmt.Errorf("workflow manual: session key %q has no record", key)
-	}
-	resp := s.handleWorkflowManual(nil, map[string]any{"session_key": key})
-	text := ""
-	if result, ok := resp.Result.(map[string]any); ok {
-		if content, ok := result["content"].([]map[string]string); ok && len(content) > 0 {
-			text = content[0]["text"]
-		}
-	}
-	if responseIsError(resp) {
-		return "", fmt.Errorf("workflow manual: %s", text)
-	}
-	return strings.TrimSpace(strings.TrimPrefix(text, workflowManualReadFullNotice)), nil
-}

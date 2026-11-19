@@ -277,7 +277,7 @@ func TestRenderLeadManual(t *testing.T) {
 	// The daemon's environment may carry another session's hosted
 	// variables; as that session's connection the render would refuse key.
 	hostedSessionEnv(t, other)
-	text, err := RenderLeadManual(os.Environ(), root, "claude", key)
+	text, err := RenderLeadManual(os.Environ(), root, HostedRender{Harness: "claude"}, key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestRenderLeadManual(t *testing.T) {
 		t.Fatalf("the render is not the manual for %q:\n%s", key, text)
 	}
 
-	if _, err := RenderLeadManual(os.Environ(), root, "claude", "never-minted-key"); err == nil || !strings.Contains(err.Error(), "has no record") {
+	if _, err := RenderLeadManual(os.Environ(), root, HostedRender{Harness: "claude"}, "never-minted-key"); err == nil || !strings.Contains(err.Error(), "has no record") {
 		t.Fatalf("an unknown key must fail the render: %v", err)
 	}
 }

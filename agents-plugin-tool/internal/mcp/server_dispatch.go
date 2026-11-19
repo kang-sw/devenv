@@ -1535,73 +1535,13 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 		return toolTextResponse(req.ID, text, nil)
 	case "playbook.read":
-		// Phase 2: name + context; rsrc root is call-site-overridable seam for M3.
-		// Argument parsing is named/extensible (not positional) for forward-compat
-		// with M3's session_key prepend.
 		name, _ := params.Arguments["name"].(string)
-		callerContext := stringMapArgument(params.Arguments["context"])
-		// M3 forward-compat: rsrc root resolved here so M3 can pass root_override.
-		rsrcRoot, err := s.resolveRsrcRoot("")
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		// Build an override lookup from the session-keyed resolver when a session_key
-		// is present.
 		keyStr, _ := params.Arguments["session_key"].(string)
-		// Provide the render-time {{.MailboxWaitCommand}} value (concrete when the
-		// key resolves an owned mailbox identity, generic otherwise) for the one
-		// stem whose body substitutes it. Because it is a reserved implicit var,
-		// any path that substitutes the body must supply it or substitution fails
-		// with ErrUnprovidedVar — so the render dispatch below gates on the same
-		// stem to keep playbook.render of this stem from failing closed.
-		if name == mailboxWaitPlaybookName {
-			callerContext = s.injectMailboxWaitCommand(callerContext, keyStr)
-		}
-		printOverrideLookup, err := buildOverrideLookup(s, keyStr)
+		text, err := s.readPlaybook(name, keyStr, stringMapArgument(params.Arguments["context"]))
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		// Resolve workflow.lang for language-binding injection.
-		printLangResolver := s.sessionResolver(keyStr, nil)
-		printWorkflowLangRV, err := printLangResolver.Get(keyStr, wsconfig.ItemWorkflowLang)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		printProfile, err := s.callerPlaybookProfile(keyStr)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		body, recommendedTier, err := printPlaybookForCaller(s, strings.TrimSpace(keyStr), printProfile, rsrcRoot, name, callerContext, s.configOptions(), printWorkflowLangRV.Value, printOverrideLookup)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		// The remaining manual/discussion knob variants run after rendering;
-		// ticket knob markers resolve in the shared render core.
-		knobResolver := s.sessionResolver(keyStr, builtinConfigDefaults())
-		whiteboardOn, err := s.whiteboardEnabled(&knobResolver, keyStr)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		trackerOn, err := s.trackerEnabled(&knobResolver, keyStr)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		// The tracker section is never a spawned key's (as workflow_manual
-		// renders it); its tools refuse that key, except a store's support
-		// conversation, which the tracker gate admits.
-		if entry, found := s.lookupSession(keyStr); found && trackerOn && !entry.isTopLevelLead() && !s.trackerSupportReadsTracker(keyStr, entry) {
-			trackerOn = false
-		}
-		body, err = applyKnobVariants(s, rsrcRoot, name, body, whiteboardOn, trackerOn)
-		if err != nil {
-			return toolTextResponse(req.ID, "", err)
-		}
-		if name == whiteboardPlaybookName || name == trackerPlaybookName {
-			if body, err = appendCommandSyntax(rsrcRoot, body); err != nil {
-				return toolTextResponse(req.ID, "", err)
-			}
-		}
-		return toolTextResponse(req.ID, withRecommendedTier(body, recommendedTier)+"\n", nil)
+		return toolTextResponse(req.ID, text+"\n", nil)
 
 	case "playbook.render":
 		// Phase 2c: name + context + root_override; child-key mint for lead callers.
