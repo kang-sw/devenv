@@ -254,20 +254,24 @@ func codexMode(mode string) (sandbox, policy string, err error) {
 const codexWorkerClientVersion = "worker"
 
 // codexWorkerMode maps a spawned child's authority to a sandbox and an
-// approval policy. Write authority (workdir-write, full) runs in the
-// workspace-write sandbox with on-request approvals, which the runner's
-// WorkerAutoApprove answers and traces: the confinement is advisory, not
-// enforced. Read-only starts in Codex's native read-only sandbox with
-// approval policy never, so Codex refuses an escalation itself and no
-// request reaches the auto-allow; codexMode would give on-request and let the
-// auto-allow run escalated commands outside the sandbox. A worker with no
-// authority is refused rather than started with a guess.
+// approval policy. Workdir-write runs in the workspace-write sandbox with
+// on-request approvals, which the runner's WorkerAutoApprove answers and
+// traces: the confinement is advisory, not enforced. Full authority keeps
+// those on-request approvals but uses Codex's danger-full-access sandbox, as
+// full already means unrestricted authority. Read-only starts in Codex's
+// native read-only sandbox with approval policy never, so Codex refuses an
+// escalation itself and no request reaches the auto-allow; codexMode would
+// give on-request and let the auto-allow run escalated commands outside the
+// sandbox. A worker with no authority is refused rather than started with a
+// guess.
 func codexWorkerMode(level PermissionLevel) (sandbox, policy string, err error) {
 	switch level {
 	case PermissionReadOnly:
 		return "read-only", "never", nil
-	case PermissionWorkdirWrite, PermissionFull:
+	case PermissionWorkdirWrite:
 		return "workspace-write", "on-request", nil
+	case PermissionFull:
+		return "danger-full-access", "on-request", nil
 	}
 	return "", "", fmt.Errorf("a worker needs an authority (read-only, workdir-write or full); got %q", level)
 }

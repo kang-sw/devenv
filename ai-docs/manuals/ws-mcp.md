@@ -1047,10 +1047,11 @@ from a support conversation:
   An `agent.spawn` worker (`agent-worker-codex`, tiers `codex.<tier>`) uses
   the same start with no holder and no lead spec, as agy workers do: the
   runner sets `StartSpec.PermissionLevel` from the child's authority.
-  Write authority (`workdir-write`, `full`) runs in the `workspace-write`
-  sandbox with approval policy `on-request`, which `WorkerAutoApprove`
-  answers and traces; read-only runs in the native `read-only` sandbox with
-  policy `never` on `thread/start` and every `turn/start`, so Codex refuses
+  Workdir-write authority runs in the `workspace-write` sandbox with approval
+  policy `on-request`, which `WorkerAutoApprove` answers and traces; full
+  authority uses the `danger-full-access` sandbox with the same approval
+  policy; read-only runs in the native `read-only` sandbox with policy
+  `never` on `thread/start` and every `turn/start`, so Codex refuses
   an escalation itself and nothing reaches the auto-allow. Both are
   advisory: the sandbox does not confine a user-config MCP server shell, and
   a worker's sandbox is not changed after spawn.

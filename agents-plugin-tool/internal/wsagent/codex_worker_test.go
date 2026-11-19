@@ -238,7 +238,7 @@ func TestCodexWorkerModeAndStartRefusals(t *testing.T) {
 	for level, want := range map[PermissionLevel][2]string{
 		PermissionReadOnly:     {"read-only", "never"},
 		PermissionWorkdirWrite: {"workspace-write", "on-request"},
-		PermissionFull:         {"workspace-write", "on-request"},
+		PermissionFull:         {"danger-full-access", "on-request"},
 	} {
 		if sandbox, policy, err := codexWorkerMode(level); err != nil || sandbox != want[0] || policy != want[1] {
 			t.Errorf("%s: %s %s %v", level, sandbox, policy, err)

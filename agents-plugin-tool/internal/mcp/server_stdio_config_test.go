@@ -247,7 +247,7 @@ func TestServeStdioConfigResolveAgentFallsBackToDefault(t *testing.T) {
 	if err := json.Unmarshal([]byte(toolText(t, byID["2"])), &result); err != nil {
 		t.Fatalf("decode config.resolve_agent response: %v", err)
 	}
-	if result.Backend != "codex" || result.Model != "gpt-6-luna" || result.Effort != "xhigh" {
+	if result.Backend != "codex" || result.Model != "gpt-6.1-terra" || result.Effort != "high" {
 		t.Fatalf("result = %#v, want the seeded default medium tier", result)
 	}
 	if result.ResolvedFrom != "default" {
@@ -276,7 +276,7 @@ func TestServeStdioConfigResolveAgentNoDetectedHarnessFallsBackToDefault(t *test
 	if err := json.Unmarshal([]byte(toolText(t, byID["1"])), &result); err != nil {
 		t.Fatalf("decode config.resolve_agent response: %v", err)
 	}
-	if result.Backend != "codex" || result.Model != "gpt-6-luna" || result.Effort != "xhigh" {
+	if result.Backend != "codex" || result.Model != "gpt-6.1-terra" || result.Effort != "high" {
 		t.Fatalf("result = %#v, want the seeded default medium tier", result)
 	}
 	if result.ResolvedFrom != "default" {
@@ -297,10 +297,10 @@ func TestServeStdioConfigResolveAgentUsesDefaultCodexTierTable(t *testing.T) {
 	for i, tc := range []struct {
 		tier, model, effort string
 	}{
-		{"small", "gpt-6-luna", "high"},
-		{"medium", "gpt-6-luna", "xhigh"},
-		{"large", "gpt-6-sol", "high"},
-		{"xlarge", "gpt-6-sol", "xhigh"},
+		{"small", "gpt-5.6-luna", "high"},
+		{"medium", "gpt-6.1-terra", "high"},
+		{"large", "gpt-6.2-sol", "high"},
+		{"xlarge", "gpt-6.2-sol", "xhigh"},
 	} {
 		var out bytes.Buffer
 		input := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"config.resolve_agent","arguments":{"tier":%q,"format":"json"}}}`, tc.tier)
@@ -768,8 +768,8 @@ func TestServeStdioCodexMetadataDetectsHarnessForAgentAlias(t *testing.T) {
 	if err := json.Unmarshal([]byte(toolText(t, byID["2"])), &resolved); err != nil {
 		t.Fatalf("decode config.resolve_agent response: %v", err)
 	}
-	if resolved.ResolvedFrom != "codex" || resolved.Backend != "codex" || resolved.Model != "gpt-6-luna" {
-		t.Fatalf("resolved = %#v, want resolved_from/backend codex and model gpt-6-luna", resolved)
+	if resolved.ResolvedFrom != "codex" || resolved.Backend != "codex" || resolved.Model != "gpt-6.1-terra" {
+		t.Fatalf("resolved = %#v, want resolved_from/backend codex and model gpt-6.1-terra", resolved)
 	}
 }
 
