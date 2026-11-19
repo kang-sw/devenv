@@ -1036,9 +1036,9 @@ func renderPlaybookBody(s *Server, rsrcRoot fs.FS, name string, callerContext ma
 func renderPlaybookBodyForCaller(s *Server, callerKey, profile string, rsrcRoot fs.FS, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
 	harness := s.playbookHarness()
 	descriptor := s.connectionDescriptor()
-	// A connection whose sessions have no ws skills (playbookCommands)
-	// belongs to a session under the native-subagent removal policy, or to
-	// one steered off its native tool: it delegates through agent.spawn.
+	// A hosted lead with no ws skills (playbookCommands) is under the
+	// native-subagent removal policy (wsagent.RemovesSubagents): it
+	// delegates through agent.spawn, where its connection allows it.
 	daemonAgentClient := (harness == "pi" && s.clientPiDaemonAgents()) || descriptor.playbookCommands || s.callerDaemonAgents(callerKey)
 	daemonAgents := daemonAgentClient && s.agentListed() && s.toolAllowed("agent.spawn") && s.toolAllowed("mailbox.send")
 	terminology := playbookTerminology(harness, daemonAgents, s.runtimeNamespace())

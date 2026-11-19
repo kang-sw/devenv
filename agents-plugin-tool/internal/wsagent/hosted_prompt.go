@@ -58,7 +58,8 @@ func (r *Runner) subagentSteer(rec Record) string {
 // playbookCommands is the lead playbook command list a hosted lead of
 // backend offers (Options.PlaybookCommands), nil for a backend without
 // BackendRegistration.PlaybookCommands. It is read at the first need and
-// kept: an error is logged once and offers none until the daemon restarts.
+// kept; a failed read is logged, offers none, and is retried at the next
+// need.
 func (r *Runner) playbookCommands(backend string) []wslive.SlashCommand {
 	if !r.opts.Backends[backend].PlaybookCommands || r.opts.PlaybookCommands == nil {
 		return nil
@@ -66,11 +67,12 @@ func (r *Runner) playbookCommands(backend string) []wslive.SlashCommand {
 	r.playbookMu.Lock()
 	defer r.playbookMu.Unlock()
 	if !r.playbookLoaded {
-		r.playbookLoaded = true
 		list, err := r.opts.PlaybookCommands()
 		if err != nil {
 			fmt.Fprintf(r.opts.Log, "agent runner: no playbook commands: %v\n", err)
+			return nil
 		}
+		r.playbookLoaded = true
 		for _, cmd := range list {
 			cmd.Source, cmd.Layer = PlaybookCommandSource, ""
 			r.playbookCmds = append(r.playbookCmds, cmd)
@@ -91,8 +93,10 @@ func (r *Runner) withPlaybookCommands(rec Record, list []wslive.SlashCommand) []
 	if len(cmds) == 0 {
 		return list
 	}
+	// A list a snapshot kept may hold an earlier runner's playbook
+	// commands; they are replaced whole.
 	out := slices.DeleteFunc(slices.Clone(list), func(c wslive.SlashCommand) bool {
-		return slices.ContainsFunc(cmds, func(p wslive.SlashCommand) bool { return p.Name == c.Name })
+		return c.Source == PlaybookCommandSource || slices.ContainsFunc(cmds, func(p wslive.SlashCommand) bool { return p.Name == c.Name })
 	})
 	return append(out, cmds...)
 }

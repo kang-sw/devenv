@@ -17,10 +17,8 @@ import (
 // server and has no ws skills, so its manual and playbooks name `ws/`
 // tools whatever package the daemon serves, a skill reference is the
 // `/lead-*` dashboard command, delegation is agent.spawn's (no Claude
-// native-spawn overlay, the Explore role carries no doubled tier phrase),
-// and the manual does not send the session back to workflow_manual for a
-// copy it already holds. The same lead without PlaybookCommands renders as
-// before.
+// native-spawn overlay, the Explore role carries no doubled tier phrase).
+// The same lead without PlaybookCommands renders as before.
 func TestHostedPlaybookCommandRender(t *testing.T) {
 	setupWorkflowManualNoteEnv(t)
 	t.Setenv(envNamespace, "wsflow")

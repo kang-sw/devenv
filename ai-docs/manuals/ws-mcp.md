@@ -990,13 +990,16 @@ from a support conversation:
   tool and to delegate through `agent.spawn`/`mailbox.send`
   (`Runner.subagentSteer`); a worker gets it after its key sentence.
 - **Playbook commands.** A backend with `PlaybookCommands` (Claude, agy)
-  hosts leads with no ws skills: its connection renders under the `ws`
-  server's names whatever package the daemon serves, a `{{ns}}:lead-*`
-  skill reference renders as the `/lead-*` dashboard command, and
-  delegation renders as `agent.spawn`. The runner adds the package's
-  self-preloading lead skills (`wsrsrc.PreloadCommands`, read once per
-  runner, the workflow manual's own left out) to the lead's command list,
-  replacing a harness command of the same name. Running one sends the
+  hosts leads with no ws skills: the lead's connection (not a worker's)
+  renders under the `ws` server's names whatever package the daemon
+  serves, a `{{ns}}:lead-*` skill reference renders as the `/lead-*`
+  dashboard command, and delegation renders as `agent.spawn`. Its prompt
+  says what a `/lead-*` reference is and keeps the manual it carries as
+  the only copy: for fresh state, and in place of `/lead-revive`, the lead
+  calls `workflow_state`. The runner adds the package's self-preloading
+  lead skills (`wsrsrc.PreloadCommands`, read once per runner, the workflow
+  manual's own left out) to the lead's command list, at creation and at a
+  rejoin, replacing a harness command of the same name. Running one sends the
   playbook the daemon renders for the lead's key (`RenderLeadPlaybook`, the
   same text as `playbook.read` on its connection) as the turn; a failed
   render sends a pointer to `playbook.read`. The page's user entry stays the

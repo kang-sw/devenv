@@ -603,6 +603,13 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		tokens := float64(*usage.Context.Tokens)
 		c.contextTokens = &tokens
 	}
+	if seed == nil && rec.Lead {
+		// A rejoined lead's list is its snapshot's, which an earlier daemon
+		// may have written without this runner's playbook commands.
+		if merged := r.withPlaybookCommands(rec, own.Commands); !slices.Equal(merged, own.Commands) {
+			seed = merged
+		}
+	}
 	if len(seed) > 0 {
 		c.live.applyQuiet(wslive.Event{Kind: wslive.KindCommands, Commands: seed})
 	}

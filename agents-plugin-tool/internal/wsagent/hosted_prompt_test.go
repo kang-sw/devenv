@@ -100,6 +100,7 @@ func TestHostedLeadPlaybookCommands(t *testing.T) {
 		}
 		return "\n# Lead Run\nbody\n", nil
 	}
+	h.opts.LeadManual = (&leadManualRender{text: "\n# Workflow Manual\nrendered\n"}).render
 	h.start()
 
 	playbooks := []wslive.SlashCommand{
@@ -118,10 +119,16 @@ func TestHostedLeadPlaybookCommands(t *testing.T) {
 	key := h.record(id).WSKey
 	merged := append([]wslive.SlashCommand{{Name: "compact", Description: "Free up context"}}, playbooks...)
 	eventually(t, "the merged command list", func() bool { return slices.Equal(h.snapshot(id).Commands, merged) })
-	prompt := appendedPrompt(t, h.holders.spawned(holder).Argv)
-	if !strings.HasPrefix(prompt, leadKeySentence(key)+"Never use the native `Agent` tool. Start a subagent only with the ws `agent.spawn` tool") ||
-		!strings.Contains(prompt, "This session has no ws skills: a `/<name>` reference such as `/lead-run` names a workflow playbook.") {
-		t.Fatalf("the lead prompt carries no steer or command note:\n%s", prompt)
+	wantPrompt := leadKeySentence(key) +
+		"Never use the native `Agent` tool. Start a subagent only with the ws `agent.spawn` tool, and continue one with the ws `mailbox.send` tool. " +
+		"This session has no ws skills: a `/<name>` reference such as `/lead-run` names a workflow playbook. " +
+		"The user runs one as that dashboard command, which sends you its playbook; you run one by reading it with the ws `playbook.read` tool and following it. " +
+		"The workflow manual below is binding; its session state is as of this session's start. " +
+		"It stays in this prompt, compactions included, so do not read it again with the workflow_manual tool: " +
+		"for fresh session state, and where the manual says to invoke `/lead-revive`, call the ws `workflow_state` tool with this key.\n\n" +
+		"# Workflow Manual\nrendered\n"
+	if prompt := appendedPrompt(t, h.holders.spawned(holder).Argv); prompt != wantPrompt {
+		t.Fatalf("lead prompt =\n%s\nwant\n%s", prompt, wantPrompt)
 	}
 	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
 	h.idle(id)
@@ -159,5 +166,38 @@ func TestHostedLeadPlaybookCommands(t *testing.T) {
 	}
 	if n := loads.Load(); n != 1 {
 		t.Fatalf("the playbook command list is read once per runner: %d reads", n)
+	}
+
+	// A rejoined lead offers the new runner's playbook commands, in place of
+	// the earlier runner's, beside the harness commands its snapshot kept,
+	// without waiting for a new launch.
+	h.opts.PlaybookCommands = func() ([]wslive.SlashCommand, error) {
+		return []wslive.SlashCommand{{Name: "lead-run", Description: "Run a ticket"}, {Name: "lead-ship", Description: "Ship"}}, nil
+	}
+	h.restart()
+	rejoined := []wslive.SlashCommand{
+		{Name: "compact", Description: "Free up context"},
+		{Name: "lead-run", Description: "Run a ticket", Source: PlaybookCommandSource}, {Name: "lead-ship", Description: "Ship", Source: PlaybookCommandSource},
+	}
+	if got := h.snapshot(id).Commands; !slices.Equal(got, rejoined) {
+		t.Fatalf("rejoined command list = %+v, want %+v", got, rejoined)
+	}
+}
+
+// TestAgentChildPromptCarriesTheSteer: an agent.spawn child of a backend
+// whose catalog names its native subagent tool gets the never-use line
+// right after its key sentence.
+func TestAgentChildPromptCarriesTheSteer(t *testing.T) {
+	h, _ := agentHarness(t, func(o *Options) {
+		reg := o.Backends[BackendClaude]
+		reg.Catalog = ClaudeCatalog()
+		o.Backends[BackendClaude] = reg
+	})
+	a, _ := h.agentRunning(h.leadCaller(), AgentSpawnRequest{Prompt: "go", Tier: "small", Authority: "read-only", SystemPrompt: "You are the cache probe."})
+	text := instructionsOf(t, h.backend.start(0))
+	want := "You are the cache probe.\n\nYour ws session key is `" + h.record(a).WSKey + "`. Pass it as the `session_key` argument of every ws tool call. " +
+		"Never use the native `Agent` tool. Start a subagent only with the ws `agent.spawn` tool, and continue one with the ws `mailbox.send` tool.\n"
+	if text != want {
+		t.Fatalf("the child's appended prompt = %q, want %q", text, want)
 	}
 }

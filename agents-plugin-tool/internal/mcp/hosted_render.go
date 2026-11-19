@@ -93,11 +93,11 @@ func RenderLeadPlaybook(env []string, root string, render HostedRender, key, nam
 }
 
 // HostedPlaybookCommands is the dashboard command list of a hosted lead
-// without ws's plugin skills, for the package env's ws-mcp serves: one
-// command per user-invocable lead skill of the package (a skill shim whose
-// preload block reads its own playbook, wsrsrc.PreloadCommands), described
-// as the skill is. The workflow manual's own skill is left out: the lead's
-// prompt already carries the manual.
+// without ws's plugin skills: one command per user-invocable lead skill of
+// the package env selects (a skill shim whose preload block reads its own
+// playbook, wsrsrc.PreloadCommands), described as the skill is. The
+// workflow manual's own skill is left out: the lead's prompt already
+// carries the manual.
 func HostedPlaybookCommands(env []string) ([]wslive.SlashCommand, error) {
 	namespace := ""
 	for _, kv := range env {

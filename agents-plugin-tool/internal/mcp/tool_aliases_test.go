@@ -113,7 +113,7 @@ func descriptorRegistrations() map[string]wsagent.BackendRegistration {
 		wsagent.BackendClaude: {LeadProfile: wsagent.LeadProfileClaude, ManualHarness: "claude"},
 		wsagent.BackendPi:     {LeadProfile: wsagent.LeadProfilePi},
 		wsagent.BackendAgy: {LeadProfile: wsagent.LeadProfileAgy, PermissionModes: wsagent.AgyPermissionModes,
-			ToolNameScheme: wsagent.ToolNameSchemeSanitize, ManualHarness: wsagent.BackendAgy},
+			ToolNameScheme: wsagent.ToolNameSchemeSanitize, ManualHarness: wsagent.BackendAgy, PlaybookCommands: true},
 	}
 }
 
@@ -159,6 +159,9 @@ func TestHostedAgyConnectionSeesAliases(t *testing.T) {
 	}
 	if got := s.playbookHarness(); got != "agy" {
 		t.Fatalf("playbook harness %q, want agy", got)
+	}
+	if !s.connectionDescriptor().playbookCommands || s.runtimeNamespace() != wsagent.ReservedMCPServer {
+		t.Fatal("an agy lead's connection renders for a session without ws skills, under the ws server")
 	}
 	if got := s.currentHarness(); got != "" {
 		t.Fatalf("detected harness %q: the descriptor must not change it", got)
@@ -244,6 +247,9 @@ func TestAgyWorkerConnectionSeesAliases(t *testing.T) {
 	}
 	if s.hostedSessionKey() != "" {
 		t.Fatal("a worker must not become a hosted lead")
+	}
+	if s.connectionDescriptor().playbookCommands {
+		t.Fatal("a worker's connection renders as before: only the lead runs without ws skills")
 	}
 	if resp := callToolOnce(t, s, 1, "git_status", map[string]any{}); !toolIsError(t, resp) {
 		t.Fatalf("a worker still needs an explicit delegate key: %s", resp)
