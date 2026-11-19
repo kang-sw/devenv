@@ -192,22 +192,9 @@ func (p *codexProcess) open(spec StartSpec) error {
 		return err
 	}
 
-	// Shadow both distributed plugin server names, not the plugins: their
-	// skills and user-controlled hooks stay loaded. Only ws opens a client:
-	// one HTTP session per bearer means two clients would collide on request
-	// IDs. Disabled wsflow still needs a transport for Codex to accept it.
-	server := map[string]any{
-		"url": spec.MCPSession.URL, "bearer_token_env_var": EnvMCPSessionToken, "required": true,
-	}
 	params := map[string]any{
-		"cwd": spec.workDir(),
-		"config": map[string]any{
-			"agents": map[string]any{"enabled": false},
-			"mcp_servers": map[string]any{
-				"ws":     server,
-				"wsflow": map[string]any{"url": spec.MCPSession.URL, "enabled": false},
-			},
-		},
+		"cwd":    spec.workDir(),
+		"config": codexThreadConfig(spec),
 	}
 	if spec.Instructions != "" {
 		text, err := os.ReadFile(spec.Instructions)
@@ -236,6 +223,42 @@ func (p *codexProcess) open(spec StartSpec) error {
 		p.deliver(Event{Notice: "codex model/list: " + err.Error()})
 	}
 	return nil
+}
+
+// codexThreadConfig builds the thread/start and thread/resume config override.
+// Both distributed plugin server names are shadowed, not the plugins: their
+// skills and user-controlled hooks stay loaded. Only ws opens a client: one
+// HTTP session per bearer means two clients would collide on request IDs.
+// Disabled wsflow still needs a transport for Codex to accept it. For spawned
+// workers (spec.Lead == nil), harmless ws tools in ChildSafeWSTools are
+// pre-approved via mcp_servers.ws.tools.<name>.approval_mode = "approve" so
+// read-only workers (approvalPolicy "never") can call them without widening
+// mutating tools; leads stay unchanged.
+func codexThreadConfig(spec StartSpec) map[string]any {
+	server := map[string]any{
+		"url": spec.MCPSession.URL, "bearer_token_env_var": EnvMCPSessionToken, "required": true,
+	}
+	if spec.Lead == nil {
+		if tools := codexChildSafeTools(spec); len(tools) > 0 {
+			server["tools"] = tools
+		}
+	}
+	return map[string]any{
+		"agents": map[string]any{"enabled": false},
+		"mcp_servers": map[string]any{
+			"ws":     server,
+			"wsflow": map[string]any{"url": spec.MCPSession.URL, "enabled": false},
+		},
+	}
+}
+
+func codexChildSafeTools(spec StartSpec) map[string]any {
+	safe := childSafeWSToolsFor(spec.Profile)
+	tools := make(map[string]any, len(safe))
+	for _, name := range safe {
+		tools[name] = map[string]any{"approval_mode": "approve"}
+	}
+	return tools
 }
 
 func codexMode(mode string) (sandbox, policy string, err error) {
