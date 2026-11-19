@@ -434,3 +434,26 @@ Forward (Minor, from R1):
   default), tool exposure only via the `EnvAllowedTools` hello value, and
   `PermissionFull` only by the `codexWorkerMode` unit test.
 - Test helpers restore `codexChoices.models`/`.efforts` but not the new `.at`.
+
+#### Edition (2ac6b1968) - 2026-11-19
+
+Review hardening before merge:
+
+- A read-only Codex worker (approval policy `never`) now declines every
+  approval-capable server request in the mapper, including an MCP tool-call
+  elicitation, so no approval event reaches the runner's worker auto-allow;
+  unit test `TestCodexMapperReadOnlyWorkerDeclinesApprovals`.
+- Catalog text: the read-only row states that Codex read-only is partial (the
+  user's own MCP servers are not confined); the worker tool-removal row no
+  longer says "the lead".
+- The agent-worker instruction text attaches through a
+  `builtinInstructionTexts` lookup, with no backend-name test.
+- Item 1 live probe gains: an MCP tool-call request under read-only is declined
+  (the worker gets an error reply and no approval appears in the runner).
+- Verification on w5090: gofmt clean on every touched Go file (CR-stripped, since
+  the sync copy is CRLF), `go build ./...`, `go vet`, and full
+  `go test ./internal/wsagent ./internal/mcp/...` ok (the mcp result printed as
+  cached against identical content, from an earlier full run of the same tree).
+- Still in Forward: the missing-file early return skips the session-report
+  recheck; reattach stored-mode check; `codexChoices.at` uses `time.Now`
+  rather than the injected clock.
