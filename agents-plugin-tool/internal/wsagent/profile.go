@@ -39,7 +39,7 @@ const ProfilePrefix = "agent.profile."
 const (
 	BackendClaude = "claude"
 	BackendPi     = "pi"
-	// BackendCodex is the Codex app-server, hosted lead-only.
+	// BackendCodex is the Codex app-server (hosted leads and agent.spawn workers).
 	BackendCodex = "codex"
 	// BackendAgy is Antigravity's CLI (AgyBackend).
 	BackendAgy = "agy"

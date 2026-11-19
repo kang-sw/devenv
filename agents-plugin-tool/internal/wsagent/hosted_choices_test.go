@@ -72,11 +72,21 @@ func TestHostedCodexCacheChoices(t *testing.T) {
 					t.Fatalf("empty cache: %v %v %v", models, efforts, err)
 				}
 			}
-			checkEmpty() // missing is not an error
-			if err := os.WriteFile(path, []byte(`{"models":broken`), 0o600); err != nil {
-				t.Fatal(err)
+			checkEmpty() // a Codex never run here has no cache: empty, not an error
+			for name, content := range map[string]string{"unparseable": `{"models":broken`, "empty file": "", "no model": `{"models":[{"slug":"hidden-only","visibility":"hide"}]}`} {
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				models, efforts, err := b.Choices(context.Background())
+				if err == nil || len(models) != 0 || len(efforts) != 0 {
+					t.Fatalf("%s cache must be an error: %v %v %v", name, models, efforts, err)
+				}
+				for _, private := range []string{path, "broken", "hidden-only"} {
+					if strings.Contains(err.Error(), private) {
+						t.Fatalf("%s: the error leaks %q: %v", name, private, err)
+					}
+				}
 			}
-			checkEmpty()
 			if err := os.WriteFile(path, []byte(syntheticCodexCache), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -245,5 +255,80 @@ func TestHostedAgyEmptyListingFails(t *testing.T) {
 	s.Choices(context.Background())
 	if listing.count() != 2 {
 		t.Fatalf("%d listings: an empty listing was cached past choicesFailTTL", listing.count())
+	}
+}
+
+func fixtureCodexCache(slug string) string {
+	return `{"models":[{"slug":"` + slug + `","supported_reasoning_levels":[{"effort":"low"}]}]}`
+}
+
+// A session's report answers for choicesTTL, and a newer report replaces it.
+func TestHostedCodexSessionReportExpiresAndIsReplaced(t *testing.T) {
+	emptyHostedChoices(t)
+	t.Setenv("CODEX_HOME", t.TempDir())
+	path := filepath.Join(os.Getenv("CODEX_HOME"), "models_cache.json")
+	if err := os.WriteFile(path, []byte(fixtureCodexCache("file-model")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first := func() string {
+		t.Helper()
+		models, _, err := (CodexBackend{}).Choices(context.Background())
+		if err != nil || len(models) != 1 {
+			t.Fatalf("choices: %v %v", models, err)
+		}
+		return models[0].ID
+	}
+	codexModels(json.RawMessage(`{"data":[{"model":"report-one"}]}`))
+	if got := first(); got != "report-one" {
+		t.Fatalf("a fresh report wins over the file: %s", got)
+	}
+	codexModels(json.RawMessage(`{"data":[{"model":"report-two"}]}`))
+	if got := first(); got != "report-two" {
+		t.Fatalf("a newer report replaces it: %s", got)
+	}
+	codexChoices.Lock()
+	codexChoices.at = time.Now().Add(-choicesTTL)
+	codexChoices.Unlock()
+	if got := first(); got != "file-model" {
+		t.Fatalf("an expired report answers nothing: %s", got)
+	}
+}
+
+// Through Support: an updated CLI's rewritten cache file shows after the
+// report expires, and a failed read is retried after choicesFailTTL, not
+// after choicesTTL.
+func TestHostedCodexChoicesFollowTheCacheFile(t *testing.T) {
+	emptyHostedChoices(t)
+	now := time.Now()
+	s := hostedChoicesSupport(t, &now)
+	path := filepath.Join(os.Getenv("CODEX_HOME"), "models_cache.json")
+	codexModels(json.RawMessage(`{"data":[{"model":"old-report"}]}`))
+	if err := os.WriteFile(path, []byte(fixtureCodexCache("new-cli")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if h := harnessByName(t, s.Choices(context.Background()), BackendCodex); len(h.Models) != 1 || h.Models[0].ID != "old-report" {
+		t.Fatalf("fresh report: %+v", h)
+	}
+	codexChoices.Lock()
+	codexChoices.at = time.Now().Add(-choicesTTL)
+	codexChoices.Unlock()
+	if h := harnessByName(t, s.Choices(context.Background()), BackendCodex); h.Error != "" || len(h.Models) != 1 || h.Models[0].ID != "new-cli" {
+		t.Fatalf("expired report must show the rewritten file: %+v", h)
+	}
+
+	// A garbage file is an error that the next window retries.
+	if err := os.WriteFile(path, []byte("garbage"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(choicesTTL)
+	if h := harnessByName(t, s.Choices(context.Background()), BackendCodex); h.Error == "" {
+		t.Fatalf("a garbage file must show an error: %+v", h)
+	}
+	if err := os.WriteFile(path, []byte(fixtureCodexCache("repaired")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(choicesFailTTL)
+	if h := harnessByName(t, s.Choices(context.Background()), BackendCodex); h.Error != "" || len(h.Models) != 1 || h.Models[0].ID != "repaired" {
+		t.Fatalf("the failure was cached past choicesFailTTL: %+v", h)
 	}
 }

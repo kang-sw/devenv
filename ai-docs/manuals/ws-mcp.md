@@ -1043,7 +1043,17 @@ from a support conversation:
   plugins' `ws` and `wsflow` MCP servers with required HTTP entries, with
   the bearer token only in the child's environment; skills and the user's
   hooks remain enabled. `agents.enabled=false` removes native subagents;
-  delegation is through `agent.*`, and Codex has no spawnable worker tier.
+  delegation is through `agent.*`.
+  An `agent.spawn` worker (`agent-worker-codex`, tiers `codex.<tier>`) uses
+  the same start with no holder and no lead spec, as agy workers do: the
+  runner sets `StartSpec.PermissionLevel` from the child's authority.
+  Write authority (`workdir-write`, `full`) runs in the `workspace-write`
+  sandbox with approval policy `on-request`, which `WorkerAutoApprove`
+  answers and traces; read-only runs in the native `read-only` sandbox with
+  policy `never` on `thread/start` and every `turn/start`, so Codex refuses
+  an escalation itself and nothing reaches the auto-allow. Both are
+  advisory: the sandbox does not confine a user-config MCP server shell, and
+  a worker's sandbox is not changed after spawn.
   Send, steer, interrupt, next-turn model/effort and native sandbox mode
   changes, and `/compact` use app-server controls. Approvals stay binary:
   allow accepts, deny declines, permission grants last one turn; session
@@ -1293,8 +1303,11 @@ daemon lacks the backend or, for a `ChoiceLister`, its executable is not on
 PATH; Claude's models are the CLI's
 version-less aliases `opus`, `sonnet`, `haiku`, `fable` and its efforts the
 Claude levels, Codex's models and effort choices come from `model/list` on
-its last opened app-server process (empty before one opens, with no account
-probe on a dashboard read), Pi's models come from `pi --offline --no-approve
+its last opened app-server process while that report is younger than the
+five-minute choices TTL (a newer report replaces it), else from the CLI's
+`models_cache.json` (read once per TTL window with no account probe on a
+dashboard read: a missing file is an empty list, an unreadable, empty, or
+model-less one an error on the 30 s failure TTL), Pi's models come from `pi --offline --no-approve
 --list-models` (`provider/model`, cached five minutes) and its efforts from
 `--thinking`; a listing failure is that harness's `error` alone), `GET
 /support/stores/<store>` (`{store, conversation: State|null, selection}`),

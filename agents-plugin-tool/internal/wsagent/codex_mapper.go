@@ -556,7 +556,7 @@ func codexModels(raw json.RawMessage) {
 	}
 	codexChoices.Lock()
 	defer codexChoices.Unlock()
-	codexChoices.models, codexChoices.efforts = models, efforts
+	codexChoices.models, codexChoices.efforts, codexChoices.at = models, efforts, time.Now()
 }
 
 func codexUsage(raw json.RawMessage) []Event {

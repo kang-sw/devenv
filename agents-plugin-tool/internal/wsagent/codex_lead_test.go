@@ -476,8 +476,8 @@ func TestCodexLeadSyntheticRequiredMCPFailure(t *testing.T) {
 }
 
 func TestCodexLeadSyntheticAdmissionFailures(t *testing.T) {
-	if _, err := (CodexBackend{}).Start(context.Background(), StartSpec{}); err == nil || !strings.Contains(err.Error(), "hosted lead") {
-		t.Fatalf("non-lead start: %v", err)
+	if _, err := (CodexBackend{}).Start(context.Background(), StartSpec{Lead: &LeadSpec{}}); err == nil || !strings.Contains(err.Error(), "requires a session holder") {
+		t.Fatalf("holderless lead start: %v", err)
 	}
 	h, f := newCodexLeadHarness(t)
 	h.start()

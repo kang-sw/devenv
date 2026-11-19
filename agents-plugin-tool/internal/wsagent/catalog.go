@@ -402,13 +402,14 @@ func ClaudeCatalog() *HarnessProfile {
 // danger-full-access explicitly disables approvals with approvalPolicy never.
 var CodexPermissionModes = []string{"read-only", "workspace-write", "danger-full-access"}
 
-// CodexCatalog is the lead-only app-server contract at the version with
-// recorded fixtures (testdata/codex-0.160.0-*.jsonl). Worker entries are absent
-// intentionally: Codex is not admitted for agent.spawn workers. Sources name
-// the protocol wiring the hosted lead adapter must deliver, including the
+// CodexCatalog is the app-server contract at the version with recorded
+// fixtures (testdata/codex-0.160.0-*.jsonl). A worker shares the lead's
+// wiring except approval, where its write authority is auto-allowed and its
+// read-only authority is refused by Codex itself (codexWorkerMode). Sources
+// name the protocol wiring the adapter must deliver, including the
 // forthcoming compaction mapper.
 func CodexCatalog() *HarnessProfile {
-	return &HarnessProfile{
+	p := &HarnessProfile{
 		Oldest: "0.160.0",
 		Newest: "0.160.0",
 		Entries: []CapabilityEntry{
@@ -441,6 +442,15 @@ func CodexCatalog() *HarnessProfile {
 				Source: "thread/tokenUsage/updated and account/rateLimits/updated push usage"},
 		},
 	}
+	for _, entry := range slices.Clone(p.Entries) {
+		entry.Role = RoleWorker
+		if entry.Item == ItemApproval {
+			entry.Grade = GradeSubstitute
+			entry.Source = "a write-authority worker's requests are auto-allowed through AnswerApproval by the registration's WorkerAutoApprove posture, inside a sandbox that is advisory, not enforced; a read-only worker starts with approval policy never, so Codex refuses an escalation itself"
+		}
+		p.Entries = append(p.Entries, entry)
+	}
+	return p
 }
 
 // AgyCatalog is what the ws adapter delivers for Antigravity's default

@@ -65,3 +65,47 @@ test('new session saves only successful starts and restores available per-harnes
   c.localStorage.setItem = () => { throw Error('blocked'); };
   p.open('root', 'name', btn); click(start); reply(201, { id: '3' });
 });
+
+test('new session popover rereads the harness choices on every open and keeps the form', () => {
+  class Element {
+    constructor(tag) { this.tag = tag; this.children = []; this.attrs = {}; this.events = {}; this.classList = { toggle() {} }; this._value = ''; }
+    appendChild(c) { this.children.push(c); return c; }
+    set textContent(v) { this.children = []; this.text = v; }
+    get textContent() { return this.text || ''; }
+    set value(v) { this._value = v; }
+    get value() { return this._value || (this.tag === 'select' && this.children[0] ? this.children[0].value : ''); }
+    setAttribute(k, v) { this.attrs[k] = v; }
+    getAttribute(k) { return this.attrs[k] || ''; }
+    addEventListener(k, f) { this.events[k] = f; }
+    focus() {}
+  }
+  const pending = [];
+  const harness = models => ({ harness: 'codex', lead: true, available: true, models: models.map(id => ({ id })), efforts: ['low'], permission_modes: ['read-only'] });
+  const c = { mode: 'index', root: { hasAttribute: () => false }, supChoices: { harnesses: [harness(['gpt-old'])] },
+    localStorage: { getItem: () => JSON.stringify({ harness: 'codex' }), setItem() {} }, sessionStorage: { setItem() {} }, RENAME_NEW: 'rename',
+    supHarness(k) { return c.supChoices && c.supChoices.harnesses.find(h => h.harness === k); },
+    tkFetch(path, opt, cb) { assert.equal(path, '/support/choices'); pending.push(cb); }, wsT: s => s, mk: (tag) => new Element(tag), rpPop: () => new Element('div'), rpBtn: () => new Element('button'), rpId: () => 'id',
+    gIcon: () => new Element('icon'), rpLive: () => true, railPopPlace() {}, railPopClose() {}, railOpen() {}, saveDraft() {}, notifAsk() {}, go() {}, toast() {},
+    WsRail: { leadBody: (root, v) => v }, railPost() {}
+  };
+  vm.createContext(c);
+  const source = fs.readFileSync(__dirname + '/assets/dashboard-leads.js', 'utf8');
+  vm.runInContext(source.slice(0, source.indexOf('  // The session menu of the viewed hosted session')), c);
+  const p = c.rpLeadMake(), btn = new Element('button');
+  const all = (el, tag) => [ ...(el.tag === tag ? [el] : []), ...el.children.flatMap(x => all(x, tag)) ];
+  const options = el => el.children.map(o => o.value);
+  p.open('root', 'name', btn);
+  // The held list answers at once; the read is still sent.
+  assert.equal(pending.length, 1);
+  const model = all(p.el, 'select')[0];
+  assert.deepEqual(options(model), ['', 'gpt-old']);
+  model.value = 'gpt-old';
+  pending.shift()(200, { harnesses: [harness(['gpt-old', 'gpt-new'])] });
+  assert.deepEqual(options(model), ['', 'gpt-old', 'gpt-new']);
+  assert.equal(model.value, 'gpt-old', 'a pick survives the refresh');
+  // A failed read keeps the held list.
+  p.open('root', 'name', btn);
+  assert.equal(pending.length, 1);
+  pending.shift()(500, {});
+  assert.deepEqual(options(model), ['', 'gpt-old', 'gpt-new']);
+});

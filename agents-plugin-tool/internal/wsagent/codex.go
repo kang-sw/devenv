@@ -18,8 +18,9 @@ import (
 )
 
 // CodexBackend drives one sustained `codex app-server` process over stdio.
-// It serves hosted leads only; its registration does not admit workers.
-// The holder owns its pipes across daemon replacement, as for agy and Claude.
+// A hosted lead runs under a holder, which owns its pipes across daemon
+// replacement, as for agy and Claude; a worker is a daemon-owned process
+// with no holder, as for agy.
 type CodexBackend struct {
 	// Command is the Codex executable; empty looks up "codex" on PATH.
 	Command string
@@ -35,12 +36,15 @@ func (b CodexBackend) Executable() string {
 	return "codex"
 }
 
-// codexChoices holds model/list from the last opened process. Session reports
-// take precedence over the session-less cache file listing.
+// codexChoices holds model/list from the last opened process, stamped when
+// it arrived. A fresh report takes precedence over the session-less cache
+// file listing, and a newer one replaces it; one older than choicesTTL
+// answers nothing, so an updated CLI shows through the file again.
 var codexChoices struct {
 	sync.Mutex
 	models  []ModelChoice
 	efforts []string
+	at      time.Time
 }
 
 func (b CodexBackend) Choices(context.Context) ([]ModelChoice, []string, error) {
@@ -68,12 +72,19 @@ func codexEnv(spec StartSpec) []string {
 // reattach sends nothing: replay rebuilds the mapper, and the runner alone
 // decides when to deliver input or reconcile a gap.
 func (b CodexBackend) Start(_ context.Context, spec StartSpec) (Process, error) {
-	if spec.Lead == nil || spec.Holder == nil {
-		return nil, errors.New("codex backend: hosted lead sessions only")
+	if spec.Lead != nil && spec.Holder == nil {
+		return nil, errors.New("codex backend: a hosted lead requires a session holder")
 	}
-	attach := spec.Holder.id != ""
+	if spec.Lead == nil && spec.Holder != nil {
+		return nil, errors.New("codex backend: workers are not holder-held")
+	}
+	attach := spec.Holder != nil && spec.Holder.id != ""
 	if !attach && spec.MCPSession == nil {
-		return nil, errors.New("codex backend: the daemon's HTTP MCP route is required; no lead was started without ws tools")
+		return nil, errors.New("codex backend: the daemon's HTTP MCP route is required; no session was started without ws tools")
+	}
+	mode, policy, err := codexStartMode(spec)
+	if err != nil {
+		return nil, fmt.Errorf("codex backend: %w", err)
 	}
 	command, pre, err := harnessCommand(b.Command, "codex")
 	if err != nil {
@@ -103,9 +114,13 @@ func (b CodexBackend) Start(_ context.Context, spec StartSpec) (Process, error) 
 	}
 	p := &codexProcess{
 		streamProcess: stream, m: mapper, epoch: newMCPToken(),
-		model: spec.Model, effort: spec.Effort, mode: spec.Lead.PermissionMode,
+		model: spec.Model, effort: spec.Effort, mode: mode, policy: policy, worker: spec.Lead == nil,
 	}
 	holder, pid, _ := stream.HolderInfo()
+	if p.worker && cmd.Process != nil {
+		// A worker has no holder: its MCP hello names the child itself.
+		pid = cmd.Process.Pid
+	}
 	if session := spec.MCPSession; session != nil && session.Started != nil {
 		session.Started(cmd.Env, pid)
 	}
@@ -114,7 +129,7 @@ func (b CodexBackend) Start(_ context.Context, spec StartSpec) (Process, error) 
 	}
 	// MCP admission checks the hosted row's physical PID. Publish it before
 	// thread/start connects, not after the handshake that waits on it.
-	if spec.Lead.Spawned != nil {
+	if spec.Lead != nil && spec.Lead.Spawned != nil {
 		spec.Lead.Spawned(holder, pid)
 	}
 	if err := p.open(spec); err != nil {
@@ -141,10 +156,14 @@ type codexProcess struct {
 	epoch string
 	seq   atomic.Uint64
 
-	// The conversation loop owns these next-turn settings.
+	// The conversation loop owns these next-turn settings. mode is the
+	// sandbox name and policy the approval policy sent with it.
 	model  string
 	effort string
 	mode   string
+	policy string
+	// worker marks a spawned child, whose sandbox follows its authority.
+	worker bool
 }
 
 func (p *codexProcess) processControls() processControls {
@@ -157,8 +176,12 @@ func (p *codexProcess) call(kind, method string, params map[string]any) (json.Ra
 }
 
 func (p *codexProcess) open(spec StartSpec) error {
+	version := codexWorkerClientVersion
+	if spec.Lead != nil {
+		version = spec.Lead.DaemonVersion
+	}
 	_, err := p.call("init", "initialize", map[string]any{
-		"clientInfo":   map[string]any{"name": "ws", "version": spec.Lead.DaemonVersion},
+		"clientInfo":   map[string]any{"name": "ws", "version": version},
 		"capabilities": map[string]any{"experimentalApi": true},
 	})
 	if err != nil {
@@ -195,12 +218,8 @@ func (p *codexProcess) open(spec StartSpec) error {
 	if spec.Model != "" {
 		params["model"] = spec.Model
 	}
-	if mode := spec.Lead.PermissionMode; mode != "" {
-		sandbox, policy, err := codexMode(mode)
-		if err != nil {
-			return err
-		}
-		params["sandbox"], params["approvalPolicy"] = sandbox, policy
+	if p.mode != "" {
+		params["sandbox"], params["approvalPolicy"] = p.mode, p.policy
 	}
 	method := "thread/start"
 	if spec.SessionID != "" {
@@ -229,6 +248,42 @@ func codexMode(mode string) (sandbox, policy string, err error) {
 	return mode, policy, nil
 }
 
+// codexWorkerClientVersion is the initialize clientInfo version of a worker
+// start, which has no lead spec to read the daemon's version from.
+const codexWorkerClientVersion = "worker"
+
+// codexWorkerMode maps a spawned child's authority to a sandbox and an
+// approval policy. Write authority (workdir-write, full) runs in the
+// workspace-write sandbox with on-request approvals, which the runner's
+// WorkerAutoApprove answers and traces: the confinement is advisory, not
+// enforced. Read-only starts in Codex's native read-only sandbox with
+// approval policy never, so Codex refuses an escalation itself and no
+// request reaches the auto-allow; codexMode would give on-request and let the
+// auto-allow run escalated commands outside the sandbox. A worker with no
+// authority is refused rather than started with a guess.
+func codexWorkerMode(level PermissionLevel) (sandbox, policy string, err error) {
+	switch level {
+	case PermissionReadOnly:
+		return "read-only", "never", nil
+	case PermissionWorkdirWrite, PermissionFull:
+		return "workspace-write", "on-request", nil
+	}
+	return "", "", fmt.Errorf("a worker needs an authority (read-only, workdir-write or full); got %q", level)
+}
+
+// codexStartMode is the sandbox and approval policy a start opens with: a
+// lead's permission mode, a worker's authority. A lead with no mode keeps
+// Codex's own settings.
+func codexStartMode(spec StartSpec) (sandbox, policy string, err error) {
+	if spec.Lead == nil {
+		return codexWorkerMode(spec.PermissionLevel)
+	}
+	if spec.Lead.PermissionMode == "" {
+		return "", "", nil
+	}
+	return codexMode(spec.Lead.PermissionMode)
+}
+
 func codexInput(text string) []any {
 	return []any{map[string]any{"type": "text", "text": text}}
 }
@@ -246,15 +301,11 @@ func (p *codexProcess) Send(text string) error {
 		params["effort"] = p.effort
 	}
 	if p.mode != "" {
-		sandbox, policy, err := codexMode(p.mode)
-		if err != nil {
-			return err
-		}
 		kind := map[string]string{
 			"read-only": "readOnly", "workspace-write": "workspaceWrite", "danger-full-access": "dangerFullAccess",
-		}[sandbox]
+		}[p.mode]
 		params["sandboxPolicy"] = map[string]any{"type": kind}
-		params["approvalPolicy"] = policy
+		params["approvalPolicy"] = p.policy
 	}
 	_, err := p.call("turn", "turn/start", params)
 	return err
@@ -299,10 +350,14 @@ func (p *codexProcess) SetEffort(effort string) error {
 // A mode change applies at the next turn/start, like model and effort; it
 // does not reinterpret an approval waiting in the current turn.
 func (p *codexProcess) SetPermissionMode(mode string) error {
-	if _, _, err := codexMode(mode); err != nil {
+	if p.worker {
+		return errors.New("a worker's sandbox follows its authority, set when it was spawned")
+	}
+	_, policy, err := codexMode(mode)
+	if err != nil {
 		return err
 	}
-	p.mode = mode
+	p.mode, p.policy = mode, policy
 	return nil
 }
 
