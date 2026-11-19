@@ -57,6 +57,7 @@
   "agent.context": "контекст: {0} токенов",
   "agent.done": "готово",
   "agent.sleep": "спит",
+  "agent.background": "фон",
   "agent.deleted": "удалён",
   "agent.effort": "усилия: {0}",
   "agent.failed": "ошибка",

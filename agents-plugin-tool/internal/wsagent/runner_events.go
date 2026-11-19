@@ -192,6 +192,7 @@ func (c *conv) handle(ev Event) {
 		}
 	case ev.BackgroundTasks != nil:
 		if n := *ev.BackgroundTasks; n != c.bgTasks || !sameCount(c.background, ev.Background) || !sameCount(c.monitors, ev.Monitors) {
+			prev := c.bgTasks
 			c.setStatus(func() {
 				c.bgTasks = n
 				c.background, c.monitors = copyCount(ev.Background), copyCount(ev.Monitors)
@@ -200,10 +201,17 @@ func (c *conv) handle(ev Event) {
 			c.changed(quiet)
 			if !quiet {
 				c.watched()
-			}
-			if n == 0 && !c.turn && !quiet {
-				c.armIdle()
-				c.restartIfDue()
+				if n > 0 {
+					c.stopBgGrace()
+				} else if n == 0 && !c.turn {
+					if prev > 0 && c.heldRes != nil {
+						c.armBgGrace()
+					}
+					if c.bgGraceTimer == nil {
+						c.armIdle()
+						c.restartIfDue()
+					}
+				}
 			}
 		}
 	case ev.Alert != nil:
@@ -228,6 +236,23 @@ func (c *conv) changed(quiet bool) {
 	}
 }
 
+// bgResumeGrace is how long a worker holds its completed-turn report after its
+// last background task finishes, waiting for the harness's self-resumed wakeup
+// turn before settling and reporting the earlier turn.
+var bgResumeGrace = 6 * time.Second
+
+func (c *conv) armBgGrace() {
+	c.stopBgGrace()
+	c.bgGraceTimer = time.NewTimer(bgResumeGrace)
+}
+
+func (c *conv) stopBgGrace() {
+	if c.bgGraceTimer != nil {
+		c.bgGraceTimer.Stop()
+		c.bgGraceTimer = nil
+	}
+}
+
 // beginTurn opens a turn the harness began with no send of the runner's: a
 // background task's completion, a compaction, a pushed message. A turn the
 // runner's own send opened is already running.
@@ -236,6 +261,7 @@ func (c *conv) beginTurn(quiet bool) {
 		return
 	}
 	c.stopIdle()
+	c.stopBgGrace()
 	c.setStatus(func() {
 		c.turn = true
 		if !quiet {
@@ -609,6 +635,8 @@ func (c *conv) processGone() {
 // prompts, and what it last reported.
 func (c *conv) processEnded() {
 	c.stopIdle()
+	hadBgGrace := c.bgGraceTimer != nil
+	c.stopBgGrace()
 	c.wrapHold = false
 	if c.turn {
 		c.setStatus(func() { c.turn = false })
@@ -637,10 +665,16 @@ func (c *conv) processEnded() {
 		c.activeMode, c.bgTasks, c.mcpBroken = "", 0, nil
 		c.background, c.monitors = nil, nil
 	})
-	if hadBackgroundTasks {
-		// A settled child's background work may have suppressed its
-		// parent's idle timer; ending the process must re-arm it too.
-		c.watched()
+	if hadBackgroundTasks || hadBgGrace || c.heldRes != nil {
+		// A child's held background turn settles and its parent's idle
+		// timer re-arms once the process exits and clears background work
+		// (including when the process exits during bgResumeGrace).
+		if !c.closed && !c.quitting {
+			c.releaseHeld()
+		}
+		if hadBackgroundTasks || hadBgGrace {
+			c.watched()
+		}
 	}
 	c.mcpSeen, c.mcpChecking, c.mcpAgain, c.mcpAgainNames = nil, false, false, nil
 	c.retry, c.alerted = nil, false
@@ -763,7 +797,7 @@ func (c *conv) finishLine() {
 // idleNow reports whether the idle timer may stop the process. Read child
 // state here too: a spawn notification may still be queued when the timer fires.
 func (c *conv) idleNow() bool {
-	if c.turn || c.replaying || c.bgTasks != 0 || c.compacting || c.compactCommand {
+	if c.turn || c.replaying || c.bgTasks > 0 || c.bgGraceTimer != nil || c.compacting || c.compactCommand {
 		return false
 	}
 	kind := ParentConversation

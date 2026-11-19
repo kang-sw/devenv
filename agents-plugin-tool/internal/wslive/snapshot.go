@@ -333,6 +333,9 @@ type Agent struct {
 	Effort        string  `json:"effort,omitempty"`
 	ContextTokens int64   `json:"contextTokens,omitempty"`
 	OutputTps     float64 `json:"outputTps,omitempty"`
+	// BackgroundTasks counts background commands the subagent's harness is
+	// still running after its turn ended; absent when zero.
+	BackgroundTasks int `json:"backgroundTasks,omitempty"`
 }
 
 // Permission is a tool permission prompt the agent waits on. The approval

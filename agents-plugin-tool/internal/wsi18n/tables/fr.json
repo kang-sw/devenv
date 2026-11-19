@@ -57,6 +57,7 @@
   "agent.context": "contexte : {0} tokens",
   "agent.done": "terminé",
   "agent.sleep": "en veille",
+  "agent.background": "arrière-plan",
   "agent.deleted": "supprimé",
   "agent.effort": "effort : {0}",
   "agent.failed": "échoué",

@@ -141,6 +141,9 @@ type RailRow struct {
 	// user). The index's working total counts permission waits; the rail
 	// does not.
 	Working bool
+	// BackgroundTasks counts background commands or monitors the harness is
+	// still running (taskBadgeCounts); shown on idle rows as "background".
+	BackgroundTasks int
 	// Subagents counts the running agents the lead itself spawned (level 1),
 	// zero without a live adapter.
 	Subagents int
@@ -397,7 +400,7 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 			if row.Approval != nil {
 				view.CountApproval++
 			}
-			if row.Hosted && !row.Stopped() && !row.Working && row.Approval == nil {
+			if row.Hosted && !row.Stopped() && !row.Working && row.BackgroundTasks == 0 && row.Approval == nil {
 				view.CountSleep++
 			}
 		}
@@ -622,6 +625,8 @@ func railRow(in railInput, live bool, now time.Time) RailRow {
 	if row.Exit == nil && adapterPresent(snap, now) {
 		row.Working = leadWorking(snap.Lead.Phase)
 		row.Subagents = levelOneRunning(snap.Agents)
+		bg, mon := taskBadgeCounts(snap)
+		row.BackgroundTasks = bg + mon
 		if live {
 			row.Approval = approvalWait(reg, snap)
 		}

@@ -35,6 +35,9 @@ func SpawnAgentEvent(st State, key string) wslive.Event {
 	if st.Status == StatusRunning {
 		ev.TurnStartedAt = st.TurnStartedAt
 	}
+	if st.Status != StatusClosed && st.BackgroundTasks > 0 {
+		ev.BackgroundTasks = st.BackgroundTasks
+	}
 	// An explicit empty list clears the previous activity on the row.
 	ev.Batches = make([]json.RawMessage, 0, len(st.Batches))
 	for _, batch := range st.Batches {

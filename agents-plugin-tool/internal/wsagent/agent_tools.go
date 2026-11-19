@@ -198,14 +198,16 @@ type AgentTiers struct {
 	Unavailable []string `json:"unavailable,omitempty"`
 }
 
-// Agent statuses: a turn runs; the first message waits for the process; a
-// process waits for input; asleep (no process, no turn); closed.
+// Agent statuses: a turn runs; turn ended with background work running; the
+// first message waits for the process; a process waits for input; asleep (no
+// process, no turn); closed.
 const (
-	AgentRunning  = "running"
-	AgentStarting = "starting"
-	AgentIdle     = "idle"
-	AgentWaiting  = "waiting"
-	AgentClosed   = "closed"
+	AgentRunning    = "running"
+	AgentBackground = "background"
+	AgentStarting   = "starting"
+	AgentIdle       = "idle"
+	AgentWaiting    = "waiting"
+	AgentClosed     = "closed"
 )
 
 // AgentStatus is st's agent.* status.
@@ -215,6 +217,8 @@ func AgentStatus(st State) string {
 		return AgentClosed
 	case st.Status == StatusRunning:
 		return AgentRunning
+	case st.BackgroundTasks > 0:
+		return AgentBackground
 	case st.Process:
 		return AgentIdle
 	case st.Held > 0 && st.Error == "":

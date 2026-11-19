@@ -115,6 +115,9 @@ func TestPiIdleStopAfterChildProcessEndedWithBackgroundWork(t *testing.T) {
 
 func testPiIdleStopAfterChildBackgroundWork(t *testing.T, processEnds bool) {
 	t.Helper()
+	restoreGrace := bgResumeGrace
+	bgResumeGrace = 60 * time.Millisecond
+	t.Cleanup(func() { bgResumeGrace = restoreGrace })
 	h, _ := newFakePiRecoveryHarness(t)
 	h.globalProfile(PiWorkerProfile, `{"backend":"pi","idle_timeout_seconds":1}`)
 	parent, holder := spawnRecoveryWorker(t, h)
@@ -136,22 +139,31 @@ func testPiIdleStopAfterChildBackgroundWork(t *testing.T, processEnds bool) {
 	})
 	h.holders.out(childHolder, string(piWidgetLine(piEventsWidgetKey, `{"kind":"status","background":1,"monitors":0}`)))
 	h.holders.out(childHolder, recoveryPiReply("waiting for background work")...)
-	if res := <-waited; res.Status != TurnDone {
-		t.Fatalf("child result: %+v", res)
+	eventually(t, "child background state", func() bool {
+		st := h.state(child.ID)
+		return st.Status == StatusIdle && st.BackgroundTasks == 1 && AgentStatus(st) == AgentBackground
+	})
+	select {
+	case res := <-waited:
+		t.Fatalf("background worker settled before background work ended: %+v", res)
+	default:
 	}
 	h.holders.out(holder, `{"type":"agent_settled"}`)
 	h.idle(parent.ID)
 	time.Sleep(1200 * time.Millisecond)
 	if !h.state(parent.ID).Process || !h.state(child.ID).Process {
-		t.Fatal("background work must protect the settled worker and its parent")
+		t.Fatal("background work must protect the background worker and its parent")
 	}
 	if processEnds {
-		// The turn already settled: only clearing background work can wake
-		// the parent's expired idle timer when this process exits.
+		// Clearing background work on process exit settles the held turn
+		// and re-arms the parent's expired idle timer.
 		h.idle(child.ID)
 		h.holders.exit(childHolder, 0)
 	} else {
 		h.holders.out(childHolder, string(piWidgetLine(piEventsWidgetKey, `{"kind":"status","background":0,"monitors":0}`)))
+	}
+	if res := <-waited; res.Status != TurnDone {
+		t.Fatalf("child result after background completion: %+v", res)
 	}
 	eventually(t, "task completion", func() bool {
 		c := h.runner.conv(child.ID)

@@ -57,6 +57,7 @@
   "agent.context": "컨텍스트: {0} 토큰",
   "agent.done": "완료",
   "agent.sleep": "휴면",
+  "agent.background": "백그라운드",
   "agent.deleted": "삭제됨",
   "agent.effort": "추론 강도: {0}",
   "agent.failed": "실패",

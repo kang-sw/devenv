@@ -356,6 +356,17 @@ func TestRailRowFailure(t *testing.T) {
 	bare.Host = &wslive.Host{BackgroundTasks: 1}
 	if row := railRow(railInput{Session: hosted, Snapshot: &bare}, true, now); row.Failure != nil {
 		t.Errorf("host state without a failure = %+v, want none", row.Failure)
+	} else if row.BackgroundTasks != 1 {
+		t.Errorf("background row = %+v, want BackgroundTasks=1", row)
+	} else {
+		html := renderNamed(t, "rrow", row)
+		if !strings.Contains(html, `class="chip bgt"`) || !strings.Contains(html, `>background</span>`) || !strings.Contains(html, `· background`) {
+			t.Errorf("rail row lacks background badge/tooltip: %s", html)
+		}
+	}
+	view := buildRailView([]railInput{{Session: hosted, Snapshot: &bare}}, nil, nil, now)
+	if view.CountSleep != 0 {
+		t.Errorf("hosted session with background tasks should not count as idle-sleepable: CountSleep=%d", view.CountSleep)
 	}
 }
 
