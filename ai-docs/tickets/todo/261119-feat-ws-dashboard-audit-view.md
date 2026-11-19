@@ -118,6 +118,22 @@ Stale since the superseded ticket (codex.large read-only research,
 6. **Compatibility tier T0.** Dashboard asset content, a template change that
    adds attributes, and new i18n keys. No route, MCP tool, store or tracker
    event changes here.
+7. **Settled audit scope reaches the view ((1730)=b, (1731)=b, (1734)=a,
+   (1737)=b, owner 2026-11-19).**
+   - Hidden-event rows, kind chips and the Raw tab stay as the approved mockup
+     shows: (1730)=b keeps hidden events captured as assembled envelopes, with
+     `raw` only on `other` rows.
+   - The view is per session page, so a `ws/agent.*` child's page shows that
+     child's own audit ((1731)=b). It does not merge a child's events into
+     its lead's.
+   - A body stored as head plus tail shows a stored-truncation row stating the
+     omitted byte count (`stored_trunc`). It is distinct from the "load more"
+     row of a response-level `truncated` body. The seen-cut line may fall in
+     the omitted middle, and the view then shows it at the marker. Its
+     strings are `js.*` keys like the rest.
+   - A session with no audit data shows an empty state, not an error: the
+     retention knob (store child (1733)=d) can remove it before the session.
+   - There is no purge or delete control ((1734)=a, purge rejected).
 
 ### Approved technical contracts (602–610)
 
@@ -247,8 +263,9 @@ Verification:
 - Node harness checks for row building, the key scopes and the darkroom state
   machine.
 - A headless run on an isolated daemon with a fixture audit store, covering
-  open, tabs, truncated "load more", the seen cut, a redaction, pin and
-  darkroom.
+  open, tabs, truncated "load more", a stored-truncation row, the seen cut,
+  a redaction, pin, darkroom and the empty state of a session with no audit
+  data.
 - LOOK captures at one narrow and one wide width chosen from the current
   breakpoints, light and dark, side by side with the realigned mockup
   (placement) and mockup v2 (interaction). The superseded ticket used 420 and

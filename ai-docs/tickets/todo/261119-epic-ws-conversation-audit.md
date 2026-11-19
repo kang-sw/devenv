@@ -66,16 +66,35 @@ otherwise.
 
 - **The daemon owns the audit record ((545)=a).** The daemon keeps tool
   inputs/outputs and hidden harness events in its own store, not in the
-  harness's own transcript file. How much is captured is re-asked as (1730)
-  in child 1. (545)=a stands until the owner answers it.
+  harness's own transcript file. Scope is settled by (1730)=b: tool calls
+  plus hidden events as assembled envelopes, `raw` only for `other`. Sessions
+  are settled by (1731)=b: every daemon-hosted session, leads and
+  `ws/agent.*` children.
 - **One harness-neutral record ((546)=a).** Capture is what the harness JSON
   stream delivers, mapped onto one envelope (id, session, harness, time, kind,
   call linkage). No per-harness schema, no API proxy.
 - **Redact before persist ((596)).** Nothing reaches the store unredacted.
-  Redaction is best-effort regex (`wsredact`). How secrets are handled beyond
-  that is (1734) in child 3.
+  Redaction is best-effort regex (`wsredact`). Nothing more is done
+  ((1734)=a): the residual risk is documented and there is no purge action
+  ((1734)=d rejected), so retention and session delete are the only removal
+  paths.
 - **The display ring is not the audit store.** The ring is capped and lossy
   by design. The audit store sits beside it.
+- **Capture scope and sessions ((1730)=b, (1731)=b).** Tool calls plus
+  hidden events, as assembled envelopes (`raw` only for `other`), for every
+  daemon-hosted session: leads and `ws/agent.*` children, each in its own
+  audit record. Non-hosted CLI-tier sessions and a per-session switch are not
+  provided.
+- **Capture point ((1732)=a).** A holder-side tee on a separate, unsequenced,
+  versioned audit channel. Skipped lines produced while no daemon is attached
+  are lost to the audit.
+- **agy compaction ((1736)=a).** The inferred compaction is the model-seen
+  cut, labelled `meta.estimated: true`.
+- **Storage ((1735)=a, (1733)=d, (1737)=b).** One SQLite file per session,
+  deleted with the session. The handle is held open and closed only after
+  about 30 minutes idle (owner (1347)=c). Retention is a config knob, default
+  7 days after the session was last seen. Each body is capped by a config knob
+  keeping head plus tail with a stored-truncation marker.
 - **All audit data reaches the UI through the query API ((599)).** The view
   parses no transcript file and adds no route of its own.
 - **History-to-audit join is by call ID ((601)), never by time window.** Rows
@@ -84,6 +103,16 @@ otherwise.
 - **Compatibility tier T0.** New store, new routes, an optional ring field;
   existing routes, ring readability, MCP tools and tracker events keep their
   semantics. The audit store carries its own schema version from day one.
+  - The holder's audit channel ((1732)=a) is an additive, version-negotiated
+    holder-protocol capability, T0. It follows the parent epic's holder-version
+    rule (versioned protocol, new daemon speaks the old holder protocol) and
+    must not refuse an old peer, since that would be T3. An old holder only
+    loses the skipped-only content.
+  - New config keys ((1733)=d retention, (1737)=b per-body cap, and the
+    existing per-session byte cap) are T0 and not a manifest field change.
+    Where declared in a config manifest, `ws` and `wsflow` stay key-identical
+    with only `default` differing, including the native-pi first-party and
+    dashboard manifest copies.
 - **Harness order** follows the parent epic (25): Claude, Codex, agy, Pi.
 - **Release-gate file-touch rule** (parent epic, owner 2026-11-17) applies to
   capture and storage: append not rewrite, no per-event O(N) rereads, and
@@ -111,17 +140,23 @@ coordinates are evidence, not edit targets):
   `audit.js` (the dashboard now assembles ordered fragment files); mockup
   surroundings that predate the topbar/rail redesign.
 
-## Open Decision Queue Index
+## Decision ID Index
 
-Owner questions are not decided. Each lives in its child's
-`## Open Decision Queue`. Board IDs (1730)-(1737), next free (1738):
+All owner questions of this epic are settled (owner 2026-11-19). Each is
+recorded under `## Decisions` in the child named below, with its rejected
+alternatives. Board IDs (1730)-(1737); next free (1738):
 
-- (1730) capture scope; (1731) target sessions:
+- (1730)=b capture scope; (1731)=b target sessions:
   `261119-feat-ws-audit-policy-event-envelope`
-- (1732) capture point; (1736) agy compaction estimate:
+- (1732)=a capture point; (1736)=a agy compaction estimate:
   `261119-feat-ws-audit-capture-harness-adapters`
-- (1733) retention period; (1734) secret handling; (1735) DB layout;
-  (1737) tool-result body amount: `261119-feat-ws-audit-sqlite-store`
+- (1733)=d retention period; (1734)=a secret handling (purge (1734)=d
+  rejected); (1735)=a DB layout; (1737)=b tool-result body amount:
+  `261119-feat-ws-audit-sqlite-store`
+
+The query API and dashboard children carry the knock-ons (read-only API,
+`stored_trunc` and empty-state handling, per-session reads) without owning a
+decision of their own.
 
 ## Completion Criteria
 
@@ -129,4 +164,6 @@ Owner questions are not decided. Each lives in its child's
   the owner, and the owner closes this epic.
 - Dropped: the owner drops the audit direction.
 - Deferred: an MCP audit tool, and any capture scope or session coverage
-  beyond what (1730)/(1731) settle, stay proposals.
+  beyond what (1730)=b/(1731)=b settle (raw stream lines, non-hosted CLI-tier
+  sessions, a per-session on/off switch), a purge action, cross-session
+  search and at-rest encryption, stay proposals.
