@@ -699,3 +699,81 @@ func TestAgyMapperUnsolicitedUpdatesDoNotOpenTurn(t *testing.T) {
 		t.Fatalf("post-rejoin unsolicited update must not open turn: %+v", after)
 	}
 }
+
+// TestAgyMapperBackgroundTasksAndWakeupTurn pins ACP background-command
+// tracking and self-resumed wakeup turns (recorded shape on agy 1.5.12):
+// an unfinished non-daemon run_command across end_turn raises BackgroundTasks,
+// IsDaemon and cancelled turns do not, completion decrements BackgroundTasks
+// and allows the following self-resume to open an unsolicited turn that closes
+// cleanly via closeUnsolicited.
+func TestAgyMapperBackgroundTasksAndWakeupTurn(t *testing.T) {
+	m := newAgyMapper("s")
+	rr := &agyRun{m: m, answers: map[string]controlAnswer{}}
+
+	m.promptSent("ws-p-e-1")
+	var turn1 []Event
+	for _, line := range []string{
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"bg1","name":"run_command","status":"in_progress","args":{"CommandLine":"sleep 20","IsDaemon":false}}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"daemon1","name":"run_command","status":"in_progress","args":{"CommandLine":"npm run dev","IsDaemon":true}}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"waiting"}}}}`,
+		`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"ws-p-e-1"}`,
+	} {
+		turn1 = append(turn1, m.mapLine([]byte(line), rr)...)
+	}
+	bgIdx, endIdx := -1, -1
+	for i, ev := range turn1 {
+		if ev.BackgroundTasks != nil {
+			bgIdx = i
+			if *ev.BackgroundTasks != 1 {
+				t.Fatalf("expected BackgroundTasks=1 (daemon ignored), got %d", *ev.BackgroundTasks)
+			}
+		}
+		if ev.TurnEnd {
+			endIdx = i
+		}
+	}
+	if bgIdx < 0 || endIdx < 0 || bgIdx > endIdx {
+		t.Fatalf("BackgroundTasks must arrive before TurnEnd: bgIdx=%d endIdx=%d evs=%+v", bgIdx, endIdx, turn1)
+	}
+
+	// Completion of bg1 drops BackgroundTasks to 0 and opens the wakeup window.
+	doneEvs := m.mapLine([]byte(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"bg1","name":"run_command","status":"completed"}}}`), rr)
+	if !slices.ContainsFunc(doneEvs, func(ev Event) bool { return ev.BackgroundTasks != nil && *ev.BackgroundTasks == 0 }) {
+		t.Fatalf("completion must drop BackgroundTasks to 0: %+v", doneEvs)
+	}
+
+	// Multi-step self-resumed wakeup turn: tool_call + completion + final reply + usage_update.
+	var wake []Event
+	for _, line := range []string{
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"usage_update","used":9360,"size":1048576}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"after1","name":"run_command","status":"in_progress","args":{"CommandLine":"echo ok","IsDaemon":false}}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"after1","name":"run_command","status":"completed"}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"DONE"}}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"usage_update","used":9451,"size":1048576}}}`,
+	} {
+		wake = append(wake, m.mapLine([]byte(line), rr)...)
+	}
+	if !m.inTurn || !m.unsolicitedTurn || !slices.ContainsFunc(wake, func(ev Event) bool { return ev.TurnStart }) {
+		t.Fatalf("wakeup burst must open an unsolicited turn: inTurn=%v unsolicited=%v evs=%+v", m.inTurn, m.unsolicitedTurn, wake)
+	}
+	closed := m.closeUnsolicited(1000)
+	if m.inTurn || m.unsolicitedTurn || !slices.ContainsFunc(closed, func(ev Event) bool { return ev.TurnEnd }) {
+		t.Fatalf("closeUnsolicited must settle the wakeup turn: inTurn=%v evs=%+v", m.inTurn, closed)
+	}
+	if got := finalReplies(closed); !slices.Equal(got, []string{"DONE"}) {
+		t.Fatalf("wakeup final reply = %q, want [DONE]", got)
+	}
+
+	// Cancelled turn with an open run_command must NOT mark BackgroundTasks.
+	m.promptSent("ws-p-e-2")
+	var cancelled []Event
+	for _, line := range []string{
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"bg2","name":"run_command","status":"in_progress","args":{"CommandLine":"sleep 20"}}}}`,
+		`{"jsonrpc":"2.0","result":{"stopReason":"cancelled"},"id":"ws-p-e-2"}`,
+	} {
+		cancelled = append(cancelled, m.mapLine([]byte(line), rr)...)
+	}
+	if slices.ContainsFunc(cancelled, func(ev Event) bool { return ev.BackgroundTasks != nil }) {
+		t.Fatalf("cancelled turn must not report BackgroundTasks: %+v", cancelled)
+	}
+}

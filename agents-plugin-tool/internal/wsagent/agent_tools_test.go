@@ -15,6 +15,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 // agentHarness is childHarness with both worker harnesses spawnable for
@@ -1202,4 +1203,83 @@ func TestAgentWorkerProfilesNeedAgentSpawn(t *testing.T) {
 		_, err := h.runner.Spawn(SpawnSpec{Profile: profile, Root: h.root, Prompt: "x", Tier: "small", Parent: &parent})
 		agentRefused(t, err, http.StatusBadRequest, "needs a parent and an authority")
 	}
+}
+
+// TestWorkerBackgroundStateHoldsReportAndShowsStatus verifies the harness-neutral
+// background state: while bgTasks > 0 after a turn ends, the worker reports
+// state "background" in agent.list and SpawnAgentEvent, withholds its turn-done
+// report, and still accepts mail; once bgTasks drops to 0, a self-resumed
+// wakeup turn supersedes the held report and settles once, or the held report
+// settles after bgResumeGrace when no wakeup arrives.
+func TestWorkerBackgroundStateHoldsReportAndShowsStatus(t *testing.T) {
+	restoreGrace := bgResumeGrace
+	bgResumeGrace = 60 * time.Millisecond
+	t.Cleanup(func() { bgResumeGrace = restoreGrace })
+
+	t.Run("wakeup turn supersedes held report", func(t *testing.T) {
+		h, got := agentHarness(t, nil)
+		lead := h.leadCaller()
+		a, ap := h.agentRunning(lead, AgentSpawnRequest{Prompt: "run build", Tier: "small", Authority: "workdir-write"})
+		one, zero := 1, 0
+		ap.events <- Event{BackgroundTasks: &one}
+		ap.reply("started background build")
+
+		eventually(t, "background state", func() bool {
+			return findAgent(t, h.runner.AgentList(lead), a).State == AgentBackground
+		})
+		if len(got.list()) != 0 {
+			t.Fatalf("report must be withheld while bgTasks > 0: %+v", got.list())
+		}
+		st := h.state(a)
+		if st.Status != StatusIdle || st.BackgroundTasks != 1 {
+			t.Fatalf("worker state = %+v", st)
+		}
+		if ev := SpawnAgentEvent(st, "k"); ev.Status != wslive.StatusDone || ev.BackgroundTasks != 1 {
+			t.Fatalf("SpawnAgentEvent = %+v", ev)
+		}
+
+		// Mail still starts a turn while background work runs.
+		if _, err := h.runner.Deliver(a, Delivery{Text: "status?"}); err != nil {
+			t.Fatal(err)
+		}
+		if msg := ap.nextSent(t); !strings.Contains(msg, "status?") {
+			t.Fatalf("mail while background = %q", msg)
+		}
+		ap.reply("still building")
+		eventually(t, "back to background after mail turn", func() bool {
+			return h.state(a).Status == StatusIdle && findAgent(t, h.runner.AgentList(lead), a).State == AgentBackground
+		})
+		if len(got.list()) != 0 {
+			t.Fatalf("report must stay withheld while bgTasks > 0: %+v", got.list())
+		}
+
+		// Background task completes, followed by self-resumed wakeup turn.
+		ap.events <- Event{BackgroundTasks: &zero}
+		ap.events <- Event{TurnStart: true}
+		ap.reply("build green")
+		eventually(t, "single final report", func() bool { return len(got.list()) == 1 })
+		if rep := got.list()[0]; rep.Result.Status != TurnDone || rep.Result.Message != "build green" {
+			t.Fatalf("final report = %+v", rep)
+		}
+		if state := findAgent(t, h.runner.AgentList(lead), a).State; state != AgentIdle {
+			t.Fatalf("state after wakeup = %q, want idle", state)
+		}
+	})
+
+	t.Run("no wakeup settles after grace", func(t *testing.T) {
+		h, got := agentHarness(t, nil)
+		lead := h.leadCaller()
+		a, ap := h.agentRunning(lead, AgentSpawnRequest{Prompt: "fire and forget", Tier: "small", Authority: "workdir-write"})
+		one, zero := 1, 0
+		ap.events <- Event{BackgroundTasks: &one}
+		ap.reply("launched")
+		eventually(t, "background state", func() bool {
+			return findAgent(t, h.runner.AgentList(lead), a).State == AgentBackground
+		})
+		ap.events <- Event{BackgroundTasks: &zero}
+		eventually(t, "grace settle report", func() bool { return len(got.list()) == 1 })
+		if rep := got.list()[0]; rep.Result.Status != TurnDone || rep.Result.Message != "launched" {
+			t.Fatalf("grace report = %+v", rep)
+		}
+	})
 }

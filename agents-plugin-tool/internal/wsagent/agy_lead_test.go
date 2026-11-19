@@ -477,3 +477,41 @@ func TestAgyLeadUnsolicitedUpdateDoesNotWedgeTurn(t *testing.T) {
 		t.Fatalf("after second turn: %+v", st)
 	}
 }
+
+// TestAgyLeadBackgroundTaskWakeupClosesAutomatically verifies the full ACP
+// lifecycle on a hosted agy lead: a run_command left open across end_turn
+// raises BackgroundTasks, its later completion drops BackgroundTasks to 0,
+// and agy's self-resumed wakeup turn opens and closes automatically once
+// usage_update goes quiet.
+func TestAgyLeadBackgroundTaskWakeupClosesAutomatically(t *testing.T) {
+	restoreUsage := agyWakeUsageQuiet
+	agyWakeUsageQuiet = 40 * time.Millisecond
+	t.Cleanup(func() { agyWakeUsageQuiet = restoreUsage })
+
+	h, f := newAgyLeadHarness(t)
+	h.startAt("http://127.0.0.1:1")
+	id := h.lead(BackendAgy, LeadOptions{}).ID
+	f.replyID = id
+	h.send(id, "run slow")
+	holder := h.holder(id)
+	eventually(t, "the first prompt", func() bool { return len(agyPromptIDs(h, holder)) == 1 })
+	h.holders.out(holder,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"tool_call","toolCallId":"bg1","name":"run_command","status":"in_progress","args":{"CommandLine":"sleep 20","IsDaemon":false}}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"backgrounded"}}}}`,
+		`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"`+agyPromptIDs(h, holder)[0]+`"}`,
+	)
+	eventually(t, "idle with background task", func() bool {
+		st := h.state(id)
+		return st.Status == StatusIdle && st.BackgroundTasks == 1
+	})
+	// Background task completes and agy self-resumes without a new prompt.
+	h.holders.out(holder,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"tool_call_update","toolCallId":"bg1","name":"run_command","status":"completed"}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"WAKEUP_DONE"}}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"usage_update","used":9451,"size":1048576}}}`,
+	)
+	eventually(t, "wakeup turn settled", func() bool {
+		st := h.state(id)
+		return st.Status == StatusIdle && st.BackgroundTasks == 0 && slices.Contains(ringTexts(h.ring(id), "reply"), "WAKEUP_DONE")
+	})
+}

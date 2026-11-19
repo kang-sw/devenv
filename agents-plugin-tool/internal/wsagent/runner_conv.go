@@ -73,10 +73,11 @@ type conv struct {
 	heldKinds map[string]bool
 
 	// loop-owned.
-	events      <-chan Event
-	idle        *time.Timer
-	idleAfter   time.Duration
-	dirtyModel  bool
+	events       <-chan Event
+	idle         *time.Timer
+	idleAfter    time.Duration
+	bgGraceTimer *time.Timer
+	dirtyModel   bool
 	dirtyEffort bool
 	dirtyMode   bool
 	// reconcileMode marks replay-reconstructed intent, not a new user setting.
@@ -442,6 +443,7 @@ func (c *conv) loop() {
 		if c.spawnTimer != nil {
 			c.spawnTimer.Stop()
 		}
+		c.stopBgGrace()
 	}()
 	// Before the first scan, Stop can report an existing holder unknown.
 	// Keep its rejoined transport and persisted identity until holdersScanned
@@ -468,7 +470,7 @@ func (c *conv) loop() {
 		return
 	}
 	for {
-		var idleC, actionC, leverC, spawnC <-chan time.Time
+		var idleC, actionC, leverC, spawnC, bgGraceC <-chan time.Time
 		leverC = c.leverC
 		if c.spawnTimer != nil {
 			spawnC = c.spawnTimer.C
@@ -478,6 +480,9 @@ func (c *conv) loop() {
 		}
 		if c.actionTimer != nil {
 			actionC = c.actionTimer.C
+		}
+		if c.bgGraceTimer != nil {
+			bgGraceC = c.bgGraceTimer.C
 		}
 		select {
 		case fn := <-c.reqs:
@@ -524,6 +529,13 @@ func (c *conv) loop() {
 			// No compaction started within the cap: what waited goes now.
 			c.leverC, c.leverStop = nil, nil
 			c.kick()
+		case <-bgGraceC:
+			c.bgGraceTimer = nil
+			c.releaseHeld()
+			if !c.turn {
+				c.armIdle()
+				c.restartIfDue()
+			}
 		case <-beat.C:
 			c.live.heartbeatSnapshot()
 			c.persistSeq()
@@ -656,9 +668,10 @@ func (c *conv) stateWithKeyCheck(checkKey bool) State {
 	if c.turn && !c.closed {
 		st.OutputTps = c.outputTps
 	}
+	st.BackgroundTasks = c.bgTasks
+	st.Background, st.Monitors = copyCount(c.background), copyCount(c.monitors)
 	if c.rec.Lead {
-		st.ActiveMode, st.BackgroundTasks, st.ActionNeeded = c.activeMode, c.bgTasks, c.actionNeeded
-		st.Background, st.Monitors = copyCount(c.background), copyCount(c.monitors)
+		st.ActiveMode, st.ActionNeeded = c.activeMode, c.actionNeeded
 		st.Approvals = append([]ApprovalRequest(nil), c.approvals...)
 		if c.failure != nil {
 			f := *c.failure
@@ -1079,6 +1092,7 @@ func (c *conv) kick() {
 		return
 	}
 	c.sendRetried = false
+	c.stopBgGrace()
 	c.turnMark, c.reply = mark, ""
 	// This turn's settle supersedes a done turn held for the children.
 	c.hold(nil)

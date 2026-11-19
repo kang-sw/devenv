@@ -95,6 +95,8 @@ type Event struct {
 	// events carry authoritative values, including zero.
 	ActiveMs      int64 `json:"activeMs,omitempty"`
 	TurnStartedAt int64 `json:"turnStartedAt,omitempty"`
+	// BackgroundTasks counts running background tasks for a subagent row.
+	BackgroundTasks int `json:"backgroundTasks,omitempty"`
 	// Caption replaces the caption when present; "" clears it.
 	Caption *string `json:"caption,omitempty"`
 	// Batches replaces the agent's batch list when present.
@@ -185,6 +187,7 @@ type agentState struct {
 	model, effort                        string
 	contextTokens                        int64
 	outputTps                            float64
+	bgTasks                              int
 }
 
 // State is one session's live state: the reducer from adapter events to a
@@ -605,7 +608,7 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		batches = st.normalizeBatches(ev.Batches)
 	}
 	if ev.AgentID == "" {
-		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" || ev.AgentKind != "" || ev.ActiveMs != 0 || ev.TurnStartedAt != 0 || hasTelemetry(ev) || ev.Observed != nil {
+		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" || ev.AgentKind != "" || ev.ActiveMs != 0 || ev.TurnStartedAt != 0 || ev.BackgroundTasks != 0 || hasTelemetry(ev) || ev.Observed != nil {
 			return fmt.Errorf("the lead takes only batches and caption; set agentId for a subagent")
 		}
 		st.setActivity(&st.lead, ev, batches)
@@ -657,10 +660,14 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		st.batchesEnded += uint64(len(closeBatches(&a.activityState, at)))
 	}
 	if ev.AgentKind == AgentKindPi {
-		// Pi's record owns timing, independent of the presentation status:
-		// held-but-idle agents can appear running without an active turn.
+		// Pi's record owns timing and background count, independent of the
+		// presentation status: held-but-idle agents can appear running without
+		// an active turn, and background work clears back to zero when done.
 		a.activeMs = max(ev.ActiveMs, 0)
 		a.turnStartedAt = max(ev.TurnStartedAt, 0)
+		a.bgTasks = max(ev.BackgroundTasks, 0)
+	} else if ev.BackgroundTasks > 0 || ev.Status == StatusFailed {
+		a.bgTasks = max(ev.BackgroundTasks, 0)
 	}
 	if a.status != StatusRunning {
 		// An ended subagent produces no output, so it shows no rate.
@@ -914,7 +921,7 @@ func (st *State) retain() {
 	var running, finished []*agentState
 	for id := range groups {
 		a := st.agents[id]
-		if a.status == StatusRunning {
+		if a.status == StatusRunning || a.bgTasks > 0 {
 			running = append(running, a)
 		} else {
 			finished = append(finished, a)
@@ -1050,10 +1057,11 @@ func (st *State) Snapshot(now int64) Snapshot {
 			AgentKind:     a.kind,
 
 			Observed:      st.observed[a.id].clone(),
-			Model:         a.model,
-			Effort:        a.effort,
-			ContextTokens: a.contextTokens,
-			OutputTps:     a.outputTps,
+			Model:           a.model,
+			Effort:          a.effort,
+			ContextTokens:   a.contextTokens,
+			OutputTps:       a.outputTps,
+			BackgroundTasks: a.bgTasks,
 		})
 	}
 	sort.Slice(snap.Agents, func(i, j int) bool {

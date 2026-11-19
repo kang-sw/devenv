@@ -57,6 +57,7 @@
   "agent.context": "上下文：{0} token",
   "agent.done": "已完成",
   "agent.sleep": "休眠",
+  "agent.background": "后台",
   "agent.deleted": "已删除",
   "agent.effort": "推理力度：{0}",
   "agent.failed": "失败",

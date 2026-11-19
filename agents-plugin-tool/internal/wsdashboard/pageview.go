@@ -263,9 +263,13 @@ type LiveSlot struct {
 // IsRunning reports a running agent.
 func (a AgentNode) IsRunning() bool { return a.Status == wslive.StatusRunning }
 
-// EndedStatus is the localized status key suffix for an ended row. Pi
-// children sleep between turns; native Claude/Codex rows still finish done.
+// EndedStatus is the localized status key suffix for an ended row. A row with
+// running background work shows "background"; Pi children otherwise sleep
+// between turns; native Claude/Codex rows finish done.
 func (a AgentNode) EndedStatus() string {
+	if a.Status == wslive.StatusDone && a.BackgroundTasks > 0 {
+		return "background"
+	}
 	if a.AgentKind == wslive.AgentKindPi && a.Status == wslive.StatusDone {
 		if a.PiDeleted {
 			return "deleted"
