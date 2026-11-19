@@ -497,7 +497,7 @@ func (c *conv) loop() {
 		case <-c.spawnC:
 			c.spawnDirty = true
 			c.live.writeSnapshot()
-			if c.live.slot == nil {
+			if c.live.currentSlot() == nil {
 				c.changed(false)
 			}
 			if c.idleNow() {
@@ -507,7 +507,7 @@ func (c *conv) loop() {
 		case <-spawnC:
 			c.spawnTimer, c.spawnNext = nil, time.Time{}
 			c.live.writeSnapshot()
-			if c.live.slot == nil {
+			if c.live.currentSlot() == nil {
 				c.changed(false)
 			}
 		case ev, ok := <-c.events:
@@ -537,7 +537,7 @@ func (c *conv) loop() {
 			}
 			if c.r.opts.Now().Sub(c.lastReg) >= wsdashboard.HeartbeatInterval {
 				c.writeRegistration()
-			} else if c.proc == nil {
+			} else {
 				c.checkRow()
 			}
 			c.expireIfDue()

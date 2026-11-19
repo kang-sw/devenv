@@ -346,7 +346,6 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 		// its descendants, as the heartbeat would (expire).
 		sessionDir := wsdashboard.SessionDir(r.opts.Dir, id)
 		wslive.DropRing(wslive.RingDir(sessionDir))
-		wsdashboard.ForgetRegistrationCache(r.opts.Dir, id)
 		if err := os.RemoveAll(sessionDir); err != nil {
 			fmt.Fprintf(r.opts.Log, "agent %s: delete: %v\n", id, err)
 			continue
@@ -594,8 +593,8 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		c.hidden = hidden
 	}
 	c.live.wake = func() {
-		if c.live.slot != nil {
-			c.live.slot.RingAppended()
+		if slot := c.live.currentSlot(); slot != nil {
+			slot.RingAppended()
 		} else {
 			r.notify(rec.ReplyID, rec.Root)
 		}
@@ -648,7 +647,7 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	if !foreign {
 		if r.opts.LiveHost != nil {
 			if slot, ok := r.opts.LiveHost.OpenHostedSlot(dir); ok {
-				c.live.slot = slot
+				c.live.setSlot(slot)
 				if folder, ok := slot.(wsdashboard.ObservedFoldSlot); ok && c.live.observedSeeded {
 					folder.FoldsObserved()
 				}

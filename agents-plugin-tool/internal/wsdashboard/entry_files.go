@@ -9,9 +9,10 @@ import (
 
 // entryFiles holds each session's parsed drained board-answer records by file
 // name, so a page read parses only the drained records it has not seen.
-// Conversation ring entries are served directly from wslive's in-memory daemon
-// ring cache (no per-render directory listing or entry-file reads); the daemon
-// drops a session's entries when it leaves the index (Daemon.sessionChanged).
+// Conversation ring entries for active hosted sessions are served directly
+// from wslive's pinned daemon RAM ring cache (no per-render directory listing
+// or entry-file reads); closed/non-hosted rings read on demand without pinning.
+// The daemon drops a session's entries when it leaves the index (Daemon.sessionChanged).
 // Held inbox entries and the snapshot change, and are read on every render.
 type entryFiles struct {
 	mu       sync.Mutex
@@ -29,8 +30,8 @@ type sessionFiles struct {
 
 func newEntryFiles() *entryFiles { return &entryFiles{sessions: map[string]*sessionFiles{}} }
 
-// readRing reads dir, the conversation ring of session replyID. In daemon mode
-// wslive serves this directly from RAM with zero disk operations.
+// readRing reads dir, the conversation ring of session replyID. For active
+// hosted sessions wslive serves this directly from pinned RAM with zero disk ops.
 func (c *entryFiles) readRing(replyID, dir string) ([]wslive.RingRecord, error) {
 	if c != nil {
 		c.mu.Lock()

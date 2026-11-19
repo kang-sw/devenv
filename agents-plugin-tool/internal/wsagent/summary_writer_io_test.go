@@ -20,10 +20,10 @@ func registrationReads() int64 {
 	return n
 }
 
-// TestSummaryWriterLockUsesInMemoryOwnershipFence pins the hosted live writer's
-// in-memory ownership fence (lockSummaryWriter): once the row is known in this
-// process, ownership checks make zero disk registration reads while still
-// refusing a row naming another process or taken by a terminal synchronously.
+// TestSummaryWriterLockReadsTheRowOnce pins the hosted live writer's ownership
+// check (lockSummaryWriter) to one registration file read per lock (7225f1a83),
+// ensuring external cross-process takeovers and concurrent unlocked reads can
+// never poison ownership.
 func TestSummaryWriterLockReadsTheRowOnce(t *testing.T) {
 	dir := t.TempDir()
 	r := NewRunner(Options{Dir: dir, Log: io.Discard})
@@ -47,26 +47,28 @@ func TestSummaryWriterLockReadsTheRowOnce(t *testing.T) {
 	}
 	write(row)
 
-	// Cold cache miss after Forget reads once; subsequent warm checks read zero.
-	wsdashboard.ForgetRegistrationCache(dir, "lead")
 	if ok, reads := lock(); !ok || reads != 1 {
-		t.Fatalf("cold owned row: ok=%v reads=%d, want true and 1", ok, reads)
-	}
-	if ok, reads := lock(); !ok || reads != 0 {
-		t.Fatalf("warm owned row: ok=%v reads=%d, want true and 0", ok, reads)
+		t.Fatalf("owned row: ok=%v reads=%d, want true and 1", ok, reads)
 	}
 
 	other := row
 	other.HostPID = 1
 	write(other)
-	if ok, reads := lock(); ok || reads != 0 || c.foreignRow {
-		t.Fatalf("row naming another process: ok=%v reads=%d foreign=%v, want false, 0, false", ok, reads, c.foreignRow)
+	if ok, reads := lock(); ok || reads != 1 || c.foreignRow {
+		t.Fatalf("row naming another process: ok=%v reads=%d foreign=%v, want false, 1, false", ok, reads, c.foreignRow)
 	}
 
+	// Simulate an unlocked concurrent read seeing the old row before an external
+	// process rewrites registration.json (terminal takeover, R1 Findings 1 & 2):
+	// lockSummaryWriter must still read fresh state under OS flock and refuse.
+	write(row)
+	if _, err := wsdashboard.ReadRegistration(dir, "lead"); err != nil {
+		t.Fatal(err)
+	}
 	taken := row
 	taken.Hosted, taken.HostPID = false, 0
 	write(taken)
-	if ok, reads := lock(); ok || reads != 0 || !c.foreignRow {
-		t.Fatalf("row a terminal took: ok=%v reads=%d foreign=%v, want false, 0, true", ok, reads, c.foreignRow)
+	if ok, reads := lock(); ok || reads != 1 || !c.foreignRow {
+		t.Fatalf("row a terminal took: ok=%v reads=%d foreign=%v, want false, 1, true", ok, reads, c.foreignRow)
 	}
 }

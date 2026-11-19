@@ -190,10 +190,12 @@ under `<cache root>/dashboard/`:
 - `sessions/<reply-id>/snapshot.json` and `sessions/<reply-id>/ring/` - the
   session's live snapshot (current lead and subagent activity, served from
   daemon RAM for slotted sessions and flushed for recovery on turn end, close,
-  and debounced heartbeat) and its conversation ring (finished messages,
-  held in daemon RAM and appended to owner-only JSONL segment files
-  `seg-<seq>.jsonl` rotated whole; legacy per-entry `.json` files are still
-  merged on load; the newest 2000 are kept, the page shows the newest 50 and
+  and debounced heartbeat) and its conversation ring (finished messages; while
+  a session holds an active daemon `HostedSlot`, its ring stays pinned in RAM
+  and appends to owner-only JSONL segment files `seg-<seq>.jsonl` rotated
+  whole; unpinned/external writers write atomic per-entry `.json` files and
+  close immediately; readers merge segments and `.json` files on load; the
+  newest 2000 are kept, the page shows the newest 50 and
   pages older ones in through the session's history route).
   ws-mcp writes them from host adapter events
   (`dashboard.intake`) and from its mailbox send and recv path, only for a
@@ -339,9 +341,11 @@ record, board, tickets, mailbox history and contacts. A nudge, periodic safety
 refresh or board poke reads both parts. Known inbox-only changes on boardless
 sessions list only the inbox stores; unknown runner writes still list every
 live store. A re-read builds no panel; the board renders only when a page
-reads the changed session. Conversation ring entries stay in daemon RAM
-(loaded once from segments plus any legacy entry files, with held-open append
-handles); drained-inbox entry files are parsed once per daemon and kept by
+reads the changed session. Active hosted sessions pin their conversation ring
+in daemon RAM (loaded once from segments plus any `.json` entry files, with
+held-open append handles released on slot close or shutdown; closed and
+non-hosted rings are fingerprinted by directory metadata without loading bodies
+or pinning RAM); drained-inbox entry files are parsed once per daemon and kept by
 name for the window the page shows; mailbox
 history, contacts, and unread counts come from the memory store (Mailbox
 store below) with no file read. The small files every read and render

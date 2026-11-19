@@ -1,6 +1,7 @@
 package wslive
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -169,6 +170,8 @@ func TestRingIsOwnerOnly(t *testing.T) {
 		t.Skip("POSIX permissions")
 	}
 	dir := filepath.Join(t.TempDir(), "ring")
+	unpin := PinRing(dir)
+	defer unpin()
 	if err := AppendRing(dir, []RingEntry{{Kind: RingUser, Text: "private words"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -190,6 +193,24 @@ func TestRingIsOwnerOnly(t *testing.T) {
 	if perm := info.Mode().Perm(); perm != 0o600 {
 		t.Errorf("ring segment mode = %o, want 600", perm)
 	}
+	if err := unpin(); err != nil {
+		t.Fatal(err)
+	}
+	// Unpinned legacy entry files must also be 0600.
+	if err := AppendRing(dir, []RingEntry{{Kind: RingUser, Text: "unpinned private"}}); err != nil {
+		t.Fatal(err)
+	}
+	names, err = RingNames(dir)
+	if err != nil || len(names) != 2 {
+		t.Fatalf("ring names after unpinned = %v, %v", names, err)
+	}
+	info, err = os.Stat(filepath.Join(dir, names[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("ring legacy entry mode = %o, want 600", perm)
+	}
 }
 
 func ringIOCount(op string) int64 {
@@ -209,6 +230,8 @@ func TestRingSegmentRotationAndWholeFileRetention(t *testing.T) {
 
 	dir := filepath.Join(t.TempDir(), "ring")
 	stepRingClock(t)
+	unpin := PinRing(dir)
+	defer unpin()
 	// Write 30 entries -> 6 segments of 5; ringMaxSegments=4 deletes oldest 2 whole segments.
 	for i := 0; i < 30; i++ {
 		appendTexts(t, dir, i, i+1)
@@ -239,10 +262,13 @@ func TestRingSegmentRotationAndWholeFileRetention(t *testing.T) {
 }
 
 func TestRingTornTrailingLineRecovery(t *testing.T) {
-	sessions := filepath.Join(t.TempDir(), "sessions")
-	dir := filepath.Join(sessions, "torn", "ring")
+	dir := filepath.Join(t.TempDir(), "sessions", "torn", "ring")
 	stepRingClock(t)
+	unpin := PinRing(dir)
 	appendTexts(t, dir, 0, 2)
+	if err := unpin(); err != nil {
+		t.Fatal(err)
+	}
 
 	segPath := filepath.Join(dir, ringSegmentName(1))
 	f, err := os.OpenFile(segPath, os.O_WRONLY|os.O_APPEND, 0o600)
@@ -255,8 +281,8 @@ func TestRingTornTrailingLineRecovery(t *testing.T) {
 	}
 	f.Close()
 
-	closeCache := EnableRingCache(sessions)
-	defer closeCache()
+	unpin = PinRing(dir)
+	defer unpin()
 	// Read before write must ignore the torn tail.
 	got, err := ReadRing(dir)
 	if err != nil || len(got) != 2 || got[0].Text != "m0" || got[1].Text != "m1" {
@@ -264,7 +290,7 @@ func TestRingTornTrailingLineRecovery(t *testing.T) {
 	}
 	// Next append must truncate the torn tail so the new entry parses cleanly.
 	appendTexts(t, dir, 2, 3)
-	if err := closeCache(); err != nil {
+	if err := unpin(); err != nil {
 		t.Fatal(err)
 	}
 	reopened, err := ReadRing(dir)
@@ -284,8 +310,12 @@ func TestRingLegacyAndSegmentMergeCompatibility(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, beforeName), []byte(`{"kind":"user","text":"legacy-before"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// New segment entry between two legacy entries.
+	// New pinned segment entry between two legacy entries.
+	unpin := PinRing(dir)
 	if err := AppendRing(dir, []RingEntry{{ringStamp: base.Add(time.Second), Kind: RingReply, Text: "segment-middle"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := unpin(); err != nil {
 		t.Fatal(err)
 	}
 	// Old binary (downgrade) ignores .jsonl segment files and writes another legacy .json file.
@@ -309,8 +339,8 @@ func TestRingPersistentCacheZeroDiskReadsAndSingleOpen(t *testing.T) {
 	sessions := filepath.Join(t.TempDir(), "sessions")
 	dir := filepath.Join(sessions, "cached", "ring")
 	stepRingClock(t)
-	closeCache := EnableRingCache(sessions)
-	defer closeCache()
+	unpin := PinRing(dir)
+	defer unpin()
 
 	// Warm initial segment open with first append.
 	appendTexts(t, dir, 0, 1)
@@ -338,6 +368,9 @@ func TestRingPersistentCacheZeroDiskReadsAndSingleOpen(t *testing.T) {
 		if names, err := RingNames(dir); err != nil || len(names) != 40 {
 			t.Fatalf("RingNames = %d, %v", len(names), err)
 		}
+		if fp, err := RingFingerprint(dir); err != nil || len(fp) == 0 {
+			t.Fatalf("RingFingerprint = %v, %v", fp, err)
+		}
 	}
 	if got := ringIOCount("read_dir") - beforeReadDir; got != 0 {
 		t.Fatalf("steady-state ring appends/reads made %d read_dir calls, want 0", got)
@@ -355,12 +388,223 @@ func TestRingPersistentCacheZeroDiskReadsAndSingleOpen(t *testing.T) {
 		t.Fatalf("steady-state ring appends made %d atomic_replace calls, want 0", got)
 	}
 
-	// Graceful close + reopen recovers every entry with zero loss.
-	if err := closeCache(); err != nil {
+	// Graceful unpin + reopen recovers every entry with zero loss.
+	if err := UnpinRingsUnder(sessions); err != nil {
 		t.Fatal(err)
+	}
+	if RingPinned(dir) {
+		t.Fatal("UnpinRingsUnder left ring pinned")
 	}
 	reopened, err := ReadRing(dir)
 	if err != nil || len(reopened) != 40 || reopened[0].Text != "m0" || reopened[39].Text != "m39" {
 		t.Fatalf("reopened = %d (%v)", len(reopened), err)
+	}
+}
+
+// TestRingExternalAppendAndUnpinnedNoHeldFD covers R1 Finding 4: external
+// writers write atomic legacy .json files without touching seg-*.jsonl,
+// SyncExternalRing merges them into a pinned RAM ring without closing the
+// held segment writer, and unpinned appends never leak open handles.
+func TestRingExternalAppendAndUnpinnedNoHeldFD(t *testing.T) {
+	base := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	dir := filepath.Join(t.TempDir(), "sessions", "hosted", "ring")
+
+	// Pinned hosted writer appends to seg-1.jsonl.
+	unpin := PinRing(dir)
+	if err := AppendRing(dir, []RingEntry{{ringStamp: base, Kind: RingUser, Text: "hosted-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	segPath := filepath.Join(dir, ringSegmentName(1))
+	segBefore, err := os.ReadFile(segPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// External process appends a legacy .json entry without touching seg-1.jsonl.
+	extName := base.Add(time.Second).Format(ringStampLayout) + "-eeee.json"
+	if err := writeLegacyRingRaw(dir, extName, []byte(`{"kind":"mail","text":"external-mail"}`)); err != nil {
+		t.Fatal(err)
+	}
+	segAfterExt, err := os.ReadFile(segPath)
+	if err != nil || string(segAfterExt) != string(segBefore) {
+		t.Fatalf("external append disturbed segment file: %v", err)
+	}
+
+	// SyncExternalRing merges external entry into pinned RAM without closing fd.
+	SyncExternalRing(dir)
+	if err := AppendRing(dir, []RingEntry{{ringStamp: base.Add(2 * time.Second), Kind: RingReply, Text: "hosted-2"}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadRing(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0].Text != "hosted-1" || got[1].Text != "external-mail" || got[2].Text != "hosted-2" {
+		t.Fatalf("merged pinned + external = %+v", got)
+	}
+	if err := unpin(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Unpinned caller appends legacy .json, holds no fd, pins nothing, and RemoveAll succeeds.
+	unpinnedDir := filepath.Join(t.TempDir(), "sessions", "unpinned", "ring")
+	if err := AppendRing(unpinnedDir, []RingEntry{{Kind: RingMail, Text: "non-slot"}}); err != nil {
+		t.Fatal(err)
+	}
+	if RingPinned(unpinnedDir) {
+		t.Fatal("unpinned AppendRing pinned ring in RAM")
+	}
+	if err := os.RemoveAll(filepath.Dir(unpinnedDir)); err != nil {
+		t.Fatalf("RemoveAll after unpinned AppendRing failed (leaked fd?): %v", err)
+	}
+}
+
+// TestRingTransientNewestSegmentReadErrorNoFallbackToSeg1 covers R1 Finding 5:
+// a transient read error on the newest segment must fail load rather than
+// leaving segSeq=0 and reopening seg-1.jsonl.
+func TestRingTransientNewestSegmentReadErrorNoFallbackToSeg1(t *testing.T) {
+	origEntries := ringSegmentEntries
+	ringSegmentEntries = 2
+	t.Cleanup(func() { ringSegmentEntries = origEntries })
+
+	dir := filepath.Join(t.TempDir(), "sessions", "errseg", "ring")
+	stepRingClock(t)
+	unpin := PinRing(dir)
+	appendTexts(t, dir, 0, 3) // seg-1 (2 entries) + seg-2 (1 entry)
+	if err := unpin(); err != nil {
+		t.Fatal(err)
+	}
+	seg1Before, err := os.ReadFile(filepath.Join(dir, ringSegmentName(1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Inject transient read failure on seg-2.
+	origRead := ringReadFile
+	failSeg2 := true
+	ringReadFile = func(path string) ([]byte, error) {
+		if failSeg2 && filepath.Base(path) == ringSegmentName(2) {
+			return nil, errors.New("transient AV lock")
+		}
+		return origRead(path)
+	}
+	t.Cleanup(func() { ringReadFile = origRead })
+
+	unpin = PinRing(dir)
+	defer unpin()
+	if err := AppendRing(dir, []RingEntry{{Kind: RingUser, Text: "during-err"}}); err == nil {
+		t.Fatal("AppendRing succeeded despite unreadable newest segment")
+	}
+	seg1After, err := os.ReadFile(filepath.Join(dir, ringSegmentName(1)))
+	if err != nil || string(seg1After) != string(seg1Before) {
+		t.Fatalf("transient newest-segment error fell back to rewriting seg-1: %v", err)
+	}
+
+	// Once transient error clears, load recovers cleanly and appends to seg-2.
+	failSeg2 = false
+	if err := AppendRing(dir, []RingEntry{{Kind: RingUser, Text: "after-recovery"}}); err != nil {
+		t.Fatalf("AppendRing after recovery: %v", err)
+	}
+	got, err := ReadRing(dir)
+	if err != nil || len(got) != 4 || got[3].Text != "after-recovery" {
+		t.Fatalf("ring after recovery = %+v, %v", got, err)
+	}
+}
+
+// TestRingTruncateErrorRotatesInsteadOfGluingTornTail covers R1 Finding 5:
+// if Truncate fails on a torn trailing line, the writer rotates to a fresh
+// segment rather than gluing the next record onto the torn tail.
+func TestRingTruncateErrorRotatesInsteadOfGluingTornTail(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "sessions", "truncer", "ring")
+	stepRingClock(t)
+	unpin := PinRing(dir)
+	appendTexts(t, dir, 0, 2)
+	if err := unpin(); err != nil {
+		t.Fatal(err)
+	}
+	seg1 := filepath.Join(dir, ringSegmentName(1))
+	f, err := os.OpenFile(seg1, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"name":"20261106T090009.000000000Z-aaaa.json","entry":{"kind":"user","text":"torn`); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	f.Close()
+
+	origTrunc := ringTruncate
+	ringTruncate = func(string, int64) error { return errors.New("truncate denied") }
+	t.Cleanup(func() { ringTruncate = origTrunc })
+
+	unpin = PinRing(dir)
+	appendTexts(t, dir, 2, 3)
+	if err := unpin(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ringSegmentName(2))); err != nil {
+		t.Fatalf("expected rotation to seg-2 when Truncate failed: %v", err)
+	}
+	got, err := ReadRing(dir)
+	if err != nil || len(got) != 3 || got[0].Text != "m0" || got[1].Text != "m1" || got[2].Text != "m2" {
+		t.Fatalf("reopened after truncate-denied rotation = %+v, %v", got, err)
+	}
+}
+
+// TestRingUnpinnedClosedSessionDoesNotPinOrReadBodies covers R1 Finding 6:
+// RingFingerprint and RingNames on unpinned/closed dirs never pin RAM entries
+// and RingFingerprint never opens or reads file bodies while still detecting
+// segment growth and legacy entry additions.
+func TestRingUnpinnedClosedSessionDoesNotPinOrReadBodies(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "sessions", "closed", "ring")
+	stepRingClock(t)
+	unpin := PinRing(dir)
+	appendTexts(t, dir, 0, 3)
+	if err := unpin(); err != nil {
+		t.Fatal(err)
+	}
+	beforePinned := pinnedRingCount()
+	beforeReadFile := ringIOCount("read_file")
+
+	fp1, err := RingFingerprint(dir)
+	if err != nil || len(fp1) == 0 {
+		t.Fatalf("RingFingerprint 1 = %v, %v", fp1, err)
+	}
+	if got := ringIOCount("read_file") - beforeReadFile; got != 0 {
+		t.Fatalf("RingFingerprint read %d files, want 0", got)
+	}
+	if pinnedRingCount() != beforePinned {
+		t.Fatalf("RingFingerprint pinned closed ring in RAM")
+	}
+
+	// External legacy append changes fingerprint with 0 body reads.
+	appendTexts(t, dir, 3, 4)
+	fp2, err := RingFingerprint(dir)
+	if err != nil || strings.Join(fp1, "|") == strings.Join(fp2, "|") {
+		t.Fatalf("RingFingerprint did not change after append: %v vs %v (%v)", fp1, fp2, err)
+	}
+	if got := ringIOCount("read_file") - beforeReadFile; got != 0 {
+		t.Fatalf("RingFingerprint after append read %d files, want 0", got)
+	}
+
+	// RingNames on unpinned dir never pins RAM entries.
+	names, err := RingNames(dir)
+	if err != nil || len(names) != 4 {
+		t.Fatalf("RingNames = %d, %v", len(names), err)
+	}
+	if pinnedRingCount() != beforePinned {
+		t.Fatalf("RingNames pinned closed ring in RAM")
+	}
+
+	// Legacy-only unpinned dir: RingNames reads 0 file bodies.
+	legacyDir := filepath.Join(t.TempDir(), "sessions", "legacy-closed", "ring")
+	appendTexts(t, legacyDir, 0, 5)
+	beforeLegacyRead := ringIOCount("read_file")
+	legacyNames, err := RingNames(legacyDir)
+	if err != nil || len(legacyNames) != 5 {
+		t.Fatalf("legacy RingNames = %d, %v", len(legacyNames), err)
+	}
+	if got := ringIOCount("read_file") - beforeLegacyRead; got != 0 {
+		t.Fatalf("legacy RingNames read %d file bodies, want 0", got)
 	}
 }

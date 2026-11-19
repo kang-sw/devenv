@@ -3,6 +3,8 @@ package wsdashboard
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,11 +40,16 @@ func ringDiskOps() int64 {
 }
 
 // TestSessionPageReadsEachEntryFileOnce pins the entry-file cache and RAM ring:
-// ring reads are served from RAM with zero disk listings/reads after initial
-// load, each new drained record is parsed once, the live view caps at RingCap,
-// and a session that leaves the index drops its cached entries.
+// hosted ring reads are served from RAM with zero disk listings/reads after
+// initial load, each new drained record is parsed once, the live view caps at
+// RingCap, and a session that leaves the index drops its cached entries.
 func TestSessionPageReadsEachEntryFileOnce(t *testing.T) {
 	f := startPageFixture(t)
+	slot, ok := f.d.OpenHostedSlot(SessionDir(f.dir, "livesession"))
+	if !ok {
+		t.Fatal("OpenHostedSlot returned false")
+	}
+	defer slot.Close()
 	drainOne(t, f, "livesession", "first answer")
 	render := func() {
 		t.Helper()
@@ -194,5 +201,57 @@ func TestStreamsServesSeamCounters(t *testing.T) {
 	}
 	if got["signals"] == 999 {
 		t.Error("a seam's counter replaced the daemon's own")
+	}
+}
+
+// TestHostedSlotPinUnpinAndExternalNudgeSync verifies R1 Findings 4 & 6 at the
+// daemon boundary: only active HostedSlot sessions pin their ring in RAM,
+// closed/unpinned sessions are never pinned across index refresh, and an
+// external legacy .json append to a hosted session becomes visible on reread.
+func TestHostedSlotPinUnpinAndExternalNudgeSync(t *testing.T) {
+	f := startPageFixture(t)
+	closedDir := wslive.RingDir(SessionDir(f.dir, "livesession"))
+	if wslive.RingPinned(closedDir) {
+		t.Fatal("unhosted session ring pinned before OpenHostedSlot")
+	}
+	f.d.Index().Refresh()
+	if wslive.RingPinned(closedDir) {
+		t.Fatal("Index.Refresh pinned unhosted session ring")
+	}
+
+	slot, ok := f.d.OpenHostedSlot(SessionDir(f.dir, "livesession"))
+	if !ok {
+		t.Fatal("OpenHostedSlot failed")
+	}
+	if !wslive.RingPinned(closedDir) {
+		t.Fatal("OpenHostedSlot did not pin hosted ring")
+	}
+	appendUsers(t, f, "livesession", 0, 1)
+
+	// Simulate external process writing a legacy .json entry directly on disk.
+	extName := time.Now().UTC().Add(time.Hour).Format("20060102T150405.000000000Z") + "-f00d.json"
+	if err := os.WriteFile(filepath.Join(closedDir, extName), []byte(`{"kind":"user","text":"from-external-proc"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// External nudge triggers authoritative ReadSession -> SyncExternalRing.
+	f.d.Index().Reread("livesession")
+	f.d.Index().Settle()
+	ring, err := wslive.ReadRing(closedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, rec := range ring {
+		if rec.Text == "from-external-proc" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("external append not merged into pinned hosted ring after Reread: %+v", ring)
+	}
+
+	slot.Close()
+	if wslive.RingPinned(closedDir) {
+		t.Fatal("slot.Close left hosted ring pinned")
 	}
 }

@@ -24,23 +24,27 @@ import (
 // Append-only JSONL segment backing and in-memory daemon ring cache for
 // conversation rings (<sessionDir>/ring/).
 //
-// Each segment is named seg-<16-digit-seq>.jsonl (mode 0600, in 0700 dir).
-// Legacy per-entry <stamp>-<hex>.json files are still read and merged by
-// Name on load, so upgrades and downgrade-reopens lose nothing; old binaries
-// ignore .jsonl files (isRingEntryName matches only .json) and never delete
-// or overwrite them.
+// Only sessions explicitly pinned while holding an active daemon HostedSlot
+// (PinRing / UnpinRing) keep their ring in RAM and append to owner-only JSONL
+// segment files seg-<16-digit-seq>.jsonl (mode 0600, in 0700 dir). Because the
+// daemon holds dashboard.lock and unpins all rings before releasing it, at most
+// one process ever writes, truncates, rotates, or prunes seg-*.jsonl.
 //
-// In daemon mode (EnableRingCache for <stateDir>/sessions), each session's
-// ring is loaded once into RAM and its active append segment file descriptor
-// stays open until rotation, slot close, drop, or daemon shutdown. Steady-
-// state appends perform one write() with zero open/close/rename/ReadDir, and
-// steady-state reads perform zero filesystem operations.
+// Unpinned/external writers (standalone ws-mcp serve --stdio, direct ws-mcp
+// call, a lingering predecessor daemon after Close, or non-slot in-daemon
+// callers) write atomic per-entry <stamp>-<hex>.json files and immediately
+// close their fd, so they never race on segment files or hold handles open.
+// Readers merge seg-*.jsonl and legacy .json files by Name on load, and
+// SyncExternalRing merges external .json appends into a pinned RAM ring on
+// external nudge/reread without disturbing the held segment writer.
 
 var (
-	// Segment rotation bounds (test seams).
+	// Segment rotation bounds and I/O seams (tests may override).
 	ringSegmentEntries       = 500
 	ringSegmentBytes   int64 = 1 << 20 // 1 MiB
 	ringMaxSegments          = 16
+	ringReadFile             = wsstate.ReadFileOnce
+	ringTruncate             = os.Truncate
 )
 
 var ringSegmentPattern = regexp.MustCompile(`^seg-([0-9]{16})\.jsonl$`)
@@ -67,6 +71,12 @@ type ringSegmentLine struct {
 	Entry RingEntry `json:"entry"`
 }
 
+// ringSegmentNameOnly decodes only the entry name from a JSONL line so
+// unpinned RingNames calls skip RingEntry body decoding.
+type ringSegmentNameOnly struct {
+	Name string `json:"name"`
+}
+
 type ringSegMeta struct {
 	seq   uint64
 	count int
@@ -75,32 +85,25 @@ type ringSegMeta struct {
 type ringMem struct {
 	mu          sync.Mutex
 	dir         string
+	refs        int
 	loaded      bool
 	closed      bool
 	records     []RingRecord // newest <= RingHistoryCap, sorted ascending by Name
 	segments    []ringSegMeta
-	legacyNames []string // legacy .json files seen on disk at load
+	legacyNames []string            // legacy .json files seen on disk
+	legacySet   map[string]struct{} // fast membership check for SyncExternalRing
 	file        *os.File
 	segSeq      uint64
 	segEntries  int
 	segBytes    int64
-	tornTail    bool // newest segment on disk had a torn trailing line not yet truncated
-}
-
-type ringRootCache struct {
-	root    string
-	mu      sync.Mutex
-	entries map[string]*ringMem // clean ring dir -> *ringMem
-	closed  bool
+	tornTail    bool // newest segment on disk has a torn trailing line not yet truncated
+	forceRotate bool // newest segment disappeared; rotate to segSeq+1 on next write
+	gen         uint64
 }
 
 var (
-	ringRootsMu sync.Mutex
-	ringRoots   = map[string]*ringRootCache{} // normalized root key -> cache
-
-	// directDirMu serializes concurrent non-cached AppendRing calls per dir.
-	directDirMu sync.Mutex
-	directLocks = map[string]*sync.Mutex{}
+	ringPinsMu sync.Mutex
+	ringPins   = map[string]*ringMem{} // normalized ring dir -> *ringMem
 )
 
 func normPathKey(path string) string {
@@ -122,180 +125,186 @@ func pathUnderRoot(dir, root string) bool {
 	return strings.HasPrefix(dir, prefix)
 }
 
-// EnableRingCache enables the in-memory ring cache and held-open segment
-// writers for every conversation ring under sessionsRoot (typically
-// <stateDir>/sessions). The returned close function closes every held segment
-// file descriptor under that root and deregisters the cache; it is idempotent.
-func EnableRingCache(sessionsRoot string) func() error {
-	clean := filepath.Clean(sessionsRoot)
+// PinRing pins the conversation ring at dir into daemon RAM and enables
+// held-open append-only JSONL segment writes for it while a HostedSlot owns
+// the session. Calls are reference-counted per dir; the returned release
+// function is idempotent.
+func PinRing(dir string) func() error {
+	clean := filepath.Clean(dir)
 	key := normPathKey(clean)
-	rc := &ringRootCache{
-		root:    clean,
-		entries: map[string]*ringMem{},
+	ringPinsMu.Lock()
+	rm := ringPins[key]
+	if rm == nil {
+		rm = &ringMem{dir: clean, legacySet: map[string]struct{}{}}
+		ringPins[key] = rm
 	}
-	ringRootsMu.Lock()
-	ringRoots[key] = rc
-	ringRootsMu.Unlock()
+	rm.refs++
+	ringPinsMu.Unlock()
 
 	var once sync.Once
-	var closeErr error
+	var err error
 	return func() error {
 		once.Do(func() {
-			ringRootsMu.Lock()
-			if ringRoots[key] == rc {
-				delete(ringRoots, key)
-			}
-			ringRootsMu.Unlock()
-
-			rc.mu.Lock()
-			rc.closed = true
-			list := make([]*ringMem, 0, len(rc.entries))
-			for _, rm := range rc.entries {
-				list = append(list, rm)
-			}
-			rc.entries = nil
-			rc.mu.Unlock()
-
-			var errs []error
-			for _, rm := range list {
-				rm.mu.Lock()
-				rm.closed = true
-				if rm.file != nil {
-					if err := rm.file.Close(); err != nil {
-						errs = append(errs, err)
-					}
-					rm.file = nil
-				}
-				rm.mu.Unlock()
-			}
-			closeErr = errors.Join(errs...)
+			err = unpinInstance(key, rm)
 		})
-		return closeErr
+		return err
 	}
 }
 
-func findRingRoot(cleanDir string) *ringRootCache {
-	ringRootsMu.Lock()
-	defer ringRootsMu.Unlock()
-	for _, rc := range ringRoots {
-		if pathUnderRoot(cleanDir, rc.root) {
-			return rc
+func unpinInstance(key string, target *ringMem) error {
+	ringPinsMu.Lock()
+	rm := ringPins[key]
+	if rm == nil || (target != nil && rm != target) {
+		ringPinsMu.Unlock()
+		return nil
+	}
+	rm.refs--
+	if rm.refs > 0 {
+		ringPinsMu.Unlock()
+		return nil
+	}
+	delete(ringPins, key)
+	ringPinsMu.Unlock()
+	return rm.close()
+}
+
+// UnpinRing decrements the pin count for dir; when the last pin releases, it
+// drops the RAM cache entry and closes any held segment file descriptor.
+func UnpinRing(dir string) error {
+	return unpinInstance(normPathKey(dir), nil)
+}
+
+// UnpinRingsUnder unpins every ring under sessionsRoot and closes all held
+// segment file descriptors. Called on daemon shutdown before releasing the
+// daemon instance lock.
+func UnpinRingsUnder(sessionsRoot string) error {
+	cleanRoot := filepath.Clean(sessionsRoot)
+	var list []*ringMem
+	ringPinsMu.Lock()
+	for key, rm := range ringPins {
+		if pathUnderRoot(rm.dir, cleanRoot) {
+			delete(ringPins, key)
+			list = append(list, rm)
 		}
+	}
+	ringPinsMu.Unlock()
+
+	var errs []error
+	for _, rm := range list {
+		if err := rm.close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// DropRing forcibly evicts dir from the pinned RAM cache and closes any open
+// segment file descriptor so directory removal succeeds on Windows.
+func DropRing(dir string) {
+	key := normPathKey(dir)
+	ringPinsMu.Lock()
+	rm := ringPins[key]
+	delete(ringPins, key)
+	ringPinsMu.Unlock()
+	if rm != nil {
+		_ = rm.close()
+	}
+}
+
+// RingPinned reports whether dir currently has a pinned RAM ring cache entry.
+func RingPinned(dir string) bool {
+	return pinnedRing(dir) != nil
+}
+
+// pinnedRingCount returns the number of currently pinned ring directories (test seam).
+func pinnedRingCount() int {
+	ringPinsMu.Lock()
+	defer ringPinsMu.Unlock()
+	return len(ringPins)
+}
+
+func pinnedRing(dir string) *ringMem {
+	key := normPathKey(dir)
+	ringPinsMu.Lock()
+	rm := ringPins[key]
+	ringPinsMu.Unlock()
+	return rm
+}
+
+func (rm *ringMem) close() error {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	rm.closed = true
+	if rm.file != nil {
+		err := rm.file.Close()
+		rm.file = nil
+		return err
 	}
 	return nil
 }
 
-// cachedRing returns the cached *ringMem for dir if dir falls under an active
-// EnableRingCache root; nil otherwise.
-func cachedRing(dir string) *ringMem {
-	clean := filepath.Clean(dir)
-	rc := findRingRoot(clean)
-	if rc == nil {
-		return nil
-	}
-	key := normPathKey(clean)
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
-	if rc.closed {
-		return nil
-	}
-	rm := rc.entries[key]
-	if rm == nil {
-		rm = &ringMem{dir: clean}
-		rc.entries[key] = rm
-	}
-	return rm
-}
-
-// CloseRingWriter closes any held-open segment file descriptor for dir while
-// keeping its cached entries in RAM. Safe to call when dir is uncached or
-// already closed.
-func CloseRingWriter(dir string) {
-	clean := filepath.Clean(dir)
-	rc := findRingRoot(clean)
-	if rc == nil {
-		return
-	}
-	key := normPathKey(clean)
-	rc.mu.Lock()
-	rm := rc.entries[key]
-	rc.mu.Unlock()
-	if rm == nil {
-		return
-	}
-	rm.mu.Lock()
-	if rm.file != nil {
-		_ = rm.file.Close()
-		rm.file = nil
-	}
-	rm.mu.Unlock()
-}
-
-// DropRing closes any held-open segment file descriptor for dir and removes
-// its in-memory cache entry. Call before removing a session directory so open
-// handles never block deletion on Windows, and when a session leaves the index.
-func DropRing(dir string) {
-	clean := filepath.Clean(dir)
-	rc := findRingRoot(clean)
-	if rc == nil {
-		return
-	}
-	key := normPathKey(clean)
-	rc.mu.Lock()
-	rm := rc.entries[key]
-	delete(rc.entries, key)
-	rc.mu.Unlock()
-	if rm == nil {
-		return
-	}
-	rm.mu.Lock()
-	rm.closed = true
-	if rm.file != nil {
-		_ = rm.file.Close()
-		rm.file = nil
-	}
-	rm.mu.Unlock()
-}
-
-// RefreshRing reloads dir's cached ring from disk if it is currently cached.
-// Used for non-hosted sessions on authoritative refreshes (/nudge or periodic
-// safety scan) so external legacy writers remain visible.
-func RefreshRing(dir string) {
-	clean := filepath.Clean(dir)
-	rc := findRingRoot(clean)
-	if rc == nil {
-		return
-	}
-	key := normPathKey(clean)
-	rc.mu.Lock()
-	rm := rc.entries[key]
-	rc.mu.Unlock()
+// SyncExternalRing merges any external legacy .json entries (or higher-seq
+// segment files) written outside the pinned daemon writer into RAM without
+// closing the held segment fd or rereading already-loaded segments.
+func SyncExternalRing(dir string) {
+	rm := pinnedRing(dir)
 	if rm == nil {
 		return
 	}
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
-	if rm.closed || rm.file != nil {
-		// An open writer means this process owns the ring.
+	if rm.closed || !rm.loaded {
 		return
 	}
-	rm.loaded = false
-	_ = rm.ensureLoadedLocked(false)
-}
-
-func directLock(cleanDir string) *sync.Mutex {
-	key := normPathKey(cleanDir)
-	directDirMu.Lock()
-	defer directDirMu.Unlock()
-	mu := directLocks[key]
-	if mu == nil {
-		mu = &sync.Mutex{}
-		directLocks[key] = mu
+	dirEntries, err := wsstate.ReadDir(rm.dir)
+	if err != nil {
+		return
 	}
-	return mu
+	var newLegacy []string
+	var newSegs []uint64
+	for _, de := range dirEntries {
+		if de.IsDir() {
+			continue
+		}
+		name := de.Name()
+		if isRingEntryName(name) {
+			if _, seen := rm.legacySet[name]; !seen {
+				newLegacy = append(newLegacy, name)
+			}
+		} else if seq, ok := parseRingSegmentSeq(name); ok && seq > rm.segSeq {
+			newSegs = append(newSegs, seq)
+		}
+	}
+	if len(newLegacy) == 0 && len(newSegs) == 0 {
+		return
+	}
+	sort.Strings(newLegacy)
+	sort.Slice(newSegs, func(i, j int) bool { return newSegs[i] < newSegs[j] })
+
+	var added []RingRecord
+	for _, name := range newLegacy {
+		if rec, ok := readLegacyRingEntry(rm.dir, name); ok {
+			added = append(added, rec)
+			rm.legacyNames = append(rm.legacyNames, name)
+			rm.legacySet[name] = struct{}{}
+		}
+	}
+	for _, seq := range newSegs {
+		recs, _, _, rerr := readSegmentFile(filepath.Join(rm.dir, ringSegmentName(seq)), false)
+		if rerr != nil {
+			continue
+		}
+		added = append(added, recs...)
+		if seq > rm.segSeq {
+			rm.segSeq = seq
+			rm.forceRotate = true
+		}
+	}
+	if len(added) > 0 {
+		rm.insertRecordsLocked(added)
+	}
 }
 
-// ensureLoadedLocked populates rm from disk if not yet loaded. rm.mu is held.
 func (rm *ringMem) ensureLoadedLocked(cutTail bool) error {
 	if rm.loaded {
 		return nil
@@ -307,10 +316,15 @@ func (rm *ringMem) ensureLoadedLocked(cutTail bool) error {
 	rm.records = st.records
 	rm.segments = st.segments
 	rm.legacyNames = st.legacyNames
+	rm.legacySet = make(map[string]struct{}, len(st.legacyNames))
+	for _, name := range st.legacyNames {
+		rm.legacySet[name] = struct{}{}
+	}
 	rm.segSeq = st.segSeq
 	rm.segEntries = st.segEntries
 	rm.segBytes = st.segBytes
 	rm.tornTail = st.tornTail
+	rm.forceRotate = st.forceRotate
 	rm.loaded = true
 	return nil
 }
@@ -323,61 +337,117 @@ type loadedRing struct {
 	segEntries  int
 	segBytes    int64
 	tornTail    bool
+	forceRotate bool
 }
 
 func parseRingNameStamp(name string) (time.Time, bool) {
-	stamp, _, ok := strings.Cut(name, "-")
-	if !ok {
+	if !ValidRingName(name) {
 		return time.Time{}, false
 	}
-	at, err := time.Parse(ringStampLayout, stamp)
+	dash := strings.IndexByte(name, '-')
+	if dash <= 0 {
+		return time.Time{}, false
+	}
+	at, err := time.Parse(ringStampLayout, name[:dash])
 	if err != nil {
 		return time.Time{}, false
 	}
-	return at.UTC(), true
+	return at, true
 }
 
-// readSegmentFile parses all complete JSONL lines from a segment file. A torn
-// trailing line (no newline) is ignored, and truncated on disk when cut is true.
-func readSegmentFile(path string, cut bool) (records []RingRecord, size int64, torn bool, err error) {
-	raw, err := wsstate.ReadFileOnce(path)
+func readSegmentFile(path string, cutTail bool) (records []RingRecord, validBytes int64, torn bool, err error) {
+	raw, err := ringReadFile(path)
 	if err != nil {
 		return nil, 0, false, err
 	}
 	if len(raw) == 0 {
 		return nil, 0, false, nil
 	}
-	if end := bytes.LastIndexByte(raw, '\n'); end+1 != len(raw) {
-		raw = raw[:end+1]
-		if cut {
-			_ = os.Truncate(path, int64(len(raw)))
+	if raw[len(raw)-1] != '\n' {
+		lastNL := bytes.LastIndexByte(raw, '\n')
+		if lastNL < 0 {
+			raw = nil
+			validBytes = 0
 		} else {
-			torn = true
+			raw = raw[:lastNL+1]
+			validBytes = int64(len(raw))
 		}
+		torn = true
+	} else {
+		validBytes = int64(len(raw))
 	}
-	size = int64(len(raw))
-	rest := raw
-	for len(rest) > 0 {
-		var line []byte
-		line, rest, _ = bytes.Cut(rest, []byte{'\n'})
-		if len(bytes.TrimSpace(line)) == 0 {
+	offset := 0
+	for offset < len(raw) {
+		nl := bytes.IndexByte(raw[offset:], '\n')
+		if nl < 0 {
+			break
+		}
+		line := bytes.TrimSpace(raw[offset : offset+nl])
+		offset += nl + 1
+		if len(line) == 0 {
 			continue
 		}
-		var sl ringSegmentLine
-		if json.Unmarshal(line, &sl) != nil || sl.Name == "" {
+		var item ringSegmentLine
+		if err := json.Unmarshal(line, &item); err != nil {
 			continue
 		}
-		at, ok := parseRingNameStamp(sl.Name)
+		at, ok := parseRingNameStamp(item.Name)
 		if !ok {
 			continue
 		}
-		records = append(records, RingRecord{RingEntry: sl.Entry, Name: sl.Name, At: at})
+		records = append(records, RingRecord{RingEntry: item.Entry, Name: item.Name, At: at})
 	}
-	return records, size, torn, nil
+	if torn && cutTail {
+		if terr := ringTruncate(path, validBytes); terr == nil {
+			torn = false
+		}
+	}
+	return records, validBytes, torn, nil
+}
+
+func readSegmentNames(path string) ([]string, error) {
+	raw, err := ringReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	if raw[len(raw)-1] != '\n' {
+		lastNL := bytes.LastIndexByte(raw, '\n')
+		if lastNL < 0 {
+			return nil, nil
+		}
+		raw = raw[:lastNL+1]
+	}
+	var names []string
+	offset := 0
+	for offset < len(raw) {
+		nl := bytes.IndexByte(raw[offset:], '\n')
+		if nl < 0 {
+			break
+		}
+		line := bytes.TrimSpace(raw[offset : offset+nl])
+		offset += nl + 1
+		if len(line) == 0 {
+			continue
+		}
+		var item ringSegmentNameOnly
+		if err := json.Unmarshal(line, &item); err != nil {
+			continue
+		}
+		if _, ok := parseRingNameStamp(item.Name); !ok {
+			continue
+		}
+		names = append(names, item.Name)
+	}
+	return names, nil
 }
 
 // loadRingDir reads all segment files and legacy .json files in dir once,
 // merges them by Name, sorts ascending, and caps to RingHistoryCap.
+// Non-ErrNotExist segment read errors are returned rather than silently
+// dropping the newest segment and resetting segSeq to 0.
 func loadRingDir(dir string, cutTail bool) (loadedRing, error) {
 	dirEntries, err := wsstate.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -408,13 +478,22 @@ func loadRingDir(dir string, cutTail bool) (loadedRing, error) {
 	var lastEntries int
 	var lastBytes int64
 	var lastTorn bool
+	var forceRotate bool
 
 	for i, seq := range segSeqs {
 		path := filepath.Join(dir, ringSegmentName(seq))
 		isNewest := i == len(segSeqs)-1
 		recs, size, torn, rerr := readSegmentFile(path, cutTail && isNewest)
 		if rerr != nil {
-			continue
+			if errors.Is(rerr, fs.ErrNotExist) {
+				if isNewest {
+					// Preserve monotonic sequence so we never reopen seg-1.
+					lastSeq = seq
+					forceRotate = true
+				}
+				continue
+			}
+			return loadedRing{}, fmt.Errorf("read conversation ring segment %s: %w", ringSegmentName(seq), rerr)
 		}
 		segments = append(segments, ringSegMeta{seq: seq, count: len(recs)})
 		for _, rec := range recs {
@@ -462,6 +541,7 @@ func loadRingDir(dir string, cutTail bool) (loadedRing, error) {
 		segEntries:  lastEntries,
 		segBytes:    lastBytes,
 		tornTail:    lastTorn,
+		forceRotate: forceRotate,
 	}, nil
 }
 
@@ -481,22 +561,23 @@ func makeRingName(entry RingEntry) (string, time.Time, error) {
 
 func encodeSegmentLines(records []RingRecord) ([]byte, error) {
 	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
 	for _, rec := range records {
-		if err := enc.Encode(ringSegmentLine{Name: rec.Name, Entry: rec.RingEntry}); err != nil {
+		raw, err := json.Marshal(ringSegmentLine{Name: rec.Name, Entry: rec.RingEntry})
+		if err != nil {
 			return nil, err
 		}
+		buf.Write(raw)
+		buf.WriteByte('\n')
 	}
 	return buf.Bytes(), nil
 }
 
 func (rm *ringMem) openSegmentLocked(seq uint64) error {
 	if err := os.MkdirAll(rm.dir, 0o700); err != nil {
-		return fmt.Errorf("create conversation ring dir: %w", err)
+		return fmt.Errorf("create conversation ring: %w", err)
 	}
 	path := filepath.Join(rm.dir, ringSegmentName(seq))
-	f, err := wsstate.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open conversation ring segment: %w", err)
 	}
@@ -518,14 +599,20 @@ func (rm *ringMem) ensureWriterLocked() error {
 		rm.segBytes = 0
 		return nil
 	}
-	// If the newest segment is already at or above rotation thresholds, open a
-	// fresh segment rather than appending past the bound.
-	if rm.segEntries >= ringSegmentEntries || rm.segBytes >= ringSegmentBytes {
+	// If the newest segment disappeared or is already at/above rotation bounds,
+	// open a fresh segment rather than appending past the bound.
+	if rm.forceRotate || rm.segEntries >= ringSegmentEntries || rm.segBytes >= ringSegmentBytes {
+		rm.forceRotate = false
 		rm.tornTail = false
 		return rm.rotateLocked(true)
 	}
 	if rm.tornTail {
-		_ = os.Truncate(filepath.Join(rm.dir, ringSegmentName(rm.segSeq)), rm.segBytes)
+		if err := ringTruncate(filepath.Join(rm.dir, ringSegmentName(rm.segSeq)), rm.segBytes); err != nil {
+			// Cannot safely truncate the torn tail: rotate to a fresh segment
+			// so the next append is never glued onto a partial line.
+			rm.tornTail = false
+			return rm.rotateLocked(true)
+		}
 		rm.tornTail = false
 	}
 	return rm.openSegmentLocked(rm.segSeq)
@@ -566,6 +653,7 @@ func (rm *ringMem) pruneOldSegmentsLocked() {
 		for _, name := range rm.legacyNames {
 			if name < cutoff {
 				_ = os.Remove(filepath.Join(rm.dir, name))
+				delete(rm.legacySet, name)
 			} else {
 				kept = append(kept, name)
 			}
@@ -584,7 +672,6 @@ func (rm *ringMem) insertRecordsLocked(recs []RingRecord) {
 	}
 	if needSort {
 		sort.Slice(rm.records, func(i, j int) bool { return rm.records[i].Name < rm.records[j].Name })
-		// Dedupe by Name, preserving the first occurrence.
 		dedup := rm.records[:0]
 		for i, rec := range rm.records {
 			if i > 0 && rec.Name == dedup[len(dedup)-1].Name {
@@ -597,13 +684,15 @@ func (rm *ringMem) insertRecordsLocked(recs []RingRecord) {
 	if len(rm.records) > RingHistoryCap {
 		rm.records = append([]RingRecord(nil), rm.records[len(rm.records)-RingHistoryCap:]...)
 	}
+	if len(recs) > 0 {
+		rm.gen++
+	}
 }
 
-func (rm *ringMem) appendRecordsLocked(records []RingRecord, keepOpen bool) error {
+func (rm *ringMem) appendRecordsLocked(records []RingRecord) error {
 	if len(records) == 0 {
 		return nil
 	}
-	// Split very large batches across segments so each segment stays bounded.
 	pos := 0
 	for pos < len(records) {
 		if err := rm.ensureWriterLocked(); err != nil {
@@ -627,7 +716,9 @@ func (rm *ringMem) appendRecordsLocked(records []RingRecord, keepOpen bool) erro
 		n, werr := rm.file.Write(raw)
 		if werr != nil {
 			if n > 0 {
-				_ = rm.file.Truncate(rm.segBytes)
+				if terr := rm.file.Truncate(rm.segBytes); terr != nil {
+					rm.tornTail = true
+				}
 			}
 			_ = rm.file.Close()
 			rm.file = nil
@@ -641,18 +732,67 @@ func (rm *ringMem) appendRecordsLocked(records []RingRecord, keepOpen bool) erro
 		rm.insertRecordsLocked(chunk)
 		pos += len(chunk)
 		if rm.segEntries >= ringSegmentEntries || rm.segBytes >= ringSegmentBytes {
-			// Rotate and prune old whole segments; only open the next segment
-			// immediately if more records remain in this batch.
 			if err := rm.rotateLocked(pos < len(records)); err != nil {
 				return err
 			}
 		}
 	}
-	if !keepOpen && rm.file != nil {
-		_ = rm.file.Close()
-		rm.file = nil
+	return nil
+}
+
+// writeLegacyRingRaw writes one atomic owner-only per-entry .json file and
+// immediately closes its handle (used by unpinned/external writers so they
+// never contend on segment files or leave handles open).
+func writeLegacyRingRaw(dir, name string, raw []byte) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create conversation ring: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".ring-*.tmp")
+	if err != nil {
+		return fmt.Errorf("write conversation ring: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if err := tmp.Chmod(0o600); err != nil && runtime.GOOS != "windows" {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("write conversation ring: %w", err)
+	}
+	if _, err := tmp.Write(raw); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("write conversation ring: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("write conversation ring: %w", err)
+	}
+	if err := os.Rename(tmpPath, filepath.Join(dir, name)); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("write conversation ring: %w", err)
 	}
 	return nil
+}
+
+// trimLegacyRing removes only surplus legacy .json files past RingHistoryCap,
+// never touching seg-*.jsonl segment files owned by a daemon writer.
+func trimLegacyRing(dir string) {
+	entries, err := wsstate.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	var names []string
+	for _, de := range entries {
+		if !de.IsDir() && isRingEntryName(de.Name()) {
+			names = append(names, de.Name())
+		}
+	}
+	if len(names) <= RingHistoryCap {
+		return
+	}
+	sort.Strings(names)
+	for _, name := range names[:len(names)-RingHistoryCap] {
+		_ = os.Remove(filepath.Join(dir, name))
+	}
 }
 
 func appendRingEntries(dir string, entries []RingEntry) error {
@@ -667,29 +807,34 @@ func appendRingEntries(dir string, entries []RingEntry) error {
 		}
 		records = append(records, RingRecord{RingEntry: entry, Name: name, At: at})
 	}
-	if rm := cachedRing(dir); rm != nil {
+	if rm := pinnedRing(dir); rm != nil {
 		rm.mu.Lock()
 		defer rm.mu.Unlock()
 		if !rm.closed {
 			if err := rm.ensureLoadedLocked(true); err != nil {
 				return err
 			}
-			return rm.appendRecordsLocked(records, true)
+			return rm.appendRecordsLocked(records)
 		}
 	}
 	clean := filepath.Clean(dir)
-	mu := directLock(clean)
-	mu.Lock()
-	defer mu.Unlock()
-	rm := &ringMem{dir: clean}
-	if err := rm.ensureLoadedLocked(true); err != nil {
-		return err
+	for _, rec := range records {
+		raw, err := json.Marshal(rec.RingEntry)
+		if err != nil {
+			return err
+		}
+		if err := writeLegacyRingRaw(clean, rec.Name, raw); err != nil {
+			return err
+		}
 	}
-	return rm.appendRecordsLocked(records, false)
+	trimLegacyRing(clean)
+	return nil
 }
 
-// appendRingNamed writes one pre-named frozen entry (SummaryCommits) into the
-// append-only segment, refusing conflicting bytes for an already-present name.
+// appendRingNamed writes one pre-named frozen entry (SummaryCommits), refusing
+// conflicting bytes for an already-present name. Pinned hosted rings append to
+// their active JSONL segment; unpinned callers write an atomic .json file so
+// they never race with or hold open a segment file.
 func appendRingNamed(dir, name string, raw []byte) error {
 	at, ok := parseRingNameStamp(name)
 	if !ok {
@@ -700,33 +845,37 @@ func appendRingNamed(dir, name string, raw []byte) error {
 		return err
 	}
 	rec := RingRecord{RingEntry: entry, Name: name, At: at}
-	checkAndAppend := func(rm *ringMem, keepOpen bool) error {
-		if err := rm.ensureLoadedLocked(true); err != nil {
-			return err
-		}
-		idx := sort.Search(len(rm.records), func(i int) bool { return rm.records[i].Name >= name })
-		if idx < len(rm.records) && rm.records[idx].Name == name {
-			prior, err := json.Marshal(rm.records[idx].RingEntry)
-			if err == nil && bytes.Equal(prior, raw) {
-				return nil
-			}
-			return fmt.Errorf("immutable summary turn already exists with different bytes")
-		}
-		return rm.appendRecordsLocked([]RingRecord{rec}, keepOpen)
-	}
-	if rm := cachedRing(dir); rm != nil {
+	if rm := pinnedRing(dir); rm != nil {
 		rm.mu.Lock()
 		defer rm.mu.Unlock()
 		if !rm.closed {
-			return checkAndAppend(rm, true)
+			if err := rm.ensureLoadedLocked(true); err != nil {
+				return err
+			}
+			idx := sort.Search(len(rm.records), func(i int) bool { return rm.records[i].Name >= name })
+			if idx < len(rm.records) && rm.records[idx].Name == name {
+				prior, err := json.Marshal(rm.records[idx].RingEntry)
+				if err == nil && bytes.Equal(prior, raw) {
+					return nil
+				}
+				return fmt.Errorf("immutable summary turn already exists with different bytes")
+			}
+			return rm.appendRecordsLocked([]RingRecord{rec})
 		}
 	}
 	clean := filepath.Clean(dir)
-	mu := directLock(clean)
-	mu.Lock()
-	defer mu.Unlock()
-	rm := &ringMem{dir: clean}
-	return checkAndAppend(rm, false)
+	if existing, found := readRingByName(clean, name); found {
+		prior, err := json.Marshal(existing.RingEntry)
+		if err == nil && bytes.Equal(prior, raw) {
+			return nil
+		}
+		return fmt.Errorf("immutable summary turn already exists with different bytes")
+	}
+	if err := writeLegacyRingRaw(clean, name, raw); err != nil {
+		return err
+	}
+	trimLegacyRing(clean)
+	return nil
 }
 
 func sliceRingPage(recs []RingRecord, before string, n int) RingPage {
@@ -754,8 +903,53 @@ func sliceRingPage(recs []RingRecord, before string, n int) RingPage {
 	return page
 }
 
+// RingFingerprint returns compact change-detection tokens for the ring at dir
+// without reading file bodies or pinning closed/non-hosted rings in RAM.
+// Pinned hosted rings are served directly from RAM with zero disk operations.
+func RingFingerprint(dir string) ([]string, error) {
+	if rm := pinnedRing(dir); rm != nil {
+		rm.mu.Lock()
+		defer rm.mu.Unlock()
+		if !rm.closed {
+			if err := rm.ensureLoadedLocked(false); err != nil {
+				return nil, err
+			}
+			if len(rm.records) == 0 {
+				return nil, nil
+			}
+			last := rm.records[len(rm.records)-1].Name
+			return []string{fmt.Sprintf("mem:%d:%d:%s", rm.gen, len(rm.records), last)}, nil
+		}
+	}
+	dirEntries, err := wsstate.ReadDir(filepath.Clean(dir))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	tokens := make([]string, 0, len(dirEntries))
+	for _, de := range dirEntries {
+		if de.IsDir() {
+			continue
+		}
+		name := de.Name()
+		if _, ok := parseRingSegmentSeq(name); ok {
+			if info, ierr := de.Info(); ierr == nil {
+				tokens = append(tokens, fmt.Sprintf("%s:%d:%d", name, info.Size(), info.ModTime().UnixNano()))
+			} else {
+				tokens = append(tokens, name)
+			}
+		} else if isRingEntryName(name) {
+			tokens = append(tokens, name)
+		}
+	}
+	sort.Strings(tokens)
+	return tokens, nil
+}
+
 func listRingNames(dir string) ([]string, error) {
-	if rm := cachedRing(dir); rm != nil {
+	if rm := pinnedRing(dir); rm != nil {
 		rm.mu.Lock()
 		defer rm.mu.Unlock()
 		if !rm.closed {
@@ -772,22 +966,56 @@ func listRingNames(dir string) ([]string, error) {
 			return names, nil
 		}
 	}
-	st, err := loadRingDir(filepath.Clean(dir), false)
+	clean := filepath.Clean(dir)
+	dirEntries, err := wsstate.ReadDir(clean)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	if len(st.records) == 0 {
+	var segSeqs []uint64
+	seen := map[string]struct{}{}
+	for _, de := range dirEntries {
+		if de.IsDir() {
+			continue
+		}
+		name := de.Name()
+		if seq, ok := parseRingSegmentSeq(name); ok {
+			segSeqs = append(segSeqs, seq)
+		} else if isRingEntryName(name) {
+			seen[name] = struct{}{}
+		}
+	}
+	sort.Slice(segSeqs, func(i, j int) bool { return segSeqs[i] < segSeqs[j] })
+	for _, seq := range segSeqs {
+		segNames, rerr := readSegmentNames(filepath.Join(clean, ringSegmentName(seq)))
+		if rerr != nil {
+			if errors.Is(rerr, fs.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("read conversation ring segment %s: %w", ringSegmentName(seq), rerr)
+		}
+		for _, name := range segNames {
+			seen[name] = struct{}{}
+		}
+	}
+	if len(seen) == 0 {
 		return nil, nil
 	}
-	names := make([]string, len(st.records))
-	for i, r := range st.records {
-		names[i] = r.Name
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if len(names) > RingHistoryCap {
+		names = names[len(names)-RingHistoryCap:]
 	}
 	return names, nil
 }
 
 func readRingPage(dir, before string, n int) (RingPage, error) {
-	if rm := cachedRing(dir); rm != nil {
+	if rm := pinnedRing(dir); rm != nil {
 		rm.mu.Lock()
 		defer rm.mu.Unlock()
 		if !rm.closed {
@@ -808,7 +1036,7 @@ func readRingByName(dir, name string) (RingRecord, bool) {
 	if _, ok := parseRingNameStamp(name); !ok {
 		return RingRecord{}, false
 	}
-	if rm := cachedRing(dir); rm != nil {
+	if rm := pinnedRing(dir); rm != nil {
 		rm.mu.Lock()
 		defer rm.mu.Unlock()
 		if !rm.closed {
@@ -822,7 +1050,12 @@ func readRingByName(dir, name string) (RingRecord, bool) {
 			return RingRecord{}, false
 		}
 	}
-	st, err := loadRingDir(filepath.Clean(dir), false)
+	clean := filepath.Clean(dir)
+	// Fast path: unpinned legacy entry file exists directly by name.
+	if rec, ok := readLegacyRingEntry(clean, name); ok {
+		return rec, true
+	}
+	st, err := loadRingDir(clean, false)
 	if err != nil {
 		return RingRecord{}, false
 	}

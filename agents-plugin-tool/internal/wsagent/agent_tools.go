@@ -869,7 +869,6 @@ func (r *Runner) forget(id string) {
 	}
 	sessionDir := wsdashboard.SessionDir(r.opts.Dir, id)
 	wslive.DropRing(wslive.RingDir(sessionDir))
-	wsdashboard.ForgetRegistrationCache(r.opts.Dir, id)
 	if err := os.RemoveAll(sessionDir); err != nil {
 		fmt.Fprintf(r.opts.Log, "agent %s: delete: %v\n", id, err)
 	}

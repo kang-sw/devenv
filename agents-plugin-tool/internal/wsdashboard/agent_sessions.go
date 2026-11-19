@@ -88,7 +88,7 @@ type agentSessions struct {
 	// snaps is the daemon's snapshot cache; nil reads every time.
 	snaps *SnapshotCache
 	// hosted reports whether a live hosted slot currently owns replyID;
-	// non-hosted sessions refresh their ring from disk on authoritative reads.
+	// hosted sessions merge any external ring appends on explicit rereads.
 	hosted func(replyID string) bool
 }
 
@@ -98,8 +98,8 @@ func (s agentSessions) ReadSession(reg Registration) (SessionData, bool, error) 
 	// leads whose fingerprint uses the inner source's separate cache: one
 	// nudge must not disappear behind either owner's presentation TTL.
 	s.snaps.Invalidate(s.dir, reg.ReplyID)
-	if s.hosted == nil || !s.hosted(reg.ReplyID) {
-		wslive.RefreshRing(wslive.RingDir(SessionDir(s.dir, reg.ReplyID)))
+	if s.hosted != nil && s.hosted(reg.ReplyID) {
+		wslive.SyncExternalRing(wslive.RingDir(SessionDir(s.dir, reg.ReplyID)))
 	}
 	if !reg.Agent {
 		s.snaps.snapshotWithoutObserved(s.dir, reg.ReplyID)
@@ -365,7 +365,7 @@ func (c *SnapshotCache) readLiveStoresClock(h io.Writer, stateDir, replyID strin
 			}
 			return names, err
 		}},
-		{"ring", LiveRing, func() ([]string, error) { return wslive.RingNames(wslive.RingDir(sessionDir)) }},
+		{"ring", LiveRing, func() ([]string, error) { return wslive.RingFingerprint(wslive.RingDir(sessionDir)) }},
 		{"inbox", LiveInbox, func() ([]string, error) { return wsinbox.Names(wsinbox.Dir(sessionDir)) }},
 		{"inbox-drained", LiveInbox, func() ([]string, error) { return wsinbox.DrainedNames(wsinbox.Dir(sessionDir)) }},
 	} {

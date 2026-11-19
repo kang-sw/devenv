@@ -64,7 +64,7 @@ func TestSummaryCommitFreezesRetriesAndNeverRecounts(t *testing.T) {
 		t.Fatalf("candidate recounted/mutated: %+v", got)
 	}
 	// Pruning/absence never grants a previously accepted commit permission.
-	if err := os.Remove(filepath.Join(dir, ringSegmentName(1))); err != nil {
+	if err := os.Remove(filepath.Join(dir, got.Name)); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Register(summaryTurnFixture()); err != nil {

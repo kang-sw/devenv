@@ -225,15 +225,14 @@ type Daemon struct {
 	trackerAnswers trackerAnswers
 	// entries caches rendered conversation entries per session.
 	entries *entryCache
-	// entryFiles caches the parsed ring and drained entries per session.
+	// entryFiles caches the parsed drained entries per session (ring entries
+	// stay in wslive's pinned RAM cache for active hosted sessions).
 	entryFiles *entryFiles
 	// snapshots caches the parsed live snapshots the pages, their refresh
 	// stamps, and agent conversation re-reads read.
 	snapshots *SnapshotCache
 	// live is the hosted sessions' snapshot slots (live_hosted.go).
 	live hostedSlots
-	// closeRings flushes and closes held conversation-ring segment handles.
-	closeRings func() error
 	// inboxMu serializes the daemon's own inbox writes (sends and cancels,
 	// and the answer check's record and nudge).
 	inboxMu       sync.Mutex
@@ -527,7 +526,6 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 			fmt.Fprintf(logw, "dashboard: LAN access token unavailable: %v\n", err)
 		}
 	}
-	d.closeRings = wslive.EnableRingCache(filepath.Join(opts.Dir, sessionsDirName))
 	if opts.Sessions != nil {
 		d.source = agentSessions{inner: opts.Sessions, dir: opts.Dir, now: time.Now, snaps: d.snapshots, hosted: d.live.hasOwner}
 		delay := opts.ackDelay
@@ -555,9 +553,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		if d.agents != nil {
 			d.agents.Close()
 		}
-		if d.closeRings != nil {
-			_ = d.closeRings()
-		}
+		_ = wslive.UnpinRingsUnder(filepath.Join(d.dir, sessionsDirName))
 		_ = listener.Close()
 		_ = lock.Unlock()
 		return nil, fmt.Errorf("write endpoint file: %w", err)
@@ -657,7 +653,6 @@ func (d *Daemon) sessionChanged(replyID string) {
 			d.live.drop(replyID)
 			d.snapshots.Forget(d.dir, replyID)
 			wslive.DropRing(wslive.RingDir(SessionDir(d.dir, replyID)))
-			ForgetRegistrationCache(d.dir, replyID)
 			if f, ok := d.source.(SessionForgetter); ok {
 				f.ForgetSession(replyID)
 			}
@@ -765,9 +760,7 @@ func (d *Daemon) Close() {
 			d.holders.Close()
 		}
 		d.foreign.close()
-		if d.closeRings != nil {
-			_ = d.closeRings()
-		}
+		_ = wslive.UnpinRingsUnder(filepath.Join(d.dir, sessionsDirName))
 		if d.beforeUnlock != nil {
 			d.beforeUnlock()
 		}

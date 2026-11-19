@@ -25,11 +25,15 @@ const summaryHistoricalRevision = "9854ff350fa1b0eccfb5c71649c5190c405925b9"
 
 func TestSummaryHistoricalReaderWriterPreservesOriginalBytes(t *testing.T) {
 	dir := t.TempDir()
+	unpin := PinRing(RingDir(dir))
 	store := &SummaryCommits{closed: map[string]bool{}, write: writeFrozenRing}
 	if err := store.Register(summaryTurnFixture()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Retry(RingDir(dir)); err != nil {
+		t.Fatal(err)
+	}
+	if err := unpin(); err != nil {
 		t.Fatal(err)
 	}
 	original := filepath.Join(RingDir(dir), ringSegmentName(1))

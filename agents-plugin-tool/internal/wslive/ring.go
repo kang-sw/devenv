@@ -163,9 +163,10 @@ var ringNamePattern = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}\.[0-9]{9}Z-[0-9a-f]
 func ValidRingName(name string) bool { return ringNamePattern.MatchString(name) }
 
 // AppendRing writes entries, in order, to the ring at dir (created when
-// missing) in append-only JSONL segments and retains whole segments covering
-// the newest RingHistoryCap entries. When EnableRingCache is active for dir,
-// the active segment handle and entries stay in RAM.
+// missing). When dir is pinned for an active hosted slot (PinRing), entries
+// stay in RAM and append to held-open owner-only JSONL segments with whole-
+// segment rotation covering RingHistoryCap; unpinned/external writers write
+// atomic per-entry .json files and close their handles immediately.
 func AppendRing(dir string, entries []RingEntry) error {
 	return appendRingEntries(dir, entries)
 }
@@ -182,7 +183,8 @@ func PrepareSummaryRing(entries []RingEntry) {
 }
 
 // RingNames returns the ring's entry names at dir, oldest first; a missing
-// directory is an empty ring. Served from RAM when EnableRingCache is active.
+// directory is an empty ring. Served from RAM when PinRing is active for dir;
+// unpinned dirs never pin records in RAM.
 func RingNames(dir string) ([]string, error) {
 	return listRingNames(dir)
 }
@@ -214,7 +216,7 @@ func ReadRingPage(dir, before string, n int) (RingPage, error) {
 
 // ReadRingEntry reads the one committed entry name of the ring at dir;
 // false when it cannot be read or parsed or its name carries no valid
-// stamp. Served from RAM when EnableRingCache is active.
+// stamp. Served from RAM when PinRing is active for dir.
 func ReadRingEntry(dir, name string) (RingRecord, bool) {
 	return readRingByName(dir, name)
 }
