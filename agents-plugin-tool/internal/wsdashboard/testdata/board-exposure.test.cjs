@@ -133,7 +133,7 @@ function trailingStickyContract() {
       var doc=document,boardPending={},boardReleaseFrame=0,boardScrollTimer=0,boardSnap=null;
       var boardHomeWrites=new WeakSet(),checks=0,flushes=0;
       if(nativeScrollend)doc.onscrollend=null;
-      function $(id){return id==='bcol'?bcol:id==='bpins'?bpins:null;}
+      function $(id){return id==='bcol'?bcol:null;}
       function inBoard(n){return board.contains(n);}
       function boardPendingNames(){return [];}
       function boardPendingBadge(){}

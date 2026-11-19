@@ -80,7 +80,7 @@ function near(actual, expected, name) { assert(Math.abs(actual - expected) <= 1,
 async function geometry(page) {
   return page.evaluate(() => {
     const rect = selector => { const n=document.querySelector(selector),r=n.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height,visible:getComputedStyle(n).display!=='none'}; };
-    return { sheet:rect('#toolbar-files'),header:rect('#chead'),composer:rect('#composer'),board:rect('#bcol'),pins:rect('#bpcol'),pane:rect('.file-preview-pane'),gutter:parseFloat(getComputedStyle(document.querySelector('.dwrap')).paddingRight),viewport:document.documentElement.clientWidth };
+    return { sheet:rect('#toolbar-files'),header:rect('#chead'),composer:rect('#composer'),board:rect('#bcol'),pins:rect('#bgal'),pane:rect('.file-preview-pane'),gutter:parseFloat(getComputedStyle(document.querySelector('.dwrap')).paddingRight),viewport:document.documentElement.clientWidth };
   });
 }
 async function settle(page) {
