@@ -199,6 +199,10 @@ func (h *proxyHost) applyLANChange(server *mcp.Server) {
 			if err != nil {
 				return err
 			}
+			exe, err = wsdashboard.LaunchExecutable(exe, h.dir)
+			if err != nil {
+				return err
+			}
 			return wsdashboard.SpawnDetached(exe, args, h.dir)
 		}
 		outcome, err := wsdashboard.Ensure(context.Background(), wsdashboard.EnsureOptions{
@@ -413,7 +417,11 @@ func daemonStartWithEnsure(args []string, ensure func(context.Context, wsdashboa
 			// The child may wait on dashboard.lock while the old daemon drains.
 			return wsdashboard.SpawnDetachedStrict(exe, append(args, "--lock-wait", "8s"), dir)
 		}
-		return wsdashboard.SpawnDetached(exe, args, dir)
+		launchExe, err := wsdashboard.LaunchExecutable(exe, dir)
+		if err != nil {
+			return err
+		}
+		return wsdashboard.SpawnDetached(launchExe, args, dir)
 	}
 	outcome, err := ensure(ctx, wsdashboard.EnsureOptions{
 		Dir:                 dir,

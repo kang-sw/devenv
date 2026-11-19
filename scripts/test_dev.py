@@ -114,7 +114,31 @@ class SeedPackageTest(unittest.TestCase):
             dev.build_local(launcher, self.root)
         self.assertEqual(events, ['generate', 'build'])
         launcher.generate_package_assets.assert_called_once_with(dev.TOOL_DIR)
+        launcher.codesign_darwin_binary.assert_called_once()
         launcher.write_runtime_metadata.assert_called_once()
+
+    def test_local_build_codesigns_after_go_build_and_before_metadata(self):
+        events = []
+        launcher = mock.Mock()
+        launcher.host_os.return_value = "darwin"
+        launcher.generate_package_assets.side_effect = lambda tool: events.append("generate")
+        launcher.source_runtime_metadata.return_value = {"version": "1.2.3"}
+        launcher.local_devenv_build_env.return_value = {"WS_CODESIGN_IDENTITY": "TestCert"}
+        launcher.codesign_darwin_binary.side_effect = lambda out, os_name, env: events.append(("codesign", os_name, env["WS_CODESIGN_IDENTITY"]))
+        launcher.write_runtime_metadata.side_effect = lambda out, identity: events.append("metadata")
+        with mock.patch.object(dev.shutil, "which", return_value="fake-go"), \
+             mock.patch.object(dev.subprocess, "run", side_effect=lambda argv, **kw: (events.append("build"), mock.Mock(returncode=0))[1]):
+            dev.build_local(launcher, self.root)
+        self.assertEqual(events, ["generate", "build", ("codesign", "darwin", "TestCert"), "metadata"])
+
+        # Signing failure aborts build_local before metadata is written.
+        launcher.write_runtime_metadata.reset_mock()
+        launcher.codesign_darwin_binary.side_effect = RuntimeError("codesign failed: no identity")
+        with mock.patch.object(dev.shutil, "which", return_value="fake-go"), \
+             mock.patch.object(dev.subprocess, "run", return_value=mock.Mock(returncode=0)):
+            with self.assertRaisesRegex(RuntimeError, "codesign failed"):
+                dev.build_local(launcher, self.root)
+        launcher.write_runtime_metadata.assert_not_called()
 
     def test_remote_build_fetches_identity_and_never_runs_ws_binary(self):
         def fake_run(argv, **kwargs):
