@@ -751,7 +751,9 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   });
   registerCompactionHistory(pi);
   registerLeadMemoryLog(pi);
+  let daemonHosted = false;
   const goalLoopHandle = registerGoalLoop(pi, {
+    isHosted: () => daemonHosted,
     readConfig: readAdapterConfig,
     rpcRegistryRef,
     leadCompactGuidePath,
@@ -828,6 +830,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     // Hosted session (hosted-session.ts): resolved once per process, before
     // the bridge reads it for the lead key. Only the owner lead can be one.
     const hosted: HostedMode = sessionRole === undefined ? await hostedMode() : { mode: "off" };
+    daemonHosted = hosted.mode === "hosted";
 
     // Bootstrap failures stay loud. One approval relay is shared by fresh
     // execution workers and dormant records restored later in this startup.

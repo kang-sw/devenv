@@ -218,7 +218,7 @@ func leadKeySentence(key string) string {
 
 // leadManualOnly closes the appended prompt of a lead whose launch has no
 // rendered manual: the lead is told to call for it.
-const leadManualOnly = "At session start and after any compaction, call the workflow_manual tool with this key and follow it.\n"
+const leadManualOnly = "At session start, call the workflow_manual tool with this key and follow it; after any compaction, call workflow_state for fresh session state.\n"
 
 // TestClaudeLeadPromptCarriesTheWorkflowManual: a hosted Claude lead's
 // appended prompt holds its key sentence, the binding-manual sentence,
@@ -236,7 +236,7 @@ func TestClaudeLeadPromptCarriesTheWorkflowManual(t *testing.T) {
 		t.Helper()
 		text := appendedPrompt(t, argv)
 		if !strings.HasPrefix(text, leadKeySentence(key)+"The workflow manual below is binding;") ||
-			!strings.Contains(text, "After any compaction, or when you need fresh session state, call the workflow_manual tool with this key and follow it.") ||
+			!strings.Contains(text, "After any compaction, or when you need fresh session state, call the workflow_state tool with this key; the manual stays in this prompt.") ||
 			!strings.HasSuffix(text, ".\n\n# Workflow Manual\n\n## Session Key\nrendered\n") || strings.Contains(text, leadManualOnly) {
 			t.Fatalf("the appended prompt is not the key sentence and the manual:\n%s", text)
 		}

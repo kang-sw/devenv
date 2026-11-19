@@ -344,7 +344,9 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 	for _, id := range r.expiredAtStart(open) {
 		// Deepest first: a child waiting past its expiry is deleted with
 		// its descendants, as the heartbeat would (expire).
-		if err := os.RemoveAll(wsdashboard.SessionDir(r.opts.Dir, id)); err != nil {
+		sessionDir := wsdashboard.SessionDir(r.opts.Dir, id)
+		wslive.DropRing(wslive.RingDir(sessionDir))
+		if err := os.RemoveAll(sessionDir); err != nil {
 			fmt.Fprintf(r.opts.Log, "agent %s: delete: %v\n", id, err)
 			continue
 		}
@@ -365,6 +367,11 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 	for _, st := range r.List() {
 		if c := r.conv(st.ID); c != nil {
 			c.do(func() {
+				// Release a persisted HeldTurn whose background work ended
+				// with the previous daemon (open children still hold it).
+				if c.rec.Parent != nil && c.rec.HolderID == "" {
+					c.releaseHeld()
+				}
 				c.spawnDirty = true
 				c.live.writeSnapshot()
 			})
@@ -591,8 +598,8 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		c.hidden = hidden
 	}
 	c.live.wake = func() {
-		if c.live.slot != nil {
-			c.live.slot.RingAppended()
+		if slot := c.live.currentSlot(); slot != nil {
+			slot.RingAppended()
 		} else {
 			r.notify(rec.ReplyID, rec.Root)
 		}
@@ -643,9 +650,9 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	// starts for it.
 	foreign := c.foreignRow
 	if !foreign {
-		if rec.Lead && r.opts.LiveHost != nil {
+		if r.opts.LiveHost != nil {
 			if slot, ok := r.opts.LiveHost.OpenHostedSlot(dir); ok {
-				c.live.slot = slot
+				c.live.setSlot(slot)
 				if folder, ok := slot.(wsdashboard.ObservedFoldSlot); ok && c.live.observedSeeded {
 					folder.FoldsObserved()
 				}

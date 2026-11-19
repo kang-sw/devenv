@@ -52,7 +52,7 @@ func TestLeadCapabilitiesFromItsInit(t *testing.T) {
 	h.holders.out(holder, catalogTurn("u1", "2.1.399", []string{"compact", "review"})...)
 	h.idle(id)
 	caps := h.state(id).Capabilities
-	if caps == nil || !caps.Unverified || caps.Version != "2.1.399" || caps.ProfileVersion != "2.1.326" || caps.Role != RoleLead || len(caps.Demoted) != 0 {
+	if caps == nil || !caps.Unverified || caps.Version != "2.1.399" || caps.ProfileVersion != "2.1.327" || caps.Role != RoleLead || len(caps.Demoted) != 0 {
 		t.Fatalf("an unverified version on the newest bound's grades: %+v", caps)
 	}
 	raw, _ := json.Marshal(h.state(id))

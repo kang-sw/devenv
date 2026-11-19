@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -260,5 +262,239 @@ func TestTranscriptShutdownFlushesDeferredSendsAndConsumedSnapshot(t *testing.T)
 				}
 			})
 		}
+	}
+}
+
+func ringSiteOpCount(op string) int64 {
+	var n int64
+	for site, count := range wsstate.FileIOCounters() {
+		if strings.HasPrefix(site, "file_io_site:wslive/ring") && strings.HasSuffix(site, ":"+op) {
+			n += count
+		}
+	}
+	return n
+}
+
+func TestNonLeadChildUsesHostedSlotAndRAMHeartbeat(t *testing.T) {
+	host := &summarySnapshotHost{}
+	clk := newTestClock()
+	h, _ := agentHarness(t, func(o *Options) {
+		o.LiveHost = host
+		o.Now = clk.Now
+		o.heartbeat = time.Hour
+	})
+	id, p := h.agentRunning(h.leadCaller(), AgentSpawnRequest{Prompt: "work", Tier: "small", Authority: "read-only"})
+	p.reply("child done")
+	eventually(t, "settled child", func() bool { return h.state(id).Status == StatusIdle })
+	c := h.runner.conv(id)
+	dir := wsdashboard.SessionDir(h.dir, id)
+	if _, ok := host.snapshot(dir); !ok {
+		t.Fatal("non-lead child did not open a hosted RAM slot")
+	}
+
+	var diskWrites int
+	c.do(func() {
+		c.live.writeSnapshotFile = func(path string, raw []byte, mode os.FileMode) error {
+			diskWrites++
+			return writeFileAtomic(path, raw, mode)
+		}
+	})
+	var notes atomic.Int64
+	origNotify := h.runner.notify
+	h.runner.notify = func(replyID, project string) {
+		notes.Add(1)
+		origNotify(replyID, project)
+	}
+	for range wslive.StaleAfterBeats + 1 {
+		clk.advance(wslive.HeartbeatInterval)
+		c.do(func() { c.live.heartbeatSnapshot() })
+	}
+	if diskWrites != 0 {
+		t.Fatalf("idle child heartbeats made %d disk snapshot writes, want 0", diskWrites)
+	}
+	if snap, ok := host.snapshot(dir); !ok || snap.Stale(clk.Now()) {
+		t.Fatalf("child RAM slot went stale: %+v", snap)
+	}
+	// Streaming and ring appends route through the slot, not full notify.
+	c.do(func() {
+		c.apply(wslive.Event{Kind: wslive.KindReply, Text: "streaming"})
+		c.apply(wslive.Event{Kind: wslive.KindReply, Text: "final child reply", Final: true})
+	})
+	if n := notes.Load(); n != 0 {
+		t.Fatalf("slotted child made %d full notify calls, want 0", n)
+	}
+	// Graceful shutdown flushes final snapshot and closes the slot.
+	h.runner.Close()
+	if _, ok := host.snapshot(dir); ok {
+		t.Fatal("closed child retained its RAM slot")
+	}
+	if ring, err := wslive.ReadRing(wslive.RingDir(dir)); err != nil || len(ring) == 0 || ring[len(ring)-1].Text != "final child reply" {
+		t.Fatalf("child ring after graceful shutdown = %+v, %v", ring, err)
+	}
+}
+
+func TestHostedLeadPhase2HotPathZeroRingReadDir(t *testing.T) {
+	h := newLeadHarness(t)
+	host := &summarySnapshotHost{}
+	h.opts.LiveHost = host
+	h.opts.heartbeat = time.Hour
+	h.start()
+
+	id := h.lead(BackendPi, LeadOptions{}).ID
+	dir := wsdashboard.SessionDir(h.dir, id)
+	unpin := wslive.PinRing(wslive.RingDir(dir))
+	defer unpin()
+
+	h.send(id, "first")
+	h.quiesce(id)
+	c := h.runner.conv(id)
+	// Warm the ring writer with one entry before measuring steady-state hot path.
+	c.do(func() {
+		c.apply(wslive.Event{Kind: wslive.KindReply, Text: "warm", Final: true})
+	})
+
+	ringReadDirBefore := ringSiteOpCount("read_dir")
+	ringTempBefore := ringSiteOpCount("create_temp")
+	ringRenameBefore := ringSiteOpCount("atomic_replace")
+	ringOpenBefore := ringSiteOpCount("open_file")
+
+	c.do(func() {
+		for i := range 25 {
+			c.apply(wslive.Event{Kind: wslive.KindReply, Text: fmt.Sprintf("delta %d", i)})
+		}
+		c.apply(wslive.Event{Kind: wslive.KindReply, Text: "steady reply", Final: true})
+		c.live.heartbeatSnapshot()
+	})
+
+	if got := ringSiteOpCount("read_dir") - ringReadDirBefore; got != 0 {
+		t.Fatalf("steady-state ring append made %d read_dir calls, want 0", got)
+	}
+	if got := ringSiteOpCount("create_temp") - ringTempBefore; got != 0 {
+		t.Fatalf("steady-state ring append made %d create_temp calls, want 0", got)
+	}
+	if got := ringSiteOpCount("atomic_replace") - ringRenameBefore; got != 0 {
+		t.Fatalf("steady-state ring append made %d atomic_replace calls, want 0", got)
+	}
+	if got := ringSiteOpCount("open_file") - ringOpenBefore; got != 0 {
+		t.Fatalf("steady-state ring append made %d open_file calls, want 0", got)
+	}
+
+	// Graceful shutdown closes handles cleanly and preserves every ring entry.
+	h.runner.Close()
+	if err := unpin(); err != nil {
+		t.Fatal(err)
+	}
+	ring, err := wslive.ReadRing(wslive.RingDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, rec := range ring {
+		if rec.Text == "steady reply" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("graceful shutdown lost steady reply from ring: %+v", ring)
+	}
+}
+
+// TestCloseSlotConcurrentWakeNoRaceOrPanic covers R1 Finding 3: an off-loop
+// SummaryCommits AfterFunc wake running concurrently with closeSlot must never
+// race on w.slot or nil-deref.
+func TestCloseSlotConcurrentWakeNoRaceOrPanic(t *testing.T) {
+	for range 20 {
+		h := newLeadHarness(t)
+		host := &summarySnapshotHost{}
+		h.opts.LiveHost = host
+		h.opts.heartbeat = time.Hour
+		h.start()
+
+		id := h.lead(BackendPi, LeadOptions{}).ID
+		c := h.runner.conv(id)
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for range 4 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				for range 50 {
+					c.live.wake()
+				}
+			}()
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			c.do(func() { c.live.closeSlot() })
+		}()
+		close(start)
+		wg.Wait()
+		h.runner.Close()
+	}
+}
+
+// TestCloseSlotRetriesPreviouslyFailedSummaryCommit covers R1 Finding 7:
+// closeSlot calls Retry (not Try), so a previously failed pending summary turn
+// is flushed best-effort on graceful shutdown per Decision (153).
+func TestCloseSlotRetriesPreviouslyFailedSummaryCommit(t *testing.T) {
+	h := newLeadHarness(t)
+	host := &summarySnapshotHost{}
+	h.opts.LiveHost = host
+	h.opts.heartbeat = time.Hour
+	h.start()
+
+	id := h.lead(BackendPi, LeadOptions{}).ID
+	dir := wsdashboard.SessionDir(h.dir, id)
+	ringDir := wslive.RingDir(dir)
+	c := h.runner.conv(id)
+
+	// Block ring directory creation with a regular file so the first Try fails.
+	if err := os.RemoveAll(ringDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ringDir, []byte("block"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	entry := wslive.RingEntry{
+		Kind:       wslive.RingTurn,
+		Done:       1,
+		DurationMs: 42,
+		SummaryHistory: &wslive.SummaryHistory{
+			V:        1,
+			Commit:   wslive.SummaryCommit(id, "shutdown-retry-commit"),
+			Requests: hostedSummaryFixture().Requests,
+		},
+	}
+	c.do(func() {
+		if err := c.live.summaryStore().Register(entry); err != nil {
+			t.Fatal(err)
+		}
+		c.live.retrySummaries() // fails and records s.failure != nil
+	})
+
+	// Clear the blocker: ordinary Try must still skip it (s.failure != nil),
+	// whereas graceful shutdown closeSlot must force Retry and commit it.
+	if err := os.Remove(ringDir); err != nil {
+		t.Fatal(err)
+	}
+	c.do(func() {
+		c.live.retrySummaries()
+	})
+	if ring, err := wslive.ReadRing(ringDir); err != nil || len(ring) != 0 {
+		t.Fatalf("Try after failure unexpectedly committed: %+v, %v", ring, err)
+	}
+
+	h.runner.Close()
+
+	ring, err := wslive.ReadRing(ringDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ring) != 1 || ring[0].SummaryHistory == nil || ring[0].SummaryHistory.Commit != entry.SummaryHistory.Commit {
+		t.Fatalf("graceful shutdown did not retry failed summary commit: %+v", ring)
 	}
 }

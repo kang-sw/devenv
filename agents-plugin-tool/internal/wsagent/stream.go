@@ -37,6 +37,12 @@ type lineMapper interface {
 	mapLine(line []byte, replies lineReplies) []Event
 }
 
+// replayStateMapper is an optional lineMapper hook called from deliver
+// (serialized with mapLine) before a holder replay marker reaches the runner.
+type replayStateMapper interface {
+	replayState(ev Event) []Event
+}
+
 type controlAnswer struct {
 	ok  bool
 	err string
@@ -206,9 +212,9 @@ func (p *streamProcess) deliver(ev Event) {
 	p.feedMu.Lock()
 	defer p.feedMu.Unlock()
 	if !p.finished {
-		if m, ok := p.mapper.(*piMapper); ok {
-			// Reconcile Pi's native-state certainty in the same order as
-			// output lines, before the runner can act on the replay marker.
+		if m, ok := p.mapper.(replayStateMapper); ok {
+			// Reconcile mapper replay state in the same order as output lines,
+			// before the runner acts on the replay marker.
 			for _, mapped := range m.replayState(ev) {
 				p.emit(mapped)
 			}

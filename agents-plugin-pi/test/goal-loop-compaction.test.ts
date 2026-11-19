@@ -778,10 +778,10 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
     const guidePath = join(tmpDir, "lead-compact-guide-261002.md");
     writeFileSync(guidePath, "GUIDE BODY 261002");
 
-    function triggerRun(configOverride?: GoalLoopConfig) {
+    function triggerRun(configOverride?: GoalLoopConfig, isHosted?: () => boolean) {
       const clock = fakeClock();
       const pi = fakePi();
-      registerGoalLoop(pi.api, { readConfig: configOverride ? staticConfigReader(configOverride) : fileReader(configPath), ...clock, leadCompactGuidePath: guidePath, sessionKeyRef: { current: "lead-key" } });
+      registerGoalLoop(pi.api, { isHosted, readConfig: configOverride ? staticConfigReader(configOverride) : fileReader(configPath), ...clock, leadCompactGuidePath: guidePath, sessionKeyRef: { current: "lead-key" } });
       const { ctx, notifications } = fakeCtx();
       const usage = { percent: 10 as number | null };
       (ctx as unknown as { getContextUsage: () => unknown }).getContextUsage = () => ({ tokens: null, contextWindow: 1000, percent: usage.percent });
@@ -800,6 +800,16 @@ describe("registerGoalLoop IO glue (fake pi): compaction release (260906 Phase 1
       const milestones = () => run.pi.sentMessages.filter((m) => (m.content as { customType?: string }).customType === "ws-lead-context-milestone");
       return { ...run, usage, text, milestones, runEnd: () => run.pi.handlers.get("agent_end")!({}, run.ctx), toolTurn: () => run.pi.handlers.get("turn_end")!({ toolResults: [{}] }, run.ctx) };
     }
+
+    test("hosted mode suppresses threshold nudges and hard steer but keeps the compaction lever", () => {
+      const { pi, ctx, usage, preparations } = triggerRun(undefined, () => true);
+      usage.percent = 95;
+      pi.handlers.get("turn_end")!({ toolResults: [{}] }, ctx);
+      pi.handlers.get("agent_end")!({}, ctx);
+      assert.equal(preparations().length, 0);
+      assert.ok(pi.handlers.has("session_before_compact"));
+      assert.ok(pi.tools.has("ws-compact"));
+    });
 
     test("token thresholds resolve against the window; milestones sit between the resolved token counts", () => {
       const { usage, preparations, text, milestones, runEnd, toolTurn } = tokenRun({ compaction_advisory_percent: "300k", compaction_hard_percent: "50%|600k" });

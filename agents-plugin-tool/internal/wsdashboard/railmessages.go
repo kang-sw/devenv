@@ -17,22 +17,23 @@ const railMessageScan = 64
 // railMessages holds each session's last conversation message for the
 // rail, so an unchanged ring is not reread: a session whose index revision
 // is the one last read is served from memory, and otherwise its ring's
-// names are listed and, while its newest name is the one last read, still
-// no entry is read (an entry file is never rewritten, so the newest name
-// alone tells whether the ring grew). The daemon drops a session's entry
-// when it leaves the index (Daemon.sessionChanged).
+// fingerprint is checked (0 disk ops for pinned hosted rings, 1 ReadDir +
+// segment metadata for unpinned/closed rings) and, while unchanged, still no
+// entry body is read. When grown, one bounded tail read (ReadRingPage with
+// railMessageScan) fetches the newest entries in a single pass. The daemon
+// drops a session's entry when it leaves the index (Daemon.sessionChanged).
 type railMessages struct {
 	mu       sync.Mutex
 	sessions map[string]railMessageEntry
-	// reads counts the ring entry files read (a test seam).
+	// reads counts the bounded tail reads performed (a test seam).
 	reads int
-	list  func(string) ([]string, error) // test-only listing seam; nil uses RingNames
+	list  func(string) ([]string, error) // test-only listing seam; nil uses RingFingerprint
 }
 
 type railMessageEntry struct {
-	rev    uint64
-	newest string
-	msg    railMessage
+	rev uint64
+	fp  string
+	msg railMessage
 }
 
 func newRailMessages() *railMessages {
@@ -61,45 +62,45 @@ func (c *railMessages) lastResult(replyID string, rev uint64, dir string) (railM
 			return known.msg, true
 		}
 	}
-	list := wslive.RingNames
+	list := wslive.RingFingerprint
 	if c != nil && c.list != nil {
 		list = c.list
 	}
-	names, err := list(dir)
+	tokens, err := list(dir)
 	if err != nil {
 		return known.msg, false
 	}
-	newest := ""
-	if len(names) > 0 {
-		newest = names[len(names)-1]
-	}
+	fp := strings.Join(tokens, "\x00")
 	msg := known.msg
 	read := 0
 	complete := true
-	if !have || newest != known.newest {
-		for i := len(names) - 1; i >= 0 && len(names)-i <= railMessageScan; i-- {
-			read++
-			rec, ok := wslive.ReadRingEntry(dir, names[i])
-			if !ok {
+	if !have || fp != known.fp {
+		if len(tokens) > 0 {
+			read = 1
+			page, rerr := wslive.ReadRingPage(dir, "", railMessageScan)
+			if rerr != nil {
 				complete = false
-				continue
+			} else {
+				for i := len(page.Records) - 1; i >= 0; i-- {
+					rec := page.Records[i]
+					if rec.Kind != wslive.RingUser && rec.Kind != wslive.RingReply {
+						continue
+					}
+					text := rec.Text
+					if rec.Kind == wslive.RingUser {
+						text = withoutImageLines(text)
+					}
+					msg = railMessage{Text: oneLine(text, railMessageRunes), User: rec.Kind == wslive.RingUser}
+					break
+				}
 			}
-			if rec.Kind != wslive.RingUser && rec.Kind != wslive.RingReply {
-				continue
-			}
-			text := rec.Text
-			if rec.Kind == wslive.RingUser {
-				text = withoutImageLines(text)
-			}
-			msg = railMessage{Text: oneLine(text, railMessageRunes), User: rec.Kind == wslive.RingUser}
-			break
 		}
 	}
 	if c != nil {
 		c.mu.Lock()
 		c.reads += read
 		if complete {
-			c.sessions[replyID] = railMessageEntry{rev: rev, newest: newest, msg: msg}
+			c.sessions[replyID] = railMessageEntry{rev: rev, fp: fp, msg: msg}
 		}
 		c.mu.Unlock()
 	}

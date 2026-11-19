@@ -294,9 +294,8 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 	keys := mcp.NewAgentKeyStore()
 	backends := map[string]wsagent.BackendRegistration{
 		wsagent.BackendClaude: {Backend: wsagent.ClaudeBackend{}, LeadProfile: wsagent.LeadProfileClaude, PermissionModes: wsagent.LeadPermissionModes, PermissionLevels: wsagent.LeadPermissionLevels(), Catalog: wsagent.ClaudeCatalog(), ManualHarness: "claude", PlaybookCommands: true, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendClaude), WorkerHTTPMCP: true},
-		// Pi has no catalog profile until its port of the Codex adapter:
-		// it stays handle-only.
-		wsagent.BackendPi: {Backend: wsagent.PiBackend{}, LeadProfile: wsagent.LeadProfilePi, PermissionLevels: wsagent.LeadPermissionLevels(), WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendPi)},
+		// Pi stays handle-only outside its native compaction descriptor.
+		wsagent.BackendPi: {NativeCompaction: wsagent.PiCompaction(), Backend: wsagent.PiBackend{}, LeadProfile: wsagent.LeadProfilePi, PermissionLevels: wsagent.LeadPermissionLevels(), WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendPi)},
 		// Codex workers are daemon-owned like agy's: HTTP MCP, auto-approved
 		// inside the sandbox their authority selects (codexWorkerMode). Its
 		// native tool names are already valid, so no name scheme applies.

@@ -140,10 +140,48 @@ type CapabilityEntry struct {
 // its entries. Oldest and Newest are the oldest and newest harness versions
 // with a recorded stream fixture; a version outside them runs on the
 // nearest bound's grades, marked unverified.
+// CompactionProtocol records native lifecycle and prompt facts, not policy.
+type CompactionProtocol struct {
+	LeadCommand, WorkerCommand bool
+	Lifecycle                  bool
+	// UsageDropRatio, when in (0, 1), detects compaction completion from a
+	// sharp context-token drop (used < prev*UsageDropRatio with at least
+	// UsageDropMinDelta tokens dropped on the same context window) on harnesses
+	// whose wire protocol emits no explicit compaction event.
+	UsageDropRatio    float64
+	UsageDropMinDelta int64
+	// CommandEndConfirms marks a harness whose native compact command completes
+	// synchronously on its clean prompt/turn response without an explicit
+	// CompactEnd notification.
+	CommandEndConfirms bool
+	PromptPersists     bool
+	LegacyAdvisory     string
+	LegacyHard         string
+	AdvisoryEnabled    string
+}
+
+// DetectsLifecycle reports whether this harness has a verified compaction
+// completion signal (either explicit wire events or descriptor usage-drop).
+func (p CompactionProtocol) DetectsLifecycle() bool {
+	return p.Lifecycle || (p.UsageDropRatio > 0 && p.UsageDropRatio < 1)
+}
+
+// LegacyKey returns only the matching lead migration key.
+func (p CompactionProtocol) LegacyKey(key string) string {
+	switch key {
+	case "compaction.lead_advisory":
+		return p.LegacyAdvisory
+	case "compaction.lead_hard":
+		return p.LegacyHard
+	}
+	return ""
+}
+
 type HarnessProfile struct {
-	Oldest  string
-	Newest  string
-	Entries []CapabilityEntry
+	Compaction CompactionProtocol
+	Oldest     string
+	Newest     string
+	Entries    []CapabilityEntry
 }
 
 // Capability is one item as resolved for a session.
@@ -351,8 +389,9 @@ const claudeSubagentTool = "Agent"
 // worker (testdata, claude_code_version).
 func ClaudeCatalog() *HarnessProfile {
 	return &HarnessProfile{
-		Oldest: "2.1.322",
-		Newest: "2.1.326",
+		Compaction: CompactionProtocol{LeadCommand: true, Lifecycle: true, PromptPersists: true, LegacyAdvisory: "claude.compaction_advisory_percent", AdvisoryEnabled: "claude.compaction_advisory_enabled"},
+		Oldest:     "2.1.322",
+		Newest:     "2.1.327",
 		Entries: []CapabilityEntry{
 			{Item: ItemSkillList, Grade: GradeUnsupported,
 				Source: "the init's skills field is not parsed (claudeInit)"},
@@ -410,15 +449,18 @@ var CodexPermissionModes = []string{"read-only", "workspace-write", "danger-full
 // forthcoming compaction mapper.
 func CodexCatalog() *HarnessProfile {
 	p := &HarnessProfile{
-		Oldest: "0.160.0",
-		Newest: "0.160.0",
+		// Both live 0.170.0 attempts were refused at thread/start by the
+		// probe MCP override validation. No lifecycle/prompt claim is inferred.
+		Compaction: CompactionProtocol{LeadCommand: true, WorkerCommand: true},
+		Oldest:     "0.160.0",
+		Newest:     "0.170.0",
 		Entries: []CapabilityEntry{
 			{Item: ItemSkillList, Role: RoleLead, Grade: GradeUnsupported,
 				Source: "skills/list exists but has no ws wiring"},
 			{Item: ItemSkillInjection, Role: RoleLead, Grade: GradeNative,
 				Source: "Codex plugin skills stay loaded while the plugin's stdio ws MCP entry is shadowed by HTTP MCP"},
 			{Item: ItemCompaction, Role: RoleLead, Grade: GradeNative,
-				Source: "the dashboard's /compact maps to thread/compact/start and thread/compacted (forthcoming mapper)"},
+				Source: "legacy dashboard /compact maps to thread/compact/start; the new lifecycle lever is unsupported until a live probe verifies detection"},
 			{Item: ItemRewind, Role: RoleLead, Grade: GradeUnsupported, Source: "no ws wiring"},
 			{Item: ItemToolRemoval, Role: RoleLead, Grade: GradeUnsupported,
 				Source: "the session keeps the user's tool setup"},
@@ -462,15 +504,27 @@ func CodexCatalog() *HarnessProfile {
 // (agyMapper.initialized) demotes what a session's shape lacks.
 func AgyCatalog() *HarnessProfile {
 	p := &HarnessProfile{
-		Oldest: "1.5.9",
-		Newest: "1.5.10",
+		// agy ACP emits no explicit compaction notification (only usage_update
+		// and end_turn), while /compact shrinks context and keeps systemPrompt.
+		// Detect completion from a >15% drop (>=2000 tokens, same window) or a
+		// clean /compact prompt response, whichever arrives first.
+		Compaction: CompactionProtocol{
+			LeadCommand:        true,
+			WorkerCommand:      true,
+			UsageDropRatio:     0.85,
+			UsageDropMinDelta:  2000,
+			CommandEndConfirms: true,
+			PromptPersists:     true,
+		},
+		Oldest:     "1.5.9",
+		Newest:     "1.5.12",
 		Entries: []CapabilityEntry{
 			{Item: ItemSkillList, Role: RoleLead, Grade: GradeUnsupported,
 				Source: "available_commands_update is shown as the command list but not read as a skill list"},
 			{Item: ItemSkillInjection, Role: RoleLead, Grade: GradeNative,
 				Source: "agy's own skills, invoked by a /name prompt and listed in available_commands_update; ws's skills arrive with the common prompt assembly, not agy plugin import"},
 			{Item: ItemCompaction, Role: RoleLead, Grade: GradeNative,
-				Source: "the dashboard's /compact goes out as a session/prompt of that text, a command agy lists (agyMapper.commands demotes a list without it); no compaction event, only the usage drop"},
+				Source: "session/prompt /compact at idle boundaries with descriptor usage-drop and prompt-response completion detection"},
 			{Item: ItemRewind, Role: RoleLead, Grade: GradeUnsupported, Source: "no ACP method"},
 			{Item: ItemToolRemoval, Role: RoleLead, Grade: GradeUnsupported,
 				Source: "the lead keeps the user's tool setup; only a custom main agent removes tools"},
@@ -503,4 +557,20 @@ func AgyCatalog() *HarnessProfile {
 		p.Entries = append(p.Entries, entry)
 	}
 	return p
+}
+
+// PiCompaction describes RPC compact: it operates on the current session,
+// independently of lead privileges. The system prompt is rebuilt each turn.
+func PiCompaction() *CompactionProtocol {
+	return &CompactionProtocol{LeadCommand: true, WorkerCommand: true, Lifecycle: true, PromptPersists: true, LegacyAdvisory: "pi.compaction_advisory_percent", LegacyHard: "pi.compaction_hard_percent"}
+}
+
+// BuiltinCompaction is the keyless config reader's descriptor floor. Runtime
+// callers prefer their admitted registration, including external backends.
+func BuiltinCompaction(harness string) CompactionProtocol {
+	descriptors := map[string]func() *HarnessProfile{BackendClaude: ClaudeCatalog, BackendCodex: CodexCatalog, BackendAgy: AgyCatalog}
+	if f := descriptors[harness]; f != nil {
+		return f().Compaction
+	}
+	return map[string]CompactionProtocol{BackendPi: *PiCompaction()}[harness]
 }

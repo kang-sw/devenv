@@ -14,6 +14,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 // agent_tools.go is the agent.* tool family's runner side: agent.spawn,
@@ -197,14 +198,16 @@ type AgentTiers struct {
 	Unavailable []string `json:"unavailable,omitempty"`
 }
 
-// Agent statuses: a turn runs; the first message waits for the process; a
-// process waits for input; asleep (no process, no turn); closed.
+// Agent statuses: a turn runs; turn ended with background work running; the
+// first message waits for the process; a process waits for input; asleep (no
+// process, no turn); closed.
 const (
-	AgentRunning  = "running"
-	AgentStarting = "starting"
-	AgentIdle     = "idle"
-	AgentWaiting  = "waiting"
-	AgentClosed   = "closed"
+	AgentRunning    = "running"
+	AgentBackground = "background"
+	AgentStarting   = "starting"
+	AgentIdle       = "idle"
+	AgentWaiting    = "waiting"
+	AgentClosed     = "closed"
 )
 
 // AgentStatus is st's agent.* status.
@@ -214,6 +217,8 @@ func AgentStatus(st State) string {
 		return AgentClosed
 	case st.Status == StatusRunning:
 		return AgentRunning
+	case st.BackgroundTasks > 0:
+		return AgentBackground
 	case st.Process:
 		return AgentIdle
 	case st.Held > 0 && st.Error == "":
@@ -866,7 +871,9 @@ func (r *Runner) forget(id string) {
 	if !ok {
 		return
 	}
-	if err := os.RemoveAll(wsdashboard.SessionDir(r.opts.Dir, id)); err != nil {
+	sessionDir := wsdashboard.SessionDir(r.opts.Dir, id)
+	wslive.DropRing(wslive.RingDir(sessionDir))
+	if err := os.RemoveAll(sessionDir); err != nil {
 		fmt.Fprintf(r.opts.Log, "agent %s: delete: %v\n", id, err)
 	}
 	r.notify(id, rec.Root)

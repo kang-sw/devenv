@@ -993,9 +993,6 @@ func (m *claudeMapper) mapEvents(line []byte, replies lineReplies) []Event {
 				return out
 			}
 		case "status":
-			if !m.lead() {
-				return nil
-			}
 			var out []Event
 			if l.PermissionMode != "" {
 				out = append(out, Event{PermissionMode: l.PermissionMode})

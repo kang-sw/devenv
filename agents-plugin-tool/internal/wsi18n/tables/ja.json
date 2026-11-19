@@ -57,6 +57,7 @@
   "agent.context": "コンテキスト: {0} トークン",
   "agent.done": "完了",
   "agent.sleep": "休止",
+  "agent.background": "バックグラウンド",
   "agent.deleted": "削除済み",
   "agent.effort": "エフォート: {0}",
   "agent.failed": "失敗",

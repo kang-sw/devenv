@@ -14,6 +14,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // railSession is a listed session for buildRailView: live (heartbeat now)
@@ -355,6 +356,17 @@ func TestRailRowFailure(t *testing.T) {
 	bare.Host = &wslive.Host{BackgroundTasks: 1}
 	if row := railRow(railInput{Session: hosted, Snapshot: &bare}, true, now); row.Failure != nil {
 		t.Errorf("host state without a failure = %+v, want none", row.Failure)
+	} else if row.BackgroundTasks != 1 {
+		t.Errorf("background row = %+v, want BackgroundTasks=1", row)
+	} else {
+		html := renderNamed(t, "rrow", row)
+		if !strings.Contains(html, `class="chip bgt"`) || !strings.Contains(html, `>background</span>`) || !strings.Contains(html, `· background`) {
+			t.Errorf("rail row lacks background badge/tooltip: %s", html)
+		}
+	}
+	view := buildRailView([]railInput{{Session: hosted, Snapshot: &bare}}, nil, nil, now)
+	if view.CountSleep != 0 {
+		t.Errorf("hosted session with background tasks should not count as idle-sleepable: CountSleep=%d", view.CountSleep)
 	}
 }
 
@@ -557,6 +569,77 @@ func TestRailMessagesReadARingOnlyWhenItGrew(t *testing.T) {
 	}
 	if got := c.last("s", 4, dir); got.Text != "look at this" {
 		t.Errorf("last = %+v, want the user message without its image lines", got)
+	}
+}
+
+// TestRailRenderUnpinnedClosedSessionsBoundedRingReads covers R2 Finding 1:
+// rendering the rail across N closed/unpinned sessions with deep non-message
+// tails (mail/tool entries) performs at most one bounded ReadRingPage per
+// session (never 64 full-ring reloads) and 0 body reads on unchanged rev bumps.
+func TestRailRenderUnpinnedClosedSessionsBoundedRingReads(t *testing.T) {
+	const numClosed = 10
+	const tailNoise = 60 // < railMessageScan (64), would trigger 61 ReadRingEntry loops before R3
+	ringReadFiles := func() int64 {
+		var n int64
+		for site, count := range wsstate.FileIOCounters() {
+			if strings.HasPrefix(site, "file_io_site:wslive/ring") && strings.HasSuffix(site, ":read_file") {
+				n += count
+			}
+		}
+		return n
+	}
+
+	root := t.TempDir()
+	dirs := make([]string, numClosed)
+	for i := range numClosed {
+		dir := wslive.RingDir(filepath.Join(root, fmt.Sprintf("closed-%d", i)))
+		dirs[i] = dir
+		unpin := wslive.PinRing(dir)
+		entries := make([]wslive.RingEntry, 0, tailNoise+1)
+		entries = append(entries, wslive.RingEntry{Kind: wslive.RingUser, Origin: wslive.OriginTerminal, Text: fmt.Sprintf("hello closed %d", i)})
+		for j := range tailNoise {
+			entries = append(entries, wslive.RingEntry{Kind: wslive.RingMail, Direction: wslive.MailRecv, Peer: "id:x", Title: fmt.Sprintf("mail %d", j)})
+		}
+		if err := wslive.AppendRing(dir, entries); err != nil {
+			t.Fatal(err)
+		}
+		if err := unpin(); err != nil {
+			t.Fatal(err)
+		}
+		if wslive.RingPinned(dir) {
+			t.Fatalf("closed session %d remained pinned", i)
+		}
+	}
+
+	c := newRailMessages()
+	beforeFirst := ringReadFiles()
+	for i, dir := range dirs {
+		msg, ok := c.lastResult(fmt.Sprintf("closed-%d", i), 1, dir)
+		if !ok || !msg.User || msg.Text != fmt.Sprintf("hello closed %d", i) {
+			t.Fatalf("closed-%d: msg=%+v ok=%v", i, msg, ok)
+		}
+	}
+	firstReads := ringReadFiles() - beforeFirst
+	if c.reads != numClosed {
+		t.Fatalf("first rail render counted %d tail reads across %d closed sessions, want %d", c.reads, numClosed, numClosed)
+	}
+	if firstReads != numClosed {
+		t.Fatalf("first rail render performed %d ring read_file calls across %d closed sessions, want %d (1 segment each)", firstReads, numClosed, numClosed)
+	}
+
+	// Subsequent rail render at a bumped rev with unchanged rings reads 0 bodies.
+	beforeSecond := ringReadFiles()
+	for i, dir := range dirs {
+		msg, ok := c.lastResult(fmt.Sprintf("closed-%d", i), 2, dir)
+		if !ok || msg.Text != fmt.Sprintf("hello closed %d", i) {
+			t.Fatalf("closed-%d rev 2: msg=%+v ok=%v", i, msg, ok)
+		}
+	}
+	if got := ringReadFiles() - beforeSecond; got != 0 {
+		t.Fatalf("unchanged closed rail render performed %d ring read_file calls, want 0", got)
+	}
+	if c.reads != numClosed {
+		t.Fatalf("unchanged closed rail render incremented tail reads to %d, want %d", c.reads, numClosed)
 	}
 }
 

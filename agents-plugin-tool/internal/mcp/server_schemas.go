@@ -14,6 +14,7 @@ const (
 
 func tools() []map[string]any {
 	toolList := []map[string]any{
+		compactTool(),
 		{
 			"name":        "call",
 			"description": "Call a ws tool by name when it is missing from the client's tool list. No tool: list names. No arguments: show description and schema.",
