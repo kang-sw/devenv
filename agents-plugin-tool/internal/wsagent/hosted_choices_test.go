@@ -131,6 +131,9 @@ func TestHostedAgyListingCommandAndEnvironment(t *testing.T) {
 	if h.Error != "" || !reflect.DeepEqual(h.Models, []ModelChoice{{ID: "fixture-gemini"}, {ID: "fixture-orchestrator"}}) || !slices.Equal(h.Efforts, agyEfforts) {
 		t.Fatalf("agy listing: %+v", h)
 	}
+	if !slices.Contains(h.Efforts, "xhigh") {
+		t.Fatal("xhigh effort not offered")
+	}
 	if !slices.Contains(h.PermissionModes, "bypass") {
 		t.Fatal("bypass not offered")
 	}

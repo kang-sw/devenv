@@ -54,9 +54,9 @@ type AgyBackend struct {
 // the process still runs in agy's native default mode.
 var AgyPermissionModes = []string{"default", "accept-edits", "auto", "plan", "bypass"}
 
-// agyEfforts are the thought_level values agy 1.5.9 offers; Choices falls
-// back to them before any session reported its own.
-var agyEfforts = []string{"low", "medium", "high"}
+// agyEfforts are the available effort values; Choices falls back to them
+// before any session reported its own.
+var agyEfforts = []string{"low", "medium", "high", "xhigh"}
 
 // Timeouts of the requests a start and a control wait on. A session request
 // may connect MCP servers before it answers.
