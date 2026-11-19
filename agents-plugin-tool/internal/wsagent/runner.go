@@ -141,6 +141,18 @@ type Options struct {
 	// daemon supplies the function; nil, or an error, leaves the prompt
 	// with the key sentence alone.
 	LeadManual func(backend, dir, key string) (string, error)
+	// PlaybookCommands lists the lead playbooks a hosted lead of a backend
+	// with BackendRegistration.PlaybookCommands offers as dashboard
+	// commands. The runner reads it once and keeps the list for its
+	// lifetime; nil, or an error, offers none.
+	PlaybookCommands func() ([]wslive.SlashCommand, error)
+	// ExpandCommand renders the body of playbook command name for the
+	// hosted lead whose key is key (backend its harness, dir its working
+	// directory): the body the session's own playbook.read returns, which
+	// the turn running the command carries, so the session needs no read of
+	// its own. internal/mcp renders it, so the daemon supplies the function;
+	// nil, or an error, sends a pointer to that read instead.
+	ExpandCommand func(backend, dir, key, name string) (string, error)
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
 	// Timer starts the lever hold's cap timer (leverHoldCap): a channel
@@ -238,6 +250,11 @@ type Runner struct {
 	// rejoined gates nested calls until held-process capabilities are validated.
 	rejoined   chan struct{}
 	rejoinOnce sync.Once
+	// playbookCmds is Options.PlaybookCommands' list, read once
+	// (playbookCommands) under playbookMu.
+	playbookMu     sync.Mutex
+	playbookLoaded bool
+	playbookCmds   []wslive.SlashCommand
 
 	// holders routes the session holders' events to the lead processes.
 	holders holderTable
@@ -586,6 +603,13 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		tokens := float64(*usage.Context.Tokens)
 		c.contextTokens = &tokens
 	}
+	if seed == nil && rec.Lead {
+		// A rejoined lead's list is its snapshot's, which an earlier daemon
+		// may have written without this runner's playbook commands.
+		if merged := r.withPlaybookCommands(rec, own.Commands); !slices.Equal(merged, own.Commands) {
+			seed = merged
+		}
+	}
 	if len(seed) > 0 {
 		c.live.applyQuiet(wslive.Event{Kind: wslive.KindCommands, Commands: seed})
 	}
@@ -871,7 +895,9 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 	}
 	var seed []wslive.SlashCommand
 	if rec.Lead {
-		seed = r.lastCommands(rec)
+		// A new lead offers its playbook commands before its process
+		// first reports the harness's own.
+		seed = r.withPlaybookCommands(rec, r.lastCommands(rec))
 	}
 	c := r.startConv(rec, seed)
 	if spawn != nil {

@@ -1034,10 +1034,14 @@ func (c *conv) kick() {
 	// so its retry shows the message once. The process's events for the
 	// turn are handled by this loop after kick returns, so they still
 	// follow the turn's start.
-	if cmd != nil {
-		err = c.runCommand(*cmd)
-	} else {
+	if cmd == nil {
 		err = c.proc.Send(strings.Join(append(append(slices.Clone(parts), reports...), mail...), "\n\n"))
+	} else if text, ok := c.playbookTurn(*cmd); ok {
+		// The runner expands a playbook command itself: the harness has
+		// no such command, and the turn carries the playbook's body.
+		err = c.proc.Send(text)
+	} else {
+		err = c.runCommand(*cmd)
 	}
 	if err != nil {
 		// The turn never began: its process ends with no turn to close.

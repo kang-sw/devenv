@@ -44,7 +44,9 @@ func isAgentTool(name string) bool {
 // call can reach a runner, the daemon's own (a lead) or over a token (a
 // spawned agent).
 func (s *Server) agentListed() bool {
-	return s.pi.agents != nil || s.piForwards()
+	// A daemon-side render for a hosted lead has no runner of its own, but
+	// renders for the lead's daemon-hosted connection, which lists them.
+	return s.pi.agents != nil || s.piForwards() || s.connectionDescriptor().leadRender
 }
 
 func (s *Server) handleAgentTool(ctx context.Context, id json.RawMessage, tool string, args map[string]any) response {

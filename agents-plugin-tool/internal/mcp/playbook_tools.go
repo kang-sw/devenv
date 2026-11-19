@@ -197,7 +197,9 @@ func (s *Server) piMCPOnlyRecord(rec wsagent.Record) bool {
 // in a code span.
 func piMCPOnlyTerminology(namespace string) map[string]string {
 	return map[string]string{
-		"ExploreAgent":  "a `" + namespace + "/agent.spawn` subagent at tier small with read-only authority",
+		// No tier here: each site states the tier it wants (the manual's
+		// "at the tier the question needs").
+		"ExploreAgent":  "a read-only `" + namespace + "/agent.spawn` subagent",
 		"SpawnIdiom":    "`" + namespace + "/agent.spawn` (tier: the resolved capability tier, not a model name; authority: at most your own)",
 		"ContinueIdiom": namespace + "/mailbox.send to the address agent.spawn returned",
 	}
@@ -808,7 +810,7 @@ func buildOverrideLookup(s *Server, sessionKey string) (overrideLookupFn, error)
 			resolver := s.sessionResolver(capturedKey, builtinConfigDefaults())
 			enabled, err := s.whiteboardEnabled(&resolver, capturedKey)
 			if err == nil && enabled {
-				return withNamespace(lineTicketQueueBoard, s.runtimeNamespace()), true
+				return s.namespaced(lineTicketQueueBoard), true
 			}
 		}
 		return "", false
@@ -1033,7 +1035,11 @@ func renderPlaybookBody(s *Server, rsrcRoot fs.FS, name string, callerContext ma
 // base files; see callerPlaybookProfile).
 func renderPlaybookBodyForCaller(s *Server, callerKey, profile string, rsrcRoot fs.FS, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
 	harness := s.playbookHarness()
-	daemonAgentClient := (harness == "pi" && s.clientPiDaemonAgents()) || s.callerDaemonAgents(callerKey)
+	descriptor := s.connectionDescriptor()
+	// A hosted lead with no ws skills (playbookCommands) is under the
+	// native-subagent removal policy (wsagent.RemovesSubagents): it
+	// delegates through agent.spawn, where its connection allows it.
+	daemonAgentClient := (harness == "pi" && s.clientPiDaemonAgents()) || descriptor.playbookCommands || s.callerDaemonAgents(callerKey)
 	daemonAgents := daemonAgentClient && s.agentListed() && s.toolAllowed("agent.spawn") && s.toolAllowed("mailbox.send")
 	terminology := playbookTerminology(harness, daemonAgents, s.runtimeNamespace())
 
@@ -1050,6 +1056,11 @@ func renderPlaybookBodyForCaller(s *Server, callerKey, profile string, rsrcRoot 
 	pb, err := wsrsrc.LoadFS(rsrcRoot, name, loadHarness, profile, nil)
 	if err != nil {
 		return "", "", err
+	}
+	if descriptor.playbookCommands {
+		// Its sessions have no ws skills: a skill reference names the
+		// dashboard command that runs the playbook (skillRef).
+		pb.Body = strings.ReplaceAll(pb.Body, "{{.SkillNamespace}}:", "/")
 	}
 
 	// recommendedTier is the first-class tier declared in frontmatter, surfaced to
@@ -1212,7 +1223,7 @@ func printPlaybookForCaller(s *Server, callerKey, profile string, rsrcRoot fs.FS
 			return "", "", fmt.Errorf("resolve %s: %w", wsconfig.ItemWorkflowPreferSubagent, err)
 		}
 		if enabled {
-			body += "\n\nUse `" + s.runtimeNamespace() + ":lead-delegate` for bounded investigation, diagnosis, drafting, and low-impact operational work."
+			body += "\n\nUse `" + s.skillRef("lead-delegate") + "` for bounded investigation, diagnosis, drafting, and low-impact operational work."
 		}
 	}
 	return body, recommendedTier, nil
@@ -1346,4 +1357,69 @@ func splitDeclaredRenderContext(callerContext map[string]string, declared map[st
 		renderContext = nil
 	}
 	return templateContext, renderContext
+}
+
+// readPlaybook is playbook.read's text for playbook name read with keyStr
+// (empty for a keyless read) and callerContext: the rendered body with its
+// knob variants and recommended tier, without the trailing newline the tool
+// result adds.
+func (s *Server) readPlaybook(name, keyStr string, callerContext map[string]string) (string, error) {
+	rsrcRoot, err := s.resolveRsrcRoot("")
+	if err != nil {
+		return "", err
+	}
+	// Provide the render-time {{.MailboxWaitCommand}} value (concrete when the
+	// key resolves an owned mailbox identity, generic otherwise) for the one
+	// stem whose body substitutes it. Because it is a reserved implicit var,
+	// any path that substitutes the body must supply it or substitution fails
+	// with ErrUnprovidedVar — so the render dispatch below gates on the same
+	// stem to keep playbook.render of this stem from failing closed.
+	if name == mailboxWaitPlaybookName {
+		callerContext = s.injectMailboxWaitCommand(callerContext, keyStr)
+	}
+	printOverrideLookup, err := buildOverrideLookup(s, keyStr)
+	if err != nil {
+		return "", err
+	}
+	// Resolve workflow.lang for language-binding injection.
+	printLangResolver := s.sessionResolver(keyStr, nil)
+	printWorkflowLangRV, err := printLangResolver.Get(keyStr, wsconfig.ItemWorkflowLang)
+	if err != nil {
+		return "", err
+	}
+	printProfile, err := s.callerPlaybookProfile(keyStr)
+	if err != nil {
+		return "", err
+	}
+	body, recommendedTier, err := printPlaybookForCaller(s, strings.TrimSpace(keyStr), printProfile, rsrcRoot, name, callerContext, s.configOptions(), printWorkflowLangRV.Value, printOverrideLookup)
+	if err != nil {
+		return "", err
+	}
+	// The remaining manual/discussion knob variants run after rendering;
+	// ticket knob markers resolve in the shared render core.
+	knobResolver := s.sessionResolver(keyStr, builtinConfigDefaults())
+	whiteboardOn, err := s.whiteboardEnabled(&knobResolver, keyStr)
+	if err != nil {
+		return "", err
+	}
+	trackerOn, err := s.trackerEnabled(&knobResolver, keyStr)
+	if err != nil {
+		return "", err
+	}
+	// The tracker section is never a spawned key's (as workflow_manual
+	// renders it); its tools refuse that key, except a store's support
+	// conversation, which the tracker gate admits.
+	if entry, found := s.lookupSession(keyStr); found && trackerOn && !entry.isTopLevelLead() && !s.trackerSupportReadsTracker(keyStr, entry) {
+		trackerOn = false
+	}
+	body, err = applyKnobVariants(s, rsrcRoot, name, body, whiteboardOn, trackerOn)
+	if err != nil {
+		return "", err
+	}
+	if name == whiteboardPlaybookName || name == trackerPlaybookName {
+		if body, err = appendCommandSyntax(rsrcRoot, body); err != nil {
+			return "", err
+		}
+	}
+	return withRecommendedTier(body, recommendedTier), nil
 }

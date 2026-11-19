@@ -12,6 +12,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsholder"
+	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wspackage"
 )
 
@@ -74,29 +75,33 @@ func agentMCPPython(preferred string, windows bool, lookPath func(string) (strin
 	return "", nil, fmt.Errorf("no Python interpreter for ws-mcp launcher: %s is unset and python3 (or py on Windows) is not on PATH", wsholder.PythonEnv)
 }
 
-// renderLeadManual is the daemon's wsagent.Options.LeadManual: the workflow
-// manual of the hosted lead whose key is key, rendered under the environment
-// its ws-mcp gets (the daemon's own, the configured hosted package's, and no
-// mailbox identity, as agentMCPCommand and the lead's launch give it) and
-// resolved against dir as a hello from that ws-mcp would be (callerHello).
-// harness is the lead backend's declared ManualHarness (wsagent.BackendRegistration),
-// "" for a backend that declares none, such as a Pi lead on its MCP fallback.
-func renderLeadManual(harness, dir, key string) (string, error) {
+// hostedPackageEnv is the configured hosted package's ws-mcp environment
+// (wsagent.HostedPluginEnvironment of its staged copy), as
+// agentMCPCommand gives it.
+func hostedPackageEnv() (map[string]string, error) {
 	name, _, err := wsagent.ResolveHostedPackage()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	stateDir, err := wsdashboard.Dir("")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	plugin, err := wspackage.StageHosted(name, stateDir)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	pkg, err := wsagent.HostedPluginEnvironment(name, plugin)
+	return wsagent.HostedPluginEnvironment(name, plugin)
+}
+
+// hostedRenderEnv is the environment a hosted lead's ws-mcp serves dir
+// under (the daemon's own, the configured hosted package's, and no mailbox
+// identity, as agentMCPCommand and the lead's launch give it), resolved
+// against dir as a hello from that ws-mcp would be (callerHello).
+func hostedRenderEnv(dir string) ([]string, error) {
+	pkg, err := hostedPackageEnv()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	env := map[string]string{}
 	for _, kv := range os.Environ() {
@@ -110,5 +115,37 @@ func renderLeadManual(harness, dir, key string) (string, error) {
 	env["WS_MCP_PROJECT_ROOT"] = dir
 	env["WS_MAILBOX"], env["WS_MAILBOX_AUTO"] = "", ""
 	hello := callerHello(wsdashboard.ProxyHello{Env: env, Cwd: dir})
-	return mcp.RenderLeadManual(mcp.EnvFromMap(hello.Env), dir, harness, key)
+	return mcp.EnvFromMap(hello.Env), nil
+}
+
+// renderLeadManual is the daemon's wsagent.Options.LeadManual: the workflow
+// manual of the hosted lead whose key is key, rendered under
+// hostedRenderEnv(dir) as render (the lead backend's registration) says.
+func renderLeadManual(render mcp.HostedRender, dir, key string) (string, error) {
+	env, err := hostedRenderEnv(dir)
+	if err != nil {
+		return "", err
+	}
+	return mcp.RenderLeadManual(env, dir, render, key)
+}
+
+// renderLeadPlaybook is the daemon's wsagent.Options.ExpandCommand: the
+// body of playbook name for the hosted lead whose key is key, rendered as
+// renderLeadManual renders its manual.
+func renderLeadPlaybook(render mcp.HostedRender, dir, key, name string) (string, error) {
+	env, err := hostedRenderEnv(dir)
+	if err != nil {
+		return "", err
+	}
+	return mcp.RenderLeadPlaybook(env, dir, render, key, name)
+}
+
+// hostedPlaybookCommands is the daemon's wsagent.Options.PlaybookCommands:
+// the lead playbook commands of the configured hosted package.
+func hostedPlaybookCommands() ([]wslive.SlashCommand, error) {
+	pkg, err := hostedPackageEnv()
+	if err != nil {
+		return nil, err
+	}
+	return mcp.HostedPlaybookCommands(mcp.EnvFromMap(pkg))
 }
