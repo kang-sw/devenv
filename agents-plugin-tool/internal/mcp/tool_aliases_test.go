@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"os"
 	"regexp"
 	"strings"
@@ -113,7 +114,48 @@ func descriptorRegistrations() map[string]wsagent.BackendRegistration {
 		wsagent.BackendClaude: {LeadProfile: wsagent.LeadProfileClaude, ManualHarness: "claude"},
 		wsagent.BackendPi:     {LeadProfile: wsagent.LeadProfilePi},
 		wsagent.BackendAgy: {LeadProfile: wsagent.LeadProfileAgy, PermissionModes: wsagent.AgyPermissionModes,
-			ToolNameScheme: wsagent.ToolNameSchemeSanitize, ManualHarness: wsagent.BackendAgy},
+			ToolNameScheme: wsagent.ToolNameSchemeSanitize, ToolsAlwaysLoad: true, ManualHarness: wsagent.BackendAgy},
+	}
+}
+
+func TestHostedAgyToolsAlwaysLoad(t *testing.T) {
+	s, _ := hostedBackendConnection(t, wsagent.BackendAgy, descriptorRegistrations())
+	var resp struct {
+		Result struct {
+			Tools []map[string]any `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(callToolsList(t, s)), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Result.Tools) == 0 {
+		t.Fatal("tools/list returned no tools")
+	}
+	for _, tool := range resp.Result.Tools {
+		meta, ok := tool["_meta"].(map[string]any)
+		if !ok || meta["antigravity/alwaysLoad"] != true {
+			t.Errorf("%v: missing alwaysLoad metadata: %v", tool["name"], tool["_meta"])
+		}
+	}
+}
+
+func TestHostedClaudeToolsHaveNoMeta(t *testing.T) {
+	s, _ := hostedBackendConnection(t, wsagent.BackendClaude, descriptorRegistrations())
+	var resp struct {
+		Result struct {
+			Tools []map[string]any `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(callToolsList(t, s)), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Result.Tools) == 0 {
+		t.Fatal("tools/list returned no tools")
+	}
+	for _, tool := range resp.Result.Tools {
+		if _, ok := tool["_meta"]; ok {
+			t.Errorf("%v: unexpected metadata: %v", tool["name"], tool["_meta"])
+		}
 	}
 }
 

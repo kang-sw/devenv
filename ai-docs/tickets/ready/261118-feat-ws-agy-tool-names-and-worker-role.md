@@ -316,6 +316,12 @@ in this session; these pointers are not an exhaustive rationale-index result.
   and a test pins that every alias plus `mcp_ws_` fits 128 characters.
   Deviation (c) of the Result above is superseded.
 
+#### Edition (49bb7454d) - 2026-11-19
+
+- Hosted agy tools now declare `_meta.antigravity/alwaysLoad` through the
+  backend descriptor, preventing large tools from becoming unreachable lazy tools.
+  w5090 build, vet and MCP/wsagent tests pass; the 2,000 B guard excludes metadata.
+
 ### Phase 2: agy worker role
 
 - Replace the global `agentWorkerBackends` map

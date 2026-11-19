@@ -69,7 +69,7 @@ func leadToolNames(getenv func(string) string) []string {
 
 func (s *Server) filteredTools() []map[string]any {
 	namespace := s.runtimeNamespace()
-	aliases := s.connectionDescriptor().aliases
+	descriptor := s.connectionDescriptor()
 	base := tools()
 	filtered := make([]map[string]any, 0, len(base))
 	for _, tool := range base {
@@ -96,7 +96,18 @@ func (s *Server) filteredTools() []map[string]any {
 			}
 		}
 		if s.toolAllowed(name) {
-			filtered = append(filtered, publicToolDefinition(tool, aliases.advertised(name), namespace))
+			definition := publicToolDefinition(tool, descriptor.aliases.advertised(name), namespace)
+			if descriptor.toolsAlwaysLoad {
+				meta := make(map[string]any)
+				if existing, ok := definition["_meta"].(map[string]any); ok {
+					for key, value := range existing {
+						meta[key] = value
+					}
+				}
+				meta["antigravity/alwaysLoad"] = true
+				definition["_meta"] = meta
+			}
+			filtered = append(filtered, definition)
 		}
 	}
 	return filtered

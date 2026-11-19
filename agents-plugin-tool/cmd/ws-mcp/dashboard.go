@@ -302,7 +302,7 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 		// agy workers use the default agent and auto-allow its permission
 		// requests. It maps no common lead permission level yet. Both
 		// roles use HTTP MCP and underscore tool-name aliases.
-		wsagent.BackendAgy: {Backend: wsagent.AgyBackend{}, LeadProfile: wsagent.LeadProfileAgy, PermissionModes: wsagent.AgyPermissionModes, Catalog: wsagent.AgyCatalog(), ToolNameScheme: wsagent.ToolNameSchemeSanitize, ManualHarness: wsagent.BackendAgy, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendAgy), WorkerHTTPMCP: true, WorkerAutoApprove: true},
+		wsagent.BackendAgy: {Backend: wsagent.AgyBackend{}, LeadProfile: wsagent.LeadProfileAgy, PermissionModes: wsagent.AgyPermissionModes, Catalog: wsagent.AgyCatalog(), ToolNameScheme: wsagent.ToolNameSchemeSanitize, ToolsAlwaysLoad: true, ManualHarness: wsagent.BackendAgy, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendAgy), WorkerHTTPMCP: true, WorkerAutoApprove: true},
 	}
 	return wsagent.NewRunner(wsagent.Options{
 		Dir:           dir,

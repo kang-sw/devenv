@@ -68,8 +68,9 @@ func (t *toolAliasTable) canonical(name string) string {
 // about the connection: its tool-name aliases and the harness its workflow
 // manual renders under. The zero value is an ordinary connection.
 type connectionDescriptor struct {
-	aliases       *toolAliasTable
-	manualHarness string
+	aliases         *toolAliasTable
+	manualHarness   string
+	toolsAlwaysLoad bool
 }
 
 // connectionDescriptor reads the descriptor of the backend registration the
@@ -110,6 +111,7 @@ func (s *Server) connectionDescriptor() connectionDescriptor {
 		return s.descriptor
 	}
 	s.descriptor.manualHarness = reg.ManualHarness
+	s.descriptor.toolsAlwaysLoad = reg.ToolsAlwaysLoad
 	names := make([]string, 0, len(tools()))
 	for _, tool := range tools() {
 		if name, _ := tool["name"].(string); name != "" {
