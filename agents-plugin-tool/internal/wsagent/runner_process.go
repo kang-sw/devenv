@@ -193,7 +193,7 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 				c.replaying, c.seq = true, rec.HolderSeq
 				return nil
 			}
-			c.seq, c.seqDirty, c.ringDirty = 0, false, false
+			c.seq, c.seqDirty, c.live.ringDirty = 0, false, false
 			c.update(func(rec *Record) {
 				rec.HolderID, rec.HostPID, rec.HolderSeq = id, pid, 0
 				rec.SteerSeq, rec.SteerAnswers, rec.SteerAnswerSeq = 0, 0, 0
@@ -427,7 +427,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		return nil
 	}
 	c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.reconcileMode = false, false, false, false
-	c.seq, c.seqDirty, c.ringDirty = 0, false, false
+	c.seq, c.seqDirty, c.live.ringDirty = 0, false, false
 	c.update(func(rec *Record) {
 		rec.HolderID, rec.HostPID, rec.HolderSeq = id, pid, 0
 		rec.forgetMCP()
@@ -709,7 +709,7 @@ func (c *conv) lineEnd(seq uint64) {
 		return
 	}
 	c.seq, c.seqDirty = seq, true
-	if c.ringDirty {
+	if c.live.ringDirty {
 		c.persistSeq()
 	}
 }
@@ -718,7 +718,7 @@ func (c *conv) persistSeq() {
 	if !c.seqDirty {
 		return
 	}
-	c.seqDirty, c.ringDirty = false, false
+	c.seqDirty, c.live.ringDirty = false, false
 	c.update(func(rec *Record) { rec.HolderSeq = c.seq })
 }
 

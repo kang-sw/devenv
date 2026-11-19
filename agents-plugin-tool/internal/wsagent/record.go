@@ -364,8 +364,8 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 }
 
 // liveWriter keeps one conversation's wslive state and writes it to the
-// session directory: ring entries as they finish, the snapshot after every
-// change and on each heartbeat.
+// session directory: ring entries as they finish, snapshots for recovery.
+// A hosted slot receives every change; file-only writers keep disk heartbeats.
 type liveWriter struct {
 	dir string
 	st  *wslive.State
@@ -378,6 +378,9 @@ type liveWriter struct {
 	slot           wsdashboard.HostedSlot
 	// The last successfully written disk projection, without its timestamp.
 	lastSnapshot []byte
+	lastDiskAt   time.Time
+	// ringDirty is loop-owned: only a real ring append advances the replay fence.
+	ringDirty bool
 	// writeSnapshotFile is the atomic writer, replaceable for deterministic IO counts.
 	writeSnapshotFile func(string, []byte, os.FileMode) error
 	// Only an observed holder agent_start supplies this real identity.
@@ -491,14 +494,30 @@ func (w *liveWriter) write(res wslive.Result, err error, kind string) bool {
 	}
 	w.writeObserved(res.Observed)
 	if len(res.Ring) > 0 {
-		if err := w.withOwner(func() error { return wslive.AppendRing(wslive.RingDir(w.dir), res.Ring) }); err != nil {
+		if err := w.withOwner(func() error {
+			// AppendRing can fail after writing part of a batch. Fence that
+			// line too so replay cannot duplicate its successful entries.
+			w.ringDirty = true
+			return wslive.AppendRing(wslive.RingDir(w.dir), res.Ring)
+		}); err != nil {
 			fmt.Fprintf(w.log, "agent %s: ring write: %v\n", w.st.ReplyID(), err)
+		} else {
+			if w.wake != nil {
+				w.wake()
+			}
 		}
 	}
 	if !res.Changed && len(res.Ring) == 0 {
 		return false
 	}
-	w.writeSnapshot()
+	if kind == wslive.KindTurnEnd {
+		w.forceSnapshot()
+	} else {
+		w.writeSnapshot()
+	}
+	if w.slot == nil && len(res.Ring) == 0 && w.wake != nil {
+		w.wake()
+	}
 	return true
 }
 
@@ -525,24 +544,32 @@ func (w *liveWriter) writeObserved(records []wslive.ObservedRecord) {
 	}
 }
 
-func (w *liveWriter) writeSnapshot() { w.flushSnapshot(false) }
+func (w *liveWriter) writeSnapshot() { w.flushSnapshot(false, false) }
 
-// Heartbeats always reach disk: legacy readers do not have the hosted slot.
-func (w *liveWriter) heartbeatSnapshot() { w.flushSnapshot(true) }
+// Only file-only writers need a disk heartbeat. Hosted liveness stays in RAM.
+func (w *liveWriter) heartbeatSnapshot() { w.flushSnapshot(true, false) }
 
-func (w *liveWriter) flushSnapshot(heartbeat bool) {
+// Turn end and shutdown are recovery boundaries, even inside the disk interval.
+func (w *liveWriter) forceSnapshot() { w.flushSnapshot(false, true) }
+
+func (w *liveWriter) flushSnapshot(heartbeat, force bool) {
 	if w.beforeSnapshot != nil {
 		w.beforeSnapshot()
 	}
-	snap := w.st.Snapshot(w.now().UnixMilli())
+	now := w.now()
+	snap := w.st.Snapshot(now.UnixMilli())
 	w.publishSnapshot(snap)
 	disk := snap.ForDisk()
 	disk.UpdatedAt = 0
 	content, err := json.Marshal(disk)
-	// Coalesce identical projections for file-only workers too. Timestamp-only
-	// changes stay in RAM until the heartbeat, which still reaches legacy readers.
-	if err == nil && !heartbeat && bytes.Equal(content, w.lastSnapshot) {
-		return
+	if !force && err == nil {
+		if w.slot != nil {
+			if bytes.Equal(content, w.lastSnapshot) || (!w.lastDiskAt.IsZero() && now.Sub(w.lastDiskAt) < wslive.HeartbeatInterval) {
+				return
+			}
+		} else if !heartbeat && bytes.Equal(content, w.lastSnapshot) {
+			return
+		}
 	}
 	var raw []byte
 	if err == nil {
@@ -554,7 +581,7 @@ func (w *liveWriter) flushSnapshot(heartbeat bool) {
 			if err := w.writeSnapshotFile(wslive.SnapshotPath(w.dir), raw, 0o644); err != nil {
 				return err
 			}
-			w.lastSnapshot = content
+			w.lastSnapshot, w.lastDiskAt = content, now
 			return nil
 		})
 	}
@@ -580,6 +607,7 @@ func (w *liveWriter) publishSnapshot(snap wslive.Snapshot) {
 }
 
 func (w *liveWriter) closeSlot() {
+	w.forceSnapshot()
 	if w.slot != nil {
 		w.slot.Close()
 	}

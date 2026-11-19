@@ -562,8 +562,6 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		r.summaryOwners[rec.ReplyID] = c
 		r.summaryMu.Unlock()
 		c.live.owner = c.lockSummaryWriter
-		c.live.wake = func() { r.notify(rec.ReplyID, rec.Root) }
-		c.live.summaryStore().SetWake(c.live.wake)
 	}
 	if rec.Lead {
 		hidden, err := wsdashboard.ReadSessionHidden(r.opts.Dir, rec.ReplyID)
@@ -574,6 +572,13 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 			fmt.Fprintf(r.opts.Log, "agent %s: %s\n", rec.ReplyID, c.lastErr)
 		}
 		c.hidden = hidden
+	}
+	c.live.wake = func() {
+		if c.live.slot != nil {
+			c.live.slot.RingAppended()
+		} else {
+			r.notify(rec.ReplyID, rec.Root)
+		}
 	}
 	c.live.beforeSnapshot = c.seedSpawnRows
 	c.observations = c.live.st.ObservedResponses("")
@@ -621,6 +626,10 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 					folder.FoldsObserved()
 				}
 			}
+		}
+		if rec.Lead {
+			// Bind after the slot is fixed: summary retries can wake off-loop.
+			c.live.summaryStore().SetWake(c.live.wake)
 		}
 		c.live.writeSnapshot()
 	}
@@ -1089,14 +1098,13 @@ func (r *Runner) send(id, text string) (State, error) {
 			c.rec.LastActiveAt = r.opts.Now().UTC().Format(time.RFC3339)
 		}
 	}
-	rec := c.rec
 	c.mu.Unlock()
-	if err == nil {
-		err = writeRecord(c.dir, rec)
-	}
 	if err != nil {
 		return State{}, err
 	}
+	// The inbox already owns the text durably. Coverage and the child's
+	// activity stamp ride the next immediate record write or shutdown flush.
+	c.recordDirty = true
 	c.signalInbox()
 	return c.state(), nil
 }

@@ -893,7 +893,9 @@ func TestChildWaitingExpiryRestartsOnActivity(t *testing.T) {
 	if _, err := h.runner.Deliver(a, Delivery{Text: "more"}); err != nil {
 		t.Fatal(err)
 	}
-	if rec := h.record(a); rec.LastActiveAt != clk.Now().UTC().Format(time.RFC3339) {
+	// Send resets expiry in RAM immediately; the stamp rides the next turn
+	// boundary or graceful shutdown, not a standalone record replacement.
+	if rec := h.runner.conv(a).record(); rec.LastActiveAt != clk.Now().UTC().Format(time.RFC3339) {
 		t.Fatalf("a send's LastActiveAt = %q", rec.LastActiveAt)
 	}
 	p := h.backend.waitProc(t, 1)
