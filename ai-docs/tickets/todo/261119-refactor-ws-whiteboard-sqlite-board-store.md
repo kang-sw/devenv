@@ -77,7 +77,7 @@ Readers and writers of the folder in this checkout:
   `index.stamp.js`.
 - The daily orphan GC deletes only root-level files of dead sessions matching
   `^([a-z0-9]+)(?:\.html|\.stamp\.js|-[0-9a-f]+\.html)$`, never directories
-  (`whiteboard_tools.go:50-52`, `:930-967`).
+  (`whiteboard_tools.go:51-53`, `:930-967`).
 
 ### Before: file operations per `whiteboard.update` (derived from code)
 
@@ -220,7 +220,7 @@ confirms them before this work merges to `develop`.
        the cache (`board_notice.go:263`). MCP opens surface the error
        (`mcp/whiteboard_store.go:63-66`).
      - The old binary writes nothing. Its daily GC does not match
-       `pending.json` or `.board.sqlite` (`whiteboard_tools.go:50-52`).
+       `pending.json` or `.board.sqlite` (`whiteboard_tools.go:51-53`).
      - This is the T3 read boundary of scenario row 11
        (`release-compatibility.md:115`). Previous-minor plugins are already
        refused by the connection guard (rows 4 and 4a).
@@ -259,7 +259,7 @@ confirms them before this work merges to `develop`.
     (`whiteboard_tools.go:905-920`).
   - The dot keeps it out of an old binary's export and backup
     (`folders_archive.go:117`) and out of the daily-GC pattern
-    (`whiteboard_tools.go:50-52`).
+    (`whiteboard_tools.go:51-53`).
   - Rejected: a sibling file; the cache root.
 - **Schema rows mirror the folder files, `(1809)`** (owner-assumed 2026-11-19
   under (1802)=b; owner confirms in the morning):
@@ -300,8 +300,10 @@ confirms them before this work merges to `develop`.
   - Exporting, and the backup that `whiteboard.load` takes, write the legacy
     layout. This is a thin reuse of the existing State-to-files mapping:
     `plan(nil, nil, state)` already yields every folder file's exact bytes
-    (`folders.go:742-895`), as the `whiteboard.load` replace does today
-    (`folders_archive.go:254-279`). An old binary can therefore load a new
+    (`folders.go:742-895`). The `whiteboard.load` replace calls it that way
+    only when no board exists; over an existing board it calls
+    `plan(&folderSession{Generation, NextTopic}, &State{}, next)` and then
+    `planLoadFloor` (`folders_archive.go:254-279`). An old binary can therefore load a new
     zip, because it requires only `meta.json` and `committed.json` at the root
     (`folders_archive.go:194-196`). The zip carries no sentinel.
   - Rejected: a new-format zip that old versions refuse. With this reuse it
@@ -351,6 +353,37 @@ confirms them before this work merges to `develop`.
   (`folders.go:742-895`, `folders_load_floor.go`).
 - Out of scope, deferred by `(1816)=a`: any deletion of legacy board folders.
   There is no deletion code.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for `agents-plugin-tool/internal/mcp/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
+- Convention: ai-docs/manuals/performance.md (declared for `agents-plugin-tool/`)
+
+## Prior Decisions
+
+- 29a762990 (2026-11-19, commit): "Trace contradiction resolved: (1804)'s 'leave legacy files untouched' conflicts with (1805)=b's close-time export" (superseded by 3962f1e81 one-way migration) — bearing: supports
+- 3962f1e81 (2026-11-19, commit): "whiteboard SQLite store takes T3 sentinel and one-way migration" — bearing: supports
+- 261119-epic-ws-daemon-sqlite-storage (2026-11-19, Cross-Child Decisions): "Whiteboard storage shape (`(1325)=a`): One SQLite file per board (per session), opened lazily and closed when idle" (refined by `(1347)=c`) — bearing: supports
+- 261119-feat-ws-whiteboard-retire-embed-snapshot (2026-11-19, Decisions): "`261119-refactor-ws-whiteboard-sqlite-board-store` carries `blocked-by:` this ticket." — bearing: constrains
+- 45d559d09 (2026-11-18, commit): "fix(whiteboard): retain load floors across downgrade writes and lock waits" — bearing: constrains
+- 75e35cf60 (2026-11-18, commit): "feat(whiteboard): board zip export, board.zip route, and whiteboard.load" — bearing: constrains
+- 872978ce4 (2026-11-17, commit): "perf(whiteboard): serve folder-cache hits without the board flock; stamp boards by commit roots" — bearing: constrains
+- 261117-research-ws-daemon-file-touch-map (2026-11-17, Whiteboard rows): "Every read takes the `.lock` flock (`wswhiteboard/folders.go:242-253`)" — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | wswhiteboard/folders*.go, board_notice.go, dashboard_answer_revision.go, mcp/whiteboard_store.go, whiteboard_tools.go, whiteboard_nudges.go, dashboard_page.go, session_state.go |
+| scope.surface | cross-module | wswhiteboard store, mcp tool handlers, dashboard watch and nudges; tool surfaces stay unchanged |
+| scope.new_public_symbol | yes | a new board DB store type beside FolderStore (name not fixed by the ticket) |
+| scope.new_type_contract | yes | new store API, SQLite schema and sentinel pending.json schema_version 3 |
+| scope.test_surface | new-files | new store tests plus existing wswhiteboard/testdata/compat-old harness and folders_*_test.go |
+| complexity.reuse_points | confirmed | FolderStore.Open import, plan(nil, nil, state), wsstore/store.go SQLite setup, wsstate counters |
+| complexity.side_effect_risk | high | replaces the board authority, locking model, stat watches, nudge targeting and zip path across processes |
+| risk.correctness | high | one-way import, crash recovery, WAL checkpoint timing and in-process change notification replace stat detection |
+| risk.fit | moderate | pilot of an epic pattern; locking_mode=EXCLUSIVE and direct-CLI refusal (1806) constrain every board caller |
+| risk.test | high | needs torn-write, kill-between-commit-and-sentinel and old-binary refusal verification plus macOS measurement |
+| risk.security_or_contract | high | T3 store boundary with minor bump; error and refusal strings are shipped text |
 
 ## Phases
 
