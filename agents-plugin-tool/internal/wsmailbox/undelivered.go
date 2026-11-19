@@ -139,7 +139,7 @@ func (s *UndeliveredSweep) Sweep(target QueueStore, now time.Time, threshold tim
 		record(WithLock(target.Path, func(store *StoreFile) error {
 			err := sweepQueues(store.Queues, now, threshold, func(name string) string { return name + "@" + string(target.Scope) }, func(sender Address, content string) error {
 				if sender.Kind == AddressReplyID {
-					if err := PostSystem(s.reply, sender.ReplyID, "", content, now); err != nil {
+					if err := PostSystem(s.reply, sender.ReplyID, SystemLabel, content, now); err != nil {
 						return err
 					}
 				} else if sender.Scope == target.Scope {

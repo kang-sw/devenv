@@ -147,6 +147,9 @@ func emptyReplyStore() ReplyStore {
 	return ReplyStore{SchemaVersion: schemaVersion, Entries: map[string]ReplyEntry{}, Queues: map[string][]Envelope{}}
 }
 
+// SystemLabel identifies daemon-originated mail without providing a reply address.
+const SystemLabel = "system"
+
 // PostSystem appends a system message to reply-id replyID's queue in the
 // reply registry at path: one the ws runtime itself sends (a spawned
 // agent's turn report), from no session, so it carries neither From nor
@@ -167,7 +170,7 @@ func PostSystem(path, replyID, label, content string, sentAt time.Time) error {
 // postSystem is also used by the sweep while it already holds the destination
 // store's lock; calling PostSystem there would try to acquire that lock twice.
 func postSystem(queues map[string][]Envelope, name, content string, sentAt time.Time) map[string][]Envelope {
-	return AppendQueue(queues, name, Envelope{Content: content, SentAt: sentAt.UTC().Format(time.RFC3339)})
+	return AppendQueue(queues, name, Envelope{Label: SystemLabel, Content: content, SentAt: sentAt.UTC().Format(time.RFC3339)})
 }
 
 // WithReplyLock performs an flock-serialized read-modify-write on the

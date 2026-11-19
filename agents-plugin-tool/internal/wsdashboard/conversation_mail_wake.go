@@ -183,8 +183,15 @@ func boardNudgeMail(text string) (reasons, topics []string) {
 	if !ok {
 		return nil, nil
 	}
-	if from != "mail from unknown" {
-		stamp, ok := strings.CutPrefix(from, "mail from unknown (")
+	from, ok = strings.CutPrefix(from, "mail from ")
+	if !ok {
+		return nil, nil
+	}
+	if from != "unknown" && from != wsmailbox.SystemLabel {
+		stamp, ok := strings.CutPrefix(from, "unknown (")
+		if !ok {
+			stamp, ok = strings.CutPrefix(from, wsmailbox.SystemLabel+" (")
+		}
 		if !ok || !strings.HasSuffix(stamp, ")") {
 			return nil, nil
 		}
