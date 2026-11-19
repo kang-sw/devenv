@@ -79,8 +79,13 @@ func (c *hostedCLI) server(root string) *mcp.Server {
 		if c.host.nudges != nil {
 			opts.WhiteboardChanged = c.host.nudges.Poke
 		}
-		if c.host.agents != nil && strings.TrimSpace(c.getenv(wsagent.EnvPiToken)) == "" {
-			opts.Agents = c.host.agents
+		if c.host.agents != nil {
+			if source, ok := c.host.agents.(mcp.AgentBackendRegistry); ok {
+				opts.AgentBackends = source
+			}
+			if strings.TrimSpace(c.getenv(wsagent.EnvPiToken)) == "" {
+				opts.Agents = c.host.agents
+			}
 		}
 		if d := c.host.live.Load(); d != nil {
 			opts.Live = d

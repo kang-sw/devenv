@@ -313,9 +313,14 @@ func TestAgyWorkerConnectionSeesAliases(t *testing.T) {
 	_, f := hostedBackendConnection(t, wsagent.BackendAgy, descriptorRegistrations())
 	t.Setenv(envHostedSession, "")
 	t.Setenv(wsagent.EnvAgentSessionKey, f.child)
+	t.Setenv(wsagent.EnvPiToken, "worker-token")
+	t.Setenv(wsagent.EnvPiEndpoint, "http://127.0.0.1:1")
 	t.Setenv(envAllowedTools, "git.status,agent.tiers")
-	s := NewServer(f.root, "test")
-	s.pi.agents = wsagent.NewRunner(wsagent.Options{Backends: descriptorRegistrations()})
+	s := NewServerWithOptions(ServerOptions{
+		Root:          f.root,
+		Version:       "test",
+		AgentBackends: wsagent.NewRunner(wsagent.Options{Backends: descriptorRegistrations()}),
+	})
 	dir, err := s.dashboard.stateDir()
 	if err != nil {
 		t.Fatal(err)

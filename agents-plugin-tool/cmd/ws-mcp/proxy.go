@@ -101,10 +101,15 @@ func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySessi
 		if d := h.live.Load(); d != nil {
 			opts.Live = d
 		}
-		// A worker now connects through the launcher too. Its capability
-		// token, not a lead runner handle, scopes its nested pi.* calls.
-		if h.agents != nil && strings.TrimSpace(hello.Env[wsagent.EnvPiToken]) == "" {
-			opts.Agents = h.agents
+		if h.agents != nil {
+			if source, ok := h.agents.(mcp.AgentBackendRegistry); ok {
+				opts.AgentBackends = source
+			}
+			// A worker now connects through the launcher too. Its capability
+			// token, not a lead runner handle, scopes its nested pi.* calls.
+			if strings.TrimSpace(hello.Env[wsagent.EnvPiToken]) == "" {
+				opts.Agents = h.agents
+			}
 		}
 		server := mcp.NewServerWithOptions(opts)
 		h.applyLANChange(server)
