@@ -1262,6 +1262,16 @@ const argsPreviewScanBytes = 4096
 // enters the state, so a preview is never stored, shown, or written to the
 // ring unmasked.
 func (st *State) argsPreview(s string) string {
+	// Older adapters may send the raw input JSON as their preview. Inspect
+	// only within the existing scan bound; never parse unbounded payloads.
+	if len(s) <= argsPreviewScanBytes && strings.HasPrefix(strings.TrimSpace(s), "{") {
+		var input map[string]any
+		if json.Unmarshal([]byte(s), &input) == nil {
+			if summary := ToolInputSummary(input, nil); summary != "" {
+				s = summary
+			}
+		}
+	}
 	s = st.scrub.scrub(s)
 	if len(s) > argsPreviewScanBytes {
 		cut := argsPreviewScanBytes

@@ -675,11 +675,14 @@ func resultEvents(name, text string) []Event {
 	return out
 }
 
-// argsPreview is a tool call's arguments as one line: the first string
-// value of a small object, else the compact JSON.
+// argsPreview prefers the optional tool summary, then a useful string
+// argument, else the compact JSON. The live state still scrubs and caps it.
 func argsPreview(raw json.RawMessage) string {
 	var obj map[string]any
 	if json.Unmarshal(raw, &obj) == nil {
+		if summary := wslive.ToolInputSummary(obj, nil); summary != "" {
+			return summary
+		}
 		for _, key := range []string{"command", "file_path", "path", "pattern", "url", "query", "description"} {
 			if s, ok := obj[key].(string); ok && s != "" {
 				return s

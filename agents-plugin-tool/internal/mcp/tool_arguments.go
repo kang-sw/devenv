@@ -6,6 +6,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 // handlerOwnedArguments lists, per tool, top-level argument names a handler
@@ -62,6 +64,18 @@ func toolInputSchema(name string) map[string]any {
 	return nil
 }
 
+// harvestToolSummary removes only undeclared metadata keys. A tool that
+// declares one of these names owns its value, even on an open schema.
+func harvestToolSummary(arguments, properties map[string]any) string {
+	summary := wslive.ToolInputSummary(arguments, properties)
+	for _, key := range wslive.ToolSummaryKeys {
+		if _, declared := properties[key]; !declared {
+			delete(arguments, key)
+		}
+	}
+	return summary
+}
+
 // precheckToolArguments validates the top level of a tools/call arguments
 // object against the tool's inputSchema before its handler runs: every
 // `required` property must be present and every argument name must be a
@@ -69,6 +83,8 @@ func toolInputSchema(name string) map[string]any {
 // returns ok=false with the refusal text when the call must not run.
 func (s *Server) precheckToolArguments(name string, arguments map[string]any) (string, bool) {
 	schema := toolInputSchema(name)
+	properties, _ := schema["properties"].(map[string]any)
+	harvestToolSummary(arguments, properties)
 	if schema == nil {
 		return "", true
 	}
@@ -88,7 +104,6 @@ func (s *Server) precheckToolArguments(name string, arguments map[string]any) (s
 			return "", true
 		}
 	}
-	properties, _ := schema["properties"].(map[string]any)
 
 	var missing []string
 	for _, property := range required {
