@@ -11,6 +11,7 @@ sage-review-completeness-reviewed: 3079dcf8e99e6e3e
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 3079dcf8e99e6e3e
+completed: 2026-11-19
 ---
 
 # Dashboard Shell Topbar Handles and Full-Height Session Rail Redesign
@@ -135,3 +136,23 @@ Implement the approved `v4-1` shell layout and usage-strip relocation across `ag
    - Run Go tests on remote `w5090` (`go test ./internal/wsdashboard/...`) and JS/browser tests where available.
    - Capture dark-theme screenshots (wide `>=1600px`, narrow `<1600px` closed and open, `760px` minimum width, usage popover open) and compare side by side against `ai-docs/assets/mockups/261119/shell-redesign/shell-redesign-v4.html` (LOOK verification), plus a light-theme sanity check.
    - **Done when:** all updated Go, Node, and Chromium browser tests pass, `dashboard-drawer.css` and `tracker.css` top-right handle appearance/placement remain unchanged, zero `.top` height drift, non-overlapping `.usage-mark`, center-first narrow-width degradation down to `760px` (compact single usage trigger still opening `.usage-pop`, no clipping of `#railbtn`/`.host.hbtn`/right handles), and the side-by-side LOOK comparison against `shell-redesign-v4.html` plus light-theme sanity check are clean.
+
+### Result (5e5f37a) - 2026-11-19
+
+Landed in b4170f9, d70dacc, 5e5f37a. The header is now one non-wrapping 34px strip of hanging handles (`.tph`: rail button `[≡]`, two-row identity, harness `.hb` + `.host.sse`/`.hbtn` + hosted, status chips). The center (`tcen` template, shell-owned in the session/shell/index headers) holds the `.usage-toggle` and an empty, hidden `#talert` slot. When docked, the rail runs full height 12px from the edges, done by lifting the `.dbody` grid item rather than porting it to `display: contents`. The strip keeps to the stage column, and `data-pincol` 1600–2199.98px resets both offsets. `.rfoot` is now Settings + Home only, drawn as labeled split buttons with the label taken from the localized `aria-label`. Usage marks use `.hb.sm` in a 19×16 mark. The popover centers under the handle. `.shp-sub` is 31px. `WsRail.topFit`/`topWatch` handle the center-first step-down (compact usage, then chips hidden plus identity ellipsis). `dashboard-drawer.css` and `tracker.css` are untouched.
+
+Verification (w5090, Chromium 1248, Playwright 1.64.1): the new `TestShellTopbarBrowser` checks:
+- wide: rail at (12,12)→vh−12 and the strip at x=372, h=34
+- narrow: the `[≡]` handle at (16,0) is 34×34, and the open overlay covers the strip
+- pincol at 1800px overlays the rail
+- 760px: precedence invariants, no collision with the right handles, essentials unclipped
+- usage marks clear of their columns; the popover sits below and centered under its handle
+- the footer at 360px fits
+
+Also: `TestSessionSwitchHeaderBrowser` shows zero drift (height 34, railTop 12, mainTop 46). The static, pages, i18n, rail-navigation and pincol tests pass. On the full package, the 17 failing browser tests are identical to HEAD's baseline failures, with none new. LOOK: compared shots of dark wide, wide+usage, narrow closed and open, 760px, and light wide against the `shell-redesign-v4.html` captures: match. Known deviations:
+- The identity row 1 carries no timestamp (the view model has none).
+- Hosted shows as an icon pill.
+- The existing detailed usage popover is kept.
+- The tracker `#tkqs` palette button shows as an extra handle.
+
+Decisions: the docked rail is 344px wide (margin-left −4px on the stretched grid item keeps the mockup's 16px stage gap). `shScroll` no longer lifts the rail. `usage-footer.browser.cjs` is now a source-only LOOK harness for the header handle.
