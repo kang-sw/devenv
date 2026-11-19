@@ -187,7 +187,7 @@ func TestAgentRunnerCatalogs(t *testing.T) {
 		t.Errorf("pi has a catalog profile; it stays handle-only until its own profile")
 	}
 	if !reflect.DeepEqual(regs[wsagent.BackendCodex].Catalog, wsagent.CodexCatalog()) {
-		t.Error("codex must retain its lead-only catalog")
+		t.Error("codex must retain its lead and worker catalog")
 	}
 	if !reflect.DeepEqual(regs[wsagent.BackendAgy].Catalog, wsagent.AgyCatalog()) {
 		t.Error("agy must retain its lead and worker catalog")
@@ -199,7 +199,7 @@ func TestAgentRunnerCatalogs(t *testing.T) {
 		{wsagent.BackendClaude, wsagent.LeadProfileClaude, wsagent.AgentWorkerProfile(wsagent.BackendClaude), true, true, false},
 		{wsagent.BackendPi, wsagent.LeadProfilePi, wsagent.AgentWorkerProfile(wsagent.BackendPi), true, false, false},
 		{wsagent.BackendAgy, wsagent.LeadProfileAgy, wsagent.AgentWorkerProfile(wsagent.BackendAgy), true, true, true},
-		{wsagent.BackendCodex, wsagent.LeadProfileCodex, "", false, false, false},
+		{wsagent.BackendCodex, wsagent.LeadProfileCodex, wsagent.AgentWorkerProfile(wsagent.BackendCodex), true, true, true},
 	} {
 		reg := regs[want.backend]
 		if reg.LeadProfile != want.lead || reg.WorkerProfile != want.worker || reg.WorkerCapable != want.capable || reg.WorkerHTTPMCP != want.http || reg.WorkerAutoApprove != want.auto {

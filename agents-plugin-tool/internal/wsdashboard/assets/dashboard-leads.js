@@ -37,13 +37,18 @@
     return m ? m[1] : name;
   }
   function leadErr(status, text) { return text || (status ? "HTTP " + status : wsT("js.post.unreachable")); }
-  // leadChoices reads the harness choices the support chat's popover uses
-  // (its cache), then runs done.
-  function leadChoices(done) {
-    if (supChoices && !supChoices.error) { done(); return; }
+  // leadChoices reads the harness choices the support chat's popover uses,
+  // then runs done. It reads them on every open, as that popover does: the
+  // daemon's lists change while the page lives (a CLI update adds models). A
+  // list already held answers at once, and refresh runs when the newer one
+  // arrives.
+  function leadChoices(done, refresh) {
+    var held = !!supChoices && !supChoices.error;
+    if (held) done();
     tkFetch("/support/choices", undefined, function (status, v) {
       if (status === 200 && Array.isArray(v.harnesses)) supChoices = v;
-      done();
+      if (!held) done();
+      else if (refresh) refresh();
     });
   }
   // Older daemons have no lead markers; retain their Claude/Pi controls.
@@ -299,6 +304,15 @@
         showPick(P.harness);
         sync();
         railPopPlace();
+      }, function () {
+        // The newer list arrived over a form the user may have edited: keep
+        // the picks, and show them against the new lists.
+        if (!rpLive(P, gen)) return;
+        picks[P.harness] = currentPick();
+        harnessButtons();
+        showPick(P.harness);
+        sync();
+        railPopPlace();
       });
     };
     P.focus = function () { (hbtn[P.harness].disabled ? cancel : hbtn[P.harness]).focus(); };
@@ -476,7 +490,8 @@
         P.st = null;
       }
       P.draw();
-      leadChoices(function () { if (P.live(gen)) { P.draw(); railPopPlace(); } });
+      var redraw = function () { if (P.live(gen)) { P.draw(); railPopPlace(); } };
+      leadChoices(redraw, redraw);
       P.fetch();
     };
     P.focus = function () { rows.model.focus(); };

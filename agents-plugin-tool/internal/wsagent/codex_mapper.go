@@ -87,6 +87,10 @@ type codexMapper struct {
 	approvals map[string]*codexPendingApproval
 	compact   bool
 	retry     int
+	// readOnlyWorker is set at start for a worker opened with approval policy
+	// never: it has no approval path, so a server request that would reach the
+	// runner is declined here instead of resting on Codex never sending one.
+	readOnlyWorker bool
 }
 
 func newCodexMapper(session string) *codexMapper {
@@ -455,6 +459,9 @@ func (m *codexMapper) request(msg codexWire, replies lineReplies, now int64) []E
 	default:
 		return refuse("ws does not support the Codex server request " + msg.Method)
 	}
+	if m.readOnlyWorker {
+		return refuse("ws declines the Codex request " + msg.Method + ": a read-only worker has no approval path")
+	}
 
 	raw := compactRaw(msg.ID)
 	id := string(raw)
@@ -556,7 +563,7 @@ func codexModels(raw json.RawMessage) {
 	}
 	codexChoices.Lock()
 	defer codexChoices.Unlock()
-	codexChoices.models, codexChoices.efforts = models, efforts
+	codexChoices.models, codexChoices.efforts, codexChoices.at = models, efforts, time.Now()
 }
 
 func codexUsage(raw json.RawMessage) []Event {

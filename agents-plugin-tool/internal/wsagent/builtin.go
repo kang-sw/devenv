@@ -143,11 +143,15 @@ var exploreText string
 //go:embed instructions/agent-worker-agy.md
 var agyWorkerText string
 
+//go:embed instructions/agent-worker-codex.md
+var codexWorkerText string
+
 // builtinInstructionTexts are the embedded instruction texts by name.
 var builtinInstructionTexts = map[string]string{
-	supportInstructions: trackerSupportText,
-	ExploreProfile:      exploreText,
-	"agent-worker-agy":  agyWorkerText,
+	supportInstructions:  trackerSupportText,
+	ExploreProfile:       exploreText,
+	"agent-worker-agy":   agyWorkerText,
+	"agent-worker-codex": codexWorkerText,
 }
 
 // BuiltinInstructionNames are the names a builtin: instructions value may
@@ -210,15 +214,15 @@ func BuiltinProfiles() map[string]json.RawMessage {
 		panic(err)
 	}
 	out[ProfilePrefix+PiMiniLeadProfile] = raw
-	for backend, tools := range map[string][]string{BackendClaude: AgentClaudeTools, BackendPi: PiWorkerTools, BackendAgy: nil} {
+	for backend, tools := range map[string][]string{BackendClaude: AgentClaudeTools, BackendPi: PiWorkerTools, BackendAgy: nil, BackendCodex: nil} {
 		p := Profile{
 			Description: fmt.Sprintf("Agent worker (%s): the internal profile of a child agent.spawn starts on this harness; its tier picks the model, its system prompt the instructions, and its authority the permission level.", backend),
 			Backend:     backend,
 			Tools:       tools,
 			WSTools:     AgentWSTools,
 		}
-		if backend == BackendAgy {
-			p.Instructions = BuiltinInstructionsPrefix + "agent-worker-agy"
+		if _, ok := builtinInstructionTexts[AgentWorkerProfile(backend)]; ok {
+			p.Instructions = BuiltinInstructionsPrefix + AgentWorkerProfile(backend)
 		}
 		raw, err := json.Marshal(p)
 		if err != nil {

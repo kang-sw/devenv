@@ -113,6 +113,9 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		Cwd:          rec.Cwd,
 		Instructions: instructions,
 		Env:          environ(),
+		// The child's authority, which a backend that sandboxes its worker
+		// maps itself (codexWorkerMode).
+		PermissionLevel: level,
 		// An agent.spawn child delegates through agent.spawn only.
 		RemoveSubagents: RemovesSubagents(rec),
 	}

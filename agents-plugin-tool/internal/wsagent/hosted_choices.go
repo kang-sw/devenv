@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 )
 
 // sessionChoiceLister bypasses Support's fallback cache as soon as a native
@@ -20,6 +22,9 @@ type sessionChoiceLister interface {
 func (CodexBackend) sessionChoices() ([]ModelChoice, []string) {
 	codexChoices.Lock()
 	defer codexChoices.Unlock()
+	if time.Since(codexChoices.at) >= choicesTTL {
+		return nil, nil
+	}
 	return slices.Clone(codexChoices.models), slices.Clone(codexChoices.efforts)
 }
 
@@ -37,10 +42,25 @@ func (b CodexBackend) hostedChoices() ([]ModelChoice, []string, error) {
 	}
 	// Support owns the TTL: one read per listing window, no stat/probe on
 	// render. Never log raw bytes, paths, parse errors or account metadata.
-	raw, _ := os.ReadFile(filepath.Join(home, "models_cache.json"))
-	models, efforts := parseCodexCache(raw)
+	raw, err := os.ReadFile(filepath.Join(home, "models_cache.json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		// A Codex never run on this machine has no cache: an empty list,
+		// not a failure.
+		return nil, nil, nil
+	}
+	var models []ModelChoice
+	var efforts []string
+	if err == nil {
+		models, efforts = parseCodexCache(raw)
+	}
 	if reported, levels := b.sessionChoices(); len(reported) > 0 {
 		return reported, levels, nil
+	}
+	// An existing file that is unreadable, empty, or names no model is a
+	// failure, so it takes the short failure TTL and shows, not a cached
+	// empty success.
+	if len(models) == 0 {
+		return nil, nil, errors.New("codex models_cache.json is unreadable, empty, or names no model")
 	}
 	return models, efforts, nil
 }

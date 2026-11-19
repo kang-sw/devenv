@@ -19,15 +19,16 @@ func TestCodexCatalog(t *testing.T) {
 		ItemFollowUp: GradeSubstitute, ItemResume: GradeNative,
 		ItemReasoningStream: GradeUnsupported, ItemUsageQuery: GradeNative,
 	}
-	if p.Oldest != "0.160.0" || p.Newest != "0.160.0" || len(p.Entries) != len(CatalogItems) {
+	if p.Oldest != "0.160.0" || p.Newest != "0.160.0" || len(p.Entries) != 2*len(CatalogItems) {
 		t.Fatalf("profile bounds or entries: %+v", p)
 	}
-	seen := map[CapabilityItem]bool{}
+	seen := map[CatalogRole]map[CapabilityItem]bool{RoleLead: {}, RoleWorker: {}}
 	for _, e := range p.Entries {
-		if seen[e.Item] || e.Role != RoleLead || e.Since != "" || e.Until != "" || e.Source == "" {
+		if seen[e.Role] == nil || seen[e.Role][e.Item] || e.Since != "" || e.Until != "" || e.Source == "" {
 			t.Errorf("invalid entry: %+v", e)
+			continue
 		}
-		seen[e.Item] = true
+		seen[e.Role][e.Item] = true
 	}
 	for _, version := range []string{"0.159.0", "0.160.0", "0.161.0", "", "codex-cli 0.160.0"} {
 		t.Run(version, func(t *testing.T) {
@@ -40,12 +41,19 @@ func TestCodexCatalog(t *testing.T) {
 				if lead.Grade(item) != want[item] {
 					t.Errorf("lead %s: got %s, want %s", item, lead.Grade(item), want[item])
 				}
-				if worker.Grade(item) != GradeUnsupported {
-					t.Errorf("worker %s is supported", item)
+				// A worker shares the lead's wiring except approval: its
+				// requests are auto-allowed, not asked.
+				wantWorker := want[item]
+				if item == ItemApproval {
+					wantWorker = GradeSubstitute
+				}
+				if worker.Grade(item) != wantWorker {
+					t.Errorf("worker %s: got %s, want %s", item, worker.Grade(item), wantWorker)
 				}
 			}
-			if !reflect.DeepEqual(lead.Items[ItemSubagentRemoval].Values, []string{"spawn_agent"}) {
-				t.Errorf("subagent removal values: %+v", lead.Items[ItemSubagentRemoval])
+			if !reflect.DeepEqual(lead.Items[ItemSubagentRemoval].Values, []string{"spawn_agent"}) ||
+				!reflect.DeepEqual(worker.Items[ItemSubagentRemoval].Values, []string{"spawn_agent"}) {
+				t.Errorf("subagent removal values: %+v, %+v", lead.Items[ItemSubagentRemoval], worker.Items[ItemSubagentRemoval])
 			}
 		})
 	}
@@ -82,25 +90,40 @@ func TestCodexStandaloneLeadProfileAndModes(t *testing.T) {
 	}
 }
 
-func TestCodexHasNoWorkerAdmission(t *testing.T) {
-	for name, raw := range BuiltinProfiles() {
+func TestCodexWorkerProfileAndAdmission(t *testing.T) {
+	profiles := BuiltinProfiles()
+	for name, raw := range profiles {
 		var p Profile
 		if err := json.Unmarshal(raw, &p); err != nil {
 			t.Fatal(err)
 		}
-		if p.Backend == BackendCodex && (!p.Lead || name != ProfilePrefix+LeadProfileCodex) {
+		if p.Backend == BackendCodex && name != ProfilePrefix+LeadProfileCodex && name != ProfilePrefix+AgentWorkerProfile(BackendCodex) {
 			t.Fatalf("unexpected Codex profile: %s", name)
 		}
 	}
-	// The compatibility guard reserves the entire internal namespace;
-	// recognizing this spelling does not grant descriptor worker admission.
-	if !isAgentWorkerProfile(AgentWorkerProfile(BackendCodex)) {
-		t.Fatal("the internal worker namespace must stay reserved for Codex too")
+	p, err := ParseProfile(profiles[ProfilePrefix+AgentWorkerProfile(BackendCodex)])
+	if err != nil || p.Lead || p.Backend != BackendCodex || !slices.Equal(p.WSTools, AgentWSTools) || len(p.Tools) != 0 {
+		t.Fatalf("worker profile: %+v, %v", p, err)
 	}
+	text, ok := p.BuiltinInstructions()
+	if !ok || !strings.Contains(text, "spawn_agent") || !strings.Contains(text, "agent.spawn") || !strings.Contains(text, "mailbox.send") {
+		t.Fatalf("worker instructions: %q", text)
+	}
+	if !slices.Contains(BuiltinInstructionNames(), "agent-worker-codex") || !isAgentWorkerProfile(AgentWorkerProfile(BackendCodex)) {
+		t.Fatal("the worker instructions and the reserved namespace must name Codex")
+	}
+	// Admission is the descriptor's: without worker fields Codex stays
+	// lead-only, with them it is a spawnable harness.
+	lookup := func(string) (string, error) { return "codex", nil }
+	setLookPath(t, lookup)
 	r := &Runner{opts: Options{Backends: map[string]BackendRegistration{
-		BackendCodex: {Backend: PiBackend{}, LeadProfile: LeadProfileCodex},
+		BackendCodex: {Backend: CodexBackend{}, LeadProfile: LeadProfileCodex},
 	}}}
 	if slices.Contains(r.workerHarnesses(), BackendCodex) || !strings.Contains(r.spawnableHarness(BackendCodex), "hosted leads only") {
-		t.Fatal("registered Codex must remain lead-only")
+		t.Fatal("a Codex registration with no worker fields must remain lead-only")
+	}
+	r.opts.Backends[BackendCodex] = BackendRegistration{Backend: CodexBackend{}, LeadProfile: LeadProfileCodex, WorkerCapable: true, WorkerProfile: AgentWorkerProfile(BackendCodex)}
+	if !slices.Equal(r.workerHarnesses(), []string{BackendCodex}) || r.spawnableHarness(BackendCodex) != "" {
+		t.Fatalf("a worker-capable Codex registration must be spawnable: %q", r.spawnableHarness(BackendCodex))
 	}
 }

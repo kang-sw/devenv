@@ -420,6 +420,34 @@ func TestCodexMapperSyntheticUnsupportedRequests(t *testing.T) {
 	}
 }
 
+// TestCodexMapperReadOnlyWorkerDeclinesApprovals: a read-only worker has no
+// approval path, so every request that would otherwise raise an approval
+// (including an MCP tool-call elicitation) is declined by the mapper and the
+// runner sees no approval event.
+func TestCodexMapperReadOnlyWorkerDeclinesApprovals(t *testing.T) {
+	for _, method := range []string{"item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval", "mcpServer/elicitation/request"} {
+		t.Run(method, func(t *testing.T) {
+			r := newCodexRun("s")
+			r.m.readOnlyWorker = true
+			r.feed(`{"method":"turn/started","params":{"threadId":"s","turn":{"id":"t"}}}`)
+			events := r.feed(fmt.Sprintf(`{"id":"server-id","method":%q,"params":{"threadId":"s","turnId":"t","itemId":"tool","command":"ls","_meta":{"codex_approval_kind":"mcp_tool_call"}}}`, method))
+			if len(events) != 1 || events[0].Approval != nil || !strings.Contains(events[0].Notice, "read-only worker") || len(r.sent) != 1 || len(r.m.approvals) != 0 {
+				t.Fatalf("read-only worker must decline without an approval event: events %+v replies %v", events, r.sent)
+			}
+			var reply struct {
+				ID    string `json:"id"`
+				Error struct {
+					Code int `json:"code"`
+				} `json:"error"`
+			}
+			_ = json.Unmarshal([]byte(jsonLine(r.sent[0])), &reply)
+			if reply.ID != "server-id" || reply.Error.Code != -32601 {
+				t.Fatalf("correlated decline: %+v", reply)
+			}
+		})
+	}
+}
+
 func TestCodexMapperSyntheticInitShapeAndRecovery(t *testing.T) {
 	r := newCodexRun("")
 	bad := r.feed(`{"id":"wsc/open/e/1","result":{"thread":{}}}`)

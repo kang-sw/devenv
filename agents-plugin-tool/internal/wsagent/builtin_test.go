@@ -55,8 +55,8 @@ func TestBuiltinSupportProfilesResolve(t *testing.T) {
 	}
 	resolver := wsconfig.NewResolver(opts, nil, nil, nil)
 	all, err := ResolveProfiles(&resolver)
-	if err != nil || len(all) != 14 {
-		t.Fatalf("ResolveProfiles with no config should list all fourteen builtin profiles: %+v, %v", all, err)
+	if err != nil || len(all) != 15 {
+		t.Fatalf("ResolveProfiles with no config should list all fifteen builtin profiles: %+v, %v", all, err)
 	}
 }
 
@@ -64,7 +64,7 @@ func TestBuiltinSupportProfilesResolve(t *testing.T) {
 // agent-worker profile with the common ws loadout: agent.* and
 // mailbox.send in place of pi.*.
 func TestBuiltinAgentWorkerProfiles(t *testing.T) {
-	for backend, tools := range map[string][]string{BackendClaude: AgentClaudeTools, BackendPi: PiWorkerTools, BackendAgy: nil} {
+	for backend, tools := range map[string][]string{BackendClaude: AgentClaudeTools, BackendPi: PiWorkerTools, BackendAgy: nil, BackendCodex: nil} {
 		name := AgentWorkerProfile(backend)
 		rp, err := ResolveProfile(testConfig(t), t.TempDir(), name)
 		if err != nil {

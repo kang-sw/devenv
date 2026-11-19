@@ -67,8 +67,10 @@ type StartSpec struct {
 	Lead *LeadSpec
 	// Holder selects durable transport independently of lead privileges.
 	Holder *holderChild
-	// PermissionLevel is explicit lead intent for this launch only. Empty keeps
-	// legacy native settings. It does not grant tools or apply worker posture.
+	// PermissionLevel is the explicit authority of this launch: a lead's
+	// selection, or the level an agent.spawn child was spawned with. Empty
+	// keeps legacy native settings. It does not grant tools; a backend reads
+	// it only where it maps the level to its own sandbox (Codex workers).
 	PermissionLevel PermissionLevel
 	// RemoveSubagents removes the harness's native subagent tool from the
 	// launch whatever the profile or the user's settings allow, so the
