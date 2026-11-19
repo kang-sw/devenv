@@ -352,7 +352,7 @@ const claudeSubagentTool = "Agent"
 func ClaudeCatalog() *HarnessProfile {
 	return &HarnessProfile{
 		Oldest: "2.1.322",
-		Newest: "2.1.326",
+		Newest: "2.1.327",
 		Entries: []CapabilityEntry{
 			{Item: ItemSkillList, Grade: GradeUnsupported,
 				Source: "the init's skills field is not parsed (claudeInit)"},
@@ -411,7 +411,7 @@ var CodexPermissionModes = []string{"read-only", "workspace-write", "danger-full
 func CodexCatalog() *HarnessProfile {
 	p := &HarnessProfile{
 		Oldest: "0.160.0",
-		Newest: "0.160.0",
+		Newest: "0.170.0",
 		Entries: []CapabilityEntry{
 			{Item: ItemSkillList, Role: RoleLead, Grade: GradeUnsupported,
 				Source: "skills/list exists but has no ws wiring"},
@@ -463,7 +463,7 @@ func CodexCatalog() *HarnessProfile {
 func AgyCatalog() *HarnessProfile {
 	p := &HarnessProfile{
 		Oldest: "1.5.9",
-		Newest: "1.5.10",
+		Newest: "1.5.12",
 		Entries: []CapabilityEntry{
 			{Item: ItemSkillList, Role: RoleLead, Grade: GradeUnsupported,
 				Source: "available_commands_update is shown as the command list but not read as a skill list"},

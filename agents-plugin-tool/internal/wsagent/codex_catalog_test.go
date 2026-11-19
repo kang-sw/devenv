@@ -19,7 +19,7 @@ func TestCodexCatalog(t *testing.T) {
 		ItemFollowUp: GradeSubstitute, ItemResume: GradeNative,
 		ItemReasoningStream: GradeUnsupported, ItemUsageQuery: GradeNative,
 	}
-	if p.Oldest != "0.160.0" || p.Newest != "0.160.0" || len(p.Entries) != 2*len(CatalogItems) {
+	if p.Oldest != "0.160.0" || p.Newest != "0.170.0" || len(p.Entries) != 2*len(CatalogItems) {
 		t.Fatalf("profile bounds or entries: %+v", p)
 	}
 	seen := map[CatalogRole]map[CapabilityItem]bool{RoleLead: {}, RoleWorker: {}}
@@ -30,13 +30,24 @@ func TestCodexCatalog(t *testing.T) {
 		}
 		seen[e.Role][e.Item] = true
 	}
-	for _, version := range []string{"0.159.0", "0.160.0", "0.161.0", "", "codex-cli 0.160.0"} {
-		t.Run(version, func(t *testing.T) {
-			lead := p.Resolve(RoleLead, version)
-			if lead.Version != version || lead.ProfileVersion != "0.160.0" || lead.Unverified != (version != "0.160.0") {
+	for _, tc := range []struct {
+		version, profile string
+		unverified       bool
+	}{
+		{"0.159.0", "0.160.0", true},
+		{"0.160.0", "0.160.0", false},
+		{"0.161.0", "0.161.0", false},
+		{"0.170.0", "0.170.0", false},
+		{"0.171.0", "0.170.0", true},
+		{"", "0.170.0", true},
+		{"codex-cli 0.160.0", "0.170.0", true},
+	} {
+		t.Run(tc.version, func(t *testing.T) {
+			lead := p.Resolve(RoleLead, tc.version)
+			if lead.Version != tc.version || lead.ProfileVersion != tc.profile || lead.Unverified != tc.unverified {
 				t.Fatalf("resolved range: %+v", lead)
 			}
-			worker := p.Resolve(RoleWorker, version)
+			worker := p.Resolve(RoleWorker, tc.version)
 			for _, item := range CatalogItems {
 				if lead.Grade(item) != want[item] {
 					t.Errorf("lead %s: got %s, want %s", item, lead.Grade(item), want[item])

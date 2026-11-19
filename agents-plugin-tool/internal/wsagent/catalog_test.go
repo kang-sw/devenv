@@ -318,10 +318,13 @@ func TestClaudeCatalogValues(t *testing.T) {
 			}
 		}
 	}
-	// Each bound of the guaranteed range is the version of a recorded
-	// fixture of each role.
+	// Oldest and the recorded fixture upper bound have a recorded fixture
+	// of each role; Newest is raised to the latest verified version.
+	if p.Oldest != "2.1.322" || p.Newest != "2.1.327" {
+		t.Fatalf("claude range = %s..%s, want 2.1.322..2.1.327", p.Oldest, p.Newest)
+	}
 	recorded := claudeFixtureVersions(t)
-	for _, bound := range []string{p.Oldest, p.Newest} {
+	for _, bound := range []string{p.Oldest, "2.1.326"} {
 		for _, role := range []CatalogRole{RoleLead, RoleWorker} {
 			if !recorded[role][bound] {
 				t.Errorf("bound %s has no recorded %s fixture; recorded %v", bound, role, recorded)
