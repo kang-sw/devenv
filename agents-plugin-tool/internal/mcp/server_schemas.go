@@ -399,21 +399,21 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "rationale.query",
-			"description": "Search commit rationale and ticket decisions by text, paths, site or pickaxe. Results group quotes by ticket thread.",
+			"description": "Search commit rationale and ticket decisions by text, paths, site or pickaxe; quotes group by ticket thread.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"query":        stringProperty("BM25 query; combines with addressing."),
-					"paths":        stringArrayProperty("Globs matching commit, ticket or thread paths."),
-					"site":         stringProperty("git log -L site: path:/regex/,+N (default +10) or path#Lstart-Lend. Exclusive with paths and pickaxe."),
+					"paths":        stringArrayProperty("Commit, ticket or thread path globs."),
+					"site":         stringProperty("git log -L: path:/regex/,+N (default +10) or path#Lstart-Lend; excludes paths and pickaxe."),
 					"occurrence":   integerProperty("Site regex match; default 1."),
-					"pickaxe":      stringProperty("git log -S string. Exclusive with paths and site."),
+					"pickaxe":      stringProperty("git log -S string; excludes paths and site."),
 					"since":        stringProperty("YYYY-MM-DD, inclusive."),
 					"until":        stringProperty("YYYY-MM-DD, inclusive."),
 					"stems":        stringArrayProperty("Limit to these ticket threads."),
-					"exclude_stem": stringProperty("Drop this stem's own records and commits naming only it."),
+					"exclude_stem": stringProperty("Exclude this stem's records and commits naming only it."),
 					"kinds":        stringArrayProperty("commit, ticket. Default both."),
-					"order":        enumStringProperty("Default relevance with query, else time.", []string{"relevance", "time"}),
+					"order":        enumStringProperty("Relevance with query, else time.", []string{"relevance", "time"}),
 					"limit":        integerProperty("Default 30, max 100."),
 					"format":       stringProperty(formatPropertyDescription),
 				},
@@ -434,7 +434,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "git.merge",
-			"description": "Lead-only. Merge a local branch into a target with --no-ff; needs a clean index, leaves the target checked out. Deletes merged impl/* and goal/* sources. A main/master target needs release_target_override plus the OIDs a refusal reports. Conflicts stay on the target for lead-delegate. Relay size advisories to the user; do not split files yourself.",
+			"description": "Lead-only. Merge a local branch with --no-ff; needs a clean index, leaves target checked out. Deletes merged impl/* and goal/* sources. Main/master needs release_target_override and refusal OIDs. Conflicts stay on target for lead-delegate. Relay size advisories to the user; do not split files yourself.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -462,10 +462,10 @@ func tools() []map[string]any {
 					"title":           stringProperty("Commit title."),
 					"description":     stringProperty("Body before AI Context."),
 					"ai_context":      stringArrayProperty("AI Context bullets."),
-					"updated_tickets": stringArrayProperty("Ticket updates; omit to detect staged moves and Result/Edition headings."),
+					"updated_tickets": stringArrayProperty("Omit to detect staged moves and Result/Edition headings."),
 					"followups": map[string]any{
 						"type":        "array",
-						"description": "Root lead only: ownerless future work; IDs return in order.",
+						"description": "Root lead only: ownerless work; IDs in order.",
 						"items": map[string]any{
 							"type": "object",
 							"properties": map[string]any{
@@ -476,8 +476,8 @@ func tools() []map[string]any {
 							"required": []string{"level", "category", "content"},
 						},
 					},
-					"resolves":        stringArrayProperty("Follow-up IDs to resolve; unknown IDs warn."),
-					"expected_branch": stringProperty("Branch you expect, from memory, not HEAD; refused on mismatch or detached HEAD."),
+					"resolves":        stringArrayProperty("IDs to resolve; unknown IDs warn."),
+					"expected_branch": stringProperty("Expected branch from memory, not HEAD; refuses mismatch or detached HEAD."),
 					"format":          stringProperty(formatPropertyDescription),
 				},
 				"required": []string{"paths", "title", "ai_context", "expected_branch"},
@@ -491,7 +491,7 @@ func tools() []map[string]any {
 				"properties": map[string]any{
 					"base":          stringProperty("Commit-ish the branch is created on."),
 					"target_branch": stringProperty("Branch to create (when absent) and check out in the worktree, e.g. impl/<parent>/<slug>. Omit to check out base itself; base must then be a local branch not checked out in another worktree."),
-					"profile":       stringProperty("Worktree profile name, e.g. full or housekeeping, or a project profile config.list lists. A pooled worktree is reused only by an acquire naming the same profile."),
+					"profile":       stringProperty("Profile name, e.g. full or housekeeping, or a project profile from config.list. Reuse requires the same profile."),
 					"format":        stringProperty(formatPropertyDescription),
 				},
 				"required": []string{"base", "profile"},
@@ -715,7 +715,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        wikiQueryTool,
-			"description": "Read tracker wikis (Markdown or .html) and history; top-level lead or store support only. Pass read's commit as base to wiki.update. Link as [text](wiki:<name>/<path>). Text by default.",
+			"description": "Read tracker wikis (Markdown or .html) and history; top-level lead or store support only. Use read's commit as wiki.update base. Link: [text](wiki:<name>/<path>). Text by default.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -723,10 +723,10 @@ func tools() []map[string]any {
 					"store":       stringProperty("Tracker store ID (tracker.query lists them)."),
 					"op":          enumStringProperty("list wikis; pages in wiki; read page and commit; search lines (case-insensitive literal); history commits; diff path in to; recovery replaced tips.", wikiQueryOps),
 					"wiki":        stringProperty("Wiki name; required by every op but list and recovery."),
-					"path":        stringProperty("Page path, folders joined by / (an .html suffix names an HTML page). Required by read and diff."),
+					"path":        stringProperty("Page path with / folders (.html for HTML); required by read and diff."),
 					"commit":      stringProperty("Read at this commit instead of the tip."),
 					"query":       stringProperty("search: the text to find."),
-					"from":        stringProperty("diff: the commit to diff from; defaults to the parent of to."),
+					"from":        stringProperty("diff: from commit; defaults to parent of to."),
 					"to":          stringProperty("diff: the commit whose change is shown."),
 					"limit":       integerProperty("history (default 30) or search: at most this many results."),
 					"format":      stringProperty(formatPropertyDescription),
@@ -736,7 +736,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        wikiUpdateTool,
-			"description": "Save one signed wiki edit (top-level lead or store support). An edit overlapping saves after base is refused with both texts and tip; others merge. Result names your next base.",
+			"description": "Save a signed wiki edit (top-level lead or store support). Overlap with saves after base is refused with both texts and tip; others merge. Result gives next base.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -744,16 +744,16 @@ func tools() []map[string]any {
 					"store":       stringProperty("Tracker store ID."),
 					"wiki":        stringProperty("Wiki name: [a-z0-9][a-z0-9-]*, max 64."),
 					"op":          enumStringProperty("Page operation.", wikiUpdateOps),
-					"base":        stringProperty("Commit from wiki.query read or last save; required unless new_wiki."),
-					"new_wiki":    boolProperty("Create the wiki; no base."),
-					"path":        stringProperty("Page path; .html makes a sandboxed HTML page."),
+					"base":        stringProperty("Read or last save commit; required unless new_wiki."),
+					"new_wiki":    boolProperty("Create wiki; no base."),
+					"path":        stringProperty("Path; .html is sandboxed HTML."),
 					"to":          stringProperty("rename: new path; suffix sets kind."),
 					"content":     stringProperty("write: whole page."),
 					"commit":      stringProperty("restore: source commit."),
 					"message":     stringProperty("Commit message."),
 					"images": map[string]any{
 						"type":        "array",
-						"description": "write: PNG/JPEG/GIF/WebP; link as ![alt](attachment:sha256).",
+						"description": "write: PNG/JPEG/GIF/WebP; link ![alt](attachment:sha256).",
 						"items": map[string]any{
 							"type": "object",
 							"properties": map[string]any{
@@ -901,21 +901,21 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.query",
-			"description": "Find tickets. ticket_stem alone resolves one in any status or errors; other arguments run discovery, paginated by offset and limit. Flags unmet blocked-by (single-ticket only), ## Blocked headings (advisory), and, where enabled, assignee and lease.",
+			"description": "Find tickets. ticket_stem alone resolves any status or errors; other arguments run discovery, paginated by offset and limit. Flags unmet blocked-by (single-ticket only), ## Blocked headings (advisory), and, where enabled, assignee and lease.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"statuses":             stringArrayProperty("Statuses to scan: ready, todo, idea, done, dropped."),
+					"statuses":             stringArrayProperty("Scan: ready, todo, idea, done, dropped."),
 					"include_done":         boolProperty("Discovery also scans .done/."),
 					"include_dropped":      boolProperty("Discovery also scans .dropped/."),
 					"query":                stringProperty("Case-insensitive text query."),
-					"ticket_stem":          stringProperty("Exact stem; given alone, resolves that ticket."),
-					"mentions_ticket_stem": stringProperty("Ticket stem results must mention."),
-					"assigned_to_me":       boolProperty("Drop tickets assigned to someone else (assignee flag on)."),
-					"unleased_or_mine":     boolProperty("Keep tickets leased by you or by no one; drop ones closed on origin (ownership index on)."),
+					"ticket_stem":          stringProperty("Exact stem; alone resolves that ticket."),
+					"mentions_ticket_stem": stringProperty("Must mention this ticket stem."),
+					"assigned_to_me":       boolProperty("Drop others' tickets (assignee flag on)."),
+					"unleased_or_mine":     boolProperty("Keep unleased or your tickets; drop those closed on origin (ownership index on)."),
 					"offset": map[string]any{
 						"type":        "integer",
-						"description": "Discovery page offset.",
+						"description": "Page offset.",
 						"default":     0,
 						"minimum":     0,
 					},
@@ -938,7 +938,7 @@ func tools() []map[string]any {
 				"properties": map[string]any{
 					"stem":                              stringProperty("Ticket stem (YYMMDD-category-name)."),
 					"status":                            stringProperty("Close target: done or dropped."),
-					"resolution":                        stringProperty("Optional resolution text appended as a ## Resolution (today) section."),
+					"resolution":                        stringProperty("Append a ## Resolution (today) section with this text."),
 					"dangerously_override_lease_status": boolProperty("With the origin ticket ownership index, proceed although another person (email) holds the ticket's lease; the lease stays with its holder and the index records the actor and reason. Set only on the user's explicit instruction; requires reason. Ignored in a project without the index."),
 					"reason":                            stringProperty("Why the lease guard is overridden. Required with dangerously_override_lease_status."),
 				},

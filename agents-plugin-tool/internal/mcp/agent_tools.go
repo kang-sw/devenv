@@ -343,11 +343,11 @@ func agentToolDefinitions() []map[string]any {
 					"prompt":             stringProperty("Child's first message."),
 					"tier":               stringProperty("Tier or alias; see agent.tiers."),
 					"system_prompt":      stringProperty("Append to system prompt; excludes system_prompt_path."),
-					"system_prompt_path": stringProperty("File to append; absolute, or relative to the session's root. Excludes system_prompt."),
+					"system_prompt_path": stringProperty("File to append; absolute or relative to session root. Excludes system_prompt."),
 					"authority":          stringProperty("read-only, workdir-write or full; capped at your own level."),
 					"cwd":                stringProperty("Absolute, or relative to the session's root. Default: the session's root. Excludes worktree."),
-					"worktree":           stringProperty("Acquired worktree as cwd and project root; absolute, or relative to the session's root. Excludes cwd."),
-					"label":              stringProperty("Label; defaults to prompt's first line."),
+					"worktree":           stringProperty("Acquired worktree as cwd and project root; absolute or relative to session root. Excludes cwd."),
+					"label":              stringProperty("Defaults to prompt's first line."),
 					"format":             format,
 				},
 				"required": []string{"session_key", "prompt", "tier", "authority"},
@@ -399,13 +399,13 @@ func agentSpawnDescription(worker bool) string {
 	}
 	if worker {
 		parts = append(parts,
-			"Ended or failed turns report by steer if running, else next turn. Your report waits for open children; you may end your turn.")
+			"Ended or failed turns report by steer if running, else next turn. Your report waits for children; you may end your turn.")
 	} else {
 		parts = append(parts,
 			"Each ended or failed turn mails you a report; end your turn and let it arrive.")
 	}
 	parts = append(parts,
-		"Mail steers running turns if supported, else waits. Mail wakes idle children.")
+		"Mail steers running turns if supported, else waits; it wakes idle children.")
 	return strings.Join(parts, " ")
 }
 
