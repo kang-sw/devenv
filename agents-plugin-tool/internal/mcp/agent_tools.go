@@ -330,8 +330,8 @@ func AgentWakeRefused(log io.Writer) func(from, id, reason string) {
 // agentToolDefinitions are the agent.* tools' definitions as a lead reads
 // them; agentWorkerTool rewrites them for a spawned agent.
 func agentToolDefinitions() []map[string]any {
-	key := stringProperty("Caller's ws session key (see ws:workflow-manual); a lead session's.")
-	format := stringProperty(`Optional output format. Use "json" for structured output.`)
+	key := stringProperty("Your ws session key.")
+	format := stringProperty(`"json" for structured output.`)
 	return []map[string]any{
 		{
 			"name":        "agent.spawn",
@@ -340,14 +340,14 @@ func agentToolDefinitions() []map[string]any {
 				"type": "object",
 				"properties": map[string]any{
 					"session_key":        key,
-					"prompt":             stringProperty("The child's first message."),
-					"tier":               stringProperty("small, medium, large or xlarge on your harness; harness.tier or a user alias. See agent.tiers."),
-					"system_prompt":      stringProperty("Append to the harness system prompt. Excludes system_prompt_path."),
-					"system_prompt_path": stringProperty("File read once at spawn and appended to the harness system prompt. Excludes system_prompt. Absolute, or relative to the session's root."),
-					"authority":          stringProperty("read-only, workdir-write or full; capped at your own permission level."),
+					"prompt":             stringProperty("Child's first message."),
+					"tier":               stringProperty("Tier or alias; see agent.tiers."),
+					"system_prompt":      stringProperty("Append to system prompt; excludes system_prompt_path."),
+					"system_prompt_path": stringProperty("File to append; absolute, or relative to the session's root. Excludes system_prompt."),
+					"authority":          stringProperty("read-only, workdir-write or full; capped at your own level."),
 					"cwd":                stringProperty("Absolute, or relative to the session's root. Default: the session's root. Excludes worktree."),
-					"worktree":           stringProperty("Acquired existing git worktree: working and project root. Absolute, or relative to the session's root. Excludes cwd."),
-					"label":              stringProperty("One-line dashboard and completion-mail label; default: prompt's first line."),
+					"worktree":           stringProperty("Acquired worktree as cwd and project root; absolute, or relative to the session's root. Excludes cwd."),
+					"label":              stringProperty("Label; defaults to prompt's first line."),
 					"format":             format,
 				},
 				"required": []string{"session_key", "prompt", "tier", "authority"},
@@ -395,19 +395,17 @@ func agentToolDefinitions() []map[string]any {
 
 func agentSpawnDescription(worker bool) string {
 	parts := []string{
-		"Spawn a child agent. Unusable tiers are refused with available tiers. Read-only blocks ws commits and ticket changes.",
-		"Use its address for mailbox.send and agent.interrupt.",
+		"Spawn a child. Unusable tiers are refused. Read-only blocks ws commits and ticket changes.",
 	}
 	if worker {
 		parts = append(parts,
-			"Each ended or failed turn reports by steer if you are running, else next turn. Your report waits for all open child reports; you may end your turn.")
+			"Ended or failed turns report by steer if running, else next turn. Your report waits for open children; you may end your turn.")
 	} else {
 		parts = append(parts,
 			"Each ended or failed turn mails you a report; end your turn and let it arrive.")
 	}
 	parts = append(parts,
-		"Mail steers a running turn if supported, else waits for next turn. Idle children sleep; mail wakes them.",
-		"Text by default; format=json for structured output.")
+		"Mail steers running turns if supported, else waits. Mail wakes idle children.")
 	return strings.Join(parts, " ")
 }
 
