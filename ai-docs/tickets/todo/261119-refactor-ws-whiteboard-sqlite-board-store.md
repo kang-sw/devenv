@@ -179,66 +179,68 @@ Phase 1 replaces it with the measured value.
   `SetMaxOpenConns(1)`, `busy_timeout`, `SQLITE_BUSY`/`SQLITE_LOCKED` retry per
   `6539b0c01`). Rule 3 above overrides the precedent's default `synchronous`
   setting (`wsstore/store.go:209-224` sets none).
+- **Compatibility tier T3 with a minor bump, `(1805)=a` (owner, direct,
+  2026-11-19 23:22):** the one-way import adds a sentinel `pending.json` with
+  `schema_version: 3` to the legacy board folder. An older binary refuses that
+  board before it can read or write it.
+  - Rejected: b, close-time export of the legacy layout plus an open-time merge
+    (T2). It writes legacy files on every close and needs a merge rule for
+    boards where both sides diverged.
+  - Rejected: c, rewriting `committed.json`/`meta.json` with schema 3. It is T3
+    like a, but it modifies legacy data.
+- **One-way migration, medium compatibility effort (owner, direct, 2026-11-19
+  23:22):** where writing back to the old format for older versions costs real
+  work, migrate one way instead. Rejected under this directive:
+  - every legacy write-back: close-time or shutdown export, export stamps,
+    re-import or merge on open;
+  - stamp or marker files kept up to date for old readers;
+  - stat-based change detection kept alive for old processes.
 
 The decisions below settled the queue on 2026-11-19 with the lead's
 recommendations as assumed answers. Each line reads "owner-assumed": the owner
 confirms them before this work merges to `develop`.
 
-- **Compatibility tier T2, `(1805)=b`** (owner-assumed 2026-11-19 under
-  (1802)=b; owner confirms in the morning):
-  - Graceful close exports the board once in the legacy folder layout.
-    Graceful close means the `(1347)=c` idle close and daemon shutdown.
-  - The DB records the exported folder generation as the export stamp.
-  - On open, if the folder's committed generation has moved past that stamp,
-    the new binary imports only what the folder gained and merges it. Boards
-    are append-only: log entries, panel versions, items.
-  - The close-time export writes files, which breaks performance.md rule 2. It
-    is owner-approved under rule 8 on the mailbox store precedent
-    (`performance.md:57-61`), and it runs off the interactive path.
-  - Rejected: a, a schema-3 sentinel `pending.json` (T3). It needs a minor bump
-    that locks out installed previous-minor sessions, and AGENTS.md prefers
-    T0-T2.
-  - Rejected: c, rewriting `committed.json`/`meta.json` with schema 3. It is T3
-    and also modifies legacy data.
-- **Tier reasoning per `release-compatibility.md` (T2 is the highest affected
-  path, so a patch is allowed under Release Rule 1)** (owner-assumed 2026-11-19
-  under (1802)=b; owner confirms in the morning):
+- **Tier reasoning per `release-compatibility.md`** (owner-assumed 2026-11-19
+  under (1802)=b; owner confirms in the morning). T3 is the highest affected
+  path. Release Rule 2 requires a minor bump and explicit owner approval; the
+  owner approved on 2026-11-19 at 23:22.
   1. Old folder, new binary: the first open imports through the retained
      `FolderStore.Open` (`folders.go:143-159`, `:400-490`). That covers pending
      replay, the schema guard, and v1 conversion. No T4.
-  2. New data, old binary: an older daemon can run when it starts first
-     (`wsdashboard/ensure.go:210-217` only stops a newer daemon from being
-     replaced). It reads the folder last exported at graceful close through its
-     unchanged schema-2 guard (`folders.go:304-321`). It never sees
-     `.board.sqlite`: the dot prefix keeps it out of `boardFiles`
-     (`folders_archive.go:117`), and old code opens only named files.
-  3. Old writes, then the new binary reopens: an old write advances the folder
-     generation (`folders.go:745-747`). Entries and panels stay append-only
-     (`folders.go:810-812`, `:977-994`). The new open compares the folder's
-     `committed.json` generation (`folders.go:93-96`) with the export stamp and
-     merges what the folder gained. The retained raw data is the DB (new
-     values) plus the folder (old values), and the merge is the new reader's
-     reconstruction. That makes it T2 (`release-compatibility.md:63`, `:67-71`).
-  4. Crash without a graceful close: the folder stays at its last export. An
-     older daemon serves that stale state and may write on it, while the DB
-     holds newer updates. Both sides diverge, and the open-time merge imports
-     what the folder gained. The cases it does not yet settle are the Phase 1
-     stop condition.
-  5. Zips: T0 in both directions (`(1813)`).
+  2. Old binary meets a migrated board: this happens when an older daemon
+     starts first (`wsdashboard/ensure.go:210-217` only stops a newer daemon
+     from being replaced). Its guard reads `pending.json` and refuses
+     `schema_version` 3 as "newer schema_version 3 (supported 2)"
+     (`folders.go:304-321`). The guard runs before the lock and again under it,
+     before any replay or write (`folders.go:225-259`, `:327-340`).
+     - Every old entry point passes that guard first. `FolderCache` misses when
+       `pending.json` exists (`folders_cache.go:84-94`) and then runs the guard.
+       `ExportArchive` and the `whiteboard.load` replace take the guarded lock
+       (`folders_archive.go:51-60`, `:241-246`). Nudge `Notify` opens through
+       the cache (`board_notice.go:263`). MCP opens surface the error
+       (`mcp/whiteboard_store.go:63-66`).
+     - The old binary writes nothing. Its daily GC does not match
+       `pending.json` or `.board.sqlite` (`whiteboard_tools.go:50-52`).
+     - This is the T3 read boundary of scenario row 11
+       (`release-compatibility.md:115`). Previous-minor plugins are already
+       refused by the connection guard (rows 4 and 4a).
+  3. New binary after an old binary's refusal: nothing changed, so it reopens
+     the DB as before.
+  4. Zips: T0 in both directions under `(1813)`.
 
-  `release-compatibility.md:118-122` requires a concrete trace of the value
-  through the old write and the new reconstruction. That trace is Phase 2's
-  compat-old verification.
-- **Import, then folder written only by the export, `(1804)`, amended by
-  `(1805)=b`** (owner-assumed 2026-11-19 under (1802)=b; owner confirms in the
-  morning):
+  Release Rule 2 requires showing that the old side actually refuses before any
+  damaging write. Phase 2's compat-old verification shows it.
+- **One-way import, `(1804)`** (owner-assumed 2026-11-19 under (1802)=b; owner
+  confirms in the morning):
   - On first start the new binary imports the legacy board folder into the DB
-    through the existing `FolderStore.Open`.
-  - After that, the folder is written only by the graceful-close export, and it
-    is never deleted (`(1816)=a`). The drafted "leaves the legacy files
-    untouched" no longer holds under `(1805)=b`.
+    through the existing `FolderStore.Open`, commits it, and then adds the
+    `(1805)=a` sentinel.
+  - A DB found without the sentinel gets it on open.
+  - The existing legacy files stay byte-identical, and the folder is never
+    written again.
   - Rejected: dual-write on every update, because it keeps the per-update 2PC
-    cost this ticket removes.
+    cost.
+  - Rejected: legacy write-back of any kind (owner directive, 23:22).
 - **Direct CLI never co-opens the board DB, `(1806)`** (owner-assumed
   2026-11-19 under (1802)=b; owner confirms in the morning):
   - A direct `ws-mcp` CLI or `serve` process routes board calls to the daemon,
@@ -270,48 +272,60 @@ confirms them before this work merges to `develop`.
 - **Checkpoint and cache pragmas, `(1810)`** (owner-assumed 2026-11-19 under
   (1802)=b; owner confirms in the morning):
   - `wal_autocheckpoint=0`.
-  - A PASSIVE checkpoint runs at board close, and from a background trigger only
-    after the board has been idle and the WAL has passed a size threshold.
-    Phase 1 measurement chooses both thresholds and records them in its Result.
+  - A PASSIVE checkpoint runs at board close, and from a background trigger
+    only after the board has been idle and the WAL has passed a size
+    threshold. Phase 1 measurement chooses both thresholds and records them in
+    its Result.
   - `cache_size` is about 256 KiB.
-  - Rejected: SQLite's default auto-checkpoint, which runs inside the commit that
-    crosses 1000 pages and so lands on the response path.
+  - Rejected: SQLite's default auto-checkpoint, which runs inside the commit
+    that crosses 1000 pages and so lands on the response path.
 - **Whole board in memory while open, `(1811)`** (owner-assumed 2026-11-19
   under (1802)=b; owner confirms in the morning):
   - The in-memory `State` is the full board, as `FolderCache` holds today
     (`folders_cache.go:58-63`).
-  - The DB is read only at open, import, and merge.
+  - The DB is read only at open and import.
   - Rejected: a recent window in memory plus DB reads for history.
 - **Derived page publish off the response path, `(1812)`** (owner-assumed
   2026-11-19 under (1802)=b; owner confirms in the morning):
   - A per-board coalescing writer publishes `index.html` / `index.stamp.js`:
     latest state wins, stamp after page.
-  - A publish failure becomes a debug event and is retried by the next publish.
-    The synchronous "board committed; fix the output problem" error
+  - A publish failure becomes a debug event and is retried by the next
+    publish. The synchronous "board committed; fix the output problem" error
     (`whiteboard_tools.go:788`) goes away.
   - Rejected: publishing under the board lock before returning
     (`mcp/session_state.go:665-675`).
-- **Zips and the load backup keep the legacy folder layout, `(1813)`**
-  (owner-assumed 2026-11-19 under (1802)=b; owner confirms in the morning):
-  - Export builds folder files from memory. Load accepts legacy-layout zips into
-    a fresh board DB. The close-time export of `(1805)=b` uses the same
-    materializer.
-  - Rejected: shipping the `.sqlite` file. An old load requires `meta.json` and
-    `committed.json` at the root (`folders_archive.go:194-196`), and a held WAL
-    DB cannot be copied consistently.
+- **Zips keep the legacy folder layout, `(1813)`** (owner-assumed 2026-11-19
+  under (1802)=b; owner confirms in the morning):
+  - Loading an old-layout zip reuses the import path.
+  - Exporting, and the backup that `whiteboard.load` takes, write the legacy
+    layout. This is a thin reuse of the existing State-to-files mapping:
+    `plan(nil, nil, state)` already yields every folder file's exact bytes
+    (`folders.go:742-895`), as the `whiteboard.load` replace does today
+    (`folders_archive.go:254-279`). An old binary can therefore load a new
+    zip, because it requires only `meta.json` and `committed.json` at the root
+    (`folders_archive.go:194-196`). The zip carries no sentinel.
+  - Rejected: a new-format zip that old versions refuse. With this reuse it
+    saves no work.
+  - Rejected: shipping the `.sqlite` file, because a held WAL DB cannot be
+    copied consistently.
 - **In-process change notification replaces stat watches, `(1814)`**
   (owner-assumed 2026-11-19 under (1802)=b; owner confirms in the morning):
-  - It replaces the dashboard watch, nudge stats, `FolderCache` root stamps, and
-    the topic memo, starting from `whiteboardChanged`
+  - It replaces the dashboard watch, nudge stats, `FolderCache` root stamps,
+    and the topic memo, starting from `whiteboardChanged`
     (`whiteboard_tools.go:340-342`).
   - Rejected: stat polling of the DB file.
+  - Rejected: keeping legacy stat detection for old processes (owner
+    directive, 23:22).
 - **`blocked-by: 261119-feat-ws-whiteboard-retire-embed-snapshot`, `(1815)`**
   (owner-assumed 2026-11-19 under (1802)=b; owner confirms in the morning):
   - Rejected: carrying embed state and the synchronous embed render through the
     new store only to delete them.
-- **Legacy folders are never deleted automatically, `(1816)=a`** (owner-assumed
-  2026-11-19 under (1802)=b; owner confirms in the morning):
-  - The folder is the downgrade path under `(1805)=b`.
+- **The legacy folder is left in place untouched, with no deletion code,
+  `(1816)=a`** (owner-assumed 2026-11-19 under (1802)=b; owner confirms in the
+  morning):
+  - The folder is manual-rollback material. Deleting `pending.json` and
+    `.board.sqlite` hands the board back to an older version as it stood at
+    import, without the updates made since.
   - Rejected: b, deleting in a later minor release.
   - Rejected: c, deleting right after import.
 
@@ -323,6 +337,8 @@ confirms them before this work merges to `develop`.
   before `ready/`), `ai-docs/manuals/shipped-surface-boundary.md` (error and
   result strings are shipped text), `ai-docs/manuals/ws-mcp.md` (for
   `internal/mcp/`).
+- Release: T3, so this change ships only in a new minor version (Release Rule
+  2; `(1805)=a`).
 - The derived `index.html` / `index.stamp.js` stay files while `file://` links
   remain (epic Non-Scope). Their retirement belongs to
   `261116-feat-ws-whiteboard-retire-disk-pages`.
@@ -333,56 +349,41 @@ confirms them before this work merges to `develop`.
   entry/panel counters, immutable panel versions, the board-revision and
   stale-nudge receipts, the load floor, and committed-before-publish ordering
   (`folders.go:742-895`, `folders_load_floor.go`).
-- Legacy folder files are never deleted. After the first import they are
-  written only by the graceful-close export (`(1805)=b`).
-- Out of scope, deferred by `(1816)=a`: any automatic deletion of legacy board
-  folders. A later ticket may add an explicit cleanup command.
+- Out of scope, deferred by `(1816)=a`: any deletion of legacy board folders.
+  There is no deletion code.
 
 ## Phases
 
-### Phase 1: Board DB store, import, close-time export, and merge (not wired)
+### Phase 1: Board DB store, one-way import, and legacy-layout zip (not wired)
 
 Build the per-board SQLite store as a new type beside `FolderStore`. Nothing
 in the daemon uses it yet.
 
 - Open it with the settled pragmas (Decisions; `(1807)`, `(1810)`), the
   schema `(1809)`, and the whole-board memory model `(1811)`.
-- Commit path: one update is one transaction holding only the changed rows. An
-  unchanged state opens no transaction.
-- Import: the legacy folder goes into the DB through `FolderStore.Open`,
-  recorded so that it runs once.
-- Legacy-layout materializer, used by the zip export, the load backup
-  (`(1813)`), and the close-time export (`(1805)=b`).
-- Close-time export: write the in-memory board into the legacy folder through
-  the existing `FolderStore` commit protocol, so `plan` writes only what changed
-  since the last export. Then record the export stamp, the folder generation,
-  in the DB.
-- Open-time merge: when the folder's `committed.json` generation is past the
-  export stamp, import the log entries, panel versions, and items the folder
-  gained. Record the new stamp.
+- Commit path: one update is one transaction holding only the changed rows.
+  An unchanged state opens no transaction.
+- One-way import (`(1804)`): import the legacy folder into the DB through
+  `FolderStore.Open` and commit. Then add the `(1805)=a` sentinel
+  `pending.json` (schema 3). A DB without the sentinel gets it on open.
+- Legacy-layout zip export and `whiteboard.load` backup through
+  `plan(nil, nil, state)` (`(1813)`). Old-layout zip load goes through the
+  import path.
 - Capture the "before" measurement for the scenario above on the base (macOS
   tracer and/or extended Go counters). It replaces the derived table.
-
-Stop condition: `(1805)=b` does not yet settle the following merge cases. A
-worker stops and reports rather than inventing a rule.
-
-- Both sides minted the same entry, panel, or item ID. This only happens in the
-  crash case, and item IDs are user-visible.
-- Both sides changed the same mutable field: an item's status or answer, a
-  topic body, label, or close state.
-- The folder was replaced by an old `whiteboard.load` (a fresh history, not an
-  extension of the export).
 
 Verification:
 
 - Round-trip import of fixture folders, including pending-intent replay, v1
   conversion, revision slots, and the load floor.
+- The legacy files stay byte-identical after import; only the sentinel is
+  added.
 - An unchanged update writes zero WAL frames.
 - A torn or killed transaction recovers to the last commit.
-- Materialized export equals the source folder's file set and bytes under the
+- A kill between the import commit and the sentinel write ends with the
+  sentinel present after the next open.
+- An exported zip equals the source folder's file set and bytes under the
   `boardFiles` rules.
-- Export, then a folder-side append, then open: the merge imports exactly the
-  appended entries, panels, and items.
 
 Deferred: wiring and the "after" measurement.
 
@@ -398,17 +399,16 @@ the board DB store:
   nudges, zip export, and `whiteboard.load` with its backup.
 - In-process change notification (`(1814)`).
 - Handle lifetime per `(1347)=c`: long idle close, reopen on next access.
-- Close-time export at that idle close and at daemon graceful shutdown, and the
-  open-time merge (`(1805)=b`).
 - Direct-CLI routing or refusal per `(1806)`.
 
 Verification:
 
 - The old-binary harness (`wswhiteboard/testdata/compat-old`) shows that an
-  old-binary write made after import survives the next new-binary open. It must
-  hold both after a graceful close and after a crash without export, within the
-  cases the Phase 1 stop condition does not hold back.
-- Zips cross between old and new in both directions.
+  old binary refuses both `read` and an update on a migrated board with the
+  newer-schema error, and that the folder bytes are unchanged afterwards
+  (Release Rule 2).
+- An old binary loads a zip exported by the new one, and the new one loads an
+  old-layout zip.
 - A second process's open fails with the `(1806)` error.
 
 Deferred: async derived publish and the measured report.
@@ -419,9 +419,7 @@ Depends on Phase 2 and on `(1815)` (the embed sibling has landed).
 
 - Move derived page publication off the response path (`(1812)`).
 - Measure "after" with Phase 1's method: file operations per
-  `whiteboard.update`, the fsync count, and update latency on macOS. Also
-  report the close-time export's file operations separately; it is off the
-  interactive path, under rule 8.
+  `whiteboard.update`, the fsync count, and update latency on macOS.
 - Report before and after in the Result, and record the Windows V3
   measurement as deferred.
 - List any remaining rule 1-5 gap with its measured cost for the owner
