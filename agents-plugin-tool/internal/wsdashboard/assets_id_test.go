@@ -1,7 +1,11 @@
 package wsdashboard
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -109,6 +113,65 @@ func TestDevAssetsIDFollowsEverySourceFragment(t *testing.T) {
 			}
 			if a.data.ID == base.data.ID {
 				t.Errorf("an edit to %s keeps the identity", path)
+			}
+		})
+	}
+}
+
+// A whiteboard fragment is shared by the inline page and the external frame
+// stylesheet. Its content must reach both the reload identity and the URL.
+func TestWhiteboardFragmentChangesFrameAsset(t *testing.T) {
+	_, wb := devSource(t)
+	f := startPageFixture(t)
+	base, err := loadDashboardAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, err := filepath.Glob(wb("page*.css"))
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("whiteboard stylesheet sources: %v, %v", paths, err)
+	}
+	for _, path := range paths {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := os.WriteFile(path, raw, 0o644); err != nil {
+					t.Error(err)
+				}
+			})
+			const marker = "\n/* whiteboard cache identity regression */\n"
+			if err := os.WriteFile(path, append(append([]byte(nil), raw...), marker...), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			changed, err := loadDashboardAssets()
+			if err != nil {
+				t.Fatal(err)
+			}
+			name := changed.data.FrameWhiteboardFile
+			if changed.data.ID == base.data.ID || name == base.data.FrameWhiteboardFile {
+				t.Fatalf("whiteboard edit did not change asset ID and frame URL: %q, %q", changed.data.ID, name)
+			}
+			css := string(changed.data.WhiteboardCSS)
+			sum := sha256.Sum256([]byte(css))
+			if want := "dashboard-" + hex.EncodeToString(sum[:12]) + ".css"; name != want || !strings.Contains(css, marker) {
+				t.Fatalf("frame stylesheet name/content = %q; want %q and marker", name, want)
+			}
+			request := func(target string) *http.Request {
+				r := authRequest(http.MethodGet, target, "")
+				r.Host = fmt.Sprintf("127.0.0.1:%d", f.d.Endpoint().Port)
+				r.AddCookie(authCookie(t, f.d))
+				return r
+			}
+			page := authServe(f.d, request("/s/livesession?frame=1"))
+			if page.Code != http.StatusOK || dataAssets(t, page.Body.String()) != changed.data.ID || !strings.Contains(page.Body.String(), `<link rel="stylesheet" href="/s/`+name+`">`) {
+				t.Fatalf("frame did not reference updated identity and stylesheet: status %d", page.Code)
+			}
+			asset := authServe(f.d, request("/s/"+name))
+			if asset.Code != http.StatusOK || asset.Body.String() != css || asset.Header().Get("Content-Type") != "text/css; charset=utf-8" || asset.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" || asset.Header().Get("X-Content-Type-Options") != "nosniff" {
+				t.Fatalf("frame stylesheet response: status %d, headers %v", asset.Code, asset.Header())
 			}
 		})
 	}
