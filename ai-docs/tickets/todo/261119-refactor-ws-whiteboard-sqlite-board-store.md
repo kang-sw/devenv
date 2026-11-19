@@ -77,7 +77,7 @@ Readers and writers of the folder in this checkout:
   `index.stamp.js`.
 - The daily orphan GC deletes only root-level files of dead sessions matching
   `^([a-z0-9]+)(?:\.html|\.stamp\.js|-[0-9a-f]+\.html)$`, never directories
-  (`whiteboard_tools.go:50-52`, `:930-967`).
+  (`whiteboard_tools.go:51-53`, `:930-967`).
 
 ### Before: file operations per `whiteboard.update` (derived from code)
 
@@ -220,7 +220,7 @@ confirms them before this work merges to `develop`.
        the cache (`board_notice.go:263`). MCP opens surface the error
        (`mcp/whiteboard_store.go:63-66`).
      - The old binary writes nothing. Its daily GC does not match
-       `pending.json` or `.board.sqlite` (`whiteboard_tools.go:50-52`).
+       `pending.json` or `.board.sqlite` (`whiteboard_tools.go:51-53`).
      - This is the T3 read boundary of scenario row 11
        (`release-compatibility.md:115`). Previous-minor plugins are already
        refused by the connection guard (rows 4 and 4a).
@@ -236,17 +236,37 @@ confirms them before this work merges to `develop`.
     through the existing `FolderStore.Open`, commits it, and then adds the
     `(1805)=a` sentinel.
   - A DB found without the sentinel gets it on open.
-  - The existing legacy files stay byte-identical, and the folder is never
-    written again.
+  - After the import commit there is no write to the legacy folder, apart
+    from what `Open` itself replays or migrates: a leftover `pending.json`,
+    content and close-result migrations, and the `.lock` file
+    (`folders.go:143-159`, `:400-447`).
   - Rejected: dual-write on every update, because it keeps the per-update 2PC
     cost.
   - Rejected: legacy write-back of any kind (owner directive, 23:22).
+  - Rejected: a new read-only import path, because it duplicates replay
+    logic and an unreplayed intent would be lost from the import.
 - **Direct CLI never co-opens the board DB, `(1806)`** (owner-assumed
   2026-11-19 under (1802)=b; owner confirms in the morning):
-  - A direct `ws-mcp` CLI or `serve` process routes board calls to the daemon,
-    or refuses with an error naming the daemon as the board owner.
+  - A direct `ws-mcp` CLI or `serve` process refuses board calls with an
+    error naming the daemon as the board owner.
+  - Rejected: routing board calls to the daemon. No proxy exists in
+    `cmd/ws-mcp`, so it would be new work, and 0.50+ launchers always go
+    through the daemon.
   - Rejected: concurrent WAL access from a second process, because it brings
     back cross-process locking and per-call revalidation (rules 1 and 4).
+- **Sentinel write failure does not block the open, `(1823)`** (technical,
+  lead ruling 2026-11-19):
+  - When the sentinel write fails after the import commit (read-only folder,
+    I/O error), the DB still opens.
+  - The sentinel is retried on the next open, and the failure is logged.
+  - Rejected: refusing to open, because it strands a board whose data is
+    already safely in the DB.
+- **Post-embed measurement baseline, `(1824)`** (technical, lead ruling
+  2026-11-19):
+  - The "before" baseline for this ticket is taken on the post-embed base,
+    after `261119-feat-ws-whiteboard-retire-embed-snapshot` has landed.
+  - Rejected: one shared baseline before both children, because it would
+    attribute the embed savings to the store.
 - **`PRAGMA locking_mode=EXCLUSIVE` before the first WAL access, `(1807)`**
   (owner-assumed 2026-11-19 under (1802)=b; owner confirms in the morning):
   - No `-shm` file and no per-transaction lock calls.
@@ -259,7 +279,7 @@ confirms them before this work merges to `develop`.
     (`whiteboard_tools.go:905-920`).
   - The dot keeps it out of an old binary's export and backup
     (`folders_archive.go:117`) and out of the daily-GC pattern
-    (`whiteboard_tools.go:50-52`).
+    (`whiteboard_tools.go:51-53`).
   - Rejected: a sibling file; the cache root.
 - **Schema rows mirror the folder files, `(1809)`** (owner-assumed 2026-11-19
   under (1802)=b; owner confirms in the morning):
@@ -300,8 +320,10 @@ confirms them before this work merges to `develop`.
   - Exporting, and the backup that `whiteboard.load` takes, write the legacy
     layout. This is a thin reuse of the existing State-to-files mapping:
     `plan(nil, nil, state)` already yields every folder file's exact bytes
-    (`folders.go:742-895`), as the `whiteboard.load` replace does today
-    (`folders_archive.go:254-279`). An old binary can therefore load a new
+    (`folders.go:742-895`). The `whiteboard.load` replace calls it that way
+    only when no board exists; over an existing board it calls
+    `plan(&folderSession{Generation, NextTopic}, &State{}, next)` and then
+    `planLoadFloor` (`folders_archive.go:254-279`). An old binary can therefore load a new
     zip, because it requires only `meta.json` and `committed.json` at the root
     (`folders_archive.go:194-196`). The zip carries no sentinel.
   - Rejected: a new-format zip that old versions refuse. With this reuse it
@@ -351,6 +373,37 @@ confirms them before this work merges to `develop`.
   (`folders.go:742-895`, `folders_load_floor.go`).
 - Out of scope, deferred by `(1816)=a`: any deletion of legacy board folders.
   There is no deletion code.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for `agents-plugin-tool/internal/mcp/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
+- Convention: ai-docs/manuals/performance.md (declared for `agents-plugin-tool/`)
+
+## Prior Decisions
+
+- 29a762990 (2026-11-19, commit): "Trace contradiction resolved: (1804)'s 'leave legacy files untouched' conflicts with (1805)=b's close-time export" (superseded by 3962f1e81 one-way migration) — bearing: supports
+- 3962f1e81 (2026-11-19, commit): "whiteboard SQLite store takes T3 sentinel and one-way migration" — bearing: supports
+- 261119-epic-ws-daemon-sqlite-storage (2026-11-19, Cross-Child Decisions): "Whiteboard storage shape (`(1325)=a`): One SQLite file per board (per session), opened lazily and closed when idle" (refined by `(1347)=c`) — bearing: supports
+- 261119-feat-ws-whiteboard-retire-embed-snapshot (2026-11-19, Decisions): "`261119-refactor-ws-whiteboard-sqlite-board-store` carries `blocked-by:` this ticket." — bearing: constrains
+- 45d559d09 (2026-11-18, commit): "fix(whiteboard): retain load floors across downgrade writes and lock waits" — bearing: constrains
+- 75e35cf60 (2026-11-18, commit): "feat(whiteboard): board zip export, board.zip route, and whiteboard.load" — bearing: constrains
+- 872978ce4 (2026-11-17, commit): "perf(whiteboard): serve folder-cache hits without the board flock; stamp boards by commit roots" — bearing: constrains
+- 261117-research-ws-daemon-file-touch-map (2026-11-17, Whiteboard rows): "Every read takes the `.lock` flock (`wswhiteboard/folders.go:242-253`)" — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | wswhiteboard/folders*.go, board_notice.go, dashboard_answer_revision.go, mcp/whiteboard_store.go, whiteboard_tools.go, whiteboard_nudges.go, dashboard_page.go, session_state.go |
+| scope.surface | cross-module | wswhiteboard store, mcp tool handlers, dashboard watch and nudges; tool surfaces stay unchanged |
+| scope.new_public_symbol | yes | a new board DB store type beside FolderStore (name not fixed by the ticket) |
+| scope.new_type_contract | yes | new store API, SQLite schema and sentinel pending.json schema_version 3 |
+| scope.test_surface | new-files | new store tests plus existing wswhiteboard/testdata/compat-old harness and folders_*_test.go |
+| complexity.reuse_points | confirmed | FolderStore.Open import, plan(nil, nil, state), wsstore/store.go SQLite setup, wsstate counters |
+| complexity.side_effect_risk | high | replaces the board authority, locking model, stat watches, nudge targeting and zip path across processes |
+| risk.correctness | high | one-way import, crash recovery, WAL checkpoint timing and in-process change notification replace stat detection |
+| risk.fit | moderate | pilot of an epic pattern; locking_mode=EXCLUSIVE and direct-CLI refusal (1806) constrain every board caller |
+| risk.test | high | needs torn-write, kill-between-commit-and-sentinel and old-binary refusal verification plus macOS measurement |
+| risk.security_or_contract | high | T3 store boundary with minor bump; error and refusal strings are shipped text |
 
 ## Phases
 
@@ -369,15 +422,20 @@ in the daemon uses it yet.
 - Legacy-layout zip export and `whiteboard.load` backup through
   `plan(nil, nil, state)` (`(1813)`). Old-layout zip load goes through the
   import path.
-- Capture the "before" measurement for the scenario above on the base (macOS
-  tracer and/or extended Go counters). It replaces the derived table.
+- Capture the "before" measurement for the scenario above on the post-embed
+  base (`(1824)`; macOS tracer and/or extended Go counters). It replaces the
+  derived table.
 
 Verification:
 
 - Round-trip import of fixture folders, including pending-intent replay, v1
   conversion, revision slots, and the load floor.
-- The legacy files stay byte-identical after import; only the sentinel is
-  added.
+- After the import commit the legacy folder is not written again. Before it,
+  only what `Open` itself replays or migrates changes (a leftover
+  `pending.json`, content and close-result migrations, the `.lock` file);
+  the fixtures cover each case. Then only the sentinel is added.
+- A failed sentinel write still opens the DB, logs the failure, and the next
+  open retries it (`(1823)`).
 - An unchanged update writes zero WAL frames.
 - A torn or killed transaction recovers to the last commit.
 - A kill between the import commit and the sentinel write ends with the
@@ -399,7 +457,7 @@ the board DB store:
   nudges, zip export, and `whiteboard.load` with its backup.
 - In-process change notification (`(1814)`).
 - Handle lifetime per `(1347)=c`: long idle close, reopen on next access.
-- Direct-CLI routing or refusal per `(1806)`.
+- Direct-CLI refusal naming the daemon as board owner per `(1806)`.
 
 Verification:
 

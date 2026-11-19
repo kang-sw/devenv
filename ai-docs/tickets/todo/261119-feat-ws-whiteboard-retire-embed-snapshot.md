@@ -61,7 +61,7 @@ were read on `develop` at `9f43a8f00`.
   - The `chip.fresh` string "new since the previous embed"
     (`wsi18n/tables/en.json:90` and the other locales).
 - Orphan GC: the daily scan deletes dead sessions' `<reply-id>-<hash>.html`
-  files (`mcp/whiteboard_tools.go:50-52`, `:927-967`).
+  files (`mcp/whiteboard_tools.go:51-53`, `:927-967`).
 
 ### Consumers
 
@@ -80,7 +80,11 @@ were read on `develop` at `9f43a8f00`.
   same lines.
 - Hosts: no consumer found. `agents-plugin/hooks/claude-mod/`,
   `agents-plugin-tool/desktop-electron/`, and the Pi extension sources contain
-  no reference to the embed file, `embed:`, `embed_dir`, or `wb:embed-dir`.
+  no reference to the embed file, `embed:`, `embed_dir`, or `wb:embed-dir`
+  (the only `embed:` hit outside the playbook copies is a synthetic result
+  string in the Pi test fixture
+  `agents-plugin-pi/test/mcp-stdio-client.test.ts:323`, which no Pi source
+  parses).
   The dashboard serves the live board and does not use the snapshot. External
   hosts that read a lead's embed line cannot be checked from this repository.
 
@@ -144,6 +148,13 @@ confirms them before this work merges to `develop`.
     push (`ai-docs/manuals/wsflow-mirroring.md` rule 6).
   - The edited text names no repository ticket, commit, or layout
     (`ai-docs/manuals/shipped-surface-boundary.md` `## Rules`).
+- **Own before/after measurement, `(1824)`** (technical, lead ruling 2026-11-19):
+  - This ticket records its own before/after file-operation counts per
+    `whiteboard.update` with `fs_usage` or `dtruss` plus
+    `wsstate.FileIOCounters`.
+  - The store child's "before" baseline is taken on the post-embed base.
+  - Rejected: one shared baseline before both children, because it would
+    attribute the embed savings to the store.
 
 ## Constraints
 
@@ -158,6 +169,12 @@ confirms them before this work merges to `develop`.
   mode (`261116-feat-ws-whiteboard-retire-disk-pages`), and the board store
   itself (`261119-refactor-ws-whiteboard-sqlite-board-store`).
 - `whiteboard.update` keeps its arguments and its `full:` line.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/rsrc/`, `agents-plugin-wsflow/skills/`, `agents-plugin-tool/internal/wsdoc/conventions/`)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin/hooks/`, `agents-plugin-wsflow/`)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for `agents-plugin-tool/internal/mcp/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
+- Convention: ai-docs/manuals/performance.md (declared for `agents-plugin-tool/`)
 
 ### Compatibility paths (graded under `(1817)=A`)
 
@@ -168,6 +185,30 @@ confirms them before this work merges to `develop`.
 | 3 | An older daemon opens a board last written by the new one | It finds `embed_dir`/`embeds`/`last_embed_seq` absent. It renders its embed into `ai-docs/whiteboards/` and marks all content "new since the previous embed" (`view.go:662`, `:699`). Display only. | T1 |
 | 4 | The new daemon opens a board written by an older one | Leftover embed fields are ignored. | T0 |
 | 5 | A zip crosses versions | Load already clears embed fields (`folders_archive.go:160`). | T0 |
+
+## Prior Decisions
+
+- 261116-feat-ws-whiteboard-retire-disk-pages (2026-11-16, Background): "embed도 사실 버려도 되긴 합니다. 이제 안 쓰는 경로거든요." (23:02, about the `embed:` disk file) — bearing: supports
+- 261119-epic-ws-daemon-sqlite-storage (2026-11-19, Cross-Child Decisions): "Retiring the per-update embed HTML snapshot rendering ... is in scope as its own child of this epic ... must state its compatibility tier" — bearing: constrains
+- 29a762990 (2026-11-19, commit): "Knock-on in embed child: under (1819) the stored-embed-dir refusal (store.go:862-866) is removed with the no-op" — bearing: supports
+- 75e35cf60 (2026-11-18, commit): "feat(whiteboard): board zip export, board.zip route, and whiteboard.load" (load clears embed fields, `folders_archive.go:160`) — bearing: constrains
+- f98d8e832 (2026-11-04, commit): "feat(whiteboard): add the session whiteboard store, tools, pages, and knob" (introduced `EmbedRetention`, the stored embed-dir refusal) — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | mcp/whiteboard_tools.go, mcp/whiteboard_panels.go, mcp/session_state.go, wswhiteboard/store.go, commands.go, effects.go, view.go, render.go, assets/*.js, wsi18n/tables/*.json, agents-plugin/rsrc/whiteboard/whiteboard.md and its wsflow and Pi copies |
+| scope.surface | cross-module | `embed:` result line and `wb:embed-dir` command are shipped tool surface; playbook text ships in three packages |
+| scope.new_public_symbol | no | none; exported `LayoutEmbed`, `EmbedRetention`, `Embed`, `State.EmbedDir` are removed or ignored |
+| scope.new_type_contract | no | none; `wb:embed-dir` becomes an accepted no-op with an info line |
+| scope.test_surface | existing | tests pinning embed output in mcp/whiteboard_tools_test.go, whiteboard_panels_test.go, wswhiteboard/render_test.go, store_test.go, commands_test.go, effects_test.go, folders_test.go; compat harness wswhiteboard/testdata/compat-old |
+| complexity.reuse_points | confirmed | existing GC pattern `whiteboardFilePattern` (whiteboard_tools.go:53) and compat-old harness are reused |
+| complexity.side_effect_risk | moderate | removes persisted State fields read by folders meta.json, the effect list, the metadata revision and a refusal path; stale `embed_dir` boards must keep loading |
+| risk.correctness | moderate | embed-only branches span view, render, panels and three JS assets; leftover fields must be ignored without a schema refusal (no DisallowUnknownFields found) |
+| risk.fit | low | owner allowed retirement and the mechanism is settled by (1817)=A |
+| risk.test | moderate | many tests pin embed output; old-daemon paths need the compat-old harness |
+| risk.security_or_contract | moderate | `embed:` line removal and playbook text are shipped surface at T1; old sessions may still follow old playbook text |
 
 ## Phases
 
@@ -192,6 +233,7 @@ Verification:
 - Each graded path in the table behaves as recorded. Where the old binary is
   involved, use the `wswhiteboard/testdata/compat-old` harness.
 - Before/after file operations and wall time per `whiteboard.update` on macOS,
-  with the method recorded in `261119-refactor-ws-whiteboard-sqlite-board-store`
-  `## Decisions`. Windows V3 measurement is recorded as deferred.
+  by the method in `(1824)`, which follows
+  `261119-refactor-ws-whiteboard-sqlite-board-store` `## Decisions`
+  (Measurement). Windows V3 measurement is recorded as deferred.
 - Tests assert behavior, not playbook sentences.
