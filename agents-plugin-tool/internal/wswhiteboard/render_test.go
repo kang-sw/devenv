@@ -425,8 +425,8 @@ func TestTopicBodyKeepsInlineScript(t *testing.T) {
 }
 
 // TestTopicBodyHTMLCaveats pins the rules the whiteboard playbook states for
-// HTML in a body: a block tag keeps the lines after it raw up to a blank
-// line, an indented line after a blank line becomes a code block, a fragment
+// HTML in a body: a block tag keeps its contents raw across blank lines,
+// including indented lines, while a fragment
 // that starts with an inline tag is markdown text whose line breaks render
 // as <br>, and {{nn}} resolves in markdown text but not inside HTML.
 func TestTopicBodyHTMLCaveats(t *testing.T) {
@@ -434,7 +434,8 @@ func TestTopicBodyHTMLCaveats(t *testing.T) {
 	wantAll(t, body, "<div>\n**raw**\n</div>", "<strong>md</strong>")
 
 	body, _ = docBody(t, "<svg viewBox=\"0 0 10 10\">\n<rect width=\"4\" height=\"4\"/>\n\n    <text>x</text>\n</svg>", ViewInput{Layout: LayoutFull})
-	wantAll(t, body, "<pre><code>&lt;text&gt;x&lt;/text&gt;")
+	wantAll(t, body, "    <text>x</text>")
+	wantNone(t, body, "<pre><code>")
 
 	body, _ = docBody(t, "<b>Status</b> green\n<i>next</i> deploy", ViewInput{Layout: LayoutFull})
 	if body != "<b>Status</b> green<br>\n<i>next</i> deploy" {

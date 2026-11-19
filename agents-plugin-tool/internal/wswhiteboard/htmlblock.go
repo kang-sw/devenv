@@ -10,15 +10,8 @@ import (
 	"github.com/yuin/goldmark/util"
 )
 
-// rawTextHTMLBlock is goldmark's HTML block parser with one repair: an HTML
-// block that goldmark ends at the first blank line (CommonMark types 6 and 7,
-// opened by a line such as <div ...>) keeps going while a raw-text element
-// (script, style, pre, textarea) opened inside it is still unclosed. A
-// mockup panel is typically <style>, <div>..</div>, then <script> on the next
-// line; the script joins the <div> block, and without this repair the first
-// blank line inside it hands the rest of the script to markdown, which
-// injects <p> and <br> into the code. The element's content reaches the
-// frame as typed, as the browser reads it.
+// rawTextHTMLBlock keeps type 6/7 HTML blocks open across blank lines while
+// elements remain open, so indented mockup contents stay HTML, not Markdown.
 type rawTextHTMLBlock struct {
 	parser.BlockParser
 }
@@ -26,13 +19,24 @@ type rawTextHTMLBlock struct {
 // rawTextKey holds a rawTextState in the parse context.
 var rawTextKey = parser.NewContextKey()
 
-// rawTextState maps each open type 6/7 block to the raw-text tag it is inside
-// at the end of its last line, so each line is scanned once.
-type rawTextState map[ast.Node]string
+// Each open block retains its element depth and lexical state between lines.
+type htmlBlockState struct {
+	depth   int
+	raw     string
+	pending string
+	comment bool
+}
+
+type rawTextState map[ast.Node]htmlBlockState
 
 var (
 	rawTextOpen  = regexp.MustCompile(`(?i)<(script|style|pre|textarea)(?:[\s/>]|$)`)
 	rawTextClose = map[string]*regexp.Regexp{}
+	htmlTag      = regexp.MustCompile(`(?i)^<(/?)([a-z][a-z0-9-]*)(?:\s+(?:[^>"']|"[^"]*"|'[^']*')*)?\s*/?>`)
+	htmlTagStart = regexp.MustCompile(`(?i)^</?[a-z][a-z0-9-]*(?:[\s/>]|$)`)
+	// Optional-end-tag elements, like void elements, must not hold a block open.
+	voidTags = map[string]bool{"area": true, "base": true, "br": true, "col": true, "embed": true, "hr": true, "img": true, "input": true, "link": true, "meta": true, "source": true, "track": true, "wbr": true,
+		"p": true, "li": true, "dt": true, "dd": true, "option": true, "optgroup": true, "tr": true, "td": true, "th": true, "thead": true, "tbody": true, "tfoot": true, "rt": true, "rp": true, "colgroup": true, "caption": true}
 )
 
 func init() {
@@ -62,6 +66,76 @@ func rawTextOpenAfter(line []byte, open string) string {
 	}
 }
 
+// scanHTMLBlock ignores comments and raw-text contents when counting tags.
+func scanHTMLBlock(line []byte, state htmlBlockState) htmlBlockState {
+	s := state.pending + string(line)
+	state.pending = ""
+	for len(s) > 0 {
+		if state.comment {
+			i := strings.Index(s, "-->")
+			if i < 0 {
+				break
+			}
+			state.comment, s = false, s[i+3:]
+			continue
+		}
+		if state.raw != "" {
+			loc := rawTextClose[state.raw].FindStringIndex(s)
+			if loc == nil {
+				break
+			}
+			s = s[loc[0]:]
+			state.raw = ""
+		}
+		i := strings.IndexByte(s, '<')
+		if i < 0 {
+			break
+		}
+		s = s[i:]
+		if strings.HasPrefix(s, "<!--") {
+			state.comment, s = true, s[4:]
+			continue
+		}
+		m := htmlTag.FindStringSubmatch(s)
+		if m == nil {
+			if htmlTagStart.MatchString(s) {
+				var quote byte
+				complete := false
+				for i := 1; i < len(s); i++ {
+					c := s[i]
+					if quote != 0 {
+						if c == quote {
+							quote = 0
+						}
+					} else if c == '\'' || c == '"' {
+						quote = c
+					} else if c == '>' {
+						complete = true
+						break
+					}
+				}
+				if !complete {
+					state.pending = s
+					break
+				}
+			}
+			s = s[1:]
+			continue
+		}
+		tag := strings.ToLower(m[2])
+		if m[1] == "/" {
+			if !voidTags[tag] && state.depth > 0 {
+				state.depth--
+			}
+		} else if !voidTags[tag] && !strings.HasSuffix(m[0], "/>") {
+			state.depth++
+			state.raw = rawTextOpenAfter([]byte(m[0]), "")
+		}
+		s = s[len(m[0]):]
+	}
+	return state
+}
+
 func (b rawTextHTMLBlock) track(pc parser.Context) rawTextState {
 	st, _ := pc.Get(rawTextKey).(rawTextState)
 	if st == nil {
@@ -81,7 +155,7 @@ func (b rawTextHTMLBlock) Open(parent ast.Node, reader text.Reader, pc parser.Co
 	line, _ := reader.PeekLine()
 	node, state := b.BlockParser.Open(parent, reader, pc)
 	if node != nil && endsAtBlank(node) {
-		b.track(pc)[node] = rawTextOpenAfter(line, "")
+		b.track(pc)[node] = scanHTMLBlock(line, htmlBlockState{})
 	}
 	return node, state
 }
@@ -93,14 +167,15 @@ func (b rawTextHTMLBlock) Continue(node ast.Node, reader text.Reader, pc parser.
 	line, segment := reader.PeekLine()
 	st := b.track(pc)
 	open := st[node]
-	if open != "" && util.IsBlank(line) {
+	if (open.depth > 0 || open.raw != "" || open.comment || open.pending != "") && util.IsBlank(line) {
+		st[node] = scanHTMLBlock(line, open)
 		node.Lines().Append(segment)
 		reader.AdvanceToEOL()
 		return parser.Continue | parser.NoChildren
 	}
 	state := b.BlockParser.Continue(node, reader, pc)
 	if state&parser.Continue != 0 {
-		st[node] = rawTextOpenAfter(line, open)
+		st[node] = scanHTMLBlock(line, open)
 	} else {
 		delete(st, node)
 	}

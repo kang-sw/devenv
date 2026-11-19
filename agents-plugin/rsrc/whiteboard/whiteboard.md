@@ -125,6 +125,7 @@ it.
 - Payload: block Markdown with inline HTML, SVG, or canvas script; no full
   HTML document and nothing external. Images: `![alt](path)`, local files.
   A standalone document → a `{{.McpNamespace}}/path.generate` file, linked.
+  An HTML block stays HTML until its opening element closes; blank lines and indentation do not resume Markdown.
 - Titles take inline Markdown; options, `wb:why`, and `wb:recommend` take
   block Markdown, including a `mermaid` fence. Text like `Vec<T>` outside
   backticks vanishes as an unknown HTML tag.
