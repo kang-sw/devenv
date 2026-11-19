@@ -1185,6 +1185,39 @@ func TestPiAgentRowBlinksAPiBadgeAndLinks(t *testing.T) {
 	}
 }
 
+// TestAgentRowRendersHarnessBadgeWhenPresent pins that a running agent.spawn
+// child with Harness renders the 2-letter harness badge (.hb.sm) in both the
+// compact roster and full tree instead of the legacy pibadge, while an old
+// record without Harness still falls back to pibadge.
+func TestAgentRowRendersHarnessBadgeWhenPresent(t *testing.T) {
+	now := testNow
+	snap := liveSnap(now, wslive.Lead{},
+		wslive.Agent{ID: "pi:agy1", Label: "agy worker", Status: wslive.StatusRunning, AgentKind: wslive.AgentKindPi, Harness: "agy", ReplyID: "agy1"},
+		wslive.Agent{ID: "pi:claude1", Label: "claude worker", Status: wslive.StatusRunning, AgentKind: wslive.AgentKindPi, Harness: "claude", ReplyID: "claude1"},
+		wslive.Agent{ID: "pi:claude2", Label: "claude done", Status: wslive.StatusDone, AgentKind: wslive.AgentKindPi, Harness: "claude", ReplyID: "claude2"},
+		wslive.Agent{ID: "pi:legacy1", Label: "legacy pi", Status: wslive.StatusRunning, AgentKind: wslive.AgentKindPi, ReplyID: "legacy1"},
+	)
+	v := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: snap, Now: now})
+	fullHTML := renderTree(t, v)
+	split := strings.Index(fullHTML, `<div class="thead">`)
+	compactHTML, treeHTML := fullHTML[:split], fullHTML[split:]
+
+	for label, html := range map[string]string{"compact": compactHTML, "tree": treeHTML} {
+		if n := strings.Count(html, `<span class="hb sm" data-h="agy"></span>`); n != 1 {
+			t.Fatalf("%s: agy hb badges = %d, want 1: %s", label, n, html)
+		}
+		if n := strings.Count(html, `<span class="hb sm" data-h="claude"></span>`); n != 1 {
+			t.Fatalf("%s: claude hb badges = %d, want 1 (running only): %s", label, n, html)
+		}
+		if n := strings.Count(html, `<span class="pibadge"`); n != 1 {
+			t.Fatalf("%s: legacy pibadge fallback = %d, want 1 (legacy row only): %s", label, n, html)
+		}
+	}
+	if !strings.Contains(treeHTML, `class="chip astatus">sleep</span>`) {
+		t.Fatalf("ended claude child should keep sleep presentation chip: %s", treeHTML)
+	}
+}
+
 func TestSpawnTreeUsesOrdinaryNestingAndCountsWithoutDuplicateRows(t *testing.T) {
 	now := testNow
 	st := wslive.NewState("lead-key")
