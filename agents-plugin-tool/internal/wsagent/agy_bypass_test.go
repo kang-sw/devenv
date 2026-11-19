@@ -237,3 +237,68 @@ func TestAgyBypassScopeAndLegacyRecordRewrite(t *testing.T) {
 		t.Fatalf("cleared bypass resurrected: %s %v", raw, err)
 	}
 }
+
+// approvalSpy replaces a live process's answerer to see what the runner
+// answered; the rest of the process is the real one.
+type approvalSpy struct {
+	Process
+	answered []ApprovalRequest
+	allowed  []bool
+}
+
+func (s *approvalSpy) AnswerApproval(req ApprovalRequest, allow bool, _ string) error {
+	s.answered = append(s.answered, req)
+	s.allowed = append(s.allowed, allow)
+	return nil
+}
+
+// TestAgyBypassAnswersBeforePublishing: under bypass a permission request is
+// allowed without ever being published (no pending approval, no page wake),
+// so the dashboard modal never flashes. Other modes still publish it.
+func TestAgyBypassAnswersBeforePublishing(t *testing.T) {
+	for _, tc := range []struct {
+		mode    string
+		bypass  bool
+		publish bool
+	}{
+		{mode: "bypass", bypass: true},
+		{mode: "default", publish: true},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			h, _ := newAgyLeadHarness(t)
+			h.startAt("http://127.0.0.1:1")
+			id := h.lead(BackendAgy, LeadOptions{PermissionMode: tc.mode}).ID
+			h.send(id, "work")
+			holder := h.holder(id)
+			eventually(t, "prompt", func() bool { return len(agyPromptIDs(h, holder)) == 1 })
+			h.quiesce(id)
+
+			c := h.runner.conv(id)
+			var (
+				spy       = &approvalSpy{}
+				published int
+				notes     int64
+				answered  []string
+			)
+			c.do(func() {
+				spy.Process, c.proc = c.proc, spy
+				defer func() { c.proc = spy.Process }()
+				before := h.notes.Load()
+				c.addApproval(ApprovalRequest{ID: "spy-call", Tool: "run_command"}, false)
+				notes, published, answered = h.notes.Load()-before, len(c.approvals), c.record().Answered
+			})
+			if tc.bypass {
+				if published != 0 || notes != 0 {
+					t.Fatalf("bypass published the request: %d pending, %d page notifications", published, notes)
+				}
+				if len(spy.answered) != 1 || spy.answered[0].ID != "spy-call" || !spy.allowed[0] || !slices.Contains(answered, "spy-call") {
+					t.Fatalf("bypass answer: %+v %v answered=%v", spy.answered, spy.allowed, answered)
+				}
+				return
+			}
+			if published != 1 || notes == 0 || len(spy.answered) != 0 {
+				t.Fatalf("%s did not publish the request: %d pending, %d notifications, %d answers", tc.mode, published, notes, len(spy.answered))
+			}
+		})
+	}
+}

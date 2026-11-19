@@ -280,10 +280,21 @@ func (c *conv) addApproval(a ApprovalRequest, quiet bool) {
 		// A replay of a prompt an earlier daemon already answered.
 		return
 	}
+	if !quiet && c.rec.agyBypass() && !c.replaying {
+		// Bypass answers before the prompt is published: the page must not
+		// see a modal, a pending row or a wake for a request nobody decides.
+		// Without an answerer the prompt falls through and stays answerable.
+		if answerer := controlsFor(c.proc).approval; answerer != nil {
+			if err := c.sendApproval(answerer, a, true, ""); err != nil {
+				fmt.Fprintf(c.r.opts.Log, "agent %s: auto-allow permission: %v\n", c.rec.ReplyID, err)
+			}
+			return
+		}
+	}
 	c.setStatus(func() { c.approvals = append(c.approvals, a) })
 	c.checkAction(quiet)
 	c.showApprovals(quiet)
-	if !quiet && (c.rec.agyBypass() || (!c.rec.Lead && c.r.opts.Backends[c.rec.Backend].WorkerAutoApprove)) {
+	if !quiet && !c.rec.Lead && c.r.opts.Backends[c.rec.Backend].WorkerAutoApprove {
 		// Use the same answer path as a user, including at-most-once
 		// tracking and a fatal write failure. The request remains traced.
 		if err := c.answerApproval(a.ID, true, ""); err != nil {
@@ -415,8 +426,14 @@ func (c *conv) answerApproval(id string, allow bool, message string) error {
 		return conflict("that permission prompt is not waiting: it was answered, withdrawn, or its process ended")
 	}
 	c.dropApproval(id, false)
-	c.update(func(rec *Record) { rec.Answered = append(rec.Answered, id) })
-	if err := answerer.AnswerApproval(*req, allow, message); err != nil {
+	return c.sendApproval(answerer, *req, allow, message)
+}
+
+// sendApproval tracks req as answered before writing the answer, so it is
+// answered at most once, and stops the process when the write fails.
+func (c *conv) sendApproval(answerer approvalAnswerer, req ApprovalRequest, allow bool, message string) error {
+	c.update(func(rec *Record) { rec.Answered = append(rec.Answered, req.ID) })
+	if err := answerer.AnswerApproval(req, allow, message); err != nil {
 		c.setStatus(func() { c.lastErr = "answer the permission prompt: " + err.Error() })
 		c.stopProcess("")
 		return fmt.Errorf("answer the permission prompt: %w", err)
