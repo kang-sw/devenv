@@ -30,6 +30,52 @@ than unused knobs, so each needs re-verification before the owner confirms it.
    list is posted to the owner for confirmation, and only owner-confirmed keys
    are removed from the user-facing config surface. Code defaults stay.
 
+Owner answers on the open queue, 2026-11-19 (items 1719-1725):
+
+2. **(1719)=ok — compatibility tier T0/T1 (owner 2026-11-19).** A stored value
+   of a removed key is ignored by the new binary (resolution never asks for it;
+   writers keep the map entry, `config.go:40,783-805`), so the file still
+   loads: T1 for the user whose tuned value stops applying, with no data
+   change. An older binary on the same machine serves its own embedded
+   manifests and registry and keeps honoring the value: T0 for the old side.
+   Settled together with Decision 3.
+3. **(1720)=a — older callers and a removed key (owner 2026-11-19).** For one
+   minor after removal, `config.tune`, `config.unset`, and `config.get` accept
+   the key with a deprecation warning: tune writes nothing, get returns the
+   code default. From the next minor the key is refused, with owner approval
+   before that refusal lands. Rejected: refusing immediately on removal - it
+   is a T3 boundary for every removed key (a removed call or argument without
+   an alias, `release-compatibility.md` Tools and Protocol Mapping); the
+   accept-and-warn path keeps the release patch-safe and matches the
+   precedent in `261113-refactor-ws-dashboard-drop-lan-serving`.
+4. **(1721)=a — per-key outcome vocabulary (owner 2026-11-19).** The owner
+   gives each candidate one outcome: remove, restrict to repo scope, or keep.
+   The triage reason for `worktree.profile.<name>`, `git.merge_size_*`, and
+   `ticket-assignee-aware` is scope, not disuse, and `worktree.profile.<name>`
+   carries live worktree-pool behavior and hooks. Rejected: remove-or-keep
+   only, with restriction as a separate ticket - removal would delete working
+   repo configuration.
+5. **(1722)=ok — dead constants (owner 2026-11-19).**
+   `sage_review_design_tier` and `sage_review_completeness_tier` (registered
+   in `wsconfig/scope.go`, never read or written by the triage's account) are
+   deleted outright after Phase 1 re-confirms there is no reader, since no
+   code default exists to keep.
+6. **(1723)=ok — re-verification record (owner 2026-11-19).** Phase 1 records
+   per key: every reader on current `develop` (Go, Claude mod, Pi extension,
+   playbook/rsrc splices, tests), the fallback each reader takes on an unset
+   value, every doc or skill line that tells a user to tune the key, and
+   whether its removal touches a manifest copy; the owner receives that table.
+7. **(1724)=ok — warning for stale values (owner 2026-11-19).** Removed keys
+   still present in a loaded config file produce one warning in `config.list`
+   output naming the key and file, so a user whose tune stopped applying can
+   see why; the file is not rewritten.
+8. **(1725)=ok — internal splice points (owner 2026-11-19).**
+   `prompt.TicketHandlerPersistConfirmation.*`,
+   `prompt.TicketHandlerReviewAutoAck.*`, and `prompt.TicketQueueWhiteboard.*`
+   leave the user-facing `prompt.<pointId>` override surface but keep their
+   playbook defaults, which remain driven by `ticket_review_auto_ack` and
+   `workflow.whiteboard_enabled`.
+
 ## Constraints
 
 - **Owner confirmation precedes implementation.** Removing a user-facing key
@@ -40,8 +86,7 @@ than unused knobs, so each needs re-verification before the owner confirms it.
   file, or committed repo config that still carries a removed key must load
   and resolve normally: the removed key is ignored, never a parse or
   resolution error. Target tier T0/T1 (`ai-docs/manuals/release-compatibility.md`);
-  the grade is settled through (1719) and recorded in `## Decisions` before
-  release. Evidence at drafting time: overrides are a free `map[string]string`
+  the grade is settled in Decision 2 (T0/T1). Evidence at drafting time: overrides are a free `map[string]string`
   (`agents-plugin-tool/internal/wsconfig/config.go:40`) that every writer
   round-trips whole (`config.go:783-805`), and resolution reads only the key
   it is asked for (`wsconfig/resolver.go:82-131`).
@@ -96,32 +141,6 @@ re-verified in Phase 1 and removed only after owner confirmation.
 | `pi.compaction_reread_budget_bytes` | Byte budget for inlined required re-reads in Pi lead compaction summary | `project` | DROP-CANDIDATE | Internal summary byte budget rarely tuned from 40960 | `agents-plugin/native-pi/first-party/config-manifest.json:78-83`, `agents-plugin-tool/internal/mcp/config_manifest.go:273-274` |
 | `pi.child_retention_ttl_days` | Days before Pi prunes stored child homes at lead startup | `global` | DROP-CANDIDATE | Local disk-cleanup TTL rarely tuned from 30 days | `agents-plugin/native-pi/first-party/config-manifest.json:85-91` |
 
-## Open Decision Queue
-
-Last ID used: (1725)
-
-(1719) [open] [announced] Compatibility tier T0/T1. A stored value of a removed key is ignored by the new binary (resolution never asks for it; writers keep the map entry, `config.go:40,783-805`), so the file still loads (T1 for the user whose tuned value stops applying, no data change). An older binary on the same machine serves its own embedded manifests and registry and keeps honoring the value (T0 for the old side). Settled in `## Decisions` once confirmed together with (1720).
-
-(1720) [open] [policy] What `config.tune`, `config.unset`, and `config.get` do for a removed key from an older caller (old skill or playbook text, Claude mod, Pi extension).
-- Context: today `config.tune` refuses a key it does not know (`internal/mcp/server_dispatch.go:422`), while `config.get` reports an unknown key as unset (`internal/mcp/config_manifest.go:507,566-569`); so plain removal turns an older caller's tune into an error, and a removed call or argument without an alias is T3 (`release-compatibility.md` Tools and Protocol Mapping). Precedent: `261113-refactor-ws-dashboard-drop-lan-serving` accepts and warns for one minor, then deletes.
-- Alternative a: for one minor, accept the key with a deprecation warning (tune writes nothing; get returns the code default), then refuse it from the next minor with owner approval.
-- Alternative b: refuse immediately on removal.
-> a: keeps the release patch-safe and matches the LAN-serving precedent; b is a T3 boundary for every removed key.
-
-(1721) [open] [policy] Outcome vocabulary for the per-key confirmation.
-- Context: three candidates are repo-level constructs rather than unused knobs (`worktree.profile.<name>`, `git.merge_size_*`, `ticket-assignee-aware`); the triage reason is that they belong in the committed repo config, not that they are unused. `worktree.profile.<name>` carries live worktree-pool behavior and hooks.
-- Alternative a: each key gets one of remove / restrict to repo scope / keep, chosen by the owner.
-- Alternative b: remove or keep only; restriction becomes a separate ticket.
-> a: the triage reason for those three is scope, not disuse; removal would delete working repo configuration.
-
-(1722) [open] [technical] Dead constants `sage_review_design_tier` and `sage_review_completeness_tier` (registered in `wsconfig/scope.go`, never read or written by the triage's account) are deleted outright after Phase 1 re-confirms there is no reader, since no code default exists to keep.
-
-(1723) [open] [technical] Phase 1 re-verification records per key: every reader on current `develop` (Go, Claude mod, Pi extension, playbook/rsrc splices, tests), the fallback each reader takes on an unset value, every doc or skill line that tells a user to tune the key, and whether its removal touches a manifest copy; the owner receives that table.
-
-(1724) [open] [technical] Removed keys still present in a loaded config file produce one warning in `config.list` output naming the key and file, so a user whose tune stopped applying can see why; no rewrite of the file.
-
-(1725) [open] [technical] The internal splice points `prompt.TicketHandlerPersistConfirmation.*`, `prompt.TicketHandlerReviewAutoAck.*`, and `prompt.TicketQueueWhiteboard.*` leave the user-facing `prompt.<pointId>` override surface but keep their playbook defaults, which remain driven by `ticket_review_auto_ack` and `workflow.whiteboard_enabled`.
-
 ## Phases
 
 ### Phase 1: Re-verify the 28 candidates and obtain owner confirmation
@@ -129,21 +148,37 @@ Last ID used: (1725)
 No code change.
 
 - Re-verify every candidate in `## Unconfirmed Candidates` against current
-  `develop` per (1723).
-- Post the per-key list with a recommended outcome per key ((1721)) to the
-  owner, and record the confirmed list in `## Decisions`.
+  `develop` per Decision 6.
+- Post the per-key list with a recommended outcome per key (remove / restrict
+  to repo scope / keep, Decision 4) to the owner, and record the confirmed
+  list in `## Decisions`.
+- Re-confirm there is no reader of `sage_review_design_tier` and
+  `sage_review_completeness_tier` (Decision 5).
 - Verification: every candidate has a recorded reader set and an owner
-  outcome; keys the owner did not confirm stay unchanged.
+  outcome from remove / restrict to repo scope / keep; keys the owner did not
+  confirm stay unchanged.
 
 ### Phase 2: Remove confirmed keys from the user-facing surface
 
-Depends on Phase 1 and on (1719)/(1720) being settled.
+Depends on Phase 1 (the owner-confirmed per-key outcomes).
 
-- For each confirmed key: take it off the registry/catalog, `config.tune` and
-  `config.list`, every manifest copy, and user-facing docs and skill text;
-  keep the code default (Decision 1); apply the older-caller behavior from
-  (1720).
+- Apply each key's confirmed outcome (Decision 4). A removed key comes off the
+  registry/catalog, `config.tune` and `config.list`, every manifest copy, and
+  user-facing docs and skill text, keeping the code default (Decision 1); a
+  key restricted to repo scope is limited to the committed repo config; a kept
+  key is unchanged. The three internal splice points leave the user-facing
+  `prompt.<pointId>` surface and keep their playbook defaults (Decision 8);
+  the two dead constants are deleted (Decision 5).
+- Older-caller behavior for a removed key (Decision 3): for one minor,
+  `config.tune`/`config.unset`/`config.get` accept it with a deprecation
+  warning (tune writes nothing; get returns the code default); the refusal
+  from the next minor lands only with owner approval.
+- A removed key still present in a loaded config file yields one `config.list`
+  warning naming the key and file, with no file rewrite (Decision 7).
 - Verification: a fixture config file carrying every removed key loads and
-  resolves without error and with the code defaults in effect; manifest parity
-  tests pass for ws and wsflow; older-caller `config.tune`/`config.get` of a
-  removed key behaves per (1720); remaining keys resolve unchanged.
+  resolves without error and with the code defaults in effect, and
+  `config.list` warns once per key naming the file; manifest parity tests pass
+  for ws and wsflow; older-caller `config.tune`/`config.get` of a removed key
+  warns and does not write or error during the deprecation minor; each
+  restricted or kept key behaves per its outcome; remaining keys resolve
+  unchanged.

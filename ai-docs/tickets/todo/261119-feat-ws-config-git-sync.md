@@ -2,7 +2,7 @@
 title: "설정 git 동기화: lead-tune 설정을 사용자 origin으로 동기화하는 synced 레이어"
 related:
   261119-refactor-ws-config-drop-candidate-cleanup: "owner (1334)=a: the 28 DROP candidates leave this ticket and are re-verified and removed there; here they stay local and unsynced"
-  260924-bug-ws-config-project-scope-is-machine-wide: "the `project` scope is one machine-wide file above `global`; its values shadow the synced layer on read (see (1705))"
+  260924-bug-ws-config-project-scope-is-machine-wide: "the `project` scope is one machine-wide file above `global`; its values shadow the synced layer on read (see Decision 10)"
   261116-feat-ws-dashboard-config-settings-ui: "dashboard settings surface; the sync-now button and sync status (Phase 4) sit in the same settings area and must not pre-empt its open questions"
   261117-research-ws-daemon-file-touch-map: "config resolution already reads several config files per call; the synced layer must not add a file touch per resolution"
   261112-feat-ws-mixed-version-compat-guards: "tier vocabulary and the remaining mixed-version guards"
@@ -82,20 +82,160 @@ Owner answers, 2026-11-19:
    button on the dashboard. The merge is per-key last-writer-wins.
 4. **(1333)=a — first enable.** On first enable, the local values of SYNC keys
    move into the synced layer and are deleted locally, with a backup kept. When
-   the repo already holds a value for a key, the repo value wins.
+   the repo already holds a value for a key, the repo value wins. The file scope
+   is narrowed by Decision 10 (global file only, class SYNC only).
 5. **(1334)=a — DROP candidates.** The 28 DROP candidates are not handled in
    this ticket. Here they stay local (not synced); their re-verification and
    removal belong to `261119-refactor-ws-config-drop-candidate-cleanup`.
+
+Owner answers on the open queue, 2026-11-19 (items 1701-1718):
+
+6. **(1701)=ok — compatibility tier T0/T1 (owner 2026-11-19).**
+   - Synced layer files under `~/.ws/config-sync/`: an older binary never opens
+     them (no reader exists on `develop`), so T0.
+   - First-enable migration deletes SYNC-key values from `~/.ws/config.json`:
+     an older binary then resolves those keys to builtin defaults
+     (`resolver.go:117-130`) and writes nothing, so T1 (display/behavior falls
+     back to defaults; the values remain in the synced repo and in the backup).
+     An older binary's own `config.tune` writes the machine-local file, which
+     wins on the new binary per Decision 1, so no data is lost.
+   - Any new machine-local sync setting is stored as an `overrides` map entry,
+     never as a new top-level field, because every writer re-marshals the fixed
+     struct (`config.go:783-805`) and would drop a top-level field (scenario 10
+     hazard); map entries survive (`config.go:40`), keeping this T0.
+   - The new `scope: "sync"` value on `config.tune`/`config.unset` (Decision 9)
+     is T0 for legacy calls; a new caller passing it to an older server is
+     refused by the argument precheck and needs capability gating
+     (`release-compatibility.md` Tools and Protocol Mapping).
+7. **(1702)=b — SYNC+LOCAL-OVERRIDE write target (owner 2026-11-19).** An
+   unscoped `config.tune` of a SYNC+LOCAL-OVERRIDE key (11 keys, Appendix A)
+   writes machine-local at the key's registered default scope; an explicit
+   `scope: "sync"` (Decision 9) publishes the value. Rejected: writing to the
+   synced layer by default like SYNC - a headless-host toggle silently
+   propagating to every workstation is worse than a missed propagation, which
+   one explicit tune repairs.
+8. **(1703)=a — status of Appendix A (owner 2026-11-19).** Appendix A is the
+   binding per-key list for this ticket, held in one Go classification table; a
+   key or family absent from it is LOCAL until classified. Rejected: Appendix A
+   as advisory with the owner confirming the SYNC list key by key before
+   Phase 1 - the table is already per-key and evidenced, and LOCAL-by-default
+   for unclassified keys keeps new keys (and possible secrets) off the remote
+   until someone decides.
+9. **(1704)=a — explicit write target (owner 2026-11-19).** `config.tune` and
+   `config.unset` gain a `sync` scope value. `scope: "global"` keeps writing
+   `~/.ws/config.json` (a deliberate machine-local override); `sync` on a LOCAL
+   or secret/path key is refused with an error naming the key's class. Needs
+   capability gating per Decision 6. Rejected: no new scope, with unscoped SYNC
+   writes going to the synced layer and every explicit scope writing
+   machine-local - both directions stay expressible with `sync`, and refusing
+   `sync` for LOCAL keys makes the secret boundary an error instead of a silent
+   redirect.
+10. **(1705)=b — SYNC-key values in the machine-wide `project` file (owner
+    2026-11-19).** The first-enable migration moves SYNC values from `global`
+    (`~/.ws/config.json`) only. SYNC-key values found in the machine-wide
+    `project` file are left untouched and reported to the user as shadowing the
+    synced value; owner reason: values set in the project layer may be there
+    for a reason. The committed `repo` scope is untouched. Only class SYNC
+    values migrate: a machine-local value of a SYNC+LOCAL-OVERRIDE key is a
+    deliberate local override by Decision 7 and stays put. Rejected: migrating
+    both machine-local files (`project` and `global`) - it would move values
+    the user set in the project layer deliberately.
+11. **(1706)=b — where the git work runs (owner 2026-11-19).** `config.tune`
+    updates the in-memory synced layer and its local snapshot and returns; a
+    single-flight async daemon worker then pulls, merges, commits, and pushes.
+    A tune that arrives while a sync runs schedules one follow-up sync, so
+    every tune is pushed but bursts coalesce. Sync failures surface as status
+    (Decision 17), not as a failed tune. Rejected: synchronous, with
+    `config.tune` returning after the push succeeds or fails - it keeps several
+    git spawns and a network round trip on the tool call.
+12. **(1707)=ok — git transport (owner 2026-11-19).** Spawn the system `git`
+    through the existing `wsgit` runner and reuse `wsledger`'s bare-repo
+    plumbing pattern (`hash-object`/`commit-tree`/`readBlob`, network lock).
+    Rejected: an in-process git library - the module has none (`go.mod`), and
+    system git reuses the user's credential helpers and SSH setup for their own
+    origin.
+13. **(1708)=ok — performance Rule 8 exception (owner 2026-11-19).** Phase 2
+    measures file operations per tune and tune-to-return latency, plus
+    daemon-start cost, on the Windows baseline before and after, records them
+    in the Result, and waits for owner approval of the git spawns before the
+    phase lands. The measurement covers the Decision 11 worker's git spawns
+    as well as the daemon-start pull.
+14. **(1709)=ok — read path (owner 2026-11-19).** The resolution path never
+    reads the bare repo. After each pull/merge or synced write, the daemon
+    writes a materialized snapshot (`~/.ws/config-sync/config.json`, the same
+    `Config` shape) through the existing locked writer; every reader loads it
+    through the existing stat-revalidated cache as one more layer below
+    `global`: `Resolver.Get`, `getGlobalOnly`, compaction, scalars, the agent
+    tier overlay (`LoadAgentTierConfig`, because `agents.tier` can be synced
+    explicitly per Decisions 7 and 9), and scoped show. Structured readers and
+    raw `GlobalOverride` callers stay unchanged because no structured-override
+    or `GlobalOverride` key is SYNC or SYNC+LOCAL-OVERRIDE in Appendix A as
+    drafted; Phase 1 re-verifies this. Rejected: reading the bare repo on
+    resolution - it would add a file touch or git spawn per `config.get`
+    (Constraints).
+15. **(1710)=ok — repo content and LWW clock (owner 2026-11-19).** One JSON
+    document in the repo maps each key to `{value, updated_at, origin}`
+    (`origin` an opaque random per-machine id, never a hostname or user name);
+    an unset writes a tombstone so deletions propagate; merge keeps the newer
+    `updated_at` per key, tie-broken by `origin`; tombstones older than a fixed
+    horizon are compacted.
+16. **(1711)=a — enabling sync and the remote (owner 2026-11-19).** Two LOCAL
+    keys in the machine-local `overrides` map (e.g. `config_sync.remote`,
+    `config_sync.enabled`), set through `config.tune` and shown in the
+    dashboard; setting the remote plus enabling triggers the first-enable
+    migration. The remote URL and enabled flag are per machine and never
+    synced. Rejected: a dedicated tool or CLI subcommand that configures the
+    bare repo's `origin` directly and keeps no config key - the keys give one
+    settings surface, visible in `config.list`, and survive older writers.
+17. **(1712)=ok — failure handling (owner 2026-11-19).** An offline remote, an
+    auth failure, or a lost push race keeps the local commit and snapshot,
+    retries on the next tune, daemon start, and sync-now, and records a
+    last-sync status (time, outcome, error text without credentials) that the
+    dashboard shows; a non-fast-forward push re-runs fetch + per-key merge
+    before retrying once.
+18. **(1713)=ok — only the daemon runs git (owner 2026-11-19).** A non-daemon
+    process that writes a synced key updates the snapshot under the config lock
+    and marks it dirty; the daemon pushes dirty state at its next start, tune,
+    or sync-now.
+19. **(1714)=a — dashboard sync-now placement (owner 2026-11-19).** A minimal
+    sync-now button with last-sync status in the existing settings popover,
+    behind a daemon route gated by `TrustedWrite`; the full settings sheet
+    adopts it later. Rejected: waiting for the settings sheet and shipping the
+    button inside it - (1332)=a asks for the button in this ticket, and a
+    gated route plus small control does not pre-empt the sheet's design
+    (`261116-feat-ws-dashboard-config-settings-ui` Q1, Q8 stay open).
+20. **(1715)=ok — classification table (owner 2026-11-19).** Classification
+    lives in one Go table (key or family -> SYNC / SYNC+LOCAL-OVERRIDE / LOCAL /
+    DROP-CANDIDATE, plus a secret/path flag); no config-manifest field or
+    `default_scope` value is added (Constraints). Adapter-manifest keys
+    (`claude.*`, `dashboard.*`, `pi.*`) are classified in the same table by key
+    name.
+21. **(1716)=ok — first-enable backup (owner 2026-11-19).** Before deleting any
+    local value, write one copy of each machine-local config file the migration
+    will change to `~/.ws/config-sync/backup/<UTC timestamp>-<file>.json`. Per
+    Decision 10 the migration changes only `~/.ws/config.json`, so only that
+    file is backed up; the `project` file is not modified and not backed up.
+    The migration is idempotent and records completion in the machine-local
+    `overrides` map so it runs once per machine.
+22. **(1717)=ok — commit-time guard (owner 2026-11-19).** Before every commit
+    to the synced repo, the writer verifies that every key in the document is
+    SYNC or SYNC+LOCAL-OVERRIDE class (SYNC+LOCAL-OVERRIDE keys reach the repo
+    only through an explicit `scope: "sync"` per Decisions 7 and 9) and aborts
+    the commit otherwise, so a classification bug cannot push a LOCAL or
+    secret/path value.
+23. **(1718)=ok — scope label on read (owner 2026-11-19).** `config.get` and
+    `config.list` report a value from the synced layer with a distinct scope
+    label (e.g. `sync`); older callers only display the string (T0/T1 per
+    Decision 6).
 
 ## Constraints
 
 - **Compatibility tier.** This change touches a shared store's on-disk shape
   (`~/.ws/config.json` contents after migration, a new synced layer) and
-  possibly a tool argument (an explicit sync write target). The tier must be
-  recorded in `## Decisions` before release
+  a tool argument (the `sync` scope value, Decision 9). The tier is settled in
+  Decision 6 (T0/T1; the `sync` scope needs capability gating)
   (`ai-docs/manuals/release-compatibility.md`, AGENTS.md
-  `### Compatibility Tiers`). The proposed grade with its evidence is
-  (1701); it is not settled until confirmed.
+  `### Compatibility Tiers`).
 - **No config-manifest field change.** The manifest parser refuses unknown
   fields (`internal/mcp/config_manifest.go:179`) and refuses a
   `default_scope` outside `session|project|global`
@@ -114,7 +254,7 @@ Owner answers, 2026-11-19:
   when no in-process route exists), and Rule 4 (no per-call open/stat) apply.
   Any git spawn on the tune path or at daemon start is a Rule 8 exception that
   states its measured cost (file operations per tune and tune latency on the
-  Windows baseline) and waits for owner approval; see (1706)-(1708). The
+  Windows baseline) and waits for owner approval; see Decisions 11 and 13. The
   resolution path must not add a file touch or spawn per `config.get`.
 - **No secret leaves the machine.** LOCAL and secret/path keys never enter the
   synced repo, on any write path and in the first-enable migration.
@@ -124,110 +264,52 @@ Owner answers, 2026-11-19:
 - **Repo is public.** Tests and fixtures use placeholder remotes and
   isolated homes; no real remote URL, credential, or user path is committed.
 
-## Open Decision Queue
-
-Last ID used: (1718)
-
-(1701) [open] [announced] Compatibility tier T0/T1, settled in `## Decisions` once confirmed.
-- Synced layer files under `~/.ws/config-sync/`: an older binary never opens them (no reader exists on `develop`), so they are T0.
-- First-enable migration deletes SYNC-key values from `~/.ws/config.json`: an older binary then resolves those keys to builtin defaults (`resolver.go:117-130`) and writes nothing, so T1 (display/behavior falls back to defaults; the values remain in the synced repo and in the backup). An older binary's own `config.tune` writes the machine-local file, which wins on the new binary per Decision 1, so no data is lost.
-- Any new machine-local sync setting is stored as an `overrides` map entry, never as a new top-level field, because every writer re-marshals the fixed struct (`config.go:783-805`) and would drop a top-level field (scenario 10 hazard); map entries survive (`config.go:40`), keeping this T0.
-- A new `scope` value on `config.tune`/`config.unset` (see (1704)) is T0 for legacy calls; a new caller passing it to an older server is refused by the argument precheck and needs capability gating (`release-compatibility.md` Tools and Protocol Mapping).
-
-(1702) [open] [policy] Default write target of SYNC+LOCAL-OVERRIDE keys (11 keys, Appendix A).
-- Context: (1328)=b names only SYNC and LOCAL. SYNC+LOCAL-OVERRIDE keys are portable preferences that headless or restricted machines commonly override (`dashboard.enabled`, `claude.dashboard_enabled`, `agents.tier`, `agent.tier_aliases`, `hosted.plugin_package`, ...). Because the machine-local layer always wins on read (Decision 1), a local override is structurally available either way; the question is only where an unscoped tune lands.
-- Alternative a: write to the synced layer by default, like SYNC.
-- Alternative b: write machine-local by default; an explicit sync target (see (1704)) publishes the value.
-> b: a headless-host toggle silently propagating to every workstation is worse than a missed propagation, which one explicit tune repairs.
-
-(1703) [open] [policy] Status of the Appendix A classification and of keys added later.
-- Context: the triage is evidence, not an owner-confirmed per-key contract; the owner decisions refer to "keys classified SYNC". Families (`preference.<slot>`, `prompt.UserPreferenceSection.<harness>`, `compaction.*[.<harness>]`, `workflow.*.<harness>`) need a family-level rule.
-- Alternative a: Appendix A is the binding per-key list for this ticket, held in one Go classification table; a key or family absent from it is LOCAL until classified.
-- Alternative b: Appendix A is advisory; the owner confirms the SYNC list key by key before Phase 1.
-> a: the table is already per-key and evidenced; LOCAL-by-default for unclassified keys keeps new keys (and possible secrets) off the remote until someone decides.
-
-(1704) [open] [policy] Explicit write target for the synced layer.
-- Context: `config.tune`/`config.unset` take `scope` from `ScopeSchemaEnum` (`session|project|repo|global`, `wsconfig/scope.go:318-320`). Without a selector, a user cannot publish a SYNC+LOCAL-OVERRIDE value or deliberately pin a SYNC value locally.
-- Alternative a: add a `sync` scope value; `scope: "global"` keeps writing `~/.ws/config.json` (a deliberate machine-local override); `sync` on a LOCAL or secret/path key is refused with an error naming the key's class.
-- Alternative b: no new scope; unscoped SYNC writes go to the synced layer and every explicit scope writes machine-local.
-> a: both directions stay expressible, and refusing `sync` for LOCAL keys makes the secret boundary an error instead of a silent redirect. Needs capability gating per (1701).
-
-(1705) [open] [policy] SYNC-key values in the machine-wide `project` file.
-- Context: `project` (`CacheRoot/config.json`) sits above `global` and above the synced layer on read, and several SYNC keys default their writes there today (Background). An existing project-file value would shadow the synced value on every machine that has one (`260924-bug-ws-config-project-scope-is-machine-wide`).
-- Alternative a: the first-enable migration moves SYNC-key values from both machine-local files (`project` and `global`), with the same backup and repo-wins rule; the committed `repo` scope is untouched.
-- Alternative b: migrate `global` only and report shadowing project values to the user.
-> a: otherwise enable appears to work but SYNC values silently do not apply.
-
-(1706) [open] [policy] Where the git work runs relative to the `config.tune` call.
-- Context: (1332)=a requires pull + per-key merge + push on every tune. Run inline, each tune waits on several git spawns and a network round trip; performance.md Rules 5, 6, and 8 apply.
-- Alternative a: synchronous: `config.tune` returns after the push succeeds or fails.
-- Alternative b: `config.tune` updates the in-memory synced layer and its local snapshot and returns; a single-flight daemon worker then pulls, merges, commits, and pushes. A tune that arrives while a sync runs schedules one follow-up sync, so every tune is pushed but bursts coalesce. Sync failures surface as status, not as a failed tune.
-> b: keeps network and spawn cost off the tool call while still pushing every tune; the failure surface is (1712).
-
-(1707) [open] [technical] Git transport: spawn the system `git` through the existing `wsgit` runner and reuse `wsledger`'s bare-repo plumbing pattern (`hash-object`/`commit-tree`/`readBlob`, network lock), instead of adding an in-process git library - the module has none (`go.mod`), and system git reuses the user's credential helpers and SSH setup for their own origin.
-
-(1708) [open] [announced] Performance Rule 8 exception: Phase 2 measures file operations per tune and tune-to-return latency, plus daemon-start cost, on the Windows baseline before and after, records them in the Result, and waits for owner approval of the git spawns before the phase lands.
-
-(1709) [open] [technical] Read path: the resolution path never reads the bare repo. After each pull/merge or synced write, the daemon writes a materialized snapshot (`~/.ws/config-sync/config.json`, the same `Config` shape) through the existing locked writer; every reader loads it through the existing stat-revalidated cache as one more layer below `global` (`Resolver.Get`, `getGlobalOnly`, compaction, scalars, the agent tier overlay if (1702) brings `agents.tier` in, scoped show). Structured readers and raw `GlobalOverride` callers stay unchanged because no structured or `GlobalOverride` key is SYNC.
-
-(1710) [open] [technical] Repo content and per-key LWW clock: one JSON document in the repo mapping each key to `{value, updated_at, origin}` (`origin` an opaque random per-machine id, never a hostname or user name); an unset writes a tombstone so deletions propagate; merge keeps the newer `updated_at` per key, tie-broken by `origin`; tombstones older than a fixed horizon are compacted.
-
-(1711) [open] [policy] How sync is enabled and where the remote is configured.
-- Context: the remote URL and the enabled flag are per machine (a URL can embed credentials) and must not be synced. A top-level field in `~/.ws/config.json` would be dropped by older writers (1701).
-- Alternative a: two LOCAL keys in the machine-local `overrides` map (e.g. `config_sync.remote`, `config_sync.enabled`), set through `config.tune` and shown in the dashboard; setting the remote plus enabling triggers the first-enable migration.
-- Alternative b: a dedicated tool or CLI subcommand that configures the bare repo's `origin` directly and keeps no config key.
-> a: one settings surface, visible in `config.list`, and the keys survive older writers.
-
-(1712) [open] [technical] Failure handling: an offline remote, an auth failure, or a lost push race keeps the local commit and snapshot, retries on the next tune, daemon start, and sync-now, and records a last-sync status (time, outcome, error text without credentials) that the dashboard shows; a non-fast-forward push re-runs fetch + per-key merge before retrying once.
-
-(1713) [open] [technical] Only the daemon runs git for the synced repo. A non-daemon process that writes a synced key updates the snapshot under the config lock and marks it dirty; the daemon pushes dirty state at its next start, tune, or sync-now.
-
-(1714) [open] [policy] Dashboard sync-now placement.
-- Context: `261116-feat-ws-dashboard-config-settings-ui` still has its entry point and save-scope questions open (its Q1, Q8).
-- Alternative a: a minimal sync-now button with last-sync status in the existing settings popover, behind a daemon route gated by `TrustedWrite`; the full settings sheet adopts it later.
-- Alternative b: wait for the settings sheet and ship the button inside it.
-> a: (1332)=a asks for the button in this ticket, and a gated route plus small control does not pre-empt the sheet's design.
-
-(1715) [open] [announced] Classification lives in one Go table (key or family -> SYNC / SYNC+LOCAL-OVERRIDE / LOCAL / DROP-CANDIDATE, plus a secret/path flag); no config-manifest field or `default_scope` value is added (Constraints). Adapter-manifest keys (`claude.*`, `dashboard.*`, `pi.*`) are classified in the same table by key name.
-
-(1716) [open] [technical] First-enable backup: before deleting any local value, write one copy of each machine-local config file it will change to `~/.ws/config-sync/backup/<UTC timestamp>-<file>.json`; the migration is idempotent and records completion in the machine-local `overrides` map so it runs once per machine.
-
-(1717) [open] [technical] Commit-time guard: before every commit to the synced repo, the writer verifies that every key in the document is SYNC-class (or SYNC+LOCAL-OVERRIDE if (1702) allows it) and aborts the commit otherwise, so a classification bug cannot push a LOCAL or secret/path value.
-
-(1718) [open] [technical] `config.get`/`config.list` report a value from the synced layer with a distinct scope label (e.g. `sync`); older callers only display the string (T0/T1 under (1701)).
-
 ## Phases
 
 ### Phase 1: Synced layer and classification (no git)
 
-Depends on the queue items it uses ((1701)-(1705), (1709), (1715), (1718)) being settled.
+Uses Decisions 6-10, 14, 20, 22, and 23.
 
-- Add the classification table (Appendix A as settled by (1703)) with the
+- Add the classification table (Appendix A, binding per Decision 8) with the
   secret/path flag on `agent.profile.<name>`, `agent.git_search_roots`, and
-  `worktree_pool`.
+  `worktree_pool`; keys absent from it are LOCAL.
 - Add the synced layer below `global` on every read path that reads the global
-  file for a SYNC-capable key, including global-only keys.
-- Route writes per Decision 2: unscoped SYNC writes go to the synced layer;
-  LOCAL and secret/path keys always write local; DROP candidates stay local
-  (Decision 5).
+  file for a syncable key (SYNC or SYNC+LOCAL-OVERRIDE), including global-only
+  keys and the agent tier overlay (Decision 14); label its values `sync` in
+  `config.get`/`config.list` (Decision 23).
+- Route writes per Decisions 2, 7, and 9: unscoped SYNC writes go to the synced
+  layer; unscoped SYNC+LOCAL-OVERRIDE writes go machine-local; `scope: "sync"`
+  writes the synced layer for SYNC and SYNC+LOCAL-OVERRIDE keys and is refused
+  for LOCAL and secret/path keys with an error naming the class; LOCAL and
+  secret/path keys always write local; DROP candidates stay local
+  (Decision 5). Capability-gate the `sync` scope (Decision 6).
+- Add the commit-time guard in the writer (Decision 22), allowing SYNC and
+  SYNC+LOCAL-OVERRIDE keys and refusing LOCAL and secret/path keys.
 - Deferred: git, migration, dashboard.
 - Verification: resolution-order tests (machine-local beats synced beats
-  builtin, global-only keys included, project/session still above); routing
-  tests per class, including refusal or local landing of secret/path keys;
-  an older-format `~/.ws/config.json` fixture still resolves unchanged.
+  builtin, global-only keys and the agent tier overlay included,
+  project/session still above); routing tests per class, including the
+  SYNC+LOCAL-OVERRIDE unscoped-local and explicit-`sync` cases and refusal of
+  `sync` for LOCAL and secret/path keys; the guard refuses a LOCAL or
+  secret/path key and accepts SYNC and SYNC+LOCAL-OVERRIDE keys; an
+  older-format `~/.ws/config.json` fixture still resolves unchanged.
 
 ### Phase 2: Git transport
 
 Depends on Phase 1.
 
 - Initialise or clone `~/.ws/config-sync/repo.git` against the user's
-  configured remote (per (1711)).
-- Pull + per-key LWW merge + commit + push on every synced tune (per
-  (1332)=a and (1706)); pull at daemon start; failure handling per (1712).
+  configured remote (per Decision 16).
+- A single-flight async daemon worker does pull + per-key LWW merge + commit +
+  push after every synced tune (Decisions 3, 11, and 15), with one coalesced
+  follow-up when a tune arrives mid-sync; the tune returns without waiting.
+  Pull at daemon start; failure handling and last-sync status per Decision 17;
+  only the daemon runs git (Decision 18).
 - Verification: two isolated homes sharing a local bare remote converge per
   key under concurrent tunes, offline retry, and a lost push race; no LOCAL or
-  secret/path key ever appears in the repo (1717); Windows measurements per
-  (1708).
+  secret/path key ever appears in the repo (Decision 22); a tune returns
+  before the push completes and a burst of tunes coalesces; Windows
+  measurements per Decision 13 cover the worker's git spawns and daemon start.
 
 ### Phase 3: First-enable migration
 
@@ -235,18 +317,26 @@ Depends on Phase 2 (the repo-wins rule needs the remote state).
 
 - On first enable, move machine-local SYNC values into the synced layer and
   delete them locally, keeping a backup; where the repo already holds a value,
-  the repo value wins (Decision 4); file scope per (1705).
+  the repo value wins (Decision 4).
+- Migrate only class SYNC values from `~/.ws/config.json` (Decision 10); leave
+  SYNC-key values in the machine-wide `project` file untouched and report them
+  to the user as shadowing the synced value, quoting the owner's reason (values
+  set in the project layer may be there for a reason).
+- Back up only the file the migration changes, `~/.ws/config.json`
+  (Decision 21).
 - Verification: first machine (empty repo) publishes its values; second
   machine with conflicting local values adopts the repo values; backup exists
-  and restores byte-identically; a re-run is a no-op; secret/path and LOCAL
-  values are untouched.
+  and restores byte-identically and no backup of the `project` file is made; a
+  `project`-file SYNC value is not modified and is reported as shadowing; a
+  re-run is a no-op; secret/path, LOCAL, and SYNC+LOCAL-OVERRIDE local values
+  are untouched.
 
 ### Phase 4: Dashboard sync-now
 
 Depends on Phase 2.
 
 - A sync-now control and last-sync status on the dashboard (placement per
-  (1714)), behind a `TrustedWrite`-gated daemon route.
+  Decision 19), behind a `TrustedWrite`-gated daemon route.
 - Verification: route refuses untrusted requests; a click runs one sync and
   updates the status; localized strings pass the dashboard i18n checks.
 
