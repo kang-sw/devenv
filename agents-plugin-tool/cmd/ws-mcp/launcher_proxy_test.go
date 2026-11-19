@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -326,12 +328,27 @@ func TestLauncherServesThroughTheDaemonItStartsFromTheStagedCopy(t *testing.T) {
 	if runtimeName == "" {
 		t.Fatalf("runtime dir entries = %v, want the staged runtime binary", runtimeEntries)
 	}
-	wantStaged := "ws-mcp-dashboard-" + wsdashboard.ExecutableContentHash(bin)[:16] + strings.ToLower(filepath.Ext(runtimeName))
+	sum16 := wsdashboard.ExecutableContentHash(bin)[:16]
+	wantStaged := "ws-mcp-dashboard-" + sum16 + strings.ToLower(filepath.Ext(runtimeName))
 	entries, err := os.ReadDir(filepath.Join(dir, "bin"))
 	// Python staging carries the content-bound identity beside the executable.
-	// ReadDir sorts names: the sidecar follows the binary it identifies.
-	if err != nil || len(entries) != 2 || entries[0].Name() != wantStaged || entries[1].Name() != wantStaged+".metadata.json" {
-		t.Fatalf("staged entries = %v (%v), want exactly %s and its metadata sidecar (the executable name must match Go's StageExecutable)", entries, err, wantStaged)
+	// ReadDir sorts names: the sidecar follows the binary it identifies. On
+	// macOS the daemon launches from the stable path ws-mcp-dashboard and
+	// recordRunningExecutable retains the extensionless ws-mcp-dashboard-<sum16>.
+	wantEntries := []string{wantStaged, wantStaged + ".metadata.json"}
+	if runtime.GOOS == "darwin" {
+		wantEntries = append(wantEntries, "ws-mcp-dashboard")
+		if plain := "ws-mcp-dashboard-" + sum16; plain != wantStaged {
+			wantEntries = append(wantEntries, plain)
+		}
+		slices.Sort(wantEntries)
+	}
+	gotEntries := make([]string, len(entries))
+	for i, e := range entries {
+		gotEntries[i] = e.Name()
+	}
+	if err != nil || !slices.Equal(gotEntries, wantEntries) {
+		t.Fatalf("staged entries = %v (%v), want %v (the executable name must match Go's StageExecutable)", gotEntries, err, wantEntries)
 	}
 	if ep.PID == client.cmd.Process.Pid {
 		t.Fatal("the daemon is the launcher process")

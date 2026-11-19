@@ -85,14 +85,17 @@ def build_local(launcher, scratch: Path) -> Path:
     print(f"building locally: {TOOL_DIR / 'cmd' / 'ws-mcp'}")
     launcher.generate_package_assets(TOOL_DIR)
     identity = launcher.source_runtime_metadata(TOOL_DIR)
+    os_name = launcher.host_os()
+    build_env = launcher.local_devenv_build_env(os_name)
     proc = subprocess.run(
         [go, "build", "-o", str(out), "./cmd/ws-mcp"],
         cwd=str(TOOL_DIR),
-        env=launcher.local_devenv_build_env(launcher.host_os()),
+        env=build_env,
         check=False,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"go build exited {proc.returncode}")
+    launcher.codesign_darwin_binary(out, os_name, build_env)
     launcher.write_runtime_metadata(out, identity)
     return out
 

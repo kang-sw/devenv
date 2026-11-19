@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -284,6 +285,63 @@ func TestFSLocalDenylistAcrossReadRoutes(t *testing.T) {
 					t.Errorf("deny list %s = %d", query, r.Code)
 				}
 			}
+		}
+	}
+}
+
+func TestFSListSkipsSymlinkResolutionOutsideSessionRoot(t *testing.T) {
+	o := startOutsideFixture(t)
+	targetDir := filepath.Join(o.away, "target-dir")
+	targetFile := o.write(t, targetDir, "file.txt", "TARGET")
+	outsideRoot := t.TempDir()
+	if err := os.Symlink(targetDir, filepath.Join(outsideRoot, "link-dir")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(targetFile, filepath.Join(outsideRoot, "link-file")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetDir, filepath.Join(o.project, "link-dir")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetFile, filepath.Join(o.project, "link-file")); err != nil {
+		t.Fatal(err)
+	}
+
+	byName := func(entries []fsEntry) map[string]fsEntry {
+		m := make(map[string]fsEntry, len(entries))
+		for _, e := range entries {
+			m[e.Name] = e
+		}
+		return m
+	}
+
+	// Outside the session root (!session), symlinks stay opaque (matching Windows)
+	// so listing $HOME or another browse root never eagerly stats symlink targets.
+	code, outside := fsList(t, o.pageFixture, o.local, "root="+url.QueryEscape(outsideRoot))
+	if code != http.StatusOK || outside.Session {
+		t.Fatalf("outside list = %d session=%v", code, outside.Session)
+	}
+	om := byName(outside.Entries)
+	for _, name := range []string{"link-dir", "link-file"} {
+		e, ok := om[name]
+		if !ok || !e.Link || e.Dir {
+			t.Errorf("outside root entry %q = %+v (present=%v), want Link=true Dir=false", name, e, ok)
+		}
+	}
+
+	// Inside the trusted session root (session == true), non-Windows local viewers
+	// still resolve symlink target types so symlinked dirs remain openable.
+	code, inside := fsList(t, o.pageFixture, o.local, "")
+	if code != http.StatusOK || !inside.Session {
+		t.Fatalf("session list = %d session=%v", code, inside.Session)
+	}
+	im := byName(inside.Entries)
+	if runtime.GOOS != "windows" {
+		if e, ok := im["link-dir"]; !ok || e.Link || !e.Dir {
+			t.Errorf("session root entry link-dir = %+v (present=%v), want Link=false Dir=true", e, ok)
+		}
+		if e, ok := im["link-file"]; !ok || e.Link || e.Dir {
+			t.Errorf("session root entry link-file = %+v (present=%v), want Link=false Dir=false", e, ok)
 		}
 	}
 }
