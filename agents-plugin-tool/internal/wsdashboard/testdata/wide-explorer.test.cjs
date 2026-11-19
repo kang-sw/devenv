@@ -144,7 +144,7 @@ test('linked file cards reveal the board instead of remaining behind explorer pr
   c.setTab = tab => { assert.equal(tab, 'board'); boardTab = true; };
   // Use the exact hook passed to the production card framework.
   const mount = block('    window.WsCards.mount(cardBoard,', '    if (worktree) {');
-  const reveal = mount.match(/reveal: (function \(\) \{[\s\S]*?\}),\n      column:/);
+  const reveal = mount.match(/reveal: (function \(\) \{[\s\S]*?\}),\n      host:/);
   assert.ok(reveal);
   const revealBoard = vm.runInContext('(' + reveal[1] + ')', c);
   Object.assign(c.window.WsCards, {
@@ -375,7 +375,7 @@ test('pane keep and toolbar durable intent close both surfaces before revealing 
     mountSheetFramework(c).fire('click');
     c.tabShown = () => true;
     const reveal = block('    window.WsCards.mount(cardBoard,', '    if (worktree) {')
-      .match(/reveal: (function \(\) \{[\s\S]*?\}),\n      column:/);
+      .match(/reveal: (function \(\) \{[\s\S]*?\}),\n      host:/);
     const revealBoard = vm.runInContext('(' + reveal[1] + ')', c);
     let opened;
     c.window.WsPreview.open = (path, options) => { opened = { path, options }; revealBoard(); };
@@ -394,11 +394,11 @@ test('docked geometry overrides dropdown insets and pane paints above the scrim'
   assert.match(css, /body:has\(#toolbar-files\[data-max\]\[data-docked\]\) \.file-preview-pane \{ z-index: var\(--z-modal\);/);
   assert.match(css, /body:has\(#toolbar-files\[data-max\]\[data-docked\]\) \.board-toolbar \.sheet-width \{ display: none;/);
 });
-test('pane CSS preserves board/pin geometry and hides overlay while closed', () => {
+test('pane CSS preserves board/gallery geometry and hides overlay while closed', () => {
   const css = readAssetSource('wsdashboard', 'dashboard.css');
   assert.match(css, /\.file-preview-pane\[hidden\]\s*\{\s*display:\s*none;/);
   const rule = css.match(/:root\[data-file-preview\] \.dgrid\.live > \.bcol,[^}]+\}/);
-  assert.ok(rule, 'missing preview-only board/pin hiding rule');
-  for (const selector of ['.bcol', '.dcv-edge', '.bpcol', '.bpzone']) assert.ok(rule[0].includes(selector));
+  assert.ok(rule, 'missing preview-only board/gallery hiding rule');
+  for (const selector of ['.bcol', '.dcv-edge', '.bgal']) assert.ok(rule[0].includes(selector));
   assert.match(rule[0], /visibility:\s*hidden/); assert.doesNotMatch(rule[0], /display:\s*none/);
 });

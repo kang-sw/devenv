@@ -62,7 +62,7 @@ check("pin/unpin retains roots, frames and count", [roots.every(function(c,i){re
 choose("all");
 check("All restores cards and topic-only total", [shown().length, cardVisibility(), counts()[0]], [7, [true, true, true, true], "14"]);
 clickPin(C); choose("implementing");
-check("pinned topic keeps its node and placement", [shown(), C.parentNode === page.W.pinList(), counts()], [["c"], true, ["14", "1", "1", "1", "1", "1", "8", "4"]]);
+check("pinned topic keeps its node and placement", [shown(), page.W.isDocked(C), counts()], [["c"], true, ["14", "1", "1", "1", "1", "1", "8", "4"]]);
 var before = page.board.childNodes.slice(), savedCards = store.cards;
 choose("cards"); choose("closed"); choose("all");
 check("filtering never moves or persists placement", [page.board.childNodes.every(function(n,i){return n === before[i];}), store.cards === savedCards], [true, true]);
