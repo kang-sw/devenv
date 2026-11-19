@@ -194,7 +194,6 @@ func piToolSurface(spec StartSpec) piSurface {
 		add(ToolBase(entry))
 	}
 	if spec.WSMCP != nil {
-		add(piMCPToolName(ReservedMCPServer, "call"))
 		for _, name := range spec.Profile.WSTools {
 			add(piMCPToolName(ReservedMCPServer, name))
 		}

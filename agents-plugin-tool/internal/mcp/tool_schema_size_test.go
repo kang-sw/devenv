@@ -13,8 +13,9 @@ import (
 // toolSchemaByteCap is the most a model-visible tool may cost as tools/list
 // serves it: name, description, and input schema, marshaled with Go's
 // encoding/json defaults (so <, >, and & cost six bytes each). agy drops
-// tool definitions above about 1.75 KB.
-const toolSchemaByteCap = 1500
+// definitions over 1,500 B including its 39 B description prefix. Keep
+// headroom here; this test limit is unrelated to CallFallback admission.
+const toolSchemaByteCap = 1450
 
 type listedToolSize struct {
 	name string

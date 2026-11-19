@@ -1011,6 +1011,17 @@ from a support conversation:
   `Backend`; common code names no backend. `ManualHarness` is the harness the
   lead's manual renders under (claude, agy, codex; Pi declares none);
   `PlaybookCommands` is described above.
+  `CallFallback` opts hosted lead connections into the compact `call` tool
+  and a generated callable-tool index appended to their workflow manual.
+  Only agy sets it today; ordinary plugin/stdio connections, other hosted
+  harnesses, and every worker neither list nor accept `call`. This is a
+  boolean for clients that may hide tools for any reason, not a size cap:
+  agy drops definitions over 1,500 B including its 39 B description prefix;
+  other clients may cap tool count. The independent listed-definition test
+  cap is 1,450 B. The index uses the same permission- and role-filtered set
+  as `call` list/schema discovery, with advertised names and the first
+  sentence of each description. Runtime catalogs omit this conditional
+  tool from their default connection surface.
   `ToolNameScheme` is how its connection's `tools/list` spells ws's dotted
   tool names: agy declares `sanitize` (each `.` becomes `_`, as `tickets_query`:
   the Pi bridge's character mapping without its `ws__` prefix, since agy adds
@@ -1863,7 +1874,7 @@ Current launcher inputs:
 | `WS_HOSTED_SESSION_KEY` | The parent-less lead key the daemon minted for the session it hosts, read only while `WS_HOSTED_SESSION` is on; the session's key stays fixed to it. |
 | `WS_HOSTED_SESSION_ROW` | Absolute path of the hosted session's `registration.json`. Its `host_pid` is the one harness process the flag holds for: equal to the reader's harness PID, hosted; another nonzero PID, an ordinary session, silently (a nested harness, a CLI call from the session's shell); 0, absent, or unreadable, read again about every 100 ms for about 3 s, then an ordinary session with one warning. Unset (an older daemon, a stray flag) is not hosted. The harness PID is `WS_MCP_HARNESS_PID` for ws-mcp (with a Windows `cmd.exe` wrapper skipped, see that row), the mod's own process for Claude (read as the parent of a host command; on Windows, when that parent is the `cmd.exe` shell the host command ran through, that shell's parent, by the same one-level rule), and the extension's process for Pi. |
 | `WS_MCP_HARNESS_PID` | Set by the launcher on every start to its own parent PID, over any inherited value: the harness that started this ws-mcp. The runtime reads it as that harness's PID, except on Windows when that process is a `cmd.exe` (the wrapper a harness commonly starts a stdio server through): then its parent. Exactly one level is skipped, so a harness nested under another still tells itself from the outer one, and a failed process lookup keeps the PID as set. It reaches the runtime on both paths (the direct child's environment, and the hello's `env` for a daemon-hosted connection, so it is per caller). A ws-mcp started without the launcher has none and is never hosted; `ws-mcp dashboard` drops it, with the three `WS_HOSTED_SESSION*` variables, from its own environment at start, so the conversations it spawns inherit no session's. |
-| `WS_MCP_ALLOWED_TOOLS` | Comma list of ws tool names; when set, `tools/list` advertises and `tools/call` accepts only these, plus the always-available `call` envelope. Its inner tool still obeys this allowlist and the normal dispatch gates. `call` discovery also applies permission and role gates using its optional `session_key` (implicit on hosted connections); without a known key it hides role-gated tools. The agent runner sets it to a profile's ws tools. `tracker.show`, `tracker.ui`, and `git.search` are listed and callable only when it names them. |
+| `WS_MCP_ALLOWED_TOOLS` | Comma list of ws tool names; when set, `tools/list` advertises and `tools/call` accepts only these. A hosted lead whose descriptor opts into `CallFallback` also gets `call`; naming `call` in an allowlist alone never enables it. Its inner tool still obeys this allowlist and the normal dispatch gates. Fallback discovery applies permission and role gates using its optional `session_key` (implicit on hosted connections); without a known key it hides role-gated tools. The agent runner sets the allowlist to a profile's ws tools. `tracker.show`, `tracker.ui`, and `git.search` are listed and callable only when it names them. |
 | `WS_MCP_PI_TOKEN` | Set by the agent runner on the ws-mcp of a spawned conversation that may spawn Pi subagents: its capability token for the daemon's `POST /agents/by-token/<op>` route, drawn at each process start and void when that process ends. With `WS_MCP_PI_ENDPOINT` and no runner of its own, this ws-mcp forwards `agent.*` and legacy `pi.*` to that route (see Dashboard daemon, the Pi spawn tree). Unset, `pi.*` is lead-only. |
 | `WS_MCP_PI_ENDPOINT` | Set beside `WS_MCP_PI_TOKEN`: the dashboard daemon's loopback base URL, for example `http://127.0.0.1:29417`. |
 | `WS_MCP_NAMESPACE` | MCP namespace and embedded package identity: `wsflow` selects wsflow assets; empty/unset or a custom display namespace selects ws. |

@@ -117,9 +117,8 @@ var PiMiniLeadWSTools = append(append([]string{}, PiWorkerWSTools...),
 
 // AgentWSTools are the common ws tools every agent.spawn child gets, on
 // every harness: PiMiniLeadWSTools with agent.* in place of pi.*, plus
-// mailbox.send and the generic call envelope. The child's authority does
-// not select among them; a read-only child's ws-mcp refuses the mutating
-// ones (EnvPermissionLevel).
+// mailbox.send. The child's authority does not select among them; a
+// read-only child's ws-mcp refuses the mutating ones (EnvPermissionLevel).
 var AgentWSTools = agentWSTools()
 
 func agentWSTools() []string {
@@ -129,7 +128,7 @@ func agentWSTools() []string {
 			out = append(out, name)
 		}
 	}
-	return append(out, "agent.spawn", "agent.interrupt", "agent.list", "agent.tiers", "mailbox.send", "call")
+	return append(out, "agent.spawn", "agent.interrupt", "agent.list", "agent.tiers", "mailbox.send")
 }
 
 // AgentClaudeTools are a Claude agent.spawn child's native tools.

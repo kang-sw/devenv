@@ -161,7 +161,7 @@ func TestPiArgsFromProfile(t *testing.T) {
 		t.Fatalf("explicit extensions load under --no-extensions; skills stay on: %v", args)
 	}
 	checks := map[string]string{
-		"--tools":                "read,bash,mcp__ws__call,mcp__ws__tickets_query,mcp__ws__project_tree,mcp__docs_x__*",
+		"--tools":                "read,bash,mcp__ws__tickets_query,mcp__ws__project_tree,mcp__docs_x__*",
 		"--append-system-prompt": "/sess/instructions.md",
 		"--model":                "openai-codex/gpt-6.1-sol",
 		"--thinking":             "low",
@@ -180,7 +180,7 @@ func TestPiToolSurface(t *testing.T) {
 	}
 	spec.WSMCP = &MCPCommand{Command: "/bin/ws-mcp"}
 	s := piToolSurface(spec)
-	for _, ok := range []string{"read", "mcp__ws__call", "mcp__ws__tickets_query", "mcp__docs__search"} {
+	for _, ok := range []string{"read", "mcp__ws__tickets_query", "mcp__docs__search"} {
 		if !s.allows(ok) {
 			t.Fatalf("%s should be allowed", ok)
 		}
@@ -876,7 +876,7 @@ func TestPiBackendStart(t *testing.T) {
 	}
 	args := strings.Split(read("args"), "\x00")
 	bridge := filepath.Join(dir, "pi", piBridgeFile)
-	if got, _ := flagValue(args, "--tools"); got != "read,mcp__ws__call,mcp__ws__tickets_query" || !slices.Contains(args, bridge) {
+	if got, _ := flagValue(args, "--tools"); got != "read,mcp__ws__tickets_query" || !slices.Contains(args, bridge) {
 		t.Fatalf("args = %v", args)
 	}
 	if info, err := os.Stat(bridge); err != nil || !isPrivate(info) {

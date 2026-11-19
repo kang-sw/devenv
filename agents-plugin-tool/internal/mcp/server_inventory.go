@@ -50,7 +50,8 @@ func leadToolNames(getenv func(string) string) []string {
 	names := make([]string, 0, len(tools()))
 	for _, tool := range tools() {
 		name, _ := tool["name"].(string)
-		if permanentlyHiddenTool(name) {
+		if permanentlyHiddenTool(name) || name == "call" {
+			// call is connection-descriptor-only, not a default runtime tool.
 			continue
 		}
 		if envFlagOn(getenv(envNoAgent)) && noAgentHiddenTool(name) {
@@ -183,9 +184,10 @@ func publicToolDefinition(tool map[string]any, advertisedName, namespace string)
 }
 
 func (s *Server) toolAllowed(name string) bool {
-	// The envelope is always available; its inner tool is checked separately.
+	// Only a descriptor opting into fallback exposes the envelope. The
+	// inner tool is still checked separately, including its allowlist.
 	if name == "call" {
-		return true
+		return s.connectionDescriptor().callFallback
 	}
 	if s.noAgentMode() && noAgentHiddenTool(name) {
 		return false

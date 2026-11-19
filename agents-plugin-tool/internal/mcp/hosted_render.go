@@ -13,10 +13,13 @@ import (
 // (wsagent.BackendRegistration) says about text the daemon renders for it:
 // Harness, the harness its workflow manual renders under ("" for none), and
 // PlaybookCommands, whether its sessions run without ws's plugin skills and
-// reach ws only as the daemon's own server.
+// reach ws only as the daemon's own server. ToolNameScheme and CallFallback
+// keep its generated tool index identical to the connection's discovery.
 type HostedRender struct {
 	Harness          string
 	PlaybookCommands bool
+	ToolNameScheme   string
+	CallFallback     bool
 }
 
 // hostedRenderServer is a throwaway server that renders for the hosted lead
@@ -38,7 +41,16 @@ func hostedRenderServer(env []string, root string, render HostedRender, key stri
 	// The harness is declared here, not detected: a name the detection list
 	// does not know (agy) still selects the manual's overlay. leadRender
 	// renders as the daemon-hosted connection, which lists the agent tools.
-	s.descriptor = connectionDescriptor{manualHarness: render.Harness, playbookCommands: render.PlaybookCommands, leadRender: true}
+	var names []string
+	for _, tool := range tools() {
+		names = append(names, tool["name"].(string))
+	}
+	aliases, err := buildToolAliasTable(render.ToolNameScheme, names)
+	if err != nil {
+		s.Close()
+		return nil, nil, err
+	}
+	s.descriptor = connectionDescriptor{manualHarness: render.Harness, playbookCommands: render.PlaybookCommands, aliases: aliases, callFallback: render.CallFallback, leadRender: true}
 	s.descriptorResolved = true
 	// A render may start the session-start tracker check (a background
 	// fetch); the server is released once that settles, without holding up

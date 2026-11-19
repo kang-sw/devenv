@@ -11,6 +11,33 @@ import (
 	"github.com/kang-sw/devenv/internal/wsagent"
 )
 
+// Synthetic descriptor isolates discovery's authority tests from hosted
+// lead identity. Production enables fallback only on an opted-in lead.
+func newCallTestServer(root string) *Server {
+	s := NewServer(root, "test")
+	s.descriptor = connectionDescriptor{callFallback: true}
+	s.descriptorResolved = true
+	return s
+}
+
+func assertCallUnavailable(t *testing.T, s *Server) {
+	t.Helper()
+	if listedToolNames(t, s)["call"] {
+		t.Fatal("a connection without fallback lists call")
+	}
+	for _, args := range []map[string]any{
+		{},
+		{"tool": "runtime.read"},
+		{"tool": "runtime.read", "arguments": map[string]any{}},
+	} {
+		raw := callToolOnce(t, s, 1, "call", args)
+		var resp response
+		if err := json.Unmarshal([]byte(raw), &resp); err != nil || resp.Error == nil || resp.Error.Code != -32601 || !strings.HasSuffix(resp.Error.Message, ": call") {
+			t.Fatalf("call itself must be refused before discovery or dispatch: %s", raw)
+		}
+	}
+}
+
 func callResponseIsError(t *testing.T, raw string) bool {
 	t.Helper()
 	var resp response
@@ -82,7 +109,7 @@ func assertCallSchema(t *testing.T, s *Server, name string) {
 func TestCallListSchemaAndDispatch(t *testing.T) {
 	setupMailboxTestEnv(t)
 	t.Setenv(envAllowedTools, "")
-	s := NewServer(t.TempDir(), "test")
+	s := newCallTestServer(t.TempDir())
 	defer s.Close()
 	assertCallListsConnection(t, s)
 	assertCallSchema(t, s, "runtime.read")
@@ -112,7 +139,7 @@ func TestCallWorkerAllowlistAndAuthority(t *testing.T) {
 	initGit(t, root)
 	// A custom profile need not explicitly include call.
 	t.Setenv(envAllowedTools, "git.status")
-	s := NewServer(root, "test")
+	s := newCallTestServer(root)
 	defer s.Close()
 	assertCallListsConnection(t, s)
 	if got := toolText(t, callToolOnce(t, s, 1, "call", map[string]any{})); got != "call\ngit.status" {
@@ -134,7 +161,7 @@ func TestCallWorkerAllowlistAndAuthority(t *testing.T) {
 
 	// With no profile filter, the inner key's role must still refuse a lead tool.
 	t.Setenv(envAllowedTools, "")
-	roleServer := NewServer(root, "test")
+	roleServer := newCallTestServer(root)
 	defer roleServer.Close()
 	assertCallMatchesDirect(t, roleServer, "workflow_state", map[string]any{"session_key": key})
 	if resp := callToolOnce(t, roleServer, 1, "workflow_state", map[string]any{"session_key": key}); !strings.Contains(resp, "tool not available") {
@@ -142,7 +169,7 @@ func TestCallWorkerAllowlistAndAuthority(t *testing.T) {
 	}
 	// The read-only permission gate must not be bypassed by the envelope.
 	t.Setenv(wsagent.EnvPermissionLevel, "read-only")
-	readOnly := NewServer(root, "test")
+	readOnly := newCallTestServer(root)
 	defer readOnly.Close()
 	assertCallMatchesDirect(t, readOnly, "git.commit", map[string]any{"session_key": key})
 	assertCallMatchesDirect(t, readOnly, "git.status", map[string]any{}) // root/key refusal too
@@ -152,7 +179,7 @@ func TestCallAgentlessGate(t *testing.T) {
 	setupMailboxTestEnv(t)
 	t.Setenv(envNoAgent, "1")
 	t.Setenv(envAllowedTools, "")
-	s := NewServer(t.TempDir(), "test")
+	s := newCallTestServer(t.TempDir())
 	defer s.Close()
 	assertCallListsConnection(t, s)
 	assertCallMatchesDirect(t, s, "exec.shell", map[string]any{})
@@ -188,13 +215,14 @@ func TestCallForwardingWorker(t *testing.T) {
 	initGit(t, root)
 	s := NewServer(root, "test")
 	defer s.Close()
-	assertCallListsConnection(t, s)
-	assertCallSchema(t, s, "agent.spawn")
+	assertCallUnavailable(t, s)
 	key, err := s.sessions.mint(root, roleDelegate, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertCallMatchesDirect(t, s, "agent.list", map[string]any{"session_key": key})
+	if raw := callToolOnce(t, s, 1, "agent.list", map[string]any{"session_key": key}); callResponseIsError(t, raw) {
+		t.Fatalf("direct worker forwarding must remain available: %s", raw)
+	}
 	if call := route.last(); call.path != wsagent.RoutePrefix+"/by-token/agent.list" || call.auth != "Bearer tok123" {
 		t.Fatalf("inner call did not use forwarding authority: %+v", call)
 	}
@@ -232,7 +260,7 @@ func TestCallDiscoveryRespectsPermissionAndRole(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(wsagent.EnvPermissionLevel, tc.level)
-			s := NewServer(root, "test")
+			s := newCallTestServer(root)
 			defer s.Close()
 			args := map[string]any{}
 			if tc.key != "" {
@@ -287,9 +315,35 @@ func TestCallDiscoveryUsesHostedOrEnvelopeKey(t *testing.T) {
 	}
 }
 
+func TestCallRequiresDescriptorOptIn(t *testing.T) {
+	t.Run("ordinary connection even when allowlisted", func(t *testing.T) {
+		setupMailboxTestEnv(t)
+		t.Setenv(envAllowedTools, "call,runtime.read")
+		s := NewServer(t.TempDir(), "test")
+		defer s.Close()
+		assertCallUnavailable(t, s)
+	})
+	for _, backend := range []string{wsagent.BackendClaude, wsagent.BackendPi, wsagent.BackendCodex} {
+		t.Run(backend, func(t *testing.T) {
+			regs := descriptorRegistrations()
+			regs[backend] = wsagent.BackendRegistration{ManualHarness: backend}
+			s, _ := hostedBackendConnection(t, backend, regs)
+			defer s.Close()
+			assertCallUnavailable(t, s)
+		})
+	}
+	t.Run("descriptor not harness name", func(t *testing.T) {
+		regs := descriptorRegistrations()
+		regs["future-host"] = wsagent.BackendRegistration{CallFallback: true}
+		s, _ := hostedBackendConnection(t, "future-host", regs)
+		defer s.Close()
+		assertCallListsConnection(t, s)
+		assertCallMatchesDirect(t, s, "runtime.read", map[string]any{})
+	})
+}
+
 func TestCallDefinitionSize(t *testing.T) {
-	setupMailboxTestEnv(t)
-	s := NewServer(t.TempDir(), "test")
+	s, _ := hostedBackendConnection(t, wsagent.BackendAgy, descriptorRegistrations())
 	defer s.Close()
 	for _, tool := range listedToolSizes(t, s) {
 		if tool.name == "call" {

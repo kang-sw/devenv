@@ -23,6 +23,22 @@ import (
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
+func TestCallFallbackRegistrationAndRenderDescriptor(t *testing.T) {
+	holders := wsholder.New(wsholder.Options{Dir: t.TempDir()})
+	defer holders.Close()
+	runner := newAgentRunner(t.TempDir(), io.Discard, nil, holders)
+	defer runner.Close()
+	for name, reg := range runner.BackendRegistrations() {
+		if reg.CallFallback != (name == wsagent.BackendAgy) {
+			t.Fatalf("backend %q fallback = %v; only agy opts in", name, reg.CallFallback)
+		}
+		render := hostedRender(reg)
+		if render.CallFallback != reg.CallFallback || render.ToolNameScheme != reg.ToolNameScheme {
+			t.Fatalf("backend %q loses fallback or alias data in prompt rendering: %+v", name, render)
+		}
+	}
+}
+
 func TestAgentMCPCommandUsesEmbeddedLauncherWithoutPlugin(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", t.TempDir())
 	t.Setenv("WS_CONFIG_HOME", t.TempDir())

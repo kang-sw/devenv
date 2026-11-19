@@ -40,6 +40,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// inspection uses the same gates below, but stops before argument checking.
 	schemaOnly := false
 	if params.Name == "call" {
+		if !s.toolAllowed("call") {
+			return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: call", s.runtimeNamespace()))
+		}
 		if refusal, ok := s.precheckToolArguments(params.Name, params.Arguments); !ok {
 			return toolErrorTextResponse(req.ID, refusal)
 		}
