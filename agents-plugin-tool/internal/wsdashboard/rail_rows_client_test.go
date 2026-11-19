@@ -12,7 +12,8 @@ function held() { return "rail.old,head.kept"; }
 function trackerLost() {} function trackerNudge() {} function syncBadge() {} function modeChanged() {} function banner() {}
 function tlHold() {} function tlCount() {} function tlShown() {} var tlHeld={};
 function frag(html) { return html; } function apScan() {}
-var applied=[], bases=[];
+var applied=[], bases=[], rebases=0;
+var railAttention={observe:function(rows,rid,baseline) { if (baseline) rebases++; }};
 function swap(name,hash,input) { applied.push([name,hash,input]); }
 var WsRail={
  rowInputFull:function(html) { return {value:html}; },
@@ -40,6 +41,7 @@ advance(0);
 sockets[2].msg("region",{name:"rail",hash:"fresh",html:"D"});
 sockets[2].msg("rail-rows",{hash:"next",valid:true,add:"E"});
 check("full region repairs baseline",applied[3],["rail","next",{value:"DE"}]);
+check("only connection baselines rebase attention",rebases,2);
 process.stdout.write(bad.join("\n"));
 `)
 }
