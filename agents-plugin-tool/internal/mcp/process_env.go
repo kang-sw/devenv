@@ -66,6 +66,11 @@ type ServerOptions struct {
 	// spawn the session's Pi subagents (pi_tools.go); nil on the direct
 	// path, where they refuse.
 	Agents PiAgents
+	// AgentBackends exposes the dashboard daemon's registered backend
+	// descriptors without granting the lead runner handle (Agents). Set for
+	// every daemon-hosted connection, including token-forwarding workers, so
+	// each connection resolves its backend descriptor and profiles.
+	AgentBackends AgentBackendRegistry
 	// Notes is the daemon's shared presentation cache; nil on standalone servers.
 	Notes *wsnote.Cache
 	// WhiteboardChanged invalidates daemon timers after a successful board write,
@@ -154,6 +159,7 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 		s.observeHarness("hello", opts.Harness)
 	}
 	s.whiteboardChanged = opts.WhiteboardChanged
+	s.agentBackendSource = opts.AgentBackends
 	s.pi.agents = opts.Agents
 	s.startPiFeed()
 	return s
