@@ -968,7 +968,7 @@ func TestRailMarkupHostedSessions(t *testing.T) {
 	waits := rowOf("waits")
 	for _, want := range []string{
 		` data-ap="1" data-ap-tool="mcp__ws__tracker_update" data-ap-args="git push origin develop">`,
-		`<span class="hi claude perm" role="img" aria-label="claude · awaiting approval" title="claude · awaiting approval">C</span>`,
+		`<span class="hb perm" data-h="claude" role="img" aria-label="claude · awaiting approval" title="claude · awaiting approval"></span>`,
 		`<span class="hosted" title="session the dashboard runs">`,
 		`<span class="chip perm" title="awaiting approval: tracker_update">`,
 		`<span class="s2 ap"><b class="who">tracker_update</b>git push origin develop</span>`,
@@ -977,25 +977,25 @@ func TestRailMarkupHostedSessions(t *testing.T) {
 			t.Errorf("the waiting row lacks %s:\n%s", want, waits)
 		}
 	}
-	if strings.Contains(waits, "hi claude run") || strings.Contains(waits, "last reply") {
+	if strings.Contains(waits, `class="hbr"`) || strings.Contains(waits, "last reply") {
 		t.Errorf("the waiting row shows a working ring or its last message:\n%s", waits)
 	}
 	if i, j := strings.Index(waits, `class="rid`), strings.Index(waits, `class="hosted"`); i < 0 || j < i {
 		t.Errorf("the hosted mark must follow the title:\n%s", waits)
 	}
 	other := rowOf("plain")
-	for _, not := range []string{"data-ap", `class="hosted"`, "chip perm", "hi pi perm"} {
+	for _, not := range []string{"data-ap", `class="hosted"`, "chip perm", `class="hb perm" data-h="pi"`} {
 		if strings.Contains(other, not) {
 			t.Errorf("a session the daemon does not host shows %q:\n%s", not, other)
 		}
 	}
-	if !strings.Contains(other, `<span class="hi pi run" role="img" aria-label="pi · lead working" title="pi · lead working">P<span class="orb"><span class="rrun"></span></span></span>`) || !strings.Contains(other, `<span class="s2">hi</span>`) {
+	if !strings.Contains(other, `<span class="hb" data-h="pi" role="img" aria-label="pi · lead working" title="pi · lead working"><span class="hbr"></span></span>`) || !strings.Contains(other, `<span class="s2">hi</span>`) {
 		t.Errorf("the working row lost its orbit line or message:\n%s", other)
 	}
-	if f := rowOf("failed"); !strings.Contains(f, `<span class="hi claude err" role="img" aria-label="claude · usage limit reached" title="claude · usage limit reached">C</span>`) || strings.Contains(f, "hi claude run") {
+	if f := rowOf("failed"); !strings.Contains(f, `<span class="hb err" data-h="claude" role="img" aria-label="claude · usage limit reached" title="claude · usage limit reached"></span>`) || strings.Contains(f, `data-h="claude" role="img" aria-label="claude · lead working"`) {
 		t.Errorf("the failed row lacks its error ring:\n%s", f)
 	}
-	if strings.Contains(waits, "hi claude err\"") || strings.Contains(other, "hi claude err\"") {
+	if strings.Contains(waits, `class="hb err" data-h="claude"`) || strings.Contains(other, `class="hb err" data-h="claude"`) {
 		t.Error("a row with no failure shows the error ring")
 	}
 
@@ -1164,20 +1164,20 @@ func TestRailStoppedRowSleeps(t *testing.T) {
 		row, _, _ := strings.Cut(rest, `</a></div>`)
 		return row
 	}
-	if row := rowOf("stopped"); !strings.Contains(html, `class="rs stopped hosted-row" data-rid="stopped"`) || !strings.Contains(row, `">C</span></span><span class="rid">stopped</span>`) {
+	if row := rowOf("stopped"); !strings.Contains(html, `class="rs stopped hosted-row" data-rid="stopped"`) || !strings.Contains(row, `></span></span><span class="rid">stopped</span>`) {
 		t.Errorf("the stopped row lacks its stopped class, or something sits between its icon and title:\n%s", row)
 	}
 	if row := rowOf("crashed"); !strings.Contains(html, `class="rs stopped hosted-row" data-rid="crashed"`) || !strings.Contains(row, "exit code 1") {
 		t.Errorf("a processless row whose child exited must sleep (the stopped rule hides its reason line):\n%s", row)
 	}
-	if row := rowOf("live"); !strings.Contains(html, `class="rs" data-rid="live"`) || !strings.Contains(row, `<span class="hi unk" role="img" aria-label="? · lead waiting" title="? · lead waiting">?</span>`) {
+	if row := rowOf("live"); !strings.Contains(html, `class="rs" data-rid="live"`) || !strings.Contains(row, `<span class="hb" data-h="" role="img" aria-label="? · lead waiting" title="? · lead waiting"></span>`) {
 		t.Errorf("the plain row = %s, want no stopped class and the unknown-harness icon", row)
 	}
 	if !strings.Contains(html, `class="rs ended" data-rid="ended"`) {
 		t.Errorf("an ended row whose child exited must stay a plain ended row:\n%s", rowOf("ended"))
 	}
 	css := mustAsset(t, "dashboard.css")
-	for _, want := range []string{".rail .rs.stopped .rid { color: var(--wb-muted-fg); }", ".rail .rs.stopped .hi { opacity: .55; }", ".rail .rs.stopped .s2 { display: none; }"} {
+	for _, want := range []string{".rail .rs.stopped .rid { color: var(--wb-muted-fg); }", ".rail .rs.stopped .hb { opacity: .55; }", ".rail .rs.stopped .s2 { display: none; }"} {
 		if !strings.Contains(css, want) {
 			t.Errorf("dashboard.css lacks %q", want)
 		}
@@ -1219,7 +1219,7 @@ func TestRailMarkupTree(t *testing.T) {
 	}
 	a1 := rowOf("a1")
 	for _, want := range []string{` data-kids="1"`, `class="kidtog" aria-expanded="true" title="2 sessions under this one: show or hide"`, `<span class="kn">2</span>`,
-		`<span class="chip perm kap" title="1 session under this one awaits approval">?</span>`, `<span class="orb kidorb">`, `data-star="0"`} {
+		`<span class="chip perm kap" title="1 session under this one awaits approval">?</span>`, `<span class="hbr kidorb">`, `data-star="0"`} {
 		if !strings.Contains(a1, want) {
 			t.Errorf("the parent a1 lacks %s:\n%s", want, a1)
 		}

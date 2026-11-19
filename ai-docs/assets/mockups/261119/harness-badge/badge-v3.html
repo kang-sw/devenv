@@ -1,0 +1,45 @@
+<style>
+.hbm{background:#1e1f22;color:#e6e6e6;font:13px system-ui,sans-serif;padding:14px;border-radius:8px}
+.hbm h4{margin:0 0 8px;font-size:12px;color:#9a9a9a;font-weight:600}
+.hb{position:relative;display:inline-flex;align-items:center;justify-content:center;width:30px;height:18px;border-radius:6px;font-size:12px;font-weight:700;line-height:1;flex:none;box-sizing:border-box}
+.hb.sm{width:22px;height:14px;font-size:9.5px;border-radius:4.5px}
+.hb[data-h=claude]{background:#d97757;color:#fff}
+.hb[data-h=pi]{background:#0b0b0c;color:#e6e6e6;border:1px solid #5a5a5a}
+.hb[data-h=codex]{background:#f2f2f2;color:#1e1f22}
+.hb[data-h=agy]{background:#3b7be8;color:#fff}
+@property --hba{syntax:"<angle>";inherits:false;initial-value:0deg}
+.sp{position:relative;display:inline-flex;padding:2px;border-radius:8px}
+.sp.sm{border-radius:6.5px}
+.sp::after{content:"";position:absolute;inset:0;border-radius:inherit;padding:2px;background:conic-gradient(from var(--hba),var(--c) 0 100deg,transparent 100deg 360deg);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;animation:hbspin 1.1s linear infinite;pointer-events:none;z-index:2}
+@keyframes hbspin{to{--hba:360deg}}
+.sp{--c:#d6dde8}
+.fa .hb{font-family:"Arial Rounded MT Bold",ui-rounded,sans-serif;font-weight:400}
+.fb .hb{font-family:"Nunito","Varela Round",ui-rounded,sans-serif;font-weight:800}
+.fc .hb{font-family:"Comic Sans MS",ui-rounded,sans-serif}
+.fd .hb{font-family:"Trebuchet MS",sans-serif}
+.fe .hb{font-family:ui-monospace,Consolas,monospace}
+table.hbt{border-collapse:collapse}
+.hbt td,.hbt th{padding:6px 7px;text-align:center;font-size:12px}
+.hbt th{color:#9a9a9a;font-weight:600;text-align:left}
+.hbt td.sep{width:14px}
+</style>
+<div class="hbm">
+<h4>dim 제거, 크기로만 구분 · 글꼴 후보 비교 (왼쪽 4개 = 리드 큰 버전 + 실행 중, 오른쪽 4개 = 서브 작은 버전 + 실행 중)</h4>
+<table class="hbt">
+<tr class="fa"><th>a. Arial Rounded MT Bold</th>
+<td><span class="hb" data-h="claude">Cl</span></td><td><span class="hb" data-h="pi">Pi</span></td><td><span class="sp" data-h="codex"><span class="hb" data-h="codex">Co</span></span></td><td><span class="sp" data-h="agy"><span class="hb" data-h="agy">Ag</span></span></td><td class="sep"></td>
+<td><span class="hb sm" data-h="claude">Cl</span></td><td><span class="sp sm" data-h="pi"><span class="hb sm" data-h="pi">Pi</span></span></td><td><span class="hb sm" data-h="codex">Co</span></td><td><span class="sp sm" data-h="agy"><span class="hb sm" data-h="agy">Ag</span></span></td></tr>
+<tr class="fb"><th>b. Nunito (번들 시)</th>
+<td><span class="hb" data-h="claude">Cl</span></td><td><span class="hb" data-h="pi">Pi</span></td><td><span class="sp" data-h="codex"><span class="hb" data-h="codex">Co</span></span></td><td><span class="sp" data-h="agy"><span class="hb" data-h="agy">Ag</span></span></td><td class="sep"></td>
+<td><span class="hb sm" data-h="claude">Cl</span></td><td><span class="sp sm" data-h="pi"><span class="hb sm" data-h="pi">Pi</span></span></td><td><span class="hb sm" data-h="codex">Co</span></td><td><span class="sp sm" data-h="agy"><span class="hb sm" data-h="agy">Ag</span></span></td></tr>
+<tr class="fc"><th>c. Comic Sans MS</th>
+<td><span class="hb" data-h="claude">Cl</span></td><td><span class="hb" data-h="pi">Pi</span></td><td><span class="sp" data-h="codex"><span class="hb" data-h="codex">Co</span></span></td><td><span class="sp" data-h="agy"><span class="hb" data-h="agy">Ag</span></span></td><td class="sep"></td>
+<td><span class="hb sm" data-h="claude">Cl</span></td><td><span class="sp sm" data-h="pi"><span class="hb sm" data-h="pi">Pi</span></span></td><td><span class="hb sm" data-h="codex">Co</span></td><td><span class="sp sm" data-h="agy"><span class="hb sm" data-h="agy">Ag</span></span></td></tr>
+<tr class="fd"><th>d. Trebuchet MS</th>
+<td><span class="hb" data-h="claude">Cl</span></td><td><span class="hb" data-h="pi">Pi</span></td><td><span class="sp" data-h="codex"><span class="hb" data-h="codex">Co</span></span></td><td><span class="sp" data-h="agy"><span class="hb" data-h="agy">Ag</span></span></td><td class="sep"></td>
+<td><span class="hb sm" data-h="claude">Cl</span></td><td><span class="sp sm" data-h="pi"><span class="hb sm" data-h="pi">Pi</span></span></td><td><span class="hb sm" data-h="codex">Co</span></td><td><span class="sp sm" data-h="agy"><span class="hb sm" data-h="agy">Ag</span></span></td></tr>
+<tr class="fe"><th>(이전) 고정폭</th>
+<td><span class="hb" data-h="claude">Cl</span></td><td><span class="hb" data-h="pi">Pi</span></td><td><span class="sp" data-h="codex"><span class="hb" data-h="codex">Co</span></span></td><td><span class="sp" data-h="agy"><span class="hb" data-h="agy">Ag</span></span></td><td class="sep"></td>
+<td><span class="hb sm" data-h="claude">Cl</span></td><td><span class="sp sm" data-h="pi"><span class="hb sm" data-h="pi">Pi</span></span></td><td><span class="hb sm" data-h="codex">Co</span></td><td><span class="sp sm" data-h="agy"><span class="hb sm" data-h="agy">Ag</span></span></td></tr>
+</table>
+</div>

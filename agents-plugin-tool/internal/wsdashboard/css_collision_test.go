@@ -299,7 +299,7 @@ func TestCSSClassesDoNotCollideAcrossModules(t *testing.T) {
 			// This exact cross-module rule is intentional: it pauses the
 			// whiteboard animation. Do not exempt other uses of these classes.
 			for _, exception := range []struct{ rule, fragment string }{
-				{`:root[data-animation-paused] :is(.spin, .pulse, .pibadge, .caret, .ibadge.busy .istop, .rail .drkwork, .rail .hi .rrun, .rail .hi.perm, .rail .sbn, .dskel i, .tk .tk-qspin, .oq-pill.board-updated) { animation-play-state: paused; }`, `.oq-pill.board-updated`},
+				{`:root[data-animation-paused] :is(.spin, .pulse, .pibadge, .caret, .ibadge.busy .istop, .rail .drkwork, .hb .hbr, .rail .hb.perm, .rail .sbn, .dskel i, .tk .tk-qspin, .oq-pill.board-updated) { animation-play-state: paused; }`, `.oq-pill.board-updated`},
 			} {
 				if strings.Count(css, exception.rule) != 1 {
 					t.Errorf("dashboard intentional cross-module rule missing or repeated: %s", exception.rule)

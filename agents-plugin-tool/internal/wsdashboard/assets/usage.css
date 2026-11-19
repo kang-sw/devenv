@@ -16,9 +16,6 @@
 .usage-pace.over { color: var(--wb-fail); }
 .usage-stale, .usage-stale .usage-pace { color: var(--wb-muted-fg); }
 .usage-stale .usage-number { text-decoration: underline dotted; text-underline-offset: 3px; }
-.usage-harness .hi, .usage-pop .hi { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; border-radius: 4px; font: 800 11px/1 var(--wb-mono, monospace); }
-.usage-harness .claude, .usage-pop .claude { background: #D97757; color: #fff; }
-.usage-harness .codex, .usage-pop .codex { background: #10A37F; color: #fff; }
 .usage-empty, .usage-meta, .usage-plan, .usage-status { color: var(--wb-muted-fg); }
 .usage-pop { width: 340px; max-width: 100%; font-size: 12.5px; }
 .usage-pop:focus { outline: none; }

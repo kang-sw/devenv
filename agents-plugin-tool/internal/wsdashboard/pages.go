@@ -1411,6 +1411,10 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		serveTermSymbols(w)
 		return
 	}
+	if rest == harnessFontName() {
+		serveHarnessFont(w)
+		return
+	}
 	if data, ok := GuideAsset(rest); ok {
 		serveGuideAsset(w, data)
 		return
