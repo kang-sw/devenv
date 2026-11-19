@@ -87,8 +87,63 @@ were read on `develop` at `9f43a8f00`.
 ## Decisions
 
 - **Retirement is allowed (owner, 2026-11-19 21:56, epic Cross-Child
-  Decisions).** The mechanism and compatibility tier are not decided; see
-  (1817).
+  Decisions).**
+
+The decisions below settled the queue on 2026-11-19 with the lead's
+recommendations as assumed answers. Each line reads "owner-assumed": the owner
+confirms them before this work merges to `develop`.
+
+- **Mechanism A, tier T1, `(1817)=A`** (owner-assumed 2026-11-19 under (1802)=b; owner confirms in the morning):
+  - Stop rendering the embed snapshot, and drop the `embed:` result line.
+  - `wb:embed-dir` stays an accepted no-op. It stores nothing, emits no
+    `setting` effect (so no metadata-revision bump), and returns one `info:`
+    deprecation line, which is shipped text.
+  - The stored-folder check that refuses a whole update (`store.go:862-866`)
+    goes with it, since the field is ignored (`(1819)`).
+  - Remove the playbook's embed bullets, the `wb:embed-dir` command-table row,
+    and the inline-embed watching clause.
+  - Tier per the table below: rows 1 and 3 are T1, rows 2, 4, and 5 are T0.
+    The highest is T1, so a patch is allowed (Release Rule 1).
+  - Rejected: B, keeping `embed:` as the live URL (T0). A host that embeds
+    files gets a URL, and the line would mislead.
+  - Rejected: C, an opt-in render (T0). It keeps a renderer no in-repo host
+    uses.
+  - Rejected: D, removing `wb:embed-dir` (T3). An unknown-command refusal hits
+    old text (`wsxmlcmd/wsxmlcmd.go:410`).
+- **The store child is blocked by this ticket, `(1815)`** (owner-assumed 2026-11-19 under (1802)=b; owner confirms in the morning):
+  - `261119-refactor-ws-whiteboard-sqlite-board-store` carries
+    `blocked-by:` this ticket.
+  - Rejected: carrying embed state and the synchronous embed render through the
+    new store.
+- **This ticket owns the embed slice of
+  `261116-feat-ws-whiteboard-retire-disk-pages`, `(1818)`** (owner-assumed 2026-11-19 under (1802)=b; owner confirms in the morning):
+  - The slice covers `embed:`, `wb:embed-dir`, old text that emits the embed
+    line, host embed users, and embed eviction.
+  - The lead narrows that ticket's text to the full page and file-only mode.
+  - Rejected: leaving the slice there; merging the two tickets.
+- **Embed fields are ignored, never refused, `(1819)`** (owner-assumed 2026-11-19 under (1802)=b; owner confirms in the morning):
+  - The new binary stops writing `last_embed_seq`, `embeds`, and `embed_dir`,
+    ignores them on read, and never refuses a board that carries them.
+    Leftover values also arrive in the store child's open-time merge.
+  - Rejected: a strip-on-load migration write.
+- **Leftover embed files go to the existing daily cleanup, `(1820)=a`** (owner-assumed 2026-11-19 under (1802)=b; owner confirms in the morning):
+  - The daily orphan cleanup (`mcp/whiteboard_tools.go:927-967`) removes a
+    session's files once its key record is gone.
+  - Host embed folders are never touched.
+  - Rejected: b, a one-time sweep at first start.
+- **Embed-only code goes with the producer, `(1821)`** (owner-assumed 2026-11-19 under (1802)=b; owner confirms in the morning):
+  - Remove the `LayoutEmbed` view and render branches, the embed panel
+    variants, the embed body-class script checks, `chip.fresh` in every
+    locale, the embed hash and eviction, and `EmbedRetention`.
+  - Keep the GC filename pattern, which `(1820)=a` relies on.
+  - Tests that pinned embed output are deleted or rewritten to assert behavior.
+  - Rejected: keeping dead layout code.
+- **Playbook edit procedure, `(1822)`** (owner-assumed 2026-11-19 under (1802)=b; owner confirms in the morning):
+  - Edit `agents-plugin/rsrc/whiteboard/whiteboard.md`.
+  - Regenerate the wsflow copy byte-identical and the Pi archives in the same
+    push (`ai-docs/manuals/wsflow-mirroring.md` rule 6).
+  - The edited text names no repository ticket, commit, or layout
+    (`ai-docs/manuals/shipped-surface-boundary.md` `## Rules`).
 
 ## Constraints
 
@@ -104,7 +159,7 @@ were read on `develop` at `9f43a8f00`.
   itself (`261119-refactor-ws-whiteboard-sqlite-board-store`).
 - `whiteboard.update` keeps its arguments and its `full:` line.
 
-### Compatibility paths to grade (tier follows the (1817) choice)
+### Compatibility paths (graded under `(1817)=A`)
 
 | # | Direction | Behavior | Grade |
 |---|---|---|---|
@@ -114,82 +169,26 @@ were read on `develop` at `9f43a8f00`.
 | 4 | The new daemon opens a board written by an older one | Leftover embed fields are ignored. | T0 |
 | 5 | A zip crosses versions | Load already clears embed fields (`folders_archive.go:160`). | T0 |
 
-## Open Decision Queue
-
-Last ID used: (1822)
-
-(1815) [open] [technical] `261119-refactor-ws-whiteboard-sqlite-board-store` takes `blocked-by:` this ticket, so the embed render is gone before the store switch.
-- Sequencing over carrying embed state (`Embeds`, `LastEmbedSeq`, `EmbedDir`)
-  and the synchronous embed render through the new store, only to delete them.
-  The per-update embed render is synchronous derived output that
-  performance.md rule 5 forbids on the update path.
-
-(1817) [open] [policy] Retirement mechanism for the embed snapshot.
-- Context: no in-repo host consumes the file. The owner described the path as
-  unused (2026-11-16) and costly (2026-11-19). The paths are graded in the
-  table above.
-- Alternative A: stop rendering. Remove the `embed:` result line. Keep
-  `wb:embed-dir` as an accepted no-op that stores nothing and returns one
-  `info:` deprecation line. Remove the playbook's embed bullets, command-table
-  row, and inline-embed watching clause. Tier T1, patch-safe.
-- Alternative B: as A, but keep the `embed:` line carrying the live board URL
-  (the `full:` value). Tier T0. A host that embeds a file path then gets a URL.
-- Alternative C: render only when a host set `wb:embed-dir`, and render nothing
-  by default. Tier T0. Keeps the embed renderer and its code for an opt-in no
-  in-repo host uses.
-- Alternative D: as A, and also remove `wb:embed-dir`. Tier T3 (unknown-command
-  refusal for old text). Needs a minor release and owner approval.
-> Recommend A. It removes all render cost and code, stays patch-safe, and leaves
-> no misleading line. B's URL does not fit hosts that embed files, and C keeps
-> a renderer nobody in the repo uses.
-
-(1818) [open] [technical] This ticket owns the embed slice that `261116-feat-ws-whiteboard-retire-disk-pages` lists as open (`embed:`, `wb:embed-dir`, old text that emits the embed line, host embed users, embed eviction). After settlement the lead narrows that ticket's text to the full page and file-only mode.
-- Moving the slice here over leaving it in 261116 or merging the tickets. The
-  owner's 2026-11-19 allowance names this child, and 261116's full-page
-  retirement depends on the `file://` link decision this ticket does not need.
-
-(1819) [open] [technical] The new binary stops writing `last_embed_seq`, `embeds`, and `embed_dir` and ignores them on read; it never refuses a board that still carries them.
-- Ignore over strip-on-load migration. Go's JSON decoding already ignores
-  unknown fields, so no write is needed. Paths 3-5 in the table stay T0/T1.
-
-(1820) [open] [policy] What happens to existing embed snapshot files in `ai-docs/whiteboards/` (up to 5 per live session, plus host-folder files the server never owned).
-- Alternative a: leave them to the existing daily orphan GC, which deletes a
-  session's files once its key record is gone
-  (`mcp/whiteboard_tools.go:927-967`). Live sessions keep their leftovers until
-  then.
-- Alternative b: a one-time sweep at first start deletes every
-  `<reply-id>-<hash>.html` in each project's `ai-docs/whiteboards/`.
-- Host embed folders are never touched in either case
-  (`whiteboard_tools.go:658-662`).
-> Recommend a: no new deletion path. The files are git-excluded and bounded.
-
-(1821) [open] [technical] Remove the embed-only code with the producer: the `LayoutEmbed` view and render branches, the embed panel variants, the embed body-class script checks, `chip.fresh` in every locale, the embed hash and eviction, and `EmbedRetention`. Tests that pinned embed output are deleted or rewritten to assert behavior.
-- Removal over keeping dead layout code. No other caller renders
-  `LayoutEmbed` (its only producer is `whiteboard_tools.go:648`). Keep the
-  GC filename pattern while (1820)a relies on it.
-
-(1822) [open] [announced] Playbook edits go to `agents-plugin/rsrc/whiteboard/whiteboard.md`, with the wsflow copy regenerated byte-identical and the Pi archives regenerated in the same push. The edited text names no repository ticket, commit, or layout.
-- Citation: `ai-docs/manuals/wsflow-mirroring.md` (generated rsrc tree; rule 6)
-  and `ai-docs/manuals/shipped-surface-boundary.md` `## Rules`.
-
 ## Phases
 
 ### Phase 1: Stop rendering and publishing the embed snapshot
 
-Apply the mechanism settled in (1817) to:
+Apply `(1817)=A` to:
 
 - the renderer and publish path;
 - the `embed:` result line;
 - `wb:embed-dir`;
-- the shipped playbook text and its copies ((1822)).
+- the shipped playbook text and its copies (`(1822)`).
 
-Also apply (1819) to persisted state and (1821) to the code, and handle
-leftover files per (1820).
+Also apply `(1819)` to persisted state and `(1821)` to the code. Leftover
+files follow `(1820)=a`: there is no new deletion path.
 
 Verification:
 
 - A top-level lead `whiteboard.update` writes no `<reply-id>-<hash>.html` and
   no host-folder file.
+- `<wb:embed-dir path="...">` is accepted and stores nothing. A board that
+  carries a stale `embed_dir` from an older version no longer refuses updates.
 - Each graded path in the table behaves as recorded. Where the old binary is
   involved, use the `wswhiteboard/testdata/compat-old` harness.
 - Before/after file operations and wall time per `whiteboard.update` on macOS,
