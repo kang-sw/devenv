@@ -111,7 +111,7 @@ section.topic:not([data-max]) > [data-wbcv]:not(.tophead):not(:has(details.entry
    Mobile retains its original insets; only wide sheets use the captured span. */
 .sheet-width { flex: none; }
 .sheet-width[hidden] { display: none !important; }
-details.entry-panel[data-max] > summary:has(> .sheet-width:not([hidden])) { grid-template-columns: 10px minmax(0, 1fr) auto auto auto; }
+details.entry-panel[data-max] > summary:has(> .sheet-width:not([hidden])) { grid-template-columns: var(--pcol) minmax(0, 1fr) auto auto auto; }
 details.entry-panel[data-max] > summary > .sheet-width { grid-column: 4; grid-row: 1; }
 details.entry-panel[data-max] > summary:has(> .sheet-width:not([hidden])) > .d-min { grid-column: 5; }
 @media (max-width: 640px) { .bcard[data-max] .bc-in { top: 46px; left: 8px; right: 8px; bottom: 8px; } }

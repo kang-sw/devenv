@@ -114,10 +114,10 @@
 .entry-panel { container-type: inline-size; background: transparent; min-width: 0; }
 /* Native maximize reuses this shell; transparent renderer bodies need a sheet. */
 .entry-panel[data-max] { background: var(--wb-bg); }
-.entry-panel > summary { list-style: none; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; column-gap: 8px; row-gap: 0; align-items: start; min-height: 24px; padding: 0; cursor: pointer; }
+.entry-panel > summary { list-style: none; display: grid; --pcol: calc(var(--h-av, 18px) + var(--h-gap, 8px) + var(--h-time, 64px)); grid-template-columns: var(--pcol) minmax(0, 1fr) auto; column-gap: 8px; row-gap: 0; align-items: start; min-height: 24px; padding: 0; cursor: pointer; }
 /* Dashboard actions are siblings of .pmeta, not children of it. Both share
    one slot; dashboard.css switches which action is displayed when large. */
-.entry-panel > summary:has(> button) { grid-template-columns: 10px minmax(0, 1fr) auto auto; }
+.entry-panel > summary:has(> button) { grid-template-columns: var(--pcol) minmax(0, 1fr) auto auto; }
 .entry-panel > summary > button { grid-column: 4; grid-row: 1; min-width: 24px; min-height: 24px; margin: 0; }
 .entry-panel > summary::-webkit-details-marker { display: none; }
 /* An unread republish stays conspicuous until the owner opens it. */
@@ -126,8 +126,16 @@
 .wb-panel-pending > .entry-panel { box-shadow: inset 0 0 0 2px var(--wb-primary); }
 .wb-panel-pending > .entry-panel > summary { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-bg)); }
 .entry-panel > summary:hover { background: var(--wb-wash); }
-.entry-panel > summary::before { content: "\25B8"; grid-column: 1; grid-row: 1; width: 10px; font-size: 10px; line-height: 24px; color: var(--wb-muted-fg); }
-.entry-panel[open] > summary::before { content: "\25BE"; }
+/* Fold state mark: a closed envelope while the body is folded, an open one
+   while it shows. It sits in the log rows' avatar column and the panel time in
+   their time column, so a card header lines up with the rows around it. */
+.pmark { grid-column: 1; grid-row: 1; display: flex; align-items: center; justify-content: center; width: var(--h-av, 18px); height: 24px; color: var(--wb-muted-fg); }
+.pmark .i { width: 14px; height: 14px; }
+.pmark .i:last-child, .entry-panel[open] > summary > .pmark .i:first-child { display: none; }
+.entry-panel[open] > summary > .pmark .i:last-child { display: block; }
+.entry-panel.msg > summary > .pmark { display: none; }
+.ptime { grid-column: 1; grid-row: 1; justify-self: start; display: flex; flex-direction: column; min-width: 0; width: var(--h-time, 64px); margin-left: calc(var(--h-av, 18px) + var(--h-gap, 8px)); line-height: 24px; color: var(--wb-muted-fg); }
+.ptime .entry-at { font: 10px/24px var(--wb-mono); opacity: .85; }
 .entry-panel > summary:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px; }
 .entry-panel.msg > summary { cursor: default; }
 .entry-panel.msg > summary:hover { background: transparent; }
@@ -136,7 +144,6 @@
 .entry-panel > summary > .entry-recap { grid-column: 2; grid-row: 1; line-height: 24px; }
 .entry-panel:not([open]):not(.msg) > summary .entry-recap { font-size: 13px; font-weight: 600; }
 .pmeta { grid-column: 3; grid-row: 1; justify-self: end; display: inline-flex; align-items: center; gap: 8px; height: 24px; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.pmeta .entry-at { font: 11px var(--wb-mono); }
 .pmeta a.mref { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; font: 600 11px var(--wb-mono); color: inherit; text-decoration: none; }
 .pmeta a.mref:hover { color: var(--wb-primary); }
 .entry-body.doc-body { font-size: 13.5px; }
@@ -177,9 +184,10 @@
 }
 /* Query the actual panel width, including inside a wide host or maximized. */
 @container (max-width: 420px) {
-  .entry-panel > summary { grid-template-columns: 10px minmax(0, 1fr); }
-  .entry-panel > summary > .pmeta { grid-column: 2; grid-row: 2; }
-  .entry-panel > summary:has(> button) { grid-template-columns: 10px minmax(0, 1fr) auto auto; }
+  .entry-panel > summary { --pcol: var(--h-av, 18px); }
+  .entry-panel > summary > .ptime { grid-column: 2; grid-row: 2; width: auto; margin-left: 0; }
+  .entry-panel > summary > .pmeta { grid-column: 3; grid-row: 2; }
+  .entry-panel > summary:has(> button) { grid-template-columns: var(--pcol) minmax(0, 1fr) auto auto; }
   .entry-panel > summary:has(> button) > .entry-recap { grid-column: 2 / 5; }
   .entry-panel > summary:has(> button) > .pmeta { grid-column: 3; }
   .entry-panel > summary > button { grid-row: 2; }
