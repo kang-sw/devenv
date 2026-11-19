@@ -580,6 +580,9 @@
     "261119-feat-ws-whiteboard-frame-css-isolation": {
       "registered_at": "2026-11-19T06:59:13Z"
     },
+    "261119-feat-ws-whiteboard-retire-embed-snapshot": {
+      "registered_at": "2026-11-19T14:14:08Z"
+    },
     "261119-refactor-ws-config-drop-candidate-cleanup": {
       "registered_at": "2026-11-19T14:03:33Z"
     },
