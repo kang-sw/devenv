@@ -243,26 +243,6 @@
     "261114-feat-ws-content-change-relative-hover": {
       "registered_at": "2026-11-14T11:47:01Z"
     },
-    "261114-feat-ws-conversation-audit-event-store": {
-      "registered_at": "2026-11-13T16:33:10Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-19T14:09:31Z"
-      }
-    },
-    "261114-feat-ws-dashboard-conversation-audit-view": {
-      "registered_at": "2026-11-13T16:39:01Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-19T14:09:38Z"
-      }
-    },
     "261114-feat-ws-live-reasoning-summary": {
       "registered_at": "2026-11-14T11:47:01Z"
     },
@@ -602,6 +582,9 @@
     },
     "261119-refactor-ws-config-drop-candidate-cleanup": {
       "registered_at": "2026-11-19T14:03:33Z"
+    },
+    "261119-refactor-ws-whiteboard-sqlite-board-store": {
+      "registered_at": "2026-11-19T14:14:02Z"
     }
   }
 }
