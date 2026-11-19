@@ -56,13 +56,10 @@ Shipped docs describe `full:`, `embed:`, the host embed folder and the `wb:embed
 None is decided; each settles through the Open Decision Queue before `ready/`.
 
 - What `full:` returns when no daemon serves the session: an error, or an auto-start of the daemon.
-- The fate of the `wb:embed-dir` command and the `embed:` line in `whiteboard.update`: accepted no-op (deprecated) or refused. Sets the compatibility tier.
-- Old plugin and skill text that tells leads to emit the host's embed line: how long it keeps being sent and what an old lead sees.
-- Host or Orca embed users: none were found in code at drafting; confirm before removing.
-- The takeover recipe in the shipped playbook relies on copying the folder and on `wb:embed-dir` (`whiteboard.md` around line 40): what replaces it.
+- The embed slice (`embed:` line, `wb:embed-dir`, host embed users, old embed text, takeover-recipe dependence on `wb:embed-dir`) moved to `261119-feat-ws-whiteboard-retire-embed-snapshot` (`(1818)`).
 - Whether the authoritative board folder store stays (expected yes; only rendered pages retire).
 - Whether existing `ai-docs/whiteboards/**/*.html` files are deleted by a migration, left in place, or ignored by git.
-- Whether the shared template and renderer split so the daemon page no longer carries the `.Full`/`.Embed` branches, and what the ~19 `RenderPage` tests become.
+- Whether the shared template and renderer split so the daemon page no longer carries the full-page disk branches, and what the ~19 `RenderPage` tests become (the embed layout branches go with `261119-feat-ws-whiteboard-retire-embed-snapshot`).
 
 ## Phases
 

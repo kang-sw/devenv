@@ -236,17 +236,37 @@ confirms them before this work merges to `develop`.
     through the existing `FolderStore.Open`, commits it, and then adds the
     `(1805)=a` sentinel.
   - A DB found without the sentinel gets it on open.
-  - The existing legacy files stay byte-identical, and the folder is never
-    written again.
+  - After the import commit there is no write to the legacy folder, apart
+    from what `Open` itself replays or migrates: a leftover `pending.json`,
+    content and close-result migrations, and the `.lock` file
+    (`folders.go:143-159`, `:400-447`).
   - Rejected: dual-write on every update, because it keeps the per-update 2PC
     cost.
   - Rejected: legacy write-back of any kind (owner directive, 23:22).
+  - Rejected: a new read-only import path, because it duplicates replay
+    logic and an unreplayed intent would be lost from the import.
 - **Direct CLI never co-opens the board DB, `(1806)`** (owner-assumed
   2026-11-19 under (1802)=b; owner confirms in the morning):
-  - A direct `ws-mcp` CLI or `serve` process routes board calls to the daemon,
-    or refuses with an error naming the daemon as the board owner.
+  - A direct `ws-mcp` CLI or `serve` process refuses board calls with an
+    error naming the daemon as the board owner.
+  - Rejected: routing board calls to the daemon. No proxy exists in
+    `cmd/ws-mcp`, so it would be new work, and 0.50+ launchers always go
+    through the daemon.
   - Rejected: concurrent WAL access from a second process, because it brings
     back cross-process locking and per-call revalidation (rules 1 and 4).
+- **Sentinel write failure does not block the open, `(1823)`** (technical,
+  lead ruling 2026-11-19):
+  - When the sentinel write fails after the import commit (read-only folder,
+    I/O error), the DB still opens.
+  - The sentinel is retried on the next open, and the failure is logged.
+  - Rejected: refusing to open, because it strands a board whose data is
+    already safely in the DB.
+- **Post-embed measurement baseline, `(1824)`** (technical, lead ruling
+  2026-11-19):
+  - The "before" baseline for this ticket is taken on the post-embed base,
+    after `261119-feat-ws-whiteboard-retire-embed-snapshot` has landed.
+  - Rejected: one shared baseline before both children, because it would
+    attribute the embed savings to the store.
 - **`PRAGMA locking_mode=EXCLUSIVE` before the first WAL access, `(1807)`**
   (owner-assumed 2026-11-19 under (1802)=b; owner confirms in the morning):
   - No `-shm` file and no per-transaction lock calls.
@@ -402,15 +422,20 @@ in the daemon uses it yet.
 - Legacy-layout zip export and `whiteboard.load` backup through
   `plan(nil, nil, state)` (`(1813)`). Old-layout zip load goes through the
   import path.
-- Capture the "before" measurement for the scenario above on the base (macOS
-  tracer and/or extended Go counters). It replaces the derived table.
+- Capture the "before" measurement for the scenario above on the post-embed
+  base (`(1824)`; macOS tracer and/or extended Go counters). It replaces the
+  derived table.
 
 Verification:
 
 - Round-trip import of fixture folders, including pending-intent replay, v1
   conversion, revision slots, and the load floor.
-- The legacy files stay byte-identical after import; only the sentinel is
-  added.
+- After the import commit the legacy folder is not written again. Before it,
+  only what `Open` itself replays or migrates changes (a leftover
+  `pending.json`, content and close-result migrations, the `.lock` file);
+  the fixtures cover each case. Then only the sentinel is added.
+- A failed sentinel write still opens the DB, logs the failure, and the next
+  open retries it (`(1823)`).
 - An unchanged update writes zero WAL frames.
 - A torn or killed transaction recovers to the last commit.
 - A kill between the import commit and the sentinel write ends with the
@@ -432,7 +457,7 @@ the board DB store:
   nudges, zip export, and `whiteboard.load` with its backup.
 - In-process change notification (`(1814)`).
 - Handle lifetime per `(1347)=c`: long idle close, reopen on next access.
-- Direct-CLI routing or refusal per `(1806)`.
+- Direct-CLI refusal naming the daemon as board owner per `(1806)`.
 
 Verification:
 

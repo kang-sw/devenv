@@ -148,6 +148,13 @@ confirms them before this work merges to `develop`.
     push (`ai-docs/manuals/wsflow-mirroring.md` rule 6).
   - The edited text names no repository ticket, commit, or layout
     (`ai-docs/manuals/shipped-surface-boundary.md` `## Rules`).
+- **Own before/after measurement, `(1824)`** (technical, lead ruling 2026-11-19):
+  - This ticket records its own before/after file-operation counts per
+    `whiteboard.update` with `fs_usage` or `dtruss` plus
+    `wsstate.FileIOCounters`.
+  - The store child's "before" baseline is taken on the post-embed base.
+  - Rejected: one shared baseline before both children, because it would
+    attribute the embed savings to the store.
 
 ## Constraints
 
@@ -226,6 +233,7 @@ Verification:
 - Each graded path in the table behaves as recorded. Where the old binary is
   involved, use the `wswhiteboard/testdata/compat-old` harness.
 - Before/after file operations and wall time per `whiteboard.update` on macOS,
-  with the method recorded in `261119-refactor-ws-whiteboard-sqlite-board-store`
-  `## Decisions`. Windows V3 measurement is recorded as deferred.
+  by the method in `(1824)`, which follows
+  `261119-refactor-ws-whiteboard-sqlite-board-store` `## Decisions`
+  (Measurement). Windows V3 measurement is recorded as deferred.
 - Tests assert behavior, not playbook sentences.
