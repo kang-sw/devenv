@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <title>Approved Mockup — Panel Header Visibility (A1 + S1)</title>
+  <style>
+    :root {
+      --wb-bg: #141518;
+      --wb-fg: #e7e7e4;
+      --wb-card: #1e2024;
+      --wb-muted: #2b2d32;
+      --wb-muted-fg: #a2a6ad;
+      --wb-primary: #7aa2ff;
+      --wb-primary-fg: #0c1424;
+      --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+      --wb-wash: color-mix(in srgb, var(--wb-fg) 6%, transparent);
+      --wb-ck-ok: #6cc39a;
+      --wb-ck-no: #f0797e;
+      --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+      --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    body { margin: 0; padding: 20px; background: var(--wb-bg); color: var(--wb-fg); font: 13.5px/1.5 var(--wb-sans); }
+    .board { max-width: 560px; margin: 0 auto; padding: 14px; border-radius: 12px; background: var(--wb-card); border: 1px solid var(--wb-line); }
+    .panel { container-type: inline-size; margin: 6px 0 10px; --h-av: 18px; --h-time: 58px; --h-gap: 8px; }
+    .panel > summary { list-style: none; display: grid; --pcol: calc(var(--h-av) + var(--h-gap) + var(--h-time)); grid-template-columns: var(--pcol) minmax(0, 1fr) auto auto; column-gap: 8px; align-items: start; padding: 5px 8px 5px 10px; border-left: 3px solid var(--wb-primary); border-radius: 8px; background: color-mix(in srgb, var(--wb-primary) 8%, transparent); cursor: pointer; }
+    .panel[open] > summary { border-radius: 8px 8px 0 0; background: color-mix(in srgb, var(--wb-primary) 12%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--wb-primary) 26%, var(--wb-line)); }
+    .pmark { grid-column: 1; grid-row: 1; width: var(--h-av); height: 24px; display: inline-flex; align-items: center; justify-content: center; color: var(--wb-primary); }
+    .ptime { grid-column: 1; grid-row: 1; margin-left: calc(var(--h-av) + var(--h-gap)); line-height: 24px; font: 10px/24px var(--wb-mono); color: var(--wb-muted-fg); }
+    .recap { grid-column: 2; grid-row: 1; line-height: 24px; font-weight: 700; word-break: keep-all; overflow-wrap: break-word; }
+    .meta { grid-column: 3; grid-row: 1; justify-self: end; display: inline-flex; align-items: center; gap: 7px; height: 24px; font: 11px var(--wb-mono); color: var(--wb-muted-fg); }
+    .body { margin: 0; padding: 9px 0 4px 12px; border-left: 3px solid color-mix(in srgb, var(--wb-primary) 26%, var(--wb-line)); border-radius: 0 0 0 4px; color: var(--wb-muted-fg); }
+    @container (max-width: 660px) {
+      .panel > summary { --pcol: var(--h-av); grid-template-columns: var(--pcol) auto minmax(0, 1fr) auto; row-gap: 4px; }
+      .recap { grid-column: 2 / 4; }
+      .ptime { grid-column: 2; grid-row: 2; margin-left: 0; line-height: 20px; }
+      .meta { grid-column: 3 / 5; grid-row: 2; height: auto; min-height: 20px; flex-wrap: wrap; }
+    }
+    @container (max-width: 440px) {
+      .meta { grid-column: 2 / 5; grid-row: 3; justify-self: start; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Approved decisions: (02)=a (A: full tinted header bar), (03)=a (A1: @container <=660px meta row fold), (04)=a (S1: top-rounded / bottom-square cap + flush 3px left spine) -->
+  <div class="board">
+    <details class="panel" open>
+      <summary>
+        <span class="pmark">✉</span>
+        <span class="ptime">5분 전</span>
+        <span class="recap">화이트보드 토널 톤으로 재설계한 인터랙티브 하모닉 필드 (다크·라이트 자동 연동)</span>
+        <span class="meta">v1 대비 +3 ~2 -5 · aurora-studio · v2 · #p1</span>
+      </summary>
+      <div class="body">Approved S1 + A1 cap header joined seamlessly to the 3px left spine.</div>
+    </details>
+    <details class="panel">
+      <summary>
+        <span class="pmark">✉</span>
+        <span class="ptime">2분 전</span>
+        <span class="recap">접힌 패널 예시 (사방 라운드 8px)</span>
+        <span class="meta">folded-sample · v1 · #p2</span>
+      </summary>
+      <div class="body">Folded panels render with full 8px rounded corners and open into a top-rounded cap.</div>
+    </details>
+  </div>
+</body>
+</html>
