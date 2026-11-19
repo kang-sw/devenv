@@ -153,7 +153,7 @@ func assertHireMail(t *testing.T, d *Daemon, p HireProposal, status string) {
 	for _, mail := range mails {
 		if strings.Contains(mail.Content, p.ID) {
 			found++
-			if !strings.Contains(mail.Content, ": "+status+"\n") || !strings.Contains(mail.Content, p.RecoveryContext) || mail.From != "" || mail.ReplyTo != "" {
+			if !strings.Contains(mail.Content, ": "+status+"\n") || !strings.Contains(mail.Content, p.RecoveryContext) || mail.From != "" || mail.ReplyTo != "" || mail.Label != wsmailbox.SystemLabel {
 				t.Fatalf("mail = %+v", mail)
 			}
 		}
