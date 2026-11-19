@@ -3,6 +3,7 @@ package wsagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,8 +49,11 @@ func parseCodexCache(raw []byte) ([]ModelChoice, []string) {
 	// Decode only the model vocabulary, not identity, etag or account data.
 	var cache struct {
 		Models []struct {
-			Slug   string `json:"slug"`
-			Levels []struct {
+			Slug string `json:"slug"`
+			// Visibility is Codex's picker visibility: "hide" and "none"
+			// keep a model out of its own list.
+			Visibility string `json:"visibility"`
+			Levels     []struct {
 				Effort string `json:"effort"`
 			} `json:"supported_reasoning_levels"`
 		} `json:"models"`
@@ -60,7 +64,7 @@ func parseCodexCache(raw []byte) ([]ModelChoice, []string) {
 	var models []ModelChoice
 	var efforts []string
 	for _, model := range cache.Models {
-		if !modelPattern.MatchString(model.Slug) {
+		if !modelPattern.MatchString(model.Slug) || model.Visibility == "hide" || model.Visibility == "none" {
 			continue
 		}
 		if !slices.ContainsFunc(models, func(m ModelChoice) bool { return m.ID == model.Slug }) {
@@ -113,7 +117,13 @@ func (b AgyBackend) hostedChoices(ctx context.Context) ([]ModelChoice, []string,
 	if err != nil {
 		return nil, efforts, fmt.Errorf("agy models: %w", err)
 	}
-	return parseAgyModels(out), efforts, nil
+	// A clean exit with no model (agy signed out, say) is a failure, so it
+	// takes the short failure TTL and shows, not a cached empty success.
+	models = parseAgyModels(out)
+	if len(models) == 0 {
+		return nil, efforts, errors.New("agy models: the listing named no model; is agy signed in?")
+	}
+	return models, efforts, nil
 }
 
 func parseAgyModels(out []byte) []ModelChoice {

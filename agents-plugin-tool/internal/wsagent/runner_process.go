@@ -583,9 +583,7 @@ func (c *conv) replayDone(lost bool) {
 		}
 	}
 	c.reconcileLeadPermission()
-	if err := c.allowAgyBypassPending(); err != nil {
-		fmt.Fprintf(c.r.opts.Log, "agent %s: auto-allow replayed permission: %v\n", c.rec.ReplyID, err)
-	}
+	c.allowAgyBypassPending()
 	c.checkAction(false)
 	c.live.writeSnapshot()
 	c.r.notify(c.rec.ReplyID, c.rec.Root)

@@ -464,11 +464,12 @@ func (p *agyProcess) SetPermissionMode(mode string) error {
 }
 
 // AnswerApproval answers a permission request with the option of the
-// matching kind. ACP carries no denial message.
+// matching kind. ACP carries no denial message. A request it cannot answer
+// (no such option, or no longer held) writes nothing: errNoApprovalAnswer.
 func (p *agyProcess) AnswerApproval(req ApprovalRequest, allow bool, _ string) error {
 	raw, option, err := p.m.answerFor(req.ID, allow)
 	if err != nil {
-		return err
+		return fmt.Errorf("%v: %w", err, errNoApprovalAnswer)
 	}
 	return p.writeLine(map[string]any{"jsonrpc": "2.0", "id": raw, "result": map[string]any{
 		"outcome": map[string]any{"outcome": "selected", "optionId": option},

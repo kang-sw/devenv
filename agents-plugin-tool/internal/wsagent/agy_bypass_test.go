@@ -1,12 +1,15 @@
 package wsagent
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 )
@@ -16,6 +19,11 @@ func agyBypassAsk(tool, request string) string {
 }
 
 func agyBypassAnswers(h *leadHarness, holder, request string) int {
+	return agyOptionAnswers(h, holder, request, "yes")
+}
+
+// agyOptionAnswers counts the answers to request that picked option.
+func agyOptionAnswers(h *leadHarness, holder, request, option string) int {
 	n := 0
 	for _, line := range h.holders.inputs(holder, "") {
 		var reply struct {
@@ -26,7 +34,7 @@ func agyBypassAnswers(h *leadHarness, holder, request string) int {
 				} `json:"outcome"`
 			} `json:"result"`
 		}
-		if json.Unmarshal([]byte(line), &reply) == nil && reply.ID == request && reply.Result.Outcome.Option == "yes" {
+		if json.Unmarshal([]byte(line), &reply) == nil && reply.ID == request && reply.Result.Outcome.Option == option {
 			n++
 		}
 	}
@@ -54,20 +62,20 @@ func TestAgyLeadBypassApprovalResumeAndReattach(t *testing.T) {
 	if st := h.state(id); len(st.Approvals) != 0 || st.PermissionMode != "bypass" {
 		t.Fatalf("auto-allow left a prompt: %+v", st)
 	}
-	if !slices.Contains(h.record(id).Answered, "call-1") {
-		t.Fatal("auto-answer not durably tracked")
-	}
+	// The bypass answer is tracked in memory and rides the next record
+	// write (the holder sequence's): no write of its own per tool call.
+	eventually(t, "auto-answer tracked by the next record write", func() bool { return slices.Contains(h.record(id).Answered, "call-1") })
 	if _, err := h.runner.AnswerApproval(id, "call-1", true, ""); requestStatus(err) != 409 {
 		t.Fatalf("second answer: %v", err)
 	}
 
-	// Native reports still update the native record, never ws's intent.
+	// A native report shows as the active mode but leaves the record:
+	// bypass holds only with native default on record (agyBypass).
 	h.holders.out(holder, `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"current_mode_update","currentModeId":"accept-edits"}}}`)
-	eventually(t, "native report", func() bool {
-		return h.state(id).ActiveMode == "accept-edits" && h.record(id).PermissionMode == "accept-edits"
-	})
-	if !h.record(id).AgyBypass || h.state(id).PermissionMode != "bypass" {
-		t.Fatal("native mode report cleared bypass")
+	eventually(t, "native report", func() bool { return h.state(id).ActiveMode == "accept-edits" })
+	h.quiesce(id)
+	if rec := h.record(id); !rec.AgyBypass || rec.PermissionMode != "default" || h.state(id).PermissionMode != "bypass" {
+		t.Fatalf("native mode report moved the bypass record: %+v", rec)
 	}
 
 	// A replacement daemon rejoins without a handshake or a duplicate answer.
@@ -89,7 +97,7 @@ func TestAgyLeadBypassApprovalResumeAndReattach(t *testing.T) {
 	eventually(t, "auto-allow after reattach", func() bool { return agyBypassAnswers(h, holder, "request-2") == 1 })
 
 	// A fresh process resumes in native default even after a native report
-	// changed PermissionMode; the separate intent survives stopping it.
+	// of another mode; the separate intent survives stopping it.
 	if _, err := h.runner.Stop(id); err != nil {
 		t.Fatal(err)
 	}
@@ -226,8 +234,13 @@ func TestAgyBypassScopeAndLegacyRecordRewrite(t *testing.T) {
 	if err := json.Unmarshal(raw, &restored); err != nil {
 		t.Fatal(err)
 	}
-	if !restored.AgyBypass || restored.PermissionMode != "accept-edits" || restored.launchPermissionMode() != "default" || restored.selectedPermissionMode() != "bypass" {
-		t.Fatalf("downgrade lost intent: %+v", restored)
+	// The old writer changed the mode without knowing the flag: the stale
+	// flag keeps the bytes but no longer widens approval.
+	if !restored.AgyBypass || restored.agyBypass() || restored.launchPermissionMode() != "accept-edits" || restored.selectedPermissionMode() != "accept-edits" {
+		t.Fatalf("stale bypass flag still allows after an old writer changed the mode: %+v", restored)
+	}
+	if kept := (Record{Lead: true, Backend: BackendAgy, PermissionMode: "default", AgyBypass: true}); !kept.agyBypass() {
+		t.Fatal("bypass stored with native default does not hold")
 	}
 	// A modern writer can explicitly clear the now-known optional member;
 	// unknown preservation must not resurrect it.
@@ -279,20 +292,42 @@ func TestAgyBypassAnswersBeforePublishing(t *testing.T) {
 				published int
 				notes     int64
 				answered  []string
+				settled   []string
+				disk      [3][]byte
+				stamps    [3]time.Time
 			)
 			c.do(func() {
 				spy.Process, c.proc = c.proc, spy
 				defer func() { c.proc = spy.Process }()
+				// The loop is held here, so only these steps could write
+				// the record.
+				snap := func(i int) {
+					disk[i], _ = os.ReadFile(recordPath(c.dir))
+					if info, err := os.Stat(recordPath(c.dir)); err == nil {
+						stamps[i] = info.ModTime()
+					}
+				}
+				snap(0)
 				before := h.notes.Load()
 				c.addApproval(ApprovalRequest{ID: "spy-call", Tool: "run_command"}, false)
 				notes, published, answered = h.notes.Load()-before, len(c.approvals), c.record().Answered
+				snap(1)
+				c.handle(Event{ApprovalDone: "spy-call"})
+				settled = c.record().Answered
+				snap(2)
 			})
 			if tc.bypass {
 				if published != 0 || notes != 0 {
 					t.Fatalf("bypass published the request: %d pending, %d page notifications", published, notes)
 				}
-				if len(spy.answered) != 1 || spy.answered[0].ID != "spy-call" || !spy.allowed[0] || !slices.Contains(answered, "spy-call") {
-					t.Fatalf("bypass answer: %+v %v answered=%v", spy.answered, spy.allowed, answered)
+				if len(spy.answered) != 1 || spy.answered[0].ID != "spy-call" || !spy.allowed[0] || !slices.Contains(answered, "spy-call") || slices.Contains(settled, "spy-call") {
+					t.Fatalf("bypass answer: %+v %v answered=%v settled=%v", spy.answered, spy.allowed, answered, settled)
+				}
+				// Neither the answer nor its settling rewrote the record.
+				for i := 1; i < 3; i++ {
+					if len(disk[0]) == 0 || !bytes.Equal(disk[i], disk[0]) || !stamps[i].Equal(stamps[0]) {
+						t.Fatalf("bypass answer step %d wrote the record:\n%s", i, disk[i])
+					}
 				}
 				return
 			}
@@ -300,5 +335,107 @@ func TestAgyBypassAnswersBeforePublishing(t *testing.T) {
 				t.Fatalf("%s did not publish the request: %d pending, %d notifications, %d answers", tc.mode, published, notes, len(spy.answered))
 			}
 		})
+	}
+}
+
+// TestAgyBypassUnanswerableRequestGoesToTheUser: a request agy offers no
+// allow option for cannot be auto-allowed. Nothing was written, so bypass
+// publishes it as default mode does instead of stopping the lead, and the
+// user can still deny it.
+func TestAgyBypassUnanswerableRequestGoesToTheUser(t *testing.T) {
+	h, _ := newAgyLeadHarness(t)
+	h.startAt("http://127.0.0.1:1")
+	id := h.lead(BackendAgy, LeadOptions{PermissionMode: "bypass"}).ID
+	h.send(id, "work")
+	holder := h.holder(id)
+	eventually(t, "prompt", func() bool { return len(agyPromptIDs(h, holder)) == 1 })
+	h.holders.out(holder, `{"jsonrpc":"2.0","method":"session/request_permission","params":{"sessionId":"agy-s1","toolCall":{"toolCallId":"deny-only","name":"run_command","title":"fixture command"},"options":[{"optionId":"no","kind":"reject_once"}]},"id":"req-deny-only"}`)
+	eventually(t, "published for the user", func() bool { return len(h.state(id).Approvals) == 1 })
+	h.quiesce(id)
+	if st := h.state(id); !st.Process {
+		t.Fatalf("an unanswerable bypass request stopped the lead: %+v", st)
+	}
+	c := h.runner.conv(id)
+	var answered []string
+	c.do(func() { answered = c.record().Answered })
+	if slices.Contains(answered, "deny-only") || agyOptionAnswers(h, holder, "req-deny-only", "no") != 0 {
+		t.Fatalf("unwritten answer tracked or written: %v", answered)
+	}
+	if _, err := h.runner.AnswerApproval(id, "deny-only", false, ""); err != nil {
+		t.Fatalf("user denial: %v", err)
+	}
+	eventually(t, "denial written", func() bool { return agyOptionAnswers(h, holder, "req-deny-only", "no") == 1 })
+	if st := h.state(id); !st.Process || len(st.Approvals) != 0 {
+		t.Fatalf("after denial: %+v", st)
+	}
+}
+
+// TestAgyBypassStaleFlagPrompts: a bypass flag on record with a mode other
+// than the native default it is stored with (an older writer changed the
+// mode) prompts instead of auto-allowing.
+func TestAgyBypassStaleFlagPrompts(t *testing.T) {
+	h, _ := newAgyLeadHarness(t)
+	h.startAt("http://127.0.0.1:1")
+	id := h.lead(BackendAgy, LeadOptions{PermissionMode: "default"}).ID
+	h.send(id, "work")
+	holder := h.holder(id)
+	eventually(t, "prompt", func() bool { return len(agyPromptIDs(h, holder)) == 1 })
+	h.holders.out(holder, agyBypassAsk("waiting", "req-waiting"))
+	eventually(t, "manual approval", func() bool { return len(h.state(id).Approvals) == 1 })
+	h.runner.Close()
+	rec := h.record(id)
+	rec.AgyBypass, rec.PermissionMode = true, "plan"
+	if err := writeRecord(wsdashboard.SessionDir(h.dir, id), rec); err != nil {
+		t.Fatal(err)
+	}
+	h.holders.restart()
+	h.startAt("http://127.0.0.1:1")
+	eventually(t, "replay completed", func() bool {
+		c := h.runner.conv(id)
+		done := false
+		if c != nil {
+			c.do(func() { done = c.proc != nil && !c.replaying })
+		}
+		return done
+	})
+	h.holders.out(holder, agyBypassAsk("next", "req-next"))
+	eventually(t, "both prompts wait", func() bool { return len(h.state(id).Approvals) == 2 })
+	if st := h.state(id); st.PermissionMode != "plan" || agyBypassAnswers(h, holder, "req-waiting") != 0 || agyBypassAnswers(h, holder, "req-next") != 0 {
+		t.Fatalf("stale bypass flag auto-allowed: %+v", st)
+	}
+}
+
+// TestAgyBypassEnableDuringReplay: enabling bypass while the session
+// rejoins its process succeeds; the waiting prompt is answered when the
+// rejoin ends, not refused mid-replay as a failed settings call.
+func TestAgyBypassEnableDuringReplay(t *testing.T) {
+	h, _ := newAgyLeadHarness(t)
+	h.startAt("http://127.0.0.1:1")
+	id := h.lead(BackendAgy, LeadOptions{PermissionMode: "default"}).ID
+	h.send(id, "work")
+	holder := h.holder(id)
+	eventually(t, "prompt", func() bool { return len(agyPromptIDs(h, holder)) == 1 })
+	h.holders.out(holder, agyBypassAsk("waiting", "req-waiting"))
+	eventually(t, "manual approval", func() bool { return len(h.state(id).Approvals) == 1 })
+	h.quiesce(id)
+	c := h.runner.conv(id)
+	var (
+		err     error
+		pending int
+	)
+	c.do(func() {
+		c.replaying = true
+		err = c.setNativePermissionMode("bypass", true)
+		pending = len(c.approvals)
+		// The rejoin's end (replayDone) answers what waits.
+		c.replaying = false
+		c.allowAgyBypassPending()
+	})
+	if err != nil || pending != 1 {
+		t.Fatalf("enable during replay: err=%v pending=%d", err, pending)
+	}
+	eventually(t, "answered after the rejoin", func() bool { return agyBypassAnswers(h, holder, "req-waiting") == 1 })
+	if st := h.state(id); st.PermissionMode != "bypass" || len(st.Approvals) != 0 {
+		t.Fatalf("after the rejoin: %+v", st)
 	}
 }

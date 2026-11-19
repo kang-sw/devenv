@@ -263,9 +263,7 @@ func (c *conv) setNativePermissionMode(mode string, user bool) error {
 		if !c.turn {
 			c.applySettings()
 		}
-		if err := c.allowAgyBypassPending(); err != nil {
-			return err
-		}
+		c.allowAgyBypassPending()
 	}
 	return nil
 }

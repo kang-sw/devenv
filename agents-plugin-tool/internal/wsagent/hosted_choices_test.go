@@ -38,7 +38,9 @@ const syntheticCodexCache = `{
  "identity":{"account_id":"SYNTHETIC-PRIVATE-ACCOUNT", "plan":"SYNTHETIC-PRIVATE-PLAN"},
  "models":[
   {"slug":"fixture-reasoner","display_name":"Fixture Reasoner","supported_reasoning_levels":[{"effort":"high"},{"effort":"low"}]},
-  {"slug":"fixture-plain","supported_reasoning_levels":[]},
+  {"slug":"fixture-plain","visibility":"list","supported_reasoning_levels":[]},
+  {"slug":"fixture-hidden","visibility":"hide","supported_reasoning_levels":[{"effort":"max"}]},
+  {"slug":"fixture-unlisted","visibility":"none","supported_reasoning_levels":[{"effort":"minimal"}]},
   {"slug":"fixture-second","supported_reasoning_levels":[{"effort":"xhigh"},{"effort":"medium"},{"effort":"low"},{"effort":""}]},
   {"slug":"fixture-reasoner"}, {"slug":"","supported_reasoning_levels":[{"effort":"invalid"}]}
  ]
@@ -222,5 +224,23 @@ func TestHostedAgySessionReportDuringListingWins(t *testing.T) {
 	models, _, err := (AgyBackend{Command: "fixture-agy"}).Choices(context.Background())
 	if err != nil || len(models) != 1 || models[0].ID != "session-winner" {
 		t.Fatalf("report lost: %v %v", models, err)
+	}
+}
+
+// TestHostedAgyEmptyListingFails: a listing that exits cleanly but names no
+// model (agy signed out) is a failure: it shows and expires after
+// choicesFailTTL instead of caching an empty success for choicesTTL.
+func TestHostedAgyEmptyListingFails(t *testing.T) {
+	emptyHostedChoices(t)
+	now := time.Now()
+	s := hostedChoicesSupport(t, &now)
+	listing := stubListing(t, "Fetching available models...\n", nil)
+	if h := harnessByName(t, s.Choices(context.Background()), BackendAgy); h.Error == "" || len(h.Models) != 0 || !slices.Equal(h.Efforts, agyEfforts) {
+		t.Fatalf("empty listing: %+v", h)
+	}
+	now = now.Add(choicesFailTTL)
+	s.Choices(context.Background())
+	if listing.count() != 2 {
+		t.Fatalf("%d listings: an empty listing was cached past choicesFailTTL", listing.count())
 	}
 }

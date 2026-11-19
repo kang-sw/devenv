@@ -149,6 +149,10 @@ type approvalAnswerer interface {
 	AnswerApproval(req ApprovalRequest, allow bool, message string) error
 }
 
+// errNoApprovalAnswer marks an AnswerApproval that wrote nothing because the
+// process could not build the answer; any other error is a failed write.
+var errNoApprovalAnswer = errors.New("no answer was written")
+
 type modeSetter interface {
 	SetPermissionMode(mode string) error
 }

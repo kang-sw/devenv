@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -122,9 +123,13 @@ func (c *conv) handle(ev Event) {
 		}
 		// The mode the harness runs in is the session's own: its next
 		// launch resumes in it. A change of the user's that waits to be
-		// applied stands until it is.
-		if c.rec.Lead && !quiet && !c.dirtyMode && ev.PermissionMode != c.rec.PermissionMode && slices.Contains(permissionModes(c.rec.Backend, []map[string]BackendRegistration{c.r.opts.Backends}), ev.PermissionMode) {
-			c.update(func(rec *Record) { rec.PermissionMode = ev.PermissionMode })
+		// applied stands until it is. Under agy bypass the launch mode is
+		// native default whatever agy reports, and bypass holds only with
+		// that mode on record (agyBypass), so a report leaves it. A flag
+		// left stale by an older writer goes, so that a report of
+		// native default does not revive it without the user.
+		if c.rec.Lead && !quiet && !c.dirtyMode && !c.rec.agyBypass() && ev.PermissionMode != c.rec.PermissionMode && slices.Contains(permissionModes(c.rec.Backend, []map[string]BackendRegistration{c.r.opts.Backends}), ev.PermissionMode) {
+			c.update(func(rec *Record) { rec.PermissionMode, rec.AgyBypass = ev.PermissionMode, false })
 			c.changed(quiet)
 		}
 	case ev.HarnessState != "":
@@ -283,12 +288,17 @@ func (c *conv) addApproval(a ApprovalRequest, quiet bool) {
 	if !quiet && c.rec.agyBypass() && !c.replaying {
 		// Bypass answers before the prompt is published: the page must not
 		// see a modal, a pending row or a wake for a request nobody decides.
-		// Without an answerer the prompt falls through and stays answerable.
+		// Without an answerer, or with no answer the process could build
+		// (nothing written), the prompt falls through to the user.
 		if answerer := controlsFor(c.proc).approval; answerer != nil {
-			if err := c.sendApproval(answerer, a, true, ""); err != nil {
-				fmt.Fprintf(c.r.opts.Log, "agent %s: auto-allow permission: %v\n", c.rec.ReplyID, err)
+			err := c.sendApproval(answerer, a, true, "")
+			if err == nil {
+				return
 			}
-			return
+			fmt.Fprintf(c.r.opts.Log, "agent %s: auto-allow permission: %v\n", c.rec.ReplyID, err)
+			if !errors.Is(err, errNoApprovalAnswer) {
+				return
+			}
 		}
 	}
 	c.setStatus(func() { c.approvals = append(c.approvals, a) })
@@ -362,18 +372,20 @@ func (c *conv) dropApproval(id string, quiet bool) bool {
 }
 
 // forgetAnswered drops a settled prompt from the record's answered list
-// ("" drops them all: their process is gone).
+// ("" drops them all: their process is gone). One settled prompt changes
+// memory only, and the next record write carries it: an id left on disk
+// only keeps a replay of its own, already answered request from waiting.
 func (c *conv) forgetAnswered(id string) {
 	if len(c.rec.Answered) == 0 || (id != "" && !slices.Contains(c.rec.Answered, id)) {
 		return
 	}
-	c.update(func(rec *Record) {
-		if id == "" {
-			rec.Answered = nil
-			return
-		}
-		rec.Answered = slices.DeleteFunc(slices.Clone(rec.Answered), func(have string) bool { return have == id })
-	})
+	if id != "" {
+		c.setStatus(func() {
+			c.rec.Answered = slices.DeleteFunc(slices.Clone(c.rec.Answered), func(have string) bool { return have == id })
+		})
+		return
+	}
+	c.update(func(rec *Record) { rec.Answered = nil })
 }
 
 // clearApprovals settles every waiting prompt with no answer: the process
@@ -426,19 +438,46 @@ func (c *conv) answerApproval(id string, allow bool, message string) error {
 		return conflict("that permission prompt is not waiting: it was answered, withdrawn, or its process ended")
 	}
 	c.dropApproval(id, false)
-	return c.sendApproval(answerer, *req, allow, message)
+	err := c.sendApproval(answerer, *req, allow, message)
+	if errors.Is(err, errNoApprovalAnswer) {
+		// The prompt is gone from the page and the process still waits on
+		// it: the process stops, as on a failed write.
+		c.approvalFailed(err)
+	}
+	return err
 }
 
 // sendApproval tracks req as answered before writing the answer, so it is
-// answered at most once, and stops the process when the write fails.
+// answered at most once, and stops the process when the write fails. An
+// answer the process could not build wrote nothing: the id is untracked and
+// the error (errNoApprovalAnswer) left to the caller. Under agy bypass,
+// which answers every tool call, the id is tracked in memory only: the next
+// record write carries it, at the latest the one of the holder sequence a
+// replay skips to (persistSeq, also on shutdown). Otherwise an answer is
+// one write per user decision and is durable at once.
 func (c *conv) sendApproval(answerer approvalAnswerer, req ApprovalRequest, allow bool, message string) error {
-	c.update(func(rec *Record) { rec.Answered = append(rec.Answered, req.ID) })
+	track := func(rec *Record) { rec.Answered = append(rec.Answered, req.ID) }
+	if c.rec.agyBypass() {
+		c.setStatus(func() { track(&c.rec) })
+	} else {
+		c.update(track)
+	}
 	if err := answerer.AnswerApproval(req, allow, message); err != nil {
-		c.setStatus(func() { c.lastErr = "answer the permission prompt: " + err.Error() })
-		c.stopProcess("")
-		return fmt.Errorf("answer the permission prompt: %w", err)
+		err = fmt.Errorf("answer the permission prompt: %w", err)
+		if errors.Is(err, errNoApprovalAnswer) {
+			c.forgetAnswered(req.ID)
+			return err
+		}
+		c.approvalFailed(err)
+		return err
 	}
 	return nil
+}
+
+// approvalFailed stops the process an answer could not reach.
+func (c *conv) approvalFailed(err error) {
+	c.setStatus(func() { c.lastErr = err.Error() })
+	c.stopProcess("")
 }
 
 // processExited handles a process whose output ended without the runner
