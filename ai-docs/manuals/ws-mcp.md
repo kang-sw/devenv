@@ -37,9 +37,11 @@ Every tool accepts optional top-level `summary`, `toolSummary`, or
 precheck harvests the first nonblank string in that order and strips all
 undeclared aliases before argument validation, including inner calls through
 `call`. A tool-declared property with one of those names remains its own input.
-Harvested descriptions are recorded as `tools.call.summary` debug events;
-harness-stream previews use the same key list and prefer the description in
-running and completed tool rows, with the existing masking and display limits.
+Descriptions reach the rows through harness-stream previews, not per-call
+debug logging. Previews use the same key list and prefer the description in
+running and completed tool rows; the Claude hook places these keys before
+ordinary flattened arguments so truncation does not hide them. Existing
+masking and display limits still apply.
 
 This is T0 for existing calls: no summary is required and no store shape
 changes. It does not make old binaries accept metadata: their precheck rejects

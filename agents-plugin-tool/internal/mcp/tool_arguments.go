@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wslive"
-	"github.com/kang-sw/devenv/internal/wsredact"
 )
 
 // handlerOwnedArguments lists, per tool, top-level argument names a handler
@@ -85,13 +84,7 @@ func harvestToolSummary(arguments, properties map[string]any) string {
 func (s *Server) precheckToolArguments(name string, arguments map[string]any) (string, bool) {
 	schema := toolInputSchema(name)
 	properties, _ := schema["properties"].(map[string]any)
-	if summary := harvestToolSummary(arguments, properties); summary != "" {
-		key, _ := arguments["session_key"].(string)
-		s.debugEvent("tools.call.summary", map[string]any{
-			"tool":    name,
-			"summary": wsredact.Secrets(wslive.ScrubSessionKeys(summary, key)),
-		})
-	}
+	harvestToolSummary(arguments, properties)
 	if schema == nil {
 		return "", true
 	}

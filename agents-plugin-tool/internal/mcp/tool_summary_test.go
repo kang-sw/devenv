@@ -1,6 +1,10 @@
 package mcp
 
 import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,16 +17,6 @@ func newSummaryTestServer(t *testing.T) (*Server, string) {
 	s, key := newPrecheckServer(t)
 	s.debug = &debugRing{logPath: func() string { return "" }}
 	return s, key
-}
-
-func recordedToolSummaries(s *Server, name string) []string {
-	var summaries []string
-	for _, event := range s.debug.recent(256) {
-		if event["event"] == "tools.call.summary" && event["tool"] == name {
-			summaries = append(summaries, event["summary"].(string))
-		}
-	}
-	return summaries
 }
 
 func TestPrecheckHarvestsAndStripsHiddenSummaries(t *testing.T) {
@@ -45,8 +39,10 @@ func TestPrecheckHarvestsAndStripsHiddenSummaries(t *testing.T) {
 			t.Fatalf("%s refused before the real handler: %s", name, resp)
 		}
 	}
-	if summaries := recordedToolSummaries(s, "runtime.read"); len(summaries) != 6 || summaries[0] != "Read runtime metadata" {
-		t.Fatalf("harvested summaries = %v", summaries)
+	for _, event := range s.debug.recent(256) {
+		if event["event"] == "tools.call.summary" {
+			t.Fatalf("harvesting summaries must not add debug records: %v", event)
+		}
 	}
 	args := map[string]any{"summary": "Read metadata", "other_unknown": true}
 	if refusal, ok := s.precheckToolArguments("runtime.read", args); ok || !strings.Contains(refusal, "unknown arguments: other_unknown\n") {
@@ -79,27 +75,25 @@ func TestHarvestLeavesDeclaredSummaryArgumentsAlone(t *testing.T) {
 	}
 }
 
-func TestSummaryMetadataIsOptionalAndScrubbed(t *testing.T) {
-	s, key := newSummaryTestServer(t)
+func TestSummaryMetadataIsOptionalAndDoesNotLog(t *testing.T) {
+	s, _ := newSummaryTestServer(t)
 	defer s.Close()
+	logPath := filepath.Join(t.TempDir(), "debug.log")
+	s.debug.logPath = func() string { return logPath }
 	for _, args := range []map[string]any{
 		{},
 		{"summary": " \n ", "toolSummary": 7, "tool_summary": nil},
+		{"summary": "Read runtime metadata"},
 	} {
 		if refusal, ok := s.precheckToolArguments("runtime.read", args); !ok || len(args) != 0 {
 			t.Fatalf("optional metadata must not refuse a call: %v %s", args, refusal)
 		}
 	}
-	if got := recordedToolSummaries(s, "runtime.read"); len(got) != 0 {
-		t.Fatalf("absent/invalid metadata recorded a summary: %v", got)
+	if events := s.debug.recent(256); len(events) != 0 {
+		t.Fatalf("summary harvesting recorded debug events: %v", events)
 	}
-	args := map[string]any{"session_key": key, "summary": "Read " + key + " password=hunter2"}
-	if _, ok := s.precheckToolArguments("runtime.read", args); !ok {
-		t.Fatal("summary refused")
-	}
-	got := recordedToolSummaries(s, "runtime.read")
-	if len(got) != 1 || strings.Contains(got[0], key) || strings.Contains(got[0], "hunter2") || !strings.Contains(got[0], "password=***") {
-		t.Fatalf("debug summary leaked a key or credential: %v", got)
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("summary harvesting touched the configured debug log: %v", err)
 	}
 }
 
@@ -107,19 +101,26 @@ func TestCallInnerDispatchHarvestsSummary(t *testing.T) {
 	setupMailboxTestEnv(t)
 	t.Setenv(envAllowedTools, "")
 	s := newCallTestServer(t.TempDir())
-	s.debug = &debugRing{logPath: func() string { return "" }}
+	logPath := filepath.Join(t.TempDir(), "debug.log")
+	s.debug = &debugRing{logPath: func() string { return logPath }}
 	defer s.Close()
-	resp := callToolOnce(t, s, 1, "call", map[string]any{
+	params, err := json.Marshal(map[string]any{"name": "call", "arguments": map[string]any{
 		"tool": "runtime.read", "toolSummary": "Use fallback dispatch",
 		"arguments": map[string]any{"format": "json", "tool_summary": "Read runtime metadata"},
-	})
-	if callResponseIsError(t, resp) {
-		t.Fatalf("inner metadata must pass the same precheck: %s", resp)
+	}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := recordedToolSummaries(s, "runtime.read"); !reflect.DeepEqual(got, []string{"Read runtime metadata"}) {
-		t.Fatalf("inner summary = %v", got)
+	// Exercise dispatch without the transport's ordinary request.received
+	// diagnostics: neither harvest may add its own log write.
+	resp := s.callTool(context.Background(), request{ID: json.RawMessage("1"), Method: "tools/call", Params: params})
+	if responseIsError(resp) {
+		t.Fatalf("inner metadata must pass the same precheck: %+v", resp)
 	}
-	if got := recordedToolSummaries(s, "call"); !reflect.DeepEqual(got, []string{"Use fallback dispatch"}) {
-		t.Fatalf("envelope summary = %v", got)
+	if events := s.debug.recent(256); len(events) != 0 {
+		t.Fatalf("envelope and inner summaries must not emit debug records: %v", events)
+	}
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("fallback dispatch touched the configured debug log: %v", err)
 	}
 }
