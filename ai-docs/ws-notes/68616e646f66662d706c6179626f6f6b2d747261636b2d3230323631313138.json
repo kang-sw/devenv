@@ -1,7 +1,0 @@
-{
-  "key": "handoff-playbook-track-20261118",
-  "value": "Update 2026-11-18 22:15 KST (Mac lead, session overhand-swampland-wireless): all seven playbook diets are done and track/playbook was handed to the develop main session for merging into develop ((138)=b, no pre-landing sweep; the release gate sweeps it). Owner answers: (130)=a, whiteboard_tools.go ws-size-guard=1300 in .gitattributes; (132)=a, move origin to kang-sw/werkschaft. The Mac clone is already moved; on the Windows office clone run `git remote set-url origin git@github.com:kang-sw/werkschaft.git`, then erase this note. (139)=a opened 261118-feat-ship-gate-facts. Next on the track: the role-manual discussion (261117-feat-role-scoped-workflow-context), then foundation Phase 2.",
-  "priority": 53,
-  "written_at": "2026-11-18T13:13:49Z",
-  "visible": true
-}
