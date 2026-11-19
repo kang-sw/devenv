@@ -36,6 +36,8 @@ type BackendRegistration struct {
 	// below); "" keeps the dotted names. Common code reads it through
 	// ApplyToolNameScheme and never names a backend.
 	ToolNameScheme string
+	// ToolsAlwaysLoad marks this connection's listed tools as always loaded.
+	ToolsAlwaysLoad bool
 	// ManualHarness is the harness name the hosted lead's workflow manual
 	// renders under; "" renders with none.
 	ManualHarness string
