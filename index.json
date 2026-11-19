@@ -554,7 +554,10 @@
         "clone_id": "9091c57d68d03c76",
         "track": "track/agent-v2",
         "phase": "active",
-        "touched_at": "2026-11-19T03:04:07Z"
+        "touched_at": "2026-11-19T03:04:59Z",
+        "impl": {
+          "branch": "impl/track/agent-v2/pout-tweak-rush"
+        }
       }
     },
     "261118-feat-ws-embed-rsrc-in-daemon": {
