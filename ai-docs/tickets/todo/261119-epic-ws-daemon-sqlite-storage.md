@@ -118,6 +118,9 @@ Confirmed by the owner on 2026-11-19 (21:52 and 21:56, board `(1325)=a`):
 - **Whiteboard storage shape (`(1325)=a`, 2026-11-19 21:56):** One SQLite file
   per board (per session), opened lazily and closed when idle, with a small
   `cache_size`.
+  - Refined by `(1347)=c` (owner, 2026-11-19 23:10): the handle stays open and
+    closes only after a long idle (about 30 minutes), then reopens on next
+    access; recorded in `261119-refactor-ws-whiteboard-sqlite-board-store`.
   - *Rejected:* One shared DB with a `board_id` column (boards share nothing; a
     per-board file keeps zip export/load and delete trivial); memory state +
     per-board append journal like `wsmailbox` (would leave the whiteboard on a

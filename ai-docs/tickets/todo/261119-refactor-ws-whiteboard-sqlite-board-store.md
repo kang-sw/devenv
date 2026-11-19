@@ -2,7 +2,7 @@
 title: "화이트보드 2PC 폴더 저장소를 보드별 SQLite로 전환"
 parent: 261119-epic-ws-daemon-sqlite-storage
 related:
-  261119-feat-ws-whiteboard-retire-embed-snapshot: "sibling child; removes the per-update embed render this store would otherwise carry (see (1359))"
+  261119-feat-ws-whiteboard-retire-embed-snapshot: "sibling child; removes the per-update embed render this store would otherwise carry (see (1771))"
   261116-feat-ws-whiteboard-retire-disk-pages: "derived index.html / index.stamp.js stay files here; their retirement is that ticket's scope"
   261117-research-ws-daemon-file-touch-map: "storage audit background (whiteboard rows)"
 ---
@@ -136,13 +136,23 @@ Phase 1 replaces it with the measured value.
 ## Decisions
 
 - **Storage shape, `(1325)=a` (owner, 2026-11-19 21:56):** one SQLite file per
-  board (per session) with a small `cache_size`. The epic's "opened lazily and
-  closed when idle" clause is being reconsidered and is open as (1347).
+  board (per session) with a small `cache_size`. Its "opened lazily and closed
+  when idle" clause is superseded by `(1347)=c` below.
   - Rejected: one shared DB with a `board_id` column, because boards share
     nothing and a per-board file keeps zip export/load and delete trivial.
   - Rejected: memory state plus a per-board append journal like `wsmailbox`,
     because it would leave the whiteboard on a different engine from the rest
     of the epic.
+- **Board DB handle lifetime, `(1347)=c` (owner, 2026-11-19 23:10):** a board's
+  DB handle, and the in-memory board with it, stays open and is closed only
+  after a long idle (about 30 minutes). The next access reopens it. This
+  supersedes the lazy-open/short-idle-close part of `(1325)=a`; the
+  one-file-per-board and small `cache_size` parts stand. Each reopen still
+  breaks performance.md rule 4 once; the owner accepted that by choosing c.
+  - Rejected: held for the whole session lifetime, because handles accumulate
+    for abandoned boards.
+  - Rejected: short idle close per `(1325)=a`, because each reopen rescans the
+    DB, `-wal`, and `-shm`, which conflicts with performance.md rule 4.
 - **Pilot and gate (owner, 2026-11-19 23:06, `(1346)`):** this child runs first
   as the epic's pilot. There is no Windows AhnLab V3 benchmark for now (the
   owner is away from that PC). Owner: "whatever it is, the files must avoid
@@ -191,25 +201,9 @@ Phase 1 replaces it with the measured value.
 
 ## Open Decision Queue
 
-Last ID used: (1366)
+Last ID used: (1778)
 
-(1347) [open] [policy] Board DB handle lifetime: held while the session lives, opened lazily and closed when idle (`(1325)=a` wording), or held with a long idle close (about 30 min).
-- Context: performance.md rule 4 says to open once and hold until shutdown.
-  Every reopen rescans the DB, `-wal`, and `-shm` and reloads the board into
-  memory (rule 1). That is a burst of scanned file touches and, if it lands
-  on an update, interactive latency (rule 5). Holding every board forever keeps
-  one handle and one in-memory board per session ever opened by the daemon.
-- Alternative a: held while the session lives, released when the session's key
-  record goes away (the point where `FolderCache.Forget` runs today,
-  `mcp/dashboard_sessions.go:865`).
-- Alternative b: lazy open, close after a short idle (as worded in `(1325)=a`).
-- Alternative c: held, with a long idle close (about 30 min) and reopen on the
-  next access.
-> Lead recommends c. Reopens become rare and fall outside active
-> conversations, and idle sessions free their handle and memory. It still
-> breaks rule 4 on each reopen, so it needs the owner's rule 8 approval.
-
-(1348) [open] [technical] Compatibility: on first start the new binary imports the legacy board folder into the DB once, through the existing `FolderStore.Open` (pending replay, schema guard, v1 conversion), and leaves the legacy files untouched.
+(1760) [open] [technical] Compatibility: on first start the new binary imports the legacy board folder into the DB once, through the existing `FolderStore.Open` (pending replay, schema guard, v1 conversion), and leaves the legacy files untouched.
 - One-time import over a dual-write or shutdown export. Reasons: the importer
   reuses the verified recovery path (`folders.go:143-159`, `:400-490`), and
   dual-write would keep the per-update 2PC cost this ticket removes.
@@ -230,10 +224,10 @@ Last ID used: (1366)
 - Tier: the import-only design is not <= T2. The new data survives in the DB,
   but writes made during the downgrade window are lost with no reconstruction.
   Release Rule 1 (`release-compatibility.md:129-131`) then requires preservation
-  or a T3 boundary. The remedy is open as (1349).
+  or a T3 boundary. The remedy is open as (1761).
 
-(1349) [open] [policy] How an older binary meets a board after import, given (1348) alone is not <= T2.
-- Context: (1348) shows an older daemon can serve the stale folder and lose its
+(1761) [open] [policy] How an older binary meets a board after import, given (1760) alone is not <= T2.
+- Context: (1760) shows an older daemon can serve the stale folder and lose its
   writes on the next upgrade. Old-side refusal is already in the code: the
   guard refuses any root file whose `schema_version` is newer than 2
   (`folders.go:314-316`). Old `FolderCache`, `present()`, nudge stats, export,
@@ -252,82 +246,82 @@ Last ID used: (1366)
   and close leaves both sides advanced, and then a conflict rule is needed
   (keep the DB and back up the folder, with no merge).
 - Alternative c: rewrite `committed.json`/`meta.json` with schema 3. T3 like a,
-  but it modifies legacy files, which (1348) forbids.
+  but it modifies legacy files, which (1760) forbids.
 > Recommend a: no file work on the close path, no merge rule, and the old side
 > refuses before it writes. It costs a minor bump.
 
-(1350) [open] [technical] A direct `ws-mcp` CLI or `serve` process (not through the daemon) never opens a board DB the daemon holds: board calls route to the daemon, or refuse with an error naming the daemon as the board owner.
+(1762) [open] [technical] A direct `ws-mcp` CLI or `serve` process (not through the daemon) never opens a board DB the daemon holds: board calls route to the daemon, or refuse with an error naming the daemon as the board owner.
 - Routing or refusal over concurrent WAL access. The epic's direct-binary
   question (`cmd/ws-mcp/main.go`) is settled here for this store only. A second
   process's own page cache and checkpoints would bring back cross-process
   locking and per-call revalidation (rules 1 and 4), the costs this ticket
   removes.
 
-(1351) [open] [technical] Open each board DB with `PRAGMA locking_mode=EXCLUSIVE` set before the first WAL access.
+(1763) [open] [technical] Open each board DB with `PRAGMA locking_mode=EXCLUSIVE` set before the first WAL access.
 - EXCLUSIVE over NORMAL locking: SQLite then keeps the WAL index in heap memory
   and creates no `-shm` file, so there are no per-transaction lock calls
-  (rule 4). A second opener gets `SQLITE_BUSY`, which (1350)'s refusal maps to
+  (rule 4). A second opener gets `SQLITE_BUSY`, which (1762)'s refusal maps to
   its error. This differs from the `wsstore` precedent, which uses NORMAL.
 
-(1352) [open] [technical] The DB lives at `ai-docs/whiteboards/<reply-id>/.board.sqlite`, inside the existing board folder.
+(1764) [open] [technical] The DB lives at `ai-docs/whiteboards/<reply-id>/.board.sqlite`, inside the existing board folder.
 - Inside the board folder over a sibling file or the cache root. Deleting the
   board stays one folder. The existing git exclude covers it
   (`whiteboard_tools.go:905-920`). The leading dot keeps an old binary's
   export and backup from copying a live DB (`folders_archive.go:117`), and it
   matches no daily-GC pattern (`whiteboard_tools.go:50-52`).
 
-(1353) [open] [technical] Schema: rows mirror the folder files (one board row for `meta.json`, topic rows for `tN/meta.json`, append-only entry rows for log lines, immutable panel rows, revision receipt and load-floor rows), and one update commits the delta that `plan` already computes as one transaction.
+(1765) [open] [technical] Schema: rows mirror the folder files (one board row for `meta.json`, topic rows for `tN/meta.json`, append-only entry rows for log lines, immutable panel rows, revision receipt and load-floor rows), and one update commits the delta that `plan` already computes as one transaction.
 - Per-file rows over one whole-state blob. `plan` already diffs exactly these
   units and skips unchanged topic metadata by byte comparison
   (`folders.go:742-895`), so the transaction holds only the changed rows
   (rule 2). A blob rewrites O(board) pages per update. Exact columns and
   indexes are left to Phase 1 under this mapping.
 
-(1354) [open] [technical] Pragmas beyond the Decisions: `wal_autocheckpoint=0`; a PASSIVE checkpoint runs at board close and from a background trigger only after the board has been idle and the WAL has passed a size threshold; `cache_size` is a fixed small value (proposal 256 KiB).
+(1766) [open] [technical] Pragmas beyond the Decisions: `wal_autocheckpoint=0`; a PASSIVE checkpoint runs at board close and from a background trigger only after the board has been idle and the WAL has passed a size threshold; `cache_size` is a fixed small value (proposal 256 KiB).
 - Explicit off-path checkpoints over SQLite's default auto-checkpoint. The
   default checkpoints inside the commit that crosses 1000 pages, which puts it
   on the update's response path (rule 3, rule 5). The idle and size
   thresholds are chosen from Phase 1 measurement and recorded in its Result.
-  The board is served from memory (1355), so the page cache only serves writes
+  The board is served from memory (1767), so the page cache only serves writes
   and the open-time load.
 
-(1355) [open] [technical] An open board is held in memory as the whole `State`, as `FolderCache` holds it today, and the DB is read only at open/import.
+(1767) [open] [technical] An open board is held in memory as the whole `State`, as `FolderCache` holds it today, and the DB is read only at open/import.
 - Whole board in memory over a recent window plus DB history reads. This
   matches today's footprint (`folders_cache.go:58-63` caches the full State,
   history included), leaves the query and render code unchanged, and makes
   every read memory-only (rule 1). The DB keeps full history, so windowing can
   come later without a schema change.
 
-(1356) [open] [technical] Derived `index.html` / `index.stamp.js` publication moves off the `whiteboard.update` response path to a per-board coalescing writer (latest state wins, stamp after page). A publish failure becomes a debug event and is retried by the next publish.
+(1768) [open] [technical] Derived `index.html` / `index.stamp.js` publication moves off the `whiteboard.update` response path to a per-board coalescing writer (latest state wins, stamp after page). A publish failure becomes a debug event and is retried by the next publish.
 - Async publication over the current publish under the board lock before
   returning (`mcp/session_state.go:665-675`, `whiteboard_tools.go:785-812`).
   Rule 5 allows only the WAL append on that path. The update result keeps its
   `full:` line. The "board committed; fix the output problem" error
   (`whiteboard_tools.go:788`) is no longer returned synchronously.
 
-(1357) [open] [technical] Zip export and `whiteboard.load` keep the legacy folder layout: export builds folder files from memory, load accepts legacy-layout zips and imports them into a fresh board DB, and the load backup is written in the same legacy layout.
+(1769) [open] [technical] Zip export and `whiteboard.load` keep the legacy folder layout: export builds folder files from memory, load accepts legacy-layout zips and imports them into a fresh board DB, and the load backup is written in the same legacy layout.
 - Legacy layout over shipping the `.sqlite` file. Old and new binaries trade
   zips in both directions: old load requires `meta.json` and `committed.json` at
   the zip root (`folders_archive.go:194-196`), so both zip directions stay T0.
   A held WAL DB cannot be copied consistently without the backup API, and the
   zip stays inspectable.
 
-(1358) [open] [technical] Stat-based change detection of the board (the dashboard page watch on `meta.json`/`committed.json`, nudge targeting stats, `FolderCache` root stamps, the topic memo) is replaced by in-process notification from the board store.
-- In-process notification over stat polling of a DB file. Once (1350) holds,
+(1770) [open] [technical] Stat-based change detection of the board (the dashboard page watch on `meta.json`/`committed.json`, nudge targeting stats, `FolderCache` root stamps, the topic memo) is replaced by in-process notification from the board store.
+- In-process notification over stat polling of a DB file. Once (1762) holds,
   the daemon is the only writer, so stats would be per-call file touches with
   nothing new to detect (rule 4). The existing hooks are
   `whiteboardChanged` (`whiteboard_tools.go:340-342`) and the nudge and watch
   sites above.
 
-(1359) [open] [technical] This ticket takes `blocked-by: 261119-feat-ws-whiteboard-retire-embed-snapshot`, so the embed render is gone before the store switch.
+(1771) [open] [technical] This ticket takes `blocked-by: 261119-feat-ws-whiteboard-retire-embed-snapshot`, so the embed render is gone before the store switch.
 - Sequencing over carrying embed state (`Embeds`, `LastEmbedSeq`, `EmbedDir`)
   and the synchronous embed render through the new store, only to delete them.
   The per-update embed render is synchronous derived output that rule 5
   forbids on the update path.
 
-(1360) [open] [policy] When, if ever, the imported legacy board folders (`meta.json`, `committed.json`, `tN/`, revision slots) are deleted.
-- Context: Phases 1-3 never delete them, per (1348). They then serve as rollback
-  data, and under (1349)a they also hold the sentinel that refuses old
+(1772) [open] [policy] When, if ever, the imported legacy board folders (`meta.json`, `committed.json`, `tN/`, revision slots) are deleted.
+- Context: Phases 1-3 never delete them, per (1760). They then serve as rollback
+  data, and under (1761)a they also hold the sentinel that refuses old
   binaries. Deleting them removes the old binary's refusal path and the raw
   import source.
 - Alternative a: never delete automatically. A later ticket may add an explicit
@@ -345,13 +339,13 @@ Last ID used: (1366)
 Build the per-board SQLite store as a new type beside `FolderStore`. Nothing
 in the daemon uses it yet.
 
-- Open with the settled pragmas (Decisions; (1351), (1354)), the schema
-  ((1353)), and the in-memory whole-State model ((1355)).
+- Open with the settled pragmas (Decisions; (1763), (1766)), the schema
+  ((1765)), and the in-memory whole-State model ((1767)).
 - Commit path: one update is one transaction holding only changed rows. An
   unchanged state opens no transaction.
 - Import: legacy folder -> DB through `FolderStore.Open`, recorded so it runs
-  once. The legacy folder stays untouched apart from what (1349) settles.
-- Legacy-layout materializer for export and backup ((1357)).
+  once. The legacy folder stays untouched apart from what (1761) settles.
+- Legacy-layout materializer for export and backup ((1769)).
 - Capture the "before" measurement on the base for the scenario above
   (macOS tracer and/or extended Go counters), replacing the derived table.
 
@@ -376,26 +370,26 @@ the board DB store:
 - `whiteboard.update`, render-only refresh, dashboard answer revision, board
   notice, `whiteboard.query` and lazy history, the served page, nudges, zip
   export, and `whiteboard.load` with its backup.
-- In-process change notification ((1358)).
-- Handle lifetime per (1347).
-- Direct-CLI routing or refusal per (1350).
-- The old-binary mechanism per (1349).
+- In-process change notification ((1770)).
+- Handle lifetime per `(1347)=c` (long idle close, reopen on next access).
+- Direct-CLI routing or refusal per (1762).
+- The old-binary mechanism per (1761).
 
 Verification:
 
 - The old-binary compatibility harness (`wswhiteboard/testdata/compat-old`)
-  exercises the settled (1349) behavior: an old store never silently writes a
+  exercises the settled (1761) behavior: an old store never silently writes a
   migrated board.
 - Zips cross both directions between old and new.
-- A second process's open fails with the (1350) error.
+- A second process's open fails with the (1762) error.
 
 Deferred: async derived publish, measured report.
 
 ### Phase 3: Update-path latency and measured result
 
-Depends on Phase 2 and (1359).
+Depends on Phase 2 and (1771).
 
-- Move derived page publication off the response path ((1356)).
+- Move derived page publication off the response path ((1768)).
 - Measure "after" with the same method as Phase 1: file operations per
   `whiteboard.update`, fsync count, and update latency on macOS.
 - Report before/after in the Result. Record Windows V3 measurement as
@@ -405,4 +399,4 @@ Depends on Phase 2 and (1359).
 
 ### Phase 4: Legacy folder cleanup [gated]
 
-Gated on (1360). It does nothing unless the owner chooses b or c there.
+Gated on (1772). It does nothing unless the owner chooses b or c there.
