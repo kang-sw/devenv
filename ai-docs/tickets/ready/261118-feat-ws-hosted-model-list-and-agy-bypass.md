@@ -250,3 +250,24 @@ lead's independent review and post-swap live check.
 - Deliberately omitted: shared daemon operations and the post-swap live check
   (lead-owned); account/login/logout commands; reading any actual Codex cache;
   dashboard assets; push and merge. No approved visual reference is linked.
+
+### Result (9716213) - 2026-11-19
+
+- Landed commits: `795074e21`, `cc5a54558`, `9bfab79ec` (flash fix),
+  `34fe1526b` (independent-review fixes), and `9716213d4` (ws `call` fallback
+  tool plus manual tool index, agy-only via `CallFallback`).
+- Verification: macOS check passed; w5090 build/vet/test passed per those
+  commits. A fresh hosted agy session recount on 2026-11-19 15:41 KST listed
+  73 of 79 ws tools in the agy client plus `call`; direct `tickets_query`
+  worked; `call` list mode (80 entries), schema mode, and dispatch mode all
+  worked, with dispatch matching the direct call. The manual carries
+  `## Callable ws tools` (80 entries).
+> Forward: The handoff record does not yet document carrying AgyBypass.
+> Forward: `runPiVersion` lacks `cmd.WaitDelay` like `runListing`.
+> Forward: The agy client drops the largest ws tool definitions first
+  (dropped: `git_commit`, `git_merge`, `rationale_query`, `tickets_acquire`,
+  `tickets_close`, `wiki_update` at 1,441–1,448 B in agy's cache); the cut
+  moved from ~1.73 KB to ~1.44 KB after the 1,500 B diet, so this is likely a
+  total budget. Owner (199)=a, 2026-11-19: list a direct-tool allowlist on
+  agy and make `call` the default path; implemented on
+  `impl/track/agent-v2/agy-direct-tools`.
