@@ -76,6 +76,17 @@ Owner answers on the open queue, 2026-11-19 (items 1719-1725):
    playbook defaults, which remain driven by `ticket_review_auto_ack` and
    `workflow.whiteboard_enabled`.
 
+Owner answer on the staging of restricted keys, 2026-11-19:
+
+9. **(1801) — restricted keys follow the (1720) staging (owner 2026-11-19).**
+   For keys whose (1721) outcome is "restrict to repo scope", the staging
+   matches (1720). For one minor, a tune at a non-repo scope and an
+   already-stored non-repo value both warn and keep applying as today. From
+   the following minor, the non-repo write is refused and a stored non-repo
+   value is ignored; that switch needs the owner's approval, like (1720).
+   Rejected: refusing immediately - it breaks users who hold the value at
+   that scope today without warning.
+
 ## Constraints
 
 - **Owner confirmation precedes implementation.** Removing a user-facing key
@@ -152,6 +163,9 @@ No code change.
 - Post the per-key list with a recommended outcome per key (remove / restrict
   to repo scope / keep, Decision 4) to the owner, and record the confirmed
   list in `## Decisions`.
+- For each key with outcome "restrict to repo scope", record the non-repo
+  scopes it is settable at today, so the staged warning and later refusal
+  (Decision 9) cover exactly those scopes.
 - Re-confirm there is no reader of `sage_review_design_tier` and
   `sage_review_completeness_tier` (Decision 5).
 - Verification: every candidate has a recorded reader set and an owner
@@ -173,12 +187,22 @@ Depends on Phase 1 (the owner-confirmed per-key outcomes).
   `config.tune`/`config.unset`/`config.get` accept it with a deprecation
   warning (tune writes nothing; get returns the code default); the refusal
   from the next minor lands only with owner approval.
+- Restricted-key staging (Decision 9): for one minor, a `config.tune` of a
+  restricted key at a non-repo scope warns and still writes, and an
+  already-stored non-repo value warns and keeps applying as today. From the
+  following minor the non-repo write is refused and a stored non-repo value is
+  ignored; that switch lands only with owner approval, like the removed-key
+  refusal.
 - A removed key still present in a loaded config file yields one `config.list`
   warning naming the key and file, with no file rewrite (Decision 7).
 - Verification: a fixture config file carrying every removed key loads and
   resolves without error and with the code defaults in effect, and
   `config.list` warns once per key naming the file; manifest parity tests pass
   for ws and wsflow; older-caller `config.tune`/`config.get` of a removed key
-  warns and does not write or error during the deprecation minor; each
-  restricted or kept key behaves per its outcome; remaining keys resolve
+  warns and does not write or error during the deprecation minor; during that
+  minor a restricted key tuned at a non-repo scope warns and still writes, and
+  a fixture non-repo stored value of a restricted key warns and still applies;
+  from the following minor (after owner approval) the non-repo tune is refused
+  and the stored non-repo value is ignored, with the repo-scope value still
+  honored; each kept key behaves per its outcome; remaining keys resolve
   unchanged.
