@@ -577,7 +577,7 @@ func (rm *ringMem) openSegmentLocked(seq uint64) error {
 		return fmt.Errorf("create conversation ring: %w", err)
 	}
 	path := filepath.Join(rm.dir, ringSegmentName(seq))
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	f, err := wsstate.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open conversation ring segment: %w", err)
 	}
@@ -747,7 +747,7 @@ func writeLegacyRingRaw(dir, name string, raw []byte) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create conversation ring: %w", err)
 	}
-	tmp, err := os.CreateTemp(dir, ".ring-*.tmp")
+	tmp, err := wsstate.CreateTemp(dir, ".ring-*.tmp")
 	if err != nil {
 		return fmt.Errorf("write conversation ring: %w", err)
 	}
@@ -766,6 +766,7 @@ func writeLegacyRingRaw(dir, name string, raw []byte) error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("write conversation ring: %w", err)
 	}
+	wsstate.CountFileIO("atomic_replace")
 	if err := os.Rename(tmpPath, filepath.Join(dir, name)); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("write conversation ring: %w", err)
@@ -1025,11 +1026,138 @@ func readRingPage(dir, before string, n int) (RingPage, error) {
 			return sliceRingPage(rm.records, before, n), nil
 		}
 	}
-	st, err := loadRingDir(filepath.Clean(dir), false)
+	return readRingPageWindow(filepath.Clean(dir), before, n)
+}
+
+// readRingPageWindow reads only the window needed to satisfy an unpinned
+// ReadRingPage(dir, before, n) call: legacy .json files are filtered by
+// `< before` and capped to the newest n before opening any file, and segments
+// are scanned newest-first stopping as soon as the window (plus one older
+// entry to settle End) is covered.
+func readRingPageWindow(dir, before string, n int) (RingPage, error) {
+	if n < 0 {
+		n = 0
+	}
+	dirEntries, err := wsstate.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return RingPage{End: true}, nil
+	}
 	if err != nil {
 		return RingPage{}, err
 	}
-	return sliceRingPage(st.records, before, n), nil
+	var segSeqs []uint64
+	var legacy []string
+	for _, de := range dirEntries {
+		if de.IsDir() {
+			continue
+		}
+		name := de.Name()
+		if seq, ok := parseRingSegmentSeq(name); ok {
+			segSeqs = append(segSeqs, seq)
+		} else if isRingEntryName(name) {
+			legacy = append(legacy, name)
+		}
+	}
+	sort.Slice(segSeqs, func(i, j int) bool { return segSeqs[i] < segSeqs[j] })
+	sort.Strings(legacy)
+
+	if before != "" {
+		legacy = legacy[:sort.SearchStrings(legacy, before)]
+	}
+
+	// Fast path: legacy-only directory (no segments) reads at most n files.
+	if len(segSeqs) == 0 {
+		start := len(legacy) - n
+		if start < 0 {
+			start = 0
+		}
+		page := RingPage{End: start == 0}
+		window := legacy[start:]
+		if len(window) > 0 {
+			page.Before = window[0]
+			page.Records = make([]RingRecord, 0, len(window))
+			for _, name := range window {
+				if rec, ok := readLegacyRingEntry(dir, name); ok {
+					page.Records = append(page.Records, rec)
+				}
+			}
+		}
+		return page, nil
+	}
+
+	hasOlder := false
+	if len(legacy) > n {
+		hasOlder = true
+		legacy = legacy[len(legacy)-n:]
+	}
+
+	byName := make(map[string]RingRecord, n+1)
+	for i := len(segSeqs) - 1; i >= 0; i-- {
+		seq := segSeqs[i]
+		recs, _, _, rerr := readSegmentFile(filepath.Join(dir, ringSegmentName(seq)), false)
+		if rerr != nil {
+			if errors.Is(rerr, fs.ErrNotExist) {
+				continue
+			}
+			return RingPage{}, fmt.Errorf("read conversation ring segment %s: %w", ringSegmentName(seq), rerr)
+		}
+		for _, rec := range recs {
+			if before != "" && rec.Name >= before {
+				continue
+			}
+			if _, exists := byName[rec.Name]; !exists {
+				byName[rec.Name] = rec
+			}
+		}
+		if len(byName) > n {
+			hasOlder = true
+			break
+		}
+	}
+
+	// Skip reading legacy .json files strictly older than the n-th newest
+	// segment record we already have; their presence only marks hasOlder.
+	var cutoff string
+	if n > 0 && len(byName) >= n {
+		segNames := make([]string, 0, len(byName))
+		for name := range byName {
+			segNames = append(segNames, name)
+		}
+		sort.Strings(segNames)
+		cutoff = segNames[len(segNames)-n]
+	}
+	for _, name := range legacy {
+		if _, exists := byName[name]; exists {
+			continue
+		}
+		if cutoff != "" && name < cutoff {
+			hasOlder = true
+			continue
+		}
+		if n == 0 {
+			hasOlder = true
+			continue
+		}
+		if rec, ok := readLegacyRingEntry(dir, name); ok {
+			byName[name] = rec
+		}
+	}
+
+	records := make([]RingRecord, 0, len(byName))
+	for _, rec := range byName {
+		records = append(records, rec)
+	}
+	sort.Slice(records, func(i, j int) bool { return records[i].Name < records[j].Name })
+	if len(records) > n {
+		hasOlder = true
+		records = records[len(records)-n:]
+	}
+	page := RingPage{End: !hasOlder}
+	if len(records) > 0 {
+		page.Before = records[0].Name
+		page.Records = records
+	}
+	return page, nil
 }
 
 func readRingByName(dir, name string) (RingRecord, bool) {
@@ -1055,13 +1183,30 @@ func readRingByName(dir, name string) (RingRecord, bool) {
 	if rec, ok := readLegacyRingEntry(clean, name); ok {
 		return rec, true
 	}
-	st, err := loadRingDir(clean, false)
+	// Otherwise scan only segment files newest-first, stopping on match.
+	dirEntries, err := wsstate.ReadDir(clean)
 	if err != nil {
 		return RingRecord{}, false
 	}
-	idx := sort.Search(len(st.records), func(i int) bool { return st.records[i].Name >= name })
-	if idx < len(st.records) && st.records[idx].Name == name {
-		return st.records[idx], true
+	var segSeqs []uint64
+	for _, de := range dirEntries {
+		if !de.IsDir() {
+			if seq, ok := parseRingSegmentSeq(de.Name()); ok {
+				segSeqs = append(segSeqs, seq)
+			}
+		}
+	}
+	sort.Slice(segSeqs, func(i, j int) bool { return segSeqs[i] < segSeqs[j] })
+	for i := len(segSeqs) - 1; i >= 0; i-- {
+		recs, _, _, rerr := readSegmentFile(filepath.Join(clean, ringSegmentName(segSeqs[i])), false)
+		if rerr != nil {
+			continue
+		}
+		for _, rec := range recs {
+			if rec.Name == name {
+				return rec, true
+			}
+		}
 	}
 	return RingRecord{}, false
 }

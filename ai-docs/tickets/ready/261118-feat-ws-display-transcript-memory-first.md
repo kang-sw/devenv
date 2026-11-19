@@ -477,6 +477,24 @@ and tests run on remote w5090 only.
   - Full `go test -count=1 -timeout=10m`: `wslive` (`14.881s`), `wsdashboard` (`281.432s`), `wsagent` (`141.509s`), `mcp` (`478.719s`), `cmd/ws-mcp` (`298.724s`): all **PASS**.
 - **Forward:** Failed unlink never retried; O(2000) slice copy per append at cap; `MkdirAll` per rotation; owner-PC before/after syscall & AV measurement after merge; Phase 3 (`record.json` delta log) remains out of scope. Ticket stays in `ready/`.
 
+#### Edition (R3) - 2026-11-19
+
+- **Resolved both R2 review findings on `b931a0261`:**
+  - **Finding 1 (P1 — Unpinned read amplification):**
+    - Replaced unpinned `readRingPage`'s full-ring `loadRingDir` fallback with bounded `readRingPageWindow` (`internal/wslive/ring_store.go:1032-1174`): legacy-only dirs filter `< before` and read at most the newest `n` `.json` files (never 2,000); segmented/mixed dirs scan `seg-*.jsonl` newest-first stopping once `len(byName) > n`, then skip reading legacy `.json` files strictly older than the `n`-th newest segment entry (marking `hasOlder`).
+    - Replaced unpinned `readRingByName`'s `loadRingDir` fallback (`internal/wslive/ring_store.go:1182-1211`) with a direct `readLegacyRingEntry` check followed by newest-first `seg-*.jsonl` scan stopping on the first match (never reading legacy files or older segments once found).
+    - Updated `railMessages.lastResult` (`internal/wsdashboard/railmessages.go:62-99`) to detect changes via `wslive.RingFingerprint` (0 body reads when unchanged) and fetch the tail in a single bounded `wslive.ReadRingPage(dir, "", railMessageScan)` call instead of calling `ReadRingEntry` in an up-to-64 loop per closed session.
+    - Pinned with `TestRingUnpinnedReadPageWindowBoundedReads` (`internal/wslive/ring_test.go`) and `TestRailRenderUnpinnedClosedSessionsBoundedRingReads` (`internal/wsdashboard/rail_test.go`, 10 closed segmented sessions with 60 trailing non-message entries -> 10 `read_file` ops on first render, 0 on unchanged rev bump).
+  - **Finding 2 (P2 — Bypassed `wsstate` file-IO counters):**
+    - Restored `wsstate.OpenFile` (`openSegmentLocked`, `ring_store.go:580`), `wsstate.CreateTemp` (`writeLegacyRingRaw`, `ring_store.go:750`), and `wsstate.CountFileIO("atomic_replace")` (`writeLegacyRingRaw`, `ring_store.go:769`) so zero-open, zero-temp, and zero-rename steady-state assertions are non-vacuous.
+    - Pinned with `TestRingFileIOCountersAreLive` (`internal/wslive/ring_test.go`: first pinned append `open_file == 1`, steady-state pinned appends `open_file == 0` / `create_temp == 0` / `atomic_replace == 0`, unpinned append `create_temp == 1` / `atomic_replace == 1`).
+- **Compatibility tier:** **T1 (display-degraded), patch-safe (`<= T2`)** — unchanged from R2 (no stored-shape or cross-version behavior change in R3).
+- **Verification (w5090 only, `job=9be093442a2f49d1ac54bebf9c526f58`, `exit=0`):**
+  - `python3 scripts/generate-package-assets.py`, `go build ./...`, `go vet ./internal/... ./cmd/...`: **PASS**.
+  - `-race` targeted runs: `wslive` `TestRingUnpinnedReadPageWindowBoundedReads` (`1.097s`), `wslive` `TestRingFileIOCountersAreLive` (`1.058s`), `wsdashboard` `TestRailRenderUnpinnedClosedSessionsBoundedRingReads` (`1.149s`), `wsdashboard` `TestRailMessagesReadARingOnlyWhenItGrew` (`1.120s`), `wsagent` `TestHostedLeadPhase2HotPathZeroRingReadDir` (`1.122s`): all **PASS**.
+  - Full `go test -count=1 -timeout=10m`: `internal/wslive` (`15.022s`), `internal/wsdashboard` (`281.232s`), `internal/wsagent` (`137.452s`), `internal/mcp` (`472.829s`), `cmd/ws-mcp` (`293.281s`): all **PASS**.
+- **Forward:** Unchanged from R2 (failed unlink never retried; O(2000) slice copy per append at cap; `MkdirAll` per rotation; owner-PC before/after syscall & AV CPU measurement after merge; Phase 3 `record.json` delta log remains unimplemented). Ticket stays in `ready/`.
+
 ### Phase 3: `record.json` as a delta append log
 
 Planned at its promotion.

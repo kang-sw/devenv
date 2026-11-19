@@ -608,3 +608,124 @@ func TestRingUnpinnedClosedSessionDoesNotPinOrReadBodies(t *testing.T) {
 		t.Fatalf("legacy RingNames read %d file bodies, want 0", got)
 	}
 }
+
+// TestRingUnpinnedReadPageWindowBoundedReads covers R2 Finding 1: unpinned
+// ReadRingPage reads only the legacy .json files (< before, newest n) or
+// newest-first segments needed for its window, and unpinned ReadRingEntry
+// stops on the first matching segment without loading the whole ring.
+func TestRingUnpinnedReadPageWindowBoundedReads(t *testing.T) {
+	t.Run("legacy-only-window", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "ring")
+		stepRingClock(t)
+		appendTexts(t, dir, 0, 200) // unpinned -> 200 legacy .json files
+
+		beforeRead := ringIOCount("read_file")
+		p1, err := ReadRingPage(dir, "", 10)
+		if err != nil || len(p1.Records) != 10 || p1.End {
+			t.Fatalf("p1 = %d end=%v err=%v", len(p1.Records), p1.End, err)
+		}
+		if p1.Records[0].Text != "m190" || p1.Records[9].Text != "m199" {
+			t.Fatalf("p1 range = %q..%q", p1.Records[0].Text, p1.Records[9].Text)
+		}
+		if got := ringIOCount("read_file") - beforeRead; got > 10 {
+			t.Fatalf("unpinned ReadRingPage(10) on 200 legacy files made %d read_file calls, want <= 10", got)
+		}
+
+		beforeRead2 := ringIOCount("read_file")
+		p2, err := ReadRingPage(dir, p1.Before, 10)
+		if err != nil || len(p2.Records) != 10 || p2.End {
+			t.Fatalf("p2 = %d end=%v err=%v", len(p2.Records), p2.End, err)
+		}
+		if p2.Records[0].Text != "m180" || p2.Records[9].Text != "m189" {
+			t.Fatalf("p2 range = %q..%q", p2.Records[0].Text, p2.Records[9].Text)
+		}
+		if got := ringIOCount("read_file") - beforeRead2; got > 10 {
+			t.Fatalf("unpinned older ReadRingPage(10) made %d read_file calls, want <= 10", got)
+		}
+	})
+
+	t.Run("segments-newest-first-and-legacy-skip", func(t *testing.T) {
+		origEntries, origMax := ringSegmentEntries, ringMaxSegments
+		ringSegmentEntries, ringMaxSegments = 5, 16
+		t.Cleanup(func() { ringSegmentEntries, ringMaxSegments = origEntries, origMax })
+
+		dir := filepath.Join(t.TempDir(), "ring")
+		stepRingClock(t)
+		// 50 older legacy .json files, then 30 pinned segment entries across 6 segments.
+		appendTexts(t, dir, 0, 50)
+		unpin := PinRing(dir)
+		appendTexts(t, dir, 50, 80)
+		if err := unpin(); err != nil {
+			t.Fatal(err)
+		}
+
+		// Requesting newest 4 entries must read only the newest 1 segment and 0 legacy files.
+		beforeRead := ringIOCount("read_file")
+		page, err := ReadRingPage(dir, "", 4)
+		if err != nil || len(page.Records) != 4 || page.End {
+			t.Fatalf("page = %d end=%v err=%v", len(page.Records), page.End, err)
+		}
+		if page.Records[0].Text != "m76" || page.Records[3].Text != "m79" {
+			t.Fatalf("page range = %q..%q", page.Records[0].Text, page.Records[3].Text)
+		}
+		if got := ringIOCount("read_file") - beforeRead; got != 1 {
+			t.Fatalf("unpinned ReadRingPage(4) on 6 segments + 50 legacy made %d read_file calls, want 1", got)
+		}
+
+		// Unpinned ReadRingEntry for the newest entry must read only 1 segment (0 legacy files).
+		beforeEntry := ringIOCount("read_file")
+		rec, ok := ReadRingEntry(dir, page.Records[3].Name)
+		if !ok || rec.Text != "m79" {
+			t.Fatalf("ReadRingEntry = %+v, %v", rec, ok)
+		}
+		// readLegacyRingEntry tries the .json path once (ErrNotExist -> counted by ReadFileOnce),
+		// then scans newest segment once -> at most 2 read_file ops total, never 6+50.
+		if got := ringIOCount("read_file") - beforeEntry; got > 2 {
+			t.Fatalf("unpinned ReadRingEntry made %d read_file calls, want <= 2", got)
+		}
+	})
+}
+
+// TestRingFileIOCountersAreLive covers R2 Finding 2: open_file, create_temp,
+// and atomic_replace wsstate counters are wired to real ring writes so
+// zero-op steady-state assertions are non-vacuous.
+func TestRingFileIOCountersAreLive(t *testing.T) {
+	// Pinned first append must increment open_file by 1; steady-state adds 0.
+	pinnedDir := filepath.Join(t.TempDir(), "pinned", "ring")
+	stepRingClock(t)
+	unpin := PinRing(pinnedDir)
+	defer unpin()
+
+	openBefore := ringIOCount("open_file")
+	appendTexts(t, pinnedDir, 0, 1)
+	if got := ringIOCount("open_file") - openBefore; got != 1 {
+		t.Fatalf("first pinned AppendRing recorded open_file=%d, want 1 (counter bypassed?)", got)
+	}
+	openWarm := ringIOCount("open_file")
+	tempWarm := ringIOCount("create_temp")
+	renameWarm := ringIOCount("atomic_replace")
+	for i := 1; i < 20; i++ {
+		appendTexts(t, pinnedDir, i, i+1)
+	}
+	if got := ringIOCount("open_file") - openWarm; got != 0 {
+		t.Fatalf("steady-state pinned appends recorded open_file=%d, want 0", got)
+	}
+	if got := ringIOCount("create_temp") - tempWarm; got != 0 {
+		t.Fatalf("steady-state pinned appends recorded create_temp=%d, want 0", got)
+	}
+	if got := ringIOCount("atomic_replace") - renameWarm; got != 0 {
+		t.Fatalf("steady-state pinned appends recorded atomic_replace=%d, want 0", got)
+	}
+
+	// Unpinned append must increment create_temp and atomic_replace by 1 each.
+	unpinnedDir := filepath.Join(t.TempDir(), "unpinned", "ring")
+	tempBefore := ringIOCount("create_temp")
+	renameBefore := ringIOCount("atomic_replace")
+	appendTexts(t, unpinnedDir, 0, 1)
+	if got := ringIOCount("create_temp") - tempBefore; got != 1 {
+		t.Fatalf("unpinned AppendRing recorded create_temp=%d, want 1 (counter bypassed?)", got)
+	}
+	if got := ringIOCount("atomic_replace") - renameBefore; got != 1 {
+		t.Fatalf("unpinned AppendRing recorded atomic_replace=%d, want 1 (counter bypassed?)", got)
+	}
+}
