@@ -124,6 +124,9 @@ type DaemonOptions struct {
 	// before its session is checked, since the nudge's sender may have
 	// written mail any waiter watches. Nil wakes none.
 	MailWake MailWaker
+	// AgyCommand resolves the agy CLI program and leading arguments for
+	// user-triggered /usage probes without spawning. Nil skips agy probes.
+	AgyCommand func() (string, []string, error)
 
 	// bindHost overrides the address the daemon binds, so a test runs LAN
 	// mode on loopback; empty derives it from LAN.
@@ -472,6 +475,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		getenv = func(string) string { return "" }
 	}
 	d.planUsage = newPlanUsageStore(opts.Dir, home, getenv)
+	d.planUsage.resolveAgy = opts.AgyCommand
 	d.cache = newPageCache(d.broker, stats)
 	d.foreign = newForeignSchedule(opts.foreignInterval, opts.MailWake)
 	d.web = newWebRegistry(d.endpoint.Port, d.endpoint.Token, logw)

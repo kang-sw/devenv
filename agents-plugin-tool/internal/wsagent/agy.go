@@ -101,6 +101,13 @@ func (b AgyBackend) Executable() string {
 	return "agy"
 }
 
+// ResolveCommand resolves the agy executable and any leading arguments the same
+// way hosted launches do (honouring Command overrides and unwrapping Windows
+// cmd-shims) without spawning a process.
+func (b AgyBackend) ResolveCommand() (string, []string, error) {
+	return harnessCommand(b.Command, "agy")
+}
+
 // agyChoices holds the last session's model and thought-level report,
 // which wins over the session-less `agy models` listing.
 var agyChoices struct {

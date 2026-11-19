@@ -31,6 +31,11 @@ func usageQueryInterval(force bool) time.Duration {
 // queues behind queryMu. Only a store with nothing to show (no cached and no
 // persisted GPT entry) probes inline, so a first page still gets a value.
 func (s *planUsageStore) refresh(ctx context.Context, force bool) {
+	// agy probes run strictly on user-triggered popover refreshes (force),
+	// never inline and never on ordinary page polls or visibility changes.
+	if force {
+		s.refreshAgy()
+	}
 	s.mu.Lock()
 	if s.gpt.AsOf == 0 && s.gpt.Status == "" && len(s.gpt.Windows) == 0 {
 		s.mu.Unlock()
