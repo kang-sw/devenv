@@ -421,7 +421,7 @@ func CodexCatalog() *HarnessProfile {
 				Source: "the dashboard's /compact maps to thread/compact/start and thread/compacted (forthcoming mapper)"},
 			{Item: ItemRewind, Role: RoleLead, Grade: GradeUnsupported, Source: "no ws wiring"},
 			{Item: ItemToolRemoval, Role: RoleLead, Grade: GradeUnsupported,
-				Source: "the lead keeps the user's tool setup"},
+				Source: "the session keeps the user's tool setup"},
 			{Item: ItemSubagentRemoval, Role: RoleLead, Grade: GradeNative, Values: []string{"spawn_agent"},
 				Source: "agents.enabled=false on thread/start and thread/resume removes the collaboration namespace"},
 			{Item: ItemModelEffort, Role: RoleLead, Grade: GradeNative,
@@ -446,7 +446,7 @@ func CodexCatalog() *HarnessProfile {
 		entry.Role = RoleWorker
 		if entry.Item == ItemApproval {
 			entry.Grade = GradeSubstitute
-			entry.Source = "a write-authority worker's requests are auto-allowed through AnswerApproval by the registration's WorkerAutoApprove posture, inside a sandbox that is advisory, not enforced; a read-only worker starts with approval policy never, so Codex refuses an escalation itself"
+			entry.Source = "a write-authority worker's requests are auto-allowed through AnswerApproval by the registration's WorkerAutoApprove posture, inside a sandbox that is advisory, not enforced; a read-only worker starts with approval policy never, so Codex refuses an escalation itself and the mapper declines any request that still arrives; read-only is partial: the user's own MCP servers configured in Codex config are not confined by the sandbox mapping"
 		}
 		p.Entries = append(p.Entries, entry)
 	}

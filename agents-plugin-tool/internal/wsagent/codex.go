@@ -94,6 +94,7 @@ func (b CodexBackend) Start(_ context.Context, spec StartSpec) (Process, error) 
 	cmd.Dir = spec.workDir()
 	cmd.Env = codexEnv(spec)
 	mapper := newCodexMapper(spec.SessionID)
+	mapper.readOnlyWorker = spec.Lead == nil && policy == "never"
 	if attach {
 		// The holder may have dropped a reply the earlier daemon already
 		// wrote. Read its durable identity once at reattach; steady-state

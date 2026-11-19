@@ -221,7 +221,7 @@ func BuiltinProfiles() map[string]json.RawMessage {
 			Tools:       tools,
 			WSTools:     AgentWSTools,
 		}
-		if backend == BackendAgy || backend == BackendCodex {
+		if _, ok := builtinInstructionTexts[AgentWorkerProfile(backend)]; ok {
 			p.Instructions = BuiltinInstructionsPrefix + AgentWorkerProfile(backend)
 		}
 		raw, err := json.Marshal(p)
