@@ -556,7 +556,14 @@
       "registered_at": "2026-11-19T14:04:50Z"
     },
     "261119-feat-ws-dashboard-paged-docking-gallery": {
-      "registered_at": "2026-11-19T07:02:59Z"
+      "registered_at": "2026-11-19T07:02:59Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-19T14:05:00Z"
+      }
     },
     "261119-feat-ws-named-custom-tiers": {
       "registered_at": "2026-11-19T08:32:19Z"
