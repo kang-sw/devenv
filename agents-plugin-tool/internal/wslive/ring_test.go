@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // stepRingClock makes every ring stamp one second after the last.
@@ -181,11 +183,184 @@ func TestRingIsOwnerOnly(t *testing.T) {
 	if err != nil || len(names) != 1 {
 		t.Fatalf("ring names = %v, %v", names, err)
 	}
-	info, err = os.Stat(filepath.Join(dir, names[0]))
+	info, err = os.Stat(filepath.Join(dir, ringSegmentName(1)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("ring entry mode = %o, want 600", perm)
+		t.Errorf("ring segment mode = %o, want 600", perm)
+	}
+}
+
+func ringIOCount(op string) int64 {
+	var n int64
+	for site, count := range wsstate.FileIOCounters() {
+		if strings.HasPrefix(site, "file_io_site:wslive/ring") && strings.HasSuffix(site, ":"+op) {
+			n += count
+		}
+	}
+	return n
+}
+
+func TestRingSegmentRotationAndWholeFileRetention(t *testing.T) {
+	origEntries, origMax := ringSegmentEntries, ringMaxSegments
+	ringSegmentEntries, ringMaxSegments = 5, 4
+	t.Cleanup(func() { ringSegmentEntries, ringMaxSegments = origEntries, origMax })
+
+	dir := filepath.Join(t.TempDir(), "ring")
+	stepRingClock(t)
+	// Write 30 entries -> 6 segments of 5; ringMaxSegments=4 deletes oldest 2 whole segments.
+	for i := 0; i < 30; i++ {
+		appendTexts(t, dir, i, i+1)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	segCount := 0
+	for _, de := range entries {
+		if _, ok := parseRingSegmentSeq(de.Name()); ok {
+			segCount++
+		}
+		if isRingEntryName(de.Name()) {
+			t.Fatalf("unexpected per-entry .json file: %s", de.Name())
+		}
+	}
+	if segCount > ringMaxSegments {
+		t.Fatalf("segment count = %d, want <= %d", segCount, ringMaxSegments)
+	}
+	page, err := ReadRingPage(dir, "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Records) == 0 || page.Records[len(page.Records)-1].Text != "m29" {
+		t.Fatalf("newest entry = %+v, want m29", page.Records)
+	}
+}
+
+func TestRingTornTrailingLineRecovery(t *testing.T) {
+	sessions := filepath.Join(t.TempDir(), "sessions")
+	dir := filepath.Join(sessions, "torn", "ring")
+	stepRingClock(t)
+	appendTexts(t, dir, 0, 2)
+
+	segPath := filepath.Join(dir, ringSegmentName(1))
+	f, err := os.OpenFile(segPath, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"name":"20261106T090009.000000000Z-aaaa.json","entry":{"kind":"user","text":"torn`); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	f.Close()
+
+	closeCache := EnableRingCache(sessions)
+	defer closeCache()
+	// Read before write must ignore the torn tail.
+	got, err := ReadRing(dir)
+	if err != nil || len(got) != 2 || got[0].Text != "m0" || got[1].Text != "m1" {
+		t.Fatalf("read with torn tail = %+v, %v", got, err)
+	}
+	// Next append must truncate the torn tail so the new entry parses cleanly.
+	appendTexts(t, dir, 2, 3)
+	if err := closeCache(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := ReadRing(dir)
+	if err != nil || len(reopened) != 3 || reopened[2].Text != "m2" {
+		t.Fatalf("reopen after torn tail = %+v, %v", reopened, err)
+	}
+}
+
+func TestRingLegacyAndSegmentMergeCompatibility(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ring")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	// Pre-upgrade legacy entry.
+	beforeName := base.Format(ringStampLayout) + "-aaaa.json"
+	if err := os.WriteFile(filepath.Join(dir, beforeName), []byte(`{"kind":"user","text":"legacy-before"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// New segment entry between two legacy entries.
+	if err := AppendRing(dir, []RingEntry{{ringStamp: base.Add(time.Second), Kind: RingReply, Text: "segment-middle"}}); err != nil {
+		t.Fatal(err)
+	}
+	// Old binary (downgrade) ignores .jsonl segment files and writes another legacy .json file.
+	if isRingEntryName(ringSegmentName(1)) {
+		t.Fatal("legacy isRingEntryName matched segment file")
+	}
+	afterName := base.Add(2*time.Second).Format(ringStampLayout) + "-bbbb.json"
+	if err := os.WriteFile(filepath.Join(dir, afterName), []byte(`{"kind":"user","text":"legacy-after"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadRing(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0].Text != "legacy-before" || got[1].Text != "segment-middle" || got[2].Text != "legacy-after" {
+		t.Fatalf("merged order = %+v", got)
+	}
+}
+
+func TestRingPersistentCacheZeroDiskReadsAndSingleOpen(t *testing.T) {
+	sessions := filepath.Join(t.TempDir(), "sessions")
+	dir := filepath.Join(sessions, "cached", "ring")
+	stepRingClock(t)
+	closeCache := EnableRingCache(sessions)
+	defer closeCache()
+
+	// Warm initial segment open with first append.
+	appendTexts(t, dir, 0, 1)
+
+	beforeReadDir := ringIOCount("read_dir")
+	beforeReadFile := ringIOCount("read_file")
+	beforeOpen := ringIOCount("open_file")
+	beforeCreateTemp := ringIOCount("create_temp")
+	beforeRename := ringIOCount("atomic_replace")
+
+	for i := 1; i < 40; i++ {
+		appendTexts(t, dir, i, i+1)
+	}
+	for range 10 {
+		recs, err := ReadRing(dir)
+		if err != nil || len(recs) != 40 {
+			t.Fatalf("ReadRing = %d, %v", len(recs), err)
+		}
+		if page, err := ReadRingPage(dir, recs[10].Name, 5); err != nil || len(page.Records) != 5 {
+			t.Fatalf("ReadRingPage = %d, %v", len(page.Records), err)
+		}
+		if rec, ok := ReadRingEntry(dir, recs[20].Name); !ok || rec.Text != "m20" {
+			t.Fatalf("ReadRingEntry = %+v, %v", rec, ok)
+		}
+		if names, err := RingNames(dir); err != nil || len(names) != 40 {
+			t.Fatalf("RingNames = %d, %v", len(names), err)
+		}
+	}
+	if got := ringIOCount("read_dir") - beforeReadDir; got != 0 {
+		t.Fatalf("steady-state ring appends/reads made %d read_dir calls, want 0", got)
+	}
+	if got := ringIOCount("read_file") - beforeReadFile; got != 0 {
+		t.Fatalf("steady-state ring appends/reads made %d read_file calls, want 0", got)
+	}
+	if got := ringIOCount("open_file") - beforeOpen; got != 0 {
+		t.Fatalf("steady-state ring appends made %d open_file calls, want 0", got)
+	}
+	if got := ringIOCount("create_temp") - beforeCreateTemp; got != 0 {
+		t.Fatalf("steady-state ring appends made %d create_temp calls, want 0", got)
+	}
+	if got := ringIOCount("atomic_replace") - beforeRename; got != 0 {
+		t.Fatalf("steady-state ring appends made %d atomic_replace calls, want 0", got)
+	}
+
+	// Graceful close + reopen recovers every entry with zero loss.
+	if err := closeCache(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := ReadRing(dir)
+	if err != nil || len(reopened) != 40 || reopened[0].Text != "m0" || reopened[39].Text != "m39" {
+		t.Fatalf("reopened = %d (%v)", len(reopened), err)
 	}
 }

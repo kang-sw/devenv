@@ -8,16 +8,22 @@ import (
 )
 
 // lockSummaryWriter is the hosted equivalent of terminal connection/slot
-// fencing. The registration lock prevents terminal handoff, and summaryMu
+// fencing. The in-process registration fence serializes against handoff and
+// terminal login without a per-write OS flock or disk read, and summaryMu
 // pins this actual conversation generation through mutation/candidate freeze.
 func (c *conv) lockSummaryWriter() (func(), bool) {
 	rec := c.record()
-	if !rec.Lead {
+	if !rec.Lead || c.foreignRow {
 		return nil, false
 	}
-	// The row tested is the one lockRowRead checked under the lock.
-	unlock, row, ok := c.lockRowRead()
-	if !ok {
+	unlock, row, err := wsdashboard.LockRegistrationMemory(c.r.opts.Dir, rec.ReplyID)
+	if err != nil {
+		fmt.Fprintf(c.r.opts.Log, "agent %s: %v\n", rec.ReplyID, err)
+		return nil, false
+	}
+	if row != nil && isForeignRow(*row, nil) {
+		unlock()
+		c.foreignRow = true
 		return nil, false
 	}
 	c.r.summaryMu.Lock()

@@ -8,9 +8,18 @@ import (
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
+func (s *Server) isTerminalRowOwned(row *wsdashboard.Registration) bool {
+	return row != nil && !row.Hosted && !row.Agent && row.EndedAt == "" && row.HarnessPID == s.harnessPID() && row.MCPOwnerPID == s.ownerPID
+}
+
 func (s *Server) terminalRowOwned(dir, replyID string) bool {
-	row, err := wsdashboard.ReadRegistration(dir, replyID)
-	return err == nil && !row.Hosted && !row.Agent && row.EndedAt == "" && row.HarnessPID == s.harnessPID() && row.MCPOwnerPID == s.ownerPID
+	unlock, row, err := wsdashboard.LockRegistrationMemory(dir, replyID)
+	if err != nil {
+		return false
+	}
+	owned := s.isTerminalRowOwned(row)
+	unlock()
+	return owned
 }
 
 func (s *Server) summaryCapable(ls *liveSession) bool {
@@ -19,18 +28,19 @@ func (s *Server) summaryCapable(ls *liveSession) bool {
 }
 
 // lockSummaryOwner fences both the actual daemon slot generation and the
-// terminal/hosted registration handoff, under the same lock takeover uses.
+// terminal/hosted registration handoff, under the same in-process fence
+// takeover uses without per-write OS flocks or disk reads.
 func (s *Server) lockSummaryOwner(ls *liveSession) (func(), error) {
 	owner, ok := ls.slot.(wsdashboard.LiveSlotOwner)
 	if !ok {
 		return nil, fmt.Errorf("reasoning summary receiver has no daemon ownership")
 	}
 	dir := filepath.Dir(filepath.Dir(ls.dir))
-	unlock, err := wsdashboard.LockRegistration(dir, ls.replyID)
+	unlock, row, err := wsdashboard.LockRegistrationMemory(dir, ls.replyID)
 	if err != nil {
 		return nil, err
 	}
-	if !s.terminalRowOwned(dir, ls.replyID) {
+	if !s.isTerminalRowOwned(row) {
 		unlock()
 		return nil, fmt.Errorf("reasoning summary terminal ownership changed")
 	}
@@ -44,17 +54,17 @@ func (s *Server) lockSummaryOwner(ls *liveSession) (func(), error) {
 
 func (s *Server) publishSummaryOwned(ls *liveSession, snap wslive.Snapshot) {
 	dir := filepath.Dir(filepath.Dir(ls.dir))
-	unlock, err := wsdashboard.LockRegistration(dir, ls.replyID)
+	unlock, row, err := wsdashboard.LockRegistrationMemory(dir, ls.replyID)
 	if err != nil {
 		return
 	}
-	if !s.terminalRowOwned(dir, ls.replyID) {
+	if !s.isTerminalRowOwned(row) {
 		unlock()
 		ls.stop()
 		return
 	}
 	// Publish checks its actual slot generation itself; keep the registration
-	// lock through that check, without recursively taking the slot mutex.
+	// fence through that check, without recursively taking the slot mutex.
 	ls.slot.Publish(snap)
 	unlock()
 }

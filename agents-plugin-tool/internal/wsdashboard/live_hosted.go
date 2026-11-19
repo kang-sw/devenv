@@ -107,6 +107,14 @@ func (l *hostedSlots) ringGen(replyID string) uint64 {
 	return l.rings[replyID]
 }
 
+// hasOwner reports whether a live hosted slot currently owns replyID.
+func (l *hostedSlots) hasOwner(replyID string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	_, ok := l.owners[replyID]
+	return ok
+}
+
 // drop forgets a session that left the index.
 func (l *hostedSlots) drop(replyID string) {
 	l.mu.Lock()

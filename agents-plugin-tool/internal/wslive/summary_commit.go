@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -166,24 +165,9 @@ func (s *SummaryCommits) retry(dir string, recovering bool) (int, error) {
 		n++
 	}
 	s.failure = nil
-	if n > 0 {
-		trimRing(dir)
-	}
 	return n, nil
 }
 
 func writeFrozenRing(dir, name string, raw []byte) error {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	path := filepath.Join(dir, name)
-	if prior, err := os.ReadFile(path); err == nil {
-		if bytes.Equal(prior, raw) {
-			return nil
-		}
-		return fmt.Errorf("immutable summary turn already exists with different bytes")
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	return writeRingRaw(dir, name, raw)
+	return appendRingNamed(dir, name, raw)
 }

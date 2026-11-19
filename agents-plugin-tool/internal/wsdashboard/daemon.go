@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+
+	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 var _ LiveHost = (*Daemon)(nil)
@@ -230,6 +232,8 @@ type Daemon struct {
 	snapshots *SnapshotCache
 	// live is the hosted sessions' snapshot slots (live_hosted.go).
 	live hostedSlots
+	// closeRings flushes and closes held conversation-ring segment handles.
+	closeRings func() error
 	// inboxMu serializes the daemon's own inbox writes (sends and cancels,
 	// and the answer check's record and nudge).
 	inboxMu       sync.Mutex
@@ -523,8 +527,9 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 			fmt.Fprintf(logw, "dashboard: LAN access token unavailable: %v\n", err)
 		}
 	}
+	d.closeRings = wslive.EnableRingCache(filepath.Join(opts.Dir, sessionsDirName))
 	if opts.Sessions != nil {
-		d.source = agentSessions{inner: opts.Sessions, dir: opts.Dir, now: time.Now, snaps: d.snapshots}
+		d.source = agentSessions{inner: opts.Sessions, dir: opts.Dir, now: time.Now, snaps: d.snapshots, hosted: d.live.hasOwner}
 		delay := opts.ackDelay
 		if delay <= 0 {
 			delay = ackCheckDelay
@@ -549,6 +554,9 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		fmt.Fprintf(logw, "dashboard: write endpoint file: %v\n", err)
 		if d.agents != nil {
 			d.agents.Close()
+		}
+		if d.closeRings != nil {
+			_ = d.closeRings()
 		}
 		_ = listener.Close()
 		_ = lock.Unlock()
@@ -648,6 +656,8 @@ func (d *Daemon) sessionChanged(replyID string) {
 			d.railMsgs.drop(replyID)
 			d.live.drop(replyID)
 			d.snapshots.Forget(d.dir, replyID)
+			wslive.DropRing(wslive.RingDir(SessionDir(d.dir, replyID)))
+			ForgetRegistrationCache(d.dir, replyID)
 			if f, ok := d.source.(SessionForgetter); ok {
 				f.ForgetSession(replyID)
 			}
@@ -755,6 +765,9 @@ func (d *Daemon) Close() {
 			d.holders.Close()
 		}
 		d.foreign.close()
+		if d.closeRings != nil {
+			_ = d.closeRings()
+		}
 		if d.beforeUnlock != nil {
 			d.beforeUnlock()
 		}

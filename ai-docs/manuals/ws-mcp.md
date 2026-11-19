@@ -188,11 +188,13 @@ under `<cache root>/dashboard/`:
   pruning removes the session directory and its files. A handed-off Pi lead
   whose session file lives inside that directory is kept for its terminal.
 - `sessions/<reply-id>/snapshot.json` and `sessions/<reply-id>/ring/` - the
-  session's live snapshot (current lead and subagent activity, rewritten
-  debounced and on a 30-second heartbeat, stale after 3 missed heartbeats by
-  its `updatedAt`) and its conversation ring (finished messages, one
-  owner-only file each; the newest 2000 are kept on disk, the page shows the
-  newest 50 and pages older ones in through the session's history route).
+  session's live snapshot (current lead and subagent activity, served from
+  daemon RAM for slotted sessions and flushed for recovery on turn end, close,
+  and debounced heartbeat) and its conversation ring (finished messages,
+  held in daemon RAM and appended to owner-only JSONL segment files
+  `seg-<seq>.jsonl` rotated whole; legacy per-entry `.json` files are still
+  merged on load; the newest 2000 are kept, the page shows the newest 50 and
+  pages older ones in through the session's history route).
   ws-mcp writes them from host adapter events
   (`dashboard.intake`) and from its mailbox send and recv path, only for a
   registered session; `internal/wslive` holds the schema and readers. An
@@ -337,8 +339,10 @@ record, board, tickets, mailbox history and contacts. A nudge, periodic safety
 refresh or board poke reads both parts. Known inbox-only changes on boardless
 sessions list only the inbox stores; unknown runner writes still list every
 live store. A re-read builds no panel; the board renders only when a page
-reads the changed session. Ring and drained-inbox entry files are parsed
-once per daemon and kept by name for the window the page shows; mailbox
+reads the changed session. Conversation ring entries stay in daemon RAM
+(loaded once from segments plus any legacy entry files, with held-open append
+handles); drained-inbox entry files are parsed once per daemon and kept by
+name for the window the page shows; mailbox
 history, contacts, and unread counts come from the memory store (Mailbox
 store below) with no file read. The small files every read and render
 re-reads (session snapshots, the session record's part files) share parsed

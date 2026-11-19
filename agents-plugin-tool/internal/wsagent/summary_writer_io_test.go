@@ -20,10 +20,10 @@ func registrationReads() int64 {
 	return n
 }
 
-// TestSummaryWriterLockReadsTheRowOnce pins the hosted live writer's
-// ownership fence (lockSummaryWriter), which every ring and snapshot write of
-// a hosted lead takes: one registration read per lock, and the fence still
-// refuses a row that names another process or that a terminal took.
+// TestSummaryWriterLockUsesInMemoryOwnershipFence pins the hosted live writer's
+// in-memory ownership fence (lockSummaryWriter): once the row is known in this
+// process, ownership checks make zero disk registration reads while still
+// refusing a row naming another process or taken by a terminal synchronously.
 func TestSummaryWriterLockReadsTheRowOnce(t *testing.T) {
 	dir := t.TempDir()
 	r := NewRunner(Options{Dir: dir, Log: io.Discard})
@@ -47,21 +47,26 @@ func TestSummaryWriterLockReadsTheRowOnce(t *testing.T) {
 	}
 	write(row)
 
+	// Cold cache miss after Forget reads once; subsequent warm checks read zero.
+	wsdashboard.ForgetRegistrationCache(dir, "lead")
 	if ok, reads := lock(); !ok || reads != 1 {
-		t.Fatalf("owned row: ok=%v reads=%d, want true and 1", ok, reads)
+		t.Fatalf("cold owned row: ok=%v reads=%d, want true and 1", ok, reads)
+	}
+	if ok, reads := lock(); !ok || reads != 0 {
+		t.Fatalf("warm owned row: ok=%v reads=%d, want true and 0", ok, reads)
 	}
 
 	other := row
 	other.HostPID = 1
 	write(other)
-	if ok, reads := lock(); ok || reads != 1 || c.foreignRow {
-		t.Fatalf("row naming another process: ok=%v reads=%d foreign=%v, want false, 1, false", ok, reads, c.foreignRow)
+	if ok, reads := lock(); ok || reads != 0 || c.foreignRow {
+		t.Fatalf("row naming another process: ok=%v reads=%d foreign=%v, want false, 0, false", ok, reads, c.foreignRow)
 	}
 
 	taken := row
 	taken.Hosted, taken.HostPID = false, 0
 	write(taken)
-	if ok, reads := lock(); ok || reads != 1 || !c.foreignRow {
-		t.Fatalf("row a terminal took: ok=%v reads=%d foreign=%v, want false, 1, true", ok, reads, c.foreignRow)
+	if ok, reads := lock(); ok || reads != 0 || !c.foreignRow {
+		t.Fatalf("row a terminal took: ok=%v reads=%d foreign=%v, want false, 0, true", ok, reads, c.foreignRow)
 	}
 }

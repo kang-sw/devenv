@@ -79,3 +79,49 @@ func TestLockRegistrationSerializesItsHolders(t *testing.T) {
 		t.Fatal("taking the lock wrote a row")
 	}
 }
+
+func TestLockRegistrationMemorySerializesWithLockRegistration(t *testing.T) {
+	dir := t.TempDir()
+	const id = "memlock1"
+	reg := Registration{ReplyID: id, Project: "/repo", Hosted: true, HostPID: 77}
+	if err := WriteRegistration(dir, reg); err != nil {
+		t.Fatal(err)
+	}
+	unlockMem, row, err := LockRegistrationMemory(dir, id)
+	if err != nil || row == nil || !row.Hosted || row.HostPID != 77 {
+		t.Fatalf("LockRegistrationMemory = %+v, %v", row, err)
+	}
+	got := make(chan error, 1)
+	go func() {
+		unlockDisk, err := LockRegistration(dir, id)
+		if err == nil {
+			defer unlockDisk()
+			updated := reg
+			updated.Hosted, updated.HostPID = false, 0
+			err = WriteRegistration(dir, updated)
+		}
+		got <- err
+	}()
+	select {
+	case err := <-got:
+		t.Fatalf("LockRegistration bypassed LockRegistrationMemory (err %v)", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	unlockMem()
+	select {
+	case err := <-got:
+		if err != nil {
+			t.Fatalf("LockRegistration after memory release: %v", err)
+		}
+	case <-time.After(registrationLockTimeout + time.Second):
+		t.Fatal("LockRegistration never acquired after LockRegistrationMemory released")
+	}
+	unlockMem2, row2, err := LockRegistrationMemory(dir, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlockMem2()
+	if row2 == nil || row2.Hosted {
+		t.Fatalf("in-memory fence missed takeover write: %+v", row2)
+	}
+}

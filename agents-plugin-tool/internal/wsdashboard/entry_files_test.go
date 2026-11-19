@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // drainOne holds one board answer in a fixture session's inbox and drains
@@ -25,11 +27,20 @@ func drainOne(t *testing.T, f *pageFixture, id, text string) {
 	}
 }
 
-// TestSessionPageReadsEachEntryFileOnce pins the entry-file cache: a second
-// render of an unchanged session reads no ring or drained entry file again,
-// a new ring entry and a new drained record are each read once, a session
-// keeps only the ring entries the page shows, and a session that leaves the
-// index drops its entries.
+func ringDiskOps() int64 {
+	var n int64
+	for site, count := range wsstate.FileIOCounters() {
+		if strings.HasPrefix(site, "file_io_site:wslive/ring") && (strings.HasSuffix(site, ":read_dir") || strings.HasSuffix(site, ":read_file")) {
+			n += count
+		}
+	}
+	return n
+}
+
+// TestSessionPageReadsEachEntryFileOnce pins the entry-file cache and RAM ring:
+// ring reads are served from RAM with zero disk listings/reads after initial
+// load, each new drained record is parsed once, the live view caps at RingCap,
+// and a session that leaves the index drops its cached entries.
 func TestSessionPageReadsEachEntryFileOnce(t *testing.T) {
 	f := startPageFixture(t)
 	drainOne(t, f, "livesession", "first answer")
@@ -43,34 +54,39 @@ func TestSessionPageReadsEachEntryFileOnce(t *testing.T) {
 
 	render()
 	first := files.parsedCount()
-	if first != 5 { // the fixture's 4 ring entries and the drained record
-		t.Fatalf("the first render read %d entry files, want 5", first)
+	if first != 1 { // the drained record (ring is served from daemon RAM)
+		t.Fatalf("the first render parsed %d drained entry files, want 1", first)
 	}
+	ringOpsBefore := ringDiskOps()
 	render()
 	if n := files.parsedCount(); n != first {
-		t.Fatalf("a render of an unchanged session read %d entry files again", n-first)
+		t.Fatalf("a render of an unchanged session parsed %d drained files again", n-first)
+	}
+	if n := ringDiskOps() - ringOpsBefore; n != 0 {
+		t.Fatalf("a render of an unchanged session made %d ring disk ops, want 0", n)
 	}
 
 	appendUsers(t, f, "livesession", 0, 1)
 	render()
 	render()
-	if n := files.parsedCount(); n != first+1 {
-		t.Fatalf("a new ring entry was read %d times, want once", n-first)
+	if n := ringDiskOps() - ringOpsBefore; n != 0 {
+		t.Fatalf("appending and rendering ring made %d ring disk read/list ops, want 0", n)
 	}
 	drainOne(t, f, "livesession", "second answer")
 	render()
 	render()
-	if n := files.parsedCount(); n != first+2 {
-		t.Fatalf("a new drained record was read %d times, want once", n-first-1)
+	if n := files.parsedCount(); n != first+1 {
+		t.Fatalf("a new drained record was parsed %d times, want once", n-first)
 	}
 
 	appendUsers(t, f, "livesession", 1, wslive.RingCap+5)
 	render()
-	files.mu.Lock()
-	kept := len(files.sessions["livesession"].ring)
-	files.mu.Unlock()
-	if kept != wslive.RingCap {
-		t.Fatalf("the session keeps %d ring entries, want the %d the page shows", kept, wslive.RingCap)
+	ring, err := files.readRing("livesession", wslive.RingDir(SessionDir(f.dir, "livesession")))
+	if err != nil || len(ring) != wslive.RingCap {
+		t.Fatalf("the live ring view returned %d entries (%v), want %d", len(ring), err, wslive.RingCap)
+	}
+	if n := ringDiskOps() - ringOpsBefore; n != 0 {
+		t.Fatalf("ring burst and renders made %d ring disk read/list ops, want 0", n)
 	}
 
 	if err := RemoveRegistration(f.dir, "livesession"); err != nil {

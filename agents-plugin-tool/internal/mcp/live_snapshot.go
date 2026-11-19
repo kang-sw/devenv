@@ -267,6 +267,7 @@ func (ls *liveSession) isStopped() bool {
 // renders again).
 func (ls *liveSession) stop() {
 	ls.halt()
+	wslive.CloseRingWriter(wslive.RingDir(ls.dir))
 	if ls.slot != nil {
 		ls.slot.Close()
 	}
@@ -333,6 +334,7 @@ func (ls *liveSession) finish() {
 	if err != nil {
 		ls.debug("dashboard.snapshot_write_error", map[string]any{"error": err.Error()})
 	}
+	wslive.CloseRingWriter(wslive.RingDir(ls.dir))
 	ls.slot.Close()
 }
 
@@ -455,12 +457,13 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	var releaseRow func()
 	if s.live.host != nil && s.ownerPID > 0 {
 		stateDir := filepath.Dir(filepath.Dir(dir))
+		var row *wsdashboard.Registration
 		var err error
-		releaseRow, err = wsdashboard.LockRegistration(stateDir, wsmailbox.ReplyID(key))
+		releaseRow, row, err = wsdashboard.LockRegistrationMemory(stateDir, wsmailbox.ReplyID(key))
 		if err != nil {
 			return toolTextResponse(id, "", err)
 		}
-		if !s.terminalRowOwned(stateDir, wsmailbox.ReplyID(key)) {
+		if !s.isTerminalRowOwned(row) {
 			releaseRow()
 			if old := s.live.existing(key); old != nil {
 				old.stop()

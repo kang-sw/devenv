@@ -342,6 +342,31 @@ on the remote w5090 only.
 Planned at its promotion, including its compatibility tier with source lines.
 Carries the in-memory registry ownership that (155) moved out of Phase 1.
 
+### Result (phase-2) - 2026-11-19
+
+- **Ring in daemon RAM with append-only JSONL segments (`internal/wslive/ring_store.go`, `ring.go`, `summary_commit.go`, `wsdashboard/daemon.go`, `wsdashboard/entry_files.go`, `wsdashboard/agent_sessions.go`, `wsdashboard/live_hosted.go`):**
+  - Conversation rings append one JSONL line (`{"name":"<stamp>-<hex>.json","entry":{...}}\n`) per entry into owner-only (`0o600`) segment files `seg-0000000000000001.jsonl`, rotated whole at 500 entries / 1 MiB with whole-file retention covering `RingHistoryCap` (2000) / `ringMaxSegments` (16), plus legacy `.json` cleanup past the retention cutoff. Torn trailing lines are ignored on read and truncated before the next append.
+  - `EnableRingCache(<stateDir>/sessions)` holds each session's ring in daemon RAM (lazy-loaded once from segments + legacy `.json` merged by `Name`) and keeps the active segment fd open until rotation, slot close (`CloseRingWriter`), drop (`DropRing` before `os.RemoveAll`), or daemon shutdown (`Daemon.Close`).
+  - `entryFiles.readRing`, `RingNames`, `ReadRingPage`, and `ReadRingEntry` serve directly from RAM with zero directory listings or entry-file reads; `agentSessions.ReadSession` calls `RefreshRing` only for non-hosted sessions.
+- **In-memory registration ownership fence (`wsdashboard/registry.go`, `wsagent/runner_summary.go`, `mcp/summary_owner.go`, `mcp/live_snapshot.go`):**
+  - Added `LockRegistrationMemory` backed by a bounded-timeout (`registrationLockTimeout`) per-`(dir, replyID)` in-process fence and synchronous `regCache` updated by `ReadRegistration`, `WriteRegistration`, and `RemoveRegistration`. `LockRegistration` acquires the same in-process fence around OS `flock`, so lifecycle/handoff transitions serialize cleanly against hot-path writers while hot-path writes (`lockSummaryWriter`, `lockSummaryOwner`, `publishSummaryOwned`, `terminalRowOwned`, `handleDashboardIntake`) do zero OS flocks and zero disk reads once warm.
+- **Slotted non-lead children/support agents (`wsagent/runner.go`, `runner_conv.go`, `record.go`, `agent_tools.go`):**
+  - All runner conversations (leads, children, support agents) open a daemon `HostedSlot` when `LiveHost != nil`, keeping idle 30 s heartbeats in RAM and suppressing redundant `spawnC` `RereadLive` wakes and running-process 30 s `checkRow` reads. `closeSlot` flushes summaries and the recovery snapshot while still holding the slot fence, closes the ring writer fd, and clears `w.slot` idempotently.
+- **Per-action file-operation counts (before -> after):**
+  - Steady-state hosted ring append (1 entry): ~11+ ops (registry flock + `ReadRegistration` + `MkdirAll` + `CreateTemp` + `Write` + `Close` + `Rename` + `trimRing` `ReadDir`) -> **1 `Write()`** (0 metadata ops; rotation every 500 entries / 1 MiB adds 1 close + 1 open + whole-segment unlink).
+  - Hosted lead streaming delta / 30 s heartbeat: ~5 metadata ops/delta (ownership flock + read; plus 30 s `checkRow` while running) -> **0 file ops**.
+  - Hosted terminal `dashboard.intake` / `publishSummaryOwned`: ~5 metadata ops/call -> **0 file ops**.
+  - Non-lead child / support agent idle 30 s heartbeat: ~6 ops (`snapshot.json` rewrite + `RefreshClock` reread) -> **0 file ops**.
+  - Page render / rail refresh / `ack_check` / `history` / `entry_text` / `ReadLiveStoresClock` ring check (after initial load): 1 `ReadDir(ring/)` + N `ReadFile` -> **0 file ops**.
+  - Slotted parent `spawnC` updates: `Index.RereadLive` (4 `ReadDir`s) -> **0 file ops**.
+- **Compatibility tier: T1 (display-degraded), patch-safe (`<= T2`):**
+  - Ring segments: new `loadRingDir` (`wslive/ring_store.go:381-466`) reads and merges both `seg-*.jsonl` and legacy `.json` files (not T4). Old binaries (`wslive/ring.go:154-156` `isRingEntryName`, pinned pre-Phase-2 `testdata/pre_effects/ring.go`, historical `9854ff350f`) match only `.json`, so on a downgrade they ignore `.jsonl` segments with no error, preserve segment bytes intact while writing legacy `.json` alongside, and reopening with the new binary merges both with zero data loss.
+  - Slotted non-lead heartbeats (`wsagent/runner.go:649-656`, `record.go:567-570`): same T1 already accepted in (156) for slotted leads (`snapshot.json` shape unchanged; a reader without the RAM slot may see `UpdatedAt` age past `StaleAfterBeats`).
+  - In-memory registration ownership (`wsdashboard/registry.go:247-276,288-315`, `wsagent/runner_summary.go:14-36`, `mcp/summary_owner.go:11-69`, `mcp/live_snapshot.go:457-470`): T0 transparent (no on-disk shape change; lifecycle transitions still take `LockRegistration`).
+- **Verification (w5090 only):** `python3 scripts/generate-package-assets.py`, `go build ./...`, `go vet ./internal/... ./cmd/...`, and `go test -count=1 -timeout=10m ./internal/wslive/... ./internal/wsdashboard/... ./internal/wsagent/... ./internal/mcp/... ./cmd/ws-mcp/...` all passed (`wslive` 14.955s, `wsdashboard` 282.979s, `wsagent` 140.132s, `mcp` 481.635s, `cmd/ws-mcp` 299.822s). New/updated tests cover segment rotation & whole-file retention, torn-tail truncation recovery, legacy+segment merge & historical-binary T1 compatibility, zero-disk-op RAM ring reads & single-open writes, in-process+OS registration fence serialization, warm zero-read ownership fence with synchronous PID/takeover refusal, and slotted non-lead RAM heartbeats. `git diff --check` clean; no local Go build/vet/test.
+- **Docs updated:** `ai-docs/manuals/ws-mcp.md` updated to describe RAM-cached rings and append-only JSONL segments.
+- **Forward:** Measure before/after syscall & AV CPU rates on the owner's Windows PC after daemon swap; Phase 3 (`record.json` delta append log) and active tool/ticket scan reductions remain out of scope for Phase 2; ticket stays in `ready/`.
+
 ### Phase 3: `record.json` as a delta append log
 
 Planned at its promotion.

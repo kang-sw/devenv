@@ -9,11 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofrs/flock"
 
+	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
@@ -161,6 +164,117 @@ func (r Registration) HarnessMayRun(alive func(pid int) bool) bool {
 	return r.EndedAt == ""
 }
 
+type regKey struct {
+	dir     string
+	replyID string
+}
+
+type regCacheEntry struct {
+	reg   Registration
+	known bool
+}
+
+var (
+	regLockMapMu sync.Mutex
+	regLocks     = map[regKey]chan struct{}{}
+
+	regCacheMu sync.Mutex
+	regCache   = map[regKey]regCacheEntry{}
+)
+
+func regKeyFor(dir, replyID string) regKey {
+	clean := filepath.Clean(dir)
+	if runtime.GOOS == "windows" {
+		clean = strings.ToLower(clean)
+	}
+	return regKey{dir: clean, replyID: replyID}
+}
+
+func regLockChan(key regKey) chan struct{} {
+	regLockMapMu.Lock()
+	defer regLockMapMu.Unlock()
+	ch := regLocks[key]
+	if ch == nil {
+		ch = make(chan struct{}, 1)
+		regLocks[key] = ch
+	}
+	return ch
+}
+
+func lockRegInProcess(key regKey, timeout time.Duration) (func(), bool) {
+	ch := regLockChan(key)
+	select {
+	case ch <- struct{}{}:
+		return func() { <-ch }, true
+	default:
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case ch <- struct{}{}:
+		return func() { <-ch }, true
+	case <-timer.C:
+		return nil, false
+	}
+}
+
+func setRegCache(dir, replyID string, entry regCacheEntry) {
+	key := regKeyFor(dir, replyID)
+	regCacheMu.Lock()
+	regCache[key] = entry
+	regCacheMu.Unlock()
+}
+
+// ForgetRegistrationCache drops the in-memory cached registration row for
+// replyID under dir (called when a session leaves the index or is deleted).
+func ForgetRegistrationCache(dir, replyID string) {
+	if !ValidReplyID(replyID) {
+		return
+	}
+	key := regKeyFor(dir, replyID)
+	regCacheMu.Lock()
+	delete(regCache, key)
+	regCacheMu.Unlock()
+}
+
+// LockRegistrationMemory acquires the in-process registration fence for
+// replyID without taking the OS file lock or reading disk when this process
+// already holds the session's registration row in memory. Every in-process
+// LockRegistration serializes on the same mutex, and every in-process
+// ReadRegistration, WriteRegistration, and RemoveRegistration updates the
+// cached row. On a cold cache miss it reads the row once from disk while
+// holding the in-process mutex.
+func LockRegistrationMemory(dir, replyID string) (unlock func(), row *Registration, err error) {
+	if !ValidReplyID(replyID) {
+		return nil, nil, fmt.Errorf("invalid reply-id %q", replyID)
+	}
+	key := regKeyFor(dir, replyID)
+	unlockMem, ok := lockRegInProcess(key, registrationLockTimeout)
+	if !ok {
+		return nil, nil, fmt.Errorf("timed out after %s waiting for the in-process registration fence %s", registrationLockTimeout, replyID)
+	}
+	regCacheMu.Lock()
+	entry, present := regCache[key]
+	regCacheMu.Unlock()
+	if !present {
+		read, rerr := ReadRegistration(dir, replyID)
+		if rerr == nil {
+			entry = regCacheEntry{reg: read, known: true}
+		} else if errors.Is(rerr, os.ErrNotExist) {
+			entry = regCacheEntry{known: false}
+		} else {
+			unlockMem()
+			return nil, nil, rerr
+		}
+	}
+	var out *Registration
+	if entry.known {
+		cp := entry.reg
+		out = &cp
+	}
+	return unlockMem, out, nil
+}
+
 // LockRegistration takes the row lock of session replyID under dir,
 // creating its directory, and returns its release. The daemon's runner and
 // a ws-mcp both rewrite a hosted session's row when the session changes
@@ -175,8 +289,13 @@ func LockRegistration(dir, replyID string) (unlock func(), err error) {
 	if !ValidReplyID(replyID) {
 		return nil, fmt.Errorf("invalid reply-id %q", replyID)
 	}
+	unlockMem, ok := lockRegInProcess(regKeyFor(dir, replyID), registrationLockTimeout)
+	if !ok {
+		return nil, fmt.Errorf("timed out after %s waiting for the registration lock %s", registrationLockTimeout, filepath.Join(SessionDir(dir, replyID), registrationLockName))
+	}
 	sessionDir := SessionDir(dir, replyID)
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		unlockMem()
 		return nil, err
 	}
 	lockPath := filepath.Join(sessionDir, registrationLockName)
@@ -185,12 +304,14 @@ func LockRegistration(dir, replyID string) (unlock func(), err error) {
 	defer cancel()
 	locked, err := fl.TryLockContext(ctx, 20*time.Millisecond)
 	if errors.Is(err, context.DeadlineExceeded) || (err == nil && !locked) {
+		unlockMem()
 		return nil, fmt.Errorf("timed out after %s waiting for the registration lock %s", registrationLockTimeout, lockPath)
 	}
 	if err != nil {
+		unlockMem()
 		return nil, fmt.Errorf("acquire the registration lock: %w", err)
 	}
-	return func() { _ = fl.Unlock() }, nil
+	return func() { _ = fl.Unlock(); unlockMem() }, nil
 }
 
 // RegistrationPath is the registration file of session replyID under dir:
@@ -239,6 +360,9 @@ func ReadRegistration(dir, replyID string) (Registration, error) {
 	}
 	raw, err := wsstate.ReadFileOnce(filepath.Join(SessionDir(dir, replyID), registrationFileName))
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			setRegCache(dir, replyID, regCacheEntry{known: false})
+		}
 		return Registration{}, err
 	}
 	var reg Registration
@@ -251,6 +375,7 @@ func ReadRegistration(dir, replyID string) (Registration, error) {
 	if reg.ReplyID != replyID {
 		return Registration{}, fmt.Errorf("%w: registration %s names reply-id %q", errRegistrationMismatch, replyID, reg.ReplyID)
 	}
+	setRegCache(dir, replyID, regCacheEntry{reg: reg, known: true})
 	return reg, nil
 }
 
@@ -320,6 +445,7 @@ func WriteRegistration(dir string, reg Registration) error {
 		_ = os.Remove(name)
 		return err
 	}
+	setRegCache(dir, reg.ReplyID, regCacheEntry{reg: reg, known: true})
 	return nil
 }
 
@@ -331,7 +457,11 @@ func RemoveRegistration(dir, replyID string) error {
 	}
 	err := os.Remove(filepath.Join(SessionDir(dir, replyID), registrationFileName))
 	if errors.Is(err, os.ErrNotExist) {
+		setRegCache(dir, replyID, regCacheEntry{known: false})
 		return nil
+	}
+	if err == nil {
+		setRegCache(dir, replyID, regCacheEntry{known: false})
 	}
 	return err
 }
@@ -389,7 +519,9 @@ func PruneRegistrations(dir string, now time.Time, retention time.Duration) int 
 		if now.Sub(last) <= retention {
 			continue
 		}
-		if os.RemoveAll(SessionDir(dir, entry.Name())) == nil {
+		wslive.DropRing(wslive.RingDir(sessionDir))
+		ForgetRegistrationCache(dir, entry.Name())
+		if os.RemoveAll(sessionDir) == nil {
 			pruned++
 		}
 	}

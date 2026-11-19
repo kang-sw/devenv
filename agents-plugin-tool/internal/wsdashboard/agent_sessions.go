@@ -87,6 +87,9 @@ type agentSessions struct {
 	now   func() time.Time
 	// snaps is the daemon's snapshot cache; nil reads every time.
 	snaps *SnapshotCache
+	// hosted reports whether a live hosted slot currently owns replyID;
+	// non-hosted sessions refresh their ring from disk on authoritative reads.
+	hosted func(replyID string) bool
 }
 
 func (s agentSessions) ReadSession(reg Registration) (SessionData, bool, error) {
@@ -95,6 +98,9 @@ func (s agentSessions) ReadSession(reg Registration) (SessionData, bool, error) 
 	// leads whose fingerprint uses the inner source's separate cache: one
 	// nudge must not disappear behind either owner's presentation TTL.
 	s.snaps.Invalidate(s.dir, reg.ReplyID)
+	if s.hosted == nil || !s.hosted(reg.ReplyID) {
+		wslive.RefreshRing(wslive.RingDir(SessionDir(s.dir, reg.ReplyID)))
+	}
 	if !reg.Agent {
 		s.snaps.snapshotWithoutObserved(s.dir, reg.ReplyID)
 		return s.inner.ReadSession(reg)
