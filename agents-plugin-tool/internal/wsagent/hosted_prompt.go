@@ -57,9 +57,9 @@ func (r *Runner) subagentSteer(rec Record) string {
 
 // playbookCommands is the lead playbook command list a hosted lead of
 // backend offers (Options.PlaybookCommands), nil for a backend without
-// BackendRegistration.PlaybookCommands. It is read at the first need and
-// kept; a failed read is logged, offers none, and is retried at the next
-// need.
+// BackendRegistration.PlaybookCommands. It is read once, at the first
+// need, and kept: a failed read is logged once and offers none until the
+// daemon restarts, so a broken package costs no read per turn.
 func (r *Runner) playbookCommands(backend string) []wslive.SlashCommand {
 	if !r.opts.Backends[backend].PlaybookCommands || r.opts.PlaybookCommands == nil {
 		return nil
@@ -67,12 +67,11 @@ func (r *Runner) playbookCommands(backend string) []wslive.SlashCommand {
 	r.playbookMu.Lock()
 	defer r.playbookMu.Unlock()
 	if !r.playbookLoaded {
+		r.playbookLoaded = true
 		list, err := r.opts.PlaybookCommands()
 		if err != nil {
 			fmt.Fprintf(r.opts.Log, "agent runner: no playbook commands: %v\n", err)
-			return nil
 		}
-		r.playbookLoaded = true
 		for _, cmd := range list {
 			cmd.Source, cmd.Layer = PlaybookCommandSource, ""
 			r.playbookCmds = append(r.playbookCmds, cmd)
@@ -83,18 +82,17 @@ func (r *Runner) playbookCommands(backend string) []wslive.SlashCommand {
 
 // withPlaybookCommands is list, the commands a lead's harness offers, with
 // rec's playbook commands added; a harness command of the same name gives
-// way, since the runner expands that name itself. A worker offers no
-// commands, so its list is returned as it is.
+// way, since the runner expands that name itself. A worker, or a lead of a
+// backend without BackendRegistration.PlaybookCommands, has its list
+// returned as it is.
 func (r *Runner) withPlaybookCommands(rec Record, list []wslive.SlashCommand) []wslive.SlashCommand {
-	if !rec.Lead {
+	if !rec.Lead || !r.opts.Backends[rec.Backend].PlaybookCommands {
 		return list
 	}
 	cmds := r.playbookCommands(rec.Backend)
-	if len(cmds) == 0 {
-		return list
-	}
 	// A list a snapshot kept may hold an earlier runner's playbook
-	// commands; they are replaced whole.
+	// commands; they are replaced whole, by none when this runner has none
+	// (it could not run them).
 	out := slices.DeleteFunc(slices.Clone(list), func(c wslive.SlashCommand) bool {
 		return c.Source == PlaybookCommandSource || slices.ContainsFunc(cmds, func(p wslive.SlashCommand) bool { return p.Name == c.Name })
 	})

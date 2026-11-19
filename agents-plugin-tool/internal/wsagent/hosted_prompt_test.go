@@ -174,13 +174,23 @@ func TestHostedLeadPlaybookCommands(t *testing.T) {
 	h.opts.PlaybookCommands = func() ([]wslive.SlashCommand, error) {
 		return []wslive.SlashCommand{{Name: "lead-run", Description: "Run a ticket"}, {Name: "lead-ship", Description: "Ship"}}, nil
 	}
-	h.restart()
+	// The holder scan, whose replay would bring the harness's list back, is
+	// held: the list read is the one the rejoin itself offers.
+	h.runner.Close()
+	h.holders.restart()
+	entered, release := h.gateScan()
+	defer release()
+	h.start()
+	wait(t, "the first scan", entered)
+	var offered []wslive.SlashCommand
+	c := h.runner.conv(id)
+	c.do(func() { offered = c.live.st.Snapshot(h.opts.Now().UnixMilli()).Commands })
 	rejoined := []wslive.SlashCommand{
 		{Name: "compact", Description: "Free up context"},
 		{Name: "lead-run", Description: "Run a ticket", Source: PlaybookCommandSource}, {Name: "lead-ship", Description: "Ship", Source: PlaybookCommandSource},
 	}
-	if got := h.snapshot(id).Commands; !slices.Equal(got, rejoined) {
-		t.Fatalf("rejoined command list = %+v, want %+v", got, rejoined)
+	if !slices.Equal(offered, rejoined) {
+		t.Fatalf("rejoined command list = %+v, want %+v", offered, rejoined)
 	}
 }
 
@@ -199,5 +209,31 @@ func TestAgentChildPromptCarriesTheSteer(t *testing.T) {
 		"Never use the native `Agent` tool. Start a subagent only with the ws `agent.spawn` tool, and continue one with the ws `mailbox.send` tool.\n"
 	if text != want {
 		t.Fatalf("the child's appended prompt = %q, want %q", text, want)
+	}
+}
+
+// TestPlaybookCommandsFailedReadOffersNone: a failed list read is logged
+// once and never retried, and a list a snapshot kept drops the playbook
+// commands this runner cannot run; a backend without PlaybookCommands keeps
+// its list as it is.
+func TestPlaybookCommandsFailedReadOffersNone(t *testing.T) {
+	log := &logBuffer{}
+	reads := 0
+	r := &Runner{opts: Options{Log: log, Backends: map[string]BackendRegistration{BackendClaude: {PlaybookCommands: true}, BackendPi: {}},
+		PlaybookCommands: func() ([]wslive.SlashCommand, error) { reads++; return nil, errors.New("package broke") }}}
+	kept := []wslive.SlashCommand{{Name: "compact"}, {Name: "lead-run", Source: PlaybookCommandSource}}
+	for range 3 {
+		if got := r.withPlaybookCommands(Record{Backend: BackendClaude, Lead: true}, kept); !slices.Equal(got, kept[:1]) {
+			t.Fatalf("offered %+v, want the harness commands alone", got)
+		}
+	}
+	if reads != 1 || strings.Count(log.String(), "no playbook commands: package broke") != 1 {
+		t.Fatalf("a failed read is tried and logged once: %d reads, log %q", reads, log.String())
+	}
+	if got := r.withPlaybookCommands(Record{Backend: BackendPi, Lead: true}, kept); !slices.Equal(got, kept) {
+		t.Fatalf("a backend without playbook commands changed its list: %+v", got)
+	}
+	if got := r.withPlaybookCommands(Record{Backend: BackendClaude}, kept); !slices.Equal(got, kept) {
+		t.Fatalf("a worker's list changed: %+v", got)
 	}
 }

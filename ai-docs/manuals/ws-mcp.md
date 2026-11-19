@@ -994,12 +994,14 @@ from a support conversation:
   renders under the `ws` server's names whatever package the daemon
   serves, a `{{ns}}:lead-*` skill reference renders as the `/lead-*`
   dashboard command, and delegation renders as `agent.spawn`. Its prompt
-  says what a `/lead-*` reference is and keeps the manual it carries as
-  the only copy: for fresh state, and in place of `/lead-revive`, the lead
-  calls `workflow_state`. The runner adds the package's self-preloading
-  lead skills (`wsrsrc.PreloadCommands`, read once per runner, the workflow
-  manual's own left out) to the lead's command list, at creation and at a
-  rejoin, replacing a harness command of the same name. Running one sends the
+  says what a `/lead-*` reference is and, when the manual rendered, keeps
+  it as the only copy: for fresh state, and in place of `/lead-revive`, the
+  lead calls `workflow_state`. The runner adds the package's
+  self-preloading lead skills (`wsrsrc.PreloadCommands`, read once per
+  runner, a failed read included, the workflow manual's own left out) to
+  the lead's command list whenever its conversation opens or its harness
+  reports a list, replacing a harness command of the same name and any
+  earlier runner's entries. Running one sends the
   playbook the daemon renders for the lead's key (`RenderLeadPlaybook`, the
   same text as `playbook.read` on its connection) as the turn; a failed
   render sends a pointer to `playbook.read`. The page's user entry stays the
