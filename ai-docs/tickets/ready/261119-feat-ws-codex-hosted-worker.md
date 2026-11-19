@@ -355,3 +355,82 @@ reaches the lead's mailbox.
    the installed CLI after a CLI update without a daemon restart, relying on
    a newer session report (a new app-server, such as the spawned worker) or a
    `models_cache.json` rewritten by the new CLI, named in the Result.
+
+### Result (a85bcbe50) - 2026-11-19
+
+Status: items 2, 4 and 5 landed and verified on w5090; items 1, 3 and 6 are
+pending live (they need the owner's PC and a daemon built from this branch).
+
+What landed (one commit, `a85bcbe50`):
+
+- Item 2, worker path. The Codex registration declares `WorkerCapable`,
+  `WorkerProfile` (`agent-worker-codex`), `WorkerHTTPMCP` and
+  `WorkerAutoApprove`; the builtin `agent-worker-codex` profile carries the
+  common ws loadout (`AgentWSTools`) and a Codex worker instruction text that
+  points at `agent.spawn`/`mailbox.send` instead of Codex's native subagent
+  tools; the catalog gained worker-role rows (approval graded Substitute).
+  `CodexBackend.Start` accepts a holderless worker start (`worker = Lead == nil`)
+  and publishes the child PID for the MCP hello. `startWorker` now passes the
+  spawn authority as `StartSpec.PermissionLevel`; the backend maps it per (172):
+  read-only runs `read-only` with approval `never`; workdir-write and full run
+  `workspace-write` with `on-request` plus the traced auto-allow; any other
+  level is refused. A worker refuses `SetPermissionMode`. Common code has no
+  harness-name branch.
+- Item 5, freshness. The session-reported choices carry a timestamp and expire
+  on `choicesTTL`; a newer report replaces them. A missing `models_cache.json`
+  yields an empty list without error; an existing empty, unparseable or
+  model-less file is an error on the 30 s fail TTL. The spawn popover and the
+  session menu refetch choices on every open and redraw without losing the form
+  (`dashboard-leads.js`). `ai-docs/manuals/ws-mcp.md` updated.
+- Item 4, tests: `codex_worker_test.go` (launch authority and approval through
+  the runner path, mode and start refusals, mode-change refusal),
+  `TestCodexWorkerProfileAndAdmission`, updated catalog/builtin/descriptor
+  tests, hosted-choices TTL/cache-file tests, and a dashboard test for the
+  popover refetch.
+
+Verification (w5090, `go build ./...`, `go vet`, `go test`):
+
+- `./internal/wsagent`: ok. `./internal/wsdashboard`: ok (includes the node
+  popover tests, which also pass locally with `node --test`).
+- `./internal/mcp`: one failure on the full run (`TestConfigListAgentProfileKnob`
+  listed builtin profiles without `agent-worker-codex`); fixed and rerun with
+  `-run "Profile|Agent|Tier|Worker|Codex"`: ok. The full package was not rerun
+  after that one-line list fix.
+- `./cmd/ws-mcp`: only `TestHostedLauncherSurvivesReplacementAndRestartsRecordedBuild`
+  failed, on the missing gitignored `generated/inventory.json` (known; noted per
+  the lead's instruction). Everything else in the package passed.
+
+Decisions: (172) applied as above; tier T0 (no stored field, no tracker event,
+no tool/argument change; an old binary has no Codex worker row). Confinement is
+advisory, recorded in the catalog source text.
+
+Review: R1 lite, one pass: 0 Critical, 0 Important, 4 Minor (no R2).
+
+Pending live (owner's PC, daemon built from `impl/track/agent-v2/maybe-romp-magma`):
+
+- Item 1, probe: against the installed Codex CLI confirm `thread/start`
+  accepts the string `sandbox` and `approvalPolicy`, that `read-only` plus
+  `never` refuses a write, and that `workspace-write` plus `on-request` raises
+  `item/commandExecution/requestApproval` which the runner auto-allows.
+- Item 3, lead reach: from a plugin lead connection, `agent.list`/`agent.tiers`
+  show a `codex.*` tier and `agent.spawn` accepts it (no listing code change was
+  needed unless a gap shows).
+- Item 6, acceptance: spawn `codex.medium` in a pooled worktree; the worker
+  edits a file, runs a w5090 build, commits, and its completion mail arrives in
+  the lead mailbox. Then update the Codex CLI (or rewrite `models_cache.json`)
+  and confirm the dashboard model list follows without a daemon restart, naming
+  which route carried it (a newer session report from the new app-server, or the
+  rewritten cache file).
+
+Forward (Minor, from R1):
+
+- `codex.go` `Start` validates the stored mode before the attach return, so a
+  holder reattach with an unrecognised stored mode now fails at `Start` rather
+  than on the next `Send`; make it lenient if that matters.
+- The read-only `answered == false` assertion in `codex_worker_test.go` holds
+  because the stand-in sends no approval when policy is `never`; the real guard
+  is the `thread/start`/`turn/start` policy assertions.
+- Tier resolution is only checked as `rec.Model != ""` (not the `codex.small`
+  default), tool exposure only via the `EnvAllowedTools` hello value, and
+  `PermissionFull` only by the `codexWorkerMode` unit test.
+- Test helpers restore `codexChoices.models`/`.efforts` but not the new `.at`.
