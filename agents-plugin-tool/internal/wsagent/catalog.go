@@ -144,10 +144,26 @@ type CapabilityEntry struct {
 type CompactionProtocol struct {
 	LeadCommand, WorkerCommand bool
 	Lifecycle                  bool
-	PromptPersists             bool
-	LegacyAdvisory             string
-	LegacyHard                 string
-	AdvisoryEnabled            string
+	// UsageDropRatio, when in (0, 1), detects compaction completion from a
+	// sharp context-token drop (used < prev*UsageDropRatio with at least
+	// UsageDropMinDelta tokens dropped on the same context window) on harnesses
+	// whose wire protocol emits no explicit compaction event.
+	UsageDropRatio    float64
+	UsageDropMinDelta int64
+	// CommandEndConfirms marks a harness whose native compact command completes
+	// synchronously on its clean prompt/turn response without an explicit
+	// CompactEnd notification.
+	CommandEndConfirms bool
+	PromptPersists     bool
+	LegacyAdvisory     string
+	LegacyHard         string
+	AdvisoryEnabled    string
+}
+
+// DetectsLifecycle reports whether this harness has a verified compaction
+// completion signal (either explicit wire events or descriptor usage-drop).
+func (p CompactionProtocol) DetectsLifecycle() bool {
+	return p.Lifecycle || (p.UsageDropRatio > 0 && p.UsageDropRatio < 1)
 }
 
 // LegacyKey returns only the matching lead migration key.
@@ -488,7 +504,18 @@ func CodexCatalog() *HarnessProfile {
 // (agyMapper.initialized) demotes what a session's shape lacks.
 func AgyCatalog() *HarnessProfile {
 	p := &HarnessProfile{
-		Compaction: CompactionProtocol{LeadCommand: true, WorkerCommand: true, PromptPersists: true},
+		// agy ACP emits no explicit compaction notification (only usage_update
+		// and end_turn), while /compact shrinks context and keeps systemPrompt.
+		// Detect completion from a >15% drop (>=2000 tokens, same window) or a
+		// clean /compact prompt response, whichever arrives first.
+		Compaction: CompactionProtocol{
+			LeadCommand:        true,
+			WorkerCommand:      true,
+			UsageDropRatio:     0.85,
+			UsageDropMinDelta:  2000,
+			CommandEndConfirms: true,
+			PromptPersists:     true,
+		},
 		Oldest:     "1.5.9",
 		Newest:     "1.5.10",
 		Entries: []CapabilityEntry{
@@ -497,7 +524,7 @@ func AgyCatalog() *HarnessProfile {
 			{Item: ItemSkillInjection, Role: RoleLead, Grade: GradeNative,
 				Source: "agy's own skills, invoked by a /name prompt and listed in available_commands_update; ws's skills arrive with the common prompt assembly, not agy plugin import"},
 			{Item: ItemCompaction, Role: RoleLead, Grade: GradeNative,
-				Source: "legacy dashboard /compact is a session/prompt command; live agy 1.5.12 returned no lifecycle signals, so the new lifecycle lever is unsupported"},
+				Source: "session/prompt /compact at idle boundaries with descriptor usage-drop and prompt-response completion detection"},
 			{Item: ItemRewind, Role: RoleLead, Grade: GradeUnsupported, Source: "no ACP method"},
 			{Item: ItemToolRemoval, Role: RoleLead, Grade: GradeUnsupported,
 				Source: "the lead keeps the user's tool setup; only a custom main agent removes tools"},

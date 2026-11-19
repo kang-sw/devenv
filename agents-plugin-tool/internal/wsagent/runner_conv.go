@@ -81,6 +81,7 @@ type conv struct {
 	compactNote                                                                  string
 	compactAdvisory, compactHard                                                 wsconfig.Threshold
 	compactTokens, compactWindow                                                 float64
+	compactPrevTokens, compactPrevWindow                                         int64
 	compactUsageFresh, compactAdvised, compactHardIssued, compactAdvisoryEnabled bool
 	compactAwaitTurn                                                             bool
 

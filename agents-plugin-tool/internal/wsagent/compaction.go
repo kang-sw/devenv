@@ -113,7 +113,7 @@ func (r *Runner) compactDescendant(own, child Record) bool {
 
 func (c *conv) compactUnsupported() string {
 	p := c.r.opts.Backends[c.rec.Backend].CompactionProtocol()
-	if !p.Lifecycle {
+	if !p.DetectsLifecycle() {
 		return "native compaction lifecycle is unsupported by this harness descriptor"
 	}
 	if (c.rec.Lead && !p.LeadCommand) || (!c.rec.Lead && !p.WorkerCommand) {
@@ -161,6 +161,7 @@ func (c *conv) loadCompaction() {
 		}
 	}
 	c.compactUsageFresh = false
+	c.compactPrevTokens, c.compactPrevWindow = 0, 0
 }
 
 func (c *conv) observeCompaction(ev wslive.Event) {
@@ -182,6 +183,52 @@ func (c *conv) observeCompaction(ev wslive.Event) {
 	}
 	if c.compactTokens < c.compactHard.Point(c.compactWindow) {
 		c.compactHardIssued = false
+	}
+}
+
+// checkUsageDropCompaction detects native compaction completion on harnesses
+// whose descriptor declares UsageDropRatio rather than explicit wire events.
+// A window change resets the baseline (model/tokenizer switch, not compaction).
+func (c *conv) checkUsageDropCompaction(ev wslive.Event) {
+	if c.r == nil || ev.Kind != wslive.KindStatus || ev.Context == nil || ev.Context.Tokens == nil {
+		return
+	}
+	p := c.r.opts.Backends[c.rec.Backend].CompactionProtocol()
+	if p.UsageDropRatio <= 0 || p.UsageDropRatio >= 1 {
+		return
+	}
+	used, window := *ev.Context.Tokens, ev.Context.Window
+	if used <= 0 || used > wslive.MaxContextTokens || window <= 0 {
+		return
+	}
+	if c.compactPrevWindow > 0 && window != c.compactPrevWindow {
+		c.compactPrevTokens, c.compactPrevWindow = 0, window
+		return
+	}
+	prev := c.compactPrevTokens
+	c.compactPrevTokens, c.compactPrevWindow = used, window
+	if prev <= 0 {
+		return
+	}
+	dropped := prev - used
+	if dropped < p.UsageDropMinDelta || float64(used) >= float64(prev)*p.UsageDropRatio {
+		return
+	}
+	trigger := wslive.TriggerAuto
+	if c.compacting {
+		trigger = wslive.TriggerManual
+	} else {
+		c.compacting = true
+	}
+	c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd, Trigger: trigger})
+	// This sample is already post-compaction: keep it as the new baseline and
+	// fresh usage so the next turn does not re-trigger on the same drop.
+	c.compactPrevTokens = used
+	c.compactAwaitTurn = false
+	c.compactTokens, c.compactWindow, c.compactUsageFresh = float64(used), float64(window), true
+	c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd, Trigger: trigger})
+	if !c.compactCommand {
+		c.stopCompactWatchdog()
 	}
 }
 
@@ -305,6 +352,7 @@ func (c *conv) compactEvent(ev wslive.Event) {
 		// A stats answer queued before compaction may still carry old tokens.
 		// Only the next model turn can produce a fresh post-compaction sample.
 		c.compactAwaitTurn = true
+		c.compactPrevTokens = 0
 		c.compactAdvised, c.compactHardIssued, c.compactUsageFresh = false, false, false
 		c.compactNote = fmt.Sprintf("Your ws session key is `%s`. Context was compacted. Fresh session state is available through the lead-only ws workflow_state tool. Keep using this same key.\n", c.rec.WSKey)
 		if !c.r.opts.Backends[c.rec.Backend].CompactionProtocol().PromptPersists {
