@@ -885,6 +885,11 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 			if !l.Success {
 				errText = "compact refused: " + l.Error
 			}
+			if !m.nativeKnown && !m.nativeRun {
+				if _, replaying := replies.(silentReplies); !replaying {
+					return m.endTurn(now, errText)
+				}
+			}
 			return m.commandDone(now, errText)
 		case "steer":
 			// A non-lead process steers a child's report, which the runner

@@ -62,11 +62,18 @@ func (c *conv) handle(ev Event) {
 			c.compactEvent(*ev.Live)
 		}
 		c.apply(*ev.Live, quiet)
-		if !quiet && ev.Live.Kind == wslive.KindStatus && !c.turn && !c.replaying {
+		if !quiet && ev.Live.Kind == wslive.KindStatus && c.canKick() {
 			c.compactIdle()
 		}
 		if !quiet && ev.Live.Kind == wslive.KindCompact && ev.Live.Phase != wslive.CompactStart {
+			if !c.compactCommand {
+				c.stopCompactWatchdog()
+			}
 			c.kick()
+			c.releaseHeld()
+			if !c.turn && !c.compacting && !c.compactCommand {
+				c.armIdle()
+			}
 		}
 	case ev.Card != nil:
 		if !quiet {
@@ -152,17 +159,29 @@ func (c *conv) handle(ev Event) {
 	case ev.UserTaken != "":
 		c.steerTaken(ev.UserTaken)
 	case ev.CommandError != "":
+		settledCompact := false
 		if !quiet && c.compactCommand {
 			c.compactCommand = false
+			c.stopCompactWatchdog()
+			settledCompact = true
 		}
 		if !quiet && c.compacting {
 			c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
-			c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
+			c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed, Text: ev.CommandError})
+			c.stopCompactWatchdog()
+			settledCompact = true
 		}
 		// Replay rebuilds lifecycle state, not transient command diagnostics.
 		if !quiet {
 			c.setStatus(func() { c.lastErr = ev.CommandError })
 			c.changed(false)
+			if settledCompact {
+				c.kick()
+				c.releaseHeld()
+				if !c.turn && !c.compacting && !c.compactCommand {
+					c.armIdle()
+				}
+			}
 		}
 	case ev.Notice != "":
 		if !quiet {
@@ -240,11 +259,12 @@ func (c *conv) beginTurn(quiet bool) {
 // endTurn closes the running turn, applies settings changed during it, and
 // submits the messages held meanwhile.
 func (c *conv) endTurn(turnErr string, quiet bool) {
-	compactCommand := c.compactCommand
+	compactCommand, wasCompacting := c.compactCommand, c.compacting
 	if !quiet {
 		c.compactCommand = false
+		c.stopCompactWatchdog()
 	}
-	if !quiet && turnErr != "" && c.compacting {
+	if !quiet && c.compacting {
 		c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
 		c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed, Text: turnErr})
 	}
@@ -254,7 +274,7 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 		c.probeWorkerRecovery()
 		return
 	}
-	if !c.turn && !c.rec.Lead && !compactCommand {
+	if !c.turn && !c.rec.Lead && !compactCommand && !wasCompacting {
 		return
 	}
 	ran := c.turn
@@ -291,8 +311,9 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 	c.applySettings()
 	c.restartIfDue()
 	c.kick()
+	c.releaseHeld()
 	c.flushRecord()
-	if !c.turn {
+	if !c.turn && !c.compacting && !c.compactCommand {
 		c.armIdle()
 	}
 }
@@ -511,8 +532,8 @@ func (c *conv) processExited() {
 		c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
 		c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
 	}
-	c.compactPending = nil
-	c.compactCommand = false
+	c.compactPending, c.compactCommand, c.compactResume = nil, false, false
+	c.stopCompactWatchdog()
 	rejoining, proc := c.replaying, c.proc
 	c.events = nil
 	// No compaction follows from a process that is gone.
@@ -541,6 +562,9 @@ func (c *conv) processExited() {
 		}
 	})
 	c.processEnded()
+	if !c.closed && !c.quitting {
+		c.releaseHeld()
+	}
 	if rejoining {
 		// The process ended while no daemon ran: what waited goes to a new
 		// one.
@@ -641,9 +665,13 @@ func (c *conv) stopProcess(reason string) {
 		c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
 		c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
 	}
-	c.compactPending, c.compactCommand = nil, false
+	c.compactPending, c.compactCommand, c.compactResume = nil, false, false
+	c.stopCompactWatchdog()
 	c.stopIdle()
 	if c.proc == nil {
+		if !c.closed && !c.quitting {
+			c.releaseHeld()
+		}
 		return
 	}
 	proc := c.proc

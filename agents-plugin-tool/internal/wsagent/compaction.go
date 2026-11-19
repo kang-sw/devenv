@@ -3,12 +3,19 @@ package wsagent
 import (
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
+
+// compactCommandTimeout bounds how long a dispatched native compact command
+// may wait without a harness response before clearing state and unblocking.
+const compactCommandTimeout = 5 * time.Minute
 
 func (r BackendRegistration) CompactionProtocol() CompactionProtocol {
 	if r.NativeCompaction != nil {
@@ -192,15 +199,17 @@ func (c *conv) compactIdle() bool {
 				c.setStatus(func() { c.lastErr = why })
 				if c.compactAdvisoryEnabled {
 					c.compactNote += fmt.Sprintf("Context usage is %.0f tokens (%.0f%%); hard point %.0f tokens (%.0f%%). Native compaction is unsupported: %s. Write durable state to your agenda before compacting.\n", c.compactTokens, c.compactTokens/c.compactWindow*100, c.compactHard.Point(c.compactWindow), c.compactHard.Point(c.compactWindow)/c.compactWindow*100, why)
-					c.compactResume = true
 				}
 			}
 		} else if c.compactAdvisoryEnabled && !c.compactAdvised && c.compactTokens >= c.compactAdvisory.Point(c.compactWindow) {
 			c.compactAdvised = true
 			point := c.compactAdvisory.Point(c.compactWindow)
 			if !math.IsInf(point, 0) {
-				c.compactNote += fmt.Sprintf("\nContext usage is %.0f tokens (%.0f%%); advisory point %.0f tokens (%.0f%%). Write durable state to your agenda, then call ws/compact at a safe boundary before continuing. No summary prose is requested.\n", c.compactTokens, c.compactTokens/c.compactWindow*100, point, point/c.compactWindow*100)
-				c.compactResume = true
+				if c.compactUnsupported() == "" {
+					c.compactNote += fmt.Sprintf("\nContext usage is %.0f tokens (%.0f%%); advisory point %.0f tokens (%.0f%%). Write durable state to your agenda, then call ws/compact at a safe boundary before continuing. No summary prose is requested.\n", c.compactTokens, c.compactTokens/c.compactWindow*100, point, point/c.compactWindow*100)
+				} else {
+					c.compactNote += fmt.Sprintf("\nContext usage is %.0f tokens (%.0f%%); advisory point %.0f tokens (%.0f%%). Write durable state to your agenda before compacting. No summary prose is requested.\n", c.compactTokens, c.compactTokens/c.compactWindow*100, point, point/c.compactWindow*100)
+				}
 			}
 		}
 	}
@@ -208,6 +217,7 @@ func (c *conv) compactIdle() bool {
 		if c.proc == nil {
 			c.compactPending = nil
 			c.setStatus(func() { c.lastErr = "compaction requires a running harness" })
+			c.releaseHeld()
 			return false
 		}
 		c.compactPending = nil
@@ -217,9 +227,11 @@ func (c *conv) compactIdle() bool {
 		if err := c.runCommand(wsinbox.Command{Name: "compact"}); err != nil {
 			req.err = err
 			c.compactCommand = false
+			c.stopCompactWatchdog()
 			c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
 			c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
 			c.setStatus(func() { c.lastErr = "compaction: " + err.Error() })
+			c.releaseHeld()
 			return false
 		}
 		return true
@@ -229,6 +241,7 @@ func (c *conv) compactIdle() bool {
 		c.compactResume = false
 		if err := c.proc.Send(text); err != nil {
 			c.setStatus(func() { c.lastErr = err.Error() })
+			c.releaseHeld()
 			return false
 		}
 		c.compactNote = ""
@@ -238,6 +251,47 @@ func (c *conv) compactIdle() bool {
 	return false
 }
 
+func (c *conv) compactHoldsReport() bool {
+	return (c.compactPending != nil && c.compactPending.resume) ||
+		((c.compacting || c.compactCommand || c.compactNote != "") && c.compactResume)
+}
+
+func (c *conv) armCompactWatchdog() {
+	c.stopCompactWatchdog()
+	if c.r != nil && c.r.opts.Timer != nil {
+		c.compactC, c.compactStop = c.r.opts.Timer(compactCommandTimeout)
+	}
+}
+
+func (c *conv) stopCompactWatchdog() {
+	if c.compactStop != nil {
+		c.compactStop()
+	}
+	c.compactC, c.compactStop = nil, nil
+}
+
+func (c *conv) compactTimedOut() {
+	c.compactC, c.compactStop = nil, nil
+	if !c.compacting && !c.compactCommand {
+		return
+	}
+	if c.turn && !c.compactCommand {
+		// Dashboard /compact ran as a command turn; end it so queued work unblocks.
+		c.setStatus(func() { c.turn = false })
+		c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
+	}
+	c.compactCommand = false
+	c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
+	c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed, Text: "compaction timed out"})
+	c.setStatus(func() { c.lastErr = "compaction timed out" })
+	c.changed(false)
+	c.kick()
+	c.releaseHeld()
+	if !c.turn && !c.compacting && !c.compactCommand {
+		c.armIdle()
+	}
+}
+
 func (c *conv) compactEvent(ev wslive.Event) {
 	if ev.Kind != wslive.KindCompact {
 		return
@@ -245,10 +299,6 @@ func (c *conv) compactEvent(ev wslive.Event) {
 	switch ev.Phase {
 	case wslive.CompactStart:
 		c.stopIdle()
-		if !c.compactCommand && c.compactPending != nil {
-			c.compactResume = c.compactPending.resume
-			c.compactPending = nil
-		}
 		c.compacting = true
 		c.compactUsageFresh = false
 		c.compactAdvised, c.compactHardIssued = true, true
@@ -266,7 +316,18 @@ func (c *conv) compactEvent(ev wslive.Event) {
 		c.compactAdvised, c.compactHardIssued, c.compactUsageFresh = false, false, false
 		c.compactNote = fmt.Sprintf("Your ws session key is `%s`. Context was compacted. Fresh session state is available through the lead-only ws workflow_state tool. Keep using this same key.\n", c.rec.WSKey)
 		if !c.r.opts.Backends[c.rec.Backend].CompactionProtocol().PromptPersists {
-			c.compactNote += c.leadManual(c.record())
+			if c.rec.Lead {
+				c.compactNote += c.leadManual(c.record())
+			} else {
+				if c.systemPrompt == "" && c.rec.SystemPrompt && c.dir != "" {
+					if raw, err := os.ReadFile(filepath.Join(c.dir, systemPromptFile)); err == nil {
+						c.systemPrompt = string(raw)
+					}
+				}
+				if c.systemPrompt != "" {
+					c.compactNote += c.systemPrompt + "\n"
+				}
+			}
 		}
 	}
 }

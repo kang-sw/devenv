@@ -756,7 +756,7 @@ func (c *conv) saveSteered() {
 // and not taken, or kept for the next turn), or a child of its own that is
 // open (openChildOf). It runs in the loop.
 func (c *conv) holdsReport() bool {
-	if len(c.steered) > 0 || len(c.rec.Reports) > 0 {
+	if len(c.steered) > 0 || len(c.rec.Reports) > 0 || c.compactHoldsReport() {
 		return true
 	}
 	ref := ParentRef{Kind: ParentConversation, ReplyID: c.rec.ReplyID}

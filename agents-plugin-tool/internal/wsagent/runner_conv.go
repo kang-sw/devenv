@@ -76,6 +76,8 @@ type conv struct {
 	// Compaction state is loop-owned, never persisted per observation.
 	compactPending                                                               *compactRequest
 	compacting, compactResume, compactCommand                                    bool
+	compactC                                                                     <-chan time.Time
+	compactStop                                                                  func()
 	compactNote                                                                  string
 	compactAdvisory, compactHard                                                 wsconfig.Threshold
 	compactTokens, compactWindow                                                 float64
@@ -449,6 +451,7 @@ func (c *conv) loop() {
 	defer close(c.done)
 	defer c.live.closeSlot()
 	defer func() {
+		c.stopCompactWatchdog()
 		if c.spawnTimer != nil {
 			c.spawnTimer.Stop()
 		}
@@ -478,8 +481,9 @@ func (c *conv) loop() {
 		return
 	}
 	for {
-		var idleC, actionC, leverC, spawnC <-chan time.Time
+		var idleC, actionC, leverC, compactC, spawnC <-chan time.Time
 		leverC = c.leverC
+		compactC = c.compactC
 		if c.spawnTimer != nil {
 			spawnC = c.spawnTimer.C
 		}
@@ -534,6 +538,8 @@ func (c *conv) loop() {
 			// No compaction started within the cap: what waited goes now.
 			c.leverC, c.leverStop = nil, nil
 			c.kick()
+		case <-compactC:
+			c.compactTimedOut()
 		case <-beat.C:
 			c.live.heartbeatSnapshot()
 			c.persistSeq()
@@ -972,8 +978,13 @@ func (c *conv) apply(ev wslive.Event, quiet ...bool) {
 // command. What follows the turn's part stays queued for the turns after
 // it, which each turn end submits; mail waits for the next message turn, or
 // goes alone once nothing is queued.
+func (c *conv) canKick() bool {
+	return !c.closed && !c.hidden && !c.turn && !c.replaying && len(c.steered) == 0 && c.leverC == nil &&
+		!(c.rec.Backend == BackendPi && c.r.opts.Holders != nil && !c.r.scanDone())
+}
+
 func (c *conv) kick() {
-	if c.closed || c.hidden || c.turn || c.replaying || len(c.steered) > 0 || c.leverC != nil || (c.rec.Backend == BackendPi && c.r.opts.Holders != nil && !c.r.scanDone()) {
+	if !c.canKick() {
 		return
 	}
 	if c.compactIdle() {

@@ -435,3 +435,272 @@ func TestCompactionObservationMemoryOnly(t *testing.T) {
 	}
 	t.Logf("100000 memory observations in %s; zero instrumented file operations", time.Since(start))
 }
+
+func TestCompactionNeverWedgesOnPiUnknownEndTurnOrTimeout(t *testing.T) {
+	// 1a: live Pi compact response must end the command even when nativeKnown is false;
+	// replay (silentReplies) keeps unknown-state probing intact.
+	spec := piSpec(t, `{"backend":"pi"}`)
+	spec.Holder = &holderChild{id: "existing"}
+	m := newPiMapper(spec)
+	line := []byte(`{"type":"response","command":"compact","success":true}`)
+	if evs := m.mapLine(line, silentReplies{}); len(evs) != 0 {
+		t.Fatalf("replay compact response settled unknown state: %+v", evs)
+	}
+	if evs := m.mapLine(line, &recordedReplies{}); len(evs) == 0 || !evs[len(evs)-1].TurnEnd {
+		t.Fatalf("live compact response with !nativeKnown did not end turn: %+v", evs)
+	}
+
+	// 1b: endTurn with empty turnErr still clears compacting/compactCommand (including dashboard /compact).
+	h := compactionHarness(t)
+	id, holder := h.runLead("one")
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	h.idle(id)
+	h.sendCommand(id, "compact", "")
+	eventually(t, "dashboard compact sent", func() bool { got := h.userInputs(holder); return len(got) == 2 && got[1] == "/compact" })
+	// Return idle turn end with no CompactEnd and no error.
+	h.holders.out(holder, resultLine(), stateLine(HarnessIdle))
+	h.sync(id, holder)
+	c := h.runner.conv(id)
+	c.do(func() {
+		if c.compacting || c.compactCommand {
+			t.Fatalf("endTurn without error left compaction stuck: compacting=%v cmd=%v", c.compacting, c.compactCommand)
+		}
+	})
+	h.send(id, "after-silent-compact")
+	eventually(t, "queued work runs after silent compact end", func() bool {
+		got := h.userInputs(holder)
+		return len(got) == 3 && strings.Contains(got[2], "after-silent-compact")
+	})
+	h.holders.out(holder, turnLines("sess-1", "u2", "second")...)
+	h.idle(id)
+
+	// 1c: CommandError, standalone CompactEnd, and standalone CompactFailed re-arm idle and kick.
+	for _, tc := range []struct {
+		name string
+		ev   Event
+	}{
+		{"CommandError", Event{CommandError: "compact refused"}},
+		{"CompactEnd", Event{Live: &wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd}}},
+		{"CompactFailed", Event{Live: &wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c.do(func() {
+				c.idleAfter = time.Hour
+				c.stopIdle()
+				c.compacting = true
+				if tc.name == "CommandError" {
+					c.compactCommand = true
+				}
+				c.handle(tc.ev)
+				if c.compacting || c.compactCommand {
+					t.Fatalf("%s left compaction active: compacting=%v cmd=%v", tc.name, c.compacting, c.compactCommand)
+				}
+				if c.idle == nil {
+					t.Fatalf("%s did not re-arm idle timer", tc.name)
+				}
+				c.stopIdle()
+				c.idleAfter = 0
+			})
+		})
+	}
+
+	// 1d: watchdog timeout clears stuck compaction, publishes CompactFailed, re-arms idle and kicks.
+	timers := &leverTimers{}
+	wh := newLeadHarness(t)
+	reg := wh.opts.Backends[BackendClaude]
+	reg.Catalog = ClaudeCatalog()
+	wh.opts.Backends[BackendClaude] = reg
+	wh.opts.Timer = timers.start
+	wh.start()
+	wid, wholder := wh.runLead("one")
+	wh.holders.out(wholder, turnLines("sess-2", "u1", "first")...)
+	wh.idle(wid)
+	wc := wh.runner.conv(wid)
+	wc.do(func() { wc.idleAfter = time.Hour })
+	resume := false
+	if got := wh.runner.Compact(wh.record(wid).WSKey, "", &resume); got.Status != "queued" {
+		t.Fatal(got)
+	}
+	eventually(t, "watchdog armed on compact command", func() bool {
+		started, _ := timers.counts()
+		return started == 1 && timers.durs[0] == compactCommandTimeout
+	})
+	timers.fire(t, 0)
+	eventually(t, "watchdog cleared compaction and re-armed idle", func() bool {
+		ok := false
+		wc.do(func() { ok = !wc.compacting && !wc.compactCommand && wc.idle != nil })
+		return ok
+	})
+	wc.do(func() { wc.stopIdle(); wc.idleAfter = 0 })
+	wh.send(wid, "after-watchdog")
+	eventually(t, "queued work unblocked after watchdog", func() bool {
+		got := wh.userInputs(wholder)
+		return len(got) == 3 && strings.Contains(got[2], "after-watchdog")
+	})
+	foundFailed := false
+	for _, entry := range wh.ring(wid) {
+		if entry.Kind == wslive.RingCompact && entry.CompactFailed {
+			foundFailed = true
+		}
+	}
+	if !foundFailed {
+		t.Fatalf("watchdog did not publish CompactFailed: %+v", wh.ring(wid))
+	}
+}
+
+func TestCompactionNudgesAndMidTurnAutoDoNotStartContinueTurn(t *testing.T) {
+	// 2a & 2b: advisory and hard-limit unsupported fallback queue note without starting a turn,
+	// and a harness lacking Lifecycle is not told to call ws/compact.
+	for _, tc := range []struct {
+		name        string
+		backend     string
+		catalog     *HarnessProfile
+		tokens      int64
+		wantCompact bool
+	}{
+		{"claude-advisory", BackendClaude, ClaudeCatalog(), 60000, true},
+		{"agy-advisory", BackendAgy, AgyCatalog(), 60000, false},
+		{"agy-hard-fallback", BackendAgy, AgyCatalog(), 90000, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := NewRunner(Options{Backends: map[string]BackendRegistration{tc.backend: {Catalog: tc.catalog}}})
+			c := &conv{
+				r:                      r,
+				rec:                    Record{Backend: tc.backend, Lead: true, WSKey: "k"},
+				compactAdvisory:        wsconfig.Threshold{Percent: 50},
+				compactHard:            wsconfig.Threshold{Percent: 80},
+				compactAdvisoryEnabled: true,
+			}
+			n := tc.tokens
+			c.observeCompaction(wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &n, Window: 100000}})
+			if c.compactIdle() {
+				t.Fatalf("%s started a turn on nudge", tc.name)
+			}
+			if c.compactResume {
+				t.Fatalf("%s set compactResume=true", tc.name)
+			}
+			if c.compactNote == "" {
+				t.Fatalf("%s queued no note", tc.name)
+			}
+			if got := strings.Contains(c.compactNote, "ws/compact"); got != tc.wantCompact {
+				t.Fatalf("%s ws/compact mention = %v, want %v; note=%q", tc.name, got, tc.wantCompact, c.compactNote)
+			}
+			if !strings.Contains(c.compactInput("real turn"), strings.TrimSpace(c.compactNote)) {
+				t.Fatalf("%s note did not ride on next real turn", tc.name)
+			}
+		})
+	}
+
+	// 2c: mid-turn native auto-compaction must not consume compactPending.resume.
+	r := NewRunner(Options{Backends: map[string]BackendRegistration{BackendClaude: {Catalog: ClaudeCatalog()}}})
+	c := &conv{r: r, rec: Record{Backend: BackendClaude, Lead: true, WSKey: "k"}, turn: true}
+	c.compactPending = &compactRequest{resume: true}
+	c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactStart, Trigger: wslive.TriggerAuto})
+	if c.compactResume || c.compactPending == nil || !c.compactPending.resume {
+		t.Fatalf("mid-turn auto-compaction consumed compactPending.resume: resume=%v pending=%+v", c.compactResume, c.compactPending)
+	}
+	c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd, Trigger: wslive.TriggerAuto})
+	if c.compactResume {
+		t.Fatal("mid-turn auto-compaction armed continue turn")
+	}
+}
+
+func TestCompactionWorkerSelfResumeDefersParentSettle(t *testing.T) {
+	h, got := newFakePiRecoveryHarness(t)
+	reg := h.runner.opts.Backends[BackendPi]
+	reg.NativeCompaction = PiCompaction()
+	h.runner.opts.Backends[BackendPi] = reg
+	lead := h.lead(BackendClaude, LeadOptions{})
+	child, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "work", Parent: &ParentRef{Kind: ParentLead, ReplyID: lead.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder := h.holder(child.ID)
+	h.holders.out(holder, `{"type":"agent_start"}`)
+	eventually(t, "worker running", func() bool { return h.state(child.ID).Status == StatusRunning })
+	key := h.record(child.ID).WSKey
+	if res := h.runner.Compact(key, "", nil); res.Status != "queued" {
+		t.Fatal(res)
+	}
+	// Initial turn finishes: parent must NOT receive TurnDone yet; compact RPC runs first.
+	h.holders.out(holder,
+		`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"pre-compact"}]}}`,
+		`{"type":"agent_settled"}`,
+	)
+	eventually(t, "worker compact queued after turn", func() bool { return len(h.holders.inputs(holder, "compact")) == 1 })
+	if reps := got.list(); len(reps) != 0 {
+		t.Fatalf("parent settled before compaction resumed: %+v", reps)
+	}
+	h.holders.out(holder,
+		`{"type":"compaction_start","reason":"manual"}`,
+		`{"type":"compaction_end","reason":"manual"}`,
+		`{"type":"response","command":"compact","success":true}`,
+	)
+	eventually(t, "resumed continue turn sent", func() bool { return len(h.holders.inputs(holder, "prompt")) == 2 })
+	if reps := got.list(); len(reps) != 0 {
+		t.Fatalf("parent settled before resumed turn ended: %+v", reps)
+	}
+	h.holders.out(holder,
+		`{"type":"agent_start"}`,
+		`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"resumed final"}]}}`,
+		`{"type":"agent_settled"}`,
+	)
+	eventually(t, "parent receives one report after resumed turn", func() bool { return len(got.list()) == 1 })
+	reps := got.list()
+	if len(reps) != 1 || reps[0].Result.Status != TurnDone || reps[0].Result.Message != "resumed final" {
+		t.Fatalf("unexpected parent reports: %+v", reps)
+	}
+}
+
+func TestCompactionStatusRespectsKickGuards(t *testing.T) {
+	for _, guard := range []string{"leverC", "hidden", "closed", "steered"} {
+		t.Run(guard, func(t *testing.T) {
+			h := compactionHarness(t)
+			id, holder := h.runLead("one")
+			h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+			h.idle(id)
+			c := h.runner.conv(id)
+			high := int64(90000)
+			c.do(func() {
+				switch guard {
+				case "leverC":
+					c.leverC = make(chan time.Time)
+				case "hidden":
+					c.hidden = true
+				case "closed":
+					c.closed = true
+				case "steered":
+					c.steered = []steeredReport{{Text: "pending"}}
+				}
+				c.handle(Event{Live: &wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &high, Window: 100000}}})
+				if c.compacting || c.compactCommand {
+					t.Fatalf("KindStatus bypassed %s guard and triggered compaction", guard)
+				}
+				c.leverC, c.hidden, c.closed, c.steered = nil, false, false, nil
+			})
+		})
+	}
+}
+
+func TestCompactionWorkerRestoreUsesSystemPromptNotLeadManual(t *testing.T) {
+	p := *PiCompaction()
+	p.PromptPersists = false
+	manual := &leadManualRender{text: "LEAD MANUAL MUST NOT APPEAR"}
+	r := NewRunner(Options{
+		LeadManual: manual.render,
+		Backends:   map[string]BackendRegistration{BackendPi: {NativeCompaction: &p}},
+	})
+	c := &conv{
+		r:            r,
+		rec:          Record{Backend: BackendPi, Lead: false, WSKey: "worker-key"},
+		systemPrompt: "WORKER SYSTEM PROMPT",
+		compacting:   true,
+	}
+	c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd})
+	if !strings.Contains(c.compactNote, "WORKER SYSTEM PROMPT") {
+		t.Fatalf("worker restore missing systemPrompt: %q", c.compactNote)
+	}
+	if strings.Contains(c.compactNote, "LEAD MANUAL MUST NOT APPEAR") {
+		t.Fatalf("worker restore leaked leadManual: %q", c.compactNote)
+	}
+}
