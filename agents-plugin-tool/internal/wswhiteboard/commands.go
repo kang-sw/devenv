@@ -29,7 +29,7 @@ var grammar = wsxmlcmd.Grammar{
 	Commands: map[string]wsxmlcmd.Spec{
 		"body":      {Kind: wsxmlcmd.Leaf, Scoped: true},
 		"edit":      {Kind: wsxmlcmd.Container, Attrs: []string{"replace_all"}, Fields: []string{"old", "new"}, Scoped: true},
-		"panel":     {Kind: wsxmlcmd.Leaf, Attrs: []string{"id", "name", "recap"}, Wrapper: "change", Fields: []string{"old", "new"}, Scoped: true},
+		"panel":     {Kind: wsxmlcmd.Leaf, Attrs: []string{"id", "name", "recap", "src"}, Wrapper: "change", Fields: []string{"old", "new"}, Scoped: true},
 		"log":       {Kind: wsxmlcmd.Leaf, Scoped: true},
 		"add":       {Kind: wsxmlcmd.Container, Attrs: []string{"id", "class"}, Fields: itemFieldNames, Scoped: true},
 		"close":     {Kind: wsxmlcmd.Empty, HiddenAttrs: []string{"result"}, Scoped: true},
