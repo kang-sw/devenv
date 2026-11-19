@@ -209,6 +209,32 @@ func (l *railLister) reread(repo string) {
 	}
 }
 
+// dropWorktree removes one deleted worktree from repo's cached list in memory
+// so an immediate rail render shows no stale row while reread runs.
+func (l *railLister) dropWorktree(repo, path, realPath string) {
+	if l == nil {
+		return
+	}
+	key := filepath.Clean(repo)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	r, ok := l.repos[key]
+	if !ok || len(r.Entries) == 0 {
+		return
+	}
+	kept := make([]railWorktreeEntry, 0, len(r.Entries))
+	for _, e := range r.Entries {
+		if samePath(e.Path, path) || (realPath != "" && samePath(e.Path, realPath)) {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	if len(kept) != len(r.Entries) {
+		r.Entries = kept
+		l.repos[key] = r
+	}
+}
+
 // lists records the repositories a render shows (with their sessions'
 // registrations) and returns the lists read so far. A wanted repository not
 // read yet is read at once while a page watches; one no render wants any

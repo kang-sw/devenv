@@ -322,6 +322,45 @@ func TestHandedOffStatesDoNotCacheSnapshots(t *testing.T) {
 	}
 }
 
+func TestRunnerForgetClosed(t *testing.T) {
+	dir := t.TempDir()
+	root := t.TempDir()
+	r := NewRunner(Options{Dir: dir})
+	parent := ParentRef{Kind: ParentConversation, ReplyID: "closedlead"}
+	r.loadClosed(Record{ReplyID: "closedlead", Lead: true, Backend: BackendClaude, Root: root, ClosedAt: "2026-01-01T00:00:00Z"})
+	r.loadClosed(Record{ReplyID: "closedchild", Backend: BackendPi, Root: root, Parent: &parent, ClosedAt: "2026-01-01T00:00:00Z"})
+	r.loadClosed(Record{ReplyID: "keepclosed", Lead: true, Backend: BackendClaude, Root: root, ClosedAt: "2026-01-01T00:00:00Z"})
+
+	if !r.IsLead("closedlead") || len(r.Children(parent)) != 1 || len(r.List()) != 3 {
+		t.Fatalf("before ForgetClosed: isLead=%v children=%d list=%d", r.IsLead("closedlead"), len(r.Children(parent)), len(r.List()))
+	}
+
+	r.ForgetClosed("closedlead")
+	r.ForgetClosed("closedchild")
+
+	for _, id := range []string{"closedlead", "closedchild"} {
+		if _, err := r.Get(id); !errors.Is(err, errUnknown) {
+			t.Errorf("Get(%s) after ForgetClosed = %v, want errUnknown", id, err)
+		}
+	}
+	if r.IsLead("closedlead") {
+		t.Error("IsLead(closedlead) = true after ForgetClosed")
+	}
+	if kids := r.Children(parent); len(kids) != 0 {
+		t.Errorf("Children(parent) after ForgetClosed = %+v, want empty", kids)
+	}
+	if _, err := r.Reopen("closedlead"); !errors.Is(err, errUnknown) {
+		t.Errorf("Reopen(closedlead) after ForgetClosed = %v, want errUnknown", err)
+	}
+	if _, err := os.Stat(wsdashboard.SessionDir(dir, "closedlead")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Reopen after ForgetClosed recreated session dir: stat err = %v", err)
+	}
+	list := r.List()
+	if len(list) != 1 || list[0].ID != "keepclosed" {
+		t.Errorf("List() after ForgetClosed = %+v, want only keepclosed", list)
+	}
+}
+
 // TestFinishedAgentsSurviveDaemonRestart pins that a restarted daemon keeps
 // the finished subagents of the snapshot the previous one left, and drops
 // the ones it showed running.
