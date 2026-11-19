@@ -316,7 +316,7 @@ test('footer matches normal, over-pace and weekly-only reference columns', async
   env.set({ entries: [entries[1]] }); env.ticks[0].fn(); await flush();
   assert.equal(groups(env.button).length, 1);
   assert.equal(env.button.querySelector('.usage-columns').children.length, 1);
-  assert.equal(env.button.querySelector('.hi').textContent, 'X');
+  assert.equal(env.button.querySelector('.hb').attributes['data-h'], 'codex');
 });
 
 test('stale boundary is strictly after 30 minutes, per window, with pace frozen at observation', async () => {

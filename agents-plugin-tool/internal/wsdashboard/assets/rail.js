@@ -984,7 +984,11 @@
     if (!top) return;
     var fit = function () { topFit(top, win); };
     var inSlot = function (rec) { var n = rec.target; n = n && n.nodeType !== 1 ? n.parentNode : n; return !!(n && n.closest && n.closest(".qsslot")); };
-    if (win.ResizeObserver) new win.ResizeObserver(fit).observe(top);
+    if (win.ResizeObserver) {
+      var ro = new win.ResizeObserver(fit), slot = top.querySelector(".qsslot");
+      ro.observe(top);
+      if (slot) ro.observe(slot); // its search handle is a strip item
+    }
     if (win.MutationObserver) new win.MutationObserver(function (recs) { if (!recs.every(inSlot)) fit(); }).observe(top, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["hidden"] });
     if (win.document.fonts && win.document.fonts.ready) win.document.fonts.ready.then(fit);
     fit();
