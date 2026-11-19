@@ -513,7 +513,17 @@
       "registered_at": "2026-11-19T12:55:07Z"
     },
     "261119-feat-ws-agy-output-tps": {
-      "registered_at": "2026-11-19T13:50:54Z"
+      "registered_at": "2026-11-19T13:50:54Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-19T14:29:09Z",
+        "impl": {
+          "branch": "impl/develop/wired-grope-baggy"
+        }
+      }
     },
     "261119-feat-ws-agy-plan-usage-display": {
       "registered_at": "2026-11-19T12:55:00Z",
