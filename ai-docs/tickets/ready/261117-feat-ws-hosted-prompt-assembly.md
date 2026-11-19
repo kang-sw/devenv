@@ -553,6 +553,75 @@ branch in common code), so a hosted agy lead receives the same expansion and
 render; tests cover an agy lead alongside Claude. Codex is out of scope until
 its hosted adapter lands.
 
+### Result (e13aa9d5d) - 2026-11-19
+
+Commits:
+- e2aca179c: the phase.
+- a552c0b89: review round 1 fixes.
+- e13aa9d5d: review round 2 fixes.
+
+Design record:
+
+- Steer (Decisions 23-24).
+  - `Runner.subagentSteer` (`wsagent/hosted_prompt.go`) returns "Never use the native `<tool>` tool. Start a subagent only with the ws `agent.spawn` tool, and continue one with the ws `mailbox.send` tool."
+  - It applies only under `RemovesSubagents(rec)`, and only when the backend catalog's `subagent_removal` item names a tool for the role (`HarnessProfile.NativeSubagentTool`, any grade).
+  - Values: Claude lead and worker `Agent`; Codex lead `spawn_agent`; agy none yet (its lead-row `Source` now names this line); Pi has no catalog.
+  - `composeLeadInstructions` puts it after the lead key sentence. `composeInstructions` appends it to a worker's key sentence.
+  - There is no harness-name branch, and no shared playbook text changed.
+- Playbook commands (Decision 14).
+  - `BackendRegistration.PlaybookCommands` is set for Claude and agy.
+  - The whitelist is derived, not hand-listed. `wsrsrc.PreloadCommands` returns the package's skill shims whose `<ws-preload playbook="X">` names their own directory, which excludes `lead-revive` (inline) and `lead-proceed` (alias). `mcp.HostedPlaybookCommands` then drops `lead-workflow-manual`, because the prompt carries the manual.
+  - The runner reads the list once per runner (a failed read is cached and logged once), and stamps each entry `Source: "ws"`.
+  - `withPlaybookCommands` merges the list into a lead's dashboard commands at creation (seed), on every harness-reported list (`KindCommands`), at caps changes, and whenever a lead conversation opens (rejoin, takeover, reopen). Harness commands of the same name, and earlier runners' `ws` entries, are replaced.
+  - `conv.kick` sends a whitelisted command as one turn: `playbookCommandTurn`, which is the command line, its arguments, and `<playbook name=…>body</playbook>`. There is no `playbook.read` round trip.
+  - The body is `mcp.RenderLeadPlaybook` for the lead's key. It shares `hostedRenderServer` with `RenderLeadManual`, and its text equals `playbook.read` on the lead's own connection (`Server.readPlaybook`, extracted from the dispatch case).
+  - A failed render sends a pointer turn to `playbook.read` and is logged.
+  - The page's user entry stays the typed line. Other commands still run as the harness's own.
+- Dogfood defects.
+  - (1) On a lead connection whose backend has `PlaybookCommands` (lead only; a worker renders as before):
+    - `runtimeNamespace()` is the reserved `ws` server;
+    - `{{.SkillNamespace}}:` refs and `{{ns}}:` lines render as `/name`;
+    - delegation renders as `agent.spawn`.
+  - (2) The lead prompt tells such a lead that the manual it carries is the only copy. For fresh state, and in place of `/lead-revive`, it calls `workflow_state`. The throwaway render server lists agent tools (`leadRender`), so the prompt copy and the tool copy share the same wording, and no "Claude delegate spawn" overlay or "the Explore agent" text appears.
+  - (3) The native Agent line is now the steer. The `pi.*` worker text in that report comes from the user's own `UserPreferenceSection` override, which is user config, so the daemon render does not rewrite it. Fix it in user config.
+  - (4) The daemon-agents `ExploreAgent` value no longer carries a tier ("a read-only `ns/agent.spawn` subagent"). This matches the tierless host values every site already renders with. It also removes "tier small" from the other daemon-agents sites (Pi MCP-only, and agent.spawn workers' renders).
+- Tiers: T0. Every addition is a runtime-only descriptor or Options field, or prompt text. No store, hello, tracker, or manifest shape changed.
+
+Worker decisions (veto points):
+
+- The expansion renders on the conversation loop, once per command run. This adds one throwaway server's config, session-store, and package reads before the turn starts, instead of the session's own `playbook.read` during the turn. It was not measured on the Windows baseline (performance.md Rule 7) because the owner rule forbids ws executables here. Rejected alternative: rendering at the dashboard HTTP route, which blocks the request.
+- A Codex lead (registered, catalog `spawn_agent`) now gets the steer line through its catalog value. It gets no playbook commands and no namespace change.
+- The Pi bridge-fallback lead's daemon-rendered manual now uses `agent.spawn` wording (`leadRender` lists the agent tools), matching its real MCP-only connection.
+- The exempt-session case is tested with a tracker-support profile, since worker-profile sessions are not in code yet. Agy is covered by unit tests (steer, connection descriptor, manual and playbook render), not by a runner-level agy lead test.
+- Unused `formatPromptOverrideListing` still hard-codes `ws:lead-tune`. It has no callers, so it was left alone.
+
+Verification:
+
+- On w5090 at e13aa9d5d / a552c0b89:
+  - `go build ./...` passed.
+  - `go vet` of `internal/wsagent`, `internal/mcp`, `internal/wsrsrc`, and `cmd/ws-mcp` passed.
+  - `go test ./internal/wsagent/... ./internal/mcp/... ./internal/wsrsrc/... -count=1` passed. The new tests were repeated with `-count=5`.
+  - `go test ./cmd/ws-mcp/...` passed except `TestHostedLauncherSurvivesReplacementAndRestartsRecordedBuild`. That test clears `WS_RSRC_DEV_CHECKOUT` and needs the gitignored embedded package assets (`generated/inventory.json`), which the remote checkout does not generate. This is environmental and unrelated to this phase.
+- New tests:
+  - `TestSubagentSteerFollowsPolicyAndCatalog`
+  - `TestAgentChildPromptCarriesTheSteer`
+  - `TestHostedLeadPlaybookCommands`: exact prompt, seed and merge, expansion, pointer, harness command, ring entries, one read, rejoin refresh under a held scan.
+  - `TestPlaybookCommandsFailedReadOffersNone`
+  - `TestPlaybookCommandTurnText`
+  - `TestPreloadCommands*`: both shipped packages, plus a synthetic tree.
+  - `TestHostedPlaybookCommandRender`: Claude and agy, with wsflow as the package.
+  - `TestHostedPlaybookCommandReadMatchesTheConnection`
+  - `TestHostedPlaybookCommandsList`
+  - Descriptor assertions for agy lead and worker connections.
+- No playbook or skill text changed, so the mirroring and shim drift checks have nothing new. The wsrsrc mirror tests passed.
+- Review: two rounds by fresh independent reviewers. Round 1 (correctness, and fit/test) found no blockers and 6 should-fix items, which are fixed in a552c0b89 or recorded above. Round 2 found no blockers and 1 should-fix, fixed in e13aa9d5d.
+- Not done: a recorded hosted turn (Claude without plugins) showing a dashboard slash command expanded into its body. The owner rule forbids ws executables on the worker's PC.
+
+Forward:
+
+- Record the live hosted turn, and measure a command run's file operations on the Windows baseline.
+- A hosted lead on the stdio ws-mcp fallback (no daemon runner) has no descriptor `playbookCommands`, so its own `playbook.read` still renders package names. The daemon expansion is unaffected.
+
 ### Phase 3: Per-turn ambient injection replacing plugin hooks
 
 The daemon injects the per-turn ambient context that plugin hooks supply today,
