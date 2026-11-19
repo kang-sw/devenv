@@ -161,8 +161,8 @@ When:
   makes the epic's design stamp stale: run `epic-review` again before
   promoting a child that depends on the changed design.
 - `revise`: a `{{.SkillNamespace}}:lead-run` worker stopped on a broken
-  ticket contract (stop (c)); the handler applies its `proposed_resolution:`
-  under a design review.
+  ticket contract (`blocked`, `next: revise`); the handler applies its
+  `proposed_resolution:` under a design review.
 - Not: ordinary `todo/` creation and edits, epic or actionable. Epics and
   research never enter `ready/`.
 
