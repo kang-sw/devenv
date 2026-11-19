@@ -424,6 +424,17 @@ func (r *Runner) serveToken(w http.ResponseWriter, req *http.Request, op string)
 		writeAnswer(w, 0, nil, err)
 		return
 	}
+	if op == "compact" {
+		var body struct {
+			Target string `json:"target"`
+			Resume *bool  `json:"resume"`
+		}
+		if !decode(w, req, &body) {
+			return
+		}
+		writeAnswer(w, http.StatusOK, r.Compact(caller.record().WSKey, body.Target, body.Resume), nil)
+		return
+	}
 	if strings.HasPrefix(op, "agent.") {
 		// agent.* checks each harness it spawns on itself (spawnableHarness).
 		r.serveAgentToken(w, req, caller, op)
@@ -627,7 +638,7 @@ func (c *conv) takeReport(text string) {
 }
 
 func (c *conv) takeSteer(text string, mark uint64) {
-	if st := controlsFor(c.proc).reports; st != nil && c.turn && !c.rec.Lead && !c.replaying && !c.wrapHold {
+	if st := controlsFor(c.proc).reports; st != nil && c.turn && !c.rec.Lead && !c.replaying && !c.wrapHold && !c.compacting && !c.compactCommand {
 		err := st.Steer(text)
 		if err == nil {
 			c.steerSeq++
@@ -741,11 +752,12 @@ func (c *conv) saveSteered() {
 }
 
 // holdsReport reports whether a done turn of the conversation waits for
-// its children: a child's report it holds and no turn took yet (steered
-// and not taken, or kept for the next turn), or a child of its own that is
-// open (openChildOf). It runs in the loop.
+// running background tasks or its children: background work still running on
+// a worker, a child's report it holds and no turn took yet (steered and not
+// taken, or kept for the next turn), or a child of its own that is open
+// (openChildOf). It runs in the loop.
 func (c *conv) holdsReport() bool {
-	if len(c.steered) > 0 || len(c.rec.Reports) > 0 {
+	if (!c.rec.Lead && (c.bgTasks > 0 || c.bgGraceTimer != nil)) || len(c.steered) > 0 || len(c.rec.Reports) > 0 || c.compactHoldsReport() {
 		return true
 	}
 	ref := ParentRef{Kind: ParentConversation, ReplyID: c.rec.ReplyID}
@@ -779,7 +791,7 @@ func (c *conv) openChildOf(parent ParentRef) bool {
 	}
 	// Input a refused wake keeps (wakeRefused) is asleep: it holds no
 	// report of the parent's.
-	return c.rec.TurnOpen || len(c.rec.PendingReports) > 0 || c.holding ||
+	return c.rec.TurnOpen || len(c.rec.PendingReports) > 0 || c.holding || c.bgTasks > 0 ||
 		!c.wakeRefused && (len(c.rec.Queued) > 0 || len(c.rec.Mail) > 0 || c.sends > max(c.settled.mark, c.voided))
 }
 

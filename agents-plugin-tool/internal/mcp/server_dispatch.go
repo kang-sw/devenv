@@ -394,7 +394,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// config.tuning path: project the per-key writer schema + current values,
 		// with the no-agent full-ws-only cut applied per entry.
 		catalogResolver := s.sessionResolver(sessionKey, s.declared.withDefaults(builtinConfigAndPromptDefaults()))
-		catalog, err := buildTuningCatalog(rsrcRoot, &catalogResolver, sessionKey, s.currentHarness(), s.noAgentMode(), s.configOptions(), s.agentBackends()...)
+		catalog, err := buildTuningCatalog(rsrcRoot, &catalogResolver, sessionKey, s.playbookHarness(), s.noAgentMode(), s.configOptions(), s.agentBackends()...)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -463,6 +463,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if entry.HarnessApplicable {
 			if harness == "" {
 				harness = s.currentHarness()
+				if isCompactionKey(entry.Key) {
+					harness = s.playbookHarness()
+				}
 			}
 			if harnessEnum := fieldEnum(entry.SelectorFields, "harness"); len(harnessEnum) > 0 {
 				if harness == "" && enumContains(harnessEnum, "default") {
@@ -489,8 +492,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// A harness-bucketed key stores its value under the harness bucket
 		// (harnessBucketKey); every other key stores under its own name.
 		storeKey := entry.Key
-		if entry.HarnessBucketed() {
-			storeKey = harnessBucketKey(entry.Key, harness)
+		if entry.HarnessStored() {
+			if !isCompactionKey(entry.Key) || (harness != "*" && harness != "all") {
+				storeKey = harnessBucketKey(entry.Key, harness)
+			}
 		}
 		if entry.Key == "agents.tier" && explicitScope != "" && explicitScope != wsconfig.ScopeProject && explicitScope != wsconfig.ScopeGlobal {
 			return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: agents.tier only supports project or global scope; got %q", explicitScope))
@@ -1679,6 +1684,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 
 	case "pi.spawn", "pi.send", "pi.list", "pi.stop", "pi.transcript", "pi.wait":
 		return s.handlePiTool(ctx, req.ID, params.Name, params.Arguments)
+	case "compact":
+		return s.handleCompact(ctx, req.ID, params.Arguments)
 	case "agent.spawn", "agent.interrupt", "agent.list", "agent.tiers":
 		return s.handleAgentTool(ctx, req.ID, params.Name, params.Arguments)
 	case "mailbox.send":

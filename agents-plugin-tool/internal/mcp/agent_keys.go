@@ -24,6 +24,19 @@ func NewAgentKeyStore() *AgentKeyStore {
 	return &AgentKeyStore{store: newSessionStore()}
 }
 
+// Root is the identity root config.get uses for this key's repo layer.
+// In particular it preserves a child's recorded cwd binding across resumes.
+func (a *AgentKeyStore) Root(key string) (string, bool) {
+	entry, ok := a.store.lookup(key)
+	return entry.root, ok
+}
+
+// GetOverride exposes the same layered session migration reads as config.get.
+// The runner uses it only at process start, never per usage observation.
+func (a *AgentKeyStore) GetOverride(key, item string) (string, bool) {
+	return (sessionConfigAdapter{s: a.store}).GetOverride(key, item)
+}
+
 // Mint creates a new agent key rooted at root.
 func (a *AgentKeyStore) Mint(root string) (string, error) {
 	return a.store.mint(root, roleDelegate, "")

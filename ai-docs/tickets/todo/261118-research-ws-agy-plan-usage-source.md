@@ -37,6 +37,12 @@ a research ticket and run it after the agy worker role lands, through Pi.
   account details (plan type, real usage values) out of tracked files and
   fixtures.
 
+## Outcome
+
+Superseded by `261119-feat-ws-agy-plan-usage-display` (`todo/`), which captures
+the live `agy -p /usage --output-format json` probe, Orca prior art, and
+owner-confirmed decisions (D1–D5) resolving `## Questions`.
+
 ## Outcome Ledger
 
 ### Verified Findings

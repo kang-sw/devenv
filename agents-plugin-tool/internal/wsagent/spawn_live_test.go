@@ -3,6 +3,7 @@ package wsagent
 import (
 	"context"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -41,7 +42,7 @@ func TestAgentSpawnHostedWorkerRows(t *testing.T) {
 		eventually(t, "spawn row "+status, func() bool {
 			snap, _ := host.snapshot(wsdashboard.SessionDir(h.dir, lead.ID))
 			for _, row := range snap.Agents {
-				if row.ID == "pi:"+id && row.Status == status {
+				if row.ID == "pi:"+id && row.Status == status && row.Harness == BackendCodex {
 					return true
 				}
 			}
@@ -340,6 +341,28 @@ func TestSpawnAgentEventLegacyStatusContract(t *testing.T) {
 			}
 			rows := feed.Snapshot(100).Agents
 			if len(rows) != 1 || rows[0].Status != tc.want || rows[0].AgentKind != wslive.AgentKindPi {
+				t.Fatalf("snapshot = %+v", rows)
+			}
+		})
+	}
+}
+
+func TestSpawnAgentEventCarriesHarnessAndNeutralLabel(t *testing.T) {
+	for _, backend := range []string{BackendAgy, BackendClaude, BackendCodex, BackendPi} {
+		t.Run(backend, func(t *testing.T) {
+			ev := SpawnAgentEvent(State{ID: "child1", Backend: backend, Status: StatusRunning}, "child-key")
+			if ev.Harness != backend || ev.AgentKind != wslive.AgentKindPi {
+				t.Fatalf("event = %+v, want harness %q and agentKind %q", ev, backend, wslive.AgentKindPi)
+			}
+			if backend != BackendPi && strings.Contains(ev.Label, "Pi subagent") {
+				t.Fatalf("non-Pi default label should not say Pi subagent: %q", ev.Label)
+			}
+			feed := wslive.NewState("lead-key")
+			if _, err := feed.Apply(ev, 100); err != nil {
+				t.Fatal(err)
+			}
+			rows := feed.Snapshot(100).Agents
+			if len(rows) != 1 || rows[0].Harness != backend || rows[0].AgentKind != wslive.AgentKindPi {
 				t.Fatalf("snapshot = %+v", rows)
 			}
 		})

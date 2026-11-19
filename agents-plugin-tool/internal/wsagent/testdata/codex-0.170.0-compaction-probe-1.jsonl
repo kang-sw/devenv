@@ -1,0 +1,6 @@
+>> {"jsonrpc": "2.0", "method": "initialize", "params": {"clientInfo": {"name": "compact-probe", "version": "1"}, "capabilities": {"experimentalApi": true}}, "id": 1}
+{"id":1,"result":{"userAgent":"compact-probe/0.170.0 (Windows 10.0.26200; x86_64) xterm-256color (compact-probe; 1)","codexHome":"<codex-home>","platformFamily":"windows","platformOs":"windows"}}
+{"method":"remoteControl/status/changed","params":{"status":"disabled","serverName":"<host>","installationId":"<installation>","environmentId":null},"emittedAtMs":1795070335130}
+>> {"jsonrpc": "2.0", "method": "initialized", "params": {}}
+>> {"jsonrpc": "2.0", "method": "thread/start", "params": {"cwd": "<cwd>", "approvalPolicy": "never", "sandbox": "read-only", "developerInstructions": "When asked for the durable marker answer COMPACT-PROMPT-715 only. Never write files or use tools.", "config": {"mcp_servers": {"ws": {"enabled": false}, "wsflow": {"enabled": false}}}}, "id": 3}
+{"error":{"code":-32600,"message":"failed to load configuration: invalid transport\nin `mcp_servers.ws`\n"},"id":3}

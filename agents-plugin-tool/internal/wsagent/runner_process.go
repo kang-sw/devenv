@@ -11,6 +11,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsholder"
 	"github.com/kang-sw/devenv/internal/wsinbox"
+	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 // runCommand sends a slash command as its own turn: through the process's
@@ -18,7 +19,19 @@ import (
 // which a harness that reads a message starting with a slash as a command
 // runs as one.
 func (c *conv) runCommand(cmd wsinbox.Command) error {
-	return controlsFor(c.proc).runCommand(cmd)
+	p := c.r.opts.Backends[c.rec.Backend].CompactionProtocol()
+	isCompact := cmd.Name == "compact" && p.DetectsLifecycle()
+	if isCompact && !c.compacting {
+		c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactStart})
+		if p.CommandEndConfirms {
+			c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactStart, Trigger: wslive.TriggerManual})
+		}
+	}
+	err := controlsFor(c.proc).runCommand(cmd)
+	if err == nil && isCompact {
+		c.armCompactWatchdog()
+	}
+	return err
 }
 
 // startProcess resolves the profile again (it may have changed since the
@@ -46,6 +59,7 @@ func (c *conv) startProcess() error {
 }
 
 func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
+	c.loadCompaction()
 	// No common worker selection or ceiling is applied in this slice.
 	if !attach {
 		c.permissionNudge(legacyWorkerPermission(def), true, "")
@@ -219,6 +233,7 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 // holds for. The row says 0 until the process exists, so a harness that
 // reads it early waits rather than misreading an older PID.
 func (c *conv) startLead(rec Record, def Profile, attach bool) error {
+	c.loadCompaction()
 	level, source, err := c.r.leadPermission(rec, c.dir)
 	if err != nil {
 		if !attach {
@@ -787,9 +802,9 @@ func composeLeadInstructions(dir string, rec Record, manual, steer string, comma
 			"for fresh session state, and where the manual says to invoke `/lead-revive`, call the ws `workflow_state` tool with this key.\n\n" + manual
 	} else if manual != "" {
 		text += "The workflow manual below is binding; its session state is as of this session's start. " +
-			"After any compaction, or when you need fresh session state, call the workflow_manual tool with this key and follow it.\n\n" + manual
+			"After any compaction, or when you need fresh session state, call the workflow_state tool with this key; the manual stays in this prompt.\n\n" + manual
 	} else {
-		text += "At session start and after any compaction, call the workflow_manual tool with this key and follow it."
+		text += "At session start, call the workflow_manual tool with this key and follow it; after any compaction, call workflow_state for fresh session state."
 	}
 	path := filepath.Join(dir, "instructions.md")
 	if err := writeFileAtomic(path, []byte(text+"\n"), 0o600); err != nil {

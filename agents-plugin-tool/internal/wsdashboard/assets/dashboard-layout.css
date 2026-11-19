@@ -153,7 +153,7 @@
   .dgrid.live:not([data-layout="tabs"])[data-ctab="files"] > .convo { display: none; }
 }
 @media (max-width: 640px) {
-  .dwrap { padding: 8px 10px; }
+  .dwrap { padding: 0 10px 8px; }
 }
 
 /* The split explorer's memory-only preview covers the board and pin column.

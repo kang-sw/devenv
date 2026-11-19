@@ -89,12 +89,17 @@ type Event struct {
 	// (AgentKindPi); it is a subagent's alone and, once set, stays. The
 	// event type is Kind, under "kind", so the marker has a key of its own.
 	AgentKind string `json:"agentKind,omitempty"`
-	Status    string `json:"status,omitempty"`
+	// Harness is the backend running a daemon-spawned subagent (e.g. "claude",
+	// "pi", "codex", "agy"); absent for native subagents or legacy producers.
+	Harness string `json:"harness,omitempty"`
+	Status  string `json:"status,omitempty"`
 	// ActiveMs is closed-turn work; TurnStartedAt is the current turn's
 	// epoch-millisecond start, or zero when no turn is working. Pi agent
 	// events carry authoritative values, including zero.
 	ActiveMs      int64 `json:"activeMs,omitempty"`
 	TurnStartedAt int64 `json:"turnStartedAt,omitempty"`
+	// BackgroundTasks counts running background tasks for a subagent row.
+	BackgroundTasks int `json:"backgroundTasks,omitempty"`
 	// Caption replaces the caption when present; "" clears it.
 	Caption *string `json:"caption,omitempty"`
 	// Batches replaces the agent's batch list when present.
@@ -179,12 +184,13 @@ type activityState struct {
 type agentState struct {
 	activityState
 	id, parentID, label, replyID, status string
-	kind                                 string
+	kind, harness                        string
 	startedAt, endedAt, touched          int64
 	activeMs, turnStartedAt              int64
 	model, effort                        string
 	contextTokens                        int64
 	outputTps                            float64
+	bgTasks                              int
 }
 
 // State is one session's live state: the reducer from adapter events to a
@@ -605,7 +611,7 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		batches = st.normalizeBatches(ev.Batches)
 	}
 	if ev.AgentID == "" {
-		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" || ev.AgentKind != "" || ev.ActiveMs != 0 || ev.TurnStartedAt != 0 || hasTelemetry(ev) || ev.Observed != nil {
+		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" || ev.AgentKind != "" || ev.Harness != "" || ev.ActiveMs != 0 || ev.TurnStartedAt != 0 || ev.BackgroundTasks != 0 || hasTelemetry(ev) || ev.Observed != nil {
 			return fmt.Errorf("the lead takes only batches and caption; set agentId for a subagent")
 		}
 		st.setActivity(&st.lead, ev, batches)
@@ -624,6 +630,9 @@ func (st *State) applyAgent(ev Event, at int64) error {
 	a := st.agent(ev.AgentID, at)
 	if ev.AgentKind != "" {
 		a.kind = ev.AgentKind
+	}
+	if h := cleanLine(ev.Harness, 32); h != "" {
+		a.harness = h
 	}
 	if ev.ParentID != "" && ev.ParentID != ev.AgentID && agentIDPattern.MatchString(ev.ParentID) {
 		a.parentID = ev.ParentID
@@ -657,10 +666,14 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		st.batchesEnded += uint64(len(closeBatches(&a.activityState, at)))
 	}
 	if ev.AgentKind == AgentKindPi {
-		// Pi's record owns timing, independent of the presentation status:
-		// held-but-idle agents can appear running without an active turn.
+		// Pi's record owns timing and background count, independent of the
+		// presentation status: held-but-idle agents can appear running without
+		// an active turn, and background work clears back to zero when done.
 		a.activeMs = max(ev.ActiveMs, 0)
 		a.turnStartedAt = max(ev.TurnStartedAt, 0)
+		a.bgTasks = max(ev.BackgroundTasks, 0)
+	} else if ev.BackgroundTasks > 0 || ev.Status == StatusFailed {
+		a.bgTasks = max(ev.BackgroundTasks, 0)
 	}
 	if a.status != StatusRunning {
 		// An ended subagent produces no output, so it shows no rate.
@@ -914,7 +927,7 @@ func (st *State) retain() {
 	var running, finished []*agentState
 	for id := range groups {
 		a := st.agents[id]
-		if a.status == StatusRunning {
+		if a.status == StatusRunning || a.bgTasks > 0 {
 			running = append(running, a)
 		} else {
 			finished = append(finished, a)
@@ -980,6 +993,7 @@ func (st *State) SeedFinished(prev Snapshot) {
 			label:         cleanLine(st.scrub.scrub(p.Label), LabelRunes),
 			replyID:       p.ReplyID,
 			kind:          knownAgentKind(p.AgentKind),
+			harness:       cleanLine(p.Harness, 32),
 			status:        p.Status,
 			startedAt:     p.StartedAt,
 			endedAt:       p.EndedAt,
@@ -1048,12 +1062,14 @@ func (st *State) Snapshot(now int64) Snapshot {
 			ActiveMs:      a.activeMs,
 			TurnStartedAt: a.turnStartedAt,
 			AgentKind:     a.kind,
+			Harness:       a.harness,
 
 			Observed:      st.observed[a.id].clone(),
-			Model:         a.model,
-			Effort:        a.effort,
-			ContextTokens: a.contextTokens,
-			OutputTps:     a.outputTps,
+			Model:           a.model,
+			Effort:          a.effort,
+			ContextTokens:   a.contextTokens,
+			OutputTps:       a.outputTps,
+			BackgroundTasks: a.bgTasks,
 		})
 	}
 	sort.Slice(snap.Agents, func(i, j int) bool {

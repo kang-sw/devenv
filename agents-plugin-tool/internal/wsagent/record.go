@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
@@ -375,6 +376,7 @@ type liveWriter struct {
 	beforeSnapshot func()
 	owner          func() (func(), bool)
 	wake           func()
+	slotMu         sync.Mutex
 	slot           wsdashboard.HostedSlot
 	// The last successfully written disk projection, without its timestamp.
 	lastSnapshot []byte
@@ -516,7 +518,7 @@ func (w *liveWriter) write(res wslive.Result, err error, kind string) bool {
 	}
 	// A file-only reader must see the new snapshot before its ring wake;
 	// there is no later Publish wake on that path to correct an early read.
-	if w.wake != nil && (ringAppended || w.slot == nil) {
+	if w.wake != nil && (ringAppended || w.currentSlot() == nil) {
 		w.wake()
 	}
 	return true
@@ -564,7 +566,7 @@ func (w *liveWriter) flushSnapshot(heartbeat, force bool) {
 	disk.UpdatedAt = 0
 	content, err := json.Marshal(disk)
 	if !force && err == nil {
-		if w.slot != nil {
+		if w.currentSlot() != nil {
 			if bytes.Equal(content, w.lastSnapshot) || (!w.lastDiskAt.IsZero() && now.Sub(w.lastDiskAt) < wslive.HeartbeatInterval) {
 				return
 			}
@@ -591,10 +593,24 @@ func (w *liveWriter) flushSnapshot(heartbeat, force bool) {
 	}
 }
 
+func (w *liveWriter) currentSlot() wsdashboard.HostedSlot {
+	w.slotMu.Lock()
+	slot := w.slot
+	w.slotMu.Unlock()
+	return slot
+}
+
+func (w *liveWriter) setSlot(slot wsdashboard.HostedSlot) {
+	w.slotMu.Lock()
+	w.slot = slot
+	w.slotMu.Unlock()
+}
+
 // publishSnapshot retains the full projection only in the daemon's live slot.
 // Hold the registration/conversation fence, not the slot mutex: Publish owns it.
 func (w *liveWriter) publishSnapshot(snap wslive.Snapshot) {
-	if w.slot == nil {
+	slot := w.currentSlot()
+	if slot == nil {
 		return
 	}
 	if w.owner != nil {
@@ -604,15 +620,23 @@ func (w *liveWriter) publishSnapshot(snap wslive.Snapshot) {
 		}
 		defer release()
 	}
-	w.slot.Publish(snap)
+	slot.Publish(snap)
 }
 
 func (w *liveWriter) closeSlot() {
-	if w.slot == nil {
+	slot := w.currentSlot()
+	if slot == nil {
 		return
 	}
+	if w.owner != nil {
+		w.flushSummaries()
+	}
 	w.forceSnapshot()
-	w.slot.Close()
+	if w.owner != nil {
+		w.summaryStore().SetWake(nil)
+	}
+	w.setSlot(nil)
+	slot.Close()
 }
 
 // registration is the conversation's session-registry entry.

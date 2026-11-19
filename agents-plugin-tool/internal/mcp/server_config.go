@@ -14,7 +14,7 @@ import (
 )
 
 func builtinConfigDefaults() map[string]string {
-	return map[string]string{
+	defaults := map[string]string{
 		wsconfig.HostedPluginPackageKey:        "wsflow",
 		wsconfig.ItemWorkflowPreferSubagent:    "off",
 		wsconfig.ItemWorkflowWhiteboardEnabled: "off",
@@ -34,6 +34,10 @@ func builtinConfigDefaults() map[string]string {
 		wsconfig.ItemGitMergeSizeExtensions:    gitMergeSizeExtensionsKey.Default,
 		wsconfig.ItemAgentChildWaitingDays:     strconv.Itoa(wsagent.DefaultChildWaitingDays),
 	}
+	for key, value := range wsconfig.CompactionDefaults {
+		defaults[key] = value
+	}
+	return defaults
 }
 
 func builtinConfigAndPromptDefaults() map[string]string {
@@ -436,6 +440,13 @@ func buildTuningCatalog(rsrcRoot fs.FS, resolver *wsconfig.Resolver, sessionKey,
 		Current:     currentWorkflowPreference(resolver, sessionKey, tierAliasesEntry.Key),
 	})
 
+	for _, key := range []string{"compaction.lead_advisory", "compaction.lead_hard", "compaction.worker_advisory", "compaction.worker_hard"} {
+		entry := registryEntryByKey(key)
+		rv, _, _ := resolveCompactionValue(resolver, sessionKey, key, harness, registries...)
+		def := wsconfig.CompactionDefaults[key]
+		appendKnob(entry, tuningKnob{ID: key, Kind: "workflow_preference", Description: "Hosted native compaction threshold, checked at idle boundaries. Advisory asks for durable agenda state; hard queues native compaction. Read at process start.", Writer: tuningWriter{Tool: "config.tune", FixedArguments: map[string]string{"key": key}}, Reset: &tuningWriter{Tool: "config.tune", FixedArguments: map[string]string{"key": key, "reset": "true"}}, SelectorFields: entry.SelectorFields, ValueFields: entry.ValueFields, Current: tuningScopedValue{Value: rv.Value, Scope: string(rv.Scope)}, Default: &def})
+	}
+
 	childWaitingEntry := registryEntryByKey(wsconfig.ItemAgentChildWaitingDays)
 	appendKnob(childWaitingEntry, tuningKnob{
 		ID:          childWaitingEntry.Key,
@@ -809,6 +820,9 @@ func formatManifestErrors(rejected []string) string {
 // harness-bucketed knob resolves for this server's session harness.
 func (s *Server) effectiveConfigValue(entry configKeyEntry, sessionKey string) (wsconfig.ResolvedValue, string, error) {
 	resolver := s.sessionResolver(sessionKey, s.declared.withDefaults(builtinConfigDefaults()))
+	if isCompactionKey(entry.Key) {
+		return s.compactionValue(&resolver, sessionKey, entry.Key, s.playbookHarness())
+	}
 	if entry.HarnessBucketed() {
 		return resolveHarnessBucketed(&resolver, sessionKey, entry.Key, s.currentHarness())
 	}

@@ -115,11 +115,15 @@ const [base, emptyBase] = process.argv.slice(2);
     assert.equal(await page.locator('.rfoot').evaluate(e => e.scrollWidth <= e.clientWidth), true);
     const footer = await page.locator('.rfoot').boundingBox();
     const gearBox = await gear.boundingBox();
-    const meterBox = await page.locator('.usage-column').first().boundingBox();
-    assert.ok(meterBox.height <= 18, 'meter is approximately one text line');
-    assert.ok(gearBox.x >= footer.x && gearBox.x < meterBox.x, 'gear is left of usage');
+    assert.ok(gearBox.x >= footer.x, 'gear leads the footer');
+    // Plan usage is the header's center handle, not the footer's.
+    assert.equal(await page.locator('.rfoot .usage-toggle').count(), 0, 'plan usage left the footer');
     await page.locator('#settings-close').click();
-    await page.locator('.usage-toggle').click();
+    if (await page.locator('html').evaluate(e => e.classList.contains('rail-open'))) {
+      await page.keyboard.press('Escape');
+      await page.waitForFunction(() => !document.documentElement.classList.contains('rail-open'));
+    }
+    await page.locator('.dwrap > .top .usage-toggle').click();
     // The page is Korean by now (#glang above); the popup's label is
     // localized (5fb017bc9), so it is js.usage.heading in ko.
     await page.getByRole('dialog', { name: '플랜 사용량', exact: true }).waitFor({ state: 'visible' });

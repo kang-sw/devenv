@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
@@ -72,11 +73,24 @@ type conv struct {
 	// whether it is a message (not an interrupt entry).
 	heldKinds map[string]bool
 
+	// Compaction state is loop-owned, never persisted per observation.
+	compactPending                                                               *compactRequest
+	compacting, compactResume, compactCommand                                    bool
+	compactC                                                                     <-chan time.Time
+	compactStop                                                                  func()
+	compactNote                                                                  string
+	compactAdvisory, compactHard                                                 wsconfig.Threshold
+	compactTokens, compactWindow                                                 float64
+	compactPrevTokens, compactPrevWindow                                         int64
+	compactUsageFresh, compactAdvised, compactHardIssued, compactAdvisoryEnabled bool
+	compactAwaitTurn                                                             bool
+
 	// loop-owned.
-	events      <-chan Event
-	idle        *time.Timer
-	idleAfter   time.Duration
-	dirtyModel  bool
+	events       <-chan Event
+	idle         *time.Timer
+	idleAfter    time.Duration
+	bgGraceTimer *time.Timer
+	dirtyModel   bool
 	dirtyEffort bool
 	dirtyMode   bool
 	// reconcileMode marks replay-reconstructed intent, not a new user setting.
@@ -342,7 +356,7 @@ func (c *conv) tellRefusedWake(mail []ClaimedMail) {
 // through its steer handle, a spawned child through the acknowledged
 // report path (reportSteerer) that keeps its report covering the message.
 func (c *conv) steersMail() bool {
-	if !c.turn || c.proc == nil || c.replaying || c.wrapHold || c.closed || c.hidden {
+	if !c.turn || c.proc == nil || c.replaying || c.wrapHold || c.closed || c.hidden || c.compacting || c.compactCommand {
 		return false
 	}
 	c.mu.Lock()
@@ -402,7 +416,7 @@ func (c *conv) inboxChanged() {
 // a backend that takes no message mid-turn, or a rejoin that cannot tell
 // whether the turn runs (wrapHold), keeps it held.
 func (c *conv) steer() {
-	if !c.turn || c.proc == nil || c.replaying || c.wrapHold || c.closed || c.hidden {
+	if !c.turn || c.proc == nil || c.replaying || c.wrapHold || c.closed || c.hidden || c.compacting || c.compactCommand {
 		return
 	}
 	if !c.rec.Lead {
@@ -439,9 +453,11 @@ func (c *conv) loop() {
 	defer close(c.done)
 	defer c.live.closeSlot()
 	defer func() {
+		c.stopCompactWatchdog()
 		if c.spawnTimer != nil {
 			c.spawnTimer.Stop()
 		}
+		c.stopBgGrace()
 	}()
 	// Before the first scan, Stop can report an existing holder unknown.
 	// Keep its rejoined transport and persisted identity until holdersScanned
@@ -468,8 +484,9 @@ func (c *conv) loop() {
 		return
 	}
 	for {
-		var idleC, actionC, leverC, spawnC <-chan time.Time
+		var idleC, actionC, leverC, compactC, spawnC, bgGraceC <-chan time.Time
 		leverC = c.leverC
+		compactC = c.compactC
 		if c.spawnTimer != nil {
 			spawnC = c.spawnTimer.C
 		}
@@ -478,6 +495,9 @@ func (c *conv) loop() {
 		}
 		if c.actionTimer != nil {
 			actionC = c.actionTimer.C
+		}
+		if c.bgGraceTimer != nil {
+			bgGraceC = c.bgGraceTimer.C
 		}
 		select {
 		case fn := <-c.reqs:
@@ -497,7 +517,9 @@ func (c *conv) loop() {
 		case <-c.spawnC:
 			c.spawnDirty = true
 			c.live.writeSnapshot()
-			c.changed(false)
+			if c.live.currentSlot() == nil {
+				c.changed(false)
+			}
 			if c.idleNow() {
 				c.armIdle()
 				c.restartIfDue()
@@ -505,7 +527,9 @@ func (c *conv) loop() {
 		case <-spawnC:
 			c.spawnTimer, c.spawnNext = nil, time.Time{}
 			c.live.writeSnapshot()
-			c.changed(false)
+			if c.live.currentSlot() == nil {
+				c.changed(false)
+			}
 		case ev, ok := <-c.events:
 			if !ok {
 				c.processExited()
@@ -524,6 +548,15 @@ func (c *conv) loop() {
 			// No compaction started within the cap: what waited goes now.
 			c.leverC, c.leverStop = nil, nil
 			c.kick()
+		case <-bgGraceC:
+			c.bgGraceTimer = nil
+			c.releaseHeld()
+			if !c.turn {
+				c.armIdle()
+				c.restartIfDue()
+			}
+		case <-compactC:
+			c.compactTimedOut()
 		case <-beat.C:
 			c.live.heartbeatSnapshot()
 			c.persistSeq()
@@ -656,9 +689,10 @@ func (c *conv) stateWithKeyCheck(checkKey bool) State {
 	if c.turn && !c.closed {
 		st.OutputTps = c.outputTps
 	}
+	st.BackgroundTasks = c.bgTasks
+	st.Background, st.Monitors = copyCount(c.background), copyCount(c.monitors)
 	if c.rec.Lead {
-		st.ActiveMode, st.BackgroundTasks, st.ActionNeeded = c.activeMode, c.bgTasks, c.actionNeeded
-		st.Background, st.Monitors = copyCount(c.background), copyCount(c.monitors)
+		st.ActiveMode, st.ActionNeeded = c.activeMode, c.actionNeeded
 		st.Approvals = append([]ApprovalRequest(nil), c.approvals...)
 		if c.failure != nil {
 			f := *c.failure
@@ -891,6 +925,9 @@ func (c *conv) dropHeld() {
 // apply applies a wslive event and tells the daemon when it wrote. quiet
 // (a replayed holder record) applies it to the state alone.
 func (c *conv) apply(ev wslive.Event, quiet ...bool) {
+	if len(quiet) == 0 || !quiet[0] {
+		c.observeCompaction(ev)
+	}
 	if ev.Kind == wslive.KindReset {
 		c.spawnDirty = true
 	}
@@ -959,8 +996,16 @@ func (c *conv) apply(ev wslive.Event, quiet ...bool) {
 // command. What follows the turn's part stays queued for the turns after
 // it, which each turn end submits; mail waits for the next message turn, or
 // goes alone once nothing is queued.
+func (c *conv) canKick() bool {
+	return !c.closed && !c.hidden && !c.turn && !c.replaying && len(c.steered) == 0 && c.leverC == nil &&
+		!(c.rec.Backend == BackendPi && c.r.opts.Holders != nil && !c.r.scanDone())
+}
+
 func (c *conv) kick() {
-	if c.closed || c.hidden || c.turn || c.replaying || len(c.steered) > 0 || c.leverC != nil || (c.rec.Backend == BackendPi && c.r.opts.Holders != nil && !c.r.scanDone()) {
+	if !c.canKick() {
+		return
+	}
+	if c.compactIdle() {
 		return
 	}
 	c.mu.Lock()
@@ -1052,14 +1097,24 @@ func (c *conv) kick() {
 	// so its retry shows the message once. The process's events for the
 	// turn are handled by this loop after kick returns, so they still
 	// follow the turn's start.
+	ordinary := cmd == nil
 	if cmd == nil {
-		err = c.proc.Send(strings.Join(append(append(slices.Clone(parts), reports...), mail...), "\n\n"))
+		err = c.proc.Send(c.compactInput(strings.Join(append(append(slices.Clone(parts), reports...), mail...), "\n\n")))
 	} else if text, ok := c.playbookTurn(*cmd); ok {
 		// The runner expands a playbook command itself: the harness has
 		// no such command, and the turn carries the playbook's body.
-		err = c.proc.Send(text)
+		ordinary = true
+		err = c.proc.Send(c.compactInput(text))
 	} else {
 		err = c.runCommand(*cmd)
+	}
+	if err != nil && cmd != nil && cmd.Name == "compact" {
+		c.setStatus(func() { c.turn, c.lastErr = false, "compaction: "+err.Error() })
+		c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
+		c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
+		c.update(func(rec *Record) { rec.Queued = rest })
+		c.signalInbox()
+		return
 	}
 	if err != nil {
 		// The turn never began: its process ends with no turn to close.
@@ -1078,7 +1133,12 @@ func (c *conv) kick() {
 		}
 		return
 	}
+	if ordinary {
+		c.compactNote = ""
+		c.compactResume = false
+	}
 	c.sendRetried = false
+	c.stopBgGrace()
 	c.turnMark, c.reply = mark, ""
 	// This turn's settle supersedes a done turn held for the children.
 	c.hold(nil)

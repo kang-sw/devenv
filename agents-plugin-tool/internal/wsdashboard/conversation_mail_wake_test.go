@@ -28,6 +28,10 @@ func TestConversationMailWakeAssociationFallbacks(t *testing.T) {
 			es[1].Text = strings.Replace(es[1].Text, " (2026-11-15T06:55:49Z)", "", 1)
 			return es
 		}, true},
+		{"peer relation line", func(es []ConvEntry) []ConvEntry {
+			es[1].Text = strings.Replace(es[1].Text, ":\n"+body, ":\n[relation: peer]\n"+body, 1)
+			return es
+		}, true},
 		{"other recipient", func(es []ConvEntry) []ConvEntry {
 			es[1].Text = strings.Replace(es[1].Text, "id:"+self, "id:elsewhere", 1)
 			return es

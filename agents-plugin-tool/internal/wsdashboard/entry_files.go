@@ -7,76 +7,38 @@ import (
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
-// entryFiles holds each session's parsed conversation ring entries and
-// drained board-answer records by file name, so a page read parses only the
-// entries it has not seen: an entry file is never rewritten, its name is
-// its identity (as HashLiveStores relies on). A session keeps only the
-// names its latest read listed, the newest wslive.RingCap ring entries and
-// the drained records the page shows, so memory follows the page's window,
-// not the history; the daemon drops a session's entries when it leaves the
-// index (Daemon.sessionChanged). Held inbox entries and the snapshot change,
-// and are read on every render.
+// entryFiles holds each session's parsed drained board-answer records by file
+// name, so a page read parses only the drained records it has not seen.
+// Conversation ring entries for active hosted sessions are served directly
+// from wslive's pinned daemon RAM ring cache (no per-render directory listing
+// or entry-file reads); closed/non-hosted rings read on demand without pinning.
+// The daemon drops a session's entries when it leaves the index (Daemon.sessionChanged).
+// Held inbox entries and the snapshot change, and are read on every render.
 type entryFiles struct {
 	mu       sync.Mutex
 	sessions map[string]*sessionFiles
-	// parsed counts the entry files read from disk; ringLists,
-	// drainedLists, and heldReads count the ring listings, drained
+	// parsed counts the drained entry files read from disk; ringLists,
+	// drainedLists, and heldReads count the ring reads, drained
 	// listings, and held-entry reads (test seams).
 	parsed                             int
 	ringLists, drainedLists, heldReads int
 }
 
 type sessionFiles struct {
-	ring    map[string]wslive.RingRecord
 	drained map[string]wsinbox.Record
 }
 
 func newEntryFiles() *entryFiles { return &entryFiles{sessions: map[string]*sessionFiles{}} }
 
-// readRing is wslive.ReadRing of dir, the ring of session replyID, with
-// every entry already read taken from the cache. A nil cache reads every
-// entry.
+// readRing reads dir, the conversation ring of session replyID. For active
+// hosted sessions wslive serves this directly from pinned RAM with zero disk ops.
 func (c *entryFiles) readRing(replyID, dir string) ([]wslive.RingRecord, error) {
-	if c == nil {
-		return wslive.ReadRing(dir)
+	if c != nil {
+		c.mu.Lock()
+		c.ringLists++
+		c.mu.Unlock()
 	}
-	c.mu.Lock()
-	c.ringLists++
-	c.mu.Unlock()
-	names, err := wslive.RingNames(dir)
-	if err != nil {
-		return nil, err
-	}
-	if len(names) > wslive.RingCap {
-		names = names[len(names)-wslive.RingCap:]
-	}
-	c.mu.Lock()
-	var known map[string]wslive.RingRecord
-	if s := c.sessions[replyID]; s != nil {
-		known = s.ring
-	}
-	c.mu.Unlock()
-	next := make(map[string]wslive.RingRecord, len(names))
-	out := make([]wslive.RingRecord, 0, len(names))
-	read := 0
-	for _, name := range names {
-		rec, ok := known[name]
-		if !ok {
-			read++
-			// An entry that does not read is skipped, as ReadRing skips it,
-			// and tried again next time.
-			if rec, ok = wslive.ReadRingEntry(dir, name); !ok {
-				continue
-			}
-		}
-		next[name] = rec
-		out = append(out, rec)
-	}
-	c.mu.Lock()
-	c.parsed += read
-	c.session(replyID).ring = next
-	c.mu.Unlock()
-	return out, nil
+	return wslive.ReadRing(dir)
 }
 
 // readDrained is wsinbox.Drained of the inbox at dir, session replyID's,

@@ -70,11 +70,23 @@ var (
 	// (1.5.10), so a live token has resolved by then; the wait only covers
 	// the route's own lag.
 	agyMCPConnectWait = 10 * time.Second
+	// agyWakeUsageQuiet closes an unsolicited background-wakeup turn once
+	// usage_update arrives and no tool_call follows (agy emits tool_call in
+	// the same burst as usage_update, whereas a final reply ends right after
+	// usage_update). agyWakeIdleQuiet is the fallback when no usage_update
+	// arrives.
+	agyWakeUsageQuiet = 1500 * time.Millisecond
+	agyWakeIdleQuiet  = 30 * time.Second
 )
 
 // agyDropEnv are the variable prefixes an agy lead starts without: the
 // parent harness sessions' (leadDropEnv names ws's own).
 var agyDropEnv = []string{"CLAUDE", "CODEX_", "PI_", "ORCA_"}
+
+// agyLeadBgShellRule is appended to a hosted agy lead's system prompt so it
+// overrides Antigravity's reactive-wakeup guidance for background commands;
+// workers carry the matching rule in instructions/agent-worker-agy.md.
+const agyLeadBgShellRule = `Never end your turn while a non-daemon ` + "`run_command`" + ` task you started is still running (ignore this for ` + "`IsDaemon: true`" + ` processes). Override Antigravity's "end the turn and wait" / reactive-wakeup guidance for background commands: stay in the same turn — do other work or check status with ` + "`manage_task`" + ` — until it finishes.`
 
 // agyRingSkip matches agy's thought chunks, which the mapper drops: a
 // lead's holder keeps them out of its ring. A line whose shape this no
@@ -149,6 +161,7 @@ func (b AgyBackend) Start(ctx context.Context, spec StartSpec) (Process, error) 
 		return nil, err
 	}
 	p := &agyProcess{streamProcess: sp, m: m, worker: spec.Lead == nil, epoch: strconv.FormatInt(time.Now().UnixNano(), 36)}
+	m.setWakeClose(p.closeUnsolicitedTurn)
 	holder, pid, _ := sp.HolderInfo()
 	if cmd.Process != nil {
 		pid = cmd.Process.Pid
@@ -220,6 +233,24 @@ func (p *agyProcess) processControls() processControls {
 	return processControls{Process: p, approval: p, mode: p, steer: p}
 }
 
+func (p *agyProcess) Close() error {
+	p.m.stopWakeTimer()
+	return p.streamProcess.Close()
+}
+
+// closeUnsolicitedTurn settles a self-resumed background-wakeup turn once the
+// stream goes quiet after its final update, serialized with streamProcess.feed.
+func (p *agyProcess) closeUnsolicitedTurn() {
+	p.feedMu.Lock()
+	defer p.feedMu.Unlock()
+	if p.finished {
+		return
+	}
+	for _, ev := range p.m.closeUnsolicited(time.Now().UnixMilli()) {
+		p.emit(ev)
+	}
+}
+
 func (p *agyProcess) newID(kind string) string {
 	return agyRequestMark + "-" + kind + "-" + p.epoch + "-" + strconv.FormatInt(p.seq.Add(1), 10)
 }
@@ -251,12 +282,23 @@ func (p *agyProcess) open(spec StartSpec) error {
 		return fmt.Errorf("agy answered initialize with ACP protocol version %d; ws speaks version 1", reply.ProtocolVersion)
 	}
 	params := map[string]any{"cwd": spec.workDir(), "mcpServers": []any{agyHTTPServer(spec.MCPSession)}}
+	var appendText string
 	if spec.Instructions != "" {
 		text, err := os.ReadFile(spec.Instructions)
 		if err != nil {
 			return fmt.Errorf("read the instruction file: %w", err)
 		}
-		params["_meta"] = map[string]any{"antigravity": map[string]any{"systemPrompt": map[string]any{"append": string(text)}}}
+		appendText = string(text)
+	}
+	if spec.Lead != nil {
+		if trimmed := strings.TrimRight(appendText, "\n"); trimmed != "" {
+			appendText = trimmed + "\n\n" + agyLeadBgShellRule + "\n"
+		} else {
+			appendText = agyLeadBgShellRule + "\n"
+		}
+	}
+	if appendText != "" {
+		params["_meta"] = map[string]any{"antigravity": map[string]any{"systemPrompt": map[string]any{"append": appendText}}}
 	}
 	kind, method := agyKindNew, "session/new"
 	if spec.SessionID != "" {
@@ -534,14 +576,27 @@ type agyMapper struct {
 
 	// outstanding are the prompts this process sent and agy has not
 	// answered; inTurn is set from a turn's first content to its end.
-	outstanding map[string]bool
-	inTurn      bool
-	turnSeq     int
-	group       int
-	groupCalls  bool
-	reply       strings.Builder
-	replyAt     int64
-	batches     batchTracker
+	// Any turn opened without a tracked prompt in outstanding (a
+	// background-task wakeup, a replayed/rejoined prompt from an earlier
+	// daemon, or a steered prompt across --replace) sets unsolicitedTurn
+	// and is bounded by wakeTimer so a burst with no prompt response
+	// closes cleanly instead of wedging c.turn.
+	outstanding     map[string]bool
+	inTurn          bool
+	unsolicitedTurn bool
+	wakeStepHadText bool
+	wakeSawUsage    bool
+	openCalls       map[string]bool
+	openBg          map[string]bool
+	bgCalls         map[string]bool
+	wakeTimer       *time.Timer
+	onWakeClose     func()
+	turnSeq         int
+	group           int
+	groupCalls      bool
+	reply           strings.Builder
+	replyAt         int64
+	batches         batchTracker
 
 	// approvals are the pending permission requests by ApprovalRequest.ID,
 	// approvalOf their ids by tool call.
@@ -553,10 +608,87 @@ func newAgyMapper(sessionID string) *agyMapper {
 	return &agyMapper{
 		sessionID:   sessionID,
 		outstanding: map[string]bool{},
+		openCalls:   map[string]bool{},
+		openBg:      map[string]bool{},
+		bgCalls:     map[string]bool{},
 		batches:     newBatchTracker("agy"),
 		approvals:   map[string]*agyApproval{},
 		approvalOf:  map[string]string{},
 	}
+}
+
+func (m *agyMapper) setWakeClose(fn func()) {
+	m.mu.Lock()
+	m.onWakeClose = fn
+	m.mu.Unlock()
+}
+
+func (m *agyMapper) stopWakeTimer() {
+	m.mu.Lock()
+	m.stopWakeTimerLocked()
+	m.mu.Unlock()
+}
+
+func (m *agyMapper) stopWakeTimerLocked() {
+	if m.wakeTimer != nil {
+		m.wakeTimer.Stop()
+		m.wakeTimer = nil
+	}
+}
+
+func (m *agyMapper) armWakeTimerLocked(d time.Duration) {
+	if m.onWakeClose == nil || !m.unsolicitedTurn {
+		return
+	}
+	m.stopWakeTimerLocked()
+	fn := m.onWakeClose
+	m.wakeTimer = time.AfterFunc(d, fn)
+}
+
+func (m *agyMapper) armWakeIfReadyLocked(replaying bool) {
+	if replaying || !m.unsolicitedTurn || len(m.approvals) > 0 {
+		return
+	}
+	if len(m.openCalls) > 0 && !(m.wakeStepHadText && len(m.openCalls) == len(m.openBg)) {
+		return
+	}
+	if m.wakeSawUsage {
+		m.armWakeTimerLocked(agyWakeUsageQuiet)
+	} else {
+		m.armWakeTimerLocked(agyWakeIdleQuiet)
+	}
+}
+
+// replayState runs from streamProcess.deliver before a holder replay marker
+// reaches the runner. If replay ended inside a turn this daemon did not send,
+// arm the quiet timer so a finished unsolicited/wakeup burst in the ring
+// closes cleanly while an in-flight prompt from the earlier daemon can still
+// stream and finish on its live prompt response.
+func (m *agyMapper) replayState(ev Event) []Event {
+	if !ev.ReplayDone {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.inTurn || len(m.outstanding) > 0 {
+		return nil
+	}
+	m.unsolicitedTurn = true
+	m.armWakeIfReadyLocked(false)
+	return nil
+}
+
+func (m *agyMapper) closeUnsolicited(now int64) []Event {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.unsolicitedTurn || !m.inTurn || len(m.outstanding) > 0 || len(m.approvals) > 0 {
+		return nil
+	}
+	if len(m.openCalls) > 0 && !(m.wakeStepHadText && len(m.openCalls) == len(m.openBg)) {
+		return nil
+	}
+	m.wakeTimer = nil
+	return m.endTurn(agyMessage{}, now)
 }
 
 func (m *agyMapper) session() string {
@@ -616,6 +748,9 @@ func (m *agyMapper) mode() string {
 
 func (m *agyMapper) promptSent(id string) {
 	m.mu.Lock()
+	m.unsolicitedTurn = false
+	m.wakeSawUsage = false
+	m.stopWakeTimerLocked()
 	m.outstanding[id] = true
 	m.mu.Unlock()
 }
@@ -672,7 +807,7 @@ func (m *agyMapper) mapLine(line []byte, replies lineReplies) []Event {
 	case msg.Method != "" && hasID:
 		return m.request(msg, replies, now)
 	case msg.Method == "session/update":
-		return m.update(msg.Params, now)
+		return m.update(msg.Params, replies, now)
 	case msg.Method == "" && hasID:
 		return m.response(msg, replies, now)
 	}
@@ -702,7 +837,10 @@ func (m *agyMapper) request(msg agyMessage, replies lineReplies, now int64) []Ev
 	if id == "" {
 		id = "rpc:" + string(raw)
 	}
-	out := m.startTurn(nil)
+	_, replaying := replies.(silentReplies)
+	out := m.startTurn(nil, replaying)
+	m.wakeSawUsage = false
+	m.stopWakeTimerLocked()
 	m.approvals[id] = &agyApproval{raw: raw, toolCallID: p.ToolCall.ToolCallID, options: p.Options}
 	if p.ToolCall.ToolCallID != "" {
 		m.approvalOf[p.ToolCall.ToolCallID] = id
@@ -904,14 +1042,21 @@ func (m *agyMapper) configOptions(body json.RawMessage) {
 	}
 }
 
-// startTurn opens a turn at its first content: a turn ws's own prompt
-// began is already running in the runner, and a replayed one is rebuilt
-// here.
-func (m *agyMapper) startTurn(out []Event) []Event {
+// startTurn opens a turn at its first content: a turn ws's own prompt began
+// is already running in the runner, a replayed one is rebuilt here, and any
+// live turn with no tracked outstanding prompt opens an unsolicitedTurn
+// bounded by wakeTimer (covering background wakeups, rejoined/steered prompts
+// across --replace, and stray wakeups).
+func (m *agyMapper) startTurn(out []Event, replaying bool) []Event {
 	if m.inTurn {
 		return out
 	}
 	m.inTurn = true
+	m.wakeStepHadText = false
+	m.wakeSawUsage = false
+	if len(m.outstanding) == 0 && !replaying {
+		m.unsolicitedTurn = true
+	}
 	m.turnSeq++
 	m.group, m.groupCalls = 0, false
 	return append(out, Event{TurnStart: true})
@@ -932,8 +1077,10 @@ func (m *agyMapper) groupID() string {
 	return "t" + strconv.Itoa(m.turnSeq) + "g" + strconv.Itoa(m.group)
 }
 
-// endTurn settles a turn at its last prompt's answer: the reply, every
-// permission request still pending, and the open tool batch end with it.
+// endTurn settles a turn at its last prompt's answer (or at the quiet end of
+// a background-wakeup turn): the reply, every permission request still
+// pending, any non-daemon run_command calls that went async across a normal
+// end, and the open tool batch end with it.
 func (m *agyMapper) endTurn(msg agyMessage, now int64) []Event {
 	out := m.flushReply(nil)
 	for id := range m.approvals {
@@ -941,15 +1088,29 @@ func (m *agyMapper) endTurn(msg agyMessage, now int64) []Event {
 	}
 	clear(m.approvals)
 	clear(m.approvalOf)
-	if b := m.batches.finish(now, true); b != nil {
-		out = append(out, *b)
-	}
-	m.inTurn = false
-	ev := Event{TurnEnd: true}
 	var r struct {
 		StopReason string `json:"stopReason"`
 	}
 	_ = json.Unmarshal(msg.Result, &r)
+	normalEnd := msg.Error == nil && (r.StopReason == "" || r.StopReason == "end_turn")
+	if b := m.batches.finish(now, !normalEnd); b != nil {
+		out = append(out, *b)
+	}
+	if normalEnd && len(m.openBg) > 0 {
+		for id := range m.openBg {
+			m.bgCalls[id] = true
+		}
+		n := len(m.bgCalls)
+		out = append(out, Event{BackgroundTasks: &n})
+	}
+	clear(m.openBg)
+	clear(m.openCalls)
+	m.inTurn = false
+	m.unsolicitedTurn = false
+	m.wakeStepHadText = false
+	m.wakeSawUsage = false
+	m.stopWakeTimerLocked()
+	ev := Event{TurnEnd: true}
 	switch {
 	case msg.Error != nil:
 		ev.TurnError = "agy: " + msg.Error.Message
@@ -985,7 +1146,7 @@ type agyUpdate struct {
 }
 
 // update maps a session/update notification.
-func (m *agyMapper) update(params json.RawMessage, now int64) []Event {
+func (m *agyMapper) update(params json.RawMessage, replies lineReplies, now int64) []Event {
 	var p struct {
 		Update agyUpdate `json:"update"`
 	}
@@ -993,16 +1154,21 @@ func (m *agyMapper) update(params json.RawMessage, now int64) []Event {
 		return nil
 	}
 	u := p.Update
+	_, replaying := replies.(silentReplies)
 	switch u.SessionUpdate {
 	case "agent_message_chunk":
-		out := m.startTurn(nil)
+		out := m.startTurn(nil, replaying)
 		var c struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		}
 		if json.Unmarshal(u.Content, &c) != nil || c.Type != "text" || c.Text == "" {
+			m.armWakeIfReadyLocked(replaying)
 			return out
 		}
+		m.wakeStepHadText = true
+		m.wakeSawUsage = false
+		m.armWakeIfReadyLocked(replaying)
 		if m.groupCalls {
 			// Text after a tool batch is the next message's.
 			m.group++
@@ -1018,19 +1184,45 @@ func (m *agyMapper) update(params json.RawMessage, now int64) []Event {
 		}
 		return append(out, Event{Live: &wslive.Event{Kind: wslive.KindReply, Text: m.reply.String()}})
 	case "agent_thought_chunk":
-		return m.startTurn(nil)
+		out := m.startTurn(nil, replaying)
+		m.wakeSawUsage = false
+		m.armWakeIfReadyLocked(replaying)
+		return out
 	case "tool_call":
-		out := m.flushReply(m.startTurn(nil))
+		out := m.flushReply(m.startTurn(nil, replaying))
+		m.wakeStepHadText = false
+		m.wakeSawUsage = false
+		m.stopWakeTimerLocked()
 		name := u.Name
 		if name == "" {
 			name = u.Title
 		}
+		if u.ToolCallID != "" && u.Status != "completed" && u.Status != "failed" {
+			isDaemon := false
+			if name == "run_command" {
+				var args struct {
+					IsDaemon bool `json:"IsDaemon"`
+				}
+				_ = json.Unmarshal(u.Args, &args)
+				isDaemon = args.IsDaemon
+				if !isDaemon {
+					m.openBg[u.ToolCallID] = true
+				}
+			}
+			if !isDaemon {
+				m.openCalls[u.ToolCallID] = true
+			}
+		}
 		out = append(out, m.batches.addCall(m.groupID(), u.ToolCallID, name, argsPreview(u.Args), now)...)
 		m.groupCalls = true
-		return append(out, m.toolStatus(u, now)...)
+		return append(out, m.toolStatus(u, replaying, now)...)
 	case "tool_call_update":
-		return m.toolStatus(u, now)
+		return m.toolStatus(u, replaying, now)
 	case "usage_update":
+		if m.inTurn && len(m.approvals) == 0 && (len(m.openCalls) == 0 || (m.wakeStepHadText && len(m.openCalls) == len(m.openBg))) {
+			m.wakeSawUsage = true
+			m.armWakeIfReadyLocked(replaying)
+		}
 		if u.Used == nil {
 			return nil
 		}
@@ -1068,21 +1260,30 @@ func params2configOptions(params json.RawMessage) json.RawMessage {
 }
 
 // toolStatus ends a tool call that reached a final status: its batch
-// entry, its permission request, and a tracker write it made.
-func (m *agyMapper) toolStatus(u agyUpdate, now int64) []Event {
+// entry, its permission request, any tracked background command, and a
+// tracker write it made.
+func (m *agyMapper) toolStatus(u agyUpdate, replaying bool, now int64) []Event {
 	if u.Status != "completed" && u.Status != "failed" {
 		return nil
 	}
 	failed := u.Status == "failed"
+	delete(m.openCalls, u.ToolCallID)
+	delete(m.openBg, u.ToolCallID)
 	out := m.batches.endCall(u.ToolCallID, failed, now)
 	if id, ok := m.approvalOf[u.ToolCallID]; ok {
 		delete(m.approvalOf, u.ToolCallID)
 		delete(m.approvals, id)
 		out = append(out, Event{ApprovalDone: id})
 	}
+	if m.bgCalls[u.ToolCallID] {
+		delete(m.bgCalls, u.ToolCallID)
+		n := len(m.bgCalls)
+		out = append(out, Event{BackgroundTasks: &n})
+	}
 	if !failed && u.Name == agyMCPToolName(ReservedMCPServer, TrackerWriteTool) {
 		out = append(out, resultEvents(TrackerWriteTool, "")...)
 	}
+	m.armWakeIfReadyLocked(replaying)
 	return out
 }
 

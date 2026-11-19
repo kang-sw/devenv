@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: c3407be083e0dfad
 sage-review-completeness-reviewed: c3407be083e0dfad
+completed: 2026-11-19
 ---
 
 # Hosted Codex/agy model lists without opening a session, and a bypass mode for agy leads
@@ -271,3 +272,8 @@ lead's independent review and post-swap live check.
   total budget. Owner (199)=a, 2026-11-19: list a direct-tool allowlist on
   agy and make `call` the default path; implemented on
   `impl/track/agent-v2/agy-direct-tools`.
+
+
+## Resolution (2026-11-19)
+
+Owner live checks on the Mac daemon (fcc6aa321 build) passed 2026-11-19 21:13 KST: (178) Codex and agy model lists appear in the new-lead dialog right after a daemon restart with no session opened; (179) an agy lead in bypass mode runs shell commands without an approval prompt.

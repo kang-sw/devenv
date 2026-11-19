@@ -368,7 +368,7 @@ func agentToolDefinitions() []map[string]any {
 		},
 		{
 			"name":        "agent.list",
-			"description": "List your direct child agents. State waiting means asleep with no turn. Send follow-ups with mailbox.send to the child's address. Text by default; format=json for structured output.",
+			"description": "List your direct child agents. State waiting means asleep with no turn; background means turn ended with background work running. Send follow-ups with mailbox.send to the child's address. Text by default; format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

@@ -552,7 +552,7 @@ func (p *piProcess) Send(text string) error {
 // prompt template, a skill). It is sent at a turn's end only, never as a
 // steer or follow-up, which refuse extension commands.
 func (p *piProcess) RunCommand(cmd wsinbox.Command) error {
-	if p.lead && cmd.Name == "compact" {
+	if cmd.Name == "compact" {
 		p.mapper.aborted.Store(false)
 		return p.compact(cmd.Args)
 	}
@@ -788,11 +788,12 @@ type piLine struct {
 	ToolName   string          `json:"toolName"`
 	// Result is a tool_execution_end's result, read only for a card or UI call:
 	// left raw so no other line's result shape can fail the line's decode.
-	Result  json.RawMessage `json:"result"`
-	IsError bool            `json:"isError"`
-	Reason  string          `json:"reason"`
-	Aborted bool            `json:"aborted"`
-	Method  string          `json:"method"`
+	Result       json.RawMessage `json:"result"`
+	IsError      bool            `json:"isError"`
+	Reason       string          `json:"reason"`
+	Aborted      bool            `json:"aborted"`
+	ErrorMessage string          `json:"errorMessage"`
+	Method       string          `json:"method"`
 	// WidgetKey and WidgetLines are a setWidget request's. The lines stay
 	// raw so a widget of another shape cannot fail the line's decode.
 	WidgetKey   string          `json:"widgetKey"`
@@ -879,15 +880,17 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 				return piCommands(l.Data)
 			}
 		case "compact":
-			// A typed /compact completes the command-only turn, unless a
-			// native run started before its answer arrived.
-			if m.spec.Lead != nil {
-				errText := ""
-				if !l.Success {
-					errText = "compact refused: " + l.Error
-				}
-				return m.commandDone(now, errText)
+			// RPC compact has the same response contract in both roles.
+			errText := ""
+			if !l.Success {
+				errText = "compact refused: " + l.Error
 			}
+			if !m.nativeKnown && !m.nativeRun {
+				if _, replaying := replies.(silentReplies); !replaying {
+					return m.endTurn(now, errText)
+				}
+			}
+			return m.commandDone(now, errText)
 		case "steer":
 			// A non-lead process steers a child's report, which the runner
 			// sends as a turn instead when pi refuses it (children.go).
@@ -967,8 +970,11 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 		phase := wslive.CompactStart
 		if l.Type == "compaction_end" {
 			phase = wslive.CompactEnd
+			if l.Aborted || l.ErrorMessage != "" {
+				phase = wslive.CompactFailed
+			}
 		}
-		return []Event{{Live: &wslive.Event{Kind: wslive.KindCompact, Phase: phase, Trigger: trigger}}}
+		return []Event{{Live: &wslive.Event{Kind: wslive.KindCompact, Phase: phase, Trigger: trigger, Text: l.ErrorMessage}}}
 	case "agent_settled":
 		m.nativeRun, m.nativeKnown = false, true
 		m.nativeGeneration++

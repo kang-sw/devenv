@@ -98,6 +98,7 @@ type hostedSlots struct {
 	next   uint64
 	owners map[string]uint64
 	rings  map[string]uint64
+	unpin  map[string]func() error
 }
 
 // ringGen is replyID's count of hosted ring appends.
@@ -105,6 +106,14 @@ func (l *hostedSlots) ringGen(replyID string) uint64 {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.rings[replyID]
+}
+
+// hasOwner reports whether a live hosted slot currently owns replyID.
+func (l *hostedSlots) hasOwner(replyID string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	_, ok := l.owners[replyID]
+	return ok
 }
 
 // drop forgets a session that left the index.
@@ -141,6 +150,12 @@ func (d *Daemon) OpenHostedSlot(sessionDir string) (HostedSlot, bool) {
 		// new writer's seed missed, so the copy no longer stands for the
 		// directory (cleared with the copy).
 		d.snapshots.shareObserved(d.dir, replyID)
+	} else {
+		// Pin the conversation ring in daemon RAM while a HostedSlot owns it.
+		if d.live.unpin == nil {
+			d.live.unpin = map[string]func() error{}
+		}
+		d.live.unpin[replyID] = wslive.PinRing(wslive.RingDir(SessionDir(d.dir, replyID)))
 	}
 	d.live.next++
 	d.live.owners[replyID] = d.live.next
@@ -210,8 +225,11 @@ func (s *daemonLiveSlot) Close() {
 	d := s.d
 	d.live.mu.Lock()
 	owned := d.live.owners[s.replyID] == s.id
+	var unpin func() error
 	if owned {
 		delete(d.live.owners, s.replyID)
+		unpin = d.live.unpin[s.replyID]
+		delete(d.live.unpin, s.replyID)
 		d.snapshots.ClearLive(d.dir, s.replyID)
 		if h, ok := d.source.(LiveSnapshotHolder); ok {
 			h.ClearLiveSnapshot(d.dir, s.replyID)
@@ -220,6 +238,9 @@ func (s *daemonLiveSlot) Close() {
 	d.live.mu.Unlock()
 	if !owned {
 		return
+	}
+	if unpin != nil {
+		_ = unpin()
 	}
 	// The file is the session's snapshot again: a full re-read, as a nudge
 	// would cause, and a full wake.

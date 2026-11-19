@@ -8,14 +8,14 @@ import (
 )
 
 // lockSummaryWriter is the hosted equivalent of terminal connection/slot
-// fencing. The registration lock prevents terminal handoff, and summaryMu
-// pins this actual conversation generation through mutation/candidate freeze.
+// fencing. The registration lock serializes against handoff and terminal
+// login, and summaryMu pins this actual conversation generation through
+// mutation/candidate freeze.
 func (c *conv) lockSummaryWriter() (func(), bool) {
 	rec := c.record()
-	if !rec.Lead {
+	if !rec.Lead || c.foreignRow {
 		return nil, false
 	}
-	// The row tested is the one lockRowRead checked under the lock.
 	unlock, row, ok := c.lockRowRead()
 	if !ok {
 		return nil, false
@@ -52,7 +52,7 @@ func (w *liveWriter) withOwner(write func() error) error {
 		}
 		defer release()
 	}
-	if owner, ok := w.slot.(wsdashboard.LiveSlotOwner); ok {
+	if owner, ok := w.currentSlot().(wsdashboard.LiveSlotOwner); ok {
 		release, owned := owner.LockOwner()
 		if !owned {
 			return fmt.Errorf("hosted live snapshot slot ownership changed")
@@ -110,6 +110,19 @@ func (w *liveWriter) retrySummaries() {
 	n, err := w.summaryStore().Try(wslive.RingDir(w.dir))
 	if err != nil {
 		fmt.Fprintf(w.log, "agent %s: summary ring retry: %v\n", w.st.ReplyID(), err)
+	}
+	if n > 0 && w.wake != nil {
+		w.wake()
+	}
+}
+
+// flushSummaries runs on graceful shutdown / slot close and forces a full
+// Retry (not Try) so a previously failed pending summary turn is flushed
+// best-effort before shutdown.
+func (w *liveWriter) flushSummaries() {
+	n, err := w.summaryStore().Retry(wslive.RingDir(w.dir))
+	if err != nil {
+		fmt.Fprintf(w.log, "agent %s: summary ring shutdown retry: %v\n", w.st.ReplyID(), err)
 	}
 	if n > 0 && w.wake != nil {
 		w.wake()

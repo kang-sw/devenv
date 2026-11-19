@@ -15,6 +15,19 @@ import (
 
 var mailBatchHead = regexp.MustCompile(`^\[(?:ws|wsflow) mailbox\] 1 message\(s\) arrived for session_key ([^\s.]+)\. They were already received through mailbox\.recv; do not call it again for these\.$`)
 
+// relationLines mirror mcp.relationLines: delivered wake envelopes open the
+// body with one of these lines, while stored ring mails keep the raw body.
+var relationLines = []string{"[relation: parent]\n", "[relation: child]\n", "[relation: peer]\n"}
+
+func trimRelationLine(body string) string {
+	for _, line := range relationLines {
+		if rest, ok := strings.CutPrefix(body, line); ok {
+			return rest
+		}
+	}
+	return body
+}
+
 // Present an unambiguous single-message wake as its stored mail. This is a
 // display association, not delivery identity: keep both keys and raw wake
 // diagnostics, but suppress the mail row at its original position. History
@@ -48,6 +61,7 @@ func linkMailWakes(entries []ConvEntry, self string) {
 		if !ok || !strings.HasPrefix(from, "mail from ") {
 			continue
 		}
+		body = trimRelationLine(body)
 		peer := strings.TrimPrefix(from, "mail from ")
 		if open := strings.LastIndex(peer, " ("); open >= 0 && strings.HasSuffix(peer, ")") {
 			if _, err := time.Parse(time.RFC3339, peer[open+2:len(peer)-1]); err != nil {
