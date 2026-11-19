@@ -124,6 +124,61 @@ func TestTranscriptKickPersistsBothSidesOfSendImmediately(t *testing.T) {
 	}
 }
 
+func TestExpiredChildSnapshotCloseDoesNotRecreateSessionDirectory(t *testing.T) {
+	h, _ := agentHarness(t, func(o *Options) { o.heartbeat = time.Hour })
+	id, p := h.agentRunning(h.leadCaller(), AgentSpawnRequest{Prompt: "one", Tier: "small", Authority: "read-only"})
+	p.reply("done")
+	eventually(t, "settled child", func() bool { return h.state(id).Status == StatusIdle })
+	h.asleep(id)
+	c := h.runner.conv(id)
+	if !h.runner.expire(id) {
+		t.Fatal("waiting child did not expire")
+	}
+	wait(t, "expired child's loop exit", c.done)
+	// Exercise the worst ordering deterministically: the deferred slot close
+	// runs after forget removed the directory, not just before it.
+	c.live.closeSlot()
+	if _, err := os.Stat(c.dir); !os.IsNotExist(err) {
+		t.Fatalf("expired child's directory was recreated: %v", err)
+	}
+}
+
+func TestRefusedWakePersistsSendCoverageBeforeCrashRecovery(t *testing.T) {
+	clk := newTestClock()
+	h, _ := agentHarness(t, func(o *Options) {
+		o.Now, o.heartbeat, o.ChildWaitingDays = clk.Now, time.Hour, 2
+	})
+	parent, child := settledPair(t, h)
+	if err := writePermissionSelection(wsdashboard.SessionDir(h.dir, parent), PermissionReadOnly); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.runner.Deliver(child, Delivery{Text: "must survive a refused wake"}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "refused wake", func() bool {
+		return strings.Contains(h.state(child).Error, "parent's current level read-only")
+	})
+	c := h.runner.conv(child)
+	if !c.do(func() {}) {
+		t.Fatal("child loop ended")
+	}
+	// Capture the actual recovery record BEFORE any graceful Close can flush
+	// it. A future startup must retain the input even past its activity expiry.
+	rec := h.record(child)
+	if rec.LastTurn == nil || rec.Sends <= rec.LastTurn.Mark || len(rec.Queued) != 0 {
+		t.Fatalf("refused wake did not persist undrained send coverage: %+v", rec)
+	}
+	clk.advance(3 * day)
+	checker := NewRunner(Options{Now: clk.Now, ChildWaitingDays: 2})
+	if expired := checker.expiredAtStart([]Record{rec}); len(expired) != 0 {
+		t.Fatalf("crash recovery would delete unread input with child %v", expired)
+	}
+	held, err := wsinbox.Held(c.inbox)
+	if err != nil || len(held) != 1 || !strings.Contains(held[0].Entry.Text(), "must survive a refused wake") {
+		t.Fatalf("refused wake lost unread inbox text: %+v, %v", held, err)
+	}
+}
+
 func TestHostedTranscriptUsesSlotNotFullNotify(t *testing.T) {
 	h := newLeadHarness(t)
 	h.opts.LiveHost = &summarySnapshotHost{}
@@ -147,46 +202,63 @@ func TestHostedTranscriptUsesSlotNotFullNotify(t *testing.T) {
 
 func TestTranscriptShutdownFlushesDeferredSendsAndConsumedSnapshot(t *testing.T) {
 	for _, backend := range []string{BackendClaude, BackendPi} {
-		t.Run(backend, func(t *testing.T) {
-			h := newLeadHarness(t)
-			host := &summarySnapshotHost{}
-			h.opts.LiveHost = host
-			h.opts.heartbeat = time.Hour
-			h.start()
-			id := h.lead(backend, LeadOptions{}).ID
-			h.send(id, "one")
-			h.quiesce(id)
-			c := h.runner.conv(id)
-			diskBefore := h.record(id)
-			if _, err := h.runner.Send(id, "held through shutdown"); err != nil {
-				t.Fatal(err)
-			}
-			h.quiesce(id)
-			// No turn boundary has occurred, so only RAM holds Sends=2.
-			if rec := h.record(id); rec.Sends != diskBefore.Sends {
-				t.Fatalf("held send was not deferred: %d -> %d", diskBefore.Sends, rec.Sends)
-			}
-			c.do(func() {
-				c.handle(Event{Seq: 100, Live: &wslive.Event{Kind: wslive.KindReply, Text: "consumed prefix"}})
-				c.handle(Event{Seq: 100, LineEnd: true})
+		for _, consumed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/consumed=%v", backend, consumed), func(t *testing.T) {
+				h := newLeadHarness(t)
+				host := &summarySnapshotHost{}
+				h.opts.LiveHost = host
+				h.opts.heartbeat = time.Hour
+				h.start()
+				id := h.lead(backend, LeadOptions{}).ID
+				h.send(id, "one")
+				h.quiesce(id)
+				c := h.runner.conv(id)
+				diskBefore := h.record(id)
+				if _, err := h.runner.Send(id, "held through shutdown"); err != nil {
+					t.Fatal(err)
+				}
+				h.quiesce(id)
+				// No turn boundary has occurred, so only RAM holds Sends=2.
+				if rec := h.record(id); rec.Sends != diskBefore.Sends {
+					t.Fatalf("held send was not deferred: %d -> %d", diskBefore.Sends, rec.Sends)
+				}
+				wantSeq := diskBefore.HolderSeq
+				dirtySeq, dirtyRecord := false, false
+				c.do(func() {
+					if consumed {
+						c.handle(Event{Seq: 100, Live: &wslive.Event{Kind: wslive.KindReply, Text: "consumed prefix"}})
+						c.handle(Event{Seq: 100, LineEnd: true})
+						wantSeq = 100
+					} else {
+						// With no dirty cursor, persistSeq cannot incidentally save
+						// Sends: only letGo's explicit flushRecord can do so.
+						c.wmu.Lock()
+						dirtyRecord = c.recordDirty
+						c.wmu.Unlock()
+						dirtySeq = c.seqDirty
+					}
+				})
+				if !consumed && (dirtySeq || !dirtyRecord) {
+					t.Fatal("test requires dirty send metadata without a dirty cursor")
+				}
+				h.runner.Close() // same Runner.Close used by SIGTERM, /shutdown, --replace
+				rec := h.record(id)
+				if rec.Sends != 2 || rec.HolderSeq != wantSeq || rec.TurnMark != 1 || len(rec.Queued) != 0 {
+					t.Fatalf("shutdown lost send coverage/cursor or deferred kick: %+v", rec)
+				}
+				dir := wsdashboard.SessionDir(h.dir, id)
+				snap, err := wslive.ReadSnapshot(wslive.SnapshotPath(dir))
+				if err != nil || (consumed && (snap.Lead.Reply == nil || snap.Lead.Reply.Text != "consumed prefix")) {
+					t.Fatalf("shutdown lost consumed snapshot: %+v, %v", snap, err)
+				}
+				if _, ok := host.snapshot(dir); ok {
+					t.Fatal("shutdown retained the RAM slot after flushing")
+				}
+				held, err := wsinbox.Held(wsinbox.Dir(dir))
+				if err != nil || len(held) != 1 || !strings.Contains(held[0].Entry.Text(), "held through shutdown") {
+					t.Fatalf("shutdown lost the held input: %+v, %v", held, err)
+				}
 			})
-			h.runner.Close() // same Runner.Close used by SIGTERM, /shutdown, --replace
-			rec := h.record(id)
-			if rec.Sends != 2 || rec.HolderSeq != 100 || rec.TurnMark != 1 || len(rec.Queued) != 0 {
-				t.Fatalf("shutdown lost send coverage/cursor or deferred kick: %+v", rec)
-			}
-			dir := wsdashboard.SessionDir(h.dir, id)
-			snap, err := wslive.ReadSnapshot(wslive.SnapshotPath(dir))
-			if err != nil || snap.Lead.Reply == nil || snap.Lead.Reply.Text != "consumed prefix" {
-				t.Fatalf("shutdown lost consumed snapshot: %+v, %v", snap, err)
-			}
-			if _, ok := host.snapshot(dir); ok {
-				t.Fatal("shutdown retained the RAM slot after flushing")
-			}
-			held, err := wsinbox.Held(wsinbox.Dir(dir))
-			if err != nil || len(held) != 1 || !strings.Contains(held[0].Entry.Text(), "held through shutdown") {
-				t.Fatalf("shutdown lost the held input: %+v, %v", held, err)
-			}
-		})
+		}
 	}
 }

@@ -244,7 +244,6 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 	if quiet {
 		return
 	}
-	c.flushRecord()
 	// Observers must see the terminal diagnostic in the same emission as
 	// the settled lifecycle, including mapped Pi agent_settled failures.
 	if turnErr != "" {
@@ -267,6 +266,7 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 	c.applySettings()
 	c.restartIfDue()
 	c.kick()
+	c.flushRecord()
 	if !c.turn {
 		c.armIdle()
 	}

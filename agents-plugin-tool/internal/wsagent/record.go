@@ -608,10 +608,11 @@ func (w *liveWriter) publishSnapshot(snap wslive.Snapshot) {
 }
 
 func (w *liveWriter) closeSlot() {
-	w.forceSnapshot()
-	if w.slot != nil {
-		w.slot.Close()
+	if w.slot == nil {
+		return
 	}
+	w.forceSnapshot()
+	w.slot.Close()
 }
 
 // registration is the conversation's session-registry entry.

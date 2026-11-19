@@ -51,8 +51,12 @@ func TestSnapshotBurstAtomicWriteCounts(t *testing.T) {
 			w.setAdapter("")
 			beforeClose := writes
 			w.closeSlot()
-			if writes != beforeClose+1 {
-				t.Fatalf("close did not flush: %d -> %d", beforeClose, writes)
+			closeWrites := 0
+			if hosted {
+				closeWrites = 1
+			}
+			if writes != beforeClose+closeWrites {
+				t.Fatalf("close writes=%d, want %d", writes-beforeClose, closeWrites)
 			}
 			snap, err := wslive.ReadSnapshot(wslive.SnapshotPath(w.dir))
 			if err != nil || snap.Adapter != "" || snap.Lead.Phase != wslive.PhaseIdle {

@@ -111,10 +111,7 @@ func (w *liveWriter) retrySummaries() {
 	if err != nil {
 		fmt.Fprintf(w.log, "agent %s: summary ring retry: %v\n", w.st.ReplyID(), err)
 	}
-	if n > 0 {
-		w.ringDirty = true
-		if w.wake != nil {
-			w.wake()
-		}
+	if n > 0 && w.wake != nil {
+		w.wake()
 	}
 }

@@ -992,8 +992,9 @@ func (c *conv) kick() {
 			c.live.writeSnapshot()
 			c.r.notify(c.rec.ReplyID, c.rec.Root)
 			if isRefusal {
-				// The input stays for the next admitted start; the child
-				// stays asleep (Deliver told the sender).
+				// The input stays for the next admitted start; persist its
+				// coverage so crash recovery cannot expire it as quiet.
+				c.flushRecord()
 				return
 			}
 			c.settleTurn(TurnFailed, err.Error(), c.sendCount())
