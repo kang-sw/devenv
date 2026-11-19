@@ -42,11 +42,11 @@ Verified findings (same research):
    length}]`). This extends `wsredact` with a match-reporting entry point and
    keeps the `Secrets(s) string` signature for existing callers. Rejected:
    storing unredacted data in a separate secure store, which is a new
-   key-management surface. What else secret handling needs is (1344).
+   key-management surface. What else secret handling needs is (1734).
 3. **Byte cap ((597), carried in part).** A per-session byte cap (config
    knob, default 256 MiB) drops the oldest data first, because one runaway
    tool output could fill the disk within any time window. (597)'s time rule
-   (the 7-day session prune) is re-asked as (1343). Its drop unit (whole
+   (the 7-day session prune) is re-asked as (1733). Its drop unit (whole
    segments) is superseded by the SQLite layout.
 4. **Compatibility tier T0, with its own schema version.** A new store with no
    older reader. The schema version lives in the database (SQLite
@@ -59,17 +59,17 @@ Verified findings (same research):
 
 ## Open Decision Queue
 
-Last ID: (1347)
+Last ID: (1737)
 
-(1343) [open] [policy] How long audit data is kept.
-- Context: (597) (2026-11-14) tied the audit data to the session directory, so the existing prune removed it 7 days after the session was last seen; the byte cap (Decision 3) bounds size independently. With SQLite the store no longer sits inside the session directory by default (see (1345)).
+(1733) [open] [policy] How long audit data is kept.
+- Context: (597) (2026-11-14) tied the audit data to the session directory, so the existing prune removed it 7 days after the session was last seen; the byte cap (Decision 3) bounds size independently. With SQLite the store no longer sits inside the session directory by default (see (1735)).
 - Alternative a: 7 days after the session was last seen, as (597) approved.
 - Alternative b: a fixed age per event (for example 30 days), independent of session activity.
 - Alternative c: no time limit; only the byte cap and an explicit session delete remove data.
 - Alternative d: a config knob, with one of a-c as the default.
 > Recommend d with a as the default: it keeps the approved behaviour and the existing prune semantics, and lets an owner who audits older work lengthen it without a code change.
 
-(1344) [open] [policy] How secrets are handled beyond best-effort redaction.
+(1734) [open] [policy] How secrets are handled beyond best-effort redaction.
 - Context: (596) redacts before persist and keeps only rule name and length, but `wsredact` is regex best-effort, so a secret in an unrecognized shape is persisted in plain text in a long-lived store. (596) rejected an unredacted store behind separate key management.
 - Alternative a: (596) as is; document the residual risk.
 - Alternative b: a, plus never storing bodies of calls that read known secret locations (environment dumps, credential files), recorded as a size-only placeholder.
@@ -77,14 +77,14 @@ Last ID: (1347)
 - Alternative d: a, plus an owner action to purge one event or one session's audit data.
 > Recommend a plus d: purge gives a remedy when a secret slips through without the key management (596) rejected, and b's denylist misses as much as the regex does while hiding legitimate audit content.
 
-(1345) [open] [policy] Database layout: one SQLite file per session, or one shared audit database.
+(1735) [open] [policy] Database layout: one SQLite file per session, or one shared audit database.
 - Context: every approved read route is per session (`/s/<id>/audit/...`, (599)). The SQLite epic chose one file per board for the whiteboard ((1325)=a: boards share nothing, export and delete stay trivial), while `wsstore` uses one shared database. The SQLite epic's direct-binary CLI access policy and Windows AV gate are still open there.
 - Alternative a: one SQLite file per session, opened lazily and closed when idle, deleted with the session.
 - Alternative b: one shared audit database with a session column and indexes.
 - Alternative c: an audit table inside a daemon database shared with other SQLite-migrated stores.
 > Recommend a: it matches (599)'s per-session routes and the whiteboard precedent, makes retention and delete a file removal, and keeps one runaway session from bloating the others; b and c only pay off for cross-session search, which no approved contract needs.
 
-(1347) [open] [policy] How much of a tool-result body is stored.
+(1737) [open] [policy] How much of a tool-result body is stored.
 - Context: the approved read API serves a body past 8 MiB as a truncated head with a range follow-up ((599)), which assumes the full body is stored. The approved view marks where the model's view ended and shows what lies below it (`seen`), which needs more than the model saw. The per-session byte cap is 256 MiB by default, so one huge output can evict most of a session's history.
 - Alternative a: the full body, bounded only by the per-session byte cap.
 - Alternative b: a per-body cap (config knob) keeping head and tail with an explicit stored-truncation marker; the range follow-up works within what is stored.
@@ -115,7 +115,7 @@ Last ID: (1347)
 
 ### Phase 1: Store, writer and redaction
 
-After (1344), (1345) and (1347) are answered and the envelope child has
+After (1734), (1735) and (1737) are answered and the envelope child has
 landed: implement the settled database layout with its schema version, the
 non-blocking writer behind the envelope child's sink interface, and
 redaction with match reporting (Decision 2) applied before every write,
@@ -129,9 +129,9 @@ per appended event before/after, per `performance.md`.
 
 ### Phase 2: Retention and byte cap
 
-Depends on Phase 1 and (1343). Implement the settled retention rule and the
+Depends on Phase 1 and (1733). Implement the settled retention rule and the
 per-session byte cap (Decision 3) dropping the oldest data first, plus any
-purge action (1344) settles.
+purge action (1734) settles.
 
 Verification: the byte cap drops the oldest data first and keeps the newest;
 retention removes exactly what the settled rule says; deleting a session

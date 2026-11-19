@@ -263,4 +263,4 @@ Superseded by `261119-epic-ws-conversation-audit` (owner (1331)=a, 2026-11-19). 
 - The (594) rationale, (596), the (597) byte cap, file modes and the schema version go to `261119-feat-ws-audit-sqlite-store`.
 - (599) and (681) go to `261119-feat-ws-audit-query-api`.
 
-The (597) 7-day time rule is re-asked as (1343).
+The (597) 7-day time rule is re-asked as (1733).

@@ -66,14 +66,14 @@ otherwise.
 
 - **The daemon owns the audit record ((545)=a).** The daemon keeps tool
   inputs/outputs and hidden harness events in its own store, not in the
-  harness's own transcript file. How much is captured is re-asked as (1340)
+  harness's own transcript file. How much is captured is re-asked as (1730)
   in child 1. (545)=a stands until the owner answers it.
 - **One harness-neutral record ((546)=a).** Capture is what the harness JSON
   stream delivers, mapped onto one envelope (id, session, harness, time, kind,
   call linkage). No per-harness schema, no API proxy.
 - **Redact before persist ((596)).** Nothing reaches the store unredacted.
   Redaction is best-effort regex (`wsredact`). How secrets are handled beyond
-  that is (1344) in child 3.
+  that is (1734) in child 3.
 - **The display ring is not the audit store.** The ring is capped and lossy
   by design. The audit store sits beside it.
 - **All audit data reaches the UI through the query API ((599)).** The view
@@ -114,14 +114,14 @@ coordinates are evidence, not edit targets):
 ## Open Decision Queue Index
 
 Owner questions are not decided. Each lives in its child's
-`## Open Decision Queue`. Board IDs (1340)-(1347), next free (1348):
+`## Open Decision Queue`. Board IDs (1730)-(1737), next free (1738):
 
-- (1340) capture scope; (1341) target sessions:
+- (1730) capture scope; (1731) target sessions:
   `261119-feat-ws-audit-policy-event-envelope`
-- (1342) capture point; (1346) agy compaction estimate:
+- (1732) capture point; (1736) agy compaction estimate:
   `261119-feat-ws-audit-capture-harness-adapters`
-- (1343) retention period; (1344) secret handling; (1345) DB layout;
-  (1347) tool-result body amount: `261119-feat-ws-audit-sqlite-store`
+- (1733) retention period; (1734) secret handling; (1735) DB layout;
+  (1737) tool-result body amount: `261119-feat-ws-audit-sqlite-store`
 
 ## Completion Criteria
 
@@ -129,4 +129,4 @@ Owner questions are not decided. Each lives in its child's
   the owner, and the owner closes this epic.
 - Dropped: the owner drops the audit direction.
 - Deferred: an MCP audit tool, and any capture scope or session coverage
-  beyond what (1340)/(1341) settle, stay proposals.
+  beyond what (1730)/(1731) settle, stay proposals.

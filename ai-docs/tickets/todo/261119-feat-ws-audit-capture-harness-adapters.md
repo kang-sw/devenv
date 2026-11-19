@@ -44,7 +44,7 @@ Verified findings (codex.large read-only research, 2026-11-19):
    onto the common envelope ((546)=a). Nothing harness-specific leaks outside
    `meta`/`raw`.
 2. **Capture taps before the display reduction and before the holder
-   ring-skip filter** (2026-11-19 finding). Where exactly is (1342).
+   ring-skip filter** (2026-11-19 finding). Where exactly is (1732).
 3. **Ring call ID ((601), carried).** The ring's per-call record gains an
    optional call ID, so a history row can open its audit events.
    - Today no ring type carries one (`wslive` `ToolCallArgs` holds `Name` and
@@ -65,20 +65,20 @@ Verified findings (codex.large read-only research, 2026-11-19):
 4. **Model-seen cut boundary sources ((598), carried).** Claude's
    `compact_boundary` and Pi's `compaction_start`/`compaction_end` provide the
    boundary. Codex and agy sources are confirmed per adapter phase. agy's
-   case is (1346).
+   case is (1736).
 
 ## Open Decision Queue
 
-Last ID: (1346)
+Last ID: (1736)
 
-(1342) [open] [policy] Where audit capture taps the stream, given the holder drops ring-skipped lines before the daemon.
+(1732) [open] [policy] Where audit capture taps the stream, given the holder drops ring-skipped lines before the daemon.
 - Context: Claude and agy launches pass a `RingSkip` pattern, so the holder keeps Claude tool-input/thinking/signature delta lines and agy `agent_thought_chunk` lines out of its ring; they never reach the daemon (`wsagent/holder.go:139-141,228-246`). The skip exists to keep partial-delta lines out of the holder's bounded output ring, which serves replay after a daemon restart. The parent epic requires the holder protocol to stay versioned, with the new daemon speaking the old holder protocol.
 - Alternative a: holder-side tee. The holder forwards skipped lines to the daemon on a separate, unsequenced audit channel and still keeps them out of its ring. Holder protocol change (versioned). Skipped lines produced while no daemon is attached are lost to the audit.
 - Alternative b: disable `RingSkip` for audited sessions. Every line reaches the daemon, which tees it to the audit adapter before mapping. No protocol change; partial deltas consume the holder ring's replay budget.
 - Alternative c: daemon-side tap after the filter only. No holder change; content that exists only in skipped lines (agy thought chunks, possibly Claude thinking) is not captured.
-> Recommend a: it captures what (1340) b/c need without shrinking the replay ring, and the daemon-downtime loss matches the audit's existing drop-on-error rule; c cannot satisfy hidden-event capture for agy.
+> Recommend a: it captures what (1730) b/c need without shrinking the replay ring, and the daemon-downtime loss matches the audit's existing drop-on-error rule; c cannot satisfy hidden-event capture for agy.
 
-(1346) [open] [policy] How the model-seen cut handles agy compaction, which is inferred rather than reported as a boundary event.
+(1736) [open] [policy] How the model-seen cut handles agy compaction, which is inferred rather than reported as a boundary event.
 - Context: (598) takes the cut from an explicit harness boundary and rejects token-count estimates. The capability catalog records agy compaction as `session/prompt /compact` at idle boundaries "with descriptor usage-drop and prompt-response completion detection", so the daemon infers it from a usage drop instead of reading a boundary line. Whether agy reports its own automatic compaction at all is unverified.
 - Alternative a: record the inferred compaction as the cut, with `meta.estimated: true` on the compaction event, so the UI can label it.
 - Alternative b: record no cut for agy; every event stays `model_seen: true` (cut at conversation start), and the compaction is stored as a plain `system` event.
@@ -106,7 +106,7 @@ Last ID: (1346)
 
 ### Phase 1: Capture tap, Claude adapter and ring call ID
 
-After (1342) is answered and the envelope child has landed: implement the
+After (1732) is answered and the envelope child has landed: implement the
 settled capture tap, the Claude stream-json adapter for every kind the policy
 admits (thinking, hooks, reminders, the compaction summary and subagent lines
 included), the Claude `compact_boundary` cut, and the ring call ID (601) for
@@ -115,7 +115,7 @@ enough to verify; persistence is child 3.
 
 Verification: unit tests over recorded Claude stream-json fixtures, one per
 kind, including a line the holder's `RingSkip` matches (it is captured per
-(1342)); a ring test that a Claude tools row's calls carry the same IDs as
+(1732)); a ring test that a Claude tools row's calls carry the same IDs as
 the captured `tool_call` events, and an older ring entry without IDs still
 reads; a slow or failing sink never delays line delivery.
 
@@ -131,7 +131,7 @@ call ID parity as in Phase 1.
 ### Phase 3: agy adapter
 
 Depends on Phase 2. Map the agy ACP stream onto the envelope, including
-thought chunks per (1340)/(1342), the compaction handling settled by (1346),
+thought chunks per (1730)/(1732), the compaction handling settled by (1736),
 and the ring call ID where agy carries a tool-call ID.
 
 Verification: per-kind fixtures, including a thought chunk and a

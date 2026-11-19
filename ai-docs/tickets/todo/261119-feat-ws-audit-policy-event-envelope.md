@@ -32,7 +32,7 @@ Verified findings (codex.large read-only research, 2026-11-19):
 1. **The daemon owns the audit record ((545)=a, 2026-11-14).** The daemon
    keeps tool inputs/outputs and hidden harness events in its own store, not
    in the harness's own transcript file. The capture breadth is re-asked as
-   (1340), given the 2026-11-19 findings. (545)=a stands until then.
+   (1730), given the 2026-11-19 findings. (545)=a stands until then.
 2. **Capture is what the harness JSON stream delivers, through one
    harness-neutral schema ((546)=a).** No API proxy to capture the system
    prompt. Every harness maps onto the same kinds. Rejected: per-harness
@@ -43,7 +43,7 @@ Verified findings (codex.large read-only research, 2026-11-19):
    `{v, id, seq, session, at, harness, kind, subkind?, turn?, call_id?,
    parent_id?, agent_id?, model_seen, in?, out?, meta?, raw?, redactions?}`.
    - `session` is new relative to (595). The old design implied the session
-     from a per-session directory. The store layout is now open (1345), so
+     from a per-session directory. The store layout is now open (1735), so
      the record names its session explicitly (the session's reply ID).
    - `kind` is one of `user`, `assistant_text`, `thinking`, `tool_call`,
      `tool_result`, `hook`, `system_reminder`, `system`, `compaction`
@@ -69,20 +69,20 @@ Verified findings (codex.large read-only research, 2026-11-19):
    event false and records itself as the cut. Without a boundary, the cut is
    the conversation start. Rejected: a token-count estimate, which the stream
    does not give reliably. The per-harness boundary sources and the agy case
-   (1346) belong to child 2.
+   (1736) belong to child 2.
 
 ## Open Decision Queue
 
-Last ID: (1341)
+Last ID: (1731)
 
-(1340) [open] [policy] What the audit captures: tool calls only, tool calls plus hidden harness events, or every raw stream line.
-- Context: (545)=a (2026-11-14) asked for every tool input/output and every hidden event (hooks, reminders, thinking, the compaction summary, system events, subagent traffic), and the approved mockup v2 shows hidden-event rows with kind chips. The 2026-11-19 research found Claude tool-input/thinking deltas and agy thought chunks are dropped by the holder before the daemon (`wsagent/holder.go:139-141,228-246`), so hidden events need the pre-filter capture point (1342) and add volume.
+(1730) [open] [policy] What the audit captures: tool calls only, tool calls plus hidden harness events, or every raw stream line.
+- Context: (545)=a (2026-11-14) asked for every tool input/output and every hidden event (hooks, reminders, thinking, the compaction summary, system events, subagent traffic), and the approved mockup v2 shows hidden-event rows with kind chips. The 2026-11-19 research found Claude tool-input/thinking deltas and agy thought chunks are dropped by the holder before the daemon (`wsagent/holder.go:139-141,228-246`), so hidden events need the pre-filter capture point (1732) and add volume.
 - Alternative a: tool calls only (`tool_call`, `tool_result`, with linkage). Smallest store, no pre-filter tap needed for content the mapper already sees; the mockup's hidden-event rows and chips (child 5 Phase 2) lose their data.
 - Alternative b: tool calls plus hidden events as assembled envelopes (thinking, hooks, reminders, compaction summary, system, subagent), `raw` kept only for `other`. Matches (545)=a and the mockup.
 - Alternative c: every raw stream line verbatim, plus the mapped envelopes. Most complete; stores partial delta fragments whose content an assembled event may already carry (per-harness, unverified), at the highest volume and redaction surface.
 > Recommend b: it is what (545)=a and the approved mockup already assume, and c's extra bytes are mostly stream fragments with the largest secret surface; a would strand child 5's Phase 2.
 
-(1341) [open] [policy] Which sessions are audited.
+(1731) [open] [policy] Which sessions are audited.
 - Context: all four hosted harnesses share the `wsagent` path. The parent epic is hosted-first ((01)=a) and freezes the Claude CLI plugin ((04)=a: keep current features, add none). Subagent traffic was previously in scope as the `subagent` kind, and daemon-owned `ws/agent.*` children are hosted sessions of their own.
 - Alternative a: hosted lead sessions only.
 - Alternative b: every daemon-hosted session (leads and `ws/agent.*` children).
@@ -104,7 +104,7 @@ Last ID: (1341)
 
 ### Phase 1: Envelope type, kinds and capture policy gate
 
-After (1340) and (1341) are answered: define the envelope (Decision 4) with
+After (1730) and (1731) are answered: define the envelope (Decision 4) with
 its schema version and kind set, the model-seen cut rule (Decision 5) as a
 pure function over an event sequence, and one policy gate that answers
 "capture this event for this session?" from the settled scope and session
