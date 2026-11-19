@@ -551,7 +551,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "9091c57d68d03c76",
         "track": "track/agent-v2",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-19T08:51:07Z",
         "impl": {
           "branch": "impl/track/agent-v2/spied-net-oil"
