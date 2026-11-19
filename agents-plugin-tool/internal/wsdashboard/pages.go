@@ -35,7 +35,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard-*.css assets/dashboard.js assets/dashboard-*.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/tracker-*.js assets/mention.js assets/capsules.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js assets/webcard.js assets/webframe.js assets/webinject.js assets/overview.js assets/brand/werkschaft-dark.svg assets/brand/werkschaft-light.svg
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard-*.css assets/dashboard.js assets/dashboard-*.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/tracker-*.js assets/mention.js assets/capsules.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/gallery.js assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js assets/webcard.js assets/webframe.js assets/webinject.js assets/overview.js assets/brand/werkschaft-dark.svg assets/brand/werkschaft-light.svg
 var dashboardFS embed.FS
 
 // These are ordered source fragments, not independently loaded scripts or
@@ -214,6 +214,8 @@ type pageAssetsData struct {
 	// shell-frame message shapes, which the shell and its frames both load.
 	ShellScript template.JS
 	// CardsScript is the board card framework (cards.js, window.WsCards),
+	// led by its paged docking gallery's pure model (gallery.js,
+	// window.WsGallery),
 	// PreviewScript its file preview kind (preview.js, window.WsPreview),
 	// and FilesScript the conversation column's file explorer (files.js,
 	// window.WsFiles); LucideSprite holds the vendored icons they draw
@@ -318,7 +320,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		UsageScript:      template.JS(get("usage.js")),
 		ShellScript:      template.JS(get("shell.js")),
 		OverviewScript:   template.JS(get("overview.js")),
-		CardsScript:      template.JS(get("cards.js")),
+		CardsScript:      template.JS(get("gallery.js") + "\n;\n" + get("cards.js")),
 		PreviewScript:    template.JS(get("preview.js")),
 		FilesScript:      template.JS(get("files.js")),
 		TerminalScript:   template.JS(get("terminal.js")),
