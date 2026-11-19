@@ -69,21 +69,30 @@ func TestCompactionAdvisoryOptOutKeepsHardThreshold(t *testing.T) {
 
 func TestCompactionDescriptors(t *testing.T) {
 	for _, tc := range []struct {
-		h                     string
-		p                     CompactionProtocol
-		lead, worker, signals bool
-	}{{BackendClaude, ClaudeCatalog().Compaction, true, false, true}, {BackendPi, *PiCompaction(), true, true, true}, {BackendCodex, CodexCatalog().Compaction, true, true, false}, {BackendAgy, AgyCatalog().Compaction, true, true, false}} {
+		h                              string
+		p                              CompactionProtocol
+		lead, worker, signals, detects bool
+	}{
+		{BackendClaude, ClaudeCatalog().Compaction, true, false, true, true},
+		{BackendPi, *PiCompaction(), true, true, true, true},
+		{BackendCodex, CodexCatalog().Compaction, true, true, false, false},
+		{BackendAgy, AgyCatalog().Compaction, true, true, false, true},
+	} {
 		t.Run(tc.h, func(t *testing.T) {
-			if tc.p.LeadCommand != tc.lead || tc.p.WorkerCommand != tc.worker || tc.p.Lifecycle != tc.signals {
+			if tc.p.LeadCommand != tc.lead || tc.p.WorkerCommand != tc.worker || tc.p.Lifecycle != tc.signals || tc.p.DetectsLifecycle() != tc.detects {
 				t.Fatal(tc.p)
 			}
-			if tc.signals && !tc.p.PromptPersists {
+			if tc.detects && !tc.p.PromptPersists {
 				t.Fatal("verified appended prompt must survive")
 			}
 			if tc.p.LegacyKey("compaction.worker_advisory") != "" || tc.p.LegacyKey("compaction.worker_hard") != "" {
 				t.Fatal("lead legacy mapped to worker")
 			}
 		})
+	}
+	agy := AgyCatalog().Compaction
+	if agy.UsageDropRatio != 0.85 || agy.UsageDropMinDelta != 2000 || !agy.CommandEndConfirms {
+		t.Fatalf("unexpected agy compaction descriptor: %+v", agy)
 	}
 }
 
@@ -586,8 +595,9 @@ func TestCompactionNudgesAndMidTurnAutoDoNotStartContinueTurn(t *testing.T) {
 		wantCompact bool
 	}{
 		{"claude-advisory", BackendClaude, ClaudeCatalog(), 60000, true},
-		{"agy-advisory", BackendAgy, AgyCatalog(), 60000, false},
-		{"agy-hard-fallback", BackendAgy, AgyCatalog(), 90000, false},
+		{"agy-advisory", BackendAgy, AgyCatalog(), 60000, true},
+		{"codex-advisory", BackendCodex, CodexCatalog(), 60000, false},
+		{"codex-hard-fallback", BackendCodex, CodexCatalog(), 90000, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := NewRunner(Options{Backends: map[string]BackendRegistration{tc.backend: {Catalog: tc.catalog}}})
@@ -809,5 +819,246 @@ func TestCompactionBeginTurnPreservesHeldReportOnCompactFailure(t *testing.T) {
 	reps := got.list()
 	if len(reps) != 1 || reps[0].Result.Status != TurnDone || reps[0].Result.Message != "turn-1-work" {
 		t.Fatalf("unexpected parent reports after failed compaction: %+v", reps)
+	}
+}
+
+func agyUsageLine(used, size int64) string {
+	return fmt.Sprintf(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"usage_update","used":%d,"size":%d}}}`, used, size)
+}
+
+func agyPromptDoneLine(id string) string {
+	return fmt.Sprintf(`{"jsonrpc":"2.0","id":%q,"result":{"stopReason":"end_turn"}}`, id)
+}
+
+func TestCompactionAgyCommandAndPromptResponse(t *testing.T) {
+	t.Run("prompt-response-ends-badge-and-resumes-without-double-trigger", func(t *testing.T) {
+		h, f := newAgyLeadHarness(t)
+		manual := &leadManualRender{text: "FULL LEAD MANUAL MUST NOT REAPPEAR"}
+		h.opts.LeadManual = manual.render
+		h.startAt("http://127.0.0.1:1")
+		id := h.lead(BackendAgy, LeadOptions{}).ID
+		f.replyID = id
+		key := h.record(id).WSKey
+
+		h.send(id, "hello")
+		holder := h.holder(id)
+		eventually(t, "turn 1 prompt", func() bool { return len(agyPromptIDs(h, holder)) == 1 })
+		h.holders.out(holder,
+			agyUsageLine(0, 1048576),
+			agyUsageLine(14845, 1048576),
+			agyPromptDoneLine(agyPromptIDs(h, holder)[0]),
+		)
+		h.idle(id)
+
+		// Explicit self ws/compact (default resume:true) is accepted and sends /compact over ACP.
+		if res := h.runner.Compact(key, "", nil); res.Status != "queued" {
+			t.Fatalf("ws/compact on agy = %+v, want queued", res)
+		}
+		eventually(t, "agy /compact prompt sent", func() bool { return len(agyPromptIDs(h, holder)) == 2 })
+		prompts := h.holders.acpInputs(holder, "session/prompt")
+		if len(prompts) != 2 || !strings.Contains(string(prompts[1]), `"/compact"`) {
+			t.Fatalf("expected /compact ACP prompt: %s", prompts)
+		}
+		// Badge shows compacting while /compact is in flight.
+		c := h.runner.conv(id)
+		eventually(t, "compacting badge shown", func() bool {
+			return h.snapshot(id).Lead.Phase == wslive.PhaseCompacting
+		})
+
+		// Measured agy 1.5.12 sequence: usage_update rises during /compact, then stopReason:end_turn.
+		h.holders.out(holder,
+			agyUsageLine(16352, 1048576),
+			agyPromptDoneLine(agyPromptIDs(h, holder)[1]),
+		)
+		eventually(t, "resumed continue turn sent with short restore note", func() bool {
+			return len(agyPromptIDs(h, holder)) == 3
+		})
+		prompts = h.holders.acpInputs(holder, "session/prompt")
+		resumed := string(prompts[2])
+		if !strings.Contains(resumed, key) || !strings.Contains(resumed, "Context was compacted") || !strings.Contains(resumed, "Continue the work") {
+			t.Fatalf("resumed turn missing short restore note: %s", resumed)
+		}
+		if strings.Contains(resumed, "FULL LEAD MANUAL MUST NOT REAPPEAR") {
+			t.Fatalf("PromptPersists=true agy leaked full manual: %s", resumed)
+		}
+		if phase := h.snapshot(id).Lead.Phase; phase == wslive.PhaseCompacting {
+			t.Fatalf("compacting badge stayed active after prompt response")
+		}
+
+		// Turn 3 reports the post-compaction drop (16352 -> 11149): must NOT emit a second CompactEnd or restore note.
+		h.holders.out(holder,
+			agyUsageLine(11149, 1048576),
+			agyPromptDoneLine(agyPromptIDs(h, holder)[2]),
+		)
+		h.idle(id)
+		compacts := 0
+		for _, entry := range h.ring(id) {
+			if entry.Kind == wslive.RingCompact && !entry.CompactFailed {
+				compacts++
+			}
+		}
+		if compacts != 1 {
+			t.Fatalf("expected exactly 1 RingCompact, got %d: %+v", compacts, h.ring(id))
+		}
+		c.do(func() {
+			if c.compactNote != "" {
+				t.Fatalf("post-compaction drop queued duplicate restore note: %q", c.compactNote)
+			}
+		})
+	})
+
+	t.Run("usage-drop-during-compact-clears-badge-before-response", func(t *testing.T) {
+		h, f := newAgyLeadHarness(t)
+		h.startAt("http://127.0.0.1:1")
+		id := h.lead(BackendAgy, LeadOptions{}).ID
+		f.replyID = id
+		key := h.record(id).WSKey
+
+		h.send(id, "hello")
+		holder := h.holder(id)
+		eventually(t, "turn 1 prompt", func() bool { return len(agyPromptIDs(h, holder)) == 1 })
+		h.holders.out(holder, agyUsageLine(50000, 1048576), agyPromptDoneLine(agyPromptIDs(h, holder)[0]))
+		h.idle(id)
+
+		resume := false
+		if res := h.runner.Compact(key, "", &resume); res.Status != "queued" {
+			t.Fatal(res)
+		}
+		eventually(t, "agy /compact prompt sent", func() bool { return len(agyPromptIDs(h, holder)) == 2 })
+		// Drop arrives BEFORE the prompt response: badge clears immediately on drop.
+		h.holders.out(holder, agyUsageLine(15000, 1048576))
+		eventually(t, "badge cleared on usage drop before response", func() bool {
+			return h.snapshot(id).Lead.Phase != wslive.PhaseCompacting
+		})
+		// Prompt response finishes the command without emitting a second CompactEnd.
+		h.holders.out(holder, agyPromptDoneLine(agyPromptIDs(h, holder)[1]))
+		h.idle(id)
+		compacts := 0
+		for _, entry := range h.ring(id) {
+			if entry.Kind == wslive.RingCompact && !entry.CompactFailed {
+				compacts++
+			}
+		}
+		if compacts != 1 {
+			t.Fatalf("drop + response emitted %d RingCompact entries, want 1", compacts)
+		}
+	})
+
+	t.Run("cancelled-compact-settles-as-failed", func(t *testing.T) {
+		h, f := newAgyLeadHarness(t)
+		h.startAt("http://127.0.0.1:1")
+		id := h.lead(BackendAgy, LeadOptions{}).ID
+		f.replyID = id
+		key := h.record(id).WSKey
+
+		h.send(id, "hello")
+		holder := h.holder(id)
+		eventually(t, "turn 1 prompt", func() bool { return len(agyPromptIDs(h, holder)) == 1 })
+		h.holders.out(holder, agyUsageLine(20000, 1048576), agyPromptDoneLine(agyPromptIDs(h, holder)[0]))
+		h.idle(id)
+
+		if res := h.runner.Compact(key, "", nil); res.Status != "queued" {
+			t.Fatal(res)
+		}
+		eventually(t, "agy /compact prompt sent", func() bool { return len(agyPromptIDs(h, holder)) == 2 })
+		h.holders.out(holder, fmt.Sprintf(`{"jsonrpc":"2.0","id":%q,"result":{"stopReason":"cancelled"}}`, agyPromptIDs(h, holder)[1]))
+		eventually(t, "compacting badge cleared after cancelled /compact", func() bool {
+			return h.snapshot(id).Lead.Phase != wslive.PhaseCompacting
+		})
+		h.idle(id)
+
+		if got := len(agyPromptIDs(h, holder)); got != 2 {
+			t.Fatalf("cancelled /compact started resume turn: %d prompts", got)
+		}
+		failed, succeeded := 0, 0
+		for _, entry := range h.ring(id) {
+			if entry.Kind == wslive.RingCompact {
+				if entry.CompactFailed {
+					failed++
+				} else {
+					succeeded++
+				}
+			}
+		}
+		if failed != 1 || succeeded != 0 {
+			t.Fatalf("cancelled /compact ring counts failed=%d succeeded=%d: %+v", failed, succeeded, h.ring(id))
+		}
+		c := h.runner.conv(id)
+		c.do(func() {
+			if c.compactNote != "" {
+				t.Fatalf("cancelled /compact queued restore note: %q", c.compactNote)
+			}
+		})
+	})
+}
+
+func TestCompactionAgyUsageDropAutoDetection(t *testing.T) {
+	h, f := newAgyLeadHarness(t)
+	h.startAt("http://127.0.0.1:1")
+	id := h.lead(BackendAgy, LeadOptions{}).ID
+	f.replyID = id
+	key := h.record(id).WSKey
+
+	h.send(id, "turn-1")
+	holder := h.holder(id)
+	eventually(t, "turn 1 prompt", func() bool { return len(agyPromptIDs(h, holder)) == 1 })
+	// Session-start 0, normal growth, small fluctuations (-2%, -10%), tiny absolute drop (-1200),
+	// and model-switch window change (1048576 -> 131072 -> 1048576) must NOT trigger compaction.
+	h.holders.out(holder,
+		agyUsageLine(0, 1048576),
+		agyUsageLine(34092, 1048576),
+		agyUsageLine(33416, 1048576),
+		agyUsageLine(50000, 1048576),
+		agyUsageLine(45000, 1048576),
+		agyUsageLine(36200, 131072),
+		agyUsageLine(24887, 131072),
+		agyUsageLine(24887, 1048576),
+		agyUsageLine(5000, 1048576),
+		agyUsageLine(3800, 1048576),
+		agyPromptDoneLine(agyPromptIDs(h, holder)[0]),
+	)
+	h.idle(id)
+	c := h.runner.conv(id)
+	c.do(func() {
+		if c.compactNote != "" {
+			t.Fatalf("fluctuation or model switch triggered restore note: %q", c.compactNote)
+		}
+	})
+	for _, entry := range h.ring(id) {
+		if entry.Kind == wslive.RingCompact {
+			t.Fatalf("fluctuation or model switch published RingCompact: %+v", entry)
+		}
+	}
+
+	// Sharp same-window drop (100,000 -> 30,000) triggers CompactEnd once and queues short restore note.
+	h.send(id, "turn-2")
+	eventually(t, "turn 2 prompt", func() bool { return len(agyPromptIDs(h, holder)) == 2 })
+	h.holders.out(holder,
+		agyUsageLine(100000, 1048576),
+		agyUsageLine(30000, 1048576),
+		agyUsageLine(29500, 1048576),
+		agyPromptDoneLine(agyPromptIDs(h, holder)[1]),
+	)
+	h.idle(id)
+
+	// Auto-compaction must NOT start an unsolicited continue turn.
+	if got := len(agyPromptIDs(h, holder)); got != 2 {
+		t.Fatalf("auto-compaction started unsolicited turn: %d prompts", got)
+	}
+	compacts := 0
+	for _, entry := range h.ring(id) {
+		if entry.Kind == wslive.RingCompact && !entry.CompactFailed && entry.Trigger == wslive.TriggerAuto {
+			compacts++
+		}
+	}
+	if compacts != 1 {
+		t.Fatalf("expected 1 auto RingCompact, got %d: %+v", compacts, h.ring(id))
+	}
+	// Next real turn carries the short restore note once.
+	h.send(id, "turn-3")
+	eventually(t, "turn 3 prompt", func() bool { return len(agyPromptIDs(h, holder)) == 3 })
+	prompts := h.holders.acpInputs(holder, "session/prompt")
+	if got := string(prompts[2]); !strings.Contains(got, key) || !strings.Contains(got, "Context was compacted") || !strings.Contains(got, "turn-3") {
+		t.Fatalf("next turn missing restore note: %s", got)
 	}
 }

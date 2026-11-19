@@ -19,9 +19,13 @@ import (
 // which a harness that reads a message starting with a slash as a command
 // runs as one.
 func (c *conv) runCommand(cmd wsinbox.Command) error {
-	isCompact := cmd.Name == "compact" && c.r.opts.Backends[c.rec.Backend].CompactionProtocol().Lifecycle
+	p := c.r.opts.Backends[c.rec.Backend].CompactionProtocol()
+	isCompact := cmd.Name == "compact" && p.DetectsLifecycle()
 	if isCompact && !c.compacting {
 		c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactStart})
+		if p.CommandEndConfirms {
+			c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactStart, Trigger: wslive.TriggerManual})
+		}
 	}
 	err := controlsFor(c.proc).runCommand(cmd)
 	if err == nil && isCompact {

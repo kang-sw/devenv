@@ -62,8 +62,11 @@ func (c *conv) handle(ev Event) {
 			c.compactEvent(*ev.Live)
 		}
 		c.apply(*ev.Live, quiet)
-		if !quiet && ev.Live.Kind == wslive.KindStatus && c.canKick() {
-			c.compactIdle()
+		if !quiet && ev.Live.Kind == wslive.KindStatus {
+			c.checkUsageDropCompaction(*ev.Live)
+			if c.canKick() {
+				c.compactIdle()
+			}
 		}
 		if !quiet && ev.Live.Kind == wslive.KindCompact && ev.Live.Phase != wslive.CompactStart {
 			if !c.compactCommand {
@@ -267,8 +270,14 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 		c.stopCompactWatchdog()
 	}
 	if !quiet && c.compacting {
-		c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
-		c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed, Text: turnErr})
+		p := c.r.opts.Backends[c.rec.Backend].CompactionProtocol()
+		if turnErr == "" && c.summaryReason != wslive.TurnAborted && p.CommandEndConfirms && (compactCommand || c.turn) {
+			c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd})
+			c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd, Trigger: wslive.TriggerManual})
+		} else {
+			c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
+			c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed, Text: turnErr})
+		}
 	}
 	if c.wrapHold && !c.rec.Lead && c.rec.Parent != nil && !quiet {
 		// A gap while streaming is reconciled at agent_settled, not left
