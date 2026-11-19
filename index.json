@@ -530,6 +530,9 @@
     "261119-feat-ws-audit-policy-event-envelope": {
       "registered_at": "2026-11-19T14:04:26Z"
     },
+    "261119-feat-ws-audit-sqlite-store": {
+      "registered_at": "2026-11-19T14:04:38Z"
+    },
     "261119-feat-ws-codex-hosted-worker": {
       "registered_at": "2026-11-19T02:37:47Z",
       "lease": {
