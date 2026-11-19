@@ -78,6 +78,9 @@ func TestConversationBoardNudgeWakeFallback(t *testing.T) {
 		{"peer sender", func(e *wslive.RingEntry) { e.Text = strings.Replace(e.Text, "from unknown", "from peer@machine", 1) }},
 		{"nonempty peer", func(e *wslive.RingEntry) { e.Peer = "peer@machine" }},
 		{"invalid timestamp", func(e *wslive.RingEntry) { e.Text = strings.Replace(e.Text, "2026-11-15T06:55:49Z", "invalid", 1) }},
+		{"invalid system timestamp", func(e *wslive.RingEntry) {
+			e.Text = strings.ReplaceAll(strings.Replace(e.Text, "from unknown", "from system", 1), "2026-11-15T06:55:49Z", "invalid")
+		}},
 		{"zero messages", func(e *wslive.RingEntry) { e.Text = strings.Replace(e.Text, "1 message(s)", "0 message(s)", 1) }},
 		{"overflow count", func(e *wslive.RingEntry) {
 			e.Text = strings.Replace(e.Text, "1 message(s)", "999999999999999999999999 message(s)", 1)
@@ -118,6 +121,9 @@ func TestConversationBoardNudgeWakeEnvelopeVariants(t *testing.T) {
 		strings.Replace(boardNudgeEnvelope, "1 message(s)", "12 message(s)", 1),
 		"mail from unknown (2026-11-15T06:55:49Z):\n",
 		"mail from unknown:\n",
+		strings.Replace(boardNudgeEnvelope, "from unknown", "from system", 1),
+		"mail from system (2026-11-15T06:55:49Z):\n",
+		"mail from system:\n",
 	} {
 		e := ConvEntry{RingEntry: wslive.RingEntry{Kind: wslive.RingWake, Cause: "mail", Text: prefix + body}}
 		if got := e.BoardNudgeSummary(); got != "Board nudge · Unblocked: One" {

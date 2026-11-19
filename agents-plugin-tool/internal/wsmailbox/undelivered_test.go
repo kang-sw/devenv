@@ -61,7 +61,7 @@ func TestSweepUndelivered(t *testing.T) {
 					t.Fatalf("original mail changed or system mail marked: %+v", queue)
 				}
 				notices := readSweepQueue(t, p, destination, destination == reply, destName)
-				if len(notices) != 1 || notices[0].From != "" || notices[0].ReplyTo != "" {
+				if len(notices) != 1 || notices[0].From != "" || notices[0].ReplyTo != "" || notices[0].Label != SystemLabel {
 					t.Fatalf("notices: %+v", notices)
 				}
 				text := notices[0].Content

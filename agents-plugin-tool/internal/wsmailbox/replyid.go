@@ -155,10 +155,12 @@ func emptyReplyStore() ReplyStore {
 	return ReplyStore{SchemaVersion: schemaVersion, Entries: map[string]ReplyEntry{}, Queues: map[string][]Envelope{}}
 }
 
-// postSystem is also used by the sweep while it already holds the destination
-// store's lock; calling PostSystem there would try to acquire that lock twice.
+// SystemLabel identifies daemon-originated mail without providing a reply address.
+const SystemLabel = "system"
+
+// postSystem appends within an existing store transaction.
 func postSystem(queues map[string][]Envelope, name, content string, sentAt time.Time) map[string][]Envelope {
-	return AppendQueue(queues, name, Envelope{Content: content, SentAt: sentAt.UTC().Format(time.RFC3339)})
+	return AppendQueue(queues, name, Envelope{Label: SystemLabel, Content: content, SentAt: sentAt.UTC().Format(time.RFC3339)})
 }
 
 // WithReplyFileLock performs an flock-serialized read-modify-write on the

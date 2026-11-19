@@ -406,7 +406,7 @@ func (d *Daemon) notifyHire(p *HireProposal) error {
 	text += "\nRecovery context:\n" + p.RecoveryContext
 	// Mail append and the proposal's Notified checkpoint are separate writes:
 	// a crash between them can resend this correlated request-id outcome.
-	if err := store.PostSystem(p.Requester, "", text, d.hireClock()); err != nil {
+	if err := store.PostSystem(p.Requester, wsmailbox.SystemLabel, text, d.hireClock()); err != nil {
 		return err
 	}
 	if d.mailWake != nil {

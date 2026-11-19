@@ -54,7 +54,10 @@
     "ticket-selector/ticket-selector.md": "e547c5031d733a6546a99fb139cd11d9db3e80744cdc39787be961187993d9fd",
     "ticket-worker-elevated/ticket-worker-elevated.md": "8f5b8c4c1d3c7305b507d61f5d01431080df7108379dc673e1f883bc307b26d3",
     "ticket-worker/ticket-worker.md": "8764420ae7acc6e1fa2cee1e385a1493225207d68179ca1fa9ee6332a4c4ff44",
-    "tracker/tracker.md": "5bcd627f9630252ba25e5b6c3a604490db2bc92c97eb9d93bb997ec9b12bad4f",
+    "tracker-admin/tracker-admin.md": "37861d7023be09dbdcc8c65753fcdf4761be48c3f90c2ea3fb71cce0606b9721",
+    "tracker-assign/tracker-assign.md": "9f656310f3307bae61fd1a0cbedce9b2260eec23d61c33889e4cd7196788dbb6",
+    "tracker-hooks/tracker-hooks.md": "bf4b3fe5eb5c3ab532ba3398af9e181b300ac3ee04130acb6b8ac700f539310f",
+    "tracker/tracker.md": "5860dae79f27761fb517b809e646f53262f632055580389ce52cf394f51f5150",
     "whiteboard/whiteboard.md": "449a7f5ab353735b4087b3d4e2c70f473b4e6f6ef0b72ff88c6d1370ec124019",
     "worker-stop-protocol.md": "7870e882ebe7d0938b15fb0643369c77c947d1919293ae5e125855ce86200e2d"
   }

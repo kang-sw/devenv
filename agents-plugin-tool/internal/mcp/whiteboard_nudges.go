@@ -421,7 +421,7 @@ func (n *WhiteboardNudges) process(t nudgeTarget, now time.Time) time.Time {
 		tickets = n.tickets(t.root)
 	}
 	next, err := whiteboardFolder(t.root, t.key).Notify(wsmailbox.ReplyID(t.key), now, gate, func(message string) error {
-		return store.PostSystem(wsmailbox.ReplyID(t.key), "", message, now)
+		return store.PostSystem(wsmailbox.ReplyID(t.key), wsmailbox.SystemLabel, message, now)
 	}, wswake.Mailbox.Wake, tickets)
 	if err != nil {
 		fmt.Fprintf(n.log, "whiteboard nudges: %s: %v\n", wsmailbox.ReplyID(t.key), err)

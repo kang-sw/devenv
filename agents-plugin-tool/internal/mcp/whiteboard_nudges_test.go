@@ -348,7 +348,7 @@ func TestWhiteboardNudgeActualMailboxWatchDrainAndManualRecv(t *testing.T) {
 			f.n.process(f.target, nudgeNow.Add(2*time.Hour))
 			select {
 			case texts := <-received:
-				if len(texts) != 1 || !strings.Contains(texts[0], "Whiteboard lead nudge (overdue, hourly)") || !strings.Contains(texts[0], "Work; owner executor") {
+				if len(texts) != 1 || !strings.Contains(texts[0], "mail from system") || !strings.Contains(texts[0], "Whiteboard lead nudge (overdue, hourly)") || !strings.Contains(texts[0], "Work; owner executor") {
 					t.Fatalf("lead input %q", texts)
 				}
 			case <-time.After(5 * time.Second):
@@ -373,7 +373,7 @@ func TestWhiteboardNudgeActualMailboxWatchDrainAndManualRecv(t *testing.T) {
 	s := NewServer(f.target.root, "test")
 	defer s.Close()
 	text := toolText(t, callToolOnce(t, s, 1, "mailbox.recv", map[string]any{"session_key": f.target.key}))
-	if !strings.Contains(text, "Whiteboard lead nudge") || len(f.queue(t)) != 0 {
+	if !strings.Contains(text, "Whiteboard lead nudge") || !strings.Contains(text, "system: Whiteboard lead nudge") || len(f.queue(t)) != 0 {
 		t.Fatal("manual recv", text)
 	}
 }

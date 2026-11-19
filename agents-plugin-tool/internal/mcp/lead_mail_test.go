@@ -55,6 +55,23 @@ func TestFormatMailBatchMatchesTheClaudeAdapterPrompt(t *testing.T) {
 	}
 }
 
+func TestSystemMailRoundTrip(t *testing.T) {
+	for _, label := range []string{wsmailbox.SystemLabel, ""} {
+		m := wsmailbox.Envelope{Label: label, Content: "notice", SentAt: "2026-01-02T03:04:05Z"}
+		handle := label
+		if handle == "" {
+			handle = "unknown"
+		}
+		text := "mail from " + handle + " (2026-01-02T03:04:05Z):\nnotice"
+		if got := formatMailEnvelope(m, ""); got != text {
+			t.Fatalf("format = %q, want %q", got, text)
+		}
+		if got := parseMailText(text); got != m {
+			t.Fatalf("parse = %+v, want %+v", got, m)
+		}
+	}
+}
+
 func TestPiMailLabelRoundTripsWithoutRecordingAContact(t *testing.T) {
 	setupMailboxTestEnv(t)
 	root := t.TempDir()

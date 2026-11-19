@@ -293,7 +293,9 @@ func parseMailText(text string) wsmailbox.Envelope {
 		stamp = whole.SentAt
 	}
 	m := wsmailbox.Envelope{Content: content, SentAt: stamp}
-	if handle != "unknown" {
+	if handle == wsmailbox.SystemLabel {
+		m.Label = handle
+	} else if handle != "unknown" {
 		if _, err := wsmailbox.ParseAddress(handle); err == nil {
 			m.From = handle
 		} else {

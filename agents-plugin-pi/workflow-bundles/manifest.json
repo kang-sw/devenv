@@ -1,6 +1,6 @@
 {
   "ws": {
-    "archive_sha256": "56227c91418c7fa688a90f6b130f2d8c47b2dd34278e4347c9c0028fda97db91",
+    "archive_sha256": "7b6403a73b2183ab2ad05729aaa6681ee4d1bd3c7f5805f621a3c2d874ce02e7",
     "files": {
       ".claude-plugin/plugin.json": "1f3039a3992df506dd123e5515578abafbbffbe1fdc634a511e519fc80a01651",
       ".codex-plugin/hooks.json": "e3f3ea60f82fb0795c63bf54b9208647f39cb3779f050d1c755fabdc8a434490",
@@ -67,7 +67,7 @@
       "rsrc/lead-workflow-manual/native-spawn-binding.claude.md": "fc7258226abd15ad2baef2ef8a361f6777d8390868a595853f61812def0cf310",
       "rsrc/lead-workflow-manual/native-spawn-binding.codex.md": "ea1977984de016a95df292c3384e93982aa67b12bbd5e8850c7ed792acbdf284",
       "rsrc/lead-workflow-manual/native-spawn-binding.md": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "rsrc/manifest.json": "e5042f2fc4748115dd5ecd0f27f3b67d5dd1d745ab6d448933cd139c4c9807dc",
+      "rsrc/manifest.json": "b80ec341e414ec08a1fdf3620b76418c61d68b340607902ff1eff5b05f4b330a",
       "rsrc/reference-discovery/reference-discovery.md": "4492f45ecff14ec454754cd9af4775b33a0df1f9cd5cf705b3f75bad75defba2",
       "rsrc/review-config/review-config.md": "dfbbf5be52c83cfb4f86edb862f8e7b135afcc7f5efb9433e808d08ac37ff53b",
       "rsrc/review-handler/review-handler.md": "485399d9c8e491a1c33c14338da768c1a61451d6a9b24042f41571ff5ee313f6",
@@ -87,7 +87,10 @@
       "rsrc/ticket-selector/ticket-selector.md": "e547c5031d733a6546a99fb139cd11d9db3e80744cdc39787be961187993d9fd",
       "rsrc/ticket-worker-elevated/ticket-worker-elevated.md": "8f5b8c4c1d3c7305b507d61f5d01431080df7108379dc673e1f883bc307b26d3",
       "rsrc/ticket-worker/ticket-worker.md": "8764420ae7acc6e1fa2cee1e385a1493225207d68179ca1fa9ee6332a4c4ff44",
-      "rsrc/tracker/tracker.md": "5bcd627f9630252ba25e5b6c3a604490db2bc92c97eb9d93bb997ec9b12bad4f",
+      "rsrc/tracker-admin/tracker-admin.md": "37861d7023be09dbdcc8c65753fcdf4761be48c3f90c2ea3fb71cce0606b9721",
+      "rsrc/tracker-assign/tracker-assign.md": "9f656310f3307bae61fd1a0cbedce9b2260eec23d61c33889e4cd7196788dbb6",
+      "rsrc/tracker-hooks/tracker-hooks.md": "bf4b3fe5eb5c3ab532ba3398af9e181b300ac3ee04130acb6b8ac700f539310f",
+      "rsrc/tracker/tracker.md": "5860dae79f27761fb517b809e646f53262f632055580389ce52cf394f51f5150",
       "rsrc/whiteboard/whiteboard.md": "449a7f5ab353735b4087b3d4e2c70f473b4e6f6ef0b72ff88c6d1370ec124019",
       "rsrc/worker-stop-protocol.md": "7870e882ebe7d0938b15fb0643369c77c947d1919293ae5e125855ce86200e2d",
       "runtime.json": "46fcbb84f29958e1656a2da3e37f1f23fe6fdbb4154f3735399977a3716a55dc",
@@ -110,7 +113,7 @@
     }
   },
   "wsflow": {
-    "archive_sha256": "718c00cdada5994928aebf83d479718bda16f1bf8416df938d3e97941c0f0ddc",
+    "archive_sha256": "7541671648a990a913f50a1992ff8abbc245ab8849b8c9f2b123bae7134516a1",
     "files": {
       ".claude-plugin/plugin.json": "ced5ef4b088015773a12d13b755d92acf2676160072fd8a4b5359d0b0bb0db53",
       ".codex-plugin/plugin.json": "ddaab57098d596ea3fe9a6dbc34dd51a8e2f7c0601bd21530a12676c51a0a745",
@@ -176,7 +179,7 @@
       "rsrc/lead-workflow-manual/native-spawn-binding.claude.md": "fc7258226abd15ad2baef2ef8a361f6777d8390868a595853f61812def0cf310",
       "rsrc/lead-workflow-manual/native-spawn-binding.codex.md": "ea1977984de016a95df292c3384e93982aa67b12bbd5e8850c7ed792acbdf284",
       "rsrc/lead-workflow-manual/native-spawn-binding.md": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "rsrc/manifest.json": "e5042f2fc4748115dd5ecd0f27f3b67d5dd1d745ab6d448933cd139c4c9807dc",
+      "rsrc/manifest.json": "b80ec341e414ec08a1fdf3620b76418c61d68b340607902ff1eff5b05f4b330a",
       "rsrc/reference-discovery/reference-discovery.md": "4492f45ecff14ec454754cd9af4775b33a0df1f9cd5cf705b3f75bad75defba2",
       "rsrc/review-config/review-config.md": "dfbbf5be52c83cfb4f86edb862f8e7b135afcc7f5efb9433e808d08ac37ff53b",
       "rsrc/review-handler/review-handler.md": "485399d9c8e491a1c33c14338da768c1a61451d6a9b24042f41571ff5ee313f6",
@@ -196,7 +199,10 @@
       "rsrc/ticket-selector/ticket-selector.md": "e547c5031d733a6546a99fb139cd11d9db3e80744cdc39787be961187993d9fd",
       "rsrc/ticket-worker-elevated/ticket-worker-elevated.md": "8f5b8c4c1d3c7305b507d61f5d01431080df7108379dc673e1f883bc307b26d3",
       "rsrc/ticket-worker/ticket-worker.md": "8764420ae7acc6e1fa2cee1e385a1493225207d68179ca1fa9ee6332a4c4ff44",
-      "rsrc/tracker/tracker.md": "5bcd627f9630252ba25e5b6c3a604490db2bc92c97eb9d93bb997ec9b12bad4f",
+      "rsrc/tracker-admin/tracker-admin.md": "37861d7023be09dbdcc8c65753fcdf4761be48c3f90c2ea3fb71cce0606b9721",
+      "rsrc/tracker-assign/tracker-assign.md": "9f656310f3307bae61fd1a0cbedce9b2260eec23d61c33889e4cd7196788dbb6",
+      "rsrc/tracker-hooks/tracker-hooks.md": "bf4b3fe5eb5c3ab532ba3398af9e181b300ac3ee04130acb6b8ac700f539310f",
+      "rsrc/tracker/tracker.md": "5860dae79f27761fb517b809e646f53262f632055580389ce52cf394f51f5150",
       "rsrc/whiteboard/whiteboard.md": "449a7f5ab353735b4087b3d4e2c70f473b4e6f6ef0b72ff88c6d1370ec124019",
       "rsrc/worker-stop-protocol.md": "7870e882ebe7d0938b15fb0643369c77c947d1919293ae5e125855ce86200e2d",
       "runtime.json": "c82d15689caf21924a02490658eaeb520a3fd0ed25fd0918e9b35ec0917838e2",
