@@ -15,6 +15,18 @@ const (
 func tools() []map[string]any {
 	toolList := []map[string]any{
 		{
+			"name":        "call",
+			"description": "Call a ws tool by name when it is missing from the client's tool list. No tool: list names. No arguments: show description and schema.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"tool":        stringProperty("Tool name (canonical or advertised alias)."),
+					"arguments":   objectProperty("Arguments to pass to the tool."),
+					"session_key": stringProperty("Your ws session key for list/schema authority."),
+				},
+			},
+		},
+		{
 			"name":        "runtime.read",
 			"description": "Return ws-mcp runtime metadata for compatibility checks.",
 			"inputSchema": map[string]any{

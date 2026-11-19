@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -34,6 +35,48 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// list showed; everything below sees the canonical name. It maps before
 	// the key rule, which reads the tool's schema by canonical name.
 	params.Name = s.connectionDescriptor().aliases.canonical(params.Name)
+	// call is only an envelope. Dispatch re-enters here with the inner name,
+	// arguments and metadata; no outer key or authority is inherited. Schema
+	// inspection uses the same gates below, but stops before argument checking.
+	schemaOnly := false
+	if params.Name == "call" {
+		if !s.toolAllowed("call") {
+			return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: call", s.runtimeNamespace()))
+		}
+		if refusal, ok := s.precheckToolArguments(params.Name, params.Arguments); !ok {
+			return toolErrorTextResponse(req.ID, refusal)
+		}
+		name, isString := params.Arguments["tool"].(string)
+		if raw := params.Arguments["tool"]; raw != nil && !isString {
+			return toolErrorTextResponse(req.ID, "call: tool must be a string")
+		}
+		if name != "" {
+			if s.connectionDescriptor().aliases.canonical(name) == "call" {
+				return toolErrorTextResponse(req.ID, "call cannot target itself")
+			}
+			if raw, present := params.Arguments["arguments"]; present {
+				arguments, ok := raw.(map[string]any)
+				if !ok {
+					return toolErrorTextResponse(req.ID, "call: arguments must be an object")
+				}
+				inner, err := json.Marshal(map[string]any{"name": name, "arguments": arguments, "_meta": params.Meta})
+				if err != nil {
+					return toolTextResponse(req.ID, "", err)
+				}
+				return s.callTool(ctx, request{ID: req.ID, Method: req.Method, Params: inner})
+			}
+			schemaOnly = true
+		}
+		// Discovery uses the envelope's key (or the hosted connection's),
+		// even when the inspected tool does not declare session_key.
+		if refusal := s.hostedSessionKeyRule("call", params.Arguments); refusal != "" {
+			return toolErrorTextResponse(req.ID, refusal)
+		}
+		if schemaOnly {
+			params.Name = s.connectionDescriptor().aliases.canonical(name)
+			params.Arguments = map[string]any{"session_key": params.Arguments["session_key"]}
+		}
+	}
 	// A hosted lead connection's session_key: omitted is the connection's
 	// own, and any key but its own or a descendant's is refused. It runs
 	// first, so everything below reads the key the call resolves to.
@@ -46,7 +89,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// The adapter-only intake and inbox drain are no model-facing replies, so
 	// they carry no badge and cost no mailbox read on their call rate.
 	if keyStr, ok := params.Arguments["session_key"].(string); ok && params.Name != dashboardIntakeTool && params.Name != dashboardInboxDrainTool {
-		jsonFormat := wantsJSON(params.Arguments)
+		// Discovery output must stay compact JSON or one name per line.
+		jsonFormat := schemaOnly || params.Name == "call" || wantsJSON(params.Arguments)
 		defer func() {
 			resp = s.applyMailboxPiggyback(resp, keyStr, jsonFormat)
 		}()
@@ -89,43 +133,28 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// (intakeSession), so its call rate reads no key.json; a removed key
 	// still passes here for up to intakeRecheck, for that tool only.
 	var sublead *subleadBoard
-	if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
+	var caller sessionEntry
+	var callerFound bool
+	callerKey, _ := params.Arguments["session_key"].(string)
+	if keyStr := callerKey; strings.TrimSpace(keyStr) != "" {
 		lookup := s.lookupSession
 		if params.Name == dashboardIntakeTool {
 			lookup = s.intakeSession
 		}
-		if entry, found := lookup(keyStr); found {
-			// pi.* and agent.* on a spawned agent's server are authorized
-			// by the runner's capability token, not the key (pi_forward.go).
-			piByToken := (isPiTool(params.Name) || isAgentTool(params.Name)) && s.piForwards()
-			if entry.scope != roleLead && !piByToken && (isLeadOnlyTool(params.Name) || !roleAllowsTool(entry.scope, params.Name)) {
-				return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", s.runtimeNamespace(), params.Name))
+		caller, callerFound = lookup(keyStr)
+		if entry := caller; callerFound {
+			var refusal string
+			sublead, refusal = s.sessionToolAccess(params.Name, keyStr, entry)
+			if refusal != "" {
+				return errorResponse(req.ID, -32601, refusal)
 			}
-			if isNoteMutationTool(params.Name) && !entry.isTopLevelLead() {
-				return errorResponse(req.ID, -32601, noteReadOnlyDenial(params.Name))
-			}
-			if params.Name == whiteboardLoadTool && !entry.isTopLevelLead() {
-				return errorResponse(req.ID, -32601, whiteboardLeadOnlyDenial(params.Name))
-			}
-			if isWhiteboardTool(params.Name) && !entry.isTopLevelLead() {
-				board, marked := s.subleadBoardFor(keyStr, entry)
-				if !marked {
-					return errorResponse(req.ID, -32601, whiteboardLeadOnlyDenial(params.Name))
-				}
-				sublead = &board
+			if sublead != nil {
 				onBoard := make(map[string]any, len(params.Arguments))
 				for name, value := range params.Arguments {
 					onBoard[name] = value
 				}
-				onBoard["session_key"] = board.boardKey
+				onBoard["session_key"] = sublead.boardKey
 				params.Arguments = onBoard
-			}
-			// A store's support conversation passes like a top-level lead for
-			// the tracker and wiki tools its profile names (its writes are
-			// pinned to its store in handleTrackerUpdate, and the wiki tools
-			// reach its store alone); tracker.show and tracker.ui are its own.
-			if (isTrackerTool(params.Name) || isWikiTool(params.Name) || params.Name == trackerShowTool || params.Name == trackerUITool) && !entry.isTopLevelLead() && !s.trackerSupportAdmits(keyStr, entry, params.Name) {
-				return errorResponse(req.ID, -32601, trackerLeadOnlyDenial(params.Name))
 			}
 			if entry.isTopLevelLead() {
 				// Registers the session on the dashboard, or keeps it off.
@@ -147,6 +176,20 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 
 	if testPanicHook != nil {
 		testPanicHook(params.Name)
+	}
+
+	if schemaOnly {
+		for _, tool := range s.callDiscoveryTools(callerKey, caller, callerFound) {
+			if s.connectionDescriptor().aliases.canonical(tool["name"].(string)) != params.Name {
+				continue
+			}
+			raw, err := json.Marshal(map[string]any{"description": tool["description"], "inputSchema": tool["inputSchema"]})
+			return toolTextResponse(req.ID, string(raw), err)
+		}
+		if toolInputSchema(params.Name) == nil {
+			return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
+		}
+		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", s.runtimeNamespace(), params.Name))
 	}
 
 	// Central argument precheck: refuse a call that misses a required
@@ -173,6 +216,13 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	}
 
 	switch params.Name {
+	case "call":
+		var names []string
+		for _, tool := range s.callDiscoveryTools(callerKey, caller, callerFound) {
+			names = append(names, tool["name"].(string))
+		}
+		sort.Strings(names)
+		return toolTextResponse(req.ID, strings.Join(names, "\n"), nil)
 	case "runtime.read":
 		info, err := runtimeInfo(s.version, s.sourceCommit)
 		if err != nil {

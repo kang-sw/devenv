@@ -36,6 +36,10 @@ type BackendRegistration struct {
 	// below); "" keeps the dotted names. Common code reads it through
 	// ApplyToolNameScheme and never names a backend.
 	ToolNameScheme string
+	// CallFallback exposes call and a tool index on hosted lead connections
+	// whose client may hide tools: agy drops definitions over 1,500 bytes
+	// including its 39-byte description prefix; other clients may cap count.
+	CallFallback bool
 	// ToolsAlwaysLoad marks this connection's listed tools as always loaded.
 	ToolsAlwaysLoad bool
 	// ManualHarness is the harness name the hosted lead's workflow manual

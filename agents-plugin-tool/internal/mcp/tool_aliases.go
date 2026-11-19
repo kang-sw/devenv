@@ -74,6 +74,7 @@ type connectionDescriptor struct {
 	aliases          *toolAliasTable
 	manualHarness    string
 	toolsAlwaysLoad  bool
+	callFallback     bool
 	playbookCommands bool
 	// leadRender marks the throwaway server of a daemon-side render for a
 	// hosted lead (hostedRenderServer): it serves no connection, but renders
@@ -120,6 +121,8 @@ func (s *Server) connectionDescriptor() connectionDescriptor {
 	}
 	s.descriptor.manualHarness = reg.ManualHarness
 	s.descriptor.toolsAlwaysLoad = reg.ToolsAlwaysLoad
+	// Workers keep their ordinary loadout; fallback is a hosted lead surface.
+	s.descriptor.callFallback = reg.CallFallback && !worker && rec.Lead
 	// Only the lead runs without ws's skills; a worker's text is rendered
 	// as before, whatever its profile keeps.
 	s.descriptor.playbookCommands = reg.PlaybookCommands && rec.Lead

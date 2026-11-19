@@ -133,6 +133,10 @@ func TestHostedWorkerOverHTTPSeesOnlyItsProfile(t *testing.T) {
 		t.Fatalf("a tool outside the profile is refused: %+v", r)
 	}
 
+	if r := call(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"call","arguments":{"tool":"tickets.query","arguments":{}}}}`); r.Error == nil || !strings.HasSuffix(r.Error.Message, ": call") {
+		t.Fatalf("a worker refuses call itself even for an allowed inner tool: %+v", r)
+	}
+
 	// The token goes void; it still resolves here, as a resolution that
 	// raced the void would, and the route refuses it and ends its session.
 	close(agents.void)

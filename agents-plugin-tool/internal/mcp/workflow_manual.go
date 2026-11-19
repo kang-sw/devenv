@@ -542,5 +542,33 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		}
 	}
 
+	if s.connectionDescriptor().callFallback && key != freshBootstrapKey {
+		entry := sessionEntry{root: rec.Root, scope: toolRole(rec.Scope), parent: rec.Parent}
+		body += "\n\n" + s.renderCallToolIndex(key, entry)
+	}
 	return toolTextResponse(id, workflowManualReadFullNotice+"\n\n"+body+"\n", nil)
+}
+
+// The index and call's list/schema discovery use the same authority-filtered
+// definitions. The manual already read this identity, so rendering adds no
+// identity-file lookup or hand-maintained inventory.
+func (s *Server) renderCallToolIndex(key string, entry sessionEntry) string {
+	definitions := s.callDiscoveryTools(key, entry, true)
+	sort.Slice(definitions, func(i, j int) bool {
+		return definitions[i]["name"].(string) < definitions[j]["name"].(string)
+	})
+	var b strings.Builder
+	b.WriteString("## Callable ws tools\n\n")
+	for _, tool := range definitions {
+		description := oneLine(tool["description"].(string))
+		for i, r := range description {
+			if strings.ContainsRune(".!?", r) && (i+1 == len(description) || description[i+1] == ' ') {
+				description = description[:i+1]
+				break
+			}
+		}
+		fmt.Fprintf(&b, "%s - %s\n", tool["name"], description)
+	}
+	b.WriteString("\nA ws tool named in this manual but missing from your tool list is reachable through `call(tool, arguments)`.\n")
+	return namespaceText(b.String(), s.runtimeNamespace())
 }

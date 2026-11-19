@@ -14,7 +14,7 @@ import (
 // serves it: name, description, and input schema, marshaled with Go's
 // encoding/json defaults (so <, >, and & cost six bytes each). agy adds a
 // 39 B description prefix and drops definitions over 1,500 B; 1,450 leaves
-// about 10 B of margin.
+// about 10 B of margin. This test limit is unrelated to CallFallback admission.
 const toolSchemaByteCap = 1450
 
 type listedToolSize struct {

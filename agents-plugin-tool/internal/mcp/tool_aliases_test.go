@@ -114,7 +114,7 @@ func descriptorRegistrations() map[string]wsagent.BackendRegistration {
 		wsagent.BackendClaude: {LeadProfile: wsagent.LeadProfileClaude, ManualHarness: "claude"},
 		wsagent.BackendPi:     {LeadProfile: wsagent.LeadProfilePi},
 		wsagent.BackendAgy: {LeadProfile: wsagent.LeadProfileAgy, PermissionModes: wsagent.AgyPermissionModes,
-			ToolNameScheme: wsagent.ToolNameSchemeSanitize, ToolsAlwaysLoad: true, ManualHarness: wsagent.BackendAgy, PlaybookCommands: true},
+			ToolNameScheme: wsagent.ToolNameSchemeSanitize, CallFallback: true, ToolsAlwaysLoad: true, ManualHarness: wsagent.BackendAgy, PlaybookCommands: true},
 	}
 }
 
@@ -284,14 +284,17 @@ func TestAgyWorkerConnectionSeesAliases(t *testing.T) {
 		t.Fatal(err)
 	}
 	listed := listedToolNames(t, s)
-	if !listed["git_status"] || !listed["agent_tiers"] || listed["git.status"] || listed["git_commit"] || listed["workflow_manual"] {
+	if !listed["git_status"] || !listed["agent_tiers"] || listed["git.status"] || listed["git_commit"] || listed["workflow_manual"] || listed["call"] {
 		t.Fatalf("worker's aliased allowlist: %v", listed)
 	}
 	if s.hostedSessionKey() != "" {
 		t.Fatal("a worker must not become a hosted lead")
 	}
-	if s.connectionDescriptor().playbookCommands {
-		t.Fatal("a worker's connection renders as before: only the lead runs without ws skills")
+	if s.connectionDescriptor().playbookCommands || s.connectionDescriptor().callFallback {
+		t.Fatal("a worker's connection keeps its ordinary loadout: only leads get playbook commands and call fallback")
+	}
+	if resp := callToolOnce(t, s, 4, "call", map[string]any{"tool": "git_status", "arguments": map[string]any{"session_key": f.child}}); !strings.Contains(resp, "not available") {
+		t.Fatalf("a worker must refuse call itself: %s", resp)
 	}
 	if resp := callToolOnce(t, s, 1, "git_status", map[string]any{}); !toolIsError(t, resp) {
 		t.Fatalf("a worker still needs an explicit delegate key: %s", resp)
