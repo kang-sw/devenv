@@ -21,8 +21,8 @@ This ticket also builds `ws/compact`, the common compaction command. Per owner
 (31)=a the catalog ticket (Decision 6) names this ticket the owner of
 `ws/compact`, the compaction nudge and the `ws-substitute` (summarize and
 continue in a new session); `ws/compact` is the default compaction method for
-hosted sessions, and the catalog's native compaction grades (Claude and Pi
-through the existing `/compact` path) remain factual inputs for the fallback.
+hosted sessions. Phase 1 stages it on native compaction; Phase 2 changes the
+backend to the new-session chain and retains native grades as fallback inputs.
 
 Owner 18:39 goal: the nudge and the state restore apply to child agents too, not
 only leads. Subagent compaction timing, notably for Pi children, was hard; the
@@ -65,8 +65,9 @@ the existing `/compact` command through the catalog; this ticket owns
 3. **Default compaction method (31)=a.** For hosted sessions on every harness
    the default is `ws/compact`: summarize in our format (today's Pi extension
    compaction format), open a NEW harness session, inherit the ws session key,
-   and inject the summary as its first prompt. Native harness compaction is only
-   the fallback when the session cannot write the summary itself.
+   and inject the summary as its first prompt. In Phase 2 native harness
+   compaction is the fallback when the session cannot write the summary itself;
+   Phase 1 is the explicitly staged native implementation under (186).
 4. **(33), owner ack 2026-11-17: (28)=a's single "hosted prompt assembly" child
    is split into two tickets:** prompt assembly (2, 3, B, C;
    `261117-feat-ws-hosted-prompt-assembly`) and compaction lifecycle (1, A,
@@ -91,9 +92,39 @@ the existing `/compact` command through the catalog; this ticket owns
    sections plus daemon-assembled fixed sections.** Rejected: a new format,
    because the existing Pi format is proven on Pi.
 
+9. **(186)=a, owner 2026-11-19 15:14:** if a compaction command can be
+   sent, implement `ws/compact` in Phase 1 by delivering the native signal.
+   This is staging, not reversal of (31)=a: Phase 2 replaces the backend with
+   (31)/(35)'s new-session chain, and (36) remains its fallback.
+10. **Thresholds, owner 2026-11-19 15:15–15:16:** four common parameters:
+    lead advisory, lead hard limit, worker advisory, worker hard limit. Resolve
+    each per harness and per normal config layer, with one shared global
+    default set and no per-harness defaults. Preserve the existing threshold
+    grammar and old Claude/Pi keys via migration reads. Lead's reading:
+    advisory nudges at the next idle boundary; hard limit makes the daemon
+    issue `ws/compact` at the next idle boundary.
+11. **Implementation details (autonomous):** use scalar keys
+    `compaction.lead_advisory`, `compaction.lead_hard`,
+    `compaction.worker_advisory`, `compaction.worker_hard`, harness-bucketed
+    in existing string overrides using `<key>.<harness>` for a harness
+    override and `<key>` for an unbucketed layer value; global defaults 50%,
+    80%, 50%, 80%, respectively. 50% and 80% are Pi's current defaults and 50% is Claude's advisory;
+    Claude's native automatic point is dynamic, not an 80% knob. Shared
+    defaults avoid harness-specific policy. Explicit common values win over
+    legacy keys at the same layer; otherwise read the matching legacy lead key
+    at that layer before falling through. Workers use shared defaults unless
+    explicitly tuned; do not map lead-only legacy settings to workers.
+    Preserve Claude's advisory-enabled opt-out for hosted advisory; it does
+    not disable hard compaction. Restore means re-render and inject the same
+    hosted session-start manual/identity injection, not the Phase 3 bundle.
+    These choices reuse existing context and avoid a new persistent shape.
+12. **Execution:** Pi worker (owner 2026-11-19 14:33); board topic
+    `daemon-compaction`.
+
 ## Constraints
 
-- Go test location (owner (68), 2026-11-17 22:10): run Go tests locally on the macOS home machine. The earlier "remote w5090 only" rule belonged to the owner's company Windows setup and does not apply here.
+- On the office Windows PC, Go builds/tests run only on remote w5090 via
+  `D:/sys_lock.sh remote w5090 run ...`; no local `go test`.
 - Read before editing `agents-plugin-tool/`: `ai-docs/manuals/shipped-surface-boundary.md`
   and `ai-docs/manuals/release-compatibility.md`; for `agents-plugin-tool/internal/mcp/`
   also `ai-docs/manuals/ws-mcp.md`. If playbooks, skills, `agents-plugin/rsrc/`
@@ -115,31 +146,109 @@ the existing `/compact` command through the catalog; this ticket owns
 
 ## Compatibility
 
-The segment chain changes the session record shape (one ws key now maps to an
-ordered list of harness-session segments). The compatibility tier must be
-settled before this ticket reaches `ready/`, and preferably at T0-T2, with the
-verdict citing source lines for which version writes and reads the session
-record and whether reopening with the new version recovers it, per
-`ai-docs/manuals/release-compatibility.md`. A T3 boundary needs the owner's
-explicit approval; T4 is never shipped. The verdict is not decided here.
+**Phase 1 target: T0, conditional on the specified implementation and skew
+verification.** No session record, event, or config-manifest schema shape is
+changed; new scalar threshold values must use existing string `overrides`.
+The old config reader loads that string map
+(`agents-plugin-tool/internal/wsconfig/config.go:37-47,83-90`); old resolver
+writes change individual map entries (`agents-plugin-tool/internal/wsconfig/resolver.go:193-213,299-310`),
+and repo writes retain other entries (`agents-plugin-tool/internal/wsconfig/repo.go:93-136`). Legacy thresholds remain readable and writable;
+new reads resolve them without destructive migration. New `ws/compact` is an
+additive command: old calls stay unchanged and new callers must gate against
+older daemons (unknown calls are refused: `mcp/server_dispatch.go:1662`).
+Reopening with the new daemon reads the retained scalar values, not a rebuilt
+session record. **Do not claim T0 solely from no session-shape change:** verify
+old global/project writers preserve new harness-bucketed scalar entries and
+that existing old-key writes still affect the new resolver; if either fails,
+re-grade before release. No new manifest fields: the old reader rejects them
+(`mcp/config_manifest.go:172-185`).
+
+Phase 2's segment chain changes the session record shape (one ws key maps to an
+ordered list of harness-session segments). Settle its separate tier with
+source-backed old/new writer and reopen traces before implementation; T3 needs
+owner approval, T4 never ships (`ai-docs/manuals/release-compatibility.md`).
 
 ## Phases
 
-Plausible breakdown for phase planning; phase text is refined at `ready/`
-promotion. Phase 2 and Phase 3 need the compatibility tier settled first.
+Phase 1 is the implementation contract below; Phases 2–3 remain todo-level.
+Phase 2 needs its compatibility tier settled before implementation.
 
-### Phase 1: Daemon compaction nudge from turn and token observation
+### Phase 1: Native ws/compact, detection and daemon nudge
 
-The daemon observes turn and token usage (it already reads usage figures) and
-nudges a session, lead or child, to compact at a safe point (idle turn
-boundary, see (34)). The nudge replaces the plugin-side advisory for hosted
-sessions only.
+1. **Probe first.** Record reproducible live agy and Codex app-server fixtures
+   for native command and compaction start/end, including autonomous native
+   compaction and failure. Existing evidence is not proof of all signals:
+   agy sends `/compact` but its fixture records no event
+   (`agents-plugin-tool/internal/wsagent/agy_fixture_test.go:309-333`,
+   `agy_test.go:322-333`); Codex sends `thread/compact/start`
+   (`wsagent/codex.go:381`) and maps `thread/compacted`
+   (`wsagent/codex_mapper.go:189`). If no native command exists, advertise
+   unsupported rather than simulate it. If no reliable lifecycle signal is
+   observed, do not fabricate completion or claim automatic detection; record
+   the limitation and bring the gap to the lead before implementation.
+2. **Common command.** Add `ws/compact` to the hosted common command/dispatch
+   surface; resolve command capability and native delivery via harness
+   descriptor/catalog, never a harness-name conditional in common code.
+   Queue at an idle turn boundary, for leads and workers; do not kill or steer
+   in-flight work. Claude uses existing `/compact` routing
+   (`wsagent/catalog.go:362`, `wsagent/claude.go:1004-1012`); Pi's existing
+   RPC `/compact` maps to its compact command (`wsagent/pi.go:543-571`),
+   and the extension's in-process lever uses `ctx.compact()`. Route unsupported
+   and errors explicitly; no blind retry or duplicate command.
+3. **Detect and restore.** Put per-harness native start/end mapping in the
+   descriptor/mappers, including auto compaction. Claude's status/compact
+   boundary are mapped at `wsagent/claude.go:1004-1012`; Pi already maps
+   `compaction_start`/`compaction_end` (`wsagent/pi.go:959-968`). Drive the
+   existing dashboard compacting phase (`wsdashboard/assets/dashboard.tmpl:189`)
+   and clear it on success/failure. On confirmed successful end, re-render and
+   inject the hosted session-start context for that same ws key, once, before
+   the next ordinary queued message. Use the existing renderer/instruction
+   assembly (`wsagent/runner_process.go:260,801-804`); do not mint a key.
+   Do not inject a Phase 3 agenda/children/exec restore bundle here.
+4. **Thresholds.** Implement the four Decision 11 values and per-layer,
+   per-harness resolution in the config registry/resolver and tune/catalog
+   surfaces (`mcp/config_registry.go:98-108,138-139`,
+   `wsconfig/config.go:37-47`). Respect the usual layer precedence: at each
+   layer use explicit common harness bucket, then explicit unbucketed common
+   value, then applicable explicitly set legacy key, then proceed to the next
+   layer; shared global default last.
+   Keep old keys declared and functional for old clients and CLI tier; no
+   destructive migration. Use the daemon's turn/usage observation
+   (`wsagent/claude.go:1252-1259`) for both roles and all harnesses, not
+   plugin-side hosted advisory. Missing/stale usage must not cause a guessed
+   hard trigger. Hard overrides advisory when both cross, latch each crossing,
+   reset on confirmed compaction or usage falling below threshold, and avoid
+   repeated idle commands on unsupported/error until a new crossing or explicit
+   user retry. Do not add per-event file writes.
 
-Deferred: ws/compact itself; state restore.
+Paths abbreviated `wsagent/`, `wsdashboard/`, `mcp/` and `wsconfig/` above
+are under `agents-plugin-tool/internal/`.
 
-Verification: Go tests for threshold crossing, safe-point-only
-delivery, child sessions nudged, and no nudge mid-turn; no per-event file write
-(measured syscalls/s).
+**Existing knobs and readers.** Claude's
+`claude.compaction_advisory_percent` defaults to `50%`, and
+`claude.compaction_advisory_enabled` defaults true
+(`agents-plugin/config-manifest.json:6-16`); the mod reads the enable flag
+(`agents-plugin/hooks/claude-mod/register.ts:1241-1260`) and advisory value
+(`agents-plugin/hooks/claude-mod/timing.ts:16`, `compaction.ts:444-447`).
+Claude's hard point is the harness automatic compaction point, not a separate
+config knob. Pi's `pi.compaction_advisory_percent` and
+`pi.compaction_hard_percent` default to `50%` and `80%`
+(`agents-plugin-pi/config-manifest.json:50-61`); the Pi goal-loop extension
+parses/resolves them (`agents-plugin-pi/src/goal-loop.ts:198-249,1512-1513`).
+Both manifests accept percent, token count `k`/`m`, or one of each separated
+by `|`, whichever occurs first. Do not confuse this separator with the four
+separate settings. Existing daemon usage observation is not a threshold reader.
+
+**Verification:** fixture tests for all four harness descriptors and both
+roles, including unsupported command and measured missing signals; native and
+command-triggered start/end, failure and exactly-once restore; badge transitions
+and ordering before queued work; idle-only command/nudge during active turns,
+children, threshold crossings, simultaneous crossings, latching/reset, stale
+usage, error/unsupported. Test percent/token/combined grammar and each layer,
+harness override, all four shared defaults, old-key reads and writes, old/new
+config round trips and manifest parity. Confirm no duplicate hosted plugin
+advisories while CLI behavior remains unchanged. Measure syscalls/s to verify
+no per-event writes; run Go builds/tests only on remote w5090.
 
 ### Phase 2: Session segment chain and ws/compact
 
