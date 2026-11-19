@@ -181,6 +181,26 @@ in this session; these pointers are not an exhaustive rationale-index result.
     models right after a restart, and a `bypass` agy lead runs a shell
     command with no prompt.
 
+#### Edition (261119-feat-ws-codex-hosted-worker) - 2026-11-19
+
+`261119-feat-ws-codex-hosted-worker` (173) and (175) supersede two parts of
+this phase's Codex `Choices` plan, from the owner's live report that the
+dashboard kept the old Codex model list after a CLI update (owner answer
+2026-11-19 12:27, "175=a"):
+
+- The "missing or malformed file is an empty list, not an error" contract
+  becomes: a file that does not exist is an empty list with no error; an
+  existing file that is empty or unparseable is an error, so Support's 30 s
+  fail TTL applies instead of a 5 min success.
+- The non-expiring "native session reports immediately override cached
+  fallbacks" precedence becomes: the session-reported `codexChoices` expires
+  on the shared choices TTL, and a newer session report replaces it.
+
+The Constraints line "A session's own report (model/list, configOptions)
+wins over the session-less listing once it exists" is superseded the same way.
+
+The implementation of both lands under that ticket's Phase 1 item 5.
+
 ## Implementation Handoff - 2026-11-18
 
 Implementation is committed at `795074e21`; Phase 1 is not closed pending the
