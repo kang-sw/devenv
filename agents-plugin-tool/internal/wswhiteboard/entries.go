@@ -139,7 +139,7 @@ func (s *State) reopenWithEvent(topic string, now time.Time) {
 
 var panelIDPattern = regexp.MustCompile(`^p[1-9][0-9]*$`)
 
-func applyPanel(p *problems, work *State, origins bodyOrigins, cmd command, topicOf topicResolver, mark int, now time.Time) {
+func applyPanel(p *problems, work *State, origins bodyOrigins, cmd command, topicOf topicResolver, mark int, now time.Time, sourceRoot string) {
 	before := len(p.List)
 	topic, topicOK := topicOf(cmd)
 	patch := len(cmd.Children) > 0
@@ -210,6 +210,25 @@ func applyPanel(p *problems, work *State, origins bodyOrigins, cmd command, topi
 		recap, recapOK = wsxmlcmd.RequiredAttr(p, cmd, "recap")
 	}
 	body := cmd.Body
+	src, hasSrc := cmd.Attr("src")
+	sourced := false
+	if hasSrc {
+		switch {
+		case patch:
+			p.Add("%s: src is a full payload from a file and cannot be combined with wb:change bundles", cmd.At("src"))
+		case strings.TrimSpace(body) != "":
+			p.Add("%s: src and inline panel content are two sources; give one", cmd.At("src"))
+		default:
+			text, err := ReadPanelSource(sourceRoot, src)
+			if err != nil {
+				p.Add("%s: %q: %v", cmd.At("src"), src, err)
+			} else if !utf8.ValidString(text) {
+				p.Add("%s: %q is not valid UTF-8 text; only text files can be a panel source", cmd.At("src"), src)
+			} else {
+				body, sourced = text, true
+			}
+		}
+	}
 	if patch {
 		if latest.ID == "" {
 			p.Add("%s: panel name %q does not exist; post a full payload first", cmd.At("name"), name)
@@ -254,7 +273,11 @@ func applyPanel(p *problems, work *State, origins bodyOrigins, cmd command, topi
 		p.Add("%s: panel payload exceeds 2 MiB of UTF-8; split it into panels or link an external file", cmd.Label())
 	}
 	if fullDocument(body) {
-		p.Add("%s: a panel takes markdown with inline HTML, not a full document (found <!DOCTYPE or <html)", cmd.Label())
+		if sourced {
+			p.Add("%s: %q is a full HTML document (found <!DOCTYPE or <html); a panel source is a fragment, so save the body content with any <style> and no <html>, <head> or <body> wrapper", cmd.At("src"), src)
+		} else {
+			p.Add("%s: a panel takes markdown with inline HTML, not a full document (found <!DOCTYPE or <html)", cmd.Label())
+		}
 	}
 	if len(p.List) != before || !topicOK || !recapOK {
 		return
