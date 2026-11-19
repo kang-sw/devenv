@@ -67,9 +67,10 @@ const BUNDLED_RUNTIME = JSON.parse(readFileSync(join(TEST_DIR, "..", "runtime.js
 
 // Captured develop-root ws-mcp tools/list snapshot. The exact set is compared
 // to the bundled contract below; it is not an independent hand-maintained
-// contract source.
+// contract source. Additive common tools are extended from the daemon's
+// schema tests when its public contract changes.
 const LIVE_TOOL_NAMES = [
-  "runtime.read", "runtime.debug_events", "session.children", "session.request_hire", "session.roster",
+  "compact", "runtime.read", "runtime.debug_events", "session.children", "session.request_hire", "session.roster",
   "mailbox.send", "mailbox.recv", "mailbox.lookup_peers",
   "ferrule", "agenda.set", "agenda.clear", "agenda.list",
   "route.resolve_implement", "todo.add", "todo.check",

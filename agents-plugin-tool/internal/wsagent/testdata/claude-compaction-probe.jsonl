@@ -1,0 +1,15 @@
+>> {"type":"user","message":{"role":"user","content":[{"type":"text","text":"What is the durable marker?"}]}}
+{"type":"system","subtype":"session_state_changed","state":"running","uuid":"8c28988b-a835-450f-8590-81a212f8f9f1","session_id":"70967176-cea7-4a1a-9efe-aff10879090e"}
+{"is_error":false,"subtype":"success","result":"COMPACT-PROMPT-715","type":"result"}
+>> {"type":"user","message":{"role":"user","content":[{"type":"text","text":"/compact"}]}}
+{"type":"system","subtype":"session_state_changed","state":"idle","uuid":"fd2335fa-0d84-4c06-b4fc-f29a7d7266ec","session_id":"70967176-cea7-4a1a-9efe-aff10879090e"}
+{"type":"system","subtype":"session_state_changed","state":"running","uuid":"fbf3c057-fa45-4742-8866-91723b6770a7","session_id":"70967176-cea7-4a1a-9efe-aff10879090e"}
+{"type":"system","subtype":"status","status":"compacting","session_id":"70967176-cea7-4a1a-9efe-aff10879090e","uuid":"9c710a43-b6e2-44a3-9529-2d08267c84c3"}
+{"type":"system","subtype":"status","status":null,"compact_result":"success","session_id":"70967176-cea7-4a1a-9efe-aff10879090e","uuid":"b8ac5aba-d58d-410a-8c28-4faac6ef2bca"}
+{"type":"system","subtype":"compact_boundary","session_id":"70967176-cea7-4a1a-9efe-aff10879090e","uuid":"7e9a1923-1931-4167-a4c2-e23a10c1a7b7","compact_metadata":{"trigger":"manual","pre_tokens":3018,"post_tokens":743,"cumulative_dropped_tokens":2275,"duration_ms":5943},"logical_parent_uuid":"9f6b82c2-64e6-43b5-aef3-24ccd3565568"}
+{"is_error":false,"subtype":"success","result":"","local_command":"compact","type":"result"}
+>> {"type":"user","message":{"role":"user","content":[{"type":"text","text":"What is the durable marker?"}]}}
+{"type":"system","subtype":"session_state_changed","state":"idle","uuid":"f4077620-976a-42f0-b3ef-7acf85be85c7","session_id":"70967176-cea7-4a1a-9efe-aff10879090e"}
+{"type":"system","subtype":"session_state_changed","state":"running","uuid":"7b9e57a2-a6f4-4255-8754-844740f62b09","session_id":"70967176-cea7-4a1a-9efe-aff10879090e"}
+{"is_error":false,"subtype":"success","result":"COMPACT-PROMPT-715","type":"result"}
+{"type":"system","subtype":"session_state_changed","state":"idle","uuid":"fc4f9534-7df3-4362-af24-c2913a60d35b","session_id":"70967176-cea7-4a1a-9efe-aff10879090e"}

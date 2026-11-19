@@ -540,7 +540,9 @@ func (s *Server) resolveConfigGet(sessionKey, key string) (configGetResult, erro
 	}
 	var rv wsconfig.ResolvedValue
 	var err error
-	if entry, ok := resolveConfigEntryForKey(key); ok && entry.Key == key && entry.HarnessBucketed() {
+	if isCompactionKey(key) {
+		rv, _, err = s.compactionValue(&resolver, sessionKey, key, s.playbookHarness())
+	} else if entry, ok := resolveConfigEntryForKey(key); ok && entry.Key == key && entry.HarnessBucketed() {
 		// A harness-bucketed knob's value lives under its bucket keys; read
 		// the one that applies to this session's harness.
 		rv, _, err = resolveHarnessBucketed(&resolver, sessionKey, key, s.currentHarness())
