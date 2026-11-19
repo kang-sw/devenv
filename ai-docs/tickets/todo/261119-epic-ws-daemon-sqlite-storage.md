@@ -32,7 +32,9 @@ file-touch and complexity gains:
    writer in 0.50+; currently ~25–50+ file ops + multiple `fsync`/dir-syncs per
    `whiteboard.update` (18/32 storage fix/perf commits, e.g. `6937612f9`,
    `45d559d09`, `872978ce4`, `f3e8bea7c`). (Derived `index.html`/`index.stamp.js`
-   remain files if `file://` links remain.)
+   remain files if `file://` links remain; retiring the separate per-update
+   embed HTML snapshot `ai-docs/whiteboards/<id>-<hash>.html` is also in scope
+   as its own child.)
 4. **Daemon-only metadata bundle:** Strictly daemon-internal JSON snapshots
    with zero external readers even outside the launcher:
    - `wsagent`: `agent.json`, `permission.json`, `support.json`, `pi-probes-v1/`
@@ -94,18 +96,38 @@ Child execution order is **not yet decided** (see `## Open questions`):
 
 - Planned: `wslive` (`ring/`, `model-evidence/`, `snapshot.json`) -> SQLite
 - Planned: `wsinbox` (`inbox/`, `drained/`, `answer-pending/`; `attachments/` kept as blob files) -> SQLite
-- Planned: `wswhiteboard` (2PC WAL folder -> SQLite; per-board vs. shared DB shape open)
+- Planned: `wswhiteboard` (2PC WAL folder -> one SQLite DB per board/session, lazily opened and idle-closed)
+- Planned: `wswhiteboard` embed HTML snapshot retirement (stop rendering `ai-docs/whiteboards/<id>-<hash>.html` per update; updates shipped whiteboard playbook embed rule and `whiteboard.update` `embed:` result field; mechanism open)
 - Planned: Daemon-only metadata bundle (`wsagent`, `wsdashboard` misc UI state, `wstrackerhook` state, `wstrackerhost` `ui-seen.json`) -> SQLite
 - Planned: MCP session key store (`sessions/<key>/` + legacy `keys/` migration) -> SQLite
 
 ## Cross-Child Decisions
 
-Confirmed by the owner on 2026-11-19 21:52:
+Confirmed by the owner on 2026-11-19 (21:52 and 21:56, board `(1325)=a`):
 
 - **Five-store scope and exclusions:** Target all five candidate stores listed
   in `## Scope` for expected dramatic file-touch and complexity reductions;
   exclude `wsmailbox` (already memory-first JSONL ring, `e973b72b4`) and keep
   all git-tracked, git-transport, non-Go-accessed, and raw-blob files as files.
+- **Whiteboard storage shape (`(1325)=a`, 2026-11-19 21:56):** One SQLite file
+  per board (per session), opened lazily and closed when idle, with a small
+  `cache_size`.
+  - *Rejected:* One shared DB with a `board_id` column (boards share nothing; a
+    per-board file keeps zip export/load and delete trivial); memory state +
+    per-board append journal like `wsmailbox` (would leave the whiteboard on a
+    different engine from the rest of the epic, and history queries would need
+    the whole board in memory).
+- **Whiteboard embed HTML snapshot retirement (owner allowance, 2026-11-19 21:56):**
+  Retiring the per-update embed HTML snapshot rendering
+  (`ai-docs/whiteboards/<id>-<hash>.html` written for hosts that embed the
+  board inline; owner note: "참고로 임베드 html 렌더링에도 tact time이 꽤
+  소요되는 거 같은데 이 경로 이제 버려도 되긴 합니다.") is in scope as its own
+  child of this epic. Because it touches shipped whiteboard playbook text
+  (embed rule) and the `whiteboard.update` result field `embed:`, that child
+  must state its compatibility tier per
+  `ai-docs/manuals/release-compatibility.md` and follow
+  `ai-docs/manuals/shipped-surface-boundary.md`. The child's mechanism is not
+  decided here.
 - **SQLite implementation precedent:** Build on the existing
   `modernc.org/sqlite` configuration in
   `agents-plugin-tool/internal/wsstore/store.go` (WAL mode,
@@ -124,13 +146,11 @@ The following architectural and sequencing choices are intentionally open and
 must not be assumed by child tickets without owner confirmation:
 
 - **Child ordering:** Which candidate store runs first as the pilot and the
-  sequence across the five children.
-- **Whiteboard storage shape:** The owner is considering one SQLite DB per
-  board/session, lazily opened, rather than a single shared DB; under
-  discussion.
-- **Per-store compatibility tier:** For each candidate store, whether downgrade
-  compatibility stays `<= T2` (via startup import + shutdown/dual-write export
-  to legacy files) or accepts a `T3` minor boundary.
+  sequence across the children.
+- **Per-store compatibility tier:** For each candidate store (and the embed
+  snapshot retirement child), whether downgrade compatibility stays `<= T2` (via
+  startup import + shutdown/dual-write export to legacy files) or accepts a
+  `T3` minor boundary.
 - **Windows AV benchmark (AhnLab V3) gate:** Using a corporate Windows PC
   running AhnLab V3 as the first gate to compare SQLite WAL (`-wal`/`-shm`,
   checkpoint `fsync`, `PRAGMA synchronous`) syscall counts and latency against
@@ -142,9 +162,10 @@ must not be assumed by child tickets without owner confirmation:
 
 ## Completion Criteria
 
-- Done: All five candidate-store child tickets are in `.done/` (or explicitly
-  deferred/dropped by the owner), compatibility tiers and Windows AV
-  measurements are verified per child, and the owner closes this epic.
+- Done: All five candidate-store child tickets and the in-scope embed-snapshot
+  retirement child are in `.done/` (or explicitly deferred/dropped by the
+  owner), compatibility tiers and Windows AV measurements are verified per
+  child, and the owner closes this epic.
 - Dropped: The owner drops the SQLite migration direction.
 - Deferred: Stores outside the five confirmed candidates (`wsnote` non-repo
   layers, `wsstate` throttles/project metadata, `wstrackerhost` config/sync
