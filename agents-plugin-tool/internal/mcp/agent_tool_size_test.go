@@ -60,8 +60,8 @@ func TestAgentToolDefinitionSize(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Logf("%s: %d bytes", name, len(data))
-				if len(data) > 2000 {
-					t.Errorf("%s: %d bytes exceeds 2000-byte tool definition cap", name, len(data))
+				if len(data) > toolSchemaByteCap {
+					t.Errorf("%s: %d bytes exceeds %d-byte tool definition cap", name, len(data), toolSchemaByteCap)
 				}
 			}
 			if count != len(agentToolNames) {

@@ -411,7 +411,7 @@ func tools() []map[string]any {
 					"since":        stringProperty("YYYY-MM-DD, inclusive."),
 					"until":        stringProperty("YYYY-MM-DD, inclusive."),
 					"stems":        stringArrayProperty("Limit to these ticket threads."),
-					"exclude_stem": stringProperty("Exclude ticket records and commits naming only this stem."),
+					"exclude_stem": stringProperty("Drop this stem's own records and commits naming only it."),
 					"kinds":        stringArrayProperty("commit, ticket. Default both."),
 					"order":        enumStringProperty("Default relevance with query, else time.", []string{"relevance", "time"}),
 					"limit":        integerProperty("Default 30, max 100."),
@@ -434,7 +434,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "git.merge",
-			"description": "Lead-only. Merge a local branch into a target with --no-ff; needs a clean index, leaves the target checked out. Deletes merged impl/* and goal/* sources. A main/master target needs release_target_override plus the OIDs a refusal reports. Conflicts stay for lead-delegate. Relay size advisories; never split files.",
+			"description": "Lead-only. Merge a local branch into a target with --no-ff; needs a clean index, leaves the target checked out. Deletes merged impl/* and goal/* sources. A main/master target needs release_target_override plus the OIDs a refusal reports. Conflicts stay on the target for lead-delegate. Relay size advisories to the user; do not split files yourself.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -445,8 +445,8 @@ func tools() []map[string]any {
 					"expected_target_oid":     stringProperty("The refusal's target_oid."),
 					"title":                   stringProperty("Merge commit title."),
 					"description":             stringProperty("Merge commit description."),
-					"ai_context":              stringArrayProperty("AI Context bullets for the merge commit."),
-					"updated_tickets":         stringArrayProperty("Ticket update summaries."),
+					"ai_context":              stringArrayProperty("AI Context bullets."),
+					"updated_tickets":         stringArrayProperty("Ticket updates."),
 					"format":                  stringProperty(formatPropertyDescription),
 				},
 				"required": []string{"title", "ai_context"},
@@ -462,7 +462,7 @@ func tools() []map[string]any {
 					"title":           stringProperty("Commit title."),
 					"description":     stringProperty("Body before AI Context."),
 					"ai_context":      stringArrayProperty("AI Context bullets."),
-					"updated_tickets": stringArrayProperty("Omit to detect staged ticket moves and Result/Edition headings."),
+					"updated_tickets": stringArrayProperty("Ticket updates; omit to detect staged moves and Result/Edition headings."),
 					"followups": map[string]any{
 						"type":        "array",
 						"description": "Root lead only: ownerless future work; IDs return in order.",
@@ -470,14 +470,14 @@ func tools() []map[string]any {
 							"type": "object",
 							"properties": map[string]any{
 								"level":    enumStringProperty("Ascending severity.", wsgit.FollowupLevels),
-								"category": enumStringProperty("Closed category.", wsgit.FollowupCategories),
+								"category": enumStringProperty("Category.", wsgit.FollowupCategories),
 								"content":  stringProperty("One-line summary and location."),
 							},
 							"required": []string{"level", "category", "content"},
 						},
 					},
 					"resolves":        stringArrayProperty("Follow-up IDs to resolve; unknown IDs warn."),
-					"expected_branch": stringProperty("Branch you expect, from memory, not HEAD. A mismatch or detached HEAD stages nothing."),
+					"expected_branch": stringProperty("Branch you expect, from memory, not HEAD; refused on mismatch or detached HEAD."),
 					"format":          stringProperty(formatPropertyDescription),
 				},
 				"required": []string{"paths", "title", "ai_context", "expected_branch"},
@@ -736,19 +736,19 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        wikiUpdateTool,
-			"description": "Save one signed wiki edit (top-level lead or store support). Pass wiki.query read's commit as base. Overlapping later saves conflict, returning both texts and the tip; others merge.",
+			"description": "Save one signed wiki edit (top-level lead or store support). An edit overlapping saves after base is refused with both texts and tip; others merge. Result names your next base.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty(sessionKeyPropertyDescription),
 					"store":       stringProperty("Tracker store ID."),
 					"wiki":        stringProperty("Wiki name: [a-z0-9][a-z0-9-]*, max 64."),
-					"op":          enumStringProperty("Operation on the page.", wikiUpdateOps),
-					"base":        stringProperty("Commit from read or last save; required unless new_wiki."),
+					"op":          enumStringProperty("Page operation.", wikiUpdateOps),
+					"base":        stringProperty("Commit from wiki.query read or last save; required unless new_wiki."),
 					"new_wiki":    boolProperty("Create the wiki; no base."),
 					"path":        stringProperty("Page path; .html makes a sandboxed HTML page."),
 					"to":          stringProperty("rename: new path; suffix sets kind."),
-					"content":     stringProperty("write: page content."),
+					"content":     stringProperty("write: whole page."),
 					"commit":      stringProperty("restore: source commit."),
 					"message":     stringProperty("Commit message."),
 					"images": map[string]any{
@@ -842,7 +842,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "mailbox.lookup_peers",
-			"description": `List registered peers in one scope, this session's correspondents across scopes, and self. Self is the active WS_MAILBOX identity or the session reply-id (opening its return channel). Peers are up to 20 named inboxes by last_seen, including offline ones; offline auto-minted names are omitted and simultaneous name conflicts marked. Correspondents are up to 20 by last_exchange, with harness/cwd when known; their history survives compaction.`, 
+			"description": `List registered peers in one scope, this session's correspondents across scopes, and self. Self is the active WS_MAILBOX identity or the session reply-id (opening its return channel). Peers are up to 20 named inboxes by last_seen, including offline ones (mail to them queues until a session with that name returns); offline auto-minted names are omitted and simultaneous name conflicts marked. Correspondents are up to 20 by last_exchange, with harness/cwd when known; this list survives compaction.`,
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -870,7 +870,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        dashboardIntakeTool,
-			"description": `Adapter-only: agents must not call. Applies ordered events to the session's dashboard state; each has a kind and optional at (epoch ms). Kinds: reset (clears live state; send at adapter start); turn_start {origin?}; turn_end {reason?}; agent {agentId?, parentId?, label?, sessionKey?, status?, caption?, batches?, model?, effort?, contextTokens?, outputTps?} updates the lead or one subagent; permission {agentId?, tool, args} or {agentId?, clear: true}; reply {text, final?} replaces the reply so far, final moves it to the conversation; user {text, origin?}; status {context?, limits?, cost?}; compact {phase: start|end|failed, trigger?}; commands {commands: [{name, description?, source?, layer?}]}; command {command, text?}. Send replies at most 10 times a second. With the dashboard off nothing is recorded. Send status, compact, commands or command only while the latest result's accepts line names it.`,
+			"description": `Adapter-only: agents must not call. Applies ordered events to the session's dashboard state; each has a kind and optional at (epoch ms). Kinds: reset (clears live state; send at adapter start); turn_start {origin?: terminal|whiteboard|mail}; turn_end {reason?}; agent {agentId?, parentId?, label?, sessionKey?, status?: running|done|failed, caption?, batches?, model?, effort?, contextTokens?, outputTps?} updates the lead or one subagent; permission {agentId?, tool, args} or {agentId?, clear: true}; reply {text, final?} replaces the reply so far, final moves it to the conversation; user {text, origin?}; status {context?, limits?, cost?}; compact {phase: start|end|failed, trigger?}; commands {commands: [{name, description?, source?, layer?}]}; command {command, text?}. Send replies at most 10 times a second. With the dashboard off nothing is recorded. Send status, compact, commands or command only while the latest result's accepts line names it.`,
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -887,7 +887,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        dashboardInboxDrainTool,
-			"description": `Adapter-only: agents must not claim messages. Atomically claim held messages, steering first then oldest; claimed messages cannot be cancelled or steered. Inject each ws:user envelope as a user message. Run command entries natively, splitting the batch in order. steer_only claims steering at a running turn's tool boundary; interrupt_only claims text-free interrupts: stop a turn started before sent_at, discard older interrupts. Full drain drops interrupts. Works with dashboard off. Text by default; format=json for structured messages.`, 
+			"description": `Adapter-only: agents must not claim messages. Atomically claim held messages, steering first then oldest; claimed messages cannot be cancelled or steered. Inject each ws:user envelope as a user message. Run command entries (/name args) natively, not as messages; a batch splits at each. steer_only claims steering at a running turn's tool boundary; interrupt_only claims text-free interrupts: stop a turn started before sent_at, discard older interrupts. Full drain drops interrupts. Works with dashboard off. Text by default; format=json for structured messages.`,
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -901,7 +901,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.query",
-			"description": "Find tickets. ticket_stem alone resolves one in any status or errors; other arguments run discovery, paginated by offset and limit. Flags unmet blocked-by (single-ticket only), advisory ## Blocked, and enabled assignee and lease.",
+			"description": "Find tickets. ticket_stem alone resolves one in any status or errors; other arguments run discovery, paginated by offset and limit. Flags unmet blocked-by (single-ticket only), ## Blocked headings (advisory), and, where enabled, assignee and lease.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -972,7 +972,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.move",
-			"description": "Move a ticket along idea <-> todo <-> ready; stages atomically, does not commit. Ready rejects epic, research and workset tickets (board artifacts, never execution targets) and tickets with an open ## Open Decision Queue. Ready promotion and epic todo settlement resolve sage-review posture from config; actionable todo is ungated. With the ownership index, a lease held by another person refuses unless dangerously_override_lease_status is true with a reason; a lease held by another clone or track warns; the lease never moves.",
+			"description": "Move a ticket along idea <-> todo <-> ready; stages atomically, does not commit. Ready rejects epic, research and workset tickets (board artifacts, never execution targets) and tickets with a ## Open Decision Queue outside fenced code. Ready promotion and epic todo settlement resolve sage-review posture from config; actionable todo is ungated. With the ownership index, a lease held by another person refuses unless dangerously_override_lease_status is true with a reason; a lease held by another clone or track warns; the lease never moves.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -986,7 +986,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.create_empty",
-			"description": "Create a dated empty ticket stub with title and applicable sage-review posture; populate via tickets.template. With assignee-aware flag, set_assignee defaults to caller's git email; false leaves unassigned, array assigns emails. Warns if outside sparse-checkout scope (git drops it after commit). Returns path and promotion tip; does not stage or commit.",
+			"description": "Create a dated empty ticket stub with title and applicable sage-review posture; populate via tickets.template. With the assignee-aware flag on, set_assignee defaults to caller's git email; false leaves unassigned, array assigns emails. Warns if outside sparse-checkout scope (git drops it after commit). Returns path and promotion tip; does not stage or commit.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1028,7 +1028,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.sage_gate",
-			"description": "Resolve the sage-review gate for a ticket landing; does not spawn reviewers. The epic todo landing runs design-only review on lead judgment when cross-child design has drifted, not at a status boundary; actionable todo calls fail; research and legacy worksets skip. Ready promotion runs actionable design and completeness review. Returns an action: skip, stop_blocked, stop_missing_route_facts, stop_open_decision_queue, ask or run (with reviewers and mode). Ready needs a ## Route Facts section; ready and epic todo are refused, before any write, while an open decision queue exists outside fenced code.",
+			"description": "Resolve the sage-review gate for a ticket landing; does not spawn reviewers. The epic todo landing runs design-only review on lead judgment when cross-child design has drifted, not at a status boundary; actionable todo calls fail; research and legacy worksets skip. Ready promotion runs actionable design and completeness review. Returns an action: skip, stop_blocked, stop_missing_route_facts, stop_open_decision_queue, ask or run (with reviewers and mode). Ready needs a ## Route Facts section; ready and epic todo are refused, before any write, while a ## Open Decision Queue section exists.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
