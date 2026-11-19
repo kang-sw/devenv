@@ -235,6 +235,7 @@ check("a missing field", S.message({ wsShell: "nav" }), null);
 check("an unknown kind", S.message({ wsShell: "eval", code: "x" }), null);
 check("no kind", [S.message(null), S.message("head"), S.message({ wbDoc: "rail" })], [null, null, null]);
 check("a field-less kind", !!S.message({ wsShell: "sync" }), true);
+check("a frame's press", !!S.message({ wsShell: "press" }), true);
 check("a session page", S.framed(U("/s/abc123#files"), O), { path: "/s/abc123", hash: "#files", rid: "abc123" });
 check("a framed page's own URL", S.framed(U("/s/abc123?frame=1"), O), { path: "/s/abc123", hash: "", rid: "abc123" });
 check("another origin", S.framed(new URL("http://evil:1/s/abc123"), O), null);

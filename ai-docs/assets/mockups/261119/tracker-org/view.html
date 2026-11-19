@@ -1,0 +1,223 @@
+<!-- Mockup: tracker "팀" card in org-chart style, narrow side panel (~380px).
+     Fragment only. Scoped under .tkov. Tokens: dark values from wswhiteboard/assets/page.css,
+     tracker.css (.chip, .av, .tree, .ia, .btn, card header) and dashboard.css. Fictitious people. -->
+<style>
+.tkov { --bg:#1e1f22; --fg:#e7e7e4; --card:#1e2024; --muted:#2b2d32; --mfg:#a2a6ad; --line:#444; --pri:#7aa2ff; --pri-fg:#0c1424;
+  --ok:#6cc39a; --fail:#f0797e; --warn:#e0a36c; --topic:#d9dbe0; --on-topic:#1b1d21;
+  --u1:#e3b341; --u2:#f0883e; --d1:#6cc39a; --d2:#8fcdb0;
+  --amb-bg:#4a3a1c; --amb:#e0a84a; --blu-bg:#1f3550; --blu:#5b9bf0; --pur-bg:#33264d; --pur:#a57bf0;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  background:var(--bg); color:var(--fg); font:13px/1.45 var(--sans); padding:20px; display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start; }
+.tkov * { box-sizing:border-box; }
+.tkov .cap { font-size:11.5px; font-weight:800; color:var(--mfg); letter-spacing:.04em; margin:0 0 6px; }
+.tkov .panel { width:380px; }
+/* card: tracker.css .card / header / .cbody */
+.tkov .card { background:var(--card); border-radius:12px; box-shadow:0 1px 2px rgb(0 0 0/.5),0 2px 8px rgb(0 0 0/.3); border:1px solid var(--line); overflow:hidden; }
+.tkov .card > header { display:flex; gap:8px; align-items:center; padding:4px 8px 4px 12px; min-height:32px; background:var(--muted); font-weight:700; font-size:13px; }
+.tkov .card > header h2 { margin:0; font-size:13px; }
+.tkov .cbody { padding:8px 12px 10px; }
+.tkov .grow { flex:1 1 0; }
+.tkov .chip { display:inline-flex; align-items:center; gap:3px; height:19px; font-size:11.5px; font-weight:700; line-height:1; padding:0 8px; border-radius:999px; background:var(--muted); color:var(--mfg); white-space:nowrap; }
+.tkov header .chip { background:var(--card); }
+.tkov .chip.admin { background:var(--topic); color:var(--on-topic); }
+.tkov .chip.you { background:var(--pri); color:var(--pri-fg); }
+.tkov .chip.flag { background:color-mix(in srgb,var(--fail) 16%,var(--card)); color:var(--fail); }
+.tkov .chip.sm { height:17px; font-size:10.5px; padding:0 6px; }
+.tkov .btn { font:inherit; font-size:12.5px; background:var(--muted); color:var(--fg); border:0; border-radius:999px; padding:2px 11px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.tkov .btn.mini { font-size:11.5px; padding:1px 9px; }
+/* the new admin button: blue-tinted so it reads as an action, not a count chip */
+.tkov .btn.edit { background:var(--blu-bg); color:#cfe0fb; box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--blu) 55%,transparent); }
+.tkov .btn.edit:hover { background:color-mix(in srgb,var(--blu-bg) 70%,var(--blu) 30%); }
+.tkov .btn svg, .tkov .ia svg { width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+.tkov .ia { width:24px; height:20px; border:0; border-radius:6px; background:transparent; color:var(--mfg); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; padding:0; flex:none; }
+.tkov .ia:hover, .tkov .ia[aria-expanded="true"] { background:var(--card); color:var(--pri); box-shadow:inset 0 0 0 1px var(--line); }
+.tkov .r2 { margin:0 0 8px; color:var(--mfg); font-size:12px; }
+.tkov .r2 b { color:var(--fg); }
+/* avatar: tracker.css .av + relation tints */
+.tkov .av { width:20px; height:20px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; flex:none; font-style:normal; font-size:9px; font-weight:800; letter-spacing:-.02em;
+  --av:var(--pri); --mix:15%; background:color-mix(in srgb,var(--av) var(--mix),var(--card)); color:var(--av); }
+.tkov .av.u1 { --av:var(--u1); --mix:18%; } .tkov .av.u2 { --av:var(--u2); --mix:21%; }
+.tkov .av.d1 { --av:var(--d1); --mix:22%; } .tkov .av.n { --av:var(--mfg); background:var(--muted); }
+.tkov .av.me { background:var(--pri); color:var(--pri-fg); }
+/* org tree: indented, elbow connectors. A row is 2 lines: name+chips, then org · id */
+.tkov .org, .tkov .org ul { list-style:none; margin:0; padding:0; }
+.tkov .org ul { margin-left:9px; }
+.tkov .org li { position:relative; }
+.tkov .org ul > li { padding-left:14px; }
+.tkov .org ul > li::before { content:""; position:absolute; left:0; top:0; width:11px; height:13px; border-left:1.5px solid var(--line); border-bottom:1.5px solid var(--line); border-bottom-left-radius:5px; }
+.tkov .org ul > li:not(:last-child)::after { content:""; position:absolute; left:0; top:13px; bottom:0; border-left:1.5px solid var(--line); }
+.tkov .nd { display:grid; grid-template-columns:16px 20px 1fr auto; column-gap:5px; align-items:center; padding:2px 2px 2px 0; border-radius:6px; }
+.tkov .nd:hover { background:color-mix(in srgb,var(--pri) 5%,var(--card)); }
+.tkov .nd.me { background:color-mix(in srgb,var(--pri) 10%,var(--card)); }
+.tkov .tg { width:16px; height:16px; border:0; background:none; color:var(--mfg); cursor:pointer; padding:0; display:inline-flex; align-items:center; justify-content:center; border-radius:4px; }
+.tkov .tg svg { width:11px; height:11px; fill:none; stroke:currentColor; stroke-width:2.4; transition:transform .12s; }
+.tkov li.shut > .nd .tg svg { transform:rotate(-90deg); }
+.tkov li.shut > ul { display:none; }
+.tkov .l1 { display:flex; align-items:center; gap:5px; min-width:0; flex-wrap:wrap; }
+.tkov .nm { font-weight:600; }
+.tkov .l2 { grid-column:3 / 5; font-size:11px; color:var(--mfg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:-1px; }
+.tkov .l2 code { font-family:var(--mono); font-size:10.5px; }
+.tkov .l2 .unit { color:#c9ccd2; font-weight:600; }
+.tkov .rt { display:flex; align-items:center; gap:2px; }
+/* subtree count: an outlined chip; "+N 접힘" turns blue when the subtree is collapsed */
+.tkov .cnt { font-size:10.5px; font-weight:700; color:var(--mfg); box-shadow:inset 0 0 0 1px var(--line); border-radius:999px; padding:1px 6px; white-space:nowrap; }
+.tkov li.shut > .nd .cnt { color:var(--blu); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--blu) 60%,transparent); }
+.tkov .cnt .fold { display:none; } .tkov li.shut > .nd .cnt .fold { display:inline; }
+/* member details: tracker.css .mdetails / .kline */
+.tkov .mdetails { margin:2px 0 4px 41px; padding:4px 8px; border-left:2px solid var(--line); display:flex; flex-direction:column; align-items:flex-start; gap:3px; }
+.tkov .kline { display:flex; align-items:center; gap:6px; max-width:100%; }
+.tkov .kline code { font-family:var(--mono); font-size:11px; color:var(--mfg); white-space:nowrap; }
+.tkov .kline.rev code { text-decoration:line-through; }
+.tkov .idcopy { font:inherit; font-size:11px; border:0; background:none; color:var(--mfg); cursor:pointer; padding:0 4px; border-radius:4px; }
+/* unassigned group: dashed amber frame so a lead-less member is visibly "not placed yet" */
+.tkov .unas { margin-top:10px; border:1px dashed color-mix(in srgb,var(--amb) 55%,transparent); border-radius:8px; padding:4px 6px 6px; background:color-mix(in srgb,var(--amb-bg) 35%,var(--card)); }
+.tkov .unas h4 { margin:0 0 3px; font-size:11.5px; font-weight:800; color:var(--amb); display:flex; align-items:center; gap:6px; }
+.tkov .unas h4 span { font-weight:500; color:var(--mfg); }
+.tkov .unas .nd { grid-template-columns:0 20px 1fr auto; }
+.tkov .muted { color:var(--mfg); font-size:12px; }
+.tkov .toolbar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:10px; padding-top:8px; border-top:1px solid var(--muted); }
+.tkov .setph { margin-top:10px; padding:6px 8px; border-radius:8px; background:var(--muted); color:var(--mfg); font-size:11.5px; }
+.tkov .notes { width:100%; max-width:788px; color:var(--mfg); font-size:12px; margin:4px 0 0; padding-left:18px; }
+.tkov .notes b { color:var(--fg); }
+</style>
+
+<div class="tkov">
+  <!-- ===================== A. admin viewer (lee-dy) ===================== -->
+  <div class="panel">
+    <p class="cap">A. 관리자 시점 — 나 = 이도윤 (lee-dy, 관리자)</p>
+    <section class="card">
+      <header><h2>팀</h2><span class="chip">멤버 9명</span>
+        <button type="button" class="btn mini edit" title="관리자 전용: 리드와 관리자 역할을 한 번에 편집합니다">
+          <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/></svg>조직도 편집</button>
+        <span class="grow"></span></header>
+      <div class="cbody">
+        <p class="r2">관리자: kim-hn, lee-dy. 나: 리드 <b>kim-hn</b>, 도달 범위 L1에 3.</p>
+        <ul class="org">
+          <li><div class="nd"><button type="button" class="tg" aria-expanded="true" aria-label="접기"><svg viewBox="0 0 12 12"><path d="M2 4l4 4 4-4"/></svg></button>
+              <i class="av u1">하늘</i><span class="l1"><span class="nm">김하늘</span><span class="chip sm admin">관리자</span><span class="chip sm">내 리드</span></span>
+              <span class="rt"><span class="cnt">7명<span class="fold"> 접힘</span></span><button type="button" class="ia" aria-expanded="false" aria-label="상세"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+              <span class="l2"><span class="unit">SW개발실</span> · <code>kim-hn</code></span></div>
+            <ul>
+              <li><div class="nd me"><button type="button" class="tg" aria-expanded="true" aria-label="접기"><svg viewBox="0 0 12 12"><path d="M2 4l4 4 4-4"/></svg></button>
+                  <i class="av me">도윤</i><span class="l1"><span class="nm">이도윤</span><span class="chip sm you">나</span><span class="chip sm admin">관리자</span></span>
+                  <span class="rt"><span class="cnt">3명<span class="fold"> 접힘</span></span><button type="button" class="ia" aria-expanded="false" aria-label="상세"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+                  <span class="l2"><span class="unit">SW개발1팀</span> · <code>lee-dy</code></span></div>
+                <ul>
+                  <li><div class="nd"><span></span><i class="av d1">지우</i><span class="l1"><span class="nm">최지우</span><span class="chip sm">L1</span></span>
+                      <span class="rt"><button type="button" class="ia" aria-expanded="false" aria-label="상세"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+                      <span class="l2">SW개발1팀 · <code>choi-jw</code></span></div></li>
+                  <li><div class="nd"><span></span><i class="av d1">민준</i><span class="l1"><span class="nm">정민준</span><span class="chip sm">L1</span><span class="chip sm flag" title="폐기된 키">폐기 1</span></span>
+                      <span class="rt"><button type="button" class="ia" aria-expanded="true" aria-label="상세"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+                      <span class="l2">SW개발1팀 · <code>jung-mj</code></span></div>
+                    <!-- existing per-member detail, unchanged: keys + profile edit (self or admin) -->
+                    <div class="mdetails">
+                      <div class="kline"><code>ssh-ed25519 AAAAC3Nz…q9fK2mXw</code><button type="button" class="idcopy">복사</button></div>
+                      <div class="kline rev"><code>ssh-ed25519 AAAAC3Nz…7hTz01Lc</code><span class="chip sm flag">폐기됨</span><button type="button" class="idcopy">복사</button></div>
+                      <div><button type="button" class="btn mini">프로필 편집</button></div>
+                    </div></li>
+                  <li><div class="nd"><span></span><i class="av d1">예린</i><span class="l1"><span class="nm">강예린</span><span class="chip sm">L1</span></span>
+                      <span class="rt"><button type="button" class="ia" aria-expanded="false" aria-label="상세"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+                      <span class="l2">SW개발1팀 · <code>kang-yr</code></span></div></li>
+                </ul></li>
+              <li><div class="nd"><button type="button" class="tg" aria-expanded="true" aria-label="접기"><svg viewBox="0 0 12 12"><path d="M2 4l4 4 4-4"/></svg></button>
+                  <i class="av n">서연</i><span class="l1"><span class="nm">박서연</span></span>
+                  <span class="rt"><span class="cnt">2명<span class="fold"> 접힘</span></span><button type="button" class="ia" aria-expanded="false" aria-label="상세"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+                  <span class="l2"><span class="unit">SW개발2팀</span> · <code>park-sy</code></span></div>
+                <ul>
+                  <li><div class="nd"><span></span><i class="av n">태호</i><span class="l1"><span class="nm">윤태호</span></span>
+                      <span class="rt"><button type="button" class="ia" aria-label="상세"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+                      <span class="l2">SW개발2팀 · <code>yoon-th</code></span></div></li>
+                  <li><div class="nd"><span></span><i class="av n">수아</i><span class="l1"><span class="nm">한수아</span><span class="chip sm">클론 2개</span></span>
+                      <span class="rt"><button type="button" class="ia" aria-label="상세"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+                      <span class="l2">SW개발2팀 · <code>han-sa</code></span></div></li>
+                </ul></li>
+            </ul></li>
+        </ul>
+        <div class="unas">
+          <h4>미배치 (리드 없음) <span>1명 · 리드도 팔로워도 없는 멤버</span></h4>
+          <div class="nd"><span></span><i class="av n">세진</i><span class="l1"><span class="nm">오세진</span><span class="chip sm" title="추가한 사람: kim-hn">참여</span></span>
+            <span class="rt"><button type="button" class="ia" aria-label="상세"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+            <span class="l2">SW개발실 · <code>oh-sj</code></span></div>
+        </div>
+        <p class="muted" style="margin:8px 0 0">제거됨: song-hj</p>
+        <div class="toolbar"><button type="button" class="btn mini" title="키 추가·폐기, 멤버 제거 등 조직도 밖의 역할 이벤트">기타 역할 이벤트…</button><span class="muted">내가 관리자입니다</span></div>
+        <div class="setph">저장소 설정 (우선순위 · 첨부 한도 · 라벨) — 기존과 동일, 목업에서 생략</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== B. non-admin viewer (choi-jw) ===================== -->
+  <div class="panel">
+    <p class="cap">B. 일반 멤버 시점 — 나 = 최지우 (choi-jw), 편집 버튼 없음</p>
+    <section class="card">
+      <header><h2>팀</h2><span class="chip">멤버 9명</span><span class="grow"></span></header>
+      <div class="cbody">
+        <p class="r2">관리자: kim-hn, lee-dy. 나: 리드 <b>lee-dy</b>, 팔로워 없음.</p>
+        <ul class="org">
+          <li><div class="nd"><button type="button" class="tg" aria-expanded="true" aria-label="접기"><svg viewBox="0 0 12 12"><path d="M2 4l4 4 4-4"/></svg></button>
+              <i class="av u2">하늘</i><span class="l1"><span class="nm">김하늘</span><span class="chip sm admin">관리자</span></span>
+              <span class="rt"><span class="cnt">7명<span class="fold"> 접힘</span></span><button type="button" class="ia" aria-label="상세"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+              <span class="l2"><span class="unit">SW개발실</span> · <code>kim-hn</code></span></div>
+            <ul>
+              <li><div class="nd"><button type="button" class="tg" aria-expanded="true" aria-label="접기"><svg viewBox="0 0 12 12"><path d="M2 4l4 4 4-4"/></svg></button>
+                  <i class="av u1">도윤</i><span class="l1"><span class="nm">이도윤</span><span class="chip sm admin">관리자</span><span class="chip sm">내 리드</span></span>
+                  <span class="rt"><span class="cnt">3명<span class="fold"> 접힘</span></span><button type="button" class="ia" aria-label="상세"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+                  <span class="l2"><span class="unit">SW개발1팀</span> · <code>lee-dy</code></span></div>
+                <ul>
+                  <li><div class="nd me"><span></span><i class="av me">지우</i><span class="l1"><span class="nm">최지우</span><span class="chip sm you">나</span></span>
+                      <span class="rt"><button type="button" class="ia" aria-expanded="true" aria-label="상세"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+                      <span class="l2">SW개발1팀 · <code>choi-jw</code></span></div>
+                    <div class="mdetails">
+                      <div class="kline"><code>ssh-ed25519 AAAAC3Nz…Rr4wPq8e</code><button type="button" class="idcopy">복사</button></div>
+                      <div><button type="button" class="btn mini">프로필 편집</button></div>
+                    </div></li>
+                  <li><div class="nd"><span></span><i class="av n">민준</i><span class="l1"><span class="nm">정민준</span><span class="chip sm flag">폐기 1</span></span>
+                      <span class="rt"><button type="button" class="ia" aria-label="상세"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+                      <span class="l2">SW개발1팀 · <code>jung-mj</code></span></div></li>
+                  <li><div class="nd"><span></span><i class="av n">예린</i><span class="l1"><span class="nm">강예린</span></span>
+                      <span class="rt"><button type="button" class="ia" aria-label="상세"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+                      <span class="l2">SW개발1팀 · <code>kang-yr</code></span></div></li>
+                </ul></li>
+              <!-- collapsed subtree: count chip turns blue and says "접힘" -->
+              <li class="shut"><div class="nd"><button type="button" class="tg" aria-expanded="false" aria-label="펼치기"><svg viewBox="0 0 12 12"><path d="M2 4l4 4 4-4"/></svg></button>
+                  <i class="av n">서연</i><span class="l1"><span class="nm">박서연</span></span>
+                  <span class="rt"><span class="cnt">2명<span class="fold"> 접힘</span></span><button type="button" class="ia" aria-label="상세"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+                  <span class="l2"><span class="unit">SW개발2팀</span> · <code>park-sy</code></span></div>
+                <ul>
+                  <li><div class="nd"><span></span><i class="av n">태호</i><span class="l1"><span class="nm">윤태호</span></span><span class="rt"></span><span class="l2">SW개발2팀 · <code>yoon-th</code></span></div></li>
+                  <li><div class="nd"><span></span><i class="av n">수아</i><span class="l1"><span class="nm">한수아</span></span><span class="rt"></span><span class="l2">SW개발2팀 · <code>han-sa</code></span></div></li>
+                </ul></li>
+            </ul></li>
+        </ul>
+        <div class="unas">
+          <h4>미배치 (리드 없음) <span>1명</span></h4>
+          <div class="nd"><span></span><i class="av n">세진</i><span class="l1"><span class="nm">오세진</span><span class="chip sm">참여</span></span>
+            <span class="rt"><button type="button" class="ia" aria-label="상세"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></span>
+            <span class="l2">SW개발실 · <code>oh-sj</code></span></div>
+        </div>
+        <p class="muted" style="margin:8px 0 0">제거됨: song-hj</p>
+        <div class="toolbar"><span class="muted">조직도는 관리자만 편집할 수 있습니다</span></div>
+        <div class="setph">저장소 설정 (읽기 전용) — 기존과 동일, 목업에서 생략</div>
+      </div>
+    </section>
+  </div>
+
+  <ul class="notes">
+    <li><b>레이아웃</b>: 380px 폭에서는 위→아래 박스형 조직도가 3단계·7명만 돼도 가로로 넘칩니다. 들여쓰기 트리 + 꺾은 연결선(└)으로 계층을 보이고, 한 행을 2줄(이름·칩 / 조직 · id)로 나눠 칩이 늘어도 줄바꿈이 깨지지 않게 했습니다.</li>
+    <li><b>리드 행</b>의 조직명(굵게)이 사실상 "팀 이름" 역할을 하고, 오른쪽 <b>N명</b>은 하위 전체 인원입니다. 접으면 파란색 "N명 접힘"으로 바뀝니다 (화살표 클릭).</li>
+    <li><b>미배치</b>: 리드가 없고 아래에도 아무도 없는 멤버만 따로 묶습니다 (최상위 실장처럼 팔로워가 있으면 트리의 루트).</li>
+    <li>아바타 색은 기존 규칙 유지: 내 리드 계열 = 주황/노랑, 내 팔로워 = 초록, 그 외 = 회색, 나 = 파랑. "⋯ 상세"는 기존 키·프로필 편집을 그대로 펼칩니다.</li>
+  </ul>
+</div>
+
+<script>
+// collapse/expand per subtree (mockup only)
+document.querySelectorAll('.tkov .tg').forEach(function (b) {
+  b.addEventListener('click', function () {
+    var li = b.closest('li'), shut = li.classList.toggle('shut');
+    b.setAttribute('aria-expanded', shut ? 'false' : 'true');
+    b.setAttribute('aria-label', shut ? '펼치기' : '접기');
+  });
+});
+</script>

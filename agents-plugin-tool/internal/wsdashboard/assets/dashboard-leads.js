@@ -374,7 +374,6 @@
         if (st === 200 && v.id) {
           if (inRow && gen === P.gen) P.st = v;
           if (!inRow || (P.rid === rid && (hostedPage || handedPage))) lead.st = v;
-          if ((action === "close" || action === "hide" || action === "unhide") && P.live(gen)) railPopClose(false);
           P.redraw();
           return;
         }
@@ -404,24 +403,32 @@
         P.draw();
       });
     };
+    // Each action button is a one-shot: the menu closes on the click, before
+    // any confirmation opens (the state it reads stays in P.st / lead.st),
+    // so a refusal reaches the user as a toast instead of the menu's line.
     stop.b.addEventListener("click", function () {
       var n = bgTasks();
+      railPopClose(false);
       if (n < 1 || window.confirm(wsTn("js.lead.stop.confirm", n))) act("stop", {});
     });
     archive.b.addEventListener("click", function () {
       var st = state();
+      railPopClose(false);
       act(st && st.hidden ? "unhide" : "hide", {});
     });
     restart.b.addEventListener("click", function () {
       var n = bgTasks();
+      railPopClose(false);
       if (n < 1 || window.confirm(wsTn("js.lead.restart.confirm", n))) act("restart", {});
     });
     handoff.b.addEventListener("click", function () {
       var n = bgTasks();
+      railPopClose(false);
       if (n < 1 || window.confirm(wsTn("js.lead.handoff.confirm", n))) act("handoff", {});
     });
     close.b.addEventListener("click", function () {
       var n = bgTasks();
+      railPopClose(false);
       if (window.confirm(n > 0 ? wsTn("js.lead.close.confirm.bg", n) : wsT("js.lead.close.confirm"))) act("close", {});
     });
     // draw shows the session's state; it runs when the menu opens and after

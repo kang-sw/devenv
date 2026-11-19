@@ -1,0 +1,176 @@
+<!-- Mockup: item-window thread with compact system events and foldable runs.
+     Fragment only. Scoped under .tktc. Tokens as in tracker-org/view.html (dashboard dark values);
+     thread shapes from tracker.css (.timeline / .ev / .cmt) and tracker-window.js (commentHtml, evLine).
+     Fictitious people. Panel A: default state (10-event run collapsed). Panel B: the same run expanded. -->
+<style>
+.tktc { --bg:#1e1f22; --fg:#e7e7e4; --card:#1e2024; --muted:#2b2d32; --mfg:#a2a6ad; --line:#444; --pri:#7aa2ff; --pri-fg:#0c1424;
+  --fail:#f0797e; --warn:#e0a36c; --sys:#7d8189; --blu-bg:#1f3550; --blu:#5b9bf0; --amb-bg:#4a3a1c; --amb:#e0a84a; --grn:#5cc46a;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  background:var(--bg); color:var(--fg); font:13px/1.45 var(--sans); padding:20px; display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start; }
+.tktc * { box-sizing:border-box; }
+.tktc .cap { font-size:11.5px; font-weight:800; color:var(--mfg); letter-spacing:.04em; margin:0 0 6px; }
+.tktc .panel { width:540px; }
+.tktc h3.prom { margin:0 0 6px; font-size:13px; display:flex; align-items:center; gap:6px; }
+.tktc h3 .cnt { font-size:11.5px; font-weight:700; color:var(--mfg); background:var(--muted); border-radius:999px; padding:0 7px; }
+.tktc .grow { flex:1 1 0; }
+.tktc .chip { display:inline-flex; align-items:center; height:17px; font-size:10.5px; font-weight:700; padding:0 6px; border-radius:999px; background:var(--muted); color:var(--mfg); white-space:nowrap; }
+.tktc .chip.st { background:var(--blu-bg); color:#a9c8f7; }
+.tktc .chip.warn { background:var(--amb-bg); color:var(--amb); }
+.tktc .org { color:var(--mfg); font-weight:500; font-size:.92em; }
+.tktc a { color:var(--pri); text-decoration:none; }
+.tktc .btn { font:inherit; font-size:11.5px; background:none; color:var(--mfg); border:0; border-radius:999px; padding:1px 8px; cursor:pointer; }
+.tktc .btn:hover { background:var(--muted); color:var(--fg); }
+/* timeline rail: tracker.css .timeline */
+.tktc .timeline { list-style:none; margin:0; padding:6px 10px; background:var(--card); border-radius:10px; box-shadow:0 1px 2px rgb(0 0 0/.5),0 2px 8px rgb(0 0 0/.3); border:1px solid var(--line); }
+/* comment: unchanged from today (.cmt) - card bubble, 13px, primary dot */
+.tktc .cmt { margin:6px 0 6px 4px; padding:6px 10px 6px 12px; border-left:2px solid var(--muted); position:relative; }
+.tktc .cmt::before { content:""; position:absolute; left:-5px; top:12px; width:8px; height:8px; border-radius:50%; background:var(--pri); }
+.tktc .cmt .ch { display:flex; align-items:center; gap:5px; font-size:12px; margin-bottom:3px; }
+.tktc .cmt .when { font-family:var(--mono); font-size:11px; color:var(--mfg); }
+.tktc .cmt .ctext { background:color-mix(in srgb,var(--muted) 55%,var(--card)); border-radius:4px 10px 10px 10px; padding:6px 9px; white-space:pre-wrap; font-size:13px; }
+.tktc .cmt.mine .ctext { background:color-mix(in srgb,var(--pri) 11%,var(--card)); }
+/* NEW compact system line: 11.5px, tight line-height, muted ink, 5px dot, time column on the left, one line + ellipsis */
+.tktc .sl { margin-left:4px; padding:1px 0 1px 12px; border-left:2px solid var(--muted); position:relative; font-size:11.5px; line-height:1.35; color:var(--mfg);
+  display:grid; grid-template-columns:40px 14px minmax(0,1fr); column-gap:4px; align-items:baseline; }
+.tktc .sl::before { content:""; position:absolute; left:-3.5px; top:7px; width:5px; height:5px; border-radius:50%; background:var(--sys); }
+.tktc .sl .t { font-family:var(--mono); font-size:10.5px; color:#80848b; white-space:nowrap; }
+.tktc .sl.wide { grid-template-columns:72px 14px minmax(0,1fr); }
+.tktc .sl .g { font-size:10.5px; text-align:center; color:var(--sys); }
+.tktc .sl .g.cc { color:#8fb0e8; } .tktc .sl .g.as { color:var(--grn); } .tktc .sl .g.ed { color:var(--warn); }
+.tktc .sl .x { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tktc .sl .x b { color:#c9ccd2; font-weight:600; }
+.tktc .sl .x .who { color:#c9ccd2; font-weight:600; margin-right:3px; }
+.tktc .sl.same .who { display:none; }           /* same author as the row above: name dropped */
+.tktc .sl:first-child { padding-top:3px; }
+/* run: a group of consecutive system lines; summary row when collapsed */
+.tktc .run { list-style:none; margin:4px 0; padding:0; }
+.tktc .run > ul { list-style:none; margin:0; padding:0; }
+.tktc .run.shut > ul { display:none; }
+.tktc .rs { margin-left:4px; padding:2px 0 2px 12px; border-left:2px dashed color-mix(in srgb,var(--sys) 60%,transparent); position:relative; font-size:11.5px; color:var(--mfg); line-height:1.35; }
+.tktc .rs::before { content:""; position:absolute; left:-6px; top:6px; width:10px; height:10px; border-radius:3px; background:var(--muted); box-shadow:inset 0 0 0 1px var(--sys); }
+.tktc .rs button { font:inherit; width:100%; text-align:left; display:flex; align-items:center; gap:6px; background:color-mix(in srgb,var(--muted) 45%,var(--card)); border:1px solid transparent; color:inherit; border-radius:6px; padding:2px 8px; cursor:pointer; }
+.tktc .rs button:hover { border-color:var(--line); color:var(--fg); }
+.tktc .rs .n { font-weight:800; color:#c9ccd2; }
+.tktc .rs .t { font-family:var(--mono); font-size:10.5px; color:#80848b; }
+.tktc .rs .tw { font-weight:700; color:var(--pri); white-space:nowrap; }
+.tktc .rs .ar { display:inline-block; transition:transform .12s; font-size:10px; }
+.tktc .run:not(.shut) .rs .ar { transform:rotate(90deg); }
+.tktc .run .lbl-open, .tktc .run.shut .lbl-close { display:none; }
+.tktc .run.shut .lbl-open { display:inline; }
+/* expanded run header: a thin divider line instead of the full pill */
+.tktc .run:not(.shut) .rs button { background:none; padding:1px 8px; }
+.tktc .run:not(.shut) .rs .sum { display:none; }
+.tktc .run.shut .rs .hdr { display:none; }
+.tktc .crop { text-align:center; color:var(--mfg); font-size:11px; margin:2px 0; }
+.tktc .notes { width:100%; max-width:1108px; color:var(--mfg); font-size:12px; margin:4px 0 0; padding-left:18px; }
+.tktc .notes b { color:var(--fg); }
+.tktc .notes code { font-family:var(--mono); font-size:11px; }
+</style>
+
+<div class="tktc">
+  <!-- ===================== A. default state ===================== -->
+  <div class="panel">
+    <p class="cap">A. 기본 상태 — 10건 연속 기록은 접힘, 2건 기록은 펼침, 단독 기록은 한 줄</p>
+    <section class="iw-thread">
+      <h3 class="prom">스레드 <span class="cnt">15</span><span class="grow"></span><button type="button" class="btn" data-all="open">기록 모두 펼치기</button></h3>
+      <ul class="timeline">
+        <!-- run of 2: below the fold threshold, open by default, still foldable -->
+        <li class="run" data-n="2">
+          <div class="rs"><button type="button" aria-expanded="true">
+            <span class="ar">▸</span><span class="hdr">시스템 기록 2건</span>
+            <span class="sum"><span class="n">시스템 기록 2건</span> · 김하늘 · 생성 1, 참조 추가 1</span>
+            <span class="grow"></span><span class="tw"><span class="lbl-open">펼치기</span><span class="lbl-close">접기</span></span></button></div>
+          <ul>
+            <li class="sl"><span class="t">00:41</span><span class="g">●</span><span class="x"><span class="who"><span class="org">SW개발실</span> 김하늘</span>작업 <b>사내 설치 스크립트 경로 정리</b>을(를) 만듦</span></li>
+            <li class="sl same"><span class="t">00:41</span><span class="g cc">+</span><span class="x"><span class="who">김하늘</span><b>lee-dy</b>을(를) 참조에 추가함</span></li>
+          </ul>
+        </li>
+        <li class="cmt mine"><div class="ch"><b><span class="org">SW개발1팀</span> 이도윤</b><span class="when">11-19 00:58</span></div>
+          <div class="ctext">설치 경로가 팀마다 달라서 정리가 필요합니다. 1팀·2팀 모두 확인 부탁드려요.</div></li>
+        <!-- run of 10: at/over the threshold, collapsed by default -->
+        <li class="run shut" data-n="10">
+          <div class="rs"><button type="button" aria-expanded="false" title="11-19 01:09 – 01:12 · 클릭하여 펼치기">
+            <span class="ar">▸</span><span class="hdr">시스템 기록 10건</span>
+            <span class="sum"><span class="n">시스템 기록 10건</span> · 김하늘 · 참조 추가 8, 배정 1, 편집 1 · <span class="t">01:09–01:12</span></span>
+            <span class="grow"></span><span class="tw"><span class="lbl-open">펼치기</span><span class="lbl-close">접기</span></span></button></div>
+          <ul>
+            <li class="sl"><span class="t">01:09</span><span class="g cc">+</span><span class="x"><span class="who"><span class="org">SW개발실</span> 김하늘</span><b>choi-jw</b>을(를) 참조에 추가함</span></li>
+            <li class="sl same"><span class="t">01:09</span><span class="g cc">+</span><span class="x"><span class="who">김하늘</span><b>jung-mj</b>을(를) 참조에 추가함</span></li>
+            <li class="sl same"><span class="t">01:09</span><span class="g cc">+</span><span class="x"><span class="who">김하늘</span><b>kang-yr</b>을(를) 참조에 추가함</span></li>
+            <li class="sl same"><span class="t">01:10</span><span class="g cc">+</span><span class="x"><span class="who">김하늘</span><b>park-sy</b>을(를) 참조에 추가함</span></li>
+            <li class="sl same"><span class="t">01:10</span><span class="g as">→</span><span class="x"><span class="who">김하늘</span><b>본인</b>에게 배정함, 배정자가 확인</span></li>
+            <li class="sl same"><span class="t">01:10</span><span class="g cc">+</span><span class="x"><span class="who">김하늘</span><b>yoon-th</b>을(를) 참조에 추가함</span></li>
+            <li class="sl same"><span class="t">01:11</span><span class="g cc">+</span><span class="x"><span class="who">김하늘</span><b>han-sa</b>을(를) 참조에 추가함</span></li>
+            <li class="sl same"><span class="t">01:11</span><span class="g ed">✎</span><span class="x" title="편집함 본문 → &quot;사내 설치 스크립트를 /opt/ws/bin 아래로 모으고, 팀별 예외 경로는 README에 남긴다&quot;"><span class="who">김하늘</span>편집함 본문 → "사내 설치 스크립트를 /opt/ws/bin 아래로 모으고, 팀별 예외 경로는 README에 남긴다"</span></li>
+            <li class="sl same"><span class="t">01:12</span><span class="g cc">+</span><span class="x"><span class="who">김하늘</span><b>oh-sj</b>을(를) 참조에 추가함</span></li>
+            <li class="sl same"><span class="t">01:12</span><span class="g cc">+</span><span class="x"><span class="who">김하늘</span><b>song-yj</b>을(를) 참조에 추가함</span></li>
+          </ul>
+        </li>
+        <li class="cmt"><div class="ch"><b><span class="org">SW개발2팀</span> 박서연</b><span class="when">11-19 08:47</span></div>
+          <div class="ctext">2팀은 /opt/ws/bin 그대로 써도 됩니다. 예외 경로 목록은 오늘 오후에 올릴게요.</div></li>
+        <!-- isolated single system event: compact, never foldable -->
+        <li class="sl wide"><span class="t">11-19 09:30</span><span class="g">●</span><span class="x"><span class="who"><span class="org">SW개발2팀</span> 박서연</span>상태 <span class="chip st">진행 중</span> 설정</span></li>
+      </ul>
+    </section>
+  </div>
+
+  <!-- ===================== B. the 10-event run expanded ===================== -->
+  <div class="panel">
+    <p class="cap">B. 같은 기록 묶음을 펼친 상태 (앞뒤 생략)</p>
+    <section class="iw-thread">
+      <h3 class="prom">스레드 <span class="cnt">15</span><span class="grow"></span><button type="button" class="btn" data-all="shut">기록 모두 접기</button></h3>
+      <ul class="timeline">
+        <li class="crop">⋯ 앞의 기록 2건 · 댓글 1건 ⋯</li>
+        <li class="run" data-n="10">
+          <div class="rs"><button type="button" aria-expanded="true">
+            <span class="ar">▸</span><span class="hdr"><span class="n">시스템 기록 10건</span> · <span class="t">11-19 01:09–01:12</span></span>
+            <span class="sum"><span class="n">시스템 기록 10건</span> · 김하늘 · 참조 추가 8, 배정 1, 편집 1</span>
+            <span class="grow"></span><span class="tw"><span class="lbl-open">펼치기</span><span class="lbl-close">접기</span></span></button></div>
+          <ul>
+            <li class="sl"><span class="t">01:09</span><span class="g cc">+</span><span class="x"><span class="who"><span class="org">SW개발실</span> 김하늘</span><b>choi-jw</b>을(를) 참조에 추가함</span></li>
+            <li class="sl same"><span class="t">01:09</span><span class="g cc">+</span><span class="x"><span class="who">김하늘</span><b>jung-mj</b>을(를) 참조에 추가함</span></li>
+            <li class="sl same"><span class="t">01:09</span><span class="g cc">+</span><span class="x"><span class="who">김하늘</span><b>kang-yr</b>을(를) 참조에 추가함</span></li>
+            <li class="sl same"><span class="t">01:10</span><span class="g cc">+</span><span class="x"><span class="who">김하늘</span><b>park-sy</b>을(를) 참조에 추가함</span></li>
+            <li class="sl same"><span class="t">01:10</span><span class="g as">→</span><span class="x"><span class="who">김하늘</span><b>본인</b>에게 배정함, 배정자가 확인</span></li>
+            <li class="sl same"><span class="t">01:10</span><span class="g cc">+</span><span class="x"><span class="who">김하늘</span><b>yoon-th</b>을(를) 참조에 추가함</span></li>
+            <li class="sl same"><span class="t">01:11</span><span class="g cc">+</span><span class="x"><span class="who">김하늘</span><b>han-sa</b>을(를) 참조에 추가함</span></li>
+            <li class="sl same"><span class="t">01:11</span><span class="g ed">✎</span><span class="x" title="편집함 본문 → &quot;사내 설치 스크립트를 /opt/ws/bin 아래로 모으고, 팀별 예외 경로는 README에 남긴다&quot;"><span class="who">김하늘</span>편집함 본문 → "사내 설치 스크립트를 /opt/ws/bin 아래로 모으고, 팀별 예외 경로는 README에 남긴다"</span></li>
+            <li class="sl same"><span class="t">01:12</span><span class="g cc">+</span><span class="x"><span class="who">김하늘</span><b>oh-sj</b>을(를) 참조에 추가함</span></li>
+            <li class="sl same"><span class="t">01:12</span><span class="g cc">+</span><span class="x"><span class="who">김하늘</span><b>song-yj</b>을(를) 참조에 추가함</span></li>
+          </ul>
+        </li>
+        <li class="cmt"><div class="ch"><b><span class="org">SW개발2팀</span> 박서연</b><span class="when">11-19 08:47</span></div>
+          <div class="ctext">2팀은 /opt/ws/bin 그대로 써도 됩니다. 예외 경로 목록은 오늘 오후에 올릴게요.</div></li>
+        <li class="crop">⋯ 이후 기록 1건 ⋯</li>
+      </ul>
+    </section>
+  </div>
+
+  <ul class="notes">
+    <li><b>묶음 규칙 (제안)</b>: 스레드에서 댓글(<code>comment.add</code>)이 아닌 이벤트가 <b>2건 이상 연속</b>되면 하나의 "기록 묶음"이 됩니다. 묶음은 댓글이 나올 때만 끊기고, 작성자가 바뀌어도 이어집니다 (요약에 "김하늘 외 1명"). 1건짜리는 묶지 않고 한 줄로만 그립니다.</li>
+    <li><b>기본 상태</b>: 묶음이 <b>4건 이상</b>이면 접힘, 2–3건이면 펼침 (접어도 한 줄밖에 안 줄어서). 단, 묶음 안에 <span class="chip warn">거부됨/충돌</span> 이벤트가 있으면 건수와 상관없이 펼쳐 둡니다. 펼침/접힘은 창이 열려 있는 동안만 메모리에 기억합니다 (파일 기록 없음).</li>
+    <li><b>요약 줄</b>: "시스템 기록 N건 · 작성자 · 종류별 건수 · 시각 범위". 종류는 참조 추가/참조 제거/배정/편집/상태 등 <code>describe()</code>의 이벤트 종류로 셉니다. 헤더의 "기록 모두 펼치기/접기"는 스레드 전체 묶음에 적용됩니다.</li>
+    <li><b>압축 줄</b>: 11.5px · 줄높이 1.35 · 흐린 글자 · 5px 점 + 종류 기호(+ 참조, → 배정, ✎ 편집). 묶음 안에서는 시각을 "시:분"만, 같은 작성자가 이어지면 이름을 생략합니다. 긴 본문 편집은 한 줄 말줄임, 마우스를 올리면 전체 (이벤트 별칭은 지금처럼 줄 툴팁).</li>
+    <li>댓글은 지금 모양 그대로 (13px 말풍선 + 파란 점) — 압축 줄과 크기·색·점 모양이 모두 달라 한눈에 구분됩니다.</li>
+  </ul>
+</div>
+
+<script>
+// fold/unfold one run, or every run in the panel (mockup only)
+document.querySelectorAll('.tktc .rs button').forEach(function (b) {
+  b.addEventListener('click', function () {
+    var shut = b.closest('.run').classList.toggle('shut');
+    b.setAttribute('aria-expanded', shut ? 'false' : 'true');
+  });
+});
+document.querySelectorAll('.tktc [data-all]').forEach(function (b) {
+  b.addEventListener('click', function () {
+    var shut = b.getAttribute('data-all') === 'shut';
+    b.closest('.iw-thread').querySelectorAll('.run').forEach(function (r) {
+      r.classList.toggle('shut', shut); r.querySelector('.rs button').setAttribute('aria-expanded', shut ? 'false' : 'true');
+    });
+    b.setAttribute('data-all', shut ? 'open' : 'shut'); b.textContent = shut ? '기록 모두 펼치기' : '기록 모두 접기';
+  });
+});
+</script>
