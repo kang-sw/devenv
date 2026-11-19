@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -114,7 +115,51 @@ func descriptorRegistrations() map[string]wsagent.BackendRegistration {
 		wsagent.BackendClaude: {LeadProfile: wsagent.LeadProfileClaude, ManualHarness: "claude"},
 		wsagent.BackendPi:     {LeadProfile: wsagent.LeadProfilePi},
 		wsagent.BackendAgy: {LeadProfile: wsagent.LeadProfileAgy, PermissionModes: wsagent.AgyPermissionModes,
-			ToolNameScheme: wsagent.ToolNameSchemeSanitize, CallFallback: true, ToolsAlwaysLoad: true, ManualHarness: wsagent.BackendAgy, PlaybookCommands: true},
+			ToolNameScheme: wsagent.ToolNameSchemeSanitize, CallFallback: true, DirectTools: []string{"todo.list", "workflow_manual"}, ToolsAlwaysLoad: true, ManualHarness: wsagent.BackendAgy, PlaybookCommands: true},
+	}
+}
+
+func TestHostedDirectToolDiscovery(t *testing.T) {
+	regs := descriptorRegistrations()
+	for _, backend := range []string{wsagent.BackendAgy, wsagent.BackendClaude} {
+		s, _ := hostedBackendConnection(t, backend, regs)
+		var resp struct {
+			Result struct {
+				Tools []struct {
+					Name string `json:"name"`
+				} `json:"tools"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal([]byte(callToolsList(t, s)), &resp); err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]bool{}
+		for _, tool := range resp.Result.Tools {
+			got[tool.Name] = true
+		}
+		want := map[string]bool{}
+		if backend == wsagent.BackendAgy {
+			for _, name := range regs[backend].DirectTools {
+				want[s.connectionDescriptor().aliases.advertised(name)] = true
+			}
+			want["call"] = true
+			for _, name := range []string{"runtime.read", "runtime_read"} {
+				if result := callToolOnce(t, s, 1, name, map[string]any{}); toolIsError(t, result) {
+					t.Fatalf("%s: %s", name, result)
+				}
+			}
+		} else {
+			for _, tool := range s.filteredTools() {
+				want[tool["name"].(string)] = true
+			}
+			if got["call"] {
+				t.Fatal("ordinary connection listed call")
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s: got %v, want %v", backend, got, want)
+		}
+		s.Close()
 	}
 }
 
@@ -168,8 +213,8 @@ func listedToolNames(t *testing.T, s *Server) map[string]bool {
 	return out
 }
 
-// TestHostedAgyConnectionSeesAliases: an agy lead's connection lists every
-// dotted ws tool under its alias only, accepts a call by alias (the omitted
+// TestHostedAgyConnectionSeesAliases: an agy lead's connection lists its
+// selected dotted ws tools under aliases, accepts a call by alias (the omitted
 // session_key still fills in, so the alias is mapped before the key rule),
 // still accepts the canonical name, and renders playbooks under harness
 // agy.

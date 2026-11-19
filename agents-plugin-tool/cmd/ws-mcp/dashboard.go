@@ -304,7 +304,14 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 		// agy workers use the default agent and auto-allow its permission
 		// requests. It maps no common lead permission level yet. Both
 		// roles use HTTP MCP and underscore tool-name aliases.
-		wsagent.BackendAgy: {Backend: wsagent.AgyBackend{}, LeadProfile: wsagent.LeadProfileAgy, PermissionModes: wsagent.AgyPermissionModes, Catalog: wsagent.AgyCatalog(), ToolNameScheme: wsagent.ToolNameSchemeSanitize, CallFallback: true, ToolsAlwaysLoad: true, ManualHarness: wsagent.BackendAgy, PlaybookCommands: true, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendAgy), WorkerHTTPMCP: true, WorkerAutoApprove: true},
+		wsagent.BackendAgy: {Backend: wsagent.AgyBackend{}, LeadProfile: wsagent.LeadProfileAgy, PermissionModes: wsagent.AgyPermissionModes, Catalog: wsagent.AgyCatalog(), ToolNameScheme: wsagent.ToolNameSchemeSanitize, CallFallback: true, DirectTools: []string{
+			"workflow_manual", "workflow_state", "agenda.set", "agenda.list", "agenda.clear",
+			"whiteboard.update", "whiteboard.query", "mailbox.send", "mailbox.recv",
+			"agent.spawn", "agent.interrupt", "agent.list", "playbook.read", "playbook.render",
+			"tickets.query", "tickets.move", "git.status", "git.log", "git.commit", "git.merge",
+			"worktree.acquire", "worktree.release", "note.query", "note.write",
+			"config.resolve_agent", "todo.list", "todo.check",
+		}, ToolsAlwaysLoad: true, ManualHarness: wsagent.BackendAgy, PlaybookCommands: true, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendAgy), WorkerHTTPMCP: true, WorkerAutoApprove: true},
 	}
 	return wsagent.NewRunner(wsagent.Options{
 		Dir:           dir,
@@ -444,5 +451,5 @@ func serveDashboard(server *mcp.Server) {
 // hostedRender is what reg says about text the daemon renders for its
 // hosted lead.
 func hostedRender(reg wsagent.BackendRegistration) mcp.HostedRender {
-	return mcp.HostedRender{Harness: reg.ManualHarness, PlaybookCommands: reg.PlaybookCommands, ToolNameScheme: reg.ToolNameScheme, CallFallback: reg.CallFallback}
+	return mcp.HostedRender{Harness: reg.ManualHarness, PlaybookCommands: reg.PlaybookCommands, ToolNameScheme: reg.ToolNameScheme, CallFallback: reg.CallFallback, DirectTools: reg.DirectTools}
 }

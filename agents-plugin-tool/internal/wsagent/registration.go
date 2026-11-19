@@ -40,6 +40,8 @@ type BackendRegistration struct {
 	// whose client may hide tools: agy drops definitions over 1,500 bytes
 	// including its 39-byte description prefix; other clients may cap count.
 	CallFallback bool
+	// DirectTools limits hosted lead discovery only; nil lists all tools.
+	DirectTools []string
 	// ToolsAlwaysLoad marks this connection's listed tools as always loaded.
 	ToolsAlwaysLoad bool
 	// ManualHarness is the harness name the hosted lead's workflow manual
@@ -83,6 +85,7 @@ func (r *Runner) BackendRegistrations() map[string]BackendRegistration {
 	for name, reg := range r.opts.Backends {
 		reg.PermissionModes = append([]string(nil), reg.PermissionModes...)
 		reg.PermissionLevels = append([]PermissionLevel(nil), reg.PermissionLevels...)
+		reg.DirectTools = append([]string(nil), reg.DirectTools...)
 		out[name] = reg
 	}
 	return out

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -567,8 +568,18 @@ func (s *Server) renderCallToolIndex(key string, entry sessionEntry) string {
 				break
 			}
 		}
-		fmt.Fprintf(&b, "%s - %s\n", tool["name"], description)
+		marker := ""
+		descriptor := s.connectionDescriptor()
+		name := descriptor.aliases.canonical(tool["name"].(string))
+		if descriptor.directTools != nil && (name == "call" || slices.Contains(descriptor.directTools, name)) {
+			marker = " [direct]"
+		}
+		fmt.Fprintf(&b, "%s%s - %s\n", tool["name"], marker, description)
 	}
-	b.WriteString("\nA ws tool named in this manual but missing from your tool list is reachable through `call(tool, arguments)`.\n")
+	if s.connectionDescriptor().directTools != nil {
+		b.WriteString("\n[direct] tools are listed directly; all others use `call(tool, arguments)`.\n")
+	} else {
+		b.WriteString("\nA ws tool named in this manual but missing from your tool list is reachable through `call(tool, arguments)`.\n")
+	}
 	return namespaceText(b.String(), s.runtimeNamespace())
 }

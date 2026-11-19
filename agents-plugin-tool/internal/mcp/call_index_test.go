@@ -12,7 +12,7 @@ func TestCallIndexMatchesConnectionDiscovery(t *testing.T) {
 	s, f := hostedBackendConnection(t, wsagent.BackendAgy, descriptorRegistrations())
 	defer s.Close()
 	reg := descriptorRegistrations()[wsagent.BackendAgy]
-	render := HostedRender{Harness: reg.ManualHarness, PlaybookCommands: reg.PlaybookCommands, ToolNameScheme: reg.ToolNameScheme, CallFallback: reg.CallFallback}
+	render := HostedRender{Harness: reg.ManualHarness, PlaybookCommands: reg.PlaybookCommands, ToolNameScheme: reg.ToolNameScheme, CallFallback: reg.CallFallback, DirectTools: reg.DirectTools}
 	rendered, err := RenderLeadManual(os.Environ(), f.root, render, f.hosted)
 	if err != nil {
 		t.Fatal(err)
@@ -25,7 +25,7 @@ func TestCallIndexMatchesConnectionDiscovery(t *testing.T) {
 			t.Fatalf("%s has no fallback index", source)
 		}
 		lines, guidance, ok := strings.Cut(index, "\n\n")
-		if !ok || !strings.Contains(guidance, "A ws tool named in this manual but missing from your tool list is reachable through `call(tool, arguments)`.") {
+		if !ok || !strings.Contains(guidance, "[direct] tools are listed directly; all others use `call(tool, arguments)`.") {
 			t.Fatalf("%s lacks the fallback guidance: %s", source, index)
 		}
 		var indexed []string
@@ -34,13 +34,18 @@ func TestCallIndexMatchesConnectionDiscovery(t *testing.T) {
 			if !ok || description == "" {
 				t.Fatalf("%s malformed index entry: %q", source, line)
 			}
+			direct := strings.HasSuffix(name, " [direct]")
+			name = strings.TrimSuffix(name, " [direct]")
+			if direct != (name == "call" || name == "todo_list" || name == "workflow_manual") {
+				t.Fatalf("%s: wrong direct marker on %s", source, name)
+			}
 			indexed = append(indexed, name)
 		}
 		if got := strings.Join(indexed, "\n"); got != names {
 			t.Fatalf("%s index = %s\ncall list = %s", source, got, names)
 		}
 		if !strings.Contains(lines, "runtime_read - Return ws-mcp runtime metadata for compatibility checks.\n") ||
-			!strings.Contains(lines, "call - Call a ws tool by name when it is missing from the client's tool list.\n") ||
+			!strings.Contains(lines, "call [direct] - Call a ws tool by name when it is missing from the client's tool list.\n") ||
 			strings.Contains(lines, "No tool: list names.") {
 			t.Fatalf("%s must use advertised names and first sentences: %s", source, lines)
 		}
