@@ -493,6 +493,7 @@ func (w *liveWriter) write(res wslive.Result, err error, kind string) bool {
 		return false
 	}
 	w.writeObserved(res.Observed)
+	ringAppended := false
 	if len(res.Ring) > 0 {
 		if err := w.withOwner(func() error {
 			// AppendRing can fail after writing part of a batch. Fence that
@@ -502,9 +503,7 @@ func (w *liveWriter) write(res wslive.Result, err error, kind string) bool {
 		}); err != nil {
 			fmt.Fprintf(w.log, "agent %s: ring write: %v\n", w.st.ReplyID(), err)
 		} else {
-			if w.wake != nil {
-				w.wake()
-			}
+			ringAppended = true
 		}
 	}
 	if !res.Changed && len(res.Ring) == 0 {
@@ -515,7 +514,9 @@ func (w *liveWriter) write(res wslive.Result, err error, kind string) bool {
 	} else {
 		w.writeSnapshot()
 	}
-	if w.slot == nil && len(res.Ring) == 0 && w.wake != nil {
+	// A file-only reader must see the new snapshot before its ring wake;
+	// there is no later Publish wake on that path to correct an early read.
+	if w.wake != nil && (ringAppended || w.slot == nil) {
 		w.wake()
 	}
 	return true

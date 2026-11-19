@@ -89,3 +89,25 @@ func TestHostedSnapshotFailedFlushRetriesWithoutAdvancingClock(t *testing.T) {
 		t.Fatalf("failed change must retry once then deduplicate: writes=%d", writes)
 	}
 }
+
+func TestFileOnlyRingWakeFollowsSnapshotWrite(t *testing.T) {
+	w := newLiveWriter(t.TempDir(), "wake", "pi", time.Now, io.Discard)
+	w.apply(wslive.Event{Kind: wslive.KindTurnStart})
+	w.apply(wslive.Event{Kind: wslive.KindReply, Text: "streaming"})
+	wakes := 0
+	w.wake = func() {
+		wakes++
+		snap, err := wslive.ReadSnapshot(wslive.SnapshotPath(w.dir))
+		if err != nil || snap.Lead.Reply != nil {
+			t.Fatalf("ring wake raced ahead of the finished snapshot: %+v, %v", snap, err)
+		}
+		ring, err := wslive.ReadRing(wslive.RingDir(w.dir))
+		if err != nil || len(ring) != 1 || ring[0].Text != "finished" {
+			t.Fatalf("ring wake preceded the append: %+v, %v", ring, err)
+		}
+	}
+	w.apply(wslive.Event{Kind: wslive.KindReply, Text: "finished", Final: true})
+	if wakes != 1 {
+		t.Fatalf("ring wakes=%d, want 1", wakes)
+	}
+}
