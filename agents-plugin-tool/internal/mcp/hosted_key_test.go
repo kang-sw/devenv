@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -189,10 +190,10 @@ func TestHostedSessionKeyRefusesOtherSessions(t *testing.T) {
 
 	id := 1
 	for name, key := range map[string]string{
-		"peer lead":     f.peer,
-		"peer child":    f.peerChild,
-		"unknown":       "never-minted-key",
-		"lineage loop":  loopA,
+		"peer lead":    f.peer,
+		"peer child":   f.peerChild,
+		"unknown":      "never-minted-key",
+		"lineage loop": loopA,
 	} {
 		for _, tool := range []string{"todo.list", "workflow_manual"} {
 			id++
@@ -247,6 +248,46 @@ func TestHostedSessionKeyRecordLineage(t *testing.T) {
 		if got != want {
 			t.Fatalf("key %q: refusal %q, want %q", key, got, want)
 		}
+	}
+}
+
+func TestHostedSessionKeyCachesOnlyProvenRecordLineage(t *testing.T) {
+	f := newHostedKeyFixture(t)
+	s := f.connect(t)
+	key, err := s.sessions.mint(f.root, roleDelegate, f.hosted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirs, err := s.sessions.dirs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dirs.sessions, key, "key.json")
+	record, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	args := map[string]any{"session_key": key}
+	if refusal := s.hostedSessionKeyRule("todo.list", args); refusal == "" {
+		t.Fatal("missing key should be refused")
+	}
+	if err := os.WriteFile(path, record, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if refusal := s.hostedSessionKeyRule("todo.list", args); refusal != "" {
+		t.Fatalf("restored key refused: %s", refusal)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if refusal := s.hostedSessionKeyRule("todo.list", args); refusal != "" {
+		t.Fatalf("proven key was read again: %s", refusal)
+	}
+	if _, ok := s.lookupSession(key); ok {
+		t.Fatal("downstream lookup must still reject the deleted key")
 	}
 }
 

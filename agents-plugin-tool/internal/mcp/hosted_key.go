@@ -66,6 +66,10 @@ func toolDeclaresSessionKey(tool string) bool {
 // key-record parent), then the session-key parent chain for keys minted by
 // tools such as playbook.render and worktree.acquire.
 func (s *Server) hostedDescendant(hosted, key string) bool {
+	cacheKey := [2]string{hosted, key}
+	if _, ok := s.hostedDescendants.Load(cacheKey); ok {
+		return true
+	}
 	if func() bool {
 		rec, ok := s.callerRecord(key)
 		if !ok {
@@ -98,6 +102,7 @@ func (s *Server) hostedDescendant(hosted, key string) bool {
 			return false
 		}
 		if entry.parent == hosted {
+			s.hostedDescendants.Store(cacheKey, struct{}{})
 			return true
 		}
 		key = entry.parent

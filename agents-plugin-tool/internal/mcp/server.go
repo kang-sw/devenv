@@ -63,6 +63,9 @@ type Server struct {
 	// first hostedSessionKey call.
 	hostedOnce sync.Once
 	hostedKey  string
+	// Key-record ancestry is immutable. Cache successes only; downstream role
+	// and root lookups still reject a deleted leaf, so no invalidation is needed.
+	hostedDescendants sync.Map
 	// descriptor is the connection's backend descriptor (tool_aliases.go),
 	// resolved once under descriptorMu.
 	descriptorMu       sync.Mutex
