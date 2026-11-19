@@ -20,8 +20,9 @@ func tools() []map[string]any {
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"tool":      stringProperty("Tool name (canonical or advertised alias)."),
-					"arguments": objectProperty("Arguments to pass to the tool."),
+					"tool":        stringProperty("Tool name (canonical or advertised alias)."),
+					"arguments":   objectProperty("Arguments to pass to the tool."),
+					"session_key": stringProperty("Your ws session key for list/schema authority."),
 				},
 			},
 		},

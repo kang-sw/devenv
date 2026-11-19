@@ -113,6 +113,58 @@ func (s *Server) filteredTools() []map[string]any {
 	return filtered
 }
 
+// callDiscoveryTools narrows tools/list's advertised surface to the caller's
+// authority. Reuse the identity already read by callTool, not one key lookup
+// per candidate. With no recognised key, use the most restrictive role so
+// omitting a key cannot disclose a role-gated tool's name or schema.
+func (s *Server) callDiscoveryTools(key string, entry sessionEntry, found bool) []map[string]any {
+	if !found {
+		entry = sessionEntry{scope: roleLeaf}
+	}
+	aliases := s.connectionDescriptor().aliases
+	var visible []map[string]any
+	for _, tool := range s.filteredTools() {
+		name := aliases.canonical(tool["name"].(string))
+		if s.permissionRefusal(name) != "" {
+			continue
+		}
+		if _, refusal := s.sessionToolAccess(name, key, entry); refusal != "" {
+			continue
+		}
+		visible = append(visible, tool)
+	}
+	return visible
+}
+
+// sessionToolAccess is the shared keyed capability gate for execution and
+// call discovery. A successful sub-lead board access also supplies the board
+// rewrite execution needs; discovery never runs a handler or writes a board.
+func (s *Server) sessionToolAccess(name, key string, entry sessionEntry) (*subleadBoard, string) {
+	// A forwarding worker's delegation tools use its token, not its key.
+	piByToken := (isPiTool(name) || isAgentTool(name)) && s.piForwards()
+	if entry.scope != roleLead && !piByToken && (isLeadOnlyTool(name) || !roleAllowsTool(entry.scope, name)) {
+		return nil, fmt.Sprintf("tool not available in current %s MCP profile: %s", s.runtimeNamespace(), name)
+	}
+	if isNoteMutationTool(name) && !entry.isTopLevelLead() {
+		return nil, noteReadOnlyDenial(name)
+	}
+	if name == whiteboardLoadTool && !entry.isTopLevelLead() {
+		return nil, whiteboardLeadOnlyDenial(name)
+	}
+	if isWhiteboardTool(name) && !entry.isTopLevelLead() {
+		board, marked := s.subleadBoardFor(key, entry)
+		if !marked {
+			return nil, whiteboardLeadOnlyDenial(name)
+		}
+		return &board, ""
+	}
+	// Support conversations may reach only their profile's tracker/wiki tools.
+	if (isTrackerTool(name) || isWikiTool(name) || name == trackerShowTool || name == trackerUITool) && !entry.isTopLevelLead() && !s.trackerSupportAdmits(key, entry, name) {
+		return nil, trackerLeadOnlyDenial(name)
+	}
+	return nil, ""
+}
+
 func publicToolDefinition(tool map[string]any, advertisedName, namespace string) map[string]any {
 	clone := make(map[string]any, len(tool))
 	for key, value := range tool {

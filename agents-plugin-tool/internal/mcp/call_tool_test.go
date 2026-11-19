@@ -11,6 +11,15 @@ import (
 	"github.com/kang-sw/devenv/internal/wsagent"
 )
 
+func callResponseIsError(t *testing.T, raw string) bool {
+	t.Helper()
+	var resp response
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		t.Fatal(err)
+	}
+	return responseIsError(resp)
+}
+
 func assertCallMatchesDirect(t *testing.T, s *Server, name string, args map[string]any) {
 	t.Helper()
 	direct := callToolOnce(t, s, 1, name, args)
@@ -29,14 +38,16 @@ func assertCallMatchesDirect(t *testing.T, s *Server, name string, args map[stri
 
 func assertCallListsConnection(t *testing.T, s *Server) {
 	t.Helper()
-	var want []string
-	for _, tool := range s.filteredTools() {
-		want = append(want, tool["name"].(string))
-	}
-	sort.Strings(want)
 	resp := callToolOnce(t, s, 1, "call", map[string]any{})
-	if got := toolText(t, resp); got != strings.Join(want, "\n") {
-		t.Fatalf("call list = %q, want %v", got, want)
+	names := strings.Split(toolText(t, resp), "\n")
+	if !sort.StringsAreSorted(names) {
+		t.Fatalf("call list is not sorted: %v", names)
+	}
+	advertised := listedToolNames(t, s)
+	for i, name := range names {
+		if !advertised[name] || (i > 0 && name == names[i-1]) {
+			t.Fatalf("call listed an unadvertised or duplicate tool: %q", name)
+		}
 	}
 	if !listedToolNames(t, s)["call"] {
 		t.Fatal("call must be listed on this connection")
@@ -186,6 +197,93 @@ func TestCallForwardingWorker(t *testing.T) {
 	assertCallMatchesDirect(t, s, "agent.list", map[string]any{"session_key": key})
 	if call := route.last(); call.path != wsagent.RoutePrefix+"/by-token/agent.list" || call.auth != "Bearer tok123" {
 		t.Fatalf("inner call did not use forwarding authority: %+v", call)
+	}
+}
+
+func TestCallDiscoveryRespectsPermissionAndRole(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+	t.Setenv(envAllowedTools, "git.commit,git.status,workflow_state")
+	keys := NewServer(root, "test")
+	defer keys.Close()
+	delegate, err := keys.sessions.mint(root, roleDelegate, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := keys.sessions.mint(root, roleLeaf, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lead, err := keys.sessions.mint(root, roleLead, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, level, key, want string
+	}{
+		{"read-only delegate", "read-only", delegate, "call\ngit.status"},
+		{"read-only lead", "read-only", lead, "call\ngit.status\nworkflow_state"},
+		{"writing delegate", "workdir-write", delegate, "call\ngit.commit\ngit.status"},
+		{"leaf", "workdir-write", leaf, "call\ngit.status"},
+		{"lead", "workdir-write", lead, "call\ngit.commit\ngit.status\nworkflow_state"},
+		{"keyless", "workdir-write", "", "call\ngit.status"},
+		{"unknown key", "workdir-write", "not-a-key", "call\ngit.status"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(wsagent.EnvPermissionLevel, tc.level)
+			s := NewServer(root, "test")
+			defer s.Close()
+			args := map[string]any{}
+			if tc.key != "" {
+				args["session_key"] = tc.key
+			}
+			list := callToolOnce(t, s, 1, "call", args)
+			if got := toolText(t, list); got != tc.want {
+				t.Fatalf("discovery list = %q, want %q", got, tc.want)
+			}
+			// Schema visibility must exactly match list visibility, even
+			// though tools/list still advertises the profile's wider surface.
+			for _, name := range []string{"git.commit", "git.status", "workflow_state"} {
+				args["tool"] = name
+				schema := callToolOnce(t, s, 1, "call", args)
+				visible := strings.Contains("\n"+tc.want+"\n", "\n"+name+"\n")
+				if callResponseIsError(t, schema) == visible {
+					t.Fatalf("%s visibility disagrees with list: %s", name, schema)
+				}
+				if !visible && tc.key != "" && tc.key != "not-a-key" {
+					direct := callToolOnce(t, s, 1, name, map[string]any{"session_key": tc.key})
+					if schema != direct {
+						t.Fatalf("%s schema refusal = %s, direct = %s", name, schema, direct)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestCallDiscoveryUsesHostedOrEnvelopeKey(t *testing.T) {
+	s, f := hostedBackendConnection(t, wsagent.BackendAgy, descriptorRegistrations())
+	defer s.Close()
+	for _, tc := range []struct {
+		key     string
+		visible bool
+	}{
+		{"", true}, // omitted: the hosted lead's own key
+		{f.child, false},
+	} {
+		args := map[string]any{}
+		if tc.key != "" {
+			args["session_key"] = tc.key
+		}
+		list := toolText(t, callToolOnce(t, s, 1, "call", args))
+		if strings.Contains("\n"+list+"\n", "\nworkflow_state\n") != tc.visible {
+			t.Fatalf("hosted list with key %q has wrong role visibility", tc.key)
+		}
+		args["tool"] = "workflow_state"
+		if schema := callToolOnce(t, s, 1, "call", args); callResponseIsError(t, schema) == tc.visible {
+			t.Fatalf("hosted schema with key %q: %s", tc.key, schema)
+		}
 	}
 }
 

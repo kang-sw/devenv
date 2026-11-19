@@ -62,9 +62,16 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				}
 				return s.callTool(ctx, request{ID: req.ID, Method: req.Method, Params: inner})
 			}
-			params.Name = s.connectionDescriptor().aliases.canonical(name)
-			params.Arguments = map[string]any{}
 			schemaOnly = true
+		}
+		// Discovery uses the envelope's key (or the hosted connection's),
+		// even when the inspected tool does not declare session_key.
+		if refusal := s.hostedSessionKeyRule("call", params.Arguments); refusal != "" {
+			return toolErrorTextResponse(req.ID, refusal)
+		}
+		if schemaOnly {
+			params.Name = s.connectionDescriptor().aliases.canonical(name)
+			params.Arguments = map[string]any{"session_key": params.Arguments["session_key"]}
 		}
 	}
 	// A hosted lead connection's session_key: omitted is the connection's
@@ -123,43 +130,28 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// (intakeSession), so its call rate reads no key.json; a removed key
 	// still passes here for up to intakeRecheck, for that tool only.
 	var sublead *subleadBoard
-	if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
+	var caller sessionEntry
+	var callerFound bool
+	callerKey, _ := params.Arguments["session_key"].(string)
+	if keyStr := callerKey; strings.TrimSpace(keyStr) != "" {
 		lookup := s.lookupSession
 		if params.Name == dashboardIntakeTool {
 			lookup = s.intakeSession
 		}
-		if entry, found := lookup(keyStr); found {
-			// pi.* and agent.* on a spawned agent's server are authorized
-			// by the runner's capability token, not the key (pi_forward.go).
-			piByToken := (isPiTool(params.Name) || isAgentTool(params.Name)) && s.piForwards()
-			if entry.scope != roleLead && !piByToken && (isLeadOnlyTool(params.Name) || !roleAllowsTool(entry.scope, params.Name)) {
-				return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", s.runtimeNamespace(), params.Name))
+		caller, callerFound = lookup(keyStr)
+		if entry := caller; callerFound {
+			var refusal string
+			sublead, refusal = s.sessionToolAccess(params.Name, keyStr, entry)
+			if refusal != "" {
+				return errorResponse(req.ID, -32601, refusal)
 			}
-			if isNoteMutationTool(params.Name) && !entry.isTopLevelLead() {
-				return errorResponse(req.ID, -32601, noteReadOnlyDenial(params.Name))
-			}
-			if params.Name == whiteboardLoadTool && !entry.isTopLevelLead() {
-				return errorResponse(req.ID, -32601, whiteboardLeadOnlyDenial(params.Name))
-			}
-			if isWhiteboardTool(params.Name) && !entry.isTopLevelLead() {
-				board, marked := s.subleadBoardFor(keyStr, entry)
-				if !marked {
-					return errorResponse(req.ID, -32601, whiteboardLeadOnlyDenial(params.Name))
-				}
-				sublead = &board
+			if sublead != nil {
 				onBoard := make(map[string]any, len(params.Arguments))
 				for name, value := range params.Arguments {
 					onBoard[name] = value
 				}
-				onBoard["session_key"] = board.boardKey
+				onBoard["session_key"] = sublead.boardKey
 				params.Arguments = onBoard
-			}
-			// A store's support conversation passes like a top-level lead for
-			// the tracker and wiki tools its profile names (its writes are
-			// pinned to its store in handleTrackerUpdate, and the wiki tools
-			// reach its store alone); tracker.show and tracker.ui are its own.
-			if (isTrackerTool(params.Name) || isWikiTool(params.Name) || params.Name == trackerShowTool || params.Name == trackerUITool) && !entry.isTopLevelLead() && !s.trackerSupportAdmits(keyStr, entry, params.Name) {
-				return errorResponse(req.ID, -32601, trackerLeadOnlyDenial(params.Name))
 			}
 			if entry.isTopLevelLead() {
 				// Registers the session on the dashboard, or keeps it off.
@@ -184,18 +176,17 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	}
 
 	if schemaOnly {
-		for _, tool := range tools() {
-			if tool["name"] != params.Name {
+		for _, tool := range s.callDiscoveryTools(callerKey, caller, callerFound) {
+			if s.connectionDescriptor().aliases.canonical(tool["name"].(string)) != params.Name {
 				continue
 			}
-			if isAgentTool(params.Name) && s.piForwards() {
-				tool = agentWorkerTool(tool)
-			}
-			definition := publicToolDefinition(tool, "", s.runtimeNamespace())
-			raw, err := json.Marshal(map[string]any{"description": definition["description"], "inputSchema": definition["inputSchema"]})
+			raw, err := json.Marshal(map[string]any{"description": tool["description"], "inputSchema": tool["inputSchema"]})
 			return toolTextResponse(req.ID, string(raw), err)
 		}
-		return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
+		if toolInputSchema(params.Name) == nil {
+			return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
+		}
+		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", s.runtimeNamespace(), params.Name))
 	}
 
 	// Central argument precheck: refuse a call that misses a required
@@ -224,7 +215,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	switch params.Name {
 	case "call":
 		var names []string
-		for _, tool := range s.filteredTools() {
+		for _, tool := range s.callDiscoveryTools(callerKey, caller, callerFound) {
 			names = append(names, tool["name"].(string))
 		}
 		sort.Strings(names)
