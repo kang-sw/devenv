@@ -226,10 +226,8 @@ func TestUnhostedFerruleMintsAndRelogsInAsBefore(t *testing.T) {
 }
 
 // TestHostedWorkflowManualHoldsTheSessionToItsKey: on a hosted connection
-// workflow_manual renders for the session's own key and a Runner-lineage
-// descendant's (a lead-scoped one: the role gate keeps this lead-only tool
-// from delegate keys), and refuses every other key, a key a ferrule call
-// minted under the hosted key included (it has no Runner record).
+// workflow_manual renders for the session's own key and lead-scoped
+// descendants in either lineage, and refuses every other key.
 func TestHostedWorkflowManualHoldsTheSessionToItsKey(t *testing.T) {
 	setupWorkflowManualNoteEnv(t)
 	root := t.TempDir()
@@ -252,7 +250,6 @@ func TestHostedWorkflowManualHoldsTheSessionToItsKey(t *testing.T) {
 		{"unknown", "never-minted-key", nil},
 		{"sentinel", freshBootstrapKey, nil},
 		{"sentinel-with-root", freshBootstrapKey, map[string]any{"root": root}},
-		{"ferrule-child", ferruleChild, nil},
 	} {
 		args := map[string]any{"session_key": tc.key}
 		for k, v := range tc.args {
@@ -271,7 +268,7 @@ func TestHostedWorkflowManualHoldsTheSessionToItsKey(t *testing.T) {
 		t.Fatalf("refused manuals minted a key: before=%d after=%d", before, after)
 	}
 
-	for i, key := range []string{hosted, child, " " + hosted + " ", " " + child + " "} {
+	for i, key := range []string{hosted, child, ferruleChild, " " + hosted + " ", " " + child + " "} {
 		resp := callToolOnce(t, s, 20+i, "workflow_manual", map[string]any{"session_key": key})
 		if toolIsError(t, resp) {
 			t.Fatalf("workflow_manual(%q) refused: %s", key, resp)

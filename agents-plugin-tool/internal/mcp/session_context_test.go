@@ -36,8 +36,7 @@ func TestResolveSessionSelection(t *testing.T) {
 		t.Fatalf("CLI context = %+v, %v", got, err)
 	}
 
-	// A key-record child alone is no descendant on a hosted connection; the
-	// Runner record of an agent.spawn child is (hostedDescendant).
+	// Both key-record and Runner-record children are hosted descendants.
 	orphan, err := s.sessions.mint(canonical, roleDelegate, lead)
 	if err != nil {
 		t.Fatal(err)
@@ -56,6 +55,7 @@ func TestResolveSessionSelection(t *testing.T) {
 		{"hosted bootstrap", sessionAccess{mode: sessionAccessBootstrap, root: canonical, scope: roleLead}, lead, "", roleLead, true},
 		{"hosted relogin", sessionAccess{mode: sessionAccessRelogin, key: lead, root: canonical, scope: roleLead}, lead, "", roleLead, true},
 		{"explicit child", sessionAccess{mode: sessionAccessManual, key: child}, child, lead, roleDelegate, false},
+		{"key-record child", sessionAccess{mode: sessionAccessManual, key: orphan}, orphan, lead, roleDelegate, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := s.resolveSession(tt.in)
@@ -70,7 +70,6 @@ func TestResolveSessionSelection(t *testing.T) {
 		want string
 	}{
 		{"sentinel", sessionAccess{mode: sessionAccessManual, key: freshBootstrapKey, root: canonical}, "workflow_manual:"},
-		{"key-record child", sessionAccess{mode: sessionAccessManual, key: orphan}, "workflow_manual:"},
 		{"relogin mismatch", sessionAccess{mode: sessionAccessRelogin, key: child, root: canonical, scope: roleLeaf, parent: lead}, "session bootstrap:"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
