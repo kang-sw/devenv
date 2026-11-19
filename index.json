@@ -522,6 +522,9 @@
     "261118-research-ws-pi-hosted-connector": {
       "registered_at": "2026-11-18T07:10:00Z"
     },
+    "261119-bug-ws-agent-v2-dogfood-surprises": {
+      "registered_at": "2026-11-19T13:16:47Z"
+    },
     "261119-epic-ws-daemon-sqlite-storage": {
       "registered_at": "2026-11-19T12:55:07Z"
     },
