@@ -34,8 +34,8 @@ func (c *conv) syncHost(quiet bool) {
 func (c *conv) alert(n wslive.Notice, quiet bool) {
 	c.alerted = true
 	c.setStatus(func() { c.failure = &n })
-	if !quiet && c.live.notice(n) {
-		c.ringDirty = true
+	if !quiet {
+		c.live.notice(n)
 	}
 	c.syncHost(quiet)
 	c.changed(quiet)

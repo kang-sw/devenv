@@ -60,14 +60,12 @@ func (c *conv) handle(ev Event) {
 		}
 		c.apply(*ev.Live, quiet)
 	case ev.Card != nil:
-		if !quiet && c.live.card(*ev.Card) {
-			c.ringDirty = true
-			c.r.notify(c.rec.ReplyID, c.rec.Root)
+		if !quiet {
+			c.live.card(*ev.Card)
 		}
 	case ev.UI != nil:
-		if !quiet && c.live.ui(*ev.UI) {
-			c.ringDirty = true
-			c.r.notify(c.rec.ReplyID, c.rec.Root)
+		if !quiet {
+			c.live.ui(*ev.UI)
 		}
 	case ev.TrackerWrite:
 		if f := c.r.opts.TrackerChanged; f != nil && !quiet {
@@ -269,6 +267,7 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 	c.applySettings()
 	c.restartIfDue()
 	c.kick()
+	c.flushRecord()
 	if !c.turn {
 		c.armIdle()
 	}
@@ -601,7 +600,7 @@ func (c *conv) releaseHolder(proc Process) {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: stop holder %s: %v\n", c.rec.ReplyID, c.rec.HolderID, err)
 		return
 	}
-	c.seqDirty, c.ringDirty = false, false
+	c.seqDirty, c.live.ringDirty = false, false
 	c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0 })
 	c.writeRegistration()
 }
@@ -646,14 +645,15 @@ func (c *conv) stopProcess(reason string) {
 func (c *conv) letGo() {
 	c.quitting = true
 	c.finishLine()
+	c.persistSeq()
 	if hp, ok := c.proc.(holderProcess); ok {
-		c.persistSeq()
 		if hp.Detach() {
-			c.live.writeSnapshot()
-			return
+			c.flushRecord()
+			return // loop's closeSlot flushes the snapshot before dropping RAM
 		}
 	}
 	c.stopProcess("")
+	c.flushRecord()
 }
 
 // finishLine applies the rest of a holder line the loop stands in the

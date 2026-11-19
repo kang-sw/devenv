@@ -267,6 +267,76 @@ tests gate the phase; the measurement is taken by the lead or owner on the
 owner's PC after the merge and recorded in the Result. Go builds and tests run
 on the remote w5090 only.
 
+### Result (c47ac38d6) - 2026-11-19
+
+- Slotted agent leads publish every change/heartbeat to RAM; unchanged
+  heartbeats write no snapshot file. Changed recovery projections write at
+  most once per heartbeat interval, plus forced turn-end and close writes.
+  Every disk projection, including shutdown, uses `ForDisk`. File-only
+  writers retain disk heartbeats. Stored shapes and the per-write ownership
+  fence are unchanged (accepted compatibility tier T1).
+- Transcript changes and summary-store appends use the existing slot's
+  `Publish`/`RingAppended`, with the file-only notify fallback. Registration,
+  mail, start-failure, and observed-evidence notifications remain in place.
+- `ringDirty` now belongs to the live writer, which knows actual
+  ring-generating results, rather than treating every changed snapshot as a
+  ring append. An owned append batch is marked even on partial failure, to
+  fence any entries it already wrote. Ring-tied `HolderSeq` stays immediate;
+  snapshot-only cursors wait for a ring line, heartbeat, or shutdown.
+- Only `Runner.send`'s coverage/activity metadata is deferred. Both kick
+  writes, claimed Mail, Reports, Steered/SteerSeq/TurnMark, and PendingReports
+  remain immediate. Immediate writes also flush the deferred metadata;
+  turn-end and `letGo` flush it explicitly, including with no live process.
+- Deterministic tests: 200 changed reply projections make 1 slotted snapshot
+  replacement versus 202 on the unchanged file-only control (including
+  initialization/turn start). Idle hosted heartbeats leave the file unchanged
+  while refreshing RAM. 200 snapshot-only holder lines make 0 record
+  replacements; a finished reply's ring line makes 1 immediate cursor write.
+  Tests also pin both kick writes, failed-flush retry, Claude/Pi graceful
+  shutdown's consumed prefix and held input, child Send metadata with no
+  process, and reasoning-summary exclusion from the shutdown snapshot.
+- Verification, **w5090 only**: after
+  `python3 scripts/generate-package-assets.py`, `go build ./...`,
+  `go vet ./internal/wsagent ./internal/wsdashboard ./internal/mcp ./cmd/ws-mcp`,
+  and `go test -count=1 -timeout=10m` of those four packages passed
+  (134.805s / 279.766s / 484.355s / 296.586s respectively). The first check
+  failed on three new test fixtures whose directory basename did not match
+  the record's reply-id, and on the missing embedded-assets prerequisite;
+  corrected the fixture directories and generated assets remotely before
+  the passing full check. No implementation failure was hidden or test
+  expectation weakened. `git diff --check` passed; no local Go build/vet/test.
+- Review: reviewer-child tools are unavailable, so R1 was the lead-authorized
+  self-review fallback, not independent review. No Critical/Important/Minor
+  findings; no R2 needed. The lead's independent Claude diff review remains
+  before merge. No merge, push, or daemon replacement was performed.
+- Forward: the lead/owner takes the ticket's before/after per-turn syscall
+  counts and latency measurement on the owner's Windows PC after merge and
+  records it in an Edition. The fixture counts above are not that measurement.
+  Phase 2 and Phase 3 remain unimplemented; this ticket stays in `ready/`.
+
+#### Edition (3e40ceb52) - 2026-11-19
+
+- R1 closeout found one Important notification-ordering defect after the
+  initial passing check: the relocated ordinary ring wake could reach a
+  file-only reader before the finished snapshot was written, leaving the
+  old streaming reply visible with no later RAM `Publish` wake. This
+  supersedes the initial Result's no-findings review statement.
+- Ordinary ring wakes now follow snapshot write/publication. A regression
+  reads both snapshot and ring synchronously inside the wake callback and
+  verifies the finished state and exactly one wake. Hosted routing and the
+  unchanged ownership fence remain intact.
+- Fixes-only R2 checked this finding's correction and regression: clean.
+  Both rounds used the authorized self-review fallback; the lead still
+  performs the independent Claude diff review before merge.
+- Final-source w5090 verification passed: generated assets, `go build ./...`,
+  vet of wsagent/wsdashboard/mcp/cmd-ws-mcp, and full
+  `go test -count=1 -timeout=10m` of those four packages
+  (135.784s / 279.700s / 473.939s / 298.180s). Full output was read.
+  No local Go build/vet/test. No further verification cycle or added scope.
+- Forward remains unchanged: owner-PC before/after syscall/latency measurement
+  after merge; later phases remain unimplemented. Local temporary files were
+  deleted.
+
 ### Phase 2: Ring in daemon RAM, append-only segment files
 
 Planned at its promotion, including its compatibility tier with source lines.

@@ -18,60 +18,100 @@ func TestSnapshotBurstAtomicWriteCounts(t *testing.T) {
 			if hosted {
 				w.slot = &idleSnapshotSlot{}
 			}
-			writes, fail := 0, false
+			writes := 0
 			w.writeSnapshotFile = func(path string, raw []byte, mode os.FileMode) error {
 				writes++
-				if fail {
-					return fmt.Errorf("injected write failure")
-				}
 				return writeFileAtomic(path, raw, mode)
 			}
-			// Replay the previous policy as a control: file-only writes had
-			// no deduplication, just like the forced-heartbeat path here.
-			for range 21 {
-				if hosted {
-					w.writeSnapshot()
-				} else {
-					w.heartbeatSnapshot()
-				}
-				now = now.Add(time.Millisecond)
+			w.writeSnapshot()
+			w.apply(wslive.Event{Kind: wslive.KindTurnStart})
+			for i := range 200 {
+				now = now.Add(10 * time.Millisecond)
+				w.apply(wslive.Event{Kind: wslive.KindReply, Text: fmt.Sprintf("delta %d", i)})
 			}
-			before := writes
-			wantBefore := 21
+			want := 202 // initial + turn start + each changed reply
 			if hosted {
-				wantBefore = 1
+				want = 1
 			}
-			if before != wantBefore {
-				t.Fatalf("control atomic writes=%d, want %d", before, wantBefore)
+			if writes != want {
+				t.Fatalf("stream atomic writes=%d, want %d", writes, want)
 			}
-			writes, w.lastSnapshot = 0, nil
-			for range 21 {
-				w.writeSnapshot()
-				now = now.Add(time.Millisecond)
+			if hosted && (w.slot.(*idleSnapshotSlot).snapshot.Lead.Reply == nil || w.slot.(*idleSnapshotSlot).snapshot.Lead.Reply.Text != "delta 199") {
+				t.Fatal("disk throttle delayed RAM publication")
 			}
-			if writes != 1 {
-				t.Fatalf("21 identical burst projections: atomic writes=%d, want 1", writes)
-			}
-			t.Logf("21 identical projections: control=%d atomic writes, after=%d (hosted=%v)", before, writes, hosted)
+			now = now.Add(wslive.HeartbeatInterval)
 			w.heartbeatSnapshot()
-			if writes != 2 {
-				t.Fatalf("heartbeat writes=%d, want 2", writes)
+			if writes != want+1 {
+				t.Fatalf("changed heartbeat atomic writes=%d, want %d", writes, want+1)
 			}
-			fail = true
-			w.setAdapter("claude")
-			if writes != 3 {
-				t.Fatal("changed own state was delayed")
+			w.apply(wslive.Event{Kind: wslive.KindTurnEnd})
+			if writes != want+2 {
+				t.Fatalf("turn end did not flush inside the disk interval: %d", writes)
 			}
-			fail = false
-			w.writeSnapshot()
-			w.writeSnapshot()
-			if writes != 4 {
-				t.Fatalf("failed change must retry once then deduplicate: writes=%d", writes)
+			w.setAdapter("")
+			beforeClose := writes
+			w.closeSlot()
+			closeWrites := 0
+			if hosted {
+				closeWrites = 1
+			}
+			if writes != beforeClose+closeWrites {
+				t.Fatalf("close writes=%d, want %d", writes-beforeClose, closeWrites)
 			}
 			snap, err := wslive.ReadSnapshot(wslive.SnapshotPath(w.dir))
-			if err != nil || snap.Adapter != "claude" || snap.UpdatedAt != now.UnixMilli() {
-				t.Fatalf("own write not immediately visible: %+v, %v", snap, err)
+			if err != nil || snap.Adapter != "" || snap.Lead.Phase != wslive.PhaseIdle {
+				t.Fatalf("close projection = %+v, %v", snap, err)
 			}
+			t.Logf("200 streamed deltas: %d snapshot replacements (hosted=%v)", want, hosted)
 		})
+	}
+}
+
+func TestHostedSnapshotFailedFlushRetriesWithoutAdvancingClock(t *testing.T) {
+	now := time.Unix(1000, 0)
+	w := newLiveWriter(t.TempDir(), "retry", "pi", func() time.Time { return now }, io.Discard)
+	w.slot = &idleSnapshotSlot{}
+	w.writeSnapshot()
+	last := w.lastDiskAt
+	now = now.Add(wslive.HeartbeatInterval)
+	writes, fail := 0, true
+	w.writeSnapshotFile = func(path string, raw []byte, mode os.FileMode) error {
+		writes++
+		if fail {
+			return fmt.Errorf("injected write failure")
+		}
+		return writeFileAtomic(path, raw, mode)
+	}
+	w.setAdapter("claude")
+	if writes != 1 || w.lastDiskAt != last {
+		t.Fatal("failed write advanced the disk clock")
+	}
+	fail = false
+	w.writeSnapshot()
+	w.writeSnapshot()
+	if writes != 2 || w.lastDiskAt != now {
+		t.Fatalf("failed change must retry once then deduplicate: writes=%d", writes)
+	}
+}
+
+func TestFileOnlyRingWakeFollowsSnapshotWrite(t *testing.T) {
+	w := newLiveWriter(t.TempDir(), "wake", "pi", time.Now, io.Discard)
+	w.apply(wslive.Event{Kind: wslive.KindTurnStart})
+	w.apply(wslive.Event{Kind: wslive.KindReply, Text: "streaming"})
+	wakes := 0
+	w.wake = func() {
+		wakes++
+		snap, err := wslive.ReadSnapshot(wslive.SnapshotPath(w.dir))
+		if err != nil || snap.Lead.Reply != nil {
+			t.Fatalf("ring wake raced ahead of the finished snapshot: %+v, %v", snap, err)
+		}
+		ring, err := wslive.ReadRing(wslive.RingDir(w.dir))
+		if err != nil || len(ring) != 1 || ring[0].Text != "finished" {
+			t.Fatalf("ring wake preceded the append: %+v, %v", ring, err)
+		}
+	}
+	w.apply(wslive.Event{Kind: wslive.KindReply, Text: "finished", Final: true})
+	if wakes != 1 {
+		t.Fatalf("ring wakes=%d, want 1", wakes)
 	}
 }

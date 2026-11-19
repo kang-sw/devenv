@@ -121,11 +121,10 @@ type conv struct {
 	wrapHold       bool
 	wrapTurnSeen   bool
 	// seq is the last holder record sequence applied whole; seqDirty that
-	// the record does not hold it yet, and ringDirty that a ring entry was
-	// written since, which makes the next line end persist it at once.
-	seq       uint64
-	seqDirty  bool
-	ringDirty bool
+	// the record does not hold it yet. live.ringDirty makes a ring line's
+	// end persist it at once.
+	seq      uint64
+	seqDirty bool
 	// lineOpen is the holder record sequence of a line some of whose events
 	// are applied and whose LineEnd is not; 0 between lines.
 	lineOpen uint64
@@ -197,6 +196,9 @@ type conv struct {
 	// wmu orders the record writes of update, which other conversations'
 	// goroutines also make (children.go takes a delivered report).
 	wmu sync.Mutex
+	// recordDirty is guarded by wmu. Only Send's coverage/activity stamp waits;
+	// consumed input and replay-dedupe mutations still persist immediately.
+	recordDirty bool
 
 	// The spawn tree (children.go). settledReport is the pending report id
 	// of the last settled turn, and parentWaits counts the conversation
@@ -684,10 +686,26 @@ func (c *conv) update(fn func(rec *Record)) {
 	defer c.wmu.Unlock()
 	c.mu.Lock()
 	fn(&c.rec)
-	rec := c.rec
 	c.mu.Unlock()
-	if err := writeRecord(c.dir, rec); err != nil {
+	c.persistRecord()
+}
+
+// persistRecord requires wmu, so an immediate write also flushes deferred sends
+// without letting an older copy overwrite a newer change.
+func (c *conv) persistRecord() {
+	rec := c.record()
+	err := writeRecord(c.dir, rec)
+	c.recordDirty = err != nil
+	if err != nil {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: record write: %v\n", rec.ReplyID, err)
+	}
+}
+
+func (c *conv) flushRecord() {
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	if c.recordDirty {
+		c.persistRecord()
 	}
 }
 
@@ -898,9 +916,8 @@ func (c *conv) apply(ev wslive.Event, quiet ...bool) {
 	}
 	if len(quiet) > 0 && quiet[0] {
 		c.live.applyQuiet(ev)
-	} else if c.live.apply(ev) {
-		c.ringDirty = true
-		c.r.notify(c.rec.ReplyID, c.rec.Root)
+	} else {
+		c.live.apply(ev)
 	}
 	if ev.Kind == wslive.KindStatus && ev.Observed != nil {
 		observations := c.live.st.ObservedResponses("")
@@ -975,8 +992,9 @@ func (c *conv) kick() {
 			c.live.writeSnapshot()
 			c.r.notify(c.rec.ReplyID, c.rec.Root)
 			if isRefusal {
-				// The input stays for the next admitted start; the child
-				// stays asleep (Deliver told the sender).
+				// The input stays for the next admitted start; persist its
+				// coverage so crash recovery cannot expire it as quiet.
+				c.flushRecord()
 				return
 			}
 			c.settleTurn(TurnFailed, err.Error(), c.sendCount())
