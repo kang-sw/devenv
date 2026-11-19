@@ -3,13 +3,17 @@ package wsdashboard
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // drainOne holds one board answer in a fixture session's inbox and drains
@@ -25,13 +29,27 @@ func drainOne(t *testing.T, f *pageFixture, id, text string) {
 	}
 }
 
-// TestSessionPageReadsEachEntryFileOnce pins the entry-file cache: a second
-// render of an unchanged session reads no ring or drained entry file again,
-// a new ring entry and a new drained record are each read once, a session
-// keeps only the ring entries the page shows, and a session that leaves the
-// index drops its entries.
+func ringDiskOps() int64 {
+	var n int64
+	for site, count := range wsstate.FileIOCounters() {
+		if strings.HasPrefix(site, "file_io_site:wslive/ring") && (strings.HasSuffix(site, ":read_dir") || strings.HasSuffix(site, ":read_file")) {
+			n += count
+		}
+	}
+	return n
+}
+
+// TestSessionPageReadsEachEntryFileOnce pins the entry-file cache and RAM ring:
+// hosted ring reads are served from RAM with zero disk listings/reads after
+// initial load, each new drained record is parsed once, the live view caps at
+// RingCap, and a session that leaves the index drops its cached entries.
 func TestSessionPageReadsEachEntryFileOnce(t *testing.T) {
 	f := startPageFixture(t)
+	slot, ok := f.d.OpenHostedSlot(SessionDir(f.dir, "livesession"))
+	if !ok {
+		t.Fatal("OpenHostedSlot returned false")
+	}
+	defer slot.Close()
 	drainOne(t, f, "livesession", "first answer")
 	render := func() {
 		t.Helper()
@@ -43,34 +61,39 @@ func TestSessionPageReadsEachEntryFileOnce(t *testing.T) {
 
 	render()
 	first := files.parsedCount()
-	if first != 5 { // the fixture's 4 ring entries and the drained record
-		t.Fatalf("the first render read %d entry files, want 5", first)
+	if first != 1 { // the drained record (ring is served from daemon RAM)
+		t.Fatalf("the first render parsed %d drained entry files, want 1", first)
 	}
+	ringOpsBefore := ringDiskOps()
 	render()
 	if n := files.parsedCount(); n != first {
-		t.Fatalf("a render of an unchanged session read %d entry files again", n-first)
+		t.Fatalf("a render of an unchanged session parsed %d drained files again", n-first)
+	}
+	if n := ringDiskOps() - ringOpsBefore; n != 0 {
+		t.Fatalf("a render of an unchanged session made %d ring disk ops, want 0", n)
 	}
 
 	appendUsers(t, f, "livesession", 0, 1)
 	render()
 	render()
-	if n := files.parsedCount(); n != first+1 {
-		t.Fatalf("a new ring entry was read %d times, want once", n-first)
+	if n := ringDiskOps() - ringOpsBefore; n != 0 {
+		t.Fatalf("appending and rendering ring made %d ring disk read/list ops, want 0", n)
 	}
 	drainOne(t, f, "livesession", "second answer")
 	render()
 	render()
-	if n := files.parsedCount(); n != first+2 {
-		t.Fatalf("a new drained record was read %d times, want once", n-first-1)
+	if n := files.parsedCount(); n != first+1 {
+		t.Fatalf("a new drained record was parsed %d times, want once", n-first)
 	}
 
 	appendUsers(t, f, "livesession", 1, wslive.RingCap+5)
 	render()
-	files.mu.Lock()
-	kept := len(files.sessions["livesession"].ring)
-	files.mu.Unlock()
-	if kept != wslive.RingCap {
-		t.Fatalf("the session keeps %d ring entries, want the %d the page shows", kept, wslive.RingCap)
+	ring, err := files.readRing("livesession", wslive.RingDir(SessionDir(f.dir, "livesession")))
+	if err != nil || len(ring) != wslive.RingCap {
+		t.Fatalf("the live ring view returned %d entries (%v), want %d", len(ring), err, wslive.RingCap)
+	}
+	if n := ringDiskOps() - ringOpsBefore; n != 0 {
+		t.Fatalf("ring burst and renders made %d ring disk read/list ops, want 0", n)
 	}
 
 	if err := RemoveRegistration(f.dir, "livesession"); err != nil {
@@ -178,5 +201,57 @@ func TestStreamsServesSeamCounters(t *testing.T) {
 	}
 	if got["signals"] == 999 {
 		t.Error("a seam's counter replaced the daemon's own")
+	}
+}
+
+// TestHostedSlotPinUnpinAndExternalNudgeSync verifies R1 Findings 4 & 6 at the
+// daemon boundary: only active HostedSlot sessions pin their ring in RAM,
+// closed/unpinned sessions are never pinned across index refresh, and an
+// external legacy .json append to a hosted session becomes visible on reread.
+func TestHostedSlotPinUnpinAndExternalNudgeSync(t *testing.T) {
+	f := startPageFixture(t)
+	closedDir := wslive.RingDir(SessionDir(f.dir, "livesession"))
+	if wslive.RingPinned(closedDir) {
+		t.Fatal("unhosted session ring pinned before OpenHostedSlot")
+	}
+	f.d.Index().Refresh()
+	if wslive.RingPinned(closedDir) {
+		t.Fatal("Index.Refresh pinned unhosted session ring")
+	}
+
+	slot, ok := f.d.OpenHostedSlot(SessionDir(f.dir, "livesession"))
+	if !ok {
+		t.Fatal("OpenHostedSlot failed")
+	}
+	if !wslive.RingPinned(closedDir) {
+		t.Fatal("OpenHostedSlot did not pin hosted ring")
+	}
+	appendUsers(t, f, "livesession", 0, 1)
+
+	// Simulate external process writing a legacy .json entry directly on disk.
+	extName := time.Now().UTC().Add(time.Hour).Format("20060102T150405.000000000Z") + "-f00d.json"
+	if err := os.WriteFile(filepath.Join(closedDir, extName), []byte(`{"kind":"user","text":"from-external-proc"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// External nudge triggers authoritative ReadSession -> SyncExternalRing.
+	f.d.Index().Reread("livesession")
+	f.d.Index().Settle()
+	ring, err := wslive.ReadRing(closedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, rec := range ring {
+		if rec.Text == "from-external-proc" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("external append not merged into pinned hosted ring after Reread: %+v", ring)
+	}
+
+	slot.Close()
+	if wslive.RingPinned(closedDir) {
+		t.Fatal("slot.Close left hosted ring pinned")
 	}
 }

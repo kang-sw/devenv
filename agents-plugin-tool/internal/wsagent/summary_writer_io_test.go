@@ -20,10 +20,10 @@ func registrationReads() int64 {
 	return n
 }
 
-// TestSummaryWriterLockReadsTheRowOnce pins the hosted live writer's
-// ownership fence (lockSummaryWriter), which every ring and snapshot write of
-// a hosted lead takes: one registration read per lock, and the fence still
-// refuses a row that names another process or that a terminal took.
+// TestSummaryWriterLockReadsTheRowOnce pins the hosted live writer's ownership
+// check (lockSummaryWriter) to one registration file read per lock (7225f1a83),
+// ensuring external cross-process takeovers and concurrent unlocked reads can
+// never poison ownership.
 func TestSummaryWriterLockReadsTheRowOnce(t *testing.T) {
 	dir := t.TempDir()
 	r := NewRunner(Options{Dir: dir, Log: io.Discard})
@@ -58,6 +58,13 @@ func TestSummaryWriterLockReadsTheRowOnce(t *testing.T) {
 		t.Fatalf("row naming another process: ok=%v reads=%d foreign=%v, want false, 1, false", ok, reads, c.foreignRow)
 	}
 
+	// Simulate an unlocked concurrent read seeing the old row before an external
+	// process rewrites registration.json (terminal takeover, R1 Findings 1 & 2):
+	// lockSummaryWriter must still read fresh state under OS flock and refuse.
+	write(row)
+	if _, err := wsdashboard.ReadRegistration(dir, "lead"); err != nil {
+		t.Fatal(err)
+	}
 	taken := row
 	taken.Hosted, taken.HostPID = false, 0
 	write(taken)

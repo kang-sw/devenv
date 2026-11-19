@@ -1,16 +1,9 @@
 package wslive
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,14 +12,12 @@ import (
 )
 
 // The conversation ring keeps a session's last RingHistoryCap finished
-// conversation messages, one file per entry named <fixed-width UTC
-// nanosecond stamp>-<random hex>.json. Every entry gets a fresh name through
-// temp+rename, so concurrent writers (several MCP processes can hold one
-// session key) never replace each other's file and need no lock, and a
-// reader never sees a partial entry. The name's stamp is the entry's time,
-// and since names sort in time order and never change, a name is also a
-// stable paging cursor: ReadRing is the newest RingCap entries (the live
-// view) and ReadRingPage walks older ones a page at a time.
+// conversation messages, persisted in append-only JSONL segments
+// (ring_store.go) and served from RAM in the daemon. Each entry keeps a
+// stable name <fixed-width UTC nanosecond stamp>-<random hex>.json that sorts
+// lexically in time order and acts as a paging cursor: ReadRing is the newest
+// RingCap entries (the live view) and ReadRingPage walks older ones a page at
+// a time. Legacy per-entry .json files are still read and merged on load.
 
 // Ring entry kinds.
 const (
@@ -172,41 +163,12 @@ var ringNamePattern = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}\.[0-9]{9}Z-[0-9a-f]
 func ValidRingName(name string) bool { return ringNamePattern.MatchString(name) }
 
 // AppendRing writes entries, in order, to the ring at dir (created when
-// missing) and trims it to the newest RingHistoryCap. It returns the first write
-// error and stops there. Trimming is best effort.
+// missing). When dir is pinned for an active hosted slot (PinRing), entries
+// stay in RAM and append to held-open owner-only JSONL segments with whole-
+// segment rotation covering RingHistoryCap; unpinned/external writers write
+// atomic per-entry .json files and close their handles immediately.
 func AppendRing(dir string, entries []RingEntry) error {
-	if len(entries) == 0 {
-		return nil
-	}
-	// The ring holds conversation text: owner-only, like mailbox history.
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create conversation ring dir: %w", err)
-	}
-	var werr error
-	for _, entry := range entries {
-		if werr = writeRingEntry(dir, entry); werr != nil {
-			break
-		}
-	}
-	trimRing(dir)
-	return werr
-}
-
-func writeRingEntry(dir string, entry RingEntry) error {
-	raw, err := json.Marshal(entry)
-	if err != nil {
-		return err
-	}
-	var suffix [4]byte
-	if _, err := rand.Read(suffix[:]); err != nil {
-		return err
-	}
-	stamp := entry.ringStamp
-	if stamp.IsZero() {
-		stamp = nextRingStamp()
-	}
-	name := stamp.Format(ringStampLayout) + "-" + hex.EncodeToString(suffix[:]) + ".json"
-	return writeRingRaw(dir, name, raw)
+	return appendRingEntries(dir, entries)
 }
 
 // PrepareSummaryRing reserves existing ring IDs in reducer order before a
@@ -220,69 +182,11 @@ func PrepareSummaryRing(entries []RingEntry) {
 	}
 }
 
-func writeRingRaw(dir, name string, raw []byte) error {
-	tmp, err := wsstate.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return fmt.Errorf("create conversation ring temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	// CreateTemp makes the file 0600, which the entry keeps: its reader, the
-	// dashboard daemon, runs as the same user.
-	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("write conversation ring entry: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("write conversation ring entry: %w", err)
-	}
-	wsstate.CountFileIO("atomic_replace")
-	if err := os.Rename(tmpPath, filepath.Join(dir, name)); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("commit conversation ring entry: %w", err)
-	}
-	return nil
-}
-
-// trimRing removes all but the newest RingHistoryCap entries, ignoring
-// errors: a concurrent trim or a failed remove only leaves extra entries
-// until the next write, and a reader skips an entry removed under it.
-func trimRing(dir string) {
-	names, err := ringEntryNames(dir)
-	if err != nil || len(names) <= RingHistoryCap {
-		return
-	}
-	for _, name := range names[:len(names)-RingHistoryCap] {
-		_ = os.Remove(filepath.Join(dir, name))
-	}
-}
-
-// ringEntryNames lists dir's committed entry names, oldest first.
-func ringEntryNames(dir string) ([]string, error) {
-	dirEntries, err := wsstate.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	names := make([]string, 0, len(dirEntries))
-	for _, de := range dirEntries {
-		if isRingEntryName(de.Name()) {
-			names = append(names, de.Name())
-		}
-	}
-	sort.Strings(names)
-	return names, nil
-}
-
-// RingNames returns the ring's entry file names at dir, oldest first; a
-// missing directory is an empty ring. An entry file is never rewritten, so
-// the names alone tell a reader whether the ring changed.
+// RingNames returns the ring's entry names at dir, oldest first; a missing
+// directory is an empty ring. Served from RAM when PinRing is active for dir;
+// unpinned dirs never pin records in RAM.
 func RingNames(dir string) ([]string, error) {
-	names, err := ringEntryNames(dir)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	return names, err
+	return listRingNames(dir)
 }
 
 // ReadRing returns the ring's live view at dir: its newest RingCap entries,
@@ -305,55 +209,22 @@ type RingPage struct {
 
 // ReadRingPage returns the newest n entries at dir whose names sort before
 // before (exclusive; empty means the newest entries), oldest first. A
-// missing directory is an empty ring. An entry that cannot be read or
-// parsed, or whose name carries no valid stamp, is skipped but still counts
-// toward n and the cursor, so a junk file never stalls paging. Unknown entry
-// fields are ignored.
+// missing directory is an empty ring. Unknown entry fields are ignored.
 func ReadRingPage(dir, before string, n int) (RingPage, error) {
-	names, err := ringEntryNames(dir)
-	if errors.Is(err, fs.ErrNotExist) {
-		return RingPage{End: true}, nil
-	}
-	if err != nil {
-		return RingPage{}, err
-	}
-	if before != "" {
-		names = names[:sort.SearchStrings(names, before)]
-	}
-	if n < 0 {
-		n = 0
-	}
-	start := len(names) - n
-	if start < 0 {
-		start = 0
-	}
-	page := RingPage{End: start == 0}
-	names = names[start:]
-	if len(names) > 0 {
-		page.Before = names[0]
-	}
-	page.Records = make([]RingRecord, 0, len(names))
-	for _, name := range names {
-		if rec, ok := readRingEntry(dir, name); ok {
-			page.Records = append(page.Records, rec)
-		}
-	}
-	return page, nil
+	return readRingPage(dir, before, n)
 }
 
 // ReadRingEntry reads the one committed entry name of the ring at dir;
 // false when it cannot be read or parsed or its name carries no valid
-// stamp. An entry file is never rewritten, so a reader may keep a read
-// entry by its name.
-func ReadRingEntry(dir, name string) (RingRecord, bool) { return readRingEntry(dir, name) }
+// stamp. Served from RAM when PinRing is active for dir.
+func ReadRingEntry(dir, name string) (RingRecord, bool) {
+	return readRingByName(dir, name)
+}
 
-func readRingEntry(dir, name string) (RingRecord, bool) {
-	stamp, _, ok := strings.Cut(name, "-")
+// readLegacyRingEntry reads one legacy per-entry .json file from disk.
+func readLegacyRingEntry(dir, name string) (RingRecord, bool) {
+	at, ok := parseRingNameStamp(name)
 	if !ok {
-		return RingRecord{}, false
-	}
-	at, err := time.Parse(ringStampLayout, stamp)
-	if err != nil {
 		return RingRecord{}, false
 	}
 	raw, err := wsstate.ReadFileOnce(filepath.Join(dir, name))
@@ -364,5 +235,5 @@ func readRingEntry(dir, name string) (RingRecord, bool) {
 	if json.Unmarshal(raw, &entry) != nil {
 		return RingRecord{}, false
 	}
-	return RingRecord{RingEntry: entry, Name: name, At: at.UTC()}, true
+	return RingRecord{RingEntry: entry, Name: name, At: at}, true
 }
