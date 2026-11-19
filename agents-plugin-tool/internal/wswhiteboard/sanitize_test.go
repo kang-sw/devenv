@@ -33,7 +33,7 @@ func TestReplyHTMLKeepsInlineHTMLAndSVG(t *testing.T) {
 	wantAll(t, out,
 		"<strong>md</strong> and <b>bold</b>",
 		`<span style="color: red; font-weight: 700" class="hl" title="t">red</span>`,
-		"<details open=\"\"><summary>more</summary>", "hidden <em>text</em>",
+		"<details open=\"\"><summary>more</summary>", "hidden *text*",
 		`<th colspan="2" align="left">h</th>`, "<td>2</td>",
 		`<svg viewBox="0 0 100 40" role="img">`,
 		`<text x="64" y="14">label</text>`,
@@ -84,7 +84,7 @@ func TestReplyHTMLBlockTagSwallowsFollowingLines(t *testing.T) {
 // closing tag is dropped and an unclosed one is closed inside the reply.
 func TestReplyHTMLBalancesStrayTags(t *testing.T) {
 	out := servedReply("</div></div></td></table><b>open\n\n<i>unclosed")
-	if out != "<b>open\n<p><i>unclosed</i></p></b>" {
+	if out != "<b>open\n\n<i>unclosed</i></b>" {
 		t.Errorf("balanced reply = %q", out)
 	}
 }

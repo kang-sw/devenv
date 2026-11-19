@@ -1,6 +1,6 @@
 {
   "ws": {
-    "archive_sha256": "5f293f13b1d0e062fb13e968b9b562a28751c34c004d5da079a02481f791c17f",
+    "archive_sha256": "56227c91418c7fa688a90f6b130f2d8c47b2dd34278e4347c9c0028fda97db91",
     "files": {
       ".claude-plugin/plugin.json": "1f3039a3992df506dd123e5515578abafbbffbe1fdc634a511e519fc80a01651",
       ".codex-plugin/hooks.json": "e3f3ea60f82fb0795c63bf54b9208647f39cb3779f050d1c755fabdc8a434490",
@@ -67,7 +67,7 @@
       "rsrc/lead-workflow-manual/native-spawn-binding.claude.md": "fc7258226abd15ad2baef2ef8a361f6777d8390868a595853f61812def0cf310",
       "rsrc/lead-workflow-manual/native-spawn-binding.codex.md": "ea1977984de016a95df292c3384e93982aa67b12bbd5e8850c7ed792acbdf284",
       "rsrc/lead-workflow-manual/native-spawn-binding.md": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "rsrc/manifest.json": "a2ed16fc9c3a5e6aca4c2b1b72e2919d615e0f21c2a7b99fa908408d2ff4b1f6",
+      "rsrc/manifest.json": "e5042f2fc4748115dd5ecd0f27f3b67d5dd1d745ab6d448933cd139c4c9807dc",
       "rsrc/reference-discovery/reference-discovery.md": "4492f45ecff14ec454754cd9af4775b33a0df1f9cd5cf705b3f75bad75defba2",
       "rsrc/review-config/review-config.md": "dfbbf5be52c83cfb4f86edb862f8e7b135afcc7f5efb9433e808d08ac37ff53b",
       "rsrc/review-handler/review-handler.md": "485399d9c8e491a1c33c14338da768c1a61451d6a9b24042f41571ff5ee313f6",
@@ -88,7 +88,7 @@
       "rsrc/ticket-worker-elevated/ticket-worker-elevated.md": "8f5b8c4c1d3c7305b507d61f5d01431080df7108379dc673e1f883bc307b26d3",
       "rsrc/ticket-worker/ticket-worker.md": "8764420ae7acc6e1fa2cee1e385a1493225207d68179ca1fa9ee6332a4c4ff44",
       "rsrc/tracker/tracker.md": "5bcd627f9630252ba25e5b6c3a604490db2bc92c97eb9d93bb997ec9b12bad4f",
-      "rsrc/whiteboard/whiteboard.md": "641c3b925d0c6f137aa33d3ee21c7493b46564620a201b0a0066d5458f53578a",
+      "rsrc/whiteboard/whiteboard.md": "449a7f5ab353735b4087b3d4e2c70f473b4e6f6ef0b72ff88c6d1370ec124019",
       "rsrc/worker-stop-protocol.md": "7870e882ebe7d0938b15fb0643369c77c947d1919293ae5e125855ce86200e2d",
       "runtime.json": "46fcbb84f29958e1656a2da3e37f1f23fe6fdbb4154f3735399977a3716a55dc",
       "skills/lead-audit-doc/SKILL.md": "910af43a6f9921271580584d590e14c76effba51350a502197c6fa307971df67",
@@ -110,7 +110,7 @@
     }
   },
   "wsflow": {
-    "archive_sha256": "938923f72b31596414872aeb84682abcbcc5b3c9d69f48e8a3bb3678dd9f4862",
+    "archive_sha256": "718c00cdada5994928aebf83d479718bda16f1bf8416df938d3e97941c0f0ddc",
     "files": {
       ".claude-plugin/plugin.json": "ced5ef4b088015773a12d13b755d92acf2676160072fd8a4b5359d0b0bb0db53",
       ".codex-plugin/plugin.json": "ddaab57098d596ea3fe9a6dbc34dd51a8e2f7c0601bd21530a12676c51a0a745",
@@ -176,7 +176,7 @@
       "rsrc/lead-workflow-manual/native-spawn-binding.claude.md": "fc7258226abd15ad2baef2ef8a361f6777d8390868a595853f61812def0cf310",
       "rsrc/lead-workflow-manual/native-spawn-binding.codex.md": "ea1977984de016a95df292c3384e93982aa67b12bbd5e8850c7ed792acbdf284",
       "rsrc/lead-workflow-manual/native-spawn-binding.md": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "rsrc/manifest.json": "a2ed16fc9c3a5e6aca4c2b1b72e2919d615e0f21c2a7b99fa908408d2ff4b1f6",
+      "rsrc/manifest.json": "e5042f2fc4748115dd5ecd0f27f3b67d5dd1d745ab6d448933cd139c4c9807dc",
       "rsrc/reference-discovery/reference-discovery.md": "4492f45ecff14ec454754cd9af4775b33a0df1f9cd5cf705b3f75bad75defba2",
       "rsrc/review-config/review-config.md": "dfbbf5be52c83cfb4f86edb862f8e7b135afcc7f5efb9433e808d08ac37ff53b",
       "rsrc/review-handler/review-handler.md": "485399d9c8e491a1c33c14338da768c1a61451d6a9b24042f41571ff5ee313f6",
@@ -197,7 +197,7 @@
       "rsrc/ticket-worker-elevated/ticket-worker-elevated.md": "8f5b8c4c1d3c7305b507d61f5d01431080df7108379dc673e1f883bc307b26d3",
       "rsrc/ticket-worker/ticket-worker.md": "8764420ae7acc6e1fa2cee1e385a1493225207d68179ca1fa9ee6332a4c4ff44",
       "rsrc/tracker/tracker.md": "5bcd627f9630252ba25e5b6c3a604490db2bc92c97eb9d93bb997ec9b12bad4f",
-      "rsrc/whiteboard/whiteboard.md": "641c3b925d0c6f137aa33d3ee21c7493b46564620a201b0a0066d5458f53578a",
+      "rsrc/whiteboard/whiteboard.md": "449a7f5ab353735b4087b3d4e2c70f473b4e6f6ef0b72ff88c6d1370ec124019",
       "rsrc/worker-stop-protocol.md": "7870e882ebe7d0938b15fb0643369c77c947d1919293ae5e125855ce86200e2d",
       "runtime.json": "c82d15689caf21924a02490658eaeb520a3fd0ed25fd0918e9b35ec0917838e2",
       "skills/lead-audit-doc/SKILL.md": "a42494d1687900d3cd18bdccda893182b4f8a323338f4d913ed4e0fe9469b715",
