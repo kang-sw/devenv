@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wslive"
 )
@@ -613,91 +614,141 @@ func TestAgyCatalogValues(t *testing.T) {
 	}
 }
 
-// TestAgyMapperUnsolicitedUpdatesDoNotOpenTurn: live updates with no open
-// session/prompt (agy's background-command wakeup) must not open a turn or
-// pollute the next prompt's reply, while replay and rejoined in-flight prompts
-// still open and close normally.
-func TestAgyMapperUnsolicitedUpdatesDoNotOpenTurn(t *testing.T) {
-	m := newAgyMapper("s")
-	rr := &agyRun{m: m, answers: map[string]controlAnswer{}}
+// TestAgyMapperUnsolicitedAndRejoinTurnsAlwaysClose verifies that every turn
+// opened without a tracked outstanding prompt (unsolicited wakeups,
+// unsolicited permission requests, replayed open bursts after ReplayDone, and
+// steered prompts across --replace) is bounded by wakeTimer or a live prompt
+// response and never wedges inTurn or drops steered output.
+func TestAgyMapperUnsolicitedAndRejoinTurnsAlwaysClose(t *testing.T) {
+	restoreUsage, restoreIdle := agyWakeUsageQuiet, agyWakeIdleQuiet
+	agyWakeUsageQuiet = 20 * time.Millisecond
+	agyWakeIdleQuiet = 40 * time.Millisecond
+	t.Cleanup(func() {
+		agyWakeUsageQuiet = restoreUsage
+		agyWakeIdleQuiet = restoreIdle
+	})
 
-	// Unsolicited burst with no open prompt.
-	var evs []Event
-	for _, line := range []string{
-		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"bg1","name":"run_command","status":"completed"}}}`,
-		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"thinking"}}}}`,
-		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"unsolicited 1"}}}}`,
-		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":" unsolicited 2"}}}}`,
-		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"u1","name":"read_file","status":"in_progress","args":{}}}}`,
-		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"usage_update","used":9404,"size":1048576}}}`,
-	} {
-		evs = append(evs, m.mapLine([]byte(line), rr)...)
-	}
-	if m.inTurn {
-		t.Fatal("unsolicited updates must not set inTurn")
-	}
-	notices, usage := 0, 0
-	for _, ev := range evs {
-		if ev.TurnStart || ev.TurnEnd {
-			t.Fatalf("unsolicited updates must not emit turn boundaries: %+v", evs)
-		}
-		if ev.Notice != "" {
-			notices++
-		}
-		if ev.Live != nil && ev.Live.Kind == wslive.KindStatus {
-			usage++
-		}
-		if ev.Live != nil && (ev.Live.Kind == wslive.KindReply || ev.Live.Kind == wslive.KindAgent) {
-			t.Fatalf("unsolicited updates must not emit reply or tool batch events: %+v", ev)
-		}
-	}
-	if notices != 1 || usage != 1 {
-		t.Fatalf("want 1 notice and 1 usage event, got %d notices, %d usage (%+v)", notices, usage, evs)
-	}
+	t.Run("unsolicited burst closes via quiet timer and does not pollute next prompt", func(t *testing.T) {
+		m := newAgyMapper("s")
+		closedCh := make(chan []Event, 1)
+		m.setWakeClose(func() { closedCh <- m.closeUnsolicited(1000) })
+		rr := &agyRun{m: m, answers: map[string]controlAnswer{}}
 
-	// Next real prompt gets a clean turn and reply.
-	m.promptSent("ws-p-e-1")
-	var turn []Event
-	for _, line := range []string{
-		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"real reply"}}}}`,
-		`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"ws-p-e-1"}`,
-	} {
-		turn = append(turn, m.mapLine([]byte(line), rr)...)
-	}
-	if got := finalReplies(turn); !slices.Equal(got, []string{"real reply"}) {
-		t.Fatalf("next real turn reply polluted: %q", got)
-	}
-	if m.inTurn {
-		t.Fatal("real turn did not close")
-	}
+		var evs []Event
+		for _, line := range []string{
+			`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"thinking"}}}}`,
+			`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"unsolicited 1"}}}}`,
+			`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":" unsolicited 2"}}}}`,
+			`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"usage_update","used":9404,"size":1048576}}}`,
+		} {
+			evs = append(evs, m.mapLine([]byte(line), rr)...)
+		}
+		if !m.inTurn || !m.unsolicitedTurn || !slices.ContainsFunc(evs, func(ev Event) bool { return ev.TurnStart }) {
+			t.Fatalf("unsolicited burst must open a bounded turn: inTurn=%v unsolicited=%v", m.inTurn, m.unsolicitedTurn)
+		}
+		var closed []Event
+		select {
+		case closed = <-closedCh:
+		case <-time.After(time.Second):
+			t.Fatal("wakeTimer did not fire for unsolicited burst")
+		}
+		if m.inTurn || !slices.ContainsFunc(closed, func(ev Event) bool { return ev.TurnEnd }) {
+			t.Fatalf("unsolicited burst did not close: inTurn=%v evs=%+v", m.inTurn, closed)
+		}
+		if got := finalReplies(closed); !slices.Equal(got, []string{"unsolicited 1 unsolicited 2"}) {
+			t.Fatalf("unsolicited reply = %q", got)
+		}
 
-	// Holder replay and rejoined in-flight prompt still open and close.
-	rm := newAgyMapper("s")
-	rm.rejoinPending = true
-	var replayed []Event
-	for _, line := range []string{
-		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"old"}}}}`,
-		`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"ws-p-prev-1"}`,
-	} {
-		replayed = append(replayed, rm.mapLine([]byte(line), silentReplies{})...)
-	}
-	if !slices.ContainsFunc(replayed, func(ev Event) bool { return ev.TurnStart }) || !slices.ContainsFunc(replayed, func(ev Event) bool { return ev.TurnEnd }) {
-		t.Fatalf("replayed turn must open and close: %+v", replayed)
-	}
-	// Live first chunk of an earlier daemon's in-flight prompt still opens and closes.
-	live := rm.mapLine([]byte(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"inflight"}}}}`), rr)
-	if !slices.ContainsFunc(live, func(ev Event) bool { return ev.TurnStart }) || !rm.inTurn {
-		t.Fatalf("rejoined in-flight turn must open: %+v", live)
-	}
-	end := rm.mapLine([]byte(`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"ws-p-prev-2"}`), rr)
-	if !slices.ContainsFunc(end, func(ev Event) bool { return ev.TurnEnd }) || rm.inTurn || rm.rejoinPending {
-		t.Fatalf("rejoined in-flight turn must close and clear rejoinPending: %+v", end)
-	}
-	// Subsequent live unsolicited update is ignored.
-	after := rm.mapLine([]byte(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"stray"}}}}`), rr)
-	if slices.ContainsFunc(after, func(ev Event) bool { return ev.TurnStart }) || rm.inTurn {
-		t.Fatalf("post-rejoin unsolicited update must not open turn: %+v", after)
-	}
+		// Next real prompt gets a clean turn and reply.
+		m.promptSent("ws-p-e-1")
+		var turn []Event
+		for _, line := range []string{
+			`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"real reply"}}}}`,
+			`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"ws-p-e-1"}`,
+		} {
+			turn = append(turn, m.mapLine([]byte(line), rr)...)
+		}
+		if got := finalReplies(turn); !slices.Equal(got, []string{"real reply"}) {
+			t.Fatalf("next real turn reply polluted: %q", got)
+		}
+		if m.inTurn {
+			t.Fatal("real turn did not close")
+		}
+	})
+
+	t.Run("unsolicited permission request opens turn and waits for answer before closing", func(t *testing.T) {
+		m := newAgyMapper("s")
+		closedCh := make(chan []Event, 1)
+		m.setWakeClose(func() { closedCh <- m.closeUnsolicited(2000) })
+		rr := &agyRun{m: m, answers: map[string]controlAnswer{}}
+
+		req := m.mapLine([]byte(`{"jsonrpc":"2.0","id":7,"method":"session/request_permission","params":{"toolCall":{"toolCallId":"perm1","name":"run_command","title":"Run"},"options":[{"optionId":"a","kind":"allow_once"}]}}`), rr)
+		if !m.inTurn || !m.unsolicitedTurn || !slices.ContainsFunc(req, func(ev Event) bool { return ev.TurnStart }) {
+			t.Fatalf("permission request must open a turn (not appear on an idle session): %+v", req)
+		}
+		if evs := m.closeUnsolicited(1500); evs != nil || !m.inTurn {
+			t.Fatalf("turn must stay open while approval is pending: %+v", evs)
+		}
+		// Tool completes (clearing approval); idle quiet timer now closes the turn.
+		m.mapLine([]byte(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"perm1","name":"run_command","status":"completed"}}}`), rr)
+		select {
+		case closed := <-closedCh:
+			if m.inTurn || !slices.ContainsFunc(closed, func(ev Event) bool { return ev.TurnEnd }) {
+				t.Fatalf("post-approval turn did not close: %+v", closed)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("wakeTimer did not fire after approval completed")
+		}
+	})
+
+	t.Run("replay open burst arms close at ReplayDone and steered prompt across replace keeps chunks", func(t *testing.T) {
+		rm := newAgyMapper("s")
+		closedCh := make(chan []Event, 1)
+		rm.setWakeClose(func() { closedCh <- rm.closeUnsolicited(3000) })
+		rr := &agyRun{m: rm, answers: map[string]controlAnswer{}}
+
+		// Replay a closed prompt followed by an unclosed unsolicited burst.
+		for _, line := range []string{
+			`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"old"}}}}`,
+			`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"ws-p-prev-1"}`,
+			`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"replayed burst"}}}}`,
+			`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"usage_update","used":500,"size":1048576}}}`,
+		} {
+			rm.mapLine([]byte(line), silentReplies{})
+		}
+		if !rm.inTurn || rm.unsolicitedTurn {
+			t.Fatalf("before ReplayDone: inTurn=%v unsolicited=%v", rm.inTurn, rm.unsolicitedTurn)
+		}
+		rm.replayState(Event{ReplayDone: true})
+		select {
+		case closed := <-closedCh:
+			if rm.inTurn || !slices.ContainsFunc(closed, func(ev Event) bool { return ev.TurnEnd }) {
+				t.Fatalf("replayed burst must close after ReplayDone: %+v", closed)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("replayed burst stayed wedged after ReplayDone")
+		}
+
+		// Steered prompt in flight across --replace: P1 finishes live, then P2
+		// chunks arrive without being dropped and P2's response closes cleanly.
+		rm.mapLine([]byte(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"p1"}}}}`), silentReplies{})
+		rm.replayState(Event{ReplayDone: true})
+		end1 := rm.mapLine([]byte(`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"ws-p-prev-2"}`), rr)
+		if !slices.ContainsFunc(end1, func(ev Event) bool { return ev.TurnEnd }) || rm.inTurn {
+			t.Fatalf("P1 response did not close P1: %+v", end1)
+		}
+		live2 := rm.mapLine([]byte(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"steered p2"}}}}`), rr)
+		if !slices.ContainsFunc(live2, func(ev Event) bool { return ev.TurnStart }) || !rm.inTurn {
+			t.Fatalf("steered P2 chunks must open turn, not be dropped: %+v", live2)
+		}
+		end2 := rm.mapLine([]byte(`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"ws-p-prev-3"}`), rr)
+		if !slices.ContainsFunc(end2, func(ev Event) bool { return ev.TurnEnd }) || rm.inTurn {
+			t.Fatalf("P2 response did not close P2: %+v", end2)
+		}
+		if got := finalReplies(end2); !slices.Equal(got, []string{"steered p2"}) {
+			t.Fatalf("steered P2 reply = %q, want [steered p2]", got)
+		}
+	})
 }
 
 // TestAgyMapperBackgroundTasksAndWakeupTurn pins ACP background-command
@@ -763,6 +814,36 @@ func TestAgyMapperBackgroundTasksAndWakeupTurn(t *testing.T) {
 	if got := finalReplies(closed); !slices.Equal(got, []string{"DONE"}) {
 		t.Fatalf("wakeup final reply = %q, want [DONE]", got)
 	}
+
+	// Wakeup turn launching a daemon (IsDaemon: true) must still arm wakeTimer
+	// and close cleanly without wedging or raising BackgroundTasks (R1 blocker B).
+	restoreUsage := agyWakeUsageQuiet
+	agyWakeUsageQuiet = 20 * time.Millisecond
+	t.Cleanup(func() { agyWakeUsageQuiet = restoreUsage })
+	daemonClosed := make(chan []Event, 1)
+	m.setWakeClose(func() { daemonClosed <- m.closeUnsolicited(2000) })
+	for _, line := range []string{
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"d-wake","name":"run_command","status":"in_progress","args":{"CommandLine":"npm run dev","IsDaemon":true}}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"daemon started"}}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"usage_update","used":9500,"size":1048576}}}`,
+	} {
+		m.mapLine([]byte(line), rr)
+	}
+	select {
+	case evs := <-daemonClosed:
+		if m.inTurn || !slices.ContainsFunc(evs, func(ev Event) bool { return ev.TurnEnd }) {
+			t.Fatalf("wakeup turn with IsDaemon did not close: inTurn=%v evs=%+v", m.inTurn, evs)
+		}
+		if slices.ContainsFunc(evs, func(ev Event) bool { return ev.BackgroundTasks != nil }) {
+			t.Fatalf("IsDaemon in wakeup turn must not raise BackgroundTasks: %+v", evs)
+		}
+		if got := finalReplies(evs); !slices.Equal(got, []string{"daemon started"}) {
+			t.Fatalf("wakeup daemon reply = %q, want [daemon started]", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("wakeup turn with IsDaemon wedged (wakeTimer never fired)")
+	}
+	m.setWakeClose(nil)
 
 	// Cancelled turn with an open run_command must NOT mark BackgroundTasks.
 	m.promptSent("ws-p-e-2")

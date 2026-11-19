@@ -566,6 +566,7 @@ func (c *conv) processGone() {
 // prompts, and what it last reported.
 func (c *conv) processEnded() {
 	c.stopIdle()
+	hadBgGrace := c.bgGraceTimer != nil
 	c.stopBgGrace()
 	c.wrapHold = false
 	if c.turn {
@@ -595,13 +596,16 @@ func (c *conv) processEnded() {
 		c.activeMode, c.bgTasks, c.mcpBroken = "", 0, nil
 		c.background, c.monitors = nil, nil
 	})
-	if hadBackgroundTasks {
+	if hadBackgroundTasks || hadBgGrace || c.heldRes != nil {
 		// A child's held background turn settles and its parent's idle
-		// timer re-arms once the process exits and clears background work.
+		// timer re-arms once the process exits and clears background work
+		// (including when the process exits during bgResumeGrace).
 		if !c.closed && !c.quitting {
 			c.releaseHeld()
 		}
-		c.watched()
+		if hadBackgroundTasks || hadBgGrace {
+			c.watched()
+		}
 	}
 	c.mcpSeen, c.mcpChecking, c.mcpAgain, c.mcpAgainNames = nil, false, false, nil
 	c.retry, c.alerted = nil, false
@@ -708,7 +712,7 @@ func (c *conv) finishLine() {
 // idleNow reports whether the idle timer may stop the process. Read child
 // state here too: a spawn notification may still be queued when the timer fires.
 func (c *conv) idleNow() bool {
-	if c.turn || c.replaying || c.bgTasks != 0 || c.bgGraceTimer != nil {
+	if c.turn || c.replaying || c.bgTasks > 0 || c.bgGraceTimer != nil {
 		return false
 	}
 	kind := ParentConversation

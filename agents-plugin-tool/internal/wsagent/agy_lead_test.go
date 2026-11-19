@@ -442,9 +442,13 @@ func TestAgyWorkerProfile(t *testing.T) {
 
 // TestAgyLeadUnsolicitedUpdateDoesNotWedgeTurn: if agy self-resumes after a
 // background command finishes with no open session/prompt, its unsolicited
-// session/update notifications must not wedge the conversation in a running
-// turn or pollute the next prompt's reply.
+// session/update burst opens a bounded turn that closes cleanly once quiet and
+// never wedges the conversation or pollutes the next prompt's reply.
 func TestAgyLeadUnsolicitedUpdateDoesNotWedgeTurn(t *testing.T) {
+	restoreUsage := agyWakeUsageQuiet
+	agyWakeUsageQuiet = 40 * time.Millisecond
+	t.Cleanup(func() { agyWakeUsageQuiet = restoreUsage })
+
 	h, f := newAgyLeadHarness(t)
 	h.startAt("http://127.0.0.1:1")
 	id := h.lead(BackendAgy, LeadOptions{}).ID
@@ -465,7 +469,10 @@ func TestAgyLeadUnsolicitedUpdateDoesNotWedgeTurn(t *testing.T) {
 		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"background finished"}}}}`,
 		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"usage_update","used":9404,"size":1048576}}}`,
 	)
-	// Next turn still dispatches immediately as a fresh prompt (not wedged).
+	eventually(t, "unsolicited burst auto-closed", func() bool {
+		return h.state(id).Status == StatusIdle && slices.Contains(ringTexts(h.ring(id), "reply"), "background finished")
+	})
+	// Next turn dispatches cleanly as a fresh prompt (not wedged).
 	h.send(id, "second")
 	eventually(t, "the second prompt", func() bool { return len(agyPromptIDs(h, holder)) == 2 })
 	h.holders.out(holder,
@@ -476,6 +483,184 @@ func TestAgyLeadUnsolicitedUpdateDoesNotWedgeTurn(t *testing.T) {
 	if st := h.state(id); st.Status != StatusIdle || st.Error != "" {
 		t.Fatalf("after second turn: %+v", st)
 	}
+	if !slices.Contains(ringTexts(h.ring(id), "reply"), "second reply") {
+		t.Fatalf("second reply missing from ring: %v", ringTexts(h.ring(id), "reply"))
+	}
+}
+
+// TestAgyLeadReplayUnsolicitedBurstDoesNotWedge (R1 finding 1A): an
+// unsolicited/wakeup burst in the holder ring with no session/prompt response
+// must not leave the lead wedged in StatusRunning after daemon --replace.
+func TestAgyLeadReplayUnsolicitedBurstDoesNotWedge(t *testing.T) {
+	restoreUsage, restoreIdle := agyWakeUsageQuiet, agyWakeIdleQuiet
+	agyWakeUsageQuiet = 40 * time.Millisecond
+	agyWakeIdleQuiet = 80 * time.Millisecond
+	t.Cleanup(func() {
+		agyWakeUsageQuiet = restoreUsage
+		agyWakeIdleQuiet = restoreIdle
+	})
+
+	for _, tc := range []struct {
+		name  string
+		lines []string
+	}{
+		{
+			name: "with usage_update",
+			lines: []string{
+				`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"replayed wakeup"}}}}`,
+				`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"usage_update","used":9404,"size":1048576}}}`,
+			},
+		},
+		{
+			name: "without usage_update",
+			lines: []string{
+				`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"replayed bare burst"}}}}`,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, f := newAgyLeadHarness(t)
+			const endpoint = "http://127.0.0.1:1"
+			h.startAt(endpoint)
+			id := h.lead(BackendAgy, LeadOptions{}).ID
+			f.replyID = id
+			h.send(id, "first")
+			holder := h.holder(id)
+			eventually(t, "first prompt", func() bool { return len(agyPromptIDs(h, holder)) == 1 })
+			h.holders.out(holder,
+				`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done1"}}}}`,
+				`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"`+agyPromptIDs(h, holder)[0]+`"}`,
+			)
+			h.idle(id)
+
+			// Write an unsolicited burst with no prompt response into the holder ring, then --replace.
+			h.holders.out(holder, tc.lines...)
+			h.runner.Close()
+			h.holders.restart()
+			h.startAt(endpoint)
+
+			eventually(t, "replay finished and burst settled", func() bool {
+				c := h.runner.conv(id)
+				if c == nil {
+					return false
+				}
+				settled := false
+				c.do(func() { settled = c.proc != nil && !c.replaying && !c.turn })
+				return settled
+			})
+			// Subsequent send must not be blocked by a wedged turn.
+			h.send(id, "after replay")
+			eventually(t, "post-replay prompt dispatched", func() bool { return len(agyPromptIDs(h, holder)) == 2 })
+			h.holders.out(holder,
+				`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"after replay ok"}}}}`,
+				`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"`+agyPromptIDs(h, holder)[1]+`"}`,
+			)
+			h.idle(id)
+		})
+	}
+}
+
+// TestAgyLeadIdleRestartUnsolicitedWakeupCloses (R1 finding 1B): after an idle
+// daemon --replace, a later live unsolicited wakeup must open and close cleanly
+// instead of staying wedged forever.
+func TestAgyLeadIdleRestartUnsolicitedWakeupCloses(t *testing.T) {
+	restoreUsage := agyWakeUsageQuiet
+	agyWakeUsageQuiet = 40 * time.Millisecond
+	t.Cleanup(func() { agyWakeUsageQuiet = restoreUsage })
+
+	h, f := newAgyLeadHarness(t)
+	const endpoint = "http://127.0.0.1:1"
+	h.startAt(endpoint)
+	id := h.lead(BackendAgy, LeadOptions{}).ID
+	f.replyID = id
+	h.send(id, "first")
+	holder := h.holder(id)
+	eventually(t, "first prompt", func() bool { return len(agyPromptIDs(h, holder)) == 1 })
+	h.holders.out(holder,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"idle1"}}}}`,
+		`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"`+agyPromptIDs(h, holder)[0]+`"}`,
+	)
+	h.idle(id)
+
+	// Daemon --replace while idle.
+	h.runner.Close()
+	h.holders.restart()
+	h.startAt(endpoint)
+	eventually(t, "idle rejoin complete", func() bool {
+		c := h.runner.conv(id)
+		if c == nil {
+			return false
+		}
+		ready := false
+		c.do(func() { ready = c.proc != nil && !c.replaying && !c.turn })
+		return ready
+	})
+
+	// Later live unsolicited wakeup arrives with no open prompt.
+	h.holders.out(holder,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"late wakeup"}}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"usage_update","used":9500,"size":1048576}}}`,
+	)
+	eventually(t, "late wakeup settled", func() bool {
+		return h.state(id).Status == StatusIdle && slices.Contains(ringTexts(h.ring(id), "reply"), "late wakeup")
+	})
+
+	h.send(id, "next")
+	eventually(t, "next prompt dispatched", func() bool { return len(agyPromptIDs(h, holder)) == 2 })
+	h.holders.out(holder,
+		`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"`+agyPromptIDs(h, holder)[1]+`"}`,
+	)
+	h.idle(id)
+}
+
+// TestAgyLeadSteeredPromptAcrossReplace (R1 finding 2): if daemon 1 sent a
+// prompt and steered a second prompt before --replace, finishing P1 live after
+// rejoin must not cause P2's chunks to be dropped; P2 opens, streams its reply,
+// and closes on P2's prompt response.
+func TestAgyLeadSteeredPromptAcrossReplace(t *testing.T) {
+	h, f := newAgyLeadHarness(t)
+	const endpoint = "http://127.0.0.1:1"
+	h.startAt(endpoint)
+	id := h.lead(BackendAgy, LeadOptions{}).ID
+	f.replyID = id
+	h.send(id, "p1")
+	holder := h.holder(id)
+	eventually(t, "p1 sent", func() bool { return len(agyPromptIDs(h, holder)) == 1 })
+	h.holders.out(holder,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"p1 part"}}}}`,
+	)
+	// Steer a second prompt while P1 is still in flight.
+	h.send(id, "p2 steered")
+	h.steerHeld(id)
+	h.runner.InboxChanged(id)
+	eventually(t, "p2 steered into running turn", func() bool { return len(agyPromptIDs(h, holder)) == 2 })
+	ids := agyPromptIDs(h, holder)
+
+	// Daemon --replace while both P1 and P2 are in flight.
+	h.runner.Close()
+	h.holders.restart()
+	h.startAt(endpoint)
+	eventually(t, "rejoin complete mid-turn", func() bool {
+		c := h.runner.conv(id)
+		if c == nil {
+			return false
+		}
+		ready := false
+		c.do(func() { ready = c.proc != nil && !c.replaying && c.turn })
+		return ready
+	})
+
+	// P1 finishes live; then P2 streams its reply and finishes live.
+	h.holders.out(holder,
+		`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"`+ids[0]+`"}`,
+	)
+	h.holders.out(holder,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"p2 steered reply"}}}}`,
+		`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"`+ids[1]+`"}`,
+	)
+	eventually(t, "steered p2 reply recorded and idle", func() bool {
+		return h.state(id).Status == StatusIdle && slices.Contains(ringTexts(h.ring(id), "reply"), "p2 steered reply")
+	})
 }
 
 // TestAgyLeadBackgroundTaskWakeupClosesAutomatically verifies the full ACP

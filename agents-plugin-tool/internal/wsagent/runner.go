@@ -365,6 +365,11 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 	for _, st := range r.List() {
 		if c := r.conv(st.ID); c != nil {
 			c.do(func() {
+				// Release a persisted HeldTurn whose background work ended
+				// with the previous daemon (open children still hold it).
+				if c.rec.Parent != nil && c.rec.HolderID == "" {
+					c.releaseHeld()
+				}
 				c.spawnDirty = true
 				c.live.writeSnapshot()
 			})
