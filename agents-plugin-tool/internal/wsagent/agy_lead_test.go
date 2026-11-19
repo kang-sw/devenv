@@ -356,11 +356,11 @@ func TestAgyLeadPromptCarriesTheWorkflowManual(t *testing.T) {
 				t.Fatalf("one session request: %d", len(news))
 			}
 			text, _ := acpField(t, news[0], "_meta", "antigravity", "systemPrompt", "append").(string)
-			want := leadKeySentence(key) + leadManualOnly
+			want := strings.TrimRight(leadKeySentence(key)+leadManualOnly, "\n") + "\n\n" + agyLeadBgShellRule + "\n"
 			if manual != nil {
 				want = leadKeySentence(key) + "The workflow manual below is binding; its session state is as of this session's start. " +
 					"After any compaction, or when you need fresh session state, call the workflow_manual tool with this key and follow it.\n\n" +
-					manual.text + "\n"
+					manual.text + "\n\n" + agyLeadBgShellRule + "\n"
 				if calls := manual.list(); len(calls) != 1 || calls[0][0] != BackendAgy || !sameDir(calls[0][1], h.root) || calls[0][2] != key {
 					t.Fatalf("the manual renders once, for agy, the lead's directory, and its key: %v", calls)
 				}
@@ -430,12 +430,50 @@ func TestAgyWorkerProfile(t *testing.T) {
 		t.Fatalf("worker profile: %+v, %v", p, err)
 	}
 	text, ok := p.BuiltinInstructions()
-	for _, want := range []string{"agent.spawn", "mailbox.send", "Do not use", "invoke_subagent", "define_subagent", "manage_subagents"} {
+	for _, want := range []string{"agent.spawn", "mailbox.send", "Do not use", "invoke_subagent", "define_subagent", "manage_subagents", "Never end your turn", "run_command", "manage_task"} {
 		if !ok || !strings.Contains(text, want) {
 			t.Errorf("worker instructions lack %q: %q", want, text)
 		}
 	}
 	if _, err := (AgyBackend{}).Start(context.Background(), StartSpec{}); err == nil || !strings.Contains(err.Error(), "HTTP MCP route") {
 		t.Fatalf("a worker without ws tools is refused: %v", err)
+	}
+}
+
+// TestAgyLeadUnsolicitedUpdateDoesNotWedgeTurn: if agy self-resumes after a
+// background command finishes with no open session/prompt, its unsolicited
+// session/update notifications must not wedge the conversation in a running
+// turn or pollute the next prompt's reply.
+func TestAgyLeadUnsolicitedUpdateDoesNotWedgeTurn(t *testing.T) {
+	h, f := newAgyLeadHarness(t)
+	h.startAt("http://127.0.0.1:1")
+	id := h.lead(BackendAgy, LeadOptions{}).ID
+	f.replyID = id
+	h.send(id, "first")
+	holder := h.holder(id)
+	eventually(t, "the first prompt", func() bool { return len(agyPromptIDs(h, holder)) == 1 })
+	h.holders.out(holder,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"waiting"}}}}`,
+		`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"`+agyPromptIDs(h, holder)[0]+`"}`,
+	)
+	h.idle(id)
+
+	// Unsolicited self-resume (recorded shape from agy 1.5.12): no prompt is open.
+	h.holders.out(holder,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"tool_call_update","toolCallId":"bg1","name":"run_command","status":"completed"}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"thinking"}}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"background finished"}}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"usage_update","used":9404,"size":1048576}}}`,
+	)
+	// Next turn still dispatches immediately as a fresh prompt (not wedged).
+	h.send(id, "second")
+	eventually(t, "the second prompt", func() bool { return len(agyPromptIDs(h, holder)) == 2 })
+	h.holders.out(holder,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"agy-s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"second reply"}}}}`,
+		`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"`+agyPromptIDs(h, holder)[1]+`"}`,
+	)
+	h.idle(id)
+	if st := h.state(id); st.Status != StatusIdle || st.Error != "" {
+		t.Fatalf("after second turn: %+v", st)
 	}
 }

@@ -612,3 +612,90 @@ func TestAgyCatalogValues(t *testing.T) {
 		}
 	}
 }
+
+// TestAgyMapperUnsolicitedUpdatesDoNotOpenTurn: live updates with no open
+// session/prompt (agy's background-command wakeup) must not open a turn or
+// pollute the next prompt's reply, while replay and rejoined in-flight prompts
+// still open and close normally.
+func TestAgyMapperUnsolicitedUpdatesDoNotOpenTurn(t *testing.T) {
+	m := newAgyMapper("s")
+	rr := &agyRun{m: m, answers: map[string]controlAnswer{}}
+
+	// Unsolicited burst with no open prompt.
+	var evs []Event
+	for _, line := range []string{
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"bg1","name":"run_command","status":"completed"}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"thinking"}}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"unsolicited 1"}}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":" unsolicited 2"}}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"u1","name":"read_file","status":"in_progress","args":{}}}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"usage_update","used":9404,"size":1048576}}}`,
+	} {
+		evs = append(evs, m.mapLine([]byte(line), rr)...)
+	}
+	if m.inTurn {
+		t.Fatal("unsolicited updates must not set inTurn")
+	}
+	notices, usage := 0, 0
+	for _, ev := range evs {
+		if ev.TurnStart || ev.TurnEnd {
+			t.Fatalf("unsolicited updates must not emit turn boundaries: %+v", evs)
+		}
+		if ev.Notice != "" {
+			notices++
+		}
+		if ev.Live != nil && ev.Live.Kind == wslive.KindStatus {
+			usage++
+		}
+		if ev.Live != nil && (ev.Live.Kind == wslive.KindReply || ev.Live.Kind == wslive.KindAgent) {
+			t.Fatalf("unsolicited updates must not emit reply or tool batch events: %+v", ev)
+		}
+	}
+	if notices != 1 || usage != 1 {
+		t.Fatalf("want 1 notice and 1 usage event, got %d notices, %d usage (%+v)", notices, usage, evs)
+	}
+
+	// Next real prompt gets a clean turn and reply.
+	m.promptSent("ws-p-e-1")
+	var turn []Event
+	for _, line := range []string{
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"real reply"}}}}`,
+		`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"ws-p-e-1"}`,
+	} {
+		turn = append(turn, m.mapLine([]byte(line), rr)...)
+	}
+	if got := finalReplies(turn); !slices.Equal(got, []string{"real reply"}) {
+		t.Fatalf("next real turn reply polluted: %q", got)
+	}
+	if m.inTurn {
+		t.Fatal("real turn did not close")
+	}
+
+	// Holder replay and rejoined in-flight prompt still open and close.
+	rm := newAgyMapper("s")
+	rm.rejoinPending = true
+	var replayed []Event
+	for _, line := range []string{
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"old"}}}}`,
+		`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"ws-p-prev-1"}`,
+	} {
+		replayed = append(replayed, rm.mapLine([]byte(line), silentReplies{})...)
+	}
+	if !slices.ContainsFunc(replayed, func(ev Event) bool { return ev.TurnStart }) || !slices.ContainsFunc(replayed, func(ev Event) bool { return ev.TurnEnd }) {
+		t.Fatalf("replayed turn must open and close: %+v", replayed)
+	}
+	// Live first chunk of an earlier daemon's in-flight prompt still opens and closes.
+	live := rm.mapLine([]byte(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"inflight"}}}}`), rr)
+	if !slices.ContainsFunc(live, func(ev Event) bool { return ev.TurnStart }) || !rm.inTurn {
+		t.Fatalf("rejoined in-flight turn must open: %+v", live)
+	}
+	end := rm.mapLine([]byte(`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"ws-p-prev-2"}`), rr)
+	if !slices.ContainsFunc(end, func(ev Event) bool { return ev.TurnEnd }) || rm.inTurn || rm.rejoinPending {
+		t.Fatalf("rejoined in-flight turn must close and clear rejoinPending: %+v", end)
+	}
+	// Subsequent live unsolicited update is ignored.
+	after := rm.mapLine([]byte(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"stray"}}}}`), rr)
+	if slices.ContainsFunc(after, func(ev Event) bool { return ev.TurnStart }) || rm.inTurn {
+		t.Fatalf("post-rejoin unsolicited update must not open turn: %+v", after)
+	}
+}

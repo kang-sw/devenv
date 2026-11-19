@@ -76,6 +76,11 @@ var (
 // parent harness sessions' (leadDropEnv names ws's own).
 var agyDropEnv = []string{"CLAUDE", "CODEX_", "PI_", "ORCA_"}
 
+// agyLeadBgShellRule is appended to a hosted agy lead's system prompt so it
+// overrides Antigravity's reactive-wakeup guidance for background commands;
+// workers carry the matching rule in instructions/agent-worker-agy.md.
+const agyLeadBgShellRule = `Never end your turn while a ` + "`run_command`" + ` task you started to finish is still running (ignore this for ` + "`IsDaemon: true`" + ` processes). Override Antigravity's "end the turn and wait" / reactive-wakeup guidance for background commands: ending the turn closes your ws turn early and ws does not receive Antigravity's internal wakeup. Stay in the same turn — do other work or check status with ` + "`manage_task`" + ` — until it finishes.`
+
 // agyRingSkip matches agy's thought chunks, which the mapper drops: a
 // lead's holder keeps them out of its ring. A line whose shape this no
 // longer matches is kept.
@@ -144,6 +149,7 @@ func (b AgyBackend) Start(ctx context.Context, spec StartSpec) (Process, error) 
 		spec.Holder.ringSkip = agyRingSkip
 	}
 	m := newAgyMapper(spec.SessionID)
+	m.rejoinPending = attach
 	sp, err := startChild(spec, cmd, m, agyProtocol{})
 	if err != nil {
 		return nil, err
@@ -251,12 +257,23 @@ func (p *agyProcess) open(spec StartSpec) error {
 		return fmt.Errorf("agy answered initialize with ACP protocol version %d; ws speaks version 1", reply.ProtocolVersion)
 	}
 	params := map[string]any{"cwd": spec.workDir(), "mcpServers": []any{agyHTTPServer(spec.MCPSession)}}
+	var appendText string
 	if spec.Instructions != "" {
 		text, err := os.ReadFile(spec.Instructions)
 		if err != nil {
 			return fmt.Errorf("read the instruction file: %w", err)
 		}
-		params["_meta"] = map[string]any{"antigravity": map[string]any{"systemPrompt": map[string]any{"append": string(text)}}}
+		appendText = string(text)
+	}
+	if spec.Lead != nil {
+		if trimmed := strings.TrimRight(appendText, "\n"); trimmed != "" {
+			appendText = trimmed + "\n\n" + agyLeadBgShellRule + "\n"
+		} else {
+			appendText = agyLeadBgShellRule + "\n"
+		}
+	}
+	if appendText != "" {
+		params["_meta"] = map[string]any{"antigravity": map[string]any{"systemPrompt": map[string]any{"append": appendText}}}
 	}
 	kind, method := agyKindNew, "session/new"
 	if spec.SessionID != "" {
@@ -534,9 +551,14 @@ type agyMapper struct {
 
 	// outstanding are the prompts this process sent and agy has not
 	// answered; inTurn is set from a turn's first content to its end.
-	outstanding map[string]bool
-	inTurn      bool
-	turnSeq     int
+	// rejoinPending allows a rejoined held lead's first live updates to
+	// open an in-flight turn started by an earlier daemon until a live
+	// prompt response settles it or this daemon sends a prompt.
+	outstanding        map[string]bool
+	inTurn             bool
+	rejoinPending      bool
+	unsolicitedNoticed bool
+	turnSeq            int
 	group       int
 	groupCalls  bool
 	reply       strings.Builder
@@ -616,6 +638,8 @@ func (m *agyMapper) mode() string {
 
 func (m *agyMapper) promptSent(id string) {
 	m.mu.Lock()
+	m.rejoinPending = false
+	m.unsolicitedNoticed = false
 	m.outstanding[id] = true
 	m.mu.Unlock()
 }
@@ -672,7 +696,7 @@ func (m *agyMapper) mapLine(line []byte, replies lineReplies) []Event {
 	case msg.Method != "" && hasID:
 		return m.request(msg, replies, now)
 	case msg.Method == "session/update":
-		return m.update(msg.Params, now)
+		return m.update(msg.Params, replies, now)
 	case msg.Method == "" && hasID:
 		return m.response(msg, replies, now)
 	}
@@ -702,7 +726,12 @@ func (m *agyMapper) request(msg agyMessage, replies lineReplies, now int64) []Ev
 	if id == "" {
 		id = "rpc:" + string(raw)
 	}
-	out := m.startTurn(nil)
+	var out []Event
+	if m.canOpenTurn(replies) {
+		out = m.startTurn(nil)
+	} else {
+		out = m.unsolicitedNotice()
+	}
 	m.approvals[id] = &agyApproval{raw: raw, toolCallID: p.ToolCall.ToolCallID, options: p.Options}
 	if p.ToolCall.ToolCallID != "" {
 		m.approvalOf[p.ToolCall.ToolCallID] = id
@@ -739,6 +768,9 @@ func (m *agyMapper) response(msg agyMessage, replies lineReplies, now int64) []E
 		return nil
 	}
 	if kind == agyKindPrompt {
+		if _, replaying := replies.(silentReplies); !replaying {
+			m.rejoinPending = false
+		}
 		ours := m.outstanding[id]
 		delete(m.outstanding, id)
 		if len(m.outstanding) > 0 || (!ours && !m.inTurn) {
@@ -904,6 +936,28 @@ func (m *agyMapper) configOptions(body json.RawMessage) {
 	}
 }
 
+// canOpenTurn reports whether agy output may open a turn: a turn is already
+// open, ws has an unanswered session/prompt, the holder is replaying an
+// earlier daemon's output, or a rejoined lead may still be waiting on the
+// earlier daemon's prompt. Live updates with no open prompt (for example
+// agy's internal wakeup after a background command finishes) never receive a
+// session/prompt response, so opening a turn for them would wedge the runner.
+func (m *agyMapper) canOpenTurn(replies lineReplies) bool {
+	if m.inTurn || len(m.outstanding) > 0 || m.rejoinPending {
+		return true
+	}
+	_, replaying := replies.(silentReplies)
+	return replaying
+}
+
+func (m *agyMapper) unsolicitedNotice() []Event {
+	if m.unsolicitedNoticed {
+		return nil
+	}
+	m.unsolicitedNoticed = true
+	return []Event{{Notice: "agy emitted updates with no open session/prompt (likely a background task wakeup); ignored to avoid wedging the turn"}}
+}
+
 // startTurn opens a turn at its first content: a turn ws's own prompt
 // began is already running in the runner, and a replayed one is rebuilt
 // here.
@@ -945,6 +999,7 @@ func (m *agyMapper) endTurn(msg agyMessage, now int64) []Event {
 		out = append(out, *b)
 	}
 	m.inTurn = false
+	m.unsolicitedNoticed = false
 	ev := Event{TurnEnd: true}
 	var r struct {
 		StopReason string `json:"stopReason"`
@@ -985,7 +1040,7 @@ type agyUpdate struct {
 }
 
 // update maps a session/update notification.
-func (m *agyMapper) update(params json.RawMessage, now int64) []Event {
+func (m *agyMapper) update(params json.RawMessage, replies lineReplies, now int64) []Event {
 	var p struct {
 		Update agyUpdate `json:"update"`
 	}
@@ -995,6 +1050,9 @@ func (m *agyMapper) update(params json.RawMessage, now int64) []Event {
 	u := p.Update
 	switch u.SessionUpdate {
 	case "agent_message_chunk":
+		if !m.canOpenTurn(replies) {
+			return m.unsolicitedNotice()
+		}
 		out := m.startTurn(nil)
 		var c struct {
 			Type string `json:"type"`
@@ -1018,8 +1076,14 @@ func (m *agyMapper) update(params json.RawMessage, now int64) []Event {
 		}
 		return append(out, Event{Live: &wslive.Event{Kind: wslive.KindReply, Text: m.reply.String()}})
 	case "agent_thought_chunk":
+		if !m.canOpenTurn(replies) {
+			return m.unsolicitedNotice()
+		}
 		return m.startTurn(nil)
 	case "tool_call":
+		if !m.canOpenTurn(replies) {
+			return append(m.unsolicitedNotice(), m.toolStatus(u, now)...)
+		}
 		out := m.flushReply(m.startTurn(nil))
 		name := u.Name
 		if name == "" {
