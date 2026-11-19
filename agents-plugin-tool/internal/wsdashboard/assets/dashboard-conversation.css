@@ -202,9 +202,11 @@ details[open] > summary.conv-row > .row-chevron { transform: rotate(0deg); }
 .wbupdate-l { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 50%; font-size: 9px; font-weight: 800; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 16%, transparent); }
 .wbupdate-item-id { font: 700 11px var(--wb-mono); color: var(--wb-muted-fg); }
 .wbupdate-items { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 7px; min-width: 0; padding: 2px 6px; }
-.wbupdate-panel { flex-wrap: nowrap; }
-.wbupdate-panel-label { flex: none; color: var(--wb-muted-fg); font-size: 10px; font-weight: 800; }
-.wbupdate-panel .wbupdate-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wbupdate-panel { flex-wrap: nowrap; align-items: center; padding: 5px 8px; border-left: 3px solid var(--wb-primary); border-radius: 3px 6px 6px 3px; background: color-mix(in srgb, var(--wb-primary) 13%, transparent); }
+.wbupdate-panel-label { flex: none; display: inline-flex; align-items: center; gap: 3px; color: var(--wb-primary); font-size: 10.5px; font-weight: 800; }
+.wbupdate-panel-label .i { width: 12px; height: 12px; }
+.wbupdate-panel .wbupdate-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--wb-fg); font-weight: 600; }
+.wbupdate-log .wbupdate-text { color: var(--wb-muted-fg); font-size: 12px; }
 .wbupdate-panel a { flex: none; }
 .wbupdate-status { display: block; padding: 0 12px; font-size: 11px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
 .wbupdate-status:empty { display: none; }
