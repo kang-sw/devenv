@@ -33,7 +33,9 @@ import (
 // worktree.remove owns every pooled worktree), is locked, or holds a live
 // session or a terminal that may still run (its folder at or below the
 // worktree; a terminal by the folder it started in). An ended session and
-// an exited terminal there are listed only.
+// an exited terminal there are listed only in the check; once git removes
+// the worktree, ended sessions in it are purged from the index and their
+// registry directories are deleted.
 //
 // A delete needs force when it discards work: changed or untracked files,
 // commits a detached HEAD holds that no branch, tag, or remote ref reaches,
@@ -261,11 +263,48 @@ func worktreeHolds(target, realTarget, folder string) bool {
 	if folder == "" || !filepath.IsAbs(folder) {
 		return false
 	}
-	if pathWithin(target, folder) {
+	if pathWithin(target, folder) || (realTarget != "" && pathWithin(realTarget, folder)) {
 		return true
 	}
 	real, err := filepath.EvalSymlinks(folder)
 	return err == nil && pathWithin(realTarget, real)
+}
+
+// worktreeEndedSessions returns the reply-ids of ended sessions (listed or
+// unlisted) whose project folder sits at or below target.
+func worktreeEndedSessions(target, realTarget string, sessions []Session, now time.Time) map[string]bool {
+	var out map[string]bool
+	for _, s := range sessions {
+		if s.Registration.Live(now) || !worktreeHolds(target, realTarget, s.Project) {
+			continue
+		}
+		if out == nil {
+			out = map[string]bool{}
+		}
+		out[s.ReplyID] = true
+	}
+	return out
+}
+
+// purgeWorktreeSessions removes ended sessions attached to a deleted worktree
+// from the index and deletes their session registry directories from disk.
+// Live sessions are left untouched (checkWorktreeDelete refuses them with
+// deleteBusy).
+func (d *Daemon) purgeWorktreeSessions(target, realTarget string, before map[string]bool, now time.Time) {
+	if d.index == nil {
+		return
+	}
+	for _, s := range d.index.Sessions() {
+		if s.Registration.Live(now) {
+			continue
+		}
+		if !before[s.ReplyID] && !worktreeHolds(target, realTarget, s.Project) {
+			continue
+		}
+		if err := d.index.purge(s.ReplyID); err != nil {
+			fmt.Fprintf(d.log, "dashboard: remove session %s after deleting %s: %v\n", s.ReplyID, target, err)
+		}
+	}
 }
 
 // worktreeHolders are the sessions and terminals in the worktree target
@@ -514,8 +553,9 @@ func (d *Daemon) handleWorktreeDeletePreview(w http.ResponseWriter, r *http.Requ
 // needs force the submit did not carry, or was forced on a token the
 // worktree no longer matches; 409 with text while another git action of the
 // repository runs; 404 as the preview does; 502 with git's line when the
-// check or git failed. Once git removed the worktree it answers 200 with a
-// worktreeDeleteAnswer, and the rail reads the repository's worktrees again.
+// check or git failed. Once git removed the worktree it discards ended
+// sessions held by it, answers 200 with a worktreeDeleteAnswer, and the
+// rail reads the repository's worktrees again.
 func (d *Daemon) handleWorktreeDelete(w http.ResponseWriter, r *http.Request) {
 	var req worktreeDeleteRequest
 	if !worktreeDeleteBody(w, r, &req) {
@@ -553,6 +593,14 @@ func (d *Daemon) handleWorktreeDelete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, c)
 		return
 	}
+	realTarget, err := filepath.EvalSymlinks(c.Path)
+	if err != nil {
+		realTarget = c.Path
+	}
+	var endedBefore map[string]bool
+	if d.index != nil {
+		endedBefore = worktreeEndedSessions(c.Path, realTarget, d.index.Sessions(), time.Now())
+	}
 	args := []string{"worktree", "remove"}
 	if c.Force {
 		args = append(args, "--force")
@@ -562,6 +610,8 @@ func (d *Daemon) handleWorktreeDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fmt.Fprintf(d.log, "dashboard: deleted the worktree %s (force %t)\n", c.Path, c.Force)
+	d.purgeWorktreeSessions(c.Path, realTarget, endedBefore, time.Now())
+	d.rail.dropWorktree(root, c.Path, realTarget)
 	d.rail.reread(root)
 	d.broker.wake(railListRepoKey)
 	msg := wsi18n.T(lang, "rail.wt.deleted", c.Path)

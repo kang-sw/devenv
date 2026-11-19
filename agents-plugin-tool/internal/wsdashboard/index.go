@@ -497,6 +497,29 @@ func (x *Index) reread(replyID string) {
 	x.lanesMu.Unlock()
 }
 
+// purge deletes one session's registry directory from disk and drops it from
+// the index under its lane, calling OnChange when an entry was removed.
+func (x *Index) purge(replyID string) error {
+	if !ValidReplyID(replyID) {
+		return fmt.Errorf("invalid reply-id %q", replyID)
+	}
+	x.lanesMu.Lock()
+	l := x.hold(replyID)
+	x.lanesMu.Unlock()
+	defer func() {
+		x.lanesMu.Lock()
+		x.unhold(replyID, l)
+		x.lanesMu.Unlock()
+	}()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	err := os.RemoveAll(SessionDir(x.opts.Dir, replyID))
+	if x.apply(replyID, nil) && x.opts.OnChange != nil {
+		x.opts.OnChange(replyID)
+	}
+	return err
+}
+
 // readLane confirms registration absence under the session lane. An
 // unreadable registration retains the entry for the next polling backstop.
 func (x *Index) readLane(replyID string, l *lane, full bool, stores LiveStores) {

@@ -247,6 +247,108 @@ func TestWorktreeDeleteRefusals(t *testing.T) {
 	f.deleted(t, worktreeDeleteRequest{Path: busy})
 }
 
+// TestWorktreeDeletePurgesEndedSessions pins the regression where deleting a
+// non-pool worktree left its ended sessions in the index until the 5-minute
+// poll, causing the rail to synthesize a ghost pending-worktree row for the
+// deleted path.
+func TestWorktreeDeletePurgesEndedSessions(t *testing.T) {
+	f := newDeleteFixture(t)
+	wt := filepath.Join(f.tmp, "purge")
+	keep := filepath.Join(f.tmp, "keep")
+	gitRun(t, f.root, "worktree", "add", "-q", "-b", "purge", wt)
+	gitRun(t, f.root, "worktree", "add", "-q", "-b", "keep", keep)
+	if err := f.d.recordUserWorktree(f.root, keep, "keep"); err != nil {
+		t.Fatal(err)
+	}
+	sub := mkDir(t, filepath.Join(wt, "sub"))
+
+	now := time.Now()
+	common := filepath.Join(f.root, ".git")
+	writeEnded := func(id, project string, unlisted bool) {
+		t.Helper()
+		reg := Registration{
+			ReplyID:      id,
+			Project:      project,
+			Harness:      "claude",
+			GitCommonDir: common,
+			RegisteredAt: stampFor(now),
+			HeartbeatAt:  stampFor(now),
+			EndedAt:      stampFor(now),
+			Unlisted:     unlisted,
+		}
+		if err := WriteRegistration(f.dir, reg); err != nil {
+			t.Fatal(err)
+		}
+		f.src.setPage(id, PageContent{})
+	}
+	writeEnded("gone", wt, false)
+	writeEnded("gonesub", sub, false)
+	writeEnded("goneunlisted", wt, true)
+	writeEnded("other", keep, false)
+	f.d.Index().Refresh()
+
+	// Seed the rail with a live viewer so l.repos holds wt too, then delete wt
+	// without calling Index().Refresh() afterward.
+	_ = f.d.railView(f.d.pages())
+	release := f.d.rail.watch()
+	defer release()
+	waitFor(t, "rail to read worktrees", func() bool {
+		for _, ws := range f.d.railView(f.d.pages()).Workspaces {
+			if samePath(ws.Path, f.root) {
+				for _, w := range ws.Worktrees {
+					if samePath(w.Path, wt) && w.Branch == "purge" {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	})
+
+	f.deleted(t, worktreeDeleteRequest{Path: wt})
+
+	view := f.d.railView(f.d.pages())
+	var ws *RailWorkspace
+	for i := range view.Workspaces {
+		if samePath(view.Workspaces[i].Path, f.root) {
+			ws = &view.Workspaces[i]
+			break
+		}
+	}
+	if ws == nil {
+		t.Fatalf("workspace %s missing from rail view: %+v", f.root, view.Workspaces)
+	}
+	if pending := ws.PendingWorktrees(); len(pending) != 0 {
+		t.Errorf("PendingWorktrees after delete = %+v, want empty", pending)
+	}
+	foundKeep := false
+	for _, w := range ws.Worktrees {
+		if samePath(w.Path, wt) || pathWithin(wt, w.Path) {
+			t.Errorf("deleted worktree %s still has a rail row: %+v", wt, w)
+		}
+		if samePath(w.Path, keep) {
+			foundKeep = true
+		}
+	}
+	if !foundKeep {
+		t.Errorf("untouched worktree %s missing from rail view: %+v", keep, ws.Worktrees)
+	}
+	for _, id := range []string{"gone", "gonesub", "goneunlisted"} {
+		if _, ok := f.d.Index().Session(id); ok {
+			t.Errorf("session %s still in index after worktree delete", id)
+		}
+		if pathExists(SessionDir(f.dir, id)) {
+			t.Errorf("session %s registry dir still on disk after worktree delete", id)
+		}
+	}
+	if _, ok := f.d.Index().Session("other"); !ok {
+		t.Errorf("session other in untouched worktree %s was removed from index", keep)
+	}
+	if !pathExists(SessionDir(f.dir, "other")) {
+		t.Errorf("session other registry dir in untouched worktree %s was removed from disk", keep)
+	}
+}
+
 // TestWorktreeDeleteRefusesARunningTerminal: a terminal whose shell started
 // in the worktree blocks its delete as a live session does, on real
 // holders.
