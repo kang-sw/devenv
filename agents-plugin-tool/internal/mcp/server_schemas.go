@@ -320,7 +320,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.get",
-			"description": "Read-only: resolve config keys and report the scope that supplied each (session, including the session's parent chain, then project, repo, global, builtin). Supply exactly one of key or nonempty keys (unique, nonblank strings). Bulk JSON returns mode=resolved-v1 and ordered results with ok and either value/scope/warnings or error.message; per-key errors do not fail siblings. A key declared by an adapter key manifest returns a value of its declared type (number, boolean, or string), and a stored value that fails that type returns the declared default with a warning; every other key returns its stored string, or scope unset when nothing holds or declares it. Defaults to compact text; use format=json for structured output.",
+			"description": "Resolve config keys through session (including parents), project, repo, global and builtin scopes. Supply key or nonempty unique keys. Bulk JSON returns ordered per-key results; errors do not fail siblings. Manifest keys return typed values, falling back to defaults with a warning on invalid values; other keys return strings or unset. Text by default; format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -399,19 +399,19 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "rationale.query",
-			"description": "Search recorded rationale: commit ## AI Context and ## Ticket Updates bullets and ticket decision sections. Address by path globs, a code site (git log -L), a pickaxe string (git log -S), or a text query. Returns pointers with quoted records grouped by ticket thread, newest first. Defaults to compact text; use format=json for structured output.",
+			"description": "Search commit rationale and ticket decisions by text, paths, site or pickaxe. Results group quotes by ticket thread.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"query":        stringProperty("BM25 text query; combines with any addressing mode."),
-					"paths":        stringArrayProperty("File globs, matched against a commit's touched paths, or a ticket's named paths and its thread's commits."),
-					"site":         stringProperty("<path>:/<regex>/,+N (default +10) or <path>#L<start>-L<end>, via git log -L. Exclusive with paths and pickaxe."),
-					"occurrence":   integerProperty("Which match of site's regex to use. Default 1."),
+					"query":        stringProperty("BM25 query; combines with addressing."),
+					"paths":        stringArrayProperty("Globs matching commit, ticket or thread paths."),
+					"site":         stringProperty("git log -L site: path:/regex/,+N (default +10) or path#Lstart-Lend. Exclusive with paths and pickaxe."),
+					"occurrence":   integerProperty("Site regex match; default 1."),
 					"pickaxe":      stringProperty("git log -S string. Exclusive with paths and site."),
 					"since":        stringProperty("YYYY-MM-DD, inclusive."),
 					"until":        stringProperty("YYYY-MM-DD, inclusive."),
-					"stems":        stringArrayProperty("Keep only records in these ticket threads."),
-					"exclude_stem": stringProperty("Drop the ticket's own records and commits that name only this stem."),
+					"stems":        stringArrayProperty("Limit to these ticket threads."),
+					"exclude_stem": stringProperty("Exclude ticket records and commits naming only this stem."),
 					"kinds":        stringArrayProperty("commit, ticket. Default both."),
 					"order":        enumStringProperty("Default relevance with query, else time.", []string{"relevance", "time"}),
 					"limit":        integerProperty("Default 30, max 100."),
@@ -434,19 +434,19 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "git.merge",
-			"description": "Lead-only. Merge a local source branch into a local target with --no-ff, leaving you on the target. Needs a clean index; unstaged changes and untracked files are tolerated unless git refuses an overlap. Merged impl/* and goal/* sources are deleted. A main/master target is refused unless retried with release_target_override and the OIDs the refusal reported. Conflicts stay on the target for lead-delegate. Relay any size advisory to the user rather than splitting files yourself.",
+			"description": "Lead-only. Merge a local branch into a target with --no-ff; needs a clean index, leaves the target checked out. Deletes merged impl/* and goal/* sources. A main/master target needs release_target_override plus the OIDs a refusal reports. Conflicts stay for lead-delegate. Relay size advisories; never split files.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"branch":                  stringProperty("Source branch; defaults to the current one. impl/* must be impl/<root>/<stem>."),
-					"target":                  stringProperty("Target branch; required unless the source is impl/<root>/<stem>, whose root it defaults to."),
-					"release_target_override": map[string]any{"type": "boolean", "default": false, "description": "Acknowledge the main/master release-target policy; needs both expected OIDs and never waives must-resolve findings."},
-					"expected_source_oid":     stringProperty("With release_target_override: the refusal's source_oid."),
-					"expected_target_oid":     stringProperty("With release_target_override: the refusal's target_oid."),
-					"title":                   stringProperty("One-line merge commit title."),
-					"description":             stringProperty("Optional merge commit description."),
+					"branch":                  stringProperty("Source; defaults to current branch. impl/* must be impl/root/stem."),
+					"target":                  stringProperty("Target; defaults to source impl/root/stem's root, else required."),
+					"release_target_override": map[string]any{"type": "boolean", "default": false, "description": "Acknowledge main/master policy; requires both OIDs, never waives must-resolve findings."},
+					"expected_source_oid":     stringProperty("The refusal's source_oid."),
+					"expected_target_oid":     stringProperty("The refusal's target_oid."),
+					"title":                   stringProperty("Merge commit title."),
+					"description":             stringProperty("Merge commit description."),
 					"ai_context":              stringArrayProperty("AI Context bullets for the merge commit."),
-					"updated_tickets":         stringArrayProperty("Optional ticket update summaries."),
+					"updated_tickets":         stringArrayProperty("Ticket update summaries."),
 					"format":                  stringProperty(formatPropertyDescription),
 				},
 				"required": []string{"title", "ai_context"},
@@ -454,30 +454,30 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "git.commit",
-			"description": "Create a workflow-aware Git commit from explicit paths and structured message fields. Text by default; format=json for structured output.",
+			"description": "Workflow-aware commit of explicit paths.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"paths":           stringArrayProperty("Paths to stage; only these are staged."),
-					"title":           stringProperty("Single-line commit title."),
-					"description":     stringProperty("Optional body before AI Context."),
+					"paths":           stringArrayProperty("Only these paths are staged."),
+					"title":           stringProperty("Commit title."),
+					"description":     stringProperty("Body before AI Context."),
 					"ai_context":      stringArrayProperty("AI Context bullets."),
-					"updated_tickets": stringArrayProperty("Ticket update summaries; omitted, staged ticket moves and Result/Edition headings are detected."),
+					"updated_tickets": stringArrayProperty("Omit to detect staged ticket moves and Result/Edition headings."),
 					"followups": map[string]any{
 						"type":        "array",
-						"description": "Root lead only. Forward-looking, ownerless work under ## Follow-ups; ids return in input order. Ticket-owned work goes in the ticket, rationale in ai_context.",
+						"description": "Root lead only: ownerless future work; IDs return in order.",
 						"items": map[string]any{
 							"type": "object",
 							"properties": map[string]any{
-								"level":    enumStringProperty("minor < important < critical.", wsgit.FollowupLevels),
+								"level":    enumStringProperty("Ascending severity.", wsgit.FollowupLevels),
 								"category": enumStringProperty("Closed category.", wsgit.FollowupCategories),
-								"content":  stringProperty("One line, e.g. <path>:<line> and a summary."),
+								"content":  stringProperty("One-line summary and location."),
 							},
 							"required": []string{"level", "category", "content"},
 						},
 					},
-					"resolves":        stringArrayProperty("Follow-up ids this commit resolves, written under ## Resolves. An unknown or resolved id warns; the commit lands."),
-					"expected_branch": stringProperty("The branch you believe you are on, from memory, not read from HEAD; if unsure, confirm you should commit here. Refused, nothing staged, when it differs from the checkout or HEAD is detached."),
+					"resolves":        stringArrayProperty("Follow-up IDs to resolve; unknown IDs warn."),
+					"expected_branch": stringProperty("Branch you expect, from memory, not HEAD. A mismatch or detached HEAD stages nothing."),
 					"format":          stringProperty(formatPropertyDescription),
 				},
 				"required": []string{"paths", "title", "ai_context", "expected_branch"},
@@ -499,13 +499,13 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "worktree.release",
-			"description": "Lead-only. Return a worktree to the pool: run its profile's pre_release hooks (a failure leaves it unchanged and leased), clean it (git reset --hard + git clean -ffdx, discarding uncommitted changes and every ignored path its profile does not preserve), detach HEAD so it becomes reuse-eligible, record the size of the preserved artifacts it kept for acquire's nudge, and remove its worktree lease. Never deletes the worktree (worktree.remove does) and does not retire the worker key. Identify it by path or by a worker session key bound to it. Refuses, changing nothing, a worktree leased to another holder (the caller's session key is neither the lease's parent_key nor its worker_key, and the key argument is not its worker_key) and a dirty worktree with no lease, unless force is true. Cleaning up a worktree whose owner is gone: pass force: true. Defaults to text; use format=json for structured output.",
+			"description": "Lead-only. Return a worktree to the pool by path or worker key: run pre_release hooks, reset --hard and clean -ffdx (discarding uncommitted and unpreserved ignored files), detach HEAD, record preserved size and remove its lease. Hook failure leaves it leased. Does not delete the worktree or retire the key. Refuses another holder's lease or a dirty unleased worktree unless forced. Text by default; format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path":   stringProperty("Absolute worktree path to release. Provide path or key."),
 					"key":    stringProperty("A worker session key bound to the worktree to release. Provide path or key."),
-					"force":  boolProperty("For whoever cleans up stale worktrees (a lead or the user): release a worktree leased to another holder, or a dirty one with no lease. Cleaning up a worktree whose owner is gone: pass force: true, only when you have confirmed the lease owner is gone or agreed; the release discards its uncommitted work."),
+					"force":  boolProperty("Release another holder's lease or a dirty unleased worktree. Confirm the owner is gone or agreed first; uncommitted work is discarded."),
 					"format": stringProperty(formatPropertyDescription),
 				},
 			},
@@ -570,12 +570,12 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "note.write",
-			"description": "Write one or more notes to the worktree (worktree-local, ephemeral; the default), clone (project-scoped, worktree-agnostic, untracked), machine (PC-global), or repo (git-tracked, one file per key under ai-docs/ws-notes/) note layer. A clone or machine write requires a reason. A note outlives the session until erased; in-session state (a pending question, a next step) belongs in agenda.set. Full-overwrite per key, including priority. A larger integer priority is surfaced first in the workflow_manual ambient Notes block.",
+			"description": "Write notes to worktree (ephemeral), clone (project, untracked), machine, or repo (git-tracked) layer. Clone and machine require a reason. Notes persist until erased; session state belongs in agenda.set. Each key is overwritten including priority; higher priority surfaces first.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty(sessionKeyPropertyDescription),
-					"layer":       enumStringProperty(`Which layer to write: "worktree" (this worktree only, ephemeral; write here by default), "clone" (this project's checkouts, worktree-agnostic, untracked; only when a session in another worktree would fail without the fact), "machine" (PC-global, project-agnostic; only when a session in another project would fail without the fact), or "repo" (git-tracked, one file per key under ai-docs/ws-notes/; staging/commit rides the caller's normal git.commit).`, []string{"worktree", "clone", "machine", "repo"}),
+					"layer":       enumStringProperty(`Layer: worktree by default; clone or machine only for facts needed across worktrees or projects; repo is git-tracked under ai-docs/ws-notes/.`, []string{"worktree", "clone", "machine", "repo"}),
 					"reason":      stringProperty(`Required when layer is "clone" or "machine", rejected as missing when empty: why a session in another worktree (clone) or another project (machine) would fail without this note. Checked only; not stored.`),
 					"notes":       objectArrayProperty(`Notes to write, each {"key": string, "value": string, "priority": integer}. priority is an integer defaulting to 0; a larger number is surfaced earlier (5 before 1).`),
 					"format":      stringProperty(formatPropertyDescription),
@@ -627,12 +627,12 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "note.query",
-			"description": "Query notes by key glob and optional written_at date range. \"layer\" is optional: a single layer name (\"worktree\", \"clone\", \"machine\", or \"repo\") queries just that layer and returns a plain untagged record array (today's shape); an array of layer names, or omitting \"layer\" entirely, queries multiple/all layers and returns each record tagged with its originating layer. Results are ordered by priority descending (larger number first), then newest written_at, then key. Retrieves the bodies the workflow_manual ambient Notes block lists key-only or hides.",
+			"description": "Query notes by key glob and written_at range, including bodies hidden by workflow_manual. A single layer returns untagged records; an array or omitted layer returns layer-tagged records. Ordered by descending priority, newest written_at, then key.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty(sessionKeyPropertyDescription),
-					"layer":       enumStringOrArrayProperty(`Optional. Which layer(s) to search: a single "worktree"/"clone"/"machine"/"repo" string, or an array of those. Omit to search all four layers. A single-string call returns a plain, untagged record array; an array or omitted call returns each record tagged with its "layer". "worktree" is this worktree only; "clone" holds facts a session in another worktree needs; "machine" holds facts a session in another project needs.`, noteLayerEnumValues),
+					"layer":       enumStringOrArrayProperty(`Layer name or array; omit to search all. A single string returns untagged records; array or omission tags each layer.`, noteLayerEnumValues),
 					"glob":        stringProperty(`Optional key glob (path.Match syntax, e.g. "ticket.*"). Omit or "*" to match every key.`),
 					"from":        stringProperty("Optional inclusive lower bound on written_at (RFC3339 or a date prefix such as \"2026-08-01\")."),
 					"then":        stringProperty("Optional inclusive upper bound on written_at (RFC3339 or a date prefix)."),
@@ -715,13 +715,13 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        wikiQueryTool,
-			"description": "Read a tracker store's wikis: Markdown or .html pages on git branches, with full history (top-level lead, or a store's support conversation on its own store). op read returns the commit it read: pass it as base to wiki.update. Link a page as [text](wiki:<name>/<path>). Text by default.",
+			"description": "Read tracker wikis (Markdown or .html) and history; top-level lead or store support only. Pass read's commit as base to wiki.update. Link as [text](wiki:<name>/<path>). Text by default.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty(sessionKeyPropertyDescription),
 					"store":       stringProperty("Tracker store ID (tracker.query lists them)."),
-					"op":          enumStringProperty("list: wikis and their tips. pages: the wiki's pages. read: one page and the commit read. search: lines containing query (case-insensitive fixed string). history: commits, newest first, narrowed by path. diff: path's change in to. recovery: tips a rewind or deletion replaced.", wikiQueryOps),
+					"op":          enumStringProperty("list wikis; pages in wiki; read page and commit; search lines (case-insensitive literal); history commits; diff path in to; recovery replaced tips.", wikiQueryOps),
 					"wiki":        stringProperty("Wiki name; required by every op but list and recovery."),
 					"path":        stringProperty("Page path, folders joined by / (an .html suffix names an HTML page). Required by read and diff."),
 					"commit":      stringProperty("Read at this commit instead of the tip."),
@@ -736,29 +736,29 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        wikiUpdateTool,
-			"description": "Save one edit to a tracker store's wiki as a signed commit; for a top-level lead or the store's support conversation. Pass as base the commit wiki.query op=read returned. An edit overlapping later saves is refused as a conflict carrying both texts and the tip; others merge. The result names your next base.",
+			"description": "Save one signed wiki edit (top-level lead or store support). Pass wiki.query read's commit as base. Overlapping later saves conflict, returning both texts and the tip; others merge.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty(sessionKeyPropertyDescription),
-					"store":       stringProperty("Tracker store ID (tracker.query lists them)."),
-					"wiki":        stringProperty("Wiki name: [a-z0-9][a-z0-9-]*, at most 64 characters."),
-					"op":          enumStringProperty("write content at path; rename path to to; delete path; restore path as of commit.", wikiUpdateOps),
-					"base":        stringProperty("Commit from wiki.query read or your last save; required unless new_wiki."),
-					"new_wiki":    boolProperty("Create the wiki; pass no base."),
-					"path":        stringProperty("Page path joined by /; an .html suffix makes an HTML page, shown sandboxed."),
-					"to":          stringProperty("rename: the new path; its suffix sets the kind."),
-					"content":     stringProperty("write: the whole page, Markdown or (for .html) a whole HTML document."),
-					"commit":      stringProperty("restore: the commit to restore from."),
-					"message":     stringProperty("Optional commit message body."),
+					"store":       stringProperty("Tracker store ID."),
+					"wiki":        stringProperty("Wiki name: [a-z0-9][a-z0-9-]*, max 64."),
+					"op":          enumStringProperty("Operation on the page.", wikiUpdateOps),
+					"base":        stringProperty("Commit from read or last save; required unless new_wiki."),
+					"new_wiki":    boolProperty("Create the wiki; no base."),
+					"path":        stringProperty("Page path; .html makes a sandboxed HTML page."),
+					"to":          stringProperty("rename: new path; suffix sets kind."),
+					"content":     stringProperty("write: page content."),
+					"commit":      stringProperty("restore: source commit."),
+					"message":     stringProperty("Commit message."),
 					"images": map[string]any{
 						"type":        "array",
-						"description": "write: PNG/JPEG/GIF/WebP for a Markdown page, shown as ![alt](attachment:<sha256>).",
+						"description": "write: PNG/JPEG/GIF/WebP; link as ![alt](attachment:sha256).",
 						"items": map[string]any{
 							"type": "object",
 							"properties": map[string]any{
-								"data": stringProperty("Base64 bytes."),
-								"name": stringProperty("Optional label for the result."),
+								"data": stringProperty("Base64."),
+								"name": stringProperty("Label."),
 							},
 							"required": []string{"data"},
 						},
@@ -842,7 +842,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "mailbox.lookup_peers",
-			"description": `List the peers self-registered in one mailbox scope ("machine", "worktree", or "clone"), the caller's own correspondents, and a "self" entry: the caller process's own address when it holds an active WS_MAILBOX/WS_MAILBOX_AUTO identity, otherwise the caller session's own reply-id (opening that session's return channel as a side effect, the same as a first mailbox.send). Peers are the scope's most recent named inboxes whether or not their session is running now, newest last_seen first, at most 20; mail sent to an inbox whose session is gone queues until a session with that WS_MAILBOX name returns. An auto-minted (WS_MAILBOX_AUTO) name whose session is gone is omitted, because a restart mints a new name and never drains the old one. A name held by two running processes at once is surfaced with a conflict marker rather than silently picking one. Correspondents are the addresses this session (its session key) itself sent mail to or received mail from, in any scope, whatever "scope" is queried: newest first, at most 20, each with last_exchange (the time of this session's own send or recv, not the message's sent_at) and the counterparty's harness/cwd when known. No other session's history is visible, and it survives compaction under the same session key.`,
+			"description": `List registered peers in one scope, this session's correspondents across scopes, and self. Self is the active WS_MAILBOX identity or the session reply-id (opening its return channel). Peers are up to 20 named inboxes by last_seen, including offline ones; offline auto-minted names are omitted and simultaneous name conflicts marked. Correspondents are up to 20 by last_exchange, with harness/cwd when known; their history survives compaction.`, 
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -870,7 +870,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        dashboardIntakeTool,
-			"description": `Adapter-only: the ws dashboard hooks call this; an agent never does. Applies ordered events to the session's live dashboard state. Each is an object with a kind and an optional at (epoch milliseconds): reset (clears all live state; send it when the adapter starts); turn_start {origin?: terminal|whiteboard|mail}; turn_end {reason?}; agent {agentId?, parentId?, label?, sessionKey?, status?: running|done|failed, caption?, batches?, model?, effort?, contextTokens?, outputTps?} updates the lead (no agentId) or one subagent; permission {agentId?, tool, args} or {agentId?, clear: true} marks a permission wait; reply {text, final?} replaces the reply so far; final moves it to the conversation; user {text, origin?} is a finished user message; status {context?, limits?, cost?} replaces the usage figures; compact {phase: start|end|failed, trigger?} marks a main-conversation compaction; commands {commands: [{name, description?, source?, layer?}]} replaces the page's slash commands; command {command, text?} records one the adapter ran from the page. Send reply text at most about 10 times a second, never per token. With dashboard.enabled off nothing is recorded. The result's "accepts:" line names the optional kinds this server takes (status, compact, commands, command): send one only while the latest result names it.`,
+			"description": `Adapter-only: agents must not call. Applies ordered events to the session's dashboard state; each has a kind and optional at (epoch ms). Kinds: reset (clears live state; send at adapter start); turn_start {origin?}; turn_end {reason?}; agent {agentId?, parentId?, label?, sessionKey?, status?, caption?, batches?, model?, effort?, contextTokens?, outputTps?} updates the lead or one subagent; permission {agentId?, tool, args} or {agentId?, clear: true}; reply {text, final?} replaces the reply so far, final moves it to the conversation; user {text, origin?}; status {context?, limits?, cost?}; compact {phase: start|end|failed, trigger?}; commands {commands: [{name, description?, source?, layer?}]}; command {command, text?}. Send replies at most 10 times a second. With the dashboard off nothing is recorded. Send status, compact, commands or command only while the latest result's accepts line names it.`,
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -887,7 +887,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        dashboardInboxDrainTool,
-			"description": `Adapter-only: the ws dashboard hooks call this; an agent never does, since a message it claimed would never reach the conversation. Atomically claims the session's held dashboard messages, steering-promoted first, then oldest first; no call returns one twice, and a claimed one can no longer be cancelled or steered from the page. Each nonempty message comes wrapped in a ws:user envelope carrying its send time: inject each as the user's own message. A command entry is a slash command the user picked (/name or /name args): run it natively, not as a message; a batch splits at it, keeping order. steer_only: true claims only steering messages, for a tool boundary of a running turn. interrupt_only: true claims only interrupt entries, each a text-free request to stop the running turn with sent_at: stop a turn that started before it and drop an older entry. A full drain drops interrupt entries. Works whether or not the dashboard is on. Text by default; format json for structured messages.`,
+			"description": `Adapter-only: agents must not claim messages. Atomically claim held messages, steering first then oldest; claimed messages cannot be cancelled or steered. Inject each ws:user envelope as a user message. Run command entries natively, splitting the batch in order. steer_only claims steering at a running turn's tool boundary; interrupt_only claims text-free interrupts: stop a turn started before sent_at, discard older interrupts. Full drain drops interrupts. Works with dashboard off. Text by default; format=json for structured messages.`, 
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -901,7 +901,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.query",
-			"description": "Find tickets. A ticket_stem given alone resolves that one ticket in any status, done and dropped included, and errors when it is not found. Any other argument runs a discovery search, paginated by offset and limit after filtering. Results flag what affects dispatch: an unmet blocked-by prerequisite (single-ticket form only), `## Blocked` headings (advisory: read the section), and, where the project enables them, the assignee and the ticket lease holder. Compact text by default; format=json for structured fields.",
+			"description": "Find tickets. ticket_stem alone resolves one in any status or errors; other arguments run discovery, paginated by offset and limit. Flags unmet blocked-by (single-ticket only), advisory ## Blocked, and enabled assignee and lease.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -972,7 +972,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.move",
-			"description": "Move a ticket along the idea <-> todo <-> ready axis. Non-implementation categories (epic, research, workset) are board artifacts, never execution targets, and are rejected at the ready/ landing, as is a ticket that still carries a ## Open Decision Queue section outside fenced code. Ready promotion and epic todo settlement resolve sage-review posture from config; actionable todo moves are ungated. Stages atomically; does not commit. With the origin ticket ownership index, a lease held by another person (email) refuses the call unless dangerously_override_lease_status is true with a reason; a lease held by another clone or track proceeds with a warning, and the lease never moves.",
+			"description": "Move a ticket along idea <-> todo <-> ready; stages atomically, does not commit. Ready rejects epic, research and workset tickets (board artifacts, never execution targets) and tickets with an open ## Open Decision Queue. Ready promotion and epic todo settlement resolve sage-review posture from config; actionable todo is ungated. With the ownership index, a lease held by another person refuses unless dangerously_override_lease_status is true with a reason; a lease held by another clone or track warns; the lease never moves.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -986,14 +986,14 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.create_empty",
-			"description": "Create a dated ticket stub at ai-docs/tickets/<status>/<YYMMDD>-<stem>.md with minimal frontmatter (title plus resolved sage-review posture for ready or epic todo). Yields only a valid empty skeleton + applicable initial posture, not a full mutation orchestrator — populate the body via tickets.template. When the ticket-assignee-aware project flag is on, set_assignee (default true) stamps the assignee: true = the caller's current git user.email (nothing when unset), false = leave unassigned, or an array of emails = assign to those. Inert while the flag is off. Returns the path and a promotion tip, plus a warning when the path lies outside this worktree's active sparse-checkout scope (git drops such a file from the worktree once it is committed); does not stage or commit.",
+			"description": "Create a dated empty ticket stub with title and applicable sage-review posture; populate via tickets.template. With assignee-aware flag, set_assignee defaults to caller's git email; false leaves unassigned, array assigns emails. Warns if outside sparse-checkout scope (git drops it after commit). Returns path and promotion tip; does not stage or commit.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"stem":          stringProperty("Semantic ticket stem without date prefix (e.g. feat-foo-bar). Authoring categories: feat, bug, refactor, chore, research, epic."),
 					"initial_state": stringProperty("Ticket status: idea, todo, or ready."),
 					"set_assignee": map[string]any{
-						"description": "Assignee to stamp at creation, honored only when the ticket-assignee-aware flag is on. true (default) = the caller's current git user.email; false = leave unassigned (assign-any); an array of email strings = assign to exactly those. Empty current email (CI/bot) yields no stamp.",
+						"description": "When assignee-aware: true (default) stamps caller's git email if set; false leaves unassigned; array assigns these emails.",
 						"oneOf": []any{
 							map[string]any{"type": "boolean"},
 							map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
@@ -1028,7 +1028,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.sage_gate",
-			"description": "Resolve the sage-review gate for a ticket landing. The todo landing runs epic design-only review (completeness never applies to an epic), invoked on lead judgment when the epic's cross-child design has drifted materially — not a status boundary; actionable todo calls fail, and research and legacy worksets skip. Actionable design and completeness review runs at ready promotion after fact population. Owns posture resolution (legacy sage-review: migration, config.list fallback), the category×stage matrix, and standalone/combined mode selection. Returns an action (skip | stop_blocked | stop_missing_route_facts | stop_open_decision_queue | ask | run); for run, the reviewer(s) to spawn and the mode. A ready/ landing is refused with stop_missing_route_facts when the ticket carries no ## Route Facts section. The ready/ landing and the epic todo landing are refused with stop_open_decision_queue, before any write, while the ticket carries a ## Open Decision Queue section outside fenced code. Does not spawn reviewers.",
+			"description": "Resolve the sage-review gate for a ticket landing; does not spawn reviewers. The epic todo landing runs design-only review on lead judgment when cross-child design has drifted, not at a status boundary; actionable todo calls fail; research and legacy worksets skip. Ready promotion runs actionable design and completeness review. Returns an action: skip, stop_blocked, stop_missing_route_facts, stop_open_decision_queue, ask or run (with reviewers and mode). Ready needs a ## Route Facts section; ready and epic todo are refused, before any write, while an open decision queue exists outside fenced code.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
