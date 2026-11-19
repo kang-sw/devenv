@@ -1,0 +1,290 @@
+<!-- Mockup: one shared checkbox picker modal for 참조 (CC) and 배정 (assign), org-chart based.
+     Fragment only. Scoped under .tkpm. Tokens as in tracker-org/view.html + editor.html (dashboard dark values).
+     Replaces today's one-click CC popover (tracker-menu.js ccPickList -> m-cc commits at once) and the assign
+     popover's flat list (asgOpts). Fictitious people. Viewer: 이도윤 (lee-dy).
+     The list IS the org tree: no separate alias section. A lead row offers two independent choices,
+     "본인" and "이하 전체" (= the org that lead heads, head included). Orgs are objects attached to a head
+     member; an org with a vacant head seat is listed disabled.
+     Frame A (interactive): 참조 variant. Frame B (static): 배정 variant differences. -->
+<style>
+.tkpm { --bg:#1e1f22; --fg:#e7e7e4; --card:#1e2024; --muted:#2b2d32; --mfg:#a2a6ad; --line:#444; --pri:#7aa2ff; --pri-fg:#0c1424;
+  --fail:#f0797e; --topic:#d9dbe0; --on-topic:#1b1d21; --u1:#e3b341; --d1:#6cc39a;
+  --amb-bg:#4a3a1c; --amb:#e0a84a; --blu-bg:#1f3550; --blu:#5b9bf0; --grn-bg:#1d3b24; --grn:#5cc46a; --pur-bg:#33264d; --pur:#a57bf0;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  background:rgb(10 11 13/.72); color:var(--fg); font:13px/1.45 var(--sans); padding:24px; display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start; }
+.tkpm * { box-sizing:border-box; }
+.tkpm .cap { font-size:11.5px; font-weight:800; color:var(--mfg); letter-spacing:.04em; margin:0 0 6px; }
+.tkpm .grow { flex:1 1 0; }
+/* fixed modal height + a guaranteed list height: only .body scrolls, header/chips/note/footer never squeeze it */
+.tkpm .dlg { background:var(--bg); border:1px solid var(--line); border-radius:12px; box-shadow:0 2px 4px rgb(0 0 0/.55),0 8px 22px rgb(0 0 0/.4); display:flex; flex-direction:column; overflow:hidden; height:640px; min-height:520px; }
+.tkpm .dlg > * { flex:none; }
+.tkpm .fa .dlg { width:560px; }
+.tkpm .fb .dlg { width:520px; }
+.tkpm .dh { display:flex; align-items:center; gap:8px; padding:9px 12px 9px 16px; background:var(--muted); }
+.tkpm .dh h2 { margin:0; font-size:14px; }
+.tkpm .dh .sub { color:var(--mfg); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tkpm .dh code, .tkpm code { font-family:var(--mono); font-size:10.5px; color:var(--mfg); }
+.tkpm .x { width:26px; height:24px; border:0; border-radius:6px; background:none; color:var(--mfg); font-size:16px; cursor:pointer; }
+.tkpm .tb { display:flex; gap:6px; align-items:center; padding:8px 14px 6px; }
+.tkpm input[type=search] { font:inherit; font-size:12.5px; padding:3px 8px; border-radius:6px; border:1px solid var(--line); background:var(--card); color:var(--fg); flex:1 1 0; }
+.tkpm .btn { font:inherit; font-size:12.5px; background:var(--muted); color:var(--fg); border:0; border-radius:999px; padding:3px 12px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.tkpm .btn.mini { font-size:11.5px; padding:1px 9px; }
+.tkpm .btn.primary { background:var(--pri); color:var(--pri-fg); font-weight:700; }
+.tkpm .btn:disabled { opacity:.5; cursor:not-allowed; }
+.tkpm .dlg > .body { flex:1 1 auto; min-height:260px; overflow:auto; padding:6px 14px 10px; }
+.tkpm h4 { margin:8px 0 3px; font-size:11.5px; font-weight:800; color:var(--mfg); display:flex; align-items:center; gap:6px; }
+.tkpm .chip { display:inline-flex; align-items:center; height:17px; font-size:10.5px; font-weight:700; padding:0 6px; border-radius:999px; background:var(--muted); color:var(--mfg); white-space:nowrap; border:0; font-family:inherit; }
+.tkpm button.chip { cursor:pointer; }
+.tkpm .chip.you { background:var(--pri); color:var(--pri-fg); }
+.tkpm .chip.was { background:none; box-shadow:inset 0 0 0 1px var(--line); }
+.tkpm .chip.add { background:var(--grn-bg); color:var(--grn); }
+.tkpm .chip.rm { background:color-mix(in srgb,var(--fail) 16%,var(--card)); color:var(--fail); }
+.tkpm .chip.pend { background:var(--pur-bg); color:#d6c3fb; }
+.tkpm .chip.rule { background:var(--blu-bg); color:#a9c8f7; }
+/* org: badge on a head's row, and the single org chip in the selection band */
+.tkpm .chip.org { background:var(--blu-bg); color:#a9c8f7; box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--blu) 45%,transparent); }
+.tkpm .chip.vac { background:none; color:var(--amb); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--amb) 60%,transparent); }
+.tkpm .av { width:20px; height:20px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; flex:none; font-style:normal; font-size:9px; font-weight:800; letter-spacing:-.02em;
+  --av:var(--mfg); background:var(--muted); color:var(--av); }
+.tkpm .av.u1 { --av:var(--u1); background:color-mix(in srgb,var(--u1) 18%,var(--card)); }
+.tkpm .av.d1 { --av:var(--d1); background:color-mix(in srgb,var(--d1) 22%,var(--card)); }
+.tkpm .av.me { background:var(--pri); color:var(--pri-fg); }
+.tkpm .av.org { border-radius:6px; background:var(--blu-bg); color:#a9c8f7; font-size:11px; }
+/* checkbox: off / on (check) / cov (dimmed check = included by an org above, not individually checked) */
+.tkpm .ck { width:15px; height:15px; border-radius:4px; box-shadow:inset 0 0 0 1.5px #6b6f76; display:inline-flex; align-items:center; justify-content:center; flex:none; font-size:11px; font-weight:900; line-height:1; color:var(--pri-fg); cursor:pointer; }
+.tkpm .on > .ck { background:var(--pri); box-shadow:none; }
+.tkpm .on > .ck::after { content:"✓"; }
+.tkpm .cov > .ck { background:color-mix(in srgb,var(--pri) 22%,var(--card)); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pri) 35%,transparent); color:color-mix(in srgb,var(--pri) 75%,var(--card)); cursor:not-allowed; }
+.tkpm .cov > .ck::after { content:"✓"; }
+.tkpm .ck.lock, .tkpm .lock > .ck { opacity:.55; cursor:not-allowed; }
+/* org tree: same elbow connectors as tracker-org, one-line rows as in the editor */
+.tkpm .org, .tkpm .org ul { list-style:none; margin:0; padding:0; }
+.tkpm .org ul { margin-left:9px; }
+.tkpm .org li { position:relative; }
+.tkpm .org ul > li { padding-left:14px; }
+.tkpm .org ul > li::before { content:""; position:absolute; left:0; top:0; width:11px; height:13px; border-left:1.5px solid var(--line); border-bottom:1.5px solid var(--line); border-bottom-left-radius:5px; }
+.tkpm .org ul > li:not(:last-child)::after { content:""; position:absolute; left:0; top:13px; bottom:0; border-left:1.5px solid var(--line); }
+.tkpm li.shut > ul { display:none; }
+.tkpm .nd { display:grid; grid-template-columns:14px 15px 20px minmax(0,1fr) auto; column-gap:6px; align-items:center; padding:2px 4px 2px 0; border-radius:6px; min-height:26px; }
+.tkpm .nd:hover { background:color-mix(in srgb,var(--pri) 5%,var(--bg)); }
+.tkpm .nd.cvr { background:color-mix(in srgb,var(--blu-bg) 30%,var(--bg)); }
+.tkpm .nd.add { background:color-mix(in srgb,var(--grn-bg) 45%,var(--bg)); }
+.tkpm .nd.rm { background:color-mix(in srgb,var(--fail) 8%,var(--bg)); }
+.tkpm .nd.rm .nm { text-decoration:line-through; color:var(--mfg); }
+.tkpm .tg { width:14px; height:14px; border:0; background:none; color:var(--mfg); cursor:pointer; padding:0; font-size:10px; }
+.tkpm li.shut > .nd .tg { transform:rotate(-90deg); }
+.tkpm .who { min-width:0; display:flex; align-items:center; gap:5px; overflow:hidden; white-space:nowrap; cursor:pointer; }
+.tkpm .who .nm { font-weight:600; }
+.tkpm .who .o { color:var(--mfg); font-size:11px; overflow:hidden; text-overflow:ellipsis; }
+.tkpm .nd.cov .who, .tkpm .nd.cvr .who { cursor:default; }
+.tkpm .rt { display:flex; align-items:center; gap:4px; }
+.tkpm .rt .mk { display:none; }
+.tkpm .nd.add .mk.add, .tkpm .nd.rm .mk.rm, .tkpm .nd[data-was="1"]:not(.rm) .mk.was { display:inline-flex; }
+/* lead row: two independent option pills, "본인" and "이하 전체" (reads as the org when the lead heads one) */
+.tkpm .opt { font:inherit; font-size:11px; font-weight:700; display:inline-flex; align-items:center; gap:5px; height:20px; border:0; border-radius:999px; padding:0 8px 0 4px; background:none; color:var(--mfg); box-shadow:inset 0 0 0 1px var(--line); cursor:pointer; white-space:nowrap; }
+.tkpm .opt .ck { width:13px; height:13px; font-size:10px; }
+.tkpm .opt.on { color:var(--fg); }
+.tkpm .opt.grp.on { background:var(--blu-bg); color:#cfe0fb; box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--blu) 60%,transparent); }
+.tkpm .opt.cov { cursor:not-allowed; color:color-mix(in srgb,var(--mfg) 80%,var(--bg)); }
+.tkpm .opt.lock { cursor:not-allowed; }
+/* vacant org: no head member, so nothing to attach the choice to */
+.tkpm .nd.vac { cursor:not-allowed; box-shadow:inset 0 0 0 1px var(--muted); margin-top:6px; }
+.tkpm .nd.vac:hover { background:none; }
+.tkpm .nd.vac .ck { cursor:not-allowed; box-shadow:inset 0 0 0 1.5px #4a4d53; }
+.tkpm .nd.vac .av, .tkpm .nd.vac .nm { opacity:.55; }
+.tkpm .nd.vac .who { cursor:not-allowed; }
+.tkpm .rt .hint { font-size:11px; color:var(--amb); white-space:nowrap; }
+.tkpm .unas { margin-top:8px; border:1px dashed color-mix(in srgb,var(--amb) 45%,transparent); border-radius:8px; padding:2px 6px 4px; }
+.tkpm .unas .nd { grid-template-columns:0 15px 20px minmax(0,1fr) auto; }
+/* selection band at the top: org = one 🏢 chip, person = person chip; click a chip to undo it */
+.tkpm .sel { display:flex; align-items:flex-start; gap:8px; padding:2px 14px 8px; border-bottom:1px solid var(--muted); }
+.tkpm .sel .lab { font-size:11px; font-weight:800; color:var(--mfg); line-height:17px; white-space:nowrap; }
+.tkpm .sel .chips { display:flex; flex-wrap:wrap; gap:4px; min-height:17px; max-height:40px; overflow:auto; }
+/* sticky footer */
+.tkpm .df { border-top:1px solid var(--line); background:var(--card); padding:8px 14px 10px; display:flex; flex-direction:column; gap:6px; }
+.tkpm .df .row { display:flex; align-items:center; gap:8px; }
+.tkpm .sum { font-size:12px; color:var(--mfg); } .tkpm .sum b { color:var(--fg); }
+.tkpm .cm { display:inline-flex; border-radius:999px; box-shadow:inset 0 0 0 1px var(--line); overflow:hidden; }
+.tkpm .cm span { font-size:11.5px; padding:2px 9px; color:var(--mfg); } .tkpm .cm span.on { background:var(--muted); color:var(--fg); font-weight:700; }
+.tkpm .note { font-size:11.5px; color:var(--mfg); background:var(--card); border-radius:8px; padding:6px 8px; border:1px solid var(--muted); margin:8px 14px; }
+.tkpm .note b { color:var(--fg); }
+.tkpm .legend { width:100%; max-width:1110px; color:var(--mfg); font-size:12px; margin:0; padding-left:18px; }
+.tkpm .legend b { color:var(--fg); } .tkpm .legend code { font-family:var(--mono); font-size:11px; color:#c9ccd2; }
+</style>
+
+<div class="tkpm">
+  <!-- ===================== A. 참조 variant (interactive) ===================== -->
+  <div class="fa">
+    <p class="cap">A. 참조 편집 — 참조 카드의 "+" 또는 항목 메뉴 "참조에 추가…"에서 엶</p>
+    <div class="dlg" role="dialog" aria-label="참조 편집">
+      <div class="dh"><h2>참조 편집</h2><span class="sub"><code>TK-42</code> 사내 설치 스크립트 경로 정리</span><span class="grow"></span><button type="button" class="x" aria-label="닫기">×</button></div>
+      <div class="tb"><input type="search" placeholder="이름 · id · 조직 검색" aria-label="이름 · id · 조직 검색"><button type="button" class="btn mini" data-act="expand">모두 펼치기</button><button type="button" class="btn mini" title="체크된 사람과 변경된 사람만 보기">선택만</button></div>
+      <div class="sel"><span class="lab">선택</span><div class="chips" id="pm-chips"></div></div>
+      <div class="body">
+        <ul class="org">
+          <li><div class="nd" data-id="kim-hn" data-nm="김하늘" data-lead="1" data-org="SW개발실" data-was="1"><button type="button" class="tg">▾</button><span></span><i class="av u1">하늘</i>
+              <span class="who"><span class="nm">김하늘</span><span class="chip org">🏢 SW개발실</span><span class="o">kim-hn</span></span>
+              <span class="rt"><span class="chip mk was">이미 참조</span><span class="chip mk add">추가</span><span class="chip mk rm">제거</span><button type="button" class="opt self"><span class="ck"></span>본인</button><button type="button" class="opt grp"><span class="ck"></span><span class="k">SW개발실 전체 (8명)</span></button></span></div>
+            <ul>
+              <li><div class="nd" data-id="lee-dy" data-nm="이도윤" data-lead="1" data-org="SW개발1팀"><button type="button" class="tg">▾</button><span></span><i class="av me">도윤</i>
+                  <span class="who"><span class="nm">이도윤</span><span class="chip you">나</span><span class="chip org">🏢 SW개발1팀</span><span class="o">lee-dy</span></span>
+                  <span class="rt"><span class="chip mk add">추가</span><span class="chip mk rm">제거</span><button type="button" class="opt self"><span class="ck"></span>본인</button><button type="button" class="opt grp"><span class="ck"></span><span class="k">SW개발1팀 전체 (4명)</span></button></span></div>
+                <ul>
+                  <li><div class="nd" data-id="choi-jw" data-nm="최지우" data-was="1"><span></span><span class="ck"></span><i class="av d1">지우</i>
+                      <span class="who"><span class="nm">최지우</span><span class="o">SW개발1팀 · choi-jw</span></span>
+                      <span class="rt"><span class="chip mk was">이미 참조</span><span class="chip mk add">추가</span><span class="chip mk rm">제거</span></span></div></li>
+                  <li><div class="nd" data-id="jung-mj" data-nm="정민준"><span></span><span class="ck"></span><i class="av d1">민준</i>
+                      <span class="who"><span class="nm">정민준</span><span class="o">SW개발1팀 · jung-mj</span></span>
+                      <span class="rt"><span class="chip mk add">추가</span><span class="chip mk rm">제거</span></span></div></li>
+                  <li><div class="nd" data-id="kang-yr" data-nm="강예린"><span></span><span class="ck"></span><i class="av d1">예린</i>
+                      <span class="who"><span class="nm">강예린</span><span class="o">SW개발1팀 · kang-yr</span></span>
+                      <span class="rt"><span class="chip mk add">추가</span><span class="chip mk rm">제거</span></span></div></li>
+                </ul></li>
+              <li><div class="nd" data-id="park-sy" data-nm="박서연" data-lead="1" data-org="SW개발2팀"><button type="button" class="tg">▾</button><span></span><i class="av">서연</i>
+                  <span class="who"><span class="nm">박서연</span><span class="chip org">🏢 SW개발2팀</span><span class="o">park-sy</span></span>
+                  <span class="rt"><span class="chip mk add">추가</span><span class="chip mk rm">제거</span><button type="button" class="opt self"><span class="ck"></span>본인</button><button type="button" class="opt grp"><span class="ck"></span><span class="k">SW개발2팀 전체 (3명)</span></button></span></div>
+                <ul>
+                  <li><div class="nd" data-id="yoon-th" data-nm="윤태호"><span></span><span class="ck"></span><i class="av">태호</i>
+                      <span class="who"><span class="nm">윤태호</span><span class="o">SW개발2팀 · yoon-th</span></span>
+                      <span class="rt"><span class="chip mk add">추가</span><span class="chip mk rm">제거</span></span></div></li>
+                  <li><div class="nd" data-id="han-sa" data-nm="한수아" data-was="1"><span></span><span class="ck"></span><i class="av">수아</i>
+                      <span class="who"><span class="nm">한수아</span><span class="o">SW개발2팀 · han-sa</span></span>
+                      <span class="rt"><span class="chip mk was">이미 참조</span><span class="chip mk add">추가</span><span class="chip mk rm">제거</span></span></div></li>
+                </ul></li>
+            </ul></li>
+          <li><div class="nd vac" aria-disabled="true" title="헤드가 없는 조직은 선택할 수 없습니다"><span></span><span class="ck"></span><i class="av org">🏢</i>
+              <span class="who"><span class="nm">QA팀</span><span class="chip vac">공석</span></span>
+              <span class="rt"><span class="hint">관리자가 헤드를 지정해야 선택 가능</span></span></div></li>
+        </ul>
+        <div class="unas"><h4 style="margin:2px 0;color:var(--amb)">미배치 (리드 없음)</h4>
+          <div class="nd" data-id="oh-sj" data-nm="오세진" data-was="1"><span></span><span class="ck"></span><i class="av">세진</i>
+            <span class="who"><span class="nm">오세진</span><span class="o">SW개발실 · oh-sj</span></span>
+            <span class="rt"><span class="chip mk was">이미 참조</span><span class="chip mk add">추가</span><span class="chip mk rm">제거</span></span></div></div>
+      </div>
+      <div class="df">
+        <div class="row"><span class="sum" id="pm-sum"></span><span class="grow"></span>
+          <button type="button" class="btn">취소</button><button type="button" class="btn primary" id="pm-apply">적용</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== B. 배정 variant (static, differences only) ===================== -->
+  <div class="fb">
+    <p class="cap">B. 배정 — 같은 모달·같은 조직도 선택, 다른 점만</p>
+    <div class="dlg" role="dialog" aria-label="배정">
+      <div class="dh"><h2>배정</h2><span class="sub"><code>TK-42</code> 사내 설치 스크립트 경로 정리</span><span class="grow"></span><button type="button" class="x" aria-label="닫기">×</button></div>
+      <div class="tb"><input type="search" placeholder="이름 · id · 조직 검색" aria-label="이름 · id · 조직 검색"></div>
+      <div class="sel"><span class="lab">선택</span><div class="chips">
+        <span class="chip was" title="이미 배정됨 — 해제는 담당자 카드에서">🔒 김하늘 · 배정됨</span><span class="chip org">🏢 SW개발1팀 · 규칙 4명</span><span class="chip pend">한수아 · 대기</span></div></div>
+      <div class="body">
+        <ul class="org">
+          <li><div class="nd"><button type="button" class="tg">▾</button><span></span><i class="av u1">하늘</i>
+              <span class="who"><span class="nm">김하늘</span><span class="chip org">🏢 SW개발실</span></span>
+              <span class="rt"><span class="chip">배정됨</span><button type="button" class="opt self on lock" title="이미 배정됨 — 해제는 담당자 카드에서"><span class="ck"></span>본인</button><button type="button" class="opt grp"><span class="ck"></span>SW개발실 전체 (8명)</button></span></div>
+            <ul>
+              <li><div class="nd cvr"><button type="button" class="tg">▾</button><span></span><i class="av me">도윤</i>
+                  <span class="who"><span class="nm">이도윤</span><span class="chip you">나</span><span class="chip org">🏢 SW개발1팀</span></span>
+                  <span class="rt"><button type="button" class="opt self cov" title="SW개발1팀 규칙에 포함"><span class="ck"></span>본인</button><button type="button" class="opt grp on"><span class="ck"></span>SW개발1팀 전체 (4명)</button><span class="chip rule">규칙</span></span></div>
+                <ul>
+                  <li><div class="nd cov cvr"><span></span><span class="ck" title="SW개발1팀 규칙에 포함"></span><i class="av d1">지우</i><span class="who"><span class="nm">최지우</span><span class="o">SW개발1팀 규칙에 포함</span></span><span class="rt"></span></div></li>
+                  <li><div class="nd cov cvr"><span></span><span class="ck" title="SW개발1팀 규칙에 포함"></span><i class="av d1">민준</i><span class="who"><span class="nm">정민준</span><span class="o">SW개발1팀 규칙에 포함</span></span><span class="rt"></span></div></li>
+                  <li><div class="nd cov cvr"><span></span><span class="ck" title="SW개발1팀 규칙에 포함"></span><i class="av d1">예린</i><span class="who"><span class="nm">강예린</span><span class="o">SW개발1팀 규칙에 포함</span></span><span class="rt"></span></div></li>
+                </ul></li>
+              <li><div class="nd"><button type="button" class="tg">▾</button><span></span><i class="av">서연</i>
+                  <span class="who"><span class="nm">박서연</span><span class="chip org">🏢 SW개발2팀</span></span>
+                  <span class="rt"><button type="button" class="opt self"><span class="ck"></span>본인</button><button type="button" class="opt grp" title="클릭하면 SW개발2팀 규칙 (대기: 박서연이 수락)"><span class="ck"></span>SW개발2팀 전체 (3명)</button></span></div>
+                <ul>
+                  <li><div class="nd"><span></span><span class="ck"></span><i class="av">태호</i><span class="who"><span class="nm">윤태호</span><span class="o">SW개발2팀 · yoon-th</span></span><span class="rt"></span></div></li>
+                  <li><div class="nd on"><span></span><span class="ck"></span><i class="av">수아</i>
+                      <span class="who"><span class="nm">한수아</span><span class="o">SW개발2팀 · han-sa</span></span>
+                      <span class="rt"><span class="chip pend" title="내 도달 범위 밖: 본인이 수락하면 배정">대기</span></span></div></li>
+                </ul></li>
+            </ul></li>
+          <li><div class="nd vac" aria-disabled="true" title="헤드가 없는 조직은 선택할 수 없습니다"><span></span><span class="ck"></span><i class="av org">🏢</i>
+              <span class="who"><span class="nm">QA팀</span><span class="chip vac">공석</span></span>
+              <span class="rt"><span class="hint">관리자가 헤드를 지정해야 선택 가능</span></span></div></li>
+        </ul>
+        <div class="unas"><h4 style="margin:2px 0;color:var(--amb)">미배치 (리드 없음)</h4>
+          <div class="nd"><span></span><span class="ck"></span><i class="av">세진</i>
+            <span class="who"><span class="nm">오세진</span><span class="o">SW개발실 · oh-sj</span></span><span class="rt"></span></div></div>
+      </div>
+      <div class="note"><b>조직 전체</b>는 사람 목록이 아니라 <b>조직 규칙</b>이 됩니다 — 이후 그 조직으로 들어오는 사람도 물려받습니다. 규칙 안의 사람은 흐린 체크로 표시되고 따로 체크할 수 없습니다. 이미 배정된 사람은 잠김 (해제는 담당자 카드에서). 내 도달 범위 밖 조직·사람은 <span class="chip pend">대기</span> (상대가 수락).</div>
+      <div class="df">
+        <div class="row"><span class="cm" role="radiogroup" aria-label="완료 방식" title="내 아래가 섞여 있어 '담당자가 닫음'은 숨김 (지금과 같음)"><span>배정자가 확인</span></span>
+          <span class="sum" title="내 아래 구성원은 내 검토를 거쳐 닫고, 나와 동료는 바로 닫습니다"><b>사람별</b></span><span class="grow"></span>
+          <button type="button" class="btn">취소</button><button type="button" class="btn primary" title="item.assign 2개: {root: lee-dy, include_root: true} 배정자가 확인 / han-sa 담당자가 닫음">배정 (2)</button></div>
+      </div>
+    </div>
+  </div>
+
+  <ul class="legend">
+    <li><b>체크 = 적용 후 상태</b>: 모달은 지금 참조 중인 사람을 체크된 채로 엽니다 (<span class="chip was">이미 참조</span>). 새로 체크 → <span class="chip add">추가</span>, 이미 참조인 사람을 해제 → <span class="chip rm">제거</span>(취소선). 클릭은 아무것도 보내지 않고, <b>적용</b>을 눌러야 기록됩니다. 취소/Esc/바깥 클릭 = 버림.</li>
+    <li><b>목록 = 조직도</b> (별도 별칭 섹션 없음): 리드 행에는 서로 독립인 선택 2개 — <b>본인</b> (그 사람만), <b>이하 전체</b> (리드 포함 그 아래 전부). 리드가 조직의 헤드면 이름 옆에 <span class="chip org">🏢 조직명</span> 배지, 이하 전체는 "조직명 전체 (N명)"으로 읽힘. 헤드가 아닌 리드는 배지 없이 "이하 전체 (N명)". 일반 멤버는 체크박스 1개.</li>
+    <li><b>포함 표시</b>: 이하 전체를 켜면 그 아래 행(본인 포함)은 파란 띠 + 흐린 체크 = "조직에 포함"이며 개별 체크가 아닙니다. 개별 체크는 그대로 보존되어 조직을 끄면 되살아납니다. 위 조직이 켜지면 아래 조직 토글도 포함 상태가 됩니다.</li>
+    <li><b>공석 조직</b>: 조직은 헤드 멤버에 붙는 별도 객체라 헤드가 비면 붙일 곳이 없음 → 비활성 행 + "관리자가 헤드를 지정해야 선택 가능". 조직도 편집에서 헤드를 정하면 그 리드 행의 배지로 옮겨갑니다.</li>
+    <li><b>선택 칩 (위)</b>: 조직 선택은 <span class="chip org">🏢 SW개발1팀 · 4명</span> 한 개, 사람은 사람 칩 (조직에 포함된 사람은 따로 칩 없음). A에서는 칩을 누르면 그 선택이 풀립니다.</li>
+    <li><b>참조의 적용</b>: 바뀐 사람마다 <code>item.cc {item, member}</code> / <code>item.uncc {item, member}</code> 이벤트 1개, 한 번의 commit 배치. 조직은 적용 시점 인원(헤드 포함)으로 펼쳐 개별 이벤트 — 이벤트 모양은 지금과 같음 (호환 T0). A의 기본 상태 = cc 4 + uncc 1 = 5건. 조직 자체를 참조로 남겨 이후 합류자도 자동 참조할지는 별도 결정.</li>
+    <li><b>배정의 적용</b>: <code>item.assign {item, targets: [사람 id…, {root, include_root: true}…], completion}</code>. 이하 전체 = 헤드 포함 조직 규칙 1개 (지금의 별칭 규칙 모양; 조직 객체 id로 가리킬지는 결정 대기). 완료 방식이 사람마다 갈리면 ("사람별") 완료 방식별로 item.assign 1개씩 — B는 SW개발1팀 규칙 = 배정자가 확인, 범위 밖 한수아 = 담당자가 닫음이라 2개. 이미 배정된 사람은 잠긴 체크 + <span class="chip">배정됨</span>; 해제는 지금처럼 담당자 카드에서. 주제(topic)는 한 명만 — 체크박스 대신 라디오.</li>
+    <li><b>높이</b>: 두 모달 모두 고정 높이(640px)에 목록 영역 최소 260px를 보장 — 헤더·선택 칩·안내·하단이 늘어도 목록이 찌그러지지 않고, 목록 안에서만 스크롤됩니다.</li>
+  </ul>
+</div>
+
+<script>
+// Mockup-only: frame A state. picks = individual checks, orgs = lead ids whose "이하 전체" is on.
+(function () {
+  var A = document.querySelector('.tkpm .fa');
+  if (!A) return;
+  var picks = {}, orgs = { 'lee-dy': 1 };
+  ['kim-hn', 'choi-jw', 'han-sa', 'yoon-th'].forEach(function (id) { picks[id] = 1; });
+  var rows = Array.prototype.slice.call(A.querySelectorAll('.nd[data-id]'));
+  function tog(m, k) { if (m[k]) delete m[k]; else m[k] = 1; }
+  function liOf(el) { var l = el && el.closest('li'); return l && A.contains(l) ? l : null; }
+  function head(l) { return l.querySelector(':scope > .nd[data-id]'); }
+  function team(r) { var l = liOf(r); return l ? [r].concat(Array.prototype.slice.call(l.querySelectorAll(':scope > ul .nd[data-id]'))) : [r]; }
+  // topmost head (self included unless above) whose org is on and covers row r
+  function coverBy(r, above) {
+    var hit = null, l = liOf(r);
+    if (above && l) l = liOf(l.parentElement);
+    for (; l; l = liOf(l.parentElement)) { var h = head(l); if (h && orgs[h.dataset.id]) hit = h; }
+    return hit;
+  }
+  function draw() {
+    var chips = [], rmChips = [], add = 0, rm = 0, n = 0;
+    rows.forEach(function (r) {
+      var id = r.dataset.id, was = r.dataset.was === '1', lead = r.dataset.lead === '1';
+      var cov = coverBy(r, false), on = !!picks[id], eff = on || !!cov;
+      var box = lead ? r.querySelector('.opt.self') : r;
+      box.classList.toggle('on', on && !cov); box.classList.toggle('cov', !!cov);
+      box.title = cov ? cov.dataset.org + ' 전체에 포함' : '';
+      r.classList.toggle('cvr', !!cov);
+      r.classList.toggle('add', eff && !was && !cov); r.classList.toggle('rm', !eff && was);
+      if (eff) n++; if (eff && !was) add++; if (!eff && was) rm++;
+      if (on && !cov) chips.push('<button type="button" class="chip ' + (was ? 'was' : 'add') + '" data-k="p:' + id + '" title="눌러서 해제">' + (was ? '' : '+ ') + r.dataset.nm + '</button>');
+      if (!eff && was) rmChips.push('<button type="button" class="chip rm" data-k="p:' + id + '" title="눌러서 되돌리기"><s>− ' + r.dataset.nm + '</s></button>');
+      if (lead) {
+        var g = r.querySelector('.opt.grp'), up = coverBy(r, true), t = team(r).length;
+        g.classList.toggle('on', !!orgs[id] && !up); g.classList.toggle('cov', !!up);
+        g.title = up ? up.dataset.org + ' 전체에 포함' : '';
+        g.querySelector('.k').textContent = (r.dataset.org ? r.dataset.org + ' 전체' : '이하 전체') + ' (' + t + '명)';
+        if (orgs[id] && !up) chips.unshift('<button type="button" class="chip org" data-k="org:' + id + '" title="눌러서 해제">🏢 ' + (r.dataset.org || r.dataset.nm + ' 이하') + ' · ' + t + '명</button>');
+      }
+    });
+    var all = chips.concat(rmChips);
+    A.querySelector('#pm-chips').innerHTML = all.length ? all.join('') : '<span class="chip was">없음</span>';
+    A.querySelector('#pm-sum').innerHTML = '대상 <b>' + n + '명</b> · 추가 ' + add + ', 제거 ' + rm;
+    var ap = A.querySelector('#pm-apply'), c = add + rm;
+    ap.disabled = !c; ap.textContent = c ? '적용 (' + c + '건)' : '적용';
+  }
+  A.addEventListener('click', function (e) {
+    var t = e.target, g = t.closest('.tg'), k = t.closest('[data-k]'), o = t.closest('.opt'), r = t.closest('.nd[data-id]');
+    if (t.closest('[data-act="expand"]')) { A.querySelectorAll('li.shut').forEach(function (l) { l.classList.remove('shut'); }); return; }
+    if (g) { g.closest('li').classList.toggle('shut'); return; }
+    if (k) { var p = k.dataset.k.split(':'); if (p[0] === 'org') delete orgs[p[1]]; else tog(picks, p[1]); draw(); return; }
+    if (!r) return;
+    if (o) { if (!o.classList.contains('cov')) { tog(o.classList.contains('grp') ? orgs : picks, r.dataset.id); draw(); } return; }
+    if ((t.closest('.ck') || t.closest('.who') || t.closest('.av')) && !coverBy(r, false)) { tog(picks, r.dataset.id); draw(); }
+  });
+  draw();
+})();
+</script>
