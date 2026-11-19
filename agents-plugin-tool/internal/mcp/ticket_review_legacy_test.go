@@ -34,7 +34,7 @@ the trace below and the Sage reviewers guard against interacting decisions.
 
 func TestLegacyLeadTicketHonorsReviewAutoAckKnob(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	t.Setenv("WS_RSRC_ROOT", buildTestRsrcTree(t, map[string]string{
+	useResourceFixture(t, buildTestRsrcTree(t, map[string]string{
 		"lead-ticket/lead-ticket.md": legacyLeadTicketFixture,
 	}))
 	read := func() string {

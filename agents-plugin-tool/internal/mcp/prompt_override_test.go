@@ -84,7 +84,7 @@ func TestOverrideNoOverrideSeedRenders(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// nil lookup: every override-point falls back to its seed.
-	body, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", nil, "")
+	body, _, err := renderPlaybookBody(s, os.DirFS(rsrcRoot), "override-pb", nil, wsconfig.Options{}, "", "", "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestOverridePerHarnessReplacement(t *testing.T) {
 
 	// Claude harness: should get the per-harness override.
 	sClaude := newTestServerWithHarness(t, "claude")
-	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup, "")
+	bodyClaude, _, err := renderPlaybookBody(sClaude, os.DirFS(rsrcRoot), "override-pb", nil, wsconfig.Options{}, "", "", "", lookup, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (claude): %v", err)
 	}
@@ -141,7 +141,7 @@ func TestOverridePerHarnessReplacement(t *testing.T) {
 
 	// Codex harness: no codex-specific or "all" override → must fall back to seed.
 	sCodex := newTestServerWithHarness(t, "codex")
-	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup, "")
+	bodyCodex, _, err := renderPlaybookBody(sCodex, os.DirFS(rsrcRoot), "override-pb", nil, wsconfig.Options{}, "", "", "", lookup, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (codex): %v", err)
 	}
@@ -173,7 +173,7 @@ func TestOverrideAllBucketFallback(t *testing.T) {
 
 	// Claude harness: no claude-specific override → "all" applies.
 	sClaude := newTestServerWithHarness(t, "claude")
-	bodyClaude, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup, "")
+	bodyClaude, _, err := renderPlaybookBody(sClaude, os.DirFS(rsrcRoot), "override-pb", nil, wsconfig.Options{}, "", "", "", lookup, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (claude): %v", err)
 	}
@@ -186,7 +186,7 @@ func TestOverrideAllBucketFallback(t *testing.T) {
 
 	// Codex harness: same expectation.
 	sCodex := newTestServerWithHarness(t, "codex")
-	bodyCodex, _, err := renderPlaybookBody(sCodex, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup, "")
+	bodyCodex, _, err := renderPlaybookBody(sCodex, os.DirFS(rsrcRoot), "override-pb", nil, wsconfig.Options{}, "", "", "", lookup, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (codex): %v", err)
 	}
@@ -199,7 +199,7 @@ func TestOverrideAllBucketFallback(t *testing.T) {
 		"SeedSection/claude": "claude wins",
 		"SeedSection/all":    "all-bucket",
 	})
-	bodyBoth, _, err := renderPlaybookBody(sClaude, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookupBoth, "")
+	bodyBoth, _, err := renderPlaybookBody(sClaude, os.DirFS(rsrcRoot), "override-pb", nil, wsconfig.Options{}, "", "", "", lookupBoth, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (both): %v", err)
 	}
@@ -220,7 +220,7 @@ func TestOverrideEmptySeedSlot(t *testing.T) {
 	s := newTestServerWithHarness(t, "claude")
 
 	// No override stored: extension slot must render nothing (empty body).
-	bodyNoOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", nil, "")
+	bodyNoOverride, _, err := renderPlaybookBody(s, os.DirFS(rsrcRoot), "override-pb", nil, wsconfig.Options{}, "", "", "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (no override): %v", err)
 	}
@@ -233,7 +233,7 @@ func TestOverrideEmptySeedSlot(t *testing.T) {
 	lookup := staticLookup(map[string]string{
 		"ExtSlot/claude": "injected extension text",
 	})
-	bodyWithOverride, _, err := renderPlaybookBody(s, rsrcRoot, "override-pb", nil, wsconfig.Options{}, "", "", "", lookup, "")
+	bodyWithOverride, _, err := renderPlaybookBody(s, os.DirFS(rsrcRoot), "override-pb", nil, wsconfig.Options{}, "", "", "", lookup, "")
 	if err != nil {
 		t.Fatalf("renderPlaybookBody (with override): %v", err)
 	}
@@ -382,7 +382,7 @@ func TestOverrideProductionPath(t *testing.T) {
 	useLeadProfile(t)
 
 	rsrcRoot := buildOverrideTestTree(t)
-	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	useResourceFixture(t, rsrcRoot)
 
 	// Separate git repo as the session-bound worktree root.
 	root := t.TempDir()
@@ -450,7 +450,7 @@ func TestOverridePrintProductionPath(t *testing.T) {
 	useLeadProfile(t)
 
 	rsrcRoot := buildOverrideTestTree(t)
-	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	useResourceFixture(t, rsrcRoot)
 
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
@@ -502,7 +502,7 @@ func TestShippedWorkflowManualOmitsDelegationSection(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -520,7 +520,7 @@ func TestShippedUserPreferenceSectionEmptySlotAndOverride(t *testing.T) {
 
 	const preferenceText = "User preferences:\n- Prefer conventional terminology when user wording is imprecise."
 
-	baseBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
+	baseBody, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook (base): %v", err)
 	}
@@ -533,7 +533,7 @@ func TestShippedUserPreferenceSectionEmptySlotAndOverride(t *testing.T) {
 	lookup := staticLookup(map[string]string{
 		"UserPreferenceSection/all": preferenceText,
 	})
-	ovBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", lookup)
+	ovBody, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", lookup)
 	if err != nil {
 		t.Fatalf("printPlaybook (override): %v", err)
 	}
@@ -567,7 +567,7 @@ func TestWorkflowLangInjectionIntoUserPreferenceSection(t *testing.T) {
 	}
 
 	// Empty workflowLang → section stays empty (no lang instruction).
-	emptyBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
+	emptyBody, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook (empty lang): %v", err)
 	}
@@ -577,7 +577,7 @@ func TestWorkflowLangInjectionIntoUserPreferenceSection(t *testing.T) {
 	assertNoMarkerSyntax(t, "empty lang", emptyBody)
 
 	// Non-empty workflowLang → instruction appears in User preferences seed.
-	langBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "Korean", nil)
+	langBody, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "Korean", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook (Korean): %v", err)
 	}
@@ -596,7 +596,7 @@ func TestShippedManualSessionSetupAndUserPreferenceSectionsAreNotThin(t *testing
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -635,7 +635,7 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	// Use the real shipped rsrc tree so lead-workflow-manual loads with its real
 	// UserPreferenceSection marker.
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	useResourceFixture(t, rsrcRoot)
 
 	// Separate git repo as the session-bound worktree root.
 	root := t.TempDir()
@@ -654,7 +654,7 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	const overrideText = "Use concise Korean status updates when reporting workflow state."
 
 	// --- Baseline: without any override, custom preference is absent ---
-	baseBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, key))
+	baseBody, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, key))
 	if err != nil {
 		t.Fatalf("printPlaybook (baseline): %v", err)
 	}
@@ -682,7 +682,7 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	}
 
 	// --- Render with the override active ---
-	overrideBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, key))
+	overrideBody, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, key))
 	if err != nil {
 		t.Fatalf("printPlaybook (after set): %v", err)
 	}
@@ -714,7 +714,7 @@ func TestConfigPromptSetEndToEnd(t *testing.T) {
 	}
 
 	// Render again — claude-specific override must still win.
-	precedenceBody, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, key))
+	precedenceBody, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, key))
 	if err != nil {
 		t.Fatalf("printPlaybook (precedence): %v", err)
 	}
@@ -738,7 +738,7 @@ func TestConfigPromptSetForPiHarness(t *testing.T) {
 	useLeadProfile(t)
 
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	useResourceFixture(t, rsrcRoot)
 
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
@@ -765,7 +765,7 @@ func TestConfigPromptSetForPiHarness(t *testing.T) {
 		t.Fatalf("config.tune prompt-set (pi) confirmation missing: %s", setText)
 	}
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, key))
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, key))
 	if err != nil {
 		t.Fatalf("printPlaybook (pi override): %v", err)
 	}
@@ -783,7 +783,7 @@ func TestConfigPromptUnsetSessionScope(t *testing.T) {
 	useLeadProfile(t)
 
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	useResourceFixture(t, rsrcRoot)
 
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
@@ -820,7 +820,7 @@ func TestConfigPromptUnsetSessionScope(t *testing.T) {
 	}
 
 	// Session override wins while present.
-	beforeUnset, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, key))
+	beforeUnset, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, key))
 	if err != nil {
 		t.Fatalf("printPlaybook (before unset): %v", err)
 	}
@@ -846,7 +846,7 @@ func TestConfigPromptUnsetSessionScope(t *testing.T) {
 	}
 
 	// Falls back to the project-scope value, not to an empty override.
-	afterUnset, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, key))
+	afterUnset, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, key))
 	if err != nil {
 		t.Fatalf("printPlaybook (after unset): %v", err)
 	}
@@ -982,7 +982,7 @@ func TestConfigPromptListEnumeratesDeclaredPoints(t *testing.T) {
 	useLeadProfile(t)
 
 	rsrcRoot := buildOverrideTestTree(t)
-	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	useResourceFixture(t, rsrcRoot)
 
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
@@ -1051,7 +1051,7 @@ func TestConfigPromptListShowsPiHarnessOverride(t *testing.T) {
 	useLeadProfile(t)
 
 	rsrcRoot := buildOverrideTestTree(t)
-	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	useResourceFixture(t, rsrcRoot)
 
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
@@ -1094,7 +1094,7 @@ func TestConfigPromptListIncludesShippedUserPreferenceSection(t *testing.T) {
 	useLeadProfile(t)
 
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	useResourceFixture(t, rsrcRoot)
 
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
@@ -1122,7 +1122,7 @@ func TestConfigTuningShippedPromptKnobsOmitDelegationSection(t *testing.T) {
 	useLeadProfile(t)
 
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
-	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	useResourceFixture(t, rsrcRoot)
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 
 	root := t.TempDir()
@@ -1149,7 +1149,7 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 	useLeadProfile(t)
 
 	rsrcRoot := buildOverrideTestTree(t)
-	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	useResourceFixture(t, rsrcRoot)
 
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
@@ -1269,7 +1269,7 @@ func TestConfigTuningCatalogProjectsPromptAndSchemaKnobs(t *testing.T) {
 	agentsKnob := requireTuningKnob(t, catalog, "agents.tier")
 	assertFieldEnum(t, agentsKnob.ValueFields, "tier", []string{"small", "medium", "large", "xlarge"})
 	assertFieldNoEnum(t, agentsKnob.ValueFields, "effort")
-	assertFieldEnum(t, agentsKnob.SelectorFields, "harness", []string{"claude", "codex", "pi", "default"})
+	assertFieldEnum(t, agentsKnob.SelectorFields, "harness", []string{"claude", "codex", "pi", "agy", "default"})
 	assertFieldEnum(t, agentsKnob.SelectorFields, "scope", []string{"project", "global"})
 }
 
@@ -1348,7 +1348,7 @@ func TestConfigTuningCatalogNoAgentShape(t *testing.T) {
 	useLeadProfile(t)
 
 	rsrcRoot := buildOverrideTestTree(t)
-	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	useResourceFixture(t, rsrcRoot)
 	t.Setenv("WS_MCP_NO_AGENT", "1")
 
 	root := t.TempDir()
@@ -1409,7 +1409,7 @@ func TestConfigTuningCatalogNoAgentShape(t *testing.T) {
 	agentsKnob := requireTuningKnob(t, catalog, "agents.tier")
 	assertFieldEnum(t, agentsKnob.ValueFields, "tier", []string{"small", "medium", "large", "xlarge"})
 	assertFieldNoEnum(t, agentsKnob.ValueFields, "effort")
-	assertFieldEnum(t, agentsKnob.SelectorFields, "harness", []string{"claude", "codex", "pi", "default"})
+	assertFieldEnum(t, agentsKnob.SelectorFields, "harness", []string{"claude", "codex", "pi", "agy", "default"})
 	assertFieldEnum(t, agentsKnob.SelectorFields, "scope", []string{"project", "global"})
 }
 
@@ -1438,7 +1438,7 @@ func TestConfigTuningCatalogNoAgentCutHonorsNoAgentVisible(t *testing.T) {
 	}
 
 	rsrcRoot := buildOverrideTestTree(t)
-	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	useResourceFixture(t, rsrcRoot)
 	t.Setenv("WS_MCP_NO_AGENT", "1")
 
 	root := t.TempDir()
@@ -1602,7 +1602,7 @@ seed
 	// A non-md file must be ignored even if it carries marker text.
 	mustWrite(t, root, "c/notes.txt", `<!-- ws:override:Ignored desc="nope" -->`)
 
-	points, err := scanOverridePoints(root)
+	points, err := scanOverridePoints(os.DirFS(root))
 	if err != nil {
 		t.Fatalf("scanOverridePoints: %v", err)
 	}

@@ -17,9 +17,12 @@ change's compatibility tier during discussion and record it in the ticket's
   regardless of suffix, build time or content, unless LAN mode changes or an
   explicit `daemon-start --replace` requests one swap (`wsdashboard/ensure.go`,
   `keepRunning` and `Ensure`).
-- **Binary and text come from different places.** Hosted MCP tools run in the
-  daemon binary, while skills and playbooks come from the connecting plugin's
-  directory (`WS_RSRC_ROOT`). Old skill text can therefore call a newer binary.
+- **Daemon-owned playbooks, plugin-owned skills.** The daemon serves its
+  embedded package's playbooks, manifests and includes, selecting wsflow from
+  `WS_MCP_NAMESPACE` and ws otherwise. Caller `WS_RSRC_ROOT` no longer selects
+  text. Harnesses still discover skills in their plugin directories, so old
+  skill shims can call a newer daemon. `WS_RSRC_DEV_CHECKOUT` is an explicit
+  daemon-process-only source override.
 - **Connection guards are strict today.** The hello accepts only its exact
   protocol and, when supplied, the daemon's major.minor
   (`wsdashboard/proxy.go:232–254`). Pi additionally requires the server to be
@@ -110,6 +113,7 @@ the new version, not reconnecting the transport.
 | 9 | A newer memo schema meets the current writer | The newer side writes schema 2; the current reader projects known memo fields but save refuses before writing. New reopen sees the unchanged file | T3 write boundary, even though reads remain possible. `wsdashboard/memos.go:67–72`, `wsdashboard/memos_test.go:44–58` |
 | 10 | A new field in `registration.json` meets a struct-only older writer | The newer side writes an unknown field; the current-style reader drops it during struct decode, and the writer replaces the whole JSON file. New reopen reads the replacement, not the lost bytes; this path provides no recovery | Not T2 and not patch-safe as-is: preserve unknown fields or enforce a T3 boundary. `wsdashboard/registry.go:75–140,236–254,280–316`, `wsstate/replace_file_unix.go:7–12`, `wsstate/replace_file_windows.go:13–32` |
 | 11 | New config-manifest field or newer whiteboard folder schema meets the current reader | The newer side writes the manifest/folder; the current reader refuses unknown manifest fields or unsupported folder schema before normal use. No rewrite in these checks; new reopen retains the original bytes, but does not unblock the old reader | T3 read boundary. `mcp/config_manifest.go:172–185`, `wswhiteboard/folders.go:231–246` |
+| 12 | A daemon without the `/mcp/session` route (v0.50.2 and earlier) rejoins a held hosted lead that a route-serving daemon started over HTTP MCP | The lead posts its token to `/mcp/session`, which the old daemon answers `401 login_required`; Claude keeps reporting the server connected, so the old daemon's MCP recovery never restarts it and the lead's ws tools fail until the process restarts. The old daemon keeps the record's unknown `mcp_*` members and writes nothing new; a new daemon's rejoin restores the token, or forgets it when another holder restarted the process. No data loss; reopening with the new version recovers fully. Arises only on a downgrade to a route-less build (an older ws-mcp never replaces a newer daemon), never on a forward update: a same-port rejoin restores the token and a moved port restarts the lead at its first idle point | Accepted downgrade-only functional degradation, patch-safe (owner (92)=a, 2026-11-18). `wsagent/runner_process.go` 322–340; v0.50.2 `localhost_auth.go` 150, `daemon.go` 753; `wsdashboard/ensure.go` 100–102 |
 
 No concrete T2 overwrite/reopen trace is established by these examples. Tracker
 append preserves earlier event bytes (`wsledger/store.go:725–763`), and a new

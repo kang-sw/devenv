@@ -41,16 +41,6 @@ func historyJSON(t *testing.T, s *Server, id int, key string, args map[string]an
 	return out
 }
 
-// resetMailboxHistoryClock clears the process-wide strictly-increasing stamp
-// guard, so an earlier test's later pinned clock cannot push this test's
-// stamps (and so its reported times) forward.
-func resetMailboxHistoryClock(t *testing.T) {
-	t.Helper()
-	mailboxHistoryClock.Lock()
-	mailboxHistoryClock.last = time.Time{}
-	mailboxHistoryClock.Unlock()
-}
-
 // historyFixture is two sessions sharing one root: A owns alice@worktree,
 // B has no named inbox.
 type historyFixture struct {
@@ -63,7 +53,6 @@ func newHistoryFixture(t *testing.T, at time.Time) historyFixture {
 	t.Helper()
 	setupMailboxTestEnv(t)
 	t.Setenv(envMailboxAuto, "")
-	resetMailboxHistoryClock(t)
 	setMailboxClock(t, at)
 	root := t.TempDir()
 	initGit(t, root)
@@ -83,15 +72,16 @@ func mustSend(t *testing.T, s *Server, id int, key, to, content string) {
 	}
 }
 
-func historyEntryFiles(t *testing.T, key string) []string {
+// historyEntryNames lists key's history window entry names, newest first.
+func historyEntryNames(t *testing.T, key string) []string {
 	t.Helper()
-	dir, err := mailboxHistoryDir("", key)
+	entries, err := (wsmailbox.Paths{}).Store().History(key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	names, err := mailboxHistoryEntryNames(dir)
-	if err != nil {
-		t.Fatal(err)
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name)
 	}
 	return names
 }
@@ -179,7 +169,7 @@ func TestMailboxHistoryRecordsSendAndRecvFromBothQueues(t *testing.T) {
 
 // TestMailboxHistoryCapOrderAndArguments pins the ring's capacity and
 // order (one multi-message drain keeps queue order; only the newest 10
-// survive, on disk too) and the read arguments: body, direction, limit
+// survive in the window) and the read arguments: body, direction, limit
 // (including below 1 and above the stored count), and that history
 // consumes and changes nothing.
 func TestMailboxHistoryCapOrderAndArguments(t *testing.T) {
@@ -192,11 +182,11 @@ func TestMailboxHistoryCapOrderAndArguments(t *testing.T) {
 		t.Fatalf("A did not drain all 12: %s", recv)
 	}
 
-	if files := historyEntryFiles(t, f.keyA); len(files) != mailboxHistoryCap {
-		t.Fatalf("A ring on disk = %d entry files, want %d: %v", len(files), mailboxHistoryCap, files)
+	if names := historyEntryNames(t, f.keyA); len(names) != mailboxHistoryCap {
+		t.Fatalf("A window = %d entries, want %d: %v", len(names), mailboxHistoryCap, names)
 	}
-	if files := historyEntryFiles(t, f.keyB); len(files) != mailboxHistoryCap {
-		t.Fatalf("B ring on disk = %d entry files, want %d: %v", len(files), mailboxHistoryCap, files)
+	if names := historyEntryNames(t, f.keyB); len(names) != mailboxHistoryCap {
+		t.Fatalf("B window = %d entries, want %d: %v", len(names), mailboxHistoryCap, names)
 	}
 
 	got := historyJSON(t, f.serverA, 31, f.keyA, nil)
@@ -253,10 +243,10 @@ func TestMailboxHistoryCapOrderAndArguments(t *testing.T) {
 
 	// Read-only: history neither drains a queue nor changes the ring.
 	mustSend(t, f.serverB, 42, f.keyB, "alice@worktree", "pending")
-	before := historyEntryFiles(t, f.keyA)
+	before := historyEntryNames(t, f.keyA)
 	historyJSON(t, f.serverA, 43, f.keyA, map[string]any{"body": true})
 	callToolWithKey(t, f.serverA, 44, f.keyA, "mailbox.history", nil)
-	after := historyEntryFiles(t, f.keyA)
+	after := historyEntryNames(t, f.keyA)
 	if strings.Join(before, ",") != strings.Join(after, ",") {
 		t.Fatalf("history changed the ring: before %v after %v", before, after)
 	}
@@ -266,16 +256,9 @@ func TestMailboxHistoryCapOrderAndArguments(t *testing.T) {
 }
 
 // TestMailboxHistoryMissingDirectoryReadsEmpty pins that a session with no
-// history directory gets an empty ring, not an error.
+// exchange gets an empty window, not an error.
 func TestMailboxHistoryMissingDirectoryReadsEmpty(t *testing.T) {
 	f := newHistoryFixture(t, time.Date(2026, 11, 6, 11, 0, 0, 0, time.UTC))
-	dir, err := mailboxHistoryDir("", f.keyB)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Fatalf("history dir exists before any exchange: %v", err)
-	}
 	if out := callToolWithKey(t, f.serverB, 2, f.keyB, "mailbox.history", nil); out != "no mailbox history\n" {
 		t.Fatalf("missing dir text = %q", out)
 	}
@@ -323,104 +306,10 @@ func TestMailboxHistoryStoresStampedBodyAndTitleSkipsNote(t *testing.T) {
 	}
 }
 
-// TestMailboxHistoryFailedWriteIsLoggedNotSurfaced pins that a ring write
-// failure is logged and neither the send nor the recv fails.
-func TestMailboxHistoryFailedWriteIsLoggedNotSurfaced(t *testing.T) {
-	f := newHistoryFixture(t, time.Date(2026, 11, 6, 13, 0, 0, 0, time.UTC))
-	root, err := mailboxHistoryRoot("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A regular file where the history root belongs makes every ring write
-	// fail at directory creation.
-	if err := os.MkdirAll(filepath.Dir(root), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(root, []byte("not a dir"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	before := debugEventCount("mailbox.history_write_error")
-	mustSend(t, f.serverB, 2, f.keyB, "alice@worktree", "still delivered")
-	if got := debugEventCount("mailbox.history_write_error"); got != before+1 {
-		t.Fatalf("failed send-side ring write not logged: %d events, want %d", got, before+1)
-	}
-	if recv := callToolWithKey(t, f.serverA, 3, f.keyA, "mailbox.recv", nil); !strings.Contains(recv, "still delivered") {
-		t.Fatalf("recv failed with a broken ring: %s", recv)
-	}
-	if got := debugEventCount("mailbox.history_write_error"); got != before+2 {
-		t.Fatalf("failed recv-side ring write not logged: %d events, want %d", got, before+2)
-	}
-}
-
-// TestMailboxHistoryFailedTrimDoesNotFailSend pins best-effort trimming: an
-// oldest entry that cannot be removed (a non-empty directory) neither fails
-// the send nor hides the newest 10 real entries.
-func TestMailboxHistoryFailedTrimDoesNotFailSend(t *testing.T) {
-	f := newHistoryFixture(t, time.Date(2026, 11, 6, 14, 0, 0, 0, time.UTC))
-	dir, err := mailboxHistoryDir("", f.keyB)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stuck := filepath.Join(dir, "20000101T000000.000000000Z-00000000.json")
-	if err := os.MkdirAll(filepath.Join(stuck, "child"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i < 11; i++ {
-		mustSend(t, f.serverB, 2+i, f.keyB, "alice@worktree", fmt.Sprintf("m%02d", i))
-	}
-	if _, err := os.Stat(stuck); err != nil {
-		t.Fatalf("the unremovable entry vanished: %v", err)
-	}
-	if files := historyEntryFiles(t, f.keyB); len(files) != mailboxHistoryCap+1 {
-		t.Fatalf("ring on disk = %v, want the newest %d plus the stuck entry", files, mailboxHistoryCap)
-	}
-	got := historyJSON(t, f.serverB, 20, f.keyB, nil)
-	if len(got) != mailboxHistoryCap || got[0].Title != "m10" || got[9].Title != "m01" {
-		t.Fatalf("history = %#v, want m10..m01", got)
-	}
-}
-
-// TestMailboxHistorySkipsUnreadableAndUnparsableEntries pins that a read
-// skips an entry it cannot read or parse instead of failing.
-func TestMailboxHistorySkipsUnreadableAndUnparsableEntries(t *testing.T) {
-	setupMailboxTestEnv(t)
-	resetMailboxHistoryClock(t)
-	setMailboxClock(t, time.Date(2026, 11, 6, 15, 0, 0, 0, time.UTC))
-	const key = "history-skip-key"
-	if _, err := appendMailboxHistory("", key, []mailboxHistoryEntry{
-		{Direction: "sent", Counterparty: "a@machine", Body: "one"},
-		{Direction: "recv", Counterparty: "a@machine", Body: "two"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	dir, err := mailboxHistoryDir("", key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "29990101T000000.000000000Z-badjson0.json"), []byte("{not json"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(filepath.Join(dir, "29990101T000000.000000001Z-adirectr.json"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".tmp-inflight"), []byte(`{"direction":"sent","body":"partial"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got, err := readMailboxHistory("", key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 || got[0].Body != "two" || got[1].Body != "one" {
-		t.Fatalf("read = %#v, want the two real entries newest first", got)
-	}
-}
-
 // TestMailboxHistoryConcurrentAppendsAllLand pins that two writers to one
 // session's ring lose no entry.
 func TestMailboxHistoryConcurrentAppendsAllLand(t *testing.T) {
 	setupMailboxTestEnv(t)
-	resetMailboxHistoryClock(t)
 	const key = "history-concurrent-key"
 	var wg sync.WaitGroup
 	errs := make(chan error, 10)
@@ -458,18 +347,21 @@ func TestMailboxHistoryConcurrentAppendsAllLand(t *testing.T) {
 }
 
 // TestMaybePruneRemovesStaleMailboxHistory pins that the key-record prune
-// pass also reaps a history directory idle past keyRetentionAge and keeps a
-// fresh one.
+// pass also reaps a legacy history directory (the downgrade export's
+// layout) idle past keyRetentionAge and keeps a fresh one.
 func TestMaybePruneRemovesStaleMailboxHistory(t *testing.T) {
-	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	resetMailboxHistoryClock(t)
-	for _, key := range []string{"stale-history", "fresh-history"} {
-		if _, err := appendMailboxHistory("", key, []mailboxHistoryEntry{{Direction: "sent", Counterparty: "x@machine", Body: key}}); err != nil {
+	cache := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("WS_CACHE_HOME", cache)
+	staleDir := filepath.Join(cache, wsmailbox.HistoryDirName, "stale-history")
+	freshDir := filepath.Join(cache, wsmailbox.HistoryDirName, "fresh-history")
+	for _, dir := range []string{staleDir, freshDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "20261106T000000.000000000Z-00000000.json"), []byte(`{"direction":"sent","counterparty":"x@machine","body":"b"}`), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	staleDir, _ := mailboxHistoryDir("", "stale-history")
-	freshDir, _ := mailboxHistoryDir("", "fresh-history")
 	backdateMtime(t, staleDir, keyRetentionAge+time.Hour)
 
 	newSessionStore().maybePrune()
@@ -487,7 +379,6 @@ func TestMaybePruneRemovesStaleMailboxHistory(t *testing.T) {
 // entry's file name, the direction, the peer, and the first line.
 func TestMailboxSendAndRecvWriteMailLines(t *testing.T) {
 	f := newLiveFixture(t, true)
-	resetMailboxHistoryClock(t)
 	mustSend(t, f.server, 3, f.keyA, wsmailbox.ReplyIDPrefix+f.replyB, "Status update\nbody line")
 	callToolWithKey(t, f.server, 4, f.keyB, "mailbox.recv", nil)
 
@@ -498,7 +389,7 @@ func TestMailboxSendAndRecvWriteMailLines(t *testing.T) {
 	if e := sent[0]; e.Kind != wslive.RingMail || e.Direction != "sent" || e.Peer != wsmailbox.ReplyIDPrefix+f.replyB || e.Title != "Status update" {
 		t.Fatalf("sent line = %+v", e)
 	}
-	if names := historyEntryFiles(t, f.keyA); len(names) != 1 || sent[0].HistoryKey != names[0] {
+	if names := historyEntryNames(t, f.keyA); len(names) != 1 || sent[0].HistoryKey != names[0] {
 		t.Fatalf("sent history key %q, history files %v", sent[0].HistoryKey, names)
 	}
 
@@ -509,7 +400,7 @@ func TestMailboxSendAndRecvWriteMailLines(t *testing.T) {
 	if e := recv[0]; e.Direction != "recv" || e.Peer != wsmailbox.ReplyIDPrefix+f.replyA || e.Title != "Status update" {
 		t.Fatalf("recv line = %+v", e)
 	}
-	if names := historyEntryFiles(t, f.keyB); len(names) != 1 || recv[0].HistoryKey != names[0] {
+	if names := historyEntryNames(t, f.keyB); len(names) != 1 || recv[0].HistoryKey != names[0] {
 		t.Fatalf("recv history key %q, history files %v", recv[0].HistoryKey, names)
 	}
 }
@@ -521,7 +412,6 @@ func TestMailboxSendAndRecvWriteMailLines(t *testing.T) {
 func TestMailLineFlushesTheLeadsToolRowFirst(t *testing.T) {
 	f := newLiveFixture(t, true)
 	fastLive(t, 20*time.Millisecond)
-	resetMailboxHistoryClock(t)
 	intake(t, f.server, f.keyA, map[string]any{"kind": "agent", "batches": []any{map[string]any{"epoch": "e", "seq": 1, "toolNames": []any{"Bash"}, "callCount": 3, "failed": 0, "startedAt": 1100, "endedAt": 1200}}})
 	mustSend(t, f.server, 3, f.keyA, wsmailbox.ReplyIDPrefix+f.replyB, "Status update")
 

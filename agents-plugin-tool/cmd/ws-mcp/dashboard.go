@@ -18,6 +18,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsholder"
+	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wstrackerhook"
 	"github.com/kang-sw/devenv/internal/wstrackerhost"
 	"github.com/kang-sw/devenv/internal/wswake"
@@ -76,9 +77,17 @@ func dashboardCommand(args []string) {
 		}
 	}
 	sessions := mcp.NewDashboardSessionSource()
+	// The daemon serves the mailbox from memory: every store call opens (or
+	// reuses) the cache root's persistent instance, holding its restore
+	// ring for the daemon's life. A daemon that loses the dashboard lock
+	// makes no store call, so it never takes the ring.
+	wsmailbox.EnablePersistent()
 	// StartDaemon starts the runner before it returns the daemon, so the
 	// runner's tracker-changed callback is bound once the daemon exists.
 	var trackerChanged lateFunc
+	// Bound once the mailbox sweep runs; Close calls it before releasing
+	// the dashboard lock.
+	var exportMailbox lateFunc
 	// The holders a predecessor left running are found in the state
 	// directory; the interpreter for a new one is the launcher's own. The
 	// runner takes the manager first: it rejoins its lead sessions'
@@ -107,6 +116,7 @@ func dashboardCommand(args []string) {
 		Version:     version,
 		BuildTime:   *buildTime,
 		ContentHash: contentHash,
+		Executable:  exe,
 		LockWait:    *lockWait,
 		Log:         logw,
 		Proxy:       host,
@@ -121,6 +131,7 @@ func dashboardCommand(args []string) {
 		Tracker:        &dashboardTracker{h: tracker, err: trackerErr, unregistered: func() { support.CloseUnregistered() }},
 		Holders:        holders,
 		Support:        support,
+		BeforeUnlock:   exportMailbox.call,
 	})
 	if errors.Is(err, wsdashboard.ErrLocked) {
 		closeTracker()
@@ -131,10 +142,25 @@ func dashboardCommand(args []string) {
 		closeTracker()
 		fatal("dashboard", err)
 	}
+	// Open the store now, so the start's import of the legacy files (and a
+	// wait on a predecessor still releasing the ring) is not on a session's
+	// first mailbox call.
+	if _, err := wsmailbox.OpenPersistent(wsmailbox.Paths{}); err != nil {
+		fmt.Fprintf(logw, "dashboard: mailbox store: %v\n", err)
+	}
 	stopMailboxSweep := startMailboxSweep(logw)
+	// The export for a previous version runs under the dashboard lock: an
+	// older daemon that takes the lock after it never has its own mail
+	// overwritten by it. The sweep stops first, so it makes no store call
+	// once the persistent mode is off.
+	exportMailbox.set(func() {
+		stopMailboxSweep()
+		if err := wsmailbox.ClosePersistent(); err != nil {
+			fmt.Fprintf(logw, "dashboard: mailbox store close: %v\n", err)
+		}
+	})
 	wsdashboard.LogDevAssets(logw, devRoot)
-	// Holding the lock, this daemon is the one the staged copies were for;
-	// every copy but its own is unused now.
+	// Settled copies remain available for surviving launchers and rollback.
 	if exe != "" {
 		wsdashboard.PruneStagedExecutables(dir, exe)
 	}
@@ -159,7 +185,13 @@ func dashboardCommand(args []string) {
 		daemon.Close()
 	case <-daemon.Done():
 	}
+	// Close already exported the mailbox under the lock; this is the
+	// fallback for a Close that ran before the export was bound, and a
+	// no-op after it (stopMailboxSweep and ClosePersistent are idempotent).
 	stopMailboxSweep()
+	if err := wsmailbox.ClosePersistent(); err != nil {
+		fmt.Fprintf(logw, "dashboard: mailbox store close: %v\n", err)
+	}
 	// The lock and endpoint are released (the successor is starting); a
 	// hosted call that outlived the drain budget still runs and ends on its
 	// own, and the replacement goroutine, when one runs, spawns the
@@ -260,14 +292,32 @@ func trackerStoreRoot(h *wstrackerhost.Host, newErr error) func(id string) (stri
 // trackerChanged runs after a conversation's successful tracker write.
 func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *wsholder.Manager) *wsagent.Runner {
 	keys := mcp.NewAgentKeyStore()
+	backends := map[string]wsagent.BackendRegistration{
+		wsagent.BackendClaude: {Backend: wsagent.ClaudeBackend{}, LeadProfile: wsagent.LeadProfileClaude, PermissionModes: wsagent.LeadPermissionModes, PermissionLevels: wsagent.LeadPermissionLevels(), Catalog: wsagent.ClaudeCatalog(), ManualHarness: "claude", PlaybookCommands: true, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendClaude), WorkerHTTPMCP: true},
+		// Pi has no catalog profile until its port of the Codex adapter:
+		// it stays handle-only.
+		wsagent.BackendPi: {Backend: wsagent.PiBackend{}, LeadProfile: wsagent.LeadProfilePi, PermissionLevels: wsagent.LeadPermissionLevels(), WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendPi)},
+		// Codex workers are daemon-owned like agy's: HTTP MCP, auto-approved
+		// inside the sandbox their authority selects (codexWorkerMode). Its
+		// native tool names are already valid, so no name scheme applies.
+		wsagent.BackendCodex: {Backend: wsagent.CodexBackend{}, LeadProfile: wsagent.LeadProfileCodex, PermissionModes: wsagent.CodexPermissionModes, Catalog: wsagent.CodexCatalog(), ManualHarness: wsagent.BackendCodex, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendCodex), WorkerHTTPMCP: true, WorkerAutoApprove: true},
+		// agy workers use the default agent and auto-allow its permission
+		// requests. It maps no common lead permission level yet. Both
+		// roles use HTTP MCP and underscore tool-name aliases.
+		wsagent.BackendAgy: {Backend: wsagent.AgyBackend{}, LeadProfile: wsagent.LeadProfileAgy, PermissionModes: wsagent.AgyPermissionModes, Catalog: wsagent.AgyCatalog(), ToolNameScheme: wsagent.ToolNameSchemeSanitize, CallFallback: true, DirectTools: []string{
+			"workflow_manual", "workflow_state", "agenda.set", "agenda.list", "agenda.clear",
+			"whiteboard.update", "whiteboard.query", "mailbox.send", "mailbox.recv",
+			"agent.spawn", "agent.interrupt", "agent.list", "playbook.read", "playbook.render",
+			"tickets.query", "tickets.move", "git.status", "git.log", "git.commit", "git.merge",
+			"worktree.acquire", "worktree.release", "note.query", "note.write",
+			"config.resolve_agent", "todo.list", "todo.check",
+		}, ToolsAlwaysLoad: true, ManualHarness: wsagent.BackendAgy, PlaybookCommands: true, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendAgy), WorkerHTTPMCP: true, WorkerAutoApprove: true},
+	}
 	return wsagent.NewRunner(wsagent.Options{
 		Dir:           dir,
 		DaemonVersion: version,
-		Backends: map[string]wsagent.BackendRegistration{
-			wsagent.BackendClaude: {Backend: wsagent.ClaudeBackend{}, LeadProfile: wsagent.LeadProfileClaude, PermissionModes: wsagent.LeadPermissionModes, PermissionLevels: wsagent.LeadPermissionLevels()},
-			wsagent.BackendPi:     {Backend: wsagent.PiBackend{}, LeadProfile: wsagent.LeadProfilePi, PermissionLevels: wsagent.LeadPermissionLevels()},
-		},
-		Keys: keys,
+		Backends:      backends,
+		Keys:          keys,
 		// A lead session's process runs under a session holder with a lead
 		// key of its own.
 		Holders:  wsagent.ManagerHost{Manager: holders},
@@ -278,6 +328,16 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 		WSMCP: func(root string) (wsagent.MCPCommand, error) {
 			return agentMCPCommand(root, version)
 		},
+		// A hosted lead's launch appends its workflow manual to its prompt,
+		// and a lead without ws skills runs the package's lead playbooks as
+		// dashboard commands whose turn carries the playbook body.
+		LeadManual: func(backend, dir, key string) (string, error) {
+			return renderLeadManual(hostedRender(backends[backend]), dir, key)
+		},
+		PlaybookCommands: hostedPlaybookCommands,
+		ExpandCommand: func(backend, dir, key, name string) (string, error) {
+			return renderLeadPlaybook(hostedRender(backends[backend]), dir, key, name)
+		},
 		Log:            logw,
 		TrackerChanged: trackerChanged,
 		// A spawned Pi subagent's settled turns go to its lead's mailbox.
@@ -285,6 +345,9 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 		// A Pi subagent's own pi.* calls (the token route) need a usable
 		// Pi, as a lead's do.
 		ChildCheck: mcp.PiReady,
+		// A message that cannot wake its sleeping agent stays queued; its
+		// sender hears why once.
+		WakeRefused: mcp.AgentWakeRefused(logw),
 	})
 }
 
@@ -383,4 +446,10 @@ func serveDashboard(server *mcp.Server) {
 		return wsdashboard.SpawnDetached(exe, args, dir)
 	}
 	startDashboard(context.Background(), settings, dir, buildTime, contentHash, spawn, os.Stderr)
+}
+
+// hostedRender is what reg says about text the daemon renders for its
+// hosted lead.
+func hostedRender(reg wsagent.BackendRegistration) mcp.HostedRender {
+	return mcp.HostedRender{Harness: reg.ManualHarness, PlaybookCommands: reg.PlaybookCommands, ToolNameScheme: reg.ToolNameScheme, CallFallback: reg.CallFallback, DirectTools: reg.DirectTools}
 }

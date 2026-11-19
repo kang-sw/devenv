@@ -242,10 +242,14 @@ export function userPrompt(
 /** An argument that carries a ws session key: never part of a preview. */
 const SESSION_KEY_ARG = /^session_?key$/i
 
+/** Keep this preference order in sync with Go's wslive.ToolSummaryKeys. */
+export const TOOL_SUMMARY_KEYS = ['summary', 'toolSummary', 'tool_summary']
+
 /**
  * Flattens a call's arguments to one capped line: `key: value` pairs, strings
- * raw, everything else JSON. A session key argument is left out, so a
- * preview never carries one (the server scrubs keys it knows as well).
+ * raw, everything else JSON. Summary keys come first, before truncation.
+ * A session key argument is left out, so a preview never carries one
+ * (the server scrubs keys it knows as well).
  */
 export function argsPreview(args: unknown, cap = ARGS_PREVIEW_CAP): string {
   let text: string
@@ -254,6 +258,11 @@ export function argsPreview(args: unknown, cap = ARGS_PREVIEW_CAP): string {
   else if (typeof args === 'object' && !Array.isArray(args)) {
     text = Object.entries(args as Record<string, unknown>)
       .filter(([key]) => !SESSION_KEY_ARG.test(key))
+      .sort(([a], [b]) => {
+        const ai = TOOL_SUMMARY_KEYS.indexOf(a)
+        const bi = TOOL_SUMMARY_KEYS.indexOf(b)
+        return (ai < 0 ? TOOL_SUMMARY_KEYS.length : ai) - (bi < 0 ? TOOL_SUMMARY_KEYS.length : bi)
+      })
       .map(([key, value]) => `${key}: ${typeof value === 'string' ? value : safeJson(value)}`)
       .join(', ')
   } else text = safeJson(args)

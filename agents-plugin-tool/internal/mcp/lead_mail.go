@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
@@ -155,8 +156,10 @@ func (m *LeadMailbox) watch(w *leadMailWatch, root string, changed func()) {
 // correspondents, and each is a received entry of its mail history and a
 // mail line of its conversation ring. It returns one text per message,
 // oldest first, which joined by blank lines read as the one prompt a
-// session's own mailbox wait submits for the batch (formatMailBatch).
-func (m *LeadMailbox) Drain(root, key string) ([]string, error) {
+// session's own mailbox wait submits for the batch (formatMailBatch), each
+// with its sender's reply-id; relation, when not nil, tags a message's
+// head with how its sender relates to the session.
+func (m *LeadMailbox) Drain(root, key string, relation func(sender string) string) ([]wsagent.ClaimedMail, error) {
 	entry, found := m.server.lookupSession(key)
 	if !found {
 		return nil, fmt.Errorf("mailbox: unknown session key")
@@ -185,7 +188,44 @@ func (m *LeadMailbox) Drain(root, key string) ([]string, error) {
 	if err := wslive.AppendRing(ringDir, mailRingLines(key, history, keys)); err != nil {
 		m.server.debugEvent("dashboard.ring_write_error", map[string]any{"error": err.Error()})
 	}
-	return formatMailBatch(leadMailLabel, leadMailRecvTool, key, drained), nil
+	senders := make([]string, len(drained))
+	relations := make([]string, len(drained))
+	for i, env := range drained {
+		senders[i] = m.server.mailSenderReplyID(env, entry.root)
+		if relation != nil {
+			relations[i] = relation(senders[i])
+		}
+	}
+	texts := formatMailBatch(leadMailLabel, leadMailRecvTool, key, drained, relations...)
+	out := make([]wsagent.ClaimedMail, len(texts))
+	for i, text := range texts {
+		out[i] = wsagent.ClaimedMail{Text: text, Sender: senders[i]}
+	}
+	return out, nil
+}
+
+// mailSenderReplyID is the reply-id of env's sender, "" for none: its
+// reply handle, or the reply-id of the session that owns its named
+// address now. It reads the store's memory only.
+func (s *Server) mailSenderReplyID(env wsmailbox.Envelope, root string) string {
+	for _, handle := range []string{env.ReplyTo, env.From} {
+		if id, ok := strings.CutPrefix(handle, wsmailbox.ReplyIDPrefix); ok {
+			return id
+		}
+	}
+	addr, err := wsmailbox.ParseAddress(env.From)
+	if env.From == "" || err != nil || addr.Kind != wsmailbox.AddressSlug {
+		return ""
+	}
+	path, err := s.mailboxPaths().ForScope(addr.Scope, root)
+	if err != nil {
+		return ""
+	}
+	presence, ok, _, err := s.mailboxPaths().Store().NamedQueue(path, addr.Name)
+	if err != nil || !ok || presence.Owner == "" {
+		return ""
+	}
+	return s.mailboxReplyID(presence.Owner)
 }
 
 // Return puts mail a Drain claimed for key, and the session never read,
@@ -203,16 +243,12 @@ func (m *LeadMailbox) Return(root, key string, texts []string) error {
 	if _, found := m.server.lookupSession(key); !found {
 		return fmt.Errorf("mailbox: unknown session key")
 	}
-	path, err := m.server.mailboxPaths().ReplyRegistry()
-	if err != nil {
-		return err
-	}
 	returned := make([]wsmailbox.Envelope, 0, len(texts))
 	for _, text := range texts {
 		returned = append(returned, parseMailText(text))
 	}
 	replyID := m.server.mailboxReplyID(key)
-	if err := wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error {
+	if err := m.server.mailboxPaths().Store().WithReplyLock(func(store *wsmailbox.ReplyStore) error {
 		if store.Queues == nil {
 			store.Queues = map[string][]wsmailbox.Envelope{}
 		}
@@ -245,6 +281,7 @@ func parseMailText(text string) wsmailbox.Envelope {
 		return whole
 	}
 	handle := strings.TrimPrefix(head, "mail from ")
+	content = trimRelationLine(content)
 	stamp := ""
 	if open := strings.LastIndex(handle, " ("); open >= 0 && strings.HasSuffix(handle, ")") {
 		handle, stamp = handle[:open], handle[open+2:len(handle)-1]
@@ -268,10 +305,30 @@ func parseMailText(text string) wsmailbox.Envelope {
 	return m
 }
 
+// relationLines are the lines formatMailEnvelope opens a body with, one per
+// relation the daemon's delivery computes.
+var relationLines = []string{"[relation: parent]\n", "[relation: child]\n", "[relation: peer]\n"}
+
+// trimRelationLine is content without the relation line a delivery opened
+// it with.
+func trimRelationLine(content string) string {
+	for _, line := range relationLines {
+		if rest, ok := strings.CutPrefix(content, line); ok {
+			return rest
+		}
+	}
+	return content
+}
+
 // formatMailEnvelope is one message as a session reads it: a "mail from
 // <handle> (<sent_at>):" line, the handle being the sender's address or
-// else its reply handle or display label, then the body.
-func formatMailEnvelope(m wsmailbox.Envelope) string {
+// else its reply handle or display label, then the body. A relation (the
+// daemon's delivery to a session it owns) opens the body as a
+// "[relation: <relation>]" line. It is a line of its own, not part of the
+// head, because a held text can reach an older binary's parseMailText
+// (Return after a downgrade): that one keeps the sender and stamp, and the
+// line stays in the body it delivers.
+func formatMailEnvelope(m wsmailbox.Envelope, relation string) string {
 	handle := strings.TrimSpace(m.From)
 	if handle == "" {
 		handle = strings.TrimSpace(m.ReplyTo)
@@ -286,7 +343,11 @@ func formatMailEnvelope(m wsmailbox.Envelope) string {
 	if stamp := strings.TrimSpace(m.SentAt); stamp != "" {
 		head += " (" + stamp + ")"
 	}
-	return head + ":\n" + m.Content
+	body := m.Content
+	if relation != "" {
+		body = "[relation: " + relation + "]\n" + body
+	}
+	return head + ":\n" + body
 }
 
 // formatMailBatch is a claimed batch as the texts of its messages, the
@@ -294,11 +355,17 @@ func formatMailEnvelope(m wsmailbox.Envelope) string {
 // for byte, the prompt the Claude adapter's mailbox wait submits for the
 // same batch under the same label and recv tool name (its formatBatch).
 // Go, Claude, and Pi envelope heads are pinned to matching literals in
-// their test suites; change them together.
-func formatMailBatch(label, recvTool, key string, mail []wsmailbox.Envelope) []string {
+// their test suites; change them together. relations, when given, open
+// each message's body with a relation line (formatMailEnvelope); only the
+// daemon's delivery gives them, so the adapters' prompts never carry one.
+func formatMailBatch(label, recvTool, key string, mail []wsmailbox.Envelope, relations ...string) []string {
 	texts := make([]string, 0, len(mail))
-	for _, m := range mail {
-		texts = append(texts, formatMailEnvelope(m))
+	for i, m := range mail {
+		relation := ""
+		if i < len(relations) {
+			relation = relations[i]
+		}
+		texts = append(texts, formatMailEnvelope(m, relation))
 	}
 	if len(texts) > 0 {
 		head := fmt.Sprintf("[%s] %d message(s) arrived for session_key %s. They were already received through %s; do not call it again for these.", label, len(mail), key, recvTool)

@@ -86,7 +86,11 @@
     "pi.list": ">=0.50.8-dev <0.51.0",
     "pi.stop": ">=0.50.8-dev <0.51.0",
     "pi.transcript": ">=0.50.8-dev <0.51.0",
-    "pi.wait": ">=0.50.8-dev <0.51.0"
+    "pi.wait": ">=0.50.8-dev <0.51.0",
+    "agent.spawn": ">=0.50.8-dev <0.51.0",
+    "agent.interrupt": ">=0.50.8-dev <0.51.0",
+    "agent.list": ">=0.50.8-dev <0.51.0",
+    "agent.tiers": ">=0.50.8-dev <0.51.0"
   },
   "commands": {
     "runtime.info": ">=0.50.8-dev <0.51.0",

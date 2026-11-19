@@ -30,7 +30,7 @@ func childHarness(t *testing.T) (*harness, *reports) {
 	})
 	got := &reports{}
 	h.config.Report = got.add
-	h.config.Backends[BackendPi] = BackendRegistration{Backend: h.backend}
+	h.config.Backends[BackendPi] = BackendRegistration{Backend: h.backend, WorkerCapable: true, WorkerProfile: AgentWorkerProfile(BackendPi)}
 	h.backend.steers = true
 	h.endpoint = "http://127.0.0.1:1"
 	for tier, model := range map[string]string{"small": "prov/small-model", "medium": "prov/medium-model", "large": "prov/large-model"} {
@@ -318,17 +318,20 @@ func TestTokenSpawnCapsDepthAndTier(t *testing.T) {
 	if code, body := h.tokenCall(token, "spawn", map[string]any{"prompt": "x", "tier": "huge"}); code != http.StatusBadRequest {
 		t.Fatalf("an unknown tier = %d %s", code, body)
 	}
-	gc := h.spawnChild(token, "medium", "depth two")
-	// The depth-2 child keeps its token and gets the cap message.
-	gcToken := h.token(1)
-	if gcToken == "" {
-		t.Fatalf("a depth-2 child holds a token")
+	// A chain down to depth 4: each child keeps its token, and the one at
+	// the cap gets the cap message.
+	var last State
+	for depth := 2; depth <= MaxSpawnDepth; depth++ {
+		last = h.spawnChild(token, "medium", "deeper")
+		if token = h.token(depth - 1); token == "" {
+			t.Fatalf("a depth-%d child holds a token", depth)
+		}
 	}
-	code, body = h.tokenCall(gcToken, "spawn", map[string]any{"prompt": "x", "tier": "small"})
-	if code != http.StatusForbidden || !strings.Contains(body, "spawn depth cap is 2") || !strings.Contains(body, "depth 2") {
-		t.Fatalf("a depth-3 spawn = %d %s", code, body)
+	code, body = h.tokenCall(token, "spawn", map[string]any{"prompt": "x", "tier": "small"})
+	if code != http.StatusForbidden || !strings.Contains(body, "pi.spawn: the spawn depth cap is 4") || !strings.Contains(body, "at depth 4") {
+		t.Fatalf("a depth-5 spawn = %d %s", code, body)
 	}
-	if n := len(h.runner.Children(ParentRef{Kind: ParentConversation, ReplyID: gc.ID})); n != 0 {
+	if n := len(h.runner.Children(ParentRef{Kind: ParentConversation, ReplyID: last.ID})); n != 0 {
 		t.Fatalf("a refused spawn spawns nothing: %d", n)
 	}
 
@@ -352,7 +355,7 @@ func TestChildReportIsSteeredIntoTheRunningParentTurn(t *testing.T) {
 		steered, _ = wp.steered()
 		return len(steered) == 1
 	})
-	if s := steered[0]; !strings.Contains(s, "[Pi subagent "+gc.ID) || !strings.Contains(s, "] turn done") || !strings.Contains(s, "child result") {
+	if s := steered[0]; !strings.Contains(s, "[subagent id:"+gc.ID) || !strings.Contains(s, "] turn done") || !strings.Contains(s, "child result") {
 		t.Fatalf("steered report = %q", s)
 	}
 	if rec := h.record(gc.ID); len(rec.PendingReports) != 0 {
@@ -383,7 +386,7 @@ func TestChildReportPromptsAnIdleParentThatHeldItsReport(t *testing.T) {
 
 	gp.reply("child result")
 	turn := wp.nextSent(t)
-	if !strings.Contains(turn, "[Pi subagent "+gc.ID) || !strings.Contains(turn, "child result") {
+	if !strings.Contains(turn, "[subagent id:"+gc.ID) || !strings.Contains(turn, "child result") {
 		t.Fatalf("the report's turn = %q", turn)
 	}
 	if steered, _ := wp.steered(); len(steered) != 0 {
@@ -426,7 +429,7 @@ func TestSteeredReportTheRunMissedGoesAsTheNextTurn(t *testing.T) {
 				wp.events <- Event{SteerAnswer: tc.after}
 			}
 			turn := wp.nextSent(t)
-			if !strings.Contains(turn, "[Pi subagent "+gc.ID) || !strings.Contains(turn, "child result") {
+			if !strings.Contains(turn, "[subagent id:"+gc.ID) || !strings.Contains(turn, "child result") {
 				t.Fatalf("the report's turn = %q", turn)
 			}
 			if _, cleared := wp.steered(); cleared != tc.cleared {
@@ -517,7 +520,7 @@ func TestHeldReportSurvivesARestart(t *testing.T) {
 
 		h.start()
 		turn := h.backend.waitProc(t, 2).nextSent(t)
-		if !strings.Contains(turn, "[Pi subagent "+gc.ID) || !strings.Contains(turn, "turn interrupted") {
+		if !strings.Contains(turn, "[subagent id:"+gc.ID) || !strings.Contains(turn, "turn interrupted") {
 			t.Fatalf("the interrupted child's report resumes the worker: %q", turn)
 		}
 		noLeadReport(t, got, "the resumed worker's turn runs")
@@ -553,7 +556,7 @@ func TestHeldReportSurvivesARestart(t *testing.T) {
 
 		h.start()
 		turn := h.backend.waitProc(t, 2).nextSent(t)
-		if !strings.Contains(turn, "[Pi subagent "+gc.ID) || !strings.Contains(turn, "persisted result") {
+		if !strings.Contains(turn, "[subagent id:"+gc.ID) || !strings.Contains(turn, "persisted result") {
 			t.Fatalf("the persisted report resumes the worker: %q", turn)
 		}
 		noLeadReport(t, got, "the resumed worker's turn runs")
@@ -608,7 +611,7 @@ func TestStoppedWorkerResumesOnItsChildsReport(t *testing.T) {
 	}
 	gp.reply("child result")
 	turn := h.backend.waitProc(t, 2).nextSent(t)
-	if !strings.Contains(turn, "[Pi subagent "+gc.ID) || !strings.Contains(turn, "child result") {
+	if !strings.Contains(turn, "[subagent id:"+gc.ID) || !strings.Contains(turn, "child result") {
 		t.Fatalf("the report resumes the stopped worker: %q", turn)
 	}
 	h.backend.proc(2).reply("final")

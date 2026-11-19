@@ -42,11 +42,7 @@ func setMailboxClock(t *testing.T, at time.Time) {
 
 func replyEntryFor(t *testing.T, key string) (wsmailbox.ReplyEntry, bool) {
 	t.Helper()
-	path, err := wsmailbox.ReplyRegistryPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	store, err := wsmailbox.LoadReplyStore(path)
+	store, err := (wsmailbox.Paths{}).Store().LoadReply()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +85,7 @@ func TestMailboxLookupPeersRecencyOrderCapAndAutoExclusion(t *testing.T) {
 		t.Fatal(err)
 	}
 	deadPID := exitedChildPID(t)
-	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+	if err := (wsmailbox.Paths{}).Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 		store.Presence["auto-live"] = wsmailbox.Presence{Name: "auto-live", Scope: wsmailbox.ScopeWorktree, PID: os.Getppid(), Auto: true, LastSeen: base.Add(-30 * time.Second).Format(time.RFC3339)}
 		store.Presence["auto-dead"] = wsmailbox.Presence{Name: "auto-dead", Scope: wsmailbox.ScopeWorktree, PID: deadPID, Auto: true, LastSeen: base.Add(-time.Minute).Format(time.RFC3339)}
 		for i := 0; i < 22; i++ {

@@ -43,7 +43,7 @@ func hostedPackageFixture(t *testing.T, name string) string {
 	return root
 }
 
-func TestHostedPackageHelloRegistryAndAgentMCPSelection(t *testing.T) {
+func TestHostedPackageHellosDoNotSelectHostedInputs(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", t.TempDir())
 	t.Setenv("WS_CONFIG_HOME", t.TempDir())
 	dir, err := wsdashboard.Dir("")
@@ -54,7 +54,7 @@ func TestHostedPackageHelloRegistryAndAgentMCPSelection(t *testing.T) {
 	roots := map[string]string{}
 	for _, name := range []string{"ws", "wsflow"} {
 		roots[name] = hostedPackageFixture(t, name)
-		// Existing hellos feed the registry without a package-name field.
+		// External hellos retain their own policy, without registering roots.
 		hello := wsdashboard.ProxyHello{Mode: wsdashboard.ProxyModeCLI, Version: "0.50.1", Cwd: roots[name], Env: map[string]string{wsrsrc.EnvRsrcRoot: "rsrc", "WS_MCP_NAMESPACE": name}}
 		session, err := host.Accept(hello)
 		if err != nil {
@@ -65,7 +65,10 @@ func TestHostedPackageHelloRegistryAndAgentMCPSelection(t *testing.T) {
 			t.Fatalf("hello policy was replaced: %+v", caller.Env)
 		}
 	}
-	// A new proxy host/reader after replacement still sees both learned roots.
+	// A replacement still selects build-owned packages, never learned roots.
+	if os.Getenv("WS_TEST_EMBEDDED_PACKAGES") == "1" {
+		t.Setenv("WS_RSRC_DEV_CHECKOUT", "")
+	}
 	host = &proxyHost{dir: dir, logw: io.Discard}
 	python := filepath.Join(t.TempDir(), "python")
 	if runtime.GOOS == "windows" {
@@ -96,10 +99,10 @@ func TestHostedPackageHelloRegistryAndAgentMCPSelection(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if cmd.Args[0] != filepath.Join(roots[want], "bin", "ws-mcp-launcher.py") || cmd.PluginWarning != "" || cmd.Env["WS_MCP_PROJECT_ROOT"] != workerRoot {
+			if cmd.Args[0] != filepath.Join(cmd.Plugin, "bin", "ws-mcp-launcher.py") || cmd.Plugin == roots[want] || cmd.PluginWarning != "" || cmd.Env["WS_MCP_PROJECT_ROOT"] != workerRoot {
 				t.Fatalf("%s/%s: %+v", starter, selected, cmd)
 			}
-			if cmd.Env["WS_MCP_CLI_NAME"] != want+"-cli" || cmd.Env["WS_SKILLS_ROOT"] != filepath.Join(roots[want], "skills") || !strings.Contains(cmd.Env["WS_MCP_CONFIG_MANIFESTS"], roots[want]) {
+			if cmd.Env["WS_MCP_CLI_NAME"] != want+"-cli" || cmd.Env["WS_SKILLS_ROOT"] != filepath.Join(cmd.Plugin, "skills") || !strings.Contains(cmd.Env["WS_MCP_CONFIG_MANIFESTS"], cmd.Plugin) {
 				t.Fatalf("wrong package policy: %v", cmd.Env)
 			}
 			if want == "wsflow" && (cmd.Env["WS_MCP_NAMESPACE"] != want || cmd.Env["WS_MCP_NO_AGENT"] != "1") {
@@ -110,14 +113,14 @@ func TestHostedPackageHelloRegistryAndAgentMCPSelection(t *testing.T) {
 			}
 		}
 	}
-	// An invalid hello remains usable but cannot poison a remembered package.
+	// An unrelated hello remains usable but cannot change hosted selection.
 	bad := hostedPackageFixture(t, "unrelated")
 	if _, err := host.Accept(wsdashboard.ProxyHello{Mode: wsdashboard.ProxyModeCLI, Version: "0.50.1", Cwd: bad, Env: map[string]string{wsrsrc.EnvRsrcRoot: filepath.Join(bad, "rsrc"), "WS_MCP_NAMESPACE": "wsflow"}}); err != nil {
 		t.Fatal(err)
 	}
-	root, warning, err := wsagent.ResolveHostedPlugin("0.50.1")
-	if err != nil || root != roots["wsflow"] || warning != "" {
-		t.Fatalf("invalid hello poisoned registry: %q %q %v", root, warning, err)
+	root, warning, err := wsagent.ResolveHostedPackage()
+	if err != nil || root != "wsflow" || warning != "" {
+		t.Fatalf("unrelated hello changed hosted selection: %q %q %v", root, warning, err)
 	}
 }
 
@@ -139,9 +142,14 @@ func TestHostedPackageSelectionLeavesNonHostedHelloPolicy(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			env, err := wsagent.HostedPluginEnvironment(plugin)
-			if err != nil {
-				t.Fatal(err)
+			// This is an external connection: its own manifest paths remain
+			// caller-owned, not the hosted build-owned environment helper.
+			env := map[string]string{
+				"WS_RSRC_ROOT":            filepath.Join(plugin, "rsrc"),
+				"WS_MCP_CONFIG_MANIFESTS": filepath.Join(plugin, "config-manifest.json") + ";" + filepath.Join(plugin, "dashboard-config-manifest.json"),
+			}
+			if name == "wsflow" {
+				env["WS_MCP_NAMESPACE"], env["WS_MCP_NO_AGENT"] = name, "1"
 			}
 			env["WS_CONFIG_HOME"], env["WS_CACHE_HOME"] = os.Getenv("WS_CONFIG_HOME"), os.Getenv("WS_CACHE_HOME")
 			host := &proxyHost{dir: t.TempDir(), logw: io.Discard}
@@ -182,7 +190,7 @@ func TestHostedPackageSelectionLeavesNonHostedHelloPolicy(t *testing.T) {
 	}
 }
 
-func TestAgentMCPSelectedPackageMissingFallsBack(t *testing.T) {
+func TestAgentMCPSelectedPackageNeedsNoInstalledCopy(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", t.TempDir())
 	t.Setenv("WS_CONFIG_HOME", t.TempDir())
 	ws := hostedPackageFixture(t, "ws")
@@ -196,7 +204,7 @@ func TestAgentMCPSelectedPackageMissingFallsBack(t *testing.T) {
 	}
 	t.Setenv(wsholder.PythonEnv, python)
 	cmd, err := agentMCPCommand(t.TempDir(), "0.50.1")
-	if err != nil || cmd.Args[0] != filepath.Join(ws, "bin", "ws-mcp-launcher.py") || !strings.Contains(cmd.PluginWarning, "wsflow") || !strings.Contains(cmd.PluginWarning, "daemon package ws at ") {
+	if err != nil || cmd.Plugin == ws || cmd.PluginWarning != "" || cmd.Env["WS_MCP_NAMESPACE"] != "wsflow" {
 		t.Fatalf("fallback = %+v, %v", cmd, err)
 	}
 }

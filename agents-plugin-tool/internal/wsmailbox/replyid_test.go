@@ -9,22 +9,23 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wskey"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 func TestReplyStoreRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mailbox-replyids.json")
 	replyID := ReplyID("amber-tide-fox")
-	err := WithReplyLock(path, func(store *ReplyStore) error {
+	err := WithReplyFileLock(path, func(store *ReplyStore) error {
 		store.Entries[replyID] = ReplyEntry{LastSeen: "2026-09-13T00:00:00Z"}
 		store.Queues = AppendQueue(store.Queues, replyID, Envelope{Content: "reply", SentAt: "2026-09-13T00:00:00Z"})
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("WithReplyLock: %v", err)
+		t.Fatalf("WithReplyFileLock: %v", err)
 	}
-	store, err := LoadReplyStore(path)
+	store, err := LoadReplyFile(path)
 	if err != nil {
-		t.Fatalf("LoadReplyStore: %v", err)
+		t.Fatalf("LoadReplyFile: %v", err)
 	}
 	if store.Entries[replyID].LastSeen == "" {
 		t.Fatalf("Entries[%s] missing after round trip", replyID)
@@ -35,19 +36,19 @@ func TestReplyStoreRoundTrip(t *testing.T) {
 }
 
 func TestPostSystemQueuesSenderlessMail(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "mailbox-replyids.json")
+	ms := (Paths{State: wsstate.Options{CacheHome: t.TempDir()}}).Store()
 	replyID := ReplyID("amber-tide-fox")
-	if err := WithReplyLock(path, func(store *ReplyStore) error {
+	if err := ms.WithReplyLock(func(store *ReplyStore) error {
 		store.Queues = AppendQueue(store.Queues, replyID, Envelope{From: "peer@machine", Content: "first"})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
 	at := time.Date(2026, 11, 13, 1, 2, 3, 0, time.FixedZone("x", 3600))
-	if err := PostSystem(path, replyID, "pi:childone", "report", at); err != nil {
+	if err := ms.PostSystem(replyID, "pi:childone", "report", at); err != nil {
 		t.Fatalf("PostSystem: %v", err)
 	}
-	store, err := LoadReplyStore(path)
+	store, err := ms.LoadReply()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +56,7 @@ func TestPostSystemQueuesSenderlessMail(t *testing.T) {
 	if len(q) != 2 || q[1] != (Envelope{Label: "pi:childone", Content: "report", SentAt: "2026-11-13T00:02:03Z"}) {
 		t.Fatalf("queue = %#v, want the system mail after the peer's", q)
 	}
-	if err := PostSystem(path, "", "", "x", at); err == nil {
+	if err := ms.PostSystem("", "", "x", at); err == nil {
 		t.Fatalf("an empty reply-id is refused")
 	}
 }

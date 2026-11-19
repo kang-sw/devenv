@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -22,7 +21,6 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsnote"
-	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
 // hostedCallLinger bounds how long the daemon process stays, after it has
@@ -77,19 +75,9 @@ func (h *proxyHost) wait() { h.background.Wait() }
 // Accept builds the session for hello: an MCP server or a one-shot CLI run.
 func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySession, error) {
 	hello = callerHello(hello)
-	// Learning a root never changes this connection's own package policy and
-	// invalid evidence must not refuse an otherwise compatible caller.
-	if h.dir != "" {
-		if err := wsagent.RegisterHostedPlugin(h.dir, hello.Env[wsrsrc.EnvRsrcRoot], hello.Version); err != nil && !errors.Is(err, os.ErrNotExist) && h.logw != nil {
-			fmt.Fprintf(h.logw, "dashboard: hosted plugin root not registered: %v\n", err)
-		}
-	}
 	env := mcp.EnvFromMap(hello.Env)
 	switch hello.Mode {
 	case wsdashboard.ProxyModeMCP:
-		if strings.TrimSpace(hello.Env[wsrsrc.EnvRsrcRoot]) == "" {
-			return nil, fmt.Errorf("hello carries no %s: a hosted session reads its resources from the launcher's plugin, never from the daemon's", wsrsrc.EnvRsrcRoot)
-		}
 		root := hello.ProjectRoot
 		if root == "" {
 			root = defaultRootFrom(".", func(key string) string { return hello.Env[key] })

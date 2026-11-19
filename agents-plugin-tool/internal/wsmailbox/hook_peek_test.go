@@ -17,7 +17,7 @@ func seedHookPeekQueue(t *testing.T, name string, envelopes ...Envelope) {
 	if err != nil {
 		t.Fatalf("MachinePath: %v", err)
 	}
-	if err := WithLock(path, func(store *StoreFile) error {
+	if err := (Paths{}).Store().WithLock(path, func(store *StoreFile) error {
 		store.Presence[name] = Presence{Name: name, Scope: ScopeMachine, Owner: "someone-else-key", LastSeen: "2026-09-13T00:00:00Z"}
 		for _, e := range envelopes {
 			store.Queues = AppendQueue(store.Queues, name, e)
@@ -152,7 +152,7 @@ func TestShouldNotifyNamedInboxUnreadResetsAfterDrain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MachinePath: %v", err)
 	}
-	if err := WithLock(path, func(store *StoreFile) error {
+	if err := (Paths{}).Store().WithLock(path, func(store *StoreFile) error {
 		store.Queues["alice"] = nil
 		return nil
 	}); err != nil {
@@ -191,7 +191,7 @@ func seedWorktreeInboxQueue(t *testing.T, root, name string, count int) {
 	if err != nil {
 		t.Fatalf("WorktreePath(%s): %v", root, err)
 	}
-	if err := WithLock(path, func(store *StoreFile) error {
+	if err := (Paths{}).Store().WithLock(path, func(store *StoreFile) error {
 		store.Presence[name] = Presence{Name: name, Scope: ScopeWorktree, Owner: "someone-else-key", LastSeen: "2026-09-13T00:00:00Z"}
 		store.Queues[name] = nil
 		for i := 0; i < count; i++ {

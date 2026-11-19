@@ -118,7 +118,7 @@ func launcherTestPlugin(t *testing.T, bin string) (launcher string, env []string
 
 // startLauncherTestDaemon prepares a live daemon for CLI-only tests: mailbox
 // commands connect to an existing daemon and do not bootstrap one themselves.
-func startLauncherTestDaemon(t *testing.T, bin string, env []string, cache, cwd string) {
+func startLauncherTestDaemon(t *testing.T, bin string, env []string, cache, cwd string) wsdashboard.Endpoint {
 	t.Helper()
 	cmd := exec.Command(bin, "daemon-start")
 	cmd.Env, cmd.Dir = env, cwd
@@ -129,7 +129,28 @@ func startLauncherTestDaemon(t *testing.T, bin string, env []string, cache, cwd 
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitForEndpoint(t, dir, version, 10*time.Second)
+	return waitForEndpoint(t, dir, version, 10*time.Second)
+}
+
+// sendThroughDaemon mails content to sessionKey's reply-id from a fresh
+// hosted session: while the daemon runs it holds the mailbox ring, so mail
+// reaches it through its tools only.
+func sendThroughDaemon(t *testing.T, ep wsdashboard.Endpoint, env []string, sessionKey, content string) {
+	t.Helper()
+	cwd := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", cwd).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	helloEnv := map[string]string{}
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			helloEnv[k] = v
+		}
+	}
+	sender := connectHosted(t, ep, wsdashboard.ProxyHello{Protocol: wsdashboard.ProxyProtocol, Mode: wsdashboard.ProxyModeMCP, Argv: []string{"serve", "--stdio"}, Cwd: cwd, ProjectRoot: cwd, Env: helloEnv, OwnerPID: os.Getpid(), Version: version})
+	key := sender.login(cwd)
+	sender.tool("mailbox.send", map[string]any{"session_key": key, "to": wsmailbox.ReplyIDPrefix + wsmailbox.ReplyID(sessionKey), "content": content})
+	sender.conn.Close()
 }
 
 type launcherClient struct {
@@ -358,7 +379,6 @@ func toolText(t *testing.T, resp map[string]any) string {
 func TestLauncherRunsMailboxWaitThroughTheDaemonLikeTheDirectCLI(t *testing.T) {
 	bin := buildDashboardTestBin(t, "")
 	launcher, env, cache, cwd := launcherTestPlugin(t, bin)
-	startLauncherTestDaemon(t, bin, env, cache, cwd)
 
 	run := func(name string, argv ...string) (string, string, int) {
 		t.Helper()
@@ -377,8 +397,11 @@ func TestLauncherRunsMailboxWaitThroughTheDaemonLikeTheDirectCLI(t *testing.T) {
 		return stdout.String(), stderr.String(), code
 	}
 	waitArgs := []string{"mailbox", "wait", "--session-key", "amber-tide-fox", "--timeout", "1s", "--format", "json"}
-	hostedOut, hostedErr, hostedCode := run("python3", append([]string{launcher}, waitArgs...)...)
+	// The direct run first: while the daemon runs it holds the mailbox ring,
+	// and a direct binary's wait (its listening marker) is refused.
 	directOut, _, directCode := run(bin, waitArgs...)
+	startLauncherTestDaemon(t, bin, env, cache, cwd)
+	hostedOut, hostedErr, hostedCode := run("python3", append([]string{launcher}, waitArgs...)...)
 	if hostedCode != mailboxWaitExitTimeout || directCode != mailboxWaitExitTimeout {
 		t.Fatalf("exit codes: hosted %d, direct %d, want %d\nhosted stderr:\n%s", hostedCode, directCode, mailboxWaitExitTimeout, hostedErr)
 	}

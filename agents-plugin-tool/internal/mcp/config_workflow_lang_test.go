@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,7 +15,7 @@ import (
 // unset.
 func TestConfigTuneWorkflowLangKeepsCaseAndResets(t *testing.T) {
 	useLeadProfile(t)
-	t.Setenv("WS_RSRC_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))
+	useResourceFixture(t, filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))
 
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
@@ -74,7 +75,7 @@ func TestConfigTuneWorkflowLangKeepsCaseAndResets(t *testing.T) {
 // workflow.lang, since the wsflow lead-tune mirror routes language requests to it.
 func TestConfigTuningCatalogNoAgentListsWorkflowLang(t *testing.T) {
 	useLeadProfile(t)
-	t.Setenv("WS_RSRC_ROOT", buildOverrideTestTree(t))
+	useResourceFixture(t, buildOverrideTestTree(t))
 	t.Setenv("WS_MCP_NO_AGENT", "1")
 
 	root := t.TempDir()
@@ -102,7 +103,7 @@ func TestPlaybookPrintLeadTuneRoutesResponseLanguageToWorkflowLang(t *testing.T)
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "codex")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-tune", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, ""))
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-tune", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, ""))
 	if err != nil {
 		t.Fatalf("printPlaybook lead-tune: %v", err)
 	}

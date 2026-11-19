@@ -3,6 +3,7 @@ package wslive
 import (
 	"slices"
 	"sort"
+	"strings"
 )
 
 // The lead's tool-usage summary: the finished tool batches between two
@@ -30,6 +31,25 @@ const (
 	// batches beyond it are only counted (BatchesOmitted).
 	ToolSummaryBatches = 40
 )
+
+// ToolSummaryKeys are optional, unadvertised call-description inputs shared
+// by MCP harvesting and harness-stream previews, in preference order.
+var ToolSummaryKeys = [...]string{"summary", "toolSummary", "tool_summary"}
+
+// ToolInputSummary reads the first nonblank string outside the tool's declared
+// properties. A nil properties map is for a stream preview with no schema;
+// this never changes the input, and ordinary tool arguments remain the fallback.
+func ToolInputSummary(input, properties map[string]any) string {
+	for _, key := range ToolSummaryKeys {
+		if _, declared := properties[key]; declared {
+			continue
+		}
+		if value, ok := input[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
 
 // ToolTally is one tool's call count in a ToolSummary.
 type ToolTally struct {

@@ -2,8 +2,10 @@ package wsagent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"time"
 
@@ -36,7 +38,18 @@ func (c *conv) handle(ev Event) {
 		}
 	case ev.ReasoningSummary != nil:
 		c.summaryProjection(ev, quiet)
+	case ev.Harness != nil:
+		c.harnessReported(*ev.Harness, quiet)
 	case ev.Live != nil:
+		if ev.Live.Kind == wslive.KindCommands {
+			// The list is offered without the commands of unsupported items
+			// and with the lead's playbook commands; the dashboard runs only
+			// a command the list holds.
+			live := *ev.Live
+			c.commands = slices.Clone(live.Commands)
+			live.Commands = c.r.withPlaybookCommands(c.rec, allowedCommands(live.Commands, c.caps))
+			ev.Live = &live
+		}
 		if !quiet && ev.Live.Kind == wslive.KindCompact && ev.Live.Phase == wslive.CompactStart {
 			// The requested compaction started: its own turn holds kick
 			// until it ends.
@@ -47,14 +60,12 @@ func (c *conv) handle(ev Event) {
 		}
 		c.apply(*ev.Live, quiet)
 	case ev.Card != nil:
-		if !quiet && c.live.card(*ev.Card) {
-			c.ringDirty = true
-			c.r.notify(c.rec.ReplyID, c.rec.Root)
+		if !quiet {
+			c.live.card(*ev.Card)
 		}
 	case ev.UI != nil:
-		if !quiet && c.live.ui(*ev.UI) {
-			c.ringDirty = true
-			c.r.notify(c.rec.ReplyID, c.rec.Root)
+		if !quiet {
+			c.live.ui(*ev.UI)
 		}
 	case ev.TrackerWrite:
 		if f := c.r.opts.TrackerChanged; f != nil && !quiet {
@@ -111,9 +122,13 @@ func (c *conv) handle(ev Event) {
 		}
 		// The mode the harness runs in is the session's own: its next
 		// launch resumes in it. A change of the user's that waits to be
-		// applied stands until it is.
-		if c.rec.Lead && !quiet && !c.dirtyMode && ev.PermissionMode != c.rec.PermissionMode && ValidLeadPermissionMode(ev.PermissionMode) {
-			c.update(func(rec *Record) { rec.PermissionMode = ev.PermissionMode })
+		// applied stands until it is. Under agy bypass the launch mode is
+		// native default whatever agy reports, and bypass holds only with
+		// that mode on record (agyBypass), so a report leaves it. A flag
+		// left stale by an older writer goes, so that a report of
+		// native default does not revive it without the user.
+		if c.rec.Lead && !quiet && !c.dirtyMode && !c.rec.agyBypass() && ev.PermissionMode != c.rec.PermissionMode && slices.Contains(permissionModes(c.rec.Backend, []map[string]BackendRegistration{c.r.opts.Backends}), ev.PermissionMode) {
+			c.update(func(rec *Record) { rec.PermissionMode, rec.AgyBypass = ev.PermissionMode, false })
 			c.changed(quiet)
 		}
 	case ev.HarnessState != "":
@@ -252,6 +267,7 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 	c.applySettings()
 	c.restartIfDue()
 	c.kick()
+	c.flushRecord()
 	if !c.turn {
 		c.armIdle()
 	}
@@ -269,9 +285,32 @@ func (c *conv) addApproval(a ApprovalRequest, quiet bool) {
 		// A replay of a prompt an earlier daemon already answered.
 		return
 	}
+	if !quiet && c.rec.agyBypass() && !c.replaying {
+		// Bypass answers before the prompt is published: the page must not
+		// see a modal, a pending row or a wake for a request nobody decides.
+		// Without an answerer, or with no answer the process could build
+		// (nothing written), the prompt falls through to the user.
+		if answerer := controlsFor(c.proc).approval; answerer != nil {
+			err := c.sendApproval(answerer, a, true, "")
+			if err == nil {
+				return
+			}
+			fmt.Fprintf(c.r.opts.Log, "agent %s: auto-allow permission: %v\n", c.rec.ReplyID, err)
+			if !errors.Is(err, errNoApprovalAnswer) {
+				return
+			}
+		}
+	}
 	c.setStatus(func() { c.approvals = append(c.approvals, a) })
 	c.checkAction(quiet)
 	c.showApprovals(quiet)
+	if !quiet && !c.rec.Lead && c.r.opts.Backends[c.rec.Backend].WorkerAutoApprove {
+		// Use the same answer path as a user, including at-most-once
+		// tracking and a fatal write failure. The request remains traced.
+		if err := c.answerApproval(a.ID, true, ""); err != nil {
+			fmt.Fprintf(c.r.opts.Log, "agent %s: auto-allow permission: %v\n", c.rec.ReplyID, err)
+		}
+	}
 }
 
 // actionGrace is how long the harness may report that it waits on the user
@@ -333,18 +372,20 @@ func (c *conv) dropApproval(id string, quiet bool) bool {
 }
 
 // forgetAnswered drops a settled prompt from the record's answered list
-// ("" drops them all: their process is gone).
+// ("" drops them all: their process is gone). One settled prompt changes
+// memory only, and the next record write carries it: an id left on disk
+// only keeps a replay of its own, already answered request from waiting.
 func (c *conv) forgetAnswered(id string) {
 	if len(c.rec.Answered) == 0 || (id != "" && !slices.Contains(c.rec.Answered, id)) {
 		return
 	}
-	c.update(func(rec *Record) {
-		if id == "" {
-			rec.Answered = nil
-			return
-		}
-		rec.Answered = slices.DeleteFunc(slices.Clone(rec.Answered), func(have string) bool { return have == id })
-	})
+	if id != "" {
+		c.setStatus(func() {
+			c.rec.Answered = slices.DeleteFunc(slices.Clone(c.rec.Answered), func(have string) bool { return have == id })
+		})
+		return
+	}
+	c.update(func(rec *Record) { rec.Answered = nil })
 }
 
 // clearApprovals settles every waiting prompt with no answer: the process
@@ -397,13 +438,46 @@ func (c *conv) answerApproval(id string, allow bool, message string) error {
 		return conflict("that permission prompt is not waiting: it was answered, withdrawn, or its process ended")
 	}
 	c.dropApproval(id, false)
-	c.update(func(rec *Record) { rec.Answered = append(rec.Answered, id) })
-	if err := answerer.AnswerApproval(*req, allow, message); err != nil {
-		c.setStatus(func() { c.lastErr = "answer the permission prompt: " + err.Error() })
-		c.stopProcess("")
-		return fmt.Errorf("answer the permission prompt: %w", err)
+	err := c.sendApproval(answerer, *req, allow, message)
+	if errors.Is(err, errNoApprovalAnswer) {
+		// The prompt is gone from the page and the process still waits on
+		// it: the process stops, as on a failed write.
+		c.approvalFailed(err)
+	}
+	return err
+}
+
+// sendApproval tracks req as answered before writing the answer, so it is
+// answered at most once, and stops the process when the write fails. An
+// answer the process could not build wrote nothing: the id is untracked and
+// the error (errNoApprovalAnswer) left to the caller. Under agy bypass,
+// which answers every tool call, the id is tracked in memory only: the next
+// record write carries it, at the latest the one of the holder sequence a
+// replay skips to (persistSeq, also on shutdown). Otherwise an answer is
+// one write per user decision and is durable at once.
+func (c *conv) sendApproval(answerer approvalAnswerer, req ApprovalRequest, allow bool, message string) error {
+	track := func(rec *Record) { rec.Answered = append(rec.Answered, req.ID) }
+	if c.rec.agyBypass() {
+		c.setStatus(func() { track(&c.rec) })
+	} else {
+		c.update(track)
+	}
+	if err := answerer.AnswerApproval(req, allow, message); err != nil {
+		err = fmt.Errorf("answer the permission prompt: %w", err)
+		if errors.Is(err, errNoApprovalAnswer) {
+			c.forgetAnswered(req.ID)
+			return err
+		}
+		c.approvalFailed(err)
+		return err
 	}
 	return nil
+}
+
+// approvalFailed stops the process an answer could not reach.
+func (c *conv) approvalFailed(err error) {
+	c.setStatus(func() { c.lastErr = err.Error() })
+	c.stopProcess("")
 }
 
 // processExited handles a process whose output ended without the runner
@@ -478,8 +552,8 @@ func (c *conv) processEnded() {
 		}
 	}
 	c.r.revokeToken(c.rec.ReplyID)
-	if c.rec.Capability != "" {
-		c.update(func(rec *Record) { rec.Capability = "" })
+	if c.rec.Capability != "" || c.rec.MCPToken != "" {
+		c.update(func(rec *Record) { rec.Capability = ""; rec.forgetMCP() })
 	}
 	if c.requeueSteered() && !c.closed && !c.quitting {
 		// The steered reports the process took with it go as the next
@@ -526,7 +600,7 @@ func (c *conv) releaseHolder(proc Process) {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: stop holder %s: %v\n", c.rec.ReplyID, c.rec.HolderID, err)
 		return
 	}
-	c.seqDirty, c.ringDirty = false, false
+	c.seqDirty, c.live.ringDirty = false, false
 	c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0 })
 	c.writeRegistration()
 }
@@ -571,14 +645,15 @@ func (c *conv) stopProcess(reason string) {
 func (c *conv) letGo() {
 	c.quitting = true
 	c.finishLine()
+	c.persistSeq()
 	if hp, ok := c.proc.(holderProcess); ok {
-		c.persistSeq()
 		if hp.Detach() {
-			c.live.writeSnapshot()
-			return
+			c.flushRecord()
+			return // loop's closeSlot flushes the snapshot before dropping RAM
 		}
 	}
 	c.stopProcess("")
+	c.flushRecord()
 }
 
 // finishLine applies the rest of a holder line the loop stands in the
@@ -624,8 +699,9 @@ func (c *conv) idleNow() bool {
 		// Send coverage protects initial queuing, but not input retained
 		// for retry after a settled launch failure. A held result still
 		// waits for the child's own descendants.
-		active := !child.closed && child.rec.Parent != nil && *child.rec.Parent == parent &&
-			(child.turn || child.bgTasks != 0 || child.holding || child.sends > max(child.settled.mark, child.voided))
+		// A child whose start admission refused sleeps (wakeRefused).
+		active := child.rec.Parent != nil && *child.rec.Parent == parent && !child.closed &&
+			(child.turn || child.bgTasks != 0 || child.holding || !child.wakeRefused && child.sends > max(child.settled.mark, child.voided))
 		child.mu.Unlock()
 		if active {
 			return false
@@ -714,7 +790,7 @@ func (c *conv) applySettings() {
 		// The accepted native target is already in Record. Common selection
 		// writes its mapping there; a permitted native control keeps its literal
 		// mode. Only an actual new launch remaps explicit common intent.
-		if err := controls.setPermissionMode(rec.PermissionMode); err != nil {
+		if err := controls.setPermissionMode(rec.launchPermissionMode()); err != nil {
 			if reconcile {
 				fmt.Fprintf(c.r.opts.Log, "agent %s: permission reconciliation: %v\n", rec.ReplyID, err)
 				c.permissionNudge(level, false, c.activeMode)
@@ -770,43 +846,6 @@ func (c *conv) closeIf(done func() bool) bool {
 	return true
 }
 
-// autoCloseDue reports whether a spawned Pi child has nothing left to do,
-// so it closes on its own: a turn of it settled done, no turn, replay,
-// background task, or descendant of it runs (idleNow, holdsReport), and
-// nothing waits for a next turn or for its parent (finished). Send reopens
-// it on its session file (resumePiChild). It runs in the loop.
-func (c *conv) autoCloseDue() bool {
-	if c.r.opts.keepFinished || c.closed || c.rec.Lead || c.rec.Parent == nil || c.rec.Backend != BackendPi || c.turn || c.wrapHold || c.holding {
-		return false
-	}
-	c.mu.Lock()
-	done := c.finished()
-	c.mu.Unlock()
-	return done && c.idleNow() && !c.holdsReport()
-}
-
-// finished reports that a turn of the conversation settled done and left
-// nothing behind: no turn open or held, no report its parent has not
-// taken, and no sent, held, queued, or claimed input. Under mu. A failed
-// or interrupted child stays open: a closed row shows no failure
-// (SpawnAgentEvent), and its parent may send it on.
-func (c *conv) finished() bool {
-	return c.settled.n > 0 && c.settled.Status == TurnDone && !c.rec.TurnOpen && c.rec.HeldTurn == nil && c.held == 0 &&
-		c.sends <= max(c.settled.mark, c.voided) &&
-		len(c.rec.PendingReports)+len(c.rec.Queued)+len(c.rec.Mail)+len(c.rec.Reports) == 0
-}
-
-// closeWhenDone has the runner close a finished Pi child (autoCloseDue)
-// off the loop: that close takes resumeMu and then runs in this loop
-// (act), so the loop never waits on it. The loop calls it after each step.
-func (c *conv) closeWhenDone() {
-	if c.autoClosing || !c.autoCloseDue() {
-		return
-	}
-	c.autoClosing = true
-	c.r.autoCloseLater(c.rec.ReplyID)
-}
-
 // finishClose is the rest of a close, once the conversation is marked
 // closed. It runs in the loop.
 func (c *conv) finishClose() {
@@ -827,4 +866,36 @@ func (c *conv) finishClose() {
 	}
 	c.signalSettled()
 	c.watched()
+}
+
+// harnessReported resolves the backend's catalog profile at the version
+// the process reported, demotes the items its init shape does not support,
+// and offers the command list again under the result. A backend with no
+// profile stays handle-only: no grades, no demotion, no warning.
+func (c *conv) harnessReported(report HarnessReport, quiet bool) {
+	profile := c.r.opts.Backends[c.rec.Backend].Catalog
+	if profile == nil {
+		return
+	}
+	role := RoleWorker
+	if c.rec.Lead {
+		role = RoleLead
+	}
+	caps := profile.Resolve(role, report.Version)
+	caps.demote(report.Demoted)
+	if c.caps != nil && reflect.DeepEqual(*c.caps, caps) {
+		return
+	}
+	if !quiet && (caps.Unverified || len(caps.Demoted) > 0) {
+		fmt.Fprintf(c.r.opts.Log, "agent %s: harness version %q (verified %s..%s) runs on %s's capabilities; demoted by its init: %v\n",
+			c.rec.ReplyID, report.Version, caps.Oldest, caps.Newest, caps.ProfileVersion, caps.Demoted)
+	}
+	before := c.r.withPlaybookCommands(c.rec, allowedCommands(c.commands, c.caps))
+	c.setStatus(func() { c.caps = &caps })
+	if c.commands != nil {
+		if after := c.r.withPlaybookCommands(c.rec, allowedCommands(c.commands, c.caps)); !slices.Equal(after, before) {
+			c.apply(wslive.Event{Kind: wslive.KindCommands, Commands: after}, quiet)
+		}
+	}
+	c.changed(quiet)
 }

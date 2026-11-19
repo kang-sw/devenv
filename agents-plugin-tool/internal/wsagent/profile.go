@@ -1,5 +1,5 @@
 // Package wsagent is the dashboard daemon's agent runner: it starts headless
-// harness processes (Claude Code, Pi) from named profiles, feeds them user
+// harness processes (Claude Code, Pi, Antigravity) from named profiles, feeds them user
 // turns, and records their output in a dashboard session directory through
 // internal/wslive, so the daemon's conversation renderer and SSE serve them
 // unchanged. Consumers drive conversations over the daemon's REST routes
@@ -39,6 +39,10 @@ const ProfilePrefix = "agent.profile."
 const (
 	BackendClaude = "claude"
 	BackendPi     = "pi"
+	// BackendCodex is the Codex app-server (hosted leads and agent.spawn workers).
+	BackendCodex = "codex"
+	// BackendAgy is Antigravity's CLI (AgyBackend).
+	BackendAgy = "agy"
 )
 
 // DefaultIdleTimeout stops an idle worker after ten minutes when its profile
@@ -75,7 +79,7 @@ var leadKeyMintingTools = map[string]bool{
 // server, no plugin, no skill.
 type Profile struct {
 	Description string `json:"description,omitempty"`
-	// Backend is the harness: BackendClaude or BackendPi.
+	// Backend is the harness name, admitted through BackendRegistration.
 	Backend string `json:"backend"`
 	// Model and Effort are the conversation's starting values; empty leaves
 	// the harness default.
@@ -118,9 +122,9 @@ type Profile struct {
 	// mcp_servers, plugins, skills, instructions, list_in_index) do not
 	// apply to it and must be absent.
 	Lead bool `json:"lead,omitempty"`
-	// PermissionMode is a lead conversation's starting permission mode
-	// (LeadPermissionModes); empty is DefaultLeadPermissionMode. It applies
-	// to the claude backend only: pi asks for no permission.
+	// PermissionMode is a lead conversation's starting native permission mode
+	// (BackendRegistration.PermissionModes). Empty leaves the harness default,
+	// except Claude uses DefaultLeadPermissionMode; Pi asks for no permission.
 	PermissionMode string `json:"permission_mode,omitempty"`
 }
 
@@ -488,7 +492,7 @@ func ProfileValueSchema(registries ...map[string]BackendRegistration) map[string
 			"idle_timeout_seconds": map[string]any{"type": "integer", "minimum": 0, "description": "End the sustained process after this many seconds with no running turn, input, background work or active child; 0 never ends it. Absent defaults to 0 for leads and 600 for workers."},
 			"list_in_index":        map[string]any{"type": "boolean", "description": "List this profile's conversations in the dashboard session index; hidden by default."},
 			"lead":                 map[string]any{"type": "boolean", "description": "Host the profile's conversations as lead sessions: the harness loads the user's own settings, plugins, hooks, memory, and MCP servers, runs under a session holder with a lead ws session key, and asks the dashboard for tool permission. The capability fields (tools, ws_tools, mcp_servers, plugins, skills, instructions, list_in_index) must be absent. Not allowed in a repo-scope profile."},
-			"permission_mode":      map[string]any{"enum": profilePermissionModes(registries), "description": "A lead conversation's starting permission mode (claude only); absent is auto."},
+			"permission_mode":      map[string]any{"enum": profilePermissionModes(registries), "description": "A lead conversation's starting permission mode, one its backend accepts; absent is auto for claude and the harness's own default otherwise."},
 		},
 	}
 }

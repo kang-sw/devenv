@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -321,11 +322,11 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: a valid session_key is required"))
 	}
 
-	// 1b. A hosted session is held to its daemon-minted key: any other key -
-	//     the FRESH sentinel, an unknown key, another parent-less key - is
-	//     refused before anything renders or mints. A key that carries a
-	//     parent passes: it is a child key a subagent on this connection
-	//     holds, and its worker playbooks read this manual.
+	// 1b. A hosted session is held to its daemon-minted key and its
+	//     descendant sessions' keys (hostedDescendant): any other key - the
+	//     FRESH sentinel, an unknown key, another lead's, a key a ferrule
+	//     call minted under the hosted key - is refused before anything
+	//     renders or mints.
 	if _, err := s.resolveSession(sessionAccess{mode: sessionAccessManual, key: key}); err != nil {
 		return toolTextResponse(id, "", err)
 	}
@@ -542,5 +543,43 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		}
 	}
 
+	if s.connectionDescriptor().callFallback && key != freshBootstrapKey {
+		entry := sessionEntry{root: rec.Root, scope: toolRole(rec.Scope), parent: rec.Parent}
+		body += "\n\n" + s.renderCallToolIndex(key, entry)
+	}
 	return toolTextResponse(id, workflowManualReadFullNotice+"\n\n"+body+"\n", nil)
+}
+
+// The index and call's list/schema discovery use the same authority-filtered
+// definitions. The manual already read this identity, so rendering adds no
+// identity-file lookup or hand-maintained inventory.
+func (s *Server) renderCallToolIndex(key string, entry sessionEntry) string {
+	definitions := s.callDiscoveryTools(key, entry, true)
+	sort.Slice(definitions, func(i, j int) bool {
+		return definitions[i]["name"].(string) < definitions[j]["name"].(string)
+	})
+	var b strings.Builder
+	b.WriteString("## Callable ws tools\n\n")
+	for _, tool := range definitions {
+		description := oneLine(tool["description"].(string))
+		for i, r := range description {
+			if strings.ContainsRune(".!?", r) && (i+1 == len(description) || description[i+1] == ' ') {
+				description = description[:i+1]
+				break
+			}
+		}
+		marker := ""
+		descriptor := s.connectionDescriptor()
+		name := descriptor.aliases.canonical(tool["name"].(string))
+		if descriptor.directTools != nil && (name == "call" || slices.Contains(descriptor.directTools, name)) {
+			marker = " [direct]"
+		}
+		fmt.Fprintf(&b, "%s%s - %s\n", tool["name"], marker, description)
+	}
+	if s.connectionDescriptor().directTools != nil {
+		b.WriteString("\n[direct] tools are listed directly; all others use `call(tool, arguments)`.\n")
+	} else {
+		b.WriteString("\nA ws tool named in this manual but missing from your tool list is reachable through `call(tool, arguments)`.\n")
+	}
+	return namespaceText(b.String(), s.runtimeNamespace())
 }

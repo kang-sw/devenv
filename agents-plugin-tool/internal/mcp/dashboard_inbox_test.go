@@ -87,7 +87,7 @@ func TestDashboardInboxDrainDescriptionIsAdapterOnly(t *testing.T) {
 	if !strings.HasPrefix(desc, "Adapter-only:") {
 		t.Fatalf("description = %q", desc)
 	}
-	for _, want := range []string{"an agent never calls it", "atomically claims", "oldest first", "promoted to steering first", "can no longer be cancelled or steered", `<ws:user at="YYYY-MM-DDThh:mm+09:00">`, "sending browser's UTC offset"} {
+	for _, want := range []string{"agents must not claim", "Atomically claim", "steering first then oldest", "cannot be cancelled or steered", "ws:user envelope"} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("description lacks %q: %s", want, desc)
 		}
@@ -157,27 +157,6 @@ func TestDashboardInboxDrainTextAndJSONOutput(t *testing.T) {
 	out = callToolWithKey(t, f.server, 8, f.keyA, dashboardInboxDrainTool, map[string]any{"format": "json"})
 	if !strings.Contains(out, `"parts":[]`) || !strings.Contains(out, `"topics":[]`) || !strings.Contains(out, `"mentions":[]`) || !strings.Contains(out, `"picks":[]`) || !strings.Contains(out, `"consoles":[]`) || strings.Contains(out, "null") {
 		t.Fatalf("chip-only json = %q", out)
-	}
-}
-
-// TestDashboardInboxDrainDescriptionNamesWebElements: the drain description
-// lists the pick and console elements and their JSON fields.
-func TestDashboardInboxDrainDescriptionNamesWebElements(t *testing.T) {
-	var desc string
-	for _, tool := range tools() {
-		if tool["name"] == dashboardInboxDrainTool {
-			desc, _ = tool["description"].(string)
-		}
-	}
-	for _, want := range []string{
-		`<wb:pick url="..." selector="...">text</wb:pick>`,
-		`<wb:console url="...">one error per line</wb:console>`,
-		"picks: [{url, selector, text}]",
-		"consoles: [{url, lines}]",
-	} {
-		if !strings.Contains(desc, want) {
-			t.Errorf("description lacks %q", want)
-		}
 	}
 }
 

@@ -1,67 +1,44 @@
 package mcp
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
-// mailbox_history.go keeps each session's history ring: the last
+// mailbox_history.go serves each session's history window: the last
 // mailboxHistoryCap messages it sent or drained, full bodies included, so
 // mail a conversation lost (a tangled session, a mis-aimed rewind) can be
-// recovered with mailbox.history.
-//
-// Storage is one file per entry under
-// <cache root>/mailbox-history/<session-key>/, named
-// <fixed-width UTC nanosecond stamp>-<random hex>.json. Every entry gets a
-// fresh name through temp+rename, so concurrent writers to one session key
-// (several MCP processes can hold the same key) never replace each other's
-// file and need no lock, and a reader never sees a partial entry. The ring
-// stays off the session record, which more than one process writes without a
-// cross-process lock, and off the machine reply-id registry, which every
-// peer's send locks.
+// recovered with mailbox.history. The window lives in the memory-first
+// mailbox store (wsmailbox.Store.History); a send or a recv appends to it in
+// the same transaction that moves the mail (Tx.AppendHistory).
 
 const (
-	// mailboxHistoryCap is the ring's capacity, received and sent together.
-	mailboxHistoryCap = 10
+	// mailboxHistoryCap is the window's capacity, received and sent together.
+	mailboxHistoryCap = wsmailbox.HistoryCap
 	// mailboxHistoryTitleMax bounds a title in runes; a longer first line is
 	// cut there with an ellipsis.
 	mailboxHistoryTitleMax = 120
-	// mailboxHistoryDirName is the cache-root sibling of the session key store
-	// (sessions/, legacy keys/) that holds one directory per session key, so
-	// no enumerator of the key store sees it.
-	mailboxHistoryDirName = "mailbox-history"
-	// mailboxHistoryStampLayout is the entry file-name stamp: fixed width with
-	// nanoseconds, so names sort lexically in time order. The RFC3339 seconds
-	// stamp the mailbox uses elsewhere is too coarse to order one drain.
-	mailboxHistoryStampLayout = "20060102T150405.000000000Z"
 
-	mailboxHistoryRecv = "recv"
-	mailboxHistorySent = "sent"
+	mailboxHistoryRecv = wsmailbox.HistoryRecv
+	mailboxHistorySent = wsmailbox.HistorySent
 )
 
-// mailboxHistoryEntry is the on-disk entry file. Its time is not stored: the
-// file-name stamp is the single source of the exchange time.
+// mailboxHistoryEntry is one entry to append. Its time is not stored: the
+// entry name's stamp is the single source of the exchange time.
 type mailboxHistoryEntry struct {
-	Direction    string `json:"direction"`
-	Counterparty string `json:"counterparty"`
-	Body         string `json:"body"`
+	Direction    string
+	Counterparty string
+	Body         string
 }
 
 // mailboxHistoryRecord is a read entry: the stored fields plus the exchange
-// time (RFC3339 UTC, from the file-name stamp), the derived title, and the
-// entry's file name (the key a conversation ring mail line carries).
+// time (RFC3339 UTC, from the name's stamp), the derived title, and the
+// entry's name (the key a conversation ring mail line carries).
 type mailboxHistoryRecord struct {
 	mailboxHistoryEntry
 	Time  string
@@ -69,191 +46,66 @@ type mailboxHistoryRecord struct {
 	Name  string
 }
 
-// mailboxHistoryClock makes entry stamps strictly increasing within this
-// process, so the entries of one drain keep their order even when the clock
-// does not advance between them. Ties across processes order arbitrarily.
-var mailboxHistoryClock struct {
-	sync.Mutex
-	last time.Time
+// mailboxHistoryStore is the mailbox store of the cache home cacheHome
+// (empty: this process's).
+func mailboxHistoryStore(cacheHome string) wsmailbox.Store {
+	return wsmailbox.Paths{State: wsstate.Options{CacheHome: cacheHome}}.Store()
 }
 
-func nextMailboxHistoryStamp() time.Time {
-	mailboxHistoryClock.Lock()
-	defer mailboxHistoryClock.Unlock()
-	now := mailboxNow().UTC()
-	if !now.After(mailboxHistoryClock.last) {
-		now = mailboxHistoryClock.last.Add(time.Nanosecond)
-	}
-	mailboxHistoryClock.last = now
-	return now
-}
-
-// mailboxHistoryRoot is <cache root>/mailbox-history; it is not created.
-// cacheHome is the WS_CACHE_HOME of the process the ring belongs to; empty
-// means this process's.
-func mailboxHistoryRoot(cacheHome string) (string, error) {
-	cacheRoot, err := wsstate.CacheRoot(wsstate.Options{CacheHome: cacheHome})
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(cacheRoot, mailboxHistoryDirName), nil
-}
-
-func mailboxHistoryDir(cacheHome, sessionKey string) (string, error) {
-	root, err := mailboxHistoryRoot(cacheHome)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(root, sessionKey), nil
-}
-
-// isMailboxHistoryEntryName reports whether name is a committed entry file,
-// excluding in-flight temp files (dot-prefixed, no .json suffix).
-func isMailboxHistoryEntryName(name string) bool {
-	return !strings.HasPrefix(name, ".") && strings.HasSuffix(name, ".json")
-}
-
-// appendMailboxHistory writes entries, in order, to sessionKey's ring and then
-// trims it to the newest mailboxHistoryCap. It returns the file names of the
-// entries written, in order, and the first write error, stopping there;
-// callers log the error and never surface it, because the send has already
-// been enqueued or the mail already drained. Trimming is best effort.
-func appendMailboxHistory(cacheHome, sessionKey string, entries []mailboxHistoryEntry) ([]string, error) {
+// appendMailboxHistoryTx appends entries, in order, to sessionKey's window
+// inside tx, stamped from mailboxNow, and returns their names.
+func appendMailboxHistoryTx(tx *wsmailbox.Tx, sessionKey string, entries []mailboxHistoryEntry) ([]string, error) {
 	if len(entries) == 0 {
 		return nil, nil
 	}
-	dir, err := mailboxHistoryDir(cacheHome, sessionKey)
+	out := make([]wsmailbox.HistoryEntry, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, wsmailbox.HistoryEntry{Direction: e.Direction, Counterparty: e.Counterparty, Body: e.Body})
+	}
+	return tx.AppendHistory(sessionKey, mailboxNow(), out...)
+}
+
+// appendMailboxHistory appends entries to sessionKey's window in a
+// transaction of its own and returns their names.
+func appendMailboxHistory(cacheHome, sessionKey string, entries []mailboxHistoryEntry) ([]string, error) {
+	var names []string
+	err := mailboxHistoryStore(cacheHome).Update("history", func(tx *wsmailbox.Tx) error {
+		var err error
+		names, err = appendMailboxHistoryTx(tx, sessionKey, entries)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("create mailbox history dir: %w", err)
-	}
-	var (
-		names []string
-		werr  error
-	)
-	for _, entry := range entries {
-		var name string
-		if name, werr = writeMailboxHistoryEntry(dir, entry); werr != nil {
-			break
-		}
-		names = append(names, name)
-	}
-	trimMailboxHistory(dir)
-	return names, werr
-}
-
-func writeMailboxHistoryEntry(dir string, entry mailboxHistoryEntry) (string, error) {
-	raw, err := json.Marshal(entry)
-	if err != nil {
-		return "", err
-	}
-	var suffix [4]byte
-	if _, err := rand.Read(suffix[:]); err != nil {
-		return "", err
-	}
-	name := nextMailboxHistoryStamp().Format(mailboxHistoryStampLayout) + "-" + hex.EncodeToString(suffix[:]) + ".json"
-
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return "", fmt.Errorf("create mailbox history temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return "", fmt.Errorf("write mailbox history entry: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return "", fmt.Errorf("write mailbox history entry: %w", err)
-	}
-	if err := os.Rename(tmpPath, filepath.Join(dir, name)); err != nil {
-		os.Remove(tmpPath)
-		return "", fmt.Errorf("commit mailbox history entry: %w", err)
-	}
-	return name, nil
-}
-
-// trimMailboxHistory removes all but the newest mailboxHistoryCap entries,
-// ignoring every error: a concurrent trim or a failed remove only leaves
-// extra entries until the next write.
-func trimMailboxHistory(dir string) {
-	names, err := mailboxHistoryEntryNames(dir)
-	if err != nil || len(names) <= mailboxHistoryCap {
-		return
-	}
-	for _, name := range names[mailboxHistoryCap:] {
-		_ = os.Remove(filepath.Join(dir, name))
-	}
-}
-
-// mailboxHistoryEntryNames lists dir's committed entry names, newest first.
-func mailboxHistoryEntryNames(dir string) ([]string, error) {
-	dirEntries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	names := make([]string, 0, len(dirEntries))
-	for _, de := range dirEntries {
-		if isMailboxHistoryEntryName(de.Name()) {
-			names = append(names, de.Name())
-		}
-	}
-	sort.Sort(sort.Reverse(sort.StringSlice(names)))
 	return names, nil
 }
 
-// readMailboxHistory returns sessionKey's ring, newest first. A missing
-// directory is an empty ring; an entry that cannot be read or parsed, or
-// whose name carries no valid stamp, is skipped.
+// readMailboxHistory returns sessionKey's window, newest first. An entry
+// whose name carries no valid stamp is skipped.
 func readMailboxHistory(cacheHome, sessionKey string) ([]mailboxHistoryRecord, error) {
-	dir, err := mailboxHistoryDir(cacheHome, sessionKey)
+	entries, err := mailboxHistoryStore(cacheHome).History(sessionKey)
 	if err != nil {
 		return nil, err
 	}
-	names, err := mailboxHistoryEntryNames(dir)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	records := make([]mailboxHistoryRecord, 0, len(names))
-	for _, name := range names {
-		if rec, ok := readMailboxHistoryEntry(dir, name); ok {
+	records := make([]mailboxHistoryRecord, 0, len(entries))
+	for _, e := range entries {
+		if rec, ok := mailboxHistoryRecordOf(e); ok {
 			records = append(records, rec)
 		}
 	}
 	return records, nil
 }
 
-// readMailboxHistoryEntry reads the one ring entry name at dir; false when
-// it cannot be read or parsed or its name carries no valid stamp. An entry
-// file is never rewritten, so a reader may keep a read entry by its name.
-func readMailboxHistoryEntry(dir, name string) (mailboxHistoryRecord, bool) {
-	stamp, _, ok := strings.Cut(name, "-")
+func mailboxHistoryRecordOf(e wsmailbox.HistoryEntry) (mailboxHistoryRecord, bool) {
+	at, ok := wsmailbox.HistoryTime(e.Name)
 	if !ok {
 		return mailboxHistoryRecord{}, false
 	}
-	at, err := time.Parse(mailboxHistoryStampLayout, stamp)
-	if err != nil {
-		return mailboxHistoryRecord{}, false
-	}
-	raw, err := os.ReadFile(filepath.Join(dir, name))
-	if err != nil {
-		return mailboxHistoryRecord{}, false
-	}
-	var entry mailboxHistoryEntry
-	if json.Unmarshal(raw, &entry) != nil {
-		return mailboxHistoryRecord{}, false
-	}
 	return mailboxHistoryRecord{
-		mailboxHistoryEntry: entry,
-		Time:                at.UTC().Format(time.RFC3339),
-		Title:               mailboxHistoryTitle(entry.Body),
-		Name:                name,
+		mailboxHistoryEntry: mailboxHistoryEntry{Direction: e.Direction, Counterparty: e.Counterparty, Body: e.Body},
+		Time:                at.Format(time.RFC3339),
+		Title:               mailboxHistoryTitle(e.Body),
+		Name:                e.Name,
 	}, true
 }
 
@@ -275,17 +127,6 @@ func mailboxHistoryTitle(body string) string {
 		return string(runes[:mailboxHistoryTitleMax]) + "…"
 	}
 	return line
-}
-
-// recordMailboxHistory appends entries to sessionKey's ring, logging a failed
-// write rather than surfacing it, and returns the written entries' file names
-// in order (fewer than entries after a failed write).
-func (s *Server) recordMailboxHistory(sessionKey string, entries []mailboxHistoryEntry) []string {
-	names, err := appendMailboxHistory(s.getenv(wsstate.EnvCacheHome), sessionKey, entries)
-	if err != nil {
-		s.debugEvent("mailbox.history_write_error", map[string]any{"error": err.Error()})
-	}
-	return names
 }
 
 // mailboxHistoryOut is mailbox.history's per-entry JSON shape. Body is a

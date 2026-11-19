@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wsagent"
+	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
 func TestResolveSessionSelection(t *testing.T) {
@@ -33,8 +36,14 @@ func TestResolveSessionSelection(t *testing.T) {
 		t.Fatalf("CLI context = %+v, %v", got, err)
 	}
 
+	// Both key-record and Runner-record children are hosted descendants.
+	orphan, err := s.sessions.mint(canonical, roleDelegate, lead)
+	if err != nil {
+		t.Fatal(err)
+	}
 	hostedSessionEnv(t, lead)
 	s = NewServer(root, "test")
+	recordSpawned(t, s, canonical, child, wsmailbox.ReplyID(lead), wsagent.ParentLead)
 	before := sessionKeyFileCount(t, s)
 	for _, tt := range []struct {
 		name        string
@@ -46,6 +55,7 @@ func TestResolveSessionSelection(t *testing.T) {
 		{"hosted bootstrap", sessionAccess{mode: sessionAccessBootstrap, root: canonical, scope: roleLead}, lead, "", roleLead, true},
 		{"hosted relogin", sessionAccess{mode: sessionAccessRelogin, key: lead, root: canonical, scope: roleLead}, lead, "", roleLead, true},
 		{"explicit child", sessionAccess{mode: sessionAccessManual, key: child}, child, lead, roleDelegate, false},
+		{"key-record child", sessionAccess{mode: sessionAccessManual, key: orphan}, orphan, lead, roleDelegate, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := s.resolveSession(tt.in)

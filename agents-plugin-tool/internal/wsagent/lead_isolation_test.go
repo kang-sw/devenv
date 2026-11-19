@@ -179,12 +179,13 @@ func TestLegacyPiLeadWithoutSDKStartsIsolated(t *testing.T) {
 	for _, withSDK := range []bool{false, true} {
 		t.Run(map[bool]string{false: "standalone", true: "sdk"}[withSDK], func(t *testing.T) {
 			h := newLeadHarness(t)
-			bundle := filepath.Join(t.TempDir(), "agents-plugin-ws")
+			bundle := filepath.Join(t.TempDir(), "agents-plugin")
 			piLeadFile(t, filepath.Join(bundle, ".claude-plugin", "plugin.json"), `{"name":"ws"}`)
-			restore := piBundledPluginRoot
-			piBundledPluginRoot = func(string) (string, string, error) { return bundle, "", nil }
-			t.Cleanup(func() { piBundledPluginRoot = restore })
+			restore := piHostedPackage
+			piHostedPackage = func() (string, string, error) { return "ws", "", nil }
+			t.Cleanup(func() { piHostedPackage = restore })
 			entry := piLeadBundle(t, filepath.Join(filepath.Dir(bundle), "agents-plugin-pi"))
+			usePreparedPiFixture(t, filepath.Dir(bundle), filepath.Join(filepath.Dir(bundle), "agents-plugin-pi"))
 			command := filepath.Join(t.TempDir(), "pi")
 			if withSDK {
 				pkg := filepath.Join(t.TempDir(), "host-pi")

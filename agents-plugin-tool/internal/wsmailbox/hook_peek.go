@@ -38,11 +38,11 @@ func PeekNamedInboxUnread(slug, root string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	store, err := Load(path)
+	_, _, queue, err := Paths{}.Store().NamedQueue(path, name)
 	if err != nil {
 		return 0, err
 	}
-	return len(store.Queues[name]), nil
+	return len(queue), nil
 }
 
 // hookNotifyDirName is the on-disk subdirectory, sibling of the mailbox
@@ -125,11 +125,11 @@ func (p Paths) ShouldNotifyNamedInboxUnread(slug, root string) (bool, int, error
 	if err != nil {
 		return false, 0, err
 	}
-	store, err := Load(path)
+	_, _, queue, err := p.Store().NamedQueue(path, name)
 	if err != nil {
 		return false, 0, err
 	}
-	unread := len(store.Queues[name])
+	unread := len(queue)
 
 	if !hookNotifyNameSafe.MatchString(name) {
 		return false, unread, fmt.Errorf("wsmailbox: invalid mailbox name %q for a notify watermark path", name)

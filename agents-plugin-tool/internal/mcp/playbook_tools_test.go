@@ -195,7 +195,7 @@ func TestPlaybookPrintUnknownHarness(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "") // no harness → host-neutral
 
-	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "delegate-pb", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestPlaybookPrintClaudeHarness(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "delegate-pb", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestPlaybookPrintPiHarnessSelectsOverlay(t *testing.T) {
 	})
 
 	piServer := newTestServerWithHarness(t, "pi")
-	piBody, _, err := printPlaybook(piServer, rsrcRoot, "overlay-pb", nil, wsconfig.Options{}, "", nil)
+	piBody, _, err := printPlaybook(piServer, os.DirFS(rsrcRoot), "overlay-pb", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook (pi): %v", err)
 	}
@@ -267,7 +267,7 @@ func TestPlaybookPrintPiHarnessSelectsOverlay(t *testing.T) {
 
 	for _, harness := range []string{"", "codex"} {
 		s := newTestServerWithHarness(t, harness)
-		body, _, err := printPlaybook(s, rsrcRoot, "overlay-pb", nil, wsconfig.Options{}, "", nil)
+		body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "overlay-pb", nil, wsconfig.Options{}, "", nil)
 		if err != nil {
 			t.Fatalf("printPlaybook (%q): %v", harness, err)
 		}
@@ -287,7 +287,7 @@ func TestPlaybookPrintPiHarnessUsesPiTerminology(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "pi")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "delegate-pb", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -323,7 +323,7 @@ func TestPlaybookPrintPiDelegationFlowPlaybooks(t *testing.T) {
 	}
 	for name, variableNames := range cases {
 		t.Run(name, func(t *testing.T) {
-			body, _, err := printPlaybook(s, rsrcRoot, name, nil, isolatedPlaybookConfigOptions(t), "", nil)
+			body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), name, nil, isolatedPlaybookConfigOptions(t), "", nil)
 			if err != nil {
 				t.Fatalf("printPlaybook: %v", err)
 			}
@@ -342,7 +342,7 @@ func TestPlaybookPrintCodexHarness(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "codex")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "delegate-pb", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestPlaybookPrintDelegatesTipPresent(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "delegate-pb", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "delegate-pb", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -385,7 +385,7 @@ func TestPlaybookPrintDelegatesTipAbsent(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "claude")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "plain-pb", map[string]string{"WorktreeID": "wt-123"}, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "plain-pb", map[string]string{"WorktreeID": "wt-123"}, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -404,7 +404,7 @@ func TestPlaybookPrintCallerContextSubstituted(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "plain-pb", map[string]string{"WorktreeID": "wt-abc"}, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "plain-pb", map[string]string{"WorktreeID": "wt-abc"}, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -426,7 +426,7 @@ func TestPlaybookPrintNoVarsPlaybook(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "novars", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "novars", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -449,7 +449,7 @@ func TestPlaybookRenderWritesTmpFile(t *testing.T) {
 
 	s := newTestServerWithHarness(t, "claude")
 
-	path, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "delegate-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, "")
+	path, _, err := renderPlaybook(s, os.DirFS(rsrcRoot), worktreeRoot, "delegate-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybook: %v", err)
 	}
@@ -490,7 +490,7 @@ func TestPlaybookPrintModelAliasFromConfig(t *testing.T) {
 	}
 
 	// Render using the custom config.
-	body, _, err := printPlaybook(s, rsrcRoot, "model-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "model-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -520,11 +520,11 @@ func TestPlaybookPrintModelAliasVariesWithConfig(t *testing.T) {
 		t.Fatalf("config B: %v", err)
 	}
 
-	bodyA, _, err := printPlaybook(s, rsrcRoot, "model-pb", nil, wsconfig.Options{CacheHome: cacheA}, "", nil)
+	bodyA, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "model-pb", nil, wsconfig.Options{CacheHome: cacheA}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook A: %v", err)
 	}
-	bodyB, _, err := printPlaybook(s, rsrcRoot, "model-pb", nil, wsconfig.Options{CacheHome: cacheB}, "", nil)
+	bodyB, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "model-pb", nil, wsconfig.Options{CacheHome: cacheB}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook B: %v", err)
 	}
@@ -556,7 +556,7 @@ func TestPlaybookPrintModelAliasPiHarnessWhenSet(t *testing.T) {
 		t.Fatalf("SetAgentsTierForHarness: %v", err)
 	}
 
-	body, _, err := printPlaybook(s, rsrcRoot, "model-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "model-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -577,12 +577,12 @@ func TestPlaybookPrintModelAliasPiHarnessFallsBackToDefault(t *testing.T) {
 
 	cacheHome := t.TempDir()
 
-	body, _, err := printPlaybook(s, rsrcRoot, "model-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "model-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
-	if !strings.Contains(body, "gpt-6-luna") {
-		t.Errorf("body %q: expected seeded default medium-tier model gpt-6-luna", body)
+	if !strings.Contains(body, "gpt-6.1-terra") {
+		t.Errorf("body %q: expected seeded default medium-tier model gpt-6.1-terra", body)
 	}
 }
 
@@ -612,7 +612,7 @@ func TestPlaybookPrintTierModelVarsFromConfig(t *testing.T) {
 		}
 	}
 
-	body, _, err := printPlaybook(s, rsrcRoot, "tier-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "tier-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -644,7 +644,7 @@ func TestPlaybookPrintTierModelVarsFallbackOnResolverError(t *testing.T) {
 		t.Fatalf("write malformed config.json: %v", err)
 	}
 
-	body, _, err := printPlaybook(s, rsrcRoot, "tier-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "tier-pb", nil, wsconfig.Options{CacheHome: cacheHome}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -670,7 +670,7 @@ func TestPlaybookPrintGoldenLeadWorkflowManualRendersExploreAgent(t *testing.T) 
 	for _, harness := range []string{"claude", "codex"} {
 		t.Run(harness, func(t *testing.T) {
 			s := newTestServerWithHarness(t, harness)
-			body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
+			body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-workflow-manual", nil, isolatedPlaybookConfigOptions(t), "", nil)
 			if err != nil {
 				t.Fatalf("printPlaybook: %v", err)
 			}
@@ -694,7 +694,7 @@ func TestPlaybookPrintMissingManifest(t *testing.T) {
 	// No manifest written.
 
 	s := newTestServerWithHarness(t, "")
-	_, _, err := printPlaybook(s, root, "pb", nil, wsconfig.Options{}, "", nil)
+	_, _, err := printPlaybook(s, os.DirFS(root), "pb", nil, wsconfig.Options{}, "", nil)
 	if err == nil {
 		t.Fatal("expected error for missing manifest, got nil")
 	}
@@ -710,7 +710,7 @@ func TestPlaybookPrintSchemaMismatch(t *testing.T) {
 	writeTestFile(t, root, "manifest.json", `{"schema_version":999,"files":{"pb/pb.md":"deadbeef"}}`)
 
 	s := newTestServerWithHarness(t, "")
-	_, _, err := printPlaybook(s, root, "pb", nil, wsconfig.Options{}, "", nil)
+	_, _, err := printPlaybook(s, os.DirFS(root), "pb", nil, wsconfig.Options{}, "", nil)
 	if err == nil {
 		t.Fatal("expected error for schema mismatch, got nil")
 	}
@@ -726,9 +726,10 @@ func TestPlaybookPrintUndeclaredCallerVar(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "")
 
-	_, _, err := printPlaybook(s, rsrcRoot, "plain-pb",
+	_, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "plain-pb",
 		map[string]string{"WorktreeID": "wt", "Undeclared": "oops"},
 		wsconfig.Options{}, "", nil)
+
 	if err == nil {
 		t.Fatal("expected ErrUndeclaredVar for undeclared caller var, got nil")
 	}
@@ -748,7 +749,7 @@ func TestPlaybookPrintUnprovidedVar(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "")
 
-	_, _, err := printPlaybook(s, rsrcRoot, "plain-pb", map[string]string{}, wsconfig.Options{}, "", nil)
+	_, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "plain-pb", map[string]string{}, wsconfig.Options{}, "", nil)
 	if err == nil {
 		t.Fatal("expected ErrUnprovidedVar for missing required var, got nil")
 	}
@@ -771,7 +772,7 @@ func TestPlaybookPrintDanglingInclude(t *testing.T) {
 	})
 	s := newTestServerWithHarness(t, "")
 
-	_, _, err := printPlaybook(s, rsrcRoot, "dangle-pb", nil, wsconfig.Options{}, "", nil)
+	_, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "dangle-pb", nil, wsconfig.Options{}, "", nil)
 	if err == nil {
 		t.Fatal("expected error for dangling include, got nil")
 	}
@@ -881,7 +882,7 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 		}
 	}
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, configOpts, "", mustOverrideLookup(t, s, ""))
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-workflow-manual", nil, configOpts, "", mustOverrideLookup(t, s, ""))
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -894,7 +895,7 @@ func TestPlaybookPrintWsflowProductModeFiltersHiddenGuidance(t *testing.T) {
 	if err := resolver.Set(wsconfig.ItemWorkflowPreferSubagent, "on", wsconfig.SetOptions{}); err != nil {
 		t.Fatalf("enable workflow.prefer_subagent: %v", err)
 	}
-	bodyOn, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, configOpts, "", mustOverrideLookup(t, s, ""))
+	bodyOn, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-workflow-manual", nil, configOpts, "", mustOverrideLookup(t, s, ""))
 	if err != nil {
 		t.Fatalf("printPlaybook on: %v", err)
 	}
@@ -915,7 +916,7 @@ func TestPlaybookPrintLeadTuneUsesWorkflowPreferenceCatalogKnobs(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "codex")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-tune", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, ""))
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-tune", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, ""))
 	if err != nil {
 		t.Fatalf("printPlaybook lead-tune: %v", err)
 	}
@@ -930,7 +931,7 @@ func TestPlaybookPrintWsflowLeadTuneOmitsFullWsOnlyCatalogKnobs(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	s := newTestServerWithHarness(t, "codex")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-tune", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, ""))
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-tune", nil, isolatedPlaybookConfigOptions(t), "", mustOverrideLookup(t, s, ""))
 	if err != nil {
 		t.Fatalf("printPlaybook lead-tune wsflow: %v", err)
 	}
@@ -1002,10 +1003,11 @@ Actual tool: ws.ferrule.
 	})
 	s := newTestServerWithHarness(t, "codex")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "namespace-pb", map[string]string{
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "namespace-pb", map[string]string{
 		"McpNamespace":   "spoof",
 		"SkillNamespace": "spoof",
 	}, wsconfig.Options{}, "", nil)
+
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1031,7 +1033,7 @@ Call {{.McpNamespace}}/tickets.query and {{.SkillNamespace}}:lead-discuss.
 	})
 	s := newTestServerWithHarness(t, "codex")
 
-	body, _, err := printPlaybook(s, rsrcRoot, "namespace-pb", nil, wsconfig.Options{}, "", nil)
+	body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "namespace-pb", nil, wsconfig.Options{}, "", nil)
 	if err != nil {
 		t.Fatalf("printPlaybook: %v", err)
 	}
@@ -1051,7 +1053,7 @@ func TestRenderPlaybookWsflowProductModeUsesShippedDelegate(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", cacheHome)
 	s := newTestServerWithHarness(t, "codex")
 
-	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", shippedImplementerContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, "")
+	path, tier, err := renderPlaybook(s, os.DirFS(rsrcRoot), worktreeRoot, "implementer", shippedImplementerContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybook: %v", err)
 	}
@@ -1085,7 +1087,7 @@ func TestRenderPlaybookShippedImplementerDeclaredContext(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", cacheHome)
 	s := newTestServerWithHarness(t, "codex")
 
-	path, tier, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", shippedImplementerContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, "")
+	path, tier, err := renderPlaybook(s, os.DirFS(rsrcRoot), worktreeRoot, "implementer", shippedImplementerContext(), wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, "")
 	if err != nil {
 		t.Fatalf("renderPlaybook: %v", err)
 	}
@@ -1116,9 +1118,10 @@ func TestRenderPlaybookWsflowLegacyPromptStemsAppendContext(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", cacheHome)
 	s := newTestServerWithHarness(t, "codex")
 
-	codeReviewerPath, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "code-reviewer", map[string]string{
+	codeReviewerPath, _, err := renderPlaybook(s, os.DirFS(rsrcRoot), worktreeRoot, "code-reviewer", map[string]string{
 		"note": "see ws/tickets.query for details",
 	}, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, "")
+
 	if err != nil {
 		t.Fatalf("renderPlaybook code-reviewer with legacy context: %v", err)
 	}
@@ -1143,7 +1146,7 @@ func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", cacheHome)
 	s := newTestServerWithHarness(t, "codex")
 
-	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "code-reviewer", map[string]string{
+	if _, _, err := renderPlaybook(s, os.DirFS(rsrcRoot), worktreeRoot, "code-reviewer", map[string]string{
 		"note": "ordinary full ws context remains template vars",
 	}, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, ""); err == nil {
 		t.Fatal("full ws renderPlaybook accepted undeclared context for code-reviewer")
@@ -1156,7 +1159,7 @@ func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
 
 	ctx := shippedImplementerContext()
 	ctx["Undeclared"] = "must fail"
-	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", ctx, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, ""); err == nil {
+	if _, _, err := renderPlaybook(s, os.DirFS(rsrcRoot), worktreeRoot, "implementer", ctx, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, ""); err == nil {
 		t.Fatal("full ws renderPlaybook accepted undeclared context for implementer")
 	} else {
 		var undeclared wsrsrc.ErrUndeclaredVar
@@ -1167,7 +1170,7 @@ func TestRenderPlaybookFullWsStillRejectsUndeclaredContext(t *testing.T) {
 
 	implCtx := shippedImplementerContext()
 	implCtx["BriefPath"] = "ai-docs/.plans/legacy-brief.md"
-	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", implCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, ""); err == nil {
+	if _, _, err := renderPlaybook(s, os.DirFS(rsrcRoot), worktreeRoot, "implementer", implCtx, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, ""); err == nil {
 		t.Fatal("full ws renderPlaybook accepted BriefPath for implementer")
 	} else {
 		var undeclared wsrsrc.ErrUndeclaredVar
@@ -1186,7 +1189,7 @@ func TestRenderPlaybookWsflowNonLegacyStemRejectsUndeclaredContext(t *testing.T)
 	t.Setenv("WS_CACHE_HOME", cacheHome)
 	s := newTestServerWithHarness(t, "codex")
 
-	if _, _, err := renderPlaybook(s, rsrcRoot, worktreeRoot, "implementer", map[string]string{
+	if _, _, err := renderPlaybook(s, os.DirFS(rsrcRoot), worktreeRoot, "implementer", map[string]string{
 		"note": "wsflow non-legacy stems still require declared template vars",
 	}, wsconfig.Options{CacheHome: cacheHome}, "", "", "", nil, ""); err == nil {
 		t.Fatal("wsflow non-legacy renderPlaybook accepted undeclared context")
@@ -1227,7 +1230,7 @@ func TestPlaybookPrintMCPDispatch(t *testing.T) {
 	rsrcRoot := buildTestRsrcTree(t, map[string]string{
 		"novars/novars.md": noVarsPlaybookContent,
 	})
-	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	useResourceFixture(t, rsrcRoot)
 
 	srv := NewServer(t.TempDir(), "test")
 	// req.Params is the JSON for the tools/call params object:

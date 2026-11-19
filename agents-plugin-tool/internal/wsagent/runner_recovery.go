@@ -34,8 +34,8 @@ func (c *conv) syncHost(quiet bool) {
 func (c *conv) alert(n wslive.Notice, quiet bool) {
 	c.alerted = true
 	c.setStatus(func() { c.failure = &n })
-	if !quiet && c.live.notice(n) {
-		c.ringDirty = true
+	if !quiet {
+		c.live.notice(n)
 	}
 	c.syncHost(quiet)
 	c.changed(quiet)
@@ -200,13 +200,19 @@ func (c *conv) mcpRestartDue() bool {
 	return false
 }
 
-// restartIfDue restarts the process when a broken MCP connection asked for
-// it and the session stands at an idle point with no background task.
-func (c *conv) restartIfDue() {
-	if !c.mcpRestartDue() || c.proc == nil || !c.idleNow() {
-		return
+// restartIfDue restarts the process when a broken MCP connection or a
+// stale ws-mcp route (mcpStale) asked for it and the session stands at an
+// idle point with no background task, and reports whether a new process
+// runs; a failed start leaves none, with its error on the session.
+func (c *conv) restartIfDue() bool {
+	if !(c.mcpStale || c.mcpRestartDue()) || c.proc == nil || !c.idleNow() {
+		return false
 	}
-	fmt.Fprintf(c.r.opts.Log, "agent %s: restart for MCP servers %v\n", c.rec.ReplyID, c.mcpBroken)
+	if c.mcpStale {
+		fmt.Fprintf(c.r.opts.Log, "agent %s: restart for its stale ws-mcp route\n", c.rec.ReplyID)
+	} else {
+		fmt.Fprintf(c.r.opts.Log, "agent %s: restart for MCP servers %v\n", c.rec.ReplyID, c.mcpBroken)
+	}
 	if c.mcpRestarted == nil {
 		c.mcpRestarted = map[string]bool{}
 	}
@@ -215,7 +221,9 @@ func (c *conv) restartIfDue() {
 	}
 	if err := c.restartProcess(); err != nil {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: restart: %v\n", c.rec.ReplyID, err)
+		return false
 	}
+	return true
 }
 
 // restartProcess ends the process, if any, and starts a new one on the

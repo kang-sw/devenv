@@ -17,9 +17,9 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 )
 
-// TestMain defaults WS_RSRC_ROOT to the shipped rsrc tree so playbook and
-// convention loads resolve bundled resources. Tests that exercise a custom
-// rsrc tree override it per-test with t.Setenv.
+// TestMain selects the canonical dev checkout independently of legacy caller
+// roots, so bare go test works without generated build assets. Tests with
+// synthetic resources select an explicit fixture checkout.
 //
 // It also defaults WS_CACHE_HOME to a throwaway temp dir so the file-backed
 // session store (sessions/<key>/ under the cache root) never reads or writes the
@@ -31,9 +31,11 @@ import (
 // ~/.ws/config.json. It is unconditional: an inherited WS_CONFIG_HOME is a
 // real config just the same. Tests that need a config home set their own.
 func TestMain(m *testing.M) {
-	if os.Getenv("WS_RSRC_ROOT") == "" {
-		_ = os.Setenv("WS_RSRC_ROOT", shippedRsrcRootForTest())
+	checkout, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		panic(err)
 	}
+	_ = os.Setenv("WS_RSRC_DEV_CHECKOUT", checkout)
 	os.Exit(runTestMain(m))
 }
 
@@ -283,7 +285,7 @@ func TestWsflowPlaybookRenderAllLegacyStemsFromRsrc(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_MCP_NO_AGENT", "1")
 	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
-	t.Setenv("WS_RSRC_ROOT", shippedRsrcRootForTest())
+	useResourceFixture(t, shippedRsrcRootForTest())
 	s := NewServer(root, "test")
 
 	for _, stem := range []string{
@@ -291,7 +293,7 @@ func TestWsflowPlaybookRenderAllLegacyStemsFromRsrc(t *testing.T) {
 	} {
 		t.Run(stem, func(t *testing.T) {
 			context := map[string]string{"bridge_probe": "context for " + stem}
-			path, _, err := renderPlaybook(s, shippedRsrcRootForTest(), root, stem, context, wsconfig.Options{}, "", "", "", nil, "")
+			path, _, err := renderPlaybook(s, os.DirFS(shippedRsrcRootForTest()), root, stem, context, wsconfig.Options{}, "", "", "", nil, "")
 			if err != nil {
 				t.Fatalf("renderPlaybook(%s): %v", stem, err)
 			}
@@ -1084,7 +1086,7 @@ func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_MCP_NO_AGENT", "1")
 	t.Setenv("WS_MCP_NAMESPACE", "wsflow")
-	t.Setenv("WS_RSRC_ROOT", shippedRsrcRootForTest())
+	useResourceFixture(t, shippedRsrcRootForTest())
 
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`,
@@ -1127,7 +1129,7 @@ func TestPlaybookRenderReturnsResolvedNativeBindings(t *testing.T) {
 		"model-pb/model-pb.md": modelAliasPlaybookContent,
 	})
 	cacheHome := t.TempDir()
-	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	useResourceFixture(t, rsrcRoot)
 	t.Setenv("WS_CACHE_HOME", cacheHome)
 
 	s := NewServer(root, "test")
@@ -1142,7 +1144,7 @@ func TestPlaybookRenderReturnsResolvedNativeBindings(t *testing.T) {
 	if len(lines) != 4 || !strings.HasSuffix(lines[0], "-model-pb.md") {
 		t.Fatalf("render metadata path/tier shape = %q", responseText)
 	}
-	if got, want := strings.Join(lines[1:], "\n"), "recommended-tier: medium\nrecommended-model: gpt-6-luna\nrecommended-reasoning-effort: xhigh"; got != want {
+	if got, want := strings.Join(lines[1:], "\n"), "recommended-tier: medium\nrecommended-model: gpt-6.1-terra\nrecommended-reasoning-effort: high"; got != want {
 		t.Fatalf("render metadata = %q, want %q", got, want)
 	}
 
@@ -1162,7 +1164,7 @@ func TestWsflowConfigAgentsTierWriteRoundTripsIntoPlaybookRenderRecommendedModel
 		"model-pb/model-pb.md": modelAliasPlaybookContent,
 	})
 	cacheHome := t.TempDir()
-	t.Setenv("WS_RSRC_ROOT", rsrcRoot)
+	useResourceFixture(t, rsrcRoot)
 	t.Setenv("WS_CACHE_HOME", cacheHome)
 	t.Setenv(envNoAgent, "1")
 	t.Setenv(envNamespace, "wsflow")

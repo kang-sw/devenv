@@ -22,12 +22,16 @@ func TestPiLeadManifestEnvironmentBoundary(t *testing.T) {
 		name, value, _ := strings.Cut(entry, "=")
 		env[name] = value
 	}
+	staged := spec.Lead.Env["WS_PI_WORKFLOW_ROOT"]
+	if staged == root || staged == "" {
+		t.Fatalf("workflow must be staged, got %q", staged)
+	}
 	for name, want := range map[string]string{
 		"WS_MCP_NAMESPACE":    "wsflow",
-		"WS_MCP_CUSTOM":       filepath.Join(root, "custom"),
-		"WS_RSRC_ROOT":        filepath.Join(root, "rsrc"),
-		"WS_SKILLS_ROOT":      filepath.Join(root, "skills"),
-		"WS_PI_WORKFLOW_ROOT": root,
+		"WS_MCP_CUSTOM":       filepath.Join(staged, "custom"),
+		"WS_RSRC_ROOT":        filepath.Join(staged, "rsrc"),
+		"WS_SKILLS_ROOT":      filepath.Join(staged, "skills"),
+		"WS_PI_WORKFLOW_ROOT": staged,
 		EnvHostedSessionKey:   "daemon-key",
 		"PATH":                "/daemon/bin",
 		"NODE_OPTIONS":        "--daemon-option",

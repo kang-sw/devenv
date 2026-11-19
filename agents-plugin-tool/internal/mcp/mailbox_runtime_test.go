@@ -26,13 +26,13 @@ func TestMailboxReplyIDFixedSessionsAcrossRestart(t *testing.T) {
 }
 
 // TestReapStaleReplyIDsRemovesOnlyStaleEmptyEntries verifies Decision 11's
-// lazy-expiry reaping: an entry past mailboxReplyIDRetention with an empty
+// lazy-expiry reaping (wsmailbox.ReapReplyEntries): an entry past wsmailbox.ReplyRetention with an empty
 // queue is removed; a stale entry with a NON-empty queue is kept
 // (undelivered mail is never dropped by reaping); a fresh entry is kept
 // regardless of its queue state.
 func TestReapStaleReplyIDsRemovesOnlyStaleEmptyEntries(t *testing.T) {
 	now := time.Now().UTC()
-	stale := now.Add(-mailboxReplyIDRetention - time.Hour).Format(time.RFC3339)
+	stale := now.Add(-wsmailbox.ReplyRetention - time.Hour).Format(time.RFC3339)
 	fresh := now.Add(-time.Minute).Format(time.RFC3339)
 
 	store := &wsmailbox.ReplyStore{
@@ -46,7 +46,7 @@ func TestReapStaleReplyIDsRemovesOnlyStaleEmptyEntries(t *testing.T) {
 		},
 	}
 
-	reapStaleReplyIDs(store, now)
+	wsmailbox.ReapReplyEntries(store, now)
 
 	if _, ok := store.Entries["stale-empty"]; ok {
 		t.Fatalf("stale entry with an empty queue was not reaped")
@@ -124,7 +124,13 @@ func exitedChildPID(t *testing.T) int {
 
 func loadPresence(t *testing.T, path, name string) wsmailbox.Presence {
 	t.Helper()
-	store, err := wsmailbox.Load(path)
+	return loadPresenceIn(t, (wsmailbox.Paths{}).Store(), path, name)
+}
+
+// loadPresenceIn is loadPresence against store.
+func loadPresenceIn(t *testing.T, ms wsmailbox.Store, path, name string) wsmailbox.Presence {
+	t.Helper()
+	store, err := ms.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +237,7 @@ func TestMailboxPresenceTickerNeverRefreshesAnotherPIDsRecord(t *testing.T) {
 		t.Skipf("cannot obtain a distinct parent PID (ppid=%d)", otherPID)
 	}
 	stamped := mailboxNowString()
-	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+	if err := (wsmailbox.Paths{}).Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 		p := store.Presence["taken"]
 		p.PID = otherPID
 		p.LastSeen = stamped
@@ -340,7 +346,7 @@ func TestMailboxPresenceTickerFollowsRebuiltRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+	if err := (wsmailbox.Paths{}).Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 		delete(store.Presence, "rebuilt")
 		return nil
 	}); err != nil {
@@ -416,7 +422,7 @@ func TestMailboxPresenceTickerIgnoresRefusedLeadRebindRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	holder := wsmailbox.Presence{Name: "anchored", Scope: wsmailbox.ScopeWorktree, PID: otherPID, Owner: "other-key", LastSeen: mailboxNowString()}
-	if err := wsmailbox.WithLock(pathB, func(store *wsmailbox.StoreFile) error {
+	if err := (wsmailbox.Paths{}).Store().WithLock(pathB, func(store *wsmailbox.StoreFile) error {
 		store.Presence["anchored"] = holder
 		return nil
 	}); err != nil {
@@ -481,7 +487,7 @@ func TestMailboxPresenceTickerRefreshesReclaimedDeadPIDRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	stale := mailboxNow().Add(-(mailboxLivenessThreshold + time.Minute)).Format(time.RFC3339)
-	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+	if err := (wsmailbox.Paths{}).Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 		p := store.Presence["reclaimed"]
 		p.PID = deadPID
 		p.Owner = "departed-child-key"
@@ -521,7 +527,7 @@ func TestMailboxPresenceTickerSkipsAfterRegistrationConflict(t *testing.T) {
 		t.Skipf("cannot obtain a distinct parent PID (ppid=%d)", otherPID)
 	}
 	stamped := mailboxNowString()
-	if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+	if err := (wsmailbox.Paths{}).Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 		store.Presence["contested"] = wsmailbox.Presence{Name: "contested", Scope: wsmailbox.ScopeWorktree, PID: otherPID, LastSeen: stamped}
 		return nil
 	}); err != nil {

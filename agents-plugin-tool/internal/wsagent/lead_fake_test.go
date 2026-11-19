@@ -16,6 +16,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsholder"
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wspackage"
 )
 
 // fakeStream is one holder connection: what it carries (the holder's
@@ -125,6 +126,11 @@ type fakeHolders struct {
 	// negative n fails every one), as a write to a gone child does; the
 	// failed input reaches no child.
 	failInput map[string]int
+	// acp answers an ACP request (a JSON-RPC line with a method and an
+	// id) written to holder id's child: result is the raw JSON result, or
+	// errMsg an error answer; ok false leaves it unanswered. It runs
+	// without the lock held, so it may call into the runner.
+	acp func(id, method string, params json.RawMessage) (result, errMsg string, ok bool)
 }
 
 func newFakeHolders() *fakeHolders {
@@ -326,11 +332,21 @@ func (f *fakeHolders) Input(id string, data []byte, eof bool) error {
 		f.mu.Unlock()
 		return errors.New("holder: write to the child: broken pipe")
 	}
+	type acpRequest struct {
+		ID     json.RawMessage `json:"id"`
+		Method string          `json:"method"`
+		Params json.RawMessage `json:"params"`
+	}
+	var acpRequests []acpRequest
 	for _, line := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
 		if len(line) == 0 {
 			continue
 		}
 		h.inputs = append(h.inputs, string(line))
+		var r acpRequest
+		if f.acp != nil && json.Unmarshal(line, &r) == nil && r.Method != "" && len(r.ID) > 0 {
+			acpRequests = append(acpRequests, r)
+		}
 		var d struct {
 			Type      string `json:"type"`
 			RequestID string `json:"request_id"`
@@ -348,6 +364,27 @@ func (f *fakeHolders) Input(id string, data []byte, eof bool) error {
 			}
 			answer, _ := json.Marshal(map[string]any{"type": "control_response", "response": response})
 			f.appendLocked(h, wsholder.Event{Event: "output", Stream: "stdout", Data: append(answer, '\n')})
+		}
+	}
+	if len(acpRequests) > 0 {
+		acp := f.acp
+		f.mu.Unlock()
+		var answers [][]byte
+		for _, r := range acpRequests {
+			result, errMsg, ok := acp(id, r.Method, r.Params)
+			if !ok {
+				continue
+			}
+			answer := map[string]any{"jsonrpc": "2.0", "id": r.ID, "result": json.RawMessage(result)}
+			if errMsg != "" {
+				answer = map[string]any{"jsonrpc": "2.0", "id": r.ID, "error": map[string]any{"code": -32603, "message": errMsg}}
+			}
+			raw, _ := json.Marshal(answer)
+			answers = append(answers, append(raw, '\n'))
+		}
+		f.mu.Lock()
+		for _, raw := range answers {
+			f.appendLocked(h, wsholder.Event{Event: "output", Stream: "stdout", Data: raw})
 		}
 	}
 	if eof && !h.exited {
@@ -526,6 +563,28 @@ func (f *fakeHolders) inputs(id, kind string) []string {
 	return out
 }
 
+// acpInputs are the params of the ACP lines of method written to the
+// holder's child, oldest first.
+func (f *fakeHolders) acpInputs(id, method string) []json.RawMessage {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	h := f.holders[id]
+	if h == nil {
+		return nil
+	}
+	var out []json.RawMessage
+	for _, line := range h.inputs {
+		var d struct {
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if json.Unmarshal([]byte(line), &d) == nil && d.Method == method {
+			out = append(out, d.Params)
+		}
+	}
+	return out
+}
+
 func (f *fakeHolders) spawned(id string) wsholder.SpawnSpec {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -585,18 +644,20 @@ func (k *fakeLeadKeys) EnsureLead(_, key string) error {
 	return nil
 }
 
-// fakeMail is a LeadMail a test delivers into.
+// fakeMail is a LeadMail a test delivers into. A drained message whose
+// sender relates to the session (Drain's relation) reads "(<relation>) "
+// before its text.
 type fakeMail struct {
 	mu      sync.Mutex
 	watches map[string]func()
-	queued  map[string][]string
+	queued  map[string][]ClaimedMail
 	stops   int
 	// drains counts Drain calls.
 	drains int
 }
 
 func newFakeMail() *fakeMail {
-	return &fakeMail{watches: map[string]func(){}, queued: map[string][]string{}}
+	return &fakeMail{watches: map[string]func(){}, queued: map[string][]ClaimedMail{}}
 }
 
 func (m *fakeMail) Watch(_, key string, changed func()) func() {
@@ -611,12 +672,20 @@ func (m *fakeMail) Watch(_, key string, changed func()) func() {
 	}
 }
 
-func (m *fakeMail) Drain(_, key string) ([]string, error) {
+func (m *fakeMail) Drain(_, key string, relation func(string) string) ([]ClaimedMail, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.drains++
 	out := m.queued[key]
 	delete(m.queued, key)
+	m.mu.Unlock()
+	for i := range out {
+		if relation == nil {
+			continue
+		}
+		if rel := relation(out[i].Sender); rel != "" {
+			out[i].Text = "(" + rel + ") " + out[i].Text
+		}
+	}
 	return out, nil
 }
 
@@ -624,7 +693,11 @@ func (m *fakeMail) Drain(_, key string) ([]string, error) {
 func (m *fakeMail) Return(_, key string, texts []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.queued[key] = append(slices.Clone(texts), m.queued[key]...)
+	back := make([]ClaimedMail, 0, len(texts))
+	for _, text := range texts {
+		back = append(back, ClaimedMail{Text: text})
+	}
+	m.queued[key] = append(back, m.queued[key]...)
 	return nil
 }
 
@@ -633,7 +706,11 @@ func (m *fakeMail) Return(_, key string, texts []string) error {
 func (m *fakeMail) waiting(key string) []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return slices.Clone(m.queued[key])
+	var out []string
+	for _, cm := range m.queued[key] {
+		out = append(out, cm.Text)
+	}
+	return out
 }
 
 func (m *fakeMail) watched(key string) bool {
@@ -648,10 +725,19 @@ func (m *fakeMail) drainCount() int {
 	return m.drains
 }
 
-// deliver puts mail in key's mailbox and tells its watcher, if any.
+// deliver puts mail with no sender in key's mailbox and tells its watcher,
+// if any.
 func (m *fakeMail) deliver(key string, texts ...string) {
+	for _, text := range texts {
+		m.deliverFrom(key, "", text)
+	}
+}
+
+// deliverFrom puts mail from sender (a reply-id) in key's mailbox and
+// tells its watcher, if any.
+func (m *fakeMail) deliverFrom(key, sender, text string) {
 	m.mu.Lock()
-	m.queued[key] = append(m.queued[key], texts...)
+	m.queued[key] = append(m.queued[key], ClaimedMail{Text: text, Sender: sender})
 	changed := m.watches[key]
 	m.mu.Unlock()
 	if changed != nil {
@@ -735,23 +821,78 @@ func newLeadHarness(t *testing.T) *leadHarness {
 		DaemonVersion: hostedPluginTestVersion,
 		Now:           func() time.Time { return now },
 		Dir:           h.dir,
-		Backends:      map[string]BackendRegistration{BackendClaude: {Backend: ClaudeBackend{Command: "/opt/harness/claude"}, LeadProfile: LeadProfileClaude, PermissionModes: LeadPermissionModes}, BackendPi: {Backend: PiBackend{Command: "/opt/harness/pi"}, LeadProfile: LeadProfilePi}},
+		Backends:      map[string]BackendRegistration{BackendClaude: {Backend: ClaudeBackend{Command: "/opt/harness/claude"}, LeadProfile: LeadProfileClaude, PermissionModes: LeadPermissionModes, WorkerCapable: true, WorkerProfile: AgentWorkerProfile(BackendClaude), WorkerHTTPMCP: true}, BackendPi: {Backend: PiBackend{Command: "/opt/harness/pi"}, LeadProfile: LeadProfilePi, WorkerCapable: true, WorkerProfile: AgentWorkerProfile(BackendPi)}},
 		Keys:          &fakeKeys{},
 		Config:        testConfig(t),
 		Log:           h.log,
 		Holders:       h.holders,
 		LeadKeys:      h.keys,
 		Mail:          h.mail,
-		heartbeat:     50 * time.Millisecond,
-		// Auto-closing finished Pi children is tested on its own
-		// (auto_close_test.go).
-		keepFinished: true,
+		// A Claude lead runs the daemon's ws-mcp as its ws server and is
+		// refused a start without one.
+		WSMCP:     hostedLeadLauncher(hostedPluginTestVersion),
+		heartbeat: 50 * time.Millisecond,
 	}
 	// Every harness PID a test writes (4002, 9001, ...) is dead unless the
 	// test marks it alive: the real process table of a CI runner can hold
 	// any of them.
 	h.opts.Alive = (&processTable{}).check
 	return h
+}
+
+// hostedLeadLauncher stands in for the daemon's ws-mcp command
+// (agentMCPCommand in cmd/ws-mcp): the selected package staged from build inputs
+// at each process start, its launcher and its selection warning.
+// The command names no real file; the holders are fakes.
+func hostedLeadLauncher(version string) func(string) (MCPCommand, error) {
+	return func(root string) (MCPCommand, error) {
+		name, warning, err := ResolveHostedPackage()
+		if err != nil {
+			return MCPCommand{}, err
+		}
+		stateDir, err := wsdashboard.Dir("")
+		if err != nil {
+			return MCPCommand{}, err
+		}
+		plugin, err := wspackage.StageHosted(name, stateDir)
+		if err != nil {
+			return MCPCommand{}, err
+		}
+		return MCPCommand{Command: "/opt/harness/python3", Args: []string{filepath.Join(plugin, "bin", "ws-mcp-launcher.py"), "serve", "--stdio"},
+			Plugin: plugin, PluginWarning: warning, Env: map[string]string{"WS_RSRC_ROOT": filepath.Join(plugin, "rsrc"), "WS_MCP_PROJECT_ROOT": root}}, nil
+	}
+}
+
+// leadMCPServer is the ws server entry of a Claude lead's --mcp-config.
+func leadMCPServer(t *testing.T, argv []string) map[string]any {
+	t.Helper()
+	raw, ok := flagValue(argv, "--mcp-config")
+	if !ok {
+		t.Fatalf("a Claude lead's launch carries no --mcp-config: %v", argv)
+	}
+	var cfg struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.MCPServers) != 1 || cfg.MCPServers[ReservedMCPServer] == nil {
+		t.Fatalf("--mcp-config must hold the ws server alone: %s", raw)
+	}
+	return cfg.MCPServers[ReservedMCPServer]
+}
+
+// leadLauncherPlugin is the hosted package whose launcher a Claude lead's
+// stdio ws server runs (hostedLeadLauncher).
+func leadLauncherPlugin(t *testing.T, argv []string) string {
+	t.Helper()
+	server := leadMCPServer(t, argv)
+	args, _ := server["args"].([]any)
+	if server["type"] != "stdio" || len(args) == 0 {
+		t.Fatalf("the lead's ws server is not the stdio launcher: %v", server)
+	}
+	launcher, _ := args[0].(string)
+	return filepath.Dir(filepath.Dir(launcher))
 }
 
 // start starts a runner over the harness's directory and holders, as a

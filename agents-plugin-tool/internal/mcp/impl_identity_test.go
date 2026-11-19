@@ -92,8 +92,8 @@ func TestImplIdentityLandedTargetVouch(t *testing.T) {
 			for _, tc := range []struct {
 				name, vouch, allowRename, upstream string
 				ahead, behind, targetAhead         int
-				cleanCurrent, canonicalCurrent    bool
-				want                              string
+				cleanCurrent, canonicalCurrent     bool
+				want                               string
 			}{
 				{name: "matching vouch", want: "recreate"},
 				{name: "clean current with vouch", cleanCurrent: true, want: "recreate"},

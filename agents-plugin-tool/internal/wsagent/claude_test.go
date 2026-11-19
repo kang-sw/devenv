@@ -121,19 +121,23 @@ func TestClaudeArgsFromProfile(t *testing.T) {
 // TestClaudeArgsBuiltinSupportProfile: the builtin Claude support profile
 // launches with Agent as its only built-in tool, in --tools and in the
 // dontAsk allowlist beside its ws tools, so a subagent it spawns inherits
-// the same limit.
+// the same limit. Its runs keep the tool: nothing disallows it.
 func TestClaudeArgsBuiltinSupportProfile(t *testing.T) {
 	p, err := ParseProfile(BuiltinProfiles()[ProfilePrefix+SupportProfileClaude])
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec := StartSpec{Root: "/work", Profile: p, WSMCP: &MCPCommand{Command: "/bin/ws-mcp"}}
+	spec := StartSpec{Root: "/work", Profile: p, WSMCP: &MCPCommand{Command: "/bin/ws-mcp"},
+		RemoveSubagents: RemovesSubagents(Record{Backend: BackendClaude, Profile: SupportProfileClaude})}
 	args, err := claudeArgs(spec)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := flagValue(args, "--tools"); got != "Agent" {
 		t.Fatalf("--tools = %q, want Agent alone", got)
+	}
+	if slices.Contains(args, "--disallowedTools") {
+		t.Fatalf("the support profile's launch disallows a tool: %v", args)
 	}
 	i := slices.Index(args, "--allowedTools")
 	if i < 0 {
@@ -142,6 +146,38 @@ func TestClaudeArgsBuiltinSupportProfile(t *testing.T) {
 	want := []string{"Agent", "mcp__ws__tracker_query", "mcp__ws__tracker_update", "mcp__ws__tracker_show", "mcp__ws__tracker_ui", "mcp__ws__wiki_query", "mcp__ws__wiki_update", "mcp__ws__git_search", "mcp__ws__playbook_read"}
 	if allowed := args[i+1:]; !slices.Equal(allowed, want) {
 		t.Fatalf("--allowedTools = %v, want %v", allowed, want)
+	}
+}
+
+// TestClaudeArgsAgentWorkerRemovesSubagents: an agent.spawn child launches
+// with the native subagent tool disallowed under both of its names, as one
+// value ahead of the allowlist that takes every argument after it, whatever
+// its profile lists in --tools.
+func TestClaudeArgsAgentWorkerRemovesSubagents(t *testing.T) {
+	p, err := ParseProfile(BuiltinProfiles()[ProfilePrefix+AgentWorkerProfile(BackendClaude)])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, tools := range map[string][]string{"builtin": p.Tools, "listing Agent": append(slices.Clone(p.Tools), "Agent")} {
+		t.Run(name, func(t *testing.T) {
+			p := p
+			p.Tools = tools
+			spec := StartSpec{Root: "/work", Profile: p, WSMCP: &MCPCommand{Command: "/bin/ws-mcp"},
+				RemoveSubagents: RemovesSubagents(Record{Backend: BackendClaude, Profile: AgentWorkerProfile(BackendClaude)})}
+			args, err := claudeArgs(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, ok := flagValue(args, "--disallowedTools"); !ok || got != "Agent,Task" {
+				t.Fatalf("--disallowedTools = %q (present %v), want Agent,Task: %v", got, ok, args)
+			}
+			if got, _ := flagValue(args, "--tools"); got != strings.Join(tools, ",") {
+				t.Fatalf("--tools = %q, want the profile's %v", got, tools)
+			}
+			if d, a := slices.Index(args, "--disallowedTools"), slices.Index(args, "--allowedTools"); a < 0 || d > a {
+				t.Fatalf("--disallowedTools must precede the allowlist: %v", args)
+			}
+		})
 	}
 }
 
@@ -154,28 +190,25 @@ func TestHarnessEnvDropsParentSession(t *testing.T) {
 	}
 }
 
-// A failed lead plugin plan must reach Start's caller before any process is
-// spawned; it must never retry with the user's installed ws/wsflow copy.
+// A failed lead plugin plan, or a lead with no ws-mcp to attach, must reach
+// Start's caller before any process is spawned; it must never retry with
+// the user's installed ws/wsflow copy.
 func TestClaudeLeadStartRefusesPluginResolutionErrors(t *testing.T) {
-	leadBundledFixture(t, "wsflow")
 	restore := lookPath
 	lookPath = func(string) (string, error) { return "/never-start-claude.exe", nil }
 	t.Cleanup(func() { lookPath = restore })
-	for _, failure := range []string{"bundle", "settings", "isolation"} {
+	for _, failure := range []string{"ws-mcp", "settings"} {
 		t.Run(failure, func(t *testing.T) {
 			spec := claudePluginLeadSpec(t)
 			want := ""
 			switch failure {
-			case "bundle":
-				t.Setenv("WS_RSRC_ROOT", filepath.Join(t.TempDir(), "missing", "rsrc"))
-				want = "bundled plugin"
+			case "ws-mcp":
+				spec.WSMCP, spec.MCPSession = nil, nil
+				want = "no ws-mcp to attach"
 			case "settings":
 				path := filepath.Join(spec.Root, ".claude", "settings.local.json")
 				writeLeadPluginFixture(t, path, `{`)
 				want = path
-			case "isolation":
-				spec.Lead.PluginIsolation = "unknown"
-				want = "invalid plugin isolation"
 			}
 			proc, err := (ClaudeBackend{Command: "/never-start-claude.exe"}).Start(context.Background(), spec)
 			if proc != nil {
@@ -623,5 +656,41 @@ func TestLiveWriterEndAgents(t *testing.T) {
 	}
 	if got["a"] != wslive.StatusFailed || got["b"] != wslive.StatusDone {
 		t.Fatalf("agents after endAgents: %v", got)
+	}
+}
+
+// TestClaudeMapperReadsResultsUnderTheAttachedServer: a result-reading ws
+// tool is read under the name its server has in the process: the inline
+// ws server, a worker's and a hosted lead's alike (the lead's --mcp-config
+// server); for a lead an older daemon started on a hosted bundle, also
+// that bundle's plugin server, either package's. A worker never has a
+// plugin server.
+func TestClaudeMapperReadsResultsUnderTheAttachedServer(t *testing.T) {
+	worker := newClaudeMapper(claudeSpec(t, `{"backend":"claude"}`))
+	lead := newClaudeMapper(leadSpec())
+	for name, want := range map[string][2]string{
+		"mcp__ws__tracker_update":                    {TrackerWriteTool, TrackerWriteTool},
+		"mcp__ws__tracker_show":                      {CardTool, CardTool},
+		"mcp__ws__tracker_ui":                        {UITool, UITool},
+		"mcp__ws__tickets_query":                     {"", ""},
+		"mcp__other__tracker_update":                 {"", ""},
+		"mcp__plugin_ws_ws__tracker_update":          {"", TrackerWriteTool},
+		"mcp__plugin_ws_ws__tracker_ui":              {"", UITool},
+		"mcp__plugin_wsflow_wsflow__tracker_show":    {"", CardTool},
+		"mcp__plugin_other_ws__tracker_update":       {"", ""},
+		"mcp__plugin_ws_ws__tickets_query":           {"", ""},
+		"mcp__plugin_wsflow_wsflow__tracker_update_": {"", ""},
+	} {
+		if got := worker.resultTool(name); got != want[0] {
+			t.Errorf("worker %s = %q, want %q", name, got, want[0])
+		}
+		if got := lead.resultTool(name); got != want[1] {
+			t.Errorf("lead %s = %q, want %q", name, got, want[1])
+		}
+	}
+	for _, pkg := range hostedPluginPackages {
+		if got := lead.resultTool(claudeMCPToolName(claudePluginServer(pkg, pkg), TrackerWriteTool)); got != TrackerWriteTool {
+			t.Errorf("hosted package %s's tracker write = %q", pkg, got)
+		}
 	}
 }

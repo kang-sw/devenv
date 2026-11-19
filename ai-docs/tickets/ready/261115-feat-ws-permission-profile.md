@@ -7,10 +7,11 @@ related:
   261115-feat-ws-worker-profile-session-spawn: "its Phase 1 follows permission Phase 2 and owns worker routes/dialog composition; its Phase 2 owns the hire-approval amendment"
   261115-feat-ws-hosted-codex-adapter-contract: "deferred Codex permission mapping belongs with its adapter; not a prerequisite here"
   261114-feat-ws-hosted-antigravity-acp-adapter: "deferred agy permission mapping belongs with its adapter; not a prerequisite here"
+  261117-feat-ws-agent-tools-mailbox-routing: "its Decision 13 is the source of Decision 3's ws/agent.spawn exception; it adds the create-time admission and worker-side explicit-level persistence for agent.spawn children"
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: 96c5564256438fb6
-sage-review-completeness-reviewed: 96c5564256438fb6
+sage-review-design-reviewed: c34a82c839d45331
+sage-review-completeness-reviewed: c34a82c839d45331
 ---
 
 # Common permission intent and truthful enforcement
@@ -72,7 +73,26 @@ verification scope.
    parent-admission-pending/error until resolved; never guess a ceiling or
    substitute a fabricated minimum. This is failure to satisfy (1000), not
    harness unenforceability under (999). Parent recomputation does not itself
-   add a parent-change process-killing/restart mechanism.
+   add a parent-change process-killing/restart mechanism. Exception for
+   `ws/agent.spawn` children (owner (74)=b, 2026-11-17, recorded in
+   `261117-feat-ws-agent-tools-mailbox-routing` Decision 13): a child may be
+   created at any level up to its parent's current level, `full` included,
+   without the user's warning; only a child above its parent is refused.
+   The spawn-supplied level is stored as the child's explicit selection
+   (Decision 8), always lower than or equal to the parent's current level,
+   never a raise. Their authority parent is the daemon-written Runner spawn
+   record (`Record.Parent`), which owner (84)=a (2026-11-17) accepts as the
+   (1177)=a authority-parent record for the `ws/agent.spawn` path only;
+   agent-tools implements it. A lead parent with no computable common level
+   (no Runner record, as for an external CLI lead, or a backend
+   `legacyLeadPermission` does not derive, as for hosted Codex and
+   Antigravity leads until Phases 3 and 4) caps its `ws/agent.spawn`
+   children at `workdir-write`, extending Decision 4's legacy derivation
+   that already maps a Pi lead to `workdir-write` (lead decision (86),
+   2026-11-17, recorded in agent-tools Decision 13); this is a derived
+   ceiling, not a guessed one, and a missing recorded child parent still
+   fails admission. Every other worker path's ceiling stays deferred
+   pending (1177).
 4. **(1001) — preserve legacy defaults.** Omitted selections retain Claude
    `auto` and the existing fixed worker tool loadouts. Derive a display from
    current native mode/tool settings without writing it back. Mark it
@@ -149,7 +169,9 @@ verification scope.
     full selection. An agent cannot satisfy user authority by supplying this
     flag. Existing native-mode controls remain, but may not bypass the common
     user-only raise check. No new human-provenance/authentication mechanism is
-    claimed by the existing trusted gate.
+    claimed by the existing trusted gate. Decision 3's `ws/agent.spawn`
+    exception is outside this rule: an agent-created child at its parent's
+    level, `full` included, needs neither the warning nor the flag.
 12. **Compatibility.** The bounded exception is **T0 only** across the shipped
     change: retain old calls and native UI behavior, preserve selection bytes
     and compute optional projections. MAIN's earlier T0/T2 storage latitude
@@ -777,7 +799,9 @@ parent ceiling or infer permission ancestry from rail/display grouping.
 
 Verification: cross-entry/nested-child fixtures, parent lowering between
 launches, resume/revive and concurrent control changes, unresolved actual
-parents, authorized lowering, rejected model raises, warning/approval correlation,
+parents, authorized lowering, rejected model raises (a `ws/agent.spawn` child at
+its parent's level, `full` included, is Decision 3's exception, not a raise),
+warning/approval correlation,
 fixed capability ceilings and no second input owner. Add optional MCP inputs
 only with discovery gating and unchanged legacy calls. Re-grade every added
 surface T0; existing native approval behavior and Pi/Claude regressions remain.
@@ -870,7 +894,7 @@ binary enforces the new permission feature.
 | # | Title | Severity |
 |---|-------|----------|
 
-## Blocked (2026-11-15)
+## Sage Review Round 2 (2026-11-15)
 
 MAIN's **2026-11-15 17:12:58Z** dispatch authorized Phase 2 backend/runtime
 only after CSI Phase 2 landed. The worker inspected exact base
@@ -920,6 +944,11 @@ outside this dispatch. Owner decisions, phase plans and existing Results are
 unchanged.
 
 ## Owner Decisions (2026-11-16)
+
+- (84)=a (2026-11-17, recorded in Decision 3 and
+  261117-feat-ws-agent-tools-mailbox-routing Decision 13): for
+  `ws/agent.spawn` children only, the daemon-written Runner spawn record is
+  the (1177) authority-parent record.
 
 - (1177)=a: the worker-side ceiling uses a separate authority-parent record,
   recomputed from the parent's current permission after restart (see

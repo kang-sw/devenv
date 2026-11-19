@@ -1,17 +1,13 @@
-// Package wsrsrc implements the call-time rsrc loader substrate for the
-// ws playbook surface. It reads plain-text playbook files from a filesystem
-// root (NOT go:embed), resolves auto-includes, applies declared-variable
-// substitution, and enforces manifest schema-version compatibility.
-//
-// Phase 1 ships no MCP tool. The loader API is consumed by the MCP layer in
-// Phase 2.
+// Package wsrsrc loads playbooks, includes and manifests through fs.FS,
+// preserving schema, hash, variant and variable validation. Daemon callers use
+// build-owned workflow packages; filesystem adapters support resource authoring.
 package wsrsrc
 
 import "fmt"
 
 // SupportedSchemaVersion is the manifest schema version this binary supports.
 // Increment only when the schema SHAPE changes — not on content-only edits.
-// Text-only edits must ship without a binary bump.
+// Production text changes require a rebuilt daemon, not a schema bump.
 const SupportedSchemaVersion = 1
 
 // PlaybookMeta holds the parsed frontmatter fields of a playbook file.

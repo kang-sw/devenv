@@ -532,6 +532,33 @@ func HarnessTiers(opts Options, harness string) (map[string]AgentTier, error) {
 	return tiers, nil
 }
 
+// ParseTierAliases reads an agent.tier_aliases value: whitespace-separated
+// name=<harness>.<tier> pairs. The result maps each lower-cased name to its
+// "<harness>.<tier>" target with the harness lower-cased and the tier folded
+// through NormalizedTier. A pair without "=", without a "." in its target,
+// naming an unknown tier, a name that itself contains ".", or a name that
+// is a tier spelling (a bare tier would shadow it) is an error.
+func ParseTierAliases(raw string) (map[string]string, error) {
+	aliases := map[string]string{}
+	for _, pair := range strings.Fields(raw) {
+		name, target, ok := strings.Cut(pair, "=")
+		name = strings.ToLower(strings.TrimSpace(name))
+		harness, tier, dotted := strings.Cut(strings.TrimSpace(target), ".")
+		harness = strings.ToLower(strings.TrimSpace(harness))
+		tier = NormalizedTier(tier)
+		switch {
+		case !ok || name == "" || strings.Contains(name, "."):
+			return nil, fmt.Errorf("%s: %q is not name=<harness>.<tier>", ItemAgentTierAliases, pair)
+		case NormalizedTier(name) != "":
+			return nil, fmt.Errorf("%s: alias %q is a tier name, which a bare tier would shadow; pick another name", ItemAgentTierAliases, name)
+		case !dotted || harness == "" || tier == "":
+			return nil, fmt.Errorf("%s: %q target must be <harness>.<tier> with tier small, medium, large or xlarge", ItemAgentTierAliases, pair)
+		}
+		aliases[name] = harness + "." + tier
+	}
+	return aliases, nil
+}
+
 func ModelAlias(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "small", "light":
@@ -584,10 +611,10 @@ func defaultConfig() Config {
 
 func applyDefaultTiers(tiers map[string]AgentTier) {
 	defaults := map[string]AgentTier{
-		"small":  {Backend: "codex", Model: "gpt-6-luna", Effort: "high"},
-		"medium": {Backend: "codex", Model: "gpt-6-luna", Effort: "xhigh"},
-		"large":  {Backend: "codex", Model: "gpt-6-sol", Effort: "high"},
-		"xlarge": {Backend: "codex", Model: "gpt-6-sol", Effort: "xhigh"},
+		"small":  {Backend: "codex", Model: "gpt-5.6-luna", Effort: "high"},
+		"medium": {Backend: "codex", Model: "gpt-6.1-terra", Effort: "high"},
+		"large":  {Backend: "codex", Model: "gpt-6.2-sol", Effort: "high"},
+		"xlarge": {Backend: "codex", Model: "gpt-6.2-sol", Effort: "xhigh"},
 	}
 	for tier, mapping := range defaults {
 		if _, ok := tiers[tier]; !ok {
@@ -613,24 +640,28 @@ func applyDefaultModelAliases(tiers map[string]AgentTier, aliases map[string]map
 func defaultModelAliases(tiers map[string]AgentTier) map[string]map[string]AgentTier {
 	return map[string]map[string]AgentTier{
 		"small": {
-			"default": tierOrDefault(tiers, "small", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "high"}),
-			"codex":   tierOrDefault(tiers, "small", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "high"}),
+			"default": tierOrDefault(tiers, "small", AgentTier{Backend: "codex", Model: "gpt-5.6-luna", Effort: "high"}),
+			"codex":   tierOrDefault(tiers, "small", AgentTier{Backend: "codex", Model: "gpt-5.6-luna", Effort: "high"}),
 			"claude":  {Backend: "claude", Model: "haiku", Effort: "high"},
+			"agy":     {Backend: "agy", Model: "gemini-4-hydrogen", Effort: "medium"},
 		},
 		"medium": {
-			"default": tierOrDefault(tiers, "medium", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "xhigh"}),
-			"codex":   tierOrDefault(tiers, "medium", AgentTier{Backend: "codex", Model: "gpt-6-luna", Effort: "xhigh"}),
+			"default": tierOrDefault(tiers, "medium", AgentTier{Backend: "codex", Model: "gpt-6.1-terra", Effort: "high"}),
+			"codex":   tierOrDefault(tiers, "medium", AgentTier{Backend: "codex", Model: "gpt-6.1-terra", Effort: "high"}),
 			"claude":  {Backend: "claude", Model: "sonnet", Effort: "high"},
+			"agy":     {Backend: "agy", Model: "gemini-4-hydrogen", Effort: "high"},
 		},
 		"large": {
-			"default": tierOrDefault(tiers, "large", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "high"}),
-			"codex":   tierOrDefault(tiers, "large", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "high"}),
+			"default": tierOrDefault(tiers, "large", AgentTier{Backend: "codex", Model: "gpt-6.2-sol", Effort: "high"}),
+			"codex":   tierOrDefault(tiers, "large", AgentTier{Backend: "codex", Model: "gpt-6.2-sol", Effort: "high"}),
 			"claude":  {Backend: "claude", Model: "opus", Effort: "high"},
+			"agy":     {Backend: "agy", Model: "gemini-4-neon", Effort: "high"},
 		},
 		"xlarge": {
-			"default": tierOrDefault(tiers, "xlarge", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "xhigh"}),
-			"codex":   tierOrDefault(tiers, "xlarge", AgentTier{Backend: "codex", Model: "gpt-6-sol", Effort: "xhigh"}),
+			"default": tierOrDefault(tiers, "xlarge", AgentTier{Backend: "codex", Model: "gpt-6.2-sol", Effort: "xhigh"}),
+			"codex":   tierOrDefault(tiers, "xlarge", AgentTier{Backend: "codex", Model: "gpt-6.2-sol", Effort: "xhigh"}),
 			"claude":  {Backend: "claude", Model: "opus", Effort: "xhigh"},
+			"agy":     {Backend: "agy", Model: "gemini-4-neon", Effort: "xhigh"},
 		},
 	}
 }
@@ -691,6 +722,8 @@ func normalizedHarness(value string) string {
 		return "claude"
 	case "pi":
 		return "pi"
+	case "agy":
+		return "agy"
 	default:
 		return ""
 	}
@@ -704,7 +737,7 @@ func aliasTargetKey(harness string) (string, error) {
 	if key := normalizedHarness(value); key != "" {
 		return key, nil
 	}
-	return "", fmt.Errorf("harness must be codex, claude, pi, or default")
+	return "", fmt.Errorf("harness must be codex, claude, pi, agy, or default")
 }
 
 func normalizeOptionalEffort(values ...string) (string, bool, error) {

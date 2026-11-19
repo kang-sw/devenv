@@ -18,13 +18,13 @@ func TestTicketDesignReviewExplorationBindings(t *testing.T) {
 			rows              []string
 		}{
 			{"codex", "an explorer subagent", []string{
-				"| small | gpt-6-luna | high |", "| medium | gpt-6-luna | xhigh |", "| large | gpt-6-sol | high |",
+				"| small | gpt-5.6-luna | high |", "| medium | gpt-6.1-terra | high |", "| large | gpt-6.2-sol | high |",
 			}},
 			{"claude", "the Explore agent", []string{
 				"| small | haiku | high |", "| medium | sonnet | high |", "| large | opus | high |",
 			}},
 			{"unknown-host", "an exploration agent", []string{
-				"| small | gpt-6-luna | high |", "| medium | gpt-6-luna | xhigh |", "| large | gpt-6-sol | high |",
+				"| small | gpt-5.6-luna | high |", "| medium | gpt-6.1-terra | high |", "| large | gpt-6.2-sol | high |",
 			}},
 		} {
 			for _, config := range []string{"default", "custom", "unset", "invalid"} {
@@ -61,7 +61,7 @@ func TestTicketDesignReviewExplorationBindings(t *testing.T) {
 						rows = []string{"| small | the small-tier model | |", "| medium | the medium-tier model | |", "| large | the large-tier model | |"}
 					}
 					root := filepath.Join("..", "..", "..", product.pkg, "rsrc")
-					body, _, err := renderPlaybookBody(newTestServerWithHarness(t, tc.harness), root, "ticket-reviewer-design", nil, opts, "", "", "", nil, "")
+					body, _, err := renderPlaybookBody(newTestServerWithHarness(t, tc.harness), os.DirFS(root), "ticket-reviewer-design", nil, opts, "", "", "", nil, "")
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -89,7 +89,7 @@ func TestTicketReviewDocumentsLoad(t *testing.T) {
 				t.Setenv("WS_MCP_NAMESPACE", product.namespace)
 				t.Setenv("WS_MCP_NO_AGENT", map[bool]string{true: "1", false: "0"}[product.namespace == "wsflow"])
 				root := filepath.Join("..", "..", "..", product.pkg, "rsrc")
-				body, _, err := renderPlaybookBody(&Server{}, root, name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil, "")
+				body, _, err := renderPlaybookBody(&Server{}, os.DirFS(root), name, nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil, "")
 				if err != nil {
 					t.Fatal(err)
 				}

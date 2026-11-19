@@ -308,7 +308,7 @@ func TestHostedCodexStopPayloadScopeAndFailOpen(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+			if err := paths.Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 				store.Queues["lead"] = append(store.Queues["lead"], wsmailbox.Envelope{Content: "mail"})
 				return nil
 			}); err != nil {

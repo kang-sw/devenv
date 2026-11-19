@@ -16,9 +16,8 @@ import (
 
 func TestMailboxSweepThresholdTune(t *testing.T) {
 	paths := wsmailbox.Paths{Config: wsconfig.Options{ConfigHome: t.TempDir()}, State: wsstate.Options{CacheHome: t.TempDir()}}
-	reply, _ := paths.ReplyRegistry()
 	sent := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
-	if err := wsmailbox.WithReplyLock(reply, func(s *wsmailbox.ReplyStore) error {
+	if err := paths.Store().WithReplyLock(func(s *wsmailbox.ReplyStore) error {
 		s.Queues = wsmailbox.AppendQueue(s.Queues, "recipient", wsmailbox.Envelope{ReplyTo: "id:sender", Content: "hello", SentAt: sent.Format(time.RFC3339)})
 		return nil
 	}); err != nil {
@@ -57,8 +56,7 @@ func TestMailboxSweepStartsWithoutDashboardSessionsAndWakes(t *testing.T) {
 	t.Setenv("WS_CONFIG_HOME", t.TempDir())
 	t.Setenv("WS_CACHE_HOME", t.TempDir())
 	paths := wsmailbox.Paths{}
-	reply, _ := paths.ReplyRegistry()
-	if err := wsmailbox.WithReplyLock(reply, func(s *wsmailbox.ReplyStore) error {
+	if err := paths.Store().WithReplyLock(func(s *wsmailbox.ReplyStore) error {
 		s.Queues = wsmailbox.AppendQueue(s.Queues, "recipient", wsmailbox.Envelope{ReplyTo: "id:sender", Content: "hello", SentAt: time.Now().Add(-4 * time.Minute).UTC().Format(time.RFC3339)})
 		return nil
 	}); err != nil {
@@ -73,7 +71,7 @@ func TestMailboxSweepStartsWithoutDashboardSessionsAndWakes(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("sweep did not wake waits")
 	}
-	s, err := wsmailbox.LoadReplyStore(reply)
+	s, err := paths.Store().LoadReply()
 	if err != nil || len(s.Queues["sender"]) != 1 {
 		t.Fatalf("system notice missing: %+v, %v", s, err)
 	}

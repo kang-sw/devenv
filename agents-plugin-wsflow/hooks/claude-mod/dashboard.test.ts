@@ -26,6 +26,7 @@ import {
   PERMISSION_PROMPT,
   RETRY_MS,
   TEXT_FLUSH_INTERVAL_MS,
+  TOOL_SUMMARY_KEYS,
   userPrompt,
   whiteboardBody,
   type DashboardEvent,
@@ -186,6 +187,18 @@ describe('pure helpers', () => {
     expect(userPrompt({ text: 'done', origin: { kind: 'task-notification' } }, PLUGIN)).toBeUndefined()
     expect(userPrompt({ text: 'hi', isMeta: true, origin: { kind: 'composer' } }, PLUGIN)).toBeUndefined()
     expect(userPrompt({ text: '  ', origin: { kind: 'composer' } }, PLUGIN)).toBeUndefined()
+  })
+
+  test('summary keys precede long arguments before the preview is capped', () => {
+    for (const key of TOOL_SUMMARY_KEYS) {
+      const preview = argsPreview({ command: 'x'.repeat(500), session_key: KEY, [key]: 'Explain this call' })
+      expect(preview.startsWith(`${key}: Explain this call, command: `)).toBe(true)
+      expect([...preview].length).toBe(ARGS_PREVIEW_CAP)
+      expect(preview.includes(KEY)).toBe(false)
+    }
+    const input: Record<string, unknown> = { command: 'ls', timeout: 5 }
+    for (const key of [...TOOL_SUMMARY_KEYS].reverse()) input[key] = key
+    expect(argsPreview(input)).toBe(TOOL_SUMMARY_KEYS.map(key => `${key}: ${key}`).join(', ') + ', command: ls, timeout: 5')
   })
 
   test('a preview flattens and caps the arguments and never carries a session key argument', () => {

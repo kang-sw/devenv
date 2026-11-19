@@ -155,6 +155,7 @@ func TestSummaryRecordWriterReopenBlanksLiveUntilNextEvent(t *testing.T) {
 		t.Fatal("disk filtering mutated RAM publication")
 	}
 	w.closeSlot()
+	assertNoSummarySnapshot(t, dir) // shutdown flush also uses ForDisk, never RAM data
 	if _, ok := host.snapshot(dir); ok {
 		t.Fatal("closed writer retained a live cache")
 	}

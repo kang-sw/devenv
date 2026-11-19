@@ -84,7 +84,15 @@ jobs:
         if: runner.os == 'Linux'
         run: python3 ../agents-plugin-pi/scripts/prepare-workflow-bundles.py --check
 
+      - name: Generate and verify embedded workflow packages
+        run: |
+          python scripts/generate-package-assets.py
+          python scripts/generate-package-assets.py --check
+          python -m unittest discover -s scripts -p test_generate_package_assets.py -v
+
       - name: Run tests
+        env:
+          WS_TEST_EMBEDDED_PACKAGES: "1"
         run: bash scripts/ci-test-shard.sh ${{ matrix.args }}
 
   # Explicit job names stay stable even when skipped before matrix expansion,
@@ -115,6 +123,9 @@ jobs:
           go-version-file: agents-plugin-tool/go.mod
           cache-dependency-path: agents-plugin-tool/go.sum
 
+      - name: Generate embedded workflow packages
+        run: python scripts/generate-package-assets.py
+
       - name: Run long tests
         run: bash scripts/ci-test-shard.sh long
 
@@ -143,6 +154,9 @@ jobs:
         with:
           go-version-file: agents-plugin-tool/go.mod
           cache-dependency-path: agents-plugin-tool/go.sum
+
+      - name: Generate embedded workflow packages
+        run: python scripts/generate-package-assets.py
 
       - name: Run long tests
         run: bash scripts/ci-test-shard.sh long

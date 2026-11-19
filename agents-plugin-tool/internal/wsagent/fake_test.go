@@ -396,16 +396,13 @@ func newHarness(t *testing.T, profiles map[string]string) *harness {
 	h.config = Options{
 		Now:      func() time.Time { return now },
 		Dir:      h.dir,
-		Backends: map[string]BackendRegistration{suiteBackend: {Backend: h.backend}, otherBackend(): {}},
+		Backends: map[string]BackendRegistration{suiteBackend: {Backend: h.backend, WorkerCapable: true, WorkerProfile: AgentWorkerProfile(suiteBackend), WorkerHTTPMCP: suiteBackend == BackendClaude}, otherBackend(): {}},
 		Keys:     h.keys,
 		Config:   testConfig(t),
 		WSMCP: func(root string) (MCPCommand, error) {
 			return MCPCommand{Command: "/bin/ws-mcp", Args: []string{"serve", "--stdio", "--root", root}}, nil
 		},
 		heartbeat: 50 * time.Millisecond,
-		// Auto-closing finished Pi children is tested on its own
-		// (auto_close_test.go).
-		keepFinished: true,
 	}
 	h.start()
 	return h

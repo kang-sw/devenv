@@ -62,6 +62,9 @@ type Record struct {
 	Lead bool `json:"lead,omitempty"`
 	// PermissionMode is the permission mode the next process launches in.
 	PermissionMode string `json:"permission_mode,omitempty"`
+	// AgyBypass is ws-side approval intent; PermissionMode stays native.
+	// Keep it top-level so older Record writers retain it as unknown data.
+	AgyBypass bool `json:"agy_bypass,omitempty"`
 	// PluginIsolation selects the lead's plugin loadout across restarts.
 	PluginIsolation string `json:"plugin_isolation,omitempty"`
 	// PluginWarning records a bundled-plugin fallback warning, if any.
@@ -113,6 +116,15 @@ type Record struct {
 	// or xlarge); a conversation it spawns may ask for no higher one.
 	// Empty for a conversation spawned without one, which spawns none.
 	Tier string `json:"tier,omitempty"`
+	// SystemPrompt marks a conversation agent.spawn gave a system prompt:
+	// its text is in the session directory's system_prompt.md, written
+	// once at spawn and appended to the harness's system prompt at every
+	// process start (agent_tools.go).
+	SystemPrompt bool `json:"system_prompt,omitempty"`
+	// LastActiveAt (RFC 3339) is a spawned conversation's last send or
+	// settled turn: the start of its child-agent-waiting expiry
+	// (agent_tools.go). Empty is CreatedAt.
+	LastActiveAt string `json:"last_active_at,omitempty"`
 	// PendingReports are the reported turns of a conversation whose parent
 	// is a conversation (ParentConversation) that the runner has not handed
 	// to that parent yet, oldest first: a report's absence is its
@@ -136,6 +148,20 @@ type Record struct {
 	Drained          uint64 `json:"drained,omitempty"`
 	TurnMark         uint64 `json:"turn_mark,omitempty"`
 	TurnStartedAt    int64  `json:"turn_started_at,omitempty"`
+
+	// MCPToken is a held lead process's ws-mcp session token
+	// (mcp_session.go), kept so a later daemon rejoining the process
+	// accepts the token it still sends. MCPURL is the route the process
+	// sends it to, which that daemon may no longer serve; MCPEnv the ws-mcp
+	// entry's environment its hello was built from (the bundle the process
+	// loaded, whatever is selected now); MCPHolder the holder the token was
+	// drawn for, so a token a later start (by a daemon that keeps the
+	// members without knowing them) left behind is told from a live one.
+	MCPToken  string            `json:"mcp_token_secret,omitempty"`
+	MCPURL    string            `json:"mcp_url,omitempty"`
+	MCPEnv    map[string]string `json:"mcp_env,omitempty"`
+	MCPHolder string            `json:"mcp_holder_id,omitempty"`
+
 	// ActiveMs is the accumulated duration of closed child turns.
 	ActiveMs     int64           `json:"active_ms,omitempty"`
 	TurnStartSeq uint64          `json:"turn_start_seq,omitempty"`
@@ -338,8 +364,8 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 }
 
 // liveWriter keeps one conversation's wslive state and writes it to the
-// session directory: ring entries as they finish, the snapshot after every
-// change and on each heartbeat.
+// session directory: ring entries as they finish, snapshots for recovery.
+// A hosted slot receives every change; file-only writers keep disk heartbeats.
 type liveWriter struct {
 	dir string
 	st  *wslive.State
@@ -352,6 +378,9 @@ type liveWriter struct {
 	slot           wsdashboard.HostedSlot
 	// The last successfully written disk projection, without its timestamp.
 	lastSnapshot []byte
+	lastDiskAt   time.Time
+	// ringDirty is loop-owned: only a real ring append advances the replay fence.
+	ringDirty bool
 	// writeSnapshotFile is the atomic writer, replaceable for deterministic IO counts.
 	writeSnapshotFile func(string, []byte, os.FileMode) error
 	// Only an observed holder agent_start supplies this real identity.
@@ -397,6 +426,17 @@ func (w *liveWriter) apply(ev wslive.Event) bool {
 		res, err = w.applySummary(ev)
 	} else {
 		res, err = w.st.Apply(ev, w.now().UnixMilli())
+	}
+	// A backend may attach a stable native identity to a finished reply.
+	// Keep it in the existing ring source member, in the same write as the
+	// text, so lost-holder-ring recovery can distinguish persisted output
+	// from a genuinely missed reply without a second checkpoint file.
+	if ev.Kind == wslive.KindReply && ev.Final && ev.Source != "" {
+		for i := range res.Ring {
+			if res.Ring[i].Kind == wslive.RingReply {
+				res.Ring[i].Source = ev.Source
+			}
+		}
 	}
 	changed := w.write(res, err, ev.Kind)
 	if w.owner != nil {
@@ -453,15 +493,32 @@ func (w *liveWriter) write(res wslive.Result, err error, kind string) bool {
 		return false
 	}
 	w.writeObserved(res.Observed)
+	ringAppended := false
 	if len(res.Ring) > 0 {
-		if err := w.withOwner(func() error { return wslive.AppendRing(wslive.RingDir(w.dir), res.Ring) }); err != nil {
+		if err := w.withOwner(func() error {
+			// AppendRing can fail after writing part of a batch. Fence that
+			// line too so replay cannot duplicate its successful entries.
+			w.ringDirty = true
+			return wslive.AppendRing(wslive.RingDir(w.dir), res.Ring)
+		}); err != nil {
 			fmt.Fprintf(w.log, "agent %s: ring write: %v\n", w.st.ReplyID(), err)
+		} else {
+			ringAppended = true
 		}
 	}
 	if !res.Changed && len(res.Ring) == 0 {
 		return false
 	}
-	w.writeSnapshot()
+	if kind == wslive.KindTurnEnd {
+		w.forceSnapshot()
+	} else {
+		w.writeSnapshot()
+	}
+	// A file-only reader must see the new snapshot before its ring wake;
+	// there is no later Publish wake on that path to correct an early read.
+	if w.wake != nil && (ringAppended || w.slot == nil) {
+		w.wake()
+	}
 	return true
 }
 
@@ -488,24 +545,32 @@ func (w *liveWriter) writeObserved(records []wslive.ObservedRecord) {
 	}
 }
 
-func (w *liveWriter) writeSnapshot() { w.flushSnapshot(false) }
+func (w *liveWriter) writeSnapshot() { w.flushSnapshot(false, false) }
 
-// Heartbeats always reach disk: legacy readers do not have the hosted slot.
-func (w *liveWriter) heartbeatSnapshot() { w.flushSnapshot(true) }
+// Only file-only writers need a disk heartbeat. Hosted liveness stays in RAM.
+func (w *liveWriter) heartbeatSnapshot() { w.flushSnapshot(true, false) }
 
-func (w *liveWriter) flushSnapshot(heartbeat bool) {
+// Turn end and shutdown are recovery boundaries, even inside the disk interval.
+func (w *liveWriter) forceSnapshot() { w.flushSnapshot(false, true) }
+
+func (w *liveWriter) flushSnapshot(heartbeat, force bool) {
 	if w.beforeSnapshot != nil {
 		w.beforeSnapshot()
 	}
-	snap := w.st.Snapshot(w.now().UnixMilli())
+	now := w.now()
+	snap := w.st.Snapshot(now.UnixMilli())
 	w.publishSnapshot(snap)
 	disk := snap.ForDisk()
 	disk.UpdatedAt = 0
 	content, err := json.Marshal(disk)
-	// Coalesce identical projections for file-only workers too. Timestamp-only
-	// changes stay in RAM until the heartbeat, which still reaches legacy readers.
-	if err == nil && !heartbeat && bytes.Equal(content, w.lastSnapshot) {
-		return
+	if !force && err == nil {
+		if w.slot != nil {
+			if bytes.Equal(content, w.lastSnapshot) || (!w.lastDiskAt.IsZero() && now.Sub(w.lastDiskAt) < wslive.HeartbeatInterval) {
+				return
+			}
+		} else if !heartbeat && bytes.Equal(content, w.lastSnapshot) {
+			return
+		}
 	}
 	var raw []byte
 	if err == nil {
@@ -517,7 +582,7 @@ func (w *liveWriter) flushSnapshot(heartbeat bool) {
 			if err := w.writeSnapshotFile(wslive.SnapshotPath(w.dir), raw, 0o644); err != nil {
 				return err
 			}
-			w.lastSnapshot = content
+			w.lastSnapshot, w.lastDiskAt = content, now
 			return nil
 		})
 	}
@@ -543,9 +608,11 @@ func (w *liveWriter) publishSnapshot(snap wslive.Snapshot) {
 }
 
 func (w *liveWriter) closeSlot() {
-	if w.slot != nil {
-		w.slot.Close()
+	if w.slot == nil {
+		return
 	}
+	w.forceSnapshot()
+	w.slot.Close()
 }
 
 // registration is the conversation's session-registry entry.

@@ -2,13 +2,16 @@ package mcp
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswake"
 )
 
@@ -60,7 +63,7 @@ func TestSystemMailRoundTrip(t *testing.T) {
 			handle = "unknown"
 		}
 		text := "mail from " + handle + " (2026-01-02T03:04:05Z):\nnotice"
-		if got := formatMailEnvelope(m); got != text {
+		if got := formatMailEnvelope(m, ""); got != text {
 			t.Fatalf("format = %q, want %q", got, text)
 		}
 		if got := parseMailText(text); got != m {
@@ -79,18 +82,14 @@ func TestPiMailLabelRoundTripsWithoutRecordingAContact(t *testing.T) {
 	m := wsmailbox.Envelope{Label: "pi:childone", Content: "Reply with pi.send(id: childone), not mailbox.send.\nall green", SentAt: "2026-01-02T03:04:05Z"}
 	// Same literal as the Pi adapter and Claude watcher suites.
 	want := "mail from pi:childone (2026-01-02T03:04:05Z):\nReply with pi.send(id: childone), not mailbox.send.\nall green"
-	if got := formatMailEnvelope(m); got != want {
+	if got := formatMailEnvelope(m, ""); got != want {
 		t.Fatalf("push text = %q, want %q", got, want)
 	}
 	parsed := parseMailText(want)
 	if parsed != m {
 		t.Fatalf("returned label mail = %+v, want %+v", parsed, m)
 	}
-	path, err := s.mailboxPaths().ReplyRegistry()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error {
+	if err := s.mailboxPaths().Store().WithReplyLock(func(store *wsmailbox.ReplyStore) error {
 		store.Queues = wsmailbox.AppendQueue(store.Queues, wsmailbox.ReplyID(key), parsed)
 		return nil
 	}); err != nil {
@@ -107,7 +106,7 @@ func TestPiMailLabelRoundTripsWithoutRecordingAContact(t *testing.T) {
 		{From: "peer@repo", Label: m.Label},
 		{ReplyTo: "id:abc123", Label: m.Label},
 	} {
-		if strings.Contains(formatMailEnvelope(peer), m.Label) || mailboxSender(peer) == m.Label {
+		if strings.Contains(formatMailEnvelope(peer, ""), m.Label) || mailboxSender(peer) == m.Label {
 			t.Fatalf("label overrides a reply address: %+v", peer)
 		}
 	}
@@ -132,20 +131,17 @@ func TestLeadMailboxRetriesFailedClaim(t *testing.T) {
 	defer mail.server.Close()
 	// No external wake may rescue the failed claim: only its retry does.
 	mail.wake = &wswake.Hub{}
-	path, err := mail.server.mailboxPaths().ReplyRegistry()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error {
+	if err := mail.server.mailboxPaths().Store().WithReplyLock(func(store *wsmailbox.ReplyStore) error {
 		store.Queues = wsmailbox.AppendQueue(store.Queues, wsmailbox.ReplyID(key), wsmailbox.Envelope{Content: "retry me"})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	original, err := os.ReadFile(path)
+	cacheRoot, err := wsstate.CacheRoot(mail.server.stateOptions())
 	if err != nil {
 		t.Fatal(err)
 	}
+	ringLock := flock.New(filepath.Join(cacheRoot, wsmailbox.RingDirName, "lock"))
 	type claim struct {
 		texts []string
 		err   error
@@ -155,19 +151,20 @@ func TestLeadMailboxRetriesFailedClaim(t *testing.T) {
 	stop := mail.Watch(root, key, func() {
 		attempt++
 		if attempt == 1 {
-			// Peek succeeded, but the subsequent claim cannot read its store.
-			if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {
+			// Peek succeeded, but the subsequent claim cannot reach its
+			// store: another process holds the ring.
+			if err := ringLock.Lock(); err != nil {
 				claims <- claim{err: err}
 				return
 			}
-			texts, err := mail.Drain(root, key)
-			if restoreErr := os.WriteFile(path, original, 0o600); restoreErr != nil {
-				err = restoreErr
+			texts, err := drainTexts(mail, root, key)
+			if unlockErr := ringLock.Unlock(); unlockErr != nil {
+				err = unlockErr
 			}
 			claims <- claim{texts, err}
 			return
 		}
-		texts, err := mail.Drain(root, key)
+		texts, err := drainTexts(mail, root, key)
 		claims <- claim{texts, err}
 	})
 	defer stop()
@@ -252,7 +249,7 @@ func TestLeadMailboxDeliversClaimedMailOnce(t *testing.T) {
 	if !signalled(5 * time.Second) {
 		t.Fatal("mail in the lead's mailbox was not signalled")
 	}
-	texts, err := mail.Drain(root, leadKey)
+	texts, err := drainTexts(mail, root, leadKey)
 	if err != nil {
 		t.Fatalf("Drain: %v", err)
 	}
@@ -265,7 +262,7 @@ func TestLeadMailboxDeliversClaimedMailOnce(t *testing.T) {
 	}
 
 	// Claimed: gone for a second drain and for the session's own recv.
-	if again, err := mail.Drain(root, leadKey); err != nil || len(again) != 0 {
+	if again, err := drainTexts(mail, root, leadKey); err != nil || len(again) != 0 {
 		t.Fatalf("a second drain returns nothing, got %q, %v", again, err)
 	}
 	if out := strings.TrimSpace(callToolWithKey(t, NewServer(root, "test"), 3, leadKey, "mailbox.recv", map[string]any{"format": "json"})); out != "null" && out != "[]" {
@@ -293,7 +290,7 @@ func TestLeadMailboxDeliversClaimedMailOnce(t *testing.T) {
 	if !signalled(5 * time.Second) {
 		t.Fatal("mail after a claim was not signalled")
 	}
-	if texts, err := mail.Drain(root, leadKey); err != nil || len(texts) != 1 || !strings.HasSuffix(texts[0], "\nsecond") {
+	if texts, err := drainTexts(mail, root, leadKey); err != nil || len(texts) != 1 || !strings.HasSuffix(texts[0], "\nsecond") {
 		t.Fatalf("the second message alone, got %q, %v", texts, err)
 	}
 
@@ -311,7 +308,39 @@ func TestLeadMailboxDeliversClaimedMailOnce(t *testing.T) {
 		t.Fatal("a stopped watch signalled")
 	}
 
-	if _, err := mail.Drain(root, "no-such-key"); err == nil {
+	if _, err := drainTexts(mail, root, "no-such-key"); err == nil {
 		t.Fatal("an unknown key is an error")
+	}
+}
+
+// drainTexts is mail.Drain's texts, with no relation tags.
+func drainTexts(mail *LeadMailbox, root, key string) ([]string, error) {
+	claimed, err := mail.Drain(root, key, nil)
+	var texts []string
+	for _, c := range claimed {
+		texts = append(texts, c.Text)
+	}
+	return texts, err
+}
+
+// The daemon's delivery opens each message's body with how its sender
+// relates to the receiver, and a returned text parses back to the envelope
+// its untagged text does. An older binary's parse (a downgrade's Return)
+// keeps the sender and stamp, with the line left in the body.
+func TestMailRelationTagRoundTrips(t *testing.T) {
+	env := wsmailbox.Envelope{ReplyTo: "id:abc123", Content: "line one\nline two", SentAt: "2026-11-18T01:02:03Z"}
+	texts := formatMailBatch(leadMailLabel, leadMailRecvTool, "key", []wsmailbox.Envelope{env, env}, "child", "")
+	if !strings.HasSuffix(texts[0], "\n\nmail from id:abc123 (2026-11-18T01:02:03Z):\n[relation: child]\nline one\nline two") {
+		t.Fatalf("the tagged text = %q", texts[0])
+	}
+	if texts[1] != "mail from id:abc123 (2026-11-18T01:02:03Z):\nline one\nline two" {
+		t.Fatalf("an untagged message = %q", texts[1])
+	}
+	want := parseMailText(texts[1])
+	if want.Content != env.Content || want.SentAt != env.SentAt {
+		t.Fatalf("the untagged text parses to %+v", want)
+	}
+	if got := parseMailText(texts[0]); got != want {
+		t.Fatalf("the tagged text parses to %+v, want %+v", got, want)
 	}
 }

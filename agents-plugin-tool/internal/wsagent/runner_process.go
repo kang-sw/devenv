@@ -55,6 +55,15 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 			return err
 		}
 	}
+	level := PermissionLevel("")
+	if !attach {
+		// Every launch re-admits a spawned child's authority against its
+		// parent's current level (agent_tools.go).
+		if err := c.r.childAdmission(rec); err != nil {
+			return err
+		}
+		level = childLevel(c.dir)
+	}
 	if rec.Backend == BackendPi && c.r.opts.Holders != nil && !attach {
 		if !c.r.scanDone() {
 			return errors.New("holder scan is not complete")
@@ -79,8 +88,17 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 				return fmt.Errorf("ws session key: %w", err)
 			}
 		}
+		if rec.SystemPrompt && c.systemPrompt == "" {
+			// Read once per daemon: the text stays in memory for every
+			// later start (a new segment re-injects it from there).
+			raw, err := os.ReadFile(filepath.Join(c.dir, systemPromptFile))
+			if err != nil {
+				return fmt.Errorf("agent.spawn system prompt: %w", err)
+			}
+			c.systemPrompt = string(raw)
+		}
 		var err error
-		instructions, err = composeInstructions(c.dir, rec, def)
+		instructions, err = composeInstructions(c.dir, rec, def, c.systemPrompt, c.r.subagentSteer(rec))
 		if err != nil {
 			return err
 		}
@@ -95,6 +113,11 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		Cwd:          rec.Cwd,
 		Instructions: instructions,
 		Env:          environ(),
+		// The child's authority, which a backend that sandboxes its worker
+		// maps itself (codexWorkerMode).
+		PermissionLevel: level,
+		// An agent.spawn child delegates through agent.spawn only.
+		RemoveSubagents: RemovesSubagents(rec),
 	}
 	if attach && len(def.WSTools) > 0 {
 		// The mapper needs the original ws tool surface, not a new bridge.
@@ -114,6 +137,8 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		}
 		env[EnvAllowedTools] = strings.Join(def.WSTools, ",")
 		env[EnvNoDashboard] = "1"
+		env[EnvPermissionLevel] = string(level)
+		env[EnvAgentSessionKey] = rec.WSKey
 		// The daemon may inherit a lead's mailbox identity; the agent's
 		// ws-mcp must never claim that inbox's presence. Blank is inert.
 		for _, name := range mailboxIdentityEnv {
@@ -135,6 +160,11 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		}
 		cmd.Env = env
 		spec.WSMCP = &cmd
+		if c.r.opts.Backends[rec.Backend].WorkerHTTPMCP {
+			// Over the daemon's HTTP route when it has one; a worker is
+			// never held, so its token is never persisted.
+			spec.MCPSession = c.r.attachMCP(rec.ReplyID, "", env, rec.workDir(), 0)
+		}
 	}
 	if rec.Backend == BackendPi && c.r.opts.Holders != nil {
 		spec.Holder = &holderChild{host: c.r.opts.Holders, table: &c.r.holders,
@@ -166,7 +196,7 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 				c.replaying, c.seq = true, rec.HolderSeq
 				return nil
 			}
-			c.seq, c.seqDirty, c.ringDirty = 0, false, false
+			c.seq, c.seqDirty, c.live.ringDirty = 0, false, false
 			c.update(func(rec *Record) {
 				rec.HolderID, rec.HostPID, rec.HolderSeq = id, pid, 0
 				rec.SteerSeq, rec.SteerAnswers, rec.SteerAnswerSeq = 0, 0, 0
@@ -222,11 +252,12 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 			return fmt.Errorf("ws session key: %w", err)
 		}
 		c.setStatus(func() { c.rejoinKeyPending = false })
-		if rec.Backend == BackendClaude {
+		if rec.Backend == BackendClaude || rec.Backend == BackendAgy || rec.Backend == BackendCodex {
 			// Written on every launch, --resume included, so each process
-			// carries the key in its prompt. Pi leads get it from their
-			// bridge extension (writePiLeadBridge).
-			if instructions, err = composeLeadInstructions(c.dir, rec); err != nil {
+			// carries the key and the manual in its prompt. Pi leads get
+			// them from their extension, or from its bridge fallback
+			// (writePiLeadBridge, LeadSpec.Manual).
+			if instructions, err = composeLeadInstructions(c.dir, rec, c.leadManual(rec), c.r.subagentSteer(rec), c.r.opts.Backends[rec.Backend].PlaybookCommands); err != nil {
 				return err
 			}
 		}
@@ -243,6 +274,8 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 			return errors.New("the session's registration could not be written, so no process was started")
 		}
 	}
+	// spawned: the backend recorded its process before Start returned (LeadSpec.Spawned).
+	var spawned bool
 	spec := StartSpec{
 		Root:         rec.Root,
 		Dir:          c.dir,
@@ -255,9 +288,13 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		Instructions: instructions,
 		Env:          environ(),
 		Holder:       holder,
+		// A hosted lead delegates through agent.spawn only. A rejoin builds
+		// no command line; the replayed init's shape shows whether the
+		// running process was started without the tool.
+		RemoveSubagents: RemovesSubagents(rec),
 		Lead: &LeadSpec{
 			DaemonVersion:   c.r.opts.DaemonVersion,
-			PermissionMode:  rec.PermissionMode,
+			PermissionMode:  rec.launchPermissionMode(),
 			PluginIsolation: leadPluginIsolation(rec.PluginIsolation),
 			PluginWarning: func(warning string) {
 				c.update(func(rec *Record) { rec.PluginWarning = warning })
@@ -294,7 +331,57 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 				EnvHostedSessionKey: rec.WSKey,
 				EnvHostedSessionRow: wsdashboard.RegistrationPath(c.r.opts.Dir, rec.ReplyID),
 			},
+			Manual: func() string { return c.leadManual(rec) },
+			Spawned: func(holderID string, pid int) {
+				spawned = true
+				c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = holderID, pid, 0 })
+				c.writeRegistration()
+			},
 		},
+	}
+	c.mcpStale = false
+	var mcpEnv map[string]string
+	switch {
+	case attach && rec.MCPToken != "" && rec.MCPHolder != "" && rec.MCPHolder != rec.HolderID:
+		// The process was started again since its token was drawn, by a
+		// daemon that keeps the record's members without knowing them: it
+		// loaded the bundle's stdio server, and the token is no one's.
+		c.update(func(rec *Record) { rec.forgetMCP() })
+	case attach && rec.MCPToken != "" && (rec.MCPURL != c.r.mcpURL() || rec.MCPEnv == nil):
+		// The process sends its token to a route this daemon does not
+		// serve (it listens on another port), or its hello is unknown:
+		// its ws-mcp is gone until it restarts, at its first idle point
+		// (restartIfDue).
+		fmt.Fprintf(c.r.opts.Log, "agent %s: the process's ws-mcp route %s is not this daemon's; it restarts at its first idle point\n", rec.ReplyID, rec.MCPURL)
+		c.mcpStale = true
+	case attach && rec.MCPToken == "" && (rec.Backend == BackendAgy || rec.Backend == BackendCodex):
+		// A start the last daemon did not finish: Spawned named the
+		// process before its token was recorded. These HTTP-only backends
+		// have no stdio fallback; restart at a known-safe idle point,
+		// as for a stale route.
+		fmt.Fprintf(c.r.opts.Log, "agent %s: the %s process's start did not finish; it restarts at its first known idle point\n", rec.ReplyID, rec.Backend)
+		c.mcpStale = true
+	case attach && rec.MCPToken != "":
+		// The recorded token and hello, as the process was started with.
+		spec.MCPSession = c.r.attachMCP(rec.ReplyID, rec.MCPToken, rec.MCPEnv, rec.workDir(), rec.HostPID)
+	case (rec.Backend == BackendClaude || rec.Backend == BackendAgy || rec.Backend == BackendCodex) && !attach:
+		// The lead's ws-mcp goes over the daemon's HTTP route with a new
+		// token. Without a route a Claude lead runs the same server over
+		// stdio (its --mcp-config entry); an agy lead has no stdio
+		// fallback. Neither loads a plugin, so a start without any ws-mcp
+		// is refused by its backend.
+		cmd, err := spec.Lead.WSMCP()
+		if err != nil {
+			fmt.Fprintf(c.r.opts.Log, "agent %s: ws-mcp unavailable, the start is refused: %v\n", rec.ReplyID, err)
+			spec.Lead.WSMCPErr = err
+			break
+		}
+		if rec.Backend == BackendClaude {
+			spec.WSMCP, spec.Lead.PluginNote = &cmd, cmd.PluginWarning
+		}
+		if spec.MCPSession = c.r.attachMCP(rec.ReplyID, "", cmd.Env, rec.workDir(), 0); spec.MCPSession != nil {
+			mcpEnv = cmd.Env
+		}
 	}
 	if source == "explicit" {
 		spec.PermissionLevel = level
@@ -317,6 +404,12 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		}()
 	}
 	if err != nil {
+		c.r.revokeToken(rec.ReplyID)
+		if spawned {
+			// The process the row named early is gone (the backend closed
+			// it); the deferred write says stopped.
+			c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0 })
+		}
 		return err
 	}
 	hp, ok := proc.(holderProcess)
@@ -326,6 +419,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 	}
 	if !held {
 		_ = proc.Close()
+		c.r.revokeToken(rec.ReplyID)
 		return fmt.Errorf("the %s backend did not start the process under a session holder", rec.Backend)
 	}
 	c.setStatus(func() { c.proc = proc })
@@ -336,8 +430,14 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		return nil
 	}
 	c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.reconcileMode = false, false, false, false
-	c.seq, c.seqDirty, c.ringDirty = 0, false, false
-	c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = id, pid, 0 })
+	c.seq, c.seqDirty, c.live.ringDirty = 0, false, false
+	c.update(func(rec *Record) {
+		rec.HolderID, rec.HostPID, rec.HolderSeq = id, pid, 0
+		rec.forgetMCP()
+		if s := spec.MCPSession; s != nil {
+			rec.MCPToken, rec.MCPURL, rec.MCPEnv, rec.MCPHolder = s.Token, s.URL, mcpEnv, id
+		}
+	})
 	c.writeRegistration()
 	return nil
 }
@@ -486,11 +586,19 @@ func (c *conv) replayDone(lost bool) {
 		}
 	}
 	c.reconcileLeadPermission()
+	c.allowAgyBypassPending()
 	c.checkAction(false)
 	c.live.writeSnapshot()
 	c.r.notify(c.rec.ReplyID, c.rec.Root)
 	// A message steered during the rejoin goes to the turn that still runs.
 	c.steer()
+	// A process whose ws-mcp route this daemon does not serve restarts
+	// before it takes input; any other restart waits for its usual idle
+	// point, as before a rejoin. A failed restart leaves no process: what
+	// is held then starts one, as with no process at all.
+	if c.mcpStale && c.restartIfDue() {
+		return
+	}
 	if !c.turn {
 		c.applySettings()
 		c.kick()
@@ -510,8 +618,8 @@ func (c *conv) recoveryFailed(reason string) {
 	}
 	c.stopProcess("")
 	c.r.revokeToken(c.rec.ReplyID)
-	if c.rec.Capability != "" {
-		c.update(func(rec *Record) { rec.Capability = "" })
+	if c.rec.Capability != "" || c.rec.MCPToken != "" {
+		c.update(func(rec *Record) { rec.Capability = ""; rec.forgetMCP() })
 	}
 	c.replaying, c.wrapHold = false, false
 }
@@ -604,7 +712,7 @@ func (c *conv) lineEnd(seq uint64) {
 		return
 	}
 	c.seq, c.seqDirty = seq, true
-	if c.ringDirty {
+	if c.live.ringDirty {
 		c.persistSeq()
 	}
 }
@@ -613,16 +721,21 @@ func (c *conv) persistSeq() {
 	if !c.seqDirty {
 		return
 	}
-	c.seqDirty, c.ringDirty = false, false
+	c.seqDirty, c.live.ringDirty = false, false
 	c.update(func(rec *Record) { rec.HolderSeq = c.seq })
 }
 
 // composeInstructions writes the instruction file a process appends to the
-// harness's own system prompt: the profile's instruction file or builtin
-// text and, when the profile allows ws tools, the conversation's ws session
-// key. It returns "" when there is nothing to append.
-func composeInstructions(dir string, rec Record, p Profile) (string, error) {
+// harness's own system prompt: agent.spawn's system prompt, the profile's
+// instruction file or builtin text and, when the profile allows ws tools,
+// the conversation's ws session key followed by steer, the native-subagent
+// line (Runner.subagentSteer; "" for none). It returns "" when there is
+// nothing to append.
+func composeInstructions(dir string, rec Record, p Profile, system, steer string) (string, error) {
 	var parts []string
+	if text := strings.TrimSpace(system); text != "" {
+		parts = append(parts, text)
+	}
 	if text, ok := p.BuiltinInstructions(); ok {
 		parts = append(parts, strings.TrimSpace(text))
 	} else if path := p.InstructionsPath(rec.Root); path != "" {
@@ -633,7 +746,11 @@ func composeInstructions(dir string, rec Record, p Profile) (string, error) {
 		parts = append(parts, strings.TrimSpace(string(raw)))
 	}
 	if len(p.WSTools) > 0 {
-		parts = append(parts, fmt.Sprintf("Your ws session key is `%s`. Pass it as the `session_key` argument of every ws tool call.", rec.WSKey))
+		key := fmt.Sprintf("Your ws session key is `%s`. Pass it as the `session_key` argument of every ws tool call.", rec.WSKey)
+		if steer != "" {
+			key += " " + steer
+		}
+		parts = append(parts, key)
 	}
 	if len(parts) == 0 {
 		return "", nil
@@ -645,18 +762,53 @@ func composeInstructions(dir string, rec Record, p Profile) (string, error) {
 	return path, nil
 }
 
-// composeLeadInstructions writes the instruction file a hosted Claude lead
-// appends to its system prompt: the session key the daemon minted for it.
-// The plugin's own hooks deliver the same key, but a policy that blocks
-// those hooks leaves the prompt as the only place the lead can learn it;
-// when both run, the duplicate line is harmless.
-func composeLeadInstructions(dir string, rec Record) (string, error) {
+// composeLeadInstructions writes the instruction file a hosted lead (Claude,
+// agy, Codex) appends to its system prompt: the session key the daemon minted for
+// it and, when one rendered, its workflow manual. This prompt teaches both
+// from the first turn without depending on a plugin or a tool call. The
+// manual is a snapshot of this launch. steer is the native-subagent line
+// (Runner.subagentSteer; "" for none). commands marks a lead whose backend
+// has BackendRegistration.PlaybookCommands: it has no ws skills, so the
+// prompt says what a `/lead-*` reference is, and the manual it carries is
+// the only copy it is told to read.
+func composeLeadInstructions(dir string, rec Record, manual, steer string, commands bool) (string, error) {
 	text := fmt.Sprintf("Your ws session key is `%s`. Pass it as the `session_key` argument of every ws tool call. "+
-		"This hosted session already has a key; do not mint a replacement (no ferrule call, no fresh-bootstrap key). "+
-		"At session start and after any compaction, call the workflow_manual tool with this key and follow it.", rec.WSKey)
+		"This hosted session already has a key; do not mint a replacement (no ferrule call, no fresh-bootstrap key). ", rec.WSKey)
+	if steer != "" {
+		text += steer + " "
+	}
+	if commands {
+		text += "This session has no ws skills: a `/<name>` reference such as `/lead-run` names a workflow playbook. " +
+			"The user runs one as that dashboard command, which sends you its playbook; you run one by reading it with the ws `playbook.read` tool and following it. "
+	}
+	if manual = strings.TrimSpace(manual); manual != "" && commands {
+		text += "The workflow manual below is binding; its session state is as of this session's start. " +
+			"It stays in this prompt, compactions included, so do not read it again with the workflow_manual tool: " +
+			"for fresh session state, and where the manual says to invoke `/lead-revive`, call the ws `workflow_state` tool with this key.\n\n" + manual
+	} else if manual != "" {
+		text += "The workflow manual below is binding; its session state is as of this session's start. " +
+			"After any compaction, or when you need fresh session state, call the workflow_manual tool with this key and follow it.\n\n" + manual
+	} else {
+		text += "At session start and after any compaction, call the workflow_manual tool with this key and follow it."
+	}
 	path := filepath.Join(dir, "instructions.md")
 	if err := writeFileAtomic(path, []byte(text+"\n"), 0o600); err != nil {
 		return "", err
 	}
 	return path, nil
+}
+
+// leadManual is the workflow manual rec's lead reads from its first turn
+// (Options.LeadManual), or "" when the daemon supplies no renderer or the
+// render failed, which is logged: the lead then starts with its key alone.
+func (c *conv) leadManual(rec Record) string {
+	if c.r.opts.LeadManual == nil {
+		return ""
+	}
+	text, err := c.r.opts.LeadManual(rec.Backend, rec.workDir(), rec.WSKey)
+	if err != nil {
+		fmt.Fprintf(c.r.opts.Log, "agent %s: workflow manual not rendered, the lead's prompt carries its key alone: %v\n", rec.ReplyID, err)
+		return ""
+	}
+	return text
 }

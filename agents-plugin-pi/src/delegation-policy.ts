@@ -114,7 +114,7 @@ export function childPolicy(parent: DelegationPolicy, tools: readonly string[], 
   return { version: 1, depth, maxDepth: parent.maxDepth, tools: effective, authority, write: requestedWrite, ...(network || requested.search || requested.fetch ? { network: requested } : {}), ...(sessionKey ? { sessionKey } : {}), ...(!sessionKey && parent.sessionKey ? { parentSessionKey: parent.sessionKey } : {}) };
 }
 export function assertPolicyTool(policy: DelegationPolicy | undefined, name: string): void {
-  if (RETIRED_NATIVE_AGENT_TOOLS.has(name)) throw new Error(`ws-pi-agent: ${name} is retired; use daemon pi.* agents`);
+  if (RETIRED_NATIVE_AGENT_TOOLS.has(name)) throw new Error(`ws-pi-agent: ${name} is retired; use daemon agent.* children`);
   if (policy && (!policy.tools.includes(name) || (name === "web_search" && !policy.network?.search) || (name === "ws_web_fetch" && !policy.network?.fetch))) throw new Error(`ws-pi-agent: ${name} exceeds this agent's capability ceiling`);
 }
 export function assertSessionAuthority(policy: DelegationPolicy | undefined, args: Record<string, unknown>, knownKeys: ReadonlySet<string>): void {

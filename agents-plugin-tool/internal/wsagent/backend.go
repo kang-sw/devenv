@@ -56,17 +56,27 @@ type StartSpec struct {
 	// WSMCP is the ws-mcp server to attach, carrying the profile's ws tool
 	// allowlist; nil when the profile allows no ws tool.
 	WSMCP *MCPCommand
+	// MCPSession, when set, attaches the ws-mcp over the daemon's HTTP
+	// route (mcp_session.go) in place of WSMCP's command.
+	MCPSession *MCPSession
 	// Env is the environment the child starts from; the backend removes the
 	// harness variables an inherited parent session leaves behind.
 	Env []string
 	// Lead is set for a lead conversation (Profile.Lead): user settings stay
-	// active, while the daemon selects its bundled plugin.
+	// active, while the daemon supplies its ws-mcp and workflow manual.
 	Lead *LeadSpec
 	// Holder selects durable transport independently of lead privileges.
 	Holder *holderChild
-	// PermissionLevel is explicit lead intent for this launch only. Empty keeps
-	// legacy native settings. It does not grant tools or apply worker posture.
+	// PermissionLevel is the explicit authority of this launch: a lead's
+	// selection, or the level an agent.spawn child was spawned with. Empty
+	// keeps legacy native settings. It does not grant tools; a backend reads
+	// it only where it maps the level to its own sandbox (Codex workers).
 	PermissionLevel PermissionLevel
+	// RemoveSubagents removes the harness's native subagent tool from the
+	// launch whatever the profile or the user's settings allow, so the
+	// conversation delegates through agent.spawn (RemovesSubagents). A
+	// backend whose harness has no such tool ignores it.
+	RemoveSubagents bool
 }
 
 // LeadSpec is what a lead conversation's process starts with.
@@ -81,18 +91,35 @@ type LeadSpec struct {
 	PluginWarning func(string)
 	// WSMCP resolves the bundled MCP launcher if Pi needs its bridge fallback.
 	WSMCP func() (MCPCommand, error)
+	// WSMCPErr is why WSMCP gave this start no command, which a Claude
+	// lead's refusal names (claudeLeadMCPArgs).
+	WSMCPErr error
+	// PluginNote is the package fallback warning of the ws-mcp this start
+	// resolved, which a Claude lead reports through PluginWarning.
+	PluginNote string
+	// Manual is the workflow manual the lead reads from its first turn
+	// (Options.LeadManual), "" when there is none; Pi's bridge fallback
+	// appends it, as the native extension it stands in for would.
+	Manual func() string
 	// Env is set on the child over the backend's own scrub: the
 	// hosted-session variables.
 	Env map[string]string
+	// Spawned records a new process before Start returns, for a backend
+	// whose start waits on its harness reaching ws-mcp (agy's session
+	// request): ws-mcp confirms a hosted session by the registration's
+	// host_pid, so the row must name the process first.
+	Spawned func(holderID string, pid int)
 }
 
 // MCPCommand is a stdio MCP server's launch command.
 type MCPCommand struct {
 	// PluginWarning is a runtime-only package fallback notice for this launch.
-	PluginWarning string            `json:"-"`
-	Command       string            `json:"command"`
-	Args          []string          `json:"args,omitempty"`
-	Env           map[string]string `json:"env,omitempty"`
+	PluginWarning string `json:"-"`
+	// Plugin is the hosted bundle the launcher belongs to, when known.
+	Plugin  string            `json:"-"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
 }
 
 // Process is one running backend process. Its methods are safe to call from
@@ -123,6 +150,10 @@ type Process interface {
 type approvalAnswerer interface {
 	AnswerApproval(req ApprovalRequest, allow bool, message string) error
 }
+
+// errNoApprovalAnswer marks an AnswerApproval that wrote nothing because the
+// process could not build the answer; any other error is a failed write.
+var errNoApprovalAnswer = errors.New("no answer was written")
 
 type modeSetter interface {
 	SetPermissionMode(mode string) error
@@ -330,6 +361,9 @@ type Event struct {
 	// retrying is over (a response came, or the turn ended).
 	Retry    *wslive.Retry
 	RetryEnd bool
+	// Harness is the catalog report of a process's start: its harness
+	// version and the items its init shape demotes (catalog.go).
+	Harness *HarnessReport
 	// MCPServers is the MCP server list the harness reported with each
 	// server's status (an init line).
 	MCPServers []MCPServer

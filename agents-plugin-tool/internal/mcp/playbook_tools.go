@@ -2,9 +2,10 @@ package mcp
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
-	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -109,37 +110,65 @@ func terminologyForHarness(harness, namespace string) map[string]string {
 	return table
 }
 
-// playbookTerminology selects daemon Pi idioms only for a caller whose
-// client and effective tool surface permit them.
-func playbookTerminology(harness string, piAvailable bool, namespace string) map[string]string {
-	if piAvailable {
+// playbookTerminology selects the daemon agent idioms (agent.spawn and
+// mailbox.send) only for a caller that delegates through them (a Pi caller
+// without the native extension, or a Claude caller launched without its
+// native subagent tool) and whose effective tool surface permits them.
+func playbookTerminology(harness string, daemonAgents bool, namespace string) map[string]string {
+	if daemonAgents {
 		return piMCPOnlyTerminology(namespace)
 	}
 	return terminologyForHarness(harness, namespace)
 }
 
-// callerPiMCPOnly reports whether key belongs to a Pi conversation the
-// daemon runs without the native ws Pi extension (wsagent.PiMCPOnly). The
-// proof is the daemon's own conversation record, found through the key's
-// reply-id and naming this exact key, read as tracker support reads it.
-// Such a session connects through Pi's builtin MCP client, whose clientInfo
-// is not the extension's "ws-pi-bridge", so harness detection does not see
-// it as pi. A key with no such record (a terminal harness, a keyless render,
-// a native-subagent child) is not.
-func (s *Server) callerPiMCPOnly(key string) bool {
+// callerRecord is the daemon's own conversation record for key, found
+// through the key's reply-id and naming this exact key, read as tracker
+// support reads it. A key with no such record (a terminal harness, a
+// keyless render, a native-subagent child) has none.
+func (s *Server) callerRecord(key string) (wsagent.Record, bool) {
 	if key == "" {
-		return false
+		return wsagent.Record{}, false
 	}
 	replyID := wsmailbox.ReplyID(key)
 	if !wsdashboard.ValidReplyID(replyID) {
-		return false
+		return wsagent.Record{}, false
 	}
 	dir, err := s.dashboard.stateDir()
 	if err != nil {
-		return false
+		return wsagent.Record{}, false
 	}
 	rec, err := wsagent.ReadRecord(dir, replyID)
-	if err != nil || rec.WSKey != key || rec.Backend != wsagent.BackendPi {
+	if err != nil || rec.WSKey != key {
+		return wsagent.Record{}, false
+	}
+	return rec, true
+}
+
+// callerDaemonAgents reports whether key belongs to a conversation that
+// delegates through the daemon's agent tools, by its callerRecord read
+// once: an MCP-only Pi conversation (piMCPOnlyRecord) or a Claude
+// conversation launched without its native subagent tool
+// (subagentRemovedRecord).
+func (s *Server) callerDaemonAgents(key string) bool {
+	rec, ok := s.callerRecord(key)
+	return ok && (s.piMCPOnlyRecord(rec) || subagentRemovedRecord(rec))
+}
+
+// subagentRemovedRecord reports whether rec is a Claude conversation the
+// daemon launches without the native subagent tool
+// (wsagent.RemovesSubagents: a hosted lead or an agent.spawn child). Its
+// connection is detected as claude, but the claude row's spawn idiom names
+// the tool its launch removed.
+func subagentRemovedRecord(rec wsagent.Record) bool {
+	return rec.Backend == wsagent.BackendClaude && wsagent.RemovesSubagents(rec)
+}
+
+// piMCPOnlyRecord reports whether rec is a Pi conversation the daemon runs
+// without the native ws Pi extension (wsagent.PiMCPOnly). Such a session
+// connects through Pi's builtin MCP client, whose clientInfo is not the
+// extension's "ws-pi-bridge", so harness detection does not see it as pi.
+func (s *Server) piMCPOnlyRecord(rec wsagent.Record) bool {
+	if rec.Backend != wsagent.BackendPi {
 		return false
 	}
 	def := rec.ResolvedDefinition
@@ -159,21 +188,20 @@ func (s *Server) callerPiMCPOnly(key string) bool {
 	if def == nil {
 		return false
 	}
-	hasSpawn, hasSend := false, false
-	for _, tool := range def.WSTools {
-		hasSpawn = hasSpawn || tool == "pi.spawn"
-		hasSend = hasSend || tool == "pi.send"
-	}
-	return hasSpawn && hasSend
+	return slices.Contains(def.WSTools, "agent.spawn") && slices.Contains(def.WSTools, "mailbox.send")
 }
 
-// piMCPOnlyTerminology names daemon Pi tools using the runtime namespace.
-// ContinueIdiom has no backticks because delegationTip wraps it in a code span.
+// piMCPOnlyTerminology names the daemon's agent tools, which a Pi session
+// without the native extension and a Claude session without its native
+// subagent tool delegate through, using the runtime namespace. ContinueIdiom has no backticks because delegationTip wraps it
+// in a code span.
 func piMCPOnlyTerminology(namespace string) map[string]string {
 	return map[string]string{
-		"ExploreAgent":  "a `" + namespace + "/pi.spawn` subagent with profile explore and tier small",
-		"SpawnIdiom":    "`" + namespace + "/pi.spawn` (tier: the resolved capability tier, not a model name)",
-		"ContinueIdiom": namespace + "/pi.send to the same subagent id",
+		// No tier here: each site states the tier it wants (the manual's
+		// "at the tier the question needs").
+		"ExploreAgent":  "a read-only `" + namespace + "/agent.spawn` subagent",
+		"SpawnIdiom":    "`" + namespace + "/agent.spawn` (tier: the resolved capability tier, not a model name; authority: at most your own)",
+		"ContinueIdiom": namespace + "/mailbox.send to the address agent.spawn returned",
 	}
 }
 
@@ -710,16 +738,16 @@ func builtinPromptOverrideDefaults() map[string]string {
 // file for override open markers, and returns the declared override-points
 // deduped by pointId (the first non-empty desc wins) sorted by PointId. It is a
 // pure function (root in, data out) so it unit-tests without a Server.
-func scanOverridePoints(rsrcRoot string) ([]overridePointDecl, error) {
+func scanOverridePoints(rsrcRoot fs.FS) ([]overridePointDecl, error) {
 	descByPoint := map[string]string{}
-	err := filepath.Walk(rsrcRoot, func(path string, info os.FileInfo, err error) error {
+	err := fs.WalkDir(rsrcRoot, ".", func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		data, err := fs.ReadFile(rsrcRoot, path)
 		if err != nil {
 			return err
 		}
@@ -782,7 +810,7 @@ func buildOverrideLookup(s *Server, sessionKey string) (overrideLookupFn, error)
 			resolver := s.sessionResolver(capturedKey, builtinConfigDefaults())
 			enabled, err := s.whiteboardEnabled(&resolver, capturedKey)
 			if err == nil && enabled {
-				return withNamespace(lineTicketQueueBoard, s.runtimeNamespace()), true
+				return s.namespaced(lineTicketQueueBoard), true
 			}
 		}
 		return "", false
@@ -957,12 +985,11 @@ func selectProductModeBlocks(body string, noAgent bool) string {
 	return strings.Join(filtered, "\n")
 }
 
-// resolveRsrcRoot resolves the plugin resource tree (WS_RSRC_ROOT or the
-// executable-derived bundle). A non-empty override is reserved for resource
-// inspection; playbook.render's worktree override must not select this root.
-func (s *Server) resolveRsrcRoot(rsrcRootOverride string) (string, error) {
+// resolveRsrcRoot selects build-owned resources. The internal explicit path is
+// only for authoring inspection; connection environment never selects it.
+func (s *Server) resolveRsrcRoot(rsrcRootOverride string) (fs.FS, error) {
 	if strings.TrimSpace(rsrcRootOverride) != "" {
-		return rsrcRootOverride, nil
+		return os.DirFS(rsrcRootOverride), nil
 	}
 	return s.rsrcRoot()
 }
@@ -997,7 +1024,7 @@ func (s *Server) resolveRsrcRoot(rsrcRootOverride string) (string, error) {
 // Returns (body, recommendedTier, error): recommendedTier is the first-class tier
 // declared in the playbook frontmatter, or tierOverride when supplied, surfaced
 // so the caller can pick the delegate's model from one render call.
-func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
+func renderPlaybookBody(s *Server, rsrcRoot fs.FS, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
 	return renderPlaybookBodyForCaller(s, "", "", rsrcRoot, name, callerContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup, tierOverride)
 }
 
@@ -1006,17 +1033,34 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 // only the connection's detected harness, selects its terminology row (see
 // playbookTerminology). profile is the caller's playbook profile ("" for the
 // base files; see callerPlaybookProfile).
-func renderPlaybookBodyForCaller(s *Server, callerKey, profile, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
-	harness := s.currentHarness()
-	piClient := (harness == "pi" && s.clientPiDaemonAgents()) || s.callerPiMCPOnly(callerKey)
-	piAvailable := piClient && s.piListed() && s.toolAllowed("pi.spawn") && s.toolAllowed("pi.send")
-	terminology := playbookTerminology(harness, piAvailable, s.runtimeNamespace())
+func renderPlaybookBodyForCaller(s *Server, callerKey, profile string, rsrcRoot fs.FS, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
+	harness := s.playbookHarness()
+	descriptor := s.connectionDescriptor()
+	// A hosted lead with no ws skills (playbookCommands) is under the
+	// native-subagent removal policy (wsagent.RemovesSubagents): it
+	// delegates through agent.spawn, where its connection allows it.
+	daemonAgentClient := (harness == "pi" && s.clientPiDaemonAgents()) || descriptor.playbookCommands || s.callerDaemonAgents(callerKey)
+	daemonAgents := daemonAgentClient && s.agentListed() && s.toolAllowed("agent.spawn") && s.toolAllowed("mailbox.send")
+	terminology := playbookTerminology(harness, daemonAgents, s.runtimeNamespace())
+
+	// The workflow manual's harness overlay maps a render onto that
+	// harness's own spawn tool; a caller delegating through agent.spawn reads
+	// the base binding instead. Every other overlay keeps the harness.
+	loadHarness := harness
+	if daemonAgents && name == workflowManualPlaybookName {
+		loadHarness = ""
+	}
 
 	// Load once with nil vars so the MCP playbook layer can add reserved
 	// namespace variables without teaching product-mode semantics to wsrsrc.
-	pb, err := wsrsrc.Load(rsrcRoot, name, harness, profile, nil)
+	pb, err := wsrsrc.LoadFS(rsrcRoot, name, loadHarness, profile, nil)
 	if err != nil {
 		return "", "", err
+	}
+	if descriptor.playbookCommands {
+		// Its sessions have no ws skills: a skill reference names the
+		// dashboard command that runs the playbook (skillRef).
+		pb.Body = strings.ReplaceAll(pb.Body, "{{.SkillNamespace}}:", "/")
 	}
 
 	// recommendedTier is the first-class tier declared in frontmatter, surfaced to
@@ -1161,13 +1205,13 @@ func workflowPreferSubagentEnabled(configOpts wsconfig.Options) (bool, error) {
 // configOpts controls config-backed model alias resolution.
 // overrideLookup: when non-nil, the session-keyed closure for resolving prompt
 // override-point values; pass nil to render every override-point with its seed.
-func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
+func printPlaybook(s *Server, rsrcRoot fs.FS, name string, callerContext map[string]string, configOpts wsconfig.Options, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
 	return printPlaybookForCaller(s, "", "", rsrcRoot, name, callerContext, configOpts, workflowLang, overrideLookup)
 }
 
 // printPlaybookForCaller is printPlaybook for the caller holding callerKey
 // and selecting profile (see renderPlaybookBodyForCaller).
-func printPlaybookForCaller(s *Server, callerKey, profile, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
+func printPlaybookForCaller(s *Server, callerKey, profile string, rsrcRoot fs.FS, name string, callerContext map[string]string, configOpts wsconfig.Options, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
 	// playbook.read exposes no tier_override arg — always "" (frontmatter tier).
 	body, recommendedTier, err := renderPlaybookBodyForCaller(s, callerKey, profile, rsrcRoot, name, callerContext, configOpts, "", "", workflowLang, overrideLookup, "")
 	if err != nil {
@@ -1179,7 +1223,7 @@ func printPlaybookForCaller(s *Server, callerKey, profile, rsrcRoot, name string
 			return "", "", fmt.Errorf("resolve %s: %w", wsconfig.ItemWorkflowPreferSubagent, err)
 		}
 		if enabled {
-			body += "\n\nUse `" + s.runtimeNamespace() + ":lead-delegate` for bounded investigation, diagnosis, drafting, and low-impact operational work."
+			body += "\n\nUse `" + s.skillRef("lead-delegate") + "` for bounded investigation, diagnosis, drafting, and low-impact operational work."
 		}
 	}
 	return body, recommendedTier, nil
@@ -1197,7 +1241,7 @@ func printPlaybookForCaller(s *Server, callerKey, profile, rsrcRoot, name string
 // tierOverride: when non-empty, replaces the playbook's frontmatter tier for
 // this render only — see renderPlaybookBody and resolveEffectiveTier. Pass ""
 // to leave frontmatter-tier behavior unchanged.
-func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
+func renderPlaybook(s *Server, rsrcRoot fs.FS, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
 	path, _, recommendedTier, err := renderPlaybookWithPlan(s, "", "", rsrcRoot, worktreeRoot, name, callerContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup, tierOverride, "")
 	return path, recommendedTier, err
 }
@@ -1211,7 +1255,7 @@ func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContex
 // later commit could pick up as a false contract. callerKey is the render
 // caller's session key and profile its playbook profile (see
 // renderPlaybookBodyForCaller).
-func renderPlaybookWithPlan(s *Server, callerKey, profile, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string, planStem string) (promptPath string, planPath string, recommendedTier string, err error) {
+func renderPlaybookWithPlan(s *Server, callerKey, profile string, rsrcRoot fs.FS, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string, planStem string) (promptPath string, planPath string, recommendedTier string, err error) {
 	templateContext := callerContext
 	var renderContext map[string]string
 	if s.noAgentMode() && wsflowRenderEligibleStems[name] && len(callerContext) > 0 {
@@ -1284,8 +1328,8 @@ func renderPlanStem(name string, callerContext map[string]string, topLevelLead b
 	return callerContext, stem
 }
 
-func declaredPlaybookVariables(s *Server, rsrcRoot, name, profile string) (map[string]bool, error) {
-	pb, err := wsrsrc.Load(rsrcRoot, name, s.currentHarness(), profile, nil)
+func declaredPlaybookVariables(s *Server, rsrcRoot fs.FS, name, profile string) (map[string]bool, error) {
+	pb, err := wsrsrc.LoadFS(rsrcRoot, name, s.playbookHarness(), profile, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1313,4 +1357,69 @@ func splitDeclaredRenderContext(callerContext map[string]string, declared map[st
 		renderContext = nil
 	}
 	return templateContext, renderContext
+}
+
+// readPlaybook is playbook.read's text for playbook name read with keyStr
+// (empty for a keyless read) and callerContext: the rendered body with its
+// knob variants and recommended tier, without the trailing newline the tool
+// result adds.
+func (s *Server) readPlaybook(name, keyStr string, callerContext map[string]string) (string, error) {
+	rsrcRoot, err := s.resolveRsrcRoot("")
+	if err != nil {
+		return "", err
+	}
+	// Provide the render-time {{.MailboxWaitCommand}} value (concrete when the
+	// key resolves an owned mailbox identity, generic otherwise) for the one
+	// stem whose body substitutes it. Because it is a reserved implicit var,
+	// any path that substitutes the body must supply it or substitution fails
+	// with ErrUnprovidedVar — so the render dispatch below gates on the same
+	// stem to keep playbook.render of this stem from failing closed.
+	if name == mailboxWaitPlaybookName {
+		callerContext = s.injectMailboxWaitCommand(callerContext, keyStr)
+	}
+	printOverrideLookup, err := buildOverrideLookup(s, keyStr)
+	if err != nil {
+		return "", err
+	}
+	// Resolve workflow.lang for language-binding injection.
+	printLangResolver := s.sessionResolver(keyStr, nil)
+	printWorkflowLangRV, err := printLangResolver.Get(keyStr, wsconfig.ItemWorkflowLang)
+	if err != nil {
+		return "", err
+	}
+	printProfile, err := s.callerPlaybookProfile(keyStr)
+	if err != nil {
+		return "", err
+	}
+	body, recommendedTier, err := printPlaybookForCaller(s, strings.TrimSpace(keyStr), printProfile, rsrcRoot, name, callerContext, s.configOptions(), printWorkflowLangRV.Value, printOverrideLookup)
+	if err != nil {
+		return "", err
+	}
+	// The remaining manual/discussion knob variants run after rendering;
+	// ticket knob markers resolve in the shared render core.
+	knobResolver := s.sessionResolver(keyStr, builtinConfigDefaults())
+	whiteboardOn, err := s.whiteboardEnabled(&knobResolver, keyStr)
+	if err != nil {
+		return "", err
+	}
+	trackerOn, err := s.trackerEnabled(&knobResolver, keyStr)
+	if err != nil {
+		return "", err
+	}
+	// The tracker section is never a spawned key's (as workflow_manual
+	// renders it); its tools refuse that key, except a store's support
+	// conversation, which the tracker gate admits.
+	if entry, found := s.lookupSession(keyStr); found && trackerOn && !entry.isTopLevelLead() && !s.trackerSupportReadsTracker(keyStr, entry) {
+		trackerOn = false
+	}
+	body, err = applyKnobVariants(s, rsrcRoot, name, body, whiteboardOn, trackerOn)
+	if err != nil {
+		return "", err
+	}
+	if name == whiteboardPlaybookName || name == trackerPlaybookName {
+		if body, err = appendCommandSyntax(rsrcRoot, body); err != nil {
+			return "", err
+		}
+	}
+	return withRecommendedTier(body, recommendedTier), nil
 }

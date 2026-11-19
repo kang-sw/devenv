@@ -1165,22 +1165,25 @@ func TestClaudeLeadResultSettlesOpenPrompts(t *testing.T) {
 }
 
 func TestClaudeLeadArgs(t *testing.T) {
-	bundle := leadBundledFixture(t, "wsflow")
 	spec := leadSpec()
 	spec.Root = t.TempDir()
 	spec.Env = []string{"CLAUDE_CONFIG_DIR=" + t.TempDir()}
 	spec.Lead.PermissionMode = "plan"
 	spec.Model, spec.Effort, spec.SessionID = "opus", "high", "sess-1"
-	// The instruction file (the hosted key) appends to the lead's prompt;
-	// the MCP config a profile conversation replaces must not reach a
-	// lead's command line even when the spec carries it.
+	// The instruction file (the hosted key and manual) appends to the
+	// lead's prompt; the daemon's ws-mcp is its ws server, beside the
+	// user's own servers (no strict config).
 	spec.Instructions = "/sess/instructions.md"
 	spec.WSMCP = &MCPCommand{Command: "/bin/ws-mcp"}
+	// A hosted lead removes the native subagent tool from the user's setup,
+	// and only that: the one allow rule is the ws server's, and no tool
+	// list replaces the user's tools.
+	spec.RemoveSubagents = RemovesSubagents(Record{Backend: BackendClaude, Lead: true})
 	args, err := claudeArgs(spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, banned := range []string{"--setting-sources", "--strict-mcp-config", "--mcp-config", "--tools", "--allowedTools", "--disable-slash-commands",
+	for _, banned := range []string{"--plugin-dir", "--setting-sources", "--strict-mcp-config", "--tools", "--disable-slash-commands",
 		"--append-system-prompt", "--bare", "--system-prompt", "--system-prompt-file", "--dangerously-skip-permissions", "--no-session-persistence"} {
 		if slices.Contains(args, banned) {
 			t.Fatalf("a lead's args must not carry %s: %v", banned, args)
@@ -1195,16 +1198,28 @@ func TestClaudeLeadArgs(t *testing.T) {
 		"--input-format": "stream-json", "--output-format": "stream-json",
 		"--permission-prompt-tool": "stdio", "--permission-mode": "plan",
 		"--model": "opus", "--effort": "high", "--resume": "sess-1",
-		"--plugin-dir": bundle, "--settings": `{"enabledPlugins":{}}`,
+		"--settings":                  `{"enabledPlugins":{}}`,
+		"--disallowedTools":           "Agent,Task",
 		"--append-system-prompt-file": "/sess/instructions.md",
 	} {
 		if got, ok := flagValue(args, flag); !ok || got != want {
 			t.Fatalf("%s = %q (present %v), want %q", flag, got, ok, want)
 		}
 	}
+	if server := leadMCPServer(t, args); server["type"] != "stdio" || server["command"] != "/bin/ws-mcp" {
+		t.Fatalf("the ws server is the daemon's ws-mcp: %v", server)
+	}
+	if n := len(args); !slices.Equal(args[n-2:], []string{"--allowedTools", "mcp__ws"}) {
+		t.Fatalf("the ws allow rule must come last: %v", args)
+	}
+	// The variadic option's one value is followed by an option, never by
+	// an argument it would swallow.
+	if i := slices.Index(args, "--disallowedTools"); i+2 < len(args) && !strings.HasPrefix(args[i+2], "--") {
+		t.Fatalf("--disallowedTools is followed by a bare argument: %v", args)
+	}
 
 	plainSpec := leadSpec()
-	plainSpec.Root, plainSpec.Env = spec.Root, spec.Env
+	plainSpec.Root, plainSpec.Env, plainSpec.WSMCP = spec.Root, spec.Env, spec.WSMCP
 	plain, err := claudeArgs(plainSpec)
 	if err != nil {
 		t.Fatal(err)
@@ -1215,7 +1230,7 @@ func TestClaudeLeadArgs(t *testing.T) {
 	if got, _ := flagValue(plain, "--permission-prompt-tool"); got != "stdio" {
 		t.Fatalf("--permission-prompt-tool = %q", got)
 	}
-	for _, absent := range []string{"--resume", "--model", "--effort", "--append-system-prompt-file"} {
+	for _, absent := range []string{"--resume", "--model", "--effort", "--disallowedTools", "--append-system-prompt-file"} {
 		if slices.Contains(plain, absent) {
 			t.Fatalf("a new lead session with no choices carries no %s: %v", absent, plain)
 		}

@@ -96,12 +96,18 @@ func claudeLeadEnv(spec StartSpec) []string {
 
 // claudeLeadArgs is the command line of a lead conversation: print mode
 // with stream-json both ways, user/project settings, hooks, memory, and MCP
-// servers. Plugin overrides replace installed ws copies with the configured
-// hosted bundle, or disable all other plugins in isolated mode. Tool permission
-// prompts come to the daemon (--permission-prompt-tool stdio). The instruction
-// file, when there is one, appends to the default system prompt.
+// servers. No ws plugin loads (claudeLeadPluginArgs): the daemon's ws-mcp is
+// the MCP server ReservedMCPServer (claudeLeadMCPArgs), whose tools run
+// without a prompt, and the instruction file carries the key and the
+// workflow manual, appended to the default system prompt. Other tool
+// permission prompts come to the daemon (--permission-prompt-tool stdio).
+// The user's tools stay, less the native subagent tool (claudeRemovedTools).
 func claudeLeadArgs(spec StartSpec) ([]string, error) {
 	plugins, err := claudeLeadPluginArgs(spec)
+	if err != nil {
+		return nil, err
+	}
+	servers, err := claudeLeadMCPArgs(spec)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +138,27 @@ func claudeLeadArgs(spec StartSpec) ([]string, error) {
 	if spec.Instructions != "" {
 		args = append(args, "--append-system-prompt-file", spec.Instructions)
 	}
-	return append(args, plugins...), nil
+	if removed := claudeRemovedTools(spec); len(removed) > 0 {
+		args = append(args, "--disallowedTools", strings.Join(removed, ","))
+	}
+	args = append(append(args, plugins...), servers...)
+	// The allowlist goes last: the option takes every following argument.
+	// The rule names the whole server, as a worker's rules name its own
+	// servers (claudeAllowedRules).
+	return append(args, "--allowedTools", "mcp__"+claudeNamePart(ReservedMCPServer)), nil
+}
+
+// claudeRemovedTools are the built-in tools spec's launch removes with
+// --disallowedTools, over a worker's --tools and a lead's own settings
+// alike: the native subagent tool under both of its names
+// (claudeInitToolNames) when spec removes subagents. The option is
+// variadic; its list goes as one comma-separated value, which Claude
+// 2.1.326 reads as the two names.
+func claudeRemovedTools(spec StartSpec) []string {
+	if !spec.RemoveSubagents {
+		return nil
+	}
+	return []string{claudeSubagentTool, claudeInitToolNames[claudeSubagentTool]}
 }
 
 // claudeArgs is the claude command line for spec, without the executable.
@@ -189,6 +215,9 @@ func claudeArgs(spec StartSpec) ([]string, error) {
 	if spec.SessionID != "" {
 		args = append(args, "--resume", spec.SessionID)
 	}
+	if removed := claudeRemovedTools(spec); len(removed) > 0 {
+		args = append(args, "--disallowedTools", strings.Join(removed, ","))
+	}
 	// The allowlist goes last: the option takes every following argument.
 	if allowed := claudeAllowedRules(spec); len(allowed) > 0 {
 		args = append(args, "--allowedTools")
@@ -218,11 +247,26 @@ func claudeMCPConfig(spec StartSpec) (string, error) {
 	for name, raw := range spec.Profile.MCPServers {
 		servers[name] = raw
 	}
-	if spec.WSMCP != nil {
+	switch {
+	case spec.WSMCP != nil && spec.MCPSession != nil:
+		servers[ReservedMCPServer] = claudeHTTPServer(spec.MCPSession.URL)
+	case spec.WSMCP != nil:
 		servers[ReservedMCPServer] = map[string]any{"type": "stdio", "command": spec.WSMCP.Command, "args": spec.WSMCP.Args, "env": spec.WSMCP.Env}
 	}
 	raw, err := json.Marshal(map[string]any{"mcpServers": servers})
 	return string(raw), err
+}
+
+// claudeHTTPServer is the ws-mcp server entry for the daemon's HTTP route
+// at url. Claude Code expands the token from the harness's environment
+// (EnvMCPSessionToken) when it connects, so the token is in no argument
+// and no file.
+func claudeHTTPServer(url string) map[string]any {
+	return map[string]any{
+		"type":    "http",
+		"url":     url,
+		"headers": map[string]any{"Authorization": "Bearer ${" + EnvMCPSessionToken + "}"},
+	}
 }
 
 var claudeNameUnsafe = regexp.MustCompile(`[^A-Za-z0-9_-]`)
@@ -256,6 +300,69 @@ type claudeInit struct {
 	// terminal_slash_commands are left out: they need a terminal, and a
 	// headless session has none.
 	SlashCommands *[]string `json:"slash_commands"`
+	// Version is the harness's version (claude_code_version).
+	Version string `json:"claude_code_version"`
+}
+
+// claudeInitShape is the light init check of the capability catalog: the
+// items whose init field does not show what their grade relies on, to be
+// demoted to unsupported. It never refuses a launch (checkClaudeInit stays
+// a worker's fatal check). The mapping:
+//
+//	tools          -> tool removal, subagent removal: the field is absent,
+//	                  a tool of the profile the launch did not remove
+//	                  (claudeRemovedTools) is missing under its name and its
+//	                  older init name (claudeInitToolNames), or a tool the
+//	                  launch removed is still listed
+//	permissionMode -> approval: the field is absent
+//	slash_commands -> compaction: a list without "compact"; an absent field
+//	                  (an older harness) changes nothing
+//	model          -> model/effort: the field is absent
+//	mcp_servers    -> none: MCP injection is an admission condition, and a
+//	                  worker's init check refuses a missing ws server
+//	plugins        -> none
+//
+// Steer, interrupt, follow-up, resume, usage query and the other items have
+// no init field: their grade follows the version alone.
+func claudeInitShape(init claudeInit, spec StartSpec) []CapabilityItem {
+	var out []CapabilityItem
+	tools := init.Tools != nil
+	if tools {
+		listed := map[string]bool{}
+		for _, name := range init.Tools {
+			listed[name] = true
+		}
+		removed := claudeRemovedTools(spec)
+		for _, entry := range spec.Profile.Tools {
+			base := ToolBase(entry)
+			if !slices.Contains(removed, base) && !listed[base] && !listed[claudeInitToolNames[base]] {
+				tools = false
+			}
+		}
+		for _, name := range removed {
+			if listed[name] {
+				tools = false
+			}
+		}
+	}
+	if !tools {
+		out = append(out, ItemToolRemoval, ItemSubagentRemoval)
+	}
+	if init.PermissionMode == "" {
+		out = append(out, ItemApproval)
+	}
+	if init.SlashCommands != nil && !slices.Contains(*init.SlashCommands, "compact") {
+		out = append(out, ItemCompaction)
+	}
+	if init.Model == "" {
+		out = append(out, ItemModelEffort)
+	}
+	return out
+}
+
+// harnessReport is the catalog report of a process's init.
+func (m *claudeMapper) harnessReport(init claudeInit) Event {
+	return Event{Harness: &HarnessReport{Version: init.Version, Demoted: claudeInitShape(init, m.spec)}}
 }
 
 // claudeInitToolNames maps a built-in tool name to the older name Claude's
@@ -264,10 +371,11 @@ type claudeInit struct {
 var claudeInitToolNames = map[string]string{"Agent": "Task"}
 
 // checkClaudeInit verifies that the child sees only what spec permits: its
-// tools are the profile's built-in tools, ws tools, and own servers' tools;
-// its MCP servers are ws (when attached) and the profile's; every plugin
-// is a built-in or one of the profile's plugin directories; and permissions
-// run in dontAsk mode.
+// tools are the profile's built-in tools less the ones the launch removed
+// (claudeRemovedTools), ws tools, and own servers' tools; its MCP servers
+// are ws (when attached) and the profile's; every plugin is a built-in or
+// one of the profile's plugin directories; and permissions run in dontAsk
+// mode.
 func checkClaudeInit(init claudeInit, spec StartSpec) error {
 	allowed := map[string]bool{}
 	for _, entry := range spec.Profile.Tools {
@@ -276,6 +384,9 @@ func checkClaudeInit(init claudeInit, spec StartSpec) error {
 		if legacy, ok := claudeInitToolNames[base]; ok {
 			allowed[legacy] = true
 		}
+	}
+	for _, name := range claudeRemovedTools(spec) {
+		delete(allowed, name)
 	}
 	servers := map[string]bool{}
 	var prefixes []string
@@ -351,9 +462,19 @@ func (b ClaudeBackend) Start(ctx context.Context, spec StartSpec) (Process, erro
 			spec.Holder.ringSkip = claudeRingSkip
 		}
 	}
+	cmd.Env = mcpSessionEnv(cmd.Env, spec.MCPSession)
 	p, err := startChild(spec, cmd, newClaudeMapper(spec), claudeProtocol{})
 	if err != nil {
 		return nil, err
+	}
+	if s := spec.MCPSession; s != nil && s.Started != nil {
+		pid := 0
+		if cmd.Process != nil {
+			pid = cmd.Process.Pid
+		} else if _, held, ok := p.HolderInfo(); ok {
+			pid = held
+		}
+		s.Started(cmd.Env, pid)
 	}
 	if spec.Lead != nil && !attach {
 		// The command list the dashboard's composer offers: an init, which
@@ -839,9 +960,11 @@ func (m *claudeMapper) mapEvents(line []byte, replies lineReplies) []Event {
 			if err := checkClaudeInit(init, m.spec); err != nil {
 				return []Event{{Fatal: err}}
 			}
+			out := []Event{m.harnessReport(init)}
 			if init.SessionID != "" {
-				return []Event{{SessionID: init.SessionID}}
+				out = append(out, Event{SessionID: init.SessionID})
 			}
+			return out
 		case "session_state_changed":
 			// running opens a turn whether or not a send began it (a
 			// background task's result, a pushed message), and again after
@@ -1065,7 +1188,8 @@ func (m *claudeMapper) closeTurn(now int64) []Event {
 func (m *claudeMapper) leadInit(init claudeInit, replies lineReplies) []Event {
 	m.model = init.Model
 	m.askContextUsage(replies)
-	var out []Event
+	// The report goes first: the command list below is offered by it.
+	out := []Event{m.harnessReport(init)}
 	if init.SessionID != "" {
 		out = append(out, Event{SessionID: init.SessionID})
 	}
@@ -1372,13 +1496,34 @@ func (m *claudeMapper) toolResults(raw json.RawMessage, now int64) []Event {
 				delete(m.levers, b.ToolUseID)
 				m.lever = m.lever || !b.IsError
 			}
-			if tool := resultTool(name, claudeMCPToolName); !b.IsError && tool != "" {
+			if tool := m.resultTool(name); !b.IsError && tool != "" {
 				out = append(out, resultEvents(tool, claudeResultText(b.Content))...)
 			}
 		}
 	}
 	return out
 }
+
+// resultTool is resultTool under the name the attached ws-mcp's server has
+// in this process: ReservedMCPServer, for a worker and a lead alike. A lead
+// an older daemon started, and this one rejoined, runs a hosted bundle
+// instead, whose server is plugin:<package>:<package> for either package,
+// so a lead accepts those names too.
+func (m *claudeMapper) resultTool(name string) string {
+	if tool := resultTool(name, claudeMCPToolName); tool != "" || !m.lead() {
+		return tool
+	}
+	for _, pkg := range hostedPluginPackages {
+		server := claudePluginServer(pkg, pkg)
+		if tool := resultTool(name, func(_, tool string) string { return claudeMCPToolName(server, tool) }); tool != "" {
+			return tool
+		}
+	}
+	return ""
+}
+
+// claudePluginServer is Claude Code's name for a plugin's MCP server.
+func claudePluginServer(plugin, key string) string { return "plugin:" + plugin + ":" + key }
 
 func (m *claudeMapper) status() Event {
 	ev := wslive.Event{Kind: wslive.KindStatus, Cost: m.cost}

@@ -40,6 +40,9 @@ var piEfforts = []string{"off", "minimal", "low", "medium", "high", "xhigh", "ma
 var runListing = func(ctx context.Context, command string, args []string, env []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Env = env
+	// A grandchild that inherited stdout (a Windows launcher shim's) must
+	// not hold the listing, and Support's choicesMu, past ctx's timeout.
+	cmd.WaitDelay = time.Second
 	return cmd.Output()
 }
 

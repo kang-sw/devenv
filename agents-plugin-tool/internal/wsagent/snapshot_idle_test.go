@@ -10,13 +10,16 @@ import (
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
-type idleSnapshotSlot struct{ snapshot wslive.Snapshot }
+type idleSnapshotSlot struct {
+	snapshot wslive.Snapshot
+	rings    int
+}
 
 func (s *idleSnapshotSlot) Publish(snapshot wslive.Snapshot) { s.snapshot = snapshot }
-func (*idleSnapshotSlot) RingAppended()                      {}
+func (s *idleSnapshotSlot) RingAppended()                    { s.rings++ }
 func (*idleSnapshotSlot) Close()                             {}
 
-func TestHostedSnapshotDedupAndDiskHeartbeat(t *testing.T) {
+func TestHostedSnapshotDedupAndRAMHeartbeat(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Unix(1000, 0)
 	w := newLiveWriter(dir, "idle", "pi", func() time.Time { return now }, io.Discard)
@@ -38,19 +41,24 @@ func TestHostedSnapshotDedupAndDiskHeartbeat(t *testing.T) {
 		t.Fatalf("unchanged disk=%d slot=%d", got.UpdatedAt, slot.snapshot.UpdatedAt)
 	}
 	w.setAdapter("claude")
-	if got := read(); got.Adapter != "claude" || got.UpdatedAt != now.UnixMilli() {
-		t.Fatalf("changed snapshot not persisted: %+v", got)
+	if got := read(); got.Adapter != "pi" || slot.snapshot.Adapter != "claude" {
+		t.Fatalf("changed snapshot should wait on disk, not in RAM: %+v", got)
 	}
-	for range 4 {
+	now = now.Add(wslive.HeartbeatInterval)
+	w.heartbeatSnapshot() // changed projection reaches recovery storage once
+	changed := read()
+	if changed.Adapter != "claude" || changed.UpdatedAt != now.UnixMilli() {
+		t.Fatalf("changed heartbeat not persisted: %+v", changed)
+	}
+	for range wslive.StaleAfterBeats + 1 {
 		now = now.Add(wslive.HeartbeatInterval)
 		w.heartbeatSnapshot()
-		got := read()
-		if got.UpdatedAt != now.UnixMilli() || got.Stale(now) || got.Stale(now.Add(wslive.HeartbeatInterval)) {
-			t.Fatalf("legacy disk heartbeat is stale: %+v", got)
+		if got := read(); got.UpdatedAt != changed.UpdatedAt || slot.snapshot.UpdatedAt != now.UnixMilli() || slot.snapshot.Stale(now) {
+			t.Fatalf("idle heartbeat wrote disk or let RAM go stale: %+v", got)
 		}
 	}
-	if !read().Stale(now.Add((wslive.StaleAfterBeats + 1) * wslive.HeartbeatInterval)) {
-		t.Fatal("stopped writer did not become stale")
+	if !read().Stale(now) {
+		t.Fatal("legacy file reader should observe the accepted T1 stale display")
 	}
 }
 

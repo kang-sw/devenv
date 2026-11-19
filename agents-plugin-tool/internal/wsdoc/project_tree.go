@@ -38,9 +38,14 @@ func ProjectTreeEnv(root string, env []string) (string, error) {
 }
 
 // ReadInfra returns an infra document body by bare stem, loaded from the rsrc
-// tree (260611 Phase 6b retired the wsprompt go:embed bundle). Path-escaping
+// tree in the daemon's build-owned package. Path-escaping
 // names are rejected so callers cannot read outside the rsrc root.
 func ReadInfra(name string) (string, error) {
+	return ReadInfraForPackage(name, os.Getenv("WS_MCP_NAMESPACE"))
+}
+
+// ReadInfraForPackage selects build-owned infra for a connection's package.
+func ReadInfraForPackage(name, namespace string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return "", fmt.Errorf("infra document name is required")
@@ -50,11 +55,11 @@ func ReadInfra(name string) (string, error) {
 		strings.ContainsAny(stem, `/\`) || strings.Contains(stem, "..") {
 		return "", fmt.Errorf("infra document name must be a bare filename or stem")
 	}
-	root, err := wsrsrc.ResolveRoot()
+	root, err := wsrsrc.PackageResources(namespace)
 	if err != nil {
 		return "", fmt.Errorf("resolve rsrc root: %w", err)
 	}
-	pb, err := wsrsrc.Load(root, stem, "", "", nil)
+	pb, err := wsrsrc.LoadFS(root, stem, "", "", nil)
 	if err != nil {
 		return "", err
 	}

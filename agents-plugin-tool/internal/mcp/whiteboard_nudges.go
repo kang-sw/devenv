@@ -415,17 +415,13 @@ func (n *WhiteboardNudges) deliveryGate(t nudgeTarget) func() bool {
 
 func (n *WhiteboardNudges) process(t nudgeTarget, now time.Time) time.Time {
 	gate := n.deliveryGate(t)
-	path, err := (wsmailbox.Paths{State: wsstate.Options{CacheHome: n.cache}}).ReplyRegistry()
-	if err != nil {
-		fmt.Fprintf(n.log, "whiteboard nudges: mailbox path: %v\n", err)
-		return now.Add(n.interval)
-	}
+	store := (wsmailbox.Paths{State: wsstate.Options{CacheHome: n.cache}}).Store()
 	var tickets wswhiteboard.TicketResolver
 	if n.tickets != nil {
 		tickets = n.tickets(t.root)
 	}
 	next, err := whiteboardFolder(t.root, t.key).Notify(wsmailbox.ReplyID(t.key), now, gate, func(message string) error {
-		return wsmailbox.PostSystem(path, wsmailbox.ReplyID(t.key), wsmailbox.SystemLabel, message, now)
+		return store.PostSystem(wsmailbox.ReplyID(t.key), wsmailbox.SystemLabel, message, now)
 	}, wswake.Mailbox.Wake, tickets)
 	if err != nil {
 		fmt.Fprintf(n.log, "whiteboard nudges: %s: %v\n", wsmailbox.ReplyID(t.key), err)

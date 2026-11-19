@@ -97,11 +97,31 @@ class SeedPackageTest(unittest.TestCase):
             copy.assert_not_called()
         self.assertTrue(binary.is_file())
 
+    def test_local_build_generates_before_go_compilation(self):
+        events = []
+        launcher = mock.Mock()
+        launcher.host_os.return_value = 'linux'
+        launcher.generate_package_assets.side_effect = lambda tool: events.append('generate')
+        launcher.source_runtime_metadata.return_value = {'version': '1.2.3'}
+        launcher.local_devenv_build_env.return_value = {}
+        def fake_build(argv, **kwargs):
+            self.assertEqual(events, ['generate'])
+            self.assertEqual(argv[1], 'build')
+            events.append('build')
+            return mock.Mock(returncode=0)
+        with mock.patch.object(dev.shutil, 'which', return_value='fake-go'), \
+             mock.patch.object(dev.subprocess, 'run', side_effect=fake_build):
+            dev.build_local(launcher, self.root)
+        self.assertEqual(events, ['generate', 'build'])
+        launcher.generate_package_assets.assert_called_once_with(dev.TOOL_DIR)
+        launcher.write_runtime_metadata.assert_called_once()
+
     def test_remote_build_fetches_identity_and_never_runs_ws_binary(self):
         def fake_run(argv, **kwargs):
             self.assertIn("--fetch", argv)
             self.assertIn(f"{dev.REMOTE_DIST}/{dev.binary_name(self.launcher)}.metadata.json={self.root.as_posix()}", argv)
             self.assertIn("scripts/write-runtime-metadata.py", argv[-1])
+            self.assertLess(argv[-1].index('scripts/generate-package-assets.py'), argv[-1].index('go build'))
             out = self.root / dev.binary_name(self.launcher)
             out.write_bytes(b"cross-build")
             self.launcher.write_runtime_metadata(out, {"version": "1.2.9-dev"})

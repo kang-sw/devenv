@@ -270,3 +270,65 @@ const optionNames = sel => sel.children.map(n => n.value);
     });
   });
 }
+
+// Harness warnings use translated warning toasts, once per distinct notice
+// for the page lifetime, without inserting a persistent element.
+{
+  const table = {
+    'js.lead.harness.unverified': 'Harness version {0} is outside the verified range {1}; running on the capabilities of {2}.',
+    'js.lead.harness.unreported': 'unreported',
+    'js.lead.harness.demoted': 'Unavailable in this session: {0}.'
+  };
+  const wsT = (k, ...a) => (table[k] || k).replace(/\{(\d+)\}/g, (m, i) => String(a[Number(i)]));
+  const calls = [];
+  const noDOM = () => assert.fail('harness warnings must not access or insert DOM elements');
+  const window = { WsToast: { show(text, opts) { calls.push({ text, kind: opts.kind }); } } };
+  const leadsSource = readAssetSource('wsdashboard', 'dashboard-leads.js');
+  const ctx = vm.createContext({ wsT, window, mk: noDOM, luIcon: noDOM, $: noDOM, document: { createElement: noDOM } });
+  vm.runInContext(leadsSource.match(/  function leadGone\(st\) \{.*\}\n/)[0] +
+    leadsSource.match(/  var harnessNotices = new Set\(\);\n  function harnessDraw\(st\) \{[\s\S]*?\n  \}\n/)[0], ctx);
+  const caps = extra => ({ status: 'running', capabilities: Object.assign({ role: 'lead', profile_version: '2.1.326', oldest: '2.1.322', newest: '2.1.326' }, extra) });
+
+  ctx.harnessDraw({ status: 'running' });
+  ctx.harnessDraw(caps({ version: '2.1.326' }));
+  ctx.harnessDraw(caps({ version: '2.1.326', demoted: [] }));
+  ctx.harnessDraw({ status: 'closed', capabilities: { unverified: true, demoted: ['closed-only'] } });
+  assert.equal(calls.length, 0, 'missing capabilities, clean and closed states are silent');
+
+  const a = caps({ version: '2.1.399', unverified: true });
+  const b = caps({ unverified: true, demoted: ['compaction', 'rewind'] });
+  ctx.harnessDraw(a);
+  assert.deepEqual(calls, [{
+    text: 'Harness version 2.1.399 is outside the verified range 2.1.322–2.1.326; running on the capabilities of 2.1.326.', kind: 'warn'
+  }]);
+  ctx.harnessDraw(a);
+  assert.equal(calls.length, 1, 'unchanged state emits only once');
+
+  ctx.harnessDraw(b);
+  assert.deepEqual(calls[1], {
+    text: 'Harness version unreported is outside the verified range 2.1.322–2.1.326; running on the capabilities of 2.1.326. Unavailable in this session: compaction, rewind.',
+    kind: 'warn'
+  }, 'translated lines are joined with a space in one warning toast');
+  ctx.harnessDraw(a);
+  assert.equal(calls.length, 2, 'A -> B -> A does not repeat A');
+
+  const demoted = caps({ version: '2.1.326', demoted: ['skill_list'] });
+  ctx.harnessDraw(demoted);
+  assert.deepEqual(calls[2], { text: 'Unavailable in this session: skill_list.', kind: 'warn' }, 'demotion alone warns');
+  ctx.harnessDraw(caps({ version: '2.1.326' }));
+  ctx.harnessDraw({ status: 'running' });
+  ctx.harnessDraw({ status: 'closed', capabilities: { unverified: true, demoted: ['closed-only'] } });
+  ctx.harnessDraw(a);
+  ctx.harnessDraw(b);
+  ctx.harnessDraw(demoted);
+  assert.equal(calls.length, 3, 'clearing or closing does not reset page-lifetime deduplication');
+
+  delete window.WsToast;
+  const late = caps({ demoted: ['late-toast'] });
+  ctx.harnessDraw(late);
+  window.WsToast = { show(text, opts) { calls.push({ text, kind: opts.kind }); } };
+  ctx.harnessDraw(late);
+  ctx.harnessDraw(late);
+  assert.deepEqual(calls[3], { text: 'Unavailable in this session: late-toast.', kind: 'warn' });
+  assert.equal(calls.length, 4, 'an unavailable toast API does not consume the notice key');
+}

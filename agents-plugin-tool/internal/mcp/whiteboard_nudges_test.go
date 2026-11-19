@@ -78,11 +78,7 @@ func (f *nudgeFixture) board(t *testing.T, commands string, now time.Time) {
 }
 func (f *nudgeFixture) queue(t *testing.T) []wsmailbox.Envelope {
 	t.Helper()
-	path, err := (wsmailbox.Paths{}).ReplyRegistry()
-	if err != nil {
-		t.Fatal(err)
-	}
-	store, err := wsmailbox.LoadReplyStore(path)
+	store, err := (wsmailbox.Paths{}).Store().LoadReply()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,13 +309,12 @@ func TestWhiteboardNudgeRestartResumeIsolationAndCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	restarted.process(dest, nudgeNow.Add(8*time.Hour))
-	path, _ := (wsmailbox.Paths{}).ReplyRegistry()
-	q, err := wsmailbox.LoadReplyStore(path)
+	q, err := (wsmailbox.Paths{}).Store().LoadReply()
 	if err != nil || len(q.Queues[row.ReplyID]) != 1 || len(q.Queues[f.row.ReplyID]) != 1 {
 		t.Fatal("copy isolation", err, q.Queues)
 	}
 	restarted.process(dest, nudgeNow.Add(8*time.Hour))
-	q, _ = wsmailbox.LoadReplyStore(path)
+	q, _ = (wsmailbox.Paths{}).Store().LoadReply()
 	if len(q.Queues[row.ReplyID]) != 1 {
 		t.Fatal("destination catch-up repeated")
 	}
@@ -341,7 +336,7 @@ func TestWhiteboardNudgeActualMailboxWatchDrainAndManualRecv(t *testing.T) {
 			defer mail.server.Close()
 			received := make(chan []string, 1)
 			stop := mail.Watch(f.target.root, f.target.key, func() {
-				texts, err := mail.Drain(f.target.root, f.target.key)
+				texts, err := drainTexts(mail, f.target.root, f.target.key)
 				if err != nil {
 					t.Error(err)
 				}
@@ -362,7 +357,7 @@ func TestWhiteboardNudgeActualMailboxWatchDrainAndManualRecv(t *testing.T) {
 			if len(f.queue(t)) != 0 {
 				t.Fatal("watch did not claim queue")
 			}
-			again, err := mail.Drain(f.target.root, f.target.key)
+			again, err := drainTexts(mail, f.target.root, f.target.key)
 			if err != nil || len(again) != 0 {
 				t.Fatal("duplicate drain", err)
 			}

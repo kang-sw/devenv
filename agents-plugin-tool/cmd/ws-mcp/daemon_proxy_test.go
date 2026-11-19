@@ -271,8 +271,9 @@ func TestHostedSessionReleasesItsDashboardSessionAndPresenceWhenItCloses(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
+	daemonStore := (wsmailbox.Paths{State: wsstate.Options{CacheHome: h.cache}}).Store()
 	presence := func() (wsmailbox.Presence, bool) {
-		store, err := wsmailbox.Load(storePath)
+		store, err := daemonStore.Load(storePath)
 		if err != nil {
 			return wsmailbox.Presence{}, false
 		}
@@ -321,12 +322,9 @@ func TestHostedSessionReleasesItsDashboardSessionAndPresenceWhenItCloses(t *test
 
 func TestHostedMailboxWaitEndsWithItsConnection(t *testing.T) {
 	h := startHostedDaemon(t)
-	root, err := wsstate.CacheRoot(wsstate.Options{CacheHome: h.cache})
-	if err != nil {
-		t.Fatal(err)
-	}
-	marker := filepath.Join(root, "mailbox-listening", "amber-tide-fox.json")
-	exists := func() bool { _, err := os.Stat(marker); return err == nil }
+	// The daemon holds the mailbox ring; this process reads it lock-free.
+	daemonMail := wsmailbox.Paths{State: wsstate.Options{CacheHome: h.cache}}
+	exists := func() bool { _, ok, err := daemonMail.ReadListeningMarker("amber-tide-fox"); return err == nil && ok }
 	argv := []string{"mailbox", "wait", "--session-key", "amber-tide-fox", "--timeout", "60s", "--format", "json"}
 
 	first := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeCLI, argv, os.Getpid(), nil))
@@ -337,14 +335,7 @@ func TestHostedMailboxWaitEndsWithItsConnection(t *testing.T) {
 	// wait's end must not remove it.
 	second := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeCLI, argv, h.ep.PID, nil))
 	markerPID := func() int {
-		raw, err := os.ReadFile(marker)
-		if err != nil {
-			return 0
-		}
-		var m wsmailbox.ListeningMarker
-		if json.Unmarshal(raw, &m) != nil {
-			return 0
-		}
+		m, _, _ := daemonMail.ReadListeningMarker("amber-tide-fox")
 		return m.PID
 	}
 	waitUntil(t, 5*time.Second, "the replacement wait owns the marker", func() bool { return markerPID() == h.ep.PID })
@@ -445,7 +436,8 @@ func TestHostedConnectionSeeingALANChangeReplacesTheDaemon(t *testing.T) {
 	// The next session sees the new global value; the daemon replaces
 	// itself and drains the sessions it hosts.
 	trigger := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeMCP, []string{"serve", "--stdio"}, os.Getpid(), nil))
-	trigger.call("initialize", map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{}})
+	// Accept itself triggers replacement. The stream may already be draining
+	// when its hello is acknowledged; initialize is not guaranteed to survive.
 	triggeredAt := time.Now()
 
 	// The blocked CLI wait is cancelled at once: its final frame carries
@@ -673,13 +665,12 @@ func TestHostedMailboxWaitResolvesARelativeRootAgainstTheHelloCwd(t *testing.T) 
 func TestHostedMailboxWaitWokenByMailExitsZeroOnTheStream(t *testing.T) {
 	h := startHostedDaemon(t)
 	const waitKey = "amber-tide-fox"
-	root, err := wsstate.CacheRoot(wsstate.Options{CacheHome: h.cache})
-	if err != nil {
-		t.Fatal(err)
-	}
-	marker := filepath.Join(root, "mailbox-listening", waitKey+".json")
+	daemonMail := wsmailbox.Paths{State: wsstate.Options{CacheHome: h.cache}}
 	wait := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeCLI, []string{"mailbox", "wait", "--session-key", waitKey, "--timeout", "30s", "--format", "json"}, os.Getpid(), nil))
-	waitUntil(t, 5*time.Second, "listening marker written", func() bool { _, err := os.Stat(marker); return err == nil })
+	waitUntil(t, 5*time.Second, "listening marker written", func() bool {
+		_, ok, err := daemonMail.ReadListeningMarker(waitKey)
+		return err == nil && ok
+	})
 
 	sender := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeMCP, []string{"serve", "--stdio"}, os.Getpid(), nil))
 	key := sender.login(h.project)
@@ -705,48 +696,51 @@ func TestHostedMailboxWaitWokenByMailExitsZeroOnTheStream(t *testing.T) {
 	}
 }
 
-// TestHostedMailboxWaitWakesOnANudge pins the wake for mail written outside
-// the daemon: a hosted wait on a named-store address returns within about a
-// second of a /nudge, well inside its 10 s backstop, even when the nudge
-// names no registered session (the daemon answers it 404).
-func TestHostedMailboxWaitWakesOnANudge(t *testing.T) {
+// TestHostedMailboxWaitWakesOnNamedMail pins the wake for named-store mail:
+// a hosted wait on a named address returns within about a second of a send
+// to it, well inside its 10 s backstop. Mail written outside the daemon
+// (what a /nudge used to announce) no longer exists: the daemon holds the
+// mailbox ring, so an outside write is refused, and an unregistered nudge
+// is still answered 404.
+func TestHostedMailboxWaitWakesOnNamedMail(t *testing.T) {
 	h := startHostedDaemon(t)
-	const waitKey = "amber-tide-fox"
-	paths := wsmailbox.Paths{
+	owner := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeMCP, []string{"serve", "--stdio"}, os.Getpid(), map[string]string{"WS_MAILBOX": "alice@machine"}))
+	waitKey := owner.login(h.project)
+	owner.tool("todo.list", map[string]any{"session_key": waitKey})
+	daemonMail := wsmailbox.Paths{
 		Config: wsconfig.Options{ConfigHome: h.configHome, CacheHome: h.cache},
 		State:  wsstate.Options{CacheHome: h.cache},
 	}
-	store, err := paths.Machine()
+	store, err := daemonMail.Machine()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := wsmailbox.WithLock(store, func(s *wsmailbox.StoreFile) error {
-		s.Presence["alice"] = wsmailbox.Presence{Name: "alice", Scope: wsmailbox.ScopeMachine, Owner: waitKey, LastSeen: time.Now().UTC().Format(time.RFC3339)}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	root, err := wsstate.CacheRoot(wsstate.Options{CacheHome: h.cache})
-	if err != nil {
-		t.Fatal(err)
-	}
-	marker := filepath.Join(root, "mailbox-listening", waitKey+".json")
+	waitUntil(t, 5*time.Second, "alice registered to the owner", func() bool {
+		p, ok, _, err := daemonMail.Store().NamedQueue(store, "alice")
+		return err == nil && ok && p.Owner == waitKey
+	})
 	wait := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeCLI, []string{"mailbox", "wait", "--session-key", waitKey, "--slug", "alice@machine", "--timeout", "30s", "--format", "json"}, os.Getpid(), nil))
-	waitUntil(t, 5*time.Second, "listening marker written", func() bool { _, err := os.Stat(marker); return err == nil })
-	// Past the wait's first peek, so the mail below is found by a recheck.
+	waitUntil(t, 5*time.Second, "listening marker written", func() bool {
+		_, ok, err := daemonMail.ReadListeningMarker(waitKey)
+		return err == nil && ok
+	})
+	// Past the wait's first peek, so the mail below is found by a wake.
 	time.Sleep(300 * time.Millisecond)
 
-	// Written from this process: the daemon sees no in-process write.
-	if err := wsmailbox.WithLock(store, func(s *wsmailbox.StoreFile) error {
-		s.Queues = wsmailbox.AppendQueue(s.Queues, "alice", wsmailbox.Envelope{Content: "outside mail", SentAt: time.Now().UTC().Format(time.RFC3339)})
+	if err := daemonMail.Store().WithLock(store, func(s *wsmailbox.StoreFile) error {
+		s.Queues = wsmailbox.AppendQueue(s.Queues, "alice", wsmailbox.Envelope{Content: "outside mail"})
 		return nil
-	}); err != nil {
-		t.Fatal(err)
+	}); err == nil || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("an outside write while the daemon runs: err = %v, want the unsupported refusal", err)
 	}
-	start := time.Now()
 	if err := wsdashboard.SendNudge(context.Background(), dashboardTestClient, h.ep, wsdashboard.NudgeBody{ReplyID: "unregistered", Project: h.project}); err == nil || !strings.Contains(err.Error(), "404") {
 		t.Fatalf("unregistered nudge err = %v, want 404", err)
 	}
+
+	sender := connectHosted(t, h.ep, h.hello(wsdashboard.ProxyModeMCP, []string{"serve", "--stdio"}, os.Getpid(), nil))
+	key := sender.login(h.project)
+	start := time.Now()
+	sender.tool("mailbox.send", map[string]any{"session_key": key, "to": "alice@machine", "content": "named mail"})
 	var final map[string]any
 	for final == nil {
 		frame, ok := wait.readLine(15 * time.Second)
@@ -758,9 +752,9 @@ func TestHostedMailboxWaitWakesOnANudge(t *testing.T) {
 		}
 	}
 	if elapsed := time.Since(start); elapsed > 3*time.Second {
-		t.Fatalf("the wait returned %v after the nudge, want about a second at most", elapsed)
+		t.Fatalf("the wait returned %v after the send, want about a second at most", elapsed)
 	}
-	if code, _ := final["exit_code"].(float64); code != 0 || !strings.Contains(final["data"].(string), "outside mail") {
-		t.Fatalf("final frame = %v, want exit_code 0 with the outside mail", final)
+	if code, _ := final["exit_code"].(float64); code != 0 || !strings.Contains(final["data"].(string), "named mail") {
+		t.Fatalf("final frame = %v, want exit_code 0 with the named mail", final)
 	}
 }

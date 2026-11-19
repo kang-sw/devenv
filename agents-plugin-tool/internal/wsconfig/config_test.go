@@ -96,7 +96,7 @@ func TestResolveAgentDefaultCoreModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveAgentForHarnessConfig returned error: %v", err)
 	}
-	if backend != "codex" || model != "gpt-6-luna" || effort != "xhigh" {
+	if backend != "codex" || model != "gpt-6.1-terra" || effort != "high" {
 		t.Fatalf("resolved backend/model/effort = %q/%q/%q", backend, model, effort)
 	}
 }
@@ -109,10 +109,10 @@ func TestResolveAgentDefaultTierModels(t *testing.T) {
 		model  string
 		effort string
 	}{
-		{tier: "small", model: "gpt-6-luna", effort: "high"},
-		{tier: "medium", model: "gpt-6-luna", effort: "xhigh"},
-		{tier: "large", model: "gpt-6-sol", effort: "high"},
-		{tier: "xlarge", model: "gpt-6-sol", effort: "xhigh"},
+		{tier: "small", model: "gpt-5.6-luna", effort: "high"},
+		{tier: "medium", model: "gpt-6.1-terra", effort: "high"},
+		{tier: "large", model: "gpt-6.2-sol", effort: "high"},
+		{tier: "xlarge", model: "gpt-6.2-sol", effort: "xhigh"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.tier, func(t *testing.T) {
@@ -155,10 +155,10 @@ func TestResolveAgentDefaultClaudeTierModels(t *testing.T) {
 
 func TestDefaultCodexTierSeedsAgreeAndPreserveStoredAliases(t *testing.T) {
 	want := map[string]AgentTier{
-		"small":  {Backend: "codex", Model: "gpt-6-luna", Effort: "high"},
-		"medium": {Backend: "codex", Model: "gpt-6-luna", Effort: "xhigh"},
-		"large":  {Backend: "codex", Model: "gpt-6-sol", Effort: "high"},
-		"xlarge": {Backend: "codex", Model: "gpt-6-sol", Effort: "xhigh"},
+		"small":  {Backend: "codex", Model: "gpt-5.6-luna", Effort: "high"},
+		"medium": {Backend: "codex", Model: "gpt-6.1-terra", Effort: "high"},
+		"large":  {Backend: "codex", Model: "gpt-6.2-sol", Effort: "high"},
+		"xlarge": {Backend: "codex", Model: "gpt-6.2-sol", Effort: "xhigh"},
 	}
 	tiers := map[string]AgentTier{}
 	applyDefaultTiers(tiers)
@@ -226,9 +226,9 @@ func TestResolveAgentLegacyTierSynonyms(t *testing.T) {
 		model  string
 		effort string
 	}{
-		{tier: "light", model: "gpt-6-luna", effort: "high"}, // light → small
-		{tier: "core", model: "gpt-6-luna", effort: "xhigh"}, // core → medium
-		{tier: "deep", model: "gpt-6-sol", effort: "high"},   // deep → large
+		{tier: "light", model: "gpt-5.6-luna", effort: "high"}, // light → small
+		{tier: "core", model: "gpt-6.1-terra", effort: "high"}, // core → medium
+		{tier: "deep", model: "gpt-6.2-sol", effort: "high"},   // deep → large
 	}
 	for _, tc := range tests {
 		t.Run(tc.tier, func(t *testing.T) {
@@ -258,7 +258,7 @@ func TestResolveAgentModelAliasUsesHarness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveAgentForHarness returned error: %v", err)
 	}
-	if backend != "codex" || model != "gpt-6-luna" {
+	if backend != "codex" || model != "gpt-6.1-terra" {
 		t.Fatalf("resolved codex alias = %q/%q", backend, model)
 	}
 }
@@ -293,7 +293,7 @@ func TestSetAgentsTierDoesNotOverwriteOtherBackendAliasMappings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveAgentForHarness returned error: %v", err)
 	}
-	if backend != "codex" || model != "gpt-6-luna" {
+	if backend != "codex" || model != "gpt-6.1-terra" {
 		t.Fatalf("explicit codex alias was overwritten = %q/%q", backend, model)
 	}
 
@@ -315,7 +315,7 @@ func TestSetAgentsTierForHarnessTargetsHarnessAlias(t *testing.T) {
 	if mapping := cfg.Agents.ModelAliases["medium"]["claude"]; mapping.Backend != "codex" || mapping.Model != "gpt-5.4" {
 		t.Fatalf("claude alias mapping = %#v", mapping)
 	}
-	if mapping := cfg.Agents.ModelAliases["medium"]["default"]; mapping.Backend != "codex" || mapping.Model != "gpt-6-luna" || mapping.Effort != "xhigh" {
+	if mapping := cfg.Agents.ModelAliases["medium"]["default"]; mapping.Backend != "codex" || mapping.Model != "gpt-6.1-terra" || mapping.Effort != "high" {
 		t.Fatalf("default alias mapping was overwritten = %#v", mapping)
 	}
 
@@ -404,7 +404,7 @@ func TestSetAgentsTierForHarnessTargetsPiAlias(t *testing.T) {
 	if mapping := cfg.Agents.ModelAliases["medium"]["pi"]; mapping.Backend != "pi" || mapping.Model != "pi-model-1" {
 		t.Fatalf("pi alias mapping = %#v", mapping)
 	}
-	if mapping := cfg.Agents.ModelAliases["medium"]["default"]; mapping.Backend != "codex" || mapping.Model != "gpt-6-luna" || mapping.Effort != "xhigh" {
+	if mapping := cfg.Agents.ModelAliases["medium"]["default"]; mapping.Backend != "codex" || mapping.Model != "gpt-6.1-terra" || mapping.Effort != "high" {
 		t.Fatalf("default alias mapping was overwritten = %#v", mapping)
 	}
 
@@ -424,10 +424,10 @@ func TestSetAgentsTierForHarnessStoresEffortWithoutModelChange(t *testing.T) {
 		t.Fatalf("SetAgentsTierForHarness returned error: %v", err)
 	}
 	mapping := cfg.Agents.ModelAliases["medium"]["codex"]
-	if mapping.Backend != "codex" || mapping.Model != "gpt-6-luna" || mapping.Effort != "medium" {
+	if mapping.Backend != "codex" || mapping.Model != "gpt-6.1-terra" || mapping.Effort != "medium" {
 		t.Fatalf("codex medium alias mapping = %#v", mapping)
 	}
-	if legacy := cfg.Agents.Tiers["medium"]; legacy.Effort != "xhigh" {
+	if legacy := cfg.Agents.Tiers["medium"]; legacy.Effort != "high" {
 		t.Fatalf("default tier effort unexpected = %#v", legacy)
 	}
 
@@ -435,7 +435,7 @@ func TestSetAgentsTierForHarnessStoresEffortWithoutModelChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveAgentForHarnessConfig returned error: %v", err)
 	}
-	if backend != "codex" || model != "gpt-6-luna" || effort != "medium" {
+	if backend != "codex" || model != "gpt-6.1-terra" || effort != "medium" {
 		t.Fatalf("resolved backend/model/effort = %q/%q/%q", backend, model, effort)
 	}
 }
@@ -477,7 +477,7 @@ func TestSetAgentsTierForHarnessClearsEffortWhenOnlyTierProvided(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetAgentsTierForHarness tier-only returned error: %v", err)
 	}
-	if mapping := cfg.Agents.ModelAliases["medium"]["codex"]; mapping.Backend != "codex" || mapping.Model != "gpt-6-luna" || mapping.Effort != "" {
+	if mapping := cfg.Agents.ModelAliases["medium"]["codex"]; mapping.Backend != "codex" || mapping.Model != "gpt-6.1-terra" || mapping.Effort != "" {
 		t.Fatalf("tier-only update did not preserve model while clearing effort = %#v", mapping)
 	}
 }
@@ -516,8 +516,8 @@ func TestSetAgentsTierForHarnessRoundTripsArbitraryEfforts(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ResolveAgentForHarnessConfig returned error: %v", err)
 			}
-			if backend != "codex" || model != "gpt-6-luna" || effort != tc.want {
-				t.Fatalf("resolved backend/model/effort = %q/%q/%q, want codex/gpt-6-luna/%q", backend, model, effort, tc.want)
+			if backend != "codex" || model != "gpt-6.1-terra" || effort != tc.want {
+				t.Fatalf("resolved backend/model/effort = %q/%q/%q, want codex/gpt-6.1-terra/%q", backend, model, effort, tc.want)
 			}
 		})
 	}
@@ -588,16 +588,16 @@ func TestShowReturnsPathAndDefaultWithoutCreatingFile(t *testing.T) {
 	if len(view.Config.Agents.Tiers) != 4 {
 		t.Fatalf("default tiers = %#v", view.Config.Agents.Tiers)
 	}
-	if small := view.Config.Agents.Tiers["small"]; small.Backend != "codex" || small.Model != "gpt-6-luna" || small.Effort != "high" {
+	if small := view.Config.Agents.Tiers["small"]; small.Backend != "codex" || small.Model != "gpt-5.6-luna" || small.Effort != "high" {
 		t.Fatalf("default small tier = %#v", small)
 	}
-	if medium := view.Config.Agents.Tiers["medium"]; medium.Backend != "codex" || medium.Model != "gpt-6-luna" || medium.Effort != "xhigh" {
+	if medium := view.Config.Agents.Tiers["medium"]; medium.Backend != "codex" || medium.Model != "gpt-6.1-terra" || medium.Effort != "high" {
 		t.Fatalf("default medium tier = %#v", medium)
 	}
-	if large := view.Config.Agents.Tiers["large"]; large.Backend != "codex" || large.Model != "gpt-6-sol" || large.Effort != "high" {
+	if large := view.Config.Agents.Tiers["large"]; large.Backend != "codex" || large.Model != "gpt-6.2-sol" || large.Effort != "high" {
 		t.Fatalf("default large tier = %#v", large)
 	}
-	if xlarge := view.Config.Agents.Tiers["xlarge"]; xlarge.Backend != "codex" || xlarge.Model != "gpt-6-sol" || xlarge.Effort != "xhigh" {
+	if xlarge := view.Config.Agents.Tiers["xlarge"]; xlarge.Backend != "codex" || xlarge.Model != "gpt-6.2-sol" || xlarge.Effort != "xhigh" {
 		t.Fatalf("default xlarge tier = %#v", xlarge)
 	}
 	if _, err := os.Stat(wantPath); !os.IsNotExist(err) {
@@ -683,10 +683,10 @@ func TestLoadReadCompatLegacyKeys(t *testing.T) {
 	}
 
 	// medium and large defaults must be backfilled.
-	if medium := cfg.Agents.Tiers["medium"]; medium.Backend != "codex" || medium.Model != "gpt-6-luna" || medium.Effort != "xhigh" {
+	if medium := cfg.Agents.Tiers["medium"]; medium.Backend != "codex" || medium.Model != "gpt-6.1-terra" || medium.Effort != "high" {
 		t.Fatalf("medium tier (backfilled) = %#v", medium)
 	}
-	if large := cfg.Agents.Tiers["large"]; large.Backend != "codex" || large.Model != "gpt-6-sol" || large.Effort != "high" {
+	if large := cfg.Agents.Tiers["large"]; large.Backend != "codex" || large.Model != "gpt-6.2-sol" || large.Effort != "high" {
 		t.Fatalf("large tier (backfilled) = %#v", large)
 	}
 
@@ -778,10 +778,10 @@ func TestLoadBackfillsMissingDefaultTiers(t *testing.T) {
 	if small := cfg.Agents.Tiers["small"]; small.Backend != "gemini" || small.Model != "gemini-3-1-pro" {
 		t.Fatalf("small mapping was overwritten: %#v", small)
 	}
-	if medium := cfg.Agents.Tiers["medium"]; medium.Backend != "codex" || medium.Model != "gpt-6-luna" || medium.Effort != "xhigh" {
+	if medium := cfg.Agents.Tiers["medium"]; medium.Backend != "codex" || medium.Model != "gpt-6.1-terra" || medium.Effort != "high" {
 		t.Fatalf("medium mapping = %#v", medium)
 	}
-	if large := cfg.Agents.Tiers["large"]; large.Backend != "codex" || large.Model != "gpt-6-sol" || large.Effort != "high" {
+	if large := cfg.Agents.Tiers["large"]; large.Backend != "codex" || large.Model != "gpt-6.2-sol" || large.Effort != "high" {
 		t.Fatalf("large mapping = %#v", large)
 	}
 }
@@ -938,7 +938,7 @@ func TestResolveAgentTierForHarnessFallsBackToDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveAgentTierForHarness returned error: %v", err)
 	}
-	if backend != "codex" || model != "gpt-6-luna" || effort != "xhigh" {
+	if backend != "codex" || model != "gpt-6.1-terra" || effort != "high" {
 		t.Fatalf("resolution = %q/%q/%q, want the seeded default medium tier", backend, model, effort)
 	}
 	if resolvedFrom != "default" {

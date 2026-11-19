@@ -55,8 +55,41 @@ func TestBuiltinSupportProfilesResolve(t *testing.T) {
 	}
 	resolver := wsconfig.NewResolver(opts, nil, nil, nil)
 	all, err := ResolveProfiles(&resolver)
-	if err != nil || len(all) != 9 {
-		t.Fatalf("ResolveProfiles with no config should list all nine builtin profiles: %+v, %v", all, err)
+	if err != nil || len(all) != 15 {
+		t.Fatalf("ResolveProfiles with no config should list all fifteen builtin profiles: %+v, %v", all, err)
+	}
+}
+
+// TestBuiltinAgentWorkerProfiles: each worker harness has an internal
+// agent-worker profile with the common ws loadout: agent.* and
+// mailbox.send in place of pi.*.
+func TestBuiltinAgentWorkerProfiles(t *testing.T) {
+	for backend, tools := range map[string][]string{BackendClaude: AgentClaudeTools, BackendPi: PiWorkerTools, BackendAgy: nil, BackendCodex: nil} {
+		name := AgentWorkerProfile(backend)
+		rp, err := ResolveProfile(testConfig(t), t.TempDir(), name)
+		if err != nil {
+			t.Fatalf("ResolveProfile(%s): %v", name, err)
+		}
+		p := rp.Definition
+		if rp.Scope != wsconfig.ScopeBuiltin || p.Backend != backend || p.Lead || !slices.Equal(p.Tools, tools) || !slices.Equal(p.WSTools, AgentWSTools) {
+			t.Fatalf("%s = %+v", name, rp)
+		}
+		for _, tool := range []string{"agent.spawn", "agent.interrupt", "agent.list", "agent.tiers", "mailbox.send"} {
+			if !slices.Contains(p.WSTools, tool) {
+				t.Errorf("%s ws_tools %v lack %s", name, p.WSTools, tool)
+			}
+		}
+		for _, tool := range p.WSTools {
+			if strings.HasPrefix(tool, "pi.") {
+				t.Errorf("%s ws_tools carry %s", name, tool)
+			}
+		}
+		if !isAgentWorkerProfile(name) {
+			t.Errorf("%s is not recognized as an agent-worker profile", name)
+		}
+	}
+	if !isAgentWorkerProfile(AgentWorkerProfile("future")) || isAgentWorkerProfile(PiWorkerProfile) {
+		t.Error("the internal namespace is reserved even before a backend is registered")
 	}
 }
 

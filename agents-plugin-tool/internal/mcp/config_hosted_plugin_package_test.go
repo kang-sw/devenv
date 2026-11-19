@@ -9,7 +9,7 @@ import (
 
 func TestConfigHostedPluginPackage(t *testing.T) {
 	useLeadProfile(t)
-	t.Setenv("WS_RSRC_ROOT", buildOverrideTestTree(t))
+	useResourceFixture(t, buildOverrideTestTree(t))
 	t.Setenv("WS_MCP_NO_AGENT", "1")
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")

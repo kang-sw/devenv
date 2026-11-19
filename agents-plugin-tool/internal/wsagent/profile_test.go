@@ -86,7 +86,7 @@ func TestParseProfileRefusesInvalid(t *testing.T) {
 		"not an object":    `["claude"]`,
 		"unknown field":    `{"backend":"claude","tool":["Read"]}`,
 		"missing backend":  `{"model":"haiku"}`,
-		"unknown backend":  `{"backend":"codex"}`,
+		"unknown backend":  `{"backend":"unknown-harness"}`,
 		"reserved server":  `{"backend":"claude","mcp_servers":{"ws":{"command":"x"}}}`,
 		"server not obj":   `{"backend":"claude","mcp_servers":{"docs":"x"}}`,
 		"negative idle":    `{"backend":"claude","idle_timeout_seconds":-1}`,

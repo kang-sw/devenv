@@ -10,6 +10,8 @@ func TestLeadProfileForBuiltinFallbackMatchesRegistry(t *testing.T) {
 	registry := map[string]BackendRegistration{
 		BackendClaude: {LeadProfile: LeadProfileClaude},
 		BackendPi:     {LeadProfile: LeadProfilePi},
+		BackendAgy:    {LeadProfile: LeadProfileAgy},
+		BackendCodex:  {LeadProfile: LeadProfileCodex},
 	}
 	leads := map[string]string{}
 	for key, raw := range BuiltinProfiles() {
@@ -28,7 +30,7 @@ func TestLeadProfileForBuiltinFallbackMatchesRegistry(t *testing.T) {
 	if len(leads) != len(registry) {
 		t.Fatalf("builtin leads = %v, registry = %v", leads, registry)
 	}
-	for _, backend := range []string{BackendClaude, BackendPi, "other", "", " pi "} {
+	for _, backend := range []string{BackendClaude, BackendPi, BackendAgy, BackendCodex, "other", "", " pi "} {
 		t.Run(backend, func(t *testing.T) {
 			want := registry[backend].LeadProfile
 			if leads[backend] != want {

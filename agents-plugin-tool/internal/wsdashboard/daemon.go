@@ -65,6 +65,10 @@ type DaemonOptions struct {
 	// ContentHash is the daemon executable's sha256 (ExecutableContentHash),
 	// reported by /health; empty is unknown and is omitted.
 	ContentHash string
+	// Executable is this daemon's executable, when supplied by the command
+	// layer. Startup retains it and records its identity under the singleton
+	// lock so hosted launchers can restart without a plugin installation.
+	Executable string
 	// Proxy builds the MCP sessions the daemon hosts for the launchers
 	// that connect to ProxyPath (proxy.go); nil leaves the route off.
 	Proxy ProxyHandler
@@ -88,6 +92,11 @@ type DaemonOptions struct {
 		Start()
 		Close()
 	}
+	// BeforeUnlock runs in Close after the daemon has stopped serving and
+	// before the cache-root lock is released, so work a successor must not
+	// overlap (the mailbox export for a previous version) finishes while
+	// the lock is still held. Nil runs nothing.
+	BeforeUnlock func()
 	// Tracker is the tracker host the tracker routes serve (tracker_routes.go);
 	// nil serves no tracker route and sends no tracker stream event.
 	Tracker TrackerHost
@@ -288,6 +297,8 @@ type Daemon struct {
 	hireInLoop bool // guarded by hireMu
 	hireWake   chan struct{}
 	hireDone   chan struct{}
+	// beforeUnlock is DaemonOptions.BeforeUnlock.
+	beforeUnlock func()
 	// files caches each session root's file list for the files route
 	// (files_route.go).
 	files *fileListCache
@@ -309,6 +320,12 @@ type Daemon struct {
 	proxyConns    map[*proxyConn]struct{}
 	proxyWG       sync.WaitGroup
 	proxyDraining bool
+	// httpSessions are ProxyHTTPPath's hosted sessions by token
+	// (proxy_http.go), each also one of proxyConns; httpReplay numbers
+	// their replayed initializes.
+	httpMu       sync.Mutex
+	httpSessions map[string]*httpMCPSession
+	httpReplay   atomic.Uint64
 	// web is the web card targets and their proxy listeners
 	// (webcard_proxy.go).
 	web *webRegistry
@@ -384,6 +401,13 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		_ = lock.Unlock()
 		return nil, err
 	}
+	if opts.Executable != "" {
+		if err := recordRunningExecutable(opts.Dir, opts.Executable, opts.Version, opts.BuildTime); err != nil {
+			_ = listener.Close()
+			_ = lock.Unlock()
+			return nil, fmt.Errorf("record running executable: %w", err)
+		}
+	}
 	if opts.Pprof {
 		enableContentionProfiles()
 	}
@@ -395,6 +419,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		log:             logw,
 		agents:          opts.Agents,
 		leadNudges:      opts.LeadNudges,
+		beforeUnlock:    opts.BeforeUnlock,
 		mailWake:        opts.MailWake,
 		tracker:         opts.Tracker,
 		broker:          newBroker(stats),
@@ -730,6 +755,9 @@ func (d *Daemon) Close() {
 			d.holders.Close()
 		}
 		d.foreign.close()
+		if d.beforeUnlock != nil {
+			d.beforeUnlock()
+		}
 		removeEndpointIfOwned(d.dir, d.endpoint.Token)
 		_ = d.lock.Unlock()
 		fmt.Fprintf(d.log, "dashboard: stopped (pid %d)\n", d.endpoint.PID)
@@ -773,6 +801,9 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc("/auth/clipboard", d.handleAuthClipboard)
 	if d.proxy != nil {
 		mux.HandleFunc(ProxyPath, d.handleProxy)
+		if _, ok := d.agents.(AgentMCPTokenHost); ok {
+			mux.HandleFunc(ProxyHTTPPath, d.handleProxyHTTP)
+		}
 	}
 	mux.HandleFunc("/nudge", d.handleNudge)
 	mux.HandleFunc("/events", d.handleIndexEvents)

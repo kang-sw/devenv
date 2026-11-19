@@ -7,7 +7,7 @@ import test from "node:test";
 
 const source = readFileSync(new URL("../pi_lead_bridge.mjs", import.meta.url), "utf8");
 async function watchdog(servers = null, launchWarning = "") {
-  const prelude = `const servers = ${JSON.stringify(servers)}; const sessionKey = 'lead-key'; const launchWarning = ${JSON.stringify(launchWarning)};\n`;
+  const prelude = `const servers = ${JSON.stringify(servers)}; const sessionKey = 'lead-key'; const launchWarning = ${JSON.stringify(launchWarning)}; const workflowManual = "";\n`;
   return import("data:text/javascript;base64," + Buffer.from(prelude + source).toString("base64"));
 }
 function host(t, version, name = "@earendil-works/pi-coding-agent") {

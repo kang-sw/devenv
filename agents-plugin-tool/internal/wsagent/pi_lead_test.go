@@ -3,6 +3,7 @@ package wsagent
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,14 +17,26 @@ func piLeadFixture(t *testing.T) (StartSpec, string) {
 	base := t.TempDir()
 	root := filepath.Join(base, "agents-plugin-wsflow")
 	piLeadFile(t, filepath.Join(root, ".claude-plugin", "plugin.json"), `{"name":"wsflow"}`)
-	restore := piBundledPluginRoot
-	piBundledPluginRoot = func(string) (string, string, error) { return root, "", nil }
-	t.Cleanup(func() { piBundledPluginRoot = restore })
+	restore := piHostedPackage
+	piHostedPackage = func() (string, string, error) { return "wsflow", "", nil }
+	t.Cleanup(func() { piHostedPackage = restore })
 	spec := StartSpec{Root: base, Cwd: filepath.Join(base, "project"), Dir: filepath.Join(base, "session"), Lead: &LeadSpec{DaemonVersion: hostedPluginTestVersion}}
 	if err := os.MkdirAll(piDir(spec.Dir), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	return spec, filepath.Join(base, "agents-plugin-pi")
+	payload := filepath.Join(base, "agents-plugin-pi")
+	// Launch tests inject a prepared-payload boundary through an explicit
+	// fixture checkout, never through installed plugin bytes or live HOME.
+	t.Setenv("WS_CACHE_HOME", filepath.Join(base, "cache"))
+	usePreparedPiFixture(t, base, payload)
+	return spec, payload
+}
+
+func usePreparedPiFixture(t *testing.T, checkout, payload string) {
+	t.Helper()
+	t.Setenv("WS_RSRC_DEV_CHECKOUT", checkout)
+	piLeadFile(t, filepath.Join(checkout, "agents-plugin-wsflow", ".keep"), "")
+	piLeadFile(t, filepath.Join(checkout, "agents-plugin", "bin", "ws-pi-payload.py"), fmt.Sprintf("print(%q)\n", payload))
 }
 
 func piLeadFile(t *testing.T, path, text string) {
@@ -57,13 +70,13 @@ func piLeadDeps(t *testing.T, dir string) {
 func TestPiLeadBundledEntries(t *testing.T) {
 	_, root := piLeadFixture(t)
 	entry := piLeadBundle(t, root)
-	entries, err := piBundledEntries(hostedPluginTestVersion)
+	entries, err := piEntriesAt(root)
 	if err != nil || !slices.Equal(entries, []string{entry}) {
 		t.Fatalf("manifest entry = %v, %v", entries, err)
 	}
 	for _, text := range []string{`{`, `{}`, `{"pi":{"extensions":["../escape.ts"]}}`, `{"pi":{"extensions":[""]}}`, `{"pi":{"extensions":["gone.ts"]}}`} {
 		piLeadFile(t, filepath.Join(root, "package.json"), text)
-		if got, err := piBundledEntries(hostedPluginTestVersion); err == nil {
+		if got, err := piEntriesAt(root); err == nil {
 			t.Fatalf("%s: accepted %v", text, got)
 		}
 	}
@@ -162,6 +175,64 @@ func TestPiLeadMissingBundleFallback(t *testing.T) {
 	spec.Lead.WSMCP = func() (MCPCommand, error) { return MCPCommand{}, errors.New("factory failure") }
 	if _, _, err := piLeadLaunch("pi", nil, spec); err == nil || !strings.Contains(err.Error(), "factory failure") {
 		t.Fatalf("fallback failure = %v", err)
+	}
+}
+
+// TestPiLeadBridgeCarriesTheManualOnItsFallback: on the MCP bridge
+// fallback (servers set) the bridge source embeds the daemon-rendered
+// manual (LeadSpec.Manual) as a JSON string beside the key, read once per
+// write; with the native extension loaded (no servers) the manual is left
+// empty and never rendered, since the extension appends its own.
+func TestPiLeadBridgeCarriesTheManualOnItsFallback(t *testing.T) {
+	const manual = "# Workflow Manual\n\n## Session Key\nlead-key \"quoted\" `code` </script>"
+	spec, _ := piLeadFixture(t)
+	spec.Lead.Env = map[string]string{EnvHostedSessionKey: "lead-key"}
+	renders := 0
+	spec.Lead.Manual = func() string { renders++; return manual }
+	embedded := func(t *testing.T, servers map[string]any) string {
+		t.Helper()
+		path, err := writePiLeadBridge(spec, servers, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(raw)
+		const prefix = "\nconst workflowManual = "
+		start := strings.Index(text, prefix)
+		if start < 0 {
+			t.Fatalf("the bridge declares no workflowManual:\n%s", text)
+		}
+		end := strings.Index(text[start+len(prefix):], ";\n")
+		var got string
+		if err := json.Unmarshal([]byte(text[start+len(prefix):start+len(prefix)+end]), &got); err != nil {
+			t.Fatalf("workflowManual is not a JSON string: %v", err)
+		}
+		return got
+	}
+	if got := embedded(t, map[string]any{ReservedMCPServer: map[string]any{"command": "/bundled/ws"}}); got != manual || renders != 1 {
+		t.Fatalf("the fallback bridge embeds %q after %d renders, want the manual once", got, renders)
+	}
+	if got := embedded(t, nil); got != "" || renders != 1 {
+		t.Fatalf("a native-extension bridge embeds %q after %d renders, want none", got, renders)
+	}
+
+	// The fallback launch itself carries it.
+	spec.Lead.PluginIsolation = "isolated"
+	spec.Lead.PluginWarning = func(string) {}
+	spec.Lead.WSMCP = func() (MCPCommand, error) { return MCPCommand{Command: "/bundled/ws"}, nil }
+	if _, _, err := piLeadLaunch("pi", nil, spec); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(piDir(spec.Dir), piBridgeFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manualJSON, _ := json.Marshal(manual)
+	if !strings.Contains(string(raw), "\nconst workflowManual = "+string(manualJSON)+";\n") || renders != 2 {
+		t.Fatalf("the fallback launch's bridge lacks the manual (%d renders):\n%s", renders, raw)
 	}
 }
 

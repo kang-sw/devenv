@@ -17,12 +17,29 @@ import (
 
 	"github.com/kang-sw/devenv/internal/mcp"
 	"github.com/kang-sw/devenv/internal/wsagent"
+	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsholder"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
-func TestAgentMCPCommandUsesTheStartingPackagesLauncher(t *testing.T) {
+func TestCallFallbackRegistrationAndRenderDescriptor(t *testing.T) {
+	holders := wsholder.New(wsholder.Options{Dir: t.TempDir()})
+	defer holders.Close()
+	runner := newAgentRunner(t.TempDir(), io.Discard, nil, holders)
+	defer runner.Close()
+	for name, reg := range runner.BackendRegistrations() {
+		if reg.CallFallback != (name == wsagent.BackendAgy) {
+			t.Fatalf("backend %q fallback = %v; only agy opts in", name, reg.CallFallback)
+		}
+		render := hostedRender(reg)
+		if render.CallFallback != reg.CallFallback || render.ToolNameScheme != reg.ToolNameScheme {
+			t.Fatalf("backend %q loses fallback or alias data in prompt rendering: %+v", name, render)
+		}
+	}
+}
+
+func TestAgentMCPCommandUsesEmbeddedLauncherWithoutPlugin(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", t.TempDir())
 	t.Setenv("WS_CONFIG_HOME", t.TempDir())
 	python := filepath.Join(t.TempDir(), "chosen python")
@@ -35,60 +52,44 @@ func TestAgentMCPCommandUsesTheStartingPackagesLauncher(t *testing.T) {
 	t.Setenv(wsholder.PythonEnv, python)
 	t.Setenv("WS_MCP_PROJECT_ROOT", filepath.Join(t.TempDir(), "lead"))
 	root := filepath.Join(t.TempDir(), "worker worktree")
-	for _, name := range []string{"ws", "wsflow", "pi"} {
+	if os.Getenv("WS_TEST_EMBEDDED_PACKAGES") == "1" {
+		t.Setenv("WS_RSRC_DEV_CHECKOUT", "")
+	}
+	for _, name := range []string{"ws", "wsflow"} {
 		t.Run(name, func(t *testing.T) {
-			plugin := filepath.Join(t.TempDir(), name+" package")
-			launcher := filepath.Join(plugin, "bin", "ws-mcp-launcher.py")
-			if err := os.MkdirAll(filepath.Dir(launcher), 0o755); err != nil {
+			r := wsconfig.NewResolver(wsconfig.Options{}, nil, nil, nil)
+			if err := r.Set(wsconfig.HostedPluginPackageKey, name, wsconfig.SetOptions{}); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(launcher, nil, 0o644); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.MkdirAll(filepath.Join(plugin, ".claude-plugin"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			manifestName := name
-			if name == "pi" {
-				manifestName = "ws"
-			}
-			if err := os.WriteFile(filepath.Join(plugin, ".claude-plugin", "plugin.json"), []byte(`{"name":"`+manifestName+`","version":"0.50.1"}`), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			rsrc := filepath.Join(plugin, "rsrc")
-			t.Setenv(wsrsrc.EnvRsrcRoot, rsrc)
+			t.Setenv(wsrsrc.EnvRsrcRoot, filepath.Join(t.TempDir(), "missing", "rsrc"))
 			cmd, err := agentMCPCommand(root, "0.50.1")
 			if err != nil {
 				t.Fatal(err)
 			}
+			launcher := filepath.Join(cmd.Plugin, "bin", "ws-mcp-launcher.py")
 			if want := []string{launcher, "serve", "--stdio"}; cmd.Command != python || !reflect.DeepEqual(cmd.Args, want) {
 				t.Fatalf("worker MCP = %+v, want %s %v", cmd, python, want)
 			}
-			if cmd.Env["WS_MCP_PROJECT_ROOT"] != root || cmd.Env[wsrsrc.EnvRsrcRoot] != rsrc {
+			if _, err := os.Stat(launcher); err != nil {
+				t.Fatal(err)
+			}
+			if cmd.Env["WS_MCP_HOSTED_PACKAGE"] != "1" {
+				t.Fatal("missing launch-only hosted marker")
+			}
+			if cmd.Env["WS_MCP_PROJECT_ROOT"] != root || cmd.Env[wsrsrc.EnvRsrcRoot] != filepath.Join(cmd.Plugin, "rsrc") {
 				t.Fatalf("worker MCP env = %v; root and package must override the daemon's inherited values", cmd.Env)
 			}
 		})
 	}
 }
 
-func TestAgentMCPCommandFailsWithoutALauncher(t *testing.T) {
-	for _, name := range []string{"unset resource root", "missing launcher", "launcher is a directory"} {
-		t.Run(name, func(t *testing.T) {
-			rsrc := filepath.Join(t.TempDir(), "rsrc")
-			if name == "unset resource root" {
-				rsrc = ""
-			}
-			if name == "launcher is a directory" {
-				if err := os.MkdirAll(filepath.Join(filepath.Dir(rsrc), "bin", "ws-mcp-launcher.py"), 0o755); err != nil {
-					t.Fatal(err)
-				}
-			}
-			t.Setenv(wsrsrc.EnvRsrcRoot, rsrc)
-			cmd, err := agentMCPCommand(t.TempDir(), "0.50.1")
-			if err == nil || !strings.Contains(err.Error(), "cannot resolve ws-mcp launcher") || cmd.Command != "" {
-				t.Fatalf("must refuse, never fall back to the daemon executable: command=%+v, error=%v", cmd, err)
-			}
-		})
+func TestAgentMCPCommandFailsWithoutBuildInputs(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", t.TempDir())
+	t.Setenv("WS_CONFIG_HOME", t.TempDir())
+	t.Setenv("WS_RSRC_DEV_CHECKOUT", t.TempDir())
+	cmd, err := agentMCPCommand(t.TempDir(), "0.50.1")
+	if err == nil || !strings.Contains(err.Error(), "cannot stage ws-mcp launcher") || cmd.Command != "" {
+		t.Fatalf("must refuse, never use daemon executable: %+v, %v", cmd, err)
 	}
 }
 
@@ -184,5 +185,41 @@ func TestAgentMCPPythonResolution(t *testing.T) {
 				t.Fatalf("Python refusal must name the launcher: %v", err)
 			}
 		})
+	}
+}
+
+// TestAgentRunnerCatalogs pins the independent lead catalogs and worker
+// descriptors. Pi stays handle-only until it has a catalog of its own.
+func TestAgentRunnerCatalogs(t *testing.T) {
+	holders := wsholder.New(wsholder.Options{Dir: t.TempDir()})
+	defer holders.Close()
+	runner := newAgentRunner(t.TempDir(), io.Discard, nil, holders)
+	defer runner.Close()
+	regs := runner.BackendRegistrations()
+	if !reflect.DeepEqual(regs[wsagent.BackendClaude].Catalog, wsagent.ClaudeCatalog()) {
+		t.Errorf("claude catalog = %+v, want the reference profile", regs[wsagent.BackendClaude].Catalog)
+	}
+	if regs[wsagent.BackendPi].Catalog != nil {
+		t.Errorf("pi has a catalog profile; it stays handle-only until its own profile")
+	}
+	if !reflect.DeepEqual(regs[wsagent.BackendCodex].Catalog, wsagent.CodexCatalog()) {
+		t.Error("codex must retain its lead and worker catalog")
+	}
+	if !reflect.DeepEqual(regs[wsagent.BackendAgy].Catalog, wsagent.AgyCatalog()) {
+		t.Error("agy must retain its lead and worker catalog")
+	}
+	for _, want := range []struct {
+		backend, lead, worker string
+		capable, http, auto   bool
+	}{
+		{wsagent.BackendClaude, wsagent.LeadProfileClaude, wsagent.AgentWorkerProfile(wsagent.BackendClaude), true, true, false},
+		{wsagent.BackendPi, wsagent.LeadProfilePi, wsagent.AgentWorkerProfile(wsagent.BackendPi), true, false, false},
+		{wsagent.BackendAgy, wsagent.LeadProfileAgy, wsagent.AgentWorkerProfile(wsagent.BackendAgy), true, true, true},
+		{wsagent.BackendCodex, wsagent.LeadProfileCodex, wsagent.AgentWorkerProfile(wsagent.BackendCodex), true, true, true},
+	} {
+		reg := regs[want.backend]
+		if reg.LeadProfile != want.lead || reg.WorkerProfile != want.worker || reg.WorkerCapable != want.capable || reg.WorkerHTTPMCP != want.http || reg.WorkerAutoApprove != want.auto {
+			t.Errorf("%s descriptor = %+v; want %+v", want.backend, reg, want)
+		}
 	}
 }

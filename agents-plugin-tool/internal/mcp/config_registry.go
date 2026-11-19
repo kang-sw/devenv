@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsagent"
@@ -21,7 +22,7 @@ var (
 	reviewPhaseEnum       = []string{"off", "lite", "full"}
 	agentsTierEnum        = []string{"small", "medium", "large", "xlarge"}
 	promptHarnessEnum     = []string{"claude", "codex", "pi", "*"}
-	agentsTierHarnessEnum = []string{"claude", "codex", "pi", "default"}
+	agentsTierHarnessEnum = []string{"claude", "codex", "pi", "agy", "default"}
 	agentsTierScopeEnum   = []string{"project", "global"}
 )
 
@@ -87,6 +88,9 @@ type configKeyEntry struct {
 	// file's structured_overrides member (the worktree.profile.<name> family)
 	// rather than a string in overrides. It never has a session-scope value.
 	Structured bool
+	// Normalize, when set, checks a free-form knob's trimmed value before
+	// config.tune writes it and returns the value to store.
+	Normalize func(string) (string, error)
 }
 
 // GlobalOnly reports whether this key's writes are constrained to
@@ -375,6 +379,45 @@ var configRegistry = []configKeyEntry{
 		NoAgentVisible:        true,
 		RequiresLeadAuthority: wsconfig.GlobalOnly(wsconfig.ItemAgentGitSearchRoots),
 		ResolverBacked:        true,
+	},
+	{
+		// Free-form like agent.git_search_roots, checked by the parser
+		// agent.spawn reads it with.
+		Key:        wsconfig.ItemAgentTierAliases,
+		WriterTool: "config.tune",
+		ResetTool:  "config.tune",
+		ValueFields: []tuningField{{
+			Name:        "value",
+			Description: "Whitespace-separated name=<harness>.<tier> pairs, for example \"mockup=pi.large quick=claude.small\"; tier is small, medium, large, or xlarge, and a name has no dot. Omit when reset is true.",
+		}},
+		NoAgentVisible:        true,
+		RequiresLeadAuthority: wsconfig.GlobalOnly(wsconfig.ItemAgentTierAliases),
+		ResolverBacked:        true,
+		Normalize: func(value string) (string, error) {
+			if _, err := wsconfig.ParseTierAliases(value); err != nil {
+				return "", err
+			}
+			return value, nil
+		},
+	},
+	{
+		Key:        wsconfig.ItemAgentChildWaitingDays,
+		WriterTool: "config.tune",
+		ResetTool:  "config.tune",
+		ValueFields: []tuningField{{
+			Name:        "value",
+			Description: "Whole number of days, at least 1. Omit when reset is true.",
+		}},
+		NoAgentVisible:        true,
+		RequiresLeadAuthority: wsconfig.GlobalOnly(wsconfig.ItemAgentChildWaitingDays),
+		ResolverBacked:        true,
+		Normalize: func(value string) (string, error) {
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 1 {
+				return "", fmt.Errorf("%s must be a whole number of days, at least 1; got %q", wsconfig.ItemAgentChildWaitingDays, value)
+			}
+			return strconv.Itoa(n), nil
+		},
 	},
 	{
 		Key:        wsconfig.ItemSageReview,

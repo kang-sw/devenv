@@ -14,6 +14,7 @@ import (
 
 	"github.com/gofrs/flock"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 func noticeTopic(t *testing.T, s *State, topic, value string, eta int, now time.Time) {
@@ -505,13 +506,13 @@ func TestBoardNotifyCrashRetryAndIntentRecovery(t *testing.T) {
 
 func TestBoardNotifyNormalUpdateAndMailboxLockDirection(t *testing.T) {
 	f := noticeFolder(t)
-	mail := filepath.Join(t.TempDir(), "reply.json")
+	mail := (wsmailbox.Paths{State: wsstate.Options{CacheHome: t.TempDir()}}).Store()
 	enqueued := make(chan struct{})
 	release := make(chan struct{})
 	notified := make(chan error, 1)
 	go func() {
 		_, err := f.Notify("lead", stateNow.Add(time.Hour), func() bool { return true }, func(message string) error {
-			if err := wsmailbox.PostSystem(mail, "lead", "", message, stateNow.Add(time.Hour)); err != nil {
+			if err := mail.PostSystem("lead", "", message, stateNow.Add(time.Hour)); err != nil {
 				return err
 			}
 			close(enqueued)
@@ -520,7 +521,7 @@ func TestBoardNotifyNormalUpdateAndMailboxLockDirection(t *testing.T) {
 		}, func() {
 			// Drain/sweep's low-level reply-lock seam is available before receipt
 			// commit, even though Notify still holds the board transaction lock.
-			if err := wsmailbox.WithReplyLock(mail, func(store *wsmailbox.ReplyStore) error {
+			if err := mail.WithReplyLock(func(store *wsmailbox.ReplyStore) error {
 				if len(store.Queues["lead"]) != 1 {
 					return fmt.Errorf("wake preceded enqueue")
 				}
@@ -560,7 +561,7 @@ func TestBoardNotifyNormalUpdateAndMailboxLockDirection(t *testing.T) {
 	if latest, _ := s.LatestAgent("Work"); latest.Text != "concurrent normal update" {
 		t.Fatal("notification lost concurrent update")
 	}
-	store, err := wsmailbox.LoadReplyStore(mail)
+	store, err := mail.LoadReply()
 	if err != nil || len(store.Queues["lead"]) != 0 {
 		t.Fatal("wake drain failed", err)
 	}
@@ -581,17 +582,22 @@ func TestBoardNotifyNormalUpdateAndMailboxLockDirection(t *testing.T) {
 
 func TestBoardNotifyMailboxTimeoutDoesNotCommitReceipt(t *testing.T) {
 	f := noticeFolder(t)
-	mail := filepath.Join(t.TempDir(), "reply.json")
-	lock := flock.New(mail + ".lock")
+	cache := t.TempDir()
+	mail := (wsmailbox.Paths{State: wsstate.Options{CacheHome: cache}}).Store()
+	// Another process (a running daemon) holds the mailbox ring.
+	if err := os.MkdirAll(filepath.Join(cache, wsmailbox.RingDirName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lock := flock.New(filepath.Join(cache, wsmailbox.RingDirName, "lock"))
 	if err := lock.Lock(); err != nil {
 		t.Fatal(err)
 	}
 	defer lock.Unlock()
 	before := folderTree(t, f.Dir)
 	_, err := f.Notify("lead", stateNow.Add(time.Hour), func() bool { return true }, func(message string) error {
-		return wsmailbox.PostSystem(mail, "lead", "", message, stateNow.Add(time.Hour))
+		return mail.PostSystem("lead", "", message, stateNow.Add(time.Hour))
 	}, func() { t.Error("failed enqueue woke") })
-	if err == nil || !strings.Contains(err.Error(), "lock") {
+	if err == nil || !strings.Contains(err.Error(), "held by another process") {
 		t.Fatal("mailbox contention did not fail", err)
 	}
 	if !reflect.DeepEqual(before, folderTree(t, f.Dir)) {

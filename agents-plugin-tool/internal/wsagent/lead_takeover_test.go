@@ -260,7 +260,7 @@ func TestTakeoverRefusals(t *testing.T) {
 		t.Fatalf("TakeOver with no recorded conversation = %v", err)
 	}
 	h.terminalSession("codexsess", LeadSession{Key: "k2", Harness: "codex", Session: "s", Cwd: h.root}, nil)
-	if _, err := h.runner.TakeOver("codexsess"); err == nil || isConflict(err) || !strings.Contains(err.Error(), "claude or pi") {
+	if _, err := h.runner.TakeOver("codexsess"); err == nil || isConflict(err) || !strings.Contains(err.Error(), "codex terminal takeover is not supported") {
 		t.Fatalf("TakeOver of a codex session = %v", err)
 	}
 	h.terminalSession("gonedir", LeadSession{Key: "k3", Harness: BackendClaude, Session: "s", Cwd: filepath.Join(h.root, "removed")}, nil)

@@ -395,10 +395,7 @@ func (d *Daemon) settleHiresDeadlineLocked(proposals []HireProposal) (time.Time,
 }
 
 func (d *Daemon) notifyHire(p *HireProposal) error {
-	path, err := (wsmailbox.Paths{State: wsstate.Options{CacheHome: filepath.Dir(d.dir)}}).ReplyRegistry()
-	if err != nil {
-		return err
-	}
+	store := (wsmailbox.Paths{State: wsstate.Options{CacheHome: filepath.Dir(d.dir)}}).Store()
 	text := fmt.Sprintf("Hiring request %s: %s\n", p.ID, p.Status)
 	if p.Session != "" {
 		text += "Session: id:" + p.Session + "\n"
@@ -409,7 +406,7 @@ func (d *Daemon) notifyHire(p *HireProposal) error {
 	text += "\nRecovery context:\n" + p.RecoveryContext
 	// Mail append and the proposal's Notified checkpoint are separate writes:
 	// a crash between them can resend this correlated request-id outcome.
-	if err := wsmailbox.PostSystem(path, p.Requester, wsmailbox.SystemLabel, text, d.hireClock()); err != nil {
+	if err := store.PostSystem(p.Requester, wsmailbox.SystemLabel, text, d.hireClock()); err != nil {
 		return err
 	}
 	if d.mailWake != nil {

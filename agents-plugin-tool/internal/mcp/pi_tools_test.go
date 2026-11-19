@@ -34,6 +34,8 @@ type fakePiAgents struct {
 	watchN   int
 	waited   []time.Duration
 	waitRes  wsagent.TurnResult
+	// agent is the agent.* side (agent_tools_test.go).
+	agent fakeAgentSide
 }
 
 func newFakePiAgents() *fakePiAgents {
@@ -55,6 +57,10 @@ func (f *fakePiAgents) Spawn(spec wsagent.SpawnSpec) (wsagent.State, error) {
 	f.mu.Unlock()
 	f.emit(st)
 	return st, nil
+}
+
+func (f *fakePiAgents) Deliver(id string, d wsagent.Delivery) (wsagent.State, error) {
+	return f.Send(id, d.Text)
 }
 
 func (f *fakePiAgents) Send(id, text string) (wsagent.State, error) {
@@ -187,14 +193,12 @@ func wsManifests() string {
 	return pkg.own + ";" + pkg.dashboard
 }
 
-var piToolNames = []string{"pi.list", "pi.send", "pi.spawn", "pi.stop", "pi.transcript", "pi.wait"}
-
 func TestPiSpawnLabelDescribesAgentsPopover(t *testing.T) {
 	for _, def := range piToolDefinitions() {
 		if def["name"] != "pi.spawn" {
 			continue
 		}
-		for _, tool := range []map[string]any{def, piWorkerTool(def)} {
+		for _, tool := range []map[string]any{def} {
 			props := tool["inputSchema"].(map[string]any)["properties"].(map[string]any)
 			desc := props["label"].(map[string]string)["description"]
 			if !strings.Contains(desc, "agents-popover row") || strings.Contains(desc, "agents-panel") {
@@ -211,7 +215,7 @@ func TestPiSendDescribesNativeSteeringWithoutChangingArguments(t *testing.T) {
 		if def["name"] != "pi.send" {
 			continue
 		}
-		for _, tool := range []map[string]any{def, piWorkerTool(def)} {
+		for _, tool := range []map[string]any{def} {
 			desc := tool["description"].(string)
 			for _, want := range []string{"With no turn running it starts the next turn now", "steers that running turn at the next tool boundary", "without cancelling in-flight tool calls", "no extra turn", "sleeping subagent resumes on its existing session file with the same id and settings", "missing, inaccessible, or non-regular file is refused"} {
 				if !strings.Contains(desc, want) {
@@ -239,9 +243,10 @@ func listedPiTools(s *Server) []string {
 	return out
 }
 
-// TestPiToolsGate pins the exposure gate: tools/list shows the pi.* tools
-// only with the knob on, a daemon runner, and a Pi of 1.0 or later, and a
-// call that comes anyway refuses with the reason.
+// TestPiToolsGate pins the call gate: tools/list never shows the pi.*
+// tools (agent.* and mailbox.send replace them), and a call answers only
+// with the knob on, a daemon runner, and a Pi of 1.0 or later, else it
+// refuses with the reason.
 func TestPiToolsGate(t *testing.T) {
 	wsflow := dashboardPackages[1]
 	for _, tc := range []struct {
@@ -265,18 +270,14 @@ func TestPiToolsGate(t *testing.T) {
 				agents = newFakePiAgents()
 			}
 			f := newPiFixture(t, tc.manifests, agents)
-			listed := listedPiTools(f.server)
+			if listed := listedPiTools(f.server); len(listed) != 0 {
+				t.Fatalf("%s: pi tools listed: %v", tc.name, listed)
+			}
 			if tc.refusal == "" {
-				if strings.Join(listed, ",") != strings.Join(piToolNames, ",") {
-					t.Fatalf("listed pi tools = %v, want %v", listed, piToolNames)
-				}
 				if out := callToolWithKey(t, f.server, 2, f.key, "pi.list", nil); out != "no Pi subagents\n" {
 					t.Fatalf("pi.list = %q", out)
 				}
 				return
-			}
-			if len(listed) != 0 {
-				t.Fatalf("%s: pi tools listed: %v", tc.name, listed)
 			}
 			if out := callToolWithKey(t, f.server, 2, f.key, "pi.list", nil); !strings.Contains(out, tc.refusal) {
 				t.Fatalf("%s: a call should refuse naming %q, got %q", tc.name, tc.refusal, out)
@@ -287,7 +288,8 @@ func TestPiToolsGate(t *testing.T) {
 
 // TestPiToolsKnobReadsTheProjectAndGlobalValues: the knob resolves through
 // the machine-local project and global files over the package default, so
-// a wsflow project opts in, and a ws user opts out, by a tune.
+// a wsflow project opts in, and a ws user opts out, by a tune. The tools
+// stay unlisted either way; the knob gates the call.
 func TestPiToolsKnobReadsTheProjectAndGlobalValues(t *testing.T) {
 	wsflow := dashboardPackages[1]
 	for _, tc := range []struct {
@@ -295,10 +297,10 @@ func TestPiToolsKnobReadsTheProjectAndGlobalValues(t *testing.T) {
 		manifests string
 		scope     wsconfig.Scope
 		value     string
-		listed    bool
+		on        bool
 	}{
-		{name: "wsflow project on", manifests: wsflow.own + ";" + wsflow.dashboard, scope: wsconfig.ScopeProject, value: "true", listed: true},
-		{name: "wsflow global on", manifests: wsflow.own + ";" + wsflow.dashboard, scope: wsconfig.ScopeGlobal, value: "true", listed: true},
+		{name: "wsflow project on", manifests: wsflow.own + ";" + wsflow.dashboard, scope: wsconfig.ScopeProject, value: "true", on: true},
+		{name: "wsflow global on", manifests: wsflow.own + ";" + wsflow.dashboard, scope: wsconfig.ScopeGlobal, value: "true", on: true},
 		{name: "ws project off", manifests: wsManifests(), scope: wsconfig.ScopeProject, value: "false"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -308,12 +310,12 @@ func TestPiToolsKnobReadsTheProjectAndGlobalValues(t *testing.T) {
 			if err := r.Set(DashboardPiSpawnKey, tc.value, wsconfig.SetOptions{ExplicitScope: tc.scope}); err != nil {
 				t.Fatal(err)
 			}
-			if got := len(listedPiTools(f.server)) > 0; got != tc.listed {
-				t.Fatalf("listed = %v, want %v", got, tc.listed)
+			if listed := listedPiTools(f.server); len(listed) != 0 {
+				t.Fatalf("pi tools listed: %v", listed)
 			}
 			out := callToolWithKey(t, f.server, 2, f.key, "pi.list", nil)
-			if refused := strings.Contains(out, " is off"); refused == tc.listed {
-				t.Fatalf("pi.list = %q, want refused %v", out, !tc.listed)
+			if refused := strings.Contains(out, " is off"); refused == tc.on {
+				t.Fatalf("pi.list = %q, want refused %v", out, !tc.on)
 			}
 		})
 	}
@@ -612,7 +614,7 @@ func TestPiWaitShowsSleepWithoutChangingTurnOutcomes(t *testing.T) {
 
 func TestPiDescriptionsExplainSleep(t *testing.T) {
 	for _, def := range piToolDefinitions() {
-		for _, tool := range []map[string]any{def, piWorkerTool(def)} {
+		for _, tool := range []map[string]any{def} {
 			name := tool["name"].(string)
 			desc := tool["description"].(string)
 			switch name {
@@ -663,12 +665,12 @@ func TestPiTurnReporterMailsTheParent(t *testing.T) {
 		Result: wsagent.TurnResult{ID: "childone", Status: wsagent.TurnInterrupted, Error: "the dashboard daemon exited while the turn ran"},
 	})
 	out := callToolWithKey(t, s, 2, key, "mailbox.recv", nil)
-	for _, want := range []string{`pi:childone: Reply with pi.send(id: childone), not mailbox.send.` + "\n" + `[Pi subagent childone "worker"] turn done`, "all green", "[Pi subagent childone] turn interrupted: the dashboard daemon exited while the turn ran"} {
+	for _, want := range []string{`agent:childone: Reply with mailbox.send(to: "id:childone").` + "\n" + `[subagent id:childone "worker"] turn done`, "all green", "[subagent id:childone] turn interrupted: the dashboard daemon exited while the turn ran"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("mailbox.recv lacks %q: %q", want, out)
 		}
 	}
-	if strings.Count(out, "[Pi subagent") != 2 {
+	if strings.Contains(out, "pi.send") || strings.Count(out, "[subagent") != 2 {
 		t.Fatalf("one mail per lead report: %q", out)
 	}
 	if entry, _ := replyEntryFor(t, key); len(entry.Contacts) != 0 {

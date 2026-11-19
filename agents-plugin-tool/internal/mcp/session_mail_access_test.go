@@ -31,11 +31,7 @@ func TestSessionAccessMailKeepsOneClaimOwnerAcrossEntryModes(t *testing.T) {
 			defer mail.server.Close()
 			cli := NewServer(t.TempDir(), "test") // caller cwd is not queue authority
 			defer cli.Close()
-			path, err := cli.mailboxPaths().ReplyRegistry()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error {
+			if err := cli.mailboxPaths().Store().WithReplyLock(func(store *wsmailbox.ReplyStore) error {
 				for _, body := range []string{"first", "second"} {
 					store.Queues = wsmailbox.AppendQueue(store.Queues, wsmailbox.ReplyID(key), wsmailbox.Envelope{Content: body, SentAt: "2026-01-02T03:04:05Z"})
 				}
@@ -47,7 +43,7 @@ func TestSessionAccessMailKeepsOneClaimOwnerAcrossEntryModes(t *testing.T) {
 				return callToolWithKey(t, cli, 1, key, "mailbox.recv", map[string]any{"format": "json"})
 			}
 			if hostedFirst {
-				texts, err := mail.Drain(root, key)
+				texts, err := drainTexts(mail, root, key)
 				if err != nil || len(texts) != 2 || !strings.HasSuffix(texts[0], "\nfirst") || !strings.HasSuffix(texts[1], "\nsecond") {
 					t.Fatalf("hosted claim = %q, %v", texts, err)
 				}
@@ -60,7 +56,7 @@ func TestSessionAccessMailKeepsOneClaimOwnerAcrossEntryModes(t *testing.T) {
 				if err := json.Unmarshal([]byte(got), &envelopes); err != nil || len(envelopes) != 2 || envelopes[0].Content != "first" || envelopes[1].Content != "second" {
 					t.Fatalf("CLI claim = %s, %v", got, err)
 				}
-				if texts, err := mail.Drain(root, key); err != nil || len(texts) != 0 {
+				if texts, err := drainTexts(mail, root, key); err != nil || len(texts) != 0 {
 					t.Fatalf("hosted delivery duplicated CLI claim: %q, %v", texts, err)
 				}
 			}

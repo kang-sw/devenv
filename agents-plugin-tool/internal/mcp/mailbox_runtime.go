@@ -236,7 +236,7 @@ func (s *Server) ensureMailboxRegistered(root string) {
 		now := mailboxNow()
 		pid := s.pid()
 		fresh := s.ownedMailboxPresence(identity, root, now.Format(time.RFC3339))
-		werr := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+		werr := s.mailboxPaths().Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 			if identity.Auto {
 				// This owner's own auto record, under whatever stem it
 				// minted before: a server hosted again for the same
@@ -345,7 +345,7 @@ func (s *Server) writeMailboxPresenceLastSeen(identity mailboxIdentity, root str
 	}
 	nowStr := mailboxNowString()
 	pid := s.pid()
-	_ = wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+	_ = s.mailboxPaths().Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 		p, ok := store.Presence[identity.Name]
 		if !ok || p.PID != pid {
 			return nil
@@ -420,33 +420,6 @@ func (s *Server) mailboxReplyID(callerSessionKey string) string {
 	return wsmailbox.ReplyID(callerSessionKey)
 }
 
-// mailboxReplyIDRetention bounds how long an idle, empty-queue reply-id
-// entry survives in the machine-tier registry before lazy reaping deletes
-// it (Decision 11's lazy-expiry reaping), mirroring session_auth.go's
-// keyRetentionAge order of magnitude. Reaping only ever removes an entry
-// whose queue is already empty: undelivered mail is never dropped by this
-// pass, only the bookkeeping Entries record for a channel nobody has
-// touched in a long time.
-const mailboxReplyIDRetention = 30 * 24 * time.Hour
-
-// reapStaleReplyIDs deletes Entries whose LastSeen exceeds
-// mailboxReplyIDRetention and whose Queues slot is empty, bounding the
-// registry's otherwise-unbounded growth from one-off callers that never
-// return. Folded into every publishReplyID write rather than a background
-// sweep (background mechanisms are 260913-feat-cross-session-mailbox-wake's
-// territory, Decisions 6/7/9).
-func reapStaleReplyIDs(store *wsmailbox.ReplyStore, now time.Time) {
-	for id, entry := range store.Entries {
-		if len(store.Queues[id]) > 0 {
-			continue
-		}
-		last, err := time.Parse(time.RFC3339, entry.LastSeen)
-		if err != nil || now.Sub(last) > mailboxReplyIDRetention {
-			delete(store.Entries, id)
-		}
-	}
-}
-
 // mailboxContact is one counterparty observed at a send or recv: its
 // literal address ("id:<reply-id>" or "slug@scope") and, for a slug, the
 // harness/cwd read from its presence record before the reply lock is taken
@@ -463,6 +436,28 @@ type mailboxContact struct {
 // caller's root). An unreadable store or missing record leaves the
 // metadata empty: it is descriptive only.
 func mailboxContactFor(paths wsmailbox.Paths, address, root string) mailboxContact {
+	store := paths.Store()
+	return mailboxContactWith(paths, address, root, func(path, name string) (wsmailbox.Presence, bool, error) {
+		p, ok, _, err := store.NamedQueue(path, name)
+		return p, ok, err
+	})
+}
+
+// mailboxContactInTx is mailboxContactFor inside a mailbox transaction,
+// which reads the presence through tx (a store call there would wait on the
+// transaction itself).
+func mailboxContactInTx(tx *wsmailbox.Tx, paths wsmailbox.Paths, address, root string) mailboxContact {
+	return mailboxContactWith(paths, address, root, func(path, name string) (wsmailbox.Presence, bool, error) {
+		store, err := tx.Named(path)
+		if err != nil {
+			return wsmailbox.Presence{}, false, err
+		}
+		p, ok := store.Presence[name]
+		return p, ok, nil
+	})
+}
+
+func mailboxContactWith(paths wsmailbox.Paths, address, root string, presence func(path, name string) (wsmailbox.Presence, bool, error)) mailboxContact {
 	c := mailboxContact{Address: address}
 	if strings.HasPrefix(address, wsmailbox.ReplyIDPrefix) {
 		return c
@@ -475,11 +470,7 @@ func mailboxContactFor(paths wsmailbox.Paths, address, root string) mailboxConta
 	if err != nil {
 		return c
 	}
-	store, err := wsmailbox.Load(path)
-	if err != nil {
-		return c
-	}
-	if p, ok := store.Presence[name]; ok {
+	if p, ok, err := presence(path, name); err == nil && ok {
 		c.Harness, c.Cwd = p.Harness, p.Cwd
 	}
 	return c
@@ -495,41 +486,47 @@ func mailboxContactFor(paths wsmailbox.Paths, address, root string) mailboxConta
 // named-inbox address ("" when none), and a contact equal to it or to the
 // caller's own reply-id is skipped (self-exclusion).
 func (s *Server) publishReplyID(callerSessionKey, root, ownNamed string, contacts ...mailboxContact) (string, error) {
-	replyID := s.mailboxReplyID(callerSessionKey)
-	path, err := s.mailboxPaths().ReplyRegistry()
+	var replyID string
+	err := s.mailboxPaths().Store().WithReplyLock(func(store *wsmailbox.ReplyStore) error {
+		replyID = s.publishReplyEntry(store, callerSessionKey, root, ownNamed, contacts...)
+		return nil
+	})
 	if err != nil {
 		return "", err
 	}
+	return replyID, nil
+}
+
+// publishReplyEntry is publishReplyID's change to store, for a caller that
+// makes it inside a larger mailbox transaction (a send, a recv). It reaps
+// expired entries (wsmailbox.ReapReplyEntries) in the same change.
+func (s *Server) publishReplyEntry(store *wsmailbox.ReplyStore, callerSessionKey, root, ownNamed string, contacts ...mailboxContact) string {
+	replyID := s.mailboxReplyID(callerSessionKey)
 	nowStr := mailboxNowString()
 	harness := s.currentHarness()
-	if err := wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error {
-		reapStaleReplyIDs(store, mailboxNow())
-		entry := store.Entries[replyID]
-		entry.LastSeen = nowStr
-		// A caller that does not know its harness (the dashboard daemon
-		// claiming mail for a session it hosts) keeps the recorded one.
-		if harness != "" {
-			entry.Harness = harness
-		}
-		entry.Cwd = root
-		for _, c := range contacts {
-			if c.Address == "" || c.Address == wsmailbox.ReplyIDPrefix+replyID || (ownNamed != "" && c.Address == ownNamed) {
-				continue
-			}
-			rec := wsmailbox.Contact{LastExchange: nowStr, Harness: c.Harness, Cwd: c.Cwd}
-			if peerID, ok := strings.CutPrefix(c.Address, wsmailbox.ReplyIDPrefix); ok {
-				if peer, found := store.Entries[peerID]; found {
-					rec.Harness, rec.Cwd = peer.Harness, peer.Cwd
-				}
-			}
-			entry.RecordContact(c.Address, rec)
-		}
-		store.Entries[replyID] = entry
-		return nil
-	}); err != nil {
-		return "", err
+	wsmailbox.ReapReplyEntries(store, mailboxNow())
+	entry := store.Entries[replyID]
+	entry.LastSeen = nowStr
+	// A caller that does not know its harness (the dashboard daemon
+	// claiming mail for a session it hosts) keeps the recorded one.
+	if harness != "" {
+		entry.Harness = harness
 	}
-	return replyID, nil
+	entry.Cwd = root
+	for _, c := range contacts {
+		if c.Address == "" || c.Address == wsmailbox.ReplyIDPrefix+replyID || (ownNamed != "" && c.Address == ownNamed) {
+			continue
+		}
+		rec := wsmailbox.Contact{LastExchange: nowStr, Harness: c.Harness, Cwd: c.Cwd}
+		if peerID, ok := strings.CutPrefix(c.Address, wsmailbox.ReplyIDPrefix); ok {
+			if peer, found := store.Entries[peerID]; found {
+				rec.Harness, rec.Cwd = peer.Harness, peer.Cwd
+			}
+		}
+		entry.RecordContact(c.Address, rec)
+	}
+	store.Entries[replyID] = entry
+	return replyID
 }
 
 // markMailboxReplyOpened stamps the session record's MailboxReplyOpened
@@ -600,7 +597,7 @@ func (s *Server) rebindMailboxOwnerAtFerrule(newSessionKey, parentKey string, sc
 	nowStr := now.Format(time.RFC3339)
 	pid := s.pid()
 	bound := false
-	werr := wsmailbox.WithLock(path, func(store *wsmailbox.StoreFile) error {
+	werr := s.mailboxPaths().Store().WithLock(path, func(store *wsmailbox.StoreFile) error {
 		p, ok := store.Presence[identity.Name]
 		if ok && p.PID != pid && mailboxPresenceLive(p, now) {
 			// A different, still-live process now legitimately holds this
@@ -655,11 +652,10 @@ func (s *Server) mailboxOwnerCheck(callerSessionKey string, root string) (isOwne
 	if perr != nil {
 		return false, identity, perr
 	}
-	store, lerr := wsmailbox.Load(path)
+	p, ok, _, lerr := s.mailboxPaths().Store().NamedQueue(path, identity.Name)
 	if lerr != nil {
 		return false, identity, lerr
 	}
-	p, ok := store.Presence[identity.Name]
 	if !ok || p.Owner == "" {
 		return false, identity, nil
 	}

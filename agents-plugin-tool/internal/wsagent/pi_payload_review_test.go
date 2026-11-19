@@ -8,11 +8,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
-func TestPiPreparedSourceDriftWithoutRebuiltBundleUsesBridge(t *testing.T) {
+func TestPiMaterializerSourceDriftDoesNotDisplacePreparedBundle(t *testing.T) {
 	base, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -23,10 +21,16 @@ func TestPiPreparedSourceDriftWithoutRebuiltBundleUsesBridge(t *testing.T) {
 	owner := filepath.Join(base, "agents-plugin-wsflow")
 	copyPiOwner(t, filepath.Join("..", "..", "..", "agents-plugin-wsflow"), owner)
 	sibling := copyPiSourceInputs(t, owner, base)
-	t.Setenv(wsrsrc.EnvRsrcRoot, filepath.Join(owner, "rsrc"))
-	entries, err := piBundledEntries(hostedPluginTestVersion)
+	entries, err := preparedPiEntries(t, owner)
 	if err != nil || len(entries) != 1 || !strings.HasPrefix(entries[0], filepath.Join(base, "cache")) {
 		t.Fatalf("current source payload must stay local: %v, %v", entries, err)
+	}
+	python := lookPython(t)
+	checkSource := func() ([]byte, error) {
+		return exec.Command(python, "-I", filepath.Join(owner, "bin", "ws-pi-payload.py"), "--plugin", owner, "--check-source", base).CombinedOutput()
+	}
+	if out, err := checkSource(); err != nil {
+		t.Fatalf("current source validator: %v: %s", err, out)
 	}
 	path := filepath.Join(sibling, filepath.FromSlash(piBundleSource))
 	raw, err := os.ReadFile(path)
@@ -34,17 +38,14 @@ func TestPiPreparedSourceDriftWithoutRebuiltBundleUsesBridge(t *testing.T) {
 		t.Fatal(err)
 	}
 	piLeadFile(t, path, string(raw)+"\n// development edit\n")
-	entries, err = piBundledEntries(hostedPluginTestVersion)
-	if err == nil || !strings.Contains(err.Error(), "stale") {
-		t.Fatalf("stale sibling bundle must not select unchecked source: %v, %v", entries, err)
+	got, err := preparedPiEntries(t, owner)
+	if err != nil || !slices.Equal(got, entries) {
+		t.Fatalf("validated prepared bundle must win over sibling drift: %v, %v", got, err)
 	}
-	warning := "previous warning"
-	spec := StartSpec{Root: base, Dir: filepath.Join(base, "session"), Lead: &LeadSpec{PluginIsolation: "isolated", Env: map[string]string{EnvHostedSessionKey: "fixture-key"}}}
-	spec.Lead.PluginWarning = func(text string) { warning = text }
-	spec.Lead.WSMCP = func() (MCPCommand, error) { return MCPCommand{Command: "fixture-only"}, nil }
-	_, args, err := piLeadLaunch("pi", nil, spec)
-	if err != nil || !strings.Contains(warning, "EXTENSION NOT LOADED") || !strings.Contains(warning, "stale") || !slices.Contains(args, "builtin:mcp") || slices.Contains(args, path) {
-		t.Fatalf("stale source launch = %v, warning %q, error %v", args, warning, err)
+	// Keep the artifact author's source-drift validator covered separately:
+	// runtime no longer asks the materializer to prefer checkout source.
+	if out, err := checkSource(); err == nil || !strings.Contains(string(out), "stale") {
+		t.Fatalf("source-drift validator accepted stale source: %v: %s", err, out)
 	}
 }
 
@@ -74,7 +75,8 @@ m["files"]["dist/index.js"] = hashlib.sha256(bundle.read_bytes()).hexdigest()
 	if out, err := exec.Command(python, "-I", "-c", script, owner).CombinedOutput(); err != nil {
 		t.Fatalf("fixture: %v: %s", err, out)
 	}
-	t.Setenv(wsrsrc.EnvRsrcRoot, filepath.Join(owner, "rsrc"))
+	usePiPayloadCheckout(t, owner)
+	setHostedPackage(t, "ws")
 	warning := ""
 	spec := StartSpec{Root: base, Dir: filepath.Join(base, "session"), Lead: &LeadSpec{PluginIsolation: "isolated", Env: map[string]string{EnvHostedSessionKey: "fixture-key"}}}
 	spec.Lead.PluginWarning = func(text string) { warning = text }
@@ -100,11 +102,11 @@ func TestPiPreparedPayloadSeparatesDiagnostics(t *testing.T) {
 	piLeadFile(t, filepath.Join(root, "package.json"), "{}")
 	helper := filepath.Join(base, "bin", "ws-pi-payload.py")
 	piLeadFile(t, helper, fmt.Sprintf("import sys\nprint('selection reason', file=sys.stderr)\nprint(%q)\n", root))
-	if got, err := piPreparedPayload(base); err != nil || got != root {
+	if got, err := materializePiPayload(base); err != nil || got != root {
 		t.Fatalf("stderr polluted payload path: %q, %v", got, err)
 	}
 	piLeadFile(t, helper, "import sys\nprint('preparation reason', file=sys.stderr)\nsys.exit(4)\n")
-	if _, err := piPreparedPayload(base); err == nil || !strings.Contains(err.Error(), "preparation reason") {
+	if _, err := materializePiPayload(base); err == nil || !strings.Contains(err.Error(), "preparation reason") {
 		t.Fatalf("stderr missing from failure: %v", err)
 	}
 }

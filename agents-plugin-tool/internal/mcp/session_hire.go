@@ -115,7 +115,7 @@ func objectSchema(properties map[string]any, required ...string) map[string]any 
 
 func sessionHireTools() []map[string]any {
 	return []map[string]any{
-		{"name": "session.request_hire", "description": "Request an owner-approved hosted peer session without blocking. Only a top-level lead enabled by the owner in the dashboard may request hiring. reason explains the request to the owner; recovery_context preserves enough context to recover after compaction (at most 16 KiB). Optional harness, model, effort, and label prefill the owner's controls, not final settings. The session will use your worktree. Acceptance is not creation: approved, rejected, expired (30 minutes), or withdrawn outcomes arrive by mail and echo recovery_context. A hired peer has no hiring entitlement and grants you no stop/close authority.", "inputSchema": objectSchema(map[string]any{
+		{"name": "session.request_hire", "description": "Request an owner-approved hosted peer without blocking; only owner-enabled top-level leads may hire. reason is owner-facing; recovery_context (max 16 KiB) aids compaction recovery. Optional harness, model, effort and label prefill owner controls. The peer uses your worktree. Outcomes (approved, rejected, expired after 30 minutes, withdrawn) arrive by mail with recovery_context. A hired peer cannot hire and grants no stop/close authority.", "inputSchema": objectSchema(map[string]any{
 			"session_key":      stringProperty("Caller's lead session key."),
 			"reason":           stringProperty("Owner-facing explanation (required)."),
 			"recovery_context": stringProperty("Context to recover this request after compaction; required, at most 16 KiB."),

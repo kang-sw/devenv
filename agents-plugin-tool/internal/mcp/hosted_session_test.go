@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
@@ -224,6 +225,9 @@ func TestUnhostedFerruleMintsAndRelogsInAsBefore(t *testing.T) {
 	}
 }
 
+// TestHostedWorkflowManualHoldsTheSessionToItsKey: on a hosted connection
+// workflow_manual renders for the session's own key and lead-scoped
+// descendants in either lineage, and refuses every other key.
 func TestHostedWorkflowManualHoldsTheSessionToItsKey(t *testing.T) {
 	setupWorkflowManualNoteEnv(t)
 	root := t.TempDir()
@@ -231,7 +235,8 @@ func TestHostedWorkflowManualHoldsTheSessionToItsKey(t *testing.T) {
 	s := NewServer(root, "test")
 	hosted, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
 	otherLead, _ := parseLoginResponse(t, callLogin(t, s, 2, root, nil))
-	child, _ := parseLoginResponse(t, callLogin(t, s, 3, root, map[string]any{"parent_session_key": hosted}))
+	ferruleChild, _ := parseLoginResponse(t, callLogin(t, s, 3, root, map[string]any{"parent_session_key": hosted}))
+	child := spawnedLeadKey(t, s, root, hosted, wsagent.ParentLead)
 	hostedSessionEnv(t, hosted)
 	s = NewServer(root, "test")
 	before := sessionKeyFileCount(t, s)
@@ -255,15 +260,15 @@ func TestHostedWorkflowManualHoldsTheSessionToItsKey(t *testing.T) {
 			t.Fatalf("%s: workflow_manual should be refused: %s", tc.name, resp)
 		}
 		text := toolText(t, resp)
-		if !strings.Contains(text, hosted) || !strings.Contains(text, envHostedSessionKey) {
-			t.Fatalf("%s: refusal %q should name the hosted key", tc.name, text)
+		if !strings.Contains(text, hosted) || !strings.Contains(text, envHostedSessionKey) || !strings.Contains(text, "descendant") {
+			t.Fatalf("%s: refusal %q should name the hosted key and the descendant rule", tc.name, text)
 		}
 	}
 	if after := sessionKeyFileCount(t, s); after != before {
 		t.Fatalf("refused manuals minted a key: before=%d after=%d", before, after)
 	}
 
-	for i, key := range []string{hosted, child, " " + hosted + " ", " " + child + " "} {
+	for i, key := range []string{hosted, child, ferruleChild, " " + hosted + " ", " " + child + " "} {
 		resp := callToolOnce(t, s, 20+i, "workflow_manual", map[string]any{"session_key": key})
 		if toolIsError(t, resp) {
 			t.Fatalf("workflow_manual(%q) refused: %s", key, resp)

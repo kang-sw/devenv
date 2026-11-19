@@ -46,11 +46,13 @@ test("legacy guidance carries explicit argument/lifecycle translation, while cur
   const adapted = adaptLegacyPiGuidance(original);
   assert.ok(adapted.startsWith(original));
   assert.ok(adapted.includes(PI_AGENT_COMPAT_GUIDE));
-  assert.match(adapted, /write_scopes are not pi.spawn arguments/);
-  assert.match(adapted, /if pi\.\* is unavailable/);
+  assert.match(adapted, /write_scopes are not agent\.spawn arguments/);
+  assert.match(adapted, /if agent\.\* is unavailable/);
+  assert.match(adapted, /ws\/mailbox\.send to the child's returned address/);
+  assert.doesNotMatch(adapted, /\bpi\.(?:spawn|send|list|stop|transcript|wait)\b|ws__pi_/);
   assert.match(adapted, /ws-fork is retired/);
   assert.equal(adaptLegacyPiGuidance(adapted), adapted);
-  assert.equal(adaptLegacyPiGuidance("Use ws/pi.spawn at tier small."), "Use ws/pi.spawn at tier small.");
+  assert.equal(adaptLegacyPiGuidance("Use ws/agent.spawn at tier small."), "Use ws/agent.spawn at tier small.");
   const image = { type: "image", data: "unchanged" };
   assert.deepEqual(adaptPiGuidanceContent([image, { type: "text", text: original }]), [image, { type: "text", text: adapted }]);
 });
@@ -154,8 +156,10 @@ test("all other spawn failures and unknown outcomes are returned without retry",
 
 test("guides describe daemon transport separately from retained execution approval", () => {
   const guide = readFileSync(new URL("../pi-lead-guide.md", import.meta.url), "utf8");
-  for (const tool of ["spawn", "send", "list", "stop", "transcript", "wait"]) assert.ok(guide.includes(`ws/pi.${tool}`));
-  assert.match(guide, /profile `explore` at tier\n`small`/);
+  for (const tool of ["agent.spawn", "agent.tiers", "agent.list", "agent.interrupt", "mailbox.send"]) assert.ok(guide.includes(`ws/${tool}`), tool);
+  assert.doesNotMatch(guide, /\bpi\.(?:spawn|send|list|stop|transcript|wait)\b|ws__pi_|`pi:<id>`/);
+  assert.match(guide, /tier `small` with\nauthority `read-only`/);
+  assert.match(guide, /labelled `agent:<id>`/);
   assert.match(guide, /not daemon children/);
   assert.doesNotMatch(guide, /ws-agent-(?:spawn|send|list|stop|transcript)|ws-fork/);
   const execution = readFileSync(new URL("../execute-worker-guide.md", import.meta.url), "utf8");

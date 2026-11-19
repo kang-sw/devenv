@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,12 +21,12 @@ func TestBatchPromotionRenderedContract(t *testing.T) {
 				pkg = "agents-plugin-wsflow"
 			}
 			root := filepath.Join("..", "..", "..", pkg, "rsrc")
-			t.Setenv("WS_RSRC_ROOT", root)
+			useResourceFixture(t, root)
 			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 			t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 			s := newTestServerWithHarness(t, "codex")
 			lead := toolText(t, callToolOnce(t, s, 1, "playbook.read", map[string]any{"name": "lead-ticket"}))
-			design, _, err := renderPlaybookBody(s, root, "ticket-reviewer-design", nil, wsconfig.Options{}, "", "", "", nil, "")
+			design, _, err := renderPlaybookBody(s, os.DirFS(root), "ticket-reviewer-design", nil, wsconfig.Options{}, "", "", "", nil, "")
 			if err != nil {
 				t.Fatal(err)
 			}

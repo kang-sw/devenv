@@ -83,6 +83,7 @@ def build_local(launcher, scratch: Path) -> Path:
         raise RuntimeError("go is not on PATH")
     out = scratch / binary_name(launcher)
     print(f"building locally: {TOOL_DIR / 'cmd' / 'ws-mcp'}")
+    launcher.generate_package_assets(TOOL_DIR)
     identity = launcher.source_runtime_metadata(TOOL_DIR)
     proc = subprocess.run(
         [go, "build", "-o", str(out), "./cmd/ws-mcp"],
@@ -123,7 +124,7 @@ def build_remote(launcher, scratch: Path) -> Path:
     goos, goarch = launcher.host_os(), launcher.host_arch()
     remote_cmd = (
         "export PATH=$HOME/sdk/go/bin:$PATH; "
-        f"cd agents-plugin-tool && mkdir -p dist-x && "
+        f"cd agents-plugin-tool && python3 scripts/generate-package-assets.py && mkdir -p dist-x && "
         f"CGO_ENABLED=0 GOOS={goos} GOARCH={goarch} go build -o dist-x/{name} ./cmd/ws-mcp && "
         f"python3 scripts/write-runtime-metadata.py dist-x/{name}"
     )

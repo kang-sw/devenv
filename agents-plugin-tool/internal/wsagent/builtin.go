@@ -57,6 +57,8 @@ func searchAnswerTools(backend string) []string {
 const (
 	LeadProfileClaude = "lead-claude"
 	LeadProfilePi     = "lead-pi"
+	LeadProfileAgy    = "lead-agy"
+	LeadProfileCodex  = "lead-codex"
 )
 
 // LeadProfileFor is the builtin lead profile of a harness, "" for a harness
@@ -113,16 +115,43 @@ var PiMiniLeadWSTools = append(append([]string{}, PiWorkerWSTools...),
 	"playbook.read", "playbook.render", "path.generate", "route.resolve_implement",
 )
 
+// AgentWSTools are the common ws tools every agent.spawn child gets, on
+// every harness: PiMiniLeadWSTools with agent.* in place of pi.*, plus
+// mailbox.send. The child's authority does not select among them; a
+// read-only child's ws-mcp refuses the mutating ones (EnvPermissionLevel).
+var AgentWSTools = agentWSTools()
+
+func agentWSTools() []string {
+	out := []string{}
+	for _, name := range PiMiniLeadWSTools {
+		if !strings.HasPrefix(name, "pi.") {
+			out = append(out, name)
+		}
+	}
+	return append(out, "agent.spawn", "agent.interrupt", "agent.list", "agent.tiers", "mailbox.send")
+}
+
+// AgentClaudeTools are a Claude agent.spawn child's native tools.
+var AgentClaudeTools = []string{"Bash", "Read", "Edit", "Write", "Glob", "Grep"}
+
 //go:embed instructions/tracker-support.md
 var trackerSupportText string
 
 //go:embed instructions/explore.md
 var exploreText string
 
+//go:embed instructions/agent-worker-agy.md
+var agyWorkerText string
+
+//go:embed instructions/agent-worker-codex.md
+var codexWorkerText string
+
 // builtinInstructionTexts are the embedded instruction texts by name.
 var builtinInstructionTexts = map[string]string{
-	supportInstructions: trackerSupportText,
-	ExploreProfile:      exploreText,
+	supportInstructions:  trackerSupportText,
+	ExploreProfile:       exploreText,
+	"agent-worker-agy":   agyWorkerText,
+	"agent-worker-codex": codexWorkerText,
 }
 
 // BuiltinInstructionNames are the names a builtin: instructions value may
@@ -185,6 +214,22 @@ func BuiltinProfiles() map[string]json.RawMessage {
 		panic(err)
 	}
 	out[ProfilePrefix+PiMiniLeadProfile] = raw
+	for backend, tools := range map[string][]string{BackendClaude: AgentClaudeTools, BackendPi: PiWorkerTools, BackendAgy: nil, BackendCodex: nil} {
+		p := Profile{
+			Description: fmt.Sprintf("Agent worker (%s): the internal profile of a child agent.spawn starts on this harness; its tier picks the model, its system prompt the instructions, and its authority the permission level.", backend),
+			Backend:     backend,
+			Tools:       tools,
+			WSTools:     AgentWSTools,
+		}
+		if _, ok := builtinInstructionTexts[AgentWorkerProfile(backend)]; ok {
+			p.Instructions = BuiltinInstructionsPrefix + AgentWorkerProfile(backend)
+		}
+		raw, err := json.Marshal(p)
+		if err != nil {
+			panic(err)
+		}
+		out[ProfilePrefix+AgentWorkerProfile(backend)] = raw
+	}
 	raw, err = json.Marshal(Profile{
 		Description:  "Local read-only Pi researcher reporting evidence from project files.",
 		Backend:      BackendPi,
@@ -209,6 +254,8 @@ func BuiltinProfiles() map[string]json.RawMessage {
 	for name, p := range map[string]Profile{
 		LeadProfileClaude: {Backend: BackendClaude, PermissionMode: DefaultLeadPermissionMode},
 		LeadProfilePi:     {Backend: BackendPi},
+		LeadProfileAgy:    {Backend: BackendAgy},
+		LeadProfileCodex:  {Backend: BackendCodex},
 	} {
 		p.Lead = true
 		p.Description = fmt.Sprintf("Hosted lead session (%s): a headless session the dashboard spawns on a worktree, with the user's own harness setup.", p.Backend)

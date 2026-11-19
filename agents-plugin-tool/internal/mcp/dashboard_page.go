@@ -60,7 +60,7 @@ func (src *DashboardSessionSource) ReadPageLang(reg wsdashboard.Registration, la
 		Contacts:   src.readContacts(reg),
 		MailBodies: map[string]string{},
 	}
-	if history, err := src.history.read(reg.ReplyID, key); err == nil {
+	if history, err := readMailboxHistory("", key); err == nil {
 		for _, r := range history {
 			page.MailBodies[r.Name] = wslive.ScrubSessionKeys(r.Body, key)
 		}
@@ -158,7 +158,8 @@ func (src *DashboardSessionSource) renderBoard(key string, record sessionRecord,
 	}
 	memoKey := replyID + "\x00" + lang
 	replies, repliesOK := src.loadReplies()
-	base := boardMemoBase(key, record, lang, reasked, replyPrint(replies, repliesOK, replyID))
+	mail := sessionMailPrint(replies, repliesOK, replyID, key)
+	base := boardMemoBase(key, record, lang, reasked, mail)
 	m := &src.boards
 	m.mu.Lock()
 	prev, had := m.entries[memoKey]
@@ -170,7 +171,7 @@ func (src *DashboardSessionSource) renderBoard(key string, record sessionRecord,
 			return prev.board, true
 		}
 	}
-	shared := boardMemoSharedBase(key, record, lang, reasked, replyPrint(replies, repliesOK, replyID))
+	shared := boardMemoSharedBase(key, record, lang, reasked, mail)
 	if had {
 		shared += boardWatchStamp(prev.board.externalWatch)
 	}
@@ -298,7 +299,7 @@ func (src *DashboardSessionSource) renderBoardTopics(key string, record sessionR
 		return docImageSrc(path)
 	}
 	in.Panels = servedWhiteboardPanels(record, key, replyID, lang, watch, func() ([]mailboxHistoryRecord, error) {
-		return src.history.read(replyID, key)
+		return readMailboxHistory("", key)
 	}, src.loadReplies)
 	// An armed wait shows as long as its process runs, and a process can
 	// die leaving its marker: no watched file reports that, so the page
@@ -561,15 +562,10 @@ func (src *DashboardSessionSource) readContacts(reg wsdashboard.Registration) []
 	return src.contactsFrom(reg, replies)
 }
 
-// loadReplies loads the machine reply-id registry through the source's
-// cache; false when it cannot be read. The store is shared: the caller only
-// reads it.
+// loadReplies reads the machine reply-id registry from the mailbox store;
+// false when it cannot be read.
 func (src *DashboardSessionSource) loadReplies() (wsmailbox.ReplyStore, bool) {
-	path, err := wsmailbox.ReplyRegistryPath()
-	if err != nil {
-		return wsmailbox.ReplyStore{}, false
-	}
-	replies, err := src.replies.LoadIdentity(path, wsmailbox.LoadReplyStore)
+	replies, err := wsmailbox.Paths{}.Store().LoadReply()
 	if err != nil {
 		return wsmailbox.ReplyStore{}, false
 	}
@@ -589,23 +585,51 @@ func replyPrint(replies wsmailbox.ReplyStore, ok bool, replyID string) string {
 	return fmt.Sprintf("%s\x00%d", contacts, len(replies.Queues[replyID]))
 }
 
-// MailPrint is the session's reply-registry print (replyPrint), which the
-// daemon's refresh stamp folds, since mail to a reply-id sends no nudge
-// (wsdashboard.MailPrintSource).
+// sessionMailPrint is what the served board and page show of session key's
+// mail state (reply-id replyID): its reply-registry print (replyPrint), its
+// history window's entry names, and its armed-wait marker. All of it lives
+// in the memory-first mailbox store, outside any file a page watches.
+func sessionMailPrint(replies wsmailbox.ReplyStore, ok bool, replyID, key string) string {
+	var b strings.Builder
+	b.WriteString(replyPrint(replies, ok, replyID))
+	if key == "" {
+		return b.String()
+	}
+	if history, err := readMailboxHistory("", key); err == nil {
+		b.WriteString("\x00history")
+		for _, r := range history {
+			b.WriteString("\x00" + r.Name)
+		}
+	}
+	if marker, ok, _ := wsmailbox.ReadListeningMarker(key); ok {
+		fmt.Fprintf(&b, "\x00marker\x00%d", marker.PID)
+	}
+	return b.String()
+}
+
+// MailPrint is the session's mail print (sessionMailPrint, over every
+// session key the reply-id maps to), which the daemon's refresh stamp
+// folds: the store's queue hints renew it, and no file a page watches
+// changes with mail (wsdashboard.MailPrintSource).
 func (src *DashboardSessionSource) MailPrint(reg wsdashboard.Registration) (string, bool) {
 	replies, ok := src.loadReplies()
-	return replyPrint(replies, ok, reg.ReplyID), true
+	src.mu.Lock()
+	keys := slices.Clone(src.byReply[reg.ReplyID])
+	src.mu.Unlock()
+	if len(keys) == 0 {
+		return sessionMailPrint(replies, ok, reg.ReplyID, ""), true
+	}
+	var b strings.Builder
+	for _, key := range keys {
+		b.WriteString(sessionMailPrint(replies, ok, reg.ReplyID, key))
+		b.WriteString("\x01")
+	}
+	return b.String(), true
 }
 
-// contactsFrom is readContacts over a reply registry already loaded.
+// contactsFrom is readContacts over a reply registry already loaded. The
+// local stores map reads each scope's named store once.
 func (src *DashboardSessionSource) contactsFrom(reg wsdashboard.Registration, replies wsmailbox.ReplyStore) []wsdashboard.Contact {
-	return src.contactsFromRead(reg, replies, false)
-}
-
-// contactsFromRead validates only the scope stores this authoritative index
-// read actually resolves. Presentation reads retain shared TTL validation, and
-// the local stores map shares each scope's path resolution and validation.
-func (src *DashboardSessionSource) contactsFromRead(reg wsdashboard.Registration, replies wsmailbox.ReplyStore, authoritative bool) []wsdashboard.Contact {
 	sorted := wsmailbox.SortedContacts(replies.Entries[reg.ReplyID].Contacts)
 	if len(sorted) == 0 {
 		return nil
@@ -618,10 +642,7 @@ func (src *DashboardSessionSource) contactsFromRead(reg wsdashboard.Registration
 		}
 		stores[scope] = nil
 		if path, err := wsmailbox.PathForScope(scope, reg.Project); err == nil {
-			if authoritative {
-				src.scopes.InvalidateUnder(path)
-			}
-			if store, err := src.scopes.LoadIdentity(path, wsmailbox.Load); err == nil {
+			if store, err := (wsmailbox.Paths{}).Store().Load(path); err == nil {
 				stores[scope] = &store
 			}
 		}

@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>Approved Concept Mockup — Paged Docking Gallery (v4)</title>
+<style>
+  :root {
+    --wb-bg: #141518;
+    --wb-fg: #e7e7e4;
+    --wb-card: #1e2024;
+    --wb-muted: #2b2d32;
+    --wb-muted-fg: #a2a6ad;
+    --wb-primary: #7aa2ff;
+    --wb-primary-fg: #0c1424;
+    --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+    --wb-wash: color-mix(in srgb, var(--wb-fg) 6%, transparent);
+    --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+    --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  body { margin: 0; padding: 18px; background: var(--wb-bg); color: var(--wb-fg); font: 12.5px/1.45 var(--wb-sans); }
+  .gal-proto { max-width: 960px; margin: 0 auto; color: var(--wb-fg); font: 12.5px/1.45 var(--wb-sans); user-select: none; }
+  .gal-proto * { box-sizing: border-box; }
+  .gal-proto .gal-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; padding: 6px 8px; border: 1px solid var(--wb-line); border-radius: 8px; background: var(--wb-card); }
+  .gal-proto .gal-seg { display: inline-flex; border: 1px solid var(--wb-line); border-radius: 6px; overflow: hidden; }
+  .gal-proto .gal-seg button { border: 0; background: transparent; color: var(--wb-muted-fg); padding: 4px 7px; font: 600 11px var(--wb-sans); cursor: pointer; }
+  .gal-proto .gal-seg button.on { background: color-mix(in srgb, var(--wb-primary) 16%, transparent); color: var(--wb-primary); }
+  .gal-proto .gal-btn { border: 1px solid var(--wb-line); border-radius: 6px; background: var(--wb-muted); color: var(--wb-fg); padding: 4px 8px; font: 600 11px var(--wb-sans); cursor: pointer; }
+  .gal-proto .gal-btn:hover { border-color: var(--wb-primary); color: var(--wb-primary); }
+  .gal-proto .gal-lbl { font-size: 11px; color: var(--wb-muted-fg); margin-left: 2px; }
+  .gal-proto .gal-status { margin-left: auto; font: 600 11px var(--wb-mono); color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, transparent); padding: 3px 8px; border-radius: 999px; }
+
+  .gal-proto .gal-shell { display: flex; height: 460px; border: 1px solid var(--wb-line); border-radius: 10px; overflow: hidden; background: var(--wb-bg); }
+  .gal-proto .gal-shell.narrow { max-width: 500px; margin: 0 auto; }
+
+  .gal-proto .gal-board { flex: 1 1 0; min-width: 150px; padding: 10px; background: var(--wb-bg); overflow: auto; display: flex; flex-direction: column; gap: 7px; transition: background .12s, box-shadow .12s; }
+  .gal-proto .gal-board.unpin-hi { background: color-mix(in srgb, #e0a84a 11%, var(--wb-bg)); box-shadow: inset 0 0 0 2px #e0a84a; }
+  .gal-proto .gal-shell.narrow > .gal-board,
+  .gal-proto .gal-shell.narrow > .gal-handle { display: none; }
+  .gal-proto .gal-bhead { font-size: 11px; font-weight: 700; color: var(--wb-muted-fg); display: flex; justify-content: space-between; align-items: center; }
+  .gal-proto .gal-unpin-banner { display: none; padding: 5px 8px; border-radius: 6px; background: rgba(224,168,74,.16); border: 1px dashed #e0a84a; color: #e0a84a; font-size: 11.5px; font-weight: 600; text-align: center; }
+  .gal-proto .gal-board.unpin-hi .gal-unpin-banner { display: block; }
+  .gal-proto .gal-bcard { padding: 7px 9px; border: 1px solid var(--wb-line); border-radius: 8px; background: var(--wb-card); display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: grab; }
+  .gal-proto .gal-bcard:hover { border-color: var(--wb-primary); }
+  .gal-proto .gal-bcard .t { font-weight: 600; font-size: 12px; }
+  .gal-proto .gal-bcard .sub { font-size: 11px; color: var(--wb-muted-fg); }
+  .gal-proto .gal-pinbtn { border: 1px solid var(--wb-line); background: var(--wb-wash); color: var(--wb-fg); border-radius: 5px; padding: 2px 7px; font-size: 11px; cursor: pointer; flex: none; }
+  .gal-proto .gal-pinbtn:hover { background: color-mix(in srgb, var(--wb-primary) 16%, transparent); color: var(--wb-primary); border-color: var(--wb-primary); }
+
+  .gal-proto .gal-handle { width: 8px; flex: none; cursor: col-resize; background: var(--wb-card); border-left: 1px solid var(--wb-line); border-right: 1px solid var(--wb-line); display: flex; align-items: center; justify-content: center; }
+  .gal-proto .gal-handle::after { content: ""; width: 2px; height: 34px; border-radius: 2px; background: var(--wb-muted-fg); opacity: .45; }
+  .gal-proto .gal-handle:hover, .gal-proto .gal-handle.drag { background: color-mix(in srgb, var(--wb-primary) 16%, transparent); }
+  .gal-proto .gal-handle:hover::after, .gal-proto .gal-handle.drag::after { background: var(--wb-primary); opacity: 1; }
+
+  .gal-proto .gal-dock { display: flex; flex: none; width: 62%; min-width: 260px; max-width: 80%; background: var(--wb-card); }
+  .gal-proto .gal-shell.narrow .gal-dock { width: 100% !important; max-width: none; flex: 1 1 0; }
+
+  .gal-proto .gal-rail { width: 34px; flex: none; border-right: 1px solid var(--wb-line); background: color-mix(in srgb, var(--wb-bg) 70%, var(--wb-card)); display: flex; flex-direction: column; align-items: center; cursor: ns-resize; }
+  .gal-proto .gal-rail.hidden { display: none; }
+  .gal-proto .gal-rzone { flex: 1 1 0; width: 100%; display: flex; align-items: center; justify-content: center; color: var(--wb-muted-fg); font-size: 10px; opacity: .5; cursor: pointer; transition: background .12s, opacity .12s; }
+  .gal-proto .gal-rzone:hover { background: var(--wb-wash); opacity: 1; color: var(--wb-primary); }
+  .gal-proto .gal-dots { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 8px 0; flex: none; }
+  .gal-proto .gal-dot { width: 22px; height: 22px; border-radius: 999px; border: 1.5px solid var(--wb-muted-fg); background: var(--wb-card); color: var(--wb-muted-fg); font: 700 10px var(--wb-mono); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: transform .12s, background .12s, border-color .12s, height .14s; }
+  .gal-proto .gal-dot:hover { border-color: var(--wb-primary); color: var(--wb-fg); transform: scale(1.08); }
+  .gal-proto .gal-dot.active { height: 28px; border-color: var(--wb-primary); background: var(--wb-primary); color: var(--wb-primary-fg); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-primary) 24%, transparent); }
+  .gal-proto .gal-dot.main { border-color: #5cc46a; color: #5cc46a; font-size: 11px; }
+  .gal-proto .gal-dot.main.active { background: #5cc46a; color: #0b1910; border-color: #5cc46a; box-shadow: 0 0 0 3px rgba(92,196,106,.24); }
+  .gal-proto .gal-dot.empty { border-style: dashed; background: transparent; font-size: 13px; font-weight: 500; }
+  .gal-proto .gal-dot.empty.active { height: 24px; border-style: solid; border-color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 16%, transparent); color: var(--wb-primary); }
+  .gal-proto .gal-dot.spring, .gal-proto .gal-dot.pull-target { outline: 2px solid #e0a84a; outline-offset: 2px; transform: scale(1.16); box-shadow: 0 0 0 5px rgba(224,168,74,.24); }
+  .gal-proto .gal-sep { width: 14px; height: 1px; background: var(--wb-line); margin: 1px 0; }
+
+  .gal-proto .gal-stage { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; padding: 8px; gap: 6px; overflow: hidden; position: relative; }
+  .gal-proto .gal-pmeta { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--wb-muted-fg); padding: 0 2px; flex: none; gap: 8px; }
+  .gal-proto .gal-viewport { flex: 1 1 0; min-height: 0; position: relative; overflow: hidden; display: flex; }
+  .gal-proto .gal-tree { flex: 1 1 0; min-height: 0; display: flex; gap: 6px; overflow: hidden; will-change: transform; transition: transform .22s cubic-bezier(.22, 1, .36, 1); }
+  .gal-proto .gal-tree.pulling { transition: transform .06s linear; }
+  .gal-proto .gal-split { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; gap: 6px; }
+  .gal-proto .gal-split.col { flex-direction: column; }
+  .gal-proto .gal-split.row { flex-direction: row; }
+
+  .gal-proto .gal-pullpill { position: absolute; left: 50%; transform: translateX(-50%) scale(.94); z-index: 10; pointer-events: none; min-width: 220px; max-width: calc(100% - 20px); padding: 5px 10px 6px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--wb-primary) 55%, var(--wb-line)); background: color-mix(in srgb, var(--wb-card) 94%, black); box-shadow: 0 6px 20px rgba(0,0,0,.45); opacity: 0; transition: opacity .14s ease, transform .14s ease; display: flex; flex-direction: column; gap: 4px; }
+  .gal-proto .gal-pullpill.top { top: 8px; }
+  .gal-proto .gal-pullpill.bottom { bottom: 8px; }
+  .gal-proto .gal-pullpill.show { opacity: 1; transform: translateX(-50%) scale(1); }
+  .gal-proto .gal-pullpill.damped { border-color: var(--wb-line); }
+  .gal-proto .gal-pulltxt { font-size: 11px; font-weight: 600; color: var(--wb-fg); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gal-proto .gal-pulltrack { height: 3px; border-radius: 999px; background: var(--wb-muted); overflow: hidden; }
+  .gal-proto .gal-pullfill { height: 100%; width: 0%; border-radius: 999px; background: var(--wb-primary); transition: width .06s linear; }
+  .gal-proto .gal-pullpill.ready .gal-pullfill { background: #5cc46a; }
+
+  .gal-proto .gal-pane { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--wb-line); border-radius: 8px; background: var(--wb-bg); overflow: hidden; position: relative; }
+  .gal-proto .gal-phead { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--wb-line); background: color-mix(in srgb, var(--wb-primary) 11%, transparent); border-left: 3px solid var(--wb-primary); cursor: grab; }
+  .gal-proto .gal-phead:active { cursor: grabbing; }
+  .gal-proto .gal-pane.term .gal-phead { border-left-color: #5cc46a; background: rgba(92,196,106,.11); }
+  .gal-proto .gal-pane.files .gal-phead { border-left-color: #e0a84a; background: rgba(224,168,74,.11); }
+  .gal-proto .gal-pane.panel .gal-phead { border-left-color: #a57bf0; background: rgba(165,123,240,.13); }
+  .gal-proto .gal-ptitle { font-weight: 700; font-size: 12px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gal-proto .gal-ptag { font: 600 10px var(--wb-mono); padding: 1px 5px; border-radius: 4px; background: var(--wb-muted); color: var(--wb-muted-fg); }
+  .gal-proto .gal-x { border: 0; background: transparent; color: var(--wb-muted-fg); width: 22px; height: 22px; border-radius: 5px; cursor: pointer; font-size: 14px; }
+  .gal-proto .gal-x:hover { background: rgba(240,121,126,.18); color: #f0797e; }
+  .gal-proto .gal-pbody { flex: 1 1 0; padding: 9px; overflow: auto; color: var(--wb-muted-fg); font-size: 12px; line-height: 1.55; white-space: pre-wrap; overscroll-behavior: contain; }
+  .gal-proto .gal-pane.term .gal-pbody { font-family: var(--wb-mono); color: #bfe8c5; }
+
+  .gal-proto .gal-overlay { position: absolute; pointer-events: none; background: color-mix(in srgb, var(--wb-primary) 24%, transparent); border: 2px solid var(--wb-primary); border-radius: 6px; display: none; z-index: 5; }
+  .gal-proto .gal-pane[data-dz="top"] .gal-overlay { display: block; left: 3px; right: 3px; top: 3px; height: calc(50% - 5px); }
+  .gal-proto .gal-pane[data-dz="bottom"] .gal-overlay { display: block; left: 3px; right: 3px; bottom: 3px; height: calc(50% - 5px); }
+  .gal-proto .gal-pane[data-dz="left"] .gal-overlay { display: block; left: 3px; top: 3px; bottom: 3px; width: calc(50% - 5px); }
+  .gal-proto .gal-pane[data-dz="right"] .gal-overlay { display: block; right: 3px; top: 3px; bottom: 3px; width: calc(50% - 5px); }
+
+  .gal-proto .gal-empty { flex: 1 1 0; border: 2px dashed var(--wb-line); border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 16px; color: var(--wb-muted-fg); }
+  .gal-proto .gal-empty.drop-hi { border-color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 12%, transparent); }
+  .gal-proto .gal-empty strong { color: var(--wb-fg); font-size: 13px; }
+  .gal-proto .gal-hint { margin-top: 6px; font-size: 11px; color: var(--wb-muted-fg); display: flex; flex-wrap: wrap; gap: 8px; }
+  .gal-proto .gal-hint code { font-family: var(--wb-mono); color: var(--wb-fg); background: var(--wb-muted); padding: 1px 4px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<!-- Approved concept mockup for right-pinned-panel-concept: (05)=ok, (06)=ok -->
+<div class="gal-proto" id="galProtoV4">
+  <div class="gal-toolbar">
+    <div class="gal-seg">
+      <button data-act="wide" class="on">넓은 뷰</button>
+      <button data-act="narrow">좁은 뷰</button>
+    </div>
+    <span class="gal-lbl">바운스 임계치:</span>
+    <div class="gal-seg" data-ref="sensSeg">
+      <button data-sens="200">민감</button>
+      <button data-sens="320" class="on">표준</button>
+      <button data-sens="480">단단함</button>
+    </div>
+    <button class="gal-btn" data-act="reset">초기화</button>
+    <span class="gal-status" data-ref="status"></span>
+  </div>
+
+  <div class="gal-shell" data-ref="shell">
+    <div class="gal-board" data-ref="wideBoard">
+      <div class="gal-bhead"><span>메인 보드</span><span>드래그: 도킹 / 드롭: 언핀</span></div>
+      <div class="gal-unpin-banner">여기에 놓으면 메인 보드로 언핀됩니다</div>
+      <div data-ref="wideBoardList" style="display:flex;flex-direction:column;gap:7px;"></div>
+    </div>
+
+    <div class="gal-handle" data-ref="handle" title="좌우 드래그로 도킹 폭 조절"></div>
+
+    <div class="gal-dock" data-ref="dock">
+      <div class="gal-rail" data-ref="rail" title="레일 위 휠: 즉시 1틱=1페이지 · 클릭/패닝/도트 이동">
+        <div class="gal-rzone" data-ref="zup" title="이전 페이지">▲</div>
+        <div class="gal-dots" data-ref="dots"></div>
+        <div class="gal-rzone" data-ref="zdn" title="다음 페이지">▼</div>
+      </div>
+
+      <div class="gal-stage" data-ref="stage">
+        <div class="gal-pmeta">
+          <span data-ref="plabel"></span>
+          <span data-ref="glog">본문을 맨 아래까지 스크롤한 뒤, 잠깐 멈추고 계속 아래로 굴려보세요!</span>
+        </div>
+        <div class="gal-viewport" data-ref="viewport">
+          <div class="gal-pullpill top" data-ref="pillTop">
+            <div class="gal-pulltxt" data-ref="pillTopTxt"></div>
+            <div class="gal-pulltrack"><div class="gal-pullfill" data-ref="pillTopFill"></div></div>
+          </div>
+          <div class="gal-tree" data-ref="tree"></div>
+          <div class="gal-pullpill bottom" data-ref="pillBot">
+            <div class="gal-pulltxt" data-ref="pillBotTxt"></div>
+            <div class="gal-pulltrack"><div class="gal-pullfill" data-ref="pillBotFill"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="gal-hint">
+    <span><code>빠르게 끝까지 스크롤</code> 관성 차단(실수 전환 방지)</span>
+    <span><code>끝에서 계속 스크롤</code> 러버밴드 밀림 + 진행바 → 임계치 스냅 전환</span>
+    <span><code>중간에 멈춤</code> 탄성 바운스백</span>
+    <span><code>레일 위 휠</code> 즉시 1틱=1페이지</span>
+  </div>
+</div>
+
+<script>
+(() => {
+  const root = document.getElementById('galProtoV4');
+  const ref = n => root.querySelector(`[data-ref="${n}"]`);
+  const rail = ref('rail'), dotsEl = ref('dots'), treeEl = ref('tree'), viewport = ref('viewport');
+  const wideBoard = ref('wideBoard'), wideBoardList = ref('wideBoardList');
+  const statusEl = ref('status'), plabel = ref('plabel'), glog = ref('glog');
+  const handle = ref('handle'), dock = ref('dock'), shell = ref('shell');
+  const pillTop = ref('pillTop'), pillTopTxt = ref('pillTopTxt'), pillTopFill = ref('pillTopFill');
+  const pillBot = ref('pillBot'), pillBotTxt = ref('pillBotTxt'), pillBotFill = ref('pillBotFill');
+
+  const longLines = Array.from({ length: 24 }, (_, i) =>
+    `${String(i + 1).padStart(2, '0')}. [긴 본문 라인] 스크롤 테스트용 콘텐츠입니다 — 끝까지 빠르게 내려도 관성으로는 안 넘어가고, 끝에서 계속 아래로 밀면 러버밴드 바운스 후 Page 2로 스냅됩니다.`
+  ).join('\n');
+
+  const leaf = item => ({ type: 'leaf', id: item.id, item });
+  const countLeaves = n => !n ? 0 : n.type === 'leaf' ? 1 : countLeaves(n.a) + countLeaves(n.b);
+  const titlesOf = n => !n ? [] : n.type === 'leaf' ? [n.item.title] : [...titlesOf(n.a), ...titlesOf(n.b)];
+  function removeLeaf(node, id) {
+    if (!node) return null;
+    if (node.type === 'leaf') return node.id === id ? null : node;
+    const a = removeLeaf(node.a, id), b = removeLeaf(node.b, id);
+    if (!a && !b) return null;
+    if (!a) return b;
+    if (!b) return a;
+    return { ...node, a, b };
+  }
+  function splitLeaf(node, targetId, zone, item) {
+    if (!node) return leaf(item);
+    if (node.type === 'leaf') {
+      if (node.id !== targetId) return node;
+      const dir = (zone === 'left' || zone === 'right') ? 'row' : 'col';
+      const nl = leaf(item);
+      return (zone === 'left' || zone === 'top')
+        ? { type: 'split', dir, a: nl, b: node }
+        : { type: 'split', dir, a: node, b: nl };
+    }
+    return { ...node, a: splitLeaf(node.a, targetId, zone, item), b: splitLeaf(node.b, targetId, zone, item) };
+  }
+
+  const seed = () => ({
+    board: [
+      { id: 'b1', kind: 'topic', title: 'API 스펙 정리 토픽', body: '보드에서 드래그해 도킹하거나 도트 0.3초 호버로 페이지 이동 후 분할 배치할 수 있습니다.' },
+      { id: 'b2', kind: 'files', title: 'dashboard-rail.css 탐색기', body: 'agents-plugin-tool/internal/wsdashboard/assets/\n├─ dashboard-rail.css\n├─ dashboard-board.js\n└─ cards.js' },
+      { id: 'b3', kind: 'panel', title: '개별 패널: 레이아웃 다이어그램', body: '특정 패널만 떼어내어 도킹 페이지에 채울 수 있습니다.' }
+    ],
+    pages: [
+      leaf({ id: 'd1', kind: 'topic', title: '긴 스크롤 토픽 (바운스-스냅 테스트)', body: '▼ 아래로 쭉 스크롤해 끝단 관성 차단과 러버밴드 바운스-스냅을 체험해 보세요!\n\n' + longLines + '\n\n── 본문 끝! 잠깐 멈췄다가 아래로 계속 스크롤하면 Page 2로 밀려 넘어갑니다 ──' }),
+      {
+        type: 'split', dir: 'col',
+        a: leaf({ id: 'd2', kind: 'term', title: 'w5090 원격 터미널', body: '$ go test ./internal/wswhiteboard/...\nPASS (0.8s)\n\n# 스크롤이 없는 짧은 페이지에서는 위/아래로 밀면 바로 바운스-스냅 게이지가 찹니다.' }),
+        b: leaf({ id: 'd3', kind: 'panel', title: '테스트 로그 비교 패널', body: '위쪽으로 밀면 Page 1, 아래쪽으로 밀면 빈 페이지(+)로 넘어갑니다.' })
+      }
+    ]
+  });
+
+  let narrow = false;
+  let state = seed(), active = 0, wheelLock = 0, pan = null, drag = null, springTimer = null, springTarget = null;
+  let threshold = 320;
+  const log = m => { glog.textContent = m; };
+  const minActive = () => narrow ? -1 : 0;
+
+  let pullDir = 0, pullAcc = 0, pullDecayTimer = null;
+  let inertiaGuard = false, lastWheelAt = 0, flipLockUntil = 0;
+
+  function pageName(idx) {
+    if (idx === -1) return 'Page 0 · 메인 보드';
+    if (idx === state.pages.length) return '마지막 빈 페이지 (+)';
+    const pg = state.pages[idx];
+    return pg ? `Page ${idx + 1} · ${titlesOf(pg)[0]}` : '';
+  }
+
+  function resetPull(animate = true) {
+    pullDir = 0; pullAcc = 0;
+    if (pullDecayTimer) { clearTimeout(pullDecayTimer); pullDecayTimer = null; }
+    treeEl.classList.toggle('pulling', !animate);
+    treeEl.style.transform = 'translateY(0px)';
+    pillTop.classList.remove('show', 'ready', 'damped');
+    pillBot.classList.remove('show', 'ready', 'damped');
+    dotsEl.querySelectorAll('.pull-target').forEach(el => el.classList.remove('pull-target'));
+  }
+
+  function animateFlipTo(nextIdx, dir) {
+    resetPull(false);
+    active = nextIdx;
+    flipLockUntil = Date.now() + 420;
+    inertiaGuard = false;
+    log(dir > 0 ? `경계 바운스-스냅 ↓ → ${pageName(nextIdx)}` : `경계 바운스-스냅 ↑ → ${pageName(nextIdx)}`);
+    render();
+    treeEl.classList.add('pulling');
+    treeEl.style.transform = `translateY(${dir * 28}px)`;
+    requestAnimationFrame(() => {
+      treeEl.classList.remove('pulling');
+      treeEl.style.transform = 'translateY(0px)';
+    });
+  }
+
+  function highlightPullDot(targetIdx) {
+    dotsEl.querySelectorAll('.pull-target').forEach(el => el.classList.remove('pull-target'));
+    const el = dotsEl.querySelector(`[data-dot-idx="${targetIdx}"]`);
+    if (el) el.classList.add('pull-target');
+  }
+
+  viewport.addEventListener('wheel', e => {
+    const dy = e.deltaY;
+    if (Math.abs(dy) < 1) return;
+    const dir = dy > 0 ? 1 : -1;
+    const now = Date.now();
+    const gap = now - lastWheelAt;
+    lastWheelAt = now;
+
+    const scroller = e.target.closest('.gal-pbody, .gal-board');
+    if (scroller) {
+      const canDown = scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 2;
+      const canUp = scroller.scrollTop > 2;
+      if ((dir > 0 && canDown) || (dir < 0 && canUp)) {
+        inertiaGuard = true;
+        if (pullAcc > 0) resetPull(true);
+        return;
+      }
+    }
+
+    const nextIdx = active + dir;
+    if (nextIdx < minActive() || nextIdx > state.pages.length) return;
+    e.preventDefault();
+    if (now < flipLockUntil) return;
+    if (inertiaGuard && gap >= 170) inertiaGuard = false;
+
+    const pill = dir > 0 ? pillBot : pillTop;
+    const pillTxt = dir > 0 ? pillBotTxt : pillTopTxt;
+    const pillFill = dir > 0 ? pillBotFill : pillTopFill;
+    (dir > 0 ? pillTop : pillBot).classList.remove('show', 'ready', 'damped');
+
+    if (inertiaGuard) {
+      treeEl.classList.add('pulling');
+      treeEl.style.transform = `translateY(${-dir * 5}px)`;
+      pill.classList.add('show', 'damped');
+      pillTxt.textContent = dir > 0 ? '끝단 도달 · 잠시 후 계속 밀면 다음 페이지' : '최상단 도달 · 잠시 후 계속 밀면 이전 페이지';
+      pillFill.style.width = '0%';
+      clearTimeout(pullDecayTimer);
+      pullDecayTimer = setTimeout(() => resetPull(true), 220);
+      return;
+    }
+
+    if (pullDir !== 0 && pullDir !== dir) { resetPull(true); return; }
+    pullDir = dir;
+    pullAcc += Math.min(125, Math.abs(dy));
+    const pct = Math.min(1, pullAcc / threshold);
+    const shift = 26 * (1 - Math.exp(-pct * 2.3));
+    treeEl.classList.add('pulling');
+    treeEl.style.transform = `translateY(${-dir * shift.toFixed(1)}px)`;
+
+    pill.classList.remove('damped');
+    pill.classList.add('show');
+    pill.classList.toggle('ready', pct >= 0.85);
+    pillTxt.textContent = `${dir > 0 ? '↓' : '↑'} ${pageName(nextIdx)} (${Math.round(pct * 100)}%)`;
+    pillFill.style.width = `${Math.round(pct * 100)}%`;
+    highlightPullDot(nextIdx);
+
+    clearTimeout(pullDecayTimer);
+    if (pullAcc >= threshold) animateFlipTo(nextIdx, dir);
+    else {
+      log(`경계 텐션 ${Math.round(pct * 100)}% — 계속 밀면 스냅, 멈추면 바운스백`);
+      pullDecayTimer = setTimeout(() => { log('임계치 미만 유휴 → 탄성 바운스백'); resetPull(true); }, 240);
+    }
+  }, { passive: false });
+
+  function clearSpring() {
+    if (springTimer) { clearTimeout(springTimer); springTimer = null; }
+    springTarget = null;
+    dotsEl.querySelectorAll('.spring').forEach(el => el.classList.remove('spring'));
+  }
+  function scheduleSpring(targetIdx, dotEl, label) {
+    if (springTarget === targetIdx) return;
+    clearSpring();
+    springTarget = targetIdx;
+    dotEl.classList.add('spring');
+    springTimer = setTimeout(() => {
+      springTimer = null; springTarget = null;
+      if (active !== targetIdx) { active = targetIdx; log(`스프링-로드 → ${label}`); render(); }
+    }, 300);
+  }
+  function cleanEmptyPages() {
+    state.pages = state.pages.filter(Boolean);
+    if (active > state.pages.length) active = state.pages.length;
+    if (active < minActive()) active = minActive();
+  }
+  function detectZone(el, ev) {
+    const r = el.getBoundingClientRect();
+    const x = (ev.clientX - r.left) / r.width, y = (ev.clientY - r.top) / r.height;
+    const m = Math.min(y, 1 - y, x, 1 - x);
+    return m === x ? 'left' : m === 1 - x ? 'right' : m === y ? 'top' : 'bottom';
+  }
+  function buildBoardCards(container) {
+    container.innerHTML = '';
+    state.board.forEach(it => {
+      const c = document.createElement('div');
+      c.className = 'gal-bcard'; c.draggable = true;
+      c.innerHTML = `<div><div class="t"></div><div class="sub">${it.kind}</div></div><button class="gal-pinbtn">도킹</button>`;
+      c.querySelector('.t').textContent = it.title;
+      c.querySelector('.gal-pinbtn').addEventListener('click', () => {
+        state.board = state.board.filter(b => b.id !== it.id);
+        state.pages.push(leaf(it)); active = state.pages.length - 1;
+        log(`새 페이지 도킹 (Page ${active + 1})`); render();
+      });
+      c.addEventListener('dragstart', e => { drag = { src: 'board', item: it }; e.dataTransfer.setData('text/plain', 'board:' + it.id); rail.classList.remove('hidden'); });
+      c.addEventListener('dragend', () => { drag = null; clearSpring(); render(); });
+      container.appendChild(c);
+    });
+  }
+  function renderNode(node, pageIdx) {
+    if (node.type === 'split') {
+      const wrap = document.createElement('div');
+      wrap.className = 'gal-split ' + node.dir;
+      wrap.append(renderNode(node.a, pageIdx), renderNode(node.b, pageIdx));
+      return wrap;
+    }
+    const it = node.item;
+    const pane = document.createElement('div');
+    pane.className = 'gal-pane ' + it.kind;
+    pane.innerHTML = `<div class="gal-phead" draggable="true"><span class="gal-ptag">${it.kind}</span><span class="gal-ptitle"></span><button class="gal-x" title="언핀/닫기">×</button></div><div class="gal-pbody"></div><div class="gal-overlay"></div>`;
+    pane.querySelector('.gal-ptitle').textContent = it.title;
+    pane.querySelector('.gal-pbody').textContent = it.body;
+    const head = pane.querySelector('.gal-phead');
+    head.addEventListener('dragstart', e => { drag = { src: 'pane', item: it, pageIdx, leafId: node.id }; e.dataTransfer.setData('text/plain', 'pane:' + node.id); });
+    head.addEventListener('dragend', () => { drag = null; clearSpring(); wideBoard.classList.remove('unpin-hi'); root.querySelectorAll('[data-dz]').forEach(el => el.removeAttribute('data-dz')); });
+    pane.querySelector('.gal-x').addEventListener('click', () => {
+      state.pages[pageIdx] = removeLeaf(state.pages[pageIdx], node.id);
+      state.board.unshift(it);
+      const removed = !state.pages[pageIdx];
+      cleanEmptyPages();
+      if (removed && active >= state.pages.length) active = state.pages.length > 0 ? state.pages.length - 1 : minActive();
+      log(removed ? '마지막 패널 닫힘 → 페이지 제거' : '패널 닫힘'); render();
+    });
+    pane.addEventListener('dragover', e => {
+      if (!drag || drag.src === 'dot' || (drag.src === 'pane' && drag.leafId === node.id)) return;
+      e.preventDefault(); pane.setAttribute('data-dz', detectZone(pane, e));
+    });
+    pane.addEventListener('dragleave', e => { if (!pane.contains(e.relatedTarget)) pane.removeAttribute('data-dz'); });
+    pane.addEventListener('drop', e => {
+      if (!drag || drag.src === 'dot' || (drag.src === 'pane' && drag.leafId === node.id)) return;
+      e.preventDefault(); clearSpring();
+      const zone = detectZone(pane, e); pane.removeAttribute('data-dz');
+      const mv = drag.item;
+      if (drag.src === 'board') state.board = state.board.filter(b => b.id !== mv.id);
+      else if (drag.src === 'pane') state.pages[drag.pageIdx] = removeLeaf(state.pages[drag.pageIdx], drag.leafId);
+      let ti = pageIdx;
+      if (drag.src === 'pane' && !state.pages[drag.pageIdx] && drag.pageIdx < pageIdx) ti--;
+      state.pages = state.pages.filter(Boolean);
+      state.pages[ti] = splitLeaf(state.pages[ti], node.id, zone, mv);
+      active = ti; log(`도킹 배열 변경 (${zone} 분할)`); drag = null; render();
+    });
+    return pane;
+  }
+  function wireUnpinTarget(el) {
+    el.addEventListener('dragover', e => { if (drag && drag.src === 'pane') { e.preventDefault(); el.classList.add('unpin-hi'); } });
+    el.addEventListener('dragleave', e => { if (!el.contains(e.relatedTarget)) el.classList.remove('unpin-hi'); });
+    el.addEventListener('drop', e => {
+      if (!drag || drag.src !== 'pane') return;
+      e.preventDefault(); clearSpring(); el.classList.remove('unpin-hi');
+      state.pages[drag.pageIdx] = removeLeaf(state.pages[drag.pageIdx], drag.leafId);
+      state.board.unshift(drag.item);
+      cleanEmptyPages();
+      if (narrow) active = -1;
+      else if (active >= state.pages.length && state.pages.length > 0) active = state.pages.length - 1;
+      log('메인 보드로 언핀 완료'); drag = null; render();
+    });
+  }
+  wireUnpinTarget(wideBoard);
+
+  function render() {
+    cleanEmptyPages();
+    rail.classList.toggle('hidden', state.pages.length === 0 && !drag);
+    const isMain = narrow && active === -1, isEnd = active === state.pages.length;
+    statusEl.textContent = isMain ? `Page 0: 메인 (도킹 ${state.pages.length}p)` : isEnd ? `빈 페이지 (+)` : `Page ${active + 1} / ${state.pages.length}`;
+    buildBoardCards(wideBoardList);
+    dotsEl.innerHTML = '';
+    if (narrow) {
+      const md = document.createElement('div');
+      md.className = 'gal-dot main' + (isMain ? ' active' : '');
+      md.dataset.dotIdx = '-1'; md.textContent = '⌂'; md.title = 'Page 0: 메인 보드';
+      md.addEventListener('click', e => { e.stopPropagation(); active = -1; log('메인 보드(Page 0)'); render(); });
+      md.addEventListener('dragover', e => { if (drag?.src === 'pane') { e.preventDefault(); scheduleSpring(-1, md, '메인 보드'); } });
+      md.addEventListener('dragleave', clearSpring);
+      md.addEventListener('drop', e => {
+        e.preventDefault(); clearSpring(); if (drag?.src !== 'pane') return;
+        state.pages[drag.pageIdx] = removeLeaf(state.pages[drag.pageIdx], drag.leafId);
+        state.board.unshift(drag.item); cleanEmptyPages(); active = -1; log('⌂ 드롭 → 언핀'); drag = null; render();
+      });
+      dotsEl.appendChild(md);
+      const sep = document.createElement('div'); sep.className = 'gal-sep'; dotsEl.appendChild(sep);
+    }
+    state.pages.forEach((pg, idx) => {
+      const d = document.createElement('div');
+      d.className = 'gal-dot' + (idx === active ? ' active' : '');
+      d.dataset.dotIdx = String(idx); d.textContent = String(countLeaves(pg));
+      d.title = `Page ${idx + 1}: ${titlesOf(pg).join(' + ')}`; d.draggable = true;
+      d.addEventListener('click', e => { e.stopPropagation(); active = idx; log(`도트 클릭 → Page ${idx + 1}`); render(); });
+      d.addEventListener('dragstart', e => { drag = { src: 'dot', dotIdx: idx }; e.dataTransfer.setData('text/plain', 'dot:' + idx); });
+      d.addEventListener('dragover', e => {
+        if (!drag || (drag.src === 'dot' && drag.dotIdx === idx)) return;
+        e.preventDefault();
+        if (drag.src === 'dot' || active === idx) d.classList.add('spring');
+        else scheduleSpring(idx, d, `Page ${idx + 1}`);
+      });
+      d.addEventListener('dragleave', clearSpring);
+      d.addEventListener('drop', e => {
+        e.preventDefault(); clearSpring(); if (!drag) return;
+        if (drag.src === 'dot' && drag.dotIdx !== idx) {
+          const [mv] = state.pages.splice(drag.dotIdx, 1); state.pages.splice(idx, 0, mv); active = idx; log(`도트 순서 이동 → Page ${idx + 1}`);
+        } else if (drag.src === 'pane' && drag.pageIdx !== idx) {
+          state.pages[drag.pageIdx] = removeLeaf(state.pages[drag.pageIdx], drag.leafId);
+          const sh = !state.pages[drag.pageIdx] && drag.pageIdx < idx ? -1 : 0;
+          state.pages = state.pages.filter(Boolean);
+          const ti = Math.max(0, Math.min(state.pages.length - 1, idx + sh));
+          state.pages[ti] = { type: 'split', dir: 'col', a: state.pages[ti], b: leaf(drag.item) }; active = ti; log(`Page ${ti + 1}로 이동`);
+        } else if (drag.src === 'board') {
+          state.board = state.board.filter(b => b.id !== drag.item.id);
+          state.pages[idx] = { type: 'split', dir: 'col', a: state.pages[idx], b: leaf(drag.item) }; active = idx; log(`Page ${idx + 1}에 도킹`);
+        }
+        drag = null; render();
+      });
+      d.addEventListener('dragend', () => { drag = null; clearSpring(); });
+      dotsEl.appendChild(d);
+    });
+    const ed = document.createElement('div');
+    ed.className = 'gal-dot empty' + (isEnd ? ' active' : '');
+    ed.dataset.dotIdx = String(state.pages.length); ed.textContent = '+'; ed.title = '마지막 빈 페이지';
+    ed.addEventListener('click', e => { e.stopPropagation(); active = state.pages.length; log('빈 페이지(+)'); render(); });
+    ed.addEventListener('dragover', e => { if (drag && drag.src !== 'dot') { e.preventDefault(); if (active !== state.pages.length) scheduleSpring(state.pages.length, ed, '빈 페이지(+)'); else ed.classList.add('spring'); } });
+    ed.addEventListener('dragleave', clearSpring);
+    ed.addEventListener('drop', e => {
+      e.preventDefault(); clearSpring(); if (!drag || drag.src === 'dot') return;
+      if (drag.src === 'board') state.board = state.board.filter(b => b.id !== drag.item.id);
+      if (drag.src === 'pane') state.pages[drag.pageIdx] = removeLeaf(state.pages[drag.pageIdx], drag.leafId);
+      state.pages.push(leaf(drag.item)); cleanEmptyPages(); active = state.pages.length - 1; log(`새 Page ${active + 1} 생성`); drag = null; render();
+    });
+    dotsEl.appendChild(ed);
+
+    treeEl.innerHTML = '';
+    if (isMain) {
+      plabel.textContent = 'Page 0 · 메인 보드';
+      const mb = document.createElement('div'); mb.className = 'gal-board'; mb.style.padding = '2px';
+      mb.innerHTML = '<div class="gal-unpin-banner">여기에 놓으면 메인 보드로 언핀됩니다</div>';
+      const list = document.createElement('div'); list.style.cssText = 'display:flex;flex-direction:column;gap:7px;';
+      buildBoardCards(list); mb.appendChild(list); wireUnpinTarget(mb); treeEl.appendChild(mb);
+    } else if (isEnd) {
+      plabel.textContent = `마지막 빈 페이지 (Page ${state.pages.length + 1})`;
+      const box = document.createElement('div'); box.className = 'gal-empty';
+      box.innerHTML = '<strong>빈 도킹 페이지</strong><div>여기에 카드·패널을 드롭해 새 페이지를 채우거나<br>위로 스크롤해 이전 페이지로 바운스-스냅해 보세요.</div>';
+      box.addEventListener('dragover', e => { if (drag && drag.src !== 'dot') { e.preventDefault(); box.classList.add('drop-hi'); } });
+      box.addEventListener('dragleave', () => box.classList.remove('drop-hi'));
+      box.addEventListener('drop', e => {
+        e.preventDefault(); clearSpring(); box.classList.remove('drop-hi'); if (!drag || drag.src === 'dot') return;
+        if (drag.src === 'board') state.board = state.board.filter(b => b.id !== drag.item.id);
+        if (drag.src === 'pane') state.pages[drag.pageIdx] = removeLeaf(state.pages[drag.pageIdx], drag.leafId);
+        state.pages.push(leaf(drag.item)); cleanEmptyPages(); active = state.pages.length - 1; log(`새 Page ${active + 1} 생성`); drag = null; render();
+      });
+      treeEl.appendChild(box);
+    } else {
+      const pg = state.pages[active];
+      plabel.textContent = `도킹 Page ${active + 1} · 패널 ${countLeaves(pg)}개`;
+      treeEl.appendChild(renderNode(pg, active));
+    }
+  }
+
+  rail.addEventListener('wheel', e => {
+    e.preventDefault(); const now = Date.now(); if (now - wheelLock < 140) return; wheelLock = now;
+    const dir = e.deltaY > 0 ? 1 : -1;
+    const next = Math.max(minActive(), Math.min(state.pages.length, active + dir));
+    if (next !== active) animateFlipTo(next, dir);
+  }, { passive: false });
+  const step = dir => { const n = Math.max(minActive(), Math.min(state.pages.length, active + dir)); if (n !== active) animateFlipTo(n, dir); };
+  ref('zup').addEventListener('click', () => { if (!pan?.moved) step(-1); });
+  ref('zdn').addEventListener('click', () => { if (!pan?.moved) step(1); });
+  rail.addEventListener('mousedown', e => {
+    if (e.target.classList.contains('gal-dot')) return;
+    pan = { y: e.clientY, p: active, moved: false };
+    const onMove = ev => {
+      const dy = ev.clientY - pan.y; if (Math.abs(dy) > 10) pan.moved = true;
+      const next = Math.max(minActive(), Math.min(state.pages.length, pan.p + Math.round(dy / 36)));
+      if (next !== active) { active = next; log(`상하 패닝 → ${pageName(next)}`); render(); }
+    };
+    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); setTimeout(() => { pan = null; }, 0); };
+    window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
+  });
+  handle.addEventListener('mousedown', e => {
+    e.preventDefault(); handle.classList.add('drag');
+    const r = shell.getBoundingClientRect();
+    const onMove = ev => { dock.style.width = Math.max(260, Math.min(r.width - 150, r.right - ev.clientX)) + 'px'; };
+    const onUp = () => { handle.classList.remove('drag'); window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
+  });
+  root.querySelector('[data-act="wide"]').addEventListener('click', e => { narrow = false; shell.classList.remove('narrow'); e.target.classList.add('on'); root.querySelector('[data-act="narrow"]').classList.remove('on'); if (active < 0) active = 0; render(); });
+  root.querySelector('[data-act="narrow"]').addEventListener('click', e => { narrow = true; shell.classList.add('narrow'); e.target.classList.add('on'); root.querySelector('[data-act="wide"]').classList.remove('on'); active = -1; render(); });
+  ref('sensSeg').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    threshold = Number(b.dataset.sens);
+    ref('sensSeg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+    log(`바운스 임계치 변경: ${b.textContent} (${threshold})`);
+  }));
+  root.querySelector('[data-act="reset"]').addEventListener('click', () => { state = seed(); active = narrow ? -1 : 0; resetPull(false); log('초기화됨'); render(); });
+
+  render();
+})();
+</script>
+</body>
+</html>

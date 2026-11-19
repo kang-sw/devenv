@@ -108,14 +108,14 @@ func TestRailMarkupAvatarBadges(t *testing.T) {
 		return row
 	}
 	for _, want := range []string{
-		`">C</span><span class="qdot" role="img" aria-label="2 items to answer" title="2 items to answer"></span><span class="sbn" title="3 subagents running">3</span></span><span class="rid">q</span>`,
+		`></span><span class="qdot" role="img" aria-label="2 items to answer" title="2 items to answer"></span><span class="sbn" title="3 subagents running">3</span></span><span class="rid">q</span>`,
 		`<a class="drmsg" href="/s/q" tabindex="-1"><span class="s2">last reply</span></a>`,
 	} {
 		if !strings.Contains(rowOf("q"), want) {
 			t.Errorf("row q lacks %s:\n%s", want, rowOf("q"))
 		}
 	}
-	if row := rowOf("p"); !strings.Contains(row, `<span class="hiw"><span class="hi codex"`) || !strings.Contains(row, `">X</span></span><span class="rid">p</span>`) {
+	if row := rowOf("p"); !strings.Contains(row, `<span class="hiw"><span class="hb" data-h="codex"`) || !strings.Contains(row, `></span></span><span class="rid">p</span>`) {
 		t.Errorf("a row without badges must keep the bare wrap before its name:\n%s", row)
 	}
 	if row := rowOf("par"); !strings.Contains(row, `<div class="drmeta"><button type="button" class="kidtog" aria-expanded="true"`) ||

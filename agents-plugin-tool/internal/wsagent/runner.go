@@ -64,20 +64,33 @@ type LeadSession struct {
 	Harness, Session, Cwd string
 }
 
-// LeadMail is a hosted lead session's ws mailbox as the runner uses it: the
-// daemon, not the session's own mailbox wait, delivers its mail.
+// LeadMail is the ws mailbox of the sessions the runner owns, hosted leads
+// and spawned children, as the runner uses it: the daemon, not the
+// session's own mailbox wait, delivers their mail. A child's address
+// (AgentAddress) is its key's reply-id queue, so mail to it lives in the
+// mailbox store's memory and restore ring, never in a file of the
+// runner's.
 type LeadMail interface {
 	// Watch calls changed whenever the mailbox of key may hold new mail,
 	// from any goroutine, until the returned stop is called. While watched,
 	// the session reads to its peers as listening.
 	Watch(root, key string, changed func()) (stop func())
 	// Drain claims every message waiting for key and returns each as the
-	// text the session's model reads for it.
-	Drain(root, key string) ([]string, error)
+	// text the session's model reads for it, oldest first. relation, when
+	// not nil, names how a sender (its reply-id) relates to the session
+	// ("parent", "child", "peer"; "" for none), for the message's head.
+	Drain(root, key string, relation func(sender string) string) ([]ClaimedMail, error)
 	// Return puts texts, mail a Drain claimed and the session never read,
 	// back in key's mailbox for its next claim: the session moved to a
 	// terminal harness, whose own mailbox wait delivers it.
 	Return(root, key string, texts []string) error
+}
+
+// ClaimedMail is one message Drain claimed: the text the session reads,
+// and its sender's reply-id, "" for system mail or a sender with none.
+type ClaimedMail struct {
+	Text   string
+	Sender string
 }
 
 // Env names the runner sets on a hosted lead session's harness. The flag
@@ -119,6 +132,27 @@ type Options struct {
 	// WSMCP is the stdio ws-mcp command serving root, without the runner's
 	// environment; nil refuses profiles that allow ws tools.
 	WSMCP func(root string) (MCPCommand, error)
+	// LeadManual renders the workflow manual of a hosted lead for its lead
+	// key, as the session's own ws-mcp would serve it from the selected
+	// package: backend is the lead's harness, dir its working directory.
+	// The lead's launch appends it to the harness's system prompt
+	// (composeLeadInstructions), so the session reads it from its first
+	// turn. internal/mcp renders the manual and imports this package, so the
+	// daemon supplies the function; nil, or an error, leaves the prompt
+	// with the key sentence alone.
+	LeadManual func(backend, dir, key string) (string, error)
+	// PlaybookCommands lists the lead playbooks a hosted lead of a backend
+	// with BackendRegistration.PlaybookCommands offers as dashboard
+	// commands. The runner reads it once and keeps the list for its
+	// lifetime; nil, or an error, offers none.
+	PlaybookCommands func() ([]wslive.SlashCommand, error)
+	// ExpandCommand renders the body of playbook command name for the
+	// hosted lead whose key is key (backend its harness, dir its working
+	// directory): the body the session's own playbook.read returns, which
+	// the turn running the command carries, so the session needs no read of
+	// its own. internal/mcp renders it, so the daemon supplies the function;
+	// nil, or an error, sends a pointer to that read instead.
+	ExpandCommand func(backend, dir, key, name string) (string, error)
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
 	// Timer starts the lever hold's cap timer (leverHoldCap): a channel
@@ -162,18 +196,20 @@ type Options struct {
 	ChildCheck func() error
 	// heartbeat overrides wslive.HeartbeatInterval for tests.
 	heartbeat time.Duration
-	// keepFinished keeps finished Pi children open (closeWhenDone and
-	// closeAtStart off), for tests that drive a child past its first turn.
-	keepFinished bool
+	// WakeRefused, when not nil, tells the sender of a message Deliver
+	// queued for a sleeping conversation whose start admission refused
+	// now (from: the sender's reply-id, id: the conversation, reason).
+	WakeRefused func(from, id, reason string)
+	// ChildWaitingDays overrides agent.child_waiting_days; 0 reads it.
+	ChildWaitingDays int
 	// spawnListed observes global spawn-projection listings in tests.
 	spawnListed func(string)
 	// stateInboxRead observes state-held inbox scans in tests.
 	stateInboxRead func(string)
 	// closedSnapshotRead observes closed/handed-off snapshot reads in tests.
 	closedSnapshotRead func(string)
-	// sendAdmitting and autoCloseLocking fence lifecycle races in tests.
-	sendAdmitting    func(string)
-	autoCloseLocking func(string)
+	// sendAdmitting observes the revival admission fence in tests.
+	sendAdmitting func(string)
 }
 
 // Runner hosts the agent conversations of one dashboard daemon.
@@ -189,9 +225,12 @@ type Runner struct {
 	convs         map[string]*conv
 	closed        map[string]Record
 	childrenIndex map[ParentRef]map[string]bool // mu; parent identity is immutable
-	quit          chan struct{}
-	wg            sync.WaitGroup
-	once          sync.Once
+	// expiry is childWaitingExpiry's value, read once (expiryOnce).
+	expiryOnce sync.Once
+	expiry     time.Duration
+	quit       chan struct{}
+	wg         sync.WaitGroup
+	once       sync.Once
 	// Separate from mu: held through summary mutation/write fencing without
 	// blocking the runner's ordinary List/Get or spawn snapshot reads.
 	summaryMu     sync.Mutex
@@ -211,6 +250,11 @@ type Runner struct {
 	// rejoined gates nested calls until held-process capabilities are validated.
 	rejoined   chan struct{}
 	rejoinOnce sync.Once
+	// playbookCmds is Options.PlaybookCommands' list, read once
+	// (playbookCommands) under playbookMu.
+	playbookMu     sync.Mutex
+	playbookLoaded bool
+	playbookCmds   []wslive.SlashCommand
 
 	// holders routes the session holders' events to the lead processes.
 	holders holderTable
@@ -225,6 +269,10 @@ type Runner struct {
 	endpoint string
 	tokens   map[string]string
 	tokenOf  map[string]string
+	// mcpTokens are the hosted ws-mcp session tokens (mcp_session.go) by
+	// token, and mcpTokenOf by conversation id.
+	mcpTokens  map[string]*mcpToken
+	mcpTokenOf map[string]string
 }
 
 // NewRunner returns a runner; Start loads its conversations.
@@ -292,12 +340,20 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 			open = append(open, rec)
 		}
 	}
-	var done map[string]bool
-	if !r.opts.keepFinished {
-		done = finishedAtStart(r.opts.Dir, open)
+	gone := map[string]bool{}
+	for _, id := range r.expiredAtStart(open) {
+		// Deepest first: a child waiting past its expiry is deleted with
+		// its descendants, as the heartbeat would (expire).
+		if err := os.RemoveAll(wsdashboard.SessionDir(r.opts.Dir, id)); err != nil {
+			fmt.Fprintf(r.opts.Log, "agent %s: delete: %v\n", id, err)
+			continue
+		}
+		gone[id] = true
 	}
+	open = slices.DeleteFunc(open, func(rec Record) bool { return gone[rec.ReplyID] })
+	orphans := orphansAtStart(open)
 	for _, rec := range open {
-		if done[rec.ReplyID] && r.closeAtStart(rec) {
+		if orphans[rec.ReplyID] && r.closeAtStart(rec) {
 			continue
 		}
 		// A lead whose process may still run under its holder rejoins
@@ -345,8 +401,8 @@ func (r *Runner) loadClosed(rec Record) {
 	r.closedRows[rec.ReplyID] = st
 }
 
-// closeAtStart closes open record rec at Start, as closeWhenDone would
-// have, with no loop started, and reports whether it did.
+// closeAtStart closes open record rec at Start, with no loop started, and
+// reports whether it did.
 func (r *Runner) closeAtStart(rec Record) bool {
 	now := r.opts.Now()
 	rec.ClosedAt = now.UTC().Format(time.RFC3339)
@@ -365,34 +421,14 @@ func (r *Runner) closeAtStart(rec Record) bool {
 	return true
 }
 
-// finishedAtStart picks the open spawned Pi children a daemon start closes
-// instead of serving (closeAtStart), as far as their records tell: one
-// whose last turn settled done and left nothing (no turn open or held, no
-// report its parent has not taken, no sent, held, queued, or claimed
-// input) and no open child of its own that stays, or one whose
-// conversation parent is closed or gone, so no report of it reaches one.
-// A finished one whose process may still run under its holder is served
-// instead: its loop rejoins that process, then closes (closeWhenDone) and
-// ends the holder with its record's holder fence cleared.
-func finishedAtStart(dir string, open []Record) map[string]bool {
+// orphansAtStart picks the open spawned Pi children a daemon start closes
+// instead of serving (closeAtStart): one whose conversation parent is
+// closed or gone, so no report of it reaches one, or that descends from
+// one. A finished child is not closed: it sleeps (agent_tools.go).
+func orphansAtStart(open []Record) map[string]bool {
 	isOpen := map[string]bool{}
-	kids := map[string][]string{}
 	for _, rec := range open {
 		isOpen[rec.ReplyID] = true
-		if rec.Parent != nil && rec.Parent.Kind == ParentConversation {
-			kids[rec.Parent.ReplyID] = append(kids[rec.Parent.ReplyID], rec.ReplyID)
-		}
-	}
-	idle := map[string]bool{}
-	for _, rec := range open {
-		last := rec.LastTurn
-		if rec.Lead || rec.Parent == nil || rec.Backend != BackendPi || last == nil || last.Result.Status != TurnDone || rec.HolderID != "" || rec.TurnOpen || rec.HeldTurn != nil ||
-			rec.Sends > max(last.Mark, rec.Voided) ||
-			len(rec.PendingReports)+len(rec.Queued)+len(rec.Mail)+len(rec.Reports)+len(rec.Steered) > 0 {
-			continue
-		}
-		held, err := wsinbox.Held(wsinbox.Dir(wsdashboard.SessionDir(dir, rec.ReplyID)))
-		idle[rec.ReplyID] = err == nil && len(held) == 0
 	}
 	done := map[string]bool{}
 	stays := func(id string) bool { return isOpen[id] && !done[id] }
@@ -403,9 +439,7 @@ func finishedAtStart(dir string, open []Record) map[string]bool {
 			if done[id] || rec.Lead || rec.Parent == nil || rec.Backend != BackendPi {
 				continue
 			}
-			orphan := rec.Parent.Kind == ParentConversation && !stays(rec.Parent.ReplyID)
-			finished := idle[id] && !slices.ContainsFunc(kids[id], stays)
-			if orphan || finished {
+			if rec.Parent.Kind == ParentConversation && !stays(rec.Parent.ReplyID) {
 				done[id], changed = true, true
 			}
 		}
@@ -545,8 +579,6 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		r.summaryOwners[rec.ReplyID] = c
 		r.summaryMu.Unlock()
 		c.live.owner = c.lockSummaryWriter
-		c.live.wake = func() { r.notify(rec.ReplyID, rec.Root) }
-		c.live.summaryStore().SetWake(c.live.wake)
 	}
 	if rec.Lead {
 		hidden, err := wsdashboard.ReadSessionHidden(r.opts.Dir, rec.ReplyID)
@@ -558,6 +590,13 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		}
 		c.hidden = hidden
 	}
+	c.live.wake = func() {
+		if c.live.slot != nil {
+			c.live.slot.RingAppended()
+		} else {
+			r.notify(rec.ReplyID, rec.Root)
+		}
+	}
 	c.live.beforeSnapshot = c.seedSpawnRows
 	c.observations = c.live.st.ObservedResponses("")
 	own := c.live.st.Snapshot(r.opts.Now().UnixMilli())
@@ -568,6 +607,13 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	if usage := own.Usage; usage != nil && usage.Context != nil && usage.Context.Tokens != nil {
 		tokens := float64(*usage.Context.Tokens)
 		c.contextTokens = &tokens
+	}
+	if seed == nil && rec.Lead {
+		// A rejoined lead's list is its snapshot's, which an earlier daemon
+		// may have written without this runner's playbook commands.
+		if merged := r.withPlaybookCommands(rec, own.Commands); !slices.Equal(merged, own.Commands) {
+			seed = merged
+		}
 	}
 	if len(seed) > 0 {
 		c.live.applyQuiet(wslive.Event{Kind: wslive.KindCommands, Commands: seed})
@@ -605,6 +651,10 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 				}
 			}
 		}
+		if rec.Lead {
+			// Bind after the slot is fixed: summary retries can wake off-loop.
+			c.live.summaryStore().SetWake(c.live.wake)
+		}
 		c.live.writeSnapshot()
 	}
 	if rec.HolderID != "" && !foreign && (rec.Lead || rec.Backend == BackendPi) {
@@ -628,8 +678,10 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	// Do not expose a previous LastTurn while startup still reconciles the
 	// later TurnOpen. The loop reconciles before it accepts this request.
 	c.do(func() {})
-	if rec.Lead && r.opts.Mail != nil && !foreign {
+	if (rec.Lead || rec.Parent != nil) && r.opts.Mail != nil && !foreign {
 		// Mail that waited while no daemon ran is found by the first check.
+		// A spawned child is watched asleep too: mail to its address wakes
+		// it.
 		c.stopMail = r.opts.Mail.Watch(rec.Root, rec.WSKey, c.signalMail)
 		c.signalMail()
 	}
@@ -705,7 +757,7 @@ func (r *Runner) Create(profile, root string) (State, error) {
 func (r *Runner) CreateLead(backend, root string, opts LeadOptions) (State, error) {
 	profile := LeadProfileFor(strings.TrimSpace(backend), r.opts.Backends)
 	if profile == "" {
-		return State{}, categorized(ErrInvalidProfile, badRequest("harness must be %q or %q; got %q", BackendClaude, BackendPi, backend))
+		return State{}, categorized(ErrInvalidProfile, badRequest("harness must be one of %s; got %q", strings.Join(r.leadHarnesses(), ", "), backend))
 	}
 	if opts.Model != "" && !modelPattern.MatchString(opts.Model) {
 		return State{}, categorized(ErrInvalidProfile, badRequest("model %q must match %s", opts.Model, modelPattern.String()))
@@ -746,7 +798,7 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 		return State{}, badRequest("agent profile %q is not a lead profile (lead: true)", rp.Name)
 	}
 	if spawn != nil {
-		if spawn.Tier != "" && rp.Definition.Backend != BackendPi {
+		if spawn.Tier != "" && rp.Definition.Backend != BackendPi && !isAgentWorkerProfile(rp.Name) {
 			return State{}, badRequest("pi.spawn: profile %q must be a non-lead Pi profile", rp.Name)
 		}
 		if err := r.checkChildProfile(spawn.Parent, rp.Name, rp.Definition); err != nil {
@@ -812,6 +864,7 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 		if len(r.opts.Backends[rec.Backend].PermissionModes) == 0 {
 			rec.PermissionMode = ""
 		}
+		rec.selectPermissionMode(rec.PermissionMode)
 	}
 	if spawn != nil {
 		spawn.apply(&rec)
@@ -831,6 +884,16 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 			rec.PermissionMode = mode
 		}
 	}
+	if spawn != nil && spawn.Authority != "" {
+		if err := writePermissionSelection(dir, spawn.Authority); err != nil {
+			return State{}, err
+		}
+	}
+	if spawn != nil && spawn.SystemPrompt != "" {
+		if err := writeFileAtomic(filepath.Join(dir, systemPromptFile), []byte(spawn.SystemPrompt), 0o600); err != nil {
+			return State{}, err
+		}
+	}
 	if lead != nil && lead.HireRequestID != "" {
 		if err := wsdashboard.MarkHired(r.opts.Dir, rec.ReplyID, lead.HireRequestID, lead.HireLabel); err != nil {
 			return State{}, err
@@ -841,7 +904,9 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 	}
 	var seed []wslive.SlashCommand
 	if rec.Lead {
-		seed = r.lastCommands(rec)
+		// A new lead offers its playbook commands before its process
+		// first reports the harness's own.
+		seed = r.withPlaybookCommands(rec, r.lastCommands(rec))
 	}
 	c := r.startConv(rec, seed)
 	if spawn != nil {
@@ -1012,9 +1077,9 @@ func (r *Runner) Send(id, text string) (State, error) {
 		return st, err
 	}
 	if rec, ok := r.recordOf(id); ok && !rec.Lead && rec.Parent != nil && rec.Backend == BackendPi {
-		// A finished Pi child closes on its own (closeWhenDone), maybe
-		// between the open check and the inbox write. Once that close is
-		// done (resumeMu), a second try reopens it as any closed Pi child.
+		// A close may land between the open check and the inbox write.
+		// Once that close is done (resumeMu), a second try reopens it as
+		// any closed Pi child.
 		r.resumeMu.Lock()
 		r.resumeMu.Unlock()
 		st, err = r.send(id, text)
@@ -1025,8 +1090,7 @@ func (r *Runner) Send(id, text string) (State, error) {
 func (r *Runner) send(id, text string) (State, error) {
 	c, err := r.open(id)
 	if err != nil {
-		// Keep revival and admission in one close fence: startup sees the
-		// previous done turn and can schedule auto-close before this write.
+		// Keep revival and admission in one fence against explicit close.
 		// Open sends do not take resumeMu, so a slow manual close still
 		// refuses them promptly rather than blocking behind its cascade.
 		r.resumeMu.Lock()
@@ -1055,15 +1119,18 @@ func (r *Runner) send(id, text string) (State, error) {
 		c.sends++
 		c.held++
 		c.rec.Sends = c.sends
+		if c.rec.Parent != nil {
+			// Any message resets a spawned child's waiting expiry.
+			c.rec.LastActiveAt = r.opts.Now().UTC().Format(time.RFC3339)
+		}
 	}
-	rec := c.rec
 	c.mu.Unlock()
-	if err == nil {
-		err = writeRecord(c.dir, rec)
-	}
 	if err != nil {
 		return State{}, err
 	}
+	// The inbox already owns the text durably. Coverage and the child's
+	// activity stamp ride the next immediate record write or shutdown flush.
+	c.recordDirty = true
 	c.signalInbox()
 	return c.state(), nil
 }
@@ -1268,63 +1335,14 @@ func (r *Runner) releaseParent(id string) {
 	}
 }
 
-// autoCloseLater closes conversation id off the caller's goroutine, which
-// is its own loop (closeWhenDone), if it is still a finished Pi child.
-func (r *Runner) autoCloseLater(id string) {
-	r.wg.Add(1)
-	go func() {
-		defer r.wg.Done()
-		if r.opts.autoCloseLocking != nil {
-			r.opts.autoCloseLocking(id)
-		}
-		r.resumeMu.Lock()
-		defer r.resumeMu.Unlock()
-		if _, closed, err := r.closeOneIf(id, true); err != nil || !closed {
-			return
-		}
-		// Idle by autoCloseDue; they close with it, as in CloseConversation.
-		for _, d := range r.descendants(id) {
-			_, _ = r.closeOne(d)
-		}
-		r.releaseParent(id)
-	}()
-}
-
 // closeOne closes conversation id alone.
 func (r *Runner) closeOne(id string) (State, error) {
-	st, _, err := r.closeOneIf(id, false)
-	return st, err
-}
-
-// closeOneIf is closeOne; finished limits it to a Pi child that is
-// finished (autoCloseDue) when its loop checks again, in the step that
-// closes it, and closed reports whether it closed.
-func (r *Runner) closeOneIf(id string, finished bool) (st State, closed bool, err error) {
-	st, err = r.act(id, func(c *conv) error {
-		if !finished {
-			c.close()
-			closed = true
-			return nil
-		}
-		// The inbox is read again under mu: a message the page wrote whose
-		// signal the loop has not taken yet keeps the child open.
-		unread := false
-		closed = c.autoCloseDue() && c.closeIf(func() bool {
-			held, err := wsinbox.Held(c.inbox)
-			if err != nil {
-				unread = true
-				return false
-			}
-			c.held = len(held)
-			return c.finished()
-		})
-		// An unreadable inbox is not asked again at every loop step; the
-		// next daemon start checks the child again (Start).
-		c.autoClosing = unread
+	st, err := r.act(id, func(c *conv) error {
+		c.close()
 		return nil
 	})
-	if err != nil || !closed {
-		return st, closed, err
+	if err != nil {
+		return st, err
 	}
 	r.mu.Lock()
 	if c, ok := r.convs[id]; ok {
@@ -1336,7 +1354,7 @@ func (r *Runner) closeOneIf(id string, finished bool) (st State, closed bool, er
 		r.closedRows[id] = st
 	}
 	r.mu.Unlock()
-	return st, true, nil
+	return st, nil
 }
 
 // SetSettings changes the conversation's model or effort (nil leaves one
@@ -1477,6 +1495,11 @@ type State struct {
 	// MCPBroken names the harness's MCP servers whose connection broke and
 	// did not come back in-stream; a restart (Restart) is the way back.
 	MCPBroken []string `json:"mcp_broken,omitempty"`
+	// Capabilities is the catalog profile the process's harness version
+	// resolved to, demoted by its init shape; Unverified in it is the
+	// dashboard's "unverified version" warning. Absent for a backend
+	// without a profile and before a process reported. Never persisted.
+	Capabilities *Capabilities `json:"capabilities,omitempty"`
 	// CanControl reports whether the asking viewer may use the lead control
 	// routes (a browser on this machine); the routes set it per request.
 	CanControl bool `json:"can_control,omitempty"`
@@ -1551,7 +1574,7 @@ func (r *Runner) closedState(rec Record) State {
 }
 
 func closedState(rec Record) State {
-	st := State{ID: rec.ReplyID, Profile: rec.Profile, Backend: rec.Backend, Root: rec.Root, Status: StatusClosed, Model: rec.Model, Effort: rec.Effort, Page: "/s/" + rec.ReplyID, CreatedAt: rec.CreatedAt, ClosedAt: rec.ClosedAt, Lead: rec.Lead, PermissionMode: rec.PermissionMode, Label: rec.Label, Tier: rec.Tier, ActiveMs: rec.ActiveMs}
+	st := State{ID: rec.ReplyID, Profile: rec.Profile, Backend: rec.Backend, Root: rec.Root, Status: StatusClosed, Model: rec.Model, Effort: rec.Effort, Page: "/s/" + rec.ReplyID, CreatedAt: rec.CreatedAt, ClosedAt: rec.ClosedAt, Lead: rec.Lead, PermissionMode: rec.selectedPermissionMode(), Label: rec.Label, Tier: rec.Tier, ActiveMs: rec.ActiveMs}
 	if rec.Lead {
 		st.Lifecycle = wsdashboard.SessionPendingDeletion
 		st.PluginIsolation = leadPluginIsolation(rec.PluginIsolation)

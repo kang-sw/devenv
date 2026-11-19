@@ -1,6 +1,7 @@
 package wsagent
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -60,6 +61,13 @@ type conv struct {
 	// failure and mcpBroken are State.Failure and State.MCPBroken.
 	failure   *wslive.Notice
 	mcpBroken []string
+	// caps is the catalog profile resolved for the process's harness
+	// version and demoted by its init shape (harnessReported); nil for a
+	// backend without a profile or before the first report. commands is
+	// the harness's last command list before allowedCommands took the
+	// commands of unsupported items out of it.
+	caps     *Capabilities
+	commands []wslive.SlashCommand
 	// heldKinds memoizes refreshHeld's reads under mu: held entry name ->
 	// whether it is a message (not an interrupt entry).
 	heldKinds map[string]bool
@@ -76,8 +84,9 @@ type conv struct {
 	reconcileMode bool
 	lastReg       time.Time
 
-	// A lead's own, loop-owned. mailC (one slot) tells the loop the
-	// mailbox may hold mail (signalMail); stopMail ends the watch.
+	// A lead's or spawned child's own, loop-owned. mailC (one slot) tells
+	// the loop the mailbox may hold mail (signalMail); stopMail ends the
+	// watch.
 	mailC    chan struct{}
 	stopMail func()
 	// spawnC coalesces daemon-owned descendant changes for this writer.
@@ -112,11 +121,10 @@ type conv struct {
 	wrapHold       bool
 	wrapTurnSeen   bool
 	// seq is the last holder record sequence applied whole; seqDirty that
-	// the record does not hold it yet, and ringDirty that a ring entry was
-	// written since, which makes the next line end persist it at once.
-	seq       uint64
-	seqDirty  bool
-	ringDirty bool
+	// the record does not hold it yet. live.ringDirty makes a ring line's
+	// end persist it at once.
+	seq      uint64
+	seqDirty bool
 	// lineOpen is the holder record sequence of a line some of whose events
 	// are applied and whose LineEnd is not; 0 between lines.
 	lineOpen uint64
@@ -141,8 +149,11 @@ type conv struct {
 	// restart was for that have not connected since. mcpChecking runs
 	// while a check is off the loop, and mcpAgain asks for one more after
 	// it, for mcpAgainNames.
-	mcpSeen       map[string]bool
-	mcpRestarted  map[string]bool
+	mcpSeen      map[string]bool
+	mcpRestarted map[string]bool
+	// mcpStale is a rejoined process whose ws-mcp route (Record.MCPURL)
+	// this daemon does not serve; it restarts at the first idle point.
+	mcpStale      bool
 	mcpChecking   bool
 	mcpAgain      bool
 	mcpAgainNames []string
@@ -154,9 +165,16 @@ type conv struct {
 	// retry (kick) and cleared by the next send that succeeds; a send that
 	// fails again meanwhile waits for the next inbox or mail signal.
 	sendRetried bool
-	// autoClosing is set while a close of this finished Pi child is
-	// dispatched (closeWhenDone) and not yet run; loop-owned.
-	autoClosing bool
+	// systemPrompt is agent.spawn's system prompt (Record.SystemPrompt),
+	// read once from the session directory; loop-owned.
+	systemPrompt string
+	// expiring is set while a child-agent-waiting expiry is dispatched
+	// (expireIfDue) and not yet decided; loop-owned.
+	expiring bool
+	// wakeRefused is set while the last process start was refused by
+	// permission admission (childAdmission): the input stays, and the
+	// child counts as asleep. Under mu.
+	wakeRefused bool
 
 	// Turn settles (spawn.go). sends counts Runner.Send's messages and
 	// settled is the last settled turn, settleC closed and replaced at each
@@ -178,6 +196,9 @@ type conv struct {
 	// wmu orders the record writes of update, which other conversations'
 	// goroutines also make (children.go takes a delivered report).
 	wmu sync.Mutex
+	// recordDirty is guarded by wmu. Only Send's coverage/activity stamp waits;
+	// consumed input and replay-dedupe mutations still persist immediately.
+	recordDirty bool
 
 	// The spawn tree (children.go). settledReport is the pending report id
 	// of the last settled turn, and parentWaits counts the conversation
@@ -226,37 +247,143 @@ func (c *conv) signalMail() {
 	}
 }
 
-// mailChanged claims the session's waiting mail into the record, so a
-// message taken from the mailbox survives until it is delivered, and
-// submits it with the held messages (kick). It runs in the loop.
+// mailChanged claims the session's waiting mail and delivers it: steered
+// into the running turn when the session takes a message mid-turn
+// (steersMail), else into the record, so a message taken from the mailbox
+// survives until it is delivered, and submitted with the held messages
+// (kick), which wakes a sleeping child past its parent's width cap. Mail a
+// sleeping child's refused wake keeps stays in the record, and each of its
+// senders is told once per claim (Options.WakeRefused). It runs in the
+// loop.
 func (c *conv) mailChanged() {
 	if c.closed || c.hidden || c.r.opts.Mail == nil {
 		return
 	}
-	// The claim and the check that the session is still the daemon's are
-	// one step: a terminal login that takes the row waits for the lock,
-	// and what was claimed before it goes back to the mailbox (release).
-	unlock, ok := c.lockRow()
-	if !ok {
-		return
+	rec := c.record()
+	relation := func(sender string) string { return c.r.mailRelation(rec, sender) }
+	var mail []ClaimedMail
+	var err error
+	if rec.Lead {
+		// The claim and the check that the session is still the daemon's
+		// are one step: a terminal login that takes the row waits for the
+		// lock, and what was claimed before it goes back to the mailbox
+		// (release).
+		unlock, ok := c.lockRow()
+		if !ok {
+			return
+		}
+		mail, err = c.r.opts.Mail.Drain(rec.Root, rec.WSKey, relation)
+		unlock()
+	} else {
+		// A child's row is never a terminal's: its claim touches no file.
+		mail, err = c.r.opts.Mail.Drain(rec.Root, rec.WSKey, relation)
 	}
-	texts, err := c.r.opts.Mail.Drain(c.rec.Root, c.rec.WSKey)
-	unlock()
 	if err != nil {
-		fmt.Fprintf(c.r.opts.Log, "agent %s: mailbox: %v\n", c.rec.ReplyID, err)
+		fmt.Fprintf(c.r.opts.Log, "agent %s: mailbox: %v\n", rec.ReplyID, err)
 	}
-	if len(texts) > 0 {
-		c.update(func(rec *Record) { rec.Mail = append(rec.Mail, texts...) })
+	var held []string
+	for _, m := range mail {
+		// Once a steer fails, the rest waits too, so the batch keeps its
+		// order.
+		if len(held) > 0 || !c.steerMail(m.Text) {
+			held = append(held, m.Text)
+		}
+	}
+	if len(held) > 0 {
+		c.update(func(rec *Record) {
+			rec.Mail = append(rec.Mail, held...)
+			if rec.Parent != nil {
+				// Any mail resets a spawned child's waiting expiry; a
+				// steered one rides a turn, whose settle resets it.
+				rec.LastActiveAt = c.r.opts.Now().UTC().Format(time.RFC3339)
+			}
+		})
+	}
+	if len(mail) > 0 {
 		// The claim changed the session's mail history and held count. A
 		// turn that runs submits nothing now, so nothing else would tell
 		// the page.
-		c.r.notify(c.rec.ReplyID, c.rec.Root)
+		c.r.notify(rec.ReplyID, rec.Root)
 	}
 	// Mail claimed earlier and not yet delivered (a start that failed, a
 	// daemon that ended) goes with it: nothing else would submit it.
 	if len(c.rec.Mail) > 0 {
 		c.kick()
 	}
+	if len(held) > 0 {
+		c.tellRefusedWake(mail)
+	}
+}
+
+// tellRefusedWake tells each sender of mail, claimed for a sleeping child
+// whose wake admission kick just refused, that its mail waits
+// (Options.WakeRefused), once per sender. It runs in the loop.
+func (c *conv) tellRefusedWake(mail []ClaimedMail) {
+	c.mu.Lock()
+	refused, reason := c.wakeRefused, c.lastErr
+	c.mu.Unlock()
+	if !refused || c.r.opts.WakeRefused == nil {
+		return
+	}
+	told := map[string]bool{}
+	for _, m := range mail {
+		if m.Sender == "" || told[m.Sender] {
+			continue
+		}
+		told[m.Sender] = true
+		c.r.opts.WakeRefused(m.Sender, c.rec.ReplyID, reason)
+	}
+}
+
+// steersMail reports whether a mail claimed now reaches the running turn
+// as a steer rather than waiting for the next turn: a turn runs that
+// takes a message mid-turn, and the harness's catalog profile, when it has
+// one and reported, does not grade steer unsupported. A lead steers
+// through its steer handle, a spawned child through the acknowledged
+// report path (reportSteerer) that keeps its report covering the message.
+func (c *conv) steersMail() bool {
+	if !c.turn || c.proc == nil || c.replaying || c.wrapHold || c.closed || c.hidden {
+		return false
+	}
+	c.mu.Lock()
+	caps := c.caps
+	c.mu.Unlock()
+	if caps != nil && !caps.Allows(ItemSteer) {
+		return false
+	}
+	ctl := controlsFor(c.proc)
+	if c.rec.Lead {
+		return ctl.steer != nil
+	}
+	return ctl.reports != nil
+}
+
+// steerMail steers one claimed mail into the running turn when the session
+// takes it now (steersMail), and reports whether it did; a failed steer
+// leaves it for the next turn. It runs in the loop.
+func (c *conv) steerMail(text string) bool {
+	if !c.steersMail() {
+		return false
+	}
+	ctl := controlsFor(c.proc)
+	if c.rec.Lead {
+		if err := ctl.steer.Steer(text); err != nil {
+			fmt.Fprintf(c.r.opts.Log, "agent %s: steer a mail: %v\n", c.rec.ReplyID, err)
+			return false
+		}
+		c.apply(*wakeEvent("mail", "mailbox", "", text).Live)
+		return true
+	}
+	if err := ctl.reports.Steer(text); err != nil {
+		fmt.Fprintf(c.r.opts.Log, "agent %s: steer a mail: %v\n", c.rec.ReplyID, err)
+		return false
+	}
+	c.steerSeq++
+	c.steered = append(c.steered, steeredReport{Text: text, Seq: c.steerSeq})
+	c.saveSteered()
+	c.apply(*wakeEvent("mail", "mailbox", "", text).Live)
+	c.changed(false)
+	return true
 }
 
 // inboxChanged takes the inbox's interrupt requests and submits the held
@@ -409,6 +536,7 @@ func (c *conv) loop() {
 			} else {
 				c.checkRow()
 			}
+			c.expireIfDue()
 		case <-c.r.quit:
 			c.letGo()
 			// The watch's listening marker names this process: left behind,
@@ -421,7 +549,6 @@ func (c *conv) loop() {
 		if c.settle() {
 			return
 		}
-		c.closeWhenDone()
 	}
 }
 
@@ -507,6 +634,8 @@ func (c *conv) stateWithKeyCheck(checkKey bool) State {
 		} else if c.proc != nil {
 			st.Lifecycle = wsdashboard.SessionActiveOn
 		}
+	} else if c.childWaitingLocked() {
+		st.Lifecycle = wsdashboard.SessionChildWaiting
 	}
 	st.Held = c.held + len(c.rec.Mail) + len(c.rec.Queued) + len(c.rec.Reports)
 	st.Error = c.lastErr
@@ -537,6 +666,10 @@ func (c *conv) stateWithKeyCheck(checkKey bool) State {
 		}
 		st.MCPBroken = slices.Clone(c.mcpBroken)
 	}
+	if c.caps != nil {
+		caps := c.caps.clone()
+		st.Capabilities = &caps
+	}
 	return c.r.permissionState(st, c.rec, c.dir)
 }
 
@@ -553,10 +686,26 @@ func (c *conv) update(fn func(rec *Record)) {
 	defer c.wmu.Unlock()
 	c.mu.Lock()
 	fn(&c.rec)
-	rec := c.rec
 	c.mu.Unlock()
-	if err := writeRecord(c.dir, rec); err != nil {
+	c.persistRecord()
+}
+
+// persistRecord requires wmu, so an immediate write also flushes deferred sends
+// without letting an older copy overwrite a newer change.
+func (c *conv) persistRecord() {
+	rec := c.record()
+	err := writeRecord(c.dir, rec)
+	c.recordDirty = err != nil
+	if err != nil {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: record write: %v\n", rec.ReplyID, err)
+	}
+}
+
+func (c *conv) flushRecord() {
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	if c.recordDirty {
+		c.persistRecord()
 	}
 }
 
@@ -767,9 +916,8 @@ func (c *conv) apply(ev wslive.Event, quiet ...bool) {
 	}
 	if len(quiet) > 0 && quiet[0] {
 		c.live.applyQuiet(ev)
-	} else if c.live.apply(ev) {
-		c.ringDirty = true
-		c.r.notify(c.rec.ReplyID, c.rec.Root)
+	} else {
+		c.live.apply(ev)
 	}
 	if ev.Kind == wslive.KindStatus && ev.Observed != nil {
 		observations := c.live.st.ObservedResponses("")
@@ -837,13 +985,22 @@ func (c *conv) kick() {
 			return
 		}
 		if err := c.startProcess(); err != nil {
-			c.setStatus(func() { c.lastErr = err.Error() })
+			var refused *admissionRefusal
+			isRefusal := errors.As(err, &refused)
+			c.setStatus(func() { c.lastErr, c.wakeRefused = err.Error(), isRefusal })
 			fmt.Fprintf(c.r.opts.Log, "agent %s: start: %v\n", c.rec.ReplyID, err)
 			c.live.writeSnapshot()
 			c.r.notify(c.rec.ReplyID, c.rec.Root)
+			if isRefusal {
+				// The input stays for the next admitted start; persist its
+				// coverage so crash recovery cannot expire it as quiet.
+				c.flushRecord()
+				return
+			}
 			c.settleTurn(TurnFailed, err.Error(), c.sendCount())
 			return
 		}
+		c.setStatus(func() { c.wakeRefused = false })
 	}
 	// Under mu, as Send writes: every send counted here is in the drain
 	// (Wait's turn marks).
@@ -895,10 +1052,14 @@ func (c *conv) kick() {
 	// so its retry shows the message once. The process's events for the
 	// turn are handled by this loop after kick returns, so they still
 	// follow the turn's start.
-	if cmd != nil {
-		err = c.runCommand(*cmd)
-	} else {
+	if cmd == nil {
 		err = c.proc.Send(strings.Join(append(append(slices.Clone(parts), reports...), mail...), "\n\n"))
+	} else if text, ok := c.playbookTurn(*cmd); ok {
+		// The runner expands a playbook command itself: the harness has
+		// no such command, and the turn carries the playbook's body.
+		err = c.proc.Send(text)
+	} else {
+		err = c.runCommand(*cmd)
 	}
 	if err != nil {
 		// The turn never began: its process ends with no turn to close.

@@ -498,7 +498,7 @@ export function buildOrphanSummary(orphans: PersistedOrphan[]): string {
   if (idle.length > 0) {
     lines.push(
       `${idle.length} previously idle agent${idle.length === 1 ? " was" : "s were"} also restored.`,
-      "Use /audit in the owner TUI to inspect retained execution history; daemon pi.* does not own these workers.",
+      "Use /audit in the owner TUI to inspect retained execution history; daemon agent.* does not own these workers.",
     );
   }
   return lines.join("\n");
@@ -620,7 +620,7 @@ export function readExecutionSidecarAt(path: string, notice: (message: string) =
     const quarantine = `${path}.retired-${randomUUID()}`;
     try { renameSync(path, quarantine); }
     catch { return blocked("Could not quarantine the existing sidecar."); }
-    notice(`ws-pi-agent: retired general/fork/explore native entries were NOT resumed or adopted by daemon pi.*. Original sidecar preserved at ${quarantine}; transcript/prompt bytes were not changed. Permanent owner-held history protection (ownerHeld:true; no live-process claim) excludes these homes from automatic retention: ${heldHomes.join(", ")}. There is no release command; after all affected sessions have stopped, back up any history you need and manually remove unwanted homes. Only ${execution.length} recognized execution-worker record(s) may be restored as dormant.`);
+    notice(`ws-pi-agent: retired general/fork/explore native entries were NOT resumed or adopted by daemon agent.*. Original sidecar preserved at ${quarantine}; transcript/prompt bytes were not changed. Permanent owner-held history protection (ownerHeld:true; no live-process claim) excludes these homes from automatic retention: ${heldHomes.join(", ")}. There is no release command; after all affected sessions have stopped, back up any history you need and manually remove unwanted homes. Only ${execution.length} recognized execution-worker record(s) may be restored as dormant.`);
   } else {
     try { rmSync(path); }
     catch { return blocked("Could not consume the existing execution sidecar."); }

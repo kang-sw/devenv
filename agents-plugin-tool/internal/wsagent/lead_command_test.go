@@ -209,11 +209,11 @@ func TestLeadSeedsCommandsFromLastSession(t *testing.T) {
 }
 
 // TestClaudeLeadCommandSplitsTheDrain: messages and commands held during a
-// turn reach the harness in order: the text before a command joined with
-// the claimed mail as one turn, the command alone as its bare typed line
-// at that turn's end, the text after it at the command's end. What waits
-// is in the record and survives a daemon restart; a batch that starts with
-// a command runs it first and mail waits for the next message turn.
+// turn reach the harness in order: the text before a command as one turn,
+// the command alone as its bare typed line at that turn's end, the text
+// after it at the command's end. What waits is in the record and survives
+// a daemon restart. Mail claimed during a turn is steered into it, so it
+// never waits behind a command.
 func TestClaudeLeadCommandSplitsTheDrain(t *testing.T) {
 	h := newLeadHarness(t).start()
 	id, holder := h.runLead("one")
@@ -226,13 +226,15 @@ func TestClaudeLeadCommandSplitsTheDrain(t *testing.T) {
 	h.sendCommand(id, "compact", "keep the names")
 	h.send(id, "after")
 	h.mail.deliver(key, "From a@x: ping")
-	eventually(t, "the mail to be claimed", func() bool { return len(h.record(id).Mail) == 1 })
-	if st := h.state(id); st.Held != 4 {
-		t.Fatalf("three messages and the mail are held: %+v", st)
+	eventually(t, "the mail to be steered", func() bool {
+		return slices.Equal(h.userInputs(holder), []string{h.envelope("one"), "From a@x: ping"})
+	})
+	if st := h.state(id); st.Held != 3 {
+		t.Fatalf("three messages are held: %+v", st)
 	}
 	h.holders.out(holder, replyLine("u1", "first"), resultLine(), stateLine(HarnessIdle))
 	eventually(t, "the text before the command", func() bool {
-		return slices.Equal(h.userInputs(holder), []string{h.envelope("one"), h.envelope("before") + "\n\nFrom a@x: ping"})
+		return slices.Equal(h.userInputs(holder), []string{h.envelope("one"), "From a@x: ping", h.envelope("before")})
 	})
 	wantQueue := []QueuedInput{{Command: &wsinbox.Command{Name: "compact", Args: "keep the names"}, After: 1}, {Text: h.envelope("after"), After: 1}}
 	eventually(t, "the rest to be queued", func() bool {
@@ -254,38 +256,38 @@ func TestClaudeLeadCommandSplitsTheDrain(t *testing.T) {
 	eventually(t, "the running turn to be back", func() bool { st := h.state(id); return st.Process && st.Status == StatusRunning })
 	h.holders.out(holder, replyLine("u2", "second"), resultLine(), stateLine(HarnessIdle))
 	eventually(t, "the command alone", func() bool {
-		return slices.Equal(h.userInputs(holder), []string{h.envelope("one"), h.envelope("before") + "\n\nFrom a@x: ping", "/compact keep the names"})
+		return slices.Equal(h.userInputs(holder), []string{h.envelope("one"), "From a@x: ping", h.envelope("before"), "/compact keep the names"})
 	})
 	h.sync(id, holder)
-	if got := h.userInputs(holder); len(got) != 3 {
+	if got := h.userInputs(holder); len(got) != 4 {
 		t.Fatalf("the text after the command waits for the command's end: %q", got)
 	}
 	h.holders.out(holder, turnLines("sess-1", "u3", "compacted")...)
 	eventually(t, "the text after the command", func() bool {
-		return slices.Equal(h.userInputs(holder)[3:], h.envelopes("after"))
+		return slices.Equal(h.userInputs(holder)[4:], h.envelopes("after"))
 	})
 	eventually(t, "the queue to empty", func() bool { return len(h.record(id).Queued) == 0 })
 	h.holders.out(holder, turnLines("sess-1", "u4", "done")...)
 	h.idle(id)
 
 	// A batch that starts with a command: the command runs alone first,
-	// and the mail goes with the message after it.
+	// then the message after it; mail claimed meanwhile went into the
+	// running turn.
 	h.send(id, "three")
-	eventually(t, "the third turn", func() bool { return len(h.userInputs(holder)) == 5 })
+	eventually(t, "the third turn", func() bool { return len(h.userInputs(holder)) == 6 })
 	h.holders.out(holder, stateLine(HarnessRunning), initLine("sess-1", "auto"))
 	h.sync(id, holder)
 	h.sendCommand(id, "cost", "")
 	h.send(id, "four")
 	h.mail.deliver(key, "From b@x: more")
-	eventually(t, "the mail to be claimed", func() bool { return len(h.record(id).Mail) == 1 })
+	eventually(t, "the mail to be steered", func() bool { return slices.Equal(h.userInputs(holder)[6:], []string{"From b@x: more"}) })
 	h.holders.out(holder, replyLine("u5", "third"), resultLine(), stateLine(HarnessIdle))
-	eventually(t, "the leading command", func() bool { return slices.Equal(h.userInputs(holder)[5:], []string{"/cost"}) })
-	if rec := h.record(id); len(rec.Mail) != 1 {
-		t.Fatalf("mail never rides with a command: %+v", rec)
-	}
+	eventually(t, "the leading command", func() bool {
+		return slices.Equal(h.userInputs(holder)[6:], []string{"From b@x: more", "/cost"})
+	})
 	h.holders.out(holder, turnLines("sess-1", "u6", "cost")...)
-	eventually(t, "the message with the mail", func() bool {
-		return slices.Equal(h.userInputs(holder)[5:], []string{"/cost", h.envelope("four") + "\n\nFrom b@x: more"})
+	eventually(t, "the message after it", func() bool {
+		return slices.Equal(h.userInputs(holder)[6:], []string{"From b@x: more", "/cost", h.envelope("four")})
 	})
 	h.holders.out(holder, turnLines("sess-1", "u7", "four")...)
 	h.idle(id)

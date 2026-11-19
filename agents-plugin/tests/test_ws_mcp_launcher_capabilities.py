@@ -381,13 +381,15 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             binary = root / "ws-mcp"
 
             def fake_go(argv, **kwargs):
+                if argv[:2] == [launcher.sys.executable, str(tool / "scripts/generate-package-assets.py")]:
+                    return subprocess.CompletedProcess(argv, 0)
                 self.assertEqual(argv[:3], [str(local["go"]), "build", "-o"])
                 Path(argv[3]).write_bytes(b"source build")
                 return subprocess.CompletedProcess(argv, 0)
 
             with mock.patch.object(launcher.subprocess, "run", side_effect=fake_go) as run:
                 self.assertTrue(launcher.build_local_devenv_runtime(root, binary, self.capability_contract(), local, "linux"))
-            self.assertEqual(run.call_count, 1)  # Only go build; never the ws binary.
+            self.assertEqual(run.call_count, 2)  # Asset generator, then go build; never the ws binary.
             self.assertEqual(launcher.read_runtime_metadata(binary)["version"], "0.18.9-dev")
             self.assertEqual(launcher.read_runtime_metadata(binary)["source_commit"], "source")
             self.assertEqual(sorted(p.name for p in root.iterdir()), ["tool", "ws-mcp", "ws-mcp.metadata.json"])

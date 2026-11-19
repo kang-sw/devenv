@@ -119,15 +119,14 @@ type whiteboardPanelInput struct {
 	lang string
 	// watch, when not nil, is told each file and directory a panel read
 	// that a writer may change without a nudge (the ticket directories and
-	// files, the mailbox stores, history directory, and listening marker),
-	// which a served page names for its refresh check.
+	// files), which a served page names for its refresh check.
 	watch func(path string)
 	// history, when not nil, reads the session's mailbox history in place
-	// of readMailboxHistory (the served page's cached read).
+	// of readMailboxHistory.
 	history func() ([]mailboxHistoryRecord, error)
-	// replies, when not nil, reads the reply-id registry in place of
-	// wsmailbox.LoadReplyStore (the served page's cached read); false when
-	// it cannot be read.
+	// replies, when not nil, reads the reply-id registry in place of the
+	// store's LoadReply (the served page's shared read); false when it
+	// cannot be read.
 	replies func() (wsmailbox.ReplyStore, bool)
 }
 

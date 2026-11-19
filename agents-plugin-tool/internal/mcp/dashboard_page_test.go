@@ -310,11 +310,11 @@ func TestDashboardReadPageWatchesUnnudgedFiles(t *testing.T) {
 }
 
 // TestDashboardReadPageWatchesTheMailboxPanel pins the mailbox panel's
-// refresh inputs: a sender's mail nudges only the sender, so the page
-// names the history directory the panel reads but not the reply store
-// (the board memo keys on what the panel shows of it), and an armed wait,
-// whose process may die leaving its marker, names that process
-// (PageContent.WatchPIDs).
+// refresh inputs: the mailbox state is in the memory store, so the page
+// names no mailbox file; the mail print (which the refresh stamp folds and
+// the store's queue hints renew) moves with the history window and the
+// armed-wait marker; and an armed wait, whose process may die leaving its
+// marker, names that process (PageContent.WatchPIDs).
 func TestDashboardReadPageWatchesTheMailboxPanel(t *testing.T) {
 	hf := newHistoryFixture(t, time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC))
 	// A successful URL can contain "error" inside its generated reply ID.
@@ -331,40 +331,32 @@ func TestDashboardReadPageWatchesTheMailboxPanel(t *testing.T) {
 	src := dashboardPageSource(t, nil)
 
 	page := readPageOK(t, src, reg)
-	history, err := mailboxHistoryDir("", hf.keyB)
+	cacheRoot, err := wsstate.CacheRoot(wsstate.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	replies, err := wsmailbox.ReplyRegistryPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	marker, err := wsmailbox.ListeningMarkerPath(hf.keyB)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{history, marker} {
-		found := false
-		for _, path := range page.Watch {
-			found = found || path == want
-		}
-		if !found {
-			t.Errorf("Watch lacks %s: %v", want, page.Watch)
-		}
-	}
-	// The reply registry is keyed into the board memo by what the panel
-	// shows of it (replyPrint), never watched as a file.
 	for _, path := range page.Watch {
-		if path == replies {
-			t.Errorf("Watch names the reply registry: %v", page.Watch)
+		if rel, err := filepath.Rel(cacheRoot, path); err == nil && strings.HasPrefix(rel, "mailbox") {
+			t.Errorf("Watch names a mailbox file %s: %v", path, page.Watch)
 		}
 	}
 	if len(page.WatchPIDs) != 0 {
 		t.Errorf("a page with no armed wait watches processes %v", page.WatchPIDs)
 	}
 
+	print, _ := src.MailPrint(reg)
+	if _, err := appendMailboxHistory("", hf.keyB, []mailboxHistoryEntry{{Direction: mailboxHistorySent, Counterparty: "id:peer", Body: "later"}}); err != nil {
+		t.Fatal(err)
+	}
+	next, _ := src.MailPrint(reg)
+	if next == print {
+		t.Error("a history entry did not move the mail print")
+	}
 	if err := wsmailbox.WriteListeningMarker(wsmailbox.ListeningMarker{SessionKey: hf.keyB, PID: os.Getpid(), StartedAt: time.Now().Format(time.RFC3339)}); err != nil {
 		t.Fatal(err)
+	}
+	if armed, _ := src.MailPrint(reg); armed == next {
+		t.Error("an armed wait did not move the mail print")
 	}
 	if got := readPageOK(t, src, reg).WatchPIDs; len(got) != 1 || got[0] != os.Getpid() {
 		t.Errorf("a page with an armed wait watches processes %v, want the wait's %d", got, os.Getpid())
@@ -407,11 +399,7 @@ func TestDashboardReadPageContacts(t *testing.T) {
 	reg := wsdashboard.Registration{ReplyID: wsmailbox.ReplyID(hf.keyB), Project: recB.Root}
 
 	// Pin A's reply entry and alice's presence to t0, alice held by A.
-	replyPath, err := wsmailbox.ReplyRegistryPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := wsmailbox.WithReplyLock(replyPath, func(st *wsmailbox.ReplyStore) error {
+	if err := (wsmailbox.Paths{}).Store().WithReplyLock(func(st *wsmailbox.ReplyStore) error {
 		entry := st.Entries[replyA]
 		entry.LastSeen = t0.Format(time.RFC3339)
 		st.Entries[replyA] = entry
@@ -426,7 +414,7 @@ func TestDashboardReadPageContacts(t *testing.T) {
 	setPresence := func(owner string) wsmailbox.Presence {
 		t.Helper()
 		var p wsmailbox.Presence
-		if err := wsmailbox.WithLock(storePath, func(st *wsmailbox.StoreFile) error {
+		if err := (wsmailbox.Paths{}).Store().WithLock(storePath, func(st *wsmailbox.StoreFile) error {
 			p = st.Presence["alice"]
 			p.Owner, p.PID, p.LastSeen = owner, os.Getpid(), t0.Format(time.RFC3339)
 			st.Presence["alice"] = p
@@ -481,7 +469,7 @@ func TestDashboardReadPageContacts(t *testing.T) {
 	// The cwd: the live record's wins, the contact record's is the fallback.
 	setCwds := func(live, recorded string) {
 		t.Helper()
-		if err := wsmailbox.WithReplyLock(replyPath, func(st *wsmailbox.ReplyStore) error {
+		if err := (wsmailbox.Paths{}).Store().WithReplyLock(func(st *wsmailbox.ReplyStore) error {
 			entry := st.Entries[replyA]
 			entry.Cwd = live
 			st.Entries[replyA] = entry
@@ -495,7 +483,7 @@ func TestDashboardReadPageContacts(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if err := wsmailbox.WithLock(storePath, func(st *wsmailbox.StoreFile) error {
+		if err := (wsmailbox.Paths{}).Store().WithLock(storePath, func(st *wsmailbox.StoreFile) error {
 			p := st.Presence["alice"]
 			p.Cwd = live
 			st.Presence["alice"] = p
@@ -529,7 +517,6 @@ func TestDashboardReadPageContacts(t *testing.T) {
 // history key maps to the full body of that history entry.
 func TestDashboardReadPageMailBodies(t *testing.T) {
 	f := newLiveFixture(t, true)
-	resetMailboxHistoryClock(t)
 	mustSend(t, f.server, 3, f.keyA, wsmailbox.ReplyIDPrefix+f.replyB, "Status update\nbody line")
 	sent := readLiveRing(t, f.sessionDir(f.replyA))
 	if len(sent) != 1 || sent[0].HistoryKey == "" {
@@ -555,7 +542,6 @@ func TestDashboardReadPageMailBodies(t *testing.T) {
 // the page's mail body.
 func TestDashboardMailKeepsSessionKeysFromTheBrowser(t *testing.T) {
 	f := newLiveFixture(t, true)
-	resetMailboxHistoryClock(t)
 	mustSend(t, f.server, 3, f.keyA, wsmailbox.ReplyIDPrefix+f.replyB, "mine is "+f.keyA+" and session_key: other-secret-key\nbody "+f.keyA)
 	sent := readLiveRing(t, f.sessionDir(f.replyA))
 	if len(sent) != 1 || sent[0].HistoryKey == "" {
@@ -605,12 +591,8 @@ func TestDashboardFingerprintCoversPageStores(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	replyPath, err := wsmailbox.ReplyRegistryPath()
-	if err != nil {
-		t.Fatal(err)
-	}
 	step("a contact", func() {
-		if err := wsmailbox.WithReplyLock(replyPath, func(st *wsmailbox.ReplyStore) error {
+		if err := (wsmailbox.Paths{}).Store().WithReplyLock(func(st *wsmailbox.ReplyStore) error {
 			st.Entries["peerpeer"] = wsmailbox.ReplyEntry{LastSeen: now.UTC().Format(time.RFC3339)}
 			entry := st.Entries[f.replyID()]
 			entry.RecordContact(wsmailbox.ReplyIDPrefix+"peerpeer", wsmailbox.Contact{LastExchange: now.UTC().Format(time.RFC3339)})
@@ -621,7 +603,7 @@ func TestDashboardFingerprintCoversPageStores(t *testing.T) {
 		}
 	})
 	step("a contact's cwd", func() {
-		if err := wsmailbox.WithReplyLock(replyPath, func(st *wsmailbox.ReplyStore) error {
+		if err := (wsmailbox.Paths{}).Store().WithReplyLock(func(st *wsmailbox.ReplyStore) error {
 			entry := st.Entries["peerpeer"]
 			entry.Cwd = "/work/peerpeer"
 			st.Entries["peerpeer"] = entry
@@ -1000,11 +982,7 @@ func TestDashboardBoardMemoKeepsContactsCurrent(t *testing.T) {
 		t.Fatal("no record for B")
 	}
 	reg := wsdashboard.Registration{ReplyID: wsmailbox.ReplyID(hf.keyB), Project: recB.Root}
-	replyPath, err := wsmailbox.ReplyRegistryPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := wsmailbox.WithReplyLock(replyPath, func(st *wsmailbox.ReplyStore) error {
+	if err := (wsmailbox.Paths{}).Store().WithReplyLock(func(st *wsmailbox.ReplyStore) error {
 		entry := st.Entries[replyA]
 		entry.LastSeen = t0.Format(time.RFC3339)
 		st.Entries[replyA] = entry

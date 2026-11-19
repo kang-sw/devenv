@@ -21,6 +21,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsholder"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // Substitute only the executable at the real holder's spawn boundary. The
@@ -168,14 +169,12 @@ func (h *piRecoveryHarness) start() {
 		Report: func(rep TurnReport) {
 			if rep.Parent.Kind == ParentLead {
 				// The same append used by PiTurnReporter, without importing mcp.
-				if err := wsmailbox.PostSystem(filepath.Join(h.base, "mailbox.json"), rep.Parent.ReplyID, "pi:"+rep.Result.ID, ReportText(rep), time.Now()); err != nil {
+				if err := h.mailStore().PostSystem(rep.Parent.ReplyID, "pi:"+rep.Result.ID, ReportText(rep), time.Now()); err != nil {
 					h.t.Errorf("completion mail: %v", err)
 				}
 			}
 		},
 		heartbeat: 20 * time.Millisecond,
-		// Replay is observed on a live loop; auto-closing is tested in auto_close_test.go.
-		keepFinished: true,
 	})
 	h.runner.SetEndpoint("http://127.0.0.1:1")
 	h.runner.Start(nil)
@@ -213,9 +212,14 @@ func (h *piRecoveryHarness) awaitFile(path string) {
 	eventually(h.t, filepath.Base(path), func() bool { _, err := os.Stat(path); return err == nil })
 }
 
+// mailStore is the harness's own mailbox store, under its base directory.
+func (h *piRecoveryHarness) mailStore() wsmailbox.Store {
+	return (wsmailbox.Paths{State: wsstate.Options{CacheHome: filepath.Join(h.base, "mail-cache")}}).Store()
+}
+
 func (h *piRecoveryHarness) mail() []wsmailbox.Envelope {
 	h.t.Helper()
-	store, err := wsmailbox.LoadReplyStore(filepath.Join(h.base, "mailbox.json"))
+	store, err := h.mailStore().LoadReply()
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -485,9 +489,6 @@ func TestPiNestedDaemonRestartRejoinsBothDepths(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("nested call was not released after holder validation")
 	}
-	if code, body := recoveryTokenCall(t, next.URL, leafBefore.Capability, "spawn", map[string]any{"prompt": "too deep", "tier": "small"}); code != http.StatusForbidden || !strings.Contains(body, "depth") {
-		t.Fatalf("depth-2 cap after rejoin: %d %s", code, body)
-	}
 	if len(got.lead()) != 0 {
 		t.Fatalf("parent result escaped its child hold: %+v", got.lead())
 	}
@@ -507,6 +508,21 @@ func TestPiNestedDaemonRestartRejoinsBothDepths(t *testing.T) {
 	}
 	if h.holders.opCount("launch") != 2 || h.holders.opCount("spawn") != 2 {
 		t.Fatalf("nested restart launched another process: %v", h.holders.opList())
+	}
+	// The rejoined leaf's restored token still traces its depth: its chain
+	// reaches the cap at depth 4, and the next spawn is refused.
+	capability := leafBefore.Capability
+	for depth := 3; depth <= MaxSpawnDepth; depth++ {
+		code, body := recoveryTokenCall(t, next.URL, capability, "spawn", map[string]any{"prompt": "deeper", "tier": "small"})
+		var st State
+		if code != http.StatusCreated || json.Unmarshal([]byte(body), &st) != nil {
+			t.Fatalf("depth-%d spawn after rejoin: %d %s", depth, code, body)
+		}
+		h.holder(st.ID)
+		capability = h.record(st.ID).Capability
+	}
+	if code, body := recoveryTokenCall(t, next.URL, capability, "spawn", map[string]any{"prompt": "too deep", "tier": "small"}); code != http.StatusForbidden || !strings.Contains(body, "the spawn depth cap is 4") {
+		t.Fatalf("depth cap after rejoin: %d %s", code, body)
 	}
 }
 

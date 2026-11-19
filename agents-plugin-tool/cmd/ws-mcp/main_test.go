@@ -16,11 +16,15 @@ import (
 	"github.com/kang-sw/devenv/internal/mcp"
 )
 
-// TestMain defaults WS_RSRC_ROOT to the shipped rsrc tree so CLI paths that
-// resolve bundled resources find them without a per-test override.
+// TestMain selects canonical build inputs for bare go test independently of
+// legacy caller resource roots.
 func TestMain(m *testing.M) {
-	if os.Getenv("WS_RSRC_ROOT") == "" {
-		_ = os.Setenv("WS_RSRC_ROOT", filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))
+	checkout, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		panic(err)
+	}
+	if os.Getenv("WS_TEST_EMBEDDED_PACKAGES") != "1" {
+		_ = os.Setenv("WS_RSRC_DEV_CHECKOUT", checkout)
 	}
 	os.Exit(runTestMain(m))
 }
@@ -672,16 +676,16 @@ func TestConfigCLICommandsReturnConfigView(t *testing.T) {
 	if before.Config.SchemaVersion != 1 || len(before.Config.Agents.Tiers) != 4 {
 		t.Fatalf("default config show = %#v", before.Config)
 	}
-	if small := before.Config.Agents.Tiers["small"]; small.Backend != "codex" || small.Model != "gpt-6-luna" || small.Effort != "high" {
+	if small := before.Config.Agents.Tiers["small"]; small.Backend != "codex" || small.Model != "gpt-5.6-luna" || small.Effort != "high" {
 		t.Fatalf("default small tier = %#v", small)
 	}
-	if medium := before.Config.Agents.Tiers["medium"]; medium.Backend != "codex" || medium.Model != "gpt-6-luna" || medium.Effort != "xhigh" {
+	if medium := before.Config.Agents.Tiers["medium"]; medium.Backend != "codex" || medium.Model != "gpt-6.1-terra" || medium.Effort != "high" {
 		t.Fatalf("default medium tier = %#v", medium)
 	}
-	if large := before.Config.Agents.Tiers["large"]; large.Backend != "codex" || large.Model != "gpt-6-sol" || large.Effort != "high" {
+	if large := before.Config.Agents.Tiers["large"]; large.Backend != "codex" || large.Model != "gpt-6.2-sol" || large.Effort != "high" {
 		t.Fatalf("default large tier = %#v", large)
 	}
-	if xlarge := before.Config.Agents.Tiers["xlarge"]; xlarge.Backend != "codex" || xlarge.Model != "gpt-6-sol" || xlarge.Effort != "xhigh" {
+	if xlarge := before.Config.Agents.Tiers["xlarge"]; xlarge.Backend != "codex" || xlarge.Model != "gpt-6.2-sol" || xlarge.Effort != "xhigh" {
 		t.Fatalf("default xlarge tier = %#v", xlarge)
 	}
 

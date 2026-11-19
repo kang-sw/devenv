@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 )
 
 //go:embed pi_lead.mjs
@@ -16,7 +18,7 @@ var piLeadAdapter string
 //go:embed pi_lead_bridge.mjs
 var piLeadBridgeSource string
 
-var piBundledPluginRoot = ResolveHostedPlugin
+var piHostedPackage = ResolveHostedPackage
 
 // preparePiLeadLaunch is replaced by runner tests whose holders never execute
 // their fictitious Pi command. Resource discovery itself stays inside Pi: a
@@ -37,12 +39,20 @@ const piNoSDKWarning = "Pi has no JavaScript SDK beside its CLI, so default plug
 
 func piLeadLaunch(command string, pre []string, spec StartSpec) (string, []string, error) {
 	args := append(piLeadArgs(spec), "--no-extensions")
-	root, packageWarning, bundleErr := piBundledPluginRoot(spec.Lead.DaemonVersion)
+	name, packageWarning, bundleErr := piHostedPackage()
 	var entries []string
+	var root string
 	if bundleErr == nil {
-		// Keep the selected package's policy even when the native extension
-		// comes from the shared source sibling instead of a prepared payload.
-		packageEnv, err := HostedPluginEnvironment(root)
+		stateDir, err := wsdashboard.Dir("")
+		if err != nil {
+			return "", nil, err
+		}
+		root, bundleErr = stagePiPayloadInputs(stateDir, name)
+	}
+	if bundleErr == nil {
+		// Pi needs real build-owned workflow skills, owner and config inputs,
+		// separate from the native extension's prepared payload.
+		packageEnv, err := HostedPluginEnvironment(name, root)
 		if err != nil {
 			return "", nil, fmt.Errorf("pi workflow environment: %w", err)
 		}
@@ -58,7 +68,8 @@ func piLeadLaunch(command string, pre []string, spec StartSpec) (string, []strin
 		spec.Lead.Env["WS_RSRC_ROOT"] = filepath.Join(root, "rsrc")
 		spec.Lead.Env["WS_SKILLS_ROOT"] = filepath.Join(root, "skills")
 		spec.Lead.Env["WS_PI_WORKFLOW_ROOT"] = root
-		entries, bundleErr = piBundledEntriesFrom(root)
+		spec.Lead.Env["WS_MCP_HOSTED_PACKAGE"] = "1"
+		entries, bundleErr = piBundledEntriesFrom(name)
 	}
 	// PluginWarning holds one value: every warning of this launch is joined
 	// into it, and an empty one clears a stale warning.
@@ -134,11 +145,18 @@ func piLeadLaunch(command string, pre []string, spec StartSpec) (string, []strin
 
 // writePiLeadBridge adds the hosted identity to the effective prompt without
 // --append-system-prompt, which would suppress the user's APPEND_SYSTEM.md.
-// Native MCP does not fill session_key or expose the hosted key to the model.
+// Native MCP does not fill session_key or expose the hosted key to the model,
+// and no extension delivers the workflow manual, so the MCP fallback (servers
+// set) appends both: the key and the manual the daemon rendered
+// (LeadSpec.Manual). A native extension appends its own manual.
 func writePiLeadBridge(spec StartSpec, servers map[string]any, warning string) (string, error) {
 	key := spec.Lead.Env[EnvHostedSessionKey]
 	if len(servers) > 0 && key == "" {
 		return "", fmt.Errorf("pi lead MCP fallback requires a hosted session key")
+	}
+	manual := ""
+	if len(servers) > 0 && spec.Lead.Manual != nil {
+		manual = spec.Lead.Manual()
 	}
 	raw, err := json.Marshal(servers)
 	if err != nil {
@@ -146,33 +164,32 @@ func writePiLeadBridge(spec StartSpec, servers map[string]any, warning string) (
 	}
 	keyJSON, _ := json.Marshal(key)
 	warningJSON, _ := json.Marshal(warning)
-	source := "const servers = " + string(raw) + ";\nconst sessionKey = " + string(keyJSON) + ";\nconst launchWarning = " + string(warningJSON) + ";\n" + piLeadBridgeSource
+	manualJSON, _ := json.Marshal(manual)
+	source := "const servers = " + string(raw) + ";\nconst sessionKey = " + string(keyJSON) + ";\nconst launchWarning = " + string(warningJSON) +
+		";\nconst workflowManual = " + string(manualJSON) + ";\n" + piLeadBridgeSource
 	path := filepath.Join(piDir(spec.Dir), piBridgeFile)
 	return path, writeFileAtomic(path, []byte(source), 0o600)
 }
 
-// piBundledEntries prefers the owning workflow package's prepared payload.
-// Source checkouts use the sibling when their valid payload is stale against
-// source inputs (the helper logs why). Invalid local payloads remain errors;
-// only source drift, never failed archive validation, permits that substitution.
-func piBundledEntries(daemonVersion string) ([]string, error) {
-	root, _, err := piBundledPluginRoot(daemonVersion)
+// Workers need only the selected name; no installed workflow root is resolved.
+func piBundledEntries(_ string) ([]string, error) {
+	name, _, err := piHostedPackage()
 	if err != nil {
 		return nil, err
 	}
-	return piBundledEntriesFrom(root)
+	return piBundledEntriesFrom(name)
 }
 
-func piBundledEntriesFrom(root string) ([]string, error) {
-	var err error
-	if _, localErr := os.Stat(filepath.Join(root, "native-pi")); !os.IsNotExist(localErr) {
-		root, err = piPreparedPayload(root)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		root = filepath.Join(filepath.Dir(root), "agents-plugin-pi")
+func piBundledEntriesFrom(name string) ([]string, error) {
+	prepared, err := piPreparedPayload(name)
+	if err != nil {
+		return nil, err
 	}
+	return piEntriesAt(prepared)
+}
+
+// piEntriesAt validates a prepared extension's manifest and load dependencies.
+func piEntriesAt(root string) ([]string, error) {
 	raw, err := os.ReadFile(filepath.Join(root, "package.json"))
 	if err != nil {
 		return nil, err

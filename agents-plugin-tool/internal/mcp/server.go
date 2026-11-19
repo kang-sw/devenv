@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 
@@ -63,6 +64,14 @@ type Server struct {
 	// first hostedSessionKey call.
 	hostedOnce sync.Once
 	hostedKey  string
+	// Key-record ancestry is immutable. Cache successes only; downstream role
+	// and root lookups still reject a deleted leaf, so no invalidation is needed.
+	hostedDescendants sync.Map
+	// descriptor is the connection's backend descriptor (tool_aliases.go),
+	// resolved once under descriptorMu.
+	descriptorMu       sync.Mutex
+	descriptorResolved bool
+	descriptor         connectionDescriptor
 	// inflight counts the requests being handled; draining refuses new
 	// ones, and inflightDone closes once a draining server goes idle
 	// (Drain).
@@ -350,7 +359,15 @@ func (s *Server) handle(ctx context.Context, req request) response {
 	case "ping":
 		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{}}
 	case "tools/list":
-		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": s.filteredTools()}}
+		descriptor := s.connectionDescriptor()
+		listed := s.filteredTools()
+		if descriptor.directTools != nil {
+			listed = slices.DeleteFunc(listed, func(tool map[string]any) bool {
+				name := descriptor.aliases.canonical(tool["name"].(string))
+				return name != "call" && !slices.Contains(descriptor.directTools, name)
+			})
+		}
+		return response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": listed}}
 	case "tools/call":
 		return s.callTool(ctx, req)
 	default:

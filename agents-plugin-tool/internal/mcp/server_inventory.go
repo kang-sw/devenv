@@ -27,7 +27,7 @@ import (
 // preserved no-op, since the pre-rename tickets.sage_record was reachable by
 // a delegate-scoped key.
 func isLeadOnlyTool(name string) bool {
-	return sessionHireTool(name) || isPiTool(name) || name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "tickets.index_init" || name == "git.merge" || name == "worktree.acquire" || name == "worktree.release" || name == "worktree.remove" || name == "worktree.list" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
+	return sessionHireTool(name) || isPiTool(name) || isAgentTool(name) || name == bootstrapToolName || name == "workflow_manual" || name == "workflow_state" || name == "tickets.sage_stamp" || name == "tickets.index_init" || name == "git.merge" || name == "worktree.acquire" || name == "worktree.release" || name == "worktree.remove" || name == "worktree.list" || strings.HasPrefix(name, "lead.") || workflowPreferenceWriterTool(name)
 }
 
 func workflowPreferenceWriterTool(name string) bool {
@@ -50,8 +50,8 @@ func leadToolNames(getenv func(string) string) []string {
 	names := make([]string, 0, len(tools()))
 	for _, tool := range tools() {
 		name, _ := tool["name"].(string)
-		name = advertisedToolName(name)
-		if permanentlyHiddenTool(name) {
+		if permanentlyHiddenTool(name) || name == "call" {
+			// call is connection-descriptor-only, not a default runtime tool.
 			continue
 		}
 		if envFlagOn(getenv(envNoAgent)) && noAgentHiddenTool(name) {
@@ -70,27 +70,100 @@ func leadToolNames(getenv func(string) string) []string {
 
 func (s *Server) filteredTools() []map[string]any {
 	namespace := s.runtimeNamespace()
+	descriptor := s.connectionDescriptor()
 	base := tools()
 	filtered := make([]map[string]any, 0, len(base))
 	for _, tool := range base {
 		name, _ := tool["name"].(string)
-		name = advertisedToolName(name)
 		if permanentlyHiddenTool(name) {
 			continue
 		}
-		if isPiTool(name) && !s.piListed() {
-			// Listed only where they can run (piUnavailable); a call that
-			// comes anyway refuses with the reason.
+		if isPiTool(name) {
+			// Never listed: agent.* and mailbox.send replace them. Their
+			// handlers still answer (piUnavailable gates a call), so a
+			// session started on an older plugin keeps working until they
+			// are deleted.
 			continue
 		}
-		if isPiTool(name) && s.piForwards() {
-			tool = piWorkerTool(tool)
+		if isAgentTool(name) {
+			// Listed where a runner answers them, the daemon's or the token
+			// route's; the agentless product mode keeps them, since
+			// delegation runs through them there too.
+			if !s.agentListed() {
+				continue
+			}
+			if s.piForwards() {
+				tool = agentWorkerTool(tool)
+			}
 		}
 		if s.toolAllowed(name) {
-			filtered = append(filtered, publicToolDefinition(tool, name, namespace))
+			definition := publicToolDefinition(tool, descriptor.aliases.advertised(name), namespace)
+			if descriptor.toolsAlwaysLoad {
+				meta := make(map[string]any)
+				if existing, ok := definition["_meta"].(map[string]any); ok {
+					for key, value := range existing {
+						meta[key] = value
+					}
+				}
+				meta["antigravity/alwaysLoad"] = true
+				definition["_meta"] = meta
+			}
+			filtered = append(filtered, definition)
 		}
 	}
 	return filtered
+}
+
+// callDiscoveryTools narrows tools/list's advertised surface to the caller's
+// authority. Reuse the identity already read by callTool, not one key lookup
+// per candidate. With no recognised key, use the most restrictive role so
+// omitting a key cannot disclose a role-gated tool's name or schema.
+func (s *Server) callDiscoveryTools(key string, entry sessionEntry, found bool) []map[string]any {
+	if !found {
+		entry = sessionEntry{scope: roleLeaf}
+	}
+	aliases := s.connectionDescriptor().aliases
+	var visible []map[string]any
+	for _, tool := range s.filteredTools() {
+		name := aliases.canonical(tool["name"].(string))
+		if s.permissionRefusal(name) != "" {
+			continue
+		}
+		if _, refusal := s.sessionToolAccess(name, key, entry); refusal != "" {
+			continue
+		}
+		visible = append(visible, tool)
+	}
+	return visible
+}
+
+// sessionToolAccess is the shared keyed capability gate for execution and
+// call discovery. A successful sub-lead board access also supplies the board
+// rewrite execution needs; discovery never runs a handler or writes a board.
+func (s *Server) sessionToolAccess(name, key string, entry sessionEntry) (*subleadBoard, string) {
+	// A forwarding worker's delegation tools use its token, not its key.
+	piByToken := (isPiTool(name) || isAgentTool(name)) && s.piForwards()
+	if entry.scope != roleLead && !piByToken && (isLeadOnlyTool(name) || !roleAllowsTool(entry.scope, name)) {
+		return nil, fmt.Sprintf("tool not available in current %s MCP profile: %s", s.runtimeNamespace(), name)
+	}
+	if isNoteMutationTool(name) && !entry.isTopLevelLead() {
+		return nil, noteReadOnlyDenial(name)
+	}
+	if name == whiteboardLoadTool && !entry.isTopLevelLead() {
+		return nil, whiteboardLeadOnlyDenial(name)
+	}
+	if isWhiteboardTool(name) && !entry.isTopLevelLead() {
+		board, marked := s.subleadBoardFor(key, entry)
+		if !marked {
+			return nil, whiteboardLeadOnlyDenial(name)
+		}
+		return &board, ""
+	}
+	// Support conversations may reach only their profile's tracker/wiki tools.
+	if (isTrackerTool(name) || isWikiTool(name) || name == trackerShowTool || name == trackerUITool) && !entry.isTopLevelLead() && !s.trackerSupportAdmits(key, entry, name) {
+		return nil, trackerLeadOnlyDenial(name)
+	}
+	return nil, ""
 }
 
 func publicToolDefinition(tool map[string]any, advertisedName, namespace string) map[string]any {
@@ -111,6 +184,11 @@ func publicToolDefinition(tool map[string]any, advertisedName, namespace string)
 }
 
 func (s *Server) toolAllowed(name string) bool {
+	// Only a descriptor opting into fallback exposes the envelope. The
+	// inner tool is still checked separately, including its allowlist.
+	if name == "call" {
+		return s.connectionDescriptor().callFallback
+	}
 	if s.noAgentMode() && noAgentHiddenTool(name) {
 		return false
 	}
@@ -159,10 +237,6 @@ func roleAllowsTool(role toolRole, name string) bool {
 	default:
 		return false
 	}
-}
-
-func advertisedToolName(name string) string {
-	return name
 }
 
 func namespaceText(text, namespace string) string {

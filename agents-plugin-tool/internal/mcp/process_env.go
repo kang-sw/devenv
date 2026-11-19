@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/execjob"
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsdoc"
@@ -223,29 +225,15 @@ func (s *Server) gitRunner() wsgit.ExecRunner {
 	return wsgit.ExecRunner{Environ: s.environ}
 }
 
-// rsrcRoot is the caller's resource tree. A hosted server takes it from
-// the caller's WS_RSRC_ROOT alone: the daemon's own executable lives in its
-// state directory, beside no resource tree, so the executable-derived
-// fallback would resolve to nothing meaningful.
-func (s *Server) rsrcRoot() (string, error) {
-	if s.env == nil {
-		return wsrsrc.ResolveRoot()
-	}
-	if root := s.getenv(wsrsrc.EnvRsrcRoot); root != "" {
-		return root, nil
-	}
-	return "", fmt.Errorf("%s not set for this connection", wsrsrc.EnvRsrcRoot)
+// rsrcRoot selects build-owned resources using package identity, never the
+// caller's resource path. The dev checkout is read from the daemon process by
+// wspackage, not from this connection's environment.
+func (s *Server) rsrcRoot() (fs.FS, error) {
+	return wsrsrc.PackageResources(s.getenv("WS_MCP_NAMESPACE"))
 }
 
-// skillsRoot is the caller's skills tree, resolved as rsrcRoot is.
-func (s *Server) skillsRoot() (string, error) {
-	if s.env == nil {
-		return wsrsrc.ResolveSkillsRoot()
-	}
-	if root := s.getenv(wsrsrc.EnvSkillsRoot); root != "" {
-		return root, nil
-	}
-	return "", fmt.Errorf("%s not set for this connection", wsrsrc.EnvSkillsRoot)
+func (s *Server) skillsRoot() (fs.FS, error) {
+	return wsrsrc.PackageSkills(s.getenv("WS_MCP_NAMESPACE"))
 }
 
 func envFlagOn(value string) bool {
@@ -340,12 +328,13 @@ func hostedRowPID(path string) int {
 
 // DropHarnessSessionEnv removes from this process's environment the
 // variables that tie a ws-mcp to one harness session: the hosted-session
-// variables and the harness PID. The dashboard daemon calls it at start. Its
-// environment is that of whichever session's launcher started it, and the
-// conversations it spawns, with the ws-mcp each attaches without a
-// launcher, would otherwise read that session's as their own.
+// variables, the harness PID, and a hosted session's ws-mcp credentials.
+// The dashboard daemon calls it at start. Its environment is that of
+// whichever session's launcher started it, and the conversations it spawns,
+// with the ws-mcp each attaches without a launcher, would otherwise read
+// that session's as their own, or reach its server with its token.
 func DropHarnessSessionEnv() {
-	for _, name := range []string{envHostedSession, envHostedSessionKey, envHostedSessionRow, envHarnessPID} {
+	for _, name := range []string{envHostedSession, envHostedSessionKey, envHostedSessionRow, envHarnessPID, wsagent.EnvMCPSessionURL, wsagent.EnvMCPSessionToken} {
 		_ = os.Unsetenv(name)
 	}
 }
@@ -366,12 +355,38 @@ func (s *Server) GlobalConfigPath() (string, error) {
 // noAgentMode reports whether the caller runs the agentless profile.
 func (s *Server) noAgentMode() bool { return envFlagOn(s.getenv(envNoAgent)) }
 
-// runtimeNamespace is the caller's tool namespace, "ws" by default.
+// runtimeNamespace is the caller's tool namespace, "ws" by default. A
+// connection whose sessions reach ws only as the daemon's own server
+// (connectionDescriptor.playbookCommands) names that server, whatever
+// package serves it: its host lists the tools under that name.
 func (s *Server) runtimeNamespace() string {
+	if s.connectionDescriptor().playbookCommands {
+		return wsagent.ReservedMCPServer
+	}
 	if value := strings.TrimSpace(s.getenv(envNamespace)); value != "" {
 		return value
 	}
 	return "ws"
+}
+
+// skillRef names the lead skill name as the caller invokes it: the
+// namespaced skill (ws:lead-run), or, on a connection whose sessions have no
+// ws skills (connectionDescriptor.playbookCommands), the dashboard command
+// that runs its playbook (/lead-run).
+func (s *Server) skillRef(name string) string {
+	if s.connectionDescriptor().playbookCommands {
+		return "/" + name
+	}
+	return s.runtimeNamespace() + ":" + name
+}
+
+// namespaced resolves a "{{ns}}" text (whiteboard_text.go): "{{ns}}:<skill>"
+// through skillRef, every other "{{ns}}" to the runtime namespace.
+func (s *Server) namespaced(text string) string {
+	if s.connectionDescriptor().playbookCommands {
+		text = strings.ReplaceAll(text, "{{ns}}:", "/")
+	}
+	return withNamespace(text, s.runtimeNamespace())
 }
 
 // cliCommandName is CLICommandName for the caller process.
