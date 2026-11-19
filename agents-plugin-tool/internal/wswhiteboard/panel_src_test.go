@@ -124,10 +124,10 @@ func TestPanelSrcRefusals(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct{ name, attrs, problem string }{
-		{"dotdot escape", `src="../outside.html"`, "leaves the project root"},
-		{"deep dotdot escape", `src="mock/../../outside.html"`, "leaves the project root"},
-		{"absolute outside", fmt.Sprintf(`src=%q`, filepath.Join(outside, "secret.html")), "leaves the project root"},
-		{"root itself", `src="."`, "leaves the project root"},
+		{"dotdot escape", `src="../outside.html"`, "outside the session root"},
+		{"deep dotdot escape", `src="mock/../../outside.html"`, "outside the session root"},
+		{"absolute outside", fmt.Sprintf(`src=%q`, filepath.Join(outside, "secret.html")), "outside the session root"},
+		{"root itself", `src="."`, "outside the session root"},
 		{"missing", `src="mock/none.html"`, "no such file"},
 		{"extension", `src="mock/notes.txt"`, "only .html, .htm, .svg and .md"},
 		{"no extension", `src="mock/ok"`, "only .html, .htm, .svg and .md"},
@@ -143,6 +143,9 @@ func TestPanelSrcRefusals(t *testing.T) {
 			st := &State{}
 			problems := b.refuse(t, st, srcPanelXML(tc.attrs))
 			wantProblems(t, problems, tc.problem)
+			if tc.problem == "outside the session root" {
+				wantProblems(t, problems, b.root)
+			}
 			if !hasProblem(problems, "line") || !hasProblem(problems, "src") {
 				t.Fatalf("the refusal must carry the command position and name the src attribute: %q", problems)
 			}
@@ -185,40 +188,39 @@ func TestPanelSrcRefusals(t *testing.T) {
 	})
 }
 
-func TestPanelSrcSymlinkEscapeRefused(t *testing.T) {
+func TestPanelSrcLinksRefused(t *testing.T) {
 	b := newSrcBoard(t)
 	outside := t.TempDir()
 	secret := filepath.Join(outside, "secret.md")
 	if err := os.WriteFile(secret, []byte("secret"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(secret, filepath.Join(b.root, "link.md")); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
-	}
-	if err := os.Symlink(outside, filepath.Join(b.root, "linkdir")); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
-	}
-	for _, src := range []string{"link.md", "linkdir/secret.md"} {
-		_, err := ReadPanelSource(b.root, src)
-		if err == nil || !strings.Contains(err.Error(), "outside the project root") {
-			t.Fatalf("ReadPanelSource(%q) = %v, want a symlink escape refusal", src, err)
+	b.write(t, "real/m.md", "inside")
+	b.write(t, "real/x.txt", "x")
+	link := func(target, name string) {
+		t.Helper()
+		if err := os.Symlink(target, filepath.Join(b.root, name)); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
 		}
 	}
-	// A symlink that stays inside the root is fine.
-	b.write(t, "real/m.md", "inside")
-	if err := os.Symlink(filepath.Join(b.root, "real", "m.md"), filepath.Join(b.root, "inner.md")); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
+	link(secret, "link.md")                              // file link out of the root
+	link(outside, "linkdir")                             // folder link out of the root
+	link(filepath.Join(b.root, "real", "m.md"), "in.md") // file link that stays inside
+	link(filepath.Join(b.root, "real"), "indir")         // folder link that stays inside
+	link(filepath.Join(b.root, "real", "x.txt"), "x.md") // link to a disallowed type
+	link("real", "rel")                                  // relative folder link
+	for _, src := range []string{"link.md", "linkdir/secret.md", "in.md", "indir/m.md", "x.md", "rel/m.md", "real/../linkdir/secret.md"} {
+		_, err := ReadPanelSource(b.root, src)
+		if err == nil || !strings.Contains(err.Error(), "symlink or junction") || !strings.Contains(err.Error(), b.root) {
+			t.Fatalf("ReadPanelSource(%q) = %v, want a refusal naming the link and the session root", src, err)
+		}
 	}
-	if got, err := ReadPanelSource(b.root, "inner.md"); err != nil || got != "inside" {
-		t.Fatalf("inner symlink = %q, %v", got, err)
+	if got, err := ReadPanelSource(b.root, "real/m.md"); err != nil || got != "inside" {
+		t.Fatalf("a plain file next to the links still reads: %q, %v", got, err)
 	}
-	// A link to a disallowed type is refused even inside the root.
-	b.write(t, "real/x.txt", "x")
-	if err := os.Symlink(filepath.Join(b.root, "real", "x.txt"), filepath.Join(b.root, "x.md")); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
-	}
-	if _, err := ReadPanelSource(b.root, "x.md"); err == nil {
-		t.Fatal("a link to a .txt target must be refused")
+	// A file where a folder is expected.
+	if _, err := ReadPanelSource(b.root, "real/m.md/deeper.md"); err == nil || !strings.Contains(err.Error(), "not a folder") {
+		t.Fatalf("a path through a file is refused: %v", err)
 	}
 }
 

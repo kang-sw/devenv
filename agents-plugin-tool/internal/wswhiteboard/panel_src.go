@@ -17,10 +17,10 @@ var panelSourceExts = map[string]bool{".html": true, ".htm": true, ".svg": true,
 // names, read once at update time. A relative path resolves against root,
 // the session's project root (the root board images resolve against); an
 // absolute path is accepted only inside root. A path that leaves root
-// lexically or through a symlink, a missing or non-regular file, an
-// extension other than .html, .htm, .svg or .md, and a file over
-// MaxPanelBytes are refused with a reason naming what failed. At most
-// MaxPanelBytes+1 bytes are read. The caller applies the panel payload
+// lexically, one with a symlink or junction anywhere below root, a missing
+// or non-regular file, an extension other than .html, .htm, .svg or .md, and
+// a file over MaxPanelBytes are refused with a reason naming what failed. At
+// most MaxPanelBytes+1 bytes are read. The caller applies the panel payload
 // rules (UTF-8, full document) to the result.
 func ReadPanelSource(root, path string) (string, error) {
 	switch {
@@ -37,41 +37,47 @@ func ReadPanelSource(root, path string) (string, error) {
 		abs = filepath.Join(root, abs)
 	}
 	abs = filepath.Clean(abs)
-	if rel, err := filepath.Rel(root, abs); err != nil || !belowRoot(rel) {
-		return "", errors.New("the path leaves the project root; keep the file inside the project")
+	rel, err := filepath.Rel(root, abs)
+	if err != nil || !belowRoot(rel) {
+		return "", fmt.Errorf("the path is outside the session root %s; keep the file inside it", root)
 	}
 	if !panelSourceExts[strings.ToLower(filepath.Ext(abs))] {
 		return "", errors.New("only .html, .htm, .svg and .md files can be a panel source")
 	}
-	realRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return "", fmt.Errorf("the project root cannot be resolved: %v", err)
-	}
-	resolved, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", errors.New("no such file")
+	// Containment is checked on the lexical path, so no component below the
+	// root may redirect it elsewhere: filepath.EvalSymlinks is not enough,
+	// because on Windows (Go 1.23+) it does not resolve junctions (mount
+	// points) while os.Stat and os.Open follow them. Each component is
+	// Lstat-ed instead: a directory on the way and a regular file at the end
+	// are accepted; a symlink or a junction (reported as ModeSymlink or
+	// ModeIrregular) is refused wherever it sits, as is any other type.
+	parts := strings.Split(rel, string(filepath.Separator))
+	cur := root
+	var info os.FileInfo
+	for i, part := range parts {
+		cur = filepath.Join(cur, part)
+		info, err = os.Lstat(cur)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return "", errors.New("no such file")
+			}
+			return "", fmt.Errorf("the file cannot be read: %v", err)
 		}
-		return "", fmt.Errorf("the file cannot be resolved: %v", err)
+		if info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+			return "", fmt.Errorf("%s is a symlink or junction; a panel source and the folders above it, below the session root %s, must be plain", strings.Join(parts[:i+1], "/"), root)
+		}
+		if i < len(parts)-1 && !info.IsDir() {
+			return "", fmt.Errorf("%s is not a folder", strings.Join(parts[:i+1], "/"))
+		}
 	}
-	if rel, err := filepath.Rel(realRoot, resolved); err != nil || !belowRoot(rel) {
-		return "", errors.New("the path resolves outside the project root through a symlink")
-	}
-	if !panelSourceExts[strings.ToLower(filepath.Ext(resolved))] {
-		return "", errors.New("the symlink target is not a .html, .htm, .svg or .md file")
-	}
-	// Stat before opening: opening a FIFO would block the update call.
-	info, err := os.Stat(resolved)
-	if err != nil {
-		return "", fmt.Errorf("the file cannot be read: %v", err)
-	}
+	// Opening a FIFO would block the update call, so only a regular file opens.
 	if !info.Mode().IsRegular() {
 		return "", errors.New("not a regular file")
 	}
 	if info.Size() > MaxPanelBytes {
 		return "", errors.New(sourceTooLarge)
 	}
-	f, err := os.Open(resolved)
+	f, err := os.Open(abs)
 	if err != nil {
 		return "", fmt.Errorf("the file cannot be read: %v", err)
 	}

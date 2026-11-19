@@ -26,9 +26,8 @@ The whiteboard is the context a top-level lead shares with its user.
 - The user approved a deliverable → build it without re-asking.
 - Text mockups (HTML/SVG) → save under
   `ai-docs/assets/mockups/YYMMDD/<topic name>/` and include them in your next
-  commit. Write a complex mockup as a file there and post it with
-  `wb:panel src="<path>"`; never pass mockup HTML bodies between agents or
-  paste them inline.
+  commit. Write a large mockup as a file there and post it with
+  `wb:panel src="<path>"`; never pass mockup HTML bodies between agents.
 - Confirmed decisions reach a ticket only through
   `{{.SkillNamespace}}:lead-ticket`, once the user moves to capture.
 
