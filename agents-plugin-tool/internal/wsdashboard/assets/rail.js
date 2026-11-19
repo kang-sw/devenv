@@ -976,13 +976,16 @@
   // topWatch keeps topFit current: on a resize of the strip (the window,
   // the drawer's and tracker's room it pads clear of) and on a change of its
   // items (a head swap, a usage redraw, a rename). Its own class changes
-  // neither resize the strip nor touch its items.
+  // neither resize the strip nor touch its items. The search slot (qsslot)
+  // holds the tracker's own fixed-position UI, whose renders are no change
+  // of the strip's items.
   function topWatch(top, win) {
     win = win || window;
     if (!top) return;
     var fit = function () { topFit(top, win); };
+    var inSlot = function (rec) { var n = rec.target; n = n && n.nodeType !== 1 ? n.parentNode : n; return !!(n && n.closest && n.closest(".qsslot")); };
     if (win.ResizeObserver) new win.ResizeObserver(fit).observe(top);
-    if (win.MutationObserver) new win.MutationObserver(fit).observe(top, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["hidden"] });
+    if (win.MutationObserver) new win.MutationObserver(function (recs) { if (!recs.every(inSlot)) fit(); }).observe(top, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["hidden"] });
     if (win.document.fonts && win.document.fonts.ready) win.document.fonts.ready.then(fit);
     fit();
   }

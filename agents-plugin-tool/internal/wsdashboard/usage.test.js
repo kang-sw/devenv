@@ -495,6 +495,15 @@ test('the handle marks each harness with the small badge and leads with the comp
   assert.equal(nodes(marks[1], 'svg').length, 0);
 });
 
+test('a reply without the account list draws the empty handle, never throws', async () => {
+  const env = environment();
+  env.set({});
+  const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
+  assert.equal(env.button.textContent, 'Plan usage');
+  mounted.sync();
+  assert.equal(env.button.textContent, 'Plan usage');
+});
+
 test('empty login state and hidden-page cadence', async () => {
   const env = environment();
   const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();

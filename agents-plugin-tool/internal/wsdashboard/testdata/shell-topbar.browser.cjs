@@ -79,6 +79,7 @@ function checkStrip(label, g) {
     for (const theme of ['dark', 'light']) {
       const context = await browser.newContext({ viewport: { width: 1920, height: 900 }, colorScheme: theme });
       await context.addInitScript(() => {
+        if (self !== top) return;
         const workers = navigator.serviceWorker;
         if (workers) Object.getPrototypeOf(workers).register = async () => { throw new Error('No service workers in fixture'); };
       });
@@ -118,12 +119,14 @@ function checkStrip(label, g) {
       }
       report.push({ theme, width: 1920, rail: g.rail, top: g.top, items: g.items.map(i => i.cls) });
       await shot(page, `${theme}-wide`);
+      await shot(page, `${theme}-wide-strip`, { clip: { x: 0, y: 0, width: 1920, height: 60 } });
       // The usage popover opens under the center handle.
       await page.locator('.usage-toggle').click();
       const dialog = page.locator('.usage-pop');
       await dialog.waitFor({ state: 'visible' });
       const pop = await dialog.boundingBox(), handle = await page.locator('.usage-toggle').boundingBox();
       assert.ok(pop.y >= handle.y + handle.height, `${theme}: usage popover opens below its handle`);
+      assert.ok(Math.abs(pop.x + pop.width / 2 - (handle.x + handle.width / 2)) <= 1, `${theme}: usage popover centers under its handle`);
       assert.equal(await page.locator('.usage-toggle').getAttribute('aria-expanded'), 'true');
       await shot(page, `${theme}-wide-usage`);
       await page.keyboard.press('Escape');
@@ -148,6 +151,7 @@ function checkStrip(label, g) {
         checkStrip('dark/1280', g);
         assert.deepEqual([g.railbtn.l, g.railbtn.t, g.railbtn.w, g.railbtn.h], [16, 0, 34, 34], 'dark/1280: rail button is a 34px handle at the top-left');
         await shot(page, 'dark-narrow');
+        await shot(page, 'dark-narrow-strip', { clip: { x: 0, y: 0, width: 1280, height: 60 } });
         await page.locator('#railbtn').click();
         await page.waitForTimeout(400);
         g = await geometry(page);
@@ -155,10 +159,10 @@ function checkStrip(label, g) {
         assert.deepEqual([g.rail.l, g.rail.t], [12, 12], 'dark/1280: overlay rail sits 12px in');
         const covered = await page.evaluate(() => {
           const b = document.querySelector('#railbtn').getBoundingClientRect(), u = document.querySelector('.usage-toggle').getBoundingClientRect();
-          const hit = (x, y) => { const e = document.elementFromPoint(x, y); return !!(e && e.closest('#rail, #rscrim')); };
+          const hit = (x, y) => { const e = document.elementFromPoint(x, y); return e && e.closest('#rail, #rscrim, #memo-pad') ? true : (e ? e.tagName + '.' + e.className + '#' + e.id : 'none'); };
           return [hit(b.left + b.width / 2, b.top + b.height / 2), hit(u.left + u.width / 2, u.top + u.height / 2)];
         });
-        assert.deepEqual(covered, [true, true], 'dark/1280: the open rail and scrim cover the strip');
+        assert.deepEqual(covered, [true, true], 'dark/1280: the open rail, its scrim and memo pad cover the strip: ' + JSON.stringify(covered));
         await shot(page, 'dark-narrow-open');
         // The rail footer is Settings and Home alone, and fits at 360px.
         await page.setViewportSize({ width: 360, height: 760 });
@@ -175,14 +179,44 @@ function checkStrip(label, g) {
         await page.waitForTimeout(300);
         g = await geometry(page);
         checkStrip('dark/760', g);
-        assert.ok(/\btu\b/.test(g.cls), 'dark/760: plan usage compacts first');
-        for (const [name, b] of [['railbtn', g.railbtn], ['usage', g.usage], ['host', g.host]]) {
-          assert.ok(b && b.w > 0 && b.l >= 0 && b.r <= g.vw, `dark/760: ${name} shows unclipped`);
+        // Grow the head until the strip runs short: the center compacts
+        // first, the identity ellipsizes only after that, the low-priority
+        // chips hide last, and the strip never overflows.
+        const steps = [
+          [0, null, null],
+          [1, 'livesession-renamed-with-a-much-longer-label', null],
+          [2, 'livesession-renamed-with-a-much-longer-label', 'a-project-folder-with-an-unusually-long-name-for-the-header-strip'],
+        ];
+        let state = null;
+        for (const [step, label, project] of steps) {
+          await page.evaluate(({ label, project }) => {
+            const top = document.querySelector('.dwrap > .top');
+            if (label) top.querySelector('.snm').textContent = label;
+            if (project) {
+              top.querySelector('.tph-r1').textContent = project;
+              top.querySelector('.tph-chips').insertAdjacentHTML('afterbegin', '<span class="nolive">stores only</span><span class="ended-chip">ended</span>');
+            }
+          }, { label, project });
+          await page.waitForTimeout(150);
+          g = await geometry(page);
+          checkStrip(`dark/760/step${step}`, g);
+          state = await page.evaluate(() => {
+            const top = document.querySelector('.dwrap > .top'), id = top.querySelector('.tph-id');
+            const clip = e => e.scrollWidth > e.clientWidth + 0.5;
+            return { tu: top.classList.contains('tu'), tch: top.classList.contains('tch'), clipped: clip(id) || [...id.querySelectorAll('.snm, .tph-r1')].some(clip) };
+          });
+          if (state.clipped) assert.ok(state.tu, `dark/760/step${step}: identity ellipsizes only after usage compacts`);
+          if (state.tch) assert.ok(state.tu, `dark/760/step${step}: chips hide only after usage compacts`);
+          for (const [name, b] of [['railbtn', g.railbtn], ['usage', g.usage], ['host', g.host]]) {
+            assert.ok(b && b.w > 0 && b.l >= 0 && b.r <= g.vw, `dark/760/step${step}: ${name} shows unclipped`);
+          }
+          await shot(page, `dark-760-step${step}-strip`, { clip: { x: 0, y: 0, width: 760, height: 60 } });
+          report.push({ width: 760, step, state, items: g.items.map(i => [i.cls, Math.round(i.box.l), Math.round(i.box.r)]), handles: g.handles.map(h => Math.round(h.l)) });
         }
+        assert.ok(state.tu && state.tch && state.clipped, 'dark/760: the longest head compacts usage, hides chips and ellipsizes the identity ' + JSON.stringify(state));
         assert.equal(g.usage.w, 34, 'dark/760: compact usage trigger is 34px');
-        const idClip = await page.evaluate(() => { const id = document.querySelector('.top .tph-id'); return id ? id.scrollWidth > id.clientWidth : false; });
-        report.push({ width: 760, cls: g.cls, idClipped: idClip, items: g.items.map(i => [i.cls, Math.round(i.box.l), Math.round(i.box.r)]), handles: g.handles.map(h => Math.round(h.l)) });
         await shot(page, 'dark-760');
+        await shot(page, 'dark-760-strip', { clip: { x: 0, y: 0, width: 760, height: 60 } });
         await page.locator('.usage-toggle').click();
         await page.locator('.usage-pop').waitFor({ state: 'visible' });
         await shot(page, 'dark-760-usage');
@@ -193,7 +227,7 @@ function checkStrip(label, g) {
         g = await geometry(page);
         assert.ok(!/\btu\b/.test(g.cls), 'dark/1920 again: plan usage shows in full');
       }
-      assert.deepEqual(errors, [], theme + ': page errors');
+      assert.deepEqual(errors, [], theme + ': page errors ' + JSON.stringify(errors));
       await context.close();
     }
     console.log(JSON.stringify(report));

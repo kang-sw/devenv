@@ -318,7 +318,10 @@
         if (!r.ok) throw new Error("usage unavailable");
         return r.json();
       }).then(function (next) {
-        data = next; drawFooter(); drawPopover();
+        // The handle sits in every header now, so a reply without the
+        // account list (a page whose daemon reports none) reads as empty.
+        data = next && Array.isArray(next.entries) ? next : { entries: [], warnPercent: 80, critPercent: 95 };
+        drawFooter(); drawPopover();
         if (force) followUp();
       }).catch(function () {
         data.entries.forEach(function (entry) { entry.status = "usage unavailable"; });

@@ -23,7 +23,7 @@
   body.tk-paged .dbody { flex: 1 1 0; min-height: 0; align-items: stretch; }
   .dbody > .tk-spage { grid-column: 2; grid-row: 1; }
   .dash:not(.live):not(.history) .rail { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
-  .top > .back { display: none; }
+  .dwrap > .top > .back { display: none; }
   .dwrap > .top { margin-left: calc(340px + 16px); }
   .dbody > .rail { margin: calc(-1 * var(--toph)) 0 0 -4px; }
 }
@@ -94,7 +94,7 @@
   :root[data-pincol] .rscrim { display: block; position: fixed; inset: 0; z-index: 44; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .22s; }
   :root[data-pincol].rail-open .rscrim { opacity: 1; pointer-events: auto; }
   :root[data-pincol] .rail .rkids { margin-left: 10px; }
-  :root[data-pincol] .top > .back { display: inline-flex; }
+  :root[data-pincol] .dwrap > .top > .back { display: inline-flex; }
   :root[data-pincol] .dwrap > .top { margin-left: 0; }
   :root[data-pincol] .dbody > .rail { margin: 0; }
 }
@@ -376,6 +376,12 @@ html:not([data-sysopen]) .rail .rsleep { display: none; }
 .rail .rfoot { flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-top: 1px solid var(--wb-muted); font-size: 12px; }
 .rail .rfoot a { color: var(--wb-muted-fg); text-decoration: none; }
 .rail .rfoot a:hover { color: var(--wb-primary); }
+/* the footer's two controls, Settings then Home, share its width, each its
+   icon and its (localized) label, drawn from the accessible name */
+.rail .rfoot > .btn.gear { flex: 1 1 0; min-width: 0; width: auto; height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 8px; border: 1px solid var(--wb-line); border-radius: 8px; background: transparent; color: var(--wb-muted-fg); font-size: 12px; font-weight: 700; white-space: nowrap; }
+.rail .rfoot > .btn.gear::after { content: attr(aria-label); overflow: hidden; text-overflow: ellipsis; }
+.rail .rfoot > .btn.gear .i { width: 14px; height: 14px; flex: none; }
+.rail .rfoot > .btn.gear:hover, .rail .rfoot > .btn.gear[aria-expanded="true"] { background: var(--wb-muted); color: var(--wb-fg); }
 /* the rail's popovers (add workspace, add worktree): one at a time, made by
    the page script outside the rail region (which every update replaces)
    and placed fixed against the + that opened them; the tracker support

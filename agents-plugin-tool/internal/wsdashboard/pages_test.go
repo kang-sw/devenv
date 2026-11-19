@@ -228,7 +228,7 @@ func TestSessionHeadLeadsWithTheProjectAndLightsTheHarnessBadge(t *testing.T) {
 	_, page := get(t, f.base+"/s/livesession")
 	name := filepath.Base(f.project)
 	for _, head := range []string{
-		`<span class="tph tph-id"><span class="tph-c"><span class="meta">` + name + `</span><span class="meta sname"`,
+		`<span class="tph tph-id"><span class="tph-c"><span class="meta tph-r1">` + name + `</span><span class="meta sname"`,
 		`>livesession</button>`,
 		`<span class="sseq"> · #3</span></span></span></span><span class="tph tph-hs"><span class="hb" data-h="claude" aria-hidden="true"></span><span class="host sse" title="harness process running"><span class="dot"></span>claude</span></span><span class="tph tph-chips">`,
 	} {

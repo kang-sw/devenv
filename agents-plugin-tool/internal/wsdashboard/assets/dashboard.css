@@ -94,10 +94,10 @@
 /* identity: the project (and the worktree page's branch) over the name */
 .tph-id { flex: 0 1 auto; min-width: 0; padding: 2px 6px 0 10px; overflow: hidden; }
 .tph-c { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
-.dwrap > .top .tph-c > .meta { font: 500 9.5px/1.15 var(--wb-sans); color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dwrap > .top .tph-r1 { font: 500 9.5px/1.15 var(--wb-sans); color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dwrap > .top .tph-c > .sname, .tph-c > .worktree-branch { min-width: 0; font: 800 12.5px/1.2 var(--wb-sans); letter-spacing: .02em; color: var(--wb-fg); }
 .tph-c > .sname .snm { padding: 0 2px; margin-left: -2px; }
-.tph-c > .sname .snm.lbl { font-weight: 800; }
+.tph-c > .sname > .snm.lbl { font-weight: 800; }
 .tph-c > .sname .sseq { flex: none; font-weight: 500; color: var(--wb-muted-fg); }
 .tph-c > .sname .sinp { height: 17px; box-sizing: border-box; width: 18ch; font-size: 12px; }
 .tph-c > .worktree-branch { display: flex; overflow: hidden; text-overflow: ellipsis; }
@@ -118,6 +118,11 @@
 .tcen { flex: none; display: inline-flex; align-items: flex-start; gap: 6px; margin: 0 auto; padding: 0 8px; }
 .talert[hidden], .talert:empty { display: none; }
 .dwrap > .top > .sse { flex: none; height: var(--toph); padding: 2px 4px 0; margin-left: 0; }
+/* the tracker's search-palette button (qsslot, tracker.js) takes the
+   handles' shape here; its own stylesheet stays as it is */
+.dwrap > .top > .qsslot:not(:empty) { flex: none; display: inline-flex; }
+.dwrap > .top > .qsslot #tkqs { width: 34px; height: var(--toph); padding: 2px 0 0; border: 0; border-radius: 0 0 8px 8px; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: var(--wb-shadow-hi); }
+.dwrap > .top > .qsslot #tkqs:hover { color: var(--wb-fg); }
 /* the strip running short (rail.js topFit) */
 .dwrap > .top.tmeas .tph-id { flex-shrink: 0; }
 .dwrap > .top.tch .tph-hs > .hosted, .dwrap > .top.tch .tph-chips > :not(.fail):not(.mcpbad) { display: none; }

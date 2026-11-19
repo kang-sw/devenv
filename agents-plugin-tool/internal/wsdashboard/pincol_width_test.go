@@ -18,7 +18,8 @@ import (
 func TestPinnedColumnFillsTheWindowRightOfTheBoard(t *testing.T) {
 	css := mustAsset(t, "dashboard.css")
 	for _, want := range []string{
-		".dwrap { margin: 0; padding: 12px 16px; max-width: 1680px; }",
+		// No top padding: the header's handles hang from the window's top edge.
+		".dwrap { margin: 0; padding: 0 16px 12px; max-width: 1680px; }",
 		".dwrap.narrow { margin: 0 auto; max-width: 1080px; padding-top: 16px; }",
 		".dr-in { position: relative; max-width: 1680px; margin: 0; }",
 		`@media (min-width: 1600px) {

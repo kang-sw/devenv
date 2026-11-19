@@ -605,7 +605,7 @@
   function shScroll(ent) {
     var y = Math.max(0, ent.y || 0);
     shTop.style.transform = y ? "translateY(" + -y + "px)" : "";
-    if (shBody) shBody.style.marginTop = y ? -Math.min(y, shTop.offsetHeight + 10) + "px" : "";
+    if (shBody) shBody.style.marginTop = y ? -Math.min(y, shTop.offsetHeight + (parseFloat(getComputedStyle(shTop).marginBottom) || 0)) + "px" : "";
   }
   function shSearch() {
     if (!shOn) return;

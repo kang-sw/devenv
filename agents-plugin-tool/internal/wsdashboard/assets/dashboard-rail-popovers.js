@@ -407,6 +407,10 @@
     if (rp.kind === "row") {
       var rr = b.closest(".rs").getBoundingClientRect(), o = rp.at;
       a = o ? { top: rr.top + o.dy, bottom: rr.top + o.dy, left: rr.left + o.dx, right: rr.left + o.dx + el.offsetWidth } : rr;
+    } else if (rp.kind === "usage") {
+      // plan usage hangs centered under the header's center handle
+      var c = (a.left + a.right) / 2;
+      a = { top: a.top, bottom: a.bottom, left: c - el.offsetWidth / 2, right: c + el.offsetWidth / 2 };
     }
     var at = WsRail.popPlace(a, el.offsetWidth, el.offsetHeight, root.clientWidth || window.innerWidth, root.clientHeight || window.innerHeight);
     el.style.top = at.top + "px";
