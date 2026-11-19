@@ -943,6 +943,53 @@ func TestCompactionAgyCommandAndPromptResponse(t *testing.T) {
 			t.Fatalf("drop + response emitted %d RingCompact entries, want 1", compacts)
 		}
 	})
+
+	t.Run("cancelled-compact-settles-as-failed", func(t *testing.T) {
+		h, f := newAgyLeadHarness(t)
+		h.startAt("http://127.0.0.1:1")
+		id := h.lead(BackendAgy, LeadOptions{}).ID
+		f.replyID = id
+		key := h.record(id).WSKey
+
+		h.send(id, "hello")
+		holder := h.holder(id)
+		eventually(t, "turn 1 prompt", func() bool { return len(agyPromptIDs(h, holder)) == 1 })
+		h.holders.out(holder, agyUsageLine(20000, 1048576), agyPromptDoneLine(agyPromptIDs(h, holder)[0]))
+		h.idle(id)
+
+		if res := h.runner.Compact(key, "", nil); res.Status != "queued" {
+			t.Fatal(res)
+		}
+		eventually(t, "agy /compact prompt sent", func() bool { return len(agyPromptIDs(h, holder)) == 2 })
+		h.holders.out(holder, fmt.Sprintf(`{"jsonrpc":"2.0","id":%q,"result":{"stopReason":"cancelled"}}`, agyPromptIDs(h, holder)[1]))
+		eventually(t, "compacting badge cleared after cancelled /compact", func() bool {
+			return h.snapshot(id).Lead.Phase != wslive.PhaseCompacting
+		})
+		h.idle(id)
+
+		if got := len(agyPromptIDs(h, holder)); got != 2 {
+			t.Fatalf("cancelled /compact started resume turn: %d prompts", got)
+		}
+		failed, succeeded := 0, 0
+		for _, entry := range h.ring(id) {
+			if entry.Kind == wslive.RingCompact {
+				if entry.CompactFailed {
+					failed++
+				} else {
+					succeeded++
+				}
+			}
+		}
+		if failed != 1 || succeeded != 0 {
+			t.Fatalf("cancelled /compact ring counts failed=%d succeeded=%d: %+v", failed, succeeded, h.ring(id))
+		}
+		c := h.runner.conv(id)
+		c.do(func() {
+			if c.compactNote != "" {
+				t.Fatalf("cancelled /compact queued restore note: %q", c.compactNote)
+			}
+		})
+	})
 }
 
 func TestCompactionAgyUsageDropAutoDetection(t *testing.T) {

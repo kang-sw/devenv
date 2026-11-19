@@ -271,7 +271,7 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 	}
 	if !quiet && c.compacting {
 		p := c.r.opts.Backends[c.rec.Backend].CompactionProtocol()
-		if turnErr == "" && p.CommandEndConfirms && (compactCommand || c.turn) {
+		if turnErr == "" && c.summaryReason != wslive.TurnAborted && p.CommandEndConfirms && (compactCommand || c.turn) {
 			c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd})
 			c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd, Trigger: wslive.TriggerManual})
 		} else {
