@@ -15,8 +15,9 @@
    The shell's rail rows stay unseen until its stored marks apply
    (data-premark, the shell template).
    The index keeps its own header (a null head): the shell's header shows
-   only its rail button (sh-own), and the framed index shows its own items
-   but its placeholder rail button. Framed, the index lays out as a session
+   only its shell-owned items, the rail button and the center cluster (plan
+   usage, sh-own), and the framed index shows its own items but its
+   placeholder rail button. Framed, the index lays out as a session
    page does: its list (ixmain) beside the rail's placeholder, left-aligned
    at its own width, and the tracker's drawer as a session page's. */
 /* Page layers, shared with the shell: an iframe's overlays cannot escape
@@ -35,10 +36,12 @@
 :root[data-shell][data-fpopover]:not([data-fdim]) .frames > iframe.on { background: transparent; }
 :root[data-frame][data-lifted], :root[data-frame][data-lifted] body, :root[data-frame][data-lifted] .dash { background: transparent; }
 :root[data-shell] .dwrap > .top > *, :root[data-shell] #rail { pointer-events: auto; }
+:root[data-shell] .dwrap > .top > .tcen { pointer-events: none; }
+:root[data-shell] .dwrap > .top > .tcen > * { pointer-events: auto; }
 :root[data-shell][data-fdim] .dwrap > .top, :root[data-shell][data-fdim] #rail { filter: brightness(var(--fdim, 1)); }
-:root[data-shell][data-fdim] .dwrap > .top > *, :root[data-shell][data-fdim] #rail { pointer-events: none; }
+:root[data-shell][data-fdim] .dwrap > .top > *, :root[data-shell][data-fdim] .dwrap > .top > .tcen > *, :root[data-shell][data-fdim] #rail { pointer-events: none; }
 .rail[data-premark] > .r-rail { visibility: hidden; }
-:root[data-shell] .dwrap > .top.sh-own > :not(.back) { display: none; }
+:root[data-shell] .dwrap > .top.sh-own > :not(.back):not(.tcen) { display: none; }
 :root[data-frame] .dwrap > .top > * { visibility: hidden; }
 .ixmain { min-width: 0; max-width: 1080px; }
 body.tk-paged .ixmain { display: none; }

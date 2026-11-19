@@ -943,6 +943,49 @@
     else hover(document, window);
   }
 
+  // topOver tells whether the header strip's items run past its content
+  // box (its right padding is the clearance of the drawer's and tracker's
+  // handles). The head region's wrapper lays out as its items (display:
+  // contents), so they are measured in its place.
+  function topOver(top, win) {
+    var box = top.getBoundingClientRect(), end = box.right - (parseFloat(win.getComputedStyle(top).paddingRight) || 0), over = false;
+    Array.prototype.forEach.call(top.querySelectorAll(":scope > :not(.r-head), :scope > .r-head > *"), function (el) {
+      var r = el.getBoundingClientRect();
+      if (r.width > 0 && r.right > end + 0.5) over = true;
+    });
+    return over;
+  }
+  // topFit steps the header strip (dashboard.css "top bar") down as it runs
+  // short, the center first. Measured with the identity at its full width
+  // (tmeas), an overflowing strip compacts plan usage to its one trigger
+  // (tu); one that still overflows hides the low-priority chips (tch), and
+  // the identity then ellipsizes to fit. The strip is one row of fixed
+  // height, so no step moves anything under it. Returns the level, 0-2.
+  function topFit(top, win) {
+    win = win || window;
+    if (!top || !top.classList) return 0;
+    var cl = top.classList, level = 0;
+    cl.add("tmeas"); cl.remove("tu", "tch");
+    if (topOver(top, win)) {
+      level = 1; cl.add("tu");
+      if (topOver(top, win)) { level = 2; cl.add("tch"); }
+    }
+    cl.remove("tmeas");
+    return level;
+  }
+  // topWatch keeps topFit current: on a resize of the strip (the window,
+  // the drawer's and tracker's room it pads clear of) and on a change of its
+  // items (a head swap, a usage redraw, a rename). Its own class changes
+  // neither resize the strip nor touch its items.
+  function topWatch(top, win) {
+    win = win || window;
+    if (!top) return;
+    var fit = function () { topFit(top, win); };
+    if (win.ResizeObserver) new win.ResizeObserver(fit).observe(top);
+    if (win.MutationObserver) new win.MutationObserver(fit).observe(top, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["hidden"] });
+    if (win.document.fonts && win.document.fonts.ready) win.document.fonts.ready.then(fit);
+    fit();
+  }
   window.WsRail = {
     admissionDrafts: admissionDrafts,
     hoverUpdates: hoverUpdates,
@@ -986,6 +1029,8 @@
     handedNotice: handedNotice,
     leaveGuard: leaveGuard,
     popPlace: popPlace,
+    topFit: topFit,
+    topWatch: topWatch,
     matchBranches: matchBranches,
     worktreeBody: worktreeBody,
     deleteReady: deleteReady,

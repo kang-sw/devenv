@@ -1,5 +1,8 @@
-// Source-only, fake-data LOOK check. No daemon, build, credentials or network.
+// Source-only, fake-data LOOK check of the header's plan usage handle (the
+// tcen template). No daemon, build, credentials or network.
 // WS_PLAYWRIGHT_MODULE=/absolute/path/to/playwright node <this-file> <mockup.html> <shots-dir>
+// The mockup is the approved shell redesign; its usage handle is captured
+// beside each implementation shot.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -34,10 +37,10 @@ function entries(variant) {
         await page.setContent(`<!doctype html><html data-theme="${theme}" data-mode="index" data-shell><head><style>${css}</style><style>
           body { margin: 0; padding: 10px; }
           .rail { position: static !important; transform: none !important; visibility: visible !important; width: 340px !important; max-width: 100%; height: auto !important; }
-        </style></head><body><aside class="rail" id="rail"><div id="r-rail"><div aria-hidden="true" style="height:48px"></div><div class="rfoot"><button class="usage-toggle" type="button" aria-label="Plan usage" aria-expanded="false"></button></div></div></aside><button id="outside" style="position:fixed;bottom:10px;right:10px">Outside</button></body></html>`);
+        </style></head><body><div class="dwrap"><div class="top"><span class="tcen"><button class="usage-toggle" type="button" aria-label="Plan usage" aria-expanded="false"></button><span class="talert" id="talert" hidden></span></span></div></div><aside class="rail" id="rail"><div id="r-rail"><div class="rfoot"></div></div></aside><button id="outside" style="position:fixed;bottom:10px;right:10px">Outside</button></body></html>`);
         await page.evaluate(({ at, entries }) => {
           Date.now = () => at;
-          window.wsT = key => key; window.wsTn = key => key;
+          window.wsI18n = { lang: 'en', t: {} }; window.wsT = key => key; window.wsTn = key => key;
           // Disable the stream transport; only usage fetches may occur, and
           // these resolve locally. Load the real dashboard event handlers.
           window.WebSocket = undefined;
@@ -52,39 +55,33 @@ function entries(variant) {
         assert.equal(await page.locator('.usage-column').count(), variant === 'weekly' ? 1 : 3);
         assert.equal(await page.locator('.usage-clock').count(), variant === 'stale' ? 1 : 0);
         assert.equal(await page.locator('.usage-pace').first().textContent(), variant === 'over' ? '+31%' : variant === 'weekly' ? '−7%' : '−13%');
-        assert.ok(await page.locator('.rfoot').evaluate(e => e.scrollWidth <= e.clientWidth), `${theme}/${width}/${variant}: footer fits`);
+        // One 34px handle row; each badge mark (with its stale clock) clear of its columns.
+        const handle = await page.locator('.usage-toggle').boundingBox();
+        assert.equal(handle.height, 34, `${theme}/${width}/${variant}: one 34px handle`);
+        const clear = await page.evaluate(() => [...document.querySelectorAll('.usage-harness')].every(h => {
+          const cols = h.querySelector('.usage-columns').getBoundingClientRect().left, c = h.querySelector('.usage-clock');
+          return h.querySelector('.usage-mark').getBoundingClientRect().right <= cols && (!c || c.getBoundingClientRect().right <= cols);
+        }));
+        assert.ok(clear, `${theme}/${width}/${variant}: marks clear of the columns`);
         if (variant === 'stale') {
           const tones = await page.locator('.usage-column').first().evaluate(e => ({ current: getComputedStyle(e).color, pace: getComputedStyle(e.querySelector('.usage-pace')).color, dotted: getComputedStyle(e.querySelector('.usage-number')).textDecorationStyle }));
           assert.equal(tones.current, tones.pace); assert.equal(tones.dotted, 'dotted');
         }
-        // The approved reference is dark-only. For light review keep its
-        // geometry intact and adapt only its palette to production tokens;
-        // never edit the canonical mockup file.
-        if (theme === 'light' && variant === 'normal') {
-          const palette = await page.evaluate(() => {
-            const style = getComputedStyle(document.documentElement);
-            return ':root { color-scheme: light; ' + Array.from(style).filter(k => k.startsWith('--wb-')).map(k => k + ':' + style.getPropertyValue(k) + ';').join('') + '}';
-          });
-          await reference.addStyleTag({ content: palette });
-        }
         const prefix = `${theme}-${width}-${variant}`;
-        const expected = await reference.locator(`[data-variant="${variant}"] .rfoot`).screenshot({ path: path.join(output, `${prefix}-mockup.png`) });
-        const actual = await page.locator('.rfoot').screenshot({ path: path.join(output, `${prefix}-actual.png`) });
-        const expectedSize = await reference.locator(`[data-variant="${variant}"] .rfoot`).boundingBox();
-        const actualSize = await page.locator('.rfoot').boundingBox();
-        assert.ok(Math.abs(expectedSize.width - actualSize.width) < 1 && Math.abs(expectedSize.height - actualSize.height) < 1, `${prefix}: matching reference footer dimensions`);
+        const expected = await reference.locator('.sr4-h[data-a="usage"]').screenshot({ path: path.join(output, `${prefix}-mockup.png`) });
+        const actual = await page.locator('.usage-toggle').screenshot({ path: path.join(output, `${prefix}-actual.png`) });
         const comparison = await context.newPage();
-        await comparison.setViewportSize({ width: 720, height: 130 });
-        await comparison.setContent(`<body style="margin:0;background:${theme === 'dark' ? '#141518' : '#fff'};color:${theme === 'dark' ? '#e7e7e4' : '#222'};font:12px system-ui"><div style="display:flex;gap:16px;padding:10px"><div>Approved A${theme === 'light' ? ' (light palette)' : ''}<br><img src="data:image/png;base64,${expected.toString('base64')}"></div><div>Implementation<br><img src="data:image/png;base64,${actual.toString('base64')}"></div></div></body>`);
+        await comparison.setViewportSize({ width: 720, height: 90 });
+        await comparison.setContent(`<body style="margin:0;background:${theme === 'dark' ? '#141518' : '#fff'};color:${theme === 'dark' ? '#e7e7e4' : '#222'};font:12px system-ui"><div style="display:flex;gap:16px;padding:10px"><div>Approved (dark)<br><img src="data:image/png;base64,${expected.toString('base64')}"></div><div>Implementation<br><img src="data:image/png;base64,${actual.toString('base64')}"></div></div></body>`);
         await comparison.screenshot({ path: path.join(output, `${prefix}-comparison.png`) });
         await comparison.close();
         // These are the production dashboard.js open, Escape, outside-click,
         // close-button, aria-expanded and focus-restoration paths, not mocks.
-        const button = page.locator('.usage-toggle'), dialog = page.getByRole('dialog', { name: 'Plan usage' });
+        const button = page.locator('.usage-toggle'), dialog = page.locator('.usage-pop');
         await button.focus(); await page.keyboard.press('Enter');
         await dialog.waitFor({ state: 'visible' });
         assert.equal(await button.getAttribute('aria-expanded'), 'true');
-        assert.ok((await page.locator('.usage-details').textContent()).includes(variant === 'weekly' ? 'via Pi' : 'Claude push'));
+        assert.ok((await dialog.textContent()).includes(variant === 'weekly' ? 'Codex' : 'Claude')); // harness names, never the source
         await page.keyboard.press('Escape'); await dialog.waitFor({ state: 'hidden' });
         assert.equal(await button.getAttribute('aria-expanded'), 'false');
         assert.equal(await button.evaluate(e => e === document.activeElement), true);
@@ -92,7 +89,7 @@ function entries(variant) {
         await page.locator('#outside').click(); await dialog.waitFor({ state: 'hidden' });
         assert.equal(await button.getAttribute('aria-expanded'), 'false');
         await button.click(); await dialog.waitFor({ state: 'visible' });
-        await page.getByRole('button', { name: 'Close plan usage' }).click();
+        await page.locator('.usage-pop .usage-close').click();
         await dialog.waitFor({ state: 'hidden' });
         assert.equal(await button.evaluate(e => e === document.activeElement), true);
         assert.deepEqual(errors, []);
@@ -102,6 +99,6 @@ function entries(variant) {
       assert.deepEqual(requests, [], 'no network requests');
       await context.close();
     }
-    console.log('Usage footer checks passed; inspect comparison PNGs in ' + path.resolve(output));
+    console.log('Usage handle checks passed; inspect comparison PNGs in ' + path.resolve(output));
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

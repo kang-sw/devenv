@@ -20,10 +20,12 @@ function environment(now = Date.UTC(2026, 10, 15), locale = 'en') {
       return null;
     }
   }
+  // The header's center cluster (the tcen template): the usage handle and
+  // the global alert slot beside it.
   const button = new Element('button'); button.className = 'usage-toggle';
-  const gear = new Element('button'); gear.className = 'settings-toggle'; gear.textContent = 'Settings';
-  const footer = new Element('div'); footer.className = 'rfoot'; footer.appendChild(gear); footer.appendChild(button);
-  const rail = new Element('aside'); rail.appendChild(footer);
+  const alert = new Element('span'); alert.className = 'talert'; alert.textContent = 'Alert';
+  const center = new Element('span'); center.className = 'tcen'; center.appendChild(button); center.appendChild(alert);
+  const top = new Element('div'); top.className = 'top'; top.appendChild(center);
   const doc = { hidden: false, events: {}, createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag), addEventListener(key, fn) { this.events[key] = fn; } };
   const calls = [], ticks = [], timers = [];
   let payload = { entries: [], warnPercent: 80, critPercent: 95 }, fail = false;
@@ -35,9 +37,11 @@ function environment(now = Date.UTC(2026, 10, 15), locale = 'en') {
   };
   class Clock extends Date { static now() { return now; } }
   vm.runInNewContext(fs.readFileSync(__dirname + '/assets/usage.js', 'utf8'), { window, Date: Clock });
-  return { window, rail, doc, button, gear, footer, calls, ticks, timers, now(value) { now = value; }, set(value) { payload = value; }, fail() { fail = true; } };
+  return { window, top, doc, button, alert, center, calls, ticks, timers, now(value) { now = value; }, set(value) { payload = value; }, fail() { fail = true; } };
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
+// groups are the handle's harness groups, after its compact trigger.
+const groups = button => button.children.filter(c => c.className === 'usage-harness');
 function nodes(root, tagOrClass) {
   return root.children.flatMap(child => [
     ...(tagOrClass.startsWith('.') ? (child.className || '').split(' ').includes(tagOrClass.slice(1)) : child.tagName === tagOrClass) ? [child] : [],
@@ -53,7 +57,7 @@ async function chartFixture({ history = 'ok', resetKnown = true, stale = false, 
   const payload = { entries: [entry] };
   if (history !== 'missing') payload.history = { schema_version: 1, status: history, samples };
   env.set(payload);
-  const mounted = env.window.WsUsage.mount(env.doc, env.rail); await flush();
+  const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
   const pop = mounted.makePopover(() => {}, () => {}); pop.open(); await flush();
   return { env, pop, payload };
 }
@@ -209,7 +213,7 @@ test('gradient ids remain unique across cards, redraws and repeated mounts', asy
   const first = nodes(pop.el, 'linearGradient').map(g => g.attributes.id);
   env.ticks[0].fn(); await flush();
   const second = nodes(pop.el, 'linearGradient').map(g => g.attributes.id);
-  const mounted = env.window.WsUsage.mount(env.doc, env.rail); await flush();
+  const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
   const another = mounted.makePopover(() => {}, () => {}); another.open(); await flush();
   const third = nodes(another.el, 'linearGradient').map(g => g.attributes.id);
   const all = [...first, ...second, ...third]; assert.equal(new Set(all).size, all.length);
@@ -252,12 +256,12 @@ test('footer and popover show detected harnesses, age, reset and safe text but h
     { harness: 'claude', plan: 'max', source: 'Claude push', asOf: at, windows: [{ kind: 'five_hour', percent: 35, resetsAt: reset, asOf: at }, { kind: 'seven_day', percent: 82, resetsAt: reset, asOf: at }] },
     { harness: 'codex', plan: '<fake-plan>', source: 'via Pi', status: 'Pi token expired - open Pi to refresh', asOf: at, windows: [{ kind: 'seven_day', percent: 96, resetsAt: reset, asOf: at }] }
   ] });
-  const mounted = env.window.WsUsage.mount(env.doc, env.rail);
+  const mounted = env.window.WsUsage.mount(env.doc, env.top);
   await flush();
-  assert.equal(env.button.children.length, 2);
-  assert.equal(env.button.children[0].querySelector('.usage-columns').children.length, 2); // C: 5h, week
-  assert.equal(env.button.children[1].querySelector('.usage-columns').children.length, 1); // X: week
-  assert.equal(env.button.children[1].querySelector('.usage-number').textContent, '96%');
+  assert.equal(groups(env.button).length, 2);
+  assert.equal(groups(env.button)[0].querySelector('.usage-columns').children.length, 2); // C: 5h, week
+  assert.equal(groups(env.button)[1].querySelector('.usage-columns').children.length, 1); // X: week
+  assert.equal(groups(env.button)[1].querySelector('.usage-number').textContent, '96%');
   const pop = mounted.makePopover(() => {}, () => {}); pop.open(); pop.focus(); await flush();
   const text = pop.el.textContent;
   assert.ok(text.indexOf('Codex / GPT') < text.indexOf('Claude'));
@@ -269,7 +273,7 @@ test('footer and popover show detected harnesses, age, reset and safe text but h
   assert.equal(env.calls[0].url, '/rail/usage?history=1');
   assert.equal(env.calls[1].options.headers['X-WS-Usage-Refresh'], '1');
   assert.equal(env.calls[0].options.credentials, 'same-origin');
-  env.button.textContent = ''; mounted.sync(); assert.equal(env.button.children.length, 2);
+  env.button.textContent = ''; mounted.sync(); assert.equal(groups(env.button).length, 2);
   env.fail(); env.ticks[0].fn(); await flush();
   assert.ok(pop.el.textContent.includes('usage unavailable'));
   assert.ok(pop.el.textContent.includes('96%')); // retained last value
@@ -279,7 +283,7 @@ test('footer and popover show detected harnesses, age, reset and safe text but h
 test('fractional percentages round like the server and pace, in footer, title and popover', async () => {
   const at = Date.UTC(2026, 10, 15), env = environment(at), resetsAt = at + 3600000;
   const cases = [[59.6, '60'], [59.000000001, '59'], [28.999999999999996, '29'], [59.4, '59']];
-  const mounted = env.window.WsUsage.mount(env.doc, env.rail);
+  const mounted = env.window.WsUsage.mount(env.doc, env.top);
   const pop = mounted.makePopover(() => {}, () => {}); pop.open();
   for (const [percent, want] of cases) {
     env.set({ entries: [{ harness: 'codex', asOf: at, windows: [{ kind: 'seven_day', percent, resetsAt, asOf: at }] }] });
@@ -299,8 +303,8 @@ test('footer matches normal, over-pace and weekly-only reference columns', async
     { harness: 'codex', windows: [w('seven_day', 38, .45)] }
   ];
   env.set({ entries });
-  env.window.WsUsage.mount(env.doc, env.rail); await flush();
-  const columns = env.button.children.map(g => g.querySelector('.usage-columns').children);
+  env.window.WsUsage.mount(env.doc, env.top); await flush();
+  const columns = groups(env.button).map(g => g.querySelector('.usage-columns').children);
   assert.deepEqual(columns.map(c => c.length), [2, 1]);
   assert.deepEqual(columns.flatMap(c => c.map(v => v.querySelector('.usage-key').textContent)), ['5h', '주', '주']);
   assert.deepEqual(columns.flatMap(c => c.map(v => v.querySelector('.usage-number').textContent)), ['20%', '53%', '38%']);
@@ -308,9 +312,9 @@ test('footer matches normal, over-pace and weekly-only reference columns', async
   assert.ok(columns[0][0].querySelector('.under'));
   entries[0].windows[1].percent = 64;
   env.ticks[0].fn(); await flush();
-  assert.equal(env.button.children[0].querySelector('.over').textContent, '+31%');
+  assert.equal(groups(env.button)[0].querySelector('.over').textContent, '+31%');
   env.set({ entries: [entries[1]] }); env.ticks[0].fn(); await flush();
-  assert.equal(env.button.children.length, 1);
+  assert.equal(groups(env.button).length, 1);
   assert.equal(env.button.querySelector('.usage-columns').children.length, 1);
   assert.equal(env.button.querySelector('.hi').textContent, 'X');
 });
@@ -322,7 +326,7 @@ test('stale boundary is strictly after 30 minutes, per window, with pace frozen 
     { kind: 'seven_day', percent: 53, resetsAt: at + 7 * 86400000 * .34 }
   ] };
   env.set({ entries: [entry] });
-  const mounted = env.window.WsUsage.mount(env.doc, env.rail); await flush();
+  const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
   assert.equal(env.button.querySelector('.usage-stale'), null);
   assert.equal(env.button.querySelector('.usage-pace').textContent, '−23%');
   env.now(at + 30 * 60000 + 1); mounted.sync();
@@ -350,7 +354,7 @@ test('missing and expired windows never create placeholder columns or fabricated
     { kind: 'seven_day', percent: 38, asOf: at }
   ] };
   env.set({ entries: [entry] });
-  const mounted = env.window.WsUsage.mount(env.doc, env.rail); await flush();
+  const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
   assert.equal(env.button.querySelector('.usage-columns').children.length, 1);
   assert.equal(env.button.querySelector('.usage-number').textContent, '38%');
   assert.equal(env.button.querySelector('.usage-pace').textContent, '—');
@@ -371,7 +375,7 @@ test('missing and expired windows never create placeholder columns or fabricated
 
 test('history composes into the single coalesced viewer request', async () => {
   const env = environment();
-  const mounted = env.window.WsUsage.mount(env.doc, env.rail);
+  const mounted = env.window.WsUsage.mount(env.doc, env.top);
   const pop = mounted.makePopover(() => {}, () => {});
   pop.open(); env.ticks[0].fn(); env.doc.events.visibilitychange();
   assert.equal(env.calls.length, 1); // mount request is still pending
@@ -393,7 +397,7 @@ test('opening during an ordinary pending request queues one forced refresh and i
     env.calls.push({ url, options });
     return new Promise(resolve => { finish = () => resolve({ ok: true, json: () => Promise.resolve({ entries: [] }) }); });
   };
-  const mounted = env.window.WsUsage.mount(env.doc, env.rail);
+  const mounted = env.window.WsUsage.mount(env.doc, env.top);
   const pop = mounted.makePopover(() => {}, () => {});
   pop.open(); pop.open();
   assert.equal(env.calls.length, 1);
@@ -411,7 +415,7 @@ test('a forced refresh refetches while the popover is open, so the background pr
   const at = Date.UTC(2026, 10, 15), env = environment(at);
   const entry = percent => ({ entries: [{ harness: 'codex', asOf: at, windows: [{ kind: 'seven_day', percent, asOf: at, resetsAt: at + 86400000 }] }] });
   env.set(entry(10));
-  const mounted = env.window.WsUsage.mount(env.doc, env.rail); await flush();
+  const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
   assert.equal(env.timers.length, 0); // an ordinary poll schedules no follow-up
   const pop = mounted.makePopover(() => {}, () => {}); pop.open(); await flush();
   assert.equal(env.calls.at(-1).url, '/rail/usage?history=1&refresh=1');
@@ -428,15 +432,15 @@ test('a forced refresh refetches while the popover is open, so the background pr
   assert.equal(env.calls.length, before); // a closed popover does not refetch
 });
 
-test('footer redraw and sync preserve the sibling settings gear', async () => {
+test('handle redraw and sync preserve the sibling alert slot', async () => {
   const at = Date.UTC(2026, 10, 15), env = environment(at);
-  const mounted = env.window.WsUsage.mount(env.doc, env.rail); await flush();
+  const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
   const unchanged = () => {
-    assert.deepEqual(env.footer.children, [env.gear, env.button]);
-    assert.equal(env.gear.textContent, 'Settings');
-    assert.equal(env.gear.className, 'settings-toggle');
+    assert.deepEqual(env.center.children, [env.button, env.alert]);
+    assert.equal(env.alert.textContent, 'Alert');
+    assert.equal(env.alert.className, 'talert');
   };
-  unchanged(); // empty usage still leaves settings reachable
+  unchanged(); // empty usage leaves the alert slot alone
   env.set({ entries: [{ harness: 'codex', asOf: at, windows: [{ kind: 'seven_day', percent: 38, asOf: at, resetsAt: at + 86400000 }] }] });
   env.ticks[0].fn(); await flush();
   assert.equal(env.button.querySelector('.usage-number').textContent, '38%');
@@ -449,29 +453,51 @@ test('footer redraw and sync preserve the sibling settings gear', async () => {
   unchanged();
 });
 
-test('compact footer keeps percent, period and pace inline with wrapping rather than clipping', () => {
+test('the header handle keeps one row: small badge marks clear of the columns, a compact trigger when short', () => {
   const css = fs.readFileSync(__dirname + '/assets/usage.css', 'utf8');
   const rule = selector => {
-    const start = css.indexOf(selector + ' {');
-    assert.ok(start >= 0, selector);
+    const start = css.indexOf('\n' + selector + ' {') + 1;
+    assert.ok(start > 0, selector);
     return css.slice(start, css.indexOf('}', start) + 1);
   };
-  assert.match(rule('.rail .rfoot'), /flex-wrap: wrap/);
-  const toggle = rule('.rail .usage-toggle');
-  for (const part of ['flex: 1 1 180px', 'min-width: 0', 'flex-wrap: wrap', 'justify-content: flex-end', 'margin-left: auto']) assert.ok(toggle.includes(part), part);
-  for (const selector of ['.usage-harness', '.usage-columns']) assert.match(rule(selector), /flex-wrap: wrap/);
+  // Plan usage left the rail footer for the header's center.
+  assert.doesNotMatch(css, /\.rail \.(rfoot|usage-toggle)/);
+  for (const selector of ['.usage-harness', '.usage-columns']) assert.match(rule(selector), /flex-wrap: nowrap/);
+  const mark = rule('.usage-mark');
+  for (const part of ['width: 19px', 'height: 16px', 'margin-right: 3px', 'flex: none']) assert.ok(mark.includes(part), part);
+  const clock = rule('.usage-clock');
+  for (const part of ['right: -4px', 'bottom: -3px']) assert.ok(clock.includes(part), part);
   const column = rule('.usage-column');
   assert.match(column, /display: inline-flex/);
   assert.match(column, /flex-direction: column/); // current % above pace delta
-  assert.match(rule('.usage-number'), /11px\/1\.2/);
-  assert.match(rule('.usage-pace'), /10px\/1\.2/);
+  assert.match(rule('.tcen .usage-number'), /font-size: 10\.5px/);
+  assert.match(rule('.tcen .usage-pace'), /font-size: 9\.5px/);
   assert.match(rule('.usage-key'), /9px\/1\.2/);
+  // Where the header runs short (tu) only the compact trigger shows.
+  assert.match(rule('.usage-mini'), /display: none/);
+  assert.match(rule('.dwrap > .top.tu .tcen > .usage-toggle'), /width: 34px/);
+  assert.match(rule('.dwrap > .top.tu .tcen > .usage-toggle > :not(.usage-mini)'), /display: none/);
+  assert.match(rule('.dwrap > .top.tu .tcen > .usage-toggle > .usage-mini'), /display: inline-flex/);
   assert.doesNotMatch(css, /overflow:\s*hidden|text-overflow:\s*ellipsis/);
+});
+
+test('the handle marks each harness with the small badge and leads with the compact trigger', async () => {
+  const at = Date.UTC(2026, 10, 15), env = environment(at);
+  env.set({ entries: [
+    { harness: 'claude', asOf: at - 42 * 60000, windows: [{ kind: 'five_hour', percent: 26, asOf: at - 42 * 60000, resetsAt: at + 3600000 }, { kind: 'seven_day', percent: 53, asOf: at - 42 * 60000, resetsAt: at + 86400000 }] },
+    { harness: 'codex', asOf: at, windows: [{ kind: 'seven_day', percent: 79, asOf: at, resetsAt: at + 86400000 }] }] });
+  env.window.WsUsage.mount(env.doc, env.top); await flush();
+  assert.equal(env.button.children[0].className, 'usage-mini');
+  const marks = nodes(env.button, '.usage-mark');
+  assert.equal(marks.length, 2);
+  assert.deepEqual(marks.map(m => [m.children[0].className, m.children[0].attributes['data-h']]), [['hb sm', 'claude'], ['hb sm', 'codex']]);
+  assert.equal(nodes(marks[0], 'svg').length, 1); // the stale clock rides the stale harness's badge
+  assert.equal(nodes(marks[1], 'svg').length, 0);
 });
 
 test('empty login state and hidden-page cadence', async () => {
   const env = environment();
-  const mounted = env.window.WsUsage.mount(env.doc, env.rail); await flush();
+  const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
   const pop = mounted.makePopover(() => {}, () => {}); pop.open(); await flush();
   assert.ok(pop.el.textContent.includes('not logged in'));
   assert.equal(env.button.textContent, 'Plan usage');

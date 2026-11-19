@@ -387,7 +387,7 @@
     if (rp.btn && rp.btn.isConnected) return rp.btn;
     var r = region("rail"), h = region("head"), found = null;
     if (rp.kind === "settings") found = r && r.querySelector(".settings-toggle");
-    else if (rp.kind === "usage") found = r && r.querySelector(".usage-toggle");
+    else if (rp.kind === "usage") found = topEl && topEl.querySelector(".usage-toggle");
     else if (rp.kind === "sess") found = h && h.querySelector(".host.hbtn");
     else if (rp.kind === "row") {
       var row = r && WsRail.refind(r, { cls: "rs", attr: "data-rid", val: rp.ws });

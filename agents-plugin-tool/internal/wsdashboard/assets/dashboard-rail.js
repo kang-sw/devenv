@@ -39,7 +39,11 @@
   // the viewed session, or a row menu's session), and the button it hangs
   // from (a row menu's: the row's link; at, where in the row it opened).
   var rp = { P: null, kind: "", ws: "", btn: null }, rpWs = null, rpWt = null, rpLead = null, rpSess = null, rpRow = null, rpUsage = null, rpIds = 0;
-  var usageGutter = railEl && window.WsUsage ? window.WsUsage.mount(doc, railEl) : null;
+  // The plan usage handle is the header's (the tcen template), shell-owned
+  // like the rail: only the page that holds the rail draws it and opens its
+  // popover; a framed page's header stays an invisible placeholder.
+  var topEl = doc.querySelector(".dwrap > .top");
+  var usageGutter = railEl && topEl && window.WsUsage ? window.WsUsage.mount(doc, topEl) : null;
   function railWide() { return !!(RAIL_WIDE && RAIL_WIDE.matches) && (!root.hasAttribute("data-pincol") || !!(RAIL_XWIDE && RAIL_XWIDE.matches)); }
   function railShown() { return root.classList.contains("rail-open"); }
   // Ctrl+` toggles rail + memos in overlay mode, memos alone beside a column;
@@ -506,6 +510,13 @@
       railKey();
     });
     [RAIL_WIDE, RAIL_XWIDE].forEach(function (m) { if (m && m.addEventListener) m.addEventListener("change", function () { railOpen(false); }); });
+    if (topEl) {
+      topEl.addEventListener("click", function (e) {
+        var usage = e.target.closest && e.target.closest(".usage-toggle");
+        if (usage && usageGutter) { e.preventDefault(); railPopOpen("usage", usage); }
+      });
+      WsRail.topWatch(topEl);
+    }
     railEl.addEventListener("click", function (e) {
       var t = e.target;
       if (admissionClick(t)) { e.preventDefault(); return; }
@@ -518,8 +529,6 @@
       }
       var settings = t.closest && t.closest(".settings-toggle");
       if (settings && gmenu) { e.preventDefault(); railPopOpen("settings", settings); return; }
-      var usage = t.closest && t.closest(".usage-toggle");
-      if (usage && usageGutter) { e.preventDefault(); railPopOpen("usage", usage); return; }
       var add = t.closest && t.closest(".radd");
       if (add) {
         e.preventDefault();

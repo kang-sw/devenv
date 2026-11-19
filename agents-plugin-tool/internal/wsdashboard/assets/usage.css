@@ -1,11 +1,26 @@
-/* The footer gutter and details are deliberately separate from rail styling. */
-.rail .rfoot { flex-wrap: wrap; }
-.rail .usage-toggle { display: flex; flex: 1 1 180px; min-width: 0; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 10px; margin-left: auto; min-height: 20px; padding: 2px 0; border: 0; background: none; color: var(--wb-fg); cursor: pointer; font: inherit; text-align: left; }
-.rail .usage-toggle:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 3px; border-radius: 3px; }
-.usage-harness { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 6px; max-width: 100%; }
-.usage-mark { position: relative; display: inline-flex; width: 16px; height: 16px; flex: none; }
+/* The plan usage handle, the header's center (the tcen template, its
+   handle shape in dashboard.css), and its popover. Each harness is its
+   small badge (the stale clock on its corner, clear of the columns) and
+   one column per window; a rule parts the harnesses. Where the header
+   runs short (tu, rail.js topFit) the handle shows only the compact
+   trigger (usage-mini), which still opens the popover. */
+.usage-toggle { color: var(--wb-fg); cursor: pointer; font: inherit; text-align: left; }
+.tcen > .usage-toggle { color: var(--wb-fg); font-size: 12px; }
+.tcen > .usage-toggle:hover .usage-mini { color: var(--wb-fg); }
+.tcen > .usage-toggle[aria-expanded="true"] { box-shadow: inset 0 -2px 0 var(--wb-primary), var(--wb-shadow-hi); }
+.usage-harness { display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 6px; }
+.usage-harness + .usage-harness::before { content: ""; align-self: center; width: 1px; height: 20px; margin: 0 2px; background: var(--wb-line); }
+.usage-mark { position: relative; display: inline-flex; align-items: center; width: 19px; height: 16px; flex: none; margin-right: 3px; }
 .usage-clock { position: absolute; width: 9px; height: 9px; right: -4px; bottom: -3px; border-radius: 50%; background: var(--wb-card); color: var(--wb-warn-ink); box-shadow: 0 0 0 1px var(--wb-card); fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.usage-columns { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 8px; }
+.usage-columns { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; }
+.tcen .usage-number { font-size: 10.5px; line-height: 1.1; }
+.tcen .usage-key, .tcen .usage-percent { line-height: 1.1; }
+.tcen .usage-pace { font-size: 9.5px; line-height: 1.1; }
+.usage-mini { display: none; color: var(--wb-muted-fg); }
+.usage-mini svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.dwrap > .top.tu .tcen > .usage-toggle { width: 34px; padding: 2px 0 0; justify-content: center; }
+.dwrap > .top.tu .tcen > .usage-toggle > :not(.usage-mini) { display: none; }
+.dwrap > .top.tu .tcen > .usage-toggle > .usage-mini { display: inline-flex; }
 .usage-column { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 1px; white-space: nowrap; font-family: var(--wb-mono, monospace); font-variant-numeric: tabular-nums; }
 .usage-current { display: flex; align-items: baseline; gap: 3px; }
 .usage-number { font: 700 11px/1.2 var(--wb-mono, monospace); letter-spacing: -.035em; }

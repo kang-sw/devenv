@@ -1,4 +1,4 @@
-/* Account plan usage: a viewer-only cache and the rail's usage popover. */
+/* Account plan usage: a viewer-only cache, the header's usage handle, and its popover. */
 (function (window) {
   "use strict";
   function active(entry, now) {
@@ -92,14 +92,27 @@
     return { grid: grid, labels: labels };
   }
   var chartSerial = 0;
-  window.WsUsage = { sorted: sorted, level: level, age: age, active: active, trend: trend, weeklyAxis: weeklyAxis, mount: function (doc, rail) {
+  window.WsUsage = { sorted: sorted, level: level, age: age, active: active, trend: trend, weeklyAxis: weeklyAxis, mount: function (doc, host) {
     var data = { entries: [], warnPercent: 80, critPercent: 95 }, pending = null, forceQueued = false, popover = null, shown = false, place = function () {}, followUps = [];
     function el(tag, cls, text) {
       var n = doc.createElement(tag); n.className = cls || "";
       if (text !== undefined) n.textContent = text;
       return n;
     }
-    function icon(entry) { var n = el("span", "hb"); n.setAttribute("data-h", String(entry.harness || "")); return n; }
+    function icon(entry, small) { var n = el("span", small ? "hb sm" : "hb"); n.setAttribute("data-h", String(entry.harness || "")); return n; }
+    // mini is the compact trigger the handle steps down to where the header
+    // runs short (rail.js topFit): a gauge, the handle's label its tooltip.
+    function mini() {
+      var wrap = el("span", "usage-mini"), svg = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("aria-hidden", "true");
+      [["path", "M4.5 16.5a8 8 0 1 1 15 0"], ["path", "M12 13.5l3.5-4"], ["circle", ""]].forEach(function (d) {
+        var n = doc.createElementNS("http://www.w3.org/2000/svg", d[0]);
+        if (d[0] === "path") n.setAttribute("d", d[1]); else { n.setAttribute("cx", "12"); n.setAttribute("cy", "14"); n.setAttribute("r", "1.6"); }
+        svg.appendChild(n);
+      });
+      wrap.appendChild(svg);
+      return wrap;
+    }
     function clock() {
       var svg = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
       svg.setAttribute("class", "usage-clock"); svg.setAttribute("viewBox", "0 0 16 16"); svg.setAttribute("aria-hidden", "true");
@@ -110,15 +123,16 @@
       return svg;
     }
     function drawFooter() {
-      var button = rail.querySelector(".usage-toggle"); if (!button) return;
+      var button = host.querySelector(".usage-toggle"); if (!button) return;
       var now = Date.now();
       button.textContent = "";
+      button.appendChild(mini());
       if (!data.entries.length) button.appendChild(el("span", "usage-empty", "Plan usage"));
       data.entries.forEach(function (entry) {
         var group = el("span", "usage-harness"), windows = active(entry, now);
         var mark = el("span", "usage-mark"), columns = el("span", "usage-columns"), hasStale = false;
         var name = entry.harness === "claude" ? "Claude" : "Codex / GPT";
-        mark.appendChild(icon(entry)); group.appendChild(mark);
+        mark.appendChild(icon(entry, true)); group.appendChild(mark);
         ["five_hour", "seven_day"].forEach(function (kind) {
           var w = windows.filter(function (v) { return v.kind === kind; })[0];
           if (!w) return;
@@ -179,7 +193,7 @@
       if (geometry.knownReset && w.kind === "seven_day") {
         var canvas = doc.createElement("canvas"), context = canvas.getContext && canvas.getContext("2d");
         if (context) {
-          var font = window.getComputedStyle(rail).getPropertyValue("--wb-sans").trim() || "sans-serif";
+          var font = window.getComputedStyle(host).getPropertyValue("--wb-sans").trim() || "sans-serif";
           context.font = "9px " + font;
         }
         axis = weeklyAxis(geometry.start, geometry.reset, locale(), function (text) {
