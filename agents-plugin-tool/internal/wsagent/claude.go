@@ -232,8 +232,11 @@ func claudeArgs(spec StartSpec) ([]string, error) {
 func claudeAllowedRules(spec StartSpec) []string {
 	rules := append([]string{}, spec.Profile.Tools...)
 	if spec.WSMCP != nil {
+		rules = append(rules, claudeMCPToolName(ReservedMCPServer, "call"))
 		for _, name := range spec.Profile.WSTools {
-			rules = append(rules, claudeMCPToolName(ReservedMCPServer, name))
+			if name != "call" {
+				rules = append(rules, claudeMCPToolName(ReservedMCPServer, name))
+			}
 		}
 	}
 	for _, name := range spec.Profile.MCPServerNames() {
@@ -392,6 +395,7 @@ func checkClaudeInit(init claudeInit, spec StartSpec) error {
 	var prefixes []string
 	if spec.WSMCP != nil {
 		servers[ReservedMCPServer] = true
+		allowed[claudeMCPToolName(ReservedMCPServer, "call")] = true
 		for _, name := range spec.Profile.WSTools {
 			allowed[claudeMCPToolName(ReservedMCPServer, name)] = true
 		}

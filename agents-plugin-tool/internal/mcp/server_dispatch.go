@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -34,6 +35,38 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// list showed; everything below sees the canonical name. It maps before
 	// the key rule, which reads the tool's schema by canonical name.
 	params.Name = s.connectionDescriptor().aliases.canonical(params.Name)
+	// call is only an envelope. Dispatch re-enters here with the inner name,
+	// arguments and metadata; no outer key or authority is inherited. Schema
+	// inspection uses the same gates below, but stops before argument checking.
+	schemaOnly := false
+	if params.Name == "call" {
+		if refusal, ok := s.precheckToolArguments(params.Name, params.Arguments); !ok {
+			return toolErrorTextResponse(req.ID, refusal)
+		}
+		name, isString := params.Arguments["tool"].(string)
+		if raw := params.Arguments["tool"]; raw != nil && !isString {
+			return toolErrorTextResponse(req.ID, "call: tool must be a string")
+		}
+		if name != "" {
+			if s.connectionDescriptor().aliases.canonical(name) == "call" {
+				return toolErrorTextResponse(req.ID, "call cannot target itself")
+			}
+			if raw, present := params.Arguments["arguments"]; present {
+				arguments, ok := raw.(map[string]any)
+				if !ok {
+					return toolErrorTextResponse(req.ID, "call: arguments must be an object")
+				}
+				inner, err := json.Marshal(map[string]any{"name": name, "arguments": arguments, "_meta": params.Meta})
+				if err != nil {
+					return toolTextResponse(req.ID, "", err)
+				}
+				return s.callTool(ctx, request{ID: req.ID, Method: req.Method, Params: inner})
+			}
+			params.Name = s.connectionDescriptor().aliases.canonical(name)
+			params.Arguments = map[string]any{}
+			schemaOnly = true
+		}
+	}
 	// A hosted lead connection's session_key: omitted is the connection's
 	// own, and any key but its own or a descendant's is refused. It runs
 	// first, so everything below reads the key the call resolves to.
@@ -46,7 +79,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// The adapter-only intake and inbox drain are no model-facing replies, so
 	// they carry no badge and cost no mailbox read on their call rate.
 	if keyStr, ok := params.Arguments["session_key"].(string); ok && params.Name != dashboardIntakeTool && params.Name != dashboardInboxDrainTool {
-		jsonFormat := wantsJSON(params.Arguments)
+		// Discovery output must stay compact JSON or one name per line.
+		jsonFormat := schemaOnly || params.Name == "call" || wantsJSON(params.Arguments)
 		defer func() {
 			resp = s.applyMailboxPiggyback(resp, keyStr, jsonFormat)
 		}()
@@ -149,6 +183,21 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		testPanicHook(params.Name)
 	}
 
+	if schemaOnly {
+		for _, tool := range tools() {
+			if tool["name"] != params.Name {
+				continue
+			}
+			if isAgentTool(params.Name) && s.piForwards() {
+				tool = agentWorkerTool(tool)
+			}
+			definition := publicToolDefinition(tool, "", s.runtimeNamespace())
+			raw, err := json.Marshal(map[string]any{"description": definition["description"], "inputSchema": definition["inputSchema"]})
+			return toolTextResponse(req.ID, string(raw), err)
+		}
+		return errorResponse(req.ID, -32602, fmt.Sprintf("unknown tool: %s", params.Name))
+	}
+
 	// Central argument precheck: refuse a call that misses a required
 	// property or carries an undeclared top-level argument before any handler
 	// runs, naming every problem and the tool's own schema at once.
@@ -173,6 +222,13 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	}
 
 	switch params.Name {
+	case "call":
+		var names []string
+		for _, tool := range s.filteredTools() {
+			names = append(names, tool["name"].(string))
+		}
+		sort.Strings(names)
+		return toolTextResponse(req.ID, strings.Join(names, "\n"), nil)
 	case "runtime.read":
 		info, err := runtimeInfo(s.version, s.sourceCommit)
 		if err != nil {

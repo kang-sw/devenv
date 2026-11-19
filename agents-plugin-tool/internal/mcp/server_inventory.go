@@ -131,6 +131,10 @@ func publicToolDefinition(tool map[string]any, advertisedName, namespace string)
 }
 
 func (s *Server) toolAllowed(name string) bool {
+	// The envelope is always available; its inner tool is checked separately.
+	if name == "call" {
+		return true
+	}
 	if s.noAgentMode() && noAgentHiddenTool(name) {
 		return false
 	}

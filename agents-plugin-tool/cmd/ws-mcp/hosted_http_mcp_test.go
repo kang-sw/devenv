@@ -126,11 +126,15 @@ func TestHostedWorkerOverHTTPSeesOnlyItsProfile(t *testing.T) {
 	for _, tool := range r.Result.Tools {
 		names = append(names, tool.Name)
 	}
-	if !slices.Equal(names, []string{"tickets.query"}) {
-		t.Fatalf("the worker lists its profile's ws tools only: %v", names)
+	if !slices.Equal(names, []string{"call", "tickets.query"}) {
+		t.Fatalf("the worker lists call and its profile's ws tools only: %v", names)
 	}
 	if r := call(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{}}}`); r.Error == nil || !strings.Contains(r.Error.Message, "not available") {
 		t.Fatalf("a tool outside the profile is refused: %+v", r)
+	}
+
+	if r := call(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"call","arguments":{"tool":"git.commit","arguments":{}}}}`); r.Error == nil || !strings.Contains(r.Error.Message, "not available") {
+		t.Fatalf("call must preserve the worker's profile refusal: %+v", r)
 	}
 
 	// The token goes void; it still resolves here, as a resolution that

@@ -99,7 +99,7 @@ func TestClaudeArgsFromProfile(t *testing.T) {
 		t.Fatalf("no --allowedTools: %v", args)
 	}
 	allowed := args[i+1:]
-	want := []string{"Read", "Bash(git status)", "Bash(git log *)", "mcp__ws__tickets_query", "mcp__docs"}
+	want := []string{"Read", "Bash(git status)", "Bash(git log *)", "mcp__ws__call", "mcp__ws__tickets_query", "mcp__docs"}
 	if !slices.Equal(allowed, want) {
 		t.Fatalf("--allowedTools must be last and hold %v, got %v", want, allowed)
 	}
@@ -143,7 +143,7 @@ func TestClaudeArgsBuiltinSupportProfile(t *testing.T) {
 	if i < 0 {
 		t.Fatalf("no --allowedTools: %v", args)
 	}
-	want := []string{"Agent", "mcp__ws__tracker_query", "mcp__ws__tracker_update", "mcp__ws__tracker_show", "mcp__ws__tracker_ui", "mcp__ws__wiki_query", "mcp__ws__wiki_update", "mcp__ws__git_search", "mcp__ws__playbook_read"}
+	want := []string{"Agent", "mcp__ws__call", "mcp__ws__tracker_query", "mcp__ws__tracker_update", "mcp__ws__tracker_show", "mcp__ws__tracker_ui", "mcp__ws__wiki_query", "mcp__ws__wiki_update", "mcp__ws__git_search", "mcp__ws__playbook_read"}
 	if allowed := args[i+1:]; !slices.Equal(allowed, want) {
 		t.Fatalf("--allowedTools = %v, want %v", allowed, want)
 	}
@@ -226,7 +226,7 @@ func TestCheckClaudeInit(t *testing.T) {
 	spec := claudeSpec(t, `{"backend":"claude","tools":["Read","Bash(git status)"],"ws_tools":["tickets.query"],"mcp_servers":{"docs":{"command":"d"}},"plugins":["plug"]}`)
 	spec.WSMCP = &MCPCommand{Command: "ws-mcp"}
 	ok := claudeInit{
-		Tools:          []string{"Read", "Bash", "mcp__ws__tickets_query", "mcp__docs__search"},
+		Tools:          []string{"Read", "Bash", "mcp__ws__call", "mcp__ws__tickets_query", "mcp__docs__search"},
 		PermissionMode: "dontAsk",
 	}
 	ok.MCPServers = append(ok.MCPServers, struct {
