@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: f486f77711d9a18c
 sage-review-completeness-reviewed: f486f77711d9a18c
+completed: 2026-11-19
 ---
 
 # Display transcript memory-first: live sessions served from RAM, files only for recovery and closed conversations
@@ -498,3 +499,14 @@ and tests run on remote w5090 only.
 ### Phase 3: `record.json` as a delta append log
 
 Planned at its promotion.
+
+#### Edition (1326) - 2026-11-19
+
+Owner decision `(1326)=a` (2026-11-19) moves Phase 3 (`record.json` as a delta
+append log) into epic `261119-epic-ws-daemon-sqlite-storage` as part of its
+daemon-only metadata-bundle child; it is not executed in this ticket.
+
+
+## Resolution (2026-11-19)
+
+Phase 1 (c47ac38d6) and Phase 2 (07843a2f2, merged via track/agent-v2 in 6bbe40145) landed. Phase 3 (record.json delta append log) moved to 261119-epic-ws-daemon-sqlite-storage (daemon-only metadata bundle child) per owner decision (1326)=a on 2026-11-19.

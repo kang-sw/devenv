@@ -15,10 +15,13 @@ file-touch and complexity gains:
 
 1. **`wslive` (`snapshot.json`, `ring/`, `model-evidence/`):** `<cache>/dashboard/sessions/<reply-id>/`
    ephemeral recovery cache. Daemon-only writer in 0.50+ with no external
-   readers; currently incurs 4 file ops + `ReadDir(up to 2,000)` + `Remove` on
-   every `AppendRing` and 6 ops + `fsync` + `Link` + `Remove` + `pruneObserved`
-   per model-evidence observation (19/65 storage fix/perf commits, e.g.
-   `aa9da6ac2`, `15c0409b1`, `bd3f4308c`, `2f3b2674b`).
+   readers. Note: the transcript ring (`ring/`) is already RAM plus append-only
+   segments (`07843a2f2`, `261118-feat-ws-display-transcript-memory-first` Phase
+   2), so the remaining SQLite migration gain is `snapshot.json` and
+   `model-evidence/` writes (formerly 4 file ops + `ReadDir(up to 2,000)` +
+   `Remove` on `AppendRing` and 6 ops + `fsync` + `Link` + `Remove` +
+   `pruneObserved` per model-evidence observation; 19/65 storage fix/perf
+   commits, e.g. `aa9da6ac2`, `15c0409b1`, `bd3f4308c`, `2f3b2674b`).
 2. **`wsinbox` (`inbox/`, `drained/`, `answer-pending/`):** `<cache>/dashboard/sessions/<reply-id>/inbox/`
    queue and 2PC crash journal. Daemon-only writer in 0.50+ (except direct CLI
    bypass); currently 4 ops per normal `Send`, ~11–14 ops + 2 `fsync` + 3
@@ -37,7 +40,10 @@ file-touch and complexity gains:
    as its own child.)
 4. **Daemon-only metadata bundle:** Strictly daemon-internal JSON snapshots
    with zero external readers even outside the launcher:
-   - `wsagent`: `agent.json`, `permission.json`, `support.json`, `pi-probes-v1/`
+   - `wsagent`: `agent.json` (also known as `record.json`; absorbs Phase 3
+     `record.json` delta-append-log work moved from
+     `261118-feat-ws-display-transcript-memory-first` by owner decision
+     `(1326)=a`, 2026-11-19), `permission.json`, `support.json`, `pi-probes-v1/`
      (5 ops/write + poll `stat` on `permission.json`; 27/68 storage fix/perf
      commits, e.g. `c47ac38d6`, `539c6c778`, `6979a79e6`, `253ea7b41`; child
      inputs `pi/session.jsonl` and `system_prompt.md` stay files).
@@ -94,11 +100,11 @@ file-touch and complexity gains:
 
 Child execution order is **not yet decided** (see `## Open questions`):
 
-- Planned: `wslive` (`ring/`, `model-evidence/`, `snapshot.json`) -> SQLite
+- Planned: `wslive` (`snapshot.json`, `model-evidence/`, and optional `ring/` unification — transcript ring is already RAM plus append-only segments in `07843a2f2`, so remaining gain is `snapshot.json` and `model-evidence/` writes) -> SQLite
 - Planned: `wsinbox` (`inbox/`, `drained/`, `answer-pending/`; `attachments/` kept as blob files) -> SQLite
 - Planned: `wswhiteboard` (2PC WAL folder -> one SQLite DB per board/session, lazily opened and idle-closed)
 - Planned: `wswhiteboard` embed HTML snapshot retirement (stop rendering `ai-docs/whiteboards/<id>-<hash>.html` per update; updates shipped whiteboard playbook embed rule and `whiteboard.update` `embed:` result field; mechanism open)
-- Planned: Daemon-only metadata bundle (`wsagent`, `wsdashboard` misc UI state, `wstrackerhook` state, `wstrackerhost` `ui-seen.json`) -> SQLite
+- Planned: Daemon-only metadata bundle (`wsagent`, including absorbed `record.json` delta log from `261118-feat-ws-display-transcript-memory-first` Phase 3 per `(1326)=a`, `wsdashboard` misc UI state, `wstrackerhook` state, `wstrackerhost` `ui-seen.json`) -> SQLite
 - Planned: MCP session key store (`sessions/<key>/` + legacy `keys/` migration) -> SQLite
 
 ## Cross-Child Decisions
