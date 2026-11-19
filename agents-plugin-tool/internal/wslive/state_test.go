@@ -237,6 +237,44 @@ func TestAgentKindRoundTrips(t *testing.T) {
 	}
 }
 
+// TestAgentHarnessRoundTrips pins the subagent harness field: it lands from
+// the event's "harness", stays across later events that omit it, reaches the
+// snapshot's JSON with omitempty, survives SeedFinished, and is refused on
+// lead events.
+func TestAgentHarnessRoundTrips(t *testing.T) {
+	st := NewState(ownerKey)
+	var ev Event
+	if err := json.Unmarshal([]byte(`{"kind":"agent","agentId":"pi:child","label":"worker","agentKind":"pi","harness":"claude"}`), &ev); err != nil {
+		t.Fatal(err)
+	}
+	if ev.Harness != "claude" {
+		t.Fatalf("event = %+v", ev)
+	}
+	mustApply(t, st, ev, 100)
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "pi:child", Status: StatusDone}, 200)
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "native"}, 150)
+	snap := st.Snapshot(300)
+	byID := map[string]Agent{}
+	for _, a := range snap.Agents {
+		byID[a.ID] = a
+	}
+	if byID["pi:child"].Harness != "claude" || byID["native"].Harness != "" {
+		t.Fatalf("agents = %+v", byID)
+	}
+	raw, err := json.Marshal(snap)
+	if err != nil || !strings.Contains(string(raw), `"harness":"claude"`) || strings.Count(string(raw), `"harness"`) != 1 {
+		t.Fatalf("snapshot JSON should carry harness on the spawned row only: %s, %v", raw, err)
+	}
+	if _, err := st.Apply(Event{Kind: KindAgent, Harness: "agy"}, 400); err == nil {
+		t.Fatalf("lead agent event with harness should be refused")
+	}
+	seeded := NewState(ownerKey)
+	seeded.SeedFinished(snap)
+	if a := seeded.Snapshot(500).Agents; len(a) != 1 || a[0].Harness != "claude" {
+		t.Fatalf("the seed keeps harness: %+v", a)
+	}
+}
+
 // TestSeedFinishedKeepsEndedAgentsOnly pins seeding from an earlier
 // writer's snapshot: done and failed agents come back with their fields,
 // running ones and another session's snapshot seed nothing, and retain's

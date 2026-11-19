@@ -314,6 +314,9 @@ type Agent struct {
 	// AgentKind marks a subagent the host does not run itself
 	// (AgentKindPi); absent for the host's own.
 	AgentKind string `json:"agentKind,omitempty"`
+	// Harness is the backend running a daemon-spawned subagent (e.g. "claude",
+	// "pi", "codex", "agy"); absent for native subagents or legacy records.
+	Harness   string `json:"harness,omitempty"`
 	Status    string `json:"status"`
 	StartedAt int64  `json:"startedAt,omitempty"`
 	EndedAt   int64  `json:"endedAt,omitempty"`
