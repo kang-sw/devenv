@@ -72,6 +72,12 @@ type AgentLiveHost interface {
 	SetLiveHost(LiveHost)
 }
 
+// AgentForgetter is an optional AgentHost that drops a closed or handed-off
+// conversation from its in-memory state when the daemon purges its session.
+type AgentForgetter interface {
+	ForgetClosed(replyID string)
+}
+
 // AgentRoutePrefix is where the daemon mounts AgentHost.Handler.
 const AgentRoutePrefix = "/agents"
 

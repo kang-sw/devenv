@@ -852,17 +852,34 @@ func (r *Runner) expire(id string) bool {
 	return true
 }
 
-// forget drops closed conversation id from the runner and deletes its
-// session directory.
-func (r *Runner) forget(id string) {
+var _ wsdashboard.AgentForgetter = (*Runner)(nil)
+
+// ForgetClosed drops closed or handed-off conversation id from the runner's
+// in-memory state without touching disk or notifying the daemon, for a caller
+// that is purging the session directory itself.
+func (r *Runner) ForgetClosed(id string) {
+	r.forgetClosed(id)
+}
+
+func (r *Runner) forgetClosed(id string) (Record, bool) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	rec, ok := r.closed[id]
 	delete(r.closed, id)
 	delete(r.closedRows, id)
 	if ok && rec.Parent != nil && r.childrenIndex != nil {
 		delete(r.childrenIndex[*rec.Parent], id)
+		if len(r.childrenIndex[*rec.Parent]) == 0 {
+			delete(r.childrenIndex, *rec.Parent)
+		}
 	}
-	r.mu.Unlock()
+	return rec, ok
+}
+
+// forget drops closed conversation id from the runner and deletes its
+// session directory.
+func (r *Runner) forget(id string) {
+	rec, ok := r.forgetClosed(id)
 	if !ok {
 		return
 	}

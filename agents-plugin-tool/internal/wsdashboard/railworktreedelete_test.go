@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -247,12 +249,47 @@ func TestWorktreeDeleteRefusals(t *testing.T) {
 	f.deleted(t, worktreeDeleteRequest{Path: busy})
 }
 
+type deleteForgetAgents struct {
+	mu        sync.Mutex
+	forgotten map[string]bool
+}
+
+func (a *deleteForgetAgents) Handler() http.Handler        { return http.NotFoundHandler() }
+func (a *deleteForgetAgents) Start(func(string, string))   {}
+func (a *deleteForgetAgents) InboxChanged(string)          {}
+func (a *deleteForgetAgents) Close()                       {}
+func (a *deleteForgetAgents) ForgetClosed(replyID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.forgotten == nil {
+		a.forgotten = map[string]bool{}
+	}
+	a.forgotten[replyID] = true
+}
+
+func (a *deleteForgetAgents) forgot(replyID string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.forgotten[replyID]
+}
+
 // TestWorktreeDeletePurgesEndedSessions pins the regression where deleting a
 // non-pool worktree left its ended sessions in the index until the 5-minute
 // poll, causing the rail to synthesize a ghost pending-worktree row for the
-// deleted path.
+// deleted path. It also verifies that hosted closed records are forgotten via
+// AgentForgetter and that rail-layout.json drops the deleted worktree from
+// worktree_order.
 func TestWorktreeDeletePurgesEndedSessions(t *testing.T) {
-	f := newDeleteFixture(t)
+	base, root := worktreeRepo(t)
+	agents := &deleteForgetAgents{}
+	pf := startPageFixture(t, withWorkspaces(t), func(o *DaemonOptions) {
+		o.Worktrees = poolSource{}
+		o.Agents = agents
+	})
+	if _, err := pf.d.workspaces.add(root, false); err != nil {
+		t.Fatal(err)
+	}
+	f := deleteFixture{pageFixture: pf, tmp: base, root: root}
 	wt := filepath.Join(f.tmp, "purge")
 	keep := filepath.Join(f.tmp, "keep")
 	gitRun(t, f.root, "worktree", "add", "-q", "-b", "purge", wt)
@@ -287,8 +324,9 @@ func TestWorktreeDeletePurgesEndedSessions(t *testing.T) {
 	writeEnded("other", keep, false)
 	f.d.Index().Refresh()
 
-	// Seed the rail with a live viewer so l.repos holds wt too, then delete wt
-	// without calling Index().Refresh() afterward.
+	// Seed the rail with a live viewer so l.repos holds wt too, and record a
+	// saved worktree_order containing wt, then delete wt without calling
+	// Index().Refresh() afterward.
 	_ = f.d.railView(f.d.pages())
 	release := f.d.rail.watch()
 	defer release()
@@ -304,6 +342,9 @@ func TestWorktreeDeletePurgesEndedSessions(t *testing.T) {
 		}
 		return false
 	})
+	if ans, err := f.d.layout.apply(railLayoutRequest{Op: "wtmove", Workspace: f.root, Path: keep, After: wt}, railFactsOf(f.d.railBaseView(f.d.pages())), f.d.Index().Loaded()); err != nil || ans.Reason != "" {
+		t.Fatalf("seed worktree_order = %+v, %v", ans, err)
+	}
 
 	f.deleted(t, worktreeDeleteRequest{Path: wt})
 
@@ -340,12 +381,28 @@ func TestWorktreeDeletePurgesEndedSessions(t *testing.T) {
 		if pathExists(SessionDir(f.dir, id)) {
 			t.Errorf("session %s registry dir still on disk after worktree delete", id)
 		}
+		if !agents.forgot(id) {
+			t.Errorf("AgentForgetter.ForgetClosed was not called for purged session %s", id)
+		}
 	}
 	if _, ok := f.d.Index().Session("other"); !ok {
 		t.Errorf("session other in untouched worktree %s was removed from index", keep)
 	}
 	if !pathExists(SessionDir(f.dir, "other")) {
 		t.Errorf("session other registry dir in untouched worktree %s was removed from disk", keep)
+	}
+	if agents.forgot("other") {
+		t.Errorf("AgentForgetter.ForgetClosed was unexpectedly called for untouched session other")
+	}
+	doc, err := readRailLayout(filepath.Join(f.dir, railLayoutFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := doc.Workspaces[f.root]; w != nil && slices.ContainsFunc(w.WorktreeOrder, func(p string) bool { return samePath(p, wt) }) {
+		t.Errorf("deleted worktree %s still lingers in rail-layout.json worktree_order: %v", wt, w.WorktreeOrder)
+	}
+	if w := doc.Workspaces[f.root]; w == nil || !slices.ContainsFunc(w.WorktreeOrder, func(p string) bool { return samePath(p, keep) }) {
+		t.Errorf("untouched worktree %s missing from rail-layout.json worktree_order: %+v", keep, w)
 	}
 }
 

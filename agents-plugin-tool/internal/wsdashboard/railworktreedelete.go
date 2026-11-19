@@ -294,12 +294,16 @@ func (d *Daemon) purgeWorktreeSessions(target, realTarget string, before map[str
 	if d.index == nil {
 		return
 	}
+	forgetter, _ := d.agents.(AgentForgetter)
 	for _, s := range d.index.Sessions() {
 		if s.Registration.Live(now) {
 			continue
 		}
 		if !before[s.ReplyID] && !worktreeHolds(target, realTarget, s.Project) {
 			continue
+		}
+		if forgetter != nil {
+			forgetter.ForgetClosed(s.ReplyID)
 		}
 		if err := d.index.purge(s.ReplyID); err != nil {
 			fmt.Fprintf(d.log, "dashboard: remove session %s after deleting %s: %v\n", s.ReplyID, target, err)
@@ -611,6 +615,9 @@ func (d *Daemon) handleWorktreeDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Fprintf(d.log, "dashboard: deleted the worktree %s (force %t)\n", c.Path, c.Force)
 	d.purgeWorktreeSessions(c.Path, realTarget, endedBefore, time.Now())
+	if err := d.layout.dropWorktreeOrder(root, c.Path, realTarget); err != nil {
+		fmt.Fprintf(d.log, "dashboard: drop worktree order for %s: %v\n", c.Path, err)
+	}
 	d.rail.dropWorktree(root, c.Path, realTarget)
 	d.rail.reread(root)
 	d.broker.wake(railListRepoKey)

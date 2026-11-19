@@ -61,3 +61,57 @@ func layoutWTMove(doc *railLayoutDoc, f railFacts, workspace, path, ref string, 
 	s.w.WorktreeOrder = insertAt(full, path, ref, after)
 	return ""
 }
+
+// dropWorktreeOrder removes a deleted worktree path from workspace root's
+// saved worktree_order (and drops an emptied workspace entry), writing
+// rail-layout.json only when it actually changed.
+func (s *railLayoutStore) dropWorktreeOrder(root, path, realPath string) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := statRailFile(s.file)
+	if !st.ok {
+		return nil
+	}
+	doc, err := readRailLayout(s.file)
+	if err != nil {
+		return err
+	}
+	if st != s.seen {
+		s.seen, s.doc = st, doc
+		s.gen++
+	}
+	next := doc.clone()
+	changed := false
+	for wsPath, w := range next.Workspaces {
+		if !samePath(wsPath, root) || len(w.WorktreeOrder) == 0 {
+			continue
+		}
+		kept := slices.DeleteFunc(slices.Clone(w.WorktreeOrder), func(p string) bool {
+			return samePath(p, path) || (realPath != "" && samePath(p, realPath))
+		})
+		if len(kept) == len(w.WorktreeOrder) {
+			continue
+		}
+		changed = true
+		w.WorktreeOrder = kept
+		if len(w.WorktreeOrder) == 0 && len(w.Order) == 0 && len(w.Stars) == 0 && len(w.Children) == 0 && len(w.extra) == 0 {
+			delete(next.Workspaces, wsPath)
+		}
+	}
+	if !changed {
+		return nil
+	}
+	after, err := next.encode()
+	if err != nil {
+		return err
+	}
+	if err := writePrivateFile(filepath.Dir(s.file), filepath.Base(s.file), after); err != nil {
+		return err
+	}
+	s.doc, s.seen = next, statRailFile(s.file)
+	s.gen++
+	return nil
+}
