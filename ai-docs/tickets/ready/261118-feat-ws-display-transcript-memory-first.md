@@ -314,6 +314,29 @@ on the remote w5090 only.
   records it in an Edition. The fixture counts above are not that measurement.
   Phase 2 and Phase 3 remain unimplemented; this ticket stays in `ready/`.
 
+#### Edition (3e40ceb52) - 2026-11-19
+
+- R1 closeout found one Important notification-ordering defect after the
+  initial passing check: the relocated ordinary ring wake could reach a
+  file-only reader before the finished snapshot was written, leaving the
+  old streaming reply visible with no later RAM `Publish` wake. This
+  supersedes the initial Result's no-findings review statement.
+- Ordinary ring wakes now follow snapshot write/publication. A regression
+  reads both snapshot and ring synchronously inside the wake callback and
+  verifies the finished state and exactly one wake. Hosted routing and the
+  unchanged ownership fence remain intact.
+- Fixes-only R2 checked this finding's correction and regression: clean.
+  Both rounds used the authorized self-review fallback; the lead still
+  performs the independent Claude diff review before merge.
+- Final-source w5090 verification passed: generated assets, `go build ./...`,
+  vet of wsagent/wsdashboard/mcp/cmd-ws-mcp, and full
+  `go test -count=1 -timeout=10m` of those four packages
+  (135.784s / 279.700s / 473.939s / 298.180s). Full output was read.
+  No local Go build/vet/test. No further verification cycle or added scope.
+- Forward remains unchanged: owner-PC before/after syscall/latency measurement
+  after merge; later phases remain unimplemented. Local temporary files were
+  deleted.
+
 ### Phase 2: Ring in daemon RAM, append-only segment files
 
 Planned at its promotion, including its compatibility tier with source lines.
