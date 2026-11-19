@@ -1,52 +1,28 @@
 # Risk Rubric
 
-One ruler for grading how risky a change is before picking the worker tier to
-dispatch it at. Grade the axes below from the unit of work in front of you —
-its stated scope, the touched tree, and what depends on it — then read the
-tier guidance holistically. It is a rubric for judgment, not a table to
-total: do not count highs or apply it as a mechanical gate.
+Grade the unit of work holistically across four axes before picking a worker
+tier (use the tier anchors below as holistic guidance, not a mechanical count):
 
-## Axes
+- **Correctness** — subtle bugs ordinary tests miss (concurrency, edge cases,
+  cross-cutting invariants).
+- **Fit** — conflict with architecture, conventions, or in-flight work (when
+  known) vs. an established pattern.
+- **Test** — strength of automated verification (exercised path or non-runtime
+  doc = low; partial or indirect coverage = moderate; unverified code/behavior
+  or self-rewritten test only = high).
+- **Security or contract** — public interface, security boundary, data
+  contract, or external consumer impact.
 
-- **Correctness** — how likely the change is to behave wrong in a way ordinary
-  testing would not immediately catch: concurrency, numeric edge cases,
-  cross-cutting invariants, or logic that is easy to get subtly wrong even
-  when it compiles and superficially runs.
-- **Fit** — how likely the change conflicts with the existing architecture, an
-  established convention, or another in-flight change, versus following a
-  clear, already-proven pattern.
-- **Test** — how well the available verification actually proves the change
-  correct: an existing, exercised test path is low; a change with no
-  meaningful automated check, or one covered only by a test the change itself
-  rewrites, is high.
-- **Security or contract** — how much the change touches a public interface,
-  a security boundary, a data contract, or something an external consumer
-  depends on, versus an internal detail nothing outside the change observes.
+Scale: **Low** (contained, caught by normal verification) · **Moderate**
+(plausible with real blast radius, catchable by verification/review) ·
+**High** (plausible and costly, hard to detect/reverse, or missed by ordinary
+checks).
 
-## Scale
+Tier:
+- **medium** — low-to-moderate across the board; no axis stands out.
+- **large** — any high axis, or compounding moderates with wide blast radius.
+- **xlarge** — multiple high axes, or one high on a costly/irreversible
+  contract or security boundary (pick proactively when warranted, without
+  waiting for a retry).
 
-- **Low** — the failure mode is implausible, contained, or would be caught
-  trivially by normal verification if it occurred.
-- **Moderate** — the failure mode is plausible, or its blast radius is real,
-  but ordinary verification or review can reasonably be expected to catch it.
-- **High** — the failure mode is plausible and would be costly, hard to
-  detect, or hard to reverse if it slipped through, or ordinary verification
-  would not catch it at all.
-
-## Tier
-
-Weigh the axes together as one read, not a checklist:
-
-- **medium** — the risk profile reads low-to-moderate across the board; no
-  axis stands out as a reason for a heavier tier.
-- **large** — at least one axis reads high, or several moderate axes compound
-  into a wide blast radius even without a single high (for example, moderate
-  correctness risk on a widely-depended-on surface).
-- **xlarge** — the read itself signals top-of-scale risk: multiple axes high
-  together, or one axis high on something costly or hard to reverse if wrong
-  — a security boundary, a contract many consumers hold, irreversible data
-  loss. Pick this proactively when the read warrants it; it is not reserved
-  for a retry.
-
-Record the tier picked and the axis (or axes) that drove it. The rubric is the
-ruler; the read is the caller's.
+Record the tier picked and the driving axis (or axes).

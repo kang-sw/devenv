@@ -50,10 +50,11 @@ fresh-context leaves. The Worker Protocol appended below governs; read it first.
 - Diagnose blame before fixing a failing test (implementation, test, or
   environment); never patch a test to match a broken implementation. A
   second failure with the same root cause as an earlier one in this run is
-  stop (f), not another attempt.
+  `blocked` (`next: retry`), not another attempt.
 - Structural deviation from the ticket — a named file, type, or interface
-  that does not exist or differs — is stop (c). Cosmetic deviation (a renamed
-  parameter, a moved helper) is adapted and listed under `decisions:`.
+  that does not exist or differs — is `blocked` (`next: revise`). Cosmetic
+  deviation (a renamed parameter, a moved helper) is adapted and listed under
+  `decisions:`.
 - Do not edit `.done/` or `.dropped/` tickets. Do not edit a phase's plan
   text once it has a `### Result`; append `#### Edition (<hash>) - <date>`.
 - Commit on your branch at logical checkpoints, one logical unit per commit,
@@ -65,10 +66,10 @@ fresh-context leaves. The Worker Protocol appended below governs; read it first.
 1. Route: `{{.McpNamespace}}/route.resolve_implement(session_key: <your key>,
    target: {kind: "ticket", ticket_path: <path>, ticket_stem: <stem>})`. The
    returned todo list is your skeleton; its branch action creates or reuses your
-   work branch from the branch your task block names. On a `goal/*` branch pass
-   `policy: {branch: {merge_confirm: "skip"}}`. A verdict that reports missing
-   route facts is stop (c): the lead populates them before spawning, so reaching
-   one here means the ticket was handed over out of order.
+   work branch from the branch your task block names. A verdict that reports
+   missing route facts is `blocked` (`next: revise`): the lead populates them
+   before spawning, so reaching one here means the ticket was handed over out
+   of order.
    Once the branch action has you on your impl branch, record it with
    `{{.McpNamespace}}/tickets.acquire(ticket_stem: <stem>)`. The lead's track
    already holds the ticket, so this call is informational: a refusal or an
@@ -117,11 +118,11 @@ fresh-context leaves. The Worker Protocol appended below governs; read it first.
    the ticket path, and the branch name; each reviewer reads the diff from
    git. Fix findings by severity. Under `lite`, review is one pass with no
    re-review: fix the Critical and Important findings once; a Critical you
-   cannot fix is stop (e), and an Important you leave unfixed goes under
-   `unresolved:` with the reason. Every other allocation runs two rounds: the
-   second verifies the fixes of the first and raises nothing new; there is no
-   third. A Critical finding still open after round 2 is stop (e). When the
-   allocation is `none`
+   cannot fix is `blocked` (`next: retry`), and an Important you leave unfixed
+   goes under `unresolved:` with the reason. Every other allocation runs two
+   rounds: the second verifies the fixes of the first and raises nothing new;
+   there is no third. A Critical finding still open after round 2 is `blocked`
+   (`next: retry`). When the allocation is `none`
    (per-phase review is off), skip this step and state the skip in your
    Report's `omitted:` field, so the user knows to read the diff.
 6. Record: append `### Result (<short-hash>) - YYYY-MM-DD` to each phase you
