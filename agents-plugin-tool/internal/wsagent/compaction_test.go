@@ -33,6 +33,26 @@ func TestCompactionUsesTheKeysConfigRoot(t *testing.T) {
 	}
 }
 
+func TestCompactionIsNotIdleTimeoutEligible(t *testing.T) {
+	r := NewRunner(Options{Backends: map[string]BackendRegistration{BackendPi: {NativeCompaction: PiCompaction()}}})
+	c := &conv{r: r, rec: Record{Backend: BackendPi}, idleAfter: time.Hour}
+	c.idle = time.NewTimer(time.Hour)
+	c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactStart})
+	if c.idle != nil || c.idleNow() {
+		t.Fatal("native compaction retained its prior idle timeout")
+	}
+	c.armIdle()
+	defer c.stopIdle()
+	if c.idleNow() {
+		t.Fatal("a rearmed timer may stop compaction")
+	}
+	c.compactCommand = true
+	c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd})
+	if c.idleNow() {
+		t.Fatal("command response is still pending")
+	}
+}
+
 func TestCompactionAdvisoryOptOutKeepsHardThreshold(t *testing.T) {
 	cfg := wsconfig.Options{CacheHome: t.TempDir(), ConfigHome: t.TempDir()}
 	resolver := wsconfig.NewResolver(cfg, nil, nil, nil)

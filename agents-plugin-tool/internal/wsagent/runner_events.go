@@ -713,7 +713,7 @@ func (c *conv) finishLine() {
 // idleNow reports whether the idle timer may stop the process. Read child
 // state here too: a spawn notification may still be queued when the timer fires.
 func (c *conv) idleNow() bool {
-	if c.turn || c.replaying || c.bgTasks != 0 {
+	if c.turn || c.replaying || c.bgTasks != 0 || c.compacting || c.compactCommand {
 		return false
 	}
 	kind := ParentConversation

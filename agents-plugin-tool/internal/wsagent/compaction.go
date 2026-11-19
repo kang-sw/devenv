@@ -244,6 +244,7 @@ func (c *conv) compactEvent(ev wslive.Event) {
 	}
 	switch ev.Phase {
 	case wslive.CompactStart:
+		c.stopIdle()
 		if !c.compactCommand && c.compactPending != nil {
 			c.compactResume = c.compactPending.resume
 			c.compactPending = nil
