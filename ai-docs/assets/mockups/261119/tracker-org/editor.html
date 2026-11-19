@@ -1,0 +1,201 @@
+<!-- Mockup: admin org-chart editor window (modal ~900px), opened from the Team card's "조직도 편집".
+     Fragment only. Scoped under .tkoe. Tokens as in view.html (dashboard dark values). Fictitious people.
+     Shown state: viewer kim-hn (admin); 3 staged changes; lee-dy is mid-drag over jung-mj (refused: cycle);
+     kim-hn's admin toggle is locked because lee-dy's admin removal is staged (last admin). -->
+<style>
+.tkoe { --bg:#1e1f22; --fg:#e7e7e4; --card:#1e2024; --muted:#2b2d32; --mfg:#a2a6ad; --line:#444; --pri:#7aa2ff; --pri-fg:#0c1424;
+  --fail:#f0797e; --topic:#d9dbe0; --on-topic:#1b1d21;
+  --amb-bg:#4a3a1c; --amb:#e0a84a; --blu-bg:#1f3550; --blu:#5b9bf0; --grn-bg:#1d3b24; --grn:#5cc46a; --pur-bg:#33264d; --pur:#a57bf0;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  position:relative; background:rgb(10 11 13/.72); color:var(--fg); font:13px/1.45 var(--sans); padding:28px; min-height:640px; }
+.tkoe * { box-sizing:border-box; }
+.tkoe .dlg { width:900px; max-width:100%; margin:0 auto; background:var(--bg); border:1px solid var(--line); border-radius:12px; box-shadow:0 2px 4px rgb(0 0 0/.55),0 8px 22px rgb(0 0 0/.4); display:flex; flex-direction:column; overflow:hidden; }
+.tkoe .dh { display:flex; align-items:center; gap:10px; padding:10px 12px 10px 16px; background:var(--muted); }
+.tkoe .dh h2 { margin:0; font-size:14px; }
+.tkoe .dh .sub { color:var(--mfg); font-size:12px; }
+.tkoe .grow { flex:1 1 0; }
+.tkoe .x { width:26px; height:24px; border:0; border-radius:6px; background:none; color:var(--mfg); font-size:16px; cursor:pointer; }
+.tkoe .x:hover { background:var(--card); color:var(--fg); }
+.tkoe .db { display:grid; grid-template-columns:1fr 300px; min-height:470px; }
+.tkoe .left { padding:10px 14px 12px; border-right:1px solid var(--line); min-width:0; }
+.tkoe .right { padding:10px 12px 12px; background:var(--card); display:flex; flex-direction:column; gap:8px; }
+.tkoe .tb { display:flex; gap:6px; align-items:center; margin-bottom:8px; }
+.tkoe input[type=search], .tkoe select { font:inherit; font-size:12px; padding:2px 6px; border-radius:6px; border:1px solid var(--line); background:var(--card); color:var(--fg); }
+.tkoe input[type=search] { width:170px; }
+.tkoe .hint { color:var(--mfg); font-size:11.5px; }
+.tkoe .btn { font:inherit; font-size:12.5px; background:var(--muted); color:var(--fg); border:0; border-radius:999px; padding:3px 12px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.tkoe .btn.mini { font-size:11.5px; padding:1px 9px; }
+.tkoe .btn.primary { background:var(--pri); color:var(--pri-fg); font-weight:700; }
+.tkoe .chip { display:inline-flex; align-items:center; height:17px; font-size:10.5px; font-weight:700; padding:0 6px; border-radius:999px; background:var(--muted); color:var(--mfg); white-space:nowrap; }
+.tkoe .chip.admin { background:var(--topic); color:var(--on-topic); }
+.tkoe .chip.you { background:var(--pri); color:var(--pri-fg); }
+.tkoe .chip.mv { background:var(--amb-bg); color:var(--amb); }
+.tkoe .av { width:20px; height:20px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; flex:none; font-style:normal; font-size:9px; font-weight:800; background:var(--muted); color:var(--mfg); }
+/* drop zone for "no lead" */
+.tkoe .rootz { border:1.5px dashed var(--line); border-radius:8px; padding:5px 10px; color:var(--mfg); font-size:12px; margin-bottom:6px; display:flex; align-items:center; gap:6px; }
+.tkoe .rootz b { color:var(--fg); }
+.tkoe .rootz.ok { border-color:var(--blu); background:color-mix(in srgb,var(--blu-bg) 60%,transparent); color:#cfe0fb; }
+/* editable tree: same elbow connectors as the card */
+.tkoe .org, .tkoe .org ul { list-style:none; margin:0; padding:0; }
+.tkoe .org ul { margin-left:18px; }
+.tkoe .org li { position:relative; }
+.tkoe .org ul > li { padding-left:14px; }
+.tkoe .org ul > li::before { content:""; position:absolute; left:0; top:0; width:11px; height:16px; border-left:1.5px solid var(--line); border-bottom:1.5px solid var(--line); border-bottom-left-radius:5px; }
+.tkoe .org ul > li:not(:last-child)::after { content:""; position:absolute; left:0; top:16px; bottom:0; border-left:1.5px solid var(--line); }
+.tkoe li.shut > ul { display:none; }
+.tkoe .row { display:grid; grid-template-columns:12px 14px 20px minmax(0,1fr) 126px 96px; column-gap:6px; align-items:center; padding:3px 6px 3px 2px; margin:1px 0; border-radius:7px; border:1px solid transparent; }
+.tkoe .row:hover { background:color-mix(in srgb,var(--pri) 5%,var(--bg)); }
+.tkoe .hd { color:#6b6f76; cursor:grab; font-size:12px; text-align:center; user-select:none; }
+.tkoe .tg { width:14px; height:14px; border:0; background:none; color:var(--mfg); cursor:pointer; padding:0; font-size:10px; }
+.tkoe li.shut > .row .tg { transform:rotate(-90deg); }
+.tkoe .who { min-width:0; display:flex; align-items:baseline; gap:5px; overflow:hidden; white-space:nowrap; }
+.tkoe .who .nm { font-weight:600; }
+.tkoe .who .o { color:var(--mfg); font-size:11px; overflow:hidden; text-overflow:ellipsis; }
+.tkoe .who code { font-family:var(--mono); font-size:10.5px; color:var(--mfg); }
+.tkoe .cnt { color:var(--mfg); font-size:10.5px; font-weight:700; }
+.tkoe .lead select { width:100%; }
+/* staged rows: amber left stripe; dragged row dims; drop targets: blue ok / red refused */
+.tkoe .row.staged { background:color-mix(in srgb,var(--amb-bg) 45%,var(--bg)); box-shadow:inset 3px 0 0 var(--amb); }
+.tkoe .row.drag { opacity:.45; outline:1.5px dashed var(--mfg); }
+.tkoe .row.ok { border-color:var(--blu); background:color-mix(in srgb,var(--blu-bg) 70%,var(--bg)); }
+.tkoe .row.bad { border-color:var(--fail); background:color-mix(in srgb,var(--fail) 10%,var(--bg)); cursor:no-drop; }
+.tkoe .refuse { margin:2px 0 4px 52px; padding:4px 8px; border-radius:6px; background:color-mix(in srgb,var(--fail) 14%,var(--bg)); color:var(--fail); font-size:11.5px; border-left:3px solid var(--fail); }
+.tkoe .refuse b { color:#ffc1c3; }
+.tkoe .was { color:var(--amb); font-size:10.5px; overflow:hidden; text-overflow:ellipsis; }
+/* admin toggle: purple when on; amber outline when its change is staged; locked = disabled + tooltip */
+.tkoe .adm { font:inherit; font-size:11px; font-weight:700; border:0; border-radius:999px; padding:2px 8px; cursor:pointer; white-space:nowrap; justify-self:start; background:transparent; color:var(--mfg); box-shadow:inset 0 0 0 1px var(--line); }
+.tkoe .adm.on { background:var(--pur-bg); color:#d6c3fb; box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pur) 60%,transparent); }
+.tkoe .adm.pend { box-shadow:inset 0 0 0 1.5px var(--amb); color:var(--amb); }
+.tkoe .adm:disabled { opacity:.55; cursor:not-allowed; }
+.tkoe .tipw { position:relative; justify-self:start; }
+.tkoe .tip { position:absolute; right:0; top:calc(100% + 5px); z-index:3; width:210px; padding:5px 8px; border-radius:6px; background:#0f1012; border:1px solid var(--line); color:var(--fg); font-size:11px; font-weight:400; box-shadow:0 4px 12px rgb(0 0 0/.5); }
+.tkoe .unas { margin-top:10px; border:1px dashed color-mix(in srgb,var(--amb) 45%,transparent); border-radius:8px; padding:5px 10px; color:var(--mfg); font-size:12px; }
+.tkoe .unas b { color:var(--amb); }
+/* staged-changes list */
+.tkoe .right h3 { margin:0; font-size:13px; display:flex; align-items:center; gap:6px; }
+.tkoe .right h3 .n { background:var(--amb-bg); color:var(--amb); border-radius:999px; padding:0 7px; font-size:11.5px; }
+.tkoe .chg { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:5px; }
+.tkoe .chg li { display:grid; grid-template-columns:1fr auto; gap:2px 6px; align-items:center; padding:6px 8px; border-radius:8px; background:var(--bg); border:1px solid var(--line); }
+.tkoe .ty { font-size:10.5px; font-weight:800; border-radius:4px; padding:0 5px; justify-self:start; }
+.tkoe .ty.lead { background:var(--blu-bg); color:#a9c8f7; }
+.tkoe .ty.add { background:var(--grn-bg); color:var(--grn); }
+.tkoe .ty.rm { background:var(--amb-bg); color:var(--amb); }
+.tkoe .chg .d { grid-column:1; font-size:12px; }
+.tkoe .chg .d code { font-family:var(--mono); font-size:11px; color:var(--mfg); }
+.tkoe .chg .arr { color:var(--mfg); margin:0 3px; }
+.tkoe .undo { grid-column:2; grid-row:1 / 3; font:inherit; font-size:11px; border:0; border-radius:6px; background:none; color:var(--mfg); cursor:pointer; padding:3px 6px; }
+.tkoe .undo:hover { background:var(--muted); color:var(--fg); }
+.tkoe .note { font-size:11.5px; color:var(--mfg); background:var(--bg); border-radius:8px; padding:6px 8px; border:1px solid var(--muted); }
+.tkoe .note ol { margin:3px 0 0; padding-left:16px; }
+.tkoe .df { display:flex; align-items:center; gap:8px; padding:9px 14px; border-top:1px solid var(--line); background:var(--card); }
+.tkoe .legend { width:900px; max-width:100%; margin:10px auto 0; color:var(--mfg); font-size:12px; }
+</style>
+
+<div class="tkoe">
+  <div class="dlg" role="dialog" aria-label="조직도 편집">
+    <div class="dh"><h2>조직도 편집</h2><span class="sub">관리자 전용 · 변경은 "저장"할 때 한 번에 기록됩니다</span><span class="grow"></span>
+      <button type="button" class="x" aria-label="닫기" title="닫기 (저장하지 않은 변경 3건은 확인 후 버림)">×</button></div>
+    <div class="db">
+      <!-- ============ left: editable tree (projected = current + staged) ============ -->
+      <div class="left">
+        <div class="tb"><input type="search" placeholder="이름 · id 검색"><button type="button" class="btn mini">모두 펼치기</button><span class="grow"></span>
+          <span class="hint">⠿ 를 끌어 다른 멤버 위에 놓으면 그 멤버가 리드가 됩니다</span></div>
+        <div class="rootz" data-id="">⤒ <b>최상위</b> — 여기에 놓으면 리드 없음 (최상위)으로 이동</div>
+        <ul class="org">
+          <li data-id="kim-hn" data-lead=""><div class="row" draggable="true"><span class="hd">⠿</span><button type="button" class="tg">▾</button><i class="av">하늘</i>
+              <span class="who"><span class="nm">김하늘</span><span class="chip you">나</span><span class="o">SW개발실 · <code>kim-hn</code></span><span class="cnt">8명</span></span>
+              <span class="lead"><select aria-label="리드 변경"><option selected>— 최상위 (리드 없음)</option><option disabled>park-sy (하위 · 순환)</option></select></span>
+              <span class="tipw"><button type="button" class="adm on" disabled aria-describedby="t1">관리자 ✓</button>
+                <span class="tip" id="t1" role="tooltip">마지막 관리자는 해제할 수 없습니다. lee-dy의 관리자 해제가 대기 중이라 kim-hn이 유일한 관리자가 됩니다.</span></span></div>
+            <ul>
+              <li data-id="lee-dy" data-lead="kim-hn"><div class="row drag" draggable="true"><span class="hd">⠿</span><button type="button" class="tg">▾</button><i class="av">도윤</i>
+                  <span class="who"><span class="nm">이도윤</span><span class="o">SW개발1팀 · <code>lee-dy</code></span><span class="cnt">4명</span></span>
+                  <span class="lead"><select aria-label="리드 변경">
+                    <option>— 최상위 (리드 없음)</option><option selected>kim-hn 김하늘</option><option>park-sy 박서연</option><option>yoon-th 윤태호</option><option>oh-sj 오세진</option>
+                    <option disabled>choi-jw (하위 · 순환)</option><option disabled>jung-mj (하위 · 순환)</option><option disabled>kang-yr (하위 · 순환)</option><option disabled>han-sa (하위 · 순환)</option></select></span>
+                  <button type="button" class="adm pend" title="관리자 해제 대기 중 — 클릭하면 되돌림">관리자 해제됨</button></div>
+                <ul>
+                  <li data-id="choi-jw" data-lead="lee-dy"><div class="row" draggable="true"><span class="hd">⠿</span><span></span><i class="av">지우</i>
+                      <span class="who"><span class="nm">최지우</span><span class="o">SW개발1팀 · <code>choi-jw</code></span></span>
+                      <span class="lead"><select aria-label="리드 변경"><option>lee-dy 이도윤</option></select></span><button type="button" class="adm">관리자 지정</button></div></li>
+                  <li data-id="jung-mj" data-lead="lee-dy"><div class="row bad" draggable="true"><span class="hd">⠿</span><span></span><i class="av">민준</i>
+                      <span class="who"><span class="nm">정민준</span><span class="o">SW개발1팀 · <code>jung-mj</code></span></span>
+                      <span class="lead"><select aria-label="리드 변경"><option>lee-dy 이도윤</option></select></span><button type="button" class="adm">관리자 지정</button></div>
+                    <div class="refuse" role="alert">놓을 수 없음 — <b>순환</b>: 정민준(jung-mj)은 이미 이도윤(lee-dy) 아래에 있습니다. 리드를 자기 하위 멤버 밑으로 옮길 수 없습니다.</div></li>
+                  <li data-id="kang-yr" data-lead="lee-dy"><div class="row" draggable="true"><span class="hd">⠿</span><span></span><i class="av">예린</i>
+                      <span class="who"><span class="nm">강예린</span><span class="o">SW개발1팀 · <code>kang-yr</code></span></span>
+                      <span class="lead"><select aria-label="리드 변경"><option>lee-dy 이도윤</option></select></span><button type="button" class="adm">관리자 지정</button></div></li>
+                  <li data-id="han-sa" data-lead="lee-dy"><div class="row staged" draggable="true"><span class="hd">⠿</span><span></span><i class="av">수아</i>
+                      <span class="who"><span class="nm">한수아</span><span class="chip mv">이동됨</span><span class="was">이전 리드: park-sy</span></span>
+                      <span class="lead"><select aria-label="리드 변경"><option>lee-dy 이도윤</option></select></span><button type="button" class="adm">관리자 지정</button></div></li>
+                </ul></li>
+              <li data-id="park-sy" data-lead="kim-hn"><div class="row" draggable="true"><span class="hd">⠿</span><button type="button" class="tg">▾</button><i class="av">서연</i>
+                  <span class="who"><span class="nm">박서연</span><span class="o">SW개발2팀 · <code>park-sy</code></span><span class="cnt">2명</span></span>
+                  <span class="lead"><select aria-label="리드 변경"><option>kim-hn 김하늘</option></select></span><button type="button" class="adm">관리자 지정</button></div>
+                <ul>
+                  <li data-id="yoon-th" data-lead="park-sy"><div class="row" draggable="true"><span class="hd">⠿</span><span></span><i class="av">태호</i>
+                      <span class="who"><span class="nm">윤태호</span><span class="o">SW개발2팀 · <code>yoon-th</code></span></span>
+                      <span class="lead"><select aria-label="리드 변경"><option>park-sy 박서연</option></select></span><button type="button" class="adm">관리자 지정</button></div></li>
+                  <li data-id="oh-sj" data-lead="park-sy"><div class="row staged" draggable="true"><span class="hd">⠿</span><span></span><i class="av">세진</i>
+                      <span class="who"><span class="nm">오세진</span><span class="chip mv">배치됨</span><span class="was">이전: 미배치</span></span>
+                      <span class="lead"><select aria-label="리드 변경"><option>park-sy 박서연</option></select></span><button type="button" class="adm">관리자 지정</button></div></li>
+                </ul></li>
+            </ul></li>
+        </ul>
+        <div class="unas"><b>미배치 (리드 없음)</b> — 없음. 최상위에 놓은 멤버 중 아래에 아무도 없으면 여기에 표시됩니다.</div>
+      </div>
+
+      <!-- ============ right: staged changes ============ -->
+      <div class="right">
+        <h3>변경 사항 <span class="n">3건</span><span class="grow"></span><button type="button" class="btn mini" title="대기 중인 변경을 모두 되돌립니다">모두 되돌리기</button></h3>
+        <ol class="chg">
+          <li><span class="ty lead">리드 변경</span><button type="button" class="undo" title="이 변경 되돌리기">↶ 되돌리기</button>
+            <span class="d">한수아 <code>han-sa</code><br><code>park-sy</code><span class="arr">→</span><code>lee-dy</code></span></li>
+          <li><span class="ty lead">리드 변경</span><button type="button" class="undo" title="이 변경 되돌리기">↶ 되돌리기</button>
+            <span class="d">오세진 <code>oh-sj</code><br><span class="hint">(없음)</span><span class="arr">→</span><code>park-sy</code></span></li>
+          <li><span class="ty rm">관리자 해제</span><button type="button" class="undo" title="이 변경 되돌리기 — kim-hn 잠금도 풀립니다">↶ 되돌리기</button>
+            <span class="d">이도윤 <code>lee-dy</code></span></li>
+        </ol>
+        <div class="note"><b style="color:var(--fg)">저장 방식</b> — 3건을 역할 이벤트 3개로 묶어 한 번에 보냅니다. 전부 기록되거나, 하나라도 거부되면 아무것도 기록되지 않고 거부된 항목이 빨간색으로 표시됩니다.
+          <ol><li>관리자 지정</li><li>리드 변경 (바뀐 트리의 위쪽부터)</li><li>관리자 해제 (본인 해제는 맨 마지막)</li></ol>
+          <span>순서는 자동으로 정합니다. 각 이벤트는 앞 이벤트가 반영된 상태로 검사되므로, 이 순서면 최종 트리가 유효한 한 중간 순환이나 권한 상실로 거부되지 않습니다.</span></div>
+        <div class="note">관리자 지정 예: 행의 <span class="chip" style="box-shadow:inset 0 0 0 1px var(--line);background:none">관리자 지정</span> 클릭 → 목록에 <span class="ty add">관리자 지정</span> 항목이 추가됩니다.</div>
+        <span class="grow"></span>
+        <div class="hint">키 추가·폐기와 멤버 제거는 이 창 밖의 <a href="#" style="color:var(--pri)">기타 역할 이벤트…</a>에서 합니다.</div>
+      </div>
+    </div>
+    <div class="df"><span class="hint">대기 중인 변경 3건 · 저장 전에는 다른 사람에게 보이지 않습니다</span><span class="grow"></span>
+      <button type="button" class="btn" title="대기 중인 변경 3건을 버리고 닫기">취소</button>
+      <button type="button" class="btn primary">저장 (3건)</button></div>
+  </div>
+  <p class="legend">목업 상태: 이도윤(lee-dy) 행을 끌어 자기 하위인 정민준(jung-mj) 위에 올린 순간 — 빨간 테두리 + 거부 안내. 다른 행 위로 끌면 파란 테두리(허용), 최상위 영역도 파란색으로 바뀝니다 (아래 스크립트, 놓기는 목업에서 무동작). 키보드/클릭 대안: 각 행의 "리드 변경" 선택 상자 — 자기 하위 멤버는 "(하위 · 순환)"으로 비활성화됩니다.</p>
+</div>
+
+<script>
+// Mockup-only drag highlight: blue on an allowed target, red when the target sits in the dragged member's subtree.
+(function () {
+  var root = document.querySelector('.tkoe'), lead = {}, dragged = null;
+  root.querySelectorAll('li[data-id]').forEach(function (li) { lead[li.dataset.id] = li.dataset.lead; });
+  function below(t, id) { for (var x = t; x; x = lead[x]) if (x === id) return true; return false; }
+  function clear() { root.querySelectorAll('.row.ok,.row.bad,.rootz.ok').forEach(function (e) { e.classList.remove('ok', 'bad'); }); }
+  root.querySelectorAll('.tg').forEach(function (b) { b.addEventListener('click', function () { b.closest('li').classList.toggle('shut'); }); });
+  root.addEventListener('dragstart', function (e) {
+    var li = e.target.closest('li[data-id]'); if (!li) return;
+    dragged = li.dataset.id; e.dataTransfer.setData('text/plain', dragged);
+    root.querySelectorAll('.row.drag,.refuse').forEach(function (n) { n.classList.remove('drag'); if (n.classList.contains('refuse')) n.remove(); });
+    clear(); li.firstElementChild.classList.add('drag');
+  });
+  root.addEventListener('dragover', function (e) {
+    if (!dragged) return;
+    var z = e.target.closest('.rootz'), row = e.target.closest('.row'); clear();
+    if (z) { z.classList.add('ok'); e.preventDefault(); return; }
+    if (!row) return;
+    var t = row.parentNode.dataset.id;
+    if (below(t, dragged)) { row.classList.add('bad'); return; } // no preventDefault: the drop is refused
+    row.classList.add('ok'); e.preventDefault();
+  });
+  root.addEventListener('dragend', function () { clear(); root.querySelectorAll('.row.drag').forEach(function (n) { n.classList.remove('drag'); }); dragged = null; });
+  root.addEventListener('drop', function (e) { e.preventDefault(); });
+})();
+</script>
