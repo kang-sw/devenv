@@ -1676,6 +1676,7 @@
   "rail.root": "raiz",
   "rail.star": "Favorito",
   "js.rail.starred": "Favorito",
+  "js.rail.attention": "Nova pergunta",
   "js.rail.menu.star": "Adicionar aos favoritos",
   "js.rail.menu.unstar": "Remover dos favoritos",
   "rail.copy": "Copiar o endereço da caixa de correio",

@@ -176,6 +176,27 @@ func (s *State) OpenAskCount() int {
 	return n
 }
 
+// OpenAskIDs is the space-separated set of open policy/check item IDs for
+// the dashboard rail. It uses the already-read state, never board files.
+// A nil state has none.
+func (s *State) OpenAskIDs() string {
+	if s == nil {
+		return ""
+	}
+	var ids []int
+	for _, item := range s.Items {
+		if item.Status == StatusOpen && (item.Class == ClassPolicy || item.Class == ClassCheck) {
+			ids = append(ids, item.ID)
+		}
+	}
+	sort.Ints(ids)
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = strconv.Itoa(id)
+	}
+	return strings.Join(out, " ")
+}
+
 // ReaskTimes maps each re-asked item's ID to its latest re-ask time in epoch
 // milliseconds, floored by the board's load time (LoadedAt) for every item of
 // a loaded board; an item never re-asked on a board never loaded, or with an

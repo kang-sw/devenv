@@ -362,6 +362,18 @@ html:not([data-sysopen]) .rail .rsleep { display: none; }
 .rail .qdot { position: absolute; z-index: 2; top: -3px; left: -3px; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-accent-policy); box-shadow: 0 0 0 1.5px var(--wb-card); }
 .rail .rs:hover .qdot { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
 .rail .rs.cur .qdot { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
+/* One-shot attention (mockup B): three flashes, then tint + icon ring.
+   The question dot's z-index keeps it above both overlays. Only the node
+   first flagged gets .attn-flash; server replacements are settled. */
+.rail .rs.attn::before { content: ""; position: absolute; inset: 0; border-radius: 6px; pointer-events: none; background: var(--wb-accent-policy); opacity: .12; }
+.rail .rs.attn .hiw::after { content: ""; position: absolute; left: 0; top: 0; width: 16px; height: 16px; border-radius: 3px; pointer-events: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-accent-policy) 45%, transparent); }
+.rail .rs.attn.attn-flash::before { animation: attn-flash .6s ease-in-out 3; }
+.rail .rs.attn.attn-flash .hiw::after { animation: attn-flash-ring .6s ease-in-out 3; }
+@keyframes attn-flash { 0% { opacity: 0; } 50% { opacity: .38; } 100% { opacity: .12; } }
+@keyframes attn-flash-ring { 0% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 0 4px var(--wb-accent-policy); } 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-accent-policy) 45%, transparent); } }
+@media (prefers-reduced-motion: reduce) {
+  .rail .rs.attn::before, .rail .rs.attn .hiw::after { animation: none !important; }
+}
 @keyframes rail-orbit { to { transform: rotate(360deg); } }
 @keyframes rail-nudge { 0%, 56%, 100% { transform: none; } 10% { transform: translateY(-3px) rotate(-10deg); } 22% { transform: translateY(0) rotate(10deg); } 34% { transform: translateY(-2px) rotate(-8deg); } 46% { transform: translateY(0) rotate(6deg); } }
 @keyframes rail-blink { 50% { opacity: .25; } }

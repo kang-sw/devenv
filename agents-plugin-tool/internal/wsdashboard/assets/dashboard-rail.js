@@ -13,6 +13,7 @@
   var railEl = $("rail"), railBtn = $("railbtn"), rscrim = $("rscrim"), WsRail = window.WsRail;
   var railHoverUpdates = region("rail") && WsRail ? WsRail.hoverUpdates(region("rail")) : null;
   var railRendered = null; // last applied canonical server input, not client-marked DOM
+  var railAttention = WsRail ? WsRail.attention() : null;
   var memoPad = railEl && $("memo-pad") && window.WsMemo ? window.WsMemo.mount(doc, railEl, $("memo-pad"), function (open) { railOpen(open === true); }) : null;
   var railStore = { load: load, save: save }, railSets = WsRail ? WsRail.state(railStore) : null;
   var colSet = railSets && railSets.collapsed, kidSet = railSets && railSets.kids;
@@ -63,6 +64,7 @@
     var r = region("rail");
     if (!r || !WsRail) return;
     WsRail.marks(r, railSets, rid);
+    railAttention.mark(q(".rs", r), rid, wsT("js.rail.attention"));
     var selectedPath = location.pathname.indexOf("/w/") === 0 ? decodeURIComponent(location.pathname.slice(3)) : "";
     q(".wthd", r).forEach(function (hd) {
       var path = hd.closest(".rwt").getAttribute("data-g").replace(/\\/g, "/").replace(/^\//, "");

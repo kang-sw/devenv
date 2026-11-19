@@ -44,7 +44,7 @@ doc.removeEventListener = function (type, fn) { doc.listeners[type] = (doc.liste
 doc.dispatchEvent = function (e) { (doc.listeners[e.type] || []).slice().forEach(function (fn) { fn(e); }); };
 // The page stands alone: no shell around it, no shell above it.
 var shell = false, framed = false, shHidden = false, shTrackerRev = null;
-var boardLatest = null;
+var boardLatest = null, railAttention = null;
 // No shell session return is open (dashboard-board.js boardReturnShown);
 // receiveRegion reads this window on every board update.
 var boardReturnTimer = 0, boardReturnFresh = false;

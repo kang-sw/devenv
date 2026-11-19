@@ -516,6 +516,47 @@
     });
   }
 
+  // attention is tab-memory only, independent of the persistent question
+  // dot. First observations (including a reconnect's full rail) baseline
+  // silently. Replaced rows retain the flag but never replay its flash.
+  function attention() {
+    var seen = Object.create(null);
+    function asks(row) {
+      var raw = row.getAttribute("data-asks");
+      return raw === null ? null : new Set(raw.trim().split(/\s+/).filter(Boolean));
+    }
+    function observe(rows, rid, baseline) {
+      var kept = Object.create(null);
+      rows.forEach(function (row) {
+        var id = row.getAttribute("data-rid"), ids = asks(row), prev = seen[id];
+        if (!ids) return; // Old server: neither baseline nor flag.
+        var fresh = !baseline && !!prev && !prev.flagged && id !== rid && Array.from(ids).some(function (n) { return !prev.asks.has(n); });
+        kept[id] = { asks: ids, flagged: id !== rid && (fresh || !!(prev && prev.flagged)), flash: fresh || !!(prev && prev.flash) };
+      });
+      seen = kept;
+    }
+    function mark(rows, rid, hint) {
+      rows.forEach(function (row) {
+        var id = row.getAttribute("data-rid"), ids = asks(row), prev = seen[id];
+        if (!ids) { delete seen[id]; prev = null; }
+        else if (!prev) prev = seen[id] = { asks: ids, flagged: false, flash: false };
+        if (prev && id === rid) { prev.flagged = false; prev.flash = false; }
+        var on = !!prev && prev.flagged, link = row.querySelector(".rl");
+        // A running flash stays on its original node. A server replacement
+        // has no .attn class, so an existing flag goes straight to settled.
+        if (!on || !row.classList.contains("attn")) row.classList.remove("attn-flash");
+        row.classList.toggle("attn", on);
+        if (on && prev.flash) { row.classList.add("attn-flash"); prev.flash = false; }
+        if (link) { if (on) link.setAttribute("title", hint); else link.removeAttribute("title"); }
+      });
+    }
+    return {
+      observe: observe,
+      mark: mark,
+      sync: function (rows, rid, hint) { observe(rows, rid); mark(rows, rid, hint); }
+    };
+  }
+
   // state is the rail's stored sets over store, as marks reads them: the
   // collapsed workspaces and parents and the ended folds left open. The
   // rows' order and stars come rendered from the daemon's layout.
@@ -939,6 +980,7 @@
     refind: refind,
     swapGate: swapGate,
     markCurrent: markCurrent,
+    attention: attention,
     reviveRoute: reviveRoute,
     markRevive: markRevive,
     handedNotice: handedNotice,

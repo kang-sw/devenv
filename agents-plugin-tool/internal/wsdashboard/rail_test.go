@@ -1074,7 +1074,7 @@ func TestRailMarkupRevive(t *testing.T) {
 	// Ignore inert hover content when checking visible row boundaries.
 	html := regexp.MustCompile(`(?s)<template class="shp-source"[^>]*>.*?</template>`).ReplaceAllString(string(region.HTML), "")
 	rowOf := func(id string) string {
-		_, rest, ok := strings.Cut(html, `<div class="rs ended" data-rid="`+id+`" data-star="0">`)
+		_, rest, ok := strings.Cut(html, `<div class="rs ended" data-rid="`+id+`" data-asks="" data-star="0">`)
 		if !ok {
 			t.Fatalf("no ended row for %s:\n%s", id, html)
 		}

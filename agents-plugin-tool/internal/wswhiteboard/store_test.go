@@ -10,6 +10,24 @@ import (
 	"time"
 )
 
+func TestOpenAskIDs(t *testing.T) {
+	var empty *State
+	if got := empty.OpenAskIDs(); got != "" {
+		t.Fatalf("nil board IDs = %q", got)
+	}
+	st := &State{Items: []Item{
+		{ID: 40, Class: ClassCheck, Status: StatusOpen},
+		{ID: 12, Class: ClassPolicy, Status: StatusOpen},
+		{ID: 15, Class: ClassPolicy, Status: StatusAnswered},
+		{ID: 16, Class: ClassTechnical, Status: StatusOpen},
+		{ID: 17, Class: ClassAnnounced, Status: StatusOpen},
+		{ID: 18, Class: ClassCheck, Status: StatusAssumed},
+	}}
+	if got := st.OpenAskIDs(); got != "12 40" || st.OpenAskCount() != 2 {
+		t.Fatalf("IDs = %q, count = %d", got, st.OpenAskCount())
+	}
+}
+
 var testNow = time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)
 
 func testEnv() Env {

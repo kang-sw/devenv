@@ -146,6 +146,8 @@ type RailRow struct {
 	Subagents int
 	// CountPolicy is the board's open policy and check items.
 	CountPolicy int
+	// OpenAskIDs is the index's already-read set, exposed as data-asks.
+	OpenAskIDs string
 	// LastTool is the time of the lead's last tool call (epoch ms; 0 when
 	// unknown). An ended session's stale snapshot still supplies it.
 	LastTool int64
@@ -594,6 +596,7 @@ func railRow(in railInput, live bool, now time.Time) RailRow {
 		Harness:     reg.Harness,
 		Live:        live,
 		CountPolicy: in.Session.CountPolicy,
+		OpenAskIDs:  in.Session.OpenAskIDs,
 		Message:     in.Message.Text,
 		User:        in.Message.User,
 		Hosted:      reg.Hosted,
