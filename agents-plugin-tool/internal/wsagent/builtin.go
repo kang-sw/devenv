@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -115,9 +116,60 @@ var PiMiniLeadWSTools = append(append([]string{}, PiWorkerWSTools...),
 	"playbook.read", "playbook.render", "path.generate", "route.resolve_implement",
 )
 
+// ChildSafeWSTools is the single harness-neutral allowlist of harmless ws MCP
+// tools pre-approved for spawned children: read-only queries, or writes scoped
+// to the ws cache, generated paths, or the child's own mailbox and session
+// todo list, already authority-enforced server-side. Mutating repository,
+// ticket, note, worktree, whiteboard, config, and orchestration tools stay
+// excluded; workdir-write children keep their existing behavior for those.
+var ChildSafeWSTools = []string{
+	"path.generate",
+	"tickets.query",
+	"tickets.template",
+	"tickets.checklist",
+	"tickets.verify",
+	"convention.read",
+	"playbook.read",
+	"note.query",
+	"rationale.query",
+	"git.status",
+	"git.diff",
+	"git.log",
+	"git.merge_base",
+	"git.resolve_impl_branch",
+	"api.list",
+	"project_tree",
+	"runtime.read",
+	"mailbox.send",
+	"mailbox.recv",
+	"todo.list",
+	"todo.read",
+	"todo.add",
+	"todo.check",
+	"todo.erase",
+	"todo.clear",
+	"todo.reorder",
+}
+
+// childSafeWSToolsFor returns the ChildSafeWSTools subset admitted by p: when
+// p.WSTools is non-empty, only safe tools present in p.WSTools are returned;
+// otherwise ChildSafeWSTools itself.
+func childSafeWSToolsFor(p Profile) []string {
+	if len(p.WSTools) == 0 {
+		return slices.Clone(ChildSafeWSTools)
+	}
+	out := make([]string, 0, len(ChildSafeWSTools))
+	for _, name := range ChildSafeWSTools {
+		if slices.Contains(p.WSTools, name) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // AgentWSTools are the common ws tools every agent.spawn child gets, on
 // every harness: PiMiniLeadWSTools with agent.* in place of pi.*, plus
-// mailbox.send. The child's authority does not select among them; a
+// ChildSafeWSTools. The child's authority does not select among them; a
 // read-only child's ws-mcp refuses the mutating ones (EnvPermissionLevel).
 var AgentWSTools = agentWSTools()
 
@@ -128,7 +180,12 @@ func agentWSTools() []string {
 			out = append(out, name)
 		}
 	}
-	return append(out, "agent.spawn", "agent.interrupt", "agent.list", "agent.tiers", "mailbox.send")
+	for _, name := range append([]string{"agent.spawn", "agent.interrupt", "agent.list", "agent.tiers"}, ChildSafeWSTools...) {
+		if !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // AgentClaudeTools are a Claude agent.spawn child's native tools.

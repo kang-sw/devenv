@@ -820,6 +820,7 @@
   }
   // Hover is CSS-only: it never arms Enter to open a result.
   function qHover(o) {}
+  function qOpener() { return $('tkqs') || $('shandle'); }
   function qOpen() {
     if (qs.open) return;
     qs.open = true; qs.back = document.activeElement;
@@ -827,7 +828,8 @@
     var d = $('tkqpop');
     d.hidden = false;
     if (O.searchHost) O.searchHost.setOpen(true);
-    $('tkqs').setAttribute('aria-expanded', 'true');
+    var qsBtn = $('tkqs');
+    if (qsBtn) qsBtn.setAttribute('aria-expanded', 'true');
     qs.step = qStepOf(d.getBoundingClientRect ? d.getBoundingClientRect().width : 0);
     if (!qs.loaded && O.searchState) {
       var saved = O.searchState.load() || {};
@@ -841,10 +843,13 @@
   function qClose() {
     if (!qs.open) return;
     qs.open = false; qAbort(); qs.gen++;
-    $('tkqpop').hidden = true; $('tkqs').setAttribute('aria-expanded', 'false');
+    $('tkqpop').hidden = true;
+    var qsBtn = $('tkqs');
+    if (qsBtn) qsBtn.setAttribute('aria-expanded', 'false');
     if (O.searchHost) O.searchHost.setOpen(false);
     var b = qs.back; qs.back = null;
-    if (b && b.isConnected) b.focus({ preventScroll: true }); else $('tkqs').focus({ preventScroll: true });
+    if (b && b.isConnected) b.focus({ preventScroll: true });
+    else { var op = qOpener(); if (op) op.focus({ preventScroll: true }); }
   }
   // Esc clears a query first and closes the palette on an empty one.
   function qEsc() { if ($('tkqin').value) { $('tkqin').value = ''; qRun(); } else qClose(); }
@@ -860,7 +865,8 @@
   function qOpenHit(r) {
     var V = AD.view(r.store);
     if (V && V.items && V.items[r.item]) {
-      if (!openItemWindow(r.store, r.item, r.comment ? { focus: r.comment, opener: $('tkqs') } : { opener: $('tkqs') })) toast(wsT("js.tk.toast.hiddenitem"));
+      var op = qOpener();
+      if (!openItemWindow(r.store, r.item, r.comment ? { focus: r.comment, opener: op } : { opener: op })) toast(wsT("js.tk.toast.hiddenitem"));
     } else location.hash = '#/' + encodeURIComponent(r.store) + '/' + encodeURIComponent(r.item);
   }
   // qPick opens row i of view v. keep (Ctrl+Enter) opens it under the palette, which stays
@@ -878,7 +884,7 @@
     }
     if (!keep) qClose();
     if (k === 'board') { if (ui.win) closeItemWindow(); if (O.searchPick) O.searchPick(r, { keep: !!keep }); }
-    else if (k === 'tracker') { if (!openItemWindow(r.store, r.item, { opener: $('tkqs') })) toast(wsT("js.tk.toast.hiddenitem")); }
+    else if (k === 'tracker') { if (!openItemWindow(r.store, r.item, { opener: qOpener() })) toast(wsT("js.tk.toast.hiddenitem")); }
     else if (k === 'tnote') qOpenHit(r);
     else if (O.filePreview) O.filePreview(r.path, k === 'content' ? { line: r.line } : {});
     if (keep) $('tkqin').focus();

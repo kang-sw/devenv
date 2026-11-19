@@ -159,7 +159,8 @@
 //
 // opts:
 //   header           the page header element; the drawer hangs from its bottom edge
-//   qsSlot           an element in the header for the search-palette button
+//   qsSlot           optional element in the header for the search-palette button
+//                    (omitted when searchHost owns the trigger)
 //   searchHost       optional {parent, setOpen(bool), contains(target)} sheet host;
 //                    the returned API's openSearch/closeSearch follows host switches
 //   searchState      optional {load(), save({query, slot})} browser persistence
