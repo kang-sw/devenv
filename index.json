@@ -546,17 +546,7 @@
       "registered_at": "2026-11-19T07:02:59Z"
     },
     "261119-feat-ws-dashboard-shell-topbar-rail-redesign": {
-      "registered_at": "2026-11-19T08:22:41Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "9091c57d68d03c76",
-        "track": "track/agent-v2",
-        "phase": "closed",
-        "touched_at": "2026-11-19T08:51:07Z",
-        "impl": {
-          "branch": "impl/track/agent-v2/spied-net-oil"
-        }
-      }
+      "registered_at": "2026-11-19T08:22:41Z"
     },
     "261119-feat-ws-named-custom-tiers": {
       "registered_at": "2026-11-19T08:32:19Z"
