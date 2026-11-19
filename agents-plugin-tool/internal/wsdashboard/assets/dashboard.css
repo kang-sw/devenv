@@ -62,16 +62,71 @@
 /* A session page stands at the window's left edge: wider than its 1680px
    cap, the spare width stays on the right, where the pinned column fills it
    (the pinned column block below). The index page stays centred. */
-.dwrap { margin: 0; padding: 12px 16px; max-width: 1680px; }
+.dwrap { margin: 0; padding: 0 16px 12px; max-width: 1680px; }
 .dwrap.narrow { margin: 0 auto; max-width: 1080px; padding-top: 16px; }
 
 /* Header and action chrome only; do not blanket the rail or card headers,
    which also carry copyable IDs, paths and labels. */
 .thead, .tabbar, .ctabs, .board-tools, .bc-acts, .d-acts, .gw-acts, .gacts, .rhd { -webkit-user-select: none; user-select: none; }
 
-/* ===== top bar ===== */
+/* ===== top bar =====
+   The header is one 34px strip of handles hanging from the window's top
+   edge, in the grammar of the drawer's and tracker's handles at its right
+   end (dashboard-drawer.css, tracker.css: they keep their own placement,
+   and the header pads clear of them). Left: the rail button while the rail
+   overlays, the session's identity (project over name), its harness, and
+   its status chips; center: plan usage and the global alert slot (tcen).
+   The strip never wraps, so its height never changes: when it runs short
+   the center first steps down to one compact trigger (tu), then the
+   identity ellipsizes and the low-priority chips hide (tch); rail.js
+   topFit measures and sets both. Beside the docked rail the strip spans
+   only the stage column (dashboard-rail.css). */
+:root { --toph: 34px; --topgap: 12px; }
 .top { gap: 10px; margin-bottom: 10px; }
+.dwrap > .top { box-sizing: border-box; height: var(--toph); margin-bottom: var(--topgap); display: flex; flex-wrap: nowrap; align-items: flex-start; gap: 6px; min-width: 0; }
 .r-head { display: contents; }
+.dwrap > .top > .back, .tph, .tcen > .usage-toggle { flex: none; box-sizing: border-box; height: var(--toph); display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 0; border: 0; border-radius: 0 0 8px 8px; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: var(--wb-shadow-hi); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dwrap > .top > .back { width: 34px; padding: 2px 0 0; justify-content: center; }
+.dwrap > .top > .back .i { width: 17px; height: 17px; }
+.dwrap > .top > .back:hover { color: var(--wb-fg); }
+.dwrap > .top > .back[aria-expanded="true"] { color: var(--wb-fg); box-shadow: inset 0 -2px 0 var(--wb-primary), var(--wb-shadow-hi); }
+.dwrap > .top > .back:focus-visible, .tcen > .usage-toggle:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
+/* identity: the project (and the worktree page's branch) over the name */
+.tph-id { flex: 0 1 auto; min-width: 0; padding: 2px 6px 0 10px; overflow: hidden; }
+.tph-c { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+.dwrap > .top .tph-r1 { font: 500 9.5px/1.15 var(--wb-sans); color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dwrap > .top .tph-c > .sname, .tph-c > .worktree-branch { min-width: 0; font: 800 12.5px/1.2 var(--wb-sans); letter-spacing: .02em; color: var(--wb-fg); }
+.tph-c > .sname .snm { padding: 0 2px; margin-left: -2px; }
+.tph-c > .sname > .snm.lbl { font-weight: 800; }
+.tph-c > .sname .sseq { flex: none; font-weight: 500; color: var(--wb-muted-fg); }
+.tph-c > .sname .sinp { height: 17px; box-sizing: border-box; width: 18ch; font-size: 12px; }
+.tph-c > .worktree-branch { display: flex; overflow: hidden; text-overflow: ellipsis; }
+/* harness: the badge, the process chip (the session menu's button for a
+   viewer who holds the controls, dashboard-leads.js leadChip), hosted */
+.tph-hs { padding: 2px 8px 0 10px; }
+.tph-hs > .host.sse { height: 22px; padding: 0 5px; margin: 0 -2px; border-radius: 6px; background: none; font-size: 12px; font-weight: 700; letter-spacing: 0; color: var(--wb-muted-fg); }
+.tph-hs > .host.hbtn:hover, .tph-hs > .host.hbtn[aria-expanded="true"] { background: var(--wb-muted); color: var(--wb-fg); }
+.tph-hs > .hosted { width: auto; height: 17px; padding: 0 5px; border-radius: 4px; background: var(--wb-muted); }
+/* status chips, one line; the group hides while it holds nothing */
+.tph-chips { gap: 5px; padding: 2px 8px 0; }
+.tph-chips:not(:has(> :not(:empty))) { display: none; }
+.tph-chips > .counts { display: inline-flex; gap: 5px; margin: 0; }
+.tph-chips > .counts:empty { display: none; }
+.tph-chips .chip, .tph-chips .nolive, .tph-chips .ended-chip, .tph-chips .worktree-path { flex: none; font-size: 11px; line-height: 18px; }
+.tph-chips .worktree-path { flex: 0 1 auto; min-width: 0; max-width: 32ch; }
+/* center: centered in the strip's free width, never under 14px from a side */
+.tcen { flex: none; display: inline-flex; align-items: flex-start; gap: 6px; margin: 0 auto; padding: 0 8px; }
+.talert[hidden], .talert:empty { display: none; }
+.dwrap > .top > .sse { flex: none; height: var(--toph); padding: 2px 4px 0; margin-left: 0; }
+/* the tracker's search-palette button (qsslot, tracker.js) takes the
+   handles' shape here; its own stylesheet stays as it is */
+.dwrap > .top > .qsslot:not(:empty) { flex: none; display: inline-flex; }
+.dwrap > .top > .qsslot #tkqs { width: 34px; height: var(--toph); padding: 2px 0 0; border: 0; border-radius: 0 0 8px 8px; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: var(--wb-shadow-hi); }
+.dwrap > .top > .qsslot #tkqs:hover { color: var(--wb-fg); }
+/* the strip running short (rail.js topFit) */
+.dwrap > .top.tmeas .tph-id { flex-shrink: 0; }
+.dwrap > .top.tch .tph-hs > .hosted, .dwrap > .top.tch .tph-chips > :not(.fail):not(.mcpbad) { display: none; }
+.dwrap > .top.tch .tph-chips:not(:has(> .fail, > .mcpbad)) { display: none; }
 /* the session name: the display label or reply-id as a copy button, the
    rename pencil beside it, and the inline rename input in its place */
 .sname { display: inline-flex; align-items: center; gap: 2px; min-width: 0; white-space: nowrap; }
