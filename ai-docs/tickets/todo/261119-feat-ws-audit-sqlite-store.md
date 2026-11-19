@@ -42,12 +42,16 @@ Verified findings (same research):
    length}]`). This extends `wsredact` with a match-reporting entry point and
    keeps the `Secrets(s) string` signature for existing callers. Rejected:
    storing unredacted data in a separate secure store, which is a new
-   key-management surface. What else secret handling needs is (1734).
+   key-management surface. What else secret handling needs is settled in
+   Decision 7 ((1734)=a): nothing more. Redaction runs on the full body
+   before any per-body cap (Decision 9), so a secret straddling the cut cannot
+   be split into an unredacted fragment.
 3. **Byte cap ((597), carried in part).** A per-session byte cap (config
    knob, default 256 MiB) drops the oldest data first, because one runaway
    tool output could fill the disk within any time window. (597)'s time rule
-   (the 7-day session prune) is re-asked as (1733). Its drop unit (whole
-   segments) is superseded by the SQLite layout.
+   is settled in Decision 6 ((1733)=d). Its drop unit (whole segments) is
+   superseded by the SQLite layout. The byte cap is a config key like the
+   knobs of Decisions 6 and 9 (Constraints, "Config keys").
 4. **Compatibility tier T0, with its own schema version.** A new store with no
    older reader. The schema version lives in the database (SQLite
    `user_version`). A daemon refuses to open a newer version for writing, in
@@ -55,42 +59,86 @@ Verified findings (same research):
 5. **SQLite precedent.** Follow the existing `modernc.org/sqlite`
    configuration in `agents-plugin-tool/internal/wsstore/store.go` (WAL,
    `SetMaxOpenConns(1)`, `busy_timeout`, foreign keys, `SQLITE_BUSY`/
-   `SQLITE_LOCKED` backoff retry), as the SQLite epic does.
-
-## Open Decision Queue
-
-Last ID: (1737)
-
-(1733) [open] [policy] How long audit data is kept.
-- Context: (597) (2026-11-14) tied the audit data to the session directory, so the existing prune removed it 7 days after the session was last seen; the byte cap (Decision 3) bounds size independently. With SQLite the store no longer sits inside the session directory by default (see (1735)).
-- Alternative a: 7 days after the session was last seen, as (597) approved.
-- Alternative b: a fixed age per event (for example 30 days), independent of session activity.
-- Alternative c: no time limit; only the byte cap and an explicit session delete remove data.
-- Alternative d: a config knob, with one of a-c as the default.
-> Recommend d with a as the default: it keeps the approved behaviour and the existing prune semantics, and lets an owner who audits older work lengthen it without a code change.
-
-(1734) [open] [policy] How secrets are handled beyond best-effort redaction.
-- Context: (596) redacts before persist and keeps only rule name and length, but `wsredact` is regex best-effort, so a secret in an unrecognized shape is persisted in plain text in a long-lived store. (596) rejected an unredacted store behind separate key management.
-- Alternative a: (596) as is; document the residual risk.
-- Alternative b: a, plus never storing bodies of calls that read known secret locations (environment dumps, credential files), recorded as a size-only placeholder.
-- Alternative c: a, plus encrypting the audit database at rest with an OS-keychain key (the key-management surface (596) rejected).
-- Alternative d: a, plus an owner action to purge one event or one session's audit data.
-> Recommend a plus d: purge gives a remedy when a secret slips through without the key management (596) rejected, and b's denylist misses as much as the regex does while hiding legitimate audit content.
-
-(1735) [open] [policy] Database layout: one SQLite file per session, or one shared audit database.
-- Context: every approved read route is per session (`/s/<id>/audit/...`, (599)). The SQLite epic chose one file per board for the whiteboard ((1325)=a: boards share nothing, export and delete stay trivial), while `wsstore` uses one shared database. The SQLite epic's direct-binary CLI access policy and Windows AV gate are still open there.
-- Alternative a: one SQLite file per session, opened lazily and closed when idle, deleted with the session.
-- Alternative b: one shared audit database with a session column and indexes.
-- Alternative c: an audit table inside a daemon database shared with other SQLite-migrated stores.
-> Recommend a: it matches (599)'s per-session routes and the whiteboard precedent, makes retention and delete a file removal, and keeps one runaway session from bloating the others; b and c only pay off for cross-session search, which no approved contract needs.
-
-(1737) [open] [policy] How much of a tool-result body is stored.
-- Context: the approved read API serves a body past 8 MiB as a truncated head with a range follow-up ((599)), which assumes the full body is stored. The approved view marks where the model's view ended and shows what lies below it (`seen`), which needs more than the model saw. The per-session byte cap is 256 MiB by default, so one huge output can evict most of a session's history.
-- Alternative a: the full body, bounded only by the per-session byte cap.
-- Alternative b: a per-body cap (config knob) keeping head and tail with an explicit stored-truncation marker; the range follow-up works within what is stored.
-- Alternative c: only what the model saw (`seen` bytes), plus the full size.
-- Alternative d: previews only, as the ring does today.
-> Recommend b: a generous per-body cap keeps the seen-vs-stored comparison the mockup approved while one runaway output can no longer evict a session's history; c and d drop the comparison.
+   `SQLITE_LOCKED` backoff retry), as the SQLite epic does. Handle lifecycle
+   follows Decision 8.
+6. **Retention is a config knob, default 7 days after the session was last
+   seen ((1733)=d, owner 2026-11-19).** The default is (597)'s approved
+   behaviour, so the existing session prune semantics apply unchanged. An
+   owner who audits older work lengthens the knob without a code change.
+   Retention removes a session's whole audit database file (Decision 8). The
+   byte cap (Decision 3) still bounds size independently.
+   - Rejected: a, a fixed 7 days with no knob. It gives an owner who audits
+     older work no recourse short of a code change.
+   - Rejected: b, a fixed age per event (for example 30 days) independent of
+     session activity. It changes (597)'s approved semantics and leaves a live
+     session's older events pruned out from under it.
+   - Rejected: c, no time limit with only the byte cap and an explicit
+     session delete removing data. It keeps a long-lived store of
+     best-effort-redacted data indefinitely (Decision 7).
+   - A knob shorter than the session's own retention can leave a live session
+     with no audit data. That is a valid state, not an error (the query API
+     child serves it as empty).
+7. **Secrets: best-effort redaction as it is, residual risk documented
+   ((1734)=a, owner 2026-11-19).** (596) stands unchanged: redact before
+   persist, keep rule name and original length only. `wsredact` is regex
+   best-effort, so a secret in an unrecognized shape is stored in plain text.
+   The feature's user documentation states this residual risk, and that
+   retention (Decision 6) and deleting the session are the only ways data
+   leaves the store. A shorter retention knob is therefore the owner's
+   mitigation. The documentation's location is chosen at implementation.
+   - Rejected: b, a plus a size-only placeholder for calls that read known
+     secret locations. A denylist misses as much as the regex does while
+     hiding legitimate audit content.
+   - Rejected: c, a plus encrypting the database at rest with an OS-keychain
+     key. It is the key-management surface (596) already rejected.
+   - Rejected: d, a plus an owner action to purge one event or one session's
+     audit data (the lead recommended a+d; the owner chose a only). No purge
+     route, tool or UI control is added anywhere in the audit epic.
+8. **One SQLite file per session, deleted with the session ((1735)=a, owner
+   2026-11-19).** Every approved read route is per session (`/s/<id>/audit/...`,
+   (599)), so each session, lead or `ws/agent.*` child (the envelope child's
+   (1731)=b), gets its own audit database file.
+   - Handle lifecycle follows the SQLite epic's handle rule, owner
+     **(1347)=c**: the handle is held open and closed only after about 30
+     minutes idle. It is not "lazy open plus a short idle close". Reopen
+     after an idle close is lazy and costs one open. (The SQLite epic's text
+     on `develop` e3837e033 still says "opened lazily and closed when idle"
+     for the whiteboard and does not yet record (1347)=c. When that epic
+     records the rule, its wording governs this one.)
+   - Deleting a session deletes its audit file (the file's `-wal`/`-shm`
+     included) and retention (Decision 6) does the same. Cross-session search
+     is not provided.
+   - The byte cap (Decision 3) applies within a session's file. Deleting the
+     oldest rows must keep the file's on-disk size bounded, not only the live
+     row bytes, so Phase 2 measures the file size after a cap drop.
+   - Rejected: b, one shared audit database with a session column. It pays
+     off only for cross-session search, which no approved contract needs, and
+     lets one runaway session bloat the others.
+   - Rejected: c, an audit table inside a daemon database shared with other
+     SQLite-migrated stores. Same reason, and it couples audit retention and
+     delete to unrelated stores.
+   - The SQLite epic's open gates (Windows AV benchmark, direct-binary CLI
+     access policy) are not settled here (Constraints).
+9. **Tool-result bodies: a per-body cap keeping head and tail ((1737)=b,
+   owner 2026-11-19).** A per-body cap (config knob) bounds each stored `in`,
+   `out` and `raw`. A body over the cap is stored as its head and tail with
+   an explicit stored-truncation marker (the envelope's `stored_trunc`). The
+   read API's range follow-up works within what is stored. This keeps the
+   seen-versus-stored comparison the mockup approved while one runaway output
+   can no longer evict a session's history.
+   - Order: redact the full body, then apply the cap (Decision 2). Redaction
+     `offset` values refer to the redacted body before the cap. A redaction
+     inside the omitted middle stays listed with its rule and length but has
+     nothing to render. The exact offset semantics are fixed in Phase 1.
+   - The default cap, and the head and tail split, are set at ready promotion
+     with measured evidence. A generous default is the intent.
+   - Search covers stored text only. The omitted middle is not searchable.
+   - Rejected: a, the full body bounded only by the per-session byte cap. One
+     huge output can evict most of a session's history.
+   - Rejected: c, only what the model saw (`seen` bytes) plus the full size.
+     It drops the comparison with the part below the model's cut.
+   - Rejected: d, previews only, as the ring does today. It drops the
+     comparison and defeats the audit's purpose.
 
 ## Constraints
 
@@ -105,6 +153,19 @@ Last ID: (1737)
   direct-binary CLI access policy) on this ticket's own authority. When that
   epic cuts the child this store most directly builds on, add it as
   `blocked-by:`.
+- Config keys (Decisions 3, 6, 9): the byte cap, the retention period and the
+  per-body cap are new config keys. They are additive, T0
+  (`ai-docs/manuals/release-compatibility.md`): an older binary that does not
+  know them keeps running on its built-in behaviour. A new key is not a
+  manifest field change. The manifest parser refuses unknown fields and
+  `default_scope` values outside `session|project|global` (scenario 11, T3),
+  so the keys use only existing fields and scopes. Wherever a key is declared
+  in a config manifest, the `ws` and `wsflow` manifests must stay
+  key-identical with only `default` differing, including the native-pi
+  first-party and dashboard manifest copies
+  (`TestShippedClaudeManifestsDifferOnlyInDefaults`;
+  `ai-docs/manuals/wsflow-mirroring.md`). Key names are chosen at
+  implementation under the existing config registry naming.
 - Writing must not block capture. Append off the hot path; on a write error,
   log and drop the event rather than stall the session (carried).
 - Store files use mode 0600 and directories 0700, like the ring (carried).
@@ -115,24 +176,33 @@ Last ID: (1737)
 
 ### Phase 1: Store, writer and redaction
 
-After (1734), (1735) and (1737) are answered and the envelope child has
-landed: implement the settled database layout with its schema version, the
-non-blocking writer behind the envelope child's sink interface, and
-redaction with match reporting (Decision 2) applied before every write,
-including the settled body handling.
+After the envelope child has landed: implement the per-session database
+layout (Decision 8) with its schema version and the held-open handle
+lifecycle, the non-blocking writer behind the envelope child's sink
+interface, redaction with match reporting (Decision 2) applied before every
+write, and the per-body cap with the stored-truncation marker (Decision 9)
+applied after it. Register the per-body cap, retention and byte-cap config
+keys (Constraints, "Config keys").
 
 Verification: redaction tests (rule name and length kept; the original
 absent from the database file's bytes, WAL included); a newer `user_version`
-is refused for writing; file and directory modes; a failing or slow
-database drops and logs without delaying the producer; measured file ops
+is refused for writing; a secret straddling the per-body cut boundary is
+redacted, not split; a body over the cap is stored as head plus tail with the
+marker and an under-cap body is stored whole; one file per session, with a
+handle that stays open across a short idle and closes only after the long
+idle (a test clock, not a 30-minute wait); file and directory modes; a
+failing or slow database drops and logs without delaying the producer; measured file ops
 per appended event before/after, per `performance.md`.
 
 ### Phase 2: Retention and byte cap
 
-Depends on Phase 1 and (1733). Implement the settled retention rule and the
-per-session byte cap (Decision 3) dropping the oldest data first, plus any
-purge action (1734) settles.
+Depends on Phase 1. Implement the retention knob (default 7 days after the
+session was last seen, Decision 6) and the per-session byte cap (Decision 3)
+dropping the oldest data first. There is no purge action (Decision 7).
 
 Verification: the byte cap drops the oldest data first and keeps the newest;
-retention removes exactly what the settled rule says; deleting a session
-removes its audit data under the settled layout.
+retention removes exactly the sessions past the configured age and no
+others, and a lengthened knob keeps them; the file's on-disk size stays
+bounded after a cap drop; deleting a session removes its audit file and its
+`-wal`/`-shm`; the new config keys resolve, and the `ws` and `wsflow`
+manifests stay key-identical with only `default` differing.
