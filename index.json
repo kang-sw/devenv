@@ -350,19 +350,6 @@
     "261115-feat-ws-dashboard-external-stt-voice-typing": {
       "registered_at": "2026-11-15T02:02:38Z"
     },
-    "261115-feat-ws-hosted-codex-adapter-contract": {
-      "registered_at": "2026-11-14T15:20:26Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "track/agent-v2",
-        "phase": "closed",
-        "touched_at": "2026-11-18T11:59:25Z",
-        "impl": {
-          "branch": "impl/track/agent-v2/envy-mud-crepe"
-        }
-      }
-    },
     "261115-feat-ws-permission-profile": {
       "registered_at": "2026-11-15T07:40:45Z"
     },
@@ -421,6 +408,9 @@
     "261116-feat-ws-session-outside-git-folder": {
       "registered_at": "2026-11-16T12:11:42Z"
     },
+    "261116-feat-ws-subagent-worktree-lease": {
+      "registered_at": "2026-11-19T07:51:11Z"
+    },
     "261116-research-ws-polling-minimization-event-ledger": {
       "registered_at": "2026-11-16T04:15:13Z"
     },
@@ -433,50 +423,11 @@
     "261117-feat-role-scoped-workflow-context": {
       "registered_at": "2026-11-17T05:54:39Z"
     },
-    "261117-feat-ws-agent-tools-mailbox-routing": {
-      "registered_at": "2026-11-17T08:20:59Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "track/agent-v2",
-        "phase": "closed",
-        "touched_at": "2026-11-17T18:23:43Z",
-        "impl": {
-          "branch": "impl/track/agent-v2/wrath-crepe-croak"
-        }
-      }
-    },
     "261117-feat-ws-exec-mux-terminal": {
       "registered_at": "2026-11-17T10:17:08Z"
     },
     "261117-feat-ws-exec-tools": {
       "registered_at": "2026-11-17T08:21:27Z"
-    },
-    "261117-feat-ws-harness-capability-catalog": {
-      "registered_at": "2026-11-17T08:20:31Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "track/agent-v2",
-        "phase": "closed",
-        "touched_at": "2026-11-17T13:16:58Z",
-        "impl": {
-          "branch": "impl/track/agent-v2/rust-stank-cedar"
-        }
-      }
-    },
-    "261117-feat-ws-hosted-antigravity-adapter": {
-      "registered_at": "2026-11-17T08:21:47Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "track/agent-v2",
-        "phase": "closed",
-        "touched_at": "2026-11-17T21:52:09Z",
-        "impl": {
-          "branch": "impl/track/agent-v2/boxer-pouch-salon"
-        }
-      }
     },
     "261117-feat-ws-hosted-child-session-entry": {
       "registered_at": "2026-11-17T09:49:58Z"
@@ -494,19 +445,6 @@
         "touched_at": "2026-11-19T01:43:17Z",
         "impl": {
           "branch": "impl/track/agent-v2/prize-pupil-anger"
-        }
-      }
-    },
-    "261117-feat-ws-mailbox-memory-first-store": {
-      "registered_at": "2026-11-17T08:21:40Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "track/agent-v2",
-        "phase": "closed",
-        "touched_at": "2026-11-17T13:54:00Z",
-        "impl": {
-          "branch": "impl/track/agent-v2/drier-ebay-many"
         }
       }
     },
@@ -559,9 +497,6 @@
           "branch": "impl/track/agent-v2/pout-tweak-rush"
         }
       }
-    },
-    "261118-feat-ws-embed-rsrc-in-daemon": {
-      "registered_at": "2026-11-18T13:51:44Z"
     },
     "261118-feat-ws-exec-intent-filter": {
       "registered_at": "2026-11-18T03:48:52Z"
