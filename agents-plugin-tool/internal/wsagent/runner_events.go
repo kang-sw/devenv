@@ -58,7 +58,26 @@ func (c *conv) handle(ev Event) {
 		if ev.Live.Kind == wslive.KindReply && ev.Live.Final && !(quiet && c.rec.Parent != nil && ev.Seq <= c.rec.TurnStartSeq) {
 			c.reply = ev.Live.Text
 		}
+		if !quiet {
+			c.compactEvent(*ev.Live)
+		}
 		c.apply(*ev.Live, quiet)
+		if !quiet && ev.Live.Kind == wslive.KindStatus {
+			c.checkUsageDropCompaction(*ev.Live)
+			if c.canKick() {
+				c.compactIdle()
+			}
+		}
+		if !quiet && ev.Live.Kind == wslive.KindCompact && ev.Live.Phase != wslive.CompactStart {
+			if !c.compactCommand {
+				c.stopCompactWatchdog()
+			}
+			c.kick()
+			c.releaseHeld()
+			if !c.turn && !c.compacting && !c.compactCommand {
+				c.armIdle()
+			}
+		}
 	case ev.Card != nil:
 		if !quiet {
 			c.live.card(*ev.Card)
@@ -143,10 +162,29 @@ func (c *conv) handle(ev Event) {
 	case ev.UserTaken != "":
 		c.steerTaken(ev.UserTaken)
 	case ev.CommandError != "":
+		settledCompact := false
+		if !quiet && c.compactCommand {
+			c.compactCommand = false
+			c.stopCompactWatchdog()
+			settledCompact = true
+		}
+		if !quiet && c.compacting {
+			c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
+			c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed, Text: ev.CommandError})
+			c.stopCompactWatchdog()
+			settledCompact = true
+		}
 		// Replay rebuilds lifecycle state, not transient command diagnostics.
 		if !quiet {
 			c.setStatus(func() { c.lastErr = ev.CommandError })
 			c.changed(false)
+			if settledCompact {
+				c.kick()
+				c.releaseHeld()
+				if !c.turn && !c.compacting && !c.compactCommand {
+					c.armIdle()
+				}
+			}
 		}
 	case ev.Notice != "":
 		if !quiet {
@@ -236,12 +274,14 @@ func (c *conv) beginTurn(quiet bool) {
 		// Not the runner's send: the turn holds no new message, so it
 		// keeps the last turn's mark.
 		c.reply = ""
-		c.hold(nil)
-		if c.rec.Parent != nil {
-			c.update(func(rec *Record) {
-				rec.TurnOpen, rec.HeldTurn = true, nil
-				rec.TurnStartSeq = c.seq
-			})
+		if !c.compactCommand {
+			c.hold(nil)
+			if c.rec.Parent != nil {
+				c.update(func(rec *Record) {
+					rec.TurnOpen, rec.HeldTurn = true, nil
+					rec.TurnStartSeq = c.seq
+				})
+			}
 		}
 		c.watched()
 	}
@@ -250,13 +290,28 @@ func (c *conv) beginTurn(quiet bool) {
 // endTurn closes the running turn, applies settings changed during it, and
 // submits the messages held meanwhile.
 func (c *conv) endTurn(turnErr string, quiet bool) {
+	compactCommand, wasCompacting := c.compactCommand, c.compacting
+	if !quiet {
+		c.compactCommand = false
+		c.stopCompactWatchdog()
+	}
+	if !quiet && c.compacting {
+		p := c.r.opts.Backends[c.rec.Backend].CompactionProtocol()
+		if turnErr == "" && c.summaryReason != wslive.TurnAborted && p.CommandEndConfirms && (compactCommand || c.turn) {
+			c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd})
+			c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd, Trigger: wslive.TriggerManual})
+		} else {
+			c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
+			c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed, Text: turnErr})
+		}
+	}
 	if c.wrapHold && !c.rec.Lead && c.rec.Parent != nil && !quiet {
 		// A gap while streaming is reconciled at agent_settled, not left
 		// dependent on acknowledgements that may have left the ring.
 		c.probeWorkerRecovery()
 		return
 	}
-	if !c.turn && !c.rec.Lead {
+	if !c.turn && !c.rec.Lead && !compactCommand && !wasCompacting {
 		return
 	}
 	ran := c.turn
@@ -276,7 +331,7 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 	if turnErr != "" {
 		c.setStatus(func() { c.lastErr = turnErr })
 	}
-	if ran && !c.replaying {
+	if ran && !c.replaying && !compactCommand {
 		status := TurnDone
 		if turnErr != "" {
 			status = TurnFailed
@@ -293,8 +348,9 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 	c.applySettings()
 	c.restartIfDue()
 	c.kick()
+	c.releaseHeld()
 	c.flushRecord()
-	if !c.turn {
+	if !c.turn && !c.compacting && !c.compactCommand {
 		c.armIdle()
 	}
 }
@@ -509,6 +565,16 @@ func (c *conv) approvalFailed(err error) {
 // processExited handles a process whose output ended without the runner
 // stopping it.
 func (c *conv) processExited() {
+	if c.turn && c.compactCommand {
+		c.setStatus(func() { c.turn = false })
+		c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
+	}
+	if c.compacting {
+		c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
+		c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
+	}
+	c.compactPending, c.compactCommand, c.compactResume = nil, false, false
+	c.stopCompactWatchdog()
 	rejoining, proc := c.replaying, c.proc
 	c.events = nil
 	// No compaction follows from a process that is gone.
@@ -537,6 +603,9 @@ func (c *conv) processExited() {
 		}
 	})
 	c.processEnded()
+	if !c.closed && !c.quitting {
+		c.releaseHeld()
+	}
 	if rejoining {
 		// The process ended while no daemon ran: what waited goes to a new
 		// one.
@@ -641,8 +710,21 @@ func (c *conv) releaseHolder(proc Process) {
 
 // stopProcess ends the process, if any; a running turn ends with it.
 func (c *conv) stopProcess(reason string) {
+	if c.turn && c.compactCommand {
+		c.setStatus(func() { c.turn = false })
+		c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
+	}
+	if c.compacting {
+		c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
+		c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
+	}
+	c.compactPending, c.compactCommand, c.compactResume = nil, false, false
+	c.stopCompactWatchdog()
 	c.stopIdle()
 	if c.proc == nil {
+		if !c.closed && !c.quitting {
+			c.releaseHeld()
+		}
 		return
 	}
 	proc := c.proc
@@ -671,6 +753,9 @@ func (c *conv) stopProcess(reason string) {
 	}
 	c.replaying, c.replayAsked = false, false
 	c.processEnded()
+	if !c.closed && !c.quitting {
+		c.releaseHeld()
+	}
 }
 
 // letGo is the daemon's shutdown: a lead's process runs on under its
@@ -712,7 +797,7 @@ func (c *conv) finishLine() {
 // idleNow reports whether the idle timer may stop the process. Read child
 // state here too: a spawn notification may still be queued when the timer fires.
 func (c *conv) idleNow() bool {
-	if c.turn || c.replaying || c.bgTasks > 0 || c.bgGraceTimer != nil {
+	if c.turn || c.replaying || c.bgTasks > 0 || c.bgGraceTimer != nil || c.compacting || c.compactCommand {
 		return false
 	}
 	kind := ParentConversation

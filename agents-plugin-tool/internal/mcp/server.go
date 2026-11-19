@@ -51,6 +51,10 @@ type Server struct {
 	tracker trackerLink
 	// pi is the pi.* tools' daemon runner and live feed (pi_tools.go).
 	pi piHost
+	// agentBackendSource exposes the daemon's registered backend descriptors
+	// independently of pi.agents, so token-forwarding workers resolve their
+	// harness descriptor without receiving a lead runner handle.
+	agentBackendSource AgentBackendRegistry
 	// env is the caller process's environment; nil reads this process's
 	// live (process_env.go). ownerPID is the caller's PID; zero means this
 	// process. debug is the caller's debug ring.

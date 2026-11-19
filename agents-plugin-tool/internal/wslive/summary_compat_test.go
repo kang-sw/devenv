@@ -25,6 +25,7 @@ const summaryHistoricalRevision = "9854ff350fa1b0eccfb5c71649c5190c405925b9"
 
 func TestSummaryHistoricalReaderWriterPreservesOriginalBytes(t *testing.T) {
 	dir := t.TempDir()
+	unpin := PinRing(RingDir(dir))
 	store := &SummaryCommits{closed: map[string]bool{}, write: writeFrozenRing}
 	if err := store.Register(summaryTurnFixture()); err != nil {
 		t.Fatal(err)
@@ -32,8 +33,10 @@ func TestSummaryHistoricalReaderWriterPreservesOriginalBytes(t *testing.T) {
 	if _, err := store.Retry(RingDir(dir)); err != nil {
 		t.Fatal(err)
 	}
-	names, _ := RingNames(RingDir(dir))
-	original := filepath.Join(RingDir(dir), names[0])
+	if err := unpin(); err != nil {
+		t.Fatal(err)
+	}
+	original := filepath.Join(RingDir(dir), ringSegmentName(1))
 	before, err := os.ReadFile(original)
 	if err != nil {
 		t.Fatal(err)
@@ -41,11 +44,14 @@ func TestSummaryHistoricalReaderWriterPreservesOriginalBytes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	module := summaryHistoricalModule(t, "wslive", summaryHistoricalRevision)
+	// Under Phase 2's append-only .jsonl segment layout (T1), the historical
+	// reader ignores .jsonl segments without error and writes its own legacy
+	// .json entries without disturbing segment bytes; reopening merges both.
 	fixture := `package wslive
 import("os";"testing")
 func TestSummaryHistoricalWriterFixture(t *testing.T){
  dir:=os.Getenv("WS_SUMMARY_FIXTURE_DIR")
- rows,err:=ReadRing(RingDir(dir));if err!=nil||len(rows)!=1||rows[0].Kind!=RingTurn||rows[0].Done!=2||rows[0].Failed!=1||rows[0].DurationMs!=73||rows[0].Reason!="error"{t.Fatalf("old reader: %+v %v",rows,err)}
+ rows,err:=ReadRing(RingDir(dir));if err!=nil||len(rows)!=0{t.Fatalf("old reader: %+v %v",rows,err)}
  if err:=AppendRing(RingDir(dir),[]RingEntry{{Kind:RingReply,Text:"historical writer append"},{Kind:RingTurn,Done:1,DurationMs:11}});err!=nil{t.Fatal(err)}
 }
 `

@@ -745,6 +745,8 @@ type OwnCompactionResult = { compaction: CompactionResult<LeadCompactionDetails>
 const GOAL_LOOP_YIELD_STATUS_KEY = "ws-goal-loop-yield";
 
 export interface RegisterGoalLoopOptions {
+  /** Confirmed hosted identity; the daemon owns only threshold delivery. */
+  isHosted?: () => boolean;
   /**
    * Reads adapter settings at each use (adapter-config.ts). Production passes
    * the ws-mcp reader; omitted means every knob at its default. A
@@ -1494,10 +1496,10 @@ export function registerGoalLoop(
   }
 
   function checkCompactionTriggers(ctx: ExtensionContext, boundary: TriggerBoundary): void | Promise<void> {
-    if (isChildProcess(process.env) || leadCompactingRef.current || preparation) return;
+    if (opts.isHosted?.() || isChildProcess(process.env) || leadCompactingRef.current || preparation) return;
     return thenOrNow(readConfig(COMPACTION_TRIGGER_CONFIG_KEYS), (config) => {
       // Re-checked: an asynchronous read leaves a gap a compaction or another preparation can enter.
-      if (leadCompactingRef.current || preparation) return;
+      if (opts.isHosted?.() || leadCompactingRef.current || preparation) return;
       fireCompactionTriggers(ctx, boundary, config);
     });
   }

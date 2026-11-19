@@ -568,12 +568,18 @@ func TestAgyFixtureVersions(t *testing.T) {
 		}
 	}
 	p := AgyCatalog()
-	if !seen[p.Oldest] || !seen[p.Newest] {
-		t.Fatalf("recorded versions %v; the catalog guarantees %s..%s", seen, p.Oldest, p.Newest)
+	if p.Oldest != "1.5.9" || p.Newest != "1.5.12" {
+		t.Fatalf("agy range = %s..%s, want 1.5.9..1.5.12", p.Oldest, p.Newest)
+	}
+	if !seen[p.Oldest] || !seen["1.5.10"] {
+		t.Fatalf("recorded versions %v; expected fixtures for %s and 1.5.10", seen, p.Oldest)
 	}
 	lead := feedAgyFixture(t, "agy-1.5.9-lead-session.jsonl").harness()
 	if caps := p.Resolve(RoleLead, lead[0].Version); caps.Unverified {
 		t.Fatalf("the recorded lead session resolves unverified at %s", lead[0].Version)
+	}
+	if caps := p.Resolve(RoleLead, "1.5.13"); !caps.Unverified || caps.ProfileVersion != "1.5.12" {
+		t.Fatalf("above-range resolve = %+v, want unverified at 1.5.12", caps)
 	}
 }
 

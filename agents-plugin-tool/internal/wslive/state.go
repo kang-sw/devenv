@@ -89,7 +89,10 @@ type Event struct {
 	// (AgentKindPi); it is a subagent's alone and, once set, stays. The
 	// event type is Kind, under "kind", so the marker has a key of its own.
 	AgentKind string `json:"agentKind,omitempty"`
-	Status    string `json:"status,omitempty"`
+	// Harness is the backend running a daemon-spawned subagent (e.g. "claude",
+	// "pi", "codex", "agy"); absent for native subagents or legacy producers.
+	Harness string `json:"harness,omitempty"`
+	Status  string `json:"status,omitempty"`
 	// ActiveMs is closed-turn work; TurnStartedAt is the current turn's
 	// epoch-millisecond start, or zero when no turn is working. Pi agent
 	// events carry authoritative values, including zero.
@@ -181,7 +184,7 @@ type activityState struct {
 type agentState struct {
 	activityState
 	id, parentID, label, replyID, status string
-	kind                                 string
+	kind, harness                        string
 	startedAt, endedAt, touched          int64
 	activeMs, turnStartedAt              int64
 	model, effort                        string
@@ -608,7 +611,7 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		batches = st.normalizeBatches(ev.Batches)
 	}
 	if ev.AgentID == "" {
-		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" || ev.AgentKind != "" || ev.ActiveMs != 0 || ev.TurnStartedAt != 0 || ev.BackgroundTasks != 0 || hasTelemetry(ev) || ev.Observed != nil {
+		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" || ev.AgentKind != "" || ev.Harness != "" || ev.ActiveMs != 0 || ev.TurnStartedAt != 0 || ev.BackgroundTasks != 0 || hasTelemetry(ev) || ev.Observed != nil {
 			return fmt.Errorf("the lead takes only batches and caption; set agentId for a subagent")
 		}
 		st.setActivity(&st.lead, ev, batches)
@@ -627,6 +630,9 @@ func (st *State) applyAgent(ev Event, at int64) error {
 	a := st.agent(ev.AgentID, at)
 	if ev.AgentKind != "" {
 		a.kind = ev.AgentKind
+	}
+	if h := cleanLine(ev.Harness, 32); h != "" {
+		a.harness = h
 	}
 	if ev.ParentID != "" && ev.ParentID != ev.AgentID && agentIDPattern.MatchString(ev.ParentID) {
 		a.parentID = ev.ParentID
@@ -987,6 +993,7 @@ func (st *State) SeedFinished(prev Snapshot) {
 			label:         cleanLine(st.scrub.scrub(p.Label), LabelRunes),
 			replyID:       p.ReplyID,
 			kind:          knownAgentKind(p.AgentKind),
+			harness:       cleanLine(p.Harness, 32),
 			status:        p.Status,
 			startedAt:     p.StartedAt,
 			endedAt:       p.EndedAt,
@@ -1055,6 +1062,7 @@ func (st *State) Snapshot(now int64) Snapshot {
 			ActiveMs:      a.activeMs,
 			TurnStartedAt: a.turnStartedAt,
 			AgentKind:     a.kind,
+			Harness:       a.harness,
 
 			Observed:      st.observed[a.id].clone(),
 			Model:           a.model,

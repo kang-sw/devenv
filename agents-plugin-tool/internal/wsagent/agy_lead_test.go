@@ -359,7 +359,7 @@ func TestAgyLeadPromptCarriesTheWorkflowManual(t *testing.T) {
 			want := strings.TrimRight(leadKeySentence(key)+leadManualOnly, "\n") + "\n\n" + agyLeadBgShellRule + "\n"
 			if manual != nil {
 				want = leadKeySentence(key) + "The workflow manual below is binding; its session state is as of this session's start. " +
-					"After any compaction, or when you need fresh session state, call the workflow_manual tool with this key and follow it.\n\n" +
+					"After any compaction, or when you need fresh session state, call the workflow_state tool with this key; the manual stays in this prompt.\n\n" +
 					manual.text + "\n\n" + agyLeadBgShellRule + "\n"
 				if calls := manual.list(); len(calls) != 1 || calls[0][0] != BackendAgy || !sameDir(calls[0][1], h.root) || calls[0][2] != key {
 					t.Fatalf("the manual renders once, for agy, the lead's directory, and its key: %v", calls)

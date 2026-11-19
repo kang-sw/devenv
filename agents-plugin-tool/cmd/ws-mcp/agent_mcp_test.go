@@ -14,12 +14,14 @@ import (
 	goruntime "runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/mcp"
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsholder"
+	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
@@ -148,6 +150,195 @@ func TestAgentMCPHostedWorkerKeepsTokenForwarding(t *testing.T) {
 		}
 	default:
 		t.Fatal("hosted worker never called the token route")
+	}
+}
+
+// TestAgentMCPHostedWorkerDescriptorThroughProxy goes through the real
+// proxyHost.Accept token path (with WS_MCP_PI_TOKEN set, so opts.Agents stays
+// nil) and pins:
+//   - an agy worker gets sanitized underscore tool names, alwaysLoad metadata,
+//     full schemas, and its full worker allowlist (not the lead's DirectTools
+//     filter);
+//   - Claude/Codex/Pi workers keep their dotted names and no metadata;
+//   - no worker lists or can invoke call, no worker gets lead session_key
+//     substitution, and agent.* calls still forward over the capability token.
+func TestAgentMCPHostedWorkerDescriptorThroughProxy(t *testing.T) {
+	for _, backend := range []string{wsagent.BackendAgy, wsagent.BackendClaude, wsagent.BackendCodex, wsagent.BackendPi} {
+		t.Run(backend, func(t *testing.T) {
+			cache, configHome, root := t.TempDir(), t.TempDir(), t.TempDir()
+			t.Setenv("WS_CACHE_HOME", cache)
+			t.Setenv("WS_CONFIG_HOME", configHome)
+			dashDir, err := wsdashboard.Dir(cache)
+			if err != nil {
+				t.Fatal(err)
+			}
+			called := make(chan string, 1)
+			route := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called <- r.URL.Path + " " + r.Header.Get("Authorization")
+				_, _ = io.WriteString(w, `{"agents":[]}`)
+			}))
+			defer route.Close()
+
+			key, err := mcp.NewAgentKeyStore().Mint(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rec := wsagent.Record{
+				ReplyID:   wsmailbox.ReplyID(key),
+				WSKey:     key,
+				Root:      root,
+				CreatedAt: time.Now().UTC().Format(time.RFC3339),
+				Backend:   backend,
+				Profile:   wsagent.AgentWorkerProfile(backend),
+				Tier:      "medium",
+				Parent:    &wsagent.ParentRef{Kind: wsagent.ParentLead, ReplyID: "lead0001"},
+			}
+			if err := wsagent.WriteRecordForTest(dashDir, rec); err != nil {
+				t.Fatal(err)
+			}
+
+			holders := wsholder.New(wsholder.Options{Dir: t.TempDir()})
+			defer holders.Close()
+			runner := newAgentRunner(dashDir, io.Discard, nil, holders)
+			defer runner.Close()
+			host := &proxyHost{agents: runner, logw: io.Discard}
+			session, err := host.Accept(wsdashboard.ProxyHello{
+				Mode:        wsdashboard.ProxyModeMCP,
+				Version:     "0.50.8",
+				Cwd:         root,
+				ProjectRoot: root,
+				OwnerPID:    os.Getpid(),
+				Env: map[string]string{
+					"WS_CACHE_HOME":            cache,
+					"WS_CONFIG_HOME":           configHome,
+					wsrsrc.EnvRsrcRoot:         os.Getenv(wsrsrc.EnvRsrcRoot),
+					"WS_MCP_NO_DASHBOARD":      "1",
+					wsagent.EnvAllowedTools:    strings.Join(wsagent.AgentWSTools, ","),
+					wsagent.EnvAgentSessionKey: key,
+					wsagent.EnvPiToken:         "worker-token",
+					wsagent.EnvPiEndpoint:      route.URL,
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := session.(*proxyMCPSession).server
+			defer server.Close()
+
+			rpcCall := func(method string, params any) map[string]any {
+				t.Helper()
+				req, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var out bytes.Buffer
+				if err := server.ServeStdio(context.Background(), bytes.NewReader(append(req, '\n')), &out); err != nil {
+					t.Fatal(err)
+				}
+				var resp map[string]any
+				if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()), &resp); err != nil {
+					t.Fatalf("unmarshal %s response %q: %v", method, out.String(), err)
+				}
+				return resp
+			}
+
+			listResp := rpcCall("tools/list", map[string]any{})
+			result, _ := listResp["result"].(map[string]any)
+			rawTools, _ := result["tools"].([]any)
+			if len(rawTools) != len(wsagent.AgentWSTools) {
+				t.Fatalf("listed %d tools, want %d", len(rawTools), len(wsagent.AgentWSTools))
+			}
+			byName := make(map[string]map[string]any, len(rawTools))
+			for _, item := range rawTools {
+				tool, _ := item.(map[string]any)
+				name, _ := tool["name"].(string)
+				byName[name] = tool
+			}
+			if _, hasCall := byName["call"]; hasCall {
+				t.Fatalf("%s worker must not list call", backend)
+			}
+
+			isAgy := backend == wsagent.BackendAgy
+			for _, canonical := range wsagent.AgentWSTools {
+				wantName := canonical
+				if isAgy {
+					wantName = strings.ReplaceAll(canonical, ".", "_")
+				}
+				tool, ok := byName[wantName]
+				if !ok {
+					t.Fatalf("%s worker missing tool %q (canonical %q)", backend, wantName, canonical)
+				}
+				if isAgy && strings.Contains(canonical, ".") {
+					if _, dotted := byName[canonical]; dotted {
+						t.Fatalf("agy worker still listed dotted name %q", canonical)
+					}
+				}
+				if isAgy {
+					meta, ok := tool["_meta"].(map[string]any)
+					if !ok || meta["antigravity/alwaysLoad"] != true {
+						t.Fatalf("agy worker tool %q missing alwaysLoad meta: %v", wantName, tool["_meta"])
+					}
+				} else if _, hasMeta := tool["_meta"]; hasMeta {
+					t.Fatalf("%s worker tool %q has unexpected _meta: %v", backend, wantName, tool["_meta"])
+				}
+			}
+
+			ticketsName, agentListName, noteQueryName := "tickets.query", "agent.list", "note.query"
+			if isAgy {
+				ticketsName, agentListName, noteQueryName = "tickets_query", "agent_list", "note_query"
+			}
+			schema, _ := byName[ticketsName]["inputSchema"].(map[string]any)
+			props, _ := schema["properties"].(map[string]any)
+			if _, ok := props["session_key"]; !ok {
+				t.Fatalf("%s worker %s missing session_key in inputSchema: %v", backend, ticketsName, schema)
+			}
+			if _, ok := props["ticket_stem"]; !ok {
+				t.Fatalf("%s worker %s missing ticket_stem in inputSchema: %v", backend, ticketsName, schema)
+			}
+
+			// call stays lead-only.
+			callResp := rpcCall("tools/call", map[string]any{
+				"name":      "call",
+				"arguments": map[string]any{"tool": noteQueryName, "arguments": map[string]any{"session_key": key}},
+			})
+			errObj, _ := callResp["error"].(map[string]any)
+			if msg, _ := errObj["message"].(string); !strings.Contains(msg, "not available") {
+				t.Fatalf("%s worker must refuse call: %v", backend, callResp)
+			}
+
+			// agent.list (by alias on agy) still forwards on the capability token.
+			agentResp := rpcCall("tools/call", map[string]any{
+				"name":      agentListName,
+				"arguments": map[string]any{"session_key": key},
+			})
+			if res, _ := agentResp["result"].(map[string]any); res == nil || res["isError"] == true {
+				t.Fatalf("%s worker %s failed: %v", backend, agentListName, agentResp)
+			}
+			select {
+			case got := <-called:
+				if got != "/agents/by-token/agent.list Bearer worker-token" {
+					t.Fatalf("%s worker forwarded request = %q", backend, got)
+				}
+			default:
+				t.Fatalf("%s worker %s did not forward through the token route", backend, agentListName)
+			}
+
+			// Workers still do not get hosted-lead session_key substitution.
+			missingKeyResp := rpcCall("tools/call", map[string]any{
+				"name":      noteQueryName,
+				"arguments": map[string]any{"layer": "machine"},
+			})
+			if res, _ := missingKeyResp["result"].(map[string]any); res == nil || res["isError"] != true {
+				t.Fatalf("%s worker %s without session_key must fail: %v", backend, noteQueryName, missingKeyResp)
+			}
+			withKeyResp := rpcCall("tools/call", map[string]any{
+				"name":      noteQueryName,
+				"arguments": map[string]any{"session_key": key, "layer": "machine"},
+			})
+			if res, _ := withKeyResp["result"].(map[string]any); res == nil || res["isError"] == true {
+				t.Fatalf("%s worker %s with session_key failed: %v", backend, noteQueryName, withKeyResp)
+			}
+		})
 	}
 }
 

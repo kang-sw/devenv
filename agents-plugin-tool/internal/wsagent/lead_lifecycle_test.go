@@ -664,26 +664,28 @@ func TestLeadFailedMailOnlySendRetriesOnce(t *testing.T) {
 	}
 }
 
-// TestPiLeadFailedCommandRetriesOnce: a dashboard command whose send fails
-// (runCommand) stays queued and runs once on a new process, shown once.
-func TestPiLeadFailedCommandRetriesOnce(t *testing.T) {
+// A compact write with unknown outcome is never retried automatically.
+func TestPiLeadFailedCommandNeedsExplicitRetry(t *testing.T) {
 	h := newLeadHarness(t).start()
 	id := h.lead(BackendPi, LeadOptions{}).ID
 	h.holders.failInputs("compact", 1)
 	h.sendCommand(id, "compact", "keep the names")
-	var holder string
-	eventually(t, "the compact command on the retry's process", func() bool {
-		holder = h.record(id).HolderID
-		return holder != "" && len(h.holders.inputs(holder, "compact")) == 1
-	})
-	if n := h.holders.opCount("spawn"); n != 2 {
-		t.Fatalf("one failed start and one retry: %d spawns (%v)", n, h.holders.opList())
+	eventually(t, "failed compact reported", func() bool { return strings.Contains(h.state(id).Error, "compaction:") })
+	c := h.runner.conv(id)
+	c.do(func() {})
+	holder := h.record(id).HolderID
+	if h.holders.opCount("spawn") != 1 || len(h.holders.inputs(holder, "compact")) != 0 {
+		t.Fatal("failed compact was retried")
 	}
+	if len(h.record(id).Queued) != 0 {
+		t.Fatal("failed compact stayed queued")
+	}
+	h.sendCommand(id, "compact", "keep the names")
+	eventually(t, "explicit retry", func() bool { return len(h.holders.inputs(holder, "compact")) == 1 })
 	h.holders.out(holder, `{"type":"response","command":"compact","success":true}`)
 	h.idle(id)
-	ring := h.ring(id)
-	if got := ringTexts(ring, wslive.RingUser); !slices.Equal(got, []string{"/compact keep the names"}) || ringKinds(ring, wslive.RingTurn) != 1 || h.state(id).Held != 0 {
-		t.Fatalf("the command shows once, in one turn: users %q, state %+v", got, h.state(id))
+	if h.holders.opCount("spawn") != 1 {
+		t.Fatal("explicit retry restarted the harness")
 	}
 }
 

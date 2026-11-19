@@ -157,11 +157,40 @@ func TestWhiteboardEffectsPinnedOldDiskReader(t *testing.T) {
 	if err := wslive.AppendRing(dir, []wslive.RingEntry{{Kind: wslive.RingUser, Text: "legacy"}, effect, {Kind: wslive.RingReply, Text: "reply"}}); err != nil {
 		t.Fatal(err)
 	}
+	// Unpinned writers emit per-entry .json files (T0): pinned old reader reads all 3.
 	old, err := oldring.ReadRing(dir)
 	if err != nil || len(old) != 3 {
-		t.Fatalf("old reader: %+v %v", old, err)
+		t.Fatalf("old reader on unpinned ring: %+v %v", old, err)
 	}
 	if old[0].Text != "legacy" || old[1].Kind != effect.Kind || old[1].Text != effect.Text || old[1].Caption != effect.Caption || old[2].Text != "reply" {
-		t.Fatalf("old reader lost history: %+v", old)
+		t.Fatalf("old reader mangled unpinned ring: %+v", old)
 	}
+
+	// Pinned hosted writers emit append-only .jsonl segments (T1): the pinned old
+	// reader ignores .jsonl segments without error and preserves them while
+	// writing legacy .json entries; the new reader merges both cleanly.
+	t.Run("pinned-segment-T1", func(t *testing.T) {
+		segDir := t.TempDir()
+		unpin := wslive.PinRing(segDir)
+		if err := wslive.AppendRing(segDir, []wslive.RingEntry{{Kind: wslive.RingUser, Text: "legacy"}, effect, {Kind: wslive.RingReply, Text: "reply"}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := unpin(); err != nil {
+			t.Fatal(err)
+		}
+		oldSeg, err := oldring.ReadRing(segDir)
+		if err != nil || len(oldSeg) != 0 {
+			t.Fatalf("old reader on segments: %+v %v", oldSeg, err)
+		}
+		if err := oldring.AppendRing(segDir, []oldring.RingEntry{{Kind: oldring.RingUser, Text: "old-writer"}}); err != nil {
+			t.Fatal(err)
+		}
+		merged, err := wslive.ReadRing(segDir)
+		if err != nil || len(merged) != 4 {
+			t.Fatalf("new reader after old append: %+v %v", merged, err)
+		}
+		if merged[0].Text != "legacy" || merged[1].Kind != effect.Kind || merged[1].Text != effect.Text || merged[1].Caption != effect.Caption || merged[2].Text != "reply" || merged[3].Text != "old-writer" {
+			t.Fatalf("merged ring lost history: %+v", merged)
+		}
+	})
 }

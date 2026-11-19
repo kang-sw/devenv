@@ -14,6 +14,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 // agent_tools.go is the agent.* tool family's runner side: agent.spawn,
@@ -870,7 +871,9 @@ func (r *Runner) forget(id string) {
 	if !ok {
 		return
 	}
-	if err := os.RemoveAll(wsdashboard.SessionDir(r.opts.Dir, id)); err != nil {
+	sessionDir := wsdashboard.SessionDir(r.opts.Dir, id)
+	wslive.DropRing(wslive.RingDir(sessionDir))
+	if err := os.RemoveAll(sessionDir); err != nil {
 		fmt.Fprintf(r.opts.Log, "agent %s: delete: %v\n", id, err)
 	}
 	r.notify(id, rec.Root)

@@ -25,10 +25,10 @@ func SpawnAgentEvent(st State, key string) wslive.Event {
 	}
 	label := st.Label
 	if label == "" {
-		label = "Pi subagent " + st.ID
+		label = "subagent " + st.ID
 	}
 	ev := wslive.Event{Kind: wslive.KindAgent, AgentID: "pi:" + st.ID,
-		AgentKind: wslive.AgentKindPi, Label: label, Status: status,
+		AgentKind: wslive.AgentKindPi, Harness: st.Backend, Label: label, Status: status,
 		Model: st.Model, Effort: st.Effort, Observed: st.Observed, SessionKey: key,
 		ContextTokens: st.ContextTokens, OutputTps: st.OutputTps,
 		ActiveMs: st.ActiveMs}

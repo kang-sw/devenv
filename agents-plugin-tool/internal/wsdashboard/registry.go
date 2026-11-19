@@ -14,6 +14,7 @@ import (
 
 	"github.com/gofrs/flock"
 
+	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
@@ -389,7 +390,8 @@ func PruneRegistrations(dir string, now time.Time, retention time.Duration) int 
 		if now.Sub(last) <= retention {
 			continue
 		}
-		if os.RemoveAll(SessionDir(dir, entry.Name())) == nil {
+		wslive.DropRing(wslive.RingDir(sessionDir))
+		if os.RemoveAll(sessionDir) == nil {
 			pruned++
 		}
 	}

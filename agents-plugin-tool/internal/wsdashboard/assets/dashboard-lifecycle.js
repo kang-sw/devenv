@@ -605,7 +605,10 @@
   function shScroll(ent) {
     var y = Math.max(0, ent.y || 0);
     shTop.style.transform = y ? "translateY(" + -y + "px)" : "";
-    if (shBody) shBody.style.marginTop = y ? -Math.min(y, shTop.offsetHeight + 10) + "px" : "";
+    // The rail no longer sits under the header: docked it runs the full
+    // height beside it (the framed page's placeholder stays sticky at 12px),
+    // and overlaid it is fixed, so it never moves with the page.
+    if (shBody) shBody.style.marginTop = "";
   }
   function shSearch() {
     if (!shOn) return;

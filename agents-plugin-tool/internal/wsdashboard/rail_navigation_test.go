@@ -27,8 +27,19 @@ func TestRailHomeButtonLocalized(t *testing.T) {
 			if !strings.Contains(html, button) || !strings.Contains(html, `id="l-house"`) {
 				t.Errorf("%s %s lacks the translated Home button or its existing house sprite", lang.Code, path)
 			}
-			if !strings.Contains(html, `href="#i-gear"/></svg></button>`+button+`<button type="button" class="usage-toggle"`) {
-				t.Errorf("%s %s: Home is not immediately between Settings and usage", lang.Code, path)
+			// The footer is Settings then Home, and nothing else: plan usage
+			// moved to the header's center cluster.
+			if !strings.Contains(html, `href="#i-gear"/></svg></button>`+button+`</div>`) {
+				t.Errorf("%s %s: the rail footer is not exactly Settings then Home", lang.Code, path)
+			}
+			top := html[strings.Index(html, `<div class="top`):]
+			top = top[:strings.Index(top, `<div class="dbody">`)]
+			if !strings.Contains(top, `<span class="tcen"><button type="button" class="usage-toggle"`) || !strings.Contains(top, `<span class="talert" id="talert" hidden></span></span>`) {
+				t.Errorf("%s %s: the header lacks the center cluster (plan usage and the empty alert slot)", lang.Code, path)
+			}
+			foot := html[strings.Index(html, `<div class="rfoot">`):]
+			if foot = foot[:strings.Index(foot, `</div>`)]; strings.Contains(foot, `usage-toggle`) || strings.Index(foot, `id="gear"`) < 0 {
+				t.Errorf("%s %s: the rail footer is not Settings and Home alone: %s", lang.Code, path, foot)
 			}
 		}
 	}
