@@ -227,12 +227,17 @@ func claudeArgs(spec StartSpec) ([]string, error) {
 }
 
 // claudeAllowedRules are the permission rules the child runs without a
-// prompt: the profile's tool entries, its ws tools, and every tool of its
+// prompt: the profile's tool entries, its ws tools (restricted to
+// ChildSafeWSTools when launched at PermissionReadOnly), and every tool of its
 // own MCP servers. dontAsk denies everything else.
 func claudeAllowedRules(spec StartSpec) []string {
 	rules := append([]string{}, spec.Profile.Tools...)
 	if spec.WSMCP != nil {
-		for _, name := range spec.Profile.WSTools {
+		wsTools := spec.Profile.WSTools
+		if spec.PermissionLevel == PermissionReadOnly {
+			wsTools = childSafeWSToolsFor(spec.Profile)
+		}
+		for _, name := range wsTools {
 			rules = append(rules, claudeMCPToolName(ReservedMCPServer, name))
 		}
 	}
