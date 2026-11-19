@@ -141,6 +141,25 @@
   // the popover's error line and keeps it open.
   function rpLeadMake() {
     var P = { gen: 0, busy: false, root: "", harness: "claude", iso: "default" };
+    var settingsKey = "ws.dashboard.newSession", saved = {}, picks = Object.create(null);
+    function readSettings() {
+      try {
+        var v = JSON.parse(localStorage.getItem(settingsKey));
+        return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+      } catch (_) { return {}; }
+    }
+    function pick(k) {
+      var v = picks[k];
+      return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+    }
+    function showPick(k) {
+      var v = pick(k), models = leadModels(k), efforts = leadEfforts(k);
+      rows.set(k, { model: models.indexOf(v.model) >= 0 ? v.model : "", effort: efforts.indexOf(v.effort) >= 0 ? v.effort : "", mode: v.mode });
+      P.iso = v.iso === "isolated" ? "isolated" : "default";
+    }
+    function currentPick() {
+      return { model: rows.model.disabled ? "" : rows.model.value, mode: rows.mode.disabled ? "" : rows.mode.value, effort: rows.effort.disabled ? "" : rows.effort.value, iso: P.iso };
+    }
     var el = P.el = rpPop(wsT("js.lead.title"));
     el.appendChild(mk("div", "sphd", wsT("js.lead.title")));
     var loc = el.appendChild(mk("div", "sploc"));
@@ -192,12 +211,12 @@
       Object.keys(hbtn).forEach(function (k) {
         var h = supHarness(k);
         hbtn[k].setAttribute("aria-checked", String(P.harness === k));
-        hbtn[k].disabled = off(k);
+        hbtn[k].disabled = P.loading || off(k);
         hbtn[k].title = off(k) ? wsT("js.sup.unavail", k, h && h.error || "") : "";
       });
       Object.keys(ibtn).forEach(function (k) { ibtn[k].setAttribute("aria-checked", String(P.iso === k)); });
       idesc.textContent = wsT(P.iso === "isolated" ? "js.lead.iso.isolated.hint" : "js.lead.iso.default.hint") + (P.harness === "pi" ? " " + wsT("js.lead.iso.pi") : "");
-      start.disabled = P.busy || off(P.harness);
+      start.disabled = P.busy || P.loading || off(P.harness);
     }
     // edited drops an earlier spawn's error once the form changed.
     function edited() {
@@ -208,15 +227,16 @@
     }
     function setHarness(k) {
       if (P.harness === k) return;
+      picks[P.harness] = currentPick();
       P.harness = k;
-      rows.set(k, { model: "", effort: "", mode: "" });
+      showPick(k);
       edited();
     }
     function submit() {
       sync();
       if (start.disabled) return;
       notifAsk();
-      var gen = P.gen;
+      var gen = P.gen, chosenHarness = P.harness, chosen = currentPick();
       P.busy = true;
       setErr("");
       status.textContent = wsT("js.lead.starting");
@@ -226,6 +246,10 @@
         status.textContent = "";
         sync();
         if (st === 201 && v.id) {
+          var stored = readSettings(), byHarness = stored.harnesses;
+          if (!byHarness || typeof byHarness !== "object" || Array.isArray(byHarness)) byHarness = {};
+          byHarness[chosenHarness] = chosen;
+          try { localStorage.setItem(settingsKey, JSON.stringify({ harness: chosenHarness, harnesses: byHarness })); } catch (_) { /* storage may be unavailable */ }
           if (rpLive(P, gen)) railPopClose(false);
           railOpen(false);
           saveDraft();
@@ -249,8 +273,14 @@
       var gen = ++P.gen, name = btn.getAttribute("data-name") || label, branch = btn.getAttribute("data-branch") || "";
       P.busy = false;
       P.root = key;
+      saved = readSettings();
+      picks = Object.create(null);
+      if (saved.harnesses && typeof saved.harnesses === "object" && !Array.isArray(saved.harnesses)) {
+        Object.keys(saved.harnesses).forEach(function (k) { picks[k] = saved.harnesses[k]; });
+      }
       P.harness = "claude";
       P.iso = "default";
+      P.loading = true;
       loc.textContent = "";
       loc.appendChild(gIcon(branch ? "repo" : "wsfolder"));
       loc.appendChild(mk("span", null, name));
@@ -263,11 +293,10 @@
       sync();
       leadChoices(function () {
         if (!rpLive(P, gen)) return;
-        // Keep the current pick when available, otherwise the first available lead.
-        var previous = P.harness;
+        P.loading = false;
+        P.harness = typeof saved.harness === "string" ? saved.harness : "claude";
         harnessButtons();
-        var same = previous === P.harness;
-        rows.set(P.harness, { model: same ? rows.model.value : "", effort: same ? rows.effort.value : "", mode: same ? rows.mode.value : "" });
+        showPick(P.harness);
         sync();
         railPopPlace();
       });
