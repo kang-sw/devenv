@@ -526,6 +526,33 @@ resolution, and for command expansion into the body without a
 `wsflow-mirroring.md`; a recorded hosted turn (Claude without plugins) showing
 a slash command from the dashboard list expanded into its body.
 
+Dogfood additions (owner (160)=a, 2026-11-19). The Phase 1 Forward live check
+ran on a hosted Claude lead (daemon `dcc8dc31e`): the `ws` server is exposed
+(79 tools as `mcp__ws__*`) and the key fill works. It surfaced these defects,
+which this phase also fixes:
+
+1. The hosted render names tools `wsflow/<tool>` and skills `wsflow:lead-*`,
+   but the hosted server is `ws` and the session has no skills. The hosted
+   render uses the connection's server name for tool references and the
+   playbook route (command expansion or `playbook.read`) instead of skill
+   names.
+2. The manual arrives twice: in the appended system prompt and again from a
+   `workflow_manual` call (about 25 KB), with different harness wording (the
+   prompt copy is Claude-specific, with a "Claude delegate spawn" section and
+   "the Explore agent"; the tool copy is generic). One source; a hosted
+   session is not told to fetch what its prompt already carries.
+3. Text points at tools a hosted Claude lead does not have: the native Agent
+   tool (removed there) and the user-preferences `pi.*` workers (hidden;
+   `agent.*` replaces them). The hosted render steers to `agent.*`.
+4. The rendered manual duplicates the tier phrase: "a `wsflow/agent.spawn`
+   subagent at tier small with read-only authority at the tier the question
+   needs".
+
+The injection path stays harness-neutral (descriptor-driven, no harness-name
+branch in common code), so a hosted agy lead receives the same expansion and
+render; tests cover an agy lead alongside Claude. Codex is out of scope until
+its hosted adapter lands.
+
 ### Phase 3: Per-turn ambient injection replacing plugin hooks
 
 The daemon injects the per-turn ambient context that plugin hooks supply today,
