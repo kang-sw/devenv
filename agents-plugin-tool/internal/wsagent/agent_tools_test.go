@@ -813,7 +813,9 @@ func TestSpawnedWorkerContextNamesDirectParentReturnAddress(t *testing.T) {
 			t.Fatal(err)
 		}
 		text := string(raw)
-		if !strings.Contains(text, "direct parent's mailbox reply address is `"+want+"`") || !strings.Contains(text, "`mailbox.send`") {
+		if strings.Count(text, "direct parent's mailbox reply address is") != 1 ||
+			!strings.Contains(text, "direct parent's mailbox reply address is `"+want+"`") ||
+			!strings.Contains(text, "`mailbox.send`") || strings.Contains(text, "@worktree") {
 			t.Fatalf("worker %d instructions do not name direct parent %q: %q", i, want, text)
 		}
 		if i == 1 && strings.Contains(text, "direct parent's mailbox reply address is `id:"+leadParent.ReplyID+"`") {
