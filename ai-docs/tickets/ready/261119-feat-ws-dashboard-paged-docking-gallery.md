@@ -497,6 +497,35 @@ Verification:
   page removal; live captures of two-pane and four-pane layouts compared with
   mockup v4.
 
+### Result (375611aa7) - 2026-11-20
+
+Landed (`2f5ad6185..375611aa7`):
+
+- Five-zone drop over a pane on the shown page through `WsGallery.zone` / `place`: an edge splits, the
+  center swaps (offered only to an already docked pane), previewed by one `.gal-overlay` over the
+  viewport (`239b67f6b`). Phase 1's interim "drop on the shown page appends" is gone; a rail dot drop
+  still appends.
+- Split dividers `.gal-div` (role=separator, aria-valuenow, focusable): pointer drag, arrow keys
+  (±0.05), double-click reset, all through `setRatio` (clamped 0.1..0.9) and persisted.
+- `buildGallery` fills each element only after it is attached, so an edge split, a collapse, or a first
+  dock moves panes with `moveBefore` and frames never reload.
+
+Verification:
+
+- `node --test testdata/gallery-*.test.cjs`: 47/47 (gallery.js unchanged; `gallery-tree.test.cjs`
+  already covers split, swap, move, remove, collapse, normalize, ratio clamping, ordinals).
+- `TestBoardGallery` (node DOM): edge split from another page, center swap, divider keys and reset.
+- `go test ./internal/wsdashboard -run TestGalleryBrowser` (Playwright, `fe1672529`): 3 consecutive
+  passes — zone previews, all four edge drops and the center swap, moves within and across pages, a
+  four-pane page, divider drag/clamp/keys/reset kept across reload, unpinning one pane collapsing its
+  split, last-pane page removal, and no remount (frame handles kept, zero iframe loads; the check fails
+  with `moveBefore` disabled).
+- `go test ./internal/wsdashboard/ -count=1`: ok (314s); `./internal/wswhiteboard/...`: ok (187s). The
+  15 browser suites failing under the Playwright env fail identically at the Phase 1 tip.
+- Captures (`ai-docs/assets/captures/261119-gallery-phase2/`): compared live wide two-pane, four-pane,
+  and right-zone preview vs mockup v4: match; deliberate differences (one viewport overlay, the 6px gap
+  is the divider) are in that folder's README.
+
 ### Phase 3: Spring-loaded hover and boundary bounce-snap
 
 Scope, with the exact mockup v4 constants:
