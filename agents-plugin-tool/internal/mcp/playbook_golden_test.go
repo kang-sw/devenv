@@ -757,6 +757,12 @@ func TestPlaybookRenderGoldenTicketWorker(t *testing.T) {
 					if strings.Contains(body, "{{.") {
 						t.Errorf("rendered body has unsubstituted variables:\n%s", body)
 					}
+					if strings.Contains(body, "/workflow_manual(") {
+						t.Errorf("rendered worker requires unavailable workflow_manual")
+					}
+					if tc.name == "ticket-worker-elevated" && !strings.Contains(body, "/config.resolve_agent(") {
+						t.Errorf("rendered elevated worker missing config.resolve_agent route")
+					}
 					key := extractSplicedKey(t, body)
 					entry, ok := s.sessions.lookup(key)
 					if !ok {

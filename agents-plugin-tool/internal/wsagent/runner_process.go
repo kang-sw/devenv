@@ -829,7 +829,7 @@ func composeInstructions(dir string, rec Record, p Profile, system, steer string
 		parts = append(parts, strings.TrimSpace(string(raw)))
 	}
 	if len(p.WSTools) > 0 {
-		key := fmt.Sprintf("Your ws session key is `%s`. Pass it as the `session_key` argument of every ws tool call.", rec.WSKey)
+		key := fmt.Sprintf("Your ws session key is `%s`. Pass it as the `session_key` argument of every ws tool call. This key is bound to worktree `%s`; if work moves to another worktree, use a key minted for that destination (from a direct spawn there or a legitimate acquisition that returns one), because this key is never rebound.", rec.WSKey, rec.Root)
 		if rec.Parent != nil {
 			key += fmt.Sprintf(" Your direct parent's mailbox reply address is `id:%s`; send it reports or questions with `mailbox.send`.", rec.Parent.ReplyID)
 		}

@@ -200,6 +200,11 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 		s.dashboardReconnect()
 	}()
 	scanner := bufio.NewScanner(in)
+	// path.write carries complete reviewer artifacts in one MCP request. Keep
+	// Scanner's small initial allocation and remove its artificial token ceiling;
+	// the local MCP transport must not disconnect merely because a report is
+	// larger than a presentation surface.
+	scanner.Buffer(nil, int(^uint(0)>>1))
 	encoder := json.NewEncoder(out)
 	var writeMu sync.Mutex
 	var wg sync.WaitGroup

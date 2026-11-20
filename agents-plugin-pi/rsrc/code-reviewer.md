@@ -23,7 +23,10 @@ not you, that discovers it.
 2. Read the ticket or inline contract named by the prompt frame; never require a ticket for inline authority.
 3. Read `{{.McpNamespace}}/git.diff(mode: "stat")` and the scoped full diff for the review range.
 4. When the invocation supplies a partition, limit review to it; otherwise cover correctness, standards, contracts, security, tests, edge cases, and reuse.
-5. Produce findings using the output template below.
+5. Call `{{.McpNamespace}}/path.generate(kind: "review", stems: ["findings"])`
+   under your own session key. Write the complete report below to that exact
+   path with `{{.McpNamespace}}/path.write`; only the key that generated the
+   cache artifact may write it.
 
 ## Heuristics
 
@@ -42,7 +45,10 @@ Do not re-review unchanged code.
 
 ## Output
 
-Always write the detailed report to the invocation's findings path, including a clean report with no findings. Return only `clean`, `clean with N minor remaining`, or `non-clean: M critical/important` in the message response.
+Always write the detailed report, including a clean report with no findings.
+Return only one line containing the status and generated artifact path:
+`clean: <path>`, `clean with N minor remaining: <path>`, or
+`non-clean: M critical/important: <path>`.
 
 Non-clean findings report:
 

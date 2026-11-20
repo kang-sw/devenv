@@ -1129,6 +1129,18 @@ func tools() []map[string]any {
 			},
 		},
 		{
+			"name":        "path.write",
+			"description": "Write a workflow artifact only when this session key previously minted that exact cache path through path.generate. Repository paths, another session's paths, and generated plan or clone paths are refused.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":    stringProperty("Exact absolute cache-artifact path returned by this session's path.generate call."),
+					"content": stringProperty("Complete artifact content to write."),
+				},
+				"required": []string{"path", "content"},
+			},
+		},
+		{
 			"name":        "workflow_manual",
 			"description": "Render and restore the ws workflow primitives manual and session state for a lead session_key. An unresolvable key returns a fail-loud notice and never mints a new key. Lead-only.",
 			"inputSchema": map[string]any{
@@ -1219,7 +1231,7 @@ func toolSchemaRequiresSessionKey(name string) bool {
 		"review.marker", "review.stamp",
 		"worktree.acquire", "worktree.release", "worktree.remove", "worktree.list",
 		"tickets.query", "tickets.close", "tickets.move", "tickets.create_empty", "tickets.sage_gate", "tickets.sage_stamp", "tickets.verify",
-		"tickets.acquire", "tickets.release", "tickets.index_init", "path.generate", "playbook.render":
+		"tickets.acquire", "tickets.release", "tickets.index_init", "path.generate", "path.write", "playbook.render":
 		return true
 	default:
 		if entry, ok := configKeyEntryForTool(name); ok {
