@@ -1,24 +1,22 @@
 diff --git a/agents-plugin-wsflow/rsrc/whiteboard/whiteboard.md b/agents-plugin-wsflow/rsrc/whiteboard/whiteboard.md
-index 22404515d..c5b78e7d0 100644
+index 22404515d..e2a236276 100644
 --- a/agents-plugin-wsflow/rsrc/whiteboard/whiteboard.md
 +++ b/agents-plugin-wsflow/rsrc/whiteboard/whiteboard.md
 @@ -7 +7,2 @@ kind: print
 -The whiteboard is the context a top-level lead shares with its user.
 +The whiteboard is the context a top-level lead shares with its user, served
 +live by the daemon.
-@@ -42,0 +44,3 @@ The whiteboard is the context a top-level lead shares with its user.
-+- A URL-valued `full:` result is the board's copyable page address. Any
-+  non-URL `full:` value is a status to surface; do not copy it as an address,
-+  derive a board stem from it, or synthesize a URL.
+@@ -42,0 +44,2 @@ The whiteboard is the context a top-level lead shares with its user.
++- `full:` is the board page's URL, or a short note saying the page is not
++  served yet.
 diff --git a/agents-plugin/rsrc/whiteboard/whiteboard.md b/agents-plugin/rsrc/whiteboard/whiteboard.md
-index 22404515d..c5b78e7d0 100644
+index 22404515d..e2a236276 100644
 --- a/agents-plugin/rsrc/whiteboard/whiteboard.md
 +++ b/agents-plugin/rsrc/whiteboard/whiteboard.md
 @@ -7 +7,2 @@ kind: print
 -The whiteboard is the context a top-level lead shares with its user.
 +The whiteboard is the context a top-level lead shares with its user, served
 +live by the daemon.
-@@ -42,0 +44,3 @@ The whiteboard is the context a top-level lead shares with its user.
-+- A URL-valued `full:` result is the board's copyable page address. Any
-+  non-URL `full:` value is a status to surface; do not copy it as an address,
-+  derive a board stem from it, or synthesize a URL.
+@@ -42,0 +44,2 @@ The whiteboard is the context a top-level lead shares with its user.
++- `full:` is the board page's URL, or a short note saying the page is not
++  served yet.
