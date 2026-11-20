@@ -990,7 +990,7 @@
   function placeShownMore() { Array.prototype.forEach.call(document.querySelectorAll('.tk .irow:hover, .tk .irow:focus-within, .tk .irow.sel'), placeMore); }
   var lastPointer = 'mouse', lastInput = 'pointer'; // the focused row is restored after a re-render only for keyboard use
 
-  var QUICK = { confirm: 1, unassign: 1, accept: 1, ihide: 1, chide: 1, comment: 1, claim: 1, unopen: 1, approve: 1, unrequest: 1, uncc: 1 };
+  var QUICK = { confirm: 1, unassign: 1, accept: 1, ihide: 1, chide: 1, comment: 1, claim: 1, unopen: 1, approve: 1, unrequest: 1, uncc: 1, 'uncc-org': 1 };
   // the item menu's steps an action button opens (in the menu, or a menu anchored to the button)
   var STEPS = { note: 1, handoff: 1, assign: 1, pri: 1, due: 1, labels: 1, move: 1, opening: 1, request: 1, wrap: 1, cc: 1 };
 
