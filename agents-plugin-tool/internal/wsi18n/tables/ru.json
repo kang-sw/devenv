@@ -30,6 +30,7 @@
   "js.usage.age": "значение {0} мин назад",
   "js.usage.unavailable": "использование недоступно",
   "js.usage.signinrequired": "требуется вход",
+  "js.usage.pending": "Проверка использования…",
   "js.usage.disabled": "отключено",
   "js.usage.no5h": "нет 5-часового окна",
   "js.usage.noweekly": "нет недельного окна",

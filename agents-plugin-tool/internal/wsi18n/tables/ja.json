@@ -30,6 +30,7 @@
   "js.usage.age": "{0}分前の値",
   "js.usage.unavailable": "使用量を取得できません",
   "js.usage.signinrequired": "サインインが必要",
+  "js.usage.pending": "使用状況を確認中…",
   "js.usage.disabled": "無効",
   "js.usage.no5h": "5時間枠なし",
   "js.usage.noweekly": "週間枠なし",

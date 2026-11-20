@@ -30,6 +30,7 @@
   "js.usage.age": "{0}분 전 값",
   "js.usage.unavailable": "사용량을 확인할 수 없음",
   "js.usage.signinrequired": "로그인 필요",
+  "js.usage.pending": "사용량 확인 중…",
   "js.usage.disabled": "비활성",
   "js.usage.no5h": "5시간 한도 없음",
   "js.usage.noweekly": "주간 한도 없음",

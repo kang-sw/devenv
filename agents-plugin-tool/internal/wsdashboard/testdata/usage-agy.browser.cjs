@@ -68,6 +68,16 @@ const payload = {
     ],
   },
 };
+const pendingPayload = {
+  warnPercent: 80,
+  critPercent: 95,
+  entries: [
+    payload.entries[0],
+    payload.entries[1],
+    { harness: 'agy', group: 'gemini', label: 'Gemini Models', pending: true, windows: [] },
+    { harness: 'agy', group: 'claude_gpt', label: 'Claude and GPT models', pending: true, windows: [] },
+  ],
+};
 
 (async () => {
   fs.mkdirSync(output, { recursive: true });
@@ -90,9 +100,10 @@ const payload = {
         window.wsT = (key, ...args) => (enTable[key] || key).replace(/\{(\d+)\}/g, (m, i) => i < args.length ? String(args[i]) : m);
         window.wsTn = key => key;
         window.WebSocket = undefined;
+        window.__usagePayload = payload;
         window.fetch = url => {
           if (!String(url).startsWith('/rail/usage')) throw new Error('Unexpected fetch: ' + url);
-          return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) });
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(window.__usagePayload) });
         };
       }, { at, payload, enTable });
       for (const content of scripts) await page.addScriptTag({ content });
@@ -149,6 +160,32 @@ const payload = {
       assert.equal(narrowLayout.overflow, false, `${theme}: percent rows stay inside their cards`);
       assert.ok(narrowLayout.pageWidth <= narrowLayout.viewportWidth, `${theme}: no horizontal page scroll`);
       await pop.screenshot({ path: path.join(output, `agy-popover-narrow-${theme}.png`) });
+
+      // A just-started daemon has no agy cache yet. The response still carries
+      // the known groups as pending so both chart rows reserve their final size.
+      await page.setViewportSize({ width: 1280, height: 2200 });
+      await page.evaluate(pending => {
+        window.__usagePayload = pending;
+        document.dispatchEvent(new Event('visibilitychange'));
+      }, pendingPayload);
+      await pop.locator('.usage-pending-card').first().waitFor();
+      assert.equal(await pop.locator('.usage-pending-card').count(), 4);
+      assert.equal(await pop.locator('.usage-pending-card .spin').count(), 4);
+      assert.equal(await page.locator('.usage-harness').count(), 2, `${theme}: pending agy groups omitted from header`);
+      const pendingLabels = await pop.locator('.usage-pending-card').evaluateAll(cards => cards.map(card => card.getAttribute('aria-label')));
+      assert.deepEqual(pendingLabels, Array(4).fill('Checking usage…'));
+      await pop.screenshot({ path: path.join(output, `agy-pending-wide-${theme}.png`) });
+
+      await page.setViewportSize({ width: 420, height: 2200 });
+      await page.evaluate(() => window.dispatchEvent(new Event('resize')));
+      const pendingNarrow = await pop.evaluate(el => ({
+        width: el.getBoundingClientRect().width,
+        pageWidth: document.documentElement.scrollWidth,
+        viewportWidth: window.innerWidth,
+      }));
+      assert.ok(pendingNarrow.width <= 404, `${theme}: pending narrow popover width ${pendingNarrow.width}`);
+      assert.ok(pendingNarrow.pageWidth <= pendingNarrow.viewportWidth, `${theme}: pending has no horizontal page scroll`);
+      await pop.screenshot({ path: path.join(output, `agy-pending-narrow-${theme}.png`) });
 
       assert.deepEqual(requests, [], `${theme}: no network requests`);
       assert.deepEqual(errors, [], `${theme}: runtime errors`);

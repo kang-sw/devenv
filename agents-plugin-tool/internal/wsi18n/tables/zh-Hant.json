@@ -30,6 +30,7 @@
   "js.usage.age": "{0}分鐘前的值",
   "js.usage.unavailable": "用量無法取得",
   "js.usage.signinrequired": "需要登入",
+  "js.usage.pending": "正在檢查用量…",
   "js.usage.disabled": "已停用",
   "js.usage.no5h": "無 5 小時視窗",
   "js.usage.noweekly": "無每週視窗",

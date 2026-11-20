@@ -611,6 +611,43 @@ test('agy sign-in required status localizes and D15 32s cache-only follow-up cle
   assert.equal(env.calls.length, callsAfterClose);
 });
 
+test('agy pending groups reserve both chart slots and are replaced by probe data', async () => {
+  const at = Date.UTC(2026, 10, 19, 12, 0), env = environment(at, 'en');
+  const pending = [
+    { harness: 'agy', group: 'gemini', label: 'Gemini Models', pending: true, windows: [] },
+    { harness: 'agy', group: 'claude_gpt', label: 'Claude and GPT models', pending: true, windows: [] }
+  ];
+  env.set({ entries: pending });
+  const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
+  assert.equal(groups(env.button).length, 0);
+  assert.equal(env.button.textContent, 'Plan usage');
+
+  const pop = mounted.makePopover(() => {}, () => {}); pop.open(); await flush();
+  assert.equal(nodes(pop.el, '.usage-vendor-bracket')[0].textContent, 'Antigravity· 2 model groups');
+  const placeholders = nodes(pop.el, '.usage-pending-card');
+  assert.equal(placeholders.length, 4);
+  assert.deepEqual(placeholders.map(card => card.attributes['data-kind']), ['five_hour', 'seven_day', 'five_hour', 'seven_day']);
+  assert.ok(placeholders.every(card => card.attributes['aria-label'] === 'Checking usage…' && card.attributes['aria-busy'] === 'true'));
+  assert.equal(nodes(pop.el, '.spin').length, 4);
+
+  const usageWindow = (kind, percent) => ({ kind, percent, asOf: at, resetsAt: at + 3600000 });
+  env.set({ entries: [
+    { harness: 'agy', group: 'gemini', label: 'Gemini Models', asOf: at, windows: [usageWindow('five_hour', 30), usageWindow('seven_day', 40)] },
+    { harness: 'agy', group: 'claude_gpt', label: 'Claude and GPT models', asOf: at, windows: [usageWindow('five_hour', 50), usageWindow('seven_day', 60)] }
+  ] });
+  const early = env.timers.find(timer => timer.live && timer.ms === 2000);
+  assert.ok(early, '2s cache-only follow-up scheduled');
+  early.fn(); await flush();
+  assert.equal(nodes(pop.el, '.usage-pending-card').length, 0);
+  assert.equal(nodes(pop.el, '.usage-window-card').length, 4);
+  assert.deepEqual(nodes(pop.el, '.usage-number').map(node => node.textContent), ['30%', '40%', '50%', '60%']);
+
+  const dashboardCss = fs.readFileSync(__dirname + '/assets/dashboard.css', 'utf8');
+  assert.match(dashboardCss, /:root\[data-animation-paused\][^{]*\.spin/);
+  assert.match(dashboardCss, /@media \(prefers-reduced-motion: reduce\) \{ \.spin[^}]*animation: none/);
+  pop.close();
+});
+
 test('popover and gutter follow fixed vendor order with adjacent agy groups regardless of utilization', async () => {
   const at = Date.UTC(2026, 10, 19, 12, 0), reset = at + 3 * 3600000, env = environment(at);
   env.set({

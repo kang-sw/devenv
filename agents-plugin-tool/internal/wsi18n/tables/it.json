@@ -30,6 +30,7 @@
   "js.usage.age": "valore di {0} min fa",
   "js.usage.unavailable": "utilizzo non disponibile",
   "js.usage.signinrequired": "accesso richiesto",
+  "js.usage.pending": "Verifica dell’utilizzo…",
   "js.usage.disabled": "disattivato",
   "js.usage.no5h": "nessuna finestra di 5 ore",
   "js.usage.noweekly": "nessuna finestra settimanale",

@@ -156,6 +156,20 @@ func (s *planUsageStore) agyEntriesLocked(now int64) []planUsageEntry {
 		}
 		return out
 	}
+	if s.agyProbing {
+		out := make([]planUsageEntry, 0, 2)
+		for _, key := range []string{"gemini", "claude_gpt"} {
+			spec := agyGroupByKey[key]
+			out = append(out, planUsageEntry{
+				Harness: "agy",
+				Group:   spec.key,
+				Label:   spec.label,
+				Pending: true,
+				Windows: []planUsageWindow{},
+			})
+		}
+		return out
+	}
 	if s.agyProbed {
 		status := s.agyStatus
 		if status == "" {
