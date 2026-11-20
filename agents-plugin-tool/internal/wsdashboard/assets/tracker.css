@@ -22,6 +22,10 @@
   --tk-agent: #6a4fc4; --tk-on-agent: #ffffff; --tk-agent-ink: #6a4fc4;
   --tk-conc: #e9a100; --tk-on-conc: #1b1d21;              /* concurrent-write markers */
   --tk-topic: #2c3038; --tk-on-topic: #ffffff;            /* admin chip */
+  --tk-blu-bg: #e7f0fe; --tk-blu: #2563eb; --tk-blu-fg: #1d4ed8;
+  --tk-amb-bg: #fef3d9; --tk-amb: #b45309;
+  --tk-grn-bg: #e4f6ec; --tk-grn: #1d7348;
+  --tk-pur-bg: #efe9fd; --tk-pur: #6d40d8; --tk-pur-fg: #5b21b6;
   --tk-toast-fail: #ffb4b8;
   --tk-backdrop: rgb(0 0 0 / .28);
 }
@@ -34,6 +38,10 @@
     --tk-agent: #3d2f6b; --tk-on-agent: #ddd3fb; --tk-agent-ink: #b9a6f5;
     --tk-conc: #d1a239; --tk-on-conc: #1b1d21;
     --tk-topic: #d9dbe0; --tk-on-topic: #1b1d21;
+    --tk-blu-bg: #1f3550; --tk-blu: #5b9bf0; --tk-blu-fg: #cfe0fb;
+    --tk-amb-bg: #4a3a1c; --tk-amb: #e0a84a;
+    --tk-grn-bg: #1e3b2e; --tk-grn: #6cc39a;
+    --tk-pur-bg: #33264d; --tk-pur: #a57bf0; --tk-pur-fg: #ddd3fb;
     --tk-toast-fail: #b0202a;
     --tk-backdrop: rgb(0 0 0 / .5);
   }
@@ -46,6 +54,10 @@
   --tk-agent: #3d2f6b; --tk-on-agent: #ddd3fb; --tk-agent-ink: #b9a6f5;
   --tk-conc: #d1a239; --tk-on-conc: #1b1d21;
   --tk-topic: #d9dbe0; --tk-on-topic: #1b1d21;
+  --tk-blu-bg: #1f3550; --tk-blu: #5b9bf0; --tk-blu-fg: #cfe0fb;
+  --tk-amb-bg: #4a3a1c; --tk-amb: #e0a84a;
+  --tk-grn-bg: #1e3b2e; --tk-grn: #6cc39a;
+  --tk-pur-bg: #33264d; --tk-pur: #a57bf0; --tk-pur-fg: #ddd3fb;
   --tk-toast-fail: #b0202a;
   --tk-backdrop: rgb(0 0 0 / .5);
 }
@@ -521,21 +533,49 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .tg-head .tcn:focus-visible { outline: 1.5px solid var(--wb-primary); }
 .tk .tg > .muted { margin: 2px 4px 6px; font-size: 12px; }
 
-/* team tree */
-.tk .tree, .tk .tree ul { list-style: none; margin: 0; padding: 0; }
-.tk .tree ul { margin-left: 12px; padding-left: 8px; border-left: 2px solid var(--wb-muted); }
-.tk .tree .node { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; padding: 2px 0; }
-.tk .tree .node.me { background: color-mix(in srgb, var(--wb-primary) 9%, var(--wb-card)); border-radius: 6px; padding-left: 4px; }
-.tk .tree .nm { font-weight: 600; }
-.tk .tree .node .av { margin-left: 0; }
+/* team org chart: indented tree with elbow connectors, two-line rows, and unplaced group */
+.tk .chip.sm { height: 17px; font-size: 10.5px; padding: 0 6px; }
+.tk .btn.tk-org-edit { background: var(--tk-blu-bg); color: var(--tk-blu-fg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tk-blu) 55%, transparent); padding: 1px 9px; }
+.tk .btn.tk-org-edit:hover { background: color-mix(in srgb, var(--tk-blu-bg) 70%, var(--tk-blu) 30%); }
+.tk .btn.tk-org-edit .i { width: 13px; height: 13px; }
+.tk .tk-org, .tk .tk-org ul { list-style: none; margin: 0; padding: 0; }
+.tk .tk-org ul { margin-left: 9px; }
+.tk .tk-org li { position: relative; }
+.tk .tk-org ul > li { padding-left: 14px; }
+.tk .tk-org ul > li::before { content: ""; position: absolute; left: 0; top: 0; width: 11px; height: 13px; border-left: 1.5px solid var(--wb-line); border-bottom: 1.5px solid var(--wb-line); border-bottom-left-radius: 5px; }
+.tk .tk-org ul > li:not(:last-child)::after { content: ""; position: absolute; left: 0; top: 13px; bottom: 0; border-left: 1.5px solid var(--wb-line); }
+.tk .tk-org-nd { display: grid; grid-template-columns: 16px 20px 1fr auto; column-gap: 5px; align-items: center; padding: 2px 2px 2px 0; border-radius: 6px; }
+.tk .tk-org-nd:hover { background: color-mix(in srgb, var(--wb-primary) 5%, var(--wb-card)); }
+.tk .tk-org-nd.me { background: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-card)); }
+.tk .tk-org-nd .av { margin-left: 0; }
+.tk .tk-org-tg { width: 16px; height: 16px; border: 0; background: none; color: var(--wb-muted-fg); cursor: pointer; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; }
+.tk .tk-org-tg:hover { color: var(--wb-fg); }
+.tk .tk-org-tg:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.tk .tk-org-tg svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; transition: transform .12s; }
+.tk .tk-org li.shut > .tk-org-nd .tk-org-tg svg { transform: rotate(-90deg); }
+.tk .tk-org li.shut > ul { display: none; }
+.tk .tk-org-l1 { display: flex; align-items: center; gap: 5px; min-width: 0; flex-wrap: wrap; }
+.tk .tk-org-l1 .nm { font-weight: 600; }
+.tk .tk-org-l2 { grid-column: 3 / 5; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: -1px; }
+.tk .tk-org-l2 code { font-family: var(--wb-mono); font-size: 10.5px; }
+.tk .tk-org-l2 .unit { color: color-mix(in srgb, var(--wb-fg) 84%, var(--wb-muted-fg)); font-weight: 600; }
+.tk .tk-org-rt { display: flex; align-items: center; gap: 2px; }
+.tk .tk-org-rt .ia { width: 24px; height: 20px; }
+.tk .tk-org-cnt { font-size: 10.5px; font-weight: 700; color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px var(--wb-line); border-radius: 999px; padding: 1px 6px; white-space: nowrap; }
+.tk .tk-org li.shut > .tk-org-nd .tk-org-cnt { color: var(--tk-blu); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tk-blu) 60%, transparent); }
 /* the org is a muted prefix where a person is named; it is not part of the display name */
 .tk .org { color: var(--wb-muted-fg); font-weight: 400; font-size: .92em; }
-.tk .tree .nid { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); }
-.tk .tree .node .grow { flex: 1 1 0; }
-.tk .tree .mdetails { margin: 2px 0 4px 26px; padding: 4px 8px; border-left: 2px solid var(--wb-line); display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
-.tk .tree .kline { display: flex; align-items: center; gap: 6px; max-width: 100%; }
-.tk .tree .kline code { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tk .tree .kline.rev code { text-decoration: line-through; }
+.tk .tk-org .mdetails, .tk .tk-unas .mdetails { margin: 2px 0 4px 41px; padding: 4px 8px; border-left: 2px solid var(--wb-line); display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.tk .tk-unas .mdetails { margin-left: 25px; }
+.tk .tk-org .kline, .tk .tk-unas .kline { display: flex; align-items: center; gap: 6px; max-width: 100%; }
+.tk .tk-org .kline code, .tk .tk-unas .kline code { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk .tk-org .kline.rev code, .tk .tk-unas .kline.rev code { text-decoration: line-through; }
+.tk .tk-unas { margin-top: 10px; border: 1px dashed color-mix(in srgb, var(--tk-amb) 55%, transparent); border-radius: 8px; padding: 4px 6px 6px; background: color-mix(in srgb, var(--tk-amb-bg) 35%, var(--wb-card)); }
+.tk .tk-unas h4 { margin: 0 0 3px; font-size: 11.5px; font-weight: 800; color: var(--tk-amb); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tk .tk-unas h4 span { font-weight: 500; color: var(--wb-muted-fg); }
+.tk .tk-unas .tk-org-nd { grid-template-columns: 0 20px 1fr auto; }
+.tk .tk-org-gone { margin: 8px 0 0; }
+.tk .card .toolbar.tk-org-tb { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid var(--wb-muted); }
 
 /* store settings (Team tab) */
 .tk .tkset { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--wb-line); }

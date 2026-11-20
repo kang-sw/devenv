@@ -261,6 +261,60 @@
     if (isCJKName(pr)) return g.slice(0, 2).join('');
     return (f.length ? g.slice(0, 1).concat(f.slice(0, 1)) : g.slice(0, 2)).join('').toUpperCase();
   }
+  // Derive the org forest from a members map (and an optional id -> leadId|'' override map):
+  // returns nested tree roots ({ id, depth, count, children }), unplaced live members (no live
+  // lead and no live followers), removed members, unreachable live members (e.g. cycles),
+  // plus lookup maps (parentOf, depthOf, countOf). Shared by cardTeam, the org editor, and pickers.
+  function orgTree(members, leadsOverride) {
+    var M = members || {}, ids = Object.keys(M), hasOv = !!leadsOverride;
+    function live(id) { return !!(id && M[id] && !M[id].removed); }
+    var parentOf = {}, kids = {}, removed = [], liveIds = [];
+    ids.forEach(function (id) {
+      if (!live(id)) { removed.push(id); return; }
+      liveIds.push(id);
+      kids[id] = [];
+    });
+    liveIds.forEach(function (id) {
+      var m = M[id], raw;
+      if (hasOv && Object.prototype.hasOwnProperty.call(leadsOverride, id)) raw = leadsOverride[id] || '';
+      else raw = m.leads && m.leads.length ? m.leads[0] : '';
+      parentOf[id] = live(raw) ? raw : '';
+    });
+    liveIds.forEach(function (id) {
+      var m = M[id];
+      if (!hasOv && Array.isArray(m.children)) {
+        m.children.forEach(function (cid) {
+          if (live(cid) && parentOf[cid] === id && kids[id].indexOf(cid) < 0) kids[id].push(cid);
+        });
+      }
+    });
+    liveIds.forEach(function (id) {
+      var p = parentOf[id];
+      if (p && kids[p].indexOf(id) < 0) kids[p].push(id);
+    });
+    var seen = {}, depthOf = {}, countOf = {};
+    function build(id, depth) {
+      seen[id] = true;
+      depthOf[id] = depth;
+      var ch = [], total = 0;
+      kids[id].forEach(function (cid) {
+        if (seen[cid]) { ch.push({ id: cid, depth: depth + 1, count: 0, children: [], cycle: true }); return; }
+        var sub = build(cid, depth + 1);
+        ch.push(sub);
+        total += 1 + sub.count;
+      });
+      countOf[id] = total;
+      return { id: id, depth: depth, count: total, children: ch, cycle: false };
+    }
+    var roots = [], unplaced = [];
+    liveIds.forEach(function (id) {
+      if (parentOf[id]) return;
+      if (kids[id].length) roots.push(build(id, 0));
+      else { seen[id] = true; depthOf[id] = 0; countOf[id] = 0; unplaced.push(id); }
+    });
+    var unreachable = liveIds.filter(function (id) { return !seen[id]; });
+    return { roots: roots, unplaced: unplaced, removed: removed, unreachable: unreachable, parentOf: parentOf, depthOf: depthOf, countOf: countOf };
+  }
   // Live, doing or blocked, and no status write for this many days: "stale" (the
   // view state carries the flag; the number is for the text).
   var STALE_DAYS = 3;
@@ -331,6 +385,7 @@
     wfold: {},            // "store|item id" -> true | false: a node of the item window's subtree open or folded (page lifetime; absent: the default)
     focus: null,          // { ev: event id, flash: true until its first paint } the item window scrolls to and marks; null: nothing
     mdet: {},             // "store|member id" -> true: the member's key and profile details are expanded in the org card (page lifetime)
+    ofold: {},            // "store|member id" -> true: the member's subtree is collapsed in the org card (page lifetime)
     sel: null,            // the row selected by a tap: it shows the same actions and details a hover shows
     msel: {},             // store -> { ids: { item id: true }, at: anchor row key } while the Items list is in selection mode (see mselClick)
     nrow: {},             // store -> { val, kind } while the Items list shows its "+ New" input row
