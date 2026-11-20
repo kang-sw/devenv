@@ -272,9 +272,9 @@ func TestCodexWorkerModeAndStartRefusals(t *testing.T) {
 	// Every refusal comes before any process: Command is not a program.
 	b := CodexBackend{Command: filepath.Join(t.TempDir(), "no-such-codex")}
 	for name, spec := range map[string]StartSpec{
-		"worker without authority": {Root: t.TempDir(), MCPSession: &MCPSession{}},
-		"lead without holder":      {Root: t.TempDir(), Lead: &LeadSpec{}},
-		"worker with holder":       {Root: t.TempDir(), Holder: &holderChild{}, PermissionLevel: PermissionReadOnly},
+		"worker without authority":      {Root: t.TempDir(), MCPSession: &MCPSession{}},
+		"lead without holder":           {Root: t.TempDir(), Lead: &LeadSpec{}},
+		"held worker without MCP route": {Root: t.TempDir(), Holder: &holderChild{}, PermissionLevel: PermissionReadOnly},
 	} {
 		if _, err := b.Start(context.Background(), spec); err == nil || !strings.Contains(err.Error(), "codex backend:") {
 			t.Errorf("%s: %v", name, err)

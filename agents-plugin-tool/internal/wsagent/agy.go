@@ -148,9 +148,6 @@ func (b AgyBackend) Start(ctx context.Context, spec StartSpec) (Process, error) 
 	if spec.Lead != nil && spec.Holder == nil {
 		return nil, errors.New("agy backend: a hosted lead requires a session holder")
 	}
-	if spec.Lead == nil && spec.Holder != nil {
-		return nil, errors.New("agy backend: workers are not holder-held")
-	}
 	attach := spec.Holder != nil && spec.Holder.id != ""
 	if !attach && spec.MCPSession == nil {
 		return nil, errors.New("agy backend: agy reaches ws tools only over the daemon's HTTP MCP route, and none is available; no process was started without ws tools")

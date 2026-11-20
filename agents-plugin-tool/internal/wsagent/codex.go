@@ -75,9 +75,6 @@ func (b CodexBackend) Start(_ context.Context, spec StartSpec) (Process, error) 
 	if spec.Lead != nil && spec.Holder == nil {
 		return nil, errors.New("codex backend: a hosted lead requires a session holder")
 	}
-	if spec.Lead == nil && spec.Holder != nil {
-		return nil, errors.New("codex backend: workers are not holder-held")
-	}
 	attach := spec.Holder != nil && spec.Holder.id != ""
 	if !attach && spec.MCPSession == nil {
 		return nil, errors.New("codex backend: the daemon's HTTP MCP route is required; no session was started without ws tools")
@@ -119,7 +116,7 @@ func (b CodexBackend) Start(_ context.Context, spec StartSpec) (Process, error) 
 	}
 	holder, pid, _ := stream.HolderInfo()
 	if p.worker && cmd.Process != nil {
-		// A worker has no holder: its MCP hello names the child itself.
+		// A direct worker's MCP hello names the child itself.
 		pid = cmd.Process.Pid
 	}
 	if session := spec.MCPSession; session != nil && session.Started != nil {
