@@ -9,10 +9,9 @@ type planUsageActivityHost interface {
 	PlanUsageActivity()
 }
 
-// signalPlanUsageActivity reports a user-started lead call when the detected
-// harness's backend descriptor opts in. Hosted sessions return from
-// dashboardTouch before reaching this method and use their settled-turn feed.
-func (s *Server) signalPlanUsageActivity() {
+// planUsageActivityEnabled reports whether the detected harness's backend
+// descriptor opts user-started lead calls into the plan-usage activity feed.
+func (s *Server) planUsageActivityEnabled() bool {
 	s.planUsageActivityOnce.Do(func() {
 		harness := s.currentHarness()
 		if harness == "" {
@@ -27,9 +26,13 @@ func (s *Server) signalPlanUsageActivity() {
 			}
 		}
 	})
-	if !s.planUsageActivity {
-		return
-	}
+	return s.planUsageActivity
+}
+
+// signalPlanUsageActivity hands an admitted user-started lead call to the
+// optional daemon host. dashboardTouch excludes hosted sessions first; they
+// use their settled-turn feed instead.
+func (s *Server) signalPlanUsageActivity() {
 	if host, ok := s.live.host.(planUsageActivityHost); ok {
 		host.PlanUsageActivity()
 	}

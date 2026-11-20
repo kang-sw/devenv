@@ -28,9 +28,11 @@ func TestUserStartedAgyActivity(t *testing.T) {
 	for _, tc := range []struct {
 		name, harness string
 		host, hosted  bool
+		noManifest    bool
 		want          int32
 	}{
 		{name: "agy", harness: wsagent.BackendAgy, host: true, want: 1},
+		{name: "agy without dashboard manifest", harness: wsagent.BackendAgy, host: true, noManifest: true, want: 1},
 		{name: "codex", harness: wsagent.BackendCodex, host: true},
 		{name: "claude", harness: wsagent.BackendClaude, host: true},
 		{name: "pi", harness: wsagent.BackendPi, host: true},
@@ -42,6 +44,9 @@ func TestUserStartedAgyActivity(t *testing.T) {
 			t.Cleanup(s.Close)
 			s.agentBackendSource = runner
 			s.sessionHarness = tc.harness
+			if tc.noManifest {
+				s.declared = declaredConfig{}
+			}
 			probe := &planUsageActivityProbe{}
 			if tc.host {
 				s.live.host = probe
