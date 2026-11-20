@@ -1,5 +1,6 @@
 ---
 title: "리뷰 스윕 1120: agy watchdog·TPS·사용량 결함 수정"
+completed: 2026-11-20
 ---
 
 # Review sweep 1120: agy watchdog, output-rate, and plan-usage fixes
@@ -47,3 +48,8 @@ partitions; fit was clean).
 - Verification: `go test ./internal/wsagent ./internal/wsdashboard` green;
   re-run the range review over the original base with the fix commits in the
   head.
+
+
+## Resolution (2026-11-20)
+
+All five findings fixed and merged in 049d3eecd (commits 28555458f, f91e597e0, 112028587, 93721cb5). Owner (1840)=a added agy.model_wait_retries (default 3) with an exactly-once exhaustion diagnostic. Re-review d7122760..112028587 concern (one Important, fixed by 93721cb5); 9b5bd0b81..93721cb5 pass.
