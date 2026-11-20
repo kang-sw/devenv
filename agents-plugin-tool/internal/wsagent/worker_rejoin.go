@@ -31,7 +31,8 @@ func (c *conv) restoreWorkerMCP() {
 	}
 	session := c.r.attachMCP(rec.ReplyID, rec.MCPToken, rec.MCPEnv, rec.workDir(), rec.HostPID)
 	if session != nil {
-		session.Started(environ(), rec.HostPID)
+		session.Started(c.workerMCPEnv, rec.HostPID)
+		c.workerMCPEnv = nil
 	}
 }
 

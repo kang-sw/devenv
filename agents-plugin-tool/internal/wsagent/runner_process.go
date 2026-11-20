@@ -191,6 +191,11 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 			spec.Holder.id, spec.Holder.skipTo = rec.HolderID, rec.HolderSeq
 		}
 	}
+	if attach && c.r.opts.Backends[rec.Backend].WorkerHTTPMCP {
+		// Let the backend reconstruct its filtered harness environment, but
+		// do not register a bearer before checkReattach validates ownership.
+		spec.MCPSession = &MCPSession{Started: func(env []string, _ int) { c.workerMCPEnv = env }}
+	}
 	if rec.Backend == BackendPi && !attach {
 		// Persist exactly the definition checked above and passed to Start,
 		// after retiring the previous process. Reattachment keeps this copy.

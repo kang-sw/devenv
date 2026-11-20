@@ -205,7 +205,9 @@ type conv struct {
 	mcpRestarted map[string]bool
 	// mcpStale is a rejoined process whose ws-mcp route (Record.MCPURL)
 	// this daemon does not serve; it restarts at the first idle point.
-	mcpStale      bool
+	mcpStale bool
+	// Backend-filtered hello environment captured at attach, before token restore.
+	workerMCPEnv  []string
 	mcpChecking   bool
 	mcpAgain      bool
 	mcpAgainNames []string
