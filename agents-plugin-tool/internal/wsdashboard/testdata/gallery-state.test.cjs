@@ -131,6 +131,37 @@ test('dock appends a page before + and shows it; undock drops an emptied page', 
   assert.equal(G.position(g, true), -1);
 });
 
+test('undock of the last page while + shows leaves nothing shown; narrow stays home', () => {
+  let g = G.activate(G.dock(G.empty(), 'c:a'), 1, false);
+  assert.equal(g.active, G.PLUS);
+  g = G.undock(g, 'c:a');
+  assert.deepEqual(g.pages, []);
+  assert.equal(g.active, null);
+  assert.equal(G.position(g, true), -1);
+  assert.equal(G.position(g, false), 0); // + is position 0 with no pages
+});
+
+test('reconcile with zero pages leaves nothing shown, + included', () => {
+  let g = G.reconcile({ active: '+', pages: [] }, []);
+  assert.deepEqual(g.pages, []);
+  assert.equal(g.active, null);
+  assert.equal(G.position(g, true), -1);
+  g = G.reconcile({ active: '+', pages: [{ id: 'p1', root: { card: 'x' } }, { id: 'p2', root: { axis: 'row', ratio: 0.5, a: { topic: 'y' }, b: { card: 'z' } } }] }, []);
+  assert.deepEqual(g.pages, []);
+  assert.equal(g.active, null);
+  assert.equal(G.position(g, true), -1);
+  // + stays when a page remains.
+  g = G.reconcile({ active: '+', pages: [{ id: 'p1', root: { card: 'x' } }] }, [{ ref: 'c:x', p: 1 }]);
+  assert.equal(g.active, G.PLUS);
+  assert.equal(G.position(g, true), 1);
+});
+
+test('narrow position on + with zero pages is home', () => {
+  const g = { v: 1, rev: 0, active: G.PLUS, pages: [] };
+  assert.equal(G.position(g, true), -1);
+  assert.equal(G.position(g, false), 0);
+});
+
 test('undock keeps the shown page when another page empties', () => {
   let g = G.dock(G.dock(G.dock(G.empty(), 'c:a'), 'c:b'), 'c:c');
   g = G.activate(g, 2, false);

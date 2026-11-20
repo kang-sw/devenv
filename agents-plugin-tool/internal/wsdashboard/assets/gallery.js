@@ -140,7 +140,9 @@
     return p;
   }
   // pull takes ref off its page; a page left empty goes, and the shown
-  // page moves to the one that took its index (or the last one).
+  // page moves to the one that took its index (or the last one). With no
+  // page left nothing is shown (null), + included: a + kept over zero
+  // pages would stand the narrow view off its Main Board.
   function pull(g, ref) {
     var i = pageOf(g, ref);
     if (i < 0) return;
@@ -148,7 +150,8 @@
     if (root) { g.pages[i] = { id: g.pages[i].id, root: root }; return; }
     var gone = g.pages[i].id;
     g.pages.splice(i, 1);
-    if (g.active === gone) g.active = g.pages.length ? g.pages[Math.min(i, g.pages.length - 1)].id : null;
+    if (!g.pages.length) g.active = null;
+    else if (g.active === gone) g.active = g.pages[Math.min(i, g.pages.length - 1)].id;
   }
   // dock puts ref on a new page before + and shows it (the pin button, a
   // drop on +).
@@ -227,11 +230,12 @@
 
   // --- where the view stands -----------------------------------------------
   // A position is -1 for Page 0 (narrow only), 0..N-1 for the docked pages,
-  // and N for +.
+  // and N for +. The narrow view with no docked page is at home even on +:
+  // its rail is hidden at rest, so a + there could only hide the board.
   function minPos(narrow) { return narrow ? -1 : 0; }
   function position(g, narrow) {
     var n = g.pages.length;
-    if (g.active === PLUS) return n;
+    if (g.active === PLUS) return narrow && !n ? -1 : n;
     var i = g.active === null ? -1 : pageIndex(g, g.active);
     if (i >= 0) return i;
     return narrow ? -1 : n ? 0 : n;
@@ -283,6 +287,7 @@
     Object.keys(want).filter(function (r) { return !have[r]; }).sort(function (a, b) { return want[a] - want[b] || (a < b ? -1 : a > b ? 1 : 0); }).forEach(function (r) {
       newPage(g, leaf(r));
     });
+    if (!g.pages.length) g.active = null;
     return g;
   }
   // flatPins reads a stored card record's flat pins: cards[].pinned and

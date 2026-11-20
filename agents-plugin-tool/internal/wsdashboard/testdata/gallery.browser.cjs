@@ -937,6 +937,112 @@ async function routeTerminal(context) {
       await context.close();
     }
 
+    // ---- Phase 3 (wide 2400): a docked explorer's list is the scroller ----
+    // The gate reads the nearest scrolling ancestor of the wheel's target
+    // within the pane, not the card's body: the explorer's own list scrolls
+    // natively, and only its end pulls toward +.
+    {
+      const context = await browser.newContext({ viewport: { width: 2400, height: 1000 }, locale: 'en-US', reducedMotion: 'no-preference' });
+      await seed(context, 'livesession', { cards: [{ id: 'gx', kind: 'explorer', pinned: 1, data: {} }], topics: [],
+        gallery: { v: 1, active: 'p1', pages: [{ id: 'p1', root: { card: 'gx' } }], rev: 1 } });
+      const { tab, page, errors } = await open(context, 'livesession');
+      await until(async () => JSON.stringify(await pages(page)) === '[["gx"]]', 'the explorer docked on page 1');
+      await page.evaluate(helpers3);
+      assert.equal(await pos(page), 0);
+      const list = '#bgal .gal-pane[data-ref="c:gx"] .fdirectory';
+      const fill = await until(() => page.evaluate(s => {
+        const d = document.querySelector(s), b = d && d.closest('.bc-body');
+        return d && d.querySelectorAll('.fentry').length >= 100 && d.scrollHeight - d.clientHeight > 300 ? { body: b.scrollHeight - b.clientHeight, view: d.getAttribute('data-view') } : null;
+      }, list), 'the docked explorer lists the project past its height', 15000);
+      assert(fill.body <= 2, 'the card body itself does not overflow: ' + JSON.stringify(fill));
+      const off = async () => { const b = await tab.locator('iframe.sframe.on').boundingBox(); return { x: b.x, y: b.y }; };
+      const spot = async (sel, avoid) => { const o = await off(); const p = await page.evaluate(spotIn, [sel, avoid]); assert(p, 'no wheel spot on ' + sel); return { x: o.x + p.x, y: o.y + p.y }; };
+      const wheel = async (at, dy, n = 1, gap = 0) => { await tab.mouse.move(at.x, at.y); for (let i = 0; i < n; i++) { if (i && gap) await sleep(gap); await tab.mouse.wheel(0, dy); } await page.evaluate(() => window.__gal.frames()); };
+      const pill = () => page.evaluate(() => window.__gal3.pill());
+      const listTop = w => page.evaluate(([s, w]) => { const d = document.querySelector(s); if (w !== undefined) d.scrollTop = w === 'end' ? d.scrollHeight : w; return { top: d.scrollTop, max: d.scrollHeight - d.clientHeight }; }, [list, w]);
+      await listTop(0);
+      await page.evaluate(() => window.__gal.frames());
+      const listAt = await spot(list, '.gal-rail, .gal-pullpill, .fdetail-head');
+
+      // Mid-list: the wheel scrolls the list, no pull, no flip.
+      await wheel(listAt, 100, 4, 30);
+      assert.equal(await pill(), null, 'the explorer\'s list scrolls natively: no pull');
+      assert.equal(await pos(page), 0, 'no flip while the list scrolls');
+      await until(async () => (await listTop()).top > 0, 'the list scrolled by the wheel');
+      await sleep(G_INERTIA + 80);
+      // The top of the first page: only the damped edge micro-bounce.
+      await listTop(0);
+      await wheel(listAt, -125);
+      let pl = await pill();
+      assert.deepEqual([pl.side, pl.damped, pl.fill, pl.text], ['top', true, '0%', '↑ No page in this direction'], 'the list\'s top on the first page: the damped edge pill');
+      await sleep(G_MICRO + 80);
+      assert.equal(await pill(), null);
+      // The list's end: the gate engages at the pane's boundary as before.
+      const end = await listTop('end');
+      assert(end.top >= end.max - 2, 'the list stands at its end: ' + JSON.stringify(end));
+      await sleep(G_INERTIA + 80);
+      await wheel(listAt, 100);
+      pl = await pill();
+      assert.deepEqual([pl.side, pl.damped, pl.fill, pl.target, pl.text], ['bottom', false, '31%', [1], '↓ + (31%)'], 'the list\'s end pulls toward +');
+      await wheel(listAt, 100, 3, 30);
+      assert.equal(await pos(page), 1, 'the list\'s end flips to +');
+      done.push('a docked explorer\'s list scrolls natively with the wheel; its end pulls and flips (nearest scrolling ancestor)');
+      assert.deepEqual(errors, [], 'no page errors (explorer gate)');
+      await context.close();
+    }
+
+    // ---- narrow 1400: the last page gone while + shows keeps the board ----
+    // With no page left nothing is shown (+ included), so a later board
+    // drag never stands the Main Board off the view.
+    for (const how of ['reconcile', 'undock']) {
+      const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, locale: 'en-US', reducedMotion: 'reduce' });
+      // reconcile: alpha's flat pin is gone (an older build cleared it), so
+      // the stored page reconciles away on load while + is stored shown.
+      await seed(context, 'livesession', { cards: [], topics: how === 'undock' ? [{ n: 'alpha', p: 1, a: 0, b: 0 }] : [],
+        gallery: { v: 1, active: '+', pages: [{ id: 'p1', root: { topic: 'alpha' } }], rev: 1 } });
+      const { tab, page, errors } = await open(context, 'livesession');
+      if (how === 'undock') {
+        await until(async () => JSON.stringify(await pages(page)) === '[["alpha"]]', 'alpha docked');
+        assert.equal(await pos(page), 1, '+ shows');
+        // alpha's page stands off the view (inert): its pin button is
+        // pressed from script, as a closing card undocks itself.
+        await bar(page, 'alpha').locator('.tpin').evaluate(b => b.click());
+      }
+      await until(async () => JSON.stringify(await pages(page)) === '[]' && await topic(page, 'alpha').evaluate(n => n.parentNode.id) === 'r-board', 'no docked page left (' + how + ')');
+      await page.evaluate(() => window.__gal.frames());
+      const rest = await page.evaluate(() => ({ active: (window.__gal.rec().gallery || {}).active || null, hidden: document.getElementById('bgal').hidden, away: document.documentElement.hasAttribute('data-gal-away') }));
+      assert.deepEqual(rest, { active: null, hidden: true, away: false }, 'nothing shown, the board at home (' + how + ')');
+      // Below the middle of the open topic after beta: beta moves after
+      // it, so the drop line shows. The board stands with beta near its
+      // top, that topic's lower half in view.
+      await page.evaluate(() => { const b = document.getElementById('bcol'); b.scrollTop += document.querySelector('section.topic[data-topic="beta"]').getBoundingClientRect().top - b.getBoundingClientRect().top - 40; });
+      await page.evaluate(() => window.__gal.frames());
+      let target = null;
+      const during = await drag(tab, await grip(bar(page, 'beta')), async () => target, async () => {
+        await until(() => page.locator('#bgal').isVisible(), 'rail on drag start');
+        const o = await tab.locator('iframe.sframe.on').boundingBox();
+        const p = await page.evaluate(() => {
+          let n = document.querySelector('section.topic[data-topic="beta"]').nextElementSibling;
+          while (n && !(n.matches('section.topic[data-topic]') && !n.classList.contains('closed'))) n = n.nextElementSibling;
+          const r = n.getBoundingClientRect(), y = Math.min(r.top + r.height * 0.75, innerHeight - 80);
+          return y > r.top + r.height / 2 ? { x: r.left + r.width / 2, y } : null;
+        });
+        assert(p, 'the next topic\'s lower half in view');
+        target = { x: o.x + p.x, y: o.y + p.y };
+        await tab.mouse.move(target.x, target.y, { steps: 4 });
+        await page.evaluate(() => window.__gal.frames());
+        return page.evaluate(async () => ({ dots: window.__gal.dots(), pos: window.__gal.pos(), away: document.documentElement.hasAttribute('data-gal-away'), inert: document.getElementById('r-board').inert,
+          seen: (await window.__gal.seen([document.querySelector('section.topic[data-topic="beta"]')]))[0], line: !!document.querySelector('.bdrop:not([hidden])') }));
+      });
+      assert.deepEqual(during, { dots: ['⌂*', '+'], pos: -1, away: false, inert: false, seen: true, line: true }, 'a board drag keeps the Main Board shown, its drop line drawn (' + how + ')');
+      await page.evaluate(() => window.__gal.frames());
+      const after = await page.evaluate(() => ({ away: document.documentElement.hasAttribute('data-gal-away'), hidden: document.getElementById('bgal').hidden, pages: window.__gal.pages().length }));
+      assert.deepEqual(after, { away: false, hidden: true, pages: 0 }, 'the drop stays on the board (' + how + ')');
+      done.push('narrow: the last page gone while + shows (' + how + '); a board drag keeps the Main Board shown');
+      assert.deepEqual(errors, [], 'no page errors (zero pages on +, ' + how + ')');
+      await context.close();
+    }
+
     // ---- Phase 3 (touch narrow): touch scrolling never charges ----
     {
       const context = await browser.newContext({ viewport: { width: 420, height: 860 }, hasTouch: true, isMobile: true, locale: 'en-US', reducedMotion: 'no-preference' });

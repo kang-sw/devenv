@@ -73,8 +73,10 @@ Frame identity sentinel for %s.</wb:body><wb:panel recap="%s panel">Panel payloa
 // narrow Main Board's top and rendered bottom (inert with no docked page),
 // the damped micro-bounce at the first page's top and +'s bottom, the
 // refractory lock and the idle spring-back, terminals and frames never
-// charging it, touch scrolling never charging it, and the wheel handler's
-// cost. The
+// charging it, touch scrolling never charging it, a docked explorer's
+// own list scrolling natively before its end pulls, the narrow board
+// drag kept on the board after the last page went while + showed, and
+// the wheel handler's cost. The
 // terminal capability is synthetic (no shell starts); the terminal list
 // and socket are routed in the browser.
 func TestGalleryBrowser(t *testing.T) {
@@ -90,6 +92,13 @@ func TestGalleryBrowser(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("WS_MCP_DASHBOARD_DEV_SOURCE", "")
 	f := startPageFixture(t, func(o *DaemonOptions) { o.Holders = &stateFilterTerminalHost{newFakeHolders()} })
+	// The project's files fill a docked explorer's list past its height, so
+	// the wheel over it scrolls natively before the gate engages.
+	for i := 0; i < 120; i++ {
+		if err := os.WriteFile(filepath.Join(f.project, fmt.Sprintf("file%03d.txt", i)), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	writeSnapshot(t, f.dir, "livesession", &wslive.Snapshot{SchemaVersion: 1, Adapter: "pi", UpdatedAt: time.Now().UnixMilli(), HeartbeatMs: 3600000,
 		Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseIdle}}})
 	update, ok := wslive.NewWhiteboardEffects([]wswhiteboard.Effect{{Kind: "log", Topic: "beta", EntryID: "e1", Field: "text", After: "beta update card marker"}})

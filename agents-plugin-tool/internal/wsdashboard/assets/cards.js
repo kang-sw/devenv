@@ -987,37 +987,60 @@
   var gate = new G.Gate(), gateT = 0, pullEl = null, pullDot = null, pills = null, homeEl = null, homeScr = null;
   var gateIn = { dy: 0, now: 0, canUp: false, canDown: false, prev: null, next: null }, nb = null, nbOf = null, nbNarrow = null;
   // OWN is what takes its own wheel events: a terminal, a frame, a canvas
-  // or media, a maximized sheet, and the bodies of terminal, web and
-  // preview cards. NEAR adds the panes' scrollers (a docked topic's body,
-  // a card's body), so one closest() finds either.
-  var OWN = '.xterm, .tm-host, iframe, canvas, video, embed, object, [data-max], [data-max] *, .bcard:is([data-kind="terminal"], [data-kind="web"], [data-kind="preview"]) > .bc-in > .bc-body';
-  var NEAR = OWN + ", .gal-pbody, .bc-body";
+  // or media, a maximized sheet, and the bodies of terminal and web cards
+  // (a preview card's body is an ordinary scroller; its frames and media
+  // are OWN themselves).
+  var OWN = '.xterm, .tm-host, iframe, canvas, video, embed, object, [data-max], [data-max] *, .bcard:is([data-kind="terminal"], [data-kind="web"]) > .bc-in > .bc-body';
+  var PANE_BODY = ':scope > section.topic > .gal-pbody, :scope > .bcard > .bc-in > .bc-body';
   function reach(s, dy) {
     return dy > 0 ? s.scrollTop + s.clientHeight < s.scrollHeight - G.C.EPS : s.scrollTop > G.C.EPS;
   }
+  // canScroll tells whether a wheel by dy over t still scrolls natively:
+  // the scrollers from t up to bound (both included; the pane, else the
+  // page or the view, or on Page 0 the board's scroller) are asked
+  // nearest first, as the browser chains the scroll, and a scroller at
+  // its limit whose overscroll behavior contains it ends the chain. Only
+  // an element that overflows pays for its computed style. With no
+  // scroller on the way, fall (the pane's body, the board's scroller)
+  // answers.
+  function canScroll(t, bound, dy, fall) {
+    var any = false, top = doc.scrollingElement;
+    for (var n = t; n && n.nodeType === 1; n = n.parentNode) {
+      if (n.scrollHeight - n.clientHeight > G.C.EPS) {
+        var cs = n === top ? null : getComputedStyle(n);
+        if (!cs || /auto|scroll/.test(cs.overflowY)) {
+          any = true;
+          if (reach(n, dy)) return true;
+          if (cs && /contain|none/.test(cs.overscrollBehaviorY)) return false;
+        }
+      }
+      if (n === bound || n === top) break;
+    }
+    return !any && !!fall && reach(fall, dy);
+  }
   // gateWheel runs wheel event e through the gate; home: it comes from the
-  // narrow view's Main Board. The scroller is the nearest topic or card
-  // body under the pointer, or on Page 0 the board's scroller (a board
-  // card's body first while it still scrolls that way). An event that a
-  // widget took (defaultPrevented) or that stands in one (OWN) never
-  // charges, nor does a pinch (ctrlKey) or anything while the overview runs.
+  // narrow view's Main Board. The scroller is the nearest one under the
+  // pointer that still scrolls that way, within its pane or, on Page 0,
+  // within the board's scroller (canScroll). An event that a widget took
+  // (defaultPrevented) or that stands in one (OWN) never charges, nor
+  // does a pinch (ctrlKey) or anything while the overview runs.
   function gateWheel(e, home) {
     if (e.defaultPrevented || e.ctrlKey || overviewOn || !lay || !e.target || !e.target.closest) return;
     var narrow = !!lay.narrow, pos = G.position(gal, narrow);
     if (home ? pos >= 0 || galEl.contains(e.target) : pos < 0) return;
     var dy = +e.deltaY || 0;
     if (e.deltaMode === 1) dy *= 40; else if (e.deltaMode === 2) dy *= 800;
-    var near = e.target.closest(NEAR), s = near;
-    if (near && near.matches(OWN)) return;
-    if (home) s = near && reach(near, dy) ? near : homeScr;
-    var top = s ? s.scrollTop : 0, w = gateIn;
+    if (e.target.closest(OWN)) return;
+    var bound = home ? homeScr : e.target.closest(".gal-pane, .gal-page") || viewEl, fall = home ? homeScr : null;
+    if (!home && bound && bound.classList.contains("gal-pane")) fall = bound.querySelector(PANE_BODY);
+    var can = canScroll(e.target, bound, dy, fall), w = gateIn;
     // The model is replaced, never changed, on every change: its
     // neighbors are read once per model and view.
     if (nbOf !== gal || nbNarrow !== narrow) { nb = G.neighbors(gal, pos, narrow); nbOf = gal; nbNarrow = narrow; }
     w.dy = dy;
     w.now = clock();
-    w.canUp = !!s && top > G.C.EPS;
-    w.canDown = !!s && top + s.clientHeight < s.scrollHeight - G.C.EPS;
+    w.canUp = dy < 0 && can;
+    w.canDown = dy > 0 && can;
     w.prev = nb.prev;
     w.next = nb.next;
     var r = gate.wheel(w);
