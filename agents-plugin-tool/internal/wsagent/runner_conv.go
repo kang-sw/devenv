@@ -87,14 +87,30 @@ type conv struct {
 	compactUsageFresh, compactAdvised, compactHardIssued, compactAdvisoryEnabled bool
 	compactAwaitTurn                                                             bool
 
+	// Agy model-wait watchdog state (loop-owned, in-memory only).
+	modelWaitTimeout           time.Duration
+	modelWaitArmed             bool
+	modelWaitRetries           int
+	modelWaitPending           int
+	modelWaitCancelling        bool
+	modelWaitRetryFromAPIError bool
+	modelWaitFailErr           string
+	modelWaitDiagnostic        string
+	modelWaitFailureExcluded   bool
+	modelWaitC                 <-chan time.Time
+	modelWaitStop              func()
+	modelWaitFailure           string
+	modelWaitDrainC            <-chan time.Time
+	modelWaitDrainStop         func()
+
 	// loop-owned.
 	events       <-chan Event
 	idle         *time.Timer
 	idleAfter    time.Duration
 	bgGraceTimer *time.Timer
 	dirtyModel   bool
-	dirtyEffort bool
-	dirtyMode   bool
+	dirtyEffort  bool
+	dirtyMode    bool
 	// reconcileMode marks replay-reconstructed intent, not a new user setting.
 	// Failed reconciliation is advisory; it must not kill an unenforceable lead.
 	reconcileMode bool
@@ -460,6 +476,7 @@ func (c *conv) loop() {
 	defer c.live.closeSlot()
 	defer func() {
 		c.stopCompactWatchdog()
+		c.stopModelWaitTimer()
 		if c.spawnTimer != nil {
 			c.spawnTimer.Stop()
 		}
@@ -490,9 +507,11 @@ func (c *conv) loop() {
 		return
 	}
 	for {
-		var idleC, actionC, leverC, compactC, spawnC, bgGraceC <-chan time.Time
+		var idleC, actionC, leverC, compactC, modelWaitC, modelWaitDrainC, spawnC, bgGraceC <-chan time.Time
 		leverC = c.leverC
 		compactC = c.compactC
+		modelWaitC = c.modelWaitC
+		modelWaitDrainC = c.modelWaitDrainC
 		if c.spawnTimer != nil {
 			spawnC = c.spawnTimer.C
 		}
@@ -563,6 +582,10 @@ func (c *conv) loop() {
 			}
 		case <-compactC:
 			c.compactTimedOut()
+		case <-modelWaitC:
+			c.modelWaitTimedOut()
+		case <-modelWaitDrainC:
+			c.modelFailureDrainTimedOut()
 		case <-beat.C:
 			c.heartbeat()
 		case <-c.r.quit:
@@ -1148,6 +1171,7 @@ func (c *conv) kick() {
 	if ordinary {
 		c.compactNote = ""
 		c.compactResume = false
+		c.startModelWait()
 	}
 	c.sendRetried = false
 	c.stopBgGrace()

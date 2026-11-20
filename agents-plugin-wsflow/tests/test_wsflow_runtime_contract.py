@@ -47,7 +47,7 @@ class WsflowRuntimeContractTest(unittest.TestCase):
                 "WS_MCP_NO_AGENT": "1",
                 "WS_MCP_NAMESPACE": "wsflow",
                 "WS_MCP_SETUP_TOOL": "setup",
-                "WS_MCP_CONFIG_MANIFESTS": "./config-manifest.json;./dashboard-config-manifest.json",
+                "WS_MCP_CONFIG_MANIFESTS": "./config-manifest.json;./agy-config-manifest.json;./dashboard-config-manifest.json",
             },
         )
 
@@ -66,7 +66,7 @@ class WsflowRuntimeContractTest(unittest.TestCase):
             paths = value.split(";")
             self.assertEqual(
                 [p[len(prefix):] for p in paths],
-                ["config-manifest.json", "dashboard-config-manifest.json"],
+                ["config-manifest.json", "agy-config-manifest.json", "dashboard-config-manifest.json"],
                 value,
             )
             for path in paths:
