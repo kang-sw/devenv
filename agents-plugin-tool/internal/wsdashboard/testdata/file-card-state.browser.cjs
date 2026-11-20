@@ -51,7 +51,7 @@ const route = '/w/' + root.replace(/^\//, '').split('/').map(encodeURIComponent)
     const pinned = await wait('WORKFLOW.md', 'preview');
     await card(pinned.id).locator('.bc-pin').click();
     await wait('WORKFLOW.md', 'pinned');
-    assert.equal(await card(pinned.id).evaluate(n => n.closest('.bpcol')?.id), 'bpcol');
+    assert.equal(await card(pinned.id).evaluate(n => n.closest('.bgal')?.id), 'bgal');
     assert.equal(await row('WORKFLOW.md').locator('.fstate').textContent(), 'Pinned');
     await row('another.txt').click();
     const next = await wait('another.txt', 'preview');
@@ -118,13 +118,13 @@ const route = '/w/' + root.replace(/^\//, '').split('/').map(encodeURIComponent)
     await capture('dark', 700, 'after-narrow.png');
     const placement = await page.evaluate(() => {
       const cards = window.WsCards.list('preview'), preview = cards.find(c => c.preview), board = document.querySelector('[data-region="board"]');
-      return { first: [...board.children].find(n => n.matches('.bcard, .bpins')) === preview.el, noPinColumn: !document.documentElement.hasAttribute('data-pincol'), italic: getComputedStyle(preview.name).fontStyle, outline: getComputedStyle(preview.el.querySelector('.bc-in')).outlineStyle };
+      return { first: [...board.children].find(n => n.matches('.bcard')) === preview.el, noPinColumn: !document.documentElement.hasAttribute('data-pincol'), italic: getComputedStyle(preview.name).fontStyle, outline: getComputedStyle(preview.el.querySelector('.bc-in')).outlineStyle };
     });
     assert.deepEqual(placement, { first: true, noPinColumn: true, italic: 'italic', outline: 'dashed' });
     fs.writeFileSync(path.join(evidence, 'placement.json'), JSON.stringify(placement, null, 2));
     for (const width of [1599, 1600]) {
       await tab.setViewportSize({ width, height: 1000 });
-      await page.waitForFunction(wide => document.documentElement.hasAttribute('data-pincol') === wide, width >= 1600);
+      await page.waitForFunction(wide => document.documentElement.hasAttribute('data-pincol') === (wide && window.WsCards.docked().length > 0), width >= 1600);
     }
     // Both existing link entry points keep their default preview semantics.
     await tab.setViewportSize({ width: 1700, height: 1000 });

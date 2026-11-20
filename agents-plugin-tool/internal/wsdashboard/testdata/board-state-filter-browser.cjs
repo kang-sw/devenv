@@ -365,14 +365,14 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
       await pin.click();
       const secondPinTopic = page.locator('section.topic[data-topic="discussing1"]');
       await secondPinTopic.locator('.tpin').click();
-      await until(async () => await page.locator('#bpcol').isVisible(), 'wide pin column appears');
+      await until(async () => await page.locator('#bgal').isVisible(), 'wide gallery column appears');
       await pinTopic.evaluate(n => { n.pinnedIdentity = n; n.pinnedFrame = n.querySelector('iframe'); });
-      const pinOrder = await page.locator('#bpins section.topic').evaluateAll(nodes => nodes.map(n => n.dataset.topic));
+      const pinOrder = await page.locator('#bgal section.topic').evaluateAll(nodes => nodes.map(n => n.dataset.topic));
       await select('waiting');
       assert.equal(await pinTopic.evaluate(n => n.hasAttribute('data-state-filtered') && n.pinnedIdentity === n && n.pinnedFrame === n.querySelector('iframe')), true);
-      assert.deepEqual(await page.locator('#bpins section.topic').evaluateAll(nodes => nodes.map(n => n.dataset.topic)), pinOrder);
+      assert.deepEqual(await page.locator('#bgal section.topic').evaluateAll(nodes => nodes.map(n => n.dataset.topic)), pinOrder);
       await select('all');
-      assert.deepEqual(await page.locator('#bpins section.topic').evaluateAll(nodes => nodes.map(n => n.dataset.topic)), pinOrder, 'All restores multi-pin order');
+      assert.deepEqual(await page.locator('#bgal section.topic').evaluateAll(nodes => nodes.map(n => n.dataset.topic)), pinOrder, 'All restores multi-pin order');
       await capture(`wide-pins-${theme}`);
       await pin.click(); await secondPinTopic.locator('.tpin').click();
       assert.deepEqual(errors, [], 'no production page errors'); assert.deepEqual(unexpected, [], 'requests isolated to owned listeners');

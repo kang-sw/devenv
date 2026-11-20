@@ -218,7 +218,7 @@ async function until(check, message) {
         async function jumpGeometry() {
           const geometry = await target.evaluate(e => {
             const r = e.getBoundingClientRect();
-            const board = e.closest('#bcol, #bpins');
+            const board = e.closest('#bcol, .gal-pbody');
             const b = board.getBoundingClientRect();
             const clip = { left: b.left + board.clientLeft, top: b.top + board.clientTop };
             clip.right = clip.left + board.clientWidth;

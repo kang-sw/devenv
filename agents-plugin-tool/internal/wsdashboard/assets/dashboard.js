@@ -202,12 +202,12 @@
   // the page load's first mount pass runs.
   var mountList = [], mountTask = false, NEAR = "100% 0px", FAR = "400% 0px", topicNear = {}, topicRO = null;
   // boardBoxes are the elements holding the board's topics: the board
-  // region and, while the pinned column shows, the pin list there
-  // (cards.js), whose topics are the board's as much as the region's.
-  // boardQ queries both; inBoard tells whether a node is in either.
+  // region and the docking gallery (cards.js #bgal), whose docked topics
+  // are the board's as much as the region's. boardQ queries both; inBoard
+  // tells whether a node is in either.
   function boardBoxes() {
-    var b = region("board"), p = window.WsCards && window.WsCards.pinList ? window.WsCards.pinList() : null;
-    return (b ? [b] : []).concat(p && p.isConnected && !(b && b.contains(p)) ? [p] : []);
+    var b = region("board"), g = window.WsCards && window.WsCards.gallery ? window.WsCards.gallery() : null;
+    return (b ? [b] : []).concat(g && g.isConnected && !(b && b.contains(g)) ? [g] : []);
   }
   function boardQ(sel) { return boardBoxes().reduce(function (a, b) { return a.concat(q(sel, b)); }, []); }
   function inBoard(n) { return !!n && boardBoxes().some(function (b) { return b.contains(n); }); }
@@ -302,7 +302,7 @@
   // The drawer's body (drbody) is only clipped while the drawer is closed
   // (hidden only while the frame shows the git sheet), so a panels swap
   // keeps its offset whether the drawer is open or closed.
-  var PANES = ["bcol", "bpins", "r-tree", "convo", "drbody"];
+  var PANES = ["bcol", "r-tree", "convo", "drbody"];
   // A scroll only marks its pane; the offset is read once per frame, in a
   // frame callback beside the board rail's. ResizeObserver caches whether
   // each pane is laid out, so scroll callbacks never probe its geometry.
@@ -437,8 +437,8 @@
     layoutMode = v;
     if (grid) {
       grid.setAttribute("data-layout", v);
-      // The pin-edge hint lives outside the grid. Mirror layout state rather
-      // than a body :has() that invalidates the document on chip mutations.
+      // Mirror layout state for rules outside the grid rather than a body
+      // :has() that invalidates the document on chip mutations.
       doc.body.setAttribute("data-dashboard-layout", v);
     }
     q(".gmenu [data-layout]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-layout") === v)); });

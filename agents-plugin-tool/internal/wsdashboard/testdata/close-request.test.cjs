@@ -36,13 +36,13 @@ class El {
 }
 const ctext = new El('textarea'), cchips = new El(), board = new El(), pins = new El();
 const doc = { activeElement: null, querySelector: () => null, createElement: t => new El(t), createTextNode: s => { const n = new El(); n.textContent = s; return n; }, getElementById: id => id === 'ctext' ? ctext : null, addEventListener: (_, f) => { context.click = f; } };
-const context = vm.createContext({ console, doc, document: doc, ctext, cchips, board, pins, colOn: true, topics: {}, maxed: null, window: {}, closeRequests: [], bmentions: [], bselections: [], mpend: null, cimgs: null, wpicks: [], wconsoles: [], sending: false, cmdSel: null, imgs: [], boardOwn: {}, posted: [], warns: [], draftSaves: 0 });
+const context = vm.createContext({ console, doc, document: doc, ctext, cchips, board, pins, galEl: pins, topics: {}, maxed: null, window: {}, closeRequests: [], bmentions: [], bselections: [], mpend: null, cimgs: null, wpicks: [], wconsoles: [], sending: false, cmdSel: null, imgs: [], boardOwn: {}, posted: [], warns: [], draftSaves: 0 });
 const noop = () => {};
 Object.assign(context, {
   wsT: (k, topic) => topic === undefined ? k : `${k}:${topic}`,
   q: (s, n) => n ? n.querySelectorAll(s) : [], dropImg: noop, release: noop, imgTrash: {},
   setTimeout: (f, ms) => setTimeout(f, ms).unref(), clearTimeout, child: (n, cls) => n.children.find(c => c.classList.contains(cls)) || null,
-  countTopics: noop, chipList: () => [], topicNotes: () => [], queueDraft: () => context.draftSaves++,
+  countTopics: noop, wrapTopic: noop, unwrapTopic: noop, chipList: () => [], topicNotes: () => [], queueDraft: () => context.draftSaves++,
   sendText: () => ctext.value, followConvo: noop, boardFlushViewed: noop, clearTrash: noop, clearMentions: noop,
   grow: noop, renderImgs: noop, closeTopicNotes: noop, clearDraft: noop, saveDraft: noop,
   noteWarn: s => context.warns.push(s), post: (route, body, done) => { context.posted.push({ route, body }); context.done = done; },

@@ -1,7 +1,10 @@
 package wsdashboard
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -200,17 +203,17 @@ var c = page.W.open("k", {name: "preview"}, undefined, C);
 var topicRaise = A.querySelector(".t-raise"), cardRaise = c.raiseBtn;
 check("topic and generic raise icons use the upward top-line icon", [topicRaise.html.indexOf("#l-arrow-up-to-line") >= 0, cardRaise.html.indexOf("#l-arrow-up-to-line") >= 0], [true, true]);
 check("topic and generic raise labels remain accessible", [topicRaise.getAttribute("aria-label"), cardRaise.getAttribute("aria-label")], ["js.card.raise", "js.card.raise"]);
-check("new card immediately above a tied origin", names(page.board), ["TOOLBAR", "PINS", "a", "b", "preview", "c", "x/c", "y/c", "reply"]);
+check("new card immediately above a tied origin", names(page.board), ["TOOLBAR", "a", "b", "preview", "c", "x/c", "y/c", "reply"]);
 c.bump(B);
-check("reused slot moves above its new origin", names(page.board), ["TOOLBAR", "PINS", "a", "preview", "b", "c", "x/c", "y/c", "reply"]);
+check("reused slot moves above its new origin", names(page.board), ["TOOLBAR", "a", "preview", "b", "c", "x/c", "y/c", "reply"]);
 c.bump(page.board.querySelector('section[data-topic="y"]'));
-check("ordinary closed origin also has adjacency", names(page.board), ["TOOLBAR", "PINS", "a", "b", "c", "x/c", "preview", "y/c", "reply"]);
+check("ordinary closed origin also has adjacency", names(page.board), ["TOOLBAR", "a", "b", "c", "x/c", "preview", "y/c", "reply"]);
 boot(store, served);
-check("snapshot survives reload", names(page.board), ["TOOLBAR", "PINS", "a", "b", "c", "x/c", "preview", "y/c", "reply"]);
+check("snapshot survives reload", names(page.board), ["TOOLBAR", "a", "b", "c", "x/c", "preview", "y/c", "reply"]);
 c = page.W.list()[0]; clickPin(B); c.bump(B);
-check("pinned origin sends ordinary preview to ordinary head", names(page.board), ["TOOLBAR", "PINS", "preview", "a", "c", "x/c", "y/c", "reply"]);
+check("pinned origin sends ordinary preview to ordinary head", names(page.board), ["TOOLBAR", "preview", "a", "c", "x/c", "y/c", "reply"]);
 var detached = topic("a", 300); c.bump(detached);
-check("detached origin falls back to head", names(page.board)[2], "preview");
+check("detached origin falls back to head", names(page.board)[1], "preview");
 var fold = A.querySelector(".t-fold");
 page.board.fire("click", {target: fold});
 check("topic whole fold is independent state", [A.getAttribute("data-size"), fold.getAttribute("aria-expanded")], ["fold", "false"]);
@@ -222,9 +225,9 @@ c = page.W.list()[0];
 var oldA = A;
 swap([topic("a", 800), B, C, reply()]);
 c.bump(oldA);
-check("replaced same-name origin is not borrowed", names(page.board)[2], "preview");
+check("replaced same-name origin is not borrowed", names(page.board)[1], "preview");
 c.bump(mk("div", {"data-topic": "b"}));
-check("non-topic origin falls back safely", names(page.board)[2], "preview");
+check("non-topic origin falls back safely", names(page.board)[1], "preview");
 check("no origin identity persists", JSON.stringify(store).indexOf("origin"), -1);
 var current = page.board.querySelector('section[data-topic="a"]');
 page.W.decorate(); page.W.decorate();
@@ -235,9 +238,9 @@ store = {};
 function noTime() { return [topic("first", 300), topic("zero", 0), reply()]; }
 boot(store, noTime);
 c = page.W.open("k", {name: "zero-preview"}, undefined, page.board.querySelector('section[data-topic="zero"]'));
-check("a zero-time origin is not a default open", [c.at, names(page.board)], [0, ["TOOLBAR", "PINS", "first", "zero-preview", "zero", "reply"]]);
+check("a zero-time origin is not a default open", [c.at, names(page.board)], [0, ["TOOLBAR", "first", "zero-preview", "zero", "reply"]]);
 boot(store, noTime);
-check("zero-time snapshot survives reload", names(page.board), ["TOOLBAR", "PINS", "first", "zero-preview", "zero", "reply"]);
+check("zero-time snapshot survives reload", names(page.board), ["TOOLBAR", "first", "zero-preview", "zero", "reply"]);
 process.stdout.write(bad.join("\n"));
 `)
 }
@@ -285,10 +288,10 @@ clickPin(A); fold(A);
 var pinned = records().filter(function (r) { return r.n === "a"; })[0];
 page.W.unfoldTopic(A.querySelector(".tdoc"));
 var revealed = records().filter(function (r) { return r.n === "a"; })[0];
-check("pinned-column reveal preserves placement and its record", [A.parentNode === page.W.pinList(), revealed.p, revealed.a, revealed.b, revealed.f], [true, pinned.p, pinned.a, pinned.b, false]);
+check("docked reveal preserves placement and its record", [page.W.isDocked(A), revealed.p, revealed.a, revealed.b, revealed.f], [true, pinned.p, pinned.a, pinned.b, false]);
 check("pinned reveal still leaves inner disclosures alone", [A.querySelector(".tdoc").open, A.querySelector(".panel-versions").open], [true, false]);
 boot(store, served, {wide: true});
-check("pinned unfolded state survives reload", [A.parentNode === page.W.pinList(), A.getAttribute("data-size"), B.getAttribute("data-size")], [true, "base", "fold"]);
+check("docked unfolded state survives reload", [page.W.isDocked(A), A.getAttribute("data-size"), B.getAttribute("data-size")], [true, "base", "fold"]);
 process.stdout.write(bad.join("\n"));
 `)
 }
@@ -308,9 +311,25 @@ func boardBoxSrc(t *testing.T, js string) string {
 // cardsDOM is a minimal DOM for running the whole of cards.js under node:
 // elements with attributes, classes, children, and a selector subset
 // (descendant and child combinators over tag, .class, [attr], [attr="v"],
-// and comma lists), a document with a body, and boot, which loads cards.js
-// into a fresh page over a storage map, as a reload does.
-const cardsDOM = `
+// and comma lists), a document with a body, and boot, which loads
+// gallery.js and cards.js (as CardsScript ships them) into a fresh page
+// over a storage map, as a reload does.
+var cardsDOM = galleryPrelude() + cardsDOMBase
+
+// galleryPrelude is gallery.js's source as the harness's GALLERY.
+func galleryPrelude() string {
+	data, err := dashboardFS.ReadFile("assets/gallery.js")
+	if err != nil {
+		panic(err)
+	}
+	src, err := json.Marshal(string(data))
+	if err != nil {
+		panic(err)
+	}
+	return "var GALLERY = " + string(src) + ";\n"
+}
+
+const cardsDOMBase = `
 var bad = [];
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
 var now = 1000;
@@ -340,6 +359,7 @@ El.prototype = {
   get nextElementSibling() { return this.nextSibling; },
   get previousElementSibling() { var k = this.parentNode && this.parentNode.kids; return k ? k[k.indexOf(this) - 1] || null : null; },
   get isConnected() { for (var n = this; n; n = n.parentNode) if (n === this.ownerDocument.documentElement) return true; return false; },
+  contains: function (n) { for (; n; n = n.parentNode) if (n === this) return true; return false; },
   insertBefore: function (n, ref) {
     if (n.parentNode) n.parentNode.removeChild(n);
     this.kids.splice(ref ? this.kids.indexOf(ref) : this.kids.length, 0, n); n.parentNode = this; return n;
@@ -351,6 +371,7 @@ El.prototype = {
   get textContent() { return this.text + this.kids.map(function (k) { return k.textContent; }).join(""); },
   set textContent(v) { this.kids = []; this.text = String(v); },
   addEventListener: function (t, fn) { (this.listeners[t] = this.listeners[t] || []).push(fn); },
+  removeEventListener: function (t, fn) { var l = this.listeners[t] || [], i = l.indexOf(fn); if (i >= 0) l.splice(i, 1); },
   fire: function (t, e) { (this.listeners[t] || []).forEach(function (fn) { fn(e); }); },
   focus: function () {}, getBoundingClientRect: function () { return { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 }; }, getClientRects: function () { return []; },
   matches: function (sel) { var me = this; return sel.split(",").some(function (s) { return match(me, s.trim().split(/\s+/)); }); },
@@ -415,35 +436,40 @@ function topic(name, at, closed) {
 }
 function more(next, remainder) { var b = mk("button.btn.closed-more", { "data-closed-next": next }); if (remainder !== undefined) b.setAttribute("data-closed-more", remainder); b.label = "more" + next; return b; }
 function reply() { var r = mk("div.reply"); r.label = "reply"; return r; }
-function label(n) { return n.label || (n.hasAttribute("data-card") ? n.card || "card" : n.hasAttribute("data-pins") ? "PINS" : n.classList.contains("board-toolbar") ? "TOOLBAR" : n.tagName); }
+function label(n) { return n.label || (n.hasAttribute("data-card") ? n.card || "card" : n.classList.contains("board-toolbar") ? "TOOLBAR" : n.tagName); }
 function names(el) { return el.children.map(label); }
-// boot loads cards.js into a fresh page whose board region holds served,
-// over store (a reload keeps it), with the pinned column shown when wide,
-// and with split a grid for the split handle (its resolved columns:
-// page.gridCols).
+// boot loads gallery.js and cards.js into a fresh page whose board region
+// holds served, over store (a reload keeps it), wide (1800px) or narrow
+// (1000px; page.width changes it before a relayout), and with split a grid
+// for the split handle (its resolved columns: page.gridCols). page.layouts
+// records each change of whether the gallery shows as a column beside
+// the board, page.states every layout state the framework hands the page.
 function boot(store, served, o) {
   o = o || {};
-  page = { doc: null, store: store, layouts: [], closedCalls: [], adopted: [], gridCols: "none" };
+  page = { doc: null, store: store, layouts: [], states: [], closedCalls: [], adopted: [], gridCols: "none", width: o.wide ? 1800 : 1000, tabs: false };
   page.doc = new Doc();
-  var dbody = page.doc.body.appendChild(new El("div", page.doc));
+  var dbody = page.dbody = page.doc.body.appendChild(new El("div", page.doc));
   page.board = dbody.appendChild(new El("div", page.doc));
   page.board.id = "r-board";
   served().forEach(function (n) { page.board.appendChild(n); });
-  page.col = dbody.appendChild(new El("aside", page.doc));
   page.split = o.split ? dbody.appendChild(new El("main", page.doc)) : null;
   var win = page.win = { listeners: {}, getSelection: function () { return null; }, addEventListener: function (type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }, innerWidth: 2000, innerHeight: 800 };
-  new Function("document", "window", "wsT", "getComputedStyle", "requestAnimationFrame", CARDS)(page.doc, win, wsT, function () { return { overflowY: "visible", gridTemplateColumns: page.gridCols }; }, function () {});
+  new Function("document", "window", "wsT", "getComputedStyle", "requestAnimationFrame", "module", GALLERY + "\n;\n" + CARDS)(page.doc, win, wsT, function () { return { overflowY: "visible", gridTemplateColumns: page.gridCols }; }, function () {}, undefined);
   page.W = win.WsCards;
+  page.G = win.WsGallery;
   page.W.register("k", { open: function (c) { c.title({ name: c.data.name }); c.el.card = c.data.name; } });
   (o.kinds || []).forEach(function (kind) { page.W.register(kind, { open: function () {} }); });
+  var col = false;
   page.W.mount(page.board, {
-    toolbar: o.toolbar,
+    toolbar: o.toolbar, host: dbody,
     key: "cards", load: function (k) { return store[k] || null; }, save: function (k, v) { if (v === null) delete store[k]; else store[k] = v; },
-    column: page.col, shows: function (n) { return !!o.wide && n > 0; }, split: page.split,
-    layout: function (on) { page.layouts.push(on); },
+    mode: function () { return { width: page.width, tabs: page.tabs }; }, split: page.split,
+    layout: function (s) { page.states.push(s); var on = s.column && s.pages > 0; if (on !== col) { col = on; page.layouts.push(on); } },
     closed: function (from, done) { page.closedCalls.push(from); if (!o.pending) done(o.closed ? o.closed(from) : null); },
     adopted: function (n) { page.adopted.push(n.getAttribute("data-topic")); }
   });
+  // The gallery's element is the wide view's column, its width handle on it.
+  page.col = page.W.gallery();
   return page;
 }
 // swap is the board morph's weave and settle for the nodes the board wants.
@@ -454,8 +480,19 @@ function swap(nodes, graft) {
   return p;
 }
 function pinBtn(t) { return t.querySelector(".tbar .tpin"); }
-function clickPin(t) { var b = pinBtn(t); (t.closest("aside") || page.board).fire("click", { target: b }); }
-function pinsOf() { return names(page.W.pinList()); }
+function clickPin(t) { var b = pinBtn(t); (page.W.gallery().contains(t) ? page.W.gallery() : page.board).fire("click", { target: b }); }
+// pinsOf is the docked units in pin order; pagesOf the gallery's pages,
+// each its panes' units; shownOf the page shown (its index, "+" or "home").
+function pinsOf() { return page.W.docked().map(label); }
+// The pages' DOM order never changes (a page switch moves nothing), so
+// pagesOf reads them in the stored gallery's order.
+function pagesOf() {
+  var els = page.W.gallery().querySelectorAll(".gal-page"), g = JSON.parse(page.store.cards || "{}").gallery || { pages: [] };
+  check("one slide per page, and +", els.length, g.pages.length + 1);
+  return g.pages.map(function (pg) { var p = els.filter(function (e) { return e.getAttribute("data-page") === pg.id; })[0]; return p ? p.querySelectorAll(".gal-pane").map(function (pane) { return pane.children.map(label).join(""); }) : null; });
+}
+function galOf() { return JSON.parse(page.store.cards || "{}").gallery; }
+function paneOf(n) { return n.parentNode && n.parentNode.classList.contains("gal-pane") ? n.parentNode : null; }
 `
 
 // TestBoardTopicPins pins whiteboard topics in the card framework's
@@ -489,55 +526,57 @@ boot(store, served1);
 check("every topic bar has a pin button, then the maximize and back buttons, before its note pen, unpressed",
   [A, B, C].map(function (t) { var b = pinBtn(t); return [!!b, b && b.parentNode.children.slice(b.parentNode.children.indexOf(b)).map(function (x) { return x.className; }), b && b.getAttribute("aria-pressed")]; }),
   [A, B, C].map(function () { return [true, ["ibtn tpin", "ibtn t-fold", "ibtn t-raise", "ibtn d-max", "ibtn d-min", "btn mini tnote-toggle"], "false"]; }));
-check("the toolbar precedes the empty pin list", names(page.board), ["TOOLBAR", "PINS", "a", "b", "c", "x/c", "more31", "reply"]);
+check("the toolbar heads the board, which holds no pin list", names(page.board), ["TOOLBAR", "a", "b", "c", "x/c", "more31", "reply"]);
+check("the gallery joins the page body, hidden with nothing docked", [page.W.gallery().parentNode === page.dbody, page.W.gallery().id, page.W.gallery().hidden], [true, "bgal", true]);
 
-// A pinned topic stands among pinned cards in pin order.
+// A pinned topic docks among the docked cards, each on a page of its own.
 now = 1100; var ca = page.W.open("k", { name: "Ca" }); ca.pin(true);
 now = 1200; clickPin(B);
 now = 1300; var cb = page.W.open("k", { name: "Cb" }); cb.pin(true);
-check("a pinned topic stands among the pinned cards, in pin order", pinsOf(), ["Ca", "b", "Cb"]);
-check("its pin button is pressed and the section marked", [pinBtn(B).getAttribute("aria-pressed"), B.hasAttribute("data-pinned")], ["true", true]);
-check("the board keeps the rest in its order", names(page.board), ["TOOLBAR", "PINS", "a", "c", "x/c", "more31", "reply"]);
+check("a docked topic stands among the docked cards, in pin order", pinsOf(), ["Ca", "b", "Cb"]);
+check("each docks on a new page before +", pagesOf(), [["Ca"], ["b"], ["Cb"]]);
+check("its pin button is pressed and the section marked", [pinBtn(B).getAttribute("aria-pressed"), B.hasAttribute("data-docked")], ["true", true]);
+check("the board keeps the rest in its order", names(page.board), ["TOOLBAR", "a", "c", "x/c", "more31", "reply"]);
 cb.pin(false);
-check("an unpinned card enters the flow at its open time", names(page.board), ["TOOLBAR", "PINS", "Cb", "a", "c", "x/c", "more31", "reply"]);
+check("an undocked card enters the flow at its open time, its emptied page gone", [names(page.board), pagesOf()], [["TOOLBAR", "Cb", "a", "c", "x/c", "more31", "reply"], [["Ca"], ["b"]]]);
 cb.close();
 
 // An unpinned hand move is undone by a later bump above it.
 now = 2000;
 page.W.move(C, { pin: false, after: null, before: A });
-check("a topic moved by hand stands where it was dropped", names(page.board), ["TOOLBAR", "PINS", "c", "a", "x/c", "more31", "reply"]);
+check("a topic moved by hand stands where it was dropped", names(page.board), ["TOOLBAR", "c", "a", "x/c", "more31", "reply"]);
 var A2 = topic("a", 2500);
 swap([A2, C, topic("x", 0, true), more(31), reply()]);
-check("a topic updated later rises above it", names(page.board), ["TOOLBAR", "PINS", "a", "c", "x/c", "more31", "reply"]);
+check("a topic updated later rises above it", names(page.board), ["TOOLBAR", "a", "c", "x/c", "more31", "reply"]);
 var stash = JSON.parse(store.cards);
 check("the move is kept with its bar time", stash.topics.filter(function (r) { return r.n === "c"; }).map(function (r) { return [r.a > 2000 - 1, r.b]; }), [[true, 100]]);
 
-// An updated pinned topic keeps its index and gains the update mark.
+// An updated docked topic keeps its pane and gains the update mark.
 now = 2600; clickPin(A2);
 check("pins before the update", pinsOf(), ["Ca", "b", "a"]);
 var B2 = topic("b", 2700, false, true);
 swap([B2, A2, C, topic("x", 0, true), more(31), reply()]);
-check("an updated pinned topic keeps its index", pinsOf(), ["Ca", "b", "a"]);
+check("an updated docked topic keeps its index", [pinsOf(), pagesOf()], [["Ca", "b", "a"], [["Ca"], ["b"], ["a"]]]);
 check("its new bar carries the pressed pin", pinBtn(B2).getAttribute("aria-pressed"), "true");
 
-// A pinned topic updated through the frame graft keeps its pin pressed.
-var oldHead = A2.querySelector(".tophead"), A3 = topic("a", 2800, false, true);
+// A docked topic updated through the frame graft keeps its pin pressed.
+var oldHead = A2.querySelector(".tophead"), A3 = topic("a", 2800, false, true), paneA = paneOf(A2);
 swap([B2, A3, C, topic("x", 0, true), more(31), reply()], function (p) {
   // The morph keeps the old section and gives it the new head's content.
   A2.removeChild(oldHead); A2.insertBefore(A3.querySelector(".tophead"), A2.firstChild);
   p.pins[p.pins.indexOf(A3)] = A2;
 });
-check("a pinned topic updated through the graft keeps its section and index", [pinsOf(), page.W.pinList().children[2] === A2], [["Ca", "b", "a"], true]);
+check("a docked topic updated through the graft keeps its section, pane and index", [pinsOf(), page.W.docked()[2] === A2, paneOf(A2) === paneA], [["Ca", "b", "a"], true, true]);
 check("and its pin button pressed", pinBtn(A2) && pinBtn(A2).getAttribute("aria-pressed"), "true");
 
-// A closed pinned topic stays pinned; past the closed cap it stays too.
+// A closed docked topic stays docked; past the closed cap it stays too.
 var B3 = topic("b", 0, true);
 swap([A2, C, B3, topic("x", 0, true), more(31), reply()]);
-check("a pinned topic that closes stays in the pin list, closed", pinsOf(), ["Ca", "b/c", "a"]);
+check("a docked topic that closes stays in its pane, closed", pinsOf(), ["Ca", "b/c", "a"]);
 swap([A2, C, topic("x", 0, true), more(31), reply()]);
-check("one the board no longer serves keeps its last node there", [pinsOf(), page.W.pinList().children[1] === B3], [["Ca", "b/c", "a"], true]);
+check("one the board no longer serves keeps its last node there", [pinsOf(), page.W.docked()[1] === B3, !!paneOf(B3)], [["Ca", "b/c", "a"], true, true]);
 
-// The pinned column: where the page shows one, the pin list moves there.
+// The wide view: the gallery shows as a column beside the board.
 var saved = store.cards;
 boot(store, function () { return [topic("a", 2800), topic("c", 100), topic("x", 0, true), more(31), reply()]; }, {
   wide: true,
@@ -546,28 +585,30 @@ boot(store, function () { return [topic("a", 2800), topic("c", 100), topic("x", 
     return mk("div.closed-page", {}, [topic("z", 0, true), topic("b", 0, true)]);
   }
 });
-check("after a reload the board's missing pinned topic is fetched page by page", [page.closedCalls, page.adopted], [[31, 61], ["b"]]);
-check("pins and their order survive the reload, in the pinned column", [pinsOf(), page.W.pinList().parentNode === page.col, page.layouts], [["Ca", "b/c", "a"], true, [true]]);
-check("the board column holds the rest, no pin list, the hand-moved topic where it stood",
+check("after a reload the board's missing docked topic is fetched page by page", [page.closedCalls, page.adopted], [[31, 61], ["b"]]);
+check("pins, pages and their order survive the reload, the gallery a column", [pinsOf(), pagesOf(), page.layouts], [["Ca", "b/c", "a"], [["Ca"], ["b/c"], ["a"]], [true]]);
+check("the board column holds the rest, the hand-moved topic where it stood",
   names(page.board), ["TOOLBAR", "c", "x/c", "more31", "reply"]);
-check("the pinned topic in the column has its pin pressed", pinBtn(page.W.pinList().children[2]).getAttribute("aria-pressed"), "true");
-// Unpinning the last pins closes the column; an open topic goes back by
+check("the docked topic has its pin pressed", pinBtn(page.W.docked()[2]).getAttribute("aria-pressed"), "true");
+// Undocking the last ones drops the column; an open topic goes back by
 // recency, a closed one to the head of the closed section.
 page.W.list("k")[0].close();
-clickPin(page.W.pinList().children[0]);
-clickPin(page.W.pinList().children[0]);
-check("the last unpin hides the column and puts the pin list atop the board", [page.layouts, names(page.board)], [[true, false], ["TOOLBAR", "PINS", "a", "c", "b/c", "x/c", "more31", "reply"]]);
+clickPin(page.W.docked()[0]);
+clickPin(page.W.docked()[0]);
+check("the last undock drops the column and its pages", [page.layouts, names(page.board), pagesOf(), galOf().pages], [[true, false], ["TOOLBAR", "a", "c", "b/c", "x/c", "more31", "reply"], [], []]);
 
-// A pin whose topic is gone is dropped.
+// A docked topic whose topic is gone is dropped, its page with it.
 store = { cards: saved };
 boot(store, function () { return [topic("a", 2800), topic("c", 100), more(31), reply()]; }, { closed: function () { return mk("div.closed-page", {}, [topic("q", 0, true)]); } });
-check("a pinned topic the closed route ends without loses its pin", [page.closedCalls, JSON.parse(store.cards).topics.map(function (r) { return r.n; }).sort()], [[31], ["a", "c"]]);
+check("a docked topic the closed route ends without leaves the record and the gallery",
+  [page.closedCalls, JSON.parse(store.cards).topics.map(function (r) { return r.n; }).sort(), galOf().pages.map(function (p) { return page.G.leaves(p.root); }), pagesOf()],
+  [[31], ["a", "c"], [["c:" + page.W.list("k")[0].id], ["t:a"]], [["Ca"], ["a"]]]);
 // A board with no closed control (an empty board's placeholder, a board
 // not yet loaded, or one serving every closed topic) cannot tell a topic
 // past its cap from one that is gone: the pins stay.
 store = { cards: saved };
 boot(store, function () { return [topic("a", 2800), reply()]; });
-check("with no closed control a missing pinned topic keeps its pin", [page.closedCalls, JSON.parse(store.cards).topics.map(function (r) { return r.n; }).sort()], [[], ["a", "b"]]);
+check("with no closed control a missing docked topic keeps its pin and its (empty) pane", [page.closedCalls, JSON.parse(store.cards).topics.map(function (r) { return r.n; }).sort(), pagesOf()], [[], ["a", "b"], [["Ca"], [""], ["a"]]]);
 store = { cards: saved };
 boot(store, function () { return []; });
 check("an empty board keeps every pin", [page.closedCalls, JSON.parse(store.cards).topics.filter(function (r) { return r.p; }).map(function (r) { return r.n; }).sort()], [[], ["a", "b"]]);
@@ -578,19 +619,283 @@ check("a failed fetch keeps the pin", JSON.parse(store.cards).topics.map(functio
 // A record from before topics joined is the cards' list.
 store = { cards: JSON.stringify([{ id: "c1", kind: "k", pinned: 5, at: 1, data: { name: "Old" } }]) };
 boot(store, function () { return [topic("a", 2800), reply()]; });
-check("an old record restores its cards", pinsOf(), ["Old"]);
+check("an old record restores its cards, docked", [pinsOf(), pagesOf()], [["Old"], [["Old"]]]);
 // A topic the page adds outside a board update gets its pin button.
 var Q = topic("q", 0, true);
 page.board.insertBefore(mk("div.closed-page", {}, [Q]), page.board.children[page.board.children.length - 1]);
 page.W.decorate();
 check("a topic of a fetched closed page gets its pin button", !!pinBtn(Q), true);
-// A pin dropped while a pinned topic is still being fetched keeps that
-// topic's order among the pins.
+// A unit docked while a docked topic is still being fetched keeps that
+// topic's page and order.
 store = { cards: JSON.stringify({ cards: [{ id: "c1", kind: "k", pinned: 2, at: 1, data: { name: "Old" } }], topics: [{ n: "b", p: 1, a: 0, b: 0 }], w: 0 }) };
 boot(store, function () { return [topic("a", 2800), more(31), reply()]; }, { pending: true });
-page.W.move(page.board.querySelector('section.topic[data-topic="a"]'), { pin: true, index: 0 });
-check("a pin dropped first among the shown pins orders after a pending one",
-  [pinsOf(), JSON.parse(store.cards).topics.map(function (r) { return [r.n, r.p]; }).sort(), JSON.parse(store.cards).cards[0].pinned], [["a", "Old"], [["a", 2], ["b", 1]], 3]);
+page.W.move(page.board.querySelector('section.topic[data-topic="a"]'), { pin: true });
+check("a unit docked while a docked topic is fetched docks after it",
+  [pinsOf(), JSON.parse(store.cards).topics.map(function (r) { return [r.n, r.p]; }).sort(), JSON.parse(store.cards).cards[0].pinned, galOf().pages.map(function (p) { return page.G.leaves(p.root); })],
+  [["Old", "a"], [["a", 3], ["b", 1]], 2, [["t:b"], ["c:c1"], ["t:a"]]]);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
+// TestBoardGallery pins the paged docking gallery's DOM side (cards.js over
+// gallery.js), the whole script executed under node over the minimal DOM:
+// the stored record migrates into the gallery (flat pins one per page in
+// pin order, the bare cards list of old, a gallery reconciled against flat
+// pins a previous build rewrote) and every save dual-writes the flat pin
+// orders beside it; the pin and unpin buttons dock on a new page before +
+// (shown) and undock (an emptied page goes); a preview card's transient
+// state ends through its kind's pinned hook; a docked topic's body is
+// wrapped in its pane's scroller and unwrapped back to stock markup; the
+// rail's dots are buttons (the narrow view's ⌂, a pane count per page, +)
+// and a drag docks on +, appends on a page's dot, undocks on ⌂, and a
+// dragged dot reorders the pages; on the page shown a pane's edge zone
+// splits it and a docked pane's center swaps the two, a split holds a
+// divider whose keys and double click set its ratio; activate shows a
+// node's page; and
+// neither a page switch, a width crossing nor a board morph moves a
+// docked unit's node.
+func TestBoardGallery(t *testing.T) {
+	data, err := dashboardFS.ReadFile("assets/cards.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := json.Marshal(string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(mustAsset(t, "preview.js"), "pinned: function (card) { card.preview = false; changed(card); }") {
+		t.Error("preview.js no longer ends a preview's transient state through its pinned hook")
+	}
+	runNode(t, "board gallery", "var CARDS = "+string(src)+";\n"+cardsDOM+`
+function rec() { return JSON.parse(page.store.cards); }
+function leavesOf(g) { return g.pages.map(function (p) { return page.G.leaves(p.root); }); }
+function dots() { return page.W.gallery().querySelectorAll(".gal-dot"); }
+function dotTexts() { return dots().map(function (b) { return [b.getAttribute("data-pos"), b.textContent, b.classList.contains("active")]; }); }
+function shown() { var a = page.W.gallery().querySelectorAll(".gal-page").filter(function (p) { return p.hasAttribute("data-active"); }); return a.map(function (p) { return p.getAttribute("data-page"); }); }
+function pageIds() { return galOf().pages.map(function (p) { return p.id; }); }
+function clickDot(pos) { var b = dots().filter(function (d) { return d.getAttribute("data-pos") === String(pos); })[0]; page.W.gallery().querySelector(".gal-dots").fire("click", { target: b }); }
+
+// Migration: flat pins, one page each in pin order, the flat orders kept.
+var store = { cards: JSON.stringify({ cards: [{ id: "c1", kind: "k", pinned: 3, at: 1, data: { name: "One" } }, { id: "c2", kind: "k", pinned: 0, at: 2, data: { name: "Two" } }], topics: [{ n: "a", p: 1, a: 0, b: 0 }, { n: "b", p: 2, a: 0, b: 0 }] }) };
+boot(store, function () { return [topic("a", 300), topic("b", 200), topic("c", 100), reply()]; });
+check("flat pins migrate one per page in pin order", leavesOf(galOf()), [["t:a"], ["t:b"], ["c:c1"]]);
+check("the pages show them in that order", pagesOf(), [["a"], ["b"], ["One"]]);
+check("the flat orders are dual-written as the gallery's", [rec().topics.map(function (r) { return [r.n, r.p]; }), rec().cards.map(function (c) { return [c.id, c.pinned]; })], [[["a", 1], ["b", 2]], [["c1", 3], ["c2", 0]]]);
+// A previous build that rewrote the record: a cleared pin leaves its page,
+// a new flat pin gets one of its own, a deleted item's leaf goes.
+var g = galOf(); g.pages.push({ id: "gone", root: { card: "zz" } });
+var r = rec(); r.gallery = g; r.topics = r.topics.filter(function (t) { return t.n !== "a"; }); r.cards[1].pinned = 9;
+store = { cards: JSON.stringify(r) };
+boot(store, function () { return [topic("a", 300), topic("b", 200), reply()]; });
+check("reconcile: a cleared pin and a deleted item leave, a new flat pin is appended", leavesOf(galOf()), [["t:b"], ["c:c1"], ["c:c2"]]);
+check("and the orders follow", [rec().topics.map(function (r) { return [r.n, r.p]; }), rec().cards.map(function (c) { return [c.id, c.pinned]; })], [[["b", 1]], [["c1", 2], ["c2", 3]]]);
+// The bare cards list of old.
+store = { cards: JSON.stringify([{ id: "o1", kind: "k", pinned: 2, at: 1, data: { name: "Old" } }, { id: "o2", kind: "k", pinned: 1, at: 1, data: { name: "Older" } }]) };
+boot(store, function () { return [topic("a", 300), reply()]; });
+check("a bare cards list migrates in pin order", [leavesOf(galOf()), rec().cards.map(function (c) { return c.pinned; })], [[["c:o2"], ["c:o1"]], [2, 1]]);
+
+// The pin and unpin buttons.
+store = {};
+var A, B;
+boot(store, function () { A = topic("a", 300); B = topic("b", 200); return [A, B, reply()]; }, { kinds: ["preview"] });
+check("narrow, nothing docked: no rail, no gallery", [page.W.gallery().hidden, dots().length], [true, 2]);
+now = 1100; var c = page.W.open("k", { name: "Ca" });
+c.pinBtn.fire("click");
+check("pin docks on a new page, shown", [pagesOf(), galOf().active === pageIds()[0], shown(), page.W.gallery().hidden], [[["Ca"]], true, [pageIds()[0]], false]);
+check("the narrow rail: home, the page's pane count, +", dotTexts(), [["-1", "⌂", false], ["0", "1", true], ["1", "+", false]]);
+check("dots are buttons", dots().map(function (b) { return [b.tagName, b.type]; }), [["BUTTON", "button"], ["BUTTON", "button"], ["BUTTON", "button"]]);
+clickPin(A);
+check("a topic's pin docks it on a page before +, shown", [pagesOf(), shown(), pinBtn(A).getAttribute("aria-pressed")], [[["Ca"], ["a"]], [pageIds()[1]], "true"]);
+check("a docked topic's body stands in its pane's scroller", [A.children.map(function (n) { return n.className; }), paneOf(A).getAttribute("data-ref")], [["tophead", "gal-pbody"], "t:a"]);
+clickDot(0);
+check("a dot shows its page", [shown(), dotTexts()[1][2]], [[pageIds()[0]], true]);
+function away() { return [page.doc.documentElement.hasAttribute("data-gal-away"), !!page.board.inert]; }
+check("narrow: a shown page stands the Main Board off the view, inert", away(), [true, true]);
+clickDot(-1);
+check("home shows the Main Board: every page off the view", [shown(), page.W.gallery().getAttribute("data-pos")], [[], "-1"]);
+check("and the Main Board back in it", away(), [false, false]);
+check("a page off the view stays mounted, translated, inert", page.W.gallery().querySelectorAll(".gal-page").map(function (p) { return [p.style.props["--gal-off"], p.inert, p.getAttribute("aria-hidden")]; }), [["1", true, "true"], ["2", true, "true"], ["3", true, "true"]]);
+check("activate shows a docked node's page", [page.W.activate(A.querySelector(".tbar")), shown()], [true, [pageIds()[1]]]);
+check("activate on the shown page switches nothing", page.W.activate(A), false);
+check("narrow: a board node shows Page 0", [page.W.activate(B), shown()], [true, []]);
+clickPin(A);
+check("unpin undocks, its emptied page gone, its markup stock again", [pagesOf(), names(page.board), A.children.map(function (n) { return n.className; }), pinBtn(A).getAttribute("aria-pressed")], [[["Ca"]], ["TOOLBAR", "a", "b", "reply"], ["tophead"], "false"]);
+c.pinBtn.fire("click");
+check("the last unpin leaves no page and hides the gallery", [pagesOf(), galOf().pages, page.W.gallery().hidden, names(page.board)], [[], [], true, ["TOOLBAR", "Ca", "a", "b", "reply"]]);
+// A preview's transient state ends when it docks (its kind's pinned hook).
+var pv = null;
+page.W.register("preview", { open: function (x) { x.title({ name: "pv" }); x.el.card = "pv"; }, pinned: function (x) { x.preview = false; } });
+pv = page.W.open("preview", {}); pv.preview = true;
+pv.pin(true);
+check("docking a preview ends its transient state", [pv.preview, !!pv.pinned, pagesOf()], [false, true, [["pv"]]]);
+pv.pin(false);
+
+// Drag: the rail shows on a drag start, + docks, a page's dot appends,
+// home undocks, a dragged dot reorders the pages.
+store = {};
+boot(store, function () { A = topic("a", 300); B = topic("b", 200); return [A, B, reply()]; });
+now = 1200; c = page.W.open("k", { name: "Cd" });
+var zero = { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 };
+function box(l, t, w, h) { return { left: l, top: t, right: l + w, bottom: t + h, width: w, height: h }; }
+function geo(n) {
+  if (n.classList.contains("gal-dot")) return box(10, 100 + 30 * +n.getAttribute("data-pos"), 20, 20);
+  if (n === page.board) return box(100, 0, 600, 800);
+  return null;
+}
+El.prototype.getClientRects = function () { return geo(this) ? [1] : []; };
+El.prototype.getBoundingClientRect = function () { return geo(this) || zero; };
+function each(type, e) { (page.doc.listeners[type] || []).forEach(function (fn) { fn(e); }); }
+function dragTo(from, head, x, y) {
+  from.fire("pointerdown", { target: head, isPrimary: true, button: 0, pointerId: 1, pointerType: "mouse", clientX: 300, clientY: 300 });
+  each("pointermove", { pointerId: 1, pointerType: "mouse", buttons: 1, clientX: x, clientY: y, preventDefault: function () {} });
+  var during = [page.W.dragging(), page.W.gallery().hidden, page.states[page.states.length - 1].rail];
+  each("pointerup", { pointerId: 1, type: "pointerup" });
+  return during;
+}
+check("a drag start shows the rail with nothing docked", dragTo(page.board, c.el.querySelector(".bc-hd"), 20, 110), [true, false, true]);
+check("a drop on + docks on a new page", [pagesOf(), galOf().pages.length, page.W.dragging()], [[["Cd"]], 1, false]);
+dragTo(page.board, A.querySelector(".tbar"), 20, 110);
+check("a drop on a page's dot appends below what it holds", [pagesOf(), dotTexts()[1][1], page.G.isSplit(galOf().pages[0].root) && galOf().pages[0].root.axis], [[["Cd", "a"]], "2", "col"]);
+check("the split renders as a column of two panes", page.W.gallery().querySelectorAll(".gal-split").map(function (s) { return s.className; }), ["gal-split col"]);
+dragTo(page.W.gallery(), c.el.querySelector(".bc-hd"), 20, 70);
+check("a drop on home undocks, the Main Board shown", [pagesOf(), names(page.board)[1], page.W.gallery().getAttribute("data-pos")], [[["a"]], "Cd", "-1"]);
+c.pin(true);
+check("two pages", pagesOf(), [["a"], ["Cd"]]);
+var rail = page.W.gallery().querySelector(".gal-rail"), d0 = dots()[1];
+rail.fire("pointerdown", { target: d0, button: 0, pointerId: 2, clientX: 20, clientY: 110 });
+each("pointermove", { pointerId: 2, clientX: 20, clientY: 140, preventDefault: function () {} });
+each("pointerup", { pointerId: 2, type: "pointerup" });
+check("a page's dot dropped on another's moves its page there, shown", [pagesOf(), shown().length === 1 && shown()[0] === pageIds()[1]], [[["Cd"], ["a"]], true]);
+// Zones: on the docked page shown, a pane's edge splits it (here from
+// another page, whose emptied page goes), a docked pane's center swaps
+// the two; the divider's keys set the ratio, kept in the record.
+var dotGeo = geo;
+geo = function (n) {
+  if (n.classList.contains("gal-viewport")) return box(800, 0, 400, 800);
+  if (n.classList.contains("gal-pane")) return n.getAttribute("data-ref") === "t:a" ? box(800, 0, 200, 800) : box(1000, 0, 200, 800);
+  return dotGeo(n);
+};
+dragTo(page.W.gallery(), c.el.querySelector(".bc-hd"), 990, 400);
+check("a right-edge drop splits the pane in a row, the emptied page gone", [pagesOf(), galOf().pages[0].root.axis, dotTexts().map(function (t) { return t[1]; })], [[["a", "Cd"]], "row", ["⌂", "2", "+"]]);
+check("the split holds its panes and a divider between them", page.W.gallery().querySelectorAll(".gal-split")[0].children.map(function (n) { return n.className; }), ["gal-pane", "gal-div", "gal-pane"]);
+check("the preview is gone after the drop", [page.W.gallery().querySelectorAll(".gal-pane").filter(function (p) { return p.hasAttribute("data-dz"); }).length, page.W.gallery().querySelector(".gal-overlay").hidden], [0, true]);
+dragTo(page.W.gallery(), A.querySelector(".tbar"), 1100, 400);
+check("a docked pane's center drop swaps the two", pagesOf(), [["Cd", "a"]]);
+var div = page.W.gallery().querySelector(".gal-div");
+check("the divider is a focusable vertical separator at 50", [div.getAttribute("role"), div.getAttribute("aria-orientation"), div.getAttribute("aria-valuenow"), div.tabIndex], ["separator", "vertical", "50", 0]);
+div.fire("keydown", { key: "ArrowRight", preventDefault: function () {} });
+div.fire("keydown", { key: "ArrowUp", preventDefault: function () {} });
+check("ArrowRight nudges a row's ratio (ArrowUp does not), saved", [galOf().pages[0].root.ratio, div.getAttribute("aria-valuenow")], [0.55, "55"]);
+div.fire("dblclick", {});
+check("a double click resets to half", galOf().pages[0].root.ratio, 0.5);
+geo = dotGeo;
+El.prototype.getClientRects = function () { return []; };
+El.prototype.getBoundingClientRect = function () { return zero; };
+
+// No remount: a page switch, a width crossing and a board morph move no
+// docked unit's node.
+store = {};
+var T;
+boot(store, function () { T = topic("t", 300); A = topic("a", 200); return [T, A, reply()]; });
+c = page.W.open("k", { name: "Cn" }); c.pin(true); clickPin(T);
+var paneC = paneOf(c.el), paneT = paneOf(T), moved = [], ins = El.prototype.insertBefore;
+El.prototype.insertBefore = function (n, ref) { if (n === c.el || n === T || (n.hasAttribute && (n.hasAttribute("data-page") || n.classList.contains("gal-pane")))) moved.push(label(n)); return ins.call(this, n, ref); };
+clickDot(0); clickDot(1); clickDot(-1); clickDot(2); clickDot(0);
+check("page switches move no node, only transforms", [moved, paneOf(c.el) === paneC, paneOf(T) === paneT], [[], true, true]);
+page.width = 1800; page.W.relayout(); page.width = 1000; page.W.relayout();
+check("a width crossing moves no node", [moved, page.layouts], [[], [true, false]]);
+swap([T, A, reply()]);
+var A2 = topic("a", 900);
+swap([A2, T, reply()]);
+check("board morphs move no docked node", [moved, paneOf(c.el) === paneC, paneOf(T) === paneT, page.W.docked().map(label)], [[], true, true, ["Cn", "t"]]);
+var T2 = topic("t", 950);
+swap([T2, A2, reply()]);
+check("a docked topic updated anew lands in its own pane, wrapped", [paneOf(T2) === paneT, T2.children.map(function (n) { return n.className; }), T.parentNode], [true, ["tophead", "gal-pbody"], null]);
+El.prototype.insertBefore = ins;
+check("the record keeps the shown page", galOf().active, galOf().pages[0].id);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
+// TestGalleryRecordInPreviousBuild is the (10)=b stale-asset check: a
+// record the gallery build persisted, with a split page whose flat pin
+// orders it dual-wrote, opened by the previous asset build (cards.js at
+// d10d68e64, frozen unedited in testdata/pre_gallery) renders every docked
+// item as a flat pin in its pin list, in the gallery's depth-first order,
+// and leaves the rest on the board. The previous build's own save keeps
+// those pins and drops the gallery field (the owner-accepted layout loss),
+// and the gallery build reading that save migrates the flat pins back one
+// per page.
+func TestGalleryRecordInPreviousBuild(t *testing.T) {
+	old, err := os.ReadFile("testdata/pre_gallery/cards.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprintf("%x", sha256.Sum256(old)); got != "980be0e0581b7188b4aa8b1b449a0fa85b9ef7c73c2f1c042a263561637d9b8d" {
+		t.Fatal("previous build fixture changed: " + got)
+	}
+	data, err := dashboardFS.ReadFile("assets/cards.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := json.Marshal(string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldSrc, err := json.Marshal(string(old))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runNode(t, "gallery record in the previous build", "var CARDS = "+string(src)+";\nvar OLD_CARDS = "+string(oldSrc)+";\n"+cardsDOM+`
+// bootOld is the previous build's page: cards.js alone (no gallery.js), its
+// pin list in the board, mounted with that build's options.
+function bootOld(store, served) {
+  page = { doc: null, store: store, layouts: [], closedCalls: [], adopted: [], gridCols: "none" };
+  page.doc = new Doc();
+  var dbody = page.doc.body.appendChild(new El("div", page.doc));
+  page.board = dbody.appendChild(new El("div", page.doc));
+  page.board.id = "r-board";
+  served().forEach(function (n) { page.board.appendChild(n); });
+  var win = { listeners: {}, getSelection: function () { return null; }, addEventListener: function (type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }, innerWidth: 1000, innerHeight: 800 };
+  new Function("document", "window", "wsT", "getComputedStyle", "requestAnimationFrame", OLD_CARDS)(page.doc, win, wsT, function () { return { overflowY: "visible", gridTemplateColumns: "none" }; }, function () {});
+  page.W = win.WsCards;
+  check("the fixture is the previous build", [typeof page.W.pinList, typeof win.WsGallery], ["function", "undefined"]);
+  page.W.register("k", { open: function (c) { c.title({ name: c.data.name }); c.el.card = c.data.name; } });
+  page.W.mount(page.board, {
+    key: "cards", load: function (k) { return store[k] || null; }, save: function (k, v) { if (v === null) delete store[k]; else store[k] = v; },
+    column: null, shows: function () { return false; }, layout: function () {},
+    closed: function (from, done) { done(null); }, adopted: function () {}
+  });
+  return page;
+}
+function served() { return [topic("a", 300), topic("b", 200), topic("c", 100), reply()]; }
+
+// The gallery build: page 1 holds Cb, page 2 a column split of b over Ca,
+// page 3 a; Free and c stay on the board.
+var store = { cards: JSON.stringify({ cards: [{ id: "c1", kind: "k", pinned: 1, at: 1, data: { name: "Ca" } }, { id: "c2", kind: "k", pinned: 2, at: 2, data: { name: "Cb" } }, { id: "c3", kind: "k", pinned: 0, at: 3, data: { name: "Free" } }],
+  topics: [{ n: "a", p: 3, a: 0, b: 0 }, { n: "b", p: 4, a: 0, b: 0 }],
+  gallery: { v: 1, active: null, pages: [{ id: "p1", root: { card: "c2" } }, { id: "p2", root: { axis: "col", ratio: 0.5, a: { topic: "b" }, b: { card: "c1" } } }, { id: "p3", root: { topic: "a" } }] } }) };
+boot(store, served);
+check("the gallery build keeps the split page", pagesOf(), [["Cb"], ["b", "Ca"], ["a"]]);
+var saved = JSON.parse(store.cards);
+check("it dual-writes the depth-first orders",
+  [saved.cards.map(function (c) { return [c.id, c.pinned]; }), saved.topics.map(function (r) { return [r.n, r.p]; }).sort()],
+  [[["c1", 3], ["c2", 1], ["c3", 0]], [["a", 4], ["b", 2]]]);
+
+// The previous build over that record: flat pins in that order.
+var persisted = store.cards;
+bootOld(store, served);
+check("the previous build renders the docked items as flat pins, in order", page.W.pinList().children.map(label), ["Cb", "b", "Ca", "a"]);
+check("and the rest on its board, by recency", names(page.board).filter(function (n) { return n !== "DIV"; }), ["TOOLBAR", "c", "Free", "reply"]);
+var rewritten = JSON.parse(store.cards);
+check("its save keeps the flat pins and drops the gallery (accepted layout loss)",
+  [rewritten.gallery, rewritten.cards.map(function (c) { return [c.id, c.pinned]; }), rewritten.topics.map(function (r) { return [r.n, r.p]; }).sort()],
+  [undefined, [["c1", 3], ["c2", 1], ["c3", 0]], [["a", 4], ["b", 2]]]);
+check("the record it read was the gallery build's", JSON.parse(persisted).gallery.pages.length, 3);
+
+// The gallery build reading the previous build's save: one pin per page.
+boot(store, served);
+check("the flat pins migrate back one per page in order", pagesOf(), [["Cb"], ["b"], ["Ca"], ["a"]]);
 process.stdout.write(bad.join("\n"));
 `)
 }
@@ -1097,8 +1402,8 @@ check("Terminal captures board column", inset(term.el), "794px");
 span = 1111; resize(1000); resize(2400);
 check("resize never remeasures owning column", [inset(term.el), reads], ["794px", initialReads]);
 closeCard(term); term.pin(true);
-page.col.getBoundingClientRect = function () { return { width: 620 }; };
-term.maxBtn.fire("click"); check("pinned Terminal captures optional column", inset(term.el), "890px"); closeCard(term);
+page.col.querySelector(".gal-viewport").getBoundingClientRect = function () { return { width: 620 }; };
+term.maxBtn.fire("click"); check("docked Terminal captures the gallery's viewport", inset(term.el), "890px"); closeCard(term);
 term.pin(false); span = 0; term.maxBtn.fire("click"); check("Terminal fallback is 960", inset(term.el), "720px"); closeCard(term);
 span = 2600; term.maxBtn.fire("click"); check("column snapshot also has 1920 cap", inset(term.el), "240px"); closeCard(term);
 var convo = page.doc.body.appendChild(mk("div", { id: "convo" }));

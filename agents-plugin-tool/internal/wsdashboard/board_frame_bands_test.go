@@ -18,13 +18,15 @@ import (
 // frame, a held selection, the mention button's frame); coming NEAR again
 // remounts them; a frame mounted with no height yet, or mounted again, is
 // marked for its first height (wbFirst, topicResized). A report with no box
-// changes nothing. A frame in no topic
+// changes nothing. While the narrow view's Main Board stands off the view
+// behind a docked page (data-gal-away) leaving FAR keeps the frames. A frame in no topic
 // mounts at once, and without scroll margins everything mounts as before.
 // The cases execute under node when it is installed.
 func TestBoardFrameBands(t *testing.T) {
 	src := dashboardFuncs(t, "boardBands", "frameNear", "bandBoard", "bandTopic", "topicBand", "unmountFrames", "unmountFrame",
 		"frameShown", "mountFrame", "mountFrames", "mountFramesPaced", "mountSlice", "frameToggle", "cvWatch")
 	runNode(t, "viewport bands", frameDOM+src+`
+var root = { away: false, hasAttribute: function (k) { return k === "data-gal-away" && root.away; } };
 var mountList = [], mountTask = false, NEAR = "100% 0px", FAR = "400% 0px", topicNear = {}, topicRO = null, frameSizes = new Map(), mpend = null, cvRO = null;
 var clock = 0, timers = [];
 var performance = { now: function () { return clock; } };
@@ -82,6 +84,12 @@ check("the placeholder keeps the frame's attributes: " + JSON.stringify(pa1.attr
   !pa1.hasAttribute("srcdoc") && !pa1.hasAttribute("sandbox"));
 check("a height not landed yet goes to the placeholder", pa2.style.height === "78px" && !frameSizes.has(fa2));
 check("a swap's first-height marks go to the placeholder", pa1.wbKeep === true && pa2.wbGrow === true && !pa1.wbGrow && !pa2.wbKeep);
+// The narrow view's Main Board off the view behind a docked page keeps
+// its frames: switching back to it reloads nothing.
+report(A, NEAR, true);
+var away1 = el(pa1);
+root.away = true; report(A, NEAR, false); report(A, FAR, false); root.away = false;
+check("the Main Board off the view keeps its frames", el(pa1) === away1 && away1.parentNode);
 report(A, NEAR, true);
 check("coming near again remounts them", mounted(pa1) && mounted(pa2) && el(pa1).getAttribute("style") === "height: 120px");
 check("a frame mounted with no height yet is marked for its first height", fa1.wbFirst === true);
@@ -135,9 +143,9 @@ if (bad.length) console.log(bad.join("\n"));
 // already shown reporting a new height), a topic in view or below, a
 // maximized topic, a topic's first size, and any change while a keep
 // session runs on the scroller move nothing; a topic taken off the page
-// leaves the observer. The pinned column scrolls its own topics where it
-// scrolls, else the board column does; a board-only page compensates the
-// document scroller. The cases execute under node when
+// leaves the observer. A docked topic (cards.js) scrolls in its pane's own
+// body (.gal-pbody), which it fills, so its size changes move no scroller;
+// a board-only page compensates the document scroller. The cases execute under node when
 // it is installed.
 func TestBoardTopicResizeKeepsTheView(t *testing.T) {
 	src := dashboardFuncs(t, "topicResized", "topicSettling", "topicScroller")
@@ -150,17 +158,16 @@ var window = { wbHistory: { keeping: function (s) { return s === keeping ? {} : 
 function Scroller(name, top) { this.name = name; this.top = top; this.clientTop = 0; this.scrollTop = 1000; this.scrollHeight = 5000; this.clientHeight = 800; this.kids = []; }
 Scroller.prototype.contains = function (t) { return this.kids.indexOf(t) >= 0; };
 Scroller.prototype.getBoundingClientRect = function () { return { top: this.top }; };
-var bcol = new Scroller("bcol", 50), pins = new Scroller("pins", 60), html = new Scroller("html", 0);
+var bcol = new Scroller("bcol", 50), html = new Scroller("html", 0);
 var doc = { scrollingElement: html };
 function $(id) { return id === "bcol" ? bcol : null; }
 function getComputedStyle(s) { return { overflowY: s.oy || "auto" }; }
 // A topic's rect is its layout top less its scroller's scroll offset.
-function Topic(name, sc, y, h, inPins) {
-  this.name = name; this.sc = sc; this.y = y; this.h = h; this.isConnected = true; this.attrs = {}; this.inPins = inPins;
-  bcol.kids.push(this); if (inPins) pins.kids.push(this);
+function Topic(name, sc, y, h) {
+  this.name = name; this.sc = sc; this.y = y; this.h = h; this.isConnected = true; this.attrs = {}; this.children = [];
+  bcol.kids.push(this);
 }
 Topic.prototype.hasAttribute = function (k) { return k in this.attrs; };
-Topic.prototype.closest = function (sel) { return sel === ".bpins" && this.inPins ? pins : null; };
 Topic.prototype.getBoundingClientRect = function () {
   var top = (this.sc === html ? 0 : this.sc.top) + this.y - this.sc.scrollTop;
   return { top: top, bottom: top + this.h, height: this.h };
@@ -200,15 +207,20 @@ delete above.attrs["data-max"];
 above.isConnected = false;
 grow(above, 0);
 check("a removed topic leaves the observer", unobserved.join() === "above" && bcol.scrollTop === 900);
-// The pinned column scrolls its own topics where it scrolls.
-var pinned = new Topic("pinned", pins, 0, 200, true);
-pins.scrollTop = 500;
-grow(pinned, 200); grow(pinned, 260);
-check("a pinned topic above the pinned column's view scrolls that column", pins.scrollTop === 560 && bcol.scrollTop === 900);
-pins.scrollHeight = 100;
-var inner = new Topic("inner", bcol, 0, 100, true);
+// A docked topic scrolls in its own body, which it fills: its size
+// changes move neither that body nor the board column.
+window.WsCards = { isDocked: function (t) { return !!t.docked; } };
+var pane = new Scroller("pane", 60), body = new Scroller("pbody", 90);
+pane.scrollTop = 0; body.scrollTop = 500;
+body.classList = { contains: function (c) { return c === "gal-pbody"; } };
+var docked = new Topic("docked", pane, 0, 200);
+docked.docked = true; docked.children = [body];
+grow(docked, 200); grow(docked, 260);
+check("a docked topic's resize moves neither its body nor the board column", body.scrollTop === 500 && bcol.scrollTop === 900);
+window.WsCards.isDocked = function () { return false; };
+var inner = new Topic("inner", bcol, 0, 100);
 grow(inner, 100); grow(inner, 150);
-check("a pin list that does not scroll leaves it to the board column", bcol.scrollTop === 950 && pins.scrollTop === 560);
+check("a topic not docked is the board column's", bcol.scrollTop === 950 && body.scrollTop === 500);
 // Board-only layout: bcol is not an independent scroller. Its document
 // must receive exactly one height delta (native anchoring is off in CSS).
 bcol.oy = "visible";

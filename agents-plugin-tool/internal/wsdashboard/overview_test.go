@@ -72,8 +72,8 @@ function node(name,filtered){return {name:name,attrs:filtered?{"data-state-filte
   hasAttribute:function(k){return k in this.attrs;},getAttribute:function(k){return this.hasAttribute(k)?this.attrs[k]:null;},
   setAttribute:function(k,v){this.attrs[k]=v;},focus:function(){doc.activeElement=this;},
   getBoundingClientRect:function(){return {top:20,bottom:60,height:40};},querySelector:function(){return null;}};}
-var a=node("a",false),hidden=node("hidden",true),b=node("b",false),pin=node("pin",false),hiddenPin=node("hiddenPin",true);
-var o={board:{querySelectorAll:function(){return [a,hidden,b];}},pins:{querySelectorAll:function(){return [pin,hiddenPin,a];}}};
+var a=node("a",false),hidden=node("hidden",true),b=node("b",false);
+var o={board:{querySelectorAll:function(){return [a,hidden,b];}}};
 function getComputedStyle(){return {marginBottom:"6px"};}
 function layer(){return "overview";} function classify(){return "item";}
 function swallow(){swallowed++;} function scroller(){return {};}
@@ -84,7 +84,7 @@ rove(a); key({key:"ArrowDown",target:a});
 check("arrow skips filtered topic",[doc.activeElement.name,hidden.getAttribute("tabindex"),swallowed],["b",null,1]);
 key({key:"ArrowUp",target:b});
 check("reverse arrow also skips filtered topic",doc.activeElement.name,"a");
-check("motion snapshot excludes filtered board and pinned topics and deduplicates",snapshot().map(function(s){return [s.n.name,s.height,s.margin];}),[["a",40,6],["b",40,6],["pin",40,6]]);
+check("motion snapshot covers the board's unfiltered topics only (docked units stay in the gallery)",snapshot().map(function(s){return [s.n.name,s.height,s.margin];}),[["a",40,6],["b",40,6]]);
 process.stdout.write(bad.join("\n"));
 `)
 }
@@ -108,14 +108,13 @@ El.prototype.getBoundingClientRect=function(){var top=this.top||0;return {top:to
 function style(){return {overflowY:"visible",marginBottom:"0",scrollPaddingTop:"0",getPropertyValue:function(){return "";}};}
 var board=doc.body.appendChild(mk("div")), toolbar=board.appendChild(mk("div.board-toolbar",{},[mk("button.board-overview")]));
 toolbar.top=-80;toolbar.firstChild.top=-80;
-var pins=board.appendChild(mk("div"));
 var rows=["a","b","c","d"].map(function(name,i){var n=board.appendChild(mk("section.topic",{"data-topic":name}));n.top=20+i*40;return n;});
 var a=rows[0],b=rows[1],c=rows[2],d=rows[3],button=toolbar.firstChild;
 a.setAttribute("data-state-filtered","");
 var session={getItem:function(k){return storage[k]||null;},setItem:function(k,v){storage[k]=v;},removeItem:function(k){delete storage[k];}};
 new Function("document","window","sessionStorage","getComputedStyle","requestAnimationFrame","performance","innerHeight","innerWidth","setTimeout",OVERVIEW)(doc,win,session,style,function(fn){frames.push(fn);},{now:function(){return clock;}},500,500,function(){});
 var api=win.WsOverview;
-function mount(){api.mount({board:board,pins:pins,toolbar:toolbar,rid:"fixture",place:function(){},keep:function(n,opt){kept.push([n.getAttribute("data-topic")||"toolbar",opt.offset]);}});}
+function mount(){api.mount({board:board,toolbar:toolbar,rid:"fixture",place:function(){},keep:function(n,opt){kept.push([n.getAttribute("data-topic")||"toolbar",opt.offset]);}});}
 function drain(){while(frames.length){clock+=120;frames.shift()(clock);}}
 function selected(){return rows.filter(function(n){return n.getAttribute("tabindex")==="0";}).map(function(n){return n.getAttribute("data-topic");});}
 function state(){return [api.active(),root.hasAttribute("data-overview"),button.getAttribute("aria-pressed")];}
@@ -166,7 +165,7 @@ func TestOverviewPageIntegration(t *testing.T) {
 	if strings.Contains(overview, "scrollTop =") || strings.Contains(overview, "scrollIntoView(") || strings.Contains(overview, "localStorage") || strings.Contains(overview, ".fold(") {
 		t.Error("overview bypasses view-only/shared scroll ownership")
 	}
-	for _, want := range []string{"o.keep(n,", "ws.dashboard.overview.", "spacer.style.height", "o.place(true)", "o.place(false)", "scroller(landed) === o.pins", "e.stopImmediatePropagation()", "n.focus({ preventScroll: true })"} {
+	for _, want := range []string{"o.keep(n,", "ws.dashboard.overview.", "spacer.style.height", "o.place(true)", "o.place(false)", "e.stopImmediatePropagation()", "n.focus({ preventScroll: true })"} {
 		if !strings.Contains(overview, want) {
 			t.Errorf("missing overview contract %q", want)
 		}

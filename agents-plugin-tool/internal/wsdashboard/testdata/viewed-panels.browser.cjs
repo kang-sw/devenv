@@ -95,12 +95,12 @@ async function guard(run, promise) {
 async function quiet(run, ms = 240) { await guard(run, run.frame.waitForTimeout(ms)); }
 async function geometry(run) {
   return guard(run, run.frame.evaluate(() => {
-    const panels = [...document.querySelectorAll('#r-board .entry-panel, #bpins .entry-panel, #r-board .wb-entry:not(.panel), #bpins .wb-entry:not(.panel)')];
+    const panels = [...document.querySelectorAll('#r-board .entry-panel, #bgal .entry-panel, #r-board .wb-entry:not(.panel), #bgal .wb-entry:not(.panel)')];
     return {
       url: location.href, assetID: document.documentElement.dataset.assets,
       focus: { tag: document.activeElement.tagName, id: document.activeElement.id },
       badge: [...document.querySelectorAll('.wb-oq-top .oq-updates')].filter(n => !n.hidden).map(n => n.textContent),
-      topics: [...document.querySelectorAll('#r-board > section.topic, #bpins > section.topic')].map(n => n.dataset.topic),
+      topics: [...document.querySelectorAll('#r-board > section.topic, #bgal .gal-pane > section.topic')].map(n => n.dataset.topic),
       panels: [...new Set(panels)].map(n => {
         const h = window.__viewedGeometry(n), r = n.getBoundingClientRect(), s = h.scroller;
         return { id: n.id, topic: n.closest('[data-topic]').dataset.topic, open: n.open, top: r.top, bottom: r.bottom, height: r.height,
@@ -429,8 +429,9 @@ async function pinned(width) {
   await guard(run, run.frame.locator('.wb-oq-top .oq-updates').click()); await quiet(run);
   check(run.name + ' pinned explicit release', (await bytes(run, 'p7')).includes('pin2'), null);
   const moved = await guard(run, run.frame.evaluate(() => {
-    window.WsCards.move(document.querySelector('#bpins section[data-topic="Q"]'), { pin: true, index: 1 });
-    return [...window.WsCards.pinList().children].filter(n => n.dataset.topic).map(n => n.dataset.topic);
+    // A docked unit's raise puts its gallery page first.
+    document.querySelector('#bgal section[data-topic="Q"] .tbar .t-raise').click();
+    return window.WsCards.docked().filter(n => n.dataset.topic).map(n => n.dataset.topic);
   }));
   check(run.name + ' explicit owner pin reorder applies immediately', moved.indexOf('Q') < moved.indexOf('P'), moved);
   await closeRun(run);

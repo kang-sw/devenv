@@ -152,20 +152,11 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 :root[data-overview] .r-board :is(section.topic, .bcard) { position: relative; margin-bottom: 6px; }
 :root[data-overview] .r-board :is(section.topic, .bcard):is(:hover, :focus-visible) { outline: 1px solid var(--wb-primary); outline-offset: -1px; }
 .overview-here::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--wb-primary); z-index: 3; pointer-events: none; }
-:root[data-overview][data-pincol] .r-board > .bpins { border: 0; padding: 0; margin-bottom: 0; }
-:root[data-overview][data-pincol] .r-board > .bpins::before { display: none; }
-:root[data-overview]:not([data-pincol]) .r-board > .bpins::before { filter: brightness(.28) saturate(.4); }
-:root[data-overview] .r-board > .bpins:not(:empty) { display: flow-root; }
-.r-board [data-overview-motion], .bpins [data-overview-motion] { content-visibility: visible !important; position: relative; }
-:is(.r-board, .bpins) [data-overview-motion] :is(section.topic > :not(.tophead), .bc-body) { content-visibility: visible !important; }
-:is(.r-board, .bpins) [data-overview-motion] :is(.tophead, .bc-hd) { position: static !important; }
-:is(.r-board, .bpins) [data-overview-motion] .trecap .rtext { display: block; overflow: hidden; }
-.overview-spacer, .overview-slot { flex: none; pointer-events: none; }
-.overview-ghost { position: fixed; z-index: 46; pointer-events: none; box-sizing: border-box; overflow: hidden; border-radius: var(--wb-radius); background: var(--wb-card); box-shadow: var(--wb-shadow-hi); }
-.overview-ghost > .tophead, .overview-ghost > .bc-hd { position: static !important; }
-.overview-ghost .rtext { overflow: hidden; }
-.overview-ghost :is(.t-close-request, .tnote-toggle, .d-max, .d-min, .t-fold, .t-raise, .bc-acts, .bc-fold, .bc-raise, .bc-max, .bc-close) { opacity: 0; }
-.overview-ghost-body { height: 100%; background: var(--wb-card); }
+:root[data-overview] .bgal { filter: brightness(.28) saturate(.4); }
+.r-board [data-overview-motion] { content-visibility: visible !important; position: relative; }
+.r-board [data-overview-motion] :is(section.topic > :not(.tophead), .bc-body) { content-visibility: visible !important; }
+.r-board [data-overview-motion] :is(.tophead, .bc-hd) { position: static !important; }
+.r-board [data-overview-motion] .trecap .rtext { display: block; overflow: hidden; }
 :root[data-shell] :is(.dwrap > .top, #rail), .dash :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .dr-handle) { transition: filter 240ms cubic-bezier(.2,.8,.2,1); }
 .overview-spacer { flex: none; pointer-events: none; }
 .overview-flash { animation: overview-flash 1.2s ease-out; }

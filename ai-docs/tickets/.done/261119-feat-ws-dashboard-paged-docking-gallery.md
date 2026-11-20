@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 7a76a0e23555c53f
 sage-review-completeness-reviewed: 7a76a0e23555c53f
+completed: 2026-11-20
 ---
 
 # 대시보드 고정 패널을 Paged Docking Gallery(2D 스플릿·바운스-스냅)로 전환
@@ -429,6 +430,50 @@ Verification:
   docked topic scrolls the target into view unobstructed by the header. After it
   passes, close `261115`.
 
+### Result (f7b0cb109) - 2026-11-20
+
+Landed (`d8fec4dcf..f7b0cb109`):
+
+- `assets/gallery.js` (window.WsGallery, shipped ahead of cards.js in `CardsScript`) is the only home of
+  the page/split-tree model, migration and reconcile, depth-first ordinals, positions, the layout mode
+  mapping, drop zones, and the Phase 3 timing gates (`d8fec4dcf`).
+- `cards.js` builds and owns `#bgal` (`.bp-edge`, `.gal-rail` of `button.gal-dot`, clipped
+  `.gal-viewport` with `.gal-page` slides and the trailing `.gal-plus`); `pinList()` is removed for
+  `gallery()` / `docked()` / `isDocked()` / `activate()`; every caller (board morph, frames, conversation,
+  overview, stream.js `navigate`, topicScroller) migrated (`0e8d810d1`, `862e67a40`).
+- Narrow view: the board column's children move off-screen inside the column clip while a docked page
+  shows, so the covered Main Board reports non-intersecting; inactive slides sit 100% + 24px off the
+  viewport so a touching edge never counts as intersecting (`7dc18b475`, `9730b4de0`).
+
+Verification:
+
+- `node --test testdata/gallery-*.test.cjs`: 47/47.
+- `go test ./internal/wsdashboard/ -count=1`: ok (321s); `./internal/wswhiteboard/...`: ok (199s).
+- `go test ./internal/wsdashboard -run Gallery` with Playwright (`TestGalleryBrowser`, `8f3533d17`): every
+  Phase 1 Playwright item passes, three consecutive runs. Other browser suites touching the board pass or
+  fail identically on base `d10d68e64` (pre-existing).
+- Stale-asset check (10)=b (`TestGalleryRecordInPreviousBuild`, `90c080681`): the frozen previous
+  `cards.js` renders the new record as flat pins in depth-first order; its own save drops `gallery`, and
+  the new build reloads one pin per page.
+- Deep-link check (12)=a: pass — the target lands at top 123.3px, below the non-sticky header's bottom
+  111.3px, and owns its `elementFromPoint`. `261115` closed.
+- Captures (`ai-docs/assets/captures/261119-gallery-phase1/`, `c9ffea097`): compared live wide 2400x1000,
+  narrow 1200x900 (page and home) and touch 420x860 vs mockup v4 wide/narrow: match; deliberate styling
+  differences are listed in that folder's README.
+
+Decisions:
+
+- `active` also takes `"+"` (the trailing page) besides a page id or `null` (home), so a view on `+`
+  survives re-derivation.
+- A center drop is defined only between two docked panes; a board-sourced drag gets the four edges only.
+- In narrow view with zero docked pages the whole bounce-snap gate is inert (rail hidden), not only Page
+  0's bottom.
+- Overview covers the Main Board only; docked units stay in the dimmed gallery (no re-parenting).
+- `data-pincol` is kept as the "right column shows, session rail overlays below 2200px" signal its
+  existing readers use; `data-gal=col|drag|narrow` is added. A wide drag with zero pages shows a fixed
+  right-edge overlay so the grid does not reflow under the pointer.
+- A docked topic reporting FAR no longer unmounts its frames, so inactive pages never reload doc frames.
+
 ### Phase 2: 2D split layout tree and edge docking
 
 Phase 2 owns multi-pane recursive 2D layouts. Scope:
@@ -452,6 +497,35 @@ Verification:
   one pane out of a multi-pane page collapsing its parent split, and last-pane
   page removal; live captures of two-pane and four-pane layouts compared with
   mockup v4.
+
+### Result (375611aa7) - 2026-11-20
+
+Landed (`2f5ad6185..375611aa7`):
+
+- Five-zone drop over a pane on the shown page through `WsGallery.zone` / `place`: an edge splits, the
+  center swaps (offered only to an already docked pane), previewed by one `.gal-overlay` over the
+  viewport (`239b67f6b`). Phase 1's interim "drop on the shown page appends" is gone; a rail dot drop
+  still appends.
+- Split dividers `.gal-div` (role=separator, aria-valuenow, focusable): pointer drag, arrow keys
+  (±0.05), double-click reset, all through `setRatio` (clamped 0.1..0.9) and persisted.
+- `buildGallery` fills each element only after it is attached, so an edge split, a collapse, or a first
+  dock moves panes with `moveBefore` and frames never reload.
+
+Verification:
+
+- `node --test testdata/gallery-*.test.cjs`: 47/47 (gallery.js unchanged; `gallery-tree.test.cjs`
+  already covers split, swap, move, remove, collapse, normalize, ratio clamping, ordinals).
+- `TestBoardGallery` (node DOM): edge split from another page, center swap, divider keys and reset.
+- `go test ./internal/wsdashboard -run TestGalleryBrowser` (Playwright, `fe1672529`): 3 consecutive
+  passes — zone previews, all four edge drops and the center swap, moves within and across pages, a
+  four-pane page, divider drag/clamp/keys/reset kept across reload, unpinning one pane collapsing its
+  split, last-pane page removal, and no remount (frame handles kept, zero iframe loads; the check fails
+  with `moveBefore` disabled).
+- `go test ./internal/wsdashboard/ -count=1`: ok (314s); `./internal/wswhiteboard/...`: ok (187s). The
+  15 browser suites failing under the Playwright env fail identically at the Phase 1 tip.
+- Captures (`ai-docs/assets/captures/261119-gallery-phase2/`): compared live wide two-pane, four-pane,
+  and right-zone preview vs mockup v4: match; deliberate differences (one viewport overlay, the 6px gap
+  is the divider) are in that folder's README.
 
 ### Phase 3: Spring-loaded hover and boundary bounce-snap
 
@@ -486,3 +560,44 @@ Verification:
   emulation never charges tension.
 - Performance check per `ai-docs/manuals/performance.md` (mounted inactive pages,
   wheel handler cost).
+
+### Result (1bb6e42fa) - 2026-11-20
+
+Landed (`37577f44d..1bb6e42fa`):
+
+- Spring-loaded rail dots through `WsGallery.Hover` from the drag's `over()` with one timer: 300ms over
+  a dot shows its page mid-drag (the shown page's dot never springs); a drop before 300ms keeps the
+  Phase 1 behaviour (`+` docks a new page, a page dot appends, `⌂` unpins) (`1bd1c7dbd`).
+- Wheel-only bounce-snap gate (`WsGallery.Gate`) on `.gal-viewport`, and on the board column in narrow
+  view only while a page is docked. The scroller is the nearest scrolling ancestor of the event target
+  within the pane (scroll chaining stops at `overscroll-behavior: contain`), falling back to the pane's
+  `.gal-pbody` / `.bc-body` or the board scroller (`1bb6e42fa`, review fix). Pull pill with %, target dot
+  `.pull-target`, ready from 85%, rubber band via the CSS `translate` property, micro-bounce at edges,
+  420ms lock, 240ms idle spring-back. Terminals, iframes, canvases, media, maximized sheets, pinch
+  (ctrlKey) and already-prevented events never charge it. New i18n keys `js.pins.edge`, `js.pins.wait`
+  in every wsi18n table.
+- Review fix in the model: with no page left `active` returns to home, and narrow `position()` reads
+  `"+"` with zero pages as home, so a board drag never hides the Main Board (`1bb6e42fa`).
+
+Verification:
+
+- `node --test testdata/gallery-*.test.cjs`: 50/50 (three new state cases fail against the pre-fix model).
+- `go test ./internal/wsdashboard -run TestGalleryBrowser` (Playwright, `58d747208`, `1bb6e42fa`): every
+  Phase 3 item — 300ms hover switch (wide and narrow), `+` drop before 300ms, hovered pane drives the flip
+  in a split page, lock and idle spring-back, edge micro-bounce with no flip or wrap, narrow Page 0 top /
+  bottom / inert with zero pages, a docked terminal and doc frame never flip, touch scroll gestures charge
+  nothing, a docked explorer list scrolls natively before the gate engages — 4/4 consecutive passes after
+  the review fix. Negative controls (spring removed, exclusions removed) fail the suite.
+- `go test ./internal/wsdashboard/ -count=1`: ok (309s); `./internal/wswhiteboard/...`: ok (286s).
+- Performance (`ai-docs/manuals/performance.md`; no file I/O on this path), Chromium synthetic events:
+  inner-scroll pass about +3µs per event over the board baseline; the boundary path is 108-121µs back to
+  back (worst case, a style read right after the previous write), tens of µs at one event per frame.
+  Inactive mounted pages are never read by the handler.
+
+Decisions:
+
+- Scroll chaining inside a pane respects `overscroll-behavior`; wheeling over a docked topic's header
+  follows the pane body's boundary.
+- A `preview` card's body is not excluded as a whole; only its iframe / media / canvas children are.
+- Known limit: in narrow view with zero docked pages the spring hover onto `+` no longer shows the empty
+  `+` page (dropping on the `+` dot still docks).

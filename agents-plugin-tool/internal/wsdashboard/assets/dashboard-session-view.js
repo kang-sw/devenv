@@ -147,7 +147,7 @@
       if (!cancelled) {
         Object.keys(saved.panes).forEach(function (id) { if (id !== "convo" && PANES.indexOf(id) >= 0 && Number.isFinite(saved.panes[id])) paneScroll[id] = saved.panes[id]; });
         PANES.forEach(function (id) {
-          if (id === "convo" || id === "bcol" || id === "bpins") return;
+          if (id === "convo" || id === "bcol") return;
           var el = $(id); if (visible(el)) placeSessionScroll(el, saved.panes[id]);
         });
         if (!reload) {

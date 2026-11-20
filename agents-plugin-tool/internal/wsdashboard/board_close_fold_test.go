@@ -50,7 +50,7 @@ function frag(nodes) { return { childNodes: nodes }; }
 function boardNodes(input) { return frag(input).childNodes; }
 function isPeer() { return false; }
 function isPanel() { return false; }
-var window = { WsCards: { weave: function (w) { return { pins: [], board: w }; }, settle: function (el, p) { el.children = p.board; }, pinList: function () { return null; } } };
+var window = { WsCards: { weave: function (w) { return { pins: [], board: w }; }, settle: function (el, p) { el.children = p.board; }, docked: function () { return []; }, isDocked: function () { return false; }, wrap: function () {} } };
 var openState = {}, boardSeen = {}, doc = {};
 `+src+`
 // topic builds a topic section whose body and one settled row the server
