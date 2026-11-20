@@ -453,6 +453,19 @@ routes/dialogs, and worker-profile Phase 2 owns its hire-approval amendment.
 | risk.test | high | Existing fixtures do not prove common-level enforcement; new admission, reopen, skew and UI cases must distinguish flags from confinement. |
 | risk.security_or_contract | high | User-only escalation and child ceilings cross trusted-route/model boundaries; ignored HTTP inputs and strict Profile/MCP readers affect compatibility. |
 
+## Open Decision Queue
+
+Last ID: (1877)
+
+(1875) [open] [technical] Settle the missing common permission UI and reconnect-aware positive preflight: finish it in Phase 2, move it to Phase 5, or drop it.
+Finish in Phase 2 over moving it to Phase 5 or dropping it - Phase 2 owns reusable common controls and full-warning confirmation, while the current dashboard still reads and sends only native `permission_mode`.
+
+(1876) [open] [technical] Settle current-parent admission for workers outside `agent.spawn`: finish it in Phase 2, move it to Phase 5, or drop it.
+Finish in Phase 2 over treating `agent.spawn` alone as sufficient, moving it to Phase 5, or dropping it - Phase 2 and Decision 14 own existing-worker admission and explicitly forbid Phase 5 from postponing Phase 2 child checks.
+
+(1877) [open] [technical] Settle the exported worker permission input, State/control projection, and authority-accurate launch nudge: finish them in Phase 2, move them to the worker-profile ticket or Phase 5, or drop them.
+Finish in Phase 2 over moving or dropping them - current State and `SetPermissionLevel` explicitly omit/refuse workers, and worker launch diagnostics derive the legacy loadout before reading an `agent.spawn` child's stored authority.
+
 ## Phases
 
 ### Phase 1: Settle the contract and compatibility documentation
