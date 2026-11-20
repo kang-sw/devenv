@@ -273,6 +273,8 @@ func replayClientName(harness string) string {
 		return "claude-code"
 	case "codex":
 		return "codex"
+	case "agy":
+		return "agy"
 	}
 	return "ws-mcp-http-replay"
 }

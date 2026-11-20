@@ -41,12 +41,12 @@ func TestMCPTokenIssueReissueAndVoid(t *testing.T) {
 	shortStartWait(t)
 	h := newHarness(t, map[string]string{"chat": chatProfile})
 	r := h.runner
-	if s := r.attachMCP("c1", "", nil, "/w", 0); s != nil {
+	if s := r.attachMCP("c1", "", nil, "/w", 0, BackendAgy); s != nil {
 		t.Fatalf("with no endpoint there is no HTTP session to give: %+v", s)
 	}
 	r.SetEndpoint("http://127.0.0.1:7/")
 	env := map[string]string{EnvAllowedTools: "tickets.query"}
-	s1 := r.attachMCP("c1", "", env, "/w", 0)
+	s1 := r.attachMCP("c1", "", env, "/w", 0, BackendAgy)
 	if s1 == nil || s1.URL != "http://127.0.0.1:7"+wsdashboard.ProxyHTTPPath || len(s1.Token) != 64 {
 		t.Fatalf("a start gets the route and a fresh token: %+v", s1)
 	}
@@ -77,7 +77,7 @@ func TestMCPTokenIssueReissueAndVoid(t *testing.T) {
 		t.Fatal("the waiting resolution never returned")
 	}
 	mcpStartWait = restore
-	if hello.OwnerPID != 4242 || hello.Env["WS_MCP_HARNESS_PID"] != "4242" || hello.Cwd != "/w" || hello.Env[EnvAllowedTools] != "tickets.query" || hello.Env["PATH"] != "/bin" {
+	if hello.OwnerPID != 4242 || hello.Harness != BackendAgy || hello.Env["WS_MCP_HARNESS_PID"] != "4242" || hello.Cwd != "/w" || hello.Env[EnvAllowedTools] != "tickets.query" || hello.Env["PATH"] != "/bin" {
 		t.Fatalf("the hello is the started process's: %+v", hello)
 	}
 	if _, has := hello.Env[EnvMCPSessionToken]; has {
@@ -90,7 +90,7 @@ func TestMCPTokenIssueReissueAndVoid(t *testing.T) {
 	}
 
 	// The next start voids the last one's token.
-	s2 := r.attachMCP("c1", "", env, "/w", 0)
+	s2 := r.attachMCP("c1", "", env, "/w", 0, BackendAgy)
 	if s2 == nil || s2.Token == s1.Token {
 		t.Fatalf("each start draws its own token: %+v", s2)
 	}
@@ -112,7 +112,7 @@ func TestMCPTokenIssueReissueAndVoid(t *testing.T) {
 
 	// Another conversation's token is its own; the process's end voids only
 	// its conversation's.
-	s3 := r.attachMCP("c2", "", env, "/w2", 0)
+	s3 := r.attachMCP("c2", "", env, "/w2", 0, BackendAgy)
 	s3.Started(nil, 0)
 	r.revokeToken("c1")
 	if !isClosed(void2) {
@@ -125,12 +125,12 @@ func TestMCPTokenIssueReissueAndVoid(t *testing.T) {
 	// A rejoin restores the recorded token, even before an endpoint is set;
 	// the recorded PID stands in for one the backend cannot report.
 	r.SetEndpoint("")
-	s4 := r.attachMCP("c3", "recorded-token", env, "/w3", 99)
+	s4 := r.attachMCP("c3", "recorded-token", env, "/w3", 99, BackendAgy)
 	if s4 == nil || s4.Token != "recorded-token" {
 		t.Fatalf("a rejoin keeps its process's token: %+v", s4)
 	}
 	s4.Started([]string{"PATH=/bin"}, 0)
-	if hello, _, ok := r.ResolveMCPToken("recorded-token"); !ok || hello.OwnerPID != 99 || hello.Env["WS_MCP_HARNESS_PID"] != "99" {
+	if hello, _, ok := r.ResolveMCPToken("recorded-token"); !ok || hello.OwnerPID != 99 || hello.Harness != BackendAgy || hello.Env["WS_MCP_HARNESS_PID"] != "99" {
 		t.Fatalf("the restored token resolves with the recorded PID: %+v %v", hello, ok)
 	}
 	for _, token := range []string{"", "unknown"} {
@@ -145,7 +145,7 @@ func TestMCPTokenIssueReissueAndVoid(t *testing.T) {
 func TestMCPTokenVoidEndsAWaitingResolution(t *testing.T) {
 	h := newHarness(t, map[string]string{"chat": chatProfile})
 	h.runner.SetEndpoint("http://127.0.0.1:7")
-	s := h.runner.attachMCP("c1", "", nil, "/w", 0)
+	s := h.runner.attachMCP("c1", "", nil, "/w", 0, BackendAgy)
 	done := make(chan bool, 1)
 	go func() {
 		_, _, ok := h.runner.ResolveMCPToken(s.Token)

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 )
 
@@ -789,7 +790,7 @@ func TestDetectHarnessFromInitializeParamsPrecedence(t *testing.T) {
 		"clientInfo": {"name": "ws-pi-bridge", "version": "codex-compat-1.0-claude-shim"},
 		"capabilities": {"note": "this client emulates codex and claude tooling"}
 	}`)
-	if got := detectHarnessFromInitializeParams(raw); got != "pi" {
+	if got := (&Server{}).detectHarnessFromInitializeParams(raw); got != "pi" {
 		t.Fatalf("detectHarnessFromInitializeParams with decoy codex/claude substrings = %q, want \"pi\"", got)
 	}
 
@@ -800,7 +801,17 @@ func TestDetectHarnessFromInitializeParamsPrecedence(t *testing.T) {
 		"clientInfo": {"name": "some-other-client", "version": "codex-compat-1.0-claude-shim"},
 		"capabilities": {"note": "this client emulates codex and claude tooling"}
 	}`)
-	if got := detectHarnessFromInitializeParams(rawWithoutPiName); got != "codex" {
+	if got := (&Server{}).detectHarnessFromInitializeParams(rawWithoutPiName); got != "codex" {
 		t.Fatalf("detectHarnessFromInitializeParams fallback without pi clientInfo = %q, want \"codex\" (substring fallback)", got)
+	}
+
+	registrations := descriptorRegistrations()
+	s := NewServerWithOptions(ServerOptions{Root: t.TempDir(), Version: "test", Harness: wsagent.BackendAgy,
+		AgentBackends: wsagent.NewRunner(wsagent.Options{Backends: registrations})})
+	if got := s.currentHarness(); got != wsagent.BackendAgy {
+		t.Fatalf("registered hello harness = %q, want agy", got)
+	}
+	if got := s.detectHarnessFromInitializeParams(json.RawMessage(`{"clientInfo":{"name":"agy"}}`)); got != wsagent.BackendAgy {
+		t.Fatalf("registered initialize harness = %q, want agy", got)
 	}
 }

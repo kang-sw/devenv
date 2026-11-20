@@ -207,7 +207,7 @@ func TestAgyLeadOverACP(t *testing.T) {
 		t.Fatalf("the prompt text: %+v", text.Prompt)
 	}
 	eventually(t, "the session id recorded", func() bool { return h.record(id).SessionID == "agy-s1" })
-	if hello, _, ok := h.runner.ResolveMCPToken(token); !ok || !sameDir(hello.ProjectRoot, h.root) || hello.Env[EnvHostedSessionKey] != rec.WSKey {
+	if hello, _, ok := h.runner.ResolveMCPToken(token); !ok || hello.Harness != BackendAgy || !sameDir(hello.ProjectRoot, h.root) || hello.Env[EnvHostedSessionKey] != rec.WSKey {
 		t.Fatalf("the token resolves to the lead's ws-mcp context: %+v %v", hello, ok)
 	}
 	f.mu.Lock()
@@ -272,8 +272,8 @@ func TestAgyLeadOverACP(t *testing.T) {
 	h.holders.restart()
 	h.startAt(endpoint)
 	eventually(t, "the token restored", func() bool {
-		_, _, ok := h.runner.ResolveMCPToken(token)
-		return ok
+		hello, _, ok := h.runner.ResolveMCPToken(token)
+		return ok && hello.Harness == BackendAgy
 	})
 	h.send(id, "again")
 	eventually(t, "the second prompt", func() bool { return len(agyPromptIDs(h, holder)) == 2 })
@@ -289,6 +289,10 @@ func TestAgyLeadOverACP(t *testing.T) {
 	}
 	h.holders.out(holder, `{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"`+ids[1]+`"}`)
 	h.idle(id)
+	st, err := h.runner.HandOff(id)
+	if err != nil || st.Status != StatusHandedOff || st.ResumeCommand != "cd "+shellQuote(h.root)+" && agy --conversation agy-s1" {
+		t.Fatalf("agy handoff = %+v, %v", st, err)
+	}
 }
 
 // TestAgyLeadRejoinOfAnUnfinishedStartRestarts: a daemon that died between

@@ -151,6 +151,7 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 	s.sessions = newSessionStore()
 	s.sessions.cacheHome = s.getenv(wsstate.EnvCacheHome)
 	s.declared = loadDeclaredConfig(s.getenv(envConfigManifests))
+	s.agentBackendSource = opts.AgentBackends
 	for _, rejected := range s.declared.rejected {
 		fmt.Fprintf(diag, "ws-mcp: config manifest rejected: %s\n", rejected)
 		s.debugEvent("config.manifest_rejected", map[string]any{"manifest": rejected})
@@ -159,7 +160,6 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 		s.observeHarness("hello", opts.Harness)
 	}
 	s.whiteboardChanged = opts.WhiteboardChanged
-	s.agentBackendSource = opts.AgentBackends
 	s.pi.agents = opts.Agents
 	s.startPiFeed()
 	return s

@@ -343,7 +343,7 @@ func (s *Server) handle(ctx context.Context, req request) response {
 	switch req.Method {
 	case "initialize":
 		s.observePiDaemonAgents(req.Params)
-		s.observeHarness("initialize", detectHarnessFromInitializeParams(req.Params))
+		s.observeHarness("initialize", s.detectHarnessFromInitializeParams(req.Params))
 		// No session/root exists yet at this call: a machine-scope identity
 		// registers immediately (needs no root); a worktree/clone identity
 		// defers until a session-bound root arrives via the owning ferrule

@@ -181,7 +181,7 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		spec.WSMCP = &cmd
 		if c.r.opts.Backends[rec.Backend].WorkerHTTPMCP {
 			// The same HTTP tuple is persisted with the holder after launch.
-			spec.MCPSession = c.r.attachMCP(rec.ReplyID, "", env, rec.workDir(), 0)
+			spec.MCPSession = c.r.attachMCP(rec.ReplyID, "", env, rec.workDir(), 0, rec.Backend)
 		}
 	}
 	if c.r.opts.Holders != nil {
@@ -397,7 +397,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		c.mcpStale = true
 	case attach && rec.MCPToken != "":
 		// The recorded token and hello, as the process was started with.
-		spec.MCPSession = c.r.attachMCP(rec.ReplyID, rec.MCPToken, rec.MCPEnv, rec.workDir(), rec.HostPID)
+		spec.MCPSession = c.r.attachMCP(rec.ReplyID, rec.MCPToken, rec.MCPEnv, rec.workDir(), rec.HostPID, rec.Backend)
 	case (rec.Backend == BackendClaude || rec.Backend == BackendAgy || rec.Backend == BackendCodex) && !attach:
 		// The lead's ws-mcp goes over the daemon's HTTP route with a new
 		// token. Without a route a Claude lead runs the same server over
@@ -413,7 +413,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		if rec.Backend == BackendClaude {
 			spec.WSMCP, spec.Lead.PluginNote = &cmd, cmd.PluginWarning
 		}
-		if spec.MCPSession = c.r.attachMCP(rec.ReplyID, "", cmd.Env, rec.workDir(), 0); spec.MCPSession != nil {
+		if spec.MCPSession = c.r.attachMCP(rec.ReplyID, "", cmd.Env, rec.workDir(), 0, rec.Backend); spec.MCPSession != nil {
 			mcpEnv = cmd.Env
 		}
 	}
