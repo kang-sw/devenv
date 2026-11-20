@@ -51,8 +51,10 @@
   // the topics. Topics otherwise keep the board's own order. Dragging a
   // header moves a card or a topic: onto a rail dot it docks (+: a new
   // page; a page's dot: below what that page holds; the narrow view's home
-  // dot: undocks), into the board's open flow it undocks and stands where
-  // it was dropped (a time between its new neighbours'). A topic moved by
+  // dot: undocks), onto a pane of the page shown it docks at that pane's
+  // zone (an edge splits the pane; the center, offered to a docked pane
+  // only, swaps the two), into the board's open flow it undocks and stands
+  // where it was dropped (a time between its new neighbours'). A topic moved by
   // hand keeps that time until the topic itself next updates; a closed
   // topic stands only in the closed section or the gallery. A docked topic
   // keeps its pane when it updates or closes, and the page keeps its last
@@ -78,12 +80,12 @@
   // element: a width handle, the dot rail (railEl, its dots in dotsEl) and
   // the clipped viewport (viewEl) holding one slide per page (pageEls by
   // page id) and the + page (plusEl); panes (paneEls by reference) and
-  // splits (splitEls by page id and path) are kept so a unit's node keeps
-  // its pane. boardw is the board's width beside the column as the user
-  // dragged it, convow the conversation's beside the board (0: the
-  // stylesheet's).
+  // splits (splitEls by page id and path, their dividers divEls) are kept
+  // so a unit's node keeps its pane. boardw is the board's width beside
+  // the column as the user dragged it, convow the conversation's beside
+  // the board (0: the stylesheet's).
   var gal = null, lay = null, galEl = null, railEl = null, dotsEl = null, viewEl = null, plusEl = null;
-  var pageEls = {}, paneEls = {}, splitEls = {}, dotEls = {}, railLast = -Infinity, rg = null, railMoved = false;
+  var pageEls = {}, paneEls = {}, splitEls = {}, divEls = {}, dotEls = {}, railLast = -Infinity, rg = null, railMoved = false;
   var boardw = 0, convow = 0;
   var toolbar = null, overviewOn = false;
   var stateFilter = "all", stateUI = null;
@@ -573,7 +575,12 @@
   // a pane keep their elements across changes, so a node stays put unless
   // its own place changed; the pages' DOM order never changes either (the
   // rail and the slides' transforms order them), so a page switch moves
-  // nothing. A docked topic still being fetched has an empty pane.
+  // nothing. A docked topic still being fetched has an empty pane. Each
+  // element is filled after it stands in its parent (top down), so a pane
+  // or a unit that moves goes from one place on the page to another, with
+  // Element.moveBefore where the browser has it (its frames keep their
+  // documents), never through a detached element: a split that takes a
+  // pane, a collapse that lifts one, a move across pages.
   function buildGallery(nodes) {
     var by = {}, want = new Map(), used = { panes: {}, splits: {}, pages: {} };
     nodes.forEach(function (n) { by[nodeRef(n)] = n; });
@@ -585,17 +592,17 @@
         put(el, n, cur);
       });
     }
+    // tree gives the element standing for node n (path from its page's
+    // root) and fill, which puts its children in it once it stands.
     function tree(pid, n, path) {
       if (G.isSplit(n)) {
-        var key = pid + "/" + path, s = splitEls[key] || (splitEls[key] = mk("div"));
+        var key = pid + "/" + path, s = splitEls[key] || (splitEls[key] = mk("div")), v = divEls[key] || (divEls[key] = divider());
         s.className = "gal-split " + n.axis;
         s.setAttribute("data-path", path);
         used.splits[key] = true;
         var a = tree(pid, n.a, path + "a"), b = tree(pid, n.b, path + "b");
-        a.style.flex = n.ratio + " 1 0px";
-        b.style.flex = (1 - n.ratio) + " 1 0px";
-        hold(s, [a, b]);
-        return s;
+        sizeSplit(s, a.el, v, b.el, n.axis, n.ratio);
+        return { el: s, fill: function () { hold(s, [a.el, v, b.el]); a.fill(); b.fill(); } };
       }
       var ref = G.refOf(n), p = paneEls[ref];
       if (!p) {
@@ -603,8 +610,7 @@
         p.setAttribute("data-ref", ref);
       }
       used.panes[ref] = true;
-      hold(p, by[ref] ? [by[ref]] : []);
-      return p;
+      return { el: p, fill: function () { hold(p, by[ref] ? [by[ref]] : []); } };
     }
     gal.pages.forEach(function (pg) {
       var el = pageEls[pg.id];
@@ -615,16 +621,82 @@
       }
       used.pages[pg.id] = true;
       var root = tree(pg.id, pg.root, "");
-      root.style.flex = "";
-      hold(el, [root]);
+      root.el.style.flex = "";
+      hold(el, [root.el]);
+      root.fill();
     });
     return { want: want, used: used };
+  }
+  // sizeSplit gives a split's two children their shares (ratio is a's)
+  // and its divider the axis and value it reports.
+  function sizeSplit(s, a, v, b, axis, ratio) {
+    a.style.flex = ratio + " 1 0px";
+    b.style.flex = (1 - ratio) + " 1 0px";
+    v.setAttribute("aria-orientation", axis === "row" ? "vertical" : "horizontal");
+    v.setAttribute("aria-valuenow", String(Math.round(ratio * 100)));
+  }
+  // divider makes a split's divider: dragged (pointer capture), it sets the
+  // split's ratio (WsGallery.setRatio clamps it) as the pointer moves and
+  // saves on release; a double click goes back to half and half; focused,
+  // the arrow keys along its axis nudge it by RATIO_STEP.
+  var RATIO_STEP = 0.05;
+  function divider() {
+    var v = mk("div", "gal-div"), from = null;
+    v.setAttribute("role", "separator");
+    v.setAttribute("aria-valuemin", String(Math.round(G.C.RATIO_MIN * 100)));
+    v.setAttribute("aria-valuemax", String(Math.round(G.C.RATIO_MAX * 100)));
+    v.setAttribute("aria-label", wsT("js.pins.width"));
+    v.title = wsT("js.pins.width");
+    v.tabIndex = 0;
+    // at is the split v divides: its page id, path and model node.
+    function at() {
+      var s = v.parentNode, pg = s && s.closest && s.closest(".gal-page[data-page]");
+      if (!pg) return null;
+      var id = pg.getAttribute("data-page"), path = s.getAttribute("data-path") || "", i = G.pageIndex(gal, id);
+      var n = i < 0 ? null : G.nodeAt(gal.pages[i].root, path);
+      return G.isSplit(n) ? { id: id, path: path, node: n, s: s } : null;
+    }
+    function set(t, r) {
+      gal = G.setRatio(gal, t.id, t.path, Math.round(r * 1000) / 1000);
+      var n = G.nodeAt(gal.pages[G.pageIndex(gal, t.id)].root, t.path);
+      sizeSplit(t.s, t.s.children[0], v, t.s.children[2], n.axis, n.ratio);
+    }
+    v.addEventListener("pointerdown", function (e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      var t = at();
+      if (!t) return;
+      var r = t.s.getBoundingClientRect(), w = v.getBoundingClientRect();
+      from = { t: t, row: t.node.axis === "row", r: r, thick: t.node.axis === "row" ? w.width : w.height };
+      v.classList.add("drag");
+      try { v.setPointerCapture(e.pointerId); } catch (x) { /* no capture: the moves still land */ }
+      e.preventDefault();
+    });
+    v.addEventListener("pointermove", function (e) {
+      if (!from) return;
+      var f = from, span = (f.row ? f.r.width : f.r.height) - f.thick;
+      if (span <= 0) return;
+      set(f.t, ((f.row ? e.clientX - f.r.left : e.clientY - f.r.top) - f.thick / 2) / span);
+    });
+    function end() { if (!from) return; from = null; v.classList.remove("drag"); persist(); }
+    v.addEventListener("pointerup", end);
+    v.addEventListener("pointercancel", end);
+    v.addEventListener("dblclick", function () { var t = at(); if (t) { set(t, 0.5); persist(); } });
+    v.addEventListener("keydown", function (e) {
+      var t = at();
+      if (!t) return;
+      var row = t.node.axis === "row", d = e.key === (row ? "ArrowLeft" : "ArrowUp") ? -1 : e.key === (row ? "ArrowRight" : "ArrowDown") ? 1 : 0;
+      if (!d) return;
+      e.preventDefault();
+      set(t, t.node.ratio + d * RATIO_STEP);
+      persist();
+    });
+    return v;
   }
   function sweepGallery(b) {
     b.want.forEach(function (list, el) {
       Array.prototype.slice.call(el.childNodes).forEach(function (c) { if (list.indexOf(c) < 0) el.removeChild(c); });
     });
-    [[paneEls, b.used.panes], [splitEls, b.used.splits], [pageEls, b.used.pages]].forEach(function (m) {
+    [[paneEls, b.used.panes], [splitEls, b.used.splits], [divEls, b.used.splits], [pageEls, b.used.pages]].forEach(function (m) {
       Object.keys(m[0]).forEach(function (k) {
         if (m[1][k]) return;
         var el = m[0][k];
@@ -1552,15 +1624,17 @@
     galSet(g, u);
   }
   // galDrop docks u where a drag let it go on the gallery: to.gal "dock" on
-  // a new page, "append" below what the page at to.pos holds, "home" (the
-  // narrow view's home dot) back to the board as its unpin button does,
-  // the Main Board shown.
+  // a new page, "append" below what the page at to.pos holds, "place" at
+  // to.zone of the docked pane to.target (an edge splits it, the center
+  // swaps the two), "home" (the narrow view's home dot) back to the board
+  // as its unpin button does, the Main Board shown.
   function galDrop(u, to) {
     if (!isCard(u.el) && u.loose) { var el = u.el; u = topicRec(u.name); u.el = el; }
     var ref = refOf(u);
     delete u.rank;
     if (!isCard(u.el)) u.at = 0;
     if (to.gal === "home") galSet(G.activate(G.undock(gal, ref), -1, true), u);
+    else if (to.gal === "place") galSet(G.place(gal, ref, to.target, to.zone), u);
     else galSet(to.gal === "append" ? G.append(gal, ref, to.pos) : G.dock(gal, ref), u);
   }
 
@@ -1615,16 +1689,55 @@
   // boardShown tells whether the Main Board takes drops: always in the wide
   // view, on Page 0 in the narrow one.
   function boardShown() { return !(lay && lay.narrow) || G.position(gal, true) < 0; }
+  // paneZone reads a drop on the docked page shown (page el) at (x, y):
+  // the pane under the pointer and its zone (WsGallery.zone: the nearest
+  // edge splits it; the center swaps the two, offered only to a docked
+  // pane, so a board item never unpins the pane it lands on), or null (a
+  // divider, the dragged pane itself).
+  function paneZone(el, x, y, d) {
+    var p = Array.prototype.filter.call(el.querySelectorAll(".gal-pane[data-ref]"), function (n) { return inside(rectOf(n), x, y); })[0];
+    var ref = p && p.getAttribute("data-ref");
+    if (!p || ref === refOf(d.unit)) return null;
+    return { gal: "place", target: ref, zone: G.zone(rectOf(p), x, y, !!d.unit.pinned), pane: p };
+  }
+  // drawZone shows the preview of a zone drop over its pane (null hides
+  // it): the half on the zone's side, the whole pane for the center. The
+  // pane carries data-dz meanwhile.
+  var zoneEl = null, zonePane = null;
+  function drawZone(to) {
+    var p = to && to.pane;
+    if (zonePane && zonePane !== p) zonePane.removeAttribute("data-dz");
+    zonePane = p || null;
+    if (!p) {
+      if (zoneEl) { zoneEl.hidden = true; zoneEl.removeAttribute("data-dz"); }
+      return;
+    }
+    p.setAttribute("data-dz", to.zone);
+    if (!zoneEl) {
+      zoneEl = mk("div", "gal-overlay");
+      zoneEl.setAttribute("aria-hidden", "true");
+    }
+    if (zoneEl.parentNode !== viewEl) viewEl.appendChild(zoneEl);
+    var r = rectOf(p), v = rectOf(viewEl), z = to.zone, I = 3;
+    var w = z === "left" || z === "right" ? r.width / 2 : r.width, h = z === "top" || z === "bottom" ? r.height / 2 : r.height;
+    zoneEl.setAttribute("data-dz", z);
+    zoneEl.style.left = (r.left - v.left + (z === "right" ? r.width - w : 0) + I) + "px";
+    zoneEl.style.top = (r.top - v.top + (z === "bottom" ? r.height - h : 0) + I) + "px";
+    zoneEl.style.width = Math.max(0, w - 2 * I) + "px";
+    zoneEl.style.height = Math.max(0, h - 2 * I) + "px";
+    zoneEl.hidden = false;
+  }
   // over reads the drop at the pointer: a rail dot (the narrow view's home
   // dot undocks, a page's dot appends to that page, + docks on a new page),
-  // the page the gallery shows (+ docks on a new page, a docked page
-  // appends to it), or the board's open flow. A drop that leaves the item
-  // where it stands lights nothing.
+  // the page the gallery shows (+ docks on a new page; on a docked page a
+  // pane's zone, paneZone), or the board's open flow. A drop that leaves
+  // the item where it stands lights nothing.
   function over(x, y) {
     var d = dg;
     d.x = x; d.y = y;
     var to = null, scr = null, lightEl = null, hit = dotAt(x, y) || pageAt(x, y);
-    if (hit) {
+    if (hit && hit.el !== plusEl && hit.el.classList.contains("gal-page")) to = paneZone(hit.el, x, y, d);
+    else if (hit) {
       var cur = G.pageOf(gal, refOf(d.unit));
       if (hit.pos < 0) to = d.unit.pinned ? { gal: "home" } : null;
       else if (hit.pos >= gal.pages.length) to = { gal: "dock" };
@@ -1643,6 +1756,7 @@
     }
     d.to = to;
     markDrop(lightEl);
+    drawZone(to && to.gal === "place" ? to : null);
     drawLine(to && to.line);
     d.scr = scr;
     var sr = rectOf(scr);
@@ -1718,6 +1832,7 @@
     doc.documentElement.removeAttribute("data-bdrag");
     drawLine(null);
     markDrop(null);
+    drawZone(null);
     dragged = true;
     setTimeout(function () { dragged = false; }, 0);
     var to = d.to;

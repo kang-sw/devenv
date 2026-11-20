@@ -647,7 +647,10 @@ process.stdout.write(bad.join("\n"));
 // wrapped in its pane's scroller and unwrapped back to stock markup; the
 // rail's dots are buttons (the narrow view's ⌂, a pane count per page, +)
 // and a drag docks on +, appends on a page's dot, undocks on ⌂, and a
-// dragged dot reorders the pages; activate shows a node's page; and
+// dragged dot reorders the pages; on the page shown a pane's edge zone
+// splits it and a docked pane's center swaps the two, a split holds a
+// divider whose keys and double click set its ratio; activate shows a
+// node's page; and
 // neither a page switch, a width crossing nor a board morph moves a
 // docked unit's node.
 func TestBoardGallery(t *testing.T) {
@@ -762,6 +765,29 @@ rail.fire("pointerdown", { target: d0, button: 0, pointerId: 2, clientX: 20, cli
 each("pointermove", { pointerId: 2, clientX: 20, clientY: 140, preventDefault: function () {} });
 each("pointerup", { pointerId: 2, type: "pointerup" });
 check("a page's dot dropped on another's moves its page there, shown", [pagesOf(), shown().length === 1 && shown()[0] === pageIds()[1]], [[["Cd"], ["a"]], true]);
+// Zones: on the docked page shown, a pane's edge splits it (here from
+// another page, whose emptied page goes), a docked pane's center swaps
+// the two; the divider's keys set the ratio, kept in the record.
+var dotGeo = geo;
+geo = function (n) {
+  if (n.classList.contains("gal-viewport")) return box(800, 0, 400, 800);
+  if (n.classList.contains("gal-pane")) return n.getAttribute("data-ref") === "t:a" ? box(800, 0, 200, 800) : box(1000, 0, 200, 800);
+  return dotGeo(n);
+};
+dragTo(page.W.gallery(), c.el.querySelector(".bc-hd"), 990, 400);
+check("a right-edge drop splits the pane in a row, the emptied page gone", [pagesOf(), galOf().pages[0].root.axis, dotTexts().map(function (t) { return t[1]; })], [[["a", "Cd"]], "row", ["⌂", "2", "+"]]);
+check("the split holds its panes and a divider between them", page.W.gallery().querySelectorAll(".gal-split")[0].children.map(function (n) { return n.className; }), ["gal-pane", "gal-div", "gal-pane"]);
+check("the preview is gone after the drop", [page.W.gallery().querySelectorAll(".gal-pane").filter(function (p) { return p.hasAttribute("data-dz"); }).length, page.W.gallery().querySelector(".gal-overlay").hidden], [0, true]);
+dragTo(page.W.gallery(), A.querySelector(".tbar"), 1100, 400);
+check("a docked pane's center drop swaps the two", pagesOf(), [["Cd", "a"]]);
+var div = page.W.gallery().querySelector(".gal-div");
+check("the divider is a focusable vertical separator at 50", [div.getAttribute("role"), div.getAttribute("aria-orientation"), div.getAttribute("aria-valuenow"), div.tabIndex], ["separator", "vertical", "50", 0]);
+div.fire("keydown", { key: "ArrowRight", preventDefault: function () {} });
+div.fire("keydown", { key: "ArrowUp", preventDefault: function () {} });
+check("ArrowRight nudges a row's ratio (ArrowUp does not), saved", [galOf().pages[0].root.ratio, div.getAttribute("aria-valuenow")], [0.55, "55"]);
+div.fire("dblclick", {});
+check("a double click resets to half", galOf().pages[0].root.ratio, 0.5);
+geo = dotGeo;
 El.prototype.getClientRects = function () { return []; };
 El.prototype.getBoundingClientRect = function () { return zero; };
 

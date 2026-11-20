@@ -70,7 +70,11 @@
    A docked unit fills its pane: a card's body flexes (its stored height
    waits for the board), a topic's head stays put over its body's
    scroller (.gal-pbody, cards.js wrapTopic), so nothing sticks over what
-   a deep link scrolls to. */
+   a deep link scrolls to. A page is a split tree: a split (.gal-split,
+   row or col) holds its two children and a 6px divider (.gal-div, a
+   focusable separator) between them; a drag over a docked pane previews
+   its drop zone (.gal-overlay over the viewport: the zone's half of the
+   pane, or all of it for the center). */
 :root { --pbw: calc(1680px - 32px - 356px); }
 .dbody:has(> .dgrid.live) { --cvw: var(--convow, calc(var(--boardw) * 5 / 7)); }
 .dash.board { --pbw: 900px; }
@@ -95,10 +99,18 @@
 .gal-page { position: absolute; inset: 0; display: flex; min-width: 0; min-height: 0; transform: translateY(calc(var(--gal-off, 0) * (100% + 24px))); }
 .gal-page[data-active] { transform: none; transition: transform .22s cubic-bezier(.22, 1, .36, 1); }
 @media (prefers-reduced-motion: reduce) { .gal-page[data-active] { transition: none; } }
-.gal-page.drop:not(.gal-plus) { outline: 2px solid var(--wb-primary); outline-offset: -2px; border-radius: var(--wb-radius); }
-.gal-split { flex: 1 1 0px; min-width: 0; min-height: 0; display: flex; gap: 6px; }
+.gal-split { flex: 1 1 0px; min-width: 0; min-height: 0; display: flex; }
 .gal-split.row { flex-direction: row; }
 .gal-split.col { flex-direction: column; }
+.gal-div { flex: none; position: relative; touch-action: none; -webkit-user-select: none; user-select: none; outline: none; }
+.gal-split.row > .gal-div { width: 6px; cursor: col-resize; }
+.gal-split.col > .gal-div { height: 6px; cursor: row-resize; }
+.gal-div::after { content: ""; position: absolute; border-radius: 999px; background: transparent; transition: background .12s; }
+.gal-split.row > .gal-div::after { left: 2px; right: 2px; top: 4px; bottom: 4px; }
+.gal-split.col > .gal-div::after { top: 2px; bottom: 2px; left: 4px; right: 4px; }
+.gal-div:hover::after, .gal-div:focus-visible::after, .gal-div.drag::after { background: var(--wb-primary); }
+.gal-overlay { position: absolute; z-index: 5; box-sizing: border-box; pointer-events: none; background: color-mix(in srgb, var(--wb-primary) 24%, transparent); border: 2px solid var(--wb-primary); border-radius: 6px; }
+.gal-overlay[hidden] { display: none; }
 .gal-pane { flex: 1 1 0px; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .gal-pane > section.topic, .gal-pane > .bcard { flex: 1 1 auto; min-height: 0; margin: 0; display: flex; flex-direction: column; }
 .gal-pane > section.topic { overflow: hidden; overflow: clip; }
