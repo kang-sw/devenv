@@ -6,8 +6,68 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 )
+
+type ambientRefreshProbe struct {
+	PiAgents
+	calls int
+}
+
+func (*ambientRefreshProbe) BackendRegistrations() map[string]wsagent.BackendRegistration {
+	return nil
+}
+
+func (p *ambientRefreshProbe) RefreshAmbient() { p.calls++ }
+
+func TestConfigTuneWorkflowLangRefreshAmbient(t *testing.T) {
+	for _, wiring := range []string{"backend source", "pi agents", "both"} {
+		t.Run(wiring, func(t *testing.T) {
+			useLeadProfile(t)
+			useResourceFixture(t, filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))
+
+			root := t.TempDir()
+			mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
+			initGit(t, root)
+			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+			t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+			s := NewServer(root, "test")
+			probe := &ambientRefreshProbe{}
+			if wiring != "pi agents" {
+				s.agentBackendSource = probe
+			}
+			if wiring != "backend source" {
+				s.pi.agents = probe
+			}
+			key, _ := parseLoginResponse(t, callLogin(t, s, 900702, root, nil))
+			checkCalls := func(want int) {
+				t.Helper()
+				if probe.calls != want {
+					t.Fatalf("ambient refresh calls = %d, want %d", probe.calls, want)
+				}
+			}
+
+			if resp := keyedCall(t, s, 1, key, "config.tune", map[string]any{"key": wsconfig.ItemWorkflowLang, "value": "Korean"}); toolIsError(t, resp) {
+				t.Fatalf("workflow.lang set failed: %s", resp)
+			}
+			checkCalls(1)
+			if resp := keyedCall(t, s, 2, key, "config.tune", map[string]any{"key": wsconfig.ItemWorkflowLang, "value": "  "}); !toolIsError(t, resp) {
+				t.Fatalf("blank workflow.lang accepted: %s", resp)
+			}
+			checkCalls(1)
+			if resp := keyedCall(t, s, 3, key, "config.tune", map[string]any{"key": wsconfig.ItemBootstrapAlarm, "value": "on"}); toolIsError(t, resp) {
+				t.Fatalf("unrelated tune failed: %s", resp)
+			}
+			checkCalls(1)
+			if resp := keyedCall(t, s, 4, key, "config.tune", map[string]any{"key": wsconfig.ItemWorkflowLang, "reset": true}); toolIsError(t, resp) {
+				t.Fatalf("workflow.lang reset failed: %s", resp)
+			}
+			checkCalls(2)
+		})
+	}
+}
 
 // TestConfigTuneWorkflowLangKeepsCaseAndResets: workflow.lang is a free-form
 // knob, so config.tune stores the language name as written (no lowercasing,

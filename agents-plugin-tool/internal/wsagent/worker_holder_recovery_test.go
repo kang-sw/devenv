@@ -1,11 +1,14 @@
 package wsagent
 
 import (
+	"encoding/json"
 	"maps"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
@@ -89,6 +92,155 @@ func completeRecoveryWorker(t *testing.T, h *leadHarness, backend, holder string
 			jsonLine(map[string]any{"jsonrpc": "2.0", "id": prompt, "result": map[string]any{"stopReason": "end_turn"}}))
 	case BackendPi:
 		h.holders.out(holder, recoveryPiReply("held result")...)
+	}
+}
+
+// TestCodexGrandchildCompletionReachesConversationParentExactlyOnce pins the
+// holder-backed Codex path that dogfooding reported missing: the grandchild's
+// terminal result starts the conversation parent's successor turn, while the
+// parent's held final is published first and is not repeated after rejoin.
+func TestCodexGrandchildCompletionReachesConversationParentExactlyOnce(t *testing.T) {
+	h, got := workerRecoveryHarness(t, BackendCodex, true)
+	caller := LeadCaller(leadParent.ReplyID, h.root, BackendClaude, h.opts.Config)
+	parentResult, err := h.runner.AgentSpawn(caller, AgentSpawnRequest{Prompt: "parent work", Tier: "codex.small", Authority: "workdir-write"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := agentID(parentResult.Address)
+	parentHolder := h.holder(parent)
+	eventually(t, "the Codex parent turn", func() bool { return len(h.holders.acpInputs(parentHolder, "turn/start")) == 1 })
+
+	childCaller := AgentCaller{Parent: ParentRef{Kind: ParentConversation, ReplyID: parent}, Root: h.root, Harness: BackendCodex, Config: h.opts.Config}
+	childResult, err := h.runner.AgentSpawn(childCaller, AgentSpawnRequest{Prompt: "inner work", Tier: "codex.small", Authority: "workdir-write"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := agentID(childResult.Address)
+	childHolder := h.holder(child)
+	eventually(t, "the Codex grandchild turn", func() bool { return len(h.holders.acpInputs(childHolder, "turn/start")) == 1 })
+
+	h.holders.out(parentHolder, codexSyntheticEnd("t1", "parent final", "completed"))
+	eventually(t, "the parent final held for its grandchild", func() bool {
+		rec := h.record(parent)
+		return rec.HeldTurn != nil && rec.HeldTurn.Message == "parent final"
+	})
+	h.holders.out(childHolder, codexSyntheticEnd("t2", "inner complete", "completed"))
+	deadline := time.Now().Add(5 * time.Second)
+	for len(h.holders.acpInputs(parentHolder, "turn/start")) != 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if gotStarts := len(h.holders.acpInputs(parentHolder, "turn/start")); gotStarts != 2 {
+		t.Fatalf("grandchild report did not start the parent successor: starts=%d parent=%+v child=%+v reports=%+v", gotStarts, h.record(parent), h.record(child), got.list())
+	}
+	h.holders.out(parentHolder, codexSyntheticEnd("t3", "successor ack", "completed"))
+	eventually(t, "the held final and successor report in order", func() bool { return len(got.lead()) == 2 })
+	if rep := got.lead()[0]; rep.Result.ID != parent || rep.Result.Message != "parent final" || rep.Result.Status != TurnDone {
+		t.Fatalf("first parent report = %+v", rep.Result)
+	}
+	if rep := got.lead()[1]; rep.Result.ID != parent || rep.Result.Message != "successor ack" || rep.Result.Status != TurnDone {
+		t.Fatalf("second parent report = %+v", rep.Result)
+	}
+	if all := got.list(); len(all) != 3 || all[0].Parent.Kind != ParentConversation || all[0].Result.ID != child {
+		t.Fatalf("grandchild completion delivery = %+v, want one conversation-parent report plus two lead reports", all)
+	}
+
+	h.runner.Close()
+	h.holders.restart()
+	h.startAt("http://127.0.0.1:1")
+	eventually(t, "the replacement daemon's holder scan", h.runner.scanDone)
+	h.quiesce(parent)
+	h.quiesce(child)
+	if reports := got.list(); len(reports) != 3 {
+		t.Fatalf("rejoin duplicated a delivered completion: %+v", reports)
+	}
+	if rec := h.record(child); len(rec.PendingReports) != 0 {
+		t.Fatalf("the delivered grandchild report stayed pending: %+v", rec.PendingReports)
+	}
+}
+
+// TestCodexAndAgyWorkerMailSteersIntoRunningTurn proves the common worker
+// mail path uses each backend's acknowledged holder-safe steer contract. The
+// daemon is replaced after the holder accepted the steer but before the
+// acknowledgement is applied; replay then consumes it exactly once.
+func TestCodexAndAgyWorkerMailSteersIntoRunningTurn(t *testing.T) {
+	const (
+		rawMessage = "mid-turn mail"
+		message    = "(parent) " + rawMessage
+	)
+	for _, backend := range []string{BackendCodex, BackendAgy} {
+		t.Run(backend, func(t *testing.T) {
+			h, _ := workerRecoveryHarness(t, backend, true)
+			id, holder := spawnHeldRecoveryWorker(t, h, backend, "workdir-write")
+			key := h.record(id).WSKey
+			eventually(t, "the worker mailbox watch", func() bool { return h.mail.watched(key) })
+			var steerEntered, steerRelease chan struct{}
+			var enterOnce, releaseOnce sync.Once
+			if backend == BackendCodex {
+				steerEntered, steerRelease = make(chan struct{}), make(chan struct{})
+				defer releaseOnce.Do(func() { close(steerRelease) })
+				acp := h.holders.acp
+				h.holders.acp = func(holder, method string, params json.RawMessage) (string, string, bool) {
+					if method == "turn/steer" {
+						enterOnce.Do(func() { close(steerEntered) })
+						<-steerRelease
+						return "", "", false
+					}
+					return acp(holder, method, params)
+				}
+			}
+			h.mail.deliverFrom(key, leadParent.ReplyID, rawMessage)
+			if backend == BackendCodex {
+				wait(t, "the holder steer write", steerEntered)
+				if rec := h.record(id); len(rec.Steered) != 1 || rec.Steered[0].Text != message {
+					t.Fatalf("the steer was not persisted before the holder write returned: %+v", rec.Steered)
+				}
+				releaseOnce.Do(func() { close(steerRelease) })
+			}
+			var steerID string
+			switch backend {
+			case BackendCodex:
+				eventually(t, "the Codex steer write", func() bool {
+					ids := codexCallIDs(h, holder, "turn/steer")
+					if len(ids) == 1 {
+						steerID = ids[0]
+					}
+					return steerID != ""
+				})
+			case BackendAgy:
+				eventually(t, "the agy steer prompt", func() bool { return len(agyPromptIDs(h, holder)) == 2 })
+			}
+			eventually(t, "the persisted unacknowledged steer", func() bool {
+				rec := h.record(id)
+				return len(rec.Steered) == 1 && rec.Steered[0].Text == message && rec.SteerAnswers == 0
+			})
+
+			h.runner.Close()
+			h.holders.restart()
+			h.startAt("http://127.0.0.1:1")
+			eventually(t, "the held worker rejoined", func() bool {
+				c := h.runner.conv(id)
+				if c == nil {
+					return false
+				}
+				ready := false
+				c.do(func() { ready = c.proc != nil && !c.replaying && c.turn })
+				return ready
+			})
+
+			switch backend {
+			case BackendCodex:
+				h.holders.out(holder,
+					jsonLine(map[string]any{"id": steerID, "result": map[string]any{"turnId": "t1"}}),
+					codexSyntheticNotification("item/started", map[string]any{"threadId": "codex-s1", "turnId": "t1", "item": map[string]any{"id": "steered-user", "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": message}}}}))
+			case BackendAgy:
+				prompts := agyPromptIDs(h, holder)
+				h.holders.out(holder, jsonLine(map[string]any{"jsonrpc": "2.0", "id": prompts[0], "result": map[string]any{"stopReason": "end_turn"}}))
+			}
+			eventually(t, "the steer acknowledged and taken once", func() bool {
+				rec := h.record(id)
+				return rec.SteerAnswers == 1 && len(rec.Steered) == 0 && rec.Drained == rec.Sends && len(rec.Reports) == 0
+			})
+		})
 	}
 }
 
@@ -320,7 +472,12 @@ func TestHeldWorkerChildLoadsBeforeLowerCeilingParent(t *testing.T) {
 			if mode != "workspace-write" || policy != "on-request" {
 				t.Fatalf("rejoined child mode = %q, policy = %q", mode, policy)
 			}
-			if _, err := h.runner.childAdmission(h.record(id)); err == nil || !strings.Contains(err.Error(), "above the parent's current level read-only") {
+			rec := h.record(id)
+			rp, resolveErr := h.runner.resolve(rec.Profile, rec.Root)
+			if resolveErr != nil {
+				t.Fatal(resolveErr)
+			}
+			if _, _, err := h.runner.childAdmission(rec, rp.Definition); err == nil || !strings.Contains(err.Error(), "above the parent's current level read-only") {
 				t.Fatalf("next launch should be refused by the current ceiling: %v", err)
 			}
 			if !strings.Contains(h.log.String(), "rejoin permission admission (advisory; applies on next launch)") || h.holders.opCount("stop") != 0 || h.holders.opCount("spawn") != 1 {

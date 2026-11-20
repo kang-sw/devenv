@@ -211,3 +211,66 @@ func TestDaemonOwnedMailResolvesANamedSender(t *testing.T) {
 		t.Fatalf("the claimed mail = %+v (relation asked for %q, want %q)", claimed, asked, want)
 	}
 }
+
+// A direct child and its nested child address their own parent by reply id.
+// The daemon's claim consumes each message before a manual recv can see it.
+func TestDirectAndNestedChildMailReachesOnlyItsParentOnce(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+	keys := NewAgentKeyStore()
+	lead, err := keys.MintLead(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := keys.Mint(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, recipient, body string
+	}{
+		{"direct", lead, "direct child report"},
+		{"nested", parent, "nested child report"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			child, err := keys.Mint(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := NewServer(root, "test")
+			defer server.Close()
+			stateDir, err := wsdashboard.Dir("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			mail := NewLeadMailbox(stateDir)
+			defer mail.server.Close()
+			address := wsmailbox.ReplyIDPrefix + wsmailbox.ReplyID(tc.recipient)
+			mustSend(t, server, 1, child, address, tc.body)
+			claimed, err := mail.Drain(root, tc.recipient, nil)
+			if err != nil || len(claimed) != 1 || claimed[0].Sender != wsmailbox.ReplyID(child) || !strings.HasSuffix(claimed[0].Text, "\n"+tc.body) {
+				t.Fatalf("direct-parent claim = %+v, %v", claimed, err)
+			}
+			if again, err := mail.Drain(root, tc.recipient, nil); err != nil || len(again) != 0 {
+				t.Fatalf("duplicate claim = %+v, %v", again, err)
+			}
+			if got := strings.TrimSpace(callToolWithKey(t, server, 2, tc.recipient, "mailbox.recv", map[string]any{"format": "json"})); got != "null" && got != "[]" {
+				t.Fatalf("manual recv duplicated claim: %s", got)
+			}
+			if sent, err := readMailboxHistory("", child); err != nil || len(sent) != 1 || sent[0].Counterparty != address {
+				t.Fatalf("child sent history = %+v, %v", sent, err)
+			}
+			path, err := wsmailbox.WorktreePath(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"lead", "parent"} {
+				_, _, queue, err := server.mailboxPaths().Store().NamedQueue(path, name)
+				if err != nil || len(queue) != 0 {
+					t.Fatalf("%s@worktree queue = %+v, %v", name, queue, err)
+				}
+			}
+		})
+	}
+}

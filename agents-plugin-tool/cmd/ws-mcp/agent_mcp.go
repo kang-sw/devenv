@@ -129,6 +129,25 @@ func renderLeadManual(render mcp.HostedRender, dir, key string) (string, error) 
 	return mcp.RenderLeadManual(env, dir, render, key)
 }
 
+// renderHostedRestoreBundle adapts the runner's direct-child projection to
+// the mcp-owned renderer without making internal/mcp import wsagent.
+func renderHostedRestoreBundle(render mcp.HostedRender, dir, key string, cause wsagent.RestoreCause, children []wsagent.AgentChild) (string, error) {
+	env, err := hostedRenderEnv(dir)
+	if err != nil {
+		return "", err
+	}
+	hosted := make([]mcp.HostedChild, 0, len(children))
+	for _, child := range children {
+		hosted = append(hosted, mcp.HostedChild{
+			Address: child.Address, Label: child.Label, Tier: child.Tier,
+			Authority: string(child.Authority), State: child.State, Model: child.Model,
+			Effort: child.Effort, Cwd: child.Cwd, Held: child.Held,
+			Error: child.Error, CreatedAt: child.CreatedAt, LastReport: child.LastReport,
+		})
+	}
+	return mcp.RenderHostedRestoreBundle(env, dir, render, key, string(cause), hosted)
+}
+
 // renderLeadPlaybook is the daemon's wsagent.Options.ExpandCommand: the
 // body of playbook name for the hosted lead whose key is key, rendered as
 // renderLeadManual renders its manual.

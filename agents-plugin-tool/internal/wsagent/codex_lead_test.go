@@ -29,6 +29,7 @@ type codexFake struct {
 	tokens      []string
 	recovery    string
 	openError   string
+	steerError  string
 	readGate    <-chan struct{}
 	readStarted chan struct{}
 }
@@ -81,7 +82,15 @@ func (f *codexFake) answer(holder, method string, params json.RawMessage) (strin
 		f.mu.Unlock()
 		f.h.holders.out(holder, codexSyntheticNotification("turn/started", map[string]any{"threadId": "codex-s1", "turn": map[string]any{"id": turn, "status": "inProgress"}}))
 		return jsonLine(map[string]any{"turn": map[string]any{"id": turn, "status": "inProgress"}}), "", true
-	case "turn/steer", "turn/interrupt", "thread/compact/start":
+	case "turn/steer":
+		f.mu.Lock()
+		steerError := f.steerError
+		f.mu.Unlock()
+		if steerError != "" {
+			return "", steerError, true
+		}
+		return `{}`, "", true
+	case "turn/interrupt", "thread/compact/start":
 		return `{}`, "", true
 	case "thread/read":
 		f.mu.Lock()
@@ -147,6 +156,35 @@ func codexApplied(t *testing.T, h *leadHarness, id, holder string) {
 }
 
 const codexSyntheticEndpoint = "http://127.0.0.1:1"
+
+func TestCodexLeadSteerReturnsRefusal(t *testing.T) {
+	h, f := newCodexLeadHarness(t)
+	h.startAt(codexSyntheticEndpoint)
+	id := h.lead(BackendCodex, LeadOptions{}).ID
+	f.replyID = id
+	h.send(id, "initial")
+	holder := h.holder(id)
+	eventually(t, "the initial Codex turn", func() bool {
+		return slices.Equal(codexUserInputs(h, holder), h.envelopes("initial"))
+	})
+	codexApplied(t, h, id, holder)
+	eventually(t, "the active Codex turn", func() bool {
+		active := false
+		h.runner.conv(id).do(func() { active = h.runner.conv(id).turn })
+		return active
+	})
+	f.mu.Lock()
+	f.steerError = "synthetic steer refusal"
+	f.mu.Unlock()
+	var steer steerer
+	h.runner.conv(id).do(func() { steer = controlsFor(h.runner.conv(id).proc).steer })
+	if err := steer.Steer("refused steer"); err == nil || !strings.Contains(err.Error(), "synthetic steer refusal") {
+		t.Fatalf("lead steer error = %v, want provider refusal", err)
+	}
+	if calls := h.holders.acpInputs(holder, "turn/steer"); len(calls) != 1 || !strings.Contains(string(calls[0]), "refused steer") {
+		t.Fatalf("lead steer calls = %s", calls)
+	}
+}
 
 func TestCodexLeadSyntheticCreateControlsAndResume(t *testing.T) {
 	h, f := newCodexLeadHarness(t)

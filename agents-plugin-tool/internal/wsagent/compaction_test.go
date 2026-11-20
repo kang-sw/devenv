@@ -233,6 +233,97 @@ func TestCompactionAutoDoesNotStartContinue(t *testing.T) {
 	})
 }
 
+func TestCompactionRestoreBundleLeadAndChildFreshExactlyOnce(t *testing.T) {
+	t.Run("lead", func(t *testing.T) {
+		probe := &restoreProbe{state: "stale-at-launch"}
+		h := newLeadHarness(t)
+		reg := h.opts.Backends[BackendClaude]
+		reg.Catalog = ClaudeCatalog()
+		h.opts.Backends[BackendClaude] = reg
+		h.opts.RestoreBundle = probe.render
+		h.start()
+		id, holder := h.runLead("one")
+		key := h.record(id).WSKey
+		h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+		h.idle(id)
+		resume := false
+		if got := h.runner.Compact(key, "", &resume); got.Status != "queued" {
+			t.Fatal(got)
+		}
+		eventually(t, "lead native compact", func() bool { return len(h.userInputs(holder)) == 2 })
+		h.send(id, "ordinary after compact")
+		probe.setState("fresh-at-delivery")
+		compactBoundary(h, id, holder)
+		eventually(t, "lead restore before ordinary work", func() bool { return len(h.userInputs(holder)) == 3 })
+		text := h.userInputs(holder)[2]
+		if restoreAt, workAt := strings.Index(text, "restore[fresh-at-delivery]"), strings.Index(text, "ordinary after compact"); restoreAt < 0 || workAt < 0 || restoreAt > workAt {
+			t.Fatalf("lead restore ordering = %q", text)
+		}
+		if calls := probe.snapshot(); len(calls) != 1 || calls[0].key != key || calls[0].cause != RestoreCompaction {
+			t.Fatalf("lead restore calls = %+v", calls)
+		}
+		h.runner.conv(id).do(func() {
+			c := h.runner.conv(id)
+			c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd})
+			if c.compactNote != "" {
+				t.Fatalf("duplicate compact end queued %q", c.compactNote)
+			}
+		})
+		if calls := probe.snapshot(); len(calls) != 1 {
+			t.Fatalf("duplicate compact end rendered again: %+v", calls)
+		}
+	})
+
+	t.Run("child", func(t *testing.T) {
+		probe := &restoreProbe{state: "stale-at-launch"}
+		h := newLeadHarness(t)
+		h.opts.WSMCP = func(string) (MCPCommand, error) { return MCPCommand{Command: "/unused/ws-mcp"}, nil }
+		h.opts.RestoreBundle = probe.render
+		reg := h.opts.Backends[BackendPi]
+		reg.NativeCompaction = PiCompaction()
+		h.opts.Backends[BackendPi] = reg
+		if _, err := wsconfig.SetGlobalAgentsTierForHarness(h.opts.Config, "medium", "", "prov/medium", PiTierHarness, "low"); err != nil {
+			t.Fatal(err)
+		}
+		h.start()
+		lead := h.lead(BackendClaude, LeadOptions{})
+		child, err := h.runner.Spawn(SpawnSpec{
+			Profile: PiWorkerProfile, Root: h.root, Prompt: "work", Tier: "medium",
+			Parent: &ParentRef{Kind: ParentLead, ReplyID: lead.ID},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		holder := h.holder(child.ID)
+		h.holders.out(holder, `{"type":"agent_start"}`, `{"type":"agent_settled"}`)
+		h.idle(child.ID)
+		key := h.record(child.ID).WSKey
+		resume := false
+		if got := h.runner.Compact(key, "", &resume); got.Status != "queued" {
+			t.Fatal(got)
+		}
+		eventually(t, "child native compact", func() bool { return len(h.holders.inputs(holder, "compact")) == 1 })
+		if _, err := h.runner.Send(child.ID, "ordinary after compact"); err != nil {
+			t.Fatal(err)
+		}
+		probe.setState("fresh-at-delivery")
+		h.holders.out(holder, `{"type":"compaction_start","reason":"manual"}`, `{"type":"compaction_end","reason":"manual"}`, `{"type":"response","command":"compact","success":true}`)
+		eventually(t, "child restore before ordinary work", func() bool { return len(h.holders.inputs(holder, "prompt")) == 2 })
+		text := h.holders.inputs(holder, "prompt")[1]
+		if restoreAt, workAt := strings.Index(text, "restore[fresh-at-delivery]"), strings.Index(text, "ordinary after compact"); restoreAt < 0 || workAt < 0 || restoreAt > workAt {
+			t.Fatalf("child restore ordering = %q", text)
+		}
+		if calls := probe.snapshot(); len(calls) != 1 || calls[0].key != key || calls[0].cause != RestoreCompaction {
+			t.Fatalf("child restore calls = %+v", calls)
+		}
+		h.holders.out(holder, `{"type":"compaction_end","reason":"manual"}`)
+		time.Sleep(30 * time.Millisecond)
+		if calls := probe.snapshot(); len(calls) != 1 {
+			t.Fatalf("duplicate child compact end rendered again: %+v", calls)
+		}
+	})
+}
+
 func TestCompactionThresholdLatchAndStaleUsage(t *testing.T) {
 	h := compactionHarness(t)
 	id, holder := h.runLead("one")
@@ -1195,5 +1286,98 @@ func TestCompactionLiveReloadProjectShadowsGlobal(t *testing.T) {
 	c.observeCompaction(wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &tokens, Window: 100000}})
 	if c.compactHard.Percent != 55 {
 		t.Fatalf("clearing project override did not fall back to global 55%%: got %+v", c.compactHard)
+	}
+}
+
+func TestCompactionMilestonesAndUsageContext(t *testing.T) {
+	root := t.TempDir()
+	cfg := wsconfig.Options{CacheHome: t.TempDir(), ConfigHome: t.TempDir(), RepoRoot: root}
+	resolver := wsconfig.NewResolver(cfg, nil, nil, nil)
+	if err := resolver.Set("compaction.lead_advisory", "110k", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeGlobal}); err != nil {
+		t.Fatal(err)
+	}
+	if err := resolver.Set("compaction.lead_hard", "180k", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeGlobal}); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRunner(Options{
+		Config:   cfg,
+		Keys:     compactionRootKeys{root: root},
+		Backends: map[string]BackendRegistration{BackendClaude: {Catalog: ClaudeCatalog()}},
+	})
+	c := &conv{r: r, rec: Record{Root: root, WSKey: "key", Backend: BackendClaude, Lead: true}}
+	c.loadCompaction()
+
+	// UsageCompaction reports soft=110k, hard=180k, m1=133333, m2=156667.
+	comp := c.usageCompaction(1_000_000)
+	if comp == nil || comp.Soft != 110_000 || comp.Hard != 180_000 || !comp.AdvisoryEnabled || len(comp.Milestones) != 2 || comp.Milestones[0] != 133_333 || comp.Milestones[1] != 156_667 {
+		t.Fatalf("usageCompaction = %+v", comp)
+	}
+
+	observe := func(tok int64) {
+		v := tok
+		c.observeCompaction(wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &v, Window: 1_000_000}})
+	}
+
+	// Below soft: nothing.
+	observe(51_293)
+	c.compactIdle()
+	if c.compactNote != "" || c.compactAdvised || c.compactM1Issued || c.compactM2Issued {
+		t.Fatalf("unexpected note below soft: %q", c.compactNote)
+	}
+
+	// Cross soft (118,800): advisory delivered, milestones unlatched.
+	observe(118_800)
+	c.compactIdle()
+	if !c.compactAdvised || c.compactM1Issued || c.compactM2Issued || !strings.Contains(c.compactNote, "advisory point 110000") {
+		t.Fatalf("soft crossing failed: advised=%v m1=%v m2=%v note=%q", c.compactAdvised, c.compactM1Issued, c.compactM2Issued, c.compactNote)
+	}
+	c.compactNote = ""
+
+	// Cross m1 (140,400): 1/3 reminder delivered.
+	observe(140_400)
+	c.compactIdle()
+	if !c.compactM1Issued || c.compactM2Issued || !strings.Contains(c.compactNote, "reminder 1/3") || !strings.Contains(c.compactNote, "180000") {
+		t.Fatalf("m1 crossing failed: m1=%v m2=%v note=%q", c.compactM1Issued, c.compactM2Issued, c.compactNote)
+	}
+	c.compactNote = ""
+
+	// Re-arm m1 on usage drop below m1; soft stays latched.
+	observe(120_000)
+	if !c.compactAdvised || c.compactM1Issued || c.compactM2Issued {
+		t.Fatalf("drop below m1 did not re-arm m1 cleanly: advised=%v m1=%v m2=%v", c.compactAdvised, c.compactM1Issued, c.compactM2Issued)
+	}
+
+	// Jump straight past m2 (163,800): only highest pending milestone (2/3) delivered, latching both m1 and m2.
+	observe(163_800)
+	c.compactIdle()
+	if !c.compactM1Issued || !c.compactM2Issued || !strings.Contains(c.compactNote, "reminder 2/3") || strings.Contains(c.compactNote, "reminder 1/3") {
+		t.Fatalf("jump to m2 failed: m1=%v m2=%v note=%q", c.compactM1Issued, c.compactM2Issued, c.compactNote)
+	}
+	c.compactNote = ""
+
+	// CompactStart latches all, CompactEnd clears all.
+	c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactStart})
+	if !c.compactAdvised || !c.compactM1Issued || !c.compactM2Issued || !c.compactHardIssued {
+		t.Fatal("CompactStart did not latch all thresholds")
+	}
+	c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd})
+	if c.compactAdvised || c.compactM1Issued || c.compactM2Issued || c.compactHardIssued {
+		t.Fatal("CompactEnd did not clear all latches")
+	}
+
+	// Live refreshCompaction clears m1/m2 when thresholds are raised above current usage.
+	c.compactAwaitTurn = false
+	observe(163_800)
+	c.compactAdvised, c.compactM1Issued, c.compactM2Issued = true, true, true
+	if err := resolver.Set("compaction.lead_advisory", "160k", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeGlobal}); err != nil {
+		t.Fatal(err)
+	}
+	if err := resolver.Set("compaction.lead_hard", "220k", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeGlobal}); err != nil {
+		t.Fatal(err)
+	}
+	NotifyCompactionConfigChanged()
+	c.refreshCompaction()
+	if !c.compactAdvised || c.compactM1Issued || c.compactM2Issued {
+		t.Fatalf("refreshCompaction did not clear m1/m2 below raised thresholds: advised=%v m1=%v m2=%v", c.compactAdvised, c.compactM1Issued, c.compactM2Issued)
 	}
 }

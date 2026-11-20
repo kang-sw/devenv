@@ -538,6 +538,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
 			notifyCompactionTune(entry.Key)
+			if entry.Key == wsconfig.ItemWorkflowLang {
+				s.refreshAgentAmbient()
+			}
 			// The echo reads through the session-anchored resolver so a reset
 			// reports the value that now applies (a committed repo value
 			// included). The reset already happened, so an echo load failure is
@@ -629,6 +632,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
 			notifyCompactionTune(entry.Key)
+			if entry.Key == wsconfig.ItemWorkflowLang {
+				s.refreshAgentAmbient()
+			}
 			resolvedScope := explicitScope
 			if resolvedScope == "" {
 				resolvedScope = entry.DefaultScope()
@@ -1576,11 +1582,29 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
+		key, _ := params.Arguments["session_key"].(string)
+		if err := processGeneratedWrites.grant(key, generated); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		text := ""
 		for _, path := range generated {
 			text += path.Path + "\n"
 		}
 		return toolTextResponse(req.ID, text, nil)
+	case "path.write":
+		if _, err := s.resolveToolRoot(params.Arguments, params.Meta); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		key, _ := params.Arguments["session_key"].(string)
+		path, pathOK := params.Arguments["path"].(string)
+		content, contentOK := params.Arguments["content"].(string)
+		if !pathOK || !contentOK {
+			return toolTextResponse(req.ID, "", fmt.Errorf("path.write: path and content must be strings"))
+		}
+		if err := processGeneratedWrites.write(key, path, content); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		return toolTextResponse(req.ID, "wrote "+path+"\n", nil)
 	case "playbook.read":
 		name, _ := params.Arguments["name"].(string)
 		keyStr, _ := params.Arguments["session_key"].(string)

@@ -204,7 +204,20 @@ type Usage struct {
 	Context    *UsageContext `json:"context,omitempty"`
 	// Limits holds at most one limit per kind, the 5-hour limit first.
 	Limits []UsageLimit `json:"limits,omitempty"`
-	Cost   *UsageCost   `json:"cost,omitempty"`
+	// LimitsAsOf is when the host observed Limits (epoch ms). It stays put
+	// when another status update only refreshes context or cost.
+	LimitsAsOf int64      `json:"limitsAsOf,omitempty"`
+	Cost       *UsageCost `json:"cost,omitempty"`
+}
+
+// UsageCompaction is the resolved ws compaction thresholds for a hosted
+// session's context window (all absolute token counts; 0/omitted when
+// infinite or unresolved).
+type UsageCompaction struct {
+	Soft            int64   `json:"soft,omitempty"`
+	Hard            int64   `json:"hard,omitempty"`
+	Milestones      []int64 `json:"milestones,omitempty"`
+	AdvisoryEnabled bool    `json:"advisory_enabled,omitempty"`
 }
 
 // UsageContext is the context window's occupancy.
@@ -220,6 +233,9 @@ type UsageContext struct {
 	// CacheHit is the last response's prompt cache hit rate in percent:
 	// cache reads over uncached input, cache reads, and cache writes.
 	CacheHit *float64 `json:"cacheHit,omitempty"`
+	// Compaction is the hosted session's resolved ws compaction thresholds;
+	// absent for external terminal and handed-off sessions or when unresolved.
+	Compaction *UsageCompaction `json:"compaction,omitempty"`
 }
 
 // UsageLimit is one plan usage limit.

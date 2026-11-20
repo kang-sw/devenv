@@ -283,7 +283,7 @@
     if (k === 'items') return VS.my.badge.join(',');
     if (k === 'notify') { var rm = readMap(); return feedEntries(v).filter(function (x) { return !rm[x.key]; }).map(function (x) { return x.key; }).join(','); }
     if (k === 'activity') return String(VS.stats.events);
-    if (k === 'org') return JSON.stringify([VS.members, VS.labels]);
+    if (k === 'org') return JSON.stringify([VS.members, VS.orgs, VS.labels]);
     return '';
   }
   function tabSeen() { return (ui.tabSeen[seenKey(ui.store)] = ui.tabSeen[seenKey(ui.store)] || {}); }
@@ -390,6 +390,7 @@
     else if (e.type === 'item.request' || e.type === 'item.deny' || e.type === 'item.unrequest') el = by('data-req', e.type === 'item.request' ? e.id : p.request);
     else if (e.type === 'item.open' || e.type === 'item.unopen') el = root.querySelector('[data-focus="opening"]');
     else if (e.type === 'item.cc' || e.type === 'item.uncc') el = by('data-ccmember', p.member) || root.querySelector('[data-focus="cc"]');
+    else if (e.type === 'item.cc_org' || e.type === 'item.uncc_org') el = by('data-ccorg', p.org) || root.querySelector('[data-focus="cc"]');
     else if (e.type === 'item.accept') el = by('data-hmember', e.member) || holders;
     else if (e.type === 'item.decline' || e.type === 'item.return' || e.type === 'item.unassign') {
       var gone = vals(VS.assignments).filter(function (r) { return r.ended && r.ended.id === e.id; })[0];
@@ -405,6 +406,14 @@
       var lst = root.querySelector('.alist'), tg = root.querySelector('[data-act="afold"]');
       if (lst) lst.classList.remove('folded');
       if (tg) tg.textContent = wsT("js.tk.asg.fewer");
+    }
+    var grpEl = el && el.closest('.arow.grp.shut');
+    if (grpEl) { // the target sits inside a collapsed org group: expand it
+      var gkey = grpEl.getAttribute('data-orgkey');
+      if (gkey && ui.item) ui.iwOrgFold[ui.store + '|' + ui.item + '|' + gkey] = true;
+      grpEl.classList.remove('shut');
+      var gb = grpEl.querySelector('.tk-iw-fold');
+      if (gb) gb.setAttribute('aria-expanded', 'true');
     }
     var runEl = el && el.closest('.tr-run.shut');
     if (runEl) { // the target sits in a collapsed thread run: expand it
@@ -497,10 +506,40 @@
     });
     return recs.filter(function (r) { return r.state === 'live' || r.state === 'pending' || (last[r.to] && last[r.to].r === r); });
   }
+  function asgOrgGroupHtml(it, g, gRows, renderRecRow) {
+    var gkey = 'a:' + g.rule.id, fk = ui.store + '|' + it.id + '|' + gkey;
+    var isOpen = fk in ui.iwOrgFold ? ui.iwOrgFold[fk] : g.deleted;
+    var tag = g.deleted ? '<span class="tk-org-dtag">' + esc(wsT("js.tk.org.tag.deleted")) + '</span>'
+      : g.vacant ? '<span class="tk-org-vac">' + esc(wsT("js.tk.org.tag.vacant")) + '</span>'
+      : g.pending ? '<span class="chip sm pend">' + esc(wsT("js.tk.st.pending")) + '</span>' : '';
+    var rmTip = g.stayed.length
+      ? wsT("js.tk.iw.asg.rmorg.keep", g.onlyThrough.length, g.stayed.length)
+      : wsTn("js.tk.iw.asg.rmorg.tip", g.onlyThrough.length, g.org.name);
+    var root = g.rule.assignRoot || g.rule.root || '';
+    var rmBtn = g.canRemove
+      ? '<button type="button" class="rmb"' + attr('act', 'unassign') + attr('item', it.id) + attr('rule', g.rule.id) + attr('root', root) + ' aria-label="' + esc(wsT("js.tk.iw.asg.rmorg.aria", g.org.name)) + '"' + tipAttr(rmTip) + '><svg class="i"><use href="#tki-minus"/></svg></button>'
+      : '';
+    var foldBtn = '<button type="button" class="tk-iw-fold"' + attr('act', 'iw-ofold') + attr('item', it.id) + attr('key', gkey) + ' aria-expanded="' + (isOpen ? 'true' : 'false') + '">' +
+      esc(wsTn("js.tk.iw.org.members", gRows.length)) + ' <span class="arw">' + (isOpen ? '&#9662;' : '&#9656;') + '</span></button>';
+    var delBar = '';
+    if (g.deleted) {
+      var noteTxt = g.canRemove ? wsT("js.tk.iw.org.del.asg") : wsT("js.tk.iw.org.del.asg.byother", nm(g.rule.by));
+      var acts = (g.canRetarget ? '<button type="button" class="btn mini primary"' + attr('act', 'retarget-asg') + attr('item', it.id) + attr('rule', g.rule.id) + attr('root', root) + attr('org', g.orgId) + '>' + esc(wsT("js.tk.iw.retarget")) + '</button>' : '') +
+        (g.canRemove ? '<button type="button" class="btn mini"' + attr('act', 'unassign') + attr('item', it.id) + attr('rule', g.rule.id) + attr('root', root) + '>' + esc(wsT("js.tk.iw.asg.rmrule")) + '</button>' : '');
+      delBar = '<div class="ar-diff muted">' + esc(noteTxt) + '</div>' + (acts ? '<div class="atb">' + acts + '</div>' : '');
+    }
+    var sub = gRows.length ? '<ul class="tk-iw-sub">' + gRows.map(function (x) { return renderRecRow(x, false, false); }).join('') + '</ul>' : '';
+    return '<li class="arow grp' + (g.deleted ? ' float' : '') + (isOpen ? '' : ' shut') + '"' + attr('orgkey', gkey) + attr('asgorg', g.orgId) + '>' +
+      '<div class="ar-main"><span class="tk-org-badge' + (g.deleted ? ' gone' : '') + '">' + esc(g.org.name) + '</span>' + tag + '<span class="grow"></span>' + foldBtn + rmBtn + '</div>' +
+      delBar + sub + '</li>';
+  }
   function assigneesHtml(v, it, recs) {
     recs = visibleRecs(recs);
-    if (!recs.length) return '<section class="iw-asg"><h3>' + wsT("js.tk.asg.title") + '<span class="grow"></span>' + assignAddBtn(it, v) + '</h3><div class="empty">' + wsT("js.tk.asg.none") + '</div></section>';
+    if (!recs.length) {
+      if (!itemOrgRules(it, VS.rules).length) return '<section class="iw-asg"><h3>' + wsT("js.tk.asg.title") + '<span class="grow"></span>' + assignAddBtn(it, v) + '</h3><div class="empty">' + wsT("js.tk.asg.none") + '</div></section>';
+    }
     var topic = it.kind === 'topic'; // a topic's record is its holder: no completion, no status
+    var orgGroups = itemOrgAssignInfo(it, VS.rules, VS.assignments, VS.orgs, VS.members, v, canAssign(it, v));
     var rows = recs.map(function (r, i) { return { r: r, i: i, d: leadDepth(r.to), on: r.state === 'live' || r.state === 'pending', src: source(r), cm: topic ? null : complText(r.completion) }; });
     rows.sort(function (a, b) { return (b.on - a.on) || (a.d - b.d) || nm(a.r.to).localeCompare(nm(b.r.to)) || (a.i - b.i); });
     function common(key) { // the most frequent value, when at least two rows hold it
@@ -511,7 +550,7 @@
     var cs = common('src'), cc = common('cm'), open = ui.aopen === it.id, hid = rows.length - A_SHOWN, reqT = {};
     reqTargets(it).forEach(function (r) { reqT[r.id] = true; });
     var head = cs !== null || cc !== null ? '<div class="a-common muted">' + [cs, cc].filter(function (x) { return x !== null; }).join(' &middot; ') + '</div>' : '';
-    var list = rows.map(function (x, k) {
+    function renderRecRow(x, foldMore, personalTag) {
       var r = x.r, b = '', rm = '';
       if (r.state === 'live' && topic && r.to === v) {
         // the holder releases the topic (unassigns their own record) or hands it off
@@ -530,22 +569,78 @@
       var note = r.note || r.answerNote, diff = [];
       if (x.src !== cs) diff.push(cs !== null && x.src.indexOf(cs) === 0 ? x.src.slice(cs.length).trim() : x.src);
       if (x.cm !== cc && x.cm !== null) diff.push(x.cm);
-      return '<li class="arow' + (!x.on ? ' gone' : '') + (k >= A_SHOWN ? ' more' : '') + '"' + attr('rec', r.id) + attr('hmember', r.to) + '>' +
+      return '<li class="arow' + (!x.on ? ' gone' : '') + (foldMore ? ' more' : '') + '"' + attr('rec', r.id) + attr('hmember', r.to) + '>' +
         '<div class="ar-main">' + avHtml(r.to, r.state === 'pending') + '<span class="ar-name">' + whoName(r.to) + '</span>' +
+        (personalTag ? '<span class="ar-tag muted">' + esc(wsT("js.tk.iw.asg.personal")) + '</span>' : '') +
         '<span class="ar-st">' + (topic && r.state === 'live' && !r.ended ? '<span class="chip">' + wsT("js.tk.asg.holder") + '</span>' : recChip(r)) + (r.ended ? ' <span class="muted">' + esc(alias(r.ended.id)) + endedBy(r) + '</span>' : '') + rm + '</span></div>' +
         (note ? '<div class="ar-note">&ldquo;' + esc(note) + '&rdquo;</div>' : '') +
         (diff.length ? '<div class="ar-diff muted">' + diff.join(' &middot; ') + '</div>' : '') +
         (b ? '<div class="tb">' + b + '</div>' : '') + '</li>';
-    }).join('');
-    return '<section class="iw-asg"><h3>' + wsT("js.tk.asg.title") + ' <span class="cnt">' + rows.length + '</span><span class="grow"></span>' + assignAddBtn(it, v) + '</h3>' + head +
-      '<ul class="alist' + (open ? '' : ' folded') + '">' + list + '</ul>' +
+    }
+    var list = '', delCnt = 0;
+    if (!orgGroups.length) {
+      list = rows.map(function (x, k) { return renderRecRow(x, k >= A_SHOWN, false); }).join('');
+    } else {
+      hid = 0;
+      var byRule = {}, groupedRec = {};
+      orgGroups.forEach(function (g) { byRule[g.rule.id] = []; if (g.deleted) delCnt++; });
+      rows.forEach(function (x) {
+        if (x.on && x.r.rule && byRule[x.r.rule]) { byRule[x.r.rule].push(x); groupedRec[x.r.id] = true; }
+      });
+      list = orgGroups.map(function (g) { return asgOrgGroupHtml(it, g, byRule[g.rule.id], renderRecRow); }).join('') +
+        rows.filter(function (x) { return !groupedRec[x.r.id]; }).map(function (x) { return renderRecRow(x, false, !x.r.rule && x.on); }).join('');
+    }
+    var delChip = delCnt ? ' <span class="chip flt">' + esc(wsTn("js.tk.iw.org.delcnt", delCnt)) + '</span>' : '';
+    return '<section class="iw-asg"><h3>' + wsT("js.tk.asg.title") + ' <span class="cnt">' + rows.length + '</span>' + delChip + '<span class="grow"></span>' + assignAddBtn(it, v) + '</h3>' + head +
+      '<ul class="alist' + (open || orgGroups.length ? '' : ' folded') + '">' + list + '</ul>' +
       (hid > 0 ? '<div class="a-fold">' + btn('afold', open ? wsT("js.tk.asg.fewer") : wsT("js.tk.asg.more", hid), {}) + '</div>' : '') + '</section>';
+  }
+  function ccOrgSectionHtml(it, cc, live) {
+    var groups = itemOrgCCInfo(it, VS.orgs, VS.members), delCnt = 0, inOrg = {};
+    var srcs = it.ccSources || {};
+    groups.forEach(function (g) {
+      if (g.deleted) delCnt++;
+      g.added.forEach(function (m) { inOrg[m] = true; });
+    });
+    var add = live ? '<button type="button" class="ia a-add"' + attr('act', 'cc') + attr('item', it.id) + ' aria-haspopup="dialog" aria-label="' + esc(wsT("js.tk.cc.add")) + '"' + tipAttr(wsT("js.tk.cc.add")) + '><svg class="i"><use href="#tki-plus"/></svg></button>' : '';
+    var delChip = delCnt ? ' <span class="chip flt">' + esc(wsTn("js.tk.iw.org.delcnt", delCnt)) + '</span>' : '';
+    var rowsHtml = groups.map(function (g) {
+      var gkey = 'c:' + g.orgId, fk = ui.store + '|' + it.id + '|' + gkey;
+      var isOpen = fk in ui.iwOrgFold ? ui.iwOrgFold[fk] : g.deleted;
+      var tag = g.deleted ? '<span class="tk-org-dtag">' + esc(wsT("js.tk.org.tag.deleted")) + '</span>'
+        : g.vacant ? '<span class="tk-org-vac">' + esc(wsT("js.tk.org.tag.vacant")) + '</span>' : '';
+      var rmTip = g.stayed.length
+        ? wsT("js.tk.iw.cc.rmorg.keep", g.onlyThrough.length, g.stayed.length)
+        : wsTn("js.tk.iw.cc.rmorg.tip", g.onlyThrough.length, g.org.name);
+      var rmBtn = live ? '<button type="button" class="rmb"' + attr('act', 'uncc-org') + attr('item', it.id) + attr('org', g.orgId) + ' aria-label="' + esc(wsT("js.tk.iw.cc.rmorg.aria", g.org.name)) + '"' + tipAttr(rmTip) + '><svg class="i"><use href="#tki-minus"/></svg></button>' : '';
+      var foldBtn = '<button type="button" class="tk-iw-fold"' + attr('act', 'iw-ofold') + attr('item', it.id) + attr('key', gkey) + ' aria-expanded="' + (isOpen ? 'true' : 'false') + '">' +
+        esc(wsTn("js.tk.iw.org.members", g.added.length)) + ' <span class="arw">' + (isOpen ? '&#9662;' : '&#9656;') + '</span></button>';
+      var delBar = g.deleted ? '<div class="ar-diff muted">' + esc(wsT("js.tk.iw.org.del.cc")) + '</div>' +
+        (live ? '<div class="atb"><button type="button" class="btn mini primary"' + attr('act', 'retarget-cc') + attr('item', it.id) + attr('org', g.orgId) + '>' + esc(wsT("js.tk.iw.retarget")) + '</button>' +
+          '<button type="button" class="btn mini"' + attr('act', 'uncc-org') + attr('item', it.id) + attr('org', g.orgId) + '>' + esc(wsT("js.tk.iw.cc.rmorg.btn")) + '</button></div>' : '') : '';
+      var sub = g.added.length ? '<ul class="tk-iw-sub">' + g.added.map(function (id) {
+        var rmt = wsT("js.tk.iw.cc.uncc.excl", nm(id));
+        var rm = live ? '<button type="button" class="rmb"' + attr('act', 'uncc') + attr('item', it.id) + attr('who', id) + ' aria-label="' + esc(wsT("js.tk.cc.remove", nm(id))) + '"' + tipAttr(rmt) + '><svg class="i"><use href="#tki-minus"/></svg></button>' : '';
+        return '<li class="arow"' + attr('ccmember', id) + '><div class="ar-main">' + avHtml(id) + '<span class="ar-name">' + whoName(id) + '</span><span class="ar-st">' + rm + '</span></div></li>';
+      }).join('') + '</ul>' : '';
+      return '<li class="arow grp' + (g.deleted ? ' float' : '') + (isOpen ? '' : ' shut') + '"' + attr('orgkey', gkey) + attr('ccorg', g.orgId) + '>' +
+        '<div class="ar-main"><span class="tk-org-badge' + (g.deleted ? ' gone' : '') + '">' + esc(g.org.name) + '</span>' + tag + '<span class="grow"></span>' + foldBtn + rmBtn + '</div>' +
+        delBar + sub + '</li>';
+    }).join('');
+    var personal = cc.filter(function (id) { return (srcs[id] && srcs[id].personal) || !inOrg[id]; });
+    rowsHtml += personal.map(function (id) {
+      var rmt = wsT("js.tk.iw.cc.uncc.excl", nm(id));
+      var rm = live ? '<button type="button" class="rmb"' + attr('act', 'uncc') + attr('item', it.id) + attr('who', id) + ' aria-label="' + esc(wsT("js.tk.cc.remove", nm(id))) + '"' + tipAttr(rmt) + '><svg class="i"><use href="#tki-minus"/></svg></button>' : '';
+      return '<li class="arow"' + attr('ccmember', id) + '><div class="ar-main">' + avHtml(id) + '<span class="ar-name">' + whoName(id) + '</span><span class="ar-tag muted">' + esc(wsT("js.tk.iw.cc.personal")) + '</span><span class="ar-st">' + rm + '</span></div></li>';
+    }).join('');
+    return '<section class="iw-asg iw-cc"' + attr('focus', 'cc') + '><h3>' + wsT("js.tk.cc.title") + ' <span class="cnt">' + cc.length + '</span>' + delChip + '<span class="grow"></span>' + add + '</h3><ul class="alist">' + rowsHtml + '</ul></section>';
   }
   // CC in the item window: the item's CC'd members (it.cc, in CC order), each with a remove
   // badge, and a "+" that opens the item menu's people step (item.cc). Any member may add or
   // remove anyone; a hidden item takes neither, and shows its list only when it has one.
   function ccHtml(it) {
-    var cc = listOf(it.cc), live = !it.hidden;
+    var cc = listOf(it.cc), orgCC = listOf(it.orgCC), live = !it.hidden;
+    if (orgCC.length) return ccOrgSectionHtml(it, cc, live);
     if (!cc.length && !live) return '';
     var add = live ? '<button type="button" class="ia a-add"' + attr('act', 'cc') + attr('item', it.id) + ' aria-haspopup="dialog" aria-label="' + esc(wsT("js.tk.cc.add")) + '"' + tipAttr(wsT("js.tk.cc.add")) + '><svg class="i"><use href="#tki-plus"/></svg></button>' : '';
     return '<section class="iw-asg iw-cc"' + attr('focus', 'cc') + '><h3>' + wsT("js.tk.cc.title") + (cc.length ? ' <span class="cnt">' + cc.length + '</span>' : '') + '<span class="grow"></span>' + add + '</h3>' +
@@ -620,6 +715,7 @@
   var SYS_KIND_KEY = {
     'item.create': "js.tk.tr.k.create", 'item.edit': "js.tk.tr.k.edit",
     'item.cc': "js.tk.tr.k.cc", 'item.uncc': "js.tk.tr.k.uncc",
+    'item.cc_org': "js.tk.tr.k.cc", 'item.uncc_org': "js.tk.tr.k.uncc",
     'item.assign': "js.tk.tr.k.assign", 'item.accept': "js.tk.tr.k.accept",
     'item.decline': "js.tk.tr.k.decline", 'item.return': "js.tk.tr.k.return",
     'item.handoff': "js.tk.tr.k.handoff", 'item.unassign': "js.tk.tr.k.unassign",
@@ -666,8 +762,8 @@
     return a + '\u2013' + b;
   }
   function sysGlyph(type) {
-    if (type === 'item.cc') return { ch: '+', cls: 'cc' };
-    if (type === 'item.uncc') return { ch: '\u2212', cls: 'cc' };
+    if (type === 'item.cc' || type === 'item.cc_org') return { ch: '+', cls: 'cc' };
+    if (type === 'item.uncc' || type === 'item.uncc_org') return { ch: '\u2212', cls: 'cc' };
     if (/^item\.(assign|accept|decline|return|handoff|unassign|claim|request|approve|deny|unrequest)$/.test(type)) return { ch: '\u2192', cls: 'as' };
     if (type === 'item.edit' || type === 'comment.edit') return { ch: '\u270e', cls: 'ed' };
     return { ch: '\u25cf', cls: '' };
@@ -764,12 +860,14 @@
   // title or Cmd/Ctrl+Enter in the body saves, Esc cancels.
   function windowHtml(v, it) {
     var recs = it.assignments.map(A), up = ancestorsOf(it), ed = ui.iedit && ui.iedit.item === it.id ? ui.iedit : null;
+    var delSum = itemDeletedOrgSummary(it, VS.rules, VS.orgs, v);
+    var cleanupChip = delSum.needsCleanup ? '<span class="chip flt"' + tipAttr(wsT("js.tk.iw.cleanup.tip")) + '>' + esc(wsT("js.tk.iw.cleanup")) + '</span>' : '';
     var h = '<div class="iw-top">' + (up.length ? '<nav class="iw-crumb" aria-label="' + wsT("js.tk.win.parents") + '">' + up.map(function (k) { return '<a href="#"' + attr('item', k) + '>' + esc(VS.items[k].title) + '</a>'; }).join('<span aria-hidden="true">&rsaquo;</span>') + '</nav>' : '') +
       '<div class="iw-head"' + attr('mitem', it.id) + attr('rk', 'iw:' + it.id) + '>' + stBtn(stKey(it), it) +
       (ed ? '<h2 id="iw-title" class="iw-edt"><input type="text" id="iw-etitle" data-keep autocomplete="off" value="' + esc(ed.title) + '" aria-label="' + wsT("js.tk.form.title") + '"></h2>' : '<h2 id="iw-title">' + esc(it.title) + '</h2>') +
       headActs(it) + moreBtn(it.id, 'iw-more', true) +
       '<button type="button" class="ia iw-x" data-act="win-close" aria-label="' + wsT("js.tk.win.close") + '"' + tipAttr(wsT("js.tk.win.close")) + '><svg class="i"><use href="#tki-x"/></svg></button></div>' +
-      '<div class="iw-chips">' + kindChip(it) + idCopyBtn(it) + (it.kind === 'topic' ? '' : stChip(it.status) + (canEdit(it) ? '' : prChip(it)) + dueChip(it) + rollupHtml(it)) + openChip(it) + labelChips(it, 'lsearch') + warnHtml(it) + '</div></div>';
+      '<div class="iw-chips">' + kindChip(it) + idCopyBtn(it) + (it.kind === 'topic' ? '' : stChip(it.status) + (canEdit(it) ? '' : prChip(it)) + dueChip(it) + rollupHtml(it)) + openChip(it) + cleanupChip + labelChips(it, 'lsearch') + warnHtml(it) + '</div></div>';
     h += '<div class="iw-grid"><div class="iw-main">';
     if (ed) h += '<div class="iw-body iw-edit">' + editorHtml('iw-ebody', { value: ed.body, rows: 5, label: wsT("js.tk.form.body"), pv: 'sh-body' }) +
       '<input type="text" id="iw-eproj" data-keep autocomplete="off" value="' + esc(ed.project) + '" placeholder="' + wsT("js.tk.form.project") + '" aria-label="' + wsT("js.tk.form.project") + '">' + labelPickHtml(ed) +

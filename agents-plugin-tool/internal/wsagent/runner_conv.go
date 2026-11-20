@@ -61,6 +61,10 @@ type conv struct {
 	monitors   *int
 	// actionNeeded is State.ActionNeeded.
 	actionNeeded string
+	// Worker permission projection is transient. Explicit selection lives in
+	// permission.json; a legacy-derived value is recomputed at each launch.
+	workerPermissionLevel  PermissionLevel
+	workerPermissionSource string
 	// failure and mcpBroken are State.Failure and State.MCPBroken.
 	failure   *wslive.Notice
 	mcpBroken []string
@@ -86,8 +90,8 @@ type conv struct {
 	compactPrevTokens, compactPrevWindow                                         int64
 	compactGen                                                                   uint64
 	compactLoaded                                                                bool
-	compactUsageFresh, compactAdvised, compactHardIssued, compactAdvisoryEnabled bool
-	compactAwaitTurn                                                             bool
+	compactUsageFresh, compactAdvised, compactM1Issued, compactM2Issued, compactHardIssued, compactAdvisoryEnabled bool
+	compactAwaitTurn                                                                                               bool
 
 	// Agy model-wait watchdog state (loop-owned, in-memory only).
 	modelWaitTimeout            time.Duration
@@ -121,9 +125,10 @@ type conv struct {
 	idle         *time.Timer
 	idleAfter    time.Duration
 	bgGraceTimer *time.Timer
-	dirtyModel   bool
-	dirtyEffort  bool
-	dirtyMode    bool
+	dirtyModel      bool
+	dirtyEffort     bool
+	dirtyMode       bool
+	dirtyPermission bool
 	// reconcileMode marks replay-reconstructed intent, not a new user setting.
 	// Failed reconciliation is advisory; it must not kill an unenforceable lead.
 	reconcileMode bool
@@ -223,6 +228,10 @@ type conv struct {
 	// systemPrompt is agent.spawn's system prompt (Record.SystemPrompt),
 	// read once from the session directory; loop-owned.
 	systemPrompt string
+	// ambient is the fully rendered hosted-lead turn suffix. It is resolved
+	// at conversation creation/restoration and refreshed by config.tune,
+	// never by the send path.
+	ambient string
 	// expiring is set while a child-agent-waiting expiry is dispatched
 	// (expireIfDue) and not yet decided; loop-owned.
 	expiring bool
@@ -433,13 +442,18 @@ func (c *conv) steerMail(text string) bool {
 		c.apply(*wakeEvent("mail", "mailbox", "", text).Live)
 		return true
 	}
+	// Persist before the holder write. The child can accept the steer and
+	// outlive this daemon before its acknowledgement reaches the runner.
+	c.steerSeq++
+	seq := c.steerSeq
+	c.steered = append(c.steered, steeredReport{Text: text, Seq: seq})
+	c.saveSteered()
 	if err := ctl.reports.Steer(text); err != nil {
+		c.steered = slices.DeleteFunc(c.steered, func(s steeredReport) bool { return s.Seq == seq })
+		c.saveSteered()
 		fmt.Fprintf(c.r.opts.Log, "agent %s: steer a mail: %v\n", c.rec.ReplyID, err)
 		return false
 	}
-	c.steerSeq++
-	c.steered = append(c.steered, steeredReport{Text: text, Seq: c.steerSeq})
-	c.saveSteered()
 	c.apply(*wakeEvent("mail", "mailbox", "", text).Live)
 	c.changed(false)
 	return true
@@ -773,6 +787,19 @@ func (c *conv) stateWithKeyCheck(checkKey bool) State {
 		caps := c.caps.clone()
 		st.Capabilities = &caps
 	}
+	if !c.rec.Lead {
+		st.PermissionLevel = c.workerPermissionLevel
+		st.PermissionSource = c.workerPermissionSource
+		if st.PermissionLevel != "" {
+			st.PermissionEnforcement = permissionQuality(c.rec.Backend, st.PermissionLevel, "")
+		}
+	}
+	st.IsChild = c.r.isChildRecord(c.rec)
+	if !c.rec.Lead {
+		// The loop refreshes worker permission at startup and every launch or
+		// control change. State/List stay memory-only on the interactive path.
+		return st
+	}
 	return c.r.permissionState(st, c.rec, c.dir)
 }
 
@@ -1039,6 +1066,16 @@ func (c *conv) applyMode(ev wslive.Event, quiet, coalesceTurnEnd bool) {
 	if !quiet {
 		c.observeCompaction(ev)
 	}
+	if ev.Kind == wslive.KindStatus && ev.Context != nil && ev.Context.Compaction == nil {
+		if !quiet {
+			c.refreshCompaction()
+		}
+		if comp := c.usageCompaction(ev.Context.Window); comp != nil {
+			ctx := *ev.Context
+			ctx.Compaction = comp
+			ev.Context = &ctx
+		}
+	}
 	if ev.Kind == wslive.KindReset {
 		c.spawnDirty = true
 	}
@@ -1212,12 +1249,12 @@ func (c *conv) kick() {
 	// follow the turn's start.
 	ordinary := cmd == nil
 	if cmd == nil {
-		err = c.proc.Send(c.compactInput(strings.Join(append(append(slices.Clone(parts), reports...), mail...), "\n\n")))
+		err = c.proc.Send(c.turnInput(strings.Join(append(append(slices.Clone(parts), reports...), mail...), "\n\n")))
 	} else if text, ok := c.playbookTurn(*cmd); ok {
 		// The runner expands a playbook command itself: the harness has
 		// no such command, and the turn carries the playbook's body.
 		ordinary = true
-		err = c.proc.Send(c.compactInput(text))
+		err = c.proc.Send(c.turnInput(text))
 	} else {
 		err = c.runCommand(*cmd)
 	}

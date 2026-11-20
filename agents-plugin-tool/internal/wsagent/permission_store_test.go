@@ -108,6 +108,59 @@ func TestPermissionStoreRoundTrip(t *testing.T) {
 	assertPermissionSelection(t, dir, PermissionFull, false)
 }
 
+func TestPermissionDelegatedSelectionRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeDelegatedPermissionSelection(dir, PermissionFull); err != nil {
+		t.Fatal(err)
+	}
+	if !delegatedPermission(dir) {
+		t.Fatal("agent.spawn provenance was not stored")
+	}
+	if err := writePermissionSelection(dir, PermissionReadOnly); err != nil {
+		t.Fatal(err)
+	}
+	if !delegatedPermission(dir) {
+		t.Fatal("authorized lowering lost agent.spawn provenance")
+	}
+	assertPermissionSelection(t, dir, PermissionReadOnly, false)
+
+	generic := t.TempDir()
+	if err := writeGenericPermissionSelection(generic, PermissionWorkdirWrite); err != nil {
+		t.Fatal(err)
+	}
+	if delegated, set := delegatedPermissionState(generic); delegated || !set {
+		t.Fatalf("generic provenance = delegated %v, set %v", delegated, set)
+	}
+	if err := writePermissionSelection(generic, PermissionReadOnly); err != nil {
+		t.Fatal(err)
+	}
+	if delegated, set := delegatedPermissionState(generic); delegated || !set {
+		t.Fatalf("generic lowering changed provenance = delegated %v, set %v", delegated, set)
+	}
+
+	legacy := t.TempDir()
+	if err := os.WriteFile(filepath.Join(legacy, "permission.json"), []byte(`{"permission_level":"read-only"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	permissionSelections.Delete(legacy)
+	if delegated, set := delegatedPermissionState(legacy); delegated || set {
+		t.Fatalf("pre-provenance state = delegated %v, set %v", delegated, set)
+	}
+
+	path := filepath.Join(dir, "permission.json")
+	corrupt := []byte(`{"permission_level":"read-only","delegated_authority":"yes"}`)
+	if err := os.WriteFile(path, corrupt, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	permissionSelections.Delete(dir)
+	if _, _, err := readPermissionSelection(dir); err == nil {
+		t.Fatal("invalid delegation provenance was accepted")
+	}
+	if err := writePermissionSelection(dir, PermissionReadOnly); err == nil {
+		t.Fatal("permission update silently repaired invalid delegation provenance")
+	}
+}
+
 func TestPermissionStoreCorruption(t *testing.T) {
 	for _, raw := range []string{"", "{", "null", "[]", "1", `"read-only"`, `{}`, `{"permission_level":null}`, `{"permission_level":false}`, `{"permission_level":1}`, `{"permission_level":""}`, `{"permission_level":"unknown"}`, `{"permission_level":"read-only"} trailing`} {
 		t.Run(raw, func(t *testing.T) {
@@ -364,7 +417,7 @@ var errRegistrationMismatch = errors.New("registration identity mismatch")
 	harness := permissionLegacyWriterPackage(t, source)
 	root := t.TempDir()
 	cases := []string{"record", "registration", "remove", "labelset", "labelclear", "hosted", "expired", "deleted"}
-	seed := []byte("{\n  \"permission_level\": \"read-only\", \"future\": {\"keep\":[1,true,\"x\"]}\n}\n")
+	seed := []byte("{\n  \"permission_level\": \"read-only\", \"delegated_authority\": true, \"future\": {\"keep\":[1,true,\"x\"]}\n}\n")
 	for _, id := range cases {
 		dir := filepath.Join(root, "sessions", id)
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -403,6 +456,10 @@ var errRegistrationMismatch = errors.New("registration identity mismatch")
 	for _, checkpoint := range checkpoints {
 		dir := filepath.Join(root, "checkpoints", checkpoint.Name())
 		assertPermissionSelection(t, dir, PermissionReadOnly, true)
+		permissionSelections.Delete(dir)
+		if !delegatedPermission(dir) {
+			t.Fatalf("old writer checkpoint %s lost delegated authority", checkpoint.Name())
+		}
 		if err := writePermissionSelection(dir, PermissionWorkdirWrite); err != nil {
 			t.Fatal(err)
 		}

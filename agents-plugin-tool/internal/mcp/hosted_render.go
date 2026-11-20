@@ -23,6 +23,15 @@ type HostedRender struct {
 	DirectTools      []string
 }
 
+// HostedChild is the runner's agent.list projection without an internal/mcp
+// dependency on wsagent.
+type HostedChild struct {
+	Address, Label, Tier, Authority, State string
+	Model, Effort, Cwd, Error              string
+	Held                                   int
+	CreatedAt, LastReport                  string
+}
+
 // hostedRenderServer is a throwaway server that renders for the hosted lead
 // whose key is key as that lead's own connection would: env is the
 // environment its ws-mcp serves under (the selected package's resource tree
@@ -86,6 +95,21 @@ func RenderLeadManual(env []string, root string, render HostedRender, key string
 		return "", fmt.Errorf("workflow manual: %s", text)
 	}
 	return strings.TrimSpace(strings.TrimPrefix(text, workflowManualReadFullNotice)), nil
+}
+
+// RenderHostedRestoreBundle reads the current split session state and renders
+// the transient bundle used after native compaction and daemon restart.
+func RenderHostedRestoreBundle(env []string, root string, render HostedRender, key, cause string, children []HostedChild) (string, error) {
+	s, release, err := hostedRenderServer(env, root, render, key)
+	if err != nil {
+		return "", fmt.Errorf("restore bundle: %w", err)
+	}
+	defer release()
+	rec, ok := s.sessions.readState(key, partAll)
+	if !ok {
+		return "", fmt.Errorf("restore bundle: session key %q has no state", key)
+	}
+	return renderHostedRestoreBundle(key, cause, rec, children), nil
 }
 
 // RenderLeadPlaybook renders playbook name for the hosted lead whose key is

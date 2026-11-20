@@ -319,7 +319,7 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged, agyActivity func
 			"tickets.query", "tickets.move", "git.status", "git.log", "git.commit", "git.merge",
 			"worktree.acquire", "worktree.release", "note.query", "note.write",
 			"config.resolve_agent", "todo.list", "todo.check",
-		}, ToolsAlwaysLoad: true, ManualHarness: wsagent.BackendAgy, PlanUsageActivity: true, PlaybookCommands: true, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendAgy), WorkerHTTPMCP: true, WorkerAutoApprove: true},
+		}, ToolsAlwaysLoad: true, ManualHarness: wsagent.BackendAgy, PlaybookCommands: true, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendAgy), WorkerHTTPMCP: true, WorkerAutoApprove: true},
 	}
 	return wsagent.NewRunner(wsagent.Options{
 		Dir:                        dir,
@@ -343,6 +343,9 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged, agyActivity func
 		// dashboard commands whose turn carries the playbook body.
 		LeadManual: func(backend, dir, key string) (string, error) {
 			return renderLeadManual(hostedRender(backends[backend]), dir, key)
+		},
+		RestoreBundle: func(backend, dir, key string, cause wsagent.RestoreCause, children []wsagent.AgentChild) (string, error) {
+			return renderHostedRestoreBundle(hostedRender(backends[backend]), dir, key, cause, children)
 		},
 		PlaybookCommands: hostedPlaybookCommands,
 		ExpandCommand: func(backend, dir, key, name string) (string, error) {

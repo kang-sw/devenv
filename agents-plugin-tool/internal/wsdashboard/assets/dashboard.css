@@ -13,7 +13,7 @@
   --wb-compact-ink: var(--wb-ph-compact);
   --pv-bg: #e4dcf7; --pv-fg: #3a2c6b; --pv-line: #b9a9e8;
   --wb-ok: #1d7348; --wb-fail: #c0262d;
-  --wb-warn: #c27a00; --wb-warn-ink: #a35f00;
+  --wb-warn: #c27a00; --wb-warn-ink: #a35f00; --wb-hot: #d95d16;
   /* the warning tone on a toast, whose surface is the inverted text colour */
   --wb-toast-warn: #f2c06b;
   --ring-think: #6a4fc4;
@@ -37,7 +37,7 @@
     --wb-compact-ink: var(--wb-on-ph-compact);
     --pv-bg: #3d2f6b; --pv-fg: #ddd3fb; --pv-line: #6a4fc4;
     --wb-ok: #6cc39a; --wb-fail: #f0797e;
-    --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
+    --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c; --wb-hot: #fb923c;
     --wb-toast-warn: #9a5a00;
     --ring-think: #967af7;
     --ring-tool: #38bdf8;
@@ -59,7 +59,7 @@
   --wb-compact-ink: var(--wb-on-ph-compact);
   --pv-bg: #3d2f6b; --pv-fg: #ddd3fb; --pv-line: #6a4fc4;
   --wb-ok: #6cc39a; --wb-fail: #f0797e;
-  --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
+  --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c; --wb-hot: #fb923c;
   --wb-toast-warn: #9a5a00;
   --ring-think: #967af7;
   --ring-tool: #38bdf8;
@@ -230,6 +230,13 @@ a.tph-parent:focus-visible { outline: 1.5px solid var(--wb-primary); outline-off
 .gmenu button[aria-pressed="true"] { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); font-weight: 700; }
 .gmenu .gk { font: 800 11px/20px var(--wb-mono); width: 26px; text-align: center; border-radius: 5px; background: var(--wb-muted); flex: none; }
 .gmenu .gs { display: block; font-size: 11.5px; color: var(--wb-muted-fg); font-weight: 400; }
+/* Desktop update: the small test-channel pill shares the check row; a long
+   label wraps inside the pill rather than overflowing a narrow card. */
+.gmenu .dupd-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.gmenu .dupd-row > #dupd-check { flex: 1 1 auto; min-width: 0; }
+.gmenu .dupd-row > .dupd-canary { flex: 0 0 auto; max-width: 50%; margin-right: 2px; text-align: center; padding: 2px 8px; border-radius: 999px; border: 1px dashed var(--wb-warn); background: color-mix(in srgb, var(--wb-warn) 9%, transparent); color: var(--wb-warn-ink); font-size: 11px; font-weight: 700; line-height: 1.35; white-space: normal; word-break: keep-all; overflow-wrap: anywhere; }
+.gmenu .dupd-row > .dupd-canary:hover { background: color-mix(in srgb, var(--wb-warn) 18%, transparent); }
+.gmenu .dupd-row > .dupd-canary:focus-visible, .gmenu #dupd-stable:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
 .gmenu select { width: 100%; box-sizing: border-box; border: 1px solid var(--wb-muted); background: var(--wb-card); color: inherit; font: inherit; font-size: 13px; border-radius: 8px; padding: 6px 8px; cursor: pointer; }
 .gmenu .gn { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--wb-muted-fg); padding: 5px 4px 0; border-top: 1px solid var(--wb-muted); margin-top: 3px; line-height: 1.4; white-space: nowrap; }
 .gmenu .gn .settings-version { margin-left: auto; flex: none; }

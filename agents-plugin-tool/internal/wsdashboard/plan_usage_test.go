@@ -17,23 +17,28 @@ func usageTestStore(t *testing.T) *planUsageStore {
 	return newPlanUsageStore(home, home, func(string) string { return "" })
 }
 
-func TestPlanUsageClaudeStaleGuardAndPersistence(t *testing.T) {
+func TestPlanUsageClaudeLatestObservationWins(t *testing.T) {
 	s := usageTestStore(t)
 	now := time.Now().UnixMilli()
-	push := func(percent float64, reset, at int64) {
-		s.pushClaude(&wslive.Snapshot{Adapter: "claude", UpdatedAt: at, Usage: &wslive.Usage{Limits: []wslive.UsageLimit{{Kind: wslive.LimitFiveHour, Percent: percent, ResetsAt: reset}}}})
+	push := func(percent float64, reset, observedAt, updatedAt int64) {
+		s.pushClaude(&wslive.Snapshot{Adapter: "claude", UpdatedAt: updatedAt, Usage: &wslive.Usage{LimitsAsOf: observedAt, Limits: []wslive.UsageLimit{{Kind: wslive.LimitFiveHour, Percent: percent, ResetsAt: reset}}}})
 	}
-	push(40, now+10000, now)
-	push(20, now+10000, now+1)
-	push(90, now+5000, now+2)
+	reset := now + 10_000
+	push(40, reset, now, now)
+	push(20, reset, now+1, now+100) // a newer lower value wins
 	got := s.entries()[0]
-	if got.Windows[0].Percent != 40 || got.AsOf != now {
-		t.Fatalf("stale push replaced data: %+v", got)
+	if got.Windows[0].Percent != 20 || got.AsOf != now+1 {
+		t.Fatalf("newer lower usage did not replace: %+v", got)
 	}
-	push(5, now+20000, now+3)
+	push(90, reset, now-1, now+1_000) // a newer heartbeat is not a newer observation
 	got = s.entries()[0]
-	if got.Windows[0].Percent != 5 || got.AsOf != now+3 {
-		t.Fatalf("new window rejected: %+v", got)
+	if got.Windows[0].Percent != 20 || got.AsOf != now+1 {
+		t.Fatalf("older observation replaced data: %+v", got)
+	}
+	push(5, now+5_000, now+2, now+2) // account switch: an earlier reset wins too
+	got = s.entries()[0]
+	if got.Windows[0].Percent != 5 || got.Windows[0].ResetsAt != now+5_000 || got.AsOf != now+2 {
+		t.Fatalf("newer account-switch observation rejected: %+v", got)
 	}
 	restored := newPlanUsageStore(s.dir, s.home, s.getenv)
 	if v := restored.entries(); len(v) != 1 || v[0].Windows[0].Percent != 5 {
@@ -42,11 +47,6 @@ func TestPlanUsageClaudeStaleGuardAndPersistence(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join(s.dir, planUsageCache))
 	if err != nil || !json.Valid(raw) {
 		t.Fatal("cache missing or invalid")
-	}
-	// A heartbeat must not make an unchanged value look newly observed.
-	push(5, now+20000, now+100)
-	if s.entries()[0].AsOf != now+3 {
-		t.Fatal("heartbeat refreshed asOf")
 	}
 }
 
@@ -115,8 +115,8 @@ func TestPlanUsageClaudeKeepsLiveAbsentWindow(t *testing.T) {
 	now := time.Now().UnixMilli()
 	five := wslive.UsageLimit{Kind: wslive.LimitFiveHour, Percent: 40, ResetsAt: now + 100000}
 	week := wslive.UsageLimit{Kind: wslive.LimitSevenDay, Percent: 20, ResetsAt: now + 200000}
-	push := func(at int64, limits ...wslive.UsageLimit) {
-		s.pushClaude(&wslive.Snapshot{Adapter: "claude", UpdatedAt: at, Usage: &wslive.Usage{Limits: limits}})
+	push := func(updatedAt int64, limits ...wslive.UsageLimit) {
+		s.pushClaude(&wslive.Snapshot{Adapter: "claude", UpdatedAt: updatedAt, Usage: &wslive.Usage{LimitsAsOf: now, Limits: limits}})
 	}
 	push(now, five, week)
 	writes := usageWriteCounter(s)
@@ -145,11 +145,11 @@ func TestPlanUsageClaudeKeepsLiveAbsentWindow(t *testing.T) {
 	gone := wslive.UsageLimit{Kind: wslive.LimitFiveHour, Percent: 40, ResetsAt: now - 1}
 	push(now+4, gone, week)
 	push(now+5, week)
-	push(now+1, five, week) // a snapshot older than the stored asOf is rejected outright
+	s.pushClaude(&wslive.Snapshot{Adapter: "claude", UpdatedAt: now + 100, Usage: &wslive.Usage{LimitsAsOf: now - 1, Limits: []wslive.UsageLimit{five, week}}})
 	if got := claudeKinds(s); len(got) != 1 || got[0] != wslive.LimitSevenDay || writes[planUsageCache] != 1 || writes[planUsageHistoryCache] != 0 {
 		t.Fatalf("expired absent window kept or flapped: %v, writes %v", got, writes)
 	}
-	if entries := newPlanUsageStore(s.dir, s.home, s.getenv).entries(); len(entries) != 1 || len(entries[0].Windows) != 1 || entries[0].AsOf != now+3 {
+	if entries := newPlanUsageStore(s.dir, s.home, s.getenv).entries(); len(entries) != 1 || len(entries[0].Windows) != 1 || entries[0].AsOf != now {
 		t.Fatalf("expected only persisted weekly window: %+v", entries)
 	}
 }
@@ -159,8 +159,8 @@ func TestPlanUsageClaudeIgnoresExpiredReportedWindow(t *testing.T) {
 	now := time.Now().UnixMilli()
 	expired := wslive.UsageLimit{Kind: wslive.LimitFiveHour, Percent: 80, ResetsAt: now - 1000}
 	week := wslive.UsageLimit{Kind: wslive.LimitSevenDay, Percent: 20, ResetsAt: now + 200000}
-	push := func(at int64, limits ...wslive.UsageLimit) {
-		s.pushClaude(&wslive.Snapshot{Adapter: "claude", UpdatedAt: at, Usage: &wslive.Usage{Limits: limits}})
+	push := func(updatedAt int64, limits ...wslive.UsageLimit) {
+		s.pushClaude(&wslive.Snapshot{Adapter: "claude", UpdatedAt: updatedAt, Usage: &wslive.Usage{LimitsAsOf: now, Limits: limits}})
 	}
 	push(now, expired, week)
 	if got := claudeKinds(s); len(got) != 1 || got[0] != wslive.LimitSevenDay {
@@ -216,7 +216,7 @@ func TestPlanUsageUnchangedPushWritesNothing(t *testing.T) {
 		t.Fatalf("first push: %v", writes)
 	}
 	for i := int64(0); i < 3; i++ {
-		s.pushClaude(&wslive.Snapshot{Adapter: "claude", UpdatedAt: now + i, Usage: &wslive.Usage{Limits: limits}})
+		s.pushClaude(&wslive.Snapshot{Adapter: "claude", UpdatedAt: now + i, Usage: &wslive.Usage{LimitsAsOf: now, Limits: limits}})
 	}
 	if writes[planUsageCache] != 1 || writes[planUsageHistoryCache] != 1 {
 		t.Fatalf("unchanged pushes wrote: %v", writes)

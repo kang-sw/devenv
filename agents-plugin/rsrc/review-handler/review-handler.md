@@ -35,7 +35,9 @@ parallel.
 - A commit with no plan → judged from its diff and `## AI Context`.
 - Range scenario → add the Landing Lens phase (the config's section, or the
   default below) and require a test change with every behavior change.
-- Each reviewer returns severity-graded findings and `omitted:`.
+- Each reviewer generates and writes its own cache artifact, then returns its
+  status and artifact path. Read those artifacts before grading; they are the
+  reviewers' complete severity-graded findings and `omitted:` record.
 
 Defaults when the config is absent or lacks the section:
 - Review Phases: **intent**: commit messages and `## AI Context` match the
@@ -49,8 +51,11 @@ Defaults when the config is absent or lacks the section:
 
 ## Grading
 
-- Write every finding to
-  `{{.McpNamespace}}/path.generate(kind: "review", stems: ["findings"])`.
+- Generate the handler's own graded artifact with
+  `{{.McpNamespace}}/path.generate(kind: "review", stems: ["findings"])`,
+  then write the complete consolidated report to it with
+  `{{.McpNamespace}}/path.write` under the same session key. Never ask a
+  reviewer to write the handler's path or reuse a reviewer's path.
 - A Minor describing a defect a caller or user can hit today (a crash, wrong
   output, a refused call that should succeed, data loss) with a plausible
   current trigger → re-grade it Important.

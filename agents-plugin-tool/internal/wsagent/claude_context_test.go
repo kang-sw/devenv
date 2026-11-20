@@ -3,9 +3,23 @@ package wsagent
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wslive"
 )
+
+func TestClaudeRateLimitObservationTimeSurvivesOtherStatuses(t *testing.T) {
+	m := newClaudeMapper(leadSpec())
+	m.now = func() time.Time { return time.UnixMilli(1_234) }
+	line := `{"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"utilization":0.4,"resetsAt":2000000000}}}}`
+	got := statuses(m.mapLine([]byte(line), nopReplies{}))
+	if len(got) != 1 || got[0].LimitsAsOf != 1_234 || len(got[0].Limits) != 1 {
+		t.Fatalf("rate limit status = %+v", got)
+	}
+	if later := m.status().Live; later == nil || later.LimitsAsOf != 1_234 {
+		t.Fatalf("later status refreshed limits observation: %+v", later)
+	}
+}
 
 // statuses are the status events among evs.
 func statuses(evs []Event) []wslive.Event {

@@ -3,7 +3,7 @@ package wsdashboard
 import "testing"
 
 func TestConversationPresentationValidatedBoardNavigation(t *testing.T) {
-	src := whiteboardBridgeFunctions(t, string(mustAsset(t, "dashboard.js")), "effectTopic", "effectJump", "effectJumpClick")
+	src := whiteboardBridgeFunctions(t, string(mustAsset(t, "dashboard.js")), "effectTopic", "effectJump", "effectJumpTo", "effectJumpClick", "effectJumpKey")
 	runNode(t, "conversation effect navigation", `
 var bad=[],effectJumpEpoch=0,topics=[],more=null,loads=[],scrolls=[],focused=[],reveals=[],results=[],tabs=[],pendingReveal=null,closedLoads=0,flashes=[],timers=[];
 function setTimeout(fn){timers.push(fn);}
@@ -27,8 +27,9 @@ function loadClosed(btn){closedLoads++;if(btn.load)btn.load();return Promise.res
 function done(topic,exact){results.push([topic,exact]);}
 var status={textContent:''},card={getAttribute:function(){return 'topic-6161';},querySelector:function(){return status;}},link=null,row=null,interactive=false;
 var containedCard=card,box={contains:function(n){return n===containedCard;}};function entriesBox(){return box;}
-function target(){return {closest:function(s){if(s==='.wbupdate-topic[data-wb-topic]')return card;if(s==='a[data-wb-jump]')return link;if(s==='.wbupdate-row[data-wb-element]')return row;if(s==='a, summary, button, input, textarea, select')return interactive?{}:null;return null;}};}
+function target(){return {closest:function(s){if(s==='.wbupdate-topic[data-wb-topic]')return card;if(s==='a[data-wb-jump]')return link;if(s==='.wbupdate-row[data-wb-element]')return row;if(s.indexOf('a, summary, button, input, textarea, select')>=0)return interactive?{}:null;return null;}};}
 function click(){var event={target:target(),button:0,preventDefault:function(){this.prevented=true;}};return event;}
+function keydown(k){return {target:target(),key:k,preventDefault:function(){this.prevented=true;}};}
 `+src+`
 (async function(){
  effectJump(a.id,a.id,done);
@@ -69,8 +70,16 @@ function click(){var event={target:target(),button:0,preventDefault:function(){t
  check('native keyboard link reaches exact element',[ev.prevented,status.textContent,focused[focused.length-1]],[true,'',['e7',true]]);
  link={getAttribute:function(){return 'p999';}};effectJumpClick(click());
  check('exact failure is disclosed, not called reached',status.textContent,'js.whiteboard.jump.elementmissing');
- link=null;row={getAttribute:function(){return 'e7';}};effectJumpClick(click());
- check('individual log-row click targets log',focused[focused.length-1],['e7',true]);row=null;
+ link=null;row={getAttribute:function(){return 'e7';},closest:function(s){return s==='.wbupdate-topic[data-wb-topic]'?card:null;}};effectJumpClick(click());
+ check('individual log-row click targets log',focused[focused.length-1],['e7',true]);
+ var k=keydown('Enter');effectJumpKey(k);check('log-row Enter targets log',[k.prevented,focused[focused.length-1]],[true,['e7',true]]);
+ k=keydown(' ');effectJumpKey(k);check('log-row Space targets log',[k.prevented,focused[focused.length-1]],[true,['e7',true]]);
+ before=focused.length;
+ k=keydown('Escape');effectJumpKey(k);
+ k=keydown('Enter');k.ctrlKey=true;effectJumpKey(k);
+ interactive=true;effectJumpKey(keydown('Enter'));interactive=false;
+ check('other keys, modified keys, and nested interactive targets do not jump on keydown',focused.length,before);
+ row=null;
  before=focused.length;interactive=true;effectJumpClick(click());interactive=false;ev=click();ev.ctrlKey=true;effectJumpClick(ev);
  var ownCard=card;card={getAttribute:function(){return a.id;},querySelector:function(){return status;}};effectJumpClick(click());card=ownCard;
  check('disclosure, modified and foreign-container clicks do not navigate',focused.length,before);

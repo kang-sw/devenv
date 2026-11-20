@@ -318,7 +318,7 @@ func TestPermissionStatePreservesExistingError(t *testing.T) {
 		}
 	}
 	worker := State{Error: "worker failure"}
-	if got := r.permissionState(worker, Record{Backend: BackendClaude}, dir); got.Error != worker.Error {
-		t.Fatalf("worker diagnostic changed: %+v", got)
+	if got := r.permissionState(worker, Record{Backend: BackendClaude}, dir); !strings.Contains(got.Error, worker.Error) || !strings.Contains(got.Error, "invalid permission_level") {
+		t.Fatalf("worker diagnostic lost admission evidence: %+v", got)
 	}
 }

@@ -93,6 +93,8 @@ test('cleanup revalidates each PID/creation identity immediately before its sign
 });
 test('Windows packaging consumes only the pinned cached x64 zip and ships the approved brand icons', async t => {
   const { bundled } = fixture(t);
+  bundled.metadata.version = bundled.contract.plugin_version;
+  bundled.save(bundled.binary + '.metadata.json', bundled.metadata);
   const daemonInput = bundled.root;
   const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-cache-test-'));
   let staged;
@@ -135,6 +137,31 @@ test('Windows packaging consumes only the pinned cached x64 zip and ships the ap
     await assert.rejects(build({ platform: 'win32', daemonInput, cache: path.join(cache, 'absent'), packageApp: () => assert.fail('must never package/download') }), /Offline prerequisite missing.*win32-x64.zip; no download attempted/);
     await assert.rejects(build({ platform: 'linux', cache }), /darwin and win32 only/);
   } finally { fs.rmSync(cache, { recursive: true, force: true }); fs.rmSync(out, { recursive: true, force: true }); }
+});
+test('Windows packaging retains a validated canary suffix and refuses a mismatched contract core', async t => {
+  const { bundled } = fixture(t);
+  bundled.metadata.version = '0.50.1-canary.12';
+  bundled.save(bundled.binary + '.metadata.json', bundled.metadata);
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-cache-test-'));
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-out-test-'));
+  t.after(() => { fs.rmSync(cache, { recursive: true, force: true }); fs.rmSync(out, { recursive: true, force: true }); });
+  fs.writeFileSync(path.join(cache, `electron-v${pkg.devDependencies.electron}-win32-x64.zip`), 'test double');
+  const run = (_command, args) => fs.writeFileSync(args.find(arg => arg.endsWith('.zip')), 'zip bytes');
+  let packaged = 0;
+  const packageApp = async options => {
+    packaged++;
+    assert.equal(options.appVersion, '0.50.1-canary.12');
+    assert.equal(options.buildVersion, '0.50.1', 'native build fields keep the validated numeric core');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(options.dir, 'package.json'))).version, '0.50.1-canary.12');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(options.dir, 'daemon', 'runtime.json'))).plugin_version, '0.50.1');
+    return ['test-only packager output'];
+  };
+  await build({ platform: 'win32', daemonInput: bundled.root, cache, out, run, packageApp });
+  assert.equal(packaged, 1);
+  bundled.contract.plugin_version = '0.50.2';
+  bundled.save(bundled.contractFile, bundled.contract);
+  await assert.rejects(build({ platform: 'win32', daemonInput: bundled.root, cache, out, run, packageApp }), /daemon version\/contract mismatch/);
+  assert.equal(packaged, 1, 'a core mismatch must fail before packaging');
 });
 test('release archive: macOS ditto keeps the .app parent, Windows bsdtar, and SUMS replaces only its own line', () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-archive-test-'));

@@ -99,6 +99,18 @@ func (r *agyRun) harness() []HarnessReport {
 	return out
 }
 
+func TestAgyMapperTracksSteerBeforeFirstProviderUpdate(t *testing.T) {
+	m := newAgyMapper("s")
+	replies := &agyRun{m: m, answers: map[string]controlAnswer{}}
+	m.promptSentText("ws-p-e-1", "initial work")
+	m.promptSentText("ws-p-e-2", "very early mail")
+	events := m.mapLine([]byte(`{"jsonrpc":"2.0","id":"ws-p-e-1","result":{"stopReason":"end_turn"}}`), replies)
+	if !slices.ContainsFunc(events, func(ev Event) bool { return ev.SteerAnswer != nil }) ||
+		!slices.ContainsFunc(events, func(ev Event) bool { return ev.UserTaken == "very early mail" }) {
+		t.Fatalf("the prompt queued before agy's first update was not acknowledged as a steer: %+v", events)
+	}
+}
+
 // turns splits the events at each TurnEnd, the TurnEnd last in its part.
 func (r *agyRun) turns() [][]Event {
 	var out [][]Event

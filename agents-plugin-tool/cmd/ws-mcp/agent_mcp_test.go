@@ -41,6 +41,38 @@ func TestCallFallbackRegistrationAndRenderDescriptor(t *testing.T) {
 	}
 }
 
+func TestHostedRestoreBundleMapsAgentChildProjection(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", t.TempDir())
+	t.Setenv("WS_CONFIG_HOME", t.TempDir())
+	root := t.TempDir()
+	runGit(t, root, "init")
+	key, err := mcp.NewAgentKeyStore().MintLead(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	children := []wsagent.AgentChild{
+		{
+			Address: "id:child-1", Label: "mapped child", Tier: "codex.large",
+			Authority: wsagent.PermissionWorkdirWrite, State: wsagent.AgentRunning,
+			Model: "gpt-fixture", Effort: "high", Cwd: filepath.Join(root, "child"), Held: 2,
+			Error: "fixture error", CreatedAt: "2026-11-20T00:00:00Z", LastReport: "done: mapped report",
+		},
+	}
+	got, err := renderHostedRestoreBundle(mcp.HostedRender{Harness: "claude"}, root, key, wsagent.RestoreRestart, children)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Your ws session key is `" + key + "`", "The daemon restarted.",
+		"id:child-1 (mapped child): running; tier=codex.large; authority=workdir-write",
+		"last=done: mapped report", "error=fixture error",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("mapped restore bundle lacks %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestAgentMCPCommandUsesEmbeddedLauncherWithoutPlugin(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", t.TempDir())
 	t.Setenv("WS_CONFIG_HOME", t.TempDir())
@@ -398,11 +430,6 @@ func TestAgentRunnerCatalogs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(regs[wsagent.BackendAgy].Catalog, wsagent.AgyCatalog()) {
 		t.Error("agy must retain its lead and worker catalog")
-	}
-	for backend, reg := range regs {
-		if got, want := reg.PlanUsageActivity, backend == wsagent.BackendAgy; got != want {
-			t.Errorf("%s PlanUsageActivity = %v, want %v", backend, got, want)
-		}
 	}
 	for _, want := range []struct {
 		backend, lead, worker string

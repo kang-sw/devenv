@@ -598,11 +598,11 @@ type steeredReport struct {
 	Mark uint64 `json:"-"`
 }
 
-// steerWorker submits a spawned Pi worker's marked inbox messages through
-// the same acknowledged, recoverable native steer path as child reports.
-// The caller checked that its turn runs and replay has finished.
+// steerWorker submits a spawned worker's marked inbox messages through the
+// same acknowledged, recoverable native steer path as child reports. The
+// caller checked that its turn runs and replay has finished.
 func (c *conv) steerWorker() {
-	if c.rec.Parent == nil || c.rec.Backend != BackendPi {
+	if c.rec.Parent == nil {
 		return
 	}
 	if controlsFor(c.proc).reports == nil {
@@ -639,15 +639,20 @@ func (c *conv) takeReport(text string) {
 
 func (c *conv) takeSteer(text string, mark uint64) {
 	if st := controlsFor(c.proc).reports; st != nil && c.turn && !c.rec.Lead && !c.replaying && !c.wrapHold && !c.compacting && !c.compactCommand {
+		// Persist before the backend write. A holder can accept the steer and
+		// outlive this daemon before its acknowledgement reaches the runner.
+		c.steerSeq++
+		seq := c.steerSeq
+		c.steered = append(c.steered, steeredReport{Text: text, Seq: seq, Mark: mark})
+		c.saveSteered()
 		err := st.Steer(text)
 		if err == nil {
-			c.steerSeq++
-			c.steered = append(c.steered, steeredReport{Text: text, Seq: c.steerSeq, Mark: mark})
-			c.saveSteered()
 			c.apply(wslive.Event{Kind: wslive.KindUser, Origin: wslive.OriginWhiteboard, Text: text})
 			c.changed(false)
 			return
 		}
+		c.steered = slices.DeleteFunc(c.steered, func(s steeredReport) bool { return s.Seq == seq })
+		c.saveSteered()
 		fmt.Fprintf(c.r.opts.Log, "agent %s: steer a message: %v\n", c.rec.ReplyID, err)
 	}
 	c.update(func(rec *Record) { rec.Reports = append(rec.Reports, text) })

@@ -150,6 +150,12 @@ type Options struct {
 	// daemon supplies the function; nil, or an error, leaves the prompt
 	// with the key sentence alone.
 	LeadManual func(backend, dir, key string) (string, error)
+	// RestoreBundle renders fresh hosted session state at the point it is
+	// delivered after compaction or daemon restart. children is the caller's
+	// direct agent.list projection; the daemon owns the renderer so this
+	// package does not read the ws session store itself. Nil keeps the Phase 1
+	// key-bearing pointer note and disables restart restore.
+	RestoreBundle func(backend, dir, key string, cause RestoreCause, children []AgentChild) (string, error)
 	// PlaybookCommands lists the lead playbooks a hosted lead of a backend
 	// with BackendRegistration.PlaybookCommands offers as dashboard
 	// commands. The runner reads it once and keeps the list for its
@@ -185,6 +191,10 @@ type Options struct {
 	// wsdashboard.TrustedWrite: a browser on this machine that sends the
 	// daemon's own Origin.
 	Trusted func(req *http.Request) (local, own bool)
+	// CardBound reports whether conversation id is bound to a subordinate
+	// whiteboard agent card (whose Record.Parent stays unset); nil defaults
+	// to false. Used by IsChild for both HTTP settings refusal and SessionView.
+	CardBound func(id string) bool
 	// TrackerChanged, when not nil, is called after a conversation's
 	// successful tracker write (an Event with TrackerWrite set), so the
 	// daemon re-reads its tracker stores. It may be called from any
@@ -271,6 +281,11 @@ type Runner struct {
 	// rejoined gates nested calls until held-process capabilities are validated.
 	rejoined   chan struct{}
 	rejoinOnce sync.Once
+	// startupLoaded closes after Start installed every open record. Restore
+	// markers may be present before then, but compactIdle sends none until the
+	// complete direct-child projection exists.
+	startupMu     sync.RWMutex
+	startupLoaded chan struct{}
 	// playbookCmds is Options.PlaybookCommands' list, read once
 	// (playbookCommands) under playbookMu.
 	playbookMu     sync.Mutex
@@ -322,7 +337,7 @@ func NewRunner(opts Options) *Runner {
 	if opts.Alive == nil {
 		opts.Alive = wsstate.ProcessAlive
 	}
-	r := &Runner{opts: opts, convs: map[string]*conv{}, closed: map[string]Record{}, quit: make(chan struct{}), scanned: make(chan struct{}), rejoined: make(chan struct{}), notify: func(string, string) {}}
+	r := &Runner{opts: opts, convs: map[string]*conv{}, closed: map[string]Record{}, quit: make(chan struct{}), scanned: make(chan struct{}), rejoined: make(chan struct{}), startupLoaded: make(chan struct{}), notify: func(string, string) {}}
 	if opts.Holders != nil {
 		// Before the manager's first scan, so a predecessor's holders are
 		// seen attaching.
@@ -339,6 +354,10 @@ func (r *Runner) SetLiveHost(host wsdashboard.LiveHost) { r.opts.LiveHost = host
 // each write to a conversation's stores, so the daemon re-reads it. The
 // daemon calls Start once it holds its lock.
 func (r *Runner) Start(notify func(replyID, project string)) {
+	startupLoaded := make(chan struct{})
+	r.startupMu.Lock()
+	r.startupLoaded = startupLoaded
+	r.startupMu.Unlock()
 	if notify != nil {
 		r.notify = notify
 	}
@@ -378,6 +397,7 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 	}
 	open = slices.DeleteFunc(open, func(rec Record) bool { return gone[rec.ReplyID] })
 	orphans := orphansAtStart(open)
+	startup := make([]*conv, 0, len(open))
 	for _, rec := range open {
 		if orphans[rec.ReplyID] && r.closeAtStart(rec) {
 			continue
@@ -385,7 +405,19 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 		// A lead whose process may still run under its holder rejoins
 		// it there, before the scan below replays the holder's records.
 		// A turn the last daemon's exit cut off settles there too.
-		r.startConv(rec, nil)
+		startup = append(startup, r.startConvAtStartup(rec, nil))
+	}
+	close(startupLoaded)
+	for _, c := range startup {
+		c.do(func() {
+			// Re-run only startup work whose earlier signal may have been
+			// consumed by the all-records-loaded barrier. A held inbox send on
+			// a processless conversation remains lazy until a new wake, as it
+			// did before restart restore existed.
+			if c.proc != nil || len(c.rec.Queued) > 0 || len(c.rec.Mail) > 0 || len(c.rec.Reports) > 0 {
+				c.kick()
+			}
+		})
 	}
 	// All records are loaded now, including children sorted after their lead.
 	for _, st := range r.List() {
@@ -418,6 +450,24 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 		r.holdersScanned()
 		r.rejoinOnce.Do(func() { close(r.rejoined) })
 	}()
+}
+
+func (r *Runner) startupReady() bool {
+	if r == nil {
+		return true
+	}
+	r.startupMu.RLock()
+	startupLoaded := r.startupLoaded
+	r.startupMu.RUnlock()
+	if startupLoaded == nil {
+		return true
+	}
+	select {
+	case <-startupLoaded:
+		return true
+	default:
+		return false
+	}
 }
 
 // loadClosed lists closed (or handed-off) record rec at Start.
@@ -630,10 +680,14 @@ func (r *Runner) summaryOwner(replyID string) *conv {
 // list the first snapshot shows (lastCommands); a process's own list
 // replaces it.
 func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
-	return r.startConvWith(rec, seed, false, nil)
+	return r.startConvWith(rec, seed, false, nil, false)
 }
 
-func (r *Runner) startConvWith(rec Record, seed []wslive.SlashCommand, spawnPending bool, claimWidth func()) *conv {
+func (r *Runner) startConvAtStartup(rec Record, seed []wslive.SlashCommand) *conv {
+	return r.startConvWith(rec, seed, false, nil, true)
+}
+
+func (r *Runner) startConvWith(rec Record, seed []wslive.SlashCommand, spawnPending bool, claimWidth func(), startupRestore bool) *conv {
 	dir := wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID)
 	c := &conv{
 		r:            r,
@@ -649,6 +703,21 @@ func (r *Runner) startConvWith(rec Record, seed []wslive.SlashCommand, spawnPend
 		mailC:        make(chan struct{}, 1),
 		done:         make(chan struct{}),
 		settleC:      make(chan struct{}),
+	}
+	c.refreshAmbient()
+	if !rec.Lead {
+		if level, source, err := r.currentWorkerPermission(rec); err == nil {
+			c.workerPermissionLevel = level
+			c.workerPermissionSource = source
+		} else {
+			c.lastErr = appendDiagnostic(c.lastErr, "worker permission selection: "+err.Error())
+		}
+	}
+	if startupRestore && r.opts.RestoreBundle != nil {
+		// Install the marker before the loop or any inbox/mail signal can
+		// kick. canKick's scan/replay gates then order delivery after holder
+		// reconciliation without admitting sessions spawned during the scan.
+		c.compactNote = restartRestoreMarker
 	}
 	c.refreshHeld()
 	if rec.Lead {
@@ -881,10 +950,29 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 		return State{}, badRequest("agent profile %q is not a lead profile (lead: true)", rp.Name)
 	}
 	if spawn != nil {
+		releaseAdmission := r.holdParentAdmission(spawn.Parent)
+		defer releaseAdmission()
 		if spawn.Tier != "" && rp.Definition.Backend != BackendPi && !isAgentWorkerProfile(rp.Name) {
 			return State{}, badRequest("pi.spawn: profile %q must be a non-lead Pi profile", rp.Name)
 		}
 		if err := r.checkChildProfile(spawn.Parent, rp.Name, rp.Definition); err != nil {
+			return State{}, err
+		}
+		level, source, err := resolveWorkerPermission(rp.Definition, spawn.PermissionLevel, spawn.PermissionLevel != "", nil)
+		if err != nil {
+			return State{}, err
+		}
+		level = r.legacyDetachedWorkerLevel(spawn.Parent, level, source)
+		if spawn.PermissionLevel != "" && !spawn.delegatedAuthority {
+			current := legacyWorkerPermission(rp.Definition)
+			if current.rank() == 0 {
+				return State{}, badRequest("the worker's current permission level is unresolved")
+			}
+			if err := authorizePermission(current, level, spawn.permissionUser, spawn.PermissionFullAck); err != nil {
+				return State{}, err
+			}
+		}
+		if err := r.admitWorkerLevel(spawn.Parent, level, spawn.delegatedAuthority || source == "legacy-derived"); err != nil {
 			return State{}, err
 		}
 	}
@@ -967,8 +1055,12 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 			rec.PermissionMode = mode
 		}
 	}
-	if spawn != nil && spawn.Authority != "" {
-		if err := writePermissionSelection(dir, spawn.Authority); err != nil {
+	if spawn != nil && spawn.PermissionLevel != "" {
+		writer := writeGenericPermissionSelection
+		if spawn.delegatedAuthority {
+			writer = writeDelegatedPermissionSelection
+		}
+		if err := writer(dir, spawn.PermissionLevel); err != nil {
 			return State{}, err
 		}
 	}
@@ -995,7 +1087,7 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 	if spawn != nil {
 		claimWidth = spawn.claimWidth
 	}
-	c := r.startConvWith(rec, seed, claimWidth != nil, claimWidth)
+	c := r.startConvWith(rec, seed, claimWidth != nil, claimWidth, false)
 	if spawn != nil {
 		return r.spawned(c, spawn.Prompt)
 	}
@@ -1358,6 +1450,50 @@ func (r *Runner) IsLead(id string) bool {
 	return closed && rec.Lead
 }
 
+func (r *Runner) isChildRecord(rec Record) bool {
+	if rec.Parent != nil {
+		return true
+	}
+	return r != nil && r.opts.CardBound != nil && r.opts.CardBound(rec.ReplyID)
+}
+
+// IsChild reports whether id is a child conversation whose settings are fixed
+// at spawn: either a spawned worker (Record.Parent != nil) or a card-bound
+// subordinate lead reported by Options.CardBound.
+func (r *Runner) IsChild(id string) bool {
+	r.mu.Lock()
+	c, open := r.convs[id]
+	rec, closed := r.closed[id]
+	r.mu.Unlock()
+	if open {
+		return r.isChildRecord(c.record())
+	}
+	if closed {
+		return r.isChildRecord(rec)
+	}
+	return r.opts.CardBound != nil && r.opts.CardBound(id)
+}
+
+// SessionMeta returns in-memory composer control metadata for replyID without
+// touching disk (wsdashboard.AgentSessionMetaHost).
+func (r *Runner) SessionMeta(replyID string) (wsdashboard.AgentSessionMeta, bool) {
+	r.mu.Lock()
+	c, open := r.convs[replyID]
+	rec, closed := r.closed[replyID]
+	r.mu.Unlock()
+	if open {
+		rec = c.record()
+	} else if !closed {
+		return wsdashboard.AgentSessionMeta{}, false
+	}
+	return wsdashboard.AgentSessionMeta{
+		Hosted:  rec.Lead,
+		IsChild: r.isChildRecord(rec),
+		Model:   rec.Model,
+		Effort:  rec.Effort,
+	}, true
+}
+
 // AnswerApproval answers the waiting tool permission prompt requestID of a
 // lead conversation: allow runs the tool call as asked, deny refuses it
 // with message for the model. A prompt is answered once: an id that is not
@@ -1555,12 +1691,16 @@ type State struct {
 
 	// Lead marks a hosted lead session; the fields below are its own.
 	Lead bool `json:"lead,omitempty"`
+	// IsChild marks a spawned worker or card-bound subordinate session whose
+	// model and effort are fixed at spawn (read-only on HTTP settings writes).
+	IsChild bool `json:"is_child,omitempty"`
 	// PermissionMode is the mode the next process launches in, and
 	// ActiveMode the one the running harness last reported (it may fall
 	// back from the one asked for).
 	PermissionMode string `json:"permission_mode,omitempty"`
 	ActiveMode     string `json:"active_mode,omitempty"`
-	// Common projections are lead-only. Worker common posture is not applied.
+	// Common projections are computed for both leads and workers; workers keep
+	// their fixed capability loadout while permission admission remains separate.
 	PermissionLevel       PermissionLevel `json:"permission_level,omitempty"`
 	PermissionSource      string          `json:"permission_source,omitempty"`
 	PermissionEnforcement string          `json:"permission_enforcement,omitempty"`
@@ -1616,9 +1756,12 @@ type State struct {
 // still refresh a handed-off terminal's evidence through closedState.
 func (r *Runner) memoryClosedState(rec Record) State {
 	if st, ok := r.closedRows[rec.ReplyID]; ok {
+		st.IsChild = r.isChildRecord(rec)
 		return st
 	}
-	return closedState(rec)
+	st := closedState(rec)
+	st.IsChild = r.isChildRecord(rec)
+	return st
 }
 
 // closedState is the state of a record no loop serves: closed, or handed
@@ -1626,10 +1769,12 @@ func (r *Runner) memoryClosedState(rec Record) State {
 func (r *Runner) closedState(rec Record) State {
 	if rec.ClosedAt != "" {
 		if st, ok := r.closedRows[rec.ReplyID]; ok {
+			st.IsChild = r.isChildRecord(rec)
 			return r.permissionState(st, rec, wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID))
 		}
 	}
 	st := closedState(rec)
+	st.IsChild = r.isChildRecord(rec)
 	if r.opts.closedSnapshotRead != nil {
 		r.opts.closedSnapshotRead(rec.ReplyID)
 	}

@@ -78,10 +78,6 @@ type Server struct {
 	descriptorMu       sync.Mutex
 	descriptorResolved bool
 	descriptor         connectionDescriptor
-	// planUsageActivity is the detected harness's descriptor opt-in to agy usage
-	// activity, resolved once after the harness becomes known.
-	planUsageActivityOnce sync.Once
-	planUsageActivity     bool
 	// inflight counts the requests being handled; draining refuses new
 	// ones, and inflightDone closes once a draining server goes idle
 	// (Drain).
@@ -95,6 +91,8 @@ type Server struct {
 	drainCtx    context.Context
 	drainCancel context.CancelFunc
 }
+
+const maxMCPRequestBytes = 64 << 20
 
 type toolRole string
 
@@ -204,6 +202,10 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 		s.dashboardReconnect()
 	}()
 	scanner := bufio.NewScanner(in)
+	// path.write carries complete reviewer artifacts in one MCP request. The
+	// ceiling is deliberately above normal reports but finite so one client
+	// cannot force unbounded daemon allocation with a single JSONL token.
+	scanner.Buffer(nil, maxMCPRequestBytes)
 	encoder := json.NewEncoder(out)
 	var writeMu sync.Mutex
 	var wg sync.WaitGroup

@@ -395,7 +395,7 @@ func assetID(data pageAssetsData, source string) string {
 // release_repository says the same for the launcher's binary download, but the
 // shared daemon never reads runtime.json, so the value is restated here and a
 // test pins the two together.
-const releaseRepository = "kang-sw/devenv"
+const releaseRepository = "kang-sw/werkschaft"
 
 // pageFuncs is the template FuncMap for one language: the page helpers and
 // the translation funcs t, tn, and tcode, with the Go-built display strings
@@ -436,17 +436,20 @@ func pageFuncs(lang string, icons map[string]bool) template.FuncMap {
 			}
 			return template.JS(b), nil
 		},
-		"marked":   func(text string) template.HTML { return markedText(lang, text) },
+		"sinceText": func(at, ms int64) string { return spanText(max(at-ms+500, 0)) },
+		"marked":    func(text string) template.HTML { return markedText(lang, text) },
 		// The tool summary's token and batch lines.
-		"tokenText":  func(requests int, u *wslive.TokenUsage) string { return tokenText(lang, requests, u) },
-		"tokenTitle": func(requests int, u *wslive.TokenUsage) string { return tokenTitle(lang, requests, u) },
-		"requests":   summaryRequests,
-		"batchNums":  func(b wslive.ToolBatch) []batchNum { return batchNums(lang, b) },
-		"batchArgs":  batchArgs,
-		"argsList":   batchArgsList,
-		"phaseWord":  func(phase string) string { return phaseWord(lang, phase) },
-		"flagText":   func(flag string) string { return flagText(lang, flag) },
-		"limitName":  func(name string) string { return limitName(lang, name) },
+		"tokenText":        func(requests int, u *wslive.TokenUsage) string { return tokenText(lang, requests, u) },
+		"tokenTitle":       func(requests int, u *wslive.TokenUsage) string { return tokenTitle(lang, requests, u) },
+		"requests":         summaryRequests,
+		"batchNums":        func(b wslive.ToolBatch) []batchNum { return batchNums(lang, b) },
+		"batchArgs":        batchArgs,
+		"argsList":         batchArgsList,
+		"phaseWord":        func(phase string) string { return phaseWord(lang, phase) },
+		"ctxBoundaryTitle": func(kind, arg string) string { return ctxBoundaryTitle(lang, kind, arg) },
+		// Retained for the SHA256-pinned historical template fixture (testdata/pre_effects/dashboard.tmpl).
+		"flagText":  flagText,
+		"limitName": limitName,
 		// Translation: t is a table lookup, tn the count form of a key, tcode
 		// a lookup whose one placeholder renders as <code>.
 		"t":     func(key string, args ...any) string { return wsi18n.T(lang, key, args...) },
@@ -504,20 +507,32 @@ func phaseWord(lang, phase string) string {
 	return phase
 }
 
-// flagText is the context bar's warning word (ContextBar.Flag) in lang.
-func flagText(lang, flag string) string {
-	if flag == "near limit" {
-		return wsi18n.T(lang, "band.flag.near")
+func ctxBoundaryTitle(lang, icon, arg string) string {
+	switch icon {
+	case "zap":
+		return wsi18n.T(lang, "band.ctx.boundary.hard", arg)
+	case "bell-ring":
+		return wsi18n.T(lang, "band.ctx.boundary.m2", arg)
+	case "bell":
+		return wsi18n.T(lang, "band.ctx.boundary.m1", arg)
+	case "info":
+		return wsi18n.T(lang, "band.ctx.boundary.soft", arg)
 	}
-	return wsi18n.T(lang, "band.flag.high")
+	return ""
 }
 
-// limitName is a usage limit chip's name (LimitChip.Name) in lang.
-func limitName(lang, name string) string {
-	if name == "weekly" {
-		return wsi18n.T(lang, "band.limit.weekly")
+func flagText(flag string) string {
+	if flag == "near limit" {
+		return "near limit"
 	}
-	return wsi18n.T(lang, "band.limit.5h")
+	return "high"
+}
+
+func limitName(name string) string {
+	if name == "weekly" {
+		return "weekly"
+	}
+	return "5-hour"
 }
 
 // clockText is a time's fallback text, UTC and fixed, so a region's HTML
@@ -956,6 +971,10 @@ type pageReader struct {
 	// layout is the rail's stored nesting, read from memory for a head's
 	// parent jump when the registration names no owner (nil: none).
 	layout *railLayoutStore
+	// agents supplies in-memory hosted/child settings metadata when present.
+	agents AgentHost
+	// cardBound reports subordinate card-bound sessions whose Record.Parent is nil.
+	cardBound func(replyID string) bool
 }
 
 func (r pageReader) clock() time.Time {
@@ -1135,6 +1154,26 @@ func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChan
 	}
 	reads := &sessionReads{page: page}
 	in := pageInputs{Session: s, Page: page, Snapshot: r.readSnapshot(replyID), Now: r.clock(), Version: r.version}
+	if r.cardBound != nil && r.cardBound(replyID) {
+		in.IsChild = true
+	}
+	if metaHost, ok := r.agents.(AgentSessionMetaHost); ok {
+		if meta, found := metaHost.SessionMeta(replyID); found {
+			if meta.IsChild {
+				in.IsChild = true
+			}
+			in.Model, in.Effort = meta.Model, meta.Effort
+		}
+	} else if s.Registration.Agent {
+		// Fallback when no live in-memory runner is attached (e.g. unit tests).
+		record, hosted := readAgentRecordEnd(SessionDir(r.dir, replyID))
+		if hosted {
+			if record.Parent != nil {
+				in.IsChild = true
+			}
+			in.Model, in.Effort = record.Model, record.Effort
+		}
+	}
 	if !s.Registration.Hosted && !s.Live {
 		record, _ := readAgentRecordEnd(SessionDir(r.dir, replyID))
 		in.HandedOff = record.Lead && record.HandedOffAt != ""
@@ -1142,6 +1181,15 @@ func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChan
 		// already open, so naming its owner from it costs no read.
 		if in.Session.ParentReplyID == "" && record.Parent != nil {
 			in.Session.ParentReplyID = record.Parent.ReplyID
+		}
+		if record.Parent != nil {
+			in.IsChild = true
+		}
+		if in.Model == "" {
+			in.Model = record.Model
+		}
+		if in.Effort == "" {
+			in.Effort = record.Effort
 		}
 	}
 	looked := map[string]bool{replyID: true}
@@ -1349,7 +1397,7 @@ func (r pageReader) indexView() IndexView {
 }
 
 func (d *Daemon) pages() pageReader {
-	return pageReader{dir: d.dir, index: d.index, source: d.source, version: d.endpoint.Version, entries: d.entryFiles, snapshots: d.snapshots, foreign: d.foreign, layout: d.layout}
+	return pageReader{dir: d.dir, index: d.index, source: d.source, version: d.endpoint.Version, entries: d.entryFiles, snapshots: d.snapshots, foreign: d.foreign, layout: d.layout, agents: d.agents, cardBound: d.cardBound}
 }
 
 // pagesIn is pages reading in the viewer's language.
@@ -1586,6 +1634,7 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 	// depend on neither Worktrees, Holders nor LangPref.
 	view.Worktrees = d.worktrees != nil
 	view.Holders = d.holders != nil
+	view.CanEditSettings = view.Hosted && !view.IsChild && localViewer(r)
 	err := errors.New("session regions failed to render")
 	if regions != nil {
 		var html string

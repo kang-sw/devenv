@@ -79,7 +79,7 @@ function packageFiles(root) {
   const args = server.args;
   const manifests = server.env?.WS_MCP_CONFIG_MANIFESTS?.split(';');
   if (!args.includes(prefix + 'bin/ws-mcp-launcher.py') ||
-      !Array.isArray(manifests) || manifests.length !== 2 ||
+      !Array.isArray(manifests) || manifests.length < 2 ||
       !manifests.includes(prefix + 'config-manifest.json') ||
       !manifests.includes(prefix + 'dashboard-config-manifest.json')) {
     throw new Error('Incomplete Claude launcher or config references');

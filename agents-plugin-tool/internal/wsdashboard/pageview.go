@@ -68,7 +68,16 @@ type SessionView struct {
 	// terminal, while no terminal runs it: the page reads the command that
 	// resumes it there from the session's agent state.
 	HandedOff bool
-	Version   string
+	// IsChild marks a spawned worker or card-bound subordinate session whose
+	// composer controls render locked read-only.
+	IsChild bool
+	// CanEditSettings reports whether the viewer may edit model/effort from
+	// the composer footer (hosted non-child session viewed from the host).
+	CanEditSettings bool
+	// Model and Effort are the session's resolved display values for the
+	// composer footer strip.
+	Model, Effort string
+	Version       string
 	// Lang is the page language (wsi18n); empty renders the default. LangPref
 	// is the language the browser chose in the gear menu, empty when it
 	// follows the browser. Both are set per request, never by the builders.
@@ -76,6 +85,8 @@ type SessionView struct {
 	// Theme is the theme the gear menu pinned ("light" or "dark"), empty
 	// when the page follows the OS. Set per request, like Lang.
 	Theme string
+	// ActivityAt is the snapshot time used for stable elapsed fallback text.
+	ActivityAt int64
 
 	HasBoard         bool
 	Seq              int
@@ -587,6 +598,10 @@ type pageInputs struct {
 	// HandedOff reports that the session's agent record is a lead's that
 	// was handed to a terminal.
 	HandedOff bool
+	// IsChild marks a spawned worker or card-bound subordinate session.
+	IsChild bool
+	// Model and Effort are the session's configured spawn/selected values.
+	Model, Effort string
 	// Lookup resolves the other sessions this daemon serves that the view
 	// names.
 	Lookup sessionLookup
@@ -660,6 +675,9 @@ func buildSessionView(in pageInputs) SessionView {
 		Adapter:          adapterPresent(in.Snapshot, in.Now),
 		Hosted:           reg.Hosted,
 		HandedOff:        in.HandedOff && !reg.Hosted && !reg.Live(in.Now),
+		IsChild:          in.IsChild || reg.ParentReplyID != "",
+		Model:            in.Model,
+		Effort:           in.Effort,
 		Version:          in.Version,
 		HasBoard:         in.Page.HasBoard,
 		Seq:              in.Page.Seq,
@@ -672,8 +690,15 @@ func buildSessionView(in pageInputs) SessionView {
 		Mermaid:          in.Page.Board.Mermaid,
 	}
 	if in.Snapshot != nil {
+		v.ActivityAt = in.Snapshot.UpdatedAt
 		if o := in.Snapshot.Lead.Observed; o != nil {
 			v.ModelHistory = append(v.ModelHistory, ModelHistoryRow{Observed: o})
+			if v.Model == "" {
+				v.Model = o.Current.Model
+			}
+			if v.Effort == "" {
+				v.Effort = o.Current.Effort
+			}
 		}
 		histories := map[string]ModelHistoryRow{}
 		for id, o := range in.Snapshot.ObservedAgents {
@@ -695,6 +720,7 @@ func buildSessionView(in pageInputs) SessionView {
 			v.ModelHistory = append(v.ModelHistory, histories[id])
 		}
 	}
+	v.CanEditSettings = v.Hosted && !v.IsChild
 	if !v.Adapter {
 		// The registry/page source already applies serving eligibility. Do not
 		// promote a runner child to a lead, or use stale snapshot activity.

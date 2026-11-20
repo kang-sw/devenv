@@ -181,12 +181,12 @@ func TestShippedClaudeWatchdogInterval(t *testing.T) {
 }
 
 // TestShippedAgyModelWaitConfig pins the package-local agy watchdog manifest:
-// ws enables a 45-second wait, wsflow keeps it off, both default to three
+// ws enables a 120-second wait, wsflow keeps it off, both default to three
 // automatic continue attempts, and both keys are non-negative integers.
 func TestShippedAgyModelWaitConfig(t *testing.T) {
 	defaults := map[string]map[string]int64{
 		"ws": {
-			"agy.model_wait_timeout_seconds": 45,
+			"agy.model_wait_timeout_seconds": 120,
 			"agy.model_wait_retries":         3,
 		},
 		"wsflow": {

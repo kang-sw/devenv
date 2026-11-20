@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/claudeagents"
+	"github.com/kang-sw/devenv/internal/wsharnessenv"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
@@ -67,23 +68,15 @@ var claudeKeptEnv = map[string]bool{
 }
 
 // claudeEnv is the child's environment: env without the parent harness
-// session's CLAUDE* variables (claudeKeptEnv aside) and without a mailbox
+// session's CLAUDE* variables (claudeKeptEnv aside) and inherited ws harness
 // identity, which the child's ws-mcp would otherwise claim.
 func claudeEnv(env []string) []string {
-	return harnessEnv(env, []string{"CLAUDE", "WS_MAILBOX"}, claudeKeptEnv, nil)
+	return harnessEnv(wsharnessenv.Drop(env), []string{"CLAUDE"}, claudeKeptEnv, nil)
 }
 
-// leadDropEnv are the variable prefixes a lead conversation's child starts
-// without, beyond its harness's own: the daemon's environment is that of
-// whichever session's launcher started it, and its mailbox identity, its
-// ws-mcp launcher state (project root, runtime binary, resource tree), and
-// its own hosted-session variables must not reach another session. The
-// user's state locations (WS_CACHE_HOME, WS_CONFIG_HOME) stay.
-var leadDropEnv = []string{"WS_MAILBOX", "WS_MCP_", "WS_RSRC", "WS_SKILLS_ROOT", "WS_HOSTED_"}
-
 // claudeLeadEnv is a lead conversation's environment: env without the
-// parent harness session's CLAUDE* variables and leadDropEnv, plus the
-// hosted-session variables.
+// parent harness session's CLAUDE* and ws variables, plus the hosted-session
+// variables.
 func claudeLeadEnv(spec StartSpec) []string {
 	// The session-state lines are what tell a turn nobody sent from an idle
 	// harness (session_state_changed in mapLine).
@@ -91,7 +84,7 @@ func claudeLeadEnv(spec StartSpec) []string {
 	for name, value := range spec.Lead.Env {
 		set[name] = value
 	}
-	return harnessEnv(spec.Env, append([]string{"CLAUDE"}, leadDropEnv...), claudeKeptEnv, set)
+	return harnessEnv(wsharnessenv.Drop(spec.Env), []string{"CLAUDE"}, claudeKeptEnv, set)
 }
 
 // claudeLeadArgs is the command line of a lead conversation: print mode
@@ -659,7 +652,10 @@ type claudeMapper struct {
 
 	context *wslive.UsageContext
 	limits  map[string]wslive.UsageLimit
-	cost    *wslive.UsageCost
+	// limitsAsOf is the last rate_limit_event observation. Other status
+	// events keep it, so context activity cannot make old limits look fresh.
+	limitsAsOf int64
+	cost       *wslive.UsageCost
 	// window is the largest modelUsage.contextWindow a result reported: the
 	// model's window, the fallback for compactWindow.
 	window int64
@@ -1112,6 +1108,7 @@ func (m *claudeMapper) mapEvents(line []byte, replies lineReplies) []Event {
 			for kind, w := range l.RateLimit.UnifiedWindows {
 				if (kind == wslive.LimitFiveHour || kind == wslive.LimitSevenDay) && w.Utilization != nil {
 					m.limits[kind] = wslive.UsageLimit{Kind: kind, Percent: *w.Utilization * 100, ResetsAt: w.ResetsAt * 1000}
+					m.limitsAsOf = now
 				}
 			}
 			return []Event{m.status()}
@@ -1528,7 +1525,7 @@ func (m *claudeMapper) resultTool(name string) string {
 func claudePluginServer(plugin, key string) string { return "plugin:" + plugin + ":" + key }
 
 func (m *claudeMapper) status() Event {
-	ev := wslive.Event{Kind: wslive.KindStatus, Cost: m.cost}
+	ev := wslive.Event{Kind: wslive.KindStatus, Cost: m.cost, LimitsAsOf: m.limitsAsOf}
 	if m.context != nil {
 		c := *m.context
 		c.Window = m.window

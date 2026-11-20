@@ -43,110 +43,6 @@ func lacks(t *testing.T, what, html string, unwanted ...string) {
 	}
 }
 
-// TestBandContextStates pins the context bar: normal, warning at 80%, and
-// critical at 95%, each with its percent, fill, and token figures; the cache
-// chip; and "?" when the host does not know its context size (after a
-// compaction), which shows no percent, no fill, and no warning.
-func TestBandContextStates(t *testing.T) {
-	ctx, _ := bandRegions(t, &wslive.Usage{Context: &wslive.UsageContext{Tokens: i64p(137_609), Window: 300_000, Percent: f64p(45.87), CacheHit: f64p(92.4)}}, nil)
-	contains(t, "normal context", ctx, `class="sb-ctx"`, `<span class="sb-pct">46%</span>`, `width: 46%`, `aria-valuenow="46"`, "137,609 / 300K", `CH 92%`)
-	lacks(t, "normal context", ctx, "sb-flag", "warn", "crit")
-
-	ctx, _ = bandRegions(t, &wslive.Usage{Context: &wslive.UsageContext{Tokens: i64p(249_100), Window: 300_000, Percent: f64p(83)}}, nil)
-	contains(t, "warning context", ctx, `class="sb-ctx warn"`, `<span class="sb-flag">high</span>`, "249,100 / 300K")
-	lacks(t, "warning context", ctx, "sb-cache")
-
-	ctx, _ = bandRegions(t, &wslive.Usage{Context: &wslive.UsageContext{Tokens: i64p(1_920_000), Window: 2_000_000, Percent: f64p(96)}}, nil)
-	contains(t, "critical context", ctx, `class="sb-ctx crit"`, `<span class="sb-flag">near limit</span>`, "1,920,000 / 2M")
-
-	// Past 100% the label keeps the figure and the fill stops at the end.
-	ctx, _ = bandRegions(t, &wslive.Usage{Context: &wslive.UsageContext{Tokens: i64p(210_000), Window: 200_000, Percent: f64p(105)}}, nil)
-	contains(t, "overfull context", ctx, `<span class="sb-pct">105%</span>`, `width: 100%`)
-
-	ctx, _ = bandRegions(t, &wslive.Usage{Context: &wslive.UsageContext{Tokens: nil, Window: 200_000}}, nil)
-	contains(t, "unknown context", ctx, `<span class="sb-pct">?</span>`, `width: 0%`, "? / 200K", "unknown until the next response")
-	lacks(t, "unknown context", ctx, "aria-valuenow", "sb-flag")
-
-	ctx, sline := bandRegions(t, nil, nil)
-	if ctx != "" || sline != "" {
-		t.Errorf("a band with no figures rendered:\nctx %q\nsline %q", ctx, sline)
-	}
-}
-
-// TestBandShowsOnlyTheFolder pins the line's repo part: the folder alone,
-// whatever branch, upstream standing, and working-tree figures the snapshot
-// brings (the git handle shows those), and no line for repo figures without
-// a folder. It shows with no usage figures at all, since ws-mcp reads it
-// itself.
-func TestBandShowsOnlyTheFolder(t *testing.T) {
-	for _, repo := range []*wslive.Repo{
-		{Folder: "devenv", Branch: "topic/band"},
-		{Folder: "devenv", Branch: "develop", Upstream: "origin/develop", Ahead: 2, Behind: 1, Modified: 3, Staged: 1, Untracked: 2},
-		{Folder: "devenv", Branch: "1a2b3c4", Detached: true},
-		{Folder: "devenv"},
-	} {
-		_, sline := bandRegions(t, nil, repo)
-		contains(t, "repo "+repo.Branch, sline, `class="sb-dir" title="folder: devenv"`, `<span>devenv</span>`)
-		lacks(t, "repo "+repo.Branch, sline, "sb-br", "sb-sync", "sb-diff", "gitpush", "#i-branch", "sb-tail")
-		if repo.Branch != "" && strings.Contains(sline, repo.Branch) {
-			t.Errorf("the band shows the branch %q: %s", repo.Branch, sline)
-		}
-	}
-	if _, sline := bandRegions(t, nil, &wslive.Repo{Branch: "main"}); sline != "" {
-		t.Errorf("repo figures without a folder rendered %q", sline)
-	}
-	_, sline := bandRegions(t, nil, &wslive.Repo{Folder: "<b>d"})
-	contains(t, "escaped folder", sline, "&lt;b&gt;d")
-}
-
-// TestBandLimitAndCostChips pins the line's tail: the 5-hour chip first and
-// the weekly one second, each with its reset for the page to format (a clock
-// time, a weekday) and its pace inputs; warning and critical levels; a chip
-// only for a reported limit; Claude's exact cost bare and Pi's estimate as
-// ~$X or ~$X+; and the narrow-band rule's markers: with both chips shown,
-// both carry "both" and the higher percent "hi" (a tie keeps the 5-hour
-// limit), which the stylesheet keeps alone below a 360px band (340px of the
-// line inside the composer's padding).
-func TestBandLimitAndCostChips(t *testing.T) {
-	five := time.Date(2026, 11, 7, 18, 0, 0, 0, time.UTC).UnixMilli()
-	week := time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC).UnixMilli() // a Sunday
-	_, sline := bandRegions(t, &wslive.Usage{
-		Limits: []wslive.UsageLimit{{Kind: wslive.LimitFiveHour, Percent: 97, ResetsAt: five}, {Kind: wslive.LimitSevenDay, Percent: 81.4, ResetsAt: week}},
-		Cost:   &wslive.UsageCost{USD: 99.314},
-	}, nil)
-	i5, i7 := strings.Index(sline, `data-limit="five_hour"`), strings.Index(sline, `data-limit="seven_day"`)
-	if i5 < 0 || i7 < 0 || i5 > i7 {
-		t.Fatalf("limit chips missing or out of order:\n%s", sline)
-	}
-	contains(t, "both limits", sline,
-		`class="sb-use crit both hi" data-limit="five_hour"`, `class="sb-use warn both" data-limit="seven_day"`,
-		`<span class="u-pct">97%</span>`, `<span class="u-pct">81%</span>`,
-		`data-f="hm">18:00</time>`, `data-f="wd">Sun</time>`,
-		`data-win="18000" data-pct="97"`, `data-win="604800" data-pct="81"`,
-		`<span class="sb-cost" title="session cost">$99.31</span>`)
-	lacks(t, "both limits", sline, "~$", "wk")
-
-	// A tie keeps the 5-hour limit as the one that stays.
-	_, sline = bandRegions(t, &wslive.Usage{Limits: []wslive.UsageLimit{{Kind: wslive.LimitFiveHour, Percent: 40}, {Kind: wslive.LimitSevenDay, Percent: 40}}}, nil)
-	contains(t, "tied limits", sline, `class="sb-use both hi" data-limit="five_hour"`, `class="sb-use both" data-limit="seven_day"`)
-	lacks(t, "tied limits", sline, "u-pace", "<time")
-
-	_, sline = bandRegions(t, &wslive.Usage{Limits: []wslive.UsageLimit{{Kind: wslive.LimitSevenDay, Percent: 17, ResetsAt: week}}}, nil)
-	contains(t, "weekly only", sline, `class="sb-use" data-limit="seven_day"`)
-	lacks(t, "weekly only", sline, "five_hour", "both", "sb-cost")
-
-	// Pi: no limits, the estimate's forms.
-	_, sline = bandRegions(t, &wslive.Usage{Cost: &wslive.UsageCost{USD: 1.234, Estimate: true}}, &wslive.Repo{Folder: "p"})
-	contains(t, "pi estimate", sline, `<span class="sb-cost" title="session cost">~$1.23</span>`)
-	lacks(t, "pi estimate", sline, "sb-use", "&#43;")
-	_, sline = bandRegions(t, &wslive.Usage{Cost: &wslive.UsageCost{USD: 1.234, Estimate: true, Incomplete: true}}, nil)
-	// html/template writes the "+" as &#43;.
-	contains(t, "pi incomplete estimate", sline, ">~$1.23&#43;</span>")
-
-	css := mustAsset(t, "dashboard.css")
-	contains(t, "stylesheet", css, ".r-sline { container-type: inline-size; }", "@container (max-width: 340px) { .sb-use.both:not(.hi) { display: none; } }")
-}
-
 func mustAsset(t *testing.T, name string) string {
 	t.Helper()
 	raw, err := dashboardTestAsset(name)
@@ -156,33 +52,168 @@ func mustAsset(t *testing.T, name string) string {
 	return string(raw)
 }
 
-// TestBandRegionsSitAroundTheMessageBox pins the placement (variant C): the
-// context bar region opens the composer above the message box and the line
-// region follows the message box, both only on the live page.
+// TestBandContextStates pins the redesigned context bar across native fallback
+// and ws-compaction-scaled threshold states (normal, soft info, 1/3 bell,
+// 2/3 bell-ring, overflow crit zap, hard==native, and unknown "?").
+func TestBandContextStates(t *testing.T) {
+	comp := &wslive.UsageCompaction{
+		Soft:            110_000,
+		Hard:            180_000,
+		Milestones:      []int64{133_333, 156_667},
+		AdvisoryEnabled: true,
+	}
+
+	// Normal (28%, no floating icon, ticks present, native parenthetical shown).
+	ctx, _ := bandRegions(t, &wslive.Usage{Context: &wslive.UsageContext{
+		Tokens: i64p(51_293), Window: 1_000_000, CacheHit: f64p(92.4), Compaction: comp,
+	}}, nil)
+	contains(t, "normal compaction", ctx,
+		`class="sb-ctx"`, `<span class="sb-pct">28%</span>`, `width: 28.5%`, `aria-valuenow="28"`,
+		"51,293 / 180K", `<span class="sb-native"> (1.0M)</span>`,
+		`<u class="m-soft" style="left: 61.1%">`,
+		`<u class="m-tick" style="left: 74.1%">`,
+		`<u class="m-tick" style="left: 87.0%">`,
+		`class="ctx-tip"`, `CH 92%`)
+	lacks(t, "normal compaction", ctx, "sb-float", "sb-flag", "t80", "t95", "warn", "d-hot", "crit")
+
+	// Soft crossed (info icon over Soft).
+	ctx, _ = bandRegions(t, &wslive.Usage{Context: &wslive.UsageContext{
+		Tokens: i64p(118_800), Window: 1_000_000, Compaction: comp,
+	}}, nil)
+	contains(t, "soft crossed", ctx, `class="sb-ctx warn"`, `<span class="sb-pct">66%</span>`, `#l-info`, `left:61.1%`)
+	lacks(t, "soft crossed", ctx, "#l-bell", "#l-zap", "sb-cache")
+
+	// Nudge 1/3 crossed (bell icon over 1/3 tick).
+	ctx, _ = bandRegions(t, &wslive.Usage{Context: &wslive.UsageContext{
+		Tokens: i64p(140_400), Window: 1_000_000, Compaction: comp,
+	}}, nil)
+	contains(t, "m1 crossed", ctx, `class="sb-ctx warn"`, `<span class="sb-pct">78%</span>`, `#l-bell"`, `left:74.1%`)
+	lacks(t, "m1 crossed", ctx, "#l-info", "#l-bell-ring", "#l-zap")
+
+	// Nudge 2/3 crossed (bell-ring icon over 2/3 tick, hot tone).
+	ctx, _ = bandRegions(t, &wslive.Usage{Context: &wslive.UsageContext{
+		Tokens: i64p(163_800), Window: 1_000_000, Compaction: comp,
+	}}, nil)
+	contains(t, "m2 crossed", ctx, `class="sb-ctx d-hot"`, `<span class="sb-pct">91%</span>`, `#l-bell-ring`, `left:87.0%`)
+
+	// Overflow >= hard (unclamped %, 100% clamped fill, zap right-aligned).
+	ctx, _ = bandRegions(t, &wslive.Usage{Context: &wslive.UsageContext{
+		Tokens: i64p(189_000), Window: 1_000_000, Compaction: comp,
+	}}, nil)
+	contains(t, "overflow", ctx, `class="sb-ctx crit"`, `<span class="sb-pct">105%</span>`, `width: 100.0%`, `class="sb-float at-hard"`, `#l-zap`)
+
+	// Hard == Native omits parenthetical.
+	sameComp := &wslive.UsageCompaction{Soft: 120_000, Hard: 200_000, Milestones: []int64{146_667, 173_333}, AdvisoryEnabled: true}
+	ctx, _ = bandRegions(t, &wslive.Usage{Context: &wslive.UsageContext{
+		Tokens: i64p(90_000), Window: 200_000, Compaction: sameComp,
+	}}, nil)
+	contains(t, "hard==native", ctx, `<span class="sb-pct">45%</span>`, "90,000 / 200K")
+	lacks(t, "hard==native", ctx, "sb-native")
+
+	// Unknown context retains ticks when Compaction is present and shows no floating icon.
+	ctx, _ = bandRegions(t, &wslive.Usage{Context: &wslive.UsageContext{
+		Tokens: nil, Window: 1_000_000, Compaction: comp,
+	}}, nil)
+	contains(t, "unknown compaction", ctx, `class="sb-ctx d-unknown"`, `<span class="sb-pct">?</span>`, `width: 0.0%`, "? / 180K", `<span class="sb-native"> (1.0M)</span>`, `m-soft`, `m-tick`)
+	lacks(t, "unknown compaction", ctx, "aria-valuenow", "sb-float")
+
+	// Non-hosted / native fallback (Compaction == nil) shows no compaction ticks and no floating icon.
+	ctx, _ = bandRegions(t, &wslive.Usage{Context: &wslive.UsageContext{
+		Tokens: i64p(1_920_000), Window: 2_000_000, Percent: f64p(96),
+	}}, nil)
+	contains(t, "native fallback", ctx, `class="sb-ctx crit"`, `<span class="sb-pct">96%</span>`, "1,920,000 / 2.0M")
+	lacks(t, "native fallback", ctx, "m-soft", "m-tick", "sb-float", "sb-native", "sb-flag")
+
+	ctx, sline := bandRegions(t, nil, nil)
+	if ctx != "" || sline != "" {
+		t.Errorf("a band with no figures rendered:\nctx %q\nsline %q", ctx, sline)
+	}
+}
+
+// TestSLineRetiresFolderLimitsAndCost pins that r-sline emits no folder,
+// usage limit, or cost chips in the composer footer while BandView.Cost remains
+// populated for the rail row hover card.
+func TestSLineRetiresFolderLimitsAndCost(t *testing.T) {
+	five := time.Date(2026, 11, 7, 18, 0, 0, 0, time.UTC).UnixMilli()
+	week := time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC).UnixMilli()
+	snap := liveSnap(testNow, wslive.Lead{})
+	snap.Repo = &wslive.Repo{Folder: "devenv", Branch: "develop"}
+	snap.Usage = &wslive.Usage{
+		Limits: []wslive.UsageLimit{{Kind: wslive.LimitFiveHour, Percent: 97, ResetsAt: five}, {Kind: wslive.LimitSevenDay, Percent: 81.4, ResetsAt: week}},
+		Cost:   &wslive.UsageCost{USD: 1.84, Estimate: true},
+	}
+	if bv := bandView(snap); bv.Cost != "~$1.84" {
+		t.Fatalf("BandView.Cost = %q, want ~$1.84 for rail hover", bv.Cost)
+	}
+	_, sline := bandRegions(t, snap.Usage, snap.Repo)
+	if sline != "" {
+		t.Fatalf("r-sline should be empty, got %q", sline)
+	}
+}
+
+// TestBandRegionsSitAroundTheMessageBox pins the placement of ctx above and
+// sline below the message box on the live page, and the 2-control composer
+// footer strip visibility across hosted lead, non-local, child, and external.
 func TestBandRegionsSitAroundTheMessageBox(t *testing.T) {
 	now := testNow
 	snap := liveSnap(now, wslive.Lead{})
 	snap.Usage = &wslive.Usage{Context: &wslive.UsageContext{Tokens: i64p(1), Window: 10}}
-	view := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: snap, Now: now})
-	regions, err := renderSessionRegions(view, nil)
-	if err != nil {
-		t.Fatal(err)
+
+	render := func(hosted, isChild, canEdit bool, model, effort string) string {
+		sess := liveSession("self", "/p", now)
+		sess.Registration.Hosted = hosted
+		view := buildSessionView(pageInputs{Session: sess, Snapshot: snap, Now: now, IsChild: isChild, Model: model, Effort: effort})
+		view.CanEditSettings = canEdit
+		regions, err := renderSessionRegions(view, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		page, err := renderSessionPage(view, regions, false, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return page
 	}
-	page, err := renderSessionPage(view, regions, false, "")
-	if err != nil {
-		t.Fatal(err)
+
+	// Check only the rendered DOM (before inline <script> i18n/JS bundles) for pill markup.
+	domOnly := func(page string) string {
+		if i := strings.Index(page, "<script>"); i >= 0 {
+			return page[:i]
+		}
+		return page
 	}
-	composer, ctx, text, sline := strings.Index(page, `id="composer"`), strings.Index(page, `data-region="ctx"`), strings.Index(page, `id="ctext"`), strings.Index(page, `data-region="sline"`)
+
+	// External session omits #composer-pills while keeping ctx/sline anchors.
+	extPage := render(false, false, false, "", "")
+	composer, ctx, text, sline := strings.Index(extPage, `id="composer"`), strings.Index(extPage, `data-region="ctx"`), strings.Index(extPage, `id="ctext"`), strings.Index(extPage, `data-region="sline"`)
 	if composer < 0 || !(composer < ctx && ctx < text && text < sline) {
 		t.Fatalf("band regions out of place: composer %d ctx %d textarea %d sline %d", composer, ctx, text, sline)
 	}
+	lacks(t, "external session", domOnly(extPage), `id="composer-pills"`, `data-pop="perm"`, `shield`)
+
+	// Hosted local lead shows exactly Model + Effort triggers (no Permission).
+	leadDOM := domOnly(render(true, false, true, "opus-4.6", "high"))
+	contains(t, "hosted local lead", leadDOM, `id="composer-pills"`, `data-pop="model"`, `data-pop="effort"`, `opus-4.6`, `high`, `#l-cpu`, `#l-gauge`, `#l-chevron-down`)
+	lacks(t, "hosted local lead", leadDOM, `data-pop="perm"`, `#l-lock`, `shield`)
+
+	// Non-local hosted lead disables triggers with host-machine tooltip (no lock icon).
+	remoteDOM := domOnly(render(true, false, false, "opus-4.6", "high"))
+	contains(t, "non-local hosted lead", remoteDOM, `id="composer-pills"`, `Controls are available on the host machine`, `disabled`)
+	lacks(t, "non-local hosted lead", remoteDOM, `#l-lock`, `fixed at spawn`)
+
+	// Child session (both worker and card-bound) renders locked read-only with lock icon.
+	for _, hosted := range []bool{false, true} {
+		childDOM := domOnly(render(hosted, true, false, "sonnet", "medium"))
+		contains(t, "child session", childDOM, `id="composer-pills"`, `data-child="1"`, `#l-lock`, `fixed at spawn`, `sonnet`, `medium`, `disabled`)
+		lacks(t, "child session", childDOM, `#l-chevron-down`, `Controls are available on the host machine`)
+	}
 
 	board := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Now: now})
-	regions, err = renderSessionRegions(board, nil)
-	if err != nil {
+	if regions, err := renderSessionRegions(board, nil); err != nil {
 		t.Fatal(err)
-	}
-	if _, ok := regions[regionCtx]; ok {
-		t.Error("the board-first page renders the band")
+	} else if _, ok := regions[regionCtx]; ok {
+		t.Error("board page rendered a context bar")
+	} else if _, ok := regions[regionSLine]; ok {
+		t.Error("board page rendered a status line")
 	}
 }

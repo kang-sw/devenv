@@ -402,75 +402,124 @@ type admissionRefusal struct{ reason string }
 
 func (e *admissionRefusal) Error() string { return e.reason }
 
+// holdParentAdmission keeps a parent's current selection stable from the
+// child's admission read through the operation that follows it. Permission
+// controls take the same session slot exclusively while changing selection.
+func (r *Runner) holdParentAdmission(parent *ParentRef) func() {
+	if parent == nil {
+		return func() {}
+	}
+	slot := permissionSlot(wsdashboard.SessionDir(r.opts.Dir, parent.ReplyID))
+	slot.admission.RLock()
+	return slot.admission.RUnlock
+}
+
 // agentCeiling is the highest authority parent's children may take: its
-// current level. A lead parent's reply-id resolves to its Runner record; a
-// lead with no record, or with no common level on its backend, caps at
-// workdir-write. A conversation parent needs its record and an explicit
-// level.
-func (r *Runner) agentCeiling(parent ParentRef) (PermissionLevel, error) {
+// current level. A lead parent's reply-id resolves to its Runner record.
+// agent.spawn delegation and omitted legacy Pi spawns retain the historical
+// detached-lead ceiling; new explicit generic workers require current parent
+// state. A conversation parent always needs its record and current level.
+func (r *Runner) agentCeiling(parent ParentRef, detachedLeadFallback bool) (PermissionLevel, error) {
 	rec, ok := r.recordOf(parent.ReplyID)
 	dir := wsdashboard.SessionDir(r.opts.Dir, parent.ReplyID)
 	if parent.Kind == ParentLead {
 		if !ok || !rec.Lead {
-			return PermissionWorkdirWrite, nil
+			if detachedLeadFallback {
+				return PermissionWorkdirWrite, nil
+			}
+			return "", fmt.Errorf("the parent lead %s has no hosted record, so its permission level is unknown", parent.ReplyID)
 		}
 		level, _, err := r.leadPermission(rec, dir)
 		if err != nil {
 			return "", fmt.Errorf("the parent lead's permission level is unreadable: %w", err)
 		}
 		if level == "" {
-			return PermissionWorkdirWrite, nil
+			if detachedLeadFallback {
+				return PermissionWorkdirWrite, nil
+			}
+			return "", fmt.Errorf("the parent lead %s has no permission level of its own", parent.ReplyID)
 		}
 		return level, nil
 	}
 	if !ok {
 		return "", fmt.Errorf("the parent conversation %s has no record, so its permission level is unknown", parent.ReplyID)
 	}
-	level, explicit, err := refreshPermissionSelection(dir)
+	level, _, err := r.currentWorkerPermission(rec)
 	if err != nil {
 		return "", fmt.Errorf("the parent conversation's permission level is unreadable: %w", err)
 	}
-	if !explicit || level.rank() == 0 {
+	if level.rank() == 0 {
 		return "", fmt.Errorf("the parent conversation %s has no permission level of its own", parent.ReplyID)
 	}
 	return level, nil
 }
 
-// childAdmission admits rec's explicit authority against its parent's
-// current level and returns it. Hosted leads and conversations agent.spawn
-// did not start (non-parented conversations and legacy/Pi children) have no
-// explicit authority record and pass with "". An
-// agent.spawn child (agent-worker-*) without a parent or explicit authority
-// record fails closed so it never launches without its authority gate.
-func (r *Runner) childAdmission(rec Record) (PermissionLevel, error) {
-	if rec.Lead {
-		return "", nil
+// admitWorkerLevel applies the current-parent ceiling to a worker creation or
+// launch. Root workers have no ceiling; a child with unresolved own authority
+// is pending rather than guessed.
+func (r *Runner) admitWorkerLevel(parent *ParentRef, level PermissionLevel, detachedLeadFallback bool) error {
+	if parent == nil {
+		return nil
 	}
-	agentWorker := isAgentWorkerProfile(rec.Profile)
-	if rec.Parent == nil {
-		if agentWorker {
-			return "", &admissionRefusal{reason: "permission admission: agent.spawn child has no parent"}
-		}
-		return "", nil
+	if level.rank() == 0 {
+		return &admissionRefusal{reason: "permission admission: the worker's own permission level is unresolved"}
 	}
-	level, explicit, err := refreshPermissionSelection(wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID))
+	ceiling, err := r.agentCeiling(*parent, detachedLeadFallback)
 	if err != nil {
-		return "", &admissionRefusal{reason: fmt.Sprintf("permission admission: own level unreadable: %v", err)}
-	}
-	if !explicit || level.rank() == 0 {
-		if agentWorker {
-			return "", &admissionRefusal{reason: "permission admission: agent.spawn child has no explicit authority record"}
-		}
-		return "", nil
-	}
-	ceiling, err := r.agentCeiling(*rec.Parent)
-	if err != nil {
-		return "", &admissionRefusal{reason: "permission admission: " + err.Error()}
+		return &admissionRefusal{reason: "permission admission: " + err.Error()}
 	}
 	if level.rank() > ceiling.rank() {
-		return "", &admissionRefusal{reason: fmt.Sprintf("permission admission: authority %s is above the parent's current level %s", level, ceiling)}
+		return &admissionRefusal{reason: fmt.Sprintf("permission admission: authority %s is above the parent's current level %s", level, ceiling)}
 	}
-	return level, nil
+	return nil
+}
+
+// legacyDetachedWorkerLevel preserves the omitted top-level pi.spawn contract:
+// an external lead has no Runner record, but its existing fixed Pi child
+// loadout remains workdir-write/advisory. Hosted and conversation parents must
+// still resolve normally, and explicit new generic selections get no fallback.
+func (r *Runner) legacyDetachedWorkerLevel(parent *ParentRef, level PermissionLevel, source string) PermissionLevel {
+	if level.rank() != 0 || source != "legacy-derived" || parent == nil || parent.Kind != ParentLead {
+		return level
+	}
+	if _, ok := r.recordOf(parent.ReplyID); !ok {
+		return PermissionWorkdirWrite
+	}
+	return level
+}
+
+// detachedWorkerFallback distinguishes new generic explicit workers (stored
+// false) from agent.spawn (true), while absence preserves sidecars written
+// before immutable provenance was introduced. Omitted legacy Pi spawns retain
+// their pre-change detached-lead behavior without writing a sidecar.
+func detachedWorkerFallback(dir, source string) bool {
+	if source == "legacy-derived" {
+		return true
+	}
+	delegated, set := delegatedPermissionState(dir)
+	return delegated || !set
+}
+
+// childAdmission resolves a worker's current explicit or legacy-derived level,
+// then admits it against its parent's current level. No derived value is
+// stored, and an unresolved child never guesses a ceiling.
+func (r *Runner) childAdmission(rec Record, def Profile) (PermissionLevel, string, error) {
+	if rec.Lead {
+		return "", "", nil
+	}
+	dir := wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID)
+	level, source, err := r.workerPermission(rec, def, dir)
+	if err != nil {
+		return "", "", &admissionRefusal{reason: fmt.Sprintf("permission admission: own level unreadable: %v", err)}
+	}
+	if isAgentWorkerProfile(rec.Profile) && source != "explicit" {
+		return "", "", &admissionRefusal{reason: "permission admission: agent.spawn child has no explicit authority record"}
+	}
+	level = r.legacyDetachedWorkerLevel(rec.Parent, level, source)
+	if err := r.admitWorkerLevel(rec.Parent, level, detachedWorkerFallback(dir, source)); err != nil {
+		return "", "", err
+	}
+	return level, source, nil
 }
 
 // childLevel is rec's explicit authority, "" for none.
@@ -599,7 +648,7 @@ func (r *Runner) AgentSpawn(caller AgentCaller, req AgentSpawnRequest) (AgentSpa
 			return AgentSpawnResult{}, &requestError{status: http.StatusForbidden, msg: fmt.Sprintf("%s: tier %q is above this conversation's own tier %q, which caps its subagents' tier; pick %q or lower", tool, bare, h.Tier, h.Tier)}
 		}
 	}
-	ceiling, err := r.agentCeiling(caller.Parent)
+	ceiling, err := r.agentCeiling(caller.Parent, true)
 	if err != nil {
 		return AgentSpawnResult{}, &requestError{status: http.StatusForbidden, msg: fmt.Sprintf("%s: permission admission: %v", tool, err)}
 	}
@@ -643,18 +692,19 @@ func (r *Runner) AgentSpawn(caller AgentCaller, req AgentSpawnRequest) (AgentSpa
 	}
 	defer releaseWidth()
 	st, err := r.Spawn(SpawnSpec{
-		Profile:      r.opts.Backends[harness].WorkerProfile,
-		Root:         root,
-		Cwd:          cwd,
-		Model:        mapping.Model,
-		Effort:       mapping.Effort,
-		Tier:         bare,
-		Prompt:       req.Prompt,
-		Label:        label,
-		Parent:       &parent,
-		Authority:    level,
-		SystemPrompt: system,
-		claimWidth:   claimWidth,
+		Profile:            r.opts.Backends[harness].WorkerProfile,
+		Root:               root,
+		Cwd:                cwd,
+		Model:              mapping.Model,
+		Effort:             mapping.Effort,
+		Tier:               bare,
+		Prompt:             req.Prompt,
+		Label:              label,
+		Parent:             &parent,
+		PermissionLevel:    level,
+		delegatedAuthority: true,
+		SystemPrompt:       system,
+		claimWidth:         claimWidth,
 	})
 	if err != nil {
 		return AgentSpawnResult{}, err
@@ -781,7 +831,12 @@ func (r *Runner) Deliver(id string, d Delivery) (State, error) {
 		rec := c.rec
 		c.mu.Unlock()
 		if asleep {
-			_, refusal = r.childAdmission(rec)
+			rp, resolveErr := r.resolve(rec.Profile, rec.Root)
+			if resolveErr != nil {
+				refusal = resolveErr
+			} else {
+				_, _, refusal = r.childAdmission(rec, rp.Definition)
+			}
 		}
 	}
 	st, err := r.Send(id, d.Text)

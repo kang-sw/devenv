@@ -424,20 +424,47 @@ test('a forced refresh refetches while the popover is open, so the background pr
   const entry = percent => ({ entries: [{ harness: 'codex', asOf: at, windows: [{ kind: 'seven_day', percent, asOf: at, resetsAt: at + 86400000 }] }] });
   env.set(entry(10));
   const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
-  assert.equal(env.timers.length, 0); // an ordinary poll schedules no follow-up
+  assert.equal(env.timers.filter(t => [2000, 11000, 32000].includes(t.ms)).length, 0); // an ordinary poll schedules no follow-up
   const pop = mounted.makePopover(() => {}, () => {}); pop.open(); await flush();
   assert.equal(env.calls.at(-1).url, '/rail/usage?history=1&refresh=1');
-  assert.deepEqual(env.timers.map(t => t.ms), [2000, 11000, 32000]);
+  assert.deepEqual(env.timers.filter(t => t.live && [2000, 11000, 32000].includes(t.ms)).map(t => t.ms), [2000, 11000, 32000]);
   env.set(entry(42)); // the daemon's background probe lands
-  env.timers[0].fn(); await flush();
+  env.timers.find(t => t.live && t.ms === 2000).fn(); await flush();
   assert.equal(env.calls.at(-1).url, '/rail/usage?history=1');
   assert.ok(pop.el.textContent.includes('42%'));
   assert.equal(env.button.querySelector('.usage-number').textContent, '42%');
   pop.open(); await flush(); // reopening replaces, not stacks, the follow-ups
-  assert.deepEqual(env.timers.filter(t => t.live).map(t => t.ms), [2000, 11000, 32000]);
+  assert.deepEqual(env.timers.filter(t => t.live && [2000, 11000, 32000].includes(t.ms)).map(t => t.ms), [2000, 11000, 32000]);
   const before = env.calls.length;
   pop.close(); env.timers.at(-1).fn(); await flush();
   assert.equal(env.calls.length, before); // a closed popover does not refetch
+});
+
+test('nearest reset timer redraws expired windows and refreshes usage', async () => {
+  const at = Date.UTC(2026, 10, 15), reset = at + 1000, env = environment(at);
+  env.set({ entries: [{ harness: 'claude', asOf: at, windows: [{ kind: 'five_hour', percent: 42, asOf: at, resetsAt: reset }] }] });
+  env.window.WsUsage.mount(env.doc, env.top); await flush();
+  assert.equal(env.button.querySelector('.usage-number').textContent, '42%');
+  const timer = env.timers.find(t => t.live && t.ms === 1100);
+  assert.ok(timer, 'reset redraw includes the 100ms expiry margin');
+  env.now(reset + 100); timer.fn();
+  assert.equal(env.button.querySelector('.usage-number'), null);
+  assert.ok(env.button.textContent.includes('usage unavailable'));
+  await flush();
+  assert.equal(env.calls.length, 2);
+  assert.equal(env.calls[1].url, '/rail/usage?history=1');
+});
+
+test('popover header age uses the oldest displayed window observation', async () => {
+  const now = Date.UTC(2026, 10, 15, 12), env = environment(now);
+  env.set({ entries: [{ harness: 'claude', asOf: now - 60000, windows: [
+    { kind: 'five_hour', percent: 20, asOf: now - 12 * 60000, resetsAt: now + 3600000 },
+    { kind: 'seven_day', percent: 30, asOf: now - 3 * 60000, resetsAt: now + 86400000 }
+  ] }] });
+  const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
+  const pop = mounted.makePopover(() => {}, () => {}); pop.open(); await flush();
+  assert.equal(pop.el.querySelector('.usage-vage').textContent, '12m ago');
+  assert.equal(pop.el.querySelector('.usage-vage').title, 'value from 12 min ago');
 });
 
 test('handle redraw and sync preserve the sibling alert slot', async () => {

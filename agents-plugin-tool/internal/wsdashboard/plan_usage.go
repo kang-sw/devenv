@@ -57,6 +57,7 @@ type planUsageStore struct {
 	lifetimeCancel context.CancelFunc
 	closed         bool
 	hist           planUsageHistoryMemo
+	codexHist      planUsageHistoryMemo
 	// agy state is kept separate from Claude/Codex so plan-usage.json and
 	// plan-usage-history.json stay byte-identical (T0). All fields below
 	// except resolveAgy, agyDebounce, agyTimeout, agyEnv, and now are guarded by mu.
@@ -196,7 +197,11 @@ func (s *planUsageStore) pushClaude(snap *wslive.Snapshot) {
 	}
 	// A status without limits is not a complete usage response. Invalid
 	// figures likewise cannot safely establish which windows are absent.
-	if snap.UpdatedAt <= 0 || len(snap.Usage.Limits) == 0 {
+	observedAt := snap.Usage.LimitsAsOf
+	if observedAt <= 0 {
+		observedAt = snap.UpdatedAt
+	}
+	if observedAt <= 0 || len(snap.Usage.Limits) == 0 {
 		return
 	}
 	for _, v := range snap.Usage.Limits {
@@ -206,7 +211,7 @@ func (s *planUsageStore) pushClaude(snap *wslive.Snapshot) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if snap.UpdatedAt < s.claude.AsOf {
+	if observedAt < s.claude.AsOf {
 		return
 	}
 	// Sessions disagree near a window boundary: a stale one still reports the
@@ -236,7 +241,7 @@ func (s *planUsageStore) pushClaude(snap *wslive.Snapshot) {
 		if (v.Kind != wslive.LimitFiveHour && v.Kind != wslive.LimitSevenDay) || !validUsage(v.Percent) {
 			continue
 		}
-		next := planUsageWindow{Kind: v.Kind, Percent: v.Percent, ResetsAt: v.ResetsAt, AsOf: snap.UpdatedAt}
+		next := planUsageWindow{Kind: v.Kind, Percent: v.Percent, ResetsAt: v.ResetsAt, AsOf: observedAt}
 		if next.AsOf <= 0 || !live(next.ResetsAt) {
 			continue
 		}
@@ -246,12 +251,13 @@ func (s *planUsageStore) pushClaude(snap *wslive.Snapshot) {
 		}
 		if i < len(s.claude.Windows) {
 			old := s.claude.Windows[i]
-			// Reset is the window identity. Never resurrect an older window or
-			// decrease usage within one, even when another session reports later.
-			if next.ResetsAt < old.ResetsAt || (next.ResetsAt == old.ResetsAt && next.Percent <= old.Percent) {
+			if next.AsOf < old.AsOf {
 				continue
 			}
-			if next.AsOf < old.AsOf {
+			// Equal-time duplicate reports keep the old monotonic tie-breaker.
+			// A strictly newer observation is authoritative even when an account
+			// switch makes its reset earlier or its percentage lower.
+			if next.AsOf == old.AsOf && (next.ResetsAt < old.ResetsAt || (next.ResetsAt == old.ResetsAt && next.Percent <= old.Percent)) {
 				continue
 			}
 			s.claude.Windows[i] = next
@@ -265,8 +271,8 @@ func (s *planUsageStore) pushClaude(snap *wslive.Snapshot) {
 		}
 	}
 	if changed {
-		if snap.UpdatedAt > s.claude.AsOf {
-			s.claude.AsOf = snap.UpdatedAt
+		if observedAt > s.claude.AsOf {
+			s.claude.AsOf = observedAt
 		}
 		s.claude.Harness = "claude"
 		s.claude.Source = "Claude push"
@@ -441,6 +447,9 @@ func (d *Daemon) handlePlanUsage(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("history") == "1" {
 		now := d.planUsage.nowTime().UnixMilli()
 		body["history"] = d.planUsage.historyView(entries, now)
+		if codexHist, ok := d.planUsage.codexFiveHourHistoryView(entries, now); ok {
+			body["codexFiveHourHistory"] = codexHist
+		}
 		for _, e := range entries {
 			if e.Harness == "agy" {
 				body["agyHistory"] = d.planUsage.agyHistoryView(entries, now)

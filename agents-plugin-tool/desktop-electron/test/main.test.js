@@ -1263,6 +1263,43 @@ test('update bridge: IPC only from the pinned dashboard main frame, status repla
   f.app.emit('will-quit');
   assert.equal(calls.at(-1), 'quit:true');
 });
+test('canary and stable-return IPC: payload-free, pinned to the dashboard main frame, canary signal only when packaged', async () => {
+  const update = require('../update'), original = update.createUpdater;
+  const calls = [];
+  let canary = true;
+  update.createUpdater = () => ({ applyOnLaunch: () => false, applyOnQuit() {}, schedule() {},
+    phase: () => ({ phase: 'none', version: null, skipped: false }), canRestart: () => false,
+    isCanary: () => canary, check: manual => calls.push(`check:${manual}`),
+    checkCanary: (...args) => calls.push(['canary', ...args]), backToStable: (...args) => calls.push(['stable', ...args]) });
+  let f;
+  try { f = await fixture(async () => 'http://127.0.0.1:39418/', 'darwin', { packaged: true }); }
+  finally { update.createUpdater = original; }
+  const wc = f.window.webContents;
+  const from = url => ({ sender: wc, senderFrame: Object.assign(wc.mainFrame, { url }) });
+  const channel = f.ipcMain.handlers['werkschaft:update-channel'];
+  assert.equal(typeof channel, 'function');
+  // Refused: another origin, the bundled connection page, a foreign sender, and a subframe.
+  const subframe = { sender: wc, senderFrame: { url: 'http://127.0.0.1:39418/' } };
+  for (const event of [from('https://example.com/'), from('file:///tmp/connection.html'),
+    { sender: {}, senderFrame: { url: 'http://127.0.0.1:39418/' } }, subframe]) {
+    f.ipcMain.emit('werkschaft:update-check-canary', event, 'https://evil.test/x.zip');
+    f.ipcMain.emit('werkschaft:update-back-to-stable', event, '0.0.1');
+    assert.deepEqual(await channel(event), { canary: false });
+  }
+  assert.deepEqual(calls, []);
+  // Admitted from the pinned main frame; any renderer argument is dropped.
+  f.ipcMain.emit('werkschaft:update-check-canary', from('http://127.0.0.1:39418/s/x'), 'https://evil.test/x.zip');
+  f.ipcMain.emit('werkschaft:update-back-to-stable', from('http://127.0.0.1:39418/'), '0.0.1', { allowOlder: true });
+  assert.deepEqual(calls, [['canary'], ['stable']]);
+  assert.deepEqual(await channel(from('http://127.0.0.1:39418/')), { canary: true, version: '0.1.0' });
+  // A stable relaunch, or an unpackaged dev run that cannot swap itself, never offers Back to stable.
+  canary = false;
+  assert.deepEqual(await channel(from('http://127.0.0.1:39418/')), { canary: false, version: '0.1.0' });
+  canary = true;
+  f.app.isPackaged = false;
+  assert.deepEqual(await channel(from('http://127.0.0.1:39418/')), { canary: false, version: '0.1.0' });
+  assert.equal(calls.some(call => call === 'check:true'), false, 'channel actions never run the stable check');
+});
 test('a stage applied at launch quits before any window and never registers the quit apply', async () => {
   const update = require('../update'), original = update.createUpdater;
   let quitApplied = false;
