@@ -571,6 +571,9 @@ type LaunchSpec struct {
 	// out of the ring, so they take no sequence and reach no client. Empty
 	// keeps every line.
 	RingSkip string
+	// RingPulse is a content-free line emitted at a bounded rate while
+	// RingSkip drops matching lines. Empty emits nothing.
+	RingPulse string
 }
 
 // Launch starts a new holder for session (a JSON object the holder records
@@ -633,6 +636,9 @@ func (m *Manager) launch(spec LaunchSpec) (string, error) {
 	}
 	if spec.RingSkip != "" {
 		args = append(args, "--ring-skip", spec.RingSkip)
+	}
+	if spec.RingPulse != "" {
+		args = append(args, "--ring-pulse", spec.RingPulse)
 	}
 	args = append(args, m.opts.holderArgs...)
 	// The holder runs in the holders directory, not its own, so it can

@@ -93,6 +93,11 @@ const agyLeadBgShellRule = `Never end your turn while a non-daemon ` + "`run_com
 // longer matches is kept.
 const agyRingSkip = `^\{"jsonrpc":"2\.0","method":"session/update","params":\{"sessionId":"[^"]*","update":\{"sessionUpdate":"agent_thought_chunk"`
 
+// agyRingPulse replaces dropped thought lines at a bounded rate. It is a
+// content-free session update, so old and new mappers both turn it into the
+// existing in-memory ModelActivity signal without exposing thought text.
+const agyRingPulse = `{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"ws_activity"}}}`
+
 // Executable is the agy command availability is checked against.
 func (b AgyBackend) Executable() string {
 	if b.Command != "" {
@@ -161,6 +166,7 @@ func (b AgyBackend) Start(ctx context.Context, spec StartSpec) (Process, error) 
 	cmd.Env = agyEnv(spec)
 	if spec.Holder != nil {
 		spec.Holder.ringSkip = agyRingSkip
+		spec.Holder.ringPulse = agyRingPulse
 	}
 	m := newAgyMapper(spec.SessionID)
 	sp, err := startChild(spec, cmd, m, agyProtocol{})

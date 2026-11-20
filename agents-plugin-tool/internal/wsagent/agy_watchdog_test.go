@@ -392,6 +392,37 @@ func TestAgyModelWaitWatchdogActivityResetsTimer(t *testing.T) {
 	eventually(t, "replacement interval interrupt", func() bool { return procInterrupts(p) == 1 })
 }
 
+// A hosted holder replaces private thought lines with the content-free pulse.
+// Repeated pulses can span longer than the timeout without cancelling, while
+// neither the pulse nor the private thought text becomes visible reply data.
+func TestAgyHostedThoughtPulseKeepsModelWaitAlive(t *testing.T) {
+	h, timers, _ := agyWatchdogHarness(t, "45")
+	_, p := startAgyWatchdogTurn(t, h, false)
+	m := newAgyMapper("s")
+	rr := &agyRun{m: m, answers: map[string]controlAnswer{}}
+
+	for interval := 0; interval < 3; interval++ {
+		evs := m.mapLine([]byte(agyRingPulse), rr)
+		activity := slices.DeleteFunc(evs, func(ev Event) bool { return ev.ModelActivity == nil })
+		if len(activity) != 1 || *activity[0].ModelActivity != 0 {
+			t.Fatalf("pulse %d activity = %+v", interval, evs)
+		}
+		p.events <- activity[0]
+		eventually(t, "replacement watchdog", func() bool {
+			started, _ := timers.counts()
+			return started == interval+2
+		})
+		timers.fire(t, interval)
+		time.Sleep(20 * time.Millisecond)
+		if got := procInterrupts(p); got != 0 {
+			t.Fatalf("pulse %d allowed %d watchdog interrupts", interval, got)
+		}
+	}
+	if reply := m.reply.String(); reply != "" || strings.Contains(reply, "thought") {
+		t.Fatalf("content-free pulse became visible reply %q", reply)
+	}
+}
+
 // (e): the reply-tail matcher joins split chunks, requires an anchored attempt
 // line, and clears a candidate when later model output proves recovery.
 func TestAgyModelWaitWatchdogMatchesAnchoredReplyTailAcrossChunks(t *testing.T) {
