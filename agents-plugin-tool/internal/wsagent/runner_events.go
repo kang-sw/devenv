@@ -668,9 +668,14 @@ func (c *conv) processGone() {
 // processEnded settles what ends with a process: its turn, its waiting
 // prompts, and what it last reported.
 func (c *conv) processEnded() {
-	// A process loss during the one retry still reports the failed attempt's
-	// saved reply when the retry itself produced no final reply.
-	c.restoreModelWaitDiagnostic()
+	// A process loss after retry exhaustion must publish the same visible
+	// diagnostic as TurnEnd before disarming the watchdog. Earlier losses still
+	// restore the failed attempt's saved reply when no final reply followed.
+	if c.modelWaitFailErr != "" && c.modelWaitRetries >= c.modelWaitMaxRetries {
+		c.publishModelWaitExhaustedDiagnostic()
+	} else {
+		c.restoreModelWaitDiagnostic()
+	}
 	c.disarmModelWait()
 	c.stopIdle()
 	hadBgGrace := c.bgGraceTimer != nil

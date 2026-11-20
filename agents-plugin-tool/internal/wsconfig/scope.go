@@ -198,10 +198,13 @@ const (
 	ItemGitMergeSizeHardLines  = "git.merge_size_hard_lines"
 	ItemGitMergeSizeExtensions = "git.merge_size_extensions"
 
-	// ItemAgyModelWaitTimeoutSeconds is the model-stream silence watchdog
-	// threshold in seconds for hosted Antigravity (agy) leads and workers.
-	// Integer >= 0; 0 disables. Package manifests supply the default.
+	// ItemAgyModelWaitTimeoutSeconds and ItemAgyModelWaitRetries configure the
+	// model-stream silence watchdog for hosted Antigravity (agy) leads and
+	// workers: seconds until recovery starts and automatic continue attempts.
+	// Both are integers >= 0; zero disables the corresponding behavior.
+	// Package manifests supply the defaults.
 	ItemAgyModelWaitTimeoutSeconds = "agy.model_wait_timeout_seconds"
+	ItemAgyModelWaitRetries        = "agy.model_wait_retries"
 )
 
 func init() {

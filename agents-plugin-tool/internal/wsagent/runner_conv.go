@@ -90,20 +90,23 @@ type conv struct {
 	compactAwaitTurn                                                             bool
 
 	// Agy model-wait watchdog state (loop-owned, in-memory only).
-	modelWaitTimeout           time.Duration
-	modelWaitArmed             bool
-	modelWaitRetries           int
-	modelWaitPending           int
-	modelWaitCancelling        bool
-	modelWaitRetryFromAPIError bool
-	modelWaitFailErr           string
-	modelWaitDiagnostic        string
-	modelWaitFailureExcluded   bool
-	modelWaitC                 <-chan time.Time
-	modelWaitStop              func()
-	modelWaitFailure           string
-	modelWaitDrainC            <-chan time.Time
-	modelWaitDrainStop         func()
+	modelWaitTimeout            time.Duration
+	modelWaitMaxRetries         int
+	modelWaitArmed              bool
+	modelWaitRetries            int
+	modelWaitPending            int
+	modelWaitCancelling         bool
+	modelWaitFailErr            string
+	modelWaitDiagnostic         string
+	modelWaitExhaustedPublished bool
+	modelWaitFailureExcluded    bool
+	modelWaitC                  <-chan time.Time
+	modelWaitStop               func()
+	modelWaitFailure            string
+	modelWaitDrainC             <-chan time.Time
+	modelWaitDrainStop          func()
+	modelWaitCancelC            <-chan time.Time
+	modelWaitCancelStop         func()
 
 	// loop-owned, except registration timing below.
 	events       <-chan Event
@@ -516,11 +519,12 @@ func (c *conv) loop() {
 		return
 	}
 	for {
-		var idleC, actionC, leverC, compactC, modelWaitC, modelWaitDrainC, spawnC, bgGraceC <-chan time.Time
+		var idleC, actionC, leverC, compactC, modelWaitC, modelWaitDrainC, modelWaitCancelC, spawnC, bgGraceC <-chan time.Time
 		leverC = c.leverC
 		compactC = c.compactC
 		modelWaitC = c.modelWaitC
 		modelWaitDrainC = c.modelWaitDrainC
+		modelWaitCancelC = c.modelWaitCancelC
 		if c.spawnTimer != nil {
 			spawnC = c.spawnTimer.C
 		}
@@ -595,6 +599,8 @@ func (c *conv) loop() {
 			c.modelWaitTimedOut()
 		case <-modelWaitDrainC:
 			c.modelFailureDrainTimedOut()
+		case <-modelWaitCancelC:
+			c.modelWaitCancelTimedOut()
 		case <-beat.C:
 			c.heartbeat()
 		case <-c.r.quit:

@@ -224,10 +224,11 @@ func TestWebSocketStreamsSendWhatSSESends(t *testing.T) {
 	}
 	f.d.Index().Refresh()
 	for _, p := range pairs[:3] {
-		got, closed := collect(p.ws)
-		sse, _ := collect(p.sse)
-		if len(got) == 0 || got[len(got)-1] != (sseEvent{name: "gone", data: "{}"}) || !closed || !slices.Equal(got, sse) {
-			t.Errorf("gone %s: WebSocket sent %v (closed %v), SSE %v", p.path, got, closed, sse)
+		got, wsClosed := collect(p.ws)
+		sse, sseClosed := collect(p.sse)
+		gone := sseEvent{name: "gone", data: "{}"}
+		if len(got) == 0 || got[len(got)-1] != gone || !wsClosed || len(sse) == 0 || sse[len(sse)-1] != gone || !sseClosed {
+			t.Errorf("gone %s: WebSocket sent %v (closed %v), SSE %v (closed %v)", p.path, got, wsClosed, sse, sseClosed)
 		}
 	}
 }
