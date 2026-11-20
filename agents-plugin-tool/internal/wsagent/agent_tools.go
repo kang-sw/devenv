@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
@@ -675,6 +677,14 @@ func (r *Runner) AgentSpawn(caller AgentCaller, req AgentSpawnRequest) (AgentSpa
 		if _, err := os.Lstat(filepath.Join(wt, ".git")); err != nil {
 			return AgentSpawnResult{}, badRequest("%s: worktree %s is not a git worktree root (no .git entry)", tool, wt)
 		}
+		unlockWorktree, err := wsgit.ReserveWorktreeSpawn(wt)
+		if err != nil {
+			if errors.Is(err, wsgit.ErrWorktreeReleasing) {
+				return AgentSpawnResult{}, conflict("%s: worktree %s is currently being released; wait for release to finish and re-acquire before spawning", tool, wt)
+			}
+			return AgentSpawnResult{}, badRequest("%s: reserve worktree %s: %v", tool, wt, err)
+		}
+		defer unlockWorktree()
 		root, cwd = wt, wt
 	} else if cwd == "" {
 		cwd = caller.base()
@@ -764,6 +774,104 @@ func (r *Runner) AgentInterrupt(caller AgentCaller, address string) (AgentInterr
 		returned = []string{}
 	}
 	return AgentInterruptResult{Address: AgentAddress(id), Status: AgentStatus(st), Returned: returned}, nil
+}
+
+// BoundWorktreeChild identifies a non-closed conversation bound to a worktree.
+type BoundWorktreeChild struct {
+	Address string `json:"address"`
+	State   string `json:"state"`
+	Cwd     string `json:"cwd,omitempty"`
+}
+
+// ActiveChildrenInWorktree returns every non-closed conversation in the runner
+// whose canonical root equals worktree or whose canonical working directory is
+// worktree or within it, oldest first then by address. Reads live state from
+// memory without touching disk records.
+func (r *Runner) ActiveChildrenInWorktree(worktree string) []BoundWorktreeChild {
+	target := canonicalWorktreePath(worktree)
+	if target == "" {
+		return nil
+	}
+	r.mu.Lock()
+	convs := make([]*conv, 0, len(r.convs))
+	for _, c := range r.convs {
+		convs = append(convs, c)
+	}
+	r.mu.Unlock()
+	type match struct {
+		createdAt string
+		child     BoundWorktreeChild
+	}
+	var matches []match
+	for _, c := range convs {
+		st := c.memoryState()
+		if st.Status == StatusClosed || st.Status == StatusHandedOff {
+			continue
+		}
+		convRoot := canonicalWorktreePath(st.Root)
+		convCwd := canonicalWorktreePath(st.Cwd)
+		if !sameWorktreePath(convRoot, target) && !worktreePathContains(target, convCwd) {
+			continue
+		}
+		matches = append(matches, match{
+			createdAt: st.CreatedAt,
+			child: BoundWorktreeChild{
+				Address: AgentAddress(st.ID),
+				State:   AgentStatus(st),
+				Cwd:     st.Cwd,
+			},
+		})
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].createdAt != matches[j].createdAt {
+			return matches[i].createdAt < matches[j].createdAt
+		}
+		return matches[i].child.Address < matches[j].child.Address
+	})
+	out := make([]BoundWorktreeChild, len(matches))
+	for i, m := range matches {
+		out[i] = m.child
+	}
+	return out
+}
+
+func canonicalWorktreePath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	p = filepath.Clean(p)
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return p
+}
+
+func sameWorktreePath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+func worktreePathContains(root, path string) bool {
+	if root == "" || path == "" {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		root, path = strings.ToLower(root), strings.ToLower(path)
+	}
+	if root == path {
+		return true
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && !filepath.IsAbs(rel)
 }
 
 // AgentList lists caller's direct children, oldest first.

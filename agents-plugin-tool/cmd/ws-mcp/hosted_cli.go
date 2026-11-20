@@ -84,6 +84,9 @@ func (c *hostedCLI) server(root string) *mcp.Server {
 			if source, ok := c.host.agents.(mcp.AgentBackendRegistry); ok {
 				opts.AgentBackends = source
 			}
+			if reader, ok := c.host.agents.(mcp.WorktreeChildrenReader); ok {
+				opts.WorktreeChildren = reader
+			}
 			if strings.TrimSpace(c.getenv(wsagent.EnvPiToken)) == "" {
 				opts.Agents = c.host.agents
 			}

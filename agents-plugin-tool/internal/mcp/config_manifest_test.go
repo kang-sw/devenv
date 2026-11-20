@@ -361,6 +361,80 @@ func TestClaudeHelloAgyModelWaitProjectTune(t *testing.T) {
 	}
 }
 
+func TestAgyManifestExposureAndValidationBothPackages(t *testing.T) {
+	useLeadProfile(t)
+	cases := []struct {
+		name           string
+		pluginDir      string
+		wantTimeoutDef float64
+		wantRetriesDef float64
+	}{
+		{name: "ws", pluginDir: filepath.Join("..", "..", "..", "agents-plugin"), wantTimeoutDef: 120, wantRetriesDef: 3},
+		{name: "wsflow", pluginDir: filepath.Join("..", "..", "..", "agents-plugin-wsflow"), wantTimeoutDef: 0, wantRetriesDef: 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			mustWrite(t, root, "README.md", "# Test\n")
+			initGit(t, root)
+			paths := []string{
+				filepath.Join(tc.pluginDir, "config-manifest.json"),
+				filepath.Join(tc.pluginDir, "agy-config-manifest.json"),
+				filepath.Join(tc.pluginDir, "dashboard-config-manifest.json"),
+			}
+			envMap := map[string]string{
+				envConfigManifests: strings.Join(paths, ";"),
+				"PATH":             os.Getenv("PATH"),
+				"WS_CACHE_HOME":    filepath.Join(t.TempDir(), "cache"),
+				"WS_CONFIG_HOME":   filepath.Join(t.TempDir(), "config"),
+				"WS_RSRC_ROOT":     filepath.Join(tc.pluginDir, "rsrc"),
+			}
+			if tc.name == "wsflow" {
+				envMap[envNamespace] = "wsflow"
+				envMap[envNoAgent] = "1"
+			}
+			server := NewServerWithOptions(ServerOptions{
+				Root: root, Version: "test", Harness: "claude", Env: EnvFromMap(envMap),
+			})
+			t.Cleanup(server.Close)
+			key, _ := parseLoginResponse(t, callLogin(t, server, 930420, root, nil))
+
+			listResp := keyedCall(t, server, 930421, key, "config.list", map[string]any{"format": "json"})
+			var view configListView
+			if err := json.Unmarshal([]byte(toolText(t, listResp)), &view); err != nil {
+				t.Fatalf("config.list json: %v", err)
+			}
+			if len(view.ManifestErrors) != 0 {
+				t.Fatalf("unexpected manifest errors: %v", view.ManifestErrors)
+			}
+			for _, setting := range []string{"agy.model_wait_timeout_seconds", "agy.model_wait_retries"} {
+				knob := requireTuningKnob(t, tuningCatalog{Knobs: view.Knobs}, setting)
+				if knob.Writer.Tool != "config.tune" || knob.Writer.FixedArguments["key"] != setting {
+					t.Fatalf("%s writer = %+v", setting, knob.Writer)
+				}
+			}
+			if got := configGetJSON(t, server, 930422, map[string]any{"session_key": key, "key": "agy.model_wait_timeout_seconds"}); got.Value != tc.wantTimeoutDef || got.Scope != "builtin" {
+				t.Fatalf("timeout default = %+v, want %v", got, tc.wantTimeoutDef)
+			}
+			if got := configGetJSON(t, server, 930423, map[string]any{"session_key": key, "key": "agy.model_wait_retries"}); got.Value != tc.wantRetriesDef || got.Scope != "builtin" {
+				t.Fatalf("retries default = %+v, want %v", got, tc.wantRetriesDef)
+			}
+			for i, bad := range []string{"-1", "many"} {
+				resp := keyedCall(t, server, 930430+i, key, "config.tune", map[string]any{"key": "agy.model_wait_retries", "value": bad})
+				if !toolIsError(t, resp) || !strings.Contains(toolText(t, resp), "at least 0") {
+					t.Fatalf("config.tune(agy.model_wait_retries=%q) = %s, want integer >= 0 rejection", bad, resp)
+				}
+			}
+			if resp := keyedCall(t, server, 930440, key, "config.tune", map[string]any{"key": "agy.model_wait_retries", "value": "5", "scope": "project"}); toolIsError(t, resp) {
+				t.Fatalf("tune agy.model_wait_retries failed: %s", resp)
+			}
+			if got := configGetJSON(t, server, 930441, map[string]any{"session_key": key, "key": "agy.model_wait_retries"}); got.Value != float64(5) || got.Scope != "project" {
+				t.Fatalf("retries after tune = %+v, want 5 [project]", got)
+			}
+		})
+	}
+}
+
 // TestConfigGetPrecedence walks one declared key down the scope stack:
 // session (own, then inherited by a leaf child through the parent chain) >
 // project > repo > global > manifest default.

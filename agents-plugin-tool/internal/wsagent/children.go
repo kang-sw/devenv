@@ -435,6 +435,24 @@ func (r *Runner) serveToken(w http.ResponseWriter, req *http.Request, op string)
 		writeAnswer(w, http.StatusOK, r.Compact(caller.record().WSKey, body.Target, body.Resume), nil)
 		return
 	}
+	if op == "worktree.children" {
+		var body struct {
+			Worktree string `json:"worktree"`
+		}
+		if !decode(w, req, &body) {
+			return
+		}
+		if strings.TrimSpace(body.Worktree) == "" {
+			writeAnswer(w, 0, nil, badRequest("worktree.children: worktree is required"))
+			return
+		}
+		children := r.ActiveChildrenInWorktree(body.Worktree)
+		if children == nil {
+			children = []BoundWorktreeChild{}
+		}
+		writeAnswer(w, http.StatusOK, map[string]any{"children": children}, nil)
+		return
+	}
 	if strings.HasPrefix(op, "agent.") {
 		// agent.* checks each harness it spawns on itself (spawnableHarness).
 		r.serveAgentToken(w, req, caller, op)

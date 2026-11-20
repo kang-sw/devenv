@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wskey"
@@ -851,11 +852,48 @@ func releaseWorktree(ctx context.Context, runner wsgit.Runner, env []string, wtP
 
 // worktreeReleaseCaller is who asks worktree.release: the caller's session
 // key (a lead's, or the worker key an acquire minted, which is a lead key
-// too), the worker key it named (empty when it named a path), and force.
+// too), the worker key it named (empty when it named a path), force, and an
+// optional daemon-wide bound-child check run under the per-worktree lock.
 type worktreeReleaseCaller struct {
-	LeadKey   string
-	WorkerKey string
-	Force     bool
+	LeadKey       string
+	WorkerKey     string
+	Force         bool
+	CheckChildren func(ctx context.Context, target string) error
+}
+
+// checkWorktreeBoundChildren refuses a non-forced worktree.release while any
+// non-closed conversation in the daemon is bound to target, naming its
+// address(es). Daemon-hosted servers query the runner directly in memory; a
+// token-bearing connection without a local runner forwards to the daemon's
+// token route and fails closed if the daemon cannot be reached.
+func (s *Server) checkWorktreeBoundChildren(ctx context.Context, target string) error {
+	var children []wsagent.BoundWorktreeChild
+	switch {
+	case s.pi.worktreeChildren != nil:
+		children = s.pi.worktreeChildren.ActiveChildrenInWorktree(target)
+	case s.piForwards():
+		var answer struct {
+			Children []wsagent.BoundWorktreeChild `json:"children"`
+		}
+		if err := s.piCall(ctx, "worktree.children", map[string]any{"worktree": target}, piForwardTimeout, &answer); err != nil {
+			return fmt.Errorf("worktree.release refuses %s: could not check bound child agents with the daemon (%v). Nothing was changed. Retry once the daemon answers, or pass force: true once you have confirmed no child is bound to this worktree", target, err)
+		}
+		children = answer.Children
+	default:
+		return nil
+	}
+	if len(children) == 0 {
+		return nil
+	}
+	parts := make([]string, 0, len(children))
+	for _, child := range children {
+		if child.State != "" {
+			parts = append(parts, fmt.Sprintf("%s (%s)", child.Address, child.State))
+		} else {
+			parts = append(parts, child.Address)
+		}
+	}
+	return fmt.Errorf("worktree.release refuses %s: non-closed child agent(s) are still bound to this worktree (%s). Nothing was changed. Wait for them to finish or close them before releasing; pass force: true only if you intend to clean the worktree while they remain open", target, strings.Join(parts, ", "))
 }
 
 // releaseWorktreeAs is releaseWorktree on behalf of caller (nil: no lease
