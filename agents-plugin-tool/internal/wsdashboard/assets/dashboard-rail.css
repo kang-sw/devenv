@@ -74,7 +74,13 @@
    row or col) holds its two children and a 6px divider (.gal-div, a
    focusable separator) between them; a drag over a docked pane previews
    its drop zone (.gal-overlay over the viewport: the zone's half of the
-   pane, or all of it for the center). */
+   pane, or all of it for the center). A drag held over a rail dot
+   springs its page into view (.spring, cards.js). Past a pane's scroll
+   limit the wheel pulls (cards.js gate): the page shown, or the narrow
+   Main Board, shifts by its translate property (apart from the slides'
+   transform) while data-gal-pull is set, a pill (.gal-pullpill) at that
+   edge of the viewport reads the target and its percentage, and the
+   target's dot carries .pull-target. */
 :root { --pbw: calc(1680px - 32px - 356px); }
 .dbody:has(> .dgrid.live) { --cvw: var(--convow, calc(var(--boardw) * 5 / 7)); }
 .dash.board { --pbw: 900px; }
@@ -93,12 +99,23 @@
 .gal-dot.main.active { background: #3fa853; color: #0b1910; box-shadow: 0 0 0 3px rgb(63 168 83 / .24); }
 .gal-dot.empty { border-style: dashed; background: transparent; font-size: 13px; font-weight: 500; }
 .gal-dot.empty.active { height: 24px; border-style: solid; border-color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 16%, transparent); color: var(--wb-primary); }
-.gal-dot.drop { outline: 2px solid #e0a84a; outline-offset: 2px; transform: scale(1.16); box-shadow: 0 0 0 5px rgb(224 168 74 / .24); }
+.gal-dot.drop, .gal-dot.spring, .gal-dot.pull-target { outline: 2px solid #e0a84a; outline-offset: 2px; transform: scale(1.16); box-shadow: 0 0 0 5px rgb(224 168 74 / .24); }
 .bgal[data-dotdrag] .gal-rail { cursor: grabbing; }
 .gal-viewport { flex: 1 1 0; min-width: 0; min-height: 0; position: relative; overflow: hidden; overflow: clip; }
 .gal-page { position: absolute; inset: 0; display: flex; min-width: 0; min-height: 0; transform: translateY(calc(var(--gal-off, 0) * (100% + 24px))); }
-.gal-page[data-active] { transform: none; transition: transform .22s cubic-bezier(.22, 1, .36, 1); }
-@media (prefers-reduced-motion: reduce) { .gal-page[data-active] { transition: none; } }
+.gal-page[data-active] { transform: none; transition: transform .22s cubic-bezier(.22, 1, .36, 1), translate .22s cubic-bezier(.22, 1, .36, 1); }
+.r-board { transition: translate .22s cubic-bezier(.22, 1, .36, 1); }
+.gal-page[data-gal-pull], .r-board[data-gal-pull] { transition: translate .06s linear; }
+@media (prefers-reduced-motion: reduce) { .gal-page[data-active], .r-board { transition: none; } }
+.gal-pullpill { position: absolute; left: 50%; z-index: 6; box-sizing: border-box; min-width: 220px; max-width: calc(100% - 20px); padding: 5px 10px 6px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--wb-primary) 55%, var(--wb-line)); background: color-mix(in srgb, var(--wb-card) 94%, black); box-shadow: 0 6px 20px rgb(0 0 0 / .45); display: flex; flex-direction: column; gap: 4px; pointer-events: none; opacity: 0; transform: translateX(-50%) scale(.94); transition: opacity .14s ease, transform .14s ease; }
+.gal-pullpill.top { top: 8px; }
+.gal-pullpill.bottom { bottom: 8px; }
+.gal-pullpill.show { opacity: 1; transform: translateX(-50%) scale(1); }
+.gal-pullpill.damped { border-color: var(--wb-line); }
+.gal-pulltxt { font-size: 11px; font-weight: 600; color: var(--wb-fg); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gal-pulltrack { height: 3px; border-radius: 999px; background: var(--wb-muted); overflow: hidden; }
+.gal-pullfill { height: 100%; width: 0%; border-radius: 999px; background: var(--wb-primary); transition: width .06s linear; }
+.gal-pullpill.ready .gal-pullfill { background: #5cc46a; }
 .gal-split { flex: 1 1 0px; min-width: 0; min-height: 0; display: flex; }
 .gal-split.row { flex-direction: row; }
 .gal-split.col { flex-direction: column; }

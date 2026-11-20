@@ -753,6 +753,7 @@
     gal.pages.forEach(function (pg, i) { slide(pageEls[pg.id], i - pos, dir); });
     slide(plusEl, n - pos, dir);
     away(shown && narrow && pos >= 0);
+    homeWheel(shown && narrow && n > 0);
   }
   // away stands the narrow view's Main Board (Page 0) off the view while a
   // docked page shows over it, as slide does an inactive page: the root's
@@ -812,6 +813,7 @@
     var narrow = !!(lay && lay.narrow), cur = G.position(gal, narrow), g = G.activate(gal, pos, narrow);
     if (g === gal) return false;
     gal = g;
+    if (pullEl) { pullOff(); gate.clear(); }
     paintGallery(dir === undefined ? (pos > cur ? 1 : -1) : dir);
     persist();
     return true;
@@ -867,6 +869,7 @@
       railLast = now;
       step(dy > 0 ? 1 : -1);
     }, { passive: false });
+    viewEl.addEventListener("wheel", function (e) { gateWheel(e, false); }, { passive: false });
     railEl.addEventListener("pointerdown", function (e) {
       if (rg || dg || (e.button !== undefined && e.button !== 0)) return;
       var b = e.target.closest && e.target.closest(".gal-dot"), p = b ? +b.getAttribute("data-pos") : NaN;
@@ -930,6 +933,177 @@
     if (lit) lit.classList.remove("drop");
     lit = el || null;
     if (lit) lit.classList.add("drop");
+  }
+  function clock() { return window.performance && window.performance.now ? window.performance.now() : Date.now(); }
+  // dotKey is the key of the rail dot (dotEls) for position p.
+  function dotKey(p) { var n = gal.pages.length; return p < 0 ? "main" : p >= n ? G.PLUS : gal.pages[p].id; }
+
+  // --- spring-loaded rail dots -----------------------------------------------
+  // While a drag runs, a rail dot hovered SPRING_MS (WsGallery.Hover) shows
+  // its page, so the drag can go on to a pane's zone or into +; the dot
+  // carries .spring meanwhile. A drop before then keeps the dot's own drop
+  // (+ docks on a new page, a page's dot appends, ⌂ undocks). The dot of
+  // the page shown never springs.
+  var hover = new G.Hover(), springT = 0;
+  function spring(hit) {
+    var el = hit && hit.el.classList.contains("gal-dot") && hit.pos !== G.position(gal, !!(lay && lay.narrow)) ? hit.el : null;
+    if (el === hover.target) return;
+    unspring();
+    if (!el) return;
+    hover.over(el, clock());
+    el.classList.add("spring");
+    springT = setTimeout(sprung, G.C.SPRING_MS);
+  }
+  function unspring() {
+    clearTimeout(springT);
+    springT = 0;
+    if (hover.target) hover.target.classList.remove("spring");
+    hover.clear();
+  }
+  // sprung fires the hover: the page shows, and the drop under the
+  // pointer is read again (over otherwise runs on a pointer move only).
+  function sprung() {
+    springT = 0;
+    var el = hover.target, now = clock();
+    if (!el) return;
+    if (!hover.fire(now)) { springT = setTimeout(sprung, Math.max(1, hover.since + hover.ms - now)); return; }
+    el.classList.remove("spring");
+    if (!dg || !dg.on) return;
+    show(+el.getAttribute("data-pos"));
+    over(dg.x, dg.y);
+  }
+
+  // --- the boundary bounce-snap gate -----------------------------------------
+  // A wheel event over the page shown (or, in the narrow view, over the
+  // Main Board on Page 0) runs through WsGallery.Gate: past the scroll
+  // limit of the pane under the pointer it charges tension toward the
+  // adjacent page (a rubber band on the page, a pill with the target and
+  // its percentage, the target's dot marked), flips there at 100%, and
+  // springs back when idle; momentum and an edge with no page past it get
+  // the damped micro-bounce. One timer asks the gate to settle (gate.due).
+  // Wheel only: touch scrolling never charges it.
+  // gateIn is the one input object every event refills (no allocation per
+  // event); nb the neighbors of the model nbOf in the view nbNarrow.
+  var gate = new G.Gate(), gateT = 0, pullEl = null, pullDot = null, pills = null, homeEl = null, homeScr = null;
+  var gateIn = { dy: 0, now: 0, canUp: false, canDown: false, prev: null, next: null }, nb = null, nbOf = null, nbNarrow = null;
+  // OWN is what takes its own wheel events: a terminal, a frame, a canvas
+  // or media, a maximized sheet, and the bodies of terminal, web and
+  // preview cards. NEAR adds the panes' scrollers (a docked topic's body,
+  // a card's body), so one closest() finds either.
+  var OWN = '.xterm, .tm-host, iframe, canvas, video, embed, object, [data-max], [data-max] *, .bcard:is([data-kind="terminal"], [data-kind="web"], [data-kind="preview"]) > .bc-in > .bc-body';
+  var NEAR = OWN + ", .gal-pbody, .bc-body";
+  function reach(s, dy) {
+    return dy > 0 ? s.scrollTop + s.clientHeight < s.scrollHeight - G.C.EPS : s.scrollTop > G.C.EPS;
+  }
+  // gateWheel runs wheel event e through the gate; home: it comes from the
+  // narrow view's Main Board. The scroller is the nearest topic or card
+  // body under the pointer, or on Page 0 the board's scroller (a board
+  // card's body first while it still scrolls that way). An event that a
+  // widget took (defaultPrevented) or that stands in one (OWN) never
+  // charges, nor does a pinch (ctrlKey) or anything while the overview runs.
+  function gateWheel(e, home) {
+    if (e.defaultPrevented || e.ctrlKey || overviewOn || !lay || !e.target || !e.target.closest) return;
+    var narrow = !!lay.narrow, pos = G.position(gal, narrow);
+    if (home ? pos >= 0 || galEl.contains(e.target) : pos < 0) return;
+    var dy = +e.deltaY || 0;
+    if (e.deltaMode === 1) dy *= 40; else if (e.deltaMode === 2) dy *= 800;
+    var near = e.target.closest(NEAR), s = near;
+    if (near && near.matches(OWN)) return;
+    if (home) s = near && reach(near, dy) ? near : homeScr;
+    var top = s ? s.scrollTop : 0, w = gateIn;
+    // The model is replaced, never changed, on every change: its
+    // neighbors are read once per model and view.
+    if (nbOf !== gal || nbNarrow !== narrow) { nb = G.neighbors(gal, pos, narrow); nbOf = gal; nbNarrow = narrow; }
+    w.dy = dy;
+    w.now = clock();
+    w.canUp = !!s && top > G.C.EPS;
+    w.canDown = !!s && top + s.clientHeight < s.scrollHeight - G.C.EPS;
+    w.prev = nb.prev;
+    w.next = nb.next;
+    var r = gate.wheel(w);
+    if (r.kind === "none") return;
+    if (r.kind === "pass") { if (r.reset) pullOff(); gateArm(); return; }
+    e.preventDefault();
+    var el = home ? board : pos >= gal.pages.length ? plusEl : pageEls[gal.pages[pos].id], to = pos + (r.dir || 0);
+    if (r.kind === "reset") pullOff();
+    else if (r.kind === "micro") pullShow(el, r.dir, r.shift, 0, "damped", wsT(r.edge ? "js.pins.edge" : "js.pins.wait"), null);
+    else if (r.kind === "pull") pullShow(el, r.dir, r.shift, r.pct, r.ready ? "ready" : "", pullName(to) + " (" + Math.round(r.pct * 100) + "%)", to);
+    else if (r.kind === "flip") { pullOff(); show(to, r.dir); }
+    gateArm();
+  }
+  function pullName(p) {
+    var b = dotEls[dotKey(p)];
+    return p >= gal.pages.length ? G.PLUS : b ? b.title : "";
+  }
+  function gateArm() {
+    clearTimeout(gateT);
+    gateT = 0;
+    var d = gate.due();
+    if (d !== null) gateT = setTimeout(gateTick, Math.max(0, d - clock()) + 1);
+  }
+  function gateTick() {
+    gateT = 0;
+    if (gate.tick(clock())) pullOff(); else gateArm();
+  }
+  function pillEls() {
+    if (!pills) pills = [-1, 1].map(function (dir) {
+      var p = mk("div", "gal-pullpill " + (dir > 0 ? "bottom" : "top")), txt = mk("div", "gal-pulltxt"), track = mk("div", "gal-pulltrack"), fill = mk("div", "gal-pullfill");
+      p.setAttribute("aria-hidden", "true");
+      track.appendChild(fill);
+      p.appendChild(txt);
+      p.appendChild(track);
+      return { el: p, txt: txt, fill: fill };
+    });
+    pills.forEach(function (p) { if (p.el.parentNode !== viewEl) viewEl.appendChild(p.el); });
+    return pills;
+  }
+  // pullShow draws a pull or a micro-bounce on el (the page shown, or the
+  // Main Board): el shifts shift px against dir (its translate, apart
+  // from the slides' transform; none for reduced motion), the pill on
+  // dir's side reads text over pct, state "damped" or "ready" (else
+  // none), and the dot of the page at target (null: none) is marked.
+  function pullShow(el, dir, shift, pct, state, text, target) {
+    if (pullEl && pullEl !== el) pullOff();
+    pullEl = el;
+    el.setAttribute("data-gal-pull", "");
+    el.style.translate = calm() ? "" : "0 " + (-dir * shift).toFixed(1) + "px";
+    var ps = pills || pillEls(), p = ps[dir > 0 ? 1 : 0], q = ps[dir > 0 ? 0 : 1], t = (dir > 0 ? "↓ " : "↑ ") + text, f = Math.round(pct * 100) + "%";
+    q.el.classList.remove("show", "ready", "damped");
+    p.el.classList.add("show");
+    p.el.classList.toggle("damped", state === "damped");
+    p.el.classList.toggle("ready", state === "ready");
+    if (p.txt.textContent !== t) p.txt.textContent = t;
+    if (p.fill.style.width !== f) p.fill.style.width = f;
+    var d = target === null ? null : dotEls[dotKey(target)] || null;
+    if (pullDot === d) return;
+    if (pullDot) pullDot.classList.remove("pull-target");
+    pullDot = d;
+    if (d) d.classList.add("pull-target");
+  }
+  // pullOff springs a pull or a micro-bounce back (the stylesheet's
+  // transition) and hides the pills and the dot mark.
+  function pullOff() {
+    if (pullEl) {
+      pullEl.removeAttribute("data-gal-pull");
+      pullEl.style.translate = "";
+      pullEl = null;
+    }
+    if (pills) pills.forEach(function (p) { p.el.classList.remove("show", "ready", "damped"); });
+    if (pullDot) pullDot.classList.remove("pull-target");
+    pullDot = null;
+  }
+  // homeWheel listens for the gate on the board's column while the narrow
+  // view has a docked page (with none the gate is inert there, and the
+  // wide view's board never pages), so the board's own scrolling carries
+  // no blocking wheel listener otherwise.
+  function onHomeWheel(e) { gateWheel(e, true); }
+  function homeWheel(on) {
+    var col = on && board ? doc.getElementById("bcol") || board.parentNode : null;
+    if (col) homeScr = scroller(board) || doc.scrollingElement;
+    if (col === homeEl) return;
+    if (homeEl) homeEl.removeEventListener("wheel", onHomeWheel);
+    homeEl = col;
+    if (col) col.addEventListener("wheel", onHomeWheel, { passive: false });
   }
   // relayout asks the page what it shows (opt.mode: its width and whether
   // the layout menu shows one column at a time), maps that to the
@@ -1755,6 +1929,7 @@
       }
     }
     d.to = to;
+    spring(hit && hit.el.classList.contains("gal-dot") ? hit : null);
     markDrop(lightEl);
     drawZone(to && to.gal === "place" ? to : null);
     drawLine(to && to.line);
@@ -1833,6 +2008,7 @@
     drawLine(null);
     markDrop(null);
     drawZone(null);
+    unspring();
     dragged = true;
     setTimeout(function () { dragged = false; }, 0);
     var to = d.to;

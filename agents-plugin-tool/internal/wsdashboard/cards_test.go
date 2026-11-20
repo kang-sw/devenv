@@ -371,6 +371,7 @@ El.prototype = {
   get textContent() { return this.text + this.kids.map(function (k) { return k.textContent; }).join(""); },
   set textContent(v) { this.kids = []; this.text = String(v); },
   addEventListener: function (t, fn) { (this.listeners[t] = this.listeners[t] || []).push(fn); },
+  removeEventListener: function (t, fn) { var l = this.listeners[t] || [], i = l.indexOf(fn); if (i >= 0) l.splice(i, 1); },
   fire: function (t, e) { (this.listeners[t] || []).forEach(function (fn) { fn(e); }); },
   focus: function () {}, getBoundingClientRect: function () { return { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 }; }, getClientRects: function () { return []; },
   matches: function (sel) { var me = this; return sel.split(",").some(function (s) { return match(me, s.trim().split(/\s+/)); }); },
