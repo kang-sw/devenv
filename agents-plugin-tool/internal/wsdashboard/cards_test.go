@@ -416,6 +416,7 @@ function Doc() {
 }
 Doc.prototype = {
   createElement: function (t) { return new El(t, this); },
+  createElementNS: function (_, t) { return new El(t, this); },
   addEventListener: function (t, fn) { (this.listeners[t] = this.listeners[t] || []).push(fn); },
   getElementById: function (id) { return this.documentElement.querySelector('[id="' + id + '"]'); }
 };
@@ -679,7 +680,7 @@ func TestBoardGallery(t *testing.T) {
 function rec() { return JSON.parse(page.store.cards); }
 function leavesOf(g) { return g.pages.map(function (p) { return page.G.leaves(p.root); }); }
 function dots() { return page.W.gallery().querySelectorAll(".gal-dot"); }
-function dotTexts() { return dots().map(function (b) { return [b.getAttribute("data-pos"), b.textContent, b.classList.contains("active")]; }); }
+function dotTexts() { return dots().map(function (b) { return [b.getAttribute("data-pos"), b.getAttribute("data-count") || b.textContent, b.classList.contains("active")]; }); }
 function shown() { var a = page.W.gallery().querySelectorAll(".gal-page").filter(function (p) { return p.hasAttribute("data-active"); }); return a.map(function (p) { return p.getAttribute("data-page"); }); }
 function pageIds() { return galOf().pages.map(function (p) { return p.id; }); }
 function clickDot(pos) { var b = dots().filter(function (d) { return d.getAttribute("data-pos") === String(pos); })[0]; page.W.gallery().querySelector(".gal-dots").fire("click", { target: b }); }

@@ -44,10 +44,17 @@ Deep body frame.</wb:body><wb:add class="policy"><wb:title>Deep target policy</w
 	for i := 0; i < 60; i++ {
 		apply(fmt.Sprintf(`<wb:topic name="deep"><wb:log>deep log %02d: a reasonably long line of text that gives the history real height</wb:log></wb:topic>`, i))
 	}
-	for _, name := range []string{"alpha", "beta", "gamma", "epsilon"} {
+	for _, name := range []string{"alpha", "beta", "gamma", "epsilon", "zeta"} {
 		apply(fmt.Sprintf(`<wb:topic name="%s" label="%s topic"><wb:body># %s body
 
 Frame identity sentinel for %s.</wb:body><wb:panel recap="%s panel">Panel payload for %s.</wb:panel><wb:log>%s first log line.</wb:log></wb:topic>`, name, name, name, name, name, name, name))
+	}
+	for _, row := range [][2]string{{"deep", "implementing"}, {"alpha", "researching"}, {"beta", "waiting"}, {"gamma", "discussing"}, {"epsilon", "awaiting-confirmation"}} {
+		attrs := ""
+		if row[1] == "implementing" {
+			attrs = ` owner="gallery fixture" eta_minutes="60"`
+		}
+		apply(fmt.Sprintf(`<wb:topic name="%s"><wb:state value="%s"%s/></wb:topic>`, row[0], row[1], attrs))
 	}
 	apply(`<wb:topic name="epsilon"><wb:log>the deep policy {{1}} decides this</wb:log></wb:topic>`)
 	if closed {

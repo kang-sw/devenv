@@ -66,7 +66,7 @@ const helpers = () => {
       return i < 0 ? null : i;
     },
     pos: () => +document.getElementById('bgal').getAttribute('data-pos'),
-    dots: () => [...document.querySelectorAll('#bgal .gal-dot')].map(b => b.textContent + (b.classList.contains('active') ? '*' : '')),
+    dots: () => [...document.querySelectorAll('#bgal .gal-dot')].map(b => (b.dataset.count || b.textContent) + (b.classList.contains('active') ? '*' : '')),
     // seen tells, per element, whether a fresh IntersectionObserver
     // (root: the viewport) reports it intersecting.
     seen: els => new Promise(done => {
@@ -1211,6 +1211,87 @@ async function routeTerminal(context) {
       await context.close();
     }
     // ---- captures for the side-by-side review with mockup v4 (opt-in) ----
+    // Icon capsules keep their page controls while showing state and card
+    // glyphs; a second page exercises the five-icon cap and overflow badge.
+    {
+      await fetch(control + '/open-gamma');
+      const T = n => ({ topic: n }), C = n => ({ card: n });
+      const S = (a, b) => ({ axis: 'col', ratio: 0.5, a, b });
+      const record = { cards: [
+        { id: 'pill-term', kind: 'terminal', pinned: 3, data: { tid: TID, cwd: '/tmp/galterm' } },
+        { id: 'pill-files', kind: 'explorer', pinned: 8, data: {} },
+      ], topics: ['alpha', 'beta', 'deep', 'gamma', 'epsilon', 'zeta'].map((n, i) => ({ n, p: i < 2 ? i + 1 : i + 2, a: 0, b: 0 })),
+        gallery: { v: 1, active: 'p1', pages: [
+          { id: 'p1', root: S(T('alpha'), T('beta')) },
+          { id: 'p2', root: [C('pill-term'), T('deep'), T('gamma'), T('epsilon'), T('zeta'), C('pill-files')].reduceRight((tail, leaf) => tail ? S(leaf, tail) : leaf, null) },
+        ], rev: 1 } };
+      const pillsShots = process.env.WS_GALLERY_PILLS_SHOTS;
+      if (pillsShots) fs.mkdirSync(pillsShots, { recursive: true });
+      for (const theme of ['dark', 'light']) for (const width of [1280, 1640, 1920, 2560]) {
+        const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: theme, locale: 'en-US', reducedMotion: 'reduce' });
+        await routeTerminal(context);
+        await context.addInitScript(({ key, value }) => {
+          try {
+            if (localStorage.getItem('pill-seeded')) return;
+            localStorage.setItem(key, JSON.stringify(value));
+            localStorage.setItem('pill-seeded', '1');
+            localStorage.removeItem('ws.dashboard.layout');
+          } catch (e) { /* sandboxed content frames have opaque origins */ }
+        }, { key: KEY, value: record });
+        const { tab, page, errors } = await open(context, 'livesession');
+        const capsules = page.locator('#bgal .gal-dot.page');
+        await until(async () => await capsules.count() === 2, `two icon capsules ${theme}/${width}: ` + JSON.stringify(await pages(page)));
+        assert.deepEqual(await capsules.first().locator('use').evaluateAll(nodes => nodes.map(n => n.getAttribute('href'))), ['#i-st-research', '#i-st-wait']);
+        const page2Icons = await capsules.nth(1).locator('use').evaluateAll(nodes => nodes.map(n => n.getAttribute('href')));
+        assert.deepEqual(page2Icons.slice(0, 4), ['#l-square-terminal', '#i-st-impl', '#i-st-discuss', '#i-st-confirm']);
+        assert.match(page2Icons[4], /^#i-/);
+        assert.equal(await capsules.nth(1).locator('.gal-dot-more').textContent(), '+1');
+        assert.equal(await capsules.nth(1).locator('.gal-dot-icon').count(), 5);
+        assert.equal(await capsules.first().getAttribute('aria-current'), 'page');
+        const colors = await capsules.evaluateAll(nodes => nodes.map(n => ({ background: getComputedStyle(n).backgroundColor, border: getComputedStyle(n).borderTopColor,
+          icon: getComputedStyle(n.querySelector('.gal-dot-icon')).color, text: getComputedStyle(n).color })));
+        assert.notEqual(colors[0].background, colors[1].background, `${theme}/${width}: active capsule has a tinted surface`);
+        assert.notEqual(colors[0].border, colors[1].border, `${theme}/${width}: active capsule has a primary border`);
+        assert.notEqual(colors[0].icon, colors[0].text, `${theme}/${width}: topic state color survives active styling`);
+        const gal = await page.evaluate(() => document.documentElement.getAttribute('data-gal'));
+        assert.equal(gal, width === 2560 ? 'col' : 'narrow', `${theme}/${width}: responsive gallery band`);
+        const geometry = await page.evaluate(() => {
+          const box = s => { const e = document.querySelector(s), r = e && e.getBoundingClientRect(); return r && { l: r.left, r: r.right, t: r.top, b: r.bottom }; };
+          return { viewport: innerWidth, rail: box('.dbody > .rail'), stage: box('.dbody > .dgrid'), gallery: box('#bgal'), capsule: box('#bgal .gal-dot.page.active') };
+        });
+        assert(geometry.capsule.l >= geometry.gallery.l && geometry.capsule.r <= geometry.gallery.r, `${theme}/${width}: capsule stays inside gallery`);
+        assert(geometry.gallery.l >= 0 && geometry.gallery.r <= width + 1, `${theme}/${width}: gallery stays inside viewport`);
+        if (width >= 1600) assert(geometry.rail.r <= geometry.stage.l + 1, `${theme}/${width}: rail does not overlap stage`);
+        if (width === 2560) assert(geometry.stage.r <= geometry.gallery.l + 1, `${theme}/${width}: pinned gallery does not overlap stage`);
+        await capsules.nth(1).click();
+        await until(async () => await pos(page) === 1, 'icon capsule switches page');
+        assert.equal(await capsules.nth(1).getAttribute('aria-current'), 'page');
+        await capsules.first().focus();
+        await tab.keyboard.press('Enter');
+        await until(async () => await pos(page) === 0, 'keyboard activates icon capsule');
+        if (theme === 'dark' && width === 1920) {
+          const overflow = await page.evaluate(() => {
+            const list = document.querySelector('#bgal .gal-dots'), plus = list.lastElementChild, sample = list.querySelectorAll('.gal-dot.page')[1];
+            const extras = Array.from({ length: 40 }, () => sample.cloneNode(true));
+            extras.forEach(e => list.insertBefore(e, plus));
+            const scrollable = list.scrollHeight > list.clientHeight;
+            list.scrollTop = list.scrollHeight;
+            const a = plus.getBoundingClientRect(), b = list.getBoundingClientRect();
+            const reachable = a.top >= b.top && a.bottom <= b.bottom;
+            extras.forEach(e => e.remove());
+            return { scrollable, reachable, height: list.clientHeight, content: list.scrollHeight };
+          });
+          assert(overflow.scrollable && overflow.reachable, 'many page capsules leave + reachable by scrolling: ' + JSON.stringify(overflow));
+        }
+        if (pillsShots) {
+          await page.waitForTimeout(300);
+          await tab.screenshot({ path: path.join(pillsShots, `${theme}-${width}.png`) });
+        }
+        assert.deepEqual(errors, [], `${theme}/${width}: page errors`);
+        await context.close();
+      }
+      done.push('icon-array capsules: state/card glyphs, five-icon cap, overflow, active theme styling, page controls, four responsive widths');
+    }
     const captures = process.env.WS_GALLERY_CAPTURES, mockup = process.argv[4] || '';
     if (captures) {
       fs.mkdirSync(captures, { recursive: true });

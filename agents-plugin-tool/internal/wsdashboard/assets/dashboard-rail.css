@@ -101,10 +101,20 @@
 .gal-rail[hidden] { display: none; }
 .gal-rzone { flex: 1 1 0; width: 100%; display: flex; align-items: center; justify-content: center; color: var(--wb-muted-fg); font-size: 10px; opacity: .5; cursor: pointer; transition: background .12s, opacity .12s; }
 .gal-rzone:hover { background: color-mix(in srgb, var(--wb-fg) 6%, transparent); opacity: 1; color: var(--wb-primary); }
-.gal-dots { flex: none; display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 8px 0; }
+.gal-dots { flex: 0 1 auto; min-height: 0; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 8px 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.gal-dots::-webkit-scrollbar { display: none; }
 .gal-dot { box-sizing: border-box; width: 22px; height: 22px; padding: 0; border-radius: 999px; border: 1.5px solid var(--wb-muted-fg); background: var(--wb-card); color: var(--wb-muted-fg); font: 700 10px var(--wb-mono); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: transform .12s, background .12s, border-color .12s, height .14s; }
 .gal-dot:hover, .gal-dot:focus-visible { border-color: var(--wb-primary); color: var(--wb-fg); transform: scale(1.08); }
 .gal-dot.active { height: 28px; border-color: var(--wb-primary); background: var(--wb-primary); color: var(--wb-card); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-primary) 24%, transparent); }
+.gal-dot.page { width: 28px; height: auto; min-height: 28px; padding: 4px 2px; border-radius: 14px; flex-direction: column; gap: 2px; color: var(--wb-muted-fg); }
+.gal-dot.page.active { height: auto; background: color-mix(in srgb, var(--wb-primary) 15%, var(--wb-card)); color: var(--wb-fg); border-color: var(--wb-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-primary) 32%, transparent); }
+.gal-dot-icon { display: block; flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.gal-dot-icon.impl { color: light-dark(#2457c5, #8db8ff); }
+.gal-dot-icon.research { color: light-dark(#7544ac, #c6a5f7); }
+.gal-dot-icon.discuss { color: light-dark(#a64f08, #ffb36b); }
+.gal-dot-icon.confirm { color: light-dark(#1d7348, #7fd6a8); }
+.gal-dot-icon.wait { color: light-dark(#596172, #b9bdc6); }
+.gal-dot-more { display: block; color: var(--wb-fg); font: 700 9px/12px var(--wb-mono); white-space: nowrap; }
 .gal-dot.main { margin-bottom: 8px; border-color: #3fa853; color: #3fa853; font-size: 11px; }
 .gal-dot.main.active { background: #3fa853; color: #0b1910; box-shadow: 0 0 0 3px rgb(63 168 83 / .24); }
 .gal-dot.empty { border-style: dashed; background: transparent; font-size: 13px; font-weight: 500; }

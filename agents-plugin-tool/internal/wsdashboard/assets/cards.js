@@ -712,8 +712,38 @@
     var c = cards.filter(function (x) { return "c:" + x.id === ref; })[0];
     return c ? c.name.textContent || c.kind : ref.slice(2);
   }
-  // paintGallery draws the rail (the narrow view's home dot, a dot per page
-  // showing its pane count, the + dot; real buttons, kept across repaints)
+  function pageIcon(ref) {
+    if (ref.slice(0, 2) === "t:") {
+      var topic = topics[ref.slice(2)], el = topic && topic.el;
+      var state = el && !el.classList.contains("closed") && el.getAttribute("data-state");
+      var states = { implementing: "impl", researching: "research", discussing: "discuss", waiting: "wait", "awaiting-confirmation": "confirm" };
+      var glyph = states[state];
+      return { href: glyph ? "#i-st-" + glyph : "#i-chat", state: glyph || "plain" };
+    }
+    var c = cards.filter(function (x) { return "c:" + x.id === ref; })[0];
+    var use = c && c.icon && c.icon.querySelector("use"), href = use && use.getAttribute("href");
+    if (!href || !/^#l-[a-z0-9-]+$/.test(href)) {
+      var kinds = { explorer: "folder-open", terminal: "square-terminal", preview: "file", web: "globe" };
+      href = "#l-" + (c && kinds[c.kind] || "file");
+    }
+    return { href: href, state: "card" };
+  }
+  function pageCapsule(b, refs) {
+    b.textContent = "";
+    b.setAttribute("data-count", String(refs.length));
+    refs.slice(0, 5).forEach(function (ref) {
+      var icon = pageIcon(ref), svg = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", "gal-dot-icon " + icon.state);
+      svg.setAttribute("aria-hidden", "true");
+      var use = doc.createElementNS("http://www.w3.org/2000/svg", "use");
+      use.setAttribute("href", icon.href);
+      svg.appendChild(use);
+      b.appendChild(svg);
+    });
+    if (refs.length > 5) b.appendChild(mk("span", "gal-dot-more", "+" + (refs.length - 5)));
+  }
+  // paintGallery draws the rail (the narrow view's home dot, a capsule per
+  // page with up to five item icons, the + dot; real buttons kept across repaints)
   // and shows the current page. dir (+1 down, -1 up) animates the flip.
   function paintGallery(dir) {
     if (!galEl) return;
@@ -726,13 +756,13 @@
         b.type = "button";
       }
       seen[k] = true;
-      b.className = "gal-dot" + (k === "main" ? " main" : k === G.PLUS ? " empty" : "") + (p === pos ? " active" : "");
+      b.className = "gal-dot" + (k === "main" ? " main" : k === G.PLUS ? " empty" : " page") + (p === pos ? " active" : "");
       b.setAttribute("data-pos", String(p));
-      if (k === "main") { b.textContent = "⌂"; label = wsT("tab.board"); }
-      else if (k === G.PLUS) { b.textContent = "+"; label = wsT("js.pins.drop"); }
+      if (k === "main") { b.removeAttribute("data-count"); b.textContent = "⌂"; label = wsT("tab.board"); }
+      else if (k === G.PLUS) { b.removeAttribute("data-count"); b.textContent = "+"; label = wsT("js.pins.drop"); }
       else {
         var refs = G.leaves(gal.pages[p].root);
-        b.textContent = String(refs.length);
+        pageCapsule(b, refs);
         label = (p + 1) + ": " + refs.map(refName).join(" + ");
       }
       b.title = label;
@@ -753,6 +783,12 @@
     if (narrow) galEl.setAttribute("data-narrow", ""); else galEl.removeAttribute("data-narrow");
     gal.pages.forEach(function (pg, i) { slide(pageEls[pg.id], i - pos, dir); });
     slide(plusEl, n - pos, dir);
+    var activeDot = dotEls[dotKey(pos)];
+    if (activeDot && dotsEl.scrollHeight > dotsEl.clientHeight) {
+      var listBox = dotsEl.getBoundingClientRect(), dotBox = activeDot.getBoundingClientRect();
+      if (dotBox.top < listBox.top) dotsEl.scrollTop += dotBox.top - listBox.top;
+      else if (dotBox.bottom > listBox.bottom) dotsEl.scrollTop += dotBox.bottom - listBox.bottom;
+    }
     away(rail && narrow && pos >= 0);
     homeWheel(rail && narrow && n > 0);
   }
