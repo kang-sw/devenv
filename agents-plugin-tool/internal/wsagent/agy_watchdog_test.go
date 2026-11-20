@@ -19,6 +19,9 @@ func agyWatchdogHarness(t *testing.T, timeoutSeconds string) (*harness, *leverTi
 
 	h := newHarness(t, map[string]string{"chat": chatProfile})
 	h.runner.Close()
+	reg := h.config.Backends[BackendAgy]
+	reg.Catalog = AgyCatalog()
+	h.config.Backends[BackendAgy] = reg
 	writeStructured(t, filepath.Join(h.root, ".ws-workflow", "config.json"), map[string]string{
 		ProfilePrefix + "chat": strings.Replace(chatProfile, `"backend":"claude"`, `"backend":"agy"`, 1),
 	})
@@ -86,7 +89,7 @@ func TestAgyModelWaitWatchdogRetriesOnceAndReportsSecondStall(t *testing.T) {
 		t.Fatalf("the retry stays in the same unreported logical turn: state=%+v reports=%+v", st, got.lead())
 	}
 
-	fireWatchdog(t, timers, 1)
+	fireWatchdog(t, timers, 2)
 	eventually(t, "second interrupt", func() bool { return procInterrupts(p) == 2 })
 	p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted}
 	eventually(t, "failed parent report", func() bool { return len(got.lead()) == 1 })
@@ -96,6 +99,32 @@ func TestAgyModelWaitWatchdogRetriesOnceAndReportsSecondStall(t *testing.T) {
 	}
 	if rec := h.record(id); rec.TurnOpen || rec.LastTurn == nil || rec.LastTurn.Result.Status != TurnFailed {
 		t.Fatalf("the failed logical turn must be settled in the record: %+v", rec)
+	}
+}
+
+func TestAgyModelWaitWatchdogForceStopsWhenInterruptIsIgnored(t *testing.T) {
+	h, timers, got := agyWatchdogHarness(t, "45")
+	_, p := startAgyWatchdogTurn(t, h, true)
+
+	fireWatchdog(t, timers, 0)
+	eventually(t, "first interrupt", func() bool { return procInterrupts(p) == 1 })
+	eventually(t, "cancel grace timer", func() bool {
+		started, _ := timers.counts()
+		return started == 2
+	})
+	timers.mu.Lock()
+	grace := timers.durs[1]
+	timers.mu.Unlock()
+	if grace != modelWaitCancelGrace {
+		t.Fatalf("cancel grace = %v, want %v", grace, modelWaitCancelGrace)
+	}
+
+	// The fake deliberately ignores Interrupt and never emits TurnEnd.
+	timers.fire(t, 1)
+	eventually(t, "force-stopped process", p.isClosed)
+	eventually(t, "failed parent report", func() bool { return len(got.lead()) == 1 })
+	if result := got.lead()[0].Result; result.Status != TurnFailed || result.Error != "agy model stream did not stop within 5s after interrupt" {
+		t.Fatalf("cancel-grace result = %+v", result)
 	}
 }
 
@@ -350,7 +379,7 @@ func TestAgyModelWaitWatchdogSilenceThenAPIErrorDoesNotRetryAgain(t *testing.T) 
 	}
 	failure := "⚠ API error (attempt 2): TLS timeout"
 	p.events <- Event{ModelFailureUpdate: &failure}
-	fireWatchdog(t, timers, 2)
+	fireWatchdog(t, timers, 3)
 	eventually(t, "second-trigger interrupt", func() bool { return procInterrupts(p) == 2 })
 	p.events <- Event{Live: &wslive.Event{Kind: wslive.KindReply, Text: failure, Final: true}}
 	p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted, ModelFailure: failure}
@@ -366,18 +395,32 @@ func TestAgyModelWaitWatchdogSilenceThenAPIErrorDoesNotRetryAgain(t *testing.T) 
 // (f): native /compact has its own watchdog and never arms model waiting.
 func TestAgyModelWaitWatchdogDoesNotArmForCompact(t *testing.T) {
 	h, timers, _ := agyWatchdogHarness(t, "45")
-	id, _ := startAgyWatchdogTurn(t, h, false)
+	id, p := startAgyWatchdogTurn(t, h, false)
+	p.reply("done")
+	eventually(t, "ordinary turn ended", func() bool { return !h.record(id).TurnOpen && h.state(id).Status != StatusRunning })
+
+	key := h.record(id).WSKey
+	resume := false
+	if result := h.runner.Compact(key, "", &resume); result.Status != "queued" {
+		t.Fatalf("compact result = %+v", result)
+	}
+	if sent := p.nextSent(t); sent != "/compact" {
+		t.Fatalf("compact command = %q, want /compact", sent)
+	}
 	c := h.runner.conv(id)
 	c.do(func() {
-		c.disarmModelWait()
-		c.compactCommand = true
-		c.startModelWait()
 		if c.modelWaitArmed || c.modelWaitC != nil {
-			t.Fatalf("compact command armed model waiting")
+			t.Fatalf("real compact command armed model waiting")
 		}
 	})
-	if started, _ := timers.counts(); started != 1 {
-		t.Fatalf("compact guard started another timer: %d", started)
+	if started, _ := timers.counts(); started != 2 {
+		t.Fatalf("ordinary + compact watchdog timers = %d, want 2", started)
+	}
+	timers.mu.Lock()
+	durations := slices.Clone(timers.durs)
+	timers.mu.Unlock()
+	if durations[0] != 45*time.Second || durations[1] != compactCommandTimeout {
+		t.Fatalf("watchdog durations = %v, want [45s %v]", durations, compactCommandTimeout)
 	}
 }
 

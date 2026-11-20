@@ -23,6 +23,7 @@ const agyAPIErrorPrefix = "⚠ API error"
 const (
 	agyStreamInterrupted = "⚠ The stream was interrupted. Please continue the task you were working on."
 	modelFailureDrain    = time.Second
+	modelWaitCancelGrace = 5 * time.Second
 )
 
 func agyReplyTailFailure(reply string) string {
@@ -122,9 +123,24 @@ func (c *conv) stopModelFailureDrain() {
 	c.modelWaitDrainC, c.modelWaitDrainStop = nil, nil
 }
 
+func (c *conv) stopModelWaitCancelGrace() {
+	if c.modelWaitCancelStop != nil {
+		c.modelWaitCancelStop()
+	}
+	c.modelWaitCancelC, c.modelWaitCancelStop = nil, nil
+}
+
+func (c *conv) armModelWaitCancelGrace() {
+	c.stopModelWaitCancelGrace()
+	if c.r != nil && c.r.opts.Timer != nil {
+		c.modelWaitCancelC, c.modelWaitCancelStop = c.r.opts.Timer(modelWaitCancelGrace)
+	}
+}
+
 func (c *conv) disarmModelWait() {
 	c.stopModelWaitTimer()
 	c.stopModelFailureDrain()
+	c.stopModelWaitCancelGrace()
 	c.modelWaitArmed = false
 	c.modelWaitRetries = 0
 	c.modelWaitPending = 0
@@ -204,6 +220,8 @@ func (c *conv) modelFailureDrainTimedOut() {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: agy model failure remained terminal for %s; interrupting before one retry (%s)\n", c.rec.ReplyID, modelFailureDrain, c.modelWaitFailure)
 		if err := c.proc.Interrupt(); err != nil {
 			c.failModelWaitImmediately(fmt.Sprintf("agy model failure interrupt failed: %v (%s)", err, c.modelWaitFailure))
+		} else {
+			c.armModelWaitCancelGrace()
 		}
 		return
 	}
@@ -211,6 +229,8 @@ func (c *conv) modelFailureDrainTimedOut() {
 	fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", c.rec.ReplyID, c.modelWaitFailErr)
 	if err := c.proc.Interrupt(); err != nil {
 		c.failModelWaitImmediately(fmt.Sprintf("%s (interrupt failed: %v)", c.modelWaitFailErr, err))
+	} else {
+		c.armModelWaitCancelGrace()
 	}
 }
 
@@ -228,6 +248,8 @@ func (c *conv) modelWaitTimedOut() {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: agy model stream stalled for %s; interrupting to retry once\n", c.rec.ReplyID, dur)
 		if err := c.proc.Interrupt(); err != nil {
 			c.failModelWaitImmediately(fmt.Sprintf("agy model stream stalled for %s and interrupt failed: %v", dur, err))
+		} else {
+			c.armModelWaitCancelGrace()
 		}
 		return
 	}
@@ -239,7 +261,23 @@ func (c *conv) modelWaitTimedOut() {
 	fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", c.rec.ReplyID, reason)
 	if err := c.proc.Interrupt(); err != nil {
 		c.failModelWaitImmediately(fmt.Sprintf("%s (interrupt failed: %v)", reason, err))
+	} else {
+		c.armModelWaitCancelGrace()
 	}
+}
+
+func (c *conv) modelWaitCancelTimedOut() {
+	c.modelWaitCancelC, c.modelWaitCancelStop = nil, nil
+	if !c.modelWaitArmed || !c.turn || c.proc == nil || (!c.modelWaitCancelling && c.modelWaitFailErr == "") {
+		return
+	}
+	reason := c.modelWaitFailErr
+	if reason == "" {
+		reason = fmt.Sprintf("agy model stream did not stop within %s after interrupt", formatWatchdogDuration(modelWaitCancelGrace))
+	} else {
+		reason += fmt.Sprintf(" and did not stop within %s after interrupt", formatWatchdogDuration(modelWaitCancelGrace))
+	}
+	c.failModelWaitImmediately(reason)
 }
 
 // interceptModelWaitTurnEnd intercepts the cancelled TurnEnd after timeout #1
@@ -253,6 +291,7 @@ func (c *conv) interceptModelWaitTurnEnd(ev Event) bool {
 		return false
 	}
 	if c.modelWaitCancelling {
+		c.stopModelWaitCancelGrace()
 		c.modelWaitCancelling = false
 		// If the prompt actually finished normally before session/cancel took
 		// effect (and not on an in-band failure), let it settle as done.

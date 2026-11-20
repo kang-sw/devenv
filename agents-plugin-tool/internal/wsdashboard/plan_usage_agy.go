@@ -28,6 +28,7 @@ const (
 	agyDefaultTimeout        = 30 * time.Second
 	agyPrintTimeoutArg       = "20s"
 	agyMaxOutputBytes        = 512 << 10
+	maxJavaScriptDateMillis  = 8.64e15
 )
 
 type agyGroupSpec struct {
@@ -419,6 +420,9 @@ func parseAgyResetTime(raw json.RawMessage) (int64, bool) {
 	if json.Unmarshal(trimmed, &num) == nil && num > 0 && !math.IsNaN(num) && !math.IsInf(num, 0) {
 		if num < 1e12 {
 			num *= 1000
+		}
+		if num > maxJavaScriptDateMillis || num > math.MaxInt64 {
+			return 0, false
 		}
 		return int64(num), true
 	}
