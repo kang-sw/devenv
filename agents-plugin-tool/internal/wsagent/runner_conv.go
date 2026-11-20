@@ -564,18 +564,7 @@ func (c *conv) loop() {
 		case <-compactC:
 			c.compactTimedOut()
 		case <-beat.C:
-			c.live.heartbeatSnapshot()
-			c.persistSeq()
-			if c.replaying {
-				// A holder that attached late (a rescan) is found here.
-				c.checkReattach()
-			}
-			if c.r.opts.Now().Sub(c.lastReg) >= wsdashboard.HeartbeatInterval {
-				c.writeRegistration()
-			} else {
-				c.checkRow()
-			}
-			c.expireIfDue()
+			c.heartbeat()
 		case <-c.r.quit:
 			c.letGo()
 			// The watch's listening marker names this process: left behind,
@@ -589,6 +578,23 @@ func (c *conv) loop() {
 			return
 		}
 	}
+}
+
+func (c *conv) heartbeat() {
+	registrationDue := c.r.opts.Now().Sub(c.lastReg) >= wsdashboard.HeartbeatInterval
+	if registrationDue {
+		c.writeRegistration()
+	}
+	c.live.heartbeatSnapshot()
+	c.persistSeq()
+	if c.replaying {
+		// A holder that attached late (a rescan) is found here.
+		c.checkReattach()
+	}
+	if !registrationDue {
+		c.checkRow()
+	}
+	c.expireIfDue()
 }
 
 // settle follows each step of the loop: a session whose row a terminal
