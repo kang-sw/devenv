@@ -51,6 +51,8 @@ var dashboardScriptFiles = []string{
 	"dashboard-drawer.js",
 	"dashboard-ticketmap.js",
 	"dashboard-ticketmap-viewb.js",
+	"dashboard-ticketmap-geom.js",
+	"dashboard-ticketmap-graph.js",
 	"dashboard-frames.js",
 	"dashboard-git.js",
 	"dashboard-tracker.js",

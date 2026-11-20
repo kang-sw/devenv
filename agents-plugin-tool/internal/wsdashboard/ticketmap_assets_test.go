@@ -12,6 +12,8 @@ import (
 var ticketMapScripts = map[string]string{
 	"dashboard-ticketmap.js":       "var ticketMap = (function () {",
 	"dashboard-ticketmap-viewb.js": "ticketMap.viewB = (function () {",
+	"dashboard-ticketmap-geom.js":  "ticketMap.geom = (function () {",
+	"dashboard-ticketmap-graph.js": "ticketMap.graph = (function () {",
 }
 
 func tmFileIndex(list []string, name string) int {
@@ -25,12 +27,15 @@ func tmFileIndex(list []string, name string) int {
 
 // TestTicketMapAssetPositions pins where the map's fragments join the
 // concatenation: the shell right after the drawer (it calls drSetOpen and
-// reads thandle), View B right after the shell, the stylesheet right after
+// reads thandle), then View B, View C's pure geometry and View C, which
+// reads ticketMap.S and ticketMap.geom at load; the stylesheet right after
 // the drawer's.
 func TestTicketMapAssetPositions(t *testing.T) {
 	d := tmFileIndex(dashboardScriptFiles, "dashboard-drawer.js")
-	if d < 0 || tmFileIndex(dashboardScriptFiles, "dashboard-ticketmap.js") != d+1 || tmFileIndex(dashboardScriptFiles, "dashboard-ticketmap-viewb.js") != d+2 {
-		t.Errorf("dashboardScriptFiles = %v; want dashboard-ticketmap.js, then dashboard-ticketmap-viewb.js, right after dashboard-drawer.js", dashboardScriptFiles)
+	for k, name := range []string{"dashboard-ticketmap.js", "dashboard-ticketmap-viewb.js", "dashboard-ticketmap-geom.js", "dashboard-ticketmap-graph.js"} {
+		if d < 0 || tmFileIndex(dashboardScriptFiles, name) != d+1+k {
+			t.Errorf("dashboardScriptFiles = %v; want %s at position %d after dashboard-drawer.js", dashboardScriptFiles, name, k+1)
+		}
 	}
 	c := tmFileIndex(dashboardStyleFiles, "dashboard-drawer.css")
 	if c < 0 || tmFileIndex(dashboardStyleFiles, "dashboard-ticketmap.css") != c+1 {
@@ -72,7 +77,9 @@ func TestTicketMapScriptScope(t *testing.T) {
 
 // TestTicketMapCSSScope pins the collision rule for the map's stylesheet:
 // every class it styles starts with d-tm- and every id with tm (#thandle is
-// styled through its d-tm-handle class).
+// styled through its d-tm-handle class). The one exception is the
+// dashboard's existing shown-state class .on, only compounded onto a d-tm-
+// class (View C's placed labels: .d-tm-lb.on); it is never a new name.
 func TestTicketMapCSSScope(t *testing.T) {
 	raw, err := dashboardFS.ReadFile("assets/dashboard-ticketmap.css")
 	if err != nil {
@@ -88,6 +95,12 @@ func TestTicketMapCSSScope(t *testing.T) {
 		sel = regexp.MustCompile(`\[[^\]]*\]`).ReplaceAllString(sel, "")
 		for _, c := range regexp.MustCompile(`\.([A-Za-z_-][\w-]*)`).FindAllStringSubmatch(sel, -1) {
 			classes++
+			if c[1] == "on" {
+				if !regexp.MustCompile(`\.d-tm-[\w-]+\.on\b`).MatchString(sel) {
+					t.Errorf("dashboard-ticketmap.css styles .on outside a d-tm- compound: %q", sel)
+				}
+				continue
+			}
 			if !strings.HasPrefix(c[1], "d-tm-") {
 				t.Errorf("dashboard-ticketmap.css styles .%s; every class must start with d-tm-", c[1])
 			}
@@ -115,6 +128,13 @@ func TestTicketMapCSSScope(t *testing.T) {
 	}
 	if n := strings.Count(string(raw), "--d-tm-sim: #a68cff; --d-tm-idea: #c9a55a;"); n != 2 {
 		t.Errorf("the dark map hues are declared %d times; want the media block and :root[data-theme=\"dark\"]", n)
+	}
+	// View C's soup lightness follows the same three blocks.
+	if n := strings.Count(string(raw), "--d-tm-sk-l: 30%;"); n != 1 {
+		t.Errorf("the light soup lightness is declared %d times; want once at :root", n)
+	}
+	if n := strings.Count(string(raw), "--d-tm-sk-l: 80%;"); n != 2 {
+		t.Errorf("the dark soup lightness is declared %d times; want the media block and :root[data-theme=\"dark\"]", n)
 	}
 }
 
@@ -160,6 +180,7 @@ func TestTicketMapSourcesNameNoRepositoryTickets(t *testing.T) {
 	path := regexp.MustCompile(`ai-docs/tickets/(ready|todo|idea|\.done|\.dropped)/\d`)
 	for _, name := range []string{
 		"assets/dashboard-ticketmap.js", "assets/dashboard-ticketmap-viewb.js", "assets/dashboard-ticketmap.css",
+		"assets/dashboard-ticketmap-geom.js", "assets/dashboard-ticketmap-graph.js",
 		"assets/dashboard-drawer.js", "assets/dashboard-lifecycle.js", "assets/overview.js", "pages.go",
 	} {
 		raw, err := os.ReadFile(name)

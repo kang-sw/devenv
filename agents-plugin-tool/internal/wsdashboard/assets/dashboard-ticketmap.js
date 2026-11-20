@@ -8,7 +8,8 @@
   // View host contract. A view is an object registered on ticketMap before
   // the first open: ticketMap.viewB (dashboard-ticketmap-viewb.js, right
   // after this file) and ticketMap.graph (View C, dashboard-ticketmap-graph.js,
-  // after viewb). The View C tab enables itself when ticketMap.graph exists.
+  // after viewb and its pure math, dashboard-ticketmap-geom.js). The View C
+  // tab enables itself when ticketMap.graph exists.
   // The host calls, on the shown view:
   //   mount(el)        once, with its container (#tmvb or #tmvc), at build;
   //   render(o)        after a load or Refresh, and on the first show of a
@@ -28,6 +29,7 @@
   //   key(e)           optional, a key the host did not consume; return true
   //                    to consume it;
   //   isEgo(), exitEgo()  View C only (Esc step 4).
+  // S.cam is View C's live camera and S.ego its ring's ticket (or null).
   // A view calls back select(i), unselect(), move(d), openFull(i), the
   // builders, and savePrefs(); it never fetches and never adds a key
   // listener of its own (the host's window capture listener isolates the
@@ -247,7 +249,8 @@
       view: "B", sel: null, hist: [], hp: -1, q: "", hits: null,
       st: tmDefaults().st, cl: new Set(), kw: null,
       simTh: 15, simUnlinked: false, simRefs: true, inspB: false,
-      collapsed: new Set(), edge: tmDefaults().edge, simEdgeTh: 24
+      collapsed: new Set(), edge: tmDefaults().edge, simEdgeTh: 24,
+      ego: null, cam: { x: 0, y: 0, k: 1 }
     };
     var G = null, back = null, E = {}, built = false, fetched = false, busy = false, seq = 0;
     var keysOn = false, lastFocus = null, fullFrom = null, fullNode = null, noteTimer = 0, rendered = {};
@@ -326,7 +329,10 @@
       built = true;
       // Tests read the state on the first open: the hook attribute may be
       // set any time before it (a framed page's URL is the shell's).
-      if (root.hasAttribute("data-test-hooks") || /[?&]tmaptest=1(?:&|$)/.test(location.search)) window.__tmap = S;
+      if (root.hasAttribute("data-test-hooks") || /[?&]tmaptest=1(?:&|$)/.test(location.search)) {
+        window.__tmap = S;
+        window.__tmapc = api.graph ? api.graph.probe : null;
+      }
       var p = tmPrefs(load(PREFS_KEY));
       S.simTh = p.simTh; S.simUnlinked = p.simUnlinked; S.simRefs = p.simRefs;
       S.st = p.st; S.edge = p.edge; S.simEdgeTh = p.simEdgeTh;
@@ -541,7 +547,8 @@
       if (G) G.clusters.forEach(function (c) { if (S.cl.has(c.id)) hidden++; });
       E.clbl.textContent = hidden ? wsT("js.tmap.clusters.some", total - hidden, total) : wsT("js.tmap.clusters");
       E.clb.setAttribute("aria-pressed", String(hidden > 0));
-      E.kw.hidden = !S.kw;
+      // View C shows the keyword chip in its own toolbar.
+      E.kw.hidden = !S.kw || S.view === "C";
       if (S.kw) {
         E.kwt.textContent = wsT("js.tmap.kw", S.kw.term, S.kw.ids.size);
         hue(E.kw, G && G.byCluster[S.kw.cluster]);
@@ -575,6 +582,7 @@
       S.view = v;
       save(VIEW_KEY, v);
       viewSync();
+      barSync();
       showView();
     }
     // showView draws the shown view once per load, then lets it show.
@@ -914,6 +922,7 @@
     api.openFull = openFull;
     api.setKw = setKw;
     api.savePrefs = savePrefs;
+    api.setView = setView;
     api.insp = function () { return built ? E.inspb : null; };
     api.inspShow = inspShow;
     api.viewB = null;

@@ -450,13 +450,16 @@
       main.appendChild(kw);
       h.appendChild(main);
       var acts = el("div", "d-tm-acts");
-      // The View C hand-offs: Phase 3 shows and wires them.
+      // The View C hand-offs: the constellation keeps the selection; the
+      // Ego Ring opens there around this ticket.
       var toc = tm.button("btn d-tm-btn", wsT("js.tmap.focus.toc"));
       toc.id = "tmftoc";
-      toc.hidden = true;
+      toc.hidden = !tm.graph;
+      toc.addEventListener("click", function () { tm.setView("C"); });
       var ego = tm.button("btn d-tm-btn", wsT("js.tmap.focus.ego"));
       ego.id = "tmfego";
-      ego.hidden = true;
+      ego.hidden = !tm.graph;
+      ego.addEventListener("click", function () { tm.setView("C"); if (tm.S.view === "C") tm.graph.enterEgo(n.i); });
       var full = tm.button("btn d-tm-btn", wsT("js.tmap.focus.full"), "file-text");
       full.id = "tmffull";
       full.addEventListener("click", function () { tm.openFull(n.i); });
@@ -826,8 +829,11 @@
     }
 
     // --- the inspector (opt-in in focus) ------------------------------------
-    function renderInsp() {
-      var body = tm.insp(), G = data(), n = G && cur !== null ? G.nodes[cur] : null, ph;
+    // renderInsp fills the inspector for node i (default: the focal one);
+    // View C calls it too, for its selection.
+    function renderInsp(i) {
+      if (i === undefined) i = cur;
+      var body = tm.insp(), G = data(), n = G && i !== null ? G.nodes[i] : null, ph;
       if (!body || !n) return;
       body.textContent = "";
       var hd = tm.hue(el("div", "d-tm-ihd"), clusterOf(n));
@@ -894,7 +900,12 @@
       body.appendChild(full);
     }
 
+    // show follows the shared selection (it may have changed in View C):
+    // focus it, or leave the focus mode when it is gone.
     function show() {
+      var sel = tm.S.sel;
+      if (sel !== null && (!isFocus() || cur !== sel)) { focus(sel); return; }
+      if (sel === null && isFocus()) { unfocus(); return; }
       if (!isFocus()) return;
       if (tm.S.inspB) renderInsp();
       tm.inspShow(!!tm.S.inspB);
@@ -904,5 +915,5 @@
       hover(null);
       if (isFocus()) tm.inspShow(false);
     }
-    return { mount: mount, render: render, filter: filter, focus: focus, unfocus: unfocus, isFocus: isFocus, show: show, hide: hide, layout: layout };
+    return { mount: mount, render: render, filter: filter, focus: focus, unfocus: unfocus, isFocus: isFocus, show: show, hide: hide, layout: layout, insp: renderInsp };
   })();
