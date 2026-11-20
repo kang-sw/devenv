@@ -6,6 +6,10 @@ related:
   261117-feat-ws-hosted-compaction-lifecycle: hosted compaction thresholds, advisory/hard nudges, CompactEnd reset
   261115-feat-ws-whiteboard-agent-card: shared subordinate conversation/composer shell read-only consumer
   261114-feat-ws-dashboard-usage-footer-meter: top-bar plan usage popover replacing footer quota chips
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: d3bfc9785c49dbb9
+sage-review-completeness-reviewed: d3bfc9785c49dbb9
 ---
 
 # Dashboard Composer Footer Controls and ws-Compaction Context Meter
