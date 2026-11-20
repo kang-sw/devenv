@@ -692,11 +692,12 @@
       var t = e.target;
       if (!t || !t.closest) return;
       if (t.closest("#tkqs")) { e.preventDefault(); shSearch(); return; }
-      if (t.closest(".host.hbtn") && shOn) { e.preventDefault(); try { shOn.el.focus(); } catch (x) {} shSend(shOn, "menu"); }
+      // The mirrored permission chip opens the same session menu.
+      if (t.closest(".host.hbtn, .pmhead[role=button]") && shOn) { e.preventDefault(); try { shOn.el.focus(); } catch (x) {} shSend(shOn, "menu"); }
     });
     if (shTop) shTop.addEventListener("keydown", function (e) {
       var t = e.target;
-      if ((e.key !== "Enter" && e.key !== " ") || !t || !t.classList || !t.classList.contains("hbtn") || !shOn) return;
+      if ((e.key !== "Enter" && e.key !== " ") || !t || !t.classList || !(t.classList.contains("hbtn") || (t.classList.contains("pmhead") && t.getAttribute("role") === "button")) || !shOn) return;
       e.preventDefault();
       try { shOn.el.focus(); } catch (x) {}
       shSend(shOn, "menu");

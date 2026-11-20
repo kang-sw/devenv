@@ -169,6 +169,7 @@ function dialogParts(d) {
   assert.equal(shown(f.seg), true);
   assert.deepEqual(f.levels(), ['', 'read-only', 'workdir-write', 'full']);
   assert.deepEqual(f.checked(), ['']);
+  assert.equal(f.seg.all(n => n.cls === 'pmtag' || n.cls.includes('derived')).length, 0, 'no level is tagged derived on creation');
   assert.equal(f.mode.parentNode.parentNode, f.adv, 'native mode lives under Advanced');
   assert.equal(shown(f.adv), true);
   assert.equal(f.mode.disabled, false, 'native mode still editable by default');

@@ -143,10 +143,11 @@
         S.el.textContent = "";
         S.btn = {};
         levels.forEach(function (l) {
-          var b = S.btn[l] = S.el.appendChild(rpBtn([l === "full" ? "full" : "", l === derived ? "derived" : ""].join(" ").trim(), wsT(PERM_LABEL[l])));
+          var dashed = !!derived && l === derived;
+          var b = S.btn[l] = S.el.appendChild(rpBtn([l === "full" ? "full" : "", dashed ? "derived" : ""].join(" ").trim(), wsT(PERM_LABEL[l])));
           b.setAttribute("role", "radio");
           b.setAttribute("data-level", l);
-          if (l === derived) b.appendChild(mk("span", "pmtag", wsT("js.perm.tag.derived")));
+          if (dashed) b.appendChild(mk("span", "pmtag", wsT("js.perm.tag.derived")));
         });
       }
       levels.forEach(function (l) {
