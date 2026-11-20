@@ -3,6 +3,10 @@ title: tracker 조직(법인) 객체와 조직 대상 참조·배정
 related:
   261119-feat-ws-tracker-org-chart-editor: prerequisite for Phase 2 (landed); the org management UI lives in that editor
   261119-feat-ws-tracker-cc-assign-picker-modal: its Phase 2 depends on this ticket (org badges, org CC and org assign targets)
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: cd3083477f16957d
+sage-review-completeness-reviewed: cd3083477f16957d
 ---
 
 # Tracker org entity and org-targeted CC and assign
@@ -43,9 +47,10 @@ Today:
   fold memo and `checkpoint_state.go` deep-copies the state. No version reads
   or writes them across a binary boundary.
 - `member.profile.org` is an unrelated free-text profile field
-  (`wt/profile.go`); the org-chart editor and the picker modal show it as row
+  (`agents-plugin-tool/internal/wstracker/profile.go#L14-L18`; no `wt/`
+  package exists); the org-chart editor and the picker modal show it as row
   text and search it (`tracker-forms.js` around 791, `tracker-picker.js`
-  around 392).
+  around 230 for search and 392-395 for the row text).
 
 Approved mockups:
 - `ai-docs/assets/mockups/261119/tracker-org-entity/editor.html` (owner check
@@ -172,11 +177,101 @@ Approved mockups:
 13. **Label collision** ((1439)). The free-text `member.profile.org` field is
     labelled "소속" in the UI and the new object "조직", with distinct
     labels in every locale.
+14. **Org scope is the head's whole subtree** ((1447), mockup v2 legend:
+    "헤드 이하 (리드 연결) 전원이 그 조직", "인원 = 헤드 포함 하위 전체").
+    Org CC (Decision 5) reaches the head's whole subtree, nested orgs
+    included, the same people an org assign rule rooted at the head with
+    `levels: 0` reaches. The nearest org of Decision 1 is the per-member
+    display label and the parent a deleted org's members fall to; it does not
+    narrow the org's scope.
+15. **Vacant and deleted orgs add nobody** ((1448)). A registration on a
+    vacant org adds nobody until a head is set; an org assign rule keeps its
+    last root and does not extend while the org is vacant, and re-roots when
+    a head is set (Decision 6, under the consent rule of Decision 22). A
+    deleted org's registrations never add anyone again
+    ("새 멤버 배정·참조 없음", mockup v2). `item.cc_org` on a vacant or
+    removed org, and an `item.assign` target whose `org` is vacant or removed
+    or whose `root` is not that org's current head, are refused. Rejected:
+    accepting a registration on a vacant org that stays idle (pickers already
+    show vacant orgs inactive, Decision 9).
+16. **Removing an org assign rule keeps people another rule covers**
+    ((1449)). A person holds one open record per item, so a person covered by
+    two rules holds the record of only one. To make Decision 11 true, the
+    fold re-extends the item's live rules right after any event that ends an
+    org-carrying rule (`item.unassign {rule}`, `{root}` or bare, and
+    `item.return`; (1455)), so a person the ended rule held but another live
+    rule covers gets that rule's record in the same step.
+    Plain rules keep today's fold. An old binary reads the org rule as a
+    plain rule and re-extends only at its next `roles.*`, `member.join` or
+    `item.assign` (T1). Rejected: leaving the gap until the next unrelated
+    refresh (the mockup promises "직접 배정한 사람은 유지" and Decision 11
+    "also covered by another registration, stay").
+17. **Concurrent org events and org names** ((1450)). Two admins can each
+    pass the causal check while making one member head of two orgs, or while
+    setting and removing the same org. Org events join the label-list
+    fold-order pass (`verdictsFrom`, `labelClash` in `replay.go`): each is
+    judged against the org list in fold order and the later conflicting one
+    is flagged and not folded, identically in incremental and full replay. A
+    `roles.org_set` folded after a concurrent `roles.org_remove` of the same
+    org is therefore refused as a set on a removed id. The pass also applies
+    `member.remove` to its org list, so a `roles.org_set` naming a head that
+    folds after a concurrent removal of that member is flagged there (its
+    causal check already passed). Live org names are
+    unique, as label names are; a deleted org's name may be reused by a new
+    org. Rejected: allowing duplicate live names (pickers and chips identify
+    an org by name).
+18. **Org ids** ((1454)). The editor mints a new org's id client-side in the
+    mockup's `o-<random>` shape; `roles.org_set` creating an org refuses an
+    id any org, live or removed, already holds.
+19. **Projection of what each registration added** ((1451), extends
+    Decision 7). The payload also carries, per item, each CC's sources
+    (personal and the org registrations that added it) and, per org
+    registration, the people it added (an org assign rule's people are its
+    records, already tagged with the rule id). The "N명 ▸" list, the
+    "only through it" removal preview of Decision 11 and the deleted org's
+    item list read these fields. The preview counts a person as "only
+    through it" by coverage, not by record ownership: someone another live
+    rule also covers stays under Decision 16 even when the removed rule
+    holds their record, so the preview leaves them out. The preview uses the
+    same test as Decision 16's re-extension: a person stays only if another
+    rule that is live now (not pending, not ended) covers them and has not
+    excluded them.
+20. **Authority and order of removal and retarget batches** ((1452)). The "−"
+    and "대상 바꾸기…" controls on an org assign registration, and its
+    "정리 필요" cleanup, are offered only to whom the existing checks allow
+    (`item.assign` is creator-only, `item.unassign {rule}` is the rule
+    author's); org CC controls are open to every member like `item.cc`. In a
+    retarget batch the old registration's removal comes before the new
+    registration, because `checkTargets` refuses a rule the author's live
+    rule already covers.
+21. **`item.unassign {root}` matches the root at assign time** ((1453)). A
+    re-rooted org rule keeps its assign-time root (the root its id is built
+    from) beside its current root; `item.unassign {root}` and
+    `{rule, root}` match the assign-time root, so old and new binaries judge
+    them the same.
+22. **Consent stays with the registration** (owner (1446)=a, 2026-11-20).
+    An org assign rule's consent is judged as for any rule against the head
+    at assign time: the request a rule rooted outside its author's reach
+    sends (`addRule`, (491)) goes to that head, and `item.accept`,
+    `item.decline` and `item.return` of the rule stay with that head (the
+    rule's assign-time root, Decision 21), as an old binary sees them. A
+    pending org rule extends to nobody until accepted. Once live (forced
+    because the author reaches the head, or accepted) it re-roots and extends
+    under each new head without a new request. Old and new binaries judge
+    every consent event the same. Rejected: re-rooting outside the author's
+    reach sends the rule back to pending with a request to the new head (an
+    old binary refuses the new head's `item.accept` that the new binary
+    accepts); re-rooting only while the author reaches the new head (an org
+    assign from outside the org would stop following at the first such head
+    change).
 
 ## Constraints
 
 - Applicable manuals: `ai-docs/manuals/shipped-surface-boundary.md`,
   `ai-docs/manuals/performance.md`, `ai-docs/manuals/release-compatibility.md`.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin-tool/)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for agents-plugin-tool/internal/)
+- Convention: ai-docs/manuals/performance.md (declared for agents-plugin-tool/)
 - Compatibility: every new surface is T1 (Decisions 2, 5, 6). Checkpoints are
   memory-only (Background), so they add no cross-version risk ((1434));
   instead, every new piece of state (orgs, org registrations, CC sources,
@@ -208,19 +303,63 @@ Approved mockups:
   cramped and is not the reference for that spacing.
 - Do not split `tracker-render.js` in this ticket.
 
+## Prior Decisions
+
+- 261119-feat-ws-tracker-cc-assign-picker-modal (2026-11-19, Decisions): "CC: one `item.cc` / `item.uncc {item, member}` per changed person; a \"이하 전체\" group expands to its current members at apply time (snapshot), because CC has no rule form today." — bearing: constrains
+- 3573e749 (2026-11-11, commit): "One event per member (`{item, member}`) rather than a list field on item.edit: ... a per-member register is what makes a concurrent add and remove of one member resolve by winner()" — bearing: constrains
+- 261108-feat-ws-tracker-data-structure (2026-11-08, commit 46731727): "Rules: new-form rule id `<event>~<root>` so one event can carry several rules; the older `mode: all` keeps the event id so old records and `ruleLevels` are unchanged." — bearing: supports
+- 261119-feat-ws-tracker-org-chart-editor (2026-11-20, commit 1f13d8ce): "Extract pure orgTree(members, leadsOverride) helper in tracker.js ... so cardTeam, Phase 2 org editor, and sibling picker modal share one derivation" — bearing: supports
+- 29c43cfb (2026-11-19, commit): "Checkpoint serialization of org state is unverified; Phase 1 must keep it at T2 or below or stop and report." — bearing: constrains (answered by (1434): checkpoints are memory-only, see Constraints)
+- b5847c83 (2026-11-20, commit): "Removal semantics come from the parent lead's message (owner chose provenance for CC; assign uses the existing item.unassign {rule})." — bearing: supports
+- ed704413 (2026-11-20, commit): "Phase 2 keeps its block on 261119-feat-ws-tracker-org-entity (declared in related: as a Phase 2-only prerequisite, no blocked-by key so Phase 1 ..." — bearing: supports
+- 261110-feat-ws-tracker-superior-settable-status-and-new-statuses (2026-11-10, Decisions): "The assigner stays a separate concept ... org superiors additionally get the wrap-up statuses and the review authority." — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/wstracker/check.go, state.go, replay.go, payload.go, view.go, checkpoint_state.go; agents-plugin-tool/internal/wsdashboard/assets/tracker-forms.js, tracker-picker.js, tracker-render.js; agents-plugin-tool/internal/wsi18n/tables/ |
+| scope.surface | cross-module | new event types in wstracker consumed by wsdashboard assets and the dashboard state payload; new locale keys in wsi18n |
+| scope.new_public_symbol | yes | new exported event-type constants and payload structs beside TypeSetLead and TypeItemCC in agents-plugin-tool/internal/wstracker/payload.go#L33-L42, #L175-L176; new org view fields in view.go |
+| scope.new_type_contract | yes | roles.org_set, roles.org_remove, item.cc_org, item.uncc_org event payloads and an org field on the item.assign target |
+| scope.test_surface | new-files | existing agents-plugin-tool/internal/wstracker/cc_test.go, team_test.go, incremental_regression_test.go and wsdashboard/tracker_org_editor.test.js cover neighbours; the ticket names no org test file, so org fold, tombstone and checkpoint-parity tests are new |
+| complexity.reuse_points | confirmed | needAdmin (check.go#L130-L135), extendRule and refreshLive (state.go#L728-L752), applyCC register (state.go#L1757-L1776), label and member tombstone checks (check.go#L20-L31, #L185-L195), orgTree helper (tracker.js#L268) |
+| complexity.side_effect_risk | high | refreshLive runs after every roles.*, member.join and item.assign (state.go#L1700-L1703), so org re-rooting and CC provenance touch every fold and the checkpoint deep copy |
+| risk.correctness | high | nearest-org resolution, re-rooting an existing rule at a changed head, CC source tracking with exclusions, and incremental-versus-full-fold parity must all agree |
+| risk.fit | moderate | UI must match two approved mockups (v2 wins) inside the existing org-chart editor without splitting tracker-render.js |
+| risk.test | moderate | Go fold and checkpoint parity are testable narrowly; drag-and-drop and LOOK captures need an asset-level fixture page |
+| risk.security_or_contract | high | four new T1 wire surfaces and a hybrid assign target must stay readable by an old binary (flagged unknown types, plain root rule); org events are admin-only |
+
 ## Phases
 
 ### Phase 1: Org object, org events and org targets in the tracker store
 
-Implement Decisions 1, 2, 3, 5, 6 and 7 in `wstracker` (check, fold, state,
-checkpoint copy) and expose org state and org registrations in the
-dashboard's tracker state payload.
+Implement Decisions 1, 2, 3, 5, 6, 7, 14-19, 21 and 22 in `wstracker` (check, fold,
+state, checkpoint copy) and expose org state, org registrations and what
+each registration added in the dashboard's tracker state payload.
 
 Verification (Go tests):
 - `roles.org_set` / `roles.org_remove`: admin-only, one org per head, vacant
   head, rename, delete; membership derived from the tree with nearest-org
   resolution for nested orgs; the org moving with its head on `set_lead`;
-  removing a head member leaves the org vacant.
+  removing a head member leaves the org vacant; a new org's id held by a
+  live or removed org is refused; a duplicate live name is refused and a
+  deleted org's name is reusable.
+- Concurrency (Decision 17): two concurrent `roles.org_set` making one
+  member head of two orgs, and a concurrent `roles.org_set` /
+  `roles.org_remove` of one org, flag the later one in fold order, the same
+  in incremental and full replay; two concurrent non-conflicting
+  `roles.org_set` of one org both fold, the later in fold order winning as
+  label edits do; a `roles.org_set` naming a head concurrent with that
+  member's `member.remove` leaves the removed member heading no org in
+  either fold order (folded first, the removal vacates the seat; folded
+  after it, the `roles.org_set` is refused for naming a removed member).
+- Scope (Decision 14): an org CC on a parent org reaches the members of a
+  nested child org.
+- Vacant orgs (Decision 15): `item.cc_org` and an org assign target on a
+  vacant org are refused, as is an org target whose `root` is not the
+  org's current head; an org rule whose org becomes vacant keeps its last
+  root and does not extend, and re-roots when a head is set.
 - Tombstones: a removed org keeps id and name, refuses `roles.org_set`,
   `item.cc_org` and org assign targets, releases its head, and its members
   resolve to the nearest parent org; its registrations stay and stop
@@ -232,7 +371,27 @@ Verification (Go tests):
   them.
 - Org assign target: one rule id `<event>~<root at assign>` with the org
   field; re-rooting after a head change; additive expansion; `item.unassign
-  {rule}` ends the rule's records.
+  {rule}` ends the rule's records. A person it held who is covered by
+  another live rule holds that rule's record in the same step, likewise
+  when the org rule ends by `item.unassign {root}`, a bare `item.unassign`
+  or `item.return` (Decision 16). `item.unassign {root}` matches the
+  assign-time root after a re-root (Decision 21).
+- Removal on dead orgs (Decisions 3 and 11): `item.uncc_org` and
+  `item.unassign {rule}` on a registration of a removed or vacant org are
+  accepted, unlike new registrations, and remove only what Decision 5 and
+  Decision 16 say.
+- Consent (Decision 22): an org rule rooted outside its author's reach
+  stays pending with its request on the assign-time head through a head
+  change, extends to nobody while pending, and that head's `item.accept`
+  makes it live under the org's current head; a live rule re-roots under a
+  new head outside the author's reach without a new request; `item.return`
+  of an accepted org rule is the assign-time head's; an old-shape reader
+  judges each of these consent events the same; a pending org rule accepted
+  after its org became vacant or was removed goes live and adds nobody.
+- Projection (Decisions 7 and 19): the state payload carries orgs (id, name,
+  head, removed mark), each item's org CC registrations and org assign rules
+  (org id, rule id), each CC's sources and each registration's added
+  people.
 - Checkpoints: incremental replay equals a full fold across org events, org
   CC and org assign (the existing incremental regression pattern).
 - Compatibility: an old-shape reader sees an org assign target as a plain
@@ -241,15 +400,21 @@ Verification (Go tests):
 
 ### Phase 2: Org management in the org-chart editor and org entries on items
 
-Implement Decisions 4 and 8-13 in the org-chart editor, the Team card (org
-badge on heads, nearest org shown for members) and the item window's assignee
-and CC cards, with every save going through the atomic dispatch route.
+Implement Decisions 4, 8-13, 18 (client-side id minting) and 20 in the
+org-chart editor, the Team card (org badge on heads, nearest org shown for
+members) and the item window's assignee and CC cards, with every save going
+through the atomic dispatch route.
 
 Verification:
 - Node tests for staged-change building and the Decision 12 event order,
   including head release before take-up, the inserted vacate event for a
   swap, and a refused drop on an existing head.
-- Node tests for the Decision 11 removal and retarget batches.
+- Node tests for the Decision 11 removal and retarget batches, including
+  the removal-before-registration order and the author gating of org assign
+  controls (Decision 20).
+- Node tests for the item-window derivations of Decision 10: the "N명 ▸"
+  people of a registration, the deleted-org count in the card title and the
+  "정리 필요" marker.
 - Dashboard Go tests (`-run 'Tracker|Asset'` on `./internal/wsdashboard`)
   pass.
 - LOOK: fixture captures compared side by side with the approved mockups
