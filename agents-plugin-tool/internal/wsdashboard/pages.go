@@ -46,6 +46,7 @@ var dashboardScriptFiles = []string{
 	"dashboard-board.js",
 	"dashboard-conversation.js",
 	"dashboard-bundles.js",
+	"dashboard-hud.js",
 	"dashboard-composer.js",
 	"dashboard-actions.js",
 	"dashboard-drawer.js",

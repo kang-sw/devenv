@@ -1806,9 +1806,10 @@
     taskBadge(monbadge, clive, "data-monitors", monTitle);
   }
   // --- agents island ---------------------------------------------------------
-  // The streamed tree is authoritative; compact rows are projections, never
-  // moved nodes, so expanding details and full-output state stay intact.
+  // The streamed tree is authoritative; the compact HUD and full popover
+  // project from it without moving tree nodes, preserving disclosure state.
   var agpop = $("agpop"), agpin = $("agpin"), agisland = $("agisland"), agcompact = $("agcompact"), agidle = $("agidle");
+  var agExpand = agcompact ? agcompact.querySelector(".hud-expand-btn") : null;
   var AGPIN_KEY = "ws.dashboard.agpop.pin", agFull = {}, agRunning = 0, agSeen = false, agDismissed = false;
   function agSize() {
     if (!agisland || agisland.hidden) return;
@@ -1818,11 +1819,16 @@
     // so both dimensions can transition even during a streaming update.
     var box = agisland.getBoundingClientRect(), transition = agisland.style.transition;
     agisland.style.transition = "none";
-    agisland.style.width = mode === "idle" ? "100%" : mode === "full" ? "500px" : "320px";
+    if (mode === "compact" && view && view.style) view.style.width = "max-content";
+    agisland.style.width = mode === "full" ? "500px" : "100%";
     agisland.style.height = "auto";
     var width = agisland.offsetWidth;
     if (mode === "idle") width = Math.min(width, view.offsetWidth);
-    else agisland.style.setProperty(mode === "full" ? "--ag-fw" : "--ag-cw", width + "px");
+    else if (mode === "compact") {
+      width = Math.min(width, view.offsetWidth);
+      if (view && view.style) view.style.width = "";
+      agisland.style.setProperty("--ag-cw", width + "px");
+    } else agisland.style.setProperty("--ag-fw", width + "px");
     var height = view.offsetHeight;
     agisland.style.width = box.width + "px";
     agisland.style.height = box.height + "px";
@@ -1833,13 +1839,15 @@
   }
   function agOpen(open) {
     if (!agpop) return;
+    if (open && typeof hudHideTooltip === "function") hudHideTooltip();
     agpop.hidden = !open;
     if (agisland) {
       agisland.hidden = !open && !agSeen;
       agisland.setAttribute("data-mode", open ? "full" : agRunning ? "compact" : "idle");
     }
-    [sbadge, agcompact, agidle].forEach(function (el) { if (el) el.setAttribute("aria-expanded", open ? "true" : "false"); });
+    [sbadge, agExpand, agidle].forEach(function (el) { if (el) el.setAttribute("aria-expanded", open ? "true" : "false"); });
     agSize();
+    if (!open && agRunning && typeof hudScheduleConnectors === "function") hudScheduleConnectors();
   }
   function agPinned() { return agpin.getAttribute("aria-pressed") === "true"; }
   function agPin(on) {
@@ -1850,41 +1858,10 @@
     if (!agisland || !agcompact || !agidle) return;
     var tree = region("tree");
     if (!tree) return;
-    // The source and counts are rendered together, including linked sessions.
-    var all = q(".ag-source .compact-agent", tree), agents = all;
-    var done = tree.querySelector(".thead .cdone"), peers = tree.querySelector(".pgroup .pghead"), peerCount = peers && peers.querySelector(".chip");
-    var firstSeen = !agSeen && (all.length > 0 || q(".tgroup .agent", tree).length > 0);
+    var info = hudProject(tree, agcompact, agidle, agpop, agOpen);
+    var firstSeen = !agSeen && (info.visibleCount > 0 || q(".tgroup .agent", tree).length > 0);
     if (firstSeen) agSeen = true;
-    agRunning = agents.length;
-    agcompact.textContent = "";
-    agents.forEach(function (agent) {
-      var head = agent.querySelector("summary.ahead"), row = doc.createElement("div");
-      if (!head) return;
-      row.className = "agrow";
-      var mark = doc.createElement("span"), name = doc.createElement("span"), phase = doc.createElement("span"), elapsed = doc.createElement("span");
-      mark.className = "agmark"; name.className = "agname"; elapsed.className = "agelapsed";
-      var sourceMark = head.querySelector(".amk"), sourceName = head.querySelector(".aname"), sourcePhase = head.querySelector(".aline .phase"), time = head.querySelector(".am time[data-ms]"), am = head.querySelector(".am");
-      if (sourceMark) mark.appendChild(sourceMark.cloneNode(true));
-      if (sourceName) { name.textContent = sourceName.textContent; name.title = sourceName.textContent; }
-      // One status pill per row: a copy of the full panel's own pill (tphase),
-      // so thinking, tool, and replying, and equally permission, compacting,
-      // and idle, keep that pill's label, class, and mark; a waiting approval
-      // must read as one here, not as a tool call.
-      if (sourcePhase) phase = sourcePhase.cloneNode(true);
-      else { phase.className = "phase tool"; phase.textContent = agisland.getAttribute("data-tool-label"); }
-      if (time) { var copy = time.cloneNode(true); elapsed.appendChild(copy); fmtTime(copy, Date.now()); }
-      else if (am) { var spans = q("span", am); if (spans.length) elapsed.textContent = spans[spans.length - 1].textContent; }
-      [mark, name, phase, elapsed].forEach(function (el) { row.appendChild(el); });
-      agcompact.appendChild(row);
-    });
-    var summary = doc.createElement("div"); summary.className = "agsummary";
-    var peerTitle = peers ? Array.prototype.map.call(peers.childNodes, function (n) { return n.nodeType === 3 ? n.nodeValue : ""; }).join("").trim() : "";
-    var peerText = [peerTitle, peerCount && peerCount.textContent].filter(Boolean).join(" ");
-    summary.textContent = [done && done.textContent, peerText].filter(Boolean).join(" · ");
-    if (summary.textContent) agcompact.appendChild(summary);
-    var idleLabel = agidle.querySelector(".agidle-label");
-    if (!idleLabel) { idleLabel = doc.createElement("span"); idleLabel.className = "agidle-label"; agidle.appendChild(idleLabel); }
-    idleLabel.textContent = done ? done.textContent : "";
+    agRunning = info.visibleCount;
     if (firstSeen && agPinned() && !agDismissed && agpop.hidden) agOpen(true);
     else if (agpop.hidden) agOpen(false); else agSize();
   }
@@ -1896,11 +1873,10 @@
   }
   if (agpop && sbadge && agpin) {
     sbadge.addEventListener("click", function () { agDismissed = !agpop.hidden; agOpen(agpop.hidden); });
-    [agcompact, agidle].forEach(function (el) {
-      if (!el) return;
-      el.addEventListener("click", function () { agOpen(true); });
-      el.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); agOpen(true); } });
-    });
+    if (agidle) {
+      agidle.addEventListener("click", function () { agOpen(true); });
+      agidle.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); agOpen(true); } });
+    }
     agpin.addEventListener("click", function () { agPin(!agPinned()); });
     $("agclose").addEventListener("click", function () { agPin(false); agOpen(false); sbadge.focus(); });
     agpop.addEventListener("click", function (e) {

@@ -2431,5 +2431,18 @@
   "js.tmap.c.tip.tickets.other": "тикетов: {0}",
   "js.tmap.c.tip.sim": "Сходство {0} %",
   "js.tmap.c.tip.more": "… ещё {0}",
-  "js.tmap.c.kwtip": "Щелчок = фильтр по ключевому слову · перетаскивание = сдвиг"
+  "js.tmap.c.kwtip": "Щелчок = фильтр по ключевому слову · перетаскивание = сдвиг",
+  "hud.expand": "Открыть полное дерево агентов",
+  "js.hud.state.thinking": "Размышление",
+  "js.hud.state.tool": "Вызов инструмента",
+  "js.hud.state.holding": "Ожидание дочерних",
+  "js.hud.state.idle": "Простой (активен)",
+  "js.hud.state.permission": "Разрешение",
+  "js.hud.state.failed": "Ошибка",
+  "js.hud.summary": "Готово {0} · Пиры {1}",
+  "js.hud.done": "Готово {0}",
+  "js.hud.deeper": "+{0} глубже",
+  "js.hud.hint.link": "Клик: открыть /s/{0}",
+  "js.hud.hint.details": "Клик: открыть детали дерева",
+  "js.hud.lead": "лид"
 }

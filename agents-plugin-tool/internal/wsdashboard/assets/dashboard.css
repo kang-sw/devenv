@@ -16,6 +16,14 @@
   --wb-warn: #c27a00; --wb-warn-ink: #a35f00;
   /* the warning tone on a toast, whose surface is the inverted text colour */
   --wb-toast-warn: #f2c06b;
+  --ring-think: #6a4fc4;
+  --ring-tool: #0284c7;
+  --ring-hold: #0e7a83;
+  --ring-perm: #d97706;
+  --ring-fail: #c0262d;
+  --hud-glass: color-mix(in srgb, var(--wb-card) 82%, transparent);
+  --hud-line: color-mix(in srgb, var(--wb-fg) 14%, transparent);
+  --hud-conn: color-mix(in srgb, var(--wb-fg) 28%, transparent);
 }
 /* Dark variants: the same OS-or-pinned rule as the whiteboard sheet. */
 @media (prefers-color-scheme: dark) {
@@ -31,6 +39,14 @@
     --wb-ok: #6cc39a; --wb-fail: #f0797e;
     --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
     --wb-toast-warn: #9a5a00;
+    --ring-think: #967af7;
+    --ring-tool: #38bdf8;
+    --ring-hold: #2dd4bf;
+    --ring-perm: #f59e0b;
+    --ring-fail: #f0797e;
+    --hud-glass: color-mix(in srgb, var(--wb-card) 78%, transparent);
+    --hud-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+    --hud-conn: color-mix(in srgb, var(--wb-fg) 30%, transparent);
   }
 }
 :root[data-theme="dark"] {
@@ -45,6 +61,14 @@
   --wb-ok: #6cc39a; --wb-fail: #f0797e;
   --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
   --wb-toast-warn: #9a5a00;
+  --ring-think: #967af7;
+  --ring-tool: #38bdf8;
+  --ring-hold: #2dd4bf;
+  --ring-perm: #f59e0b;
+  --ring-fail: #f0797e;
+  --hud-glass: color-mix(in srgb, var(--wb-card) 78%, transparent);
+  --hud-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+  --hud-conn: color-mix(in srgb, var(--wb-fg) 30%, transparent);
 }
 
 /* Scrollbars, for every scroller of the dashboard and the tracker: thin, a transparent
@@ -262,6 +286,8 @@ a.tph-parent:focus-visible { outline: 1.5px solid var(--wb-primary); outline-off
 :root .tk .tk-qspin { animation-timing-function: steps(12); }
 :root[data-animation-paused] :is(.spin, .pulse, .pibadge, .caret, .ibadge.busy .istop, .rail .drkwork, .hb .hbr, .rail .hb.perm, .rail .sbn, .dskel i, .tk .tk-qspin, .oq-pill.board-updated) { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) { .spin, .caret, .pulse, .pibadge { animation: none; } }
+:root[data-animation-paused] .hud-node[data-state] .hud-ring { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .hud-node[data-state] .hud-ring { animation: none; } }
 .args { font-family: var(--wb-mono); font-size: 12px; color: var(--wb-muted-fg); }
 code.fpath { font-size: 11.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
 .empty { margin: 8px 0; padding: 18px 14px; text-align: center; font-size: 13px; color: var(--wb-muted-fg); border: 1px dashed var(--wb-muted-fg); border-radius: var(--wb-radius); }

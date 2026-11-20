@@ -2431,5 +2431,18 @@
   "js.tmap.c.tip.tickets.other": "{0} 个工单",
   "js.tmap.c.tip.sim": "相似度 {0}%",
   "js.tmap.c.tip.more": "… 另有 {0} 个",
-  "js.tmap.c.kwtip": "点击 = 关键词筛选 · 拖动 = 平移"
+  "js.tmap.c.kwtip": "点击 = 关键词筛选 · 拖动 = 平移",
+  "hud.expand": "打开完整智能体树",
+  "js.hud.state.thinking": "思考中",
+  "js.hud.state.tool": "工具调用",
+  "js.hud.state.holding": "等待子节点",
+  "js.hud.state.idle": "空闲（存活）",
+  "js.hud.state.permission": "需要批准",
+  "js.hud.state.failed": "失败",
+  "js.hud.summary": "已完成 {0} · 对等 {1}",
+  "js.hud.done": "已完成 {0}",
+  "js.hud.deeper": "+{0} 更深",
+  "js.hud.hint.link": "点击：打开 /s/{0}",
+  "js.hud.hint.details": "点击：打开树详情",
+  "js.hud.lead": "主导"
 }

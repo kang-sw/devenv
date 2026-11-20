@@ -2431,5 +2431,18 @@
   "js.tmap.c.tip.tickets.other": "{0} ticket",
   "js.tmap.c.tip.sim": "Somiglianza {0}%",
   "js.tmap.c.tip.more": "… altri {0}",
-  "js.tmap.c.kwtip": "Clic = filtro per parola chiave · trascina = sposta"
+  "js.tmap.c.kwtip": "Clic = filtro per parola chiave · trascina = sposta",
+  "hud.expand": "Apri albero completo degli agenti",
+  "js.hud.state.thinking": "Ragionamento",
+  "js.hud.state.tool": "Chiamata tool",
+  "js.hud.state.holding": "Attesa figli",
+  "js.hud.state.idle": "Inattivo (attivo)",
+  "js.hud.state.permission": "Permesso",
+  "js.hud.state.failed": "Fallito",
+  "js.hud.summary": "Completati {0} · Peer {1}",
+  "js.hud.done": "Completati {0}",
+  "js.hud.deeper": "+{0} sotto",
+  "js.hud.hint.link": "Clic: apri /s/{0}",
+  "js.hud.hint.details": "Clic: apri dettagli albero",
+  "js.hud.lead": "lead"
 }
