@@ -16,7 +16,7 @@ import (
 // agy model wait, and the automatic `continue` attempts shared by silence and
 // in-band failures. The wsflow package supplies zero for the timeout instead.
 const (
-	DefaultAgyModelWaitTimeoutSeconds = 45
+	DefaultAgyModelWaitTimeoutSeconds = 120
 	DefaultAgyModelWaitRetries        = 3
 )
 
