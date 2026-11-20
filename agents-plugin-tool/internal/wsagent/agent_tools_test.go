@@ -1342,3 +1342,130 @@ func TestWorkerBackgroundStateHoldsReportAndShowsStatus(t *testing.T) {
 		}
 	})
 }
+
+// TestAgentChildMissingPermissionRecordFailsClosed verifies that an
+// agent.spawn child whose permission.json is missing fails admission closed
+// instead of launching with an empty authority, while legitimate callers
+// without permission.json (Pi children, non-parented conversations, hosted
+// top-level leads) keep working.
+func TestAgentChildMissingPermissionRecordFailsClosed(t *testing.T) {
+	refusals := &wakeRefusals{}
+	h, _ := agentHarness(t, func(o *Options) { o.WakeRefused = refusals.add })
+	lead := h.leadCaller()
+
+	// 1. Spawn a read-only agent child, settle and sleep it, then delete permission.json.
+	a, ap := h.agentRunning(lead, AgentSpawnRequest{Prompt: "audit", Tier: "small", Authority: "read-only"})
+	ap.reply("done")
+	eventually(t, "a's turn settled", func() bool { return h.state(a).Status == StatusIdle })
+	h.asleep(a)
+	permPath := filepath.Join(wsdashboard.SessionDir(h.dir, a), "permission.json")
+	if err := os.Remove(permPath); err != nil {
+		t.Fatal(err)
+	}
+	starts := h.backend.startCount()
+	if _, err := h.runner.Deliver(a, Delivery{From: "senderreplyid", Text: "wake without permission.json"}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "missing permission.json refused", func() bool {
+		return strings.Contains(h.state(a).Error, "no explicit authority record")
+	})
+	time.Sleep(80 * time.Millisecond)
+	if n := h.backend.startCount(); n != starts {
+		t.Fatalf("child without permission.json launched %d processes", n-starts)
+	}
+	if st := h.state(a); st.Process || st.Held == 0 || AgentStatus(st) != AgentWaiting {
+		t.Fatalf("refused child state = %+v", st)
+	}
+	if got := refusals.list(); len(got) != 1 || got[0][1] != a || !strings.Contains(got[0][2], "no explicit authority record") {
+		t.Fatalf("wake refusals = %v", got)
+	}
+
+	// Restoring permission.json lets the next delivery wake the child with its authority intact.
+	if err := writePermissionSelection(wsdashboard.SessionDir(h.dir, a), PermissionReadOnly); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.runner.Deliver(a, Delivery{From: "senderreplyid", Text: "wake restored"}); err != nil {
+		t.Fatal(err)
+	}
+	p := h.backend.waitProc(t, starts)
+	p.nextSent(t)
+	if lvl := h.backend.start(starts).WSMCP.Env[EnvPermissionLevel]; lvl != string(PermissionReadOnly) {
+		t.Fatalf("restored child EnvPermissionLevel = %q, want %q", lvl, PermissionReadOnly)
+	}
+
+	// 2. Legitimate Pi child (pi.spawn) has no permission.json and still launches.
+	piStarts := h.backend.startCount()
+	parent := leadParent
+	piChild, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "pi task", Tier: "small", Parent: &parent})
+	if err != nil {
+		t.Fatalf("PiWorkerProfile spawn: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wsdashboard.SessionDir(h.dir, piChild.ID), "permission.json")); !os.IsNotExist(err) {
+		t.Fatalf("PiWorkerProfile should not write permission.json, stat err = %v", err)
+	}
+	h.backend.waitProc(t, piStarts).nextSent(t)
+
+	// 3. Legitimate hosted top-level lead without permission.json still works.
+	lh, _ := agentLeadHarness(t)
+	hostedLead := lh.lead(BackendClaude, LeadOptions{PermissionMode: "auto"})
+	if _, err := os.Stat(filepath.Join(wsdashboard.SessionDir(lh.dir, hostedLead.ID), "permission.json")); !os.IsNotExist(err) {
+		t.Fatalf("legacy hosted lead should not have permission.json, stat err = %v", err)
+	}
+	if _, err := lh.runner.Send(hostedLead.ID, "hello lead"); err != nil {
+		t.Fatalf("hosted lead send: %v", err)
+	}
+	lh.holder(hostedLead.ID)
+}
+
+// TestAgentSpawnWidthCapAtomicUnderConcurrentSpawns verifies that concurrent
+// AgentSpawn calls racing for the remaining width slots cannot exceed
+// MaxSpawnWidth.
+func TestAgentSpawnWidthCapAtomicUnderConcurrentSpawns(t *testing.T) {
+	h, _ := agentHarness(t, nil)
+	lead := h.leadCaller()
+	const remaining = 5
+	for i := range MaxSpawnWidth - remaining {
+		h.agentSpawn(lead, AgentSpawnRequest{Prompt: fmt.Sprintf("pre %d", i), Tier: "small", Authority: "read-only"})
+	}
+	const contenders = 20
+	start := make(chan struct{})
+	errs := make(chan error, contenders)
+	var wg sync.WaitGroup
+	for i := range contenders {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			<-start
+			_, err := h.runner.AgentSpawn(lead, AgentSpawnRequest{Prompt: fmt.Sprintf("race %d", n), Tier: "small", Authority: "read-only"})
+			errs <- err
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	succeeded, refused := 0, 0
+	for err := range errs {
+		if err == nil {
+			succeeded++
+			continue
+		}
+		agentRefused(t, err, http.StatusForbidden, "the spawn width cap is 99 awake direct children")
+		refused++
+	}
+	if succeeded != remaining || refused != contenders-remaining {
+		t.Fatalf("concurrent spawn results: succeeded=%d refused=%d, want %d and %d", succeeded, refused, remaining, contenders-remaining)
+	}
+	if n := len(h.runner.AgentList(lead)); n != MaxSpawnWidth {
+		t.Fatalf("AgentList count = %d, want %d", n, MaxSpawnWidth)
+	}
+	if n := h.runner.awakeChildren(leadParent); n != MaxSpawnWidth {
+		t.Fatalf("awakeChildren = %d, want %d", n, MaxSpawnWidth)
+	}
+	h.runner.mu.Lock()
+	pending := len(h.runner.pendingSpawns)
+	h.runner.mu.Unlock()
+	if pending != 0 {
+		t.Fatalf("pendingSpawns leaked %d entries", pending)
+	}
+}

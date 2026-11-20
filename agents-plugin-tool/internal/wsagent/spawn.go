@@ -95,6 +95,9 @@ type SpawnSpec struct {
 	// SystemPrompt is appended to the harness's system prompt at every
 	// process start; empty is none.
 	SystemPrompt string
+	// claimWidth transfers an AgentSpawn width reservation when startConv
+	// registers the conversation under r.mu.
+	claimWidth func()
 }
 
 // apply sets the spawn's choices on a new conversation's record.
@@ -211,6 +214,9 @@ func cleanLabel(label string) string {
 // open.
 func (r *Runner) spawned(c *conv, prompt string) (State, error) {
 	st, err := r.Send(c.rec.ReplyID, prompt)
+	c.mu.Lock()
+	c.spawnPending = false
+	c.mu.Unlock()
 	if err != nil {
 		_, _ = r.CloseConversation(c.rec.ReplyID)
 		return State{}, err

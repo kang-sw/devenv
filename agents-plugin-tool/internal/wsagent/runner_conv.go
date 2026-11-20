@@ -191,6 +191,10 @@ type conv struct {
 	// permission admission (childAdmission): the input stays, and the
 	// child counts as asleep. Under mu.
 	wakeRefused bool
+	// spawnPending is true from registration in r.convs until spawned()'s
+	// first Send (or close), so awakeLocked counts a newly registered spawn
+	// with no gap after pendingSpawns handoff. Under mu.
+	spawnPending bool
 
 	// Turn settles (spawn.go). sends counts Runner.Send's messages and
 	// settled is the last settled turn, settleC closed and replaced at each

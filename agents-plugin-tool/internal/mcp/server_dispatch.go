@@ -102,7 +102,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	if !s.toolAllowed(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", s.runtimeNamespace(), params.Name))
 	}
-	if refusal := s.permissionRefusal(params.Name); refusal != "" {
+	if refusal := s.permissionRefusal(params.Name, params.Arguments); refusal != "" {
 		return toolErrorTextResponse(req.ID, refusal)
 	}
 	// Keyed capability gate: when a session_key is present and maps to a known
