@@ -103,6 +103,7 @@
   "composer.aria": "Tab은 들여쓰기입니다. 메시지 입력란을 벗어나려면 Escape를 누른 뒤 Tab을 누르세요.",
   "composer.send": "보내기",
   "convo.activity": "리드 {0}",
+  "convo.activity.turn": "턴",
   "summary.label": "추론 요약",
   "summary.provider": "제공자 명시 요약",
   "summary.updating": "갱신 중",

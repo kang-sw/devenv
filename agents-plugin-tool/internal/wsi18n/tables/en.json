@@ -103,6 +103,7 @@
   "composer.aria": "Tab indents. Press Escape, then Tab, to leave the message box.",
   "composer.send": "send",
   "convo.activity": "lead {0}",
+  "convo.activity.turn": "turn",
   "summary.label": "Reasoning summary",
   "summary.provider": "Provider-exposed summary",
   "summary.updating": "Updating",

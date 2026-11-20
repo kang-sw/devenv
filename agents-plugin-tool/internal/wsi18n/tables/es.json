@@ -103,6 +103,7 @@
   "composer.aria": "Tab inserta sangría. Pulsa Escape y luego Tab para salir del cuadro de mensaje.",
   "composer.send": "enviar",
   "convo.activity": "líder {0}",
+  "convo.activity.turn": "turno",
   "summary.label": "Resumen del razonamiento",
   "summary.provider": "Resumen expuesto por el proveedor",
   "summary.updating": "Actualizando",

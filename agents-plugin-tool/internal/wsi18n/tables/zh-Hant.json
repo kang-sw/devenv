@@ -103,6 +103,7 @@
   "composer.aria": "Tab 鍵用於縮排。按 Escape，再按 Tab，即可離開訊息輸入框。",
   "composer.send": "傳送",
   "convo.activity": "主導 {0}",
+  "convo.activity.turn": "輪次",
   "summary.label": "推理摘要",
   "summary.provider": "提供方公開摘要",
   "summary.updating": "更新中",

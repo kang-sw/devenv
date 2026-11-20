@@ -103,6 +103,7 @@
   "composer.aria": "Tab вставляет отступ. Чтобы выйти из поля сообщения, нажмите Escape, затем Tab.",
   "composer.send": "отправить",
   "convo.activity": "лид {0}",
+  "convo.activity.turn": "ход",
   "summary.label": "Сводка рассуждений",
   "summary.provider": "Сводка, раскрытая поставщиком",
   "summary.updating": "Обновляется",
