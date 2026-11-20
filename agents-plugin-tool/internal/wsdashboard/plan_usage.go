@@ -2,6 +2,7 @@ package wsdashboard
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"math"
@@ -46,11 +47,15 @@ type planUsageStore struct {
 	lastQuery   time.Time
 	// lastSaved holds the last successfully written cache bytes, guarded by mu.
 	lastSaved []byte
-	// probing marks the one background probe in flight; probes lets tests
-	// wait for it. Both are guarded by mu.
-	probing bool
-	probes  sync.WaitGroup
-	hist    planUsageHistoryMemo
+	// probing marks the one background probe in flight; probes lets tests and
+	// daemon shutdown wait for it. closed and lifetimeCtx/lifetimeCancel tie
+	// background probes to the owning daemon's lifetime. Guarded by mu.
+	probing        bool
+	probes         sync.WaitGroup
+	lifetimeCtx    context.Context
+	lifetimeCancel context.CancelFunc
+	closed         bool
+	hist           planUsageHistoryMemo
 	// agy state is kept separate from Claude/Codex so plan-usage.json and
 	// plan-usage-history.json stay byte-identical (T0). All fields below
 	// except resolveAgy, agyDebounce, agyTimeout, agyEnv, and now are guarded by mu.
@@ -105,7 +110,16 @@ func (s *planUsageStore) write(name string, data []byte) error {
 }
 
 func newPlanUsageStore(dir, home string, getenv func(string) string) *planUsageStore {
-	s := &planUsageStore{dir: dir, home: home, getenv: getenv, usageURL: "https://chatgpt.com/backend-api/wham/usage", client: &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	lifeCtx, lifeCancel := context.WithCancel(context.Background())
+	s := &planUsageStore{
+		dir:            dir,
+		home:           home,
+		getenv:         getenv,
+		lifetimeCtx:    lifeCtx,
+		lifetimeCancel: lifeCancel,
+		usageURL:       "https://chatgpt.com/backend-api/wham/usage",
+		client:         &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+	}
 	var saved struct {
 		Claude planUsageEntry `json:"claude"`
 		GPT    planUsageEntry `json:"gpt"`
@@ -115,6 +129,43 @@ func newPlanUsageStore(dir, home string, getenv func(string) string) *planUsageS
 	}
 	s.loadAgyLocked()
 	return s
+}
+
+// beginClose marks the store closed and cancels its daemon-lifetime context so
+// no new probe starts, in-flight probes terminate, and no further writes occur.
+func (s *planUsageStore) beginClose() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.closed = true
+	cancel := s.lifetimeCancel
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// waitClose waits for in-flight background probes until they finish or ctx
+// expires. Call beginClose first so no new probe can join probes.
+func (s *planUsageStore) waitClose(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		s.probes.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+}
+
+func (s *planUsageStore) close(ctx context.Context) {
+	s.beginClose()
+	s.waitClose(ctx)
 }
 
 func (s *planUsageStore) nowTime() time.Time {

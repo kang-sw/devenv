@@ -239,12 +239,17 @@ test('stale cards neutralize only the current marker and freeze pace without rec
 test('usage ordering, expired windows, thresholds and ages', () => {
   const u = environment().window.WsUsage;
   const entries = [
-    { harness: 'claude', windows: [{ percent: 99, resetsAt: 5 }, { percent: 40, resetsAt: 50 }] },
-    { harness: 'codex', windows: [{ percent: 80, resetsAt: 50 }] }
+    { harness: 'agy', group: 'claude_gpt', windows: [{ percent: 95, resetsAt: 50 }] },
+    { harness: 'codex', windows: [{ percent: 80, resetsAt: 50 }] },
+    { harness: 'agy', group: 'gemini', windows: [{ percent: 15, resetsAt: 50 }] },
+    { harness: 'claude', windows: [{ percent: 99, resetsAt: 5 }, { percent: 40, resetsAt: 50 }] }
   ];
-  assert.equal(u.sorted(entries, 10)[0].harness, 'codex');
-  assert.equal(entries[0].harness, 'claude');
-  assert.equal(u.active(entries[0], 10).length, 1);
+  assert.deepEqual(
+    u.sorted(entries).map(e => e.group ? e.harness + ':' + e.group : e.harness),
+    ['claude', 'codex', 'agy:gemini', 'agy:claude_gpt']
+  );
+  assert.equal(entries[0].harness, 'agy');
+  assert.equal(u.active(entries[3], 10).length, 1);
   for (const [p, want] of [[79, 'normal'], [80, 'warning'], [94, 'warning'], [95, 'critical']]) assert.equal(u.level(p, 80, 95), want);
   assert.equal(u.age(60000, 180000), 'value from 2 min ago');
   assert.equal(u.age(0, 180000), 'usage unavailable');
@@ -264,7 +269,7 @@ test('footer and popover show detected harnesses, age, reset and safe text but h
   assert.equal(groups(env.button)[1].querySelector('.usage-number').textContent, '96%');
   const pop = mounted.makePopover(() => {}, () => {}); pop.open(); pop.focus(); await flush();
   const text = pop.el.textContent;
-  assert.ok(text.indexOf('Codex / GPT') < text.indexOf('Claude'));
+  assert.ok(text.indexOf('Claude') < text.indexOf('Codex / GPT'));
   for (const s of ['96%', 'Weekly', '5-hour', 'value from 0 min ago', 'Resets ', '<fake-plan>', 'Pi token expired']) assert.ok(text.includes(s), s);
   for (const source of ['via Pi', 'Claude push']) assert.ok(!text.includes(source), source);
   assert.equal(pop.el.attributes.role, 'dialog');
@@ -600,4 +605,23 @@ test('agy sign-in required status localizes and D15 32s cache-only follow-up cle
   const callsAfterClose = env.calls.length;
   live32.fn(); await flush();
   assert.equal(env.calls.length, callsAfterClose);
+});
+
+test('popover and gutter follow fixed vendor order with adjacent agy groups regardless of utilization', async () => {
+  const at = Date.UTC(2026, 10, 19, 12, 0), reset = at + 3 * 3600000, env = environment(at);
+  env.set({
+    entries: [
+      { harness: 'agy', group: 'claude_gpt', label: 'Claude and GPT models', source: 'via agy CLI', asOf: at, windows: [{ kind: 'five_hour', percent: 96, asOf: at, resetsAt: reset }] },
+      { harness: 'codex', source: 'via Codex CLI', asOf: at, windows: [{ kind: 'seven_day', percent: 88, asOf: at, resetsAt: reset }] },
+      { harness: 'agy', group: 'gemini', label: 'Gemini Models', source: 'via agy CLI', asOf: at, windows: [{ kind: 'five_hour', percent: 12, asOf: at, resetsAt: reset }] },
+      { harness: 'claude', source: 'Claude push', asOf: at, windows: [{ kind: 'five_hour', percent: 5, asOf: at, resetsAt: reset }] }
+    ]
+  });
+  const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
+  const footerTitles = groups(env.button).map(g => g.title);
+  assert.deepEqual(footerTitles, ['Claude', 'Codex / GPT', 'Gemini Models', 'Claude and GPT models']);
+  const pop = mounted.makePopover(() => {}, () => {}); pop.open(); await flush();
+  const popTitles = nodes(pop.el, '.usage-account').map(s => s.querySelector('.usage-heading').textContent);
+  assert.deepEqual(popTitles, ['Claude', 'Codex / GPT', 'Gemini Models', 'Claude and GPT models']);
+  pop.close();
 });

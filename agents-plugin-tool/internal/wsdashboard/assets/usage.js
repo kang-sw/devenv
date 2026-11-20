@@ -4,11 +4,18 @@
   function active(entry, now) {
     return (entry.windows || []).filter(function (w) { return !w.resetsAt || w.resetsAt > now; });
   }
-  function tightest(entry, now) {
-    return active(entry, now).reduce(function (n, w) { return w.disabled ? n : Math.max(n, w.percent); }, -1);
+  function vendorOrder(entry) {
+    if (entry.harness === "claude") return 0;
+    if (entry.harness === "codex") return 1;
+    if (entry.harness === "agy") {
+      if (entry.group === "gemini") return 2;
+      if (entry.group === "claude_gpt") return 3;
+      return 4;
+    }
+    return 5;
   }
-  function sorted(entries, now) {
-    return entries.slice().sort(function (a, b) { return tightest(b, now) - tightest(a, now); });
+  function sorted(entries) {
+    return entries.slice().sort(function (a, b) { return vendorOrder(a) - vendorOrder(b); });
   }
   function level(percent, warn, crit) { return percent >= crit ? "critical" : percent >= warn ? "warning" : "normal"; }
   function age(at, now) { return at ? "value from " + Math.max(0, Math.floor((now - at) / 60000)) + " min ago" : "usage unavailable"; }
@@ -148,7 +155,7 @@
       var now = Date.now(), rendered = 0;
       button.textContent = "";
       button.appendChild(mini());
-      data.entries.forEach(function (entry) {
+      sorted(data.entries).forEach(function (entry) {
         var windows = active(entry, now), enabled = windows.filter(function (v) { return !v.disabled; });
         if (windows.length && !enabled.length) return;
         var group = el("span", "usage-harness");
@@ -334,7 +341,7 @@
       if (!popover || !shown) return;
       var list = popover.querySelector(".usage-details"); list.textContent = "";
       if (!data.entries.length) list.appendChild(el("p", "usage-status", t("notLoggedIn")));
-      sorted(data.entries, Date.now()).forEach(function (entry) {
+      sorted(data.entries).forEach(function (entry) {
         var row = el("section", "usage-account"), head = el("div", "usage-heading");
         head.appendChild(icon(entry));
         head.appendChild(el("b", "", entryName(entry)));

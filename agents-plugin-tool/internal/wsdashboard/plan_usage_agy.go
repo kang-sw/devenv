@@ -176,7 +176,7 @@ func (s *planUsageStore) agyEntriesLocked(now int64) []planUsageEntry {
 // ~10-minute debounce. Never blocks the HTTP handler.
 func (s *planUsageStore) refreshAgy() {
 	s.mu.Lock()
-	if s.resolveAgy == nil || s.agyProbing || s.agyBilledLatch || s.agyAuthHold {
+	if s.closed || s.resolveAgy == nil || s.agyProbing || s.agyBilledLatch || s.agyAuthHold {
 		s.mu.Unlock()
 		return
 	}
@@ -185,21 +185,28 @@ func (s *planUsageStore) refreshAgy() {
 		return
 	}
 	resolve := s.resolveAgy
+	parentCtx := s.lifetimeCtx
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
 	s.agyProbing = true
 	s.probes.Add(1)
 	s.mu.Unlock()
 	go func() {
 		defer s.probes.Done()
-		s.probeAgy(resolve)
+		s.probeAgy(parentCtx, resolve)
 	}()
 }
 
-func (s *planUsageStore) probeAgy(resolve func() (string, []string, error)) {
+func (s *planUsageStore) probeAgy(parentCtx context.Context, resolve func() (string, []string, error)) {
 	defer func() {
 		s.mu.Lock()
 		s.agyProbing = false
 		s.mu.Unlock()
 	}()
+	if parentCtx.Err() != nil {
+		return
+	}
 	prog, pre, err := resolve()
 	if err != nil || strings.TrimSpace(prog) == "" {
 		// Binary absent: skip silently with no entry and no debounce penalty.
@@ -207,7 +214,7 @@ func (s *planUsageStore) probeAgy(resolve func() (string, []string, error)) {
 	}
 	// The debounce window starts when the probe is spawned, regardless of outcome.
 	s.mu.Lock()
-	if s.agyBilledLatch || s.agyAuthHold {
+	if s.closed || parentCtx.Err() != nil || s.agyBilledLatch || s.agyAuthHold {
 		s.mu.Unlock()
 		return
 	}
@@ -216,12 +223,18 @@ func (s *planUsageStore) probeAgy(resolve func() (string, []string, error)) {
 	baseEnv := s.agyEnv
 	s.mu.Unlock()
 
-	stdout, stderr, overflowed, cmdErr := runAgyUsageCommand(prog, pre, baseEnv, timeout)
+	stdout, stderr, stdoutOverflow, stderrOverflow, cmdErr := runAgyUsageCommand(parentCtx, prog, pre, baseEnv, timeout)
+	if parentCtx.Err() != nil {
+		return
+	}
 	at := s.nowTime().UnixMilli()
-	outcome, groups := parseAgyUsageOutput(stdout, stderr, overflowed, cmdErr, at)
+	outcome, groups := parseAgyUsageOutput(stdout, stderr, stdoutOverflow, stderrOverflow, cmdErr, at)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed || parentCtx.Err() != nil {
+		return
+	}
 	s.agyProbed = true
 	switch outcome {
 	case agyOutcomeOK:
@@ -274,16 +287,20 @@ type agyUsageGroup struct {
 	Buckets []json.RawMessage `json:"buckets"`
 }
 
-func parseAgyUsageOutput(stdout, stderr []byte, overflowed bool, cmdErr error, at int64) (agyProbeOutcome, []planUsageEntry) {
+func parseAgyUsageOutput(stdout, stderr []byte, stdoutOverflow, stderrOverflow bool, cmdErr error, at int64) (agyProbeOutcome, []planUsageEntry) {
 	if bytes.Contains(stderr, []byte(agyAuthRequiredMarker)) {
 		return agyOutcomeAuthHold, nil
 	}
+	if stdoutOverflow {
+		// Truncated stdout cannot prove the turn was unbilled; latch conservatively.
+		return agyOutcomeBilledLatch, nil
+	}
 	var env agyUsageEnvelope
-	parsed := !overflowed && len(bytes.TrimSpace(stdout)) > 0 && json.Unmarshal(stdout, &env) == nil
+	parsed := len(bytes.TrimSpace(stdout)) > 0 && json.Unmarshal(stdout, &env) == nil
 	if parsed && (env.NumTurns > 0 || strings.TrimSpace(env.ConversationID) != "") {
 		return agyOutcomeBilledLatch, nil
 	}
-	if overflowed || cmdErr != nil || !parsed {
+	if stderrOverflow || cmdErr != nil || !parsed {
 		return agyOutcomeUnavailable, nil
 	}
 	if env.Status != "" && env.Status != "SUCCESS" {
@@ -385,7 +402,7 @@ func parseAgyBucket(raw json.RawMessage, at int64) (planUsageWindow, bool) {
 func parseAgyResetTime(raw json.RawMessage) (int64, bool) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
-		return 0, true
+		return 0, false
 	}
 	if trimmed[0] == '"' {
 		var text string
@@ -426,43 +443,46 @@ func sortAgyWindows(windows []planUsageWindow) {
 	})
 }
 
-// cappedOutput enforces a shared byte cap across stdout and stderr, cancelling
-// the subprocess as soon as combined output exceeds the budget.
-type cappedOutput struct {
+// cappedBuffer enforces a per-stream byte cap, cancelling the subprocess as
+// soon as that stream exceeds its budget while retaining bytes read up to the
+// cap for auth-marker and latch inspection.
+type cappedBuffer struct {
 	mu         sync.Mutex
 	remaining  int
 	overflowed bool
 	onOverflow func()
+	buf        bytes.Buffer
 }
 
-type cappedStream struct {
-	cap *cappedOutput
-	buf bytes.Buffer
-}
-
-func (w *cappedStream) Write(p []byte) (int, error) {
-	w.cap.mu.Lock()
-	if w.cap.overflowed {
-		w.cap.mu.Unlock()
+func (w *cappedBuffer) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	if w.overflowed {
+		w.mu.Unlock()
 		return len(p), nil
 	}
-	if len(p) > w.cap.remaining {
-		if w.cap.remaining > 0 {
-			_, _ = w.buf.Write(p[:w.cap.remaining])
-			w.cap.remaining = 0
+	if len(p) > w.remaining {
+		if w.remaining > 0 {
+			_, _ = w.buf.Write(p[:w.remaining])
+			w.remaining = 0
 		}
-		w.cap.overflowed = true
-		cb := w.cap.onOverflow
-		w.cap.mu.Unlock()
+		w.overflowed = true
+		cb := w.onOverflow
+		w.mu.Unlock()
 		if cb != nil {
 			cb()
 		}
 		return len(p), nil
 	}
 	_, _ = w.buf.Write(p)
-	w.cap.remaining -= len(p)
-	w.cap.mu.Unlock()
+	w.remaining -= len(p)
+	w.mu.Unlock()
 	return len(p), nil
+}
+
+func (w *cappedBuffer) snapshot() ([]byte, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return slices.Clone(w.buf.Bytes()), w.overflowed
 }
 
 func agyCommandEnv(base []string) []string {
@@ -481,8 +501,11 @@ func agyCommandEnv(base []string) []string {
 	return append(out, key+"=true")
 }
 
-func runAgyUsageCommand(prog string, pre, baseEnv []string, timeout time.Duration) (stdout, stderr []byte, overflowed bool, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+func runAgyUsageCommand(parentCtx context.Context, prog string, pre, baseEnv []string, timeout time.Duration) (stdout, stderr []byte, stdoutOverflow, stderrOverflow bool, err error) {
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parentCtx, timeout)
 	defer cancel()
 	args := append(slices.Clone(pre), "-p", "/usage", "--output-format", "json", "--print-timeout", agyPrintTimeoutArg)
 	cmd := exec.CommandContext(ctx, prog, args...)
@@ -496,18 +519,14 @@ func runAgyUsageCommand(prog string, pre, baseEnv []string, timeout time.Duratio
 		return nil
 	}
 	cmd.WaitDelay = 2 * time.Second
-	shared := &cappedOutput{remaining: agyMaxOutputBytes, onOverflow: cancel}
-	outStream := &cappedStream{cap: shared}
-	errStream := &cappedStream{cap: shared}
-	cmd.Stdout = outStream
-	cmd.Stderr = errStream
+	outBuf := &cappedBuffer{remaining: agyMaxOutputBytes, onOverflow: cancel}
+	errBuf := &cappedBuffer{remaining: agyMaxOutputBytes, onOverflow: cancel}
+	cmd.Stdout = outBuf
+	cmd.Stderr = errBuf
 	err = cmd.Run()
-	shared.mu.Lock()
-	stdout = slices.Clone(outStream.buf.Bytes())
-	stderr = slices.Clone(errStream.buf.Bytes())
-	overflowed = shared.overflowed
-	shared.mu.Unlock()
-	return stdout, stderr, overflowed, err
+	stdout, stdoutOverflow = outBuf.snapshot()
+	stderr, stderrOverflow = errBuf.snapshot()
+	return stdout, stderr, stdoutOverflow, stderrOverflow, err
 }
 
 // agyHistory returns the full pruned agy usage history.

@@ -499,33 +499,135 @@ func TestPlanUsageAgyHistoryAppendPruneAndGroupIsolation(t *testing.T) {
 func TestPlanUsageAgyResetTimeAndStatusValidation(t *testing.T) {
 	at := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC).UnixMilli()
 	// Unsupported command name -> unavailable.
-	outcome, groups := parseAgyUsageOutput([]byte(`{"status":"SUCCESS","num_turns":0,"conversation_id":"","command":{"name":"other","data":{"groups":[]}}}`), nil, false, nil, at)
+	outcome, groups := parseAgyUsageOutput([]byte(`{"status":"SUCCESS","num_turns":0,"conversation_id":"","command":{"name":"other","data":{"groups":[]}}}`), nil, false, false, nil, at)
 	if outcome != agyOutcomeUnavailable || len(groups) != 0 {
 		t.Fatalf("unsupported command accepted: %v %+v", outcome, groups)
 	}
 	// Non-SUCCESS status -> unavailable.
-	outcome, _ = parseAgyUsageOutput([]byte(`{"status":"ERROR","num_turns":0,"conversation_id":"","command":{"name":"usage","data":{"groups":[{"name":"Gemini Models","buckets":[{"window":"5h","remaining_fraction":0.5,"reset_time":"2026-11-19T15:00:00Z"}]}]}}}`), nil, false, nil, at)
+	outcome, _ = parseAgyUsageOutput([]byte(`{"status":"ERROR","num_turns":0,"conversation_id":"","command":{"name":"usage","data":{"groups":[{"name":"Gemini Models","buckets":[{"window":"5h","remaining_fraction":0.5,"reset_time":"2026-11-19T15:00:00Z"}]}]}}}`), nil, false, false, nil, at)
 	if outcome != agyOutcomeUnavailable {
 		t.Fatalf("error status accepted: %v", outcome)
 	}
-	// Numeric epoch reset_time and null reset_time both parse cleanly; empty string drops.
+	// Numeric epoch reset_time parses cleanly; null, absent, and empty string drop per D7.
 	epoch := strconv.FormatInt(at/1000+3600, 10)
-	body := fmt.Sprintf(`{"status":"SUCCESS","num_turns":0,"conversation_id":"","command":{"name":"usage","data":{"groups":[{"name":"Gemini Models","buckets":[{"window":"5h","remaining_fraction":0.25,"reset_time":%s},{"window":"weekly","remaining_fraction":0.5,"reset_time":null},{"window":"5h","remaining_fraction":0.1,"reset_time":""}]}]}}}`, epoch)
-	outcome, groups = parseAgyUsageOutput([]byte(body), nil, false, nil, at)
-	if outcome != agyOutcomeOK || len(groups) != 1 || len(groups[0].Windows) != 2 {
-		t.Fatalf("unexpected epoch/null reset parse: %v %+v", outcome, groups)
+	body := fmt.Sprintf(`{"status":"SUCCESS","num_turns":0,"conversation_id":"","command":{"name":"usage","data":{"groups":[{"name":"Gemini Models","buckets":[{"window":"5h","remaining_fraction":0.25,"reset_time":%s},{"window":"weekly","remaining_fraction":0.5,"reset_time":null},{"window":"weekly","remaining_fraction":0.4},{"window":"5h","remaining_fraction":0.1,"reset_time":""}]}]}}}`, epoch)
+	outcome, groups = parseAgyUsageOutput([]byte(body), nil, false, false, nil, at)
+	if outcome != agyOutcomeOK || len(groups) != 1 || len(groups[0].Windows) != 1 {
+		t.Fatalf("expected only numeric epoch bucket to survive, got outcome=%v groups=%+v", outcome, groups)
 	}
-	if groups[0].Windows[0].ResetsAt != (at/1000+3600)*1000 || groups[0].Windows[1].ResetsAt != 0 {
+	if groups[0].Windows[0].Kind != "five_hour" || groups[0].Windows[0].ResetsAt != (at/1000+3600)*1000 {
 		t.Fatalf("unexpected resetsAt values: %+v", groups[0].Windows)
 	}
-	// Oversize buffer check: combined stdout+stderr never exceeds cap.
-	var cancelled bool
-	shared := &cappedOutput{remaining: 16, onOverflow: func() { cancelled = true }}
-	outW := &cappedStream{cap: shared}
-	errW := &cappedStream{cap: shared}
-	_, _ = outW.Write(bytes.Repeat([]byte("a"), 10))
-	_, _ = errW.Write(bytes.Repeat([]byte("b"), 10))
-	if !shared.overflowed || !cancelled || outW.buf.Len()+errW.buf.Len() != 16 {
-		t.Fatalf("combined cap failed: overflow=%v cancelled=%v total=%d", shared.overflowed, cancelled, outW.buf.Len()+errW.buf.Len())
+	// Independent per-stream cappedBuffer: each stream retains up to its own cap.
+	var cancelled int
+	outW := &cappedBuffer{remaining: 16, onOverflow: func() { cancelled++ }}
+	errW := &cappedBuffer{remaining: 16, onOverflow: func() { cancelled++ }}
+	_, _ = outW.Write(bytes.Repeat([]byte("a"), 12))
+	_, _ = errW.Write(bytes.Repeat([]byte("b"), 20))
+	outBytes, outOver := outW.snapshot()
+	errBytes, errOver := errW.snapshot()
+	if outOver || len(outBytes) != 12 {
+		t.Fatalf("stdout buffer affected by stderr overflow: over=%v len=%d", outOver, len(outBytes))
 	}
+	if !errOver || len(errBytes) != 16 || cancelled != 1 {
+		t.Fatalf("stderr cap failed: over=%v len=%d cancelled=%d", errOver, len(errBytes), cancelled)
+	}
+}
+
+func TestPlanUsageAgyOverflowLatchesAndAuthHold(t *testing.T) {
+	t.Run("billed_stdout_with_stderr_overflow", func(t *testing.T) {
+		var clockMu sync.Mutex
+		now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+		script := `printf '{"status":"SUCCESS","num_turns":1,"conversation_id":"","command":{"name":"usage","data":{"groups":[]}}}\n'
+dd if=/dev/zero bs=1024 count=600 2>/dev/null | tr '\0' 'E' >&2`
+		s, countFile, _ := fakeAgyEnv(t, script)
+		s.now = func() time.Time { clockMu.Lock(); defer clockMu.Unlock(); return now }
+
+		s.refresh(context.Background(), true)
+		s.probes.Wait()
+
+		s.mu.Lock()
+		latched := s.agyBilledLatch
+		s.mu.Unlock()
+		if !latched {
+			t.Fatal("expected billed latch when stdout has num_turns=1 and stderr overflows 512 KiB")
+		}
+		if got := fakeAgyCallCount(countFile); got != 1 {
+			t.Fatalf("initial call count = %d, want 1", got)
+		}
+
+		// Advancing past debounce must not spawn again once latched.
+		clockMu.Lock()
+		now = now.Add(30 * time.Minute)
+		clockMu.Unlock()
+		s.refresh(context.Background(), true)
+		s.probes.Wait()
+		if got := fakeAgyCallCount(countFile); got != 1 {
+			t.Fatalf("latched store spawned again: count=%d", got)
+		}
+	})
+
+	t.Run("stdout_overflow_sets_billed_latch", func(t *testing.T) {
+		var clockMu sync.Mutex
+		now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+		script := `dd if=/dev/zero bs=1024 count=600 2>/dev/null | tr '\0' 'A'`
+		s, countFile, _ := fakeAgyEnv(t, script)
+		s.now = func() time.Time { clockMu.Lock(); defer clockMu.Unlock(); return now }
+
+		s.refresh(context.Background(), true)
+		s.probes.Wait()
+
+		s.mu.Lock()
+		latched := s.agyBilledLatch
+		s.mu.Unlock()
+		if !latched {
+			t.Fatal("expected conservative billed latch when stdout overflows 512 KiB")
+		}
+		entries := s.entries()
+		if len(entries) != 1 || entries[0].Status != "usage unavailable" {
+			t.Fatalf("unexpected status-only entry on stdout overflow: %+v", entries)
+		}
+
+		clockMu.Lock()
+		now = now.Add(30 * time.Minute)
+		clockMu.Unlock()
+		s.refresh(context.Background(), true)
+		s.probes.Wait()
+		if got := fakeAgyCallCount(countFile); got != 1 {
+			t.Fatalf("stdout-overflow latch failed to prevent future spawns: count=%d", got)
+		}
+	})
+
+	t.Run("auth_marker_retained_on_stderr_overflow", func(t *testing.T) {
+		var clockMu sync.Mutex
+		now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+		script := `printf 'Authentication required. Please visit the URL https://example.invalid/login\n' >&2
+dd if=/dev/zero bs=1024 count=600 2>/dev/null | tr '\0' 'E' >&2
+exit 1`
+		s, countFile, _ := fakeAgyEnv(t, script)
+		s.now = func() time.Time { clockMu.Lock(); defer clockMu.Unlock(); return now }
+
+		s.refresh(context.Background(), true)
+		s.probes.Wait()
+
+		s.mu.Lock()
+		held := s.agyAuthHold
+		s.mu.Unlock()
+		if !held {
+			t.Fatal("expected auth hold when marker is in retained stderr before overflow")
+		}
+		entries := s.entries()
+		if len(entries) != 1 || entries[0].Status != agyStatusSignInRequired {
+			t.Fatalf("unexpected entry on auth-hold stderr overflow: %+v", entries)
+		}
+
+		clockMu.Lock()
+		now = now.Add(30 * time.Minute)
+		clockMu.Unlock()
+		s.refresh(context.Background(), true)
+		s.probes.Wait()
+		if got := fakeAgyCallCount(countFile); got != 1 {
+			t.Fatalf("auth hold failed to prevent future spawns: count=%d", got)
+		}
+	})
 }

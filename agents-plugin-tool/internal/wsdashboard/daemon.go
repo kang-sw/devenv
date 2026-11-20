@@ -554,6 +554,9 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	if err := writeEndpoint(opts.Dir, d.endpoint); err != nil {
 		// A detached daemon's returned error has no reader; the log does.
 		fmt.Fprintf(logw, "dashboard: write endpoint file: %v\n", err)
+		if d.planUsage != nil {
+			d.planUsage.close(context.Background())
+		}
 		if d.agents != nil {
 			d.agents.Close()
 		}
@@ -740,6 +743,9 @@ func (d *Daemon) Close() {
 		// connects, and the hosted sessions drain meanwhile (proxy.go):
 		// the whole stop stays under the successor's lock wait.
 		ctx, cancel := context.WithTimeout(context.Background(), shutdownDeadline)
+		if d.planUsage != nil {
+			d.planUsage.beginClose()
+		}
 		shutdownDone := make(chan struct{})
 		go func() {
 			_ = d.server.Shutdown(ctx)
@@ -747,6 +753,9 @@ func (d *Daemon) Close() {
 		}()
 		d.drainProxy()
 		<-shutdownDone
+		if d.planUsage != nil {
+			d.planUsage.waitClose(ctx)
+		}
 		cancel()
 		// Shutdown closes only the listeners Serve has registered, and Serve
 		// runs on its own goroutine: a Close before that goroutine is
