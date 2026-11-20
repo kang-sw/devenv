@@ -960,7 +960,18 @@ func (c *conv) dropHeld() {
 // apply applies a wslive event and tells the daemon when it wrote. quiet
 // (a replayed holder record) applies it to the state alone.
 func (c *conv) apply(ev wslive.Event, quiet ...bool) {
-	if len(quiet) == 0 || !quiet[0] {
+	replayed := len(quiet) > 0 && quiet[0]
+	c.applyMode(ev, replayed, false)
+}
+
+// applyCoalesced applies a mapper status whose immediately following TurnEnd
+// is its recovery boundary, avoiding a redundant file-only snapshot rewrite.
+func (c *conv) applyCoalesced(ev wslive.Event, quiet bool) {
+	c.applyMode(ev, quiet, true)
+}
+
+func (c *conv) applyMode(ev wslive.Event, quiet, coalesceTurnEnd bool) {
+	if !quiet {
 		c.observeCompaction(ev)
 	}
 	if ev.Kind == wslive.KindReset {
@@ -986,8 +997,10 @@ func (c *conv) apply(ev wslive.Event, quiet ...bool) {
 			}
 		})
 	}
-	if len(quiet) > 0 && quiet[0] {
+	if quiet {
 		c.live.applyQuiet(ev)
+	} else if coalesceTurnEnd {
+		c.live.applyCoalesced(ev)
 	} else {
 		c.live.apply(ev)
 	}

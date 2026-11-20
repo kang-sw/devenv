@@ -377,6 +377,9 @@ type Event struct {
 	// boundaries and user messages itself; a backend never sends
 	// turn_start, turn_end, user, or reset.
 	Live *wslive.Event
+	// LiveCoalescesTurnEnd marks a live status immediately followed by this
+	// mapper's TurnEnd. File-only recovery can persist both in one snapshot.
+	LiveCoalescesTurnEnd bool
 	// ReasoningSummary is a validated lead-only widget projection, never an
 	// extension-supplied lifecycle/usage/key command.
 	ReasoningSummary *wslive.ReasoningSummary

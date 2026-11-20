@@ -25,8 +25,9 @@ import (
 // adding evidence beside the copy's (shareObserved) returns the session to
 // the overlay until ClearLive.
 type SnapshotCache struct {
-	files    FileCache[parsedSnapshot]
-	observed wslive.ObservedCache
+	files       FileCache[parsedSnapshot]
+	observed    wslive.ObservedCache
+	outputRates wslive.OutputRateCache
 	// load is an instance-local snapshot opener/decoder seam for tests.
 	load func(string) (parsedSnapshot, error)
 
@@ -176,7 +177,9 @@ func (c *SnapshotCache) setLive(stateDir, replyID string, snap wslive.Snapshot, 
 		return false
 	}
 	p.folded = folded
-	path := wslive.SnapshotPath(SessionDir(stateDir, replyID))
+	dir := SessionDir(stateDir, replyID)
+	c.outputRates.Remember(dir, p.snap.Lead.OutputRate)
+	path := wslive.SnapshotPath(dir)
 	c.liveMu.Lock()
 	defer c.liveMu.Unlock()
 	prev, had := c.live[path]
@@ -224,7 +227,19 @@ func (c *SnapshotCache) snapshotWithoutObserved(stateDir, replyID string) *wsliv
 	if err != nil {
 		return nil
 	}
+	if c != nil {
+		c.outputRates.Remember(SessionDir(stateDir, replyID), p.snap.Lead.OutputRate)
+	}
 	return &p.snap
+}
+
+// warmOutputRate restores a legacy-stripped rate once during authoritative
+// session indexing. Presentation reads use only the warmed in-memory value.
+func (c *SnapshotCache) warmOutputRate(stateDir, replyID string) {
+	if c == nil {
+		return
+	}
+	c.outputRates.Warm(SessionDir(stateDir, replyID))
 }
 
 // Snapshot reads the live snapshot of session replyID under stateDir; nil
@@ -247,10 +262,19 @@ func (c *SnapshotCache) snapshotResult(stateDir, replyID string) (*wslive.Snapsh
 	}
 	dir := SessionDir(stateDir, replyID)
 	var observed *wslive.ObservedCache
+	var outputRates *wslive.OutputRateCache
 	if c != nil {
 		observed = &c.observed
+		outputRates = &c.outputRates
 	}
 	observed.Load(dir).Overlay(&p.snap)
+	// New writers fold OutputRate into snapshot/RAM. A legacy-stripped snapshot
+	// overlays only the value warmed during authoritative session indexing;
+	// presentation reads never touch the recovery sidecar.
+	outputRates.Remember(dir, p.snap.Lead.OutputRate)
+	if p.snap.Lead.Observed == nil && p.snap.Lead.OutputRate == nil {
+		wslive.OverlayOutputRate(&p.snap, outputRates.Cached(dir))
+	}
 	return &p.snap, nil
 }
 
@@ -289,6 +313,7 @@ func (c *SnapshotCache) Forget(stateDir, replyID string) {
 	}
 	c.files.ForgetUnder(SessionDir(stateDir, replyID))
 	c.observed.Forget(SessionDir(stateDir, replyID))
+	c.outputRates.Forget(SessionDir(stateDir, replyID))
 }
 
 // Counts reports the snapshot reads served from the cache and the ones that

@@ -611,6 +611,13 @@ type agyMapper struct {
 	// approvalOf their ids by tool call.
 	approvals  map[string]*agyApproval
 	approvalOf map[string]string
+
+	// lastContext retains the latest usage_update context so KindStatus rate
+	// events preserve it instead of clearing Usage.Context.
+	lastContext *wslive.UsageContext
+	rate        agyOutputRateTracker
+	// now is an optional local clock seam (epoch ms) for deterministic tests.
+	now func() int64
 }
 
 func newAgyMapper(sessionID string) *agyMapper {
@@ -698,6 +705,7 @@ func (m *agyMapper) closeUnsolicited(now int64) []Event {
 		return nil
 	}
 	m.wakeTimer = nil
+	m.rate.dropUntracked()
 	return m.endTurn(agyMessage{}, now)
 }
 
@@ -758,16 +766,21 @@ func (m *agyMapper) mode() string {
 
 func (m *agyMapper) promptSent(id string) {
 	m.mu.Lock()
+	if m.unsolicitedTurn {
+		m.rate.dropUntracked()
+	}
 	m.unsolicitedTurn = false
 	m.wakeSawUsage = false
 	m.stopWakeTimerLocked()
 	m.outstanding[id] = true
+	m.rate.promptSent(id)
 	m.mu.Unlock()
 }
 
 func (m *agyMapper) promptDropped(id string) {
 	m.mu.Lock()
 	delete(m.outstanding, id)
+	m.rate.promptDropped(id)
 	m.mu.Unlock()
 }
 
@@ -810,6 +823,9 @@ func (m *agyMapper) mapLine(line []byte, replies lineReplies) []Event {
 		return nil
 	}
 	now := time.Now().UnixMilli()
+	if m.now != nil {
+		now = m.now()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	hasID := len(msg.ID) > 0 && string(msg.ID) != "null"
@@ -861,6 +877,7 @@ func (m *agyMapper) request(msg agyMessage, replies lineReplies, now int64) []Ev
 		id = "rpc:" + string(raw)
 	}
 	_, replaying := replies.(silentReplies)
+	m.rate.breakRun(replaying)
 	out := m.startTurn(nil, replaying)
 	m.wakeSawUsage = false
 	m.stopWakeTimerLocked()
@@ -900,12 +917,39 @@ func (m *agyMapper) response(msg agyMessage, replies lineReplies, now int64) []E
 		return nil
 	}
 	if kind == agyKindPrompt {
+		_, replaying := replies.(silentReplies)
 		ours := m.outstanding[id]
 		delete(m.outstanding, id)
+		var rateEv *Event
+		if rate, ok := m.rate.complete(id, msg, replaying); ok {
+			rateCopy := rate
+			rateEv = &Event{Live: &wslive.Event{
+				Kind:       wslive.KindStatus,
+				Context:    cloneUsageContext(m.lastContext),
+				OutputTps:  &rateCopy,
+				OutputRate: &wslive.OutputRate{OutputTps: rateCopy, At: now},
+			}}
+		}
 		if len(m.outstanding) > 0 || (!ours && !m.inTurn) {
+			if rateEv != nil {
+				return []Event{*rateEv}
+			}
 			return nil
 		}
-		return m.endTurn(msg, now)
+		out := m.endTurn(msg, now)
+		if rateEv != nil {
+			// Emit KindStatus before TurnEnd so the runner updates telemetry
+			// while the turn is active. Mark this exact pair so file-only
+			// recovery persists both in TurnEnd's single snapshot.
+			if n := len(out); n > 0 && out[n-1].TurnEnd {
+				turnEnd := out[n-1]
+				rateEv.LiveCoalescesTurnEnd = true
+				out = append(out[:n-1], *rateEv, turnEnd)
+			} else {
+				out = append(out, *rateEv)
+			}
+		}
+		return out
 	}
 	a := controlAnswer{ok: msg.Error == nil, body: msg.Result}
 	if msg.Error != nil {
@@ -1037,6 +1081,9 @@ func (m *agyMapper) configOptions(body json.RawMessage) {
 	seen := map[string]bool{}
 	for _, o := range r.ConfigOptions {
 		if o.ID == "model" {
+			if o.CurrentValue != "" && o.CurrentValue != m.model {
+				m.rate.clearWindow()
+			}
 			m.model = o.CurrentValue
 		}
 		for _, v := range o.Options {
@@ -1157,6 +1204,7 @@ func (m *agyMapper) endTurn(msg agyMessage, now int64) []Event {
 	m.wakeStepHadText = false
 	m.wakeSawUsage = false
 	m.stopWakeTimerLocked()
+	m.rate.dropUntracked()
 	ev := Event{TurnEnd: true}
 	switch {
 	case msg.Error != nil:
@@ -1211,6 +1259,9 @@ func (m *agyMapper) update(params json.RawMessage, replies lineReplies, now int6
 	}
 	u := p.Update
 	_, replaying := replies.(silentReplies)
+	if u.SessionUpdate != "agent_message_chunk" {
+		m.rate.breakRun(replaying)
+	}
 	switch u.SessionUpdate {
 	case "agent_message_chunk":
 		out := m.startTurn(nil, replaying)
@@ -1222,6 +1273,7 @@ func (m *agyMapper) update(params json.RawMessage, replies lineReplies, now int6
 			m.armWakeIfReadyLocked(replaying)
 			return out
 		}
+		m.rate.messageChunk(now, replaying)
 		m.wakeStepHadText = true
 		m.wakeSawUsage = false
 		m.armWakeIfReadyLocked(replaying)
@@ -1303,6 +1355,7 @@ func (m *agyMapper) update(params json.RawMessage, replies lineReplies, now int6
 			pct := float64(used) * 100 / float64(u.Size)
 			ctx.Percent = &pct
 		}
+		m.lastContext = cloneUsageContext(ctx)
 		return []Event{{Live: &wslive.Event{Kind: wslive.KindStatus, Context: ctx}}}
 	case "available_commands_update":
 		return m.commands(u.AvailableCommands)

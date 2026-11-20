@@ -620,6 +620,10 @@ func (r *Runner) startConvWith(rec Record, seed []wslive.SlashCommand, spawnPend
 		observed := own.Lead.Observed.Current
 		c.observed = &observed
 	}
+	if own.Lead.OutputRate != nil {
+		rate := own.Lead.OutputRate.OutputTps
+		c.outputTps = &rate
+	}
 	if usage := own.Usage; usage != nil && usage.Context != nil && usage.Context.Tokens != nil {
 		tokens := float64(*usage.Context.Tokens)
 		c.contextTokens = &tokens
