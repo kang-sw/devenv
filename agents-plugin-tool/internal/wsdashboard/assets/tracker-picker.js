@@ -511,7 +511,7 @@
     if (map[id]) delete map[id]; else map[id] = true;
   }
 
-  function pmToggleSelf(id) {
+  function pmToggleSelf(id, fromKey) {
     if (!PM || !id) return;
     if (PM.kind === 'cc') {
       if (pmCcEvalCur().cov.personBy[id]) return;
@@ -525,7 +525,7 @@
         else { PM.picks = {}; PM.picks[id] = true; }
       } else pmTogMap(PM.picks, id);
     }
-    PM.focusId = id;
+    if (!fromKey) PM.focusId = null;
     pmDraw();
   }
 
@@ -538,7 +538,7 @@
     }
     PM.err = '';
     pmTogMap(PM.groups, id);
-    PM.focusId = id;
+    PM.focusId = null;
     pmDraw();
   }
 
@@ -660,7 +660,7 @@
     if (k === 'Enter' && t && t.id === 'tkpmq') {
       e.preventDefault();
       var targetId = PM.focusId || pmVisibleIds()[0];
-      if (targetId) pmToggleSelf(targetId);
+      if (targetId) pmToggleSelf(targetId, true);
     }
   }
   // --- end picker modal state & renderer
