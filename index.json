@@ -570,7 +570,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-20T08:11:53Z"
+        "touched_at": "2026-11-20T08:13:29Z",
+        "impl": {
+          "branch": "impl/develop/balmy-darn-groom"
+        }
       }
     },
     "261119-feat-ws-whiteboard-frame-css-isolation": {
