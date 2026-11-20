@@ -739,8 +739,8 @@
   function guessTabCols() {
     var openTab = tabList.filter(function (tab) { return tab.t && tab.t.term; })[0];
     if (openTab) return openTab.t.term.cols;
-    var box = doc.getElementById("convo") || doc.getElementById("chead");
-    var w = box ? box.clientWidth : 0;
+    var box = doc.getElementById("convo"), w = box ? box.clientWidth : 0;
+    if (w <= 0) { box = doc.getElementById("chead"); w = box ? box.clientWidth : 0; }
     return w > 0 ? Math.max(20, Math.min(400, Math.floor((w - 20) / 7.8))) : guessCols();
   }
   function activateTab(tid) {

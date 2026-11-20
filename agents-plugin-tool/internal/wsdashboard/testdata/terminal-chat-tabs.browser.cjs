@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { chromium } = require(process.env.WS_PLAYWRIGHT_MODULE);
 const [base, controlURL] = process.argv.slice(2);
-const shots = process.env.WS_CHAT_TERM_SHOTS || '/tmp/chat-term-tabs';
+const shots = process.env.WS_CHAT_TERM_SHOTS;
 
 async function until(fn, what, ms = 10000) {
   const limit = Date.now() + ms;
@@ -14,7 +14,7 @@ async function until(fn, what, ms = 10000) {
 }
 
 (async () => {
-  fs.mkdirSync(shots, { recursive: true });
+  if (shots) fs.mkdirSync(shots, { recursive: true });
   const browser = await chromium.launch({ headless: true });
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'ko-KR' });
@@ -23,6 +23,16 @@ async function until(fn, what, ms = 10000) {
       { name: 'ws_dashboard_lang', value: 'ko', url: base }
     ]);
     const tab = await context.newPage(), errors = [], termPosts = [], termCloses = [], wsOpens = [];
+    async function capture(name) { if (shots) await tab.screenshot({ path: shots + '/' + name }); }
+    async function setTheme(theme) {
+      await tab.evaluate(theme => {
+        const button = document.querySelector('[data-theme-set="' + theme + '"]');
+        if (!button) throw new Error('missing theme toggle: ' + theme);
+        button.click();
+      }, theme);
+      await until(() => tab.evaluate(theme => document.documentElement.getAttribute('data-theme') === theme, theme), theme + ' shell theme');
+      await until(() => page.evaluate(theme => document.documentElement.getAttribute('data-theme') === theme, theme), theme + ' session theme');
+    }
     tab.on('pageerror', e => { errors.push(e.message); console.error('pageerror:', e.message); });
     tab.on('request', r => {
       const u = new URL(r.url());
@@ -44,12 +54,10 @@ async function until(fn, what, ms = 10000) {
     assert.equal(await page.locator('#agisland').isVisible(), true);
     assert.equal(await page.locator('#chead .csum').isVisible(), true);
     assert.equal(await page.locator('.bcard[data-kind="terminal"]').count(), 0);
-    await tab.screenshot({ path: shots + '/default-ctabs.png' });
-    await tab.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
-    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
-    await tab.screenshot({ path: shots + '/default-ctabs-light.png' });
-    await tab.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
-    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+    await capture('default-ctabs.png');
+    await setTheme('light');
+    await capture('default-ctabs-light.png');
+    await setTheme('dark');
 
     // 1. One-click + opens Terminal 1 in grid-area: convo without duplicating a .bcard
     await page.locator('#ctabs [data-ctab-add-term]').click();
@@ -119,12 +127,10 @@ async function until(fn, what, ms = 10000) {
     await input2.pressSequentially('echo TAB2-OK', { delay: 10 });
     await input2.press('Enter');
     await until(() => page.evaluate(() => (document.querySelector('#cterm-panes .d-tpane[data-active]')?.textContent || '').includes('TAB2-OK')), 'TAB2-OK output');
-    await tab.screenshot({ path: shots + '/active-term-tabs.png' });
-    await tab.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
-    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
-    await tab.screenshot({ path: shots + '/active-term-tabs-light.png' });
-    await tab.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
-    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+    await capture('active-term-tabs.png');
+    await setTheme('light');
+    await capture('active-term-tabs-light.png');
+    await setTheme('dark');
 
     // 4. Coexistence with board terminal card + reload persistence
     await page.locator('#board-term-slot .tnew').click();
