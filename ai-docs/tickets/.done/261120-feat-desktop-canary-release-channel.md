@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 065b18fcc5b5338b
 sage-review-design-reviewed: 065b18fcc5b5338b
+completed: 2026-11-21
 ---
 
 # Add a desktop canary release channel
@@ -489,3 +490,83 @@ Verification: automated dashboard browser and Electron main/preload tests pass;
 the named non-Codex executor records before/after screenshot evidence and an
 independent reviewer checks placement, canary-only stable-return visibility,
 distinction, localization, and regressions.
+
+### Result (d0a9ea764) - 2026-11-21
+
+- Executed by a Claude Code worker. Settings now shows a small dashed
+  warn-ink `Canary 빌드로 업데이트` pill in the same row as `Check for updates`.
+  It is a native button with keyboard access and a `:focus-visible` ring. A
+  long label wraps inside the pill, which never overflows the card. A
+  `Back to stable` row sits below the check row. It shows only when the
+  shell's `channel()` reports `canary: true`, which is
+  `app.isPackaged && updater.isCanary()`. The row names the running canary
+  and the downgrade. A stable relaunch reports `canary: false` and the row
+  stays hidden.
+- IPC: the preload adds payload-free `checkCanary()` and `backToStable()`
+  (`werkschaft:update-check-canary` and `werkschaft:update-back-to-stable`)
+  plus a `channel()` invoke (`werkschaft:update-channel`). Main admits all
+  three only through the existing `fromDashboard` main-frame pin. Any
+  renderer argument is dropped, and a refused caller gets `{canary:false}`.
+  Release selection and URLs stay in the main-process updater from Phase 2.
+- Statuses carrying `action` drive their own toasts:
+  - Canary: available (Update/Skip), no newer canary, a distinct miss at
+    the page cap, and failure.
+  - Stable return: available names the stable target, the running canary
+    and the downgrade, with one `Downgrade to vX` action, a dismiss and no
+    Skip. Nothing installs before that click. Ready says the shared daemon
+    keeps running. There are also already-stable and failure toasts. A
+    Windows shell offers only the download page.
+  - Statuses without `action` read exactly as before.
+- Compatibility (Decisions 5 and 9): the IPC addition is T0 both ways. A
+  new dashboard on an older shell builds neither control, because each is
+  gated on its own bridge members. An older dashboard ignores the extra
+  members and the optional `action`/`limited` status fields. This change
+  adds no file I/O and no polling. A page load makes one in-memory IPC
+  call, `channel()`, and the actions run only on click (performance manual
+  rules 1 and 5).
+- Localization: 15 new `js.update.*` keys in all 11 wsi18n tables, with
+  placeholders matching English. Korean keeps the owner's label verbatim.
+  English and the long European labels were shortened so that all 11
+  locales fit beside the check button at the 760 px minimum window width.
+- Screenshots in `ai-docs/assets/mockups/261120/canary-channel/`: all are
+  1800x1000, ko-KR, with the Settings card open and the none phase unless
+  noted.
+  - Before: `before-settings-light.png` and `before-settings-dark.png`.
+  - After, stable running (also the state after a return relaunch):
+    `after-stable-running-light.png` and `after-stable-running-dark.png`,
+    plus the `-focus-` variants.
+  - After, canary running: `after-canary-running-light.png` and
+    `after-canary-running-dark.png`.
+  - Toasts: `after-canary-available-*`, `after-stable-return-confirm-*`
+    and `after-stable-return-ready-*`.
+  - Narrow 760 px: `after-narrow-{ko-KR,en-US}-{light,dark}-760.png`.
+
+  Comparison: the before and after-stable shots match everywhere except the
+  App update section. There the pill is added on the right of the
+  `업데이트 확인` row, with the label and the `최신 버전` line unchanged, and
+  no Back to stable appears. The canary-running shots add only the
+  `안정 버전으로 되돌리기` row (`canary v0.52.0-canary.1 실행 중 · … (다운그레이드)`)
+  below it. The card grows upward by that row, and the other rows and the
+  footer are unchanged. The pill reads as distinct in both themes.
+- Review (lite, independent): no Critical or Important findings.
+  - Minor 1 (a `(skipped)` suffix on a stable-return Settings line) was
+    fixed in d0a9ea764 and is pinned by the fixture.
+  - Minor 2 (a partial bridge exposing only some of the new members is
+    untested) was left as is. It is reachable only with a mismatched
+    preload, and each control is gated on its own members.
+- Verification:
+  - `node --test test/*.test.js` in `desktop-electron`: 184 tests, 180
+    pass, 4 Windows-only skips, 0 fail. This includes the new main IPC
+    admission test and the preload test.
+  - `TestDesktopUpdateBrowser` passed. It ran headless Chromium through the
+    cached Playwright with `PLAYWRIGHT_BROWSERS_PATH` set, with the desktop
+    bridge stubbed and no Electron. It covers the browser tab, the older
+    shell, a stable shell, a canary shell, all 11 locales at narrow width,
+    and a failing `channel()`.
+  - The full `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test
+    ./internal/wsdashboard -count=1` passed on e33dc16f8 (329 s; the
+    Chromium test is skipped without Playwright). The browser test was
+    rerun on d0a9ea764.
+  - The wsi18n key, table, placeholder and plural tests passed.
+    `TestEveryEnglishKeyIsUsed` fails on four `wb.*` keys this change does
+    not touch.
