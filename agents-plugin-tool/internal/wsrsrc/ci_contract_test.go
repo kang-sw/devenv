@@ -142,3 +142,94 @@ func TestCIReleaseLongSkipGate(t *testing.T) {
 		})
 	}
 }
+
+func TestCIReleasePublication(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash unavailable")
+	}
+	workflow, err := os.ReadFile(filepath.Join("..", "..", "..", ".github", "workflows", "ws-mcp-release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(workflow)
+	_, publication, ok := strings.Cut(text, "      - name: Publish GitHub release assets\n")
+	if !ok {
+		t.Fatal("native publication step missing")
+	}
+	publication, _, ok = strings.Cut(publication, "\n  windows-smoke:")
+	if !ok || !strings.Contains(publication, "if: startsWith(github.ref, 'refs/tags/') && !inputs.desktop_dry_run") {
+		t.Fatal("native publication must remain gated on tags and dry-run veto")
+	}
+	_, body, ok := strings.Cut(publication, "        run: |\n")
+	if !ok {
+		t.Fatal("native publication shell missing")
+	}
+	var lines []string
+	for _, line := range strings.Split(strings.TrimSuffix(body, "\n"), "\n") {
+		if !strings.HasPrefix(line, "          ") {
+			t.Fatalf("unexpected native publication indentation: %q", line)
+		}
+		lines = append(lines, strings.TrimPrefix(line, "          "))
+	}
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "dist"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "dist", "native.bin"), []byte("fixture"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	gh := "#!/bin/sh\nif [ \"$2\" = view ]; then exit 1; fi\nprintf '<%s>\\n' \"$@\" >> \"$CALL_LOG\"\nprintf '<end>\\n' >> \"$CALL_LOG\"\n"
+	if err := os.WriteFile(filepath.Join(root, "gh"), []byte(gh), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		tag    string
+		canary bool
+	}{
+		{"v0.50.8", false},
+		{"v0.50.9-canary.0", true},
+		{"v12.3.4-canary.19", true},
+		{"v0.50.9-canary.1-extra", false},
+		{"v0.50.9-canary.x", false},
+		{"v0.50.9-canary.1.2", false},
+		{"v0.50.9-rc.1", false},
+	} {
+		t.Run(tt.tag, func(t *testing.T) {
+			log := filepath.Join(t.TempDir(), "calls")
+			cmd := exec.Command(bash, "-c", strings.Join(lines, "\n"))
+			cmd.Dir = root
+			cmd.Env = append(os.Environ(), "PATH="+root+string(os.PathListSeparator)+os.Getenv("PATH"), "GITHUB_REF_NAME="+tt.tag, "CALL_LOG="+log)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("publication failed: %v\n%s", err, out)
+			}
+			calls, err := os.ReadFile(log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "<release>\n<create>\n<" + tt.tag + ">\n<--title>\n<" + tt.tag + ">\n<--notes>\n<Automated ws-mcp release assets for " + tt.tag + ".>\n"
+			if tt.canary {
+				want += "<--prerelease>\n<--latest=false>\n"
+			}
+			want += "<end>\n<release>\n<upload>\n<" + tt.tag + ">\n<dist/native.bin>\n<--clobber>\n<end>\n"
+			if string(calls) != want {
+				t.Fatalf("calls = %q, want %q", calls, want)
+			}
+		})
+	}
+	for _, required := range []string{
+		"agents-plugin-tool/desktop-electron/dist/Werkschaft-${{ matrix.platform }}-${{ matrix.arch }}.zip",
+		"agents-plugin-tool/desktop-electron/dist/Werkschaft-desktop-SHA256SUMS",
+		"[['darwin', 'arm64'], ['win32', 'x64']]",
+		"fs.writeFileSync(path.join(process.env.OUTPUT, SUMS), lines.join('\\n') + '\\n');",
+		"gh release upload \"$GITHUB_REF_NAME\" \"$RUNNER_TEMP/desktop-release/\"* --repo \"$GITHUB_REPOSITORY\" --clobber",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("desktop release contract missing %q", required)
+		}
+	}
+	_, desktop, ok := strings.Cut(text, "      - name: Publish desktop assets to the native assets' tag release\n")
+	if !ok || !strings.Contains(desktop, "if: startsWith(github.ref, 'refs/tags/') && !inputs.desktop_dry_run") {
+		t.Fatal("desktop upload must target the same tag release under the same dry-run veto")
+	}
+}

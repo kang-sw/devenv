@@ -395,7 +395,7 @@ func assetID(data pageAssetsData, source string) string {
 // release_repository says the same for the launcher's binary download, but the
 // shared daemon never reads runtime.json, so the value is restated here and a
 // test pins the two together.
-const releaseRepository = "kang-sw/devenv"
+const releaseRepository = "kang-sw/werkschaft"
 
 // pageFuncs is the template FuncMap for one language: the page helpers and
 // the translation funcs t, tn, and tcode, with the Go-built display strings
@@ -408,19 +408,20 @@ func pageFuncs(lang string, icons map[string]bool) template.FuncMap {
 			}
 			return template.HTML(`<svg class="i" aria-hidden="true"><use href="#i-` + name + `"/></svg>`), nil
 		},
-		"region":   renderRegionElement,
-		"clock":    clockText,
-		"spanText": spanText,
-		"toolName": toolName,
-		"shortID":  shortID,
-		"marked":   func(text string) template.HTML { return markedText(lang, text) },
+		"region":    renderRegionElement,
+		"clock":     clockText,
+		"sinceText": func(at, ms int64) string { return spanText(max(at-ms+500, 0)) },
+		"spanText":  spanText,
+		"toolName":  toolName,
+		"shortID":   shortID,
+		"marked":    func(text string) template.HTML { return markedText(lang, text) },
 		// The tool summary's token and batch lines.
-		"tokenText":  func(requests int, u *wslive.TokenUsage) string { return tokenText(lang, requests, u) },
-		"tokenTitle": func(requests int, u *wslive.TokenUsage) string { return tokenTitle(lang, requests, u) },
-		"requests":   summaryRequests,
-		"batchNums":  func(b wslive.ToolBatch) []batchNum { return batchNums(lang, b) },
-		"batchArgs":  batchArgs,
-		"argsList":   batchArgsList,
+		"tokenText":        func(requests int, u *wslive.TokenUsage) string { return tokenText(lang, requests, u) },
+		"tokenTitle":       func(requests int, u *wslive.TokenUsage) string { return tokenTitle(lang, requests, u) },
+		"requests":         summaryRequests,
+		"batchNums":        func(b wslive.ToolBatch) []batchNum { return batchNums(lang, b) },
+		"batchArgs":        batchArgs,
+		"argsList":         batchArgsList,
 		"phaseWord":        func(phase string) string { return phaseWord(lang, phase) },
 		"ctxBoundaryTitle": func(kind, arg string) string { return ctxBoundaryTitle(lang, kind, arg) },
 		// Retained for the SHA256-pinned historical template fixture (testdata/pre_effects/dashboard.tmpl).

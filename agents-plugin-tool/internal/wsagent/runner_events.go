@@ -151,8 +151,9 @@ func (c *conv) handle(ev Event) {
 	case ev.PermissionMode != "":
 		if ev.PermissionMode != c.activeMode {
 			c.setStatus(func() { c.activeMode = ev.PermissionMode })
-			if c.rec.Lead && !quiet {
-				if level, _, err := c.r.leadPermission(c.record(), c.dir); err == nil {
+			rec := c.record()
+			if rec.Lead && !quiet {
+				if level, _, err := c.r.leadPermission(rec, c.dir); err == nil {
 					c.permissionNudge(level, false, ev.PermissionMode)
 				}
 			}
@@ -165,7 +166,8 @@ func (c *conv) handle(ev Event) {
 		// that mode on record (agyBypass), so a report leaves it. A flag
 		// left stale by an older writer goes, so that a report of
 		// native default does not revive it without the user.
-		if c.rec.Lead && !quiet && !c.dirtyMode && !c.rec.agyBypass() && ev.PermissionMode != c.rec.PermissionMode && slices.Contains(permissionModes(c.rec.Backend, []map[string]BackendRegistration{c.r.opts.Backends}), ev.PermissionMode) {
+		rec := c.record()
+		if rec.Lead && !quiet && !c.dirtyMode && !rec.agyBypass() && ev.PermissionMode != rec.PermissionMode && slices.Contains(permissionModes(rec.Backend, []map[string]BackendRegistration{c.r.opts.Backends}), ev.PermissionMode) {
 			c.update(func(rec *Record) { rec.PermissionMode, rec.AgyBypass = ev.PermissionMode, false })
 			c.changed(quiet)
 		}
@@ -947,18 +949,21 @@ func (c *conv) setSettings(model, effort *string) error {
 // backend session. A restart ends the session's background work with the
 // process, so it is the last resort.
 func (c *conv) applySettings() {
-	model, effort, mode, reconcile := c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.reconcileMode
+	model, effort, mode, permission, reconcile := c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.dirtyPermission, c.reconcileMode
 	if c.replaying {
 		return
 	}
-	c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.reconcileMode = false, false, false, false
-	if c.proc == nil || (!model && !effort && !mode) {
+	c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.dirtyPermission, c.reconcileMode = false, false, false, false, false
+	if c.proc == nil || (!model && !effort && !mode && !permission) {
 		return
 	}
 	rec := c.record()
 	restart := false
 	controls := controlsFor(c.proc)
-	if model && controls.SetModel(rec.Model) != nil {
+	if permission && !rec.Lead {
+		restart = true
+	}
+	if model && !restart && controls.SetModel(rec.Model) != nil {
 		restart = true
 	}
 	if effort && !restart && controls.SetEffort(rec.Effort) != nil {

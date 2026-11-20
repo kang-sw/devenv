@@ -836,6 +836,67 @@ func TestRegionHashIgnoresRenderTime(t *testing.T) {
 	}
 }
 
+func TestActivityElapsedTimers(t *testing.T) {
+	now := time.Now()
+	phase := now.Add(-18 * time.Second).UnixMilli()
+	turn := now.Add(-72 * time.Second).UnixMilli()
+	for _, tc := range []struct {
+		name, lang  string
+		phase, turn int64
+		wantTimes   int
+		wantTurn    bool
+	}{
+		{"both English", "en", phase, turn, 2, true},
+		{"both Korean", "ko", phase, turn, 2, true},
+		{"phase only", "en", phase, 0, 1, false},
+		{"turn only", "en", 0, turn, 1, false},
+		{"neither", "en", 0, 0, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lead := wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseThinking, PhaseStartedAt: tc.phase}, TurnStartedAt: tc.turn}
+			view := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: liveSnap(now, lead), Now: now})
+			view.Lang = tc.lang
+			regions, err := renderSessionRegions(view, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			again, err := renderSessionRegions(view, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if regions[regionConvLive].Hash != again[regionConvLive].Hash {
+				t.Fatal("unchanged activity changed its region hash")
+			}
+			activity := string(regions[regionConvLive].HTML)
+			if got := strings.Count(activity, `data-f="since"`); got != tc.wantTimes {
+				t.Fatalf("time count = %d, want %d: %s", got, tc.wantTimes, activity)
+			}
+			if tc.phase > 0 {
+				want := `data-ms="` + strconv.FormatInt(tc.phase, 10) + `" data-f="since">18s</time>`
+				if !strings.Contains(activity, want) {
+					t.Errorf("phase time lacks initial elapsed text %q: %s", want, activity)
+				}
+			}
+			if tc.turn > 0 {
+				want := `data-ms="` + strconv.FormatInt(tc.turn, 10) + `" data-f="since">1m 12s</time>`
+				if !strings.Contains(activity, want) {
+					t.Errorf("turn time lacks initial elapsed text %q: %s", want, activity)
+				}
+			}
+			turnLabel := "(turn "
+			if tc.lang == "ko" {
+				turnLabel = "(턴 "
+			}
+			if got := strings.Contains(activity, turnLabel); got != tc.wantTurn {
+				t.Errorf("turn label present = %t, want %t: %s", got, tc.wantTurn, activity)
+			}
+			if tc.wantTimes == 0 && strings.Contains(activity, " · ") {
+				t.Errorf("empty elapsed separator: %s", activity)
+			}
+		})
+	}
+}
+
 func TestRenderedPermissionWaitAndEndedSessions(t *testing.T) {
 	now := testNow
 	lead := wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhasePermission,

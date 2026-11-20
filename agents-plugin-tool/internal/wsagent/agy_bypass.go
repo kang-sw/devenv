@@ -23,7 +23,8 @@ func (rec Record) agyBypass() bool {
 // prompt the process could not answer stays for the user; a failed write
 // stopped the process, so nothing is left to answer.
 func (c *conv) allowAgyBypassPending() {
-	if c.replaying || !(c.rec.agyBypass() || !c.rec.Lead && c.r.opts.Backends[c.rec.Backend].WorkerAutoApprove) {
+	rec := c.record()
+	if c.replaying || !(rec.agyBypass() || !rec.Lead && c.r.opts.Backends[rec.Backend].WorkerAutoApprove) {
 		return
 	}
 	answerer := controlsFor(c.proc).approval
@@ -36,7 +37,7 @@ func (c *conv) allowAgyBypassPending() {
 			c.dropApproval(approval.ID, false)
 			continue
 		}
-		fmt.Fprintf(c.r.opts.Log, "agent %s: auto-allow permission: %v\n", c.rec.ReplyID, err)
+		fmt.Fprintf(c.r.opts.Log, "agent %s: auto-allow permission: %v\n", rec.ReplyID, err)
 		if !errors.Is(err, errNoApprovalAnswer) {
 			return
 		}

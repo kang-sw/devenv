@@ -60,28 +60,44 @@ func (c *conv) startProcess() error {
 }
 
 func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
+	releaseAdmission := func() {}
+	if !attach {
+		releaseAdmission = c.r.holdParentAdmission(rec.Parent)
+	}
+	defer releaseAdmission()
 	c.mcpStale = false
 	c.loadCompaction()
 	c.loadModelWait()
-	// No common worker selection or ceiling is applied in this slice.
-	if !attach {
-		c.permissionNudge(legacyWorkerPermission(def), true, "")
-	}
 	if rec.Backend == BackendPi && !attach {
 		if err := c.r.checkChildProfile(rec.Parent, rec.Profile, def); err != nil {
 			return err
 		}
 	}
-	level := PermissionLevel("")
+	level, source := PermissionLevel(""), ""
 	if attach {
-		level = childLevel(c.dir)
-	} else {
-		// Every launch re-admits a spawned child's authority against its
-		// parent's current level (agent_tools.go).
 		var err error
-		if level, err = c.r.childAdmission(rec); err != nil {
+		level, source, err = c.r.workerPermission(rec, def, c.dir)
+		if err != nil {
+			// A daemon replacement observes an existing held process instead of
+			// orphaning it solely because its selection cannot be read.
+			fmt.Fprintf(c.r.opts.Log, "agent %s: rejoin worker permission selection (advisory): %v\n", rec.ReplyID, err)
+			level, source = "", ""
+		}
+	} else {
+		// Every launch re-admits the worker's current explicit or legacy-derived
+		// authority against its parent's current level (agent_tools.go).
+		var err error
+		if level, source, err = c.r.childAdmission(rec, def); err != nil {
 			return err
 		}
+	}
+	c.setStatus(func() {
+		c.workerPermissionLevel = level
+		c.workerPermissionSource = source
+	})
+	if !attach {
+		// Emit only after reading the stored authority used for admission.
+		c.permissionNudge(level, true, "")
 	}
 	if c.r.opts.Holders != nil && !attach {
 		if !c.r.scanDone() {
@@ -240,7 +256,7 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 			})
 		}
 	}
-	c.dirtyModel, c.dirtyEffort = false, false
+	c.dirtyModel, c.dirtyEffort, c.dirtyPermission = false, false, false
 	if def.ListInIndex != rec.Listed {
 		c.update(func(rec *Record) { rec.Listed = def.ListInIndex })
 		c.writeRegistration()
@@ -468,7 +484,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		c.replaying, c.seq = true, rec.HolderSeq
 		return nil
 	}
-	c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.reconcileMode = false, false, false, false
+	c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.dirtyPermission, c.reconcileMode = false, false, false, false, false
 	c.seq, c.seqDirty, c.live.ringDirty = 0, false, false
 	c.update(func(rec *Record) {
 		rec.HolderID, rec.HostPID, rec.HolderSeq = id, pid, 0
@@ -581,7 +597,11 @@ func (c *conv) checkReattach() {
 				if c.retireDowngradedWorker(hp) {
 					return
 				}
-				if _, err := c.r.childAdmission(c.record()); err != nil {
+				rec := c.record()
+				rp, resolveErr := c.r.resolve(rec.Profile, rec.Root)
+				if resolveErr != nil {
+					fmt.Fprintf(c.r.opts.Log, "agent %s: rejoin permission admission (advisory; applies on next launch): %v\n", c.rec.ReplyID, resolveErr)
+				} else if _, _, err := c.r.childAdmission(rec, rp.Definition); err != nil {
 					fmt.Fprintf(c.r.opts.Log, "agent %s: rejoin permission admission (advisory; applies on next launch): %v\n", c.rec.ReplyID, err)
 				}
 				c.r.restoreToken(c.record())
@@ -814,7 +834,7 @@ func composeInstructions(dir string, rec Record, p Profile, system, steer string
 		parts = append(parts, strings.TrimSpace(string(raw)))
 	}
 	if len(p.WSTools) > 0 {
-		key := fmt.Sprintf("Your ws session key is `%s`. Pass it as the `session_key` argument of every ws tool call.", rec.WSKey)
+		key := fmt.Sprintf("Your ws session key is `%s`. Pass it as the `session_key` argument of every ws tool call. This key is bound to worktree `%s`; if work moves to another worktree, use a key minted for that destination (from a direct spawn there or a legitimate acquisition that returns one), because this key is never rebound.", rec.WSKey, rec.Root)
 		if rec.Parent != nil {
 			key += fmt.Sprintf(" Your direct parent's mailbox reply address is `id:%s`; send it reports or questions with `mailbox.send`.", rec.Parent.ReplyID)
 		}

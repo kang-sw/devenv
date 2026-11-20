@@ -172,7 +172,8 @@ fetched state.
   assembles a `wsflow` daemon input with
   `agents-plugin-tool/desktop-electron/scripts/assemble-daemon-input.cjs`, then
   runs `desktop-electron/scripts/build.cjs` without launching Electron. The
-  packaged app version comes from the validated plugin runtime contract.
+  packaged app version comes from validated binary metadata; for stable tags it
+  equals the plugin runtime contract's numeric core.
 - A final job waits for both desktop platforms, verifies each archive against
   its platform checksum, and writes one combined
   `Werkschaft-desktop-SHA256SUMS` (SHA256, two spaces, asset filename per line).
@@ -295,3 +296,70 @@ independent of the release.
 - Delete the release branch: `git push origin --delete release/<version>` and
   `git branch -D release/<version>`. The next develop merge resumes normal
   development without a version bump; the next ship owns the next patch bump.
+
+## Desktop canary procedure
+
+This is a separate owner-operated prerelease path. It publishes a desktop test
+build from reviewed `develop` without promoting `main` or merging its canary-only
+version bump back into `develop`. Complete the manual install and return checks
+below before treating a canary as accepted. Keep the stable procedure above as
+the authority for stable publication.
+
+1. Fetch origin and tags, confirm local `develop` contains `origin/develop`, and
+   run the review-watermark release gate over the intended `develop` cut as in
+   Pre-flight. Cut an ephemeral `release/canary-<core>` branch in its own worktree
+   at that reviewed commit. Record the cut SHA. No unreviewed commit may enter
+   the branch except its generated version bump, which is tested on its final
+   SHA. Stop if the review gate has no clear cut or needs an override that the
+   owner has not approved.
+2. Choose the **next patch core** after the latest claimed stable tag, within
+   the current minor (for example, stable `v0.50.8` gives core `0.50.9`). Run
+   `agents-plugin-tool/scripts/bump-ws-version.sh <core>` on the ephemeral
+   branch and commit its generated changes. Confirm both runtime contracts
+   retain numeric `plugin_version=<core>` and `release_tag=v<core>`; the canary
+   suffix belongs to the tag and native binary metadata. **Do not publish a
+   minor-core canary** unless a separately approved T3 flow is defined. A
+   higher minor would replace the shared daemon across minors, break older
+   plugin sessions, and Back to stable would not restore that daemon.
+3. Grade the actual canary payload under
+   `ai-docs/manuals/release-compatibility.md`: cite old/new read and write
+   paths, the highest tier, and recovery on reopening. The canary label alone
+   has no compatibility grade. T4 cannot ship; a T3 change stops this patch-core
+   procedure. Run the normal local release tests and contract/marketplace
+   checks on the branch head. Push the ephemeral branch, dispatch `ws-mcp CI`
+   for that exact SHA, and require its Linux and Windows jobs to pass with the
+   selected long-test policy, as in Publish. Record that SHA as the tag target.
+4. Refresh remote tags before choosing `N`. For `v<core>-canary.N`, use the
+   lowest non-negative decimal counter not already claimed on origin; never
+   overwrite or delete an existing canary tag to resolve a collision. Recheck
+   the chosen remote ref immediately before publishing. If another publisher
+   claims it, increment `N`, recheck, and tag the same tested SHA. Show the
+   owner the core, counter, branch, tested SHA, compatibility verdict, and
+   publication sequence for approval. Push only the canary tag; leave `main`
+   and `develop` untouched. A tag exactly shaped `vX.Y.Z-canary.N` creates the
+   same tag release with `--prerelease --latest=false`; native and desktop jobs
+   upload to that one release.
+5. Watch the complete `ws-mcp release` run, including native build, Windows
+   smoke, both desktop builds, and `desktop-release`. Confirm the release is a
+   prerelease, is excluded from latest, and its tag and target SHA match the
+   approved values. Download the release assets and verify native `SHA256SUMS`
+   plus combined `Werkschaft-desktop-SHA256SUMS`. Confirm the latter contains
+   exactly `Werkschaft-darwin-arm64.zip` and `Werkschaft-win32-x64.zip`, each
+   with a passing SHA-256 check. A green native upload alone is incomplete.
+6. On a test machine, use the explicit `Canary 빌드로 업데이트` action to install
+   the canary, restart, and confirm the desktop reports the suffixed version and
+   connects to its bundled daemon. Exercise `Back to stable`, confirm the
+   selected `/releases/latest` stable desktop installs and reports its stable
+   version, then inspect the shared daemon version and source. App SemVer puts
+   a same-core canary below stable, while daemon retention keeps a healthy
+   equal-core daemon regardless of suffix. Back to stable changes app bytes;
+   it never drains or downgrades the shared daemon. If equal-core canary daemon
+   bytes must be replaced, use the explicit `Replace daemon (same core)` action
+   or shut down the daemon and reconnect with the stable app. A lower-core
+   stable app attaches to a healthy higher-core daemon; shut that daemon down
+   explicitly before reconnecting if stable daemon bytes are required.
+7. Record the acceptance result and remove the ephemeral worktree and local
+   branch. Delete the remote canary branch after verification; retain the
+   published tag/release for traceability. Do not merge the canary-only bump
+   into `develop` and do not promote `main`. A later stable ship derives its own
+   version from the stable flow above.

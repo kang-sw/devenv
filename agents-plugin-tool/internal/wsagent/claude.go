@@ -652,7 +652,10 @@ type claudeMapper struct {
 
 	context *wslive.UsageContext
 	limits  map[string]wslive.UsageLimit
-	cost    *wslive.UsageCost
+	// limitsAsOf is the last rate_limit_event observation. Other status
+	// events keep it, so context activity cannot make old limits look fresh.
+	limitsAsOf int64
+	cost       *wslive.UsageCost
 	// window is the largest modelUsage.contextWindow a result reported: the
 	// model's window, the fallback for compactWindow.
 	window int64
@@ -1105,6 +1108,7 @@ func (m *claudeMapper) mapEvents(line []byte, replies lineReplies) []Event {
 			for kind, w := range l.RateLimit.UnifiedWindows {
 				if (kind == wslive.LimitFiveHour || kind == wslive.LimitSevenDay) && w.Utilization != nil {
 					m.limits[kind] = wslive.UsageLimit{Kind: kind, Percent: *w.Utilization * 100, ResetsAt: w.ResetsAt * 1000}
+					m.limitsAsOf = now
 				}
 			}
 			return []Event{m.status()}
@@ -1521,7 +1525,7 @@ func (m *claudeMapper) resultTool(name string) string {
 func claudePluginServer(plugin, key string) string { return "plugin:" + plugin + ":" + key }
 
 func (m *claudeMapper) status() Event {
-	ev := wslive.Event{Kind: wslive.KindStatus, Cost: m.cost}
+	ev := wslive.Event{Kind: wslive.KindStatus, Cost: m.cost, LimitsAsOf: m.limitsAsOf}
 	if m.context != nil {
 		c := *m.context
 		c.Window = m.window

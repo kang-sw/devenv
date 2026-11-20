@@ -206,6 +206,7 @@ func TestAgentChildPromptCarriesTheSteer(t *testing.T) {
 	a, _ := h.agentRunning(h.leadCaller(), AgentSpawnRequest{Prompt: "go", Tier: "small", Authority: "read-only", SystemPrompt: "You are the cache probe."})
 	text := instructionsOf(t, h.backend.start(0))
 	want := "You are the cache probe.\n\nYour ws session key is `" + h.record(a).WSKey + "`. Pass it as the `session_key` argument of every ws tool call. " +
+		"This key is bound to worktree `" + h.record(a).Root + "`; if work moves to another worktree, use a key minted for that destination (from a direct spawn there or a legitimate acquisition that returns one), because this key is never rebound. " +
 		"Your direct parent's mailbox reply address is `id:" + leadParent.ReplyID + "`; send it reports or questions with `mailbox.send`. " +
 		"Never use the native `Agent` tool. Start a subagent only with the ws `agent.spawn` tool, and continue one with the ws `mailbox.send` tool.\n"
 	if text != want {

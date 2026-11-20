@@ -423,7 +423,7 @@ func newLiveWriter(dir, key, adapter string, now func() time.Time, log io.Writer
 			st.SeedOutputRate(prev.Lead.OutputRate)
 		}
 		if u := prev.Usage; u != nil {
-			_, _ = st.Apply(wslive.Event{Kind: wslive.KindStatus, Context: u.Context, Cost: u.Cost, Limits: u.Limits}, now().UnixMilli())
+			_, _ = st.Apply(wslive.Event{Kind: wslive.KindStatus, Context: u.Context, Cost: u.Cost, Limits: u.Limits, LimitsAsOf: u.LimitsAsOf}, now().UnixMilli())
 		}
 		// The command list too: a session whose process is not running
 		// reports it again only at its next turn (claude) or start (pi),

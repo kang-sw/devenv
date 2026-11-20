@@ -40,6 +40,10 @@ const (
 	modelWaitBackoffFiring
 )
 
+// Owner disabled silence detection: long tool-call generation looks identical
+// to a stalled stream, while agy's in-band failures still trigger retries.
+var agySilenceWatchdogEnabled = false
+
 // defaultAgyModelWaitBackoff uses equal jitter: each attempt waits between
 // half and all of an exponentially growing ceiling, bounded at 30 seconds.
 func defaultAgyModelWaitBackoff(attempt int) time.Duration {
@@ -140,7 +144,7 @@ func (c *conv) startModelWait() {
 
 func (c *conv) resetModelWaitTimer() {
 	c.stopModelWaitTimer()
-	if !c.modelWaitArmed || c.modelWaitCancelling || c.modelWaitFailure != "" || c.modelWaitFailErr != "" || c.modelWaitTimeout <= 0 {
+	if !agySilenceWatchdogEnabled || !c.modelWaitArmed || c.modelWaitCancelling || c.modelWaitFailure != "" || c.modelWaitFailErr != "" || c.modelWaitTimeout <= 0 {
 		return
 	}
 	if c.modelWaitPending > 0 || len(c.approvals) > 0 {

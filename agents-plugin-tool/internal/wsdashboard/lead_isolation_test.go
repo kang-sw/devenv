@@ -16,6 +16,14 @@ func TestLeadPopoverLaunchBehavior(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lead popover cases failed: %v\n%s", err, out)
 	}
+	// The common permission level controls of the same popover and the
+	// session menu: absent support, the three levels, the full warning's
+	// cancel/confirm and permission_full_ack, reconnect re-reads, refusals
+	// never retried on the legacy route, and the state's quality.
+	out, err = exec.Command(node, "testdata/permission-controls.test.cjs").CombinedOutput()
+	if err != nil {
+		t.Fatalf("permission control cases failed: %v\n%s", err, out)
+	}
 }
 
 // TestLeadPopoverIsolationWiring pins the plugin-isolation control to the

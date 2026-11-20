@@ -374,6 +374,48 @@ func TestChildReportIsSteeredIntoTheRunningParentTurn(t *testing.T) {
 	}
 }
 
+func TestHostedLeadClaimedChildMailIsOneSteerOrLaterTurn(t *testing.T) {
+	for _, active := range []bool{true, false} {
+		name := "later turn"
+		if active {
+			name = "active steer"
+		}
+		t.Run(name, func(t *testing.T) {
+			h := newLeadHarness(t).start()
+			id := h.lead(BackendClaude, LeadOptions{}).ID
+			key := h.record(id).WSKey
+			var holder string
+			var want []string
+			if active {
+				h.send(id, "question")
+				holder = h.holder(id)
+				h.holders.out(holder, stateLine(HarnessRunning), initLine("sess-1", "auto"))
+				h.sync(id, holder)
+				want = append(h.envelopes("question"), "child report")
+			} else {
+				want = []string{"child report"}
+			}
+			h.mail.deliver(key, "child report")
+			if !active {
+				holder = h.holder(id)
+			}
+			eventually(t, "one child mail delivery", func() bool {
+				return slices.Equal(h.userInputs(holder), want)
+			})
+			h.quiesce(id)
+			if queued := h.mail.waiting(key); len(queued) != 0 {
+				t.Fatalf("claimed mail remains queued: %q", queued)
+			}
+			if again, err := h.mail.Drain(h.root, key, nil); err != nil || len(again) != 0 {
+				t.Fatalf("second claim = %+v, %v", again, err)
+			}
+			if got := h.userInputs(holder); !slices.Equal(got, want) {
+				t.Fatalf("hosted lead inputs = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestChildReportPromptsAnIdleParentThatHeldItsReport(t *testing.T) {
 	h, got := childHarness(t)
 	w, wp, _, gc, gp := workerWithChild(t, h)

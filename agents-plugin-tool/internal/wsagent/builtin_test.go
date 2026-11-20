@@ -74,7 +74,7 @@ func TestBuiltinAgentWorkerProfiles(t *testing.T) {
 		if rp.Scope != wsconfig.ScopeBuiltin || p.Backend != backend || p.Lead || !slices.Equal(p.Tools, tools) || !slices.Equal(p.WSTools, AgentWSTools) {
 			t.Fatalf("%s = %+v", name, rp)
 		}
-		for _, tool := range []string{"agent.spawn", "agent.interrupt", "agent.list", "agent.tiers", "mailbox.send"} {
+		for _, tool := range []string{"agent.spawn", "agent.interrupt", "agent.list", "agent.tiers", "mailbox.send", "config.resolve_agent", "infra.read", "path.write"} {
 			if !slices.Contains(p.WSTools, tool) {
 				t.Errorf("%s ws_tools %v lack %s", name, p.WSTools, tool)
 			}

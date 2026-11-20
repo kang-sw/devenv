@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
 // agentHarness is childHarness with both worker harnesses spawnable for
@@ -675,6 +677,47 @@ func TestAgentSystemPromptReachesEveryStart(t *testing.T) {
 	agentRefused(t, err, http.StatusBadRequest, "system_prompt_path")
 }
 
+func TestAgentRenderedPlaybookPromptReachesChildAndKeepsCaps(t *testing.T) {
+	h, _ := agentHarness(t, nil)
+	playbook, err := wsrsrc.Load(filepath.Join("..", "..", "..", "agents-plugin", "rsrc"), "explore", "codex", "", map[string]string{
+		"ExploreAgent":  "an explorer subagent",
+		"SpawnIdiom":    "creating a new Codex task",
+		"ContinueIdiom": "resuming the agent using its task id",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if playbook.Meta.Delegates {
+		t.Fatal("the shipped explore playbook still declares delegates")
+	}
+	if playbook.Meta.Tier != "small" {
+		t.Fatalf("the shipped explore tier = %q, want small", playbook.Meta.Tier)
+	}
+	path := filepath.Join(h.root, "rendered-explore.md")
+	if err := os.WriteFile(path, []byte(playbook.Body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a, _ := h.agentRunning(h.leadCaller(), AgentSpawnRequest{
+		Prompt:           "explore the cache",
+		Tier:             playbook.Meta.Tier,
+		Authority:        "read-only",
+		SystemPromptPath: "rendered-explore.md",
+	})
+	text := instructionsOf(t, h.backend.start(0))
+	want := playbook.Body + "\n\nYour ws session key is `" + h.record(a).WSKey + "`. Pass it as the `session_key` argument of every ws tool call. " +
+		"This key is bound to worktree `" + h.root + "`; if work moves to another worktree, use a key minted for that destination (from a direct spawn there or a legitimate acquisition that returns one), because this key is never rebound. " +
+		"Your direct parent's mailbox reply address is `id:" + leadParent.ReplyID + "`; send it reports or questions with `mailbox.send`.\n"
+	if text != want {
+		t.Fatalf("the rendered playbook body was not delivered exactly: %q, want %q", text, want)
+	}
+
+	_, err = h.runner.AgentSpawn(h.holderOf(a), AgentSpawnRequest{Prompt: "x", Tier: "small", Authority: "workdir-write"})
+	agentRefused(t, err, http.StatusForbidden, "authority workdir-write is above this session's own level read-only")
+	_, err = h.runner.AgentSpawn(h.holderOf(a), AgentSpawnRequest{Prompt: "x", Tier: "medium", Authority: "read-only"})
+	agentRefused(t, err, http.StatusForbidden, `tier "medium" is above this conversation's own tier "small"`)
+}
+
 // TestAgentChildPromptCarriesNoLeadManual: an agent.spawn child's
 // appended prompt is its system prompt, its profile text, its key, and its
 // direct parent reply address, as before the lead manual: the daemon's lead
@@ -685,6 +728,7 @@ func TestAgentChildPromptCarriesNoLeadManual(t *testing.T) {
 	a, _ := h.agentRunning(h.leadCaller(), AgentSpawnRequest{Prompt: "go", Tier: "small", Authority: "read-only", SystemPrompt: "You are the cache probe."})
 	text := instructionsOf(t, h.backend.start(0))
 	want := "You are the cache probe.\n\nYour ws session key is `" + h.record(a).WSKey + "`. Pass it as the `session_key` argument of every ws tool call. " +
+		"This key is bound to worktree `" + h.root + "`; if work moves to another worktree, use a key minted for that destination (from a direct spawn there or a legitimate acquisition that returns one), because this key is never rebound. " +
 		"Your direct parent's mailbox reply address is `id:" + leadParent.ReplyID + "`; send it reports or questions with `mailbox.send`.\n"
 	if text != want {
 		t.Fatalf("the child's appended prompt = %q, want %q", text, want)
@@ -772,12 +816,55 @@ func TestSpawnedWorkerContextNamesDirectParentReturnAddress(t *testing.T) {
 			t.Fatal(err)
 		}
 		text := string(raw)
-		if !strings.Contains(text, "direct parent's mailbox reply address is `"+want+"`") || !strings.Contains(text, "`mailbox.send`") {
+		if strings.Count(text, "direct parent's mailbox reply address is") != 1 ||
+			!strings.Contains(text, "direct parent's mailbox reply address is `"+want+"`") ||
+			!strings.Contains(text, "`mailbox.send`") || strings.Contains(text, "@worktree") {
 			t.Fatalf("worker %d instructions do not name direct parent %q: %q", i, want, text)
+		}
+		if !strings.Contains(text, "This key is bound to worktree `"+spec.Root+"`") ||
+			!strings.Contains(text, "direct spawn there or a legitimate acquisition that returns one") ||
+			!strings.Contains(text, "this key is never rebound") {
+			t.Fatalf("worker %d instructions do not diagnose cross-worktree key reuse: %q", i, text)
 		}
 		if i == 1 && strings.Contains(text, "direct parent's mailbox reply address is `id:"+leadParent.ReplyID+"`") {
 			t.Fatalf("nested worker context names the root lead instead of its direct parent: %q", text)
 		}
+	}
+}
+
+func TestSpawnedWorkerKeyIsMintedForExplicitWorktree(t *testing.T) {
+	h, _ := agentHarness(t, nil)
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "Test"},
+		{"commit", "--allow-empty", "-m", "base"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = h.root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	destination := filepath.Join(t.TempDir(), "destination")
+	cmd := exec.Command("git", "worktree", "add", "-b", "impl/test/destination", destination, "HEAD")
+	cmd.Dir = h.root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add: %v\n%s", err, out)
+	}
+	h.agentRunning(h.leadCaller(), AgentSpawnRequest{
+		Prompt: "work there", Tier: "small", Authority: "workdir-write", Worktree: destination,
+	})
+	spec := h.backend.start(0)
+	if spec.Root != destination {
+		t.Fatalf("spawn root = %q, want destination %q", spec.Root, destination)
+	}
+	raw, err := os.ReadFile(spec.Instructions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "This key is bound to worktree `"+destination+"`") {
+		t.Fatalf("explicit-worktree instructions do not bind the minted key to the destination: %q", raw)
 	}
 }
 
@@ -1505,8 +1592,10 @@ func TestAgentChildMissingPermissionRecordFailsClosed(t *testing.T) {
 		t.Fatalf("wake refusals = %v", got)
 	}
 
-	// Restoring permission.json lets the next delivery wake the child with its authority intact.
-	if err := writePermissionSelection(wsdashboard.SessionDir(h.dir, a), PermissionReadOnly); err != nil {
+	// A pre-provenance permission.json still identifies this internal-profile
+	// child as agent.spawn delegation and lets the next delivery wake it.
+	permissionSelections.Delete(wsdashboard.SessionDir(h.dir, a))
+	if err := os.WriteFile(permPath, []byte("{\n  \"permission_level\": \"read-only\"\n}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.runner.Deliver(a, Delivery{From: "senderreplyid", Text: "wake restored"}); err != nil {

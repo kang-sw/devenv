@@ -111,7 +111,10 @@
 .permwait > span { min-width: 0; overflow-wrap: anywhere; }
 .permwait .t { margin-left: auto; font-size: 11.5px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; flex: none; }
 .activity { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--wb-muted-fg); padding: 0 4px; }
-.activity .spin { color: var(--wb-primary); }
+.activity .spin { color: var(--wb-primary); flex: none; }
+.activity .act-copy { min-width: 0; }
+.activity .act-t { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.activity .act-turn { color: var(--wb-muted-fg); white-space: nowrap; }
 /* Provider summaries are separate from answer bubbles; no markdown styling. */
 .turn-with-summary { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .d-summary { min-width: 0; color: var(--wb-muted-fg); font-size: 12px; }
@@ -251,9 +254,9 @@ button.sbadge:focus-visible { outline: 1.5px solid var(--wb-primary); outline-of
 /* The island overlays the conversation grid cell, not its scrolling content. */
 .dgrid.live > .agisland { grid-area: convo; position: relative; z-index: var(--z-popovers); align-self: start; justify-self: end; margin: 8px; min-width: 0; max-width: calc(100% - 16px); overflow: hidden; box-sizing: border-box; background: var(--wb-card); color: var(--wb-fg); border-radius: 16px; box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); transition: width .2s ease, height .2s ease, border-radius .2s ease; }
 .dgrid.live > .agisland[hidden] { display: none !important; }
-.dgrid.live[data-tab="board"] > .agisland, .dgrid.live[data-ctab="files"] > .agisland { display: none; }
-@media (min-width: 760px) { .dgrid.live[data-layout="split"][data-tab="board"]:not([data-ctab="files"]) > .agisland { display: block; } }
-@media (min-width: 1100px) { .dgrid.live:not([data-layout="tabs"])[data-tab="board"]:not([data-ctab="files"]) > .agisland { display: block; } }
+.dgrid.live[data-tab="board"] > .agisland, .dgrid.live[data-ctab="files"] > .agisland, .dgrid.live[data-ctab="term"] > .agisland { display: none; }
+@media (min-width: 760px) { .dgrid.live[data-layout="split"][data-tab="board"]:not([data-ctab="files"]):not([data-ctab="term"]) > .agisland { display: block; } }
+@media (min-width: 1100px) { .dgrid.live:not([data-layout="tabs"])[data-tab="board"]:not([data-ctab="files"]):not([data-ctab="term"]) > .agisland { display: block; } }
 .agisland[data-mode="idle"] { width: 48px; height: 30px; border-radius: 999px; }
 .agisland[data-mode="compact"] { width: 320px; }
 .agisland[data-mode="full"] { width: 500px; border-radius: 10px; }
@@ -495,15 +498,15 @@ section.selection-bundle > .thumbs { margin: 0; padding: 0 10px 8px; }
 .sb { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 12px; min-width: 0; font-size: 12.5px; line-height: 1.3; padding: 0 2px; }
 .sb .i { width: 13px; height: 13px; }
 .sb-top { position: relative; flex-wrap: nowrap; padding: 0 2px; }
-.sb-ctx { --c: var(--wb-primary); display: flex; align-items: flex-end; gap: 8px; min-width: 0; flex: 1 1 100%; position: relative; cursor: help; }
+.sb-ctx { --c: var(--wb-primary); display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 100%; position: relative; cursor: help; }
 .sb-ctx.warn { --c: var(--wb-warn); }
 .sb-ctx.d-hot { --c: var(--wb-hot); }
 .sb-ctx.crit { --c: var(--wb-fail); }
 .sb-ctx.d-unknown { --c: var(--wb-muted-fg); }
-.sb-pct { display: inline-flex; align-items: center; flex: none; font: 800 16px/1 system-ui, sans-serif; color: var(--c); font-variant-numeric: tabular-nums; border-radius: 6px; margin-bottom: 1px; }
+.sb-pct { display: inline-flex; align-items: center; flex: none; font: 800 16px/1 system-ui, sans-serif; color: var(--c); font-variant-numeric: tabular-nums; border-radius: 6px; }
 .sb-ctx.crit .sb-pct { background: var(--c); color: var(--wb-card); padding: 2px 6px; }
-.sb-bar-wrap { position: relative; flex: 1 1 70px; min-width: 54px; padding-top: 14px; }
-.sb-float { position: absolute; top: 0; width: 12px; height: 12px; transform: translateX(-50%); display: grid; place-items: center; pointer-events: none; color: var(--fc, var(--c)); }
+.sb-bar-wrap { position: relative; flex: 1 1 70px; min-width: 54px; }
+.sb-float { position: absolute; bottom: calc(100% + 2px); top: auto; z-index: 4; width: 12px; height: 12px; transform: translateX(-50%); display: grid; place-items: center; pointer-events: none; color: var(--fc, var(--c)); }
 .sb-float.at-hard { transform: none; left: auto; right: 0; }
 .sb-float .li { width: 12px; height: 12px; display: block; stroke-width: 2; }
 .sb-bar { position: relative; display: block; height: 10px; border-radius: 999px; background: var(--wb-muted); overflow: hidden; }
@@ -512,7 +515,7 @@ section.selection-bundle > .thumbs { margin: 0; padding: 0 10px 8px; }
 .sb-bar .m-soft { top: 0; bottom: 0; width: 2px; background: var(--wb-card); box-shadow: 0 0 0 1px color-mix(in srgb, var(--wb-fg) 26%, transparent); }
 .sb-bar .m-tick { top: 2px; bottom: 2px; width: 1.5px; background: color-mix(in srgb, var(--wb-card) 85%, var(--wb-fg) 15%); opacity: .82; }
 .sb-ctx.warn .sb-bar, .sb-ctx.d-hot .sb-bar, .sb-ctx.crit .sb-bar { box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 26%, transparent); }
-.sb-tok, .sb-cache { flex: none; font: 600 11.5px/1 var(--wb-mono); color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; margin-bottom: 1px; }
+.sb-tok, .sb-cache { flex: none; font: 600 11.5px/1 var(--wb-mono); color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .sb-native { opacity: .82; }
 .ctx-tip { position: absolute; left: 50%; bottom: calc(100% + 6px); transform: translateX(-50%); z-index: 40; width: max-content; min-width: 210px; max-width: min(280px, calc(100vw - 24px)); padding: 8px 10px; border-radius: 9px; background: var(--wb-fg); color: var(--wb-card); box-shadow: var(--wb-shadow-hi); font: 11.5px/1.45 var(--wb-sans); pointer-events: none; opacity: 0; visibility: hidden; transition: opacity .12s ease; }
 .sb-top:hover .ctx-tip, .sb-top:focus-within .ctx-tip { opacity: 1; visibility: visible; }

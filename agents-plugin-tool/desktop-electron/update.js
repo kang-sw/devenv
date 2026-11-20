@@ -19,17 +19,45 @@ const USER_AGENT = 'werkschaft-desktop';
 const INTERVAL = 6 * 60 * 60 * 1000;
 const FIRST_CHECK = 8000;
 const LIMITS = { release: 1 << 20, sums: 64 << 10, zip: 1 << 30 };
+const CANARY_PAGES = 10;
+const RELEASES_PER_PAGE = 30;
 
 function parseVersion(value) {
-  const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(String(value ?? '').trim());
-  return match ? match.slice(1).map(Number) : null;
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-canary\.(\d+))?$/.exec(String(value ?? '').trim());
+  if (!match) return null;
+  const numbers = match.slice(1).map(part => part == null ? null : Number(part));
+  if (numbers.some(part => part != null && !Number.isSafeInteger(part))) return null;
+  const core = numbers.slice(0, 3), canary = numbers[3];
+  return { core, channel: canary == null ? 'stable' : 'canary', canary,
+    version: `${core.join('.')}${canary == null ? '' : `-canary.${canary}`}` };
 }
-// Numeric x.y.z only: a prerelease suffix never parses, so it is never newer.
+function compareVersions(left, right) {
+  const a = parseVersion(left), b = parseVersion(right);
+  if (!a || !b) return null;
+  for (let i = 0; i < 3; i++) if (a.core[i] !== b.core[i]) return a.core[i] > b.core[i] ? 1 : -1;
+  if (a.channel !== b.channel) return a.channel === 'stable' ? 1 : -1;
+  if (a.channel === 'stable' || a.canary === b.canary) return 0;
+  return a.canary > b.canary ? 1 : -1;
+}
 function isNewer(candidate, current) {
-  const a = parseVersion(candidate), b = parseVersion(current);
-  if (!a || !b) return false;
-  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
-  return false;
+  return compareVersions(candidate, current) === 1;
+}
+const isCanaryVersion = value => parseVersion(value)?.channel === 'canary';
+// staged.json's original version field is the pre-feature updater's only
+// eligibility gate. Channel selections carry their real identity separately
+// and leave a numeric successor here so that updater preserves/applies the
+// verified stage instead of deleting an unfamiliar canary or downgrade.
+function legacyStageVersion(current) {
+  const parsed = parseVersion(current);
+  if (!parsed) return null;
+  const core = [...parsed.core];
+  for (let i = core.length - 1; i >= 0; i--) {
+    if (core[i] >= Number.MAX_SAFE_INTEGER) continue;
+    core[i]++;
+    for (let j = i + 1; j < core.length; j++) core[j] = 0;
+    return core.join('.');
+  }
+  return null;
 }
 const assetName = (platform, arch) => `Werkschaft-${platform}-${arch}.zip`;
 
@@ -42,21 +70,43 @@ function parseSums(text) {
   return sums;
 }
 
-// Returns { version, asset, zipURL, sumsURL } or { reason } when there is
-// nothing to install (not newer, draft/prerelease, missing asset).
-function selectRelease(release, { platform, arch, current }) {
-  if (!release || typeof release !== 'object') return { reason: 'invalid release response' };
-  if (release.draft || release.prerelease) return { reason: 'latest release is a draft or prerelease' };
-  const version = parseVersion(release.tag_name)?.join('.');
-  if (!version) return { reason: `unrecognized tag ${release.tag_name}` };
-  if (!isNewer(version, current)) return { reason: `v${version} is not newer than v${current}` };
+function releaseAssetSelection(release, { platform, arch }) {
   const assets = Array.isArray(release.assets) ? release.assets : [];
   const url = name => assets.find(a => a && a.name === name && typeof a.browser_download_url === 'string')?.browser_download_url;
   const asset = assetName(platform, arch);
   const zipURL = url(asset), sumsURL = url(SUMS);
-  if (!zipURL) return { reason: `v${version} has no ${asset}` };
-  if (!sumsURL) return { reason: `v${version} has no ${SUMS}` };
-  return { version, asset, zipURL, sumsURL };
+  if (!zipURL) return { reason: `v${parseVersion(release.tag_name)?.version || release.tag_name} has no ${asset}` };
+  if (!sumsURL) return { reason: `v${parseVersion(release.tag_name)?.version || release.tag_name} has no ${SUMS}` };
+  return { asset, zipURL, sumsURL };
+}
+
+// Returns { version, asset, zipURL, sumsURL } or { reason } when there is
+// nothing to install (not newer, draft/prerelease, missing asset).
+function selectRelease(release, { platform, arch, current, allowOlder = false }) {
+  if (!release || typeof release !== 'object') return { reason: 'invalid release response' };
+  if (release.draft || release.prerelease) return { reason: 'latest release is a draft or prerelease' };
+  const parsed = parseVersion(release.tag_name);
+  if (!parsed || parsed.channel !== 'stable') return { reason: `unrecognized tag ${release.tag_name}` };
+  if (!allowOlder && !isNewer(parsed.version, current)) return { reason: `v${parsed.version} is not newer than v${current}` };
+  const selected = releaseAssetSelection(release, { platform, arch });
+  return selected.reason ? selected : { version: parsed.version, ...selected };
+}
+
+// Eligibility is deliberately page-local. The caller stops on the first page
+// returning a candidate, then applies the installed-version gate.
+function selectCanaryPage(releases, { platform, arch }) {
+  if (!Array.isArray(releases)) return null;
+  let selected = null;
+  for (const release of releases) {
+    if (!release || typeof release !== 'object' || release.draft) continue;
+    const parsed = parseVersion(release.tag_name);
+    if (!parsed || parsed.channel !== 'canary') continue;
+    const asset = releaseAssetSelection(release, { platform, arch });
+    if (asset.reason) continue;
+    const candidate = { version: parsed.version, ...asset };
+    if (!selected || isNewer(candidate.version, selected.version)) selected = candidate;
+  }
+  return selected;
 }
 
 // https anywhere; plain http only to loopback, for a local test feed.
@@ -390,8 +440,11 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
   const stateFile = path.join(userData, 'update-state.json');
   const stagedFile = path.join(staging, 'staged.json');
   let available = null, busy = false, phase = { phase: 'unchecked', version: null, skipped: false };
-  const setPhase = (name, value = null, skipped = false) => { phase = { phase: name, version: value, skipped }; };
+  const setPhase = (name, value = null, skipped = false, action = null) => {
+    phase = { phase: name, version: value, skipped, ...(action ? { action } : {}) };
+  };
   const emit = status => send({ ...status, phase: { ...phase } });
+  const actionFields = target => target?.action ? { action: target.action } : {};
   const readJSON = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) || {}; } catch { return {}; } };
   const readState = () => readJSON(stateFile);
   function writeState(patch) {
@@ -403,16 +456,57 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
   function acknowledgeFailure() {
     if (applyFailure) { writeState({ applyFailure: null }); applyFailure = null; }
   }
-  if (applyFailure && !isNewer(applyFailure.version, version)) acknowledgeFailure();
+  const explicitStableReturn = target => target?.action === 'stable-return' && isCanaryVersion(version) &&
+    parseVersion(target.version)?.channel === 'stable' && compareVersions(target.version, version) !== 0;
+  const installable = target => !!target && (isNewer(target.version, version) || explicitStableReturn(target));
+  if (applyFailure && !installable(applyFailure)) acknowledgeFailure();
   // Called only after main actually sends the queued failure to the dashboard.
   function statusDelivered(status) {
     if (applyFailure && status.state === 'apply-error' && status.version === applyFailure.version
       && status.message === applyFailure.message) acknowledgeFailure();
   }
-  // A staged update newer than this app whose folder is still there.
+  // A staged newer update, or an explicitly selected stable return, whose
+  // verified folder is still there.
   function staged() {
     const value = readJSON(stagedFile);
-    return isNewer(value.version, version) && typeof value.app === 'string' && fs.existsSync(value.app) ? value : null;
+    const target = typeof value.targetVersion === 'string'
+      ? { ...value, legacyVersion: value.version, version: value.targetVersion }
+      : value;
+    return installable(target) && typeof target.app === 'string' && fs.existsSync(target.app) ? target : null;
+  }
+
+  async function checksumSelection(found) {
+    if (!found?.version) return found;
+    const sha256 = parseSums(await readText(found.sumsURL, LIMITS.sums)).get(found.asset);
+    return sha256 ? { ...found, sha256 } : { reason: `${SUMS} has no ${found.asset} line` };
+  }
+
+  function finishCheck(found, { manual, action = null, limited } = {}) {
+    // A scheduled stable check must not revoke a user's pending manual channel
+    // choice. The next manual action may replace the single available slot.
+    if (!manual && available?.action) {
+      log(`Keeping manual ${available.action} selection v${available.version}`);
+      return phase.phase === 'ready' ? 'ready' : 'available';
+    }
+    if (!found?.version) {
+      available = null;
+      log(`No update: ${found?.reason || 'no eligible release'}`);
+      if (!staged()) setPhase('none');
+      if (manual) emit({ state: 'current', version, manual, ...(action ? { action, limited: !!limited } : {}) });
+      return 'current';
+    }
+    available = { ...found, ...(action ? { action } : {}) };
+    if (phase.phase === 'ready' && phase.version === found.version) {
+      emit({ state: 'ready', version: found.version, ...actionFields(available) });
+      return 'ready';
+    }
+    const skipped = readState().skipped === found.version;
+    setPhase('available', found.version, skipped, action);
+    if (skipped && !manual) return 'skipped';
+    const problem = platform === 'win32' ? locationProblem(platform, installLocation(platform, execPath, packaged), staging) : null;
+    emit({ state: problem ? 'apply-error' : 'available', version: found.version, current: version, skipped, manual,
+      ...actionFields(available), ...(problem ? { downloadPage: DOWNLOAD_PAGE, message: problem } : {}) });
+    return 'available';
   }
 
   async function check(manual = false) {
@@ -421,31 +515,57 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
       const release = JSON.parse(await readText(`${feed.replace(/\/+$/, '')}/repos/${REPO}/releases/latest`,
         LIMITS.release, 'application/vnd.github+json'));
       found = selectRelease(release, { platform, arch, current: version });
-      if (found.version) {
-        const sha256 = parseSums(await readText(found.sumsURL, LIMITS.sums)).get(found.asset);
-        found = sha256 ? { ...found, sha256 } : { reason: `${SUMS} has no ${found.asset} line` };
-      }
+      found = await checksumSelection(found);
     } catch (error) {
       log(`Update check failed: ${error.message}`);
       // A failed check leaves the standing phase as it was.
       if (manual) emit({ state: 'error', manual });
       return 'error';
     }
-    if (!found.version) {
-      log(`No update: ${found.reason}`);
-      if (!staged()) setPhase('none');
-      if (manual) emit({ state: 'current', version, manual });
-      return 'current';
+    return finishCheck(found, { manual });
+  }
+
+  async function checkCanary() {
+    let found = null, limited = true;
+    try {
+      const base = feed.replace(/\/+$/, '');
+      for (let page = 1; page <= CANARY_PAGES; page++) {
+        const releases = JSON.parse(await readText(`${base}/repos/${REPO}/releases?per_page=${RELEASES_PER_PAGE}&page=${page}`,
+          LIMITS.release, 'application/vnd.github+json'));
+        if (!Array.isArray(releases)) throw new Error('Invalid releases list response');
+        found = selectCanaryPage(releases, { platform, arch });
+        if (found) {
+          if (!isNewer(found.version, version)) found = { reason: `v${found.version} is not newer than v${version}` };
+          else found = await checksumSelection(found);
+          limited = false;
+          break;
+        }
+        if (releases.length < RELEASES_PER_PAGE) { limited = false; break; }
+      }
+    } catch (error) {
+      log(`Canary update check failed: ${error.message}`);
+      emit({ state: 'error', manual: true, action: 'canary' });
+      return 'error';
     }
-    available = found;
-    if (phase.phase === 'ready' && phase.version === found.version) { emit({ state: 'ready', version: found.version }); return 'ready'; }
-    const skipped = readState().skipped === found.version;
-    setPhase('available', found.version, skipped);
-    if (skipped && !manual) return 'skipped';
-    const problem = platform === 'win32' ? locationProblem(platform, installLocation(platform, execPath, packaged), staging) : null;
-    emit({ state: problem ? 'apply-error' : 'available', version: found.version, current: version, skipped, manual,
-      ...(problem ? { downloadPage: DOWNLOAD_PAGE, message: problem } : {}) });
-    return 'available';
+    return finishCheck(found || { reason: limited ? `no eligible canary in the first ${CANARY_PAGES * RELEASES_PER_PAGE} releases`
+      : 'no eligible canary release' }, { manual: true, action: 'canary', limited });
+  }
+
+  async function backToStable() {
+    if (!isCanaryVersion(version)) return finishCheck({ reason: 'the running app is already stable' },
+      { manual: true, action: 'stable-return', limited: false });
+    let found;
+    try {
+      const release = JSON.parse(await readText(`${feed.replace(/\/+$/, '')}/repos/${REPO}/releases/latest`,
+        LIMITS.release, 'application/vnd.github+json'));
+      found = selectRelease(release, { platform, arch, current: version, allowOlder: true });
+      found = await checksumSelection(found);
+    } catch (error) {
+      log(`Stable return check failed: ${error.message}`);
+      emit({ state: 'error', manual: true, action: 'stable-return' });
+      return 'error';
+    }
+    return finishCheck(found, { manual: true, action: 'stable-return', limited: false });
   }
 
   function skip(value) {
@@ -459,13 +579,14 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
     if (busy || !available) return null;
     busy = true;
     const target = available;
-    emit({ state: 'downloading', version: target.version });
+    emit({ state: 'downloading', version: target.version, ...actionFields(target) });
     try {
       const install = installLocation(platform, execPath, packaged);
       if (!install) throw new Error('this build cannot update itself (not a packaged app)');
       const initialProblem = locationProblem(platform, install, staging);
       if (initialProblem) {
-        emit({ state: 'apply-error', version: target.version, message: initialProblem, downloadPage: DOWNLOAD_PAGE });
+        emit({ state: 'apply-error', version: target.version, message: initialProblem, downloadPage: DOWNLOAD_PAGE,
+          ...actionFields(target) });
         return 'apply-error';
       }
       fs.rmSync(staging, { recursive: true, force: true });
@@ -479,17 +600,25 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
       const app = stagedApp(platform, extract);
       if (!app) throw new Error(`${target.asset} holds no Werkschaft app`);
       fs.rmSync(zip, { force: true });
-      fs.writeFileSync(stagedFile, JSON.stringify({ version: target.version, app }));
+      let persistedVersion = target.version;
+      const targetVersion = target.action ? target.version : null;
+      if (targetVersion) {
+        persistedVersion = legacyStageVersion(version);
+        if (!persistedVersion) throw new Error(`cannot preserve a channel stage from v${version}`);
+      }
+      fs.writeFileSync(stagedFile, JSON.stringify({ version: persistedVersion, app,
+        ...(targetVersion ? { targetVersion } : {}), ...actionFields(target) }));
       const problem = locationProblem(platform, install, staging);
       // Keep the verified stage either way: fixing the folder lets a later quit apply it.
-      if (!problem) setPhase('ready', target.version);
-      emit(problem ? { state: 'apply-error', version: target.version, message: problem, downloadPage: DOWNLOAD_PAGE }
-        : { state: 'ready', version: target.version });
+      if (!problem) setPhase('ready', target.version, false, target.action);
+      emit(problem ? { state: 'apply-error', version: target.version, message: problem, downloadPage: DOWNLOAD_PAGE,
+        ...actionFields(target) } : { state: 'ready', version: target.version, ...actionFields(target) });
       return problem ? 'apply-error' : 'ready';
     } catch (error) {
       log(`Update download failed: ${error.message}`);
       fs.rmSync(staging, { recursive: true, force: true });
-      emit({ state: 'download-error', version: target.version, message: error.message, downloadPage: DOWNLOAD_PAGE });
+      emit({ state: 'download-error', version: target.version, message: error.message, downloadPage: DOWNLOAD_PAGE,
+        ...actionFields(target) });
       return 'download-error';
     } finally { busy = false; }
   }
@@ -505,7 +634,8 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
     try {
       if (platform === 'win32') {
         fs.rmSync(resultFile, { force: true });
-        writeState({ applyAttempt: { version: stage.version, startedAt: now(), target: install } });
+        writeState({ applyAttempt: { version: stage.version, startedAt: now(), target: install,
+          ...actionFields(stage) } });
       }
       fs.writeFileSync(script, helperScript(platform));
       const [command, args] = helperCommand(platform, script, {
@@ -525,7 +655,8 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
       const message = `Update apply failed: ${error.message}`;
       fs.appendFileSync(logFile, message + '\n');
       if (platform === 'win32') fs.writeFileSync(resultFile, JSON.stringify({ status: 'error', message }));
-      emit({ state: 'apply-error', version: stage.version, message, downloadPage: DOWNLOAD_PAGE });
+      emit({ state: 'apply-error', version: stage.version, message, downloadPage: DOWNLOAD_PAGE,
+        ...actionFields(stage) });
       return false;
     }
   }
@@ -568,7 +699,7 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
       // Legacy attempts have no target, so do not defer this install or
       // discard a stage that their still-running helper may be using.
       if (active) return attempt.target ? deferLaunch(attempt) : false;
-      if (result.status === 'success' && attempt.target && !attempt.deferred && isNewer(attempt.version, version)) {
+      if (result.status === 'success' && attempt.target && !attempt.deferred && installable(attempt)) {
         // Persist before launching the continuation, so an older copy cannot loop.
         writeState({ applyAttempt: { ...attempt, deferred: true } });
         return deferLaunch(attempt);
@@ -581,8 +712,8 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
         log(message);
         fs.appendFileSync(logFile, message + '\n');
         if (stage?.version === attempt.version) fs.rmSync(staging, { recursive: true, force: true });
-        if (isNewer(attempt.version, version)) {
-          applyFailure = { version: attempt.version, message };
+        if (installable(attempt)) {
+          applyFailure = { version: attempt.version, message, ...actionFields(attempt) };
           writeState({ applyFailure });
           emitFailure();
           return false;
@@ -599,13 +730,15 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
       log(`Update v${stage.version} failed to apply; discarding it`);
       fs.rmSync(staging, { recursive: true, force: true });
       writeState({ launchAttempt: null });
-      emit({ state: 'apply-error', version: stage.version, message: 'the previous attempt failed; see update-apply.log', downloadPage: DOWNLOAD_PAGE });
+      emit({ state: 'apply-error', version: stage.version, message: 'the previous attempt failed; see update-apply.log',
+        downloadPage: DOWNLOAD_PAGE, ...actionFields(stage) });
       return false;
     }
     // An unwritable folder keeps the stage (and no attempt is spent) and says so.
     const problem = locationProblem(platform, installLocation(platform, execPath, packaged), staging);
     if (problem) {
-      emit({ state: 'apply-error', version: stage.version, message: problem, downloadPage: DOWNLOAD_PAGE });
+      emit({ state: 'apply-error', version: stage.version, message: problem, downloadPage: DOWNLOAD_PAGE,
+        ...actionFields(stage) });
       return false;
     }
     writeState({ launchAttempt: stage.version });
@@ -620,10 +753,12 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
     timers = [first, every];
   }
   const stop = () => { timers.forEach(clearTimeout); timers.forEach(clearInterval); timers = []; };
-  return { check, skip, download, applyOnQuit, applyOnLaunch, canRestart, phase: () => ({ ...phase }),
+  return { check, checkCanary, backToStable, skip, download, applyOnQuit, applyOnLaunch, canRestart,
+    isCanary: () => isCanaryVersion(version), phase: () => ({ ...phase }),
     schedule, stop, statusDelivered, paths: { staging, stateFile } };
 }
 
-module.exports = { REPO, FEED, SUMS, DOWNLOAD_PAGE, USER_AGENT, INTERVAL, parseVersion, isNewer, assetName, parseSums,
-  selectRelease, allowedURL, readText, downloadTo, installLocation, extractCommand, stagedApp, stagingLocation, applyProblem,
+module.exports = { REPO, FEED, SUMS, DOWNLOAD_PAGE, USER_AGENT, INTERVAL, parseVersion, compareVersions, isNewer,
+  isCanaryVersion, legacyStageVersion, assetName, parseSums, selectRelease, selectCanaryPage, allowedURL, readText, downloadTo,
+  installLocation, extractCommand, stagedApp, stagingLocation, applyProblem,
   helperScript, helperCommand, relaunchArgs, windowsCommandLine, windowsBootstrap, spawnDetached, windowsHelperRunning, createUpdater };

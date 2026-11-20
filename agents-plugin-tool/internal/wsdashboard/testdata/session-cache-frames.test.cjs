@@ -43,9 +43,11 @@ test('hide completes an in-flight docframe replacement before parking its placeh
 test('terminal cache safety rejects in-flight list and create callbacks', () => {
   const source=readAssetSource('wsdashboard','terminal.js'), callbacks=[];
   const gate=source.match(/cacheSafe: (function \(\) \{[^\n]+\})/)[1];
-  const context={ listWait:null, creating:0, worktree:'', ROWS:24, guessCols:()=>80, hooks:{post(route,body,done){callbacks.push(done);}}, show(){}, REFUSAL:{}, wsT:k=>k };
+  const context={ listWait:null, creating:0, tabCreating:0, tabList:[], worktree:'', ROWS:24, guessCols:()=>80, hooks:{post(route,body,done){callbacks.push(done);}}, show(){}, REFUSAL:{}, wsT:k=>k };
   vm.createContext(context); vm.runInContext('var safe='+gate+';'+func(source,'create'),context);
   assert.equal(context.safe(),true); context.listWait=[]; assert.equal(context.safe(),false); context.listWait=null;
+  context.tabCreating=1; assert.equal(context.safe(),false); context.tabCreating=0; assert.equal(context.safe(),true);
+  context.tabList=[{}]; assert.equal(context.safe(),false); context.tabList=[]; assert.equal(context.safe(),true);
   context.create({},()=>{}); assert.equal(context.safe(),false,'a pending create may introduce a runtime after hide');
   callbacks.shift()(false,'unavailable'); assert.equal(context.safe(),true);
 });

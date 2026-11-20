@@ -327,7 +327,7 @@ func TestObserveImplementBranchVouchedTargetAheadFailsClosed(t *testing.T) {
 			runGit(t, root, "commit", "--allow-empty", "-m", "current work")
 			intercepted := false
 			client := wsgit.Client{Runner: mergeInterceptRunner{intercept: func(_ context.Context, _ string, args []string) ([]byte, error, bool) {
-				if len(args) == 3 && args[0] == "rev-list" && args[1] == "--count" && strings.HasSuffix(args[2], "..refs/heads/"+target) {
+				if len(args) == 5 && args[0] == "rev-list" && args[1] == "--left-right" && args[2] == "--count" && strings.HasPrefix(args[3], "refs/heads/"+target+"...") {
 					intercepted = true
 					return []byte(tc.output), tc.err, true
 				}
@@ -1015,6 +1015,32 @@ func TestResolveImplementSameTicketStemAcrossPhasesContinues(t *testing.T) {
 	if result2.Verdict.BranchPlan.Action != "continue" {
 		t.Fatalf("phase 2 action = %q, want continue (same ticket_stem must resolve the same target branch %q); plan=%+v",
 			result2.Verdict.BranchPlan.Action, targetBranch, result2.Verdict.BranchPlan)
+	}
+}
+
+func TestResolveImplementExactStaleTargetStopsForReacquire(t *testing.T) {
+	const stem = "261115-feat-ws-permission-profile"
+	input := ticketPhaseInput(stem, "Phase 2")
+	first := resolveImplement(input, factsFromTicket(input), implementBranchObservation{CurrentBranch: "develop", StartCommit: "abc123"})
+	target := first.Verdict.BranchPlan.TargetBranch
+
+	stale := resolveImplement(input, factsFromTicket(input), implementBranchObservation{
+		CurrentBranch: target, StartCommit: "abc123", AheadOfMergeRoot: 0, BehindMergeRoot: 1800,
+	})
+	if stale.Verdict.BranchPlan.Action != "stop" {
+		t.Fatalf("stale exact-target action = %q, want stop; plan=%+v", stale.Verdict.BranchPlan.Action, stale.Verdict.BranchPlan)
+	}
+	for _, want := range []string{"pooled caller must re-acquire", "in-root caller must switch", "develop", "1800"} {
+		if !strings.Contains(stale.Verdict.BranchPlan.Reason, want) {
+			t.Fatalf("stale exact-target reason missing %q: %q", want, stale.Verdict.BranchPlan.Reason)
+		}
+	}
+
+	equal := resolveImplement(input, factsFromTicket(input), implementBranchObservation{
+		CurrentBranch: target, StartCommit: "abc123", AheadOfMergeRoot: 0, BehindMergeRoot: 0,
+	})
+	if equal.Verdict.BranchPlan.Action != "continue" {
+		t.Fatalf("equal exact-target action = %q, want continue; plan=%+v", equal.Verdict.BranchPlan.Action, equal.Verdict.BranchPlan)
 	}
 }
 

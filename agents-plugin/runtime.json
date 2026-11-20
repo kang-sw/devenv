@@ -3,7 +3,7 @@
   "plugin_version": "0.50.8",
   "required_mcp": ">=0.50.8-dev <0.51.0",
   "mcp_protocol": "2025-03-26",
-  "release_repository": "kang-sw/devenv",
+  "release_repository": "kang-sw/werkschaft",
   "release_tag": "v0.50.8",
   "tools": {
     "compact": ">=0.50.8-dev <0.51.0",
@@ -64,6 +64,7 @@
     "review.marker": ">=0.50.8-dev <0.51.0",
     "review.stamp": ">=0.50.8-dev <0.51.0",
     "path.generate": ">=0.50.8-dev <0.51.0",
+    "path.write": ">=0.50.8-dev <0.51.0",
     "workflow_manual": ">=0.50.8-dev <0.51.0",
     "workflow_state": ">=0.50.8-dev <0.51.0",
     "playbook.read": ">=0.50.8-dev <0.51.0",

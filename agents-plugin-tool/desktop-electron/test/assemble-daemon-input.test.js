@@ -46,7 +46,7 @@ for (const product of ['wsflow', 'ws']) for (const platform of ['darwin', 'win32
     if (platform === 'darwin' && process.platform !== 'win32') assert(fs.statSync(selected.binary).mode & 0o111);
     const plugin = JSON.parse(fs.readFileSync(path.join(out, '.claude-plugin', 'plugin.json'), 'utf8'));
     assert.equal(plugin.version, contract.plugin_version);
-    for (const name of ['bin/ws-mcp-launcher.py', 'config-manifest.json', 'dashboard-config-manifest.json',
+    for (const name of ['bin/ws-mcp-launcher.py', 'config-manifest.json', 'agy-config-manifest.json', 'dashboard-config-manifest.json',
       'claude-agents/effort-low.md', 'rsrc/manifest.json', 'skills/manifest.json']) {
       assert(fs.statSync(path.join(out, name)).isFile(), name);
     }

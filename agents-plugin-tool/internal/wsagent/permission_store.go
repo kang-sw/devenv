@@ -13,11 +13,19 @@ import (
 )
 
 type permissionSelection struct {
-	mu       sync.Mutex
-	loaded   bool
-	level    PermissionLevel
-	explicit bool
-	err      error
+	mu sync.Mutex
+	// admission serializes a session's permission changes with descendant
+	// creation/start checks that use this session as their current parent.
+	admission sync.RWMutex
+
+	loaded    bool
+	level     PermissionLevel
+	explicit  bool
+	delegated bool
+	// delegatedSet distinguishes a new generic worker's explicit false from
+	// a pre-provenance sidecar, whose missing member must retain old behavior.
+	delegatedSet bool
+	err          error
 	// info is permission.json's stat taken before the last read, infoAt the
 	// clock before that stat, and absent that neither the file nor a link
 	// existed then; revalidatePermissionSelection compares them.
@@ -43,7 +51,7 @@ func cachedPermissionSelection(dir string) (PermissionLevel, bool, error) {
 	slot.mu.Lock()
 	defer slot.mu.Unlock()
 	if !slot.loaded {
-		slot.level, slot.explicit, slot.err = readPermissionSelection(dir)
+		slot.level, slot.explicit, slot.delegated, slot.delegatedSet, slot.err = readPermissionSelectionState(dir)
 		slot.loaded = true
 	}
 	return slot.level, slot.explicit, slot.err
@@ -87,7 +95,7 @@ func revalidatePermissionSelection(dir string) {
 func (slot *permissionSelection) loadLocked(dir string) {
 	slot.infoAt = time.Now()
 	slot.info, slot.absent = statPermissionSelection(dir)
-	slot.level, slot.explicit, slot.err = readPermissionSelection(dir)
+	slot.level, slot.explicit, slot.delegated, slot.delegatedSet, slot.err = readPermissionSelectionState(dir)
 	slot.loaded = true
 }
 
@@ -133,13 +141,64 @@ func readPermissionMembers(dir string) (map[string]json.RawMessage, PermissionLe
 }
 
 func readPermissionSelection(dir string) (level PermissionLevel, explicit bool, err error) {
-	_, level, explicit, err = readPermissionMembers(dir)
+	level, explicit, _, _, err = readPermissionSelectionState(dir)
 	return
 }
 
+func readPermissionSelectionState(dir string) (level PermissionLevel, explicit, delegated, delegatedSet bool, err error) {
+	members, level, explicit, err := readPermissionMembers(dir)
+	if err != nil || !explicit {
+		return level, explicit, false, false, err
+	}
+	if raw, ok := members["delegated_authority"]; ok {
+		delegatedSet = true
+		if err := json.Unmarshal(raw, &delegated); err != nil {
+			return "", true, false, true, fmt.Errorf("invalid delegated_authority in %s", filepath.Join(dir, "permission.json"))
+		}
+	}
+	return level, true, delegated, delegatedSet, nil
+}
+
+// delegatedPermission reports immutable agent.spawn provenance from the same
+// cached sidecar read that resolved the explicit worker level.
+func delegatedPermission(dir string) bool {
+	delegated, _ := delegatedPermissionState(dir)
+	return delegated
+}
+
+func delegatedPermissionState(dir string) (delegated, set bool) {
+	slot := permissionSlot(dir)
+	slot.mu.Lock()
+	defer slot.mu.Unlock()
+	if !slot.loaded {
+		slot.loadLocked(dir)
+	}
+	if slot.err != nil || !slot.explicit {
+		return false, false
+	}
+	return slot.delegated, slot.delegatedSet
+}
+
 // writePermissionSelection persists an already authorized choice. The caller's
-// conversation loop serializes authorization, selection updates and admission.
+// conversation loop and admission lock serialize authorization, selection
+// updates and descendant admission.
 func writePermissionSelection(dir string, level PermissionLevel) error {
+	return writePermissionSelectionAs(dir, level, false, false)
+}
+
+// writeDelegatedPermissionSelection persists agent.spawn provenance beside
+// its explicit authority. Generic controls retain but cannot create this bit.
+func writeDelegatedPermissionSelection(dir string, level PermissionLevel) error {
+	return writePermissionSelectionAs(dir, level, true, true)
+}
+
+// writeGenericPermissionSelection records an explicit non-agent.spawn origin,
+// so absence remains available as the pre-provenance compatibility signal.
+func writeGenericPermissionSelection(dir string, level PermissionLevel) error {
+	return writePermissionSelectionAs(dir, level, false, true)
+}
+
+func writePermissionSelectionAs(dir string, level PermissionLevel, delegated, setDelegated bool) error {
 	slot := permissionSlot(dir)
 	slot.mu.Lock()
 	defer slot.mu.Unlock()
@@ -155,6 +214,17 @@ func writePermissionSelection(dir string, level PermissionLevel) error {
 		members = make(map[string]json.RawMessage)
 	}
 	members["permission_level"], _ = json.Marshal(level)
+	storedDelegated, storedDelegatedSet := false, false
+	if raw, ok := members["delegated_authority"]; ok {
+		storedDelegatedSet = true
+		if err := json.Unmarshal(raw, &storedDelegated); err != nil {
+			return fmt.Errorf("invalid delegated_authority in %s", filepath.Join(dir, "permission.json"))
+		}
+	}
+	if setDelegated {
+		members["delegated_authority"], _ = json.Marshal(delegated)
+		storedDelegated, storedDelegatedSet = delegated, true
+	}
 	raw, err := json.MarshalIndent(members, "", "  ")
 	if err != nil {
 		return err
@@ -162,6 +232,8 @@ func writePermissionSelection(dir string, level PermissionLevel) error {
 	if err := writeFileAtomic(filepath.Join(dir, "permission.json"), append(raw, '\n'), 0o600); err != nil {
 		return err
 	}
+	slot.delegated = storedDelegated
+	slot.delegatedSet = storedDelegatedSet
 	slot.level, slot.explicit, slot.err, slot.loaded = level, true, nil, true
 	slot.info, slot.absent = nil, false // the next revalidation re-reads once
 	return nil

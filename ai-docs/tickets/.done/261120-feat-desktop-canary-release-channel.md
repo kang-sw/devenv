@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 065b18fcc5b5338b
 sage-review-design-reviewed: 065b18fcc5b5338b
+completed: 2026-11-21
 ---
 
 # Add a desktop canary release channel
@@ -361,6 +362,32 @@ desktop assembly/packaging tests cover core/suffix behavior; package/runtime
 contract tests cover every repository destination; doc review compares stable
 ship semantics before and after.
 
+### Result (58119168e) - 2026-11-21
+
+- Exact `vX.Y.Z-canary.N` tags now create prereleases excluded from latest;
+  stable release creation and the shared native/desktop asset upload path are
+  unchanged. Packaging retains the validated suffix in Electron `appVersion`
+  and staged `package.json`; the native `buildVersion` stays at the validated
+  numeric contract core under the binding design-review fallback.
+- The separate canary ship procedure uses an ephemeral reviewed release branch,
+  a next-patch core, no `main` promotion or merge-back, compatibility grading,
+  artifact/SUMS and install/return checks, and forbids a minor-core canary
+  without the separately approved T3 boundary. Stable ship instructions remain
+  unchanged.
+- All eight audited outbound repository identities now name
+  `kang-sw/werkschaft`, with drift coverage across ws, wsflow, Pi, both plugin
+  manifest formats, and the dashboard. Read-only HTTP checks confirmed the old
+  repository, latest-release, historical asset, and API URLs still redirect.
+- Compatibility: release publication and repository identity are T0; the
+  daemon channel label is T0 by itself, while each canary payload still needs
+  its own directional compatibility verdict. The numeric native build field is
+  a packaging compatibility decision; the suffixed package identity remains
+  the updater authority.
+- Verification passed: desktop Node suite (178 pass, 4 Windows-only skips),
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsrsrc -run '^TestCIRelease' -count=1`,
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsdashboard -run '^TestSettingsGitHubLinkMatchesReleaseDestinations$' -count=1`,
+  and `python3 -m unittest discover agents-plugin-wsflow/tests -p 'test_wsflow_runtime_contract.py'` (3 pass).
+
 ### Phase 2: Select canaries and return to stable through the existing updater
 
 Depends on Phase 1. Implement Decisions 11 and 12:
@@ -400,6 +427,40 @@ list feeds and assert the same download, checksum, extraction, staging, and
 swap functions serve canary install and stable return. No live release is
 created by tests.
 
+### Result (58119168e) - 2026-11-21
+
+- The updater now accepts only bounded stable or `-canary.N` versions, applies
+  the settled SemVer ordering, walks at most ten 30-release/1 MiB pages, picks
+  the highest eligible canary on the first eligible page, and distinguishes a
+  cap-limited miss. Scheduled/latest checks remain stable-only.
+- Manual canary and stable-return selections share the existing single
+  available/download/checksum/extract/stage/swap path. A scheduled stable check
+  cannot erase a pending manual selection. Stable return is available only
+  from a canary and carries explicit downgrade intent through reopen without
+  touching the shared daemon; existing daemon tests retain a healthy
+  higher-core incumbent.
+- Persistent channel stages keep the original numeric `staged.json.version`
+  gate usable by pre-feature updaters and add `targetVersion` plus `action` for
+  the real new-updater identity. Ordinary stable staging still performs the
+  same single `staged.json` write with `{version, app}`; a channel action still
+  performs one write, now with the additive fields. No file I/O or polling was
+  added before the user invokes a manual action, and unknown root state fields
+  continue through merge writes.
+- Compatibility: desktop update state and explicit stable return are T0 in both
+  directions under the numeric legacy gate and additive fields. The updater
+  process API is additive; Phase 3 still owns the payload-free IPC and two-way
+  dashboard capability gates needed to complete that T0 verdict.
+- The allocated lite review found three issues: the old-updater proof used new
+  code, scheduled checks could clear manual selection, and mocked packaging
+  could not establish native suffix acceptance. All three were corrected once;
+  per lite policy no second review round was run.
+- Verification passed: focused packaging/updater tests (31 pass) and the full
+  desktop Node suite (178 pass, 4 Windows-only skips), including ordering,
+  malformed/draft/asset filtering, page stop/cap behavior, shared checksum
+  failure handling, reopen/downgrade intent, pre-feature state, and the existing
+  never-downgrade daemon matrix. No Electron process, tag, release, or push was
+  created.
+
 ### Phase 3: Add canary and stable-return controls
 
 Depends on Phase 2. This UI phase must be executed by a **Claude Code worker
@@ -429,3 +490,83 @@ Verification: automated dashboard browser and Electron main/preload tests pass;
 the named non-Codex executor records before/after screenshot evidence and an
 independent reviewer checks placement, canary-only stable-return visibility,
 distinction, localization, and regressions.
+
+### Result (d0a9ea764) - 2026-11-21
+
+- Executed by a Claude Code worker. Settings now shows a small dashed
+  warn-ink `Canary 빌드로 업데이트` pill in the same row as `Check for updates`.
+  It is a native button with keyboard access and a `:focus-visible` ring. A
+  long label wraps inside the pill, which never overflows the card. A
+  `Back to stable` row sits below the check row. It shows only when the
+  shell's `channel()` reports `canary: true`, which is
+  `app.isPackaged && updater.isCanary()`. The row names the running canary
+  and the downgrade. A stable relaunch reports `canary: false` and the row
+  stays hidden.
+- IPC: the preload adds payload-free `checkCanary()` and `backToStable()`
+  (`werkschaft:update-check-canary` and `werkschaft:update-back-to-stable`)
+  plus a `channel()` invoke (`werkschaft:update-channel`). Main admits all
+  three only through the existing `fromDashboard` main-frame pin. Any
+  renderer argument is dropped, and a refused caller gets `{canary:false}`.
+  Release selection and URLs stay in the main-process updater from Phase 2.
+- Statuses carrying `action` drive their own toasts:
+  - Canary: available (Update/Skip), no newer canary, a distinct miss at
+    the page cap, and failure.
+  - Stable return: available names the stable target, the running canary
+    and the downgrade, with one `Downgrade to vX` action, a dismiss and no
+    Skip. Nothing installs before that click. Ready says the shared daemon
+    keeps running. There are also already-stable and failure toasts. A
+    Windows shell offers only the download page.
+  - Statuses without `action` read exactly as before.
+- Compatibility (Decisions 5 and 9): the IPC addition is T0 both ways. A
+  new dashboard on an older shell builds neither control, because each is
+  gated on its own bridge members. An older dashboard ignores the extra
+  members and the optional `action`/`limited` status fields. This change
+  adds no file I/O and no polling. A page load makes one in-memory IPC
+  call, `channel()`, and the actions run only on click (performance manual
+  rules 1 and 5).
+- Localization: 15 new `js.update.*` keys in all 11 wsi18n tables, with
+  placeholders matching English. Korean keeps the owner's label verbatim.
+  English and the long European labels were shortened so that all 11
+  locales fit beside the check button at the 760 px minimum window width.
+- Screenshots in `ai-docs/assets/mockups/261120/canary-channel/`: all are
+  1800x1000, ko-KR, with the Settings card open and the none phase unless
+  noted.
+  - Before: `before-settings-light.png` and `before-settings-dark.png`.
+  - After, stable running (also the state after a return relaunch):
+    `after-stable-running-light.png` and `after-stable-running-dark.png`,
+    plus the `-focus-` variants.
+  - After, canary running: `after-canary-running-light.png` and
+    `after-canary-running-dark.png`.
+  - Toasts: `after-canary-available-*`, `after-stable-return-confirm-*`
+    and `after-stable-return-ready-*`.
+  - Narrow 760 px: `after-narrow-{ko-KR,en-US}-{light,dark}-760.png`.
+
+  Comparison: the before and after-stable shots match everywhere except the
+  App update section. There the pill is added on the right of the
+  `업데이트 확인` row, with the label and the `최신 버전` line unchanged, and
+  no Back to stable appears. The canary-running shots add only the
+  `안정 버전으로 되돌리기` row (`canary v0.52.0-canary.1 실행 중 · … (다운그레이드)`)
+  below it. The card grows upward by that row, and the other rows and the
+  footer are unchanged. The pill reads as distinct in both themes.
+- Review (lite, independent): no Critical or Important findings.
+  - Minor 1 (a `(skipped)` suffix on a stable-return Settings line) was
+    fixed in d0a9ea764 and is pinned by the fixture.
+  - Minor 2 (a partial bridge exposing only some of the new members is
+    untested) was left as is. It is reachable only with a mismatched
+    preload, and each control is gated on its own members.
+- Verification:
+  - `node --test test/*.test.js` in `desktop-electron`: 184 tests, 180
+    pass, 4 Windows-only skips, 0 fail. This includes the new main IPC
+    admission test and the preload test.
+  - `TestDesktopUpdateBrowser` passed. It ran headless Chromium through the
+    cached Playwright with `PLAYWRIGHT_BROWSERS_PATH` set, with the desktop
+    bridge stubbed and no Electron. It covers the browser tab, the older
+    shell, a stable shell, a canary shell, all 11 locales at narrow width,
+    and a failing `channel()`.
+  - The full `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test
+    ./internal/wsdashboard -count=1` passed on e33dc16f8 (329 s; the
+    Chromium test is skipped without Playwright). The browser test was
+    rerun on d0a9ea764.
+  - The wsi18n key, table, placeholder and plural tests passed.
+    `TestEveryEnglishKeyIsUsed` fails on four `wb.*` keys this change does
+    not touch.
