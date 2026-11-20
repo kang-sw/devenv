@@ -23,7 +23,8 @@ decision sites**: 8 declarative descriptor-data sites, 35 backend-behavior
 sites, 19 candidate legacy-compatibility exceptions, and 4 intentionally
 adapter-owned sites. A site is one branch or one adjacent table/branch cluster;
 all lines in a cluster share one migration decision. The classes route work;
-they do not pre-settle whether a candidate exception remains ((1881)).
+candidate exceptions remain only where old persisted bytes or external
+identifiers cannot be interpreted through registration data ((1881)).
 
 ### Refreshed inventory
 
@@ -109,59 +110,63 @@ name-free.
   Rejected: no ticket, moving sites only as feature work touches them.
 - **Umbrella and last, owner 2026-11-20.** This ticket is the umbrella for
   removing Claude/Codex/Agy/Pi string and `Backend*` branches from common code.
-  Its implementation runs after the other common-interface feature tickets
-  land. Backend-specific adapter files remain adapter-owned.
-
-## Open Decision Queue
-
-Last ID: (1883)
-
-(1880) [open] [technical] Split reusable harness differences between declarative `BackendRegistration` values and narrow `Backend` behavior methods.
-`BackendRegistration` data plus narrow `Backend` methods over a second catalog or one callback-heavy descriptor - common callers already receive registrations, while executable lifecycle behavior remains testable in its adapter.
-
-(1881) [open] [policy] Decide which candidate legacy-compatibility and dashboard/MCP detection sites are legitimate retained exceptions.
-- The inventory class is provisional routing: several sites parse persisted records, old holder kinds, old Pi paths, or external `clientInfo` values, but others may be removable once prerequisite tickets land.
-- Alternatives: retain every candidate with an inline rationale; migrate every name check; or retain only source-backed protocol/store parsers and move the rest behind descriptors/methods.
-> Recommend retaining only branches whose old bytes or external identifiers cannot be interpreted through registration data, with regression fixtures and a site comment for each survivor.
-
-(1882) [open] [policy] Name the exact prerequisite ticket set that must land before this umbrella can move from `todo/`.
-- The owner confirmed that implementation runs last after the other common-interface feature tickets, but the parent epic also contains research, unrelated extensions, and future work with no ticket.
-- Alternatives: wait for every active child of the parent epic; or block only on the feature tickets that can add/move sites in this inventory.
-> Recommend an explicit migration-relevant prerequisite list at promotion, refreshed against the parent epic, rather than a whole-epic dependency.
-
-(1883) [open] [policy] Set the compatibility ceiling for the umbrella and the rule for splitting any higher-tier change.
-- The intended refactor can target T0 when it preserves MCP calls, client detection, persisted records, config selectors, and process behavior; the concrete old/new reader-writer trace does not exist until the descriptor and exception choices settle.
-- Alternatives: require T0 throughout; permit source-backed T1/T2 in this umbrella; or split every observable/store change into its own ticket. T3 would require a minor bump and explicit owner approval.
-> Recommend T0-only for this umbrella unless a prerequisite ticket already settled a higher tier; split newly discovered T1+ behavior rather than hiding it inside branch removal.
+  Its implementation runs after the migration-relevant prerequisites land.
+  Backend-specific adapter files remain adapter-owned.
+- **(1880)-(1883), owner (1880)=a, 2026-11-20.** The owner accepted all four
+  worker recommendations in one answer.
+- **(1880): one registration seam.** Put declarative harness differences on
+  `BackendRegistration` values and executable differences behind narrow
+  `Backend` methods. Rejected: a second catalog; one callback-heavy descriptor.
+- **(1881): source-backed survivors only.** Retain a common-code name branch
+  only when old persisted bytes or external identifiers (including historical
+  `clientInfo`, holder kinds, and Pi paths) cannot be interpreted through
+  registration data. Give each survivor a regression fixture and a site comment.
+  Rejected: retaining every candidate with a rationale; migrating every name
+  check.
+- **(1882): migration-relevant promotion gate.** At promotion, name an explicit
+  prerequisite list refreshed against the parent epic, limited to tickets that
+  can add or move sites in this inventory. Rejected: waiting for every active
+  child of the parent epic.
+- **(1883): T0 ceiling.** This umbrella is T0-only unless a prerequisite ticket
+  already settled a higher tier. Split newly discovered T1+ behavior into its
+  own ticket. Rejected: allowing T1/T2 inside this umbrella; splitting every
+  observable change regardless of tier.
 
 ## Constraints
 
 - Manuals for the touched paths: `ai-docs/manuals/performance.md`,
   `ai-docs/manuals/release-compatibility.md`, `ai-docs/manuals/ws-mcp.md`, and
   `ai-docs/manuals/shipped-surface-boundary.md` where shipped surfaces change.
-- Implementation runs last after the other common-interface feature tickets;
-  the exact promotion gate is (1882). Keep this ticket in `todo/` until then.
+- Before promotion, refresh the parent epic's child list and name the exact
+  migration-relevant prerequisite tickets that can add or move inventory sites.
+  Keep this ticket in `todo/` until that list is explicit and has landed; do
+  not gate on unrelated epic children ((1882)).
 - Preserve Decision (144) and use the descriptor seam already established by
   `261118-feat-ws-agy-tool-names-and-worker-role`; do not add a parallel
-  harness registry.
+  harness registry. Put declarative differences on `BackendRegistration` and
+  executable differences behind narrow `Backend` methods ((1880)).
 - Genuine behavior remains in backend/adapter-owned files. Common code may use
   registration data or backend methods but may not branch on a harness name.
-- Any retained common-code exception needs source-backed compatibility reason,
-  a regression fixture, and an inline comment naming the boundary it preserves.
+- Retain a common-code name branch only when old persisted bytes or external
+  identifiers cannot be interpreted through registration data. Each survivor
+  needs a regression fixture and a site comment naming that boundary ((1881)).
 - Go tests and harness parity runs execute on remote w5090 only. Follow the
   performance manual's file-operation budget and measure the affected daemon
   lifecycle paths there.
 - A compatibility verdict is directional and source-backed: identify the old
   and new writer/reader, the write or refusal, and the new-version reopen path.
-  Do not infer T2 from retained append-only data alone.
+  Keep this umbrella at T0 unless a prerequisite already settled a higher tier;
+  split newly discovered T1+ behavior into its own ticket ((1883)). Do not
+  infer T2 from retained append-only data alone.
 
 ## Phases
 
 ### Phase 1: Extend the descriptor/catalog seam
 
-Add the reusable declarative values and narrow backend methods settled in
-(1880), then move the inventory's descriptor-data construction behind that
-single seam. Primary files:
+First check the explicit promotion prerequisite list against the parent epic
+and refresh the inventory on its landed head ((1882)). Add the reusable
+declarative values and narrow backend methods settled in (1880), then move the
+inventory's descriptor-data construction behind that single seam. Primary files:
 `internal/wsagent/registration.go`, `backend.go`, `catalog.go`, `builtin.go`,
 `support.go`, the affected backend-owned files, and
 `cmd/ws-mcp/dashboard.go`. Keep runtime registration data out of persisted
@@ -170,12 +175,12 @@ profile/config shapes unless separately approved.
 Verification: registration-copy and descriptor-default unit tests; built-in
 profile/catalog fixtures for Claude, Codex, Agy, and Pi; a focused search that
 shows no new parallel harness catalog; and w5090 Go tests for `internal/wsagent`
-and `cmd/ws-mcp` packages affected by the final design.
+and `cmd/ws-mcp` packages affected by the final design. Record the explicit
+prerequisite list and inventory refresh against the parent epic ((1882)).
 
-Compatibility question ((1883)): are all additions runtime-only and invisible
-to MCP/config/store readers (T0), or does any field reach a cross-version
-surface? If it does, record the old/new read-write-refusal trace before this
-phase is implementation-ready.
+Compatibility verification ((1883)): show that additions are runtime-only and
+invisible to MCP/config/store readers (T0). If a directional old/new
+reader-writer trace reveals T1+ behavior, split it into its own ticket.
 
 ### Phase 2: Migrate runner, process, permission, and lifecycle behavior
 
@@ -183,8 +188,9 @@ Replace common name checks with Phase 1 data/methods across
 `internal/wsagent/permission.go`, `agent_tools.go`, `runner.go`,
 `runner_process.go`, `runner_events.go`, `runner_summary.go`, `children.go`,
 `spawn.go`, `handoff.go`, and `worker_rejoin.go`. Implement behavior in the
-matching Claude/Codex/Agy/Pi adapter files. Preserve only the exceptions
-settled by (1881), including historical holder/record/session-file reads.
+matching Claude/Codex/Agy/Pi adapter files. Preserve historical
+holder/record/session-file name checks only when their old bytes cannot be
+interpreted through registration data ((1881)).
 
 Verification: w5090 `internal/wsagent` package tests plus focused fixtures for
 permissions, worker admission, cwd/key ownership, holder restart/rejoin,
@@ -193,10 +199,10 @@ settled-activity callback. Run four-harness lead and worker parity checks and
 measure file operations on start, turn settlement, restart, rejoin, and
 handoff; the migration must not add interactive-path file I/O.
 
-Compatibility question ((1883)): does the migration leave record/holder JSON,
-legacy Pi session paths, downgrade rejoin, and process behavior byte/behavior
-compatible (T0), or does any old daemon rewrite or refuse new state? Cite each
-writer, reader, and reopen path before assigning a higher tier.
+Compatibility verification ((1883)): prove T0 for record/holder JSON, legacy Pi
+session paths, downgrade rejoin, and process behavior with directional writer,
+reader, and reopen evidence. Split any newly found T1+ behavior into its own
+ticket.
 
 ### Phase 3: Migrate MCP detection, prompt terminology, and dashboard consumers
 
@@ -207,7 +213,8 @@ and remove common harness-name policy from
 `internal/wsdashboard/plan_usage.go`, `plan_usage_history.go`, `daemon.go`,
 `pageview_rail.go`, `registry.go`, `pages.go`, `proxy_http.go`, and
 `conversation_presentation.go`. Keep external identifier and persisted-format
-parsers only where (1881) accepts them; keep Agy usage logic in
+parsers only where old bytes or external identifiers cannot be interpreted
+through registration data ((1881)); keep Agy usage logic in
 `plan_usage_agy.go`.
 
 Verification: w5090 `internal/mcp` and `internal/wsdashboard` package tests;
@@ -217,10 +224,11 @@ HTTP replay, plan-usage history, rail revive, retirement, and peer-lead display
 fixtures; and MCP schema/legacy-call checks showing unchanged tool names,
 arguments, and default behavior.
 
-Compatibility question ((1883)): do detector/parser changes still accept every
-old `clientInfo`, call, config selector, history file, registration, and replay
-name (T0), or does an old/new caller lose a call or encounter a read/write
-boundary? Tool-list refresh is not evidence that a removed call is compatible.
+Compatibility verification ((1883)): prove T0 acceptance of old `clientInfo`,
+calls, config selectors, history files, registrations, and replay names with
+directional old/new caller and reader-writer evidence. Split any newly found
+T1+ behavior into its own ticket. Tool-list refresh does not prove a removed
+call compatible.
 
 ### Phase 4: Residual audit and parity, compatibility, and performance gate
 
@@ -228,17 +236,20 @@ Repeat the source inventory on the landed prerequisite head. Search non-test Go
 code in the original scope for Claude/Codex/Agy/Pi literals and
 `BackendClaude|BackendCodex|BackendAgy|BackendPi`; require zero common-code
 behavior branches except the exact (1881) allowlist and declarative registration
-rows. Confirm that every survivor is adapter-owned or carries its compatibility
-fixture/comment, and update this inventory if prerequisite tickets moved a
-site.
+rows. Confirm that each common-code survivor parses old persisted bytes or
+external identifiers that registration data cannot interpret, and update this
+inventory if prerequisite tickets moved a site.
 
 Verification: the Phase 1-3 package suites together; four-harness hosted lead
 and `agent.spawn` worker parity; restart/rejoin/handoff and downgrade fixtures;
 MCP legacy-call and detector fixtures; race coverage for touched lifecycle
 paths; and w5090 syscall/file-operation measurements against the pre-change
-baseline. Record the residual search command and output in the phase result.
+baseline. For each retained common-code name check, verify its regression
+fixture and site comment naming the preserved compatibility boundary. Record
+the residual search command, output, and allowlist in the phase result.
 
-Compatibility question ((1883)): what is the highest directional tier across
-the implemented phases? Cite source lines for every affected old/new writer,
-reader/refusal, and reopen recovery; a T3 result stops release for a minor bump
-and explicit owner approval, and T4 cannot ship.
+Compatibility verification ((1883)): record the directional T0 verdict across
+the implemented phases, citing source lines for each affected old/new writer,
+reader/refusal, and reopen path. Split newly discovered T1+ behavior into its
+own ticket; a prerequisite's already settled higher tier remains that ticket's
+decision.
