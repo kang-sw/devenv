@@ -379,3 +379,43 @@ func TestEndingOrgRuleReextendsOverlappingRule(t *testing.T) {
 	v := tm.view("maya.pc")
 	wantEq(t, "other rule fills gap in same step", asg(t, v, plainRule+">lena").State, "live")
 }
+
+func TestBareUnassignDefersOrgRuleReextension(t *testing.T) {
+	t.Run("same author rules all end before reextension", func(t *testing.T) {
+		tm := newTeam(t)
+		tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-search", "Search", "lena"))
+		it := tm.do("maya.pc", TypeItemCreate, map[string]any{"kind": "task", "title": "Bare overlap"})
+		ev := tm.do("maya.pc", TypeItemAssign, map[string]any{"item": it, "completion": "assigner", "targets": []any{
+			map[string]any{"root": "lena", "org": "o-search", "include_root": true},
+			map[string]any{"root": "maya", "levels": 1},
+		}})
+		plainRecord := ev + "~maya>lena"
+		tm.do("maya.pc", TypeItemUnassign, map[string]any{"item": it})
+		if tm.clone("maya.pc").r.S.asg[plainRecord] != nil {
+			t.Fatalf("bare unassign created stray record %s", plainRecord)
+		}
+	})
+
+	t.Run("creator gone stand-in preserves another authors coverage", func(t *testing.T) {
+		tm := newTeam(t)
+		tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-search", "Search", "lena"))
+		it := tm.do("maya.pc", TypeItemCreate, map[string]any{"kind": "task", "title": "Stand-in overlap"})
+		for _, member := range []string{"lena", "omar", "ivy", "jon", "kai"} {
+			leads := []string{}
+			if member == "lena" {
+				leads = []string{"bo"}
+			}
+			tm.do("ada.pc", TypeSetLead, map[string]any{"member": member, "leads": leads})
+		}
+		tm.do("ada.pc", "roles.remove_member", map[string]any{"member": "maya"})
+		orgEvent := tm.do("ada.pc", TypeItemAssign, map[string]any{"item": it, "completion": "assigner", "targets": []any{
+			map[string]any{"root": "lena", "org": "o-search", "include_root": true},
+		}})
+		plainEvent := tm.do("bo.pc", TypeItemAssign, map[string]any{"item": it, "completion": "assigner", "targets": []any{
+			map[string]any{"root": "lena", "include_root": true},
+		}})
+		wantEq(t, "stand-in org rule owns overlap", tm.clone("ada.pc").r.S.openRec(it, "lena").rule, orgEvent+"~lena")
+		tm.do("ada.pc", TypeItemUnassign, map[string]any{"item": it})
+		wantEq(t, "other author's rule fills stand-in gap", asg(t, tm.view("ada.pc"), plainEvent+"~lena>lena").State, "live")
+	})
+}

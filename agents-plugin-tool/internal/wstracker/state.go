@@ -859,11 +859,12 @@ func (s *state) refreshItemRules(item string, n *node) {
 	}
 }
 
-// endRule ends ru with the live records it made; a handoff its holder
-// accepted stays.
-func (s *state) endRule(ru *rule, n *node) {
+// endRuleRecords ends ru with the live records it made; a handoff its holder
+// accepted stays. It reports whether an org rule ended, so callers that end a
+// batch of rules can defer re-extension until every rule and record is closed.
+func (s *state) endRuleRecords(ru *rule, n *node) bool {
 	if ru == nil {
-		return
+		return false
 	}
 	if ru.ended == "" {
 		ru.ended = n.id
@@ -873,7 +874,11 @@ func (s *state) endRule(ru *rule, n *node) {
 			s.endRec(x, n, "unassigned")
 		}
 	}
-	if ru.org != "" {
+	return ru.org != ""
+}
+
+func (s *state) endRule(ru *rule, n *node) {
+	if s.endRuleRecords(ru, n) {
 		s.refreshItemRules(ru.item, n)
 	}
 }
@@ -882,6 +887,12 @@ func (s *state) endRule(ru *rule, n *node) {
 // is withdrawn, an accepted one unassigned, then the rule ends with its
 // records.
 func (s *state) unassignRule(ru *rule, n *node) {
+	if s.unassignRuleRecords(ru, n) {
+		s.refreshItemRules(ru.item, n)
+	}
+}
+
+func (s *state) unassignRuleRecords(ru *rule, n *node) bool {
 	if q := s.asg[ru.request]; ru.request != "" && q != nil {
 		switch q.state {
 		case "pending":
@@ -890,7 +901,7 @@ func (s *state) unassignRule(ru *rule, n *node) {
 			q.state, q.ended = "unassigned", n
 		}
 	}
-	s.endRule(ru, n)
+	return s.endRuleRecords(ru, n)
 }
 
 // fallbackHolder is who holds a task nobody else holds: its creator, or
@@ -1609,12 +1620,13 @@ func (s *state) apply(n *node) {
 				s.endRec(r, n, endState(r))
 			}
 		} else {
+			refresh := false
 			for _, ru := range s.openRules(item) {
 				if ru.by != a {
 					continue
 				}
 				if ru.org != "" {
-					s.unassignRule(ru, n)
+					refresh = s.unassignRuleRecords(ru, n) || refresh
 				} else {
 					ru.ended = n.id
 					if q := s.asg[ru.request]; ru.request != "" && q != nil && q.state == "accepted" {
@@ -1631,6 +1643,9 @@ func (s *state) apply(n *node) {
 				if x.by == a || (x.state == "pending" && x.sender == a) {
 					s.endRec(x, n, endState(x))
 				}
+			}
+			if refresh {
+				s.refreshItemRules(item, n)
 			}
 		}
 	case TypeItemStatus, TypeItemClose, TypeItemConfirm, TypeItemReject, TypeItemReopen:
