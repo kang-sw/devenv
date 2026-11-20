@@ -23,10 +23,7 @@ func TestAgyActivityCallbackOnSettledHostedChildTurn(t *testing.T) {
 	h.runner.Close()
 	h.config.AgyActivity = func() { calls.Add(1) }
 	h.start()
-	id := h.create("chat").ID
-	if _, err := h.runner.Send(id, "work"); err != nil {
-		t.Fatal(err)
-	}
+	id := h.spawn("work", leadParent).ID
 	p := h.backend.waitProc(t, 0)
 	p.nextSent(t)
 	p.reply("done")
@@ -63,6 +60,34 @@ func TestAgyActivityCallbackSkipsWatchdogContinuedTurnEnd(t *testing.T) {
 	eventually(t, "settled agy activity callback", func() bool { return calls.Load() == 1 })
 }
 
+func TestAgyActivityCallbackSkipsCompactCommandTurn(t *testing.T) {
+	var calls atomic.Int64
+	h, _, _ := agyWatchdogHarness(t, "45")
+	h.runner.Close()
+	h.config.AgyActivity = func() { calls.Add(1) }
+	h.start()
+	id, p := startAgyWatchdogTurn(t, h, false)
+	p.reply("done")
+	eventually(t, "ordinary agy activity callback", func() bool { return calls.Load() == 1 })
+	c := h.runner.conv(id)
+	c.do(func() {})
+	calls.Store(0)
+
+	key := h.record(id).WSKey
+	resume := false
+	if result := h.runner.Compact(key, "", &resume); result.Status != "queued" {
+		t.Fatalf("compact result = %+v", result)
+	}
+	if sent := p.nextSent(t); sent != "/compact" {
+		t.Fatalf("compact command = %q, want /compact", sent)
+	}
+	p.reply("compacted")
+	c.do(func() {})
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("compact command turn raised %d activity callbacks", got)
+	}
+}
+
 func TestAgyActivityCallbackSkipsNonAgyTurn(t *testing.T) {
 	var calls atomic.Int64
 	h := newHarness(t, map[string]string{"chat": chatProfile})
@@ -77,6 +102,8 @@ func TestAgyActivityCallbackSkipsNonAgyTurn(t *testing.T) {
 	p.nextSent(t)
 	p.reply("done")
 	eventually(t, "non-agy idle", func() bool { return h.state(id).Status == StatusIdle })
+	c := h.runner.conv(id)
+	c.do(func() {})
 	if got := calls.Load(); got != 0 {
 		t.Fatalf("non-agy turn raised %d activity callbacks", got)
 	}

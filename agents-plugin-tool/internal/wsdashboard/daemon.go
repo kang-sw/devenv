@@ -695,6 +695,9 @@ func (d *Daemon) AgyActivity() {
 
 // agyActivity exposes completion of the lock-taking handoff to package tests.
 func (d *Daemon) agyActivity(done chan<- struct{}) {
+	if d.planUsage == nil {
+		return
+	}
 	go func() {
 		d.planUsage.refreshAgy()
 		if done != nil {
