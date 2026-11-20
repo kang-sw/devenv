@@ -883,7 +883,7 @@ Pi calls share this route; the Pi-specific legacy behavior follows:
   (`WS_MCP_PI_ENDPOINT`, set by `ws-mcp dashboard` through
   `Runner.SetEndpoint` before `Start`) in its attached ws-mcp's environment.
   The token is drawn at every actual process launch and void once that
-  process ends or the conversation closes. A holder-backed Pi worker keeps it
+  process ends or the conversation closes. A holder-backed worker keeps it
   in its record; the successor restores it only after checking the recorded
   holder association, so reattachment does not revoke a surviving worker's
   ability to call delegation tools. A conversation opened through `POST /agents`, or
@@ -1519,20 +1519,47 @@ continues (`internal/wsagent/runner_events.go` L804-818).
 | Child kind | Owner | Survives graceful replace? | What to do |
 |---|---|---|---|
 | Hosted Claude, Pi, agy, or Codex lead | Session holder (`internal/wsagent/runner_process.go` L229-258, L294-312) | Yes, while holder and child survive | Replace; check rejoin if progress stalls. |
-| Production Pi `agent.spawn` worker; other Pi conversations with a holder manager | Session holder (`internal/wsagent/runner_process.go` L184-190; `cmd/ws-mcp/dashboard.go` L321-331) | Yes, while holder and child survive | Replace; check rejoin if progress stalls. |
-| Codex, Claude, or agy `agent.spawn` worker; other non-lead Claude conversations | Daemon subprocess (`internal/wsagent/runner_process.go` L178-190; `internal/wsagent/stream.go` L108-166) | No; shutdown stops it (`internal/wsagent/backend.go` L466-491) | Send a new message after replace to resume. |
+| Claude, Codex, agy, or Pi `agent.spawn` worker | Session holder (`internal/wsagent/runner_process.go`, `startWorker`) | Yes, while holder and child survive | Replace; check rejoin if progress stalls. |
+| Legacy direct worker still running under an older daemon | Daemon subprocess | No; shutdown stops it | Send a new message after replace; its next launch uses a holder. |
 
-Do not delay a replace for healthy held leads or Pi workers. Delay it only when
-a direct Codex, Claude, or agy worker's in-flight turn must finish; otherwise
-accept its `interrupted` settlement ("the dashboard daemon exited while the
-turn ran") and send a new message. The consumed prompt is not replayed
-(`internal/wsagent/spawn.go` L368-381; `internal/wsagent/runner_conv.go` L509-517).
-Held continuity still needs a rejoinable holder and child; a 32 MiB ring wrap
-can delay turn-state recovery (`internal/wsagent/holder.go` L74-79;
-`internal/wsagent/runner_process.go` L567-625).
-MCP calls during drain may receive 503, and a Windows holder marked not
-restart-safe may die with its starter's job object (Daemon-Hosted MCP and
-Session holders below).
+Healthy held leads and workers can continue through a normal daemon replacement.
+A successor validates the worker holder's kind, backend, reply id, cwd,
+capability hash, and harness PID before restoring its delegation capability
+and HTTP-MCP tuple. The tuple keeps the original token, URL, environment, and
+holder binding: an already-running worker cannot learn a rotated token.
+Attach uses the child's persisted authority; current-parent admission is checked
+after records load and governs its next launch. Replay rebuilds turn state,
+deduplicates answered controls, and auto-allows remaining requests for backends
+whose worker policy enables it.
+
+New workers use the `agent-worker` holder kind and a `handed_off_at` fence.
+An older daemon sees that child as ended, starts no worker, leaves its record
+unchanged, and does not recognize its holder kind. This surviving-child-row
+behavior is T1. The complete downgrade surface follows owner decision (1855)=a:
+T2 with the explicit exception that a downgrade beyond the 7-day
+`RegistryRetention` may irrecoverably delete the child's session history.
+An old daemon may also release and rewrite a held conversation parent's turn.
+Live legacy `pi-worker` holders retain their unfenced shape and remain adoptable.
+
+On re-upgrade, a fenced open child of a settled conversation parent is silently
+retired only when its nonzero start strictly predates the parent's terminal
+settlement stamp, the parent's sends do not exceed its last turn's mark, and
+its held mail and queued input are empty. Invalid, equal, or same-second
+stamps adopt the child; the parent timestamp has second precision. Retirement
+clears the active turn and holder fence in one record update and leaves a
+wakeable sleeping child, preserving its last result and sending no second
+parent report. A lead parent instead restores its held turn, adopts the child,
+and receives one late report. An old-pruned child leaves an unowned holder for
+the successor's orphan sweep.
+
+Interrupt remains turn-scoped. Idle timeout, explicit stop, close, and expiry
+end the holder and revoke its tokens. A legacy direct worker's open turn
+settles `interrupted` once before queued input starts its next held process.
+A lost 32 MiB ring uses existing backend recovery; a backend that cannot
+reconcile the lost turn reports failure honestly. Re-arming agy's model-wait
+watchdog across replacement remains outside this contract, matching held leads.
+MCP calls during drain may receive 503. Windows survival requires a
+restart-safe holder; one still inside its starter's job object may end with it.
 
 Session holders: a holder is a small Python process (standard library only,
 3.10 or newer) that owns one child process, over pipes or a PTY (ConPTY on
@@ -1557,7 +1584,7 @@ while the child lives.
 The daemon scans the holders directory at start and every 3 minutes,
 attaches to every holder over loopback TCP with the descriptor's token, and
 replays the holder's output ring (sequenced; 4 MiB for a terminal holder,
-32 MiB for a hosted lead or Pi worker's holder, `leadRingBytes`, so a rejoin
+32 MiB for a hosted lead or worker's holder, `leadRingBytes`, so a rejoin
 rebuilds a long turn whole; a reattach within one
 daemon process continues after the last sequence it saw, a new daemon
 process replays the whole ring). The newest authenticated attach takes over,
