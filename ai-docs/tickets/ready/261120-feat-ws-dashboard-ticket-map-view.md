@@ -1722,3 +1722,58 @@ prefix with `~/.local/bin/ws-rgo` on remote-Go hosts.
   reviewer compares the calm soup topography, the borderless typography, the
   hull and edge tone, the Ego Ring composition, and the chip and toolbar
   placement against v5, and the Result records the comparison.
+
+### Result (4db08f3f0) - 2026-11-20
+
+- **Landed** (`5169291c6..4db08f3f0`):
+  - `dashboard-ticketmap-geom.js` (`ticketMap.geom`): the pure part. It holds
+    mulberry32, the layout and iteration scaling, the hull, `inPoly`, the soup
+    offsets and centroid, the spatial hash, the label planner, the sim-edge
+    pick, the tooltip clamp, `zoomAt`/wheel/fit, the stage and soup alpha, the
+    Ego geometry, and `resolveHit`;
+  - `dashboard-ticketmap-graph.js` (`ticketMap.graph`): the View C DOM,
+    rendering, interaction, and Ego Ring;
+  - View C rules appended to `dashboard-ticketmap.css`, with `--d-tm-sk-l` in
+    all three theme blocks;
+  - the C tab, the focal-card ToC and Ego buttons, and the B↔C shared-state
+    routing;
+  - `js.tmap.c.*` keys in all 11 tables;
+  - `ticketmap-graph.test.cjs` and `TestTicketMapGraphBrowser`.
+- **Verification:**
+  - `node --test testdata/ticketmap-*.test.cjs`: 27/27 pass.
+  - `go test ./internal/wsdashboard -run 'TicketMap|DashboardSourceAssembly|CSSClassesDoNotCollide'`:
+    ok.
+  - `go test ./internal/wsi18n`: ok.
+  - `WS_PLAYWRIGHT_MODULE=… WS_TICKETMAP_SHOTS=/tmp/tmshots-p3 go test ./internal/wsdashboard -run 'TicketMap.*Browser' -count=1`:
+    `TestTicketMapBrowser` and `TestTicketMapGraphBrowser` both PASS. That
+    covers items 1–17 in dark and light at 1600×960 and 1280×800, plus the
+    `hasTouch` 1280×800 context: the CDP pinch scales ×2.00 with 0px drift.
+- **Performance** (dev Mac, headless Chromium):
+  - layout takes 30–34 ms on the 170 fixture (179 nodes) and 54–86 ms on the
+    300 fixture (309 nodes), within the ≤ 150 ms target;
+  - the frame interval during a continuous wheel is 8.6 ms mean (p95 9.3 ms)
+    at 170 and p95 16.6 ms at 300;
+  - a synchronous `draw()` takes 1.0–1.2 ms;
+  - after the single fetch, no session makes any request.
+- **Captures:** compared `/tmp/tmshots-p3/c-soup-*`, `c-zoom-*`, `ego-*`, and
+  `kw-filter-*` against `mock-c-*` (both themes, both viewports): match. The
+  calm soup topography, the borderless typography, the hull and edge tone, the
+  Ego Ring composition, and the chip and toolbar placement agree.
+  The remaining differences come from the data or the spec:
+  - the fixture's keyword weights are steeper and it has fewer cross-cluster
+    links;
+  - the Ego Ring hides non-members, as specified;
+  - the keyword camera lands at k = 1.1 versus v5's 0.9, from the same cap
+    formula over a different fit.
+- **Decisions:**
+  - Pure geometry lives in its own file, `dashboard-ticketmap-geom.js`,
+    loaded before the graph file. The script order is ticketmap, viewb, geom,
+    graph. The split keeps every file under the 1000-line size guard and makes
+    the logic testable in Node.
+  - `.on` is the placed-label state class named by the Playwright contract. It
+    only ever appears compounded onto a `d-tm-` class, and the CSS scope test
+    asserts that.
+  - Ego sector captions are clamped 4px inside the viewport. v5 left one
+    clipped at 1280; this deliberately departs from it.
+  - A `window.__tmapc` probe is exposed only under the same test-hook gate as
+    `window.__tmap`.
