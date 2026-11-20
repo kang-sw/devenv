@@ -902,6 +902,57 @@ prefix with `~/.local/bin/ws-rgo` on remote-Go hosts.
 - Payload size on the `n=170` fixture: under 600 KB (asserted), recorded in the
   Result next to the v5 reference (735 KB for 290 nodes with previews).
 
+### Result (e24588ac7) - 2026-11-20
+
+- **Landed** (`59bde59ba..e24588ac7`):
+  - spine `wsdoc/tickets_map.go`: load, targeted ref lookup, fingerprint, memo
+    with a 16-root LRU, payload types, `EmptyTicketMapJSON`;
+  - `tickets_cache.go`: `doc` field, `scanStatusDirWith`, the
+    `readTicketDir`/`lstatTicketFile` seams, and `listStatusDirEntries`;
+  - text engine: `tickets_map_text.go`, plus `tickets_map_words.go` for the
+    tokenizers and stoplists;
+  - cluster engine: `tickets_map_cluster.go`, `tickets_map_louvain.go`,
+    `tickets_map_naming.go`;
+  - the synthetic fixture `wsdoc/wsdoctest/ticketmap.go`;
+  - the route: `wsdashboard/ticket_graph.go`, the `tickets/graph` case, the
+    agent forwarder, and `mcp/dashboard_ticket_graph.go`;
+  - the tests listed under Verification.
+- **Verification:**
+  - `go test ./internal/wsdoc -count=1`: ok, including the TicketMap text,
+    cluster, determinism (`-race` run separately), touch, and surface tests.
+  - `go test ./internal/wsdashboard -run 'TicketGraph|GuardedRoutes|Access'`:
+    ok.
+  - `go test ./internal/mcp -run TicketGraph`: ok.
+- **Touch counts** on the n=170 fixture: a cold build does 179 opens (170 open
+  + 9 refs), 16 lstats (≤ 2 × 9), and 3 listings. A warm build does 0 opens and
+  the same lstat and listing counts. No listing of `.done/` or `.dropped/`
+  happens.
+- **Clusters** on the fixture: K = 10 within `[7, 12]` plus Misc. Every planted
+  topic is 100% co-clustered. The Korean label is Hangul and the Japanese label
+  is a Kanji bigram.
+- **Bench** (`BenchmarkTicketMapBuild`, n=300, Apple M3 Max): cold about
+  25 ms/op (target ≤ 400 ms); warm memo about 1.0–1.2 ms/op. The warm memo
+  misses the < 1 ms target. Its time is the 3 listings plus the about 186 stat
+  calls the file-touch budget requires; the hashing and memo lookup are a small
+  part of it.
+- **Payload** at n=170: 311,356 bytes (179 nodes, 1,491 sim rows), under the
+  600 KB assertion. The v5 reference is 735 KB for 290 nodes.
+- **Decisions:**
+  - `ledger` is ws convention vocabulary in `enStop`, so the fixture's billing
+    topic uses `billing/invoice.go`.
+  - Topic sizes in the fixture are flattened to 13–19, because the γ-score
+    entropy term otherwise splits an outsized topic.
+  - `blocked-by` fragments are normalized to `#phaseN`.
+  - Edges declared by closed refs are included when both ends are included;
+    `missing` is computed for open tickets only.
+  - `cluster.terms` holds the up-to-8 name candidates.
+  - `clusterKeywords` keys exist only for clusters with a non-empty soup.
+  - Every other contract reading is in the commits' AI Context.
+- **Pre-existing failures** reproduced on unchanged HEAD, outside this ticket:
+  `TestTrackerStoreRegistryUI` (`closeOrgEditor` ReferenceError) and an
+  `internal/mcp` full-package hang in
+  `TestDashboardTransientBoardLockRetainsIndexAndCaches`.
+
 ### Phase 2: `#thandle` Entry, Full-Viewport Overlay Shell & View B (Swimlane Matrix + 3-Tier Hierarchical Click-Focus)
 
 **Files to create or modify**
