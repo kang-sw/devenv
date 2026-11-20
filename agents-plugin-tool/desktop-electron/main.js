@@ -13,7 +13,8 @@ const { createShellLog } = require('./shell-log');
 const { HEIGHT, colors, createBar, trackDashboardTheme } = require('./titlebar');
 const { createUpdater } = require('./update');
 const UPDATE = Object.freeze({ check: 'werkschaft:update-check', download: 'werkschaft:update-download',
-  skip: 'werkschaft:update-skip', restart: 'werkschaft:update-restart', subscribe: 'werkschaft:update-subscribe', status: 'werkschaft:update-status' });
+  skip: 'werkschaft:update-skip', restart: 'werkschaft:update-restart', subscribe: 'werkschaft:update-subscribe', status: 'werkschaft:update-status',
+  checkCanary: 'werkschaft:update-check-canary', backToStable: 'werkschaft:update-back-to-stable', channel: 'werkschaft:update-channel' });
 
 function failStartup({ app, dialog }, error) {
   let logPath, logStatus;
@@ -454,6 +455,12 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     ipcMain.on(UPDATE.check, event => { if (fromDashboard(event)) updater.check(true); });
     ipcMain.on(UPDATE.download, event => { if (fromDashboard(event)) updater.download(); });
     ipcMain.on(UPDATE.skip, (event, version) => { if (fromDashboard(event)) updater.skip(version); });
+    // Payload-free manual channel actions: any renderer argument is ignored.
+    ipcMain.on(UPDATE.checkCanary, event => { if (fromDashboard(event)) updater.checkCanary(); });
+    ipcMain.on(UPDATE.backToStable, event => { if (fromDashboard(event)) updater.backToStable(); });
+    // Back to stable is offered only by a packaged canary; a dev run cannot swap itself.
+    ipcMain.handle(UPDATE.channel, event => fromDashboard(event)
+      ? { canary: !!app.isPackaged && !!updater.isCanary?.(), version: app.getVersion() } : { canary: false });
     ipcMain.on(UPDATE.restart, event => {
       if (!fromDashboard(event) || !updater.canRestart()) return;
       relaunch = true;
