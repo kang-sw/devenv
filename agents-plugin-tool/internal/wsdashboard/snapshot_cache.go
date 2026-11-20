@@ -177,7 +177,9 @@ func (c *SnapshotCache) setLive(stateDir, replyID string, snap wslive.Snapshot, 
 		return false
 	}
 	p.folded = folded
-	path := wslive.SnapshotPath(SessionDir(stateDir, replyID))
+	dir := SessionDir(stateDir, replyID)
+	c.outputRates.Remember(dir, p.snap.Lead.OutputRate)
+	path := wslive.SnapshotPath(dir)
 	c.liveMu.Lock()
 	defer c.liveMu.Unlock()
 	prev, had := c.live[path]
@@ -225,7 +227,19 @@ func (c *SnapshotCache) snapshotWithoutObserved(stateDir, replyID string) *wsliv
 	if err != nil {
 		return nil
 	}
+	if c != nil {
+		c.outputRates.Remember(SessionDir(stateDir, replyID), p.snap.Lead.OutputRate)
+	}
 	return &p.snap
+}
+
+// warmOutputRate restores a legacy-stripped rate once during authoritative
+// session indexing. Presentation reads use only the warmed in-memory value.
+func (c *SnapshotCache) warmOutputRate(stateDir, replyID string) {
+	if c == nil {
+		return
+	}
+	c.outputRates.Warm(SessionDir(stateDir, replyID))
 }
 
 // Snapshot reads the live snapshot of session replyID under stateDir; nil
@@ -254,11 +268,12 @@ func (c *SnapshotCache) snapshotResult(stateDir, replyID string) (*wslive.Snapsh
 		outputRates = &c.outputRates
 	}
 	observed.Load(dir).Overlay(&p.snap)
-	// New writers fold OutputRate into snapshot/RAM. Read the sidecar only as
-	// recovery after a legacy writer stripped that field; ordinary renders do
-	// no output-rate file I/O.
+	// New writers fold OutputRate into snapshot/RAM. A legacy-stripped snapshot
+	// overlays only the value warmed during authoritative session indexing;
+	// presentation reads never touch the recovery sidecar.
+	outputRates.Remember(dir, p.snap.Lead.OutputRate)
 	if p.snap.Lead.Observed == nil && p.snap.Lead.OutputRate == nil {
-		wslive.OverlayOutputRate(&p.snap, outputRates.Load(dir))
+		wslive.OverlayOutputRate(&p.snap, outputRates.Cached(dir))
 	}
 	return &p.snap, nil
 }
@@ -288,7 +303,6 @@ func (c *SnapshotCache) Invalidate(stateDir, replyID string) {
 	path := wslive.SnapshotPath(SessionDir(stateDir, replyID))
 	c.files.InvalidateUnder(path)
 	c.observed.Invalidate(SessionDir(stateDir, replyID))
-	c.outputRates.Invalidate(SessionDir(stateDir, replyID))
 }
 
 // Forget drops the cached snapshot file of session replyID under stateDir;

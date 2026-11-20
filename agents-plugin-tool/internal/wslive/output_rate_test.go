@@ -79,7 +79,7 @@ func TestOutputRateApplyResetRetentionAndValidation(t *testing.T) {
 	}
 }
 
-func TestOutputRateDurableSidecarT1SurvivesLegacySnapshotWriterAndPrune(t *testing.T) {
+func TestOutputRateDurableSidecarT2SurvivesLegacySnapshotWriterAndPrune(t *testing.T) {
 	dir := t.TempDir()
 	st := NewState("agy-session")
 	res, err := st.Apply(Event{Kind: KindStatus, OutputRate: &OutputRate{OutputTps: 53.4, At: 5000}}, 5000)
@@ -160,54 +160,53 @@ func TestOutputRateDurableSidecarT1SurvivesLegacySnapshotWriterAndPrune(t *testi
 	}
 }
 
-func TestOutputRateCacheValidationAndNegativeCache(t *testing.T) {
+func TestOutputRateCacheWarmRememberAndForget(t *testing.T) {
 	dir := t.TempDir()
 	var cache OutputRateCache
 	reads := func() int64 { return wsstate.FileIOCounters()["file_io_read_file"] }
 
-	// Absent file is negatively cached until an explicit change signal.
+	// Absent recovery is negatively cached until intake remembers a value or
+	// session teardown explicitly forgets it.
 	before := reads()
-	if got := cache.Load(dir); got != nil {
+	if got := cache.Warm(dir); got != nil {
 		t.Fatalf("absent load = %+v", got)
 	}
-	if got := cache.Load(dir); got != nil {
+	if got := cache.Warm(dir); got != nil {
 		t.Fatalf("cached absent load = %+v", got)
 	}
 	if got := reads() - before; got != 2 {
 		t.Fatalf("absent recovery reads = %d, want 2 bounded segments", got)
 	}
 
-	// Write sidecar and invalidate -> reloads immediately.
+	// A later sidecar write is not discovered by presentation invalidations.
+	// The owning intake path remembers the same value directly in memory.
 	if err := WriteOutputRate(dir, &OutputRate{OutputTps: 25, At: 1000}); err != nil {
 		t.Fatal(err)
 	}
-	cache.Invalidate(dir)
-	if got := cache.Load(dir); got == nil || got.OutputTps != 25 || got.At != 1000 {
-		t.Fatalf("reloaded after invalidate = %+v", got)
+	if got := cache.Cached(dir); got != nil {
+		t.Fatalf("unremembered sidecar leaked into memory = %+v", got)
 	}
+	cache.Remember(dir, &OutputRate{OutputTps: 25, At: 1000})
 
-	// Cached hits do no filesystem work.
+	// Cached presentation hits do no filesystem work.
 	before = reads()
-	if got := cache.Load(dir); got == nil || got.OutputTps != 25 {
+	if got := cache.Cached(dir); got == nil || got.OutputTps != 25 {
 		t.Fatalf("cached hit = %+v", got)
 	}
 	if got := reads() - before; got != 0 {
 		t.Fatalf("cached hit reads = %d, want 0", got)
 	}
 
-	// A write stays invisible to the recovery cache until its nudge invalidates.
+	cache.Remember(dir, &OutputRate{OutputTps: 88.5, At: 2000})
+	cache.Remember(dir, &OutputRate{OutputTps: 10, At: 1500})
+	if got := cache.Cached(dir); got == nil || got.OutputTps != 88.5 || got.At != 2000 {
+		t.Fatalf("remembered newest = %+v", got)
+	}
 	if err := WriteOutputRate(dir, &OutputRate{OutputTps: 88.5, At: 2000}); err != nil {
 		t.Fatal(err)
 	}
-	if got := cache.Load(dir); got == nil || got.OutputTps != 25 {
-		t.Fatalf("uninvaldated cache = %+v", got)
-	}
-	cache.Invalidate(dir)
-	if got := cache.Load(dir); got == nil || got.OutputTps != 88.5 || got.At != 2000 {
-		t.Fatalf("updated load = %+v", got)
-	}
 	cache.Forget(dir)
-	if got := cache.Load(dir); got == nil || got.OutputTps != 88.5 {
+	if got := cache.Warm(dir); got == nil || got.OutputTps != 88.5 {
 		t.Fatalf("load after forget = %+v", got)
 	}
 }
@@ -215,7 +214,6 @@ func TestOutputRateCacheValidationAndNegativeCache(t *testing.T) {
 func TestOutputRateLogHeldAppendFileTouchBudget(t *testing.T) {
 	dir := t.TempDir()
 	log := NewOutputRateLog(dir)
-	defer log.Close()
 	before := wsstate.FileIOCounters()
 	if err := log.Append(&OutputRate{OutputTps: 25, At: 1000}); err != nil {
 		t.Fatal(err)
@@ -224,6 +222,12 @@ func TestOutputRateLogHeldAppendFileTouchBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	after := wsstate.FileIOCounters()
+	want := map[string]int64{"mkdir_all": 1, "open_file": 1, "stat": 1, "write": 2, "atomic_replace": 0, "close": 0}
+	for op, n := range want {
+		if got := after["file_io_"+op] - before["file_io_"+op]; got != n {
+			t.Fatalf("two appends %s operations = %d, want %d", op, got, n)
+		}
+	}
 	if got := after["file_io_open_file"] - before["file_io_open_file"]; got != 1 {
 		t.Fatalf("two appends opened files %d times, want 1 held handle", got)
 	}
@@ -232,6 +236,13 @@ func TestOutputRateLogHeldAppendFileTouchBudget(t *testing.T) {
 	}
 	if got := after["file_io_atomic_replace"] - before["file_io_atomic_replace"]; got != 0 {
 		t.Fatalf("append replaced files %d times, want 0", got)
+	}
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	closed := wsstate.FileIOCounters()
+	if got := closed["file_io_close"] - after["file_io_close"]; got != 1 {
+		t.Fatalf("graceful log close operations = %d, want 1", got)
 	}
 	if got, err := ReadOutputRate(dir); err != nil || got == nil || got.OutputTps != 88.5 || got.At != 2000 {
 		t.Fatalf("latest appended rate = %+v, %v", got, err)
@@ -252,6 +263,12 @@ func TestOutputRateLogRotatesWholeSegmentsAndRecoversLatest(t *testing.T) {
 		t.Fatal(err)
 	}
 	after := wsstate.FileIOCounters()
+	want := map[string]int64{"mkdir_all": 1, "open_file": 4, "stat": 1, "write": 4, "atomic_replace": 3, "close": 4}
+	for op, n := range want {
+		if got := after["file_io_"+op] - before["file_io_"+op]; got != n {
+			t.Fatalf("four rotating appends %s operations = %d, want %d", op, got, n)
+		}
+	}
 	if got := after["file_io_open_file"] - before["file_io_open_file"]; got != 4 {
 		t.Fatalf("initial + three rotated segment opens = %d, want 4", got)
 	}

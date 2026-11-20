@@ -109,6 +109,7 @@ func (s agentSessions) ReadSession(reg Registration) (SessionData, bool, error) 
 	}
 	if !reg.Agent {
 		s.snaps.snapshotWithoutObserved(s.dir, reg.ReplyID)
+		s.snaps.warmOutputRate(s.dir, reg.ReplyID)
 		return s.inner.ReadSession(reg)
 	}
 	if _, err := os.Stat(SessionDir(s.dir, reg.ReplyID)); err != nil {
@@ -117,6 +118,7 @@ func (s agentSessions) ReadSession(reg Registration) (SessionData, bool, error) 
 		}
 		return SessionData{}, false, err
 	}
+	s.snaps.warmOutputRate(s.dir, reg.ReplyID)
 	h := sha256.New()
 	stores, updatedAt, staleAt := s.snaps.ReadLiveStoresClock(h, s.dir, reg.ReplyID, s.now(), LiveStoreFingerprint{}, AllLiveStores)
 	return SessionData{Fingerprint: hex.EncodeToString(h.Sum(nil)[:16]), LiveStores: stores, SnapshotUpdatedAt: updatedAt, SnapshotStaleAt: staleAt}, true, nil
@@ -128,11 +130,13 @@ func (s agentSessions) ReadLiveSession(reg Registration, previous SessionData, s
 	s.snaps.Invalidate(s.dir, reg.ReplyID)
 	if !reg.Agent {
 		s.snaps.snapshotWithoutObserved(s.dir, reg.ReplyID)
+		s.snaps.warmOutputRate(s.dir, reg.ReplyID)
 		if live, ok := s.inner.(LiveSessionSource); ok {
 			return live.ReadLiveSession(reg, previous, stores)
 		}
 		return s.inner.ReadSession(reg)
 	}
+	s.snaps.warmOutputRate(s.dir, reg.ReplyID)
 	h := sha256.New()
 	previous.LiveStores, previous.SnapshotUpdatedAt, previous.SnapshotStaleAt = s.snaps.ReadLiveStoresClock(h, s.dir, reg.ReplyID, s.now(), previous.LiveStores, stores)
 	previous.Fingerprint = hex.EncodeToString(h.Sum(nil)[:16])

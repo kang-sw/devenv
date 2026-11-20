@@ -83,7 +83,7 @@ func TestAgyOutputRateHoverAndRowBrowser(t *testing.T) {
 
 	// Register an agy subagent session in its 2nd turn. Persist output-rate.json
 	// separately from snapshot.json (no lead.outputRate in snapshot.json) so the
-	// render exercises SnapshotCache's T1 sidecar overlay end-to-end.
+	// render exercises SnapshotCache's T2 recovery overlay end-to-end.
 	if err := WriteRegistration(f.dir, Registration{
 		ReplyID:      "agychild",
 		Project:      f.project,

@@ -143,12 +143,21 @@ func assertNear(t *testing.T, label string, got, want float64) {
 
 func agyOutputRateFileIO() int64 {
 	var total int64
-	for site, count := range wsstate.FileIOCounters() {
-		if strings.HasPrefix(site, "file_io_site:wslive/output_rate.go:") {
-			total += count
-		}
+	for _, count := range agyOutputRateFileOps() {
+		total += count
 	}
 	return total
+}
+
+func agyOutputRateFileOps() map[string]int64 {
+	out := map[string]int64{}
+	for site, count := range wsstate.FileIOCounters() {
+		if strings.HasPrefix(site, "file_io_site:wslive/output_rate.go:") {
+			op := site[strings.LastIndexByte(site, ':')+1:]
+			out[op] += count
+		}
+	}
+	return out
 }
 
 // TestAgyOutputRateFromRecordedFixtures drives the recorded agy ACP fixtures
@@ -488,6 +497,11 @@ func TestAgyOutputRateSteeredTurnAttribution(t *testing.T) {
 	if len(rates1) != 1 {
 		t.Fatalf("prompt 1 rate events = %d, want 1", len(rates1))
 	}
+	for _, ev := range evs1 {
+		if ev.Live != nil && ev.Live.OutputRate != nil && ev.LiveCoalescesTurnEnd {
+			t.Fatal("mid-turn steered rate incorrectly coalesced without TurnEnd")
+		}
+	}
 	assertNear(t, "steered prompt 1 rate", *rates1[0].OutputTps, 80.0)
 
 	// Now chunks belong to prompt 2 (500ms span).
@@ -505,6 +519,15 @@ func TestAgyOutputRateSteeredTurnAttribution(t *testing.T) {
 	assertNear(t, "steered prompt 2 window rate", *rates2[0].OutputTps, 100.0)
 	if !evs2[len(evs2)-1].TurnEnd {
 		t.Fatalf("final steered prompt did not end with TurnEnd: %+v", evs2)
+	}
+	coalesced := false
+	for _, ev := range evs2 {
+		if ev.Live != nil && ev.Live.OutputRate != nil {
+			coalesced = ev.LiveCoalescesTurnEnd
+		}
+	}
+	if !coalesced {
+		t.Fatal("final prompt rate did not coalesce with its immediate TurnEnd")
 	}
 }
 
@@ -594,7 +617,11 @@ func TestAgyOutputRateRowHoverRetentionAndReopen(t *testing.T) {
 	clock += 10
 	for _, ev := range m.mapLine(agyPromptResultLine("ws-p-e-1", "end_turn", map[string]any{"outputTokens": 1023, "thoughtTokens": 988}), nopReplies{}) {
 		if ev.Live != nil {
-			c.apply(*ev.Live)
+			if ev.LiveCoalescesTurnEnd {
+				c.applyCoalesced(*ev.Live, false)
+			} else {
+				c.apply(*ev.Live)
+			}
 		}
 		if ev.TurnEnd {
 			c.setStatus(func() { c.turn = false })
@@ -669,11 +696,59 @@ func TestAgyOutputRateHostedApplyDefersSidecarToRecoveryFlush(t *testing.T) {
 	}
 
 	w.apply(wslive.Event{Kind: wslive.KindTurnEnd, At: 1100})
-	if got := agyOutputRateFileIO() - before; got != 1 {
-		t.Fatalf("turn-end recovery flush sidecar operations = %d, want 1 open", got)
+	if got := agyOutputRateFileIO() - before; got != 4 {
+		t.Fatalf("turn-end recovery flush sidecar operations = %d, want mkdir+open+stat+write", got)
 	}
 	if got, err := wslive.ReadOutputRate(dir); err != nil || got == nil || got.OutputTps != 42 {
 		t.Fatalf("recovery sidecar = %+v, %v", got, err)
+	}
+}
+
+func TestAgyOutputRateFileOnlyCompletionCoalescesSnapshotAndCountsIO(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Unix(1000, 0)
+	w := newLiveWriter(dir, "agy-rate-file-only", "agy", func() time.Time { return now }, io.Discard)
+	writes := 0
+	w.writeSnapshotFile = func(string, []byte, os.FileMode) error {
+		writes++
+		return nil
+	}
+	w.apply(wslive.Event{Kind: wslive.KindTurnStart})
+
+	checkAction := func(label string, rate wslive.OutputRate, wantOps map[string]int64) {
+		t.Helper()
+		beforeWrites := writes
+		before := agyOutputRateFileOps()
+		w.applyCoalesced(wslive.Event{Kind: wslive.KindStatus, OutputRate: &rate})
+		if writes != beforeWrites {
+			t.Fatalf("%s rate status wrote snapshot before TurnEnd", label)
+		}
+		w.apply(wslive.Event{Kind: wslive.KindTurnEnd})
+		if writes-beforeWrites != 1 {
+			t.Fatalf("%s completion snapshot writes = %d, want 1", label, writes-beforeWrites)
+		}
+		after := agyOutputRateFileOps()
+		for op, want := range wantOps {
+			if got := after[op] - before[op]; got != want {
+				t.Fatalf("%s %s operations = %d, want %d", label, op, got, want)
+			}
+		}
+	}
+
+	checkAction("first response", wslive.OutputRate{OutputTps: 42, At: 1000}, map[string]int64{
+		"mkdir_all": 1, "open_file": 1, "stat": 1, "write": 1, "close": 0,
+	})
+	w.apply(wslive.Event{Kind: wslive.KindTurnStart})
+	checkAction("steady response", wslive.OutputRate{OutputTps: 48, At: 2000}, map[string]int64{
+		"mkdir_all": 0, "open_file": 0, "stat": 0, "write": 1, "close": 0,
+	})
+	beforeClose := agyOutputRateFileOps()
+	if err := w.outputRates.Close(); err != nil {
+		t.Fatal(err)
+	}
+	afterClose := agyOutputRateFileOps()
+	if got := afterClose["close"] - beforeClose["close"]; got != 1 {
+		t.Fatalf("session close operations = %d, want 1", got)
 	}
 }
 

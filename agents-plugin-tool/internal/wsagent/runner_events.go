@@ -61,7 +61,11 @@ func (c *conv) handle(ev Event) {
 		if !quiet {
 			c.compactEvent(*ev.Live)
 		}
-		c.apply(*ev.Live, quiet)
+		if ev.LiveCoalescesTurnEnd {
+			c.applyCoalesced(*ev.Live, quiet)
+		} else {
+			c.apply(*ev.Live, quiet)
+		}
 		if !quiet && ev.Live.Kind == wslive.KindStatus {
 			c.checkUsageDropCompaction(*ev.Live)
 			if c.canKick() {

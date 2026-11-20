@@ -916,9 +916,11 @@ func (m *agyMapper) response(msg agyMessage, replies lineReplies, now int64) []E
 		out := m.endTurn(msg, now)
 		if rateEv != nil {
 			// Emit KindStatus before TurnEnd so the runner updates telemetry
-			// while the turn is active and TurnEnd flushes the snapshot with it.
+			// while the turn is active. Mark this exact pair so file-only
+			// recovery persists both in TurnEnd's single snapshot.
 			if n := len(out); n > 0 && out[n-1].TurnEnd {
 				turnEnd := out[n-1]
+				rateEv.LiveCoalescesTurnEnd = true
 				out = append(out[:n-1], *rateEv, turnEnd)
 			} else {
 				out = append(out, *rateEv)

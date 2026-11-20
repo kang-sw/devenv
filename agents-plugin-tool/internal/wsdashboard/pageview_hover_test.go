@@ -8,18 +8,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wslive"
-	"github.com/kang-sw/devenv/internal/wsstate"
 )
-
-func outputRateReadIO() int64 {
-	var n int64
-	for site, count := range wsstate.FileIOCounters() {
-		if strings.HasPrefix(site, "file_io_site:wslive/output_rate.go:") {
-			n += count
-		}
-	}
-	return n
-}
 
 func TestSessionHoverExistingEvidence(t *testing.T) {
 	now := testNow
@@ -251,7 +240,8 @@ func TestSessionHoverAgyOutputRateAndUnknownModel(t *testing.T) {
 		t.Fatalf("ended agy subagent row kept rate: %s", doneHTML)
 	}
 
-	// Reopen via SnapshotCache after legacy snapshot.json rewrite restores OutputRate from sidecar.
+	// Authoritative session reopen warms the sidecar once; repeated rail renders
+	// after snapshot invalidations use only that recovered in-memory value.
 	stateDir := t.TempDir()
 	sessionDir := SessionDir(stateDir, reg.ReplyID)
 	if err := wslive.WriteOutputRate(sessionDir, &wslive.OutputRate{OutputTps: 69.6, At: at}); err != nil {
@@ -262,9 +252,25 @@ func TestSessionHoverAgyOutputRateAndUnknownModel(t *testing.T) {
 		Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseReplying}, TurnStartedAt: at + 1000},
 	})
 	var cache SnapshotCache
-	reopened := cache.Snapshot(stateDir, reg.ReplyID)
-	if reopened == nil || reopened.Lead.OutputRate == nil || reopened.Lead.OutputRate.OutputTps != 69.6 || reopened.Lead.Observed != nil {
-		t.Fatalf("reopened snapshot cache overlay = %+v", reopened)
+	beforeWarm := cache.outputRates.Reads()
+	source := agentSessions{inner: newFakeSource(), dir: stateDir, now: func() time.Time { return now }, snaps: &cache}
+	if _, ok, err := source.ReadSession(reg); err != nil || !ok {
+		t.Fatalf("authoritative session warm: ok=%v err=%v", ok, err)
+	}
+	if got := cache.outputRates.Reads() - beforeWarm; got != 2 {
+		t.Fatalf("authoritative recovery warm sidecar operations = %d, want 2 bounded reads", got)
+	}
+	beforeRenders := cache.outputRates.Reads()
+	var reopened *wslive.Snapshot
+	for range 3 {
+		cache.Invalidate(stateDir, reg.ReplyID)
+		reopened = cache.Snapshot(stateDir, reg.ReplyID)
+		if reopened == nil || reopened.Lead.OutputRate == nil || reopened.Lead.OutputRate.OutputTps != 69.6 || reopened.Lead.Observed != nil {
+			t.Fatalf("reopened snapshot cache overlay = %+v", reopened)
+		}
+	}
+	if got := cache.outputRates.Reads() - beforeRenders; got != 0 {
+		t.Fatalf("three invalidated rail renders read output-rate sidecar %d times, want 0", got)
 	}
 	reopenedRow := railRow(railInput{Session: Session{Registration: reg}, Snapshot: reopened}, true, now)
 	if reopenedRow.Hover.Rate != 70 || reopenedRow.Hover.RateAt != at {
@@ -272,7 +278,7 @@ func TestSessionHoverAgyOutputRateAndUnknownModel(t *testing.T) {
 	}
 
 	// A current snapshot already carries the folded rate, so a cold render does
-	// not touch the recovery sidecar. Only the legacy-rewrite case above reads it.
+	// not touch the recovery sidecar.
 	currentStateDir := t.TempDir()
 	if err := os.MkdirAll(SessionDir(currentStateDir, "agycurrent"), 0o700); err != nil {
 		t.Fatal(err)
@@ -284,12 +290,12 @@ func TestSessionHoverAgyOutputRateAndUnknownModel(t *testing.T) {
 			OutputRate: &wslive.OutputRate{OutputTps: 69.6, At: at},
 		},
 	})
-	beforeReads := outputRateReadIO()
 	var currentCache SnapshotCache
+	beforeReads := currentCache.outputRates.Reads()
 	if got := currentCache.Snapshot(currentStateDir, "agycurrent"); got == nil || got.Lead.OutputRate == nil {
 		t.Fatalf("current snapshot rate = %+v", got)
 	}
-	if got := outputRateReadIO() - beforeReads; got != 0 {
+	if got := currentCache.outputRates.Reads() - beforeReads; got != 0 {
 		t.Fatalf("current snapshot render read output-rate sidecar %d times, want 0", got)
 	}
 }

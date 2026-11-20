@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
@@ -105,6 +106,7 @@ type OutputRateLog struct {
 	dir      string
 	file     *os.File
 	bytes    int64
+	prepared bool
 	maxBytes int64 // test seam; zero uses outputRateSegmentBytes
 }
 
@@ -142,6 +144,7 @@ func (l *OutputRateLog) Append(rate *OutputRate) error {
 			return err
 		}
 	}
+	wsstate.CountFileIO("write")
 	n, err := l.file.Write(line)
 	l.bytes += int64(n)
 	return err
@@ -151,16 +154,24 @@ func (l *OutputRateLog) ensureOpen() error {
 	if l.file != nil {
 		return nil
 	}
-	if err := os.MkdirAll(l.dir, 0700); err != nil {
-		return err
+	firstOpen := !l.prepared
+	if firstOpen {
+		wsstate.CountFileIO("mkdir_all")
+		if err := os.MkdirAll(l.dir, 0700); err != nil {
+			return err
+		}
 	}
 	f, err := wsstate.OpenFile(OutputRatePath(l.dir), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
 	l.file = f
-	if info, statErr := f.Stat(); statErr == nil {
-		l.bytes = info.Size()
+	if firstOpen {
+		wsstate.CountFileIO("stat")
+		if info, statErr := f.Stat(); statErr == nil {
+			l.bytes = info.Size()
+		}
+		l.prepared = true
 	}
 	return nil
 }
@@ -168,6 +179,7 @@ func (l *OutputRateLog) ensureOpen() error {
 // rotate retains one prior whole segment. Every record is a full latest-value
 // snapshot, so either segment alone is sufficient for recovery.
 func (l *OutputRateLog) rotate() error {
+	wsstate.CountFileIO("close")
 	if err := l.file.Close(); err != nil {
 		return err
 	}
@@ -191,9 +203,11 @@ func (l *OutputRateLog) Close() error {
 	if l.file == nil {
 		return nil
 	}
+	wsstate.CountFileIO("close")
 	err := l.file.Close()
 	l.file = nil
 	l.bytes = 0
+	l.prepared = false
 	return err
 }
 
@@ -211,8 +225,15 @@ func WriteOutputRate(dir string, rate *OutputRate) error {
 // ReadOutputRate reads the latest valid delta from the session's additive
 // sidecar, tolerating missing files, blank lines and a torn final append.
 func ReadOutputRate(dir string) (*OutputRate, error) {
+	return readOutputRate(dir, nil)
+}
+
+func readOutputRate(dir string, beforeRead func()) (*OutputRate, error) {
 	var latest *OutputRate
 	for _, path := range []string{filepath.Join(dir, outputRatePreviousName), OutputRatePath(dir)} {
+		if beforeRead != nil {
+			beforeRead()
+		}
 		raw, err := readReplacedFile(path)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -238,20 +259,21 @@ func ReadOutputRate(dir string) (*OutputRate, error) {
 	return latest, nil
 }
 
-// OutputRateCache reads each sidecar at most once between explicit invalidation
-// signals. Ordinary snapshots carry OutputRate themselves, so this cache is a
-// recovery overlay only after a legacy snapshot rewrite, never a polling path.
+// OutputRateCache warms each sidecar once off presentation paths, then serves
+// only memory. Snapshot invalidation never discards its recovered value.
 type OutputRateCache struct {
 	mu       sync.Mutex
 	sessions map[string]*outputRateSlot
+	reads    atomic.Int64
 }
 
 type outputRateSlot struct {
 	rate *OutputRate
 }
 
-// Load returns the session's persisted OutputRate, or nil when absent/invalid.
-func (c *OutputRateCache) Load(dir string) *OutputRate {
+// Warm loads the session's persisted OutputRate once. Callers keep this off
+// presentation paths (for example, during authoritative session indexing).
+func (c *OutputRateCache) Warm(dir string) *OutputRate {
 	if c == nil {
 		r, _ := ReadOutputRate(dir)
 		return r
@@ -263,8 +285,13 @@ func (c *OutputRateCache) Load(dir string) *OutputRate {
 		return rate
 	}
 	c.mu.Unlock()
-	rate, _ := ReadOutputRate(dir)
+	rate, _ := readOutputRate(dir, func() { c.reads.Add(1) })
 	c.mu.Lock()
+	if slot, ok := c.sessions[dir]; ok {
+		rate := cloneOutputRate(slot.rate)
+		c.mu.Unlock()
+		return rate
+	}
 	if c.sessions == nil {
 		c.sessions = map[string]*outputRateSlot{}
 	}
@@ -279,14 +306,52 @@ func (c *OutputRateCache) Load(dir string) *OutputRate {
 	return cloneOutputRate(rate)
 }
 
-// Invalidate makes the next recovery overlay reload dir.
-func (c *OutputRateCache) Invalidate(dir string) {
+// Reads reports bounded recovery-segment read attempts made by Warm.
+func (c *OutputRateCache) Reads() int64 {
 	if c == nil {
+		return 0
+	}
+	return c.reads.Load()
+}
+
+// Cached returns only the warmed or remembered value and never touches disk.
+func (c *OutputRateCache) Cached(dir string) *OutputRate {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	var rate *OutputRate
+	if slot := c.sessions[dir]; slot != nil {
+		rate = cloneOutputRate(slot.rate)
+	}
+	c.mu.Unlock()
+	return rate
+}
+
+// Remember refreshes a session from in-memory intake. A newer value wins.
+func (c *OutputRateCache) Remember(dir string, rate *OutputRate) {
+	cleaned := cleanOutputRate(rate)
+	if c == nil || cleaned == nil {
 		return
 	}
 	c.mu.Lock()
-	delete(c.sessions, dir)
-	c.mu.Unlock()
+	defer c.mu.Unlock()
+	if c.sessions == nil {
+		c.sessions = map[string]*outputRateSlot{}
+	}
+	if slot, ok := c.sessions[dir]; ok {
+		if slot.rate == nil || cleaned.At >= slot.rate.At {
+			slot.rate = cloneOutputRate(cleaned)
+		}
+		return
+	}
+	if len(c.sessions) >= observedSessionCap {
+		for old := range c.sessions {
+			delete(c.sessions, old)
+			break
+		}
+	}
+	c.sessions[dir] = &outputRateSlot{rate: cloneOutputRate(cleaned)}
 }
 
 // Forget drops cached output-rate state for dir.
