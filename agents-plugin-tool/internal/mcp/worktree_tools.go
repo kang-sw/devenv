@@ -548,28 +548,30 @@ func provisionWorktree(ctx context.Context, runner wsgit.Runner, env []string, r
 		if branchExists {
 			recreated := false
 			if mergeRoot, _, nameRooted := parseImplBranchRoot(targetBranch); nameRooted {
-				ahead, behind, compareErr := branchDivergenceFromMergeRoot(wsgit.Client{Runner: runner}, root, mergeRoot, targetBranch)
-				switch {
-				case compareErr != nil:
-					res.Warnings = append(res.Warnings, fmt.Sprintf("could not classify target branch %q against encoded merge root %q; it was preserved: %v", targetBranch, mergeRoot, compareErr))
-				case ahead == 0 && behind > 0:
-					ref := "refs/heads/" + targetBranch
-					for _, entry := range entries {
-						if filepath.Clean(entry.Path) != filepath.Clean(wtPath) && entry.Branch == ref {
-							return res, fmt.Errorf("worktree.acquire: stale target branch %q is checked out at %s; release that checkout and re-acquire (the branch and both worktrees were left intact)", targetBranch, entry.Path)
+				mergeRootRef := "refs/heads/" + mergeRoot
+				if _, err := wtRun(ctx, runner, root, "show-ref", "--verify", "--quiet", mergeRootRef); err == nil {
+					ahead, behind, compareErr := branchDivergenceFromMergeRoot(wsgit.Client{Runner: runner}, root, mergeRoot, targetBranch)
+					switch {
+					case compareErr != nil:
+						res.Warnings = append(res.Warnings, fmt.Sprintf("could not classify target branch %q against encoded merge root %q; it was preserved: %v", targetBranch, mergeRoot, compareErr))
+					case ahead == 0 && behind > 0:
+						ref := "refs/heads/" + targetBranch
+						for _, entry := range entries {
+							if filepath.Clean(entry.Path) != filepath.Clean(wtPath) && entry.Branch == ref {
+								return res, fmt.Errorf("worktree.acquire: stale target branch %q is checked out at %s; release that checkout and re-acquire (the branch and both worktrees were left intact)", targetBranch, entry.Path)
+							}
 						}
+						if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("switch", "--detach", mergeRootRef)...); err != nil {
+							return res, fmt.Errorf("worktree.acquire: detach stale target %q at encoded merge root %q: %w", targetBranch, mergeRoot, err)
+						}
+						if _, err := wtRun(ctx, runner, wtPath, "branch", "-d", "--", targetBranch); err != nil {
+							return res, fmt.Errorf("worktree.acquire: delete stale target branch %q without force: %v; release any checkout holding it and re-acquire", targetBranch, err)
+						}
+						if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("switch", "-c", targetBranch, mergeRootRef)...); err != nil {
+							return res, fmt.Errorf("worktree.acquire: recreate stale target branch %q from encoded merge root %q: %w", targetBranch, mergeRoot, err)
+						}
+						recreated = true
 					}
-					mergeRootRef := "refs/heads/" + mergeRoot
-					if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("switch", "--detach", mergeRootRef)...); err != nil {
-						return res, fmt.Errorf("worktree.acquire: detach stale target %q at encoded merge root %q: %w", targetBranch, mergeRoot, err)
-					}
-					if _, err := wtRun(ctx, runner, wtPath, "branch", "-d", "--", targetBranch); err != nil {
-						return res, fmt.Errorf("worktree.acquire: delete stale target branch %q without force: %v; release any checkout holding it and re-acquire", targetBranch, err)
-					}
-					if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("switch", "-c", targetBranch, mergeRootRef)...); err != nil {
-						return res, fmt.Errorf("worktree.acquire: recreate stale target branch %q from encoded merge root %q: %w", targetBranch, mergeRoot, err)
-					}
-					recreated = true
 				}
 			}
 			if !recreated {
