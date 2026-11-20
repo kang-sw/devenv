@@ -770,6 +770,85 @@ client preflight/reconnect behavior, worker admission, live confinement, Windows
 execution and all deferred phases remain unimplemented or unverified as already
 recorded. No acceptance beyond Phase 2a is claimed.
 
+#### Edition (e9ba42f29) - 2026-11-21
+
+**Decision 15 backend closeout slice — common permission UI remains open.**
+
+This Edition delivers (1876) and (1877) through `e9ba42f29`; it is not a
+whole-Phase 2 Result. The dashboard common-permission UI, reconnect-aware
+positive preflight and full-warning cancel/confirm flow in (1875) remain for a
+separate executor after the mockup. No dashboard UI file changed, and the
+ticket remains `ready/`.
+
+`SpawnSpec.PermissionLevel` is now the exported worker permission input
+(`internal/wsagent/spawn.go:90-94`). Agent-tool wire input remains the existing
+`authority` member and maps to that field. An explicit value is admitted before
+creation, stored in the existing private `permission.json`, and read again
+before process start; omission keeps conservative legacy derivation without
+writeback. Worker State now computes `permission_level`, `permission_source`
+and `permission_enforcement` through the existing optional State members
+(`internal/wsagent/runner.go:1627-1631`). The existing public lowering seam and
+trusted `POST /agents/<id>/settings/permission` route now control workers while
+keeping child model/effort fixed and requiring user authority for raises.
+
+Workers created outside `agent.spawn` now resolve their own current explicit or
+legacy-derived level and their recorded authority parent's current level at
+creation and every fresh process launch. Root workers need no parent ceiling;
+missing/unresolved conversation parents and unclassified worker capability
+surfaces refuse admission instead of guessing. A parent lowered while a child
+process is held does not cause a retroactive kill, but the child's next launch
+is refused. The launch nudge is computed only after the stored/derived level is
+read and distinguishes root workers from workers whose current-parent admission
+passed; neither wording treats a capability loadout as confinement evidence.
+
+The existing server surface needed by (1875) is present: support choices expose
+lead common levels, `POST /agents/leads/permission` owns selection-bearing lead
+creation, and `POST /agents/<id>/settings/permission` owns trusted common-level
+changes, now including workers. The common dashboard control, fresh preflight
+after reconnect/server replacement and full-warning client flow are still the
+unimplemented UI consumers; no new worker route was added here.
+
+Compatibility remains **T0**. The public Go input is additive and omission
+preserves old caller behavior (`spawn.go:90-94,146-152`); State additions use
+`omitempty` (`runner.go:1627-1631`); no MCP tool/argument, HTTP route, Record,
+Profile, registration or key-store shape changed. Explicit worker input reuses
+the private sidecar writer, which retains unknown JSON members
+(`permission_store.go:140-163`). The pinned old Record/registration/label
+writers preserve exact sidecar bytes at fourteen checkpoints and the new reader
+recovers and updates them while retaining unknown members
+(`permission_store_test.go:366-409`). Legacy omission writes no sidecar, so an
+old binary neither needs to understand a new stored field nor destroys one;
+reopening with the new binary recovers every retained explicit selection.
+
+The allocated lite review found one Critical over-admission path and one
+Important nudge accuracy issue. The single correction pass in `5e7a8f4bb`
+classifies every native/ws/plugin/MCP capability surface before deriving a
+legacy worker level and gives root workers authority-accurate wording, with
+creation/restart mixed-loadout and root/child nudge regressions. Per the lite
+review contract, no re-review ran. Review artifact:
+`/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@c4d08aee/review-paths/6a6d88e8-01-261115-feat-ws-permission-profile-decision15-backend-lite.md`.
+
+Verification from `agents-plugin-tool/`, with complete output read:
+
+```sh
+GOCACHE=/tmp/ws-permission-go-cache GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -race -v -count=1 -run '^TestPermission(WorkerInputStateAndControl|LegacyWorkerMixedLoadouts|CurrentParentAdmission|MissingParentAdmission)$'
+GOCACHE=/tmp/ws-permission-go-cache GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -race -v -count=1 -run '^TestPermission'
+GOCACHE=/tmp/ws-permission-go-cache GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -race -v -count=1 -run '^(TestAgentSpawnCapsAtAHostedLeadsLevel|TestRefusedWakeUnderAHostedLead|TestHeldWorkerChildLoadsBeforeLowerCeilingParent|TestPermissionWorkerInputStateAndControl|TestPermissionCurrentParentAdmission|TestPermissionMissingParentAdmission)$'
+GOCACHE=/tmp/ws-permission-go-cache GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/mcp -v -count=1 -timeout 45m -run '^TestAgent'
+```
+
+All four nonempty selectors passed (1.970 s, 6.164 s, 2.174 s and 2.141 s).
+The MCP selector required local-loopback sandbox permission for its temporary
+HTTP listeners; it used no provider or network service. `git diff --check`
+passed. No live provider, daemon stop/swap, broad suite, dashboard UI test,
+network service, push or merge ran.
+
+Dogfood note: the first lite reviewer was spawned read-only, but the rendered
+review wrapper requires writing its allocated findings artifact; it returned a
+summary while leaving that artifact empty. A fresh workdir-write reviewer
+recovered the review. Separately, `workflow_manual` was unavailable from the ws
+tool surface, so this run used the repository manuals and rendered playbooks.
+
 ### Phase 3: Add the Codex per-run permission launch path
 
 Deferred until the Codex adapter provides its settled exact-version launch

@@ -768,6 +768,72 @@ operations and send-to-processing latency before/after: steady-state turns add
 zero file operations and no writes. Live smoke confirms the response language
 without the owner's duplicate hook enabled.
 
+### Result (75274d98) - 2026-11-21
+
+Commits:
+- `e18d84bde`: runner-owned ambient cache, canonical formatter, and shared
+  ordinary/expanded-playbook `turnInput` seam.
+- `0985f2aeb`: successful `workflow.lang` set/reset refresh through the
+  daemon runner's optional in-memory capability.
+- `9dff34aa6`: real hosted-lead lifecycle coverage for refresh, retry,
+  expanded playbooks, and model-only history.
+- `75274d98f`: Lite-review fix adding real Claude, Codex, agy, and Pi send-path
+  coverage.
+
+Design record:
+
+- `wsagent.WorkflowLanguageInstruction` is the one canonical formatter used by
+  ambient and playbook/manual rendering (`internal/wsagent/ambient.go:12-20`,
+  `internal/mcp/playbook_tools.go:331-335`). An empty resolved value emits no
+  block.
+- Each conversation resolves its fully rendered `<ws-ambient>` block once at
+  creation/restoration through the existing rooted config options and optional
+  session reader (`ambient.go:31-63`, `runner.go:646-658`). Non-lead records
+  short-circuit before any config read.
+- Both ordinary and daemon-expanded playbook turns call `turnInput`; it applies
+  the one-shot compaction prefix first and appends ambient last
+  (`ambient.go:65-76`, `runner_conv.go:1232-1239`). Queue, page, history, and
+  retry state keep the original unwrapped text.
+- A successful `workflow.lang` set/reset synchronously calls the runner's
+  optional `RefreshAmbient` capability before `config.tune` returns
+  (`mcp/agent_backends.go:13-27`, `server_dispatch.go:536-543,630-637`). Failed
+  validation/writes and unrelated knobs do not refresh. Refresh republishes
+  every open conversation in memory so global, repo, and session-scope changes
+  all settle before the next turn; workers still short-circuit without reads
+  (`ambient.go:79-91`). The send path performs no config resolution, file I/O,
+  generation polling, or subprocess work.
+- Pi's native extension, model prompt, skill, goal, and bridge behavior remains
+  untouched per Decisions 21 and 27. No plugin hook, `runner_process.go`, Pi
+  extension, resource, manifest, or generated artifact changed.
+
+Compatibility:
+
+- T0 in both directions. The change adds only runtime-only fields, an optional
+  Go interface, and model prompt text. It changes no MCP tool or argument,
+  `/mcp` hello, record/store/event shape, config/rsrc manifest, or persisted
+  value. Old and new binaries continue reading the existing `workflow.lang`
+  key; an old daemon simply sends the pre-Phase-3 unwrapped input, while a new
+  daemon persists no ambient state for an old daemon to drop.
+
+Verification:
+
+- `GOCACHE=/private/tmp/ws-hosted-prompt-go-cache GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -run 'Ambient|TestHostedLeadPlaybookCommands|TestLeadFailedSendShowsTheMessageOnce|TestCompactionAutoDoesNotStartContinue' -count=1` passed.
+- `GOCACHE=/private/tmp/ws-hosted-prompt-go-cache GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/mcp -run 'TestConfigTuneWorkflowLang|TestPlaybook.*WorkflowLang' -count=1 -timeout 45m` passed.
+- The first local test attempt did not compile because the sandbox refused the
+  default Go build-cache path; setting the scratch `GOCACHE` above resolved the
+  environment failure. No implementation/test failure repeated.
+- Lite review found one Important gap (real backend send coverage was
+  Claude-only); `75274d98f` fixed it for Claude, Codex, agy, and Pi. Per Lite
+  policy there was no second review. The generated findings file remained
+  empty because the read-only reviewer could not write it; the delivered
+  finding was applied from the reviewer completion report.
+
+Not run under the caller's constraints: live provider dogfood, daemon swap,
+and the Windows file-operation/latency baseline. The implementation-level
+steady-state test proves repeated `turnInput` calls make no config reads; the
+platform syscall count and live response-language smoke remain follow-up
+evidence, not an implementation gap.
+
 ### Phase 4: Renderable agent-facing playbooks for `agent.spawn`
 
 No rendering happens inside `agent.spawn` (playbook-unaware, owner 18:56).

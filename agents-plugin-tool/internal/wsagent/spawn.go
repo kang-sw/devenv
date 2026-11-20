@@ -87,11 +87,11 @@ type SpawnSpec struct {
 	// spawns may ask for (children.go). Empty records none, and such a
 	// conversation spawns nothing.
 	Tier string
-	// Authority is an agent.spawn child's permission level, stored as its
-	// explicit selection (permission.json) and re-admitted against its
-	// parent's level at every process start (agent_tools.go). Empty
-	// stores none.
-	Authority PermissionLevel
+	// PermissionLevel is this worker's common permission input. A non-empty
+	// value is stored as its explicit selection (permission.json); omission
+	// keeps legacy derivation with no writeback. Every child is re-admitted
+	// against its parent's current level at creation and process start.
+	PermissionLevel PermissionLevel
 	// SystemPrompt is appended to the harness's system prompt at every
 	// process start; empty is none.
 	SystemPrompt string
@@ -143,7 +143,10 @@ func (r *Runner) Spawn(spec SpawnSpec) (State, error) {
 	if p := spec.Parent; p != nil && (strings.TrimSpace(p.Kind) == "" || !wsdashboard.ValidReplyID(p.ReplyID)) {
 		return State{}, badRequest("parent must name a kind and a valid reply-id")
 	}
-	if isAgentWorkerProfile(strings.TrimSpace(spec.Profile)) && (spec.Parent == nil || spec.Authority.rank() == 0) {
+	if spec.PermissionLevel != "" && spec.PermissionLevel.rank() == 0 {
+		return State{}, badRequest("permission_level must be read-only, workdir-write or full")
+	}
+	if isAgentWorkerProfile(strings.TrimSpace(spec.Profile)) && (spec.Parent == nil || spec.PermissionLevel.rank() == 0) {
 		// Its ceiling is its authority (agent_tools.go): a spawn without
 		// one would run the common loadout unchecked.
 		return State{}, badRequest("profile %q is agent.spawn's internal profile: it needs a parent and an authority", spec.Profile)
