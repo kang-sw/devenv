@@ -138,7 +138,7 @@ func TestAgyModelWaitWatchdogRetriesConfiguredBudgetAndReportsExhaustion(t *test
 	if report.Result.Status != TurnFailed || report.Result.Error != "agy model stream stalled for 45s after 3 automatic continue attempts" {
 		t.Fatalf("exhausted report = %+v", report.Result)
 	}
-	if want := "ws: agy stalled; sent 3 automatic continue attempts, all failed."; !strings.Contains(report.Result.Message, want) {
+	if want := "ws: agy stalled; sent 3 automatic continue attempts, all failed. Failure classes: no-event silence."; !strings.Contains(report.Result.Message, want) {
 		t.Fatalf("exhausted report message = %q, want %q", report.Result.Message, want)
 	}
 	if rec := h.record(id); rec.TurnOpen || rec.LastTurn == nil || rec.LastTurn.Result.Status != TurnFailed {
@@ -189,7 +189,7 @@ func TestAgyModelWaitWatchdogPublishesExhaustionToHostedLeadConversation(t *test
 	h.holders.out(holder, `{"jsonrpc":"2.0","result":{"stopReason":"cancelled"},"id":"`+ids[1]+`"}`)
 	h.idle(id)
 
-	const diagnostic = "ws: agy stalled; sent 1 automatic continue attempts, all failed."
+	const diagnostic = "ws: agy stalled; sent 1 automatic continue attempts, all failed. Failure classes: no-event silence."
 	if replies := ringTexts(h.ring(id), wslive.RingReply); !slices.Contains(replies, diagnostic) {
 		t.Fatalf("hosted lead replies = %q, want visible diagnostic %q", replies, diagnostic)
 	}
@@ -250,7 +250,7 @@ func TestAgyModelWaitWatchdogExhaustionPublishesDiagnosticOnEOF(t *testing.T) {
 	p.exit()
 	eventually(t, "failed parent report", func() bool { return len(got.lead()) == 1 })
 
-	const diagnostic = "ws: agy stalled; sent 1 automatic continue attempts, all failed."
+	const diagnostic = "ws: agy stalled; sent 1 automatic continue attempts, all failed. Failure classes: no-event silence."
 	report := got.lead()[0]
 	if report.Result.Status != TurnFailed || report.Result.Error != "agy model stream stalled for 45s after 1 automatic continue attempts" {
 		t.Fatalf("EOF exhaustion result = %+v", report.Result)
@@ -281,7 +281,7 @@ func TestAgyModelWaitWatchdogExhaustionPublishesDiagnosticOnGraceForceStop(t *te
 	eventually(t, "force-stopped exhausted process", p.isClosed)
 	eventually(t, "failed parent report", func() bool { return len(got.lead()) == 1 })
 
-	const diagnostic = "ws: agy stalled; sent 1 automatic continue attempts, all failed."
+	const diagnostic = "ws: agy stalled; sent 1 automatic continue attempts, all failed. Failure classes: no-event silence."
 	report := got.lead()[0]
 	if report.Result.Status != TurnFailed || report.Result.Error != "agy model stream stalled for 45s after 1 automatic continue attempts and did not stop within 5s after interrupt" {
 		t.Fatalf("grace exhaustion result = %+v", report.Result)
@@ -569,8 +569,22 @@ func TestAgyModelWaitWatchdogAPIErrorUsesSharedRetry(t *testing.T) {
 	eventually(t, "post-API-error interrupt", func() bool { return procInterrupts(p) == 1 })
 	p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted}
 	eventually(t, "post-API-error failure report", func() bool { return len(got.lead()) == 1 })
-	if result := got.lead()[0].Result; result.Status != TurnFailed || result.Error != "agy model stream stalled for 45s after 1 automatic continue attempts" || !strings.Contains(result.Message, failure) || !strings.Contains(result.Message, "sent 1 automatic continue attempts") {
+	if result := got.lead()[0].Result; result.Status != TurnFailed || result.Error != "agy model stream stalled for 45s after 1 automatic continue attempts" || !strings.Contains(result.Message, failure) || !strings.Contains(result.Message, "Failure classes: no capacity, no-event silence") {
 		t.Fatalf("shared retry result = %+v", result)
+	}
+}
+
+func TestAgyModelFailureClassifiesKnownInBandErrors(t *testing.T) {
+	for failure, want := range map[string]string{
+		"⚠ API error (attempt 1): 503 UNAVAILABLE: No capacity": "no capacity (503/UNAVAILABLE)",
+		"⚠ API error (attempt 1): unexpected EOF":               "unexpected EOF",
+		"⚠ API error (attempt 1): stream idle timeout":          "stream idle timeout",
+		"⚠ API error (attempt 1): TLS handshake timeout":        "TLS handshake timeout",
+		"": "no-event silence",
+	} {
+		if got := agyModelFailureClass(failure); got != want {
+			t.Errorf("classify %q = %q, want %q", failure, got, want)
+		}
 	}
 }
 

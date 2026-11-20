@@ -166,6 +166,7 @@ func (c *conv) disarmModelWait() {
 	c.modelWaitFailErr = ""
 	c.modelWaitDiagnostic = ""
 	c.modelWaitExhaustedPublished = false
+	c.modelWaitFailureClasses = nil
 	c.modelWaitFailure = ""
 	c.modelWaitFailureExcluded = false
 }
@@ -243,6 +244,7 @@ func (c *conv) modelFailureDrainTimedOut() {
 		}
 		return
 	}
+	c.noteModelWaitFailure(c.modelWaitFailure)
 	c.modelWaitFailErr = c.modelWaitExhaustedError(c.modelWaitFailure)
 	fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", c.rec.ReplyID, c.modelWaitFailErr)
 	if err := c.proc.Interrupt(); err != nil {
@@ -260,6 +262,7 @@ func (c *conv) modelWaitTimedOut() {
 	if c.modelWaitPending > 0 || len(c.approvals) > 0 {
 		return
 	}
+	c.noteModelWaitFailure("")
 	dur := formatWatchdogDuration(c.modelWaitTimeout)
 	if c.modelWaitRetries < c.modelWaitMaxRetries {
 		c.modelWaitCancelling = true
@@ -327,6 +330,7 @@ func (c *conv) interceptModelWaitTurnEnd(ev Event) bool {
 
 func (c *conv) retryModelWait(failure string) bool {
 	c.stopModelFailureDrain()
+	c.noteModelWaitFailure(failure)
 	c.modelWaitRetries++
 	c.modelWaitPending = 0
 	c.modelWaitFailure = ""
@@ -366,6 +370,7 @@ func (c *conv) modelWaitTurnError(ev Event) string {
 		return c.modelWaitFailErr
 	}
 	if ev.ModelFailure != "" && c.modelWaitRetries >= c.modelWaitMaxRetries {
+		c.noteModelWaitFailure(ev.ModelFailure)
 		c.modelWaitFailErr = c.modelWaitExhaustedError(ev.ModelFailure)
 		c.publishModelWaitExhaustedDiagnostic()
 		return c.modelWaitFailErr
@@ -384,10 +389,56 @@ func (c *conv) modelWaitExhaustedError(failure string) string {
 }
 
 func (c *conv) modelWaitExhaustedDiagnostic() string {
-	if c.modelWaitRetries == 0 {
-		return "ws: agy stalled; automatic continue retries are disabled (0 attempts configured)."
+	classes := ""
+	if len(c.modelWaitFailureClasses) > 0 {
+		classes = " Failure classes: " + strings.Join(c.modelWaitFailureClasses, ", ") + "."
 	}
-	return fmt.Sprintf("ws: agy stalled; sent %d automatic continue attempts, all failed.", c.modelWaitRetries)
+	if c.modelWaitRetries == 0 {
+		return "ws: agy stalled; automatic continue retries are disabled (0 attempts configured)." + classes
+	}
+	return fmt.Sprintf("ws: agy stalled; sent %d automatic continue attempts, all failed.%s", c.modelWaitRetries, classes)
+}
+
+func (c *conv) noteModelWaitFailure(failure string) {
+	class := agyModelFailureClass(failure)
+	for _, seen := range c.modelWaitFailureClasses {
+		if seen == class {
+			return
+		}
+	}
+	c.modelWaitFailureClasses = append(c.modelWaitFailureClasses, class)
+}
+
+func agyModelFailureClass(failure string) string {
+	if failure == "" {
+		return "no-event silence"
+	}
+	lower := strings.ToLower(failure)
+	switch {
+	case strings.Contains(lower, "no capacity"):
+		if strings.Contains(lower, "503") || strings.Contains(lower, "unavailable") {
+			return "no capacity (503/UNAVAILABLE)"
+		}
+		return "no capacity"
+	case strings.Contains(lower, "unexpected eof"):
+		return "unexpected EOF"
+	case strings.Contains(lower, "stream idle timeout"):
+		return "stream idle timeout"
+	case strings.Contains(lower, "tls handshake timeout"):
+		return "TLS handshake timeout"
+	case strings.Contains(lower, "tls") && strings.Contains(lower, "timeout"):
+		return "TLS timeout"
+	case strings.Contains(lower, "503"):
+		return "HTTP 503"
+	case strings.Contains(lower, "unavailable"):
+		return "UNAVAILABLE"
+	case failure == agyStreamInterrupted:
+		return "stream interrupted"
+	case strings.HasPrefix(failure, agyAPIErrorPrefix):
+		return "API error"
+	default:
+		return "model failure"
+	}
 }
 
 func (c *conv) publishModelWaitExhaustedDiagnostic() {

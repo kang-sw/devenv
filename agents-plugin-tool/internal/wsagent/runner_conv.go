@@ -99,6 +99,7 @@ type conv struct {
 	modelWaitFailErr            string
 	modelWaitDiagnostic         string
 	modelWaitExhaustedPublished bool
+	modelWaitFailureClasses     []string
 	modelWaitFailureExcluded    bool
 	modelWaitC                  <-chan time.Time
 	modelWaitStop               func()
