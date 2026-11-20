@@ -265,6 +265,7 @@ type RuleView struct {
 	Via         string   `json:"via"`
 	By          string   `json:"by"`
 	Root        string   `json:"root"`
+	AssignRoot  string   `json:"assignRoot"`
 	Org         *string  `json:"org"`
 	IncludeRoot bool     `json:"includeRoot"`
 	Levels      *float64 `json:"levels"`
@@ -903,7 +904,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 
 	vw.Rules = map[string]RuleView{}
 	for _, ru := range S.rules {
-		rv := RuleView{ID: ru.id, Item: ru.item, Via: ru.via, By: ru.by, Root: ru.root, Org: nz(ru.org), IncludeRoot: ru.includeRoot,
+		rv := RuleView{ID: ru.id, Item: ru.item, Via: ru.via, By: ru.by, Root: ru.root, AssignRoot: ru.assignRoot, Org: nz(ru.org), IncludeRoot: ru.includeRoot,
 			Levels: ruleLevels(ru), Completion: ru.completion, State: ru.state, Request: nz(ru.request), Ended: nz(ru.ended), TS: ts(ru.ts)}
 		if ru.ended != "" {
 			rv.State = "ended"

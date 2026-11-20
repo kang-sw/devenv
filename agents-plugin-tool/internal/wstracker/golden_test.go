@@ -75,14 +75,15 @@ func loadGolden(t testing.TB, path string) (goldenDoc, *memSource) {
 // goldenExcluded lists fields intentionally outside current reference-engine
 // parity, with the reason.
 var goldenExcluded = map[string]string{
-	"events[].local":    "mock bookkeeping (_local): the caller fills unpushed state from the wsledger sync report",
-	"events[].open":     "mock bookkeeping (_open): the open batch is the caller's",
-	"events[].late":     "mock bookkeeping (_late)",
-	"stats.commits":     "a wsledger event carries no commit identity; the caller fills it",
-	"orgs":              "the reference engine does not yet implement org entities",
-	"items[].ccSources": "the reference engine does not yet implement org CC provenance",
-	"items[].orgCC":     "the reference engine does not yet implement org CC registrations",
-	"rules[].org":       "the reference engine does not yet implement org assignment rules",
+	"events[].local":     "mock bookkeeping (_local): the caller fills unpushed state from the wsledger sync report",
+	"events[].open":      "mock bookkeeping (_open): the open batch is the caller's",
+	"events[].late":      "mock bookkeeping (_late)",
+	"stats.commits":      "a wsledger event carries no commit identity; the caller fills it",
+	"orgs":               "the reference engine does not yet implement org entities",
+	"items[].ccSources":  "the reference engine does not yet implement org CC provenance",
+	"items[].orgCC":      "the reference engine does not yet implement org CC registrations",
+	"rules[].org":        "the reference engine does not yet implement org assignment rules",
+	"rules[].assignRoot": "the reference engine does not yet project assign-time rule roots",
 }
 
 func TestGoldenParity(t *testing.T) {
@@ -122,7 +123,9 @@ func TestGoldenParity(t *testing.T) {
 				delete(entry, "orgCC")
 			}
 			for _, rule := range got["rules"].(map[string]any) {
-				delete(rule.(map[string]any), "org")
+				entry := rule.(map[string]any)
+				delete(entry, "org")
+				delete(entry, "assignRoot")
 			}
 			var diffs []string
 			diffJSON("", want, got, &diffs)

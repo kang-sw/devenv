@@ -109,7 +109,7 @@ func projectionFixture() *wstrackerhost.StoreView {
 				"a": {ID: "a", Item: "i", To: "me", By: "other", Sender: "other", Via: "e", State: "live", Forced: true, Status: "todo", TS: "2026-11-17T01:00:00Z", LastUpdate: "2026-11-18T00:00:00Z"},
 			},
 			Requests: map[string]wstracker.RequestView{"q": {ID: "q", Item: "i", By: "other", Assignee: "me", Note: projectionString("request note"), TS: "2026-11-18T01:00:00Z"}},
-			Rules:    map[string]wstracker.RuleView{"rule": {ID: "rule", Item: "i", Org: projectionString("o-team"), State: "live"}},
+			Rules:    map[string]wstracker.RuleView{"rule": {ID: "rule", Item: "i", Root: "other", AssignRoot: "original", Org: projectionString("o-team"), State: "live"}},
 			Notices:  []wstracker.Notice{{Key: "w:a:done:now", Kind: "done", Assignment: "a", Item: "i", To: "me", TS: "2026-11-18T00:00:00Z"}},
 			My: wstracker.My{Assignments: []string{"a"}, Received: wstracker.Received{Pending: []string{"a"}},
 				Today: wstracker.Today{Confirms: []string{"a"}}, Requests: wstracker.MyReqs{Incoming: []string{"q"}},
@@ -222,6 +222,9 @@ func TestTrackerProjectionSummaryContract(t *testing.T) {
 	}
 	if row.Item["orgCC"] == nil || row.Item["ccSources"] == nil || trackerString(row.Rules["rule"].Org) != "o-team" {
 		t.Fatalf("missing org registrations: %+v", row)
+	}
+	if row.Rules["rule"].Root != "other" || row.Rules["rule"].AssignRoot != "original" {
+		t.Fatalf("missing rule roots: %+v", row.Rules["rule"])
 	}
 	all, err := json.Marshal(struct {
 		Items   any

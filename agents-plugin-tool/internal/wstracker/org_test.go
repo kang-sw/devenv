@@ -247,6 +247,7 @@ func TestOrgAssignFollowsHeadAndKeepsAssignRoot(t *testing.T) {
 	wantIn(t, "new head subtree is added", v.Items[it].Assignments, rid+">sven")
 	wantIn(t, "old subtree is not revoked", v.Items[it].Assignments, rid+">lena")
 	wantEq(t, "org rule projection", deref(v.Rules[rid].Org), "o-platform")
+	wantEq(t, "assign-time root projection", v.Rules[rid].AssignRoot, "maya")
 
 	wantEq(t, "current root does not match unassign root",
 		strings.Contains(tm.refused("maya.pc", TypeItemUnassign, map[string]any{"item": it, "root": "raj"}), "no rule"), true)
