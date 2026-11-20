@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: f04090c323fa1868
 sage-review-completeness-reviewed: f04090c323fa1868
+completed: 2026-11-20
 ---
 
 # Dedicated Dashboard Ticket Map View (B Hierarchical Swimlane + C Keyword-Soup Constellation)
@@ -1777,3 +1778,8 @@ prefix with `~/.local/bin/ws-rgo` on remote-Go hosts.
     clipped at 1280; this deliberately departs from it.
   - A `window.__tmapc` probe is exposed only under the same test-hook gate as
     `window.__tmap`.
+
+
+## Resolution (2026-11-20)
+
+All three phases landed on impl/develop/disk-tusk-phony (59bde59ba..469a78ebd). The lite review found one Critical: root eviction wrote into shared ticketCache maps that a concurrent listing could be reading. It is fixed in 469a78ebd by a clone-and-swap, with a race test that fails without the fix under -race. The Important item, the missing eviction test, is fixed in the same commit, as are two Minors: nodes now sort by stem, and the surface test is strict about missing files. Three Minors remain open as follow-ups. Refresh keeps hidden-cluster, collapsed-lane and keyword filters by the renumbered cluster id. A closed ref's cluster score counts refs placed earlier. A plain listing that runs during a map build can drop fresh docs, which costs speed only. Final verification passed: go test of wsdoc, the targeted wsdashboard run, wsi18n, and mcp TicketGraph; node 27/27; TestTicketMapBrowser and TestTicketMapGraphBrowser.
