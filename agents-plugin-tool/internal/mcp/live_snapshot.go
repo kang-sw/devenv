@@ -222,8 +222,16 @@ func (h *liveHub) session(key, dir, root string, nudge func(), active func() boo
 	if err == nil {
 		state.SeedObserved(records)
 	}
+	if rate, err := wslive.ReadOutputRate(dir); err == nil && rate != nil {
+		state.SeedOutputRate(rate)
+	} else if err != nil {
+		folded = false
+	}
 	if prev, err := wslive.ReadSnapshot(wslive.SnapshotPath(dir)); err == nil {
 		state.SeedLastTurn(prev)
+		if prev.Lead.OutputRate != nil {
+			state.SeedOutputRate(prev.Lead.OutputRate)
+		}
 	}
 	ls = &liveSession{dir: dir, root: root, replyID: state.ReplyID(), nudge: nudge, active: active, debug: debug, state: state}
 	if h.host != nil && !h.closed {
@@ -524,9 +532,10 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	}
 	now := currentLiveSeams().now().UnixMilli()
 	var (
-		ring     []wslive.RingEntry
-		observed []wslive.ObservedRecord
-		problems []string
+		ring       []wslive.RingEntry
+		observed   []wslive.ObservedRecord
+		outputRate *wslive.OutputRate
+		problems   []string
 		applied  int
 		changed  bool
 		urgent   bool
@@ -556,6 +565,9 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 				}
 				reset = reset || ev.Kind == wslive.KindReset
 				observed = append(observed, res.Observed...)
+				if res.OutputRate != nil {
+					outputRate = res.OutputRate
+				}
 				for _, entry := range res.Ring {
 					if entry.SummaryHistory != nil {
 						wslive.PrepareSummaryRing(res.Ring)
@@ -597,6 +609,9 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	}
 	if err := wslive.AppendObserved(ls.dir, observed); err != nil {
 		s.debugEvent("dashboard.model_evidence_write_error", map[string]any{"error": err.Error()})
+	}
+	if err := wslive.WriteOutputRate(ls.dir, outputRate); err != nil {
+		s.debugEvent("dashboard.output_rate_write_error", map[string]any{"error": err.Error()})
 	}
 	if len(ring) > 0 {
 		s.appendLiveRing(key, ls.dir, ls.slot, ring)

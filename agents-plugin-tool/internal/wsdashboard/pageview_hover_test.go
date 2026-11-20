@@ -184,8 +184,78 @@ events.mouseover({target:a,clientX:40,clientY:60}); events.scroll({});check("scr
 events.mouseover({target:a,clientX:40,clientY:60}); wins.resize();check("resize hides",popup.hidden,true);
 doc.activeElement=b; events.focusin({target:b});check("focus opens",popup.innerHTML,"updated B");
 doc.activeElement=null;mutate([{target:{}}]);check("lost focus after SSE hides",popup.hidden,true);
-// An agent with no direct source must not borrow its child's/parent's template.
-var orphan=anchor("orphan","nested");orphan.children=[];hit=orphan;events.mouseover({target:orphan,clientX:40,clientY:60});check("no direct source stays closed",popup.hidden,true);
-if(bad.length) console.log(bad.join("\n"));
-`)
+	// An agent with no direct source must not borrow its child's/parent's template.
+	var orphan=anchor("orphan","nested");orphan.children=[];hit=orphan;events.mouseover({target:orphan,clientX:40,clientY:60});check("no direct source stays closed",popup.hidden,true);
+	if(bad.length) console.log(bad.join("\n"));
+	`)
+}
+
+func TestSessionHoverAgyOutputRateAndUnknownModel(t *testing.T) {
+	now := testNow
+	at := now.Add(-2 * time.Second).UnixMilli()
+	reg := Registration{ReplyID: "agychild", Harness: "agy", RegisteredAt: stampFor(now.Add(-time.Minute))}
+	snap := &wslive.Snapshot{
+		Adapter: "agy", HeartbeatMs: 30000, UpdatedAt: now.UnixMilli(),
+		Lead: wslive.Lead{
+			Activity:   wslive.Activity{Phase: wslive.PhaseIdle},
+			OutputRate: &wslive.OutputRate{OutputTps: 69.6, At: at},
+		},
+	}
+
+	// Idle after eligible turn: hover shows rounded rate and Unknown observed model.
+	row := railRow(railInput{Session: Session{Registration: reg, Label: "agy worker"}, Snapshot: snap}, true, now)
+	if row.Hover.Rate != 70 || row.Hover.RateAt != at || row.Hover.Observed != nil {
+		t.Fatalf("idle agy hover = %+v", row.Hover)
+	}
+	html := renderNamed(t, "session-hover", row)
+	contains(t, "idle agy hover", html, "Observed output model", "Unknown", `class="tps">70`, "Last-turn output rate")
+
+	// Second turn generating: hover retains prior rate and keeps Unknown observed model.
+	snap.Lead.Phase, snap.Lead.TurnStartedAt = wslive.PhaseReplying, at+1000
+	row = railRow(railInput{Session: Session{Registration: reg, Label: "agy worker"}, Snapshot: snap}, true, now)
+	if row.Hover.Rate != 70 || row.Hover.RateAt != at || row.Hover.Observed != nil {
+		t.Fatalf("working agy hover = %+v", row.Hover)
+	}
+	html = renderNamed(t, "session-hover", row)
+	contains(t, "working agy hover", html, "Observed output model", "Unknown", `class="tps">70`, "Output rate")
+
+	// Stopped/stale agy session hides live rate.
+	stopped := reg
+	stopped.HostStopped = true
+	row = railRow(railInput{Session: Session{Registration: stopped}, Snapshot: snap}, true, now)
+	if row.Hover.Rate != 0 {
+		t.Fatalf("stopped agy hover kept rate: %+v", row.Hover)
+	}
+
+	// Parent subagent row shows rate while running and Unknown observed model in hover.
+	child := AgentNode{Agent: wslive.Agent{
+		ID: "pi:agychild", ReplyID: "agychild", AgentKind: wslive.AgentKindPi, Harness: "agy",
+		Label: "agy worker", Status: wslive.StatusRunning, Model: "gemini-3.8-flash", OutputTps: 69.6,
+	}}
+	rowHTML := renderNamed(t, "agent", child)
+	contains(t, "running agy subagent row", rowHTML, `class="atps" title="output: 70 tokens/s">70 t/s`, "Observed output model", "Unknown")
+	child.Status = wslive.StatusDone
+	if doneHTML := renderNamed(t, "agent", child); strings.Contains(doneHTML, "atps") {
+		t.Fatalf("ended agy subagent row kept rate: %s", doneHTML)
+	}
+
+	// Reopen via SnapshotCache after legacy snapshot.json rewrite restores OutputRate from sidecar.
+	stateDir := t.TempDir()
+	sessionDir := SessionDir(stateDir, reg.ReplyID)
+	if err := wslive.WriteOutputRate(sessionDir, &wslive.OutputRate{OutputTps: 69.6, At: at}); err != nil {
+		t.Fatal(err)
+	}
+	writeSnapshot(t, stateDir, reg.ReplyID, &wslive.Snapshot{
+		SchemaVersion: 1, ReplyID: reg.ReplyID, Adapter: "agy", HeartbeatMs: 30000, UpdatedAt: now.UnixMilli(),
+		Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseReplying}, TurnStartedAt: at + 1000},
+	})
+	var cache SnapshotCache
+	reopened := cache.Snapshot(stateDir, reg.ReplyID)
+	if reopened == nil || reopened.Lead.OutputRate == nil || reopened.Lead.OutputRate.OutputTps != 69.6 || reopened.Lead.Observed != nil {
+		t.Fatalf("reopened snapshot cache overlay = %+v", reopened)
+	}
+	reopenedRow := railRow(railInput{Session: Session{Registration: reg}, Snapshot: reopened}, true, now)
+	if reopenedRow.Hover.Rate != 70 || reopenedRow.Hover.RateAt != at {
+		t.Fatalf("reopened hover = %+v", reopenedRow.Hover)
+	}
 }

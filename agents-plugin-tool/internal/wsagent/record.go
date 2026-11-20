@@ -403,9 +403,17 @@ func newLiveWriter(dir, key, adapter string, now func() time.Time, log io.Writer
 	if err == nil {
 		st.SeedObserved(records)
 	}
+	if rate, err := wslive.ReadOutputRate(dir); err == nil && rate != nil {
+		st.SeedOutputRate(rate)
+	} else if err != nil {
+		folded = false
+	}
 	if prev, err := wslive.ReadSnapshot(wslive.SnapshotPath(dir)); err == nil {
 		st.SeedFinished(prev)
 		st.SeedLastTurn(prev)
+		if prev.Lead.OutputRate != nil {
+			st.SeedOutputRate(prev.Lead.OutputRate)
+		}
 		if u := prev.Usage; u != nil {
 			_, _ = st.Apply(wslive.Event{Kind: wslive.KindStatus, Context: u.Context, Cost: u.Cost, Limits: u.Limits}, now().UnixMilli())
 		}
@@ -454,6 +462,7 @@ func (w *liveWriter) applyQuiet(ev wslive.Event) {
 	res, err := w.st.Apply(ev, w.now().UnixMilli())
 	if err == nil {
 		w.writeObserved(res.Observed)
+		w.writeOutputRate(res.OutputRate)
 	}
 }
 
@@ -495,6 +504,7 @@ func (w *liveWriter) write(res wslive.Result, err error, kind string) bool {
 		return false
 	}
 	w.writeObserved(res.Observed)
+	w.writeOutputRate(res.OutputRate)
 	ringAppended := false
 	if len(res.Ring) > 0 {
 		if err := w.withOwner(func() error {
@@ -544,6 +554,15 @@ func (w *liveWriter) setAdapter(name string) {
 func (w *liveWriter) writeObserved(records []wslive.ObservedRecord) {
 	if err := wslive.AppendObserved(w.dir, records); err != nil {
 		fmt.Fprintf(w.log, "agent %s: model evidence write: %v\n", w.st.ReplyID(), err)
+	}
+}
+
+func (w *liveWriter) writeOutputRate(rate *wslive.OutputRate) {
+	if rate == nil {
+		return
+	}
+	if err := w.withOwner(func() error { return wslive.WriteOutputRate(w.dir, rate) }); err != nil {
+		fmt.Fprintf(w.log, "agent %s: output rate write: %v\n", w.st.ReplyID(), err)
 	}
 }
 

@@ -25,8 +25,9 @@ import (
 // adding evidence beside the copy's (shareObserved) returns the session to
 // the overlay until ClearLive.
 type SnapshotCache struct {
-	files    FileCache[parsedSnapshot]
-	observed wslive.ObservedCache
+	files       FileCache[parsedSnapshot]
+	observed    wslive.ObservedCache
+	outputRates wslive.OutputRateCache
 	// load is an instance-local snapshot opener/decoder seam for tests.
 	load func(string) (parsedSnapshot, error)
 
@@ -247,10 +248,15 @@ func (c *SnapshotCache) snapshotResult(stateDir, replyID string) (*wslive.Snapsh
 	}
 	dir := SessionDir(stateDir, replyID)
 	var observed *wslive.ObservedCache
+	var outputRates *wslive.OutputRateCache
 	if c != nil {
 		observed = &c.observed
+		outputRates = &c.outputRates
 	}
 	observed.Load(dir).Overlay(&p.snap)
+	if p.snap.Lead.Observed == nil {
+		wslive.OverlayOutputRate(&p.snap, outputRates.Load(dir))
+	}
 	return &p.snap, nil
 }
 
@@ -279,6 +285,7 @@ func (c *SnapshotCache) Invalidate(stateDir, replyID string) {
 	path := wslive.SnapshotPath(SessionDir(stateDir, replyID))
 	c.files.InvalidateUnder(path)
 	c.observed.Invalidate(SessionDir(stateDir, replyID))
+	c.outputRates.Invalidate(SessionDir(stateDir, replyID))
 }
 
 // Forget drops the cached snapshot file of session replyID under stateDir;
@@ -289,6 +296,7 @@ func (c *SnapshotCache) Forget(stateDir, replyID string) {
 	}
 	c.files.ForgetUnder(SessionDir(stateDir, replyID))
 	c.observed.Forget(SessionDir(stateDir, replyID))
+	c.outputRates.Forget(SessionDir(stateDir, replyID))
 }
 
 // Counts reports the snapshot reads served from the cache and the ones that
