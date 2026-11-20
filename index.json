@@ -608,7 +608,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-20T12:44:15Z"
+        "touched_at": "2026-11-20T12:45:55Z",
+        "impl": {
+          "branch": "impl/develop/clump-chill-yodel"
+        }
       }
     },
     "261120-feat-ws-dashboard-numbers-screen": {
