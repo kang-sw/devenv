@@ -2,8 +2,8 @@
 title: 레일 하트비트 정체 근본 수정 (하트비트 sweeper 분리 + 세션별 잠금)
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: b6632e56b1fd0be6
-sage-review-completeness-reviewed: b6632e56b1fd0be6
+sage-review-design-reviewed: 7c5b798a7e4376be
+sage-review-completeness-reviewed: 7c5b798a7e4376be
 ---
 
 # Rail heartbeat starvation: independent heartbeat and per-session summary lock
@@ -48,7 +48,13 @@ fix.
   the row from `c.record()`, so it cannot roll back a newer `HostPID` or
   `HostStopped` the loop wrote. The `lastReg` due time and `foreignRow` are
   synchronized between the loop's `heartbeat()` and the sweeper so the two
-  never double-write within one `HeartbeatInterval`.
+  never double-write within one `HeartbeatInterval`. Per-session attempts
+  are independent: a sweep never waits on one session's flock before trying
+  the next (each attempt runs concurrently or uses a non-blocking try-lock
+  that skips to the next tick), so a held flock delays only its own session.
+  Rejected: a sequential sweep over `LockRegistration` - its 2 s wait per
+  held flock adds up to `N x 2s` and can push healthy sessions past the
+  interval.
   Rejected: calling `writeRegistration` from the sweeper - it races on
   conv-loop-owned fields and can write a stale full row.
 - The per-session registration flock fence stays (Prior Decisions b931a0261,
@@ -114,7 +120,10 @@ fix.
   blocked and assert another session's snapshot publishes and its
   `HeartbeatAt` advances, and (b) block one session's conv loop outside its
   own row lock and assert that session's `HeartbeatAt` still advances within
-  one `HeartbeatInterval`, with at most one registration write per interval.
+  one `HeartbeatInterval`, with at most one registration write per interval,
+  and (c) place a session whose registration flock is held ahead of a healthy
+  session in sweep order and assert the healthy session's `HeartbeatAt`
+  advances within one interval.
   `TestHeartbeatRegistrationPrecedesBlockedSnapshot` locks `r.summaryMu`
   directly; adapt it to the per-reply-id lock. Other existing
   `Registration|Heartbeat` tests in `internal/wsagent` stay green; `go test ./internal/wsagent ./internal/wslive
