@@ -64,6 +64,7 @@
     "review.marker": ">=0.50.8-dev <0.51.0",
     "review.stamp": ">=0.50.8-dev <0.51.0",
     "path.generate": ">=0.50.8-dev <0.51.0",
+    "path.write": ">=0.50.8-dev <0.51.0",
     "workflow_manual": ">=0.50.8-dev <0.51.0",
     "workflow_state": ">=0.50.8-dev <0.51.0",
     "playbook.read": ">=0.50.8-dev <0.51.0",
