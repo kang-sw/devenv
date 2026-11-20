@@ -152,11 +152,19 @@ const bar = (page, name) => topic(page, name).locator(':scope > .tophead > .tbar
 async function plus(page) { return center(page.locator('#bgal .gal-dot.empty')); }
 async function shot(tab, name) { if (shots) await tab.screenshot({ path: path.join(shots, name + '.png') }); }
 async function seed(context, id, record, layout) {
-  const tab = await context.newPage();
-  await tab.goto(base + '/s/' + id);
-  await tab.evaluate(([k, v, l]) => { localStorage.setItem(k, v); if (l) localStorage.setItem('ws.dashboard.layout', l); else localStorage.removeItem('ws.dashboard.layout'); },
-    ['ws.dashboard.cards.' + id, JSON.stringify(record), layout || null]);
-  await tab.close();
+  // Seed before the shell or its frame can mount cards. A throwaway tab can
+  // still have a loading frame that rewrites this record after evaluate.
+  const generation = (context.gallerySeedGeneration || 0) + 1;
+  context.gallerySeedGeneration = generation;
+  await context.addInitScript(({ key, value, layout, generation }) => {
+    try {
+      if (+(localStorage.getItem('gallery-browser-seeded') || 0) >= generation) return;
+      localStorage.setItem(key, value);
+      localStorage.setItem('gallery-browser-seeded', String(generation));
+      if (layout) localStorage.setItem('ws.dashboard.layout', layout);
+      else localStorage.removeItem('ws.dashboard.layout');
+    } catch (e) { /* sandboxed content frames have opaque origins */ }
+  }, { key: 'ws.dashboard.cards.' + id, value: JSON.stringify(record), layout: layout || null, generation });
 }
 // The terminal capability is synthetic: the daemon's list and the card's
 // socket are answered here, so a terminal card mounts its emulator with
@@ -1247,6 +1255,18 @@ async function routeTerminal(context) {
         assert.match(page2Icons[4], /^#i-/);
         assert.equal(await capsules.nth(1).locator('.gal-dot-more').textContent(), '+1');
         assert.equal(await capsules.nth(1).locator('.gal-dot-icon').count(), 5);
+        const stateColors = await capsules.locator('.gal-dot-icon').evaluateAll(nodes => nodes
+          .filter(n => [...n.classList].some(c => c.startsWith('d-gal-')))
+          .map(n => [([...n.classList].find(c => c.startsWith('d-gal-'))), getComputedStyle(n).color]));
+        assert.deepEqual(Object.fromEntries(stateColors), theme === 'dark' ? {
+          'd-gal-research': 'rgb(198, 165, 247)', 'd-gal-wait': 'rgb(185, 189, 198)',
+          'd-gal-impl': 'rgb(141, 184, 255)', 'd-gal-discuss': 'rgb(255, 179, 107)',
+          'd-gal-confirm': 'rgb(127, 214, 168)',
+        } : {
+          'd-gal-research': 'rgb(117, 68, 172)', 'd-gal-wait': 'rgb(89, 97, 114)',
+          'd-gal-impl': 'rgb(36, 87, 197)', 'd-gal-discuss': 'rgb(166, 79, 8)',
+          'd-gal-confirm': 'rgb(29, 115, 72)',
+        }, `${theme}/${width}: semantic capsule colors`);
         assert.equal(await capsules.first().getAttribute('aria-current'), 'page');
         const colors = await capsules.evaluateAll(nodes => nodes.map(n => ({ background: getComputedStyle(n).backgroundColor, border: getComputedStyle(n).borderTopColor,
           icon: getComputedStyle(n.querySelector('.gal-dot-icon')).color, text: getComputedStyle(n).color })));

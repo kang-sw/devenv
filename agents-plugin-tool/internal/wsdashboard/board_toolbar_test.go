@@ -58,7 +58,9 @@ page.board.insertBefore = function (n, ref) { if (n === bar) moves++; return ins
 page.board.removeChild = function (n) { if (n === bar) moves++; return remove.call(this, n); };
 clickPin(B); first("pin keeps toolbar first");
 check("a pin is counted once", count(), "open 2 · closed 8");
-page.width = 1800; page.W.relayout(); first("width crossing keeps toolbar first");
+page.width = 1800; page.W.relayout(); first("rail-only width keeps toolbar first");
+check("the gallery stays paged until its column fits", [page.layouts, page.states[page.states.length - 1].narrow], [[], true]);
+page.width = 2560; page.W.relayout(); first("column width crossing keeps toolbar first");
 check("the gallery shows as a column", [page.layouts, gal.parentNode === page.dbody], [[true], true]);
 check("column topics count", count(), "open 2 · closed 8");
 var layoutBefore = page.layouts.slice();
@@ -67,13 +69,13 @@ check("overview leaves the gallery where it stands, the layout unchanged", [gal.
 page.W.relayout();
 var c = page.W.open("k", { name: "C" });
 check("arrange in overview keeps the docked topic docked", page.W.isDocked(B), true);
-page.width = 1000; page.W.relayout(); page.width = 1800; page.W.relayout();
+page.width = 1000; page.W.relayout(); page.width = 2560; page.W.relayout();
 check("a wide crossing changes only the layout", [page.W.isDocked(B), page.layouts], [true, [true, false, true]]);
 page.W.overview(false);
 check("exit keeps the current layout", [page.W.isDocked(B), page.layouts], [true, [true, false, true]]);
 c.pin(true); c.pin(false); c.close(); first("card pin/unpin/close keep toolbar first");
 clickPin(B); first("unpin keeps toolbar first");
-check("the last undock hides the gallery", [gal.hidden, page.layouts], [true, [true, false, true, false]]);
+check("the last undock leaves the wide empty slot", [gal.hidden, page.states[page.states.length - 1].empty, page.layouts], [false, true, [true, false, true, false]]);
 var nextMore = more(2); nextMore.setAttribute("data-closed-more", "4");
 B = topic("b", 400); X = topic("x", 0, true);
 swap([B, X, topic("y", 0, true), nextMore, reply()]); first("weave and settle keep toolbar first");

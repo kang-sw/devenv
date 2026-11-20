@@ -1069,6 +1069,9 @@ var store = {}, colW = 500, A;
 function served() { A = topic("a", 300); return [A, reply()]; }
 function start(pin) {
   boot(store, served, { wide: true, split: true });
+  // Leave room for the split grid and a gallery column even after the
+  // handles grow the board; at 2560px the four-band layout pages instead.
+  page.width = 3200; page.W.relayout();
   page.col.getBoundingClientRect = function () { return { top: 0, bottom: 0, left: 0, right: colW, width: colW, height: 0 }; };
   if (pin) clickPin(A);
 }
