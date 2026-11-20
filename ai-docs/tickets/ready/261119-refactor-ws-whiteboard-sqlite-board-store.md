@@ -597,6 +597,92 @@ Verification:
 
 Deferred: wiring and the "after" measurement.
 
+### Result (0bdc5a7b0) - 2026-11-20
+
+Implemented `BoardDB` beside `FolderStore`; no daemon, MCP, dashboard, or
+nudge caller uses it yet. The Phase 1 contract was read from `develop` at
+`692a42368`, including owner `(1837)=a`; this result leaves the worktree's
+existing plan text unchanged.
+
+- VERIFIED: one held SQLite connection with `locking_mode=EXCLUSIVE` before
+  WAL, `synchronous=NORMAL`, `wal_autocheckpoint=0`, and a 256 KiB cache.
+  The board, whole topic documents, append-only entries, immutable panels,
+  revision slots, and load floors recover into a complete in-memory State.
+- VERIFIED: changed updates commit row deltas in one transaction. Unchanged
+  updates open no transaction and leave the WAL bytes unchanged. Entry edits,
+  removal, and moves between unrelated topics are refused; adoption retains
+  the history directory and receipts do not regress. The active receipt slot
+  stays in memory, so updates do not query the DB to choose it.
+- VERIFIED: import holds the legacy lock through replay/conversion, DB commit,
+  and schema-3 sentinel creation, and stores the imported generation.
+  Fixtures compare retained legacy bytes against a control `FolderStore.Open`
+  for unchanged data, content/close-result migration, pending replay, and v1
+  conversion, then verify DB update/close/reopen leaves those files intact.
+- VERIFIED: sentinel write failure logs and still opens the committed DB;
+  reopen retries under the legacy lock. Both committed-generation divergence
+  and an unreplayed pending intent are logged without re-import. A waiting
+  retry sees the intervening legacy commit, and a legacy writer blocked by
+  import refuses after the sentinel appears.
+- VERIFIED: missing/corrupt/unreadable DB fixtures refuse with explicit manual
+  rollback guidance and preserve the legacy files. Healthy owner contention
+  instead gets bounded retry advice; it is not diagnosed as corruption.
+- VERIFIED: process-kill fixtures recover the last committed state when killed
+  before transaction commit and restore the sentinel when killed immediately
+  after import commit. Optional topic proof data survives updates and reopen.
+  Concurrent first importers recheck DB existence under the legacy lock.
+  Duplicate legacy load-floor generations preserve FolderStore's first-record
+  semantics; SQL iteration errors cannot return a partial board.
+- VERIFIED: zip export and load backup reuse `plan(nil, nil, state)`.
+  `LoadedAt` is cleared on the planning clone and carried by the reserved
+  load-floor log. Before and after updates, `FolderStore.Open`, DB re-import,
+  and DB reopen produce the same full State, including answers and panel/log
+  history. Archives contain neither `.board.sqlite` nor `pending.json`.
+  Load refuses zip-supplied SQLite recovery files and sidecars before import,
+  so the legacy files remain the archive's authority.
+  Loading an old-layout zip uses the import path; replacement preserves the
+  render-sequence/receipt rules and captures the answer floor after backup
+  under the lock.
+- VERIFIED: close runs PASSIVE checkpoint. Background checkpoint requires
+  **30 seconds idle and at least 4 MiB WAL**; a callback rechecks the latest
+  idle deadline under the mutex, including when an old timer already fired.
+  Import and reopen arm that timer. Tests exercise both threshold gates with
+  a real WAL larger than 4 MiB. Exclusive-open retry bound: **2 seconds**;
+  both release-within-bound and timeout are covered.
+
+The inherited post-embed macOS baseline (lead-verified handoff, not rerun by
+this continuation) is **122 ms first write, 75 ms steady median, 99 ms steady
+p95; FileIOCounters 99 first / 107 steady**. Its harness is
+`internal/mcp/whiteboard_measurement_test.go`, enabled by
+`WS_WHITEBOARD_MEASURE_UPDATES`, on the post-embed stack ending at `9a0b51449`.
+The harness updates one topic with a panel and log, so these measured values
+are not a validation of the earlier log-only multi-topic derived table.
+Counters and final-file snapshots are supporting lower-bound evidence: direct
+`os.*`, flock, transient files, and SQLite VFS operations are not all counted.
+A complete syscall count is unverified. The "after" measurement and live
+wiring remain Phase 2/3 work. Windows AhnLab V3 measurement is deferred.
+
+Compatibility remains the approved **T3** sentinel boundary, with the minor
+bump deferred to release. The new writer stamps schema 3 in
+`board_db.go:814-818`; the retained old reader/writer checks root schemas in
+`folders.go:327-337` and refuses newer versions at `folders.go:314-315`, before
+the callback can replay or write (`folders.go:225-258`). A new reopen reads
+its unchanged committed DB (`board_db.go:169-185`). The refusal/reopen fixture
+is `board_db_test.go:102-120`. Separate historical-binary verification remains
+in Phase 2. Legacy-layout zip behavior is T0 in both directions under the
+semantic State criterion, exercised by
+`TestBoardDBLegacyArchiveExportBackupAndLoad` and `assertBoardDBArchiveState`.
+
+Validation on the completed code, from `agents-plugin-tool` with
+`GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`:
+
+- `go test ./internal/wswhiteboard ./internal/mcp -run 'Whiteboard|BoardDB|Folder' -count=1`:
+  PASS (`wswhiteboard` 430.443 s; `mcp` 231.894 s).
+- `go test ./internal/wswhiteboard -count=1`: PASS (510.452 s).
+- `GOOS=windows go vet ./internal/wswhiteboard`: PASS.
+- `go test -race ./internal/wswhiteboard -run BoardDB -count=1`: PASS (31.691 s).
+- Independent `codex.medium` review: four findings fixed; final review reports
+  no actionable findings. `git diff --check` passed.
+
 ### Phase 2: Switch board authority to the DB
 
 Depends on Phase 1.
