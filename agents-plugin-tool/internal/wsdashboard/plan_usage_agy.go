@@ -502,7 +502,12 @@ func runAgyUsageCommand(prog string, pre, baseEnv []string, timeout time.Duratio
 	cmd.Stdout = outStream
 	cmd.Stderr = errStream
 	err = cmd.Run()
-	return outStream.buf.Bytes(), errStream.buf.Bytes(), shared.overflowed, err
+	shared.mu.Lock()
+	stdout = slices.Clone(outStream.buf.Bytes())
+	stderr = slices.Clone(errStream.buf.Bytes())
+	overflowed = shared.overflowed
+	shared.mu.Unlock()
+	return stdout, stderr, overflowed, err
 }
 
 // agyHistory returns the full pruned agy usage history.
