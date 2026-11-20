@@ -12,10 +12,12 @@ Five agent-v2 dogfood surprises were observed on 2026-11-20 while the shared
 daemon still ran code from before
 `261120-refactor-ws-agent-workers-under-holders`. The holder migration has now
 landed in this checkout, but the live observations were not made against that
-code. This ticket keeps the observations together because they cross the same
-spawned-worker contract: how a child is contacted, how its descendants report
-back, which ws tools it receives, and which session identity reaches its MCP
-hello.
+code. Source diagnosis added a sixth instance at the same process-context
+boundary: a dashboard session terminal copies the daemon environment into its
+PTY. This ticket keeps the observations together because they cross the same
+spawned-process contract: how a child is contacted, how its descendants report
+back, which ws tools it receives, and which session identity reaches a worker
+or terminal-launched harness.
 
 The diagnosis below is source-only. No runtime reproduction, build, or test was
 performed while drafting this ticket. Runtime observations are therefore
@@ -23,9 +25,49 @@ marked INFERRED unless current source or the completed holder ticket records
 them directly; source claims are marked VERIFIED with repository-relative
 citations.
 
+## Decisions
+
+1. **(1864) Codex and agy workers receive real mid-turn mail steer through the
+   common worker steer path.** Their worker catalogs already promise native
+   `ItemSteer`, so the implementation must make that capability true without
+   requiring interruption or turn completion. **Rejected:** narrowing the
+   capability or user contract to next-turn delivery; `agent.spawn`, the
+   catalog, and Codex lead steering already promise native steer. Compatibility
+   estimate: T0 because the correction fulfills an existing behavior contract
+   without changing a tool, hello, or stored-record shape.
+2. **(1865) First write a holder-backed Codex parent/grandchild end-to-end
+   completion-delivery regression, and change code only if it fails.**
+   **Rejected:** a speculative fix without a current reproducer. Compatibility
+   estimate: T0 for either a no-code-change result or a correction confined to
+   the existing pending-report route; re-grade any newly required mechanism.
+3. **(1866) Put the direct parent's reply address into the child's worker
+   context at spawn, at one shared seam used by every harness.** **Rejected:**
+   relying on the first-mail envelope, because the child needs the address
+   before inbound mail; relying on parent-side spawn metadata, because the
+   child cannot see it. Compatibility estimate: T0 for additive worker context
+   that preserves mailbox address syntax.
+4. **(1867) Add `review.marker` and `review.stamp` only to the review-handler
+   profile's loadout.** Keep the existing authority gate, including the
+   read-only refusal. **Rejected:** adding the mutation tools to the common
+   worker loadout, because least privilege limits them to the handler that
+   requires them. Compatibility estimate: T0 because existing tools become
+   discoverable only in the selected profile and no schema changes.
+5. **(1868) Use one shared environment drop set for every worker backend
+   launch.** It includes `WS_HOSTED_*` and applies the existing `CLAUDE*` and
+   `WS_MAILBOX*` exclusions where their harness boundaries require them.
+   **Rejected:** a Claude-only exclusion, because every backend starts from the
+   daemon environment. Compatibility estimate: T0 because filtering inherited
+   process identity changes neither the hello schema nor its connection gate.
+6. **Item 6 consequence of (1868): the dashboard session terminal applies the
+   same shared drop set before spawning its PTY.** This is an announced
+   consequence of the confirmed common process-boundary rule, not a separate
+   mechanism choice. Compatibility estimate: T0 because ordinary machine and
+   user environment remains intact while stale harness/session identity is
+   omitted from a newly spawned process.
+
 ## Evidence and diagnosis
 
-### 1. Codex child mail does not steer into a running turn
+### 1. Codex and agy child mail does not steer into a running turn
 
 - **VERIFIED — symptom:** the completed holder ticket records that mailbox
   updates appeared together only after interruption and explicitly leaves
@@ -35,14 +77,19 @@ citations.
   same shape twice, but this drafting pass did not reproduce it: a Codex
   implementation worker missed two parent mails and a Codex renderer
   grandchild held five messages for more than 40 minutes.
-- **VERIFIED — current source reproduces the static cause:** the Codex catalog
-  clones the lead's native steer capability onto workers
-  (`agents-plugin-tool/internal/wsagent/catalog.go:473-493`), but
-  `codexProcess.processControls` supplies `steer` and omits the recoverable
-  `reports` control (`agents-plugin-tool/internal/wsagent/codex.go:166-168`).
-  Non-lead mail may steer only when `controlsFor(proc).reports` is non-nil, so
-  Codex worker mail is held for a later turn despite the native capability
-  grade (`agents-plugin-tool/internal/wsagent/runner_conv.go:397-425`).
+- **VERIFIED — current source reproduces the static cause for both backends:**
+  the Codex and agy catalogs clone each lead capability, including native
+  `ItemSteer`, onto workers
+  (`agents-plugin-tool/internal/wsagent/catalog.go:473-493`,
+  `agents-plugin-tool/internal/wsagent/catalog.go:537-557`). Their process
+  controls expose `steer` but not the acknowledged `reports` control
+  (`agents-plugin-tool/internal/wsagent/codex.go:166-168`,
+  `agents-plugin-tool/internal/wsagent/agy.go:242-244`). The common
+  `steerWorker` path currently returns unless the worker is Pi and has that
+  `reports` control (`agents-plugin-tool/internal/wsagent/children.go:601-609`),
+  while non-lead mail eligibility also requires `reports`
+  (`agents-plugin-tool/internal/wsagent/runner_conv.go:397-425`). Codex and agy
+  therefore advertise native steer that the worker mail path cannot use.
 - **INFERRED — suspected cause:** the worker capability declaration and the
   runner's acknowledged worker-steer contract disagree. This explains delayed
   visibility without requiring mailbox-store loss; the source does not prove
@@ -52,10 +99,11 @@ citations.
   (`ai-docs/tickets/.done/261120-refactor-ws-agent-workers-under-holders.md:630-634`).
   Nothing in the current Codex control seam shows that the holder work fixed
   this item.
-- **INFERRED — compatibility estimate:** T0 if repaired through the existing
-  mail/steer behavior without changing tool schemas, arguments, hello fields,
-  or persisted record shape. Re-grade if the selected approach changes one of
-  those cross-version surfaces.
+- **INFERRED — live agy scope:** no agy incident was reported or reproduced;
+  its inclusion follows the same VERIFIED catalog/control mismatch.
+- **VERIFIED — compatibility decision:** T0 under Decision (1864), provided
+  implementation keeps the existing tool schemas, arguments, hello fields,
+  and persisted record shape.
 
 ### 2. Codex grandchild completion was not delivered to its parent
 
@@ -165,6 +213,51 @@ citations.
   and merely omits inherited hosted-identity values from fresh worker
   processes. Re-grade if the hello contract or connection refusal changes.
 
+### 6. A dashboard session terminal inherits daemon/session environment
+
+- **VERIFIED — current source reproduces full daemon-environment inheritance:**
+  the dashboard's default terminal shell starts from `os.Environ()`, copies
+  every entry, and changes only an absent or incapable `TERM`
+  (`agents-plugin-tool/internal/wsdashboard/terminal_shell.go:21-48`,
+  `agents-plugin-tool/internal/wsdashboard/terminal_shell.go:61-91`). The
+  session route passes that shell to terminal creation, which gives the map
+  unchanged to the holder's PTY spawn
+  (`agents-plugin-tool/internal/wsdashboard/terminal_routes.go:403-415`,
+  `agents-plugin-tool/internal/wsdashboard/terminals.go:235-268`).
+- **VERIFIED — normal current startup removes only part of the risk:** the
+  dashboard command drops hosted-session values, the harness PID, MCP session
+  URL/token, and worker permission before reading or spawning from its
+  environment (`agents-plugin-tool/cmd/ws-mcp/dashboard.go:40-42`,
+  `agents-plugin-tool/internal/mcp/process_env.go:335-347`). It does not remove
+  `WS_MAILBOX` or `WS_MAILBOX_AUTO`. The launcher passes the caller environment
+  into daemon startup with only package/resource selection adjustments
+  (`agents-plugin/bin/ws-mcp-launcher.py:1459-1480`), so a daemon started from a
+  named-mailbox session can still pass that identity to every terminal.
+- **VERIFIED — a terminal-launched Claude/ws-mcp forwards inherited values:**
+  the launcher copies its environment into the proxy hello and only normalizes
+  path-valued entries (`agents-plugin/bin/ws-mcp-launcher.py:1320-1337`,
+  `agents-plugin/bin/ws-mcp-launcher.py:1489-1508`). An inherited explicit
+  mailbox value becomes that server's process-lifetime mailbox identity
+  (`agents-plugin-tool/internal/mcp/mailbox_runtime.go:109-140`). Thus running
+  Claude in such a terminal can bind the daemon starter's mailbox rather than
+  begin without a named mailbox.
+- **VERIFIED — inherited hosted values do not by themselves adopt the wrong
+  hosted key:** the launcher replaces `WS_MCP_HARNESS_PID` with its direct
+  parent PID (`agents-plugin/bin/ws-mcp-launcher.py:2326-2333`), and hosted-key
+  resolution accepts the inherited key only when the registration row's
+  `host_pid` matches that harness PID; a row naming another process yields an
+  ordinary session (`agents-plugin-tool/internal/mcp/process_env.go:274-305`).
+  A missing or not-yet-populated row can still impose a bounded wait and
+  warning (`agents-plugin-tool/internal/mcp/process_env.go:286-318`).
+- **INFERRED — live incident and holder-migration relation:** no terminal was
+  launched during this diagnosis, so an actual wrong-mailbox collision or
+  hosted-session warning is not runtime-reproduced. The worker-holder migration
+  does not change the current dashboard terminal shell or PTY environment
+  seam, so it is not shown to fix this source-reproducible boundary.
+- **VERIFIED — compatibility decision:** T0 under the Item 6 consequence of
+  (1868); filtering occurs before process spawn and changes no MCP wire or
+  stored-data shape.
+
 ## Constraints
 
 - Convention: `ai-docs/manuals/ws-mcp.md` (declared for
@@ -183,23 +276,19 @@ citations.
 - Preserve direct-child ownership checks, authority ceilings, mailbox return
   channel semantics, exactly-once completion reporting, and holder survival
   from `261120-refactor-ws-agent-workers-under-holders`.
+- Build the shared drop set as an in-memory launch-boundary filter used before
+  worker and terminal holder spawn; do not add interactive-path file reads or
+  per-message work.
+- Retain ordinary machine and user environment required by interactive shells
+  and harnesses, including shell selection, `PATH`, home/config locations, and
+  unrelated credentials. Remove only inherited harness/session identity and
+  backend-specific parent state covered by Decision (1868).
+- Keep the hosted `host_pid` confirmation guard even after launch filtering;
+  filtering is defense in depth, not a replacement for connection-side
+  identity validation.
 - Do not treat Item 2's supplied-session-key suspicion as established. First
   reproduce the current Codex parent/grandchild path or record that the named
   regression passes without a code change.
-
-## Open Decision Queue
-
-Last ID used: (1868)
-
-(1864) [open] [technical] Choose whether Codex workers gain an acknowledged recoverable mid-turn steer path or the worker capability and user-facing contract are narrowed to queued next-turn delivery.
-
-(1865) [open] [technical] Choose the Item 2 fix only after the end-to-end Codex grandchild regression distinguishes a current delivery defect from a pre-holder observation already removed by the migration.
-
-(1866) [open] [technical] Choose where to expose the direct parent's reply address to a new child: injected worker context, the initial prompt envelope, or another existing spawn metadata seam.
-
-(1867) [open] [technical] Choose whether review-ledger tools belong in the common agent worker loadout, a review-handler-specific profile, or a lead-owned stamping handoff.
-
-(1868) [open] [technical] Choose whether Claude worker identity filtering reuses the shared worker/lead drop set or adds a backend-specific hosted-session exclusion.
 
 ## Phases
 
@@ -208,7 +297,7 @@ Last ID used: (1868)
 1. Add the named regressions below before changing behavior. Item 2 must first
    run against the current holder-backed source; if it passes, preserve the
    no-reproduction result and limit code changes to defects the tests expose.
-2. Implement only the approaches settled from (1864)-(1868). Keep existing
+2. Implement only the approaches settled in `## Decisions`. Keep existing
    tool names, mailbox address syntax, session-key authority, completion
    exactly-once behavior, and holder ownership checks unless a later confirmed
    decision explicitly changes one.
@@ -219,24 +308,32 @@ Last ID used: (1868)
    completion path; do not claim a Windows antivirus latency result without
    measuring it on that baseline.
 
-Verification expectations, one named regression per dogfood item:
+Verification expectations, at least one named regression per dogfood item:
 
-- Item 1: `TestCodexWorkerMailSteersIntoRunningTurn` proves parent mail reaches
-  an active Codex worker without interruption, turn end, duplication, or loss.
+- Item 1: `TestCodexAndAgyWorkerMailSteersIntoRunningTurn` proves parent mail
+  reaches active Codex and agy workers through the common worker steer path
+  without interruption, turn end, duplication, or loss.
 - Item 2: `TestCodexGrandchildCompletionReachesConversationParentExactlyOnce`
-  proves a Codex grandchild's terminal result reaches its Codex conversation
-  parent once and releases the parent's held final in the documented order;
+  is holder-backed and proves a Codex grandchild's terminal result reaches its
+  Codex conversation parent once and releases the parent's held final in the
+  documented order; code changes are permitted only if this test first fails.
   `TestAgentForwardSessionKeyDoesNotSelectCompletionParent` pins the token-
   scoped routing boundary.
 - Item 3: `TestSpawnedWorkerContextNamesDirectParentReturnAddress` proves a
   newly started child can identify the direct parent, not merely the root
   lead, before any follow-up mail; `TestChildMailEnvelopeKeepsParentRelation`
   preserves the later envelope behavior.
-- Item 4: `TestReviewHandlerWorkerLoadoutIncludesReviewLedgerTools` proves the
-  review handler can discover and call `review.marker` and `review.stamp` at
-  its intended authority while unrelated worker profiles do not gain an
-  unapproved mutation surface.
-- Item 5: `TestClaudeWorkerHelloDropsInheritedHostedSessionEnv` starts from a
-  daemon environment containing hosted-session values and proves a fresh
-  Claude worker's hello omits them while retaining its own agent session key
-  and allowed-tool/permission context.
+- Item 4: `TestReviewHandlerProfileIncludesReviewLedgerToolsWithWriteAuthority`
+  proves the review handler can discover and call `review.marker` and
+  `review.stamp` at its intended authority, read-only refusal remains, and
+  unrelated worker profiles do not gain the mutation surface.
+- Item 5: `TestWorkerBackendsDropInheritedHarnessSessionEnv` covers every
+  worker backend from a contaminated daemon environment and proves each fresh
+  worker omits hosted/mailbox/parent-harness identity while retaining its own
+  agent session key, allowed tools, permission context, and required
+  backend-specific environment.
+- Item 6: `TestSessionTerminalDropsInheritedHarnessSessionEnv` proves the
+  holder PTY receives no hosted, MCP-session, permission, or mailbox identity
+  from a contaminated daemon while retaining `PATH`, home/config, shell, and
+  normalized `TERM`; launching ws-mcp from that shell must create an ordinary
+  non-mailbox session without the hosted-row wait.
