@@ -32,6 +32,12 @@
   function itemMenu(id, anchor, pt, opts) {
     if (!VS || !VS.items[id]) return;
     opts = opts || {};
+    if (opts.step === 'cc' || opts.step === 'assign') {
+      var opener = MN && MN.backEl ? MN.backEl : anchor;
+      if (MN) closeMenu(false);
+      openPicker(opts.step, { item: id }, opener);
+      return;
+    }
     if (MN && MN.kind === 'item' && anchor && $('tkmenu').contains(anchor)) {
       MN.from = MN.step; MN.step = opts.step || 'main'; MN.op = opts.op || null; MN.who = opts.who || null; MN.req = opts.req || null; MN.q = ''; MN.as = null; MN.mv = null;
       drawMenu(); return;
@@ -143,11 +149,6 @@
         '<div class="mrow"><input type="text" id="tkmq" data-mi data-autofocus autocomplete="off" spellcheck="false" placeholder="' + wsT("js.tk.menu.search") + '" aria-label="' + wsT("js.tk.menu.search") + '" value="' + esc(MN.q || '') + '"></div>' +
         '<div class="mlist" role="group">' + handoffList(it, hfrom) + '</div>' + noteField(wsT("js.tk.form.note.opt"));
     }
-    if (step === 'cc') {
-      return h + back + '<div class="mtitle">' + wsT("js.tk.dlg.cc.title", esc(it.alias)) + '</div><p class="mintro">' + wsT("js.tk.dlg.cc.intro") + '</p>' +
-        '<div class="mrow"><input type="text" id="tkmq" data-mi data-autofocus autocomplete="off" spellcheck="false" placeholder="' + wsT("js.tk.menu.search") + '" aria-label="' + wsT("js.tk.menu.search") + '" value="' + esc(MN.q || '') + '"></div>' +
-        '<div class="mlist" role="group">' + ccPickList(it) + '</div>';
-    }
     if (step === 'opening') {
       return h + back + '<div class="mtitle">' + wsT("js.tk.dlg.open.title", esc(it.alias)) + '</div><p class="mintro">' + wsT("js.tk.dlg.open.intro") + '</p>' +
         '<div role="group">' + mi('m-opening', esc(wsT("js.tk.open.scope.team")), { scope: 'team' }, { icon: 'team', val: esc(wsT("js.tk.open.scope.team.sub")) }) +
@@ -207,6 +208,7 @@
     // a topic's holder releases it: item.unassign of their own record
     if (mineR && !task && !it.hidden) more.push(mi('unassign', esc(wsT("js.tk.act.release")), { item: it.id, who: v }, { icon: 'withdraw' }));
     if (canAssign(it, v)) more.push(mi('assign', esc(wsT("js.tk.act.assign")), { item: it.id }, { icon: 'assign', sub: 1 }));
+    if (!it.hidden) more.push(mi('cc', esc(wsT("js.tk.pm.cc.menu")), { item: it.id }, { icon: 'plus' }));
     if (canOpen(it)) more.push(mi('opening', esc(wsT("js.tk.act.open")), { item: it.id }, { icon: 'team', sub: 1 }));
     if (canUnopen(it)) more.push(mi('unopen', esc(wsT("js.tk.act.unopen")), { item: it.id }, { icon: 'withdraw' }));
     if (reqTargets(it).length) more.push(mi('request', esc(wsT("js.tk.act.request")), { item: it.id }, { icon: 'handoff', sub: 1 }));
@@ -230,17 +232,8 @@
       return '<button type="button" class="mi" role="menuitem" data-mi' + attr('act', 'm-handoff') + attr('to', id) + '>' + avHtml(id) + '<span class="ml">' + whoName(id) + '</span><span class="mv">' + esc(id) + '</span></button>';
     }).join('');
   }
-  // The CC step's people: every member not removed and not CC'd yet, the viewer included, filtered by the search.
-  function ccPickList(it) {
-    var q = String(MN.q || '').trim().toLowerCase(), cc = listOf(it.cc);
-    var ids = Object.keys(VS.members).filter(function (id) { return !VS.members[id].removed && cc.indexOf(id) < 0 && (!q || (id + ' ' + nmo(id)).toLowerCase().indexOf(q) >= 0); });
-    if (!ids.length) return '<p class="mempty">' + wsT("js.tk.menu.nobody") + '</p>';
-    return ids.map(function (id) {
-      return '<button type="button" class="mi" role="menuitem" data-mi' + attr('act', 'm-cc') + attr('to', id) + '>' + avHtml(id) + '<span class="ml">' + whoName(id) + '</span><span class="mv">' + esc(id) + '</span></button>';
-    }).join('');
-  }
-  // the people list a search box (#tkmq) filters: the CC step's or the handoff step's
-  function mqList(it) { return MN.step === 'cc' ? ccPickList(it) : handoffList(it, MN.who || VS.viewer.member); }
+  // the people list a search box (#tkmq) filters: the handoff step's
+  function mqList(it) { return handoffList(it, MN.who || VS.viewer.member); }
   // "Move to..." (ticket decision 8): the item menu's move step, the keyboard and touch path of the
   // move drag. A searchable tree of the destinations the store takes (moveWhy) plus the top level;
   // an item that takes none shows only as the context line of one that does, so the item's own
@@ -310,7 +303,7 @@
   function asgBelow(S) { return S.sel.some(function (o) { return complClass(o) === 'assigner'; }); }
   // The picked targets as the item.assign events they write, one per completion class (asgClass),
   // the first target's class first, each with its completion stored explicitly. Within an event,
-  // people come first, then rules ({root, levels?}; the whole subtree without levels).
+  // people come first, then rules ({root, include_root?, levels?}; the whole subtree without levels).
   function asgEvents(item, sel, compl) {
     var groups = [], by = {};
     sel.forEach(function (o) {
@@ -320,7 +313,12 @@
     });
     return groups.map(function (g) {
       var people = g.sel.filter(function (o) { return o.t === 'p'; }).map(function (o) { return o.id; });
-      var rules = g.sel.filter(function (o) { return o.t === 'r'; }).map(function (o) { return o.levels == null ? { root: o.root } : { root: o.root, levels: o.levels }; });
+      var rules = g.sel.filter(function (o) { return o.t === 'r'; }).map(function (o) {
+        var r = { root: o.root };
+        if (o.include_root) r.include_root = true;
+        if (o.levels != null) r.levels = o.levels;
+        return r;
+      });
       return ['item.assign', { item: item, targets: people.concat(rules), completion: g.c }];
     });
   }
@@ -523,7 +521,6 @@
       case 'm-ledit': return labelDialog({ label: a.getAttribute('data-label') });
       case 'm-lrm': return labelRemove(a.getAttribute('data-label'), function () { if (MN) MN.lab = null; });
       case 'm-ladd': return labelDialog({});
-      case 'm-cc': return commit([['item.cc', { item: id, member: a.getAttribute('data-to') }]]);
       case 'm-handoff': {
         var hp = { item: id, to: a.getAttribute('data-to') }, note = menuNote();
         if (MN.who && MN.who !== VS.viewer.member) hp.assignee = MN.who;
@@ -589,7 +586,7 @@
       if (t.id === 'tkmnote' && MN.step === 'note') { e.preventDefault(); menuAct('m-note-send', t); return; }
       if (t.id === 'tkmnote' && MN.step === 'request') { e.preventDefault(); var p0 = m.querySelector('[data-act="m-request"]'); if (p0) p0.click(); return; }
       if (t.hasAttribute('data-rin')) { e.preventDefault(); menuApplyClose(true); return; }
-      if (t.id === 'tkmq') { e.preventDefault(); var p1 = m.querySelector('[data-act="m-handoff"], [data-act="m-cc"]'); if (p1) p1.click(); return; }
+      if (t.id === 'tkmq') { e.preventDefault(); var p1 = m.querySelector('[data-act="m-handoff"]'); if (p1) p1.click(); return; }
       if (t.id === 'tkmvq') { e.preventDefault(); var p2 = m.querySelector('[data-act="m-move"]'); if (p2) p2.click(); return; }
       return; // a button: its click; a form field: the form's submit
     }

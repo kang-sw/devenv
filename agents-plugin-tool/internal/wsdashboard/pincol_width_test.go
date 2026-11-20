@@ -35,7 +35,7 @@ func TestPinnedColumnFillsTheWindowRightOfTheBoard(t *testing.T) {
 		":root { --pbw: calc(1680px - 32px - 356px); }",
 		".dash.board { --pbw: 900px; }",
 		":root[data-pincol] .dbody { grid-template-columns: minmax(0, min(var(--boardw, min(var(--pbw), 100% - 496px)), 100% - 296px)) minmax(280px, 1fr); }",
-		":root[data-pincol] .dbody { grid-template-columns: 340px minmax(0, min(var(--boardw, min(var(--pbw), 100% - 852px)), 100% - 652px)) minmax(280px, 1fr); }",
+		`:root:is([data-pincol], [data-gal="empty"], [data-gal="drag"]) .dbody { grid-template-columns: 340px minmax(0, min(var(--boardw, min(var(--pbw), 100% - 852px)), 100% - 652px)) minmax(280px, 1fr); }`,
 		":root[data-pincol] .dwrap:not(.narrow), :root[data-pincol] .dgrid.board { max-width: none; }",
 	} {
 		if !strings.Contains(css, want) {
@@ -48,13 +48,14 @@ func TestPinnedColumnFillsTheWindowRightOfTheBoard(t *testing.T) {
 }
 
 // TestGalleryNoReservedColumnWithoutAPage pins the docking gallery's wide
-// layout CSS: the gallery is the page body's last column only while the
-// page marks one (data-pincol, from 1600px with a docked page); nothing
-// else reserves it, so with no docked page the board takes the full width
-// at every width (the empty pin column, its idle drop placeholder and the
-// idle edge zone are gone). A drag alone shows it over the right edge
-// (data-gal="drag"), and the narrow view lays it fixed over the board's
-// column (data-gal="narrow"), with its width handle only in the column.
+// layout CSS: from 1600–2199px the gallery is the page body's last column
+// only while the page marks one (data-pincol, with a docked page); a drag
+// alone shows it over the right edge (data-gal="drag", >= 360px wide).
+// From 2200px, when 0 pages are docked at rest, the idle dashed drop slot
+// (data-gal="empty") occupies Col 3 beside the docked rail and stage, with
+// .bp-edge still gated to [data-pincol] and zero layout jump when dragging
+// begins (data-gal="drag" stays in Col 3). Below 1600px or in tabs,
+// data-gal="narrow" lays it fixed over the board's column.
 func TestGalleryNoReservedColumnWithoutAPage(t *testing.T) {
 	css := mustAsset(t, "dashboard.css")
 	for _, gone := range []string{".bpzone", ".bpins", ".bpcol", "data-drop", "attr(data-label)"} {
@@ -67,10 +68,11 @@ func TestGalleryNoReservedColumnWithoutAPage(t *testing.T) {
 		":root[data-gal] .bgal:not([hidden]) { display: flex; gap: 6px; min-width: 0; min-height: 0; }",
 		".bgal > .bp-edge { display: none; }",
 		`:root[data-gal="narrow"] .bgal:not([hidden]) { position: fixed; z-index: 35; left: var(--gal-left, 0px); top: var(--gal-top, 0px); width: var(--gal-width, 100vw); height: var(--gal-height, 100vh); pointer-events: none; }`,
-		`:root[data-gal="drag"] .bgal:not([hidden]) { position: fixed;`,
+		`:root[data-gal="drag"] .bgal:not([hidden]) { position: fixed; z-index: 40; top: 50px; bottom: 12px; right: 16px; width: clamp(360px, calc(100vw - 1696px), 520px); }`,
 		"  :root[data-pincol] .bgal:not([hidden]) { position: relative; grid-row: 1; grid-column: 2; }",
 		"  :root[data-pincol] .bgal > .bp-edge { display: block; }",
-		"  :root[data-pincol] .bgal:not([hidden]) { grid-column: 3; }",
+		`  :root:is([data-pincol], [data-gal="empty"], [data-gal="drag"]) .bgal:not([hidden]) { position: relative; z-index: auto; top: auto; bottom: auto; right: auto; width: auto; grid-column: 3; grid-row: 1; }`,
+		`  :root:is([data-pincol], [data-gal="empty"], [data-gal="drag"]) .dash:not(.live):not(.history) .bgal:not([hidden]) { position: sticky; top: 12px; height: calc(100vh - 24px); height: calc(100dvh - 24px); }`,
 		// Inactive pages leave the clipped viewport by transform alone, a gap
 		// past its edge (an edge-adjacent box still counts as intersecting).
 		".gal-viewport { flex: 1 1 0; min-width: 0; min-height: 0; position: relative; overflow: hidden; overflow: clip; }",
@@ -116,9 +118,10 @@ func TestGalleryNoReservedColumnWithoutAPage(t *testing.T) {
 // narrow view over the board's column (shown only with a docked page or a
 // drag); from 1600px a docked page makes it a column (data-pincol, which
 // below 2200px also turns the session rail into its overlay); with no
-// docked page no column is reserved, at 2200px and up too, and a drag
-// alone shows it over the right edge. Crossing 1600px changes the layout
-// only.
+// docked page at 1600–2199px no column is reserved and a drag alone shows
+// it over the right edge (data-gal="drag"); from 2200px with no docked
+// page at rest, the idle empty slot shows in Col 3 (data-gal="empty",
+// without data-pincol). Crossing 1600px changes the layout only.
 func TestGalleryLayoutModes(t *testing.T) {
 	js := mustAsset(t, "dashboard.js")
 	mode := regexp.MustCompile(`(?s)\n  function galMode\(\) \{.*?\n  \}\n`).FindString(js)
@@ -165,10 +168,10 @@ check("1599px, a drag with no page: the narrow rail", at(1599, 0, true), ["narro
 check("1600px, a page: a column, the session rail overlaying", at(1600, 1, false), ["col", true, true]);
 check("2199px, a page: still the overlay", at(2199, 1, false), ["col", true, true]);
 check("2200px, a page: a column beside the docked rail", at(2200, 1, false), ["col", true, false]);
-check("2200px, no page: no reserved column", at(2200, 0, false), [null, false, false]);
-check("2600px, no page: no reserved column", at(2600, 0, false), [null, false, false]);
+check("2200px, no page: idle empty slot in Col 3", at(2200, 0, false), ["empty", false, false]);
+check("2600px, no page: idle empty slot in Col 3", at(2600, 0, false), ["empty", false, false]);
 check("1800px, no page: no reserved column", at(1800, 0, false), [null, false, false]);
-check("2200px, a drag with no page: over the right edge, no column", at(2200, 0, true), ["drag", false, false]);
+check("2200px, a drag with no page: drag slot in Col 3, no pincol", at(2200, 0, true), ["drag", false, false]);
 check("1800px, a drag with no page: over the right edge, the rail docked", at(1800, 0, true), ["drag", false, false]);
 check("tabs at 2600px, a page: the narrow view", at(2600, 1, false, true), ["narrow", false, false]);
 check("galMode holds the width to each media query's side", [(width = 1599.5, galMode().width < 1600), (width = 2199.9, galMode().width)], [true, 2199]);

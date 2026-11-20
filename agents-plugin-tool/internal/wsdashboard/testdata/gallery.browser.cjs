@@ -1079,27 +1079,48 @@ async function routeTerminal(context) {
       const context = await browser.newContext({ viewport: { width: 2400, height: 1000 }, locale: 'en-US', reducedMotion: 'reduce' });
       await seed(context, 'livesession', {});
       let { tab, page, errors } = await open(context, 'livesession');
+      await page.evaluate(helpers3);
       const layout = () => page.evaluate(() => {
         const r = document.documentElement, g = document.getElementById('bgal'), b = document.getElementById('bcol').getBoundingClientRect();
-        const gb = g.getBoundingClientRect(), edge = g.querySelector('.bp-edge');
+        const gb = g.getBoundingClientRect(), edge = g.querySelector('.bp-edge'), rail = g.querySelector('.gal-rail'), plus = g.querySelector('.gal-plus');
+        const pb = plus.getBoundingClientRect();
         return { gal: r.getAttribute('data-gal'), pincol: r.hasAttribute('data-pincol'), hidden: g.hidden, cols: getComputedStyle(document.querySelector('.dbody')).gridTemplateColumns.split(' ').length,
-          edge: !!edge && getComputedStyle(edge).display !== 'none', right: Math.round(b.right), galLeft: Math.round(gb.left), w: innerWidth };
+          edge: !!edge && getComputedStyle(edge).display !== 'none', railHidden: !rail || rail.hidden || getComputedStyle(rail).display === 'none',
+          plusVisible: !plus.hidden && getComputedStyle(plus).display !== 'none' && pb.width > 0 && pb.height > 0,
+          plusWidth: Math.round(pb.width), galWidth: Math.round(gb.width), right: Math.round(b.right), galLeft: Math.round(gb.left), w: innerWidth };
       });
       let l = await layout();
-      assert.deepEqual([l.gal, l.pincol, l.hidden, l.edge], [null, false, true, false], '2400 with no page: no column, no handle');
+      assert.deepEqual([l.gal, l.pincol, l.hidden, l.railHidden, l.edge, l.plusVisible], ['empty', false, false, true, false, true], '2400 with no page: idle empty slot in Col 3, rail and handle hidden');
+      assert(l.galLeft >= l.right, '2400 idle empty slot stands right of the board');
+      assert(l.plusWidth >= 500 && l.galWidth >= 500, '2400 idle .gal-plus spans full Col 3: ' + JSON.stringify(l));
       const zeroCols = l.cols;
+      assert.equal(zeroCols, 3, '2400 already uses 3 grid columns at rest');
+      const plusBox = await center(page.locator('#bgal .gal-plus'));
+      await tab.mouse.move(plusBox.x, plusBox.y);
+      await tab.mouse.wheel(0, 125);
+      await tab.mouse.wheel(0, -125);
+      await page.evaluate(() => window.__gal.frames());
+      assert.equal(await page.evaluate(() => window.__gal3.pill()), null, 'wheeling over idle .gal-plus at 2400 emits no pull pill');
+      assert.equal(await page.evaluate(() => document.querySelectorAll('[data-gal-pull]').length), 0, 'wheeling over idle .gal-plus sets no pull transform');
       await shot(tab, 'layout-2400-zero');
-      // A drag start on the wide view shows the rail over the right edge; + docks.
-      const wide = await drag(tab, await grip(bar(page, 'beta')), () => plus(page), async () => {
-        await until(() => page.locator('#bgal').isVisible(), 'wide rail on drag start');
-        return page.evaluate(() => document.documentElement.getAttribute('data-gal'));
+      // A drag start at 2400 keeps #bgal in Col 3 at the exact same slot width (zero jump) and shows .gal-rail; dropping directly onto .gal-plus docks onto Page 1.
+      const wide = await drag(tab, await grip(bar(page, 'beta')), () => center(page.locator('#bgal .gal-plus')), async () => {
+        await until(() => page.locator('#bgal .gal-rail').isVisible(), 'wide rail on drag start');
+        const p = await center(page.locator('#bgal .gal-plus'));
+        await tab.mouse.move(p.x, p.y, { steps: 6 });
+        await until(() => page.evaluate(() => document.querySelector('#bgal .gal-plus').classList.contains('drop')), '.gal-plus lights as drop target');
+        return page.evaluate(() => {
+          const g = document.getElementById('bgal'), rail = g.querySelector('.gal-rail'), plus = g.querySelector('.gal-plus');
+          return { gal: document.documentElement.getAttribute('data-gal'), galWidth: Math.round(g.getBoundingClientRect().width),
+            railHidden: !rail || rail.hidden || getComputedStyle(rail).display === 'none', plusDrop: plus.classList.contains('drop') };
+        });
       });
-      assert.equal(wide, 'drag', 'the wide drag with no page overlays the right edge');
-      await until(async () => JSON.stringify(await pages(page)) === '[["beta"]]', 'wide drop on + docks beta');
+      assert.deepEqual(wide, { gal: 'drag', galWidth: l.galWidth, railHidden: false, plusDrop: true }, '2400 drag keeps exact Col 3 width with rail shown and .gal-plus lit');
+      await until(async () => JSON.stringify(await pages(page)) === '[["beta"]]', 'direct drop on .gal-plus docks beta onto Page 1');
       l = await layout();
-      assert.deepEqual([l.gal, l.pincol, l.hidden, l.edge, l.cols], ['col', true, false, true, zeroCols + 1], '2400 with a page: the gallery column with its handle');
+      assert.deepEqual([l.gal, l.pincol, l.hidden, l.railHidden, l.edge, l.cols], ['col', true, false, false, true, zeroCols], '2400 with a page: the gallery column with its handle, zero column-count jump');
       assert(l.galLeft >= l.right, 'the gallery stands right of the board');
-      done.push('drop on + with zero pages (wide drag overlay); 2400 zero pages reserves no column');
+      done.push('2400 idle empty slot (no rail/edge/pull pill), zero-jump drag, direct drop onto .gal-plus docks Page 1');
       await tab.setViewportSize({ width: 1800, height: 1000 });
       await until(async () => (await layout()).w === 1800, 'resize 1800');
       l = await layout();
@@ -1122,8 +1143,31 @@ async function routeTerminal(context) {
       l = await until(async () => { const v = await layout(); return v.gal === 'narrow' ? v : null; }, 'tabs at 2400 is narrow');
       assert.equal(l.pincol, false, 'tabs never takes the column');
       await shot(tab, 'layout-2400-tabs');
-      done.push('layout modes: 1400 narrow, 1800 column + rail overlay, 2400 zero pages no column, tabs narrow at 2400');
+      done.push('layout modes: 1400 narrow, 1800 column + rail overlay, 2400 idle empty slot, tabs narrow at 2400');
       assert.deepEqual(errors, []);
+      await context.close();
+    }
+
+    // ---- 1800x1000 with 0 pages: hidden at rest, drag overlay >= 360px ----
+    {
+      const context = await browser.newContext({ viewport: { width: 1800, height: 1000 }, locale: 'en-US', reducedMotion: 'reduce' });
+      await seed(context, 'livesession', {});
+      const { tab, page, errors } = await open(context, 'livesession');
+      const rest = await page.evaluate(() => ({ gal: document.documentElement.getAttribute('data-gal'), pincol: document.documentElement.hasAttribute('data-pincol'), hidden: document.getElementById('bgal').hidden }));
+      assert.deepEqual(rest, { gal: null, pincol: false, hidden: true }, '1800 with 0 pages: #bgal hidden at rest');
+      const during = await drag(tab, await grip(bar(page, 'beta')), () => center(page.locator('#bgal .gal-plus')), async () => {
+        await until(() => page.locator('#bgal').isVisible(), '1800 drag shows #bgal');
+        const p = await center(page.locator('#bgal .gal-plus'));
+        await tab.mouse.move(p.x, p.y, { steps: 6 });
+        await until(() => page.evaluate(() => document.querySelector('#bgal .gal-plus').classList.contains('drop')), '1800 .gal-plus lights as drop target');
+        return page.evaluate(() => ({ gal: document.documentElement.getAttribute('data-gal'), width: Math.round(document.getElementById('bgal').getBoundingClientRect().width), plusDrop: document.querySelector('#bgal .gal-plus').classList.contains('drop') }));
+      });
+      assert.equal(during.gal, 'drag', '1800 drag sets data-gal="drag"');
+      assert(during.width >= 360, '1800 drag overlay width >= 360px (not 140px): ' + JSON.stringify(during));
+      assert.equal(during.plusDrop, true, '1800 drag over .gal-plus lights it');
+      await until(async () => JSON.stringify(await pages(page)) === '[["beta"]]', '1800 drop onto .gal-plus docks beta onto Page 1');
+      done.push('1800 zero pages: hidden at rest, drag overlay >= 360px, drop onto .gal-plus docks');
+      assert.deepEqual(errors, [], 'no page errors (1800 zero pages)');
       await context.close();
     }
 

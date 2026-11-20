@@ -141,7 +141,8 @@
 .gal-pane > .bcard > .bc-in > .bc-hd { flex: none; }
 .gal-pane > .bcard:not([data-max]) > .bc-in > .bc-body { flex: 1 1 auto; height: auto !important; }
 .gal-pane > .bcard > .bc-in > .bc-grip { display: none; }
-.gal-plus { box-sizing: border-box; align-items: center; justify-content: center; padding: 16px; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); border-radius: var(--wb-radius); color: var(--wb-muted-fg); font-weight: 700; font-size: 13px; text-align: center; }
+.gal-plus { box-sizing: border-box; align-items: center; justify-content: center; padding: 16px; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-bg) 94%, transparent); color: var(--wb-muted-fg); font-weight: 700; font-size: 13px; text-align: center; -webkit-user-select: none; user-select: none; transition: border-color .15s, color .15s, background-color .15s; }
+:root[data-gal="empty"]:not([data-bdrag]) .gal-plus { border-color: color-mix(in srgb, var(--wb-muted-fg) 26%, transparent); color: color-mix(in srgb, var(--wb-muted-fg) 72%, transparent); background: transparent; }
 :root[data-bdrag] .gal-plus, .gal-plus.drop { border-color: var(--wb-primary); color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 8%, var(--wb-bg)); }
 .gal-plus.drop { background: color-mix(in srgb, var(--wb-primary) 18%, var(--wb-bg)); }
 /* the narrow view: over the board's column, Page 0 the board itself */
@@ -160,7 +161,7 @@
 :root[data-gal-away] .dgrid > .bcol > * { transform: translateX(calc(-100% - 100vw)); }
 :root[data-gal-away] .dgrid.board > .bcol { overflow-x: clip; }
 /* the wide view with no docked page, while a drag runs: over the right edge */
-:root[data-gal="drag"] .bgal:not([hidden]) { position: fixed; z-index: 40; top: 50px; bottom: 12px; right: 16px; width: clamp(140px, calc(100vw - 1696px), 520px); }
+:root[data-gal="drag"] .bgal:not([hidden]) { position: fixed; z-index: 40; top: 50px; bottom: 12px; right: 16px; width: clamp(360px, calc(100vw - 1696px), 520px); }
 .bp-edge { position: absolute; top: 0; bottom: 0; left: -12px; width: 9px; cursor: col-resize; touch-action: none; z-index: 2; }
 .bp-edge::after, .dcv-edge::after { content: ""; position: absolute; top: 50%; left: 3px; width: 3px; height: 36px; margin-top: -18px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
 .bp-edge:hover::after, .bp-edge.drag::after, .dcv-edge:hover::after, .dcv-edge.drag::after { background: var(--wb-primary); }
@@ -185,12 +186,14 @@
   :root[data-pincol] .dbody > .rail { margin: 0; }
 }
 @media (min-width: 2200px) {
-  /* rail and column both show */
-  :root[data-pincol] .dbody { grid-template-columns: 340px minmax(0, min(var(--boardw, min(var(--pbw), 100% - 852px)), 100% - 652px)) minmax(280px, 1fr); }
+  /* rail and column (or idle/drag slot) all show */
+  :root:is([data-pincol], [data-gal="empty"], [data-gal="drag"]) .dwrap:not(.narrow), :root:is([data-pincol], [data-gal="empty"], [data-gal="drag"]) .dgrid.board { max-width: none; }
+  :root:is([data-pincol], [data-gal="empty"], [data-gal="drag"]) .dbody { grid-template-columns: 340px minmax(0, min(var(--boardw, min(var(--pbw), 100% - 852px)), 100% - 652px)) minmax(280px, 1fr); }
   :root[data-pincol][data-boardw] .dbody:has(> .dgrid.live) { grid-template-columns: 340px minmax(0, min(var(--cvw) + 16px + var(--boardw), 100% - 652px)) minmax(280px, 1fr); }
-  :root[data-pincol] .dbody > .rail { grid-column: 1; grid-row: 1; }
-  :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 2; }
-  :root[data-pincol] .bgal:not([hidden]) { grid-column: 3; }
+  :root:is([data-pincol], [data-gal="empty"], [data-gal="drag"]) .dbody > .rail { grid-column: 1; grid-row: 1; }
+  :root:is([data-pincol], [data-gal="empty"], [data-gal="drag"]) .dbody > .dgrid, :root:is([data-pincol], [data-gal="empty"], [data-gal="drag"]) .dbody > .tk-spage { grid-column: 2; grid-row: 1; }
+  :root:is([data-pincol], [data-gal="empty"], [data-gal="drag"]) .bgal:not([hidden]) { position: relative; z-index: auto; top: auto; bottom: auto; right: auto; width: auto; grid-column: 3; grid-row: 1; }
+  :root:is([data-pincol], [data-gal="empty"], [data-gal="drag"]) .dash:not(.live):not(.history) .bgal:not([hidden]) { position: sticky; top: 12px; height: calc(100vh - 24px); height: calc(100dvh - 24px); }
 }
 /* An empty board (no topic or card in it; the placeholder may follow a future toolbar card) is a quiet dashed placeholder. In the live page it fills its column (.bcol), a scroll box with its own offsets (padding, the .top-classed pill wrapper's margin, the rail wrappers' margins), so it is pinned to the column's padding box rather than sized by height: 100%, which overflowed by those offsets. Elsewhere (no sized column) it stays a short strip. */
 .r-board:not(:has(> .topic, > .bcard)) > .empty { box-sizing: border-box; min-height: 54px; margin: 0; display: grid; place-items: center; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); font-weight: 700; }

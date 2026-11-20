@@ -1,0 +1,100 @@
+package wsagent
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/kang-sw/devenv/internal/wsdashboard"
+)
+
+// This file is compiled against the pinned pre-change tree, including its
+// real Runner.Start, holdersScanned, releaseHeld and PruneRegistrations.
+func TestLegacyWorkerHolderFenceAndParentDegradation(t *testing.T) {
+	h, reports := newFakePiRecoveryHarness(t)
+	worker, holder := spawnRecoveryWorker(t, h)
+	h.runner.Close()
+	h.holders.restart()
+	child := h.record(worker.ID)
+	now := h.opts.Now().UTC().Truncate(time.Second)
+	child.HandedOffAt = now.Format(time.RFC3339)
+	child.Parent = &ParentRef{Kind: ParentConversation, ReplyID: "zzparent"}
+	parent := Record{ReplyID: "zzparent", Root: h.root, Backend: BackendPi, Profile: PiWorkerProfile, WSKey: "parent-key", Parent: &leadParent,
+		CreatedAt: now.Format(time.RFC3339), LastActiveAt: now.Format(time.RFC3339), Sends: 1, Drained: 1,
+		HeldTurn: &TurnResult{ID: "zzparent", Status: TurnDone, Message: "parent result", mark: 1}}
+	for _, rec := range []Record{child, parent} {
+		if err := writeRecord(wsdashboard.SessionDir(h.dir, rec.ReplyID), rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.holders.set(func() {
+		raw, _ := json.Marshal(map[string]any{"kind": "agent-worker", "backend": "pi", "reply_id": child.ReplyID, "cwd": child.workDir(), "capability": capabilityHash(child.Capability)})
+		h.holders.holders[holder].session = raw
+	})
+	childPath := recordPath(wsdashboard.SessionDir(h.dir, child.ReplyID))
+	before, err := os.ReadFile(childPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.start()
+	wait(t, "old scan", h.runner.rejoined)
+	if h.runner.conv(child.ReplyID) != nil {
+		t.Fatal("old daemon started a child loop/watcher")
+	}
+	if st := h.state(child.ReplyID); AgentStatus(st) != AgentClosed || st.Process {
+		t.Fatalf("old child projection: %+v", st)
+	}
+	if h.holders.opCount("launch") != 1 || h.holders.opCount("spawn") != 1 || h.holders.opCount("stop") != 0 {
+		t.Fatalf("old daemon touched unrecognized holder: %v", h.holders.opList())
+	}
+	eventually(t, "old parent released", func() bool { rec := h.record("zzparent"); return rec.HeldTurn == nil && rec.LastTurn != nil })
+	if got := reports.list(); len(got) != 1 || got[0].Result.ID != "zzparent" {
+		t.Fatalf("old parent publication: %+v", got)
+	}
+	after, err := os.ReadFile(childPath)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("old daemon rewrote fenced child record")
+	}
+	h.runner.Close()
+	// Retention ages the registration row, not the holder's living process.
+	reg, err := wsdashboard.ReadRegistration(h.dir, child.ReplyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamp := reg.LastSeen()
+	wsdashboard.PruneRegistrations(h.dir, stamp.Add(wsdashboard.RegistryRetention), wsdashboard.RegistryRetention)
+	if _, err := os.Stat(childPath); err != nil {
+		t.Fatal("old prune removed child at the retention boundary")
+	}
+	wsdashboard.PruneRegistrations(h.dir, stamp.Add(wsdashboard.RegistryRetention+time.Second), wsdashboard.RegistryRetention)
+	if _, err := os.Stat(filepath.Dir(childPath)); !os.IsNotExist(err) {
+		t.Fatal("old prune did not remove aged fenced child directory")
+	}
+}
+
+func TestLegacyWorkerHolderPiRejoinsWithoutFence(t *testing.T) {
+	h, _ := newFakePiRecoveryHarness(t)
+	worker, holder := spawnRecoveryWorker(t, h)
+	before := h.record(worker.ID)
+	if before.HandedOffAt != "" {
+		t.Fatal("old fixture unexpectedly fenced Pi")
+	}
+	h.restart()
+	wait(t, "old Pi scan", h.runner.rejoined)
+	eventually(t, "old Pi replay", func() bool {
+		c := h.runner.conv(worker.ID)
+		done := false
+		c.do(func() { done = !c.replaying })
+		return done
+	})
+	after := h.record(worker.ID)
+	if after.HolderID != holder || after.HostPID != before.HostPID || !after.TurnOpen {
+		t.Fatal("legacy Pi identity changed")
+	}
+	if h.holders.opCount("launch") != 1 || h.holders.opCount("spawn") != 1 || h.holders.opCount("stop") != 0 {
+		t.Fatalf("old Pi duplicate/stop: %v", h.holders.opList())
+	}
+}

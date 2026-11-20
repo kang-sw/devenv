@@ -1,0 +1,602 @@
+<!-- Mockup: org (조직) objects in the admin org-chart editor (tracker-org/editor.html .tkoe; badge = picker .chip.org).
+     Fragment, scoped under .tkoo, fictitious people. State: 1 staged lead change, QA팀 created (vacant), 릴리스TF deleted;
+     QA팀 badge mid-drag over 이도윤, refused (already heads SW개발1팀). Script: badge drag + head select.
+     v2 (2026-11-20, extends the approved 261119 editor.html; everything above unchanged): orgs are tombstoned.
+     Saved-deleted orgs that items still reference get their own dashed rows under the org section with a clickable
+     "업무 N건" (플랫폼팀 shown expanded); unreferenced ones fold into "삭제된 조직 (N)". Frame ② = the item
+     window's assignee and CC cards with a live org, a deleted org and a personal entry. -->
+<style>
+.tkoo { --bg:#1e1f22; --fg:#e7e7e4; --card:#1e2024; --muted:#2b2d32; --mfg:#a2a6ad; --line:#444; --pri:#7aa2ff; --pri-fg:#0c1424;
+  --fail:#f0797e; --topic:#d9dbe0; --on-topic:#1b1d21;
+  --amb-bg:#4a3a1c; --amb:#e0a84a; --blu-bg:#1f3550; --blu:#5b9bf0; --grn-bg:#1d3b24; --grn:#5cc46a; --pur-bg:#33264d; --pur:#a57bf0;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  position:relative; background:rgb(10 11 13/.72); color:var(--fg); font:13px/1.45 var(--sans); padding:28px; }
+.tkoo * { box-sizing:border-box; }
+.tkoo code { font-family:var(--mono); font-size:10.5px; color:var(--mfg); }
+.tkoo .dlg { width:900px; max-width:100%; margin:0 auto; background:var(--bg); border:1px solid var(--line); border-radius:12px; box-shadow:0 2px 4px rgb(0 0 0/.55),0 8px 22px rgb(0 0 0/.4); display:flex; flex-direction:column; overflow:hidden; }
+.tkoo .dh { display:flex; align-items:center; gap:10px; padding:10px 12px 10px 16px; background:var(--muted); }
+.tkoo .dh h2 { margin:0; font-size:14px; }
+.tkoo .dh .sub { color:var(--mfg); font-size:12px; }
+.tkoo .grow { flex:1 1 0; }
+.tkoo .x { width:26px; height:24px; border:0; border-radius:6px; background:none; color:var(--mfg); font-size:16px; cursor:pointer; }
+.tkoo .db { display:grid; grid-template-columns:1fr 290px; min-height:500px; }
+.tkoo .left { padding:10px 14px 12px; border-right:1px solid var(--line); min-width:0; }
+.tkoo .right { padding:10px 12px 12px; background:var(--card); display:flex; flex-direction:column; gap:8px; }
+.tkoo .tb { display:flex; gap:6px; align-items:center; margin-bottom:8px; }
+.tkoo input[type=search], .tkoo select { font:inherit; font-size:12px; padding:2px 6px; border-radius:6px; border:1px solid var(--line); background:var(--card); color:var(--fg); }
+.tkoo input[type=search] { width:170px; }
+.tkoo .hint { color:var(--mfg); font-size:11.5px; font-weight:400; }
+.tkoo .btn { font:inherit; font-size:12.5px; background:var(--muted); color:var(--fg); border:0; border-radius:999px; padding:3px 12px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.tkoo .btn.mini { font-size:11.5px; padding:1px 9px; }
+.tkoo .btn.primary { background:var(--pri); color:var(--pri-fg); font-weight:700; }
+.tkoo .btn.dng:hover { color:var(--fail); }
+.tkoo .chip { display:inline-flex; align-items:center; height:17px; font-size:10.5px; font-weight:700; padding:0 6px; border-radius:999px; background:var(--muted); color:var(--mfg); white-space:nowrap; flex:none; }
+.tkoo .chip.you { background:var(--pri); color:var(--pri-fg); }
+.tkoo .chip.mv { background:var(--amb-bg); color:var(--amb); }
+.tkoo .chip.new { background:var(--grn-bg); color:var(--grn); }
+.tkoo .chip.vac { background:none; color:var(--amb); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--amb) 60%,transparent); }
+/* org badge (as in the picker): blue; draggable = grab; amber ring = staged; struck = deletion staged */
+.tkoo .chip.org { background:var(--blu-bg); color:#a9c8f7; box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--blu) 45%,transparent); }
+.tkoo .chip.org[draggable=true] { cursor:grab; }
+.tkoo .chip.org.pend { box-shadow:inset 0 0 0 1.5px var(--amb); }
+.tkoo .chip.org.del { background:none; color:var(--mfg); text-decoration:line-through; box-shadow:inset 0 0 0 1px var(--line); }
+.tkoo .chip.org.drag { opacity:.45; outline:1.5px dashed var(--mfg); }
+.tkoo .av { width:20px; height:20px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; flex:none; font-style:normal; font-size:9px; font-weight:800; background:var(--muted); color:var(--mfg); }
+/* editable tree: same elbow connectors and row grid as .tkoe */
+.tkoo .org, .tkoo .org ul { list-style:none; margin:0; padding:0; }
+.tkoo .org ul { margin-left:18px; }
+.tkoo .org li { position:relative; }
+.tkoo .org ul > li { padding-left:14px; }
+.tkoo .org ul > li::before { content:""; position:absolute; left:0; top:0; width:11px; height:16px; border-left:1.5px solid var(--line); border-bottom:1.5px solid var(--line); border-bottom-left-radius:5px; }
+.tkoo .org ul > li:not(:last-child)::after { content:""; position:absolute; left:0; top:16px; bottom:0; border-left:1.5px solid var(--line); }
+.tkoo li.shut > ul { display:none; }
+.tkoo .row { display:grid; grid-template-columns:12px 14px 20px minmax(0,1fr) 116px 84px; column-gap:6px; align-items:center; padding:3px 6px 3px 2px; margin:1px 0; border-radius:7px; border:1px solid transparent; }
+.tkoo .row:hover { background:color-mix(in srgb,var(--pri) 5%,var(--bg)); }
+.tkoo .hd { color:#6b6f76; cursor:grab; font-size:12px; text-align:center; user-select:none; }
+.tkoo .tg { width:14px; height:14px; border:0; background:none; color:var(--mfg); cursor:pointer; padding:0; font-size:10px; }
+.tkoo li.shut > .row .tg { transform:rotate(-90deg); }
+.tkoo .who { min-width:0; display:flex; align-items:center; gap:5px; overflow:hidden; white-space:nowrap; }
+.tkoo .who .nm { font-weight:600; }
+.tkoo .bdg { display:inline-flex; gap:4px; } .tkoo .bdg:empty { display:none; }
+/* nearest org: subtle grey text in front of the id */
+.tkoo .who .o { color:var(--mfg); font-size:11px; overflow:hidden; text-overflow:ellipsis; }
+.tkoo .who .o i { font-style:normal; color:#7d8189; }
+.tkoo .cnt { color:var(--mfg); font-size:10.5px; font-weight:700; }
+.tkoo .lead select { width:100%; }
+.tkoo .row.staged { background:color-mix(in srgb,var(--amb-bg) 45%,var(--bg)); box-shadow:inset 3px 0 0 var(--amb); }
+.tkoo .row.drag { opacity:.45; outline:1.5px dashed var(--mfg); }
+.tkoo .row.ok { border-color:var(--blu); background:color-mix(in srgb,var(--blu-bg) 70%,var(--bg)); }
+.tkoo .row.bad { border-color:var(--fail); background:color-mix(in srgb,var(--fail) 10%,var(--bg)); cursor:no-drop; }
+.tkoo .refuse { display:block; margin:2px 0 4px 52px; padding:4px 8px; border-radius:6px; background:color-mix(in srgb,var(--fail) 14%,var(--bg)); color:var(--fail); font-size:11.5px; border-left:3px solid var(--fail); }
+.tkoo .refuse b { color:#ffc1c3; }
+.tkoo .was { color:var(--amb); font-size:10.5px; }
+.tkoo .adm { font:inherit; font-size:11px; font-weight:700; border:0; border-radius:999px; padding:2px 8px; cursor:pointer; white-space:nowrap; justify-self:start; background:transparent; color:var(--mfg); box-shadow:inset 0 0 0 1px var(--line); }
+.tkoo .adm.on { background:var(--pur-bg); color:#d6c3fb; box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pur) 60%,transparent); }
+.tkoo .unas { margin-top:8px; border:1px dashed color-mix(in srgb,var(--amb) 45%,transparent); border-radius:8px; padding:3px 6px 3px 10px; color:var(--mfg); font-size:12px; }
+.tkoo .unas > b { color:var(--amb); font-size:11.5px; }
+/* org section (below the tree) */
+.tkoo .os { margin-top:12px; border-top:1px solid var(--muted); padding-top:8px; }
+.tkoo .os h3 { margin:0 0 5px; font-size:13px; display:flex; align-items:center; gap:6px; }
+.tkoo .os h3 .n { color:var(--mfg); font-size:11.5px; }
+.tkoo .ogs { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:3px; }
+.tkoo .og, .tkoo .oh { display:grid; grid-template-columns:minmax(0,1fr) 40px 190px 140px; column-gap:8px; align-items:center; padding:4px 6px; border-radius:7px; border:1px solid var(--muted); }
+.tkoo .oh { border:0; padding:0 7px; font-size:10.5px; font-weight:700; color:#7d8189; }
+.tkoo .og .cnt, .tkoo .oh .r { text-align:right; }
+.tkoo .nmc { display:flex; align-items:center; gap:5px; min-width:0; overflow:hidden; white-space:nowrap; }
+.tkoo .nmc code { color:#7d8189; }
+.tkoo .hs { display:flex; align-items:center; gap:5px; color:var(--mfg); font-size:11.5px; }
+.tkoo .hs select { flex:1; min-width:0; }
+.tkoo .acts { display:flex; gap:4px; justify-content:flex-end; }
+.tkoo .og.vac { background:color-mix(in srgb,var(--amb-bg) 45%,var(--bg)); border-color:color-mix(in srgb,var(--amb) 55%,transparent); box-shadow:inset 3px 0 0 var(--amb); }
+.tkoo .og.del { opacity:.7; } .tkoo .og.del code { text-decoration:line-through; }
+.tkoo .vh { grid-column:1 / -1; font-size:11px; color:var(--amb); margin-top:2px; }
+.tkoo .og .refuse { grid-column:1 / -1; margin:3px 0 0; }
+.tkoo .rn { font:inherit; font-size:12px; width:150px; padding:1px 6px; border-radius:6px; border:1px solid var(--pri); background:var(--card); color:var(--fg); }
+/* staged-changes list (as .tkoe) + org entry types */
+.tkoo .right h3 { margin:0; font-size:13px; display:flex; align-items:center; gap:6px; }
+.tkoo .right h3 .n { background:var(--amb-bg); color:var(--amb); border-radius:999px; padding:0 7px; font-size:11.5px; }
+.tkoo .chg { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:5px; }
+.tkoo .chg li { display:grid; grid-template-columns:1fr auto; gap:2px 6px; align-items:center; padding:6px 8px; border-radius:8px; background:var(--bg); border:1px solid var(--line); }
+.tkoo .ty { font-size:10.5px; font-weight:800; border-radius:4px; padding:0 5px; justify-self:start; }
+.tkoo .ty.lead { background:var(--blu-bg); color:#a9c8f7; }
+.tkoo .ty.add { background:var(--grn-bg); color:var(--grn); }
+.tkoo .ty.rm { background:var(--amb-bg); color:var(--amb); }
+.tkoo .ty.org { background:var(--pur-bg); color:#d6c3fb; }
+.tkoo .chg .d { grid-column:1; font-size:12px; }
+.tkoo .chg .refuse { grid-column:1 / -1; margin:2px 0 0; }
+.tkoo .arr { color:var(--mfg); margin:0 3px; }
+.tkoo .undo { grid-column:2; grid-row:1 / 3; font:inherit; font-size:11px; border:0; border-radius:6px; background:none; color:var(--mfg); cursor:pointer; padding:3px 6px; }
+.tkoo .undo:hover { background:var(--muted); color:var(--fg); }
+.tkoo .note { font-size:11.5px; color:var(--mfg); background:var(--bg); border-radius:8px; padding:6px 8px; border:1px solid var(--muted); }
+.tkoo .note b { color:var(--fg); }
+.tkoo .note ol { margin:3px 0; padding-left:16px; }
+.tkoo .df { display:flex; align-items:center; gap:8px; padding:9px 14px; border-top:1px solid var(--line); background:var(--card); }
+.tkoo .legend { width:900px; max-width:100%; margin:10px auto 0; color:var(--mfg); font-size:12px; padding-left:18px; }
+.tkoo .legend b { color:var(--fg); } .tkoo .legend code { color:#c9ccd2; font-size:11px; }
+
+/* ===== v2: tombstoned orgs (saved deletions). Dashed grey = deleted and kept; struck = deletion only staged ===== */
+.tkoo .chip.org.gone { padding:0 6px; background:none; color:var(--mfg); box-shadow:none; border:1px dashed #6b6f76; }
+.tkoo .chip.dtag { background:none; color:var(--mfg); box-shadow:inset 0 0 0 1px var(--line); font-weight:600; }
+.tkoo .dz { margin-top:10px; }
+.tkoo .dzh { display:flex; align-items:baseline; gap:8px; margin:0 0 4px; padding:0 2px; font-size:12px; }
+.tkoo .dzh b { color:var(--mfg); white-space:nowrap; }
+.tkoo .dzh .hint { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tkoo .og.gone { border-style:dashed; border-color:#3d3f45; }
+.tkoo .og.gone > .nmc, .tkoo .og.gone > .cnt { opacity:.85; }
+.tkoo .gw { color:#7d8189; font-size:11.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tkoo .btn.refs { background:none; color:var(--pri); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pri) 45%,transparent); }
+.tkoo .btn.refs:hover { background:color-mix(in srgb,var(--pri) 12%,var(--bg)); }
+.tkoo .btn.refs .cv { display:inline-block; font-size:9px; transition:transform .12s; }
+.tkoo .og.open .btn.refs { background:color-mix(in srgb,var(--pri) 14%,var(--bg)); }
+.tkoo .og.open .btn.refs .cv { transform:rotate(180deg); }
+.tkoo .og:not(.open) > .rl { display:none; }
+.tkoo .rl { grid-column:1 / -1; margin:5px 0 1px; border-radius:6px; background:var(--card); border:1px solid var(--muted); overflow:hidden; }
+.tkoo .rl ul { list-style:none; margin:0; padding:0; }
+.tkoo .rl li { display:grid; grid-template-columns:86px minmax(0,1fr) auto 50px; column-gap:8px; align-items:center; padding:4px 8px; font-size:12px; cursor:pointer; }
+.tkoo .rl li + li { border-top:1px solid var(--muted); }
+.tkoo .rl li:hover { background:color-mix(in srgb,var(--pri) 7%,var(--card)); }
+.tkoo .rl li:hover .ttl { color:var(--pri); text-decoration:underline; }
+.tkoo .iref { font-family:var(--mono); font-size:11px; color:var(--pri); text-decoration:none; }
+.tkoo .rl .ttl { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+.tkoo .rk { display:inline-flex; gap:3px; }
+.tkoo .rl .st { justify-self:end; }
+.tkoo .rlf { padding:4px 8px; border-top:1px solid var(--muted); font-size:11px; color:var(--mfg); }
+.tkoo .chip.k-asg { background:none; color:var(--fg); box-shadow:inset 0 0 0 1px var(--line); font-weight:600; }
+.tkoo .chip.s-doing { background:color-mix(in srgb,var(--pri) 20%,var(--card)); color:var(--pri); }
+.tkoo .chip.s-todo { background:color-mix(in srgb,var(--pri) 10%,var(--card)); color:var(--pri); }
+.tkoo .chip.s-rev { background:color-mix(in srgb,var(--amb) 18%,var(--card)); color:var(--amb); }
+.tkoo .chip.s-topic { background:none; color:var(--mfg); box-shadow:inset 0 0 0 1px var(--line); font-weight:600; }
+.tkoo .dzc { margin-top:4px; font-size:12px; color:var(--mfg); }
+.tkoo .dzc summary { cursor:pointer; padding:2px 4px; border-radius:6px; width:max-content; list-style:none; }
+.tkoo .dzc summary::-webkit-details-marker { display:none; }
+.tkoo .dzc summary::before { content:"▸"; display:inline-block; width:12px; font-size:10px; }
+.tkoo .dzc[open] summary::before { content:"▾"; }
+.tkoo .dzc summary:hover { background:var(--muted); color:var(--fg); }
+.tkoo .dzl { display:flex; flex-wrap:wrap; gap:4px 14px; padding:4px 6px 2px 18px; }
+.tkoo .dzl span.it { display:inline-flex; align-items:center; gap:5px; }
+
+/* ===== v2 frame ②: the item window's side column (as tracker-window.js assigneesHtml / ccHtml, tracker.css .iw-asg) ===== */
+.tkoo .cap { width:900px; max-width:100%; margin:30px auto 8px; display:flex; align-items:baseline; gap:10px; }
+.tkoo .cap b { font-size:13px; }
+.tkoo .iw { width:900px; max-width:100%; margin:0 auto; background:var(--bg); border:1px solid var(--line); border-radius:12px; box-shadow:0 2px 4px rgb(0 0 0/.55),0 8px 22px rgb(0 0 0/.4); overflow:hidden; }
+.tkoo .iw.flash { animation:tkoo-flash 1.6s ease-out; }
+@keyframes tkoo-flash { from { box-shadow:0 0 0 3px var(--pri),0 8px 22px rgb(0 0 0/.4); } }
+.tkoo .iwh { display:flex; align-items:center; gap:8px; padding:9px 12px 9px 16px; background:var(--muted); }
+.tkoo .iwh code { font-size:11.5px; color:var(--mfg); }
+.tkoo .iwh h2 { margin:0; font-size:14px; }
+.tkoo .iwg { display:grid; grid-template-columns:minmax(0,1fr) 292px; gap:12px 18px; padding:12px 16px 14px; align-items:start; }
+.tkoo .iwm { display:flex; flex-direction:column; gap:10px; min-width:0; color:#c9ccd2; font-size:13px; }
+.tkoo .iwm .chips { display:flex; gap:4px; }
+.tkoo .iwm p { margin:0; }
+.tkoo .iwm .sk { height:9px; border-radius:5px; background:var(--muted); }
+.tkoo .iwm h4 { margin:6px 0 0; font-size:12px; font-weight:800; color:var(--mfg); letter-spacing:.04em; }
+.tkoo .tl { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; font-size:12px; color:var(--mfg); }
+.tkoo .tl b { color:var(--fg); font-weight:600; }
+.tkoo .iws { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.tkoo .iws .chip { height:19px; font-size:11px; padding:0 7px; }
+.tkoo .iws h3 { margin:4px 0 0; font-size:12px; font-weight:800; color:var(--mfg); letter-spacing:.04em; display:flex; align-items:center; gap:6px; }
+.tkoo .iws h3 .cnt { font-size:12px; font-weight:600; }
+.tkoo .iws h3 .chip.flt { height:17px; font-size:10.5px; letter-spacing:0; }
+.tkoo .chip.flt { background:var(--amb-bg); color:var(--amb); }
+.tkoo .ia { width:26px; height:22px; border:0; border-radius:6px; background:none; color:var(--mfg); font-size:16px; line-height:1; cursor:pointer; padding:0; }
+.tkoo .ia:hover { background:var(--card); color:var(--pri); }
+.tkoo .pcard { background:color-mix(in srgb,var(--muted) 55%,var(--card)); border:1px solid var(--line); border-radius:10px; padding:8px 12px 10px; }
+.tkoo .pcard h3 { margin:0 0 6px; }
+.tkoo .pcard dl { display:grid; grid-template-columns:auto minmax(0,1fr); gap:5px 12px; margin:0; font-size:12.5px; }
+.tkoo .pcard dt { color:var(--mfg); } .tkoo .pcard dd { margin:0; }
+.tkoo .muted { color:var(--mfg); }
+.tkoo .ias { display:flex; flex-direction:column; gap:6px; }
+.tkoo .a-common { font-size:12px; margin:-2px 0 0; }
+.tkoo .alist { list-style:none; margin:0; padding:0; background:var(--card); border-radius:10px; box-shadow:0 1px 2px rgb(0 0 0/.45),0 0 0 1px rgb(255 255 255/.04); font-size:12.5px; overflow:hidden; }
+.tkoo .arow { padding:6px 10px; display:flex; flex-direction:column; gap:2px; }
+.tkoo .arow + .arow { border-top:1px solid var(--muted); }
+.tkoo .ar-main { display:flex; align-items:center; gap:6px; min-width:0; }
+.tkoo .ar-main .av { width:18px; height:18px; font-size:8.5px; }
+/* an org registration row starts with its badge (no avatar); its detail lines align to the badge */
+.tkoo .grp > .ar-diff { padding-left:3px; }
+.tkoo .grp > .sub, .tkoo .grp > .atb { margin-left:6px; }
+.tkoo .iwm .chip.org { padding:0 6px; }
+.tkoo .ar-name { font-weight:700; flex:1 1 auto; min-width:0; display:flex; align-items:center; flex-wrap:wrap; gap:4px; }
+.tkoo .ar-st { flex:none; display:inline-flex; gap:4px; align-items:center; }
+.tkoo .ar-diff { padding-left:24px; font-size:11.5px; color:var(--mfg); }
+.tkoo .ar-diff b { color:var(--fg); font-weight:600; }
+.tkoo .atb { display:flex; gap:4px; flex-wrap:wrap; margin:3px 0 1px 24px; }
+.tkoo .rmb { flex:none; width:16px; height:16px; padding:0 0 1px; border:0; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; background:var(--fail); color:#2a0d0f; font:900 13px/1 var(--sans); }
+.tkoo .fold { font:inherit; font-size:11px; font-weight:700; border:0; border-radius:999px; padding:1px 7px; background:var(--muted); color:var(--mfg); cursor:pointer; white-space:nowrap; }
+.tkoo .fold:hover { color:var(--fg); }
+.tkoo .grp.shut > .sub { display:none; }
+.tkoo .sub { list-style:none; margin:3px 0 1px 24px; padding:0 0 0 8px; border-left:1.5px solid var(--line); display:flex; flex-direction:column; gap:3px; }
+.tkoo .sub li { display:flex; align-items:center; gap:6px; font-size:12px; }
+.tkoo .sub li .n { flex:1; min-width:0; font-weight:600; }
+.tkoo .sub .av { width:16px; height:16px; font-size:7.5px; }
+.tkoo .arow.float { box-shadow:inset 3px 0 0 var(--amb); background:color-mix(in srgb,var(--amb-bg) 22%,var(--card)); }
+.tkoo .arow.float .ar-diff .w { color:var(--amb); }
+.tkoo .iw + .legend { margin-top:10px; }
+</style>
+
+<div class="tkoo">
+  <div class="dlg" role="dialog" aria-label="조직도 편집">
+    <div class="dh"><h2>조직도 편집</h2><span class="sub">관리자 전용 · 리드·관리자·조직 변경은 "저장"할 때 한 번에 기록됩니다</span><span class="grow"></span>
+      <button type="button" class="x" aria-label="닫기" title="닫기 (저장하지 않은 변경은 확인 후 버림)">×</button></div>
+    <div class="db">
+      <!-- ============ left: tree (projected = current + staged), then the org section ============ -->
+      <div class="left">
+        <div class="tb"><input type="search" placeholder="이름 · id · 조직 검색"><button type="button" class="btn mini" data-a="exp">모두 펼치기</button><span class="grow"></span>
+          <span class="hint">⠿ 행을 끌면 리드 변경 · 🏢 배지를 끌면 헤드 변경</span></div>
+        <ul class="org">
+          <li data-id="kim-hn" data-nm="김하늘"><div class="row" draggable="true"><span class="hd">⠿</span><button type="button" class="tg">▾</button><i class="av">하늘</i>
+              <span class="who"><span class="nm">김하늘</span><span class="chip you">나</span><span class="bdg"><span class="chip org" draggable="true" data-org="o-k7m2">🏢 SW개발실</span></span><span class="o"><code>kim-hn</code></span><span class="cnt">7명</span></span>
+              <span class="lead"><select aria-label="리드 변경"><option>— 최상위 (리드 없음)</option></select></span><button type="button" class="adm on">관리자 ✓</button></div>
+            <ul>
+              <li data-id="lee-dy" data-nm="이도윤"><div class="row bad" draggable="true"><span class="hd">⠿</span><button type="button" class="tg">▾</button><i class="av">도윤</i>
+                  <span class="who"><span class="nm">이도윤</span><span class="bdg"><span class="chip org" draggable="true" data-org="o-p3x9">🏢 SW개발1팀</span></span><span class="o"><code>lee-dy</code></span><span class="cnt">4명</span></span>
+                  <span class="lead"><select aria-label="리드 변경"><option>kim-hn 김하늘</option></select></span><button type="button" class="adm on">관리자 ✓</button></div>
+                <div class="refuse frozen" role="alert">놓을 수 없음 — <b>한 사람은 조직 하나만</b> 맡습니다. 이도윤(lee-dy)님은 이미 🏢 SW개발1팀의 헤드입니다. 먼저 그 조직의 헤드를 바꾸거나 비우세요.</div>
+                <ul>
+                  <li data-id="choi-jw" data-nm="최지우"><div class="row" draggable="true"><span class="hd">⠿</span><span></span><i class="av">지우</i>
+                      <span class="who"><span class="nm">최지우</span><span class="bdg"></span><span class="o">SW개발1팀 · <code>choi-jw</code></span></span>
+                      <span class="lead"><select aria-label="리드 변경"><option>lee-dy 이도윤</option></select></span><button type="button" class="adm">관리자 지정</button></div></li>
+                  <li data-id="jung-mj" data-nm="정민준"><div class="row" draggable="true"><span class="hd">⠿</span><span></span><i class="av">민준</i>
+                      <span class="who"><span class="nm">정민준</span><span class="bdg"></span><span class="o">SW개발1팀 · <code>jung-mj</code></span></span>
+                      <span class="lead"><select aria-label="리드 변경"><option>lee-dy 이도윤</option></select></span><button type="button" class="adm">관리자 지정</button></div></li>
+                  <li data-id="kang-yr" data-nm="강예린"><div class="row" draggable="true"><span class="hd">⠿</span><span></span><i class="av">예린</i>
+                      <span class="who"><span class="nm">강예린</span><span class="bdg"></span><span class="o">SW개발1팀 · <code>kang-yr</code></span></span>
+                      <span class="lead"><select aria-label="리드 변경"><option>lee-dy 이도윤</option></select></span><button type="button" class="adm">관리자 지정</button></div></li>
+                  <li data-id="han-sa" data-nm="한수아"><div class="row staged" draggable="true"><span class="hd">⠿</span><span></span><i class="av">수아</i>
+                      <span class="who"><span class="nm">한수아</span><span class="chip mv">이동됨</span><span class="bdg"></span><span class="o">SW개발1팀 · <code>han-sa</code></span><span class="was">이전: park-sy</span></span>
+                      <span class="lead"><select aria-label="리드 변경"><option>lee-dy 이도윤</option></select></span><button type="button" class="adm">관리자 지정</button></div></li>
+                </ul></li>
+              <li data-id="park-sy" data-nm="박서연"><div class="row" draggable="true"><span class="hd">⠿</span><button type="button" class="tg">▾</button><i class="av">서연</i>
+                  <span class="who"><span class="nm">박서연</span><span class="bdg"><span class="chip org" draggable="true" data-org="o-r8d4">🏢 SW개발2팀</span></span><span class="o"><code>park-sy</code></span><span class="cnt">1명</span></span>
+                  <span class="lead"><select aria-label="리드 변경"><option>kim-hn 김하늘</option></select></span><button type="button" class="adm">관리자 지정</button></div>
+                <ul>
+                  <li data-id="yoon-th" data-nm="윤태호"><div class="row" draggable="true"><span class="hd">⠿</span><span></span><i class="av">태호</i>
+                      <span class="who"><span class="nm">윤태호</span><span class="bdg"></span><span class="o">SW개발2팀 · <code>yoon-th</code></span></span>
+                      <span class="lead"><select aria-label="리드 변경"><option>park-sy 박서연</option></select></span><button type="button" class="adm">관리자 지정</button></div></li>
+                </ul></li>
+            </ul></li>
+        </ul>
+        <div class="unas"><b>미배치 (리드 없음)</b>
+          <ul class="org">
+            <li data-id="oh-sj" data-nm="오세진"><div class="row" draggable="true"><span class="hd">⠿</span><span></span><i class="av">세진</i>
+                <span class="who"><span class="nm">오세진</span><span class="bdg"><span class="chip org del" title="삭제 예정">🏢 릴리스TF</span></span><span class="o"><i>조직 없음</i> · <code>oh-sj</code></span></span>
+                <span class="lead"><select aria-label="리드 변경"><option>— 최상위 (리드 없음)</option></select></span><button type="button" class="adm">관리자 지정</button></div></li>
+          </ul></div>
+
+        <!-- org section: one row per org object -->
+        <div class="os">
+          <h3>🏢 조직 <span class="n"><span class="nO">5</span>개</span><span class="hint">배지를 멤버 위에 끌어 놓거나 "헤드"에서 고르면 헤드가 바뀝니다</span><span class="grow"></span>
+            <button type="button" class="btn mini" data-a="new">＋ 새 조직</button></h3>
+          <div class="oh"><span>조직 · id</span><span class="r">인원</span><span>헤드</span><span></span></div>
+          <ul class="ogs">
+            <li class="og" data-k="o-k7m2"><span class="nmc"><span class="chip org" draggable="true" data-org="o-k7m2">🏢 SW개발실</span><code>o-k7m2</code></span><span class="cnt">8명</span>
+              <label class="hs">헤드 <select data-k="o-k7m2" aria-label="SW개발실 헤드"><option value="kim-hn" selected>kim-hn 김하늘</option></select></label>
+              <span class="acts"><button type="button" class="btn mini" data-a="ren" data-k="o-k7m2">이름 바꾸기</button><button type="button" class="btn mini dng" data-a="del" data-k="o-k7m2">삭제</button></span></li>
+            <li class="og" data-k="o-p3x9"><span class="nmc"><span class="chip org" draggable="true" data-org="o-p3x9">🏢 SW개발1팀</span><code>o-p3x9</code></span><span class="cnt">5명</span>
+              <label class="hs">헤드 <select data-k="o-p3x9" aria-label="SW개발1팀 헤드"><option value="lee-dy" selected>lee-dy 이도윤</option></select></label>
+              <span class="acts"><button type="button" class="btn mini" data-a="ren" data-k="o-p3x9">이름 바꾸기</button><button type="button" class="btn mini dng" data-a="del" data-k="o-p3x9">삭제</button></span></li>
+            <li class="og" data-k="o-r8d4"><span class="nmc"><span class="chip org" draggable="true" data-org="o-r8d4">🏢 SW개발2팀</span><code>o-r8d4</code></span><span class="cnt">2명</span>
+              <label class="hs">헤드 <select data-k="o-r8d4" aria-label="SW개발2팀 헤드"><option value="park-sy" selected>park-sy 박서연</option></select></label>
+              <span class="acts"><button type="button" class="btn mini" data-a="ren" data-k="o-r8d4">이름 바꾸기</button><button type="button" class="btn mini dng" data-a="del" data-k="o-r8d4">삭제</button></span></li>
+            <li class="og del" data-k="o-t5n1"><span class="nmc"><span class="chip org del" title="삭제 예정">🏢 릴리스TF</span><code>o-t5n1</code></span><span class="cnt">—</span>
+              <label class="hs">헤드 <select data-k="o-t5n1" aria-label="릴리스TF 헤드" disabled><option value="oh-sj" selected>oh-sj 오세진</option></select></label>
+              <span class="acts"><button type="button" class="btn mini" data-a="undo" data-k="o-t5n1">↶ 삭제 취소</button></span>
+              <span class="vh">업무 2건이 이 조직을 가리킵니다 — 저장하면 "삭제된 조직"으로 남고 따라가기를 멈춥니다</span></li>
+            <li class="og vac" data-k="o-w2c6"><span class="nmc"><span class="chip org pend drag" draggable="true" data-org="o-w2c6">🏢 QA팀</span><span class="chip new">새</span><span class="chip vac">공석</span><code>o-w2c6</code></span><span class="cnt">—</span>
+              <label class="hs">헤드 <select data-k="o-w2c6" aria-label="QA팀 헤드"><option value="" selected>— 공석 (헤드 없음)</option></select></label>
+              <span class="acts"><button type="button" class="btn mini" data-a="ren" data-k="o-w2c6">이름 바꾸기</button><button type="button" class="btn mini dng" data-a="del" data-k="o-w2c6">삭제</button></span>
+              <span class="vh">공석 — 참조·배정 목록에서 이 조직은 비활성입니다. 배지를 멤버 위에 끌어 놓거나 헤드를 고르세요.</span></li>
+          </ul>
+
+          <!-- v2: saved deletions (tombstones). Static, outside the staged model above. -->
+          <div class="dz">
+            <div class="dzh"><b>삭제된 조직 2</b><span class="hint">업무가 아직 가리키는 조직 · 복원·새 대상 지정 불가 · 업무에서 대상을 바꾸면 빠집니다</span></div>
+            <ul class="ogs dgs">
+              <li class="og gone open" data-g="o-a3q8"><span class="nmc"><span class="chip org gone" title="삭제된 조직 — 이름만 남아 있습니다">🏢 플랫폼팀</span><span class="chip dtag">삭제됨</span><code>o-a3q8</code></span><span class="cnt">—</span>
+                <span class="gw" title="2026-11-12 김하늘(kim-hn)님이 삭제">11-12 삭제 · 김하늘</span>
+                <span class="acts"><button type="button" class="btn mini refs" data-x="refs" aria-expanded="true" title="이 조직을 가리키는 업무">업무 3건 <span class="cv">▾</span></button></span>
+                <div class="rl" role="region" aria-label="플랫폼팀을 가리키는 업무">
+                  <ul>
+                    <li data-x="open" title="업무 창 열기"><a class="iref" href="#iw-demo">kim-hn-42</a><span class="ttl">결제 모듈 리팩터링</span><span class="rk"><span class="chip k-asg">배정</span><span class="chip k-asg">참조</span></span><span class="st"><span class="chip s-doing">진행 중</span></span></li>
+                    <li data-x="open" title="업무 창 열기"><a class="iref" href="#iw-demo">park-sy-17</a><span class="ttl">릴리스 노트 자동 생성</span><span class="rk"><span class="chip k-asg">배정</span></span><span class="st"><span class="chip s-todo">할 일</span></span></li>
+                    <li data-x="open" title="업무 창 열기"><a class="iref" href="#iw-demo">lee-dy-8</a><span class="ttl">11월 장애 대응 회고</span><span class="rk"><span class="chip k-asg">참조</span></span><span class="st"><span class="chip s-topic">주제</span></span></li>
+                  </ul>
+                  <div class="rlf">누르면 업무 창이 열립니다 (② 참고). 배정·참조는 이름으로 남아 있지만 더는 조직을 따라가지 않습니다.</div>
+                </div></li>
+              <li class="og gone" data-g="o-m6v2"><span class="nmc"><span class="chip org gone" title="삭제된 조직 — 이름만 남아 있습니다">🏢 인프라TF</span><span class="chip dtag">삭제됨</span><code>o-m6v2</code></span><span class="cnt">—</span>
+                <span class="gw" title="2026-11-05 김하늘(kim-hn)님이 삭제">11-05 삭제 · 김하늘</span>
+                <span class="acts"><button type="button" class="btn mini refs" data-x="refs" aria-expanded="false" title="이 조직을 가리키는 업무">업무 1건 <span class="cv">▾</span></button></span>
+                <div class="rl" role="region" aria-label="인프라TF를 가리키는 업무">
+                  <ul>
+                    <li data-x="open" title="업무 창 열기"><a class="iref" href="#iw-demo">choi-jw-5</a><span class="ttl">빌드 서버 이전</span><span class="rk"><span class="chip k-asg">참조</span></span><span class="st"><span class="chip s-rev">검토 중</span></span></li>
+                  </ul>
+                  <div class="rlf">누르면 업무 창이 열립니다 (② 참고).</div>
+                </div></li>
+            </ul>
+            <details class="dzc"><summary>삭제된 조직 (2) · 가리키는 업무 없음</summary>
+              <div class="dzl"><span class="it"><span class="chip org gone">🏢 디자인TF</span><code>o-c9h3</code><span class="gw">10-30 삭제</span></span>
+                <span class="it"><span class="chip org gone">🏢 신입온보딩TF</span><code>o-e1k5</code><span class="gw">09-14 삭제</span></span></div></details>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ right: staged changes (lead + admin + org, one atomic save) ============ -->
+      <div class="right">
+        <h3>변경 사항 <span class="n"><span class="nN">3</span>건</span><span class="grow"></span><button type="button" class="btn mini" data-a="all" title="대기 중인 조직 변경을 모두 되돌립니다">모두 되돌리기</button></h3>
+        <ol class="chg">
+          <li data-fixed><span class="ty lead">리드 변경</span><button type="button" class="undo" title="이 변경 되돌리기 (목업: 리드 변경은 기존 편집기와 동일)">↶ 되돌리기</button>
+            <span class="d">한수아 <code>han-sa</code><br><code>park-sy</code><span class="arr">→</span><code>lee-dy</code></span></li>
+          <li><span class="ty rm">조직 삭제</span><button type="button" class="undo" data-a="undo" data-k="o-t5n1" title="이 변경 되돌리기">↶ 되돌리기</button>
+            <span class="d">릴리스TF <code>o-t5n1</code><br><span class="hint">헤드였던 오세진 이하는 가장 가까운 상위 조직으로</span></span></li>
+          <li><span class="ty add">조직 생성</span><button type="button" class="undo" data-a="undo" data-k="o-w2c6" title="이 변경 되돌리기">↶ 되돌리기</button>
+            <span class="d">QA팀 <code>o-w2c6</code><br>헤드: <span class="hint">공석</span></span></li>
+        </ol>
+        <div class="note"><b>저장 방식</b> — 리드·관리자·조직 변경을 한 번에 보냅니다. 전부 기록되거나, 하나라도 거부되면 아무것도 기록되지 않습니다. 조직 변경은 조직당 이벤트 1개 (이름과 헤드를 함께 바꿔도 1개).
+          <ol><li>관리자 지정</li><li>조직 삭제 · 헤드를 내놓는 변경</li><li>조직 생성 · 헤드를 받는 변경</li><li>리드 변경 (트리 위쪽부터)</li><li>관리자 해제 (본인은 맨 마지막)</li></ol>
+          순서는 자동입니다. 헤드를 맞바꾼 경우에는 한쪽을 잠시 공석으로 두는 이벤트가 하나 더 붙습니다.</div>
+        <span class="grow"></span>
+        <div class="hint">키 추가·폐기와 멤버 제거는 이 창 밖의 <a href="#" style="color:var(--pri)">기타 역할 이벤트…</a>에서 합니다.</div>
+      </div>
+    </div>
+    <div class="df"><span class="hint">대기 중인 변경 <span class="nN">3</span>건 · 저장 전에는 다른 사람에게 보이지 않습니다</span><span class="grow"></span>
+      <button type="button" class="btn">취소</button>
+      <button type="button" class="btn primary">저장 (<span class="nN">3</span>건)</button></div>
+  </div>
+  <ul class="legend">
+    <li><b>조직은 멤버와 별개 객체</b>: 고정 id (이름을 바꿔도 유지) · 이름 · 헤드 최대 1명. 헤드가 없으면 <span class="chip vac">공석</span> — 주황 행, 참조·배정 목록에서 비활성.</li>
+    <li><b>한 사람은 조직 하나만</b>: 이미 헤드인 멤버 위에 배지를 놓으면 빨간 테두리와 이유가 뜨고 거부됩니다 ("헤드" 선택 상자에서는 그런 멤버가 비활성). 맞바꾸려면 한쪽을 먼저 공석으로.</li>
+    <li><b>소속은 자동</b>: 헤드 이하 (리드 연결) 전원이 그 조직. 조직 안에 조직이 있으면 가장 가까운 조직을 행의 회색 글씨로 표시. 인원 = 헤드 포함 하위 전체. 미배치 멤버는 "조직 없음".</li>
+    <li><b>헤드를 트리에서 옮기면 조직도 함께</b> 이동합니다. 다른 사람에게 넘길 때만 배지 끌기나 "헤드" 선택으로 명시 지정 — 이전 헤드는 새 헤드 아래가 아니면 그 조직에서 빠집니다.</li>
+    <li><b>참조·배정</b>: 리드를 사람으로 고르면 개인 대상 그대로. 조직 대상은 별개이며, 피커의 🏢 배지는 그 조직을 빨리 고르는 화면 편의일 뿐입니다.</li>
+    <li><b>이벤트</b>: 관리자 전용 <code>roles.org_set {org, name, head}</code> (생성·이름·헤드, head 비움 = 공석) / <code>roles.org_remove {org}</code>. 호환성 <b>T1</b> — 이전 버전은 조직 이벤트를 무시하고 조직을 표시하지 않습니다 (데이터 변경 없음).</li>
+    <li><b>목업 상태</b>: QA팀 배지를 이도윤 위에 올린 순간 (거부). 해 보기 — SW개발2팀 배지를 윤태호에게 (박서연은 SW개발실 소속이 됨), QA팀을 오세진에게 (릴리스TF 삭제 대기 중이라 허용), 이름 바꾸기·삭제·새 조직·되돌리기.</li>
+    <li><b>v2 · 삭제된 조직 (지워지지 않음)</b>: 저장된 삭제는 이름·id가 남는 기록입니다. 복원할 수 없고 새 참조·배정 대상으로 고를 수 없으며, 멤버는 가장 가까운 상위 조직으로 갑니다. 표시는 <span class="chip org gone">🏢 플랫폼팀</span><span class="chip dtag">삭제됨</span> (회색 점선) — 아직 저장 전인 삭제 <span class="chip org del">🏢 릴리스TF</span> (취소선, 되돌리기 가능)와 구별합니다.</li>
+    <li><b>v2 · 정리</b>: 업무가 아직 가리키는 삭제된 조직만 점선 행으로 보이고, <b>업무 N건</b>을 누르면 그 업무 목록이 행 아래에 펼쳐집니다 (업무 · 배정/참조 · 상태, 누르면 업무 창). 업무에서 대상을 바꾸면 0건이 되어 아래 접힌 <b>삭제된 조직 (N)</b>으로 들어갑니다. 위 "조직 N개"에는 세지 않습니다.</li>
+  </ul>
+
+  <!-- ============ v2 frame ②: item window, assignee + CC cards with live org / deleted org / personal ============ -->
+  <div class="cap"><b>② 업무 창 — 삭제된 조직을 가리키는 등록</b><span class="hint">① 목록에서 kim-hn-42를 누른 결과. 오른쪽 열의 담당자·참조 카드만 새로 그렸습니다.</span></div>
+  <div class="iw" id="iw-demo" role="dialog" aria-label="업무 kim-hn-42">
+    <div class="iwh"><code>kim-hn-42</code><h2>결제 모듈 리팩터링</h2><span class="grow"></span><button type="button" class="x" aria-label="닫기">×</button></div>
+    <div class="iwg">
+      <div class="iwm">
+        <div class="chips"><span class="chip">작업</span><span class="chip s-doing">진행 중</span><span class="chip flt" title="삭제된 조직을 가리키는 등록이 있습니다">정리 필요</span></div>
+        <p>결제 모듈의 승인·취소 경로를 분리하고, 재시도 정책을 한곳으로 모읍니다. 기존 API는 유지합니다.</p>
+        <div class="sk" style="width:92%"></div><div class="sk" style="width:78%"></div><div class="sk" style="width:64%"></div>
+        <h4>활동</h4>
+        <ul class="tl">
+          <li><b>김하늘</b>님이 <span class="chip org">🏢 SW개발1팀</span> 전체를 배정 · <span class="chip org">🏢 SW개발2팀</span> 전체를 참조 <span class="muted">11-03</span></li>
+          <li><b>김하늘</b>님이 <span class="chip org">🏢 플랫폼팀</span> 전체를 배정·참조 · <b>오세진</b>님을 배정 · <b>한수아</b>님을 참조 <span class="muted">11-03</span></li>
+          <li><b>김하늘</b>님이 조직 <span class="chip org gone">🏢 플랫폼팀</span>을 삭제 — 이 업무의 배정·참조 등록은 이름으로 남고 더는 따라가지 않습니다 <span class="muted">11-12</span></li>
+        </ul>
+      </div>
+      <div class="iws">
+        <section class="pcard" aria-label="속성"><h3>속성</h3><dl>
+          <dt>상태</dt><dd>진행 중 <span class="muted">작업 중</span></dd>
+          <dt>담당자</dt><dd><b>7</b> <span class="muted">·</span> 진행 중 3 <span class="muted">·</span> 검토 중 1</dd>
+          <dt>만든 사람</dt><dd>김하늘 <span class="chip" style="height:17px;font-size:10.5px">관리자</span></dd></dl></section>
+
+        <!-- assignees: one row per registration; an org row folds its people, a personal row is the person -->
+        <section class="ias" aria-label="담당자">
+          <h3>담당자 <span class="cnt">7</span><span class="chip flt" title="삭제된 조직을 가리키는 등록 1개 — 대상을 바꾸세요">삭제된 조직 1</span><span class="grow"></span><button type="button" class="ia" aria-label="배정" title="배정">＋</button></h3>
+          <div class="a-common muted"><b style="color:var(--fg)">김하늘</b>님이 배정 · 배정자가 확인</div>
+          <ul class="alist">
+            <li class="arow grp shut"><div class="ar-main"><span class="ar-name"><span class="chip org">🏢 SW개발1팀</span></span>
+                <span class="ar-st"><button type="button" class="fold" data-x="fold" aria-expanded="false">4명 ▸</button><button type="button" class="rmb" aria-label="SW개발1팀 등록 해제" title="등록 해제 — SW개발1팀으로만 배정된 사람의 배정도 끝남 (직접 배정한 사람은 유지)">−</button></span></div>
+              <div class="ar-diff">조직 전체 · 헤드 이도윤 · 새로 들어오는 사람도 배정</div>
+              <ul class="sub"><li><i class="av">도윤</i><span class="n">이도윤</span><span class="chip s-doing">진행 중</span></li><li><i class="av">지우</i><span class="n">최지우</span><span class="chip s-rev">검토 중</span></li>
+                <li><i class="av">민준</i><span class="n">정민준</span><span class="chip s-todo">할 일</span></li><li><i class="av">예린</i><span class="n">강예린</span><span class="chip s-todo">할 일</span></li></ul></li>
+            <li class="arow grp float"><div class="ar-main"><span class="ar-name"><span class="chip org gone" title="삭제된 조직 — 이름만 남아 있습니다">🏢 플랫폼팀</span><span class="chip dtag">삭제된 조직</span></span>
+                <span class="ar-st"><button type="button" class="fold" data-x="fold" aria-expanded="true">2명 ▾</button><button type="button" class="rmb" aria-label="플랫폼팀 등록 해제" title="등록 해제 — 이 등록으로만 배정된 2명의 배정도 끝남 (직접 배정한 사람은 유지)">−</button></span></div>
+              <div class="ar-diff"><span class="w">11-12 삭제 — 더는 따라가지 않습니다.</span> 이미 받은 배정은 그대로입니다.</div>
+              <ul class="sub"><li><i class="av">태호</i><span class="n">윤태호</span><span class="chip s-doing">진행 중</span></li><li><i class="av">서준</i><span class="n">백서준</span><span class="chip s-doing">진행 중</span></li></ul>
+              <div class="atb"><button type="button" class="btn mini primary" title="피커가 열립니다. 적용하면 새 대상 배정과 이 등록 해제를 한 번에 보냅니다">대상 바꾸기…</button></div></li>
+            <li class="arow"><div class="ar-main"><i class="av">세진</i><span class="ar-name">오세진</span><span class="ar-st"><span class="chip s-todo">할 일</span><button type="button" class="rmb" aria-label="오세진 배정 해제" title="배정 해제">−</button></span></div>
+              <div class="ar-diff">개인 배정</div></li>
+          </ul>
+        </section>
+
+        <!-- CC: same three kinds -->
+        <section class="ias" aria-label="참조">
+          <h3>참조 <span class="cnt">6</span><span class="chip flt" title="삭제된 조직을 가리키는 등록 1개">삭제된 조직 1</span><span class="grow"></span><button type="button" class="ia" aria-label="참조에 추가" title="참조에 추가">＋</button></h3>
+          <ul class="alist">
+            <li class="arow grp shut"><div class="ar-main"><span class="ar-name"><span class="chip org">🏢 SW개발2팀</span></span>
+                <span class="ar-st"><button type="button" class="fold" data-x="fold" aria-expanded="false">2명 ▸</button><button type="button" class="rmb" aria-label="SW개발2팀 참조 해제" title="참조 해제 — SW개발2팀으로만 참조된 사람도 빠짐 (직접 참조한 사람은 유지)">−</button></span></div>
+              <div class="ar-diff">조직 전체 · 새로 들어오는 사람도 참조</div>
+              <ul class="sub"><li><i class="av">서연</i><span class="n">박서연</span></li><li><i class="av">태호</i><span class="n">윤태호</span></li></ul></li>
+            <li class="arow grp shut float"><div class="ar-main"><span class="ar-name"><span class="chip org gone" title="삭제된 조직 — 이름만 남아 있습니다">🏢 플랫폼팀</span><span class="chip dtag">삭제된 조직</span></span>
+                <span class="ar-st"><button type="button" class="fold" data-x="fold" aria-expanded="false">3명 ▸</button><button type="button" class="rmb" aria-label="플랫폼팀 참조 해제" title="등록 해제 — 이 등록으로만 참조된 사람도 빠짐 (윤태호는 SW개발2팀으로도 참조되어 남음)">−</button></span></div>
+              <div class="ar-diff"><span class="w">11-12 삭제 — 더는 따라가지 않습니다.</span> 이미 참조된 3명은 그대로입니다.</div>
+              <ul class="sub"><li><i class="av">태호</i><span class="n">윤태호</span></li><li><i class="av">서준</i><span class="n">백서준</span></li><li><i class="av">하준</i><span class="n">문하준</span></li></ul>
+              <div class="atb"><button type="button" class="btn mini primary" title="피커가 열립니다. 적용하면 새 대상 참조와 이 등록 해제를 한 번에 보냅니다">대상 바꾸기…</button></div></li>
+            <li class="arow"><div class="ar-main"><i class="av">수아</i><span class="ar-name">한수아</span><span class="ar-st"><button type="button" class="rmb" aria-label="한수아 참조 해제" title="참조 해제">−</button></span></div>
+              <div class="ar-diff">개인 참조</div></li>
+          </ul>
+        </section>
+      </div>
+    </div>
+  </div>
+  <ul class="legend">
+    <li><b>등록 세 종류</b>: 조직 <span class="chip org">🏢 SW개발1팀</span> ("N명 ▸"로 받은 사람 펼침, 조직을 따라감) · 삭제된 조직 <span class="chip org gone">🏢 플랫폼팀</span><span class="chip dtag">삭제된 조직</span> (점선 회색 + 주황 띠) · 개인 (사람 아바타, 상태 칩).</li>
+    <li><b>삭제된 조직 등록</b>: 업무에 이름 그대로 남고 더는 조직을 따라가지 않습니다 (새 멤버 배정·참조 없음). 이미 받은 배정·참조는 하나도 회수하지 않습니다. 카드 제목의 <span class="chip flt">삭제된 조직 1</span>과 업무의 <span class="chip flt">정리 필요</span>로 "떠 있는" 업무임을 알립니다.</li>
+    <li><b>−</b> (조직 등록, 살아 있든 삭제됐든): 등록과 함께 그 등록으로만 들어온 사람도 빠집니다 — 배정은 <code>item.unassign {rule}</code>로 그 규칙의 배정이 끝나고, 참조는 <code>item.uncc_org</code>가 그 등록이 추가한 사람만 뺍니다 (윤태호는 SW개발2팀으로도 참조되어 남음). 직접 추가한 사람은 그대로입니다.</li>
+    <li><b>대상 바꾸기…</b>: 피커에서 새 대상을 고르면, 새 대상 등록과 이 등록 해제를 한 번에 보냅니다 — 새 대상에 드는 사람은 남고 나머지는 빠집니다. 어느 쪽이든 ①의 "업무 N건"에서 빠집니다.</li>
+  </ul>
+</div>
+
+<script>
+// Mockup-only: org model + badge drag / head select, re-rendering badges, nearest-org text, the org section and the staged list.
+(function () {
+  var R = document.querySelector('.tkoo'), M = {}, renaming = '', err = null, drag = null, cur = null, curOk = false;
+  var T = '끌어서 멤버 위에 놓으면 그 멤버가 헤드가 됩니다', ARR = '<span class="arr">→</span>';
+  // n0/h0 = saved name/head; n/h = staged; st: '' | 'new' | 'del'
+  var O = { 'o-k7m2': { n0: 'SW개발실', h0: 'kim-hn' }, 'o-p3x9': { n0: 'SW개발1팀', h0: 'lee-dy' }, 'o-r8d4': { n0: 'SW개발2팀', h0: 'park-sy' },
+    'o-t5n1': { n0: '릴리스TF', h0: 'oh-sj', st: 'del', r: 2 }, 'o-w2c6': { n0: 'QA팀', h0: '', st: 'new' } };
+  Object.keys(O).forEach(function (k) { var o = O[k]; o.n = o.n0; o.h = o.h0; o.st = o.st || ''; });
+  R.querySelectorAll('li[data-id]').forEach(function (li) { M[li.dataset.id] = li; });
+  var fixed = R.querySelector('.chg [data-fixed]').outerHTML;
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); }
+  function nm(id) { return id ? M[id].dataset.nm : '공석'; }
+  function up(li) { return li.parentElement.closest('li[data-id]'); }
+  function size(id) { return M[id].querySelectorAll('li[data-id]').length + 1; }
+  function headOf(id, skip) { for (var k in O) if (k !== skip && O[k].st !== 'del' && O[k].h === id) return k; return ''; }
+  function changed(k) { var o = O[k]; return !!(o.st || o.n !== o.n0 || o.h !== o.h0); }
+  function badge(k, cls) {
+    return '<span class="chip org' + cls + '"' + (cls.indexOf('del') < 0 ? ' draggable="true" data-org="' + k + '" title="' + T + '"' : ' title="삭제 예정"') + '>🏢 ' + esc(O[k].n) + '</span>';
+  }
+  function opts(k) {
+    var h = '<option value=""' + (O[k].h ? '' : ' selected') + '>— 공석 (헤드 없음)</option>';
+    Object.keys(M).forEach(function (id) {
+      var other = headOf(id, k);
+      h += '<option value="' + id + '"' + (O[k].h === id ? ' selected' : '') + (other ? ' disabled' : '') + '>' + id + ' ' + nm(id) + (other ? ' (🏢 ' + esc(O[other].n) + ' 헤드)' : '') + '</option>';
+    });
+    return h;
+  }
+  function errHtml(k) { return err && err.k === k ? '<span class="refuse" role="alert">' + err.t + '</span>' : ''; }
+
+  function drawTree() {
+    Object.keys(M).forEach(function (id) {
+      var row = M[id].firstElementChild, b = '', own = headOf(id), near = '', x;
+      for (var k in O) {
+        if (O[k].st !== 'del' && O[k].h === id) b += badge(k, changed(k) ? ' pend' : '');
+        else if (O[k].st === 'del' && O[k].h0 === id) b += badge(k, ' del');
+      }
+      row.querySelector('.bdg').innerHTML = b;
+      for (x = M[id]; x && !near; x = up(x)) near = headOf(x.dataset.id);
+      row.querySelector('.o').innerHTML = (own ? '' : (near ? esc(O[near].n) : '<i>조직 없음</i>') + ' · ') + '<code>' + id + '</code>';
+    });
+  }
+  function ogRow(k) {
+    var o = O[k], del = o.st === 'del', vac = !del && !o.h;
+    return '<li class="og' + (del ? ' del' : vac ? ' vac' : '') + '" data-k="' + k + '"><span class="nmc">' +
+      (renaming === k ? '<input class="rn" value="' + esc(o.n) + '" aria-label="조직 이름">' : badge(k, del ? ' del' : changed(k) ? ' pend' : '')) +
+      (o.st === 'new' ? '<span class="chip new">새</span>' : '') + (vac ? '<span class="chip vac">공석</span>' : '') +
+      '<code>' + k + '</code></span><span class="cnt">' + (!del && o.h ? size(o.h) + '명' : '—') + '</span>' +
+      '<label class="hs">헤드 <select data-k="' + k + '" aria-label="' + esc(o.n) + ' 헤드"' + (del ? ' disabled' : '') + '>' + opts(k) + '</select></label><span class="acts">' +
+      (del ? '<button type="button" class="btn mini" data-a="undo" data-k="' + k + '">↶ 삭제 취소</button>'
+           : '<button type="button" class="btn mini" data-a="ren" data-k="' + k + '">이름 바꾸기</button><button type="button" class="btn mini dng" data-a="del" data-k="' + k + '">삭제</button>') +
+      '</span>' + (del && o.r ? '<span class="vh">업무 ' + o.r + '건이 이 조직을 가리킵니다 — 저장하면 "삭제된 조직"으로 남고 따라가기를 멈춥니다</span>' : '') + (vac ? '<span class="vh">공석 — 참조·배정 목록에서 이 조직은 비활성입니다. 배지를 멤버 위에 끌어 놓거나 헤드를 고르세요.</span>' : '') + errHtml(k) + '</li>';
+  }
+  function chgItem(k) {
+    var o = O[k], ty, d = [];
+    if (o.st === 'new') { ty = '<span class="ty add">조직 생성</span>'; d = [esc(o.n) + ' <code>' + k + '</code>', '헤드: ' + (o.h ? nm(o.h) + ' <code>' + o.h + '</code>' : '<span class="hint">공석</span>')]; }
+    else if (o.st === 'del') { ty = '<span class="ty rm">조직 삭제</span>'; d = [esc(o.n0) + ' <code>' + k + '</code>', '<span class="hint">헤드였던 ' + nm(o.h0) + ' 이하는 가장 가까운 상위 조직으로</span>']; }
+    else {
+      ty = '<span class="ty org">조직 변경</span>';
+      if (o.n !== o.n0) d.push('이름: ' + esc(o.n0) + ARR + esc(o.n));
+      if (o.h !== o.h0) d.push((o.n === o.n0 ? esc(o.n) + ' ' : '') + '헤드: ' + nm(o.h0) + ARR + nm(o.h));
+    }
+    return '<li>' + ty + '<button type="button" class="undo" data-a="undo" data-k="' + k + '" title="이 변경 되돌리기">↶ 되돌리기</button><span class="d">' + d.join('<br>') + '</span>' + errHtml(k) + '</li>';
+  }
+  function draw() {
+    var ks = Object.keys(O), ch = ks.filter(changed), n = 1 + ch.length;
+    drawTree();
+    R.querySelector('.ogs').innerHTML = ks.map(ogRow).join('');
+    R.querySelector('.chg').innerHTML = fixed + ch.map(chgItem).join('');
+    R.querySelectorAll('.nN').forEach(function (e) { e.textContent = n; });
+    R.querySelector('.nO').textContent = ks.length;
+  }
+  function clearFrozen() {
+    R.querySelectorAll('.frozen').forEach(function (e) { e.remove(); });
+    R.querySelectorAll('.bad,.drag').forEach(function (e) { e.classList.remove('bad', 'drag'); });
+  }
+  function clear() {
+    R.querySelectorAll('.row.ok,.row.bad').forEach(function (e) { e.classList.remove('ok', 'bad'); });
+    R.querySelectorAll('.refuse.live').forEach(function (e) { e.remove(); });
+  }
+  function end() { clear(); R.querySelectorAll('.drag').forEach(function (e) { e.classList.remove('drag'); }); drag = cur = null; curOk = false; }
+  function setHead(k, id) {
+    err = null;
+    if (id && headOf(id, k)) return draw(); // a member heads at most one org
+    O[k].h = id; draw();
+  }
+  function undo(k) {
+    var o = O[k], other = o.h0 && headOf(o.h0, k); err = null;
+    if (o.st === 'new') delete O[k];
+    else if (other) err = { k: k, t: '되돌릴 수 없음 — ' + nm(o.h0) + '님은 지금 🏢 ' + esc(O[other].n) + '의 헤드입니다. 그 조직의 헤드를 먼저 바꾸세요.' };
+    else { o.n = o.n0; o.h = o.h0; o.st = ''; }
+    draw();
+  }
+  function commit(i) { var k = renaming, v = i.value.trim(); if (!k) return; renaming = ''; if (v && O[k]) O[k].n = v; draw(); }
+
+  // drag: an org badge (head reassignment) or a whole row (lead change, highlight only as in .tkoe)
+  R.addEventListener('dragstart', function (e) {
+    clearFrozen(); clear();
+    var c = e.target.closest && e.target.closest('.chip.org[draggable=true]'), li;
+    if (c) { drag = { k: c.dataset.org }; c.classList.add('drag'); }
+    else if ((li = e.target.closest && e.target.closest('li[data-id]'))) { drag = { id: li.dataset.id }; li.firstElementChild.classList.add('drag'); }
+    else return;
+    e.dataTransfer.setData('text/plain', drag.k || drag.id); e.dataTransfer.effectAllowed = 'move';
+  });
+  R.addEventListener('dragover', function (e) {
+    if (!drag) return;
+    var row = e.target.closest('.row'), t, other;
+    if (row && row === cur) { if (curOk) e.preventDefault(); return; }
+    clear(); cur = row; curOk = false;
+    if (!row) return;
+    t = row.parentNode.dataset.id;
+    if (drag.k) {
+      if (O[drag.k].h === t) return; // already the head: neutral
+      if ((other = headOf(t, drag.k))) {
+        row.classList.add('bad');
+        row.insertAdjacentHTML('afterend', '<div class="refuse live" role="alert">놓을 수 없음 — <b>한 사람은 조직 하나만</b> 맡습니다. ' + nm(t) + '(' + t + ')님은 이미 🏢 ' + esc(O[other].n) + '의 헤드입니다. 먼저 그 조직의 헤드를 바꾸거나 비우세요.</div>');
+        return; // no preventDefault: the drop is refused
+      }
+    } else { for (var x = M[t]; x; x = up(x)) if (x.dataset.id === drag.id) { row.classList.add('bad'); return; } }
+    row.classList.add('ok'); curOk = true; e.preventDefault();
+  });
+  R.addEventListener('drop', function (e) {
+    e.preventDefault();
+    var k = drag && drag.k, t = curOk && cur && cur.parentNode.dataset.id;
+    end(); if (k && t) setHead(k, t); // lead drops are a no-op in this mockup
+  });
+  R.addEventListener('dragend', end);
+
+  R.addEventListener('click', function (e) {
+    var b = e.target.closest('button'), a, k; if (!b) return;
+    if (b.classList.contains('tg')) { b.closest('li').classList.toggle('shut'); return; }
+    a = b.dataset.a; k = b.dataset.k; if (!a) return;
+    clearFrozen(); err = null;
+    if (a === 'exp') R.querySelectorAll('li.shut').forEach(function (li) { li.classList.remove('shut'); });
+    else if (a === 'new') {
+      k = 'o-' + Math.random().toString(36).slice(2, 6);
+      O[k] = { n0: '새 조직', h0: '', n: '새 조직', h: '', st: 'new' }; renaming = k; draw();
+      R.querySelector('.rn').select(); R.querySelector('.rn').focus();
+    }
+    else if (a === 'ren') { renaming = k; draw(); R.querySelector('.rn').select(); R.querySelector('.rn').focus(); }
+    else if (a === 'del') { if (O[k].st === 'new') delete O[k]; else O[k].st = 'del'; draw(); }
+    else if (a === 'undo') undo(k);
+    else if (a === 'all') { Object.keys(O).forEach(function (q) { var o = O[q]; if (o.st === 'new') delete O[q]; else { o.n = o.n0; o.h = o.h0; o.st = ''; } }); draw(); }
+  });
+  R.addEventListener('change', function (e) { var s = e.target; if (s.matches('select[data-k]')) { clearFrozen(); setHead(s.dataset.k, s.value); } });
+  R.addEventListener('keydown', function (e) {
+    if (!e.target.classList.contains('rn')) return;
+    if (e.key === 'Enter') commit(e.target); else if (e.key === 'Escape') { renaming = ''; draw(); }
+  });
+  R.addEventListener('focusout', function (e) { if (e.target.classList.contains('rn')) commit(e.target); });
+
+  draw(); // fills the full head option lists; the frozen refusal stays until the first interaction
+  R.querySelector('.og[data-k="o-w2c6"] .chip.org').classList.add('drag');
+})();
+
+// v2 mockup-only: deleted-org "업무 N건" lists, item-window group folds, a reference opening frame ②.
+(function () {
+  var R = document.querySelector('.tkoo');
+  R.addEventListener('click', function (e) {
+    var t = e.target.closest('[data-x]'), li, w;
+    if (!t) return;
+    if (t.dataset.x === 'refs') { li = t.closest('.og'); li.classList.toggle('open'); t.setAttribute('aria-expanded', li.classList.contains('open')); }
+    else if (t.dataset.x === 'fold') {
+      li = t.closest('.grp'); li.classList.toggle('shut');
+      var open = !li.classList.contains('shut');
+      t.setAttribute('aria-expanded', open); t.textContent = t.textContent.replace(/[▸▾]/, open ? '▾' : '▸');
+    } else if (t.dataset.x === 'open') {
+      e.preventDefault(); w = R.querySelector('#iw-demo');
+      w.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      w.classList.remove('flash'); void w.offsetWidth; w.classList.add('flash');
+    }
+  });
+})();
+</script>

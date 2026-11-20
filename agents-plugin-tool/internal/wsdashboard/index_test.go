@@ -276,13 +276,14 @@ func TestPruneRegistrationsAgesClosedSpawnedChildrenByTheirRow(t *testing.T) {
 	session("childold", `{`+child+`,"closed_at":"2026-10-01T00:00:00Z"}`, old, true)
 	session("childrecent", `{`+child+`,"closed_at":"2026-11-06T11:00:00Z"}`, recent, true)
 	session("childopen", `{`+child+`}`, old, false)
+	session("childheld", `{`+child+`,"holder_id":"h1","handed_off_at":"2026-10-01T00:00:00Z"}`, old, false)
 	session("claudechild", `{"backend":"claude","parent":{"kind":"lead","reply_id":"someleadid"},"closed_at":"2026-10-01T00:00:00Z"}`, old, true)
 	session("pinoparent", `{"backend":"pi","closed_at":"2026-10-01T00:00:00Z"}`, old, true)
 
 	if n := PruneRegistrations(dir, testNow, RegistryRetention); n != 2 {
 		t.Errorf("pruned %d, want 2", n)
 	}
-	for id, want := range map[string]bool{"childold": false, "childrecent": true, "childopen": true, "claudechild": false, "pinoparent": true} {
+	for id, want := range map[string]bool{"childold": false, "childrecent": true, "childopen": true, "childheld": true, "claudechild": false, "pinoparent": true} {
 		_, err := os.Stat(SessionDir(dir, id))
 		if exists := err == nil; exists != want {
 			t.Errorf("%s exists = %v, want %v", id, exists, want)

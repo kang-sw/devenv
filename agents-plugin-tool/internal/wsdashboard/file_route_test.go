@@ -132,7 +132,7 @@ func TestFileViewKinds(t *testing.T) {
 	writeFile(t, filepath.Join(f.project, "page.html"), "<script>alert(1)</script><b>x</b>")
 	writeFile(t, filepath.Join(f.project, "docs", "guide", "a.md"), "# Guide\n\n<script>alert(1)</script> and <b>bold</b>\n\n"+
 		"[sibling](b.md) [up](../top.md) [abs](/etc/hosts) [web](https://example.com/) ![pic](pic.png) ![outpic](/elsewhere/out.png)\n\n"+
-		"```mermaid\ngraph TD; A-->B\n```\n")
+		"```mermaid\ngraph TD; A-->B\n```\n\n```diff\n--- a/file\n+++ b/file\n-old\n+new\n```\n")
 	writeFile(t, filepath.Join(f.project, "blob.bin"), "BIN\x00\x01\x02")
 	writeFile(t, filepath.Join(f.project, "huge.txt"), strings.Repeat("x", fileViewMax+1))
 
@@ -168,6 +168,9 @@ func TestFileViewKinds(t *testing.T) {
 		`<a href="https://example.com/" target="_blank" rel="noopener noreferrer" data-wl="url">web</a>`,
 		`<img src="/s/livesession/image?path=docs%2Fguide%2Fpic.png" alt="pic">`,
 		`<code class="language-mermaid">`,
+		`<code class="language-diff"><span class="wb-diff-file">--- a/file`,
+		`<span class="wb-diff-remove">-old`,
+		`<span class="wb-diff-add">+new`,
 		`<code class="fpath">docs/guide/a.md</code>`,
 	}
 	for _, want := range wantAll {

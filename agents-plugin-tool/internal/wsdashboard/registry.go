@@ -434,6 +434,7 @@ type agentRecordEnd struct {
 	Lead        bool   `json:"lead"`
 	ClosedAt    string `json:"closed_at"`
 	HandedOffAt string `json:"handed_off_at"`
+	HolderID    string `json:"holder_id"`
 	Backend     string `json:"backend"`
 	SessionFile string `json:"session_file"`
 	Parent      *struct {
@@ -461,7 +462,7 @@ func (r agentRecordEnd) terminalConversation(sessionDir string) bool {
 // handed to a terminal), or a closed spawned child (a closed Pi child only
 // a Send reopens on the session file this directory holds).
 func (r agentRecordEnd) retired() bool {
-	return (r.Lead || r.Parent != nil) && (r.ClosedAt != "" || r.HandedOffAt != "")
+	return (r.Lead || r.Parent != nil) && (r.ClosedAt != "" || (r.HandedOffAt != "" && !HeldAgentWorker(r.Lead, r.HolderID, r.HandedOffAt)))
 }
 
 // piChildDeleted is a presentation-only revival check for an already settled
@@ -493,4 +494,10 @@ func readAgentRecordEnd(sessionDir string) (record agentRecordEnd, hosted bool) 
 		return agentRecordEnd{}, true
 	}
 	return record, true
+}
+
+// HeldAgentWorker distinguishes a live worker's downgrade fence from a lead
+// handed to a terminal. Shared by registry retention and runner projections.
+func HeldAgentWorker(lead bool, holderID, handedOffAt string) bool {
+	return !lead && holderID != "" && handedOffAt != ""
 }

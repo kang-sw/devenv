@@ -205,10 +205,13 @@ type conv struct {
 	mcpRestarted map[string]bool
 	// mcpStale is a rejoined process whose ws-mcp route (Record.MCPURL)
 	// this daemon does not serve; it restarts at the first idle point.
-	mcpStale      bool
-	mcpChecking   bool
-	mcpAgain      bool
-	mcpAgainNames []string
+	mcpStale bool
+	// Backend-filtered hello environment captured at attach, before token restore.
+	workerMCPEnv   []string
+	workerRetiring bool // validated downgrade retirement retries before replay
+	mcpChecking    bool
+	mcpAgain       bool
+	mcpAgainNames  []string
 	// retry is the API request retry under way; alerted that the running
 	// turn brought a typed failure, so its end clears none.
 	retry   *wslive.Retry
@@ -718,7 +721,7 @@ func (c *conv) stateWithKeyCheck(checkKey bool) State {
 	}
 	if c.closed {
 		st.Status, st.ClosedAt = StatusClosed, c.rec.ClosedAt
-		if c.rec.ClosedAt == "" && c.rec.HandedOffAt != "" {
+		if c.rec.ClosedAt == "" && c.rec.handedOff() {
 			st.Status, st.HandedOffAt = StatusHandedOff, c.rec.HandedOffAt
 			st.ResumeCommand = resumeCommand(c.rec, c.dir)
 		}
@@ -1107,7 +1110,7 @@ func (c *conv) applyMode(ev wslive.Event, quiet, coalesceTurnEnd bool) {
 // goes alone once nothing is queued.
 func (c *conv) canKick() bool {
 	return !c.closed && !c.hidden && !c.turn && !c.replaying && len(c.steered) == 0 && c.leverC == nil &&
-		!(c.rec.Backend == BackendPi && c.r.opts.Holders != nil && !c.r.scanDone())
+		!(c.r.opts.Holders != nil && !c.r.scanDone())
 }
 
 func (c *conv) kick() {

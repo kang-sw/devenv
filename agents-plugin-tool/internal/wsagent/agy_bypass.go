@@ -16,13 +16,14 @@ func (rec Record) agyBypass() bool {
 	return rec.Lead && rec.Backend == BackendAgy && rec.AgyBypass && rec.PermissionMode == "default"
 }
 
-// allowAgyBypassPending also covers an old daemon's unanswered prompts replayed
+// allowAgyBypassPending serves bypass leads and auto-approving workers,
+// including an old daemon's unanswered prompts replayed
 // by a new daemon. addApproval already discarded ids durably answered before.
 // A rejoin answers them at its end (replayDone), not while it replays. A
 // prompt the process could not answer stays for the user; a failed write
 // stopped the process, so nothing is left to answer.
 func (c *conv) allowAgyBypassPending() {
-	if !c.rec.agyBypass() || c.replaying {
+	if c.replaying || !(c.rec.agyBypass() || !c.rec.Lead && c.r.opts.Backends[c.rec.Backend].WorkerAutoApprove) {
 		return
 	}
 	answerer := controlsFor(c.proc).approval

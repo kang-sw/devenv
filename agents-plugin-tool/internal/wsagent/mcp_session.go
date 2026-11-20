@@ -18,10 +18,9 @@ import (
 //   - Token. Each process start draws a per-session token; a new start
 //     voids the one the conversation's last process had, and the token is
 //     void once the process ends or the conversation closes (revokeToken).
-//     A held lead's token is persisted in its record (Record.MCPToken),
+//     A held process's token is persisted in its record (Record.MCPToken),
 //     with the hello's ws-mcp environment and the holder it was drawn for,
-//     and restored when a later daemon rejoins the process; a worker is
-//     never held, so its token lives in memory only.
+//     and restored when a later daemon rejoins the process. Worker restoration follows holder ownership validation.
 //   - Context. The token resolves to the hello the stdio launcher would
 //     have sent from the same harness (mcpHello): the harness's own
 //     environment, the ws-mcp entry's environment (the tool allowlist, the

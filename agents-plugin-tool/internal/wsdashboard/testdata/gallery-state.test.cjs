@@ -211,9 +211,10 @@ test('movePage reorders and keeps the shown page', () => {
   assert.equal(G.position(g, false), 2);
 });
 
-test('neighbors: edges are false, inert narrow without pages is null', () => {
+test('neighbors: edges are false, inert without pages in both views', () => {
   const none = G.empty(), one = G.dock(none, 'c:a');
   assert.deepEqual(G.neighbors(none, -1, true), { prev: null, next: null });
+  assert.deepEqual(G.neighbors(none, 0, false), { prev: null, next: null });
   assert.deepEqual(G.neighbors(one, -1, true), { prev: false, next: true });
   assert.deepEqual(G.neighbors(one, 0, true), { prev: true, next: true });
   assert.deepEqual(G.neighbors(one, 1, true), { prev: true, next: false });
@@ -224,17 +225,18 @@ test('neighbors: edges are false, inert narrow without pages is null', () => {
 test('layout mode mapping: tabs, below 1600, 1600-2199, from 2200', () => {
   const L = o => G.layout(Object.assign({ tabs: false, pages: 0, dragging: false }, o));
   // tabs is narrow at any width
-  assert.deepEqual(L({ width: 3000, tabs: true, pages: 2 }), { narrow: true, column: false, overlay: false, rail: true });
+  assert.deepEqual(L({ width: 3000, tabs: true, pages: 2 }), { narrow: true, column: false, overlay: false, rail: true, empty: false });
+  assert.deepEqual(L({ width: 3000, tabs: true }), { narrow: true, column: false, overlay: false, rail: false, empty: false });
   // below 1600 is narrow; its rail hides with no pages unless a drag runs
-  assert.deepEqual(L({ width: 1599 }), { narrow: true, column: false, overlay: false, rail: false });
-  assert.deepEqual(L({ width: 1200, dragging: true }), { narrow: true, column: false, overlay: false, rail: true });
+  assert.deepEqual(L({ width: 1599 }), { narrow: true, column: false, overlay: false, rail: false, empty: false });
+  assert.deepEqual(L({ width: 1200, dragging: true }), { narrow: true, column: false, overlay: false, rail: true, empty: false });
   // 1600-2199: a docked page shows the column and the session rail overlays
-  assert.deepEqual(L({ width: 1600, pages: 1 }), { narrow: false, column: true, overlay: true, rail: true });
-  assert.deepEqual(L({ width: 2199, pages: 1 }), { narrow: false, column: true, overlay: true, rail: true });
-  assert.deepEqual(L({ width: 1800 }), { narrow: false, column: false, overlay: false, rail: false });
-  // from 2200: no reserved empty column; the rail docks beside a gallery
-  assert.deepEqual(L({ width: 2200 }), { narrow: false, column: false, overlay: false, rail: false });
-  assert.deepEqual(L({ width: 2400, pages: 1 }), { narrow: false, column: true, overlay: false, rail: true });
+  assert.deepEqual(L({ width: 1600, pages: 1 }), { narrow: false, column: true, overlay: true, rail: true, empty: false });
+  assert.deepEqual(L({ width: 2199, pages: 1 }), { narrow: false, column: true, overlay: true, rail: true, empty: false });
+  assert.deepEqual(L({ width: 1800 }), { narrow: false, column: false, overlay: false, rail: false, empty: false });
+  // from 2200: empty slot placeholder at rest with 0 pages; the rail docks beside a gallery
+  assert.deepEqual(L({ width: 2200 }), { narrow: false, column: false, overlay: false, rail: false, empty: true });
+  assert.deepEqual(L({ width: 2400, pages: 1 }), { narrow: false, column: true, overlay: false, rail: true, empty: false });
   // a drag opens the column with zero pages so + can take a first dock
-  assert.deepEqual(L({ width: 2400, dragging: true }), { narrow: false, column: true, overlay: false, rail: true });
+  assert.deepEqual(L({ width: 2400, dragging: true }), { narrow: false, column: true, overlay: false, rail: true, empty: false });
 });

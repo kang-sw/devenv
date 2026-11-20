@@ -418,6 +418,13 @@ in this session; these pointers are not an exhaustive rationale-index result.
 Owner directive: medium is now `gemini-4-neon`/`high` and large is
 `gemini-4-neon`/`xhigh`; small and xlarge remain unchanged.
 
+#### Edition (bf037d642) - 2026-11-20
+
+Decision (151)'s daemon-owned agy-worker shape and its in-memory-only token
+assumption are superseded by `261120-refactor-ws-agent-workers-under-holders`.
+Remaining work in this ticket must preserve the holder-backed worker lifecycle
+and must not follow the daemon-owned restart or token shape.
+
 ### Phase 3: Custom-agent path for the agy worker behind a knob
 
 - A config knob selects the agy worker's agent: the default agent (default)
