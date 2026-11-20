@@ -598,6 +598,9 @@
     "261120-bug-ws-agent-dogfood-delivery-context": {
       "registered_at": "2026-11-20T12:21:26Z"
     },
+    "261120-feat-ws-agy-usage-activity-trigger": {
+      "registered_at": "2026-11-20T12:38:30Z"
+    },
     "261120-feat-ws-dashboard-composer-controls-and-context-meter": {
       "registered_at": "2026-11-20T11:46:21Z"
     },
