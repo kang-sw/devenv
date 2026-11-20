@@ -29,11 +29,9 @@ owns the operation.
 - **VERIFIED:** `agent.spawn` anchors a child to the caller root unless the
   spawn request names a worktree; the selected root, cwd, and minted ws key are
   persisted in the child record
-  (`agents-plugin-tool/internal/wsagent/agent_tools.go:80`,
-  `agents-plugin-tool/internal/wsagent/agent_tools.go:620`,
-  `agents-plugin-tool/internal/wsagent/agent_tools.go:645`,
-  `agents-plugin-tool/internal/wsagent/runner.go:866`,
-  `agents-plugin-tool/internal/wsagent/runner.go:927`).
+  (`agents-plugin-tool/internal/wsagent/agent_tools.go#L620-L658`,
+  `agents-plugin-tool/internal/wsagent/runner.go#L907-L935`,
+  `agents-plugin-tool/internal/wsagent/spawn.go#L103-L121`).
 - **VERIFIED:** process startup revalidates the saved key against that root,
   and the child prompt requires that key on every ws call
   (`agents-plugin-tool/internal/wsagent/runner_process.go:94`,
@@ -68,9 +66,10 @@ owns the operation.
   is a named mailbox, whereas a reply id enters the direct reply queue
   (`agents-plugin-tool/internal/mcp/mailbox_tools.go:68`).
 - **VERIFIED:** current `develop` injects the direct parent's reply id into
-  every child prompt and tests both direct and nested parent routing
-  (`agents-plugin-tool/internal/wsagent/runner_process.go:796`,
-  `agents-plugin-tool/internal/wsagent/agent_tools_test.go:763`). This landed in
+  every spawned child's prompt when its profile has ws tools, and the prompt
+  test covers both direct and nested parent addresses
+  (`agents-plugin-tool/internal/wsagent/runner_process.go#L796-L824`,
+  `agents-plugin-tool/internal/wsagent/agent_tools_test.go#L763-L781`). This landed in
   `f9332e85c` under
   `261120-bug-ws-agent-dogfood-delivery-context`
   (`ai-docs/tickets/.done/261120-bug-ws-agent-dogfood-delivery-context.md:409`).
@@ -86,22 +85,24 @@ owns the operation.
 
 ### 3. A fully merged implementation branch is reused as if active
 
-- **VERIFIED:** on `develop`, `git.resolve_impl_branch` resolves
+- **VERIFIED:** at the diagnosis ref `596109dbe`,
+  `git.resolve_impl_branch` resolves
   `261115-feat-ws-permission-profile` to
   `impl/develop/foyer-cause-shore`; that ref is an ancestor of `develop` and is
   `1800` commits behind with `0` commits ahead.
 - **VERIFIED:** the resolver derives and validates only the canonical branch
   name; it does not inspect existence, ancestry, or divergence
-  (`agents-plugin-tool/internal/mcp/impl_identity_tool.go:10`). Acquisition
-  checks out an existing branch without resetting it and only warns when it is
-  behind base
-  (`agents-plugin-tool/internal/mcp/worktree_tools.go:73`,
-  `agents-plugin-tool/internal/mcp/worktree_tools.go:530`).
-- **VERIFIED:** route observation records commits ahead of the merge root but
-  not commits behind it
-  (`agents-plugin-tool/internal/mcp/implement_resolver.go:130`,
-  `agents-plugin-tool/internal/mcp/implement_resolver.go:470`,
-  `agents-plugin-tool/internal/mcp/implement_resolver.go:507`). An exact
+  (`agents-plugin-tool/internal/mcp/impl_identity_tool.go#L10-L39`). Acquisition
+  checks out an existing branch without resetting it; a known existing target
+  behind base emits a warning and is not reset, while fact-read failures also
+  emit warnings
+  (`agents-plugin-tool/internal/mcp/worktree_tools.go#L73-L107`,
+  `agents-plugin-tool/internal/mcp/worktree_tools.go#L530-L567`).
+- **VERIFIED:** route observation measures current and leftover-target commits
+  ahead of their merge root while retaining upstream `Ahead`/`Behind` fields;
+  it does not record a merge-root-specific behind count
+  (`agents-plugin-tool/internal/mcp/implement_resolver.go#L130-L145`,
+  `agents-plugin-tool/internal/mcp/implement_resolver.go#L507-L543`). An exact
   canonical-target match returns `continue` unconditionally
   (`agents-plugin-tool/internal/mcp/implement_resolver.go:931`). The separate
   create path already distinguishes an empty leftover branch from one carrying
@@ -183,20 +184,23 @@ owns the operation.
   `agents-plugin-pi/src/write-scopes.ts:180`). The common daemon-agent adapter
   explicitly states that legacy write scopes are not `agent.spawn` arguments
   (`agents-plugin-pi/src/daemon-agent-compat.ts:17`).
-- **VERIFIED:** hosted leads do not wait on mailbox polling. The daemon claims
-  queued direct replies and injects them as user turns
-  (`agents-plugin-tool/internal/mcp/lead_mail.go:18`,
-  `agents-plugin-tool/internal/mcp/lead_mail.go:154`,
+- **VERIFIED:** hosted lead processes do not call `mailbox.recv` or poll for
+  mail themselves; the daemon's `LeadMailbox` watches and claims queued direct
+  replies, then injects them as user turns
+  (`agents-plugin-tool/internal/mcp/lead_mail.go#L18-L23`,
+  `agents-plugin-tool/internal/mcp/lead_mail.go#L81-L167`,
   `agents-plugin-tool/internal/wsagent/runner_conv.go:309`). A delivered batch
   explicitly says it has already been received through `mailbox.recv`, so a
   later manual receive must not duplicate it
   (`agents-plugin-tool/internal/mcp/lead_mail.go:353`).
-- **VERIFIED:** ws persists a settled child's complete `TurnResult` in its
-  pending-report record and `ReportText` appends the final message without an
-  explicit source-side truncation cap
-  (`agents-plugin-tool/internal/wsagent/record.go:242`,
-  `agents-plugin-tool/internal/wsagent/spawn.go:307`,
-  `agents-plugin-tool/internal/wsagent/children.go:1002`).
+- **VERIFIED:** for a `ParentConversation` child, ws persists the complete
+  `TurnResult` in its pending-report record and `ReportText` appends the final
+  message without an explicit source-side truncation cap; a `ParentLead` child
+  instead reports through `Options.Report` and mailbox delivery
+  (`agents-plugin-tool/internal/wsagent/record.go#L130-L144`,
+  `agents-plugin-tool/internal/wsagent/record.go#L242-L259`,
+  `agents-plugin-tool/internal/wsagent/spawn.go#L305-L365`,
+  `agents-plugin-tool/internal/wsagent/children.go#L1001-L1020`).
 - **INFERRED:** the canary worker's truncated reports therefore do not have a
   demonstrated truncation point in this ws delivery path. The fact that all
   three findings were recovered through compact follow-ups proves that a
@@ -211,18 +215,19 @@ owns the operation.
   and worker steering, but the host-neutral reviewer artifact ownership remains
   broken. The prior ticket itself left this recheck forward
   (`ai-docs/tickets/.done/261120-bug-ws-agent-dogfood-delivery-context.md:451`).
-- **Minimal fix:** settle (1926). Prefer making the write-capable handler own
-  the generated artifact and requiring a bounded, completeness-checked
-  findings handoff from the read-only reviewer rather than assuming one final
-  report is untruncated. Test clean, ordinary non-clean, and oversized
-  multi-finding Lite runs for a complete non-empty artifact, no reviewer source
-  writes, direct-parent delivery exactly once, and no duplicate manual receive
-  after auto-claim.
-- **Compatibility:** **T0** for moving artifact persistence to the existing
-  handler and clarifying current mailbox semantics. No tool, hello, mailbox
-  record, or persisted-history shape changes.
+- **Minimal fix:** implement (1926): add the harness-neutral MCP tool
+  `path.write(path, content)`, authorize it only for a cache path that the same
+  session key previously minted through `path.generate`, and expose it through
+  `ChildSafeWSTools`. Keep the reviewer read-only with respect to the source
+  tree while allowing its daemon-side MCP call to write the detailed report to
+  the generated findings path; its final response remains only the one-line
+  status. Test clean, ordinary non-clean, oversized, unminted-path, and
+  cross-session attempts.
+- **Compatibility:** **T0.** `path.write` is an additive tool, and the playbooks
+  that call it ship embedded with the same binary. Existing tools, arguments,
+  hello data, mailbox records, and persisted-history shapes remain unchanged.
 
-### 6. The worker playbook requires tools its child profile withholds
+### 6. Worker instructions require tools their child profile withholds
 
 - **VERIFIED:** the shared Worker Protocol tells every ticket worker to call
   `workflow_manual`, while the elevated ticket-worker playbook tells it to
@@ -251,45 +256,63 @@ owns the operation.
   read-only children
   (`agents-plugin-tool/internal/wsagent/codex.go:258`,
   `agents-plugin-tool/internal/wsagent/claude.go:224`).
+- **VERIFIED:** the non-blocked `route.resolve_implement` Prep todo requires
+  `infra.read("impl-playbook")`, and `infra.read` is a read-only bundled-document
+  tool that delegate authorization permits
+  (`agents-plugin-tool/internal/mcp/session_state.go#L454-L474`,
+  `agents-plugin-tool/internal/mcp/server_schemas.go#L557-L568`,
+  `agents-plugin-tool/internal/mcp/server_dispatch.go#L1125-L1128`,
+  `agents-plugin-tool/internal/mcp/server_inventory.go#L220-L236`). It is also
+  absent from `PiMiniLeadWSTools`, `ChildSafeWSTools`, and `AgentWSTools`, so the
+  common Codex, Claude, agy, and Pi agent-worker profiles cannot satisfy that
+  emitted instruction
+  (`agents-plugin-tool/internal/wsagent/builtin.go#L111-L190`,
+  `agents-plugin-tool/internal/wsagent/builtin.go#L276-L290`).
 - **Develop verdict:** **not fixed.** The canary worker's missing tools match
   the current playbook/profile mismatch exactly.
-- **Minimal fix:** settle (1927) and (1928). Remove the impossible
-  `workflow_manual` call
+- **Minimal fix:** implement (1927), (1928), and their source-derived
+  `infra.read` consequence. Remove the impossible `workflow_manual` call
   from worker instructions and treat the rendered Worker Protocol, ticket,
-  AGENTS guidance, and declared manuals as the worker's context. Add the
-  already-authorized `config.resolve_agent` to the harness-neutral child-safe
-  and agent-worker surfaces. Regress every worker playbook's required ws tool
-  references against the effective Codex, Claude, agy, and Pi child profiles.
-- **Compatibility:** **T0.** This exposes an existing read-only tool to a role
+  AGENTS guidance, declared manuals, and route-emitted infra document as the
+  worker's context. Add the already-authorized `config.resolve_agent` and
+  `infra.read` to the harness-neutral child-safe and agent-worker surfaces.
+  Regress required ws tool references in worker playbooks and deterministic
+  route output against the effective Codex, Claude, agy, and Pi child profiles.
+- **Compatibility:** **T0.** This exposes existing read-only tools to a role
   that the server already authorizes and removes a bad instruction; it changes
   no MCP schema, argument, hello, or persisted record. `workflow_manual`
   remains excluded, so no child gains a lead-key mint path
   (`ai-docs/manuals/release-compatibility.md:73`).
 
-## Open Decision Queue
+## Decisions
 
-Last ID: (1928)
-
-- (1924) [open] [policy] Should a live child remain permanently bound to its
-  spawn root, requiring respawn for a different worktree (recommended), or
-  should ws introduce an explicit adopt/rebind lifecycle that atomically moves
-  key, root, mail, config, and process authority?
-- (1925) [open] [technical] Should stale canonical implementation branches be
-  classified and recreated during locked worktree acquisition, with route
-  resolution retaining a defensive stale-target refusal (recommended), or
-  should route resolution own all repair before acquisition?
-- (1926) [open] [technical] Should the write-capable review handler persist a
-  bounded, completeness-checked findings handoff from the read-only reviewer
-  (recommended), or should common `agent.spawn` gain a narrowly scoped
-  review-artifact write capability across every host?
-- (1927) [open] [technical] Should worker instructions stop requiring the
-  lead-key-minting `workflow_manual` and rely on the rendered Worker Protocol,
-  ticket, AGENTS guidance, and declared manuals (recommended), or should ws
-  introduce a new child-safe workflow-context tool?
-- (1928) [open] [technical] Should the child surface expose the existing
-  read-only `config.resolve_agent` that the server already authorizes for
-  delegates (recommended), or should every host's worker delegation contract
-  be redesigned to avoid separate tier resolution?
+- **(1924) Child worktree binding:** A live child stays bound to its spawn
+  root. Work in a different worktree requires a respawn, and an attempt through
+  the old path receives an actionable error. Rejected: an adopt/rebind
+  lifecycle.
+- **(1925) Stale implementation branch ownership:** Classify and recreate stale
+  canonical implementation branches during locked worktree acquisition; route
+  resolution retains only a defensive stale-target refusal. Rejected:
+  route-owned repair.
+- **(1926) Read-only reviewer artifact write:** Add the harness-neutral ws MCP
+  tool `path.write(path, content)`. It writes only to a ws-cache path that the
+  same session key previously minted through `path.generate`; it is included in
+  `ChildSafeWSTools` so read-only children can call it. The daemon-side write
+  runs outside the harness sandbox, while the child retains zero source-tree
+  write authority. The reviewer writes its detailed report to the generated
+  findings path and returns only the one-line status. Compatibility is T0: the
+  tool is additive and the calling playbooks ship embedded with the same
+  binary. Rejected: having the handler persist a bounded handoff; a session
+  allow-list tool (`allowed.edit`), because it creates a new authority path for
+  deciding who sets the list.
+- **(1927) Worker bootstrap context:** Remove the lead-only `workflow_manual`
+  requirement from worker instructions; workers rely on the rendered Worker
+  Protocol, ticket, AGENTS guidance, and declared manuals. Rejected: a new
+  child-safe context tool.
+- **(1928) Delegate tier resolution:** Expose the existing read-only
+  `config.resolve_agent` to delegate children. The same settled child-surface
+  rule covers the existing read-only, delegate-authorized `infra.read` required
+  by deterministic route output. Rejected: redesigning delegation.
 
 ## Constraints
 
@@ -315,14 +338,47 @@ Last ID: (1928)
   `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`; do not restart, replace, or
   otherwise touch the shared daemon during diagnosis or verification.
 
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/rsrc/`, `agents-plugin-wsflow/skills/`, `agents-plugin-tool/internal/wsdoc/conventions/`)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin/hooks/`, `agents-plugin-wsflow/`)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for `agents-plugin-tool/internal/mcp/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
+- Convention: ai-docs/manuals/performance.md (declared for `agents-plugin-tool/`)
+
+## Prior Decisions
+
+- 261120-bug-ws-agent-dogfood-delivery-context (2026-11-20, Result): "Every spawned worker context now names its direct parent's `id:<reply-id>` at the shared instruction seam." — bearing: supports
+- 261116-bug-ws-worktree-acquire-stale-branch-facts (2026-11-16, commit): "Recreation starts from the encoded merge root, not the vouched current tip; deletion stays non-forced." — bearing: contradiction-candidate
+- 114f104d4 (2026-11-20, commit): "Shipped agy settings in a separate namespace manifest because adding an agy key to the existing claude namespace manifest would make older readers reject it." — bearing: supports
+- 260912-bug-ws-pi-readonly-reviewer-artifact-contract (2026-09-13, Result): "Reviewers retain the read-only tool surface plus scoped native edit/write wrappers for only that file." — bearing: constrains
+- c6a2d1b3 (2026-11-19, commit): "Defined one harness-neutral allowlist (ChildSafeWSTools in internal/wsagent/builtin.go) and ensured AgentWSTools includes all entries." — bearing: constrains
+- c4dcf460 (2026-11-20, commit): "Rejected a review-handler-only profile because agent.spawn has one common backend-neutral loadout and no handler role signal." — bearing: supports
+- 924d473e (2026-09-09, commit): "The key is still a child (parent = caller key) bound to the caller's root." — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/mcp, agents-plugin-tool/internal/wsagent, agents-plugin/rsrc, agents-plugin-wsflow/rsrc, agents-plugin-pi/src, and package manifest tests |
+| scope.surface | public-interface | new MCP tool path.write(path, content), child tool visibility, diagnostics, and shipped worker/reviewer instructions are caller-visible |
+| scope.new_public_symbol | yes | additive MCP tool path.write |
+| scope.new_type_contract | yes | path.write(path, content) plus same-session path.generate provenance and exact generated-cache-path authorization |
+| scope.test_surface | existing | internal/mcp server and route tests, internal/wsstate generated-path tests, internal/wsagent child-surface tests, package runtime/hosted-package tests, and Pi policy tests |
+| complexity.reuse_points | confirmed | path.generate allocation, session-key root lookup, worktree acquisition lock, ChildSafeWSTools/AgentWSTools, and existing manifest/config loaders |
+| complexity.side_effect_risk | high | the ticket combines branch recreation, daemon-side file writes, mailbox delivery, manifest loading, and four harness child surfaces |
+| risk.correctness | high | a stale-branch misclassification can discard or reuse work, and an artifact or delivery error can lose review findings |
+| risk.fit | high | six phases cross MCP dispatch, wsstate, wsagent profiles, shipped playbooks, plugin packaging, and Pi compatibility |
+| risk.test | high | branch topology, same-session path provenance, clean/non-clean/oversized reports, once-only mail, manifest parity, and four harness profiles need coverage |
+| risk.security_or_contract | high | path.write adds a session-scoped file-write authority whose cache containment and source-tree exclusion are security boundaries |
+
 ## Phases
 
 ### Phase 1: Make child worktree binding explicit
 
-After (1924) settles, implement the chosen lifecycle without weakening root
-authority. Under the recommended contract, retain immutable child keys, reject
-later cross-worktree assignments with a respawn-specific diagnostic, and teach
-lead/child guidance to spawn directly into the acquired worktree.
+Implement the settled lifecycle without weakening root authority: retain
+immutable child keys, reject later cross-worktree assignments with a
+respawn-specific diagnostic, and teach lead/child guidance to spawn directly
+into the acquired worktree.
 
 Acceptance:
 
@@ -349,10 +405,10 @@ Acceptance:
 
 ### Phase 3: Retire fully landed canonical implementation branches
 
-After (1925) settles, make provisioning and route resolution distinguish a
-retained active branch from a canonical branch whose work is wholly contained
-in base. Perform any branch recreation under the existing acquisition lock and
-never discard unmerged work.
+Make provisioning and route resolution distinguish a retained active branch
+from a canonical branch whose work is wholly contained in base. Perform branch
+recreation under the existing acquisition lock and never discard unmerged
+work.
 
 Acceptance:
 
@@ -387,46 +443,48 @@ Acceptance:
   new-caller-to-old-daemon path is recorded as T3 and requires explicit owner
   approval.
 
-### Phase 5: Give Lite review artifacts one write-capable owner
+### Phase 5: Add a cache-scoped reviewer report writer
 
-After (1926) settles, remove the contradiction between a read-only reviewer and
-mandatory durable findings. Under the recommended contract, let the handler
-generate and write the artifact, and use a bounded handoff with an explicit
-finding count or equivalent completeness check instead of trusting one large
-final report, including the clean-report case.
+Add `path.write(path, content)` as a harness-neutral daemon-side MCP operation.
+The session key may write only an exact ws-cache path that it previously minted
+through `path.generate`; no repository path or path minted by another session
+is eligible. Include the tool in `ChildSafeWSTools`, pass the generated findings
+path to the read-only Lite reviewer, and keep the reviewer contract: write the
+detailed report there, then return only the one-line status.
 
 Acceptance:
 
-- A non-clean read-only Lite review produces a non-empty findings artifact
-  containing every returned finding.
-- An oversized multi-finding review remains complete when one host-visible
-  report would be truncated; the handler detects a missing chunk or count
-  before reporting success.
-- A clean Lite review produces a non-empty clean report.
-- The reviewer receives no source-tree write authority.
-- The direct-parent report reaches the hosted lead exactly once without
-  relying on a worktree inbox or duplicate manual receive.
-- ws/wsflow mirrors and Pi compatibility guidance remain aligned.
-- Compatibility remains T0, or any proposed `agent.spawn` API addition is
-  separately tiered and settled before implementation.
+- `path.write` accepts an exact generated cache path only when that same session
+  key previously obtained it from `path.generate`.
+- Unminted paths, paths minted by another session, repository paths, traversal,
+  aliases, and symlink escapes are refused without modifying a file.
+- A read-only child can call `path.write` through every effective
+  `ChildSafeWSTools` host surface but receives no source-tree write authority.
+- Non-clean, clean, and oversized Lite reviews each leave a complete non-empty
+  findings artifact, and the reviewer final response contains only the
+  one-line status.
+- The write occurs daemon-side and does not depend on a harness-specific file
+  write grant; ws/wsflow mirrors and Pi guidance remain aligned.
+- Compatibility remains T0 because the tool is additive and its calling
+  playbooks ship embedded with the same binary.
 
 ### Phase 6: Align worker instructions with the spawned-child tool surface
 
-After (1927) and (1928) settle, remove the lead-only bootstrap call from the
-Worker Protocol and expose the existing read-only tier resolver that elevated
-workers actually need for delegation. Keep all lead-key mint paths unavailable
-to children.
+Remove the lead-only bootstrap call from the Worker Protocol and expose the
+existing read-only tier resolver that elevated workers need for delegation,
+plus the read-only infra document reader required by deterministic route output.
+Keep all lead-key mint paths unavailable to children.
 
 Acceptance:
 
 - Rendered ticket-worker instructions do not tell spawned children to call
   `workflow_manual` or any other intentionally unavailable lead-only tool.
-- `config.resolve_agent` is visible and callable with a delegate key under the
-  effective Codex, Claude, agy, and Pi agent-worker profiles, including the
-  Codex child-safe MCP map.
-- A contract test compares required ws tool references in worker playbooks
-  against each effective child surface and fails on another prose/exposure
-  drift.
+- `config.resolve_agent` and `infra.read` are visible and callable with a
+  delegate key under the effective Codex, Claude, agy, and Pi agent-worker
+  profiles, including the Codex child-safe MCP map.
+- A contract test compares required ws tool references in worker playbooks and
+  deterministic route output against each effective child surface and fails on
+  another instruction/exposure drift.
 - Leaf keys retain their current config restrictions, and no child can mint or
   adopt a lead key.
 - ws/wsflow mirrors stay aligned.
