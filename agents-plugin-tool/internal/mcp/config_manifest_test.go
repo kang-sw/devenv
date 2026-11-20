@@ -392,7 +392,7 @@ func TestConfigGetTypesAndFallbacks(t *testing.T) {
 // manifest would only log at startup and silently leave every adapter knob
 // untunable.
 func TestShippedAdapterManifestsLoad(t *testing.T) {
-	for _, path := range []string{piManifestPath, claudeManifestPath, wsflowClaudeManifestPath} {
+	for _, path := range []string{piManifestPath, claudeManifestPath, wsflowClaudeManifestPath, agyManifestPath, wsflowAgyManifestPath} {
 		declared := loadDeclaredConfig(path)
 		if len(declared.rejected) != 0 {
 			t.Fatalf("shipped manifest rejected: %v", declared.rejected)
@@ -409,6 +409,8 @@ var (
 	// wsflowClaudeManifestPath is the wsflow package's own Claude manifest:
 	// the same keys as claudeManifestPath, differing only in each default.
 	wsflowClaudeManifestPath = filepath.Join("..", "..", "..", "agents-plugin-wsflow", "config-manifest.json")
+	agyManifestPath          = filepath.Join("..", "..", "..", "agents-plugin", "agy-config-manifest.json")
+	wsflowAgyManifestPath    = filepath.Join("..", "..", "..", "agents-plugin-wsflow", "agy-config-manifest.json")
 )
 
 // The compaction-threshold grammar corpus: the Pi adapter-config test runs it

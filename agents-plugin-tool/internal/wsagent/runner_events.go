@@ -115,6 +115,13 @@ func (c *conv) handle(ev Event) {
 		}
 		c.replayBoundary = c.replayBoundary || c.replaying
 		if !quiet {
+			if c.interceptModelWaitTurnEnd(ev) {
+				return
+			}
+			if override := c.modelWaitTurnError(ev); override != "" {
+				ev.TurnError = override
+			}
+			c.disarmModelWait()
 			// Every turn end lifts an earlier hold; a lever turn arms anew.
 			c.holdForLever(ev.CompactRequested && !c.interruptAsked)
 			c.interruptAsked = false
@@ -124,6 +131,10 @@ func (c *conv) handle(ev Event) {
 		c.endTurn(ev.TurnError, quiet)
 		c.live.summaryNaturalEnd = false
 		c.live.summarySource, c.summaryReason, c.summaryGap = "", "", false
+	case ev.ModelActivity != nil:
+		if !quiet {
+			c.onModelActivity(*ev.ModelActivity)
+		}
 	case ev.Approval != nil:
 		c.addApproval(*ev.Approval, quiet)
 	case ev.ApprovalDone != "":
@@ -384,6 +395,9 @@ func (c *conv) addApproval(a ApprovalRequest, quiet bool) {
 		}
 	}
 	c.setStatus(func() { c.approvals = append(c.approvals, a) })
+	if !quiet && c.modelWaitArmed {
+		c.stopModelWaitTimer()
+	}
 	c.checkAction(quiet)
 	c.showApprovals(quiet)
 	if !quiet && !c.rec.Lead && c.r.opts.Backends[c.rec.Backend].WorkerAutoApprove {
@@ -445,6 +459,9 @@ func (c *conv) dropApproval(id string, quiet bool) bool {
 	for i, have := range c.approvals {
 		if have.ID == id {
 			c.setStatus(func() { c.approvals = append(c.approvals[:i:i], c.approvals[i+1:]...) })
+			if !quiet && c.modelWaitArmed && len(c.approvals) == 0 && c.modelWaitPending == 0 {
+				c.resetModelWaitTimer()
+			}
 			c.checkAction(quiet)
 			c.showApprovals(quiet)
 			return true
@@ -599,7 +616,11 @@ func (c *conv) processExited() {
 	c.setStatus(func() {
 		c.proc = nil
 		if c.lastErr == "" {
-			c.lastErr = "the backend process exited"
+			if c.modelWaitFailErr != "" {
+				c.lastErr = c.modelWaitFailErr
+			} else {
+				c.lastErr = "the backend process exited"
+			}
 		}
 	})
 	c.processEnded()
@@ -634,6 +655,7 @@ func (c *conv) processGone() {
 // processEnded settles what ends with a process: its turn, its waiting
 // prompts, and what it last reported.
 func (c *conv) processEnded() {
+	c.disarmModelWait()
 	c.stopIdle()
 	hadBgGrace := c.bgGraceTimer != nil
 	c.stopBgGrace()
@@ -837,6 +859,7 @@ func (c *conv) checkInterrupt() {
 		return
 	}
 	c.interruptAsked = true
+	c.disarmModelWait()
 	if err := c.proc.Interrupt(); err != nil {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: interrupt: %v\n", c.rec.ReplyID, err)
 		c.stopProcess("")

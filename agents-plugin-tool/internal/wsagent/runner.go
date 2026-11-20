@@ -129,6 +129,9 @@ type Options struct {
 	// Config is the base of each profile resolution; RepoRoot is replaced by
 	// the conversation's working root.
 	Config wsconfig.Options
+	// AgyModelWaitTimeoutSeconds is the selected hosted package's manifest
+	// default for agy.model_wait_timeout_seconds. Nil uses the ws default.
+	AgyModelWaitTimeoutSeconds *int
 	// WSMCP is the stdio ws-mcp command serving root, without the runner's
 	// environment; nil refuses profiles that allow ws tools.
 	WSMCP func(root string) (MCPCommand, error)

@@ -60,6 +60,7 @@ func (c *conv) startProcess() error {
 
 func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 	c.loadCompaction()
+	c.loadModelWait()
 	// No common worker selection or ceiling is applied in this slice.
 	if !attach {
 		c.permissionNudge(legacyWorkerPermission(def), true, "")
@@ -234,6 +235,7 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 // reads it early waits rather than misreading an older PID.
 func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 	c.loadCompaction()
+	c.loadModelWait()
 	level, source, err := c.r.leadPermission(rec, c.dir)
 	if err != nil {
 		if !attach {

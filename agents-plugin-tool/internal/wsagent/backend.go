@@ -396,10 +396,16 @@ type Event struct {
 	// it for resume.
 	SessionID string
 	// TurnEnd ends the running turn; TurnError describes a turn that ended
-	// in an error (a refusal, an interrupt).
+	// in an error (a refusal, an interrupt). APIError (with TurnEnd) carries an
+	// in-band harness API error chunk that ended the turn without recovery.
 	TurnEnd    bool
 	TurnError  string
 	TurnReason string
+	APIError   string
+	// ModelActivity is an internal-only signal that a raw stream update arrived
+	// during a turn, carrying the count of currently pending tool calls
+	// (including daemon commands) so the model-wait watchdog can reset or pause.
+	ModelActivity *int
 	// CompactRequested (with TurnEnd): the ending turn carried a successful
 	// compaction lever call (a *__request_compaction tool call whose result
 	// is not an error) and was not interrupted. The runner holds queued
