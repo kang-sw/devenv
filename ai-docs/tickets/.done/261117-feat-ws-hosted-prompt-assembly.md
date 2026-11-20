@@ -17,6 +17,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 1e60dd1b53252259
 sage-review-design-reviewed: 1e60dd1b53252259
+completed: 2026-11-21
 ---
 
 # Hosted prompt assembly
@@ -916,3 +917,99 @@ caps unchanged; the existing builtin-profile test still passes with the shipped
 playbook hidden.
 Run the ws/wsflow/Pi rsrc mirror and manifest drift guards and both Pi bundle
 freshness checks after regeneration.
+
+### Result (6ceff7e97) - 2026-11-21
+
+Commits:
+
+- `c5e6d6d7e`: exact wsflow/Pi resource mirrors, all three rsrc manifests,
+  both Pi workflow bundles and native first-party inventories, plus the
+  `agent.spawn` delivery/cap regression.
+- `6ceff7e97`: child-facing `explore` body, `tier: small`, removal of
+  `delegates: true`, and the shipped `playbook.render` surface regression.
+- `a553e6df3`: Lite-review fixes that pin the real delegation-tip marker and
+  deliver the real shipped explore resource under its selected small/read-only
+  caps.
+
+Design record:
+
+- `explore` remains the existing render stem and declares only the established
+  `ExploreAgent`, `SpawnIdiom`, and `ContinueIdiom` variables. Its body now
+  addresses the spawned read-only worker directly, defines evidence and stop
+  conditions, and contains no caller fallback or continuity instruction.
+- `playbook.render` remains the only rendering owner and returns the existing
+  path plus config-resolved `recommended-tier`, `recommended-model`, and
+  `recommended-reasoning-effort` lines. `agent.spawn` remains playbook-unaware:
+  the test passes the rendered file as `system_prompt_path` and asserts its
+  exact body precedes the daemon-composed key and parent-mailbox suffix.
+- The embedded builtin explore profile and all production spawn, delivery,
+  authority, and tier-cap code remain unchanged. The real shipped-resource
+  regression proves nested workdir-write and medium requests are refused from
+  the small/read-only child.
+- The authoritative ws resource, wsflow mirror, and Pi mirror are byte-identical.
+  The mandatory workflow-bundle and native first-party generators refreshed
+  only the frozen Phase 4 output list.
+
+Compatibility:
+
+- T0 in both directions, as Decision 25 settled. This changes only a resource
+  body and adds an existing frontmatter tier; the variables and
+  `playbook.render` response fields already exist, resource names have no
+  allowlist, no MCP argument/protocol/store/manifest shape changes, and the
+  unchanged embedded builtin profile remains the fallback for an older plugin
+  that lacks the resource.
+
+Verification:
+
+- `python3 agents-plugin-pi/scripts/prepare-workflow-bundles.py` and
+  `python3 agents-plugin-pi/scripts/prepare-native-payload.py
+  --first-party-only` passed; the first command's `--check` form passed both
+  before and after native refresh. A second native refresh left the worktree
+  clean.
+- `GOCACHE=/private/tmp/ws-p4-go-cache GOPROXY=off GOSUMDB=off
+  GOTOOLCHAIN=local go test ./internal/wsagent -run
+  'TestAgent(SystemPromptReachesEveryStart|RenderedPlaybookPromptReachesChildAndKeepsCaps|SpawnCapsAuthorityAndTier)'
+  -count=1 -v` passed (0.902 s).
+- `GOCACHE=/private/tmp/ws-p4-go-cache GOPROXY=off GOSUMDB=off
+  GOTOOLCHAIN=local go test ./internal/mcp -run
+  'TestRenderShippedExploreForAgentSpawn|TestRenderReturnsFrontmatterRecommendedTier|TestWithRecommendedRenderBinding'
+  -count=1 -timeout 45m -v` passed (0.908 s).
+- `GOCACHE=/private/tmp/ws-p4-go-cache GOPROXY=off GOSUMDB=off
+  GOTOOLCHAIN=local go test ./internal/wsrsrc -run
+  'Test(WsflowRsrcMirrorUpToDate|PiMirrorUpToDate|ShippedManifestUpToDate)'
+  -count=1 -v` passed (0.277 s), and `TestPiBundleCommittedIsFresh`
+  passed (0.546 s). The parent lead independently ran the whole
+  `internal/wsrsrc` package and the pre-review focused wsagent/MCP commands;
+  all passed.
+- The first worker Go invocation reached no compiler or test because the
+  sandbox refused the default macOS Go cache. Setting the isolated `GOCACHE`
+  above resolved the environment failure; no implementation/test failure
+  repeated.
+- The required one-pass fresh-reader audit found four Important and five Minor
+  wording issues; `6ceff7e97` fixed all of them before implementation review.
+  Lite review found two Important test gaps; `a553e6df3` fixed both. Per Lite
+  policy there was no second review.
+
+Dogfood surprises:
+
+- `route.resolve_implement` proposed renaming this Phase 4 branch to the deleted,
+  already-merged Phase 3 branch `impl/develop/prize-pupil-anger`; the parent
+  vouched `impl/develop/prompt-assembly-p4` and identified the known stale-branch
+  resolution gap tracked by `261121-bug-ws-dogfood-context-routing-gaps`.
+- `workflow_manual` and `config.resolve_agent` were absent from this worker's
+  exposed ws tool surface. The parent confirmed the manual gap is tracked by
+  `261121-bug-ws-dogfood-context-routing-gaps`; this run used `playbook.read`,
+  `playbook.render`'s resolved recommendation, and `agent.tiers` without
+  restarting or swapping the daemon.
+- The generation leaf's first ad hoc manifest write emitted a literal `\\n`;
+  it corrected the serialization immediately, then all manifests parsed and
+  passed exact hash/mirror validation before bundle generation. No malformed
+  artifact was committed.
+
+Not attributed to Phase 4: the optional
+`workflow-bundle-consumer.test.mjs` check fails on both this branch and
+untouched `develop` because its immutable older consumer rejects the current
+Claude launcher/config reference set; the first macOS run also exposed the
+`/var` to `/private/var` identity difference. The mandatory generators,
+inventory checks, native bundle freshness test, and Go drift guards above all
+pass.
