@@ -348,9 +348,9 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-20T15:05:25Z",
+        "touched_at": "2026-11-20T15:33:42Z",
         "impl": {
-          "branch": "impl/develop/permission-phase2-closeout"
+          "branch": "impl/develop/permission-common-ui"
         }
       }
     },
