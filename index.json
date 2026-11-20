@@ -611,6 +611,9 @@
         }
       }
     },
+    "261120-feat-ws-dashboard-chat-agent-roster-hud": {
+      "registered_at": "2026-11-20T14:14:08Z"
+    },
     "261120-feat-ws-dashboard-composer-controls-and-context-meter": {
       "registered_at": "2026-11-20T11:46:21Z",
       "lease": {
