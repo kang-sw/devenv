@@ -523,3 +523,7 @@ the lead. During delegation, the renderer reached an idle/done state and
 committed, but its completion report was not delivered to this worker; the
 worker verified the retained source itself and reported the session-key/
 completion-delivery discrepancy to the lead for a follow-up at the merge point.
+
+The checkpoint append triggered a Sage freshness advisory. The original ready
+ticket body is a byte-identical prefix of this file; its decisions, constraints,
+and phase plan were not revised, so no design/completeness rerun was invoked.
