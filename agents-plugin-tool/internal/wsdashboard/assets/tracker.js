@@ -909,8 +909,8 @@
       }
       var vacId = '';
       for (var i = 0; i < remaining.length; i++) {
-        var cid = remaining[i];
-        if (simOrgs[cid] && simOrgs[cid].head) { vacId = cid; break; }
+        var cid = remaining[i], h = simOrgs[cid] && simOrgs[cid].head;
+        if (h && remaining.some(function (r) { return r !== cid && activeSets[r].head === h; })) { vacId = cid; break; }
       }
       if (vacId) {
         events.push({ type: 'roles.org_set', payload: { org: vacId, name: simOrgs[vacId].name, head: '' }, origin: 'human' });
@@ -965,14 +965,22 @@
       return ta !== tb ? (ta < tb ? -1 : 1) : (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     });
   }
-  function ruleCoversMember(ru, memberId, ot) {
-    if (!ru || ru.ended || ru.state !== 'live' || !ru.root || !memberId) return false;
-    if (memberId === ru.root) return !!ru.includeRoot;
+  function ruleCoversMember(ru, memberId, ot, oi, members) {
+    if (!ru || ru.ended || ru.state !== 'live' || !memberId) return false;
+    var root = ru.root || '';
+    if (ru.org && oi) {
+      var o = oi.byId && oi.byId[ru.org];
+      var M = members || {};
+      if (!o || o.removed || !o.head || (members && (!M[o.head] || M[o.head].removed))) return false;
+      root = o.head;
+    }
+    if (!root) return false;
+    if (memberId === root) return !!ru.includeRoot;
     var parentOf = (ot && ot.parentOf) || {};
     var cur = parentOf[memberId] || '', steps = 1, seen = {};
     seen[memberId] = true;
     while (cur && !seen[cur]) {
-      if (cur === ru.root) return ru.levels == null || steps <= ru.levels;
+      if (cur === root) return ru.levels == null || steps <= ru.levels;
       seen[cur] = true;
       cur = parentOf[cur] || '';
       steps++;
@@ -987,10 +995,12 @@
     var orgRules = itemOrgRules(it, openRules);
     if (!orgRules.length) return [];
     var amap = assignments || {};
-    var activeRecs = [];
+    var activeRecs = [], seenRec = {};
     (it.assignments || []).concat(it.pending || []).forEach(function (aid) {
       var r = typeof aid === 'string' ? amap[aid] : aid;
-      if (r && (r.state === 'live' || r.state === 'pending') && !r.fallback) activeRecs.push(r);
+      if (!r || !r.id || seenRec[r.id]) return;
+      seenRec[r.id] = true;
+      if ((r.state === 'live' || r.state === 'pending') && !r.fallback) activeRecs.push(r);
     });
     var canAsg = canAssignItem !== undefined ? !!canAssignItem : (!it.hidden && it.author === viewer);
     return orgRules.map(function (ru) {
@@ -1002,7 +1012,7 @@
       recs.forEach(function (r) {
         if (r.ruleRequest) { onlyThrough.push(r); return; }
         var coveredElsewhere = openRules.some(function (o) {
-          return o.id !== ru.id && ruleCoversMember(o, r.to, ot);
+          return o.id !== ru.id && ruleCoversMember(o, r.to, ot, oi, M);
         });
         if (coveredElsewhere) stayed.push(r);
         else onlyThrough.push(r);

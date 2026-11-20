@@ -280,6 +280,31 @@
     });
     return { show: show, matched: matched, expand: expand, hasAny: active ? hasAny : Object.keys(show).length > 0 };
   }
+  // Computes locked people in assign/retarget picker. When retargeting (skipRule set),
+  // members holding records under skipRule stay unlocked unless another surviving live rule
+  // on the item covers them (since item.unassign triggers refreshItemRules before item.assign).
+  function pmRetargetLockedPeople(it, rules, assignments, orgs, members, skipRule) {
+    var lockedP = {};
+    if (!it) return lockedP;
+    var amap = assignments || {}, M = members || {}, oi = orgIndex(orgs, M), ot = oi.tree;
+    var rlist = Array.isArray(rules) ? rules : Object.keys(rules || {}).map(function (k) { return rules[k]; });
+    var surviving = skipRule ? rlist.filter(function (ru) {
+      return ru && !ru.ended && ru.state === 'live' && ru.item === it.id && ru.id !== skipRule;
+    }) : [];
+    var seen = {};
+    (it.assignments || []).concat(it.pending || []).forEach(function (aid) {
+      var r = typeof aid === 'string' ? amap[aid] : aid;
+      if (!r || !r.id || seen[r.id]) return;
+      seen[r.id] = true;
+      if (r.state !== 'live' && r.state !== 'pending') return;
+      if (skipRule && r.rule === skipRule) {
+        if (surviving.some(function (ru) { return ruleCoversMember(ru, r.to, ot, oi, M); })) lockedP[r.to] = true;
+        return;
+      }
+      lockedP[r.to] = true;
+    });
+    return lockedP;
+  }
   // --- end picker modal pure logic
 
   // --- picker modal state & renderer
@@ -316,12 +341,16 @@
       } else {
         norule = it.kind === 'topic'; single = it.kind === 'topic';
         var skipRule = retarget && retarget.rule ? retarget.rule : '';
-        listOf(it.assignments).forEach(function (aid) {
-          var r = A(aid);
-          if (r && (r.state === 'live' || r.state === 'pending') && (!skipRule || r.rule !== skipRule)) lockedP[r.to] = true;
-        });
+        lockedP = pmRetargetLockedPeople(it, VS.rules, VS.assignments, VS.orgs, VS.members, skipRule);
         idx.order.forEach(function (id) { if (lockedP[id]) lockedOrder.push(id); });
-        var otherRules = skipRule ? Object.keys(VS.rules || {}).map(function (k) { return VS.rules[k]; }).filter(function (ru) { return ru && ru.id !== skipRule; }) : VS.rules;
+        var otherRules = Object.keys(VS.rules || {}).map(function (k) { return VS.rules[k]; }).filter(function (ru) {
+          if (!ru || (skipRule && ru.id === skipRule)) return false;
+          if (ru.org) {
+            var o = oi.byId[ru.org];
+            if (!o || o.removed || !o.head || !VS.members[o.head] || VS.members[o.head].removed) return false;
+          }
+          return true;
+        });
         if (!norule) idx.order.forEach(function (id) {
           if ((idx.isLead[id] || oi.headToOrg[id]) && pmRuleCovered(idx, otherRules, it.id, VS.viewer.member, id)) lockedG[id] = true;
         });

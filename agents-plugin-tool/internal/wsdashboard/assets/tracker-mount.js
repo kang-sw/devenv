@@ -651,7 +651,7 @@
     });
     oed.addEventListener('keydown', function (e) {
       var rn = e.target && e.target.closest && e.target.closest('.tk-oe-rn[data-oe-rn]');
-      if (!rn || !ui.orged || e.isComposing) return;
+      if (!rn || !ui.orged || e.isComposing || e.keyCode === 229) return;
       if (e.key === 'Enter') {
         e.preventDefault();
         orgEdCommitRename(ui.orged, rn.getAttribute('data-oe-rn'), rn.value);

@@ -314,3 +314,88 @@ test('Decision 11 & 8: retarget batches always remove first, link org heads, kee
   // Crucially: zero item.uncc events!
   assert.equal(batchCc.some(e => e[0] === 'item.uncc'), false);
 });
+
+test('Review regressions: pending record dedup, dead/vacant org non-coverage, and retarget lockedP with surviving live rules', () => {
+  const { members, orgs } = fixture();
+  const orgsWithVac = orgs.concat([{ id: 'o-vac', name: 'VacantOrg', head: '', removed: null }]);
+  // ItemView places non-fallback pending records in BOTH it.assignments and it.pending (wstracker/view.go:784-790).
+  const it = {
+    id: 'kim-hn#50', alias: 'kim-hn-50', author: 'kim-hn', hidden: false,
+    assignments: ['a-pend', 'a-plat', 'a-vac-only'],
+    pending: ['a-pend'],
+    cc: [], ccSources: {}, orgCC: [],
+  };
+  const rules = {
+    'r-pend': { id: 'r-pend', item: 'kim-hn#50', by: 'kim-hn', root: 'park-sy', assignRoot: 'park-sy', org: 'o-sw2', includeRoot: true, levels: null, state: 'pending', ended: null, ts: '2026-11-19T01:00:00Z' },
+    'r-plat': { id: 'r-plat', item: 'kim-hn#50', by: 'kim-hn', root: 'choi-jw', assignRoot: 'choi-jw', org: 'o-plat', includeRoot: true, levels: null, state: 'live', ended: null, ts: '2026-11-19T02:00:00Z' },
+    'r-vac':  { id: 'r-vac',  item: 'kim-hn#50', by: 'kim-hn', root: 'lee-dy',  assignRoot: 'lee-dy',  org: 'o-vac',  includeRoot: true, levels: null, state: 'live', ended: null, ts: '2026-11-19T03:00:00Z' },
+    'r-sw1':  { id: 'r-sw1',  item: 'kim-hn#50', by: 'kim-hn', root: 'lee-dy',  assignRoot: 'lee-dy',  org: 'o-sw1',  includeRoot: true, levels: null, state: 'live', ended: null, ts: '2026-11-19T04:00:00Z' },
+  };
+  const assignments = {
+    'a-pend': { id: 'a-pend', item: 'kim-hn#50', to: 'park-sy', state: 'pending', rule: 'r-pend', ruleRequest: true, fallback: false },
+    'a-plat': { id: 'a-plat', item: 'kim-hn#50', to: 'choi-jw', state: 'live', rule: 'r-plat', fallback: false },
+    'a-vac-only': { id: 'a-vac-only', item: 'kim-hn#50', to: 'jung-mj', state: 'live', rule: 'r-plat', fallback: false },
+  };
+
+  // 1. Pending ruleRequest in both assignments and pending must NOT be double-counted.
+  const info = J(ctx.itemOrgAssignInfo(it, rules, assignments, orgsWithVac, members, 'kim-hn', true));
+  const pendInfo = info.find(x => x.rule.id === 'r-pend');
+  assert.equal(pendInfo.recs.length, 1);
+  assert.equal(pendInfo.onlyThrough.length, 1);
+
+  // 2. Dead or vacant org rule whose stale root covers a member must NOT mark that member as stayed.
+  const rulesDeadOnly = { 'r-plat': rules['r-plat'], 'r-vac': rules['r-vac'] };
+  const infoDead = J(ctx.itemOrgAssignInfo(it, rulesDeadOnly, assignments, orgsWithVac, members, 'kim-hn', true));
+  const platDead = infoDead.find(x => x.rule.id === 'r-plat');
+  assert.deepEqual(platDead.stayed, []);
+  assert.deepEqual(platDead.onlyThrough.map(r => r.to).sort(), ['choi-jw', 'jung-mj']);
+
+  // 3. Retarget lockedP: skipping r-plat locks choi-jw & jung-mj when live r-sw1 covers them,
+  //    but leaves them unlocked when only dead/vacant r-vac exists.
+  const lockedWithLive = J(ctx.pmRetargetLockedPeople(it, rules, assignments, orgsWithVac, members, 'r-plat'));
+  assert.equal(!!lockedWithLive['choi-jw'], true);
+  assert.equal(!!lockedWithLive['jung-mj'], true);
+  assert.equal(!!lockedWithLive['park-sy'], true);
+  const lockedWithoutLive = J(ctx.pmRetargetLockedPeople(it, rulesDeadOnly, assignments, orgsWithVac, members, 'r-plat'));
+  assert.equal(!!lockedWithoutLive['choi-jw'], false);
+  assert.equal(!!lockedWithoutLive['jung-mj'], false);
+});
+
+test('Org helpers coverage: orgEdRenameOrg, orgEdMapRefusal, orgItemRefs, and 2-org name swap', () => {
+  const { members, orgs } = fixture();
+  const ed = ctx.orgEdInit(members, 'kim-hn', orgs);
+  assert.equal(ctx.orgEdRenameOrg(ed, 'o-sw1', '   ').reason, 'blank_name');
+  assert.equal(ctx.orgEdRenameOrg(ed, 'o-sw1', 'sw개발2팀').reason, 'dup_name');
+  assert.equal(ctx.orgEdRenameOrg(ed, 'o-sw1', '플랫폼코어팀').ok, true);
+  // Renaming back to base name removes the staged no-op
+  assert.equal(ctx.orgEdRenameOrg(ed, 'o-sw1', 'SW개발1팀').ok, true);
+  assert.equal(ctx.orgEdCount(ed), 0);
+
+  // orgEdMapRefusal maps valid index to change key and out-of-range to _batch
+  assert.deepEqual(J(ctx.orgEdMapRefusal(['org:o-sw1', 'lead:choi-jw'], { index: 1, reason: 'bad' })), { key: 'lead:choi-jw', reason: 'bad' });
+  assert.deepEqual(J(ctx.orgEdMapRefusal(['org:o-sw1'], { index: 5, reason: 'oops' })), { key: '_batch', reason: 'oops' });
+
+  // orgItemRefs counts assign + CC references per org and ignores hidden items
+  const items = {
+    'i1': { id: 'i1', alias: 'k-1', title: 'One', status: 'doing', hidden: false, orgCC: [{ org: 'o-plat', added: ['choi-jw'] }] },
+    'i2': { id: 'i2', alias: 'k-2', title: 'Hidden', status: 'todo', hidden: true, orgCC: [{ org: 'o-plat', added: ['choi-jw'] }] },
+  };
+  const rmap = { 'r1': { id: 'r1', item: 'i1', org: 'o-plat', ended: null } };
+  const refs = J(ctx.orgItemRefs(orgs, items, rmap, ['i1', 'i2']));
+  assert.equal(refs['o-plat'].count, 1);
+  assert.equal(refs['o-plat'].items[0].assign, true);
+  assert.equal(refs['o-plat'].items[0].cc, true);
+
+  // 2-org name swap via staging + server simulation
+  const edSwap = ctx.orgEdInit(members, 'kim-hn', orgs);
+  assert.equal(ctx.orgEdRenameOrg(edSwap, 'o-sw1', 'TempName').ok, true);
+  assert.equal(ctx.orgEdRenameOrg(edSwap, 'o-sw2', 'SW개발1팀').ok, true);
+  assert.equal(ctx.orgEdRenameOrg(edSwap, 'o-sw1', 'SW개발2팀').ok, true);
+  const plan = ctx.orgEdPreflightAndBuild(edSwap, members, 'kim-hn', orgs);
+  assert.equal(plan.ok, true, JSON.stringify(plan));
+  assert.equal(plan.events.length, 3);
+  const sim = simulateServer(members, orgs, 'kim-hn', plan.events);
+  assert.equal(sim.ok, true, JSON.stringify(sim));
+  assert.equal(sim.orgs['o-sw1'].name, 'SW개발2팀');
+  assert.equal(sim.orgs['o-sw2'].name, 'SW개발1팀');
+});
