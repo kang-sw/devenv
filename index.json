@@ -504,16 +504,6 @@
     "261118-research-ws-agy-custom-agent-prompt": {
       "registered_at": "2026-11-18T07:09:55Z"
     },
-    "261118-research-ws-agy-plan-usage-source": {
-      "registered_at": "2026-11-18T13:12:52Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-20T04:14:31Z"
-      }
-    },
     "261118-research-ws-pi-hosted-connector": {
       "registered_at": "2026-11-18T07:10:00Z"
     },
@@ -563,7 +553,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-19T14:06:13Z",
         "impl": {
           "branch": "impl/develop/ditto-wasp-pager"
