@@ -1,7 +1,9 @@
 package wsagent
 
 import (
+	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -106,6 +108,17 @@ func TestHeldWorkersCompleteAcrossRunnerReplacement(t *testing.T) {
 				if backend != BackendPi && (before.MCPToken == "" || before.MCPHolder != holder || before.MCPURL == "" || before.MCPEnv == nil) {
 					t.Fatalf("worker MCP tuple was not persisted: %+v", before)
 				}
+				var beforeEnv map[string]string
+				if backend != BackendPi {
+					hello, _, ok := h.runner.ResolveMCPToken(before.MCPToken)
+					if !ok {
+						t.Fatal("launched worker's MCP token does not resolve")
+					}
+					beforeEnv = maps.Clone(hello.Env)
+					if beforeEnv[EnvAgentSessionKey] != before.WSKey || beforeEnv[EnvPermissionLevel] != authority || beforeEnv["WS_MCP_HARNESS_PID"] != strconv.Itoa(before.HostPID) {
+						t.Fatalf("launched worker MCP identity: key %q, level %q, pid %q", beforeEnv[EnvAgentSessionKey], beforeEnv[EnvPermissionLevel], beforeEnv["WS_MCP_HARNESS_PID"])
+					}
+				}
 				h.runner.Close()
 				if h.holders.opCount("stop") != 0 {
 					t.Fatalf("runner shutdown stopped the worker: %v, record %+v", h.holders.opList(), h.record(id))
@@ -128,8 +141,16 @@ func TestHeldWorkersCompleteAcrossRunnerReplacement(t *testing.T) {
 					if after.MCPToken != before.MCPToken || after.MCPURL != before.MCPURL || after.MCPHolder != before.MCPHolder {
 						t.Fatalf("MCP tuple changed: before %+v, after %+v", before, after)
 					}
-					if _, _, ok := h.runner.ResolveMCPToken(before.MCPToken); !ok {
+					hello, _, ok := h.runner.ResolveMCPToken(before.MCPToken)
+					if !ok {
 						t.Fatal("rejoined worker's persisted MCP token does not resolve")
+					}
+					for _, name := range []string{EnvHostedSession, EnvHostedSessionKey, EnvAgentSessionKey, EnvPermissionLevel, "WS_MCP_HARNESS_PID"} {
+						want, wasSet := beforeEnv[name]
+						got, isSet := hello.Env[name]
+						if got != want || isSet != wasSet {
+							t.Errorf("rejoined MCP env %s = %q (set %v), launched %q (set %v)", name, got, isSet, want, wasSet)
+						}
 					}
 				}
 				if backend == BackendCodex {
@@ -242,42 +263,69 @@ func TestHeldWorkerAttachUsesChildAuthorityWithAbsentParent(t *testing.T) {
 }
 
 func TestHeldWorkerChildLoadsBeforeLowerCeilingParent(t *testing.T) {
-	h, _ := workerRecoveryHarness(t, BackendCodex, true)
-	id, holder := spawnHeldRecoveryWorker(t, h, BackendCodex, "workdir-write")
-	before := h.record(id)
-	h.runner.Close()
-	// The directory scan is filename ordered. Reparent the already launched
-	// worker to a sleeping conversation whose id sorts after the worker.
-	parentID := strings.Repeat("z", 64)
-	if id >= parentID {
-		t.Fatalf("fixture parent %q must sort after child %q", parentID, id)
-	}
-	before.Parent = &ParentRef{Kind: ParentConversation, ReplyID: parentID}
-	if err := writeRecord(wsdashboard.SessionDir(h.dir, id), before); err != nil {
-		t.Fatal(err)
-	}
-	parentDir := wsdashboard.SessionDir(h.dir, parentID)
-	parent := Record{ReplyID: parentID, Profile: PiWorkerProfile, Backend: BackendPi, Root: h.root,
-		WSKey: "parent-key", CreatedAt: before.CreatedAt, Parent: &leadParent}
-	if err := writeRecord(parentDir, parent); err != nil {
-		t.Fatal(err)
-	}
-	if err := writePermissionSelection(parentDir, PermissionReadOnly); err != nil {
-		t.Fatal(err)
-	}
-	h.holders.restart()
-	h.startAt("http://127.0.0.1:1")
-	wait(t, "holder scan", h.runner.rejoined)
-	eventually(t, "child reattached ahead of parent", func() bool {
-		return h.state(id).Process && h.record(id).HolderID == holder
-	})
-	if rec := h.record(id); rec.HostPID != before.HostPID || !rec.TurnOpen {
-		t.Fatalf("lower current parent ceiling changed the running child: %+v", rec)
-	}
-	if _, err := h.runner.childAdmission(h.record(id)); err == nil || !strings.Contains(err.Error(), "above the parent's current level read-only") {
-		t.Fatalf("next launch should be refused by the current ceiling: %v", err)
-	}
-	if !strings.Contains(h.log.String(), "rejoin permission admission (advisory; applies on next launch)") || h.holders.opCount("stop") != 0 || h.holders.opCount("spawn") != 1 {
-		t.Fatalf("advisory attach changed the holder: %v, log %s", h.holders.opList(), h.log.String())
+	for _, tc := range []struct {
+		name, kind string
+		lead       bool
+	}{
+		{name: "conversation worker", kind: ParentConversation},
+		{name: "conversation lead", kind: ParentConversation, lead: true},
+		{name: "lead parent", kind: ParentLead, lead: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _ := workerRecoveryHarness(t, BackendCodex, true)
+			id, holder := spawnHeldRecoveryWorker(t, h, BackendCodex, "workdir-write")
+			before := h.record(id)
+			h.runner.Close()
+			// The directory scan is filename ordered. Reparent the already
+			// launched worker to a sleeping record loaded after it.
+			parentID := strings.Repeat("z", 64)
+			if id >= parentID {
+				t.Fatalf("fixture parent %q must sort after child %q", parentID, id)
+			}
+			before.Parent = &ParentRef{Kind: tc.kind, ReplyID: parentID}
+			if err := writeRecord(wsdashboard.SessionDir(h.dir, id), before); err != nil {
+				t.Fatal(err)
+			}
+			parentDir := wsdashboard.SessionDir(h.dir, parentID)
+			parent := Record{ReplyID: parentID, Profile: PiWorkerProfile, Backend: BackendPi, Root: h.root,
+				WSKey: "parent-key", CreatedAt: before.CreatedAt, Parent: &leadParent}
+			if tc.lead {
+				parent.Lead, parent.Profile, parent.Backend, parent.Parent = true, LeadProfileClaude, BackendClaude, nil
+				reg := h.opts.Backends[BackendClaude]
+				reg.PermissionLevels = LeadPermissionLevels()
+				h.opts.Backends[BackendClaude] = reg
+			}
+			if err := writeRecord(parentDir, parent); err != nil {
+				t.Fatal(err)
+			}
+			if err := writePermissionSelection(parentDir, PermissionReadOnly); err != nil {
+				t.Fatal(err)
+			}
+			h.holders.restart()
+			h.startAt("http://127.0.0.1:1")
+			wait(t, "holder scan", h.runner.rejoined)
+			eventually(t, "child reattached ahead of parent", func() bool {
+				return h.state(id).Process && h.record(id).HolderID == holder
+			})
+			if rec := h.record(id); rec.HostPID != before.HostPID || !rec.TurnOpen {
+				t.Fatalf("lower current parent ceiling changed the running child: %+v", rec)
+			}
+			var mode, policy string
+			c := h.runner.conv(id)
+			c.do(func() {
+				if p, ok := c.proc.(*codexProcess); ok {
+					mode, policy = p.mode, p.policy
+				}
+			})
+			if mode != "workspace-write" || policy != "on-request" {
+				t.Fatalf("rejoined child mode = %q, policy = %q", mode, policy)
+			}
+			if _, err := h.runner.childAdmission(h.record(id)); err == nil || !strings.Contains(err.Error(), "above the parent's current level read-only") {
+				t.Fatalf("next launch should be refused by the current ceiling: %v", err)
+			}
+			if !strings.Contains(h.log.String(), "rejoin permission admission (advisory; applies on next launch)") || h.holders.opCount("stop") != 0 || h.holders.opCount("spawn") != 1 {
+				t.Fatalf("advisory attach changed the holder: %v, log %s", h.holders.opList(), h.log.String())
+			}
+		})
 	}
 }
