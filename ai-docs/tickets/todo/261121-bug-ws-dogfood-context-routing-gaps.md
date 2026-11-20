@@ -4,6 +4,7 @@ related:
   261119-bug-ws-agent-v2-dogfood-surprises: "Earlier broad dogfood capture; this ticket carries the source-diagnosed current fixes."
   261120-bug-ws-agent-dogfood-delivery-context: "Develop already contains its direct-parent and worker-delivery fixes."
   261115-feat-ws-permission-profile: "Its retained implementation branch reproduces stale branch reuse."
+  261116-feat-ws-subagent-worktree-lease: "Phase 1's second valid B-key source depends on this lease contract landing."
   260912-bug-ws-pi-readonly-reviewer-artifact-contract: "Prior Pi-only scoped reviewer artifact contract."
 sage-review-design: required
 sage-review-completeness: required
@@ -53,8 +54,9 @@ owns the operation.
   child spawned directly into B or, after
   `261116-feat-ws-subagent-worktree-lease` lands, the B-bound key returned when
   the child legitimately acquires B under Decision (1190); respawn is not the
-  only valid path. Test the refused A-key-in-B handoff and both valid B-key
-  sources.
+  only valid path. Test the refused A-key-in-B handoff and direct-spawn B-key
+  source; test the acquired B-key source once that prerequisite lands and defer
+  it otherwise.
 - **Compatibility:** **T0** for the preferred diagnostic/prompt/workflow fix:
   tool schemas and stored key records do not change, and old calls retain their
   behavior. An additive rebind API could only be T0 with capability gating and
@@ -126,10 +128,13 @@ owns the operation.
   `worktree.acquire`. In addition, during locked pooled-worktree acquisition,
   classify an existing name-rooted canonical target against its encoded merge
   root and non-force delete/recreate it when the target-only count is zero and
-  the merge-root-only count is positive. Preserve/refuse targets with unmerged
-  work and retain an equal target. Route resolution adds only a defensive stop
-  for the exact-target `continue` case at `:932-935`, telling the caller to
-  re-acquire so the locked acquisition path can repair it. Regress the
+  the merge-root-only count is positive, switching the pooled worktree to the
+  merge root before deletion. Leave targets with target-only commits and equal
+  targets checked out as today, with divergent targets retaining the existing
+  behind warning. Route resolution adds only a defensive stop for the
+  exact-target `continue` case at `:932-935`, telling a pooled caller to
+  re-acquire or an in-root caller to switch the root to the merge root and route
+  again so the kept create-path action can repair it. Regress the
   landed-or-empty-behind, active-ahead, equal, divergent, and unchanged
   in-root serial recreate cases.
 - **Compatibility:** **T0.** The correction can preserve current tool names,
@@ -319,16 +324,21 @@ owns the operation.
   acquisition. A name-rooted canonical target is stale and safe to recreate
   only when comparison with its encoded merge root, not an arbitrary caller
   base, succeeds with target-only `0` and merge-root-only `>0` (ahead `0`,
-  behind `>0`); `0/0` stays equal, and any target-only commits are preserved
-  and refused. This predicate also covers a freshly created empty canonical
+  behind `>0`); `0/0` stays equal, and any target-only `>0` branch is preserved
+  and checked out as today, including a divergent branch and its existing
+  behind warning. This predicate also covers a freshly created empty canonical
   branch left behind after its merge root advances, so neither classification
   nor diagnostics may claim it proves previously landed work or work loss. Use
-  non-forced deletion; if another pooled worktree has the branch checked out,
-  acquisition fails
+  non-forced deletion after switching the pooled worktree to the encoded merge
+  root; if another pooled worktree has the branch checked out, acquisition fails
   actionably, leaves the branch and both worktrees intact, and tells the caller
   to release that checkout and re-acquire. Route resolution adds no repair: it
   changes only the exact-target `continue` case at `:932-935` to refuse this
-  stale predicate and tell the caller to re-acquire. Rejected: removing the
+  stale predicate and tell a pooled caller to re-acquire or an in-root caller
+  to switch the root to the merge root and route again, which reaches the kept
+  create-path `recreate`. The scope-limited rejection of auto-resetting stale
+  branches in `261116-bug-ws-worktree-acquire-stale-branch-facts` Phase 1 is
+  lifted only for the target-only `0` case. Rejected: removing the
   existing route recreation paths or broad route-owned repair.
 - **(1926) Read-only reviewer artifact write:** Add the harness-neutral ws MCP
   tool `path.write(path, content)`. It writes only to a ws-cache path that the
@@ -429,9 +439,10 @@ Acceptance:
 - A child spawned in worktree A cannot ws-commit in worktree B and receives an
   actionable diagnostic to obtain and use a B-bound key.
 - A child spawned with `worktree: B` can use its minted key for B.
-- After `261116-feat-ws-subagent-worktree-lease`, a child that legitimately
-  acquires B can use the returned key for B without privilege escalation under
-  that ticket's Decision (1190).
+- If `261116-feat-ws-subagent-worktree-lease` has landed, a child that
+  legitimately acquires B can use the returned key for B without privilege
+  escalation under that ticket's Decision (1190); otherwise this second valid
+  B-key source and its regression test are deferred.
 - Existing same-root child calls remain unchanged.
 - Compatibility remains T0, or the phase records and settles a revised tier
   before implementation.
@@ -462,13 +473,14 @@ Acceptance:
 
 - During pooled-worktree acquisition, a name-rooted canonical target with
   target-only `0` and merge-root-only `>0` against its encoded merge root is
-  non-force deleted and recreated from that merge root under the acquisition
-  lock instead of being checked out stale. This safe-to-recreate class includes
-  a formerly empty branch after the merge root advances and is not evidence
-  that the branch previously carried landed work.
-- Equal and actively-ahead same-ticket targets retain their intended behavior.
-- Divergent or otherwise unmerged targets are preserved and produce a stop or
-  explicit conflict instead of reset.
+  handled by first switching the pooled worktree to that merge root, then
+  non-force deleting and recreating the target from it under the acquisition
+  lock instead of checking it out stale. This safe-to-recreate class includes a
+  formerly empty branch after the merge root advances and is not evidence that
+  the branch previously carried landed work.
+- Equal targets and targets with target-only `>0`, whether actively ahead or
+  divergent, are checked out as today and are neither recreated nor refused;
+  divergent targets retain the existing behind warning.
 - If another pooled worktree checks out the stale target, non-forced deletion
   fails the acquisition without mutation and the error identifies the blocking
   checkout and tells the caller to release it and re-acquire.
@@ -477,7 +489,9 @@ Acceptance:
   `261116-bug-ws-worktree-acquire-stale-branch-facts`; regress that an in-root
   serial worker still receives and can execute those actions. Only an
   exact-target `continue` that meets the stale predicate becomes a defensive
-  refusal whose message tells the caller to re-acquire.
+  refusal whose message tells a pooled caller to re-acquire and an in-root
+  caller to switch the root to the merge root and route again, reaching the
+  kept create-path `recreate`.
 - The exact `261115-feat-ws-permission-profile` topology is covered by a
   regression fixture.
 - Compatibility remains T0.
@@ -515,11 +529,13 @@ through `path.generate`; no repository path or path minted by another session
 is eligible. Include the tool in `ChildSafeWSTools`. Update
 `agents-plugin/rsrc/code-reviewer.md:45` and its wsflow/Pi mirrors so the
 read-only reviewer mints its own findings path, writes the detailed report, and
-returns only a one-line status containing that path. The current pre-generated
-path invoker inventory is only
+returns only a one-line status containing that path. The review handler at
 `agents-plugin/rsrc/review-handler/review-handler.md:53,90` and its wsflow/Pi
-mirrors; remove that ownership and make it read the path from reviewer status.
-Also update the Lite invoker in
+mirrors is not a pre-generated-path invoker: it keeps minting and writing its
+own graded findings report with `path.generate` and `path.write` under its own
+key, even when it runs read-only, and keeps returning `findings: <path>`. It
+reads each partition reviewer's returned findings path as input. Update the Lite
+invoker in
 `agents-plugin/rsrc/worker-stop-protocol.md:70-84` and its mirrors, which does
 not currently pass a findings path, to read the returned path rather than add a
 parent-generated one.
@@ -537,6 +553,11 @@ Acceptance:
   reviewer-minted findings artifact; the reviewer final response is one status
   line containing its path, and each invoker reads the full artifact from that
   returned path.
+- The review handler continues to create and write its own graded findings
+  report with `path.generate` and `path.write` under its own key when it runs
+  read-only, returns `findings: <path>`, and reads each partition reviewer's
+  report from that reviewer's returned path; `lead-review` continues forwarding
+  the handler's findings path.
 - Whether the reviewer uses the render-minted child key from
   `playbook_tools.go:1082-1099` or another reviewer key, the same key performs
   both `path.generate` and `path.write`.
