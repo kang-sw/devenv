@@ -138,3 +138,17 @@ func TestIncrementalFoldOrgSetCanNameJoinedHead(t *testing.T) {
 		t.Fatalf("joined member could not head org: status=%s reason=%s org=%+v", n.status, n.reason, tr.r.S.orgs["o-team"])
 	}
 }
+
+func TestIncrementalFoldOrgConflictMatchesFullReplay(t *testing.T) {
+	g := json.RawMessage(`{"admins":["a","b"],"members":[{"id":"a","keys":["a"]},{"id":"b","keys":["b"]},{"id":"h","keys":["h"]}]}`)
+	first := incrementalEvent("a", 1, TypeOrgSet, `{"org":"o-a","name":"A","head":"h"}`, 1, nil)
+	src := newMemSource(g, "a.pc", []wsledger.Event{first})
+	tr := New(src, src.stream)
+
+	conflict := incrementalEvent("b", 1, TypeOrgSet, `{"org":"o-b","name":"B","head":"h"}`, 2, nil)
+	src.add(conflict)
+	assertIncrementalFold(t, tr, src)
+	if n := tr.r.byID[conflict.ID.String()]; n.status != "flagged" || !strings.Contains(n.reason, "already heads") {
+		t.Fatalf("incremental org conflict = %s %q", n.status, n.reason)
+	}
+}

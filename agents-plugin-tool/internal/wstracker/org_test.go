@@ -4,19 +4,34 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/kang-sw/devenv/internal/wsledger"
 )
 
 func TestOrgAssignTargetRetainsLegacyRootShape(t *testing.T) {
-	raw, err := json.Marshal(AssignTarget{Root: "maya", Org: "o-platform", IncludeRoot: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var target map[string]any
-	if err := json.Unmarshal(raw, &target); err != nil {
-		t.Fatal(err)
-	}
-	wantEq(t, "legacy root", target["root"], any("maya"))
-	wantEq(t, "additive org", target["org"], any("o-platform"))
+	tm := newTeam(t)
+	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-platform", "Platform", "maya"))
+	it := tm.do("maya.pc", TypeItemCreate, map[string]any{"kind": "task", "title": "Legacy target"})
+	tm.view("maya.pc")
+
+	withOrg := tm.clone("maya.pc").r.S.checkpoint()
+	legacy := tm.clone("maya.pc").r.S.checkpoint()
+	base := obj{"item": it, "completion": "assigner"}
+	withOrgPayload := obj{"item": base["item"], "completion": base["completion"], "targets": []any{
+		map[string]any{"root": "maya", "org": "o-platform", "include_root": true},
+	}}
+	legacyPayload := obj{"item": base["item"], "completion": base["completion"], "targets": []any{
+		map[string]any{"root": "maya", "include_root": true},
+	}}
+	newNode := &node{id: "maya.pc#legacy", alias: "maya.pc-legacy", member: "maya", typ: TypeItemAssign, p: withOrgPayload, ts: tm.now}
+	oldNode := &node{id: newNode.id, alias: newNode.alias, member: newNode.member, typ: newNode.typ, p: legacyPayload, ts: newNode.ts}
+	wantEq(t, "old and new target verdict", string(withOrg.check(newNode)), string(legacy.check(oldNode)))
+	withOrg.apply(newNode)
+	legacy.apply(oldNode)
+	rid := newNode.id + "~maya"
+	wantEq(t, "new target rule id", withOrg.ruleByID[rid].id, rid)
+	wantEq(t, "legacy target rule id", legacy.ruleByID[rid].id, rid)
 }
 
 func orgSetPayload(id, name, head string) map[string]any {
@@ -150,6 +165,30 @@ func TestConcurrentOrgListConflictsUseFoldOrder(t *testing.T) {
 		wantEq(t, "member removal", event(t, v, rm).Status, "applied")
 		wantEq(t, "later org set", event(t, v, set).Status, "flagged")
 	})
+
+	t.Run("member removal after concurrent set vacates head", func(t *testing.T) {
+		tm := newTeam(t)
+		tm.goOffline("ada.pc")
+		tm.goOffline("bo.pc")
+		set := tm.do("bo.pc", TypeOrgSet, orgSetPayload("o-leaf", "Leaf", "lena"))
+		rm := tm.do("ada.pc", "roles.remove_member", map[string]any{"member": "lena"})
+		tm.comeOnline("ada.pc")
+		tm.comeOnline("bo.pc")
+		v := tm.view("ada.pc")
+		wantEq(t, "earlier org set", event(t, v, set).Status, "applied")
+		wantEq(t, "later member removal", event(t, v, rm).Status, "applied")
+		wantEq(t, "removal vacates concurrent head", tm.clone("ada.pc").r.S.orgs["o-leaf"].head, "")
+	})
+}
+
+func TestRemovedChildOrgFallsBackToParent(t *testing.T) {
+	tm := newTeam(t)
+	tm.do("ada.pc", TypeSetLead, map[string]any{"member": "omar", "leads": []string{"lena"}})
+	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-platform", "Platform", "maya"))
+	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-search", "Search", "lena"))
+	wantEq(t, "nested org before removal", tm.clone("ada.pc").r.S.nearestOrg("omar").id, "o-search")
+	tm.do("ada.pc", TypeOrgRemove, map[string]any{"org": "o-search"})
+	wantEq(t, "nested member falls to parent", tm.clone("ada.pc").r.S.nearestOrg("omar").id, "o-platform")
 }
 
 func TestOrgCCProvenanceAndDynamicScope(t *testing.T) {
@@ -232,6 +271,50 @@ func TestOrgCCVacancyAndTombstone(t *testing.T) {
 	// Removing a dead registration remains valid and revokes its sole sources.
 	tm.do("raj.pc", TypeItemUnccOrg, map[string]any{"item": it, "org": "o-platform"})
 	wantEq(t, "dead registration removed", len(tm.view("maya.pc").Items[it].CC), 0)
+}
+
+func TestVacantOrgRegistrationsCanBeRemoved(t *testing.T) {
+	tm := newTeam(t)
+	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-platform", "Platform", "maya"))
+	it := tm.do("maya.pc", TypeItemCreate, map[string]any{"kind": "task", "title": "Vacant cleanup"})
+	tm.do("raj.pc", TypeItemCCOrg, map[string]any{"item": it, "org": "o-platform"})
+	assign := tm.do("maya.pc", TypeItemAssign, map[string]any{"item": it, "completion": "assigner", "targets": []any{
+		map[string]any{"root": "maya", "org": "o-platform", "include_root": true},
+	}})
+	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-platform", "Platform", ""))
+	tm.do("raj.pc", TypeItemUnccOrg, map[string]any{"item": it, "org": "o-platform"})
+	tm.do("maya.pc", TypeItemUnassign, map[string]any{"item": it, "rule": assign + "~maya"})
+	v := tm.view("maya.pc")
+	wantEq(t, "vacant org CC removed", len(v.Items[it].OrgCC), 0)
+	wantEq(t, "vacant org rule removed", v.Rules[assign+"~maya"].State, "ended")
+}
+
+func TestJoinedNewcomerEntersOrgCC(t *testing.T) {
+	g := json.RawMessage(`{"admins":["a"],"members":[{"id":"a","keys":["a"]}]}`)
+	events := []wsledger.Event{
+		incrementalEvent("a", 1, TypeItemCreate, `{"kind":"task","title":"joined newcomer"}`, 1, nil),
+		incrementalEvent("a", 2, TypeOrgSet, `{"org":"o-team","name":"Team","head":"a"}`, 2, nil),
+		incrementalEvent("a", 3, TypeItemCCOrg, `{"item":"a.pc#1","org":"o-team"}`, 3, nil),
+		incrementalEvent("b", 1, wsledger.TypeMemberJoin, `{"member":"b","key":"b"}`, 4, map[string]int{"a.pc": 3}),
+		incrementalEvent("a", 4, TypeSetLead, `{"member":"b","leads":["a"]}`, 5, map[string]int{"b.pc": 1}),
+	}
+	src := newMemSource(g, "a.pc", events)
+	v := New(src, src.stream).View(time.Time{}, 0)
+	wantIn(t, "joined newcomer receives org CC", v.Items["a.pc#1"].CC, "b")
+}
+
+func TestLegacyPersonalUnccWithoutVisibleOrgSourceIsNoOp(t *testing.T) {
+	g := json.RawMessage(`{"admins":["a"],"members":[{"id":"a","keys":["a"]},{"id":"b","keys":["b"]}]}`)
+	events := []wsledger.Event{
+		incrementalEvent("a", 1, TypeItemCreate, `{"kind":"task","title":"old-reader no-op"}`, 1, nil),
+		// This is the event an old reader retains after flagging and not folding
+		// the unknown item.cc_org that had made b visible to the new reader.
+		incrementalEvent("a", 2, TypeItemUncc, `{"item":"a.pc#1","member":"b"}`, 2, nil),
+	}
+	src := newMemSource(g, "a.pc", events)
+	v := New(src, src.stream).View(time.Time{}, 0)
+	wantEq(t, "legacy uncc verdict", v.Events[1].Status, "applied")
+	wantEq(t, "legacy uncc changes no CC", len(v.Items["a.pc#1"].CC), 0)
 }
 
 func TestOrgAssignFollowsHeadAndKeepsAssignRoot(t *testing.T) {
@@ -407,6 +490,36 @@ func TestEndingOrgRuleReextendsOverlappingRule(t *testing.T) {
 	tm.do("maya.pc", TypeItemUnassign, map[string]any{"item": it, "rule": orgRule})
 	v := tm.view("maya.pc")
 	wantEq(t, "other rule fills gap in same step", asg(t, v, plainRule+">lena").State, "live")
+}
+
+func TestEndingOrgRuleByRootReextendsOverlappingRule(t *testing.T) {
+	tm := newTeam(t)
+	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-search", "Search", "lena"))
+	it := tm.do("maya.pc", TypeItemCreate, map[string]any{"kind": "task", "title": "Root overlap"})
+	ev := tm.do("maya.pc", TypeItemAssign, map[string]any{"item": it, "completion": "assigner", "targets": []any{
+		map[string]any{"root": "lena", "org": "o-search", "include_root": true},
+		map[string]any{"root": "maya", "levels": 1},
+	}})
+	tm.do("maya.pc", TypeItemUnassign, map[string]any{"item": it, "root": "lena"})
+	wantEq(t, "root removal fills gap in same step", asg(t, tm.view("maya.pc"), ev+"~maya>lena").State, "live")
+}
+
+func TestReturningOrgRuleReextendsOverlappingRule(t *testing.T) {
+	tm := newTeam(t)
+	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-sales", "Sales", "raj"))
+	it := tm.do("maya.pc", TypeItemCreate, map[string]any{"kind": "task", "title": "Return overlap"})
+	orgEvent := tm.do("maya.pc", TypeItemAssign, map[string]any{"item": it, "targets": []any{
+		map[string]any{"root": "raj", "org": "o-sales", "include_root": true},
+	}})
+	plainEvent := tm.do("maya.pc", TypeItemAssign, map[string]any{"item": it, "targets": []any{
+		map[string]any{"root": "ada", "levels": 1},
+	}})
+	tm.do("raj.pc", TypeItemAccept, map[string]any{"item": it})
+	tm.do("ada.pc", TypeItemAccept, map[string]any{"item": it})
+	tm.view("maya.pc")
+	wantEq(t, "org rule owns accepted overlap", tm.clone("maya.pc").r.S.openRec(it, "raj").rule, orgEvent+"~raj")
+	tm.do("ada.pc", TypeItemReturn, map[string]any{"item": it, "assignee": "raj"})
+	wantEq(t, "return fills gap in same step", asg(t, tm.view("maya.pc"), plainEvent+"~ada>raj").State, "live")
 }
 
 func TestBareUnassignDefersOrgRuleReextension(t *testing.T) {
