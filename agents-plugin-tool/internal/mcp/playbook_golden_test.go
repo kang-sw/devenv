@@ -862,9 +862,9 @@ func TestClaudeSpawnIdiomRendersAtEverySite(t *testing.T) {
 }
 
 // TestSpawnIdiomSitesListIsComplete keeps spawnIdiomSites equal to the real
-// playbook directories that use {{.SpawnIdiom}}, so a new site cannot go
-// unpinned. lead-workflow-manual uses it only through its Claude overlay,
-// which TestLeadWorkflowManualClaudeSpawnBindingOverlay pins.
+// playbooks that declare SpawnIdiom, including uses through shared includes.
+// lead-workflow-manual uses it only through its Claude overlay, which
+// TestLeadWorkflowManualClaudeSpawnBindingOverlay pins.
 func TestSpawnIdiomSitesListIsComplete(t *testing.T) {
 	rsrcRoot := filepath.Join("..", "..", "..", "agents-plugin", "rsrc")
 	found := map[string]bool{}
@@ -876,7 +876,7 @@ func TestSpawnIdiomSitesListIsComplete(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if strings.Contains(string(data), "{{.SpawnIdiom}}") {
+		if strings.Contains(string(data), "  - SpawnIdiom\n") {
 			found[filepath.Base(filepath.Dir(path))] = true
 		}
 		return nil
