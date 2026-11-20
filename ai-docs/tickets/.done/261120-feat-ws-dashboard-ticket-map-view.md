@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: f04090c323fa1868
 sage-review-completeness-reviewed: f04090c323fa1868
+completed: 2026-11-20
 ---
 
 # Dedicated Dashboard Ticket Map View (B Hierarchical Swimlane + C Keyword-Soup Constellation)
@@ -902,6 +903,57 @@ prefix with `~/.local/bin/ws-rgo` on remote-Go hosts.
 - Payload size on the `n=170` fixture: under 600 KB (asserted), recorded in the
   Result next to the v5 reference (735 KB for 290 nodes with previews).
 
+### Result (e24588ac7) - 2026-11-20
+
+- **Landed** (`59bde59ba..e24588ac7`):
+  - spine `wsdoc/tickets_map.go`: load, targeted ref lookup, fingerprint, memo
+    with a 16-root LRU, payload types, `EmptyTicketMapJSON`;
+  - `tickets_cache.go`: `doc` field, `scanStatusDirWith`, the
+    `readTicketDir`/`lstatTicketFile` seams, and `listStatusDirEntries`;
+  - text engine: `tickets_map_text.go`, plus `tickets_map_words.go` for the
+    tokenizers and stoplists;
+  - cluster engine: `tickets_map_cluster.go`, `tickets_map_louvain.go`,
+    `tickets_map_naming.go`;
+  - the synthetic fixture `wsdoc/wsdoctest/ticketmap.go`;
+  - the route: `wsdashboard/ticket_graph.go`, the `tickets/graph` case, the
+    agent forwarder, and `mcp/dashboard_ticket_graph.go`;
+  - the tests listed under Verification.
+- **Verification:**
+  - `go test ./internal/wsdoc -count=1`: ok, including the TicketMap text,
+    cluster, determinism (`-race` run separately), touch, and surface tests.
+  - `go test ./internal/wsdashboard -run 'TicketGraph|GuardedRoutes|Access'`:
+    ok.
+  - `go test ./internal/mcp -run TicketGraph`: ok.
+- **Touch counts** on the n=170 fixture: a cold build does 179 opens (170 open
+  + 9 refs), 16 lstats (≤ 2 × 9), and 3 listings. A warm build does 0 opens and
+  the same lstat and listing counts. No listing of `.done/` or `.dropped/`
+  happens.
+- **Clusters** on the fixture: K = 10 within `[7, 12]` plus Misc. Every planted
+  topic is 100% co-clustered. The Korean label is Hangul and the Japanese label
+  is a Kanji bigram.
+- **Bench** (`BenchmarkTicketMapBuild`, n=300, Apple M3 Max): cold about
+  25 ms/op (target ≤ 400 ms); warm memo about 1.0–1.2 ms/op. The warm memo
+  misses the < 1 ms target. Its time is the 3 listings plus the about 186 stat
+  calls the file-touch budget requires; the hashing and memo lookup are a small
+  part of it.
+- **Payload** at n=170: 311,356 bytes (179 nodes, 1,491 sim rows), under the
+  600 KB assertion. The v5 reference is 735 KB for 290 nodes.
+- **Decisions:**
+  - `ledger` is ws convention vocabulary in `enStop`, so the fixture's billing
+    topic uses `billing/invoice.go`.
+  - Topic sizes in the fixture are flattened to 13–19, because the γ-score
+    entropy term otherwise splits an outsized topic.
+  - `blocked-by` fragments are normalized to `#phaseN`.
+  - Edges declared by closed refs are included when both ends are included;
+    `missing` is computed for open tickets only.
+  - `cluster.terms` holds the up-to-8 name candidates.
+  - `clusterKeywords` keys exist only for clusters with a non-empty soup.
+  - Every other contract reading is in the commits' AI Context.
+- **Pre-existing failures** reproduced on unchanged HEAD, outside this ticket:
+  `TestTrackerStoreRegistryUI` (`closeOrgEditor` ReferenceError) and an
+  `internal/mcp` full-package hang in
+  `TestDashboardTransientBoardLockRetainsIndexAndCaches`.
+
 ### Phase 2: `#thandle` Entry, Full-Viewport Overlay Shell & View B (Swimlane Matrix + 3-Tier Hierarchical Click-Focus)
 
 **Files to create or modify**
@@ -1296,6 +1348,55 @@ prefix with `~/.local/bin/ws-rgo` on remote-Go hosts.
     3-tier composition, the connector style, and the semantic grid density;
     the Result records the comparison.
 
+### Result (26647d12c) - 2026-11-20
+
+- **Landed** (`500b23d66..26647d12c`):
+  - `#thandle` in `dashboard-drawer.js`: `thandleSync`, `drRoom` `--thr` and
+    `--drhw`, `drRo`, and the outside-click exclusion;
+  - `dashboard-ticketmap.js`: the overlay shell, state `S`, data flow, the
+    keyboard layering, the Full View modal, the file-card hand-off, and the
+    view-host contract;
+  - `dashboard-ticketmap-viewb.js`: View B's matrix, 3-tier focus, connectors,
+    semantic grid, and inspector;
+  - `dashboard-ticketmap.css`;
+  - the `dim()` and `classify()` selectors;
+  - the vendored `network.svg`;
+  - `js.tmap.*` keys in all 11 tables;
+  - the Node, asset, and browser tests.
+- **Verification:**
+  - `go test ./internal/wsdashboard -run 'TicketMap|DashboardSourceAssembly|CSSClassesDoNotCollide|LucideIcons|TicketGraph'`:
+    ok.
+  - `go test ./internal/wsi18n`: ok.
+  - `node --test testdata/ticketmap-*.test.cjs`: 15/15 pass.
+  - `TestTicketMapBrowser` (items 1–14): pass at 1600×960 and 1280×800 in
+    dark and light, plus 900×700. It sees 179 nodes, 11 lanes, and exactly
+    2 graph requests (first open + Refresh).
+- **Captures:** compared `/tmp/tmshots-p2/b-*.png` vs `mock-b-*.png` and
+  `b-focus-*.png` vs `mock-b-focus-*.png` (both themes, both viewports):
+  match. The lane, header, and card grammar, the 3-tier composition, the
+  connector style, and the grid density all agree. Differences are intended:
+  - ToC and Ego are hidden until Phase 3;
+  - the mockup's "Related N" column caption is not in the spec;
+  - at 1280 the top-bar stats are ellipsized because the bar also carries
+    Clusters, Refresh, and Close.
+- **Decisions:**
+  - View B lives in its own file, `dashboard-ticketmap-viewb.js`
+    (`ticketMap.viewB = (function () { … })();`), placed right after
+    `dashboard-ticketmap.js` in `dashboardScriptFiles`. This keeps every file
+    under the 1000-line size guard.
+  - While the overlay shows, every keydown is stopped; only consumed keys are
+    `preventDefault`ed.
+  - `window.__tmap` is set on the first open.
+  - At 900px a wrapped related card is entered at its left edge (`ts=left`),
+    the same later-row rule Tier 3 uses.
+  - Additional keys: `js.tmap.ind.deg`, `ind.kids`, `ind.phase`, `sim.th`, and
+    `insp.none`.
+  - The drawer tests `TestSearchPaletteHandleGeometry` and
+    `TestDrawerRoomResizeFrame` were updated for the third observed handle.
+- **Pre-existing failures** reproduced on unchanged HEAD:
+  `TestShellTopbarBrowser` (dark/760 `clipped:false`) and
+  `TestPanelRowsBrowser` (agenda event timeout).
+
 ### Phase 3: View C (Constellation Graph + 3-Stage Semantic Zoom Keyword Soup + Ego Ring)
 
 **Files to create or modify**
@@ -1622,3 +1723,63 @@ prefix with `~/.local/bin/ws-rgo` on remote-Go hosts.
   reviewer compares the calm soup topography, the borderless typography, the
   hull and edge tone, the Ego Ring composition, and the chip and toolbar
   placement against v5, and the Result records the comparison.
+
+### Result (4db08f3f0) - 2026-11-20
+
+- **Landed** (`5169291c6..4db08f3f0`):
+  - `dashboard-ticketmap-geom.js` (`ticketMap.geom`): the pure part. It holds
+    mulberry32, the layout and iteration scaling, the hull, `inPoly`, the soup
+    offsets and centroid, the spatial hash, the label planner, the sim-edge
+    pick, the tooltip clamp, `zoomAt`/wheel/fit, the stage and soup alpha, the
+    Ego geometry, and `resolveHit`;
+  - `dashboard-ticketmap-graph.js` (`ticketMap.graph`): the View C DOM,
+    rendering, interaction, and Ego Ring;
+  - View C rules appended to `dashboard-ticketmap.css`, with `--d-tm-sk-l` in
+    all three theme blocks;
+  - the C tab, the focal-card ToC and Ego buttons, and the B↔C shared-state
+    routing;
+  - `js.tmap.c.*` keys in all 11 tables;
+  - `ticketmap-graph.test.cjs` and `TestTicketMapGraphBrowser`.
+- **Verification:**
+  - `node --test testdata/ticketmap-*.test.cjs`: 27/27 pass.
+  - `go test ./internal/wsdashboard -run 'TicketMap|DashboardSourceAssembly|CSSClassesDoNotCollide'`:
+    ok.
+  - `go test ./internal/wsi18n`: ok.
+  - `WS_PLAYWRIGHT_MODULE=… WS_TICKETMAP_SHOTS=/tmp/tmshots-p3 go test ./internal/wsdashboard -run 'TicketMap.*Browser' -count=1`:
+    `TestTicketMapBrowser` and `TestTicketMapGraphBrowser` both PASS. That
+    covers items 1–17 in dark and light at 1600×960 and 1280×800, plus the
+    `hasTouch` 1280×800 context: the CDP pinch scales ×2.00 with 0px drift.
+- **Performance** (dev Mac, headless Chromium):
+  - layout takes 30–34 ms on the 170 fixture (179 nodes) and 54–86 ms on the
+    300 fixture (309 nodes), within the ≤ 150 ms target;
+  - the frame interval during a continuous wheel is 8.6 ms mean (p95 9.3 ms)
+    at 170 and p95 16.6 ms at 300;
+  - a synchronous `draw()` takes 1.0–1.2 ms;
+  - after the single fetch, no session makes any request.
+- **Captures:** compared `/tmp/tmshots-p3/c-soup-*`, `c-zoom-*`, `ego-*`, and
+  `kw-filter-*` against `mock-c-*` (both themes, both viewports): match. The
+  calm soup topography, the borderless typography, the hull and edge tone, the
+  Ego Ring composition, and the chip and toolbar placement agree.
+  The remaining differences come from the data or the spec:
+  - the fixture's keyword weights are steeper and it has fewer cross-cluster
+    links;
+  - the Ego Ring hides non-members, as specified;
+  - the keyword camera lands at k = 1.1 versus v5's 0.9, from the same cap
+    formula over a different fit.
+- **Decisions:**
+  - Pure geometry lives in its own file, `dashboard-ticketmap-geom.js`,
+    loaded before the graph file. The script order is ticketmap, viewb, geom,
+    graph. The split keeps every file under the 1000-line size guard and makes
+    the logic testable in Node.
+  - `.on` is the placed-label state class named by the Playwright contract. It
+    only ever appears compounded onto a `d-tm-` class, and the CSS scope test
+    asserts that.
+  - Ego sector captions are clamped 4px inside the viewport. v5 left one
+    clipped at 1280; this deliberately departs from it.
+  - A `window.__tmapc` probe is exposed only under the same test-hook gate as
+    `window.__tmap`.
+
+
+## Resolution (2026-11-20)
+
+All three phases landed on impl/develop/disk-tusk-phony (59bde59ba..469a78ebd). The lite review found one Critical: root eviction wrote into shared ticketCache maps that a concurrent listing could be reading. It is fixed in 469a78ebd by a clone-and-swap, with a race test that fails without the fix under -race. The Important item, the missing eviction test, is fixed in the same commit, as are two Minors: nodes now sort by stem, and the surface test is strict about missing files. Three Minors remain open as follow-ups. Refresh keeps hidden-cluster, collapsed-lane and keyword filters by the renumbered cluster id. A closed ref's cluster score counts refs placed earlier. A plain listing that runs during a map build can drop fresh docs, which costs speed only. Final verification passed: go test of wsdoc, the targeted wsdashboard run, wsi18n, and mcp TicketGraph; node 27/27; TestTicketMapBrowser and TestTicketMapGraphBrowser.

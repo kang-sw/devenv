@@ -116,6 +116,7 @@ func guardedRoutes() []struct{ method, path, body string } {
 		{http.MethodGet, "/s/livesession/history", ""},
 		{http.MethodGet, "/s/livesession/entry?key=20261107T090000.000000000Z-ab.json", ""},
 		{http.MethodGet, "/s/livesession/tickets/idea", ""},
+		{http.MethodGet, "/s/livesession/tickets/graph", ""},
 		// The file browser's reads, and its host route with an action the
 		// route refuses, so a passing request runs no host command. Its
 		// capability route is admitted by the capability, not the guard
