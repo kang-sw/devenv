@@ -31,7 +31,9 @@ func SpawnAgentEvent(st State, key string) wslive.Event {
 		AgentKind: wslive.AgentKindPi, Harness: st.Backend, Label: label, Status: status,
 		Model: st.Model, Effort: st.Effort, Observed: st.Observed, SessionKey: key,
 		ContextTokens: st.ContextTokens, OutputTps: st.OutputTps,
-		ActiveMs: st.ActiveMs}
+		ActiveMs: st.ActiveMs,
+		Holding:  st.Status != StatusClosed && st.Holding,
+		Alive:    st.Status != StatusClosed && st.Process}
 	if st.Status == StatusRunning {
 		ev.TurnStartedAt = st.TurnStartedAt
 	}

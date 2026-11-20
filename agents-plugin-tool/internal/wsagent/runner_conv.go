@@ -727,6 +727,7 @@ func (c *conv) stateWithKeyCheck(checkKey bool) State {
 		}
 	}
 	st.Process = c.proc != nil
+	st.Holding = c.holding && !c.closed
 	st.Hidden = c.hidden
 	if c.rec.Lead && !c.closed {
 		st.Lifecycle = wsdashboard.SessionAsleep

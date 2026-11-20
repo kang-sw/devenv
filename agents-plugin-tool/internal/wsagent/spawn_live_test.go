@@ -388,3 +388,54 @@ func TestSpawnLeadRejectsUnknownAndCyclicOwnership(t *testing.T) {
 		}
 	}
 }
+
+func TestSpawnAgentEventProjectsHoldingAndAlive(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		st          State
+		wantStatus  string
+		wantHolding bool
+		wantAlive   bool
+	}{
+		{"holding alive", State{Status: StatusIdle, Process: true, Holding: true}, wslive.StatusDone, true, true},
+		{"alive idle", State{Status: StatusIdle, Process: true, Holding: false}, wslive.StatusDone, false, true},
+		{"asleep", State{Status: StatusIdle, Process: false, Holding: false}, wslive.StatusDone, false, false},
+		{"running", State{Status: StatusRunning, Process: true, Holding: false}, wslive.StatusRunning, false, true},
+		{"failed alive", State{Status: StatusIdle, Error: "boom", Process: true}, wslive.StatusFailed, false, true},
+		{"closed clears liveness", State{Status: StatusClosed, Process: true, Holding: true}, wslive.StatusDone, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.st.ID = "child"
+			ev := SpawnAgentEvent(tc.st, "child-key")
+			if ev.Status != tc.wantStatus || ev.Holding != tc.wantHolding || ev.Alive != tc.wantAlive {
+				t.Fatalf("event = %+v, want status=%q holding=%v alive=%v", ev, tc.wantStatus, tc.wantHolding, tc.wantAlive)
+			}
+		})
+	}
+}
+
+func TestConvStateHoldingTracksHeldTurn(t *testing.T) {
+	h, _ := agentHarness(t, nil)
+	h.runner.SetEndpoint("http://127.0.0.1:1")
+	parentID, parentProc := h.agentRunning(h.leadCaller(), AgentSpawnRequest{Prompt: "parent", Tier: "small", Authority: "read-only"})
+	childID, childProc := h.agentRunning(h.holderOf(parentID), AgentSpawnRequest{Prompt: "child", Tier: "small", Authority: "read-only"})
+	parentProc.reply("waiting on child")
+	eventually(t, "parent holding", func() bool {
+		st, err := h.runner.Get(parentID)
+		return err == nil && st.Holding && st.Process
+	})
+	childProc.reply("child done")
+	eventually(t, "parent releases hold", func() bool {
+		st, err := h.runner.Get(parentID)
+		return err == nil && !st.Holding
+	})
+	if _, err := h.runner.CloseConversation(childID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.runner.CloseConversation(parentID); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := h.runner.Get(parentID); err != nil || st.Holding || st.Process {
+		t.Fatalf("closed parent kept holding/process: %+v, err=%v", st, err)
+	}
+}
