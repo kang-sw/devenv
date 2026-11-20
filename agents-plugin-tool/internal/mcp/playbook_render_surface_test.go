@@ -703,6 +703,50 @@ func TestRenderReturnsFrontmatterRecommendedTier(t *testing.T) {
 	}
 }
 
+func TestRenderShippedExploreForAgentSpawn(t *testing.T) {
+	useLeadProfile(t)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	useResourceFixture(t, shippedRsrcRootForTest())
+	repo := initGitRepo(t)
+	runGit(t, repo, "commit", "--allow-empty", "-m", "initial")
+	s := NewServer(repo, "test")
+	s.observeHarness("test", "codex")
+	leadKey, err := s.sessions.mint(repo, roleLead, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp := callToolOnce(t, s, 1, "playbook.render", map[string]any{
+		"name":        "explore",
+		"session_key": leadKey,
+	})
+	if toolIsError(t, resp) {
+		t.Fatalf("playbook.render explore: %s", resp)
+	}
+	text := toolText(t, resp)
+	for _, want := range []string{"recommended-tier: small", "recommended-model:", "recommended-reasoning-effort:"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("render response missing %q: %q", want, text)
+		}
+	}
+	path := strings.Split(strings.TrimSpace(text), "\n")[0]
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered := string(body)
+	if !strings.HasPrefix(rendered, "# Explore Worker\n\nYou are ") {
+		t.Fatalf("rendered explore is not addressed to the spawned worker:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "To continue or refine this exploration") || strings.Contains(rendered, "Your parent can continue this agent") {
+		t.Fatalf("rendered explore carries a caller continuity tip:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "{{.") {
+		t.Fatalf("rendered explore has an unresolved variable:\n%s", rendered)
+	}
+}
+
 // tierOverridePlaybookContent declares frontmatter tier: medium and substitutes
 // {{.RoleModel}} inline, so a render's in-body model text moves with whichever
 // tier actually governed resolution (frontmatter, or a render-time override).
