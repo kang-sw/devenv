@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
@@ -53,7 +54,7 @@ func TestPiHostedEmbeddedPackageMatrix(t *testing.T) {
 			if err != nil || json.Unmarshal(raw, &owner) != nil || owner.Name != want {
 				t.Fatalf("workflow owner: %s %v", raw, err)
 			}
-			for _, path := range []string{"config-manifest.json", "dashboard-config-manifest.json", "rsrc/manifest.json", "skills/lead-run/SKILL.md"} {
+			for _, path := range []string{"config-manifest.json", "agy-config-manifest.json", "dashboard-config-manifest.json", "rsrc/manifest.json", "skills/lead-run/SKILL.md"} {
 				if _, err := os.Stat(filepath.Join(workflow, filepath.FromSlash(path))); err != nil {
 					t.Fatal(err)
 				}
@@ -65,6 +66,11 @@ func TestPiHostedEmbeddedPackageMatrix(t *testing.T) {
 			for key, value := range policy {
 				if spec.Lead.Env[key] != value {
 					t.Fatalf("%s = %q want %q", key, spec.Lead.Env[key], value)
+				}
+			}
+			for _, manifestPath := range strings.Split(spec.Lead.Env["WS_MCP_CONFIG_MANIFESTS"], ";") {
+				if _, err := os.Stat(manifestPath); err != nil {
+					t.Fatalf("staged manifest %q missing: %v", manifestPath, err)
 				}
 			}
 			// Workers prepare the real native extension using only the selected name.

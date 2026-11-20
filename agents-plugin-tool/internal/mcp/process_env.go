@@ -75,6 +75,9 @@ type ServerOptions struct {
 	// every daemon-hosted connection, including token-forwarding workers, so
 	// each connection resolves its backend descriptor and profiles.
 	AgentBackends AgentBackendRegistry
+	// WorktreeChildren exposes the daemon's read-only bound-child query for
+	// worktree.release without granting the lead runner handle (Agents).
+	WorktreeChildren WorktreeChildrenReader
 	// Notes is the daemon's shared presentation cache; nil on standalone servers.
 	Notes *wsnote.Cache
 	// WhiteboardChanged invalidates daemon timers after a successful board write,
@@ -167,6 +170,12 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 	}
 	s.whiteboardChanged = opts.WhiteboardChanged
 	s.pi.agents = opts.Agents
+	s.pi.worktreeChildren = opts.WorktreeChildren
+	if s.pi.worktreeChildren == nil && opts.Agents != nil {
+		if reader, ok := opts.Agents.(WorktreeChildrenReader); ok {
+			s.pi.worktreeChildren = reader
+		}
+	}
 	s.startPiFeed()
 	return s
 }

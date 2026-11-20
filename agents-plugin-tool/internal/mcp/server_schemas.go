@@ -117,7 +117,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "git.resolve_impl_branch",
-			"description": "Resolve a ticket's canonical implementation branch before worktree provisioning. Pure name resolution: base is the exact run base/current branch (including goal/* or impl/*); no branch is created. Uses the same merge-root and ticket identity authority as route.resolve_implement.",
+			"description": "Resolve a ticket's canonical implementation branch before worktree provisioning. Pure name resolution: base is the exact run base/current branch (including goal/* or impl/*); no branch is created, and it does not inspect whether the branch exists or has landed (worktree.acquire and route.resolve_implement decide recreate-or-block). Uses the same merge-root and ticket identity authority as route.resolve_implement.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -512,13 +512,13 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "worktree.release",
-			"description": "Lead-only. Return a worktree to the pool by path or worker key: run pre_release hooks, reset --hard and clean -ffdx (discarding uncommitted and unpreserved ignored files), detach HEAD, record preserved size and remove its lease. Hook failure leaves it leased. Does not delete the worktree or retire the key. Refuses another holder's lease or a dirty unleased worktree unless forced. Text by default; format=json for structured output.",
+			"description": "Lead-only. Return a worktree to the pool by path or worker key: run pre_release hooks, reset --hard and clean -ffdx (discarding uncommitted and unpreserved ignored files), detach HEAD, record preserved size and remove its lease. Hook failure leaves it leased. Does not delete the worktree or retire the key. Refuses another holder's lease, a dirty unleased worktree, or a worktree with non-closed bound child agents unless forced. Text by default; format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path":   stringProperty("Absolute worktree path to release. Provide path or key."),
 					"key":    stringProperty("A worker session key bound to the worktree to release. Provide path or key."),
-					"force":  boolProperty("Release another holder's lease or a dirty unleased worktree. Confirm the owner is gone or agreed first; uncommitted work is discarded."),
+					"force":  boolProperty("Release another holder's lease, a dirty unleased worktree, or a worktree with non-closed bound child agents. Confirm the owner and bound children are gone or agreed first; uncommitted work is discarded."),
 					"format": stringProperty(formatPropertyDescription),
 				},
 			},

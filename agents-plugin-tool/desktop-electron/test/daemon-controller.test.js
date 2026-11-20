@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
-const { connectDaemon } = require('../daemon-controller');
+const { connectDaemon, launchEnv } = require('../daemon-controller');
 const { fixture } = require('./daemon-fixture.cjs');
 const URL = 'http://127.0.0.1:39418/'; // Only a value in injected discovery; never bound.
 const config = f => ({ appRoot: f.appRoot, userData: f.userData, platform: 'darwin' });
@@ -369,6 +369,14 @@ test('missing macOS daemon starts only staged dashboard, preserves config/cache,
   assert(calls >= 3);
   assert(fs.existsSync(path.join(stagedRoot, 'rsrc/hello/hello.md')));
   assert(fs.existsSync(path.join(stagedRoot, '.claude-plugin/plugin.json')));
+});
+test('launchEnv includes agy-config-manifest.json when staged package provides it', t => {
+  const f = fixture(t, 'darwin');
+  const agy = path.join(f.bundled.root, 'agy-config-manifest.json');
+  fs.writeFileSync(agy, JSON.stringify({ schema_version: 1 }));
+  const built = launchEnv(env(f), { root: f.bundled.root, binary: f.bundled.binary, env: {} }, env(f).WS_CACHE_HOME);
+  assert.deepEqual(built.WS_MCP_CONFIG_MANIFESTS.split(';'),
+    ['config-manifest.json', 'agy-config-manifest.json', 'dashboard-config-manifest.json'].map(file => path.join(f.bundled.root, file)));
 });
 test('development source stages its own package, invalid explicit selection never falls back', async t => {
   const f = fixture(t, 'darwin');
