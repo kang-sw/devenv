@@ -403,7 +403,14 @@
       "registered_at": "2026-11-19T07:51:11Z"
     },
     "261116-feat-ws-whiteboard-retire-disk-pages": {
-      "registered_at": "2026-11-20T08:58:53Z"
+      "registered_at": "2026-11-20T08:58:53Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-20T11:24:55Z"
+      }
     },
     "261116-research-ws-polling-minimization-event-ledger": {
       "registered_at": "2026-11-16T04:15:13Z"
