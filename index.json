@@ -605,7 +605,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-20T18:02:14Z"
+        "touched_at": "2026-11-20T18:04:38Z",
+        "impl": {
+          "branch": "impl/develop/rare-scoop-dose"
+        }
       }
     },
     "261121-bug-ws-dogfood-tune-agy-release-route-gaps": {
