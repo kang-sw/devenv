@@ -217,9 +217,15 @@ func TestPlanUsageAgyActivityRespectsDebounceAndHolds(t *testing.T) {
 			clockMu.Lock()
 			now = now.Add(tc.advance)
 			clockMu.Unlock()
-			d.AgyActivity()
-			// The second handoff has no probe to wait for; give its goroutine time to run.
-			time.Sleep(50 * time.Millisecond)
+			done := make(chan struct{})
+			d.agyActivity(done)
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				t.Fatal("second agy activity handoff did not return")
+			}
+			// Any incorrectly admitted probe joined before the handoff returned.
+			s.probes.Wait()
 			if got := fakeAgyCallCount(countFile); got != 1 {
 				t.Fatalf("second activity spawned despite %s: count=%d", tc.name, got)
 			}

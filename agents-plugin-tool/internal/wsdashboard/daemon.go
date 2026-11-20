@@ -690,7 +690,17 @@ func (d *Daemon) agentChanged(replyID, _ string) {
 // AgyActivity schedules a usage refresh after a hosted agy turn settles.
 // The handoff must not wait for the plan-usage store's lock.
 func (d *Daemon) AgyActivity() {
-	go d.planUsage.refreshAgy()
+	d.agyActivity(nil)
+}
+
+// agyActivity exposes completion of the lock-taking handoff to package tests.
+func (d *Daemon) agyActivity(done chan<- struct{}) {
+	go func() {
+		d.planUsage.refreshAgy()
+		if done != nil {
+			close(done)
+		}
+	}()
 }
 
 // poll fills the session index at once and then re-reads every registered
