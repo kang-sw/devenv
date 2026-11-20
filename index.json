@@ -619,6 +619,9 @@
           "branch": "impl/develop/disk-tusk-phony"
         }
       }
+    },
+    "261120-research-ws-daemon-supervision-http-attach": {
+      "registered_at": "2026-11-20T12:40:36Z"
     }
   }
 }
