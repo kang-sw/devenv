@@ -909,7 +909,9 @@
   // available | ready) the settings line. downloadPage, when the shell sends
   // it, adds [Open download page] (replacing [Update] on available: a shell
   // that does not update itself); the link opens in the system browser
-  // through the shell's window-open handler.
+  // through the shell's window-open handler. A current shell adds an
+  // optional action (canary | stable-return) to statuses and phases of a
+  // manual channel selection, and limited to a canary miss at the page cap.
   function desktopUpdate() {
     var api = window.werkschaftDesktop && window.werkschaftDesktop.update;
     var card = gmenu && gmenu.querySelector(".gmenu");
@@ -930,6 +932,36 @@
     head.textContent = wsT("js.update.title");
     card.insertBefore(head, note);
     var check = item("dupd-check", "↻", wsT("js.update.check"));
+    // Manual channel actions: each control appears only when this shell's
+    // bridge has its member, so an older shell keeps the original row. The
+    // canary pill shares the check row; Back to stable shows only once the
+    // shell reports a packaged canary (a stable relaunch drops it).
+    if (typeof api.checkCanary === "function") {
+      var row = doc.createElement("div");
+      row.className = "dupd-row";
+      card.insertBefore(row, check);
+      row.appendChild(check);
+      var canary = doc.createElement("button");
+      canary.type = "button";
+      canary.id = "dupd-canary";
+      canary.className = "dupd-canary";
+      canary.textContent = wsT("js.update.canary");
+      canary.title = wsT("js.update.canary.hint");
+      row.appendChild(canary);
+      canary.addEventListener("click", function () { api.checkCanary(); });
+    }
+    var stable = null, running = "";
+    if (typeof api.backToStable === "function" && typeof api.channel === "function") {
+      stable = item("dupd-stable", "↩", wsT("js.update.stable"));
+      stable.hidden = true;
+      stable.addEventListener("click", function () { api.backToStable(); });
+      Promise.resolve().then(function () { return api.channel(); }).then(function (c) {
+        if (!c || c.canary !== true) return;
+        running = String(c.version || "");
+        stable.querySelector(".gs").textContent = wsT("js.update.stable.hint", running);
+        stable.hidden = false;
+      }, function () {});
+    }
     var restart = item("dupd-restart", "⏻", wsT("js.update.restart"));
     restart.hidden = true;
     check.addEventListener("click", function () { api.check(); });
@@ -937,7 +969,9 @@
     function phaseLine(p) {
       check.querySelector(".gs").textContent = !p ? "" :
         p.phase === "none" ? wsT("js.update.state.none") :
-        p.phase === "available" ? wsT("js.update.state.available", p.version) + (p.skipped ? " " + wsT("js.update.skipped") : "") :
+        p.phase === "available" ? (p.action === "stable-return" ? wsT("js.update.stable.state", p.version) :
+          p.action === "canary" ? wsT("js.update.canary.state", p.version) :
+          wsT("js.update.state.available", p.version)) + (p.skipped ? " " + wsT("js.update.skipped") : "") :
         p.phase === "ready" ? wsT("js.update.state.ready", p.version) : "";
       restart.hidden = !p || p.phase !== "ready";
     }
@@ -950,16 +984,26 @@
       var v = String(s.version || ""), m = String(s.message || "");
       var page = typeof s.downloadPage === "string" && /^https:\/\//.test(s.downloadPage) ? s.downloadPage : "";
       var pageAct = page ? [{ label: wsT("js.update.downloadpage"), run: function () { window.open(page, "_blank", "noopener"); } }] : [];
-      if (s.state === "available") {
-        toast(wsT("js.update.available", v) + (s.skipped ? " " + wsT("js.update.skipped") : ""), { sticky: true, dismiss: close, actions:
+      // action names a manual channel selection (canary | stable-return);
+      // an older shell never sends it, so those statuses read as before.
+      var back = s.action === "stable-return", canaryAct = s.action === "canary";
+      if (s.state === "available" && back) {
+        // An explicit downgrade: name the stable target and the running
+        // canary before anything installs. No skip: it is a one-off choice.
+        toast(wsT("js.update.stable.available", v, String(s.current || running || "")), { sticky: true, dismiss: close, actions:
+          page ? pageAct : [{ label: wsT("js.update.stable.install", v), run: function () { api.download(); } }] });
+      } else if (s.state === "available") {
+        toast(wsT(canaryAct ? "js.update.canary.available" : "js.update.available", v) + (s.skipped ? " " + wsT("js.update.skipped") : ""), { sticky: true, dismiss: close, actions:
           (page ? pageAct : [{ label: wsT("js.update.install"), run: function () { api.download(); } }]).concat(
           [{ label: wsT("js.update.skip"), run: function () { api.skip(v); } }]) });
       } else if (s.state === "downloading") toast(wsT("js.update.downloading", v), { sticky: true });
       else if (s.state === "ready") {
-        toast(wsT("js.update.ready", v), { sticky: true, dismiss: close, actions: [
+        toast(wsT(back ? "js.update.stable.ready" : "js.update.ready", v), { sticky: true, dismiss: close, actions: [
           { label: wsT("js.update.restart"), run: function () { api.restart(); } }] });
-      } else if (s.state === "current") toast(wsT("js.update.current", v));
-      else if (s.state === "error") toast(wsT("js.update.failed"), { kind: "warn" });
+      } else if (s.state === "current" && canaryAct) toast(wsT(s.limited ? "js.update.canary.limited" : "js.update.canary.none"));
+      else if (s.state === "current" && back) toast(wsT("js.update.stable.current"));
+      else if (s.state === "current") toast(wsT("js.update.current", v));
+      else if (s.state === "error") toast(wsT(canaryAct ? "js.update.canary.failed" : back ? "js.update.stable.failed" : "js.update.failed"), { kind: "warn" });
       else if (s.state === "download-error") toast(wsT("js.update.downloadfailed", m), { kind: "warn", sticky: true, dismiss: close, actions: pageAct });
       else if (s.state === "apply-error") toast(wsT("js.update.applyfailed", m), { kind: "warn", sticky: true, dismiss: close, actions: pageAct });
     });
