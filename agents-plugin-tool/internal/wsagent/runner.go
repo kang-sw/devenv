@@ -1624,7 +1624,8 @@ type State struct {
 	// back from the one asked for).
 	PermissionMode string `json:"permission_mode,omitempty"`
 	ActiveMode     string `json:"active_mode,omitempty"`
-	// Common projections are lead-only. Worker common posture is not applied.
+	// Common projections are computed for both leads and workers; workers keep
+	// their fixed capability loadout while permission admission remains separate.
 	PermissionLevel       PermissionLevel `json:"permission_level,omitempty"`
 	PermissionSource      string          `json:"permission_source,omitempty"`
 	PermissionEnforcement string          `json:"permission_enforcement,omitempty"`
