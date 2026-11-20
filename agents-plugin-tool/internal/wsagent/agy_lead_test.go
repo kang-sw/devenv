@@ -351,6 +351,95 @@ func TestAgyLeadRejoinOfAnUnfinishedStartRestarts(t *testing.T) {
 	}
 }
 
+// TestAgyLeadRejoinOfMovedRouteRestartsWithSessionResume: when a replacement
+// daemon listens on a different MCP route than the rejoined agy process was
+// started with, the runner marks the process mcpStale and restarts it at
+// replay completion as a fresh process that opens with session/resume on the
+// recorded session ID and a new token for the new route.
+func TestAgyLeadRejoinOfMovedRouteRestartsWithSessionResume(t *testing.T) {
+	h, f := newAgyLeadHarness(t)
+	const (
+		endpoint1 = "http://127.0.0.1:1"
+		endpoint2 = "http://127.0.0.1:2"
+	)
+	h.startAt(endpoint1)
+	id := h.lead(BackendAgy, LeadOptions{}).ID
+	f.replyID = id
+	h.send(id, "hello")
+	holder := h.holder(id)
+	eventually(t, "the first prompt", func() bool { return len(agyPromptIDs(h, holder)) == 1 })
+	h.holders.out(holder, `{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"`+agyPromptIDs(h, holder)[0]+`"}`)
+	h.idle(id)
+
+	rec1 := h.record(id)
+	token1 := rec1.MCPToken
+	if rec1.SessionID != "agy-s1" || rec1.MCPURL != endpoint1+wsdashboard.ProxyHTTPPath {
+		t.Fatalf("before move: session=%q url=%q", rec1.SessionID, rec1.MCPURL)
+	}
+
+	// Rejoin under a daemon whose MCP HTTP route moved to a different endpoint.
+	h.runner.Close()
+	h.holders.restart()
+	h.startAt(endpoint2)
+
+	eventually(t, "stale route restart", func() bool {
+		return h.holders.opCount("stop "+holder) == 1 && h.holders.opCount("spawn") == 2
+	})
+	eventually(t, "fresh agy process", func() bool {
+		st := h.state(id)
+		return st.Process && h.holder(id) != holder
+	})
+	fresh := h.holder(id)
+	eventually(t, "fresh process opens with session/resume", func() bool {
+		return len(h.holders.acpInputs(fresh, "session/resume")) == 1
+	})
+	if news := h.holders.acpInputs(fresh, "session/new"); len(news) != 0 {
+		t.Fatalf("fresh process sent %d session/new requests, want 0", len(news))
+	}
+	resumed := h.holders.acpInputs(fresh, "session/resume")[0]
+	if gotSID := acpField(t, resumed, "sessionId"); gotSID != "agy-s1" {
+		t.Fatalf("session/resume sessionId = %v, want agy-s1", gotSID)
+	}
+	rec2 := h.record(id)
+	token2 := rec2.MCPToken
+	if token2 == "" || token2 == token1 {
+		t.Fatalf("fresh process must mint a new token: old=%q new=%q", token1, token2)
+	}
+	if rec2.MCPURL != endpoint2+wsdashboard.ProxyHTTPPath {
+		t.Fatalf("record MCPURL = %q, want %q", rec2.MCPURL, endpoint2+wsdashboard.ProxyHTTPPath)
+	}
+	var resumeParams struct {
+		MCPServers []struct {
+			Type, Name, URL string
+			Headers         []struct{ Name, Value string }
+		} `json:"mcpServers"`
+	}
+	_ = json.Unmarshal(resumed, &resumeParams)
+	if s := resumeParams.MCPServers; len(s) != 1 || s[0].Type != "http" || s[0].Name != ReservedMCPServer ||
+		s[0].URL != endpoint2+wsdashboard.ProxyHTTPPath || len(s[0].Headers) != 1 ||
+		s[0].Headers[0].Name != "Authorization" || s[0].Headers[0].Value != "Bearer "+token2 {
+		t.Fatalf("session/resume ws MCP server = %+v", s)
+	}
+	if _, _, ok := h.runner.ResolveMCPToken(token1); ok {
+		t.Fatal("stale route token must not resolve")
+	}
+	if hello, _, ok := h.runner.ResolveMCPToken(token2); !ok || hello.Harness != BackendAgy {
+		t.Fatalf("fresh token resolve = (%+v, %v), want agy", hello, ok)
+	}
+
+	// Next turn runs on the resumed session in the fresh process.
+	h.send(id, "after move")
+	eventually(t, "prompt on fresh process", func() bool { return len(agyPromptIDs(h, fresh)) == 1 })
+	if got := h.holders.acpInputs(fresh, "session/prompt")[0]; acpField(t, got, "sessionId") != "agy-s1" {
+		t.Fatalf("post-move prompt sessionId = %s", got)
+	}
+	h.holders.out(fresh, `{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"`+agyPromptIDs(h, fresh)[0]+`"}`)
+	h.idle(id)
+	if st := h.state(id); st.Error != "" {
+		t.Fatalf("post-move state error = %q", st.Error)
+	}
+}
+
 // TestAgyLeadPromptCarriesTheWorkflowManual: a hosted agy lead's session
 // request appends its key sentence and the manual the daemon rendered for
 // agy, its directory, and its key to agy's system prompt
