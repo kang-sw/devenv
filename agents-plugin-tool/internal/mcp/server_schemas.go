@@ -79,7 +79,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "agenda.set",
-			"description": "Upsert a session-level agenda blob under a key. Agenda blobs hold mode context ('what are we doing and why') and are reminded at workflow-manual load. Session-scoped: clear a blob when its work ends; a fact a future session needs belongs in note.write. Freeform fallback for cases not covered by a typed enter.* tool. Pass merge: true to patch the stored blob (RFC 7396 JSON Merge Patch) instead of replacing it, so a small change does not re-send the whole blob.",
+			"description": "Upsert a session agenda blob under a key. Agenda is this session's working memory: what is being done, why, the next step, and pending questions. It is restored with the session key after compaction or resume via workflow_state; clear a blob when its work ends. Use todo for an ordered checklist of steps; keep context, rationale, and pending state in agenda. A fact a future session needs belongs in note.write. Pass merge: true to patch the stored blob (RFC 7396 JSON Merge Patch) instead of replacing it, so a small change does not re-send the whole blob.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -150,7 +150,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "todo.add",
-			"description": "Add a new pending todo item with a caller-provided key (unique within the active list) and title. position defaults to \"end\" (append); \"before\"/\"after\" insert relative to ref_key, which is required for those positions and rejected for \"end\". Erased keys are reusable.",
+			"description": "Add a pending step to the session's ordered todo checklist with a caller-provided key (unique within the active list) and title. position defaults to \"end\" (append); \"before\"/\"after\" insert relative to ref_key, which is required for those positions and rejected for \"end\". Erased keys are reusable.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -166,7 +166,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "todo.check",
-			"description": "Set the status of an existing todo item. Status is one of pending, wip, done, defer. Successful raw/text output includes a full ordered checkpoint todo rendering with instructions only for adjacent actionable items; compact rows with hidden instructions get an indented ...+ marker.",
+			"description": "Mark a step on the session's ordered todo checklist as pending, wip, done, or defer. Session context and rationale belong in agenda.set, not todo. Successful raw/text output includes a full ordered checkpoint todo rendering with instructions only for adjacent actionable items; compact rows with hidden instructions get an indented ...+ marker.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -179,7 +179,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "todo.erase",
-			"description": "Remove a todo item by key. The key becomes reusable afterwards.",
+			"description": "Remove a step from the session's todo checklist by key. The key becomes reusable afterwards.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -191,7 +191,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "todo.clear",
-			"description": "Remove all todo items, or only done items when done_only is true (leaving pending, wip, defer).",
+			"description": "Remove all steps from the session's todo checklist, or only done steps when done_only is true (leaving pending, wip, defer).",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -203,7 +203,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "todo.list",
-			"description": "Render the todo list with visible {key} tokens. Summary mode (default) shows all pending/wip items plus one adjacent context item on each side of each active block, collapsing the rest to '...'. Full mode shows every item in order.",
+			"description": "Show the session's ordered checklist of steps with visible {key} tokens. Session context and rationale belong in agenda.set, not todo. Summary mode (default) shows all pending/wip items plus one adjacent context item on each side of each active block, collapsing the rest to '...'. Full mode shows every item in order.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -215,7 +215,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "todo.read",
-			"description": "Return one todo item's full JSON payload, including nullable instruction.",
+			"description": "Return one step from the session's todo checklist as a full JSON payload, including nullable instruction.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -227,7 +227,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "todo.reorder",
-			"description": "Move the contiguous span [from_key … to_key] as a block to before or after ref_key. ref_key must lie outside the span.",
+			"description": "Reorder steps in the session's todo checklist: move the contiguous span [from_key … to_key] as a block to before or after ref_key. ref_key must lie outside the span.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
