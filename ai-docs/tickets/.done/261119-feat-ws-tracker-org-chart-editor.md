@@ -8,6 +8,7 @@ related:
   261110-epic-ws-tracker-team-feedback: workload visibility follows the org tree
 sage-review-design-reviewed: 10a1cceda2f6fe00
 sage-review-completeness-reviewed: 10a1cceda2f6fe00
+completed: 2026-11-20
 ---
 
 # Tracker Team card org-chart view and admin org-chart editor
@@ -262,3 +263,16 @@ Verification:
   - Interactive Playwright check on live fixture: revoked/active `.kline .idcopy` button heights 19px (single line), `kim-hn` admin toggle disabled when `lee-dy` removal is staged, atomic Save closes modal and applies all 3 changes cleanly.
   - LOOK comparison (`compared /tmp/tracker-org-chart/phase2-editor.png vs /tmp/tracker-org-chart/mockup-editor.png`: match): header, search/expand toolbar, root drop zone, elbow-connected projected tree, amber staged stripes/chips, dimmed drag source (`lee-dy`), amber pending admin button (`관리자 해제됨`), red cycle refusal target + banner (`jung-mj`), right-hand staged-changes list, save-order note, roles link, and footer match `editor.html`. Deliberate deviations: last-admin lock tooltip opens on hover via dashboard `tipAttr` instead of permanently covering adjacent rows; avatars use the dashboard's relation-tinted colors rather than monochrome grey; mockup-only explanatory callout ("관리자 지정 예: ...") is omitted in live UI.
 - Compatibility tier: T0.
+
+#### Edition (52c5ce3) - 2026-11-20
+
+- Addressed all findings from one-pass `code-review-lite` (2 Important, 2 Minor):
+  - Mounted `#tktip` inside the nearest open `<dialog>` while shown (restored to `document.body` in `hideTip`/`closeOrgEditor`) with `#tkorged-body` isolating `renderOrgEditor()` updates so tooltips inside `#tkorged` (including the last-admin lock tooltip) render in the top layer above the modal backdrop; surfaced cycle-blocked `oe-undo` errors in the in-modal `.tk-oe-berr` alert banner and removed the hidden behind-backdrop save-refusal toast.
+  - Guarded `#tk-oe-q` search input against `e.isComposing` and added `compositionend` handling to preserve Korean/CJK IME composition.
+  - Closed `#tkorged` in `dropGone()` when the active store disappears, and normalized dropped no-op lead `baseLeads[id]` through `orgTree(curVS.members).parentOf` in `orgEdSave()`.
+- Re-verified: `go test -count=1 ./internal/wsi18n`, narrow `./internal/wsdashboard` tests, `node --test` (10/10), and Playwright top-layer tooltip + IME composition + atomic save checks all PASS.
+
+
+## Resolution (2026-11-20)
+
+Implemented both phases of the tracker Team org-chart view and admin org-chart editor modal on impl/develop/why-shone-henna with 11-locale i18n, Node and Go tests, side-by-side LOOK verification against view.html and editor.html, and all code-review-lite findings fixed (T0 compatibility).
