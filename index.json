@@ -402,19 +402,6 @@
     "261116-feat-ws-subagent-worktree-lease": {
       "registered_at": "2026-11-19T07:51:11Z"
     },
-    "261116-feat-ws-whiteboard-retire-disk-pages": {
-      "registered_at": "2026-11-20T08:58:53Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-20T11:25:55Z",
-        "impl": {
-          "branch": "impl/develop/stuck-crave-groin"
-        }
-      }
-    },
     "261116-research-ws-polling-minimization-event-ledger": {
       "registered_at": "2026-11-16T04:15:13Z"
     },
@@ -618,7 +605,7 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-20T12:45:55Z",
+        "touched_at": "2026-11-20T13:32:34Z",
         "impl": {
           "branch": "impl/develop/clump-chill-yodel"
         }
@@ -626,19 +613,6 @@
     },
     "261120-feat-ws-dashboard-numbers-screen": {
       "registered_at": "2026-11-20T11:31:45Z"
-    },
-    "261120-feat-ws-dashboard-ticket-map-view": {
-      "registered_at": "2026-11-20T07:05:30Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-20T09:24:26Z",
-        "impl": {
-          "branch": "impl/develop/disk-tusk-phony"
-        }
-      }
     },
     "261120-research-ws-daemon-supervision-http-attach": {
       "registered_at": "2026-11-20T12:40:36Z"
