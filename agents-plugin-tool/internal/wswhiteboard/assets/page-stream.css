@@ -167,6 +167,11 @@
 .pmeta .pflink { width: 22px; height: 22px; min-width: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 5px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
 .pmeta .pflink .i { width: 13px; height: 13px; }
 .pmeta .pflink.on, .pmeta .pflink:hover { background: var(--wb-wash); color: var(--wb-fg); }
+.pmeta .pfmention { box-sizing: border-box; width: 22px; height: 22px; min-width: 22px; padding: 0; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--wb-muted-fg); font: 700 14px/20px var(--wb-sans); cursor: pointer; opacity: 0; transition: opacity .14s ease, color .14s ease, background .14s ease; }
+.entry-panel > summary:hover .pfmention, .entry-panel > summary:focus-within .pfmention, .pfmention:focus-visible { opacity: 1; }
+.pmeta .pfmention:hover, .pmeta .pfmention:focus-visible { background: var(--wb-wash); border-color: var(--wb-line); color: var(--wb-primary); }
+.pmeta .pfmention:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 1px; }
+@media (hover: none) { .pmeta .pfmention { opacity: 1; } }
 .historical > .entry-panel:not(.msg) > summary { border-left-color: var(--wb-muted-fg); background: var(--wb-wash); }
 .historical > .entry-panel:not(.msg) > summary:hover { background: color-mix(in srgb, var(--wb-fg) 9%, transparent); }
 .historical > .entry-panel[open]:not(.msg) > summary { border-bottom-color: var(--wb-line); }

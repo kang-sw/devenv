@@ -133,6 +133,8 @@
       U.ego.title = wsT("js.tmap.c.ego.tip") + " (E)";
       U.ego.appendChild(tm.kbd("E"));
       U.ego.disabled = true;
+      U.mention = tm.mentionButton(function () { return G && G.nodes[S.sel]; }, "d-tm-cmention");
+      if (U.mention) { U.mention.disabled = true; t.appendChild(U.mention); }
       // The keyword chip: "<prefix> <term> (n) ×", the × its clear button.
       U.kw = mk(t, "span", "d-tm-ckw", null, "tmckw");
       U.kw.hidden = true;
@@ -381,6 +383,7 @@
       });
       edges.concat(sims).forEach(function (e) { e.el.classList.toggle("d-tm-hl", s !== null && (e.a === s || e.b === s)); });
       U.ego.disabled = s === null;
+      if (U.mention) U.mention.disabled = s === null;
       placeRings();
       schedule();
     }

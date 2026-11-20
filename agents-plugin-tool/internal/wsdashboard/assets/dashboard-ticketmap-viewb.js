@@ -56,6 +56,13 @@
     var fx = null, cur = null, F = {}, raf = 0;
 
     function el(tag, cls, text) { return tm.el(tag, cls, text); }
+    function withMention(card, n, cls) {
+      var wrap = el("div", "d-tm-mwrap" + (cls ? " " + cls : ""));
+      wrap.appendChild(card);
+      var b = tm.mentionButton(n);
+      if (b) wrap.appendChild(b);
+      return wrap;
+    }
     function data() { return tm.data(); }
     function clusterOf(n) { var G = data(); return G && G.byCluster[n.cluster]; }
     function stOrd(s) { return tm.ST.indexOf(s); }
@@ -176,7 +183,7 @@
         cell.appendChild(el("span", "d-tm-ccap", colName(col)));
         list.forEach(function (n, ix) {
           var xtra = col === "ref" && ix >= REFCAP, cd = card(n, xtra);
-          cards[n.i] = cd;
+          cards[n.i] = cd.querySelector(".d-tm-card");
           L.nodes.push(n);
           if (xtra) L.xtra.push(n);
           cell.appendChild(cd);
@@ -212,7 +219,7 @@
     }
     // card is a matrix card: exactly the top row and the title, no excerpt.
     function card(n, xtra) {
-      var c = tm.hue(tm.button("d-tm-card d-tm-st-" + n.status + (n.open ? "" : " d-tm-ref") + (xtra ? " d-tm-xtra" : "")), clusterOf(n));
+      var c = tm.hue(tm.button("d-tm-card d-tm-st-" + n.status + (n.open ? "" : " d-tm-ref")), clusterOf(n));
       c.setAttribute("data-i", n.i);
       c.title = n.stem;
       var top = el("span", "d-tm-ctop");
@@ -221,7 +228,7 @@
       top.appendChild(indicators(n));
       c.appendChild(top);
       c.appendChild(el("span", "d-tm-ctt", n.title));
-      return c;
+      return withMention(c, n, "d-tm-mcard" + (xtra ? " d-tm-xtra" : ""));
     }
     function filter() {
       if (!mx) return;
@@ -231,6 +238,7 @@
         var any = false, more = 0;
         L.nodes.forEach(function (n) {
           var on = tm.shown(n), hit = on && tm.isHit(n.i);
+          cards[n.i].parentNode.hidden = !on;
           cards[n.i].hidden = !on;
           cards[n.i].classList.toggle("d-tm-hit", hit);
           L.dots[n.i].hidden = !on;
@@ -463,6 +471,8 @@
       var full = tm.button("btn d-tm-btn", wsT("js.tmap.focus.full"), "file-text");
       full.id = "tmffull";
       full.addEventListener("click", function () { tm.openFull(n.i); });
+      var mention = tm.mentionButton(n, "d-tm-mention-action");
+      if (mention) acts.appendChild(mention);
       acts.appendChild(toc);
       acts.appendChild(ego);
       acts.appendChild(full);
@@ -518,7 +528,7 @@
     // tickets one relation-note line.
     function xcard(x, k, xtra) {
       var G = data(), n = F.n, m = G.nodes[x.j];
-      var c = tm.hue(tm.button("d-tm-xc" + (xtra ? " d-tm-xtra" : "")), clusterOf(m));
+      var c = tm.hue(tm.button("d-tm-xc"), clusterOf(m));
       c.setAttribute("data-pivot", m.i);
       c.setAttribute("data-g", k);
       var notes = x.notes.filter(function (t) { return t.note; });
@@ -549,7 +559,7 @@
         nl.appendChild(doc.createTextNode(notes[0].note));
         c.appendChild(nl);
       }
-      return c;
+      return withMention(c, m, "d-tm-mxc" + (xtra ? " d-tm-xtra" : ""));
     }
 
     // --- layout and connectors ------------------------------------------
@@ -569,7 +579,7 @@
         var grs = Array.prototype.slice.call(row.children);
         var ns = grs.map(function (gr) {
           var all = gr.classList.contains("d-tm-all");
-          return Array.prototype.filter.call(gr.querySelectorAll(".d-tm-xc"), function (c) { return all || !c.classList.contains("d-tm-xtra"); }).length;
+          return Array.prototype.filter.call(gr.querySelectorAll(".d-tm-xc"), function (c) { return all || !c.parentNode.classList.contains("d-tm-xtra"); }).length;
         });
         var r = tmHierCols(W1, ns);
         grs.forEach(function (gr, ix) {
@@ -824,7 +834,7 @@
         (s.terms || []).forEach(function (t) { chips.appendChild(tm.chip(t[0], !!t[1])); });
         body.appendChild(chips);
         c.appendChild(body);
-        F.semgrid.appendChild(c);
+        F.semgrid.appendChild(withMention(c, m, "d-tm-msc"));
       });
     }
 
@@ -839,6 +849,8 @@
       var hd = tm.hue(el("div", "d-tm-ihd"), clusterOf(n));
       hd.appendChild(el("h3", "d-tm-ititle", n.title));
       hd.appendChild(el("div", "d-tm-stem", n.stem));
+      var mention = tm.mentionButton(n, "d-tm-mention-inspector");
+      if (mention) hd.appendChild(mention);
       body.appendChild(hd);
       var kv = el("dl", "d-tm-kv");
       function row(key, v) {
@@ -879,7 +891,7 @@
         Array.from(x.rels).sort(function (p, q) { return relOrd(p) - relOrd(q); }).forEach(function (r) { a.appendChild(el("span", "d-tm-rp d-tm-rp-" + r, r)); });
         a.appendChild(el("span", "d-tm-ilt", G.nodes[x.j].title));
         a.title = G.nodes[x.j].stem;
-        il.appendChild(a);
+        il.appendChild(withMention(a, G.nodes[x.j], "d-tm-mil"));
       });
       if (!links.length) il.appendChild(el("span", "d-tm-inone", wsT("js.tmap.insp.none")));
       body.appendChild(il);
@@ -891,7 +903,7 @@
         a.appendChild(el("span", "d-tm-ipc", Math.round(s.s * 100) + "%"));
         a.appendChild(el("span", "d-tm-ilt", G.nodes[s.j].title));
         a.title = G.nodes[s.j].stem;
-        sl.appendChild(a);
+        sl.appendChild(withMention(a, G.nodes[s.j], "d-tm-mil"));
       });
       if (!sims.length) sl.appendChild(el("span", "d-tm-inone", wsT("js.tmap.insp.none")));
       body.appendChild(sl);
