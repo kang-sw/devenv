@@ -433,9 +433,9 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-19T13:16:07Z",
+        "touched_at": "2026-11-20T15:04:57Z",
         "impl": {
-          "branch": "impl/develop/tickets-post-v2"
+          "branch": "impl/develop/prize-pupil-anger"
         }
       }
     },
@@ -579,19 +579,6 @@
         "touched_at": "2026-11-20T03:49:27Z",
         "impl": {
           "branch": "impl/develop/cough-race-suave"
-        }
-      }
-    },
-    "261120-bug-ws-agent-dogfood-delivery-context": {
-      "registered_at": "2026-11-20T12:21:26Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-20T13:35:01Z",
-        "impl": {
-          "branch": "impl/develop/salt-banjo-ebook"
         }
       }
     },
