@@ -106,6 +106,7 @@ Child execution order is **not yet decided** (see `## Open questions`):
 - Planned: `wswhiteboard` embed HTML snapshot retirement (stop rendering `ai-docs/whiteboards/<id>-<hash>.html` per update; updates shipped whiteboard playbook embed rule and `whiteboard.update` `embed:` result field; mechanism open)
 - Planned: Daemon-only metadata bundle (`wsagent`, including absorbed `record.json` delta log from `261118-feat-ws-display-transcript-memory-first` Phase 3 per `(1326)=a`, `wsdashboard` misc UI state, `wstrackerhook` state, `wstrackerhost` `ui-seen.json`) -> SQLite
 - Planned: MCP session key store (`sessions/<key>/` + legacy `keys/` migration) -> SQLite
+- Planned: Numbers screen (`261120-feat-ws-dashboard-numbers-screen`), with ~30-day harness/model statistics after the SQLite board store lands on `develop`
 
 ## Cross-Child Decisions
 
