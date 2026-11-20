@@ -119,9 +119,6 @@ Stage 2 (hosted-first migration, reference implementation Claude):
 - Planned (not yet cut): the remaining plugin/extension moves into the daemon
   (playbooks instead of skills, `prompts/list` slash commands); open questions
   are in `261116-research-ws-hosted-session-first-tier`.
-- Planned (not yet cut): Pi extension retirement, after hosted parity, with
-  per-item approval. Its parity criteria are an open question in the research
-  ticket.
 
 Stage 3 (tier-1 harnesses; each prerequisite: the catalog ticket):
 
@@ -131,8 +128,12 @@ Stage 3 (tier-1 harnesses; each prerequisite: the catalog ticket):
 - `261117-feat-ws-hosted-antigravity-adapter` - Antigravity after Codex; revives
   the dropped `261114-feat-ws-hosted-antigravity-acp-adapter` as a new stem;
   account access confirmed (owner 2026-11-17 22:10).
-- Planned (not yet cut): the Pi hosted backend as a port of the Codex adapter and
-  catalog profile (25), last.
+- `261120-feat-ws-pi-common-interface-rebuild` - late-stage Pi child, after
+  Claude, Codex, and agy complete the common hosted interface: rebuild Pi from
+  scratch as its backend adapter, fit beneath the unchanged daemon application
+  layer, MCP tools, and prompt assembly, and retire the existing Pi extension
+  through a separately settled transition/compatibility gate (owner directive,
+  2026-11-20). This supersedes the prior planned Codex-adapter port (25).
 
 Stage 4 (extensions):
 
