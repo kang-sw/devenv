@@ -624,6 +624,9 @@
     "261120-feat-ws-dashboard-numbers-screen": {
       "registered_at": "2026-11-20T11:31:45Z"
     },
+    "261120-feat-ws-pi-common-interface-rebuild": {
+      "registered_at": "2026-11-20T14:10:37Z"
+    },
     "261120-research-ws-daemon-supervision-http-attach": {
       "registered_at": "2026-11-20T12:40:36Z"
     }
