@@ -923,6 +923,9 @@ type pageReader struct {
 	// foreign is the daemon's shared look at the inputs refresh stamps cannot
 	// learn of from a wake (foreign_schedule.go); nil looks every time.
 	foreign *foreignSchedule
+	// layout is the rail's stored nesting, read from memory for a head's
+	// parent jump when the registration names no owner (nil: none).
+	layout *railLayoutStore
 }
 
 func (r pageReader) clock() time.Time {
@@ -1035,6 +1038,24 @@ func (r pageReader) lookup() sessionLookup {
 	}
 }
 
+// parentSource reads session's owners for a head: lookup serves the index
+// (recording what the page names), the rail layout's stored nesting stands in
+// for a session whose registration names no owner. The layout is read from
+// memory (foreign look rules, as the rail's own stamp), and a parent counts
+// only while the index serves it.
+func (r pageReader) parentSource(lookup func(string) (Session, bool)) parentSource {
+	return parentSource{session: lookup, layoutParent: func(id string) string {
+		var since time.Time
+		if r.foreign != nil {
+			since = r.foreign.filesSince()
+		}
+		return layoutParentOf(r.layout.docSince(since), id, func(p string) bool {
+			_, ok := lookup(p)
+			return ok
+		})
+	}}
+}
+
 // session builds one session page's view; false when the daemon does not
 // serve that reply-id.
 func (r pageReader) session(replyID string) (SessionView, bool) {
@@ -1087,8 +1108,20 @@ func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChan
 	if !s.Registration.Hosted && !s.Live {
 		record, _ := readAgentRecordEnd(SessionDir(r.dir, replyID))
 		in.HandedOff = record.Lead && record.HandedOffAt != ""
+		// An ended child's row may predate ParentReplyID; this record is
+		// already open, so naming its owner from it costs no read.
+		if in.Session.ParentReplyID == "" && record.Parent != nil {
+			in.Session.ParentReplyID = record.Parent.ReplyID
+		}
 	}
 	looked := map[string]bool{replyID: true}
+	in.Parents = r.parentSource(func(id string) (Session, bool) {
+		looked[id] = true
+		if r.index == nil {
+			return Session{}, false
+		}
+		return r.index.Session(id)
+	})
 	inputs := refreshInputs{watch: slices.Clone(page.Watch), pids: slices.Clone(page.WatchPIDs)}
 	if s.Registration.Hosted && s.Registration.HostPID > 0 {
 		inputs.pids = append(inputs.pids, s.Registration.HostPID)
@@ -1286,7 +1319,7 @@ func (r pageReader) indexView() IndexView {
 }
 
 func (d *Daemon) pages() pageReader {
-	return pageReader{dir: d.dir, index: d.index, source: d.source, version: d.endpoint.Version, entries: d.entryFiles, snapshots: d.snapshots, foreign: d.foreign}
+	return pageReader{dir: d.dir, index: d.index, source: d.source, version: d.endpoint.Version, entries: d.entryFiles, snapshots: d.snapshots, foreign: d.foreign, layout: d.layout}
 }
 
 // pagesIn is pages reading in the viewer's language.
