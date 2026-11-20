@@ -198,17 +198,15 @@ func appendDiagnostic(existing, diagnostic string) string {
 // A worker projection is used only for the diagnostic. Unknown surfaces remain
 // unresolved and never become an authority ceiling or applied selection.
 func legacyWorkerPermission(def Profile) PermissionLevel {
-	if slices.Equal(def.Tools, PiWorkerTools) {
-		return PermissionWorkdirWrite
-	}
 	if len(def.MCPServers) != 0 || len(def.Plugins) != 0 {
 		return ""
 	}
+	mutable := false
 	for _, tool := range def.Tools {
 		switch strings.ToLower(ToolBase(tool)) {
 		case "read", "grep", "glob", "find", "ls":
 		case "bash", "edit", "write":
-			return PermissionWorkdirWrite
+			mutable = true
 		default:
 			return ""
 		}
@@ -217,8 +215,15 @@ func legacyWorkerPermission(def Profile) PermissionLevel {
 		switch tool {
 		case "git.status", "git.diff", "git.log", "git.merge_base":
 		default:
+			if slices.Contains(PiWorkerWSTools, tool) || slices.Contains(PiMiniLeadWSTools, tool) {
+				mutable = true
+				continue
+			}
 			return ""
 		}
+	}
+	if mutable {
+		return PermissionWorkdirWrite
 	}
 	return PermissionReadOnly
 }
@@ -233,6 +238,8 @@ func (c *conv) permissionNudge(level PermissionLevel, worker bool, active string
 	if worker {
 		if level == "" {
 			limit = "common worker authority is unresolved; the capability loadout is not confinement evidence"
+		} else if rec.Parent == nil {
+			limit = "root worker has no authority parent; the capability loadout and harness controls do not prove confinement"
 		} else {
 			limit = "current-parent admission passed; the capability loadout and harness controls do not prove confinement"
 		}

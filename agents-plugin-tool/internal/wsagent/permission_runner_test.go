@@ -318,6 +318,17 @@ func TestPermissionWorkerInputStateAndControl(t *testing.T) {
 	if next := h.backend.waitProcStart(t, 1); next.PermissionLevel != PermissionReadOnly {
 		t.Fatalf("lowered restart input: %+v", next)
 	}
+	root, err := h.runner.Create(PiWorkerProfile, h.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.runner.Send(root.ID, "root work"); err != nil {
+		t.Fatal(err)
+	}
+	h.backend.waitProcStart(t, 2)
+	if got := log.String(); !strings.Contains(got, "Permission workdir-write is advisory on pi: root worker has no authority parent") {
+		t.Fatalf("root worker nudge: %s", got)
+	}
 }
 
 func TestPermissionCurrentParentAdmission(t *testing.T) {
@@ -367,6 +378,44 @@ func TestPermissionMissingParentAdmission(t *testing.T) {
 	}
 	if root.Parent != nil || root.PermissionLevel != PermissionWorkdirWrite || root.PermissionSource != "legacy-derived" {
 		t.Fatalf("root worker admission: %+v", root)
+	}
+}
+
+func TestPermissionLegacyWorkerMixedLoadouts(t *testing.T) {
+	h := permissionHarness(t).start()
+	parent := h.lead(BackendClaude, LeadOptions{PermissionLevel: PermissionWorkdirWrite})
+	parentRef := ParentRef{Kind: ParentLead, ReplyID: parent.ID}
+	h.globalProfile("mixed-create", `{"backend":"pi","tools":["bash","mystery"]}`)
+	before := len(h.runner.List())
+	if _, err := h.runner.Spawn(SpawnSpec{Profile: "mixed-create", Root: h.root, Prompt: "work", Parent: &parentRef}); err == nil || !strings.Contains(err.Error(), "own permission level is unresolved") {
+		t.Fatalf("mixed creation admission: %v", err)
+	}
+	if len(h.runner.List()) != before {
+		t.Fatal("mixed creation refusal created a conversation")
+	}
+
+	h.globalProfile("mixed-restart", `{"backend":"pi","tools":["bash"]}`)
+	child, err := h.runner.Spawn(SpawnSpec{Profile: "mixed-restart", Root: h.root, Prompt: "work", Parent: &parentRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.holder(child.ID)
+	if _, err := h.runner.Stop(child.ID); err != nil {
+		t.Fatal(err)
+	}
+	h.globalProfile("mixed-restart", `{"backend":"pi","tools":["bash","mystery"]}`)
+	h.send(child.ID, "restart with changed capabilities")
+	if got := h.state(child.ID); got.Process || !strings.Contains(got.Error, "own permission level is unresolved") {
+		t.Fatalf("mixed restart admission: %+v", got)
+	}
+
+	for name, def := range map[string]Profile{
+		"plugin":     {Tools: slices.Clone(PiWorkerTools), Plugins: []string{"unsafe"}},
+		"unknown-ws": {Tools: slices.Clone(PiWorkerTools), WSTools: []string{"git.status", "unknown.tool"}},
+	} {
+		if got := legacyWorkerPermission(def); got != "" {
+			t.Errorf("%s legacy level = %q", name, got)
+		}
 	}
 }
 
