@@ -429,6 +429,50 @@ Verification:
   docked topic scrolls the target into view unobstructed by the header. After it
   passes, close `261115`.
 
+### Result (f7b0cb109) - 2026-11-20
+
+Landed (`d8fec4dcf..f7b0cb109`):
+
+- `assets/gallery.js` (window.WsGallery, shipped ahead of cards.js in `CardsScript`) is the only home of
+  the page/split-tree model, migration and reconcile, depth-first ordinals, positions, the layout mode
+  mapping, drop zones, and the Phase 3 timing gates (`d8fec4dcf`).
+- `cards.js` builds and owns `#bgal` (`.bp-edge`, `.gal-rail` of `button.gal-dot`, clipped
+  `.gal-viewport` with `.gal-page` slides and the trailing `.gal-plus`); `pinList()` is removed for
+  `gallery()` / `docked()` / `isDocked()` / `activate()`; every caller (board morph, frames, conversation,
+  overview, stream.js `navigate`, topicScroller) migrated (`0e8d810d1`, `862e67a40`).
+- Narrow view: the board column's children move off-screen inside the column clip while a docked page
+  shows, so the covered Main Board reports non-intersecting; inactive slides sit 100% + 24px off the
+  viewport so a touching edge never counts as intersecting (`7dc18b475`, `9730b4de0`).
+
+Verification:
+
+- `node --test testdata/gallery-*.test.cjs`: 47/47.
+- `go test ./internal/wsdashboard/ -count=1`: ok (321s); `./internal/wswhiteboard/...`: ok (199s).
+- `go test ./internal/wsdashboard -run Gallery` with Playwright (`TestGalleryBrowser`, `8f3533d17`): every
+  Phase 1 Playwright item passes, three consecutive runs. Other browser suites touching the board pass or
+  fail identically on base `d10d68e64` (pre-existing).
+- Stale-asset check (10)=b (`TestGalleryRecordInPreviousBuild`, `90c080681`): the frozen previous
+  `cards.js` renders the new record as flat pins in depth-first order; its own save drops `gallery`, and
+  the new build reloads one pin per page.
+- Deep-link check (12)=a: pass — the target lands at top 123.3px, below the non-sticky header's bottom
+  111.3px, and owns its `elementFromPoint`. `261115` closed.
+- Captures (`ai-docs/assets/captures/261119-gallery-phase1/`, `c9ffea097`): compared live wide 2400x1000,
+  narrow 1200x900 (page and home) and touch 420x860 vs mockup v4 wide/narrow: match; deliberate styling
+  differences are listed in that folder's README.
+
+Decisions:
+
+- `active` also takes `"+"` (the trailing page) besides a page id or `null` (home), so a view on `+`
+  survives re-derivation.
+- A center drop is defined only between two docked panes; a board-sourced drag gets the four edges only.
+- In narrow view with zero docked pages the whole bounce-snap gate is inert (rail hidden), not only Page
+  0's bottom.
+- Overview covers the Main Board only; docked units stay in the dimmed gallery (no re-parenting).
+- `data-pincol` is kept as the "right column shows, session rail overlays below 2200px" signal its
+  existing readers use; `data-gal=col|drag|narrow` is added. A wide drag with zero pages shows a fixed
+  right-edge overlay so the grid does not reflow under the pointer.
+- A docked topic reporting FAR no longer unmounts its frames, so inactive pages never reload doc frames.
+
 ### Phase 2: 2D split layout tree and edge docking
 
 Phase 2 owns multi-pane recursive 2D layouts. Scope:
