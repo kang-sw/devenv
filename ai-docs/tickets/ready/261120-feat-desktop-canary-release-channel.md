@@ -361,6 +361,32 @@ desktop assembly/packaging tests cover core/suffix behavior; package/runtime
 contract tests cover every repository destination; doc review compares stable
 ship semantics before and after.
 
+### Result (58119168e) - 2026-11-21
+
+- Exact `vX.Y.Z-canary.N` tags now create prereleases excluded from latest;
+  stable release creation and the shared native/desktop asset upload path are
+  unchanged. Packaging retains the validated suffix in Electron `appVersion`
+  and staged `package.json`; the native `buildVersion` stays at the validated
+  numeric contract core under the binding design-review fallback.
+- The separate canary ship procedure uses an ephemeral reviewed release branch,
+  a next-patch core, no `main` promotion or merge-back, compatibility grading,
+  artifact/SUMS and install/return checks, and forbids a minor-core canary
+  without the separately approved T3 boundary. Stable ship instructions remain
+  unchanged.
+- All eight audited outbound repository identities now name
+  `kang-sw/werkschaft`, with drift coverage across ws, wsflow, Pi, both plugin
+  manifest formats, and the dashboard. Read-only HTTP checks confirmed the old
+  repository, latest-release, historical asset, and API URLs still redirect.
+- Compatibility: release publication and repository identity are T0; the
+  daemon channel label is T0 by itself, while each canary payload still needs
+  its own directional compatibility verdict. The numeric native build field is
+  a packaging compatibility decision; the suffixed package identity remains
+  the updater authority.
+- Verification passed: desktop Node suite (178 pass, 4 Windows-only skips),
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsrsrc -run '^TestCIRelease' -count=1`,
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsdashboard -run '^TestSettingsGitHubLinkMatchesReleaseDestinations$' -count=1`,
+  and `python3 -m unittest discover agents-plugin-wsflow/tests -p 'test_wsflow_runtime_contract.py'` (3 pass).
+
 ### Phase 2: Select canaries and return to stable through the existing updater
 
 Depends on Phase 1. Implement Decisions 11 and 12:
@@ -399,6 +425,40 @@ Verification: updater unit/integration tests exercise local stable and releases
 list feeds and assert the same download, checksum, extraction, staging, and
 swap functions serve canary install and stable return. No live release is
 created by tests.
+
+### Result (58119168e) - 2026-11-21
+
+- The updater now accepts only bounded stable or `-canary.N` versions, applies
+  the settled SemVer ordering, walks at most ten 30-release/1 MiB pages, picks
+  the highest eligible canary on the first eligible page, and distinguishes a
+  cap-limited miss. Scheduled/latest checks remain stable-only.
+- Manual canary and stable-return selections share the existing single
+  available/download/checksum/extract/stage/swap path. A scheduled stable check
+  cannot erase a pending manual selection. Stable return is available only
+  from a canary and carries explicit downgrade intent through reopen without
+  touching the shared daemon; existing daemon tests retain a healthy
+  higher-core incumbent.
+- Persistent channel stages keep the original numeric `staged.json.version`
+  gate usable by pre-feature updaters and add `targetVersion` plus `action` for
+  the real new-updater identity. Ordinary stable staging still performs the
+  same single `staged.json` write with `{version, app}`; a channel action still
+  performs one write, now with the additive fields. No file I/O or polling was
+  added before the user invokes a manual action, and unknown root state fields
+  continue through merge writes.
+- Compatibility: desktop update state and explicit stable return are T0 in both
+  directions under the numeric legacy gate and additive fields. The updater
+  process API is additive; Phase 3 still owns the payload-free IPC and two-way
+  dashboard capability gates needed to complete that T0 verdict.
+- The allocated lite review found three issues: the old-updater proof used new
+  code, scheduled checks could clear manual selection, and mocked packaging
+  could not establish native suffix acceptance. All three were corrected once;
+  per lite policy no second review round was run.
+- Verification passed: focused packaging/updater tests (31 pass) and the full
+  desktop Node suite (178 pass, 4 Windows-only skips), including ordering,
+  malformed/draft/asset filtering, page stop/cap behavior, shared checksum
+  failure handling, reopen/downgrade intent, pre-feature state, and the existing
+  never-downgrade daemon matrix. No Electron process, tag, release, or push was
+  created.
 
 ### Phase 3: Add canary and stable-return controls
 
