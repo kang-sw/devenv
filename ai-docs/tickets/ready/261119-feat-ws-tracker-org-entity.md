@@ -457,6 +457,26 @@ Verification (Go tests):
   ./cmd/ws-mcp`; native `go vet ./internal/wstracker ./cmd/ws-mcp`; and the
   same vet command with `GOOS=windows`.
 
+#### Edition (b3f393b) - 2026-11-20
+
+- Extended assign-time-root compatibility to legacy `item.assign mode:"all"`,
+  so an org rule re-rooted under a new head does not make the new binary reject
+  an assign the old binary accepts.
+- Root-qualified `item.unassign` now ends every matching rule and record before
+  one re-extension, preventing records from being created and ended by the
+  same event when multiple rules share an assign-time root.
+- Added a fold-owned per-item org CC registration index. Personal `item.cc` and
+  `item.uncc` now touch only that item's registrations, view projection reuses
+  the index, and checkpoints derive an owned index from copied canonical state
+  while preserving a zero-value state's nil shape.
+- Verification passed: `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test
+  -count=1 ./internal/wstracker`; `GOPROXY=off GOSUMDB=off
+  GOTOOLCHAIN=local go test -count=1 -run 'Tracker|Asset'
+  ./internal/wsdashboard`; `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test
+  -count=1 -run 'TestTrackerProjectionSummaryContract|TestTrackerProjectionDetailVersions'
+  ./cmd/ws-mcp`; native `go vet ./internal/wstracker`; and the same vet command
+  with `GOOS=windows`.
+
 ### Phase 2: Org management in the org-chart editor and org entries on items
 
 Implement Decisions 4, 8-13, 18 (client-side id minting) and 20 in the
