@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsharnessenv"
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
@@ -393,9 +394,9 @@ func piLeadArgs(spec StartSpec) []string {
 
 // piEnv is the child's environment: env without the ws Pi package's
 // process-role and bootstrap variables a parent Pi session leaves behind,
-// and without a mailbox identity.
+// and without inherited ws harness identity.
 func piEnv(env []string) []string {
-	return harnessEnv(env, []string{"WS_PI_", "WS_MAILBOX"}, nil, map[string]string{"PI_SKIP_VERSION_CHECK": "1"})
+	return harnessEnv(wsharnessenv.Drop(env), []string{"WS_PI_"}, nil, map[string]string{"PI_SKIP_VERSION_CHECK": "1"})
 }
 
 // piWorkerEnv marks a daemon worker for an explicitly loaded native extension:
@@ -404,15 +405,15 @@ func piWorkerEnv(env []string) []string {
 	return append(piEnv(env), "WS_PI_SPAWN_ROLE=worker")
 }
 
-// piLeadEnv is a lead conversation's environment: piEnv without the ws
-// variables of the session that started the daemon (leadDropEnv), plus the
-// hosted-session variables.
+// piLeadEnv is a lead conversation's environment without the Pi and ws
+// variables of the session that started the daemon, plus the hosted-session
+// variables.
 func piLeadEnv(spec StartSpec) []string {
 	set := map[string]string{"PI_SKIP_VERSION_CHECK": "1"}
 	for name, value := range spec.Lead.Env {
 		set[name] = value
 	}
-	return harnessEnv(spec.Env, append([]string{"WS_PI_"}, leadDropEnv...), nil, set)
+	return harnessEnv(wsharnessenv.Drop(spec.Env), []string{"WS_PI_"}, nil, set)
 }
 
 // checkPiToolEntries refuses permission rules: pi's --tools allows whole

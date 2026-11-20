@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+
+	"github.com/kang-sw/devenv/internal/wsharnessenv"
 )
 
 // terminalShell is the shell a new terminal runs: its argv, and the whole
@@ -34,13 +36,13 @@ func daemonShell() terminalShell {
 // On Windows the shell is the first of pwsh.exe and powershell.exe that can
 // be run, by its resolved path, then %COMSPEC%, then cmd.exe. Elsewhere it
 // is $SHELL when that can be run, then /bin/sh. The shell inherits the
-// environment, with one change: a TERM that is missing, empty, or "dumb" (a
-// daemon started by an agent host or a service has no terminal of its own)
-// becomes xterm-256color, which is what the page's emulator speaks; a
-// capable TERM is kept.
+// environment without the harness session that started the daemon. A TERM
+// that is missing, empty, or "dumb" (a daemon started by an agent host or a
+// service has no terminal of its own) becomes xterm-256color, which is what
+// the page's emulator speaks; a capable TERM is kept.
 func pickShell(goos string, environ []string, look func(name string) (string, bool)) terminalShell {
 	env := map[string]string{}
-	for _, kv := range environ {
+	for _, kv := range wsharnessenv.Drop(environ) {
 		// Windows lists per-drive working directories as "=C:=C:\dir".
 		if k, v, ok := strings.Cut(kv, "="); ok && k != "" {
 			env[k] = v

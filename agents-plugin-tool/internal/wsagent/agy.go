@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsharnessenv"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
@@ -79,8 +80,8 @@ var (
 	agyWakeIdleQuiet  = 30 * time.Second
 )
 
-// agyDropEnv are the variable prefixes an agy lead starts without: the
-// parent harness sessions' (leadDropEnv names ws's own).
+// agyDropEnv are the parent harness variable prefixes an agy session starts
+// without. wsharnessenv.Drop removes ws's own session identity.
 var agyDropEnv = []string{"CLAUDE", "CODEX_", "PI_", "ORCA_"}
 
 // agyLeadBgShellRule is appended to a hosted agy lead's system prompt so it
@@ -127,9 +128,9 @@ func (b AgyBackend) Choices(ctx context.Context) ([]ModelChoice, []string, error
 }
 
 // agyEnv is a lead's environment: the daemon's without the parent harness
-// sessions' variables and ws's own launcher state (leadDropEnv, which also
-// drops the HTTP MCP credentials: agy takes them in its session request),
-// plus the hosted-session variables.
+// sessions' variables and ws's own launcher state (including the HTTP MCP
+// credentials: agy takes them in its session request), plus the hosted-session
+// variables.
 func agyEnv(spec StartSpec) []string {
 	set := map[string]string{}
 	if spec.Lead != nil {
@@ -137,7 +138,7 @@ func agyEnv(spec StartSpec) []string {
 			set[name] = value
 		}
 	}
-	return harnessEnv(spec.Env, append(slices.Clone(agyDropEnv), leadDropEnv...), nil, set)
+	return harnessEnv(wsharnessenv.Drop(spec.Env), agyDropEnv, nil, set)
 }
 
 // Start launches `agy acp` for spec and, unless it rejoins a held process,

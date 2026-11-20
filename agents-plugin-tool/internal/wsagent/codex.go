@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsharnessenv"
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
@@ -63,8 +64,8 @@ func codexEnv(spec StartSpec) []string {
 	if spec.MCPSession != nil {
 		set[EnvMCPSessionToken] = spec.MCPSession.Token
 	}
-	drop := append([]string{"CLAUDE", "CODEX_", "PI_", "ORCA_", "WS_PI_"}, leadDropEnv...)
-	return harnessEnv(spec.Env, drop, map[string]bool{"CODEX_HOME": true}, set)
+	drop := []string{"CLAUDE", "CODEX_", "PI_", "ORCA_", "WS_PI_"}
+	return harnessEnv(wsharnessenv.Drop(spec.Env), drop, map[string]bool{"CODEX_HOME": true}, set)
 }
 
 // Start initializes and opens a new process before returning. A holder
