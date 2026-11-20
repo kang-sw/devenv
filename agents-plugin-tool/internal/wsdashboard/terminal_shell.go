@@ -42,7 +42,7 @@ func daemonShell() terminalShell {
 // the page's emulator speaks; a capable TERM is kept.
 func pickShell(goos string, environ []string, look func(name string) (string, bool)) terminalShell {
 	env := map[string]string{}
-	for _, kv := range wsharnessenv.Drop(environ) {
+	for _, kv := range wsharnessenv.DropForOS(goos, environ) {
 		// Windows lists per-drive working directories as "=C:=C:\dir".
 		if k, v, ok := strings.Cut(kv, "="); ok && k != "" {
 			env[k] = v

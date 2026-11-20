@@ -282,6 +282,10 @@ func TestSessionTerminalDropsInheritedHarnessSessionEnv(t *testing.T) {
 			}
 		}
 	}
+	windows := pickShell("windows", append(environ, "Ws_McP_SeSsIoN_ToKeN=parent-token"), func(name string) (string, bool) { return name, true })
+	if _, ok := windows.Env["Ws_McP_SeSsIoN_ToKeN"]; ok {
+		t.Fatalf("mixed-case inherited harness identity survived in a Windows terminal: %v", windows.Env)
+	}
 }
 
 // TestTerminalFolder pins the folder a create request resolves to: the

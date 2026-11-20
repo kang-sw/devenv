@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -146,7 +147,9 @@ func TestCodexGrandchildCompletionReachesConversationParentExactlyOnce(t *testin
 	h.runner.Close()
 	h.holders.restart()
 	h.startAt("http://127.0.0.1:1")
-	time.Sleep(50 * time.Millisecond)
+	eventually(t, "the replacement daemon's holder scan", h.runner.scanDone)
+	h.quiesce(parent)
+	h.quiesce(child)
 	if reports := got.list(); len(reports) != 3 {
 		t.Fatalf("rejoin duplicated a delivered completion: %+v", reports)
 	}
@@ -170,16 +173,29 @@ func TestCodexAndAgyWorkerMailSteersIntoRunningTurn(t *testing.T) {
 			id, holder := spawnHeldRecoveryWorker(t, h, backend, "workdir-write")
 			key := h.record(id).WSKey
 			eventually(t, "the worker mailbox watch", func() bool { return h.mail.watched(key) })
+			var steerEntered, steerRelease chan struct{}
+			var enterOnce, releaseOnce sync.Once
 			if backend == BackendCodex {
+				steerEntered, steerRelease = make(chan struct{}), make(chan struct{})
+				defer releaseOnce.Do(func() { close(steerRelease) })
 				acp := h.holders.acp
 				h.holders.acp = func(holder, method string, params json.RawMessage) (string, string, bool) {
 					if method == "turn/steer" {
+						enterOnce.Do(func() { close(steerEntered) })
+						<-steerRelease
 						return "", "", false
 					}
 					return acp(holder, method, params)
 				}
 			}
 			h.mail.deliverFrom(key, leadParent.ReplyID, rawMessage)
+			if backend == BackendCodex {
+				wait(t, "the holder steer write", steerEntered)
+				if rec := h.record(id); len(rec.Steered) != 1 || rec.Steered[0].Text != message {
+					t.Fatalf("the steer was not persisted before the holder write returned: %+v", rec.Steered)
+				}
+				releaseOnce.Do(func() { close(steerRelease) })
+			}
 			var steerID string
 			switch backend {
 			case BackendCodex:

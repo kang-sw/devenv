@@ -346,6 +346,12 @@ func (p *codexProcess) Steer(text string) error {
 	if turn == "" {
 		return ErrUnsupported
 	}
+	if !p.worker {
+		_, err := p.call("control", "turn/steer", map[string]any{
+			"threadId": session, "expectedTurnId": turn, "input": codexInput(text),
+		})
+		return err
+	}
 	id := "wsc/control/" + p.epoch + "/" + strconv.FormatUint(p.seq.Add(1), 10)
 	return p.writeLine(map[string]any{"id": id, "method": "turn/steer", "params": map[string]any{
 		"threadId": session, "expectedTurnId": turn, "input": codexInput(text),

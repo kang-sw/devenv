@@ -792,7 +792,10 @@ func (m *agyMapper) promptSentText(id, text string) {
 	m.unsolicitedTurn = false
 	m.wakeSawUsage = false
 	m.stopWakeTimerLocked()
-	if m.inTurn && len(m.outstanding) > 0 {
+	// A second prompt while one is outstanding is a steer even when agy has
+	// not emitted the first session update yet. The runner can submit mail as
+	// soon as its turn starts, before that provider update arrives.
+	if len(m.outstanding) > 0 {
 		m.steerText[id] = text
 		m.steerOrder = append(m.steerOrder, id)
 	}
