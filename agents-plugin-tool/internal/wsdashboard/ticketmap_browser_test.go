@@ -30,27 +30,34 @@ func (s *ticketMapFake) ReadTicketGraph(reg Registration) ([]byte, bool, error) 
 	return payload, err == nil, err
 }
 
-// The ticket map overlay and View B in Chromium (the ticket's Phase 2
-// Playwright items 1-14): the #thandle placement, the first open's one
-// request, the matrix, the 3-tier click-focus with measured connectors, the
-// semantic grid, Full View and the file-card hand-off, Esc layering, the
-// framed shell's dim, and the 900px layout, in both themes.
-// WS_TICKETMAP_SHOTS (absolute) keeps the overlay's screenshots beside the
-// approved mockup's same states for the side-by-side capture check.
-func TestTicketMapBrowser(t *testing.T) {
+// ticketMapEnv is a framed live page with a tickets panel over the synthetic
+// board written under the session's project root, so the route's payload
+// and the file-card hand-off's preview both resolve it.
+type ticketMapEnv struct {
+	f      *pageFixture
+	src    *ticketMapFake
+	graph  string // the payload the route serves, for the browser to read
+	shots  string // WS_TICKETMAP_SHOTS, "" when unset
+	mockup string // the approved mockup, "" when absent
+}
+
+// startTicketMapBrowser skips without WS_PLAYWRIGHT_MODULE and otherwise
+// starts the shared ticket map browser fixture.
+func startTicketMapBrowser(t *testing.T) *ticketMapEnv {
+	t.Helper()
 	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
 		t.Skip("set WS_PLAYWRIGHT_MODULE to use cached Chromium")
 	}
-	shots := os.Getenv("WS_TICKETMAP_SHOTS")
-	if shots != "" && !filepath.IsAbs(shots) {
+	env := &ticketMapEnv{shots: os.Getenv("WS_TICKETMAP_SHOTS")}
+	if env.shots != "" && !filepath.IsAbs(env.shots) {
 		t.Fatal("WS_TICKETMAP_SHOTS must be absolute")
 	}
 	mockup, err := filepath.Abs(filepath.Join("..", "..", "..", "ai-docs", "assets", "mockups", "261119", "ticket-map-view", "ticket-map-v5-bc.html"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(mockup); err != nil {
-		mockup = ""
+	if _, err := os.Stat(mockup); err == nil {
+		env.mockup = mockup
 	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -73,8 +80,7 @@ func TestTicketMapBrowser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var src *ticketMapFake
-	f := startPageFixture(t, func(o *DaemonOptions) {
+	env.f = startPageFixture(t, func(o *DaemonOptions) {
 		o.Port = 0
 		o.LAN = false
 		o.bindHost = "127.0.0.1"
@@ -83,13 +89,18 @@ func TestTicketMapBrowser(t *testing.T) {
 		p.Board = regions
 		p.Seq++
 		pf.setPage("livesession", p)
-		src = &ticketMapFake{pageFake: pf}
-		o.Sessions = src
+		env.src = &ticketMapFake{pageFake: pf}
+		o.Sessions = env.src
 	})
-	// The board sits under the session's project root, so the route's
-	// payload and the file-card hand-off's preview both resolve it.
-	wsdoctest.WriteTicketMapFixture(t, f.project, wsdoctest.TicketMapDefaultOpen)
-	payload, err := wsdoc.TicketMapJSON(f.project)
+	wsdoctest.WriteTicketMapFixture(t, env.f.project, wsdoctest.TicketMapDefaultOpen)
+	env.graph = ticketMapPayload(t, env.f.project)
+	return env
+}
+
+// ticketMapPayload writes the board's encoded payload to a temp file.
+func ticketMapPayload(t *testing.T, project string) string {
+	t.Helper()
+	payload, err := wsdoc.TicketMapJSON(project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,17 +108,36 @@ func TestTicketMapBrowser(t *testing.T) {
 	if err := os.WriteFile(graph, payload, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	return graph
+}
+
+// run runs a browser script under ctx's deadline and requires the page to
+// have read the ticket graph through the route.
+func (env *ticketMapEnv) run(t *testing.T, label, script string, args ...string) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "node", "testdata/ticketmap.browser.cjs", f.base, graph, wsdoctest.TicketMapEpicStem, shots, mockup).CombinedOutput()
+	out, err := exec.CommandContext(ctx, "node", append([]string{script}, args...)...).CombinedOutput()
 	t.Log(string(out))
 	if err != nil {
-		t.Fatalf("Chromium ticket map: %v", err)
+		t.Fatalf("Chromium %s: %v", label, err)
 	}
-	src.mu.Lock()
-	reads := src.reads
-	src.mu.Unlock()
+	env.src.mu.Lock()
+	reads := env.src.reads
+	env.src.mu.Unlock()
 	if reads == 0 {
 		t.Fatal("the browser never read the ticket graph")
 	}
+}
+
+// The ticket map overlay and View B in Chromium (the ticket's Phase 2
+// Playwright items 1-14): the #thandle placement, the first open's one
+// request, the matrix, the 3-tier click-focus with measured connectors, the
+// semantic grid, Full View and the file-card hand-off, Esc layering, the
+// framed shell's dim, and the 900px layout, in both themes.
+// WS_TICKETMAP_SHOTS (absolute) keeps the overlay's screenshots beside the
+// approved mockup's same states for the side-by-side capture check.
+func TestTicketMapBrowser(t *testing.T) {
+	env := startTicketMapBrowser(t)
+	env.run(t, "ticket map", "testdata/ticketmap.browser.cjs", env.f.base, env.graph, wsdoctest.TicketMapEpicStem, env.shots, env.mockup)
 }

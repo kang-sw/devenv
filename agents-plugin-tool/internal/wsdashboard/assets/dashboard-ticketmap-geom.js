@@ -261,8 +261,9 @@
     // the spatial hash: the overlay controls (o.blocks) first, then the
     // framed stars (priority >= 9e6), the cluster headers (the full label
     // above the hull, the first term above, then both below, clamped 4px
-    // inside), the ego captions, and the soup and the other stars (the soup
-    // first when o.soupFirst). o.stars are the candidates, highest priority
+    // inside), the ego captions (clamped likewise), and the soup and the
+    // other stars (the soup first when o.soupFirst). o.stars are the
+    // candidates, highest priority
     // first: {i, x, y, r (screen), p, title, framed, pre, side, inner,
     // skip}; o.obst the stars a title must not cover; o.heads {id, x, y,
     // by, full, short, cnt} in world units; o.sects [{x, y, text}|null];
@@ -336,6 +337,9 @@
       o.sects.forEach(function (a, ix) {
         if (!a) return;
         var w = Math.ceil(o.text(a.text, 700, 11) + 30), b = { x: a.x * k + o.cx - w / 2, y: a.y * k + o.cy - 10, w: w, h: 20 };
+        // Like a header, a caption past the edge is clamped 4px inside.
+        b.x = clamp(b.x, 4, W - w - 4);
+        b.y = clamp(b.y, 4, H - 24);
         if (!g.hits(b)) { g.put(b); out.sects.set(ix, b); }
       });
       if (o.soupFirst) { soup(); rest(); } else { rest(); soup(); }

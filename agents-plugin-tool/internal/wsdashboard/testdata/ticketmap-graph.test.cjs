@@ -217,6 +217,10 @@ test('the label planner never overlaps labels, controls or the viewport edge', (
   assert.ok(plan.stars.has(0) && !plan.stars.has(1), 'the framed star places first, its neighbour yields');
   assert.ok(!plan.stars.has(3) && !plan.stars.has(10), 'skipped stars stay unlabelled');
   assert.equal(plan.soup.size, 8, 'at most 8 soup words per cluster');
+  // An ego caption anchored past the right edge is clamped 4px inside.
+  const cap = geo.planLabels({ W: 800, H: 400, k: 1, cx: 0, cy: 0, ego: null, soupFirst: true, text, maxLen: 46, blocks: [], obst: [], stars: [], heads: [], soup: [],
+    sects: [{ x: 790, y: 395, text: 'Semantically similar (body %)' }] }).sects.get(0);
+  assert.ok(cap && cap.x + cap.w === 796 && cap.y + cap.h === 396, 'clamped caption ' + JSON.stringify(cap));
   assert.equal(geo.fitText('abcdefghij', 1e9, 6, s => s.length), 'abcde…');
   assert.equal(geo.fitText('abcdefghij', 7, 46, s => s.length), 'abcdef…');
 });
