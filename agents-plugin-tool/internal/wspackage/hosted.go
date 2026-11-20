@@ -21,9 +21,9 @@ var hostedStages = struct {
 	roots map[string]string
 }{roots: make(map[string]string)}
 
-// StageHosted publishes the build-owned launcher and four manifests under the
+// StageHosted publishes the build-owned launcher and five manifests under the
 // daemon state directory. Successful same-process calls do zero filesystem I/O.
-// The explicit dev checkout stays live: rehash its five inputs at each launch
+// The explicit dev checkout stays live: rehash its six inputs at each launch
 // so staged manifests cannot lag behind the live package environment.
 func StageHosted(name, stateDir string) (string, error) {
 	return stageHostedPackage(name, stateDir, os.Getenv(EnvDevCheckout), Open)
