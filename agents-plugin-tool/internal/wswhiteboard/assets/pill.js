@@ -7,7 +7,7 @@
   // re-runs this after every board swap, so it tears down what the previous
   // run attached.
   var d = document;
-  if (d.body.classList.contains("embed") || !window.IntersectionObserver) return;
+  if (!window.IntersectionObserver) return;
   var host = d.getElementById("bcol") || d.querySelector(".wrap");
   if (!host) return;
   var st = window.wbPill || (window.wbPill = {});

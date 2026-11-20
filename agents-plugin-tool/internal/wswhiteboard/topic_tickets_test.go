@@ -321,11 +321,6 @@ func TestTopicHeadHoldsTheSummaryLine(t *testing.T) {
 	if strings.Contains(section, `class="chead"`) {
 		t.Error("an open topic keeps the in-flow check header")
 	}
-	embed := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
-	if !strings.Contains(embed, `<div class="ckpill"><span class="ckbtn">`) {
-		t.Error("the embed's pill is not a plain span")
-	}
-
 	plain := &State{}
 	mustApply(t, plain, `<wb:topic name="p"><wb:log>only a line</wb:log></wb:topic>`)
 	if page := render(t, BuildView(plain, ViewInput{Layout: LayoutFull, ReplyID: "r"})); strings.Contains(page, `class="ckpill"`) || !strings.Contains(page, `<div class="tsub"><div class="trecap"`) {

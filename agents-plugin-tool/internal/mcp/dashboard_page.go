@@ -509,7 +509,6 @@ func docImagePath(root, path string) string {
 func servedWhiteboardPanels(record sessionRecord, key, replyID, lang string, watch func(path string), history func() ([]mailboxHistoryRecord, error), replies func() (wsmailbox.ReplyStore, bool)) []wswhiteboard.Panel {
 	return whiteboardPanels(whiteboardPanelInput{
 		rec:        record,
-		layout:     wswhiteboard.LayoutFull,
 		root:       record.Root,
 		sessionKey: key,
 		replyID:    replyID,

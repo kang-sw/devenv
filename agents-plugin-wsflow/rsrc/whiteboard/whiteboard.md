@@ -60,7 +60,6 @@ it.
 | `wb:answer` | `id` or `ids`, `value`, `assumed?` | the user's verbatim words |
 | `wb:patch` | `id`, `status?`, `class?`, `clear?` | any `wb:add` field, replacing it |
 | `wb:floor` | `id` | none |
-| `wb:embed-dir` | `path` | none |
 
 ```xml
 <wb:topic name="rollout" label="Rollout">
@@ -159,14 +158,7 @@ whiteboard.query payload: {topic?, text?, closed?, entries?, since?, last?, kind
 
 ## Each turn
 
-**While the user is watching the board, put as much of the conversation as practical on it, and do not repeat what the update wrote there in the terminal or chat. The user is watching when their current message starts with `[user message from the {{.McpNamespace}} whiteboard]` or carries a `<ws:user>` envelope, a `<wb:answers>` block, a `<wb:selection>` block, `<wb:mention>` elements or `<wb:close-request>` elements, when the host embeds the board inline in the conversation, or when they say they are watching. Otherwise the chat carries the conversation as usual.**
-
-- The host's instructions give an embed syntax and the turn made an update →
-  end with the embed line for the returned `embed:`. Never update just to
-  emit it.
-- The host names a folder for embedded files → send
-  `<wb:embed-dir path="<folder>"/>` on the first update after start or
-  revival; `path=""` returns embeds to `ai-docs/whiteboards/`.
+**While the user is watching the board, put as much of the conversation as practical on it, and do not repeat what the update wrote there in the terminal or chat. The user is watching when their current message starts with `[user message from the {{.McpNamespace}} whiteboard]` or carries a `<ws:user>` envelope, a `<wb:answers>` block, a `<wb:selection>` block, `<wb:mention>` elements or `<wb:close-request>` elements, or when they say they are watching. Otherwise the chat carries the conversation as usual.**
 
 ## Answers
 

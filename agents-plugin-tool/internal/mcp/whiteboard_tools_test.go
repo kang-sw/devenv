@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -226,7 +227,7 @@ func TestToolDescriptionsNameRuntimeNamespace(t *testing.T) {
 	}
 }
 
-func TestWhiteboardUpdateRendersPageEmbedAndStampInOrder(t *testing.T) {
+func TestWhiteboardUpdateRendersPageAndStampInOrder(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	if _, err := os.Stat(f.dir()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("no whiteboard folder may exist before the first render: %v", err)
@@ -276,13 +277,12 @@ func TestWhiteboardUpdateRendersPageEmbedAndStampInOrder(t *testing.T) {
 		t.Fatalf("ids line = %q", got)
 	}
 	full := resultLine(t, text, "full: ")
-	embed := resultLine(t, text, "embed: ")
 	rid := f.replyID()
-	if full != "ai-docs/whiteboards/"+rid+"/index.html" || !strings.HasPrefix(embed, "ai-docs/whiteboards/"+rid+"-") {
-		t.Fatalf("paths full=%q embed=%q", full, embed)
+	if full != "ai-docs/whiteboards/"+rid+"/index.html" {
+		t.Fatalf("full path = %q", full)
 	}
-	if len(order) != 3 || order[0] != filepath.Base(embed) || order[1] != "index.html" || order[2] != "index.stamp.js" {
-		t.Fatalf("write order = %v, want embed, page, then stamp", order)
+	if len(order) != 2 || order[0] != "index.html" || order[1] != "index.stamp.js" {
+		t.Fatalf("write order = %v, want page then stamp", order)
 	}
 	page, err := os.ReadFile(filepath.Join(f.root, full))
 	if err != nil || !strings.HasPrefix(string(page), "<!DOCTYPE html>") || !strings.Contains(string(page), "Two columns?") {
@@ -317,92 +317,41 @@ func TestWhiteboardUpdateRendersPageEmbedAndStampInOrder(t *testing.T) {
 	}
 }
 
-func TestWhiteboardEmbedRetentionAndDistinctNames(t *testing.T) {
+func TestWhiteboardUpdateWritesNoEmbedSnapshots(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	first := resultLine(t, f.update(t, ``), "embed: ")
-	second := resultLine(t, f.update(t, ``), "embed: ")
-	if first == second {
-		t.Fatalf("two identical renders must produce distinct embed names: %s", first)
+	for i := 0; i < 2; i++ {
+		text := f.update(t, ``)
+		if strings.Contains(text, "embed:") {
+			t.Fatalf("update returned an embed line: %s", text)
+		}
 	}
-	for i := 0; i < 4; i++ {
-		f.update(t, ``)
-	}
-	names := f.embeds(t, f.dir())
-	if len(names) != 5 {
-		t.Fatalf("embeds kept = %d (%v), want 5", len(names), names)
-	}
-	// Age is the render sequence, not mtime: make the oldest-by-sequence
-	// embed the newest on disk, and it is still the one evicted.
-	rec, _ := f.s.sessions.readState(f.key, partAll)
-	oldest := rec.Whiteboard.Embeds[0].Name
-	future := time.Now().Add(time.Hour)
-	if err := os.Chtimes(filepath.Join(f.dir(), oldest), future, future); err != nil {
-		t.Fatal(err)
-	}
-	newestBefore := rec.Whiteboard.Embeds[1].Name
-	past := time.Now().Add(-48 * time.Hour)
-	if err := os.Chtimes(filepath.Join(f.dir(), newestBefore), past, past); err != nil {
-		t.Fatal(err)
-	}
-	f.update(t, ``)
-	if _, err := os.Stat(filepath.Join(f.dir(), oldest)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("the lowest-sequence embed %s must be evicted despite its fresh mtime", oldest)
-	}
-	if _, err := os.Stat(filepath.Join(f.dir(), newestBefore)); err != nil {
-		t.Fatalf("embed %s must survive despite its old mtime: %v", newestBefore, err)
-	}
-	if got := len(f.embeds(t, f.dir())); got != 5 {
-		t.Fatalf("embeds kept after eviction = %d, want 5", got)
+	if names := f.embeds(t, f.dir()); len(names) != 0 {
+		t.Fatalf("update wrote embed snapshots: %v", names)
 	}
 }
 
-func TestWhiteboardEmbedDir(t *testing.T) {
+func TestWhiteboardEmbedDirIsDeprecatedNoop(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	host := t.TempDir()
-	for _, bad := range []string{"relative/dir", filepath.Join(host, "missing")} {
-		if resp := f.call(t, "whiteboard.update", map[string]any{"commands": embedDirCommand(bad)}); !isToolError(resp) {
-			t.Fatalf("embed_dir %q must be refused: %s", bad, resp)
-		}
+	f.update(t, ``)
+	before, ok := f.s.sessions.readState(f.key, partAll)
+	if !ok {
+		t.Fatal("read state before deprecated command")
 	}
-	embed := resultLine(t, f.update(t, embedDirCommand(host)), "embed: ")
-	if strings.Contains(embed, "/") || !strings.HasPrefix(embed, f.replyID()+"-") {
-		t.Fatalf("embed with embed_dir must be the bare file name: %q", embed)
+	text := f.update(t, embedDirCommand(host))
+	if !strings.Contains(text, "info: wb:embed-dir is deprecated and ignored; embed HTML snapshots are no longer rendered.") || strings.Contains(text, "embed:") {
+		t.Fatalf("deprecated command result: %s", text)
 	}
-	if _, err := os.Stat(filepath.Join(host, embed)); err != nil {
-		t.Fatalf("the setting call's own embed must land in embed_dir: %v", err)
+	after, ok := f.s.sessions.readState(f.key, partAll)
+	if !ok {
+		t.Fatal("read state after deprecated command")
 	}
-	if names := f.embeds(t, f.dir()); len(names) != 0 {
-		t.Fatalf("no embed may land in the repository folder while embed_dir is set: %v", names)
+	before.Whiteboard.Seq = after.Whiteboard.Seq
+	if !reflect.DeepEqual(before.Whiteboard, after.Whiteboard) {
+		t.Fatalf("deprecated command stored state: before=%+v after=%+v", before.Whiteboard, after.Whiteboard)
 	}
-	// Remembered for later updates, and never evicted there.
-	for i := 0; i < 6; i++ {
-		later := resultLine(t, f.update(t, ``), "embed: ")
-		if strings.Contains(later, "/") {
-			t.Fatalf("later embed must still go to embed_dir: %q", later)
-		}
-	}
-	if got := len(f.embeds(t, host)); got != 7 {
-		t.Fatalf("embeds in embed_dir = %d, want all 7 kept", got)
-	}
-	// Repository GC never touches the host folder.
-	orphan := "zzzorphan-0123456789.html"
-	mustWrite(t, host, orphan, "x")
-	f.s.maybeCollectWhiteboards(f.root)
-	if _, err := os.Stat(filepath.Join(host, orphan)); err != nil {
-		t.Fatalf("GC must not touch embed_dir: %v", err)
-	}
-	// A vanished folder refuses the update, naming it.
-	gone := t.TempDir()
-	f.update(t, embedDirCommand(gone))
-	os.RemoveAll(gone)
-	resp := f.call(t, "whiteboard.update", map[string]any{"commands": ""})
-	if !isToolError(resp) || !strings.Contains(toolText(t, resp), gone) {
-		t.Fatalf("update with a vanished embed_dir must be refused naming it: %s", resp)
-	}
-	// "" clears it, and embeds return to the repository folder.
-	embed = resultLine(t, f.update(t, `<wb:embed-dir path=""/>`), "embed: ")
-	if !strings.HasPrefix(embed, "ai-docs/whiteboards/") {
-		t.Fatalf("cleared embed_dir must return embeds to the repository: %q", embed)
+	if entries, err := os.ReadDir(host); err != nil || len(entries) != 0 {
+		t.Fatalf("deprecated command wrote host files: %v, %v", entries, err)
 	}
 }
 
@@ -460,11 +409,6 @@ func TestWhiteboardRenameRetriesSharingViolation(t *testing.T) {
 			}
 			if f.stamp(t) != "wbStamp(\"7\");\n" || !strings.Contains(f.fullPage(t), "committed-marker") {
 				t.Fatal("a later render did not repair the page and stamp")
-			}
-			for _, e := range repaired.Whiteboard.Embeds {
-				if !exists(filepath.Join(f.dir(), e.Name)) {
-					t.Fatalf("repaired render is missing recorded embed %s", e.Name)
-				}
 			}
 		})
 	}
@@ -692,7 +636,7 @@ func TestWhiteboardUpdateResultCarriesStaleTopicNudge(t *testing.T) {
 	if got := resultLine(t, text, "info: "); got != want+" "+warning {
 		t.Fatalf("info line = %q\nwant        %q", got, want+" "+warning)
 	}
-	for _, path := range []string{resultLine(t, text, "full: "), resultLine(t, text, "embed: ")} {
+	for _, path := range []string{resultLine(t, text, "full: ")} {
 		page, err := os.ReadFile(filepath.Join(f.root, path))
 		if err != nil {
 			t.Fatal(err)
@@ -1244,7 +1188,7 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 	}
 }
 
-func TestWhiteboardPlaybookStatesPointerAndEmbedDirWithoutNamingAHost(t *testing.T) {
+func TestWhiteboardPlaybookNamesNoHost(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	text := toolText(t, f.call(t, "playbook.read", map[string]any{"name": "whiteboard"}))
 	if strings.TrimSpace(text) == "" {

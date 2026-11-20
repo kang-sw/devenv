@@ -135,11 +135,6 @@ func TestTopicWithABodyIsNotQuiet(t *testing.T) {
 	if quiet := topicView(t, st, LayoutFull, "quiet"); quiet.Quiet || quiet.Doc != "" || quiet.Stream.Count == 0 {
 		t.Fatalf("full-page settled history must stay visible: %+v", quiet)
 	}
-	// The embed is unchanged only after its current snapshot was acknowledged.
-	st.LastEmbedSeq = st.Seq
-	if quiet := topicView(t, st, LayoutEmbed, "quiet"); !quiet.Quiet || quiet.Doc != "" {
-		t.Fatalf("unchanged embed topic must remain quiet: %+v", quiet)
-	}
 	// A quiet topic that gains a body is no longer quiet.
 	mustApply(t, st, topicXML("quiet", "now with notes"))
 	if quiet := topicView(t, st, LayoutFull, "quiet"); quiet.Quiet || quiet.Doc != "" || !fixedContentView(t, quiet).Open {
@@ -178,7 +173,7 @@ func TestContentOnlyTopicInTheView(t *testing.T) {
 	}
 	mustApply(t, st, `<wb:topic name="notes"><wb:close result="done"/></wb:topic>`)
 	notes = topicView(t, st, LayoutFull, "notes")
-	if notes.Quiet || !notes.Closed || notes.Stream.Count == 0 || notes.Doc != "" || fixedContentView(t, notes).Text != "just notes" || fixedContentView(t, notes).Open || notes.DocOpen(false) || notes.DocOpen(true) {
+	if notes.Quiet || !notes.Closed || notes.Stream.Count == 0 || notes.Doc != "" || fixedContentView(t, notes).Text != "just notes" || fixedContentView(t, notes).Open || notes.DocOpen() {
 		t.Fatalf("closed notes = %+v", notes)
 	}
 }
@@ -186,37 +181,16 @@ func TestContentOnlyTopicInTheView(t *testing.T) {
 func TestBodyOpenOnTheFullPageUnlessClosed(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassTechnical, "t", "x")+topicXML("t", "body"))
-	if tv := topicView(t, st, LayoutFull, "t"); tv.Doc != "" || !fixedContentView(t, tv).Open || tv.DocNew {
+	if tv := topicView(t, st, LayoutFull, "t"); tv.Doc != "" || !fixedContentView(t, tv).Open {
 		t.Fatalf("full page topic = %+v", tv)
 	}
 	mustApply(t, st, `<wb:topic name="t"><wb:close result="done"/></wb:topic>`)
-	if tv := topicView(t, st, LayoutFull, "t"); tv.DocOpen(false) || tv.Doc != "" || fixedContentView(t, tv).Text != "body" || fixedContentView(t, tv).Open {
+	if tv := topicView(t, st, LayoutFull, "t"); tv.DocOpen() || tv.Doc != "" || fixedContentView(t, tv).Text != "body" || fixedContentView(t, tv).Open {
 		t.Fatalf("closed topic on the full page = %+v", tv)
 	}
 	// No body, nothing to open.
-	if (TopicView{}).DocOpen(false) || (TopicView{}).DocOpen(true) {
+	if (TopicView{}).DocOpen() {
 		t.Fatal("a topic without a body has no open body")
-	}
-}
-
-// Snapshot embeds omit current-content payloads regardless of freshness.
-// Full pages still carry them, independent of the previous embed mark.
-func TestEmbedOmitsCurrentContent(t *testing.T) {
-	st := &State{}
-	mustApply(t, st, topicXML("a", "body a")+topicXML("b", "body b"))
-	for _, name := range []string{"a", "b"} {
-		tv := topicView(t, st, LayoutEmbed, name)
-		if tv.Doc != "" || tv.DocNew || tv.DocOpen(true) {
-			t.Fatalf("embed carries current content: %+v", tv)
-		}
-	}
-	st.LastEmbedSeq = st.Seq
-	mustApply(t, st, topicXML("b", "body b2"))
-	if full := topicView(t, st, LayoutFull, "b"); full.Doc != "" || fixedContentView(t, full).Text != "body b2" || !fixedContentView(t, full).Open {
-		t.Fatalf("full page current content lost: %+v", full)
-	}
-	if embed := topicView(t, st, LayoutEmbed, "b"); embed.Doc != "" || embed.DocNew {
-		t.Fatalf("fresh current content leaked into embed: %+v", embed)
 	}
 }
 

@@ -127,9 +127,8 @@ func (f FolderStore) boardFiles(meta *folderSession) ([]string, error) {
 // is extracted to a temporary folder and opened with the store (schema guard,
 // pending replay, consistency checks) before the destination is touched, so
 // a refused archive leaves the destination as it was and creates no backup.
-// The render bookkeeping (embed folder, embeds, last embed sequence) is
-// cleared; every other value, the ID counters included, stays as loaded,
-// except the revision receipts (metadata and stale-nudge revisions), which
+// Every value, the ID counters included, stays as loaded, except the revision
+// receipts (metadata and stale-nudge revisions), which
 // the destination's receipt floors because viewers compare them, the render
 // sequence, which replace raises past the destination's, and LoadedAt, set
 // at the locked swap (not the backup-name time now), so answers sent to the
@@ -157,7 +156,6 @@ func (f FolderStore) LoadArchive(path string, now time.Time) (backup string, top
 	if board == nil {
 		return "", 0, fmt.Errorf("the archive holds no board")
 	}
-	board.EmbedDir, board.Embeds, board.LastEmbedSeq = "", nil, 0
 	return f.replace(board, f.Dir+".bak-"+now.Format("060102_1504"))
 }
 

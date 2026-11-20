@@ -10,52 +10,48 @@ import (
 	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
-const sampleDoc = `<p>One update writes the full page and an embed; the embed keeps the latest five.</p>
+const sampleDoc = `<p>One update writes the standalone board page and its change stamp.</p>
 <svg viewBox="0 0 640 170" role="img" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0,0 L8,4 L0,8 z"/></marker></defs>
   <rect class="box" x="10" y="55" width="120" height="50" rx="8"/><text x="24" y="77">lead</text><text class="sub" x="24" y="93">one update per turn</text>
   <rect class="box store" x="200" y="55" width="140" height="50" rx="8"/><text class="on" x="214" y="77">session store</text><text class="sub on" x="214" y="93">items · seq · archive</text>
-  <rect class="box" x="430" y="10" width="200" height="50" rx="8"/><text x="444" y="32">full · &lt;id&gt;.html</text><text class="sub" x="444" y="48">overwrite + stamp</text>
-  <rect class="box" x="430" y="100" width="200" height="50" rx="8"/><text x="444" y="122">embed · &lt;id&gt;-&lt;hash&gt;.html</text><text class="sub" x="444" y="138">new file, keep 5</text>
+  <rect class="box" x="430" y="55" width="200" height="50" rx="8"/><text x="444" y="77">board · &lt;id&gt;/index.html</text><text class="sub" x="444" y="93">overwrite + stamp</text>
   <path class="edge" d="M130,80 H198" marker-end="url(#ah)"/>
-  <path class="edge" d="M340,72 C385,72 390,35 428,35" marker-end="url(#ah)"/>
-  <path class="edge" d="M340,88 C385,88 390,125 428,125" marker-end="url(#ah)"/>
-  <path class="edge dash" d="M180,146 H395 V48 H428" marker-end="url(#ah)"/>
+  <path class="edge" d="M340,80 H428" marker-end="url(#ah)"/>
 </svg>`
 
 // sampleState is a board with every item kind: open policy, assumed, open
 // technical and announced, answered, withdrawn, and superseded items across
-// several topics, one of them closed, and no topic body. The previous embed
-// was at seq 10.
+// several topics, one of them closed, and no topic body.
 func sampleState() *State {
-	st := &State{Counter: 90, Seq: 12, LastEmbedSeq: 10, SettleSeq: 21, ClosedTopics: []string{"초기 범위"}}
+	st := &State{Counter: 90, Seq: 12, SettleSeq: 21, ClosedTopics: []string{"초기 범위"}}
 	add := func(item Item) { st.Items = append(st.Items, item) }
 	settled := func(id int, topic, title string, order, changed int) Item {
 		return Item{ID: id, Class: ClassTechnical, Topic: topic, Title: title, Status: StatusAnswered, Answer: "ok", AnswerQuote: "looks fine", Settled: order, Changed: changed}
 	}
 
-	add(Item{ID: 77, Class: ClassPolicy, Topic: "embed retention", Title: "How old embed files are cleaned up",
-		Options:        []string{"delete the previous embed on every render", "keep the latest five", "keep everything until session GC"},
-		Recommendation: "b: bounds the file count while chat history keeps rendering",
-		Rationale:      "If the host rereads the file, a deleted embed turns blank in chat history.\nEmbeds in a host folder are never deleted.",
+	add(Item{ID: 77, Class: ClassPolicy, Topic: "page storage", Title: "How the board page is published",
+		Options:        []string{"rewrite in place", "atomic replace", "append every render"},
+		Recommendation: "b: readers never observe a partial page",
+		Rationale:      "The page and stamp are derived output; durable board state commits first.",
 		Links:          []string{"follows {{69}}", "see {{999}} in the archive"},
 		Status:         StatusOpen, Changed: 12})
-	add(Item{ID: 78, Class: ClassTechnical, Topic: "embed retention", Title: "Eviction order follows the render sequence",
-		Rationale: "not mtime - two renders in one second share an mtime, and copies change it", Status: StatusOpen, Changed: 11})
-	add(Item{ID: 69, Class: ClassPolicy, Topic: "embed retention", Title: "Whiteboards live in ai-docs/whiteboards/",
+	add(Item{ID: 78, Class: ClassTechnical, Topic: "page storage", Title: "The stamp follows the page publication",
+		Rationale: "readers reload only after the replacement page is ready", Status: StatusOpen, Changed: 11})
+	add(Item{ID: 69, Class: ClassPolicy, Topic: "page storage", Title: "Whiteboards live in ai-docs/whiteboards/",
 		Options: []string{"ai-docs/whiteboards/", "ai-docs/whiteboards.local/"}, Status: StatusAnswered, Answer: "a",
 		AnswerQuote: "no need for a local folder", Settled: 9, Changed: 6})
 
-	add(Item{ID: 73, Class: ClassPolicy, Topic: "embed layout", Title: "Where Now sits in the embed",
+	add(Item{ID: 73, Class: ClassPolicy, Topic: "page layout", Title: "Where Now sits on the page",
 		Options:        []string{"always below", "always above", "above when this render changed it, otherwise below the topics so the questions come first"},
 		Recommendation: "c: a new explanation is read first, an old one stays out of the way",
 		Status:         StatusOpen, Changed: 12})
-	add(Item{ID: 76, Class: ClassPolicy, Topic: "embed layout", Title: "Recommendation shows as a star plus a line",
+	add(Item{ID: 76, Class: ClassPolicy, Topic: "page layout", Title: "Recommendation shows as a star plus a line",
 		Options: []string{"star only", "star and recommendation line"}, Recommendation: "b",
 		Status: StatusAssumed, Answer: "b", AnswerQuote: "71-76 look good", Settled: 21, Changed: 11})
-	add(Item{ID: 71, Class: ClassAnnounced, Topic: "embed layout", Title: "Full page has two columns, panels in the sidebar",
+	add(Item{ID: 71, Class: ClassAnnounced, Topic: "page layout", Title: "The page has two columns, panels in the sidebar",
 		Status: StatusAnswered, Answer: "ok", AnswerQuote: "71-76 look good", Settled: 18, Changed: 11})
-	add(Item{ID: 72, Class: ClassAnnounced, Topic: "embed layout", Title: "Embed has one column",
+	add(Item{ID: 72, Class: ClassAnnounced, Topic: "page layout", Title: "Small screens collapse to one column",
 		Status: StatusAnswered, Answer: "ok", AnswerQuote: "71-76 look good", Settled: 19, Changed: 11, Links: []string{"pairs with {{71}}"}})
 
 	add(Item{ID: 80, Class: ClassTechnical, Topic: "Now 입력", Title: "now_path로 HTML 파일을 받아 update 시점에 저장",
@@ -106,7 +102,7 @@ func render(t *testing.T, view View) string {
 }
 
 func layouts() map[string]Layout {
-	return map[string]Layout{"full": LayoutFull, "embed": LayoutEmbed}
+	return map[string]Layout{"full": LayoutFull}
 }
 
 func TestRenderPageDocumentShape(t *testing.T) {
@@ -155,7 +151,7 @@ func TestRenderPageIsSelfContained(t *testing.T) {
 	}
 }
 
-func TestRenderPageChangeSignalOnlyOnFull(t *testing.T) {
+func TestRenderPageChangeSignal(t *testing.T) {
 	full := render(t, sampleView(LayoutFull))
 	// The page carries its own seq so the poller compares every stamp, the
 	// first included, against the version it was rendered at.
@@ -177,15 +173,6 @@ func TestRenderPageChangeSignalOnlyOnFull(t *testing.T) {
 	if restore < strings.Index(full, `getItem("wb-open-"`) || restore < strings.LastIndex(full, "build();") {
 		t.Errorf("scroll restore is not the last synchronous step")
 	}
-
-	view := sampleView(LayoutEmbed)
-	view.StampFile = "stray.stamp.js" // the embed ignores a stamp even when one is set
-	embed := render(t, view)
-	for _, banned := range []string{"data-stamp", "data-seq", "wbStamp", "sessionStorage", "wb-banner", "location.reload"} {
-		if strings.Contains(embed, banned) {
-			t.Errorf("embed carries %q", banned)
-		}
-	}
 }
 
 // docTag finds the topic body's <details> tag on a page.
@@ -193,14 +180,13 @@ var docTag = regexp.MustCompile(`<details class="tdoc"[^>]*>`)
 
 // TestRenderPageTopicBodyPlacement pins where a topic body sits: inside its
 // topic block, between the title bar and the items, open on the full page
-// unless the topic is closed, and open on the embed only when it changed
-// since the previous embed.
+// unless the topic is closed.
 func TestRenderPageTopicBodyPlacement(t *testing.T) {
 	for name, layout := range map[string]Layout{"full": LayoutFull} {
 		st := sampleState()
-		st.Topics = []TopicDoc{{Name: "embed layout", Body: "layout **notes**", Changed: 12}, {Name: "초기 범위", Body: "closed notes", Changed: 3}, {Name: "tool surface", Body: "old notes", Changed: 4}}
+		st.Topics = []TopicDoc{{Name: "page layout", Body: "layout **notes**", Changed: 12}, {Name: "초기 범위", Body: "closed notes", Changed: 3}, {Name: "tool surface", Body: "old notes", Changed: 4}}
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		start := strings.Index(out, `<span class="tname" title="embed layout">embed layout</span>`)
+		start := strings.Index(out, `<span class="tname" title="page layout">page layout</span>`)
 		block := out[start:]
 		block = block[:strings.Index(block, "</section>")]
 		doc, items := strings.Index(block, `<details class="tdoc"`), strings.Index(block, `class="topic-stream"`)
@@ -208,17 +194,16 @@ func TestRenderPageTopicBodyPlacement(t *testing.T) {
 			t.Errorf("%s: the body (%d) is not above the items (%d)", name, doc, items)
 		}
 		wantAll(t, block, `<summary title="topic notes"><svg class="i" aria-hidden="true"><use href="#i-book"/></svg>`, `<div class="doc-body md">layout <strong>notes</strong></div>`)
-		if tag := docTag.FindString(block); tag != `<details class="tdoc" data-key="doc:embed layout" data-body-at="" open>` {
-			t.Errorf("%s: body tag = %q, want it open (changed at seq 12, after the embed at 10)", name, tag)
+		if tag := docTag.FindString(block); tag != `<details class="tdoc" data-key="doc:page layout" data-body-at="" open>` {
+			t.Errorf("%s: body tag = %q, want it open", name, tag)
 		}
-		// A body that did not change since the previous embed is open only on the full page.
+		// An unchanged body is also open on the full page.
 		start = strings.Index(out, `<span class="tname" title="tool surface">tool surface</span>`)
 		block = out[start:]
 		block = block[:strings.Index(block, "</section>")]
 		tag := docTag.FindString(block)
-		wantOpen := layout == LayoutFull
-		if open := strings.HasSuffix(tag, " open>"); open != wantOpen {
-			t.Errorf("%s: unchanged body tag %q, open = %v, want %v", name, tag, open, wantOpen)
+		if open := strings.HasSuffix(tag, " open>"); !open {
+			t.Errorf("%s: unchanged body tag %q is not open", name, tag)
 		}
 		// A closed topic folds its body on both pages.
 		start = strings.Index(out, `<span class="tname" title="초기 범위">초기 범위</span>`)
@@ -234,7 +219,7 @@ func TestRenderPageTopicBodyPlacement(t *testing.T) {
 			t.Errorf("%s: a closed topic still carries its body", name)
 		}
 		// A topic with no body has no body block.
-		start = strings.Index(out, `<span class="tname" title="embed retention">embed retention</span>`)
+		start = strings.Index(out, `<span class="tname" title="page storage">page storage</span>`)
 		block = out[start:]
 		block = block[:strings.Index(block, "</section>")]
 		if strings.Contains(block, "tdoc") {
@@ -290,11 +275,11 @@ func TestRenderPageTopicKeyAttribute(t *testing.T) {
 func TestRenderPageTopicBodyToggleBelongsToTheBar(t *testing.T) {
 	for name, layout := range map[string]Layout{"full": LayoutFull} {
 		st := sampleState()
-		st.Topics = []TopicDoc{{Name: "embed layout", Body: "layout notes", Changed: 12}}
+		st.Topics = []TopicDoc{{Name: "page layout", Body: "layout notes", Changed: 12}}
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		wantAll(t, out, `<section class="topic has-doc" id="`+topicAnchor("embed layout")+`" data-topic="embed layout" data-open-asks="true"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="embed layout">embed layout</span></span>`,
+		wantAll(t, out, `<section class="topic has-doc" id="`+topicAnchor("page layout")+`" data-topic="page layout" data-open-asks="true"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="page layout">page layout</span></span>`,
 			`.topic.has-doc > .tophead > .tbar { padding-right:`, `details.tdoc > summary { position: absolute;`)
-		start := strings.Index(out, `<span class="tname" title="embed retention">embed retention</span>`)
+		start := strings.Index(out, `<span class="tname" title="page storage">page storage</span>`)
 		if start < 0 {
 			t.Fatalf("%s: topic missing", name)
 		}
@@ -302,18 +287,6 @@ func TestRenderPageTopicBodyToggleBelongsToTheBar(t *testing.T) {
 			t.Errorf("%s: a topic without a body is marked has-doc", name)
 		}
 	}
-}
-
-// Embeds no longer carry current content, even when it changed. Panel recaps
-// and the latest agent line replace the old body/freshness presentation.
-func TestRenderPageEmbedOmitsCurrentBody(t *testing.T) {
-	st := &State{Seq: 12, LastEmbedSeq: 10, Topics: []TopicDoc{{Name: "fresh", Body: "f", Changed: 12}, {Name: "stale", Body: "s", Changed: 5}}}
-	embed := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
-	wantNone(t, markup(embed), `data-key="doc:fresh"`, `data-key="doc:stale"`, `class="doc-body`)
-	wantAll(t, embed, `href="r/index.html">Open full board</a>`)
-	full := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantNone(t, full, `class="new"`)
-	wantAll(t, full, `<details class="tdoc" data-key="doc:fresh" data-body-at="" open>`, `<details class="tdoc" data-key="doc:stale" data-body-at="" open>`)
 }
 
 // TestRenderPageEscapesItemTextButNotTopicBody pins what reaches a page as
@@ -454,9 +427,9 @@ func TestTopicBodyHTMLCaveats(t *testing.T) {
 
 func TestRenderPageTopicBlockOrder(t *testing.T) {
 	out := render(t, sampleView(LayoutFull))
-	start := strings.Index(out, `<span class="tname" title="embed layout">embed layout</span>`)
+	start := strings.Index(out, `<span class="tname" title="page layout">page layout</span>`)
 	if start < 0 {
-		t.Fatal("embed layout topic missing")
+		t.Fatal("page layout topic missing")
 	}
 	block := out[start:]
 	block = block[:strings.Index(block, "</section>")]
@@ -473,7 +446,7 @@ func TestRenderPageTopicBlockOrder(t *testing.T) {
 		t.Errorf("title bar chips: want the policy count and no assumed count")
 	}
 
-	start = strings.Index(out, `<span class="tname" title="embed retention">embed retention</span>`)
+	start = strings.Index(out, `<span class="tname" title="page storage">page storage</span>`)
 	block = out[start:]
 	block = block[:strings.Index(block, "</section>")]
 	policy, ack, settled := strings.Index(block, `id="item-77"`), strings.Index(block, `id="item-78"`), strings.Index(block, `id="item-69"`)
@@ -487,7 +460,7 @@ func TestRenderPagePolicyOptionsAndPicks(t *testing.T) {
 	for _, want := range []string{
 		`<div class="card policy" id="item-77" data-id="77">`,
 		`<button class="opt rec" data-opt="b" aria-pressed="false"><span class="k">b<svg class="i" aria-hidden="true"><use href="#i-star"/></svg></span>`,
-		`<b><svg class="i" aria-hidden="true"><use href="#i-star"/></svg>b</b> bounds the file count`,
+		`<b><svg class="i" aria-hidden="true"><use href="#i-star"/></svg>b</b> readers never observe a partial page`,
 		// a settled policy item shows its picked option
 		`<span class="pick" title="picked"><span class="k">a</span><span class="pt">ai-docs/whiteboards/</span></span>`,
 		`<input type="checkbox" data-id="78">`,
@@ -508,25 +481,9 @@ func TestRenderPagePolicyOptionsAndPicks(t *testing.T) {
 // user's veto or comment. It counts nowhere as waiting: no header or topic
 // chip, no bulk checkbox, and its topic is quiet once nothing else waits.
 func TestRenderPageAssumedItemIsASettledRow(t *testing.T) {
-	embedState := sampleState()
-	embedState.LastEmbedSeq = embedState.Seq // isolate assumed markup from freshness badges
-	out := render(t, BuildView(embedState, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
-	wantAll(t, out,
-		`<div class="srow" id="item-76" data-id="76"><details class="sx" data-key="item:76"><summary><span class="stext"><span class="id">(76)</span><span class="amark" title="assumed, confirm or correct">assumed</span><b>Recommendation shows as a star plus a line</b> <span class="pick" title="picked"><span class="k">b</span>`,
-		`“71-76 look good”</span></span></summary>`,
-		// The pen and note follow the row's details as siblings, outside its
-		// toggle path, so they show and work while the row is closed.
-		`</div></details><button class="btn mini note-toggle" title="note"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button><textarea class="note" rows="1" placeholder="✎" title="correction" hidden></textarea></div>`)
-	wantNone(t, out, "card assumed", "chip assumed", `data-v="ok"`)
-	if got := strings.Count(out, `class="amark"`); got != 1 {
-		t.Errorf("%d assumed markers, want 1", got)
-	}
-	// A settled row that is not assumed has neither a marker nor a pen.
-	wantAll(t, out, `<div class="srow" id="item-72"><span class="stext"><span class="id">(72)</span><b>`)
-
 	// A topic holding only an assumed item waits on nothing: the item rotates
-	// with the settled rows, the header carries no count, and once closed the
-	// embed topic is quiet and the row keeps its pen; full history stays open.
+	// with the settled rows, the header carries no count, and full history
+	// stays open after the topic closes.
 	st := &State{}
 	mustApply(t, st, addXML(ClassPolicy, "t", "p", "x", "y"))
 	mustApply(t, st, `<wb:answer id="1" value="a" assumed="true">sure</wb:answer>`)
@@ -551,16 +508,6 @@ func TestRenderPageAssumedItemIsASettledRow(t *testing.T) {
 	closedFull := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	wantAll(t, closedFull, `<section class="topic closed" id="`+topicAnchor("t")+`" data-topic="t" title="closed">`, `<div class="topic-stream">`, `data-history-item="1"`, `data-id="01"`, `title="correction"`)
 	wantNone(t, closedFull, `<details class="settled"`, `<details class="topic-stream"`)
-	closed := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
-	wantAll(t, closed, `<section class="topic quiet closed" id="`+topicAnchor("t")+`" data-topic="t" title="closed">`,
-		`<div class="srow" id="item-1" data-id="01">`,
-		`<button class="btn mini note-toggle" title="note"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button><textarea class="note" rows="1" placeholder="✎" title="correction" hidden></textarea></div>`,
-		`<div class="reply solo" data-idle hidden>`)
-	head := closed[strings.Index(closed, `<div class="top">`):]
-	head = head[:strings.Index(head, "</div>")]
-	// The embed may mark fresh activity, including the default topic state,
-	// but an assumed answer never becomes a pending answer/ack count.
-	wantNone(t, head, `class="chip policy"`, `class="chip ok"`)
 }
 
 // A settled row with more to show unfolds to its original item: a details
@@ -580,33 +527,16 @@ func TestRenderPageSettledRowExpands(t *testing.T) {
 	for name, layout := range layouts() {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
 		row := func(id int) string {
-			if layout == LayoutFull {
-				r := regexpHistoryArticle(out, fmt.Sprintf("item-%d", id))
-				if r == "" {
-					t.Fatalf("%s: history row %d missing", name, id)
-				}
-				return r
-			}
-			at := strings.LastIndex(out[:max(0, strings.Index(out, fmt.Sprintf(`" id="item-%d"`, id)))], `<div class="srow`)
-			if at < 0 {
-				t.Fatalf("%s: settled row %d missing", name, id)
-			}
-			r := out[at:]
-			r = r[:strings.Index(r, "</section>")]
-			if next := strings.Index(r[1:], `<div class="srow`); next >= 0 {
-				r = r[:next+1]
+			r := regexpHistoryArticle(out, fmt.Sprintf("item-%d", id))
+			if r == "" {
+				t.Fatalf("%s: history row %d missing", name, id)
 			}
 			return r
 		}
 
 		policy := row(1)
-		if layout == LayoutEmbed {
-			wantAll(t, policy, `<div class="srow" id="item-1"><details class="sx" data-key="item:1"><summary><span class="stext">`,
-				`<span class="link"><svg class="i" aria-hidden="true"><use href="#i-link"/></svg>see <a href="#item-2">(02)</a></span></span></span></summary><div class="sbody">`)
-		} else {
-			wantAll(t, policy, `data-history-item="1"`, `<details class="sx" data-key="item:1">`, `see <a href="#item-2">(02)</a>`, `class="quote"`, "fine", "Time unknown")
-			wantNone(t, out, `<details class="settled"`, `<details class="topic-stream"`)
-		}
+		wantAll(t, policy, `<div class="srow wb-hitem policy" id="item-1"><details class="sx" data-key="item:1"><summary><span class="stext wb-htext">`,
+			`<span class="link"><svg class="i" aria-hidden="true"><use href="#i-link"/></svg>see <a href="#item-2">(02)</a></span>`)
 		wantAll(t, policy,
 			`<div class="sbody"><div class="ctx md">context <strong>why</strong></div><div class="opts">`,
 			`<span class="opt static"><span class="k">a</span><span>here</span></span>`,
@@ -626,11 +556,7 @@ func TestRenderPageSettledRowExpands(t *testing.T) {
 		wantAll(t, row(3), `<details class="sx" data-key="item:3">`, `<div class="sbody"><div class="ctx md">because <code>x</code></div></div></details>`)
 
 		bare := row(4)
-		if layout == LayoutEmbed {
-			wantAll(t, bare, `<div class="srow" id="item-4"><span class="stext">`)
-		} else {
-			wantAll(t, bare, `data-history-item="4"`)
-		}
+		wantAll(t, bare, `<div class="srow wb-hitem announced" id="item-4">`, `<span class="stext wb-htext">`)
 		wantAll(t, bare, "only a link")
 		wantNone(t, bare, "<details", "sbody")
 	}
@@ -671,90 +597,10 @@ func TestRenderPageQuietAndCollapsedSettled(t *testing.T) {
 			previous = at
 		}
 	}
-
-	embedState := sampleState()
-	for i := range embedState.Items {
-		if embedState.Items[i].ID == 58 || embedState.Items[i].ID == 59 {
-			embedState.Items[i].Changed = 11
-		}
-	}
-	full := render(t, BuildView(embedState, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
-	// The embed's closed topic's settled items sit behind a collapsed chip in its one
-	// title line.
-	start := strings.Index(full, `<section class="topic quiet closed" id="`+topicAnchor("초기 범위")+`" data-topic="초기 범위" title="closed">`)
-	if start < 0 {
-		t.Fatal("closed settled-only topic is not quiet")
-	}
-	block := full[start:]
-	block = block[:strings.Index(block, "</section>")]
-	if strings.Contains(block, `class="tbody"`) {
-		t.Errorf("quiet topic renders a body")
-	}
-	if !strings.HasPrefix(block[strings.Index(block, `<details class="settled"`):], `<details class="settled"><summary title="settled">`) {
-		t.Errorf("quiet topic's settled chip is not collapsed")
-	}
-	for _, id := range []int{40, 41, 42} {
-		if !strings.Contains(block, fmt.Sprintf(`id="item-%d"`, id)) {
-			t.Errorf("collapsed settled item %d missing from the quiet topic", id)
-		}
-	}
-
-	// Two fresh embed decisions stay expanded, while the older six retain
-	// their independent nested disclosure. Full pages use HISTORY instead.
-	start = strings.Index(full, `<span class="tname" title="tool surface">tool surface</span>`)
-	block = full[start:]
-	block = block[:strings.Index(block, "</section>")]
-	if !strings.Contains(block, `<details class="settled" open><summary title="settled">`) {
-		t.Errorf("fresh embed settled rows are not shown open")
-	}
-	more := strings.Index(block, `<details class="more"><summary title="older settled items">+6</summary>`)
-	if more < 0 {
-		t.Fatalf("nested +6 details missing: %s", block)
-	}
-	for id := 52; id < 60; id++ {
-		at := strings.Index(block, fmt.Sprintf(`id="item-%d"`, id))
-		if at < 0 {
-			t.Errorf("settled item %d missing", id)
-		} else if collapsed := id < 58; collapsed != (at > more) {
-			t.Errorf("settled item %d collapsed=%v but sits at %d against +N at %d", id, collapsed, at, more)
-		}
-	}
-
-	embed := render(t, sampleView(LayoutEmbed))
-	if !strings.Contains(embed, `<section class="topic quiet" id="`+topicAnchor("tool surface")+`" data-topic="tool surface"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="tool surface">tool surface</span></span>`) {
-		t.Errorf("embed: settled-only topic with nothing new is not quiet")
-	}
-}
-
-func TestRenderPageNewBadgeOnlyOnEmbed(t *testing.T) {
-	const badge = `<span class="new" title="new since the previous embed"></span>`
-	embed := render(t, sampleView(LayoutEmbed))
-	for _, id := range []int{77, 78, 76, 72} {
-		at := strings.Index(embed, fmt.Sprintf(`id="item-%d"`, id))
-		end := strings.Index(embed[at:], "</div>")
-		if at < 0 || !strings.Contains(embed[at:at+end], badge) {
-			t.Errorf("embed: item %d lacks the new badge", id)
-		}
-	}
-	if !strings.Contains(embed, `<span class="chip fresh" title="new since the previous embed"><span class="new"></span>`) {
-		t.Errorf("embed: fresh count chip missing")
-	}
-
-	view := sampleView(LayoutFull)
-	for i := range view.Topics {
-		for j := range view.Topics[i].Policy {
-			view.Topics[i].Policy[j].New = true
-		}
-		view.Topics[i].Fresh = 3
-	}
-	full := render(t, view)
-	if strings.Contains(full, `class="new"`) || strings.Contains(full, "chip fresh") {
-		t.Errorf("full page shows new badges")
-	}
 }
 
 func TestRenderPageReplyBar(t *testing.T) {
-	view := sampleView(LayoutEmbed)
+	view := sampleView(LayoutFull)
 	if !view.BulkAck || !view.Answerable {
 		t.Fatalf("sample board should be answerable with a bulk checkbox")
 	}
@@ -764,10 +610,10 @@ func TestRenderPageReplyBar(t *testing.T) {
 	if !strings.Contains(out, `<input type="checkbox" id="ack-all"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>3</label>`) {
 		t.Errorf("bulk checkbox missing or miscounted")
 	}
-	// Embed: reply bar right after the topics, panels collapsed after it.
+	// The reply bar follows the topics and precedes the panels.
 	reply, lastTopic, panel := strings.Index(out, `<div class="reply`), strings.LastIndex(out, "</section>"), strings.Index(out, `<details class="panel"`)
 	if !(lastTopic < reply && reply < panel) {
-		t.Errorf("embed order: topics end %d, reply %d, panels %d", lastTopic, reply, panel)
+		t.Errorf("page order: topics end %d, reply %d, panels %d", lastTopic, reply, panel)
 	}
 
 	view.BulkAck = false
@@ -790,16 +636,6 @@ func TestRenderPagePanels(t *testing.T) {
 	if strings.Index(full, `<aside class="side flat">`) < strings.Index(full, `</main>`) {
 		t.Errorf("auxiliary sections must follow the full-width board")
 	}
-	embed := render(t, sampleView(LayoutEmbed))
-	for _, want := range []string{`<details class="panel" id="p-todo">`, `<details class="panel" id="p-agenda">`, `<div class="side flat">`} {
-		if !strings.Contains(embed, want) {
-			t.Errorf("embed lacks %q", want)
-		}
-	}
-	if strings.Contains(embed, `<aside`) || strings.Contains(embed, `class="grid`) {
-		t.Errorf("embed uses the two-column layout")
-	}
-
 	view := sampleView(LayoutFull)
 	view.Panels = nil
 	if out := render(t, view); !strings.Contains(out, `<div class="grid solo">`) || strings.Contains(out, "<aside") {
@@ -884,7 +720,7 @@ func TestRenderPageItemReferenceKeepsEscaping(t *testing.T) {
 		{ID: 1, Class: ClassTechnical, Topic: "t", Title: `<u>x</u>{{01}}<script>s()</script>`,
 			Rationale: `<s>r</s> {{01}}`, Links: []string{`<em>l</em>{{01}}`}, Status: StatusOpen},
 	}
-	out := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
+	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	for _, want := range []string{
 		`&lt;u&gt;x&lt;/u&gt;<a href="#item-1">(01)</a>&lt;script&gt;s()&lt;/script&gt;`,
 		`&lt;s&gt;r&lt;/s&gt; <a href="#item-1">(01)</a>`,
@@ -899,7 +735,7 @@ func TestRenderPageItemReferenceKeepsEscaping(t *testing.T) {
 	}
 }
 
-// Standalone and embed boards load no tracker, file explorer, or Git controls.
+// Standalone boards load no tracker, file explorer, or Git controls.
 // Every other client key stays available, including body/gutter timestamps,
 // state clocks, forms, pills, code controls, and the standalone viewer.
 func TestPagesLeaveOutDashboardOnlyStrings(t *testing.T) {
@@ -922,7 +758,7 @@ func TestPagesLeaveOutDashboardOnlyStrings(t *testing.T) {
 		}
 	}
 	st := &State{Seq: 1}
-	for _, layout := range []Layout{LayoutFull, LayoutEmbed} {
+	for _, layout := range []Layout{LayoutFull} {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
 		for key := range wsi18n.ClientTable("en") {
 			want := !strings.HasPrefix(key, trackerKeyPrefix) && !strings.HasPrefix(key, filesKeyPrefix) && !strings.HasPrefix(key, gitKeyPrefix)
@@ -933,9 +769,9 @@ func TestPagesLeaveOutDashboardOnlyStrings(t *testing.T) {
 	}
 }
 
-func TestRenderPageEmbedSizeBudget(t *testing.T) {
+func TestRenderPageSizeBudget(t *testing.T) {
 	long := strings.Repeat("A fairly long sentence about the trade-off, written the way a lead explains it. ", 4)
-	st := &State{Seq: 30, LastEmbedSeq: 20, Topics: []TopicDoc{{Name: "topic 1", Body: sampleDoc, Changed: 30}, {Name: "topic 2", Body: sampleDoc, Changed: 5}}}
+	st := &State{Seq: 30, Topics: []TopicDoc{{Name: "topic 1", Body: sampleDoc, Changed: 30}, {Name: "topic 2", Body: sampleDoc, Changed: 5}}}
 	settle := 0
 	for i := 1; i <= 60; i++ {
 		item := Item{ID: i, Topic: fmt.Sprintf("topic %d", i%6), Title: fmt.Sprintf("Item %d: %s", i, long[:120]), Rationale: long, Links: []string{fmt.Sprintf("see {{%d}}", max(1, i-1))}, Changed: 15 + i%16}
@@ -959,9 +795,8 @@ func TestRenderPageEmbedSizeBudget(t *testing.T) {
 		rows[i] = PanelRow{Label: fmt.Sprintf("key.%d", i), Text: long[:100]}
 	}
 	panels = append(panels, Panel{ID: "extra", Title: "Extra", Icon: "board", Count: "20", Rows: rows})
-	// The embed's ticket panel lists every ready ticket with an absolute
-	// file: link (an embed_dir outside the repository), and its mailbox
-	// panel is one line.
+	// The ticket panel lists every ready ticket with an absolute file: link,
+	// and its mailbox panel is one line.
 	tickets := make([]PanelRow, 100)
 	for i := range tickets {
 		tickets[i] = PanelRow{Label: "ready", Text: long[:100], Link: fmt.Sprintf("file:///home/someone/projects/a-long-repository-name/ai-docs/tickets/ready/2611%02d-feat-a-fairly-long-ticket-stem-%d.md", i%30, i)}
@@ -971,12 +806,12 @@ func TestRenderPageEmbedSizeBudget(t *testing.T) {
 		Panel{ID: "mailbox", Title: "Mailbox", Icon: "mail", Count: "3 unread", Rows: []PanelRow{{Label: "someone@worktree", Text: "3 unread"}}},
 	)
 
-	out := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "size-check", Panels: panels}))
-	// The budget keeps the frequently loaded board page small.
+	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "size-check", Panels: panels}))
+	// The budget keeps the standalone board page small.
 	const budget = 2 << 20
-	t.Logf("populated embed: %d bytes (%.1f%% of 2 MiB)", len(out), 100*float64(len(out))/budget)
+	t.Logf("populated page: %d bytes (%.1f%% of 2 MiB)", len(out), 100*float64(len(out))/budget)
 	// About a third of the limit: the stress is past any real board (60
-	// items, 100 ready tickets), and the embed has no truncation to fall back
+	// items and 100 ready tickets), with no truncation to fall back
 	// on. 35% left the topic bar's pen, note box, and updated time room;
 	// 40% adds the settled rows' expanded bodies (each settled item's
 	// rationale and options ride in the snapshot so it unfolds without script);
@@ -984,13 +819,13 @@ func TestRenderPageEmbedSizeBudget(t *testing.T) {
 	// toggle (styles, icon, and script, about 2.7 KB a page); 44% the code
 	// blocks' wrap toggle (button, wrapped-line styles, and script, about 1.7 KB);
 	// 45% the topic stream's interleave styles (log rows with a clock column,
-	// folds, panel cards, the embed's panel titles; about 6 KB); 46% the
+	// folds, panel cards, and panel titles; about 6 KB); 46% the
 	// topic head (linked ticket badges and their status marks, the glow, the
 	// summary line and check pill, the stuck head's popover; about 3.2 KB);
 	// 47% the closed-more control's data-closed-more attribute (Decision 26,
 	// 261114-feat-ws-dashboard-board-toolbar-overview; about 0.2 KB).
 	if len(out) > budget*47/100 {
-		t.Errorf("populated embed is %d bytes, not well under 2 MiB", len(out))
+		t.Errorf("populated page is %d bytes, not well under 2 MiB", len(out))
 	}
 }
 
@@ -1006,7 +841,7 @@ func TestRenderPagePanelRowLinks(t *testing.T) {
 		{Label: "todo", Text: "Plain"},
 		{State: "pending", Label: "k", Text: "Stateful", Link: "../tickets/todo/261106-feat-c.md"},
 	}}}
-	for name, layout := range map[string]Layout{"full": LayoutFull, "embed": LayoutEmbed} {
+	for name, layout := range map[string]Layout{"full": LayoutFull} {
 		out := render(t, BuildView(&State{}, ViewInput{Layout: layout, ReplyID: "r", Panels: panels}))
 		for _, want := range []string{
 			`<li class="keyed"><code>ready</code><span><a href="../tickets/ready/261106-feat-a.md">Relative</a></span></li>`,
@@ -1054,15 +889,11 @@ func TestRenderPageTodoRowIcons(t *testing.T) {
 	}
 }
 
-// TestOpenQuestionPillIsOnTheFullPageOnly pins where the open-question pill
-// script ships: the full page and the dashboard's shared form script carry
-// it, the embed (a snapshot with no scrolling board) does not.
-func TestOpenQuestionPillIsOnTheFullPageOnly(t *testing.T) {
+// TestOpenQuestionPill pins that the standalone page and dashboard's shared
+// form script carry the open-question pill.
+func TestOpenQuestionPill(t *testing.T) {
 	if out := render(t, sampleView(LayoutFull)); !strings.Contains(out, "data-wb-title") || !strings.Contains(out, ".oq-pill") {
 		t.Errorf("full page lacks the open-question pill script or style")
-	}
-	if out := render(t, sampleView(LayoutEmbed)); strings.Contains(out, "data-wb-title") {
-		t.Errorf("embed carries the open-question pill script")
 	}
 	assets, err := PageAssets()
 	if err != nil || !strings.Contains(string(assets.FormScript), "data-wb-title") {
@@ -1070,16 +901,11 @@ func TestOpenQuestionPillIsOnTheFullPageOnly(t *testing.T) {
 	}
 }
 
-// TestTopicRailIsOnTheFullPageOnly pins where the topic rail (the sticky
-// current-topic bar and its jump capsules) ships: the full page and the
-// dashboard's shared form script carry its script, the embed does not, and
-// the shared stylesheet carries its rules.
-func TestTopicRailIsOnTheFullPageOnly(t *testing.T) {
+// TestTopicRail pins that the standalone page and dashboard's shared form
+// script carry the topic rail and the shared stylesheet carries its rules.
+func TestTopicRail(t *testing.T) {
 	if out := render(t, sampleView(LayoutFull)); !strings.Contains(out, "window.wbRail") || !strings.Contains(out, ".wb-rail-wrap") {
 		t.Errorf("full page lacks the topic rail script or style")
-	}
-	if out := render(t, sampleView(LayoutEmbed)); strings.Contains(out, "window.wbRail") {
-		t.Errorf("embed carries the topic rail script")
 	}
 	assets, err := PageAssets()
 	if err != nil || !strings.Contains(string(assets.FormScript), "window.wbRail") {

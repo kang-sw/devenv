@@ -3,7 +3,6 @@ package wswhiteboard
 import (
 	"encoding/json"
 	"os/exec"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -141,30 +140,19 @@ process.stdout.write(bad.join("\n"));`
 	}
 }
 
-// TestCheckHideToggleKeepsItsStateOnTheRoot runs answers.js and form.js over
-// the check board. The full page renders no hide toggle: completed 04 and 05
-// stay plain HISTORY rows, open 03 is the card stacked after the history, and
-// assumed 06 keeps its correction control in HISTORY. The embed keeps its
-// toggle, starts on the stored state, and toggles for the page alone without
-// touching storage. The cases execute under node when it is installed.
-func TestCheckHideToggleKeepsItsStateOnTheRoot(t *testing.T) {
+// TestFullPageOmitsCheckHideToggleUnderNode runs answers.js and form.js over
+// the check board. Completed checks stay plain history rows, the open check is
+// stacked after history, and the assumed check keeps its correction control.
+func TestFullPageOmitsCheckHideToggleUnderNode(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node not installed; check hide toggle cases not executed")
 	}
-	boards := map[Layout][]byte{}
 	regions, err := RenderRegions(BuildView(checkBoard(t), ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	boards[LayoutFull], _ = json.Marshal(string(regions.Board))
-	// Regions are the full board's; the embed's pill (and its toggle) comes
-	// from the embed page's topic section.
-	embedTopic := regexp.MustCompile(`(?s)<section class="topic[^>]*>.*?</section>`).FindString(render(t, BuildView(checkBoard(t), ViewInput{Layout: LayoutEmbed, ReplyID: "r"})))
-	if !strings.Contains(embedTopic, `class="btn mini ckhide"`) {
-		t.Fatalf("embed topic lacks its hide toggle:\n%s", embedTopic)
-	}
-	boards[LayoutEmbed], _ = json.Marshal(embedTopic)
+	board, _ := json.Marshal(string(regions.Board))
 	answers, err := embeddedAsset("answers.js")
 	if err != nil {
 		t.Fatal(err)
@@ -173,14 +161,11 @@ func TestCheckHideToggleKeepsItsStateOnTheRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cases := func(layout Layout, bodyClass, body string) string {
-		return "var BOARD = " + string(boards[layout]) + ";\nvar BODY_CLASS = " + bodyClass + ";\n" + formPrelude + `
-var stored = {}, touched = 0;
-window.localStorage = { getItem: function (k) { touched++; return k in stored ? stored[k] : null; }, setItem: function (k, v) { touched++; stored[k] = String(v); } };
+	cases := func(body string) string {
+		return "var BOARD = " + string(board) + ";\nvar BODY_CLASS = \"full\";\n" + formPrelude + `
 function run() {
 ` + string(answers) + string(form) + `
 }
-function state() { return document.documentElement.getAttribute("data-ck-hide"); }
 function pressed() { return document.querySelectorAll("button.ckhide").map(function (b) { return b.getAttribute("aria-pressed"); }); }
 function ids(sel) { return document.querySelectorAll(sel).map(function (e) { return e.attrs.id; }); }
 ` + body + `
@@ -188,8 +173,7 @@ process.stdout.write(bad.join("\n"));`
 	}
 	// The full page has no pill and no hide button: its open check is the
 	// card stacked after the history, its answered checks plain history rows.
-	full := cases(LayoutFull, `"full"`, `
-check("before the script runs nothing is set", state(), null);
+	full := cases(`
 run();
 check("no hide button on the full page", pressed(), []);
 check("completed checks render no live check rows", ids(".topic .checks .ckrow:not([data-id])"), []);
@@ -197,20 +181,12 @@ check("completed checks are history rows", ids(".timeline-ask .wb-hitem.check:no
 check("the open check is the stacked card", ids(".wb-asks .checks .ckrow[data-id]"), ["item-3"]);
 check("the assumed history check keeps its correction control", ids(".topic .ckrow[data-assumed]"), ["check-6"]);
 check("the withdrawn history check stays a void row", ids(".timeline-ask .wb-hitem.check.void"), ["item-7"]);`)
-	embed := cases(LayoutEmbed, `"embed"`, `
-stored["ws.wb.checks.hideAnswered"] = "0";
-run();
-check("the embed starts on whatever another page stored", [state(), pressed()], ["1", ["true"]]);
-click(document.querySelector("button.ckhide"));
-check("the embed toggles for the page alone", [state(), pressed(), stored["ws.wb.checks.hideAnswered"], touched], ["0", ["false"], "0", 0]);`)
-	for name, script := range map[string]string{"full": full, "embed": embed} {
-		out, err := nodeScript(node, script).CombinedOutput()
-		if err != nil {
-			t.Fatalf("%s: node: %v\n%s", name, err, out)
-		}
-		if s := strings.TrimSpace(string(out)); s != "" {
-			t.Errorf("%s: check hide toggle cases failed:\n%s", name, s)
-		}
+	out, err := nodeScript(node, full).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	if s := strings.TrimSpace(string(out)); s != "" {
+		t.Errorf("full-page check cases failed:\n%s", s)
 	}
 }
 

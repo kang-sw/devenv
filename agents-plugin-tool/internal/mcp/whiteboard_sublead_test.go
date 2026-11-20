@@ -48,7 +48,7 @@ func seedLeadBoard(t *testing.T, s *Server, key, commands string) {
 		if rec.Whiteboard == nil {
 			rec.Whiteboard = &wswhiteboard.State{}
 		}
-		if _, problems := wswhiteboard.Apply(rec.Whiteboard, commands, wswhiteboard.Env{Now: time.Now(), IsAbs: filepath.IsAbs}); len(problems) > 0 {
+		if _, problems := wswhiteboard.Apply(rec.Whiteboard, commands, wswhiteboard.Env{Now: time.Now()}); len(problems) > 0 {
 			t.Fatalf("seed: %v", problems)
 		}
 		return nil

@@ -197,6 +197,5 @@ func semanticEffects(before, after *State) []Effect {
 	if before.Counter != after.Counter && len(after.Items) == len(before.Items) {
 		add(Effect{Kind: "setting", Field: "id-floor"}, strconv.Itoa(before.Counter), strconv.Itoa(after.Counter))
 	}
-	add(Effect{Kind: "setting", Field: "embed-dir"}, before.EmbedDir, after.EmbedDir)
 	return out
 }

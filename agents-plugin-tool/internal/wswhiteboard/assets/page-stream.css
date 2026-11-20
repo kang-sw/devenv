@@ -29,11 +29,6 @@
 .trecap:has(> .rat[role="button"]) { cursor: pointer; }
 .tsub > .trecap:has(> .rat[role="button"]):hover { color: var(--wb-fg); }
 .trecap > .rat[role="button"]:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px; border-radius: 3px; }
-.ckpill { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-left: auto; min-width: 0; max-width: 100%; }
-.ckbtn { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: 22px; padding: 0 9px; border: 0; border-radius: 8px; background: var(--wb-bg); color: var(--wb-muted-fg); font: 800 10.5px var(--wb-sans); letter-spacing: .06em; text-transform: uppercase; white-space: normal; overflow-wrap: anywhere; }
-.ckbtn .i { width: 12px; height: 12px; }
-.ckbtn .prog { font-variant-numeric: tabular-nums; letter-spacing: 0; text-transform: none; font-size: 11.5px; font-weight: 700; }
-
 /* Linked tickets: one ticket icon right after the waiting clock, reusing the
    .dw button and popover (page-items.css). Neutral at rest and never a topic
    glow; the count badge appears only from two tickets. In the popover an open
@@ -58,7 +53,7 @@
    current state and latest batch stay live; other rows ship inside inert
    gaps. Shared per-scroller owners preserve the reading line on admission. */
 .topic-stream { margin: 0 14px; padding: 7px 0 10px; border-top: 1px solid var(--wb-line); font-size: 13px; }
-.topic-stream .mhead, .tstream > .mhead { display: flex; align-items: center; gap: 6px; min-height: 22px; padding: 0 4px 4px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; color: var(--wb-muted-fg); }
+.topic-stream .mhead { display: flex; align-items: center; gap: 6px; min-height: 22px; padding: 0 4px 4px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; color: var(--wb-muted-fg); }
 .wb-history > .mhead { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); min-height: 26px; }
 .wb-history > .mhead > .wb-mtitle { grid-column: 1; display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A long localized label shortens first; the icon and the count stay whole. */
@@ -67,8 +62,8 @@
 .wb-history > .mhead > .mmeta { grid-column: 3; justify-self: end; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .system-run > summary > .lbl::before { content: ""; flex: none; display: inline-block; width: 0; height: 0; margin-right: 6px; vertical-align: 1px; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
 .system-run[open] > summary > .lbl::before { transform: rotate(90deg); }
-.topic-stream .mhead .i, .tstream > .mhead .i { width: 12px; height: 12px; }
-.topic-stream .mhead .n, .tstream > .mhead .n { letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.topic-stream .mhead .i { width: 12px; height: 12px; }
+.topic-stream .mhead .n { letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .topic-stream .mhead .mmeta { font-weight: 600; letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .wb-history { overflow-anchor: none; }
 .history-live { display: flow-root; width: 100%; }
@@ -216,25 +211,14 @@
 @media (prefers-reduced-motion: reduce) {
   .entry-panel:not(.msg) > summary { transition: none; }
 }
-/* the embed: the latest panel recaps under the same quiet header */
-.tstream { margin: 0 14px; padding: 7px 0 8px; border-top: 1px solid var(--wb-line); }
-.panel-recaps { list-style: none; margin: 0; padding: 0; font-size: 13px; }
-.panel-recaps li { display: flex; align-items: baseline; gap: 8px; padding: 1px 6px; border-radius: 6px; }
-.panel-recaps li > .entry-recap { font-size: 13px; font-weight: 600; }
-.panel-recaps li > .entry-at { flex: none; font: 11px var(--wb-mono); color: var(--wb-muted-fg); }
-.panel-recaps li > a.mref { flex: none; font: 600 11px var(--wb-mono); text-decoration: none; }
-.full-board-link { font-size: 12px; margin: 10px 0; }
-
 /* topic body: block markdown above the topic's items, folded under its own summary */
 /* The summary is the topic bar's button: it is taken out of the details' flow
    and pinned to the bar's right end (the bar reserves room for it), so the body
    opens as a full-width block under the bar. */
 .topic { position: relative; }
 .topic.has-doc > .tophead > .tbar { padding-right: 46px; }
-.topic.has-doc:has(> details.tdoc > summary .new) > .tophead > .tbar { padding-right: 60px; }
 details.tdoc > summary { position: absolute; top: 5px; right: 12px; cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 9px; border-radius: 999px; background: rgb(127 127 127 / .28); color: var(--wb-on-topic); }
 details.tdoc > summary::-webkit-details-marker { display: none; }
-details.tdoc > summary .new { background: currentColor; }
 .topic.quiet details.tdoc > summary { color: var(--wb-muted-fg); }
 .doc-body { padding: 10px 14px 12px; overflow-x: auto; overflow-wrap: anywhere; }
 .doc-body > :first-child { margin-top: 0; }

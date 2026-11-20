@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,10 +19,9 @@ func readWhiteboardPage(t *testing.T, path string) string {
 }
 
 // TestWhiteboardMarkdownFileLinks pins how an item's markdown image and link
-// paths reach the pages: a relative path resolves against the session root
-// and a bare absolute path is a file path; the full page, inside the
-// repository, links both relative to itself, and an embed written to an
-// embed_dir outside the repository links them by absolute file: URLs.
+// paths reach the page: a relative path resolves against the session root and
+// a bare absolute path is a file path; the full page links both relative to
+// itself.
 func TestWhiteboardMarkdownFileLinks(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	abs := filepath.Join(f.root, "docs", "notes.md")
@@ -44,83 +42,25 @@ func TestWhiteboardMarkdownFileLinks(t *testing.T) {
 			t.Errorf("full page lacks %q", want)
 		}
 	}
-
-	host := t.TempDir()
-	embed := resultLine(t, f.update(t, embedDirCommand(host)), "embed: ")
-	page := readWhiteboardPage(t, filepath.Join(host, embed))
-	fileURL := func(p string) string {
-		p = filepath.ToSlash(p)
-		if !strings.HasPrefix(p, "/") {
-			p = "/" + p // a Windows drive path: file:///C:/...
-		}
-		return (&url.URL{Scheme: "file", Path: p}).String()
-	}
-	for _, want := range []string{
-		`<img src="` + fileURL(filepath.Join(f.root, "img", "shot one.png")) + `" alt="shot"/>`,
-		`<a href="` + fileURL(abs) + `">notes</a>`,
-	} {
-		if !strings.Contains(page, want) {
-			t.Errorf("embed in an outside embed_dir lacks %q", want)
-		}
-	}
-	if full := readWhiteboardPage(t, f.pagePath()); !strings.Contains(full, `<img src="../../../img/shot%20one.png"`) {
-		t.Errorf("the full page must keep its repository-relative link while embed_dir is set")
-	}
-}
-
-func TestWhiteboardEmbedSnapshotsOmitPayloadsAndResolveFullLinks(t *testing.T) {
-	f := newWhiteboardFixture(t)
-	text := f.update(t, `<wb:topic name="snapshot"><wb:body>current-content-secret</wb:body><wb:panel recap="panel-recap-marker">panel-payload-secret</wb:panel><wb:log>old-agent-line-secret</wb:log><wb:log>latest-agent-line-marker</wb:log></wb:topic>`)
-	repositoryEmbed := readWhiteboardPage(t, filepath.Join(f.root, resultLine(t, text, "embed: ")))
-	if !strings.Contains(repositoryEmbed, `<a href="`+f.replyID()+`/index.html">Open full board</a>`) {
-		t.Fatal("repository snapshot must link relative to the nested session index")
-	}
-	host := t.TempDir()
-	external := resultLine(t, f.update(t, embedDirCommand(host)), "embed: ")
-	hostEmbed := readWhiteboardPage(t, filepath.Join(host, external))
-	pagePath := filepath.ToSlash(f.pagePath())
-	if !strings.HasPrefix(pagePath, "/") {
-		pagePath = "/" + pagePath
-	}
-	fullURL := (&url.URL{Scheme: "file", Path: pagePath}).String()
-	if !strings.Contains(hostEmbed, `<a href="`+fullURL+`">Open full board</a>`) {
-		t.Fatalf("host snapshot must link to the full index by absolute file URL %q", fullURL)
-	}
-	for name, page := range map[string]string{"repository": repositoryEmbed, "host": hostEmbed} {
-		for _, marker := range []string{"panel-recap-marker", "latest-agent-line-marker"} {
-			if !strings.Contains(page, marker) {
-				t.Errorf("%s snapshot omitted compact metadata %q", name, marker)
-			}
-		}
-		for _, secret := range []string{"panel-payload-secret", "current-content-secret", "old-agent-line-secret", `class="wb-history"`, `<iframe`} {
-			if strings.Contains(page, secret) {
-				t.Errorf("%s snapshot duplicated accumulated payload %q", name, secret)
-			}
-		}
-	}
 }
 
 // TestWhiteboardMarkdownFileLinkNeverYieldsAScheme pins the real link rule
 // against a file named like a URL beside the page: relative to the page it
-// is a bare "javascript:..." name, which must not reach an href as a scheme,
-// on the full page and in an embed_dir inside the repository.
+// is a bare "javascript:..." name, which must not reach an href as a scheme.
 func TestWhiteboardMarkdownFileLinkNeverYieldsAScheme(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	embed := resultLine(t, f.update(t, embedDirCommand(f.root)+`
+	f.update(t, `
 <wb:topic name="t"><wb:add class="policy">
 <wb:title>[a](./ai-docs/whiteboards/javascript:alert(1)) [b](ai-docs/whiteboards/javascript%3Aalert%282%29)</wb:title>
 <wb:option>x</wb:option>
 <wb:option>y</wb:option>
 <wb:why>[c](./javascript:alert(3))
 ![d](javascript%3Ax.png)</wb:why>
-</wb:add></wb:topic>`), "embed: ")
+</wb:add></wb:topic>`)
 	full := readWhiteboardPage(t, f.pagePath())
-	inRepo := readWhiteboardPage(t, filepath.Join(f.root, embed))
-	for name, page := range map[string]string{"full": full, "embed in the repository root": inRepo} {
-		for _, bad := range []string{`href="javascript`, `src="javascript`} {
-			if strings.Contains(page, bad) {
-				t.Errorf("%s page holds %q", name, bad)
-			}
+	for _, bad := range []string{`href="javascript`, `src="javascript`} {
+		if strings.Contains(full, bad) {
+			t.Errorf("full page holds %q", bad)
 		}
 	}
 	for _, want := range []string{`href="../javascript:alert(1)">a</a>`, `href="../javascript:alert(2)">b</a>`} {
@@ -128,35 +68,30 @@ func TestWhiteboardMarkdownFileLinkNeverYieldsAScheme(t *testing.T) {
 			t.Errorf("full page lacks %q", want)
 		}
 	}
-	for _, want := range []string{`href="./javascript:alert(3)">c</a>`, `src="./javascript:x.png"`} {
-		if !strings.Contains(inRepo, want) {
-			t.Errorf("embed in the repository root lacks %q", want)
-		}
-	}
 }
 
 // TestWhiteboardMermaidAssetWrittenOnce pins the shared mermaid script: a
 // page with a mermaid block loads it by its bare hashed name, and the page
-// writer stores it beside that page, in the board folder and in embed_dir,
-// only when it is missing; a board without a mermaid block writes none.
+// writer stores it beside that page only when it is missing; a board without
+// a mermaid block writes none.
 func TestWhiteboardMermaidAssetWrittenOnce(t *testing.T) {
 	name, data := wswhiteboard.MermaidAsset()
 
 	plain := newWhiteboardFixture(t)
 	plain.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>no diagram</wb:title></wb:add></wb:topic>`)
-	if _, err := os.Stat(filepath.Join(plain.dir(), name)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(plain.pageDir(), name)); !os.IsNotExist(err) {
 		t.Fatalf("a board without a mermaid block wrote the mermaid script: %v", err)
 	}
 
 	f := newWhiteboardFixture(t)
-	embed := resultLine(t, f.update(t, "<wb:topic name=\"t\"><wb:add class=\"policy\">\n<wb:title>diagram</wb:title>\n<wb:option>x</wb:option>\n<wb:option>y</wb:option>\n<wb:why>\n```mermaid\ngraph LR\nA-->B\n```\n</wb:why>\n</wb:add></wb:topic>"), "embed: ")
-	asset := filepath.Join(f.dir(), name)
+	f.update(t, "<wb:topic name=\"t\"><wb:add class=\"policy\">\n<wb:title>diagram</wb:title>\n<wb:option>x</wb:option>\n<wb:option>y</wb:option>\n<wb:why>\n```mermaid\ngraph LR\nA-->B\n```\n</wb:why>\n</wb:add></wb:topic>")
+	asset := filepath.Join(f.pageDir(), name)
 	got, err := os.ReadFile(asset)
 	if err != nil || len(got) != len(data) {
 		t.Fatalf("mermaid script not written beside the pages: %v (%d of %d bytes)", err, len(got), len(data))
 	}
 	tag := `<script src="` + name + `"></script>`
-	for _, page := range []string{f.pagePath(), filepath.Join(f.root, embed)} {
+	for _, page := range []string{f.pagePath()} {
 		if got, err := os.ReadFile(filepath.Join(filepath.Dir(page), name)); err != nil || len(got) != len(data) {
 			t.Errorf("%s is missing its adjacent mermaid asset: %v", page, err)
 		}
@@ -173,16 +108,6 @@ func TestWhiteboardMermaidAssetWrittenOnce(t *testing.T) {
 	if got, _ := os.ReadFile(asset); string(got) != "sentinel" {
 		t.Fatalf("an update rewrote the existing mermaid script")
 	}
-
-	host := t.TempDir()
-	embed = resultLine(t, f.update(t, embedDirCommand(host)), "embed: ")
-	if got, err := os.ReadFile(filepath.Join(host, name)); err != nil || len(got) != len(data) {
-		t.Fatalf("mermaid script not written into embed_dir: %v", err)
-	}
-	if !strings.Contains(readWhiteboardPage(t, filepath.Join(host, embed)), tag) {
-		t.Errorf("the embed in embed_dir does not load the shared script by its relative name")
-	}
-
 	// The shared script is not a session file, so whiteboard GC keeps it.
 	if whiteboardFilePattern.MatchString(name) {
 		t.Errorf("GC pattern matches the shared mermaid script %q", name)
