@@ -1,5 +1,5 @@
 ---
-title: wsdoc ticket scanner silently skips non-canonical status directories (e.g. non-hidden done/)
+title: "wsdoc 티켓 스캐너가 비표준 상태 디렉토리(예: 숨김 처리되지 않은 done/)를 조용히 건너뛰는 문제"
 related:
   260728-research-duplicate-ticket-stem-silent-resolve: adjacent scanner robustness/observability topic in the same wsdoc ticket-resolution path
 ---

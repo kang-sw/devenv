@@ -1,5 +1,5 @@
 ---
-title: Revisit a Tauri shell for Werkschaft (WKWebView viability, size, memory)
+title: "Werkschaft용 Tauri 셸 재검토 (WKWebView 가용성, 용량, 메모리)"
 related:
   261115-feat-werkschaft-electron-shell: the Electron migration this research may reverse
   261113-feat-werkschaft-thin-tauri-shell: the earlier Tauri thin shell

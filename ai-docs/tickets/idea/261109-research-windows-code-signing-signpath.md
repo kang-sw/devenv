@@ -1,5 +1,5 @@
 ---
-title: Windows code signing for ws-mcp release binaries (SignPath Foundation)
+title: "ws-mcp 릴리스 바이너리용 Windows 코드 서명 (SignPath Foundation)"
 ---
 
 # Windows code signing for ws-mcp release binaries (SignPath Foundation)

@@ -1,5 +1,5 @@
 ---
-title: "Require a browser credential on localhost dashboard access (cookie gate, one-time login links, Electron cookie)"
+title: "localhost dashboard 접근 시 브라우저 인증 요구 (쿠키 게이트, 일회용 로그인 링크, Electron 쿠키)"
 related:
   261113-refactor-ws-dashboard-drop-lan-serving: "LAN token/cookie branch this gate coexists with; whichever lands second keeps the localhost gate"
   261115-feat-werkschaft-electron-daemon-override: "Electron daemon launch shipping in the same release (1227)"

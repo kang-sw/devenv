@@ -1,5 +1,5 @@
 ---
-title: "Pre-existing node test suite failures in claude-mod and agents-plugin-pi"
+title: "claude-mod 및 agents-plugin-pi의 기존 node 테스트 스위트 실패"
 ---
 
 # Pre-existing node test suite failures in claude-mod and agents-plugin-pi

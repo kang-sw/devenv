@@ -1,5 +1,5 @@
 ---
-title: Whiteboard policy answer that proposes the user's own alternative
+title: "사용자가 직접 대안을 제시하는 whiteboard 정책 응답"
 ---
 
 # Whiteboard policy answer that proposes the user's own alternative

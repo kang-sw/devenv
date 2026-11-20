@@ -1,5 +1,5 @@
 ---
-title: "Design reviewer requires researcher spawning unavailable at its delegation depth"
+title: "설계 리뷰어가 현재 위임 깊이에서 사용할 수 없는 researcher spawn을 요구하는 문제"
 related:
   261113-feat-ws-whiteboard-board-frontend-performance: "encountered during the mandatory Phase 3 verification-accommodation design gate"
 ---

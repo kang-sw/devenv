@@ -1,5 +1,5 @@
 ---
-title: "Experiment: launch the session holder with the official Windows embeddable Python under AhnLab V3"
+title: "실험: AhnLab V3 환경에서 Windows 공식 embeddable Python으로 세션 holder 실행"
 related:
   261112-research-ws-ade-desktop-shell-and-rename: "owner decision (494)=a chose a Go holder port as the long-term direction; this experiment may remove the need to wait for it on Windows"
   261113-bug-ws-only-the-dashboard-daemon-runs-an-exe: "the one-executable principle: only the daemon runs an exe because V3 prompts on new executables"

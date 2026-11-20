@@ -1,5 +1,5 @@
 ---
-title: "Revive topic summaries show structured work state instead of log prose"
+title: "revive 토픽 요약에 로그 서술 대신 구조화된 작업 상태 표시"
 related:
   261114-feat-ws-whiteboard-topic-state-and-lead-nudges: "landed explicit state, owner and cumulative ETA authority; preserve its lifecycle"
   261114-feat-ws-topic-latest-panel-recap-summary: "separate summary-projection request; do not extend its log/panel behavior into revive injection"

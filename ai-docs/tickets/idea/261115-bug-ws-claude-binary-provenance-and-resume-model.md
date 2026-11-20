@@ -1,5 +1,5 @@
 ---
-title: Harden dashboard Claude binary provenance and resume model selection
+title: "dashboard Claude 바이너리 출처 확인 및 재개 모델 선택 강화"
 related:
   261115-feat-ws-dashboard-observed-session-model: complementary visibility of actual observed model and changes
   261114-feat-ws-whiteboard-topic-state-and-lead-nudges: implementation ordering after Phase 2, not a technical prerequisite

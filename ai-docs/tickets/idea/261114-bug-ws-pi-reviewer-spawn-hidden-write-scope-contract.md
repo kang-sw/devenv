@@ -1,5 +1,5 @@
 ---
-title: Expose the Pi reviewer spawn write-scope requirement before dispatch
+title: "디스패치 전에 Pi 리뷰어 spawn 쓰기 범위 요구 사항 노출"
 ---
 
 # Expose the Pi reviewer spawn write-scope requirement before dispatch

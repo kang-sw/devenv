@@ -1,5 +1,5 @@
 ---
-title: "ws-cli call: accept JSON payload from stdin"
+title: "ws-cli call: stdin에서 JSON 페이로드 입력 지원"
 sage-review-design: required
 related:
   260726-feat-ws-cli-lenient-tool-name-resolution: sibling daemon-hosted CLI ergonomics ticket from the same host-MCP-down, daemon-available dogfooding session

@@ -1,5 +1,5 @@
 ---
-title: "Electron shell: decide on the default hunspell dictionary download"
+title: "Electron 셸: 기본 hunspell 사전 다운로드 정책 결정"
 related:
   261115-feat-werkschaft-electron-shell: "the shell whose session defaults trigger the download"
 ---

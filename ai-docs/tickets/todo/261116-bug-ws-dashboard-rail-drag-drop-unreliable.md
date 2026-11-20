@@ -1,5 +1,5 @@
 ---
-title: "Rail drag reorder still drops unreliably even when the insertion line shows"
+title: "삽입선이 표시되어도 레일 드래그 순서 변경 드롭이 불안정한 문제"
 ---
 
 # Rail drag reorder still drops unreliably even when the insertion line shows

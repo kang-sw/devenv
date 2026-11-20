@@ -1,5 +1,5 @@
 ---
-title: "Pi parallel worktree workers inherit the lead cwd and can mutate its checkout"
+title: "Pi 병렬 worktree 워커가 lead cwd를 상속해 체크아웃을 변경할 수 있는 문제"
 related:
   260920-feat-pi-agent-spawn-cwd-override: provides the missing per-spawn placement primitive
 ---

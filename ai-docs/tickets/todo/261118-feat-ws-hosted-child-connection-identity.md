@@ -1,5 +1,5 @@
 ---
-title: "Hosted child-connection identity: refuse a child's use of its parent's session key"
+title: "hosted 자식 연결 신원 검증: 자식의 부모 session key 사용 거부"
 parent: 261114-epic-ws-common-session-foundation
 blocked-by: 261117-feat-ws-hosted-prompt-assembly
 related:

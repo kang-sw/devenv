@@ -1,5 +1,5 @@
 ---
-title: "Keep the opt-in Pi develop-marker manual check valid under current tuning"
+title: "현재 튜닝 하에서 선택적 Pi develop-marker 매뉴얼 검사 유효성 유지"
 ---
 
 # Keep the opt-in Pi develop-marker manual check valid under current tuning

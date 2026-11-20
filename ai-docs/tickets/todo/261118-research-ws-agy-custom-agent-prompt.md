@@ -1,5 +1,5 @@
 ---
-title: "agy custom agent: replace Antigravity's default system prompt for hosted agy leads"
+title: "agy 커스텀 에이전트: hosted agy lead의 Antigravity 기본 시스템 프롬프트 교체"
 parent: 261114-epic-ws-common-session-foundation
 related:
   261117-feat-ws-hosted-antigravity-adapter: "its custom-agent removability verdict (08)=c rejected this direction; (127)=a reopens it as a probe"

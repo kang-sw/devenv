@@ -1,5 +1,5 @@
 ---
-title: playbook.print of lead skill/manual bodies leaks gated bootstrap surface to subagents
+title: "lead 스킬/매뉴얼 본문에 대한 playbook.print가 제한된 부트스트랩 표면을 서브에이전트에 노출하는 문제"
 related:
   260625-feat-ws-session-state-machine: surfaced this during Phase 3b workflow_manual hardening
 related-mental-model:

@@ -1,5 +1,5 @@
 ---
-title: "pi print mode prints nothing when a ws-spawned child settles after the final answer"
+title: "최종 응답 이후 ws-spawned 자식이 종료될 때 pi print 모드가 아무것도 출력하지 않는 문제"
 ---
 
 # pi -p prints nothing when a ws-spawned explorer settles after the final answer

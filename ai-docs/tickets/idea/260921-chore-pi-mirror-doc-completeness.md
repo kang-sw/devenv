@@ -1,5 +1,5 @@
 ---
-title: Name agents-plugin-pi as the third committed mirror in mirroring docs
+title: "미러링 문서에 세 번째 커밋 미러로 agents-plugin-pi 명시"
 ---
 
 # Name agents-plugin-pi as the third committed mirror in mirroring docs

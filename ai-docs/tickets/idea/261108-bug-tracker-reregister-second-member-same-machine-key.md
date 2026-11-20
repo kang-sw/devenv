@@ -1,5 +1,5 @@
 ---
-title: "tracker: re-registering a remote under a second member id from the same machine key fails and leaves refs on the remote"
+title: "tracker: 동일 머신 키에서 두 번째 member id로 원격을 재등록할 때 실패하고 원격에 ref가 남는 문제"
 related:
   261107-epic-ws-personal-common-store: the tracker epic this host bug belongs to
   261108-feat-ws-tracker-drawer-ui: browser acceptance that surfaced it

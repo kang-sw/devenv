@@ -1,5 +1,5 @@
 ---
-title: "Investigate empty ticket-update overrides in git.commit"
+title: "git.commit의 빈 ticket-update 오버라이드 동작 조사"
 related:
   261115-feat-ws-dashboard-explorer-path-bar: "dogfood observation during closure"
 ---

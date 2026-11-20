@@ -1,5 +1,5 @@
 ---
-title: "Implementation routing creates a nested impl branch despite explicit non-impl continuation"
+title: "명시적 non-impl 이어가기 지정에도 구현 라우팅이 중첩 impl 브랜치를 생성하는 문제"
 related:
   260921-feat-ws-impl-branch-identity-resolver: "landed identity_vouch contract"
   260918-feat-route-implement-shared-branch-continuation-override: "closed continuation predecessor"

@@ -1,5 +1,5 @@
 ---
-title: Stabilize flaky pi real-process and timing tests
+title: "불안정한 pi 실제 프로세스 및 타이밍 테스트 안정화"
 ---
 
 # Stabilize flaky pi real-process and timing tests

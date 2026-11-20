@@ -1,5 +1,5 @@
 ---
-title: "Dashboard daemon holds about 15% of a core while idle on Windows"
+title: "Windows 유휴 상태에서 dashboard 데몬이 CPU 1개 코어의 약 15%를 점유하는 문제"
 related:
   261111-feat-ws-mailbox-wait-without-process-relaunch: "sibling from the same CPU probe (board (288) b); that ticket covers the per-wake process cost, this one the daemon's own CPU"
   261116-bug-ws-exe-launch-elimination: "separate lead-owned exe-spawn elimination; count legitimate git subprocesses without conflating them with ws exe probes"

@@ -1,5 +1,5 @@
 ---
-title: Design conversation-visible prompt refusal with old-dashboard compatibility
+title: "구버전 dashboard 호환성을 유지하는 대화창 표시형 프롬프트 거부 설계"
 related:
   261114-bug-ws-live-lead-state-prompt-compaction: Busy-state repair deliberately retains controls-menu-only refusal visibility
 ---

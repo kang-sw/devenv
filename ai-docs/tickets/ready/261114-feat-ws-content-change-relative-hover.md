@@ -1,5 +1,5 @@
 ---
-title: Latest body update time in topic header and change gutter
+title: "토픽 헤더와 변경 gutter에 본문 최근 수정 시각 표시"
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: fa3b36bdc68a3c08

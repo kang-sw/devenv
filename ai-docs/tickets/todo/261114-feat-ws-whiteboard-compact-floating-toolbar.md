@@ -1,5 +1,5 @@
 ---
-title: Compact floating toolbar for the whiteboard
+title: "whiteboard용 컴팩트 플로팅 툴바"
 related:
   261114-feat-ws-dashboard-board-toolbar-overview: 'prior toolbar implementation; preserves Search event handling'
 sage-review-design: completed

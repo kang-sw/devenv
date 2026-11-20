@@ -1,5 +1,5 @@
 ---
-title: Remote chat bridge for driving lead sessions from a phone
+title: "휴대폰에서 lead 세션을 제어하기 위한 원격 채팅 브리지"
 related:
   261118-feat-ws-dashboard-anonymous-feedback-button: sibling idea from the same discussion
   261113-refactor-ws-dashboard-drop-lan-serving: remote-access direction (local-only daemon, remote later)

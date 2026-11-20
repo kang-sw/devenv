@@ -1,5 +1,5 @@
 ---
-title: "Daemon file-touch map: what each file does, how it is coupled, and where reduction pays"
+title: "데몬 파일 접근 맵: 각 파일의 역할, 결합도, 감축 효과가 큰 지점"
 related:
   261117-research-ws-dashboard-data-only-client-assembly: sibling research; page-load cost, discussed after daemon round 2
   261116-feat-ws-daemon-hub-first-polling: in-progress daemon polling work whose wakes drive rereads

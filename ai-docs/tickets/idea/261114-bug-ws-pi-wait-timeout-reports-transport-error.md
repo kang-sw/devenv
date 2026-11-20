@@ -1,5 +1,5 @@
 ---
-title: "Pi wait: bounded timeout sometimes returns a transport-style context-canceled error"
+title: "Pi wait: 제한된 타임아웃이 간헐적으로 전송 계층 스타일의 context-canceled 오류를 반환하는 문제"
 ---
 
 # Pi wait: bounded timeout sometimes returns a transport-style context-canceled error

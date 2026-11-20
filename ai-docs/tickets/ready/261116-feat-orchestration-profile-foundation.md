@@ -1,5 +1,5 @@
 ---
-title: "Orchestration profile foundation: profile-aware playbooks, sub-lead protocol, sub-lead board status"
+title: "오케스트레이션 프로필 기반: 프로필 인식 playbook, sub-lead 프로토콜, sub-lead 보드 상태"
 parent: 261116-epic-lead-orchestration-profile
 related:
   261116-research-ws-hosted-session-first-tier: context - ws/agent.spawn direction for harness-neutral spawn depth (68)

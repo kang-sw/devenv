@@ -1,5 +1,5 @@
 ---
-title: "Whiteboard implementing topics cannot shorten ETA or correct owner in place"
+title: "진행 중(implementing)인 whiteboard 토픽의 ETA 단축 및 담당자 제자리 수정 불가 문제"
 related:
   261114-feat-ws-whiteboard-topic-state-and-lead-nudges: "preserve landed run identity, elapsed-time and cumulative-ETA semantics until owner decisions change them"
 ---

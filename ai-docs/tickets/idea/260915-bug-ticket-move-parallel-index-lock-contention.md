@@ -1,5 +1,5 @@
 ---
-title: "Concurrent ticket moves in one worktree contend on the Git index lock"
+title: "단일 worktree 내 동시 티켓 이동 시 Git index lock 경합 발생"
 ---
 
 # Concurrent ticket moves in one worktree contend on the Git index lock

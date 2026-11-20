@@ -1,5 +1,5 @@
 ---
-title: workflow_manual fresh sentinel mints a lead key for any caller, including subagents
+title: "workflow_manual fresh 센티넬이 서브에이전트를 포함한 모든 호출자에게 lead 키를 발급하는 문제"
 related:
   261030-feat-note-layer-discipline-and-worker-readonly: the worker note read-only gate is bypassable through this hole
 ---

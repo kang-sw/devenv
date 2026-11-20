@@ -1,5 +1,5 @@
 ---
-title: "Claude mod: startup config_get calls raise a flood of permission dialogs"
+title: "Claude mod: 시작 시 config_get 호출로 권한 대화상자가 폭주하는 문제"
 ---
 
 # Claude mod: startup config_get calls raise a flood of permission dialogs
