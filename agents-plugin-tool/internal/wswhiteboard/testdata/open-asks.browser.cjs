@@ -44,7 +44,20 @@ async function arrived(p, id, what, before) {
   try {
     for (const width of [806, 420]) {
       const p = await b.newPage({ viewport: { width, height: 900 }, colorScheme: 'dark' });
+      const errors = [];
+      p.on('pageerror', e => errors.push(e.message));
       await p.goto(url);
+      // The dashboard owns fragment navigation around the shared history
+      // loader; this standalone fixture supplies that host call.
+      await p.evaluate(() => document.addEventListener('click', e => {
+        const a = e.target.closest('a[href^="#"]');
+        if (!a) return;
+        const id = a.getAttribute('href').slice(1);
+        if (!/^(?:e[1-9][0-9]*|item-[1-9][0-9]*)$/.test(id)) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        window.wbHistory.loadTarget(document, id);
+      }, true));
       await p.waitForTimeout(500);
       // (a) the open asks stack after the history, in creation order.
       const stack = await p.evaluate(sel => {
@@ -76,6 +89,7 @@ async function arrived(p, id, what, before) {
       const ref = await arrived(p, 'item-1', `${width} item reference`, now);
       await shot(p, `${width}-3-itemref`);
       out[width] = { stack, jump, ref };
+      assert.deepEqual(errors, [], `${width}: browser script errors`);
       await p.close();
     }
     console.log(JSON.stringify(out));
