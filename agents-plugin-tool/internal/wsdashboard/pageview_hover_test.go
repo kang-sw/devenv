@@ -2,12 +2,24 @@ package wsdashboard
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
+
+func outputRateReadIO() int64 {
+	var n int64
+	for site, count := range wsstate.FileIOCounters() {
+		if strings.HasPrefix(site, "file_io_site:wslive/output_rate.go:") {
+			n += count
+		}
+	}
+	return n
+}
 
 func TestSessionHoverExistingEvidence(t *testing.T) {
 	now := testNow
@@ -257,5 +269,27 @@ func TestSessionHoverAgyOutputRateAndUnknownModel(t *testing.T) {
 	reopenedRow := railRow(railInput{Session: Session{Registration: reg}, Snapshot: reopened}, true, now)
 	if reopenedRow.Hover.Rate != 70 || reopenedRow.Hover.RateAt != at {
 		t.Fatalf("reopened hover = %+v", reopenedRow.Hover)
+	}
+
+	// A current snapshot already carries the folded rate, so a cold render does
+	// not touch the recovery sidecar. Only the legacy-rewrite case above reads it.
+	currentStateDir := t.TempDir()
+	if err := os.MkdirAll(SessionDir(currentStateDir, "agycurrent"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeSnapshot(t, currentStateDir, "agycurrent", &wslive.Snapshot{
+		SchemaVersion: 1, ReplyID: "agycurrent", Adapter: "agy", HeartbeatMs: 30000, UpdatedAt: now.UnixMilli(),
+		Lead: wslive.Lead{
+			Activity:   wslive.Activity{Phase: wslive.PhaseIdle},
+			OutputRate: &wslive.OutputRate{OutputTps: 69.6, At: at},
+		},
+	})
+	beforeReads := outputRateReadIO()
+	var currentCache SnapshotCache
+	if got := currentCache.Snapshot(currentStateDir, "agycurrent"); got == nil || got.Lead.OutputRate == nil {
+		t.Fatalf("current snapshot rate = %+v", got)
+	}
+	if got := outputRateReadIO() - beforeReads; got != 0 {
+		t.Fatalf("current snapshot render read output-rate sidecar %d times, want 0", got)
 	}
 }

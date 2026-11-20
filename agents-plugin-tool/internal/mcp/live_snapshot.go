@@ -185,6 +185,10 @@ type liveSession struct {
 	// write, flushNow a turn end since it, and lastFlush is its time.
 	dirty, flushNow bool
 	lastFlush       time.Time
+	// outputRates is a lazy held append handle; pendingOutputRate joins the
+	// next snapshot recovery flush instead of writing on dashboard.intake.
+	outputRates       *wslive.OutputRateLog
+	pendingOutputRate *wslive.OutputRate
 
 	// writeMu serializes snapshot writes, so a slow write is never
 	// overtaken by an older marshal.
@@ -233,7 +237,11 @@ func (h *liveHub) session(key, dir, root string, nudge func(), active func() boo
 			state.SeedOutputRate(prev.Lead.OutputRate)
 		}
 	}
-	ls = &liveSession{dir: dir, root: root, replyID: state.ReplyID(), nudge: nudge, active: active, debug: debug, state: state}
+	ls = &liveSession{
+		dir: dir, root: root, replyID: state.ReplyID(),
+		nudge: nudge, active: active, debug: debug, state: state,
+		outputRates: wslive.NewOutputRateLog(dir),
+	}
 	if h.host != nil && !h.closed {
 		if slot, ok := h.host.OpenHostedSlot(dir); ok {
 			ls.slot = slot
@@ -275,6 +283,7 @@ func (ls *liveSession) isStopped() bool {
 // renders again).
 func (ls *liveSession) stop() {
 	ls.halt()
+	_ = ls.outputRates.Close()
 	if ls.slot != nil {
 		ls.slot.Close()
 	}
@@ -318,6 +327,7 @@ func (h *liveHub) close() {
 // finish stops the session; a hosted one flushes its snapshot file first
 // and then releases its slot.
 func (ls *liveSession) finish() {
+	defer func() { _ = ls.outputRates.Close() }()
 	if !ls.halt() || ls.slot == nil {
 		return
 	}
@@ -331,11 +341,21 @@ func (ls *liveSession) finish() {
 	ls.writeMu.Lock()
 	ls.mu.Lock()
 	snap := ls.state.Snapshot(currentLiveSeams().now().UnixMilli())
+	var outputRate *wslive.OutputRate
+	if ls.pendingOutputRate != nil {
+		copy := *ls.pendingOutputRate
+		outputRate = &copy
+	}
 	ls.mu.Unlock()
 	snap.Repo = repo
 	data, err := json.Marshal(snap.ForDisk())
 	if err == nil {
-		err = ls.withSlotOwner(func() error { return writeLiveSnapshot(ls.dir, data) })
+		err = ls.withSlotOwner(func() error {
+			if err := writeLiveSnapshot(ls.dir, data); err != nil {
+				return err
+			}
+			return ls.outputRates.Append(outputRate)
+		})
 	}
 	ls.writeMu.Unlock()
 	if err != nil {
@@ -532,10 +552,9 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	}
 	now := currentLiveSeams().now().UnixMilli()
 	var (
-		ring       []wslive.RingEntry
-		observed   []wslive.ObservedRecord
-		outputRate *wslive.OutputRate
-		problems   []string
+		ring     []wslive.RingEntry
+		observed []wslive.ObservedRecord
+		problems []string
 		applied  int
 		changed  bool
 		urgent   bool
@@ -566,7 +585,8 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 				reset = reset || ev.Kind == wslive.KindReset
 				observed = append(observed, res.Observed...)
 				if res.OutputRate != nil {
-					outputRate = res.OutputRate
+					copy := *res.OutputRate
+					ls.pendingOutputRate = &copy
 				}
 				for _, entry := range res.Ring {
 					if entry.SummaryHistory != nil {
@@ -609,9 +629,6 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	}
 	if err := wslive.AppendObserved(ls.dir, observed); err != nil {
 		s.debugEvent("dashboard.model_evidence_write_error", map[string]any{"error": err.Error()})
-	}
-	if err := wslive.WriteOutputRate(ls.dir, outputRate); err != nil {
-		s.debugEvent("dashboard.output_rate_write_error", map[string]any{"error": err.Error()})
 	}
 	if len(ring) > 0 {
 		s.appendLiveRing(key, ls.dir, ls.slot, ring)
@@ -728,6 +745,11 @@ func (ls *liveSession) fire() {
 		return
 	}
 	snap := ls.state.Snapshot(now.UnixMilli())
+	var outputRate *wslive.OutputRate
+	if ls.pendingOutputRate != nil {
+		copy := *ls.pendingOutputRate
+		outputRate = &copy
+	}
 	write := true
 	// The flush clock before this write, restored when it fails.
 	wasFlushNow, wasLastFlush := ls.flushNow, ls.lastFlush
@@ -754,7 +776,12 @@ func (ls *liveSession) fire() {
 		var data []byte
 		data, err = json.Marshal(snap.ForDisk())
 		if err == nil {
-			err = ls.withSlotOwner(func() error { return writeLiveSnapshot(ls.dir, data) })
+			err = ls.withSlotOwner(func() error {
+				if err := writeLiveSnapshot(ls.dir, data); err != nil {
+					return err
+				}
+				return ls.outputRates.Append(outputRate)
+			})
 		}
 	}
 	ls.writeMu.Unlock()
@@ -775,6 +802,9 @@ func (ls *liveSession) fire() {
 		ls.nudge()
 	}
 	ls.mu.Lock()
+	if write && err == nil && outputRate != nil && ls.pendingOutputRate != nil && *ls.pendingOutputRate == *outputRate {
+		ls.pendingOutputRate = nil
+	}
 	if ls.due.IsZero() {
 		ls.scheduleLocked(seams.heartbeat)
 	}

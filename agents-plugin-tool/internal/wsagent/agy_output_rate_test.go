@@ -6,11 +6,13 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 func agyChunkLine(text string) []byte {
@@ -137,6 +139,16 @@ func assertNear(t *testing.T, label string, got, want float64) {
 	if math.Abs(got-want) > 1e-6 {
 		t.Fatalf("%s = %.6f, want %.6f", label, got, want)
 	}
+}
+
+func agyOutputRateFileIO() int64 {
+	var total int64
+	for site, count := range wsstate.FileIOCounters() {
+		if strings.HasPrefix(site, "file_io_site:wslive/output_rate.go:") {
+			total += count
+		}
+	}
+	return total
 }
 
 // TestAgyOutputRateFromRecordedFixtures drives the recorded agy ACP fixtures
@@ -383,6 +395,7 @@ func TestAgyOutputRateWindowAndModelChangeReset(t *testing.T) {
 	m := newAgyMapper("sid-1")
 	m.now = func() int64 { return clock }
 	m.mapLine(agyConfigUpdateLine("gemini-3.8-flash", "high"), nopReplies{})
+	published := wslive.NewState("rate-retention")
 
 	complete := func(seq int, tokens, spanMs int64) float64 {
 		id := "ws-p-e-" + strconv.Itoa(seq)
@@ -396,6 +409,9 @@ func TestAgyOutputRateWindowAndModelChangeReset(t *testing.T) {
 		rates := agyRateEvents(evs)
 		if len(rates) != 1 {
 			t.Fatalf("seq %d: rates=%d, want 1", seq, len(rates))
+		}
+		if _, err := published.Apply(*rates[0], clock); err != nil {
+			t.Fatalf("seq %d apply rate: %v", seq, err)
 		}
 		return *rates[0].OutputTps
 	}
@@ -422,8 +438,25 @@ func TestAgyOutputRateWindowAndModelChangeReset(t *testing.T) {
 	if evs := m.mapLine(agyConfigUpdateLine("claude-sonnet-4-6", ""), nopReplies{}); len(evs) != 0 {
 		t.Fatalf("model change should publish nothing, got %+v", evs)
 	}
+	if got := published.Snapshot(clock).Lead.OutputRate; got == nil || got.OutputTps != 100.0 {
+		t.Fatalf("model reset cleared prior published rate: %+v", got)
+	}
+	// An ineligible response after reset also publishes nothing and retains the
+	// prior downstream value while the fresh window stays empty.
+	m.promptSent("ws-p-e-10")
+	clock += 100
+	m.mapLine(agyChunkLine("x"), nopReplies{})
+	clock += 500
+	m.mapLine(agyChunkLine("y"), nopReplies{})
+	clock += 10
+	if evs := agyRateEvents(m.mapLine(agyPromptResultLine("ws-p-e-10", "end_turn", map[string]any{"outputTokens": 7, "thoughtTokens": 0}), nopReplies{})); len(evs) != 0 {
+		t.Fatalf("ineligible completion after reset published rate: %+v", evs)
+	}
+	if got := published.Snapshot(clock).Lead.OutputRate; got == nil || got.OutputTps != 100.0 {
+		t.Fatalf("ineligible completion cleared prior published rate: %+v", got)
+	}
 	// Next eligible response starts a fresh window: 20 tokens / 1000ms = 20 t/s.
-	assertNear(t, "fresh window after model change", complete(10, 20, 1000), 20.0)
+	assertNear(t, "fresh window after model change", complete(11, 20, 1000), 20.0)
 }
 
 func TestAgyOutputRateSteeredTurnAttribution(t *testing.T) {
@@ -473,6 +506,59 @@ func TestAgyOutputRateSteeredTurnAttribution(t *testing.T) {
 	if !evs2[len(evs2)-1].TurnEnd {
 		t.Fatalf("final steered prompt did not end with TurnEnd: %+v", evs2)
 	}
+}
+
+func TestAgyOutputRateMatchesPromptResultByJSONRPCID(t *testing.T) {
+	clock := int64(30_000)
+	m := newAgyMapper("sid-1")
+	m.now = func() int64 { return clock }
+	m.promptSent("ws-p-e-1")
+	m.mapLine(agyChunkLine("first"), nopReplies{})
+	clock += 500
+	m.mapLine(agyChunkLine(" response"), nopReplies{})
+	m.promptSent("ws-p-e-2")
+
+	// JSON-RPC permits responses to arrive out of order. Prompt 2 owns no
+	// chunks, so its result is ineligible; it must not consume prompt 1's span.
+	clock += 10
+	if got := agyRateEvents(m.mapLine(agyPromptResultLine("ws-p-e-2", "end_turn", map[string]any{"outputTokens": 1000, "thoughtTokens": 0}), nopReplies{})); len(got) != 0 {
+		t.Fatalf("out-of-order prompt 2 stole prompt 1 span: %+v", got)
+	}
+	clock += 10
+	got := agyRateEvents(m.mapLine(agyPromptResultLine("ws-p-e-1", "end_turn", map[string]any{"outputTokens": 10, "thoughtTokens": 0}), nopReplies{}))
+	if len(got) != 1 {
+		t.Fatalf("prompt 1 matching span rate events = %d, want 1", len(got))
+	}
+	assertNear(t, "prompt 1 JSON-RPC matched rate", *got[0].OutputTps, 20.0)
+}
+
+func TestAgyOutputRateRejectsUntrackedPromptResult(t *testing.T) {
+	clock := int64(40_000)
+	m := newAgyMapper("sid-1")
+	m.now = func() int64 { return clock }
+
+	// A resumed response can stream before this mapper has the request id. Its
+	// result must close the untracked span without turning it into a rate sample.
+	m.mapLine(agyChunkLine("resumed"), nopReplies{})
+	clock += 500
+	m.mapLine(agyChunkLine(" response"), nopReplies{})
+	clock += 10
+	if got := agyRateEvents(m.mapLine(agyPromptResultLine("ws-p-old-1", "end_turn", map[string]any{"outputTokens": 100, "thoughtTokens": 0}), nopReplies{})); len(got) != 0 {
+		t.Fatalf("untracked prompt result published rate: %+v", got)
+	}
+
+	// The next locally sent prompt opens a matched span and remains measurable.
+	m.promptSent("ws-p-e-2")
+	clock += 100
+	m.mapLine(agyChunkLine("tracked"), nopReplies{})
+	clock += 500
+	m.mapLine(agyChunkLine(" response"), nopReplies{})
+	clock += 10
+	got := agyRateEvents(m.mapLine(agyPromptResultLine("ws-p-e-2", "end_turn", map[string]any{"outputTokens": 10, "thoughtTokens": 0}), nopReplies{}))
+	if len(got) != 1 {
+		t.Fatalf("tracked prompt after resumed response rates = %d, want 1", len(got))
+	}
+	assertNear(t, "tracked prompt after resumed response", *got[0].OutputTps, 20.0)
 }
 
 func TestAgyOutputRateRowHoverRetentionAndReopen(t *testing.T) {
@@ -560,6 +646,35 @@ func TestAgyOutputRateRowHoverRetentionAndReopen(t *testing.T) {
 		t.Fatalf("reopened snapshot lost OutputRate: %+v", reopenedSnap.Lead)
 	}
 	assertNear(t, "reopened OutputRate", reopenedSnap.Lead.OutputRate.OutputTps, 70.0)
+}
+
+func TestAgyOutputRateHostedApplyDefersSidecarToRecoveryFlush(t *testing.T) {
+	dir := t.TempDir()
+	host := &summarySnapshotHost{}
+	slot, ok := host.OpenHostedSlot(dir)
+	if !ok {
+		t.Fatal("hosted slot refused")
+	}
+	w := newLiveWriter(dir, "agy-rate-io", "agy", time.Now, io.Discard)
+	w.setSlot(slot)
+	defer w.closeSlot()
+
+	before := agyOutputRateFileIO()
+	w.apply(wslive.Event{Kind: wslive.KindStatus, OutputRate: &wslive.OutputRate{OutputTps: 42, At: 1000}})
+	if got := agyOutputRateFileIO() - before; got != 0 {
+		t.Fatalf("hosted rate apply touched sidecar %d times, want 0", got)
+	}
+	if snap, ok := host.snapshot(dir); !ok || snap.Lead.OutputRate == nil || snap.Lead.OutputRate.OutputTps != 42 {
+		t.Fatalf("hosted RAM snapshot = %+v, ok=%v", snap.Lead.OutputRate, ok)
+	}
+
+	w.apply(wslive.Event{Kind: wslive.KindTurnEnd, At: 1100})
+	if got := agyOutputRateFileIO() - before; got != 1 {
+		t.Fatalf("turn-end recovery flush sidecar operations = %d, want 1 open", got)
+	}
+	if got, err := wslive.ReadOutputRate(dir); err != nil || got == nil || got.OutputTps != 42 {
+		t.Fatalf("recovery sidecar = %+v, %v", got, err)
+	}
 }
 
 func TestAgyOutputRateUnsolicitedTurnPromptTakeover(t *testing.T) {

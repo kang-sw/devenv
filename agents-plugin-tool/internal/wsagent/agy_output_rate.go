@@ -129,10 +129,11 @@ func (t *agyOutputRateTracker) popSpan(id string) *agyPromptSpan {
 			return s
 		}
 	}
+	// A live result from a prompt sent by an earlier daemon can close the
+	// leading untracked response, but it cannot supply the JSON-RPC identity
+	// that opened that span in this mapper. Drop it without publishing.
 	if len(t.spans) > 0 && t.spans[0].id == "" {
-		s := t.spans[0]
 		t.spans = t.spans[1:]
-		return s
 	}
 	return nil
 }

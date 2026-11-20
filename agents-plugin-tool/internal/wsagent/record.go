@@ -385,6 +385,10 @@ type liveWriter struct {
 	ringDirty bool
 	// writeSnapshotFile is the atomic writer, replaceable for deterministic IO counts.
 	writeSnapshotFile func(string, []byte, os.FileMode) error
+	// outputRates is a lazy held append handle; pendingOutputRate is persisted
+	// only with an existing snapshot recovery flush, never in apply's hot path.
+	outputRates       *wslive.OutputRateLog
+	pendingOutputRate *wslive.OutputRate
 	// Only an observed holder agent_start supplies this real identity.
 	summarySource     string
 	summaryNaturalEnd bool
@@ -424,7 +428,12 @@ func newLiveWriter(dir, key, adapter string, now func() time.Time, log io.Writer
 			_, _ = st.Apply(wslive.Event{Kind: wslive.KindCommands, Commands: prev.Commands}, now().UnixMilli())
 		}
 	}
-	return &liveWriter{dir: dir, st: st, now: now, log: log, writeSnapshotFile: writeFileAtomic, observedSeeded: folded}
+	return &liveWriter{
+		dir: dir, st: st, now: now, log: log,
+		writeSnapshotFile: writeFileAtomic,
+		observedSeeded:    folded,
+		outputRates:       wslive.NewOutputRateLog(dir),
+	}
 }
 
 // apply applies ev and writes what it changed; it reports whether anything
@@ -462,7 +471,7 @@ func (w *liveWriter) applyQuiet(ev wslive.Event) {
 	res, err := w.st.Apply(ev, w.now().UnixMilli())
 	if err == nil {
 		w.writeObserved(res.Observed)
-		w.writeOutputRate(res.OutputRate)
+		w.holdOutputRate(res.OutputRate)
 	}
 }
 
@@ -504,7 +513,7 @@ func (w *liveWriter) write(res wslive.Result, err error, kind string) bool {
 		return false
 	}
 	w.writeObserved(res.Observed)
-	w.writeOutputRate(res.OutputRate)
+	w.holdOutputRate(res.OutputRate)
 	ringAppended := false
 	if len(res.Ring) > 0 {
 		if err := w.withOwner(func() error {
@@ -557,13 +566,12 @@ func (w *liveWriter) writeObserved(records []wslive.ObservedRecord) {
 	}
 }
 
-func (w *liveWriter) writeOutputRate(rate *wslive.OutputRate) {
+func (w *liveWriter) holdOutputRate(rate *wslive.OutputRate) {
 	if rate == nil {
 		return
 	}
-	if err := w.withOwner(func() error { return wslive.WriteOutputRate(w.dir, rate) }); err != nil {
-		fmt.Fprintf(w.log, "agent %s: output rate write: %v\n", w.st.ReplyID(), err)
-	}
+	copy := *rate
+	w.pendingOutputRate = &copy
 }
 
 func (w *liveWriter) writeSnapshot() { w.flushSnapshot(false, false) }
@@ -586,10 +594,13 @@ func (w *liveWriter) flushSnapshot(heartbeat, force bool) {
 	content, err := json.Marshal(disk)
 	if !force && err == nil {
 		if w.currentSlot() != nil {
-			if bytes.Equal(content, w.lastSnapshot) || (!w.lastDiskAt.IsZero() && now.Sub(w.lastDiskAt) < wslive.HeartbeatInterval) {
+			if w.pendingOutputRate != nil && w.lastDiskAt.IsZero() && !heartbeat {
 				return
 			}
-		} else if !heartbeat && bytes.Equal(content, w.lastSnapshot) {
+			if (!w.lastDiskAt.IsZero() && now.Sub(w.lastDiskAt) < wslive.HeartbeatInterval) || (bytes.Equal(content, w.lastSnapshot) && w.pendingOutputRate == nil) {
+				return
+			}
+		} else if !heartbeat && bytes.Equal(content, w.lastSnapshot) && w.pendingOutputRate == nil {
 			return
 		}
 	}
@@ -604,6 +615,12 @@ func (w *liveWriter) flushSnapshot(heartbeat, force bool) {
 				return err
 			}
 			w.lastSnapshot, w.lastDiskAt = content, now
+			if w.pendingOutputRate != nil {
+				if err := w.outputRates.Append(w.pendingOutputRate); err != nil {
+					return err
+				}
+				w.pendingOutputRate = nil
+			}
 			return nil
 		})
 	}
@@ -643,6 +660,7 @@ func (w *liveWriter) publishSnapshot(snap wslive.Snapshot) {
 }
 
 func (w *liveWriter) closeSlot() {
+	defer func() { _ = w.outputRates.Close() }()
 	slot := w.currentSlot()
 	if slot == nil {
 		return

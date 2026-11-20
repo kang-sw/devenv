@@ -254,7 +254,10 @@ func (c *SnapshotCache) snapshotResult(stateDir, replyID string) (*wslive.Snapsh
 		outputRates = &c.outputRates
 	}
 	observed.Load(dir).Overlay(&p.snap)
-	if p.snap.Lead.Observed == nil {
+	// New writers fold OutputRate into snapshot/RAM. Read the sidecar only as
+	// recovery after a legacy writer stripped that field; ordinary renders do
+	// no output-rate file I/O.
+	if p.snap.Lead.Observed == nil && p.snap.Lead.OutputRate == nil {
 		wslive.OverlayOutputRate(&p.snap, outputRates.Load(dir))
 	}
 	return &p.snap, nil
