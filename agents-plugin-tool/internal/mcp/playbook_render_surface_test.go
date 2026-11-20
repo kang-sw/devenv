@@ -739,7 +739,7 @@ func TestRenderShippedExploreForAgentSpawn(t *testing.T) {
 	if !strings.HasPrefix(rendered, "# Explore Worker\n\nYou are ") {
 		t.Fatalf("rendered explore is not addressed to the spawned worker:\n%s", rendered)
 	}
-	if strings.Contains(rendered, "To continue or refine this exploration") || strings.Contains(rendered, "Your parent can continue this agent") {
+	if strings.Contains(rendered, "**Continuity tip:** This playbook delegates") {
 		t.Fatalf("rendered explore carries a caller continuity tip:\n%s", rendered)
 	}
 	if strings.Contains(rendered, "{{.") {
