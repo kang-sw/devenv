@@ -588,7 +588,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-20T15:17:35Z"
       }
     },
@@ -600,19 +600,6 @@
     },
     "261121-bug-ws-agy-mcp-session-413-no-reconnect": {
       "registered_at": "2026-11-20T16:22:31Z"
-    },
-    "261121-bug-ws-dogfood-context-routing-gaps": {
-      "registered_at": "2026-11-20T15:10:45Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-20T16:04:24Z",
-        "impl": {
-          "branch": "impl/develop/stung-sushi-peso"
-        }
-      }
     },
     "261121-bug-ws-dogfood-tune-agy-release-route-gaps": {
       "registered_at": "2026-11-20T16:43:05Z"
