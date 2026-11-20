@@ -599,7 +599,14 @@
       "registered_at": "2026-11-20T12:40:36Z"
     },
     "261121-bug-ws-agy-mcp-session-413-no-reconnect": {
-      "registered_at": "2026-11-20T16:22:31Z"
+      "registered_at": "2026-11-20T16:22:31Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-20T18:02:14Z"
+      }
     },
     "261121-bug-ws-dogfood-tune-agy-release-route-gaps": {
       "registered_at": "2026-11-20T16:43:05Z"
