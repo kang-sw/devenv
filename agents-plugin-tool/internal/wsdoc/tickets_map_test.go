@@ -674,10 +674,6 @@ func TestTicketMapSourcesNameNoRepositoryTickets(t *testing.T) {
 	}
 	for _, name := range files {
 		raw, err := os.ReadFile(name)
-		if errors.Is(err, fs.ErrNotExist) {
-			t.Logf("%s does not exist yet; skipped", name)
-			continue
-		}
 		if err != nil {
 			t.Fatal(err)
 		}

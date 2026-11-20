@@ -314,17 +314,20 @@ func evictTicketMapRoots() {
 		}
 		delete(ticketMapState.roots, oldest)
 		prefix := filepath.Join(oldest, filepath.FromSlash(TicketsDir)) + string(filepath.Separator)
+		// A stored directory map is shared with concurrent unlocked readers
+		// (scanStatusEntries reads prev after releasing the lock), so it is
+		// never written in place: the doc-free copy replaces it.
 		ticketCache.Lock()
 		for dir, entries := range ticketCache.dirs {
 			if !strings.HasPrefix(dir+string(filepath.Separator), prefix) {
 				continue
 			}
+			stripped := make(map[string]ticketCacheEntry, len(entries))
 			for name, entry := range entries {
-				if entry.doc != nil {
-					entry.doc = nil
-					entries[name] = entry
-				}
+				entry.doc = nil
+				stripped[name] = entry
 			}
+			ticketCache.dirs[dir] = stripped
 		}
 		ticketCache.Unlock()
 		ticketRefCache.Lock()
@@ -356,6 +359,9 @@ func loadTicketMap(root string) (ticketMapLoad, error) {
 			}
 			return ticketMapLoad{}, err
 		}
+		// The listing is sorted by file name; "a-b.md" sorts before "a.md"
+		// although stem "a" sorts first, so order by stem for the contract.
+		slices.SortStableFunc(scans, func(a, b ticketScan) int { return strings.Compare(a.info.Stem, b.info.Stem) })
 		for _, scan := range scans {
 			// First wins in ticketStatusRank order, like loadTicketGraph.
 			if openIndex[scan.info.Stem] {
