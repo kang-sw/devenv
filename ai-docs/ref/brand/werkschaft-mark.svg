@@ -1,5 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"><title>Werkschaft</title><rect width="512" height="512" rx="96" fill="#1E2235"/><g transform="translate(8 0)" fill="none" stroke-width="46" stroke-linejoin="miter" stroke-miterlimit="2">
-<path d="M120 362 L176 200" stroke="#F2EBDD" stroke-linecap="butt"/><path d="M232 362 L288 150" stroke="#F2EBDD" stroke-linecap="butt"/>
-<path d="M64 150 L112.3 333" stroke="#E4572E" stroke-linecap="butt"/><path d="M185.1 226.5 L222.9 335.5" stroke="#E4572E" stroke-linecap="butt"/>
-<path d="M428.3 180 A50 50 0 1 0 339.7 226.1" stroke="#F2EBDD" stroke-linecap="butt"/><path d="M360 238.9 L408 269.2" stroke="#E4572E" stroke-linecap="butt"/><path d="M428.3 282 A50 50 0 1 1 339.7 328.1" stroke="#F2EBDD" stroke-linecap="butt"/>
-</g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"><title>Werkschaft</title>
+<rect width="512" height="512" rx="96" fill="#1E2235"/>
+<g transform="translate(0 8)">
+<polygon points="196,222 314,212 328,288 244,328 184,284" fill="#F3A712"/>
+<polygon points="222,70 310,64 316,138 220,146" fill="#E4572E"/>
+<polygon points="146,202 206,146 322,140 374,196 346,224 260,188 176,224" fill="#E4572E"/>
+<g fill="none" stroke="#F2EBDD" stroke-linecap="round">
+<path d="M222 134 C198 84 256 48 298 80 C324 106 286 154 234 140" stroke-width="25"/>
+<path d="M142 206 L196 144 L258 156 L322 138 L370 202" stroke-width="26" stroke-linejoin="miter"/>
+<path d="M106 312 C148 290 174 342 142 384 C110 412 60 372 86 326" stroke-width="25"/>
+<path d="M162 232 L148 298 L184 350 L238 386" stroke-width="26" stroke-linejoin="miter"/>
+<path d="M406 312 C364 290 338 342 370 384 C402 412 452 372 426 326" stroke-width="25"/>
+<path d="M350 232 L364 298 L328 350 L274 386" stroke-width="26" stroke-linejoin="miter"/>
+</g>
+</g>
+</svg>
