@@ -402,9 +402,17 @@ confirms them before this work merges to `develop`.
   under (1802)=b; owner confirms in the morning):
   - Loading an old-layout zip reuses the import path.
   - Exporting, and the backup that `whiteboard.load` takes, write the legacy
-    layout. This is a thin reuse of the existing State-to-files mapping:
-    `plan(nil, nil, state)` already yields every folder file's exact bytes
-    (`folders.go:742-895`). The `whiteboard.load` replace calls it that way
+    layout. This is a thin reuse of the existing State-to-files mapping
+    `plan(nil, nil, state)` (`folders.go:742-895`). The export is
+    semantically equivalent, not byte-identical (owner (1837)=a,
+    2026-11-20): an old binary loading the zip, and a new binary re-importing
+    it, both reach a State equal to the source (every topic, panel, item,
+    answer, and log entry). File bytes, topic folder numbering, the tN
+    directories, receipts, `committed.json`, load-floor history, and extra
+    root files may differ, because `plan(nil, nil, state)` cannot reproduce
+    them. Rejected: storing imported raw bytes in the DB for a byte-identical
+    export; it adds storage and code and helps only an export taken before
+    any update. The `whiteboard.load` replace calls it that way
     only when no board exists; over an existing board it calls
     `plan(&folderSession{Generation, NextTopic}, &State{}, next)` and then
     `planLoadFloor` (`folders_archive.go:254-279`). An old binary can therefore load a new
@@ -587,13 +595,11 @@ Verification:
   sentinel present after the next open.
 - A PASSIVE checkpoint runs at close (`(1810)`), and the chosen thresholds are
   recorded in the Result.
-- An exported zip equals the source folder's file set and bytes under the
-  `boardFiles` rules. `boardFiles` is `FolderStore.boardFiles`
-  (`wswhiteboard/folders_archive.go:93-124`, used at `:67` and `:300`): the root
-  files and the topic folders `meta.json` references, plus the revision
-  receipts, leaving out `.lock`, a pending intent, dot-named files, and
-  unreferenced topic folders. So `.board.sqlite` and the sentinel
-  `pending.json` stay out of the zip.
+- An exported zip is semantically equivalent to its source (`(1813)`,
+  owner (1837)=a): the old `FolderStore` loads it into a State equal to the
+  DB's State, and a new-binary re-import of it yields an equal State. Byte
+  and folder-number equality is not required. The zip never contains
+  `.board.sqlite` or the sentinel `pending.json`.
 
 Deferred: wiring and the "after" measurement.
 
