@@ -5,12 +5,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/kang-sw/devenv/internal/mcpframe"
 )
 
 // proxy_http.go is the daemon's second MCP hosting route: MCP Streamable
@@ -30,10 +33,6 @@ import (
 const ProxyHTTPPath = "/mcp/session"
 
 const (
-	// httpMCPBodyLimit keeps a POST, with the newline the stream adds, within
-	// the session's line scanner (bufio.Scanner's default token cap): a longer
-	// line would end the session, not just fail its request.
-	httpMCPBodyLimit = bufio.MaxScanTokenSize - 1
 	// httpMCPReplayProtocol is the protocol version of a replayed initialize.
 	httpMCPReplayProtocol = "2025-06-18"
 )
@@ -109,38 +108,58 @@ func (d *Daemon) handleProxyHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, httpMCPBodyLimit+1))
+	body, err := io.ReadAll(io.LimitReader(r.Body, mcpframe.MaxRequestBytes+1))
 	if err != nil {
 		writeRPCError(w, http.StatusBadRequest, nil, -32700, "parse error")
 		return
 	}
-	if len(body) > httpMCPBodyLimit {
-		writeRPCError(w, http.StatusRequestEntityTooLarge, nil, -32600, "message exceeds "+strconv.Itoa(httpMCPBodyLimit)+" bytes")
-		return
-	}
-	if !json.Valid(body) {
-		writeRPCError(w, http.StatusBadRequest, nil, -32700, "parse error")
+	if len(body) > mcpframe.MaxRequestBytes {
+		writeRPCError(w, http.StatusOK, mcpframe.ExtractID(body[:mcpframe.MaxRequestBytes]), -32600, mcpframe.TooLargeMessage(mcpframe.MaxRequestBytes))
 		return
 	}
 	trimmed := bytes.TrimSpace(body)
-	if trimmed[0] == '[' {
+	if len(trimmed) == 0 {
+		writeRPCError(w, http.StatusBadRequest, nil, -32700, "parse error")
+		return
+	}
+	var line []byte
+	if bytes.ContainsAny(trimmed, "\r\n") {
+		var buf bytes.Buffer
+		if err := json.Compact(&buf, trimmed); err != nil {
+			writeRPCError(w, http.StatusBadRequest, nil, -32700, "parse error")
+			return
+		}
+		line = buf.Bytes()
+	} else {
+		line = trimmed
+	}
+	switch line[0] {
+	case '[':
+		if !json.Valid(line) {
+			writeRPCError(w, http.StatusBadRequest, nil, -32700, "parse error")
+			return
+		}
 		writeRPCError(w, http.StatusBadRequest, nil, -32600, "batches are not supported")
 		return
-	}
-	if trimmed[0] != '{' {
+	case '{':
+	default:
+		if !json.Valid(line) {
+			writeRPCError(w, http.StatusBadRequest, nil, -32700, "parse error")
+			return
+		}
 		writeRPCError(w, http.StatusBadRequest, nil, -32600, "invalid request")
-		return
-	}
-	var line bytes.Buffer
-	if err := json.Compact(&line, trimmed); err != nil {
-		writeRPCError(w, http.StatusBadRequest, nil, -32700, "parse error")
 		return
 	}
 	var msg struct {
 		ID     json.RawMessage `json:"id"`
 		Method *string         `json:"method"`
 	}
-	if err := json.Unmarshal(line.Bytes(), &msg); err != nil {
+	if err := json.Unmarshal(line, &msg); err != nil {
+		var syntaxErr *json.SyntaxError
+		if errors.As(err, &syntaxErr) {
+			writeRPCError(w, http.StatusBadRequest, nil, -32700, "parse error")
+			return
+		}
 		writeRPCError(w, http.StatusBadRequest, nil, -32600, "invalid request")
 		return
 	}
@@ -156,7 +175,7 @@ func (d *Daemon) handleProxyHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if id == nil {
 		// A notification, or the client's answer to a server request.
-		if err := s.writeLine(line.Bytes()); err != nil {
+		if err := s.writeLine(line); err != nil {
 			writeRPCError(w, http.StatusServiceUnavailable, nil, -32000, "ws-mcp session ended")
 			return
 		}
@@ -173,7 +192,7 @@ func (d *Daemon) handleProxyHTTP(w http.ResponseWriter, r *http.Request) {
 		writeRPCError(w, http.StatusOK, id, -32600, "request id already in flight")
 		return
 	}
-	if err := s.writeLine(line.Bytes()); err != nil {
+	if err := s.writeLine(line); err != nil {
 		s.abandon(key, ch)
 		writeRPCError(w, http.StatusOK, id, -32000, "ws-mcp session ended")
 		return
