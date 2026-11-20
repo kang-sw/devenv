@@ -583,7 +583,14 @@
       }
     },
     "261120-bug-ws-agent-dogfood-delivery-context": {
-      "registered_at": "2026-11-20T12:21:26Z"
+      "registered_at": "2026-11-20T12:21:26Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-20T13:33:45Z"
+      }
     },
     "261120-feat-ws-agy-usage-activity-trigger": {
       "registered_at": "2026-11-20T12:38:30Z",
