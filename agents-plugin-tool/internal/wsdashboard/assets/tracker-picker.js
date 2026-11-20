@@ -235,37 +235,40 @@
     if (!VS) return;
     ctx = ctx || {};
     var it = ctx.item ? VS.items[ctx.item] : null;
+    var draftObj = ctx.draft ? (ctx.ed ? ui.ned : ui.nrow[ui.store]) : null;
     if (!ctx.draft && !it) return;
+    if (ctx.draft && !draftObj) return;
     var ot = orgTree(VS.members), idx = pmIndex(ot);
-    var picks = {}, origCc = [];
+    var picks = {}, origCc = [], lockedP = {}, lockedOrder = [], lockedG = {};
+    var norule = false, single = false, compl = null;
     if (kind === 'cc') {
       origCc = listOf(it.cc).slice();
       origCc.forEach(function (id) { if (idx.listed[id]) picks[id] = true; });
+    } else if (kind === 'assign') {
+      if (ctx.draft) {
+        norule = true; single = draftObj.kind === 'topic'; compl = draftObj.compl || null;
+        listOf(draftObj.who).forEach(function (id) {
+          if (idx.listed[id] && (!single || !Object.keys(picks).length)) picks[id] = true;
+        });
+      } else {
+        norule = it.kind === 'topic'; single = it.kind === 'topic';
+        listOf(it.assignments).forEach(function (aid) {
+          var r = A(aid);
+          if (r && (r.state === 'live' || r.state === 'pending')) lockedP[r.to] = true;
+        });
+        idx.order.forEach(function (id) { if (lockedP[id]) lockedOrder.push(id); });
+        if (!norule) idx.order.forEach(function (id) {
+          if (idx.isLead[id] && pmRuleCovered(idx, VS.rules, it.id, VS.viewer.member, id)) lockedG[id] = true;
+        });
+      }
     }
     PM = {
-      kind: kind,
-      item: ctx.item || null,
-      draft: !!ctx.draft,
-      ed: !!ctx.ed,
-      store: ui.store,
-      ot: ot,
-      idx: idx,
-      origCc: origCc,
-      picks: picks,
-      groups: {},
-      lockedP: {},
-      lockedG: {},
-      norule: false,
-      single: false,
-      compl: null,
-      shut: {},
-      q: '',
-      only: false,
-      focusId: null,
-      err: '',
-      busy: false,
-      backEl: opener || null,
-      back: opener ? returnSel(opener) : null
+      kind: kind, item: ctx.item || null, draft: !!ctx.draft, ed: !!ctx.ed, store: ui.store,
+      ot: ot, idx: idx, origCc: origCc, picks: picks, groups: {},
+      lockedP: lockedP, lockedOrder: lockedOrder, lockedG: lockedG,
+      norule: norule, single: single, compl: compl,
+      shut: {}, q: '', only: false, focusId: null, err: '', busy: false,
+      backEl: opener || null, back: opener ? returnSel(opener) : null
     };
     hideTip();
     var dl = $('tkpm');
@@ -293,9 +296,12 @@
 
   function pmShellHtml() {
     var it = PM.item && VS.items[PM.item];
+    var draftObj = PM.draft ? (PM.ed ? ui.ned : ui.nrow[PM.store]) : null;
     var title = PM.kind === 'cc' ? wsT("js.tk.pm.cc.title") : wsT("js.tk.pm.assign.title");
-    var sub = it ? '<code>' + esc(it.alias) + '</code> ' + esc(it.title) : '';
+    var sub = it ? '<code>' + esc(it.alias) + '</code> ' + esc(it.title) :
+      draftObj ? esc((draftObj.val || '').trim() || wsT("js.tk.new.item")) : '';
     var hasTools = PM.kind === 'cc';
+    var hasNote = PM.kind === 'assign' && !PM.norule;
     return '<div class="pm-dlg" role="document" aria-label="' + esc(title) + '">' +
       '<div class="pm-dh"><h2>' + title + '</h2>' + (sub ? '<span class="pm-sub">' + sub + '</span>' : '') +
       '<span class="grow"></span><button type="button" class="pm-x" data-pm="close" aria-label="' + esc(wsT("js.tk.common.close")) + '">&times;</button></div>' +
@@ -304,6 +310,7 @@
         '<button type="button" class="pm-btn mini" id="tkpm-only" data-pm="only" aria-pressed="false" title="' + esc(wsT("js.tk.pm.only.tip")) + '">' + wsT("js.tk.pm.only") + '</button>' : '') + '</div>' +
       '<div class="pm-sel"><span class="pm-lab">' + wsT("js.tk.pm.selected") + '</span><div class="pm-chips" id="tkpm-chips"></div></div>' +
       '<div class="pm-body" id="tkpm-body"></div>' +
+      (hasNote ? '<div class="pm-note">' + wsT("js.tk.pm.asg.note") + '</div>' : '') +
       '<div class="pm-err" id="tkpm-err" role="alert" hidden></div>' +
       '<div class="pm-df" id="tkpm-foot"></div>' +
       '</div>';
@@ -311,6 +318,60 @@
 
   function pmCcEvalCur() {
     return pmCcEval(PM.idx, PM.origCc, PM.picks, PM.groups);
+  }
+
+  function pmAssignEvalCur() {
+    return pmAssignEval(PM.idx, {
+      viewer: VS.viewer.member, reach: VS.viewer.reach || {},
+      lockedPeople: PM.lockedP, lockedGroups: PM.lockedG,
+      picks: PM.picks, groups: PM.groups,
+      norule: PM.norule, single: PM.single, compl: PM.compl
+    });
+  }
+
+  function pmAsgChipsHtml(ev) {
+    var out = [];
+    if (!PM.draft) {
+      PM.lockedOrder.forEach(function (id) {
+        out.push('<span class="pm-chip was" title="' + esc(wsT("js.tk.pm.asg.locked.tip")) + '">&#x1F512; ' + wsT("js.tk.pm.chip.asg.locked", esc(nm(id))) + '</span>');
+      });
+    }
+    ev.chips.forEach(function (c) {
+      if (c.t === 'g') {
+        var txt = c.pend ? wsTn("js.tk.pm.chip.asg.grp.pend", c.n, esc(nm(c.id))) : wsTn("js.tk.pm.chip.asg.grp", c.n, esc(nm(c.id)));
+        out.push('<button type="button" class="pm-chip ' + (c.pend ? 'pend' : 'org') + '" data-pm="chip" data-k="g:' + esc(c.id) + '" title="' + esc(wsT("js.tk.pm.chip.clear")) + '">' + txt + '</button>');
+      } else {
+        var ptxt = c.pend ? wsT("js.tk.pm.chip.asg.pend", esc(nm(c.id))) : esc(nm(c.id));
+        out.push('<button type="button" class="pm-chip ' + (c.pend ? 'pend' : 'add') + '" data-pm="chip" data-k="p:' + esc(c.id) + '" title="' + esc(wsT("js.tk.pm.chip.clear")) + '">' + ptxt + '</button>');
+      }
+    });
+    return out.length ? out.join('') : '<span class="pm-chip was">' + wsT("js.tk.pm.none") + '</span>';
+  }
+
+  function pmAsgRowHtml(id, isLead, ev) {
+    var v = VS.viewer.member, reach = VS.viewer.reach || {};
+    var showGrp = isLead && !PM.norule, locked = !!PM.lockedP[id];
+    var covBy = !locked ? (ev.visCov.personBy[id] || '') : '', covered = !!covBy;
+    var on = !locked && !covered && !!PM.picks[id], isLive = id === v || !!reach[id];
+    var cls = 'pm-nd' + (covered ? ' cvr' : '') + (!showGrp && (on || locked) ? ' on' : '') + (!showGrp && covered ? ' cov' : '') + (!showGrp && locked ? ' lock' : '') + (PM.focusId === id ? ' focus' : '');
+    var rowTip = locked ? ' title="' + esc(wsT("js.tk.pm.asg.locked.tip")) + '"' : covered ? ' title="' + esc(wsT("js.tk.pm.asg.cov", nm(covBy))) + '"' : '';
+    var col1 = isLead ? '<button type="button" class="pm-tg" data-pm="tog" data-id="' + esc(id) + '" aria-label="' + esc(wsT("js.tk.pm.toggle")) + '">&#9662;</button>' : '<span></span>';
+    var col2 = showGrp ? '<span></span>' : PM.single
+      ? '<span class="pm-rdo' + (locked ? ' lock' : '') + '" data-pm="self" data-id="' + esc(id) + '" role="radio" aria-checked="' + (on || locked ? 'true' : 'false') + '"' + (locked ? ' aria-disabled="true"' : '') + rowTip + '></span>'
+      : '<span class="pm-ck' + (locked ? ' lock' : '') + '" data-pm="self" data-id="' + esc(id) + '" role="checkbox" aria-checked="' + (on || covered || locked ? 'true' : 'false') + '"' + (locked || covered ? ' aria-disabled="true"' : '') + rowTip + '></span>';
+    var subTxt = (!showGrp && covered) ? wsT("js.tk.pm.asg.cov", esc(nm(covBy))) : pmRowSub(id);
+    var who = '<span class="pm-who"' + (showGrp ? '' : ' data-pm="self" data-id="' + esc(id) + '"') + rowTip + '><span class="pm-nm">' + esc(nm(id)) + '</span>' +
+      (id === v ? '<span class="pm-chip you">' + wsT("js.tk.pm.you") + '</span>' : '') + '<span class="pm-o">' + subTxt + '</span></span>';
+    var rt = (locked ? '<span class="pm-chip">' + wsT("js.tk.pm.asg.locked") + '</span>' : '') +
+      (on && !isLive ? '<span class="pm-chip pend" title="' + esc(wsT("js.tk.pm.asg.pend.tip")) + '">' + wsT("js.tk.pm.asg.pend") + '</span>' : '');
+    if (showGrp) {
+      var gLocked = !!PM.lockedG[id], gCov = !gLocked ? (ev.visCov.groupBy[id] || '') : '', gOn = !gLocked && !gCov && !!PM.groups[id];
+      var gTip = gLocked ? ' title="' + esc(wsT("js.tk.pm.asg.rule.locked.tip")) + '"' : gCov ? ' title="' + esc(wsT("js.tk.pm.asg.cov", nm(gCov))) + '"' : !isLive ? ' title="' + esc(wsT("js.tk.pm.asg.grp.pend.tip", nm(id))) + '"' : '';
+      rt += '<button type="button" class="pm-opt self' + (on || locked ? ' on' : '') + (locked ? ' lock' : '') + (covered ? ' cov' : '') + '" data-pm="self" data-id="' + esc(id) + '" aria-pressed="' + (on || covered || locked ? 'true' : 'false') + '"' + (locked || covered ? ' aria-disabled="true"' : '') + rowTip + '><span class="pm-ck"></span>' + wsT("js.tk.pm.self") + '</button>';
+      rt += '<button type="button" class="pm-opt grp' + (gOn || gLocked ? ' on' : '') + (gLocked ? ' lock' : '') + (gCov ? ' cov' : '') + '" data-pm="grp" data-id="' + esc(id) + '" aria-pressed="' + (gOn || gLocked || !!gCov ? 'true' : 'false') + '"' + (gLocked || gCov ? ' aria-disabled="true"' : '') + gTip + '><span class="pm-ck"></span><span class="k">' + wsTn("js.tk.pm.grp", PM.idx.count[id] || 1) + '</span></button>';
+      if (gOn) rt += isLive ? '<span class="pm-chip rule">' + wsT("js.tk.pm.asg.rule") + '</span>' : '<span class="pm-chip pend" title="' + esc(wsT("js.tk.pm.asg.grp.pend.tip", nm(id))) + '">' + wsT("js.tk.pm.asg.pend") + '</span>';
+    }
+    return '<div class="' + cls + '" data-id="' + esc(id) + '"' + (showGrp ? ' data-lead="1"' : '') + '>' + col1 + col2 + avHtml(id, false, false) + who + '<span class="pm-rt">' + rt + '</span></div>';
   }
 
   function pmCcChipsHtml(ev) {
@@ -385,42 +446,53 @@
     return h;
   }
 
+  function pmAsgFootHtml(ev) {
+    var left = PM.single ? '<span class="pm-sum">' + wsT("js.tk.ap.topic") + '</span>' :
+      '<span class="pm-cm" role="radiogroup" aria-label="' + esc(wsT("js.tk.form.completion")) + '">' + ['assignee', 'assigner'].map(function (c) {
+        var on = ev.mode === c;
+        return '<button type="button" role="radio" class="' + (on ? 'on' : '') + '" aria-checked="' + (on ? 'true' : 'false') + '" data-pm="compl" data-c="' + c + '"' + (c === 'assignee' && ev.below ? ' hidden' : '') + '>' + esc(complText(c)) + '</button>';
+      }).join('') + '</span>' +
+      (ev.mode === 'mixed' ? '<span class="pm-sum" title="' + esc(wsT("js.tk.ap.compl.mixed.tip")) + '"><b>' + wsT("js.tk.ap.compl.mixed") + '</b></span>' : '');
+    var cnt = ev.targets.length;
+    var applyLbl = cnt ? wsTn("js.tk.pm.asg.apply.n", cnt) : wsT("js.tk.pm.asg.apply");
+    return '<div class="pm-row">' + left + '<span class="grow"></span>' +
+      '<button type="button" class="pm-btn" data-pm="close">' + wsT("js.tk.common.cancel") + '</button>' +
+      '<button type="button" class="pm-btn primary" id="tkpm-apply" data-pm="apply"' + (!ev.dirty || PM.busy ? ' disabled' : '') + '>' + applyLbl + '</button></div>';
+  }
+
   function pmDraw() {
     if (!PM) return;
-    var origMap = {};
-    PM.origCc.forEach(function (id) { origMap[id] = true; });
-    var ev = pmCcEvalCur();
-    var flt = pmFilter(PM.ot, PM.q, PM.only, function (id) {
-      return !!PM.picks[id] || !!PM.groups[id] || !!ev.effective[id] || !!origMap[id];
-    }, pmMatch);
-    var chips = $('tkpm-chips');
-    if (chips) chips.innerHTML = pmCcChipsHtml(ev);
-    var body = $('tkpm-body');
-    if (body) {
-      var st = body.scrollTop;
-      body.innerHTML = pmTreeHtml(flt, function (id, isLead) { return pmCcRowHtml(id, isLead, ev, origMap); });
-      body.scrollTop = st;
-    }
-    var onlyBtn = $('tkpm-only');
-    if (onlyBtn) {
-      onlyBtn.setAttribute('aria-pressed', PM.only ? 'true' : 'false');
-      onlyBtn.classList.toggle('on', PM.only);
-    }
-    var err = $('tkpm-err');
-    if (err) {
-      err.textContent = PM.err || '';
-      err.hidden = !PM.err;
-    }
-    var foot = $('tkpm-foot');
-    if (foot) {
+    var isCc = PM.kind === 'cc', origMap = {}, ev, flt, rowFn, chipsHtml, footHtml;
+    if (isCc) {
+      PM.origCc.forEach(function (id) { origMap[id] = true; });
+      ev = pmCcEvalCur();
+      flt = pmFilter(PM.ot, PM.q, PM.only, function (id) {
+        return !!PM.picks[id] || !!PM.groups[id] || !!ev.effective[id] || !!origMap[id];
+      }, pmMatch);
+      chipsHtml = pmCcChipsHtml(ev);
+      rowFn = function (id, isLead) { return pmCcRowHtml(id, isLead, ev, origMap); };
       var cnt = ev.added.length + ev.removed.length;
-      var applyLbl = cnt ? wsTn("js.tk.pm.cc.apply.n", cnt) : wsT("js.tk.pm.cc.apply");
-      foot.innerHTML = '<div class="pm-row"><span class="pm-sum">' +
-        wsT("js.tk.pm.cc.sum", ev.effectiveCount, ev.added.length, ev.removed.length) +
-        '</span><span class="grow"></span>' +
-        '<button type="button" class="pm-btn" data-pm="close">' + wsT("js.tk.common.cancel") + '</button>' +
-        '<button type="button" class="pm-btn primary" id="tkpm-apply" data-pm="apply"' + (!ev.dirty || PM.busy ? ' disabled' : '') + '>' + applyLbl + '</button></div>';
+      footHtml = '<div class="pm-row"><span class="pm-sum">' + wsT("js.tk.pm.cc.sum", ev.effectiveCount, ev.added.length, ev.removed.length) +
+        '</span><span class="grow"></span><button type="button" class="pm-btn" data-pm="close">' + wsT("js.tk.common.cancel") + '</button>' +
+        '<button type="button" class="pm-btn primary" id="tkpm-apply" data-pm="apply"' + (!ev.dirty || PM.busy ? ' disabled' : '') + '>' +
+        (cnt ? wsTn("js.tk.pm.cc.apply.n", cnt) : wsT("js.tk.pm.cc.apply")) + '</button></div>';
+    } else {
+      ev = pmAssignEvalCur();
+      flt = pmFilter(PM.ot, PM.q, false, function () { return true; }, pmMatch);
+      chipsHtml = pmAsgChipsHtml(ev);
+      rowFn = function (id, isLead) { return pmAsgRowHtml(id, isLead, ev); };
+      footHtml = pmAsgFootHtml(ev);
     }
+    var chips = $('tkpm-chips');
+    if (chips) chips.innerHTML = chipsHtml;
+    var body = $('tkpm-body');
+    if (body) { var st = body.scrollTop; body.innerHTML = pmTreeHtml(flt, rowFn); body.scrollTop = st; }
+    var onlyBtn = $('tkpm-only');
+    if (onlyBtn) { onlyBtn.setAttribute('aria-pressed', PM.only ? 'true' : 'false'); onlyBtn.classList.toggle('on', PM.only); }
+    var err = $('tkpm-err');
+    if (err) { err.textContent = PM.err || ''; err.hidden = !PM.err; }
+    var foot = $('tkpm-foot');
+    if (foot) foot.innerHTML = footHtml;
   }
 
   function pmVisibleIds() {
@@ -441,18 +513,29 @@
 
   function pmToggleSelf(id) {
     if (!PM || !id) return;
-    var ev = pmCcEvalCur();
-    if (ev.cov.personBy[id]) return;
-    PM.err = '';
-    pmTogMap(PM.picks, id);
+    if (PM.kind === 'cc') {
+      if (pmCcEvalCur().cov.personBy[id]) return;
+      PM.err = '';
+      pmTogMap(PM.picks, id);
+    } else {
+      if (PM.lockedP[id] || pmAssignEvalCur().visCov.personBy[id]) return;
+      PM.err = '';
+      if (PM.single) {
+        if (PM.picks[id]) delete PM.picks[id];
+        else { PM.picks = {}; PM.picks[id] = true; }
+      } else pmTogMap(PM.picks, id);
+    }
     PM.focusId = id;
     pmDraw();
   }
 
   function pmToggleGrp(id) {
-    if (!PM || !id) return;
-    var ev = pmCcEvalCur();
-    if (ev.cov.groupBy[id]) return;
+    if (!PM || !id || PM.norule) return;
+    if (PM.kind === 'cc') {
+      if (pmCcEvalCur().cov.groupBy[id]) return;
+    } else {
+      if (PM.lockedG[id] || pmAssignEvalCur().visCov.groupBy[id]) return;
+    }
     PM.err = '';
     pmTogMap(PM.groups, id);
     PM.focusId = id;
@@ -467,9 +550,25 @@
 
   function pmApply() {
     if (!PM || PM.busy) return;
-    var events = pmCcEvents(PM.item, PM.idx, PM.origCc, PM.picks, PM.groups);
+    var cur = PM, events;
+    if (cur.kind === 'cc') {
+      events = pmCcEvents(cur.item, cur.idx, cur.origCc, cur.picks, cur.groups);
+    } else {
+      var ev = pmAssignEvalCur();
+      if (!ev.targets.length) return;
+      if (cur.draft) {
+        var n = cur.ed ? ui.ned : ui.nrow[cur.store];
+        if (n) { n.who = ev.targets.map(function (o) { return o.id; }); n.compl = cur.compl; }
+        var backId = cur.backEl && cur.backEl.id, ed = cur.ed;
+        pmClose(false);
+        render();
+        var el = (backId && $(backId)) || $(ed ? 'tkned' : 'tknew');
+        if (el) el.focus({ preventScroll: true });
+        return;
+      }
+      events = pmAssignEvents(cur.item, ev.targets, cur.compl, VS.viewer.member, VS.viewer.reach || {});
+    }
     if (!events.length) return;
-    var cur = PM;
     cur.busy = true;
     cur.err = '';
     pmDraw();
@@ -510,6 +609,7 @@
     if (act === 'tog' && id) { pmTogMap(PM.shut, id); pmDraw(); return; }
     if (act === 'self' && id) { pmToggleSelf(id); return; }
     if (act === 'grp' && id) { pmToggleGrp(id); return; }
+    if (act === 'compl') { PM.compl = a.getAttribute('data-c'); pmDraw(); return; }
     if (act === 'chip') {
       var k = a.getAttribute('data-k') || '', sep = k.indexOf(':');
       if (sep < 0) return;
@@ -539,14 +639,19 @@
     var k = e.key, t = e.target;
     if (k === 'Escape') { e.preventDefault(); pmClose(true); return; }
     if (e.isComposing || e.keyCode === 229) return;
+    if ((k === 'ArrowLeft' || k === 'ArrowRight') && t && t.closest('.pm-cm')) {
+      var nx = t.parentNode.querySelector('[data-c]:not([hidden]):not([data-c="' + t.getAttribute('data-c') + '"])');
+      if (nx) { e.preventDefault(); PM.compl = nx.getAttribute('data-c'); pmDraw(); var nb = $('tkpm-foot') && $('tkpm-foot').querySelector('[data-c="' + PM.compl + '"]'); if (nb) nb.focus(); }
+      return;
+    }
     if (k === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); pmApply(); return; }
     if (k === 'ArrowDown' || k === 'ArrowUp') {
       var ids = pmVisibleIds();
       if (!ids.length) return;
       e.preventDefault();
       var at = PM.focusId ? ids.indexOf(PM.focusId) : -1;
-      var nx = at < 0 ? (k === 'ArrowDown' ? 0 : ids.length - 1) : (at + (k === 'ArrowDown' ? 1 : ids.length - 1)) % ids.length;
-      PM.focusId = ids[nx];
+      var nxIdx = at < 0 ? (k === 'ArrowDown' ? 0 : ids.length - 1) : (at + (k === 'ArrowDown' ? 1 : ids.length - 1)) % ids.length;
+      PM.focusId = ids[nxIdx];
       pmDraw();
       var row = $('tkpm-body') && $('tkpm-body').querySelector('.pm-nd[data-id="' + CSS.escape(PM.focusId) + '"]');
       if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
