@@ -112,7 +112,9 @@ Stage 2 (hosted-first migration, reference implementation Claude):
   split the oversized `agents-plugin-tool/internal/wsagent` sources this epic
   grew past the 1000-line size guard (`agent_tools_test.go`, `runner_conv.go`,
   with the earlier `runner.go`, `claude.go`, `pi.go`, `children.go`,
-  `lead_claude_test.go`, `lead_fake_test.go`). Owner (94)=a: defer to this
+  `lead_claude_test.go`, `lead_fake_test.go`), plus
+  `agents-plugin-tool/internal/wsdashboard/daemon.go` (1010 lines after
+  `dec0d7d6a`; owner (1874), 2026-11-20). Owner (94)=a: defer to this
   follow-up and do not raise the `.gitattributes` threshold.
 - Planned (not yet cut): the remaining plugin/extension moves into the daemon
   (playbooks instead of skills, `prompts/list` slash commands); open questions
