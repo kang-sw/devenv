@@ -849,6 +849,127 @@ summary while leaving that artifact empty. A fresh workdir-write reviewer
 recovered the review. Separately, `workflow_manual` was unavailable from the ws
 tool surface, so this run used the repository manuals and rendered playbooks.
 
+#### Edition (fca18b571) - 2026-11-21
+
+**Decision 15 (1875) common permission UI slice — partial Phase 2 delivery.**
+
+This Edition delivers Decision 15 item (1875) on `impl/develop/permission-common-ui`
+through `fca18b571` (`c9e9f0072..fca18b571`); it is not a whole-Phase 2 Result,
+and the ticket remains `ready/`.
+
+What landed:
+
+- `c9e9f0072`: Reusable common permission level controls in the lead creation
+  popover, the session menu, and the session header permission chip
+  (`internal/wsdashboard/assets/{dashboard-leads.js,dashboard-rail.css,dashboard-stream.js,dashboard-lifecycle.js,dashboard-rail-popovers.js,rail.js}`,
+  `en.json`/`ko.json`, and `testdata/permission-controls.test.cjs` wired into
+  `TestLeadPopoverLaunchBehavior`). Creation defaults to "default (existing
+  behavior)" (legacy `/agents/leads` with native mode under Advanced); explicit
+  levels own the native mode and post only to `/agents/leads/permission` after a
+  fresh `/support/choices` read; `full` opens the confirmation warning whose
+  checkbox enables the grant carrying `permission_full_ack:true` (cancel/Escape
+  sends nothing). Session menu renders intent, native mode and evidence
+  separately (absent observation is `pending`), dashes/tags legacy-derived
+  levels, posts changes to `/agents/<id>/settings/permission`, keeps native
+  controls on `/settings`, and shows state only (no selector) for workers.
+  Stream drops advance `permEpoch` so pre-drop support cannot carry across a
+  daemon swap; 404/405 refusals show an error and offer re-check without
+  retrying legacy URLs.
+- `da65db345`: Added all 65 `js.perm.*` strings across the nine remaining
+  `internal/wsi18n/tables/` locales (`de`, `es`, `fr`, `it`, `ja`, `pt-BR`,
+  `ru`, `zh-Hans`, `zh-Hant`).
+- `1ba1796be`: Fixed the creation segment tagging the default button as derived,
+  wired the shell's mirrored permission chip click to the session menu, and added
+  isolated Chromium acceptance `TestPermissionUIBrowser`
+  (`permission_ui_browser_test.go`, `testdata/permission-ui.browser.cjs`).
+- `f7071a099` and `72a1f551d`: Prefixed permission state-grid `.k`/`.v` classes
+  to `.pmk`/`.pmv` (avoiding collision with whiteboard `.v`), guarded
+  `permStreamSync` in `dashboard-stream.js` for stream-only harnesses, and
+  refreshed the Chromium captures and `compare-*.png` sheets under
+  `ai-docs/assets/mockups/261121/permission-common-ui/`.
+- `fca18b571`: Addressed the Important review finding by adding mid-request
+  stream-drop coverage to `testdata/permission-controls.test.cjs` (a pre-drop
+  `/support/choices` response arriving after `connected(false)` during creation
+  open, creation Start preflight, and session-menu preflight cannot satisfy the
+  new epoch or trigger `/agents/leads/permission` or
+  `/agents/<id>/settings/permission`).
+
+Contract fixture name mapping (backend `wsagent` tests are outside this UI
+branch's scope):
+
+- `TestPermissionRouteSupportAndSwap` does not exist under that name; its cases
+  are covered across `TestPermissionSupport`
+  (`internal/wsagent/permission_http_test.go:236-270`),
+  `TestPermissionPinnedRouter`
+  (`internal/wsagent/permission_http_test.go:272-359` — positive preflight
+  followed by pinned `90eacda7e` router 405/404 with zero creates/settings/files),
+  `TestPermissionHTTPRegistryAbsentAndLegacy`
+  (`internal/wsagent/permission_http_test.go:164-195`), and
+  `TestPermissionHTTPInvalidZeroWrites`
+  (`internal/wsagent/permission_http_test.go:65-107`), plus dashboard client
+  reconnect/swap/refusal coverage in `testdata/permission-controls.test.cjs` and
+  `testdata/permission-ui.browser.cjs`. Unsupported MCP tool schema is N/A in
+  Phase 2 (no MCP argument or schema change in Phase 2).
+- `TestPermissionSidecarLifecycle` does not exist under that name; its live
+  hosted retention and expired-directory pruning cases are covered inside
+  `TestPermissionSidecarOldWriteNewReopen`
+  (`internal/wsagent/permission_store_test.go:322-439`, subtests `hosted`,
+  `expired`, `deleted` at lines 366, 411-438) and its pinned `90eacda7e`
+  `PruneRegistrations` harness `TestPermissionPinnedWriters`
+  (`internal/wsagent/permission_store_test.go:442-478`, lines 471-477).
+
+Visual comparison (`ai-docs/assets/mockups/261121/permission-common-ui/compare-*.png`
+vs `ai-docs/tickets/assets/261115-feat-ws-permission-profile/` across dark/light
+at 1440 and 420 for `create`, `create-pi`, `full-warning`, `settings`,
+`settings-picked`, `state`, and `unsupported`): **match** on all permission
+controls, states, warnings, and unsupported flows, with only expected
+production/fixture differences: updated `develop` page chrome (Memos panel, Plan
+usage, rail/header styling), popovers retaining existing production rows
+(model/effort/plugin isolation in creation; existing hand-to-terminal action in
+session menu), refusal banner positioned above the action buttons below those
+rows in `unsupported` panel B, fixture folder path without branch in
+`create`/`full-warning`, separate real-header head-chip tiles in `state`, and
+one minor Korean phrasing difference (`고른 수준(읽기 전용)은 보내지 않습니다` vs
+mockup `고른 읽기 전용은 보내지 않습니다` in `unsupported` B2).
+
+Compatibility remains **T0**: UI consumes optional `permission_levels` and
+computed State fields without modifying stored records or legacy native routes,
+and never falls back silently from a refused `/permission` route to a legacy
+route.
+
+Verification from `agents-plugin-tool/`, with complete output read:
+
+```sh
+node internal/wsdashboard/testdata/permission-controls.test.cjs
+node internal/wsdashboard/testdata/lead-popover.test.cjs
+node --test internal/wsdashboard/new-session.test.js
+node internal/wsdashboard/testdata/board-home-ack.test.cjs
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsdashboard -v -count=1 -run '^(TestLeadPopoverLaunchBehavior|TestLeadPopoverIsolationWiring|TestRailScript|TestCSSClassesDoNotCollideAcrossModules|TestHiddenFrameHoldsItsUpdatesUntilShown)$'
+PLAYWRIGHT_BROWSERS_PATH="$HOME/Library/Caches/ms-playwright" WS_PLAYWRIGHT_MODULE="/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright" GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsdashboard -v -count=1 -run '^TestPermissionUIBrowser$'
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsi18n -v -count=1 -run '^(TestOtherTablesHoldEveryEnglishKey|TestPlaceholdersMatchEnglish)$'
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -v -count=1 -run '^TestPermission(PinnedRouter|Support|SidecarOldWriteNewReopen)$'
+```
+
+All eight commands passed (`permission-controls.test.cjs` passed;
+`lead-popover.test.cjs` passed; `new-session.test.js` 2/2;
+`board-home-ack.test.cjs` 10/10; focused `wsdashboard` Go tests 1.020 s;
+`TestPermissionUIBrowser` 50.23 s / 50.750 s total; `wsi18n` table/placeholder
+checks 0.397 s — `TestEveryEnglishKeyIsUsed` for unrelated `wb.*` keys is
+already fixed on `develop` in `2a3d08575`; mapped `wsagent` contract tests
+3.418 s). `git diff --check develop...HEAD` passed.
+
+Follow-up Minor review items left unfixed in this slice:
+- `P.dropped` remains set after a transient preflight failure in the creation
+  popover.
+- An out-of-order stale `/support/choices` response within the same epoch can
+  overwrite a newer one.
+- `permPreflight` checks `permission_levels` without re-checking harness
+  lead-capable/available flags.
+- Stale async callbacks clear `P.busy` without a generation check.
+- A confirmed `full` grant in the session menu is dropped silently if the menu
+  closes while preflight is in flight.
+- Three synthetic JS harness test-fidelity gaps vs full browser DOM.
+
 ### Phase 3: Add the Codex per-run permission launch path
 
 Deferred until the Codex adapter provides its settled exact-version launch
