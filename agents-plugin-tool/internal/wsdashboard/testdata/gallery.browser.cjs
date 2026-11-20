@@ -324,6 +324,278 @@ async function routeTerminal(context) {
       await context.close();
     }
 
+    // ---- Phase 2 (wide 2400): the 2D split tree ----
+    // Five-zone drops with their preview, edge splits from the board and
+    // from other pages, moves within a page, the center swap of two docked
+    // panes, the dividers (drag, clamp, keys, double click, kept across a
+    // reload), unpinning one pane out of a split and the last pane's page
+    // going; the docked topics keep their nodes and frame documents
+    // throughout.
+    {
+      const context = await browser.newContext({ viewport: { width: 2400, height: 1000 }, locale: 'en-US', reducedMotion: 'reduce' });
+      await seed(context, 'livesession', { cards: [], topics: [{ n: 'alpha', p: 1, a: 0, b: 0 }, { n: 'beta', p: 2, a: 0, b: 0 }, { n: 'deep', p: 3, a: 0, b: 0 }] });
+      let { tab, page, errors } = await open(context, 'livesession');
+      await until(async () => JSON.stringify(await pages(page)) === '[["alpha"],["beta"],["deep"]]', 'three seeded pages');
+      // The session page stands in a frame: in-frame rects plus its offset
+      // are the mouse's coordinates.
+      const off = async () => { const b = await tab.locator('iframe.sframe.on').boundingBox(); return { x: b.x, y: b.y }; };
+      const paneRect = name => page.evaluate(n => { const p = document.querySelector(`#bgal .gal-pane[data-ref="t:${n}"]`), r = p.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height }; }, name);
+      // at is a point of name's pane in zone z (an edge band, or the middle).
+      const at = async (name, z) => {
+        const r = await paneRect(name), o = await off();
+        const fx = z === 'left' ? 0.08 : z === 'right' ? 0.92 : 0.5, fy = z === 'top' ? 0.12 : z === 'bottom' ? 0.92 : 0.5;
+        return { x: o.x + r.left + r.width * fx, y: o.y + r.top + r.height * fy };
+      };
+      // zoneSeen is the zone the hovered pane shows and whether the overlay
+      // covers that zone's part of it (3px inset).
+      const zoneSeen = name => page.evaluate(n => {
+        const p = document.querySelector(`#bgal .gal-pane[data-ref="t:${n}"]`), z = p.getAttribute('data-dz'), ov = document.querySelector('#bgal .gal-overlay');
+        if (!z || !ov || ov.hidden) return { z, ok: false };
+        const r = p.getBoundingClientRect(), o = ov.getBoundingClientRect();
+        const w = z === 'left' || z === 'right' ? r.width / 2 : r.width, h = z === 'top' || z === 'bottom' ? r.height / 2 : r.height;
+        const want = { left: r.left + (z === 'right' ? r.width - w : 0) + 3, top: r.top + (z === 'bottom' ? r.height - h : 0) + 3, width: w - 6, height: h - 6 };
+        const ok = ['left', 'top', 'width', 'height'].every(k => Math.abs(o[k] - want[k]) < 1.5);
+        return { z, ok, others: document.querySelectorAll('#bgal .gal-pane[data-dz]').length };
+      }, name);
+      const tree = () => page.evaluate(() => {
+        const g = window.__gal.rec().gallery, i = g.pages.findIndex(p => p.id === g.active);
+        const show = n => n.axis ? { [n.axis]: [show(n.a), show(n.b)] } : (n.topic || n.card);
+        return show(g.pages[i < 0 ? 0 : i].root);
+      });
+      // domTree reads the shown page's DOM the same way, with each split's
+      // divider between its children.
+      const domTree = () => page.evaluate(() => {
+        const pg = document.querySelector('#bgal .gal-page[data-active]:not(.gal-plus)');
+        const show = el => el.classList.contains('gal-split')
+          ? (el.children.length === 3 && el.children[1].classList.contains('gal-div') ? { [el.classList.contains('row') ? 'row' : 'col']: [show(el.children[0]), show(el.children[2])] } : 'bad split')
+          : el.getAttribute('data-ref').slice(2);
+        return pg.children.length === 1 ? show(pg.firstElementChild) : 'bad page';
+      });
+      // keep records each docked topic's node and mounted body frame (a
+      // load counter on the element, and a mark set inside its document
+      // through Playwright, the frames being cross-origin) and tells whether
+      // all recorded so far still hold them: same nodes, connected, the
+      // same frame document (not detached, mark intact), no load since.
+      const marks = new Map();
+      const keep = async () => {
+        const r = await page.evaluate(() => {
+          const k = window.__keepT || (window.__keepT = {});
+          const bad = [];
+          Object.keys(k).forEach(n => {
+            const r = k[n];
+            if (!r.sec.isConnected || (r.f && (!r.f.isConnected || r.f.__loads))) bad.push(n);
+          });
+          document.querySelectorAll('#bgal .gal-pane > section.topic[data-topic]').forEach(sec => {
+            const n = sec.getAttribute('data-topic'), f = sec.querySelector('iframe.doc-frame:not(.doc-frame-next)');
+            if (k[n]) { if (k[n].sec !== sec || (f && k[n].f && k[n].f !== f)) bad.push(n + ' (node)'); if (!k[n].f && f) { k[n].f = f; f.__loads = 0; f.addEventListener('load', () => { f.__loads++; }); } return; }
+            if (f) { f.__loads = 0; f.addEventListener('load', () => { f.__loads++; }); }
+            k[n] = { sec, f };
+          });
+          return { bad, kept: Object.keys(k).sort(), framed: Object.keys(k).filter(n => k[n].f) };
+        });
+        for (const n of r.framed) {
+          const h = await page.locator(`#bgal section.topic[data-topic="${n}"] iframe.doc-frame:not(.doc-frame-next)`).first().elementHandle();
+          const f = h && await h.contentFrame();
+          const m = marks.get(n);
+          if (!m) {
+            if (f) { await f.evaluate(t => { window.__galMark = t; }, 'm-' + n); marks.set(n, f); }
+            continue;
+          }
+          if (m.isDetached() || f !== m || await m.evaluate(() => window.__galMark) !== 'm-' + n) r.bad.push(n + ' (document)');
+        }
+        delete r.framed;
+        r.marked = [...marks.keys()].sort();
+        return r;
+      };
+      // forget stops keep watching names (they left the gallery).
+      const forget = names => { names.forEach(n => marks.delete(n)); return page.evaluate(ns => { ns.forEach(n => { delete window.__keepT[n]; }); }, names); };
+      // gamma closed above, so deep is the fourth docked topic.
+      // Visit each page so its frames mount, then record them.
+      // framed tells whether each docked topic's body frame is mounted (a
+      // frame mounts once its page has shown).
+      // deep renders no body frame here; its node is kept all the same.
+      const framed = () => page.evaluate(() => [...document.querySelectorAll('#bgal .gal-pane > section.topic[data-topic]')].every(s => s.getAttribute('data-topic') === 'deep' || s.querySelector('iframe.doc-frame:not(.doc-frame-next)')));
+      for (const i of [1, 2, 0]) {
+        await dot(page, i).click();
+        await until(async () => await pos(page) === i, 'visit ' + i);
+        await until(() => page.evaluate(() => [...document.querySelectorAll('#bgal .gal-page[data-active] section.topic')].every(s => s.getAttribute('data-topic') === 'deep' || s.querySelector('iframe.doc-frame:not(.doc-frame-next)'))), 'page ' + i + ' frames', 15000);
+      }
+      await until(framed, 'docked frames mounted', 15000);
+      let k = await keep();
+      assert.deepEqual(k, { bad: [], kept: ['alpha', 'beta', 'deep'], marked: ['alpha', 'beta'] }, 'docked nodes and frames recorded, the frames\' documents marked');
+
+      // A board item over a docked pane: each edge shows its zone's half,
+      // the middle shows an edge (no center for a board item); the right
+      // edge splits alpha in a row.
+      const hovered = await drag(tab, await grip(bar(page, 'epsilon')), () => at('alpha', 'right'), async () => {
+        const seen = {};
+        for (const z of ['left', 'right', 'top', 'bottom', 'middle']) {
+          const p = await at('alpha', z);
+          await tab.mouse.move(p.x, p.y, { steps: 4 });
+          seen[z] = await zoneSeen('alpha');
+        }
+        return seen;
+      });
+      for (const z of ['left', 'right', 'top', 'bottom']) assert.deepEqual(hovered[z], { z, ok: true, others: 1 }, 'the ' + z + ' edge zone and its overlay');
+      assert(hovered.middle.ok && hovered.middle.z !== 'center', 'a board item gets no center zone: ' + JSON.stringify(hovered.middle));
+      await until(async () => JSON.stringify(await pages(page)) === '[["alpha","epsilon"],["beta"],["deep"]]', 'right edge splits alpha');
+      assert.deepEqual([await tree(), await domTree()], [{ row: ['alpha', 'epsilon'] }, { row: ['alpha', 'epsilon'] }], 'a row split, rendered with its divider');
+      assert.equal(await page.evaluate(() => document.querySelectorAll('#bgal [data-dz]').length + (document.querySelector('#bgal .gal-overlay').hidden ? 0 : 1)), 0, 'the preview clears on drop');
+      assert.deepEqual(await page.evaluate(() => window.__gal.dots()), ['2*', '1', '1', '+'], 'the dot counts two panes');
+      await until(() => page.evaluate(() => !!document.querySelector('#bgal section.topic[data-topic="epsilon"] iframe.doc-frame')), 'epsilon frame mounted');
+      k = await keep();
+      assert.deepEqual(k.bad, [], 'an edge split keeps the docked nodes and frames');
+      done.push('five-zone preview over a docked pane (four edges for a board item, overlay geometry); right edge drop splits in a row');
+
+      // Across pages: beta (page 2) dragged while the rail wheel turns back
+      // to page 1 lands at alpha's bottom; its emptied page goes.
+      await dot(page, 1).click();
+      await until(async () => await pos(page) === 1, 'page 2');
+      const railPt = await center(page.locator('#bgal .gal-rail .gal-rzone.up'));
+      await drag(tab, await grip(bar(page, 'beta')), () => at('alpha', 'bottom'), async () => {
+        await tab.mouse.move(railPt.x, railPt.y, { steps: 6 });
+        await tab.mouse.wheel(0, -120);
+        await until(async () => await pos(page) === 0, 'the rail wheel turns to page 1 mid-drag');
+        const p = await at('alpha', 'bottom');
+        await tab.mouse.move(p.x, p.y, { steps: 6 });
+        return zoneSeen('alpha');
+      });
+      await until(async () => JSON.stringify(await pages(page)) === '[["alpha","beta","epsilon"],["deep"]]', 'beta moves across pages to alpha\'s bottom');
+      assert.deepEqual(await domTree(), { row: [{ col: ['alpha', 'beta'] }, 'epsilon'] }, 'bottom splits alpha in a column');
+      assert.deepEqual(await page.evaluate(() => window.__gal.dots()), ['3*', '1', '+'], 'the emptied page left the rail');
+      assert.deepEqual((await keep()).bad, [], 'a cross-page move keeps nodes and frames');
+      done.push('pane move across pages (rail wheel mid-drag), bottom edge split, emptied page removed');
+
+      // Within the page: epsilon to alpha's top.
+      await drag(tab, await grip(bar(page, 'epsilon')), () => at('alpha', 'top'));
+      await until(async () => JSON.stringify(await tree()) === JSON.stringify({ col: [{ col: ['epsilon', 'alpha'] }, 'beta'] }), 'epsilon moves to alpha\'s top');
+      assert.deepEqual(await domTree(), { col: [{ col: ['epsilon', 'alpha'] }, 'beta'] }, 'the row collapsed, the top edge split alpha');
+      assert.deepEqual((await keep()).bad, [], 'a move within the page keeps nodes and frames');
+      done.push('pane move within a page (top edge), the vacated split collapses');
+
+      // Left: deep (page 2) to beta's left; four panes on one page.
+      await dot(page, 1).click();
+      await until(async () => await pos(page) === 1, 'deep\'s page');
+      await drag(tab, await grip(bar(page, 'deep')), () => at('beta', 'left'), async () => {
+        await tab.mouse.move(railPt.x, railPt.y, { steps: 6 });
+        await tab.mouse.wheel(0, -120);
+        await until(async () => await pos(page) === 0, 'back to page 1 mid-drag');
+      });
+      await until(async () => JSON.stringify(await pages(page)) === '[["epsilon","alpha","deep","beta"]]', 'deep lands left of beta');
+      assert.deepEqual(await domTree(), { col: [{ col: ['epsilon', 'alpha'] }, { row: ['deep', 'beta'] }] }, 'four panes');
+      assert.deepEqual(await page.evaluate(() => window.__gal.dots()), ['4*', '+']);
+      assert.deepEqual((await keep()).bad, [], 'four panes: nodes and frames kept');
+      await shot(tab, 'wide-four-panes');
+      done.push('left edge split from another page: four panes on one page, dot shows 4');
+
+      // Center: a docked pane over another's middle swaps the two; the
+      // preview covers the whole pane.
+      const swapSeen = await drag(tab, await grip(bar(page, 'epsilon')), () => at('beta', 'middle'), async () => {
+        const p = await at('beta', 'middle');
+        await tab.mouse.move(p.x, p.y, { steps: 6 });
+        return zoneSeen('beta');
+      });
+      assert.deepEqual(swapSeen, { z: 'center', ok: true, others: 1 }, 'the center zone previews the whole pane');
+      await until(async () => JSON.stringify(await tree()) === JSON.stringify({ col: [{ col: ['beta', 'alpha'] }, { row: ['deep', 'epsilon'] }] }), 'center swaps epsilon and beta');
+      assert.deepEqual(await domTree(), { col: [{ col: ['beta', 'alpha'] }, { row: ['deep', 'epsilon'] }] });
+      assert.deepEqual((await keep()).bad, [], 'a swap keeps nodes and frames');
+      done.push('center drop swaps two docked panes (whole-pane preview)');
+
+      // Dividers: the root's (a column: row-resize) drags its ratio, clamps
+      // at 0.1, nudges by the arrow keys, resets on a double click, and the
+      // ratio survives a reload.
+      const rootDiv = page.locator('#bgal .gal-page[data-active] > .gal-split > .gal-div');
+      const divInfo = () => rootDiv.evaluate(v => ({ role: v.getAttribute('role'), orient: v.getAttribute('aria-orientation'), now: +v.getAttribute('aria-valuenow'), cursor: getComputedStyle(v).cursor, tab: v.tabIndex }));
+      assert.deepEqual(await divInfo(), { role: 'separator', orient: 'horizontal', now: 50, cursor: 'row-resize', tab: 0 }, 'the root divider: a focusable horizontal separator');
+      assert.equal(await page.locator('#bgal .gal-page[data-active] .gal-split.row > .gal-div').evaluate(v => getComputedStyle(v).cursor + ' ' + v.getAttribute('aria-orientation')), 'col-resize vertical', 'a row split\'s divider');
+      const rootRatio = () => page.evaluate(() => { const g = window.__gal.rec().gallery; return g.pages[0].root.ratio; });
+      const shares = () => page.evaluate(() => {
+        const s = document.querySelector('#bgal .gal-page[data-active] > .gal-split'), a = s.children[0].getBoundingClientRect(), b = s.children[2].getBoundingClientRect();
+        return a.height / (a.height + b.height);
+      });
+      const splitBox = async () => { const o = await off(); const r = await page.evaluate(() => { const b = document.querySelector('#bgal .gal-page[data-active] > .gal-split').getBoundingClientRect(); return { left: b.left, top: b.top, width: b.width, height: b.height }; }); return { ...r, left: r.left + o.x, top: r.top + o.y }; };
+      let sb = await splitBox();
+      const dv = await center(rootDiv);
+      await tab.mouse.move(dv.x, dv.y);
+      await tab.mouse.down();
+      await tab.mouse.move(dv.x, sb.top + 3 + (sb.height - 6) * 0.3, { steps: 8 });
+      await tab.mouse.up();
+      let r0 = await rootRatio();
+      assert(Math.abs(r0 - 0.3) < 0.01, 'the divider drag sets the ratio: ' + r0);
+      assert(Math.abs(await shares() - 0.3) < 0.01, 'the panes follow the ratio');
+      assert.equal((await divInfo()).now, 30);
+      const dv2 = await center(rootDiv);
+      await tab.mouse.move(dv2.x, dv2.y);
+      await tab.mouse.down();
+      await tab.mouse.move(dv2.x, sb.top - 50, { steps: 8 });
+      await tab.mouse.up();
+      assert.equal(await rootRatio(), 0.1, 'a drag past the end clamps at 0.1');
+      await rootDiv.focus();
+      await tab.keyboard.press('ArrowDown');
+      await tab.keyboard.press('ArrowDown');
+      assert(Math.abs(await rootRatio() - 0.2) < 1e-9, 'two ArrowDown presses nudge to 0.2');
+      await tab.keyboard.press('ArrowUp');
+      assert(Math.abs(await rootRatio() - 0.15) < 1e-9, 'ArrowUp nudges back');
+      await tab.keyboard.press('ArrowLeft');
+      assert(Math.abs(await rootRatio() - 0.15) < 1e-9, 'a column divider ignores ArrowLeft');
+      await rootDiv.dblclick();
+      assert.equal(await rootRatio(), 0.5, 'a double click resets to half');
+      const dv3 = await center(rootDiv);
+      sb = await splitBox();
+      await tab.mouse.move(dv3.x, dv3.y);
+      await tab.mouse.down();
+      await tab.mouse.move(dv3.x, sb.top + 3 + (sb.height - 6) * 0.65, { steps: 8 });
+      await tab.mouse.up();
+      r0 = await rootRatio();
+      assert(Math.abs(r0 - 0.65) < 0.01, 'dragged to 0.65: ' + r0);
+      assert.deepEqual((await keep()).bad, [], 'divider drags keep nodes and frames');
+      assert.deepEqual(errors, [], 'no page errors (split)');
+      await tab.close();
+      ({ tab, page, errors } = await open(context, 'livesession'));
+      marks.clear();
+      await until(async () => JSON.stringify(await pages(page)) === '[["beta","alpha","deep","epsilon"]]', 'the split page after a reload');
+      assert.equal(await rootRatio(), r0, 'the ratio is kept across a reload');
+      assert(Math.abs(await shares() - r0) < 0.01, 'and drawn');
+      assert.deepEqual(await domTree(), { col: [{ col: ['beta', 'alpha'] }, { row: ['deep', 'epsilon'] }] }, 'the tree is kept across a reload');
+      done.push('divider drag (ratio, clamp 0.1, arrow keys, double-click reset), persisted across reload');
+
+      // Unpinning one pane: deep's header dropped on the Main Board takes
+      // it back to the board and collapses its row; the others keep their
+      // nodes and frames.
+      if (await pos(page) !== 0) await dot(page, 0).click();
+      await until(framed, 'frames mounted after the reload', 15000);
+      k = await keep();
+      assert.deepEqual(k, { bad: [], kept: ['alpha', 'beta', 'deep', 'epsilon'], marked: ['alpha', 'beta', 'epsilon'] }, 'docked frames recorded after the reload');
+      // board is a point on the Main Board's open flow (the board column's middle).
+      const board = () => center(page.locator('#bcol'));
+      await drag(tab, await grip(bar(page, 'deep')), board);
+      await until(async () => JSON.stringify(await pages(page)) === '[["beta","alpha","epsilon"]]', 'deep unpinned to the board');
+      assert.equal(await topic(page, 'deep').evaluate(n => n.parentNode.id), 'r-board', 'deep stands on the Main Board');
+      assert.deepEqual(await domTree(), { col: [{ col: ['beta', 'alpha'] }, 'epsilon'] }, 'deep\'s row collapsed into epsilon');
+      assert.equal(await rootRatio(), r0, 'the root keeps its ratio');
+      await forget(['deep']);
+      assert.deepEqual((await keep()).bad, [], 'the remaining panes keep nodes and frames');
+      assert.deepEqual(await page.evaluate(() => window.__gal.dots()), ['3*', '+']);
+      done.push('header drag to the Main Board unpins one pane of a multi-pane page; its parent split collapses; others not remounted');
+
+      // The pin button unpins the rest one by one; the last pane's page
+      // goes.
+      await bar(page, 'beta').locator('.tpin').click();
+      await until(async () => JSON.stringify(await pages(page)) === '[["alpha","epsilon"]]', 'beta unpinned by its button');
+      assert.deepEqual(await domTree(), { col: ['alpha', 'epsilon'] });
+      await bar(page, 'alpha').locator('.tpin').click();
+      await until(async () => JSON.stringify(await pages(page)) === '[["epsilon"]]', 'alpha unpinned by its button');
+      assert.deepEqual(await domTree(), 'epsilon', 'a single pane fills the page');
+      await forget(['beta', 'alpha']);
+      assert.deepEqual((await keep()).bad, [], 'the last pane keeps its node and frame');
+      await drag(tab, await grip(bar(page, 'epsilon')), board);
+      await until(async () => JSON.stringify(await pages(page)) === '[]', 'the last pane\'s page goes');
+      assert.equal(await page.evaluate(() => document.querySelectorAll('#bgal .gal-page:not(.gal-plus), #bgal .gal-split, #bgal .gal-pane, #bgal .gal-div').length), 0, 'no page, split, pane or divider left');
+      done.push('last-pane page removal (pin button and header drag)');
+      assert.deepEqual(errors, [], 'no page errors (split, reloaded)');
+      await context.close();
+    }
+
     // ---- layout modes at real viewports ----
     {
       const context = await browser.newContext({ viewport: { width: 2400, height: 1000 }, locale: 'en-US', reducedMotion: 'reduce' });
@@ -437,6 +709,59 @@ async function routeTerminal(context) {
         await until(async () => await pos(page) === want, 'capture page');
         await page.evaluate(() => window.__gal.frames());
         await tab.screenshot({ path: path.join(captures, name + '.png') });
+        await context.close();
+      }
+      // Phase 2: two-pane and four-pane split pages at wide 2400x1000, the
+      // shapes of mockup v4's split page (a column of two) and of that page
+      // with a board item dropped on each pane's right edge; and the right
+      // edge zone's preview mid-drag.
+      const T = n => ({ topic: n }), S = (axis, a, b) => ({ axis, ratio: 0.5, a, b });
+      const splitRec = root => ({ cards: [], topics: ['alpha', 'beta', 'epsilon', 'deep'].map((n, i) => ({ n, p: i + 1, a: 0, b: 0 })).filter(t => JSON.stringify(root).includes('"' + t.n + '"')),
+        gallery: { v: 1, active: 'p1', pages: [{ id: 'p1', root }], rev: 1 } });
+      for (const [name, root, preview] of [
+        ['live-wide-2pane-2400x1000', S('col', T('alpha'), T('beta')), false],
+        ['live-wide-4pane-2400x1000', S('col', S('row', T('alpha'), T('epsilon')), S('row', T('beta'), T('deep'))), false],
+        ['live-wide-zone-right-2400x1000', S('col', T('alpha'), T('beta')), true],
+      ]) {
+        const context = await browser.newContext({ viewport: { width: 2400, height: 1000 }, colorScheme: 'dark', locale: 'en-US', reducedMotion: 'reduce' });
+        await seed(context, 'livesession', splitRec(root));
+        const { tab, page } = await open(context, 'livesession');
+        await until(() => page.locator('#bgal .gal-rail').isVisible(), 'capture split rail');
+        await until(() => page.evaluate(() => [...document.querySelectorAll('#bgal .gal-pane > section.topic[data-topic]')].every(s => s.getAttribute('data-topic') === 'deep' || s.querySelector('iframe.doc-frame')) && document.querySelectorAll('#bgal .gal-pane').length > 1), 'capture split frames', 15000);
+        await page.evaluate(() => window.__gal.frames());
+        if (preview) {
+          const o = await tab.locator('iframe.sframe.on').boundingBox();
+          const r = await page.evaluate(() => { const b = document.querySelector('#bgal .gal-pane[data-ref="t:alpha"]').getBoundingClientRect(); return { x: b.right - b.width * 0.08, y: b.top + b.height / 2 }; });
+          const g = await grip(bar(page, 'epsilon'));
+          await tab.mouse.move(g.x, g.y);
+          await tab.mouse.down();
+          await tab.mouse.move(g.x + 14, g.y + 14, { steps: 4 });
+          await tab.mouse.move(o.x + r.x, o.y + r.y, { steps: 8 });
+          await until(() => page.evaluate(() => document.querySelector('#bgal .gal-pane[data-ref="t:alpha"]').getAttribute('data-dz') === 'right'), 'capture zone preview');
+        }
+        await tab.screenshot({ path: path.join(captures, name + '.png') });
+        if (preview) await tab.mouse.up();
+        await context.close();
+      }
+      if (mockup) {
+        const context = await browser.newContext({ viewport: { width: 1000, height: 640 }, locale: 'ko-KR', reducedMotion: 'reduce' });
+        const tab = await context.newPage();
+        await tab.goto('file://' + mockup);
+        const proto = tab.locator('#galProtoV4');
+        await tab.locator('[data-act="wide"]').click();
+        await tab.locator('#galProtoV4 .gal-dot:not(.main):not(.empty)').nth(1).click();
+        await proto.screenshot({ path: path.join(captures, 'mockup-v4-wide-2pane.png') });
+        // The mockup's own pane highlight for a right-edge hover (its
+        // dragover sets data-dz; set here as a still).
+        await tab.locator('#galProtoV4 .gal-pane').first().evaluate(p => p.setAttribute('data-dz', 'right'));
+        await proto.screenshot({ path: path.join(captures, 'mockup-v4-wide-zone-right.png') });
+        await tab.locator('#galProtoV4 .gal-pane').first().evaluate(p => p.removeAttribute('data-dz'));
+        // Its four-pane shape: a board item dropped on each pane's right edge.
+        for (const i of [0, 1]) {
+          const pane = tab.locator('#galProtoV4 .gal-tree .gal-pane').nth(i * 2), b = await pane.boundingBox();
+          await tab.locator('#galProtoV4 .gal-bcard').first().dragTo(pane, { targetPosition: { x: b.width * 0.92, y: b.height / 2 } });
+        }
+        await proto.screenshot({ path: path.join(captures, 'mockup-v4-wide-4pane.png') });
         await context.close();
       }
       if (mockup) {

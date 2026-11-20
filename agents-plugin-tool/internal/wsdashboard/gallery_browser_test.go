@@ -63,7 +63,11 @@ Frame identity sentinel for %s.</wb:body><wb:panel recap="%s panel">Panel payloa
 // activation by reveal/navigate/update card, inactive pages and the narrow
 // Main Board reported out of view with their frames and terminal still
 // mounted, closed and missing docked topics, the layout modes at real
-// viewports, and the docked-topic deep link below its header. The
+// viewports, the docked-topic deep link below its header, and the split
+// tree (Phase 2): five-zone drops with their preview, pane moves within
+// and across pages, the center swap, divider drags kept across a reload,
+// a split collapsing when one pane unpins, the last pane's page going,
+// and the docked frames never reloading on the way. The
 // terminal capability is synthetic (no shell starts); the terminal list
 // and socket are routed in the browser.
 func TestGalleryBrowser(t *testing.T) {
@@ -126,7 +130,8 @@ func TestGalleryBrowser(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	// WS_GALLERY_CAPTURES=<dir> also writes the live and mockup v4 captures
-	// for the side-by-side review (ai-docs/assets/captures/261119-gallery-phase1).
+	// for the side-by-side review (ai-docs/assets/captures/261119-gallery-phase1
+	// and, for the split pages, 261119-gallery-phase2).
 	mockup, _ := filepath.Abs("../../../ai-docs/assets/mockups/261119/right-pinned-panel-concept/paged-docking-gallery-v4.html")
 	if _, err := os.Stat(mockup); err != nil {
 		mockup = ""
