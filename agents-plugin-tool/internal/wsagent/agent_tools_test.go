@@ -1280,6 +1280,33 @@ func TestAgentWorkerProfilesNeedAgentSpawn(t *testing.T) {
 	}
 }
 
+func TestChildReportPublishesHeldFinalBeforeSuccessor(t *testing.T) {
+	h, got := agentHarness(t, nil)
+	lead := h.leadCaller()
+	parent, pp := h.agentRunning(lead, AgentSpawnRequest{Prompt: "parent work", Tier: "medium", Authority: "workdir-write"})
+	_, cp := h.agentRunning(h.holderOf(parent), AgentSpawnRequest{Prompt: "inner work", Tier: "small", Authority: "workdir-write"})
+
+	pp.reply("parent final")
+	eventually(t, "parent final held for inner child", func() bool {
+		rec := h.record(parent)
+		return rec.HeldTurn != nil && rec.HeldTurn.Message == "parent final"
+	})
+	cp.reply("inner complete")
+	if turn := pp.nextSent(t); !strings.Contains(turn, "inner complete") {
+		t.Fatalf("inner child's report turn = %q", turn)
+	}
+	eventually(t, "held parent final reported first", func() bool { return len(got.lead()) == 1 })
+	if rep := got.lead()[0]; rep.Result.Status != TurnDone || rep.Result.Message != "parent final" {
+		t.Fatalf("first parent report = %+v", rep.Result)
+	}
+
+	pp.reply("successor ack")
+	eventually(t, "successor ack reported second", func() bool { return len(got.lead()) == 2 })
+	if reps := got.lead(); reps[1].Result.Status != TurnDone || reps[1].Result.Message != "successor ack" {
+		t.Fatalf("parent reports = %+v", reps)
+	}
+}
+
 // TestWorkerBackgroundStateHoldsReportAndShowsStatus verifies the harness-neutral
 // background state: while bgTasks > 0 after a turn ends, the worker reports
 // state "background" in agent.list and SpawnAgentEvent, withholds its turn-done
