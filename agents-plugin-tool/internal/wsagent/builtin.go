@@ -140,6 +140,7 @@ var ChildSafeWSTools = []string{
 	"api.list",
 	"project_tree",
 	"runtime.read",
+	"review.marker",
 	"mailbox.send",
 	"mailbox.recv",
 	"todo.list",
@@ -168,9 +169,10 @@ func childSafeWSToolsFor(p Profile) []string {
 }
 
 // AgentWSTools are the common ws tools every agent.spawn child gets, on
-// every harness: PiMiniLeadWSTools with agent.* in place of pi.*, plus
-// ChildSafeWSTools. The child's authority does not select among them; a
-// read-only child's ws-mcp refuses the mutating ones (EnvPermissionLevel).
+// every harness: PiMiniLeadWSTools with agent.* in place of pi.*, the review
+// ledger tools, plus ChildSafeWSTools. The child's authority does not select
+// among them; a read-only child's ws-mcp refuses the mutating ones
+// (EnvPermissionLevel).
 var AgentWSTools = agentWSTools()
 
 func agentWSTools() []string {
@@ -180,7 +182,7 @@ func agentWSTools() []string {
 			out = append(out, name)
 		}
 	}
-	for _, name := range append([]string{"agent.spawn", "agent.interrupt", "agent.list", "agent.tiers"}, ChildSafeWSTools...) {
+	for _, name := range append([]string{"agent.spawn", "agent.interrupt", "agent.list", "agent.tiers", "review.stamp"}, ChildSafeWSTools...) {
 		if !slices.Contains(out, name) {
 			out = append(out, name)
 		}

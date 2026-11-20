@@ -13,6 +13,7 @@ var testMutatingAndExcludedWSTools = []string{
 	"tickets.create_empty",
 	"tickets.acquire",
 	"tickets.release",
+	"review.stamp",
 	"note.write",
 	"worktree.acquire",
 	"worktree.release",
@@ -46,6 +47,7 @@ func TestChildSafeWSToolsAllowlist(t *testing.T) {
 		"path.generate", "tickets.query", "tickets.template", "convention.read",
 		"playbook.read", "note.query", "rationale.query", "git.log", "git.diff",
 		"git.status", "git.merge_base", "api.list", "project_tree", "runtime.read",
+		"review.marker",
 		"mailbox.send", "mailbox.recv", "todo.list", "todo.read", "todo.add",
 		"todo.check", "todo.erase", "todo.clear", "todo.reorder",
 	} {
@@ -184,7 +186,7 @@ func TestClaudeChildSafeMCPToolsArgs(t *testing.T) {
 			t.Fatalf("missing --allowedTools: %v", args)
 		}
 		allowed := args[i+1:]
-		for _, name := range append(slices.Clone(ChildSafeWSTools), "git.commit", "tickets.move", "agent.spawn") {
+		for _, name := range append(slices.Clone(ChildSafeWSTools), "git.commit", "tickets.move", "agent.spawn", "review.stamp") {
 			rule := claudeMCPToolName(ReservedMCPServer, name)
 			if !slices.Contains(allowed, rule) {
 				t.Errorf("workdir-write --allowedTools missing %q", rule)
