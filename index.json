@@ -602,7 +602,14 @@
       "registered_at": "2026-11-20T12:38:30Z"
     },
     "261120-feat-ws-dashboard-composer-controls-and-context-meter": {
-      "registered_at": "2026-11-20T11:46:21Z"
+      "registered_at": "2026-11-20T11:46:21Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-20T12:44:15Z"
+      }
     },
     "261120-feat-ws-dashboard-numbers-screen": {
       "registered_at": "2026-11-20T11:31:45Z"
