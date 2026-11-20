@@ -170,7 +170,7 @@ func TestEntryRowsStreams(t *testing.T) {
 
 func TestEntryRowsFailedSendAndUncertainBaseline(t *testing.T) {
 	d := &Daemon{stats: &streamStats{}}
-	raw := `<div class="thead">title</div><details class="modelhistory">model</details><div class="centries"><div data-entry="a">A</div><div data-entry="b">B</div></div>`
+	raw := `<div class="thead">title<span class="sum"><button class="modelhistory-trigger"></button><template class="modelhistory-source">model</template></span></div><div class="centries"><div data-entry="a">A</div><div data-entry="b">B</div></div>`
 	r := newRegion(raw)
 	rows := splitEntryRows(raw)
 	sink, state := &railRowsSink{fail: true}, &keyedRowState{name: regionEntries}

@@ -56,7 +56,7 @@ for (const address of [base, updates]) {
       doc.createElement = function(name, ...args) { if (name === 'template') parses++; return create.call(doc, name, ...args); };
       try {
         const row = (key, text, attr = '') => `<details data-entry="${key}" data-key="${key}" ${attr}><summary>${text}</summary><p>body</p></details>`;
-        const raw = '<div class="thead">title</div><details class="modelhistory"><summary>models</summary></details><div class="centries">' + row('a', 'A') + row('b', 'B') + '</div>';
+        const raw = '<div class="thead">title<span class="sum"><button class="modelhistory-trigger"></button><template class="modelhistory-source">models</template></span></div><div class="centries">' + row('a', 'A') + row('b', 'B') + '</div>';
         const base = api.entryInputFull(raw), before = JSON.stringify(base);
         assertLocal(!!base, 'canonical full accepted');
         const changed = (key, html) => ({ key, hash: 'rendered-row', html });
@@ -85,7 +85,7 @@ for (const address of [base, updates]) {
         assertLocal(api.entryInputHTML(two).includes('available peer A') && api.entryInputHTML(two).includes('new B'), 'hidden inputs accumulate');
         assertLocal(JSON.stringify(base) === before && !api.entryInputHTML(base).includes('new B'), 'held inputs immutable');
         root.innerHTML = raw;
-        const box = root.querySelector('.centries'), sibling = box.children[1], head = root.querySelector('.thead'), models = root.querySelector('.modelhistory');
+        const box = root.querySelector('.centries'), sibling = box.children[1], head = root.querySelector('.thead'), models = root.querySelector('.modelhistory-source');
         const older = doc.createElement('div'); older.setAttribute('data-entry', '0'); older.textContent = 'older history only'; box.prepend(older);
         sibling.open = true; sibling.querySelector('summary').textContent = 'client formatted B';
         const oldA = box.querySelector('[data-entry="a"]');
@@ -96,7 +96,7 @@ for (const address of [base, updates]) {
         assertLocal(formatted.length === 1 && formatted[0] === box.querySelector('[data-entry="a"]'), 'only changed row formatted');
         assertLocal(box.querySelector('[data-entry="a"]') !== oldA && box.textContent.includes('available peer A'), 'same-key canonical HTML replaces despite unchanged mail-wake');
         assertLocal(box.querySelector('[data-entry="b"]') === sibling && sibling.open && box.firstElementChild === older, 'unchanged disclosure/history nodes retained');
-        assertLocal(root.querySelector('.thead') === head && root.querySelector('.modelhistory') === models, 'stable shell nodes retained');
+        assertLocal(root.querySelector('.thead') === head && root.querySelector('.modelhistory-source') === models, 'stable shell nodes retained');
         assertLocal(!api.entryInputHTML(one).includes('older history only') && !api.entryInputHTML(one).includes('client formatted'), 'live DOM never becomes canonical input');
         parses = 0;
         api.mergeEntriesRegion(root, two, false, one);
@@ -105,7 +105,7 @@ for (const address of [base, updates]) {
         const full = '<div class="thead">new title</div><div class="centries">' + row('z', 'after gap') + '</div>';
         api.mergeEntriesRegion(root, full, false, two);
         assertLocal(resets === 1 && box.children.length === 1 && box.firstElementChild.getAttribute('data-entry') === 'z', 'legacy full gap resets loaded history');
-        assertLocal(!root.querySelector('.modelhistory'), 'full shell removes model history');
+        assertLocal(!root.querySelector('.modelhistory-source'), 'full shell removes model history');
         return { rejected: invalid.length, changedOnlyParsing: true, canonicalClean: true, gapReset: true };
       } finally { doc.createElement = create; }
       function assertLocal(ok, label) { if (!ok) throw Error(label); }
@@ -212,11 +212,13 @@ for (const address of [base, updates]) {
     // Model history uses full regions, without replacing loaded keyed history.
     oldHash = await hash();
     assert.equal((await update('model', 'entry-model-one'))[0].event, 'region'); await waitHash(oldHash);
-    const models = frame.locator('#r-entries .modelhistory');
-    await models.evaluate(d => new Promise(resolve => { d.addEventListener('toggle', resolve, { once: true }); d.open = true; }));
+    const modelTrigger = frame.locator('.modelhistory-trigger');
+    await modelTrigger.click();
+    const models = frame.locator('.modelhistory-popover');
+    await models.waitFor({ state: 'visible' });
     oldHash = await hash();
     assert.equal((await update('model', 'entry-model-two'))[0].event, 'region'); await waitHash(oldHash);
-    assert(await models.evaluate(d => d.open), 'full shell preserves model disclosure');
+    assert(await models.isVisible(), 'full shell preserves open model popover');
     assert((await models.textContent()).includes('entry-model-two'));
     assert(await frame.evaluate(() => entryRefs.older.isConnected && entryRefs.disclosure.isConnected && entryRefs.effect.isConnected), 'full shell retains loaded history and effect nodes');
 

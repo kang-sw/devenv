@@ -110,6 +110,9 @@ func TestObservedHistoryIsReadableWithoutLiveActivity(t *testing.T) {
 		t.Fatalf("history became activity: %+v", v)
 	}
 	contains(t, "saved model history", renderNamed(t, "r-entries", v), "Observed model history", "retired-child", "physical")
+	if html := renderNamed(t, "r-entries", v); strings.Contains(html, `<details class="modelhistory"`) || !strings.Contains(html, `class="chip modelhistory-trigger"`) {
+		t.Fatalf("model history is not a title-bar popover source: %s", html)
+	}
 }
 
 func TestSessionHoverTooltipBoundary(t *testing.T) {
