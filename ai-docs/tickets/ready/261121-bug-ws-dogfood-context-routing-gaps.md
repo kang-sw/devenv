@@ -6,8 +6,10 @@ related:
   261115-feat-ws-permission-profile: "Its retained implementation branch reproduces stale branch reuse."
   261116-feat-ws-subagent-worktree-lease: "Phase 1's second valid B-key source depends on this lease contract landing."
   260912-bug-ws-pi-readonly-reviewer-artifact-contract: "Prior Pi-only scoped reviewer artifact contract."
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: f92b32b2745affc9
+sage-review-completeness-reviewed: f92b32b2745affc9
 ---
 
 # Fix ws dogfood context routing gaps
@@ -128,8 +130,10 @@ owns the operation.
   `worktree.acquire`. In addition, during locked pooled-worktree acquisition,
   classify an existing name-rooted canonical target against its encoded merge
   root and non-force delete/recreate it when the target-only count is zero and
-  the merge-root-only count is positive, switching the pooled worktree to the
-  merge root before deletion. Leave targets with target-only commits and equal
+  the merge-root-only count is positive, first moving the pooled worktree to
+  the merge-root commit with a detached checkout (`git switch --detach
+  refs/heads/<merge-root>`; a plain branch switch fails while another worktree,
+  usually the main root, has the merge-root branch checked out). Leave targets with target-only commits and equal
   targets checked out as today, with divergent targets retaining the existing
   behind warning. Route resolution adds only a defensive stop for the
   exact-target `continue` case at `:932-935`, telling a pooled caller to
@@ -473,9 +477,12 @@ Acceptance:
 
 - During pooled-worktree acquisition, a name-rooted canonical target with
   target-only `0` and merge-root-only `>0` against its encoded merge root is
-  handled by first switching the pooled worktree to that merge root, then
-  non-force deleting and recreating the target from it under the acquisition
-  lock instead of checking it out stale. This safe-to-recreate class includes a
+  handled by first detaching the pooled worktree at that merge-root commit
+  (`git switch --detach refs/heads/<merge-root>`), then non-force deleting
+  (`git branch -d`) and recreating the target from it (`git switch -c <target>
+  <merge-root>`) under the acquisition lock instead of checking it out stale.
+  The real-Git regression runs with the merge-root branch checked out in the
+  main root. This safe-to-recreate class includes a
   formerly empty branch after the merge root advances and is not evidence that
   the branch previously carried landed work.
 - Equal targets and targets with target-only `>0`, whether actively ahead or
