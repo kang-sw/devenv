@@ -282,7 +282,7 @@ func (r *replayed) verdicts(all []*node) {
 }
 
 func (r *replayed) verdictsFrom(all []*node, start int) {
-	// lf folds applied label/org-list events and member removals in fold order.
+	// lf folds applied label/org-list events and member lifecycle events in fold order.
 	// Concurrent writers can each pass their causal check; the later conflicting
 	// list event is flagged here so names and org heads remain unique and a
 	// removed member cannot become an org head.
@@ -430,7 +430,7 @@ func isLabelList(t string) bool {
 func isOrgList(t string) bool { return t == TypeOrgSet || t == TypeOrgRemove }
 
 func isFoldOrderList(t string) bool {
-	return isLabelList(t) || isOrgList(t) || t == wsledger.TypeRemoveMember
+	return isLabelList(t) || isOrgList(t) || t == wsledger.TypeMemberJoin || t == wsledger.TypeRemoveMember
 }
 
 func (s *state) listClash(n *node) rejection {

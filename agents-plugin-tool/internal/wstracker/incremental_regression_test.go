@@ -123,3 +123,18 @@ func TestIncrementalFoldOrgStateMatchesFullReplay(t *testing.T) {
 		t.Fatalf("org checkpoint state diverged: cc=%v rule=%+v", tr.r.S.items["a.pc#1"].cc, tr.r.S.ruleByID["a.pc#4~b"])
 	}
 }
+
+func TestIncrementalFoldOrgSetCanNameJoinedHead(t *testing.T) {
+	g := json.RawMessage(`{"admins":["a"],"members":[{"id":"a","keys":["a"]}]}`)
+	join := incrementalEvent("b", 1, wsledger.TypeMemberJoin, `{"member":"b","key":"b"}`, 1, nil)
+	src := newMemSource(g, "a.pc", []wsledger.Event{join})
+	tr := New(src, src.stream)
+
+	set := incrementalEvent("a", 1, TypeOrgSet, `{"org":"o-team","name":"Team","head":"b"}`, 2, map[string]int{"b.pc": 1})
+	src.add(set)
+	assertIncrementalFold(t, tr, src)
+	n := tr.r.byID[set.ID.String()]
+	if n.status != "applied" || tr.r.S.orgs["o-team"] == nil || tr.r.S.orgs["o-team"].head != "b" {
+		t.Fatalf("joined member could not head org: status=%s reason=%s org=%+v", n.status, n.reason, tr.r.S.orgs["o-team"])
+	}
+}

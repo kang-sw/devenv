@@ -38,6 +38,7 @@ func TestOrgLifecycleAndMembership(t *testing.T) {
 	tm := newTeam(t)
 	wantEq(t, "org events are admin-only",
 		strings.Contains(tm.refused("maya.pc", TypeOrgSet, orgSetPayload("o-platform", "Platform", "maya")), "admin-only"), true)
+	tm.do("ada.pc", TypeSetLead, map[string]any{"member": "omar", "leads": []string{"lena"}})
 	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-platform", "Platform", "maya"))
 	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-search", "Search", "lena"))
 
@@ -46,8 +47,9 @@ func TestOrgLifecycleAndMembership(t *testing.T) {
 	wantEq(t, "nested org head", s.orgs["o-search"].head, "lena")
 	wantEq(t, "head nearest org", s.nearestOrg("maya").id, "o-platform")
 	wantEq(t, "nested head nearest org", s.nearestOrg("lena").id, "o-search")
-	wantEq(t, "nested member keeps nearest child org", s.nearestOrg("lena").id, "o-search")
+	wantEq(t, "nested member keeps nearest child org", s.nearestOrg("omar").id, "o-search")
 	wantIn(t, "parent org scope includes nested head", s.orgMembers(s.orgs["o-platform"]), "lena")
+	wantIn(t, "parent org scope includes nested member", s.orgMembers(s.orgs["o-platform"]), "omar")
 
 	wantEq(t, "one org per head",
 		strings.Contains(tm.refused("ada.pc", TypeOrgSet, orgSetPayload("o-other", "Other", "maya")), "already heads"), true)
