@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 7a76a0e23555c53f
 sage-review-completeness-reviewed: 7a76a0e23555c53f
+completed: 2026-11-20
 ---
 
 # 대시보드 고정 패널을 Paged Docking Gallery(2D 스플릿·바운스-스냅)로 전환
@@ -559,3 +560,44 @@ Verification:
   emulation never charges tension.
 - Performance check per `ai-docs/manuals/performance.md` (mounted inactive pages,
   wheel handler cost).
+
+### Result (1bb6e42fa) - 2026-11-20
+
+Landed (`37577f44d..1bb6e42fa`):
+
+- Spring-loaded rail dots through `WsGallery.Hover` from the drag's `over()` with one timer: 300ms over
+  a dot shows its page mid-drag (the shown page's dot never springs); a drop before 300ms keeps the
+  Phase 1 behaviour (`+` docks a new page, a page dot appends, `⌂` unpins) (`1bd1c7dbd`).
+- Wheel-only bounce-snap gate (`WsGallery.Gate`) on `.gal-viewport`, and on the board column in narrow
+  view only while a page is docked. The scroller is the nearest scrolling ancestor of the event target
+  within the pane (scroll chaining stops at `overscroll-behavior: contain`), falling back to the pane's
+  `.gal-pbody` / `.bc-body` or the board scroller (`1bb6e42fa`, review fix). Pull pill with %, target dot
+  `.pull-target`, ready from 85%, rubber band via the CSS `translate` property, micro-bounce at edges,
+  420ms lock, 240ms idle spring-back. Terminals, iframes, canvases, media, maximized sheets, pinch
+  (ctrlKey) and already-prevented events never charge it. New i18n keys `js.pins.edge`, `js.pins.wait`
+  in every wsi18n table.
+- Review fix in the model: with no page left `active` returns to home, and narrow `position()` reads
+  `"+"` with zero pages as home, so a board drag never hides the Main Board (`1bb6e42fa`).
+
+Verification:
+
+- `node --test testdata/gallery-*.test.cjs`: 50/50 (three new state cases fail against the pre-fix model).
+- `go test ./internal/wsdashboard -run TestGalleryBrowser` (Playwright, `58d747208`, `1bb6e42fa`): every
+  Phase 3 item — 300ms hover switch (wide and narrow), `+` drop before 300ms, hovered pane drives the flip
+  in a split page, lock and idle spring-back, edge micro-bounce with no flip or wrap, narrow Page 0 top /
+  bottom / inert with zero pages, a docked terminal and doc frame never flip, touch scroll gestures charge
+  nothing, a docked explorer list scrolls natively before the gate engages — 4/4 consecutive passes after
+  the review fix. Negative controls (spring removed, exclusions removed) fail the suite.
+- `go test ./internal/wsdashboard/ -count=1`: ok (309s); `./internal/wswhiteboard/...`: ok (286s).
+- Performance (`ai-docs/manuals/performance.md`; no file I/O on this path), Chromium synthetic events:
+  inner-scroll pass about +3µs per event over the board baseline; the boundary path is 108-121µs back to
+  back (worst case, a style read right after the previous write), tens of µs at one event per frame.
+  Inactive mounted pages are never read by the handler.
+
+Decisions:
+
+- Scroll chaining inside a pane respects `overscroll-behavior`; wheeling over a docked topic's header
+  follows the pane body's boundary.
+- A `preview` card's body is not excluded as a whole; only its iframe / media / canvas children are.
+- Known limit: in narrow view with zero docked pages the spring hover onto `+` no longer shows the empty
+  `+` page (dropping on the `+` dot still docks).
