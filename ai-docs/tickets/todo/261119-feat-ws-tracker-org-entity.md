@@ -66,8 +66,12 @@ Approved mockups:
    member's org is the nearest one above (or at) them. A vacant head seat is
    allowed (the org has no members until a head is set). The org moves with
    its head when the head's position changes; giving the org to someone else
-   is an explicit admin action. Rejected: an alias string on the lead (lost
-   when the lead moves); orgs as a membership list (duplicates the tree).
+   is an explicit admin action. Removing a member who heads an org leaves
+   that org vacant in the same fold step, as `member.remove` already drops
+   the member's admin role ((1445)). Rejected: an alias string on the lead
+   (lost when the lead moves); orgs as a membership list (duplicates the
+   tree); refusing a member removal while they head an org (it would block
+   the removal on an org setting the remover may not see).
 2. **Org events, admin-only, T1.** `roles.org_set {org, name, head}` creates
    or updates an org (`head: ""` = vacant) and `roles.org_remove {org}`
    deletes it. Both go through `needAdmin`. `roles.org_set` naming a head who
@@ -169,12 +173,6 @@ Approved mockups:
     labelled "소속" in the UI and the new object "조직", with distinct
     labels in every locale.
 
-## Open Decision Queue
-
-Last ID: (1445)
-
-(1445) [open] [announced] Removing a member who heads an org leaves that org vacant (head ""), in the same fold step that removes the member - follows `member.remove` dropping the member's admin role (`state.go` around 1646-1656) and the vacant-seat rule of Decision 1; refusing the removal instead would block a member removal on an org edit that the remover may not be able to see.
-
 ## Constraints
 
 - Applicable manuals: `ai-docs/manuals/shipped-surface-boundary.md`,
@@ -221,7 +219,8 @@ dashboard's tracker state payload.
 Verification (Go tests):
 - `roles.org_set` / `roles.org_remove`: admin-only, one org per head, vacant
   head, rename, delete; membership derived from the tree with nearest-org
-  resolution for nested orgs; the org moving with its head on `set_lead`.
+  resolution for nested orgs; the org moving with its head on `set_lead`;
+  removing a head member leaves the org vacant.
 - Tombstones: a removed org keeps id and name, refuses `roles.org_set`,
   `item.cc_org` and org assign targets, releases its head, and its members
   resolve to the nearest parent org; its registrations stay and stop
