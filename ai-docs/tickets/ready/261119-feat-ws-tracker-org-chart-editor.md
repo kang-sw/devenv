@@ -216,6 +216,18 @@ Verification:
   subtree; compare side by side with `view.html` panels A and B. Report any
   deliberate deviation.
 
+### Result (1f13d8c) - 2026-11-20
+
+- Extracted standalone pure `orgTree(members, leadsOverride)` helper in `agents-plugin-tool/internal/wsdashboard/assets/tracker.js` (outside the `wkAct..cardTeam` span pinned by `tracker_wiki_test.go`) deriving nested tree roots with subtree counts and depths, unplaced live members (no live lead and no live followers), removed members, and cycle-unreachable live members. Added Node unit tests in `agents-plugin-tool/internal/wsdashboard/tracker_org_tree.test.js`.
+- Restyled `cardTeam` in `agents-plugin-tool/internal/wsdashboard/assets/tracker-wiki.js` and `agents-plugin-tool/internal/wsdashboard/assets/tracker.css` per Decisions 1-3, 9, and `view.html`: indented org tree with elbow connectors, two-line rows, page-lifetime in-memory subtree collapse (`ui.ofold`, cleaned in `GONE_BY_KEY` in `tracker-forms.js`, toggled via `ofold` in `tracker-mount.js`), dashed amber unplaced frame, admin-only "조직도 편집" button placed after the member count chip via `spec.tools`, relabelled "기타 역할 이벤트…" admin button, and non-admin hint. Preserved existing chips, avatar relation tints, problem flags, `.mdetails`, and `settingsHtml(!!me.admin)`.
+- Updated all 11 locale tables under `agents-plugin-tool/internal/wsi18n/tables/*.json` and regenerated `ai-docs/ref/tracker-mockup/i18n-en.js`.
+- Verification:
+  - `node --test agents-plugin-tool/internal/wsdashboard/tracker_org_tree.test.js`: PASS (3/3).
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -count=1 ./internal/wsi18n`: PASS.
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -count=1 -run 'TestTracker(StoreSettingsLeaveTheRolesDialog|LabelsInTheDashboard|PriorityDialogRows|Wiki|MockupI18nIsCurrent)|TestDashboardSourceAssembly' ./internal/wsdashboard`: PASS.
+  - LOOK comparison (`compared /tmp/tracker-org-chart/phase1-admin.png & /tmp/tracker-org-chart/phase1-nonadmin.png vs /tmp/tracker-org-chart/mockup-view.png`: match): 3-level tree, connectors, two-line rows, avatar tints, collapsed `park-sy` blue "2명 접힘" badge, dashed amber unplaced box, admin button position, and non-admin hint match `view.html` panels A and B. Deliberate deviations: live `paneHtml` places `멤버 N명` + `조직도 편집` in `.ptools` directly under the tab strip (the live Team tab's header holds the tab icons); mockup-only `Join a store...` appears in the fixture toolbar via `ext.teamTools`.
+- Compatibility tier: T0.
+
 ### Phase 2: Admin org-chart editor
 
 Build the editor modal per Decisions 4-8 and `editor.html`, opened from the
