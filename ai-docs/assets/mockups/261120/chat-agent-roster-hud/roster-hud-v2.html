@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chat Agent Roster HUD v2 — Compact #agcompact Redesign</title>
+  <link rel="stylesheet" href="roster-hud-v2.css">
+</head>
+<body>
+  <div class="demo-page">
+    <header class="controls-bar" aria-label="Interactive mockup controls">
+      <div class="ctrl-brand">
+        <span class="ctrl-badge">HUD v2</span>
+        <strong>Compact Agent Roster</strong>
+        <span class="ctrl-sub">24px nodes · 18px icons · (42)=c</span>
+      </div>
+
+      <div class="ctrl-group" role="group" aria-label="Theme">
+        <button type="button" class="ctrl-btn" data-theme-btn="dark" aria-pressed="true">Dark</button>
+        <button type="button" class="ctrl-btn" data-theme-btn="light" aria-pressed="false">Light</button>
+      </div>
+
+      <label class="ctrl-select-wrap">
+        <span class="ctrl-lbl">Scenario</span>
+        <select id="ctrl-scenario" class="ctrl-select">
+          <option value="heavy">Heavy 12-agent 3-level</option>
+          <option value="states">All 6 States &amp; 4 Harnesses</option>
+          <option value="max4">Max 4 Rows Deep</option>
+          <option value="fanout">Wide Fan-out (14 direct)</option>
+        </select>
+      </label>
+
+      <div class="ctrl-group" role="group" aria-label="Idle visibility policy (42)=c">
+        <button type="button" class="ctrl-btn" data-idle-btn="active" aria-pressed="false">Active only</button>
+        <button type="button" class="ctrl-btn" data-idle-btn="alive" aria-pressed="true">Alive idle</button>
+      </div>
+
+      <div class="ctrl-group" role="group" aria-label="Conversation width">
+        <button type="button" class="ctrl-btn" data-width-btn="620" aria-pressed="true">Desktop (~620px)</button>
+        <button type="button" class="ctrl-btn" data-width-btn="420" aria-pressed="false">Narrow (420px)</button>
+      </div>
+
+      <button type="button" class="ctrl-btn ctrl-compare" id="ctrl-compare" aria-pressed="false">
+        Compare: Before (#agcompact)
+      </button>
+    </header>
+
+    <main class="stage-wrap">
+      <section id="convo-shell" class="convo-shell" data-width="620" aria-label="Simulated dashboard conversation pane">
+        <header class="chead thead">
+          <div class="ctabs" role="tablist">
+            <button type="button" class="ctab active" role="tab" aria-selected="true">Conversation</button>
+            <button type="button" class="ctab" role="tab" aria-selected="false">Files</button>
+          </div>
+          <div class="csum">
+            <span class="chip">턴 14</span>
+            <span class="chip crun-chip" id="hdr-run-chip">실행 12</span>
+          </div>
+        </header>
+
+        <div id="convo" class="convo">
+          <div class="conv" id="conv-messages">
+            <div class="msg user">
+              <div class="mh"><span>22:41</span> <b>사용자</b></div>
+              <div class="bub">리팩토링 대상 패키지별로 병렬 워커 띄워서 심볼 인덱스, 의존성 그래프, 그리고 테스트 깨지는 부분까지 한 번에 조사하고 수정안 정리해줘.</div>
+            </div>
+
+            <details class="d-summary saved">
+              <summary>
+                <svg class="i" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 4.5L6 7.5L9 4.5"/></svg>
+                <span class="d-label">사고 요약</span>
+                <span class="d-meta">3.2s</span>
+              </summary>
+              <div class="d-body"><p>네 개 모듈을 독립 워크트리 워커로 분배하고, 각 워커가 필요 시 세부 분석 서브에이전트를 스폰하도록 구성한다.</p></div>
+            </details>
+
+            <div class="toolsline">
+              <div class="conv-row">
+                <span class="row-icon"><svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10.5 3.5l2 2-6.5 6.5-2.5.5.5-2.5z"/></svg></span>
+                <span class="row-content tsum">
+                  <span class="tsn">도구 4회</span>
+                  <span class="tsl"><span class="tool">agent.spawn<span class="x">×3</span></span> <span class="tool">tickets_query</span></span>
+                  <span class="ttok">18.4k tok</span>
+                </span>
+                <span class="row-time">22:42</span>
+              </div>
+              <ul class="brows">
+                <li class="brow done"><span class="mk">✓</span><span class="bp one"><span class="tool">agent.spawn</span><span class="ba">parser-worker (codex · high)</span></span><span class="bm"><span>0.4s</span></span></li>
+                <li class="brow done"><span class="mk">✓</span><span class="bp one"><span class="tool">agent.spawn</span><span class="ba">graph-auditor (claude · medium)</span></span><span class="bm"><span>0.3s</span></span></li>
+                <li class="brow done"><span class="mk">✓</span><span class="bp one"><span class="tool">agent.spawn</span><span class="ba">test-runner (agy · high)</span></span><span class="bm"><span>0.4s</span></span></li>
+              </ul>
+            </div>
+
+            <div class="msg fromlead">
+              <div class="mh conv-row">
+                <span class="row-icon"><span class="hb sm" data-h="claude"></span></span>
+                <span class="row-content"><span class="src">lead</span> <b>coordinator</b></span>
+                <span class="row-time">22:43</span>
+              </div>
+              <div class="bub md">
+                <p>직속 워커 3개(<code>parser-worker</code>, <code>graph-auditor</code>, <code>test-runner</code>)를 병렬 실행했습니다. 각 워커가 하위 파일 스캔 및 타입 검증 서브에이전트를 추가로 호출해 분석 중입니다.</p>
+                <ul>
+                  <li><strong>AST / 심볼 추출</strong> — <code>internal/symindex</code> 경계 타입 14건 확인 중</li>
+                  <li><strong>의존성 사이클 검사</strong> — 패키지 간 순환 참조 2곳 발견, 분리안 작성</li>
+                  <li><strong>회귀 테스트 매트릭스</strong> — 통합 테스트 38개 중 실패 3개 원인 추적 중</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="wake-divider"><span><span class="hb sm" data-h="codex"></span> parser-worker · 중간 보고 수신 · 22:45</span></div>
+
+            <div class="msg fromlead">
+              <div class="mh conv-row">
+                <span class="row-icon"><span class="hb sm" data-h="claude"></span></span>
+                <span class="row-content"><span class="src">lead</span> <b>coordinator</b></span>
+                <span class="row-time">22:46</span>
+              </div>
+              <div class="bub md">
+                <p><code>parser-worker</code>의 하위 <code>schema-diff</code>가 스키마 불일치 패치를 준비 중입니다. <code>graph-auditor</code> 쪽 권한 승인 요청 1건이 대기 중이라 확인 후 바로 병합하겠습니다.</p>
+              </div>
+            </div>
+
+            <div class="activity">
+              <span class="spin" aria-hidden="true"></span>
+              <span>서브에이전트 12개 응답 대기 및 결과 취합 중…</span>
+            </div>
+          </div>
+        </div>
+
+        <aside id="hud-legend" class="hud-legend" hidden aria-label="Status ring and harness legend"></aside>
+
+        <div id="agisland" class="agisland" data-mode="hud" aria-label="Active agents HUD">
+          <div id="hud-view" class="hud-view">
+            <div id="hud-tree-scroll" class="hud-tree-scroll">
+              <div id="hud-canvas" class="hud-canvas">
+                <svg id="hud-lines" class="hud-lines" aria-hidden="true"></svg>
+                <div id="hud-roots" class="hud-roots"></div>
+              </div>
+            </div>
+            <div class="hud-footer">
+              <span id="hud-footprint" class="hud-footprint" hidden></span>
+              <button type="button" id="hud-expand-btn" class="hud-expand-btn" aria-expanded="false" aria-controls="agpop" title="전체 에이전트 트리 열기">
+                <span id="hud-summary-text">완료 4 · 피어 20</span>
+                <svg class="i" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5L9 7M2.5 13.5L7 9"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div id="agcompact-old" class="agcompact-old" hidden aria-label="Legacy #agcompact vertical list"></div>
+        </div>
+
+        <aside id="agpop" class="agpop" hidden aria-label="Full agent tree popover">
+          <div class="thead">
+            <span>에이전트 트리</span>
+            <div class="sum" id="agpop-chips"></div>
+            <button type="button" id="agpop-close" class="agpop-close" aria-label="닫기">×</button>
+          </div>
+          <div class="r-tree" id="agpop-tree"></div>
+        </aside>
+
+        <div id="hud-tooltip" class="hud-tooltip" role="tooltip" hidden></div>
+        <div id="hud-toast" class="hud-toast" role="status" aria-live="polite" hidden></div>
+      </section>
+    </main>
+  </div>
+  <script src="roster-hud-v2.js"></script>
+</body>
+</html>
