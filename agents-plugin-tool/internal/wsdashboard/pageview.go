@@ -85,6 +85,8 @@ type SessionView struct {
 	// Theme is the theme the gear menu pinned ("light" or "dark"), empty
 	// when the page follows the OS. Set per request, like Lang.
 	Theme string
+	// ActivityAt is the snapshot time used for stable elapsed fallback text.
+	ActivityAt int64
 
 	HasBoard         bool
 	Seq              int
@@ -687,6 +689,7 @@ func buildSessionView(in pageInputs) SessionView {
 		Mermaid:          in.Page.Board.Mermaid,
 	}
 	if in.Snapshot != nil {
+		v.ActivityAt = in.Snapshot.UpdatedAt
 		if o := in.Snapshot.Lead.Observed; o != nil {
 			v.ModelHistory = append(v.ModelHistory, ModelHistoryRow{Observed: o})
 			if v.Model == "" {

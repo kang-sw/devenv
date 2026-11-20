@@ -103,6 +103,7 @@
   "composer.aria": "Tab inserisce un rientro. Premi Esc, poi Tab, per uscire dalla casella del messaggio.",
   "composer.send": "invia",
   "convo.activity": "lead {0}",
+  "convo.activity.turn": "turno",
   "summary.label": "Riepilogo del ragionamento",
   "summary.provider": "Riepilogo esposto dal fornitore",
   "summary.updating": "Aggiornamento",

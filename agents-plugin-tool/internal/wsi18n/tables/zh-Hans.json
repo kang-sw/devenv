@@ -103,6 +103,7 @@
   "composer.aria": "Tab 键用于缩进。按 Escape，再按 Tab，即可离开消息输入框。",
   "composer.send": "发送",
   "convo.activity": "主导 {0}",
+  "convo.activity.turn": "轮次",
   "summary.label": "推理摘要",
   "summary.provider": "提供方公开摘要",
   "summary.updating": "更新中",

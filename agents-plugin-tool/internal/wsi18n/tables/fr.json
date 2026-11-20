@@ -103,6 +103,7 @@
   "composer.aria": "Tab insère une tabulation. Appuyez sur Échap, puis sur Tab, pour quitter la zone de message.",
   "composer.send": "envoyer",
   "convo.activity": "lead {0}",
+  "convo.activity.turn": "tour",
   "summary.label": "Résumé du raisonnement",
   "summary.provider": "Résumé exposé par le fournisseur",
   "summary.updating": "Mise à jour",

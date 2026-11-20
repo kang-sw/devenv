@@ -103,6 +103,7 @@
   "composer.aria": "Tab はインデントです。メッセージ欄から出るには Escape を押してから Tab を押してください。",
   "composer.send": "送信",
   "convo.activity": "リード {0}",
+  "convo.activity.turn": "ターン",
   "summary.label": "推論要約",
   "summary.provider": "提供元が公開した要約",
   "summary.updating": "更新中",

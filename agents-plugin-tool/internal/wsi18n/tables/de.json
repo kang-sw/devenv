@@ -103,6 +103,7 @@
   "composer.aria": "Tab rückt ein. Drücke Escape und dann Tab, um das Nachrichtenfeld zu verlassen.",
   "composer.send": "senden",
   "convo.activity": "Lead {0}",
+  "convo.activity.turn": "Turn",
   "summary.label": "Denkzusammenfassung",
   "summary.provider": "Vom Anbieter offengelegte Zusammenfassung",
   "summary.updating": "Wird aktualisiert",

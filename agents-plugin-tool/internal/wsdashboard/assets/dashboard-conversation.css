@@ -111,7 +111,10 @@
 .permwait > span { min-width: 0; overflow-wrap: anywhere; }
 .permwait .t { margin-left: auto; font-size: 11.5px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; flex: none; }
 .activity { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--wb-muted-fg); padding: 0 4px; }
-.activity .spin { color: var(--wb-primary); }
+.activity .spin { color: var(--wb-primary); flex: none; }
+.activity .act-copy { min-width: 0; }
+.activity .act-t { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.activity .act-turn { color: var(--wb-muted-fg); white-space: nowrap; }
 /* Provider summaries are separate from answer bubbles; no markdown styling. */
 .turn-with-summary { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .d-summary { min-width: 0; color: var(--wb-muted-fg); font-size: 12px; }
