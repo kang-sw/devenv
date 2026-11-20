@@ -1,7 +1,6 @@
   // Shared by all rendered regions.
   var doc = document;
   function q(sel, root) { return Array.prototype.slice.call((root || doc).querySelectorAll(sel)); }
-  var dirty = false;
   var ta, hint, all;
   // replyEls looks the reply bar's controls up again: a dashboard board swap
   // can replace the bar while it keeps the topics, whose controls stay wired
@@ -213,7 +212,6 @@
     ta.style.height = "";
     if (text.indexOf("\n") >= 0) grow(ta);
     hint.textContent = "";
-    dirty = text !== "";
     // A board with nothing to answer keeps its reply bar hidden until a topic
     // note gives it a line.
     var bar = ta.closest(".reply");

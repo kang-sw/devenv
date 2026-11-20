@@ -83,9 +83,8 @@ func TestDashboardFolderSharedReadsDuringUpdateAndRender(t *testing.T) {
 	}
 	for n := 0; n < 4; n++ {
 		f.update(t, `<wb:topic name="topic"><wb:body>committed update</wb:body><wb:log>update history</wb:log></wb:topic>`)
-		// The implicit render caller also runs BeginRender inside its uncached
-		// folder transaction, not on the state retained by DashboardSessionSource.
-		f.s.refreshWhiteboardAfter(map[string]any{"session_key": f.key}, response{})
+		// Panel writes refresh the served view without mutating the frozen board.
+		f.call(t, "agenda.set", map[string]any{"key": "refresh", "value": map[string]any{"round": n}})
 	}
 	wg.Wait()
 	after, _ := json.Marshal(frozen)

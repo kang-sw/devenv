@@ -112,12 +112,10 @@ type sessionRecord struct {
 	Todos []todoItem `json:"todos,omitempty"`
 	// Whiteboard decodes the legacy snapshot; board-aware loaders replace this
 	// in-memory value with the topic-folder authority. New writes never update
-	// the cache part. Nil means no board and gates implicit panel refresh.
+	// the cache part. Nil means no board.
 	Whiteboard *wswhiteboard.State `json:"whiteboard,omitempty"`
 	// Process-local identity of the immutable folder read, never persisted.
 	boardRevision uint64
-	// Prepared derived output, published under the folder lock after commit.
-	boardOutput *whiteboardRender
 }
 
 // sessionRecordSchemaVersion is key.json's schema version. Version 1 was the
@@ -168,6 +166,9 @@ var sessionKeyFilenamePattern = regexp.MustCompile(`^[a-z0-9-]{1,128}$`)
 // presents only the opaque key, never its root, so the record path must be
 // derivable from the key plus the globally-deterministic cache root.
 type sessionStore struct {
+	boardOwner      bool
+	boardRetirement *whiteboardRetirement
+
 	// mu serializes same-process read-modify-write and the mint claim loop.
 	// Cross-process safety rests on filesystem primitives: an exclusive
 	// directory create for the unique mint claim, the key directory's record

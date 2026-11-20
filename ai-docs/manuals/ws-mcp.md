@@ -102,7 +102,11 @@ and `todos.json`. A pre-0.50 `whiteboard.json` remains an immutable rollback
 snapshot. Whiteboards now live under the project's
 `ai-docs/whiteboards/<reply-id>/`: versioned session `meta.json`, opaque topic
 folders holding `meta.json`, immutable panel versions, and append-only
-`log.jsonl`, with a derived `index.html`. The first board open (queries and
+`log.jsonl`. The daemon renders pages from this store without writing page
+artifacts. Its first board open schedules one background cleanup per project
+and cache root: retired index/stamp and hashed Mermaid files, plus dead
+sessions' repository embed snapshots. The cleanup preserves board data and
+live embeds and uses no marker or recurring GC. The first board open (queries and
 dashboard reads included) converts the old snapshot once under the folder
 lock. New writes never update either old board representation, and key expiry
 does not delete authoritative topic folders. An absent agenda/todo part is empty. A write replaces only the part files it changes, each atomically, and
@@ -1467,8 +1471,7 @@ tree instead of its embedded copies, re-reading and re-parsing them on every
 request, so an edit shows on a browser reload and only Go changes need a
 rebuild. Off when unset; a root without those directories fails the daemon at
 startup, and a file that resolves outside the root (a symlink) is refused. The
-vendored mermaid bundle and the MCP server's own whiteboard page file and embed
-stay embedded. A running daemon keeps its mode, so shut it down first
+vendored Mermaid bundle stays embedded. A running daemon keeps its mode, so shut it down first
 (`POST /shutdown` above), then start
 `WS_MCP_DASHBOARD_DEV_SOURCE=$PWD/agents-plugin-tool ws-mcp dashboard`; a
 half-edited template answers 500 (the error is in `dashboard.log`) and the next

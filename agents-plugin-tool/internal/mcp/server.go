@@ -19,6 +19,8 @@ import (
 )
 
 type Server struct {
+	boardOwner bool
+
 	root              string
 	version           string
 	sourceCommit      string

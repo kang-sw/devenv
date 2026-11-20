@@ -2,18 +2,14 @@ package mcp
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
@@ -25,42 +21,19 @@ import (
 )
 
 // The session whiteboard: whiteboard.update applies a command string to the
-// authoritative topic-folder store (wswhiteboard.Apply) and renders, in one
-// call, the full page and its change stamp. The model,
-// folder transactions, view, and templates live in internal/wswhiteboard;
-// this file owns derived page publication and artifact lifetime.
+// authoritative topic-folder store (wswhiteboard.Apply). The daemon renders
+// views from committed state; updates produce no derived page files.
 
 const (
 	whiteboardPlaybookName = "whiteboard"
 	// whiteboardDirRel is the whiteboard folder under a session root. It is
-	// created, and registered in the repository's local exclude file, at a
-	// session's first render, never earlier.
-	whiteboardDirRel = "ai-docs/whiteboards"
-	// whiteboardGCMarker bookkeeps the once-a-day orphan scan (the
-	// maybePrune marker pattern). Its leading dot keeps it out of the file
-	// patterns the scan deletes.
-	whiteboardGCMarker  = ".gc-marker"
-	whiteboardGCCadence = 24 * time.Hour
-	whiteboardOnValue   = "on"
+	// registered in the repository's local exclude file when a board is created.
+	whiteboardDirRel  = "ai-docs/whiteboards"
+	whiteboardOnValue = "on"
 )
 
 var (
 	errWhiteboardRefused = errors.New("whiteboard batch refused")
-	errNoWhiteboard      = errors.New("session has no whiteboard")
-	// whiteboardFilePattern matches legacy flat page/embed files, so the daily
-	// orphan cleanup still retires old snapshots.
-	whiteboardFilePattern = regexp.MustCompile(`^([a-z0-9]+)(?:\.html|\.stamp\.js|-[0-9a-f]+\.html)$`)
-)
-
-// Test seams for output publication and the rename retry (technical decision
-// 119): a browser polling the stamp holds a brief read handle, and on Windows
-// a rename over a file that is open fails with a sharing violation.
-var (
-	whiteboardMkdirAll        = os.MkdirAll
-	whiteboardRename          = os.Rename
-	whiteboardRenameRetryable = renameSharingViolation
-	whiteboardRenameAttempts  = 5
-	whiteboardRenameBackoff   = 40 * time.Millisecond
 )
 
 func isWhiteboardTool(name string) bool {
@@ -89,30 +62,11 @@ type whiteboardSectionProvider struct {
 // renderer.
 type whiteboardPanelInput struct {
 	rec sessionRecord
-	// root is the session root, where the ticket directories live; env is
-	// the environment the ticket read's git runs under (nil means this
-	// process's, the daemon's served page).
+	// root is the session root, where the ticket directories live.
 	root       string
-	env        []string
 	sessionKey string
 	replyID    string
-	// cacheHome is the WS_CACHE_HOME the session's mailbox history ring
-	// lives under; empty means this process's. paths resolves the mailbox
-	// stores, reply registry, and listening marker; the zero value is this
-	// process's environment (the daemon's served page).
-	cacheHome string
-	paths     wsmailbox.Paths
-	// mailbox is this process's mailbox identity and whether the session
-	// holds its named inbox (mailboxOwnerCheck), which the own address and
-	// the named-inbox unread count depend on.
-	mailbox whiteboardMailbox
-	// served builds the panels for a page served over http (the dashboard
-	// daemon's session page) rather than one written to disk: a ticket row
-	// carries its repo-relative path as text instead of a file link.
-	served bool
-	// lang is the language of the text the panels draw (titles, counts, row
-	// phrases; a wsi18n code). Empty is English, which is what a page
-	// written to disk uses; only a served page follows its viewer.
+	// lang is the viewer's language; empty selects English.
 	lang string
 	// watch, when not nil, is told each file and directory a panel read
 	// that a writer may change without a nudge (the ticket directories and
@@ -125,11 +79,6 @@ type whiteboardPanelInput struct {
 	// store's LoadReply (the served page's shared read); false when it
 	// cannot be read.
 	replies func() (wsmailbox.ReplyStore, bool)
-}
-
-type whiteboardMailbox struct {
-	owner    bool
-	identity mailboxIdentity
 }
 
 var whiteboardProviders = []whiteboardSectionProvider{
@@ -257,11 +206,10 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any,
 	var (
 		problems []string
 		outcome  wswhiteboard.Outcome
-		render   whiteboardRender
 		observed boardMutationObservation
 		root     string
 	)
-	err = s.sessions.mutateRecordPartsObserved(key, partAll, partWhiteboard, func(rec *sessionRecord) error {
+	err = s.sessions.mutateRecordPartsObserved(key, partWhiteboard, partWhiteboard, func(rec *sessionRecord) error {
 		if rec.Whiteboard == nil {
 			rec.Whiteboard = &wswhiteboard.State{}
 		}
@@ -283,18 +231,16 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any,
 		if sublead == nil {
 			s.stampBoardInputs(key, rec.Whiteboard, beforeEntry)
 		}
-		var renderErr error
-		render, renderErr = s.renderWhiteboard(rec, key)
-		return renderErr
+		return nil
 	}, &observed)
-	// A successful Apply is not a commit. Conversely a failed replay or
-	// derived publication does not undo a synced intent. This independent
+	// A successful Apply is not a commit. Conversely a failed replay does
+	// not undo a synced intent. This independent
 	// best-effort append accepts the commit-to-ring crash gap: never replay
 	// board commands or manufacture projection entries during recovery.
 	if observed.Committed {
 		s.recordWhiteboardEffects(key, outcome.Effects)
 	}
-	s.debugEvent("whiteboard.commit_outcome", map[string]any{"committed": observed.Committed, "html_published": observed.Published})
+	s.debugEvent("whiteboard.commit_outcome", map[string]any{"committed": observed.Committed})
 	if errors.Is(err, errWhiteboardRefused) {
 		text := refusal(problems)
 		if outcome.Unpartitioned {
@@ -337,7 +283,10 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any,
 		}
 		sb.WriteString("ids: " + strings.Join(labels, ", ") + "\n")
 	}
-	full := render.full
+	full := "page unavailable"
+	if s.boardOwner {
+		full = "page not yet served"
+	}
 	if url, ok := s.dashboardPageURL(key); ok {
 		full = url
 	}
@@ -433,7 +382,7 @@ const whiteboardLoadTool = "whiteboard.load"
 // folder through the store (wswhiteboard.FolderStore.LoadArchive), keeping
 // the previous board as a backup folder beside it. Afterwards it behaves like
 // a successful whiteboard.update: the cached board is dropped, the board knob
-// turns on, and the dispatcher refreshes the page and nudges the dashboard.
+// turns on, and the dispatcher nudges the dashboard.
 func (s *Server) handleWhiteboardLoad(id json.RawMessage, args map[string]any) response {
 	key, err := sessionStateKey(whiteboardLoadTool, args)
 	if err != nil {
@@ -542,34 +491,6 @@ func markdownSection(body, heading string) string {
 	return strings.TrimSpace(strings.Join(lines[start:], "\n"))
 }
 
-// refreshWhiteboardAfter re-renders the full page (stamp bumped)
-// after a successful write by a tool that dirties a panel (see
-// whiteboardProviders), once the session's board exists.
-// The gate is board existence, not the knob: a session that never rendered
-// writes no file, and an ad hoc board stays current.
-// A refresh that would publish the same page writes nothing (see
-// renderWhiteboardPages).
-func (s *Server) refreshWhiteboardAfter(args map[string]any, resp response) {
-	if responseIsError(resp) {
-		return
-	}
-	key, _ := args["session_key"].(string)
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return
-	}
-	if rec, ok := s.sessions.readState(key, partWhiteboard); !ok || rec.Whiteboard == nil {
-		return
-	}
-	err := s.sessions.mutateRecordParts(key, partAll, partWhiteboard, func(rec *sessionRecord) error {
-		_, err := s.renderWhiteboardPages(rec, key, true)
-		return err
-	})
-	if err != nil && !errors.Is(err, errNoWhiteboard) {
-		s.debugEvent("whiteboard.refresh_failed", map[string]any{"error": err.Error()})
-	}
-}
-
 func responseIsError(resp response) bool {
 	if resp.Error != nil {
 		return true
@@ -580,243 +501,6 @@ func responseIsError(resp response) bool {
 	}
 	isError, _ := result["isError"].(bool)
 	return isError
-}
-
-// renderWhiteboard prepares the derived page. The folder transaction publishes
-// it only after its durable commit, with the stamp last.
-func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string) (whiteboardRender, error) {
-	return s.renderWhiteboardPages(rec, sessionKey, false)
-}
-
-// renderWhiteboardPages is renderWhiteboard; refresh additionally begins the
-// render. When the full page rendered at the current sequence is already the
-// published page and stamp, byte for byte, a viewer has nothing new to see:
-// it returns errRecordUnchanged, so neither the stamp-only store commit nor
-// the outputs are rewritten, and open pages are not told to reload.
-func (s *Server) renderWhiteboardPages(rec *sessionRecord, sessionKey string, refresh bool) (whiteboardRender, error) {
-	var out whiteboardRender
-	st := rec.Whiteboard
-	replyID := wsmailbox.ReplyID(sessionKey)
-	dir := filepath.Join(rec.Root, filepath.FromSlash(whiteboardDirRel))
-	if err := registerWhiteboardExclude(s.gitRunner(), rec.Root, dir); err != nil {
-		return out, fmt.Errorf("register %s in the git exclude file: %w", whiteboardDirRel, err)
-	}
-	pageDir := filepath.Join(dir, replyID)
-	panelInput := whiteboardPanelInput{
-		rec:        *rec,
-		root:       rec.Root,
-		env:        s.environ(),
-		sessionKey: sessionKey,
-		replyID:    replyID,
-		cacheHome:  s.getenv(wsstate.EnvCacheHome),
-		paths:      s.mailboxPaths(),
-		mailbox:    s.whiteboardMailbox(sessionKey, rec.Root),
-	}
-	view := wswhiteboard.BuildView(st, wswhiteboard.ViewInput{
-		Layout:   wswhiteboard.LayoutFull,
-		ReplyID:  replyID,
-		Panels:   whiteboardPanels(panelInput),
-		FileLink: whiteboardItemFileLink(rec.Root, whiteboardPageDir(panelInput)),
-		Tickets:  &whiteboardTickets{root: rec.Root},
-	})
-	view.StampFile = "index.stamp.js"
-	if refresh {
-		// The view depends on the sequence only through view.Seq, so one
-		// build serves both renders and the panels are read once.
-		if html, err := wswhiteboard.RenderPage(view); err == nil && whiteboardPublished(pageDir, html, st.Seq) {
-			return out, errRecordUnchanged
-		}
-		st.BeginRender()
-		view.Seq = st.Seq
-	}
-	html, err := wswhiteboard.RenderPage(view)
-	if err != nil {
-		return out, fmt.Errorf("render full page: %w", err)
-	}
-	out.files = append(out.files, whiteboardOutput{filepath.Join(pageDir, "index.html"), html, "full page"})
-	stamp := whiteboardStamp(st.Seq)
-	out.files = append(out.files, whiteboardOutput{filepath.Join(pageDir, "index.stamp.js"), stamp, "stamp"})
-	out.full = whiteboardDirRel + "/" + replyID + "/index.html"
-	rec.boardOutput = &out
-	return out, nil
-}
-
-func whiteboardStamp(seq int) string {
-	return fmt.Sprintf("wbStamp(%q);\n", fmt.Sprint(seq))
-}
-
-// whiteboardPublished reports whether pageDir already holds exactly this full
-// page and the stamp for seq. It compares against the files on disk: the page
-// by a remembered hash while its stat identity is unchanged, since another
-// process that published since replaces the file and so moves that identity.
-func whiteboardPublished(pageDir, html string, seq int) bool {
-	if !whiteboardPageMatches(filepath.Join(pageDir, "index.html"), html) {
-		return false
-	}
-	stamp, err := os.ReadFile(filepath.Join(pageDir, "index.stamp.js"))
-	return err == nil && string(stamp) == whiteboardStamp(seq)
-}
-
-// whiteboardPages remembers, per full page path, the stat and content hash of
-// the page this process last wrote or read back, so an unchanged refresh does
-// not read the multi-megabyte page again.
-var whiteboardPages sync.Map // path -> whiteboardPageMemo
-
-type whiteboardPageMemo struct {
-	info os.FileInfo
-	sum  [sha256.Size]byte
-}
-
-func whiteboardPageMatches(path, html string) bool {
-	info, err := wsstate.Stat(path)
-	if err != nil {
-		whiteboardPages.Delete(path)
-		return false
-	}
-	if v, ok := whiteboardPages.Load(path); ok {
-		if memo := v.(whiteboardPageMemo); wsstate.SameFileMetadata(memo.info, info) {
-			return int64(len(html)) == info.Size() && memo.sum == sha256.Sum256([]byte(html))
-		}
-	}
-	page, err := wsstate.ReadFileOnce(path)
-	if err != nil {
-		return false
-	}
-	// Remember only bytes the stats on both sides of the read vouch for.
-	if after, err := wsstate.Stat(path); err == nil && wsstate.SameFileMetadata(info, after) {
-		whiteboardPages.Store(path, whiteboardPageMemo{info: after, sum: sha256.Sum256(page)})
-	}
-	return string(page) == html
-}
-
-// rememberWhiteboardPage records a page this process just published. The
-// caller holds the board flock, so no other writer replaces it in between.
-func rememberWhiteboardPage(path, html string) {
-	if info, err := wsstate.Stat(path); err == nil {
-		whiteboardPages.Store(path, whiteboardPageMemo{info: info, sum: sha256.Sum256([]byte(html))})
-	}
-}
-
-// ensureWhiteboardMermaid writes the shared mermaid script into dir, before
-// the page that loads it, when that page holds a mermaid block and the file
-// is missing: about 3 MB is written once per folder, never per update. Its
-// name carries the asset's hash, so an upgrade adds a file instead of
-// replacing one an older page still loads, and it matches no whiteboard GC
-// pattern.
-func ensureWhiteboardMermaid(dir, html string) error {
-	if !wswhiteboard.UsesMermaid(html) {
-		return nil
-	}
-	name, data := wswhiteboard.MermaidAsset()
-	path := filepath.Join(dir, name)
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	}
-	if err := writeWhiteboardFile(path, data); err != nil {
-		return fmt.Errorf("write %s: %w", name, err)
-	}
-	return nil
-}
-
-// whiteboardRender is derived output prepared during a store mutation.
-// Publication runs under the folder lock after commit.
-type whiteboardRender struct {
-	full  string
-	files []whiteboardOutput
-}
-
-type whiteboardOutput struct {
-	path, text, label string
-}
-
-// Publication follows the durable store commit; a failed output write never
-// rolls back accepted history or publishes a stamp ahead of its page.
-func (r whiteboardRender) publish() (err error) {
-	defer func() {
-		if err != nil {
-			err = fmt.Errorf("board committed; %w; fix the output problem, then retry whiteboard.update with commands: \"\" (render-only); do not resend accepted commands", err)
-		}
-	}()
-	for _, file := range r.files {
-		dir := filepath.Dir(file.path)
-		if err := whiteboardMkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("create output directory %s: %w", dir, err)
-		}
-		if strings.HasSuffix(file.path, ".html") {
-			if err := ensureWhiteboardMermaid(dir, file.text); err != nil {
-				return err
-			}
-		}
-		if err := writeWhiteboardFile(file.path, []byte(file.text)); err != nil {
-			return fmt.Errorf("write %s: %w", file.label, err)
-		}
-		if file.label == "full page" {
-			rememberWhiteboardPage(file.path, file.text)
-		}
-	}
-	return nil
-}
-
-// writeWhiteboardFile replaces path through a temp file and a rename, so a
-// reader never sees a torn file. The temp name starts with a dot, outside
-// the patterns the orphan scan deletes.
-func writeWhiteboardFile(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	// CreateTemp makes the file 0600; a browser or host reading the page may
-	// run as another user.
-	if err := tmp.Chmod(0o644); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	if err := renameWithRetry(tmpName, path); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	return nil
-}
-
-// renameWithRetry retries a rename the platform refused because another
-// process briefly holds the target open, before giving up.
-func renameWithRetry(from, to string) error {
-	var err error
-	for attempt := 0; attempt < whiteboardRenameAttempts; attempt++ {
-		if attempt > 0 {
-			time.Sleep(whiteboardRenameBackoff)
-		}
-		err = whiteboardRename(from, to)
-		if err == nil || !whiteboardRenameRetryable(err) {
-			return err
-		}
-	}
-	return err
-}
-
-// renameSharingViolation reports a Windows rename refused because the target
-// is open elsewhere: ERROR_SHARING_VIOLATION (32), or ERROR_ACCESS_DENIED (5),
-// which MoveFileEx returns for a target opened without delete sharing.
-func renameSharingViolation(err error) bool {
-	if runtime.GOOS != "windows" {
-		return false
-	}
-	var errno syscall.Errno
-	if errors.As(err, &errno) {
-		return errno == 32 || errno == 5
-	}
-	return false
 }
 
 // registerWhiteboardExclude adds /ai-docs/whiteboards/ to the repository's
@@ -840,51 +524,9 @@ func registerWhiteboardExclude(runner wsgit.Runner, root, dir string) error {
 }
 
 // whiteboardCommonDirs memoizes each root's git common dir, which a
-// repository keeps for its lifetime, so a render runs a stat instead of a git
+// repository keeps for its lifetime, so registration stats instead of spawning a git
 // subprocess. A root outside git is not remembered and is asked again.
 var whiteboardCommonDirs sync.Map // root -> common dir
-
-// maybeCollectWhiteboards deletes, at most once a day per whiteboard folder
-// and only when the folder exists, every whiteboard file whose reply id
-// matches no live session key record. A host embed folder is never scanned.
-func (s *Server) maybeCollectWhiteboards(root string) {
-	if strings.TrimSpace(root) == "" {
-		return
-	}
-	dir := filepath.Join(root, filepath.FromSlash(whiteboardDirRel))
-	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-		return
-	}
-	marker := filepath.Join(dir, whiteboardGCMarker)
-	if info, err := os.Stat(marker); err == nil && time.Since(info.ModTime()) < whiteboardGCCadence {
-		return
-	}
-	live, ok := s.sessions.liveReplyIDs()
-	if !ok {
-		return // an unreadable key store must never read as "no session is live"
-	}
-	f, err := os.OpenFile(marker, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-	if err != nil {
-		return
-	}
-	f.Close()
-	now := time.Now()
-	_ = os.Chtimes(marker, now, now)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		match := whiteboardFilePattern.FindStringSubmatch(entry.Name())
-		if match == nil || live[match[1]] {
-			continue
-		}
-		_ = os.Remove(filepath.Join(dir, entry.Name()))
-	}
-}
 
 // liveReplyIDs returns the reply id of every session key on disk, in either
 // layout. ok is false when the key store cannot be read.
@@ -893,9 +535,9 @@ func (s *sessionStore) liveReplyIDs() (map[string]bool, bool) {
 	if err != nil {
 		return nil, false
 	}
-	s.mu.Lock()
+	// listKeys reads directory names only, including in-progress claims.
+	// The background sweep must not hold up a session response on s.mu.
 	keys, err := s.listKeys(d)
-	s.mu.Unlock()
 	if err != nil {
 		return nil, false
 	}

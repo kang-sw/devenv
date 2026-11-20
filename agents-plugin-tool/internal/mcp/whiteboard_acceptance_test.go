@@ -2,11 +2,11 @@ package mcp
 
 import (
 	"encoding/json"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -23,15 +23,6 @@ func TestWhiteboardCommandAcceptanceFirstTextRetryAndSequence(t *testing.T) {
 		return rec.Whiteboard
 	}
 	before := read()
-	original := whiteboardRename
-	publications := 0
-	whiteboardRename = func(a, b string) error {
-		if strings.HasSuffix(b, ".html") || strings.HasSuffix(b, ".stamp.js") {
-			publications++
-		}
-		return original(a, b)
-	}
-	t.Cleanup(func() { whiteboardRename = original })
 	large := strings.Repeat("large accepted body\n\n", 400)
 	badEdit := `<wb:edit replace_all="false"><wb:old>missing anchor</wb:old><wb:new>  full &amp; <b>replacement</b>  </wb:new></wb:edit>`
 	badPatch := `<wb:patch id="999"><wb:why>  full rationale &amp; text  </wb:why></wb:patch>`
@@ -60,17 +51,16 @@ func TestWhiteboardCommandAcceptanceFirstTextRetryAndSequence(t *testing.T) {
 		t.Fatal("retry payload inaccurate", tree)
 	}
 	after := read()
-	if after.Seq != before.Seq+1 || after.Items[0].Changed != after.Items[1].Changed || after.AnswerSeq != after.Seq || after.Items[0].Status != wswhiteboard.StatusCommented || publications != 2 || len(effectsRecords(t, live, live.replyA)) != 2 {
-		t.Fatal("mixed call not one durable/publication unit", publications, after)
+	if after.Seq != before.Seq+1 || after.Items[0].Changed != after.Items[1].Changed || after.AnswerSeq != after.Seq || after.Items[0].Status != wswhiteboard.StatusCommented || len(effectsRecords(t, live, live.replyA)) != 2 {
+		t.Fatal("mixed call not one durable unit", after)
 	}
-	publications = 0
 	retry := strings.TrimSuffix(strings.TrimPrefix(tree, "<wb:failed>\n"), "\n</wb:failed>")
 	retry = strings.ReplaceAll(retry, "missing anchor", large[:len("large accepted body")])
 	retry = strings.ReplaceAll(retry, `replace_all="false"`, `replace_all="true"`)
 	retry = strings.ReplaceAll(retry, `id="999"`, `id="1"`)
 	f.update(t, retry)
 	retried := read()
-	if retried.Counter != after.Counter || retried.PanelCounter != after.PanelCounter || publications != 2 {
+	if retried.Counter != after.Counter || retried.PanelCounter != after.PanelCounter {
 		t.Fatal("corrected retry duplicated accepted work")
 	}
 	if retried.Items[0].Rationale != "  full rationale & text  " || !strings.Contains(retried.TopicBody("t"), "  full & <b>replacement</b>  ") {
@@ -86,20 +76,18 @@ func TestWhiteboardCommandAcceptanceFirstTextRetryAndSequence(t *testing.T) {
 	} {
 		files := whiteboardTreeForTest(t, f.dir())
 		records := len(effectsRecords(t, live, live.replyA))
-		publications = 0
 		r := f.call(t, "whiteboard.update", map[string]any{"commands": bad})
-		if !isToolError(r) || !strings.Contains(toolText(t, r), "nothing was applied") || publications != 0 || len(effectsRecords(t, live, live.replyA)) != records {
+		if !isToolError(r) || !strings.Contains(toolText(t, r), "nothing was applied") || len(effectsRecords(t, live, live.replyA)) != records {
 			t.Fatal("failed-only call changed effects/publication", r)
 		}
 		assertWhiteboardTreeForTest(t, f.dir(), files)
 	}
 	for _, noop := range []string{`<wb:floor id="1"/>`, ``} {
 		before := read()
-		publications = 0
 		records := len(effectsRecords(t, live, live.replyA))
 		f.update(t, noop)
 		after := read()
-		if after.Seq != before.Seq+1 || after.EntrySeq != before.EntrySeq || publications != 2 || len(effectsRecords(t, live, live.replyA)) != records {
+		if after.Seq != before.Seq+1 || after.EntrySeq != before.EntrySeq || len(effectsRecords(t, live, live.replyA)) != records {
 			t.Fatal("accepted no-op/empty sequence changed", noop)
 		}
 	}
@@ -107,11 +95,13 @@ func TestWhiteboardCommandAcceptanceFirstTextRetryAndSequence(t *testing.T) {
 	if !strings.Contains(query, "commented 1") || !strings.Contains(query, "comment, not a choice") || !strings.Contains(query, "answered_at:") {
 		t.Fatal(query)
 	}
-	// The file page exposes the status without a UI redesign.
+	// Settled comments live in the served page's lazy topic history.
 	st := read()
-	data, err := os.ReadFile(f.pagePath())
-	if err != nil || !strings.Contains(string(data), "user commented") {
-		t.Fatal("comment label missing", f.pagePath(), err)
+	_ = f.servedPage(t)
+	entry, _ := f.s.sessions.lookup(f.key)
+	frags, ok := f.source.ReadTopicHistory(wsdashboard.Registration{ReplyID: f.replyID(), Project: entry.root}, "", []string{"t"}, "")
+	if !ok || len(frags) != 1 || !strings.Contains(string(frags[0].HTML), "user commented") {
+		t.Fatal("comment label missing")
 	}
 	if !reflect.DeepEqual(st.Items[0].Options, []string{"One", "Two"}) {
 		t.Fatal("comment lost choices")

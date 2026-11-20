@@ -48,7 +48,11 @@ func openWhiteboard(record *sessionRecord, key string, raw io.Writer) error {
 }
 
 func (src *DashboardSessionSource) openWhiteboard(record *sessionRecord, key string, raw io.Writer) error {
-	return openWhiteboard(record, key, raw)
+	err := openWhiteboard(record, key, raw)
+	if err == nil {
+		src.store.retireWhiteboardPages(record.Root)
+	}
+	return err
 }
 
 func openWhiteboardCached(record *sessionRecord, key string, raw io.Writer, cache *wswhiteboard.FolderCache) error {
