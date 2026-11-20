@@ -687,6 +687,43 @@ func TestStatusUnknownContextAndBadFigures(t *testing.T) {
 	}
 }
 
+func TestStatusUsageCompactionDeepCopyAndNormalize(t *testing.T) {
+	st := NewState(ownerKey)
+	comp := &UsageCompaction{Soft: 110_000, Hard: 180_000, Milestones: []int64{133_333, 156_667}, AdvisoryEnabled: true}
+	mustApply(t, st, Event{Kind: KindStatus, Context: &UsageContext{Tokens: i64p(50_000), Window: 1_000_000, Compaction: comp}}, 1_000)
+
+	// Mutating the input event's Compaction/Milestones after Apply must not affect state.
+	comp.Hard = 999
+	comp.Milestones[0] = 1
+	snap1 := st.Snapshot(1_000)
+	if snap1.Usage == nil || snap1.Usage.Context == nil || snap1.Usage.Context.Compaction == nil {
+		t.Fatalf("compaction lost: %+v", snap1.Usage)
+	}
+	got := snap1.Usage.Context.Compaction
+	if got.Soft != 110_000 || got.Hard != 180_000 || !got.AdvisoryEnabled || len(got.Milestones) != 2 || got.Milestones[0] != 133_333 || got.Milestones[1] != 156_667 {
+		t.Fatalf("compaction mutated or wrong: %+v", got)
+	}
+
+	// Mutating a returned snapshot's Compaction/Milestones must not affect subsequent snapshots.
+	snap1.Usage.Context.Compaction.Soft = 42
+	snap1.Usage.Context.Compaction.Milestones[1] = 42
+	snap2 := st.Snapshot(2_000)
+	if snap2.Usage.Context.Compaction.Soft != 110_000 || snap2.Usage.Context.Compaction.Milestones[1] != 156_667 {
+		t.Fatalf("snapshot shared compaction pointer/slice: %+v", snap2.Usage.Context.Compaction)
+	}
+
+	// Negative/empty compaction normalizes to nil (omitted in JSON).
+	mustApply(t, st, Event{Kind: KindStatus, Context: &UsageContext{Tokens: i64p(1000), Window: 200_000, Compaction: &UsageCompaction{Soft: -1, Hard: 0, Milestones: []int64{0, -5}}}}, 3_000)
+	snap3 := st.Snapshot(3_000)
+	if snap3.Usage.Context.Compaction != nil {
+		t.Fatalf("empty compaction was not dropped: %+v", snap3.Usage.Context.Compaction)
+	}
+	raw, err := json.Marshal(snap3)
+	if err != nil || strings.Contains(string(raw), `"compaction"`) {
+		t.Fatalf("nil compaction should be omitted from JSON: %s", raw)
+	}
+}
+
 // TestCompactionShowsThenSettlesIntoRing pins the compact event: start puts
 // the lead in the compacting phase (clocked from the start, over a running
 // turn's thinking) without a ring entry; end writes one compaction line with

@@ -127,6 +127,9 @@ type DaemonOptions struct {
 	// AgyCommand resolves the agy CLI program and leading arguments for
 	// user-triggered /usage probes without spawning. Nil skips agy probes.
 	AgyCommand func() (string, []string, error)
+	// CardBound reports whether replyID is bound to a subordinate whiteboard
+	// agent card whose Record.Parent stays unset; nil defaults to false.
+	CardBound func(replyID string) bool
 
 	// bindHost overrides the address the daemon binds, so a test runs LAN
 	// mode on loopback; empty derives it from LAN.
@@ -334,7 +337,8 @@ type Daemon struct {
 	httpReplay   atomic.Uint64
 	// web is the web card targets and their proxy listeners
 	// (webcard_proxy.go).
-	web *webRegistry
+	web       *webRegistry
+	cardBound func(replyID string) bool
 
 	closeOnce sync.Once
 	stop      chan struct{}
@@ -424,6 +428,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		listener:        listener,
 		log:             logw,
 		agents:          opts.Agents,
+		cardBound:       opts.CardBound,
 		leadNudges:      opts.LeadNudges,
 		beforeUnlock:    opts.BeforeUnlock,
 		mailWake:        opts.MailWake,

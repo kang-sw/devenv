@@ -182,7 +182,7 @@ func (r *Runner) serve(w http.ResponseWriter, req *http.Request) {
 		}
 		return st
 	}
-	if req.Method == http.MethodPost && (id == leadsRoute || id == sleepIdleRoute || action == "settings/permission" || leadMove(action) || (r.IsLead(id) && leadControl(action))) {
+	if req.Method == http.MethodPost && (id == leadsRoute || id == sleepIdleRoute || action == "settings" || action == "settings/permission" || leadMove(action) || (r.IsLead(id) && leadControl(action))) {
 		if !local {
 			http.Error(w, "unknown agent route", http.StatusNotFound)
 			return
@@ -310,6 +310,10 @@ func (r *Runner) serve(w http.ResponseWriter, req *http.Request) {
 		}
 		writeAnswer(w, http.StatusOK, view(st), err)
 	case action == "settings":
+		if r.IsChild(id) {
+			http.Error(w, "child session settings are fixed at spawn", http.StatusForbidden)
+			return
+		}
 		var body settingsRequest
 		if !decode(w, req, &body) {
 			return

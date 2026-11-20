@@ -185,6 +185,10 @@ type Options struct {
 	// wsdashboard.TrustedWrite: a browser on this machine that sends the
 	// daemon's own Origin.
 	Trusted func(req *http.Request) (local, own bool)
+	// CardBound reports whether conversation id is bound to a subordinate
+	// whiteboard agent card (whose Record.Parent stays unset); nil defaults
+	// to false. Used by IsChild for both HTTP settings refusal and SessionView.
+	CardBound func(id string) bool
 	// TrackerChanged, when not nil, is called after a conversation's
 	// successful tracker write (an Event with TrackerWrite set), so the
 	// daemon re-reads its tracker stores. It may be called from any
@@ -1354,6 +1358,50 @@ func (r *Runner) IsLead(id string) bool {
 	return closed && rec.Lead
 }
 
+func (r *Runner) isChildRecord(rec Record) bool {
+	if rec.Parent != nil {
+		return true
+	}
+	return r != nil && r.opts.CardBound != nil && r.opts.CardBound(rec.ReplyID)
+}
+
+// IsChild reports whether id is a child conversation whose settings are fixed
+// at spawn: either a spawned worker (Record.Parent != nil) or a card-bound
+// subordinate lead reported by Options.CardBound.
+func (r *Runner) IsChild(id string) bool {
+	r.mu.Lock()
+	c, open := r.convs[id]
+	rec, closed := r.closed[id]
+	r.mu.Unlock()
+	if open {
+		return r.isChildRecord(c.record())
+	}
+	if closed {
+		return r.isChildRecord(rec)
+	}
+	return r.opts.CardBound != nil && r.opts.CardBound(id)
+}
+
+// SessionMeta returns in-memory composer control metadata for replyID without
+// touching disk (wsdashboard.AgentSessionMetaHost).
+func (r *Runner) SessionMeta(replyID string) (wsdashboard.AgentSessionMeta, bool) {
+	r.mu.Lock()
+	c, open := r.convs[replyID]
+	rec, closed := r.closed[replyID]
+	r.mu.Unlock()
+	if open {
+		rec = c.record()
+	} else if !closed {
+		return wsdashboard.AgentSessionMeta{}, false
+	}
+	return wsdashboard.AgentSessionMeta{
+		Hosted:  rec.Lead,
+		IsChild: r.isChildRecord(rec),
+		Model:   rec.Model,
+		Effort:  rec.Effort,
+	}, true
+}
+
 // AnswerApproval answers the waiting tool permission prompt requestID of a
 // lead conversation: allow runs the tool call as asked, deny refuses it
 // with message for the model. A prompt is answered once: an id that is not
@@ -1549,6 +1597,9 @@ type State struct {
 
 	// Lead marks a hosted lead session; the fields below are its own.
 	Lead bool `json:"lead,omitempty"`
+	// IsChild marks a spawned worker or card-bound subordinate session whose
+	// model and effort are fixed at spawn (read-only on HTTP settings writes).
+	IsChild bool `json:"is_child,omitempty"`
 	// PermissionMode is the mode the next process launches in, and
 	// ActiveMode the one the running harness last reported (it may fall
 	// back from the one asked for).
@@ -1610,9 +1661,12 @@ type State struct {
 // still refresh a handed-off terminal's evidence through closedState.
 func (r *Runner) memoryClosedState(rec Record) State {
 	if st, ok := r.closedRows[rec.ReplyID]; ok {
+		st.IsChild = r.isChildRecord(rec)
 		return st
 	}
-	return closedState(rec)
+	st := closedState(rec)
+	st.IsChild = r.isChildRecord(rec)
+	return st
 }
 
 // closedState is the state of a record no loop serves: closed, or handed
@@ -1620,10 +1674,12 @@ func (r *Runner) memoryClosedState(rec Record) State {
 func (r *Runner) closedState(rec Record) State {
 	if rec.ClosedAt != "" {
 		if st, ok := r.closedRows[rec.ReplyID]; ok {
+			st.IsChild = r.isChildRecord(rec)
 			return r.permissionState(st, rec, wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID))
 		}
 	}
 	st := closedState(rec)
+	st.IsChild = r.isChildRecord(rec)
 	if r.opts.closedSnapshotRead != nil {
 		r.opts.closedSnapshotRead(rec.ReplyID)
 	}

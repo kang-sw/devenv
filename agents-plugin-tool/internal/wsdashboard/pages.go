@@ -927,6 +927,10 @@ type pageReader struct {
 	// layout is the rail's stored nesting, read from memory for a head's
 	// parent jump when the registration names no owner (nil: none).
 	layout *railLayoutStore
+	// agents supplies in-memory hosted/child settings metadata when present.
+	agents AgentHost
+	// cardBound reports subordinate card-bound sessions whose Record.Parent is nil.
+	cardBound func(replyID string) bool
 }
 
 func (r pageReader) clock() time.Time {
@@ -1106,6 +1110,26 @@ func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChan
 	}
 	reads := &sessionReads{page: page}
 	in := pageInputs{Session: s, Page: page, Snapshot: r.readSnapshot(replyID), Now: r.clock(), Version: r.version}
+	if r.cardBound != nil && r.cardBound(replyID) {
+		in.IsChild = true
+	}
+	if metaHost, ok := r.agents.(AgentSessionMetaHost); ok {
+		if meta, found := metaHost.SessionMeta(replyID); found {
+			if meta.IsChild {
+				in.IsChild = true
+			}
+			in.Model, in.Effort = meta.Model, meta.Effort
+		}
+	} else if s.Registration.Agent {
+		// Fallback when no live in-memory runner is attached (e.g. unit tests).
+		record, hosted := readAgentRecordEnd(SessionDir(r.dir, replyID))
+		if hosted {
+			if record.Parent != nil {
+				in.IsChild = true
+			}
+			in.Model, in.Effort = record.Model, record.Effort
+		}
+	}
 	if !s.Registration.Hosted && !s.Live {
 		record, _ := readAgentRecordEnd(SessionDir(r.dir, replyID))
 		in.HandedOff = record.Lead && record.HandedOffAt != ""
@@ -1113,6 +1137,15 @@ func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChan
 		// already open, so naming its owner from it costs no read.
 		if in.Session.ParentReplyID == "" && record.Parent != nil {
 			in.Session.ParentReplyID = record.Parent.ReplyID
+		}
+		if record.Parent != nil {
+			in.IsChild = true
+		}
+		if in.Model == "" {
+			in.Model = record.Model
+		}
+		if in.Effort == "" {
+			in.Effort = record.Effort
 		}
 	}
 	looked := map[string]bool{replyID: true}
@@ -1320,7 +1353,7 @@ func (r pageReader) indexView() IndexView {
 }
 
 func (d *Daemon) pages() pageReader {
-	return pageReader{dir: d.dir, index: d.index, source: d.source, version: d.endpoint.Version, entries: d.entryFiles, snapshots: d.snapshots, foreign: d.foreign, layout: d.layout}
+	return pageReader{dir: d.dir, index: d.index, source: d.source, version: d.endpoint.Version, entries: d.entryFiles, snapshots: d.snapshots, foreign: d.foreign, layout: d.layout, agents: d.agents, cardBound: d.cardBound}
 }
 
 // pagesIn is pages reading in the viewer's language.
@@ -1555,6 +1588,7 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 	// depend on neither Worktrees, Holders nor LangPref.
 	view.Worktrees = d.worktrees != nil
 	view.Holders = d.holders != nil
+	view.CanEditSettings = view.Hosted && !view.IsChild && localViewer(r)
 	err := errors.New("session regions failed to render")
 	if regions != nil {
 		var html string

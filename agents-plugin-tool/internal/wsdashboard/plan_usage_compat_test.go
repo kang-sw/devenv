@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -417,5 +418,62 @@ func TestPlanUsageAgyT0CompatibilityLeavesExistingFilesUnchanged(t *testing.T) {
 	}
 	if got := reopened.history(appended.AsOf); got.Status != "ok" || len(got.Samples) != 3 {
 		t.Fatalf("reopened store lost existing history: %+v", got)
+	}
+}
+
+func TestPlanUsageCodexFiveHourT0CompatibilityAndSeparateFile(t *testing.T) {
+	s := usageTestStore(t)
+	setCodexUsageAuth(t, s, `{"auth_mode":"chatgpt","tokens":{"access_token":"fake-access"}}`)
+	bodyBoth := `{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":22,"limit_window_seconds":18000,"reset_at":2099000000},"secondary_window":{"used_percent":48,"limit_window_seconds":604800,"reset_at":2100000000}}}`
+	s.client.Transport = usageRoundTrip(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(bodyBoth))}, nil
+	})
+	s.query(context.Background(), false)
+
+	// Shared plan-usage-history.json must stay readable by the pinned old validator
+	// (no Codex five_hour sample may ever land there).
+	oldHist := &pinnedHistoryStore{dir: s.dir}
+	h, err := oldHist.pinnedHistoryRead()
+	if err != nil || len(h.Records) != 1 || h.Records[0].Sample.Harness != "codex" || h.Records[0].Sample.Kind != "seven_day" {
+		t.Fatalf("pinned history reader failed or saw codex 5h: len=%d err=%v recs=%+v", len(h.Records), err, h.Records)
+	}
+	// Codex five_hour sample lands exclusively in plan-usage-codex-history.json.
+	now := time.Now().UnixMilli()
+	codexHist := s.codexFiveHourHistory(now)
+	if codexHist.Status != "ok" || len(codexHist.Samples) != 1 || codexHist.Samples[0].Kind != "five_hour" || codexHist.Samples[0].Percent != 22 {
+		t.Fatalf("codex 5h history = %+v", codexHist)
+	}
+	if _, err := os.Stat(filepath.Join(s.dir, planUsageCodexHistoryCache)); err != nil {
+		t.Fatalf("missing %s: %v", planUsageCodexHistoryCache, err)
+	}
+
+	// /rail/usage?history=1 emits codexFiveHourHistory when samples exist, and omits
+	// it when no Codex five_hour samples exist.
+	d := &Daemon{dir: s.dir, planUsage: s}
+	rec := httptest.NewRecorder()
+	d.handlePlanUsage(rec, httptest.NewRequest(http.MethodGet, "/rail/usage?history=1", nil))
+	var with5h map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &with5h); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := with5h["codexFiveHourHistory"]; !ok {
+		t.Fatalf("expected codexFiveHourHistory when samples exist: %s", rec.Body.String())
+	}
+
+	sWeeklyOnly := usageTestStore(t)
+	setCodexUsageAuth(t, sWeeklyOnly, `{"auth_mode":"chatgpt","tokens":{"access_token":"fake-access"}}`)
+	sWeeklyOnly.client.Transport = usageRoundTrip(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(weeklyUsageBody))}, nil
+	})
+	sWeeklyOnly.query(context.Background(), false)
+	dWeekly := &Daemon{dir: sWeeklyOnly.dir, planUsage: sWeeklyOnly}
+	rec2 := httptest.NewRecorder()
+	dWeekly.handlePlanUsage(rec2, httptest.NewRequest(http.MethodGet, "/rail/usage?history=1", nil))
+	var without5h map[string]json.RawMessage
+	if err := json.Unmarshal(rec2.Body.Bytes(), &without5h); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := without5h["codexFiveHourHistory"]; ok {
+		t.Fatalf("unexpected codexFiveHourHistory without 5h samples: %s", rec2.Body.String())
 	}
 }

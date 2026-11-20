@@ -78,6 +78,21 @@ type AgentForgetter interface {
 	ForgetClosed(replyID string)
 }
 
+// AgentSessionMeta holds a runner conversation's in-memory child and settings
+// metadata for SessionView rendering without touching disk.
+type AgentSessionMeta struct {
+	Hosted  bool
+	IsChild bool
+	Model   string
+	Effort  string
+}
+
+// AgentSessionMetaHost is an optional AgentHost that exposes in-memory child
+// and settings metadata for SessionView.
+type AgentSessionMetaHost interface {
+	SessionMeta(replyID string) (AgentSessionMeta, bool)
+}
+
 // AgentRoutePrefix is where the daemon mounts AgentHost.Handler.
 const AgentRoutePrefix = "/agents"
 

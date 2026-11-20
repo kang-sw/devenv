@@ -18,23 +18,30 @@ import (
 
 func TestPlanUsageWindowClassification(t *testing.T) {
 	for _, body := range []string{
-		`{"primary":{"usedPercent":31,"windowDurationMins":10080,"resetsAt":2100000000},"secondary":{"usedPercent":82,"windowDurationMins":300}}`,
-		`{"secondary":{"usedPercent":31,"windowDurationMins":10080,"resetsAt":"2036-07-18T13:20:00Z"},"primary":{"usedPercent":82,"windowDurationMins":300}}`,
+		`{"primary":{"usedPercent":31,"windowDurationMins":10080,"resetsAt":2100000000},"secondary":{"usedPercent":82,"windowDurationMins":300,"resetsAt":2099000000}}`,
+		`{"secondary":{"usedPercent":31,"windowDurationMins":10080,"resetsAt":"2036-07-18T13:20:00Z"},"primary":{"usedPercent":82,"windowDurationMins":300,"resetsAt":2099000000}}`,
 	} {
 		var limits codexUsageLimits
 		if err := json.Unmarshal([]byte(body), &limits); err != nil {
 			t.Fatal(err)
 		}
 		e, err := codexUsageEntry(limits, "fake")
-		if err != nil || len(e.Windows) != 1 || e.Windows[0].Percent != 31 || e.Windows[0].ResetsAt != 2100000000000 {
-			t.Fatalf("weekly classification failed: %+v %v", e, err)
+		if err != nil || len(e.Windows) != 2 ||
+			e.Windows[0].Kind != "five_hour" || e.Windows[0].Percent != 82 || e.Windows[0].ResetsAt != 2099000000000 ||
+			e.Windows[1].Kind != "seven_day" || e.Windows[1].Percent != 31 || e.Windows[1].ResetsAt != 2100000000000 {
+			t.Fatalf("window classification failed: %+v %v", e, err)
 		}
 	}
-	for _, body := range []string{`{}`, `{"primary":{"usedPercent":4,"windowDurationMins":300}}`, `{"primary":{"windowDurationMins":10080}}`, `{"primary":{"usedPercent":101,"windowDurationMins":10080}}`} {
+	var only5h codexUsageLimits
+	_ = json.Unmarshal([]byte(`{"primary":{"usedPercent":4,"windowDurationMins":300}}`), &only5h)
+	if e, err := codexUsageEntry(only5h, "fake"); err != nil || len(e.Windows) != 1 || e.Windows[0].Kind != "five_hour" || e.Windows[0].Percent != 4 {
+		t.Fatalf("five-hour-only window rejected: %+v %v", e, err)
+	}
+	for _, body := range []string{`{}`, `{"primary":{"usedPercent":4,"windowDurationMins":180}}`, `{"primary":{"windowDurationMins":10080}}`, `{"primary":{"usedPercent":101,"windowDurationMins":10080}}`} {
 		var limits codexUsageLimits
 		_ = json.Unmarshal([]byte(body), &limits)
 		if _, err := codexUsageEntry(limits, "fake"); err == nil {
-			t.Error("invalid weekly window accepted")
+			t.Error("invalid window accepted")
 		}
 	}
 }
