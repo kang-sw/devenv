@@ -189,6 +189,7 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 			session: holderSession{Kind: holderKindAgentWorker, Backend: rec.Backend, ReplyID: rec.ReplyID, Cwd: rec.workDir(), Capability: capabilityHash(rec.Capability)}}
 		if attach {
 			spec.Holder.id, spec.Holder.skipTo = rec.HolderID, rec.HolderSeq
+			spec.Holder.attachReady = make(chan struct{})
 		}
 	}
 	if attach && c.r.opts.Backends[rec.Backend].WorkerHTTPMCP {
@@ -441,12 +442,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		if spawned {
 			// The process the row named early is gone (the backend closed
 			// it); the deferred write says stopped.
-			c.update(func(rec *Record) {
-				rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0
-				if !rec.Lead {
-					rec.HandedOffAt = ""
-				}
-			})
+			c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0 })
 		}
 		return err
 	}
@@ -582,6 +578,9 @@ func (c *conv) checkReattach() {
 				c.r.restoreToken(c.record())
 				c.restoreWorkerMCP()
 				c.events = c.proc.Events()
+				if gated, ok := c.proc.(interface{ allowHolderReplay() }); ok {
+					gated.allowHolderReplay()
+				}
 			}
 		}
 	}

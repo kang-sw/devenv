@@ -146,6 +146,12 @@ type holderChild struct {
 	// replacement emitted at a bounded rate for skipped output.
 	ringPulse string
 
+	// Worker replay waits for record/descriptor ownership validation. The
+	// holder's replay reply precedes its events, so Scan can finish while
+	// the event reader waits here with bounded socket backpressure.
+	attachReady chan struct{}
+	attachOnce  sync.Once
+
 	proc *streamProcess
 	base string
 	pid  int
@@ -233,6 +239,13 @@ func (h *holderChild) release() { h.table.remove(h.id, h) }
 
 // event takes one holder event, on the holder's reader goroutine.
 func (h *holderChild) event(ev wsholder.Event) {
+	if h.attachReady != nil {
+		select {
+		case <-h.attachReady:
+		case <-h.proc.closing:
+			return
+		}
+	}
 	switch ev.Event {
 	case "output":
 		h.seen(ev.Seq)
@@ -362,4 +375,12 @@ func (t *holderTable) isRejected(id string) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.rejected[id]
+}
+
+// allowHolderReplay opens a worker's transport only after the runner checked
+// its ownership and reconciled downgrade state. Leads have no worker gate.
+func (p *streamProcess) allowHolderReplay() {
+	if h := p.holder; h != nil && h.attachReady != nil {
+		h.attachOnce.Do(func() { close(h.attachReady) })
+	}
 }

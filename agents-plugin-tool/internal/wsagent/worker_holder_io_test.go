@@ -16,7 +16,23 @@ func TestWorkerHolderFileOperations(t *testing.T) {
 	h.start()
 	wait(t, "initial scan", h.runner.rejoined)
 	before := wsstate.FileIOCounters()["file_io_total"]
-	worker, holder := spawnRecoveryWorker(t, h)
+	worker, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "work", Tier: "medium", Parent: &leadParent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var holder string
+	eventually(t, "held launch", func() bool {
+		rec := h.runner.conv(worker.ID).record()
+		holder = rec.HolderID
+		return holder != "" && rec.HostPID > 0
+	})
+	h.holders.out(holder, `{"type":"agent_start"}`)
+	eventually(t, "worker output applied", func() bool {
+		c := h.runner.conv(worker.ID)
+		var applied bool
+		c.do(func() { applied = c.seq > 0 })
+		return applied
+	})
 	h.quiesce(worker.ID)
 	t.Logf("worker launch instrumented file operations: %d", wsstate.FileIOCounters()["file_io_total"]-before)
 	h.runner.Close()

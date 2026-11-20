@@ -3,6 +3,7 @@ package wsagent
 import (
 	"encoding/json"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"strings"
 	"testing"
 	"time"
 
@@ -170,6 +171,12 @@ func TestWorkerOwnershipMismatchNeverStopsForeignHolder(t *testing.T) {
 		raw, _ := json.Marshal(meta)
 		h.holders.holders[holder].session = raw
 	})
+	// Oversized unvalidated output would make the mapper kill this foreign
+	// holder if transport replay were allowed before the association check.
+	previousLimit := maxLineBytes
+	maxLineBytes = 1024
+	t.Cleanup(func() { maxLineBytes = previousLimit })
+	h.holders.out(holder, strings.Repeat("x", 2048))
 	h.start()
 	wait(t, "ownership scan", h.runner.rejoined)
 	eventually(t, "ownership rejected", func() bool { return h.record(worker.ID).HolderID == "" })

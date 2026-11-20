@@ -503,10 +503,6 @@ func (r *Runner) holdersScanned() {
 	owned := map[string]bool{}
 	for _, c := range convs {
 		c.do(func() {
-			// A rejected association is not permission to stop that holder.
-			if id := c.rec.HolderID; id != "" {
-				owned[id] = true
-			}
 			c.checkReattach()
 			if c.hidden {
 				c.stopProcess("")
