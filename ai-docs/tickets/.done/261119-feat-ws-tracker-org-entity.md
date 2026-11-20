@@ -553,3 +553,22 @@ Verification:
   `TestPlaceholdersMatchEnglish`, `TestPluralKeysComeInPairs`,
   `TestTablesAreValidJSON`; only `TestEveryEnglishKeyIsUsed` fails on 4
   pre-existing unrelated `wb.*` keys already present on `develop` `415f1f033`).
+
+#### Edition (b42f0ba) - 2026-11-21
+
+- Aligned `lockedG` overlap checks in `tracker-picker.js` with
+  `wstracker/check.go`: `pmRuleCovers` now uses each surviving live rule's
+  assign-time root (`assignRoot || root`), `pmRuleCovered` checks `!y.ended`,
+  and `openPicker` keeps surviving live rules of deleted or vacant orgs in
+  `otherRules` (`pmRetargetLockedPeople` left unchanged).
+- Replaced `.toLowerCase()` org-name comparisons in `tracker.js`
+  (`orgEdNameClash`, `orgEdPreflightAndBuild` `nameSeen` and `nameOwner`) with
+  `orgNameFoldKey`, matching Go's `strings.EqualFold` at least as strictly
+  (including Greek `σ`/`ς`/`Σ` and German `ß`/`ẞ`).
+- Added regression tests in `tracker_org_entity.test.js` for re-headed
+  `assignRoot` locks, deleted/vacant org live rule locks, and Greek `σ`/`ς`
+  uniqueness checks.
+- Verification passed: `node --test internal/wsdashboard/tracker_*.test.js`
+  (`53/53` passed) and `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test
+  -count=1 -timeout 20m -run 'Tracker|Asset' ./internal/wsdashboard` (`ok
+  14.987s`).
