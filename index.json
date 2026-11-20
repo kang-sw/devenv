@@ -615,7 +615,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-20T14:36:28Z"
+        "touched_at": "2026-11-20T14:37:42Z",
+        "impl": {
+          "branch": "impl/develop/gooey-shock-conch"
+        }
       }
     },
     "261120-feat-ws-dashboard-composer-controls-and-context-meter": {
