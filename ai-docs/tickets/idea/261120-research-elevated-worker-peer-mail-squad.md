@@ -129,6 +129,39 @@ backend + UI/tests, or cross-cutting refactor + performance constraints):
 - `ws/mailbox.history` currently returns only messages sent or received by the
   calling session key; a parent mini-lead has no direct read tool for
   child-to-child peer mail today.
+- **Pilot 1 empirical run (2026-11-20, `261120-bug-ws-rail-heartbeat-starvation`,
+  code `cd667bc5a`, merged `22f7939ec`):** 3-harness shared-worktree squad
+  (Alex `codex.large` Fix 2, Chris `claude.large` Fix 3 + lock hawk, Dana
+  `agy.large` adversarial `-race` tester) + independent fresh-context post-hoc
+  reviewer (`claude.large`):
+  - **Pre-edit huddle value:** Caught 4 concrete concurrency/contract defects
+    before any line of code was edited — Trap D (`wsdashboard/live_hosted.go`
+    holding global `d.live.mu` across ring I/O), F1/F2 (`conv.regMu` across OS
+    flock turning 2s timeout into unbounded wait/re-entrancy deadlock), TOCTOU
+    generation-swap race in the sweeper (resolved via `lockSummaryOwner`), and
+    unsynchronized mock fidelity (`daemonLiveSlot` + `wsstate.FileIOCounters()`
+    budget).
+  - **Shared-worktree barrier & failover:** Disjoint file ownership + single
+    mini-lead build/test/commit barrier produced **0 file-race incidents**,
+    first-try `-race` green builds across all 9 production files and both new
+    regression test files, and clean mid-run failover when `agy.large` hit two
+    consecutive 45s stream stalls (splitting remaining new tests cleanly across
+    `claude.large` and `codex.large`).
+  - **Independent post-hoc review stayed mandatory:** Even after the 4 pre-edit
+    catches, the fresh-context reviewer caught 2 Important shared-context blind
+    spots (`I-1`: sweeper firing at the same 2m threshold as healthy conv loops
+    caused an extra `checkRow()` file read and stopped full-row repair; `I-2`:
+    missing `Runner.Start` → ticker → `Runner.Close` lifecycle test) plus `M-4`
+    (releasing locks before `notify`). Peer-mail collaboration did *not* replace
+    fresh-context review.
+  - **Voluntary CC leaked:** Under a max-2-peer-message cap, 2 of 3 peers sent
+    direct peer messages to squadmates and omitted separate CC mail to the
+    mini-lead, empirically confirming that prompt-level CC is unreliable for
+    oversight without a daemon-level parent-scoped audit view.
+  - **Token ROI signal:** Almost all high-leverage value came from the *pre-edit
+    design critique*, while parallel 3-writer editing plus a 4th fresh reviewer
+    (~3–4x token footprint) added coordination/failover ceremony without
+    proportional speedup.
 
 ### Confirmed Decisions
 
@@ -150,6 +183,18 @@ backend + UI/tests, or cross-cutting refactor + performance constraints):
 - **Prototype B (Implementer + Adversarial Tester Pair):** One peer implements
   while the other writes edge-case/contract tests on the same worktree; both
   diagnose mini-lead test failures together via peer mail.
+- **Prototype C (Single Writer + Early-Spawned Reviewer Pair — high-ROI
+  candidate from Pilot 1):** Keep a single `workdir-write` implementer (zero
+  file partitioning, zero edit races, zero build-barrier ceremony), but spawn
+  the `read-only` reviewer *before* editing begins (optionally cross-model /
+  cross-harness). Flow: Writer sends a concise pre-edit design/intent brief →
+  Reviewer challenges traps/locks/invariants and issues `GO` → Writer
+  implements and runs verification → Reviewer audits the resulting diff (with an
+  explicit adversarial prompt to challenge its own Step 1 approval, escalating
+  to a fresh third reviewer only on high-risk slices). Reuses the reviewer's
+  already-read file context (~1.3–1.5x cost vs. ~3–4x for a 3-writer squad) and
+  allows either direct peer-mail or mini-lead-mediated handshakes (built-in
+  auditability with zero daemon changes).
 - **Guardrail set for first trial (playbook-only, no Go changes):**
   disjoint file partition by mini-lead, single-committer mini-lead, explicit
   `ready-for-check` build barrier, max 2 peer round-trips per topic before
@@ -177,6 +222,11 @@ backend + UI/tests, or cross-cutting refactor + performance constraints):
 6. **Net ROI:** Under the paired benchmark, does squad mode beat serial leaves
    enough on defect rate or wall-clock time to justify the knob and prompt
    complexity?
+7. **Prototype C (Early-Spawned Reviewer) anchoring vs. ROI:** When the same
+   reviewer approves a single writer's pre-edit plan and later reviews the diff,
+   how much confirmation bias / shared-design blindness remains (e.g., would it
+   still catch steady-state issues like Pilot 1's `I-1`), and is a
+   mini-lead-mediated 2-agent handshake cleaner than direct peer-mail?
 
 ### Rejected Alternatives
 
