@@ -190,6 +190,10 @@ type Options struct {
 	// daemon re-reads its tracker stores. It may be called from any
 	// goroutine.
 	TrackerChanged func()
+	// AgyActivity, when not nil, is called after a live agy conversation's
+	// turn settles. It may be called from any conversation loop and must not
+	// block on the runner.
+	AgyActivity func()
 	// Report, when not nil, receives each settled turn of a conversation
 	// with a parent (Runner.Spawn): a turn's end, a failed start, a process
 	// lost mid-turn, and, when the next daemon loads the record, a turn

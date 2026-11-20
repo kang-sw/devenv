@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,6 +12,75 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
+
+func TestAgyActivityCallbackOnSettledHostedChildTurn(t *testing.T) {
+	previous := suiteBackend
+	suiteBackend = BackendAgy
+	t.Cleanup(func() { suiteBackend = previous })
+
+	var calls atomic.Int64
+	h := newHarness(t, map[string]string{"chat": chatProfile})
+	h.runner.Close()
+	h.config.AgyActivity = func() { calls.Add(1) }
+	h.start()
+	id := h.create("chat").ID
+	if _, err := h.runner.Send(id, "work"); err != nil {
+		t.Fatal(err)
+	}
+	p := h.backend.waitProc(t, 0)
+	p.nextSent(t)
+	p.reply("done")
+	eventually(t, "agy activity callback", func() bool { return calls.Load() == 1 })
+
+	c := h.runner.conv(id)
+	c.do(func() {
+		c.handle(Event{TurnStart: true, Replay: true})
+		c.handle(Event{TurnEnd: true, Replay: true})
+	})
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("replayed turn end raised %d activity callbacks, want 1 total", got)
+	}
+}
+
+func TestAgyActivityCallbackSkipsWatchdogContinuedTurnEnd(t *testing.T) {
+	var calls atomic.Int64
+	h, timers, _ := agyWatchdogHarnessWithRetries(t, "45", "1")
+	h.runner.Close()
+	h.config.AgyActivity = func() { calls.Add(1) }
+	h.start()
+	_, p := startAgyWatchdogTurn(t, h, false)
+
+	fireWatchdog(t, timers, 0)
+	eventually(t, "retry interrupt", func() bool { return procInterrupts(p) == 1 })
+	p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted}
+	if sent := p.nextSent(t); sent != "continue" {
+		t.Fatalf("retry prompt = %q, want continue", sent)
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("watchdog-continued turn end raised %d activity callbacks", got)
+	}
+	p.reply("done")
+	eventually(t, "settled agy activity callback", func() bool { return calls.Load() == 1 })
+}
+
+func TestAgyActivityCallbackSkipsNonAgyTurn(t *testing.T) {
+	var calls atomic.Int64
+	h := newHarness(t, map[string]string{"chat": chatProfile})
+	h.runner.Close()
+	h.config.AgyActivity = func() { calls.Add(1) }
+	h.start()
+	id := h.create("chat").ID
+	if _, err := h.runner.Send(id, "work"); err != nil {
+		t.Fatal(err)
+	}
+	p := h.backend.waitProc(t, 0)
+	p.nextSent(t)
+	p.reply("done")
+	eventually(t, "non-agy idle", func() bool { return h.state(id).Status == StatusIdle })
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("non-agy turn raised %d activity callbacks", got)
+	}
+}
 
 func agyWatchdogHarness(t *testing.T, timeoutSeconds string) (*harness, *leverTimers, *reports) {
 	return agyWatchdogHarnessWithRetries(t, timeoutSeconds, "1")
