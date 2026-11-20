@@ -21,7 +21,7 @@ func checkpointRichState() *state {
 		items: map[string]*item{"i": {id: "i", due: &due, start: &start, placedBy: n, parentBy: n,
 			edited: n, node: n, mentionsAt: n, mentions: []string{"a"}, refs: []string{"ref"},
 			attachments: []attachment{{oid: "oid", name: "file", size: 42}}, labels: labelSet{"l"},
-			open: &opening{node: n, by: "a", scope: ScopeStore, ended: n}, cc: []ccEntry{{"a", n}}}},
+			open: &opening{node: n, by: "a", scope: ScopeStore, ended: n}, cc: []ccEntry{{member: "a", since: n}}}},
 		iorder: []string{"i"}, place: []placement{{id: "i", afterSet: true}},
 		asg: map[string]*rec{"r": r}, recs: []*rec{r}, byItem: map[string][]*rec{"i": {r}},
 		rules: []*rule{ru}, ruleByID: map[string]*rule{"rule": ru},

@@ -17,6 +17,8 @@ func (s *state) checkpoint() *state {
 	cp.corder = slices.Clone(s.corder)
 	cp.rorder = slices.Clone(s.rorder)
 	cp.lorder = slices.Clone(s.lorder)
+	cp.oorder = slices.Clone(s.oorder)
+	cp.ccOrder = slices.Clone(s.ccOrder)
 	cp.place = slices.Clone(s.place)
 	cp.admins = maps.Clone(s.admins)
 	cp.prio.names = slices.Clone(s.prio.names)
@@ -55,6 +57,9 @@ func (s *state) checkpoint() *state {
 		v.refs = slices.Clone(it.refs)
 		v.labels = slices.Clone(it.labels)
 		v.cc = slices.Clone(it.cc)
+		for i := range v.cc {
+			v.cc[i].orgs = maps.Clone(it.cc[i].orgs)
+		}
 		cp.items[id] = &v
 	}
 
@@ -159,6 +164,22 @@ func (s *state) checkpoint() *state {
 			cp.labels[id] = &v
 		}
 	}
+	cp.orgs = maps.Clone(s.orgs)
+	for id, o := range s.orgs {
+		if o != nil {
+			v := *o
+			cp.orgs[id] = &v
+		}
+	}
+	cp.ccOrgs = maps.Clone(s.ccOrgs)
+	for key, reg := range s.ccOrgs {
+		if reg != nil {
+			v := *reg
+			v.added = maps.Clone(reg.added)
+			v.excluded = maps.Clone(reg.excluded)
+			cp.ccOrgs[key] = &v
+		}
+	}
 	return &cp
 }
 
@@ -170,7 +191,7 @@ func checkpointBodyValue(v bodyVal) bodyVal {
 // exhaustive: a new mutable register type must not silently alias a save.
 func checkpointHeadValue(v any) any {
 	switch x := v.(type) {
-	case nil, string, bool, int, float64, ccVal, statusVal, placeVal:
+	case nil, string, bool, int, float64, ccVal, ccOrgVal, statusVal, placeVal:
 		return v
 	case []string:
 		return slices.Clone(x)

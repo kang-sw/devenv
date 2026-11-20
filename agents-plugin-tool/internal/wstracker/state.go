@@ -144,13 +144,28 @@ type item struct {
 // ccEntry is one CC'd member of an item; since is the add whose register
 // write made the member CC'd (a repeated add moves nothing).
 type ccEntry struct {
-	member string
-	since  *node
+	member   string
+	since    *node
+	personal bool
+	orgs     map[string]bool
 }
 
 // ccVal is a CC register value (one register per item and member): true
 // while the member is CC'd. Its own type so a marker shows it as a CC.
 type ccVal bool
+
+// ccOrgVal is the registration value written for one item and org.
+type ccOrgVal bool
+
+// ccOrgReg is one item.cc_org registration. added is the provenance set that
+// remains after members leave the org; excluded is written by personal uncc
+// and prevents future automatic re-adds.
+type ccOrgReg struct {
+	item, org       string
+	active          bool
+	since           *node
+	added, excluded map[string]bool
+}
 
 // opening is an item.open: the creator (or the admin standing in for a
 // removed one) opens a task nobody else holds to a scope, team (the
@@ -321,6 +336,8 @@ type state struct {
 	lorder   []string // label ids in fold order of their adds
 	orgs     map[string]*org
 	oorder   []string // org ids in fold order of their creation
+	ccOrgs   map[string]*ccOrgReg
+	ccOrder  []string // item/org keys in first-registration order
 	prio     priority
 	attMax   float64 // attachments.max_bytes, the engine's number (posIntOf)
 }
@@ -460,7 +477,7 @@ func newState(g *genesis, hb func(x, y *node) bool, marks bool) *state {
 		hb: hb, marks: marks,
 		members: map[string]*member{}, admins: map[string]bool{},
 		items: map[string]*item{}, asg: map[string]*rec{}, byItem: map[string][]*rec{}, ruleByID: map[string]*rule{},
-		comments: map[string]*comment{}, reg: map[string][]head{}, bodies: map[string]*bodyFold{}, labels: map[string]*label{}, orgs: map[string]*org{}, reqs: map[string]*takeReq{},
+		comments: map[string]*comment{}, reg: map[string][]head{}, bodies: map[string]*bodyFold{}, labels: map[string]*label{}, orgs: map[string]*org{}, ccOrgs: map[string]*ccOrgReg{}, reqs: map[string]*takeReq{},
 		prio:   priority{names: append([]string(nil), g.prio.names...), def: g.prio.def},
 		attMax: g.attMax,
 	}
@@ -1438,6 +1455,8 @@ func (s *state) apply(n *node) {
 		s.applyMove(n)
 	case TypeItemCC, TypeItemUncc:
 		s.applyCC(n)
+	case TypeItemCCOrg, TypeItemUnccOrg:
+		s.applyCCOrg(n)
 	case TypeItemAssign:
 		s.applyAssign(n)
 	case TypeItemHandoff:
@@ -1787,6 +1806,9 @@ func (s *state) apply(n *node) {
 	}
 	switch {
 	case strings.HasPrefix(n.typ, "roles.") || n.typ == TypeItemAssign || n.typ == wsledger.TypeMemberJoin:
+		if strings.HasPrefix(n.typ, "roles.") || n.typ == wsledger.TypeMemberJoin {
+			s.refreshOrgCC(n)
+		}
 		s.refreshLive(n)
 		s.settleAll(n)
 	case n.typ == TypeItemCreate:
@@ -1838,10 +1860,52 @@ func (s *state) applyMove(n *node) {
 	}
 }
 
-// applyCC folds an item.cc or item.uncc: one register per item and member,
-// so a concurrent add and remove of one member fold by the register winner.
-// The member joins the item's CC list when the shown value turns on, since
-// the winning add, and leaves it when the value turns off.
+func ccOrgKey(item, org string) string { return item + ":" + org }
+
+func ccEntryAt(it *item, member string) (*ccEntry, int) {
+	for i := range it.cc {
+		if it.cc[i].member == member {
+			return &it.cc[i], i
+		}
+	}
+	return nil, -1
+}
+
+func (s *state) addCCSource(it *item, member, org string, personal bool, since *node) {
+	e, _ := ccEntryAt(it, member)
+	if e == nil {
+		it.cc = append(it.cc, ccEntry{member: member, since: since, orgs: map[string]bool{}})
+		e = &it.cc[len(it.cc)-1]
+	}
+	if personal {
+		e.personal = true
+	}
+	if org != "" {
+		if e.orgs == nil {
+			e.orgs = map[string]bool{}
+		}
+		e.orgs[org] = true
+	}
+}
+
+func (s *state) removeCCSource(it *item, member, org string, all bool) {
+	e, at := ccEntryAt(it, member)
+	if e == nil {
+		return
+	}
+	if all {
+		e.personal, e.orgs = false, map[string]bool{}
+	} else {
+		delete(e.orgs, org)
+	}
+	if !e.personal && len(e.orgs) == 0 {
+		it.cc = append(it.cc[:at:at], it.cc[at+1:]...)
+	}
+}
+
+// applyCC folds a personal item.cc or item.uncc. The register still resolves
+// concurrent personal writes; an uncc clears every source and excludes the
+// member from all active org registrations on the item.
 func (s *state) applyCC(n *node) {
 	it, m := s.items[n.p.str("item")], n.p.str("member")
 	if it == nil || m == "" {
@@ -1849,17 +1913,68 @@ func (s *state) applyCC(n *node) {
 	}
 	key := "cc:" + it.id + ":" + m
 	on := bool(s.write(key, "CC of "+m+" on "+it.alias, n, ccVal(n.typ == TypeItemCC)).(ccVal))
-	at := -1
-	for i, e := range it.cc {
-		if e.member == m {
-			at = i
+	if on {
+		s.addCCSource(it, m, "", true, s.regWinner(key))
+		return
+	}
+	s.removeCCSource(it, m, "", true)
+	for _, reg := range s.ccOrgs {
+		if reg.active && reg.item == it.id {
+			reg.excluded[m] = true
+			delete(reg.added, m)
 		}
 	}
-	switch {
-	case on && at < 0:
-		it.cc = append(it.cc, ccEntry{member: m, since: s.regWinner(key)})
-	case !on && at >= 0:
-		it.cc = append(it.cc[:at:at], it.cc[at+1:]...)
+}
+
+func (s *state) applyCCOrg(n *node) {
+	it, orgID := s.items[n.p.str("item")], n.p.str("org")
+	if it == nil || orgID == "" {
+		return
+	}
+	k := ccOrgKey(it.id, orgID)
+	on := bool(s.write("cco:"+k, "CC org "+orgID+" on "+it.alias, n, ccOrgVal(n.typ == TypeItemCCOrg)).(ccOrgVal))
+	reg := s.ccOrgs[k]
+	if reg == nil {
+		reg = &ccOrgReg{item: it.id, org: orgID, added: map[string]bool{}, excluded: map[string]bool{}}
+		s.ccOrgs[k] = reg
+		s.ccOrder = append(s.ccOrder, k)
+	}
+	if on {
+		if !reg.active {
+			reg.since = s.regWinner("cco:" + k)
+		}
+		reg.active = true
+		s.extendCCOrg(reg, n)
+		return
+	}
+	for member := range reg.added {
+		s.removeCCSource(it, member, orgID, false)
+	}
+	reg.active, reg.added = false, map[string]bool{}
+	reg.since = nil
+}
+
+func (s *state) extendCCOrg(reg *ccOrgReg, n *node) {
+	if reg == nil || !reg.active {
+		return
+	}
+	it := s.items[reg.item]
+	o := s.liveOrg(reg.org)
+	if it == nil || o == nil || o.head == "" {
+		return
+	}
+	for _, member := range s.orgMembers(o) {
+		if reg.excluded[member] || reg.added[member] {
+			continue
+		}
+		reg.added[member] = true
+		s.addCCSource(it, member, reg.org, false, n)
+	}
+}
+
+func (s *state) refreshOrgCC(n *node) {
+	for _, k := range s.ccOrder {
+		s.extendCCOrg(s.ccOrgs[k], n)
 	}
 }
 
