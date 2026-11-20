@@ -560,7 +560,7 @@
       if (/^#\/./.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
     }
     if (MN && (MN.kind === 'store' ? gone(MN.store) : lost)) closeMenu(false, true);
-    if (PM && lost) pmClose(false);
+    if (typeof PM !== 'undefined' && PM && lost) pmClose(false);
     var dl = $('tkdlg'), f = dl && dl.open && dl.querySelector('form');
     if (f) {
       var fs = f.getAttribute('data-fstore');

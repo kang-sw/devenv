@@ -304,7 +304,7 @@
     var hasNote = PM.kind === 'assign' && !PM.norule;
     return '<div class="pm-dlg" role="document" aria-label="' + esc(title) + '">' +
       '<div class="pm-dh"><h2>' + title + '</h2>' + (sub ? '<span class="pm-sub">' + sub + '</span>' : '') +
-      '<span class="grow"></span><button type="button" class="pm-x" data-pm="close" aria-label="' + esc(wsT("js.tk.common.close")) + '">&times;</button></div>' +
+      '<span class="grow"></span><button type="button" class="pm-x" data-pm="close" aria-label="' + esc(wsT("js.tk.dlg.close")) + '">&times;</button></div>' +
       '<div class="pm-tb"><input type="search" id="tkpmq" autocomplete="off" spellcheck="false" placeholder="' + esc(wsT("js.tk.pm.search")) + '" aria-label="' + esc(wsT("js.tk.pm.search")) + '">' +
       (hasTools ? '<button type="button" class="pm-btn mini" data-pm="expand">' + wsT("js.tk.pm.expand") + '</button>' +
         '<button type="button" class="pm-btn mini" id="tkpm-only" data-pm="only" aria-pressed="false" title="' + esc(wsT("js.tk.pm.only.tip")) + '">' + wsT("js.tk.pm.only") + '</button>' : '') + '</div>' +
@@ -456,7 +456,7 @@
     var cnt = ev.targets.length;
     var applyLbl = cnt ? wsTn("js.tk.pm.asg.apply.n", cnt) : wsT("js.tk.pm.asg.apply");
     return '<div class="pm-row">' + left + '<span class="grow"></span>' +
-      '<button type="button" class="pm-btn" data-pm="close">' + wsT("js.tk.common.cancel") + '</button>' +
+      '<button type="button" class="pm-btn" data-pm="close">' + wsT("js.tk.dlg.cancel") + '</button>' +
       '<button type="button" class="pm-btn primary" id="tkpm-apply" data-pm="apply"' + (!ev.dirty || PM.busy ? ' disabled' : '') + '>' + applyLbl + '</button></div>';
   }
 
@@ -473,7 +473,7 @@
       rowFn = function (id, isLead) { return pmCcRowHtml(id, isLead, ev, origMap); };
       var cnt = ev.added.length + ev.removed.length;
       footHtml = '<div class="pm-row"><span class="pm-sum">' + wsT("js.tk.pm.cc.sum", ev.effectiveCount, ev.added.length, ev.removed.length) +
-        '</span><span class="grow"></span><button type="button" class="pm-btn" data-pm="close">' + wsT("js.tk.common.cancel") + '</button>' +
+        '</span><span class="grow"></span><button type="button" class="pm-btn" data-pm="close">' + wsT("js.tk.dlg.cancel") + '</button>' +
         '<button type="button" class="pm-btn primary" id="tkpm-apply" data-pm="apply"' + (!ev.dirty || PM.busy ? ' disabled' : '') + '>' +
         (cnt ? wsTn("js.tk.pm.cc.apply.n", cnt) : wsT("js.tk.pm.cc.apply")) + '</button></div>';
     } else {
