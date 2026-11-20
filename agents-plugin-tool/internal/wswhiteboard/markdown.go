@@ -981,9 +981,8 @@ func writeAltText(w util.BufWriter, source []byte, n ast.Node) {
 	}
 }
 
-// fencedCode renders a mermaid block as <pre class="mermaid"> holding its
-// source, which the shared mermaid script draws and a host that cannot load
-// that script still shows as readable text; any other fence is a code block.
+// fencedCode renders mermaid as a diagram source and diff/patch as escaped,
+// classified lines. Other fences keep their ordinary code block markup.
 func (r *mdRenderer) fencedCode(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
 	if !entering {
 		return ast.WalkContinue, nil
@@ -991,6 +990,10 @@ func (r *mdRenderer) fencedCode(w util.BufWriter, source []byte, node ast.Node, 
 	n := node.(*ast.FencedCodeBlock)
 	lang := string(n.Language(source))
 	mermaid := strings.EqualFold(lang, "mermaid") && !r.page.noMermaid
+	diff := strings.EqualFold(lang, "diff") || strings.EqualFold(lang, "patch")
+	if diff {
+		lang = strings.ToLower(lang)
+	}
 	if mermaid {
 		r.page.Mermaid = true
 		_, _ = w.WriteString(`<pre class="mermaid">`)
@@ -1005,7 +1008,14 @@ func (r *mdRenderer) fencedCode(w util.BufWriter, source []byte, node ast.Node, 
 	}
 	for i := 0; i < n.Lines().Len(); i++ {
 		segment := n.Lines().At(i)
-		_, _ = w.Write(util.EscapeHTML(segment.Value(source)))
+		line := segment.Value(source)
+		if diff {
+			_, _ = w.WriteString(`<span class="wb-diff-` + diffLineKind(line) + `">`)
+		}
+		_, _ = w.Write(util.EscapeHTML(line))
+		if diff {
+			_, _ = w.WriteString(`</span>`)
+		}
 	}
 	if mermaid {
 		_, _ = w.WriteString("</pre>\n")
@@ -1013,6 +1023,22 @@ func (r *mdRenderer) fencedCode(w util.BufWriter, source []byte, node ast.Node, 
 		_, _ = w.WriteString("</code></pre>\n")
 	}
 	return ast.WalkSkipChildren, nil
+}
+
+func diffLineKind(line []byte) string {
+	s := string(line)
+	switch {
+	case strings.HasPrefix(s, "+++"), strings.HasPrefix(s, "---"), strings.HasPrefix(s, "diff "), strings.HasPrefix(s, "index "):
+		return "file"
+	case strings.HasPrefix(s, "@@"):
+		return "hunk"
+	case strings.HasPrefix(s, "+"):
+		return "add"
+	case strings.HasPrefix(s, "-"):
+		return "remove"
+	default:
+		return "context"
+	}
 }
 
 // itemRef renders a reference to an item on the page as an in-page anchor
