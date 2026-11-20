@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 7097099f051924ab
 sage-review-completeness-reviewed: 7097099f051924ab
+completed: 2026-11-20
 ---
 
 # agy plan usage refreshed on agy activity
@@ -256,3 +257,40 @@ Verification (Go tests):
   with no daemon host, nor does a hosted agy session's call.
 - The signal adds no file I/O or blocking on the tool-call path, including
   while a probe holds the plan-usage store's lock.
+
+### Result (0ab057a9) - 2026-11-20
+
+- Verified the predecessor identity for user-started leads: the launcher hello's
+  `Harness` reaches `ServerOptions.Harness`; `observeHarness` normalizes it
+  through the registered backend's `ManualHarness`; `currentHarness()` is
+  therefore `agy` without a new hello field or raw-hello reader.
+- Added `BackendRegistration.PlanUsageActivity` and enabled it only on agy's
+  daemon registration. A keyed top-level lead call resolves that descriptor
+  once, excludes hosted sessions, and invokes the daemon's optional in-memory
+  host capability. The daemon capability reuses Phase 1's asynchronous
+  `AgyActivity` admission path; hostless servers and codex, claude, and pi
+  remain inert. No new agy name check was added to common MCP code.
+- The call path adds no file I/O. Only descriptor-opted connections perform the
+  cached hosted-session check; the daemon method returns before the plan-usage
+  lock, so the existing debounce, in-flight guard, billed-turn latch, auth hold,
+  cache, and history behavior remain unchanged. Compatibility remains T0: no
+  MCP, hello, store, tracker, or manifest shape changed.
+- Lite review found one Important gap: the first implementation placed the
+  signal below `dashboardDeclared`, skipping an agy connection that had a
+  daemon host but no dashboard manifest. Commit `068d60ac` moved the
+  descriptor-gated signal above that guard while retaining hosted exclusion
+  and added the missing regression. No Critical or Important finding remains.
+- Final verification passed (every Go command used
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`):
+  `go test -count=1 -timeout 20m -run '^TestUserStartedAgyActivity$' ./internal/mcp`;
+  `go test -count=1 -run '^TestPlanUsageAgy' ./internal/wsdashboard`;
+  `go test -count=1 -run 'Tracker|Asset' ./internal/wsdashboard`;
+  `go test -count=1 -run '^TestAgyActivityCallback' ./internal/wsagent`;
+  `go test -count=1 -run '^TestAgentRunnerCatalogs$' ./cmd/ws-mcp`;
+  native and `GOOS=windows` `go vet` on `./internal/mcp`,
+  `./internal/wsdashboard`, `./internal/wsagent`, and `./cmd/ws-mcp`.
+
+
+## Resolution (2026-11-20)
+
+Phase 1 and Phase 2 now refresh agy plan usage from hosted settled turns and user-started agy lead tool calls through the same debounced asynchronous probe path.
