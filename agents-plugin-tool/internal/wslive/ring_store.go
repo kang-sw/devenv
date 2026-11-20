@@ -69,6 +69,11 @@ func parseRingSegmentSeq(name string) (uint64, bool) {
 type ringSegmentLine struct {
 	Name  string    `json:"name"`
 	Entry RingEntry `json:"entry"`
+	// PrevMax, written on the first line of a rotated segment (seq > 1), is
+	// the maximum entry Name across all earlier segments so unpinned disk
+	// paging can stop early only when enough strictly newer entries are seen.
+	// Optional and ignored by older binaries (T0).
+	PrevMax string `json:"prevMax,omitempty"`
 }
 
 // ringSegmentNameOnly decodes only the entry name from a JSONL line so
@@ -96,8 +101,9 @@ type ringMem struct {
 	segSeq      uint64
 	segEntries  int
 	segBytes    int64
-	tornTail    bool // newest segment on disk has a torn trailing line not yet truncated
-	forceRotate bool // newest segment disappeared; rotate to segSeq+1 on next write
+	segMaxName  string // max entry Name across all segments <= segSeq
+	tornTail    bool   // newest segment on disk has a torn trailing line not yet truncated
+	forceRotate bool   // newest segment disappeared; rotate to segSeq+1 on next write
 	gen         uint64
 }
 
@@ -294,6 +300,11 @@ func SyncExternalRing(dir string) {
 		if rerr != nil {
 			continue
 		}
+		for _, rec := range recs {
+			if rec.Name > rm.segMaxName {
+				rm.segMaxName = rec.Name
+			}
+		}
 		added = append(added, recs...)
 		if seq > rm.segSeq {
 			rm.segSeq = seq
@@ -323,6 +334,7 @@ func (rm *ringMem) ensureLoadedLocked(cutTail bool) error {
 	rm.segSeq = st.segSeq
 	rm.segEntries = st.segEntries
 	rm.segBytes = st.segBytes
+	rm.segMaxName = st.segMaxName
 	rm.tornTail = st.tornTail
 	rm.forceRotate = st.forceRotate
 	rm.loaded = true
@@ -336,6 +348,7 @@ type loadedRing struct {
 	segSeq      uint64
 	segEntries  int
 	segBytes    int64
+	segMaxName  string
 	tornTail    bool
 	forceRotate bool
 }
@@ -356,12 +369,17 @@ func parseRingNameStamp(name string) (time.Time, bool) {
 }
 
 func readSegmentFile(path string, cutTail bool) (records []RingRecord, validBytes int64, torn bool, err error) {
+	records, _, validBytes, torn, err = readSegmentFileWithMeta(path, cutTail)
+	return records, validBytes, torn, err
+}
+
+func readSegmentFileWithMeta(path string, cutTail bool) (records []RingRecord, prevMax string, validBytes int64, torn bool, err error) {
 	raw, err := ringReadFile(path)
 	if err != nil {
-		return nil, 0, false, err
+		return nil, "", 0, false, err
 	}
 	if len(raw) == 0 {
-		return nil, 0, false, nil
+		return nil, "", 0, false, nil
 	}
 	if raw[len(raw)-1] != '\n' {
 		lastNL := bytes.LastIndexByte(raw, '\n')
@@ -395,6 +413,9 @@ func readSegmentFile(path string, cutTail bool) (records []RingRecord, validByte
 		if !ok {
 			continue
 		}
+		if ValidRingName(item.PrevMax) && (prevMax == "" || item.PrevMax > prevMax) {
+			prevMax = item.PrevMax
+		}
 		records = append(records, RingRecord{RingEntry: item.Entry, Name: item.Name, At: at})
 	}
 	if torn && cutTail {
@@ -402,7 +423,7 @@ func readSegmentFile(path string, cutTail bool) (records []RingRecord, validByte
 			torn = false
 		}
 	}
-	return records, validBytes, torn, nil
+	return records, prevMax, validBytes, torn, nil
 }
 
 func readSegmentNames(path string) ([]string, error) {
@@ -477,6 +498,7 @@ func loadRingDir(dir string, cutTail bool) (loadedRing, error) {
 	var lastSeq uint64
 	var lastEntries int
 	var lastBytes int64
+	var segMaxName string
 	var lastTorn bool
 	var forceRotate bool
 
@@ -497,6 +519,9 @@ func loadRingDir(dir string, cutTail bool) (loadedRing, error) {
 		}
 		segments = append(segments, ringSegMeta{seq: seq, count: len(recs)})
 		for _, rec := range recs {
+			if rec.Name > segMaxName {
+				segMaxName = rec.Name
+			}
 			if _, exists := byName[rec.Name]; !exists {
 				byName[rec.Name] = rec
 			}
@@ -540,6 +565,7 @@ func loadRingDir(dir string, cutTail bool) (loadedRing, error) {
 		segSeq:      lastSeq,
 		segEntries:  lastEntries,
 		segBytes:    lastBytes,
+		segMaxName:  segMaxName,
 		tornTail:    lastTorn,
 		forceRotate: forceRotate,
 	}, nil
@@ -559,10 +585,14 @@ func makeRingName(entry RingEntry) (string, time.Time, error) {
 	return name, stamp, nil
 }
 
-func encodeSegmentLines(records []RingRecord) ([]byte, error) {
+func encodeSegmentLines(records []RingRecord, prevMax string) ([]byte, error) {
 	var buf bytes.Buffer
-	for _, rec := range records {
-		raw, err := json.Marshal(ringSegmentLine{Name: rec.Name, Entry: rec.RingEntry})
+	for i, rec := range records {
+		line := ringSegmentLine{Name: rec.Name, Entry: rec.RingEntry}
+		if i == 0 && prevMax != "" {
+			line.PrevMax = prevMax
+		}
+		raw, err := json.Marshal(line)
 		if err != nil {
 			return nil, err
 		}
@@ -709,7 +739,11 @@ func (rm *ringMem) appendRecordsLocked(records []RingRecord) error {
 		if len(chunk) > room {
 			chunk = chunk[:room]
 		}
-		raw, err := encodeSegmentLines(chunk)
+		var prevMax string
+		if rm.segEntries == 0 && rm.segSeq > 1 {
+			prevMax = rm.segMaxName
+		}
+		raw, err := encodeSegmentLines(chunk, prevMax)
 		if err != nil {
 			return err
 		}
@@ -726,6 +760,11 @@ func (rm *ringMem) appendRecordsLocked(records []RingRecord) error {
 		}
 		rm.segEntries += len(chunk)
 		rm.segBytes += int64(n)
+		for _, rec := range chunk {
+			if rec.Name > rm.segMaxName {
+				rm.segMaxName = rec.Name
+			}
+		}
 		if len(rm.segments) > 0 {
 			rm.segments[len(rm.segments)-1].count += len(chunk)
 		}
@@ -1030,10 +1069,11 @@ func readRingPage(dir, before string, n int) (RingPage, error) {
 }
 
 // readRingPageWindow reads only the window needed to satisfy an unpinned
-// ReadRingPage(dir, before, n) call: legacy .json files are filtered by
-// `< before` and capped to the newest n before opening any file, and segments
-// are scanned newest-first stopping as soon as the window (plus one older
-// entry to settle End) is covered.
+// ReadRingPage(dir, before, n) call while enforcing RingHistoryCap: legacy
+// .json files are filtered by `< before` and capped before opening any file,
+// and segments are scanned newest-first stopping early only when the segment's
+// recorded prevMax upper bound proves no earlier segment can supply an entry
+// newer than the collected window (or shift the RingHistoryCap boundary).
 func readRingPageWindow(dir, before string, n int) (RingPage, error) {
 	if n < 0 {
 		n = 0
@@ -1054,19 +1094,22 @@ func readRingPageWindow(dir, before string, n int) (RingPage, error) {
 		name := de.Name()
 		if seq, ok := parseRingSegmentSeq(name); ok {
 			segSeqs = append(segSeqs, seq)
-		} else if isRingEntryName(name) {
+		} else if ValidRingName(name) {
 			legacy = append(legacy, name)
 		}
 	}
 	sort.Slice(segSeqs, func(i, j int) bool { return segSeqs[i] < segSeqs[j] })
 	sort.Strings(legacy)
 
-	if before != "" {
-		legacy = legacy[:sort.SearchStrings(legacy, before)]
-	}
-
-	// Fast path: legacy-only directory (no segments) reads at most n files.
+	// Fast path: legacy-only directory (no segments) enforces RingHistoryCap
+	// and reads at most n files.
 	if len(segSeqs) == 0 {
+		if len(legacy) > RingHistoryCap {
+			legacy = legacy[len(legacy)-RingHistoryCap:]
+		}
+		if before != "" {
+			legacy = legacy[:sort.SearchStrings(legacy, before)]
+		}
 		start := len(legacy) - n
 		if start < 0 {
 			start = 0
@@ -1085,16 +1128,32 @@ func readRingPageWindow(dir, before string, n int) (RingPage, error) {
 		return page, nil
 	}
 
-	hasOlder := false
-	if len(legacy) > n {
-		hasOlder = true
-		legacy = legacy[len(legacy)-n:]
+	var legacyBefore, legacyAtOrAfter []string
+	if before == "" {
+		legacyBefore = legacy
+	} else {
+		cut := sort.SearchStrings(legacy, before)
+		legacyBefore = legacy[:cut]
+		legacyAtOrAfter = legacy[cut:]
 	}
 
-	byName := make(map[string]RingRecord, n+1)
+	newerNames := make(map[string]struct{}, len(legacyAtOrAfter))
+	for _, name := range legacyAtOrAfter {
+		newerNames[name] = struct{}{}
+	}
+	if len(newerNames) >= RingHistoryCap {
+		return RingPage{End: true}, nil
+	}
+
+	hasOlder := false
+	byNameCap := n + 1
+	if byNameCap > RingHistoryCap {
+		byNameCap = RingHistoryCap
+	}
+	byName := make(map[string]RingRecord, byNameCap)
 	for i := len(segSeqs) - 1; i >= 0; i-- {
 		seq := segSeqs[i]
-		recs, _, _, rerr := readSegmentFile(filepath.Join(dir, ringSegmentName(seq)), false)
+		recs, prevMax, _, _, rerr := readSegmentFileWithMeta(filepath.Join(dir, ringSegmentName(seq)), false)
 		if rerr != nil {
 			if errors.Is(rerr, fs.ErrNotExist) {
 				continue
@@ -1103,39 +1162,78 @@ func readRingPageWindow(dir, before string, n int) (RingPage, error) {
 		}
 		for _, rec := range recs {
 			if before != "" && rec.Name >= before {
+				newerNames[rec.Name] = struct{}{}
 				continue
 			}
 			if _, exists := byName[rec.Name]; !exists {
 				byName[rec.Name] = rec
 			}
 		}
-		if len(byName) > n {
-			hasOlder = true
-			break
+		if len(newerNames) >= RingHistoryCap {
+			return RingPage{End: true}, nil
+		}
+		if i > 0 && prevMax != "" && (before == "" || prevMax < before) {
+			budget := RingHistoryCap - len(newerNames)
+			need := n
+			if need > budget {
+				need = budget
+			}
+			strictlyNewer := 0
+			for name := range byName {
+				if name > prevMax {
+					strictlyNewer++
+				}
+			}
+			if strictlyNewer >= need && (budget <= n || len(byName) > need) {
+				if len(byName) > need && budget > n {
+					hasOlder = true
+				}
+				break
+			}
 		}
 	}
 
-	// Skip reading legacy .json files strictly older than the n-th newest
+	if len(newerNames) >= RingHistoryCap {
+		return RingPage{End: true}, nil
+	}
+	budget := RingHistoryCap - len(newerNames)
+	need := n
+	if need > budget {
+		need = budget
+	}
+
+	if len(legacyBefore) > need {
+		if budget > n {
+			hasOlder = true
+		}
+		legacyBefore = legacyBefore[len(legacyBefore)-need:]
+	}
+
+	// Skip reading legacy .json files strictly older than the need-th newest
 	// segment record we already have; their presence only marks hasOlder.
 	var cutoff string
-	if n > 0 && len(byName) >= n {
+	if need > 0 && len(byName) >= need {
 		segNames := make([]string, 0, len(byName))
 		for name := range byName {
 			segNames = append(segNames, name)
 		}
 		sort.Strings(segNames)
-		cutoff = segNames[len(segNames)-n]
+		cutoff = segNames[len(segNames)-need]
 	}
-	for _, name := range legacy {
+	for _, name := range legacyBefore {
 		if _, exists := byName[name]; exists {
 			continue
 		}
 		if cutoff != "" && name < cutoff {
-			hasOlder = true
+			if budget > n {
+				hasOlder = true
+			}
 			continue
 		}
-		if n == 0 {
-			hasOlder = true
+		if need == 0 {
+			if budget > n {
+				hasOlder = true
+			}
 			continue
 		}
 		if rec, ok := readLegacyRingEntry(dir, name); ok {
@@ -1148,9 +1246,14 @@ func readRingPageWindow(dir, before string, n int) (RingPage, error) {
 		records = append(records, rec)
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].Name < records[j].Name })
-	if len(records) > n {
-		hasOlder = true
-		records = records[len(records)-n:]
+	if len(records) > need {
+		if budget > n {
+			hasOlder = true
+		}
+		records = records[len(records)-need:]
+	}
+	if budget <= n {
+		hasOlder = false
 	}
 	page := RingPage{End: !hasOlder}
 	if len(records) > 0 {

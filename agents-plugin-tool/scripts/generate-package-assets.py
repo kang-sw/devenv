@@ -14,7 +14,7 @@ import sys
 
 PACKAGES = {"ws": "agents-plugin", "wsflow": "agents-plugin-wsflow"}
 TREES = ("rsrc", "skills")
-FILES = ("runtime.json", "config-manifest.json", "dashboard-config-manifest.json",
+FILES = ("runtime.json", "config-manifest.json", "agy-config-manifest.json", "dashboard-config-manifest.json",
          ".claude-plugin/plugin.json", "bin/ws-mcp-launcher.py")
 # Retain this small generated index in Git: a placeholder-only Go build can
 # still resolve an explicit dev checkout without embedding a second asset tree.

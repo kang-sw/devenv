@@ -129,6 +129,9 @@ type Options struct {
 	// Config is the base of each profile resolution; RepoRoot is replaced by
 	// the conversation's working root.
 	Config wsconfig.Options
+	// AgyModelWaitTimeoutSeconds is the selected hosted package's manifest
+	// default for agy.model_wait_timeout_seconds. Nil uses the ws default.
+	AgyModelWaitTimeoutSeconds *int
 	// WSMCP is the stdio ws-mcp command serving root, without the runner's
 	// environment; nil refuses profiles that allow ws tools.
 	WSMCP func(root string) (MCPCommand, error)
@@ -225,6 +228,7 @@ type Runner struct {
 	convs         map[string]*conv
 	closed        map[string]Record
 	childrenIndex map[ParentRef]map[string]bool // mu; parent identity is immutable
+	pendingSpawns map[ParentRef]int             // mu; in-flight width-checked spawns until registered
 	// expiry is childWaitingExpiry's value, read once (expiryOnce).
 	expiryOnce sync.Once
 	expiry     time.Duration
@@ -561,20 +565,25 @@ func (r *Runner) conv(replyID string) *conv {
 // list the first snapshot shows (lastCommands); a process's own list
 // replaces it.
 func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
+	return r.startConvWith(rec, seed, false, nil)
+}
+
+func (r *Runner) startConvWith(rec Record, seed []wslive.SlashCommand, spawnPending bool, claimWidth func()) *conv {
 	dir := wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID)
 	c := &conv{
-		r:          r,
-		dir:        dir,
-		inbox:      wsinbox.Dir(dir),
-		rec:        rec,
-		live:       newLiveWriter(dir, rec.WSKey, rec.Backend, r.opts.Now, r.opts.Log),
-		reqs:       make(chan func()),
-		inboxC:     make(chan struct{}, 1),
-		spawnC:     make(chan struct{}, 1),
-		spawnDirty: true,
-		mailC:      make(chan struct{}, 1),
-		done:       make(chan struct{}),
-		settleC:    make(chan struct{}),
+		r:            r,
+		dir:          dir,
+		inbox:        wsinbox.Dir(dir),
+		rec:          rec,
+		live:         newLiveWriter(dir, rec.WSKey, rec.Backend, r.opts.Now, r.opts.Log),
+		reqs:         make(chan func()),
+		inboxC:       make(chan struct{}, 1),
+		spawnC:       make(chan struct{}, 1),
+		spawnDirty:   true,
+		spawnPending: spawnPending,
+		mailC:        make(chan struct{}, 1),
+		done:         make(chan struct{}),
+		settleC:      make(chan struct{}),
 	}
 	c.refreshHeld()
 	if rec.Lead {
@@ -610,6 +619,10 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	if own.Lead.Observed != nil {
 		observed := own.Lead.Observed.Current
 		c.observed = &observed
+	}
+	if own.Lead.OutputRate != nil {
+		rate := own.Lead.OutputRate.OutputTps
+		c.outputTps = &rate
 	}
 	if usage := own.Usage; usage != nil && usage.Context != nil && usage.Context.Tokens != nil {
 		tokens := float64(*usage.Context.Tokens)
@@ -679,6 +692,9 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	r.indexChildLocked(rec)
 	delete(r.closed, rec.ReplyID)
 	delete(r.closedRows, rec.ReplyID)
+	if claimWidth != nil {
+		claimWidth()
+	}
 	r.wg.Add(1)
 	go c.loop()
 	r.mu.Unlock()
@@ -915,7 +931,11 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 		// first reports the harness's own.
 		seed = r.withPlaybookCommands(rec, r.lastCommands(rec))
 	}
-	c := r.startConv(rec, seed)
+	var claimWidth func()
+	if spawn != nil {
+		claimWidth = spawn.claimWidth
+	}
+	c := r.startConvWith(rec, seed, claimWidth != nil, claimWidth)
 	if spawn != nil {
 		return r.spawned(c, spawn.Prompt)
 	}

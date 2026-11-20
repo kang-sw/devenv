@@ -134,6 +134,7 @@ type Event struct {
 	// Observed is optional response evidence on status (lead) or agent (child).
 	// It never changes the meaning of Model/Effort or permits lead telemetry.
 	Observed      *ModelObservation `json:"observed,omitempty"`
+	OutputRate    *OutputRate       `json:"outputRate,omitempty"`
 	Model         string            `json:"model,omitempty"`
 	Effort        string            `json:"effort,omitempty"`
 	ContextTokens *float64          `json:"contextTokens,omitempty"`
@@ -166,6 +167,9 @@ type Result struct {
 	// record that is its agent's first, latest or a model change, and the
 	// record after it when a late record makes that one a change point.
 	Observed []ObservedRecord
+	// OutputRate holds a newly updated session output rate that durable storage
+	// should persist to OutputRateName.
+	OutputRate *OutputRate
 }
 
 type activityState struct {
@@ -210,6 +214,7 @@ type State struct {
 	previousTurnMs int64
 	summary        summaryState
 	lastTurnOutput *ModelObservation
+	outputRate     *OutputRate
 	reply          *Reply
 	// compactStartedAt is the running compaction's start, 0 when none runs;
 	// compactTrigger is its trigger, which an end without one inherits.
@@ -296,7 +301,7 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 	switch ev.Kind {
 	case KindReset:
 		st.summary.resync = st.turnStartedAt > 0
-		*st = State{replyID: st.replyID, adapter: st.adapter, scrub: st.scrub, agents: map[string]*agentState{}, batchesEnded: st.batchesEnded, host: st.host, summary: st.summary, observations: st.observations, observed: st.observed, lastTurnOutput: st.lastTurnOutput}
+		*st = State{replyID: st.replyID, adapter: st.adapter, scrub: st.scrub, agents: map[string]*agentState{}, batchesEnded: st.batchesEnded, host: st.host, summary: st.summary, observations: st.observations, observed: st.observed, lastTurnOutput: st.lastTurnOutput, outputRate: st.outputRate}
 		st.lead.phase = PhaseIdle
 		res.Changed = true
 	case KindTurnStart:
@@ -484,6 +489,12 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 			}
 		}
 	}
+	if ev.Kind == KindStatus && ev.OutputRate != nil {
+		if changed, persist := st.setOutputRate(ev.OutputRate); changed {
+			res.OutputRate = persist
+			res.Changed = true
+		}
+	}
 	st.refreshPhases(at)
 	st.retain()
 	if st.lead.phase != leadPhase || st.reply != leadReply {
@@ -611,7 +622,7 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		batches = st.normalizeBatches(ev.Batches)
 	}
 	if ev.AgentID == "" {
-		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" || ev.AgentKind != "" || ev.Harness != "" || ev.ActiveMs != 0 || ev.TurnStartedAt != 0 || ev.BackgroundTasks != 0 || hasTelemetry(ev) || ev.Observed != nil {
+		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" || ev.AgentKind != "" || ev.Harness != "" || ev.ActiveMs != 0 || ev.TurnStartedAt != 0 || ev.BackgroundTasks != 0 || hasTelemetry(ev) || ev.Observed != nil || ev.OutputRate != nil {
 			return fmt.Errorf("the lead takes only batches and caption; set agentId for a subagent")
 		}
 		st.setActivity(&st.lead, ev, batches)
@@ -1034,6 +1045,7 @@ func (st *State) Snapshot(now int64) Snapshot {
 		Lead: Lead{
 			Observed:         st.observed[""].clone(),
 			LastTurnOutput:   cloneObservation(st.lastTurnOutput),
+			OutputRate:       cloneOutputRate(st.outputRate),
 			Activity:         st.lead.view(),
 			TurnStartedAt:    st.turnStartedAt,
 			TurnOrigin:       st.turnOrigin,

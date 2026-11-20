@@ -41,19 +41,19 @@ func TestTrackerKnobWriteDefaultsAndCatalog(t *testing.T) {
 	if !entry.HarnessBucketed() || !entry.RequiresLeadAuthority || !entry.RepoScoped() || !entry.NoAgentVisible || !entry.ResolverBacked {
 		t.Fatalf("tracker entry must be harness-bucketed, lead-only, repo-scoped, agentless-visible, resolver-backed: %+v", entry)
 	}
-	if got, want := entry.RepoKey(), "workflow.tracker_enabled.<claude|codex|pi|all>"; got != want {
+	if got, want := entry.RepoKey(), "workflow.tracker_enabled.<claude|codex|pi|agy|all>"; got != want {
 		t.Fatalf("RepoKey = %q, want %q", got, want)
 	}
 
 	catalog := parseTuningCatalogResponse(t, f.call(t, "config.list", map[string]any{"format": "json"}))
 	knob := requireTuningKnob(t, catalog, trackerKnobKey)
 	assertFieldEnum(t, knob.ValueFields, "value", []string{"on", "off"})
-	assertFieldEnum(t, knob.SelectorFields, "harness", []string{"claude", "codex", "pi", "*"})
+	assertFieldEnum(t, knob.SelectorFields, "harness", []string{"claude", "codex", "pi", "agy", "*"})
 	assertFieldEnum(t, knob.SelectorFields, "scope", wsconfig.ScopeSchemaEnum())
 	if got := mustMarshalJSON(t, knob.Current); !strings.Contains(got, `"value":"off"`) || !strings.Contains(got, `"scope":"builtin"`) {
 		t.Fatalf("catalog current value must be the builtin off: %s", got)
 	}
-	if !knob.RepoScope || knob.RepoKey != "workflow.tracker_enabled.<claude|codex|pi|all>" {
+	if !knob.RepoScope || knob.RepoKey != "workflow.tracker_enabled.<claude|codex|pi|agy|all>" {
 		t.Fatalf("catalog must offer the repo scope under the bucket keys: %+v", knob)
 	}
 

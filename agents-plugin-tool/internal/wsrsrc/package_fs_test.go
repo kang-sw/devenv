@@ -85,7 +85,7 @@ func TestBuildOwnedResourceLoader(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, file := range []string{"runtime.json", "config-manifest.json", "dashboard-config-manifest.json", ".claude-plugin/plugin.json", "bin/ws-mcp-launcher.py", "skills/lead-bootstrap/AGENTS.template.md"} {
+		for _, file := range []string{"runtime.json", "config-manifest.json", "agy-config-manifest.json", "dashboard-config-manifest.json", ".claude-plugin/plugin.json", "bin/ws-mcp-launcher.py", "skills/lead-bootstrap/AGENTS.template.md"} {
 			if _, err := fs.ReadFile(pkg, file); err != nil {
 				t.Fatalf("%s/%s: %v", name, file, err)
 			}

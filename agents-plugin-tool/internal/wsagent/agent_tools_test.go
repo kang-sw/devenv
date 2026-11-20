@@ -1012,6 +1012,81 @@ func TestChildWaitingExpiryReadsItsConfig(t *testing.T) {
 	}
 }
 
+// TestChildWaitingExpiryRetriesAfterFailedClose: when expire's CloseConversation
+// fails with a non-errClosed error, expire resets c.expiring so a later
+// heartbeat retries and deletes the expired child.
+func TestChildWaitingExpiryRetriesAfterFailedClose(t *testing.T) {
+	clk := newTestClock()
+	var logBuf logBuffer
+	h, _ := agentHarness(t, func(o *Options) {
+		o.Now = clk.Now
+		o.ChildWaitingDays = 2
+		o.Log = &logBuf
+	})
+	a, b := settledPair(t, h)
+	// b was active after a, so a expires first and closes b before closing a.
+	h.runner.conv(b).update(func(rec *Record) { rec.LastActiveAt = clk.Now().Add(day).UTC().Format(time.RFC3339) })
+
+	// Inject a transient non-errClosed failure on CloseConversation(a): when
+	// CloseConversation(a) finishes closing descendant b, remove a from r.convs
+	// once so closeOne(a) returns errUnknown instead of closing a.
+	var mu sync.Mutex
+	var saved *conv
+	injected := false
+	stop := h.runner.Watch(func(st State) {
+		if st.ID != b || st.Status != StatusClosed {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if injected {
+			return
+		}
+		injected = true
+		h.runner.mu.Lock()
+		saved = h.runner.convs[a]
+		delete(h.runner.convs, a)
+		h.runner.mu.Unlock()
+	})
+	defer stop()
+
+	// Advance 2.5 days so a (age 2.5d >= 2d) expires while b (age 1.5d < 2d)
+	// does not expire on its own and only closes inside CloseConversation(a).
+	clk.advance(2*day + 12*time.Hour)
+	eventually(t, "the failed expiry close is logged", func() bool {
+		return strings.Contains(logBuf.String(), "agent "+a+": expire:")
+	})
+	mu.Lock()
+	c := saved
+	mu.Unlock()
+	if c == nil {
+		t.Fatal("failed-close injection did not capture parent conv")
+	}
+	// expire must clear c.expiring after the non-errClosed failure so the
+	// heartbeat can retry.
+	eventually(t, "expiring flag cleared for heartbeat retry", func() bool {
+		var expiring bool
+		if !c.do(func() { expiring = c.expiring }) {
+			return false
+		}
+		return !expiring
+	})
+	if gone(h, a) {
+		t.Fatal("child directory deleted despite failed close")
+	}
+
+	// Restore a into r.convs and let the next heartbeat retry expiry.
+	h.runner.mu.Lock()
+	h.runner.convs[a] = c
+	h.runner.mu.Unlock()
+	eventually(t, "heartbeat retried expiry and deleted child", func() bool {
+		return gone(h, a)
+	})
+	if len(h.runner.AgentList(h.leadCaller())) != 0 {
+		t.Fatal("the lead still lists the retried expired child")
+	}
+}
+
 // agentLeadHarness runs hosted leads (claude with common permission levels,
 // and a lead-only "codex" backend) whose agent.spawn children are Pi workers
 // under fake holders.
@@ -1205,6 +1280,33 @@ func TestAgentWorkerProfilesNeedAgentSpawn(t *testing.T) {
 	}
 }
 
+func TestChildReportPublishesHeldFinalBeforeSuccessor(t *testing.T) {
+	h, got := agentHarness(t, nil)
+	lead := h.leadCaller()
+	parent, pp := h.agentRunning(lead, AgentSpawnRequest{Prompt: "parent work", Tier: "medium", Authority: "workdir-write"})
+	_, cp := h.agentRunning(h.holderOf(parent), AgentSpawnRequest{Prompt: "inner work", Tier: "small", Authority: "workdir-write"})
+
+	pp.reply("parent final")
+	eventually(t, "parent final held for inner child", func() bool {
+		rec := h.record(parent)
+		return rec.HeldTurn != nil && rec.HeldTurn.Message == "parent final"
+	})
+	cp.reply("inner complete")
+	if turn := pp.nextSent(t); !strings.Contains(turn, "inner complete") {
+		t.Fatalf("inner child's report turn = %q", turn)
+	}
+	eventually(t, "held parent final reported first", func() bool { return len(got.lead()) == 1 })
+	if rep := got.lead()[0]; rep.Result.Status != TurnDone || rep.Result.Message != "parent final" {
+		t.Fatalf("first parent report = %+v", rep.Result)
+	}
+
+	pp.reply("successor ack")
+	eventually(t, "successor ack reported second", func() bool { return len(got.lead()) == 2 })
+	if reps := got.lead(); reps[1].Result.Status != TurnDone || reps[1].Result.Message != "successor ack" {
+		t.Fatalf("parent reports = %+v", reps)
+	}
+}
+
 // TestWorkerBackgroundStateHoldsReportAndShowsStatus verifies the harness-neutral
 // background state: while bgTasks > 0 after a turn ends, the worker reports
 // state "background" in agent.list and SpawnAgentEvent, withholds its turn-done
@@ -1341,4 +1443,131 @@ func TestWorkerBackgroundStateHoldsReportAndShowsStatus(t *testing.T) {
 			t.Fatal("idleNow must allow idle stop when bgTasks is -1 (unknown)")
 		}
 	})
+}
+
+// TestAgentChildMissingPermissionRecordFailsClosed verifies that an
+// agent.spawn child whose permission.json is missing fails admission closed
+// instead of launching with an empty authority, while legitimate callers
+// without permission.json (Pi children, non-parented conversations, hosted
+// top-level leads) keep working.
+func TestAgentChildMissingPermissionRecordFailsClosed(t *testing.T) {
+	refusals := &wakeRefusals{}
+	h, _ := agentHarness(t, func(o *Options) { o.WakeRefused = refusals.add })
+	lead := h.leadCaller()
+
+	// 1. Spawn a read-only agent child, settle and sleep it, then delete permission.json.
+	a, ap := h.agentRunning(lead, AgentSpawnRequest{Prompt: "audit", Tier: "small", Authority: "read-only"})
+	ap.reply("done")
+	eventually(t, "a's turn settled", func() bool { return h.state(a).Status == StatusIdle })
+	h.asleep(a)
+	permPath := filepath.Join(wsdashboard.SessionDir(h.dir, a), "permission.json")
+	if err := os.Remove(permPath); err != nil {
+		t.Fatal(err)
+	}
+	starts := h.backend.startCount()
+	if _, err := h.runner.Deliver(a, Delivery{From: "senderreplyid", Text: "wake without permission.json"}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "missing permission.json refused", func() bool {
+		return strings.Contains(h.state(a).Error, "no explicit authority record")
+	})
+	time.Sleep(80 * time.Millisecond)
+	if n := h.backend.startCount(); n != starts {
+		t.Fatalf("child without permission.json launched %d processes", n-starts)
+	}
+	if st := h.state(a); st.Process || st.Held == 0 || AgentStatus(st) != AgentWaiting {
+		t.Fatalf("refused child state = %+v", st)
+	}
+	if got := refusals.list(); len(got) != 1 || got[0][1] != a || !strings.Contains(got[0][2], "no explicit authority record") {
+		t.Fatalf("wake refusals = %v", got)
+	}
+
+	// Restoring permission.json lets the next delivery wake the child with its authority intact.
+	if err := writePermissionSelection(wsdashboard.SessionDir(h.dir, a), PermissionReadOnly); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.runner.Deliver(a, Delivery{From: "senderreplyid", Text: "wake restored"}); err != nil {
+		t.Fatal(err)
+	}
+	p := h.backend.waitProc(t, starts)
+	p.nextSent(t)
+	if lvl := h.backend.start(starts).WSMCP.Env[EnvPermissionLevel]; lvl != string(PermissionReadOnly) {
+		t.Fatalf("restored child EnvPermissionLevel = %q, want %q", lvl, PermissionReadOnly)
+	}
+
+	// 2. Legitimate Pi child (pi.spawn) has no permission.json and still launches.
+	piStarts := h.backend.startCount()
+	parent := leadParent
+	piChild, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "pi task", Tier: "small", Parent: &parent})
+	if err != nil {
+		t.Fatalf("PiWorkerProfile spawn: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wsdashboard.SessionDir(h.dir, piChild.ID), "permission.json")); !os.IsNotExist(err) {
+		t.Fatalf("PiWorkerProfile should not write permission.json, stat err = %v", err)
+	}
+	h.backend.waitProc(t, piStarts).nextSent(t)
+
+	// 3. Legitimate hosted top-level lead without permission.json still works.
+	lh, _ := agentLeadHarness(t)
+	hostedLead := lh.lead(BackendClaude, LeadOptions{PermissionMode: "auto"})
+	if _, err := os.Stat(filepath.Join(wsdashboard.SessionDir(lh.dir, hostedLead.ID), "permission.json")); !os.IsNotExist(err) {
+		t.Fatalf("legacy hosted lead should not have permission.json, stat err = %v", err)
+	}
+	if _, err := lh.runner.Send(hostedLead.ID, "hello lead"); err != nil {
+		t.Fatalf("hosted lead send: %v", err)
+	}
+	lh.holder(hostedLead.ID)
+}
+
+// TestAgentSpawnWidthCapAtomicUnderConcurrentSpawns verifies that concurrent
+// AgentSpawn calls racing for the remaining width slots cannot exceed
+// MaxSpawnWidth.
+func TestAgentSpawnWidthCapAtomicUnderConcurrentSpawns(t *testing.T) {
+	h, _ := agentHarness(t, nil)
+	lead := h.leadCaller()
+	const remaining = 5
+	for i := range MaxSpawnWidth - remaining {
+		h.agentSpawn(lead, AgentSpawnRequest{Prompt: fmt.Sprintf("pre %d", i), Tier: "small", Authority: "read-only"})
+	}
+	const contenders = 20
+	start := make(chan struct{})
+	errs := make(chan error, contenders)
+	var wg sync.WaitGroup
+	for i := range contenders {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			<-start
+			_, err := h.runner.AgentSpawn(lead, AgentSpawnRequest{Prompt: fmt.Sprintf("race %d", n), Tier: "small", Authority: "read-only"})
+			errs <- err
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	succeeded, refused := 0, 0
+	for err := range errs {
+		if err == nil {
+			succeeded++
+			continue
+		}
+		agentRefused(t, err, http.StatusForbidden, "the spawn width cap is 99 awake direct children")
+		refused++
+	}
+	if succeeded != remaining || refused != contenders-remaining {
+		t.Fatalf("concurrent spawn results: succeeded=%d refused=%d, want %d and %d", succeeded, refused, remaining, contenders-remaining)
+	}
+	if n := len(h.runner.AgentList(lead)); n != MaxSpawnWidth {
+		t.Fatalf("AgentList count = %d, want %d", n, MaxSpawnWidth)
+	}
+	if n := h.runner.awakeChildren(leadParent); n != MaxSpawnWidth {
+		t.Fatalf("awakeChildren = %d, want %d", n, MaxSpawnWidth)
+	}
+	h.runner.mu.Lock()
+	pending := len(h.runner.pendingSpawns)
+	h.runner.mu.Unlock()
+	if pending != 0 {
+		t.Fatalf("pendingSpawns leaked %d entries", pending)
+	}
 }

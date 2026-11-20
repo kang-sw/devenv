@@ -63,7 +63,7 @@ def legacy_payload(base):
 
 def copy_owner(base, identity):
     owner = base / PRODUCTS[identity]
-    for name in ("native-pi", "rsrc", "skills", "bin", "runtime.json", "config-manifest.json",
+    for name in ("native-pi", "rsrc", "skills", "bin", "runtime.json", "config-manifest.json", "agy-config-manifest.json",
                  "dashboard-config-manifest.json", ".claude-plugin", ".codex-plugin", ".mcp.json",
                  "hooks", "claude-agents"):
         source, dest = REPO / PRODUCTS[identity] / name, owner / name
@@ -135,7 +135,7 @@ class DaemonWorkflowBundleTests(unittest.TestCase):
         self.assertEqual(json.loads((root / "runtime.json").read_bytes())["plugin"], identity)
         # Compare the actual config bytes, not just manifest names or marker
         # identity. wsflow must not inherit ws's permissive Claude defaults.
-        for name in ("config-manifest.json", "dashboard-config-manifest.json", "hooks/hooks.json"):
+        for name in ("config-manifest.json", "agy-config-manifest.json", "dashboard-config-manifest.json", "hooks/hooks.json"):
             self.assertEqual((root / name).read_bytes(), (source / name).read_bytes(), name)
         defaults = {item["key"]: item["default"] for item in json.loads((root / "config-manifest.json").read_bytes())["keys"]}
         self.assertEqual(defaults["claude.compaction_advisory_enabled"], identity == "ws")

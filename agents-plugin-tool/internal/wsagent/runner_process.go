@@ -60,6 +60,7 @@ func (c *conv) startProcess() error {
 
 func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 	c.loadCompaction()
+	c.loadModelWait()
 	// No common worker selection or ceiling is applied in this slice.
 	if !attach {
 		c.permissionNudge(legacyWorkerPermission(def), true, "")
@@ -73,10 +74,10 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 	if !attach {
 		// Every launch re-admits a spawned child's authority against its
 		// parent's current level (agent_tools.go).
-		if err := c.r.childAdmission(rec); err != nil {
+		var err error
+		if level, err = c.r.childAdmission(rec); err != nil {
 			return err
 		}
-		level = childLevel(c.dir)
 	}
 	if rec.Backend == BackendPi && c.r.opts.Holders != nil && !attach {
 		if !c.r.scanDone() {
@@ -234,6 +235,7 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 // reads it early waits rather than misreading an older PID.
 func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 	c.loadCompaction()
+	c.loadModelWait()
 	level, source, err := c.r.leadPermission(rec, c.dir)
 	if err != nil {
 		if !attach {

@@ -579,17 +579,34 @@ func TestHostedVariablesUnderAnotherHarnessLeaveAnOrdinarySession(t *testing.T) 
 func TestDropHarnessSessionEnvLeavesNoSessionToInherit(t *testing.T) {
 	hostedSessionEnv(t, "hosted-key")
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	if got := NewServer(t.TempDir(), "test").hostedSessionKey(); got != "hosted-key" {
+	t.Setenv(wsagent.EnvPermissionLevel, string(wsagent.PermissionReadOnly))
+	root := t.TempDir()
+	before := NewServer(root, "test")
+	if got := before.hostedSessionKey(); got != "hosted-key" {
 		t.Fatalf("precondition: hosted key = %q", got)
 	}
+	if raw := callToolOnce(t, before, 1, "git.commit", map[string]any{"session_key": "hosted-key"}); !strings.Contains(raw, "permission denied") {
+		t.Fatalf("precondition: expected read-only refusal before drop: %s", raw)
+	}
+	before.Close()
 	DropHarnessSessionEnv()
-	for _, name := range []string{envHostedSession, envHostedSessionKey, envHostedSessionRow, envHarnessPID} {
+	for _, name := range []string{envHostedSession, envHostedSessionKey, envHostedSessionRow, envHarnessPID, wsagent.EnvPermissionLevel} {
 		if value, ok := os.LookupEnv(name); ok {
 			t.Fatalf("%s still set to %q", name, value)
 		}
 	}
-	if got := NewServer(t.TempDir(), "test").hostedSessionKey(); got != "" {
+	after := NewServer(root, "test")
+	defer after.Close()
+	if got := after.hostedSessionKey(); got != "" {
 		t.Fatalf("hosted key after the drop = %q", got)
+	}
+	if raw := callToolOnce(t, after, 2, "git.commit", map[string]any{"session_key": "k"}); strings.Contains(raw, "permission denied") {
+		t.Fatalf("git.commit refused after DropHarnessSessionEnv: %s", raw)
+	}
+	hostedAfter := NewServerWithOptions(ServerOptions{Root: root, Version: "test", Env: os.Environ()})
+	defer hostedAfter.Close()
+	if raw := callToolOnce(t, hostedAfter, 3, "tickets.move", map[string]any{"session_key": "k"}); strings.Contains(raw, "permission denied") {
+		t.Fatalf("hosted server inherited permission level after DropHarnessSessionEnv: %s", raw)
 	}
 }
 

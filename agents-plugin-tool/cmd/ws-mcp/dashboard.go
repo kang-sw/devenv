@@ -126,6 +126,7 @@ func dashboardCommand(args []string) {
 		Sessions:       sessions,
 		Worktrees:      sessions,
 		MailWake:       wswake.Mailbox,
+		AgyCommand:     wsagent.AgyBackend{}.ResolveCommand,
 		Agents:         agents,
 		LeadNudges:     nudges,
 		Tracker:        &dashboardTracker{h: tracker, err: trackerErr, unregistered: func() { support.CloseUnregistered() }},
@@ -291,6 +292,10 @@ func trackerStoreRoot(h *wstrackerhost.Host, newErr error) func(id string) (stri
 // for the ws-mcp it attaches to a conversation whose profile allows ws tools.
 // trackerChanged runs after a conversation's successful tracker write.
 func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *wsholder.Manager) *wsagent.Runner {
+	modelWaitSeconds := wsagent.DefaultAgyModelWaitTimeoutSeconds
+	if name, _, err := wsagent.ResolveHostedPackage(); err == nil && name == "wsflow" {
+		modelWaitSeconds = 0
+	}
 	keys := mcp.NewAgentKeyStore()
 	backends := map[string]wsagent.BackendRegistration{
 		wsagent.BackendClaude: {Backend: wsagent.ClaudeBackend{}, LeadProfile: wsagent.LeadProfileClaude, PermissionModes: wsagent.LeadPermissionModes, PermissionLevels: wsagent.LeadPermissionLevels(), Catalog: wsagent.ClaudeCatalog(), ManualHarness: "claude", PlaybookCommands: true, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendClaude), WorkerHTTPMCP: true},
@@ -313,10 +318,11 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 		}, ToolsAlwaysLoad: true, ManualHarness: wsagent.BackendAgy, PlaybookCommands: true, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendAgy), WorkerHTTPMCP: true, WorkerAutoApprove: true},
 	}
 	return wsagent.NewRunner(wsagent.Options{
-		Dir:           dir,
-		DaemonVersion: version,
-		Backends:      backends,
-		Keys:          keys,
+		Dir:                        dir,
+		DaemonVersion:              version,
+		AgyModelWaitTimeoutSeconds: &modelWaitSeconds,
+		Backends:                   backends,
+		Keys:                       keys,
 		// A lead session's process runs under a session holder with a lead
 		// key of its own.
 		Holders:  wsagent.ManagerHost{Manager: holders},

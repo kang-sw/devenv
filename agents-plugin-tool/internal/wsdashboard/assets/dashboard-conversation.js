@@ -92,7 +92,7 @@
   function entryInputHTML(input) { return keyedInputHTML(input, ENTRY_SLOT); }
 
   // mergeEntriesRegion applies an entries region event: the title bar (its
-  // counts) and model history are synced, and the entries are merged. A window
+  // counts and model-history source) is synced, and the entries are merged. A window
   // past a gap starts the box over; a box at the bottom (pin) sheds its oldest
   // entries past the cap. Either way the older history is loaded again from
   // what the box then holds.
@@ -119,18 +119,80 @@
     var nbox = src.querySelector(".centries");
     if (!box || !nbox) { el.innerHTML = html; restoreOpen(el); fmtTimes(el); sweepOutImgs(el); mermaid(el); histReset(); return; }
     if (head && nhead) { head.parentNode.replaceChild(nhead, head); fmtTimes(nhead); }
-    var history = el.querySelector(".modelhistory"), nhistory = src.querySelector(".modelhistory");
-    if (history) {
-      if (nhistory) history.parentNode.replaceChild(nhistory, history);
-      else history.parentNode.removeChild(history);
-    } else if (nhistory) box.parentNode.insertBefore(nhistory, box);
-    if (nhistory) { restoreOpen(nhistory); fmtTimes(nhistory); }
     if (gapped(box, nbox)) { resetEntries(box); histReset(); }
     var added = mergeEntries(box, nbox, changed);
     added.forEach(sweepOutImgs);
     mermaid(added);
     if (pin && evictEntries(box)) histReset();
   }
+
+  // Model history is a click-only popover sourced by the entries title bar.
+  // The popover lives outside the swapped region; syncChead calls
+  // modelHistorySync after each entries refresh so an open popover keeps its
+  // state while its source and anchor are replaced.
+  var modelHistoryPop = null, modelHistoryOpen = false;
+  function modelHistoryTrigger() { return doc.querySelector(".modelhistory-trigger"); }
+  function modelHistorySource(btn) {
+    return btn && btn.parentNode && btn.parentNode.querySelector("template.modelhistory-source");
+  }
+  function modelHistoryPlace() {
+    var btn = modelHistoryTrigger();
+    if (!modelHistoryPop || modelHistoryPop.hidden || !btn || !window.WsRail) return;
+    var a = btn.getBoundingClientRect();
+    var at = window.WsRail.popPlace(a, modelHistoryPop.offsetWidth, modelHistoryPop.offsetHeight,
+      root.clientWidth || window.innerWidth, root.clientHeight || window.innerHeight);
+    modelHistoryPop.style.top = at.top + "px";
+    modelHistoryPop.style.left = at.left + "px";
+  }
+  function modelHistoryClose(refocus) {
+    modelHistoryOpen = false;
+    if (modelHistoryPop) modelHistoryPop.hidden = true;
+    var btn = modelHistoryTrigger();
+    if (btn) {
+      btn.setAttribute("aria-expanded", "false");
+      if (refocus) btn.focus();
+    }
+  }
+  function modelHistorySync() {
+    var btn = modelHistoryTrigger(), src = modelHistorySource(btn);
+    if (!btn || !src) {
+      if (modelHistoryPop) modelHistoryPop.hidden = true;
+      return;
+    }
+    btn.setAttribute("aria-expanded", String(!!modelHistoryOpen));
+    if (!modelHistoryOpen) return;
+    if (!modelHistoryPop) {
+      modelHistoryPop = doc.createElement("div");
+      modelHistoryPop.id = "modelhistory-popover";
+      modelHistoryPop.className = "rpop modelhistory-popover";
+      modelHistoryPop.setAttribute("role", "dialog");
+      modelHistoryPop.setAttribute("aria-label", btn.getAttribute("aria-label") || "");
+      doc.body.appendChild(modelHistoryPop);
+    }
+    modelHistoryPop.innerHTML = src.innerHTML;
+    modelHistoryPop.hidden = false;
+    fmtTimes(modelHistoryPop);
+    modelHistoryPlace();
+  }
+  function modelHistoryToggle(btn) {
+    if (modelHistoryOpen) { modelHistoryClose(true); return; }
+    modelHistoryOpen = true;
+    btn.setAttribute("aria-expanded", "true");
+    modelHistorySync();
+  }
+  doc.addEventListener("click", function (e) {
+    var btn = e.target && e.target.closest && e.target.closest(".modelhistory-trigger");
+    if (btn) { e.preventDefault(); modelHistoryToggle(btn); return; }
+    if (modelHistoryOpen && (!modelHistoryPop || !modelHistoryPop.contains(e.target))) modelHistoryClose(false);
+  }, true);
+  window.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape" || !modelHistoryOpen) return;
+    e.preventDefault();
+    e.stopPropagation();
+    modelHistoryClose(true);
+  }, true);
+  window.addEventListener("resize", modelHistoryPlace);
+  doc.addEventListener("scroll", modelHistoryPlace, true);
 
   // Conversation cards navigate only this session's board and validated IDs.
   // The existing card/filter and history owners retain all geometry decisions.

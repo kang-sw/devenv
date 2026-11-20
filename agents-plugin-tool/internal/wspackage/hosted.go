@@ -12,7 +12,7 @@ import (
 // A hosted launcher needs only these package-relative inputs, not a plugin
 // installation. Settled stages outlive the daemon and are never overwritten.
 var hostedFiles = []string{
-	"bin/ws-mcp-launcher.py", "runtime.json", "config-manifest.json",
+	"bin/ws-mcp-launcher.py", "runtime.json", "config-manifest.json", "agy-config-manifest.json",
 	"dashboard-config-manifest.json", ".claude-plugin/plugin.json",
 }
 

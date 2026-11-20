@@ -179,3 +179,46 @@ func TestShippedClaudeWatchdogInterval(t *testing.T) {
 		})
 	}
 }
+
+// TestShippedAgyModelWaitTimeout pins the package-local agy watchdog manifest:
+// ws enables a 45-second wait, wsflow keeps it off, and both expose the same
+// non-negative integer contract through config.get/config.tune.
+func TestShippedAgyModelWaitTimeout(t *testing.T) {
+	const key = "agy.model_wait_timeout_seconds"
+	for _, pkg := range []struct {
+		name string
+		path string
+		want int64
+	}{{"ws", agyManifestPath, 45}, {"wsflow", wsflowAgyManifestPath, 0}} {
+		t.Run(pkg.name, func(t *testing.T) {
+			declared := loadDeclaredConfig(pkg.path)
+			k, ok := declared.lookup(key)
+			if !ok || len(declared.rejected) != 0 {
+				t.Fatalf("%s declaration = %+v, rejected %v", key, k, declared.rejected)
+			}
+			if k.Type != declaredTypeInteger || k.Minimum == nil || *k.Minimum != 0 || k.DefaultValue != pkg.want {
+				t.Fatalf("%s contract = %+v, want integer >= 0 with default %d", key, k, pkg.want)
+			}
+			server, _, sessionKey := manifestServer(t, pkg.path)
+			if got := configGetJSON(t, server, 933000, map[string]any{"key": key}); got.Value != float64(pkg.want) || got.Scope != "builtin" {
+				t.Fatalf("config.get(%s) = %+v", key, got)
+			}
+			if resp := keyedCall(t, server, 933001, sessionKey, "config.tune", map[string]any{"key": key, "value": "-1"}); !toolIsError(t, resp) {
+				t.Fatalf("config.tune(%s=-1) = %s, want a rejection", key, resp)
+			}
+			if resp := keyedCall(t, server, 933002, sessionKey, "config.tune", map[string]any{"key": key, "value": "0"}); toolIsError(t, resp) {
+				t.Fatalf("config.tune(%s=0) = %s", key, resp)
+			}
+		})
+	}
+
+	ws := readManifestJSON(t, agyManifestPath)
+	wsflow := readManifestJSON(t, wsflowAgyManifestPath)
+	wsKey := manifestKeyObjects(t, agyManifestPath, ws)[0]
+	wsflowKey := manifestKeyObjects(t, wsflowAgyManifestPath, wsflow)[0]
+	delete(wsKey, "default")
+	delete(wsflowKey, "default")
+	if !reflect.DeepEqual(wsKey, wsflowKey) {
+		t.Fatalf("agy manifest fields other than default differ:\nws     %v\nwsflow %v", wsKey, wsflowKey)
+	}
+}
