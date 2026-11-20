@@ -664,6 +664,8 @@ func TestTicketMapSourcesNameNoRepositoryTickets(t *testing.T) {
 		"tickets_map_text.go",
 		"tickets_map_words.go",
 		"tickets_map_cluster.go",
+		"tickets_map_louvain.go",
+		"tickets_map_naming.go",
 		"../wsdashboard/ticket_graph.go",
 		"../mcp/dashboard_ticket_graph.go",
 	}

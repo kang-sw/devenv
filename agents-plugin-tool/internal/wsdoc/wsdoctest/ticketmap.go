@@ -201,15 +201,15 @@ type topicSpec struct {
 // Topic vocabularies are disjoint, avoid the text engine's stoplists, and
 // share no lemma, so each topic is separable on its own terms.
 var ticketMapTopics = []topicSpec{
-	{"orchard", TicketMapScriptLatin, "orchard/harvest.go", []string{"orchard", "pruning", "harvest", "sapling", "graft", "rootstock", "blossom", "pollinator", "cider", "espalier", "canopy", "bushel"}, 22},
-	{"billing", TicketMapScriptLatin, "billing/invoice.go", []string{"invoice", "posting", "reconcile", "journal", "accrual", "debit", "creditor", "settlement", "voucher", "payable", "auditor", "remittance"}, 20},
+	{"orchard", TicketMapScriptLatin, "orchard/harvest.go", []string{"orchard", "pruning", "harvest", "sapling", "graft", "rootstock", "blossom", "pollinator", "cider", "espalier", "canopy", "bushel"}, 19},
+	{"billing", TicketMapScriptLatin, "billing/invoice.go", []string{"invoice", "posting", "reconcile", "journal", "accrual", "debit", "creditor", "settlement", "voucher", "payable", "auditor", "remittance"}, 19},
 	{"garden", TicketMapScriptLatin, "garden/moisture.py", []string{"garden", "moisture", "soil", "sprinkler", "seedling", "compost", "mulch", "trellis", "greenhouse", "germination", "watering", "hydrometer"}, 19},
 	{"optics", TicketMapScriptLatin, "optics/eyepiece.rs", []string{"telescope", "eyepiece", "nebula", "observatory", "refractor", "aperture", "collimation", "comet", "starfield", "parallax", "zenith", "astrograph"}, 18},
 	{"kitchen", TicketMapScriptLatin, "kitchen/recipe.ts", []string{"recipe", "pantry", "oven", "ingredient", "simmer", "braise", "saffron", "menu", "skillet", "marinade", "broth", "ladle"}, 17},
-	{"railway", TicketMapScriptLatin, "rail/timetable.sql", []string{"railway", "locomotive", "junction", "timetable", "carriage", "depot", "freight", "switchyard", "signalman", "gauge", "sleeper", "turntable"}, 15},
-	{"weather", TicketMapScriptLatin, "meteo/barometer.py", []string{"forecast", "barometer", "rainfall", "humidity", "cyclone", "isobar", "drizzle", "thunderstorm", "anemometer", "monsoon", "dewpoint", "hailstone"}, 14},
-	{"archive", TicketMapScriptLatin, "archive/catalog.js", []string{"archive", "catalog", "manuscript", "librarian", "bookshelf", "binding", "folio", "vellum", "codex", "provenance", "accession", "curator"}, 13},
-	{"kr", TicketMapScriptHangul, "shop/cart.go", []string{"주문", "배송", "추적", "결제", "장바구니", "상품", "재고", "반품", "쿠폰", "택배", "영수증", "환불"}, 12},
+	{"railway", TicketMapScriptLatin, "rail/timetable.sql", []string{"railway", "locomotive", "junction", "timetable", "carriage", "depot", "freight", "switchyard", "signalman", "gauge", "sleeper", "turntable"}, 16},
+	{"weather", TicketMapScriptLatin, "meteo/barometer.py", []string{"forecast", "barometer", "rainfall", "humidity", "cyclone", "isobar", "drizzle", "thunderstorm", "anemometer", "monsoon", "dewpoint", "hailstone"}, 15},
+	{"archive", TicketMapScriptLatin, "archive/catalog.js", []string{"archive", "catalog", "manuscript", "librarian", "bookshelf", "binding", "folio", "vellum", "codex", "provenance", "accession", "curator"}, 14},
+	{"kr", TicketMapScriptHangul, "shop/cart.go", []string{"주문", "배송", "추적", "결제", "장바구니", "상품", "재고", "반품", "쿠폰", "택배", "영수증", "환불"}, 13},
 	{"jp", TicketMapScriptJapanese, "music/score.go", []string{"楽譜", "調律", "録音", "演奏", "練習", "ギター", "ピアノ", "バイオリン", "メトロノーム", "合奏", "指揮者", "音階"}, 12},
 }
 
@@ -236,13 +236,19 @@ func topicSizes(n int) ([]int, error) {
 	if n < TicketMapMinOpen {
 		return nil, fmt.Errorf("ticket map fixture: n=%d is below the minimum %d", n, TicketMapMinOpen)
 	}
+	// The orchard topic never drops under orchardMinTopic (its tickets carry
+	// every epic relation); the rounding correction adjusts the other topics.
+	const orchardMinTopic = 19
 	sizes := make([]int, len(ticketMapTopics))
 	sum := 0
 	for i, tp := range ticketMapTopics {
 		sizes[i] = int(math.Round(float64(tp.base) * float64(n) / TicketMapDefaultOpen))
+		if i == 0 {
+			sizes[i] = max(sizes[i], orchardMinTopic)
+		}
 		sum += sizes[i]
 	}
-	for i := 0; sum != n-ticketMapSpecials; i = (i + 1) % len(sizes) {
+	for i := 1; sum != n-ticketMapSpecials; i = i%(len(sizes)-1) + 1 {
 		if sum < n-ticketMapSpecials {
 			sizes[i]++
 			sum++
@@ -250,9 +256,6 @@ func topicSizes(n int) ([]int, error) {
 			sizes[i]--
 			sum--
 		}
-	}
-	if sizes[0] < 20 {
-		return nil, fmt.Errorf("ticket map fixture: orchard topic has %d tickets, need 20", sizes[0])
 	}
 	for i, size := range sizes {
 		if size < 8 {
@@ -429,10 +432,31 @@ func planTicketMap(n int) (TicketMapLayout, []fixtureTicket, error) {
 	return layout, all, nil
 }
 
-// pick returns the topic word at offset m for ticket j; offsets 0..7 are
-// distinct within one ticket because 5 is coprime with the vocabulary size.
+// pick returns the topic word at offset m for ticket j: entry m of a
+// deterministic pseudo-random permutation of the vocabulary seeded by the
+// topic and j, so offsets are distinct within one ticket. A contiguous window
+// over the vocabulary would make two tickets' similarity a function of their
+// windows' cyclic distance, giving each topic's neighbor graph a ring that
+// clustering cuts into arcs.
 func pick(tp topicSpec, j, m int) string {
-	return tp.words[(j*5+m)%len(tp.words)]
+	var perm [16]int
+	n := len(tp.words)
+	for i := 0; i < n; i++ {
+		perm[i] = i
+	}
+	seed := uint64(14695981039346656037)
+	for i := 0; i < len(tp.name); i++ {
+		seed = (seed ^ uint64(tp.name[i])) * 1099511628211
+	}
+	seed ^= uint64(j+1) * 0x9E3779B97F4A7C15
+	for i := n - 1; i > 0; i-- {
+		seed ^= seed << 13
+		seed ^= seed >> 7
+		seed ^= seed << 17
+		k := int(seed % uint64(i+1))
+		perm[i], perm[k] = perm[k], perm[i]
+	}
+	return tp.words[perm[m]]
 }
 
 func capitalize(s string) string {
@@ -550,7 +574,7 @@ func japaneseBody(tp topicSpec, j int, title string, phases int) string {
 
 func isolatedTicket(stem string, words [5]string) *fixtureTicket {
 	title := capitalize(words[0]) + " " + words[1]
-	body := fmt.Sprintf("# %s\n\n## Background\n\nThe %s %s widget %s near the %s %s.\n",
+	body := fmt.Sprintf("# %s\n\n## Background\n\nThe %s %s widget %s by the %s %s.\n",
 		title, words[0], words[1], words[4], words[2], words[3])
 	return &fixtureTicket{stem: stem, title: title, body: body}
 }
