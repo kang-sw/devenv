@@ -174,26 +174,19 @@ for (const address of [base, updates]) {
     assert.deepEqual(deltaKeys(await update('peer', 'Entry Peer Renamed')), [keys.a]); await waitHash(oldHash);
     assert((await frame.locator('[data-entry="' + keys.a + '"]').textContent()).includes('Entry Peer Renamed'), 'same-key peer presentation refreshes');
 
-    const shown = async value => {
-      // Registered after production's shell listener: observing this message
-      // acknowledges that the hidden gate has already processed it.
-      await frame.evaluate(() => {
-        window.entryShownAck = null;
-        window.addEventListener('message', function ack(e) {
-          if (e.source !== parent || e.origin !== location.origin || e.data?.wsShell !== 'shown') return;
-          window.entryShownAck = e.data.shown;
-          window.removeEventListener('message', ack);
-        });
-      });
-      await page.evaluate(shown => document.querySelector('iframe.sframe.on').contentWindow.postMessage({ wsShell: 'shown', shown }, location.origin), value);
-      await frame.waitForFunction(shown => window.entryShownAck === shown, value);
-    };
-    await shown(false);
+    const browserHidden = value => frame.evaluate(hidden => {
+      window.entryTestHidden = hidden;
+      if (!Object.prototype.hasOwnProperty.call(document, 'hidden')) {
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => window.entryTestHidden });
+      }
+      document.dispatchEvent(new Event('visibilitychange'));
+    }, value);
+    await browserHidden(true);
     oldHash = await hash();
     assert.deepEqual(deltaKeys(await update('a', 'off')), [keys.a]);
     assert.deepEqual(deltaKeys(await update('b', 'off')), [keys.b]);
     assert.equal(await hash(), oldHash, 'hidden gate does not touch live DOM');
-    await shown(true); await waitHash(oldHash);
+    await browserHidden(false); await waitHash(oldHash);
     assert.equal(await frame.locator('[data-entry="' + keys.a + '"] .mbody').count(), 0);
     assert.equal(await frame.locator('[data-entry="' + keys.b + '"] .mbody').count(), 0, 'both hidden deltas materialize, not only last changed list');
     assert(await frame.evaluate(() => entryRefs.older.isConnected && entryRefs.sibling.isConnected && entryRefs.effect.isConnected), 'hidden updates retain history and unrelated siblings');
