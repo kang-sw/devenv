@@ -12,6 +12,31 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 )
 
+func TestLeadTuneRenderGatesAdapterSettingOnConfigCatalog(t *testing.T) {
+	for _, product := range []string{"agents-plugin", "agents-plugin-wsflow"} {
+		t.Run(product, func(t *testing.T) {
+			rsrcRoot := filepath.Join("..", "..", "..", product, "rsrc")
+			s := newTestServerWithHarness(t, "claude")
+			body, _, err := printPlaybook(s, os.DirFS(rsrcRoot), "lead-tune", nil, isolatedPlaybookConfigOptions(t), "", nil)
+			if err != nil {
+				t.Fatalf("printPlaybook lead-tune: %v", err)
+			}
+			invoke := strings.SplitN(strings.SplitN(body, "## On: invoke\n", 2)[1], "## On: explain knobs", 2)[0]
+			if !strings.Contains(invoke, "config.list") || !strings.Contains(invoke, "using only catalog-provided writer") {
+				t.Fatalf("lead-tune must load the catalog before routing a write:\n%s", invoke)
+			}
+			if !strings.Contains(body, "Such knobs are listed only in sessions of the adapter that declares them") ||
+				!strings.Contains(body, "so say so instead of writing it") {
+				t.Fatalf("lead-tune lacks the absent-adapter-key gate:\n%s", body)
+			}
+			scalar := strings.SplitN(strings.SplitN(body, "## On: tune scalar knob\n", 2)[1], "## On: commit repo-scope setting", 2)[0]
+			if !strings.Contains(scalar, "Call `config.tune`") || !strings.Contains(scalar, "catalog exposes") {
+				t.Fatalf("scalar tuning escaped catalog metadata:\n%s", scalar)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Golden render: real agents-plugin/rsrc tree
 // ---------------------------------------------------------------------------
