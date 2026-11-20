@@ -70,9 +70,10 @@ merges belong to the lead after your report.
 3. **Review:**
    - Allocation `none` → skip and state the skip in `omitted:`.
    - Map allocation to structured render wrappers: `lite` → `code-review-lite`;
-     `single` → `reviewer`; partitioned → `code-review-correctness`,
-     `code-review-fit`, `code-review-test` (flat `code-reviewer` is an
-     included contract, not a delegated playbook). Render each with
+     `single` → `reviewer`; partitioned → only its named partitions:
+     correctness → `code-review-correctness`, fit → `code-review-fit`, test →
+     `code-review-test` (flat `code-reviewer` is an included contract, not a
+     delegated playbook). Render each selected wrapper with
      `{{.McpNamespace}}/playbook.render` and spawn by {{.SpawnIdiom}} with the
      rendered path, ticket path, and branch name.
    - `lite`: one pass, no re-review — fix Critical and Important findings once;
