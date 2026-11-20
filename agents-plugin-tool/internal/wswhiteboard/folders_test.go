@@ -78,7 +78,7 @@ func folderFixture() *State {
 		},
 		Labels:       map[string]string{"recap-only": "Closed topic"},
 		ClosedTopics: []string{"recap-only", "empty closed"}, CloseResults: map[string]string{"recap-only": "Finished.", "empty closed": "No items."},
-		LastEmbedSeq: 8, Embeds: []Embed{{Seq: 8, Name: "embed8.html"}}, EmbedDir: "D:/old/embed", LastNudgeAt: "2026-11-02T00:00:00Z",
+		LastNudgeAt: "2026-11-02T00:00:00Z",
 	}
 }
 
@@ -296,7 +296,6 @@ func TestFolderPanelNamesThroughV050Writer(t *testing.T) {
 		dir := t.TempDir()
 		legacy := filepath.Join(t.TempDir(), "legacy.json")
 		legacyState := folderFixture()
-		legacyState.EmbedDir = "" // this fixture tests content, not a stale host path
 		if err := os.WriteFile(legacy, folderJSON(legacyState), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -521,11 +520,9 @@ func TestFolderImmutableVersionsAndLog(t *testing.T) {
 	if panels != 4 {
 		t.Fatalf("panel versions = %d", panels)
 	}
-	// Render-only bookkeeping never changes log bytes or immutable versions.
+	// Render-only session metadata never changes log bytes or immutable versions.
 	if err := (FolderStore{Dir: dir}).Update(nil, func(s *State) error {
 		s.Seq++
-		s.LastEmbedSeq = s.Seq
-		s.Embeds = append(s.Embeds, Embed{Seq: s.Seq, Name: "render.html"})
 		return nil
 	}); err != nil {
 		t.Fatal(err)

@@ -3,7 +3,7 @@ package wswhiteboard
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -31,11 +31,7 @@ func TestOpenAskIDs(t *testing.T) {
 var testNow = time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)
 
 func testEnv() Env {
-	return Env{
-		Now:   testNow,
-		IsDir: func(string) bool { return false },
-		IsAbs: filepath.IsAbs,
-	}
+	return Env{Now: testNow}
 }
 
 func mustApply(t *testing.T, st *State, commands string) Outcome {
@@ -700,60 +696,43 @@ func TestStoredStateWithRetiredNowFieldsLoads(t *testing.T) {
 
 func TestApplyEmbedDir(t *testing.T) {
 	st := &State{}
-	// Absolute paths come from t.TempDir so the test holds on Windows, where
-	// a slash-rooted path such as /host/scratch is not absolute.
-	base := t.TempDir()
-	scratch := filepath.Join(base, "scratch")
-	other := filepath.Join(base, "other")
-	missing := filepath.Join(base, "missing")
-	embedDir := func(dir string) string { return `<wb:embed-dir path="` + dir + `"/>` }
-	dirs := map[string]bool{scratch: true, other: true}
-	env := testEnv()
-	env.IsDir = func(path string) bool { return dirs[path] }
-	apply := func(commands string) []string {
-		_, problems := Apply(st, commands, env)
-		return problems
+	for _, command := range []string{`<wb:embed-dir path="relative/dir"/>`, `<wb:embed-dir path="/missing"/>`, `<wb:embed-dir/>`, `<wb:embed-dir path=""/>`} {
+		before, _ := json.Marshal(st)
+		out, problems := Apply(st, command, testEnv())
+		if len(problems) > 0 || out.Accepted != 1 || out.Info != embedDirDeprecatedInfo(true) {
+			t.Fatalf("%s: outcome %+v problems %v", command, out, problems)
+		}
+		after, _ := json.Marshal(st)
+		if string(after) == string(before) {
+			continue
+		}
+		var beforeState, afterState State
+		_ = json.Unmarshal(before, &beforeState)
+		_ = json.Unmarshal(after, &afterState)
+		beforeState.Seq = afterState.Seq
+		if !reflect.DeepEqual(beforeState, afterState) {
+			t.Fatalf("%s stored state: before %s after %s", command, before, after)
+		}
 	}
-	if problems := apply(`<wb:embed-dir path="relative/dir"/>`); !hasProblem(problems, "must be an absolute path") {
-		t.Fatalf("relative embed-dir problems = %v", problems)
+}
+
+func TestStateIgnoresLegacyEmbedFields(t *testing.T) {
+	raw := []byte(`{"seq":7,"counter":1,"last_embed_seq":6,"embed_dir":"/old/host","embeds":[{"seq":6,"name":"old.html"}],"items":[{"id":1,"class":"technical","topic":"t","title":"kept","status":"open","changed":7}]}`)
+	var st State
+	if err := json.Unmarshal(raw, &st); err != nil {
+		t.Fatal(err)
 	}
-	if problems := apply(embedDir(missing)); !hasProblem(problems, "not an existing directory") {
-		t.Fatalf("missing embed-dir problems = %v", problems)
+	if st.Seq != 7 || len(st.Items) != 1 || st.Items[0].Title != "kept" {
+		t.Fatalf("legacy board did not open: %+v", st)
 	}
-	// The path attribute is required; an empty one clears the setting.
-	if problems := apply(`<wb:embed-dir/>`); !hasProblem(problems, `command 1 <wb:embed-dir> (line 1) path: required ("" clears it)`) {
-		t.Fatalf("pathless embed-dir problems = %v", problems)
+	out, err := json.Marshal(&st)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if problems := apply(embedDir(scratch)); len(problems) > 0 {
-		t.Fatalf("embed-dir refused: %v", problems)
-	}
-	if st.EmbedDir != scratch {
-		t.Fatalf("embed-dir must be remembered: %q", st.EmbedDir)
-	}
-	// Setting another existing folder replaces it.
-	if problems := apply(embedDir(other)); len(problems) > 0 || st.EmbedDir != other {
-		t.Fatalf("replacing embed-dir: problems %v dir %q", problems, st.EmbedDir)
-	}
-	// The stored folder is re-checked by every later update, refusing the
-	// whole batch, even one that touches nothing else.
-	delete(dirs, other)
-	before, _ := json.Marshal(st)
-	if problems := apply(addXML(ClassTechnical, "t", "x")); !hasProblem(problems, other+" (stored for this session) is no longer an existing directory") {
-		t.Fatalf("vanished embed-dir problems = %v", problems)
-	}
-	if after, _ := json.Marshal(st); string(after) != string(before) {
-		t.Fatalf("the refused batch changed the state:\n%s\n%s", before, after)
-	}
-	if problems := apply(``); !hasProblem(problems, "send <wb:embed-dir") {
-		t.Fatalf("an empty batch must re-check the stored folder: %v", problems)
-	}
-	// Re-pointing or clearing it in the same update is accepted.
-	if problems := apply(embedDir(scratch) + addXML(ClassTechnical, "t", "x")); len(problems) > 0 || st.EmbedDir != scratch || len(st.Items) != 1 {
-		t.Fatalf("re-pointing embed-dir: problems %v dir %q", problems, st.EmbedDir)
-	}
-	delete(dirs, scratch)
-	if problems := apply(`<wb:embed-dir path=""/>`); len(problems) > 0 || st.EmbedDir != "" {
-		t.Fatalf("clearing embed-dir: problems %v dir %q", problems, st.EmbedDir)
+	for _, retired := range []string{"last_embed_seq", "embed_dir", "embeds"} {
+		if strings.Contains(string(out), `"`+retired+`"`) {
+			t.Errorf("rewritten state retained %q: %s", retired, out)
+		}
 	}
 }
 
@@ -787,7 +766,7 @@ func TestApplyEmptyCommandsOnlyAdvanceRender(t *testing.T) {
 	}
 }
 
-func TestBuildViewTopicOrderAndEmbedFreshness(t *testing.T) {
+func TestBuildViewTopicOrder(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassTechnical, "settled", "s")+
 		addXML(ClassTechnical, "acks", "k")+
@@ -807,25 +786,6 @@ func TestBuildViewTopicOrderAndEmbedFreshness(t *testing.T) {
 	}
 	if !view.BulkAck || !view.Answerable || view.StampFile != "r.stamp.js" {
 		t.Fatalf("view flags = %+v", view)
-	}
-	// Mark the first embed, then change one item: only it is new.
-	st.LastEmbedSeq = st.Seq
-	mustApply(t, st, `<wb:answer id="2" value="ok">ok</wb:answer>`)
-	embed := BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"})
-	fresh := 0
-	for _, topic := range embed.Topics {
-		fresh += topic.Fresh
-		for _, iv := range topic.Expanded {
-			if iv.ID != 2 || !iv.New {
-				t.Fatalf("embed expanded only the new settled item: %+v", iv)
-			}
-		}
-		if topic.Name == "settled" && (!topic.Quiet || len(topic.Collapsed) != 1) {
-			t.Fatalf("unchanged settled topic must be quiet in the embed: %+v", topic)
-		}
-	}
-	if fresh != 1 || embed.StampFile != "" {
-		t.Fatalf("embed fresh = %d stamp %q", fresh, embed.StampFile)
 	}
 }
 

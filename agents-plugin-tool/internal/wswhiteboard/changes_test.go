@@ -212,15 +212,6 @@ func TestRenderDocWritesMarksAsComments(t *testing.T) {
 		t.Fatal("the page must carry exactly the new and the modified mark beside the delafter one")
 	}
 
-	// The embed snapshot carries none.
-	embed, err := RenderPage(BuildView(st, ViewInput{Layout: LayoutEmbed}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(embed, "wbchg:") {
-		t.Fatal("the embed must not carry change marks")
-	}
-
 	// A framed body (the dashboard) carries them inside its frame document.
 	regions, err := RenderRegions(view)
 	if err != nil {

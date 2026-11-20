@@ -477,7 +477,7 @@ func TestPolicyCommentLifecycleBookkeepingAndViews(t *testing.T) {
 		t.Fatal("legacy fallback omitted comment")
 	}
 	s.AnswerSeq = before.AnswerSeq
-	for _, layout := range []Layout{LayoutFull, LayoutEmbed} {
+	for _, layout := range []Layout{LayoutFull} {
 		view := BuildView(s, ViewInput{Layout: layout})
 		html, err := RenderPage(view)
 		if err != nil || !strings.Contains(html, "user commented") || !strings.Contains(html, "literal") {

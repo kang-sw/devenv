@@ -229,20 +229,15 @@ func TestCheckStampReadsALoneOkOrNo(t *testing.T) {
 			t.Errorf("%q: verdict and reading %q, want %q", answer, got, want)
 		}
 	}
-	// An embed keeps its ticked row; full pages carry the same answer in history.
+	// The page carries the answer in history.
 	st := &State{}
 	mustApply(t, st, addXML(ClassCheck, "t", "look")+`<wb:answer id="1" value="no problem, ship it">fine</wb:answer>`)
 	full := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	wantAll(t, regexpHistoryArticle(full, "item-1"), `data-history-item="1"`, "no problem, ship it</div>")
 	wantNone(t, regexpHistoryArticle(full, "item-1"), `class="stamp"`, `class="ckrow`)
-	page := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
-	row := regexp.MustCompile(`<div class="ckrow[^"]*" id="item-1".*?</div>`).FindString(page)
-	if !strings.Contains(row, `class="ckrow done"`) || strings.Contains(row, `class="stamp"`) || !strings.Contains(row, `no problem, ship it</span>`) {
-		t.Fatalf("free-text answered check row:\n%s", row)
-	}
 }
 
-func TestClosedTopicFoldsItsChecksWithTheSettledItems(t *testing.T) {
+func TestClosedTopicCarriesChecksInHistory(t *testing.T) {
 	st := checkBoard(t)
 	mustApply(t, st, `<wb:answer id="1" value="a">a</wb:answer><wb:answer id="2" value="ok">ok</wb:answer><wb:answer id="3" value="ok">ok</wb:answer><wb:topic name="t"><wb:close result="done"/></wb:topic>`)
 	topic := topicView(t, st, LayoutFull, "t")
@@ -256,59 +251,11 @@ func TestClosedTopicFoldsItsChecksWithTheSettledItems(t *testing.T) {
 	for _, id := range []string{"3", "4", "5", "6"} {
 		wantAll(t, regexpHistoryArticle(full, "item-"+id), `data-history-item="`+id+`"`)
 	}
-	page := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
-	fold := regexp.MustCompile(`(?s)<details class="settled".*?</details>`).FindString(page)
-	if !strings.Contains(fold, `class="checks"`) {
-		t.Fatalf("the check list folds into the settled details:\n%s", fold)
-	}
 }
 
-// TestCheckListHideToggleShowsWhereAnAnsweredCheckCanHide pins where the
-// embed check pill's hide toggle renders: in the head of an open topic
-// holding an answered check, pressed by default, and nowhere else: not on a
-// list whose checks are open or assumed only (an assumed check stays
-// visible), not in a closed topic's settled fold, and never on the full
-// page, which has no check pill (its open checks stack after the history).
-// The stylesheet hides exactly the rows without data-id, which the answered
-// rows alone lack (form.js runs the toggle; see
-// TestCheckHideToggleKeepsItsStateOnTheRoot).
-func TestCheckListHideToggleShowsWhereAnAnsweredCheckCanHide(t *testing.T) {
-	const toggle = `<button type="button" class="btn mini ckhide" aria-pressed="true" title="hide answered requests">`
+func TestFullPageHasNoCheckHideToggle(t *testing.T) {
 	full := render(t, BuildView(checkBoard(t), ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	wantNone(t, full, `<div class="ckpill">`, `class="btn mini ckhide"`)
-	page := render(t, BuildView(checkBoard(t), ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
-	head := regexp.MustCompile(`<div class="ckpill">.*?</div>`).FindString(page)
-	if !strings.Contains(head, toggle) || strings.Count(page, `class="btn mini ckhide"`) != 1 {
-		t.Fatalf("open topic with answered checks: header\n%s", head)
-	}
-	if topic := topicView(t, checkBoard(t), LayoutFull, "t"); topic.HideableChecks() != 2 {
-		t.Fatalf("HideableChecks = %d, want 2 (04 ok, 05 no; 06 assumed stays)", topic.HideableChecks())
-	}
-
-	st := &State{}
-	mustApply(t, st, addXML(ClassCheck, "t", "look")+addXML(ClassCheck, "t", "assume")+`<wb:answer id="2" value="ok" assumed="true">fine</wb:answer>`)
-	if page := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"})); strings.Contains(page, `class="btn mini ckhide"`) {
-		t.Fatal("a list of open and assumed checks carries the hide toggle")
-	}
-
-	closed := checkBoard(t)
-	mustApply(t, closed, `<wb:answer id="1" value="a">a</wb:answer><wb:answer id="2" value="ok">ok</wb:answer><wb:answer id="3" value="ok">ok</wb:answer><wb:topic name="t"><wb:close result="done"/></wb:topic>`)
-	if page := render(t, BuildView(closed, ViewInput{Layout: LayoutEmbed, ReplyID: "r"})); !strings.Contains(page, `class="checks"`) || strings.Contains(page, `class="btn mini ckhide"`) {
-		t.Fatal("a closed topic's folded check list carries the hide toggle")
-	}
-
-	css, err := whiteboardTestAsset("page.css")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, rule := range []string{
-		`html[data-ck-hide="1"] .topic:not(.closed) .checks .ckrow:not([data-id]) { display: none; }`,
-		`html:not([data-ck-hide]) .ckhide { display: none; }`,
-	} {
-		if !strings.Contains(string(css), rule) {
-			t.Errorf("page.css lacks %q", rule)
-		}
-	}
 }
 
 func TestOpenCheckRanksAsAnAskNotAnAck(t *testing.T) {

@@ -28,7 +28,7 @@ func TestDashboardAnswerMarkerDoesNotChangeTopicDisplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, layout := range []Layout{LayoutFull, LayoutEmbed} {
+	for _, layout := range []Layout{LayoutFull} {
 		oldView := BuildView(before, ViewInput{Layout: layout, ReplyID: "r"})
 		newView := BuildView(after, ViewInput{Layout: layout, ReplyID: "r"})
 		if len(oldView.Topics) != len(newView.Topics) {

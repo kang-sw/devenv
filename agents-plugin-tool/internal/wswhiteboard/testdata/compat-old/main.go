@@ -21,7 +21,7 @@ func main() {
 	var problems []string
 	if os.Args[2] != "read" {
 		err := store.Update(nil, func(s *wswhiteboard.State) error {
-			_, problems = wswhiteboard.Apply(s, os.Args[2], wswhiteboard.Env{Now: time.Date(2026, 11, 16, 1, 2, 3, 0, time.UTC), IsAbs: func(string) bool { return false }, IsDir: func(string) bool { return false }})
+			_, problems = wswhiteboard.Apply(s, os.Args[2], wswhiteboard.Env{Now: time.Date(2026, 11, 16, 1, 2, 3, 0, time.UTC), IsAbs: func(string) bool { return true }, IsDir: func(string) bool { return true }})
 			if len(problems) > 0 {
 				return errors.New("refused")
 			}
@@ -43,11 +43,18 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	embedPage, err := wswhiteboard.RenderPage(wswhiteboard.BuildView(s, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutEmbed}))
+	if err != nil {
+		panic(err)
+	}
 	data, err := json.Marshal(struct {
-		State         *wswhiteboard.State
-		Problems      []string
-		Display, Page string
-	}{s, problems, wswhiteboard.FormatQuery(query), page})
+		State                    *wswhiteboard.State
+		Problems                 []string
+		Display, Page, EmbedPage string
+		LastEmbedSeq             int
+		EmbedDir                 string
+		EmbedCount               int
+	}{s, problems, wswhiteboard.FormatQuery(query), page, embedPage, s.LastEmbedSeq, s.EmbedDir, len(s.Embeds)})
 	if err != nil {
 		panic(err)
 	}

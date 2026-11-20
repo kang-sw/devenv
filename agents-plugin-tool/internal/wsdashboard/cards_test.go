@@ -406,11 +406,11 @@ function mk(spec, attrs, kids) {
   return e;
 }
 // topic builds a topic section as the board serves it, its bar in its head:
-// open with its bar time, or closed; fresh adds the update mark.
-function topic(name, at, closed, fresh) {
-  var bar = mk("div.tbar", {}, [mk("span.tlead", {}, [mk("span.tname")])].concat(closed ? [] : [mk("time.tago", { "data-at": at })]).concat(fresh ? [mk("span.chip.fresh")] : []).concat([mk("button.btn.mini.tnote-toggle")]));
+// open with its bar time, or closed.
+function topic(name, at, closed) {
+  var bar = mk("div.tbar", {}, [mk("span.tlead", {}, [mk("span.tname")])].concat(closed ? [] : [mk("time.tago", { "data-at": at })]).concat([mk("button.btn.mini.tnote-toggle")]));
   var t = mk("section.topic" + (closed ? ".closed" : ""), { "data-topic": name }, [mk("div.tophead", {}, [bar])]);
-  t.label = name + (closed ? "/c" : "") + (fresh ? "*" : "");
+  t.label = name + (closed ? "/c" : "");
   return t;
 }
 function more(next, remainder) { var b = mk("button.btn.closed-more", { "data-closed-next": next }); if (remainder !== undefined) b.setAttribute("data-closed-more", remainder); b.label = "more" + next; return b; }
@@ -517,7 +517,7 @@ now = 2600; clickPin(A2);
 check("pins before the update", pinsOf(), ["Ca", "b", "a"]);
 var B2 = topic("b", 2700, false, true);
 swap([B2, A2, C, topic("x", 0, true), more(31), reply()]);
-check("an updated pinned topic keeps its index, with the board's update mark", pinsOf(), ["Ca", "b*", "a"]);
+check("an updated pinned topic keeps its index", pinsOf(), ["Ca", "b", "a"]);
 check("its new bar carries the pressed pin", pinBtn(B2).getAttribute("aria-pressed"), "true");
 
 // A pinned topic updated through the frame graft keeps its pin pressed.
@@ -527,7 +527,7 @@ swap([B2, A3, C, topic("x", 0, true), more(31), reply()], function (p) {
   A2.removeChild(oldHead); A2.insertBefore(A3.querySelector(".tophead"), A2.firstChild);
   p.pins[p.pins.indexOf(A3)] = A2;
 });
-check("a pinned topic updated through the graft keeps its section and index", [pinsOf(), page.W.pinList().children[2] === A2], [["Ca", "b*", "a"], true]);
+check("a pinned topic updated through the graft keeps its section and index", [pinsOf(), page.W.pinList().children[2] === A2], [["Ca", "b", "a"], true]);
 check("and its pin button pressed", pinBtn(A2) && pinBtn(A2).getAttribute("aria-pressed"), "true");
 
 // A closed pinned topic stays pinned; past the closed cap it stays too.

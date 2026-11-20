@@ -405,26 +405,6 @@ func TestPanelTargetsBeyondClosedTopicCapStayNavigable(t *testing.T) {
 	wantAll(t, string(regions.Board), `<template data-history-topic="closed-1">`, `data-doc="entry:e1"`)
 }
 
-func TestStreamEmbedOnlyLatestLineAndPanelRecaps(t *testing.T) {
-	st := streamFixture()
-	st.Topics[0].Body = strings.Repeat("CURRENT-CONTENT-PAYLOAD", 50000)
-	for i := range st.Topics[0].Entries {
-		if st.Topics[0].Entries[i].Kind == EntryPanel {
-			st.Topics[0].Entries[i].Text = strings.Repeat("PANEL-PAYLOAD", 50000)
-		}
-	}
-	view := BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r", FullBoardLink: "file:///board/index.html"})
-	out := render(t, view)
-	wantAll(t, out, `class="trecap" data-entry="e9" data-kind="panel"`, `class="evi wb-evi-panel"`, `href="file:///board/index.html">Open full board</a>`, `href="file:///board/index.html#p1"`, "recap e9")
-	wantNone(t, markup(out), "CURRENT-CONTENT-PAYLOAD", "PANEL-PAYLOAD", "first system", "last system", "agent state", "recap e3", `class="wb-history"`, "srcdoc=", `class="doc-body`)
-	if len(out) > (2<<20)*44/100 {
-		t.Fatalf("compact embed exceeds 44%% of the 2 MiB budget: %d bytes", len(out))
-	}
-	if view.Topics[0].Stream.Count != 0 || len(view.Topics[0].Older) != 0 || len(view.Topics[0].PanelRecaps) != 4 {
-		t.Fatal("embed carries accumulated stream data")
-	}
-}
-
 func TestPanelAuthoredReferencesAcrossAllSurfaces(t *testing.T) {
 	st := streamFixture()
 	st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "title {{p1}} and `{{p1}}`", Status: StatusOpen,

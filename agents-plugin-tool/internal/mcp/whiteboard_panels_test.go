@@ -113,10 +113,8 @@ func linkTexts(links []panelLink) []string {
 }
 
 // TestWhiteboardTicketPanel pins the ticket panel: the full page lists every
-// ready/ and todo/ ticket, never idea/; the embed lists
-// ready/ only; and every link resolves from where its page is written (the
-// whiteboard folder, an embed_dir inside the repository, or one outside it,
-// where it is a file: URL).
+// ready/ and todo/ ticket, never idea/, and every link resolves from the
+// whiteboard page directory.
 func TestWhiteboardTicketPanel(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	writeTicket(t, f.root, "ready", "261101-feat-ready-a", "Ready A")
@@ -158,36 +156,6 @@ func TestWhiteboardTicketPanel(t *testing.T) {
 	}
 	assertLinksResolve(t, "full", f.pageDir(), links, false)
 
-	embedPage := func(embed string) string {
-		t.Helper()
-		if filepath.IsAbs(embed) {
-			return readPage(t, embed)
-		}
-		return readPage(t, filepath.Join(f.root, filepath.FromSlash(embed)))
-	}
-	wantEmbed := []string{"261020-bug-ready-b", "Ready A"}
-
-	embed := panelHTML(embedPage(resultLine(t, f.update(t, ``), "embed: ")), "tickets")
-	if got := linkTexts(panelLinks(embed)); strings.Join(got, "|") != strings.Join(wantEmbed, "|") {
-		t.Fatalf("embed ticket rows = %q, want ready only %q", got, wantEmbed)
-	}
-	assertLinksResolve(t, "embed in the whiteboard folder", f.dir(), panelLinks(embed), false)
-
-	inner := filepath.Join(f.root, "host", "visuals")
-	if err := os.MkdirAll(inner, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	name := resultLine(t, f.update(t, embedDirCommand(inner)), "embed: ")
-	embed = panelHTML(embedPage(filepath.Join(inner, name)), "tickets")
-	assertLinksResolve(t, "embed_dir inside the repository", inner, panelLinks(embed), false)
-
-	outside := t.TempDir()
-	name = resultLine(t, f.update(t, embedDirCommand(outside)), "embed: ")
-	embed = panelHTML(embedPage(filepath.Join(outside, name)), "tickets")
-	if got := linkTexts(panelLinks(embed)); strings.Join(got, "|") != strings.Join(wantEmbed, "|") {
-		t.Fatalf("outside embed ticket rows = %q, want %q", got, wantEmbed)
-	}
-	assertLinksResolve(t, "embed_dir outside the repository", outside, panelLinks(embed), true)
 }
 
 // TestWhiteboardLatestTodoTicketsFollowsStemDate pins the latest-ten selection: by the
@@ -212,43 +180,33 @@ func TestWhiteboardLatestTodoTicketsFollowsStemDate(t *testing.T) {
 }
 
 // TestWhiteboardPanelsOmittedWhenEmpty pins that a session with no ready or
-// todo tickets and no mailbox address or history renders neither panel, and
-// that an embed with todo tickets but no ready ones omits the ticket panel.
+// todo tickets and no mailbox address or history renders neither panel.
 func TestWhiteboardPanelsOmittedWhenEmpty(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	writeTicket(t, f.root, "idea", "261106-feat-idea-x", "Idea X")
-	embed := resultLine(t, f.update(t, ``), "embed: ")
-	for _, page := range []string{f.fullPage(t), readPage(t, filepath.Join(f.root, embed))} {
-		for _, id := range []string{"tickets", "mailbox"} {
-			if panelHTML(page, id) != "" {
-				t.Fatalf("empty %s panel rendered", id)
-			}
+	f.update(t, ``)
+	for _, id := range []string{"tickets", "mailbox"} {
+		if panelHTML(f.fullPage(t), id) != "" {
+			t.Fatalf("empty %s panel rendered", id)
 		}
 	}
 	writeTicket(t, f.root, "todo", "261106-feat-todo-x", "Todo X")
-	embed = resultLine(t, f.update(t, ``), "embed: ")
+	f.update(t, ``)
 	if panelHTML(f.fullPage(t), "tickets") == "" {
 		t.Fatalf("full page must list the todo ticket")
 	}
-	if panelHTML(readPage(t, filepath.Join(f.root, embed)), "tickets") != "" {
-		t.Fatalf("an embed with no ready tickets must omit the ticket panel")
-	}
 }
 
-// TestWhiteboardEmbedTodoPanelShowsUnfinished pins the embed todo panel: the
-// count of every todo plus the titles of the unfinished ones; the full page
-// lists them all.
-func TestWhiteboardEmbedTodoPanelShowsUnfinished(t *testing.T) {
+// TestWhiteboardTodoPanelShowsAllRows pins the todo count, order, and folded
+// completed rows on the full page.
+func TestWhiteboardTodoPanelShowsAllRows(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	f.call(t, "todo.add", map[string]any{"key": "a", "title": "finished work"})
 	f.call(t, "todo.add", map[string]any{"key": "b", "title": "open work"})
 	f.call(t, "todo.add", map[string]any{"key": "c", "title": "deferred work"})
 	f.call(t, "todo.check", map[string]any{"key": "a", "status": "done"})
 	f.call(t, "todo.check", map[string]any{"key": "c", "status": "defer"})
-	embed := panelHTML(readPage(t, filepath.Join(f.root, resultLine(t, f.update(t, ``), "embed: "))), "todo")
-	if !strings.Contains(embed, `<span class="chip">1/3</span>`) || !strings.Contains(embed, "open work") || !strings.Contains(embed, "deferred work") || strings.Contains(embed, "finished work") {
-		t.Fatalf("embed todo panel = %s", embed)
-	}
+	f.update(t, ``)
 	full := panelHTML(f.fullPage(t), "todo")
 	if !strings.Contains(full, "finished work") || !strings.Contains(full, "open work") {
 		t.Fatalf("full todo panel must list every todo: %s", full)
@@ -259,9 +217,6 @@ func TestWhiteboardEmbedTodoPanelShowsUnfinished(t *testing.T) {
 	fold := strings.Index(full, `class="folded"`)
 	if fold < 0 || strings.Index(full, "open work") > strings.Index(full, "deferred work") || strings.Index(full, "deferred work") > fold || fold > strings.Index(full, "finished work") {
 		t.Fatalf("full todo panel order must be unfinished rows, fold, done rows: %s", full)
-	}
-	if strings.Contains(embed, "folded") {
-		t.Fatalf("embed todo panel must not fold done rows: %s", embed)
 	}
 }
 
@@ -283,12 +238,10 @@ func agendaPanelHTML(page string) string {
 	return page[start : start+1+end]
 }
 
-// TestWhiteboardAgendaPanelTree pins the agenda panel: the full page, on
-// disk and served, lays each blob out as a tree (root open, nested
-// containers folded, a long string folded to its whole value); the embed
-// keeps one summary row per key; agenda.clear drops the key from the
-// rewritten page and the served page alike, and clearing the last key drops
-// the panel.
+// TestWhiteboardAgendaPanelTree pins the agenda panel: the full page, on disk
+// and served, lays each blob out as a tree (root open, nested containers
+// folded, a long string folded to its whole value). agenda.clear drops the
+// key from both views, and clearing the last key drops the panel.
 func TestWhiteboardAgendaPanelTree(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	src := dashboardPageSource(t, nil)
@@ -304,13 +257,7 @@ func TestWhiteboardAgendaPanelTree(t *testing.T) {
 		"story": long,
 		"flaky": []any{},
 	}})
-	embed := agendaPanelHTML(readPage(t, filepath.Join(f.root, resultLine(t, f.update(t, ``), "embed: "))))
-	if got := panelRows(embed); strings.Join(got, "\n") != "overnight | {flaky, run, story}\nround2 | {notes}" {
-		t.Fatalf("embed agenda rows = %q\n%s", got, embed)
-	}
-	if strings.Contains(embed, `class="tree"`) || strings.Contains(embed, "masonry memo") {
-		t.Fatalf("the embed must stay compact: %s", embed)
-	}
+	f.update(t, ``)
 	for name, page := range map[string]string{"disk": agendaPanelHTML(f.fullPage(t)), "served": served()} {
 		for _, want := range []string{
 			`<details class="tnode" data-key="agenda/overnight" open>`,
@@ -384,11 +331,9 @@ func TestWhiteboardTicketWriteRerendersFullPage(t *testing.T) {
 }
 
 // TestWhiteboardMailboxPanel pins the mailbox panel and its refresh. The full
-// page carries the owned address, the unread count over the named inbox and
-// the reply-id queue, the armed-wait state, the correspondents, and the
-// history ring with the ring's own titles; the embed carries one line. A
-// mailbox.send and a mailbox.recv each re-render the full page; mail
-// arriving from another session shows on the next render.
+// page carries the owned address, unread count, armed-wait state,
+// correspondents, and history ring. mailbox.send and mailbox.recv each
+// re-render it; mail arriving from another session shows on the next render.
 func TestWhiteboardMailboxPanel(t *testing.T) {
 	t0 := time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC)
 	hf := newHistoryFixture(t, t0)
@@ -421,10 +366,7 @@ func TestWhiteboardMailboxPanel(t *testing.T) {
 	if err := wsmailbox.WriteListeningMarker(wsmailbox.ListeningMarker{SessionKey: hf.keyA, PID: os.Getpid(), StartedAt: stamp}); err != nil {
 		t.Fatal(err)
 	}
-	embed := panelHTML(readPage(t, filepath.Join(f.root, resultLine(t, f.update(t, ``), "embed: "))), "mailbox")
-	if got := panelRows(embed); strings.Join(got, "\n") != "alice@worktree | 2 unread" {
-		t.Fatalf("embed mailbox line = %q", got)
-	}
+	f.update(t, ``)
 	if got := panelRows(panelHTML(f.fullPage(t), "mailbox")); len(got) == 0 || got[0] != "alice@worktree | 2 unread, waiting for mail" {
 		t.Fatalf("full mailbox status row = %q", got)
 	}

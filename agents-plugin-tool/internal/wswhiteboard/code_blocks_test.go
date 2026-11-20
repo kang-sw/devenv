@@ -14,9 +14,9 @@ import (
 const codeBody = "intro\n\n```go\nx := 1\ny := 2\nz := 3\n```\n\n```\none line\n```\n\n```mermaid\ngraph TD; A-->B\n```\n"
 
 // TestCodeBlocksScriptReachesEveryPageAndFrame pins where code.js runs: the
-// full page and the embed (after form.js, which defines wbBindBoard), the
-// dashboard's shared form script, and a served topic-body frame, whose
-// document cannot reach the host page's copy.
+// standalone page (after form.js, which defines wbBindBoard), the dashboard's
+// shared form script, and a served topic-body frame, whose document cannot
+// reach the host page's copy.
 func TestCodeBlocksScriptReachesEveryPageAndFrame(t *testing.T) {
 	code, err := embeddedAsset("code.js")
 	if err != nil {

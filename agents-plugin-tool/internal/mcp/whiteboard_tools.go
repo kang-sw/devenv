@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,7 +26,7 @@ import (
 
 // The session whiteboard: whiteboard.update applies a command string to the
 // authoritative topic-folder store (wswhiteboard.Apply) and renders, in one
-// call, the full page, its change stamp, and a new embed snapshot. The model,
+// call, the full page and its change stamp. The model,
 // folder transactions, view, and templates live in internal/wswhiteboard;
 // this file owns derived page publication and artifact lifetime.
 
@@ -48,8 +47,8 @@ const (
 var (
 	errWhiteboardRefused = errors.New("whiteboard batch refused")
 	errNoWhiteboard      = errors.New("session has no whiteboard")
-	// whiteboardFilePattern matches the files a session's board writes:
-	// <reply-id>.html, <reply-id>.stamp.js, <reply-id>-<hash>.html.
+	// whiteboardFilePattern matches legacy flat page/embed files, so the daily
+	// orphan cleanup still retires old snapshots.
 	whiteboardFilePattern = regexp.MustCompile(`^([a-z0-9]+)(?:\.html|\.stamp\.js|-[0-9a-f]+\.html)$`)
 )
 
@@ -76,11 +75,10 @@ func whiteboardLeadOnlyDenial(name string) string {
 	return fmt.Sprintf("%s is not available to a spawned session: the whiteboard is the top-level lead's channel to its user. Put what the user should see in your final report; your lead decides what reaches the board.", name)
 }
 
-// whiteboardSectionProvider supplies one auxiliary panel of both pages and
+// whiteboardSectionProvider supplies one auxiliary panel and
 // declares which tool calls dirty it. Only real sections are registered; a
 // provider with nothing to show yields no panel. A provider gathers its data
-// once per call and shapes the rows for in.layout, so the two pages never
-// drift apart.
+// once per call, so a page never observes mixed source data.
 type whiteboardSectionProvider struct {
 	id        string
 	dirtiedBy []string
@@ -90,8 +88,7 @@ type whiteboardSectionProvider struct {
 // whiteboardPanelInput is everything a provider reads, resolved once by the
 // renderer.
 type whiteboardPanelInput struct {
-	rec    sessionRecord
-	layout wswhiteboard.Layout
+	rec sessionRecord
 	// root is the session root, where the ticket directories live; env is
 	// the environment the ticket read's git runs under (nil means this
 	// process's, the daemon's served page).
@@ -158,8 +155,8 @@ var whiteboardProviders = []whiteboardSectionProvider{
 	},
 }
 
-// todoPanel lists the unfinished todos in store order. The full page folds the
-// done ones below them; the embed keeps the count and omits them.
+// todoPanel lists the unfinished todos in store order and folds the done ones
+// below them.
 func todoPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	todos := in.rec.Todos
 	if len(todos) == 0 {
@@ -171,7 +168,7 @@ func todoPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 		switch {
 		case todo.Status != todoDone:
 			rows = append(rows, row)
-		case in.layout != wswhiteboard.LayoutEmbed:
+		default:
 			folded = append(folded, row)
 		}
 	}
@@ -179,12 +176,8 @@ func todoPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	return wswhiteboard.Panel{ID: "todo", Title: wsi18n.T(in.lang, "panel.todo"), Icon: "todo", Count: fmt.Sprintf("%d/%d", count, len(todos)), Rows: rows, Folded: folded}, true
 }
 
-// agendaPanel shows the agenda blobs in key order. The full page (on disk
-// and served) lays each blob out whole as a foldable tree: the user asked to
-// read the agendas there, which reverses the earlier rule that the panel
-// never shows a blob body. The embed, a frozen snapshot kept in chat
-// history, stays compact: one row per key with the one-line summary
-// agenda.list produces.
+// agendaPanel shows the agenda blobs in key order, each laid out whole as a
+// foldable tree.
 func agendaPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	agenda := in.rec.Agenda
 	if len(agenda) == 0 {
@@ -197,11 +190,7 @@ func agendaPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	sort.Strings(keys)
 	panel := wswhiteboard.Panel{ID: "agenda", Title: wsi18n.T(in.lang, "panel.agenda"), Icon: "agenda", Count: fmt.Sprint(len(keys))}
 	for _, k := range keys {
-		if in.layout == wswhiteboard.LayoutEmbed {
-			panel.Rows = append(panel.Rows, wswhiteboard.PanelRow{Label: k, Text: agendaSummary(agenda[k])})
-		} else {
-			panel.Tree = append(panel.Tree, wswhiteboard.JSONTree("agenda/", k, agenda[k]))
-		}
+		panel.Tree = append(panel.Tree, wswhiteboard.JSONTree("agenda/", k, agenda[k]))
 	}
 	return panel, true
 }
@@ -233,9 +222,8 @@ func whiteboardDirtyingTool(name string) bool {
 // status commands only and attributes them (wswhiteboard.Env.StatusAuthor),
 // refusals name the whiteboard-status playbook, and success is one
 // acknowledgement line. A sub-lead write never enables the lead's board knob
-// and never returns the lead directives (the page URLs, the applied info);
-// it renders no embed, since the lead embeds its own board, and it stamps no
-// user inputs, which the lead's own next entry answers.
+// and never returns the lead directives (the page URL, the applied info). It
+// stamps no user inputs, which the lead's own next entry answers.
 func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any, sublead *subleadBoard) response {
 	const tool = "whiteboard.update"
 	key, err := sessionStateKey(tool, args)
@@ -279,11 +267,6 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any,
 		}
 		env := wswhiteboard.Env{
 			Now: time.Now(),
-			IsDir: func(path string) bool {
-				info, err := os.Stat(path)
-				return err == nil && info.IsDir()
-			},
-			IsAbs: filepath.IsAbs,
 			// wb:panel src reads inside the session's project root, the root
 			// board images resolve against.
 			SourceRoot: rec.Root,
@@ -301,7 +284,7 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any,
 			s.stampBoardInputs(key, rec.Whiteboard, beforeEntry)
 		}
 		var renderErr error
-		render, renderErr = s.renderWhiteboard(rec, key, sublead == nil)
+		render, renderErr = s.renderWhiteboard(rec, key)
 		return renderErr
 	}, &observed)
 	// A successful Apply is not a commit. Conversely a failed replay or
@@ -359,7 +342,6 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any,
 		full = url
 	}
 	sb.WriteString("full: " + full + "\n")
-	sb.WriteString("embed: " + render.embed + "\n")
 	if outcome.Info != "" {
 		sb.WriteString("info: " + outcome.Info + "\n")
 	}
@@ -560,7 +542,7 @@ func markdownSection(body, heading string) string {
 	return strings.TrimSpace(strings.Join(lines[start:], "\n"))
 }
 
-// refreshWhiteboardAfter re-renders the full page (stamp bumped, no embed)
+// refreshWhiteboardAfter re-renders the full page (stamp bumped)
 // after a successful write by a tool that dirties a panel (see
 // whiteboardProviders), once the session's board exists.
 // The gate is board existence, not the knob: a session that never rendered
@@ -580,7 +562,7 @@ func (s *Server) refreshWhiteboardAfter(args map[string]any, resp response) {
 		return
 	}
 	err := s.sessions.mutateRecordParts(key, partAll, partWhiteboard, func(rec *sessionRecord) error {
-		_, err := s.renderWhiteboardPages(rec, key, false, true)
+		_, err := s.renderWhiteboardPages(rec, key, true)
 		return err
 	})
 	if err != nil && !errors.Is(err, errNoWhiteboard) {
@@ -600,11 +582,10 @@ func responseIsError(resp response) bool {
 	return isError
 }
 
-// renderWhiteboard prepares derived pages and embed bookkeeping. The folder
-// transaction publishes them only after its durable commit, with the stamp
-// last. The returned paths are relative to the root (a host embed is bare).
-func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmbed bool) (whiteboardRender, error) {
-	return s.renderWhiteboardPages(rec, sessionKey, withEmbed, false)
+// renderWhiteboard prepares the derived page. The folder transaction publishes
+// it only after its durable commit, with the stamp last.
+func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string) (whiteboardRender, error) {
+	return s.renderWhiteboardPages(rec, sessionKey, false)
 }
 
 // renderWhiteboardPages is renderWhiteboard; refresh additionally begins the
@@ -612,7 +593,7 @@ func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmb
 // published page and stamp, byte for byte, a viewer has nothing new to see:
 // it returns errRecordUnchanged, so neither the stamp-only store commit nor
 // the outputs are rewritten, and open pages are not told to reload.
-func (s *Server) renderWhiteboardPages(rec *sessionRecord, sessionKey string, withEmbed, refresh bool) (whiteboardRender, error) {
+func (s *Server) renderWhiteboardPages(rec *sessionRecord, sessionKey string, refresh bool) (whiteboardRender, error) {
 	var out whiteboardRender
 	st := rec.Whiteboard
 	replyID := wsmailbox.ReplyID(sessionKey)
@@ -631,44 +612,13 @@ func (s *Server) renderWhiteboardPages(rec *sessionRecord, sessionKey string, wi
 		paths:      s.mailboxPaths(),
 		mailbox:    s.whiteboardMailbox(sessionKey, rec.Root),
 	}
-	viewInput := func(layout wswhiteboard.Layout) wswhiteboard.ViewInput {
-		in := panelInput
-		in.layout = layout
-		return wswhiteboard.ViewInput{
-			Layout:        layout,
-			ReplyID:       replyID,
-			Panels:        whiteboardPanels(in),
-			FileLink:      whiteboardItemFileLink(rec.Root, whiteboardPageDir(in)),
-			FullBoardLink: whiteboardFileLink(rec.Root, whiteboardPageDir(in), filepath.Join(pageDir, "index.html")),
-			Tickets:       &whiteboardTickets{root: rec.Root},
-		}
-	}
-
-	if withEmbed {
-		html, err := wswhiteboard.RenderPage(wswhiteboard.BuildView(st, viewInput(wswhiteboard.LayoutEmbed)))
-		if err != nil {
-			return out, fmt.Errorf("render embed: %w", err)
-		}
-		name := replyID + "-" + whiteboardEmbedHash(st.Seq, html) + ".html"
-		target := dir
-		if st.EmbedDir != "" {
-			target = st.EmbedDir
-		}
-		out.files = append(out.files, whiteboardOutput{filepath.Join(target, name), html, "embed"})
-		if st.EmbedDir != "" {
-			// The host owns its folder's lifetime: the server never evicts
-			// there, since the host re-reads a visual's file when it redraws
-			// its chat history.
-			out.embed = name
-		} else {
-			st.Embeds = append(st.Embeds, wswhiteboard.Embed{Seq: st.Seq, Name: name})
-			out.evicted = evictWhiteboardEmbeds(st, dir)
-			out.embed = whiteboardDirRel + "/" + name
-		}
-		st.LastEmbedSeq = st.Seq
-	}
-
-	view := wswhiteboard.BuildView(st, viewInput(wswhiteboard.LayoutFull))
+	view := wswhiteboard.BuildView(st, wswhiteboard.ViewInput{
+		Layout:   wswhiteboard.LayoutFull,
+		ReplyID:  replyID,
+		Panels:   whiteboardPanels(panelInput),
+		FileLink: whiteboardItemFileLink(rec.Root, whiteboardPageDir(panelInput)),
+		Tickets:  &whiteboardTickets{root: rec.Root},
+	})
 	view.StampFile = "index.stamp.js"
 	if refresh {
 		// The view depends on the sequence only through view.Seq, so one
@@ -769,11 +719,10 @@ func ensureWhiteboardMermaid(dir, html string) error {
 }
 
 // whiteboardRender is derived output prepared during a store mutation.
-// Publication and retention run under the folder lock after commit.
+// Publication runs under the folder lock after commit.
 type whiteboardRender struct {
-	full, embed string
-	files       []whiteboardOutput
-	evicted     []string
+	full  string
+	files []whiteboardOutput
 }
 
 type whiteboardOutput struct {
@@ -805,36 +754,7 @@ func (r whiteboardRender) publish() (err error) {
 			rememberWhiteboardPage(file.path, file.text)
 		}
 	}
-	for _, path := range r.evicted {
-		_ = os.Remove(path)
-	}
 	return nil
-}
-
-// whiteboardEmbedHash derives an embed's short hash from the render sequence
-// together with the content, so two identical renders still get distinct
-// names: hosts expect a new file per visual, and retention deletes recorded
-// names.
-func whiteboardEmbedHash(seq int, html string) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%d\n%s", seq, html)))
-	return hex.EncodeToString(sum[:])[:10]
-}
-
-// evictWhiteboardEmbeds keeps the newest EmbedRetention embeds in the
-// repository folder, ordered by render sequence, never by file mtime, and
-// returns the paths of the dropped ones for the caller to delete.
-func evictWhiteboardEmbeds(st *wswhiteboard.State, dir string) []string {
-	if len(st.Embeds) <= wswhiteboard.EmbedRetention {
-		return nil
-	}
-	sort.SliceStable(st.Embeds, func(i, j int) bool { return st.Embeds[i].Seq < st.Embeds[j].Seq })
-	drop := len(st.Embeds) - wswhiteboard.EmbedRetention
-	var paths []string
-	for _, old := range st.Embeds[:drop] {
-		paths = append(paths, filepath.Join(dir, old.Name))
-	}
-	st.Embeds = append([]wswhiteboard.Embed(nil), st.Embeds[drop:]...)
-	return paths
 }
 
 // writeWhiteboardFile replaces path through a temp file and a rename, so a

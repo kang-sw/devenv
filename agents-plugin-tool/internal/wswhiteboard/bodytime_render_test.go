@@ -73,12 +73,9 @@ func TestBodyTimeFrameBundleOwnsItsFormatter(t *testing.T) {
 	wantNone(t, string(chg), "window.parent", "data-at", "ChangedAt", "BodyTimeProof", "toLocale", "toISOString", ".focus(", "scrollIntoView")
 }
 
-func TestBodyTimeDoesNotAddAClockToEmbedOrBodylessTopics(t *testing.T) {
+func TestBodyTimeDoesNotAddAClockToBodylessTopics(t *testing.T) {
 	view := View{Layout: LayoutFull, Topics: []TopicView{{Name: "empty", Label: "Empty", BodyUpdatedAt: "2026-01-01T00:00:00Z"}}}
 	wantNone(t, markup(render(t, view)), `class="body-age"`)
-	view.Layout = LayoutEmbed
-	view.Topics[0].Doc = "body"
-	wantNone(t, markup(render(t, view)), `class="body-age"`, `data-body-at=`)
 }
 
 func TestBodyTimeDeferredAndClosedRenderKeepTheSameSource(t *testing.T) {
