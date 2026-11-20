@@ -1,5 +1,5 @@
 ---
-title: "agent-v2 도그푸드 서프라이즈 및 agy compaction 배지/배경 유예 수정"
+title: "agent-v2 도그푸딩 발견 사항 및 agy compaction 배지·백그라운드 유예 수정"
 parent: 261114-epic-ws-common-session-foundation
 related:
   261117-feat-ws-hosted-prompt-assembly: "hosted manual, playbook.render, and steer rendering surfaces"
@@ -183,20 +183,25 @@ timing only; no stored shape or protocol change).
 
 ### Phase 4: Daemon swap (`--replace`) and agy turn/child lifecycle
 
-1. **Item 8 — Mail sent after a daemon swap (`--replace`) does not wake an idle agy child *(Diagnosis needed)*:**
+1. **Item 8 — Mail sent after a daemon swap (`--replace`) does not wake an idle agy child *(diagnosed)*:**
    - **Observed symptom:** After a daemon `--replace`, `mailbox.send` to an idle
      agy child does not wake the child.
-   - **Expected behavior:** Mail sent after `--replace` wakes an addressable
-     idle agy child reliably, or if non-holder-backed children cannot survive
-     daemon replacement, their retired/stopped status is surfaced explicitly
-     rather than silently dropping wakes.
+   - **Diagnosed cause:** The agy `agent.spawn` worker is daemon-owned. Daemon
+     replacement kills its process and startup settles any persisted open turn
+     interrupted, so no surviving child process remains for mail to wake.
+   - **Ownership:** Survival/wake continuity is implemented by
+     `261120-refactor-ws-agent-workers-under-holders`, which moves every
+     `agent.spawn` worker under a holder.
 
-2. **Item 10 — An agy turn silent for >30 s after a `--replace` ends early *(Diagnosis needed)*:**
+2. **Item 10 — An agy turn silent for >30 s after a `--replace` ends early *(diagnosed)*:**
    - **Observed symptom:** After a daemon `--replace`, an agy turn that produces
      no output for >30 s ends early.
-   - **Expected behavior:** An active agy turn silent for >30 s (for example
-     during model thinking or long tool/command work) remains open after
-     `--replace` until the harness reports turn completion or failure.
+   - **Diagnosed cause:** The agy `agent.spawn` worker is daemon-owned. Daemon
+     replacement kills the worker process and the successor settles its open
+     turn interrupted; the silence threshold is not the continuity mechanism.
+   - **Ownership:** In-flight turn continuity and parent exactly-once reporting
+     across replacement are implemented by
+     `261120-refactor-ws-agent-workers-under-holders`.
 
 3. **Item 14 — agy child turn ends with only a stream-idle API error as its final report *(fix in progress)*:**
    - **Observed symptom (2026-11-19):** an agy child's turn can end with only
@@ -206,7 +211,10 @@ timing only; no stored shape or protocol change).
      child as received by the lead).
    - **Status:** a watchdog fix is in progress on branch
      `impl/develop/agy-model-wait-watchdog`; this ticket tracks the symptom
-     only and takes no implementation from that branch.
+     only and takes no implementation from that branch. Re-arming the agy
+     model-wait watchdog across daemon replacement is explicitly out of scope
+     for `261120-refactor-ws-agent-workers-under-holders`; held workers match
+     current held-lead behavior there.
    - **Expected behavior:** a stream-idle timeout is retried or reported as a
      turn failure that the lead can distinguish from a completed report, never
      as the final report of a finished turn.
