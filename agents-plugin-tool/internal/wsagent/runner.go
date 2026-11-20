@@ -1658,6 +1658,8 @@ type State struct {
 	Status string `json:"status"`
 	// Process reports a live backend process.
 	Process bool `json:"process"`
+	// Holding reports whether a finished turn is held pending child reports.
+	Holding bool `json:"holding,omitempty"`
 	// Hidden is dashboard sidecar state, never part of the runner record.
 	Hidden    bool                         `json:"hidden,omitempty"`
 	Lifecycle wsdashboard.SessionLifecycle `json:"lifecycle,omitempty"`

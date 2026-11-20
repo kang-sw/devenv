@@ -691,6 +691,7 @@ func (c *conv) processEnded() {
 	hadBgGrace := c.bgGraceTimer != nil
 	c.stopBgGrace()
 	c.wrapHold = false
+	hadTurn := c.turn
 	if c.turn {
 		c.setStatus(func() { c.turn = false })
 		c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
@@ -734,6 +735,9 @@ func (c *conv) processEnded() {
 	c.syncHost(true)
 	c.live.endAgents()
 	c.live.writeSnapshot()
+	if !c.closed && !c.quitting && !hadTurn && !hadBackgroundTasks && !hadBgGrace {
+		c.watched()
+	}
 	c.r.notify(c.rec.ReplyID, c.rec.Root)
 }
 

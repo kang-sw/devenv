@@ -355,6 +355,10 @@ type Agent struct {
 	// BackgroundTasks counts background commands the subagent's harness is
 	// still running after its turn ended; absent when zero.
 	BackgroundTasks int `json:"backgroundTasks,omitempty"`
+	// Holding and Alive report daemon-hosted worker liveness while Status stays
+	// legacy-compatible (StatusDone when not actively running or holding mail).
+	Holding bool `json:"holding,omitempty"`
+	Alive   bool `json:"alive,omitempty"`
 }
 
 // Permission is a tool permission prompt the agent waits on. The approval

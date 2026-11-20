@@ -219,6 +219,7 @@ type TreeView struct {
 	Peers                     PeerGroup
 	CompactAgents             []AgentNode
 	Subagents                 SubagentCount
+	HUD                       HUDView
 }
 
 // RunningAgents and EndedAgents split the top-level subagents into the
@@ -757,6 +758,7 @@ func buildSessionView(in pageInputs) SessionView {
 	attributeBoardNavigation(&v.Conversation, in.Page.BoardTargets)
 	v.Conversation.Sent = sentMarks(in.Drained, in.Held, in.Page.Reasked, settledTurnStart(in.Ring))
 	v.Tree.Subagents, v.Tree.CompactAgents = subagentProjection(reg.ReplyID, in.Snapshot.Agents, lookup, in.Now)
+	v.Tree.HUD = hudProjection(reg.ReplyID, v.Label, v.Harness, in.Snapshot.Agents, len(v.Tree.Peers.Live), lookup, in.Now)
 	v.Conversation.Subagents = v.Tree.Subagents
 	return v
 }

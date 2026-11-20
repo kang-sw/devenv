@@ -100,6 +100,9 @@ type Event struct {
 	TurnStartedAt int64 `json:"turnStartedAt,omitempty"`
 	// BackgroundTasks counts running background tasks for a subagent row.
 	BackgroundTasks int `json:"backgroundTasks,omitempty"`
+	// Holding and Alive carry live hosted-worker liveness onto Pi agent rows.
+	Holding bool `json:"holding,omitempty"`
+	Alive   bool `json:"alive,omitempty"`
 	// Caption replaces the caption when present; "" clears it.
 	Caption *string `json:"caption,omitempty"`
 	// Batches replaces the agent's batch list when present.
@@ -198,6 +201,7 @@ type agentState struct {
 	contextTokens                        int64
 	outputTps                            float64
 	bgTasks                              int
+	holding, alive                       bool
 }
 
 // State is one session's live state: the reducer from adapter events to a
@@ -625,7 +629,7 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		batches = st.normalizeBatches(ev.Batches)
 	}
 	if ev.AgentID == "" {
-		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" || ev.AgentKind != "" || ev.Harness != "" || ev.ActiveMs != 0 || ev.TurnStartedAt != 0 || ev.BackgroundTasks != 0 || hasTelemetry(ev) || ev.Observed != nil || ev.OutputRate != nil {
+		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" || ev.AgentKind != "" || ev.Harness != "" || ev.ActiveMs != 0 || ev.TurnStartedAt != 0 || ev.BackgroundTasks != 0 || ev.Holding || ev.Alive || hasTelemetry(ev) || ev.Observed != nil || ev.OutputRate != nil {
 			return fmt.Errorf("the lead takes only batches and caption; set agentId for a subagent")
 		}
 		st.setActivity(&st.lead, ev, batches)
@@ -677,6 +681,9 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		}
 		a.status = ev.Status
 		a.permission = nil
+		if ev.AgentKind != AgentKindPi {
+			a.holding, a.alive = false, false
+		}
 		st.batchesEnded += uint64(len(closeBatches(&a.activityState, at)))
 	}
 	if ev.AgentKind == AgentKindPi {
@@ -686,6 +693,8 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		a.activeMs = max(ev.ActiveMs, 0)
 		a.turnStartedAt = max(ev.TurnStartedAt, 0)
 		a.bgTasks = max(ev.BackgroundTasks, 0)
+		a.holding = ev.Holding
+		a.alive = ev.Alive
 	} else if ev.BackgroundTasks > 0 || ev.Status == StatusFailed {
 		a.bgTasks = max(ev.BackgroundTasks, 0)
 	}
@@ -938,10 +947,44 @@ func (st *State) retain() {
 		}
 		groups[id] = append(groups[id], a)
 	}
+	canonical := func(id string) string {
+		if target := st.spawnAliases[id]; st.agents[target] != nil {
+			return target
+		}
+		return id
+	}
+	protected := map[string]bool{}
+	for id := range groups {
+		a := st.agents[id]
+		if a.status == StatusRunning || a.bgTasks > 0 || a.holding || a.alive {
+			protected[id] = true
+		}
+	}
+	seeds := make([]string, 0, len(protected))
+	for id := range protected {
+		seeds = append(seeds, id)
+	}
+	for _, start := range seeds {
+		visited := map[string]bool{start: true}
+		cur := start
+		for {
+			a := st.agents[cur]
+			if a == nil || a.parentID == "" {
+				break
+			}
+			p := canonical(a.parentID)
+			if visited[p] || st.agents[p] == nil || groups[p] == nil {
+				break
+			}
+			visited[p] = true
+			protected[p] = true
+			cur = p
+		}
+	}
 	var running, finished []*agentState
 	for id := range groups {
 		a := st.agents[id]
-		if a.status == StatusRunning || a.bgTasks > 0 {
+		if protected[id] {
 			running = append(running, a)
 		} else {
 			finished = append(finished, a)
@@ -1013,6 +1056,8 @@ func (st *State) SeedFinished(prev Snapshot) {
 			endedAt:       p.EndedAt,
 			activeMs:      p.ActiveMs,
 			touched:       p.EndedAt,
+			// Holding and Alive are intentionally not seeded from disk (T0):
+			// liveness is republished solely from RAM by live writers.
 			model:         cleanLine(st.scrub.scrub(p.Model), ModelRunes),
 			effort:        cleanLine(st.scrub.scrub(p.Effort), EffortRunes),
 			contextTokens: p.ContextTokens,
@@ -1085,6 +1130,8 @@ func (st *State) Snapshot(now int64) Snapshot {
 			ContextTokens:   a.contextTokens,
 			OutputTps:       a.outputTps,
 			BackgroundTasks: a.bgTasks,
+			Holding:         a.holding,
+			Alive:           a.alive,
 		})
 	}
 	sort.Slice(snap.Agents, func(i, j int) bool {

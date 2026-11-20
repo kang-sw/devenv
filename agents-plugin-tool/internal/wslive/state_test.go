@@ -921,3 +921,93 @@ func TestBatchViewJSONIsUnchangedByTelemetry(t *testing.T) {
 		t.Fatalf("batch JSON = %s, want %s", raw, want)
 	}
 }
+
+func TestHoldingAndAliveT0RoundTripAndSeedFinished(t *testing.T) {
+	st := NewState(ownerKey)
+	if _, err := st.Apply(Event{Kind: KindAgent, Holding: true}, 50); err == nil {
+		t.Fatal("lead agent event with holding should be refused")
+	}
+	if _, err := st.Apply(Event{Kind: KindAgent, Alive: true}, 51); err == nil {
+		t.Fatal("lead agent event with alive should be refused")
+	}
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "pi:hold", AgentKind: AgentKindPi, Status: StatusDone, Holding: true, Alive: true}, 100)
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "pi:idle", AgentKind: AgentKindPi, Status: StatusDone, Alive: true}, 110)
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "native", Status: StatusDone, Holding: true, Alive: true}, 120)
+
+	raw, err := json.Marshal(st.Snapshot(200))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), SnapshotName)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := ReadSnapshot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]Agent{}
+	for _, a := range snap.Agents {
+		byID[a.ID] = a
+	}
+	if !byID["pi:hold"].Holding || !byID["pi:hold"].Alive {
+		t.Fatalf("pi:hold lost holding/alive: %+v", byID["pi:hold"])
+	}
+	if byID["pi:idle"].Holding || !byID["pi:idle"].Alive {
+		t.Fatalf("pi:idle = %+v", byID["pi:idle"])
+	}
+	if byID["native"].Holding || byID["native"].Alive {
+		t.Fatalf("non-Pi done row should clear holding/alive: %+v", byID["native"])
+	}
+
+	// T0 evidence 3: SeedFinished MUST NOT seed Holding/Alive from disk.
+	seeded := NewState(ownerKey)
+	seeded.SeedFinished(snap)
+	for _, a := range seeded.Snapshot(300).Agents {
+		if a.Holding || a.Alive {
+			t.Fatalf("SeedFinished copied liveness from disk: %+v", a)
+		}
+	}
+}
+
+func TestRetainProtectsHoldingAliveAndAncestorsUnderCap(t *testing.T) {
+	st := NewState(ownerKey)
+	// Parent is StatusDone without holding/alive, but has a running grandchild.
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "pi:root", AgentKind: AgentKindPi, Status: StatusDone}, 10)
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "pi:mid", ParentID: "pi:root", AgentKind: AgentKindPi, Status: StatusDone}, 11)
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "pi:leaf", ParentID: "pi:mid", AgentKind: AgentKindPi, Status: StatusRunning}, 12)
+	// Holding and alive-idle Pi workers arrive with StatusDone.
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "pi:hold", AgentKind: AgentKindPi, Status: StatusDone, Holding: true, Alive: true}, 13)
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "pi:idle", AgentKind: AgentKindPi, Status: StatusDone, Alive: true}, 14)
+	// Cyclic ParentID edges must not hang retain().
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "cyc-a", ParentID: "cyc-b", Status: StatusRunning}, 15)
+	mustApply(t, st, Event{Kind: KindAgent, AgentID: "cyc-b", ParentID: "cyc-a", Status: StatusDone}, 16)
+	// Exceed FinishedAgentCap to force eviction of unprotected finished rows.
+	for i := 0; i < FinishedAgentCap+4; i++ {
+		id := fmt.Sprintf("fin-%d", i)
+		mustApply(t, st, Event{Kind: KindAgent, AgentID: id, Status: StatusRunning}, int64(20+i))
+		mustApply(t, st, Event{Kind: KindAgent, AgentID: id, Status: StatusDone}, int64(100+i))
+	}
+	byID := map[string]Agent{}
+	for _, a := range st.Snapshot(200).Agents {
+		byID[a.ID] = a
+	}
+	for _, keep := range []string{"pi:root", "pi:mid", "pi:leaf", "pi:hold", "pi:idle", "cyc-a", "cyc-b"} {
+		if _, ok := byID[keep]; !ok {
+			t.Fatalf("protected agent %q was evicted under FinishedAgentCap; kept=%v", keep, byID)
+		}
+	}
+	// RunningAgentCap still bounds protected rows.
+	for i := 0; i < RunningAgentCap+5; i++ {
+		mustApply(t, st, Event{Kind: KindAgent, AgentID: fmt.Sprintf("alive-%d", i), AgentKind: AgentKindPi, Status: StatusDone, Alive: true}, int64(300+i))
+	}
+	var protectedCount int
+	for _, a := range st.Snapshot(500).Agents {
+		if a.Status == StatusRunning || a.Holding || a.Alive || a.ID == "pi:root" || a.ID == "pi:mid" || a.ID == "cyc-b" {
+			protectedCount++
+		}
+	}
+	if protectedCount > RunningAgentCap {
+		t.Fatalf("protected count %d exceeds RunningAgentCap %d", protectedCount, RunningAgentCap)
+	}
+}

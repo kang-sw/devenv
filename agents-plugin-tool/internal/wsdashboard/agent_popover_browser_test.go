@@ -137,3 +137,107 @@ func TestAgentBadgePopoverBrowser(t *testing.T) {
 		t.Fatalf("agent badge popover: %v", err)
 	}
 }
+
+func TestHUDOrgChartBrowser(t *testing.T) {
+	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
+		t.Skip("set WS_PLAYWRIGHT_MODULE for disposable Chromium acceptance")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	f := startPageFixture(t)
+	now := time.Now().UnixMilli()
+	mk := func(id, parent, label, harness, status, phase, model, effort, cap string, activeMs int64, holding, alive bool) wslive.Agent {
+		a := wslive.Agent{ID: id, ParentID: parent, Label: label, Harness: harness, Status: status, Model: model, Effort: effort, Holding: holding, Alive: alive, ActiveMs: activeMs, StartedAt: now - activeMs}
+		a.Caption = cap
+		if status == wslive.StatusRunning {
+			a.Phase, a.TurnStartedAt = phase, now-activeMs
+		} else {
+			a.EndedAt = now - 10000
+		}
+		return a
+	}
+	// Heavy 12-agent 3-level tree covering all 6 states and 4 harnesses + 2 done folded into 완료 2
+	h2 := mk("h2", "h1", "ast-scanner", "claude", wslive.StatusDone, "", "sonnet-4.6", "medium", "Aggregating symbols", 108000, true, true)
+	h2.ReplyID = "boardsession"
+	h5 := mk("h5", "h1", "schema-diff", "codex", wslive.StatusRunning, wslive.PhaseTool, "gpt-5.4", "high", "apply_patch", 65000, false, true)
+	h5.Batches = []wslive.BatchView{{Seq: 1, StartedAt: now - 5000, Running: &wslive.RunningView{ToolName: "apply_patch", ArgsPreview: "v2.go", StartedAt: now - 5000}}}
+	h7 := mk("h7", "h6", "cycle-detect", "claude", wslive.StatusRunning, wslive.PhaseThinking, "sonnet-4.6", "medium", "Needs approval", 78000, false, true)
+	h7.Permission = &wslive.Permission{ToolName: "bash", ArgsPreview: "git diff", StartedAt: now - 4000}
+	heavy := wslive.Snapshot{SchemaVersion: 1, Adapter: "claude", UpdatedAt: now, HeartbeatMs: 30000,
+		Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseThinking}},
+		Agents: []wslive.Agent{
+			mk("h1", "", "parser-worker", "codex", wslive.StatusDone, "", "gpt-5.4", "high", "Waiting on ast-scanner", 134000, true, true),
+			h2,
+			mk("h3", "h2", "sym-extract", "agy", wslive.StatusRunning, wslive.PhaseTool, "gemini-4-h", "high", "rg -n internal/", 41000, false, true),
+			mk("h4", "h2", "type-bounds", "pi", wslive.StatusRunning, wslive.PhaseThinking, "o3-mini", "medium", "Constraint graph", 29000, false, true),
+			h5,
+			mk("h6", "", "graph-auditor", "claude", wslive.StatusDone, "", "opus-4.6", "high", "Waiting on cycle-detect", 129000, true, true),
+			h7,
+			mk("h8", "h6", "import-lint", "pi", wslive.StatusDone, "", "gpt-5.4", "low", "Standby", 44000, false, true),
+			mk("h9", "", "test-runner", "agy", wslive.StatusDone, "", "gemini-4-h", "high", "Collecting test matrix", 115000, true, true),
+			mk("h10", "h9", "unit-matrix", "codex", wslive.StatusRunning, wslive.PhaseTool, "gpt-5.4", "medium", "go test", 58000, false, true),
+			mk("h11", "h9", "e2e-smoke", "claude", wslive.StatusFailed, "", "sonnet-4.6", "medium", "exit 1", 37000, false, false),
+			mk("h12", "h8", "pkg-edges", "codex", wslive.StatusRunning, wslive.PhaseTool, "gpt-5.4", "medium", "go list -deps", 19000, false, true),
+			mk("hd1", "h1", "cache-warm", "pi", wslive.StatusDone, "", "gpt-5.4", "low", "", 30000, false, false),
+			mk("hd2", "h9", "bench-closed", "agy", wslive.StatusDone, "", "gemini-4-h", "low", "", 40000, false, false),
+		}}
+
+	// Depth-4 + 2 overflow children at depth 5
+	depth := wslive.Snapshot{SchemaVersion: 1, Adapter: "claude", UpdatedAt: now, HeartbeatMs: 30000,
+		Agents: []wslive.Agent{
+			mk("d1", "", "arch-lead", "claude", wslive.StatusDone, "", "opus-4.6", "high", "", 60000, true, true),
+			mk("d2", "d1", "core-split", "codex", wslive.StatusDone, "", "gpt-5.4", "high", "", 50000, true, true),
+			mk("d3", "d2", "ast-rewriter", "agy", wslive.StatusDone, "", "gemini-4-h", "high", "", 40000, true, true),
+			mk("d4", "d3", "leaf-patcher", "pi", wslive.StatusRunning, wslive.PhaseTool, "o3-mini", "medium", "patching", 30000, false, true),
+			mk("d5a", "d4", "depth5-a", "codex", wslive.StatusRunning, wslive.PhaseThinking, "gpt-5.4", "low", "", 10000, false, true),
+			mk("d5b", "d4", "depth5-b", "claude", wslive.StatusRunning, wslive.PhaseTool, "sonnet-4.6", "low", "", 8000, false, true),
+		}}
+
+	// Wide fan-out (14 direct)
+	fanAgents := make([]wslive.Agent, 14)
+	harnesses := []string{"claude", "codex", "agy", "pi"}
+	for i := range fanAgents {
+		fanAgents[i] = mk(string(rune('a'+i)), "", "shard", harnesses[i%4], wslive.StatusRunning, wslive.PhaseTool, "gpt-5.4", "medium", "work", int64(10000+i*1000), false, true)
+	}
+	fanout := wslive.Snapshot{SchemaVersion: 1, Adapter: "claude", UpdatedAt: now, HeartbeatMs: 30000, Agents: fanAgents}
+	idleOnly := wslive.Snapshot{SchemaVersion: 1, Adapter: "claude", UpdatedAt: now, HeartbeatMs: 30000,
+		Agents: []wslive.Agent{
+			mk("done1", "", "done-a", "claude", wslive.StatusDone, "", "sonnet-4.6", "low", "", 15000, false, false),
+			mk("done2", "", "done-b", "codex", wslive.StatusDone, "", "gpt-5.4", "low", "", 22000, false, false),
+		}}
+
+	f.d.snapshots.SetLive(f.dir, "livesession", heavy)
+	f.d.broker.wake(liveDep("livesession"))
+	switcher := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var next wslive.Snapshot
+		switch r.URL.Query().Get("s") {
+		case "depth":
+			next = depth
+		case "fanout":
+			next = fanout
+		case "idle":
+			next = idleOnly
+		default:
+			next = heavy
+		}
+		next.UpdatedAt = time.Now().UnixMilli()
+		f.d.snapshots.SetLive(f.dir, "livesession", next)
+		f.d.broker.wake(liveDep("livesession"))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer switcher.Close()
+
+	mockupPath, _ := filepath.Abs(filepath.Join("..", "..", "..", "ai-docs", "assets", "mockups", "261120", "chat-agent-roster-hud", "roster-hud-v2.html"))
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, node, "testdata/hud.browser.cjs")
+	cmd.Env = append(os.Environ(), "HUD_BASE="+f.base, "HUD_SWITCH="+switcher.URL, "HUD_MOCKUP="+mockupPath, "HUD_SHOTS="+os.Getenv("WS_HUD_SHOTS"))
+	cmd.WaitDelay = 5 * time.Second
+	out, err := cmd.CombinedOutput()
+	t.Logf("%s", out)
+	if err != nil {
+		t.Fatalf("hud org chart browser: %v", err)
+	}
+}

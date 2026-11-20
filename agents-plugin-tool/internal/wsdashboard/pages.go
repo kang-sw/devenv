@@ -46,6 +46,7 @@ var dashboardScriptFiles = []string{
 	"dashboard-board.js",
 	"dashboard-conversation.js",
 	"dashboard-bundles.js",
+	"dashboard-hud.js",
 	"dashboard-composer.js",
 	"dashboard-actions.js",
 	"dashboard-drawer.js",
@@ -407,12 +408,35 @@ func pageFuncs(lang string, icons map[string]bool) template.FuncMap {
 			}
 			return template.HTML(`<svg class="i" aria-hidden="true"><use href="#i-` + name + `"/></svg>`), nil
 		},
-		"region":    renderRegionElement,
-		"clock":     clockText,
+		"region":   renderRegionElement,
+		"clock":    clockText,
+		"spanText": spanText,
+		"toolName": toolName,
+		"shortID":  shortID,
+		"hudJSON": func(v HUDView) (template.JS, error) {
+			var strip func([]HUDNode) []HUDNode
+			strip = func(in []HUDNode) []HUDNode {
+				if len(in) == 0 {
+					return in
+				}
+				out := make([]HUDNode, len(in))
+				for i, n := range in {
+					if n.OwnRow {
+						n.Task = ""
+					}
+					n.Children = strip(n.Children)
+					out[i] = n
+				}
+				return out
+			}
+			v.Roots = strip(v.Roots)
+			b, err := json.Marshal(v)
+			if err != nil {
+				return "", err
+			}
+			return template.JS(b), nil
+		},
 		"sinceText": func(at, ms int64) string { return spanText(max(at-ms+500, 0)) },
-		"spanText":  spanText,
-		"toolName":  toolName,
-		"shortID":   shortID,
 		"marked":    func(text string) template.HTML { return markedText(lang, text) },
 		// The tool summary's token and batch lines.
 		"tokenText":        func(requests int, u *wslive.TokenUsage) string { return tokenText(lang, requests, u) },

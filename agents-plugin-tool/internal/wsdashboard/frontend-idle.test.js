@@ -90,3 +90,14 @@ test('idle CSS bounds animation rates and contains without paint or size contain
   assert.match(board, /doc\.body\.appendChild\(sheet\)/);
   assert.match(clocks, /time\.tago, time\.entry-at\[data-at\] \{[^}]*contain: layout style;/);
 });
+
+test('HUD node animations pause when hidden and disable under reduced motion', () => {
+  const base = read(dashboard, 'dashboard.css');
+  const conversation = read(dashboard, 'dashboard-conversation.css');
+  for (const name of ['hud-spin-think', 'hud-spin-tool', 'hud-hold-breathe', 'hud-perm-pulse']) {
+    assert.match(conversation, new RegExp(`@keyframes ${name}\\b`), `missing @keyframes ${name}`);
+  }
+  assert.match(base, /:root\[data-animation-paused\]\s+\.hud-node\[data-state\]\s+\.hud-ring\s*\{\s*animation-play-state:\s*paused;\s*\}/);
+  assert.match(base, /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.hud-node\[data-state\]\s+\.hud-ring\s*\{\s*animation:\s*none;\s*\}\s*\}/);
+  assert.match(conversation, /@media \(prefers-reduced-motion: reduce\)\s*\{[^@]*\.hud-node\[data-state\]\s+\.hud-ring\s*\{\s*animation:\s*none;\s*\}/);
+});
