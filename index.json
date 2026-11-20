@@ -566,31 +566,8 @@
     "261120-feat-ws-agy-timeout-process-respawn": {
       "registered_at": "2026-11-20T14:49:51Z"
     },
-    "261120-feat-ws-dashboard-chat-agent-roster-hud": {
-      "registered_at": "2026-11-20T14:14:08Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-20T14:37:42Z",
-        "impl": {
-          "branch": "impl/develop/gooey-shock-conch"
-        }
-      }
-    },
     "261120-feat-ws-dashboard-numbers-screen": {
       "registered_at": "2026-11-20T11:31:45Z"
-    },
-    "261120-feat-ws-dashboard-rail-workspace-admission": {
-      "registered_at": "2026-11-20T14:22:04Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-20T15:17:35Z"
-      }
     },
     "261120-feat-ws-pi-common-interface-rebuild": {
       "registered_at": "2026-11-20T14:10:37Z"
@@ -612,7 +589,14 @@
       }
     },
     "261121-bug-ws-dogfood-tune-agy-release-route-gaps": {
-      "registered_at": "2026-11-20T16:43:05Z"
+      "registered_at": "2026-11-20T16:43:05Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-20T18:30:04Z"
+      }
     }
   }
 }
