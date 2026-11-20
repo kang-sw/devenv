@@ -1170,7 +1170,7 @@
   // or the dialog, nor from a row's in-place edit (editRowHtml, .ned), which stays open until saved
   // or dropped, though it carries the row's data-item.
   function clickItem(t) {
-    return t.closest('select, textarea, input, #tkdlg, .ned') ? null : t.closest('[data-item]');
+    return t.closest('select, textarea, input, #tkdlg, #tkpm, .ned') ? null : t.closest('[data-item]');
   }
   // The "⋯" button every menu-capable row, card, entry, and the item window header carries.
   function moreBtn(id, cls, tab) {

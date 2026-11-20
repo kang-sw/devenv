@@ -160,10 +160,10 @@ done();
 }
 
 // TestTrackerItemWindowCC pins the item window's CC list (tracker.js ccHtml):
-// one row per CC'd member with a remove control, a "+" that opens the item
-// menu's CC step, no controls on a hidden item (and no section when it has
-// no CC), and the writes the controls send: item.cc {item, member} from the
-// CC step's pick and item.uncc {item, member} from a row's remove. The
+// one row per CC'd member with a remove control, a "+" that opens the shared
+// CC picker modal, no controls on a hidden item (and no section when it has
+// no CC), and the writes the controls send: batched item.cc / item.uncc from
+// the modal apply path and item.uncc {item, member} from a row's remove. The
 // cases execute under node when it is installed.
 func TestTrackerItemWindowCC(t *testing.T) {
 	data, err := dashboardTestAsset("assets/tracker.js")
@@ -173,10 +173,12 @@ func TestTrackerItemWindowCC(t *testing.T) {
 	js := string(data)
 	for _, want := range []string{
 		"case 'uncc': put([['item.uncc', { item: item, member: who }]]); break;",
-		"case 'm-cc': return commit([['item.cc', { item: id, member: a.getAttribute('data-to') }]]);",
+		"openPicker(opts.step, { item: id }, opener);",
+		"out.push(['item.cc', { item: itemId, member: id }]);",
+		"out.push(['item.uncc', { item: itemId, member: id }]);",
+		"pmCcEvents(PM.item, PM.idx, PM.origCc, PM.picks, PM.groups)",
 		"case 'item.cc': return wsT(\"js.tk.ev.cc\", esc(p.member), ref(p.item));",
 		"case 'item.uncc': return wsT(\"js.tk.ev.uncc\", esc(p.member), ref(p.item));",
-		"if (step === 'cc') {",
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("tracker.js lacks %q", want)

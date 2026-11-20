@@ -423,7 +423,139 @@
     }
   }
 
-  function pmClick() {}
-  function pmInput() {}
-  function pmKey() {}
+  function pmVisibleIds() {
+    var body = $('tkpm-body');
+    if (!body) return [];
+    var out = [];
+    Array.prototype.forEach.call(body.querySelectorAll('.pm-nd[data-id]'), function (el) {
+      var li = el.parentNode;
+      if (li && li.parentNode && li.parentNode.closest && li.parentNode.closest('li.shut')) return;
+      out.push(el.getAttribute('data-id'));
+    });
+    return out;
+  }
+
+  function pmTogMap(map, id) {
+    if (map[id]) delete map[id]; else map[id] = true;
+  }
+
+  function pmToggleSelf(id) {
+    if (!PM || !id) return;
+    var ev = pmCcEvalCur();
+    if (ev.cov.personBy[id]) return;
+    PM.err = '';
+    pmTogMap(PM.picks, id);
+    PM.focusId = id;
+    pmDraw();
+  }
+
+  function pmToggleGrp(id) {
+    if (!PM || !id) return;
+    var ev = pmCcEvalCur();
+    if (ev.cov.groupBy[id]) return;
+    PM.err = '';
+    pmTogMap(PM.groups, id);
+    PM.focusId = id;
+    pmDraw();
+  }
+
+  function pmRestoreFocus(backEl, back) {
+    var el = backEl && backEl.isConnected ? backEl : back && document.querySelector(back);
+    if (el && !el.matches('a[href], button, input, [tabindex]')) el = el.querySelector('a[href], button, [tabindex]');
+    if (el) el.focus({ preventScroll: true });
+  }
+
+  function pmApply() {
+    if (!PM || PM.busy) return;
+    var events = pmCcEvents(PM.item, PM.idx, PM.origCc, PM.picks, PM.groups);
+    if (!events.length) return;
+    var cur = PM;
+    cur.busy = true;
+    cur.err = '';
+    pmDraw();
+    AD.dispatch(cur.store, events.map(function (ev) {
+      return { type: ev[0], payload: ev[1], origin: ev[2] || 'human' };
+    }), function (res) {
+      if (PM !== cur) return;
+      if (!res || !res.ok) {
+        cur.busy = false;
+        var r = res && res.refusal && res.refusal.reason;
+        cur.err = r ? String(r) : String((res && res.error) || wsT("js.tk.toast.refused"));
+        pmDraw();
+        return;
+      }
+      var backEl = cur.backEl, back = cur.back;
+      pmClose(false);
+      wrote(res.results || []);
+      pmRestoreFocus(backEl, back);
+    });
+  }
+
+  function pmClick(e) {
+    e.stopPropagation();
+    if (!PM) return;
+    if (e.target === $('tkpm')) { pmClose(true); return; }
+    var a = e.target.closest('[data-pm]');
+    if (!a) {
+      var row = e.target.closest('.pm-nd[data-id]');
+      if (row && row.getAttribute('data-lead') !== '1' && e.target.closest('.av')) {
+        pmToggleSelf(row.getAttribute('data-id'));
+      }
+      return;
+    }
+    var act = a.getAttribute('data-pm'), id = a.getAttribute('data-id');
+    if (act === 'close') { pmClose(true); return; }
+    if (act === 'expand') { PM.shut = {}; pmDraw(); return; }
+    if (act === 'only') { PM.only = !PM.only; pmDraw(); return; }
+    if (act === 'tog' && id) { pmTogMap(PM.shut, id); pmDraw(); return; }
+    if (act === 'self' && id) { pmToggleSelf(id); return; }
+    if (act === 'grp' && id) { pmToggleGrp(id); return; }
+    if (act === 'chip') {
+      var k = a.getAttribute('data-k') || '', sep = k.indexOf(':');
+      if (sep < 0) return;
+      var kind = k.slice(0, sep), cid = k.slice(sep + 1);
+      PM.err = '';
+      if (kind === 'g') delete PM.groups[cid];
+      else if (kind === 'p') pmTogMap(PM.picks, cid);
+      pmDraw();
+      return;
+    }
+    if (act === 'apply') pmApply();
+  }
+
+  function pmInput(e) {
+    if (!PM) return;
+    var t = e.target;
+    if (t && t.id === 'tkpmq') {
+      if (e.isComposing) return;
+      PM.q = t.value || '';
+      pmDraw();
+    }
+  }
+
+  function pmKey(e) {
+    if (!PM) return;
+    e.stopPropagation();
+    var k = e.key, t = e.target;
+    if (k === 'Escape') { e.preventDefault(); pmClose(true); return; }
+    if (e.isComposing || e.keyCode === 229) return;
+    if (k === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); pmApply(); return; }
+    if (k === 'ArrowDown' || k === 'ArrowUp') {
+      var ids = pmVisibleIds();
+      if (!ids.length) return;
+      e.preventDefault();
+      var at = PM.focusId ? ids.indexOf(PM.focusId) : -1;
+      var nx = at < 0 ? (k === 'ArrowDown' ? 0 : ids.length - 1) : (at + (k === 'ArrowDown' ? 1 : ids.length - 1)) % ids.length;
+      PM.focusId = ids[nx];
+      pmDraw();
+      var row = $('tkpm-body') && $('tkpm-body').querySelector('.pm-nd[data-id="' + CSS.escape(PM.focusId) + '"]');
+      if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    if (k === 'Enter' && t && t.id === 'tkpmq') {
+      e.preventDefault();
+      var targetId = PM.focusId || pmVisibleIds()[0];
+      if (targetId) pmToggleSelf(targetId);
+    }
+  }
   // --- end picker modal state & renderer
