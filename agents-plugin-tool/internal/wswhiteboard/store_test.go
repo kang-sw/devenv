@@ -784,7 +784,7 @@ func TestBuildViewTopicOrder(t *testing.T) {
 	if strings.Join(names, ",") != "policy,acks,settled,assumed" {
 		t.Fatalf("topic order = %v", names)
 	}
-	if !view.BulkAck || !view.Answerable || view.StampFile != "r.stamp.js" {
+	if !view.BulkAck || !view.Answerable {
 		t.Fatalf("view flags = %+v", view)
 	}
 }

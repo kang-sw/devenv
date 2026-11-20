@@ -14,9 +14,8 @@ import (
 const codeBody = "intro\n\n```go\nx := 1\ny := 2\nz := 3\n```\n\n```\none line\n```\n\n```mermaid\ngraph TD; A-->B\n```\n"
 
 // TestCodeBlocksScriptReachesEveryPageAndFrame pins where code.js runs: the
-// standalone page (after form.js, which defines wbBindBoard), the dashboard's
-// shared form script, and a served topic-body frame, whose document cannot
-// reach the host page's copy.
+// dashboard's shared form script and a served topic-body frame, whose document
+// cannot reach the host page's copy.
 func TestCodeBlocksScriptReachesEveryPageAndFrame(t *testing.T) {
 	code, err := embeddedAsset("code.js")
 	if err != nil {
@@ -42,12 +41,6 @@ func TestCodeBlocksScriptReachesEveryPageAndFrame(t *testing.T) {
 	if !strings.Contains(string(shared.FormScript), string(form)+"\n"+string(code)) {
 		t.Errorf("the dashboard's shared form script does not run code.js right after form.js")
 	}
-	for name, l := range layouts() {
-		newPage := newPageData(BuildView(&State{}, ViewInput{Layout: l, ReplyID: "r"}), assets, false)
-		if !strings.Contains(string(newPage.Script), string(form)+string(code)) {
-			t.Errorf("%s: the page script does not run code.js right after form.js", name)
-		}
-	}
 }
 
 // TestCodeBlocksGetNumbersAndCopyUnderNode runs code.js under node over a
@@ -68,7 +61,7 @@ func TestCodeBlocksGetNumbersAndCopyUnderNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	script := "var BOARD = " + string(board) + ";\n" + formPrelude + string(wsi18n.SubsetScript("ko", codeKeyPrefix)) + `
+	script := "var BOARD = " + string(board) + ";\n" + formPrelude + string(wsi18n.SubsetScript("ko", frameKeyPrefix)) + `
 // A page's wsT is a global as well as window.wsT.
 var wsT = window.wsT;
 // What code.js needs beyond the form's mini DOM: building and moving nodes,

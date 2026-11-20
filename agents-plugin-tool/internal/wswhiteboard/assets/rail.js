@@ -10,12 +10,9 @@
   // board region and are reused.
   var d = document;
   if (!window.requestAnimationFrame) return;
-  // host carries the rail class (the dashboard's board column, the full
-  // page's wrapper, the same element pill.js puts its wrappers in); box
-  // holds the topics and the wrappers. The rail's offsets go on the
-  // elements that read them, not on host (offsets, below).
+  // host carries the rail class and holds the topics and wrappers. The rail's
+  // offsets go on the elements that read them, not on host (offsets, below).
   var host = d.getElementById("bcol"), box = host;
-  if (!host) { host = d.querySelector("body.full .wrap"); box = host && host.querySelector("main"); }
   if (!box) return;
   var st = window.wbRail || (window.wbRail = {});
   if (st.off) st.off();

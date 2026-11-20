@@ -1,7 +1,6 @@
 package wswhiteboard
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
 func panelDiffEdgeFixture() View {
@@ -37,21 +38,21 @@ func TestPanelDiffBrowser(t *testing.T) {
 	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
 		t.Skip("set WS_PLAYWRIGHT_MODULE to run Chromium acceptance")
 	}
-	a, err := loadAssets()
-	if err != nil {
-		t.Fatal(err)
-	}
 	pages := map[string]string{}
 	for _, name := range []string{"/", "/live", "/framed", "/edge"} {
 		v := panelDiffFixture(t, name == "/live")
 		if name == "/edge" {
 			v = panelDiffEdgeFixture()
 		}
-		var buf bytes.Buffer
-		if err := a.templateFor(v.Lang).ExecuteTemplate(&buf, "page", newPageData(v, a, name == "/framed")); err != nil {
+		regions, err := RenderRegions(v)
+		if err != nil {
 			t.Fatal(err)
 		}
-		pages[name] = buf.String()
+		shared, err := PageAssets()
+		if err != nil {
+			t.Fatal(err)
+		}
+		pages[name] = `<!DOCTYPE html><html><head><style>` + string(shared.CSS) + `</style></head><body>` + string(shared.Sprite) + `<main>` + string(regions.Board) + `</main><aside>` + string(regions.Panels) + `</aside><script>` + string(wsi18n.Script(v.Lang)) + `</script><script>` + string(shared.AnswersScript) + `</script><script>(function(){` + string(shared.FormScript) + `})();</script></body></html>`
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if page, ok := pages[r.URL.Path]; ok {

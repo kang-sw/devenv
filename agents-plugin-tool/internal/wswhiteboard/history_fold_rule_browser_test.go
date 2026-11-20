@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
 // One history with closed questions, their answers, an older owner input and
@@ -82,10 +84,15 @@ func TestHistoryFoldRuleBrowser(t *testing.T) {
 			t.Fatalf("fixture lacks a %s row: %v", l, want)
 		}
 	}
-	page, err := RenderPage(view)
+	regions, err := RenderRegions(view)
 	if err != nil {
 		t.Fatal(err)
 	}
+	assets, err := PageAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := `<!DOCTYPE html><html><head><style>` + string(assets.CSS) + `</style></head><body>` + string(assets.Sprite) + `<main>` + string(regions.Board) + `</main><aside>` + string(regions.Panels) + `</aside><script>` + string(wsi18n.Script(view.Lang)) + `</script><script>` + string(assets.AnswersScript) + `</script><script>(function(){` + string(assets.FormScript) + `})();</script></body></html>`
 	dir := os.Getenv("WS_FOLD_PAGE")
 	if dir == "" {
 		dir = t.TempDir()

@@ -6,9 +6,9 @@ import (
 )
 
 func TestBarePathsPreserveEmphasisAndHomeLinks(t *testing.T) {
-	page := &pageData{View: View{FileLink: func(p string) string { return "L/" + p }}}
+	page := &pageData{}
 	targets := TextTargets{FileActions: func(p string) FileAction {
-		return FileAction{Href: "L/" + p, Abs: p, Rel: p}
+		return FileAction{Href: "/L/" + p, Abs: p, Rel: p}
 	}}
 	finished := targets
 	finished.HTML = true

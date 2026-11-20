@@ -8,10 +8,12 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
-// This is the real self-contained page, without a daemon or shared store.
-// WS_TOPIC_STATE_SHOTS keeps the light/dark and open-tip acceptance captures.
+// This fixture composes the production regions and assets without a daemon or
+// shared store. WS_TOPIC_STATE_SHOTS keeps the acceptance captures.
 func TestTopicStateCompactBrowser(t *testing.T) {
 	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
 		t.Skip("set WS_PLAYWRIGHT_MODULE to run Chromium acceptance")
@@ -47,10 +49,15 @@ func TestTopicStateCompactBrowser(t *testing.T) {
 			view.Topics[i].Tickets = []TicketBadge{{Stem: "260101-feat-example", Status: TicketReady}}
 		}
 	}
-	page, err := RenderPage(view)
+	regions, err := RenderRegions(view)
 	if err != nil {
 		t.Fatal(err)
 	}
+	assets, err := PageAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := `<!DOCTYPE html><html><head><style>` + string(assets.CSS) + `</style></head><body>` + string(assets.Sprite) + `<main>` + string(regions.Board) + `</main><aside>` + string(regions.Panels) + `</aside><script>` + string(wsi18n.Script(view.Lang)) + `</script><script>` + string(assets.AnswersScript) + `</script><script>(function(){` + string(assets.FormScript) + `})();</script></body></html>`
 	dir := t.TempDir()
 	file := filepath.Join(dir, "board.html")
 	if err := os.WriteFile(file, []byte(page), 0o600); err != nil {

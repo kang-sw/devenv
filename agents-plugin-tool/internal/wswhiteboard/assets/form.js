@@ -1,8 +1,7 @@
-  // Shared by both layouts. The full page appends live.js inside the same
-  // function scope.
+  // Shared by all rendered regions.
   var doc = document;
   function q(sel, root) { return Array.prototype.slice.call((root || doc).querySelectorAll(sel)); }
-  var dirty = false, copied = false, onCopied = null;
+  var dirty = false;
   var ta, hint, all;
   // replyEls looks the reply bar's controls up again: a dashboard board swap
   // can replace the bar while it keeps the topics, whose controls stay wired
@@ -148,8 +147,8 @@
   // still waiting. The waiting build lives on window, as this script runs
   // again on every dashboard board swap while the controls it bound keep
   // their run's functions. Anything that reads the reply (the copy button,
-  // the dashboard's boardAnswers, live.js's formBusy) flushes it first
-  // (flushBuild, window.wbFlushReply).
+  // the dashboard's boardAnswers) flushes it first (flushBuild,
+  // window.wbFlushReply).
   function buildSoon(el) {
     var p = window.wbBuildPending, topic = el.closest(".topic");
     if (p) {
@@ -209,8 +208,6 @@
       return { topic: n.getAttribute("data-topic"), note: n.value };
     });
     var text = window.wbAnswers.block(items, topics);
-    // A changed reply is no longer the copied one.
-    if (text !== ta.value) copied = false;
     ta.value = text;
     // The block makes the reply several lines tall.
     ta.style.height = "";
@@ -237,8 +234,6 @@
     if (ok) {
       hint.innerHTML = '<svg class="i" aria-hidden="true"><use href="#i-check"/></svg>';
       ta.blur();
-      copied = true;
-      if (onCopied) onCopied();
     } else {
       hint.textContent = "Ctrl+C";
     }

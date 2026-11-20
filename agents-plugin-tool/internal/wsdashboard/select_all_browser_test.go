@@ -3,7 +3,6 @@ package wsdashboard
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,19 +45,6 @@ func TestScopedSelectAllBrowser(t *testing.T) {
 	view := wswhiteboard.BuildView(state, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutFull, ReplyID: "selection-fixture",
 		Panels: []wswhiteboard.Panel{{ID: "notes", Title: "Notes panel", Rows: []wswhiteboard.PanelRow{{Text: "Only this panel body."}}}},
 	})
-	standalone, err := wswhiteboard.RenderPage(view)
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(standalone))
-	}))
-	defer server.Close()
 	regions, err := wswhiteboard.RenderRegions(view)
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +56,7 @@ func TestScopedSelectAllBrowser(t *testing.T) {
 	f.d.Index().Refresh()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "node", "testdata/select-all.browser.cjs", f.base, server.URL, os.Getenv("WS_SELECT_ALL_SHOTS")).CombinedOutput()
+	out, err := exec.CommandContext(ctx, "node", "testdata/select-all.browser.cjs", f.base, os.Getenv("WS_SELECT_ALL_SHOTS")).CombinedOutput()
 	t.Log(string(out))
 	if err != nil {
 		t.Fatalf("scoped select-all: %v", err)

@@ -94,7 +94,6 @@ func TestPanelUpdatedMarkIsProminentAndLatestOnly(t *testing.T) {
 			if strings.Count(out, `class="wb-panel-updated" hidden`) != 4 {
 				t.Fatal("one initially hidden update mark per latest panel required")
 			}
-			wantAll(t, out, `data-wb-reply="r"`, "UPDATED")
 		} else {
 			wantNone(t, out, `class="wb-panel-updated"`)
 		}

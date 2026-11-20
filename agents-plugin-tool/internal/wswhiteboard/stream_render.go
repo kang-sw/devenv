@@ -15,10 +15,7 @@ func (d entryData) HistoryItem() itemData {
 }
 
 func (d entryData) PayloadClass() string {
-	if d.Page.DocFramed {
-		return "framed"
-	}
-	return "md"
+	return "framed"
 }
 
 // entryPageData is one history page to render.

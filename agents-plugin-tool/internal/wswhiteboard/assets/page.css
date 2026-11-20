@@ -119,16 +119,8 @@ body { font: 14px/1.5 var(--wb-sans); }
 .id, code { font-family: var(--wb-mono); }
 button { font: inherit; color: inherit; }
 /* Only chrome: topic labels, item IDs, paths and readable bodies stay copyable. */
-.top h1, .mhead, .btn { -webkit-user-select: none; user-select: none; }
+.mhead, .btn { -webkit-user-select: none; user-select: none; }
 a { color: var(--wb-primary); }
-.wrap { margin: 0 auto; padding: 16px; }
-.full .wrap { max-width: 1200px; }
-
-/* page header */
-.top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
-.top h1 { font-size: 18px; margin: 0; font-weight: 700; }
-.top .meta { color: var(--wb-muted-fg); font-size: 12px; font-family: var(--wb-mono); }
-.top .counts { margin-left: auto; display: flex; gap: 6px; align-items: center; }
 
 /* chips: filled, role-coloured */
 .chip { display: inline-flex; align-items: center; gap: 3px; height: 20px; font-size: 12px; font-weight: 700; line-height: 1; padding: 0 9px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
@@ -140,10 +132,4 @@ button.chip.bulk { border: 0; cursor: pointer; transition: filter .12s, box-shad
 button.chip.bulk:hover { filter: brightness(1.12); box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 35%, transparent); }
 button.chip.bulk:active { filter: brightness(.95); }
 button.chip.bulk:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
-
-/* layout */
-.grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-items: start; }
-.grid > main { min-width: 0; }
-.side { display: flex; flex-direction: column; gap: 10px; }
-.side.flat { position: static; margin-top: 14px; }
 

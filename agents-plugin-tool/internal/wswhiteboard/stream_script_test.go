@@ -148,7 +148,7 @@ if(bad.length)throw Error(bad.join('\n'));
 	}
 }
 
-func TestHistoryScriptWiredOnlyIntoFullPagesAndSharedAssets(t *testing.T) {
+func TestHistoryScriptWiredIntoSharedAssets(t *testing.T) {
 	a, err := loadAssets()
 	if err != nil {
 		t.Fatal(err)
@@ -156,12 +156,6 @@ func TestHistoryScriptWiredOnlyIntoFullPagesAndSharedAssets(t *testing.T) {
 	shared, err := PageAssets()
 	if err != nil || !strings.Contains(string(shared.FormScript), a.stream) {
 		t.Fatalf("shared history script missing: %v", err)
-	}
-	for _, layout := range []Layout{LayoutFull} {
-		p := newPageData(BuildView(streamFixture(), ViewInput{Layout: layout}), a, false)
-		if got := strings.Contains(string(p.Script), a.stream); got != (layout == LayoutFull) {
-			t.Errorf("layout %d history wiring %v", layout, got)
-		}
 	}
 	// The viewport fold is back as a gap refold; the clip budget stays retired.
 	for _, old := range []string{"PANELS =", "LINES =", "--wb-history-height"} {

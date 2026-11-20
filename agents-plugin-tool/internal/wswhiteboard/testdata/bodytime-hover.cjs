@@ -129,11 +129,11 @@ function retainHover(row) {
 async function run() {
   await fs.mkdir(captures, { recursive: true });
   await fs.mkdir(path.join(captures, 'canary'), { recursive: true });
-  for (const name of ['unframed.html', 'framed.html']) await fs.access(path.join(fixture, name));
+  await fs.access(path.join(fixture, 'framed.html'));
   server = http.createServer(async (req, res) => {
     try {
       const name = new URL(req.url, 'http://localhost').pathname.slice(1);
-      if (!/^(?:unframed\.html|framed\.html|wb-frame-[a-f0-9]{12}\.(?:css|js))$/.test(name)) { res.writeHead(404).end(); return; }
+      if (!/^(?:framed\.html|wb-frame-[a-f0-9]{12}\.(?:css|js))$/.test(name)) { res.writeHead(404).end(); return; }
       const data = await fs.readFile(path.join(fixture, name));
       res.setHeader('Content-Type', name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html');
       res.end(data);
@@ -159,8 +159,8 @@ async function run() {
   browserProcess.once('exit', (code, signal) => receipt('browser_child_exit', { pid: browserProcess.pid, code, signal }));
   browser = await chromium.connect(browserServer.wsEndpoint(), { timeout: 15000 });
   const results = [], canaryResults = [];
-  const scenarios = [{ width: 360, mode: 'unframed', canary: true },
-    ...[1280, 800, 360].flatMap(width => ['unframed', 'framed'].map(mode => ({ width, mode, canary: false })))];
+  const scenarios = [{ width: 360, mode: 'framed', canary: true },
+    ...[1280, 800, 360].map(width => ({ width, mode: 'framed', canary: false }))];
   for (const { width, mode, canary } of scenarios) {
       if (!canary) assert.equal(canaryResults.length, 1, 'mandatory canary passed before matrix');
       const captureDir = canary ? path.join(captures, 'canary') : captures;
@@ -177,7 +177,7 @@ async function run() {
       assert.equal(await page.locator('.topic').count(), 4, 'fixture topic contract');
       assert.equal(await page.locator('.tdoc[data-body-at]').count(), 4, 'distinct body metadata contract');
       assert.equal(await page.locator('.tbar > time.tago').count(), 4, 'activity remains separately present and first');
-      assert.equal(await page.locator('iframe.doc-frame').count(), mode === 'framed' ? 4 : 0);
+      assert.equal(await page.locator('iframe.doc-frame').count(), 4);
       await page.locator('#probe-focus').focus();
       for (const [topic, want] of Object.entries(expected).filter(([topic]) => !canary || topic === 'unknown')) {
         const card = page.locator(`.topic[data-topic="${topic}"]`);
@@ -220,15 +220,14 @@ async function run() {
           let point = null;
           const trace = async phase => {
             const row = { ...identity, phase, ...await hoverSnapshot(page, hit, point, errors, errorTimeline,
-              mode === 'framed' ? card.locator('iframe.doc-frame') : null) };
+              card.locator('iframe.doc-frame')) };
             retainHover(row);
             return row;
           };
           await bounded((async () => {
           try {
-          if (mode === 'framed') await card.locator('iframe.doc-frame').scrollIntoViewIfNeeded();
+          await card.locator('iframe.doc-frame').scrollIntoViewIfNeeded();
           await hit.scrollIntoViewIfNeeded();
-          if (mode === 'unframed') await hit.evaluate(el => el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }));
           await page.mouse.move(width - 2, 2);
           // Let frame size and fonts settle before the measured hover.
           await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
@@ -245,13 +244,12 @@ async function run() {
           // shortcut. A single receiver assertion diagnoses coverage, not age.
           point = { x: hitBefore.x + 1, y: hitBefore.y + Math.min(6, hitBefore.height / 2) };
           const beforeHover = await trace('before-hover');
-          const productOcclusion = mode === 'unframed' && width === 360 && beforeHover.local.receiver && beforeHover.local.receiver.capsule;
           assert.ok(beforeHover.local.receivesPoint,
-            `${productOcclusion ? 'PRODUCT OCCLUSION: ' : ''}transparent gutter point must reach intended hit: ${JSON.stringify(beforeHover.local.receiver)}`);
+            `transparent gutter point must reach intended hit: ${JSON.stringify(beforeHover.local.receiver)}`);
           // Hit its outer transparent gutter, not only the 2px painted line.
           await page.mouse.move(hitBefore.x + 1, hitBefore.y + Math.min(6, hitBefore.height / 2));
           await trace('after-move');
-          const tip = mode === 'framed' ? scope.locator('.wb-chg-tip') : page.locator('.wb-chg-tip:not([hidden])');
+          const tip = scope.locator('.wb-chg-tip');
           await tip.waitFor({ state: 'visible' });
           assert.equal(await tip.textContent(), want, 'header/gutter same value');
           assert.doesNotMatch(await tip.textContent(), /\d{1,2}:\d{2}|\d{4}[-/.]\d/, 'relative only, no date or clock');

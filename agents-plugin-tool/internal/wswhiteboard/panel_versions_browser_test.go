@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
 // panelVersionsState is the approved mockup's "mixed" topic: implementation
@@ -44,10 +46,15 @@ func panelVersionsState(t *testing.T) *State {
 func TestPanelVersionsHistoryBrowser(t *testing.T) {
 	view := BuildView(panelVersionsState(t), ViewInput{Layout: LayoutFull, ReplyID: "panel-versions", Location: time.UTC})
 	view.Lang = "ko"
-	page, err := RenderPage(view)
+	regions, err := RenderRegions(view)
 	if err != nil {
 		t.Fatal(err)
 	}
+	assets, err := PageAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := `<!DOCTYPE html><html><head><style>` + string(assets.CSS) + `</style></head><body>` + string(assets.Sprite) + `<main>` + string(regions.Board) + `</main><aside>` + string(regions.Panels) + `</aside><script>` + string(wsi18n.Script(view.Lang)) + `</script><script>` + string(assets.AnswersScript) + `</script><script>(function(){` + string(assets.FormScript) + `})();</script></body></html>`
 	path := os.Getenv("WS_PANEL_VERSIONS_PAGE")
 	if path == "" {
 		path = filepath.Join(t.TempDir(), "panel-versions.html")

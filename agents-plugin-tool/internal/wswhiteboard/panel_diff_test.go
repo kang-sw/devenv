@@ -101,7 +101,14 @@ var panelDiffPayload = regexp.MustCompile(`<!--wbpdg-data:(.*?)-->`)
 
 func TestPanelDiffRenderLatestOnly(t *testing.T) {
 	v := panelDiffFixture(t, false)
-	out := render(t, v)
+	regions, err := RenderRegions(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(regions.Board)
+	for _, doc := range frameDocs(t, out) {
+		out += doc
+	}
 	matches := panelDiffPayload.FindAllStringSubmatch(out, -1)
 	if len(matches) != 1 || strings.Count(out, `class="pdg-chip"`) != 1 {
 		t.Fatalf("want one latest diff, got %d payloads", len(matches))
@@ -122,13 +129,27 @@ func TestPanelDiffRenderLatestOnly(t *testing.T) {
 			t.Fatalf("old formatting or word diff lost: %+v", c)
 		}
 	}
-	live := render(t, panelDiffFixture(t, true))
+	liveRegions, err := RenderRegions(panelDiffFixture(t, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := string(liveRegions.Board)
+	for _, doc := range frameDocs(t, live) {
+		live += doc
+	}
 	wantAll(t, live, `<span>v3 대비</span><span class="n a">+0</span><span class="n m">~1</span><span class="n wb-pdg-del">−0</span>`)
 	if strings.Count(live, `<!--wbpdg-data:`) != 1 {
 		t.Fatal("older version retained its marks after republish")
 	}
 	singleState := &State{Topics: []TopicDoc{{Name: "t", Entries: []Entry{{ID: "e1", Kind: EntryPanel, PanelID: "p1", Recap: "only version", Text: panelDiffV2}}}}}
-	single := render(t, BuildView(singleState, ViewInput{Layout: LayoutFull}))
+	singleRegions, err := RenderRegions(BuildView(singleState, ViewInput{Layout: LayoutFull}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	single := string(singleRegions.Board)
+	for _, doc := range frameDocs(t, single) {
+		single += doc
+	}
 	if panelDiffPayload.MatchString(single) || strings.Contains(single, `class="pdg-chip"`) {
 		t.Fatal("single version has a comparison")
 	}
@@ -139,7 +160,7 @@ func TestPanelDiffSnapshotSanitizesOldHTMLAndNestedLists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := newPageData(View{Layout: LayoutFull, Lang: "en"}, a, false)
+	p := newPageData(View{Layout: LayoutFull, Lang: "en"}, a)
 	e := EntryView{Entry: Entry{ID: "e2", Text: "- **parent** changed\n  - child\n"}, Diff: diffPanel("- **parent** old\n  - child\n", "- **parent** changed\n  - child\n")}
 	out := string(p.renderPanel(e))
 	var data panelDiffData
@@ -191,9 +212,17 @@ func TestPanelDiffEmptyAndFramedRender(t *testing.T) {
 		{ID: "e2", Kind: EntryPanel, PanelID: "p1", Recap: "empty"},
 	}}}}
 	v := BuildView(st, ViewInput{Layout: LayoutFull})
-	out := render(t, v)
-	wantAll(t, out, `class="pdg-chip"`, `<!--wbpdg:0-->`, `<div class="doc-body entry-body md">`)
-	regions, err := RenderRegions(panelDiffFixture(t, false))
+	regions, err := RenderRegions(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	board := string(regions.Board)
+	out := board
+	for _, doc := range frameDocs(t, board) {
+		out += doc
+	}
+	wantAll(t, out, `class="pdg-chip"`, `<!--wbpdg:0-->`, `<div class="doc-body entry-body framed">`, `<div class="doc-body md">`)
+	regions, err = RenderRegions(panelDiffFixture(t, false))
 	if err != nil {
 		t.Fatal(err)
 	}

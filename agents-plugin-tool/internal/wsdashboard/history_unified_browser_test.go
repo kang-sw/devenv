@@ -38,8 +38,8 @@ func TestUnifiedHistoryBrowser(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &c); err != nil {
 		t.Fatal(err)
 	}
-	if c.Host != "standalone" && c.Host != "dashboard" {
-		t.Fatal("host must be standalone or dashboard")
+	if c.Host != "dashboard" {
+		t.Fatal("host must be dashboard")
 	}
 	if c.Lang != "en" && c.Lang != "ko" {
 		t.Fatal("locale must be explicit en or ko")
@@ -63,13 +63,11 @@ func TestUnifiedHistoryBrowser(t *testing.T) {
 	t.Setenv("WS_CONFIG_HOME", t.TempDir())
 	t.Setenv("WS_MCP_DASHBOARD_DEV_SOURCE", "")
 	var board wswhiteboard.Regions
-	var standalone string
 	if c.Scenario == "history-unified" {
 		var manifest struct {
 			Stages []struct {
 				Languages map[string]struct {
-					Standalone string `json:"standalone"`
-					Board      string `json:"board"`
+					Board string `json:"board"`
 				} `json:"languages"`
 			} `json:"stages"`
 		}
@@ -81,57 +79,36 @@ func TestUnifiedHistoryBrowser(t *testing.T) {
 			t.Fatalf("renderer manifest: %v", err)
 		}
 		first := manifest.Stages[0].Languages[c.Lang]
-		// Preserve the generator's specimen; only this disposable live copy is
-		// replaced during standalone stage/reload verification.
-		data, err = os.ReadFile(filepath.Join(c.Fixtures, first.Standalone))
-		if err != nil {
-			t.Fatal(err)
-		}
-		standalone = filepath.Join(c.Fixtures, "live-"+c.Lang+".html")
-		if err := os.WriteFile(standalone, data, 0600); err != nil {
-			t.Fatal(err)
-		}
 		board.Board = template.HTML(first.Board)
 		board.CountPolicy = 2
 	} else {
 		state := unifiedHistoryMotionState(t, c.Scenario == "recap-jitter")
 		view := wswhiteboard.BuildView(state, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutFull, ReplyID: "historymotion", Location: time.UTC})
-		view.Lang, view.StampFile = c.Lang, ""
+		view.Lang = c.Lang
 		var err error
 		board, err = wswhiteboard.RenderRegions(view)
 		if err != nil {
 			t.Fatal(err)
 		}
-		page, err := wswhiteboard.RenderPage(view)
-		if err != nil {
-			t.Fatal(err)
-		}
-		standalone = filepath.Join(artifacts, "motion.html")
-		if err := os.WriteFile(standalone, []byte(page), 0600); err != nil {
-			t.Fatal(err)
-		}
 	}
 	var origins []string
-	address := (&url.URL{Scheme: "file", Path: standalone}).String()
-	if c.Host == "dashboard" {
-		dir, project, src := t.TempDir(), t.TempDir(), newPageFake()
-		register(t, dir, "historysession", project, time.Now())
-		src.setPage("historysession", PageContent{HasBoard: true, Seq: 1, Board: board})
-		writeSnapshot(t, dir, "historysession", &wslive.Snapshot{SchemaVersion: 1, Adapter: "pi", UpdatedAt: time.Now().UnixMilli(), HeartbeatMs: 3600000, Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseIdle}}})
-		d := startIndexedDaemon(t, dir, src, time.Hour, func(o *DaemonOptions) {
-			o.noGitBadge = true
-			o.Tracker = &fakeTracker{}
-		})
-		base := endpointURL(d.Endpoint(), "")
-		u, err := url.Parse(base)
-		if err != nil || u.Port() == "29417" || u.Port() == "" {
-			t.Fatal("fixture requires its own ephemeral port")
-		}
-		waitFor(t, "history fixture indexed", func() bool { _, ok := d.Index().Session("historysession"); return ok })
-		origins = []string{base}
-		address = base + "/s/historysession"
+	dir, project, src := t.TempDir(), t.TempDir(), newPageFake()
+	register(t, dir, "historysession", project, time.Now())
+	src.setPage("historysession", PageContent{HasBoard: true, Seq: 1, Board: board})
+	writeSnapshot(t, dir, "historysession", &wslive.Snapshot{SchemaVersion: 1, Adapter: "pi", UpdatedAt: time.Now().UnixMilli(), HeartbeatMs: 3600000, Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseIdle}}})
+	d := startIndexedDaemon(t, dir, src, time.Hour, func(o *DaemonOptions) {
+		o.noGitBadge = true
+		o.Tracker = &fakeTracker{}
+	})
+	base := endpointURL(d.Endpoint(), "")
+	u, err := url.Parse(base)
+	if err != nil || u.Port() == "29417" || u.Port() == "" {
+		t.Fatal("fixture requires its own ephemeral port")
 	}
-	files := []string{standalone,
+	waitFor(t, "history fixture indexed", func() bool { _, ok := d.Index().Session("historysession"); return ok })
+	origins = []string{base}
+	address := base + "/s/historysession"
+	files := []string{
 		filepath.Join(harness, "ai-docs/tickets/assets/261114-feat-ws-whiteboard-history-centered-header/approved-centered-header.fragment.html"),
 		filepath.Join(harness, "ai-docs/tickets/assets/261114-feat-ws-whiteboard-history-unified-decisions/approved-density.fragment.html")}
 	encodedOrigins, _ := json.Marshal(origins)

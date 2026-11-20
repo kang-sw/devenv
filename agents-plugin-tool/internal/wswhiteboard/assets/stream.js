@@ -770,9 +770,8 @@
       refresh(gap);
     }
   }
-  // viewKit holds the visibility source and the keep-in-place helper every
-  // board host shares (the dashboard's board, the standalone page's
-  // history). win gives the globals it uses, so the kit runs under a fake
+  // viewKit holds the dashboard board's visibility source and keep-in-place
+  // helper. win gives the globals it uses, so the kit runs under a fake
   // window too.
   //
   // watch(node, {onChange, onOut, margin}) subscribes to node's viewport
@@ -1457,31 +1456,6 @@
   document.addEventListener('focusout', function () {
     window.setTimeout(function () { histories(document).forEach(collapse); }, 0);
   });
-
-  // The standalone file page navigates its own fragments. The dashboard has
-  // its own allowlisted bridge, scroll policy, and region-swap lifecycle.
-  if (document.body && document.body.classList.contains('full')) {
-    function jump(id) {
-      var node = loadTarget(document, id);
-      if (node && !node.closest('.wb-history')) kit.jump(node, { block: 'nearest' });
-      return node;
-    }
-    document.addEventListener('click', function (e) {
-      var a = e.target.closest && e.target.closest('a[href]');
-      var href = a && a.getAttribute('href');
-      if (!href || href[0] !== '#' || !jump(href.slice(1))) return;
-      e.preventDefault();
-      try { window.history.replaceState(null, '', href); } catch (_) {}
-    });
-    window.addEventListener('hashchange', function () { jump(location.hash.slice(1)); });
-    var storageKey = 'wb-history:' + location.pathname, saved;
-    try { saved = JSON.parse(sessionStorage.getItem(storageKey) || 'null'); sessionStorage.removeItem(storageKey); } catch (_) {}
-    if (saved) restore(document, saved);
-    if (location.hash) jump(location.hash.slice(1));
-    window.addEventListener('beforeunload', function () {
-      try { sessionStorage.setItem(storageKey, JSON.stringify(capture(document))); } catch (_) {}
-    });
-  }
 })();
 
 /* Recap jump: a topic recap's clock chip (.rat, a keyboard button) names the

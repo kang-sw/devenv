@@ -8,9 +8,8 @@ import (
 )
 
 // ClosedCap is how many closed topics a page shows, the most recently closed
-// first. The served page fetches more through ClosedWindow; the file page
-// names how many it leaves out. A closed topic still waiting on the
-// user is never capped, and the store keeps every topic.
+// first. The served page fetches more through ClosedWindow. A closed topic
+// still waiting on the user is never capped, and the store keeps every topic.
 const ClosedCap = 30
 
 // Layout selects which page a View renders as.
@@ -28,10 +27,7 @@ type View struct {
 	Layout  Layout
 	ReplyID string
 	Seq     int
-	// StampFile is the change-signal script the page polls, a bare file name
-	// beside the page.
-	StampFile string
-	Topics    []TopicView
+	Topics  []TopicView
 	// DeferredTopics are capped closed topics, carried inert for explicit
 	// panel/entry navigation without another stream protocol.
 	DeferredTopics []TopicView
@@ -42,8 +38,7 @@ type View struct {
 	// topics become empty marked templates, timeline gaps keep their shell
 	// with an empty payload, and earlier panel versions keep their fold with
 	// an empty body, each marked data-lazy. The served dashboard fetches the
-	// complete topic on demand (stream.js hydrate). Pages written to disk
-	// never set it: they have nothing to fetch from.
+	// complete topic on demand (stream.js hydrate).
 	LazyHistory bool
 	// Panels come from the section providers, in registration order.
 	Panels []Panel
@@ -57,24 +52,19 @@ type View struct {
 	Stored map[int]bool
 	// StoredPanels holds board-wide stable pN targets, including older pages.
 	StoredPanels map[string]bool
-	// FileLink turns a file path a markdown link or image names (relative
-	// to the session root, or absolute) into the href the page uses from
-	// the folder it is written to. Nil keeps the path as written.
-	FileLink func(path string) string
 	// FileText, when set, renders every file target (a relative or absolute
 	// path, or a file: URL) as text instead: a link keeps its label followed
 	// by the path FileText returns, and an image shows its alt text followed
 	// by that path. A page served over http sets it, since a browser blocks
 	// file: links there and a relative path would resolve against the
-	// server's URL, not the session root. FileLink is then unused.
+	// server's URL, not the session root.
 	FileText func(path string) string
 	// ImageSrc, when set on a page with FileText, serves a file image: an
 	// image whose destination is a file target (a relative or absolute path,
 	// a drive path, or a file: URL) renders as <img src> with the src
 	// ImageSrc returns for the path, and the destination's own query and
 	// fragment are dropped. An empty result leaves the image to FileText's
-	// path text (or FileLink's href without FileText); links and autolinks
-	// never use it.
+	// path text; links and autolinks never use it.
 	ImageSrc func(path string) string
 	// DocImageSrc, when set, serves a file image in a topic body of
 	// RenderRegions' fragments in ImageSrc's place. That body renders in a
@@ -107,14 +97,12 @@ type View struct {
 	// only where the image loads. A topic body uses it for an image only,
 	// and only in its sandboxed frame (RenderRegions), which cannot load the
 	// Href itself: the image keeps its path text, marked data-relay with the
-	// Href, for the frame to ask its host page for the image (framedDoc).
-	// An unframed body never consults it. A zero FileAction leaves the
-	// target to ImageSrc and FileActions alone.
+	// Href, for the frame to ask its host page for the image (framedDoc). A
+	// zero FileAction leaves the target to ImageSrc and FileActions alone.
 	OutsideImage func(path string) FileAction
 	// Lang is the language of the text the page itself draws (a wsi18n
-	// code; empty renders English). A page written to disk renders in
-	// English: it has no viewer to follow. The served dashboard page sets
-	// it, after BuildView, per viewer.
+	// code; empty renders English). The served dashboard page sets it, after
+	// BuildView, per viewer.
 	Lang string
 }
 
@@ -462,8 +450,7 @@ type PanelRow struct {
 	State string
 	Label string
 	Text  string
-	// Link, when set, makes Text a link: a relative path or an absolute
-	// file: URL the provider built (see RenderPage); empty for none.
+	// Link, when set, makes Text a link; empty for none.
 	Link string
 	// Path is the row's file as text, shown after Text when the row has no
 	// Link: a served page lists a ticket by its repo-relative path instead
@@ -525,9 +512,8 @@ type ViewInput struct {
 	Layout  Layout
 	ReplyID string
 	Panels  []Panel
-	// FileLink, FileText, ImageSrc, DocImageSrc, FileActions, and
-	// OutsideImage are copied to the View.
-	FileLink     func(path string) string
+	// FileText, ImageSrc, DocImageSrc, FileActions, and OutsideImage are
+	// copied to the View.
 	FileText     func(path string) string
 	ImageSrc     func(path string) string
 	DocImageSrc  func(path string) string
@@ -561,7 +547,6 @@ func BuildView(state *State, in ViewInput) View {
 		Panels:       in.Panels,
 		Stored:       map[int]bool{},
 		StoredPanels: map[string]bool{},
-		FileLink:     in.FileLink,
 		FileText:     in.FileText,
 		ImageSrc:     in.ImageSrc,
 		DocImageSrc:  in.DocImageSrc,
@@ -582,8 +567,6 @@ func BuildView(state *State, in ViewInput) View {
 	for _, item := range state.Items {
 		view.Stored[item.ID] = true
 	}
-	view.StampFile = in.ReplyID + ".stamp.js"
-
 	expanded := map[int]bool{}
 	for _, id := range recentSettled(state) {
 		expanded[id] = true

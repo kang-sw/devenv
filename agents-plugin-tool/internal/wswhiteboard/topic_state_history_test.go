@@ -44,7 +44,7 @@ func main() {
  default:
   err=f.Update(nil,func(s *old.State) error {
    if action=="render" {
-    _,e:=old.RenderPage(old.BuildView(s,old.ViewInput{Layout:old.LayoutFull}));if e!=nil{return e}
+    _,e:=old.RenderRegions(old.BuildView(s,old.ViewInput{Layout:old.LayoutFull}));if e!=nil{return e}
     s.BeginRender();return nil
    }
    _,problems=old.Apply(s,os.Args[3],old.Env{Now:time.Date(2026,11,15,1,5,0,0,time.UTC),IsAbs:filepath.IsAbs,IsDir:func(p string)bool{st,e:=os.Stat(p);return e==nil&&st.IsDir()}})

@@ -22,20 +22,15 @@ import (
 )
 
 // The page assets: one template set, the shared stylesheet, the answer-form
-// and dependency-popover scripts both layouts run, the change-signal script
-// only the full page runs,
-// the mermaid theme script a page with a mermaid block runs, the script a
-// served page's topic-body frames run, the image viewer script the full page
-// runs (with the SVG helpers it shares with those frames), and the icon
-// sprite. Everything is inlined, so a page needs no other file beyond the
-// full page's stamp script and, when it holds a mermaid block, the shared
-// mermaid script (MermaidAsset).
+// and dependency-popover scripts, the mermaid theme script, the script a
+// served page's topic-body frames run, the image viewer script, and the icon
+// sprite.
 //
-//go:embed assets/page.tmpl assets/page.css assets/page-*.css assets/stream.js assets/chg.js assets/panel-diff.js assets/answers.js assets/form.js assets/code.js assets/live.js assets/pill.js assets/rail.js assets/ago.js assets/deps.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/select-all.js assets/sprite.svg
+//go:embed assets/page.tmpl assets/page.css assets/page-*.css assets/stream.js assets/chg.js assets/panel-diff.js assets/answers.js assets/form.js assets/code.js assets/pill.js assets/rail.js assets/ago.js assets/deps.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/select-all.js assets/sprite.svg
 var assetFS embed.FS
 
-// All consumers (standalone, dashboard and topic-body frames) use this same
-// byte-for-byte stylesheet assembly, preserving its cascade and frame hashes.
+// The dashboard and topic-body frames use this same byte-for-byte stylesheet
+// assembly, preserving its cascade and frame hashes.
 var pageStyleFiles = []string{
 	"page.css",
 	"page-items.css",
@@ -76,7 +71,6 @@ type pageAssets struct {
 	// page that runs form (it follows form, which defines wbBindBoard) and
 	// inside a topic-body frame.
 	code   string
-	live   string
 	stream string
 	// pill is the open-question pill, shared by the full page and the dashboard.
 	pill string
@@ -85,7 +79,7 @@ type pageAssets struct {
 	rail string
 	// ago keeps the topic bars' updated-ago times current, on the same two.
 	ago string
-	// deps drives dependency popovers in the standalone page and dashboard.
+	// deps drives dependency popovers in the dashboard.
 	deps string
 	// mermaidInit themes and runs mermaid after the shared script loads.
 	mermaidInit template.JS
@@ -138,8 +132,7 @@ func loadAssets() (*pageAssets, error) {
 func embeddedAsset(name string) ([]byte, error) { return assetFS.ReadFile("assets/" + name) }
 
 // devAssets, when set, is the source root loadAssets reads from instead of
-// the embedded copy. The daemon sets it at startup; the MCP server never
-// does, so the pages it writes keep the embedded assets.
+// the embedded copy. The daemon sets it at startup.
 var devAssets atomic.Pointer[wsdevassets.Root]
 
 // SetDevAssets turns dev assets on for this process, or off with nil. The
@@ -153,22 +146,6 @@ func DevAssetsOn() bool { return devAssets.Load() != nil }
 
 // devAssetDir is where the whiteboard assets live under a dev source root.
 const devAssetDir = "internal/wswhiteboard/assets"
-
-// trackerKeyPrefix marks the client strings of the dashboard's tracker
-// renderer (tracker.js). A whiteboard page never loads that script, so its
-// client table leaves the strings out.
-const trackerKeyPrefix = "js.tk."
-
-// filesKeyPrefix belongs to the dashboard's file explorer (files.js), which
-// standalone boards never load. Keep its growing table off the page.
-const filesKeyPrefix = "js.files."
-
-// gitKeyPrefix belongs to dashboard-git.js, which static boards never load.
-// Its controls must not bloat the standalone translation table.
-const gitKeyPrefix = "js.git."
-
-// codeKeyPrefix is the copy button's standalone client subset (code.js).
-const codeKeyPrefix = "js.wb.copy"
 
 // frameKeyPrefix keeps the frame's copy and relative body-time strings local
 // to the opaque-origin document, without the rest of the dashboard table.
@@ -197,7 +174,6 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 		form:        get("form.js"),
 		selectAll:   get("select-all.js"),
 		code:        code,
-		live:        get("live.js"),
 		stream:      get("stream.js"),
 		pill:        get("pill.js"),
 		rail:        get("rail.js"),
@@ -261,7 +237,6 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 			"href":        rowHref,
 			"actionAttrs": panelActionAttrs,
 			"t":           func(key string, args ...any) string { return wsi18n.T(lang, key, args...) },
-			"i18n":        func() template.JS { return wsi18n.ScriptExcept(lang, trackerKeyPrefix, filesKeyPrefix, gitKeyPrefix) },
 		}
 		// The file's template is "page.tmpl" under the root "page", as
 		// ParseFS names it.
@@ -305,25 +280,7 @@ func panelActionAttrs(r PanelRow) template.HTMLAttr {
 	return template.HTMLAttr(buf.String())
 }
 
-// RenderPage renders view as one self-contained HTML document. Item text renders as
-// markdown with raw HTML escaped (markdown.go); a topic body renders as
-// markdown with its raw HTML written as is (pageData.renderDoc).
-func RenderPage(view View) (string, error) {
-	a, err := loadAssets()
-	if err != nil {
-		return "", fmt.Errorf("whiteboard page assets: %w", err)
-	}
-	data := newPageData(view, a, false)
-	var buf bytes.Buffer
-	if err := a.templateFor(view.Lang).ExecuteTemplate(&buf, "page", data); err != nil {
-		return "", fmt.Errorf("whiteboard page: %w", err)
-	}
-	return buf.String(), nil
-}
-
-// Regions are a full page's board and panels rendered alone, by the same
-// templates RenderPage uses, so a page that lays them out itself (the
-// dashboard daemon's session page) shows exactly what the static page shows.
+// Regions are a served page's board and panels rendered as fragments.
 type Regions struct {
 	// Board is the topic blocks and the reply bar.
 	Board template.HTML
@@ -362,11 +319,10 @@ type TopicUnit struct {
 // the cache and must also invalidate it when its external render inputs change.
 type TopicReuse func(id, revision string, render func() (TopicUnit, error)) (TopicUnit, error)
 
-// RenderRegions renders view's board and panels as fragments, as the full
-// page shows them, with one difference: each topic body renders inside its
-// own sandboxed frame (framedDoc), since the page that hosts the fragments is
-// served from the dashboard daemon's origin, and a body's raw HTML and
-// scripts must not run there. Build view with LayoutFull.
+// RenderRegions renders view's board and panels as fragments. Each topic body
+// renders inside its own sandboxed frame (framedDoc), since the page that
+// hosts the fragments is served from the dashboard daemon's origin and a
+// body's raw HTML and scripts must not run there. Build view with LayoutFull.
 func RenderRegions(view View) (Regions, error) {
 	regions, _, err := RenderRegionsWithTopics(view, nil)
 	return regions, err
@@ -380,8 +336,7 @@ func RenderRegionsWithTopics(view View, reuse TopicReuse) (Regions, *TopicRegion
 		return Regions{}, nil, fmt.Errorf("whiteboard page assets: %w", err)
 	}
 	view.Layout = LayoutFull
-	view.StampFile = ""
-	data := pageDataBase(view, a, true)
+	data := pageDataBase(view, a)
 	data.topicReuse = reuse
 	data.lazyAssets = a
 	var board, panels bytes.Buffer
@@ -414,19 +369,18 @@ func RenderClosedTopics(view View) (template.HTML, error) {
 		return "", fmt.Errorf("whiteboard page assets: %w", err)
 	}
 	view.Layout = LayoutFull
-	view.StampFile = ""
 	var buf bytes.Buffer
-	if err := a.templateFor(view.Lang).ExecuteTemplate(&buf, "closedpage", newPageData(view, a, true)); err != nil {
+	if err := a.templateFor(view.Lang).ExecuteTemplate(&buf, "closedpage", newPageData(view, a)); err != nil {
 		return "", fmt.Errorf("whiteboard closed topics: %w", err)
 	}
 	return template.HTML(buf.String()), nil
 }
 
-// SharedAssets are the static page's inlined assets, for a page that hosts
+// SharedAssets are the assets for a page that hosts
 // RenderRegions fragments: the stylesheet the fragments are styled by, the
 // icon sprite they reference, the answer-form script that drives the board's
-// reply bar (a function body: run it inside a function scope, as RenderPage
-// does), and the mermaid theme script that runs after MermaidAsset.
+// reply bar (a function body: run it inside a function scope), and the
+// mermaid theme script that runs after MermaidAsset.
 type SharedAssets struct {
 	CSS             template.CSS
 	Sprite          template.HTML
@@ -442,7 +396,7 @@ type SharedAssets struct {
 	ViewerScript template.JS
 }
 
-// PageAssets returns the static page's shared assets.
+// PageAssets returns the served page's shared assets.
 func PageAssets() (SharedAssets, error) {
 	a, err := loadAssets()
 	if err != nil {
@@ -451,20 +405,12 @@ func PageAssets() (SharedAssets, error) {
 	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form + "\n" + a.code + "\n" + a.pill + "\n" + a.rail + "\n" + a.ago + "\n" + a.deps + "\n" + a.stream + "\n" + a.panelDiff), AnswersScript: template.JS(a.answers), SelectAllScript: template.JS(a.selectAll), MermaidInit: a.mermaidInit, ViewerScript: template.JS(a.viewer)}, nil
 }
 
-// pageData is what the page template executes on: the view plus the inlined
-// assets and the board-wide counts the header shows.
+// pageData is what the fragment templates execute on.
 type pageData struct {
 	View
-	CSS    template.CSS
-	Script template.JS
-	Sprite template.HTML
-	// docs holds each topic body rendered by renderDoc on every page render,
-	// or, with DocFramed, the sandboxed frame that holds that rendering,
-	// keyed by topic name.
+	// docs holds each topic body's sandboxed frame, keyed by topic name.
 	docs    map[string]template.HTML
 	entries map[string]template.HTML
-	// DocFramed renders each topic body inside a sandboxed frame (framedDoc).
-	DocFramed bool
 	// tmpl is the template set the page renders with (templateFor), which
 	// TopicHTML executes the topic template from.
 	tmpl         *template.Template
@@ -487,11 +433,9 @@ type pageData struct {
 	// CountBulk is how many items the bulk checkbox answers.
 	CountBulk int
 
-	// Mermaid is set while the template renders a mermaid block, so the
-	// page's closing script tags, rendered after every item, load mermaid
-	// only on a page that holds one.
-	Mermaid     bool
-	MermaidInit template.JS
+	// Mermaid records blocks outside body frames so the hosting page can
+	// load Mermaid for those regions. Each body frame loads its own assets.
+	Mermaid bool
 	// noMermaid renders a mermaid fence as a plain code block (RenderText
 	// without TextTargets.Mermaid).
 	noMermaid bool
@@ -521,26 +465,16 @@ type pageData struct {
 	footnotePrefix string
 }
 
-// chgWire starts the change marks of every unframed topic body on the page;
-// a framed body's own frame script starts its own (doc-frame.js).
-const chgWire = "\nArray.prototype.forEach.call(document.querySelectorAll('.doc-body:not(.framed)'), wbWatchChanges);\n"
-
-// BulkChips reports that a topic bar's count chips render as buttons that
-// answer every item they count (form.js, button[data-bulk]): only on the
-// dashboard's board (RenderRegions, the framed render), where a staged answer
-// is sent; the static page keeps them plain counts.
-func (p *pageData) BulkChips() bool { return p.DocFramed }
-
 // MermaidFile is the shared mermaid script's name, beside the page.
 func (p *pageData) MermaidFile() string {
 	name, _ := MermaidAsset()
 	return name
 }
 
-// newPageData builds the data a page renders from; framed renders each topic
-// body inside a sandboxed frame (framedDoc).
-func newPageData(view View, a *pageAssets, framed bool) *pageData {
-	p := pageDataBase(view, a, framed)
+// newPageData builds the data a page renders, with every topic body inside a
+// sandboxed frame (framedDoc).
+func newPageData(view View, a *pageAssets) *pageData {
+	p := pageDataBase(view, a)
 	topics := view.Topics
 	if !view.LazyHistory {
 		topics = append(append([]TopicView(nil), view.Topics...), view.DeferredTopics...)
@@ -551,20 +485,14 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 	return p
 }
 
-func pageDataBase(view View, a *pageAssets, framed bool) *pageData {
-	script := a.viewer + a.selectAll + a.answers + a.form + a.code + a.deps + a.pill + a.rail + a.ago + a.stream + a.live + a.chg + chgWire + a.panelDiff
+func pageDataBase(view View, a *pageAssets) *pageData {
 	p := &pageData{
 		View:        view,
-		CSS:         a.css,
-		Script:      template.JS("(function () {\n" + script + "})();\n"),
-		Sprite:      a.sprite,
-		MermaidInit: a.mermaidInit,
 		icons:       a.icons,
 		onPage:      map[int]bool{},
 		panelOnPage: map[string]bool{},
 		docs:        map[string]template.HTML{},
 		entries:     map[string]template.HTML{},
-		DocFramed:   framed,
 		tmpl:        a.templateFor(view.Lang),
 		topicUnits:  map[string]TopicUnit{},
 	}
@@ -599,7 +527,7 @@ func (p *pageData) prepareTopic(t TopicView, a *pageAssets) {
 		for _, run := range page.Runs {
 			e := run.Entry
 			if e.Kind == EntryPanel && e.HasBody() && (live == nil || live[e.ID] && !e.Historical) {
-				p.entries[e.ID] = p.panelHTML(t.Name, e, p.DocFramed, a)
+				p.entries[e.ID] = p.panelHTML(t.Name, e, a)
 			}
 		}
 	}
@@ -608,14 +536,11 @@ func (p *pageData) prepareTopic(t TopicView, a *pageAssets) {
 	}
 	page := p.Mermaid
 	p.Mermaid = false
-	p.framing, p.inDoc, p.relays = p.DocFramed, true, nil
+	p.framing, p.inDoc, p.relays = true, true, nil
 	html := p.renderDoc(t.Doc, t.DocMarks)
 	p.framing, p.inDoc = false, false
-	if p.DocFramed {
-		// A frame loads its own mermaid; only unframed content sets Mermaid.
-		html = p.framedDoc(t.Name, "", html, t.DocStale, p.Mermaid, p.relays, a, t.BodyUpdatedAt)
-		p.Mermaid = false
-	}
+	html = p.framedDoc(t.Name, "", html, t.DocStale, p.Mermaid, p.relays, a, t.BodyUpdatedAt)
+	p.Mermaid = false
 	p.Mermaid = p.Mermaid || page
 	p.docs[t.Name] = html
 }
@@ -626,16 +551,14 @@ func (p *pageData) DocHTML(topic string) template.HTML { return p.docs[topic] }
 // EntryHTML is a panel's content, isolated just like the topic body.
 func (p *pageData) EntryHTML(id string) template.HTML { return p.entries[id] }
 
-func (p *pageData) panelHTML(topic string, e EntryView, framed bool, a *pageAssets) template.HTML {
+func (p *pageData) panelHTML(topic string, e EntryView, a *pageAssets) template.HTML {
 	pageMermaid := p.Mermaid
 	p.Mermaid = false
-	p.framing, p.inDoc, p.relays = framed, true, nil
+	p.framing, p.inDoc, p.relays = true, true, nil
 	out := p.renderPanel(e)
 	p.framing, p.inDoc = false, false
-	if framed {
-		out = p.framedDoc(topic, e.ID, out, false, p.Mermaid, p.relays, a, "")
-		p.Mermaid = false
-	}
+	out = p.framedDoc(topic, e.ID, out, false, p.Mermaid, p.relays, a, "")
+	p.Mermaid = false
 	p.Mermaid = p.Mermaid || pageMermaid
 	return out
 }
@@ -820,23 +743,17 @@ type topicData struct {
 	Page *pageData
 }
 
-// DocClass is the class list of the topic's body box: framed or md, and
-// chg-stale once its change marks are stale (TopicView.DocStale), which
-// chg.js dims the bars from.
+// DocClass is the class list of the topic's framed body box, plus chg-stale
+// once its change marks are stale (TopicView.DocStale).
 func (d topicData) DocClass() string {
-	class := "md"
-	if d.Page.DocFramed {
-		class = "framed"
-	}
-	return class + staleClass(d.DocStale)
+	return "framed" + staleClass(d.DocStale)
 }
 
 // TopicOf pairs a topic with the page for the topic template.
 func (p *pageData) TopicOf(t TopicView) topicData { return topicData{TopicView: t, Page: p} }
 
-// TopicHTML renders t's topic section. On the dashboard's board (DocFramed)
-// the section carries data-th, a hash of its own rendered bytes (data-th
-// excluded): the board swap (dashboard.js morphBoard) compares it in place of
+// TopicHTML renders t's topic section. The section carries data-th, a hash of
+// its own rendered bytes (data-th excluded): the board swap compares it in place of
 // the section's whole HTML to keep an unchanged topic's node. Hashing the
 // bytes covers everything the HTML compare covered (classes, frame
 // documents, language); the theme is pinned after render (ThemeFrames), so
@@ -882,9 +799,6 @@ func (p *pageData) renderTopicHTML(t TopicView) (template.HTML, error) {
 		return "", err
 	}
 	html := buf.String()
-	if !p.DocFramed {
-		return template.HTML(html), nil
-	}
 	sum := sha256.Sum256(buf.Bytes())
 	at := strings.IndexByte(html, '>')
 	if !strings.HasPrefix(html, "<section ") || at < 0 {
