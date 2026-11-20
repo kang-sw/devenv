@@ -100,3 +100,26 @@ func TestIncrementalFoldReindexesReplacementSeen(t *testing.T) {
 		t.Fatalf("removed Seen dependency retained: order=%v successors=%v", ids(), tr.r.memo.succ[key.ID.String()])
 	}
 }
+
+func TestIncrementalFoldOrgStateMatchesFullReplay(t *testing.T) {
+	g := json.RawMessage(`{"admins":["a"],"members":[{"id":"a","keys":["a"]},{"id":"b","keys":["b"],"leads":["a"]},{"id":"c","keys":["c"],"leads":["b"]}]}`)
+	item := incrementalEvent("a", 1, TypeItemCreate, `{"kind":"task","title":"org fold"}`, 1, nil)
+	set := incrementalEvent("a", 2, TypeOrgSet, `{"org":"o-team","name":"Team","head":"b"}`, 2, nil)
+	cc := incrementalEvent("a", 3, TypeItemCCOrg, `{"item":"a.pc#1","org":"o-team"}`, 3, nil)
+	assign := incrementalEvent("a", 4, TypeItemAssign, `{"item":"a.pc#1","completion":"assigner","targets":[{"root":"b","org":"o-team","include_root":true}]}`, 4, nil)
+	src := newMemSource(g, "a.pc", []wsledger.Event{item, set, cc, assign})
+	tr := New(src, src.stream)
+
+	moveHead := incrementalEvent("a", 5, TypeOrgSet, `{"org":"o-team","name":"Team","head":"c"}`, 5, nil)
+	src.add(moveHead)
+	assertIncrementalFold(t, tr, src)
+	if tr.r.memo.replayedFrom != 4 {
+		t.Fatalf("org append did not resume from terminal checkpoint: %d", tr.r.memo.replayedFrom)
+	}
+	uncc := incrementalEvent("a", 6, TypeItemUnccOrg, `{"item":"a.pc#1","org":"o-team"}`, 6, nil)
+	src.add(uncc)
+	assertIncrementalFold(t, tr, src)
+	if len(tr.r.S.items["a.pc#1"].cc) != 0 || tr.r.S.ruleByID["a.pc#4~b"].root != "c" {
+		t.Fatalf("org checkpoint state diverged: cc=%v rule=%+v", tr.r.S.items["a.pc#1"].cc, tr.r.S.ruleByID["a.pc#4~b"])
+	}
+}

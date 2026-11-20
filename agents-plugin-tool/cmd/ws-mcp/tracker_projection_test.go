@@ -87,10 +87,13 @@ func projectionFixture() *wstrackerhost.StoreView {
 		Sync:  wstrackerhost.SyncInfo{Error: "https://user:password@example.test/?token=secret", WikiWarnings: []string{"https://user:password@example.test/?token=secret"}},
 		View: &wstracker.View{
 			Viewer: wstracker.Viewer{Member: "me", Stream: "me.pc"}, Now: "2026-11-18T07:18:00Z",
+			Orgs: []wstracker.OrgView{{ID: "o-team", Name: "Team", Head: "other"}},
 			Items: map[string]wstracker.ItemView{
 				"i": {ID: "i", Alias: "#1", Kind: "task", Title: "Summary title", Author: "other", TS: "2026-11-17T01:00:00Z", Status: projectionString("todo"),
 					Body: "**body-secret** <script>alert(1)</script> ![own](attachment:" + oid + ") ![remote](https://example.test/x.png)", BodyRev: []string{"body-revision-secret"},
-					Attachments: att, Mentions: []string{"me"}, Thread: []string{"e", "c"}, Due: projectionString("2026-11-17")},
+					Attachments: att, Mentions: []string{"me"}, Thread: []string{"e", "c"}, Due: projectionString("2026-11-17"),
+					CC: []string{"me"}, CCSources: map[string]wstracker.CCSourceView{"me": {Orgs: []string{"o-team"}}},
+					OrgCC: []wstracker.OrgCCView{{Org: "o-team", Added: []string{"me"}}}},
 				"other-item": {ID: "other-item", Kind: "topic", Title: "Other", Body: "not-requested-secret"},
 			},
 			ItemOrder: []string{"i", "other-item"},
@@ -106,7 +109,7 @@ func projectionFixture() *wstrackerhost.StoreView {
 				"a": {ID: "a", Item: "i", To: "me", By: "other", Sender: "other", Via: "e", State: "live", Forced: true, Status: "todo", TS: "2026-11-17T01:00:00Z", LastUpdate: "2026-11-18T00:00:00Z"},
 			},
 			Requests: map[string]wstracker.RequestView{"q": {ID: "q", Item: "i", By: "other", Assignee: "me", Note: projectionString("request note"), TS: "2026-11-18T01:00:00Z"}},
-			Rules:    map[string]wstracker.RuleView{"rule": {ID: "rule", Item: "i", State: "live"}},
+			Rules:    map[string]wstracker.RuleView{"rule": {ID: "rule", Item: "i", Org: projectionString("o-team"), State: "live"}},
 			Notices:  []wstracker.Notice{{Key: "w:a:done:now", Kind: "done", Assignment: "a", Item: "i", To: "me", TS: "2026-11-18T00:00:00Z"}},
 			My: wstracker.My{Assignments: []string{"a"}, Received: wstracker.Received{Pending: []string{"a"}},
 				Today: wstracker.Today{Confirms: []string{"a"}}, Requests: wstracker.MyReqs{Incoming: []string{"q"}},
@@ -217,6 +220,9 @@ func TestTrackerProjectionSummaryContract(t *testing.T) {
 	if len(row.Assignments) != 1 || len(row.Requests) != 1 || len(row.Rules) != 1 || len(row.Notices) != 1 || len(row.CCNotices) != 1 {
 		t.Fatalf("missing indirect records: %+v", row)
 	}
+	if row.Item["orgCC"] == nil || row.Item["ccSources"] == nil || trackerString(row.Rules["rule"].Org) != "o-team" {
+		t.Fatalf("missing org registrations: %+v", row)
+	}
 	all, err := json.Marshal(struct {
 		Items   any
 		Globals any
@@ -237,7 +243,7 @@ func TestTrackerProjectionSummaryContract(t *testing.T) {
 	if string(p.Globals["now"]) != `"2026-11-18T07:00:00Z"` {
 		t.Errorf("now = %s", p.Globals["now"])
 	}
-	for _, key := range []string{"store", "sync", "clones", "viewer", "priority", "attachments", "labels", "members", "admins", "rolesProblems", "itemOrder", "my", "stats", "heads", "now"} {
+	for _, key := range []string{"store", "sync", "clones", "viewer", "priority", "attachments", "labels", "orgs", "members", "admins", "rolesProblems", "itemOrder", "my", "stats", "heads", "now"} {
 		if _, ok := p.Globals[key]; !ok {
 			t.Errorf("missing global %s", key)
 		}

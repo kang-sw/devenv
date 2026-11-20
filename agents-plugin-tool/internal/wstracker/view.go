@@ -19,6 +19,7 @@ type View struct {
 	Priority      PriorityLevels         `json:"priority"`
 	Attachments   AttachmentLimit        `json:"attachments"`
 	Labels        []LabelView            `json:"labels"` // the live label list, in add order
+	Orgs          []OrgView              `json:"orgs"`   // live orgs and tombstones, in creation order
 	Members       map[string]MemberView  `json:"members"`
 	Admins        []string               `json:"admins"`
 	RolesProblems []string               `json:"rolesProblems"`
@@ -56,6 +57,15 @@ type LabelView struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	Color string `json:"color"`
+}
+
+// OrgView is one first-class org. Head is empty while vacant; Removed names
+// the roles.org_remove event for a tombstone.
+type OrgView struct {
+	ID      string  `json:"id"`
+	Name    string  `json:"name"`
+	Head    string  `json:"head"`
+	Removed *string `json:"removed"`
 }
 
 type PriorityLevels struct {
@@ -154,8 +164,21 @@ type ItemView struct {
 	Claimable bool      `json:"claimable"`
 	Requests  []string  `json:"requests"`
 	// CC are the CC'd members who are not removed, in the order they came
-	// to be CC'd.
-	CC []string `json:"cc"`
+	// to be CC'd. CCSources distinguishes personal and org provenance; OrgCC
+	// keeps each active org registration and everyone it added.
+	CC        []string                `json:"cc"`
+	CCSources map[string]CCSourceView `json:"ccSources"`
+	OrgCC     []OrgCCView             `json:"orgCC"`
+}
+
+type CCSourceView struct {
+	Personal bool     `json:"personal"`
+	Orgs     []string `json:"orgs"`
+}
+
+type OrgCCView struct {
+	Org   string   `json:"org"`
+	Added []string `json:"added"`
 }
 
 // OpenView is an open item's opening: the item.open event, its writer, and
@@ -242,6 +265,7 @@ type RuleView struct {
 	Via         string   `json:"via"`
 	By          string   `json:"by"`
 	Root        string   `json:"root"`
+	Org         *string  `json:"org"`
 	IncludeRoot bool     `json:"includeRoot"`
 	Levels      *float64 `json:"levels"`
 	Completion  string   `json:"completion"`
@@ -777,11 +801,32 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 			Counted: r.counted(it, status[id]), Children: []string{}, Assignments: orEmpty(recIDs), Pending: orEmpty(pend),
 			Thread: orEmpty(threads[id]), Depth: len(chain) - 1,
 			Mentions: append([]string{}, it.mentions...), Attachments: attachmentViews(it.attachments),
-			Refs: append([]string{}, it.refs...), Backrefs: orEmpty(backrefs[id]), Requests: []string{}, CC: []string{}}
+			Refs: append([]string{}, it.refs...), Backrefs: orEmpty(backrefs[id]), Requests: []string{}, CC: []string{},
+			CCSources: map[string]CCSourceView{}, OrgCC: []OrgCCView{}}
 		for _, e := range it.cc {
 			if S.liveMember(e.member) {
 				iv.CC = append(iv.CC, e.member)
+				sources := CCSourceView{Personal: e.personal, Orgs: []string{}}
+				for _, oid := range S.oorder {
+					if e.orgs[oid] {
+						sources.Orgs = append(sources.Orgs, oid)
+					}
+				}
+				iv.CCSources[e.member] = sources
 			}
+		}
+		for _, key := range S.ccOrder {
+			reg := S.ccOrgs[key]
+			if reg == nil || !reg.active || reg.item != id {
+				continue
+			}
+			entry := OrgCCView{Org: reg.org, Added: []string{}}
+			for _, member := range S.morder {
+				if reg.added[member] {
+					entry.Added = append(entry.Added, member)
+				}
+			}
+			iv.OrgCC = append(iv.OrgCC, entry)
 		}
 		if o := S.activeOpen(it); o != nil {
 			iv.Open = &OpenView{ID: o.node.id, By: o.by, Scope: o.scope, TS: ts(o.node.ts)}
@@ -858,7 +903,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 
 	vw.Rules = map[string]RuleView{}
 	for _, ru := range S.rules {
-		rv := RuleView{ID: ru.id, Item: ru.item, Via: ru.via, By: ru.by, Root: ru.root, IncludeRoot: ru.includeRoot,
+		rv := RuleView{ID: ru.id, Item: ru.item, Via: ru.via, By: ru.by, Root: ru.root, Org: nz(ru.org), IncludeRoot: ru.includeRoot,
 			Levels: ruleLevels(ru), Completion: ru.completion, State: ru.state, Request: nz(ru.request), Ended: nz(ru.ended), TS: ts(ru.ts)}
 		if ru.ended != "" {
 			rv.State = "ended"
@@ -924,6 +969,15 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 		if l := S.liveLabel(id); l != nil {
 			vw.Labels = append(vw.Labels, LabelView{ID: id, Name: l.name, Color: l.color})
 		}
+	}
+	vw.Orgs = []OrgView{}
+	for _, id := range S.oorder {
+		o := S.orgs[id]
+		ov := OrgView{ID: id, Name: o.name, Head: o.head}
+		if o.removed != nil {
+			ov.Removed = viewCopy(&o.removed.id)
+		}
+		vw.Orgs = append(vw.Orgs, ov)
 	}
 	vw.Admins = append([]string{}, S.aorder...)
 
