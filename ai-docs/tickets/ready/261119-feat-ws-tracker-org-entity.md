@@ -398,6 +398,32 @@ Verification (Go tests):
   root rule; unknown org event types are flagged, not folded; an `item.uncc`
   of a member the old reader does not see as CC'd is a no-op.
 
+### Result (67e9125) - 2026-11-20
+
+- Added first-class org state and tombstones, admin-only org lifecycle events,
+  fold-order conflict handling (including joined and removed members), nearest
+  org and whole-subtree resolution, and checkpoint-safe copies.
+- Added dynamic org CC registrations with personal/per-org provenance,
+  exclusions and registration additions, plus org assignment rules that retain
+  their assign-time identity and consent while following the current head.
+  Ending an org rule immediately re-extends other live rules.
+- Projected orgs, org CC registrations and sources, registration additions and
+  org assignment identity through the tracker view and dashboard projection.
+  No Phase 2 editor or item-window UI was started, and no locale strings were
+  added.
+- Compatibility remains T1: the four new event types are additive constants
+  (`payload.go` lines 34-35 and 183-184), while an old binary's default event
+  check flags unknown types before fold (`check.go` line 1580). The hybrid
+  assign target still carries the legacy `root` shape (`org_test.go` lines
+  9-19), so an old reader treats it as an ordinary root rule and changes no org
+  state.
+- Lite review found one Critical joined-head replay bug and one Important
+  nested-org test gap. Both were fixed in `67e9125`; no Minor findings remain.
+- Verification passed: `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test
+  -count=1 ./internal/wstracker` and `GOPROXY=off GOSUMDB=off
+  GOTOOLCHAIN=local go test -count=1 -run 'Tracker|Asset'
+  ./internal/wsdashboard` (one package passed, zero failed, for each command).
+
 ### Phase 2: Org management in the org-chart editor and org entries on items
 
 Implement Decisions 4, 8-13, 18 (client-side id minting) and 20 in the
