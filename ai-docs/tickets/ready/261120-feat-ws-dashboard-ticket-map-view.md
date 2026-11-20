@@ -4,6 +4,10 @@ related:
   261119-feat-ws-dashboard-shell-topbar-rail-redesign: amends its "right cluster strictly untouched" rule (Decisions, Top-right handle boundary) to add #thandle beside #shandle through drRoom()/--drhw/--thr
   261117-feat-ws-dashboard-wide-drawer-tickets-notes: the drawer 2-column Tickets panel and its demand-only idea read stay unchanged; the map is an additive full-viewport overlay that reuses the same route gate
   261119-feat-ws-dashboard-paged-docking-gallery: the map's "Open in dashboard file card" action opens a durable preview card through WsPreview.open, which the docking gallery shows and activates
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: f04090c323fa1868
+sage-review-completeness-reviewed: f04090c323fa1868
 ---
 
 # Dedicated Dashboard Ticket Map View (B Hierarchical Swimlane + C Keyword-Soup Constellation)
@@ -90,11 +94,15 @@ All decisions `(16)`–`(29)` are settled; this section is their record.
   - A reference that resolves nowhere is *dangling*. It is counted and reported,
     never an error.
   - Tickets that only a sparse checkout hides (`TicketInfo.Hidden`) are out of
-    scope: the build is filesystem-only, like the idea route's `TicketsList`
-    call (`mcp/dashboard_ticket_ideas.go#L21`), so a hidden referenced stem
-    counts as dangling.
-  - *Rejected:* a full scan of `.done/` and `.dropped/` (1,298 files on this
-    board, 1,186 of them unreferenced). It is noisy, and on the target machines
+    scope: the build is filesystem-only, like the idea route's
+    `whiteboardTicketsList` call (`mcp/dashboard_ticket_ideas.go#L21`, a test
+    seam `var whiteboardTicketsList = wsdoc.TicketsList` at
+    `mcp/whiteboard_panels.go#L121`, which leaves `Resolve` off), so a hidden
+    referenced stem counts as dangling.
+  - *Rejected:* a full scan of `.done/` and `.dropped/` (1,302 files on this
+    board at populate time, 998 in `.done/` and 304 in `.dropped/`, about 1,190
+    of them unreferenced by an open ticket's `parent`/`blocked-by`/`related`;
+    `ls ai-docs/tickets/.done ai-docs/tickets/.dropped`). It is noisy, and on the target machines
     each file touch costs 10–100× (`ai-docs/manuals/performance.md`).
     *Rejected:* reusing `loadTicketGraph` (`wsdoc/tickets_graph.go#L78-L120`),
     which deliberately scans with `IncludeDone`/`IncludeDropped`.
@@ -263,6 +271,14 @@ All decisions `(16)`–`(29)` are settled; this section is their record.
   shown (`B` or `C`), set on every view switch.
   *Rejected:* `(29)=b`, View C first (the readiness matrix is immediately
   actionable for triage).
+- **Word lists are authored, not ported (auto-confirmed technical).** The v5
+  `build.py` is not committed, so "ported verbatim" `EN_STOP`/`KO_STOP`/`KO_SUFFIX`
+  cannot be followed. The implementer authors generic English and Korean
+  function-word lists and a Korean particle/ending list under the
+  shipped-surface boundary, validated by the Phase 1 text and cluster tests.
+  *Rejected:* committing the v5 generator as a reference file (it is not a
+  deliverable, and its repository-specific audit picks must not reach shipped
+  code).
 - **Performance shape (`performance.md` rules 1, 4, 5, 7).**
   - Per-ticket parse results and term statistics live in the `ticketCache`
     entry and are revalidated by `(size, modTime)` from the directory listing
@@ -288,8 +304,10 @@ All decisions `(16)`–`(29)` are settled; this section is their record.
   - `ai-docs/manuals/performance.md` (declared for `agents-plugin-tool/`).
     **File-touch budget per overlay open or Refresh**, counted by Phase 1's
     touch test. The fixed costs are:
-    - exactly 3 directory listings (`ready/`, `todo/`, `idea/`) through the
-      existing `sortedEntries`;
+    - exactly 3 directory listings (`ready/`, `todo/`, `idea/`) through an
+      error-returning `readTicketDir` seam (wrapping `os.ReadDir`, sorting
+      names like `sortedEntries` while surfacing non-`ErrNotExist` read errors
+      instead of silently returning `nil`);
     - on non-Windows, the existing one `entry.Info()` lstat per open ticket
       entry (free on Windows);
     - at most 2 `Lstat` calls per distinct referenced closed stem (`.done/`
@@ -358,7 +376,9 @@ All decisions `(16)`–`(29)` are settled; this section is their record.
 
     The overlay therefore covers the drawer (`--z-panels`, 40), popovers (60),
     the maximized-card scrim (69), and maximized cards (70; later in DOM order).
-  - The overlay is appended to `document.body` last.
+  - The overlay is appended to `document.body` last, and re-appended on every
+    open, so a card created or maximized after the first open (same `z-index`,
+    later in DOM order) never paints above it.
   - Opening the overlay closes an open session drawer through `drSetOpen(false)`.
   - Shell frame lift: the selector list in `dim()` (`dashboard-lifecycle.js#L738`)
     gains `.d-tm-back:not([hidden])`. A framed page with the overlay open then
@@ -371,11 +391,17 @@ All decisions `(16)`–`(29)` are settled; this section is their record.
   - Keyboard isolation: while the overlay is visible, one `keydown` listener on
     `window` in the capture phase (registered on open, removed on close or
     yield) runs before the drawer's document-capture Escape handler
-    (`dashboard-drawer.js#L475-L482`) and every page shortcut. It handles the
-    overlay keys and calls `preventDefault()` and `stopImmediatePropagation()`
-    for every key it consumes. It also swallows `/`, Ctrl/Cmd+K, and Ctrl+Space
-    (focusing the map search instead), so the quick-search palette never opens
-    under the overlay.
+    (`dashboard-drawer.js#L475-L482`), `tracker-mount.js#L404`, and every
+    document/bubble page shortcut. Load-time window-capture Escape listeners
+    (`dashboard-git.js#L760`, `dashboard-rail-popovers.js#L1174,#L1185`,
+    `dashboard-conversation.js#L188`) only act while their own UI is open;
+    clicking `#thandle` (and `ticketMap.open()`) dismisses any open transient
+    popover/modal before opening so those listeners are inert while the map is
+    active. The overlay listener handles the overlay keys and calls
+    `preventDefault()` and `stopImmediatePropagation()` for every key it
+    consumes. It also swallows `/`, Ctrl/Cmd+K, and Ctrl+Space (focusing the
+    map search instead), so the quick-search palette never opens under the
+    overlay.
   - The listener ignores IME composition (`e.isComposing || e.keyCode === 229`)
     and typing targets (`input`, `textarea`, `select`, and `[contenteditable]`
     other than range and checkbox inputs), except for Escape, which is still
@@ -390,6 +416,36 @@ All decisions `(16)`–`(29)` are settled; this section is their record.
   - `assets/dashboard-drawer.js`, `dashboard-drawer.css`,
     `dashboard-lifecycle.js`, `overview.js`, `preview.js`, `cards.js`, and
     `gallery.js` (read-only here: no change to either).
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for agents-plugin-tool/internal/)
+- Convention: ai-docs/manuals/performance.md (declared for agents-plugin-tool/)
+
+## Prior Decisions
+
+- 261119-feat-ws-dashboard-shell-topbar-rail-redesign (2026-11-19, Decisions): "Right cluster (strictly untouched): Existing iframe-owned top-right handles ... `#shandle`, drawer `#drhandle` and their CSS/DOM contracts ... must not be modified." — bearing: constrains
+- 261117-feat-ws-dashboard-wide-drawer-tickets-notes (2026-11-17, Decisions): "Idea fetched on demand — (29)=ok. A new route reads `idea/` only when the user presses `더보기`. Rejected: adding idea to the live panel region." — bearing: supports
+- 6b2963ee (2026-11-17, commit): "Read idea only on an explicit button press via a session-indexed read route; do not add idea to live panel reads or watches." — bearing: supports
+- c7e79e71 (2026-11-17, commit): "Stale-data guards: a file whose mtime is within 2 s of the listing is never cached (same-tick same-size rewrite); symlinked tickets are always reread (the listing describes the link)" — bearing: constrains
+- 961c8e3b (2026-11-15, commit): "Concatenate contiguous JavaScript source fragments without separators into the original single IIFE, preserving declaration hoisting, early return, shared state, handler ordering" — bearing: constrains
+- 261119-feat-ws-dashboard-paged-docking-gallery (2026-11-20, commit 04dde7ac): "Resolved single conflict in agents-plugin-tool/internal/wsdashboard/cards_test.go against develop ... preserving develop's mark-free pin assertions alongside gallery page/pane assertions" — bearing: supports
+- e207bc36 (2026-11-13, commit): "feat(dashboard): wide-view header handles at window edge, idle pin placeholder, board-width handle" — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | wsdoc/tickets_cache.go, wsdoc/tickets_map*.go, wsdashboard/pages.go, ticket_graph.go, agent_sessions.go, mcp/dashboard_ticket_graph.go, assets/dashboard-drawer.js, dashboard-ticketmap.js, dashboard-lifecycle.js, overview.js, wsi18n/tables/*.json |
+| scope.surface | cross-module | new route GET /s/<rid>/tickets/graph spanning wsdoc, wsdashboard, mcp, wsi18n and embedded assets; drRoom geometry shared by the shell header |
+| scope.new_public_symbol | yes | wsdoc.TicketMap, wsdoc.TicketMapJSON, wsdashboard.TicketGraphSource, (*DashboardSessionSource).ReadTicketGraph, route tickets/graph |
+| scope.new_type_contract | yes | TicketMapResult and the versioned JSON payload (meta, clusters, clusterKeywords, nodes, edges, sim); TicketGraphSource.ReadTicketGraph |
+| scope.test_surface | new-files | none exist yet: search for ticketmap under wsdashboard and wsdoc returned nothing; also extends existing asset_source_test.go, access_test.go, css_collision_test.go |
+| complexity.reuse_points | confirmed | read: ticketCache and scanStatusDir (tickets_cache.go#L24-L85), listStatusDirEntries (readTicketDir seam), parseBlockedByEdge, relatedEntries, ticketPhases, handleTicketIdeas shape (ticket_ideas.go#L22-L51), drRoom, WsPreview.open |
+| complexity.side_effect_risk | moderate | extends the shared ticketCache that TicketsList and git.commit verification also use (wrapper keeps callers unchanged); drRoom, dim() and overview classify selectors change for every session page |
+| risk.correctness | high | deterministic Louvain, tokenizer and byte-identical JSON across GOMAXPROCS within one build and host; the v5 generator is not in the tree, so word lists are authored and constants come from this ticket |
+| risk.fit | moderate | amends the done shell redesign handle boundary; must obey the single-IIFE asset concatenation and CSS collision rules |
+| risk.test | high | three phases of new Go, Node and Playwright suites, a synthetic fixture generator, touch-count and determinism tests, and screenshot comparison against the mockup |
+| risk.security_or_contract | moderate | new read-only route behind the existing access guard and agent refusal; escape-first markdown renderer; T0 additive payload with a version field |
 
 ## Phases
 
@@ -417,8 +473,12 @@ prefix with `~/.local/bin/ws-rgo` on remote-Go hosts.
   copied for wsdashboard through an exported test helper in
   `internal/wsdoc/wsdoctest`. Its corpus is project-neutral (invented domains,
   invented paths) and plants:
-  - 8 topics of 12–24 open tickets each, each with distinct title words and
-    one code path such as `ledger/posting.go` or `garden/moisture.py`;
+  - 8 Latin-script topics of 12–24 open tickets each, each with distinct title
+    words and one code path such as `ledger/posting.go` or
+    `garden/moisture.py`. The Korean and Japanese topics below are additional.
+    The implementer picks exact sizes so the default `n=170` open tickets
+    includes the epic's 11 children and the 5 isolated tickets and the cluster
+    assertions hold;
   - one Korean topic (`주문`, `배송`, `추적`, …) and one Japanese topic (Kanji
     and Katakana titles);
   - a term present in every ticket (`widget`), which must be high-DF cut;
@@ -446,8 +506,15 @@ prefix with `~/.local/bin/ws-rgo` on remote-Go hosts.
     `scanStatusDir` as a `wantDoc=false` wrapper, so no existing caller changes;
   - add `ticketRefCache` (a mutex-guarded `map[absPath]ticketCacheEntry`) for
     closed refs;
-  - add `var lstatTicketFile = os.Lstat` as a counting seam next to
-    `readTicketFile` (`#L20-L22`).
+  - add `var lstatTicketFile = os.Lstat` and `var readTicketDir = os.ReadDir`
+    as counting seams next to `readTicketFile` (`#L20-L22`), with an
+    error-returning sorted status-dir listing helper (`listStatusDirEntries`)
+    so non-`ErrNotExist` directory read errors propagate to `500` rather than
+    returning `nil` like `sortedEntries` (`project_tree.go#L299`);
+  - keep per-root `doc *ticketDoc` and fingerprint memo memory bounded in
+    long-lived multi-worktree daemons (evict least-recently-used roots past a
+    modest cap, e.g. 16 roots, or record measured per-root footprint alongside
+    the Phase 1 benchmark).
 - Create `wsdoc/tickets_map.go`: loading, ref lookup, fingerprint memo, result
   types, JSON encoding, and the exported entry points.
 - Create `wsdoc/tickets_map_text.go`: the markdown section parser, tokenizers,
@@ -519,7 +586,9 @@ prefix with `~/.local/bin/ws-rgo` on remote-Go hosts.
     list. Lemma merges sum stats later, so the raw list is never stored.
 
   Features read at most the first 256 KiB of a body.
-- **Tokenization.** Parameters are copied exactly from the v5 builder.
+- **Tokenization.** Every numeric weight, threshold, and regex below is
+  specified in this ticket and is the contract. The v5 builder is not committed,
+  so the word lists are not ported: the implementer authors them (see Stoplists).
   - Weights: `W_TITLE=2.4`, `W_CODE=3.0`, `W_PROSE=1.0`. A section matching
     `^(context|goal|goals|scope|problem|background|motivation|summary|overview|why)\b`
     (case-insensitive) is scaled ×1.4. A section matching
@@ -550,15 +619,23 @@ prefix with `~/.local/bin/ws-rgo` on remote-Go hosts.
       < 2, all digits, digits making up ≥ half its length, or a hex hash with a
       digit) or a stopword;
     - Hangul runs `[\x{AC00}-\x{D7A3}]{2,}` are stripped of the longest
-      matching particle or ending from the v5 `KO_SUFFIX` list, keeping at
-      least 2 syllables, then dropped when shorter than 2 or in `KO_STOP`;
+      matching particle or ending from `koSuffixes` (authored per Stoplists),
+      keeping at least 2 syllables, then dropped when shorter than 2 or in
+      `koStop`;
     - Han, Hiragana, and Katakana runs (`\p{Han}`, `\p{Hiragana}`,
       `\p{Katakana}`) of length ≥ 2 emit overlapping rune bigrams (no
       dictionary segmentation); single-rune runs are dropped;
     - invalid UTF-8 bytes are skipped.
-  - Stoplists: the v5 generic `EN_STOP` and `KO_STOP` lists ported verbatim into
-    `tickets_map_text.go`. They are English and Korean function words and ws
-    ticket-convention words only.
+  - Stoplists: `enStop`, `koStop`, and the Korean particle/ending list
+    `koSuffixes` are authored by the implementer in `tickets_map_text.go`. They
+    hold English and Korean function words (Korean: common josa and verb
+    endings, longest-match first) and ws ticket-convention words only, with no
+    domain or repository-specific term. Their correctness contract is the text
+    tests: `화이트보드를` → `화이트보드`, English function words and
+    status/section-heading words filtered, and the cluster tests on the
+    fixture. The lists are an implementation detail, not a payload field, so
+    changing them needs only `ticketMapVersion` to be bumped when cluster output
+    changes.
 - **Lemmatization.** Corpus-driven; build `LEMMA` by iterating the vocabulary
   in lexicographic order. Candidate order for a pure `[a-z]+` word:
   1. `ies`→`y` (length > 5);
@@ -644,7 +721,7 @@ prefix with `~/.local/bin/ws-rgo` on remote-Go hosts.
   - Name candidates: terms with `tick_c ≥ max(2, ceil(0.12·size_c))` and
     `cdf/K ≤ 0.60`, de-duplicated by substring of the base or an equal lemma,
     keeping up to 8. Terms shorter than 3 runes are dropped for Latin, digit,
-    and code terms; Hangul and CJK terms need only 2 runes (the v5 builder's
+    and code terms; Hangul and CJK terms need only 2 runes (the v5 reference's
     byte-agnostic `len < 3` dropped 2-syllable Hangul terms).
   - Names: first take candidates carried in titles by ≥ 2 tickets (≥ 1 when
     `size_c < 6`) that are not code terms, then the rest, up to 3 terms.
@@ -660,8 +737,9 @@ prefix with `~/.local/bin/ws-rgo` on remote-Go hosts.
   - For each carrying member ticket, `tw = round(max(vec[w], 0.02) + 0.15·[term in title channel], 3)`.
 - **Fingerprint memo.** A SHA-256 over sorted `(relPath, size, modTime
   UnixNano)` of every included file, plus the sorted dangling stems and the
-  constant `ticketMapVersion = 1`. When the fingerprint equals the last
-  build's, return the cached bytes. Store a memo only when no included file is
+  constant `ticketMapVersion = 1`. The memo is keyed by `root`, so sessions on
+  different project roots do not evict each other. When the fingerprint equals
+  that root's last build, return the cached bytes. Store a memo only when no included file is
   younger than `ticketCacheRacyWindow`.
 
 **`GET /s/<rid>/tickets/graph` response (`200`, `application/json`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`)**
@@ -718,7 +796,7 @@ prefix with `~/.local/bin/ws-rgo` on remote-Go hosts.
     sorted by `(i, j)`.
 - Rounding: `gamma` has 1 decimal, `modularity` 3, `score` 3, `weight` 3. Floats
   are encoded with `strconv.FormatFloat(x, 'f', -1, 64)` after rounding, so the
-  bytes are identical across runs and platforms.
+  bytes are identical across runs within one build and host.
 - Error and empty mapping:
   - An empty or missing board returns `200` with zero counts, `[]` arrays, and
     `{}` for `clusterKeywords`.
@@ -781,7 +859,7 @@ prefix with `~/.local/bin/ws-rgo` on remote-Go hosts.
     frontmatter; a `#phase2` fragment preserved in `edges`; a duplicate stem
     across `todo/` and `.done/` (the open one wins).
   - **Touch test** (`tickets_map_touch_test.go`), counting `readTicketFile`,
-    `lstatTicketFile`, and `sortedEntries` calls through seams:
+    `lstatTicketFile`, and `readTicketDir` calls through seams:
     - a cold build gives opens = included tickets, listings = 3, and closed
       lstat ≤ 2 × distinct referenced closed stems;
     - a warm rebuild with mtimes backdated past the racy window gives
@@ -914,7 +992,7 @@ prefix with `~/.local/bin/ws-rgo` on remote-Go hosts.
   exposed). `S` holds:
   - `view`, `sel` (node index or null), `hist`, `hp`;
   - `q`, `hits`;
-  - `st` (5 booleans), `cl` (a Set of hidden cluster ids), `kw` (soup item or
+  - `st` (5 booleans, all on by default), `cl` (a Set of hidden cluster ids), `kw` (soup item or
     null);
   - `simTh` (default 15), `simUnlinked` (false), `simRefs` (true), `inspB`
     (false);
@@ -936,11 +1014,15 @@ prefix with `~/.local/bin/ws-rgo` on remote-Go hosts.
   - **Derived graph:** a per-node map `X` of
     `j → {rels:Set, notes:[{note, side, rel}]}` with inverse relations
     `child`/`blocks`/`related`, `simMap`, a `sim` list sorted descending and
-    capped at 25, `deg`, `blockedOpen`, and a lower-cased search haystack of
+    capped at 25, `deg` (the count of distinct explicit-relation neighbors; similarity
+    neighbors do not count), `blockedOpen`, and a lower-cased search haystack of
     title + stem + kw + cluster label + preview.
   - **Refresh:** refetch, rebuild, re-select by stem (dropped when the stem is
     gone), keep filters, history (filtered by stems that still exist), and
     view, and keep the scroll position when the cluster count is unchanged.
+  - **Refresh failure:** a failed or 404 Refresh keeps the retained graph and
+    state, shows a transient `js.tmap.error` notice with Retry, and never
+    replaces a loaded graph with the error state.
   - **Reopen:** shows the retained state without a fetch.
 - **Close:** set `hidden`, remove the keydown listener, return focus to
   `#thandle` when the overlay held focus, and set `aria-expanded=false`.
@@ -1160,8 +1242,9 @@ prefix with `~/.local/bin/ws-rgo` on remote-Go hosts.
   1. Opening the page performs no `/tickets/graph` request. `#thandle` is
      visible next to `#shandle`; its right edge is exactly
      `#shandle.left − 6px` (±0.5), and the header right padding equals
-     `--drhw + 6`. With the drawer handle hidden, `#thandle` still sits
-     6px left of `#shandle`.
+     `--drhw + --tkhw + 6` (matching `dashboard-drawer.css#L456`, with
+     `--tkhw` resolving to `0px` when no tracker handle is present). With the
+     drawer handle hidden, `#thandle` still sits 6px left of `#shandle`.
   2. Clicking `#thandle` sends one request, the overlay covers the viewport
      (`getBoundingClientRect` equals the viewport), and `aria-expanded=true`.
      The first open shows View B.
@@ -1252,7 +1335,7 @@ prefix with `~/.local/bin/ws-rgo` on remote-Go hosts.
   - the tooltip `#tmtip`.
 
 **Deterministic layout** (run once per payload; the seed is 42 with the v5
-mulberry-style `rng`):
+`mulberry32` `rng`):
 
 - Node radius: open `{ready 7.5, todo 6.5, idea 5.5} + min(5, √deg·1.1) + (epic ? 2.5 : 0)`;
   refs 4.5. Cluster radius `CR = 34 + 30·√count`.
