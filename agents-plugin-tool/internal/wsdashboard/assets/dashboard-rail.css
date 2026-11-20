@@ -481,10 +481,9 @@ html:not([data-sysopen]) .rail .rsleep { display: none; }
 .shp-last { font-size: 10.5px; color: var(--wb-muted-fg); font-family: var(--wb-sans); overflow-wrap: anywhere; }
 .shp.stale .shp-mid, .shp.stale .shp-eff { opacity: .72; }
 /* r-ctx renders the existing status-band markup directly into the popup. */
-.shp .sb-top { padding: 0; }
+.shp .sb-top { padding: 4px 0 0; }
 .shp .sb-ctx { gap: 7px; min-width: 0; }
 .shp .sb-pct { font-size: 15px; }
-.shp .sb-bar-wrap { padding-top: 13px; }
 .shp .sb-bar { height: 8px; min-width: 60px; }
 .shp .sb-tok { font-size: 11px; }
 .shp .sb-native, .shp .ctx-tip { display: none; }
