@@ -398,6 +398,14 @@ confirms them before this work merges to `develop`.
     (`whiteboard_tools.go:788`) goes away.
   - Rejected: publishing under the board lock before returning
     (`mcp/session_state.go:665-675`).
+- **The disk-page retirement supersedes `(1812)`'s publisher mechanism,
+  `(1841)=a` (owner, 2026-11-20).** Phase 3 no longer builds or verifies a
+  coalescing `index.html` / `index.stamp.js` publisher, because
+  `261116-feat-ws-whiteboard-retire-disk-pages` removes those pages before this
+  ticket switches the update path in Phase 2. Keep `(1812)` as decision
+  history: its response-path goal still holds, but retirement satisfies it by
+  removing publication rather than moving publication to a background writer.
+  Rejected: keeping the publisher after its only outputs retire.
 - **Zips keep the legacy folder layout, `(1813)`** (owner-assumed 2026-11-19
   under (1802)=b; owner confirms in the morning):
   - Loading an old-layout zip reuses the import path.
@@ -454,17 +462,17 @@ confirms them before this work merges to `develop`.
 - Release: T3, so this change ships only in a new minor version (Release Rule
   2; `(1805)=a`). The minor version bump is NOT part of this ticket. It happens
   at release, through the ship flow, with the owner's approval.
-- The derived `index.html` / `index.stamp.js` stay files while `file://` links
-  remain (epic Non-Scope). Their retirement belongs to
-  `261116-feat-ws-whiteboard-retire-disk-pages`.
+- The derived `index.html` / `index.stamp.js` retire in
+  `261116-feat-ws-whiteboard-retire-disk-pages` before this ticket's Phase 2;
+  this ticket neither carries nor recreates their publisher (`(1841)=a`).
 - The `whiteboard.update`, `whiteboard.query`, and `whiteboard.load` tool
   surfaces keep their arguments and result lines. Embed changes belong to the
   sibling child. Refusal semantics change in exactly these same-version ways,
   each graded under `release-compatibility.md`:
-  - `(1812)` removes the synchronous "board committed; ... fix the output
-    problem" error (`mcp/whiteboard_tools.go:788`). A publish failure becomes a
-    debug event. Tier: T0. The call succeeds where it used to fail, and no
-    stored data changes.
+  - `(1812)`, as superseded by `(1841)=a`, removes the synchronous "board
+    committed; ... fix the output problem" error (`mcp/whiteboard_tools.go:788`)
+    by retiring the derived publisher entirely. Tier: T0. The call succeeds
+    where a derived publish used to fail, and no stored data changes.
   - `(1806)` adds the direct-CLI refusal. Tier: T3. A call that worked now
     refuses. It rides the minor bump of `(1805)=a`, but the 23:22 approval
     covered only the `(1805)=a` sentinel. The owner's morning confirmation of
@@ -478,7 +486,7 @@ confirms them before this work merges to `develop`.
   field of ready ticket `261114-feat-ws-content-change-relative-hover`.
 - Existing invariants carry over unchanged: append-only entries, monotonic
   entry/panel counters, immutable panel versions, the board-revision and
-  stale-nudge receipts, the load floor, and committed-before-publish ordering
+  stale-nudge receipts, the load floor, and durable commit ordering
   (`folders.go:742-895`, `folders_load_floor.go`).
 - Out of scope, deferred by `(1816)=a`: any deletion of legacy board folders.
   There is no deletion code.
@@ -610,8 +618,8 @@ Depends on Phase 1.
 Route every writer and reader listed in `### Current store inventory` through
 the board DB store:
 
-- `whiteboard.update`, the render-only refresh, the dashboard answer revision,
-  the board notice, `whiteboard.query` and lazy history, the served page,
+- `whiteboard.update`, the dashboard answer revision, the board notice,
+  `whiteboard.query` and lazy history, the served page,
   nudges, zip export, and `whiteboard.load` with its backup.
 - In-process change notification (`(1814)`).
 - Handle lifetime per `(1347)=c`: long idle close, reopen on next access.
@@ -636,19 +644,17 @@ Verification:
   open succeeds within the `(1827)` bound once the drain closes the DB, and an
   open that outlasts the bound returns an explicit error.
 - The dashboard and the nudge see an update through in-process notification,
-  with no stat of board files (`(1814)`). Here "board files" excludes the
-  derived `index.html` and `index.stamp.js`, whose writes are Phase 3's
-  concern.
+  with no stat of board files (`(1814)`). The disk-page retirement has already
+  removed the derived `index.html` / `index.stamp.js` path (`(1841)=a`).
 - An idle close followed by a reopen keeps the board's state intact
   (`(1347)=c`).
 
-Deferred: async derived publish and the measured report.
+Deferred: the measured report.
 
-### Phase 3: Update-path latency and measured result
+### Phase 3: Update-path measured result
 
 Depends on Phase 2 and on `(1815)` (the embed sibling has landed).
 
-- Move derived page publication off the response path (`(1812)`).
 - Measure "after" with Phase 1's method: file operations per
   `whiteboard.update`, the fsync count, and update latency on macOS.
 - Report before and after in the Result, and record the Windows V3
@@ -656,22 +662,16 @@ Depends on Phase 2 and on `(1815)` (the embed sibling has landed).
 - List any remaining rule 1-5 gap with its measured cost for the owner
   (rule 8), citing `performance.md`'s rule numbers (`(1346)`).
 
-The trace measures the store path separately from the derived publish. The
-`(1812)` coalescing writer still rewrites `index.html` and `index.stamp.js`
-through temp file and rename, so it is a known Rule 2 and Rule 4 gap owned by
-`261116-feat-ws-whiteboard-retire-disk-pages`. List it in the Result with its
-measured cost. It is not a phase failure.
+The trace measures the store path only. Per `(1841)=a`,
+`261116-feat-ws-whiteboard-retire-disk-pages` has already removed the derived
+page and stamp reads/writes; this ticket does not reintroduce them.
 
 Verification, on a traced single `whiteboard.update` (the Phase 1 scenario):
 
-- No per-call open, flock, or stat of board files (Rule 4). "Board files"
-  excludes the derived `index.html` and `index.stamp.js` writes.
+- No per-call open, flock, or stat of board files (Rule 4), and no derived
+  `index.html` / `index.stamp.js` access.
 - One WAL append per update, and nothing written for an unchanged state
   (Rule 2).
 - No fsync on the response path (Rule 5).
-- Publish (`(1812)`): a publish failure becomes a debug event while the update
-  still succeeds; the stamp is written after the page; under coalescing the
-  latest state wins.
-- Every remaining gap other than the derived publish above is listed per
-  Rule 8 with its measured cost. A gap fails the phase unless the owner
-  approves it.
+- Every remaining gap is listed per Rule 8 with its measured cost. A gap fails
+  the phase unless the owner approves it.
