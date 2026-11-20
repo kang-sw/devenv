@@ -254,9 +254,9 @@ button.sbadge:focus-visible { outline: 1.5px solid var(--wb-primary); outline-of
 /* The island overlays the conversation grid cell, not its scrolling content. */
 .dgrid.live > .agisland { grid-area: convo; position: relative; z-index: var(--z-popovers); align-self: start; justify-self: end; margin: 8px; min-width: 0; max-width: calc(100% - 16px); overflow: hidden; box-sizing: border-box; background: var(--wb-card); color: var(--wb-fg); border-radius: 16px; box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); transition: width .2s ease, height .2s ease, border-radius .2s ease; }
 .dgrid.live > .agisland[hidden] { display: none !important; }
-.dgrid.live[data-tab="board"] > .agisland, .dgrid.live[data-ctab="files"] > .agisland { display: none; }
-@media (min-width: 760px) { .dgrid.live[data-layout="split"][data-tab="board"]:not([data-ctab="files"]) > .agisland { display: block; } }
-@media (min-width: 1100px) { .dgrid.live:not([data-layout="tabs"])[data-tab="board"]:not([data-ctab="files"]) > .agisland { display: block; } }
+.dgrid.live[data-tab="board"] > .agisland, .dgrid.live[data-ctab="files"] > .agisland, .dgrid.live[data-ctab="term"] > .agisland { display: none; }
+@media (min-width: 760px) { .dgrid.live[data-layout="split"][data-tab="board"]:not([data-ctab="files"]):not([data-ctab="term"]) > .agisland { display: block; } }
+@media (min-width: 1100px) { .dgrid.live:not([data-layout="tabs"])[data-tab="board"]:not([data-ctab="files"]):not([data-ctab="term"]) > .agisland { display: block; } }
 .agisland[data-mode="idle"] { width: 48px; height: 30px; border-radius: 999px; }
 .agisland[data-mode="compact"] { width: 320px; }
 .agisland[data-mode="full"] { width: 500px; border-radius: 10px; }
