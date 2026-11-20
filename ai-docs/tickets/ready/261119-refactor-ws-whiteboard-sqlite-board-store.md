@@ -652,8 +652,13 @@ recreated here:
   sweep onto a response path.
 - Handle lifetime per `(1347)=c`: long idle close, reopen on next access.
 - Direct-CLI refusal naming the daemon as board owner per `(1806)`, keyed on
-  the `BoardOwner` option that only the daemon sets, and made before the DB is
-  opened.
+  the `BoardOwner` option introduced early by
+  `261116-feat-ws-whiteboard-retire-disk-pages`, which only the daemon sets, and
+  made before the DB is opened.
+- Delete the now-unreachable raw-binary `full: page unavailable` branch and its
+  page-retirement test when `(1806)` begins refusing every non-owner board call;
+  the shipped playbook already treats every non-URL `full:` value generically,
+  so this removal needs no shipped-text change.
 - Close every board DB on daemon drain and shutdown (`(1827)`).
 
 Verification:

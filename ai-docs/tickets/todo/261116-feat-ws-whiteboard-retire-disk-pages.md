@@ -118,6 +118,19 @@ its changed facts are recorded below.
   `develop` at `06e615956`). Its `full:` line reports "page not yet served"; it
   does not diagnose daemon absence. Rejected: treating a missing nudge-derived
   URL as evidence that no daemon exists.
+- **Construction, not live dashboard state, distinguishes daemon ownership
+  (technical, lead).** Add a daemon-only `ServerOptions.BoardOwner` flag in this
+  ticket, before `(1806)` uses the same option for refusal. Set it at server
+  construction when the server belongs to the daemon, including a hosted
+  one-shot CLI (`hostedCLI.server` has `c.host != nil`,
+  `cmd/ws-mcp/hosted_cli.go:74-95`, and `mcpCommand` uses that shared constructor
+  at `:527-532`) and an accepted proxy connection
+  (`cmd/ws-mcp/proxy.go:90-103`). Leave it false for direct raw `serve --stdio`
+  and manual `ws-mcp call`. This ticket uses the flag only to choose between
+  "page not yet served" and "page unavailable"; it does not implement
+  `(1806)`'s refusal. Rejected: inferring ownership from `ServerOptions.Live` or
+  `WhiteboardChanged`, because `Live` is nil before the dashboard binds and the
+  nudge callback is not an ownership contract.
 - **The authoritative board data store stays, `(1839)=a`.** Retire only
   rendered page artifacts and their producer/consumer branches. Keep every
   board-state file and the current board semantics until the SQLite-store
@@ -201,8 +214,8 @@ its changed facts are recorded below.
 - The required edits to `agents-plugin/rsrc/whiteboard/whiteboard.md` and its
   byte-identical `agents-plugin-wsflow/rsrc/whiteboard/whiteboard.md` mirror are
   a gated implementation step: prepare the exact diff describing the
-  daemon-only board, the served URL on `full:`, the raw-binary unavailable
-  status, and the daemon-session not-yet-served status, then obtain owner
+  daemon-only board and this stable rule: a URL-valued `full:` is copyable;
+  any non-URL `full:` value is a status to surface, not copy. Obtain owner
   approval of that diff before committing it. Follow the
   mirroring manual for any generated Pi/package copies. This ticket's settled
   design does not itself authorize an unseen shipped-text diff.
@@ -233,11 +246,11 @@ its changed facts are recorded below.
 
 | fact | value | evidence |
 |---|---|---|
-| scope.span | multi-file | agents-plugin-tool/internal/mcp/whiteboard_tools.go, agents-plugin-tool/internal/mcp/whiteboard_panels.go, agents-plugin-tool/internal/mcp/session_state.go, agents-plugin-tool/internal/mcp/server_dispatch.go, agents-plugin-tool/internal/mcp/dashboard_sessions.go, agents-plugin-tool/internal/mcp/dashboard_page.go, agents-plugin-tool/internal/wswhiteboard/render.go, agents-plugin-tool/internal/wswhiteboard/view.go, agents-plugin-tool/internal/wswhiteboard/assets/page.tmpl, agents-plugin-tool/internal/wswhiteboard/assets/live.js, agents-plugin/rsrc/whiteboard/whiteboard.md, agents-plugin-wsflow/rsrc/whiteboard/whiteboard.md |
+| scope.span | multi-file | agents-plugin-tool/cmd/ws-mcp/hosted_cli.go, agents-plugin-tool/cmd/ws-mcp/proxy.go, agents-plugin-tool/internal/mcp/whiteboard_tools.go, agents-plugin-tool/internal/mcp/whiteboard_panels.go, agents-plugin-tool/internal/mcp/session_state.go, agents-plugin-tool/internal/mcp/server_dispatch.go, agents-plugin-tool/internal/mcp/dashboard_sessions.go, agents-plugin-tool/internal/mcp/dashboard_page.go, agents-plugin-tool/internal/wswhiteboard/render.go, agents-plugin-tool/internal/wswhiteboard/view.go, agents-plugin-tool/internal/wswhiteboard/assets/page.tmpl, agents-plugin-tool/internal/wswhiteboard/assets/live.js, agents-plugin/rsrc/whiteboard/whiteboard.md, agents-plugin-wsflow/rsrc/whiteboard/whiteboard.md |
 | scope.surface | cross-module | MCP `full:` result status, wswhiteboard rendering, daemon page, and shipped whiteboard playbooks |
-| scope.new_public_symbol | no | no new exported symbol named; RenderPage and disk-only fields are removed |
-| scope.new_type_contract | no | no new type or signature named; `full:` keeps its label and carries a served URL, raw-binary unavailable status, or daemon-session not-yet-served status |
-| scope.test_surface | existing | agents-plugin-tool/internal/wswhiteboard/render_test.go is among 19 RenderPage test files on both bases; agents-plugin-tool/internal/mcp/whiteboard_tools_test.go, agents-plugin-tool/internal/wswhiteboard/testdata/bodytime-hover.go, and agents-plugin-tool/internal/wswhiteboard/testdata/compat-old/main.go exist |
+| scope.new_public_symbol | yes | add exported internal field `ServerOptions.BoardOwner`; RenderPage and disk-only fields are removed |
+| scope.new_type_contract | yes | add internal `ServerOptions.BoardOwner bool` at construction; `full:` keeps its label and carries a served URL, raw-binary unavailable status, or daemon-session not-yet-served status |
+| scope.test_surface | existing | agents-plugin-tool/cmd/ws-mcp/hosted_cli_test.go and proxy tests cover construction; agents-plugin-tool/internal/wswhiteboard/render_test.go is among 19 RenderPage test files on both bases; agents-plugin-tool/internal/mcp/whiteboard_tools_test.go, agents-plugin-tool/internal/wswhiteboard/testdata/bodytime-hover.go, and agents-plugin-tool/internal/wswhiteboard/testdata/compat-old/main.go exist |
 | complexity.reuse_points | confirmed | dashboardPageURL in agents-plugin-tool/internal/mcp/dashboard_sessions.go#L735-L752; RenderRegionsWithTopics and PageAssets in agents-plugin-tool/internal/wswhiteboard/render.go#L375-L451; agents-plugin-tool/internal/wswhiteboard/testdata/compat-old/main.go |
 | complexity.side_effect_risk | high | removes synchronous publication and the standing GC, then performs the closed-set first-open sweep while preserving board data and live embeds |
 | risk.correctness | high | daemon liveness can lag the nudge; cleanup and update must not alter committed board state or non-target files |
@@ -270,6 +283,10 @@ Implementation scope, checked against the post-embed commit `fb5e10db5`:
   update also commits but reports only that the page is unavailable. Neither
   status carries a start-daemon hint or a disk path, and neither is fed to
   board-copy as a URL.
+- Add `ServerOptions.BoardOwner` as the construction-time discriminator and set
+  it for daemon proxy and hosted one-shot servers, including while `Live` is
+  still nil; leave it false on direct raw-binary servers. Use it here only for
+  `full:` wording. SQLite Phase 2 later reuses it for `(1806)`'s refusal.
 - Delete the full-page render and publish path from
   `agents-plugin-tool/internal/mcp/whiteboard_tools.go#L545-L757`:
   `refreshWhiteboardAfter`, the remaining
@@ -334,6 +351,11 @@ Verification:
   served panel fresh. Replace the explicit caller at
   `internal/mcp/dashboard_wake_reads_test.go:88` and prove authoritative board
   changes still commit once.
+- Cover a daemon-hosted session whose connection is accepted before the
+  dashboard binds: with `Live == nil`, its update reports "page not yet served",
+  not "page unavailable". Cover the same distinction for the daemon-hosted
+  one-shot CLI and direct raw-binary call so construction ownership, not
+  `Live`/`WhiteboardChanged`, decides the status.
 - Exercise the first-board-open cleanup against a fixture containing live and
   dead session embeds, nested page artifacts, unrelated HTML, and representative
   `meta.json`, `pending.json`,
@@ -363,5 +385,5 @@ Verification:
   must not request `index.html` or `index.stamp.js`.
 - Verify the owner-approved canonical playbook and wsflow mirror are
   byte-identical where required, contain no file-only guidance, and describe
-  served-URL, raw-binary unavailable, not-yet-served, and board-copy behavior
-  without repository-local references.
+  URL-valued `full:` and generic non-URL status/board-copy behavior without
+  repository-local references.
