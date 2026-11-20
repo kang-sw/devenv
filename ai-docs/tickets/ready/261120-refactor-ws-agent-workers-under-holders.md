@@ -4,6 +4,10 @@ related:
   261118-feat-ws-agy-tool-names-and-worker-role: "reverses Decision (151), which made agy workers daemon-owned"
   261119-feat-ws-codex-hosted-worker: "reverses Decision (172), which copied the daemon-owned agy worker shape"
   261119-bug-ws-agent-v2-dogfood-surprises: "Phase 4 Items 8 and 10 are symptoms of daemon-owned agy workers"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 90648c8a78eda6ef
+sage-review-completeness-reviewed: 90648c8a78eda6ef
 ---
 
 # Move agent.spawn workers under session holders
@@ -251,7 +255,10 @@ against `develop` at `a858d67b0`.
   evidence, parse failure, equal timestamp, or same-second ambiguity adopts
   the child. `LastActiveAt` has RFC3339 second precision and `TurnStartedAt`
   has Unix-millisecond precision, so adoption is the conservative precision
-  rule. Finish a matched active turn and clear `TurnOpen`, `HandedOffAt`, and
+  rule. `Sends` also counts voided (page-cancelled) and steered sends, so a
+  parent with one keeps `Sends > LastTurn.Mark` and adopts even after a real
+  downgrade; that one late report is expected, and the guard is not tightened
+  with voided-send arithmetic. Finish a matched active turn and clear `TurnOpen`, `HandedOffAt`, and
   the holder fields in one record update without publishing. Otherwise adopt
   normally. In particular,
   ordinary idle/mail-woken children and children of a lead must survive
