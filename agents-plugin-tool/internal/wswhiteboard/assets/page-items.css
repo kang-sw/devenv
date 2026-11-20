@@ -137,6 +137,10 @@ button.closed-more { display: flex; margin: 0 auto 16px; }
 .md img { max-width: 100%; height: auto; border-radius: 6px; vertical-align: middle; }
 .md pre { background: var(--wb-muted); border-radius: 8px; padding: 6px 9px; overflow-x: auto; font-size: 12.5px; }
 .md pre > code { background: none; padding: 0; font-size: inherit; }
+.md code.language-diff > .wb-diff-add, .md code.language-patch > .wb-diff-add { color: var(--wb-ck-ok); background: color-mix(in srgb, var(--wb-ck-ok) 14%, transparent); }
+.md code.language-diff > .wb-diff-remove, .md code.language-patch > .wb-diff-remove { color: var(--wb-ck-no); background: color-mix(in srgb, var(--wb-ck-no) 14%, transparent); }
+.md code.language-diff > .wb-diff-hunk, .md code.language-patch > .wb-diff-hunk { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 9%, transparent); }
+.md code.language-diff > .wb-diff-file, .md code.language-patch > .wb-diff-file { color: var(--wb-muted-fg); font-weight: 700; }
 /* code blocks (code.js): the pre sits in div.cb, which carries the copy button; a block of two or more lines also has a number gutter, a flex sibling of the code that stays at the left edge while a wide block scrolls (its shadow covers the pre's left padding, where the scrolled code would show) and is never selected or copied */
 .md .cb { position: relative; margin: 0 0 6px; }
 .md > .cb:last-child { margin-bottom: 0; }
@@ -157,6 +161,7 @@ button.closed-more { display: flex; margin: 0 auto 16px; }
 .cb-wrap.cb-ln > pre { display: block; }
 .cb-wrap > pre > .ln { display: none; }
 .cb-wrap .cl { display: block; position: relative; padding-left: calc(var(--nd, 1) * 1ch + 19px); }
+.cb-wrap code.language-diff > .cl, .cb-wrap code.language-patch > .cl { min-height: 1lh; }
 .cb-wrap .cl::before { content: attr(data-n); position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--nd, 1) * 1ch + 8px); text-align: right; padding-right: 0; color: var(--wb-muted-fg); border-right: 1px solid var(--wb-line); user-select: none; -webkit-user-select: none; }
 /* a table always spans the full width; cells wrap at spaces, and code spans (paths, URLs) may also break mid-token so a long one does not widen the table */
 .md table { display: table; width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; border: 1px solid var(--wb-line); border-radius: 8px; }

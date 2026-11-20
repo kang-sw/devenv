@@ -35,6 +35,7 @@ function wbCodeBlocks(root) {
     if (pre.wbCode) return;
     pre.wbCode = true;
     var src = code.textContent, lines = src.replace(/\n$/, "").split("\n").length;
+    var diffMarkup = /(?:^|\s)language-(?:diff|patch)(?:\s|$)/.test(code.className) ? code.innerHTML : "";
     var wrap = d.createElement("div"), btn = d.createElement("button"), wbtn = d.createElement("button"), timer = 0;
     wrap.className = "cb" + (lines > 1 ? " cb-ln" : "");
     pre.parentNode.insertBefore(wrap, pre);
@@ -68,6 +69,18 @@ function wbCodeBlocks(root) {
       wbtn.className = "cb-wrapbtn" + (on ? " on" : "");
       wbtn.setAttribute("aria-pressed", on ? "true" : "false");
       if (lines < 2) return;
+      if (diffMarkup) {
+        code.innerHTML = diffMarkup;
+        if (on) {
+          wrap.setAttribute("style", "--nd:" + String(lines).length);
+          Array.prototype.slice.call(code.children).forEach(function (span, i) {
+            span.className += " cl";
+            span.setAttribute("data-n", String(i + 1));
+            span.textContent = span.textContent.replace(/\n$/, "");
+          });
+        }
+        return;
+      }
       code.innerHTML = "";
       code.textContent = src;
       if (!on) return;

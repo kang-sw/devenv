@@ -2,6 +2,7 @@ package wswhiteboard
 
 import (
 	"fmt"
+	"html/template"
 	"regexp"
 	"strings"
 	"testing"
@@ -505,6 +506,31 @@ func TestRenderTextMermaidOption(t *testing.T) {
 	off := string(RenderText(src, TextTargets{}))
 	if strings.Contains(off, `class="mermaid"`) || !strings.Contains(off, `<code class="language-mermaid">`) {
 		t.Errorf("mermaid off: %s", off)
+	}
+}
+
+func TestDiffFenceLineKinds(t *testing.T) {
+	lines := []string{
+		"diff --git a/a b/a", "index 123..456", "--- a/a", "+++ b/a",
+		"@@ -1,2 +1,2 @@", " context", "-old <script>alert(1)</script>", "+new & safe",
+	}
+	kinds := []string{"file", "file", "file", "file", "hunk", "context", "remove", "add"}
+	for _, lang := range []string{"diff", "patch", "DIFF"} {
+		out := string(RenderText("```"+lang+"\n"+strings.Join(lines, "\n")+"\n```", TextTargets{}))
+		if !strings.Contains(out, `<code class="language-`+strings.ToLower(lang)+`">`) {
+			t.Errorf("%s fence has the wrong language class: %s", lang, out)
+		}
+		for i, line := range lines {
+			want := `<span class="wb-diff-` + kinds[i] + `">` + template.HTMLEscapeString(line) + "\n</span>"
+			if !strings.Contains(out, want) {
+				t.Errorf("%s line %d: missing %q in %s", lang, i, want, out)
+			}
+		}
+		wantNone(t, out, "<script>")
+	}
+	plain := string(RenderText("```go\n+new\n-old\n```", TextTargets{}))
+	if plain != "<pre><code class=\"language-go\">+new\n-old\n</code></pre>" {
+		t.Errorf("non-diff fence changed: %s", plain)
 	}
 }
 
