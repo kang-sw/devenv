@@ -1,7 +1,10 @@
 package wsdashboard
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -783,6 +786,89 @@ swap([T2, A2, reply()]);
 check("a docked topic updated anew lands in its own pane, wrapped", [paneOf(T2) === paneT, T2.children.map(function (n) { return n.className; }), T.parentNode], [true, ["tophead", "gal-pbody"], null]);
 El.prototype.insertBefore = ins;
 check("the record keeps the shown page", galOf().active, galOf().pages[0].id);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
+// TestGalleryRecordInPreviousBuild is the (10)=b stale-asset check: a
+// record the gallery build persisted, with a split page whose flat pin
+// orders it dual-wrote, opened by the previous asset build (cards.js at
+// d10d68e64, frozen unedited in testdata/pre_gallery) renders every docked
+// item as a flat pin in its pin list, in the gallery's depth-first order,
+// and leaves the rest on the board. The previous build's own save keeps
+// those pins and drops the gallery field (the owner-accepted layout loss),
+// and the gallery build reading that save migrates the flat pins back one
+// per page.
+func TestGalleryRecordInPreviousBuild(t *testing.T) {
+	old, err := os.ReadFile("testdata/pre_gallery/cards.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprintf("%x", sha256.Sum256(old)); got != "980be0e0581b7188b4aa8b1b449a0fa85b9ef7c73c2f1c042a263561637d9b8d" {
+		t.Fatal("previous build fixture changed: " + got)
+	}
+	data, err := dashboardFS.ReadFile("assets/cards.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := json.Marshal(string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldSrc, err := json.Marshal(string(old))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runNode(t, "gallery record in the previous build", "var CARDS = "+string(src)+";\nvar OLD_CARDS = "+string(oldSrc)+";\n"+cardsDOM+`
+// bootOld is the previous build's page: cards.js alone (no gallery.js), its
+// pin list in the board, mounted with that build's options.
+function bootOld(store, served) {
+  page = { doc: null, store: store, layouts: [], closedCalls: [], adopted: [], gridCols: "none" };
+  page.doc = new Doc();
+  var dbody = page.doc.body.appendChild(new El("div", page.doc));
+  page.board = dbody.appendChild(new El("div", page.doc));
+  page.board.id = "r-board";
+  served().forEach(function (n) { page.board.appendChild(n); });
+  var win = { listeners: {}, getSelection: function () { return null; }, addEventListener: function (type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }, innerWidth: 1000, innerHeight: 800 };
+  new Function("document", "window", "wsT", "getComputedStyle", "requestAnimationFrame", OLD_CARDS)(page.doc, win, wsT, function () { return { overflowY: "visible", gridTemplateColumns: "none" }; }, function () {});
+  page.W = win.WsCards;
+  check("the fixture is the previous build", [typeof page.W.pinList, typeof win.WsGallery], ["function", "undefined"]);
+  page.W.register("k", { open: function (c) { c.title({ name: c.data.name }); c.el.card = c.data.name; } });
+  page.W.mount(page.board, {
+    key: "cards", load: function (k) { return store[k] || null; }, save: function (k, v) { if (v === null) delete store[k]; else store[k] = v; },
+    column: null, shows: function () { return false; }, layout: function () {},
+    closed: function (from, done) { done(null); }, adopted: function () {}
+  });
+  return page;
+}
+function served() { return [topic("a", 300), topic("b", 200), topic("c", 100), reply()]; }
+
+// The gallery build: page 1 holds Cb, page 2 a column split of b over Ca,
+// page 3 a; Free and c stay on the board.
+var store = { cards: JSON.stringify({ cards: [{ id: "c1", kind: "k", pinned: 1, at: 1, data: { name: "Ca" } }, { id: "c2", kind: "k", pinned: 2, at: 2, data: { name: "Cb" } }, { id: "c3", kind: "k", pinned: 0, at: 3, data: { name: "Free" } }],
+  topics: [{ n: "a", p: 3, a: 0, b: 0 }, { n: "b", p: 4, a: 0, b: 0 }],
+  gallery: { v: 1, active: null, pages: [{ id: "p1", root: { card: "c2" } }, { id: "p2", root: { axis: "col", ratio: 0.5, a: { topic: "b" }, b: { card: "c1" } } }, { id: "p3", root: { topic: "a" } }] } }) };
+boot(store, served);
+check("the gallery build keeps the split page", pagesOf(), [["Cb"], ["b", "Ca"], ["a"]]);
+var saved = JSON.parse(store.cards);
+check("it dual-writes the depth-first orders",
+  [saved.cards.map(function (c) { return [c.id, c.pinned]; }), saved.topics.map(function (r) { return [r.n, r.p]; }).sort()],
+  [[["c1", 3], ["c2", 1], ["c3", 0]], [["a", 4], ["b", 2]]]);
+
+// The previous build over that record: flat pins in that order.
+var persisted = store.cards;
+bootOld(store, served);
+check("the previous build renders the docked items as flat pins, in order", page.W.pinList().children.map(label), ["Cb", "b", "Ca", "a"]);
+check("and the rest on its board, by recency", names(page.board).filter(function (n) { return n !== "DIV"; }), ["TOOLBAR", "c", "Free", "reply"]);
+var rewritten = JSON.parse(store.cards);
+check("its save keeps the flat pins and drops the gallery (accepted layout loss)",
+  [rewritten.gallery, rewritten.cards.map(function (c) { return [c.id, c.pinned]; }), rewritten.topics.map(function (r) { return [r.n, r.p]; }).sort()],
+  [undefined, [["c1", 3], ["c2", 1], ["c3", 0]], [["a", 4], ["b", 2]]]);
+check("the record it read was the gallery build's", JSON.parse(persisted).gallery.pages.length, 3);
+
+// The gallery build reading the previous build's save: one pin per page.
+boot(store, served);
+check("the flat pins migrate back one per page in order", pagesOf(), [["Cb"], ["b"], ["Ca"], ["a"]]);
 process.stdout.write(bad.join("\n"));
 `)
 }
