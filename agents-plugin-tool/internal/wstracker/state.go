@@ -2023,7 +2023,11 @@ func (s *state) extendCCOrg(reg *ccOrgReg, n *node) {
 	if it == nil || o == nil || o.head == "" {
 		return
 	}
-	for _, member := range s.orgMembers(o) {
+	s.extendCCOrgMembers(reg, it, n, s.orgMembers(o))
+}
+
+func (s *state) extendCCOrgMembers(reg *ccOrgReg, it *item, n *node, members []string) {
+	for _, member := range members {
 		if it.ccExcluded[member] || reg.excluded[member] || reg.added[member] {
 			continue
 		}
@@ -2033,8 +2037,22 @@ func (s *state) extendCCOrg(reg *ccOrgReg, n *node) {
 }
 
 func (s *state) refreshOrgCC(n *node) {
+	members := map[string][]string{}
+	computed := map[string]bool{}
 	for _, k := range s.ccOrder {
-		s.extendCCOrg(s.ccOrgs[k], n)
+		reg := s.ccOrgs[k]
+		if reg == nil || !reg.active {
+			continue
+		}
+		it := s.items[reg.item]
+		if it == nil {
+			continue
+		}
+		if !computed[reg.org] {
+			members[reg.org] = s.orgMembers(s.liveOrg(reg.org))
+			computed[reg.org] = true
+		}
+		s.extendCCOrgMembers(reg, it, n, members[reg.org])
 	}
 }
 
