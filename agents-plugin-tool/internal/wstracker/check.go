@@ -429,7 +429,7 @@ func (s *state) checkStage(it *item, p obj) rejection {
 	return ""
 }
 
-const targetShape = "a target is a member id or a rule {root, include_root?, levels?}"
+const targetShape = "a target is a member id or a rule {root, org?, include_root?, levels?}"
 
 // checkTargets checks item.assign targets (490)-(492): member ids and rules
 // {root, include_root?, levels?}, mixed, one rule per root. A rule is
@@ -1284,8 +1284,8 @@ func (s *state) check(n *node) rejection {
 			if ru.by != a {
 				return rejection("only the rule's author (" + ru.by + ") ends " + alias(id))
 			}
-			if !p.null("root") && p["root"] != ru.root {
-				return rejection(alias(id) + " is rooted at " + ru.root + ", not " + p.disp("root"))
+			if !p.null("root") && p["root"] != ru.assignRoot {
+				return rejection(alias(id) + " was assigned at root " + ru.assignRoot + ", not " + p.disp("root"))
 			}
 		} else if !p.null("root") { // the author's rules rooted at root, with their requests and records
 			if p.truthy("assignee") {
@@ -1293,7 +1293,7 @@ func (s *state) check(n *node) rejection {
 			}
 			has := false
 			for _, x := range s.openRules(it.id) {
-				has = has || x.by == a && x.root == p.str("root")
+				has = has || x.by == a && x.assignRoot == p.str("root")
 			}
 			if !has {
 				return rejection(a + " has no rule rooted at " + p.disp("root") + " on " + it.alias)

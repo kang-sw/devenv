@@ -267,14 +267,14 @@ type rec struct {
 // "<event id>~<root>". state: live (the author reaches the root, or the
 // root accepted request) | pending; ended is the event that ended it.
 type rule struct {
-	id, via, item, by, root, completion string
-	includeRoot                         bool
-	levels                              float64
-	excluded                            map[string]bool
-	ended                               string
-	state                               string
-	request                             string
-	ts                                  time.Time
+	id, via, item, by, root, assignRoot, org, completion string
+	includeRoot                                          bool
+	levels                                               float64
+	excluded                                             map[string]bool
+	ended                                                string
+	state                                                string
+	request                                              string
+	ts                                                   time.Time
 }
 
 // wholeSubtree is the reach depth of a rule with no levels.
@@ -757,6 +757,12 @@ func (s *state) hasLiveRule() bool {
 // coveredBy lists who ru covers now: the root (with includeRoot, while a
 // member), then its reach.
 func (s *state) coveredBy(ru *rule) []string {
+	if ru.org != "" {
+		o := s.liveOrg(ru.org)
+		if o == nil || o.head == "" {
+			return nil
+		}
+	}
 	var out []string
 	if ru.includeRoot && s.liveMember(ru.root) {
 		out = append(out, ru.root)
@@ -836,6 +842,23 @@ func (s *state) refreshLive(n *node) {
 	}
 }
 
+func (s *state) refreshOrgRules() {
+	for _, ru := range s.rules {
+		if ru.ended != "" || ru.org == "" {
+			continue
+		}
+		if o := s.liveOrg(ru.org); o != nil && o.head != "" {
+			ru.root = o.head
+		}
+	}
+}
+
+func (s *state) refreshItemRules(item string, n *node) {
+	for _, ru := range s.liveRules(item) {
+		s.extendRule(ru, n, true)
+	}
+}
+
 // endRule ends ru with the live records it made; a handoff its holder
 // accepted stays.
 func (s *state) endRule(ru *rule, n *node) {
@@ -849,6 +872,9 @@ func (s *state) endRule(ru *rule, n *node) {
 		if x.rule == ru.id && !x.ruleRequest && x.state == "live" {
 			s.endRec(x, n, "unassigned")
 		}
+	}
+	if ru.org != "" {
+		s.refreshItemRules(ru.item, n)
 	}
 }
 
@@ -998,7 +1024,7 @@ func (s *state) addRule(n *node, item string, x obj, completion string) {
 	if s.ruleByID[id] != nil || s.members[root] == nil {
 		return
 	}
-	ru := &rule{id: id, via: n.id, item: item, by: a, root: root, includeRoot: x["include_root"] == true,
+	ru := &rule{id: id, via: n.id, item: item, by: a, root: root, assignRoot: root, org: x.str("org"), includeRoot: x["include_root"] == true,
 		completion: completion, excluded: map[string]bool{}, state: "live", ts: n.ts}
 	ru.levels, _ = x["levels"].(float64)
 	s.addRuleRec(ru)
@@ -1555,7 +1581,7 @@ func (s *state) apply(n *node) {
 			}
 		} else if !p.null("root") {
 			for _, ru := range s.openRules(item) {
-				if ru.by == a && ru.root == p.str("root") {
+				if ru.by == a && ru.assignRoot == p.str("root") {
 					s.unassignRule(ru, n)
 				}
 			}
@@ -1587,9 +1613,13 @@ func (s *state) apply(n *node) {
 				if ru.by != a {
 					continue
 				}
-				ru.ended = n.id
-				if q := s.asg[ru.request]; ru.request != "" && q != nil && q.state == "accepted" {
-					q.state, q.ended = "unassigned", n
+				if ru.org != "" {
+					s.unassignRule(ru, n)
+				} else {
+					ru.ended = n.id
+					if q := s.asg[ru.request]; ru.request != "" && q != nil && q.state == "accepted" {
+						q.state, q.ended = "unassigned", n
+					}
 				}
 			}
 			for _, x := range append([]*rec(nil), s.byItem[item]...) {
@@ -1808,6 +1838,7 @@ func (s *state) apply(n *node) {
 	case strings.HasPrefix(n.typ, "roles.") || n.typ == TypeItemAssign || n.typ == wsledger.TypeMemberJoin:
 		if strings.HasPrefix(n.typ, "roles.") || n.typ == wsledger.TypeMemberJoin {
 			s.refreshOrgCC(n)
+			s.refreshOrgRules()
 		}
 		s.refreshLive(n)
 		s.settleAll(n)
@@ -2011,7 +2042,7 @@ func (s *state) applyAssign(n *node) {
 	if p.str("mode") == "all" {
 		// the older form: a rule rooted at the author, its id the event's
 		levels, _ := p["levels"].(float64)
-		ru := &rule{id: n.id, via: n.id, item: item, by: a, root: a, levels: levels, completion: completion,
+		ru := &rule{id: n.id, via: n.id, item: item, by: a, root: a, assignRoot: a, levels: levels, completion: completion,
 			excluded: map[string]bool{}, state: "live", ts: n.ts}
 		s.addRuleRec(ru)
 		s.extendRule(ru, n, false)
