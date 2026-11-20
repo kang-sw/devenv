@@ -37,6 +37,35 @@ backoff. When the budget is exhausted, it fails the turn. The agy process and
 its ACP session survive every step, so a stall bound to that process persists
 into the next turn.
 
+## Correction (2026-11-21)
+
+The "bound to the live process or session" premise above did not hold. A
+read-only diagnosis built from agy's own transcript timestamps found:
+- The fresh worker hit the same stall within minutes. The healthy-looking agy
+  lead session got 27 automatic `continue` messages that day and had 2 turns
+  fail after the retry budget ran out.
+- The agy process, its ACP session, and the cached context (about 90K tokens)
+  were alive throughout. No permission request was open.
+- Cause: gemini-4-neon-high streams nothing over ACP while it generates a
+  large `edit_file` call. The silence timer fired, `session/cancel` discarded
+  the edit, and `continue` regenerated the same edit into the same cutoff.
+  The retry budget is per turn (reset only in `disarmModelWait`), so earlier
+  stalls used up the retries that later ones needed.
+- ws cannot tell long tool-call generation apart from a dead upstream; only
+  agy can. agy's own 10-minute stream idle timeout surfaces in-band as
+  `⚠ API error (attempt N): request failed: stream idle timeout (10m0s): ...`.
+
+Owner answer (1472), 2026-11-21 00:18: switch off ws's silence detection and
+keep only agy's in-band error handling with our automatic `continue`. Landed
+as develop 586c0c2cc (`agySilenceWatchdogEnabled = false` in
+`agy_watchdog.go`), with the daemon swapped.
+
+What remains for this ticket: kill-and-respawn applies only when agy's
+in-band failure retries are exhausted, or when a real upstream hang leaves
+the process unrecoverable. Before this ticket is promoted, check whether that
+case still occurs with silence detection off. If it does not, drop the
+ticket.
+
 ## Phases
 
 ### Phase 1: Kill and respawn or resume agy on model-wait exhaustion
