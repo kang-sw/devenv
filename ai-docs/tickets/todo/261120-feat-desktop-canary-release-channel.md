@@ -219,11 +219,11 @@ Current source establishes the implementation baseline:
     the action and rely solely on a later stable release outranking the canary;
     the owner wants a direct return button.
 
-12. **First eligible release in creation order (1913).** Owner (1911) answer,
+12. **First page holding an eligible release (1913).** Owner (1911) answer,
     2026-11-20: walk the GitHub REST releases list newest-first, page by page,
-    and stop at the first non-draft release whose tag exactly matches
-    `vX.Y.Z-canary.N` and whose platform zip and combined SUMS assets are
-    present. Then apply Decision 4 to decide whether to offer it; a candidate
+    and stop at the first page holding an eligible release: non-draft, tag
+    exactly `vX.Y.Z-canary.N`, platform zip and combined SUMS assets
+    present (selection within that page is below). Then apply Decision 4 to decide whether to offer it; a candidate
     that is not newer ends the check without scanning older releases. Bound
     the walk at 10 pages of 30 releases and 1 MiB per response; report no
     eligible canary within the cap rather than silently claiming the full
@@ -231,8 +231,17 @@ Current source establishes the implementation baseline:
     commit time, not publication time); therefore selection follows creation
     recency, not the greatest SemVer, and an older-created higher SemVer can be
     skipped. GitHub's [REST release docs](https://docs.github.com/en/rest/releases/releases)
-    describe list pagination and the `created_at` meaning for latest releases;
-    the list-order premise is an explicit assumption to verify in implementation.
+    describe list pagination and the `created_at` meaning for latest releases
+    but do not guarantee the list's order. To stay correct without that
+    guarantee, selection is page-local: within the first page that holds any
+    eligible canary, take the highest canary by Decision 4 among that page's
+    eligible entries, and stop there. Later pages are read only when earlier
+    pages hold no eligible canary. The cross-page newest-first premise is
+    recorded as an assumption; a test pins page-local highest selection
+    with an out-of-order page (lead technical decision, auto-confirmed from the
+    fact-populator decision gap, 2026-11-20). Rejected for this gap: sorting
+    across all pages (contradicts the owner's early stop) and trusting the first
+    entry of a page (an out-of-order page would pick a lower canary).
     Rejected: exhaustive pagination and highest-version selection, because
     reading accumulated history is wasteful; first-page-only selection, which
     can miss an eligible canary; GraphQL or page scraping, which would add a
@@ -248,6 +257,10 @@ Current source establishes the implementation baseline:
 
 ## Constraints
 
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for agents-plugin-tool/internal/)
+- Convention: ai-docs/manuals/performance.md (declared for agents-plugin-tool/)
 - Ticket-only scope ends with this plan. Implementation must read and obey
   `ai-docs/manuals/release-compatibility.md`,
   `ai-docs/manuals/shipped-surface-boundary.md`,
@@ -266,6 +279,29 @@ Current source establishes the implementation baseline:
   keep release filtering and URL authority in the main process, and retain the
   existing HTTPS/loopback URL policy (`agents-plugin-tool/desktop-electron/update.js:62-89`,
   `agents-plugin-tool/desktop-electron/dashboard-preload.js:1-26`).
+
+## Prior Decisions
+
+- 424ff4e7 (2026-11-16, commit): "Owner decision (1224)=a selects release-workflow desktop builds. Reuse ws-mcp-assets rather than rebuild binaries in desktop jobs so native and bundled daemon metadata have one source of truth." — bearing: supports
+- 9db551d0 (2026-11-16, commit): "Owner decision (1210) makes wsflow the bundled default; retain an explicit ws choice without introducing a CI workflow." — bearing: constrains
+- 21aa53f9 (2026-11-15, commit): "T0 both ways: an old daemon's page ignores the bridge (no toast); a new page in a browser or an older shell has no bridge (no row). No route, stored shape, MCP or protocol change." — bearing: supports
+- d1865da5 (2026-11-15, commit): "The page opens via window.open, which the shell's existing setWindowOpenHandler classifies as external and hands to openExternal; no new preload bridge method or IPC channel." — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | .github/workflows/ws-mcp-release.yml, agents-plugin-tool/desktop-electron/update.js, agents-plugin-tool/internal/wsdashboard/assets/dashboard-lifecycle.js, ai-docs/ship/ws.md, package runtime and manifest files |
+| scope.surface | public-interface | Settings controls, desktop preload IPC, GitHub release assets, and runtime repository contracts in Decisions 2, 5, and 8 |
+| scope.new_public_symbol | yes | new canary-check and stable-return actions on the renderer-visible preload bridge in Decision 5 |
+| scope.new_type_contract | yes | additive update status and persistent explicit-selection intent across old/new updater state in Decisions 5 and 9 |
+| scope.test_surface | existing | agents-plugin-tool/desktop-electron/test/update.test.js, agents-plugin-tool/desktop-electron/test/main.test.js, agents-plugin-tool/internal/wsdashboard/testdata/desktop-update.browser.cjs |
+| complexity.reuse_points | confirmed | existing download, checksum, extraction, staging, and detached swap in agents-plugin-tool/desktop-electron/update.js#L458-L536 |
+| complexity.side_effect_risk | high | canary app can replace the shared daemon; explicit stable return may retain a higher-core daemon |
+| risk.correctness | high | version ordering, bounded feed selection, checksum verification, and downgrade staging must agree |
+| risk.fit | moderate | release workflow, package identity, updater, IPC, dashboard, and ship procedure change together |
+| risk.test | high | cross-platform packaged install, restart/reopen, and old/new state compatibility require verification |
+| risk.security_or_contract | high | renderer IPC and release URL authority cross a trust boundary; shared daemon compatibility remains directional |
 
 ## Phases
 
@@ -305,7 +341,8 @@ Depends on Phase 1. Implement Decisions 11 and 12:
   from Decision 4 without admitting arbitrary prerelease grammars.
 - Keep stable `check()` on `/releases/latest`. Add a separately invoked canary
   list check that walks newest-first across bounded pages and stops at the
-  first non-draft exact-tag canary with the required platform zip and SUMS.
+  first page holding a non-draft exact-tag canary with the required platform
+  zip and SUMS, selecting the highest such canary on that page (Decision 12).
   Check its version only after selection; if it is not newer, return `current`
   without scanning farther. Enforce Decision 12's page and byte caps and
   distinguish a cap-limited miss from a full-list miss. Feed the result into the existing
