@@ -1,5 +1,5 @@
 ---
-title: "Whiteboard ask 1205 was absent from the board page despite existing in the store"
+title: "저장소에는 있으나 whiteboard 페이지에서 ask 1205가 누락된 문제"
 ---
 
 # Whiteboard ask 1205 was absent from the board page despite existing in the store

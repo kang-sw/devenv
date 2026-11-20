@@ -1,5 +1,5 @@
 ---
-title: "Lead orchestration profile: sub-lead building blocks behind a thin lead"
+title: "lead 오케스트레이션 프로필: 얇은 lead 뒤의 sub-lead 구성 요소"
 sage-review-design: required
 related:
   261115-feat-ws-worker-profile-session-spawn: context - role/scope gates a sub-lead key must fit

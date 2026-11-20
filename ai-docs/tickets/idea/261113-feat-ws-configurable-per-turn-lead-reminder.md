@@ -1,5 +1,5 @@
 ---
-title: "A configurable reminder appended to every lead turn"
+title: "매 lead 턴 끝에 추가되는 설정 가능한 리마인더"
 ---
 
 # A configurable reminder appended to every lead turn

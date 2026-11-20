@@ -1,5 +1,5 @@
 ---
-title: Harden proxy registration ownership against predecessor end writes
+title: "선행 프록시 종료 쓰기에 대한 프록시 등록 소유권 강화"
 related:
   261114-bug-ws-shared-daemon-restarts-without-a-swap: coordinated daemon replacement and recovery lane
 ---

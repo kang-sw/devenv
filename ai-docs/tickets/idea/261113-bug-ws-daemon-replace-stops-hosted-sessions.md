@@ -1,5 +1,5 @@
 ---
-title: "Daemon replace ended two other projects' hosted lead sessions with a masked exit reason"
+title: "데몬 교체 시 다른 두 프로젝트의 hosted lead 세션이 가려진 종료 사유와 함께 중단된 문제"
 related:
   - 261113-bug-ws-launcher-dev-rebuild-replaces-daemon-mid-work
 ---

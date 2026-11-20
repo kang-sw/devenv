@@ -1,5 +1,5 @@
 ---
-title: "ws dashboard as the first-tier agent host: daemon-spawned lead sessions, multi-session and workspace management, terminal, file preview"
+title: "1차 에이전트 호스트로서의 ws dashboard: 데몬 기반 lead 세션, 다중 세션·워크스페이스 관리, 터미널, 파일 미리보기"
 sage-review-design: required
 related:
   260730-research-ws-dashboard-drop-for-orca: partially reversed - the daemon takes back session hosting and the terminal that this decision ceded to Orca

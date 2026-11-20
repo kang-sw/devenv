@@ -1,5 +1,5 @@
 ---
-title: "Dashboard daemon drops LAN serving (T1: accept-and-warn for one minor, then delete)"
+title: "dashboard 데몬 LAN 서빙 제거 (T1: 한 마이너 버전 동안 허용·경고 후 삭제)"
 related:
   261112-research-ws-ade-desktop-shell-and-rename: "Werkschaft concept: local-only product, (490)-(492)"
   261113-feat-ws-dashboard-browser-pane: "its LAN-token cookie strip (decision 17) ends with the cookie"

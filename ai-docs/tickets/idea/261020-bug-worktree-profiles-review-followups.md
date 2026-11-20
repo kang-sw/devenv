@@ -1,5 +1,5 @@
 ---
-title: Worktree profiles lite-review follow-ups
+title: "worktree profiles Lite 리뷰 후속 조치"
 related:
   261020-feat-worktree-profiles: origin; the lite review recorded these as Minor in its Phase 4 Result
 ---

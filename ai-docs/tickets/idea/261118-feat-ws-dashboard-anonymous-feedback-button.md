@@ -1,5 +1,5 @@
 ---
-title: In-dashboard anonymous feedback button
+title: "dashboard 내부 익명 피드백 버튼"
 related:
   261118-feat-ws-remote-chat-bridge: sibling idea from the same discussion
 ---

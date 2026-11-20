@@ -1,5 +1,5 @@
 ---
-title: "Dashboard settings panel: per-harness config editor driven by an enriched config.list schema"
+title: "dashboard 설정 패널: 확장된 config.list 스키마 기반 하네스별 설정 편집기"
 related:
   261116-feat-ws-dashboard-generalized-mentions: "sibling undesigned dashboard todo from the same day; same decision-queue handling"
 ---

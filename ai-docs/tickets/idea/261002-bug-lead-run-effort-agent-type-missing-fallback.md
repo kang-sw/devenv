@@ -1,5 +1,5 @@
 ---
-title: lead-run worker spawn has no fallback when the ws:effort-* agent type is unavailable
+title: "ws:effort-* 에이전트 타입을 사용할 수 없을 때 lead-run 워커 spawn에 폴백이 없는 문제"
 ---
 
 # lead-run worker spawn has no fallback when the ws:effort-* agent type is unavailable

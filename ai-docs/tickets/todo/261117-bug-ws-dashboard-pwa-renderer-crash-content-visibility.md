@@ -1,5 +1,5 @@
 ---
-title: Dashboard renderer crash (STATUS_BREAKPOINT) on board ask click, live-bisecting content-visibility triggers
+title: "보드 ask 클릭 시 dashboard 렌더러 크래시(STATUS_BREAKPOINT) 및 content-visibility 트리거 라이브 이분 추적"
 ---
 
 # Dashboard renderer crash (STATUS_BREAKPOINT) on board ask click, live-bisecting content-visibility triggers

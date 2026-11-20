@@ -1,5 +1,5 @@
 ---
-title: "Hosted prompt assembly: daemon-owned workflow manual, playbook body, ambient injection and renderable agent-facing playbooks"
+title: "hosted 프롬프트 조립: 데몬 소유 workflow manual, playbook 본문, 주변 컨텍스트 주입, 렌더링 가능한 에이전트용 playbook"
 parent: 261114-epic-ws-common-session-foundation
 related:
   261117-feat-ws-harness-capability-catalog: "landed (85ef24622); value source for the native-subagent steer (its native subagent tool name per harness) and the skill list/injection items"

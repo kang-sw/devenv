@@ -1,5 +1,5 @@
 ---
-title: "Common permission intent and truthful enforcement for Claude/Pi sessions"
+title: "Claude/Pi 세션용 공통 권한 의도와 실제 적용 상태 보고"
 related:
   261115-research-ws-unified-agent-tool-surface: "research context only; owner 853 approved capture, not permission policy"
   261114-refactor-ws-common-session-interface: "owner 1050 permits bounded T0 controls first; its Phase 2 later absorbs them without changing keys, lineage or input ownership"

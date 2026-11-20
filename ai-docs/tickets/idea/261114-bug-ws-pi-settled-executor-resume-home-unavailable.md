@@ -1,5 +1,5 @@
 ---
-title: Settled Pi executor cannot resume because its owned session home is unavailable
+title: "종료된 Pi executor가 소유한 세션 홈을 사용할 수 없어 재개할 수 없는 문제"
 ---
 
 # Settled Pi executor cannot resume because its owned session home is unavailable

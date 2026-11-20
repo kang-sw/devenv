@@ -1,5 +1,5 @@
 ---
-title: "Explicit mailbox multi-recipient sends with public To/CC and hidden BCC"
+title: "공개 To/CC와 비공개 BCC를 지원하는 명시적 mailbox 다중 수신자 발송"
 ---
 
 # Explicit mailbox multi-recipient sends with public To/CC and hidden BCC

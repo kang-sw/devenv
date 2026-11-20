@@ -1,5 +1,5 @@
 ---
-title: Incremental commit-history cache for rationale.query
+title: "rationale.query용 증분 커밋 이력 캐시"
 related:
   260924-research-terminal-ticket-gc: sibling discussion; GC was found not to reduce this cost
 ---

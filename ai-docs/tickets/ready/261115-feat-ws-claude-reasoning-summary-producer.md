@@ -1,5 +1,5 @@
 ---
-title: "Show public Claude reasoning summaries through interactive and hosted producers"
+title: "대화형 및 hosted 프로듀서를 통한 Claude 공개 추론 요약 표시"
 related:
   261114-feat-ws-live-reasoning-summary: "reuse the existing lead-only projection, immutable natural-turn history and display contract; its Pi-only admission is not Claude support"
   261115-feat-ws-permission-profile: "MAIN queue ordering only; no permission implementation contract is consumed by this ticket"

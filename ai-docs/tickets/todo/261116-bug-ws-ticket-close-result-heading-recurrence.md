@@ -1,5 +1,5 @@
 ---
-title: "tickets.close still warns about missing Result for nested phase outcomes"
+title: "중첩된 phase 결과에 대해 tickets.close가 여전히 Result 누락 경고를 내는 문제"
 related:
   260917-bug-ticket-close-checker-result-heading-level-drift: "closed predecessor; fresh recurrence, not an edit to its historical resolution"
 ---

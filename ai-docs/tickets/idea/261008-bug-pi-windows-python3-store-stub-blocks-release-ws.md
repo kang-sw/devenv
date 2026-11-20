@@ -1,5 +1,5 @@
 ---
-title: Release ws-on-Pi fails on Windows when python3 is the Microsoft Store stub
+title: "Windows에서 python3가 Microsoft Store 스텁일 때 릴리스 ws-on-Pi 실행 실패"
 related:
   261008-bug-windows-mailbox-wait-outlives-pi-host: discovered during its native-Windows probe
 ---

@@ -1,5 +1,5 @@
 ---
-title: ws config "project" scope resolves to one machine-wide file
+title: "ws config \"project\" 스코프가 머신 전역 단일 파일로 해석되는 문제"
 ---
 
 # ws config "project" scope resolves to one machine-wide file

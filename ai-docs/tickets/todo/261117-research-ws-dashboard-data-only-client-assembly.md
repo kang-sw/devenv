@@ -1,5 +1,5 @@
 ---
-title: "Dashboard session page: data-only server, client-side assembly"
+title: "dashboard 세션 페이지: 데이터 전용 서버와 클라이언트 측 조립"
 related:
   261116-feat-ws-dashboard-session-page-payload-and-render-cost: predecessor; Phase 1 landed, Phase 2 (lazy history) in progress
   261113-feat-ws-dashboard-frontend-performance-profile-and-optimize: measurement scenarios and harness to reuse

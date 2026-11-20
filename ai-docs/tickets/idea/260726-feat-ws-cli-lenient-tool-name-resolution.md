@@ -1,5 +1,5 @@
 ---
-title: "ws-cli lenient tool-name resolution + normalized-uniqueness guard"
+title: "ws-cli 관대한 도구명 해석 및 정규화 유일성 가드"
 sage-review-design: required
 ---
 

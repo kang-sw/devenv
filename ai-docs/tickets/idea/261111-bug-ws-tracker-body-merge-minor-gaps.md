@@ -1,5 +1,5 @@
 ---
-title: "Tracker body merge: two minor gaps from the assignee-edit review"
+title: "tracker 본문 병합: 담당자 편집 리뷰에서 남은 사소한 누락 두 건"
 related:
   - 261111-feat-ws-tracker-assignee-edit-and-body-merge
 ---

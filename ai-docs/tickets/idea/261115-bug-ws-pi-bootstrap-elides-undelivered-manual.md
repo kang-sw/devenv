@@ -1,5 +1,5 @@
 ---
-title: Pi bootstrap can elide an undelivered workflow manual
+title: "Pi 부트스트랩이 전달되지 않은 workflow manual을 생략할 수 있는 문제"
 ---
 
 # Pi bootstrap and manual-elision readiness

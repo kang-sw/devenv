@@ -1,5 +1,5 @@
 ---
-title: "Pi Esc drops queued mailbox push batches"
+title: "Pi에서 Esc 입력 시 대기 중인 mailbox 푸시 배치가 유실되는 문제"
 ---
 
 # Pi Esc drops queued mailbox push batches

@@ -1,5 +1,5 @@
 ---
-title: "board-headless history-paint fails on develop with a native ResizeObserver loop error"
+title: "develop에서 네이티브 ResizeObserver 루프 오류로 board-headless history-paint가 실패하는 문제"
 ---
 
 # history-paint ResizeObserver loop error

@@ -1,5 +1,5 @@
 ---
-title: "Move harness-name branches out of the common layer into per-harness registration data"
+title: "공통 레이어의 하네스 이름 분기를 하네스별 등록 데이터로 이전"
 parent: 261114-epic-ws-common-session-foundation
 related:
   261118-feat-ws-agy-tool-names-and-worker-role: "(143)=a introduces the harness descriptor on BackendRegistration that this cleanup extends"

@@ -1,5 +1,5 @@
 ---
-title: tickets.acquire records any impl branch as the ticket's impl
+title: "tickets.acquire가 아무 impl 브랜치나 해당 티켓의 impl로 기록하는 문제"
 ---
 
 # tickets.acquire records any impl branch as the ticket's impl

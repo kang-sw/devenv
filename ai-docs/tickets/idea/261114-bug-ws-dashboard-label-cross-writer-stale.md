@@ -1,5 +1,5 @@
 ---
-title: "Dashboard: a label saved on one page goes stale when another writer sets it back before the render"
+title: "dashboard: 렌더링 전 다른 라이터가 라벨을 되돌릴 때 한 페이지에 저장된 라벨이 오래된 값으로 남는 문제"
 related:
   261113-feat-ws-dashboard-session-rail-tree: "found in its Phase 4 harness run; Forward note in 4d760277c and b710d81ce"
 ---

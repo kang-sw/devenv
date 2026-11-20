@@ -1,5 +1,5 @@
 ---
-title: "agy completion: dotted tool-name aliases, harness detection, and the agy worker role"
+title: "agy 마무리: 점(.) 구분 도구명 별칭, 하네스 감지, agy 워커 역할"
 parent: 261114-epic-ws-common-session-foundation
 related:
   261117-feat-ws-hosted-antigravity-adapter: "its Phase 2 (88) shipped the hosted agy lead only and deferred the worker role, naming three prerequisites; Phase 2 here picks them up"

@@ -1,5 +1,5 @@
 ---
-title: "P2: Diagnose persistent Electron lag at high-resolution fullscreen"
+title: "P2: 고해상도 전체 화면에서 지속되는 Electron 지연 원인 진단"
 related:
   261115-feat-werkschaft-electron-shell: "preserve shell security and navigation contract during A/B diagnostics"
   261113-feat-ws-dashboard-frontend-performance-profile-and-optimize: "shared rendering and input candidates are tracked separately from native presentation"

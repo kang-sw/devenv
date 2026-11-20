@@ -1,5 +1,5 @@
 ---
-title: Generalize dashboard mentions beyond whiteboard topic text
+title: "whiteboard 토픽 텍스트 너머로 dashboard 멘션 기능 일반화"
 ---
 
 # Generalize dashboard mentions beyond whiteboard topic text

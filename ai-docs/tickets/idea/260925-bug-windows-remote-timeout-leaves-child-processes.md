@@ -1,5 +1,5 @@
 ---
-title: Windows remote-command timeout leaves git and ssh children running
+title: "Windows 원격 명령 타임아웃 후 git 및 ssh 자식 프로세스가 잔류하는 문제"
 related:
   260924-bug-ticket-index-read-timeout-below-ssh-roundtrip: introduced the bounded read/write timeouts whose kill path this concerns
   260925-chore-ship-preflight-misses-ci-matrix: the CI gap that let the test-side symptom reach a release run

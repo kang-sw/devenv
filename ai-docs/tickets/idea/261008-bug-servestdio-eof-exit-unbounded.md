@@ -1,5 +1,5 @@
 ---
-title: ServeStdio waits unbounded on in-flight handlers after stdin EOF
+title: "stdin EOF 이후 ServeStdio가 진행 중인 핸들러를 무기한 대기하는 문제"
 related:
   261008-bug-windows-mailbox-wait-outlives-pi-host: split out of its candidate direction 3
   260917-bug-windows-smoke-servestdio-exit-timing-flake: same EOF exit path

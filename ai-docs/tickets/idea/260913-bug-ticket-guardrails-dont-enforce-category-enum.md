@@ -1,5 +1,5 @@
 ---
-title: "Ticket write-guardrails accept a non-enumerated category token (e.g. `test`) instead of enforcing the category enum"
+title: "티켓 쓰기 가드레일이 category 열거형 강제 대신 미등록 카테고리 토큰(예: `test`)을 허용하는 문제"
 related:
   260913-test-mailbox-and-landing-gate-coverage-gaps: source — the closed ticket whose invalid `test` category token surfaced this gap
 ---
