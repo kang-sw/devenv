@@ -1,6 +1,9 @@
 package mcp
 
 import (
+	"bytes"
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,22 +56,23 @@ func TestPathWriteRequiresSameSessionGeneratedCachePath(t *testing.T) {
 
 	// Proxy reconnects construct a fresh Server in the same daemon process.
 	// The same session key must retain its minted cache-path capability.
+	reconnectPath := generate(21, child, "review")
 	reconnected := NewServer(root, "test")
 	if resp := callToolOnce(t, reconnected, 22, "path.write", map[string]any{
-		"session_key": child, "path": childPath, "content": "after reconnect\n",
+		"session_key": child, "path": reconnectPath, "content": "after reconnect\n",
 	}); toolIsError(t, resp) {
 		t.Fatalf("same-session path.write after reconnect: %s", resp)
 	}
-	if got, err := os.ReadFile(childPath); err != nil || string(got) != "after reconnect\n" {
+	if got, err := os.ReadFile(reconnectPath); err != nil || string(got) != "after reconnect\n" {
 		t.Fatalf("reconnected findings = %q, %v", got, err)
 	}
 
 	if resp := callToolOnce(t, s, 23, "path.write", map[string]any{
-		"session_key": child, "path": childPath, "content": 7,
+		"session_key": child, "path": reconnectPath, "content": 7,
 	}); !toolIsError(t, resp) || !strings.Contains(resp, "path and content must be strings") {
 		t.Fatalf("non-string content refusal = %s", resp)
 	}
-	if got, err := os.ReadFile(childPath); err != nil || string(got) != "after reconnect\n" {
+	if got, err := os.ReadFile(reconnectPath); err != nil || string(got) != "after reconnect\n" {
 		t.Fatalf("non-string content changed findings = %q, %v", got, err)
 	}
 
@@ -98,6 +102,51 @@ func TestPathWriteRequiresSameSessionGeneratedCachePath(t *testing.T) {
 	planPath := generate(20, child, "plan")
 	if resp := write(21, child, planPath, "source tree write"); !toolIsError(t, resp) {
 		t.Fatalf("repo-local generated plan was writable: %s", resp)
+	}
+}
+
+func TestPathWriteGrantsAreBoundedAndConsumed(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	root := t.TempDir()
+	initGit(t, root)
+	s := NewServer(root, "test")
+	key, err := s.sessions.mint(root, roleDelegate, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	paths := make([]string, 0, maxGeneratedPathGrants+1)
+	for i := 0; i <= maxGeneratedPathGrants; i++ {
+		resp := callToolOnce(t, s, i+1, "path.generate", map[string]any{
+			"session_key": key, "kind": "review", "stems": []any{"bounded"},
+		})
+		if toolIsError(t, resp) {
+			t.Fatalf("path.generate(%d): %s", i, resp)
+		}
+		paths = append(paths, strings.TrimSpace(toolText(t, resp)))
+	}
+	processGeneratedWrites.mu.RLock()
+	count := processGeneratedWrites.grantCountLocked()
+	processGeneratedWrites.mu.RUnlock()
+	if count > maxGeneratedPathGrants {
+		t.Fatalf("open generated-path grants = %d, want <= %d", count, maxGeneratedPathGrants)
+	}
+	if resp := callToolOnce(t, s, 100, "path.write", map[string]any{
+		"session_key": key, "path": paths[0], "content": "evicted",
+	}); !toolIsError(t, resp) {
+		t.Fatalf("oldest grant remained writable after capacity eviction: %s", resp)
+	}
+	last := paths[len(paths)-1]
+	if resp := callToolOnce(t, s, 101, "path.write", map[string]any{
+		"session_key": key, "path": last, "content": "complete",
+	}); toolIsError(t, resp) {
+		t.Fatalf("newest grant write: %s", resp)
+	}
+	if resp := callToolOnce(t, s, 102, "path.write", map[string]any{
+		"session_key": key, "path": last, "content": "second",
+	}); !toolIsError(t, resp) {
+		t.Fatalf("completed grant was not consumed: %s", resp)
 	}
 }
 
@@ -169,5 +218,31 @@ func TestPathWriteRefusesSymlinkReplacementAndAcceptsOversizedContent(t *testing
 	}
 	if got, err := os.ReadFile(victimPath); err != nil || string(got) != "victim-safe" {
 		t.Fatalf("parent symlink victim = %q, %v", got, err)
+	}
+}
+
+func TestServeStdioRejectsPathWriteBeyondRequestLimit(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	root := t.TempDir()
+	initGit(t, root)
+	s := NewServer(root, "test")
+	key, err := s.sessions.mint(root, roleDelegate, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated := callToolOnce(t, s, 1, "path.generate", map[string]any{
+		"session_key": key, "kind": "review", "stems": []any{"limit"},
+	})
+	path := strings.TrimSpace(toolText(t, generated))
+	line := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"path.write","arguments":{"session_key":` +
+		fmt.Sprintf("%q", key) + `,"path":` + fmt.Sprintf("%q", path) + `,"content":"` + strings.Repeat("x", maxMCPRequestBytes) + `"}}}`
+	var out bytes.Buffer
+	err = s.ServeStdio(context.Background(), strings.NewReader(line), &out)
+	if err == nil || !strings.Contains(err.Error(), "token too long") {
+		t.Fatalf("ServeStdio oversized request error = %v, output = %.200q", err, out.String())
+	}
+	if got, readErr := os.ReadFile(path); readErr != nil || len(got) != 0 {
+		t.Fatalf("rejected oversized request changed artifact: bytes=%d err=%v", len(got), readErr)
 	}
 }
