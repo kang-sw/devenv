@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
@@ -16,9 +17,10 @@ import (
 )
 
 // conv is one open conversation. Its loop goroutine owns the process and
-// every write but Send's inbox write; other goroutines read through state(),
-// act through do(), and tell the loop of an inbox change through
-// signalInbox().
+// every conversation write but Send's inbox write; the runner heartbeat
+// sweep may refresh only this conversation's registration heartbeat. Other
+// goroutines read through state(), act through do(), and tell the loop of an
+// inbox change through signalInbox().
 type conv struct {
 	r             *Runner
 	dir           string
@@ -103,7 +105,7 @@ type conv struct {
 	modelWaitDrainC            <-chan time.Time
 	modelWaitDrainStop         func()
 
-	// loop-owned.
+	// loop-owned, except registration timing below.
 	events       <-chan Event
 	idle         *time.Timer
 	idleAfter    time.Duration
@@ -114,7 +116,10 @@ type conv struct {
 	// reconcileMode marks replay-reconstructed intent, not a new user setting.
 	// Failed reconciliation is advisory; it must not kill an unenforceable lead.
 	reconcileMode bool
-	lastReg       time.Time
+	// regMu is leaf-only: it guards the timestamp in memory and is never held
+	// across a registration lock or file I/O.
+	regMu   sync.Mutex
+	lastReg time.Time
 
 	// A lead's or spawned child's own, loop-owned. mailC (one slot) tells
 	// the loop the mailbox may hold mail (signalMail); stopMail ends the
@@ -132,8 +137,12 @@ type conv struct {
 	// foreignRow is set once the session's row was found to be a terminal
 	// harness's (lockRow, checkRow); the loop then lets the session go
 	// (settle).
-	spawning   bool
-	foreignRow bool
+	spawning bool
+	// foreignRow is monotonic for this conversation generation. rowHeld is an
+	// in-memory hint that lets the heartbeat sweep skip a row whose ordinary
+	// owner already holds its flock, without touching the lock file.
+	foreignRow atomic.Bool
+	rowHeld    atomic.Int32
 	// replaying is set from a rejoin of the holder's process (reattach)
 	// until its replay ends: no turn is submitted meanwhile, since the
 	// replay is what tells whether one runs.
@@ -604,7 +613,7 @@ func (c *conv) loop() {
 }
 
 func (c *conv) heartbeat() {
-	registrationDue := c.r.opts.Now().Sub(c.lastReg) >= wsdashboard.HeartbeatInterval
+	registrationDue := c.regDue(c.r.opts.Now())
 	if registrationDue {
 		c.writeRegistration()
 	}
@@ -624,7 +633,7 @@ func (c *conv) heartbeat() {
 // harness took is let go (release), and it reports whether the loop ends
 // (the conversation closed, or was let go), having stopped the mail watch.
 func (c *conv) settle() bool {
-	if c.foreignRow && !c.closed {
+	if c.isForeign() && !c.closed {
 		c.release()
 	}
 	if !c.closed {
@@ -791,10 +800,6 @@ func (c *conv) setStatus(fn func()) {
 // is.
 func (c *conv) writeRegistration() bool {
 	rec := c.record()
-	now := c.r.opts.Now()
-	reg := registration(rec, now)
-	// WriteRegistration normalizes this default before persisting it.
-	reg.SchemaVersion = 1
 	var previousRow *wsdashboard.Registration
 	if rec.Lead {
 		unlock, previous, ok := c.lockRowRead()
@@ -802,20 +807,30 @@ func (c *conv) writeRegistration() bool {
 			return false
 		}
 		defer unlock()
+		if previous != nil {
+			previousRow = previous
+		}
+	}
+	// Take the timestamp after the lead's row lock. A heartbeat sweep that won
+	// the flock first therefore cannot be rolled back by this full-row write.
+	now := c.r.opts.Now()
+	reg := registration(rec, now)
+	// WriteRegistration normalizes this default before persisting it.
+	reg.SchemaVersion = 1
+	if rec.Lead {
 		reg.HostStopped = rec.HostPID == 0 && !c.spawning
 		// The holder manager writes the last exit independently of the
 		// runner's heartbeat; a regenerated row must not discard it.
-		if previous != nil {
-			previousRow = previous
-			reg.HostExitCode = previous.HostExitCode
-			reg.HostExitSignal = previous.HostExitSignal
-			reg.HostExitReason = previous.HostExitReason
-			reg.HostStoppedAt = previous.HostStoppedAt
+		if previousRow != nil {
+			reg.HostExitCode = previousRow.HostExitCode
+			reg.HostExitSignal = previousRow.HostExitSignal
+			reg.HostExitReason = previousRow.HostExitReason
+			reg.HostStoppedAt = previousRow.HostStoppedAt
 		}
 	}
 	// Reuse only the row already read under the lead's ownership lock, not
 	// process-local evidence: a spawn needs a real reservation on disk.
-	if previousRow != nil && now.Sub(c.lastReg) < wsdashboard.HeartbeatInterval {
+	if previousRow != nil && !c.regDue(now) {
 		previous := *previousRow
 		previous.HeartbeatAt = reg.HeartbeatAt
 		if previous == reg {
@@ -827,9 +842,29 @@ func (c *conv) writeRegistration() bool {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: registration write: %v\n", rec.ReplyID, err)
 		return false
 	}
-	c.lastReg = now
+	c.setLastReg(now)
 	c.r.notify(rec.ReplyID, rec.Root)
 	return true
+}
+
+func (c *conv) isForeign() bool { return c.foreignRow.Load() }
+
+func (c *conv) markForeign() { c.foreignRow.Store(true) }
+
+func (c *conv) lastRegAt() time.Time {
+	c.regMu.Lock()
+	defer c.regMu.Unlock()
+	return c.lastReg
+}
+
+func (c *conv) setLastReg(now time.Time) {
+	c.regMu.Lock()
+	c.lastReg = now
+	c.regMu.Unlock()
+}
+
+func (c *conv) regDue(now time.Time) bool {
+	return now.Sub(c.lastRegAt()) >= wsdashboard.HeartbeatInterval
 }
 
 // rowForeign reports whether a session's row, as read, is no longer the
@@ -866,18 +901,23 @@ func (c *conv) lockRow() (unlock func(), ok bool) {
 // reads it once per lock: the live writer takes this lock for every ring
 // and snapshot write (lockSummaryWriter).
 func (c *conv) lockRowRead() (unlock func(), row *wsdashboard.Registration, ok bool) {
-	if c.foreignRow {
+	if c.isForeign() {
 		return nil, nil, false
 	}
-	unlock, err := wsdashboard.LockRegistration(c.r.opts.Dir, c.rec.ReplyID)
+	flockUnlock, err := wsdashboard.LockRegistration(c.r.opts.Dir, c.rec.ReplyID)
 	if err != nil {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: %v\n", c.rec.ReplyID, err)
 		return nil, nil, false
 	}
+	c.rowHeld.Add(1)
+	unlock = func() {
+		c.rowHeld.Add(-1)
+		flockUnlock()
+	}
 	read, err := wsdashboard.ReadRegistration(c.r.opts.Dir, c.rec.ReplyID)
 	if isForeignRow(read, err) {
+		c.markForeign()
 		unlock()
-		c.foreignRow = true
 		return nil, nil, false
 	}
 	if err == nil {
@@ -892,8 +932,8 @@ func (c *conv) lockRowRead() (unlock func(), row *wsdashboard.Registration, ok b
 // lock, and the row leaves the daemon only through a terminal login, which
 // never gives it back.
 func (c *conv) checkRow() {
-	if c.rec.Lead && !c.foreignRow && rowForeign(c.r.opts.Dir, c.rec.ReplyID) {
-		c.foreignRow = true
+	if c.rec.Lead && !c.isForeign() && rowForeign(c.r.opts.Dir, c.rec.ReplyID) {
+		c.markForeign()
 	}
 }
 

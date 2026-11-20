@@ -235,10 +235,17 @@ type Runner struct {
 	quit       chan struct{}
 	wg         sync.WaitGroup
 	once       sync.Once
-	// Separate from mu: held through summary mutation/write fencing without
-	// blocking the runner's ordinary List/Get or spawn snapshot reads.
+	// summaryMu only guards the two maps below, briefly; it is never held
+	// across another lock or I/O (summaryLock, setSummaryOwner,
+	// summaryOwner). summaryLocks holds one mutex per reply-id, created
+	// lazily and never deleted, so every conversation generation of a
+	// session shares it: a writer holds its own session's mutex through
+	// summary mutation/ring I/O (lockSummaryOwner) without blocking another
+	// session's snapshot publish, and summaryOwners[id] changes only under
+	// that mutex.
 	summaryMu     sync.Mutex
 	summaryOwners map[string]*conv
+	summaryLocks  map[string]*sync.Mutex
 	// closedRows caches immutable closed states under mu, until reopened.
 	// Handed-off snapshots still belong to a terminal and are not cached.
 	closedRows map[string]State
@@ -383,6 +390,7 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 	}
 	// A child loaded before its parent found no parent to report to.
 	r.deliverPending()
+	r.startHeartbeatSweeper()
 	if r.opts.Holders == nil {
 		// No holder to wait for.
 		r.markScanned()
@@ -558,6 +566,47 @@ func (r *Runner) conv(replyID string) *conv {
 	return r.convs[replyID]
 }
 
+// summaryLock returns replyID's summary writer mutex, the same one for
+// every conversation generation of the session. Only the map guard is
+// taken, and it is released before the caller locks the mutex.
+func (r *Runner) summaryLock(replyID string) *sync.Mutex {
+	r.summaryMu.Lock()
+	defer r.summaryMu.Unlock()
+	if r.summaryLocks == nil {
+		r.summaryLocks = map[string]*sync.Mutex{}
+	}
+	l := r.summaryLocks[replyID]
+	if l == nil {
+		l = &sync.Mutex{}
+		r.summaryLocks[replyID] = l
+	}
+	return l
+}
+
+// setSummaryOwner makes c replyID's summary writer generation. It waits
+// for a writer of the session that holds the summary lock (a ring or
+// snapshot write, or a heartbeat sweep), so the owner never changes under
+// one.
+func (r *Runner) setSummaryOwner(replyID string, c *conv) {
+	l := r.summaryLock(replyID)
+	l.Lock()
+	defer l.Unlock()
+	r.summaryMu.Lock()
+	defer r.summaryMu.Unlock()
+	if r.summaryOwners == nil {
+		r.summaryOwners = map[string]*conv{}
+	}
+	r.summaryOwners[replyID] = c
+}
+
+// summaryOwner reads replyID's summary writer generation, unpinned: it can
+// change once this returns. Use lockSummaryOwner to decide a write on it.
+func (r *Runner) summaryOwner(replyID string) *conv {
+	r.summaryMu.Lock()
+	defer r.summaryMu.Unlock()
+	return r.summaryOwners[replyID]
+}
+
 // startConv starts serving rec. It writes the registration and the
 // snapshot, and tells the daemon, before it takes r.mu to list the
 // conversation, so no other conversation's Get, List, or act waits on
@@ -588,12 +637,7 @@ func (r *Runner) startConvWith(rec Record, seed []wslive.SlashCommand, spawnPend
 	c.refreshHeld()
 	if rec.Lead {
 		_, _, _ = refreshPermissionSelection(dir)
-		r.summaryMu.Lock()
-		if r.summaryOwners == nil {
-			r.summaryOwners = map[string]*conv{}
-		}
-		r.summaryOwners[rec.ReplyID] = c
-		r.summaryMu.Unlock()
+		r.setSummaryOwner(rec.ReplyID, c)
 		c.live.owner = c.lockSummaryWriter
 	}
 	if rec.Lead {
@@ -661,7 +705,7 @@ func (r *Runner) startConvWith(rec Record, seed []wslive.SlashCommand, spawnPend
 	// A row a terminal login took while no daemon ran: the loop lets the
 	// session go before it takes anything else (settle), and nothing below
 	// starts for it.
-	foreign := c.foreignRow
+	foreign := c.isForeign()
 	if !foreign {
 		if r.opts.LiveHost != nil {
 			if slot, ok := r.opts.LiveHost.OpenHostedSlot(dir); ok {
