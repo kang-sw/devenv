@@ -134,6 +134,12 @@ type Registration struct {
 	// persisted on registration/heartbeat/end. Reconnection resumes the idle
 	// budget from this stamp rather than counting a restart as activity.
 	LastCallAt string `json:"last_call_at,omitempty"`
+	// ParentReplyID is the reply-id of the session that spawned this one
+	// (the agent runner's record Parent, copied onto the row it writes), so
+	// a page names its owner from the registration it already reads. Empty
+	// for a session nobody spawned, and from an older runner; the page then
+	// falls back to the rail layout's nesting.
+	ParentReplyID string `json:"parent_reply_id,omitempty"`
 }
 
 // HostMayRun reports whether a hosted row's harness process may still run,
@@ -431,7 +437,8 @@ type agentRecordEnd struct {
 	Backend     string `json:"backend"`
 	SessionFile string `json:"session_file"`
 	Parent      *struct {
-		Kind string `json:"kind"`
+		Kind    string `json:"kind"`
+		ReplyID string `json:"reply_id"`
 	} `json:"parent"`
 }
 

@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 	"time"
@@ -10,10 +11,14 @@ import (
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
-// DefaultAgyModelWaitTimeoutSeconds is the ws package's default: seconds of raw
-// ACP session/update silence during an active agy model wait before ws cancels
-// and retries once with `continue`. The wsflow package supplies zero instead.
-const DefaultAgyModelWaitTimeoutSeconds = 45
+// DefaultAgyModelWaitTimeoutSeconds and DefaultAgyModelWaitRetries are the ws
+// package defaults: seconds of raw ACP session/update silence during an active
+// agy model wait, and the automatic `continue` attempts shared by silence and
+// in-band failures. The wsflow package supplies zero for the timeout instead.
+const (
+	DefaultAgyModelWaitTimeoutSeconds = 45
+	DefaultAgyModelWaitRetries        = 3
+)
 
 // agyAPIErrorPrefix starts agy's in-band API error line. The full matcher is
 // deliberately anchored to the accumulated reply tail: agy can split the
@@ -23,7 +28,31 @@ const agyAPIErrorPrefix = "⚠ API error"
 const (
 	agyStreamInterrupted = "⚠ The stream was interrupted. Please continue the task you were working on."
 	modelFailureDrain    = time.Second
+	modelWaitCancelGrace = 5 * time.Second
+	modelWaitBackoffBase = time.Second
+	modelWaitBackoffCap  = 30 * time.Second
 )
+
+const (
+	modelWaitBackoffIdle uint32 = iota
+	modelWaitBackoffPending
+	modelWaitBackoffCancelled
+	modelWaitBackoffFiring
+)
+
+// defaultAgyModelWaitBackoff uses equal jitter: each attempt waits between
+// half and all of an exponentially growing ceiling, bounded at 30 seconds.
+func defaultAgyModelWaitBackoff(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	ceiling := modelWaitBackoffBase
+	for i := 1; i < attempt && ceiling < modelWaitBackoffCap; i++ {
+		ceiling = min(ceiling*2, modelWaitBackoffCap)
+	}
+	half := ceiling / 2
+	return half + time.Duration(rand.Int64N(int64(ceiling-half)+1))
+}
 
 func agyReplyTailFailure(reply string) string {
 	line := strings.TrimRight(reply, " \t\r\n")
@@ -51,11 +80,11 @@ func agyReplyTailFailure(reply string) string {
 	return line
 }
 
-// loadModelWait reads agy.model_wait_timeout_seconds once at process start for
+// loadModelWait reads agy's model-wait settings once at process start for
 // hosted agy leads and workers. Never touches disk during turns or timer ticks.
 func (c *conv) loadModelWait() {
 	if c.rec.Backend != BackendAgy {
-		c.modelWaitTimeout = 0
+		c.modelWaitTimeout, c.modelWaitMaxRetries = 0, 0
 		return
 	}
 	cfg := c.r.opts.Config
@@ -70,8 +99,13 @@ func (c *conv) loadModelWait() {
 	if c.r.opts.AgyModelWaitTimeoutSeconds != nil {
 		sec = *c.r.opts.AgyModelWaitTimeoutSeconds
 	}
+	retries := DefaultAgyModelWaitRetries
+	if c.r.opts.AgyModelWaitRetries != nil {
+		retries = *c.r.opts.AgyModelWaitRetries
+	}
 	r := wsconfig.NewResolver(cfg, map[string]string{
 		wsconfig.ItemAgyModelWaitTimeoutSeconds: strconv.Itoa(sec),
+		wsconfig.ItemAgyModelWaitRetries:        strconv.Itoa(retries),
 	}, reader, nil)
 	rv, err := r.Get(c.rec.WSKey, wsconfig.ItemAgyModelWaitTimeoutSeconds)
 	if err != nil {
@@ -81,7 +115,16 @@ func (c *conv) loadModelWait() {
 	} else {
 		sec = n
 	}
+	rv, err = r.Get(c.rec.WSKey, wsconfig.ItemAgyModelWaitRetries)
+	if err != nil {
+		fmt.Fprintf(c.r.opts.Log, "agent %s: %s: %v\n", c.rec.ReplyID, wsconfig.ItemAgyModelWaitRetries, err)
+	} else if n, perr := strconv.Atoi(strings.TrimSpace(rv.Value)); perr != nil || n < 0 {
+		fmt.Fprintf(c.r.opts.Log, "agent %s: %s: invalid value %q; using %d\n", c.rec.ReplyID, wsconfig.ItemAgyModelWaitRetries, rv.Value, retries)
+	} else {
+		retries = n
+	}
 	c.modelWaitTimeout = time.Duration(sec) * time.Second
+	c.modelWaitMaxRetries = retries
 }
 
 // startModelWait arms the model-wait watchdog for a freshly sent ordinary agy
@@ -122,16 +165,42 @@ func (c *conv) stopModelFailureDrain() {
 	c.modelWaitDrainC, c.modelWaitDrainStop = nil, nil
 }
 
+func (c *conv) stopModelWaitCancelGrace() {
+	if c.modelWaitCancelStop != nil {
+		c.modelWaitCancelStop()
+	}
+	c.modelWaitCancelC, c.modelWaitCancelStop = nil, nil
+}
+
+func (c *conv) stopModelWaitBackoff() {
+	if c.modelWaitBackoffStop != nil {
+		c.modelWaitBackoffStop()
+	}
+	c.modelWaitBackoffC, c.modelWaitBackoffStop = nil, nil
+	c.modelWaitBackoffFailure = ""
+	c.modelWaitBackoffFence.Store(modelWaitBackoffIdle)
+}
+
+func (c *conv) armModelWaitCancelGrace() {
+	c.stopModelWaitCancelGrace()
+	if c.r != nil && c.r.opts.Timer != nil {
+		c.modelWaitCancelC, c.modelWaitCancelStop = c.r.opts.Timer(modelWaitCancelGrace)
+	}
+}
+
 func (c *conv) disarmModelWait() {
 	c.stopModelWaitTimer()
 	c.stopModelFailureDrain()
+	c.stopModelWaitCancelGrace()
+	c.stopModelWaitBackoff()
 	c.modelWaitArmed = false
 	c.modelWaitRetries = 0
 	c.modelWaitPending = 0
 	c.modelWaitCancelling = false
-	c.modelWaitRetryFromAPIError = false
 	c.modelWaitFailErr = ""
 	c.modelWaitDiagnostic = ""
+	c.modelWaitExhaustedPublished = false
+	c.modelWaitFailureClasses = nil
 	c.modelWaitFailure = ""
 	c.modelWaitFailureExcluded = false
 }
@@ -199,18 +268,23 @@ func (c *conv) modelFailureDrainTimedOut() {
 	if c.modelWaitPending > 0 || len(c.approvals) > 0 {
 		return
 	}
-	if c.modelWaitRetries == 0 {
+	if c.modelWaitRetries < c.modelWaitMaxRetries {
 		c.modelWaitCancelling = true
-		fmt.Fprintf(c.r.opts.Log, "agent %s: agy model failure remained terminal for %s; interrupting before one retry (%s)\n", c.rec.ReplyID, modelFailureDrain, c.modelWaitFailure)
+		fmt.Fprintf(c.r.opts.Log, "agent %s: agy model failure remained terminal for %s; interrupting before automatic continue attempt %d/%d (%s)\n", c.rec.ReplyID, modelFailureDrain, c.modelWaitRetries+1, c.modelWaitMaxRetries, c.modelWaitFailure)
 		if err := c.proc.Interrupt(); err != nil {
 			c.failModelWaitImmediately(fmt.Sprintf("agy model failure interrupt failed: %v (%s)", err, c.modelWaitFailure))
+		} else {
+			c.armModelWaitCancelGrace()
 		}
 		return
 	}
-	c.modelWaitFailErr = "agy model failure after retry: " + c.modelWaitFailure
+	c.noteModelWaitFailure(c.modelWaitFailure)
+	c.modelWaitFailErr = c.modelWaitExhaustedError(c.modelWaitFailure)
 	fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", c.rec.ReplyID, c.modelWaitFailErr)
 	if err := c.proc.Interrupt(); err != nil {
 		c.failModelWaitImmediately(fmt.Sprintf("%s (interrupt failed: %v)", c.modelWaitFailErr, err))
+	} else {
+		c.armModelWaitCancelGrace()
 	}
 }
 
@@ -222,29 +296,45 @@ func (c *conv) modelWaitTimedOut() {
 	if c.modelWaitPending > 0 || len(c.approvals) > 0 {
 		return
 	}
+	c.noteModelWaitFailure("")
 	dur := formatWatchdogDuration(c.modelWaitTimeout)
-	if c.modelWaitRetries == 0 {
+	if c.modelWaitRetries < c.modelWaitMaxRetries {
 		c.modelWaitCancelling = true
-		fmt.Fprintf(c.r.opts.Log, "agent %s: agy model stream stalled for %s; interrupting to retry once\n", c.rec.ReplyID, dur)
+		fmt.Fprintf(c.r.opts.Log, "agent %s: agy model stream stalled for %s; interrupting before automatic continue attempt %d/%d\n", c.rec.ReplyID, dur, c.modelWaitRetries+1, c.modelWaitMaxRetries)
 		if err := c.proc.Interrupt(); err != nil {
 			c.failModelWaitImmediately(fmt.Sprintf("agy model stream stalled for %s and interrupt failed: %v", dur, err))
+		} else {
+			c.armModelWaitCancelGrace()
 		}
 		return
 	}
-	reason := fmt.Sprintf("agy model stream stalled for %s twice", dur)
-	if c.modelWaitRetryFromAPIError {
-		reason = fmt.Sprintf("agy model stream stalled for %s after API error retry", dur)
-	}
+	reason := c.modelWaitExhaustedError("")
 	c.modelWaitFailErr = reason
 	fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", c.rec.ReplyID, reason)
 	if err := c.proc.Interrupt(); err != nil {
 		c.failModelWaitImmediately(fmt.Sprintf("%s (interrupt failed: %v)", reason, err))
+	} else {
+		c.armModelWaitCancelGrace()
 	}
 }
 
-// interceptModelWaitTurnEnd intercepts the cancelled TurnEnd after timeout #1
-// or a terminal in-band model failure while the single retry budget is unused,
-// keeps the logical ws turn open, sends `continue`, and rearms the watchdog.
+func (c *conv) modelWaitCancelTimedOut() {
+	c.modelWaitCancelC, c.modelWaitCancelStop = nil, nil
+	if !c.modelWaitArmed || !c.turn || c.proc == nil || (!c.modelWaitCancelling && c.modelWaitFailErr == "") {
+		return
+	}
+	reason := c.modelWaitFailErr
+	if reason == "" {
+		reason = fmt.Sprintf("agy model stream did not stop within %s after interrupt", formatWatchdogDuration(modelWaitCancelGrace))
+	} else {
+		reason += fmt.Sprintf(" and did not stop within %s after interrupt", formatWatchdogDuration(modelWaitCancelGrace))
+	}
+	c.failModelWaitImmediately(reason)
+}
+
+// interceptModelWaitTurnEnd intercepts a cancelled TurnEnd or terminal in-band
+// model failure while the per-turn retry budget remains, keeps the logical ws
+// turn open, sends `continue`, and rearms the watchdog.
 func (c *conv) interceptModelWaitTurnEnd(ev Event) bool {
 	if !c.modelWaitArmed || !c.turn || c.proc == nil {
 		return false
@@ -253,6 +343,7 @@ func (c *conv) interceptModelWaitTurnEnd(ev Event) bool {
 		return false
 	}
 	if c.modelWaitCancelling {
+		c.stopModelWaitCancelGrace()
 		c.modelWaitCancelling = false
 		// If the prompt actually finished normally before session/cancel took
 		// effect (and not on an in-band failure), let it settle as done.
@@ -265,7 +356,7 @@ func (c *conv) interceptModelWaitTurnEnd(ev Event) bool {
 		}
 		return c.retryModelWait(failure)
 	}
-	if ev.ModelFailure != "" && c.modelWaitFailErr == "" && c.modelWaitRetries == 0 {
+	if ev.ModelFailure != "" && c.modelWaitFailErr == "" && c.modelWaitRetries < c.modelWaitMaxRetries {
 		return c.retryModelWait(ev.ModelFailure)
 	}
 	return false
@@ -273,17 +364,56 @@ func (c *conv) interceptModelWaitTurnEnd(ev Event) bool {
 
 func (c *conv) retryModelWait(failure string) bool {
 	c.stopModelFailureDrain()
-	c.modelWaitRetries = 1
-	c.modelWaitRetryFromAPIError = strings.HasPrefix(failure, agyAPIErrorPrefix)
 	c.modelWaitPending = 0
 	c.modelWaitFailure = ""
 	c.modelWaitFailureExcluded = false
-	c.modelWaitDiagnostic = c.reply
+	if c.reply != "" {
+		c.modelWaitDiagnostic = c.reply
+	}
 	c.reply = ""
+	c.modelWaitBackoffFailure = failure
+	c.modelWaitBackoffFence.Store(modelWaitBackoffPending)
+	c.mu.Lock()
+	held := c.held > 0
+	c.mu.Unlock()
+	if held {
+		c.cancelModelWaitBackoffForInput()
+	}
+	if c.modelWaitBackoffFence.Load() == modelWaitBackoffCancelled {
+		c.cancelModelWaitBackoff()
+		return true
+	}
+	attempt := c.modelWaitRetries + 1
+	delay := c.r.opts.AgyModelWaitBackoff(attempt)
+	if delay <= 0 {
+		c.modelWaitBackoffTimedOut()
+		return true
+	}
+	fmt.Fprintf(c.r.opts.Log, "agent %s: waiting %s before automatic continue attempt %d/%d\n", c.rec.ReplyID, formatWatchdogDuration(delay), attempt, c.modelWaitMaxRetries)
+	c.modelWaitBackoffC, c.modelWaitBackoffStop = c.r.opts.Timer(delay)
+	return true
+}
+
+func (c *conv) modelWaitBackoffTimedOut() {
+	failure := c.modelWaitBackoffFailure
+	c.modelWaitBackoffC, c.modelWaitBackoffStop = nil, nil
+	c.modelWaitBackoffFailure = ""
+	if !c.modelWaitBackoffFence.CompareAndSwap(modelWaitBackoffPending, modelWaitBackoffFiring) {
+		if c.modelWaitBackoffFence.Load() == modelWaitBackoffCancelled {
+			c.cancelModelWaitBackoff()
+		}
+		return
+	}
+	defer c.modelWaitBackoffFence.Store(modelWaitBackoffIdle)
+	if !c.modelWaitArmed || !c.turn || c.proc == nil || c.modelWaitFailErr != "" {
+		return
+	}
+	c.noteModelWaitFailure(failure)
+	c.modelWaitRetries++
 	if failure == "" {
-		fmt.Fprintf(c.r.opts.Log, "agent %s: agy model stream stalled for %s; retrying once with continue\n", c.rec.ReplyID, formatWatchdogDuration(c.modelWaitTimeout))
+		fmt.Fprintf(c.r.opts.Log, "agent %s: agy model stream stalled for %s; sending automatic continue attempt %d/%d\n", c.rec.ReplyID, formatWatchdogDuration(c.modelWaitTimeout), c.modelWaitRetries, c.modelWaitMaxRetries)
 	} else {
-		fmt.Fprintf(c.r.opts.Log, "agent %s: agy reported terminal in-band model failure; retrying once with continue (%s)\n", c.rec.ReplyID, failure)
+		fmt.Fprintf(c.r.opts.Log, "agent %s: agy reported terminal in-band model failure; sending automatic continue attempt %d/%d (%s)\n", c.rec.ReplyID, c.modelWaitRetries, c.modelWaitMaxRetries, failure)
 	}
 	if err := c.proc.Send("continue"); err != nil {
 		reason := fmt.Sprintf("agy model stream stalled for %s and retry send failed: %v", formatWatchdogDuration(c.modelWaitTimeout), err)
@@ -291,14 +421,29 @@ func (c *conv) retryModelWait(failure string) bool {
 			reason = fmt.Sprintf("agy model failure retry send failed: %v (%s)", err, failure)
 		}
 		c.failModelWaitImmediately(reason)
-		return true
+		return
 	}
 	c.resetModelWaitTimer()
-	return true
+}
+
+func (c *conv) cancelModelWaitBackoffForInput() {
+	c.modelWaitBackoffFence.CompareAndSwap(modelWaitBackoffPending, modelWaitBackoffCancelled)
+}
+
+func (c *conv) cancelModelWaitBackoff() {
+	state := c.modelWaitBackoffFence.Load()
+	if c.modelWaitBackoffC == nil && state != modelWaitBackoffPending && state != modelWaitBackoffCancelled {
+		return
+	}
+	c.stopModelWaitBackoff()
+	c.restoreModelWaitDiagnostic()
+	c.summaryReason = wslive.TurnAborted
+	c.disarmModelWait()
+	c.endTurn("", false)
 }
 
 // modelWaitTurnError returns the TurnFailed error message to apply when a
-// watched turn settles after exhausting its single retry budget.
+// watched turn settles after exhausting its retry budget.
 func (c *conv) modelWaitTurnError(ev Event) string {
 	if !c.modelWaitArmed {
 		return ""
@@ -307,17 +452,94 @@ func (c *conv) modelWaitTurnError(ev Event) string {
 		return ""
 	}
 	if c.modelWaitFailErr != "" {
-		c.restoreModelWaitDiagnostic()
+		c.publishModelWaitExhaustedDiagnostic()
 		return c.modelWaitFailErr
 	}
-	if ev.ModelFailure != "" && c.modelWaitRetries >= 1 {
-		c.restoreModelWaitDiagnostic()
-		if strings.HasPrefix(ev.ModelFailure, agyAPIErrorPrefix) {
-			return "agy API error after retry: " + ev.ModelFailure
-		}
-		return "agy model failure after retry: " + ev.ModelFailure
+	if ev.ModelFailure != "" && c.modelWaitRetries >= c.modelWaitMaxRetries {
+		c.noteModelWaitFailure(ev.ModelFailure)
+		c.modelWaitFailErr = c.modelWaitExhaustedError(ev.ModelFailure)
+		c.publishModelWaitExhaustedDiagnostic()
+		return c.modelWaitFailErr
 	}
 	return ""
+}
+
+func (c *conv) modelWaitExhaustedError(failure string) string {
+	if failure == "" {
+		return fmt.Sprintf("agy model stream stalled for %s after %d automatic continue attempts", formatWatchdogDuration(c.modelWaitTimeout), c.modelWaitRetries)
+	}
+	if strings.HasPrefix(failure, agyAPIErrorPrefix) {
+		return fmt.Sprintf("agy API error after %d automatic continue attempts: %s", c.modelWaitRetries, failure)
+	}
+	return fmt.Sprintf("agy model failure after %d automatic continue attempts: %s", c.modelWaitRetries, failure)
+}
+
+func (c *conv) modelWaitExhaustedDiagnostic() string {
+	classes := ""
+	if len(c.modelWaitFailureClasses) > 0 {
+		classes = " Failure classes: " + strings.Join(c.modelWaitFailureClasses, ", ") + "."
+	}
+	if c.modelWaitRetries == 0 {
+		return "ws: agy stalled; automatic continue retries are disabled (0 attempts configured)." + classes
+	}
+	return fmt.Sprintf("ws: agy stalled; sent %d automatic continue attempts, all failed.%s", c.modelWaitRetries, classes)
+}
+
+func (c *conv) noteModelWaitFailure(failure string) {
+	class := agyModelFailureClass(failure)
+	for _, seen := range c.modelWaitFailureClasses {
+		if seen == class {
+			return
+		}
+	}
+	c.modelWaitFailureClasses = append(c.modelWaitFailureClasses, class)
+}
+
+func agyModelFailureClass(failure string) string {
+	if failure == "" {
+		return "no-event silence"
+	}
+	lower := strings.ToLower(failure)
+	switch {
+	case strings.Contains(lower, "no capacity"):
+		if strings.Contains(lower, "503") || strings.Contains(lower, "unavailable") {
+			return "no capacity (503/UNAVAILABLE)"
+		}
+		return "no capacity"
+	case strings.Contains(lower, "unexpected eof"):
+		return "unexpected EOF"
+	case strings.Contains(lower, "stream idle timeout"):
+		return "stream idle timeout"
+	case strings.Contains(lower, "tls handshake timeout"):
+		return "TLS handshake timeout"
+	case strings.Contains(lower, "tls") && strings.Contains(lower, "timeout"):
+		return "TLS timeout"
+	case strings.Contains(lower, "503"):
+		return "HTTP 503"
+	case strings.Contains(lower, "unavailable"):
+		return "UNAVAILABLE"
+	case failure == agyStreamInterrupted:
+		return "stream interrupted"
+	case strings.HasPrefix(failure, agyAPIErrorPrefix):
+		return "API error"
+	default:
+		return "model failure"
+	}
+}
+
+func (c *conv) publishModelWaitExhaustedDiagnostic() {
+	if c.modelWaitExhaustedPublished {
+		return
+	}
+	c.restoreModelWaitDiagnostic()
+	diagnostic := c.modelWaitExhaustedDiagnostic()
+	if c.reply == "" {
+		c.reply = diagnostic
+	} else {
+		c.reply += "\n\n" + diagnostic
+	}
+	c.apply(wslive.Event{Kind: wslive.KindReply, Text: diagnostic, Final: true})
+	c.modelWaitExhaustedPublished = true
 }
 
 func (c *conv) restoreModelWaitDiagnostic() {
@@ -327,7 +549,11 @@ func (c *conv) restoreModelWaitDiagnostic() {
 }
 
 func (c *conv) failModelWaitImmediately(reason string) {
-	c.restoreModelWaitDiagnostic()
+	if c.modelWaitFailErr != "" && c.modelWaitRetries >= c.modelWaitMaxRetries {
+		c.publishModelWaitExhaustedDiagnostic()
+	} else {
+		c.restoreModelWaitDiagnostic()
+	}
 	c.disarmModelWait()
 	c.setStatus(func() { c.lastErr = reason })
 	fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", c.rec.ReplyID, reason)

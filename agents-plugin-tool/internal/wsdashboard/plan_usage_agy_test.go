@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -110,6 +111,113 @@ func validAgyFixtureJSON(reset5h, resetWeekly string) string {
     }
   }
 }`, resetWeekly, reset5h, reset5h, resetWeekly, reset5h, reset5h, reset5h, reset5h)
+}
+
+func TestParseAgyResetTimeRange(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want int64
+		ok   bool
+	}{
+		{name: "seconds", raw: `1700000000`, want: 1700000000000, ok: true},
+		{name: "milliseconds", raw: `1700000000000`, want: 1700000000000, ok: true},
+		{name: "javascript date max", raw: `8640000000000000`, want: 8640000000000000, ok: true},
+		{name: "above javascript date max", raw: `8640000000000001`},
+		{name: "above int64", raw: `9223372036854775808`},
+		{name: "overflowing float", raw: `1e309`},
+		{name: "huge integer", raw: `999999999999999999999999999999999999`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseAgyResetTime(json.RawMessage(tc.raw))
+			if ok != tc.ok || got != tc.want {
+				t.Fatalf("parseAgyResetTime(%s) = %d, %v; want %d, %v", tc.raw, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
+func TestPlanUsageAgyBlockingGoHelper(t *testing.T) {
+	if os.Getenv("WS_AGY_BLOCKING_HELPER") != "1" {
+		return
+	}
+	if err := os.WriteFile(os.Getenv("WS_AGY_HELPER_STARTED"), []byte("started"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		time.Sleep(time.Hour)
+	}
+}
+
+func TestPlanUsageAgyDaemonShutdownCancelsGoHelper(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	dir := filepath.Join(root, "state")
+	for _, path := range []string{home, dir} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := filepath.Join(root, "started")
+	var probeStillRunningAtUnlock atomic.Bool
+	var d *Daemon
+	d, err = StartDaemon(DaemonOptions{
+		Dir:        dir,
+		Home:       home,
+		noGitBadge: true,
+		AgyCommand: func() (string, []string, error) {
+			return exe, []string{"-test.run=^TestPlanUsageAgyBlockingGoHelper$", "--"}, nil
+		},
+		BeforeUnlock: func() {
+			d.planUsage.mu.Lock()
+			probeStillRunningAtUnlock.Store(d.planUsage.agyProbing)
+			d.planUsage.mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartDaemon: %v", err)
+	}
+	defer d.Close()
+	d.planUsage.agyEnv = append(os.Environ(), "WS_AGY_BLOCKING_HELPER=1", "WS_AGY_HELPER_STARTED="+started)
+	var writeCount atomic.Int32
+	d.planUsage.writeFile = func(dir, name string, data []byte) error {
+		writeCount.Add(1)
+		return writePrivateFile(dir, name, data)
+	}
+
+	req := httptest.NewRequest("GET", "/rail/usage?refresh=1", nil)
+	req.Header.Set("X-WS-Usage-Refresh", "1")
+	w := httptest.NewRecorder()
+	d.handlePlanUsage(w, req)
+	if w.Code != 200 {
+		t.Fatalf("forced /rail/usage status = %d", w.Code)
+	}
+	eventuallyFile := time.Now().Add(5 * time.Second)
+	for time.Now().Before(eventuallyFile) {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	if _, err := os.Stat(started); err != nil {
+		t.Fatal("Go-built fake agy probe never started")
+	}
+
+	closeStart := time.Now()
+	d.Close()
+	if elapsed := time.Since(closeStart); elapsed > 5*time.Second {
+		t.Fatalf("daemon Close did not bound in-flight agy probe: took %s", elapsed)
+	}
+	if probeStillRunningAtUnlock.Load() {
+		t.Fatal("in-flight agy probe had not drained before daemon released its lock")
+	}
+	if got := writeCount.Load(); got != 0 {
+		t.Fatalf("cancelled probe performed %d store writes, want 0", got)
+	}
 }
 
 func TestPlanUsageAgyParseClampMalformedAndDisabled(t *testing.T) {

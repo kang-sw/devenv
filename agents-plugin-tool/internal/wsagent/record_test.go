@@ -175,3 +175,18 @@ func TestRecordUnknownMembersRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+// TestRegistrationCarriesTheSpawnerForTheDashboardHead pins the runner's row:
+// a spawned conversation's registration names its parent's reply-id (the
+// dashboard head reads it from the row it already holds), and any other
+// conversation's names none.
+func TestRegistrationCarriesTheSpawnerForTheDashboardHead(t *testing.T) {
+	now := time.Now()
+	kid := registration(Record{ReplyID: "kidsession", Parent: &ParentRef{Kind: ParentConversation, ReplyID: "ownersession"}}, now)
+	if kid.ParentReplyID != "ownersession" {
+		t.Fatalf("spawned row names parent %q, want ownersession", kid.ParentReplyID)
+	}
+	if lone := registration(Record{ReplyID: "lonesession"}, now); lone.ParentReplyID != "" {
+		t.Fatalf("an unspawned row names parent %q", lone.ParentReplyID)
+	}
+}

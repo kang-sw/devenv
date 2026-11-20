@@ -379,6 +379,43 @@ func (s *railLayoutStore) current() (*railLayoutDoc, uint64) {
 	return s.doc, s.gen
 }
 
+// docSince is current for a reader that tolerates the file's state as of
+// since: it looks at the file again only when the last look came before
+// since (a zero since always looks), like generationSince.
+func (s *railLayoutStore) docSince(since time.Time) *railLayoutDoc {
+	if s == nil {
+		return &railLayoutDoc{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if since.IsZero() || s.looked.Before(since) {
+		s.refreshLocked()
+	}
+	return s.doc
+}
+
+// layoutParentOf is id's stored parent in any workspace of doc, among the
+// sessions listed accepts; "" for none, and of two the first by name, as
+// layoutScope.parent reads one workspace. It serves a page head, which has
+// no rail view to take a workspace's listed sessions from.
+func layoutParentOf(doc *railLayoutDoc, id string, listed func(string) bool) string {
+	if doc == nil {
+		return ""
+	}
+	best := ""
+	for _, w := range doc.Workspaces {
+		if w == nil {
+			continue
+		}
+		for p, kids := range w.Children {
+			if p != id && (best == "" || p < best) && slices.Contains(kids, id) && listed(p) {
+				best = p
+			}
+		}
+	}
+	return best
+}
+
 // generationSince is current's generation for a refresh stamp: the file is
 // statted again only when its last stat came before since (a zero since
 // always stats). This daemon's ops move the generation themselves.

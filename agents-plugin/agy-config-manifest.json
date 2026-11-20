@@ -7,7 +7,14 @@
       "type": "integer",
       "minimum": 0,
       "default": 45,
-      "description": "Hosted Antigravity (agy) only (unused on other hosts): seconds without a raw ACP session/update during an active model wait, paused while any tool call or approval is pending, before the runner cancels the stalled turn and retries once with continue; a second stall fails the logical turn. The same single retry budget applies when a turn ends on an in-band ⚠ API error chunk. 0 disables. Read at process start for hosted leads and workers."
+      "description": "Hosted Antigravity (agy) only (unused on other hosts): seconds without a raw ACP session/update during an active model wait, paused while any tool call or approval is pending, before the runner interrupts the stalled turn and may recover with automatic continue attempts. The same retry budget applies to terminal in-band model failures. 0 disables the watchdog. Read at process start for hosted leads and workers."
+    },
+    {
+      "key": "agy.model_wait_retries",
+      "type": "integer",
+      "minimum": 0,
+      "default": 3,
+      "description": "Hosted Antigravity (agy) only (unused on other hosts): maximum automatic continue attempts per logical turn after model-wait silence or a terminal in-band model failure. The shared budget resets for each new user turn; exhaustion fails the turn and adds a visible diagnostic. 0 disables automatic retries. Read at process start for hosted leads and workers."
     }
   ]
 }
