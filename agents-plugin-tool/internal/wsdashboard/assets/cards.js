@@ -1068,8 +1068,8 @@
     el.setAttribute("data-gal-pull", "");
     el.style.translate = calm() ? "" : "0 " + (-dir * shift).toFixed(1) + "px";
     var ps = pills || pillEls(), p = ps[dir > 0 ? 1 : 0], q = ps[dir > 0 ? 0 : 1], t = (dir > 0 ? "↓ " : "↑ ") + text, f = Math.round(pct * 100) + "%";
-    q.el.classList.remove("show", "ready", "damped");
-    p.el.classList.add("show");
+    q.el.classList.remove("lit", "ready", "damped");
+    p.el.classList.add("lit");
     p.el.classList.toggle("damped", state === "damped");
     p.el.classList.toggle("ready", state === "ready");
     if (p.txt.textContent !== t) p.txt.textContent = t;
@@ -1088,7 +1088,7 @@
       pullEl.style.translate = "";
       pullEl = null;
     }
-    if (pills) pills.forEach(function (p) { p.el.classList.remove("show", "ready", "damped"); });
+    if (pills) pills.forEach(function (p) { p.el.classList.remove("lit", "ready", "damped"); });
     if (pullDot) pullDot.classList.remove("pull-target");
     pullDot = null;
   }

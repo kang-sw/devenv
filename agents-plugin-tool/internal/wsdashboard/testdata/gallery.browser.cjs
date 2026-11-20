@@ -107,7 +107,7 @@ const spotIn = ([sel, avoid]) => {
 const helpers3 = () => {
   const g = window.__gal3 = {
     pill: () => {
-      const s = document.querySelector('#bgal .gal-pullpill.show');
+      const s = document.querySelector('#bgal .gal-pullpill.lit');
       if (!s) return null;
       const pulled = document.querySelector('[data-gal-pull]'), tr = pulled ? (pulled.style.translate || '').split(' ') : [];
       return { side: s.classList.contains('top') ? 'top' : 'bottom', text: s.querySelector('.gal-pulltxt').textContent, fill: s.querySelector('.gal-pullfill').style.width,
@@ -121,11 +121,15 @@ const helpers3 = () => {
       g.mo = new MutationObserver(ms => ms.forEach(m => {
         const t = performance.now(), n = m.target;
         if (n.id === 'bgal' && m.attributeName === 'data-pos') g.log.push({ t, pos: n.getAttribute('data-pos') });
-        else if (n.classList.contains('gal-dot') && n.classList.contains('spring') && !(m.oldValue || '').includes('spring')) g.log.push({ t, spring: n.getAttribute('data-pos') });
+        else if (n.classList.contains('gal-plus') && m.attributeName === 'data-active' && n.hasAttribute('data-active')) g.log.push({ t, plus: true });
+        else if (m.attributeName === 'class' && n.classList.contains('gal-dot') && n.classList.contains('spring') && !(m.oldValue || '').includes('spring')) g.log.push({ t, spring: n.getAttribute('data-pos') });
       }));
-      g.mo.observe(document.getElementById('bgal'), { subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['data-pos', 'class'] });
+      g.mo.observe(document.getElementById('bgal'), { subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['data-pos', 'class', 'data-active'] });
     },
+    // wheels holds each wheel event's arrival time in the page.
+    wheels: [],
   };
+  document.addEventListener('wheel', () => { g.wheels.push(performance.now()); }, { capture: true, passive: true });
 };
 async function open(context, id, w, h) {
   const tab = await context.newPage();
@@ -676,6 +680,17 @@ async function routeTerminal(context) {
       assert.equal(await pill(), null, 'the micro-bounce clears after 220ms idle');
       done.push('first page top: damped micro-bounce only, no flip or wrap');
 
+      // alpha's wheel spot, read while its page shows, probes the lock right
+      // after the flip below with no round trip in between.
+      await dot(page, 1).click();
+      await until(async () => await pos(page) === 1, 'alpha\'s page for its spot');
+      await scrollTo('alpha', 0);
+      await sleep(300);
+      const alphaAt = await spot(body('alpha'));
+      await dot(page, 0).click();
+      await until(async () => await pos(page) === 0, 'back to page 1');
+      await sleep(300);
+
       // The hovered pane drives the gate: deep still scrolls down (native,
       // no pull), while beta beside it at its end pulls toward page 2,
       // ready from 85%, and flips at 100% (4 x 100 of 320).
@@ -697,19 +712,19 @@ async function routeTerminal(context) {
       assert.deepEqual([pl.fill, pl.ready, pl.text], ['94%', true, '↓ 2: alpha (94%)'], 'ready from 85%');
       assert(Math.abs(pl.shift + rubber(300 / 320)) < 0.11 && pl.shift > -26, 'the band eases below 26px: ' + pl.shift);
       assert.equal(await pos(page), 0, 'no flip below 100%');
+      await page.evaluate(() => window.__gal3.watch());
       await wheel(betaAt, 100);
-      const flipped = Date.now();
+      // The lock: a tick at once after the flip is ignored.
+      await wheel(alphaAt, -100);
+      const lockProbe = await page.evaluate(() => ({ flip: (window.__gal3.log.find(l => l.pos === '1') || {}).t, probe: window.__gal3.wheels[window.__gal3.wheels.length - 1], pill: window.__gal3.pill() }));
       assert.equal(await pos(page), 1, 'the hovered pane\'s pull flips to page 2 at 100%');
-      assert.equal(await pill(), null, 'the flip clears the pull');
       done.push('hovered pane in a split page drives the flip (the other pane scrolls natively); pill %, target dot, ready from 85%, rubber band');
 
       // The 420ms lock ignores wheel events after a flip; then a pull below
       // 100% springs back after 240ms idle.
-      await scrollTo('alpha', 0);
-      const alphaAt = await spot(body('alpha'));
-      await wheel(alphaAt, -100);
-      assert(Date.now() - flipped < G_LOCK - 40, 'the lock probe ran inside the lock: ' + (Date.now() - flipped) + 'ms');
-      assert.equal(await pill(), null, 'wheel events inside the 420ms lock are ignored');
+      assert(lockProbe.flip !== undefined && lockProbe.probe - lockProbe.flip < G_LOCK, 'the lock probe arrived inside the lock: ' + JSON.stringify(lockProbe));
+      assert.equal(lockProbe.pill, null, 'a wheel event inside the 420ms lock is ignored (no pull)');
+      assert.equal(await pill(), null, 'the flip cleared the pull');
       await sleep(G_LOCK);
       await wheel(alphaAt, -100);
       pl = await pill();
@@ -814,12 +829,13 @@ async function routeTerminal(context) {
       const sprung = await drag(tab, await grip(bar(page, 'epsilon')), () => at('alpha', 'right'), async () => {
         const d = await center(dot(page, 1));
         await tab.mouse.move(d.x, d.y, { steps: 4 });
-        const early = { pos: await pos(page), spring: await dot(page, 1).evaluate(b => b.classList.contains('spring')) };
         await until(async () => await pos(page) === 1, 'the 300ms spring shows page 2 mid-drag', 2000);
-        return { early, log: await page.evaluate(() => window.__gal3.log) };
+        return { log: await page.evaluate(() => window.__gal3.log) };
       });
-      assert.deepEqual(sprung.early, { pos: 0, spring: true }, 'the hovered dot springs, the page not yet shown');
+      // The log orders it: the dot starts springing while page 1 shows, and
+      // page 2 shows 300ms later.
       const springAt = sprung.log.find(l => l.spring === '1'), shownAt = sprung.log.find(l => l.pos === '1');
+      assert(springAt && !sprung.log.some(l => l.pos === '1' && l.t < springAt.t), 'the hovered dot springs before its page shows: ' + JSON.stringify(sprung.log));
       assert(springAt && shownAt && shownAt.t - springAt.t >= 290 && shownAt.t - springAt.t < 600, 'the page shows 300ms after the hover starts: ' + JSON.stringify(sprung.log));
       await until(async () => { const p = await pages(page); return p.length === 3 && JSON.stringify(p.slice(0, 2)) === '[["deep","beta"],["alpha","epsilon"]]'; }, 'epsilon drops right of alpha on the sprung page');
       assert.equal(await pos(page), 1, 'the sprung page stays shown');
@@ -836,10 +852,10 @@ async function routeTerminal(context) {
       await tab.mouse.move(g.x + 14, g.y + 14, { steps: 4 });
       const pd = await plus(page);
       await tab.mouse.move(pd.x, pd.y, { steps: 3 });
-      const quick = { pos: await pos(page), spring: await page.locator('#bgal .gal-dot.empty').evaluate(b => b.classList.contains('spring')), log: await page.evaluate(() => window.__gal3.log) };
       await tab.mouse.up();
-      assert.deepEqual([quick.pos, quick.spring], [0, true], 'over + the dot springs, + not shown yet');
-      assert.equal(quick.log.filter(l => l.pos === '3').length, 0, '+ never showed before the drop');
+      const quick = await page.evaluate(() => window.__gal3.log);
+      assert(quick.some(l => l.spring === '3'), 'over + the dot sprang: ' + JSON.stringify(quick));
+      assert(!quick.some(l => l.plus), '+ never showed: the drop came before 300ms: ' + JSON.stringify(quick));
       await until(async () => { const p = await pages(page); return p.length === 4 && p[3][0] === 'deep' && p[0][0] === 'beta'; }, 'the drop on + docks deep on a new page');
       assert.equal(await active(page), 3, 'the new page shows');
       done.push('drop on + before 300ms creates a new page');
@@ -931,7 +947,7 @@ async function routeTerminal(context) {
       if (await pos(page) !== -1) await dot(page, -1).tap();
       await until(async () => await pos(page) === -1, 'touch Page 0');
       await page.evaluate(helpers3);
-      await page.evaluate(() => { window.__wheels = 0; document.addEventListener('wheel', () => { window.__wheels++; }, { capture: true }); window.__seenPull = 0; new MutationObserver(() => { if (document.querySelector('[data-gal-pull], #bgal .gal-pullpill.show')) window.__seenPull++; }).observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['data-gal-pull', 'class'] }); });
+      await page.evaluate(() => { window.__wheels = 0; document.addEventListener('wheel', () => { window.__wheels++; }, { capture: true }); window.__seenPull = 0; new MutationObserver(() => { if (document.querySelector('[data-gal-pull], #bgal .gal-pullpill.lit')) window.__seenPull++; }).observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['data-gal-pull', 'class'] }); });
       const cdp = await context.newCDPSession(tab);
       const b = await tab.locator('iframe.sframe.on').boundingBox();
       const r = await page.evaluate(() => { const c = document.getElementById('bcol').getBoundingClientRect(); return { x: c.left + c.width * 0.6, y: c.top + c.height / 2 }; });

@@ -110,7 +110,7 @@
 .gal-pullpill { position: absolute; left: 50%; z-index: 6; box-sizing: border-box; min-width: 220px; max-width: calc(100% - 20px); padding: 5px 10px 6px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--wb-primary) 55%, var(--wb-line)); background: color-mix(in srgb, var(--wb-card) 94%, black); box-shadow: 0 6px 20px rgb(0 0 0 / .45); display: flex; flex-direction: column; gap: 4px; pointer-events: none; opacity: 0; transform: translateX(-50%) scale(.94); transition: opacity .14s ease, transform .14s ease; }
 .gal-pullpill.top { top: 8px; }
 .gal-pullpill.bottom { bottom: 8px; }
-.gal-pullpill.show { opacity: 1; transform: translateX(-50%) scale(1); }
+.gal-pullpill.lit { opacity: 1; transform: translateX(-50%) scale(1); }
 .gal-pullpill.damped { border-color: var(--wb-line); }
 .gal-pulltxt { font-size: 11px; font-weight: 600; color: var(--wb-fg); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gal-pulltrack { height: 3px; border-radius: 999px; background: var(--wb-muted); overflow: hidden; }
