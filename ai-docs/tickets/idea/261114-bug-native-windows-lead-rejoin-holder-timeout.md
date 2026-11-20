@@ -1,5 +1,5 @@
 ---
-title: Native Windows lead rejoin still times out a holder call during long replay
+title: "네이티브 Windows에서 긴 재생(replay) 중 lead 재합류 시 여전히 holder 호출이 타임아웃되는 문제"
 related:
   261113-bug-ws-release-gate-sweep-fixes: completed predecessor that introduced the long-replay regression contract
 ---

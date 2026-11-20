@@ -1,5 +1,5 @@
 ---
-title: "Dashboard: remember per-harness auth slots and switch accounts for new sessions"
+title: "dashboard: 하네스별 인증 슬롯 기억 및 새 세션용 계정 전환"
 related:
   261113-feat-ws-dashboard-rail-usage-gutter: prerequisite (the usage gutter and popover this extends)
 ---

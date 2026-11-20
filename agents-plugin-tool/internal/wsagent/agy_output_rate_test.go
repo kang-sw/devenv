@@ -689,7 +689,7 @@ func TestAgyOutputRateRowHoverRetentionAndReopen(t *testing.T) {
 	assertNear(t, "reopened OutputRate", reopenedSnap.Lead.OutputRate.OutputTps, 70.0)
 }
 
-func TestAgyOutputRateHostedApplyDefersSidecarToRecoveryFlush(t *testing.T) {
+func TestAgyOutputRateHostedFirstSamplePersistsBeforeTurnEnd(t *testing.T) {
 	dir := t.TempDir()
 	host := &summarySnapshotHost{}
 	slot, ok := host.OpenHostedSlot(dir)
@@ -702,19 +702,19 @@ func TestAgyOutputRateHostedApplyDefersSidecarToRecoveryFlush(t *testing.T) {
 
 	before := agyOutputRateFileIO()
 	w.apply(wslive.Event{Kind: wslive.KindStatus, OutputRate: &wslive.OutputRate{OutputTps: 42, At: 1000}})
-	if got := agyOutputRateFileIO() - before; got != 0 {
-		t.Fatalf("hosted rate apply touched sidecar %d times, want 0", got)
+	if got := agyOutputRateFileIO() - before; got != 4 {
+		t.Fatalf("first hosted rate sidecar operations = %d, want mkdir+open+stat+write", got)
 	}
 	if snap, ok := host.snapshot(dir); !ok || snap.Lead.OutputRate == nil || snap.Lead.OutputRate.OutputTps != 42 {
 		t.Fatalf("hosted RAM snapshot = %+v, ok=%v", snap.Lead.OutputRate, ok)
 	}
+	if got, err := wslive.ReadOutputRate(dir); err != nil || got == nil || got.OutputTps != 42 {
+		t.Fatalf("pre-TurnEnd recovery sidecar = %+v, %v", got, err)
+	}
 
 	w.apply(wslive.Event{Kind: wslive.KindTurnEnd, At: 1100})
 	if got := agyOutputRateFileIO() - before; got != 4 {
-		t.Fatalf("turn-end recovery flush sidecar operations = %d, want mkdir+open+stat+write", got)
-	}
-	if got, err := wslive.ReadOutputRate(dir); err != nil || got == nil || got.OutputTps != 42 {
-		t.Fatalf("recovery sidecar = %+v, %v", got, err)
+		t.Fatalf("TurnEnd appended the unchanged sample: total operations = %d, want 4", got)
 	}
 }
 

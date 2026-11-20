@@ -1,5 +1,5 @@
 ---
-title: "Nested Pi RPC child stderr cascades unframed into the parent TUI"
+title: "중첩 Pi RPC 자식 stderr가 프레이밍 없이 부모 TUI로 전파되는 문제"
 related:
   260920-bug-pi-mailbox-wait-stderr-leaks-into-tui: same user-visible terminal contamination through a different producer and routing path
   260920-bug-pi-concurrent-skill-regeneration-race: observed native crash whose raw stderr exposed this transport behavior

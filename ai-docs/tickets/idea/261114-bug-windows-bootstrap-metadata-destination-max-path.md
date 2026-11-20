@@ -1,5 +1,5 @@
 ---
-title: Windows launcher bootstrap metadata destination still reaches MAX_PATH after the short-temp repair
+title: "짧은 임시 경로 수정 후에도 Windows 런처 부트스트랩 메타데이터 대상 경로가 MAX_PATH에 도달하는 문제"
 ---
 
 # Windows bootstrap metadata destination reaches MAX_PATH

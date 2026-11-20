@@ -232,9 +232,10 @@ func TestAgentSpawnAndListDescribeTheChild(t *testing.T) {
 		c := findAgent(t, h.runner.AgentList(lead), a)
 		return c.LastReport == "done: found the leak" && c.State == AgentIdle
 	})
-	if reps := got.lead(); len(reps) != 1 || reps[0].Result.ID != a {
-		t.Fatalf("the lead's reports = %+v", reps)
-	}
+	eventually(t, "lead receives a's report", func() bool {
+		reps := got.lead()
+		return len(reps) == 1 && reps[0].Result.ID == a
+	})
 	// No auto-close: the finished child stays open.
 	stillOpen(t, h, a, "a finished agent.spawn child")
 	if other := h.runner.AgentList(LeadCaller("otherleadreplyid", h.root, BackendClaude, h.config.Config)); len(other) != 0 {

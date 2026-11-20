@@ -1,5 +1,5 @@
 ---
-title: "Record time and reason when the dashboard session index removes a session"
+title: "dashboard 세션 인덱스에서 세션 제거 시 시각과 사유 기록"
 related:
   261114-bug-ws-shared-daemon-restarts-without-a-swap: "separate incident investigation; index churn did not prove a daemon restart"
 ---

@@ -87,6 +87,10 @@ type SessionView struct {
 	BoardUnits             *BoardUnits
 	Mermaid                bool
 
+	// Parent is the session that owns this one (the head's parent jump);
+	// nil for a session nobody owns.
+	Parent *ParentView
+
 	Lead         LeadView
 	Tree         TreeView
 	Conversation ConversationView
@@ -585,6 +589,9 @@ type pageInputs struct {
 	// Lookup resolves the other sessions this daemon serves that the view
 	// names.
 	Lookup sessionLookup
+	// Parents resolves the session's owners for the head's parent jump; the
+	// zero value finds none beyond the registration's own ParentReplyID.
+	Parents parentSource
 }
 
 // sessionLookup resolves the sessions a page view names: session reads the
@@ -642,6 +649,7 @@ func buildSessionView(in pageInputs) SessionView {
 	reg := in.Session.Registration
 	v := SessionView{
 		ReplyID:          reg.ReplyID,
+		Parent:           resolveParent(in.Session, in.Parents),
 		Label:            in.Session.Label,
 		Project:          reg.Project,
 		ProjectName:      filepath.Base(reg.Project),

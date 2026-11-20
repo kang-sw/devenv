@@ -1,5 +1,5 @@
 ---
-title: "board-headless: adapter history deep-link and shared-controls scenario gaps"
+title: "board-headless: 어댑터 history 딥링크 및 shared-controls 시나리오 누락"
 ---
 
 # board-headless: adapter history deep-link and shared-controls scenario gaps

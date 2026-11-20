@@ -73,7 +73,8 @@ Attach protocol, version 1. Newline-delimited JSON objects, UTF-8, both ways.
   A pipe child's output is one record per line (the newline included); a PTY
   child's output is one record per read. A holder started with --ring-skip
   keeps the pipe child's whole stdout lines that the pattern matches from
-  their start out of the ring: they take no sequence and reach no client.
+  their start out of the ring. With --ring-pulse it substitutes that
+  content-free line at most once every five seconds while dropping matches.
 
 Self-exit: once the child has exited (or none was ever spawned) and nobody
 has been attached for the idle period (24 hours), the holder exits. A live
@@ -107,6 +108,7 @@ SCHEMA_VERSION = 1
 DESCRIPTOR_NAME = "descriptor.json"
 LOG_NAME = "holder.log"
 EXIT_NAME = "exit.json"
+RING_PULSE_SECONDS = 5.0
 
 
 def _start_ticks():
@@ -233,11 +235,14 @@ def unskipped(pattern, pieces, at_start: bool):
     the next piece starts a line. Only a whole line (one record that starts
     a line and is not cut) is skipped."""
     kept = []
+    skipped = False
     for data, partial in pieces:
-        if not (at_start and not partial and pattern.match(data)):
+        if at_start and not partial and pattern.match(data):
+            skipped = True
+        else:
             kept.append((data, partial))
         at_start = not partial
-    return kept, at_start
+    return kept, at_start, skipped
 
 
 class LineSplitter:
@@ -809,6 +814,8 @@ class Holder:
         descriptor_check: float = DESCRIPTOR_CHECK_SECONDS,
         ring_bytes: int = RING_BYTES,
         ring_skip: str | None = None,
+        ring_pulse: str | None = None,
+        ring_pulse_seconds: float = RING_PULSE_SECONDS,
         stop_grace: float = STOP_GRACE_SECONDS,
         restart_safe: bool = True,
         script_path: str | None = None,
@@ -825,6 +832,9 @@ class Holder:
         self.max_record = max(1, min(MAX_RECORD_BYTES, ring_bytes))
         self.ring = Ring(ring_bytes)
         self.ring_skip = re.compile(ring_skip.encode("utf-8")) if ring_skip else None
+        self.ring_pulse = ring_pulse.encode("utf-8") + b"\n" if ring_pulse else None
+        self.ring_pulse_seconds = ring_pulse_seconds
+        self.ring_pulse_at = float("-inf")
         self.cond = threading.Condition()
         self.attachment: Attachment | None = None
         self.child = None
@@ -1205,12 +1215,22 @@ class Holder:
             else:
                 pieces = list(splitter.feed(chunk))
             if skip is not None:
-                pieces, at_start = unskipped(skip, pieces, at_start)
+                pieces, at_start, skipped = unskipped(skip, pieces, at_start)
+                if skipped and self.ring_pulse is not None:
+                    now = time.monotonic()
+                    if now - self.ring_pulse_at >= self.ring_pulse_seconds:
+                        pieces.append((self.ring_pulse, False))
+                        self.ring_pulse_at = now
             self._append_output(stream, pieces)
         if splitter is not None:
             pieces = list(splitter.flush())
             if skip is not None:
-                pieces, at_start = unskipped(skip, pieces, at_start)
+                pieces, at_start, skipped = unskipped(skip, pieces, at_start)
+                if skipped and self.ring_pulse is not None:
+                    now = time.monotonic()
+                    if now - self.ring_pulse_at >= self.ring_pulse_seconds:
+                        pieces.append((self.ring_pulse, False))
+                        self.ring_pulse_at = now
             self._append_output(stream, pieces)
 
     def _append_output(self, stream: str, pieces) -> None:
@@ -1322,6 +1342,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--descriptor-check-seconds", type=float, default=DESCRIPTOR_CHECK_SECONDS)
     parser.add_argument("--ring-bytes", type=int, default=RING_BYTES)
     parser.add_argument("--ring-skip", default=None, help="a regular expression; the pipe child's stdout lines it matches stay out of the ring")
+    parser.add_argument("--ring-pulse", default=None, help="a content-free line emitted at a bounded rate while ring-skip drops lines")
     parser.add_argument("--stop-grace-seconds", type=float, default=STOP_GRACE_SECONDS)
     parser.add_argument("--restart-unsafe", action="store_true", help="record that this holder may end with its starter")
     args = parser.parse_args(argv)
@@ -1340,6 +1361,7 @@ def main(argv: list[str] | None = None) -> int:
         descriptor_check=args.descriptor_check_seconds,
         ring_bytes=args.ring_bytes,
         ring_skip=args.ring_skip,
+        ring_pulse=args.ring_pulse,
         stop_grace=args.stop_grace_seconds,
         restart_safe=not args.restart_unsafe,
     )

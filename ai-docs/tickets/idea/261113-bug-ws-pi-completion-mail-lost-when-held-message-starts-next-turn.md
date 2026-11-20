@@ -1,5 +1,5 @@
 ---
-title: "Pi completion mail lost when a held message starts the next turn"
+title: "대기 메시지가 다음 턴을 시작할 때 Pi 완료 메일이 유실되는 문제"
 ---
 
 # Pi completion mail lost when a held message starts the next turn

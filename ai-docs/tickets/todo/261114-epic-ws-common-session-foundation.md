@@ -1,5 +1,5 @@
 ---
-title: "Common session foundation: hosted-first harness common-ization through a capability catalog"
+title: "공통 세션 기반: 역량 카탈로그를 통한 hosted 우선 하네스 공통화"
 sage-review-design: required
 related:
   261110-epic-ws-dashboard-agent-host: "existing hosted-agent product scope; this epic supplies a shared foundation without replacing its child plans"

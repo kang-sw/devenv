@@ -1,5 +1,5 @@
 ---
-title: Selection-note browser acceptance reports six chips where five are expected
+title: "selection-note 브라우저 인수 테스트에서 칩 5개 기대 대비 6개가 보고되는 문제"
 related:
   261114-research-selection-cross-entry-capsule-count: "existing historical evidence and unresolved native keyboard-range question"
   261114-feat-ws-dashboard-selection-mention-note: "selection-note behavior and preserved browser acceptance gap"

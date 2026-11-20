@@ -1,5 +1,5 @@
 ---
-title: "Allow subagents to acquire and release pooled worktree leases"
+title: "서브에이전트의 풀 worktree 리스 획득·반납 허용"
 related:
   261116-feat-ws-worktree-release-guard: existing lease-holder and dirty-unleased release guard
   260915-bug-ticket-worker-serial-route-acquires-extra-worktree: preserve the user-approved serial versus parallel worktree contract

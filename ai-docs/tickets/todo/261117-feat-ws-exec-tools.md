@@ -1,5 +1,5 @@
 ---
-title: "ws/exec tools: daemon-owned command execution with async conversion, completion push, and native process-tool removal"
+title: "ws/exec 도구: 비동기 전환, 완료 푸시, 네이티브 프로세스 도구 제거를 포함한 데몬 소유 명령 실행"
 parent: 261114-epic-ws-common-session-foundation
 related:
   261117-feat-ws-single-session-holder: prerequisite

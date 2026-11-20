@@ -1,6 +1,5 @@
 ---
-title: chmod-based unreadable-file tests skip silently on DrvFs and as root, so the
-  guard they provide is filesystem-dependent
+title: "chmod 기반 읽기 불가 파일 테스트가 DrvFs 및 root에서 조용히 건너뛰어져 파일시스템에 따라 검증이 누락되는 문제"
 related:
   260726-refactor-retire-spec-planned-marker-mechanism: its Phase 1 hit this twice
     and removed one instance; the surviving one is pre-existing

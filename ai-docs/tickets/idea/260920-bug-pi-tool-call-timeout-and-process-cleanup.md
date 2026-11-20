@@ -1,5 +1,5 @@
 ---
-title: "Pi tool calls need bounded execution and subprocess-tree cleanup"
+title: "Pi 도구 호출의 실행 시간 제한 및 하위 프로세스 트리 정리 필요"
 ---
 
 # Pi tool calls need bounded execution and subprocess-tree cleanup

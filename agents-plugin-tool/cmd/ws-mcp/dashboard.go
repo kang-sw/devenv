@@ -293,6 +293,7 @@ func trackerStoreRoot(h *wstrackerhost.Host, newErr error) func(id string) (stri
 // trackerChanged runs after a conversation's successful tracker write.
 func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *wsholder.Manager) *wsagent.Runner {
 	modelWaitSeconds := wsagent.DefaultAgyModelWaitTimeoutSeconds
+	modelWaitRetries := wsagent.DefaultAgyModelWaitRetries
 	if name, _, err := wsagent.ResolveHostedPackage(); err == nil && name == "wsflow" {
 		modelWaitSeconds = 0
 	}
@@ -321,6 +322,7 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 		Dir:                        dir,
 		DaemonVersion:              version,
 		AgyModelWaitTimeoutSeconds: &modelWaitSeconds,
+		AgyModelWaitRetries:        &modelWaitRetries,
 		Backends:                   backends,
 		Keys:                       keys,
 		// A lead session's process runs under a session holder with a lead

@@ -1,5 +1,5 @@
 ---
-title: "ws/exec mux: PTY-backed terminal sessions with a rendered screen read"
+title: "ws/exec mux: 렌더링된 화면 읽기를 지원하는 PTY 기반 터미널 세션"
 parent: 261114-epic-ws-common-session-foundation
 related:
   261117-feat-ws-exec-tools: "prerequisite; owns exec.shell, exec.write and the job model this builds on"

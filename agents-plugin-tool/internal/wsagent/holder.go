@@ -139,6 +139,9 @@ type holderChild struct {
 	// ringSkip is the launch's wsholder.LaunchSpec.RingSkip: output lines
 	// the backend's mapper drops, kept out of the ring.
 	ringSkip string
+	// ringPulse is the launch's wsholder.LaunchSpec.RingPulse: a content-free
+	// replacement emitted at a bounded rate for skipped output.
+	ringPulse string
 
 	proc *streamProcess
 	base string
@@ -173,7 +176,7 @@ func (h *holderChild) start(p *streamProcess, cmd *exec.Cmd) error {
 	if err != nil {
 		return err
 	}
-	id, err := h.host.LaunchWith(wsholder.LaunchSpec{Session: raw, RingBytes: leadRingBytes, RingSkip: h.ringSkip})
+	id, err := h.host.LaunchWith(wsholder.LaunchSpec{Session: raw, RingBytes: leadRingBytes, RingSkip: h.ringSkip, RingPulse: h.ringPulse})
 	if err != nil {
 		return fmt.Errorf("start a session holder: %w", err)
 	}

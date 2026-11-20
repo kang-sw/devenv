@@ -1,5 +1,5 @@
 ---
-title: "Dashboard session rewind: drop the conversation after a chosen user message, one direction only"
+title: "dashboard 세션 되감기: 선택한 사용자 메시지 이후 대화 단방향 삭제"
 ---
 
 # Dashboard session rewind: drop the conversation after a chosen user message, one direction only

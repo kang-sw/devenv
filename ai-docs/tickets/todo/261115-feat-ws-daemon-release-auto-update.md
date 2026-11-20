@@ -1,5 +1,5 @@
 ---
-title: "Electron shell: user-approved daemon update from GitHub releases"
+title: "Electron 셸: GitHub 릴리스에서 사용자 승인 기반 데몬 업데이트"
 related:
   261115-feat-werkschaft-electron-shell: "prerequisite: the update runs in the Electron shell main process (its Phase 1 shell must exist). That ticket carries the shell daemon rule (never replace or stop a daemon) that this ticket gives one user-approved exception"
   261113-feat-werkschaft-thin-tauri-shell: "Decision 2 (daemon ownership, 'revisit when the app self-updates') is the decision this ticket revisits"

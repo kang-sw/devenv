@@ -1,5 +1,5 @@
 ---
-title: "Session four-state rail: post-ship follow-ups"
+title: "세션 4상태 레일: 배포 후 후속 작업"
 related:
   261113-feat-ws-dashboard-session-four-state-lifecycle: "source ticket; both phases carry Results, so its known deviations are captured here"
   261114-bug-ws-delegate-reviewer-render-lacks-trusted-provenance: "earlier fix for a similar trusted-provenance refusal; check whether the child-spawn report is a regression of it"

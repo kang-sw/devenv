@@ -1,5 +1,5 @@
 ---
-title: "Worker-profile sessions: assigned tasks, mailbox reports, and owner-approved creation"
+title: "워커 프로필 세션: 배정된 작업, mailbox 보고, 소유자 승인 생성"
 blocked-by: 261115-feat-ws-permission-profile#phase2
 related:
   261115-feat-ws-permission-profile: "Phase 2 supplies reusable permission controls/backend and existing-worker admission; worker Phase 1 composes its new posture/routes/dialog afterward"

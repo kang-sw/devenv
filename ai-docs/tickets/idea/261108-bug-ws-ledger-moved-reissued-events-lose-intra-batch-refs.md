@@ -1,5 +1,5 @@
 ---
-title: wsledger moved and re-issued events lose references to other events of the same batch
+title: "wsledger에서 이동·재발행된 이벤트가 동일 배치 내 다른 이벤트 참조를 잃는 문제"
 related:
   261107-feat-ws-tracker-ledger-protocol: the re-issue decision ((211) a) and MoveToFreshClone recovery this breaks
   261108-feat-ws-tracker-data-structure: the domain names items and comments by event id

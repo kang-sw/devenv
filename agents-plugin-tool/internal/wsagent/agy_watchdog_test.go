@@ -8,10 +8,15 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 func agyWatchdogHarness(t *testing.T, timeoutSeconds string) (*harness, *leverTimers, *reports) {
+	return agyWatchdogHarnessWithRetries(t, timeoutSeconds, "1")
+}
+
+func agyWatchdogHarnessWithRetries(t *testing.T, timeoutSeconds, retries string) (*harness, *leverTimers, *reports) {
 	t.Helper()
 	previous := suiteBackend
 	suiteBackend = BackendAgy
@@ -19,6 +24,9 @@ func agyWatchdogHarness(t *testing.T, timeoutSeconds string) (*harness, *leverTi
 
 	h := newHarness(t, map[string]string{"chat": chatProfile})
 	h.runner.Close()
+	reg := h.config.Backends[BackendAgy]
+	reg.Catalog = AgyCatalog()
+	h.config.Backends[BackendAgy] = reg
 	writeStructured(t, filepath.Join(h.root, ".ws-workflow", "config.json"), map[string]string{
 		ProfilePrefix + "chat": strings.Replace(chatProfile, `"backend":"claude"`, `"backend":"agy"`, 1),
 	})
@@ -26,9 +34,15 @@ func agyWatchdogHarness(t *testing.T, timeoutSeconds string) (*harness, *leverTi
 	if err := resolver.Set(wsconfig.ItemAgyModelWaitTimeoutSeconds, timeoutSeconds, wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeGlobal}); err != nil {
 		t.Fatal(err)
 	}
+	if retries != "" {
+		if err := resolver.Set(wsconfig.ItemAgyModelWaitRetries, retries, wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeGlobal}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	timers := &leverTimers{}
 	got := &reports{}
 	h.config.Timer = timers.start
+	h.config.AgyModelWaitBackoff = func(int) time.Duration { return 0 }
 	h.config.Report = got.add
 	h.start()
 	return h, timers, got
@@ -67,35 +81,229 @@ func fireWatchdog(t *testing.T, timers *leverTimers, index int) {
 	timers.fire(t, index)
 }
 
-// (a), (b): the first silent interval is cancelled and retried in the same
-// logical turn; the second is a failed turn reported to the parent.
-func TestAgyModelWaitWatchdogRetriesOnceAndReportsSecondStall(t *testing.T) {
-	h, timers, got := agyWatchdogHarness(t, "45")
+func exhaustSingleAgyWatchdogRetry(t *testing.T, timers *leverTimers, p *fakeProc) {
+	t.Helper()
+	fireWatchdog(t, timers, 0)
+	eventually(t, "retry interrupt", func() bool { return procInterrupts(p) == 1 })
+	p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted}
+	if sent := p.nextSent(t); sent != "continue" {
+		t.Fatalf("retry prompt = %q, want continue", sent)
+	}
+	fireWatchdog(t, timers, 2)
+	eventually(t, "exhaustion interrupt", func() bool { return procInterrupts(p) == 2 })
+}
+
+func agyWatchdogDiagnosticCount(t *testing.T, h *harness, id, diagnostic string) int {
+	t.Helper()
+	c := h.runner.conv(id)
+	c.do(func() {})
+	records := readEventually(t, "watchdog diagnostic in the ring", func() ([]wslive.RingRecord, error) {
+		return wslive.ReadRing(wslive.RingDir(wsdashboard.SessionDir(h.dir, id)))
+	})
+	count := 0
+	for _, record := range records {
+		if record.Kind == wslive.RingReply && record.Text == diagnostic {
+			count++
+		}
+	}
+	return count
+}
+
+// The built-in retry budget is spent inside one logical turn. Each silent
+// interval is cancelled before continue is sent, and the turn fails visibly
+// after exactly the configured number of attempts.
+func TestAgyModelWaitWatchdogRetriesConfiguredBudgetAndReportsExhaustion(t *testing.T) {
+	h, timers, got := agyWatchdogHarnessWithRetries(t, "45", "")
+	id, p := startAgyWatchdogTurn(t, h, true)
+
+	for attempt := 1; attempt <= DefaultAgyModelWaitRetries; attempt++ {
+		fireWatchdog(t, timers, (attempt-1)*2)
+		eventually(t, "retry interrupt", func() bool { return procInterrupts(p) == attempt })
+		if st := h.state(id); st.Status != StatusRunning {
+			t.Fatalf("attempt %d closed the logical turn while cancellation landed: %+v", attempt, st)
+		}
+		p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted}
+		if sent := p.nextSent(t); sent != "continue" {
+			t.Fatalf("attempt %d prompt = %q, want continue", attempt, sent)
+		}
+		if st := h.state(id); st.Status != StatusRunning || len(got.lead()) != 0 {
+			t.Fatalf("attempt %d left the logical turn: state=%+v reports=%+v", attempt, st, got.lead())
+		}
+	}
+
+	fireWatchdog(t, timers, DefaultAgyModelWaitRetries*2)
+	eventually(t, "exhaustion interrupt", func() bool { return procInterrupts(p) == DefaultAgyModelWaitRetries+1 })
+	p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted}
+	eventually(t, "failed parent report", func() bool { return len(got.lead()) == 1 })
+	report := got.lead()[0]
+	if report.Result.Status != TurnFailed || report.Result.Error != "agy model stream stalled for 45s after 3 automatic continue attempts" {
+		t.Fatalf("exhausted report = %+v", report.Result)
+	}
+	if want := "ws: agy stalled; sent 3 automatic continue attempts, all failed. Failure classes: no-event silence."; !strings.Contains(report.Result.Message, want) {
+		t.Fatalf("exhausted report message = %q, want %q", report.Result.Message, want)
+	}
+	if rec := h.record(id); rec.TurnOpen || rec.LastTurn == nil || rec.LastTurn.Result.Status != TurnFailed {
+		t.Fatalf("the failed logical turn must be settled in the record: %+v", rec)
+	}
+}
+
+func TestAgyModelWaitWatchdogZeroRetriesDisablesAutomaticContinue(t *testing.T) {
+	h, timers, got := agyWatchdogHarnessWithRetries(t, "45", "0")
+	_, p := startAgyWatchdogTurn(t, h, true)
+
+	fireWatchdog(t, timers, 0)
+	eventually(t, "zero-budget interrupt", func() bool { return procInterrupts(p) == 1 })
+	p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted}
+	eventually(t, "zero-budget parent report", func() bool { return len(got.lead()) == 1 })
+	result := got.lead()[0].Result
+	if result.Status != TurnFailed || result.Error != "agy model stream stalled for 45s after 0 automatic continue attempts" {
+		t.Fatalf("zero-budget result = %+v", result)
+	}
+	if want := "automatic continue retries are disabled (0 attempts configured)"; !strings.Contains(result.Message, want) {
+		t.Fatalf("zero-budget message = %q, want %q", result.Message, want)
+	}
+	if queued := len(p.sent); queued != 0 {
+		t.Fatalf("zero retry budget sent %d continue prompts", queued)
+	}
+}
+
+func TestAgyModelWaitWatchdogPublishesExhaustionToHostedLeadConversation(t *testing.T) {
+	h, f := newAgyLeadHarness(t)
+	timers := &leverTimers{}
+	timeout, retries := 45, 1
+	h.opts.Timer = timers.start
+	h.opts.AgyModelWaitBackoff = func(int) time.Duration { return 0 }
+	h.opts.AgyModelWaitTimeoutSeconds = &timeout
+	h.opts.AgyModelWaitRetries = &retries
+	h.startAt("http://127.0.0.1:1")
+	id := h.lead(BackendAgy, LeadOptions{}).ID
+	f.replyID = id
+	h.send(id, "work")
+	holder := h.holder(id)
+	eventually(t, "hosted lead first prompt", func() bool { return len(agyPromptIDs(h, holder)) == 1 })
+
+	fireWatchdog(t, timers, 0)
+	ids := agyPromptIDs(h, holder)
+	h.holders.out(holder, `{"jsonrpc":"2.0","result":{"stopReason":"cancelled"},"id":"`+ids[0]+`"}`)
+	eventually(t, "hosted lead continue prompt", func() bool { return len(agyPromptIDs(h, holder)) == 2 })
+	fireWatchdog(t, timers, 2)
+	ids = agyPromptIDs(h, holder)
+	h.holders.out(holder, `{"jsonrpc":"2.0","result":{"stopReason":"cancelled"},"id":"`+ids[1]+`"}`)
+	h.idle(id)
+
+	const diagnostic = "ws: agy stalled; sent 1 automatic continue attempts, all failed. Failure classes: no-event silence."
+	if replies := ringTexts(h.ring(id), wslive.RingReply); !slices.Contains(replies, diagnostic) {
+		t.Fatalf("hosted lead replies = %q, want visible diagnostic %q", replies, diagnostic)
+	}
+	if st := h.state(id); !strings.Contains(st.Error, "after 1 automatic continue attempts") {
+		t.Fatalf("hosted lead state = %+v", st)
+	}
+}
+
+func TestAgyModelWaitWatchdogForceStopsWhenInterruptIsIgnored(t *testing.T) {
+	// Exercise the shipped default-three budget: a cancellation that never
+	// lands must still fail on its own grace timer before any retry can start.
+	h, timers, got := agyWatchdogHarnessWithRetries(t, "45", "")
 	id, p := startAgyWatchdogTurn(t, h, true)
 
 	fireWatchdog(t, timers, 0)
 	eventually(t, "first interrupt", func() bool { return procInterrupts(p) == 1 })
-	if st := h.state(id); st.Status != StatusRunning {
-		t.Fatalf("the logical turn must stay open while cancellation lands: %+v", st)
-	}
-	p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted}
-	if got := p.nextSent(t); got != "continue" {
-		t.Fatalf("retry prompt = %q, want continue", got)
-	}
-	if st := h.state(id); st.Status != StatusRunning || len(got.lead()) != 0 {
-		t.Fatalf("the retry stays in the same unreported logical turn: state=%+v reports=%+v", st, got.lead())
+	eventually(t, "cancel grace timer", func() bool {
+		started, _ := timers.counts()
+		return started == 2
+	})
+	timers.mu.Lock()
+	grace := timers.durs[1]
+	timers.mu.Unlock()
+	if grace != modelWaitCancelGrace {
+		t.Fatalf("cancel grace = %v, want %v", grace, modelWaitCancelGrace)
 	}
 
-	fireWatchdog(t, timers, 1)
-	eventually(t, "second interrupt", func() bool { return procInterrupts(p) == 2 })
-	p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted}
+	// The fake deliberately ignores Interrupt and never emits TurnEnd.
+	timers.fire(t, 1)
+	eventually(t, "force-stopped process", p.isClosed)
 	eventually(t, "failed parent report", func() bool { return len(got.lead()) == 1 })
-	report := got.lead()[0]
-	if report.Result.Status != TurnFailed || report.Result.Error != "agy model stream stalled for 45s twice" {
-		t.Fatalf("second-stall report = %+v", report.Result)
+	if result := got.lead()[0].Result; result.Status != TurnFailed || result.Error != "agy model stream did not stop within 5s after interrupt" {
+		t.Fatalf("cancel-grace result = %+v", result)
 	}
-	if rec := h.record(id); rec.TurnOpen || rec.LastTurn == nil || rec.LastTurn.Result.Status != TurnFailed {
-		t.Fatalf("the failed logical turn must be settled in the record: %+v", rec)
+
+	// A holder may still deliver its EOF and an already-buffered cancelled
+	// TurnEnd after stopProcess settled the child. Run those exact handlers in
+	// order and prove the report fence makes both stale events idempotent.
+	c := h.runner.conv(id)
+	c.do(func() {
+		c.processExited()
+		c.handle(Event{TurnEnd: true, TurnReason: wslive.TurnAborted})
+	})
+	if reports := got.lead(); len(reports) != 1 {
+		t.Fatalf("late EOF/TurnEnd produced %d parent reports: %+v", len(reports), reports)
+	}
+	if rec := h.record(id); rec.TurnOpen || rec.ReportID == "" || rec.ReportID != rec.LastReportedTurn {
+		t.Fatalf("late EOF/TurnEnd unsettled or duplicated the child report: %+v", rec)
+	}
+}
+
+func TestAgyModelWaitWatchdogExhaustionPublishesDiagnosticOnEOF(t *testing.T) {
+	h, timers, got := agyWatchdogHarness(t, "45")
+	id, p := startAgyWatchdogTurn(t, h, true)
+	exhaustSingleAgyWatchdogRetry(t, timers, p)
+
+	// The exhausted prompt exits without TurnEnd after accepting the interrupt.
+	p.exit()
+	eventually(t, "failed parent report", func() bool { return len(got.lead()) == 1 })
+
+	const diagnostic = "ws: agy stalled; sent 1 automatic continue attempts, all failed. Failure classes: no-event silence."
+	report := got.lead()[0]
+	if report.Result.Status != TurnFailed || report.Result.Error != "agy model stream stalled for 45s after 1 automatic continue attempts" {
+		t.Fatalf("EOF exhaustion result = %+v", report.Result)
+	}
+	if count := strings.Count(report.Result.Message, diagnostic); count != 1 {
+		t.Fatalf("EOF exhaustion message contains diagnostic %d times: %q", count, report.Result.Message)
+	}
+
+	// A buffered TurnEnd after EOF must not publish or report the turn again.
+	c := h.runner.conv(id)
+	c.do(func() { c.handle(Event{TurnEnd: true, TurnReason: wslive.TurnAborted}) })
+	if reports := got.lead(); len(reports) != 1 {
+		t.Fatalf("EOF plus late TurnEnd produced %d parent reports: %+v", len(reports), reports)
+	}
+	if count := agyWatchdogDiagnosticCount(t, h, id, diagnostic); count != 1 {
+		t.Fatalf("EOF plus late TurnEnd published %d exhaustion diagnostics", count)
+	}
+}
+
+func TestAgyModelWaitWatchdogExhaustionPublishesDiagnosticOnGraceForceStop(t *testing.T) {
+	h, timers, got := agyWatchdogHarness(t, "45")
+	id, p := startAgyWatchdogTurn(t, h, true)
+	exhaustSingleAgyWatchdogRetry(t, timers, p)
+
+	// The exhausted prompt ignores the interrupt, so the bounded grace force-
+	// stops it without a TurnEnd from the backend.
+	fireWatchdog(t, timers, 3)
+	eventually(t, "force-stopped exhausted process", p.isClosed)
+	eventually(t, "failed parent report", func() bool { return len(got.lead()) == 1 })
+
+	const diagnostic = "ws: agy stalled; sent 1 automatic continue attempts, all failed. Failure classes: no-event silence."
+	report := got.lead()[0]
+	if report.Result.Status != TurnFailed || report.Result.Error != "agy model stream stalled for 45s after 1 automatic continue attempts and did not stop within 5s after interrupt" {
+		t.Fatalf("grace exhaustion result = %+v", report.Result)
+	}
+	if count := strings.Count(report.Result.Message, diagnostic); count != 1 {
+		t.Fatalf("grace exhaustion message contains diagnostic %d times: %q", count, report.Result.Message)
+	}
+
+	// EOF and a buffered TurnEnd may still arrive after stopProcess settled the
+	// report; both must remain idempotent.
+	c := h.runner.conv(id)
+	c.do(func() {
+		c.processExited()
+		c.handle(Event{TurnEnd: true, TurnReason: wslive.TurnAborted})
+	})
+	if reports := got.lead(); len(reports) != 1 {
+		t.Fatalf("grace force-stop plus late events produced %d parent reports: %+v", len(reports), reports)
+	}
+	if count := agyWatchdogDiagnosticCount(t, h, id, diagnostic); count != 1 {
+		t.Fatalf("grace force-stop plus late events published %d exhaustion diagnostics", count)
 	}
 }
 
@@ -184,6 +392,143 @@ func TestAgyModelWaitWatchdogActivityResetsTimer(t *testing.T) {
 	}
 	timers.fire(t, 1)
 	eventually(t, "replacement interval interrupt", func() bool { return procInterrupts(p) == 1 })
+}
+
+func TestAgyModelWaitWatchdogDelaysAutomaticContinue(t *testing.T) {
+	h, timers, _ := agyWatchdogHarness(t, "45")
+	h.runner.opts.AgyModelWaitBackoff = func(attempt int) time.Duration {
+		if attempt != 1 {
+			t.Fatalf("backoff attempt = %d, want 1", attempt)
+		}
+		return 7 * time.Second
+	}
+	_, p := startAgyWatchdogTurn(t, h, false)
+
+	fireWatchdog(t, timers, 0)
+	eventually(t, "retry interrupt", func() bool { return procInterrupts(p) == 1 })
+	p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted}
+	eventually(t, "backoff timer", func() bool {
+		started, _ := timers.counts()
+		return started == 3
+	})
+	if queued := len(p.sent); queued != 0 {
+		t.Fatalf("continue sent before backoff: %d queued", queued)
+	}
+	timers.mu.Lock()
+	delay := timers.durs[2]
+	timers.mu.Unlock()
+	if delay != 7*time.Second {
+		t.Fatalf("backoff delay = %v, want 7s", delay)
+	}
+	timers.fire(t, 2)
+	if sent := p.nextSent(t); sent != "continue" {
+		t.Fatalf("post-backoff prompt = %q", sent)
+	}
+}
+
+func TestAgyModelWaitWatchdogUserActionCancelsBackoff(t *testing.T) {
+	for _, action := range []string{"send", "interrupt", "stop", "process exit"} {
+		t.Run(action, func(t *testing.T) {
+			h, timers, got := agyWatchdogHarness(t, "45")
+			h.runner.opts.AgyModelWaitBackoff = func(int) time.Duration { return 7 * time.Second }
+			id, p := startAgyWatchdogTurn(t, h, true)
+			fireWatchdog(t, timers, 0)
+			eventually(t, "retry interrupt", func() bool { return procInterrupts(p) == 1 })
+			p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted}
+			eventually(t, "backoff timer", func() bool {
+				started, _ := timers.counts()
+				return started == 3
+			})
+
+			if action == "send" {
+				if _, err := h.runner.Send(id, "new direction"); err != nil {
+					t.Fatal(err)
+				}
+				if sent := p.nextSent(t); !strings.Contains(sent, "new direction") || strings.Contains(sent, "continue") {
+					t.Fatalf("replacement prompt = %q", sent)
+				}
+			} else if action == "interrupt" {
+				if _, _, err := h.runner.Interrupt(id); err != nil {
+					t.Fatal(err)
+				}
+			} else if action == "stop" {
+				if _, err := h.runner.Stop(id); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				p.exit()
+			}
+			eventually(t, "single settlement", func() bool { return len(got.lead()) == 1 })
+			timers.fire(t, 2) // a stopped fake timer may still deliver
+			time.Sleep(40 * time.Millisecond)
+			if queued := len(p.sent); queued != 0 {
+				t.Fatalf("%s allowed a delayed continue: %d queued", action, queued)
+			}
+			if reports := got.lead(); len(reports) != 1 {
+				t.Fatalf("%s produced %d settlements: %+v", action, len(reports), reports)
+			}
+		})
+	}
+}
+
+func TestAgyModelWaitWatchdogSendWinsReadyBackoffRace(t *testing.T) {
+	h, timers, _ := agyWatchdogHarness(t, "45")
+	h.runner.opts.AgyModelWaitBackoff = func(int) time.Duration { return 7 * time.Second }
+	id, p := startAgyWatchdogTurn(t, h, false)
+	fireWatchdog(t, timers, 0)
+	eventually(t, "retry interrupt", func() bool { return procInterrupts(p) == 1 })
+	p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted}
+	eventually(t, "backoff timer", func() bool {
+		started, _ := timers.counts()
+		return started == 3
+	})
+
+	gate := newGate(t, func() {})
+	go h.runner.conv(id).do(gate.wait)
+	gate.awaitEntered(t)
+	timers.fire(t, 2) // ready while the conversation loop is held
+	if _, err := h.runner.Send(id, "new direction"); err != nil {
+		t.Fatal(err)
+	}
+	gate.release()
+	if sent := p.nextSent(t); !strings.Contains(sent, "new direction") || strings.Contains(sent, "continue") {
+		t.Fatalf("race winner prompt = %q", sent)
+	}
+	time.Sleep(40 * time.Millisecond)
+	if queued := len(p.sent); queued != 0 {
+		t.Fatalf("ready backoff sent %d late prompts", queued)
+	}
+}
+
+// A hosted holder replaces private thought lines with the content-free pulse.
+// Repeated pulses can span longer than the timeout without cancelling, while
+// neither the pulse nor the private thought text becomes visible reply data.
+func TestAgyHostedThoughtPulseKeepsModelWaitAlive(t *testing.T) {
+	h, timers, _ := agyWatchdogHarness(t, "45")
+	_, p := startAgyWatchdogTurn(t, h, false)
+	m := newAgyMapper("s")
+	rr := &agyRun{m: m, answers: map[string]controlAnswer{}}
+
+	for interval := 0; interval < 3; interval++ {
+		evs := m.mapLine([]byte(agyRingPulse), rr)
+		activity := slices.DeleteFunc(evs, func(ev Event) bool { return ev.ModelActivity == nil })
+		if len(activity) != 1 || *activity[0].ModelActivity != 0 {
+			t.Fatalf("pulse %d activity = %+v", interval, evs)
+		}
+		p.events <- activity[0]
+		eventually(t, "replacement watchdog", func() bool {
+			started, _ := timers.counts()
+			return started == interval+2
+		})
+		timers.fire(t, interval)
+		time.Sleep(20 * time.Millisecond)
+		if got := procInterrupts(p); got != 0 {
+			t.Fatalf("pulse %d allowed %d watchdog interrupts", interval, got)
+		}
+	}
+	if reply := m.reply.String(); reply != "" || strings.Contains(reply, "thought") {
+		t.Fatalf("content-free pulse became visible reply %q", reply)
+	}
 }
 
 // (e): the reply-tail matcher joins split chunks, requires an anchored attempt
@@ -332,8 +677,22 @@ func TestAgyModelWaitWatchdogAPIErrorUsesSharedRetry(t *testing.T) {
 	eventually(t, "post-API-error interrupt", func() bool { return procInterrupts(p) == 1 })
 	p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted}
 	eventually(t, "post-API-error failure report", func() bool { return len(got.lead()) == 1 })
-	if result := got.lead()[0].Result; result.Status != TurnFailed || result.Error != "agy model stream stalled for 45s after API error retry" || result.Message != failure {
+	if result := got.lead()[0].Result; result.Status != TurnFailed || result.Error != "agy model stream stalled for 45s after 1 automatic continue attempts" || !strings.Contains(result.Message, failure) || !strings.Contains(result.Message, "Failure classes: no capacity, no-event silence") {
 		t.Fatalf("shared retry result = %+v", result)
+	}
+}
+
+func TestAgyModelFailureClassifiesKnownInBandErrors(t *testing.T) {
+	for failure, want := range map[string]string{
+		"⚠ API error (attempt 1): 503 UNAVAILABLE: No capacity": "no capacity (503/UNAVAILABLE)",
+		"⚠ API error (attempt 1): unexpected EOF":               "unexpected EOF",
+		"⚠ API error (attempt 1): stream idle timeout":          "stream idle timeout",
+		"⚠ API error (attempt 1): TLS handshake timeout":        "TLS handshake timeout",
+		"": "no-event silence",
+	} {
+		if got := agyModelFailureClass(failure); got != want {
+			t.Errorf("classify %q = %q, want %q", failure, got, want)
+		}
 	}
 }
 
@@ -350,12 +709,12 @@ func TestAgyModelWaitWatchdogSilenceThenAPIErrorDoesNotRetryAgain(t *testing.T) 
 	}
 	failure := "⚠ API error (attempt 2): TLS timeout"
 	p.events <- Event{ModelFailureUpdate: &failure}
-	fireWatchdog(t, timers, 2)
+	fireWatchdog(t, timers, 3)
 	eventually(t, "second-trigger interrupt", func() bool { return procInterrupts(p) == 2 })
 	p.events <- Event{Live: &wslive.Event{Kind: wslive.KindReply, Text: failure, Final: true}}
 	p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted, ModelFailure: failure}
 	eventually(t, "shared-budget failure report", func() bool { return len(got.lead()) == 1 })
-	if result := got.lead()[0].Result; result.Status != TurnFailed || !strings.Contains(result.Error, "after retry") || !strings.Contains(result.Message, failure) {
+	if result := got.lead()[0].Result; result.Status != TurnFailed || !strings.Contains(result.Error, "after 1 automatic continue attempts") || !strings.Contains(result.Message, failure) || !strings.Contains(result.Message, "sent 1 automatic continue attempts") {
 		t.Fatalf("second-trigger result = %+v", result)
 	}
 	if queued := len(p.sent); queued != 0 {
@@ -366,23 +725,37 @@ func TestAgyModelWaitWatchdogSilenceThenAPIErrorDoesNotRetryAgain(t *testing.T) 
 // (f): native /compact has its own watchdog and never arms model waiting.
 func TestAgyModelWaitWatchdogDoesNotArmForCompact(t *testing.T) {
 	h, timers, _ := agyWatchdogHarness(t, "45")
-	id, _ := startAgyWatchdogTurn(t, h, false)
+	id, p := startAgyWatchdogTurn(t, h, false)
+	p.reply("done")
+	eventually(t, "ordinary turn ended", func() bool { return !h.record(id).TurnOpen && h.state(id).Status != StatusRunning })
+
+	key := h.record(id).WSKey
+	resume := false
+	if result := h.runner.Compact(key, "", &resume); result.Status != "queued" {
+		t.Fatalf("compact result = %+v", result)
+	}
+	if sent := p.nextSent(t); sent != "/compact" {
+		t.Fatalf("compact command = %q, want /compact", sent)
+	}
 	c := h.runner.conv(id)
 	c.do(func() {
-		c.disarmModelWait()
-		c.compactCommand = true
-		c.startModelWait()
 		if c.modelWaitArmed || c.modelWaitC != nil {
-			t.Fatalf("compact command armed model waiting")
+			t.Fatalf("real compact command armed model waiting")
 		}
 	})
-	if started, _ := timers.counts(); started != 1 {
-		t.Fatalf("compact guard started another timer: %d", started)
+	if started, _ := timers.counts(); started != 2 {
+		t.Fatalf("ordinary + compact watchdog timers = %d, want 2", started)
+	}
+	timers.mu.Lock()
+	durations := slices.Clone(timers.durs)
+	timers.mu.Unlock()
+	if durations[0] != 45*time.Second || durations[1] != compactCommandTimeout {
+		t.Fatalf("watchdog durations = %v, want [45s %v]", durations, compactCommandTimeout)
 	}
 }
 
-// (g): zero is the explicit off switch.
-func TestAgyModelWaitWatchdogZeroDisables(t *testing.T) {
+// A zero timeout disables the watchdog independently of its retry budget.
+func TestAgyModelWaitWatchdogTimeoutZeroDisables(t *testing.T) {
 	h, timers, _ := agyWatchdogHarness(t, "0")
 	id, _ := startAgyWatchdogTurn(t, h, false)
 	if started, _ := timers.counts(); started != 0 {

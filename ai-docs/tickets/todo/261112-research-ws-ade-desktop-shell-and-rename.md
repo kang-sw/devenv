@@ -1,5 +1,5 @@
 ---
-title: "Werkschaft: local-only product concept - desktop shell, zero-install built-in agent, distribution, and the rename (formerly ws-ade)"
+title: "Werkschaft: 로컬 전용 제품 컨셉 - 데스크톱 셸, 무설치 내장 에이전트, 배포, 명칭 변경 (구 ws-ade)"
 related:
   261110-epic-ws-dashboard-agent-host: "its Scope deferred a desktop shell until the browser dashboard is complete ((18) a, (19)); (493)=b reverses that order for a thin shell built in parallel"
   261110-research-ws-dashboard-agent-host-foundations: "holds the earlier Tauri-vs-Electron question; this ticket carries it forward"

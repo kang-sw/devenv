@@ -4,12 +4,12 @@ parent: 261119-epic-ws-daemon-sqlite-storage
 blocked-by: 261119-feat-ws-whiteboard-retire-embed-snapshot
 related:
   261119-feat-ws-whiteboard-retire-embed-snapshot: "sibling child; removes the per-update embed render this store would otherwise carry (see (1815))"
-  261116-feat-ws-whiteboard-retire-disk-pages: "derived index.html / index.stamp.js stay files here; their retirement is that ticket's scope"
+  261116-feat-ws-whiteboard-retire-disk-pages: "Phase 2 prerequisite; retires derived pages, their publisher and refresh, owns the full: status changes, and keeps the first-open cleanup sweep"
   261117-research-ws-daemon-file-touch-map: "storage audit background (whiteboard rows)"
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: e86e61719a409f61
-sage-review-completeness-reviewed: e86e61719a409f61
+sage-review-design-reviewed: a5a67f154108c7a6
+sage-review-completeness-reviewed: a5a67f154108c7a6
 ---
 
 # Whiteboard 2PC folder store -> one SQLite database per board
@@ -55,8 +55,7 @@ by `261119-feat-ws-whiteboard-retire-embed-snapshot`.
 Readers and writers of the folder in this checkout:
 
 - Writes: `whiteboard.update` (`mcp/session_state.go:649-675` via
-  `mcp/whiteboard_tools.go:276-306`); render-only refresh after todo/agenda
-  tools (`whiteboard_tools.go:570-589`); dashboard answer revision
+  `mcp/whiteboard_tools.go:276-306`); dashboard answer revision
   (`wswhiteboard/dashboard_answer_revision.go:21-65`); board notice nudges
   (`wswhiteboard/board_notice.go:250-315`); `whiteboard.load` replace
   (`wswhiteboard/folders_archive.go:241-294`, called from
@@ -78,11 +77,11 @@ Readers and writers of the folder in this checkout:
   (`folders.go:563-651`, `wswhiteboard/folders_memo.go:88-128`).
 - Non-Go readers: none found. `claude-mod`, `desktop-electron`, and the Pi
   extension sources do not reference `meta.json`, `committed.json`, or the
-  board folder. Browsers read only the derived `index.html` and poll
-  `index.stamp.js`.
-- The daily orphan GC deletes only root-level files of dead sessions matching
-  `^([a-z0-9]+)(?:\.html|\.stamp\.js|-[0-9a-f]+\.html)$`, never directories
-  (`whiteboard_tools.go:51-53`, `:930-967`).
+  board folder. The browser-only derived-page readers retire in
+  `261116-feat-ws-whiteboard-retire-disk-pages` before Phase 2.
+- The derived-page ticket also replaces the daily orphan GC with its retained
+  off-response-path, first-open cleanup sweep; neither the old GC nor the
+  retired render refresh enters Phase 2's routing inventory.
 
 ### Before: file operations per `whiteboard.update` (derived from code)
 
@@ -217,9 +216,8 @@ confirms them before this work merges to `develop`.
   under (1802)=b; owner confirms in the morning). T3 is the highest affected
   path. Release Rule 2 requires a minor bump and explicit owner approval; the
   owner approved on 2026-11-19 at 23:22. That approval covers the `(1805)=a`
-  sentinel. `(1806)`'s direct-CLI refusal is a second T3 path, and the owner's
-  morning confirmation of `(1806)` is the explicit approval Release Rule 2
-  requires for it.
+  sentinel. `(1806)`'s direct-CLI refusal is a second T3 path, and `(1844)=a`
+  is the explicit owner approval Release Rule 2 requires for it.
   1. Old folder, new binary: the first open imports through the retained
      `FolderStore.Open` (`folders.go:143-159`, `:400-490`). That covers pending
      replay, the schema guard, and v1 conversion. No T4.
@@ -262,8 +260,22 @@ confirms them before this work merges to `develop`.
   - Rejected: legacy write-back of any kind (owner directive, 23:22).
   - Rejected: a new read-only import path, because it duplicates replay
     logic and an unreplayed intent would be lost from the import.
-- **Direct CLI never co-opens the board DB, `(1806)`** (owner-assumed
-  2026-11-19 under (1802)=b; owner confirms in the morning):
+- **The daemon-only premise confirms `(1806)`, `(1844)=a` (owner, 2026-11-20
+  17:31; note 17:30).** "all MCP functions presuppose the daemon; the no-daemon
+  scenario is meaningless." SQLite decision `(1806)` stands: once Phase 2
+  makes the DB authoritative, non-owner processes refuse board calls. Rejected:
+  retaining a supported no-daemon board mode.
+- **Raw-binary updates keep committing only before Phase 2, `(1852)=a` (owner,
+  2026-11-20 17:44).** After
+  `261116-feat-ws-whiteboard-retire-disk-pages` lands and before this ticket's
+  Phase 2, direct `ws-mcp serve --stdio` and `ws-mcp call whiteboard.update`
+  still use their in-process server (`cmd/ws-mcp/main.go:19-77`,
+  `cmd/ws-mcp/hosted_cli.go:508-539`), commit the update, and report only that
+  the page is unavailable on `full:`, with no start-daemon hint. Phase 2 then
+  applies `(1806)`. Rejected: pulling the refusal into the page-retirement
+  ticket, which would make that ticket T3 and require a minor bump.
+- **Direct CLI never co-opens the board DB, `(1806)`** (owner-confirmed by
+  `(1844)=a` on 2026-11-20):
   - A direct `ws-mcp` CLI or `serve` process refuses board calls with an
     error naming the daemon as the board owner.
   - The refusal keys on an explicit board-owner option: a `BoardOwner bool`
@@ -394,10 +406,21 @@ confirms them before this work merges to `develop`.
   - A per-board coalescing writer publishes `index.html` / `index.stamp.js`:
     latest state wins, stamp after page.
   - A publish failure becomes a debug event and is retried by the next
-    publish. The synchronous "board committed; fix the output problem" error
-    (`whiteboard_tools.go:788`) goes away.
+    publish. Historical only: the synchronous "board committed; fix the output
+    problem" error (`whiteboard_tools.go:788`) is removed by
+    `261116-feat-ws-whiteboard-retire-disk-pages`, not by this store ticket.
   - Rejected: publishing under the board lock before returning
     (`mcp/session_state.go:665-675`).
+- **The disk-page retirement supersedes `(1812)`'s publisher mechanism,
+  `(1841)=a` (owner, 2026-11-20).** Phase 3 no longer builds or verifies a
+  coalescing `index.html` / `index.stamp.js` publisher, because
+  `261116-feat-ws-whiteboard-retire-disk-pages` removes those pages before this
+  ticket switches the update path in Phase 2. Keep `(1812)` as decision
+  history: its response-path goal still holds, but retirement satisfies it by
+  removing publication rather than moving publication to a background writer.
+  The retirement also owns the resulting `full:` unavailable/not-yet-served
+  lines and retains its off-response-path first-open cleanup sweep. Rejected:
+  keeping the publisher after its only outputs retire.
 - **Zips keep the legacy folder layout, `(1813)`** (owner-assumed 2026-11-19
   under (1802)=b; owner confirms in the morning):
   - Loading an old-layout zip reuses the import path.
@@ -454,21 +477,23 @@ confirms them before this work merges to `develop`.
 - Release: T3, so this change ships only in a new minor version (Release Rule
   2; `(1805)=a`). The minor version bump is NOT part of this ticket. It happens
   at release, through the ship flow, with the owner's approval.
-- The derived `index.html` / `index.stamp.js` stay files while `file://` links
-  remain (epic Non-Scope). Their retirement belongs to
-  `261116-feat-ws-whiteboard-retire-disk-pages`.
+- The derived `index.html` / `index.stamp.js` retire in
+  `261116-feat-ws-whiteboard-retire-disk-pages` before this ticket's Phase 2;
+  this ticket neither carries nor recreates their publisher or refresh
+  (`(1841)=a`). It keeps that ticket's off-response-path first-open sweep.
 - The `whiteboard.update`, `whiteboard.query`, and `whiteboard.load` tool
   surfaces keep their arguments and result lines. Embed changes belong to the
   sibling child. Refusal semantics change in exactly these same-version ways,
   each graded under `release-compatibility.md`:
-  - `(1812)` removes the synchronous "board committed; ... fix the output
-    problem" error (`mcp/whiteboard_tools.go:788`). A publish failure becomes a
-    debug event. Tier: T0. The call succeeds where it used to fail, and no
-    stored data changes.
+  - `261116-feat-ws-whiteboard-retire-disk-pages`, superseding `(1812)` under
+    `(1841)=a`, removes the synchronous "board committed; ... fix the output
+    problem" error (`mcp/whiteboard_tools.go:788`) by retiring the derived
+    publisher entirely. Tier: T0. The call succeeds where a derived publish
+    used to fail, and no stored data changes.
   - `(1806)` adds the direct-CLI refusal. Tier: T3. A call that worked now
     refuses. It rides the minor bump of `(1805)=a`, but the 23:22 approval
-    covered only the `(1805)=a` sentinel. The owner's morning confirmation of
-    `(1806)` is the explicit approval Release Rule 2 requires for this T3.
+    covered only the `(1805)=a` sentinel. The owner's `(1844)=a` confirmation
+    is the explicit approval Release Rule 2 requires for this T3.
   - New open and sentinel error strings (`(1828)`, `(1825)`, `(1826)`,
     `(1827)`) are shipped text under `shipped-surface-boundary.md`. Tier: T0.
     They apply only to board states the new binary creates, so no old behavior
@@ -478,7 +503,7 @@ confirms them before this work merges to `develop`.
   field of ready ticket `261114-feat-ws-content-change-relative-hover`.
 - Existing invariants carry over unchanged: append-only entries, monotonic
   entry/panel counters, immutable panel versions, the board-revision and
-  stale-nudge receipts, the load floor, and committed-before-publish ordering
+  stale-nudge receipts, the load floor, and durable commit ordering
   (`folders.go:742-895`, `folders_load_floor.go`).
 - Out of scope, deferred by `(1816)=a`: any deletion of legacy board folders.
   There is no deletion code.
@@ -552,11 +577,15 @@ in the daemon uses it yet.
   `plan(nil, nil, state)` (`(1813)`). Old-layout zip load goes through the
   import path.
 - Capture the "before" measurement for the scenario above on the post-embed
-  base (`(1824)`; macOS tracer and/or extended Go counters). It replaces the
-  derived table.
+  base (`(1824)`; macOS tracer and/or extended Go counters). Separate store I/O
+  from derived-page I/O and report a store-only subtotal in addition to the
+  page subtotal and combined total. The measured report replaces the derived
+  table without attributing page-render cost to the store.
 
 Verification:
 
+- The measured post-embed baseline reports store I/O and derived-page I/O
+  separately, including a store-only subtotal and the combined total.
 - Round-trip import of fixture folders, including pending-intent replay, v1
   conversion, revision slots, and the load floor.
 - After the import commit the legacy folder is not written again. Before it,
@@ -607,17 +636,29 @@ Deferred: wiring and the "after" measurement.
 
 Depends on Phase 1.
 
-Route every writer and reader listed in `### Current store inventory` through
-the board DB store:
+Prerequisite: `261116-feat-ws-whiteboard-retire-disk-pages` landed.
 
-- `whiteboard.update`, the render-only refresh, the dashboard answer revision,
-  the board notice, `whiteboard.query` and lazy history, the served page,
+Route every remaining authoritative-store writer and reader listed in
+`### Current store inventory` through the board DB store. The page-retirement
+ticket has already removed `refreshWhiteboardAfter`; it is not routed or
+recreated here:
+
+- `whiteboard.update`, the dashboard answer revision, the board notice,
+  `whiteboard.query` and lazy history, the served page,
   nudges, zip export, and `whiteboard.load` with its backup.
 - In-process change notification (`(1814)`).
+- Keep the page-retirement ticket's off-response-path first-open cleanup sweep;
+  Phase 2 changes its authoritative store source but does not remove or move the
+  sweep onto a response path.
 - Handle lifetime per `(1347)=c`: long idle close, reopen on next access.
 - Direct-CLI refusal naming the daemon as board owner per `(1806)`, keyed on
-  the `BoardOwner` option that only the daemon sets, and made before the DB is
-  opened.
+  the `BoardOwner` option introduced early by
+  `261116-feat-ws-whiteboard-retire-disk-pages`, which only the daemon sets, and
+  made before the DB is opened.
+- Delete the now-unreachable raw-binary `full: page unavailable` branch and its
+  page-retirement test when `(1806)` begins refusing every non-owner board call;
+  the shipped playbook already treats every non-URL `full:` value generically,
+  so this removal needs no shipped-text change.
 - Close every board DB on daemon drain and shutdown (`(1827)`).
 
 Verification:
@@ -636,19 +677,17 @@ Verification:
   open succeeds within the `(1827)` bound once the drain closes the DB, and an
   open that outlasts the bound returns an explicit error.
 - The dashboard and the nudge see an update through in-process notification,
-  with no stat of board files (`(1814)`). Here "board files" excludes the
-  derived `index.html` and `index.stamp.js`, whose writes are Phase 3's
-  concern.
+  with no stat of board files (`(1814)`). The disk-page retirement has already
+  removed the derived `index.html` / `index.stamp.js` path (`(1841)=a`).
 - An idle close followed by a reopen keeps the board's state intact
   (`(1347)=c`).
 
-Deferred: async derived publish and the measured report.
+Deferred: the measured report.
 
-### Phase 3: Update-path latency and measured result
+### Phase 3: Update-path measured result
 
 Depends on Phase 2 and on `(1815)` (the embed sibling has landed).
 
-- Move derived page publication off the response path (`(1812)`).
 - Measure "after" with Phase 1's method: file operations per
   `whiteboard.update`, the fsync count, and update latency on macOS.
 - Report before and after in the Result, and record the Windows V3
@@ -656,22 +695,16 @@ Depends on Phase 2 and on `(1815)` (the embed sibling has landed).
 - List any remaining rule 1-5 gap with its measured cost for the owner
   (rule 8), citing `performance.md`'s rule numbers (`(1346)`).
 
-The trace measures the store path separately from the derived publish. The
-`(1812)` coalescing writer still rewrites `index.html` and `index.stamp.js`
-through temp file and rename, so it is a known Rule 2 and Rule 4 gap owned by
-`261116-feat-ws-whiteboard-retire-disk-pages`. List it in the Result with its
-measured cost. It is not a phase failure.
+The trace measures the store path only. Per `(1841)=a`,
+`261116-feat-ws-whiteboard-retire-disk-pages` has already removed the derived
+page and stamp reads/writes; this ticket does not reintroduce them.
 
 Verification, on a traced single `whiteboard.update` (the Phase 1 scenario):
 
-- No per-call open, flock, or stat of board files (Rule 4). "Board files"
-  excludes the derived `index.html` and `index.stamp.js` writes.
+- No per-call open, flock, or stat of board files (Rule 4), and no derived
+  `index.html` / `index.stamp.js` access.
 - One WAL append per update, and nothing written for an unchanged state
   (Rule 2).
 - No fsync on the response path (Rule 5).
-- Publish (`(1812)`): a publish failure becomes a debug event while the update
-  still succeeds; the stamp is written after the page; under coalescing the
-  latest state wins.
-- Every remaining gap other than the derived publish above is listed per
-  Rule 8 with its measured cost. A gap fails the phase unless the owner
-  approves it.
+- Every remaining gap is listed per Rule 8 with its measured cost. A gap fails
+  the phase unless the owner approves it.

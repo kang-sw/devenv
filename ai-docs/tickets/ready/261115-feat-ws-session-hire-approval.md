@@ -1,5 +1,5 @@
 ---
-title: "Owner-approved nonblocking hosted-session hiring"
+title: "소유자 승인 기반 논블로킹 hosted 세션 생성 요청"
 related:
   261114-research-ws-session-hire-approval: "source research; its Confirmed Decisions are this ticket's contract"
   261114-research-ws-clerk-session-role: "clerk decisions 720-722 stay unchanged"

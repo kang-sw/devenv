@@ -1,5 +1,5 @@
 ---
-title: "Auto-approve read-only ws-execute commands with a typed decision model; mutations still go to the lead"
+title: "타입 판별 모델로 읽기 전용 ws-execute 명령 자동 승인 (변경 명령은 계속 lead로 전달)"
 related:
   261003-feat-pi-execute-worker-git-read-tools: prerequisite; structural removal of git inspection approvals lands first, and this ticket's value is measured on the residual
   261003-research-typed-decision-model-new-domains: origin; decision-model survey and the discussion that narrowed this to read-only

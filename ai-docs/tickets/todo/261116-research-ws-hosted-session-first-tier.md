@@ -1,5 +1,5 @@
 ---
-title: "Hosted sessions as the first tier: move features out of the plugin/extension path, retire the Pi extension, keep a limited Claude CLI compatibility tier"
+title: "1차 티어로서의 hosted 세션: 플러그인/확장 경로에서 기능 이전, Pi 확장 폐지, 제한적 Claude CLI 호환 티어 유지"
 parent: 261114-epic-ws-common-session-foundation
 related:
   261110-epic-ws-dashboard-agent-host: "the existing first-tier agent host epic; this research asks which harness-side features the daemon should own once hosted sessions are the reference tier"

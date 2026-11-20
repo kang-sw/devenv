@@ -1,5 +1,5 @@
 ---
-title: "Single PC-wide session holder: one holder process and one daemon connection for many children and exec jobs"
+title: "PC당 단일 세션 holder: 다수의 자식 세션과 exec 작업을 위한 단일 holder 프로세스 및 데몬 연결"
 parent: 261114-epic-ws-common-session-foundation
 related:
   261117-feat-ws-exec-tools: "this ticket is its prerequisite (exec jobs run under the single holder)"

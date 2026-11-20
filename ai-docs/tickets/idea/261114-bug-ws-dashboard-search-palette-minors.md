@@ -1,5 +1,5 @@
 ---
-title: "Dashboard search palette: four minor leftovers from the unified-search run"
+title: "dashboard 검색 팔레트: 통합 검색 구현에서 남은 사소한 문제 4건"
 related:
   261114-feat-ws-dashboard-unified-search-palette: "source: left open by its worker (merged b9f5086e4, 2026-11-14)"
 ---

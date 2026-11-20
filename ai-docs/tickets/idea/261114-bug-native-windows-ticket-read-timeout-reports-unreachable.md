@@ -1,5 +1,5 @@
 ---
-title: Native Windows ticket-index timeout regression test reports origin unreachable instead of not refreshed
+title: "네이티브 Windows 티켓 인덱스 타임아웃 회귀 테스트가 not refreshed 대신 origin unreachable을 보고하는 문제"
 related:
   260924-bug-ticket-index-read-timeout-below-ssh-roundtrip: prior timeout-versus-transport-failure contract
   260926-bug-wsindex-hang-transport-stop-wait-fails-on-local-windows-host: historical dropped transport-helper case; not edited or reopened

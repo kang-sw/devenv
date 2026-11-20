@@ -1,5 +1,5 @@
 ---
-title: Pi fork rejects its freshly minted descendant key on read-only calls
+title: "Pi fork가 읽기 전용 호출에서 새로 발급된 하위(descendant) 키 권한을 거부하는 문제"
 ---
 
 # Pi fork rejects its freshly minted descendant key on read-only calls

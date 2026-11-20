@@ -1,5 +1,5 @@
 ---
-title: "Hosted Pi EXEC cannot follow run-worker routing without a private CLI bridge"
+title: "hosted Pi EXEC이 사설 CLI 브리지 없이는 run-worker 라우팅을 따를 수 없는 문제"
 related:
   261114-bug-design-review-requires-unavailable-researcher-spawn: "related missing-delegation capability, but reviewer-depth admission differs from this peer-lead incident"
   261115-bug-ws-pi-bootstrap-elides-undelivered-manual: "inspect native-versus-fallback capabilities without assuming the same cause"

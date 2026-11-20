@@ -1,5 +1,5 @@
 ---
-title: "Research polling minimization and a change ledger"
+title: "폴링 최소화 및 변경 원장(ledger) 연구"
 related:
   261116-feat-ws-daemon-hub-first-polling: "Actionable phased implementation of board 1242=a and 1243=a"
   261116-bug-ws-dashboard-frontend-idle-and-switch-cost: "Frontend idle and switch costs"

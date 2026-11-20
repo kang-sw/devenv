@@ -1,5 +1,5 @@
 ---
-title: Nudge stale agenda pruning at compaction and revive
+title: "compaction 및 revive 시 오래된 agenda 정리 넛지"
 ---
 
 # Nudge stale agenda pruning at compaction and revive

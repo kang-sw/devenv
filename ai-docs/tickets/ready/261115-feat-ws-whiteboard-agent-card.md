@@ -1,5 +1,5 @@
 ---
-title: "Whiteboard agent cards: subordinate hosted sessions and shared conversation shell"
+title: "whiteboard 에이전트 카드: 종속 hosted 세션과 공유 대화 셸"
 blocked-by: 261115-feat-ws-worker-profile-session-spawn#phase1
 related:
   261115-feat-ws-permission-profile: "prerequisite: Phase 2 supplies reusable permission controls and Claude/Pi launch admission"

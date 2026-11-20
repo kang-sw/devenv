@@ -1,5 +1,5 @@
 ---
-title: "Split the agy adapter file below the size guard"
+title: "agy 어댑터 파일을 크기 가드 미만으로 분할"
 parent: 261114-epic-ws-common-session-foundation
 related:
   261118-feat-ws-agy-tool-names-and-worker-role: "its Phase 2 merge (f50bc2625) pushed agy.go past 1000 lines; its Phase 3 also edits agy.go, so sequence the split around it"

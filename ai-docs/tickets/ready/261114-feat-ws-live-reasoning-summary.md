@@ -1,5 +1,5 @@
 ---
-title: "Show provider-exposed reasoning summaries in live dashboard activity"
+title: "대시보드 실시간 활동에 프로바이더 제공 추론 요약 표시"
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 7cdd116388c6e855

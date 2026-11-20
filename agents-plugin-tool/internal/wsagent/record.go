@@ -613,6 +613,16 @@ func (w *liveWriter) flushSnapshot(heartbeat, force bool) {
 	if !force && err == nil {
 		if w.currentSlot() != nil {
 			if w.pendingOutputRate != nil && w.lastDiskAt.IsZero() && !heartbeat {
+				err = w.withOwner(func() error {
+					if err := w.outputRates.Append(w.pendingOutputRate); err != nil {
+						return err
+					}
+					w.pendingOutputRate = nil
+					return nil
+				})
+				if err != nil {
+					fmt.Fprintf(w.log, "agent %s: output-rate write: %v\n", w.st.ReplyID(), err)
+				}
 				return
 			}
 			if (!w.lastDiskAt.IsZero() && now.Sub(w.lastDiskAt) < wslive.HeartbeatInterval) || (bytes.Equal(content, w.lastSnapshot) && w.pendingOutputRate == nil) {
@@ -711,6 +721,9 @@ func registration(rec Record, now time.Time) wsdashboard.Registration {
 		// is always listed. Only the writer of this row differs.
 		reg.Agent, reg.Unlisted = false, false
 		reg.Hosted, reg.HostPID = true, rec.HostPID
+	}
+	if rec.Parent != nil {
+		reg.ParentReplyID = rec.Parent.ReplyID
 	}
 	if rec.ClosedAt != "" {
 		reg.EndedAt = rec.ClosedAt

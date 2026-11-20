@@ -1,5 +1,5 @@
 ---
-title: "Dashboard voice typing through an external transcription provider"
+title: "외부 전사 프로바이더를 통한 dashboard 음성 입력"
 related:
   261115-feat-werkschaft-electron-shell: "EXEC4 owns the Electron shell; coordinate scoped microphone acceptance without changing its shell contract here"
 ---

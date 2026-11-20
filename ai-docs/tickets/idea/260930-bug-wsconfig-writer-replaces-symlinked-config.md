@@ -1,5 +1,5 @@
 ---
-title: wsconfig shared writer replaces a symlinked config file with a regular file
+title: "wsconfig 공유 라이터가 심볼릭 링크된 설정 파일을 일반 파일로 덮어쓰는 문제"
 related:
   260929-bug-config-tune-agents-tier-lost-update: origin (introduced the shared writer for agents.tier)
 ---

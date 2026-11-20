@@ -1,5 +1,5 @@
 ---
-title: "Display the whiteboard \"commented\" status (approved mockup)"
+title: "whiteboard \"commented\" 상태 표시 (승인된 목업)"
 ---
 
 # Display the whiteboard "commented" status (approved mockup)

@@ -1,5 +1,5 @@
 ---
-title: "claude-mod dashboard engine tests flake under machine load (first flush never reaches the intake)"
+title: "머신 부하 시 claude-mod dashboard 엔진 테스트 불안정 (첫 플러시가 intake에 도달하지 않음)"
 ---
 
 # claude-mod dashboard engine tests flake under load

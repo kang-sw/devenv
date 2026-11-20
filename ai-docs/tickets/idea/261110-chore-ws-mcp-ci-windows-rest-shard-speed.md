@@ -1,5 +1,5 @@
 ---
-title: "Bring the ws-mcp CI windows `rest` shard down to the ~7 min of the other shards"
+title: "ws-mcp CI Windows `rest` 샤드 실행 시간을 다른 샤드 수준(~7분)으로 단축"
 ---
 
 # Bring the ws-mcp CI windows `rest` shard down to ~7 min

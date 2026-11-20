@@ -180,45 +180,68 @@ func TestShippedClaudeWatchdogInterval(t *testing.T) {
 	}
 }
 
-// TestShippedAgyModelWaitTimeout pins the package-local agy watchdog manifest:
-// ws enables a 45-second wait, wsflow keeps it off, and both expose the same
-// non-negative integer contract through config.get/config.tune.
-func TestShippedAgyModelWaitTimeout(t *testing.T) {
-	const key = "agy.model_wait_timeout_seconds"
+// TestShippedAgyModelWaitConfig pins the package-local agy watchdog manifest:
+// ws enables a 45-second wait, wsflow keeps it off, both default to three
+// automatic continue attempts, and both keys are non-negative integers.
+func TestShippedAgyModelWaitConfig(t *testing.T) {
+	defaults := map[string]map[string]int64{
+		"ws": {
+			"agy.model_wait_timeout_seconds": 45,
+			"agy.model_wait_retries":         3,
+		},
+		"wsflow": {
+			"agy.model_wait_timeout_seconds": 0,
+			"agy.model_wait_retries":         3,
+		},
+	}
 	for _, pkg := range []struct {
 		name string
 		path string
-		want int64
-	}{{"ws", agyManifestPath, 45}, {"wsflow", wsflowAgyManifestPath, 0}} {
+	}{{"ws", agyManifestPath}, {"wsflow", wsflowAgyManifestPath}} {
 		t.Run(pkg.name, func(t *testing.T) {
 			declared := loadDeclaredConfig(pkg.path)
-			k, ok := declared.lookup(key)
-			if !ok || len(declared.rejected) != 0 {
-				t.Fatalf("%s declaration = %+v, rejected %v", key, k, declared.rejected)
-			}
-			if k.Type != declaredTypeInteger || k.Minimum == nil || *k.Minimum != 0 || k.DefaultValue != pkg.want {
-				t.Fatalf("%s contract = %+v, want integer >= 0 with default %d", key, k, pkg.want)
+			if len(declared.rejected) != 0 {
+				t.Fatalf("%s rejected %v", pkg.path, declared.rejected)
 			}
 			server, _, sessionKey := manifestServer(t, pkg.path)
-			if got := configGetJSON(t, server, 933000, map[string]any{"key": key}); got.Value != float64(pkg.want) || got.Scope != "builtin" {
-				t.Fatalf("config.get(%s) = %+v", key, got)
-			}
-			if resp := keyedCall(t, server, 933001, sessionKey, "config.tune", map[string]any{"key": key, "value": "-1"}); !toolIsError(t, resp) {
-				t.Fatalf("config.tune(%s=-1) = %s, want a rejection", key, resp)
-			}
-			if resp := keyedCall(t, server, 933002, sessionKey, "config.tune", map[string]any{"key": key, "value": "0"}); toolIsError(t, resp) {
-				t.Fatalf("config.tune(%s=0) = %s", key, resp)
+			callID := 933000
+			for key, want := range defaults[pkg.name] {
+				k, ok := declared.lookup(key)
+				if !ok {
+					t.Fatalf("%s does not declare %s", pkg.path, key)
+				}
+				if k.Type != declaredTypeInteger || k.Minimum == nil || *k.Minimum != 0 || k.DefaultValue != want {
+					t.Fatalf("%s contract = %+v, want integer >= 0 with default %d", key, k, want)
+				}
+				if got := configGetJSON(t, server, callID, map[string]any{"key": key}); got.Value != float64(want) || got.Scope != "builtin" {
+					t.Fatalf("config.get(%s) = %+v", key, got)
+				}
+				callID++
+				if resp := keyedCall(t, server, callID, sessionKey, "config.tune", map[string]any{"key": key, "value": "-1"}); !toolIsError(t, resp) {
+					t.Fatalf("config.tune(%s=-1) = %s, want a rejection", key, resp)
+				}
+				callID++
+				if resp := keyedCall(t, server, callID, sessionKey, "config.tune", map[string]any{"key": key, "value": "0"}); toolIsError(t, resp) {
+					t.Fatalf("config.tune(%s=0) = %s", key, resp)
+				}
+				callID++
 			}
 		})
 	}
 
 	ws := readManifestJSON(t, agyManifestPath)
 	wsflow := readManifestJSON(t, wsflowAgyManifestPath)
-	wsKey := manifestKeyObjects(t, agyManifestPath, ws)[0]
-	wsflowKey := manifestKeyObjects(t, wsflowAgyManifestPath, wsflow)[0]
-	delete(wsKey, "default")
-	delete(wsflowKey, "default")
-	if !reflect.DeepEqual(wsKey, wsflowKey) {
-		t.Fatalf("agy manifest fields other than default differ:\nws     %v\nwsflow %v", wsKey, wsflowKey)
+	wsKeys := manifestKeyObjects(t, agyManifestPath, ws)
+	wsflowKeys := manifestKeyObjects(t, wsflowAgyManifestPath, wsflow)
+	if len(wsKeys) != len(wsflowKeys) {
+		t.Fatalf("agy manifest key counts differ: ws %d, wsflow %d", len(wsKeys), len(wsflowKeys))
+	}
+	for i := range wsKeys {
+		wsKey, wsflowKey := wsKeys[i], wsflowKeys[i]
+		delete(wsKey, "default")
+		delete(wsflowKey, "default")
+		if !reflect.DeepEqual(wsKey, wsflowKey) {
+			t.Fatalf("agy manifest key %d fields other than default differ:\nws     %v\nwsflow %v", i, wsKey, wsflowKey)
+		}
 	}
 }

@@ -1,5 +1,5 @@
 ---
-title: Initialize live-summary fixture registration before its first read
+title: "첫 읽기 전에 live-summary 픽스처 등록 초기화"
 related:
   261114-feat-ws-live-reasoning-summary: scoped test-fixture follow-up
 ---
