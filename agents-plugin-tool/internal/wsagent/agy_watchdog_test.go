@@ -427,11 +427,11 @@ func TestAgyModelWaitWatchdogDelaysAutomaticContinue(t *testing.T) {
 }
 
 func TestAgyModelWaitWatchdogUserActionCancelsBackoff(t *testing.T) {
-	for _, action := range []string{"send", "interrupt", "stop"} {
+	for _, action := range []string{"send", "interrupt", "stop", "process exit"} {
 		t.Run(action, func(t *testing.T) {
-			h, timers, _ := agyWatchdogHarness(t, "45")
+			h, timers, got := agyWatchdogHarness(t, "45")
 			h.runner.opts.AgyModelWaitBackoff = func(int) time.Duration { return 7 * time.Second }
-			id, p := startAgyWatchdogTurn(t, h, false)
+			id, p := startAgyWatchdogTurn(t, h, true)
 			fireWatchdog(t, timers, 0)
 			eventually(t, "retry interrupt", func() bool { return procInterrupts(p) == 1 })
 			p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted}
@@ -451,17 +451,52 @@ func TestAgyModelWaitWatchdogUserActionCancelsBackoff(t *testing.T) {
 				if _, _, err := h.runner.Interrupt(id); err != nil {
 					t.Fatal(err)
 				}
-			} else {
+			} else if action == "stop" {
 				if _, err := h.runner.Stop(id); err != nil {
 					t.Fatal(err)
 				}
+			} else {
+				p.exit()
 			}
+			eventually(t, "single settlement", func() bool { return len(got.lead()) == 1 })
 			timers.fire(t, 2) // a stopped fake timer may still deliver
 			time.Sleep(40 * time.Millisecond)
 			if queued := len(p.sent); queued != 0 {
 				t.Fatalf("%s allowed a delayed continue: %d queued", action, queued)
 			}
+			if reports := got.lead(); len(reports) != 1 {
+				t.Fatalf("%s produced %d settlements: %+v", action, len(reports), reports)
+			}
 		})
+	}
+}
+
+func TestAgyModelWaitWatchdogSendWinsReadyBackoffRace(t *testing.T) {
+	h, timers, _ := agyWatchdogHarness(t, "45")
+	h.runner.opts.AgyModelWaitBackoff = func(int) time.Duration { return 7 * time.Second }
+	id, p := startAgyWatchdogTurn(t, h, false)
+	fireWatchdog(t, timers, 0)
+	eventually(t, "retry interrupt", func() bool { return procInterrupts(p) == 1 })
+	p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted}
+	eventually(t, "backoff timer", func() bool {
+		started, _ := timers.counts()
+		return started == 3
+	})
+
+	gate := newGate(t, func() {})
+	go h.runner.conv(id).do(gate.wait)
+	gate.awaitEntered(t)
+	timers.fire(t, 2) // ready while the conversation loop is held
+	if _, err := h.runner.Send(id, "new direction"); err != nil {
+		t.Fatal(err)
+	}
+	gate.release()
+	if sent := p.nextSent(t); !strings.Contains(sent, "new direction") || strings.Contains(sent, "continue") {
+		t.Fatalf("race winner prompt = %q", sent)
+	}
+	time.Sleep(40 * time.Millisecond)
+	if queued := len(p.sent); queued != 0 {
+		t.Fatalf("ready backoff sent %d late prompts", queued)
 	}
 }
 

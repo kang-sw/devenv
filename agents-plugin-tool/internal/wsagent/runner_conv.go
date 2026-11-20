@@ -111,6 +111,10 @@ type conv struct {
 	modelWaitBackoffC           <-chan time.Time
 	modelWaitBackoffStop        func()
 	modelWaitBackoffFailure     string
+	// modelWaitBackoffFence is the only model-wait field shared with Send:
+	// pending -> cancelled lets a successful inbox write win before it
+	// returns; pending -> firing commits the automatic continue instead.
+	modelWaitBackoffFence atomic.Uint32
 
 	// loop-owned, except registration timing below.
 	events       <-chan Event

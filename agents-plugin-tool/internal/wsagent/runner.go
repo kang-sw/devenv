@@ -1199,6 +1199,7 @@ func (r *Runner) send(id, text string) (State, error) {
 		c.sends++
 		c.held++
 		c.rec.Sends = c.sends
+		c.cancelModelWaitBackoffForInput()
 		if c.rec.Parent != nil {
 			// Any message resets a spawned child's waiting expiry.
 			c.rec.LastActiveAt = r.opts.Now().UTC().Format(time.RFC3339)

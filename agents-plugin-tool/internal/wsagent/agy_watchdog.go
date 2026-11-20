@@ -33,6 +33,13 @@ const (
 	modelWaitBackoffCap  = 30 * time.Second
 )
 
+const (
+	modelWaitBackoffIdle uint32 = iota
+	modelWaitBackoffPending
+	modelWaitBackoffCancelled
+	modelWaitBackoffFiring
+)
+
 // defaultAgyModelWaitBackoff uses equal jitter: each attempt waits between
 // half and all of an exponentially growing ceiling, bounded at 30 seconds.
 func defaultAgyModelWaitBackoff(attempt int) time.Duration {
@@ -171,6 +178,7 @@ func (c *conv) stopModelWaitBackoff() {
 	}
 	c.modelWaitBackoffC, c.modelWaitBackoffStop = nil, nil
 	c.modelWaitBackoffFailure = ""
+	c.modelWaitBackoffFence.Store(modelWaitBackoffIdle)
 }
 
 func (c *conv) armModelWaitCancelGrace() {
@@ -364,6 +372,17 @@ func (c *conv) retryModelWait(failure string) bool {
 	}
 	c.reply = ""
 	c.modelWaitBackoffFailure = failure
+	c.modelWaitBackoffFence.Store(modelWaitBackoffPending)
+	c.mu.Lock()
+	held := c.held > 0
+	c.mu.Unlock()
+	if held {
+		c.cancelModelWaitBackoffForInput()
+	}
+	if c.modelWaitBackoffFence.Load() == modelWaitBackoffCancelled {
+		c.cancelModelWaitBackoff()
+		return true
+	}
 	attempt := c.modelWaitRetries + 1
 	delay := c.r.opts.AgyModelWaitBackoff(attempt)
 	if delay <= 0 {
@@ -379,6 +398,13 @@ func (c *conv) modelWaitBackoffTimedOut() {
 	failure := c.modelWaitBackoffFailure
 	c.modelWaitBackoffC, c.modelWaitBackoffStop = nil, nil
 	c.modelWaitBackoffFailure = ""
+	if !c.modelWaitBackoffFence.CompareAndSwap(modelWaitBackoffPending, modelWaitBackoffFiring) {
+		if c.modelWaitBackoffFence.Load() == modelWaitBackoffCancelled {
+			c.cancelModelWaitBackoff()
+		}
+		return
+	}
+	defer c.modelWaitBackoffFence.Store(modelWaitBackoffIdle)
 	if !c.modelWaitArmed || !c.turn || c.proc == nil || c.modelWaitFailErr != "" {
 		return
 	}
@@ -400,8 +426,13 @@ func (c *conv) modelWaitBackoffTimedOut() {
 	c.resetModelWaitTimer()
 }
 
+func (c *conv) cancelModelWaitBackoffForInput() {
+	c.modelWaitBackoffFence.CompareAndSwap(modelWaitBackoffPending, modelWaitBackoffCancelled)
+}
+
 func (c *conv) cancelModelWaitBackoff() {
-	if c.modelWaitBackoffC == nil {
+	state := c.modelWaitBackoffFence.Load()
+	if c.modelWaitBackoffC == nil && state != modelWaitBackoffPending && state != modelWaitBackoffCancelled {
 		return
 	}
 	c.stopModelWaitBackoff()
