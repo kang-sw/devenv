@@ -8,8 +8,8 @@ related:
   261117-research-ws-daemon-file-touch-map: "storage audit background (whiteboard rows)"
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: e86e61719a409f61
-sage-review-completeness-reviewed: e86e61719a409f61
+sage-review-design-reviewed: a5a67f154108c7a6
+sage-review-completeness-reviewed: a5a67f154108c7a6
 ---
 
 # Whiteboard 2PC folder store -> one SQLite database per board

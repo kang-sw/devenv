@@ -5,6 +5,10 @@ related:
   261119-refactor-ws-whiteboard-sqlite-board-store: "store sibling; this retirement lands after embed retirement and before the store ticket's Phase 2 switches the update path"
   261116-feat-ws-dashboard-session-page-payload-and-render-cost: "sibling; explicitly excludes this retirement"
   261116-feat-ws-dashboard-generalized-mentions: "sibling undesigned todo from the same day"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 1c50ef9fbaf5a1a2
+sage-review-completeness-reviewed: 1c50ef9fbaf5a1a2
 ---
 
 # Retire the whiteboard's disk-rendered pages (file-only mode) in favor of daemon-served boards
