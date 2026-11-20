@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: cd3083477f16957d
 sage-review-completeness-reviewed: cd3083477f16957d
+completed: 2026-11-21
 ---
 
 # Tracker org entity and org-targeted CC and assign
@@ -500,3 +501,55 @@ Verification:
   `ai-docs/assets/mockups/261119/tracker-org-entity/editor.html` and
   `ai-docs/assets/mockups/261120/tracker-org-entity/editor-v2.html`
   (`editor-v2.png`), covering frames ① and ②.
+
+### Result (89123e5) - 2026-11-21
+
+- Added pure org entity helpers (`orgIndex`, `orgMintId`, `orgItemRefs`), org
+  staging/undo, case-insensitive org name uniqueness, and Decision 12 batch
+  ordering (`add_admin` -> `org_remove` -> head releases -> topological
+  `org_set` with head-swap vacate and name-swap cycle breaking -> `set_lead` ->
+  `remove_admin` self last) in `tracker.js`.
+- Wired the org-chart editor modal (`tracker-forms.js`, `tracker-mount.js`) with
+  draggable org badges on tree heads, one-org-per-head refusal banner, orgs list
+  with inline rename and head dropdown locking, staged-delete item-reference
+  warnings, vacant-org warnings, saved deleted-org tombstones with expandable
+  referencing item lists, and folded unreferenced tombstones.
+- Updated `cardTeam` (`tracker-wiki.js`) to display org badges on heads and
+  nearest enclosing org on non-head members, and extended `targetsText` and
+  `describe` (`tracker.js`) for `roles.org_set`, `roles.org_remove`,
+  `item.cc_org`, `item.uncc_org`, and org assign/unassign events.
+- Added item-window org entries (`tracker-window.js`) for Assignees and CC cards
+  (active org groups, deleted-org amber warning cards, `정리 필요` chip gated by
+  Decision 20, coverage-based removal previews under Decision 19, item-wide
+  personal `item.uncc` exclusion tooltip), atomic retarget picker mode
+  (`tracker-picker.js`, including 1-person org heads and surviving-rule
+  `lockedP`), org styles (`tracker.css`), all 11 locale tables under
+  `internal/wsi18n/tables/` (including Decision 13 affiliation/org disambiguation),
+  and regenerated `ai-docs/ref/tracker-mockup/i18n-en.js`.
+- Kept `internal/wsdashboard/daemon.go` untouched and did not split
+  `tracker-render.js`; every save goes through the existing atomic dispatch
+  route. Compatibility stays T1 (no new wire surfaces beyond Phase 1).
+- Lite review (`03febff7-01-org-entity-phase2.md`) reported 0 Critical, 3
+  Important (pending record deduplication in `itemOrgAssignInfo`, dead/vacant
+  org non-coverage in `ruleCoversMember`, and surviving-rule `lockedP` in
+  retarget assign mode), and 2 Minor (IME `keyCode === 229` guard on org rename
+  and helper coverage tests). All 3 Important and both Minor items were fixed in
+  `89123e5`.
+- LOOK verification: 7 headless Chromium captures under
+  `ai-docs/assets/captures/261120/org-entity/` (`frame1-editor.png`,
+  `frame1-editor-orgs.png`, `frame1-editor-light.png`,
+  `frame2-item-window.png`, `frame2-item-window-cc.png`,
+  `frame3-retarget-picker.png`, `team-card.png`) inspected and verified matching
+  `ai-docs/assets/mockups/261120/tracker-org-entity/editor-v2.png` frames ① and
+  ② (with polish commit `787be76` fixing tombstone date slicing and undo button
+  styling).
+- Verification passed: Node tests (`32/32` across
+  `tracker_org_editor.test.js`, `tracker_org_entity.test.js`,
+  `tracker_picker.test.js`, `tracker_org_tree.test.js`, `tracker_draft.test.js`),
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -count=1 -timeout 20m -run 'Tracker|Asset' ./internal/wsdashboard`,
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -count=1 ./internal/wstracker`,
+  and all tracker/org `wsi18n` checks (`TestEveryUsedKeyIsInTheEnglishTable`,
+  `TestOtherTablesHoldOnlyEnglishKeysAndNames`, `TestOtherTablesHoldEveryEnglishKey`,
+  `TestPlaceholdersMatchEnglish`, `TestPluralKeysComeInPairs`,
+  `TestTablesAreValidJSON`; only `TestEveryEnglishKeyIsUsed` fails on 4
+  pre-existing unrelated `wb.*` keys already present on `develop` `415f1f033`).
