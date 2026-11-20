@@ -78,6 +78,10 @@ type Server struct {
 	descriptorMu       sync.Mutex
 	descriptorResolved bool
 	descriptor         connectionDescriptor
+	// planUsageActivity is the detected harness's descriptor opt-in, resolved
+	// once before the first user-started lead signal.
+	planUsageActivityOnce sync.Once
+	planUsageActivity     bool
 	// inflight counts the requests being handled; draining refuses new
 	// ones, and inflightDone closes once a draining server goes idle
 	// (Drain).

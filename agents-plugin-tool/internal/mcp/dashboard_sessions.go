@@ -344,6 +344,7 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 		}
 		return
 	}
+	s.signalPlanUsageActivity()
 	d := &s.dashboard
 	commonDir := ""
 	discovered := false

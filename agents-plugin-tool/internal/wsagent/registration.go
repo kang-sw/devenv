@@ -50,6 +50,10 @@ type BackendRegistration struct {
 	// ManualHarness is the harness name the hosted lead's workflow manual
 	// renders under; "" renders with none.
 	ManualHarness string
+	// PlanUsageActivity marks a user-started lead call from this harness as
+	// activity for the daemon's existing plan-usage refresh path. Common MCP
+	// code resolves the flag through ManualHarness and never names a backend.
+	PlanUsageActivity bool
 	// PlaybookCommands marks a backend whose hosted sessions run without
 	// ws's plugin skills and reach ws only as the ReservedMCPServer server.
 	// Its hosted lead offers the package's lead playbooks as dashboard
