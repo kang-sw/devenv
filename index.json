@@ -557,9 +557,9 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-20T12:14:00Z",
+        "touched_at": "2026-11-20T14:20:28Z",
         "impl": {
-          "branch": "impl/develop/depth-comfy-gown"
+          "branch": "impl/develop/org-entity-phase2"
         }
       }
     },
@@ -597,19 +597,6 @@
     },
     "261120-feat-desktop-canary-release-channel": {
       "registered_at": "2026-11-20T14:11:51Z"
-    },
-    "261120-feat-ws-agy-usage-activity-trigger": {
-      "registered_at": "2026-11-20T12:38:30Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-20T13:42:28Z",
-        "impl": {
-          "branch": "impl/develop/agy-usage-phase2"
-        }
-      }
     },
     "261120-feat-ws-dashboard-chat-agent-roster-hud": {
       "registered_at": "2026-11-20T14:14:08Z"
