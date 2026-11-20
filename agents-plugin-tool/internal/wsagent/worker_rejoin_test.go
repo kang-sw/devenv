@@ -195,6 +195,58 @@ func TestWorkerMCPRestoreRequiresExactTuple(t *testing.T) {
 	}
 }
 
+func TestDowngradeLeadParentAdoptsLateWorkerReport(t *testing.T) {
+	h, reports := workerRecoveryHarness(t, BackendCodex)
+	id, holder := spawnHeldRecoveryWorker(t, h, BackendCodex, "workdir-write")
+	h.runner.Close()
+	h.holders.restart()
+	child := h.record(id)
+	now := h.opts.Now().UTC().Truncate(time.Second)
+	child.Parent = &ParentRef{Kind: ParentLead, ReplyID: "zzlead"}
+	child.TurnStartedAt = now.Add(-2 * time.Second).UnixMilli()
+	parent := Record{ReplyID: "zzlead", Lead: true, Root: h.root, Backend: BackendClaude,
+		Profile: LeadProfileClaude, WSKey: "parent-key", CreatedAt: child.CreatedAt,
+		LastActiveAt: now.Format(time.RFC3339), TurnMark: 1, Sends: 1, Drained: 1,
+		HeldTurn: &TurnResult{ID: "zzlead", Status: TurnDone, Message: "held lead result"}}
+	for _, rec := range []Record{child, parent} {
+		if err := writeRecord(wsdashboard.SessionDir(h.dir, rec.ReplyID), rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.startAt("http://127.0.0.1:1")
+	wait(t, "lead-parent rejoin", h.runner.rejoined)
+	lead := h.runner.conv(parent.ReplyID)
+	// ParentLead reports go to the external lead callback, not the hosted
+	// conversation queue. Restore the held result before that late report.
+	lead.do(func() {
+		if lead.heldRes == nil || lead.heldRes.Message != "held lead result" || !lead.holding || lead.settled.n != 0 {
+			t.Error("lead did not restore its persisted held result")
+		}
+	})
+	if rec := h.record(id); rec.HolderID != holder || rec.HostPID != child.HostPID || !rec.TurnOpen {
+		t.Fatal("lead-parent child was retired instead of adopted")
+	}
+	if h.record(parent.ReplyID).HeldTurn == nil || h.holders.opCount("stop") != 0 {
+		t.Fatal("lead re-release rewrote its held result or stopped the child")
+	}
+	completeRecoveryWorker(t, h, BackendCodex, holder)
+	eventually(t, "one late lead report", func() bool { return len(reports.list()) == 1 })
+	if rep := reports.list()[0]; rep.Parent != *child.Parent || rep.Result.Status != TurnDone || rep.Result.Message != "held result" {
+		t.Fatalf("late report: %+v", rep)
+	}
+	h.quiesce(id)
+	lead.do(func() {
+		lead.releaseHeld()
+		lead.releaseHeld()
+		if lead.heldRes != nil || lead.settled.n != 1 || lead.settled.Message != "held lead result" {
+			t.Error("lead result released twice")
+		}
+	})
+	if len(reports.list()) != 1 || h.record(parent.ReplyID).HeldTurn == nil {
+		t.Fatal("late child completion duplicated a report or rewrote the lead")
+	}
+}
+
 func TestWorkerOwnershipMismatchNeverStopsForeignHolder(t *testing.T) {
 	h, _ := newFakePiRecoveryHarness(t)
 	worker, holder := spawnRecoveryWorker(t, h)
