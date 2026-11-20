@@ -719,6 +719,7 @@
       case 'approve': put([['item.approve', { item: item, request: a.getAttribute('data-req') }]]); break;
       case 'unrequest': put([['item.unrequest', { item: item, request: a.getAttribute('data-req') }]]); break;
       case 'uncc': put([['item.uncc', { item: item, member: who }]]); break;
+      case 'uncc-org': put([['item.uncc_org', { item: item, org: a.getAttribute('data-org') }]]); break;
       case 'ihide': put([['item.hide', { item: item }]]); break;
       case 'chide': put([['comment.hide', { comment: cid }]]); break;
       case 'comment': {
@@ -745,6 +746,12 @@
       case 'stale_base': return wsT("js.tk.org.err.stale");
       case 'removed_member': return wsT("js.tk.org.err.removed");
       case 'removed_target': return wsT("js.tk.org.err.removedlead", err.target || '');
+      case 'removed_org': return wsT("js.tk.org.err.removedorg");
+      case 'removed_head': return wsT("js.tk.org.err.removedhead", err.target || '');
+      case 'org_exists': return wsT("js.tk.org.err.orgexists");
+      case 'blank_name': return wsT("js.tk.org.err.blankname");
+      case 'dup_name': return wsT("js.tk.org.err.dupname");
+      case 'already_head': return wsT("js.tk.org.err.alreadyhead", err.target || '');
       case 'cycle': return wsT("js.tk.org.err.cycle");
       case 'last_admin': return wsT("js.tk.org.err.lastadmin");
       case 'not_admin': return wsT("js.tk.org.err.notadmin");
@@ -755,7 +762,7 @@
     if (!VS || !ui.store) return;
     var v = memberOf(viewerOf(ui.store)), me = VS.members[v];
     if (!me || me.removed || !me.admin) return;
-    ui.orged = orgEdInit(VS.members, v);
+    ui.orged = orgEdInit(VS.members, v, VS.orgs);
     var dl = $('tkorged');
     if (!dl) return;
     renderOrgEditor();
@@ -771,9 +778,94 @@
     if (dl && dl.open) dl.close();
     return true;
   }
-  function orgEdRefuseHtml(dragId, targetId) {
-    var dm = VS && VS.members[dragId], tm = VS && VS.members[targetId];
-    return '<div class="tk-oe-refuse" role="alert">' + wsT("js.tk.org.refuse.cycle", esc(tm ? tm.name : targetId), esc(targetId), esc(dm ? dm.name : dragId), esc(dragId)) + '</div>';
+  function orgEdRefuseHtml(refuseOrDrag, targetId) {
+    if (refuseOrDrag && typeof refuseOrDrag === 'object') {
+      var r = refuseOrDrag, tm0 = VS && VS.members[r.target];
+      if (r.kind === 'org_head') {
+        return '<div class="tk-oe-refuse" role="alert">' + wsT("js.tk.org.refuse.head", esc(tm0 ? tm0.name : r.target), esc(r.target), esc(r.otherName || ''), esc(r.orgName || '')) + '</div>';
+      }
+      var dm0 = VS && VS.members[r.member];
+      return '<div class="tk-oe-refuse" role="alert">' + wsT("js.tk.org.refuse.cycle", esc(tm0 ? tm0.name : r.target), esc(r.target), esc(dm0 ? dm0.name : r.member), esc(r.member)) + '</div>';
+    }
+    var dm = VS && VS.members[refuseOrDrag], tm = VS && VS.members[targetId];
+    return '<div class="tk-oe-refuse" role="alert">' + wsT("js.tk.org.refuse.cycle", esc(tm ? tm.name : targetId), esc(targetId), esc(dm ? dm.name : refuseOrDrag), esc(refuseOrDrag)) + '</div>';
+  }
+  function orgEdCommitRename(ed, orgId, val) {
+    if (!ed || !orgId) return;
+    var res = orgEdRenameOrg(ed, orgId, val);
+    if (!res.ok) {
+      ed.errors._batch = orgEdErrText({ code: res.reason });
+    } else {
+      delete ed.errors._batch;
+      ed.editingOrg = null;
+    }
+    renderOrgEditor();
+  }
+  function orgEdOrgsHtml(ed, oi, liveIds, refs) {
+    var disp = orgEdAllDisplayOrgs(ed);
+    var liveCount = Object.keys(orgEdProjectedOrgs(ed)).length;
+    function headOpts(o) {
+      var cur = o.head || '';
+      var h = '<option value=""' + (!cur ? ' selected' : '') + '>' + esc(wsT("js.tk.org.head.vacant")) + '</option>';
+      liveIds.forEach(function (cand) {
+        var cm = VS.members[cand], held = oi.headToOrg[cand];
+        var taken = !!(held && held.id !== o.id);
+        var label = taken ? wsT("js.tk.org.head.taken", cand, held.name) : cand + (cm && cm.name && cm.name !== cand ? ' ' + cm.name : '');
+        h += '<option value="' + esc(cand) + '"' + (cur === cand ? ' selected' : '') + (taken ? ' disabled' : '') + '>' + esc(label) + '</option>';
+      });
+      return h;
+    }
+    var rows = disp.map(function (o) {
+      var isDel = o.staged === 'delete', isVac = !o.head && !isDel, isRen = ed.editingOrg === o.id && !isDel;
+      var cls = 'tk-oe-og' + (isDel ? ' del' : o.staged ? ' pend' : '') + (isVac ? ' vac' : '');
+      var nameEl = isRen
+        ? '<input type="text" class="tk-oe-rn" id="tk-oe-rn" value="' + esc(o.name) + '"' + attr('oe-rn', o.id) + ' autocomplete="off" spellcheck="false" aria-label="' + esc(wsT("js.tk.org.rename.aria")) + '">'
+        : '<span class="tk-org-badge' + (isDel ? ' del' : o.staged ? ' pend' : '') + '">' + esc(o.name) + '</span>';
+      var meta = isDel ? '<span class="tk-org-dtag">' + esc(wsT("js.tk.org.tag.delstaged")) + '</span>'
+        : isVac ? '<span class="tk-org-vac">' + esc(wsT("js.tk.org.tag.vacant")) + '</span>'
+        : '<span class="sz">' + esc(wsTn("js.tk.org.sec.size", oi.sizeOf(o.id))) + '</span>';
+      var acts = isDel
+        ? '<button type="button" class="undo"' + attr('act', 'oe-undo') + attr('key', 'org:' + o.id) + '>&#8630; ' + esc(wsT("js.tk.org.undo")) + '</button>'
+        : '<button type="button" class="btn mini"' + attr('act', 'oe-org-ren') + attr('org', o.id) + '>' + esc(wsT("js.tk.org.btn.rename")) + '</button>' +
+          '<button type="button" class="btn mini danger"' + attr('act', 'oe-org-del') + attr('org', o.id) + '>' + esc(wsT("js.tk.org.btn.delete")) + '</button>';
+      var warn = '';
+      if (isDel && refs[o.id] && refs[o.id].count > 0) {
+        warn = '<div class="tk-oe-owarn">' + esc(wsTn("js.tk.org.del.refs", refs[o.id].count)) + '</div>';
+      } else if (isVac) {
+        warn = '<div class="tk-oe-owarn vac">' + esc(wsT("js.tk.org.vacant.note")) + '</div>';
+      }
+      return '<div class="tk-oe-ogi"><div class="' + cls + '"' + attr('oe-org', o.id) + '>' + nameEl + meta + '<span class="grow"></span>' +
+        '<select class="tk-oe-hsel"' + attr('oe-head', o.id) + (isDel ? ' disabled' : '') + ' aria-label="' + esc(wsT("js.tk.org.head.aria")) + '">' + headOpts(o) + '</select>' +
+        acts + '</div>' + warn + '</div>';
+    }).join('');
+    var goneRef = [], goneUnref = [];
+    (ed.baseOrgOrder || []).forEach(function (id) {
+      var o = ed.baseOrgs[id];
+      if (!o || !o.removed) return;
+      if (refs[id] && refs[id].count > 0) goneRef.push(o);
+      else goneUnref.push(o);
+    });
+    var goneHtml = '';
+    if (goneRef.length || goneUnref.length) {
+      goneHtml = '<div class="tk-oe-dz">' + goneRef.map(function (o) {
+        var ref = refs[o.id], open = !!ed.goneOpen[o.id], info = orgEventInfo(o.removed);
+        var when = info ? (info.ts ? esc(fmtTs(info.ts).slice(0, 10)) : '') + (info.by ? ' &middot; ' + esc(nm(info.by)) : '') : '';
+        var list = open ? '<ul class="tk-oe-rl">' + ref.items.map(function (it) {
+          var tags = (it.assign ? '<span class="chip sm">' + esc(wsT("js.tk.org.gone.asg")) + '</span>' : '') +
+            (it.cc ? '<span class="chip sm">' + esc(wsT("js.tk.org.gone.cc")) + '</span>' : '');
+          return '<li><code>' + esc(it.alias) + '</code><button type="button" class="tk-oe-rla"' + attr('act', 'oe-gone-open') + attr('item', it.id) + '>' + esc(it.title) + '</button>' + tags + (it.status ? stChip(it.status) : '') + '</li>';
+        }).join('') + '</ul>' : '';
+        return '<div class="tk-oe-ogi"><div class="tk-oe-og gone">' +
+          '<span class="tk-org-badge gone">' + esc(o.name) + '</span><span class="tk-org-dtag">' + esc(wsT("js.tk.org.tag.deleted")) + '</span>' +
+          (when ? '<span class="sz">' + when + '</span>' : '') + '<span class="grow"></span>' +
+          '<button type="button" class="tk-oe-gtog"' + attr('act', 'oe-gone-tog') + attr('org', o.id) + ' aria-expanded="' + (open ? 'true' : 'false') + '">' + esc(wsTn("js.tk.org.gone.items", ref.count)) + (open ? ' &#9662;' : ' &#9656;') + '</button>' +
+          '</div>' + list + '</div>';
+      }).join('') + (goneUnref.length ? '<details class="tk-oe-dzc"><summary>' + esc(wsTn("js.tk.org.gone.unref", goneUnref.length)) + '</summary><div class="tk-oe-dzl">' +
+        goneUnref.map(function (o) { return '<span class="tk-org-badge gone">' + esc(o.name) + '</span>'; }).join(' ') + '</div></details>' : '') + '</div>';
+    }
+    return '<div class="tk-oe-os"><h4>' + esc(wsT("js.tk.org.sec.title")) + ' <span class="cnt">' + esc(wsTn("js.tk.org.sec.count", liveCount)) + '</span><span class="grow"></span>' +
+      '<button type="button" class="btn mini"' + attr('act', 'oe-org-new') + '>+ ' + esc(wsT("js.tk.org.sec.add")) + '</button></h4>' +
+      (rows || '<p class="hint">' + esc(wsT("js.tk.org.sec.empty")) + '</p>') + goneHtml + '</div>';
   }
   function renderOrgEditor() {
     var dl = $('tkorged'), body = $('tkorged-body') || dl, ed = ui.orged;
@@ -782,7 +874,12 @@
     var selStart = hadSearch ? document.activeElement.selectionStart : null;
     var selEnd = hadSearch ? document.activeElement.selectionEnd : null;
     var leads = orgEdProjectedLeads(ed), admins = orgEdProjectedAdmins(ed);
-    var ot = orgTree(VS.members, leads);
+    var projOrgs = orgEdProjectedOrgs(ed), dispOrgs = orgEdAllDisplayOrgs(ed);
+    var oi = orgIndex(Object.keys(projOrgs).map(function (k) { return projOrgs[k]; }), VS.members, leads);
+    var ot = oi.tree;
+    var refs = orgItemRefs(VS.orgs, VS.items, VS.rules, VS.itemOrder);
+    var delByHead = {};
+    dispOrgs.forEach(function (o) { if (o.staged === 'delete' && o.head) delByHead[o.head] = o; });
     var changes = orgEdChanges(ed), nChg = changes.length;
     var q = String(ed.q || '').trim().toLowerCase();
     var liveIds = Object.keys(ed.baseLeads).sort();
@@ -790,8 +887,9 @@
     var adminCnt = orgEdAdminCount(ed);
     function matchId(id) {
       if (!q) return true;
-      var m = VS.members[id];
-      var text = (id + ' ' + (m ? m.name + ' ' + ((m.profile && m.profile.org) || '') : '')).toLowerCase();
+      var m = VS.members[id], hd = oi.headToOrg[id], nr = hd ? null : oi.nearestOrg(id);
+      var text = (id + ' ' + (m ? m.name + ' ' + ((m.profile && m.profile.org) || '') : '') +
+        (hd ? ' ' + hd.name : '') + (nr ? ' ' + nr.name : '')).toLowerCase();
       return text.indexOf(q) >= 0;
     }
     function subtreeMatch(n) {
@@ -824,25 +922,31 @@
     function rowHtml(id, count, isLead, shut) {
       var m = VS.members[id] || { name: id, profile: {} };
       var leadStaged = Object.prototype.hasOwnProperty.call(ed.stagedLeads, id);
-      var isDrag = ed.drag === id;
+      var isDrag = ed.dragKind !== 'org' && ed.drag === id;
       var isBad = !!(ed.refuse && ed.refuse.target === id);
       var rowCls = 'tk-oe-row' + (leadStaged ? ' staged' : '') + (isDrag ? ' drag' : '') + (isBad ? ' bad' : '');
       var tg = isLead ? '<button type="button" class="tg"' + attr('act', 'oe-fold') + attr('who', id) + ' aria-expanded="' + (shut ? 'false' : 'true') + '" aria-label="' + esc(wsT(shut ? "js.tk.team.expand" : "js.tk.team.collapse")) + '">&#9662;</button>' : '<span></span>';
+      var headed = oi.headToOrg[id], delOrg = delByHead[id];
+      var orgBadge = headed
+        ? '<span class="tk-org-badge' + (headed.staged ? ' pend' : '') + (ed.dragKind === 'org' && ed.drag === headed.id ? ' drag' : '') + '" draggable="true"' + attr('oe-org-drag', headed.id) + tipAttr(wsT("js.tk.org.badge.dragtip")) + '>' + esc(headed.name) + '</span>'
+        : (delOrg ? '<span class="tk-org-badge del">' + esc(delOrg.name) + '</span>' : '');
       var meta = '';
       if (leadStaged) {
         var was = ed.baseLeads[id] || '';
         meta = '<span class="chip sm mv">' + esc(wsT(was ? "js.tk.org.moved" : "js.tk.org.placed")) + '</span>' +
           '<span class="was">' + esc(was ? wsT("js.tk.org.waslead", was) : wsT("js.tk.org.wasunplaced")) + '</span>';
       } else {
-        meta = '<span class="o">' + (m.profile && m.profile.org ? esc(m.profile.org) + ' &middot; ' : '') + '<code>' + esc(id) + '</code></span>';
+        var near = headed ? null : oi.nearestOrg(id);
+        var otxt = near ? esc(near.name) + ' &middot; ' : (!headed ? '<i>' + esc(wsT("js.tk.org.no_org")) + '</i> &middot; ' : '');
+        meta = '<span class="o">' + otxt + '<code>' + esc(id) + '</code></span>';
       }
       var cnt = isLead ? '<span class="cnt">' + esc(wsTn("js.tk.team.subcount", count)) + '</span>' : '';
       var you = id === ed.viewer ? '<span class="chip sm you">' + wsT("js.tk.team.you") + '</span>' : '';
       return '<div class="' + rowCls + '" draggable="true"' + attr('oe-id', id) + '>' +
         '<span class="hd" aria-hidden="true">&#10299;</span>' + tg + avHtml(id) +
-        '<span class="tk-oe-who"><span class="nm">' + esc(m.name) + '</span>' + you + meta + cnt + '</span>' +
+        '<span class="tk-oe-who"><span class="nm">' + esc(m.name) + '</span>' + orgBadge + you + meta + cnt + '</span>' +
         '<span class="tk-oe-lead"><select class="tk-oe-sel"' + attr('oe-sel', id) + ' aria-label="' + esc(wsT("js.tk.org.sel.aria")) + '">' + leadOpts(id) + '</select></span>' +
-        admBtn(id) + '</div>' + (isBad ? orgEdRefuseHtml(ed.refuse.member, id) : '');
+        admBtn(id) + '</div>' + (isBad ? orgEdRefuseHtml(ed.refuse) : '');
     }
     function treeNode(n) {
       if (q && !subtreeMatch(n)) return '';
@@ -859,14 +963,34 @@
       : '<div class="tk-oe-unas empty">' + wsT("js.tk.org.unas.empty") + '</div>';
     var topErr = ed.errors._viewer || ed.errors._batch;
     var chgHtml = changes.length ? '<ol class="tk-oe-chg">' + changes.map(function (c) {
-      var m = VS.members[c.member], nmTxt = m ? m.name : c.member;
-      var tyCls = c.kind === 'lead' ? 'lead' : c.kind === 'add_admin' ? 'add' : 'rm';
-      var tyLbl = c.kind === 'lead' ? wsT("js.tk.org.ty.lead") : c.kind === 'add_admin' ? wsT("js.tk.org.ty.add") : wsT("js.tk.org.ty.rm");
-      var detail = esc(nmTxt) + ' <code>' + esc(c.member) + '</code>';
-      if (c.kind === 'lead') {
-        var f = c.from ? '<code>' + esc(c.from) + '</code>' : '<span class="hint">' + esc(wsT("js.tk.org.none")) + '</span>';
-        var t = c.to ? '<code>' + esc(c.to) + '</code>' : '<span class="hint">' + esc(wsT("js.tk.org.none")) + '</span>';
-        detail += '<br>' + f + '<span class="arr">&rarr;</span>' + t;
+      var tyCls = 'lead', tyLbl = '', detail = '';
+      if (c.kind === 'org_create') {
+        tyCls = 'org'; tyLbl = wsT("js.tk.org.ty.orgnew");
+        detail = '<b>' + esc(c.name) + '</b>' + (c.head ? '<br>' + esc(wsT("js.tk.org.chg.head", c.head)) : '<br><span class="hint">' + esc(wsT("js.tk.org.head.vacant")) + '</span>');
+      } else if (c.kind === 'org_delete') {
+        tyCls = 'rm'; tyLbl = wsT("js.tk.org.ty.orgdel");
+        detail = '<b>' + esc(c.name) + '</b> <code>' + esc(c.org) + '</code>';
+      } else if (c.kind === 'org_edit') {
+        tyCls = 'org'; tyLbl = wsT("js.tk.org.ty.orgedit");
+        var parts = [];
+        if (c.fromName !== c.toName) parts.push(esc(c.fromName) + '<span class="arr">&rarr;</span><b>' + esc(c.toName) + '</b>');
+        else parts.push('<b>' + esc(c.toName) + '</b>');
+        if (c.fromHead !== c.toHead) {
+          var fh = c.fromHead ? '<code>' + esc(c.fromHead) + '</code>' : '<span class="hint">' + esc(wsT("js.tk.org.head.vacant")) + '</span>';
+          var th = c.toHead ? '<code>' + esc(c.toHead) + '</code>' : '<span class="hint">' + esc(wsT("js.tk.org.head.vacant")) + '</span>';
+          parts.push(fh + '<span class="arr">&rarr;</span>' + th);
+        }
+        detail = parts.join('<br>');
+      } else {
+        var m = VS.members[c.member], nmTxt = m ? m.name : c.member;
+        tyCls = c.kind === 'lead' ? 'lead' : c.kind === 'add_admin' ? 'add' : 'rm';
+        tyLbl = c.kind === 'lead' ? wsT("js.tk.org.ty.lead") : c.kind === 'add_admin' ? wsT("js.tk.org.ty.add") : wsT("js.tk.org.ty.rm");
+        detail = esc(nmTxt) + ' <code>' + esc(c.member) + '</code>';
+        if (c.kind === 'lead') {
+          var f = c.from ? '<code>' + esc(c.from) + '</code>' : '<span class="hint">' + esc(wsT("js.tk.org.none")) + '</span>';
+          var t = c.to ? '<code>' + esc(c.to) + '</code>' : '<span class="hint">' + esc(wsT("js.tk.org.none")) + '</span>';
+          detail += '<br>' + f + '<span class="arr">&rarr;</span>' + t;
+        }
       }
       var errMsg = ed.errors[c.key] ? '<div class="tk-oe-cerr">' + esc(orgEdErrText(ed.errors[c.key])) + '</div>' : '';
       return '<li' + (errMsg ? ' class="err"' : '') + attr('oe-chg', c.key) + '><span class="ty ' + tyCls + '">' + esc(tyLbl) + '</span>' +
@@ -884,7 +1008,7 @@
             '<button type="button" class="btn mini"' + attr('act', 'oe-expand') + '>' + esc(wsT("js.tk.org.expandall")) + '</button><span class="grow"></span>' +
             '<span class="hint">' + esc(wsT("js.tk.org.draghint")) + '</span></div>' +
           '<div class="tk-oe-rootz" data-oe-drop="">&#10514; ' + wsT("js.tk.org.rootzone") + '</div>' +
-          (treeHtml ? '<ul class="tk-oe-org">' + treeHtml + '</ul>' : '') + unasHtml +
+          (treeHtml ? '<ul class="tk-oe-org">' + treeHtml + '</ul>' : '') + unasHtml + orgEdOrgsHtml(ed, oi, liveIds, refs) +
         '</div>' +
         '<div class="tk-oe-right">' +
           '<h3>' + esc(wsT("js.tk.org.changes")) + ' <span class="n">' + esc(wsTn("js.tk.org.count", nChg)) + '</span><span class="grow"></span>' +
@@ -909,13 +1033,19 @@
     var ed = ui.orged;
     if (!ed || ed.saving || !ui.store) return;
     var curVS = AD.view(ui.store) || VS, v = memberOf(viewerOf(ui.store));
-    var plan = orgEdPreflightAndBuild(ed, curVS && curVS.members, v);
+    var plan = orgEdPreflightAndBuild(ed, curVS && curVS.members, v, curVS && curVS.orgs);
     // Drop no-op staged changes already reflected in the current store view (Decision 8).
     var curParent = curVS && curVS.members ? orgTree(curVS.members).parentOf : {};
+    var curOrgsById = {};
+    listOf(curVS && curVS.orgs).forEach(function (o) { if (o && o.id) curOrgsById[o.id] = o; });
     plan.dropped.forEach(function (k) {
       var sep = k.indexOf(':'), kind = k.slice(0, sep), id = k.slice(sep + 1);
       if (kind === 'lead') { delete ed.stagedLeads[id]; ed.baseLeads[id] = curParent[id] || ''; }
       if (kind === 'admin') { delete ed.stagedAdmins[id]; ed.baseAdmins[id] = !!(curVS.members[id] && curVS.members[id].admin); }
+      if (kind === 'org') {
+        delete ed.stagedOrgs[id];
+        if (curOrgsById[id]) ed.baseOrgs[id] = { id: id, name: curOrgsById[id].name || '', head: curOrgsById[id].head || '', removed: curOrgsById[id].removed || null };
+      }
       delete ed.errors[k];
     });
     if (!plan.ok) {

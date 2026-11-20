@@ -1139,6 +1139,7 @@
     focus: null,          // { ev: event id, flash: true until its first paint } the item window scrolls to and marks; null: nothing
     mdet: {},             // "store|member id" -> true: the member's key and profile details are expanded in the org card (page lifetime)
     ofold: {},            // "store|member id" -> true: the member's subtree is collapsed in the org card (page lifetime)
+    iwOrgFold: {},        // "store|item|key" -> true|false: item window org group expand/collapse override
     orged: null,          // open admin org-chart editor state (orgEdInit), or null when closed
     sel: null,            // the row selected by a tap: it shows the same actions and details a hover shows
     msel: {},             // store -> { ids: { item id: true }, at: anchor row key } while the Items list is in selection mode (see mselClick)
@@ -1277,12 +1278,26 @@
     return o === 'agent-auto' ? '<span class="chip agent">' + wsT("js.tk.chip.agent") + '</span><span class="chip auto">' + wsT("js.tk.chip.auto") + '</span>' :
       o === 'agent' ? '<span class="chip agent">' + wsT("js.tk.chip.agent") + '</span>' : '';
   }
+  function orgNameOf(id) {
+    if (!id) return '';
+    var list = VS && Array.isArray(VS.orgs) ? VS.orgs : [];
+    for (var i = 0; i < list.length; i++) if (list[i] && list[i].id === id) return list[i].name || id;
+    return id;
+  }
+  function orgEventInfo(evId) {
+    if (!evId || !VS) return null;
+    var list = VS.historyEvents || VS.events || [];
+    for (var i = list.length - 1; i >= 0; i--) {
+      if (list[i] && list[i].id === evId) return { ts: list[i].ts || '', by: list[i].member || '' };
+    }
+    return null;
+  }
   function complText(c) { return c === 'assigner' ? wsT("js.tk.compl.assigner") : wsT("js.tk.compl.assignee"); }
-  // an item.assign target list as HTML: people (by is "self"), then a subtree rule as its root's
-  // reach, the root itself listed first when the rule includes it
+  // an item.assign target list as HTML: people (by is "self"), then an org or subtree rule
   function targetsText(ts, by) {
     return ts.map(function (t) {
       if (typeof t === 'string') return esc(t === by ? wsT("js.tk.ev.self") : t);
+      if (t.org) return wsT("js.tk.ev.rule.org", esc(orgNameOf(t.org)));
       var r = t.levels == null ? wsT("js.tk.ev.rule.all", esc(t.root)) : wsT("js.tk.ev.rule.lv", esc(t.root), esc(t.levels));
       return t.include_root ? esc(t.root) + ', ' + r : r;
     }).join(', ');
@@ -1383,7 +1398,12 @@
       case 'item.accept': return wsT("js.tk.ev.accept", ref(p.item)) + tail(p.note);
       case 'item.decline': return wsT("js.tk.ev.decline", ref(p.item)) + tail(p.note);
       case 'item.return': return wsT("js.tk.ev.return", esc(p.assignee), ref(p.item)) + tail(p.note);
-      case 'item.unassign': return wsT("js.tk.ev.unassign", p.root ? wsT("js.tk.ev.unassign.rule", esc(p.root)) : esc(p.assignee || wsT("js.tk.ev.unassign.all")), ref(p.item));
+      case 'item.unassign': {
+        var uru = p.rule && VS.rules && VS.rules[p.rule];
+        var ulbl = uru && uru.org ? wsT("js.tk.ev.unassign.org", esc(orgNameOf(uru.org)))
+          : (p.root ? wsT("js.tk.ev.unassign.rule", esc(p.root)) : esc(p.assignee || wsT("js.tk.ev.unassign.all")));
+        return wsT("js.tk.ev.unassign", ulbl, ref(p.item));
+      }
       // with assignee: an org superior's wrap-up (or the assigner's drop) on that member's assignment
       case 'item.status': return (p.assignee && p.assignee !== n.member ? wsT("js.tk.ev.status.of", esc(p.assignee), stChip(p.status), ref(p.item)) : wsT("js.tk.ev.status", stChip(p.status), ref(p.item))) + tail(p.note);
       case 'item.close': return wsT("js.tk.ev.close", ref(p.item)) + tail(p.note);
@@ -1401,6 +1421,8 @@
       case 'item.unrequest': return wsT("js.tk.ev.unrequest", esc(alias(p.request)), ref(p.item));
       case 'item.cc': return wsT("js.tk.ev.cc", esc(p.member), ref(p.item));
       case 'item.uncc': return wsT("js.tk.ev.uncc", esc(p.member), ref(p.item));
+      case 'item.cc_org': return wsT("js.tk.ev.ccorg", esc(orgNameOf(p.org)), ref(p.item));
+      case 'item.uncc_org': return wsT("js.tk.ev.unccorg", esc(orgNameOf(p.org)), ref(p.item));
       case 'comment.add': return wsT("js.tk.ev.comment", ref(p.item)) + (inThread ? '' : tail(String(p.body || '').slice(0, 90))) + extrasTxt(p);
       case 'comment.edit': return wsT("js.tk.ev.cedit", esc(alias(p.comment)), inThread ? '' : ref(n.thread || '')) + extrasTxt(p);
       case 'comment.hide': return wsT("js.tk.ev.chide", esc(alias(p.comment)));
@@ -1416,6 +1438,8 @@
       case 'roles.set_lead': return wsT("js.tk.ev.setlead", esc(p.member), esc((p.leads || []).join(', ') || wsT("js.tk.common.nobody")));
       case 'roles.add_admin': return wsT("js.tk.ev.addadmin", esc(p.member));
       case 'roles.remove_admin': return wsT("js.tk.ev.removeadmin", esc(p.member));
+      case 'roles.org_set': return p.head ? wsT("js.tk.ev.orgset", esc(p.name || p.org), esc(p.head)) : wsT("js.tk.ev.orgset.vacant", esc(p.name || p.org));
+      case 'roles.org_remove': return wsT("js.tk.ev.orgremove", esc(orgNameOf(p.org)));
       case 'roles.add_key': return wsT("js.tk.ev.addkey", esc(p.key), esc(p.member));
       case 'roles.revoke_key': return wsT("js.tk.ev.revokekey", esc(p.key), esc(p.member));
       case 'roles.remove_member': return wsT("js.tk.ev.removemember", esc(p.member));

@@ -575,7 +575,7 @@
   }
 
   function cardTeam(v) {
-    var me = VS.members[v] || {}, R = VS.viewer.reach, levels = {}, ot = orgTree(VS.members);
+    var me = VS.members[v] || {}, R = VS.viewer.reach, levels = {}, oi = orgIndex(VS.orgs, VS.members), ot = oi.tree;
     Object.keys(R).forEach(function (k) { levels[R[k]] = (levels[R[k]] || 0) + 1; });
     var summary = wsT("js.tk.team.summary", esc(VS.admins.join(', ')), VS.viewer.lead ? wsT("js.tk.team.lead", esc(VS.viewer.lead)) : wsT("js.tk.team.root"),
       Object.keys(R).length ? wsT("js.tk.team.reach", Object.keys(levels).map(function (d) { return wsT("js.tk.team.reachat", levels[d], d); }).join(', ')) : wsT("js.tk.team.nofollowers"));
@@ -590,7 +590,9 @@
     }
     function rowHtml(id, descCount, shut) {
       var m = VS.members[id], open = !!ui.mdet[ui.store + '|' + id], isLead = descCount > 0;
-      var chips = (id === v ? '<span class="chip sm you">' + wsT("js.tk.team.you") + '</span>' : '') +
+      var headed = oi.headToOrg[id], near = headed ? null : oi.nearestOrg(id);
+      var orgBadge = headed ? '<span class="chip sm tk-org-badge">' + esc(headed.name) + '</span>' : '';
+      var chips = orgBadge + (id === v ? '<span class="chip sm you">' + wsT("js.tk.team.you") + '</span>' : '') +
         (m.admin ? '<span class="chip sm admin">' + wsT("js.tk.team.admin") + '</span>' : '') +
         (id === VS.viewer.lead ? '<span class="chip sm">' + wsT("js.tk.team.yourlead") + '</span>' : '') +
         (R[id] ? '<span class="chip sm" title="' + wsT("js.tk.team.levels.tip") + '">L' + R[id] + '</span>' : '') +
@@ -599,7 +601,12 @@
         ((VS.clones[id] || []).length > 1 ? '<span class="chip sm" title="' + wsT("js.tk.team.clones.tip") + '">' + wsT("js.tk.team.clones", VS.clones[id].length) + '</span>' : '');
       var cnt = isLead ? '<span class="tk-org-cnt">' + esc(shut ? wsTn("js.tk.team.subcount.shut", descCount) : wsTn("js.tk.team.subcount", descCount)) + '</span>' : '';
       var tg = isLead ? '<button type="button" class="tk-org-tg"' + attr('act', 'ofold') + attr('who', id) + ' aria-expanded="' + (shut ? 'false' : 'true') + '" aria-label="' + esc(wsT(shut ? "js.tk.team.expand" : "js.tk.team.collapse")) + '"><svg viewBox="0 0 12 12"><path d="M2 4l4 4 4-4"/></svg></button>' : '<span></span>';
-      var org = m.profile && m.profile.org ? (isLead ? '<span class="unit">' + esc(m.profile.org) + '</span>' : esc(m.profile.org)) + ' &middot; ' : '';
+      var l2Parts = [];
+      if (near) l2Parts.push('<span class="unit">' + esc(near.name) + '</span>');
+      if (m.profile && m.profile.org && (!headed || m.profile.org !== headed.name) && (!near || m.profile.org !== near.name)) {
+        l2Parts.push(isLead && !near ? '<span class="unit">' + esc(m.profile.org) + '</span>' : esc(m.profile.org));
+      }
+      var org = l2Parts.length ? l2Parts.join(' &middot; ') + ' &middot; ' : '';
       return '<div class="tk-org-nd' + (id === v ? ' me' : '') + '">' + tg + avHtml(id) +
         '<span class="tk-org-l1"><span class="nm">' + esc(m.name) + '</span>' + chips + '</span>' +
         '<span class="tk-org-rt">' + cnt + '<button type="button" class="ia mdet"' + attr('act', 'mdet') + attr('who', id) + ' aria-expanded="' + (open ? 'true' : 'false') + '" aria-label="' + esc(wsT("js.tk.team.details")) + '"' + tipAttr(wsT("js.tk.team.details")) + '><svg class="i"><use href="#tki-more"/></svg></button></span>' +

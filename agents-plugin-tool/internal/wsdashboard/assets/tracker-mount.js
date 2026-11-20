@@ -188,10 +188,63 @@
         else if (k === 'oe-expand') { if (ui.orged) { ui.orged.fold = {}; renderOrgEditor(); } }
         else if (k === 'oe-fold') { if (ui.orged && d.who) { ui.orged.fold[d.who] = !ui.orged.fold[d.who]; renderOrgEditor(); } }
         else if (k === 'oe-adm') { if (ui.orged && d.who) { delete ui.orged.errors._batch; orgEdToggleAdmin(ui.orged, d.who); renderOrgEditor(); } }
-        else if (k === 'oe-undo') { if (ui.orged) { delete ui.orged.errors._batch; if (!orgEdUndo(ui.orged, a.getAttribute('data-key'))) ui.orged.errors._batch = wsT("js.tk.org.err.undo.cycle"); renderOrgEditor(); } }
+        else if (k === 'oe-undo') {
+          if (ui.orged) {
+            delete ui.orged.errors._batch;
+            if (!orgEdUndo(ui.orged, a.getAttribute('data-key'))) {
+              var ue = ui.orged.lastUndoErr;
+              ui.orged.errors._batch = ue && ue.reason === 'already_head' ? wsT("js.tk.org.err.undo.head", ue.head, ue.other.name)
+                : ue && ue.reason === 'dup_name' ? wsT("js.tk.org.err.undo.name", ue.other.name)
+                : wsT("js.tk.org.err.undo.cycle");
+            }
+            renderOrgEditor();
+          }
+        }
         else if (k === 'oe-undo-all') { if (ui.orged) { orgEdUndoAll(ui.orged); renderOrgEditor(); } }
         else if (k === 'oe-save') orgEdSave();
         else if (k === 'oe-roles') { if (closeOrgEditor(false)) openDialog('admin', {}); }
+        else if (k === 'oe-org-new') {
+          if (ui.orged) {
+            var baseNm = wsT("js.tk.org.new.default"), tryNm = baseNm, nIdx = 2;
+            while (orgEdNameClash(ui.orged, tryNm, '')) tryNm = baseNm + ' ' + (nIdx++);
+            var cr = orgEdCreateOrg(ui.orged, tryNm, '');
+            if (cr.ok) {
+              delete ui.orged.errors._batch;
+              ui.orged.editingOrg = cr.id;
+              renderOrgEditor();
+              var rni = $('tk-oe-rn');
+              if (rni) { rni.focus(); rni.select(); }
+            }
+          }
+        }
+        else if (k === 'oe-org-ren') {
+          if (ui.orged) {
+            ui.orged.editingOrg = a.getAttribute('data-org');
+            renderOrgEditor();
+            var rni2 = $('tk-oe-rn');
+            if (rni2) { rni2.focus(); rni2.select(); }
+          }
+        }
+        else if (k === 'oe-org-del') {
+          if (ui.orged) { delete ui.orged.errors._batch; orgEdDeleteOrg(ui.orged, a.getAttribute('data-org')); renderOrgEditor(); }
+        }
+        else if (k === 'oe-gone-tog') {
+          if (ui.orged) { var goid = a.getAttribute('data-org'); ui.orged.goneOpen[goid] = !ui.orged.goneOpen[goid]; renderOrgEditor(); }
+        }
+        else if (k === 'oe-gone-open') {
+          if (d.item && closeOrgEditor(false)) showItem(d.item);
+        }
+        else if (k === 'iw-ofold') {
+          var fk0 = ui.store + '|' + d.item + '|' + a.getAttribute('data-key');
+          ui.iwOrgFold[fk0] = a.getAttribute('aria-expanded') !== 'true';
+          render();
+        }
+        else if (k === 'retarget-asg') {
+          openPicker('assign', { item: d.item, retarget: { kind: 'assign', rule: a.getAttribute('data-rule'), root: a.getAttribute('data-root'), org: a.getAttribute('data-org') } }, a);
+        }
+        else if (k === 'retarget-cc') {
+          openPicker('cc', { item: d.item, retarget: { kind: 'cc', org: a.getAttribute('data-org') } }, a);
+        }
         else if (k === 'idcopy') copyId(a);
         else if (k === 'new-x') closeNewRow();
         else if (k === 'nchip') newMenu(a.getAttribute('data-step'), a, a.hasAttribute('data-ed'));
@@ -581,19 +634,58 @@
     oed.addEventListener('input', oeSearchInput);
     oed.addEventListener('compositionend', oeSearchInput);
     oed.addEventListener('change', function (e) {
+      if (!ui.orged) return;
+      var hsel = e.target && e.target.closest && e.target.closest('select[data-oe-head]');
+      if (hsel) {
+        delete ui.orged.errors._batch;
+        var hres = orgEdStageOrgHead(ui.orged, hsel.getAttribute('data-oe-head'), hsel.value);
+        if (!hres.ok) ui.orged.errors._batch = orgEdErrText({ code: hres.reason, target: hsel.value });
+        renderOrgEditor();
+        return;
+      }
       var sel = e.target && e.target.closest && e.target.closest('select[data-oe-sel]');
-      if (!sel || !ui.orged) return;
+      if (!sel) return;
       delete ui.orged.errors._batch;
       orgEdStageLead(ui.orged, sel.getAttribute('data-oe-sel'), sel.value);
       renderOrgEditor();
     });
+    oed.addEventListener('keydown', function (e) {
+      var rn = e.target && e.target.closest && e.target.closest('.tk-oe-rn[data-oe-rn]');
+      if (!rn || !ui.orged || e.isComposing) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        orgEdCommitRename(ui.orged, rn.getAttribute('data-oe-rn'), rn.value);
+      } else if (e.key === 'Escape') {
+        e.preventDefault(); e.stopPropagation();
+        ui.orged.editingOrg = null;
+        renderOrgEditor();
+      }
+    });
+    oed.addEventListener('focusout', function (e) {
+      var rn = e.target && e.target.closest && e.target.closest('.tk-oe-rn[data-oe-rn]');
+      if (!rn || !ui.orged) return;
+      var oid = rn.getAttribute('data-oe-rn');
+      if (ui.orged.editingOrg === oid) orgEdCommitRename(ui.orged, oid, rn.value);
+    });
     oed.addEventListener('dragstart', function (e) {
       e.stopPropagation();
       if (!ui.orged || (e.target && e.target.closest && e.target.closest('select, button, input'))) { e.preventDefault(); return; }
+      var badge = e.target && e.target.closest && e.target.closest('.tk-org-badge[data-oe-org-drag]');
+      if (badge) {
+        var oid = badge.getAttribute('data-oe-org-drag');
+        ui.orged.drag = oid;
+        ui.orged.dragKind = 'org';
+        ui.orged.refuse = null;
+        if (e.dataTransfer) { e.dataTransfer.setData('text/plain', 'org:' + oid); e.dataTransfer.effectAllowed = 'move'; }
+        oeClearHover();
+        badge.classList.add('drag');
+        return;
+      }
       var row = e.target && e.target.closest && e.target.closest('.tk-oe-row[data-oe-id]');
       if (!row) return;
       var id = row.getAttribute('data-oe-id');
       ui.orged.drag = id;
+      ui.orged.dragKind = 'member';
       ui.orged.refuse = null;
       if (e.dataTransfer) { e.dataTransfer.setData('text/plain', id); e.dataTransfer.effectAllowed = 'move'; }
       oeClearHover();
@@ -606,6 +698,25 @@
       if (!ed || !ed.drag) return;
       var z = e.target && e.target.closest && e.target.closest('.tk-oe-rootz');
       var row = e.target && e.target.closest && e.target.closest('.tk-oe-row[data-oe-id]');
+      if (ed.dragKind === 'org') {
+        if (!row) { oeClearHover(); return; }
+        var otid = row.getAttribute('data-oe-id');
+        var curOrg = orgEdProjectedOrgs(ed)[ed.drag];
+        if (!curOrg || curOrg.head === otid) { oeClearHover(); return; }
+        var held = orgEdHeadOf(ed, otid);
+        if (held && held.id !== ed.drag) {
+          if (!row.classList.contains('bad')) {
+            oeClearHover();
+            row.classList.add('bad');
+            row.insertAdjacentHTML('afterend', orgEdRefuseHtml({ kind: 'org_head', target: otid, otherName: held.name, orgName: curOrg.name }));
+          }
+          return;
+        }
+        if (!row.classList.contains('ok')) { oeClearHover(); row.classList.add('ok'); }
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        return;
+      }
       if (z) {
         if (!z.classList.contains('ok')) { oeClearHover(); z.classList.add('ok'); }
         e.preventDefault();
@@ -632,10 +743,25 @@
       var ed = ui.orged;
       if (!ed || !ed.drag) return;
       e.preventDefault();
-      var dragId = ed.drag;
-      ed.drag = null;
+      var dragId = ed.drag, dragKind = ed.dragKind;
+      ed.drag = null; ed.dragKind = null;
       var z = e.target && e.target.closest && e.target.closest('.tk-oe-rootz');
       var row = e.target && e.target.closest && e.target.closest('.tk-oe-row[data-oe-id]');
+      if (dragKind === 'org') {
+        if (row) {
+          var otid = row.getAttribute('data-oe-id');
+          var curOrg = orgEdProjectedOrgs(ed)[dragId];
+          if (otid && curOrg && curOrg.head !== otid) {
+            delete ed.errors._batch;
+            var ores = orgEdStageOrgHead(ed, dragId, otid);
+            if (!ores.ok && ores.reason === 'already_head') {
+              ed.refuse = { kind: 'org_head', target: otid, otherName: ores.other.name, orgName: curOrg.name };
+            }
+          }
+        }
+        renderOrgEditor();
+        return;
+      }
       if (z) { delete ed.errors._batch; orgEdStageLead(ed, dragId, ''); }
       else if (row) {
         var tid = row.getAttribute('data-oe-id');
@@ -650,9 +776,9 @@
     oed.addEventListener('dragend', function (e) {
       e.stopPropagation();
       if (!ui.orged) return;
-      ui.orged.drag = null;
+      ui.orged.drag = null; ui.orged.dragKind = null;
       oeClearHover();
-      Array.prototype.forEach.call(oed.querySelectorAll('.tk-oe-row.drag'), function (n) { n.classList.remove('drag'); });
+      Array.prototype.forEach.call(oed.querySelectorAll('.tk-oe-row.drag, .tk-org-badge.drag'), function (n) { n.classList.remove('drag'); });
     });
   }
 
