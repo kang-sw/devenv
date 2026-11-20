@@ -281,7 +281,8 @@
               <span class="acts"><button type="button" class="btn mini" data-a="ren" data-k="o-r8d4">이름 바꾸기</button><button type="button" class="btn mini dng" data-a="del" data-k="o-r8d4">삭제</button></span></li>
             <li class="og del" data-k="o-t5n1"><span class="nmc"><span class="chip org del" title="삭제 예정">🏢 릴리스TF</span><code>o-t5n1</code></span><span class="cnt">—</span>
               <label class="hs">헤드 <select data-k="o-t5n1" aria-label="릴리스TF 헤드" disabled><option value="oh-sj" selected>oh-sj 오세진</option></select></label>
-              <span class="acts"><button type="button" class="btn mini" data-a="undo" data-k="o-t5n1">↶ 삭제 취소</button></span></li>
+              <span class="acts"><button type="button" class="btn mini" data-a="undo" data-k="o-t5n1">↶ 삭제 취소</button></span>
+              <span class="vh">업무 2건이 이 조직을 가리킵니다 — 저장하면 "삭제된 조직"으로 남고 따라가기를 멈춥니다</span></li>
             <li class="og vac" data-k="o-w2c6"><span class="nmc"><span class="chip org pend drag" draggable="true" data-org="o-w2c6">🏢 QA팀</span><span class="chip new">새</span><span class="chip vac">공석</span><code>o-w2c6</code></span><span class="cnt">—</span>
               <label class="hs">헤드 <select data-k="o-w2c6" aria-label="QA팀 헤드"><option value="" selected>— 공석 (헤드 없음)</option></select></label>
               <span class="acts"><button type="button" class="btn mini" data-a="ren" data-k="o-w2c6">이름 바꾸기</button><button type="button" class="btn mini dng" data-a="del" data-k="o-w2c6">삭제</button></span>
@@ -382,15 +383,15 @@
           <div class="a-common muted"><b style="color:var(--fg)">김하늘</b>님이 배정 · 배정자가 확인</div>
           <ul class="alist">
             <li class="arow grp shut"><div class="ar-main"><span class="ar-name"><span class="chip org">🏢 SW개발1팀</span></span>
-                <span class="ar-st"><button type="button" class="fold" data-x="fold" aria-expanded="false">4명 ▸</button><button type="button" class="rmb" aria-label="SW개발1팀 등록 해제" title="등록 해제 — 앞으로 들어오는 사람은 배정되지 않음 (이미 받은 배정은 유지)">−</button></span></div>
+                <span class="ar-st"><button type="button" class="fold" data-x="fold" aria-expanded="false">4명 ▸</button><button type="button" class="rmb" aria-label="SW개발1팀 등록 해제" title="등록 해제 — SW개발1팀으로만 배정된 사람의 배정도 끝남 (직접 배정한 사람은 유지)">−</button></span></div>
               <div class="ar-diff">조직 전체 · 헤드 이도윤 · 새로 들어오는 사람도 배정</div>
               <ul class="sub"><li><i class="av">도윤</i><span class="n">이도윤</span><span class="chip s-doing">진행 중</span></li><li><i class="av">지우</i><span class="n">최지우</span><span class="chip s-rev">검토 중</span></li>
                 <li><i class="av">민준</i><span class="n">정민준</span><span class="chip s-todo">할 일</span></li><li><i class="av">예린</i><span class="n">강예린</span><span class="chip s-todo">할 일</span></li></ul></li>
             <li class="arow grp float"><div class="ar-main"><span class="ar-name"><span class="chip org gone" title="삭제된 조직 — 이름만 남아 있습니다">🏢 플랫폼팀</span><span class="chip dtag">삭제된 조직</span></span>
-                <span class="ar-st"><button type="button" class="fold" data-x="fold" aria-expanded="true">2명 ▾</button><button type="button" class="rmb" aria-label="플랫폼팀 등록 해제" title="등록 해제 — 이미 받은 배정 2건은 유지">−</button></span></div>
+                <span class="ar-st"><button type="button" class="fold" data-x="fold" aria-expanded="true">2명 ▾</button><button type="button" class="rmb" aria-label="플랫폼팀 등록 해제" title="등록 해제 — 이 등록으로만 배정된 2명의 배정도 끝남 (직접 배정한 사람은 유지)">−</button></span></div>
               <div class="ar-diff"><span class="w">11-12 삭제 — 더는 따라가지 않습니다.</span> 이미 받은 배정은 그대로입니다.</div>
               <ul class="sub"><li><i class="av">태호</i><span class="n">윤태호</span><span class="chip s-doing">진행 중</span></li><li><i class="av">서준</i><span class="n">백서준</span><span class="chip s-doing">진행 중</span></li></ul>
-              <div class="atb"><button type="button" class="btn mini primary" title="피커가 열립니다. 고른 대상을 배정하고 이 등록을 해제합니다">대상 바꾸기…</button></div></li>
+              <div class="atb"><button type="button" class="btn mini primary" title="피커가 열립니다. 적용하면 새 대상 배정과 이 등록 해제를 한 번에 보냅니다">대상 바꾸기…</button></div></li>
             <li class="arow"><div class="ar-main"><i class="av">세진</i><span class="ar-name">오세진</span><span class="ar-st"><span class="chip s-todo">할 일</span><button type="button" class="rmb" aria-label="오세진 배정 해제" title="배정 해제">−</button></span></div>
               <div class="ar-diff">개인 배정</div></li>
           </ul>
@@ -401,14 +402,14 @@
           <h3>참조 <span class="cnt">6</span><span class="chip flt" title="삭제된 조직을 가리키는 등록 1개">삭제된 조직 1</span><span class="grow"></span><button type="button" class="ia" aria-label="참조에 추가" title="참조에 추가">＋</button></h3>
           <ul class="alist">
             <li class="arow grp shut"><div class="ar-main"><span class="ar-name"><span class="chip org">🏢 SW개발2팀</span></span>
-                <span class="ar-st"><button type="button" class="fold" data-x="fold" aria-expanded="false">2명 ▸</button><button type="button" class="rmb" aria-label="SW개발2팀 참조 해제" title="참조 해제 — 앞으로 들어오는 사람은 참조되지 않음 (이미 참조된 사람은 유지)">−</button></span></div>
+                <span class="ar-st"><button type="button" class="fold" data-x="fold" aria-expanded="false">2명 ▸</button><button type="button" class="rmb" aria-label="SW개발2팀 참조 해제" title="참조 해제 — SW개발2팀으로만 참조된 사람도 빠짐 (직접 참조한 사람은 유지)">−</button></span></div>
               <div class="ar-diff">조직 전체 · 새로 들어오는 사람도 참조</div>
               <ul class="sub"><li><i class="av">서연</i><span class="n">박서연</span></li><li><i class="av">태호</i><span class="n">윤태호</span></li></ul></li>
             <li class="arow grp shut float"><div class="ar-main"><span class="ar-name"><span class="chip org gone" title="삭제된 조직 — 이름만 남아 있습니다">🏢 플랫폼팀</span><span class="chip dtag">삭제된 조직</span></span>
-                <span class="ar-st"><button type="button" class="fold" data-x="fold" aria-expanded="false">3명 ▸</button><button type="button" class="rmb" aria-label="플랫폼팀 참조 해제" title="등록 해제 — 이미 참조된 3명은 유지">−</button></span></div>
+                <span class="ar-st"><button type="button" class="fold" data-x="fold" aria-expanded="false">3명 ▸</button><button type="button" class="rmb" aria-label="플랫폼팀 참조 해제" title="등록 해제 — 이 등록으로만 참조된 사람도 빠짐 (윤태호는 SW개발2팀으로도 참조되어 남음)">−</button></span></div>
               <div class="ar-diff"><span class="w">11-12 삭제 — 더는 따라가지 않습니다.</span> 이미 참조된 3명은 그대로입니다.</div>
               <ul class="sub"><li><i class="av">태호</i><span class="n">윤태호</span></li><li><i class="av">서준</i><span class="n">백서준</span></li><li><i class="av">하준</i><span class="n">문하준</span></li></ul>
-              <div class="atb"><button type="button" class="btn mini primary" title="피커가 열립니다. 고른 대상을 참조하고 이 등록을 해제합니다">대상 바꾸기…</button></div></li>
+              <div class="atb"><button type="button" class="btn mini primary" title="피커가 열립니다. 적용하면 새 대상 참조와 이 등록 해제를 한 번에 보냅니다">대상 바꾸기…</button></div></li>
             <li class="arow"><div class="ar-main"><i class="av">수아</i><span class="ar-name">한수아</span><span class="ar-st"><button type="button" class="rmb" aria-label="한수아 참조 해제" title="참조 해제">−</button></span></div>
               <div class="ar-diff">개인 참조</div></li>
           </ul>
@@ -419,7 +420,8 @@
   <ul class="legend">
     <li><b>등록 세 종류</b>: 조직 <span class="chip org">🏢 SW개발1팀</span> ("N명 ▸"로 받은 사람 펼침, 조직을 따라감) · 삭제된 조직 <span class="chip org gone">🏢 플랫폼팀</span><span class="chip dtag">삭제된 조직</span> (점선 회색 + 주황 띠) · 개인 (사람 아바타, 상태 칩).</li>
     <li><b>삭제된 조직 등록</b>: 업무에 이름 그대로 남고 더는 조직을 따라가지 않습니다 (새 멤버 배정·참조 없음). 이미 받은 배정·참조는 하나도 회수하지 않습니다. 카드 제목의 <span class="chip flt">삭제된 조직 1</span>과 업무의 <span class="chip flt">정리 필요</span>로 "떠 있는" 업무임을 알립니다.</li>
-    <li><b>대상 바꾸기…</b>: 피커가 열리고, 고른 대상(살아 있는 조직이나 사람)을 등록한 뒤 이 등록을 해제합니다. <b>−</b>는 등록만 해제 — 받은 사람은 남아 개인 행처럼 보이고 ("플랫폼팀(삭제됨)으로 받음"), 사람별 해제·인계는 지금처럼 각 사람에서 합니다. 해제되면 ①의 "업무 N건"에서 빠집니다.</li>
+    <li><b>−</b> (조직 등록, 살아 있든 삭제됐든): 등록과 함께 그 등록으로만 들어온 사람도 빠집니다 — 배정은 <code>item.unassign {rule}</code>로 그 규칙의 배정이 끝나고, 참조는 <code>item.uncc_org</code>가 그 등록이 추가한 사람만 뺍니다 (윤태호는 SW개발2팀으로도 참조되어 남음). 직접 추가한 사람은 그대로입니다.</li>
+    <li><b>대상 바꾸기…</b>: 피커에서 새 대상을 고르면, 새 대상 등록과 이 등록 해제를 한 번에 보냅니다 — 새 대상에 드는 사람은 남고 나머지는 빠집니다. 어느 쪽이든 ①의 "업무 N건"에서 빠집니다.</li>
   </ul>
 </div>
 
@@ -430,7 +432,7 @@
   var T = '끌어서 멤버 위에 놓으면 그 멤버가 헤드가 됩니다', ARR = '<span class="arr">→</span>';
   // n0/h0 = saved name/head; n/h = staged; st: '' | 'new' | 'del'
   var O = { 'o-k7m2': { n0: 'SW개발실', h0: 'kim-hn' }, 'o-p3x9': { n0: 'SW개발1팀', h0: 'lee-dy' }, 'o-r8d4': { n0: 'SW개발2팀', h0: 'park-sy' },
-    'o-t5n1': { n0: '릴리스TF', h0: 'oh-sj', st: 'del' }, 'o-w2c6': { n0: 'QA팀', h0: '', st: 'new' } };
+    'o-t5n1': { n0: '릴리스TF', h0: 'oh-sj', st: 'del', r: 2 }, 'o-w2c6': { n0: 'QA팀', h0: '', st: 'new' } };
   Object.keys(O).forEach(function (k) { var o = O[k]; o.n = o.n0; o.h = o.h0; o.st = o.st || ''; });
   R.querySelectorAll('li[data-id]').forEach(function (li) { M[li.dataset.id] = li; });
   var fixed = R.querySelector('.chg [data-fixed]').outerHTML;
@@ -475,7 +477,7 @@
       '<label class="hs">헤드 <select data-k="' + k + '" aria-label="' + esc(o.n) + ' 헤드"' + (del ? ' disabled' : '') + '>' + opts(k) + '</select></label><span class="acts">' +
       (del ? '<button type="button" class="btn mini" data-a="undo" data-k="' + k + '">↶ 삭제 취소</button>'
            : '<button type="button" class="btn mini" data-a="ren" data-k="' + k + '">이름 바꾸기</button><button type="button" class="btn mini dng" data-a="del" data-k="' + k + '">삭제</button>') +
-      '</span>' + (vac ? '<span class="vh">공석 — 참조·배정 목록에서 이 조직은 비활성입니다. 배지를 멤버 위에 끌어 놓거나 헤드를 고르세요.</span>' : '') + errHtml(k) + '</li>';
+      '</span>' + (del && o.r ? '<span class="vh">업무 ' + o.r + '건이 이 조직을 가리킵니다 — 저장하면 "삭제된 조직"으로 남고 따라가기를 멈춥니다</span>' : '') + (vac ? '<span class="vh">공석 — 참조·배정 목록에서 이 조직은 비활성입니다. 배지를 멤버 위에 끌어 놓거나 헤드를 고르세요.</span>' : '') + errHtml(k) + '</li>';
   }
   function chgItem(k) {
     var o = O[k], ty, d = [];
