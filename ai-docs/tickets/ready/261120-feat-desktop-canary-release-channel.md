@@ -1,5 +1,9 @@
 ---
 title: "데스크톱 카나리 릴리스 채널 추가"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-completeness-reviewed: 065b18fcc5b5338b
+sage-review-design-reviewed: 065b18fcc5b5338b
 ---
 
 # Add a desktop canary release channel
@@ -279,6 +283,30 @@ Current source establishes the implementation baseline:
   keep release filtering and URL authority in the main process, and retain the
   existing HTTPS/loopback URL policy (`agents-plugin-tool/desktop-electron/update.js:62-89`,
   `agents-plugin-tool/desktop-electron/dashboard-preload.js:1-26`).
+- Design review notes (2026-11-20), binding on planning:
+  - The desktop replaces any older numeric daemon core, across minors too
+    (`desktop-electron/daemon-controller.js:95-98`), so Decision 6's
+    same-minor wording covers only the routine patch-bump canary. A
+    minor-core canary (Decision 9's T3 case) would drain the shared daemon
+    across minors, previous-minor plugin sessions fail fast, and Back to
+    stable cannot restore the daemon. The Phase 1 ship procedure states this
+    consequence and its recovery (an explicit daemon shutdown), or forbids
+    minor-core canaries.
+  - Phase 1's win32 packaging test covers a suffixed `buildVersion`. If
+    rcedit or the macOS bundle fields reject the suffix, `buildVersion`
+    stays at the numeric core. The updater identity comes from the staged
+    package.json `version` (`desktop-electron/scripts/build.cjs:62-63`), so
+    Decision 13 still holds.
+  - Phase 2 planning names how canary handling treats the single `available`
+    slot, the persisted `skipped` value, and the auto-acknowledged
+    `applyFailure` for a not-newer version (`desktop-electron/update.js:392`,
+    `:406`, `:440-455`, `:584`). It also names the main-process signal that
+    the running app is a canary, which shows Back to stable.
+  - App ordering (canary below stable, Decision 4) is the reverse of daemon
+    `CompareVersions` and the launcher's comparison for equal cores
+    (`internal/wsdashboard/version.go:8-20`, `ws-mcp-launcher.py:1114-1131`). Equal
+    cores take the separate keep-running path, so this is harmless. The ship
+    doc and tests must not claim one ordering across app and daemon.
 
 ## Prior Decisions
 
