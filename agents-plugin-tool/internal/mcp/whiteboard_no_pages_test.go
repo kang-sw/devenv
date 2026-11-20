@@ -73,7 +73,20 @@ func TestWhiteboardMailboxWritesKeepBoardBytesAndRefreshServedView(t *testing.T)
 func TestWhiteboardPanelWritesKeepBoardBytesAndRefreshServedView(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	f.update(t, `<wb:topic name="t"><wb:log>board</wb:log></wb:topic>`)
+	swept := make(chan struct{})
+	f.source = dashboardPageSource(t, nil)
+	f.source.store.boardRetirement = &whiteboardRetirement{sweep: func(dir string, live func() (map[string]bool, bool)) {
+		sweepRetiredWhiteboardPages(dir, live)
+		close(swept)
+	}}
 	_ = f.servedPage(t)
+	// Old outputs recreated later belong to the already-swept interval. Wait
+	// for that boundary explicitly, including on hosts with slow file scans.
+	select {
+	case <-swept:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first cleanup did not finish")
+	}
 	before := whiteboardTreeForTest(t, f.pageDir())
 	actions := []struct {
 		tool         string
