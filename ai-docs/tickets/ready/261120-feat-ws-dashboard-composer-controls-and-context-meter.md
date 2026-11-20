@@ -115,6 +115,20 @@ Implement the hosted compaction milestones, snapshot metadata, Codex 5h probe pr
    - Tests: a parented worker is refused on `settings`; a record the `cardBound` hook reports (test stub) is refused and renders `IsChild` while its `ParentRef` stays nil; a parentless support conversation still switches model/effort through `Support.Select`; a cross-origin or non-local `settings` POST to a non-lead is refused.
 5. **Verification:** Add/update Go unit tests in `wsagent/compaction_test.go`, `wsagent/lead_http_test.go`, `wslive/state_test.go`, `wsdashboard/plan_usage_codex_test.go`, `wsdashboard/plan_usage_history_test.go`, and `wsdashboard/plan_usage_compat_test.go`; run `go test ./internal/wsagent/... ./internal/wslive/... ./internal/wsdashboard/...`.
 
+### Result (da6f20f) - 2026-11-20
+
+- **Landed:**
+  - Hosted 1/3 and 2/3 compaction milestones in `wsagent/compaction.go` and `wsagent/runner_conv.go`, plus `claude-mod` hosted advisory/milestone suppression (`agents-plugin/hooks/claude-mod/register.ts`, mirrored to `agents-plugin-wsflow/hooks/claude-mod/register.ts`, and synced Pi/native-pi workflow bundles).
+  - Additive T0 `UsageCompaction` on `wslive.UsageContext` (`wslive/snapshot.go`, `wslive/state.go`, `wsagent/agy_output_rate.go`, `wsagent/runner_conv.go`) with explicit deep copy across `normalizeUsage`, `(*Usage).clone`, and `cloneUsageContext`.
+  - Codex 5-hour quota (`18000s`/`300m`) promoted to `five_hour` ahead of `seven_day` (`wsdashboard/plan_usage_probe.go`) and persisted in separate `plan-usage-codex-history.json` (`wsdashboard/plan_usage_history.go`, `wsdashboard/plan_usage.go`) while keeping `plan-usage-history.json` byte-compatible with pinned legacy validators.
+  - `POST /agents/<id>/settings` gated on `local && own` for every id and refusing `403` for every child (`Record.Parent != nil || CardBound`), keeping `Runner.SetSettings` unguarded (`wsagent/http.go`, `wsagent/runner.go`), and `SessionView` populated with `IsChild`, `CanEditSettings`, `Model`, and `Effort` (`wsdashboard/{agent_sessions,daemon,pages,pageview,registry}.go`).
+- **Verification:**
+  - `go test ./internal/wsagent/... ./internal/wslive/... ./internal/wsdashboard/...`: passed (`wsagent` 140.895s, `wslive` 26.838s, `wsdashboard` 332.754s).
+  - `go test ./internal/wsrsrc/...`: passed (0.977s).
+  - `python3 -m unittest discover agents-plugin-wsflow/tests`: passed (22 tests, 2 skipped).
+  - `claude plugin test agents-plugin; claude plugin test agents-plugin-wsflow`: passed (848 pass, 0 fail across 20 files).
+  - `python3 agents-plugin-pi/scripts/prepare-workflow-bundles.py --check`: workflow bundles complete and current.
+
 ### Phase 2: Dashboard UI & Visual Verification
 
 *(Depends on Phase 1 landing `UsageContext.Compaction`, `SessionView` child settings metadata, `wsagent/http.go` guard, and the Codex 5h `/rail/usage` window and history member.)*
