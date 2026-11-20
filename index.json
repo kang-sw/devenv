@@ -301,16 +301,6 @@
     "261115-bug-ws-dashboard-fixture-real-home-plan-usage-probe": {
       "registered_at": "2026-11-15T02:27:46Z"
     },
-    "261115-bug-ws-dashboard-pinned-deeplink-under-topic-header": {
-      "registered_at": "2026-11-15T03:57:52Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-20T03:01:35Z"
-      }
-    },
     "261115-bug-ws-pi-bootstrap-elides-undelivered-manual": {
       "registered_at": "2026-11-14T15:17:10Z"
     },
@@ -547,19 +537,6 @@
     "261119-feat-ws-dashboard-audit-view": {
       "registered_at": "2026-11-19T14:04:50Z"
     },
-    "261119-feat-ws-dashboard-paged-docking-gallery": {
-      "registered_at": "2026-11-19T07:02:59Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-19T14:06:13Z",
-        "impl": {
-          "branch": "impl/develop/ditto-wasp-pager"
-        }
-      }
-    },
     "261119-feat-ws-named-custom-tiers": {
       "registered_at": "2026-11-19T08:32:19Z"
     },
@@ -600,7 +577,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-20T06:21:53Z",
         "impl": {
           "branch": "impl/develop/frame-conch-twerp"
