@@ -5,6 +5,8 @@ related:
   261120-bug-ws-agent-dogfood-delivery-context: "Develop already contains its direct-parent and worker-delivery fixes."
   261115-feat-ws-permission-profile: "Its retained implementation branch reproduces stale branch reuse."
   260912-bug-ws-pi-readonly-reviewer-artifact-contract: "Prior Pi-only scoped reviewer artifact contract."
+sage-review-design: required
+sage-review-completeness: required
 ---
 
 # Fix ws dogfood context routing gaps
