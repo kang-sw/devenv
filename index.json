@@ -596,7 +596,14 @@
       }
     },
     "261120-feat-desktop-canary-release-channel": {
-      "registered_at": "2026-11-20T14:11:51Z"
+      "registered_at": "2026-11-20T14:11:51Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-20T14:34:22Z"
+      }
     },
     "261120-feat-ws-dashboard-chat-agent-roster-hud": {
       "registered_at": "2026-11-20T14:14:08Z"
