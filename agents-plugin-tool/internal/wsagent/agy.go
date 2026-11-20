@@ -166,6 +166,7 @@ func (b AgyBackend) Start(ctx context.Context, spec StartSpec) (Process, error) 
 		spec.Holder.ringPulse = agyRingPulse
 	}
 	m := newAgyMapper(spec.SessionID)
+	m.recoveredSteers = slices.Clone(spec.RecoveredSteers)
 	sp, err := startChild(spec, cmd, m, agyProtocol{})
 	if err != nil {
 		return nil, err
@@ -240,7 +241,11 @@ type agyProcess struct {
 }
 
 func (p *agyProcess) processControls() processControls {
-	return processControls{Process: p, approval: p, mode: p, steer: p}
+	controls := processControls{Process: p, approval: p, mode: p, steer: p}
+	if p.worker {
+		controls.reports = p
+	}
+	return controls
 }
 
 func (p *agyProcess) Close() error {
@@ -369,7 +374,7 @@ func (p *agyProcess) Send(text string) error {
 		return errors.New("the agy session is not open")
 	}
 	id := p.newID(agyKindPrompt)
-	p.m.promptSent(id)
+	p.m.promptSentText(id, text)
 	err := p.writeLine(map[string]any{"jsonrpc": "2.0", "id": id, "method": "session/prompt", "params": map[string]any{
 		"sessionId": sid,
 		"prompt":    []any{map[string]any{"type": "text", "text": text}},
@@ -383,6 +388,11 @@ func (p *agyProcess) Send(text string) error {
 // Steer writes text as another prompt: agy ends the running prompt and
 // carries its run on under this one (seen on 1.5.9).
 func (p *agyProcess) Steer(text string) error { return p.Send(text) }
+
+// ClearSteered is a no-op for agy. Its acknowledgement is the prior prompt's
+// end_turn response, which also proves the replacement prompt took the run;
+// the runner receives SteerAnswer and UserTaken together.
+func (p *agyProcess) ClearSteered() error { return nil }
 
 // Interrupt cancels the running turn; its prompt answers "cancelled".
 func (p *agyProcess) Interrupt() error {
@@ -592,6 +602,9 @@ type agyMapper struct {
 	// and is bounded by wakeTimer so a burst with no prompt response
 	// closes cleanly instead of wedging c.turn.
 	outstanding     map[string]bool
+	steerText       map[string]string
+	steerOrder      []string
+	recoveredSteers []string
 	inTurn          bool
 	unsolicitedTurn bool
 	wakeStepHadText bool
@@ -627,6 +640,7 @@ func newAgyMapper(sessionID string) *agyMapper {
 	return &agyMapper{
 		sessionID:    sessionID,
 		outstanding:  map[string]bool{},
+		steerText:    map[string]string{},
 		openCalls:    map[string]bool{},
 		pendingTools: map[string]bool{},
 		openBg:       map[string]bool{},
@@ -767,7 +781,9 @@ func (m *agyMapper) mode() string {
 	return m.curMode
 }
 
-func (m *agyMapper) promptSent(id string) {
+func (m *agyMapper) promptSent(id string) { m.promptSentText(id, "") }
+
+func (m *agyMapper) promptSentText(id, text string) {
 	m.mu.Lock()
 	if m.unsolicitedTurn {
 		m.rate.dropUntracked()
@@ -775,6 +791,10 @@ func (m *agyMapper) promptSent(id string) {
 	m.unsolicitedTurn = false
 	m.wakeSawUsage = false
 	m.stopWakeTimerLocked()
+	if m.inTurn && len(m.outstanding) > 0 {
+		m.steerText[id] = text
+		m.steerOrder = append(m.steerOrder, id)
+	}
 	m.outstanding[id] = true
 	m.rate.promptSent(id)
 	m.mu.Unlock()
@@ -783,6 +803,8 @@ func (m *agyMapper) promptSent(id string) {
 func (m *agyMapper) promptDropped(id string) {
 	m.mu.Lock()
 	delete(m.outstanding, id)
+	delete(m.steerText, id)
+	m.steerOrder = slices.DeleteFunc(m.steerOrder, func(steerID string) bool { return steerID == id })
 	m.rate.promptDropped(id)
 	m.mu.Unlock()
 }
@@ -923,6 +945,21 @@ func (m *agyMapper) response(msg agyMessage, replies lineReplies, now int64) []E
 		_, replaying := replies.(silentReplies)
 		ours := m.outstanding[id]
 		delete(m.outstanding, id)
+		var steerEvents []Event
+		for i, steerID := range m.steerOrder {
+			if m.outstanding[steerID] {
+				text := m.steerText[steerID]
+				delete(m.steerText, steerID)
+				m.steerOrder = slices.Delete(m.steerOrder, i, i+1)
+				steerEvents = append(steerEvents, Event{SteerAnswer: &SteerAnswer{}}, Event{UserTaken: text})
+				break
+			}
+		}
+		if len(steerEvents) == 0 && len(m.recoveredSteers) > 0 {
+			text := m.recoveredSteers[0]
+			m.recoveredSteers = m.recoveredSteers[1:]
+			steerEvents = append(steerEvents, Event{SteerAnswer: &SteerAnswer{}}, Event{UserTaken: text})
+		}
 		var rateEv *Event
 		if rate, ok := m.rate.complete(id, msg, replaying); ok {
 			rateCopy := rate
@@ -935,9 +972,9 @@ func (m *agyMapper) response(msg agyMessage, replies lineReplies, now int64) []E
 		}
 		if len(m.outstanding) > 0 || (!ours && !m.inTurn) {
 			if rateEv != nil {
-				return []Event{*rateEv}
+				return append(steerEvents, *rateEv)
 			}
-			return nil
+			return steerEvents
 		}
 		out := m.endTurn(msg, now)
 		if rateEv != nil {
@@ -952,7 +989,7 @@ func (m *agyMapper) response(msg agyMessage, replies lineReplies, now int64) []E
 				out = append(out, *rateEv)
 			}
 		}
-		return out
+		return append(steerEvents, out...)
 	}
 	a := controlAnswer{ok: msg.Error == nil, body: msg.Result}
 	if msg.Error != nil {

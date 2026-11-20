@@ -371,6 +371,34 @@ func TestAgentWorkerForwardsOnItsToken(t *testing.T) {
 	}
 }
 
+func TestAgentForwardSessionKeyDoesNotSelectCompletionParent(t *testing.T) {
+	setupMailboxTestEnv(t)
+	route := &fakeAgentRoute{}
+	daemon := httptest.NewServer(route)
+	defer daemon.Close()
+	t.Setenv(wsagent.EnvPiToken, "tok123")
+	t.Setenv(wsagent.EnvPiEndpoint, daemon.URL+"/")
+	t.Setenv(envAllowedTools, strings.Join(wsagent.AgentWSTools, ","))
+	root := t.TempDir()
+	initGit(t, root)
+	s := NewServer(root, "test")
+	defer s.Close()
+	key, err := s.sessions.mint(root, roleDelegate, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := callToolWithKey(t, s, 1, key, "agent.spawn", map[string]any{"prompt": "child", "tier": "small", "authority": "read-only"}); !strings.Contains(out, "id:kid9") {
+		t.Fatalf("agent.spawn = %q", out)
+	}
+	call := route.last()
+	if _, forwarded := call.body["session_key"]; forwarded {
+		t.Fatalf("the worker session key was forwarded as completion-routing input: %+v", call.body)
+	}
+	if call.body["prompt"] != "child" || call.body["tier"] != "small" || call.body["authority"] != "read-only" {
+		t.Fatalf("forwarded spawn lost its token-scoped request: %+v", call.body)
+	}
+}
+
 // TestReadOnlyAgentRefusesMutatingTools: a read-only agent's ws-mcp, from
 // its process env or a hosted session's hello env, refuses the loadout's
 // mutating tools naming the level; mailbox.send and every tool of a

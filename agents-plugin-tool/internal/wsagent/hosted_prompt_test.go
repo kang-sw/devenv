@@ -195,8 +195,8 @@ func TestHostedLeadPlaybookCommands(t *testing.T) {
 }
 
 // TestAgentChildPromptCarriesTheSteer: an agent.spawn child of a backend
-// whose catalog names its native subagent tool gets the never-use line
-// right after its key sentence.
+// whose catalog names its native subagent tool gets the parent return address
+// and the never-use line right after its key sentence.
 func TestAgentChildPromptCarriesTheSteer(t *testing.T) {
 	h, _ := agentHarness(t, func(o *Options) {
 		reg := o.Backends[BackendClaude]
@@ -206,6 +206,7 @@ func TestAgentChildPromptCarriesTheSteer(t *testing.T) {
 	a, _ := h.agentRunning(h.leadCaller(), AgentSpawnRequest{Prompt: "go", Tier: "small", Authority: "read-only", SystemPrompt: "You are the cache probe."})
 	text := instructionsOf(t, h.backend.start(0))
 	want := "You are the cache probe.\n\nYour ws session key is `" + h.record(a).WSKey + "`. Pass it as the `session_key` argument of every ws tool call. " +
+		"Your direct parent's mailbox reply address is `id:" + leadParent.ReplyID + "`; send it reports or questions with `mailbox.send`. " +
 		"Never use the native `Agent` tool. Start a subagent only with the ws `agent.spawn` tool, and continue one with the ws `mailbox.send` tool.\n"
 	if text != want {
 		t.Fatalf("the child's appended prompt = %q, want %q", text, want)

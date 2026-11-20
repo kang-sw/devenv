@@ -91,6 +91,7 @@ func (b CodexBackend) Start(_ context.Context, spec StartSpec) (Process, error) 
 	cmd.Env = codexEnv(spec)
 	mapper := newCodexMapper(spec.SessionID)
 	mapper.readOnlyWorker = spec.Lead == nil && policy == "never"
+	mapper.worker = spec.Lead == nil
 	if attach {
 		// The holder may have dropped a reply the earlier daemon already
 		// wrote. Read its durable identity once at reattach; steady-state
@@ -164,7 +165,11 @@ type codexProcess struct {
 }
 
 func (p *codexProcess) processControls() processControls {
-	return processControls{Process: p, approval: p, mode: p, steer: p, commands: p, turns: p}
+	controls := processControls{Process: p, approval: p, mode: p, steer: p, commands: p, turns: p}
+	if p.worker {
+		controls.reports = p
+	}
+	return controls
 }
 
 func (p *codexProcess) call(kind, method string, params map[string]any) (json.RawMessage, error) {
@@ -340,11 +345,15 @@ func (p *codexProcess) Steer(text string) error {
 	if turn == "" {
 		return ErrUnsupported
 	}
-	_, err := p.call("control", "turn/steer", map[string]any{
+	id := "wsc/control/" + p.epoch + "/" + strconv.FormatUint(p.seq.Add(1), 10)
+	return p.writeLine(map[string]any{"id": id, "method": "turn/steer", "params": map[string]any{
 		"threadId": session, "expectedTurnId": turn, "input": codexInput(text),
-	})
-	return err
+	}})
 }
+
+// ClearSteered is a no-op for Codex: turn/steer is scoped by the expected
+// active turn id, so an accepted message cannot leak into a later turn.
+func (p *codexProcess) ClearSteered() error { return nil }
 
 func (p *codexProcess) Interrupt() error {
 	session, turn := p.m.active()

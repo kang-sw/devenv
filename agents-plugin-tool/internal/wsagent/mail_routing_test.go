@@ -218,7 +218,7 @@ func TestMailResetsTheChildWaitingClock(t *testing.T) {
 	}
 }
 
-func TestMailRelationFollowsTheSpawnLineage(t *testing.T) {
+func TestChildMailEnvelopeKeepsParentRelation(t *testing.T) {
 	h, _ := mailHarness(t, nil)
 	a, b := settledPair(t, h)
 	card := h.card()
