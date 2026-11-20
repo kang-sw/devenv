@@ -289,7 +289,7 @@ above carry (123) and (124)).
 
 ## Open Decision Queue
 
-Last ID: (1903)
+Last ID: (1904)
 
 (1900) [open] [policy] Phase 3 hosted-backend scope now that Codex is registered.
 
@@ -310,14 +310,17 @@ Last ID: (1903)
 
 - Context: Decision 21 deliberately keeps Pi's native extension manual
   injection. Pi also applies its lead bootstrap and model-prompt blocks from
-  `before_agent_start` on every turn. Moving those features into the daemon is
-  a larger Pi-extension retirement and would reverse Decision 21; keeping them
-  means Phase 3 cannot literally remove every hosted Pi prompt hook.
+  `before_agent_start` on every turn, expands `/skill:` and `ws-skill` results
+  through `lead-skills.ts`, and can submit an active-goal follow-up through
+  `goal-loop.ts`. Moving those features into the daemon is a larger
+  Pi-extension retirement and would reverse Decision 21; keeping them means
+  Phase 3 cannot literally remove every hosted Pi prompt hook. Hosted Pi's
+  separate compaction preparation prompts are already disabled.
 - a. Preserve Decision 21. Narrow Phase 3's promise to daemon-owned ambient
   input; Pi's native lead-bootstrap/model-prompt hooks remain enumerated
   exceptions.
-- b. Supersede Decision 21 and migrate all Pi per-turn prompt blocks into the
-  daemon in this phase.
+- b. Supersede Decision 21 and migrate all Pi per-turn prompt and follow-up
+  injection paths into the daemon in this phase.
 
 > recommendation: a - the existing Pi blocks include live skill discovery,
 > model-specific user configuration, and fork inheritance; those are not the
@@ -354,6 +357,23 @@ Last ID: (1903)
 > recommendation: a - exploration is the bounded read-only workload the small
 > tier is intended to cover, while callers can still override the returned
 > recommendation.
+
+(1904) [open] [policy] Shape of the rendered explore instructions.
+
+- Context: `agents-plugin/rsrc/explore/explore.md#L9-L38` currently addresses
+  the calling workflow, including its spawn and continuation idioms, rather
+  than the spawned child. Its `delegates: true` frontmatter also makes
+  `playbook.render` append a caller-facing continuity tip
+  (`agents-plugin-tool/internal/mcp/playbook_tools.go#L514-L528`). That shape
+  does not satisfy Phase 4's child-instruction contract.
+- a. Repurpose the existing `explore` stem as child-facing appended
+  instructions and remove `delegates: true`.
+- b. Keep the existing caller-facing `explore` stem and add a new rendered stem
+  for child instructions.
+
+> recommendation: a - `explore` is already the named profile/playbook contract;
+> rewriting it avoids a second stem and removes caller-only prose from the
+> child's appended instructions.
 
 ## Constraints
 
@@ -717,11 +737,14 @@ rather than being retired by this phase (1901).
 | `agents-plugin/hooks/hooks.json` | The only command hook is the `SessionStart` matcher for `compact`, which prints the revive nudge. | No plugin-less hosted Claude lead; the ws/wsflow CLI plugin only. | Explicitly excluded; `261117-feat-ws-hosted-compaction-lifecycle` owns it. |
 | `agents-plugin/hooks/claude-mod/register.ts` manual/preload rewrites | A keyed workflow-manual row on lead-skill expansion, repeat-read collapse, and manual adoption notices around `workflow_manual` / `playbook_read`. | None in hosted Claude after Phase 1 removed the plugin. | Already replaced by Phases 1-2, not Phase 3 ambient. |
 | `register.ts` mailbox/dashboard steering | Mail and promoted dashboard text can be appended at a main-thread tool boundary; prompt/turn hooks otherwise observe the stream for feed, captions, status, compaction, and reconnect state. Hosted mode disables the mailbox watcher and dashboard feed (`register.ts#L984-L993`, `#L1217-L1223`). | No hosted backend receives this mod injection. | No text to reproduce. The daemon already joins claimed mail and child reports into the next ordinary input (`runner_conv.go#L1129-L1133`, `#L1212-L1219`). UI/feed observers are not model ambient. |
+| Claude mod compaction/reconnect paths | Context-window advisory and milestone prompts, an optional post-compaction continuation (`timing.ts#L145-L169`, `#L196-L204`; `compaction.ts#L29-L65`), and MCP reconnect success/failure plus optional continuation prompts (`reconnect.ts#L71-L80`, `#L340-L377`). | None in hosted Claude after Phase 1 removed the plugin. | Do not reproduce. `SessionStart(compact)` remains separately excluded, and these plugin-owned lifecycle prompts are not the short daemon ambient block. |
 | owner user-level Claude hooks | `UserPromptSubmit` and main-agent `PostToolUse` add `(응답 언어: 한국어)` as `additionalContext` in the current owner settings. These are user hooks, not shipped ws hooks. | Hosted Claude, because the plugin-less launch still keeps user settings. | Do not inspect or emulate arbitrary user hook output. Under (1902)=a, `workflow.lang` becomes the ws-owned replacement and the owner can remove the duplicate local hook. |
-| `agents-plugin/.codex-plugin/hooks.json` | A `Stop` command can block completion and ask the model to drain unread mail from its named `WS_MAILBOX` inbox. | The Codex plugin may stay loaded (`codex.go#L224-L248`), but hosted processes remove `WS_MAILBOX`/`WS_MAILBOX_AUTO` (`runner_process.go#L355-L357`) and the daemon owns mail delivery; no response-language or other per-turn ws ambient is supplied. | No replacement text. Include Codex in the new backend-neutral language block only if (1900)=a. User Codex hooks remain host-owned. |
+| `agents-plugin/.codex-plugin/hooks.json` | A `Stop` command can block completion and ask the model to drain unread mail from its named `WS_MAILBOX` inbox. | The Codex plugin hook is preserved because hosted Codex keeps plugins and user hooks (`codex.go#L224-L248`), but it is silent in daemon-hosted sessions because `runner_process.go#L355-L357` blanks `WS_MAILBOX` and `WS_MAILBOX_AUTO`; the daemon owns mail delivery. No response-language or other per-turn ws ambient is supplied. | No replacement text. Include Codex in the new backend-neutral language block only if (1900)=a. User Codex hooks remain host-owned. |
 | agy adapter | No plugin/hook ambient facility. `_meta.antigravity.systemPrompt.append` carries launch-time instructions, and later `Send` calls pass turn text directly (`agy.go#L296-L311`, `#L364-L378`). | Hosted agy. | New ambient block rides the common turn input; no agy-specific file. |
 | Pi `lead-bootstrap.ts` | Every lead/fork `before_agent_start` appends the static manual snapshot, session-state pointer, Pi guide, live `<available_skills>`, and Pi agent-compat guide (`lead-bootstrap.ts#L1-L28`, `#L304-L350`). | Native-extension hosted Pi leads and forks; not worker/explore roles. | Preserve under (1901)=a / Decision 21. It is not duplicated in the daemon ambient block. |
 | Pi `model-prompts.ts` | Every turn replaces a length-framed `<ws-model-prompts>` block with user-configured general and lead-only text for the selected model (`model-prompts.ts#L9-L31`, `#L68-L103`). | Native-extension hosted Pi leads/forks, subject to role/model config. | Preserve under (1901)=a; model-specific and fork-inheritance semantics stay extension-owned. |
+| Pi `lead-skills.ts` expansion | Typed `/skill:` input and `ws-skill` results can replace a shim preload with a rendered playbook body or a pointer to its visible copy (`lead-skills.ts#L310-L360`, `#L377-L429`). | Native-extension hosted Pi leads/forks when the skill tool is active; typed expansion requires interactive or RPC input. | Preserve under (1901)=a. This is explicit skill invocation, not daemon ambient. |
+| Pi `goal-loop.ts` follow-up | While a lead goal remains active, settlement can submit a follow-up reminder with achieve/block/compact directions, context usage, and carried-forward text (`goal-loop.ts#L533-L550`, `#L1072-L1119`, `#L1412-L1445`). Its separate advisory, milestone, and hard-cut compaction preparation is disabled in hosted mode (`goal-loop.ts#L1477-L1503`). | Hosted Pi lead, conditional on an active goal. | Preserve under (1901)=a. Goal lifecycle remains extension-owned and is not duplicated in the daemon ambient block. |
 | Pi generated bridge | `before_agent_start` appends extension-health/version warnings; only the fallback path also appends hosted identity and the daemon-rendered manual (`pi_lead_bridge.mjs#L46-L59`, `pi_lead.go#L146-L171`). | Hosted Pi; identity/manual only when the native extension failed and MCP fallback is active. | Preserve. Warnings and fallback identity/manual are not language ambient. |
 | Pi active-tool hook | `index.ts#L547-L554` filters the active tool set before each turn. | Hosted Pi roles with delegation policy. | Not model context and outside this phase. |
 
@@ -788,8 +811,9 @@ Frozen file list under the recommended (1900)-(1902) answers:
 seam); `children.go` is **not touched** (its reports already enter the joined
 turn); `agent_tools.go` is **not touched**; no `rsrc/manifest.json` or other
 manifest is touched. A (1901)=b answer reopens this list and additionally needs
-the Pi extension/bridge and their generated package artifacts; implementation
-must not silently take that branch.
+the Pi extension/bridge, `agents-plugin-pi/src/lead-skills.ts`,
+`agents-plugin-pi/src/goal-loop.ts`, and their generated package artifacts;
+implementation must not silently take that branch.
 
 Verification: remote w5090 Go tests exercise each of Claude, Codex (if
 (1900)=a), agy, and Pi through ordinary and expanded-playbook turns; lead versus
@@ -810,8 +834,11 @@ already exist:
 
 - `agents-plugin/rsrc/explore/explore.md` is already `kind: render`, declares
   only the established `ExploreAgent`, `SpawnIdiom`, and `ContinueIdiom`
-  variables, and has exact wsflow and Pi rsrc mirrors. What it lacks is a
-  frontmatter `tier`, so `playbook.render` omits the recommendation.
+  variables, and has exact wsflow and Pi rsrc mirrors. Its current body is a
+  caller-facing fallback brief (`explore.md#L9-L38`), and `delegates: true`
+  makes rendering append another caller continuity tip
+  (`playbook_tools.go#L514-L528`). It also lacks a frontmatter `tier`, so
+  `playbook.render` omits the recommendation.
 - `internal/wsagent/builtin.go#L194-L212` embeds
   `internal/wsagent/instructions/explore.md` and maps it to `ExploreProfile`;
   the builtin profile selects `builtin:explore` at `builtin.go#L290-L299`.
@@ -823,14 +850,17 @@ already exist:
   returns path plus recommended tier/model/effort when a tier exists
   (`playbook_tools.go#L531-L565`).
 
-Therefore this phase adds only the chosen bare `tier` to the shipped explore
-playbook and closes the cross-surface contract tests. Under (1903)=a the value
-is `small`. The embedded one-line profile remains unchanged as the legacy
-profile path when a caller/plugin has no renderable playbook. "Fallback" does
-not mean that a failed `playbook.render` silently loads builtin text; the two
-paths remain independent, which is the T0 behavior Decision 25 approved. The
-native-subagent steer still comes from daemon-composed child instructions
-(Decision 24), not this playbook. Depends on
+Under the recommended (1904)=a answer, this phase rewrites the existing
+`explore` body as instructions addressed to the spawned child, removes
+`delegates: true` so rendering carries no caller continuity tip, and adds the
+bare tier chosen in (1903). Under (1903)=a that tier is `small`. A (1904)=b
+answer reopens the frozen resource and artifact list for a new stem. The
+embedded one-line profile remains unchanged as the legacy profile path when a
+caller/plugin has no renderable playbook. "Fallback" does not mean that a
+failed `playbook.render` silently loads builtin text; the two paths remain
+independent, which is the T0 behavior Decision 25 approved. The native-subagent
+steer still comes from daemon-composed child instructions (Decision 24), not
+this playbook. Depends on
 `261117-feat-ws-agent-tools-mailbox-routing#phase1`.
 
 Frozen file list (the resource regeneration is mandatory):
@@ -857,7 +887,8 @@ Frozen file list (the resource regeneration is mandatory):
   required outputs of `prepare-workflow-bundles.py` followed by
   `prepare-native-payload.py --first-party-only`, not optional release noise.
 - Tests: `agents-plugin-tool/internal/mcp/playbook_render_surface_test.go`
-  (shipped explore render returns path plus bare tier/model/effort) and
+  (shipped explore render returns path plus bare tier/model/effort, directly
+  addresses the spawned child, and carries no caller continuity tip) and
   `agents-plugin-tool/internal/wsagent/agent_tools_test.go` (the rendered file's
   exact body reaches the child while tier/authority caps still apply).
 
@@ -870,8 +901,10 @@ only the three rsrc manifests and the listed Pi bundle/native inventories do.
 
 Verification: remote w5090 tests prove the real shipped `explore` render returns
 a path and the selected bare-tier recommendation plus config-resolved model and
-effort; spawning with that path and tier delivers its exact rendered body as
-the appended system prompt, with tier-rank and authority caps unchanged; the
-existing builtin-profile test still passes with the shipped playbook hidden.
+effort; the rendered body addresses the spawned child and carries no
+caller-facing continuity tip; spawning with that path and tier delivers its
+exact rendered body as the appended system prompt, with tier-rank and authority
+caps unchanged; the existing builtin-profile test still passes with the shipped
+playbook hidden.
 Run the ws/wsflow/Pi rsrc mirror and manifest drift guards and both Pi bundle
 freshness checks after regeneration.
