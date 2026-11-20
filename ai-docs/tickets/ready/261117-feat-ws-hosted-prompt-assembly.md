@@ -12,6 +12,7 @@ related:
   261115-feat-ws-worker-profile-session-spawn: "ready; owner-created worker-profile sessions keep its short worker manual and are exempt from native-subagent removal"
   261115-feat-ws-whiteboard-agent-card: "ready; card children keep its fixed card bootstrap; its keyless-attempt tests meet Decision 10"
   261115-feat-ws-hosted-codex-adapter-contract: "ready; recommends keeping plugin skills and hooks in hosted Codex, the opposite of Decision 12, outside this ticket's scope (Decision 15)"
+  261120-feat-ws-pi-common-interface-rebuild: "late-stage epic child rebuilding Pi on the common hosted interface and retiring its native extension after the unresolved transition gate"
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 1e60dd1b53252259
@@ -287,93 +288,37 @@ above carry (123) and (124)).
     embedded text, which would drop the profile for an old plugin under a new
     daemon.
 
-## Open Decision Queue
+Decisions 26-30 settle (1900)-(1904) from the owner's 2026-11-20 answer
+"(1900)=a", meaning all recommended options.
 
-Last ID: (1904)
-
-(1900) [open] [policy] Phase 3 hosted-backend scope now that Codex is registered.
-
-- Context: Decision 15 excluded Codex because it was not a hosted backend then,
-  but `cmd/ws-mcp/dashboard.go` now registers `BackendCodex` for hosted leads and
-  workers. Leaving Decision 15 unchanged would make the phase's backend matrix
-  knowingly incomplete.
-- a. Supersede Decision 15 for Phase 3 only: cover hosted Claude, Codex, agy, and
-  Pi.
-- b. Keep Decision 15: inventory Codex, but do not inject ambient context into
-  it in this ticket.
-
-> recommendation: a - the new unit sits at the backend-neutral send boundary,
-> and excluding a registered hosted backend would create an avoidable prompt
-> contract split.
-
-(1901) [open] [policy] Meaning of "needs no plugin hooks" for hosted Pi.
-
-- Context: Decision 21 deliberately keeps Pi's native extension manual
-  injection. Pi also applies its lead bootstrap and model-prompt blocks from
-  `before_agent_start` on every turn, expands `/skill:` and `ws-skill` results
-  through `lead-skills.ts`, and can submit an active-goal follow-up through
-  `goal-loop.ts`. Moving those features into the daemon is a larger
-  Pi-extension retirement and would reverse Decision 21; keeping them means
-  Phase 3 cannot literally remove every hosted Pi prompt hook. Hosted Pi's
-  separate compaction preparation prompts are already disabled.
-- a. Preserve Decision 21. Narrow Phase 3's promise to daemon-owned ambient
-  input; Pi's native lead-bootstrap/model-prompt hooks remain enumerated
-  exceptions.
-- b. Supersede Decision 21 and migrate all Pi per-turn prompt and follow-up
-  injection paths into the daemon in this phase.
-
-> recommendation: a - the existing Pi blocks include live skill discovery,
-> model-specific user configuration, and fork inheritance; those are not the
-> same concern as a short backend-neutral turn reminder.
-
-(1902) [open] [policy] Content and role of the new daemon ambient block.
-
-- Context: ws ships no `UserPromptSubmit` hook. The owner's user-level Claude
-  hook currently appends `(응답 언어: 한국어)`, while ws already has the
-  layered `workflow.lang` key and a canonical language instruction used by
-  manual/playbook rendering. The separate
-  `261113-feat-ws-configurable-per-turn-lead-reminder` idea proposes arbitrary
-  reminder text and has unresolved scope choices of its own.
-- a. Inject only the canonical instruction resolved from `workflow.lang`, and
-  only for hosted leads. Leave arbitrary reminders and arbitrary user hooks to
-  the idea ticket/host configuration.
-- b. Add `lead.turn_reminder` here and inject both language and arbitrary
-  reminder text for hosted leads.
-- c. Attempt to mirror host user-hook output generically for every hosted role.
-
-> recommendation: a - it replaces the observed response-language use case from
-> an existing ws-owned config value without inventing a second config contract
-> or leaking lead-mode reminders into workers.
-
-(1903) [open] [policy] Recommended bare tier for the renderable explore brief.
-
-- Context: `explore/explore.md` is already renderable but has no `tier`, so
-  `playbook.render` returns no recommendation. The brief is read-only,
-  evidence-gathering work; the embedded `explore` profile deliberately leaves
-  model and effort tier-selected by its caller.
-- a. `small`.
-- b. `medium`.
-
-> recommendation: a - exploration is the bounded read-only workload the small
-> tier is intended to cover, while callers can still override the returned
-> recommendation.
-
-(1904) [open] [policy] Shape of the rendered explore instructions.
-
-- Context: `agents-plugin/rsrc/explore/explore.md#L9-L38` currently addresses
-  the calling workflow, including its spawn and continuation idioms, rather
-  than the spawned child. Its `delegates: true` frontmatter also makes
-  `playbook.render` append a caller-facing continuity tip
-  (`agents-plugin-tool/internal/mcp/playbook_tools.go#L514-L528`). That shape
-  does not satisfy Phase 4's child-instruction contract.
-- a. Repurpose the existing `explore` stem as child-facing appended
-  instructions and remove `delegates: true`.
-- b. Keep the existing caller-facing `explore` stem and add a new rendered stem
-  for child instructions.
-
-> recommendation: a - `explore` is already the named profile/playbook contract;
-> rewriting it avoids a second stem and removes caller-only prose from the
-> child's appended instructions.
+26. **(1900) Phase 3 covers hosted Claude, Codex, agy, and Pi.** Owner
+    (1900)=a, 2026-11-20. This supersedes Decision 15 for Phase 3 only:
+    Codex is now a registered hosted backend, and the ambient unit sits at the
+    backend-neutral send boundary. Rejected: inventory Codex while excluding
+    it from ambient injection, which would split the hosted prompt contract.
+27. **(1901) Preserve Decision 21 during Phase 3.** Owner (1901)=a,
+    2026-11-20. Pi's native `lead-bootstrap`, `model-prompts`, `lead-skills`,
+    `goal-loop` hooks and the bridge remain enumerated exceptions;
+    Phase 3 delivers only daemon-owned ambient input and does not migrate those
+    hooks. Owner context, 2026-11-20: Pi's extension will instead be retired
+    and Pi rebuilt from scratch against the common interface in the late epic
+    child `261120-feat-ws-pi-common-interface-rebuild`. Rejected: migrating all
+    Pi per-turn prompt and follow-up injection paths into the daemon in this
+    phase; those paths include live skill discovery and model/fork behavior
+    beyond the short ambient block.
+28. **(1902) Inject only the canonical instruction resolved from
+    `workflow.lang`, for hosted leads only.** Owner (1902)=a, 2026-11-20.
+    An unset value adds nothing. Rejected: adding `lead.turn_reminder` here,
+    which creates another config contract; mirroring arbitrary host user-hook
+    output for every hosted role, which would leak lead reminders into workers.
+29. **(1903) Set the renderable `explore` brief's recommended bare tier to
+    `small`.** Owner (1903)=a, 2026-11-20. Callers may override the returned
+    recommendation. Rejected: `medium`, because bounded read-only exploration
+    fits the small tier.
+30. **(1904) Repurpose the existing `explore` stem as child-facing appended
+    instructions and remove `delegates: true`.** Owner (1904)=a, 2026-11-20.
+    Rejected: retaining the caller-facing stem and adding another rendered
+    stem, which would duplicate the existing named profile/playbook contract.
 
 ## Constraints
 
@@ -723,12 +668,12 @@ Forward:
 ### Phase 3: Per-turn ambient injection replacing plugin hooks
 
 The daemon adds one backend-neutral ambient block to each hosted lead turn's
-input. The recommended settlement of (1900)-(1902) makes that block the
-canonical instruction resolved from `workflow.lang`; an unset value adds
-nothing. It does not copy arbitrary user hooks or introduce
+input across hosted Claude, Codex, agy, and Pi (Decision 26). That block is the
+canonical instruction resolved from `workflow.lang` (Decision 28); an unset
+value adds nothing. It does not copy arbitrary user hooks or introduce
 `lead.turn_reminder`. `StartSpec.Instructions` remains launch-only (Decision
-16), and Pi's native prompt hooks remain the enumerated Decision 21 exception
-rather than being retired by this phase (1901).
+16), and Pi's native prompt hooks remain the enumerated Decision 21 and 27
+exceptions until the late epic rebuild.
 
 #### Current hook and ambient inventory
 
@@ -738,13 +683,13 @@ rather than being retired by this phase (1901).
 | `agents-plugin/hooks/claude-mod/register.ts` manual/preload rewrites | A keyed workflow-manual row on lead-skill expansion, repeat-read collapse, and manual adoption notices around `workflow_manual` / `playbook_read`. | None in hosted Claude after Phase 1 removed the plugin. | Already replaced by Phases 1-2, not Phase 3 ambient. |
 | `register.ts` mailbox/dashboard steering | Mail and promoted dashboard text can be appended at a main-thread tool boundary; prompt/turn hooks otherwise observe the stream for feed, captions, status, compaction, and reconnect state. Hosted mode disables the mailbox watcher and dashboard feed (`register.ts#L984-L993`, `#L1217-L1223`). | No hosted backend receives this mod injection. | No text to reproduce. The daemon already joins claimed mail and child reports into the next ordinary input (`runner_conv.go#L1129-L1133`, `#L1212-L1219`). UI/feed observers are not model ambient. |
 | Claude mod compaction/reconnect paths | Context-window advisory and milestone prompts, an optional post-compaction continuation (`timing.ts#L145-L169`, `#L196-L204`; `compaction.ts#L29-L65`), and MCP reconnect success/failure plus optional continuation prompts (`reconnect.ts#L71-L80`, `#L340-L377`). | None in hosted Claude after Phase 1 removed the plugin. | Do not reproduce. `SessionStart(compact)` remains separately excluded, and these plugin-owned lifecycle prompts are not the short daemon ambient block. |
-| owner user-level Claude hooks | `UserPromptSubmit` and main-agent `PostToolUse` add `(응답 언어: 한국어)` as `additionalContext` in the current owner settings. These are user hooks, not shipped ws hooks. | Hosted Claude, because the plugin-less launch still keeps user settings. | Do not inspect or emulate arbitrary user hook output. Under (1902)=a, `workflow.lang` becomes the ws-owned replacement and the owner can remove the duplicate local hook. |
-| `agents-plugin/.codex-plugin/hooks.json` | A `Stop` command can block completion and ask the model to drain unread mail from its named `WS_MAILBOX` inbox. | The Codex plugin hook is preserved because hosted Codex keeps plugins and user hooks (`codex.go#L224-L248`), but it is silent in daemon-hosted sessions because `runner_process.go#L355-L357` blanks `WS_MAILBOX` and `WS_MAILBOX_AUTO`; the daemon owns mail delivery. No response-language or other per-turn ws ambient is supplied. | No replacement text. Include Codex in the new backend-neutral language block only if (1900)=a. User Codex hooks remain host-owned. |
+| owner user-level Claude hooks | `UserPromptSubmit` and main-agent `PostToolUse` add `(응답 언어: 한국어)` as `additionalContext` in the current owner settings. These are user hooks, not shipped ws hooks. | Hosted Claude, because the plugin-less launch still keeps user settings. | Do not inspect or emulate arbitrary user hook output. The `workflow.lang` instruction is the ws-owned replacement (Decision 28); the owner can remove the duplicate local hook. |
+| `agents-plugin/.codex-plugin/hooks.json` | A `Stop` command can block completion and ask the model to drain unread mail from its named `WS_MAILBOX` inbox. | The Codex plugin hook is preserved because hosted Codex keeps plugins and user hooks (`codex.go#L224-L248`), but it is silent in daemon-hosted sessions because `runner_process.go#L355-L357` blanks `WS_MAILBOX` and `WS_MAILBOX_AUTO`; the daemon owns mail delivery. No response-language or other per-turn ws ambient is supplied. | No replacement text. Codex receives the backend-neutral language block (Decision 26); user Codex hooks remain host-owned. |
 | agy adapter | No plugin/hook ambient facility. `_meta.antigravity.systemPrompt.append` carries launch-time instructions, and later `Send` calls pass turn text directly (`agy.go#L296-L311`, `#L364-L378`). | Hosted agy. | New ambient block rides the common turn input; no agy-specific file. |
-| Pi `lead-bootstrap.ts` | Every lead/fork `before_agent_start` appends the static manual snapshot, session-state pointer, Pi guide, live `<available_skills>`, and Pi agent-compat guide (`lead-bootstrap.ts#L1-L28`, `#L304-L350`). | Native-extension hosted Pi leads and forks; not worker/explore roles. | Preserve under (1901)=a / Decision 21. It is not duplicated in the daemon ambient block. |
-| Pi `model-prompts.ts` | Every turn replaces a length-framed `<ws-model-prompts>` block with user-configured general and lead-only text for the selected model (`model-prompts.ts#L9-L31`, `#L68-L103`). | Native-extension hosted Pi leads/forks, subject to role/model config. | Preserve under (1901)=a; model-specific and fork-inheritance semantics stay extension-owned. |
-| Pi `lead-skills.ts` expansion | Typed `/skill:` input and `ws-skill` results can replace a shim preload with a rendered playbook body or a pointer to its visible copy (`lead-skills.ts#L310-L360`, `#L377-L429`). | Native-extension hosted Pi leads/forks when the skill tool is active; typed expansion requires interactive or RPC input. | Preserve under (1901)=a. This is explicit skill invocation, not daemon ambient. |
-| Pi `goal-loop.ts` follow-up | While a lead goal remains active, settlement can submit a follow-up reminder with achieve/block/compact directions, context usage, and carried-forward text (`goal-loop.ts#L533-L550`, `#L1072-L1119`, `#L1412-L1445`). Its separate advisory, milestone, and hard-cut compaction preparation is disabled in hosted mode (`goal-loop.ts#L1477-L1503`). | Hosted Pi lead, conditional on an active goal. | Preserve under (1901)=a. Goal lifecycle remains extension-owned and is not duplicated in the daemon ambient block. |
+| Pi `lead-bootstrap.ts` | Every lead/fork `before_agent_start` appends the static manual snapshot, session-state pointer, Pi guide, live `<available_skills>`, and Pi agent-compat guide (`lead-bootstrap.ts#L1-L28`, `#L304-L350`). | Native-extension hosted Pi leads and forks; not worker/explore roles. | Preserve under Decision 27 / Decision 21. It is not duplicated in the daemon ambient block. |
+| Pi `model-prompts.ts` | Every turn replaces a length-framed `<ws-model-prompts>` block with user-configured general and lead-only text for the selected model (`model-prompts.ts#L9-L31`, `#L68-L103`). | Native-extension hosted Pi leads/forks, subject to role/model config. | Preserve under Decision 27; model-specific and fork-inheritance semantics stay extension-owned. |
+| Pi `lead-skills.ts` expansion | Typed `/skill:` input and `ws-skill` results can replace a shim preload with a rendered playbook body or a pointer to its visible copy (`lead-skills.ts#L310-L360`, `#L377-L429`). | Native-extension hosted Pi leads/forks when the skill tool is active; typed expansion requires interactive or RPC input. | Preserve under Decision 27. This is explicit skill invocation, not daemon ambient. |
+| Pi `goal-loop.ts` follow-up | While a lead goal remains active, settlement can submit a follow-up reminder with achieve/block/compact directions, context usage, and carried-forward text (`goal-loop.ts#L533-L550`, `#L1072-L1119`, `#L1412-L1445`). Its separate advisory, milestone, and hard-cut compaction preparation is disabled in hosted mode (`goal-loop.ts#L1477-L1503`). | Hosted Pi lead, conditional on an active goal. | Preserve under Decision 27. Goal lifecycle remains extension-owned and is not duplicated in the daemon ambient block. |
 | Pi generated bridge | `before_agent_start` appends extension-health/version warnings; only the fallback path also appends hosted identity and the daemon-rendered manual (`pi_lead_bridge.mjs#L46-L59`, `pi_lead.go#L146-L171`). | Hosted Pi; identity/manual only when the native extension failed and MCP fallback is active. | Preserve. Warnings and fallback identity/manual are not language ambient. |
 | Pi active-tool hook | `index.ts#L547-L554` filters the active tool set before each turn. | Hosted Pi roles with delegation policy. | Not model context and outside this phase. |
 
@@ -786,7 +731,7 @@ it at both `Process.Send` calls. The unit must:
   T0 in both directions: an old daemon keeps sending the unwrapped input, and a
   new daemon stores no state an old daemon can drop.
 
-Frozen file list under the recommended (1900)-(1902) answers:
+Frozen file list under Decisions 26-28:
 
 - `agents-plugin-tool/internal/wsagent/runner_conv.go` - yes: add loop-owned
   ambient cache fields and route both send sites through `turnInput`.
@@ -810,13 +755,12 @@ Frozen file list under the recommended (1900)-(1902) answers:
 `runner_process.go` is **not touched** (launch-time instructions are the wrong
 seam); `children.go` is **not touched** (its reports already enter the joined
 turn); `agent_tools.go` is **not touched**; no `rsrc/manifest.json` or other
-manifest is touched. A (1901)=b answer reopens this list and additionally needs
-the Pi extension/bridge, `agents-plugin-pi/src/lead-skills.ts`,
-`agents-plugin-pi/src/goal-loop.ts`, and their generated package artifacts;
-implementation must not silently take that branch.
+manifest is touched. Pi extension/bridge, `agents-plugin-pi/src/lead-skills.ts`,
+`agents-plugin-pi/src/goal-loop.ts`, and generated package artifacts belong to
+the late epic rebuild, not this phase (Decision 27).
 
-Verification: remote w5090 Go tests exercise each of Claude, Codex (if
-(1900)=a), agy, and Pi through ordinary and expanded-playbook turns; lead versus
+Verification: remote w5090 Go tests exercise each of Claude, Codex, agy, and Pi
+through ordinary and expanded-playbook turns; lead versus
 worker; set, reset, and empty `workflow.lang`; a compaction note plus ambient
 block exactly once and in order; retries without duplicated ambient text; and
 the unchanged dashboard-visible user text. The Windows baseline records file
@@ -850,12 +794,10 @@ already exist:
   returns path plus recommended tier/model/effort when a tier exists
   (`playbook_tools.go#L531-L565`).
 
-Under the recommended (1904)=a answer, this phase rewrites the existing
-`explore` body as instructions addressed to the spawned child, removes
-`delegates: true` so rendering carries no caller continuity tip, and adds the
-bare tier chosen in (1903). Under (1903)=a that tier is `small`. A (1904)=b
-answer reopens the frozen resource and artifact list for a new stem. The
-embedded one-line profile remains unchanged as the legacy profile path when a
+This phase rewrites the existing `explore` body as instructions addressed to
+the spawned child, removes `delegates: true` so rendering carries no caller
+continuity tip, and adds the recommended bare tier `small` (Decisions 29-30).
+The embedded one-line profile remains unchanged as the legacy profile path when a
 caller/plugin has no renderable playbook. "Fallback" does not mean that a
 failed `playbook.render` silently loads builtin text; the two paths remain
 independent, which is the T0 behavior Decision 25 approved. The native-subagent
