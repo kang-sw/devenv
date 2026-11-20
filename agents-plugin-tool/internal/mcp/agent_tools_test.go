@@ -371,6 +371,110 @@ func TestAgentWorkerForwardsOnItsToken(t *testing.T) {
 	}
 }
 
+func TestAgentForwardSessionKeyDoesNotSelectCompletionParent(t *testing.T) {
+	setupMailboxTestEnv(t)
+	route := &fakeAgentRoute{}
+	daemon := httptest.NewServer(route)
+	defer daemon.Close()
+	t.Setenv(wsagent.EnvPiToken, "tok123")
+	t.Setenv(wsagent.EnvPiEndpoint, daemon.URL+"/")
+	t.Setenv(envAllowedTools, strings.Join(wsagent.AgentWSTools, ","))
+	root := t.TempDir()
+	initGit(t, root)
+	s := NewServer(root, "test")
+	defer s.Close()
+	key, err := s.sessions.mint(root, roleDelegate, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := callToolWithKey(t, s, 1, key, "agent.spawn", map[string]any{"prompt": "child", "tier": "small", "authority": "read-only"}); !strings.Contains(out, "id:kid9") {
+		t.Fatalf("agent.spawn = %q", out)
+	}
+	call := route.last()
+	if _, forwarded := call.body["session_key"]; forwarded {
+		t.Fatalf("the worker session key was forwarded as completion-routing input: %+v", call.body)
+	}
+	if call.body["prompt"] != "child" || call.body["tier"] != "small" || call.body["authority"] != "read-only" {
+		t.Fatalf("forwarded spawn lost its token-scoped request: %+v", call.body)
+	}
+}
+
+// TestAgentWSToolsIncludeReviewLedgerToolsUnderReadOnlyGate proves every
+// agent.spawn backend advertises the review ledger tools from its common
+// loadout, while the spawned authority still controls their write paths.
+func TestAgentWSToolsIncludeReviewLedgerToolsUnderReadOnlyGate(t *testing.T) {
+	setupMailboxTestEnv(t)
+	for _, backend := range []string{wsagent.BackendClaude, wsagent.BackendPi, wsagent.BackendAgy, wsagent.BackendCodex} {
+		t.Run("lists/"+backend, func(t *testing.T) {
+			var profile wsagent.Profile
+			raw := wsagent.BuiltinProfiles()[wsagent.ProfilePrefix+wsagent.AgentWorkerProfile(backend)]
+			if err := json.Unmarshal(raw, &profile); err != nil {
+				t.Fatalf("unmarshal %s worker profile: %v", backend, err)
+			}
+			env := append(os.Environ(), envAllowedTools+"="+strings.Join(profile.WSTools, ","))
+			s := NewServerWithOptions(ServerOptions{Root: t.TempDir(), Version: "test", Env: env})
+			defer s.Close()
+			listed := map[string]bool{}
+			for _, tool := range s.filteredTools() {
+				listed[tool["name"].(string)] = true
+			}
+			for _, name := range []string{"review.marker", "review.stamp"} {
+				if !listed[name] {
+					t.Errorf("%s worker tools/list lacks %s; ws_tools=%v", backend, name, profile.WSTools)
+				}
+			}
+		})
+	}
+
+	newWorkerServer := func(t *testing.T, level wsagent.PermissionLevel) (*Server, string, string) {
+		t.Helper()
+		root := t.TempDir()
+		initGit(t, root)
+		env := append(os.Environ(),
+			envAllowedTools+"="+strings.Join(wsagent.AgentWSTools, ","),
+			wsagent.EnvPermissionLevel+"="+string(level),
+		)
+		s := NewServerWithOptions(ServerOptions{Root: root, Version: "test", Env: env})
+		key, err := s.sessions.mint(root, roleDelegate, "")
+		if err != nil {
+			s.Close()
+			t.Fatal(err)
+		}
+		return s, key, root
+	}
+
+	t.Run("workdir-write-calls-both", func(t *testing.T) {
+		s, key, _ := newWorkerServer(t, wsagent.PermissionWorkdirWrite)
+		defer s.Close()
+		if out := callToolWithKey(t, s, 1, key, "review.marker", nil); strings.Contains(out, "permission denied") || !strings.Contains(out, "review ledger has no entry yet") {
+			t.Fatalf("workdir-write review.marker = %q", out)
+		}
+		if out := callToolWithKey(t, s, 2, key, "review.stamp", map[string]any{"base": "abcdef0", "head": "abcdef1", "verdict": "pass"}); !strings.Contains(out, "stamped review ledger") {
+			t.Fatalf("workdir-write review.stamp = %q", out)
+		}
+		if out := callToolWithKey(t, s, 3, key, "review.marker", nil); !strings.Contains(out, "abcdef0..abcdef1: pass") {
+			t.Fatalf("workdir-write review.marker after stamp = %q", out)
+		}
+	})
+
+	t.Run("read-only-gate", func(t *testing.T) {
+		s, key, root := newWorkerServer(t, wsagent.PermissionReadOnly)
+		defer s.Close()
+		if out := callToolWithKey(t, s, 1, key, "review.marker", nil); strings.Contains(out, "permission denied") || !strings.Contains(out, "review ledger has no entry yet") {
+			t.Fatalf("read-only review.marker = %q", out)
+		}
+		if out := callToolWithKey(t, s, 2, key, "review.marker", map[string]any{"bootstrap": true}); !strings.Contains(out, "permission denied") {
+			t.Fatalf("read-only review.marker(bootstrap:true) = %q", out)
+		}
+		if out := callToolWithKey(t, s, 3, key, "review.stamp", map[string]any{"base": "abcdef0", "head": "abcdef1", "verdict": "pass"}); !strings.Contains(out, "permission denied") {
+			t.Fatalf("read-only review.stamp = %q", out)
+		}
+		if _, err := os.Stat(filepath.Join(root, "ai-docs", ".review-ledger.md")); !os.IsNotExist(err) {
+			t.Fatalf("read-only review calls touched review ledger: stat err = %v", err)
+		}
+	})
+}
+
 // TestReadOnlyAgentRefusesMutatingTools: a read-only agent's ws-mcp, from
 // its process env or a hosted session's hello env, refuses the loadout's
 // mutating tools naming the level; mailbox.send and every tool of a

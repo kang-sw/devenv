@@ -676,15 +676,16 @@ func TestAgentSystemPromptReachesEveryStart(t *testing.T) {
 }
 
 // TestAgentChildPromptCarriesNoLeadManual: an agent.spawn child's
-// appended prompt is its system prompt, its profile text, and its key
-// sentence, as before the lead manual: the daemon's lead manual render is
-// never called for it and none of its text reaches the child.
+// appended prompt is its system prompt, its profile text, its key, and its
+// direct parent reply address, as before the lead manual: the daemon's lead
+// manual render is never called for it and none of its text reaches the child.
 func TestAgentChildPromptCarriesNoLeadManual(t *testing.T) {
 	manual := &leadManualRender{text: "# Lead workflow manual sentinel"}
 	h, _ := agentHarness(t, func(o *Options) { o.LeadManual = manual.render })
 	a, _ := h.agentRunning(h.leadCaller(), AgentSpawnRequest{Prompt: "go", Tier: "small", Authority: "read-only", SystemPrompt: "You are the cache probe."})
 	text := instructionsOf(t, h.backend.start(0))
-	want := "You are the cache probe.\n\nYour ws session key is `" + h.record(a).WSKey + "`. Pass it as the `session_key` argument of every ws tool call.\n"
+	want := "You are the cache probe.\n\nYour ws session key is `" + h.record(a).WSKey + "`. Pass it as the `session_key` argument of every ws tool call. " +
+		"Your direct parent's mailbox reply address is `id:" + leadParent.ReplyID + "`; send it reports or questions with `mailbox.send`.\n"
 	if text != want {
 		t.Fatalf("the child's appended prompt = %q, want %q", text, want)
 	}
@@ -755,6 +756,27 @@ func TestAgentChildGetsATokenAndItsAuthority(t *testing.T) {
 		}
 		if code, body := h.tokenCall(env[EnvPiToken], "agent.list", nil); code != http.StatusOK {
 			t.Fatalf("%s: the child's token lists = %d %s", tc.tier, code, body)
+		}
+	}
+}
+
+func TestSpawnedWorkerContextNamesDirectParentReturnAddress(t *testing.T) {
+	h, _ := agentHarness(t, nil)
+	parent, _ := h.agentRunning(h.leadCaller(), AgentSpawnRequest{Prompt: "parent", Tier: "medium", Authority: "workdir-write"})
+	h.agentRunning(h.holderOf(parent), AgentSpawnRequest{Prompt: "child", Tier: "small", Authority: "workdir-write"})
+
+	for i, want := range []string{"id:" + leadParent.ReplyID, "id:" + parent} {
+		spec := h.backend.start(i)
+		raw, err := os.ReadFile(spec.Instructions)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(raw)
+		if !strings.Contains(text, "direct parent's mailbox reply address is `"+want+"`") || !strings.Contains(text, "`mailbox.send`") {
+			t.Fatalf("worker %d instructions do not name direct parent %q: %q", i, want, text)
+		}
+		if i == 1 && strings.Contains(text, "direct parent's mailbox reply address is `id:"+leadParent.ReplyID+"`") {
+			t.Fatalf("nested worker context names the root lead instead of its direct parent: %q", text)
 		}
 	}
 }

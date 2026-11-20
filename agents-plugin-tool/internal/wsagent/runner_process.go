@@ -138,6 +138,11 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		// An agent.spawn child delegates through agent.spawn only.
 		RemoveSubagents: RemovesSubagents(rec),
 	}
+	if attach {
+		for _, steer := range rec.Steered {
+			spec.RecoveredSteers = append(spec.RecoveredSteers, steer.Text)
+		}
+	}
 	if attach && len(def.WSTools) > 0 {
 		// The mapper needs the original ws tool surface, not a new bridge.
 		spec.WSMCP = &MCPCommand{}
@@ -791,9 +796,9 @@ func (c *conv) persistSeq() {
 // composeInstructions writes the instruction file a process appends to the
 // harness's own system prompt: agent.spawn's system prompt, the profile's
 // instruction file or builtin text and, when the profile allows ws tools,
-// the conversation's ws session key followed by steer, the native-subagent
-// line (Runner.subagentSteer; "" for none). It returns "" when there is
-// nothing to append.
+// the conversation's ws session key and direct parent's reply address,
+// followed by steer, the native-subagent line (Runner.subagentSteer; "" for
+// none). It returns "" when there is nothing to append.
 func composeInstructions(dir string, rec Record, p Profile, system, steer string) (string, error) {
 	var parts []string
 	if text := strings.TrimSpace(system); text != "" {
@@ -810,6 +815,9 @@ func composeInstructions(dir string, rec Record, p Profile, system, steer string
 	}
 	if len(p.WSTools) > 0 {
 		key := fmt.Sprintf("Your ws session key is `%s`. Pass it as the `session_key` argument of every ws tool call.", rec.WSKey)
+		if rec.Parent != nil {
+			key += fmt.Sprintf(" Your direct parent's mailbox reply address is `id:%s`; send it reports or questions with `mailbox.send`.", rec.Parent.ReplyID)
+		}
 		if steer != "" {
 			key += " " + steer
 		}

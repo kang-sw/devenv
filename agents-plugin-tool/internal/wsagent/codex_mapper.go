@@ -45,6 +45,10 @@ type codexItem struct {
 	Result    json.RawMessage `json:"result"`
 	Error     json.RawMessage `json:"error"`
 	ExitCode  *int            `json:"exitCode"`
+	Content   []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
 }
 
 type codexStatus struct {
@@ -91,6 +95,7 @@ type codexMapper struct {
 	// never: it has no approval path, so a server request that would reach the
 	// runner is declined here instead of resting on Codex never sending one.
 	readOnlyWorker bool
+	worker         bool
 }
 
 func newCodexMapper(session string) *codexMapper {
@@ -283,7 +288,13 @@ func (m *codexMapper) response(msg codexWire, replies lineReplies, now int64) []
 			codexModels(msg.Result)
 		case "recover":
 			out = m.recover(msg.Result, now)
+		case "control":
+			if m.worker {
+				out = append(out, Event{SteerAnswer: &SteerAnswer{}})
+			}
 		}
+	} else if kind == "control" && m.worker {
+		out = append(out, Event{SteerAnswer: &SteerAnswer{Refusal: answer.err}})
 	}
 	// Notifications, not control acknowledgements, own turn boundaries.
 	// In particular, a late turn/start response cannot reopen an ended turn.
@@ -305,6 +316,20 @@ func (m *codexMapper) item(turn string, item codexItem, done bool, now int64) []
 		m.started[item.ID] = true
 	}
 	switch item.Type {
+	case "userMessage":
+		if done || !m.worker {
+			return nil
+		}
+		var parts []string
+		for _, content := range item.Content {
+			if content.Type == "text" && content.Text != "" {
+				parts = append(parts, content.Text)
+			}
+		}
+		if text := strings.Join(parts, "\n"); text != "" {
+			return []Event{{UserTaken: text}}
+		}
+		return nil
 	case "agentMessage":
 		if !done {
 			return nil

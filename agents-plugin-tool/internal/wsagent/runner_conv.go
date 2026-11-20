@@ -433,13 +433,18 @@ func (c *conv) steerMail(text string) bool {
 		c.apply(*wakeEvent("mail", "mailbox", "", text).Live)
 		return true
 	}
+	// Persist before the holder write. The child can accept the steer and
+	// outlive this daemon before its acknowledgement reaches the runner.
+	c.steerSeq++
+	seq := c.steerSeq
+	c.steered = append(c.steered, steeredReport{Text: text, Seq: seq})
+	c.saveSteered()
 	if err := ctl.reports.Steer(text); err != nil {
+		c.steered = slices.DeleteFunc(c.steered, func(s steeredReport) bool { return s.Seq == seq })
+		c.saveSteered()
 		fmt.Fprintf(c.r.opts.Log, "agent %s: steer a mail: %v\n", c.rec.ReplyID, err)
 		return false
 	}
-	c.steerSeq++
-	c.steered = append(c.steered, steeredReport{Text: text, Seq: c.steerSeq})
-	c.saveSteered()
 	c.apply(*wakeEvent("mail", "mailbox", "", text).Live)
 	c.changed(false)
 	return true

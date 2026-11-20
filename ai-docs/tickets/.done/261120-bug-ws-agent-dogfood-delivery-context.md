@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 8b93504a8f77679f
 sage-review-design-reviewed: 8b93504a8f77679f
+completed: 2026-11-20
 ---
 
 # Fix agent mail, completion delivery, and worker context
@@ -404,3 +405,51 @@ Verification expectations, at least one named regression per dogfood item:
   from a contaminated daemon while retaining `PATH`, home/config, shell, and
   normalized `TERM`; launching ws-mcp from that shell must create an ordinary
   non-mailbox session without the hosted-row wait.
+
+### Result (f9332e85) - 2026-11-20
+
+- Codex and agy workers now expose the acknowledged report control and use the
+  common worker-steer path. Both report and mailbox steers persist before the
+  holder write, and holder reattach restores their existing `Record.Steered`
+  text for acknowledgement replay (`children.go:601-660`,
+  `runner_conv.go:420-450`, `codex.go:168-173,344-363`,
+  `agy.go:244-249,787-804,948-965`). The successful interactive path still
+  performs one steered-record persistence; only an immediate backend refusal
+  adds two rollback persistences (persist then remove) before the existing
+  next-turn queue update. No per-message reads were added.
+- The holder-backed Codex parent/grandchild completion regression passed before
+  any completion-routing production edit, so the current token-scoped parent
+  route was preserved. The restart assertion now waits for the holder scan and
+  quiesces both conversation loops instead of using a fixed sleep.
+- Every spawned worker context now names its direct parent's `id:<reply-id>` at
+  the shared instruction seam (`runner_process.go:816-824`); the session key
+  remains local authorization and is not forwarded as parent-selection input.
+- `review.marker` and `review.stamp` are in the common worker loadout
+  (`builtin.go:132-190`). The unchanged gate still permits non-bootstrap marker
+  reads and refuses marker bootstrap plus stamps for read-only workers
+  (`permission_gate.go:16-27`). The lead-review fallback now states only the
+  still-real tier ceiling, and canonical, wsflow, Pi resource, manifest,
+  workflow-bundle, and native first-party mirrors were regenerated.
+- Worker launches and dashboard terminals share the in-memory
+  `wsharnessenv` drop set; Windows matching is case-insensitive while ordinary
+  user state and explicit child overlays remain (`wsharnessenv/env.go:10-42`,
+  `terminal_shell.go:35-55`). This adds zero file operations at launch or on
+  interactive paths.
+- Compatibility is T0 in both directions. The change adds no tool name,
+  argument, hello field, persisted field, or record shape: old binaries read
+  and write the same records, new binaries read old records, and reopening the
+  new binary recovers accepted steers from the pre-existing `Steered` field.
+  Existing review tools become discoverable without changing their schemas;
+  environment filtering and worker prompt text are launch-only corrections.
+- Verification passed with `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`:
+  `go test ./internal/mcp -timeout 45m -count=1` (1022.743s),
+  `go test ./internal/wsagent -count=1` after review fixes (140.995s), and
+  `go test ./internal/wsdashboard ./internal/wsharnessenv -count=1`
+  (324.830s / 0.602s). The pre-review integrated `internal/wsrsrc` check also
+  passed, as did all six named ticket regressions and the focused review-fix
+  regressions.
+- Lite review found five Important issues and no Criticals: very-early agy
+  steering, mailbox persist ordering, Codex lead refusal propagation, Windows
+  environment-name casing, and a fixed-sleep restart assertion. All five were
+  fixed in `f9332e85`; the one allocated review pass is resolved with no open
+  finding.
