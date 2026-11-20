@@ -612,7 +612,17 @@
       "registered_at": "2026-11-20T12:40:36Z"
     },
     "261121-bug-ws-dogfood-context-routing-gaps": {
-      "registered_at": "2026-11-20T15:10:45Z"
+      "registered_at": "2026-11-20T15:10:45Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-20T16:04:24Z",
+        "impl": {
+          "branch": "impl/develop/stung-sushi-peso"
+        }
+      }
     }
   }
 }
