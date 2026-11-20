@@ -136,6 +136,9 @@ Object.assign(host.context,{require,process,TextEncoder,El:host.El,Event:host.Ev
 vm.runInContext(`+quoted(selectionRuntimeEnvironment)+`,host.context);
 ['toast.js','mention.js','capsules.js','rail.js'].forEach(n=>vm.runInContext(fs.readFileSync(path.join('assets',n),'utf8'),host.context));
 vm.runInContext(`+quoted(selectionProductionRuntime(t))+`,host.context);
+// These cases retain the separate-chip fallback path; the browser suite
+// exercises the live inline editor and its ordered capsule delivery.
+vm.runInContext('inlineEditor = function(){ return null; };',host.context);
 Promise.resolve(vm.runInContext(`+quoted("(async function(){\n"+body+"\n})()")+`,host.context)).catch(e=>{console.error(e);process.exitCode=1;});
 `)
 }

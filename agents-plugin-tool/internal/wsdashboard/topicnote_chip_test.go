@@ -42,6 +42,7 @@ Object.defineProperty(El.prototype, "textContent", { get: function () { return t
 function Event(type, o) { this.type = type; this.bubbles = !!(o && o.bubbles); }
 var doc = { createElement: function (t) { return new El(t); }, createTextNode: function (s) { var e = new El("#text"); e.textContent = s; return e; } };
 var board = new El("div"), chipSurface = new El("div"), log = [], bad = [], live = false;
+function inlineEditor() { return null; }
 // Native lookup boundary: this isolated chip surface has no image row.
 doc.getElementById = function(id) { return id === "cchips" ? chipSurface : null; };
 function region(name) { return name === "board" ? board : null; }

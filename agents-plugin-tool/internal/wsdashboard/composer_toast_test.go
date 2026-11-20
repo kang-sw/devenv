@@ -30,6 +30,8 @@ var saveDraft = typeof saveDraft !== "undefined" ? saveDraft : function () {};
 var restoreHeld = typeof restoreHeld !== "undefined" ? restoreHeld : function () {};
 var boardOwn = typeof boardOwn !== "undefined" ? boardOwn : {};
 var imgTrash = typeof imgTrash !== "undefined" ? imgTrash : {};
+function inlineEditor() { return null; }
+function inlineRows() { return []; }
 `
 
 // composerSendSource is sendMessage with the outbox section it hands each

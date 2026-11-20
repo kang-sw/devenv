@@ -19,19 +19,6 @@
     if (u) { wconsoles.splice(+u.getAttribute("data-unwcon"), 1); renderChips(); return; }
     u = t.closest("[data-unclose-request]");
     if (u) { removeCloseRequest(u.getAttribute("data-unclose-request")); return; }
-    u = t.closest(".t-close-request");
-    if (u && inBoard(u)) {
-      var topic = u.closest("section.topic[data-topic]");
-      if (topic && !topic.classList.contains("closed")) {
-        // Restore through the sheet owner so its scrim cannot cover the reason field.
-        if (topic.hasAttribute("data-max")) {
-          var back = topic.querySelector(".d-min");
-          if (back) back.click();
-        }
-        addCloseRequest(topic.getAttribute("data-topic"));
-      }
-      return;
-    }
     if (t.closest("[data-wbmention]")) { addMention(); return; }
     u = t.closest("[data-tchip]");
     if (u) { focusTopicNote(u.getAttribute("data-tchip")); return; }

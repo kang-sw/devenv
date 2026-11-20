@@ -30,6 +30,7 @@ var doc={createElement:function(t){return new El(t);},createTextNode:function(t)
 var cimgs=null,closeRequests=[],bselections=[];
 var cchips=new El('div'),bmentions=[{topic:'plan',id:'07',text:'one\n two'},{topic:'계획 "<&',id:'3',entry:'e8',text:'old version'},{topic:'plan',text:'topic only'}],wpicks=[],wconsoles=[];
 function chipList(){return [];}function topicNotes(){return [];}function inBoard(){return false;}function wsT(k){return k;}
+function inlineEditor(){return null;}
 function effectJump(topic,id){jumps.push([topic,id]);}
 `+dashboardFuncs(t, "renderChips", "renderSelectionChips")+click+`
 var original=JSON.stringify(bmentions);renderChips();

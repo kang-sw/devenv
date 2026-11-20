@@ -39,8 +39,7 @@ const [base] = process.argv.slice(2);
       await tab.mouse.move(off.x + pts.e.x, off.y + pts.e.y, { steps: 8 });
       await tab.mouse.up();
     }
-    // The user's own composer text must stay exactly as typed: an attached
-    // selection is a separate bundle (source + its own memo), never composer text.
+    // Attached selections become inline tokens beside the user's prose.
     const composerEditor = page.locator('#composer .wsc-editor, .composer .wsc-editor').first();
     await composerEditor.fill('prior text');
     const composerText = () => page.evaluate(() => document.querySelector('#ctext').value);
@@ -59,9 +58,11 @@ const [base] = process.argv.slice(2);
       await note.fill(memo);
       await page.locator('[data-wbmention]').click();
       await page.waitForTimeout(150);
-      assert.equal(await composerText(), 'prior text', 'attaching a selection leaves the composer text untouched');
-      assert.equal(await page.locator('#cchips .selection-bundle').count(), n, 'each push is its own bundle element');
-      assert.equal(await page.locator('#cchips .selection-bundle').nth(n - 1).locator('.selection-note').getAttribute('title'), memo, 'the bundle holds its own memo');
+      assert((await composerText()).startsWith('prior text '));
+      const capsules = page.locator('#ctext + .wsc-editor .wsc-mention');
+      assert.equal(await capsules.count(), n, 'each push is an inline capsule');
+      assert.equal(await capsules.nth(n - 1).evaluate(el => JSON.parse(el.getAttribute('data-wsc-payload')).selection.comment), memo);
+      assert.equal(await page.locator('#cchips').evaluate(el => el.children.length), 0);
       results.push({ a, b, want, memo });
     }
     await page.locator('#csend').click();

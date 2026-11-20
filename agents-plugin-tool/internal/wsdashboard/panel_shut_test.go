@@ -19,6 +19,7 @@ func TestPanelShutPersistence(t *testing.T) {
 	}
 	src := dashboardFuncs(t, "isPanel", "shutId", "shutList", "shutHas", "shutPut", "isPeer", "openKey", "restoreOpenOne", "restoreOpen", "boardDraft", "restoreDraft")
 	runNode(t, "panel shut persistence", selectionCodecSource(t)+`var bselections = [], boardIncarnation = ""; function marker(n) { return "[Image #" + n + "]"; }`+frameDOM+constants+src+`
+function inlineEditor() { return null; }
 var rid = "session-a", openState = {}, PEER_KEY = "p.", railSets = null;
 var storage = {};
 function load(k) { return Object.prototype.hasOwnProperty.call(storage, k) ? storage[k] : null; }

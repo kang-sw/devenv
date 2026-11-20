@@ -102,12 +102,13 @@
   function readDraft() {
     var b = region("board"), open = {};
     Object.keys(openState).forEach(function (k) { if (openState[k] && k.indexOf("k:history:") !== 0) open[k] = true; });
-    var prefix = selectionPrefix(bselections);
+    var prefix = inlineEditor() ? "" : selectionPrefix(bselections);
     var shift = function (r) { return Object.assign({}, r, { start: r.start + prefix.length, end: r.end + prefix.length }); };
     var d = {
       boardIncarnation: typeof boardIncarnation === "string" ? boardIncarnation : null,
       text: prefix + (ctext ? ctext.value : ""),
       capsules: ctext && ctext.wsc ? ctext.wsc.snapshot().map(shift) : [],
+      selections: inlineEditor() ? bselections.map(function (s) { return { key: s.key, mentions: s.mentions, comment: s.comment, images: s.images }; }) : [],
       cmd: cmdSel ? { name: cmdSel.name, args: cmdSel.args } : null,
       mentions: mentions.map(function (m) { return shift({ start: m.start, end: m.end, text: m.text }); }),
       answers: b ? boardRead(readAnswers) : {},
@@ -148,7 +149,14 @@
   function boardDraft(d) {
     if (d && typeof d.boardIncarnation === "string" && d.boardIncarnation !== boardIncarnation) {
       // Keep free text and image references, never reattach replaced IDs.
-      return Object.assign({}, d, { boardIncarnation: boardIncarnation, answers: {}, chips: [], bmentions: [], closeRequests: [] });
+      var text = d.text || "", ranges = Array.isArray(d.capsules) ? d.capsules.slice() : [];
+      ranges.filter(function (r) { return /^(answer|topic-note|mention)$/.test(r.kind); }).reverse().forEach(function (cut) {
+        text = text.slice(0, cut.start) + text.slice(cut.end);
+        ranges = ranges.filter(function (r) { return r !== cut && (r.end <= cut.start || r.start >= cut.end); }).map(function (r) {
+          return r.start >= cut.end ? Object.assign({}, r, { start: r.start - (cut.end - cut.start), end: r.end - (cut.end - cut.start) }) : r;
+        });
+      });
+      return Object.assign({}, d, { boardIncarnation: boardIncarnation, text: text, capsules: ranges, selections: [], answers: {}, chips: [], bmentions: [], closeRequests: [] });
     }
     return d;
   }
@@ -164,6 +172,7 @@
       d.text = split.text;
       d.mentions = selectionRanges(d.mentions, split.cuts);
       d.capsules = selectionRanges(d.capsules, split.cuts);
+      if (inlineEditor() && Array.isArray(d.selections)) bselections = d.selections.filter(function (s) { return s && s.key && Array.isArray(s.mentions) && Array.isArray(s.images); });
       if (Array.isArray(d.sel)) {
         var caret = selectionRanges([{ start: d.sel[0], end: d.sel[1] }], split.cuts)[0];
         d.sel = caret ? [caret.start, caret.end] : [0, 0];
@@ -173,6 +182,12 @@
         return s;
       });
       bselections.forEach(function (s) { named += "\n" + s.images.map(marker).join(" "); });
+      // Restore the editor before board controls reconcile their answers;
+      // otherwise their upserts would consume the empty composer caret.
+      if (ctext && typeof d.text === "string" && d.text && inlineEditor()) {
+        ctext.value = WsRail.stripMarkers(d.text, [], lost).text;
+        ctext.wsc.restore(window.WsCapsules.stripMarkers(d.text, d.capsules, lost).ranges);
+      }
       if (cchips) renderChips();
       // A lost image's marker leaves the notes as it leaves the text; what
       // the restored notes still name may bring a reference image back.
@@ -215,7 +230,7 @@
         renderChips();
       }
       if (ccmd && !cmdSel && d.cmd && typeof d.cmd.name === "string" && d.cmd.name) setCommand(d.cmd.name, d.cmd.args);
-      if (ctext && typeof d.text === "string" && d.text && !ctext.value) {
+      if (ctext && typeof d.text === "string" && d.text && (!ctext.value || inlineEditor())) {
         var s = WsRail.stripMarkers(d.text, Array.isArray(d.mentions) ? d.mentions : [], lost);
         ctext.value = s.text;
         if (ctext.wsc) ctext.wsc.restore(window.WsCapsules.stripMarkers(d.text, d.capsules, lost).ranges);
