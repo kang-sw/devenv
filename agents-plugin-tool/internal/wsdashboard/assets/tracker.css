@@ -619,8 +619,8 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .timeline .tr-sl.concm::before { background: var(--tk-conc); }
 .tk .timeline .tr-sl.wide { grid-template-columns: 72px 14px minmax(0, 1fr); }
 .tk .timeline .tr-sl:first-child { padding-top: 3px; }
-.tk .timeline .tr-sl.st-break { margin: 3px 0 3px 4px; padding: 2px 0 2px 12px; }
-.tk .timeline .tr-sl.st-break::before { left: -4px; top: 7px; width: 6px; height: 6px; background: var(--wb-primary); }
+.tk .timeline .tr-sl.st-break { padding: 4px 0 4px 12px; }
+.tk .timeline .tr-sl.st-break::before { left: -4px; top: 9px; width: 6px; height: 6px; background: var(--wb-primary); }
 .tk .timeline .tr-sl.st-break.tr-st-blocked::before { background: var(--tk-fail); }
 .tk .timeline .tr-sl.st-break.tr-st-done::before { background: var(--tk-ok); }
 .tk .timeline .tr-sl.st-break.tr-st-in-review::before { background: var(--tk-warn); }
