@@ -138,6 +138,9 @@ func TestTicketMapEmptyBoard(t *testing.T) {
 		if bytes.Contains(raw, []byte("null")) || bytes.HasSuffix(raw, []byte("\n")) {
 			t.Errorf("%s: payload has null or a trailing newline: %s", name, raw)
 		}
+		if empty, err := EmptyTicketMapJSON(); err != nil || !bytes.Equal(empty, raw) {
+			t.Errorf("%s: EmptyTicketMapJSON = %s, %v; want the built payload %s", name, empty, err, raw)
+		}
 	}
 }
 

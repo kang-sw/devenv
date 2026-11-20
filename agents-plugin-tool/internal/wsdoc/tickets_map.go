@@ -234,6 +234,14 @@ func TicketMapJSON(root string) ([]byte, error) {
 	return entry.json, nil
 }
 
+// EmptyTicketMapJSON returns the payload TicketMapJSON builds for a board with
+// no tickets, for callers that serve a missing board as an empty one. The
+// bytes are freshly encoded and owned by the caller.
+func EmptyTicketMapJSON() ([]byte, error) {
+	load := ticketMapLoad{stable: true}
+	return encodeTicketMap(assembleTicketMap(load, ticketMapFingerprint(load)))
+}
+
 // TicketMap is the typed form of TicketMapJSON. The result is shared; do not
 // modify it.
 func TicketMap(root string) (*TicketMapResult, error) {
