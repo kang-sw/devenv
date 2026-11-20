@@ -66,6 +66,7 @@
     b.appendChild(el('div', { class: 'tk tk-iwin-back', id: 'tkwin', hidden: '' }, '<div class="iwin" role="dialog" aria-modal="true" tabindex="-1"><div class="iwin-in" id="tkwinbody"></div></div>' +
       '<ul class="tk-mpop" id="tkmpop" role="listbox" aria-label="' + wsT("js.tk.composer.mention.tip") + '" hidden></ul>'));
     b.appendChild(el('dialog', { class: 'tk tk-dlg', id: 'tkdlg' }));
+    b.appendChild(el('dialog', { class: 'tk tk-dlg tk-orged', id: 'tkorged' }, '<div id="tkorged-body"></div>'));
     // a page without the shared toast stack (the tracker mockup) gets the renderer's own
     if (!window.WsToast) b.appendChild(el('div', { class: 'tk tk-toast', id: 'tktoast', hidden: '' }));
     b.appendChild(el('div', { class: 'tk tk-tip', id: 'tktip', role: 'tooltip', hidden: '' }));
@@ -128,6 +129,7 @@
       if (menuOutside(e, t)) return;
       if (!own(t)) return;
       if (t === $('tkwin')) { closeItemWindow(); return; } // the backdrop
+      if (t === $('tkorged')) { closeOrgEditor(false); return; } // the org-editor backdrop
       if (t.closest('#tkqs')) { if (qs.open) qClose(); else qOpen(); return; }
       var qo = t.closest('[data-qi]'), qh = t.closest('#tkqpop [data-qslot]');
       if (qo) {
@@ -179,6 +181,16 @@
         else if (k === 'msel') { var mr = a.closest('.irow'); if (mr) mselClick(mr, e); }
         else if (k === 'msel-clear') { mselClear(); render(); }
         else if (k === 'mdet') { var mk = ui.store + '|' + d.who; ui.mdet[mk] = !ui.mdet[mk]; render(); }
+        else if (k === 'ofold') { var ok = ui.store + '|' + d.who; ui.ofold[ok] = !ui.ofold[ok]; render(); }
+        else if (k === 'org-edit') openOrgEditor();
+        else if (k === 'oe-close') closeOrgEditor(false);
+        else if (k === 'oe-expand') { if (ui.orged) { ui.orged.fold = {}; renderOrgEditor(); } }
+        else if (k === 'oe-fold') { if (ui.orged && d.who) { ui.orged.fold[d.who] = !ui.orged.fold[d.who]; renderOrgEditor(); } }
+        else if (k === 'oe-adm') { if (ui.orged && d.who) { delete ui.orged.errors._batch; orgEdToggleAdmin(ui.orged, d.who); renderOrgEditor(); } }
+        else if (k === 'oe-undo') { if (ui.orged) { delete ui.orged.errors._batch; if (!orgEdUndo(ui.orged, a.getAttribute('data-key'))) ui.orged.errors._batch = wsT("js.tk.org.err.undo.cycle"); renderOrgEditor(); } }
+        else if (k === 'oe-undo-all') { if (ui.orged) { orgEdUndoAll(ui.orged); renderOrgEditor(); } }
+        else if (k === 'oe-save') orgEdSave();
+        else if (k === 'oe-roles') { if (closeOrgEditor(false)) openDialog('admin', {}); }
         else if (k === 'idcopy') copyId(a);
         else if (k === 'new-x') closeNewRow();
         else if (k === 'nchip') newMenu(a.getAttribute('data-step'), a, a.hasAttribute('data-ed'));
@@ -518,7 +530,7 @@
         return;
       }
       // a host that handled this Esc itself (its own menu, say) marks it defaultPrevented
-      if (e.key !== 'Escape' || e.defaultPrevented || $('tkdlg').open) return;
+      if (e.key !== 'Escape' || e.defaultPrevented || $('tkdlg').open || $('tkorged').open) return;
       if (ui.win) closeItemWindow();
       else if ((ui.open || ui.page) && mselOn()) { e.preventDefault(); mselClear(); render(); }
       else if (ui.open) collapse();
@@ -548,6 +560,93 @@
     window.addEventListener('popstate', function () { if (routeStore() !== ui.page) applyRoute(); });
     // the host opened its own drawer: an open store collapses (and so syncs)
     document.addEventListener('ws:drawer-open', function () { if (ui.open) collapse(); });
+    // admin org-chart editor modal: Escape discard confirm, search, lead select, and native HTML5 drag-and-drop
+    var oed = $('tkorged');
+    function oeClearHover() {
+      Array.prototype.forEach.call(oed.querySelectorAll('.tk-oe-row.ok, .tk-oe-row.bad, .tk-oe-rootz.ok'), function (n) { n.classList.remove('ok', 'bad'); });
+      Array.prototype.forEach.call(oed.querySelectorAll('.tk-oe-refuse'), function (n) { n.remove(); });
+    }
+    oed.addEventListener('cancel', function (e) { e.preventDefault(); closeOrgEditor(false); });
+    function oeSearchInput(e) {
+      if (e.isComposing || !e.target || e.target.id !== 'tk-oe-q' || !ui.orged) return;
+      ui.orged.q = e.target.value; renderOrgEditor();
+    }
+    oed.addEventListener('input', oeSearchInput);
+    oed.addEventListener('compositionend', oeSearchInput);
+    oed.addEventListener('change', function (e) {
+      var sel = e.target && e.target.closest && e.target.closest('select[data-oe-sel]');
+      if (!sel || !ui.orged) return;
+      delete ui.orged.errors._batch;
+      orgEdStageLead(ui.orged, sel.getAttribute('data-oe-sel'), sel.value);
+      renderOrgEditor();
+    });
+    oed.addEventListener('dragstart', function (e) {
+      e.stopPropagation();
+      if (!ui.orged || (e.target && e.target.closest && e.target.closest('select, button, input'))) { e.preventDefault(); return; }
+      var row = e.target && e.target.closest && e.target.closest('.tk-oe-row[data-oe-id]');
+      if (!row) return;
+      var id = row.getAttribute('data-oe-id');
+      ui.orged.drag = id;
+      ui.orged.refuse = null;
+      if (e.dataTransfer) { e.dataTransfer.setData('text/plain', id); e.dataTransfer.effectAllowed = 'move'; }
+      oeClearHover();
+      Array.prototype.forEach.call(oed.querySelectorAll('.tk-oe-row.drag'), function (n) { n.classList.remove('drag'); });
+      row.classList.add('drag');
+    });
+    oed.addEventListener('dragover', function (e) {
+      e.stopPropagation();
+      var ed = ui.orged;
+      if (!ed || !ed.drag) return;
+      var z = e.target && e.target.closest && e.target.closest('.tk-oe-rootz');
+      var row = e.target && e.target.closest && e.target.closest('.tk-oe-row[data-oe-id]');
+      if (z) {
+        if (!z.classList.contains('ok')) { oeClearHover(); z.classList.add('ok'); }
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        return;
+      }
+      if (!row) { oeClearHover(); return; }
+      var tid = row.getAttribute('data-oe-id');
+      if (tid === ed.drag) { oeClearHover(); return; }
+      if (orgEdIsInSubtree(orgEdProjectedLeads(ed), tid, ed.drag)) {
+        if (!row.classList.contains('bad')) {
+          oeClearHover();
+          row.classList.add('bad');
+          row.insertAdjacentHTML('afterend', orgEdRefuseHtml(ed.drag, tid));
+        }
+        return; // omit preventDefault so the browser refuses the drop
+      }
+      if (!row.classList.contains('ok')) { oeClearHover(); row.classList.add('ok'); }
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    });
+    oed.addEventListener('drop', function (e) {
+      e.stopPropagation();
+      var ed = ui.orged;
+      if (!ed || !ed.drag) return;
+      e.preventDefault();
+      var dragId = ed.drag;
+      ed.drag = null;
+      var z = e.target && e.target.closest && e.target.closest('.tk-oe-rootz');
+      var row = e.target && e.target.closest && e.target.closest('.tk-oe-row[data-oe-id]');
+      if (z) { delete ed.errors._batch; orgEdStageLead(ed, dragId, ''); }
+      else if (row) {
+        var tid = row.getAttribute('data-oe-id');
+        if (tid && tid !== dragId) {
+          delete ed.errors._batch;
+          var res = orgEdStageLead(ed, dragId, tid);
+          if (!res.ok && res.reason === 'cycle') ed.refuse = { member: dragId, target: tid };
+        }
+      }
+      renderOrgEditor();
+    });
+    oed.addEventListener('dragend', function (e) {
+      e.stopPropagation();
+      if (!ui.orged) return;
+      ui.orged.drag = null;
+      oeClearHover();
+      Array.prototype.forEach.call(oed.querySelectorAll('.tk-oe-row.drag'), function (n) { n.classList.remove('drag'); });
+    });
   }
 
   function mount(adapter, opts) {
@@ -572,6 +671,7 @@
       leavePage: leavePage,
       viewerChanged: function (id) {
         ui.last = null;
+        closeOrgEditor(true);
         if (id === ui.store && viewing()) bringUp(id);
         render();
       },

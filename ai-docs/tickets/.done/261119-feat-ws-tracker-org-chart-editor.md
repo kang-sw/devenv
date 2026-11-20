@@ -8,6 +8,7 @@ related:
   261110-epic-ws-tracker-team-feedback: workload visibility follows the org tree
 sage-review-design-reviewed: 10a1cceda2f6fe00
 sage-review-completeness-reviewed: 10a1cceda2f6fe00
+completed: 2026-11-20
 ---
 
 # Tracker Team card org-chart view and admin org-chart editor
@@ -139,24 +140,24 @@ Both use fictitious people; they are the visual contract for this ticket.
   (`agents-plugin-tool/` rows of AGENTS.md Implementation Conventions). The
   editor adds no file I/O on interactive paths; it works from the view the
   card already holds.
-- This PC (AhnLab V3): no local `go test`, Go tools, gofmt, ws/ws-mcp exes,
-  launcher, or Electron. Go tests run on w5090 via
-  `D:/sys_lock.sh remote w5090 run ...` (Linux, no Node). Local Node is
-  allowed for touched dashboard test files only, never the full
-  desktop-electron suite.
-- Do not start, stop, or replace the shared daemon: the owner keeps it on the
-  track/agent-v2 build today. LOOK captures use an asset-level fixture page in
-  a browser (dashboard assets plus a fixture tracker view), not a live daemon.
-  If a faithful capture is impossible that way, stop and report to the lead.
-- Temp files only under `D:/Temp/<purpose>/`.
+- Test environment (amended 2026-11-20, work moved to the macOS dev
+  machine): Go tests run locally and narrowly with
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -count=1 -run '<pattern>' ./internal/<pkg>`
+  from `agents-plugin-tool/`; never the whole `./internal/wsdashboard` or
+  `./internal/mcp` package. Node tests run only for touched dashboard test
+  files. No Electron, no real `agy` binary.
+- Do not start, stop, or replace the shared daemon. LOOK captures use an
+  asset-level fixture page in headless Chromium (dashboard assets plus a
+  fixture tracker view), not a live daemon. If a faithful capture is
+  impossible that way, stop and report to the lead.
+- Temp files only under a per-purpose directory in the system temp dir.
 - Out of scope (owner (1387)=a): a post-sync check that compares folded leads
   with the saved intent and flags a change the fold silently dropped for an
   unsynced cross-clone `set_lead`.
 - Every new `js.tk.*` key makes `TestTrackerMockupI18nIsCurrent`
   (`wsdashboard/tracker_mockup_i18n_test.go`) fail against
   `ai-docs/ref/tracker-mockup/i18n-en.js`; regenerate it with
-  `WS_REGEN_TRACKER_MOCKUP_I18N=1 go test ...` on w5090 and fetch the file
-  back. The same `ai-docs/ref/tracker-mockup/` directory (`index.html`,
+  `WS_REGEN_TRACKER_MOCKUP_I18N=1 go test -run TestTrackerMockupI18nIsCurrent ./internal/wsdashboard`. The same `ai-docs/ref/tracker-mockup/` directory (`index.html`,
   `fixtures.js`, `engine.js`, `mock-adapter.js`, which loads the `tracker-*.js`
   fragments from `file://`) is the asset-level fixture page for the LOOK
   captures.
@@ -192,7 +193,7 @@ Both use fictitious people; they are the visual contract for this ticket.
 | complexity.side_effect_risk | moderate | editor stages and sends admin and lead writes as one atomic batch; server refusals and fold-time cycle drops are the guard |
 | risk.correctness | high | event ordering, cycle and last-admin simulation, and the save-time pre-flight (Decision 8) must be reproduced client-side; the fold-time silent cycle drop (state.go#L1618-L1624) is out of scope |
 | risk.fit | moderate | must match view.html and editor.html in a ~380 px side panel with native drag-and-drop; Team card source is a peeled tracker.js fragment |
-| risk.test | moderate | drag-and-drop and LOOK capture cannot run on this PC and need an asset-level fixture page; pure ordering and cycle logic is Node-testable |
+| risk.test | moderate | drag-and-drop and LOOK capture need an asset-level fixture page; pure ordering and cycle logic is Node-testable |
 | risk.security_or_contract | moderate | admin-only writes and last-admin guard are server-enforced (tracker.go#L239-L261); UI must not offer states the server refuses |
 
 ## Phases
@@ -208,13 +209,25 @@ Phase 2), the non-admin hint, and the generic dialog button relabelled
 working.
 
 Verification:
-- Go: `wsdashboard` and `wsi18n` packages green on w5090 (locale key parity
+- Go: `wsdashboard` and `wsi18n` packages green (narrow `-run` patterns) (locale key parity
   included); update `tracker_settings_test.go` where it asserts the card or
   dialog text.
 - LOOK: capture the card for an admin viewer and a non-admin viewer on a
   fixture with a 3-level tree, one unplaced member, and one collapsed
   subtree; compare side by side with `view.html` panels A and B. Report any
   deliberate deviation.
+
+### Result (1f13d8c) - 2026-11-20
+
+- Extracted standalone pure `orgTree(members, leadsOverride)` helper in `agents-plugin-tool/internal/wsdashboard/assets/tracker.js` (outside the `wkAct..cardTeam` span pinned by `tracker_wiki_test.go`) deriving nested tree roots with subtree counts and depths, unplaced live members (no live lead and no live followers), removed members, and cycle-unreachable live members. Added Node unit tests in `agents-plugin-tool/internal/wsdashboard/tracker_org_tree.test.js`.
+- Restyled `cardTeam` in `agents-plugin-tool/internal/wsdashboard/assets/tracker-wiki.js` and `agents-plugin-tool/internal/wsdashboard/assets/tracker.css` per Decisions 1-3, 9, and `view.html`: indented org tree with elbow connectors, two-line rows, page-lifetime in-memory subtree collapse (`ui.ofold`, cleaned in `GONE_BY_KEY` in `tracker-forms.js`, toggled via `ofold` in `tracker-mount.js`), dashed amber unplaced frame, admin-only "조직도 편집" button placed after the member count chip via `spec.tools`, relabelled "기타 역할 이벤트…" admin button, and non-admin hint. Preserved existing chips, avatar relation tints, problem flags, `.mdetails`, and `settingsHtml(!!me.admin)`.
+- Updated all 11 locale tables under `agents-plugin-tool/internal/wsi18n/tables/*.json` and regenerated `ai-docs/ref/tracker-mockup/i18n-en.js`.
+- Verification:
+  - `node --test agents-plugin-tool/internal/wsdashboard/tracker_org_tree.test.js`: PASS (3/3).
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -count=1 ./internal/wsi18n`: PASS.
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -count=1 -run 'TestTracker(StoreSettingsLeaveTheRolesDialog|LabelsInTheDashboard|PriorityDialogRows|Wiki|MockupI18nIsCurrent)|TestDashboardSourceAssembly' ./internal/wsdashboard`: PASS.
+  - LOOK comparison (`compared /tmp/tracker-org-chart/phase1-admin.png & /tmp/tracker-org-chart/phase1-nonadmin.png vs /tmp/tracker-org-chart/mockup-view.png`: match): 3-level tree, connectors, two-line rows, avatar tints, collapsed `park-sy` blue "2명 접힘" badge, dashed amber unplaced box, admin button position, and non-admin hint match `view.html` panels A and B. Deliberate deviations: live `paneHtml` places `멤버 N명` + `조직도 편집` in `.ptools` directly under the tab strip (the live Team tab's header holds the tab icons); mockup-only `Join a store...` appears in the fixture toolbar via `ext.teamTools`.
+- Compatibility tier: T0.
 
 ### Phase 2: Admin org-chart editor
 
@@ -234,6 +247,32 @@ Verification:
   back to the staged change, staged-change undo and discard confirmation, and
   the pre-flight check (no-op dropped, every invalid change highlighted, a
   stale base blocking the save) per Decision 8.
-- Go: `wsdashboard` and `wsi18n` green on w5090.
+- Go: `wsdashboard` and `wsi18n` green (narrow `-run` patterns).
 - LOOK: capture the editor with three staged changes, a refused drag target,
   and the locked last-admin toggle; compare side by side with `editor.html`.
+
+### Result (acad90a) - 2026-11-20
+
+- Added pure, Node-testable editor state, cycle detection, final-set last-admin lock, Decision 8 save-time pre-flight, ordered atomic batch compilation (`roles.add_admin` -> `roles.set_lead` by ascending final depth -> `roles.remove_admin` with viewer self-removal last), and Decision 7 409 `refusal.index` mapping helpers in `agents-plugin-tool/internal/wsdashboard/assets/tracker.js` (`363640a`). Covered with 7 unit tests (including a simulated sequential server dispatcher for 2-node lead swaps and 3-node chain reversals) in `agents-plugin-tool/internal/wsdashboard/tracker_org_editor.test.js`.
+- Implemented the admin org-chart editor modal (`<dialog id="tkorged">`) in `agents-plugin-tool/internal/wsdashboard/assets/tracker-forms.js`, `agents-plugin-tool/internal/wsdashboard/assets/tracker-mount.js`, and `agents-plugin-tool/internal/wsdashboard/assets/tracker.css` (`363640a`, CSS polish `acad90a`): projected tree with search/expand-all, HTML5 drag-and-drop with `stopPropagation()` and live `.ok`/`.bad`/`.tk-oe-refuse` feedback without DOM thrashing, lead-select dropdown fallback with disabled cycle options, admin toggle with last-admin lock over the final admin set, staged-changes list with per-item undo and undo-all, dirty-close discard confirmation (Close, Cancel, Escape, backdrop), and atomic `AD.dispatch` save. Also folded in the Phase 1 review polish preventing revoked-key `.kline .idcopy` labels from wrapping.
+- Appended 57 `js.tk.org.*` keys in place across all 11 locale tables under `agents-plugin-tool/internal/wsi18n/tables/*.json` and regenerated `ai-docs/ref/tracker-mockup/i18n-en.js`.
+- Verification:
+  - `node --test agents-plugin-tool/internal/wsdashboard/tracker_org_tree.test.js agents-plugin-tool/internal/wsdashboard/tracker_org_editor.test.js`: PASS (10/10).
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -count=1 ./internal/wsi18n`: PASS.
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -count=1 -run 'TestTracker(StoreSettingsLeaveTheRolesDialog|LabelsInTheDashboard|PriorityDialogRows|Wiki|MockupI18nIsCurrent)|TestDashboardSourceAssembly' ./internal/wsdashboard`: PASS.
+  - Interactive Playwright check on live fixture: revoked/active `.kline .idcopy` button heights 19px (single line), `kim-hn` admin toggle disabled when `lee-dy` removal is staged, atomic Save closes modal and applies all 3 changes cleanly.
+  - LOOK comparison (`compared /tmp/tracker-org-chart/phase2-editor.png vs /tmp/tracker-org-chart/mockup-editor.png`: match): header, search/expand toolbar, root drop zone, elbow-connected projected tree, amber staged stripes/chips, dimmed drag source (`lee-dy`), amber pending admin button (`관리자 해제됨`), red cycle refusal target + banner (`jung-mj`), right-hand staged-changes list, save-order note, roles link, and footer match `editor.html`. Deliberate deviations: last-admin lock tooltip opens on hover via dashboard `tipAttr` instead of permanently covering adjacent rows; avatars use the dashboard's relation-tinted colors rather than monochrome grey; mockup-only explanatory callout ("관리자 지정 예: ...") is omitted in live UI.
+- Compatibility tier: T0.
+
+#### Edition (52c5ce3) - 2026-11-20
+
+- Addressed all findings from one-pass `code-review-lite` (2 Important, 2 Minor):
+  - Mounted `#tktip` inside the nearest open `<dialog>` while shown (restored to `document.body` in `hideTip`/`closeOrgEditor`) with `#tkorged-body` isolating `renderOrgEditor()` updates so tooltips inside `#tkorged` (including the last-admin lock tooltip) render in the top layer above the modal backdrop; surfaced cycle-blocked `oe-undo` errors in the in-modal `.tk-oe-berr` alert banner and removed the hidden behind-backdrop save-refusal toast.
+  - Guarded `#tk-oe-q` search input against `e.isComposing` and added `compositionend` handling to preserve Korean/CJK IME composition.
+  - Closed `#tkorged` in `dropGone()` when the active store disappears, and normalized dropped no-op lead `baseLeads[id]` through `orgTree(curVS.members).parentOf` in `orgEdSave()`.
+- Re-verified: `go test -count=1 ./internal/wsi18n`, narrow `./internal/wsdashboard` tests, `node --test` (10/10), and Playwright top-layer tooltip + IME composition + atomic save checks all PASS.
+
+
+## Resolution (2026-11-20)
+
+Implemented both phases of the tracker Team org-chart view and admin org-chart editor modal on impl/develop/why-shone-henna with 11-locale i18n, Node and Go tests, side-by-side LOOK verification against view.html and editor.html, and all code-review-lite findings fixed (T0 compatibility).

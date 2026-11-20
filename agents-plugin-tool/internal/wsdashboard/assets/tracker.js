@@ -261,6 +261,261 @@
     if (isCJKName(pr)) return g.slice(0, 2).join('');
     return (f.length ? g.slice(0, 1).concat(f.slice(0, 1)) : g.slice(0, 2)).join('').toUpperCase();
   }
+  // Derive the org forest from a members map (and an optional id -> leadId|'' override map):
+  // returns nested tree roots ({ id, depth, count, children }), unplaced live members (no live
+  // lead and no live followers), removed members, unreachable live members (e.g. cycles),
+  // plus lookup maps (parentOf, depthOf, countOf). Shared by cardTeam, the org editor, and pickers.
+  function orgTree(members, leadsOverride) {
+    var M = members || {}, ids = Object.keys(M), hasOv = !!leadsOverride;
+    function live(id) { return !!(id && M[id] && !M[id].removed); }
+    var parentOf = {}, kids = {}, removed = [], liveIds = [];
+    ids.forEach(function (id) {
+      if (!live(id)) { removed.push(id); return; }
+      liveIds.push(id);
+      kids[id] = [];
+    });
+    liveIds.forEach(function (id) {
+      var m = M[id], raw;
+      if (hasOv && Object.prototype.hasOwnProperty.call(leadsOverride, id)) raw = leadsOverride[id] || '';
+      else raw = m.leads && m.leads.length ? m.leads[0] : '';
+      parentOf[id] = live(raw) ? raw : '';
+    });
+    liveIds.forEach(function (id) {
+      var m = M[id];
+      if (!hasOv && Array.isArray(m.children)) {
+        m.children.forEach(function (cid) {
+          if (live(cid) && parentOf[cid] === id && kids[id].indexOf(cid) < 0) kids[id].push(cid);
+        });
+      }
+    });
+    liveIds.forEach(function (id) {
+      var p = parentOf[id];
+      if (p && kids[p].indexOf(id) < 0) kids[p].push(id);
+    });
+    var seen = {}, depthOf = {}, countOf = {};
+    function build(id, depth) {
+      seen[id] = true;
+      depthOf[id] = depth;
+      var ch = [], total = 0;
+      kids[id].forEach(function (cid) {
+        if (seen[cid]) { ch.push({ id: cid, depth: depth + 1, count: 0, children: [], cycle: true }); return; }
+        var sub = build(cid, depth + 1);
+        ch.push(sub);
+        total += 1 + sub.count;
+      });
+      countOf[id] = total;
+      return { id: id, depth: depth, count: total, children: ch, cycle: false };
+    }
+    var roots = [], unplaced = [];
+    liveIds.forEach(function (id) {
+      if (parentOf[id]) return;
+      if (kids[id].length) roots.push(build(id, 0));
+      else { seen[id] = true; depthOf[id] = 0; countOf[id] = 0; unplaced.push(id); }
+    });
+    var unreachable = liveIds.filter(function (id) { return !seen[id]; });
+    return { roots: roots, unplaced: unplaced, removed: removed, unreachable: unreachable, parentOf: parentOf, depthOf: depthOf, countOf: countOf };
+  }
+  // Pure state and validation helpers for the admin org-chart editor modal (Decisions 4-8).
+  function orgEdInit(members, viewer) {
+    var ot = orgTree(members), baseLeads = {}, baseAdmins = {}, M = members || {};
+    Object.keys(ot.parentOf).forEach(function (id) {
+      baseLeads[id] = ot.parentOf[id] || '';
+      baseAdmins[id] = !!(M[id] && M[id].admin);
+    });
+    return {
+      viewer: viewer || '', baseLeads: baseLeads, baseAdmins: baseAdmins,
+      stagedLeads: {}, stagedAdmins: {}, fold: {}, q: '',
+      drag: null, over: null, refuse: null, errors: {}, saving: false
+    };
+  }
+  function orgEdProjectedLeads(ed) {
+    var out = {};
+    Object.keys(ed.baseLeads).forEach(function (id) { out[id] = ed.baseLeads[id]; });
+    Object.keys(ed.stagedLeads).forEach(function (id) { out[id] = ed.stagedLeads[id]; });
+    return out;
+  }
+  function orgEdProjectedAdmins(ed) {
+    var out = {};
+    Object.keys(ed.baseAdmins).forEach(function (id) { out[id] = !!ed.baseAdmins[id]; });
+    Object.keys(ed.stagedAdmins).forEach(function (id) { out[id] = !!ed.stagedAdmins[id]; });
+    return out;
+  }
+  function orgEdAdminCount(ed) {
+    var pa = orgEdProjectedAdmins(ed), n = 0;
+    Object.keys(pa).forEach(function (id) { if (pa[id]) n++; });
+    return n;
+  }
+  function orgEdIsInSubtree(leadsMap, candidate, memberId) {
+    var seen = {};
+    for (var x = candidate; x && !seen[x]; x = leadsMap[x]) {
+      if (x === memberId) return true;
+      seen[x] = true;
+    }
+    return false;
+  }
+  function orgEdCanRemoveAdmin(ed, id) {
+    var pa = orgEdProjectedAdmins(ed);
+    return !pa[id] || orgEdAdminCount(ed) > 1;
+  }
+  function orgEdStageLead(ed, memberId, newLead) {
+    var target = newLead || '';
+    if (!Object.prototype.hasOwnProperty.call(ed.baseLeads, memberId)) return { ok: false, reason: 'unknown_member' };
+    var leads = orgEdProjectedLeads(ed);
+    if (target && orgEdIsInSubtree(leads, target, memberId)) return { ok: false, reason: 'cycle' };
+    if (target === (ed.baseLeads[memberId] || '')) delete ed.stagedLeads[memberId];
+    else ed.stagedLeads[memberId] = target;
+    delete ed.errors['lead:' + memberId];
+    ed.refuse = null;
+    return { ok: true };
+  }
+  function orgEdToggleAdmin(ed, id) {
+    if (!Object.prototype.hasOwnProperty.call(ed.baseAdmins, id)) return { ok: false, reason: 'unknown_member' };
+    var pa = orgEdProjectedAdmins(ed), cur = !!pa[id];
+    if (cur && !orgEdCanRemoveAdmin(ed, id)) return { ok: false, reason: 'last_admin' };
+    var next = !cur;
+    if (next === !!ed.baseAdmins[id]) delete ed.stagedAdmins[id];
+    else ed.stagedAdmins[id] = next;
+    delete ed.errors['admin:' + id];
+    return { ok: true };
+  }
+  function orgEdUndo(ed, key) {
+    var sep = String(key || '').indexOf(':');
+    if (sep < 0) return false;
+    var kind = key.slice(0, sep), id = key.slice(sep + 1);
+    if (kind === 'lead') {
+      if (!Object.prototype.hasOwnProperty.call(ed.stagedLeads, id)) return false;
+      var nextLeads = orgEdProjectedLeads(ed);
+      var orig = ed.baseLeads[id] || '';
+      delete nextLeads[id];
+      if (orig && orgEdIsInSubtree(nextLeads, orig, id)) return false;
+      delete ed.stagedLeads[id];
+      delete ed.errors[key];
+      return true;
+    }
+    if (kind === 'admin') {
+      if (!Object.prototype.hasOwnProperty.call(ed.stagedAdmins, id)) return false;
+      var wasAdd = ed.stagedAdmins[id] === true;
+      delete ed.stagedAdmins[id];
+      delete ed.errors[key];
+      // Undoing a staged add_admin could leave 0 admins if an existing admin's removal was also staged;
+      // restore staged removals so the editor never holds a state the server refuses.
+      if (wasAdd && orgEdAdminCount(ed) < 1) {
+        Object.keys(ed.stagedAdmins).forEach(function (aid) {
+          if (ed.stagedAdmins[aid] === false) { delete ed.stagedAdmins[aid]; delete ed.errors['admin:' + aid]; }
+        });
+      }
+      return true;
+    }
+    return false;
+  }
+  function orgEdUndoAll(ed) {
+    ed.stagedLeads = {};
+    ed.stagedAdmins = {};
+    ed.errors = {};
+    ed.refuse = null;
+  }
+  function orgEdChanges(ed) {
+    var list = [];
+    Object.keys(ed.stagedLeads).sort().forEach(function (id) {
+      list.push({ key: 'lead:' + id, kind: 'lead', member: id, from: ed.baseLeads[id] || '', to: ed.stagedLeads[id] || '' });
+    });
+    Object.keys(ed.stagedAdmins).sort().forEach(function (id) {
+      list.push({ key: 'admin:' + id, kind: ed.stagedAdmins[id] ? 'add_admin' : 'remove_admin', member: id });
+    });
+    return list;
+  }
+  function orgEdCount(ed) {
+    return Object.keys(ed.stagedLeads).length + Object.keys(ed.stagedAdmins).length;
+  }
+  function orgEdCloseNeedsConfirm(ed) {
+    return !!ed && orgEdCount(ed) > 0;
+  }
+  // Save-time pre-flight check and deterministic single-batch event builder (Decisions 7 & 8).
+  // Re-applies staged changes onto currentMembers: drops no-ops, blocks on stale bases and all
+  // invalid changes at once, and emits add_admin -> set_lead (ascending final depth) -> remove_admin
+  // (saving viewer's own removal very last) with an index-to-change-key map for 409 refusals.
+  function orgEdPreflightAndBuild(ed, currentMembers, viewer) {
+    var M = currentMembers || {}, who = viewer || ed.viewer || '';
+    var me = M[who];
+    if (!me || me.removed || !me.admin) {
+      return { ok: false, errors: { _viewer: { code: 'not_admin' } }, dropped: [], events: [], indexMap: [] };
+    }
+    var curTree = orgTree(M), curParent = curTree.parentOf;
+    var errors = {}, dropped = [], activeLeads = {}, activeAdmins = {};
+    Object.keys(ed.stagedLeads).sort().forEach(function (id) {
+      var key = 'lead:' + id, target = ed.stagedLeads[id] || '', curM = M[id];
+      if (!curM || curM.removed) { errors[key] = { code: 'removed_member' }; return; }
+      if (target && (!M[target] || M[target].removed)) { errors[key] = { code: 'removed_target', target: target }; return; }
+      var curLead = curParent[id] || '', baseLead = ed.baseLeads[id] || '';
+      if (curLead === target) { dropped.push(key); return; }
+      if (curLead !== baseLead) { errors[key] = { code: 'stale_base', actual: curLead }; return; }
+      activeLeads[id] = target;
+    });
+    Object.keys(ed.stagedAdmins).sort().forEach(function (id) {
+      var key = 'admin:' + id, want = !!ed.stagedAdmins[id], curM = M[id];
+      if (!curM || curM.removed) { errors[key] = { code: 'removed_member' }; return; }
+      if (want === !!curM.admin) { dropped.push(key); return; }
+      activeAdmins[id] = want;
+    });
+    var finalLeads = {};
+    Object.keys(curParent).forEach(function (id) { finalLeads[id] = curParent[id]; });
+    Object.keys(activeLeads).forEach(function (id) { finalLeads[id] = activeLeads[id]; });
+    var finalTree = orgTree(M, finalLeads);
+    var unreach = {};
+    finalTree.unreachable.forEach(function (id) { unreach[id] = true; });
+    Object.keys(activeLeads).forEach(function (id) {
+      if (unreach[id] || (activeLeads[id] && orgEdIsInSubtree(finalLeads, activeLeads[id], id))) {
+        errors['lead:' + id] = { code: 'cycle' };
+      }
+    });
+    var finalAdminCount = 0;
+    Object.keys(curParent).forEach(function (id) {
+      var isAdm = Object.prototype.hasOwnProperty.call(activeAdmins, id) ? activeAdmins[id] : !!(M[id] && M[id].admin);
+      if (isAdm) finalAdminCount++;
+    });
+    if (finalAdminCount < 1) {
+      Object.keys(activeAdmins).forEach(function (id) {
+        if (activeAdmins[id] === false) errors['admin:' + id] = { code: 'last_admin' };
+      });
+    }
+    if (Object.keys(errors).length) {
+      return { ok: false, errors: errors, dropped: dropped, events: [], indexMap: [] };
+    }
+    var events = [], indexMap = [];
+    // 1. roles.add_admin first
+    Object.keys(activeAdmins).sort().forEach(function (id) {
+      if (activeAdmins[id] === true) {
+        events.push({ type: 'roles.add_admin', payload: { member: id }, origin: 'human' });
+        indexMap.push('admin:' + id);
+      }
+    });
+    // 2. roles.set_lead in ascending depth of the final tree
+    Object.keys(activeLeads).sort(function (a, b) {
+      var da = finalTree.depthOf[a] || 0, db = finalTree.depthOf[b] || 0;
+      return da !== db ? da - db : (a < b ? -1 : a > b ? 1 : 0);
+    }).forEach(function (id) {
+      var target = activeLeads[id];
+      events.push({ type: 'roles.set_lead', payload: { member: id, leads: target ? [target] : [] }, origin: 'human' });
+      indexMap.push('lead:' + id);
+    });
+    // 3. roles.remove_admin last, saving viewer's own removal very last
+    var rms = Object.keys(activeAdmins).filter(function (id) { return activeAdmins[id] === false; }).sort(function (a, b) {
+      if (a === who && b !== who) return 1;
+      if (b === who && a !== who) return -1;
+      return a < b ? -1 : a > b ? 1 : 0;
+    });
+    rms.forEach(function (id) {
+      events.push({ type: 'roles.remove_admin', payload: { member: id }, origin: 'human' });
+      indexMap.push('admin:' + id);
+    });
+    return { ok: true, errors: {}, dropped: dropped, events: events, indexMap: indexMap };
+  }
+  function orgEdMapRefusal(indexMap, refusal) {
+    if (!refusal) return { key: '_batch', reason: '' };
+    var idx = typeof refusal.index === 'number' ? refusal.index : -1;
+    var key = idx >= 0 && idx < indexMap.length ? indexMap[idx] : '_batch';
+    return { key: key, reason: refusal.reason || '' };
+  }
   // Live, doing or blocked, and no status write for this many days: "stale" (the
   // view state carries the flag; the number is for the text).
   var STALE_DAYS = 3;
@@ -331,6 +586,8 @@
     wfold: {},            // "store|item id" -> true | false: a node of the item window's subtree open or folded (page lifetime; absent: the default)
     focus: null,          // { ev: event id, flash: true until its first paint } the item window scrolls to and marks; null: nothing
     mdet: {},             // "store|member id" -> true: the member's key and profile details are expanded in the org card (page lifetime)
+    ofold: {},            // "store|member id" -> true: the member's subtree is collapsed in the org card (page lifetime)
+    orged: null,          // open admin org-chart editor state (orgEdInit), or null when closed
     sel: null,            // the row selected by a tap: it shows the same actions and details a hover shows
     msel: {},             // store -> { ids: { item id: true }, at: anchor row key } while the Items list is in selection mode (see mselClick)
     nrow: {},             // store -> { val, kind } while the Items list shows its "+ New" input row
