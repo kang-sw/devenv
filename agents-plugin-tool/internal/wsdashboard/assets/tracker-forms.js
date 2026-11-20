@@ -937,7 +937,7 @@
           '<span class="was">' + esc(was ? wsT("js.tk.org.waslead", was) : wsT("js.tk.org.wasunplaced")) + '</span>';
       } else {
         var near = headed ? null : oi.nearestOrg(id);
-        var otxt = near ? esc(near.name) + ' &middot; ' : (!headed ? '<i>' + esc(wsT("js.tk.org.no_org")) + '</i> &middot; ' : '');
+        var otxt = near ? esc(near.name) + ' &middot; ' : (!headed ? '<i>' + esc(wsT("js.tk.org.noorg")) + '</i> &middot; ' : '');
         meta = '<span class="o">' + otxt + '<code>' + esc(id) + '</code></span>';
       }
       var cnt = isLead ? '<span class="cnt">' + esc(wsTn("js.tk.team.subcount", count)) + '</span>' : '';

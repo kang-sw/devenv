@@ -70,10 +70,10 @@
   }
   // Evaluates CC picker state over listed live members only. Unlisted/removed members in origCc
   // are never placed in removed. Group choices expand to their current subtree snapshot on apply.
-  function pmCcEval(idx, origCc, picks, groups) {
+  function pmCcEval(idx, origCc, picks, groups, headToOrg) {
     var P = picks || {}, G = groups || {}, orig = {};
     (origCc || []).forEach(function (id) { orig[id] = true; });
-    var cov = pmCover(idx, G);
+    var cov = pmCover(idx, G, headToOrg);
     var effective = {}, added = [], removed = [], grpChips = [], addChips = [], rmChips = [], effectiveCount = 0;
     cov.topGroups.forEach(function (gid) {
       grpChips.push({ t: 'g', id: gid, n: idx.count[gid] || 1 });
@@ -286,8 +286,8 @@
   var PM = null;
 
   function pmMatch(id, qq) {
-    var m = VS && VS.members[id];
-    var hay = (nm(id) + ' ' + id + ' ' + (m && m.profile && m.profile.org ? m.profile.org : '')).toLowerCase();
+    var m = VS && VS.members[id], hd = PM && PM.headToOrg && PM.headToOrg[id];
+    var hay = (nm(id) + ' ' + id + ' ' + (m && m.profile && m.profile.org ? m.profile.org : '') + (hd ? ' ' + hd.name : '')).toLowerCase();
     return hay.indexOf(qq) >= 0;
   }
 
@@ -298,12 +298,15 @@
     var draftObj = ctx.draft ? (ctx.ed ? ui.ned : ui.nrow[ui.store]) : null;
     if (!ctx.draft && !it) return;
     if (ctx.draft && !draftObj) return;
-    var ot = orgTree(VS.members), idx = pmIndex(ot);
+    var retarget = ctx.retarget || null;
+    var oi = orgIndex(VS.orgs, VS.members), ot = oi.tree, idx = pmIndex(ot);
     var picks = {}, origCc = [], lockedP = {}, lockedOrder = [], lockedG = {};
     var norule = false, single = false, compl = null;
     if (kind === 'cc') {
-      origCc = listOf(it.cc).slice();
-      origCc.forEach(function (id) { if (idx.listed[id]) picks[id] = true; });
+      if (!retarget) {
+        origCc = listOf(it.cc).slice();
+        origCc.forEach(function (id) { if (idx.listed[id]) picks[id] = true; });
+      }
     } else if (kind === 'assign') {
       if (ctx.draft) {
         norule = true; single = draftObj.kind === 'topic'; compl = draftObj.compl || null;
@@ -312,18 +315,21 @@
         });
       } else {
         norule = it.kind === 'topic'; single = it.kind === 'topic';
+        var skipRule = retarget && retarget.rule ? retarget.rule : '';
         listOf(it.assignments).forEach(function (aid) {
           var r = A(aid);
-          if (r && (r.state === 'live' || r.state === 'pending')) lockedP[r.to] = true;
+          if (r && (r.state === 'live' || r.state === 'pending') && (!skipRule || r.rule !== skipRule)) lockedP[r.to] = true;
         });
         idx.order.forEach(function (id) { if (lockedP[id]) lockedOrder.push(id); });
+        var otherRules = skipRule ? Object.keys(VS.rules || {}).map(function (k) { return VS.rules[k]; }).filter(function (ru) { return ru && ru.id !== skipRule; }) : VS.rules;
         if (!norule) idx.order.forEach(function (id) {
-          if (idx.isLead[id] && pmRuleCovered(idx, VS.rules, it.id, VS.viewer.member, id)) lockedG[id] = true;
+          if ((idx.isLead[id] || oi.headToOrg[id]) && pmRuleCovered(idx, otherRules, it.id, VS.viewer.member, id)) lockedG[id] = true;
         });
       }
     }
     PM = {
       kind: kind, item: ctx.item || null, draft: !!ctx.draft, ed: !!ctx.ed, store: ui.store,
+      retarget: retarget, headToOrg: oi.headToOrg,
       ot: ot, idx: idx, origCc: origCc, picks: picks, groups: {},
       lockedP: lockedP, lockedOrder: lockedOrder, lockedG: lockedG,
       norule: norule, single: single, compl: compl,
@@ -357,27 +363,31 @@
   function pmShellHtml() {
     var it = PM.item && VS.items[PM.item];
     var draftObj = PM.draft ? (PM.ed ? ui.ned : ui.nrow[PM.store]) : null;
-    var title = PM.kind === 'cc' ? wsT("js.tk.pm.cc.title") : wsT("js.tk.pm.assign.title");
+    var rt = PM.retarget;
+    var title = rt ? wsT(PM.kind === 'cc' ? "js.tk.pm.retarget.cc.title" : "js.tk.pm.retarget.asg.title", orgNameOf(rt.org))
+      : (PM.kind === 'cc' ? wsT("js.tk.pm.cc.title") : wsT("js.tk.pm.assign.title"));
     var sub = it ? '<code>' + esc(it.alias) + '</code> ' + esc(it.title) :
       draftObj ? esc((draftObj.val || '').trim() || wsT("js.tk.new.item")) : '';
-    var hasTools = PM.kind === 'cc';
-    var hasNote = PM.kind === 'assign' && !PM.norule;
+    var hasTools = PM.kind === 'cc' && !rt;
+    var hasNote = !!rt || (PM.kind === 'assign' && !PM.norule);
+    var noteTxt = rt ? wsT(PM.kind === 'cc' ? "js.tk.pm.retarget.cc.note" : "js.tk.pm.retarget.asg.note", esc(orgNameOf(rt.org)))
+      : wsT("js.tk.pm.asg.note");
     return '<div class="pm-dlg" role="document" aria-label="' + esc(title) + '">' +
-      '<div class="pm-dh"><h2>' + title + '</h2>' + (sub ? '<span class="pm-sub">' + sub + '</span>' : '') +
+      '<div class="pm-dh"><h2>' + esc(title) + '</h2>' + (sub ? '<span class="pm-sub">' + sub + '</span>' : '') +
       '<span class="grow"></span><button type="button" class="pm-x" data-pm="close" aria-label="' + esc(wsT("js.tk.dlg.close")) + '">&times;</button></div>' +
       '<div class="pm-tb"><input type="search" id="tkpmq" autocomplete="off" spellcheck="false" placeholder="' + esc(wsT("js.tk.pm.search")) + '" aria-label="' + esc(wsT("js.tk.pm.search")) + '">' +
       (hasTools ? '<button type="button" class="pm-btn mini" data-pm="expand">' + wsT("js.tk.pm.expand") + '</button>' +
         '<button type="button" class="pm-btn mini" id="tkpm-only" data-pm="only" aria-pressed="false" title="' + esc(wsT("js.tk.pm.only.tip")) + '">' + wsT("js.tk.pm.only") + '</button>' : '') + '</div>' +
       '<div class="pm-sel"><span class="pm-lab">' + wsT("js.tk.pm.selected") + '</span><div class="pm-chips" id="tkpm-chips"></div></div>' +
       '<div class="pm-body" id="tkpm-body"></div>' +
-      (hasNote ? '<div class="pm-note">' + wsT("js.tk.pm.asg.note") + '</div>' : '') +
+      (hasNote ? '<div class="pm-note">' + noteTxt + '</div>' : '') +
       '<div class="pm-err" id="tkpm-err" role="alert" hidden></div>' +
       '<div class="pm-df" id="tkpm-foot"></div>' +
       '</div>';
   }
 
   function pmCcEvalCur() {
-    return pmCcEval(PM.idx, PM.origCc, PM.picks, PM.groups);
+    return pmCcEval(PM.idx, PM.origCc, PM.picks, PM.groups, PM.retarget ? PM.headToOrg : null);
   }
 
   function pmAssignEvalCur() {
@@ -385,7 +395,8 @@
       viewer: VS.viewer.member, reach: VS.viewer.reach || {},
       lockedPeople: PM.lockedP, lockedGroups: PM.lockedG,
       picks: PM.picks, groups: PM.groups,
-      norule: PM.norule, single: PM.single, compl: PM.compl
+      norule: PM.norule, single: PM.single, compl: PM.compl,
+      headToOrg: PM.retarget ? PM.headToOrg : null
     });
   }
 
@@ -410,7 +421,8 @@
 
   function pmAsgRowHtml(id, isLead, ev) {
     var v = VS.viewer.member, reach = VS.viewer.reach || {};
-    var showGrp = isLead && !PM.norule, locked = !!PM.lockedP[id];
+    var org = PM.headToOrg && PM.headToOrg[id];
+    var showGrp = (isLead || (!!PM.retarget && !!org)) && !PM.norule, locked = !!PM.lockedP[id];
     var covBy = !locked ? (ev.visCov.personBy[id] || '') : '', covered = !!covBy;
     var on = !locked && !covered && !!PM.picks[id], isLive = id === v || !!reach[id];
     var cls = 'pm-nd' + (covered ? ' cvr' : '') + (!showGrp && (on || locked) ? ' on' : '') + (!showGrp && covered ? ' cov' : '') + (!showGrp && locked ? ' lock' : '') + (PM.focusId === id ? ' focus' : '');
@@ -420,8 +432,9 @@
       ? '<span class="pm-rdo' + (locked ? ' lock' : '') + '" data-pm="self" data-id="' + esc(id) + '" role="radio" aria-checked="' + (on || locked ? 'true' : 'false') + '"' + (locked ? ' aria-disabled="true"' : '') + rowTip + '></span>'
       : '<span class="pm-ck' + (locked ? ' lock' : '') + '" data-pm="self" data-id="' + esc(id) + '" role="checkbox" aria-checked="' + (on || covered || locked ? 'true' : 'false') + '"' + (locked || covered ? ' aria-disabled="true"' : '') + rowTip + '></span>';
     var subTxt = (!showGrp && covered) ? wsT("js.tk.pm.asg.cov", esc(nm(covBy))) : pmRowSub(id);
+    var orgTag = org ? '<span class="tk-org-badge">' + esc(org.name) + '</span>' : '';
     var who = '<span class="pm-who"' + (showGrp ? '' : ' data-pm="self" data-id="' + esc(id) + '"') + rowTip + '><span class="pm-nm">' + esc(nm(id)) + '</span>' +
-      (id === v ? '<span class="pm-chip you">' + wsT("js.tk.pm.you") + '</span>' : '') + '<span class="pm-o">' + subTxt + '</span></span>';
+      orgTag + (id === v ? '<span class="pm-chip you">' + wsT("js.tk.pm.you") + '</span>' : '') + '<span class="pm-o">' + subTxt + '</span></span>';
     var rt = (locked ? '<span class="pm-chip">' + wsT("js.tk.pm.asg.locked") + '</span>' : '') +
       (on && !isLive ? '<span class="pm-chip pend" title="' + esc(wsT("js.tk.pm.asg.pend.tip")) + '">' + wsT("js.tk.pm.asg.pend") + '</span>' : '');
     if (showGrp) {
@@ -456,33 +469,36 @@
 
   function pmCcRowHtml(id, isLead, ev, origMap) {
     var v = VS.viewer.member;
+    var org = PM.headToOrg && PM.headToOrg[id];
+    var showGrp = isLead || (!!PM.retarget && !!org);
     var covBy = ev.cov.personBy[id] || '';
     var covered = !!covBy;
     var on = !!PM.picks[id], eff = on || covered, was = !!origMap[id];
     var cls = 'pm-nd';
     if (covered) cls += ' cvr';
-    if (!isLead && on && !covered) cls += ' on';
-    if (!isLead && covered) cls += ' cov';
+    if (!showGrp && on && !covered) cls += ' on';
+    if (!showGrp && covered) cls += ' cov';
     if (eff && !was && !covered) cls += ' add';
     if (!eff && was) cls += ' rm';
     if (PM.focusId === id) cls += ' focus';
     var covTip = covered ? ' title="' + esc(wsT("js.tk.pm.cov.tip", nm(covBy))) + '"' : '';
     var col1 = isLead ? '<button type="button" class="pm-tg" data-pm="tog" data-id="' + esc(id) + '" aria-label="' + esc(wsT("js.tk.pm.toggle")) + '">&#9662;</button>' : '<span></span>';
-    var col2 = isLead ? '<span></span>' : '<span class="pm-ck" data-pm="self" data-id="' + esc(id) + '" role="checkbox" aria-checked="' + (eff ? 'true' : 'false') + '"' + (covered ? ' aria-disabled="true"' : '') + covTip + '></span>';
-    var who = '<span class="pm-who"' + (isLead ? '' : ' data-pm="self" data-id="' + esc(id) + '"') + covTip + '><span class="pm-nm">' + esc(nm(id)) + '</span>' +
-      (id === v ? '<span class="pm-chip you">' + wsT("js.tk.pm.you") + '</span>' : '') +
+    var col2 = showGrp ? '<span></span>' : '<span class="pm-ck" data-pm="self" data-id="' + esc(id) + '" role="checkbox" aria-checked="' + (eff ? 'true' : 'false') + '"' + (covered ? ' aria-disabled="true"' : '') + covTip + '></span>';
+    var orgTag = org ? '<span class="tk-org-badge">' + esc(org.name) + '</span>' : '';
+    var who = '<span class="pm-who"' + (showGrp ? '' : ' data-pm="self" data-id="' + esc(id) + '"') + covTip + '><span class="pm-nm">' + esc(nm(id)) + '</span>' +
+      orgTag + (id === v ? '<span class="pm-chip you">' + wsT("js.tk.pm.you") + '</span>' : '') +
       '<span class="pm-o">' + pmRowSub(id) + '</span></span>';
     var rt = '';
     if (was && eff) rt += '<span class="pm-chip was">' + wsT("js.tk.pm.cc.was") + '</span>';
     else if (!was && eff && !covered) rt += '<span class="pm-chip add">' + wsT("js.tk.pm.cc.add") + '</span>';
     else if (was && !eff) rt += '<span class="pm-chip rm">' + wsT("js.tk.pm.cc.rm") + '</span>';
-    if (isLead) {
+    if (showGrp) {
       var gCov = ev.cov.groupBy[id] || '', gOn = !!PM.groups[id];
       var gTip = gCov ? ' title="' + esc(wsT("js.tk.pm.cov.tip", nm(gCov))) + '"' : '';
       rt += '<button type="button" class="pm-opt self' + (on && !covered ? ' on' : '') + (covered ? ' cov' : '') + '" data-pm="self" data-id="' + esc(id) + '" aria-pressed="' + (eff ? 'true' : 'false') + '"' + (covered ? ' aria-disabled="true"' : '') + covTip + '><span class="pm-ck"></span>' + wsT("js.tk.pm.self") + '</button>';
       rt += '<button type="button" class="pm-opt grp' + (gOn && !gCov ? ' on' : '') + (gCov ? ' cov' : '') + '" data-pm="grp" data-id="' + esc(id) + '" aria-pressed="' + ((gOn || !!gCov) ? 'true' : 'false') + '"' + (gCov ? ' aria-disabled="true"' : '') + gTip + '><span class="pm-ck"></span><span class="k">' + wsTn("js.tk.pm.grp", PM.idx.count[id] || 1) + '</span></button>';
     }
-    return '<div class="' + cls + '" data-id="' + esc(id) + '"' + (isLead ? ' data-lead="1"' : '') + (was ? ' data-was="1"' : '') + '>' +
+    return '<div class="' + cls + '" data-id="' + esc(id) + '"' + (showGrp ? ' data-lead="1"' : '') + (was ? ' data-was="1"' : '') + '>' +
       col1 + col2 + avHtml(id, false, false) + who + '<span class="pm-rt">' + rt + '</span></div>';
   }
 
@@ -514,7 +530,8 @@
       }).join('') + '</span>' +
       (ev.mode === 'mixed' ? '<span class="pm-sum" title="' + esc(wsT("js.tk.ap.compl.mixed.tip")) + '"><b>' + wsT("js.tk.ap.compl.mixed") + '</b></span>' : '');
     var cnt = ev.targets.length;
-    var applyLbl = cnt ? wsTn("js.tk.pm.asg.apply.n", cnt) : wsT("js.tk.pm.asg.apply");
+    var applyLbl = PM.retarget ? wsT("js.tk.pm.retarget.apply")
+      : (cnt ? wsTn("js.tk.pm.asg.apply.n", cnt) : wsT("js.tk.pm.asg.apply"));
     return '<div class="pm-row">' + left + '<span class="grow"></span>' +
       '<button type="button" class="pm-btn" data-pm="close">' + wsT("js.tk.dlg.cancel") + '</button>' +
       '<button type="button" class="pm-btn primary" id="tkpm-apply" data-pm="apply"' + (!ev.dirty || PM.busy ? ' disabled' : '') + '>' + applyLbl + '</button></div>';
@@ -532,10 +549,12 @@
       chipsHtml = pmCcChipsHtml(ev);
       rowFn = function (id, isLead) { return pmCcRowHtml(id, isLead, ev, origMap); };
       var cnt = ev.added.length + ev.removed.length;
-      footHtml = '<div class="pm-row"><span class="pm-sum">' + wsT("js.tk.pm.cc.sum", ev.effectiveCount, ev.added.length, ev.removed.length) +
+      var ccApplyLbl = PM.retarget ? wsT("js.tk.pm.retarget.apply") : (cnt ? wsTn("js.tk.pm.cc.apply.n", cnt) : wsT("js.tk.pm.cc.apply"));
+      var ccSumTxt = PM.retarget ? wsTn("js.tk.pm.retarget.cc.sum", ev.effectiveCount) : wsT("js.tk.pm.cc.sum", ev.effectiveCount, ev.added.length, ev.removed.length);
+      footHtml = '<div class="pm-row"><span class="pm-sum">' + ccSumTxt +
         '</span><span class="grow"></span><button type="button" class="pm-btn" data-pm="close">' + wsT("js.tk.dlg.cancel") + '</button>' +
         '<button type="button" class="pm-btn primary" id="tkpm-apply" data-pm="apply"' + (!ev.dirty || PM.busy ? ' disabled' : '') + '>' +
-        (cnt ? wsTn("js.tk.pm.cc.apply.n", cnt) : wsT("js.tk.pm.cc.apply")) + '</button></div>';
+        ccApplyLbl + '</button></div>';
     } else {
       ev = pmAssignEvalCur();
       flt = pmFilter(PM.ot, PM.q, false, function () { return true; }, pmMatch);
@@ -612,7 +631,7 @@
     if (!PM || PM.busy) return;
     var cur = PM, events;
     if (cur.kind === 'cc') {
-      events = pmCcEvents(cur.item, cur.idx, cur.origCc, cur.picks, cur.groups);
+      events = cur.retarget ? pmRetargetCcEvents(cur.item, cur.retarget, cur.idx, cur.picks, cur.groups, cur.headToOrg) : pmCcEvents(cur.item, cur.idx, cur.origCc, cur.picks, cur.groups);
     } else {
       var ev = pmAssignEvalCur();
       if (!ev.targets.length) return;
@@ -626,7 +645,8 @@
         if (el) el.focus({ preventScroll: true });
         return;
       }
-      events = pmAssignEvents(cur.item, ev.targets, cur.compl, VS.viewer.member, VS.viewer.reach || {});
+      events = cur.retarget ? pmRetargetAssignEvents(cur.item, cur.retarget, ev.targets, cur.compl, VS.viewer.member, VS.viewer.reach || {}, cur.headToOrg)
+        : pmAssignEvents(cur.item, ev.targets, cur.compl, VS.viewer.member, VS.viewer.reach || {});
     }
     if (!events.length) return;
     cur.busy = true;
