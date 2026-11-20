@@ -211,16 +211,17 @@ owns the operation.
   and worker steering, but the host-neutral reviewer artifact ownership remains
   broken. The prior ticket itself left this recheck forward
   (`ai-docs/tickets/.done/261120-bug-ws-agent-dogfood-delivery-context.md:451`).
-- **Minimal fix:** settle (1926). Prefer making the write-capable handler own
-  the generated artifact and requiring a bounded, completeness-checked
-  findings handoff from the read-only reviewer rather than assuming one final
-  report is untruncated. Test clean, ordinary non-clean, and oversized
-  multi-finding Lite runs for a complete non-empty artifact, no reviewer source
-  writes, direct-parent delivery exactly once, and no duplicate manual receive
-  after auto-claim.
-- **Compatibility:** **T0** for moving artifact persistence to the existing
-  handler and clarifying current mailbox semantics. No tool, hello, mailbox
-  record, or persisted-history shape changes.
+- **Minimal fix:** implement (1926): add the harness-neutral MCP tool
+  `path.write(path, content)`, authorize it only for a cache path that the same
+  session key previously minted through `path.generate`, and expose it through
+  `ChildSafeWSTools`. Keep the reviewer read-only with respect to the source
+  tree while allowing its daemon-side MCP call to write the detailed report to
+  the generated findings path; its final response remains only the one-line
+  status. Test clean, ordinary non-clean, oversized, unminted-path, and
+  cross-session attempts.
+- **Compatibility:** **T0.** `path.write` is an additive tool, and the playbooks
+  that call it ship embedded with the same binary. Existing tools, arguments,
+  hello data, mailbox records, and persisted-history shapes remain unchanged.
 
 ### 6. The worker playbook requires tools its child profile withholds
 
@@ -266,30 +267,34 @@ owns the operation.
   remains excluded, so no child gains a lead-key mint path
   (`ai-docs/manuals/release-compatibility.md:73`).
 
-## Open Decision Queue
+## Decisions
 
-Last ID: (1928)
-
-- (1924) [open] [policy] Should a live child remain permanently bound to its
-  spawn root, requiring respawn for a different worktree (recommended), or
-  should ws introduce an explicit adopt/rebind lifecycle that atomically moves
-  key, root, mail, config, and process authority?
-- (1925) [open] [technical] Should stale canonical implementation branches be
-  classified and recreated during locked worktree acquisition, with route
-  resolution retaining a defensive stale-target refusal (recommended), or
-  should route resolution own all repair before acquisition?
-- (1926) [open] [technical] Should the write-capable review handler persist a
-  bounded, completeness-checked findings handoff from the read-only reviewer
-  (recommended), or should common `agent.spawn` gain a narrowly scoped
-  review-artifact write capability across every host?
-- (1927) [open] [technical] Should worker instructions stop requiring the
-  lead-key-minting `workflow_manual` and rely on the rendered Worker Protocol,
-  ticket, AGENTS guidance, and declared manuals (recommended), or should ws
-  introduce a new child-safe workflow-context tool?
-- (1928) [open] [technical] Should the child surface expose the existing
-  read-only `config.resolve_agent` that the server already authorizes for
-  delegates (recommended), or should every host's worker delegation contract
-  be redesigned to avoid separate tier resolution?
+- **(1924) Child worktree binding:** A live child stays bound to its spawn
+  root. Work in a different worktree requires a respawn, and an attempt through
+  the old path receives an actionable error. Rejected: an adopt/rebind
+  lifecycle.
+- **(1925) Stale implementation branch ownership:** Classify and recreate stale
+  canonical implementation branches during locked worktree acquisition; route
+  resolution retains only a defensive stale-target refusal. Rejected:
+  route-owned repair.
+- **(1926) Read-only reviewer artifact write:** Add the harness-neutral ws MCP
+  tool `path.write(path, content)`. It writes only to a ws-cache path that the
+  same session key previously minted through `path.generate`; it is included in
+  `ChildSafeWSTools` so read-only children can call it. The daemon-side write
+  runs outside the harness sandbox, while the child retains zero source-tree
+  write authority. The reviewer writes its detailed report to the generated
+  findings path and returns only the one-line status. Compatibility is T0: the
+  tool is additive and the calling playbooks ship embedded with the same
+  binary. Rejected: having the handler persist a bounded handoff; a session
+  allow-list tool (`allowed.edit`), because it creates a new authority path for
+  deciding who sets the list.
+- **(1927) Worker bootstrap context:** Remove the lead-only `workflow_manual`
+  requirement from worker instructions; workers rely on the rendered Worker
+  Protocol, ticket, AGENTS guidance, and declared manuals. Rejected: a new
+  child-safe context tool.
+- **(1928) Delegate tier resolution:** Expose the existing read-only
+  `config.resolve_agent` to delegate children. Rejected: redesigning
+  delegation.
 
 ## Constraints
 
@@ -319,10 +324,10 @@ Last ID: (1928)
 
 ### Phase 1: Make child worktree binding explicit
 
-After (1924) settles, implement the chosen lifecycle without weakening root
-authority. Under the recommended contract, retain immutable child keys, reject
-later cross-worktree assignments with a respawn-specific diagnostic, and teach
-lead/child guidance to spawn directly into the acquired worktree.
+Implement the settled lifecycle without weakening root authority: retain
+immutable child keys, reject later cross-worktree assignments with a
+respawn-specific diagnostic, and teach lead/child guidance to spawn directly
+into the acquired worktree.
 
 Acceptance:
 
@@ -349,10 +354,10 @@ Acceptance:
 
 ### Phase 3: Retire fully landed canonical implementation branches
 
-After (1925) settles, make provisioning and route resolution distinguish a
-retained active branch from a canonical branch whose work is wholly contained
-in base. Perform any branch recreation under the existing acquisition lock and
-never discard unmerged work.
+Make provisioning and route resolution distinguish a retained active branch
+from a canonical branch whose work is wholly contained in base. Perform branch
+recreation under the existing acquisition lock and never discard unmerged
+work.
 
 Acceptance:
 
@@ -387,35 +392,36 @@ Acceptance:
   new-caller-to-old-daemon path is recorded as T3 and requires explicit owner
   approval.
 
-### Phase 5: Give Lite review artifacts one write-capable owner
+### Phase 5: Add a cache-scoped reviewer report writer
 
-After (1926) settles, remove the contradiction between a read-only reviewer and
-mandatory durable findings. Under the recommended contract, let the handler
-generate and write the artifact, and use a bounded handoff with an explicit
-finding count or equivalent completeness check instead of trusting one large
-final report, including the clean-report case.
+Add `path.write(path, content)` as a harness-neutral daemon-side MCP operation.
+The session key may write only an exact ws-cache path that it previously minted
+through `path.generate`; no repository path or path minted by another session
+is eligible. Include the tool in `ChildSafeWSTools`, pass the generated findings
+path to the read-only Lite reviewer, and keep the reviewer contract: write the
+detailed report there, then return only the one-line status.
 
 Acceptance:
 
-- A non-clean read-only Lite review produces a non-empty findings artifact
-  containing every returned finding.
-- An oversized multi-finding review remains complete when one host-visible
-  report would be truncated; the handler detects a missing chunk or count
-  before reporting success.
-- A clean Lite review produces a non-empty clean report.
-- The reviewer receives no source-tree write authority.
-- The direct-parent report reaches the hosted lead exactly once without
-  relying on a worktree inbox or duplicate manual receive.
-- ws/wsflow mirrors and Pi compatibility guidance remain aligned.
-- Compatibility remains T0, or any proposed `agent.spawn` API addition is
-  separately tiered and settled before implementation.
+- `path.write` accepts an exact generated cache path only when that same session
+  key previously obtained it from `path.generate`.
+- Unminted paths, paths minted by another session, repository paths, traversal,
+  aliases, and symlink escapes are refused without modifying a file.
+- A read-only child can call `path.write` through every effective
+  `ChildSafeWSTools` host surface but receives no source-tree write authority.
+- Non-clean, clean, and oversized Lite reviews each leave a complete non-empty
+  findings artifact, and the reviewer final response contains only the
+  one-line status.
+- The write occurs daemon-side and does not depend on a harness-specific file
+  write grant; ws/wsflow mirrors and Pi guidance remain aligned.
+- Compatibility remains T0 because the tool is additive and its calling
+  playbooks ship embedded with the same binary.
 
 ### Phase 6: Align worker instructions with the spawned-child tool surface
 
-After (1927) and (1928) settle, remove the lead-only bootstrap call from the
-Worker Protocol and expose the existing read-only tier resolver that elevated
-workers actually need for delegation. Keep all lead-key mint paths unavailable
-to children.
+Remove the lead-only bootstrap call from the Worker Protocol and expose the
+existing read-only tier resolver that elevated workers need for delegation.
+Keep all lead-key mint paths unavailable to children.
 
 Acceptance:
 
