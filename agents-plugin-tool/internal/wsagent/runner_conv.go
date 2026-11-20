@@ -227,6 +227,10 @@ type conv struct {
 	// systemPrompt is agent.spawn's system prompt (Record.SystemPrompt),
 	// read once from the session directory; loop-owned.
 	systemPrompt string
+	// ambient is the fully rendered hosted-lead turn suffix. It is resolved
+	// at conversation creation/restoration and refreshed by config.tune,
+	// never by the send path.
+	ambient string
 	// expiring is set while a child-agent-waiting expiry is dispatched
 	// (expireIfDue) and not yet decided; loop-owned.
 	expiring bool
@@ -1235,12 +1239,12 @@ func (c *conv) kick() {
 	// follow the turn's start.
 	ordinary := cmd == nil
 	if cmd == nil {
-		err = c.proc.Send(c.compactInput(strings.Join(append(append(slices.Clone(parts), reports...), mail...), "\n\n")))
+		err = c.proc.Send(c.turnInput(strings.Join(append(append(slices.Clone(parts), reports...), mail...), "\n\n")))
 	} else if text, ok := c.playbookTurn(*cmd); ok {
 		// The runner expands a playbook command itself: the harness has
 		// no such command, and the turn carries the playbook's body.
 		ordinary = true
-		err = c.proc.Send(c.compactInput(text))
+		err = c.proc.Send(c.turnInput(text))
 	} else {
 		err = c.runCommand(*cmd)
 	}

@@ -331,11 +331,7 @@ func resolveTierModelVars(harness string, configOpts wsconfig.Options) map[strin
 // resolveWorkflowLangVar generates the WorkflowLang instruction text from the
 // resolved workflow.lang config value. Returns "" when lang is empty.
 func resolveWorkflowLangVar(lang string) string {
-	if strings.TrimSpace(lang) == "" {
-		return ""
-	}
-	return "Respond to the user in " + strings.TrimSpace(lang) +
-		". Write ticket frontmatter titles in that language. Keep all internal reasoning, subagent prompts, code comments, and other AI-authored artifacts in English."
+	return wsagent.WorkflowLanguageInstruction(lang)
 }
 
 func resolveNamespaceVars(namespace string) map[string]string {

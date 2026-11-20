@@ -654,6 +654,7 @@ func (r *Runner) startConvWith(rec Record, seed []wslive.SlashCommand, spawnPend
 		done:         make(chan struct{}),
 		settleC:      make(chan struct{}),
 	}
+	c.refreshAmbient()
 	if !rec.Lead {
 		if level, source, err := r.currentWorkerPermission(rec); err == nil {
 			c.workerPermissionLevel = level
