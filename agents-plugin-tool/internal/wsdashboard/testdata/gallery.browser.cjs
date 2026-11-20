@@ -416,6 +416,44 @@ async function routeTerminal(context) {
       assert.deepEqual(errors, []);
       await context.close();
     }
+    // ---- captures for the side-by-side review with mockup v4 (opt-in) ----
+    const captures = process.env.WS_GALLERY_CAPTURES, mockup = process.argv[4] || '';
+    if (captures) {
+      fs.mkdirSync(captures, { recursive: true });
+      const two = { cards: [], topics: [{ n: 'alpha', p: 1, a: 0, b: 0 }, { n: 'deep', p: 2, a: 0, b: 0 }] };
+      for (const [name, viewport, extra, home] of [
+        ['live-wide-2400x1000', { width: 2400, height: 1000 }, {}, false],
+        ['live-narrow-1200x900-page', { width: 1200, height: 900 }, {}, false],
+        ['live-narrow-1200x900-home', { width: 1200, height: 900 }, {}, true],
+        ['live-touch-420x860', { width: 420, height: 860 }, { hasTouch: true, isMobile: true }, false],
+      ]) {
+        const context = await browser.newContext({ viewport, ...extra, colorScheme: 'dark', locale: 'en-US', reducedMotion: 'reduce' });
+        await seed(context, 'livesession', two);
+        const { tab, page } = await open(context, 'livesession');
+        if (await page.evaluate(() => getComputedStyle(document.getElementById('bcol')).display === 'none')) await page.locator('#tabbar [data-tab="board"]').click();
+        await until(() => page.locator('#bgal .gal-rail').isVisible(), 'capture rail');
+        const want = home ? -1 : 0;
+        if (await pos(page) !== want) await dot(page, want).click();
+        await until(async () => await pos(page) === want, 'capture page');
+        await page.evaluate(() => window.__gal.frames());
+        await tab.screenshot({ path: path.join(captures, name + '.png') });
+        await context.close();
+      }
+      if (mockup) {
+        const context = await browser.newContext({ viewport: { width: 1000, height: 640 }, locale: 'ko-KR', reducedMotion: 'reduce' });
+        const tab = await context.newPage();
+        await tab.goto('file://' + mockup);
+        const proto = tab.locator('#galProtoV4');
+        await tab.locator('[data-act="wide"]').click();
+        await proto.screenshot({ path: path.join(captures, 'mockup-v4-wide.png') });
+        await tab.locator('[data-act="narrow"]').click();
+        await proto.screenshot({ path: path.join(captures, 'mockup-v4-narrow-home.png') });
+        await tab.locator('#galProtoV4 .gal-dot:not(.main):not(.empty)').first().click();
+        await proto.screenshot({ path: path.join(captures, 'mockup-v4-narrow-page.png') });
+        await context.close();
+      }
+      done.push('captures written to ' + captures);
+    }
     console.log(done.map(d => 'ok - ' + d).join('\n'));
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exit(1); });

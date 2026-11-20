@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -124,7 +125,13 @@ func TestGalleryBrowser(t *testing.T) {
 	defer control.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, node, "testdata/gallery.browser.cjs", f.base, control.URL)
+	// WS_GALLERY_CAPTURES=<dir> also writes the live and mockup v4 captures
+	// for the side-by-side review (ai-docs/assets/captures/261119-gallery-phase1).
+	mockup, _ := filepath.Abs("../../../ai-docs/assets/mockups/261119/right-pinned-panel-concept/paged-docking-gallery-v4.html")
+	if _, err := os.Stat(mockup); err != nil {
+		mockup = ""
+	}
+	cmd := exec.CommandContext(ctx, node, "testdata/gallery.browser.cjs", f.base, control.URL, mockup)
 	out, err := cmd.CombinedOutput()
 	t.Log(string(out))
 	if err != nil {
