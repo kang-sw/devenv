@@ -544,6 +544,10 @@ func (c *conv) checkReattach() {
 	if !ok {
 		return
 	}
+	if c.workerRetiring {
+		c.retireDowngradedWorker(hp)
+		return
+	}
 	id, _, _ := hp.HolderInfo()
 	listed, attached := false, false
 	for _, info := range c.r.opts.Holders.List().Holders {

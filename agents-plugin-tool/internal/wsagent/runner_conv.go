@@ -207,10 +207,11 @@ type conv struct {
 	// this daemon does not serve; it restarts at the first idle point.
 	mcpStale bool
 	// Backend-filtered hello environment captured at attach, before token restore.
-	workerMCPEnv  []string
-	mcpChecking   bool
-	mcpAgain      bool
-	mcpAgainNames []string
+	workerMCPEnv   []string
+	workerRetiring bool // validated downgrade retirement retries before replay
+	mcpChecking    bool
+	mcpAgain       bool
+	mcpAgainNames  []string
 	// retry is the API request retry under way; alerted that the running
 	// turn brought a typed failure, so its end clears none.
 	retry   *wslive.Retry

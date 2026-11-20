@@ -58,20 +58,26 @@ func downgradeSettledChild(child, parent Record) bool {
 // the downgrade-fenced turn must not publish a second report to its parent.
 func (c *conv) retireDowngradedWorker(hp holderProcess) bool {
 	rec := c.record()
-	if rec.Parent == nil || rec.Parent.Kind != ParentConversation {
-		return false
+	if !c.workerRetiring {
+		if rec.Parent == nil || rec.Parent.Kind != ParentConversation {
+			return false
+		}
+		parent := c.r.conv(rec.Parent.ReplyID)
+		if parent == nil || !downgradeSettledChild(rec, parent.record()) {
+			return false
+		}
+		c.workerRetiring = true
+		hp.Detach()
+		c.events = nil
 	}
-	parent := c.r.conv(rec.Parent.ReplyID)
-	if parent == nil || !downgradeSettledChild(rec, parent.record()) {
-		return false
-	}
-	hp.Detach()
-	c.events = nil
-	c.setStatus(func() { c.proc = nil })
+	// Keep the detached association until Stop succeeds. A failed Stop may
+	// already have removed the holder, so retry before the ordinary list/gone
+	// path, which would publish a second terminal result for this turn.
 	if err := c.r.opts.Holders.Stop(rec.HolderID); err != nil && !errors.Is(err, wsholder.ErrUnknownHolder) {
 		c.setStatus(func() { c.lastErr = fmt.Sprintf("retire downgraded worker: %v", err) })
 		return true
 	}
+	c.setStatus(func() { c.proc, c.lastErr = nil, "" })
 	c.r.revokeToken(rec.ReplyID)
 	c.update(func(rec *Record) {
 		finishActiveTurn(rec, c.r.opts.Now().UnixMilli())
@@ -83,6 +89,7 @@ func (c *conv) retireDowngradedWorker(hp holderProcess) bool {
 	})
 	c.setStatus(func() { c.turn = false })
 	c.replaying, c.replayAsked = false, false
+	c.workerRetiring = false
 	c.seqDirty, c.live.ringDirty = false, false
 	c.writeRegistration()
 	return true

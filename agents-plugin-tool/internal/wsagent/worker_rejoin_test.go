@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"encoding/json"
+	"errors"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"strings"
 	"testing"
@@ -84,6 +85,17 @@ func TestWorkerHolderOwnership(t *testing.T) {
 }
 
 func TestDowngradeRetirementPersistsSleepingWorker(t *testing.T) {
+	testDowngradeRetirement(t, "")
+}
+
+func TestDowngradeRetirementRetriesStop(t *testing.T) {
+	for _, outcome := range []string{"retry", "already gone"} {
+		t.Run(outcome, func(t *testing.T) { testDowngradeRetirement(t, outcome) })
+	}
+}
+
+func testDowngradeRetirement(t *testing.T, stopError string) {
+	t.Helper()
 	h, reports := newFakePiRecoveryHarness(t)
 	worker, holder := spawnRecoveryWorker(t, h)
 	h.runner.Close()
@@ -102,8 +114,30 @@ func TestDowngradeRetirementPersistsSleepingWorker(t *testing.T) {
 	}
 	// Completion accumulated during downgrade must never publish a second report.
 	h.holders.out(holder, recoveryPiReply("late result")...)
+	if stopError != "" {
+		h.opts.heartbeat = time.Hour
+		h.holders.set(func() { h.holders.stopErr = errors.New("fixture stop failure") })
+	}
 	h.start()
 	wait(t, "holder scan", h.runner.rejoined)
+	if stopError != "" {
+		c := h.runner.conv(worker.ID)
+		c.do(func() {
+			if !c.workerRetiring || !c.replaying || c.proc == nil || c.events != nil || !strings.Contains(c.lastErr, "fixture stop failure") {
+				t.Error("failed retirement lost its retryable association or exposed replay")
+			}
+		})
+		if rec := h.record(worker.ID); rec.HolderID != holder || !rec.TurnOpen || len(reports.list()) != 0 {
+			t.Fatal("failed stop prematurely retired or published the child")
+		}
+		h.holders.set(func() { h.holders.stopErr = nil })
+		if stopError == "already gone" {
+			if err := h.holders.Stop(holder); err != nil {
+				t.Fatal(err)
+			}
+		}
+		c.do(c.heartbeat)
+	}
 	eventually(t, "silent retirement", func() bool { return h.record(worker.ID).HolderID == "" })
 	assertSleeping := func() {
 		rec := h.record(worker.ID)
@@ -115,8 +149,12 @@ func TestDowngradeRetirementPersistsSleepingWorker(t *testing.T) {
 		}
 	}
 	assertSleeping()
-	if h.holders.opCount("stop "+holder) != 1 {
-		t.Fatal("retired holder was not stopped once")
+	wantStops := 1
+	if stopError != "" {
+		wantStops = 2
+	}
+	if h.holders.opCount("stop "+holder) != wantStops {
+		t.Fatalf("retirement stop attempts: %v", h.holders.opList())
 	}
 	h.restart()
 	wait(t, "second scan", h.runner.rejoined)
@@ -185,5 +223,44 @@ func TestWorkerOwnershipMismatchNeverStopsForeignHolder(t *testing.T) {
 	}
 	if rec := h.record(worker.ID); rec.HandedOffAt != "" || rec.Capability != "" || rec.TurnOpen {
 		t.Fatal("rejected association retained an active capability or fence")
+	}
+}
+
+func TestWorkerAttachRegistersNoMCPBeforeOwnership(t *testing.T) {
+	for _, backend := range []string{BackendClaude, BackendCodex, BackendAgy} {
+		t.Run(backend, func(t *testing.T) {
+			h, _ := workerRecoveryHarness(t, backend)
+			id, holder := spawnHeldRecoveryWorker(t, h, backend, "workdir-write")
+			h.runner.Close()
+			h.holders.restart()
+			h.holders.set(func() {
+				var meta holderSession
+				if err := json.Unmarshal(h.holders.holders[holder].session, &meta); err != nil {
+					t.Fatal(err)
+				}
+				meta.Cwd = "/foreign"
+				raw, _ := json.Marshal(meta)
+				h.holders.holders[holder].session = raw
+			})
+			entered, release := h.gateScan()
+			defer release()
+			h.startAt("http://127.0.0.1:1")
+			wait(t, "blocked ownership scan", entered)
+			assertNoTokens := func() {
+				h.runner.mu.Lock()
+				defer h.runner.mu.Unlock()
+				if len(h.runner.mcpTokens) != 0 || len(h.runner.mcpTokenOf) != 0 {
+					t.Error("unvalidated attach registered an MCP bearer")
+				}
+			}
+			assertNoTokens()
+			release()
+			wait(t, "ownership scan", h.runner.rejoined)
+			eventually(t, "ownership rejection", func() bool { return h.runner.conv(id).record().HolderID == "" })
+			assertNoTokens()
+			if h.holders.opCount("stop") != 0 {
+				t.Fatal("ownership rejection stopped foreign holder")
+			}
+		})
 	}
 }
