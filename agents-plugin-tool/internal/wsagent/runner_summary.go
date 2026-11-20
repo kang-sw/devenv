@@ -9,24 +9,50 @@ import (
 
 // lockSummaryWriter is the hosted equivalent of terminal connection/slot
 // fencing. The registration lock serializes against handoff and terminal
-// login, and summaryMu pins this actual conversation generation through
-// mutation/candidate freeze.
+// login, and the session's own summary lock (lockSummaryOwner) pins this
+// actual conversation generation through mutation/candidate freeze. Another
+// session's lock is never taken, so one session's stalled ring I/O does not
+// block another's snapshot publish.
 func (c *conv) lockSummaryWriter() (func(), bool) {
 	rec := c.record()
-	if !rec.Lead || c.foreignRow {
+	if !rec.Lead || c.isForeign() {
 		return nil, false
 	}
 	unlock, row, ok := c.lockRowRead()
 	if !ok {
 		return nil, false
 	}
-	c.r.summaryMu.Lock()
-	if c.r.summaryOwners[rec.ReplyID] != c || row == nil || !row.Hosted || row.HostPID != rec.HostPID || row.Harness != rec.Backend {
-		c.r.summaryMu.Unlock()
+	release, owned := c.r.lockSummaryOwner(rec.ReplyID, c)
+	if !owned {
 		unlock()
 		return nil, false
 	}
-	return func() { c.r.summaryMu.Unlock(); unlock() }, true
+	if row == nil || !row.Hosted || row.HostPID != rec.HostPID || row.Harness != rec.Backend {
+		release()
+		unlock()
+		return nil, false
+	}
+	return func() { release(); unlock() }, true
+}
+
+// lockSummaryOwner pins replyID's summary owner to want: it takes the
+// session's summary lock and checks, under the brief map guard, that want
+// is still the owner. On success the summary lock stays held until unlock,
+// so no newer generation (setSummaryOwner) takes over meanwhile.
+//
+// The caller holds replyID's registration lock first (lock order: row flock
+// -> summary lock -> slot owner lock -> leaf mutexes). Every other holder
+// of the summary lock either holds that flock too or holds the summary
+// lock only briefly (setSummaryOwner), so a flock holder never waits here
+// behind ring I/O.
+func (r *Runner) lockSummaryOwner(replyID string, want *conv) (unlock func(), ok bool) {
+	l := r.summaryLock(replyID)
+	l.Lock()
+	if r.summaryOwner(replyID) != want {
+		l.Unlock()
+		return nil, false
+	}
+	return l.Unlock, true
 }
 
 func (c *conv) summaryStart(ev Event) {

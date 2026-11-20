@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 7c5b798a7e4376be
 sage-review-completeness-reviewed: 7c5b798a7e4376be
+completed: 2026-11-20
 ---
 
 # Rail heartbeat starvation: independent heartbeat and per-session summary lock
@@ -129,3 +130,19 @@ fix.
   `Registration|Heartbeat` tests in `internal/wsagent` stay green; `go test ./internal/wsagent ./internal/wslive
   ./internal/wsdashboard` green with narrow `-run` patterns where the package
   is slow.
+
+### Result (cd667bc5a) - 2026-11-20
+
+- **Fix 2 (independent hosted-lead heartbeat sweeper):** Added non-blocking `wsdashboard.TryLockRegistration` (`agents-plugin-tool/internal/wsdashboard/registry.go`) and a runner-level `heartbeatSweeper` started in `Runner.Start` (`agents-plugin-tool/internal/wsagent/runner_heartbeat.go`). The sweeper visits a sorted snapshot of live conversations and refreshes `HeartbeatAt` in place (preserving all other persisted row fields) under `TryLockRegistration` + `lockSummaryOwner` without waiting on contended flocks, releasing both locks before `r.notify`.
+- **Fallback grace threshold & file-touch budget (`performance.md`):** The sweeper triggers at `HeartbeatInterval + min(opts.heartbeat, HeartbeatInterval/2)` (2m30s at default 30s tick, well inside the 5m `LiveWindow`) so healthy conv loops keep winning their own `HeartbeatInterval` full-row refresh and repair with zero extra `checkRow()` reads. `foreignRow` (`atomic.Bool`), `rowHeld` (`atomic.Int32` in-memory skip hint), and leaf-only `regMu` around `lastReg` prevent duplicate writes and eliminate lock-file touches on ineligible/busy rows. Full-row timestamp capture in `writeRegistration` moved after acquiring the lead flock so a delayed loop write cannot roll back a newer sweep heartbeat.
+- **Deviation noted (non-lead conversations):** The sweeper refreshes hosted lead conversations only (`rec.Lead && rec.ClosedAt == ""`); non-lead child conversations have no registration row-lock fence, so skipping them avoids racing their unlocked full-row writes.
+- **Fix 3 (per-session summary lock) + daemon slot lock (Trap D):** Replaced runner-wide `summaryMu` locking with lazy per-reply-id `summaryLocks` (`agents-plugin-tool/internal/wsagent/runner.go`, `runner_summary.go`) shared across conversation generations via `setSummaryOwner` and `lockSummaryOwner`. Also fixed a co-located bottleneck in `agents-plugin-tool/internal/wsdashboard/live_hosted.go` where `daemonLiveSlot.LockOwner` held daemon-wide `d.live.mu` across ring I/O by adding per-reply-id `hostedSlots.ownerLocks` (strict lock order: `OS flock(id) -> summaryLock(id) -> ownerLock(id) -> leaf locks`), preserving takeover and close fencing while unblocking other sessions' `Publish` and `LockOwner`.
+- **Compatibility tier:** `T0` confirmed (no change to `registration.json`, ring segment format, MCP tools, or tracker events).
+- **Verification:**
+  - `go test -race -count=3 ./internal/wsagent -run 'TestStalledRingWrite|TestHostedSlotTakeover|TestSummaryOwnerRollover|TestHeartbeat|TestRegistration|TestSummaryWriter|TestTryLock'` — PASS (2.99s), covering Verification (a)+(Trap D), (b)+`Start`/`Close` ticker lifecycle+`FileIOCounters` budget, (c) busy earlier flock skip, takeover/generation-rollover fencing, and healthy-loop grace threshold.
+  - `go test -count=1 ./internal/wsagent` — PASS (125.1s). (Full `internal/wsagent -race` hit only pre-existing unrelated `Runner.send` `c.rec.Sends` races also reproduced on `HEAD`; zero races in changed code.)
+  - `go test -race -count=1 ./internal/wslive` — PASS (30.3s).
+  - `go test -race -count=1 ./internal/wsdashboard -run 'TestHosted|TestLive|TestRegistration|TestRail'` (102 tests) — PASS (29.3s).
+  - `GOOS=windows go vet ./internal/wsagent ./internal/wsdashboard ./internal/wslive` — clean.
+  - Independent fresh-context post-hoc code review: `PASS` (0 Critical, 0 Important remaining after resolving `I-1`, `I-2`, and `M-4`).
+

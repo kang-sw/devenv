@@ -194,6 +194,29 @@ func LockRegistration(dir, replyID string) (unlock func(), err error) {
 	return func() { _ = fl.Unlock() }, nil
 }
 
+// TryLockRegistration tries the row lock of session replyID under dir once,
+// without waiting. A false locked result with no error means another writer
+// holds the row; the caller leaves that session for a later attempt.
+func TryLockRegistration(dir, replyID string) (unlock func(), locked bool, err error) {
+	if !ValidReplyID(replyID) {
+		return nil, false, fmt.Errorf("invalid reply-id %q", replyID)
+	}
+	sessionDir := SessionDir(dir, replyID)
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		return nil, false, err
+	}
+	lockPath := filepath.Join(sessionDir, registrationLockName)
+	fl := flock.New(lockPath)
+	locked, err = fl.TryLock()
+	if err != nil {
+		return nil, false, fmt.Errorf("acquire the registration lock: %w", err)
+	}
+	if !locked {
+		return nil, false, nil
+	}
+	return func() { _ = fl.Unlock() }, true, nil
+}
+
 // RegistrationPath is the registration file of session replyID under dir:
 // what a hosted session's harness reads to check HostPID.
 func RegistrationPath(dir, replyID string) string {
