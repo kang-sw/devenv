@@ -702,8 +702,11 @@ check("a topic's pin docks it on a page before +, shown", [pagesOf(), shown(), p
 check("a docked topic's body stands in its pane's scroller", [A.children.map(function (n) { return n.className; }), paneOf(A).getAttribute("data-ref")], [["tophead", "gal-pbody"], "t:a"]);
 clickDot(0);
 check("a dot shows its page", [shown(), dotTexts()[1][2]], [[pageIds()[0]], true]);
+function away() { return [page.doc.documentElement.hasAttribute("data-gal-away"), !!page.board.inert]; }
+check("narrow: a shown page stands the Main Board off the view, inert", away(), [true, true]);
 clickDot(-1);
 check("home shows the Main Board: every page off the view", [shown(), page.W.gallery().getAttribute("data-pos")], [[], "-1"]);
+check("and the Main Board back in it", away(), [false, false]);
 check("a page off the view stays mounted, translated, inert", page.W.gallery().querySelectorAll(".gal-page").map(function (p) { return [p.style.props["--gal-off"], p.inert, p.getAttribute("aria-hidden")]; }), [["1", true, "true"], ["2", true, "true"], ["3", true, "true"]]);
 check("activate shows a docked node's page", [page.W.activate(A.querySelector(".tbar")), shown()], [true, [pageIds()[1]]]);
 check("activate on the shown page switches nothing", page.W.activate(A), false);

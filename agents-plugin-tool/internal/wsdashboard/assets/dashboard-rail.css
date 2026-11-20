@@ -119,6 +119,15 @@
 :root[data-gal="narrow"] .bgal > .gal-rail, :root[data-gal="narrow"] .bgal:not([data-pos="-1"]) > .gal-viewport { pointer-events: auto; }
 :root[data-gal="narrow"] .bgal:not([data-pos="-1"]) > .gal-viewport { background: var(--wb-bg); }
 :root[data-gal="narrow"] .dgrid > .bcol { padding-left: 42px; }
+/* While a docked page shows over it (data-gal-away, cards.js), the Main
+   Board stands off the view as an inactive page does: its column's content
+   is translated past the window's left edge, out of the column's clip (a
+   scroller already clips; the board-first page's column clips for this),
+   so intersection observers count it out of view. Only the content moves:
+   the column keeps its box (placeGallery measures it), its scroll offset
+   and its DOM. */
+:root[data-gal-away] .dgrid > .bcol > * { transform: translateX(calc(-100% - 100vw)); }
+:root[data-gal-away] .dgrid.board > .bcol { overflow-x: clip; }
 /* the wide view with no docked page, while a drag runs: over the right edge */
 :root[data-gal="drag"] .bgal:not([hidden]) { position: fixed; z-index: 40; top: 50px; bottom: 12px; right: 16px; width: clamp(140px, calc(100vw - 1696px), 520px); }
 .bp-edge { position: absolute; top: 0; bottom: 0; left: -12px; width: 9px; cursor: col-resize; touch-action: none; z-index: 2; }

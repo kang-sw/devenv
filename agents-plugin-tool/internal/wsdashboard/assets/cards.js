@@ -680,6 +680,19 @@
     if (narrow) galEl.setAttribute("data-narrow", ""); else galEl.removeAttribute("data-narrow");
     gal.pages.forEach(function (pg, i) { slide(pageEls[pg.id], i - pos, dir); });
     slide(plusEl, n - pos, dir);
+    away(shown && narrow && pos >= 0);
+  }
+  // away stands the narrow view's Main Board (Page 0) off the view while a
+  // docked page shows over it, as slide does an inactive page: the root's
+  // data-gal-away translates the board column's content out of the
+  // column's clip (the stylesheet), so intersection observers see the
+  // board out of view (viewed topics, terminals) while its DOM and scroll
+  // offset stay as they were; it takes no focus (inert).
+  function away(on) {
+    var r = doc.documentElement;
+    if (on === r.hasAttribute("data-gal-away")) return;
+    if (on) r.setAttribute("data-gal-away", ""); else r.removeAttribute("data-gal-away");
+    if (board) board.inert = on;
   }
   // slide stands a page off positions from the one shown: an inactive page
   // stays mounted, translated out of the clipped viewport (the stylesheet's

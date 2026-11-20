@@ -18,13 +18,15 @@ import (
 // frame, a held selection, the mention button's frame); coming NEAR again
 // remounts them; a frame mounted with no height yet, or mounted again, is
 // marked for its first height (wbFirst, topicResized). A report with no box
-// changes nothing. A frame in no topic
+// changes nothing. While the narrow view's Main Board stands off the view
+// behind a docked page (data-gal-away) leaving FAR keeps the frames. A frame in no topic
 // mounts at once, and without scroll margins everything mounts as before.
 // The cases execute under node when it is installed.
 func TestBoardFrameBands(t *testing.T) {
 	src := dashboardFuncs(t, "boardBands", "frameNear", "bandBoard", "bandTopic", "topicBand", "unmountFrames", "unmountFrame",
 		"frameShown", "mountFrame", "mountFrames", "mountFramesPaced", "mountSlice", "frameToggle", "cvWatch")
 	runNode(t, "viewport bands", frameDOM+src+`
+var root = { away: false, hasAttribute: function (k) { return k === "data-gal-away" && root.away; } };
 var mountList = [], mountTask = false, NEAR = "100% 0px", FAR = "400% 0px", topicNear = {}, topicRO = null, frameSizes = new Map(), mpend = null, cvRO = null;
 var clock = 0, timers = [];
 var performance = { now: function () { return clock; } };
@@ -82,6 +84,12 @@ check("the placeholder keeps the frame's attributes: " + JSON.stringify(pa1.attr
   !pa1.hasAttribute("srcdoc") && !pa1.hasAttribute("sandbox"));
 check("a height not landed yet goes to the placeholder", pa2.style.height === "78px" && !frameSizes.has(fa2));
 check("a swap's first-height marks go to the placeholder", pa1.wbKeep === true && pa2.wbGrow === true && !pa1.wbGrow && !pa2.wbKeep);
+// The narrow view's Main Board off the view behind a docked page keeps
+// its frames: switching back to it reloads nothing.
+report(A, NEAR, true);
+var away1 = el(pa1);
+root.away = true; report(A, NEAR, false); report(A, FAR, false); root.away = false;
+check("the Main Board off the view keeps its frames", el(pa1) === away1 && away1.parentNode);
 report(A, NEAR, true);
 check("coming near again remounts them", mounted(pa1) && mounted(pa2) && el(pa1).getAttribute("style") === "height: 120px");
 check("a frame mounted with no height yet is marked for its first height", fa1.wbFirst === true);
