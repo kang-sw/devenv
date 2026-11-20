@@ -114,7 +114,14 @@ func agyWatchdogHarness(t *testing.T, timeoutSeconds string) (*harness, *leverTi
 }
 
 func agyWatchdogHarnessWithRetries(t *testing.T, timeoutSeconds, retries string) (*harness, *leverTimers, *reports) {
+	return agyWatchdogHarnessWithSilence(t, timeoutSeconds, retries, true)
+}
+
+func agyWatchdogHarnessWithSilence(t *testing.T, timeoutSeconds, retries string, silence bool) (*harness, *leverTimers, *reports) {
 	t.Helper()
+	previousSilence := agySilenceWatchdogEnabled
+	agySilenceWatchdogEnabled = silence
+	t.Cleanup(func() { agySilenceWatchdogEnabled = previousSilence })
 	previous := suiteBackend
 	suiteBackend = BackendAgy
 	t.Cleanup(func() { suiteBackend = previous })
@@ -206,6 +213,39 @@ func agyWatchdogDiagnosticCount(t *testing.T, h *harness, id, diagnostic string)
 	return count
 }
 
+func TestAgyModelWaitWatchdogSilenceOffKeepsInBandRetry(t *testing.T) {
+	if agySilenceWatchdogEnabled {
+		t.Fatal("silence watchdog must be off by default")
+	}
+	h, timers, _ := agyWatchdogHarnessWithSilence(t, "1", "1", false)
+	id, p := startAgyWatchdogTurn(t, h, false)
+	c := h.runner.conv(id)
+	c.do(func() {
+		if !c.modelWaitArmed || c.modelWaitTimeout != time.Second {
+			t.Fatalf("in-band retry must stay armed: armed=%v timeout=%v", c.modelWaitArmed, c.modelWaitTimeout)
+		}
+	})
+	time.Sleep(1100 * time.Millisecond)
+	if started, _ := timers.counts(); started != 0 {
+		t.Fatalf("silent turn started %d watchdog timers", started)
+	}
+	if interrupts := procInterrupts(p); interrupts != 0 || len(p.sent) != 0 {
+		t.Fatalf("silent turn interrupted %d times and queued %d prompts", interrupts, len(p.sent))
+	}
+
+	failure := "⚠ API error (attempt 1): request failed: stream idle timeout (10m0s): context deadline exceeded"
+	if got := agyReplyTailFailure("reply\n" + failure); got != failure {
+		t.Fatalf("in-band failure tail = %q, want %q", got, failure)
+	}
+	p.events <- Event{ModelFailureUpdate: &failure}
+	fireWatchdog(t, timers, 0) // in-band failure drain, not a silence timer
+	eventually(t, "in-band failure interrupt", func() bool { return procInterrupts(p) == 1 })
+	p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted, ModelFailure: failure}
+	if sent := p.nextSent(t); sent != "continue" {
+		t.Fatalf("in-band retry prompt = %q, want continue", sent)
+	}
+}
+
 // The built-in retry budget is spent inside one logical turn. Each silent
 // interval is cancelled before continue is sent, and the turn fails visibly
 // after exactly the configured number of attempts.
@@ -265,6 +305,9 @@ func TestAgyModelWaitWatchdogZeroRetriesDisablesAutomaticContinue(t *testing.T) 
 }
 
 func TestAgyModelWaitWatchdogPublishesExhaustionToHostedLeadConversation(t *testing.T) {
+	previousSilence := agySilenceWatchdogEnabled
+	agySilenceWatchdogEnabled = true
+	t.Cleanup(func() { agySilenceWatchdogEnabled = previousSilence })
 	h, f := newAgyLeadHarness(t)
 	timers := &leverTimers{}
 	timeout, retries := 45, 1
