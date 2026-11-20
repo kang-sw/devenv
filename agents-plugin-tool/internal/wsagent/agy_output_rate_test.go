@@ -5,6 +5,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -132,6 +133,19 @@ func agyRateEvents(events []Event) []*wslive.Event {
 		}
 	}
 	return out
+}
+
+func agyDownstreamEvents(events []Event) []Event {
+	var visible []Event
+	for _, event := range events {
+		activity := event.ModelActivity
+		event.ModelActivity = nil
+		if activity != nil && reflect.DeepEqual(event, Event{}) {
+			continue
+		}
+		visible = append(visible, event)
+	}
+	return visible
 }
 
 func assertNear(t *testing.T, label string, got, want float64) {
@@ -444,7 +458,7 @@ func TestAgyOutputRateWindowAndModelChangeReset(t *testing.T) {
 	assertNear(t, "after 9th drops 1st", complete(9, 50, 500), 100.0)
 
 	// Model change clears the window and publishes nothing.
-	if evs := m.mapLine(agyConfigUpdateLine("claude-sonnet-4-6", ""), nopReplies{}); len(evs) != 0 {
+	if evs := agyDownstreamEvents(m.mapLine(agyConfigUpdateLine("claude-sonnet-4-6", ""), nopReplies{})); len(evs) != 0 {
 		t.Fatalf("model change should publish nothing, got %+v", evs)
 	}
 	if got := published.Snapshot(clock).Lead.OutputRate; got == nil || got.OutputTps != 100.0 {

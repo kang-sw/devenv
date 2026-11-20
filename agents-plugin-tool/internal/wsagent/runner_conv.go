@@ -1189,8 +1189,17 @@ func (c *conv) kick() {
 	c.sendRetried = false
 	c.stopBgGrace()
 	c.turnMark, c.reply = mark, ""
-	// This turn's settle supersedes a done turn held for the children.
-	c.hold(nil)
+	// A child report satisfies an agent worker's hold on the completed turn
+	// that waited for it. Publish that turn before opening the report's
+	// successor. Legacy pi-worker turns, and report-free successors such as
+	// background follow-ups, retain their interim-supersession behavior.
+	if isAgentWorkerProfile(c.rec.Profile) && c.heldRes != nil && len(reports) > 0 {
+		res := *c.heldRes
+		c.hold(nil)
+		c.publish(res)
+	} else {
+		c.hold(nil)
+	}
 	c.update(func(rec *Record) {
 		rec.Queued = rest
 		rec.Drained, rec.TurnMark, rec.Voided = c.drained, mark, c.voided
