@@ -212,6 +212,35 @@ Verification (Go tests):
   the same shape as a popover probe's; the existing cache and history tests
   pass unchanged (Decision 5).
 
+### Result (c946b532) - 2026-11-20
+
+- Added a runner `AgyActivity` callback beside `TrackerChanged`, raised once
+  after a live hosted agy child or lead turn settles. Replay, non-agy turns,
+  compaction/non-turn endings, and watchdog-intercepted continuations do not
+  signal activity.
+- Late-bound the callback to `Daemon.AgyActivity`, whose goroutine handoff
+  returns before taking the plan-usage mutex. The turn-end path adds no file
+  I/O or process wait; `refreshAgy` remains the only probe admission path and
+  retains its in-flight, debounce, billed-turn, auth-hold, cache, history, and
+  shutdown guards.
+- Removed `WS_MCP_HARNESS` from the probe environment while retaining
+  `AGY_CLI_DISABLE_AUTO_UPDATE=true`. Activity and popover probes write the
+  same schema-1 cache and history bytes, preserving the T0 decision and the
+  existing popover behavior.
+- Lite review found one Important test race: the duplicate-signal assertions
+  used a fixed sleep before the activity goroutine necessarily ran. Commit
+  `c946b532` added a package-private completion seam and waits for the handoff
+  plus any admitted probe; the one-pass review has no open findings.
+- Final verification passed:
+  `go test -count=1 -run '^TestAgyActivityCallback' ./internal/wsagent`;
+  `go test -count=1 -run '^TestPlanUsageAgy' ./internal/wsdashboard`;
+  `go test -count=1 -run 'Tracker|Asset' ./internal/wsdashboard`;
+  `go test -count=1 -run 'Test(LateFuncBindsAfterConstruction|AgentRunnerCatalogs|CallFallbackRegistrationAndRenderDescriptor)' ./cmd/ws-mcp`;
+  native and `GOOS=windows` `go vet` on `./internal/wsagent`,
+  `./internal/wsdashboard`, and `./cmd/ws-mcp`. Every Go command used
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`; tests used only fake/test agy
+  helpers.
+
 ### Phase 2: User-started agy lead proxy
 
 Starts after `impl/develop/agy-handoff-identity` (agy harness identity fix)
