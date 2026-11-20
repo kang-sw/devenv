@@ -32,3 +32,5 @@ agents-plugin*/native-pi/first-party-manifest.json linguist-generated=true
 agents-plugin-tool/internal/wswhiteboard/assets/mermaid/mermaid.min.js linguist-vendored
 # Owner (1321)=a 2026-11-19: the composer script is at 2054 lines; raise its own soft limit instead of splitting.
 /agents-plugin-tool/internal/wsdashboard/assets/dashboard-composer.js ws-size-guard=2500
+# Owner (1832)=a 2026-11-20: agent_tools.go passed 1000 lines while wsagent fixes are in flight; raise its own soft limit.
+/agents-plugin-tool/internal/wsagent/agent_tools.go ws-size-guard=1300
