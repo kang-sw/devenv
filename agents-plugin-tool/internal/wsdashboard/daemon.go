@@ -291,10 +291,12 @@ type Daemon struct {
 	railMsgs   *railMessages
 	railInputs railInputCache
 	// workspaces holds the stored workspaces, nil without them
-	// (workspaces.go); pathHost is the machine whose rules read a pasted
-	// folder path (workspacepath.go).
-	workspaces *workspaceStore
-	pathHost   pathHost
+	// (workspaces.go); wsAdmission holds rejected unregistered workspaces
+	// (workspace_admission.go); pathHost is the machine whose rules read a
+	// pasted folder path (workspacepath.go).
+	workspaces  *workspaceStore
+	wsAdmission *workspaceAdmissionStore
+	pathHost    pathHost
 	// layout holds the rail's shared row order, tree, and stars
 	// (rail_layout.go).
 	layout *railLayoutStore
@@ -522,11 +524,16 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	d.railMsgs = newRailMessages()
 	d.rail = newRailLister(railRead, func() { d.broker.wake(railListRepoKey) }, d.stop)
 	d.workspaces = openWorkspaceStore(opts.WorkspacesFile)
+	d.wsAdmission = openWorkspaceAdmissionStore(WorkspaceAdmissionFilePath(opts.WorkspacesFile))
 	d.layout = openRailLayoutStore(opts.Dir)
 	d.rail.admission = newRailAdmissionTracker(d.layout)
 	d.pathHost = daemonPathHost()
 	if d.workspaces != nil {
-		d.rail.sweep = d.workspaces.sweep
+		d.rail.sweep = func() bool {
+			c1 := d.workspaces.sweep()
+			c2 := d.wsAdmission.sweep()
+			return c1 || c2
+		}
 	}
 	if d.lan {
 		// Mint the token now, so the localhost index shows it before any

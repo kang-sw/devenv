@@ -30,7 +30,7 @@ func (d *Daemon) handleWorktreePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lang, pref := requestLang(r)
-	railView := d.railView(d.pagesIn(lang))
+	railView := d.railOrderedView(d.pagesIn(lang))
 	var workspace string
 	var selected RailWorktree
 	// Bookmarks can be the first request after a restart, before a shell

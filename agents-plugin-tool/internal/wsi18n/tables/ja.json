@@ -2441,5 +2441,7 @@
   "js.tmap.c.tip.tickets.other": "{0} 件のチケット",
   "js.tmap.c.tip.sim": "類似度 {0}%",
   "js.tmap.c.tip.more": "… ほか {0} 件",
-  "js.tmap.c.kwtip": "クリック = キーワードで絞り込み · ドラッグ = 移動"
+  "js.tmap.c.kwtip": "クリック = キーワードで絞り込み · ドラッグ = 移動",
+  "rail.ws.admission.invalid": "無効なワークスペース承認の選択です。",
+  "rail.ws.admission.stale": "ワークスペース一覧が変更されました。更新してから選び直してください。"
 }

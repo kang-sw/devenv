@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
 // withWorkspaces runs a fixture daemon that keeps stored workspaces, in a
@@ -90,7 +92,7 @@ func pathBody(t *testing.T, key, path string) string {
 // route at all on a daemon that keeps no stored workspaces.
 func TestWorkspaceRoutesNeedTheDaemonsOrigin(t *testing.T) {
 	f := startPageFixture(t, withWorkspaces(t))
-	routes := []string{workspacePreviewRoute, workspaceAddRoute, workspaceForgetRoute, worktreeOptionsRoute, worktreeAddRoute, worktreeDeletePreviewRoute, worktreeDeleteRoute, workspaceGitInitRoute}
+	routes := []string{workspacePreviewRoute, workspaceAddRoute, workspaceForgetRoute, workspaceAdmissionRoute, worktreeOptionsRoute, worktreeAddRoute, worktreeDeletePreviewRoute, worktreeDeleteRoute, workspaceGitInitRoute}
 	for _, route := range routes {
 		for _, o := range []string{"", "null", "http://evil.example"} {
 			if code, header, _ := postJSON(t, f.base+route, o, `{"path":"`+f.project+`","workspace":"`+f.project+`"}`); code != http.StatusForbidden {
@@ -466,5 +468,219 @@ func TestSessionPageOffersTheRailAddButtons(t *testing.T) {
 	off := startPageFixture(t)
 	if _, page := get(t, off.base+"/s/livesession"); !strings.Contains(page, `id="rail"`) || strings.Contains(page, `class="radd"`) || strings.Contains(page, `class="rforget"`) {
 		t.Error("a daemon without stored workspaces offers a + or forget on the rail")
+	}
+}
+
+func TestWorkspaceAdmissionRoute(t *testing.T) {
+	f := startPageFixture(t, withWorkspaces(t))
+	pendA := t.TempDir()
+	pendB := t.TempDir()
+	keepFile := filepath.Join(pendB, "keep.txt")
+	if err := os.WriteFile(keepFile, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.addSession(t, "spenda", pendA, "pend A")
+	f.addSession(t, "spendb", pendB, "pend B")
+	if _, err := f.d.workspaces.add(f.project, false); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "pending sessions indexed", func() bool {
+		_, okA := f.d.Index().Session("spenda")
+		_, okB := f.d.Index().Session("spendb")
+		return okA && okB
+	})
+
+	postAdm := func(lang string, req any) (int, workspaceAdmissionReply) {
+		t.Helper()
+		raw, err := json.Marshal(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		httpReq, err := http.NewRequest(http.MethodPost, f.base+workspaceAdmissionRoute, strings.NewReader(string(raw)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		httpReq.Header.Set("Origin", f.base)
+		httpReq.Header.Set("Content-Type", "application/json")
+		if lang != "" {
+			httpReq.AddCookie(&http.Cookie{Name: wsi18n.CookieName, Value: lang})
+		}
+		resp, err := (&http.Client{Transport: localhostTestHTTPTransport()}).Do(httpReq)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var reply workspaceAdmissionReply
+		_ = json.NewDecoder(resp.Body).Decode(&reply)
+		return resp.StatusCode, reply
+	}
+
+	// 400 malformed / bounds checks.
+	var over500 []workspaceAdmissionSelection
+	for i := 0; i < 501; i++ {
+		over500 = append(over500, workspaceAdmissionSelection{Path: filepath.Join(pendA, string(rune('a'+i%26)), "x"), Action: "reject"})
+	}
+	for _, tc := range []struct {
+		name string
+		sels []workspaceAdmissionSelection
+	}{
+		{"empty", nil},
+		{"over500", over500},
+		{"empty-path", []workspaceAdmissionSelection{{Path: "", Action: "reject"}}},
+		{"relative-path", []workspaceAdmissionSelection{{Path: "rel/dir", Action: "reject"}}},
+		{"unclean-path", []workspaceAdmissionSelection{{Path: pendA + string(filepath.Separator), Action: "reject"}}},
+		{"duplicate-path", []workspaceAdmissionSelection{{Path: pendA, Action: "reject"}, {Path: pendA, Action: "approve"}}},
+		{"invalid-action", []workspaceAdmissionSelection{{Path: pendA, Action: "delete"}}},
+	} {
+		code, rep := postAdm("ko", workspaceAdmissionRequest{Selections: tc.sels})
+		if code != http.StatusBadRequest || rep.Applied || rep.Message == "" {
+			t.Errorf("%s = (%d, %+v), want 400 with message", tc.name, code, rep)
+		}
+	}
+
+	// Body > 16 KiB and <= 256 KiB succeeds on admission route while 16 KiB still bounds other routes.
+	bigPad := strings.Repeat("x", 20<<10)
+	if code, _, _ := postJSON(t, f.base+workspacePreviewRoute, f.base, `{"path":"/`+bigPad+`"}`); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("workspacePreview >16KiB = %d, want 413", code)
+	}
+	var many []workspaceAdmissionSelection
+	bigBase := t.TempDir()
+	for i := 0; i < 120; i++ {
+		dir := mkDir(t, filepath.Join(bigBase, strings.Repeat("d", 140)+"-"+strconvUint(uint64(i))))
+		id := "big" + strconvUint(uint64(i))
+		f.addSession(t, id, dir, id)
+		many = append(many, workspaceAdmissionSelection{Path: dir, Action: "reject"})
+	}
+	waitFor(t, "120 pending roots indexed", func() bool {
+		_, ok := f.d.Index().Session("big119")
+		return ok
+	})
+	if code, rep := postAdm("en", workspaceAdmissionRequest{Selections: many}); code != http.StatusOK || !rep.Applied {
+		t.Fatalf("large (>16KiB, <=256KiB) batch = (%d, %+v), want 200 applied", code, rep)
+	}
+	// Undo the 120 roots so the fixture stays clean, and verify >256 KiB returns 413.
+	for i := range many {
+		many[i].Action = "undo"
+	}
+	if code, rep := postAdm("en", workspaceAdmissionRequest{Selections: many}); code != http.StatusOK || !rep.Applied {
+		t.Fatalf("large undo batch = (%d, %+v)", code, rep)
+	}
+	over256 := `{"selections":[{"path":"/` + strings.Repeat("a", 260<<10) + `","action":"reject"}]}`
+	if code, _, _ := postJSON(t, f.base+workspaceAdmissionRoute, f.base, over256); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf(">256KiB admission body = %d, want 413", code)
+	}
+
+	// Open SSE stream to verify broker wake on successful batches.
+	stream := openStream(t, f.base+"/rail/events")
+	quiet(t, stream)
+	wakeBefore := func() uint64 {
+		f.d.broker.mu.Lock()
+		defer f.d.broker.mu.Unlock()
+		return f.d.broker.changed[railListRepoKey]
+	}()
+
+	// Reject pendB -> persisted, disk untouched, broker wakes railListRepoKey, reply has gen & html.
+	code, rep := postAdm("en", workspaceAdmissionRequest{Selections: []workspaceAdmissionSelection{{Path: pendB, Action: "reject"}}})
+	if code != http.StatusOK || !rep.Applied || rep.Gen == 0 || !strings.Contains(rep.HTML, `id="rlist"`) {
+		t.Fatalf("reject = (%d, %+v)", code, rep)
+	}
+	if got, err := os.ReadFile(keepFile); err != nil || string(got) != "keep" {
+		t.Fatalf("reject touched disk: %q, %v", got, err)
+	}
+	if !f.d.wsAdmission.isRejected(pendB) {
+		t.Fatal("reject did not persist in wsAdmission")
+	}
+	wakeAfter := func() uint64 {
+		f.d.broker.mu.Lock()
+		defer f.d.broker.mu.Unlock()
+		return f.d.broker.changed[railListRepoKey]
+	}()
+	if wakeAfter <= wakeBefore {
+		t.Fatalf("reject did not wake %s: before=%d after=%d", railListRepoKey, wakeBefore, wakeAfter)
+	}
+
+	// Idempotent reject of already-rejected path succeeds with byte-unchanged store.
+	admFile := WorkspaceAdmissionFilePath(filepath.Join(filepath.Dir(f.d.wsAdmission.file), "workspaces.json"))
+	beforeIdem, err := os.ReadFile(admFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, rep := postAdm("en", workspaceAdmissionRequest{Selections: []workspaceAdmissionSelection{{Path: pendB, Action: "reject"}}}); code != http.StatusOK || !rep.Applied {
+		t.Fatalf("idempotent reject = (%d, %+v)", code, rep)
+	}
+	if afterIdem, _ := os.ReadFile(admFile); string(afterIdem) != string(beforeIdem) {
+		t.Fatalf("idempotent reject rewrote admission file")
+	}
+
+	// 409 stale checks (all-or-nothing: neither store written).
+	missingDir := mkDir(t, filepath.Join(t.TempDir(), "vanished"))
+	f.addSession(t, "svanish", missingDir, "vanish")
+	waitFor(t, "vanish indexed", func() bool { _, ok := f.d.Index().Session("svanish"); return ok })
+	if err := os.RemoveAll(missingDir); err != nil {
+		t.Fatal(err)
+	}
+	wsFile := filepath.Join(filepath.Dir(admFile), "workspaces.json")
+	wsBefore, _ := os.ReadFile(wsFile)
+	admBefore, _ := os.ReadFile(admFile)
+	unlisted := t.TempDir()
+	for _, tc := range []struct {
+		name string
+		sels []workspaceAdmissionSelection
+	}{
+		{"approve-missing-dir", []workspaceAdmissionSelection{{Path: missingDir, Action: "approve"}}},
+		{"approve-stored", []workspaceAdmissionSelection{{Path: f.project, Action: "approve"}}},
+		{"reject-stored", []workspaceAdmissionSelection{{Path: f.project, Action: "reject"}}},
+		{"approve-unlisted", []workspaceAdmissionSelection{{Path: unlisted, Action: "approve"}}},
+		{"reject-unlisted", []workspaceAdmissionSelection{{Path: unlisted, Action: "reject"}}},
+		{"undo-not-rejected", []workspaceAdmissionSelection{{Path: pendA, Action: "undo"}}},
+		{"mixed-valid-and-stale", []workspaceAdmissionSelection{{Path: pendA, Action: "approve"}, {Path: unlisted, Action: "reject"}}},
+	} {
+		code, rep := postAdm("ko", workspaceAdmissionRequest{Selections: tc.sels})
+		if code != http.StatusConflict || rep.Applied || rep.Message != "워크스페이스 목록이 바뀌었습니다. 새로고침 후 다시 선택하세요." {
+			t.Errorf("%s = (%d, %+v), want 409 localized stale", tc.name, code, rep)
+		}
+	}
+	if wsAfter, _ := os.ReadFile(wsFile); string(wsAfter) != string(wsBefore) {
+		t.Fatal("refused 409 batch modified workspaces.json")
+	}
+	if admAfter, _ := os.ReadFile(admFile); string(admAfter) != string(admBefore) {
+		t.Fatal("refused 409 batch modified workspace-admission.json")
+	}
+	// A foreign malformed/newer admission file must refuse an approve before
+	// workspaces.json is changed, so a retry does not become stale.
+	for _, bad := range []string{`{broken`, `{"version":2,"rejected":[]}`} {
+		if err := os.WriteFile(admFile, []byte(bad), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		code, rep := postAdm("en", workspaceAdmissionRequest{Selections: []workspaceAdmissionSelection{{Path: pendA, Action: "approve"}}})
+		if code != http.StatusInternalServerError || rep.Applied {
+			t.Fatalf("bad admission file %q = (%d, %+v), want unapplied 500", bad, code, rep)
+		}
+		if got, _ := os.ReadFile(wsFile); string(got) != string(wsBefore) {
+			t.Fatalf("approve changed workspaces.json before admission preflight: %q", got)
+		}
+		if err := os.WriteFile(admFile, admBefore, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Undo pendB -> returns to PendingWorkspaces; then approve both pendA and pendB -> promoted to Workspaces.
+	if code, rep = postAdm("en", workspaceAdmissionRequest{Selections: []workspaceAdmissionSelection{{Path: pendB, Action: "undo"}}}); code != http.StatusOK || !rep.Applied {
+		t.Fatalf("undo = (%d, %+v)", code, rep)
+	}
+	if f.d.wsAdmission.isRejected(pendB) {
+		t.Fatal("undo left pendB rejected")
+	}
+	if code, rep = postAdm("en", workspaceAdmissionRequest{Selections: []workspaceAdmissionSelection{{Path: pendA, Action: "approve"}, {Path: pendB, Action: "reject"}}}); code != http.StatusOK || !rep.Applied {
+		t.Fatalf("mixed approve+reject = (%d, %+v)", code, rep)
+	}
+	if !strings.Contains(rep.HTML, `data-ws="`+pendA+`"`) {
+		t.Fatalf("approved root missing from returned HTML:\n%s", rep.HTML)
+	}
+	waitRegionHolding(t, stream, regionRail, `data-ws="`+pendA+`"`)
+	// Approve previously-rejected pendB directly -> clears rejection and promotes to top-level Workspaces.
+	code, rep = postAdm("en", workspaceAdmissionRequest{Selections: []workspaceAdmissionSelection{{Path: pendB, Action: "approve"}}})
+	if code != http.StatusOK || !rep.Applied || !strings.Contains(rep.HTML, `data-ws="`+pendB+`"`) || f.d.wsAdmission.isRejected(pendB) {
+		t.Fatalf("approve rejected root = (%d, %+v), isRejected=%v", code, rep, f.d.wsAdmission.isRejected(pendB))
 	}
 }

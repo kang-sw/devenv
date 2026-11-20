@@ -722,7 +722,10 @@ func TestRailLayoutUnknownEntries(t *testing.T) {
 // stream's rail; a refusal answers 409 with its reason, an import over a
 // layout 200 not_applied; the route needs a POST with the daemon's Origin.
 func TestRailLayoutRoute(t *testing.T) {
-	f := startPageFixture(t)
+	f := startPageFixture(t, withWorkspaces(t))
+	if _, err := f.d.workspaces.add(f.project, false); err != nil {
+		t.Fatal(err)
+	}
 	waitFor(t, "the index to load", f.d.Index().Loaded)
 	stream := openStream(t, f.base+"/s/livesession/events")
 	quiet(t, stream)

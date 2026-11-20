@@ -2441,5 +2441,7 @@
   "js.tmap.c.tip.tickets.other": "{0} tickets",
   "js.tmap.c.tip.sim": "Similarité {0} %",
   "js.tmap.c.tip.more": "… +{0} de plus",
-  "js.tmap.c.kwtip": "Clic = filtre par mot-clé · glisser = déplacer"
+  "js.tmap.c.kwtip": "Clic = filtre par mot-clé · glisser = déplacer",
+  "rail.ws.admission.invalid": "Sélection d’admission d’espace de travail non valide.",
+  "rail.ws.admission.stale": "La liste des espaces de travail a changé. Actualisez et sélectionnez à nouveau."
 }

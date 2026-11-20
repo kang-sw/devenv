@@ -126,6 +126,35 @@ func TestWorktreePageGuardsAndTemplate(t *testing.T) {
 	if code, _ := get(t, f.base+worktreePagePath(root)+"?frame=1"); code != http.StatusOK {
 		t.Errorf("live workspace worktree = %d", code)
 	}
+
+	// An unstored repository whose only listed session is in a pooled worktree
+	// has zero visible sessions (omitted from PendingWorkspaces), yet its
+	// non-pooled worktrees still resolve via railOrderedView.
+	_, pooledOnlyRoot := worktreeRepo(t)
+	pooledOnlyWT := filepath.Join(filepath.Dir(pooledOnlyRoot), ".ws-worktrees", filepath.Base(pooledOnlyRoot), "pool1")
+	gitRun(t, pooledOnlyRoot, "worktree", "add", "-q", "-b", "pool1", pooledOnlyWT)
+	register(t, f.dir, "pooledonly", pooledOnlyWT, time.Now())
+	f.d.Index().Refresh()
+	waitFor(t, "pooledonly indexed", func() bool { _, ok := f.d.Index().Session("pooledonly"); return ok })
+	view := f.d.railView(f.d.pages())
+	hasRoot, hasPooledOnly := false, false
+	for _, ws := range view.PendingWorkspaces {
+		if samePath(ws.Path, root) {
+			hasRoot = true
+		}
+		if samePath(ws.Path, pooledOnlyRoot) {
+			hasPooledOnly = true
+		}
+	}
+	if !hasRoot || hasPooledOnly {
+		t.Fatalf("PendingWorkspaces = %+v, want %s present and all-pooled %s omitted", view.PendingWorkspaces, root, pooledOnlyRoot)
+	}
+	if code, _ := get(t, f.base+worktreePagePath(pooledOnlyRoot)+"?frame=1"); code != http.StatusOK {
+		t.Errorf("all-pooled unstored repo root worktree page = %d, want 200", code)
+	}
+	if code, _ := get(t, f.base+worktreePagePath(pooledOnlyWT)+"?frame=1"); code != http.StatusNotFound {
+		t.Errorf("pooled worktree page on unstored repo = %d, want 404", code)
+	}
 }
 
 // Compare the shared header and explorer-only frame using real page consumers.

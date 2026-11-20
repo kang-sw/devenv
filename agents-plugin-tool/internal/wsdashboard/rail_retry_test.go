@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +17,10 @@ func TestRailRetriesFailedInputsWithoutAnotherWake(t *testing.T) {
 		t.Run(failedStore, func(t *testing.T) {
 			now := time.Now()
 			stats := &streamStats{}
-			d := &Daemon{dir: t.TempDir(), log: io.Discard, stats: stats, broker: newBroker(stats), railMsgs: newRailMessages(), snapshots: &SnapshotCache{}}
+			d := &Daemon{dir: t.TempDir(), log: io.Discard, stats: stats, broker: newBroker(stats), railMsgs: newRailMessages(), snapshots: &SnapshotCache{}, workspaces: openWorkspaceStore(filepath.Join(t.TempDir(), "workspaces.json"))}
+			if _, err := d.workspaces.add("/rail-retry-test", false); err != nil {
+				t.Fatal(err)
+			}
 			d.broker.after = func(time.Duration, func()) {}
 			d.index = NewIndex(IndexOptions{Now: func() time.Time { return now }})
 			for _, id := range []string{"changed", "unrelated"} {

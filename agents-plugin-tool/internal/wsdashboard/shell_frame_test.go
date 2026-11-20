@@ -189,7 +189,7 @@ process.stdout.write(bad.join("\n"));
 // standing alone) take one session render per change, and two shells' rail
 // streams share one rail render when its visible content changes.
 func TestFramesOfOneSessionShareOneRender(t *testing.T) {
-	f := startPageFixture(t)
+	f := startStoredRailFixture(t)
 	a := openStream(t, f.base+"/s/livesession/events?frame=1")
 	b := openStream(t, f.base+"/s/livesession/events?frame=1")
 	railA := openStream(t, f.base+railEventsRoute)

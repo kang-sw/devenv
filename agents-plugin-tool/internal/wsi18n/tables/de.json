@@ -2441,5 +2441,7 @@
   "js.tmap.c.tip.tickets.other": "{0} Tickets",
   "js.tmap.c.tip.sim": "Ähnlichkeit {0} %",
   "js.tmap.c.tip.more": "… +{0} weitere",
-  "js.tmap.c.kwtip": "Klick = Stichwortfilter · Ziehen = verschieben"
+  "js.tmap.c.kwtip": "Klick = Stichwortfilter · Ziehen = verschieben",
+  "rail.ws.admission.invalid": "Ungültige Auswahl für die Workspace-Zulassung.",
+  "rail.ws.admission.stale": "Die Workspace-Liste hat sich geändert. Aktualisieren und erneut auswählen."
 }

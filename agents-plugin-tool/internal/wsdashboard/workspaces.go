@@ -131,6 +131,14 @@ func (s *workspaceStore) workspaces() []storedWorkspace {
 	return append([]storedWorkspace(nil), s.list...)
 }
 
+// preflight catches an unreadable or malformed external edit before a batch
+// begins writing to the workspace and admission stores.
+func (s *workspaceStore) preflight() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.reload()
+}
+
 func (s *workspaceStore) index(path string) int {
 	for i, w := range s.list {
 		if w.Path == path {

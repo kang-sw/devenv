@@ -12,7 +12,7 @@ import (
 // frame holds the session's regions under a placeholder for the rail, and no
 // rail of its own.
 func TestSessionURLServesTheShellAroundItsFramedPage(t *testing.T) {
-	f := startPageFixture(t)
+	f := startStoredRailFixture(t)
 	code, shell := get(t, f.base+"/s/livesession")
 	if code != http.StatusOK {
 		t.Fatalf("GET /s/livesession = %d", code)
@@ -187,7 +187,7 @@ func TestSessionPageFramesOnlyItsOwnOrigin(t *testing.T) {
 // streams its own regions without the rail, which the session page standing
 // alone carries over its own stream.
 func TestShellStreamsTheRailAndItsFramesTheirRegions(t *testing.T) {
-	f := startPageFixture(t)
+	f := startStoredRailFixture(t)
 	rail := openStream(t, f.base+railEventsRoute)
 	framed := openStream(t, f.base+"/s/livesession/events?frame=1")
 	alone := openStream(t, f.base+"/s/livesession/events")
@@ -207,7 +207,11 @@ func TestShellStreamsTheRailAndItsFramesTheirRegions(t *testing.T) {
 	}
 	quiet(t, alone)
 
-	f.addSession(t, "lonersession", t.TempDir(), "alone")
+	loner := t.TempDir()
+	if _, err := f.d.workspaces.add(loner, false); err != nil {
+		t.Fatal(err)
+	}
+	f.addSession(t, "lonersession", loner, "alone")
 	waitRegionHolding(t, rail, regionRail, `data-rid="lonersession"`)
 	waitRegionHolding(t, alone, regionRail, `data-rid="lonersession"`)
 	for _, ev := range quiet(t, framed) {

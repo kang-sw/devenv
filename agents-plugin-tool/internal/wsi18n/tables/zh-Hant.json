@@ -2441,5 +2441,7 @@
   "js.tmap.c.tip.tickets.other": "{0} 個工單",
   "js.tmap.c.tip.sim": "相似度 {0}%",
   "js.tmap.c.tip.more": "… 另有 {0} 個",
-  "js.tmap.c.kwtip": "點擊 = 關鍵字篩選 · 拖曳 = 平移"
+  "js.tmap.c.kwtip": "點擊 = 關鍵字篩選 · 拖曳 = 平移",
+  "rail.ws.admission.invalid": "無效的工作區准入選擇。",
+  "rail.ws.admission.stale": "工作區清單已變更。請重新整理後再選擇。"
 }

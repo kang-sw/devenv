@@ -2441,5 +2441,7 @@
   "js.tmap.c.tip.tickets.other": "티켓 {0}개",
   "js.tmap.c.tip.sim": "유사도 {0}%",
   "js.tmap.c.tip.more": "… +{0}개 더",
-  "js.tmap.c.kwtip": "클릭 = 키워드 필터 · 드래그 = 이동"
+  "js.tmap.c.kwtip": "클릭 = 키워드 필터 · 드래그 = 이동",
+  "rail.ws.admission.invalid": "유효하지 않은 워크스페이스 승인 선택입니다.",
+  "rail.ws.admission.stale": "워크스페이스 목록이 바뀌었습니다. 새로고침 후 다시 선택하세요."
 }
