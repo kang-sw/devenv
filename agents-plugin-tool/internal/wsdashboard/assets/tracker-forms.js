@@ -545,7 +545,7 @@
   // so no "unknown store" notice follows), its menu and dialogs close, and its page-lifetime state
   // goes, so its wiki and search answers are dropped instead of retried. Nothing syncs: a hidden
   // store was applied by its hide, an unregistered one has nothing left to sync.
-  var GONE_BY_STORE = ['wiki', 'psr', 'nrow', 'knew', 'tab', 'panel'], GONE_BY_KEY = ['tabSeen', 'loaded', 'mdet', 'wfold'];
+  var GONE_BY_STORE = ['wiki', 'psr', 'nrow', 'knew', 'tab', 'panel'], GONE_BY_KEY = ['tabSeen', 'loaded', 'mdet', 'ofold', 'wfold'];
   function dropGone() {
     function gone(n) { return !!n && order.indexOf(n) < 0; }
     var lost = gone(ui.store);

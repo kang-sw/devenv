@@ -179,6 +179,8 @@
         else if (k === 'msel') { var mr = a.closest('.irow'); if (mr) mselClick(mr, e); }
         else if (k === 'msel-clear') { mselClear(); render(); }
         else if (k === 'mdet') { var mk = ui.store + '|' + d.who; ui.mdet[mk] = !ui.mdet[mk]; render(); }
+        else if (k === 'ofold') { var ok = ui.store + '|' + d.who; ui.ofold[ok] = !ui.ofold[ok]; render(); }
+        else if (k === 'org-edit') { /* Phase 2 opens the org-chart editor modal */ }
         else if (k === 'idcopy') copyId(a);
         else if (k === 'new-x') closeNewRow();
         else if (k === 'nchip') newMenu(a.getAttribute('data-step'), a, a.hasAttribute('data-ed'));
