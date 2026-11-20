@@ -433,32 +433,6 @@
     "261117-feat-ws-hosted-child-session-entry": {
       "registered_at": "2026-11-17T09:49:58Z"
     },
-    "261117-feat-ws-hosted-compaction-lifecycle": {
-      "registered_at": "2026-11-17T09:49:15Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-20T15:05:05Z",
-        "impl": {
-          "branch": "impl/develop/tidal-baked-duvet"
-        }
-      }
-    },
-    "261117-feat-ws-hosted-prompt-assembly": {
-      "registered_at": "2026-11-17T09:48:35Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-20T15:31:26Z",
-        "impl": {
-          "branch": "impl/develop/prompt-assembly-p4"
-        }
-      }
-    },
     "261117-feat-ws-single-session-holder": {
       "registered_at": "2026-11-17T08:21:19Z"
     },
@@ -576,7 +550,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-20T14:20:28Z",
         "impl": {
           "branch": "impl/develop/org-entity-phase2"
@@ -599,19 +573,6 @@
         "touched_at": "2026-11-20T03:49:27Z",
         "impl": {
           "branch": "impl/develop/cough-race-suave"
-        }
-      }
-    },
-    "261120-feat-desktop-canary-release-channel": {
-      "registered_at": "2026-11-20T14:11:51Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-20T15:11:23Z",
-        "impl": {
-          "branch": "impl/develop/okay-sleek-karma"
         }
       }
     },
