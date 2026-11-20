@@ -1,5 +1,5 @@
 ---
-title: "Migrate the Werkschaft desktop shell from Tauri to Electron"
+title: "Werkschaft 데스크톱 셸을 Tauri에서 Electron으로 이전"
 related:
   261113-feat-werkschaft-thin-tauri-shell: "current Tauri shell (Phase 1 Result e7121971); parity source; its binding decisions carry over except the webview technology"
   261112-research-ws-ade-desktop-shell-and-rename: "Werkschaft concept; Electron was the recorded fallback if the webview matrix proved painful"
@@ -1021,7 +1021,9 @@ processes were signalled. No Windows host was accessed and no Electron/GUI ran
 on the Mac. Live smoke remains deferred to the owner-authorized Windows run;
 no new phase, policy, dependency, API or independent review pass was added.
 
-#### Edition (052919e16, 21aa53f98) - 2026-11-15
+#### Edition (052919e16) - 2026-11-15
+
+Also landed in follow-up commit 21aa53f98.
 
 Owner-approved self-update for v0.50.0, superseding the carried "no
 self-update" and "no preload" decisions for this one bridge. The shell checks
