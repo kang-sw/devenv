@@ -532,19 +532,6 @@
         }
       }
     },
-    "261119-feat-ws-agy-plan-usage-display": {
-      "registered_at": "2026-11-19T12:55:00Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-19T14:26:44Z",
-        "impl": {
-          "branch": "impl/develop/thong-amid-swung"
-        }
-      }
-    },
     "261119-feat-ws-audit-capture-harness-adapters": {
       "registered_at": "2026-11-19T14:04:32Z"
     },
@@ -624,7 +611,17 @@
       "registered_at": "2026-11-19T14:03:33Z"
     },
     "261119-refactor-ws-whiteboard-sqlite-board-store": {
-      "registered_at": "2026-11-19T14:14:02Z"
+      "registered_at": "2026-11-19T14:14:02Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-20T03:49:27Z",
+        "impl": {
+          "branch": "impl/develop/cough-race-suave"
+        }
+      }
     },
     "261120-bug-ws-rail-heartbeat-starvation": {
       "registered_at": "2026-11-20T02:41:44Z"
