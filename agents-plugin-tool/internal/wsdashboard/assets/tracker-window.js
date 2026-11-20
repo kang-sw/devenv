@@ -406,6 +406,14 @@
       if (lst) lst.classList.remove('folded');
       if (tg) tg.textContent = wsT("js.tk.asg.fewer");
     }
+    var runEl = el && el.closest('.tr-run.shut');
+    if (runEl) { // the target sits in a collapsed thread run: expand it
+      var rid = runEl.getAttribute('data-run');
+      if (rid && ui.item) setRunCollapsed(threadFoldMap(ui.item), rid, false);
+      runEl.classList.remove('shut');
+      var rb = runEl.querySelector('.tr-rs button');
+      if (rb) rb.setAttribute('aria-expanded', 'true');
+    }
     return el;
   }
   // The item window's parts. The window is a header (title, chips, actions) over two
@@ -607,6 +615,151 @@
         '<span class="bt">' + esc(host ? host.title : alias(c.item)) + '</span><span class="bs">' + wsT("js.tk.bref.cmt", esc(nm(c.author))) + ' ' + snippet(c.body) + '</span></a>';
     }).join('') + '</div></section>';
   }
+  // Thread run grouping and compact system lines (item window only; evLine stays
+  // unchanged for the activity feed and wiki).
+  var SYS_KIND_KEY = {
+    'item.create': "js.tk.tr.k.create", 'item.edit': "js.tk.tr.k.edit",
+    'item.cc': "js.tk.tr.k.cc", 'item.uncc': "js.tk.tr.k.uncc",
+    'item.assign': "js.tk.tr.k.assign", 'item.accept': "js.tk.tr.k.accept",
+    'item.decline': "js.tk.tr.k.decline", 'item.return': "js.tk.tr.k.return",
+    'item.handoff': "js.tk.tr.k.handoff", 'item.unassign': "js.tk.tr.k.unassign",
+    'item.claim': "js.tk.tr.k.claim", 'item.open': "js.tk.tr.k.open", 'item.unopen': "js.tk.tr.k.open",
+    'item.request': "js.tk.tr.k.request", 'item.approve': "js.tk.tr.k.request", 'item.deny': "js.tk.tr.k.request", 'item.unrequest': "js.tk.tr.k.request",
+    'item.close': "js.tk.tr.k.close", 'item.confirm': "js.tk.tr.k.confirm", 'item.reject': "js.tk.tr.k.reject", 'item.reopen': "js.tk.tr.k.reopen",
+    'item.hide': "js.tk.tr.k.hide", 'item.unhide': "js.tk.tr.k.hide", 'item.move': "js.tk.tr.k.move",
+    'comment.add': "js.tk.tr.k.comment", 'comment.edit': "js.tk.tr.k.comment", 'comment.hide': "js.tk.tr.k.comment"
+  };
+  function isThreadComment(n, itemId) { return n.type === 'comment.add' && n.thread === itemId; }
+  function isThreadStatusBreak(n) { return n.type === 'item.status'; }
+  function groupThreadEvents(evs, itemId) {
+    var out = [], buf = [];
+    function flush() {
+      if (buf.length >= 2) out.push({ kind: 'run', id: buf[0].id, events: buf });
+      else if (buf.length === 1) out.push({ kind: 'single', ev: buf[0] });
+      buf = [];
+    }
+    evs.forEach(function (n) {
+      if (!n) return;
+      if (isThreadComment(n, itemId)) { flush(); out.push({ kind: 'comment', ev: n }); }
+      else if (isThreadStatusBreak(n)) { flush(); out.push({ kind: 'status', ev: n }); }
+      else buf.push(n);
+    });
+    flush();
+    return out;
+  }
+  function runHasAlert(events) { return events.some(function (n) { return n.status === 'flagged' || !!(n.markers && n.markers.length); }); }
+  function runDefaultCollapsed(events) { return events.length >= 4 && !runHasAlert(events); }
+  function isRunCollapsed(run, foldMap) {
+    return foldMap && Object.prototype.hasOwnProperty.call(foldMap, run.id) ? !!foldMap[run.id] : runDefaultCollapsed(run.events);
+  }
+  function setRunCollapsed(foldMap, runId, collapsed) { foldMap[runId] = !!collapsed; }
+  function setAllRunsCollapsed(groups, foldMap, collapsed) { groups.forEach(function (g) { if (g.kind === 'run') foldMap[g.id] = !!collapsed; }); }
+  function hasCollapsedRun(groups, foldMap) { return groups.some(function (g) { return g.kind === 'run' && isRunCollapsed(g, foldMap); }); }
+  function fmtTime(ts) { return ts ? fmtTs(ts).slice(6) : '-'; }
+  function fmtRunRange(events, full) {
+    if (!events.length) return '';
+    var a = fmtTs(events[0].ts), b = fmtTs(events[events.length - 1].ts);
+    if (a === '-' && b === '-') return '';
+    var sameDay = a.slice(0, 5) === b.slice(0, 5);
+    if (full) return sameDay ? (a === b ? a : a + '\u2013' + b.slice(6)) : a + '\u2013' + b;
+    if (sameDay) { var t1 = a.slice(6), t2 = b.slice(6); return t1 === t2 ? t1 : t1 + '\u2013' + t2; }
+    return a + '\u2013' + b;
+  }
+  function sysGlyph(type) {
+    if (type === 'item.cc') return { ch: '+', cls: 'cc' };
+    if (type === 'item.uncc') return { ch: '\u2212', cls: 'cc' };
+    if (/^item\.(assign|accept|decline|return|handoff|unassign|claim|request|approve|deny|unrequest)$/.test(type)) return { ch: '\u2192', cls: 'as' };
+    if (type === 'item.edit' || type === 'comment.edit') return { ch: '\u270e', cls: 'ed' };
+    return { ch: '\u25cf', cls: '' };
+  }
+  function sysKindKey(type) { return SYS_KIND_KEY[type] || "js.tk.tr.k.misc"; }
+  function runAuthorsText(events) {
+    var ids = [];
+    events.forEach(function (n) { if (n.member && ids.indexOf(n.member) < 0) ids.push(n.member); });
+    if (!ids.length) return '';
+    return ids.length === 1 ? nm(ids[0]) : wsTn("js.tk.tr.others", ids.length - 1, nm(ids[0]));
+  }
+  function runKindsText(events) {
+    var order = [], counts = {};
+    events.forEach(function (n) {
+      var k = sysKindKey(n.type);
+      if (!counts[k]) order.push(k);
+      counts[k] = (counts[k] || 0) + 1;
+    });
+    return order.map(function (k) { return wsT(k) + ' ' + counts[k]; }).join(', ');
+  }
+  function plainTextOfHtml(html) {
+    return String(html || '').replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&middot;/g, '\u00b7').replace(/&rarr;/g, '\u2192')
+      .replace(/&ldquo;/g, '\u201c').replace(/&rdquo;/g, '\u201d').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+  }
+  function threadFoldMap(itemId) {
+    var key = ui.store + '|' + itemId;
+    ui.trfold = ui.trfold || {};
+    return (ui.trfold[key] = ui.trfold[key] || Object.create(null));
+  }
+  function toggleThreadRun(runId) {
+    var it = ui.item && VS && VS.items[ui.item];
+    if (!it || !runId) return;
+    var evs = it.thread.map(function (id) { return EV[id]; }).filter(Boolean);
+    var run = groupThreadEvents(evs, it.id).filter(function (g) { return g.kind === 'run' && g.id === runId; })[0];
+    if (!run) return;
+    var fm = threadFoldMap(it.id);
+    setRunCollapsed(fm, runId, !isRunCollapsed(run, fm));
+    render();
+  }
+  function toggleThreadAll(wantOpen) {
+    var it = ui.item && VS && VS.items[ui.item];
+    if (!it) return;
+    var evs = it.thread.map(function (id) { return EV[id]; }).filter(Boolean);
+    setAllRunsCollapsed(groupThreadEvents(evs, it.id), threadFoldMap(it.id), !wantOpen);
+    render();
+  }
+  function sysLineHtml(n, it, opts) {
+    var desc = describe(n, n.parentThread === it.id ? 'parent' : true), gl = sysGlyph(n.type);
+    var stCls = opts.statusBreak ? ' st-break' + (n.payload && n.payload.status ? ' tr-st-' + esc(n.payload.status) : '') : '';
+    var cls = 'tr-sl' + (opts.inRun ? '' : ' wide') + (opts.sameAuthor ? ' same' : '') + stCls +
+      (n.status !== 'applied' ? ' ' + n.status : '') + (n.markers && n.markers.length ? ' concm' : '') +
+      (n.origin && n.origin !== 'human' ? ' agent' : '');
+    var full = plainTextOfHtml(whoName(n.member) + ' ' + desc);
+    return '<li class="' + cls + '"' + attr('ev', n.id) + tipAttr(n.alias) + '>' +
+      '<span class="tr-t">' + esc(opts.inRun ? fmtTime(n.ts) : fmtTs(n.ts)) + '</span>' +
+      '<span class="tr-g' + (gl.cls ? ' ' + gl.cls : '') + '" aria-hidden="true">' + gl.ch + '</span>' +
+      '<span class="tr-x" title="' + esc(full) + '"><span class="tr-who">' + whoName(n.member) + '</span>' + originChip(n.origin) + desc + flags(n) + '</span>' +
+      (n.reason ? '<span class="reason">' + esc(n.reason) + '</span>' : '') + markerHtml(n) + supHtml(n) + '</li>';
+  }
+  function threadRunHtml(run, it, foldMap) {
+    var shut = isRunCollapsed(run, foldMap), cnt = wsTn("js.tk.tr.count", run.events.length);
+    var who = runAuthorsText(run.events), kinds = runKindsText(run.events);
+    var range = fmtRunRange(run.events, false), fullRange = fmtRunRange(run.events, true);
+    var tip = wsT(shut ? "js.tk.tr.tip.open" : "js.tk.tr.tip.close", fullRange);
+    var hdr = '<span class="tr-n">' + esc(cnt) + '</span>' + (fullRange ? ' &middot; <span class="tr-t">' + esc(fullRange) + '</span>' : '');
+    var sum = ['<span class="tr-n">' + esc(cnt) + '</span>'];
+    if (who) sum.push(esc(who));
+    if (kinds) sum.push(esc(kinds));
+    if (range) sum.push('<span class="tr-t">' + esc(range) + '</span>');
+    var rows = run.events.map(function (n, idx) {
+      return sysLineHtml(n, it, { inRun: true, sameAuthor: idx > 0 && run.events[idx - 1].member === n.member, statusBreak: false });
+    }).join('');
+    return '<li class="tr-run' + (shut ? ' shut' : '') + '"' + attr('run', run.id) + attr('n', run.events.length) + '>' +
+      '<div class="tr-rs"><button type="button"' + attr('act', 'trfold') + attr('run', run.id) + ' aria-expanded="' + (!shut) + '"' + tipAttr(tip) + '>' +
+      '<span class="tr-ar" aria-hidden="true">&#9656;</span><span class="tr-hdr">' + hdr + '</span><span class="tr-sum">' + sum.join(' &middot; ') + '</span>' +
+      '<span class="grow"></span><span class="tr-tw"><span class="tr-lbl-open">' + wsT("js.tk.tr.expand") + '</span><span class="tr-lbl-close">' + wsT("js.tk.tr.collapse") + '</span></span>' +
+      '</button></div><ul>' + rows + '</ul></li>';
+  }
+  function threadSectionHtml(v, it) {
+    var evs = it.thread.map(function (id) { return EV[id]; }).filter(Boolean);
+    var groups = groupThreadEvents(evs, it.id), fm = threadFoldMap(it.id);
+    var hasRuns = groups.some(function (g) { return g.kind === 'run'; });
+    var anyShut = hasRuns && hasCollapsedRun(groups, fm);
+    var allBtn = hasRuns ? '<span class="grow"></span><button type="button" class="tr-all"' + attr('act', 'trfold-all') + attr('all', anyShut ? 'open' : 'shut') + '>' + wsT(anyShut ? "js.tk.tr.expandall" : "js.tk.tr.collapseall") + '</button>' : '';
+    return '<section class="iw-thread"><h3 class="prom">' + wsT("js.tk.win.thread") + ' <span class="cnt">' + evs.length + '</span>' + allBtn + '</h3><ul class="timeline">' +
+      groups.map(function (g) {
+        if (g.kind === 'comment') return commentHtml(g.ev, v, it);
+        if (g.kind === 'run') return threadRunHtml(g, it, fm);
+        return sysLineHtml(g.ev, it, { inRun: false, sameAuthor: false, statusBreak: g.kind === 'status' });
+      }).join('') + '</ul></section>';
+  }
   // The edit mode (ui.iedit) turns the title and the body into fields in place: Enter in the
   // title or Cmd/Ctrl+Enter in the body saves, Esc cancels.
   function windowHtml(v, it) {
@@ -625,11 +778,7 @@
     else if (it.body || it.mentions.length || it.attachments.length)
       h += '<div class="iw-body">' + (it.body ? textBlock('sh-body', 'items', it.id, it.body, attr('focus', 'body')) : '') + mentionChips(it.mentions) + attChips(it.attachments, true) + '</div>';
     h += subtasksHtml(it) + backrefsHtml(it);
-    var evs = it.thread.map(function (id) { return EV[id]; });
-    h += '<section class="iw-thread"><h3 class="prom">' + wsT("js.tk.win.thread") + ' <span class="cnt">' + evs.length + '</span></h3><ul class="timeline">' + evs.map(function (n) {
-      if (n.type === 'comment.add' && n.thread === it.id) return commentHtml(n, v, it);
-      return evLine(n, n.parentThread === it.id ? 'parent' : true);
-    }).join('') + '</ul></section>';
+    h += threadSectionHtml(v, it);
 
     // composer: a comment (optionally a quote reply); the status moved to the header's menu.
     // The box carries the @ button (bottom left) and the send button (bottom right); Cmd/Ctrl+Enter sends.
