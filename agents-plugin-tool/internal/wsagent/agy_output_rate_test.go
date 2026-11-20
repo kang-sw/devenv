@@ -561,3 +561,74 @@ func TestAgyOutputRateRowHoverRetentionAndReopen(t *testing.T) {
 	}
 	assertNear(t, "reopened OutputRate", reopenedSnap.Lead.OutputRate.OutputTps, 70.0)
 }
+
+func TestAgyOutputRateUnsolicitedTurnPromptTakeover(t *testing.T) {
+	clock := int64(30_000)
+	m := newAgyMapper("sid-unsolicited")
+	m.now = func() int64 { return clock }
+
+	// Live unsolicited wakeup streams chunks with no tracked prompt.
+	m.mapLine(agyChunkLine("background wakeup "), nopReplies{})
+	clock += 400
+	m.mapLine(agyChunkLine("done"), nopReplies{})
+
+	// A tracked prompt is sent before closeUnsolicited fires; it must drop the
+	// unsolicited untracked span so its own chunks are attributed to ws-p-e-1.
+	clock += 100
+	m.promptSent("ws-p-e-1")
+	m.mapLine(agyChunkLine("tracked "), nopReplies{})
+	clock += 500
+	m.mapLine(agyChunkLine("reply"), nopReplies{})
+	clock += 10
+	evs1 := m.mapLine(agyPromptResultLine("ws-p-e-1", "end_turn", map[string]any{"outputTokens": 140, "thoughtTokens": 100}), nopReplies{})
+	rates1 := agyRateEvents(evs1)
+	if len(rates1) != 1 {
+		t.Fatalf("prompt 1 after unsolicited wakeup: rates=%d, want 1", len(rates1))
+	}
+	// 40 visible tokens / 500ms = 80 t/s (unsolicited 400ms must not leak in).
+	assertNear(t, "prompt 1 rate", *rates1[0].OutputTps, 80.0)
+
+	// Subsequent turn must also track cleanly.
+	clock += 100
+	m.promptSent("ws-p-e-2")
+	m.mapLine(agyChunkLine("next "), nopReplies{})
+	clock += 500
+	m.mapLine(agyChunkLine("turn"), nopReplies{})
+	clock += 10
+	evs2 := m.mapLine(agyPromptResultLine("ws-p-e-2", "end_turn", map[string]any{"outputTokens": 160, "thoughtTokens": 100}), nopReplies{})
+	rates2 := agyRateEvents(evs2)
+	if len(rates2) != 1 {
+		t.Fatalf("prompt 2 after unsolicited wakeup: rates=%d, want 1", len(rates2))
+	}
+	// Window: (40 + 60) / (500 + 500) * 1000 = 100 t/s.
+	assertNear(t, "prompt 2 window rate", *rates2[0].OutputTps, 100.0)
+}
+
+func TestAgyOutputRateOutlierDoesNotPoisonWindow(t *testing.T) {
+	clock := int64(40_000)
+	m := newAgyMapper("sid-outlier")
+	m.now = func() int64 { return clock }
+
+	// Extreme outlier above wslive.MaxOutputTps (e.g. 500,000 tokens in 250ms = 2,000,000 t/s).
+	m.promptSent("ws-p-e-1")
+	m.mapLine(agyChunkLine("a"), nopReplies{})
+	clock += 250
+	m.mapLine(agyChunkLine("b"), nopReplies{})
+	clock += 10
+	if rates := agyRateEvents(m.mapLine(agyPromptResultLine("ws-p-e-1", "end_turn", map[string]any{"outputTokens": 500_000, "thoughtTokens": 0}), nopReplies{})); len(rates) != 0 {
+		t.Fatalf("outlier above MaxOutputTps emitted rate: %+v", rates)
+	}
+
+	// Next eligible response must still publish cleanly without the outlier in the window.
+	clock += 100
+	m.promptSent("ws-p-e-2")
+	m.mapLine(agyChunkLine("c"), nopReplies{})
+	clock += 500
+	m.mapLine(agyChunkLine("d"), nopReplies{})
+	clock += 10
+	rates := agyRateEvents(m.mapLine(agyPromptResultLine("ws-p-e-2", "end_turn", map[string]any{"outputTokens": 50, "thoughtTokens": 0}), nopReplies{}))
+	if len(rates) != 1 {
+		t.Fatalf("eligible response after outlier: rates=%d, want 1", len(rates))
+	}
+	assertNear(t, "post-outlier rate", *rates[0].OutputTps, 100.0)
+}

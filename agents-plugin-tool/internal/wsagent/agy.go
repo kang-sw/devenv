@@ -756,6 +756,9 @@ func (m *agyMapper) mode() string {
 
 func (m *agyMapper) promptSent(id string) {
 	m.mu.Lock()
+	if m.unsolicitedTurn {
+		m.rate.dropUntracked()
+	}
 	m.unsolicitedTurn = false
 	m.wakeSawUsage = false
 	m.stopWakeTimerLocked()
@@ -1152,6 +1155,7 @@ func (m *agyMapper) endTurn(msg agyMessage, now int64) []Event {
 	m.wakeStepHadText = false
 	m.wakeSawUsage = false
 	m.stopWakeTimerLocked()
+	m.rate.dropUntracked()
 	ev := Event{TurnEnd: true}
 	switch {
 	case msg.Error != nil:

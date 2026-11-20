@@ -82,10 +82,11 @@ func (t *agyOutputRateTracker) promptDropped(id string) {
 	}
 }
 
-// dropUntracked discards a leading span opened without a tracked prompt id
-// (for example, an unsolicited background-wakeup turn that closed quietly).
+// dropUntracked discards leading spans opened without a tracked prompt id
+// (for example, an unsolicited background-wakeup turn that closed quietly or
+// was superseded by a tracked prompt).
 func (t *agyOutputRateTracker) dropUntracked() {
-	if len(t.spans) > 0 && t.spans[0].id == "" {
+	for len(t.spans) > 0 && t.spans[0].id == "" {
 		t.spans = t.spans[1:]
 	}
 }
@@ -152,12 +153,17 @@ func (t *agyOutputRateTracker) complete(id string, msg agyMessage, replaying boo
 	if !ok || visibleTokens < agyOutputRateMinTokens {
 		return 0, false
 	}
-	t.window = append(t.window, agyRateSample{tokens: visibleTokens, ms: spanMs})
-	if len(t.window) > agyOutputRateWindow {
-		t.window = t.window[len(t.window)-agyOutputRateWindow:]
+	sampleRate := float64(visibleTokens) * 1000 / float64(spanMs)
+	if math.IsNaN(sampleRate) || math.IsInf(sampleRate, 0) || sampleRate <= 0 || sampleRate > wslive.MaxOutputTps {
+		return 0, false
 	}
-	var totalTokens, totalMs int64
-	for _, s := range t.window {
+	next := t.window
+	if len(next) >= agyOutputRateWindow {
+		next = next[len(next)-(agyOutputRateWindow-1):]
+	}
+	totalTokens := visibleTokens
+	totalMs := spanMs
+	for _, s := range next {
 		totalTokens += s.tokens
 		totalMs += s.ms
 	}
@@ -168,6 +174,7 @@ func (t *agyOutputRateTracker) complete(id string, msg agyMessage, replaying boo
 	if math.IsNaN(rate) || math.IsInf(rate, 0) || rate <= 0 || rate > wslive.MaxOutputTps {
 		return 0, false
 	}
+	t.window = append(next, agyRateSample{tokens: visibleTokens, ms: spanMs})
 	return rate, true
 }
 
