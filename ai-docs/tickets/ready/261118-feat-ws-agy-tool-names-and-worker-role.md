@@ -418,7 +418,7 @@ in this session; these pointers are not an exhaustive rationale-index result.
 Owner directive: medium is now `gemini-4-neon`/`high` and large is
 `gemini-4-neon`/`xhigh`; small and xlarge remain unchanged.
 
-#### Edition (5587cd363) - 2026-11-20
+#### Edition (bf037d642) - 2026-11-20
 
 Decision (151)'s daemon-owned agy-worker shape and its in-memory-only token
 assumption are superseded by `261120-refactor-ws-agent-workers-under-holders`.

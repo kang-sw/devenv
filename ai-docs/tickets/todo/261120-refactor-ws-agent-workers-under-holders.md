@@ -24,7 +24,28 @@ normal daemon replacement, rejoins through its existing holder, and reports
 its in-flight result to its parent exactly once.
 
 All source paths below are relative to `agents-plugin-tool/` and were verified
-against `develop` at `5587cd363`.
+against `develop` at `26b999a47`.
+
+## Open Decision Queue
+
+Last ID: (1854)
+
+(1854) [open] [policy] On downgrade to an old daemon, a holder-backed worker is treated as ended (accept documented degradation) vs T3+minor vs fencing non-lead parents.
+
+- Context: the old daemon's `holdsReport`/`openChildOf`
+  (`internal/wsagent/children.go:754-807`) sees a fenced child as closed, so a
+  held parent publishes and rewrites its record
+  (`internal/wsagent/runner.go:386-394`); old `PruneRegistrations` deletes the
+  fenced child's session directory after seven days
+  (`internal/wsdashboard/registry.go:57,386-424,460-464`). The T1 fixture
+  assertions (b) and (c) in Phase 1 item 4 therefore cannot pass.
+- Alternatives: (a) accept as the same outcome as today's daemon restart,
+  document it, and specify that the new daemon absorbs the child's late report
+  on re-upgrade without a second terminal status, narrowing T1 to child-row
+  display; (b) T3 with a minor bump; (c) also fence non-lead parents (cannot
+  cover lead parents: `internal/wsagent/runner.go:528-537`).
+> Recommend (a): downgrade is a rare dev path with today's restart outcome;
+> (b) locks out previous-minor plugin sessions; (c) is partial.
 
 ## Decisions
 
@@ -73,16 +94,22 @@ against `develop` at `5587cd363`.
   `internal/wsagent/runner_events.go:377-400,562-580`,
   `internal/wsagent/codex.go:151-176`,
   `internal/wsagent/codex_mapper.go:120-129,398-425`,
-  `internal/wsagent/agy.go:215-267,679-695`). Before backend attach, every
-  worker re-derives its persisted authority with `childAdmission` rather than
-  passing an empty `StartSpec.PermissionLevel`; after replay, one common pass
-  auto-allows pending approvals for every `WorkerAutoApprove` worker
-  (`internal/wsagent/runner_process.go:61-81,121-135,574-607`,
-  `internal/wsagent/agent_tools.go:445-470`,
+  `internal/wsagent/agy.go:215-267,679-695`). Backend attach derives its mode
+  only from the child's persisted explicit selection through `childLevel` and
+  never blocks on a parent ceiling; after every record is loaded,
+  `holdersScanned` recomputes `childAdmission` against the current parent as
+  an advisory check. A refusal applies to the next launch and must not stop or
+  orphan the held process, matching held-lead rejoin behavior. After replay,
+  one common pass auto-allows pending approvals for every
+  `WorkerAutoApprove` worker
+  (`internal/wsagent/runner.go:337-386,483-537,710-745`,
+  `internal/wsagent/runner_process.go:61-81,121-135,236-246,574-607`,
+  `internal/wsagent/agent_tools.go:405-483`,
   `internal/wsagent/runner_events.go:379-421,534-540`,
   `internal/wsagent/agy_bypass.go:15-42`). Rejected: treating holder-ring
-  replay alone as proof that an open turn completed, or limiting replayed
-  approval recovery to agy leads.
+  replay alone as proof that an open turn completed, blocking attachment on a
+  parent that may not be loaded yet, or limiting replayed approval recovery to
+  agy leads.
 - **Legacy direct workers settle an open turn interrupted once, then use a
   holder on their next launch.** Startup already performs this settlement
   before queued input can open a new turn
@@ -136,12 +163,17 @@ against `develop` at `5587cd363`.
 - Preserve worker authority, profile, sandbox/permission, worktree/cwd, tier,
   model/effort, and mailbox semantics. Holder ownership must not grant a
   worker lead authority or change its caller-visible `agent.*` contract.
-- Rejoin recomputes the child's current admission from its persisted explicit
-  selection before backend attach, without starting a duplicate process or
-  trusting an old ceiling, matching `261115-feat-ws-permission-profile`'s
-  holder-reattach contract. Codex read-only must restore native `read-only`
-  plus per-turn `never`; write/full must restore their mapped sandbox and
-  policy (`internal/wsagent/codex.go:85-97,290-307`).
+- Rejoin restores the backend mode from the child's own persisted explicit
+  selection through `childLevel`/`cachedPermissionSelection`; a missing or
+  unavailable parent must never block attachment to the existing process.
+  After all records load, recompute the current parent ceiling as an advisory
+  check: a refusal governs the next launch and never stops or orphans the held
+  process. This satisfies `261115-feat-ws-permission-profile`'s requirement to
+  avoid both a duplicate process and trust in an old ceiling. A valid Codex
+  read-only selection restores native `read-only` plus per-turn `never`;
+  write/full restore their mapped sandbox and policy
+  (`internal/wsagent/agent_tools.go:405-483`,
+  `internal/wsagent/codex.go:85-97,290-307`).
 - Preserve delegation capability semantics and binding. A rejoined worker may
   continue using its existing child capability only after the holder session's
   backend, reply id, cwd where relevant, capability hash, and child PID pass
@@ -175,11 +207,19 @@ against `develop` at `5587cd363`.
   legacy holder (`internal/wsagent/runner_process.go:515-542`).
 - On attach, `startWorker` currently leaves authority empty because it calls
   `childAdmission` only for a fresh start; Codex immediately maps that empty
-  level, fails, and would lose `mapper.readOnlyWorker` and the per-turn
-  `never` policy if mode mapping were merely skipped
-  (`internal/wsagent/runner_process.go:61-81,121-135`,
-  `internal/wsagent/codex.go:81-97,290-307`). Recompute admission on attach;
-  do not make Codex's mode validation lenient.
+  level and fails (`internal/wsagent/runner_process.go:61-81,121-135`,
+  `internal/wsagent/codex.go:81-97,290-307`). Rejoin occurs inside
+  `startConv` while filename-ordered records are still loading, before the
+  child itself enters `r.convs`; a conversation parent not loaded yet makes
+  `agentCeiling` fail, while an absent lead parent falls back to
+  workdir-write (`internal/wsagent/runner.go:337-386,710-745`,
+  `internal/wsagent/agent_tools.go:405-428`). Give backend attach the child's
+  persisted `childLevel` (`cachedPermissionSelection`) and never refuse the
+  existing process there. Recompute `childAdmission` after all records load,
+  in or after `holdersScanned`, as an advisory diagnostic whose refusal
+  applies to the next launch, following the lead's attach rule
+  (`internal/wsagent/agent_tools.go:439-483`,
+  `internal/wsagent/runner_process.go:236-246`).
 - Remove the Codex and agy worker-holder refusals
   (`internal/wsagent/codex.go:74-83`,
   `internal/wsagent/agy.go:142-156`). For Claude, change the launch-argument
@@ -220,12 +260,12 @@ against `develop` at `5587cd363`.
 | scope.new_public_symbol | no | no new exported API symbol is named; agent-worker is a holder kind and holderSession is internal |
 | scope.new_type_contract | yes | holderSession gains backend ownership metadata; persisted Record.HandedOffAt becomes the T1 old-daemon fence (internal/wsagent/holder.go#L69-L89; internal/wsagent/record.go#L55-L63) |
 | scope.test_surface | existing | internal/wsagent/pi_worker_recovery_test.go, codex_worker_test.go, codex_recovery_test.go and lead_recovery_test.go exist; Phase 1 adds an old-daemon fixture |
-| complexity.reuse_points | confirmed | existing Pi holder allocation and reattach, held-lead MCP tuple, and replay reconciliation were read (internal/wsagent/runner_process.go#L184-L190; #L359-L402; #L511-L625) |
+| complexity.reuse_points | confirmed | existing Pi holder allocation and reattach, held-lead MCP tuple, childLevel persisted-selection projection, advisory held-lead permission rejoin, and replay reconciliation were read (internal/wsagent/runner_process.go#L184-L190; #L236-L246; #L359-L402; #L511-L625; internal/wsagent/agent_tools.go#L476-L483) |
 | complexity.side_effect_risk | high | daemon replacement, holder lifetime, worker tokens and interrupted-turn settlement change together |
 | risk.correctness | high | replay must settle in-flight work and parent reporting exactly once across four backends |
-| risk.fit | high | one worker holder kind must preserve each backend's launch, authority, cwd and ownership binding |
+| risk.fit | high | one worker holder kind must preserve each backend's launch, cwd and ownership binding; attach mode comes from the child's persisted selection while current-parent ceiling admission waits until all records are loaded |
 | risk.test | high | directional old-daemon fixture, four-backend replacement coverage and Windows restart behavior are required |
-| risk.security_or_contract | high | T1 fence and token/capability restoration affect old-daemon writes and worker authority |
+| risk.security_or_contract | high | T1 fence and token/capability restoration affect old-daemon writes; advisory post-load ceiling refusal must preserve the held process while governing its next launch |
 
 ## Phases
 
@@ -238,7 +278,11 @@ against `develop` at `5587cd363`.
    reconstruction. Recognize both the new `agent-worker` holder kind and live
    legacy `pi-worker` holders; generalize Pi-only orphan classification and
    use backend-neutral honest-failure text when a non-Pi lost-ring turn has no
-   recovery implementation.
+   recovery implementation. On attach, derive backend mode from the child's
+   persisted explicit `childLevel` and never gate the existing process on
+   parent admission. After all records load, recompute `childAdmission` in or
+   after `holdersScanned`; any refusal is advisory for the held process and
+   applies to its next launch.
 2. Persist and restore `WorkerHTTPMCP` through the existing held-lead tuple
    path after holder kind/backend, reply-id, cwd, capability, and PID
    validation. Restore beside `restoreToken` in `checkReattach`, not in the
@@ -274,9 +318,13 @@ against `develop` at `5587cd363`.
    During an in-flight turn, replace the daemon, rejoin the same holder and
    harness PID, restore replay and the `WorkerHTTPMCP` tuple where applicable,
    and complete without a replacement-induced interrupted settlement. For
-   Codex, cover both read-only and write authority through the real runner
-   rejoin path and assert the restored sandbox/approval policy, including the
-   read-only per-turn `never` policy.
+   Codex, cover both read-only and write persisted selections through the real
+   runner rejoin path and assert the restored sandbox/approval policy,
+   including the read-only per-turn `never` policy. Load the child before both
+   a conversation parent and a lead parent and prove attach still succeeds;
+   after `holdersScanned`, prove current-ceiling refusal is advisory to that
+   process, is retained for the next launch, and does not stop or orphan the
+   holder.
 2. Assert the parent receives one terminal status and one final worker report
    exactly once, including completion while no daemon is attached. Also prove
    queued mail waits for reconciliation and then wakes/steers normally. Cover
