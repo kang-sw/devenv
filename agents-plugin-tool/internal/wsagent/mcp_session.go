@@ -88,10 +88,11 @@ func newMCPToken() string {
 // next process, voiding the one it had, and returns the session to start
 // it with; nil when a new token has no endpoint to go with or none could
 // be drawn. A given token is a rejoined process's, which already holds
-// its URL. env is the ws-mcp entry's environment and cwd the harness's
-// working directory; knownPID stands in for a PID the backend cannot report
-// (a rejoined process, whose PID the record holds).
-func (r *Runner) attachMCP(id, token string, env map[string]string, cwd string, knownPID int) *MCPSession {
+// its URL. env is the ws-mcp entry's environment, cwd the harness's working
+// directory, and harness the record's backend identity. knownPID stands in for
+// a PID the backend cannot report (a rejoined process, whose PID the record
+// holds).
+func (r *Runner) attachMCP(id, token string, env map[string]string, cwd string, knownPID int, harness string) *MCPSession {
 	restore := token != ""
 	if !restore {
 		token = newMCPToken()
@@ -130,6 +131,7 @@ func (r *Runner) attachMCP(id, token string, env map[string]string, cwd string, 
 				pid = knownPID
 			}
 			t.hello = mcpHello(harnessEnv, t.env, t.cwd, pid, version)
+			t.hello.Harness = harness
 			close(t.ready)
 		},
 	}

@@ -29,7 +29,7 @@ func (c *conv) restoreWorkerMCP() {
 		c.mcpStale = true
 		return
 	}
-	session := c.r.attachMCP(rec.ReplyID, rec.MCPToken, rec.MCPEnv, rec.workDir(), rec.HostPID)
+	session := c.r.attachMCP(rec.ReplyID, rec.MCPToken, rec.MCPEnv, rec.workDir(), rec.HostPID, rec.Backend)
 	if session != nil {
 		session.Started(c.workerMCPEnv, rec.HostPID)
 		c.workerMCPEnv = nil

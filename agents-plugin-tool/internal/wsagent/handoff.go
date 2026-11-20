@@ -309,6 +309,11 @@ func resumeCommand(rec Record, sessionDir string) string {
 			return ""
 		}
 		return cd + "claude --resume " + shellQuote(rec.SessionID)
+	case BackendAgy:
+		if rec.SessionID == "" {
+			return ""
+		}
+		return cd + "agy --conversation " + shellQuote(rec.SessionID)
 	case BackendPi:
 		file := rec.SessionFile
 		if file == "" {
