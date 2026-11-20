@@ -424,6 +424,39 @@ Verification (Go tests):
   GOTOOLCHAIN=local go test -count=1 -run 'Tracker|Asset'
   ./internal/wsdashboard` (one package passed, zero failed, for each command).
 
+#### Edition (fd021c0) - 2026-11-20
+
+- Kept old/new assign verdicts aligned after an org head change by judging an
+  existing org rule's overlap from its assign-time root, while extension alone
+  follows the current head. A concurrently folded head change now also sets the
+  rule's current root immediately without moving its id or consent request.
+- Bare `item.unassign` now closes all of the actor's rules and records before a
+  single re-extension of surviving rules. Root-qualified unassign and
+  `item.return` re-extension paths are covered explicitly, including the
+  removed-creator admin stand-in case.
+- Personal `item.uncc` exclusions now belong to the item and apply to every
+  current and future org registration until a personal `item.cc` clears them.
+  Checkpoints own the new exclusion map.
+- Added `RuleView.assignRoot` beside the current `root` (`view.go` lines
+  262-276 and 910-915), allowing Phase 2 to form root-qualified unassign
+  payloads without parsing rule ids. This view-only additive field is T0 for
+  field-tolerant old readers; the existing org event and target behavior stays
+  T1.
+- Indexed active org CC registrations by item during view projection and
+  cached each org's member scope once per roles refresh event; both indexes are
+  in-memory only and add no file I/O or persisted state.
+- Closed the remaining Phase 1 test gaps: both concurrent member-removal
+  orders, incremental/full conflict parity, joined newcomers, nearest-parent
+  fallback after child-org removal, vacant registration cleanup, old-reader
+  `item.uncc` no-op behavior, and a real org-ignoring target check/fold path.
+- Verification passed: `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test
+  -count=1 ./internal/wstracker`; `GOPROXY=off GOSUMDB=off
+  GOTOOLCHAIN=local go test -count=1 -run 'Tracker|Asset'
+  ./internal/wsdashboard`; `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test
+  -count=1 -run 'TestTrackerProjectionSummaryContract|TestTrackerProjectionDetailVersions'
+  ./cmd/ws-mcp`; native `go vet ./internal/wstracker ./cmd/ws-mcp`; and the
+  same vet command with `GOOS=windows`.
+
 ### Phase 2: Org management in the org-chart editor and org entries on items
 
 Implement Decisions 4, 8-13, 18 (client-side id minting) and 20 in the
