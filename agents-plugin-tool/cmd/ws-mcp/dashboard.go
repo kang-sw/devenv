@@ -126,6 +126,7 @@ func dashboardCommand(args []string) {
 		Sessions:       sessions,
 		Worktrees:      sessions,
 		MailWake:       wswake.Mailbox,
+		AgyCommand:     wsagent.AgyBackend{}.ResolveCommand,
 		Agents:         agents,
 		LeadNudges:     nudges,
 		Tracker:        &dashboardTracker{h: tracker, err: trackerErr, unregistered: func() { support.CloseUnregistered() }},

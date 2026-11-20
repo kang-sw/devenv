@@ -272,6 +272,12 @@ func TestHarnessCommandElsewhereIsUnchanged(t *testing.T) {
 	if prog, pre, err := harnessCommand("/opt/pi.cmd", "pi"); err != nil || prog != "/opt/pi.cmd" || pre != nil {
 		t.Errorf("a set command passes through unresolved, got %q %q %v", prog, pre, err)
 	}
+	if prog, pre, err := (AgyBackend{Command: "/opt/agy"}).ResolveCommand(); err != nil || prog != "/opt/agy" || pre != nil {
+		t.Errorf("AgyBackend.ResolveCommand override: got %q %q %v", prog, pre, err)
+	}
+	if _, _, err := (AgyBackend{}).ResolveCommand(); !errors.Is(err, exec.ErrNotFound) {
+		t.Errorf("AgyBackend.ResolveCommand missing binary: got %v, want ErrNotFound", err)
+	}
 }
 
 // TestHarnessStartsGoThroughTheShimUnwrap: every hosted start site refuses a

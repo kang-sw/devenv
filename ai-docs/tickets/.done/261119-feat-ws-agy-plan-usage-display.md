@@ -9,6 +9,7 @@ sage-review-completeness: completed
 sage-review-design: completed
 sage-review-design-reviewed: a90f0331abaed07c
 sage-review-completeness-reviewed: a90f0331abaed07c
+completed: 2026-11-20
 ---
 
 # agy plan usage display (CLI /usage)
@@ -390,3 +391,19 @@ and verification:
       cleared on close.
   - A UI capture of the plan-usage gutter and popover showing both `agy` groups
     alongside Claude and Codex.
+
+### Result (ef6b384) - 2026-11-20
+
+- **Fetcher, store, and T0 persistence (`c7c231c`, `ef6b384`):**
+  - Added `(AgyBackend).ResolveCommand()` in `agents-plugin-tool/internal/wsagent/agy.go` (delegating to `harnessCommand(b.Command, "agy")`) and injected it via `DaemonOptions.AgyCommand` from `agents-plugin-tool/cmd/ws-mcp/dashboard.go` so `wsdashboard` avoids a cyclic import and daemon test fixtures stay isolated from any host `agy` binary.
+  - Added `plan_usage_agy.go`, `plan_usage_agy_unix.go`, and `plan_usage_agy_windows.go` implementing `agy -p /usage --output-format json --print-timeout 20s` with `AGY_CLI_DISABLE_AUTO_UPDATE=true`, null stdin, 30s context timeout + process-tree termination (`execjob.KillTree`), Windows `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | HideWindow`, and a mutex-guarded 512 KiB combined stdout+stderr cap (`cappedOutput`).
+  - Implemented D7 bucket mapping (`5h` -> `five_hour`, `weekly` -> `seven_day`, clamped `percent` rounded to remove float noise, malformed-bucket drop, `Disabled` flag), D3/D13 Orca safety latches (process-lifetime billed-turn latch on `num_turns > 0` or non-empty `conversation_id`, daemon-lifetime auth-required hold on stderr match), and D2/D11/D14 ~10-minute spawn-start debounce triggered only on `/rail/usage?refresh=1`.
+  - Stored `agy` cache in `plan-usage-agy.json` (byte-identical skip) and observations in `plan-usage-agy-history.json` (14-day / 5000-sample pruning, fixed ASCII group keys `gemini` and `claude_gpt`). Left `plan-usage.json` and `plan-usage-history.json` unchanged (T0). Emitted `/rail/usage?history=1` `agyHistory` only when `agy` entries are present so non-`agy` responses keep exact backward shape parity.
+  - Added fake-`agy` unit tests (`plan_usage_agy_test.go`, temp `HOME` + `PATH`), T0 non-destruction compatibility coverage (`plan_usage_compat_test.go`), and `ResolveCommand` tests (`cmdshim_test.go`).
+- **UI gutter, popover, i18n, and browser capture (`7aa7fe5`):**
+  - Updated `assets/usage.js` and `assets/usage.css` to render per-group `agy` entries (`Gemini Models` / footer `Gemini`, `Claude and GPT models` / footer `Claude/GPT`) with the shared `agy` badge, compact two-line `.usage-group` with visible observation age inside the 34px single-row handle, disabled buckets omitted from footer and dimmed in popover (`.usage-disabled` / `.usage-disabled-tag`), per-group history isolation via `(harness, group, kind)`, localized `"sign-in required"` status, and D15 32s cache-only follow-up timer cleared on close.
+  - Added `js.usage.signinrequired` and `js.usage.disabled` across all 11 locale tables under `internal/wsi18n/tables/`.
+  - Added Node tests in `usage.test.js` and `usage-trend.test.js`, plus a Chromium UI capture harness in `testdata/usage-agy.browser.cjs` (dark/light gutter + popover verified).
+- **Review & verification:**
+  - Independent `code-review-lite` over `d1aa3aa..7aa7fe5` found 0 Critical, 0 Important, and 1 Minor (`cappedOutput` unlocked read after `cmd.Run()`), fixed in `ef6b384`.
+  - Verified green after `ef6b384`: host and `GOOS=windows` `go vet` (`./internal/wsdashboard ./internal/wsagent ./cmd/ws-mcp`), `go test -race -count=1 -run 'TestPlanUsageAgy' ./internal/wsdashboard`, `go test -count=1 -run 'TestPlanUsage|TestCSS|TestOrbitCSS|TestAsset' ./internal/wsdashboard`, `go test -count=1 -run 'TestHarnessCommand' ./internal/wsagent`, `go test -count=1 ./internal/wsi18n`, `node --test` on `usage-axis.test.js`, `usage-trend.test.js`, and 17/17 targeted tests in `usage.test.js` (6 pre-existing unrelated legacy SVG chart tests on `develop` untouched), and Playwright Chromium `usage-agy.browser.cjs` capture.

@@ -31,7 +31,16 @@ func usageQueryInterval(force bool) time.Duration {
 // queues behind queryMu. Only a store with nothing to show (no cached and no
 // persisted GPT entry) probes inline, so a first page still gets a value.
 func (s *planUsageStore) refresh(ctx context.Context, force bool) {
+	// agy probes run strictly on user-triggered popover refreshes (force),
+	// never inline and never on ordinary page polls or visibility changes.
+	if force {
+		s.refreshAgy()
+	}
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
 	if s.gpt.AsOf == 0 && s.gpt.Status == "" && len(s.gpt.Windows) == 0 {
 		s.mu.Unlock()
 		s.query(ctx, force)
@@ -41,12 +50,16 @@ func (s *planUsageStore) refresh(ctx context.Context, force bool) {
 		s.mu.Unlock()
 		return
 	}
+	parentCtx := s.lifetimeCtx
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
 	s.probing = true
 	s.probes.Add(1)
 	s.mu.Unlock()
 	go func() {
 		defer s.probes.Done()
-		s.query(context.Background(), force)
+		s.query(parentCtx, force)
 		s.mu.Lock()
 		s.probing = false
 		s.mu.Unlock()
@@ -75,6 +88,9 @@ func (s *planUsageStore) query(ctx context.Context, force bool) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
 	if err != nil {
 		s.gpt.Status = "usage unavailable"
 		if !codex && err == errPiExpired {
