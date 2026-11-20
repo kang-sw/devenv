@@ -1,6 +1,6 @@
 {
   "ws": {
-    "archive_sha256": "ab788c66d402ff893dce7abf5f004ab8ddf7007158382b56a546f05108d87811",
+    "archive_sha256": "c771d5952edb9beef3ed252974d1e060bc403438b86a83430f155cdbe481811c",
     "files": {
       ".claude-plugin/plugin.json": "82cdba8cbd36f841a6d3a54def2c7d1df4701ed36af2e275c8a3c0234246acc6",
       ".codex-plugin/hooks.json": "e3f3ea60f82fb0795c63bf54b9208647f39cb3779f050d1c755fabdc8a434490",
@@ -43,7 +43,7 @@
       "rsrc/delegate-report.md": "5e65dbae4e07b002152cdd16829dee616652a561c9df82e57ab6ae2c4c0e1f00",
       "rsrc/delegate-sample/delegate-sample.md": "b727304ac2039a36ed742d9867de4885602abdc2014a2732e25ede64d3c14b9d",
       "rsrc/executor-wrapup.md": "c4e5a8db074933e89bbdff8fd1162bd45c9650dbe075f7b602189ab7ec1342d5",
-      "rsrc/explore/explore.md": "9b732d81f459802f64346c7b1de2d0ca4ac971d931d9994a5131046e7dd9397d",
+      "rsrc/explore/explore.md": "58a4678be6fad743422ee1cebaf6780805447e02b5571039880d9e7690014a11",
       "rsrc/fresh-read-doc-auditor/fresh-read-doc-auditor.md": "40c5a3d88738e1e994202c36422e52bb8fbde666b0f8cfade5a3eed021a8a8f5",
       "rsrc/fresh-reader-audit/fresh-reader-audit.md": "dcc96e269f1b29643f2957a24e5d26f56eeba43d64afcb9ef08a853ebcac4f48",
       "rsrc/impl-playbook.md": "2d39f361920a5afc268d5fe23d8237b56adf0dc38968c1011238e7a9ee7a2e99",
@@ -68,7 +68,7 @@
       "rsrc/lead-workflow-manual/native-spawn-binding.claude.md": "fc7258226abd15ad2baef2ef8a361f6777d8390868a595853f61812def0cf310",
       "rsrc/lead-workflow-manual/native-spawn-binding.codex.md": "ea1977984de016a95df292c3384e93982aa67b12bbd5e8850c7ed792acbdf284",
       "rsrc/lead-workflow-manual/native-spawn-binding.md": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "rsrc/manifest.json": "7bf51bcf79c84a433b53c9b3abac651828b1e40da970abcbffc4c5279f3cef3a",
+      "rsrc/manifest.json": "fb256a6cda20c0d7dc3434233de5fb6e1ef708affa68e21f754a66621cce66ab",
       "rsrc/reference-discovery/reference-discovery.md": "4492f45ecff14ec454754cd9af4775b33a0df1f9cd5cf705b3f75bad75defba2",
       "rsrc/review-config/review-config.md": "dfbbf5be52c83cfb4f86edb862f8e7b135afcc7f5efb9433e808d08ac37ff53b",
       "rsrc/review-handler/review-handler.md": "485399d9c8e491a1c33c14338da768c1a61451d6a9b24042f41571ff5ee313f6",
@@ -115,7 +115,7 @@
     }
   },
   "wsflow": {
-    "archive_sha256": "99aaf32d988f3a069144e1e93fc5fcc158e5127af76d8218773ca8aec7868a2b",
+    "archive_sha256": "6502d7861528193faa7313270aa3a6b124091b55577958ca815528bb48231083",
     "files": {
       ".claude-plugin/plugin.json": "302f8d8a2115d153cd97bfda17a556d4022b6dec47119ae441a833b522d890b1",
       ".codex-plugin/plugin.json": "ddaab57098d596ea3fe9a6dbc34dd51a8e2f7c0601bd21530a12676c51a0a745",
@@ -157,7 +157,7 @@
       "rsrc/delegate-report.md": "5e65dbae4e07b002152cdd16829dee616652a561c9df82e57ab6ae2c4c0e1f00",
       "rsrc/delegate-sample/delegate-sample.md": "b727304ac2039a36ed742d9867de4885602abdc2014a2732e25ede64d3c14b9d",
       "rsrc/executor-wrapup.md": "c4e5a8db074933e89bbdff8fd1162bd45c9650dbe075f7b602189ab7ec1342d5",
-      "rsrc/explore/explore.md": "9b732d81f459802f64346c7b1de2d0ca4ac971d931d9994a5131046e7dd9397d",
+      "rsrc/explore/explore.md": "58a4678be6fad743422ee1cebaf6780805447e02b5571039880d9e7690014a11",
       "rsrc/fresh-read-doc-auditor/fresh-read-doc-auditor.md": "40c5a3d88738e1e994202c36422e52bb8fbde666b0f8cfade5a3eed021a8a8f5",
       "rsrc/fresh-reader-audit/fresh-reader-audit.md": "dcc96e269f1b29643f2957a24e5d26f56eeba43d64afcb9ef08a853ebcac4f48",
       "rsrc/impl-playbook.md": "2d39f361920a5afc268d5fe23d8237b56adf0dc38968c1011238e7a9ee7a2e99",
@@ -182,7 +182,7 @@
       "rsrc/lead-workflow-manual/native-spawn-binding.claude.md": "fc7258226abd15ad2baef2ef8a361f6777d8390868a595853f61812def0cf310",
       "rsrc/lead-workflow-manual/native-spawn-binding.codex.md": "ea1977984de016a95df292c3384e93982aa67b12bbd5e8850c7ed792acbdf284",
       "rsrc/lead-workflow-manual/native-spawn-binding.md": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "rsrc/manifest.json": "7bf51bcf79c84a433b53c9b3abac651828b1e40da970abcbffc4c5279f3cef3a",
+      "rsrc/manifest.json": "fb256a6cda20c0d7dc3434233de5fb6e1ef708affa68e21f754a66621cce66ab",
       "rsrc/reference-discovery/reference-discovery.md": "4492f45ecff14ec454754cd9af4775b33a0df1f9cd5cf705b3f75bad75defba2",
       "rsrc/review-config/review-config.md": "dfbbf5be52c83cfb4f86edb862f8e7b135afcc7f5efb9433e808d08ac37ff53b",
       "rsrc/review-handler/review-handler.md": "485399d9c8e491a1c33c14338da768c1a61451d6a9b24042f41571ff5ee313f6",

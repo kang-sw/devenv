@@ -675,6 +675,33 @@ func TestAgentSystemPromptReachesEveryStart(t *testing.T) {
 	agentRefused(t, err, http.StatusBadRequest, "system_prompt_path")
 }
 
+func TestAgentRenderedPlaybookPromptReachesChildAndKeepsCaps(t *testing.T) {
+	h, _ := agentHarness(t, nil)
+	body := "# Explore Worker\n\nInvestigate the cache and report evidence."
+	path := filepath.Join(h.root, "rendered-explore.md")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a, _ := h.agentRunning(h.leadCaller(), AgentSpawnRequest{
+		Prompt:           "explore the cache",
+		Tier:             "medium",
+		Authority:        "workdir-write",
+		SystemPromptPath: "rendered-explore.md",
+	})
+	text := instructionsOf(t, h.backend.start(0))
+	want := body + "\n\nYour ws session key is `" + h.record(a).WSKey + "`. Pass it as the `session_key` argument of every ws tool call. " +
+		"Your direct parent's mailbox reply address is `id:" + leadParent.ReplyID + "`; send it reports or questions with `mailbox.send`.\n"
+	if text != want {
+		t.Fatalf("the rendered playbook body was not delivered exactly: %q, want %q", text, want)
+	}
+
+	_, err := h.runner.AgentSpawn(h.holderOf(a), AgentSpawnRequest{Prompt: "x", Tier: "small", Authority: "full"})
+	agentRefused(t, err, http.StatusForbidden, "authority full is above this session's own level workdir-write")
+	_, err = h.runner.AgentSpawn(h.holderOf(a), AgentSpawnRequest{Prompt: "x", Tier: "large", Authority: "workdir-write"})
+	agentRefused(t, err, http.StatusForbidden, `tier "large" is above this conversation's own tier "medium"`)
+}
+
 // TestAgentChildPromptCarriesNoLeadManual: an agent.spawn child's
 // appended prompt is its system prompt, its profile text, its key, and its
 // direct parent reply address, as before the lead manual: the daemon's lead
