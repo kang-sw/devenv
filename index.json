@@ -598,6 +598,9 @@
     "261120-feat-desktop-canary-release-channel": {
       "registered_at": "2026-11-20T14:11:51Z"
     },
+    "261120-feat-ws-agy-mcp-client-identity": {
+      "registered_at": "2026-11-20T14:24:39Z"
+    },
     "261120-feat-ws-dashboard-chat-agent-roster-hud": {
       "registered_at": "2026-11-20T14:14:08Z"
     },
