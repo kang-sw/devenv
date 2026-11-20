@@ -29,7 +29,7 @@ type node struct {
 	status, reason       string // applied | flagged | waiting
 	causalStatus         string // verdict before final-fold concurrency flags
 	ignored              bool
-	clash                bool // flagged only by the fold-order label-name clash; still in later causal-past checks
+	clash                bool // flagged only by a fold-order list clash; still in later causal-past checks
 	markers              []marker
 	superseded           []supersession
 	thread, parentThread string
@@ -282,13 +282,13 @@ func (r *replayed) verdicts(all []*node) {
 }
 
 func (r *replayed) verdictsFrom(all []*node, start int) {
-	// lf folds only the applied label-list events, in fold order: a label
-	// name two admins add or rename to concurrently passes both causal
-	// checks, and the later one in fold order is flagged here, so the list
-	// never holds a name twice.
+	// lf folds applied label/org-list events and member lifecycle events in fold order.
+	// Concurrent writers can each pass their causal check; the later conflicting
+	// list event is flagged here so names and org heads remain unique and a
+	// removed member cannot become an org head.
 	lf := newState(r.g, r.hb, false)
 	for _, n := range r.order[:start] {
-		if n.causalStatus == "applied" && isLabelList(n.typ) {
+		if n.causalStatus == "applied" && isFoldOrderList(n.typ) {
 			lf.apply(n)
 		}
 	}
@@ -304,12 +304,13 @@ func (r *replayed) verdictsFrom(all []*node, start int) {
 			if !isIdentity(n.typ) {
 				if rej := r.stateBeforeMode(n, true).check(n); rej != "" {
 					n.status, n.reason = "flagged", string(rej)
-				} else if isLabelList(n.typ) {
-					if rej := lf.labelClash(n); rej != "" {
-						n.status, n.reason, n.clash = "flagged", string(rej), true
-					} else {
-						lf.apply(n)
-					}
+				}
+			}
+			if n.status == "applied" && isFoldOrderList(n.typ) {
+				if rej := lf.listClash(n); rej != "" {
+					n.status, n.reason, n.clash = "flagged", string(rej), true
+				} else {
+					lf.apply(n)
 				}
 			}
 		case wsledger.Ignored:
@@ -424,6 +425,26 @@ func (r *replayed) stateBeforeMode(n *node, causal bool) *state {
 // isLabelList reports an event that changes the store's label list.
 func isLabelList(t string) bool {
 	return t == TypeAddLabel || t == TypeEditLabel || t == TypeRemoveLabel
+}
+
+func isOrgList(t string) bool { return t == TypeOrgSet || t == TypeOrgRemove }
+
+func isFoldOrderList(t string) bool {
+	return isLabelList(t) || isOrgList(t) || t == wsledger.TypeMemberJoin || t == wsledger.TypeRemoveMember
+}
+
+func (s *state) listClash(n *node) rejection {
+	if isLabelList(n.typ) {
+		return s.labelClash(n)
+	}
+	switch n.typ {
+	case TypeOrgSet:
+		return s.checkOrgSet(n.p)
+	case TypeOrgRemove:
+		_, r := s.needOrg(n.p.str("org"), true)
+		return r
+	}
+	return ""
 }
 
 // labelClash is the rejection of a label add or rename whose name a label

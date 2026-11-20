@@ -21,7 +21,7 @@ import (
 // roots, so bare go test works without generated build assets. Tests with
 // synthetic resources select an explicit fixture checkout.
 //
-// It also defaults WS_CACHE_HOME to a throwaway temp dir so the file-backed
+// It also points WS_CACHE_HOME at a throwaway temp dir so the file-backed
 // session store (sessions/<key>/ under the cache root) never reads or writes the
 // developer's real ~/.cache during the suite. Tests that assert specific cache
 // paths still override it per-test with t.Setenv (last write wins).
@@ -40,15 +40,13 @@ func TestMain(m *testing.M) {
 }
 
 func runTestMain(m *testing.M) int {
-	if os.Getenv("WS_CACHE_HOME") == "" {
-		dir, err := os.MkdirTemp("", "ws-mcp-test-cache-")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "TestMain: create temp cache home: %v\n", err)
-			return 1
-		}
-		defer os.RemoveAll(dir)
-		_ = os.Setenv("WS_CACHE_HOME", dir)
+	cacheHome, err := os.MkdirTemp("", "ws-mcp-test-cache-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: create temp cache home: %v\n", err)
+		return 1
 	}
+	defer os.RemoveAll(cacheHome)
+	_ = os.Setenv("WS_CACHE_HOME", cacheHome)
 	configHome, err := os.MkdirTemp("", "ws-mcp-test-config-")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "TestMain: create temp config home: %v\n", err)

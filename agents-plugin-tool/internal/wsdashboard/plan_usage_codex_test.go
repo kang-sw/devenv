@@ -169,7 +169,7 @@ func TestPlanUsageCodexHomeSelection(t *testing.T) {
 }
 
 func TestPlanUsageCodexRESTWindows(t *testing.T) {
-	for _, seconds := range []int{604799, 604800, 604801, 604859, 604860, 300, 0, -604800} {
+	for _, seconds := range []int{17999, 18000, 18001, 604799, 604800, 604801, 604859, 604860, 300, 0, -604800} {
 		for _, slot := range []string{"primary_window", "secondary_window"} {
 			t.Run(fmt.Sprintf("%s-%d", slot, seconds), func(t *testing.T) {
 				s := usageTestStore(t)
@@ -179,15 +179,32 @@ func TestPlanUsageCodexRESTWindows(t *testing.T) {
 					return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
 				})
 				e, err := s.queryCodex(context.Background())
-				if seconds == 604800 {
+				switch seconds {
+				case 18000:
+					if err != nil || len(e.Windows) != 1 || e.Windows[0].Kind != "five_hour" || e.Windows[0].ResetsAt != 2100000000000 {
+						t.Fatal("five_hour window not mapped")
+					}
+				case 604800:
 					if err != nil || len(e.Windows) != 1 || e.Windows[0].Kind != "seven_day" || e.Windows[0].ResetsAt != 2100000000000 {
 						t.Fatal("weekly window not mapped")
 					}
-				} else if err != errPlanUsage {
-					t.Fatal("non-exact duration mapped as weekly")
+				default:
+					if err != errPlanUsage {
+						t.Fatal("non-exact duration mapped as codex quota")
+					}
 				}
 			})
 		}
+	}
+	// Both 5h and 7d windows order five_hour before seven_day regardless of slot order.
+	sBoth := usageTestStore(t)
+	setCodexUsageAuth(t, sBoth, `{"auth_mode":"chatgpt","tokens":{"access_token":"fake-access"}}`)
+	sBoth.client.Transport = usageRoundTrip(func(r *http.Request) (*http.Response, error) {
+		body := `{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":41,"limit_window_seconds":604800,"reset_at":2100000000},"secondary_window":{"used_percent":18,"limit_window_seconds":18000,"reset_at":2099000000}}}`
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})
+	if e, err := sBoth.queryCodex(context.Background()); err != nil || len(e.Windows) != 2 || e.Windows[0].Kind != "five_hour" || e.Windows[1].Kind != "seven_day" {
+		t.Fatalf("both windows ordering failed: %+v %v", e, err)
 	}
 	// The existing Pi path deliberately truncates seconds to minutes.
 	s := usageTestStore(t)

@@ -2,6 +2,7 @@ import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import { ENABLED_KEY, OWN_SETTLE_MS } from './captions'
 import { CONTINUATION_WINDOW_MS, SETTLE_MS, UNOBSERVED_REASON } from './compaction'
+import { HARNESS_PID_ARGV } from './hosted'
 import { KNOB } from './register'
 import {
   ADVISORY_KEY,
@@ -59,14 +60,21 @@ type Opts = {
   connect?: Connect
   /** The caption switch (claude.display_summary_enabled) reads true. */
   captions?: boolean
+  /** Hosted-session env + matching registration PID so resolveHostedMode returns hosted. */
+  hosted?: boolean
 }
 
 /** The advisory knob on. */
 const ON = { compaction: true } as const
+const HOSTED_ROW = '/state/sessions/hosted/registration.json'
+const HOSTED_PID = 4242
 
 function world(on: On, opts: Opts = {}) {
   const clock = mock.clock(on)
-  mock.env(on, {})
+  mock.env(
+    on,
+    opts.hosted ? { WS_HOSTED_SESSION: '1', WS_HOSTED_SESSION_KEY: 'hosted-key', WS_HOSTED_SESSION_ROW: HOSTED_ROW } : {},
+  )
   const w = {
     clock,
     plugin: '',
@@ -143,11 +151,16 @@ function world(on: On, opts: Opts = {}) {
   on('session.measure', ($, e) => ({ changed: e.changed }))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', ($, e) => ({ text: e.answer }))
-  on('process.run', () =>
-    opts.processOk === false
-      ? { deny: 'no host commands on this surface' }
-      : { value: { exitCode: 0, stdout: 'Python 3.12.0\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } },
+  on('fs.read', ($, e, next) =>
+    opts.hosted && e.path === HOSTED_ROW ? { value: JSON.stringify({ reply_id: 'hosted', hosted: true, host_pid: HOSTED_PID }) } : next(e),
   )
+  on('process.run', ($, e) => {
+    if (opts.processOk === false) return { deny: 'no host commands on this surface' }
+    if (opts.hosted && e.argv.join(' ') === HARNESS_PID_ARGV.join(' ')) {
+      return { value: { exitCode: 0, stdout: `${HOSTED_PID}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    return { value: { exitCode: 0, stdout: 'Python 3.12.0\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
   on('tool.register', ($, e, next) => {
     w.plugin = next.origin.plugin
     if (e.name === opts.refuseRegister) return { deny: 'refused by the test' }
@@ -888,4 +901,11 @@ test('captions on: a session end during the settle submits nothing', async ($, o
   await $.session.end({ reason: 'clear', sessionId: 'sess-1', resume: undefined as never })
   await settle(w)
   expect(w.own).toEqual([])
+})
+
+test('hosted session: plugin advisories and milestones stay off even when the advisory knob is on, while the lever still works', async ($, on) => {
+  const w = world(on, { ...ON, hosted: true })
+  await start($, w)
+  expect(w.knobReads).toEqual([])
+  await expectInert($, w)
 })

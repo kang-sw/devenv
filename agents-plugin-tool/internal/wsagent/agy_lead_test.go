@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,6 +42,23 @@ func newAgyLeadHarness(t *testing.T) (*leadHarness, *agyFake) {
 	f := &agyFake{h: h}
 	h.holders.acp = f.answer
 	return h, f
+}
+
+func TestAgyActivityCallbackOnSettledHostedLeadTurn(t *testing.T) {
+	h, f := newAgyLeadHarness(t)
+	var calls atomic.Int64
+	h.opts.AgyActivity = func() { calls.Add(1) }
+	h.startAt("http://127.0.0.1:1")
+	id := h.lead(BackendAgy, LeadOptions{}).ID
+	f.replyID = id
+	h.send(id, "hello")
+	holder := h.holder(id)
+	eventually(t, "the prompt", func() bool { return len(agyPromptIDs(h, holder)) == 1 })
+	h.holders.out(holder, `{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"`+agyPromptIDs(h, holder)[0]+`"}`)
+	h.idle(id)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("settled hosted lead raised %d activity callbacks, want 1", got)
+	}
 }
 
 // config is the session's configOptions for its model, with option id's

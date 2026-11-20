@@ -1,12 +1,12 @@
 {
   "ws": {
-    "archive_sha256": "f05d40d37bb5e6d36644f85d0f39e72d77428e7133ee5fc61191c533fc3c95fb",
+    "archive_sha256": "ab788c66d402ff893dce7abf5f004ab8ddf7007158382b56a546f05108d87811",
     "files": {
       ".claude-plugin/plugin.json": "82cdba8cbd36f841a6d3a54def2c7d1df4701ed36af2e275c8a3c0234246acc6",
       ".codex-plugin/hooks.json": "e3f3ea60f82fb0795c63bf54b9208647f39cb3779f050d1c755fabdc8a434490",
       ".codex-plugin/plugin.json": "849575abc8732f182fe94b57938665a2a9e39f080c09937483dc387408f2e9b2",
       ".mcp.json": "a81797f2a1422acfe8fdf28a4bc8d50486260711af771e9c75dc4054261d460c",
-      "agy-config-manifest.json": "50f1db5a394ea64b7db524ef42f67cd8b49fb02626914e991dd44f8856fa374f",
+      "agy-config-manifest.json": "f42c28f901cd960c27c989e2b03e5874e8f42fb7db3ad336607a25eabec99c3b",
       "bin/ws-cli": "64969b4f3f810a6628e43876c0ee67856c9e0abf9bb19d7dd31540c156dd7fcc",
       "bin/ws-cli.cmd": "747815bea96b806398e052dfb790318cb4f370d59f6ac3519a417ae56bf38917",
       "bin/ws-mcp-launcher.py": "60e4352ef1effcd01b90454e0a5ebf2d57397310e93569904e0bdc0cd3bdc8c4",
@@ -26,7 +26,7 @@
       "hooks/claude-mod/manual.ts": "45d3a3db85dba6c025aa0efbc053b7e2378a751a506c699a8d9fc590be7b31c1",
       "hooks/claude-mod/preload.ts": "debaaf35e23027eebe045fb1af0b95035a77f479afef6602655583c9e9cb22d8",
       "hooks/claude-mod/reconnect.ts": "b689cbf45d3f5045d0179290ef61d8ad28cd2a368d8faa2331ce4234243670ff",
-      "hooks/claude-mod/register.ts": "06c2e52ced23bd6c9d54fbc23eaa39b865550cad4b54fa47e3047eb291af80cb",
+      "hooks/claude-mod/register.ts": "00928ed71c78129727fa33521e4bd157b05c4896a7c3c962a442356f2910cc6f",
       "hooks/claude-mod/settings.ts": "5832173684c2b80ed44606566f4af7e8437f269f46eb38d0e2d3e87f6ba98a4b",
       "hooks/claude-mod/timing.ts": "aaa921d2164afb64508e758786d01b10c622c8554c1d655d216e81ccacde7ba6",
       "hooks/claude-mod/wake.ts": "78c00f1eea5468c6a9a82a45d97285a38fbba4a4d9a769838f5625d80cf0a402",
@@ -115,7 +115,7 @@
     }
   },
   "wsflow": {
-    "archive_sha256": "9c3de4d03f2ad6b910796fd729b4b603198d65551bf7ad2da687c17603376245",
+    "archive_sha256": "99aaf32d988f3a069144e1e93fc5fcc158e5127af76d8218773ca8aec7868a2b",
     "files": {
       ".claude-plugin/plugin.json": "302f8d8a2115d153cd97bfda17a556d4022b6dec47119ae441a833b522d890b1",
       ".codex-plugin/plugin.json": "ddaab57098d596ea3fe9a6dbc34dd51a8e2f7c0601bd21530a12676c51a0a745",
@@ -140,7 +140,7 @@
       "hooks/claude-mod/manual.ts": "45d3a3db85dba6c025aa0efbc053b7e2378a751a506c699a8d9fc590be7b31c1",
       "hooks/claude-mod/preload.ts": "debaaf35e23027eebe045fb1af0b95035a77f479afef6602655583c9e9cb22d8",
       "hooks/claude-mod/reconnect.ts": "b689cbf45d3f5045d0179290ef61d8ad28cd2a368d8faa2331ce4234243670ff",
-      "hooks/claude-mod/register.ts": "06c2e52ced23bd6c9d54fbc23eaa39b865550cad4b54fa47e3047eb291af80cb",
+      "hooks/claude-mod/register.ts": "00928ed71c78129727fa33521e4bd157b05c4896a7c3c962a442356f2910cc6f",
       "hooks/claude-mod/settings.ts": "5832173684c2b80ed44606566f4af7e8437f269f46eb38d0e2d3e87f6ba98a4b",
       "hooks/claude-mod/timing.ts": "aaa921d2164afb64508e758786d01b10c622c8554c1d655d216e81ccacde7ba6",
       "hooks/claude-mod/wake.ts": "78c00f1eea5468c6a9a82a45d97285a38fbba4a4d9a769838f5625d80cf0a402",

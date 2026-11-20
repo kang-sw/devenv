@@ -127,6 +127,9 @@ type DaemonOptions struct {
 	// AgyCommand resolves the agy CLI program and leading arguments for
 	// user-triggered /usage probes without spawning. Nil skips agy probes.
 	AgyCommand func() (string, []string, error)
+	// CardBound reports whether replyID is bound to a subordinate whiteboard
+	// agent card whose Record.Parent stays unset; nil defaults to false.
+	CardBound func(replyID string) bool
 
 	// bindHost overrides the address the daemon binds, so a test runs LAN
 	// mode on loopback; empty derives it from LAN.
@@ -334,7 +337,8 @@ type Daemon struct {
 	httpReplay   atomic.Uint64
 	// web is the web card targets and their proxy listeners
 	// (webcard_proxy.go).
-	web *webRegistry
+	web       *webRegistry
+	cardBound func(replyID string) bool
 
 	closeOnce sync.Once
 	stop      chan struct{}
@@ -424,6 +428,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		listener:        listener,
 		log:             logw,
 		agents:          opts.Agents,
+		cardBound:       opts.CardBound,
 		leadNudges:      opts.LeadNudges,
 		beforeUnlock:    opts.BeforeUnlock,
 		mailWake:        opts.MailWake,
@@ -685,6 +690,25 @@ func (d *Daemon) agentChanged(replyID, _ string) {
 	d.stats.WakeAgent.Add(1)
 	d.broker.wake(replyID)
 	d.acks.poke(replyID)
+}
+
+// AgyActivity schedules a usage refresh after a hosted agy turn settles.
+// The handoff must not wait for the plan-usage store's lock.
+func (d *Daemon) AgyActivity() {
+	d.agyActivity(nil)
+}
+
+// agyActivity exposes completion of the lock-taking handoff to package tests.
+func (d *Daemon) agyActivity(done chan<- struct{}) {
+	if d.planUsage == nil {
+		return
+	}
+	go func() {
+		d.planUsage.refreshAgy()
+		if done != nil {
+			close(done)
+		}
+	}()
 }
 
 // poll fills the session index at once and then re-reads every registered

@@ -186,6 +186,66 @@ func (c *conv) loadCompactionThresholds() {
 	c.compactGen = gen
 }
 
+func (c *conv) compactMilestones(window float64) (m1, m2 float64, ok bool) {
+	if !c.compactAdvisoryEnabled || window <= 0 {
+		return 0, 0, false
+	}
+	soft := c.compactAdvisory.Point(window)
+	hard := c.compactHard.Point(window)
+	if math.IsInf(soft, 0) || math.IsInf(hard, 0) || !(hard > soft) {
+		return 0, 0, false
+	}
+	step := (hard - soft) / 3
+	return soft + step, soft + 2*step, true
+}
+
+func (c *conv) usageCompaction(window int64) *wslive.UsageCompaction {
+	if !c.compactLoaded || window <= 0 {
+		return nil
+	}
+	w := float64(window)
+	finite := func(v float64) int64 {
+		if math.IsInf(v, 0) || math.IsNaN(v) || v <= 0 {
+			return 0
+		}
+		return int64(math.Round(v))
+	}
+	soft := finite(c.compactAdvisory.Point(w))
+	hard := finite(c.compactHard.Point(w))
+	var milestones []int64
+	if m1, m2, ok := c.compactMilestones(w); ok {
+		milestones = []int64{int64(math.Round(m1)), int64(math.Round(m2))}
+	}
+	if soft == 0 && hard == 0 && len(milestones) == 0 {
+		return nil
+	}
+	return &wslive.UsageCompaction{
+		Soft:            soft,
+		Hard:            hard,
+		Milestones:      milestones,
+		AdvisoryEnabled: c.compactAdvisoryEnabled,
+	}
+}
+
+func (c *conv) disarmCompactionLatches() {
+	if c.compactTokens < c.compactAdvisory.Point(c.compactWindow) {
+		c.compactAdvised = false
+	}
+	if m1, m2, ok := c.compactMilestones(c.compactWindow); ok {
+		if c.compactTokens < m1 {
+			c.compactM1Issued = false
+		}
+		if c.compactTokens < m2 {
+			c.compactM2Issued = false
+		}
+	} else {
+		c.compactM1Issued, c.compactM2Issued = false, false
+	}
+	if c.compactTokens < c.compactHard.Point(c.compactWindow) {
+		c.compactHardIssued = false
+	}
+}
+
 // refreshCompaction lazily reloads thresholds when config.tune has modified a
 // compaction key since this conversation last loaded them. Steady-state checks
 // perform only an atomic load with zero file I/O.
@@ -198,12 +258,7 @@ func (c *conv) refreshCompaction() {
 	}
 	c.loadCompactionThresholds()
 	if c.compactUsageFresh && !c.compacting {
-		if c.compactTokens < c.compactAdvisory.Point(c.compactWindow) {
-			c.compactAdvised = false
-		}
-		if c.compactTokens < c.compactHard.Point(c.compactWindow) {
-			c.compactHardIssued = false
-		}
+		c.disarmCompactionLatches()
 	}
 }
 
@@ -222,12 +277,7 @@ func (c *conv) observeCompaction(ev wslive.Event) {
 	c.compactTokens, c.compactWindow = float64(*ctx.Tokens), float64(ctx.Window)
 	c.compactUsageFresh = true
 	c.refreshCompaction()
-	if c.compactTokens < c.compactAdvisory.Point(c.compactWindow) {
-		c.compactAdvised = false
-	}
-	if c.compactTokens < c.compactHard.Point(c.compactWindow) {
-		c.compactHardIssued = false
-	}
+	c.disarmCompactionLatches()
 }
 
 // checkUsageDropCompaction detects native compaction completion on harnesses
@@ -283,24 +333,49 @@ func (c *conv) compactIdle() bool {
 	}
 	if c.compactPending == nil && c.compactUsageFresh {
 		c.refreshCompaction()
-		if c.compactTokens >= c.compactHard.Point(c.compactWindow) && !c.compactHardIssued {
-			c.compactHardIssued, c.compactAdvised = true, true
+		hard := c.compactHard.Point(c.compactWindow)
+		if c.compactTokens >= hard && !c.compactHardIssued {
+			c.compactHardIssued, c.compactAdvised, c.compactM1Issued, c.compactM2Issued = true, true, true, true
 			if why := c.compactUnsupported(); why == "" {
 				c.compactPending = &compactRequest{}
 			} else {
 				c.setStatus(func() { c.lastErr = why })
 				if c.compactAdvisoryEnabled {
-					c.compactNote += fmt.Sprintf("Context usage is %.0f tokens (%.0f%%); hard point %.0f tokens (%.0f%%). Native compaction is unsupported: %s. Write durable state to your agenda before compacting.\n", c.compactTokens, c.compactTokens/c.compactWindow*100, c.compactHard.Point(c.compactWindow), c.compactHard.Point(c.compactWindow)/c.compactWindow*100, why)
+					c.compactNote += fmt.Sprintf("Context usage is %.0f tokens (%.0f%%); hard point %.0f tokens (%.0f%%). Native compaction is unsupported: %s. Write durable state to your agenda before compacting.\n", c.compactTokens, c.compactTokens/c.compactWindow*100, hard, hard/c.compactWindow*100, why)
 				}
 			}
 		} else if c.compactAdvisoryEnabled && !c.compactAdvised && c.compactTokens >= c.compactAdvisory.Point(c.compactWindow) {
 			c.compactAdvised = true
+			if m1, m2, ok := c.compactMilestones(c.compactWindow); ok {
+				if c.compactTokens >= m1 {
+					c.compactM1Issued = true
+				}
+				if c.compactTokens >= m2 {
+					c.compactM2Issued = true
+				}
+			}
 			point := c.compactAdvisory.Point(c.compactWindow)
 			if !math.IsInf(point, 0) {
 				if c.compactUnsupported() == "" {
 					c.compactNote += fmt.Sprintf("\nContext usage is %.0f tokens (%.0f%%); advisory point %.0f tokens (%.0f%%). Write durable state to your agenda, then call ws/compact at a safe boundary before continuing. No summary prose is requested.\n", c.compactTokens, c.compactTokens/c.compactWindow*100, point, point/c.compactWindow*100)
 				} else {
 					c.compactNote += fmt.Sprintf("\nContext usage is %.0f tokens (%.0f%%); advisory point %.0f tokens (%.0f%%). Write durable state to your agenda before compacting. No summary prose is requested.\n", c.compactTokens, c.compactTokens/c.compactWindow*100, point, point/c.compactWindow*100)
+				}
+			}
+		} else if m1, m2, ok := c.compactMilestones(c.compactWindow); ok {
+			which, point := 0, 0.0
+			if c.compactTokens >= m2 && !c.compactM2Issued {
+				c.compactM1Issued, c.compactM2Issued = true, true
+				which, point = 2, m2
+			} else if c.compactTokens >= m1 && !c.compactM1Issued {
+				c.compactM1Issued = true
+				which, point = 1, m1
+			}
+			if which > 0 {
+				if c.compactUnsupported() == "" {
+					c.compactNote += fmt.Sprintf("\nContext usage is %.0f tokens (%.0f%%); compaction reminder %d/3 (%.0f tokens, hard point %.0f tokens). Write durable state to your agenda, then call ws/compact at a safe boundary before continuing. No summary prose is requested.\n", c.compactTokens, c.compactTokens/c.compactWindow*100, which, point, hard)
+				} else {
+					c.compactNote += fmt.Sprintf("\nContext usage is %.0f tokens (%.0f%%); compaction reminder %d/3 (%.0f tokens, hard point %.0f tokens). Write durable state to your agenda before compacting. No summary prose is requested.\n", c.compactTokens, c.compactTokens/c.compactWindow*100, which, point, hard)
 				}
 			}
 		}
@@ -385,7 +460,7 @@ func (c *conv) compactEvent(ev wslive.Event) {
 		c.stopIdle()
 		c.compacting = true
 		c.compactUsageFresh = false
-		c.compactAdvised, c.compactHardIssued = true, true
+		c.compactAdvised, c.compactM1Issued, c.compactM2Issued, c.compactHardIssued = true, true, true, true
 	case wslive.CompactFailed:
 		c.compacting, c.compactResume = false, false
 	case wslive.CompactEnd:
@@ -398,7 +473,7 @@ func (c *conv) compactEvent(ev wslive.Event) {
 		// Only the next model turn can produce a fresh post-compaction sample.
 		c.compactAwaitTurn = true
 		c.compactPrevTokens = 0
-		c.compactAdvised, c.compactHardIssued, c.compactUsageFresh = false, false, false
+		c.compactAdvised, c.compactM1Issued, c.compactM2Issued, c.compactHardIssued, c.compactUsageFresh = false, false, false, false, false
 		c.compactNote = fmt.Sprintf("Your ws session key is `%s`. Context was compacted. Fresh session state is available through the lead-only ws workflow_state tool. Keep using this same key.\n", c.rec.WSKey)
 		if !c.r.opts.Backends[c.rec.Backend].CompactionProtocol().PromptPersists {
 			if c.rec.Lead {

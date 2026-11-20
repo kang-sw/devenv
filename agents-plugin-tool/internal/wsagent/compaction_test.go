@@ -1197,3 +1197,96 @@ func TestCompactionLiveReloadProjectShadowsGlobal(t *testing.T) {
 		t.Fatalf("clearing project override did not fall back to global 55%%: got %+v", c.compactHard)
 	}
 }
+
+func TestCompactionMilestonesAndUsageContext(t *testing.T) {
+	root := t.TempDir()
+	cfg := wsconfig.Options{CacheHome: t.TempDir(), ConfigHome: t.TempDir(), RepoRoot: root}
+	resolver := wsconfig.NewResolver(cfg, nil, nil, nil)
+	if err := resolver.Set("compaction.lead_advisory", "110k", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeGlobal}); err != nil {
+		t.Fatal(err)
+	}
+	if err := resolver.Set("compaction.lead_hard", "180k", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeGlobal}); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRunner(Options{
+		Config:   cfg,
+		Keys:     compactionRootKeys{root: root},
+		Backends: map[string]BackendRegistration{BackendClaude: {Catalog: ClaudeCatalog()}},
+	})
+	c := &conv{r: r, rec: Record{Root: root, WSKey: "key", Backend: BackendClaude, Lead: true}}
+	c.loadCompaction()
+
+	// UsageCompaction reports soft=110k, hard=180k, m1=133333, m2=156667.
+	comp := c.usageCompaction(1_000_000)
+	if comp == nil || comp.Soft != 110_000 || comp.Hard != 180_000 || !comp.AdvisoryEnabled || len(comp.Milestones) != 2 || comp.Milestones[0] != 133_333 || comp.Milestones[1] != 156_667 {
+		t.Fatalf("usageCompaction = %+v", comp)
+	}
+
+	observe := func(tok int64) {
+		v := tok
+		c.observeCompaction(wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &v, Window: 1_000_000}})
+	}
+
+	// Below soft: nothing.
+	observe(51_293)
+	c.compactIdle()
+	if c.compactNote != "" || c.compactAdvised || c.compactM1Issued || c.compactM2Issued {
+		t.Fatalf("unexpected note below soft: %q", c.compactNote)
+	}
+
+	// Cross soft (118,800): advisory delivered, milestones unlatched.
+	observe(118_800)
+	c.compactIdle()
+	if !c.compactAdvised || c.compactM1Issued || c.compactM2Issued || !strings.Contains(c.compactNote, "advisory point 110000") {
+		t.Fatalf("soft crossing failed: advised=%v m1=%v m2=%v note=%q", c.compactAdvised, c.compactM1Issued, c.compactM2Issued, c.compactNote)
+	}
+	c.compactNote = ""
+
+	// Cross m1 (140,400): 1/3 reminder delivered.
+	observe(140_400)
+	c.compactIdle()
+	if !c.compactM1Issued || c.compactM2Issued || !strings.Contains(c.compactNote, "reminder 1/3") || !strings.Contains(c.compactNote, "180000") {
+		t.Fatalf("m1 crossing failed: m1=%v m2=%v note=%q", c.compactM1Issued, c.compactM2Issued, c.compactNote)
+	}
+	c.compactNote = ""
+
+	// Re-arm m1 on usage drop below m1; soft stays latched.
+	observe(120_000)
+	if !c.compactAdvised || c.compactM1Issued || c.compactM2Issued {
+		t.Fatalf("drop below m1 did not re-arm m1 cleanly: advised=%v m1=%v m2=%v", c.compactAdvised, c.compactM1Issued, c.compactM2Issued)
+	}
+
+	// Jump straight past m2 (163,800): only highest pending milestone (2/3) delivered, latching both m1 and m2.
+	observe(163_800)
+	c.compactIdle()
+	if !c.compactM1Issued || !c.compactM2Issued || !strings.Contains(c.compactNote, "reminder 2/3") || strings.Contains(c.compactNote, "reminder 1/3") {
+		t.Fatalf("jump to m2 failed: m1=%v m2=%v note=%q", c.compactM1Issued, c.compactM2Issued, c.compactNote)
+	}
+	c.compactNote = ""
+
+	// CompactStart latches all, CompactEnd clears all.
+	c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactStart})
+	if !c.compactAdvised || !c.compactM1Issued || !c.compactM2Issued || !c.compactHardIssued {
+		t.Fatal("CompactStart did not latch all thresholds")
+	}
+	c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd})
+	if c.compactAdvised || c.compactM1Issued || c.compactM2Issued || c.compactHardIssued {
+		t.Fatal("CompactEnd did not clear all latches")
+	}
+
+	// Live refreshCompaction clears m1/m2 when thresholds are raised above current usage.
+	c.compactAwaitTurn = false
+	observe(163_800)
+	c.compactAdvised, c.compactM1Issued, c.compactM2Issued = true, true, true
+	if err := resolver.Set("compaction.lead_advisory", "160k", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeGlobal}); err != nil {
+		t.Fatal(err)
+	}
+	if err := resolver.Set("compaction.lead_hard", "220k", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeGlobal}); err != nil {
+		t.Fatal(err)
+	}
+	NotifyCompactionConfigChanged()
+	c.refreshCompaction()
+	if !c.compactAdvised || c.compactM1Issued || c.compactM2Issued {
+		t.Fatalf("refreshCompaction did not clear m1/m2 below raised thresholds: advised=%v m1=%v m2=%v", c.compactAdvised, c.compactM1Issued, c.compactM2Issued)
+	}
+}

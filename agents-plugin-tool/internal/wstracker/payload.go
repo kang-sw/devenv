@@ -31,6 +31,8 @@ const (
 	TypeCommentEdit       = "comment.edit"
 	TypeCommentHide       = "comment.hide"
 	TypeSetLead           = "roles.set_lead"
+	TypeOrgSet            = "roles.org_set"
+	TypeOrgRemove         = "roles.org_remove"
 	TypeSetPriorityLevels = "roles.set_priority_levels"
 	// TypeSetAttachmentLimit changes the store's attachments.max_bytes.
 	TypeSetAttachmentLimit = "roles.set_attachment_limit"
@@ -109,6 +111,7 @@ type ItemAssign struct {
 type AssignTarget struct {
 	Person      string
 	Root        string
+	Org         string
 	IncludeRoot bool
 	Levels      int
 }
@@ -120,6 +123,9 @@ func (t AssignTarget) MarshalJSON() ([]byte, error) {
 		return json.Marshal(t.Person)
 	}
 	m := map[string]any{"root": t.Root}
+	if t.Org != "" {
+		m["org"] = t.Org
+	}
 	if t.IncludeRoot {
 		m["include_root"] = true
 	}
@@ -172,8 +178,10 @@ const (
 // lists and CC notices) with no status, accept, or completion; item.assign
 // stays the creator's.
 const (
-	TypeItemCC   = "item.cc"
-	TypeItemUncc = "item.uncc"
+	TypeItemCC      = "item.cc"
+	TypeItemUncc    = "item.uncc"
+	TypeItemCCOrg   = "item.cc_org"
+	TypeItemUnccOrg = "item.uncc_org"
 )
 
 // ItemCC is the payload of item.cc and item.uncc: Member is the member
@@ -181,6 +189,25 @@ const (
 type ItemCC struct {
 	Item   string `json:"item"`
 	Member string `json:"member"`
+}
+
+// ItemCCOrg is the payload of item.cc_org and item.uncc_org.
+type ItemCCOrg struct {
+	Item string `json:"item"`
+	Org  string `json:"org"`
+}
+
+// OrgSet is the payload of roles.org_set. An empty Head leaves the org
+// vacant; the same event shape creates and updates live orgs.
+type OrgSet struct {
+	Org  string `json:"org"`
+	Name string `json:"name"`
+	Head string `json:"head"`
+}
+
+// OrgRemove is the payload of roles.org_remove.
+type OrgRemove struct {
+	Org string `json:"org"`
 }
 
 // ItemOpen is the payload of item.open. item.unopen and item.claim take an

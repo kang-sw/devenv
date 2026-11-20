@@ -1237,8 +1237,16 @@ export const register: Register = (on) => {
 
     // Until this start's advisory knob read settles on, no usage is observed,
     // so no advisory or milestone turn is sent; the lever works regardless.
+    // Hosted sessions let the daemon own advisories and milestones so plugin
+    // and daemon nudges never both fire.
     advisoryOn = false
-    const advisoryRead = readKnob(KNOB.compactionAdvisory).then((value) => value === true)
+    const advisoryRead = hostedRead.then((hosted) => {
+      if (hosted.mode === 'hosted') {
+        $.ui.log(`${$.plugin.name} compaction: hosted session: the daemon delivers advisories and milestones; plugin advisories stay off`, { to: 'debug' })
+        return false
+      }
+      return readKnob(KNOB.compactionAdvisory).then((value) => value === true)
+    })
     void advisoryRead.then((enabled) => {
       if (enabled && startSeq === starts) advisoryOn = true
     })

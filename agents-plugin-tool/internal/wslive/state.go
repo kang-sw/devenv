@@ -1353,7 +1353,10 @@ func normalizeUsage(ev Event) *Usage {
 			hit := *c.CacheHit
 			ctx.CacheHit = &hit
 		}
-		if ctx.Window > 0 || ctx.Tokens != nil {
+		if comp := normalizeCompaction(c.Compaction); comp != nil {
+			ctx.Compaction = comp
+		}
+		if ctx.Window > 0 || ctx.Tokens != nil || ctx.Compaction != nil {
 			u.Context = ctx
 		}
 	}
@@ -1400,11 +1403,40 @@ func (u *Usage) clone() *Usage {
 			v := *c.CacheHit
 			c.CacheHit = &v
 		}
+		if c.Compaction != nil {
+			comp := *c.Compaction
+			if len(comp.Milestones) > 0 {
+				comp.Milestones = append([]int64(nil), comp.Milestones...)
+			} else {
+				comp.Milestones = nil
+			}
+			c.Compaction = &comp
+		}
 		out.Context = &c
 	}
 	if u.Cost != nil {
 		c := *u.Cost
 		out.Cost = &c
+	}
+	return out
+}
+
+func normalizeCompaction(in *UsageCompaction) *UsageCompaction {
+	if in == nil {
+		return nil
+	}
+	out := &UsageCompaction{
+		Soft:            max(in.Soft, 0),
+		Hard:            max(in.Hard, 0),
+		AdvisoryEnabled: in.AdvisoryEnabled,
+	}
+	for _, m := range in.Milestones {
+		if m > 0 {
+			out.Milestones = append(out.Milestones, m)
+		}
+	}
+	if out.Soft == 0 && out.Hard == 0 && len(out.Milestones) == 0 && !out.AdvisoryEnabled {
+		return nil
 	}
 	return out
 }

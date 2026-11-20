@@ -13,7 +13,7 @@
   --wb-compact-ink: var(--wb-ph-compact);
   --pv-bg: #e4dcf7; --pv-fg: #3a2c6b; --pv-line: #b9a9e8;
   --wb-ok: #1d7348; --wb-fail: #c0262d;
-  --wb-warn: #c27a00; --wb-warn-ink: #a35f00;
+  --wb-warn: #c27a00; --wb-warn-ink: #a35f00; --wb-hot: #d95d16;
   /* the warning tone on a toast, whose surface is the inverted text colour */
   --wb-toast-warn: #f2c06b;
 }
@@ -29,7 +29,7 @@
     --wb-compact-ink: var(--wb-on-ph-compact);
     --pv-bg: #3d2f6b; --pv-fg: #ddd3fb; --pv-line: #6a4fc4;
     --wb-ok: #6cc39a; --wb-fail: #f0797e;
-    --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
+    --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c; --wb-hot: #fb923c;
     --wb-toast-warn: #9a5a00;
   }
 }
@@ -43,7 +43,7 @@
   --wb-compact-ink: var(--wb-on-ph-compact);
   --pv-bg: #3d2f6b; --pv-fg: #ddd3fb; --pv-line: #6a4fc4;
   --wb-ok: #6cc39a; --wb-fail: #f0797e;
-  --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
+  --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c; --wb-hot: #fb923c;
   --wb-toast-warn: #9a5a00;
 }
 

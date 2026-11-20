@@ -436,6 +436,8 @@ type agentRecordEnd struct {
 	HandedOffAt string `json:"handed_off_at"`
 	HolderID    string `json:"holder_id"`
 	Backend     string `json:"backend"`
+	Model       string `json:"model"`
+	Effort      string `json:"effort"`
 	SessionFile string `json:"session_file"`
 	Parent      *struct {
 		Kind    string `json:"kind"`

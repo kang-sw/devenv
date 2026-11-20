@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 var errPlanUsage = errors.New("usage unavailable")
@@ -31,8 +33,8 @@ func usageQueryInterval(force bool) time.Duration {
 // queues behind queryMu. Only a store with nothing to show (no cached and no
 // persisted GPT entry) probes inline, so a first page still gets a value.
 func (s *planUsageStore) refresh(ctx context.Context, force bool) {
-	// agy probes run strictly on user-triggered popover refreshes (force),
-	// never inline and never on ordinary page polls or visibility changes.
+	// Popover refreshes (force) and agy activity both reach refreshAgy. Neither
+	// runs the agy probe inline or from ordinary page polls or visibility changes.
 	if force {
 		s.refreshAgy()
 	}
@@ -106,7 +108,17 @@ func (s *planUsageStore) query(ctx context.Context, force bool) {
 		}
 	} else {
 		s.gpt = entry
-		s.appendHistoryLocked(usageSamples(entry), time.Now().UnixMilli())
+		now := time.Now().UnixMilli()
+		var shared, codex5h []planUsageSample
+		for _, sample := range usageSamples(entry) {
+			if sample.Harness == "codex" && sample.Kind == wslive.LimitFiveHour {
+				codex5h = append(codex5h, sample)
+			} else {
+				shared = append(shared, sample)
+			}
+		}
+		s.appendHistoryLocked(shared, now)
+		s.appendHistoryFileLocked(&s.codexHist, codexFiveHourHistorySpec, codex5h, now)
 	}
 	s.saveLocked()
 	s.lastQuery = time.Now()
@@ -126,12 +138,28 @@ type codexUsageLimits struct {
 func codexUsageEntry(limits codexUsageLimits, source string) (planUsageEntry, error) {
 	at := time.Now().UnixMilli()
 	e := planUsageEntry{Harness: "codex", Plan: limits.Plan, Source: source, AsOf: at, Windows: []planUsageWindow{}}
+	var fiveHour, sevenDay *planUsageWindow
 	for _, w := range []*codexUsageWindow{limits.Primary, limits.Secondary} {
 		// Primary and secondary can exchange positions across plans.
-		if w == nil || w.Minutes != 10080 || w.Percent == nil || !validUsage(*w.Percent) {
+		if w == nil || w.Percent == nil || !validUsage(*w.Percent) {
 			continue
 		}
-		e.Windows = append(e.Windows, planUsageWindow{Kind: "seven_day", Percent: *w.Percent, ResetsAt: usageReset(w.Reset), AsOf: at})
+		switch w.Minutes {
+		case 300:
+			if fiveHour == nil {
+				fiveHour = &planUsageWindow{Kind: wslive.LimitFiveHour, Percent: *w.Percent, ResetsAt: usageReset(w.Reset), AsOf: at}
+			}
+		case 10080:
+			if sevenDay == nil {
+				sevenDay = &planUsageWindow{Kind: wslive.LimitSevenDay, Percent: *w.Percent, ResetsAt: usageReset(w.Reset), AsOf: at}
+			}
+		}
+	}
+	if fiveHour != nil {
+		e.Windows = append(e.Windows, *fiveHour)
+	}
+	if sevenDay != nil {
+		e.Windows = append(e.Windows, *sevenDay)
 	}
 	if len(e.Windows) == 0 {
 		return planUsageEntry{}, errPlanUsage
@@ -173,11 +201,18 @@ func (s *planUsageStore) queryCodex(ctx context.Context) (planUsageEntry, error)
 		return planUsageEntry{}, err
 	}
 	convert := func(w *usageHTTPWindow) *codexUsageWindow {
-		// Do not truncate near-weekly seconds into a weekly Codex quota.
-		if w == nil || w.Seconds != 604800 {
+		// Do not truncate arbitrary durations into 5-hour or weekly Codex quotas.
+		if w == nil {
 			return nil
 		}
-		return &codexUsageWindow{Percent: w.Percent, Minutes: 10080, Reset: w.Reset}
+		switch w.Seconds {
+		case 18000:
+			return &codexUsageWindow{Percent: w.Percent, Minutes: 300, Reset: w.Reset}
+		case 604800:
+			return &codexUsageWindow{Percent: w.Percent, Minutes: 10080, Reset: w.Reset}
+		default:
+			return nil
+		}
 	}
 	return codexUsageEntry(codexUsageLimits{Plan: body.Plan, Primary: convert(body.Limits.Primary), Secondary: convert(body.Limits.Secondary)}, codexUsageSource)
 }

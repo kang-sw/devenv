@@ -97,8 +97,8 @@ func TestTerminalButtonLivesInBoardToolbar(t *testing.T) {
 	}
 	css := mustAsset(t, "dashboard.css")
 	for _, want := range []string{
-		".cfoot > .r-sline { flex: 1 1 auto; min-width: 0; }",
-		".cfoot:has(> .r-sline:empty) { display: none; }",
+		".cfoot > .r-sline { flex: 0 1 auto; min-width: 0; }",
+		".cfoot:has(> .r-sline:empty):not(:has(> .fpills:not([hidden]))) { display: none; }",
 		".tpop { position: absolute; top: calc(100% + 8px); left: 0;",
 		"@container board-toolbar (max-width: 540px)",
 		".board-action:not(.board-overview) .board-label, .board-action kbd { display: none; }",
