@@ -971,7 +971,7 @@
         p.phase === "none" ? wsT("js.update.state.none") :
         p.phase === "available" ? (p.action === "stable-return" ? wsT("js.update.stable.state", p.version) :
           p.action === "canary" ? wsT("js.update.canary.state", p.version) :
-          wsT("js.update.state.available", p.version)) + (p.skipped ? " " + wsT("js.update.skipped") : "") :
+          wsT("js.update.state.available", p.version)) + (p.skipped && p.action !== "stable-return" ? " " + wsT("js.update.skipped") : "") :
         p.phase === "ready" ? wsT("js.update.state.ready", p.version) : "";
       restart.hidden = !p || p.phase !== "ready";
     }

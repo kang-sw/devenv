@@ -295,6 +295,9 @@ function channelStub(running) {
       assert.deepEqual(await page.locator('.wstoast .wst-act').allTextContents(), ['다운그레이드 (v0.51.0)'], 'no skip on an explicit return');
       assert.equal(await page.locator('.wstoast .wst-x').count(), 1, 'the return can be dismissed');
       assert.match(await page.locator('#dupd-check .gs').textContent(), /v0\.51\.0.*다운그레이드/);
+      // A previously skipped stable is still an explicit return: no skipped suffix.
+      await emit(page, { state: 'phase', phase: { phase: 'available', version: '0.51.0', skipped: true, action: 'stable-return' } });
+      assert.doesNotMatch(await page.locator('#dupd-check .gs').textContent(), /건너뜀/);
       assert.equal((await calls(page)).includes('download'), false, 'nothing installs before the explicit action');
       await canaryShot(page, `after-stable-return-confirm-${scheme}.png`);
       await page.locator('.wstoast .wst-act').click();
