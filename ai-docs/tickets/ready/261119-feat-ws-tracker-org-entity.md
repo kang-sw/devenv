@@ -398,6 +398,85 @@ Verification (Go tests):
   root rule; unknown org event types are flagged, not folded; an `item.uncc`
   of a member the old reader does not see as CC'd is a no-op.
 
+### Result (67e9125) - 2026-11-20
+
+- Added first-class org state and tombstones, admin-only org lifecycle events,
+  fold-order conflict handling (including joined and removed members), nearest
+  org and whole-subtree resolution, and checkpoint-safe copies.
+- Added dynamic org CC registrations with personal/per-org provenance,
+  exclusions and registration additions, plus org assignment rules that retain
+  their assign-time identity and consent while following the current head.
+  Ending an org rule immediately re-extends other live rules.
+- Projected orgs, org CC registrations and sources, registration additions and
+  org assignment identity through the tracker view and dashboard projection.
+  No Phase 2 editor or item-window UI was started, and no locale strings were
+  added.
+- Compatibility remains T1: the four new event types are additive constants
+  (`payload.go` lines 34-35 and 183-184), while an old binary's default event
+  check flags unknown types before fold (`check.go` line 1580). The hybrid
+  assign target still carries the legacy `root` shape (`org_test.go` lines
+  9-19), so an old reader treats it as an ordinary root rule and changes no org
+  state.
+- Lite review found one Critical joined-head replay bug and one Important
+  nested-org test gap. Both were fixed in `67e9125`; no Minor findings remain.
+- Verification passed: `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test
+  -count=1 ./internal/wstracker` and `GOPROXY=off GOSUMDB=off
+  GOTOOLCHAIN=local go test -count=1 -run 'Tracker|Asset'
+  ./internal/wsdashboard` (one package passed, zero failed, for each command).
+
+#### Edition (fd021c0) - 2026-11-20
+
+- Kept old/new assign verdicts aligned after an org head change by judging an
+  existing org rule's overlap from its assign-time root, while extension alone
+  follows the current head. A concurrently folded head change now also sets the
+  rule's current root immediately without moving its id or consent request.
+- Bare `item.unassign` now closes all of the actor's rules and records before a
+  single re-extension of surviving rules. Root-qualified unassign and
+  `item.return` re-extension paths are covered explicitly, including the
+  removed-creator admin stand-in case.
+- Personal `item.uncc` exclusions now belong to the item and apply to every
+  current and future org registration until a personal `item.cc` clears them.
+  Checkpoints own the new exclusion map.
+- Added `RuleView.assignRoot` beside the current `root` (`view.go` lines
+  262-276 and 910-915), allowing Phase 2 to form root-qualified unassign
+  payloads without parsing rule ids. This view-only additive field is T0 for
+  field-tolerant old readers; the existing org event and target behavior stays
+  T1.
+- Indexed active org CC registrations by item during view projection and
+  cached each org's member scope once per roles refresh event; both indexes are
+  in-memory only and add no file I/O or persisted state.
+- Closed the remaining Phase 1 test gaps: both concurrent member-removal
+  orders, incremental/full conflict parity, joined newcomers, nearest-parent
+  fallback after child-org removal, vacant registration cleanup, old-reader
+  `item.uncc` no-op behavior, and a real org-ignoring target check/fold path.
+- Verification passed: `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test
+  -count=1 ./internal/wstracker`; `GOPROXY=off GOSUMDB=off
+  GOTOOLCHAIN=local go test -count=1 -run 'Tracker|Asset'
+  ./internal/wsdashboard`; `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test
+  -count=1 -run 'TestTrackerProjectionSummaryContract|TestTrackerProjectionDetailVersions'
+  ./cmd/ws-mcp`; native `go vet ./internal/wstracker ./cmd/ws-mcp`; and the
+  same vet command with `GOOS=windows`.
+
+#### Edition (b3f393b) - 2026-11-20
+
+- Extended assign-time-root compatibility to legacy `item.assign mode:"all"`,
+  so an org rule re-rooted under a new head does not make the new binary reject
+  an assign the old binary accepts.
+- Root-qualified `item.unassign` now ends every matching rule and record before
+  one re-extension, preventing records from being created and ended by the
+  same event when multiple rules share an assign-time root.
+- Added a fold-owned per-item org CC registration index. Personal `item.cc` and
+  `item.uncc` now touch only that item's registrations, view projection reuses
+  the index, and checkpoints derive an owned index from copied canonical state
+  while preserving a zero-value state's nil shape.
+- Verification passed: `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test
+  -count=1 ./internal/wstracker`; `GOPROXY=off GOSUMDB=off
+  GOTOOLCHAIN=local go test -count=1 -run 'Tracker|Asset'
+  ./internal/wsdashboard`; `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test
+  -count=1 -run 'TestTrackerProjectionSummaryContract|TestTrackerProjectionDetailVersions'
+  ./cmd/ws-mcp`; native `go vet ./internal/wstracker`; and the same vet command
+  with `GOOS=windows`.
+
 ### Phase 2: Org management in the org-chart editor and org entries on items
 
 Implement Decisions 4, 8-13, 18 (client-side id minting) and 20 in the

@@ -129,7 +129,7 @@ func projectTracker(id string, v *wstrackerhost.StoreView, seen wsdashboard.Trac
 	globals := map[string]any{
 		"store": v.Store, "sync": v.Sync, "clones": v.Clones,
 		"viewer": v.Viewer, "priority": v.Priority, "attachments": v.Attachments,
-		"labels": v.Labels, "members": v.Members, "admins": v.Admins,
+		"labels": v.Labels, "orgs": v.Orgs, "members": v.Members, "admins": v.Admins,
 		"rolesProblems": v.RolesProblems, "itemOrder": v.ItemOrder,
 		"my": v.My, "stats": v.Stats, "heads": v.Heads, "now": v.Now,
 	}
@@ -177,8 +177,9 @@ func projectTracker(id string, v *wstrackerhost.StoreView, seen wsdashboard.Trac
 		Members     map[string]wstracker.MemberView
 		Priority    wstracker.PriorityLevels
 		Labels      []wstracker.LabelView
+		Orgs        []wstracker.OrgView
 		Attachments wstracker.AttachmentLimit
-	}{id, v.Viewer, v.Members, v.Priority, v.Labels, v.Attachments})
+	}{id, v.Viewer, v.Members, v.Priority, v.Labels, v.Orgs, v.Attachments})
 	if err != nil {
 		return out, err
 	}

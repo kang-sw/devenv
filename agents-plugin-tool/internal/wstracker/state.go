@@ -135,22 +135,38 @@ type item struct {
 	mentions           []string
 	attachments        []attachment
 	refs               []string
-	labels             labelSet  // label ids as written; the view drops removed ones
-	open               *opening  // the latest item.open; active while its ended is nil
-	cc                 []ccEntry // the CC'd members, in the order they came to be CC'd
-	mentionsAt         *node     // the body write mentions come from; nil while none
+	labels             labelSet        // label ids as written; the view drops removed ones
+	open               *opening        // the latest item.open; active while its ended is nil
+	cc                 []ccEntry       // the CC'd members, in the order they came to be CC'd
+	ccExcluded         map[string]bool // personal uncc exclusions shared by every org registration
+	mentionsAt         *node           // the body write mentions come from; nil while none
 }
 
 // ccEntry is one CC'd member of an item; since is the add whose register
 // write made the member CC'd (a repeated add moves nothing).
 type ccEntry struct {
-	member string
-	since  *node
+	member   string
+	since    *node
+	personal bool
+	orgs     map[string]bool
 }
 
 // ccVal is a CC register value (one register per item and member): true
 // while the member is CC'd. Its own type so a marker shows it as a CC.
 type ccVal bool
+
+// ccOrgVal is the registration value written for one item and org.
+type ccOrgVal bool
+
+// ccOrgReg is one item.cc_org registration. added is the provenance set that
+// remains after members leave the org; excluded is written by personal uncc
+// and prevents future automatic re-adds.
+type ccOrgReg struct {
+	item, org       string
+	active          bool
+	since           *node
+	added, excluded map[string]bool
+}
 
 // opening is an item.open: the creator (or the admin standing in for a
 // removed one) opens a task nobody else holds to a scope, team (the
@@ -201,6 +217,13 @@ type label struct {
 	removed         *node
 }
 
+// org is a first-class organization. Removed orgs remain as tombstones so
+// registrations can keep their display identity.
+type org struct {
+	id, name, head string
+	removed        *node
+}
+
 // attachment is attachment metadata as folded; oid is the content's sha256.
 type attachment struct {
 	oid, name, mime string
@@ -245,14 +268,14 @@ type rec struct {
 // "<event id>~<root>". state: live (the author reaches the root, or the
 // root accepted request) | pending; ended is the event that ended it.
 type rule struct {
-	id, via, item, by, root, completion string
-	includeRoot                         bool
-	levels                              float64
-	excluded                            map[string]bool
-	ended                               string
-	state                               string
-	request                             string
-	ts                                  time.Time
+	id, via, item, by, root, assignRoot, org, completion string
+	includeRoot                                          bool
+	levels                                               float64
+	excluded                                             map[string]bool
+	ended                                                string
+	state                                                string
+	request                                              string
+	ts                                                   time.Time
 }
 
 // wholeSubtree is the reach depth of a rule with no levels.
@@ -292,28 +315,33 @@ type state struct {
 	hb    func(x, y *node) bool // x is in y's causal past (x earlier in fold order)
 	marks bool                  // final fold: record concurrent-change markers
 
-	members  map[string]*member
-	morder   []string
-	admins   map[string]bool
-	aorder   []string
-	items    map[string]*item
-	iorder   []string
-	place    []placement
-	asg      map[string]*rec
-	recs     []*rec
-	byItem   map[string][]*rec
-	rules    []*rule
-	ruleByID map[string]*rule
-	comments map[string]*comment
-	corder   []string
-	reqs     map[string]*takeReq
-	rorder   []string // take request ids in fold order
-	reg      map[string][]head
-	bodies   map[string]*bodyFold // item id -> its body as folded (merge.go)
-	labels   map[string]*label
-	lorder   []string // label ids in fold order of their adds
-	prio     priority
-	attMax   float64 // attachments.max_bytes, the engine's number (posIntOf)
+	members      map[string]*member
+	morder       []string
+	admins       map[string]bool
+	aorder       []string
+	items        map[string]*item
+	iorder       []string
+	place        []placement
+	asg          map[string]*rec
+	recs         []*rec
+	byItem       map[string][]*rec
+	rules        []*rule
+	ruleByID     map[string]*rule
+	comments     map[string]*comment
+	corder       []string
+	reqs         map[string]*takeReq
+	rorder       []string // take request ids in fold order
+	reg          map[string][]head
+	bodies       map[string]*bodyFold // item id -> its body as folded (merge.go)
+	labels       map[string]*label
+	lorder       []string // label ids in fold order of their adds
+	orgs         map[string]*org
+	oorder       []string // org ids in fold order of their creation
+	ccOrgs       map[string]*ccOrgReg
+	ccOrgsByItem map[string][]*ccOrgReg
+	ccOrder      []string // item/org keys in first-registration order
+	prio         priority
+	attMax       float64 // attachments.max_bytes, the engine's number (posIntOf)
 }
 
 // genesis is the parsed roles.json the fold starts from.
@@ -451,7 +479,7 @@ func newState(g *genesis, hb func(x, y *node) bool, marks bool) *state {
 		hb: hb, marks: marks,
 		members: map[string]*member{}, admins: map[string]bool{},
 		items: map[string]*item{}, asg: map[string]*rec{}, byItem: map[string][]*rec{}, ruleByID: map[string]*rule{},
-		comments: map[string]*comment{}, reg: map[string][]head{}, bodies: map[string]*bodyFold{}, labels: map[string]*label{}, reqs: map[string]*takeReq{},
+		comments: map[string]*comment{}, reg: map[string][]head{}, bodies: map[string]*bodyFold{}, labels: map[string]*label{}, orgs: map[string]*org{}, ccOrgs: map[string]*ccOrgReg{}, ccOrgsByItem: map[string][]*ccOrgReg{}, reqs: map[string]*takeReq{},
 		prio:   priority{names: append([]string(nil), g.prio.names...), def: g.prio.def},
 		attMax: g.attMax,
 	}
@@ -491,6 +519,67 @@ func (s *state) removeAdmin(a string) {
 func (s *state) liveMember(id string) bool {
 	m := s.members[id]
 	return m != nil && m.removed == nil
+}
+
+func (s *state) liveOrg(id string) *org {
+	o := s.orgs[id]
+	if o == nil || o.removed != nil {
+		return nil
+	}
+	return o
+}
+
+func (s *state) orgNamed(name, except string) *org {
+	for _, id := range s.oorder {
+		o := s.liveOrg(id)
+		if o != nil && id != except && strings.EqualFold(o.name, name) {
+			return o
+		}
+	}
+	return nil
+}
+
+func (s *state) orgHeadedBy(member, except string) *org {
+	if member == "" {
+		return nil
+	}
+	for _, id := range s.oorder {
+		o := s.liveOrg(id)
+		if o != nil && id != except && o.head == member {
+			return o
+		}
+	}
+	return nil
+}
+
+// nearestOrg is the member's display org: the closest live org head at or
+// above the member in the lead chain. Org registration scope intentionally
+// uses orgMembers instead and includes nested orgs.
+func (s *state) nearestOrg(member string) *org {
+	for cur, n := member, 0; cur != "" && n <= len(s.members); n++ {
+		if o := s.orgHeadedBy(cur, ""); o != nil {
+			return o
+		}
+		m := s.members[cur]
+		if m == nil {
+			return nil
+		}
+		cur = m.lead()
+	}
+	return nil
+}
+
+// orgMembers is the whole live subtree rooted at the org's head, including
+// that head and members whose nearest org is a nested child org.
+func (s *state) orgMembers(o *org) []string {
+	if o == nil || o.removed != nil || !s.liveMember(o.head) {
+		return nil
+	}
+	out := []string{o.head}
+	for _, r := range s.reach(o.head, wholeSubtree) {
+		out = append(out, r.id)
+	}
+	return out
 }
 
 // ---------------------------------------------------------------- org tree
@@ -670,6 +759,12 @@ func (s *state) hasLiveRule() bool {
 // coveredBy lists who ru covers now: the root (with includeRoot, while a
 // member), then its reach.
 func (s *state) coveredBy(ru *rule) []string {
+	if ru.org != "" {
+		o := s.liveOrg(ru.org)
+		if o == nil || o.head == "" {
+			return nil
+		}
+	}
 	var out []string
 	if ru.includeRoot && s.liveMember(ru.root) {
 		out = append(out, ru.root)
@@ -749,11 +844,29 @@ func (s *state) refreshLive(n *node) {
 	}
 }
 
-// endRule ends ru with the live records it made; a handoff its holder
-// accepted stays.
-func (s *state) endRule(ru *rule, n *node) {
+func (s *state) refreshOrgRules() {
+	for _, ru := range s.rules {
+		if ru.ended != "" || ru.org == "" {
+			continue
+		}
+		if o := s.liveOrg(ru.org); o != nil && o.head != "" {
+			ru.root = o.head
+		}
+	}
+}
+
+func (s *state) refreshItemRules(item string, n *node) {
+	for _, ru := range s.liveRules(item) {
+		s.extendRule(ru, n, true)
+	}
+}
+
+// endRuleRecords ends ru with the live records it made; a handoff its holder
+// accepted stays. It reports whether an org rule ended, so callers that end a
+// batch of rules can defer re-extension until every rule and record is closed.
+func (s *state) endRuleRecords(ru *rule, n *node) bool {
 	if ru == nil {
-		return
+		return false
 	}
 	if ru.ended == "" {
 		ru.ended = n.id
@@ -763,12 +876,25 @@ func (s *state) endRule(ru *rule, n *node) {
 			s.endRec(x, n, "unassigned")
 		}
 	}
+	return ru.org != ""
+}
+
+func (s *state) endRule(ru *rule, n *node) {
+	if s.endRuleRecords(ru, n) {
+		s.refreshItemRules(ru.item, n)
+	}
 }
 
 // unassignRule ends ru for item.unassign {root} or {rule}: a pending request
 // is withdrawn, an accepted one unassigned, then the rule ends with its
 // records.
 func (s *state) unassignRule(ru *rule, n *node) {
+	if s.unassignRuleRecords(ru, n) {
+		s.refreshItemRules(ru.item, n)
+	}
+}
+
+func (s *state) unassignRuleRecords(ru *rule, n *node) bool {
 	if q := s.asg[ru.request]; ru.request != "" && q != nil {
 		switch q.state {
 		case "pending":
@@ -777,7 +903,7 @@ func (s *state) unassignRule(ru *rule, n *node) {
 			q.state, q.ended = "unassigned", n
 		}
 	}
-	s.endRule(ru, n)
+	return s.endRuleRecords(ru, n)
 }
 
 // fallbackHolder is who holds a task nobody else holds: its creator, or
@@ -911,9 +1037,15 @@ func (s *state) addRule(n *node, item string, x obj, completion string) {
 	if s.ruleByID[id] != nil || s.members[root] == nil {
 		return
 	}
-	ru := &rule{id: id, via: n.id, item: item, by: a, root: root, includeRoot: x["include_root"] == true,
+	ru := &rule{id: id, via: n.id, item: item, by: a, root: root, assignRoot: root, org: x.str("org"), includeRoot: x["include_root"] == true,
 		completion: completion, excluded: map[string]bool{}, state: "live", ts: n.ts}
 	ru.levels, _ = x["levels"].(float64)
+	// A concurrent head change can fold before an assign that was valid at its
+	// causal snapshot. Consent and identity stay on the assign-time root, while
+	// coverage starts at the head visible in this fold.
+	if o := s.liveOrg(ru.org); o != nil && o.head != "" {
+		ru.root = o.head
+	}
 	s.addRuleRec(ru)
 	if root == a || s.below(a, root) {
 		s.extendRule(ru, n, false)
@@ -1276,7 +1408,7 @@ func (s *state) apply(n *node) {
 			kind = "task"
 		}
 		it := &item{id: n.id, alias: n.alias, kind: kind, title: jsString(p["title"]),
-			parent: p.str("parent"), author: a, ts: n.ts, node: n, priority: s.prio.def}
+			parent: p.str("parent"), author: a, ts: n.ts, node: n, priority: s.prio.def, ccExcluded: map[string]bool{}}
 		it.project = p.str("project")
 		if d, ok := p["due"].(string); ok && d != "" {
 			it.due = &d
@@ -1368,6 +1500,8 @@ func (s *state) apply(n *node) {
 		s.applyMove(n)
 	case TypeItemCC, TypeItemUncc:
 		s.applyCC(n)
+	case TypeItemCCOrg, TypeItemUnccOrg:
+		s.applyCCOrg(n)
 	case TypeItemAssign:
 		s.applyAssign(n)
 	case TypeItemHandoff:
@@ -1465,10 +1599,14 @@ func (s *state) apply(n *node) {
 				s.unassignRule(ru, n)
 			}
 		} else if !p.null("root") {
+			refresh := false
 			for _, ru := range s.openRules(item) {
-				if ru.by == a && ru.root == p.str("root") {
-					s.unassignRule(ru, n)
+				if ru.by == a && ru.assignRoot == p.str("root") {
+					refresh = s.unassignRuleRecords(ru, n) || refresh
 				}
+			}
+			if refresh {
+				s.refreshItemRules(item, n)
 			}
 		} else if p.truthy("assignee") {
 			who := p.str("assignee")
@@ -1494,13 +1632,18 @@ func (s *state) apply(n *node) {
 				s.endRec(r, n, endState(r))
 			}
 		} else {
+			refresh := false
 			for _, ru := range s.openRules(item) {
 				if ru.by != a {
 					continue
 				}
-				ru.ended = n.id
-				if q := s.asg[ru.request]; ru.request != "" && q != nil && q.state == "accepted" {
-					q.state, q.ended = "unassigned", n
+				if ru.org != "" {
+					refresh = s.unassignRuleRecords(ru, n) || refresh
+				} else {
+					ru.ended = n.id
+					if q := s.asg[ru.request]; ru.request != "" && q != nil && q.state == "accepted" {
+						q.state, q.ended = "unassigned", n
+					}
 				}
 			}
 			for _, x := range append([]*rec(nil), s.byItem[item]...) {
@@ -1512,6 +1655,9 @@ func (s *state) apply(n *node) {
 				if x.by == a || (x.state == "pending" && x.sender == a) {
 					s.endRec(x, n, endState(x))
 				}
+			}
+			if refresh {
+				s.refreshItemRules(item, n)
 			}
 		}
 	case TypeItemStatus, TypeItemClose, TypeItemConfirm, TypeItemReject, TypeItemReopen:
@@ -1623,6 +1769,19 @@ func (s *state) apply(n *node) {
 		if !cycle {
 			m.leads = s.write("lead:"+m.id, "lead of "+m.id, n, leads).([]string)
 		}
+	case TypeOrgSet:
+		id := p.str("org")
+		o := s.orgs[id]
+		if o == nil {
+			o = &org{id: id}
+			s.orgs[id] = o
+			s.oorder = append(s.oorder, id)
+		}
+		o.name, o.head = p.str("name"), p.str("head")
+	case TypeOrgRemove:
+		if o := s.orgs[p.str("org")]; o != nil && o.removed == nil {
+			o.removed, o.head = n, ""
+		}
 	case wsledger.TypeAddAdmin:
 		s.addAdmin(p.str("member"))
 	case wsledger.TypeRemoveAdmin:
@@ -1654,6 +1813,11 @@ func (s *state) apply(n *node) {
 		}
 		m.removed = n
 		s.removeAdmin(id)
+		for _, oid := range s.oorder {
+			if o := s.liveOrg(oid); o != nil && o.head == id {
+				o.head = ""
+			}
+		}
 		for _, x := range append([]*rec(nil), s.recs...) {
 			if x.to == id && s.handedConc(x, n) {
 				s.reverseHanded(x, n)
@@ -1699,6 +1863,10 @@ func (s *state) apply(n *node) {
 	}
 	switch {
 	case strings.HasPrefix(n.typ, "roles.") || n.typ == TypeItemAssign || n.typ == wsledger.TypeMemberJoin:
+		if strings.HasPrefix(n.typ, "roles.") || n.typ == wsledger.TypeMemberJoin {
+			s.refreshOrgCC(n)
+			s.refreshOrgRules()
+		}
 		s.refreshLive(n)
 		s.settleAll(n)
 	case n.typ == TypeItemCreate:
@@ -1750,10 +1918,52 @@ func (s *state) applyMove(n *node) {
 	}
 }
 
-// applyCC folds an item.cc or item.uncc: one register per item and member,
-// so a concurrent add and remove of one member fold by the register winner.
-// The member joins the item's CC list when the shown value turns on, since
-// the winning add, and leaves it when the value turns off.
+func ccOrgKey(item, org string) string { return item + ":" + org }
+
+func ccEntryAt(it *item, member string) (*ccEntry, int) {
+	for i := range it.cc {
+		if it.cc[i].member == member {
+			return &it.cc[i], i
+		}
+	}
+	return nil, -1
+}
+
+func (s *state) addCCSource(it *item, member, org string, personal bool, since *node) {
+	e, _ := ccEntryAt(it, member)
+	if e == nil {
+		it.cc = append(it.cc, ccEntry{member: member, since: since, orgs: map[string]bool{}})
+		e = &it.cc[len(it.cc)-1]
+	}
+	if personal {
+		e.personal = true
+	}
+	if org != "" {
+		if e.orgs == nil {
+			e.orgs = map[string]bool{}
+		}
+		e.orgs[org] = true
+	}
+}
+
+func (s *state) removeCCSource(it *item, member, org string, all bool) {
+	e, at := ccEntryAt(it, member)
+	if e == nil {
+		return
+	}
+	if all {
+		e.personal, e.orgs = false, map[string]bool{}
+	} else {
+		delete(e.orgs, org)
+	}
+	if !e.personal && len(e.orgs) == 0 {
+		it.cc = append(it.cc[:at:at], it.cc[at+1:]...)
+	}
+}
+
+// applyCC folds a personal item.cc or item.uncc. The register still resolves
+// concurrent personal writes; an uncc clears every source and excludes the
+// member from all active org registrations on the item.
 func (s *state) applyCC(n *node) {
 	it, m := s.items[n.p.str("item")], n.p.str("member")
 	if it == nil || m == "" {
@@ -1761,17 +1971,90 @@ func (s *state) applyCC(n *node) {
 	}
 	key := "cc:" + it.id + ":" + m
 	on := bool(s.write(key, "CC of "+m+" on "+it.alias, n, ccVal(n.typ == TypeItemCC)).(ccVal))
-	at := -1
-	for i, e := range it.cc {
-		if e.member == m {
-			at = i
+	if on {
+		delete(it.ccExcluded, m)
+		for _, reg := range s.ccOrgsByItem[it.id] {
+			delete(reg.excluded, m)
 		}
+		s.addCCSource(it, m, "", true, s.regWinner(key))
+		return
 	}
-	switch {
-	case on && at < 0:
-		it.cc = append(it.cc, ccEntry{member: m, since: s.regWinner(key)})
-	case !on && at >= 0:
-		it.cc = append(it.cc[:at:at], it.cc[at+1:]...)
+	it.ccExcluded[m] = true
+	s.removeCCSource(it, m, "", true)
+	for _, reg := range s.ccOrgsByItem[it.id] {
+		reg.excluded[m] = true
+		delete(reg.added, m)
+	}
+}
+
+func (s *state) applyCCOrg(n *node) {
+	it, orgID := s.items[n.p.str("item")], n.p.str("org")
+	if it == nil || orgID == "" {
+		return
+	}
+	k := ccOrgKey(it.id, orgID)
+	on := bool(s.write("cco:"+k, "CC org "+orgID+" on "+it.alias, n, ccOrgVal(n.typ == TypeItemCCOrg)).(ccOrgVal))
+	reg := s.ccOrgs[k]
+	if reg == nil {
+		reg = &ccOrgReg{item: it.id, org: orgID, added: map[string]bool{}, excluded: map[string]bool{}}
+		s.ccOrgs[k] = reg
+		s.ccOrgsByItem[it.id] = append(s.ccOrgsByItem[it.id], reg)
+		s.ccOrder = append(s.ccOrder, k)
+	}
+	if on {
+		if !reg.active {
+			reg.since = s.regWinner("cco:" + k)
+		}
+		reg.active = true
+		s.extendCCOrg(reg, n)
+		return
+	}
+	for member := range reg.added {
+		s.removeCCSource(it, member, orgID, false)
+	}
+	reg.active, reg.added = false, map[string]bool{}
+	reg.since = nil
+}
+
+func (s *state) extendCCOrg(reg *ccOrgReg, n *node) {
+	if reg == nil || !reg.active {
+		return
+	}
+	it := s.items[reg.item]
+	o := s.liveOrg(reg.org)
+	if it == nil || o == nil || o.head == "" {
+		return
+	}
+	s.extendCCOrgMembers(reg, it, n, s.orgMembers(o))
+}
+
+func (s *state) extendCCOrgMembers(reg *ccOrgReg, it *item, n *node, members []string) {
+	for _, member := range members {
+		if it.ccExcluded[member] || reg.excluded[member] || reg.added[member] {
+			continue
+		}
+		reg.added[member] = true
+		s.addCCSource(it, member, reg.org, false, n)
+	}
+}
+
+func (s *state) refreshOrgCC(n *node) {
+	members := map[string][]string{}
+	computed := map[string]bool{}
+	for _, k := range s.ccOrder {
+		reg := s.ccOrgs[k]
+		if reg == nil || !reg.active {
+			continue
+		}
+		it := s.items[reg.item]
+		if it == nil {
+			continue
+		}
+		if !computed[reg.org] {
+			members[reg.org] = s.orgMembers(s.liveOrg(reg.org))
+			computed[reg.org] = true
+		}
+		s.extendCCOrgMembers(reg, it, n, members[reg.org])
 	}
 }
 
@@ -1808,7 +2091,7 @@ func (s *state) applyAssign(n *node) {
 	if p.str("mode") == "all" {
 		// the older form: a rule rooted at the author, its id the event's
 		levels, _ := p["levels"].(float64)
-		ru := &rule{id: n.id, via: n.id, item: item, by: a, root: a, levels: levels, completion: completion,
+		ru := &rule{id: n.id, via: n.id, item: item, by: a, root: a, assignRoot: a, levels: levels, completion: completion,
 			excluded: map[string]bool{}, state: "live", ts: n.ts}
 		s.addRuleRec(ru)
 		s.extendRule(ru, n, false)

@@ -31,6 +31,60 @@ func (s *state) needMember(id string) rejection {
 	return ""
 }
 
+func (s *state) needOrg(id string, live bool) (*org, rejection) {
+	o := s.orgs[id]
+	if o == nil {
+		return nil, rejection(`unknown org "` + id + `"`)
+	}
+	if live && o.removed != nil {
+		return nil, rejection("org " + id + " (" + o.name + ") was removed")
+	}
+	return o, ""
+}
+
+func (s *state) checkOrgName(name, except string) rejection {
+	if strings.TrimSpace(name) == "" {
+		return "name must be a non-blank string"
+	}
+	if strings.TrimSpace(name) != name {
+		return "name has leading or trailing spaces"
+	}
+	if o := s.orgNamed(name, except); o != nil {
+		return rejection(`org "` + name + `" already exists (` + o.id + ")")
+	}
+	return ""
+}
+
+func (s *state) checkOrgSet(p obj) rejection {
+	id, ok := p["org"].(string)
+	if !ok || id == "" || !wsledger.ValidID(id) {
+		return "org must be a valid org id"
+	}
+	name, ok := p["name"].(string)
+	if !ok {
+		return "name must be a non-blank string"
+	}
+	if r := s.checkOrgName(name, id); r != "" {
+		return r
+	}
+	head, ok := p["head"].(string)
+	if !ok {
+		return "head must be a member id or an empty string"
+	}
+	if existing := s.orgs[id]; existing != nil && existing.removed != nil {
+		return rejection("org " + id + " (" + existing.name + ") was removed")
+	}
+	if head != "" {
+		if r := s.needMember(head); r != "" {
+			return r
+		}
+		if held := s.orgHeadedBy(head, id); held != nil {
+			return rejection(head + " already heads org " + held.id + " (" + held.name + ")")
+		}
+	}
+	return ""
+}
+
 // creatorGone (208, 292): an admin stands in for a removed creator on
 // assign, unassign, edit, and hide.
 func (s *state) creatorGone(it *item, a string) bool {
@@ -404,6 +458,23 @@ func (s *state) checkTargets(it *item, a string, p obj) rejection {
 		if _, ok := t["include_root"].(bool); !ok && !t.null("include_root") {
 			return targetShape
 		}
+		orgID := ""
+		if !t.null("org") {
+			orgID, ok = t["org"].(string)
+			if !ok || orgID == "" {
+				return targetShape
+			}
+			o, r := s.needOrg(orgID, true)
+			if r != "" {
+				return r
+			}
+			if o.head == "" {
+				return rejection("org " + orgID + " (" + o.name + ") is vacant")
+			}
+			if root != o.head {
+				return rejection("org " + orgID + " is headed by " + o.head + ", not " + root)
+			}
+		}
 		ru := &rule{root: root, includeRoot: t["include_root"] == true}
 		if !t.null("levels") {
 			l, ok := t["levels"].(float64)
@@ -428,7 +499,14 @@ func (s *state) checkTargets(it *item, a string, p obj) rejection {
 			return rejection("nobody is " + within + "below " + root)
 		}
 		for _, y := range s.liveRules(it.id) {
-			if y.by == a && s.ruleCovers(y, ru) {
+			// An org rule's current root follows its head for extension, but
+			// existing-rule overlap is judged from the assign-time shape that an
+			// old reader sees. Keep old and new binaries on the same verdict.
+			existing := *y
+			if existing.assignRoot != "" {
+				existing.root = existing.assignRoot
+			}
+			if y.by == a && s.ruleCovers(&existing, ru) {
 				return rejection("the rule rooted at " + root + " is already covered by " + alias(y.id))
 			}
 		}
@@ -885,10 +963,14 @@ func (s *state) check(n *node) rejection {
 				return rejection("nobody is within " + jsNum(levels) + " levels below " + a)
 			}
 			for _, x := range s.liveRules(it.id) {
-				if x.by != a || !s.ruleCovers(x, &rule{root: a, levels: levels}) {
+				existing := *x
+				if existing.assignRoot != "" {
+					existing.root = existing.assignRoot
+				}
+				if x.by != a || !s.ruleCovers(&existing, &rule{root: a, levels: levels}) {
 					continue
 				}
-				if x.root == a && x.levels != 0 {
+				if existing.root == a && existing.levels != 0 {
 					return rejection("already assigned to everyone within " + jsNum(x.levels) + " levels (" + alias(x.id) + ")")
 				}
 				return rejection("the rule rooted at " + a + " is already covered by " + alias(x.id))
@@ -1116,6 +1198,26 @@ func (s *state) check(n *node) rejection {
 			return rejection(`unknown member "` + m + `"`)
 		}
 
+	case TypeItemCCOrg, TypeItemUnccOrg:
+		it, r := needIt()
+		if r != "" {
+			return r
+		}
+		if it.hidden {
+			return rejection(it.alias + " is hidden")
+		}
+		orgID, ok := p["org"].(string)
+		if !ok || orgID == "" {
+			return "org must be an org id"
+		}
+		o, r := s.needOrg(orgID, n.typ == TypeItemCCOrg)
+		if r != "" {
+			return r
+		}
+		if n.typ == TypeItemCCOrg && o.head == "" {
+			return rejection("org " + orgID + " (" + o.name + ") is vacant")
+		}
+
 	case TypeItemAccept, TypeItemDecline:
 		it, r := needIt()
 		if r != "" {
@@ -1193,8 +1295,8 @@ func (s *state) check(n *node) rejection {
 			if ru.by != a {
 				return rejection("only the rule's author (" + ru.by + ") ends " + alias(id))
 			}
-			if !p.null("root") && p["root"] != ru.root {
-				return rejection(alias(id) + " is rooted at " + ru.root + ", not " + p.disp("root"))
+			if !p.null("root") && p["root"] != ru.assignRoot {
+				return rejection(alias(id) + " is rooted at " + ru.assignRoot + ", not " + p.disp("root"))
 			}
 		} else if !p.null("root") { // the author's rules rooted at root, with their requests and records
 			if p.truthy("assignee") {
@@ -1202,7 +1304,7 @@ func (s *state) check(n *node) rejection {
 			}
 			has := false
 			for _, x := range s.openRules(it.id) {
-				has = has || x.by == a && x.root == p.str("root")
+				has = has || x.by == a && x.assignRoot == p.str("root")
 			}
 			if !has {
 				return rejection(a + " has no rule rooted at " + p.disp("root") + " on " + it.alias)
@@ -1400,6 +1502,23 @@ func (s *state) check(n *node) rejection {
 			return r
 		}
 		return s.checkLeads(p.disp("member"), p)
+
+	case TypeOrgSet:
+		if r := s.needAdmin(a); r != "" {
+			return r
+		}
+		return s.checkOrgSet(p)
+
+	case TypeOrgRemove:
+		if r := s.needAdmin(a); r != "" {
+			return r
+		}
+		orgID, ok := p["org"].(string)
+		if !ok || orgID == "" {
+			return "org must be an org id"
+		}
+		_, r := s.needOrg(orgID, true)
+		return r
 
 	case TypeSetPriorityLevels:
 		if r := s.needAdmin(a); r != "" {
