@@ -43,6 +43,22 @@ function isNewer(candidate, current) {
   return compareVersions(candidate, current) === 1;
 }
 const isCanaryVersion = value => parseVersion(value)?.channel === 'canary';
+// staged.json's original version field is the pre-feature updater's only
+// eligibility gate. Channel selections carry their real identity separately
+// and leave a numeric successor here so that updater preserves/applies the
+// verified stage instead of deleting an unfamiliar canary or downgrade.
+function legacyStageVersion(current) {
+  const parsed = parseVersion(current);
+  if (!parsed) return null;
+  const core = [...parsed.core];
+  for (let i = core.length - 1; i >= 0; i--) {
+    if (core[i] >= Number.MAX_SAFE_INTEGER) continue;
+    core[i]++;
+    for (let j = i + 1; j < core.length; j++) core[j] = 0;
+    return core.join('.');
+  }
+  return null;
+}
 const assetName = (platform, arch) => `Werkschaft-${platform}-${arch}.zip`;
 
 function parseSums(text) {
@@ -453,7 +469,10 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
   // verified folder is still there.
   function staged() {
     const value = readJSON(stagedFile);
-    return installable(value) && typeof value.app === 'string' && fs.existsSync(value.app) ? value : null;
+    const target = typeof value.targetVersion === 'string'
+      ? { ...value, legacyVersion: value.version, version: value.targetVersion }
+      : value;
+    return installable(target) && typeof target.app === 'string' && fs.existsSync(target.app) ? target : null;
   }
 
   async function checksumSelection(found) {
@@ -463,6 +482,12 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
   }
 
   function finishCheck(found, { manual, action = null, limited } = {}) {
+    // A scheduled stable check must not revoke a user's pending manual channel
+    // choice. The next manual action may replace the single available slot.
+    if (!manual && available?.action) {
+      log(`Keeping manual ${available.action} selection v${available.version}`);
+      return phase.phase === 'ready' ? 'ready' : 'available';
+    }
     if (!found?.version) {
       available = null;
       log(`No update: ${found?.reason || 'no eligible release'}`);
@@ -575,7 +600,14 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
       const app = stagedApp(platform, extract);
       if (!app) throw new Error(`${target.asset} holds no Werkschaft app`);
       fs.rmSync(zip, { force: true });
-      fs.writeFileSync(stagedFile, JSON.stringify({ version: target.version, app, ...actionFields(target) }));
+      let persistedVersion = target.version;
+      const targetVersion = target.action ? target.version : null;
+      if (targetVersion) {
+        persistedVersion = legacyStageVersion(version);
+        if (!persistedVersion) throw new Error(`cannot preserve a channel stage from v${version}`);
+      }
+      fs.writeFileSync(stagedFile, JSON.stringify({ version: persistedVersion, app,
+        ...(targetVersion ? { targetVersion } : {}), ...actionFields(target) }));
       const problem = locationProblem(platform, install, staging);
       // Keep the verified stage either way: fixing the folder lets a later quit apply it.
       if (!problem) setPhase('ready', target.version, false, target.action);
@@ -727,6 +759,6 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
 }
 
 module.exports = { REPO, FEED, SUMS, DOWNLOAD_PAGE, USER_AGENT, INTERVAL, parseVersion, compareVersions, isNewer,
-  isCanaryVersion, assetName, parseSums, selectRelease, selectCanaryPage, allowedURL, readText, downloadTo,
+  isCanaryVersion, legacyStageVersion, assetName, parseSums, selectRelease, selectCanaryPage, allowedURL, readText, downloadTo,
   installLocation, extractCommand, stagedApp, stagingLocation, applyProblem,
   helperScript, helperCommand, relaunchArgs, windowsCommandLine, windowsBootstrap, spawnDetached, windowsHelperRunning, createUpdater };

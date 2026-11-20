@@ -151,7 +151,7 @@ test('Windows packaging retains a validated canary suffix and refuses a mismatch
   const packageApp = async options => {
     packaged++;
     assert.equal(options.appVersion, '0.50.1-canary.12');
-    assert.equal(options.buildVersion, '0.50.1-canary.12');
+    assert.equal(options.buildVersion, '0.50.1', 'native build fields keep the validated numeric core');
     assert.equal(JSON.parse(fs.readFileSync(path.join(options.dir, 'package.json'))).version, '0.50.1-canary.12');
     assert.equal(JSON.parse(fs.readFileSync(path.join(options.dir, 'daemon', 'runtime.json'))).plugin_version, '0.50.1');
     return ['test-only packager output'];

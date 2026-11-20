@@ -10,6 +10,13 @@ const u = require('../update');
 
 const tmp = prefix => fs.mkdtempSync(path.join(os.tmpdir(), `werkschaft-canary-${prefix}-`));
 const sha = data => crypto.createHash('sha256').update(data).digest('hex');
+const legacyParseVersion = value => /^v?(\d+)\.(\d+)\.(\d+)$/.exec(String(value ?? '').trim())?.slice(1).map(Number) || null;
+const legacyIsNewer = (candidate, current) => {
+  const a = legacyParseVersion(candidate), b = legacyParseVersion(current);
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+  return false;
+};
 const assets = (base, names) => names.map(name => ({ name, browser_download_url: `${base}/download/${encodeURIComponent(name)}` }));
 const release = (base, version, extra = {}) => ({
   tag_name: `v${version}`, draft: false, prerelease: version.includes('-canary.'),
@@ -58,6 +65,9 @@ test('stable/canary versions use the bounded grammar and SemVer ordering', () =>
   ]) assert.equal(u.isNewer(candidate, current), newer, `${candidate} > ${current}`);
   assert.equal(u.isCanaryVersion('0.51.2-canary.0'), true);
   assert.equal(u.isCanaryVersion('0.51.2'), false);
+  assert.equal(u.legacyStageVersion('0.51.2-canary.9'), '0.51.3');
+  assert.equal(legacyIsNewer(u.legacyStageVersion('0.51.2-canary.9'), '0.51.2'), true,
+    'a pre-feature app whose visible version lost the suffix preserves a same-core canary stage');
 });
 
 test('a canary page ignores ineligible rows and selects its highest eligible version', () => {
@@ -93,6 +103,12 @@ test('canary checks stop on the first eligible page, including a not-newer candi
     assert.deepEqual(server.hits.filter(hit => hit.includes('/releases?')), [
       `/repos/${u.REPO}/releases?per_page=30&page=1`, `/repos/${u.REPO}/releases?per_page=30&page=2`,
     ]);
+
+    server.state.latest = release(server.base, '0.51.0', { prerelease: false });
+    assert.equal(await updater.check(false), 'available',
+      'a scheduled stable check preserves the pending manual canary selection');
+    assert.equal(updater.phase().version, '0.52.0-canary.10');
+    assert.equal(updater.phase().action, 'canary');
 
     server.hits.length = 0;
     server.state.pages.set(1, [release(server.base, '0.50.0-canary.9')]);
@@ -146,7 +162,10 @@ test('explicit stable return survives staging and reopen while ordinary stable c
     assert.equal(sent.at(-1).action, 'stable-return');
     assert.equal(await updater.download(), 'ready');
     const staged = JSON.parse(fs.readFileSync(path.join(userData, 'update/staged.json')));
-    assert.deepEqual({ version: staged.version, action: staged.action }, { version: '0.50.8', action: 'stable-return' });
+    assert.deepEqual({ targetVersion: staged.targetVersion, action: staged.action },
+      { targetVersion: '0.50.8', action: 'stable-return' });
+    assert.equal(legacyIsNewer(staged.version, '0.51.0'), true,
+      'a pre-feature updater sees an eligible numeric stage and ignores the additive target/action fields');
     const reopened = u.createUpdater(common);
     assert.equal(reopened.applyOnLaunch(), true);
     assert.equal(detached.length, 1, 'the existing detached swap path applies the explicit downgrade');
@@ -157,7 +176,7 @@ test('explicit stable return survives staging and reopen while ordinary stable c
   } finally { await server.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test('canary skip state is harmless to a stable verified stage and downgrade failures stay visible', () => {
+test('pre-feature state ignores a canary skip without deleting a verified stage; downgrade failures stay visible', () => {
   const root = tmp('compat'), userData = path.join(root, 'userData'), staging = path.join(userData, 'update');
   const install = path.join(root, 'Applications', 'Werkschaft.app'), app = path.join(staging, 'extract', 'Werkschaft.app');
   try {
@@ -167,10 +186,12 @@ test('canary skip state is harmless to a stable verified stage and downgrade fai
     }
     fs.writeFileSync(path.join(staging, 'staged.json'), JSON.stringify({ version: '0.51.0', app }));
     fs.writeFileSync(path.join(userData, 'update-state.json'), JSON.stringify({ skipped: '0.51.0-canary.2', future: { kept: true } }));
+    assert.equal(legacyIsNewer(JSON.parse(fs.readFileSync(path.join(staging, 'staged.json'))).version, '0.50.8'), true,
+      'the exact pre-feature numeric gate keeps this stage despite the canary-valued skipped entry');
     const detached = [];
-    const oldCompatible = u.createUpdater({ version: '0.50.8', userData, packaged: true, platform: 'darwin', arch: 'arm64',
+    const reopened = u.createUpdater({ version: '0.50.8', userData, packaged: true, platform: 'darwin', arch: 'arm64',
       execPath: path.join(install, 'Contents/MacOS/Werkschaft'), detach: (_command, args) => detached.push(args), log: () => {} });
-    assert.equal(oldCompatible.applyOnLaunch(), true);
+    assert.equal(reopened.applyOnLaunch(), true);
     assert.equal(fs.existsSync(app), true, 'a canary-valued skip does not discard the verified stage');
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(userData, 'update-state.json'))).future, { kept: true });
 
