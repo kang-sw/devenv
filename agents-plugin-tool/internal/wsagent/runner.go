@@ -654,6 +654,7 @@ func (r *Runner) startConvWith(rec Record, seed []wslive.SlashCommand, spawnPend
 		done:         make(chan struct{}),
 		settleC:      make(chan struct{}),
 	}
+	c.refreshAmbient()
 	c.refreshHeld()
 	if rec.Lead {
 		_, _, _ = refreshPermissionSelection(dir)
