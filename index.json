@@ -618,6 +618,9 @@
     },
     "261119-refactor-ws-whiteboard-sqlite-board-store": {
       "registered_at": "2026-11-19T14:14:02Z"
+    },
+    "261120-bug-ws-rail-heartbeat-starvation": {
+      "registered_at": "2026-11-20T02:41:44Z"
     }
   }
 }
