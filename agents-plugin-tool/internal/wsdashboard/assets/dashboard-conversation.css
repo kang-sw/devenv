@@ -11,7 +11,7 @@
 .msg.user .bub { background: color-mix(in srgb, var(--wb-primary) 13%, var(--wb-card)); border-radius: 12px 12px 4px 12px; padding: 8px 11px; }
 .msg.fromlead { align-self: stretch; min-width: 0; }
 .msg.fromlead .mh.conv-row { margin-bottom: 0; }
-.msg.fromlead .bub { margin: 0 62px 0 36px; background: var(--wb-card); border-radius: 4px 12px 12px 12px; padding: 8px 12px; box-shadow: var(--wb-shadow); }
+.msg.fromlead .bub { margin: 0 31px 0 18px; background: var(--wb-card); border-radius: 4px 12px 12px 12px; padding: 8px 12px; box-shadow: var(--wb-shadow); }
 /* a lead reply is markdown: block spacing comes from the board's .md rules; here only wrapping and overflow */
 .msg .bub.md { white-space: normal; min-width: 0; }
 .msg .bub.md pre { max-width: 100%; overflow-x: auto; }
@@ -30,7 +30,7 @@
    keyboard focus, and while a copy confirms (data-pinned); faint on touch screens. */
 .msg:has(> .d-acts) { position: relative; }
 .d-acts { position: absolute; right: -4px; bottom: -13px; z-index: 1; display: flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--wb-line); border-radius: 9px; background: color-mix(in srgb, var(--wb-fg) 4%, var(--wb-card)); box-shadow: 0 2px 8px rgb(0 0 0 / .3); opacity: 0; pointer-events: none; transition: opacity .12s; }
-.msg.fromlead > .d-acts { right: 54px; }
+.msg.fromlead > .d-acts { right: 23px; }
 .msg:hover > .d-acts, .msg:focus-within > .d-acts, .d-acts[data-pinned] { opacity: 1; pointer-events: auto; }
 @media (hover: none) { .d-acts { opacity: .7; pointer-events: auto; } }
 .msg.fromlead:has(> .d-acts):is(:hover, :focus-within) > .bub { box-shadow: var(--wb-shadow), 0 0 0 1px color-mix(in srgb, var(--wb-fg) 9%, transparent); }
@@ -212,6 +212,7 @@ details[open] > summary.conv-row > .row-chevron { transform: rotate(0deg); }
 .wbupdate-status:empty { display: none; }
 summary.conv-row:focus-visible, .conv-row a:focus-visible, .wbupdate :is(a, summary):focus-visible, .child-report > summary:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 3px; }
 .wbupdate-bar a:focus-visible { outline-color: var(--wb-on-topic); }
+.wbupdate-row[data-wb-element]:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 1px; border-radius: 6px; }
 
 /* ===== composer: never swapped ===== */
 .composer { contain: layout style; position: relative; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }

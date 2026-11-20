@@ -2082,7 +2082,6 @@
   "entry.whiteboard.topic": "トピック",
   "entry.whiteboard.panel": "パネル",
   "entry.whiteboard.norecap": "要約なし",
-  "entry.whiteboard.open": "ボードで開く",
   "js.whiteboard.jump.itemmissing": "このホワイトボード項目は利用できなくなりました。",
   "js.whiteboard.jump.missing": "このトピックは利用できなくなりました。",
   "js.whiteboard.jump.elementmissing": "該当する要素が利用できないため、トピックを表示しています。",

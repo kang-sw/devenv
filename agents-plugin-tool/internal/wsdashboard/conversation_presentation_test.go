@@ -308,12 +308,12 @@ func TestConversationPresentationWhiteboardFoldAndTargets(t *testing.T) {
 	}
 	ring := []wslive.RingRecord{ringRecord(1, e.RingEntry)}
 	html := presentationHTML(t, ring, PageContent{}, nil)
-	for _, want := range []string{`<article class="wbeffects wbupdate"`, `data-wb-topic="topic-706c616e"`, `data-wb-element="e7"`, `data-wb-jump="p2"`, `data-wb-jump="item-42"`, "recap &lt;b&gt;literal&lt;/b&gt;", `class="wbupdate-items"`, `>(42)</a>`} {
+	for _, want := range []string{`<article class="wbeffects wbupdate"`, `data-wb-topic="topic-706c616e"`, `data-wb-element="e7" tabindex="0" role="link"`, `data-wb-jump="p2"`, `data-wb-jump="item-42"`, "recap &lt;b&gt;literal&lt;/b&gt;", `class="wbupdate-items"`, `>(42)</a>`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %q: %s", want, html)
 		}
 	}
-	for _, bad := range []string{"SECRET PANEL PAYLOAD", "second line", "<html>", "<img", "<iframe", "<script>", "srcdoc=", "Answer on board", "question?", "b: &lt;script&gt;literal&lt;/script&gt;", "wbeffect-details", "wbeffect-values"} {
+	for _, bad := range []string{"SECRET PANEL PAYLOAD", "second line", "<html>", "<img", "<iframe", "<script>", "srcdoc=", "Answer on board", "Open on board", `data-wb-jump="e7"`, "question?", "b: &lt;script&gt;literal&lt;/script&gt;", "wbeffect-details", "wbeffect-values"} {
 		if strings.Contains(html, bad) {
 			t.Errorf("panel payload or interpreted markup %q: %s", bad, html)
 		}
