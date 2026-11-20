@@ -718,7 +718,7 @@ func (c *conv) stateWithKeyCheck(checkKey bool) State {
 	}
 	if c.closed {
 		st.Status, st.ClosedAt = StatusClosed, c.rec.ClosedAt
-		if c.rec.ClosedAt == "" && c.rec.HandedOffAt != "" {
+		if c.rec.ClosedAt == "" && c.rec.handedOff() {
 			st.Status, st.HandedOffAt = StatusHandedOff, c.rec.HandedOffAt
 			st.ResumeCommand = resumeCommand(c.rec, c.dir)
 		}
@@ -1107,7 +1107,7 @@ func (c *conv) applyMode(ev wslive.Event, quiet, coalesceTurnEnd bool) {
 // goes alone once nothing is queued.
 func (c *conv) canKick() bool {
 	return !c.closed && !c.hidden && !c.turn && !c.replaying && len(c.steered) == 0 && c.leverC == nil &&
-		!(c.rec.Backend == BackendPi && c.r.opts.Holders != nil && !c.r.scanDone())
+		!(c.r.opts.Holders != nil && !c.r.scanDone())
 }
 
 func (c *conv) kick() {

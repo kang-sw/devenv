@@ -70,6 +70,7 @@ func (h ManagerHost) Status(id string) (wsholder.AttachInfo, error) {
 // descriptor.
 const holderKindLead = "lead"
 const holderKindPiWorker = "pi-worker"
+const holderKindAgentWorker = "agent-worker"
 
 // leadRingBytes is the output ring of a lead conversation's holder. A
 // rejoin rebuilds the turn state from the ring, so it holds a long turn's
@@ -81,6 +82,7 @@ const leadRingBytes = 32 << 20
 // holderSession is the descriptor a lead conversation's holder records.
 type holderSession struct {
 	Kind    string `json:"kind"`
+	Backend string `json:"backend,omitempty"`
 	ReplyID string `json:"reply_id"`
 	Cwd     string `json:"cwd,omitempty"`
 	Label   string `json:"label,omitempty"`

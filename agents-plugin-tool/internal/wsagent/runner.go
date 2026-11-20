@@ -352,7 +352,7 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 			}
 			continue
 		}
-		if rec.ClosedAt != "" || rec.HandedOffAt != "" {
+		if rec.ClosedAt != "" || rec.handedOff() {
 			// A handed-off session is a terminal harness's: nothing here
 			// writes its row, watches its mail, or starts a process for it.
 			r.loadClosed(rec)
@@ -449,7 +449,7 @@ func (r *Runner) closeAtStart(rec Record) bool {
 	return true
 }
 
-// orphansAtStart picks the open spawned Pi children a daemon start closes
+// orphansAtStart picks the open spawned children a daemon start closes
 // instead of serving (closeAtStart): one whose conversation parent is
 // closed or gone, so no report of it reaches one, or that descends from
 // one. A finished child is not closed: it sleeps (agent_tools.go).
@@ -464,7 +464,7 @@ func orphansAtStart(open []Record) map[string]bool {
 		changed = false
 		for _, rec := range open {
 			id := rec.ReplyID
-			if done[id] || rec.Lead || rec.Parent == nil || rec.Backend != BackendPi {
+			if done[id] || rec.Lead || rec.Parent == nil {
 				continue
 			}
 			if rec.Parent.Kind == ParentConversation && !stays(rec.Parent.ReplyID) {
@@ -500,6 +500,10 @@ func (r *Runner) holdersScanned() {
 	owned := map[string]bool{}
 	for _, c := range convs {
 		c.do(func() {
+			// A rejected association is not permission to stop that holder.
+			if id := c.rec.HolderID; id != "" {
+				owned[id] = true
+			}
 			c.checkReattach()
 			if c.hidden {
 				c.stopProcess("")
@@ -527,7 +531,7 @@ func (r *Runner) holdersScanned() {
 	}
 	for _, info := range listed {
 		var meta holderSession
-		if json.Unmarshal(info.Session, &meta) != nil || (meta.Kind != holderKindLead && meta.Kind != holderKindPiWorker) || owned[info.ID] {
+		if json.Unmarshal(info.Session, &meta) != nil || (meta.Kind != holderKindLead && meta.Kind != holderKindPiWorker && meta.Kind != holderKindAgentWorker) || owned[info.ID] {
 			continue
 		}
 		fmt.Fprintf(r.opts.Log, "agent: ending conversation holder %s of %s: no open conversation runs under it\n", info.ID, meta.ReplyID)
@@ -730,7 +734,7 @@ func (r *Runner) startConvWith(rec Record, seed []wslive.SlashCommand, spawnPend
 		}
 		c.live.writeSnapshot()
 	}
-	if rec.HolderID != "" && !foreign && (rec.Lead || rec.Backend == BackendPi) {
+	if rec.HolderID != "" && !foreign {
 		if rec.Parent != nil && rec.TurnOpen {
 			c.turn = true
 			c.live.applyQuiet(wslive.Event{Kind: wslive.KindTurnStart})
@@ -788,7 +792,7 @@ var errHandedOff = &requestError{status: http.StatusConflict, msg: "the session 
 
 // endedError is the refusal of a write to a conversation no loop serves.
 func endedError(rec Record) error {
-	if rec.ClosedAt == "" && rec.HandedOffAt != "" {
+	if rec.ClosedAt == "" && rec.handedOff() {
 		return errHandedOff
 	}
 	return errClosed
@@ -1669,7 +1673,7 @@ func closedState(rec Record) State {
 		// A lead's Cwd is a taken-over terminal's, not a spawn choice.
 		st.Cwd = rec.Cwd
 	}
-	if rec.ClosedAt == "" && rec.HandedOffAt != "" {
+	if rec.ClosedAt == "" && rec.handedOff() {
 		st.Status, st.HandedOffAt = StatusHandedOff, rec.HandedOffAt
 	}
 	return st

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsholder"
@@ -70,7 +71,7 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 			return err
 		}
 	}
-	level := PermissionLevel("")
+	level := childLevel(c.dir)
 	if !attach {
 		// Every launch re-admits a spawned child's authority against its
 		// parent's current level (agent_tools.go).
@@ -79,7 +80,7 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 			return err
 		}
 	}
-	if rec.Backend == BackendPi && c.r.opts.Holders != nil && !attach {
+	if c.r.opts.Holders != nil && !attach {
 		if !c.r.scanDone() {
 			return errors.New("holder scan is not complete")
 		}
@@ -167,7 +168,7 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 			if !attach {
 				token, endpoint := c.r.issueToken(rec.ReplyID)
 				env[EnvPiToken], env[EnvPiEndpoint] = token, endpoint
-				if rec.Backend == BackendPi && c.r.opts.Holders != nil {
+				if c.r.opts.Holders != nil {
 					c.update(func(rec *Record) { rec.Capability = token })
 				}
 				rec.Capability = token
@@ -176,14 +177,13 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		cmd.Env = env
 		spec.WSMCP = &cmd
 		if c.r.opts.Backends[rec.Backend].WorkerHTTPMCP {
-			// Over the daemon's HTTP route when it has one; a worker is
-			// never held, so its token is never persisted.
+			// The same HTTP tuple is persisted with the holder after launch.
 			spec.MCPSession = c.r.attachMCP(rec.ReplyID, "", env, rec.workDir(), 0)
 		}
 	}
-	if rec.Backend == BackendPi && c.r.opts.Holders != nil {
+	if c.r.opts.Holders != nil {
 		spec.Holder = &holderChild{host: c.r.opts.Holders, table: &c.r.holders,
-			session: holderSession{Kind: holderKindPiWorker, ReplyID: rec.ReplyID, Cwd: rec.workDir(), Capability: capabilityHash(rec.Capability)}}
+			session: holderSession{Kind: holderKindAgentWorker, Backend: rec.Backend, ReplyID: rec.ReplyID, Cwd: rec.workDir(), Capability: capabilityHash(rec.Capability)}}
 		if attach {
 			spec.Holder.id, spec.Holder.skipTo = rec.HolderID, rec.HolderSeq
 		}
@@ -209,12 +209,20 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		if held {
 			if attach {
 				c.replaying, c.seq = true, rec.HolderSeq
+				// Hold runner events until ownership and downgrade reconciliation
+				// finish; Scan may already be delivering buffered output.
+				c.events = nil
 				return nil
 			}
 			c.seq, c.seqDirty, c.live.ringDirty = 0, false, false
 			c.update(func(rec *Record) {
 				rec.HolderID, rec.HostPID, rec.HolderSeq = id, pid, 0
 				rec.SteerSeq, rec.SteerAnswers, rec.SteerAnswerSeq = 0, 0, 0
+				rec.HandedOffAt = c.r.opts.Now().UTC().Format(time.RFC3339)
+				rec.forgetMCP()
+				if s := spec.MCPSession; s != nil {
+					rec.MCPToken, rec.MCPURL, rec.MCPEnv, rec.MCPHolder = s.Token, s.URL, spec.WSMCP.Env, id
+				}
 			})
 		}
 	}
@@ -425,7 +433,12 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		if spawned {
 			// The process the row named early is gone (the backend closed
 			// it); the deferred write says stopped.
-			c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0 })
+			c.update(func(rec *Record) {
+				rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0
+				if !rec.Lead {
+					rec.HandedOffAt = ""
+				}
+			})
 		}
 		return err
 	}
@@ -475,7 +488,12 @@ func (c *conv) retireHolder() error {
 			return fmt.Errorf("the session's previous process could not be ended (holder %s): %w", id, err)
 		}
 	}
-	c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0 })
+	c.update(func(rec *Record) {
+		rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0
+		if !rec.Lead {
+			rec.HandedOffAt = ""
+		}
+	})
 	c.writeRegistration()
 	return nil
 }
@@ -527,18 +545,34 @@ func (c *conv) checkReattach() {
 	for _, info := range c.r.opts.Holders.List().Holders {
 		if info.ID == id {
 			listed, attached = true, info.Attached
+			if !attached {
+				continue
+			}
 			if !c.rec.Lead {
 				var meta holderSession
-				if json.Unmarshal(info.Session, &meta) != nil || meta.Kind != holderKindPiWorker || meta.ReplyID != c.rec.ReplyID || meta.Capability != capabilityHash(c.rec.Capability) || (info.Child != nil && c.rec.HostPID != 0 && info.Child.PID != c.rec.HostPID) {
+				if json.Unmarshal(info.Session, &meta) != nil || !workerHolderMatches(c.rec, meta, info.Child) {
 					// Never stop a holder that failed the ownership check.
 					hp.Detach()
 					c.setStatus(func() { c.proc = nil })
 					c.events = nil
-					c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0 })
+					c.update(func(rec *Record) {
+						rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0
+						if !rec.Lead {
+							rec.HandedOffAt = ""
+						}
+					})
 					c.recoveryFailed("held process association does not match the worker record")
 					return
 				}
+				if c.retireDowngradedWorker(hp) {
+					return
+				}
+				if _, err := c.r.childAdmission(c.record()); err != nil {
+					fmt.Fprintf(c.r.opts.Log, "agent %s: rejoin permission admission (advisory; applies on next launch): %v\n", c.rec.ReplyID, err)
+				}
 				c.r.restoreToken(c.record())
+				c.restoreWorkerMCP()
+				c.events = c.proc.Events()
 			}
 		}
 	}
@@ -628,7 +662,7 @@ func (c *conv) replayDone(lost bool) {
 // recoveryFailed settles once, ends the unrecoverable transport, and never
 // launches another process on the strength of a failed probe.
 func (c *conv) recoveryFailed(reason string) {
-	text := "Pi worker recovery failed: " + reason
+	text := "Worker recovery failed: " + reason
 	c.setStatus(func() { c.turn = false; c.lastErr = text })
 	if c.rec.TurnOpen {
 		c.settleTurn(TurnFailed, text, c.turnMark)
