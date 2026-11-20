@@ -268,6 +268,12 @@
     }
     step();
   }
+  function effectJumpTo(card, id) {
+    effectJump(card.getAttribute("data-wb-topic"), id, function (found, exact) {
+      var status = card.querySelector(".wbupdate-status");
+      if (status) status.textContent = !found ? wsT("js.whiteboard.jump.missing") : !exact ? wsT("js.whiteboard.jump.elementmissing") : "";
+    });
+  }
   function effectJumpClick(e) {
     var t = e.target, box = entriesBox();
     if (!t || !t.closest || !box || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -280,14 +286,22 @@
     if (!link && selection && !selection.isCollapsed) return;
     e.preventDefault();
     var row = t.closest(".wbupdate-row[data-wb-element]");
-    var topicID = card.getAttribute("data-wb-topic");
-    var id = link ? link.getAttribute("data-wb-jump") : row ? row.getAttribute("data-wb-element") : topicID;
-    effectJump(topicID, id, function (found, exact) {
-      var status = card.querySelector(".wbupdate-status");
-      if (status) status.textContent = !found ? wsT("js.whiteboard.jump.missing") : !exact ? wsT("js.whiteboard.jump.elementmissing") : "";
-    });
+    var id = link ? link.getAttribute("data-wb-jump") : row ? row.getAttribute("data-wb-element") : card.getAttribute("data-wb-topic");
+    effectJumpTo(card, id);
+  }
+  function effectJumpKey(e) {
+    if ((e.key !== "Enter" && e.key !== " ") || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var t = e.target, box = entriesBox();
+    if (!t || !t.closest || !box) return;
+    if (t.closest("[data-wb-nav], a, summary, button, input, textarea, select")) return;
+    var row = t.closest(".wbupdate-row[data-wb-element]");
+    var card = row && row.closest(".wbupdate-topic[data-wb-topic]");
+    if (!row || !card || !box.contains(card)) return;
+    e.preventDefault();
+    effectJumpTo(card, row.getAttribute("data-wb-element"));
   }
   doc.addEventListener("click", effectJumpClick);
+  doc.addEventListener("keydown", effectJumpKey);
 
   // User chips and references in committed previews share the card jump owner.
   // Delegation also covers held bubbles and subsequently paged conversation rows.

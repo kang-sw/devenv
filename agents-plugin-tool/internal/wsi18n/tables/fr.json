@@ -2082,7 +2082,6 @@
   "entry.whiteboard.topic": "Sujet",
   "entry.whiteboard.panel": "Panneau",
   "entry.whiteboard.norecap": "Résumé indisponible",
-  "entry.whiteboard.open": "Ouvrir sur le tableau",
   "js.whiteboard.jump.itemmissing": "Cet élément du tableau blanc n’est plus disponible.",
   "js.whiteboard.jump.missing": "Ce sujet n’est plus disponible.",
   "js.whiteboard.jump.elementmissing": "L’élément exact est indisponible ; son sujet est affiché.",

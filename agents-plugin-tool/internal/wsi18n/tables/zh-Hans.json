@@ -2082,7 +2082,6 @@
   "entry.whiteboard.topic": "主题",
   "entry.whiteboard.panel": "面板",
   "entry.whiteboard.norecap": "摘要不可用",
-  "entry.whiteboard.open": "在白板上打开",
   "js.whiteboard.jump.itemmissing": "此白板条目已不可用。",
   "js.whiteboard.jump.missing": "此主题已不可用。",
   "js.whiteboard.jump.elementmissing": "确切元素不可用；正在显示其主题。",
