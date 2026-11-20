@@ -399,3 +399,43 @@ test('Org helpers coverage: orgEdRenameOrg, orgEdMapRefusal, orgItemRefs, and 2-
   assert.equal(sim.orgs['o-sw1'].name, 'SW개발2팀');
   assert.equal(sim.orgs['o-sw2'].name, 'SW개발1팀');
 });
+
+test('Lead review regressions: pmRuleCovered uses assignRoot & keeps dead/vacant org rules, and org name fold matches Greek σ/ς', () => {
+  const { members, orgs } = fixture();
+  const oi = ctx.orgIndex(orgs, members);
+  const idx = ctx.pmIndex(oi.tree);
+
+  // 1a. Surviving org rule assigned when head was lee-dy (assignRoot: lee-dy), later re-headed to park-sy (root: park-sy):
+  //     server check.go judges overlap from assignRoot, so lee-dy (and descendants) MUST be locked, while park-sy is NOT locked.
+  const reheadedRule = {
+    'r-rehead': { id: 'r-rehead', item: 'kim-hn#60', by: 'kim-hn', org: 'o-sw1', root: 'park-sy', assignRoot: 'lee-dy', includeRoot: true, levels: null, state: 'live', ended: null },
+  };
+  assert.equal(ctx.pmRuleCovered(idx, reheadedRule, 'kim-hn#60', 'kim-hn', 'lee-dy'), true);
+  assert.equal(ctx.pmRuleCovered(idx, reheadedRule, 'kim-hn#60', 'kim-hn', 'choi-jw'), true);
+  assert.equal(ctx.pmRuleCovered(idx, reheadedRule, 'kim-hn#60', 'kim-hn', 'park-sy'), false);
+
+  // 1b. Live rules whose org was deleted (o-plat) or vacated (o-vac) stay in check.go liveRules and lock their assignRoot.
+  const deadAndVacRules = {
+    'r-dead': { id: 'r-dead', item: 'kim-hn#60', by: 'kim-hn', org: 'o-plat', root: 'lee-dy', assignRoot: 'lee-dy', includeRoot: true, levels: null, state: 'live', ended: null },
+    'r-vac':  { id: 'r-vac',  item: 'kim-hn#60', by: 'kim-hn', org: 'o-vac',  root: 'park-sy', assignRoot: 'park-sy', includeRoot: true, levels: null, state: 'live', ended: null },
+  };
+  assert.equal(ctx.pmRuleCovered(idx, deadAndVacRules, 'kim-hn#60', 'kim-hn', 'lee-dy'), true);
+  assert.equal(ctx.pmRuleCovered(idx, deadAndVacRules, 'kim-hn#60', 'kim-hn', 'park-sy'), true);
+  assert.equal(ctx.pmRuleCovered(idx, deadAndVacRules, 'kim-hn#60', 'kim-hn', 'kim-hn'), false);
+
+  // 2. Org-name case-folding catches Greek σ vs ς (and ß vs ẞ) in both staging and preflight.
+  const greekOrgs = orgs.concat([{ id: 'o-gr', name: 'Ομάδασ', head: '', removed: null }]);
+  const ed = ctx.orgEdInit(members, 'kim-hn', greekOrgs);
+  assert.equal(ctx.orgNameFoldKey('Ομάδασ'), ctx.orgNameFoldKey('Ομάδας'));
+  assert.equal(ctx.orgNameFoldKey('Ομάδασ'), ctx.orgNameFoldKey('ΟΜΆΔΑΣ'));
+  assert.equal(ctx.orgNameFoldKey('ß'), ctx.orgNameFoldKey('ẞ'));
+  assert.equal(ctx.orgEdCreateOrg(ed, 'Ομάδας', '').reason, 'dup_name');
+  assert.equal(ctx.orgEdRenameOrg(ed, 'o-sw1', 'Ομάδας').reason, 'dup_name');
+
+  // Preflight also catches σ vs ς when another org was concurrently renamed on the live state.
+  const edPre = ctx.orgEdInit(members, 'kim-hn', orgs);
+  assert.equal(ctx.orgEdCreateOrg(edPre, 'Ομάδας', '').ok, true);
+  const planPre = ctx.orgEdPreflightAndBuild(edPre, members, 'kim-hn', greekOrgs);
+  assert.equal(planPre.ok, false);
+  assert.ok(Object.values(planPre.errors).some(e => e.code === 'dup_name'));
+});

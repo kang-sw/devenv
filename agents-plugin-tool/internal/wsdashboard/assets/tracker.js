@@ -499,13 +499,18 @@
     }
     return null;
   }
+  // Unicode case-folding key for org-name uniqueness, at least as strict as Go's strings.EqualFold
+  // (collapses e.g. Greek σ/ς/Σ and German ß/ẞ into a single fold key).
+  function orgNameFoldKey(s) {
+    return String(s || '').trim().toUpperCase().toLowerCase().toUpperCase().toLowerCase();
+  }
   function orgEdNameClash(ed, name, excludeId) {
-    var low = String(name || '').trim().toLowerCase();
+    var low = orgNameFoldKey(name);
     if (!low) return null;
     var proj = orgEdProjectedOrgs(ed), ids = Object.keys(proj);
     for (var i = 0; i < ids.length; i++) {
       var o = proj[ids[i]];
-      if (o.id !== excludeId && String(o.name || '').trim().toLowerCase() === low) return o;
+      if (o.id !== excludeId && orgNameFoldKey(o.name) === low) return o;
     }
     return null;
   }
@@ -822,7 +827,7 @@
     });
     var nameSeen = {}, headSeen = {};
     Object.keys(finalOrgs).sort().forEach(function (id) {
-      var o = finalOrgs[id], low = o.name.toLowerCase();
+      var o = finalOrgs[id], low = orgNameFoldKey(o.name);
       if (nameSeen[low]) {
         if (activeSets[id]) errors['org:' + id] = { code: 'dup_name' };
         if (activeSets[nameSeen[low]]) errors['org:' + nameSeen[low]] = { code: 'dup_name' };
@@ -862,8 +867,8 @@
       return '';
     }
     function nameOwner(n) {
-      var low = String(n || '').toLowerCase(), ids = Object.keys(simOrgs);
-      for (var i = 0; i < ids.length; i++) if (simOrgs[ids[i]].name.toLowerCase() === low) return ids[i];
+      var low = orgNameFoldKey(n), ids = Object.keys(simOrgs);
+      for (var i = 0; i < ids.length; i++) if (orgNameFoldKey(simOrgs[ids[i]].name) === low) return ids[i];
       return '';
     }
     // 3. Pure head releases first (frees heads before any take-up)

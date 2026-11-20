@@ -104,16 +104,20 @@
     return out;
   }
   // Whether existing live rule y covers proposed whole-subtree rule {root, include_root: true} (no levels).
+  // Matches wstracker/check.go: overlap is judged from the assign-time root (assignRoot || root),
+  // including live rules whose org was later deleted or vacated.
   function pmRuleCovers(idx, y, root) {
     if (!y || y.levels != null) return false;
-    if (y.root === root) return !!(y.includeRoot || y.include_root);
-    return !!(idx.desc[y.root] && idx.desc[y.root][root] > 0);
+    var yRoot = y.assignRoot || y.root;
+    if (!yRoot) return false;
+    if (yRoot === root) return !!(y.includeRoot || y.include_root);
+    return !!(idx.desc[yRoot] && idx.desc[yRoot][root] > 0);
   }
   // Whether any live rule of viewer on itemId already covers {root, include_root: true}.
   function pmRuleCovered(idx, rules, itemId, viewer, root) {
     var list = Array.isArray(rules) ? rules : Object.keys(rules || {}).map(function (k) { return rules[k]; });
     return list.some(function (y) {
-      return y && y.item === itemId && y.by === viewer && y.state === 'live' && pmRuleCovers(idx, y, root);
+      return y && !y.ended && y.item === itemId && y.by === viewer && y.state === 'live' && pmRuleCovers(idx, y, root);
     });
   }
   // Pure completion class for a single assign target, matching complClass/asgClass.
@@ -343,14 +347,7 @@
         var skipRule = retarget && retarget.rule ? retarget.rule : '';
         lockedP = pmRetargetLockedPeople(it, VS.rules, VS.assignments, VS.orgs, VS.members, skipRule);
         idx.order.forEach(function (id) { if (lockedP[id]) lockedOrder.push(id); });
-        var otherRules = Object.keys(VS.rules || {}).map(function (k) { return VS.rules[k]; }).filter(function (ru) {
-          if (!ru || (skipRule && ru.id === skipRule)) return false;
-          if (ru.org) {
-            var o = oi.byId[ru.org];
-            if (!o || o.removed || !o.head || !VS.members[o.head] || VS.members[o.head].removed) return false;
-          }
-          return true;
-        });
+        var otherRules = skipRule ? Object.keys(VS.rules || {}).map(function (k) { return VS.rules[k]; }).filter(function (ru) { return ru && ru.id !== skipRule; }) : VS.rules;
         if (!norule) idx.order.forEach(function (id) {
           if ((idx.isLead[id] || oi.headToOrg[id]) && pmRuleCovered(idx, otherRules, it.id, VS.viewer.member, id)) lockedG[id] = true;
         });
