@@ -424,7 +424,17 @@
       "registered_at": "2026-11-17T09:49:58Z"
     },
     "261117-feat-ws-hosted-compaction-lifecycle": {
-      "registered_at": "2026-11-17T09:49:15Z"
+      "registered_at": "2026-11-17T09:49:15Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-20T15:05:05Z",
+        "impl": {
+          "branch": "impl/develop/tidal-baked-duvet"
+        }
+      }
     },
     "261117-feat-ws-hosted-prompt-assembly": {
       "registered_at": "2026-11-17T09:48:35Z",
