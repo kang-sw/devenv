@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 )
 
 // PermissionLevel is common intent, independent of native modes and capability
@@ -113,22 +115,70 @@ func (r *Runner) resolveLeadPermission(rec Record, level PermissionLevel, explic
 	return legacyLeadPermission(rec), "legacy-derived", nil
 }
 
+func resolveWorkerPermission(def Profile, level PermissionLevel, explicit bool, err error) (PermissionLevel, string, error) {
+	if err != nil {
+		return "", "", err
+	}
+	if explicit {
+		return level, "explicit", nil
+	}
+	return legacyWorkerPermission(def), "legacy-derived", nil
+}
+
+// workerPermission reads this worker's durable selection, or derives the
+// legacy level from the definition that will actually launch. Derived levels
+// are never written back.
+func (r *Runner) workerPermission(rec Record, def Profile, dir string) (PermissionLevel, string, error) {
+	level, explicit, err := refreshPermissionSelection(dir)
+	return resolveWorkerPermission(def, level, explicit, err)
+}
+
+// currentWorkerPermission resolves a parent conversation at admission time.
+// Profile edits may change a legacy-derived level, so a launch never reuses a
+// stored definition as the parent's current authority.
+func (r *Runner) currentWorkerPermission(rec Record) (PermissionLevel, string, error) {
+	dir := wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID)
+	level, explicit, err := refreshPermissionSelection(dir)
+	if err != nil || explicit {
+		return resolveWorkerPermission(Profile{}, level, explicit, err)
+	}
+	rp, err := r.resolve(rec.Profile, rec.Root)
+	if err != nil {
+		return "", "", err
+	}
+	if rp.Definition.Backend != rec.Backend || rp.Definition.Lead {
+		return "", "", fmt.Errorf("agent profile %q no longer resolves to this worker's %s backend", rec.Profile, rec.Backend)
+	}
+	return resolveWorkerPermission(rp.Definition, "", false, nil)
+}
+
 // permissionState is computed even for closed rows; cached records must not
 // cache old enforcement evidence. Selection is cached separately and invalidated
-// by permission writes; workers deliberately omit it.
+// by permission writes.
 func (r *Runner) permissionState(st State, rec Record, dir string) State {
-	if !rec.Lead {
-		return st
-	}
 	selected, explicit, readErr := cachedPermissionSelection(dir)
-	level, source, err := r.resolveLeadPermission(rec, selected, explicit, readErr)
+	var level PermissionLevel
+	var source string
+	var err error
+	if rec.Lead {
+		level, source, err = r.resolveLeadPermission(rec, selected, explicit, readErr)
+	} else if explicit || readErr != nil {
+		level, source, err = resolveWorkerPermission(Profile{}, selected, explicit, readErr)
+	} else if st.PermissionLevel != "" {
+		level, source = st.PermissionLevel, st.PermissionSource
+	} else if rec.ResolvedDefinition != nil {
+		level, source = legacyWorkerPermission(*rec.ResolvedDefinition), "legacy-derived"
+	}
 	if err != nil {
 		st.Error = appendDiagnostic(st.Error, err.Error())
 		return st
 	}
+	if level == "" {
+		return st
+	}
 	st.PermissionLevel, st.PermissionSource = level, source
 	active := ""
-	if st.Process {
+	if rec.Lead && st.Process {
 		active = st.ActiveMode
 	}
 	st.PermissionEnforcement = permissionQuality(rec.Backend, level, active)
@@ -181,7 +231,11 @@ func (c *conv) permissionNudge(level PermissionLevel, worker bool, active string
 		limit = "native mode observation is pending; confinement is unproved"
 	}
 	if worker {
-		limit = "common worker posture is deferred; the unchanged capability loadout is not a sandbox"
+		if level == "" {
+			limit = "common worker authority is unresolved; the capability loadout is not confinement evidence"
+		} else {
+			limit = "current-parent admission passed; the capability loadout and harness controls do not prove confinement"
+		}
 	}
 	label := string(level)
 	if label == "" {
@@ -198,30 +252,59 @@ func (r *Runner) SetPermissionLevel(id string, level PermissionLevel) (State, er
 
 func (c *conv) setPermissionLevel(level PermissionLevel, user, ack bool) error {
 	rec := c.record()
-	if !rec.Lead {
-		return badRequest("common worker permission selection is deferred")
-	}
-	if !c.r.supportsLeadPermission(rec.Backend, level) {
+	if rec.Lead && !c.r.supportsLeadPermission(rec.Backend, level) {
 		return badRequest("permission_level %q is not supported on %s", level, rec.Backend)
 	}
-	current, _, err := c.r.leadPermission(rec, c.dir)
+	var current PermissionLevel
+	var err error
+	if rec.Lead {
+		current, _, err = c.r.leadPermission(rec, c.dir)
+	} else {
+		rp, resolveErr := c.r.resolve(rec.Profile, rec.Root)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		if rp.Definition.Backend != rec.Backend || rp.Definition.Lead {
+			return badRequest("agent profile %q no longer resolves to this worker's %s backend", rec.Profile, rec.Backend)
+		}
+		current, _, err = c.r.workerPermission(rec, rp.Definition, c.dir)
+	}
 	if err != nil {
 		return err
+	}
+	if current.rank() == 0 {
+		return badRequest("the worker's current permission level is unresolved")
 	}
 	if err := authorizePermission(current, level, user, ack); err != nil {
 		return err
 	}
+	if !rec.Lead && rec.Parent != nil {
+		ceiling, err := c.r.agentCeiling(*rec.Parent)
+		if err != nil {
+			return badRequest("permission admission: %v", err)
+		}
+		if level.rank() > ceiling.rank() {
+			return &requestError{status: http.StatusForbidden, msg: fmt.Sprintf("permission admission: authority %s is above the parent's current level %s", level, ceiling)}
+		}
+	}
 	if err := writePermissionSelection(c.dir, level); err != nil {
 		return err
 	}
-	if mode := nativePermissionMode(rec.Backend, level); mode != "" {
-		c.update(func(rec *Record) { rec.PermissionMode = mode })
-		c.dirtyMode, c.reconcileMode = true, false
+	if rec.Lead {
+		if mode := nativePermissionMode(rec.Backend, level); mode != "" {
+			c.update(func(rec *Record) { rec.PermissionMode = mode })
+			c.dirtyMode, c.reconcileMode = true, false
+		}
+	} else {
+		c.setStatus(func() {
+			c.workerPermissionLevel = level
+			c.workerPermissionSource = "explicit"
+		})
 	}
 	if !c.turn {
 		c.applySettings()
 	}
-	c.permissionNudge(level, false, "")
+	c.permissionNudge(level, !rec.Lead, "")
 	return nil
 }
 

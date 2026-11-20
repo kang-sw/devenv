@@ -1,6 +1,7 @@
 package wsagent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -273,25 +274,99 @@ func TestPermissionConcurrentUpdateStart(t *testing.T) {
 	assertPermissionSelection(t, wsdashboard.SessionDir(h.dir, st.ID), PermissionReadOnly, false)
 }
 
-func TestPermissionWorkersRemainUnapplied(t *testing.T) {
+func TestPermissionWorkerInputStateAndControl(t *testing.T) {
 	h, _ := childHarness(t)
-	st := h.spawnWorker("medium")
+	var log bytes.Buffer
+	h.runner.Close()
+	h.config.Log = &log
+	h.start()
+	st, err := h.runner.Spawn(SpawnSpec{
+		Profile: PiWorkerProfile, Root: h.root, Prompt: "work", Tier: "medium",
+		Label: "worker", Parent: &leadParent, PermissionLevel: PermissionWorkdirWrite,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	spec := h.backend.waitProcStart(t, 0)
-	if !slices.Equal(spec.Profile.Tools, PiWorkerTools) || spec.PermissionLevel != "" {
-		t.Fatalf("worker posture applied: %+v", spec)
+	if !slices.Equal(spec.Profile.Tools, PiWorkerTools) || spec.PermissionLevel != PermissionWorkdirWrite {
+		t.Fatalf("worker launch input: %+v", spec)
 	}
 	state, err := h.runner.Get(st.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.PermissionLevel != "" || state.PermissionSource != "" || state.PermissionEnforcement != "" {
-		t.Fatalf("false worker State: %+v", state)
+	if state.PermissionLevel != PermissionWorkdirWrite || state.PermissionSource != "explicit" || state.PermissionEnforcement != "advisory" {
+		t.Fatalf("worker State: %+v", state)
 	}
-	if _, err := h.runner.SetPermissionLevel(st.ID, PermissionReadOnly); err == nil {
-		t.Fatal("worker selection accepted")
+	assertPermissionSelection(t, wsdashboard.SessionDir(h.dir, st.ID), PermissionWorkdirWrite, false)
+	if got := log.String(); !strings.Contains(got, "Permission workdir-write is advisory on pi: current-parent admission passed") {
+		t.Fatalf("authority-accurate worker nudge: %s", got)
 	}
-	if _, err := os.Stat(filepath.Join(wsdashboard.SessionDir(h.dir, st.ID), "permission.json")); !os.IsNotExist(err) {
-		t.Fatalf("worker sidecar: %v", err)
+	lowered, err := h.runner.SetPermissionLevel(st.ID, PermissionReadOnly)
+	if err != nil || lowered.PermissionLevel != PermissionReadOnly || lowered.PermissionSource != "explicit" {
+		t.Fatalf("lower worker: %+v %v", lowered, err)
+	}
+	if _, err := h.runner.SetPermissionLevel(st.ID, PermissionWorkdirWrite); requestStatus(err) != http.StatusForbidden {
+		t.Fatalf("worker raise: %v", err)
+	}
+	if _, err := h.runner.Stop(st.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.runner.Send(st.ID, "again"); err != nil {
+		t.Fatal(err)
+	}
+	if next := h.backend.waitProcStart(t, 1); next.PermissionLevel != PermissionReadOnly {
+		t.Fatalf("lowered restart input: %+v", next)
+	}
+}
+
+func TestPermissionCurrentParentAdmission(t *testing.T) {
+	h := permissionHarness(t).start()
+	parent := h.lead(BackendClaude, LeadOptions{PermissionLevel: PermissionWorkdirWrite})
+	parentRef := ParentRef{Kind: ParentLead, ReplyID: parent.ID}
+	child, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "work", Parent: &parentRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.holder(child.ID)
+	if got := h.state(child.ID); got.PermissionLevel != PermissionWorkdirWrite || got.PermissionSource != "legacy-derived" || got.PermissionEnforcement != "advisory" {
+		t.Fatalf("legacy worker projection: %+v", got)
+	}
+	if _, err := os.Stat(filepath.Join(wsdashboard.SessionDir(h.dir, child.ID), "permission.json")); !os.IsNotExist(err) {
+		t.Fatalf("legacy worker wrote selection: %v", err)
+	}
+	if _, err := h.runner.Stop(child.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.runner.SetPermissionLevel(parent.ID, PermissionReadOnly); err != nil {
+		t.Fatal(err)
+	}
+	h.send(child.ID, "wake below the new ceiling")
+	if got := h.state(child.ID); got.Process || !strings.Contains(got.Error, "authority workdir-write is above the parent's current level read-only") {
+		t.Fatalf("worker started above current parent: %+v", got)
+	}
+	if _, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "new child", Parent: &parentRef}); err == nil || !strings.Contains(err.Error(), "above the parent's current level read-only") {
+		t.Fatalf("creation admission: %v", err)
+	}
+}
+
+func TestPermissionMissingParentAdmission(t *testing.T) {
+	h, _ := childHarness(t)
+	before := len(h.runner.List())
+	missing := ParentRef{Kind: ParentConversation, ReplyID: "missingparentrecord"}
+	_, err := h.runner.Spawn(SpawnSpec{Profile: AgentWorkerProfile(BackendPi), Root: h.root, Prompt: "work", Parent: &missing, PermissionLevel: PermissionWorkdirWrite})
+	if err == nil || !strings.Contains(err.Error(), "has no record") {
+		t.Fatalf("missing parent admission: %v", err)
+	}
+	if len(h.runner.List()) != before {
+		t.Fatal("missing-parent refusal created a conversation")
+	}
+	root, err := h.runner.Create(PiWorkerProfile, h.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root.Parent != nil || root.PermissionLevel != PermissionWorkdirWrite || root.PermissionSource != "legacy-derived" {
+		t.Fatalf("root worker admission: %+v", root)
 	}
 }
 

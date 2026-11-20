@@ -61,6 +61,10 @@ type conv struct {
 	monitors   *int
 	// actionNeeded is State.ActionNeeded.
 	actionNeeded string
+	// Worker permission projection is transient. Explicit selection lives in
+	// permission.json; a legacy-derived value is recomputed at each launch.
+	workerPermissionLevel  PermissionLevel
+	workerPermissionSource string
 	// failure and mcpBroken are State.Failure and State.MCPBroken.
 	failure   *wslive.Notice
 	mcpBroken []string
@@ -776,6 +780,10 @@ func (c *conv) stateWithKeyCheck(checkKey bool) State {
 	if c.caps != nil {
 		caps := c.caps.clone()
 		st.Capabilities = &caps
+	}
+	if !c.rec.Lead {
+		st.PermissionLevel = c.workerPermissionLevel
+		st.PermissionSource = c.workerPermissionSource
 	}
 	st.IsChild = c.r.isChildRecord(c.rec)
 	return c.r.permissionState(st, c.rec, c.dir)

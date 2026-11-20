@@ -654,6 +654,14 @@ func (r *Runner) startConvWith(rec Record, seed []wslive.SlashCommand, spawnPend
 		done:         make(chan struct{}),
 		settleC:      make(chan struct{}),
 	}
+	if !rec.Lead {
+		if level, source, err := r.currentWorkerPermission(rec); err == nil {
+			c.workerPermissionLevel = level
+			c.workerPermissionSource = source
+		} else {
+			c.lastErr = appendDiagnostic(c.lastErr, "worker permission selection: "+err.Error())
+		}
+	}
 	c.refreshHeld()
 	if rec.Lead {
 		_, _, _ = refreshPermissionSelection(dir)
@@ -891,6 +899,13 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 		if err := r.checkChildProfile(spawn.Parent, rp.Name, rp.Definition); err != nil {
 			return State{}, err
 		}
+		level, _, err := resolveWorkerPermission(rp.Definition, spawn.PermissionLevel, spawn.PermissionLevel != "", nil)
+		if err != nil {
+			return State{}, err
+		}
+		if err := r.admitWorkerLevel(spawn.Parent, level); err != nil {
+			return State{}, err
+		}
 	}
 	if lead != nil && lead.PermissionLevel != "" {
 		base := Record{Lead: true, Backend: rp.Definition.Backend, PermissionMode: rp.Definition.PermissionMode}
@@ -971,8 +986,8 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 			rec.PermissionMode = mode
 		}
 	}
-	if spawn != nil && spawn.Authority != "" {
-		if err := writePermissionSelection(dir, spawn.Authority); err != nil {
+	if spawn != nil && spawn.PermissionLevel != "" {
+		if err := writePermissionSelection(dir, spawn.PermissionLevel); err != nil {
 			return State{}, err
 		}
 	}

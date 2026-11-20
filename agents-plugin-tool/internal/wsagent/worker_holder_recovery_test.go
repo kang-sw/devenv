@@ -472,7 +472,12 @@ func TestHeldWorkerChildLoadsBeforeLowerCeilingParent(t *testing.T) {
 			if mode != "workspace-write" || policy != "on-request" {
 				t.Fatalf("rejoined child mode = %q, policy = %q", mode, policy)
 			}
-			if _, err := h.runner.childAdmission(h.record(id)); err == nil || !strings.Contains(err.Error(), "above the parent's current level read-only") {
+			rec := h.record(id)
+			rp, resolveErr := h.runner.resolve(rec.Profile, rec.Root)
+			if resolveErr != nil {
+				t.Fatal(resolveErr)
+			}
+			if _, _, err := h.runner.childAdmission(rec, rp.Definition); err == nil || !strings.Contains(err.Error(), "above the parent's current level read-only") {
 				t.Fatalf("next launch should be refused by the current ceiling: %v", err)
 			}
 			if !strings.Contains(h.log.String(), "rejoin permission admission (advisory; applies on next launch)") || h.holders.opCount("stop") != 0 || h.holders.opCount("spawn") != 1 {

@@ -63,25 +63,36 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 	c.mcpStale = false
 	c.loadCompaction()
 	c.loadModelWait()
-	// No common worker selection or ceiling is applied in this slice.
-	if !attach {
-		c.permissionNudge(legacyWorkerPermission(def), true, "")
-	}
 	if rec.Backend == BackendPi && !attach {
 		if err := c.r.checkChildProfile(rec.Parent, rec.Profile, def); err != nil {
 			return err
 		}
 	}
-	level := PermissionLevel("")
+	level, source := PermissionLevel(""), ""
 	if attach {
-		level = childLevel(c.dir)
-	} else {
-		// Every launch re-admits a spawned child's authority against its
-		// parent's current level (agent_tools.go).
 		var err error
-		if level, err = c.r.childAdmission(rec); err != nil {
+		level, source, err = c.r.workerPermission(rec, def, c.dir)
+		if err != nil {
+			// A daemon replacement observes an existing held process instead of
+			// orphaning it solely because its selection cannot be read.
+			fmt.Fprintf(c.r.opts.Log, "agent %s: rejoin worker permission selection (advisory): %v\n", rec.ReplyID, err)
+			level, source = "", ""
+		}
+	} else {
+		// Every launch re-admits the worker's current explicit or legacy-derived
+		// authority against its parent's current level (agent_tools.go).
+		var err error
+		if level, source, err = c.r.childAdmission(rec, def); err != nil {
 			return err
 		}
+	}
+	c.setStatus(func() {
+		c.workerPermissionLevel = level
+		c.workerPermissionSource = source
+	})
+	if !attach {
+		// Emit only after reading the stored authority used for admission.
+		c.permissionNudge(level, true, "")
 	}
 	if c.r.opts.Holders != nil && !attach {
 		if !c.r.scanDone() {
@@ -581,7 +592,11 @@ func (c *conv) checkReattach() {
 				if c.retireDowngradedWorker(hp) {
 					return
 				}
-				if _, err := c.r.childAdmission(c.record()); err != nil {
+				rec := c.record()
+				rp, resolveErr := c.r.resolve(rec.Profile, rec.Root)
+				if resolveErr != nil {
+					fmt.Fprintf(c.r.opts.Log, "agent %s: rejoin permission admission (advisory; applies on next launch): %v\n", c.rec.ReplyID, resolveErr)
+				} else if _, _, err := c.r.childAdmission(rec, rp.Definition); err != nil {
 					fmt.Fprintf(c.r.opts.Log, "agent %s: rejoin permission admission (advisory; applies on next launch): %v\n", c.rec.ReplyID, err)
 				}
 				c.r.restoreToken(c.record())
