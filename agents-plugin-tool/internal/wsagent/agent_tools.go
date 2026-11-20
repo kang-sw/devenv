@@ -405,8 +405,8 @@ func (e *admissionRefusal) Error() string { return e.reason }
 // agentCeiling is the highest authority parent's children may take: its
 // current level. A lead parent's reply-id resolves to its Runner record; a
 // lead with no record, or with no common level on its backend, caps at
-// workdir-write. A conversation parent needs its record and an explicit
-// level.
+// workdir-write. A conversation parent needs its record and either an explicit
+// level or a currently derivable legacy level.
 func (r *Runner) agentCeiling(parent ParentRef) (PermissionLevel, error) {
 	rec, ok := r.recordOf(parent.ReplyID)
 	dir := wsdashboard.SessionDir(r.opts.Dir, parent.ReplyID)
@@ -426,51 +426,51 @@ func (r *Runner) agentCeiling(parent ParentRef) (PermissionLevel, error) {
 	if !ok {
 		return "", fmt.Errorf("the parent conversation %s has no record, so its permission level is unknown", parent.ReplyID)
 	}
-	level, explicit, err := refreshPermissionSelection(dir)
+	level, _, err := r.currentWorkerPermission(rec)
 	if err != nil {
 		return "", fmt.Errorf("the parent conversation's permission level is unreadable: %w", err)
 	}
-	if !explicit || level.rank() == 0 {
+	if level.rank() == 0 {
 		return "", fmt.Errorf("the parent conversation %s has no permission level of its own", parent.ReplyID)
 	}
 	return level, nil
 }
 
-// childAdmission admits rec's explicit authority against its parent's
-// current level and returns it. Hosted leads and conversations agent.spawn
-// did not start (non-parented conversations and legacy/Pi children) have no
-// explicit authority record and pass with "". An
-// agent.spawn child (agent-worker-*) without a parent or explicit authority
-// record fails closed so it never launches without its authority gate.
-func (r *Runner) childAdmission(rec Record) (PermissionLevel, error) {
-	if rec.Lead {
-		return "", nil
+// admitWorkerLevel applies the current-parent ceiling to a worker creation or
+// launch. Root workers have no ceiling; a child with unresolved own authority
+// is pending rather than guessed.
+func (r *Runner) admitWorkerLevel(parent *ParentRef, level PermissionLevel) error {
+	if parent == nil {
+		return nil
 	}
-	agentWorker := isAgentWorkerProfile(rec.Profile)
-	if rec.Parent == nil {
-		if agentWorker {
-			return "", &admissionRefusal{reason: "permission admission: agent.spawn child has no parent"}
-		}
-		return "", nil
+	if level.rank() == 0 {
+		return &admissionRefusal{reason: "permission admission: the worker's own permission level is unresolved"}
 	}
-	level, explicit, err := refreshPermissionSelection(wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID))
+	ceiling, err := r.agentCeiling(*parent)
 	if err != nil {
-		return "", &admissionRefusal{reason: fmt.Sprintf("permission admission: own level unreadable: %v", err)}
-	}
-	if !explicit || level.rank() == 0 {
-		if agentWorker {
-			return "", &admissionRefusal{reason: "permission admission: agent.spawn child has no explicit authority record"}
-		}
-		return "", nil
-	}
-	ceiling, err := r.agentCeiling(*rec.Parent)
-	if err != nil {
-		return "", &admissionRefusal{reason: "permission admission: " + err.Error()}
+		return &admissionRefusal{reason: "permission admission: " + err.Error()}
 	}
 	if level.rank() > ceiling.rank() {
-		return "", &admissionRefusal{reason: fmt.Sprintf("permission admission: authority %s is above the parent's current level %s", level, ceiling)}
+		return &admissionRefusal{reason: fmt.Sprintf("permission admission: authority %s is above the parent's current level %s", level, ceiling)}
 	}
-	return level, nil
+	return nil
+}
+
+// childAdmission resolves a worker's current explicit or legacy-derived level,
+// then admits it against its parent's current level. No derived value is
+// stored, and an unresolved child never guesses a ceiling.
+func (r *Runner) childAdmission(rec Record, def Profile) (PermissionLevel, string, error) {
+	if rec.Lead {
+		return "", "", nil
+	}
+	level, source, err := r.workerPermission(rec, def, wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID))
+	if err != nil {
+		return "", "", &admissionRefusal{reason: fmt.Sprintf("permission admission: own level unreadable: %v", err)}
+	}
+	if err := r.admitWorkerLevel(rec.Parent, level); err != nil {
+		return "", "", err
+	}
+	return level, source, nil
 }
 
 // childLevel is rec's explicit authority, "" for none.
@@ -643,18 +643,18 @@ func (r *Runner) AgentSpawn(caller AgentCaller, req AgentSpawnRequest) (AgentSpa
 	}
 	defer releaseWidth()
 	st, err := r.Spawn(SpawnSpec{
-		Profile:      r.opts.Backends[harness].WorkerProfile,
-		Root:         root,
-		Cwd:          cwd,
-		Model:        mapping.Model,
-		Effort:       mapping.Effort,
-		Tier:         bare,
-		Prompt:       req.Prompt,
-		Label:        label,
-		Parent:       &parent,
-		Authority:    level,
-		SystemPrompt: system,
-		claimWidth:   claimWidth,
+		Profile:         r.opts.Backends[harness].WorkerProfile,
+		Root:            root,
+		Cwd:             cwd,
+		Model:           mapping.Model,
+		Effort:          mapping.Effort,
+		Tier:            bare,
+		Prompt:          req.Prompt,
+		Label:           label,
+		Parent:          &parent,
+		PermissionLevel: level,
+		SystemPrompt:    system,
+		claimWidth:      claimWidth,
 	})
 	if err != nil {
 		return AgentSpawnResult{}, err
@@ -781,7 +781,12 @@ func (r *Runner) Deliver(id string, d Delivery) (State, error) {
 		rec := c.rec
 		c.mu.Unlock()
 		if asleep {
-			_, refusal = r.childAdmission(rec)
+			rp, resolveErr := r.resolve(rec.Profile, rec.Root)
+			if resolveErr != nil {
+				refusal = resolveErr
+			} else {
+				_, _, refusal = r.childAdmission(rec, rp.Definition)
+			}
 		}
 	}
 	st, err := r.Send(id, d.Text)

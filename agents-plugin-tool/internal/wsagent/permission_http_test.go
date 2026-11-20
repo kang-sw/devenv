@@ -194,7 +194,7 @@ func TestPermissionHTTPRegistryAbsentAndLegacy(t *testing.T) {
 	}
 }
 
-func TestPermissionHTTPWorkerDeferred(t *testing.T) {
+func TestPermissionHTTPWorkerControl(t *testing.T) {
 	h := permissionHarness(t)
 	// The builtin worker has ws tools; satisfy its capability attachment check
 	// with a command the fake holder never executes.
@@ -204,25 +204,32 @@ func TestPermissionHTTPWorkerDeferred(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := permissionHTTPFiles(t, h.dir)
 	path := "/agents/" + st.ID + "/settings/permission"
 	for _, tc := range []struct {
 		v      viewer
 		status int
-	}{{lanBrowser, 404}, {localClient, 403}, {localBrowser, 400}} {
-		res := h.route(tc.v, http.MethodPost, path, map[string]any{"permission_level": "read-only", "model": "opus"})
+	}{{lanBrowser, 404}, {localClient, 403}} {
+		before := permissionHTTPFiles(t, h.dir)
+		res := h.route(tc.v, http.MethodPost, path, map[string]any{"permission_level": "read-only"})
 		if res.status != tc.status {
 			t.Fatalf("worker: %d %s", res.status, res.body)
 		}
-	}
-	if !reflect.DeepEqual(before, permissionHTTPFiles(t, h.dir)) {
-		t.Fatal("worker refusal wrote")
-	}
-	res := h.route(localBrowser, http.MethodGet, "/agents/"+st.ID, nil)
-	for _, field := range []string{"permission_level", "permission_source", "permission_enforcement"} {
-		if strings.Contains(res.body, `"`+field+`"`) {
-			t.Fatalf("worker implies support: %s", res.body)
+		if !reflect.DeepEqual(before, permissionHTTPFiles(t, h.dir)) {
+			t.Fatal("worker refusal wrote")
 		}
+	}
+	res := h.route(localBrowser, http.MethodPost, path, map[string]any{"permission_level": "read-only"})
+	if res.status != http.StatusOK {
+		t.Fatalf("worker lower: %d %s", res.status, res.body)
+	}
+	res = h.route(localBrowser, http.MethodGet, "/agents/"+st.ID, nil)
+	for _, field := range []string{"permission_level", "permission_source", "permission_enforcement"} {
+		if !strings.Contains(res.body, `"`+field+`"`) {
+			t.Fatalf("worker omits %s: %s", field, res.body)
+		}
+	}
+	if !strings.Contains(res.body, `"permission_level":"read-only"`) || !strings.Contains(res.body, `"permission_source":"explicit"`) {
+		t.Fatalf("worker projection: %s", res.body)
 	}
 }
 
