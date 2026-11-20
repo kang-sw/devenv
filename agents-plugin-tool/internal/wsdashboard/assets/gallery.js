@@ -251,11 +251,10 @@
   }
   // neighbors tells the bounce-snap gate what lies past the page at pos:
   // true an adjacent page, false an edge (a damped micro-bounce only), null
-  // nothing at all (the gate stays inert: narrow with no docked page, where
-  // the gallery's rail is hidden).
+  // nothing at all (the gate stays inert when there are no docked pages).
   function neighbors(g, pos, narrow) {
     var n = g.pages.length;
-    if (narrow && !n) return { prev: null, next: null };
+    if (!n) return { prev: null, next: null };
     return { prev: pos > minPos(narrow), next: pos < n };
   }
 
@@ -322,10 +321,11 @@
   // of one paged view. column: the wide view shows the gallery column beside
   // the board (never an empty one, save while a drag runs). overlay: the
   // session rail overlays (below SLOT, beside a gallery). rail: the
-  // gallery's dot rail shows.
+  // gallery's dot rail shows. empty: from SLOT with no docked pages and no
+  // drag, the idle dashed slot placeholder shows.
   function layout(o) {
     var narrow = !!o.tabs || !(o.width >= C.WIDE), any = o.pages > 0, drag = !!o.dragging;
-    return { narrow: narrow, column: !narrow && (any || drag), overlay: !narrow && any && o.width < C.SLOT, rail: any || drag };
+    return { narrow: narrow, column: !narrow && (any || drag), overlay: !narrow && any && o.width < C.SLOT, rail: any || drag, empty: !narrow && !any && !drag && o.width >= C.SLOT };
   }
 
   // --- drops ---------------------------------------------------------------
