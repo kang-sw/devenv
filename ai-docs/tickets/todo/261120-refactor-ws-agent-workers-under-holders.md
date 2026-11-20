@@ -24,28 +24,7 @@ normal daemon replacement, rejoins through its existing holder, and reports
 its in-flight result to its parent exactly once.
 
 All source paths below are relative to `agents-plugin-tool/` and were verified
-against `develop` at `26b999a47`.
-
-## Open Decision Queue
-
-Last ID: (1854)
-
-(1854) [open] [policy] On downgrade to an old daemon, a holder-backed worker is treated as ended (accept documented degradation) vs T3+minor vs fencing non-lead parents.
-
-- Context: the old daemon's `holdsReport`/`openChildOf`
-  (`internal/wsagent/children.go:754-807`) sees a fenced child as closed, so a
-  held parent publishes and rewrites its record
-  (`internal/wsagent/runner.go:386-394`); old `PruneRegistrations` deletes the
-  fenced child's session directory after seven days
-  (`internal/wsdashboard/registry.go:57,386-424,460-464`). The T1 fixture
-  assertions (b) and (c) in Phase 1 item 4 therefore cannot pass.
-- Alternatives: (a) accept as the same outcome as today's daemon restart,
-  document it, and specify that the new daemon absorbs the child's late report
-  on re-upgrade without a second terminal status, narrowing T1 to child-row
-  display; (b) T3 with a minor bump; (c) also fence non-lead parents (cannot
-  cover lead parents: `internal/wsagent/runner.go:528-537`).
-> Recommend (a): downgrade is a rare dev path with today's restart outcome;
-> (b) locks out previous-minor plugin sessions; (c) is partial.
+against `develop` at `c570bb95e`.
 
 ## Decisions
 
@@ -116,23 +95,48 @@ Last ID: (1854)
   (`internal/wsagent/runner_conv.go:521-528`,
   `internal/wsagent/spawn.go:368-381`). Rejected: attempting to revive a
   process that the predecessor daemon already killed.
-- **Compatibility target: T1 using `handed_off_at` as the old-daemon fence
-  (owner, 2026-11-20 17:59 KST).** While a non-lead worker is live under a
-  new `agent-worker` holder, the new daemon keeps `handed_off_at` set with
-  `HolderID`. A live legacy `pi-worker` holder keeps the legacy shape so an
-  old daemon can reattach it instead of sweeping it. An old
-  daemon loads a fenced `agent-worker` record through the closed path and
-  starts no loop, mail watcher, or process; its UI shows handed-off state and
-  it changes no data (`internal/wsagent/runner.go:333-358,1657-1674`,
-  `internal/wsagent/record.go:55-63`). Only the new daemon interprets
-  non-lead + `HolderID` + `HandedOffAt` as a held worker and opens/rejoins it.
-  The fence is cleared when the holder ends. Verification must include a
-  directional old-daemon fixture proving that the old load path starts
-  nothing, does not stop a live holder, does not release or rewrite a parent's
-  held turn, and does not prune the worker session. If the fixture does not
-  prove T1, implementation stops and returns the old/new trace to the lead;
-  T3 and a minor bump require explicit owner approval. Rejected: settling this
-  ticket as T3 with a minor bump.
+- **(1854)=a, owner 2026-11-20: downgrade treats a holder-backed worker as
+  ended, as a documented degradation.** This is the same outcome as today's
+  daemon restart: the old daemon sees the fenced child as closed, its
+  `holdsReport`/`openChildOf` no longer holds a done parent turn, and
+  `releaseHeld` publishes and rewrites the parent's record
+  (`internal/wsagent/children.go:754-807`,
+  `internal/wsagent/runner.go:386-394`). After `RegistryRetention`, old
+  `PruneRegistrations` deletes the fenced child's session directory
+  (`internal/wsdashboard/registry.go:57,386-424,460-464`). Rejected: T3 with
+  a minor bump, which locks out previous-minor plugin sessions; fencing
+  non-lead parents, which cannot cover lead parents because an old daemon
+  sweeps an unowned lead holder (`internal/wsagent/runner.go:528-537`).
+- **Compatibility tier: T1 applies only to the fenced child row while that row
+  exists, not to the whole downgrade flow.** The new daemon keeps
+  `HandedOffAt` set with `HolderID` for a live new-kind `agent-worker`. The old
+  daemon projects that child as closed/ended, starts no loop, watcher, attach,
+  or process, never rewrites the child's own record, and cannot stop its
+  holder because its holder-kind filter does not recognize `agent-worker`
+  (`internal/wsagent/runner.go:333-358,528-537,1657-1674`,
+  `internal/wsagent/record.go:55-63`). That child-row display/read behavior is
+  T1. Parent release/rewrite and aged-row deletion are explicitly accepted
+  degradation outside the T1 claim; this ticket does not call those surfaces
+  T1. A live legacy `pi-worker` holder keeps the legacy shape so an old daemon
+  rejoins it rather than sweeping it. Only the new daemon interprets non-lead
+  + `HolderID` + `HandedOffAt` as a held worker.
+- **Re-upgrade silently retires a held child whose parent already settled it
+  during downgrade.** Before `checkReattach` requests holder replay in
+  `holdersScanned`, inspect the restored parent's persisted `HeldTurn` and
+  `LastTurn`. When the child remains open but the parent has no open or held
+  turn and has already recorded its terminal `LastTurn`, detach the in-memory
+  holder adapter, clear its event route, and call `retireHolder` without
+  `stopProcess`, `processEnded`, `settleTurn`, or `publish`; leave the child
+  projected ended, so later holder output produces neither a second terminal
+  status nor a duplicate parent report (`internal/wsagent/record.go:112-115,138-143,166-170`,
+  `internal/wsagent/runner.go:386-401,694-708,483-517`,
+  `internal/wsagent/spawn.go:257-341`,
+  `internal/wsagent/runner_events.go:733-802`,
+  `internal/wsagent/runner_process.go:462-480,511-565`). If old pruning already
+  removed the child record, the new `agent-worker` orphan sweep retires the
+  unowned holder. Retirement is simpler than adoption plus report suppression:
+  it reuses the holder-retirement path and adds no backend-specific suppression
+  state. Rejected: adopting the process and carrying a new late-report filter.
 - **One held-worker predicate overrides every handed-off reader in the new
   daemon.** Non-lead + non-empty `HolderID` + non-empty `HandedOffAt` means a
   held worker, not a closed or handed-off conversation. Use that predicate for
@@ -184,6 +188,11 @@ Last ID: (1854)
 - Pending approval requests replayed from the holder, including requests that
   arrived while no daemon was attached, run the ordinary traced at-most-once
   auto-allow after replay for every `WorkerAutoApprove` worker.
+- Scope the compatibility claim to the fenced child's row while it survives.
+  Downgrade may release and rewrite a held parent and may delete an aged child
+  directory after `RegistryRetention`; both are documented degradation, not
+  T1 behavior. On re-upgrade, parent settlement wins: retire the held child
+  before replay and emit no second terminal status or parent report.
 - A configured holder failure refuses launch; it must not silently fall back
   to daemon ownership. Keep steady-state handling memory-first and add no
   per-message, per-timer, or per-turn whole-file rewrite.
@@ -205,6 +214,14 @@ Last ID: (1854)
   (`internal/wsagent/runner.go:483-537`). Generalize `checkReattach`'s
   hard-coded `holderKindPiWorker` ownership check without rejecting a matching
   legacy holder (`internal/wsagent/runner_process.go:515-542`).
+- Use the restored parent's `HeldTurn`/`LastTurn` as the pre-replay downgrade
+  reconciliation seam. `startConv` restores those fields before the first
+  holder scan, while `checkReattach` does not request replay until that scan;
+  therefore `holdersScanned` can retire a child whose parent already settled
+  it without consuming a late terminal event
+  (`internal/wsagent/record.go:112-115,138-143,166-170`,
+  `internal/wsagent/runner.go:386-401,694-708,483-517`,
+  `internal/wsagent/runner_process.go:462-480,511-565`).
 - On attach, `startWorker` currently leaves authority empty because it calls
   `childAdmission` only for a fresh start; Codex immediately maps that empty
   level and fails (`internal/wsagent/runner_process.go:61-81,121-135`,
@@ -246,7 +263,7 @@ Last ID: (1854)
 
 ## Prior Decisions
 
-- 261113-bug-ws-pi-subagent-turn-dies-on-daemon-restart (2026-11-13, commit): "Reuse the existing holder pipe transport and publish/settle path, not a new delivery mechanism. Lead privileges remain independent of holder selection" — bearing: supports
+- 261113-bug-ws-pi-subagent-turn-dies-on-daemon-restart (2026-11-13, Decisions and Result): "Accepted downgrade consequence: an older daemon interrupts the turn and leaves its held worker process orphaned" and the in-flight interruption "equals today's behaviour" — bearing: supports (1854)'s documented degradation and newer-daemon orphan retirement
 - 261118-feat-ws-agy-tool-names-and-worker-role (2026-11-18, Decisions 151): "the agy worker is not holder-held, like the Claude worker; a daemon restart ends it" — bearing: constrains
 - 261119-feat-ws-codex-hosted-worker (2026-11-19, Decisions 172): "The Codex worker start path follows the agy worker shape: daemon-owned with no holder and no lead spec" — bearing: constrains
 - 261110-feat-ws-dashboard-headless-lead-sessions (2026-11-11, commit): "run hosted lead sessions under session holders" — bearing: supports
@@ -258,14 +275,14 @@ Last ID: (1854)
 | scope.span | multi-file | agents-plugin-tool/internal/wsagent/holder.go, runner_process.go, runner.go, runner_conv.go, claude.go, codex.go, agy.go, record.go; internal/wsholder/holder.py; ai-docs/manuals/ws-mcp.md |
 | scope.surface | cross-module | wsagent worker lifecycle, wsholder session descriptor and daemon compatibility behavior cross module boundaries |
 | scope.new_public_symbol | no | no new exported API symbol is named; agent-worker is a holder kind and holderSession is internal |
-| scope.new_type_contract | yes | holderSession gains backend ownership metadata; persisted Record.HandedOffAt becomes the T1 old-daemon fence (internal/wsagent/holder.go#L69-L89; internal/wsagent/record.go#L55-L63) |
-| scope.test_surface | existing | internal/wsagent/pi_worker_recovery_test.go, codex_worker_test.go, codex_recovery_test.go and lead_recovery_test.go exist; Phase 1 adds an old-daemon fixture |
+| scope.new_type_contract | yes | holderSession gains backend ownership metadata; persisted Record.HandedOffAt is a child-row-only T1 fence, while parent release and RegistryRetention deletion are documented downgrade degradation (internal/wsagent/holder.go#L69-L89; internal/wsagent/record.go#L55-L63) |
+| scope.test_surface | existing | internal/wsagent/pi_worker_recovery_test.go, codex_worker_test.go, codex_recovery_test.go and lead_recovery_test.go exist; Phase 1 adds a directional old-daemon fixture and Phase 2 adds re-upgrade retirement/no-duplicate coverage |
 | complexity.reuse_points | confirmed | existing Pi holder allocation and reattach, held-lead MCP tuple, childLevel persisted-selection projection, advisory held-lead permission rejoin, and replay reconciliation were read (internal/wsagent/runner_process.go#L184-L190; #L236-L246; #L359-L402; #L511-L625; internal/wsagent/agent_tools.go#L476-L483) |
 | complexity.side_effect_risk | high | daemon replacement, holder lifetime, worker tokens and interrupted-turn settlement change together |
-| risk.correctness | high | replay must settle in-flight work and parent reporting exactly once across four backends |
+| risk.correctness | high | normal replacement replay must report exactly once across four backends; re-upgrade after downgrade must retire a child whose parent already settled it before replay can emit a duplicate |
 | risk.fit | high | one worker holder kind must preserve each backend's launch, cwd and ownership binding; attach mode comes from the child's persisted selection while current-parent ceiling admission waits until all records are loaded |
-| risk.test | high | directional old-daemon fixture, four-backend replacement coverage and Windows restart behavior are required |
-| risk.security_or_contract | high | T1 fence and token/capability restoration affect old-daemon writes; advisory post-load ceiling refusal must preserve the held process while governing its next launch |
+| risk.test | high | child-row T1 fixture, documented parent/prune degradation, re-upgrade retirement, four-backend replacement coverage and Windows restart behavior are required |
+| risk.security_or_contract | high | the T1 claim is limited to the surviving child row; parent rewrite and aged-row deletion are accepted degradation, while token/capability restoration and advisory admission remain authority-sensitive |
 
 ## Phases
 
@@ -297,20 +314,20 @@ Last ID: (1854)
    end clears the fence. Keep the existing once-only interrupted settlement
    for legacy direct-worker records.
 4. Add the directional compatibility fixture against the old-daemon load
-   path. For a fenced new-kind `agent-worker`, assert no conversation loop,
-   mail watcher, holder attach, or process start occurs and no record data
-   changes. Separately load a live legacy `pi-worker`-kind holder without the
-   fence, assert the old daemon rejoins the existing holder without starting a
-   duplicate process, and assert its `holdersScanned` sweep sends no `Stop`.
-   Include an open parent whose done turn is held for the fenced child and
-   assert startup `releaseHeld`/`holdsReport` neither publishes nor rewrites
-   the parent's record; age the fenced child's registration past the prune
-   retention and assert old `PruneRegistrations` does not delete its session
-   directory (`internal/wsagent/runner.go:386-397,483-537`,
-   `internal/wsagent/children.go:780-807`,
-   `internal/wsdashboard/registry.go:386-424,460-465`). If any trace changes
-   data or stops the live holder, the verdict is not T1: stop and return both
-   old/new traces to the lead; do not select T3 or a minor bump.
+   path. For a fenced new-kind `agent-worker`, assert the old daemon projects
+   the child closed/ended, starts no conversation loop, watcher, attach, or
+   process, never rewrites the child's own record, and sends no holder `Stop`;
+   the stop rule is unreachable because the old kind filter does not recognize
+   `agent-worker`. Separately load a live legacy `pi-worker` holder without the
+   fence and assert the old daemon rejoins the existing holder without a
+   duplicate process or `Stop`. Pin the documented degradation too: a held
+   parent releases, publishes, and rewrites its record when it sees the child
+   closed, and old `PruneRegistrations` deletes the child directory only after
+   `RegistryRetention` (`internal/wsagent/runner.go:386-397,483-537`,
+   `internal/wsagent/children.go:754-807`,
+   `internal/wsdashboard/registry.go:57,386-424,460-465`). The compatibility
+   verdict is T1 only for the surviving fenced child row; the parent and
+   retention assertions document accepted downgrade behavior.
 
 ### Phase 2: Prove replacement continuity and update the operations contract
 
@@ -330,15 +347,23 @@ Last ID: (1854)
    queued mail waits for reconciliation and then wakes/steers normally. Cover
    a permission request already pending at daemon replacement and one raised
    while no daemon is attached; after replay, `WorkerAutoApprove` answers each
-   once through the traced approval path.
+   once through the traced approval path. Add re-upgrade coverage where the
+   old daemon already released the parent's held turn: before replay, the new
+   daemon detects parent `TurnOpen == false`, `HeldTurn == nil`, and a terminal
+   `LastTurn`, detaches the child adapter and retires the still-live holder
+   without `stopProcess`/`processEnded`/`settleTurn`/`publish`, and produces no
+   second terminal status or duplicate parent report. Also cover
+   an old-pruned child directory: the unowned new-kind holder is retired by
+   the new-daemon orphan sweep.
 3. Cover holder-kind, backend, reply-id, cwd, capability, PID, and MCP-tuple
    mismatches; legacy direct-worker startup; authority/profile and delegation
    behavior; interrupt versus idle/stop/close; and restart-safe versus
    non-restart-safe Windows holders.
 4. Update `ai-docs/manuals/ws-mcp.md` where it describes daemon replacement,
    session holders, and spawned-worker close/hold behavior. State that every
-   `agent.spawn` backend is holder-backed, document the T1 old-daemon fence and
-   tuple binding, and keep watchdog re-arm explicitly out of scope.
+   `agent.spawn` backend is holder-backed, document the child-row-only T1
+   fence, accepted downgrade parent/prune degradation, re-upgrade retirement,
+   and tuple binding, and keep watchdog re-arm explicitly out of scope.
 5. Run focused holder, runner, backend, MCP, and process-control tests plus the
    repository's configured Go verification. Report startup/rejoin and
    steady-state file-operation deltas; measure on the Windows antivirus
