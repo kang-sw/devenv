@@ -1347,6 +1347,55 @@ prefix with `~/.local/bin/ws-rgo` on remote-Go hosts.
     3-tier composition, the connector style, and the semantic grid density;
     the Result records the comparison.
 
+### Result (26647d12c) - 2026-11-20
+
+- **Landed** (`500b23d66..26647d12c`):
+  - `#thandle` in `dashboard-drawer.js`: `thandleSync`, `drRoom` `--thr` and
+    `--drhw`, `drRo`, and the outside-click exclusion;
+  - `dashboard-ticketmap.js`: the overlay shell, state `S`, data flow, the
+    keyboard layering, the Full View modal, the file-card hand-off, and the
+    view-host contract;
+  - `dashboard-ticketmap-viewb.js`: View B's matrix, 3-tier focus, connectors,
+    semantic grid, and inspector;
+  - `dashboard-ticketmap.css`;
+  - the `dim()` and `classify()` selectors;
+  - the vendored `network.svg`;
+  - `js.tmap.*` keys in all 11 tables;
+  - the Node, asset, and browser tests.
+- **Verification:**
+  - `go test ./internal/wsdashboard -run 'TicketMap|DashboardSourceAssembly|CSSClassesDoNotCollide|LucideIcons|TicketGraph'`:
+    ok.
+  - `go test ./internal/wsi18n`: ok.
+  - `node --test testdata/ticketmap-*.test.cjs`: 15/15 pass.
+  - `TestTicketMapBrowser` (items 1–14): pass at 1600×960 and 1280×800 in
+    dark and light, plus 900×700. It sees 179 nodes, 11 lanes, and exactly
+    2 graph requests (first open + Refresh).
+- **Captures:** compared `/tmp/tmshots-p2/b-*.png` vs `mock-b-*.png` and
+  `b-focus-*.png` vs `mock-b-focus-*.png` (both themes, both viewports):
+  match. The lane, header, and card grammar, the 3-tier composition, the
+  connector style, and the grid density all agree. Differences are intended:
+  - ToC and Ego are hidden until Phase 3;
+  - the mockup's "Related N" column caption is not in the spec;
+  - at 1280 the top-bar stats are ellipsized because the bar also carries
+    Clusters, Refresh, and Close.
+- **Decisions:**
+  - View B lives in its own file, `dashboard-ticketmap-viewb.js`
+    (`ticketMap.viewB = (function () { … })();`), placed right after
+    `dashboard-ticketmap.js` in `dashboardScriptFiles`. This keeps every file
+    under the 1000-line size guard.
+  - While the overlay shows, every keydown is stopped; only consumed keys are
+    `preventDefault`ed.
+  - `window.__tmap` is set on the first open.
+  - At 900px a wrapped related card is entered at its left edge (`ts=left`),
+    the same later-row rule Tier 3 uses.
+  - Additional keys: `js.tmap.ind.deg`, `ind.kids`, `ind.phase`, `sim.th`, and
+    `insp.none`.
+  - The drawer tests `TestSearchPaletteHandleGeometry` and
+    `TestDrawerRoomResizeFrame` were updated for the third observed handle.
+- **Pre-existing failures** reproduced on unchanged HEAD:
+  `TestShellTopbarBrowser` (dark/760 `clipped:false`) and
+  `TestPanelRowsBrowser` (agenda event timeout).
+
 ### Phase 3: View C (Constellation Graph + 3-Stage Semantic Zoom Keyword Soup + Ego Ring)
 
 **Files to create or modify**
