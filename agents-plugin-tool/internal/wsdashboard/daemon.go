@@ -687,6 +687,12 @@ func (d *Daemon) agentChanged(replyID, _ string) {
 	d.acks.poke(replyID)
 }
 
+// AgyActivity schedules a usage refresh after a hosted agy turn settles.
+// The handoff must not wait for the plan-usage store's lock.
+func (d *Daemon) AgyActivity() {
+	go d.planUsage.refreshAgy()
+}
+
 // poll fills the session index at once and then re-reads every registered
 // session at the external safety interval. Clock-only checks retain the old
 // cadence, with targeted reads only when known liveness evidence expires.

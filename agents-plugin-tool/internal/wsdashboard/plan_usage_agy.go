@@ -187,7 +187,7 @@ func (s *planUsageStore) agyEntriesLocked(now int64) []planUsageEntry {
 }
 
 // refreshAgy schedules at most one asynchronous agy CLI /usage probe on a
-// user-triggered popover refresh, subject to the process-lifetime latches and
+// popover refresh or agy activity, subject to the process-lifetime latches and
 // ~10-minute debounce. Never blocks the HTTP handler.
 func (s *planUsageStore) refreshAgy() {
 	s.mu.Lock()
@@ -508,10 +508,12 @@ func agyCommandEnv(base []string) []string {
 		base = os.Environ()
 	}
 	const key = "AGY_CLI_DISABLE_AUTO_UPDATE"
+	const harnessKey = "WS_MCP_HARNESS"
 	out := make([]string, 0, len(base)+1)
 	for _, entry := range base {
 		name, _, ok := strings.Cut(entry, "=")
-		if ok && (name == key || (runtime.GOOS == "windows" && strings.EqualFold(name, key))) {
+		if ok && (name == key || name == harnessKey ||
+			runtime.GOOS == "windows" && (strings.EqualFold(name, key) || strings.EqualFold(name, harnessKey))) {
 			continue
 		}
 		out = append(out, entry)
