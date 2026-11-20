@@ -13,6 +13,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: dff1690277918e94
 sage-review-completeness-reviewed: dff1690277918e94
+completed: 2026-11-21
 ---
 
 # Hosted compaction lifecycle
@@ -502,3 +503,46 @@ Restart and compact renders use state changed after launch rather than cached
 text. Assert no new record/store/schema/hello/tool/manifest write and no
 per-event file write; old/new directional fixtures confirm the T0 matrix. No
 test calls `lead-revive`; the CLI-tier `lead-revive` behavior remains unchanged.
+
+### Result (3ddcb14c) - 2026-11-21
+
+- Added one daemon-owned, runtime-only `wsagent.Options.RestoreBundle`
+  provider and wired it through the hosted MCP adapter. The renderer reads the
+  current split session state at delivery, reuses `renderSessionState`, renders
+  only the typed `implement` target (or `none recorded`), and includes the
+  existing direct-child `agent.list` projection.
+- Compact completion and daemon restart share an in-memory restore marker.
+  Compact delivery remains consume-once before ordinary work; restart delivery
+  is queued only for records loaded by that startup, waits for holder replay,
+  defers active conversations, and leaves processless sleeping or held-send
+  conversations asleep until their existing wake path. Provider failure emits
+  a logged, key-bearing diagnostic instead of partial state.
+- **Compatibility: T0 (transparent).** The provider is an in-memory option
+  (`internal/wsagent/runner.go:153-158`), the hosted renderer reads existing
+  state and calls the existing state renderer
+  (`internal/mcp/hosted_render.go:100-112`,
+  `internal/mcp/workflow_manual.go:108-168`), and the persisted record remains
+  schema version 1 with no restore field (`internal/wsagent/record.go:25-31`).
+  The new/old/new fixture verifies byte-identical persisted records across a
+  provider-aware start, a provider-less old-daemon start, and a new reopen.
+  There is no MCP tool/argument, hello, store, tracker-event, config/rsrc
+  manifest, or per-event persisted write change.
+- Lite review found startup ordering, scan-spawn inclusion, and missing
+  directional-fixture gaps; all were fixed. A later full-package run exposed
+  repeated-`Start` double-close and lazy held-send restart regressions; both
+  were fixed while preserving the all-records-loaded barrier and covered by
+  the existing direct and Pi restart contracts.
+- **Verification:** focused `internal/wsagent` compaction/restart/provider/T0
+  suites passed, including repeated-start and both
+  `RecordSurvivesDaemonRestart` variants (the latter at `-count=10`); focused
+  `cmd/ws-mcp` adapter passed (0.721s); focused `internal/mcp` renderer/state
+  suite passed with `-timeout 45m` (66.625s); `git diff --check` passed. A
+  lead-run loopback-enabled `go test ./internal/wsagent -count=1` on
+  `3ddcb14c` passed every test attributable to this change; its sole failure,
+  `TestPiMaterializerSourceDriftDoesNotDisplacePreparedBundle`, reproduced
+  identically on develop `9289a0722` and is pre-existing.
+
+
+## Resolution (2026-11-21)
+
+Phase 2 delivered the runtime-only hosted state restore bundle for compaction and daemon restart, completing the ticket with T0 compatibility and focused plus loopback-enabled verification.
