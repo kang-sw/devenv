@@ -89,7 +89,7 @@ func TestDowngradeRetirementPersistsSleepingWorker(t *testing.T) {
 }
 
 func TestDowngradeRetirementRetriesStop(t *testing.T) {
-	for _, outcome := range []string{"retry", "already gone"} {
+	for _, outcome := range []string{"retry", "already gone", "queued mail"} {
 		t.Run(outcome, func(t *testing.T) { testDowngradeRetirement(t, outcome) })
 	}
 }
@@ -130,6 +130,14 @@ func testDowngradeRetirement(t *testing.T, stopError string) {
 		if rec := h.record(worker.ID); rec.HolderID != holder || !rec.TurnOpen || len(reports.list()) != 0 {
 			t.Fatal("failed stop prematurely retired or published the child")
 		}
+		if stopError == "queued mail" {
+			h.send(worker.ID, "wake after stop succeeds")
+			c.do(func() {
+				if !c.replaying || len(c.inboxC) != 0 || c.rec.HolderID != holder {
+					t.Error("fixture did not consume the inbox signal while replay blocked kick")
+				}
+			})
+		}
 		h.holders.set(func() { h.holders.stopErr = nil })
 		if stopError == "already gone" {
 			if err := h.holders.Stop(holder); err != nil {
@@ -137,6 +145,16 @@ func testDowngradeRetirement(t *testing.T, stopError string) {
 			}
 		}
 		c.do(c.heartbeat)
+		if stopError == "queued mail" {
+			eventually(t, "queued input wakes without restart", func() bool {
+				rec := h.runner.conv(worker.ID).record()
+				return rec.HolderID != "" && rec.HolderID != holder && rec.TurnOpen && rec.TurnMark > child.TurnMark
+			})
+			if len(reports.list()) != 0 || h.holders.opCount("stop "+holder) != 2 {
+				t.Fatal("retirement wake duplicated the old report or stop")
+			}
+			return
+		}
 	}
 	eventually(t, "silent retirement", func() bool { return h.record(worker.ID).HolderID == "" })
 	assertSleeping := func() {

@@ -92,5 +92,8 @@ func (c *conv) retireDowngradedWorker(hp holderProcess) bool {
 	c.workerRetiring = false
 	c.seqDirty, c.live.ringDirty = false, false
 	c.writeRegistration()
+	// Inbox signals consumed while retirement was retrying could not kick.
+	// Recheck the retained input now that this child may launch a new turn.
+	c.signalInbox()
 	return true
 }
