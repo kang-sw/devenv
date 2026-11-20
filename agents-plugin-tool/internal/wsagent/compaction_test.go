@@ -233,6 +233,97 @@ func TestCompactionAutoDoesNotStartContinue(t *testing.T) {
 	})
 }
 
+func TestCompactionRestoreBundleLeadAndChildFreshExactlyOnce(t *testing.T) {
+	t.Run("lead", func(t *testing.T) {
+		probe := &restoreProbe{state: "stale-at-launch"}
+		h := newLeadHarness(t)
+		reg := h.opts.Backends[BackendClaude]
+		reg.Catalog = ClaudeCatalog()
+		h.opts.Backends[BackendClaude] = reg
+		h.opts.RestoreBundle = probe.render
+		h.start()
+		id, holder := h.runLead("one")
+		key := h.record(id).WSKey
+		h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+		h.idle(id)
+		resume := false
+		if got := h.runner.Compact(key, "", &resume); got.Status != "queued" {
+			t.Fatal(got)
+		}
+		eventually(t, "lead native compact", func() bool { return len(h.userInputs(holder)) == 2 })
+		h.send(id, "ordinary after compact")
+		probe.setState("fresh-at-delivery")
+		compactBoundary(h, id, holder)
+		eventually(t, "lead restore before ordinary work", func() bool { return len(h.userInputs(holder)) == 3 })
+		text := h.userInputs(holder)[2]
+		if restoreAt, workAt := strings.Index(text, "restore[fresh-at-delivery]"), strings.Index(text, "ordinary after compact"); restoreAt < 0 || workAt < 0 || restoreAt > workAt {
+			t.Fatalf("lead restore ordering = %q", text)
+		}
+		if calls := probe.snapshot(); len(calls) != 1 || calls[0].key != key || calls[0].cause != RestoreCompaction {
+			t.Fatalf("lead restore calls = %+v", calls)
+		}
+		h.runner.conv(id).do(func() {
+			c := h.runner.conv(id)
+			c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd})
+			if c.compactNote != "" {
+				t.Fatalf("duplicate compact end queued %q", c.compactNote)
+			}
+		})
+		if calls := probe.snapshot(); len(calls) != 1 {
+			t.Fatalf("duplicate compact end rendered again: %+v", calls)
+		}
+	})
+
+	t.Run("child", func(t *testing.T) {
+		probe := &restoreProbe{state: "stale-at-launch"}
+		h := newLeadHarness(t)
+		h.opts.WSMCP = func(string) (MCPCommand, error) { return MCPCommand{Command: "/unused/ws-mcp"}, nil }
+		h.opts.RestoreBundle = probe.render
+		reg := h.opts.Backends[BackendPi]
+		reg.NativeCompaction = PiCompaction()
+		h.opts.Backends[BackendPi] = reg
+		if _, err := wsconfig.SetGlobalAgentsTierForHarness(h.opts.Config, "medium", "", "prov/medium", PiTierHarness, "low"); err != nil {
+			t.Fatal(err)
+		}
+		h.start()
+		lead := h.lead(BackendClaude, LeadOptions{})
+		child, err := h.runner.Spawn(SpawnSpec{
+			Profile: PiWorkerProfile, Root: h.root, Prompt: "work", Tier: "medium",
+			Parent: &ParentRef{Kind: ParentLead, ReplyID: lead.ID},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		holder := h.holder(child.ID)
+		h.holders.out(holder, `{"type":"agent_start"}`, `{"type":"agent_settled"}`)
+		h.idle(child.ID)
+		key := h.record(child.ID).WSKey
+		resume := false
+		if got := h.runner.Compact(key, "", &resume); got.Status != "queued" {
+			t.Fatal(got)
+		}
+		eventually(t, "child native compact", func() bool { return len(h.holders.inputs(holder, "compact")) == 1 })
+		if _, err := h.runner.Send(child.ID, "ordinary after compact"); err != nil {
+			t.Fatal(err)
+		}
+		probe.setState("fresh-at-delivery")
+		h.holders.out(holder, `{"type":"compaction_start","reason":"manual"}`, `{"type":"compaction_end","reason":"manual"}`, `{"type":"response","command":"compact","success":true}`)
+		eventually(t, "child restore before ordinary work", func() bool { return len(h.holders.inputs(holder, "prompt")) == 2 })
+		text := h.holders.inputs(holder, "prompt")[1]
+		if restoreAt, workAt := strings.Index(text, "restore[fresh-at-delivery]"), strings.Index(text, "ordinary after compact"); restoreAt < 0 || workAt < 0 || restoreAt > workAt {
+			t.Fatalf("child restore ordering = %q", text)
+		}
+		if calls := probe.snapshot(); len(calls) != 1 || calls[0].key != key || calls[0].cause != RestoreCompaction {
+			t.Fatalf("child restore calls = %+v", calls)
+		}
+		h.holders.out(holder, `{"type":"compaction_end","reason":"manual"}`)
+		time.Sleep(30 * time.Millisecond)
+		if calls := probe.snapshot(); len(calls) != 1 {
+			t.Fatalf("duplicate child compact end rendered again: %+v", calls)
+		}
+	})
+}
+
 func TestCompactionThresholdLatchAndStaleUsage(t *testing.T) {
 	h := compactionHarness(t)
 	id, holder := h.runLead("one")
