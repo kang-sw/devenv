@@ -108,3 +108,23 @@ test('agy per-group trend isolates samples by group identity within shared harne
   );
   assert.deepEqual(Array.from(cgResult.points, p => p.percent), [90, 95]);
 });
+
+test('codex five_hour trend isolates five_hour history from seven_day history', () => {
+  const c5a = { harness: 'codex', kind: 'five_hour', source: 'via Codex CLI', resetsAt: reset, asOf: start + .1 * duration, percent: 12 };
+  const c5b = { harness: 'codex', kind: 'five_hour', source: 'via Codex CLI', resetsAt: reset, asOf: start + .3 * duration, percent: 26 };
+  const c7 = { harness: 'codex', kind: 'seven_day', source: 'via Codex CLI', resetsAt: reset + 86400000, asOf: start + .2 * duration, percent: 48 };
+  const codexFiveHourHistory = { schema_version: 1, status: 'ok', samples: [c5a, c5b] };
+  const sharedHistory = { schema_version: 1, status: 'ok', samples: [c7] };
+  const fiveResult = window.WsUsage.trend(
+    { harness: 'codex', source: 'via Codex CLI', asOf: c5b.asOf },
+    { kind: 'five_hour', percent: c5b.percent, resetsAt: reset, asOf: c5b.asOf },
+    codexFiveHourHistory
+  );
+  assert.deepEqual(Array.from(fiveResult.points, p => p.percent), [12, 26]);
+  const weeklyResult = window.WsUsage.trend(
+    { harness: 'codex', source: 'via Codex CLI', asOf: c7.asOf },
+    { kind: 'seven_day', percent: c7.percent, resetsAt: c7.resetsAt, asOf: c7.asOf },
+    sharedHistory
+  );
+  assert.deepEqual(Array.from(weeklyResult.points, p => p.percent), [48]);
+});

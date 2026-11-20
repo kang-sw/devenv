@@ -239,9 +239,13 @@
       if (!status || status === "usage unavailable") return t("unavailable");
       return status;
     }
-    function entryHistory(entry) { return entry.harness === "agy" ? (data.agyHistory || data.history) : data.history; }
+    function entryHistory(entry, kind) {
+      if (entry.harness === "agy") return data.agyHistory || data.history;
+      if (entry.harness === "codex" && kind === "five_hour") return data.codexFiveHourHistory || data.history;
+      return data.history;
+    }
     function drawChart(entry, w, old, now) {
-      var geometry = trend(entry, w, entryHistory(entry)), id = "usage-chart-" + (++chartSerial);
+      var geometry = trend(entry, w, entryHistory(entry, w.kind)), id = "usage-chart-" + (++chartSerial);
       var chart = svgNode("svg", { "class": "usage-chart", viewBox: "0 0 288 113", role: "img", "aria-label": t("chart", windowLabel(w.kind), t(geometry.knownReset ? "baseline" : "unknownReset")) });
       chart.appendChild(svgNode("title", {}, windowLabel(w.kind) + ": " + Math.round(w.percent) + "%; " + observedAge(geometry.at, now) + (old ? "; " + t("stalePace") : "")));
       var axis = null;
@@ -359,7 +363,7 @@
       var chart = drawChart(entry, w, old, now); card.appendChild(chart.el);
       var observed = observedAge(at, now) + (old ? "; " + t("stalePace") : "");
       card.setAttribute("aria-label", t("card", windowLabel(w.kind), Math.round(w.percent), comparison, observed) + (isDisabled ? "; " + t("disabled") : ""));
-      var history = entryHistory(entry), note;
+      var history = entryHistory(entry, w.kind), note;
       if (!history || history.schema_version !== 1 || history.status === "unavailable") note = t("historyUnavailable");
       else if (history.status === "empty") note = t("historyEmpty");
       else note = t(chart.geometry.points.length > 1 ? "historyRecorded" : "historyEarlier");

@@ -29,7 +29,7 @@
   // lead is the viewed hosted session: its last read state, the read in
   // flight, the permission line the state was last read for, and the
   // approval cards by request id.
-  var lead = { st: null, busy: false, again: false, key: "", cards: {}, need: null };
+  var lead = { st: null, busy: false, again: false, gone: false, key: "", cards: {}, need: null };
   // toolLabel is a tool's name as the server's rows show it: an MCP tool
   // without its server prefix.
   function toolLabel(name) {
@@ -517,8 +517,8 @@
       lead.busy = false;
       // A daemon that no longer runs the session answers 404: the page then
       // shows it as any session it only watches.
-      if (status === 200 && v.id) lead.st = v;
-      else if (status === 404) lead.st = null;
+      if (status === 200 && v.id) { lead.st = v; lead.gone = false; }
+      else if (status === 404) { lead.st = null; lead.gone = true; }
       if (status === 200 || status === 404) leadDraw();
       if (lead.again) { lead.again = false; leadFetch(); }
     });
@@ -636,6 +636,7 @@
   function leadDraw() {
     var st = lead.st, box = $("apbox");
     leadChip();
+    composerSync(st);
     if (rp.P && rp.kind === "sess") {
       if (leadCan()) rp.P.draw();
       else railPopClose(false);
@@ -747,5 +748,176 @@
     if (key === lead.key) return;
     lead.key = key;
     leadFetch();
+  }
+
+  // --- composer footer 2-control strip (Model + Effort only, decision (38)) --
+  var composerPills = $("composer-pills"), composerPop = { slot: "", portal: null, busy: false };
+  function composerHarness() {
+    if (lead.st && lead.st.backend) return String(lead.st.backend);
+    var h = region("head"), el = h && h.querySelector(".host.sse");
+    return el ? el.textContent.trim() : "";
+  }
+  function composerHarnessLabel(k) {
+    if (k === "claude") return "Claude";
+    if (k === "codex") return "Codex";
+    if (k === "agy") return "AGY";
+    if (k === "pi") return "Pi";
+    return k || "";
+  }
+  function composerCurrent(slot) {
+    if (lead.st) return String(slot === "model" ? (lead.st.model || "") : (lead.st.effort || ""));
+    var btn = composerPills && composerPills.querySelector('[data-pop="' + slot + '"]');
+    if (!btn) return "";
+    var v = btn.getAttribute("data-val");
+    if (v !== null) return v;
+    var pv = btn.querySelector(".pv"), txt = pv ? pv.textContent.trim() : "";
+    return txt === wsT("js.sup.default") ? "" : txt;
+  }
+  function composerEnsurePortal() {
+    if (composerPop.portal) return composerPop.portal;
+    var el = mk("div", "fpop");
+    el.id = "fpop-portal";
+    el.setAttribute("role", "listbox");
+    el.hidden = true;
+    doc.body.appendChild(el);
+    composerPop.portal = el;
+    return el;
+  }
+  function composerPlacePop() {
+    var pop = composerPop.portal;
+    if (!pop || pop.hidden || !composerPop.slot || !composerPills) return;
+    var btn = composerPills.querySelector('[data-pop="' + composerPop.slot + '"]');
+    if (!btn) return;
+    var r = btn.getBoundingClientRect(), pw = pop.offsetWidth, ph = pop.offsetHeight;
+    var left = Math.max(8, Math.min(r.left, window.innerWidth - pw - 8));
+    var top = r.top - ph - 6;
+    if (top < 8) top = Math.min(window.innerHeight - ph - 8, r.bottom + 6);
+    pop.style.left = left + "px";
+    pop.style.top = Math.max(8, top) + "px";
+  }
+  function composerClosePop(restoreFocus) {
+    var was = composerPop.slot;
+    composerPop.slot = "";
+    if (composerPills) q("[data-pop]", composerPills).forEach(function (b) { b.setAttribute("aria-expanded", "false"); });
+    if (composerPop.portal) { composerPop.portal.hidden = true; composerPop.portal.removeAttribute("data-sig"); composerPop.portal.textContent = ""; }
+    if (restoreFocus && was && composerPills) {
+      var btn = composerPills.querySelector('[data-pop="' + was + '"]');
+      if (btn && !btn.disabled) btn.focus();
+    }
+  }
+  function composerDrawPop() {
+    var slot = composerPop.slot;
+    if (!slot || !composerPills) return;
+    var pop = composerEnsurePortal(), harness = composerHarness(), cur = composerCurrent(slot);
+    var list = slot === "model" ? leadModels(harness) : leadEfforts(harness);
+    var all = list.slice();
+    if (cur && all.indexOf(cur) < 0) all.push(cur);
+    var sig = [slot, harness, cur].concat(all).join("\n");
+    if (!pop.hidden && pop.getAttribute("data-sig") === sig) {
+      composerPlacePop();
+      return;
+    }
+    pop.setAttribute("data-sig", sig);
+    pop.textContent = "";
+    var hdText = (composerHarnessLabel(harness) ? composerHarnessLabel(harness) + " " : "") + wsT(slot === "model" ? "js.sup.model" : "js.sup.effort");
+    pop.appendChild(mk("div", "fpop-hd", hdText));
+    var opts = [{ val: "", label: wsT("js.sup.default") }].concat(all.map(function (v) { return { val: v, label: v }; }));
+    opts.forEach(function (o) {
+      var opt = mk("button", "fpop-opt");
+      opt.type = "button";
+      opt.setAttribute("role", "option");
+      opt.setAttribute("data-slot", slot);
+      opt.setAttribute("data-val", o.val);
+      opt.setAttribute("aria-selected", String(o.val === cur));
+      opt.appendChild(mk("span", null, o.label));
+      pop.appendChild(opt);
+    });
+    pop.hidden = false;
+    composerPlacePop();
+  }
+  function composerPick(slot, val) {
+    if (composerPop.busy) return;
+    var body = {};
+    body[slot] = val;
+    composerPop.busy = true;
+    composerClosePop(true);
+    composerSync(lead.st);
+    railPost("/agents/" + encodeURIComponent(rid) + "/settings", body, function (st, v, s) {
+      composerPop.busy = false;
+      if (st === 200 && v.id) { lead.st = v; lead.gone = false; leadDraw(); return; }
+      toast(leadErr(st, s));
+      leadDraw();
+      leadFetch();
+    });
+  }
+  function composerSync(st) {
+    if (!composerPills) return;
+    if ((st && leadGone(st)) || (!st && lead.gone)) {
+      composerPills.hidden = true;
+      composerClosePop(false);
+      return;
+    }
+    composerPills.hidden = false;
+    var isChild = !!(root.hasAttribute("data-child") || (st && st.is_child));
+    var canEdit = !isChild && !composerPop.busy && (st ? !!st.can_control : root.hasAttribute("data-can-edit-settings"));
+    [["model", "js.lead.controls.model"], ["effort", "js.lead.controls.effort"]].forEach(function (pair) {
+      var slot = pair[0], tipKey = pair[1], btn = composerPills.querySelector('[data-pop="' + slot + '"]');
+      if (!btn) return;
+      if (st) {
+        var raw = String(slot === "model" ? (st.model || "") : (st.effort || ""));
+        btn.setAttribute("data-val", raw);
+        var pv = btn.querySelector(".pv");
+        if (pv) pv.textContent = raw || wsT("js.sup.default");
+      }
+      btn.disabled = !canEdit;
+      btn.title = isChild ? wsT("js.lead.controls.child") : (!canEdit && !(st ? false : composerPop.busy) ? wsT("js.lead.controls.host") : wsT(tipKey));
+      if (!canEdit && composerPop.busy && !isChild && (st ? !!st.can_control : root.hasAttribute("data-can-edit-settings"))) btn.title = wsT(tipKey);
+      var tail = btn.lastElementChild, wantLock = isChild;
+      if (tail && tail.classList.contains("lock") !== wantLock) {
+        var nextTail = luIcon(wantLock ? "lock" : "chevron-down");
+        nextTail.setAttribute("class", "i li " + (wantLock ? "lock" : "chev"));
+        btn.replaceChild(nextTail, tail);
+      }
+    });
+    if (composerPop.slot) {
+      if (!canEdit) composerClosePop(false);
+      else composerDrawPop();
+    }
+  }
+  if (composerPills) {
+    composerPills.addEventListener("click", function (e) {
+      var btn = e.target && e.target.closest && e.target.closest("[data-pop]");
+      if (!btn || btn.disabled) return;
+      var slot = btn.getAttribute("data-pop");
+      if (composerPop.slot === slot) { composerClosePop(true); return; }
+      composerClosePop(false);
+      composerPop.slot = slot;
+      btn.setAttribute("aria-expanded", "true");
+      composerDrawPop();
+      leadChoices(composerDrawPop, composerDrawPop);
+    });
+    doc.addEventListener("click", function (e) {
+      if (!composerPop.slot) return;
+      var t = e.target;
+      if (t && t.closest) {
+        var opt = t.closest("#fpop-portal .fpop-opt");
+        if (opt) { composerPick(opt.getAttribute("data-slot"), opt.getAttribute("data-val")); return; }
+        if (t.closest("#fpop-portal") || t.closest("#composer-pills")) return;
+      }
+      composerClosePop(false);
+    });
+    doc.addEventListener("keydown", function (e) {
+      if (!composerPop.slot) return;
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); composerClosePop(true); return; }
+      if ((e.key === "ArrowDown" || e.key === "ArrowUp") && composerPop.portal) {
+        var opts = q(".fpop-opt", composerPop.portal);
+        if (!opts.length) return;
+        e.preventDefault();
+        var idx = opts.indexOf(doc.activeElement);
+        var next = e.key === "ArrowDown" ? (idx + 1) % opts.length : (idx <= 0 ? opts.length - 1 : idx - 1);
+        opts[next].focus();
+      }
+    });
+    window.addEventListener("resize", composerPlacePop);
   }
 

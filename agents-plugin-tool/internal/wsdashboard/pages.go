@@ -415,9 +415,11 @@ func pageFuncs(lang string, icons map[string]bool) template.FuncMap {
 		"batchNums":  func(b wslive.ToolBatch) []batchNum { return batchNums(lang, b) },
 		"batchArgs":  batchArgs,
 		"argsList":   batchArgsList,
-		"phaseWord":  func(phase string) string { return phaseWord(lang, phase) },
-		"flagText":   func(flag string) string { return flagText(lang, flag) },
-		"limitName":  func(name string) string { return limitName(lang, name) },
+		"phaseWord":        func(phase string) string { return phaseWord(lang, phase) },
+		"ctxBoundaryTitle": func(kind, arg string) string { return ctxBoundaryTitle(lang, kind, arg) },
+		// Retained for the SHA256-pinned historical template fixture (testdata/pre_effects/dashboard.tmpl).
+		"flagText":  flagText,
+		"limitName": limitName,
 		// Translation: t is a table lookup, tn the count form of a key, tcode
 		// a lookup whose one placeholder renders as <code>.
 		"t":     func(key string, args ...any) string { return wsi18n.T(lang, key, args...) },
@@ -475,20 +477,32 @@ func phaseWord(lang, phase string) string {
 	return phase
 }
 
-// flagText is the context bar's warning word (ContextBar.Flag) in lang.
-func flagText(lang, flag string) string {
-	if flag == "near limit" {
-		return wsi18n.T(lang, "band.flag.near")
+func ctxBoundaryTitle(lang, icon, arg string) string {
+	switch icon {
+	case "zap":
+		return wsi18n.T(lang, "band.ctx.boundary.hard", arg)
+	case "bell-ring":
+		return wsi18n.T(lang, "band.ctx.boundary.m2", arg)
+	case "bell":
+		return wsi18n.T(lang, "band.ctx.boundary.m1", arg)
+	case "info":
+		return wsi18n.T(lang, "band.ctx.boundary.soft", arg)
 	}
-	return wsi18n.T(lang, "band.flag.high")
+	return ""
 }
 
-// limitName is a usage limit chip's name (LimitChip.Name) in lang.
-func limitName(lang, name string) string {
-	if name == "weekly" {
-		return wsi18n.T(lang, "band.limit.weekly")
+func flagText(flag string) string {
+	if flag == "near limit" {
+		return "near limit"
 	}
-	return wsi18n.T(lang, "band.limit.5h")
+	return "high"
+}
+
+func limitName(name string) string {
+	if name == "weekly" {
+		return "weekly"
+	}
+	return "5-hour"
 }
 
 // clockText is a time's fallback text, UTC and fixed, so a region's HTML

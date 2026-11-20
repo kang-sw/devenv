@@ -484,8 +484,10 @@ html:not([data-sysopen]) .rail .rsleep { display: none; }
 .shp .sb-top { padding: 0; }
 .shp .sb-ctx { gap: 7px; min-width: 0; }
 .shp .sb-pct { font-size: 15px; }
+.shp .sb-bar-wrap { padding-top: 13px; }
 .shp .sb-bar { height: 8px; min-width: 60px; }
 .shp .sb-tok { font-size: 11px; }
+.shp .sb-native, .shp .ctx-tip { display: none; }
 .shp.stale .sb-ctx { --c: var(--wb-muted-fg); }
 .shp-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .shp-stat { min-width: 0; display: grid; gap: 1px; padding: 5px 8px 6px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); }
