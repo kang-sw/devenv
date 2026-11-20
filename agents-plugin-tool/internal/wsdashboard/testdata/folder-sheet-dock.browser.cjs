@@ -36,7 +36,7 @@ const html = `<!doctype html><html data-rid="fixture" data-theme="light"><head><
 <div id="bcol" class="bcol"><div id="r-board" class="r-board">${topic('current-topic', 'Current work', 'The board stays in place underneath the reading pane.')}${topic('pinned-topic', 'Pinned reference', 'This durable topic must return unchanged after dismissal.')}</div></div>
 </main></div></div>
 <script>const translations=${translations}; function wsT(k,a,b){var text=k==='js.board.toolbar.count'?a+' open · '+b+' closed':translations[k]||k;var args=[a,b];return text.replace(/\\{(\\d+)\\}/g,function(_,i){return args[+i];});} function wsTn(k,n){return wsT(k+(n===1?'.one':'.other'),n);}</script>
-<script src="/cards.js"></script><script src="/files.js"></script><script src="/preview.js"></script>
+<script src="/gallery.js"></script><script src="/cards.js"></script><script src="/files.js"></script><script src="/preview.js"></script>
 <script>(function(){
 var doc=document,root=doc.documentElement,rid='fixture',cardIdentity=rid,live=true,worktree='',mode='live',layoutMode='split',LAYOUT_KEY='layout';
 var grid=doc.getElementById('grid'),fpane=doc.getElementById('files'),chead=doc.getElementById('chead'),filesTab=null,filesSheet=null;
@@ -54,7 +54,7 @@ window.folderFixture={setLayout:function(value){layoutMode=value;grid.setAttribu
 window.addEventListener('resize',syncFilePreview);
 window.fixtureReady=true;
 })();</script></body></html>`;
-const assets = { '/cards.js': read('cards.js'), '/files.js': read('files.js'), '/preview.js': read('preview.js'), '/dashboard.css': read('dashboard.css'), '/page.css': readAssetSource('wswhiteboard', 'page.css') };
+const assets = { '/gallery.js': read('gallery.js'), '/cards.js': read('cards.js'), '/files.js': read('files.js'), '/preview.js': read('preview.js'), '/dashboard.css': read('dashboard.css'), '/page.css': readAssetSource('wswhiteboard', 'page.css') };
 const unexpected = [];
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://fixture');
@@ -101,6 +101,13 @@ async function closed(page, name) {
   const port=server.address().port; assert.notEqual(port,29417);
   const origin=`http://127.0.0.1:${port}`;
   console.log('Offline fixture: '+origin+' (ephemeral port, not 29417)');
+  // Below 1600px and in tabs the gallery takes its narrow model: the seeded
+  // pin's page, shown when it docks, covers the Main Board (Page 0), whose
+  // toolbar holds the folder. Show Page 0 through its rail dot.
+  async function showBoard(page){
+    const home=page.locator('#bgal .gal-dot.main');
+    if (await home.isVisible() && !(await home.evaluate(n=>n.classList.contains('active')))) await home.click();
+  }
   browser=await chromium.launch({headless:true});
   for (const size of [{width:1920,height:1080},{width:1440,height:900}]) {
     const context=await browser.newContext({viewport:size,deviceScaleFactor:1,colorScheme:'light',reducedMotion:'reduce'});
@@ -111,6 +118,7 @@ async function closed(page, name) {
     const page=await context.newPage(); page.setDefaultTimeout(8000);
     page.on('pageerror',e => errors.push(e.stack));
     await page.goto(origin); await page.waitForFunction(() => window.fixtureReady);
+    await showBoard(page);
     const label=`${size.width}x${size.height}`,folder=page.locator('.board-files'),sheet=page.locator('#toolbar-files');
     check(await sheet.isHidden() && await page.locator('.file-preview-pane').isHidden(),label+' initial state has both surfaces closed');
     await capture(page,size,'a-closed');
@@ -165,6 +173,7 @@ async function closed(page, name) {
     check(await page.evaluate(({x,y})=>document.elementFromPoint(x,y)?.classList.contains('bc-scrim'),outside),label+' empty column gutter outside sheet and reading pane hits scrim');
     await page.mouse.click(outside.x,outside.y); await closed(page,label+' outside empty-space click closes both');
     await page.evaluate(() => folderFixture.setLayout('tabs'));
+    await showBoard(page);
     await folder.click(); await sheet.locator('[data-entry="README.md"]').waitFor(); await settle(page);
     const tabs=await geometry(page);
     check(await sheet.getAttribute('data-docked') === null && tabs.sheet.top > tabs.board.top && tabs.sheet.bottom < size.height,label+' tabs retains non-docked dropdown sheet');
