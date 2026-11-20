@@ -356,6 +356,9 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 			status = TurnFailed
 		}
 		c.settleTurn(status, turnErr, c.turnMark)
+		if c.rec.Backend == BackendAgy && c.r.opts.AgyActivity != nil {
+			c.r.opts.AgyActivity()
+		}
 	}
 	if c.replaying {
 		return

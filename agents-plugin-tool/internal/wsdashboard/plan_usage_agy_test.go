@@ -113,6 +113,151 @@ func validAgyFixtureJSON(reset5h, resetWeekly string) string {
 }`, resetWeekly, reset5h, reset5h, resetWeekly, reset5h, reset5h, reset5h, reset5h)
 }
 
+func waitAgyActivityProbe(t *testing.T, d *Daemon, s *planUsageStore) {
+	t.Helper()
+	started := make(chan struct{}, 1)
+	resolve := s.resolveAgy
+	s.resolveAgy = func() (string, []string, error) {
+		started <- struct{}{}
+		return resolve()
+	}
+	d.AgyActivity()
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("agy activity did not start a probe")
+	}
+	s.probes.Wait()
+}
+
+func TestPlanUsageAgyActivityDoesNotWaitForStoreLock(t *testing.T) {
+	base := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+	s, countFile, _ := fakeAgyEnv(t, "cat <<'EOF'\n"+validAgyFixtureJSON(base.Add(3*time.Hour).Format(time.RFC3339), base.Add(4*24*time.Hour).Format(time.RFC3339))+"\nEOF")
+	d := &Daemon{planUsage: s}
+	s.mu.Lock()
+	returned := make(chan struct{})
+	go func() {
+		d.AgyActivity()
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		s.mu.Unlock()
+		t.Fatal("AgyActivity waited for the plan-usage store lock")
+	}
+	s.mu.Unlock()
+	deadline := time.Now().Add(3 * time.Second)
+	for fakeAgyCallCount(countFile) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := fakeAgyCallCount(countFile); got != 1 {
+		t.Fatalf("activity probe count = %d, want 1", got)
+	}
+	s.probes.Wait()
+}
+
+func TestPlanUsageAgyActivitySharesPopoverProbePath(t *testing.T) {
+	base := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+	payload := validAgyFixtureJSON(base.Add(3*time.Hour).Format(time.RFC3339), base.Add(4*24*time.Hour).Format(time.RFC3339))
+	var files [2][2][]byte
+	for i, trigger := range []string{"activity", "popover"} {
+		s, countFile, _ := fakeAgyEnv(t, "cat <<'EOF'\n"+payload+"\nEOF")
+		s.now = func() time.Time { return base }
+		d := &Daemon{planUsage: s}
+		if trigger == "activity" {
+			waitAgyActivityProbe(t, d, s)
+		} else {
+			req := httptest.NewRequest("GET", "/rail/usage?refresh=1", nil)
+			req.Header.Set("X-WS-Usage-Refresh", "1")
+			w := httptest.NewRecorder()
+			d.handlePlanUsage(w, req)
+			if w.Code != 200 {
+				t.Fatalf("popover status = %d", w.Code)
+			}
+			s.probes.Wait()
+		}
+		if got := fakeAgyCallCount(countFile); got != 1 {
+			t.Fatalf("%s probe count = %d, want 1", trigger, got)
+		}
+		for j, name := range []string{planUsageAgyCache, planUsageAgyHistoryCache} {
+			var err error
+			files[i][j], err = os.ReadFile(filepath.Join(s.dir, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !json.Valid(files[i][j]) {
+				t.Fatalf("%s wrote invalid %s", trigger, name)
+			}
+		}
+	}
+	for j, name := range []string{planUsageAgyCache, planUsageAgyHistoryCache} {
+		if !bytes.Equal(files[0][j], files[1][j]) {
+			t.Fatalf("activity and popover wrote different %s shapes", name)
+		}
+	}
+}
+
+func TestPlanUsageAgyActivityRespectsDebounceAndHolds(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		advance    time.Duration
+	}{
+		{"debounce", `echo 'not json'; exit 1`, 9 * time.Minute},
+		{"billed_turn", `echo '{"status":"SUCCESS","num_turns":1,"conversation_id":"","command":{"name":"usage","data":{"groups":[]}}}'`, 30 * time.Minute},
+		{"auth_hold", `printf 'Authentication required. Please visit the URL https://example.invalid/auth\n' >&2; exit 1`, 30 * time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var clockMu sync.Mutex
+			now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+			s, countFile, _ := fakeAgyEnv(t, tc.body)
+			s.now = func() time.Time { clockMu.Lock(); defer clockMu.Unlock(); return now }
+			d := &Daemon{planUsage: s}
+			waitAgyActivityProbe(t, d, s)
+			clockMu.Lock()
+			now = now.Add(tc.advance)
+			clockMu.Unlock()
+			done := make(chan struct{})
+			d.agyActivity(done)
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				t.Fatal("second agy activity handoff did not return")
+			}
+			// Any incorrectly admitted probe joined before the handoff returned.
+			s.probes.Wait()
+			if got := fakeAgyCallCount(countFile); got != 1 {
+				t.Fatalf("second activity spawned despite %s: count=%d", tc.name, got)
+			}
+		})
+	}
+}
+
+func TestPlanUsageAgyCommandEnvStripsHarness(t *testing.T) {
+	t.Setenv("WS_MCP_HARNESS", "agy")
+	for _, base := range [][]string{nil, {"WS_MCP_HARNESS=agy", "AGY_CLI_DISABLE_AUTO_UPDATE=false", "OTHER=kept"}} {
+		env := agyCommandEnv(base)
+		var auto, other bool
+		for _, entry := range env {
+			if strings.HasPrefix(entry, "WS_MCP_HARNESS=") {
+				t.Fatalf("probe inherited harness: %q", entry)
+			}
+			auto = auto || entry == "AGY_CLI_DISABLE_AUTO_UPDATE=true"
+			other = other || entry == "OTHER=kept"
+		}
+		if !auto || base != nil && !other {
+			t.Fatalf("probe environment lost required values: %v", env)
+		}
+	}
+	if runtime.GOOS == "windows" {
+		for _, entry := range agyCommandEnv([]string{"ws_mcp_harness=agy"}) {
+			if strings.EqualFold(strings.SplitN(entry, "=", 2)[0], "WS_MCP_HARNESS") {
+				t.Fatalf("probe inherited mixed-case harness: %q", entry)
+			}
+		}
+	}
+}
+
 func TestParseAgyResetTimeRange(t *testing.T) {
 	for _, tc := range []struct {
 		name string
