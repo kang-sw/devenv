@@ -135,6 +135,10 @@ func (c *conv) handle(ev Event) {
 		if !quiet {
 			c.onModelActivity(*ev.ModelActivity)
 		}
+	case ev.ModelFailureUpdate != nil:
+		if !quiet {
+			c.onModelFailure(*ev.ModelFailureUpdate)
+		}
 	case ev.Approval != nil:
 		c.addApproval(*ev.Approval, quiet)
 	case ev.ApprovalDone != "":
@@ -397,6 +401,11 @@ func (c *conv) addApproval(a ApprovalRequest, quiet bool) {
 	c.setStatus(func() { c.approvals = append(c.approvals, a) })
 	if !quiet && c.modelWaitArmed {
 		c.stopModelWaitTimer()
+		c.stopModelFailureDrain()
+		if c.modelWaitFailure != "" {
+			c.modelWaitFailureExcluded = true
+		}
+		c.modelWaitFailure = ""
 	}
 	c.checkAction(quiet)
 	c.showApprovals(quiet)
@@ -655,6 +664,9 @@ func (c *conv) processGone() {
 // processEnded settles what ends with a process: its turn, its waiting
 // prompts, and what it last reported.
 func (c *conv) processEnded() {
+	// A process loss during the one retry still reports the failed attempt's
+	// saved reply when the retry itself produced no final reply.
+	c.restoreModelWaitDiagnostic()
 	c.disarmModelWait()
 	c.stopIdle()
 	hadBgGrace := c.bgGraceTimer != nil

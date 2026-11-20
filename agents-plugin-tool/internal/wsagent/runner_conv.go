@@ -93,8 +93,13 @@ type conv struct {
 	modelWaitCancelling        bool
 	modelWaitRetryFromAPIError bool
 	modelWaitFailErr           string
+	modelWaitDiagnostic        string
+	modelWaitFailureExcluded   bool
 	modelWaitC                 <-chan time.Time
 	modelWaitStop              func()
+	modelWaitFailure           string
+	modelWaitDrainC            <-chan time.Time
+	modelWaitDrainStop         func()
 
 	// loop-owned.
 	events       <-chan Event
@@ -496,10 +501,11 @@ func (c *conv) loop() {
 		return
 	}
 	for {
-		var idleC, actionC, leverC, compactC, modelWaitC, spawnC, bgGraceC <-chan time.Time
+		var idleC, actionC, leverC, compactC, modelWaitC, modelWaitDrainC, spawnC, bgGraceC <-chan time.Time
 		leverC = c.leverC
 		compactC = c.compactC
 		modelWaitC = c.modelWaitC
+		modelWaitDrainC = c.modelWaitDrainC
 		if c.spawnTimer != nil {
 			spawnC = c.spawnTimer.C
 		}
@@ -572,6 +578,8 @@ func (c *conv) loop() {
 			c.compactTimedOut()
 		case <-modelWaitC:
 			c.modelWaitTimedOut()
+		case <-modelWaitDrainC:
+			c.modelFailureDrainTimedOut()
 		case <-beat.C:
 			c.live.heartbeatSnapshot()
 			c.persistSeq()

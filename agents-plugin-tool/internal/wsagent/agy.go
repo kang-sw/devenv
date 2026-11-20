@@ -590,7 +590,7 @@ type agyMapper struct {
 	pendingTools    map[string]bool
 	openBg          map[string]bool
 	bgCalls         map[string]bool
-	apiError        string
+	modelFailure    string
 	wakeTimer       *time.Timer
 	onWakeClose     func()
 	turnSeq         int
@@ -810,10 +810,18 @@ func (m *agyMapper) mapLine(line []byte, replies lineReplies) []Event {
 	case msg.Method != "" && hasID:
 		return m.request(msg, replies, now)
 	case msg.Method == "session/update":
+		oldFailure := m.modelFailure
 		out := m.update(msg.Params, replies, now)
 		if _, replaying := replies.(silentReplies); !replaying {
 			n := len(m.pendingTools)
 			out = append(out, Event{ModelActivity: &n})
+			if oldFailure != m.modelFailure {
+				if oldFailure != "" && m.modelFailure == "" {
+					out = append(out, Event{Notice: "agy recovered after in-band model failure: " + oldFailure})
+				}
+				failure := m.modelFailure
+				out = append(out, Event{ModelFailureUpdate: &failure})
+			}
 		}
 		return out
 	case msg.Method == "" && hasID:
@@ -1060,7 +1068,7 @@ func (m *agyMapper) startTurn(out []Event, replaying bool) []Event {
 		return out
 	}
 	m.inTurn = true
-	m.apiError = ""
+	m.modelFailure = ""
 	m.wakeStepHadText = false
 	m.wakeSawUsage = false
 	if len(m.outstanding) == 0 && !replaying {
@@ -1080,6 +1088,26 @@ func (m *agyMapper) flushReply(out []Event) []Event {
 		return out
 	}
 	return append(out, Event{Live: &wslive.Event{Kind: wslive.KindReply, Text: text, Final: true}})
+}
+
+// stripReplyFailure removes a terminal failure line once later model activity
+// proves agy recovered. The live partial remains a diagnostic, but the final
+// reply and parent report contain only the successful attempt.
+func (m *agyMapper) stripReplyFailure(failure string) {
+	if failure == "" {
+		return
+	}
+	text := m.reply.String()
+	trimmed := strings.TrimRight(text, " \t\r\n")
+	if !strings.HasSuffix(trimmed, failure) {
+		return
+	}
+	prefix := strings.TrimSuffix(trimmed, failure)
+	prefix = strings.TrimSuffix(prefix, "\n")
+	prefix = strings.TrimSuffix(prefix, "\r")
+	m.reply.Reset()
+	m.reply.WriteString(prefix)
+	m.replyAt = 0
 }
 
 func (m *agyMapper) groupID() string {
@@ -1115,8 +1143,8 @@ func (m *agyMapper) endTurn(msg agyMessage, now int64) []Event {
 	clear(m.openBg)
 	clear(m.openCalls)
 	clear(m.pendingTools)
-	apiErr := m.apiError
-	m.apiError = ""
+	modelFailure := m.modelFailure
+	m.modelFailure = ""
 	m.inTurn = false
 	m.unsolicitedTurn = false
 	m.wakeStepHadText = false
@@ -1130,8 +1158,8 @@ func (m *agyMapper) endTurn(msg agyMessage, now int64) []Event {
 		ev.TurnReason = wslive.TurnAborted
 	case r.StopReason != "" && r.StopReason != "end_turn":
 		ev.TurnError = "agy stopped the turn: " + r.StopReason
-	case apiErr != "":
-		ev.APIError = apiErr
+	case modelFailure != "":
+		ev.ModelFailure = modelFailure
 	}
 	return append(out, ev)
 }
@@ -1183,19 +1211,21 @@ func (m *agyMapper) update(params json.RawMessage, replies lineReplies, now int6
 		m.wakeStepHadText = true
 		m.wakeSawUsage = false
 		m.armWakeIfReadyLocked(replaying)
-		if trimmed := strings.TrimSpace(c.Text); trimmed != "" {
-			if strings.HasPrefix(trimmed, agyAPIErrorPrefix) {
-				m.apiError = trimmed
-			} else {
-				m.apiError = ""
-			}
-		}
 		if m.groupCalls {
 			// Text after a tool batch is the next message's.
 			m.group++
 			m.groupCalls = false
 		}
+		before := m.reply.String()
+		oldFailure := m.modelFailure
 		m.reply.WriteString(c.Text)
+		m.modelFailure = agyReplyTailFailure(m.reply.String())
+		if oldFailure != "" && m.modelFailure == "" {
+			m.reply.Reset()
+			m.reply.WriteString(before)
+			m.stripReplyFailure(oldFailure)
+			m.reply.WriteString(c.Text)
+		}
 		if m.replyAt != 0 && now-m.replyAt < claudePartialEvery {
 			return out
 		}
@@ -1206,13 +1236,16 @@ func (m *agyMapper) update(params json.RawMessage, replies lineReplies, now int6
 		return append(out, Event{Live: &wslive.Event{Kind: wslive.KindReply, Text: m.reply.String()}})
 	case "agent_thought_chunk":
 		out := m.startTurn(nil, replaying)
-		m.apiError = ""
+		m.stripReplyFailure(m.modelFailure)
+		m.modelFailure = ""
 		m.wakeSawUsage = false
 		m.armWakeIfReadyLocked(replaying)
 		return out
 	case "tool_call":
-		out := m.flushReply(m.startTurn(nil, replaying))
-		m.apiError = ""
+		out := m.startTurn(nil, replaying)
+		m.stripReplyFailure(m.modelFailure)
+		out = m.flushReply(out)
+		m.modelFailure = ""
 		m.wakeStepHadText = false
 		m.wakeSawUsage = false
 		m.stopWakeTimerLocked()
