@@ -1,0 +1,13 @@
+{
+  "reviewer": "id:resistantachinessreaffirmsled",
+  "tier": "codex.large",
+  "scope": "Lite correctness and test integrity",
+  "range": "f2234e573..cc76ef0b5",
+  "observed_via": "ws agent.list",
+  "state_at_verdict_read": "waiting",
+  "last_report": "done: clean",
+  "detailed_report_visible_in_worker": false,
+  "recovery_requested": "Copy existing report to shared ticket assets and send directly to the root lead; do not re-review.",
+  "post_review_test_only_commit": "6b30df09a",
+  "note": "This is the worker-observed runtime verdict. It does not substitute text for the missing detailed reviewer artifact."
+}

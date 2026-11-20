@@ -391,3 +391,135 @@ Verification:
   byte-identical where required, contain no file-only guidance, and describe
   URL-valued `full:` and generic non-URL status/board-copy behavior without
   repository-local references.
+
+
+## Implementation checkpoint - 2026-11-20
+
+Code is committed on `impl/develop/stuck-crave-groin`: renderer retirement
+`e629248ed`, MCP/cleanup/construction retirement `cc76ef0b5`, and test-only
+cleanup synchronization `6b30df09a`. The phase remains open for the owner
+gates below.
+
+### Implemented behavior
+
+- Updates commit the existing folder store once and return a served URL,
+  `page not yet served` for daemon ownership without a URL, or `page unavailable`
+  for the interval raw diagnostic call. Proxy and hosted CLI construction set
+  `BoardOwner` even when `Live` is nil.
+- Todo, agenda, ticket, and mailbox mutations retain daemon nudges and no longer
+  render or mutate the authoritative board for panel refresh. The update also
+  stops reading agenda/todo parts that only the removed publisher needed.
+- Successful daemon board opens share one background cleanup guard per canonical
+  project/cache identity. No response waits for the sweep and no marker is
+  written. The closed set preserves unrelated flat HTML, old flat stamp names,
+  the pre-existing GC marker, live embeds, host symlinks, directories, and every
+  authoritative file. An unreadable session listing preserves embeds.
+- The removed page writer also served live recovery snapshots; that still-used
+  atomic replacement and Windows sharing-violation retry moved into
+  `live_snapshot_file.go`. Removing it would have broken an unrelated live path.
+
+### Verification obtained
+
+All Go commands used `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`.
+`internal/mcp` ran separately with `-timeout 45m`; no shared daemon or holder
+was stopped or modified.
+
+- `go test ./internal/wswhiteboard -count=1 -timeout 5m`: PASS (250.629s).
+- Focused MCP regex
+  `Whiteboard|Dashboard(ReadPage|Folder|Stamp|Pointer|Served|SingleNudge|TopicTicket)|LiveSnapshotReplacement`:
+  123 top-level tests passed. One migrated assertion incorrectly expected a
+  settled comment in the initial page; it now checks the actual lazy-history
+  response. Its focused rerun passed. Opt-in fixture/measurement tests ran
+  separately below; the unrelated idle CPU fixture remained skipped.
+- `TestWhiteboardConstructionBeforeDashboardBind`: PASS for proxy, hosted CLI,
+  and raw CLI with no bound dashboard.
+- An equivalent old-renderer harness compiled from `f2234e573` recreated
+  deleted page/stamp files, including the page's stamp reference. All six
+  authoritative file hashes and decoded state stayed identical. The new
+  `TestWhiteboardReopensOldRecreatedPages` then passed against the same folder.
+  The folder reader/writer remain `internal/wswhiteboard/folders.go:146,183`;
+  `cc76ef0b5:internal/mcp/session_state.go:657` retains that writer, and
+  `whiteboard_tools.go:286` changes only the successful `full:` value.
+  The old producer at `f2234e573:internal/mcp/whiteboard_tools.go:625-646`
+  recreates the derived page/stamp. This supports the settled T1 verdict.
+- `TestWhiteboardRetirementClosedSet`, unknown-liveness preservation, and the
+  blocked-sweep first-open/shared-guard test: PASS. The fixture deletes exactly
+  seven retired files; a blocked cleanup does not delay the first read, and
+  subsequent reads/actions schedule no second scan or marker.
+- Real temporary daemon Chromium before/after: PASS for answer selection,
+  file actions, lazy topic history, sandboxed frames, loaded images, rendered
+  Mermaid, and auxiliary panels. Neither run requested `index.html` or
+  `index.stamp.js`. The captures below match apart from generated IDs, clocks,
+  and fixture host counters. The fixture has no notes provider; that panel's
+  matching unavailable state is not a retirement regression.
+- Dashboard `TestPagesCarryScopedSelectAllScript` and
+  `TestScopedSelectAllBrowser`: PASS. The separate external unified-history
+  harness was not configured and remained skipped.
+- wsflow skill bundle tests: 10 PASS. Pi bundle freshness: PASS. The pinned
+  `workflow-bundle-consumer.test.mjs` failed on its already committed producer
+  `f2234e573` with `Incomplete Claude launcher or config references` and a
+  macOS `/var` versus `/private/var` identity assertion; it did not consume the
+  uncommitted proposed prose bundles. Reported to the lead as an existing
+  package validation issue, not changed here.
+- Search finds no current `RenderPage` caller, `StampFile`, `DocFramed`,
+  `refreshWhiteboardAfter`, or recurring GC producer. Only the intentionally
+  historical `testdata/compat-old` driver retains its old calls.
+
+| Capture | Before | After |
+|---|---|---|
+| Board/history/answers | [before](../assets/261116-feat-ws-whiteboard-retire-disk-pages/before-board.png) | [after](../assets/261116-feat-ws-whiteboard-retire-disk-pages/after-board.png) |
+| Image/frame | [before](../assets/261116-feat-ws-whiteboard-retire-disk-pages/before-image.png) | [after](../assets/261116-feat-ws-whiteboard-retire-disk-pages/after-image.png) |
+| Mermaid | [before](../assets/261116-feat-ws-whiteboard-retire-disk-pages/before-mermaid.png) | [after](../assets/261116-feat-ws-whiteboard-retire-disk-pages/after-mermaid.png) |
+| Auxiliary panels | [before](../assets/261116-feat-ws-whiteboard-retire-disk-pages/before-panels.png) | [after](../assets/261116-feat-ws-whiteboard-retire-disk-pages/after-panels.png) |
+
+### Supporting performance evidence
+
+These are macOS fixture timings and instrumented API counters, not the required
+Windows antivirus baseline or syscall totals. The counters omit direct `os.*`
+calls; byte snapshots report resulting file changes, not transient operations.
+Full rows are in [measurements.json](../assets/261116-feat-ws-whiteboard-retire-disk-pages/measurements.json).
+
+| Action | Before | After |
+|---|---|---|
+| First update | 163.58 ms; 99 instrumented operations | 104.76 ms; 96 operations |
+| Steady update (4 samples) | median 80.38 ms; p95 96.03 ms; 98/107/107/107 operations | median 58.86 ms; p95 70.51 ms; 94/103/103/103 operations |
+| `agenda.set` | 45.47 ms; 91 operations | 0.559 ms; 12 operations |
+| Update derived output | two files; 349,770-358,339 bytes | zero files/bytes |
+| Agenda derived output | two files; 349,060 bytes | zero files/bytes |
+| Agenda authoritative board change | two files; 206 bytes | zero files/bytes |
+
+The update's authoritative byte deltas matched before/after (981 bytes on the
+first update, then 1,249/1,604/1,960/2,315). The cleanup test runs separately
+from these raw-dispatch action measurements; privileged syscall-level cleanup
+and action traces remain uncollected.
+
+### Pending gates and handoff
+
+1. Owner approval of the [exact proposed shipped prose diff](../assets/261116-feat-ws-whiteboard-retire-disk-pages/proposed-whiteboard.patch)
+   is still required by this ticket. The canonical/wsflow prose, manifests,
+   and generated Pi copies are prepared but uncommitted. The existing handoff
+   procedure already uses a ZIP; no obsolete board-copy procedure was recreated.
+2. A Windows antivirus baseline and privileged syscall traces were unavailable
+   in this environment. `dtruss` refused the available privileges. Obtain an
+   authorized measurement host, or explicitly decide how this evidence gate
+   is to be handled before closing the phase.
+Independent Lite reviewer `id:resistantachinessreaffirmsled` returned `clean`
+for `f2234e573..cc76ef0b5`, confirmed through `agent.list` after automatic
+completion and mailbox delivery failed. The requested detailed report was
+not visible at its `/tmp` path or the shared-worktree recovery path. The
+[worker-observed review status](../assets/261116-feat-ws-whiteboard-retire-disk-pages/review-status.json)
+records that evidence and limitation; a direct report copy to the root lead
+was requested. No Critical, Important, or Minor finding was reported.
+
+After that verdict, `6b30df09a` only makes the panel-action test wait for its
+first asynchronous sweep before creating old-output sentinels. This prevents
+a slow cleanup from racing the later-action assertion. Both the byte-preserving
+panel-action test and asynchronous/shared cleanup test passed in a focused
+rerun; production code is unchanged from the reviewed head. Lite is one pass,
+so no second reviewer was dispatched.
+
+The branch has not been merged or pushed. `merge_confirm: ask` remains with
+the lead. During delegation, the renderer reached an idle/done state and
+committed, but its completion report was not delivered to this worker; the
+worker verified the retained source itself and reported the session-key/
+completion-delivery discrepancy to the lead for a follow-up at the merge point.
