@@ -1425,6 +1425,18 @@
   }
   document.addEventListener('click', function (e) {
     var t = e.target, btn = t.closest && t.closest('button.pflink'), item = t.closest && t.closest('.pfmenu .pfmi');
+    var mentionButton = t.closest && t.closest('button.pfmention');
+    if (mentionButton) {
+      e.preventDefault(); e.stopPropagation();
+      var article = mentionButton.closest('.wb-entry[data-panel][data-entry]');
+      var topic = article && article.closest('section.topic[data-topic]');
+      var composer = window.WsComposer;
+      if (topic && composer && typeof composer.addPanelMention === 'function') {
+        composer.addPanelMention({ topic: topic.getAttribute('data-topic'), panel: article.getAttribute('data-panel'),
+          entry: article.getAttribute('data-entry'), recap: (article.querySelector('.entry-recap') || {}).textContent || '' });
+      }
+      return;
+    }
     if (item) {
       e.preventDefault(); e.stopPropagation();
       if (linkCopy(location.href.split('#')[0] + '#' + item.getAttribute('data-copy'))) {

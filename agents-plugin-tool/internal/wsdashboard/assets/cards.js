@@ -1167,14 +1167,6 @@
         [["t-fold", "chevron-down", "js.card.fold"], ["t-raise", "arrow-up-to-line", "js.card.raise"], ["d-max", "maximize-2", "js.card.max"], ["d-min", "minimize-2", "js.card.back"]].forEach(function (a) {
           if (!child(bar, a[0])) bar.insertBefore(ibtn(a[0], a[1], wsT(a[2])), child(bar, "tnote-toggle"));
         });
-        // This only attaches intent to the live composer; it never closes a topic.
-        var close = child(bar, "t-close-request");
-        if (sec.classList.contains("closed") || !doc.getElementById("ctext")) {
-          if (close) close.remove();
-        } else {
-          if (!close) close = ibtn("t-close-request", "x", wsT("js.closerequest.add"));
-          bar.appendChild(close);
-        }
         sec.setAttribute("data-size", r && r.folded ? "fold" : "base");
         child(bar, "t-fold").setAttribute("aria-expanded", String(!(r && r.folded)));
         b.setAttribute("aria-pressed", String(on));

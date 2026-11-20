@@ -44,6 +44,7 @@ function wsT(k, a) { return a === undefined ? k : k + ":" + a; }
 var warns = [];
 function noteWarn(t) { warns.push(t); }
 var rid = "s1";
+function inlineEditor() { return null; }
 
 var ctext = new El("textarea"), cimgs = new El("div", "cimgs"), board = new El("div");
 ctext.selectionStart = ctext.selectionEnd = 0;

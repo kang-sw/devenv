@@ -23,6 +23,7 @@ for (const e of G.edges) {
 }
 const laneIds = [...new Set(G.nodes.map(n => n.cluster))].sort((a, b) => a - b);
 const SIZES = [[1600, 960], [1280, 800]];
+const mentionShots = process.env.WS_TICKETMAP_MENTION_SHOTS;
 
 function shot(page, name) {
   if (!shots) return Promise.resolve();
@@ -228,6 +229,18 @@ async function overlaySession(browser, theme, W, H, narrow) {
   // 4. Hover lights neighbours; '/', a query with a hit count, Esc clears.
   const epicCard = fr.locator(`#tmvb .d-tm-card[title="${epicStem}"]`);
   await epicCard.scrollIntoViewIfNeeded();
+  if (W === 1600 && mentionShots) {
+    const mb = epicCard.locator('..').locator('.d-tm-mention');
+    await mb.hover();
+    await page.waitForTimeout(300);
+    assert.equal(await mb.evaluate(e => getComputedStyle(e).opacity), '1', `${tag}: hover reveals mention`);
+    assert.equal(await fr.locator('.d-tm-mcard:not(:hover) > .d-tm-mention').first().evaluate(e => getComputedStyle(e).opacity), '0', `${tag}: idle mention stays subtle`);
+    fs.mkdirSync(mentionShots, { recursive: true });
+    await page.screenshot({ path: path.join(mentionShots, `ticketmap-mention-hover-${theme}.png`) });
+    await page.mouse.move(2, H - 2);
+    await mb.focus();
+    assert.equal(await mb.evaluate(e => getComputedStyle(e).opacity), '1', `${tag}: keyboard focus reveals mention`);
+  }
   await epicCard.hover();
   await page.waitForTimeout(300);
   const lit = await fr.evaluate(i => {
@@ -284,10 +297,12 @@ async function overlaySession(browser, theme, W, H, narrow) {
   for (const t of tiers.down) assert.ok(t >= tiers.hero.b + 20, `${tag}: downstream ${t} >= 20px below the focal ${tiers.hero.b}`);
   for (const l of tiers.lat) assert.ok(l >= tiers.hero.r + 20, `${tag}: related ${l} >= 20px right of the focal ${tiers.hero.r}`);
   assert.equal(tiers.excerpt + tiers.cards, 0, `${tag}: no excerpt nodes`);
+  assert.equal(await fr.evaluate(() => document.querySelectorAll('#tmhero .d-tm-mention, #tmhier .d-tm-mxc > .d-tm-mention, #tmsemgrid .d-tm-msc > .d-tm-mention').length > 2), true, `${tag}: focal, hierarchy and semantic mention controls`);
+  assert.equal(await fr.evaluate(() => document.querySelectorAll('button button').length), 0, `${tag}: no nested buttons`);
 
   // 6. The semantic grid: descending, >= 15%, chips, column count.
   const sem = await fr.evaluate(() => {
-    const cards = [...document.querySelectorAll('#tmsemgrid > .d-tm-sc')];
+    const cards = [...document.querySelectorAll('#tmsemgrid > .d-tm-msc > .d-tm-sc')];
     return { pct: cards.map(c => +c.getAttribute('data-pct')), chips: cards.map(c => c.querySelector('.d-tm-schips').children.length),
       cols: getComputedStyle(document.getElementById('tmsemgrid')).gridTemplateColumns.split(' ').length };
   });
@@ -306,6 +321,7 @@ async function overlaySession(browser, theme, W, H, narrow) {
   const w1 = await wiresOk(fr, `${tag} +N`);
   assert.equal(w1.cards, w0.cards + 3, `${tag}: +N adds the hidden children`);
   await fr.locator('#tmfinsp').click();
+  assert.equal(await fr.locator('.d-tm-ihd .d-tm-mention').count(), 1, `${tag}: inspector can mention the selected ticket`);
   await page.waitForTimeout(100);
   assert.equal(await fr.locator('#tmfinsp').getAttribute('aria-pressed'), 'true');
   assert.notEqual(await fr.evaluate(() => getComputedStyle(document.getElementById('tminsp')).display), 'none', `${tag}: the inspector opens`);
@@ -315,7 +331,7 @@ async function overlaySession(browser, theme, W, H, narrow) {
   await wiresOk(fr, `${tag} inspector closed`);
 
   // 8. Threshold and unlinked-only.
-  const semCount = () => fr.evaluate(() => document.querySelectorAll('#tmsemgrid > .d-tm-sc').length);
+  const semCount = () => fr.evaluate(() => document.querySelectorAll('#tmsemgrid > .d-tm-msc > .d-tm-sc').length);
   const setTh = v => fr.evaluate(v => { const e = document.getElementById('tmsemth'); e.value = String(v); e.dispatchEvent(new Event('input', { bubbles: true })); }, v);
   const at15 = await semCount();
   await setTh(10);
@@ -336,7 +352,7 @@ async function overlaySession(browser, theme, W, H, narrow) {
   assert.equal(await heroStem(fr), epicStem, `${tag}: Prev`);
   const down = await pivot(fr, '#tmhier .d-tm-down .d-tm-xc', `${tag} downstream`);
   assert.deepEqual((await hist(fr)).hist, [epic.i, down], `${tag}: a pivot truncates the forward entries`);
-  const simI = await pivot(fr, '#tmsemgrid > .d-tm-sc', `${tag} semantic`);
+  const simI = await pivot(fr, '#tmsemgrid > .d-tm-msc > .d-tm-sc', `${tag} semantic`);
   assert.deepEqual(await hist(fr), { hist: [epic.i, down, simI], hp: 2, sel: simI });
   await fr.locator('#tmfprev').click();
   assert.equal(await heroStem(fr), G.nodes[down].stem, `${tag}: Prev restores`);
@@ -420,6 +436,86 @@ async function overlaySession(browser, theme, W, H, narrow) {
     await page.keyboard.press('Escape');
     await page.keyboard.press('Escape');
     assert.equal(await isOpen(fr), false);
+  }
+
+  if (W === 1600) {
+    async function prepare() {
+      await fr.evaluate(() => {
+        const field = document.getElementById('ctext');
+        field.value = 'before after';
+        field.focus();
+        field.setSelectionRange(7, 7);
+      });
+      await fr.locator('#thandle').click();
+      if (await fr.locator('#tmfback').isVisible()) await fr.locator('#tmfback').click();
+    }
+    async function mentionFrom(selector, stem) {
+      const history = await fr.evaluate(() => ({ hist: window.__tmap.hist.slice(), hp: window.__tmap.hp, sel: window.__tmap.sel }));
+      await fr.locator(selector).first().click();
+      const state = await fr.evaluate(() => {
+        const f = document.getElementById('ctext');
+        return { text: f.value, rows: f.wsc.ordered().filter(r => r.kind === 'ticket'), focus: document.activeElement === f.wsc.editor, open: !document.getElementById('tmback').hidden };
+      });
+      assert.equal(state.text, `before [ticket:${stem}] after`, `${tag}: mention inserts at the saved caret`);
+      assert.equal(state.rows.length, 1, `${tag}: one ticket capsule`);
+      const ticket = G.nodes.find(n => n.stem === stem);
+      const fields = ({ stem, title, status, path }) => ({ stem, title, status, path });
+      assert.deepEqual(fields(state.rows[0].payload), fields(ticket), `${tag}: semantic ticket payload`);
+      assert.equal(state.focus, true, `${tag}: composer receives focus`);
+      assert.equal(state.open, false, `${tag}: map closes after mention`);
+      assert.deepEqual(await fr.evaluate(() => ({ hist: window.__tmap.hist.slice(), hp: window.__tmap.hp, sel: window.__tmap.sel })), history, `${tag}: mention leaves map selection and history unchanged`);
+    }
+    await prepare();
+    await mentionFrom(`#tmvb .d-tm-card[title="${epicStem}"] + .d-tm-mention`, epicStem);
+    const copied = await fr.evaluate(() => {
+      const f = document.getElementById('ctext'), row = f.wsc.ordered().find(r => r.kind === 'ticket'), clip = new DataTransfer();
+      f.focus(); f.setSelectionRange(row.start, row.end);
+      f.wsc.editor.dispatchEvent(new ClipboardEvent('copy', { clipboardData: clip, bubbles: true, cancelable: true }));
+      const rich = clip.getData('application/x-wsc-capsules+json');
+      f.value = 'before after'; f.setSelectionRange(7, 7);
+      f.wsc.editor.dispatchEvent(new ClipboardEvent('paste', { clipboardData: clip, bubbles: true, cancelable: true }));
+      return { rich, text: f.value, rows: f.wsc.ordered().filter(r => r.kind === 'ticket') };
+    });
+    assert.ok(copied.rich.includes(`"stem":"${epicStem}"`), `${tag}: clipboard carries ticket metadata`);
+    assert.equal(copied.rows.length, 1, `${tag}: paste restores one ticket capsule`);
+    assert.equal(copied.rows[0].payload.stem, epicStem, `${tag}: paste restores its semantic stem`);
+    assert.ok(copied.text.includes(`[ticket:${epicStem}]`), `${tag}: paste restores the ticket anchor`);
+    await fr.evaluate(() => {
+      const f = document.getElementById('ctext'), row = f.wsc.ordered().find(r => r.kind === 'ticket');
+      f.focus(); f.setSelectionRange(row.end, row.end);
+    });
+    await page.keyboard.press('Backspace');
+    const deleted = await fr.evaluate(() => {
+      const f = document.getElementById('ctext');
+      return { text: f.value, rows: f.wsc.ordered().filter(r => r.kind === 'ticket') };
+    });
+    assert.equal(deleted.rows.length, 0, `${tag}: Backspace removes the ticket atomically`);
+    assert.equal(deleted.text.includes('[ticket:'), false, `${tag}: Backspace leaves no partial anchor`);
+    await prepare();
+    await fr.locator(`#tmvb .d-tm-card[title="${epicStem}"]`).click();
+    await mentionFrom('#tmhero .d-tm-mention', epicStem);
+    await prepare();
+    await fr.locator(`#tmvb .d-tm-card[title="${epicStem}"]`).click();
+    const x = fr.locator('#tmhier .d-tm-mxc > .d-tm-mention').first();
+    const xStem = G.nodes[+(await x.locator('..').locator('.d-tm-xc').getAttribute('data-pivot'))].stem;
+    await mentionFrom('#tmhier .d-tm-mxc > .d-tm-mention', xStem);
+    await prepare();
+    await fr.locator(`#tmvb .d-tm-card[title="${epicStem}"]`).click();
+    const s = fr.locator('#tmsemgrid .d-tm-msc > .d-tm-mention').first();
+    const sStem = G.nodes[+(await s.locator('..').locator('.d-tm-sc').getAttribute('data-pivot'))].stem;
+    await mentionFrom('#tmsemgrid .d-tm-msc > .d-tm-mention', sStem);
+    await prepare();
+    await fr.locator(`#tmvb .d-tm-card[title="${epicStem}"]`).click();
+    await fr.locator('#tmfinsp').click();
+    await mentionFrom('.d-tm-ihd .d-tm-mention', epicStem);
+    await prepare();
+    await fr.locator(`#tmvb .d-tm-card[title="${epicStem}"]`).click();
+    await fr.locator('#tmviewc').click();
+    assert.equal(await fr.locator('.d-tm-ihd .d-tm-mention').isVisible(), true, `${tag}: View C selected-node inspector can mention directly`);
+    await mentionFrom('.d-tm-ihd .d-tm-mention', epicStem);
+    await prepare();
+    assert.equal(await fr.locator('#tmctool .d-tm-cmention').isEnabled(), true, `${tag}: View C has a direct mention action`);
+    await mentionFrom('#tmctool .d-tm-cmention', epicStem);
   }
 
   // 14. Zero console errors, page errors, or failed requests.

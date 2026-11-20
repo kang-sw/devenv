@@ -295,6 +295,22 @@
     }
     function catTag(n) { return el("span", "d-tm-cat d-tm-cat-" + n.cat, n.cat); }
     function chip(term, code) { return el("span", "d-tm-chip" + (code ? " d-tm-chip-code" : ""), term); }
+    function mentionAvailable() { return !!(doc.getElementById("ctext") && window.WsComposer && typeof window.WsComposer.addTicketMention === "function"); }
+    function mention(n) {
+      if (!n || !mentionAvailable()) return false;
+      close(false);
+      return !!window.WsComposer.addTicketMention({ stem: n.stem, title: n.title, status: n.status, path: n.path });
+    }
+    function mentionButton(n, cls) {
+      if (!mentionAvailable()) return null;
+      var label = wsT("js.tm.mention");
+      if (!label || label === "js.tm.mention") label = "Mention ticket";
+      var b = button("d-tm-mention" + (cls ? " " + cls : ""), "@");
+      b.title = label;
+      b.setAttribute("aria-label", label);
+      b.addEventListener("click", function (e) { e.stopPropagation(); e.preventDefault(); mention(typeof n === "function" ? n() : n); });
+      return b;
+    }
 
     function cur() { return S.view === "C" ? api.graph : api.viewB; }
     function shown(n) { return tmShown(S, n); }
@@ -912,6 +928,7 @@
     api.clusterPill = clusterPill;
     api.catTag = catTag;
     api.chip = chip;
+    api.mentionButton = mentionButton;
     api.shown = shown;
     api.isHit = isHit;
     api.bucket = tmBucket;

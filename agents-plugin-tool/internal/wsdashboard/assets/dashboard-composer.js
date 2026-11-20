@@ -44,9 +44,71 @@
   // wpicks and wconsoles are the web card's picked elements and console
   // blocks the composer holds, in the order added (web picks, below).
   var wpicks = [], wconsoles = [];
-  function chipList() { return chipOrder.map(function (id) { return chips[id]; }); }
-  function putChip(c) { if (!chips[c.id]) chipOrder.push(c.id); chips[c.id] = c; }
-  function dropChip(id) { delete chips[id]; chipOrder = chipOrder.filter(function (x) { return x !== id; }); }
+  function inlineEditor() { return ctext && ctext.wsc && ctext.wsc.insertCapsule ? ctext.wsc : null; }
+  function inlineRows(kind) { var edit = inlineEditor(); return edit ? edit.ordered().filter(function (r) { return r.kind === kind; }) : []; }
+  function answerCapsule(c) {
+    return { label: "(" + c.id + ")=" + (c.answer || "note"), anchor: "(" + c.id + ")=" + (c.answer || "note"), plain: "(" + c.id + ")=" + (c.answer || "note") + (c.note ? " " + c.note : ""), answer: c };
+  }
+  function topicNoteCapsule(n) {
+    var note = n.value.trim();
+    return { label: "[" + n.topic + "] " + note.replace(/\s+/g, " ").slice(0, 40), anchor: "[note:" + n.topic + "]", plain: "[" + n.topic + "] " + note, topic: n.topic, note: note };
+  }
+  var restoringInlineBack = false;
+  function syncInlineTopics() {
+    var edit = inlineEditor(); if (!edit) return;
+    if (restoringInlineBack) return;
+    var notes = boardQ(".tnote[data-topic]");
+    var was = syncingInline; syncingInline = true;
+    try {
+      notes.forEach(function (el) {
+        var n = { topic: el.getAttribute("data-topic"), value: el.value }, exists = inlineRows("topic-note").some(function (r) { return r.key === n.topic; });
+        if (!n.value.trim()) { if (exists) edit.remove("topic-note", n.topic); return; }
+        if (exists) edit.upsert("topic-note", n.topic, topicNoteCapsule(n));
+        else edit.insertCapsule("topic-note", topicNoteCapsule(n), { key: n.topic, preserveCaret: true });
+      });
+    } finally { syncingInline = was; }
+  }
+  // The editor owns order and deletion. Board controls remain a view of its
+  // answer and note tokens; this guard prevents a board change echoing back.
+  var syncingInline = false;
+  if (ctext) ctext.addEventListener("wsc:change", function (e) {
+    if (syncingInline) return;
+    syncingInline = true;
+    try {
+      (e.detail.removed || []).forEach(function (r) {
+        if (r.kind === "answer") { dropChip(r.key, true); setItem(r.key, null); }
+        if (r.kind === "topic-note") clearTopicNote(r.key);
+        if (r.kind === "mention" && r.payload && r.payload.selectionKey) {
+          var at = bselections.findIndex(function (s) { return s.key === r.payload.selectionKey; });
+          if (at >= 0) dropSelection(at, true);
+        }
+      });
+      (e.detail.added || []).forEach(function (r) {
+        if (r.kind === "answer" && r.payload && r.payload.answer) { putChip(r.payload.answer); setItem(r.key, r.payload.answer); }
+        if (r.kind === "topic-note" && r.payload && r.payload.note) {
+          var note = topicNote(r.key);
+          if (note) { note.value = r.payload.note; note.dispatchEvent(new Event("input", { bubbles: true })); }
+        }
+        if (r.kind === "mention" && r.payload && r.payload.selection && !bselections.some(function (s) { return s.key === r.key; })) {
+          bselections.push(Object.assign({ key: r.key }, r.payload.selection));
+        }
+      });
+    } finally { syncingInline = false; }
+    queueDraft();
+  });
+  function chipList() { return inlineEditor() ? inlineRows("answer").map(function (r) { return r.payload && r.payload.answer; }).filter(Boolean) : chipOrder.map(function (id) { return chips[id]; }); }
+  function putChip(c) {
+    if (!chips[c.id]) chipOrder.push(c.id);
+    chips[c.id] = c;
+    var edit = inlineEditor(); if (edit && !restoringInlineBack) { var was = syncingInline; syncingInline = true; try {
+      if (inlineRows("answer").some(function (r) { return r.key === c.id; })) edit.upsert("answer", c.id, answerCapsule(c));
+      else edit.insertCapsule("answer", answerCapsule(c), { key: c.id, preserveCaret: true });
+    } finally { syncingInline = was; } }
+  }
+  function dropChip(id, fromEditor) {
+    delete chips[id]; chipOrder = chipOrder.filter(function (x) { return x !== id; });
+    var edit = inlineEditor(); if (edit && !fromEditor) { var was = syncingInline; syncingInline = true; try { edit.remove("answer", id); } finally { syncingInline = was; } }
+  }
   function boardItem(id) {
     return boardQ('.card[data-id="' + id + '"], .arow[data-id="' + id + '"], .ckrow[data-id="' + id + '"], .srow[data-id="' + id + '"]')[0] || null;
   }
@@ -86,11 +148,13 @@
       var c = readItem(item), id = item.getAttribute("data-id");
       if (c) putChip(c); else if (chips[id]) dropChip(id);
     });
+    if (inlineEditor()) syncInlineTopics();
     if (!updateNoteChips()) renderChips();
   }
   // Typing changes note text, not the chip set. Keep the existing strip (and
   // focused controls) intact; replacing its children also dirties :has() ancestors.
   function updateNoteChips() {
+    if (inlineEditor()) return true;
     var list = chipList(), notes = topicNotes();
     var answers = q("[data-unchip]", cchips), topics = q("[data-tchip]", cchips);
     if (answers.length !== list.length || topics.length !== notes.length) return false;
@@ -108,10 +172,11 @@
   }
   function renderChips() {
     if (!cchips) return;
+    if (inlineEditor()) syncInlineTopics();
     var active = doc.activeElement, focused = active && active.getAttribute("data-close-reason");
     var selection = focused != null ? [active.selectionStart, active.selectionEnd] : null;
     cchips.textContent = "";
-    chipList().forEach(function (c) {
+    if (!inlineEditor()) chipList().forEach(function (c) {
       var el = doc.createElement("span"), b = doc.createElement("b"), x = doc.createElement("button");
       el.className = "achip";
       b.textContent = "(" + c.id + ")";
@@ -132,7 +197,7 @@
     });
     // A topic note is no item's answer, but a send carries it, so it shows
     // here too: "[topic] text", read from the board on every render.
-    topicNotes().forEach(function (n) {
+    if (!inlineEditor()) topicNotes().forEach(function (n) {
       var el = doc.createElement("span"), b = doc.createElement("b"), t = doc.createElement("span"), x = doc.createElement("button");
       el.className = "achip tchip";
       el.setAttribute("data-tchip", n.topic);
@@ -150,7 +215,7 @@
       cchips.appendChild(el);
     });
     // A board mention: "[topic] (id)" and the selected text, clipped.
-    bmentions.forEach(function (m, i) {
+    if (!inlineEditor()) bmentions.forEach(function (m, i) {
       var el = doc.createElement("span"), open = doc.createElement("button"), b = doc.createElement("b"), t = doc.createElement("span"), x = doc.createElement("button");
       el.className = "achip mchip";
       el.title = m.text;
@@ -175,7 +240,7 @@
       el.appendChild(x);
       cchips.appendChild(el);
     });
-    renderSelectionChips();
+    if (!inlineEditor()) renderSelectionChips();
     closeRequests.forEach(function (r) {
       var el = doc.createElement("span"), b = doc.createElement("b"), input = doc.createElement("textarea"), x = doc.createElement("button");
       el.className = "achip close-request-chip";
@@ -201,7 +266,7 @@
     // A web card's picked element: its selector and text; a console block:
     // its error count and page. The held message shows the same capsules
     // (dashboard.tmpl achips).
-    wpicks.forEach(function (p, i) {
+    if (!inlineEditor()) wpicks.forEach(function (p, i) {
       var el = doc.createElement("span"), b = doc.createElement("b"), x = doc.createElement("button");
       el.className = "achip mchip pchip";
       el.title = p.url + "\n" + p.selector + (p.text ? "\n" + p.text : "");
@@ -220,7 +285,7 @@
       el.appendChild(x);
       cchips.appendChild(el);
     });
-    wconsoles.forEach(function (c, i) {
+    if (!inlineEditor()) wconsoles.forEach(function (c, i) {
       var el = doc.createElement("span"), b = doc.createElement("b"), t = doc.createElement("span"), x = doc.createElement("button");
       el.className = "achip mchip cchip";
       el.title = c.url + "\n" + c.lines.join("\n");
@@ -278,10 +343,11 @@
     note.title = s.comment;
     note.setAttribute("aria-label", wsT("js.wbmention.note"));
   }
-  function dropSelection(index) {
+  function dropSelection(index, fromEditor) {
     var s = bselections[index];
     if (!s) return;
     bselections.splice(index, 1);
+    if (inlineEditor() && !fromEditor) inlineEditor().remove("mention", s.key);
     if (mpend && mpend.edit === s) hideMention();
     s.images.slice().forEach(function (n) {
       var it = imgs.filter(function (p) { return p.n === n; })[0];
@@ -293,7 +359,9 @@
     var s = bselections[index];
     if (!s) return;
     hideMention();
-    var row = s.row && s.row.parentNode, rect = row ? row.getBoundingClientRect() : { left: 4, bottom: 4 };
+    var row = s.row && s.row.parentNode;
+    if (!row && inlineEditor()) row = q(".wsc-mention", inlineEditor().editor).filter(function (n) { return n.getAttribute("data-wsc-key") === s.key; })[0];
+    var rect = row ? row.getBoundingClientRect() : { left: 4, bottom: 4 };
     placeMention({ ms: s.mentions, x: rect.left, y: rect.bottom, edit: s, comment: s.comment, images: s.images.slice() });
     lockMention(); mnote.focus();
     mnote.setSelectionRange(mnote.value.length, mnote.value.length);
@@ -307,19 +375,41 @@
   // says why, and nothing is lost.
   var WEB_PICKS = 50, WEB_CONSOLES = 10;
   function addWebPick(p) {
-    if (wpicks.length >= WEB_PICKS) { noteWarn(wsT("js.web.cap.picks", WEB_PICKS)); return false; }
-    wpicks = wpicks.concat([p]);
+    if (wpicks.length + inlineRows("pick").length >= WEB_PICKS) { noteWarn(wsT("js.web.cap.picks", WEB_PICKS)); return false; }
+    if (inlineEditor()) inlineEditor().insertCapsule("pick", { label: p.selector, anchor: "[pick:" + p.selector + "]", plain: p.selector + (p.text ? " " + p.text : ""), pick: p });
+    else wpicks = wpicks.concat([p]);
     renderChips();
     queueDraft();
     return true;
   }
   function addWebConsole(c) {
-    if (wconsoles.length >= WEB_CONSOLES) { noteWarn(wsT("js.web.cap.consoles", WEB_CONSOLES)); return false; }
-    wconsoles = wconsoles.concat([c]);
+    if (wconsoles.length + inlineRows("console").length >= WEB_CONSOLES) { noteWarn(wsT("js.web.cap.consoles", WEB_CONSOLES)); return false; }
+    if (inlineEditor()) inlineEditor().insertCapsule("console", { label: "console ×" + c.lines.length, anchor: "[console:" + c.url + "]", plain: "console ×" + c.lines.length + " " + c.url, console: c });
+    else wconsoles = wconsoles.concat([c]);
     renderChips();
     queueDraft();
     return true;
   }
+  // Public Pass 2 hooks. The editor remembers the last caret when a board
+  // control takes focus; callers pass semantic data, never DOM ranges.
+  function addPanelMention(ref) {
+    if (!ref || !ref.topic || !/^p[1-9][0-9]*$/.test(ref.panel || "")) return null;
+    var label = ref.panel + " · " + (ref.recap || ref.topic);
+    var mention = { topic: ref.topic, text: label };
+    if (/^e[1-9][0-9]*$/.test(ref.entry || "")) mention.entry = ref.entry;
+    var payload = { label: label, anchor: "{{" + ref.panel + "}}", plain: "[" + label + "]", mention: mention,
+      panel: ref.panel, entry: ref.entry || "", recap: ref.recap || "" };
+    if (inlineEditor()) return inlineEditor().insertCapsule("mention", payload);
+    bmentions.push(mention); renderChips(); queueDraft(); return mention;
+  }
+  function addTicketMention(ref) {
+    if (!ref || !/^[0-9]{6}-[a-z0-9][a-z0-9-]*$/.test(ref.stem || "")) return null;
+    var payload = { label: "#" + ref.stem, anchor: "[ticket:" + ref.stem + "]", plain: "[" + ref.stem + "] " + (ref.title || ""),
+      stem: ref.stem, title: ref.title || "", status: ref.status || "", path: ref.path || "" };
+    if (inlineEditor()) return inlineEditor().insertCapsule("ticket", payload);
+    ctext.value += (ctext.value ? " " : "") + payload.anchor; queueDraft(); return payload;
+  }
+  window.WsComposer = Object.assign(window.WsComposer || {}, { addPanelMention: addPanelMention, addTicketMention: addTicketMention });
   // validPicks and validConsoles keep the well-formed entries of a list a
   // cancel or a stored draft returned.
   function validPicks(list) {
@@ -666,7 +756,7 @@
       el.appendChild(x);
       var h = homes[i];
       if (h === -2) { if (mimgs) mimgs.appendChild(el); return; }
-      if (h <= -3) { var group = bselections[-3 - h]; if (group && group.row) group.row.appendChild(el); return; }
+      if (h <= -3) { var group = bselections[-3 - h]; if (group && group.row) group.row.appendChild(el); else cimgs.appendChild(el); return; }
       if (h < 0) { cimgs.appendChild(el); return; }
       // A note's row follows the note, so it hides with it (CSS) and
       // leaves with it when a board swap replaces its topic.
@@ -1169,13 +1259,23 @@
     if (p) placeMention(p);
     else if (mpend && !mpend.frame) hideMention();
   }
+  function putSelectionCapsule(s, update) {
+    if (!inlineEditor() || !s.mentions.length) return;
+    if (!s.key) s.key = "selection-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+    var first = s.mentions[0], label = (first.entry || first.id || first.topic) + " · " + first.text.replace(/\s+/g, " ").slice(0, 38);
+    var payload = { label: label, anchor: "[mention:" + (first.entry || first.topic) + "]", plain: s.mentions.map(function (m) { return "[" + m.topic + "] " + m.text; }).join(" "), selectionKey: s.key, selection: { mentions: s.mentions, comment: s.comment, images: s.images } };
+    if (update) inlineEditor().upsert("mention", s.key, payload);
+    else inlineEditor().insertCapsule("mention", payload, { key: s.key });
+  }
   function addMention(keepFocus) {
     var p = mpend;
     if (!p || p.rid !== rid || mcomposing) return;
     if (!p.ms.length) return;
     var s = { mentions: validMentions(p.ms), comment: mnote.value, images: p.images.slice() }, index = bselections.indexOf(p.edit);
+    s.key = index >= 0 ? p.edit.key : "selection-" + Date.now() + "-" + Math.random().toString(36).slice(2);
     if (index >= 0) { s.row = p.edit.row; bselections[index] = s; }
     else bselections.push(s);
+    putSelectionCapsule(s, index >= 0);
     hideMention(true, keepFocus && index >= 0);
     if (p.frame) { if (doc.contains(p.frame)) postDoc(p.frame, { wbDoc: "unsel" }); }
     else if (window.getSelection) window.getSelection().removeAllRanges();
@@ -1188,6 +1288,14 @@
     queueDraft();
     if (!keepFocus) ctext.focus();
   }
+  if (inlineEditor()) inlineEditor().editor.addEventListener("click", function (e) {
+    var cap = e.target.closest && e.target.closest(".wsc-capsule");
+    if (!cap) return;
+    if (cap.getAttribute("data-wsc-kind") === "topic-note") { focusTopicNote(cap.getAttribute("data-wsc-key")); return; }
+    if (cap.getAttribute("data-wsc-kind") !== "mention") return;
+    var key = cap.getAttribute("data-wsc-key"), at = bselections.findIndex(function (s) { return s.key === key; });
+    if (at >= 0) editSelection(at);
+  });
   // frameMention takes a body frame's selection report: its text and where
   // its end stands inside the frame.
   function frameMention(f, text, x, y) {
@@ -1235,6 +1343,34 @@
       return { el: el, topic: el.getAttribute("data-topic"), value: el.value };
     }).filter(function (n) { return n.value.trim(); });
   }
+  function inlineSend() {
+    var edit = inlineEditor(), rows = edit.ordered(), raw = ctext.value, notes = rows.filter(function (r) { return r.kind === "topic-note"; }).map(function (r) {
+      return { el: topicNote(r.key), topic: r.key, value: r.payload.note };
+    }), said = [], picks = [], consoles = [], usedSelections = {}, at = 0, text = "";
+    var hasProse = false;
+    rows.forEach(function (r) { if (raw.slice(at, r.start).trim()) hasProse = true; at = r.end; });
+    if (raw.slice(at).trim()) hasProse = true;
+    at = 0;
+    rows.forEach(function (r) {
+      text += raw.slice(at, r.start);
+      var p = r.payload || {}, anchor = raw.slice(r.start, r.end);
+      if (r.kind === "answer" || r.kind === "topic-note") {
+        if (hasProse || rows.some(function (x) { return x.kind !== "answer" && x.kind !== "topic-note"; })) text += anchor;
+      } else if (r.kind === "mention" && p.selectionKey) {
+        var s = bselections.filter(function (x) { return x.key === p.selectionKey; })[0] || p.selection;
+        if (s) { text += "\n\n" + selectionBlock(s) + "\n\n"; usedSelections[p.selectionKey] = true; }
+      } else {
+        text += anchor;
+        if (r.kind === "mention" && p.mention) said.push(p.mention);
+        if (r.kind === "pick" && p.pick) picks.push(p.pick);
+        if (r.kind === "console" && p.console) consoles.push(p.console);
+      }
+      at = r.end;
+    });
+    text += raw.slice(at);
+    var legacy = bselections.filter(function (s) { return !usedSelections[s.key]; });
+    return { text: selectionPrefix(legacy) + text.trim(), notes: notes, mentions: said.concat(bmentions), picks: picks.concat(wpicks), consoles: consoles.concat(wconsoles) };
+  }
   function sendMessage() {
     if (sending) return;
     var inline = !cmdSel && window.WsCapsules && window.WsCapsules.command(ctext);
@@ -1243,11 +1379,12 @@
     if ((cmdSel || inline) && outboxUnsent()) return;
     if (cmdSel) { sendCommand(); return; }
     if (inline) { sendInlineCommand(inline); return; }
-    var groups = bselections.slice(), t = selectionPrefix(groups) + sendText().trim(), list = chipList(), notes = topicNotes(), said = bmentions.slice();
+    var groups = bselections.slice(), inlineData = inlineEditor() ? inlineSend() : null;
+    var t = inlineData ? inlineData.text : selectionPrefix(groups) + sendText().trim(), list = chipList(), notes = inlineData ? inlineData.notes : topicNotes(), said = inlineData ? inlineData.mentions : bmentions.slice();
     var committed = {};
     groups.forEach(function (s) { s.images.forEach(function (n) { committed[n] = true; }); });
     var pics = imgs.filter(function (p) { return !mpend || (mpend.images || []).indexOf(p.n) < 0 || committed[p.n]; });
-    var wp = wpicks.slice(), wc = wconsoles.slice();
+    var wp = inlineData ? inlineData.picks : wpicks.slice(), wc = inlineData ? inlineData.consoles : wconsoles.slice();
     var closing = closeRequests.map(function (r) { return { ref: r, topic: r.topic, reason: r.reason }; });
     if (!t && !list.length && !pics.length && !notes.length && !said.length && !wp.length && !wc.length && !closing.length) { noteWarn(wsT("js.send.empty")); return; }
     if (pics.some(function (p) { return !p.ref && p.data === null; })) { noteWarn(wsT("js.send.reading")); return; }
@@ -1279,14 +1416,14 @@
     // Flush the debounced draft while the composer still owns the send.
     // Once it enters the outbox, saveDraft intentionally leaves it untouched.
     saveDraft();
+    var inlineBack = inlineEditor() ? { text: ctext.value, capsules: inlineEditor().snapshot(), selections: bselections.map(function (s) { return { key: s.key, mentions: s.mentions, comment: s.comment, images: s.images }; }) } : null;
     pics.forEach(dropImg);
     ctext.value = ""; grow(); clearMentions();
     list.forEach(function (c) { dropChip(c.id); });
     list.forEach(function (c) { setItem(c.id, null); });
     bmentions = []; bselections = []; closeRequests = []; wpicks = []; wconsoles = [];
     notes.forEach(function (n) {
-      n.el.value = "";
-      n.el.dispatchEvent(new Event("input", { bubbles: true }));
+      if (n.el) { n.el.value = ""; n.el.dispatchEvent(new Event("input", { bubbles: true })); }
     });
     closeTopicNotes();
     clearTrash();
@@ -1296,7 +1433,7 @@
     // the daemon's OK, is the confirmation.
     outboxAdd({
       body: body, pics: pics, own: ownTopics, user: lastUserEntry(),
-      back: { text: t, chips: list, topics: body.topics, mentions: said, closeRequests: body.closeRequests, picks: wp, consoles: wc, sentAt: Date.now() }
+      back: { text: t, chips: list, topics: body.topics, mentions: said, closeRequests: body.closeRequests, picks: wp, consoles: wc, inline: inlineBack, sentAt: Date.now() }
     });
   }
   // --- outbox: a message shows the moment the daemon holds it ----------------
@@ -1598,7 +1735,19 @@
   // another is selected, comes back as its typed line, with a warning.
   function restoreHeld(list) {
     holdSync = true;
-    try { restoreHeldNow(list); } finally { holdSync = false; }
+    restoringInlineBack = true;
+    try { restoreHeldNow(list); } finally { restoringInlineBack = false; holdSync = false; }
+    if (inlineEditor()) {
+      chipOrder.forEach(function (id) { if (!inlineRows("answer").some(function (r) { return r.key === id; })) putChip(chips[id]); });
+      syncInlineTopics();
+      bselections.forEach(function (s) { if (!inlineRows("mention").some(function (r) { return r.key === s.key; })) putSelectionCapsule(s, false); });
+      bmentions.forEach(function (m) { inlineEditor().insertCapsule("mention", { label: "[" + m.topic + "] " + m.text.replace(/\s+/g, " ").slice(0, 38), anchor: "[mention:" + m.topic + "]", plain: "[" + m.topic + "] " + m.text, mention: m }); });
+      bmentions = [];
+      wpicks.forEach(function (p) { inlineEditor().insertCapsule("pick", { label: p.selector, anchor: "[pick:" + p.selector + "]", plain: p.selector + " " + (p.text || ""), pick: p }); });
+      wpicks = [];
+      wconsoles.forEach(function (c) { inlineEditor().insertCapsule("console", { label: "console ×" + c.lines.length, anchor: "[console:" + c.url + "]", plain: "console ×" + c.lines.length + " " + c.url, console: c }); });
+      wconsoles = [];
+    }
     syncMarkers();
     renderImgs();
   }
@@ -1616,7 +1765,7 @@
       astext++;
       return { text: "/" + c.name + (c.args ? " " + c.args : "") };
     });
-    var cur = ctext.value.trim(), top = imgSeq, backs = [], back, restoredSelections = [];
+    var cur = ctext.value.trim(), top = imgSeq, backs = [], back, restoredSelections = [], backRanges = [];
     // The draft's mentions move with it, past its leading whitespace's trim.
     var lead = ctext.value.length - ctext.value.replace(/^\s+/, "").length;
     Object.keys(allNums()).forEach(function (k) { top = Math.max(top, +k); });
@@ -1635,7 +1784,13 @@
         top = Math.max(top, renum[n]);
       });
       var rn = function (s) { return (s || "").replace(new RegExp(MARKER, "g"), function (m, k) { return renum[+k] ? marker(renum[+k]) : m; }); };
-      var split = splitSelectionText(res.text || ""), text = rn(split.text);
+      var split = splitSelectionText(res.inline && inlineEditor() ? res.inline.text : res.text || ""), text = rn(split.text);
+      if (res.inline && inlineEditor()) {
+        var offset = backs.join("\n\n").length + (backs.length ? 2 : 0);
+        var rr = window.WsCapsules.shifted(res.inline.text, text, res.inline.capsules || []);
+        rr.forEach(function (r) { backRanges.push(Object.assign({}, r, { start: r.start + offset, end: r.end + offset })); });
+        (res.inline.selections || []).forEach(function (s) { restoredSelections.push(s); });
+      }
       split.groups.forEach(function (s) { s.images = s.images.map(function (n) { return renum[n] || n; }); restoredSelections.push(s); });
       (res.chips || []).forEach(function (c) {
         var o = {};
@@ -1658,12 +1813,13 @@
     imgs.forEach(function (p) { if (!named[p.n] && !inBack[p.n]) missing.push(marker(p.n)); });
     if (missing.length) back += (back ? "\n" : "") + missing.join(" ");
     ctext.value = back + (back && cur ? "\n\n" : "") + cur;
+    if (inlineEditor() && backRanges.length) inlineEditor().restore(backRanges.concat(inlineEditor().snapshot()));
     grow();
     shiftMentions(back.length + (back && cur ? 2 : 0) - lead);
     imgs.sort(function (a, b) { return a.n - b.n; });
     // Their mentions go back ahead of the draft's, in the order given.
     var held = [];
-    list.forEach(function (res) { held = held.concat(validMentions(res.mentions)); });
+    list.forEach(function (res) { if (!res.inline) held = held.concat(validMentions(res.mentions)); });
     bmentions = held.concat(bmentions);
     var requests = [];
     list.slice().sort(function (a, b) { return (+a.sentAt || 0) - (+b.sentAt || 0); }).forEach(function (res) { requests = requests.concat(validCloseRequests(res.closeRequests)); });
@@ -1676,7 +1832,7 @@
     closeRequests = requests;
     // So do their picked elements and console blocks.
     var hp = [], hc = [];
-    list.forEach(function (res) { hp = hp.concat(validPicks(res.picks)); hc = hc.concat(validConsoles(res.consoles)); });
+    list.forEach(function (res) { if (!res.inline) { hp = hp.concat(validPicks(res.picks)); hc = hc.concat(validConsoles(res.consoles)); } });
     wpicks = hp.concat(wpicks);
     wconsoles = hc.concat(wconsoles);
     renderChips();

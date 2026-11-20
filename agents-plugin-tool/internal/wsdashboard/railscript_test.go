@@ -11,6 +11,7 @@ import (
 // store for running rail.js under node.
 const railJSHarness = `
 var window = {};
+function inlineEditor() { return null; }
 var bad = [];
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
 function El(cls, attrs) {

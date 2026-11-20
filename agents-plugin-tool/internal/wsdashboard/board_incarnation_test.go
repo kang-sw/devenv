@@ -185,6 +185,7 @@ func TestComposerBoardIncarnation(t *testing.T) {
 	runNode(t, "assembled dashboard syntax", fmt.Sprintf("new (require('node:vm').Script)(%q);", src))
 	runNode(t, "composer incarnation", selectionCodecSource(t)+composerToastPrelude+composerSendSource(t, src)+composerFunc(t, src, "boardDraft")+outboxDOM+`
 var sending = false, boardIncarnation = "rendered-old", rid = "session", draftTimer = null;
+function inlineEditor() { return null; }
 var saves = 0, reloads = 0, postedBody;
 saveDraft = function () { saves++; };
 window.location = { reload: function () { reloads++; } };
@@ -231,6 +232,7 @@ func TestComposerRestoredAnswerIncarnation(t *testing.T) {
 	src := mustAsset(t, "dashboard.js")
 	runNode(t, "restored answer incarnation", composerToastPrelude+composerFunc(t, src, "restoreHeldNow")+`
 var boardIncarnation = "2026-11-18T00:00:00.000Z", MARKER = "image ([0-9]+)";
+function inlineEditor() { return null; }
 function noteWarn() {}
 function splitSelectionText(text) { return { text: text, groups: [] }; }
 function markerNums() { return {}; }

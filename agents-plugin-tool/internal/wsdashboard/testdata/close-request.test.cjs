@@ -42,7 +42,7 @@ Object.assign(context, {
   wsT: (k, topic) => topic === undefined ? k : `${k}:${topic}`,
   q: (s, n) => n ? n.querySelectorAll(s) : [], dropImg: noop, release: noop, imgTrash: {},
   setTimeout: (f, ms) => setTimeout(f, ms).unref(), clearTimeout, child: (n, cls) => n.children.find(c => c.classList.contains(cls)) || null,
-  countTopics: noop, wrapTopic: noop, unwrapTopic: noop, chipList: () => [], topicNotes: () => [], queueDraft: () => context.draftSaves++,
+  countTopics: noop, wrapTopic: noop, unwrapTopic: noop, chipList: () => [], topicNotes: () => [], inlineEditor: () => null, queueDraft: () => context.draftSaves++,
   sendText: () => ctext.value, followConvo: noop, boardFlushViewed: noop, clearTrash: noop, clearMentions: noop,
   grow: noop, renderImgs: noop, closeTopicNotes: noop, clearDraft: noop, saveDraft: noop,
   noteWarn: s => context.warns.push(s), post: (route, body, done) => { context.posted.push({ route, body }); context.done = done; },
@@ -64,26 +64,20 @@ function topic(key, closed, host = board) {
 const a = topic('a"<&>', false), b = topic('b', false, pins), closed = topic('closed', true);
 context.decorate(); context.decorate();
 const close = row => row.bar.children.find(n => n.classList.contains('t-close-request'));
-assert.equal(a.bar.children.at(-1), close(a)); assert.equal(b.bar.children.at(-1), close(b)); assert.equal(close(closed), undefined);
-assert.equal(a.bar.children.filter(n => n.classList.contains('t-close-request')).length, 1);
+assert.equal(close(a), undefined); assert.equal(close(b), undefined); assert.equal(close(closed), undefined);
 assert.ok(a.bar.children.some(n => n.classList.contains('topic-state-badge')));
 const lookup = doc.getElementById; doc.getElementById = () => null;
 context.decorate(); assert.equal(close(a), undefined, 'no dead action on a page without a composer');
 doc.getElementById = lookup; context.decorate();
 context.topics['a"<&>'] = { folded: true, el: a.sec };
-context.decorate(); assert.equal(a.sec.getAttribute('data-size'), 'fold'); assert.equal(a.bar.children.at(-1), close(a));
-assert.equal(close(a).getAttribute('aria-label'), 'js.closerequest.add');
+context.decorate(); assert.equal(a.sec.getAttribute('data-size'), 'fold'); assert.equal(close(a), undefined);
 const press = n => context.click({ target: n });
-a.sec.setAttribute('data-max', '');
-let restored = 0;
-a.bar.children.find(n => n.classList.contains('d-min')).click = () => { restored++; a.sec.removeAttribute('data-max'); };
-press(close(a)); const reason = doc.activeElement;
-assert.equal(restored, 1, 'fullscreen is restored through its existing back action before focusing the composer');
+context.addCloseRequest('a"<&>'); const reason = doc.activeElement;
 assert.equal(reason.getAttribute('data-close-reason'), 'a"<&>'); assert.equal(context.posted.length, 0, 'x is not a board mutation');
 reason.value = 'keep & <reason>'; reason.listeners.input(); reason.setSelectionRange(2, 5);
 context.renderChips(); assert.deepEqual([doc.activeElement.selectionStart, doc.activeElement.selectionEnd], [2, 5], 'reconciliation retains caret');
-press(close(a)); assert.equal(context.closeRequests.length, 1); assert.equal(doc.activeElement.value, 'keep & <reason>');
-press(close(b)); assert.equal(context.closeRequests.length, 2);
+context.addCloseRequest('a"<&>'); assert.equal(context.closeRequests.length, 1); assert.equal(doc.activeElement.value, 'keep & <reason>');
+context.addCloseRequest('b'); assert.equal(context.closeRequests.length, 2);
 press(cchips.querySelectorAll('[data-unclose-request]')[0]); assert.equal(context.closeRequests.length, 1);
 a.sec.className += ' closed'; context.decorate(); assert.equal(close(a), undefined);
 // A disappearing/closed topic does not discard its already attached request.
@@ -115,5 +109,5 @@ context.restoreHeld([{ sentAt: 2, closeRequests: [{ topic: 'held', reason: 'newe
 assert.deepEqual(JSON.parse(JSON.stringify(context.closeRequests)), [{ topic: 'held', reason: 'newest' }, { topic: 'draft', reason: 'mine' }]);
 assert.deepEqual(JSON.parse(JSON.stringify(context.validCloseRequests([null, { topic: 'bad\n', reason: '' }, { topic: 'x' }]))), []);
 const css = readAssetSource('wsdashboard', 'dashboard.css');
-assert.match(css, /:root\[data-overview\] \.r-board :is\(\.t-close-request,/);
-console.log('close requests: header order, badges, pinned/closed, focus/caret, dedupe/removal, stale sends, failure/races and held restore passed');
+assert.doesNotMatch(css, /\.t-close-request/);
+console.log('close requests: no topic header action; retained legacy composer restore and send passed');
