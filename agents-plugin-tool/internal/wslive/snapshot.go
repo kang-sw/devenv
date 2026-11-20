@@ -204,7 +204,10 @@ type Usage struct {
 	Context    *UsageContext `json:"context,omitempty"`
 	// Limits holds at most one limit per kind, the 5-hour limit first.
 	Limits []UsageLimit `json:"limits,omitempty"`
-	Cost   *UsageCost   `json:"cost,omitempty"`
+	// LimitsAsOf is when the host observed Limits (epoch ms). It stays put
+	// when another status update only refreshes context or cost.
+	LimitsAsOf int64      `json:"limitsAsOf,omitempty"`
+	Cost       *UsageCost `json:"cost,omitempty"`
 }
 
 // UsageCompaction is the resolved ws compaction thresholds for a hosted

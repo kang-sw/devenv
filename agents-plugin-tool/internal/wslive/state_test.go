@@ -597,9 +597,10 @@ func TestStatusEventReplacesUsage(t *testing.T) {
 		t.Fatal("usage present before any status event")
 	}
 	res := mustApply(t, st, Event{Kind: KindStatus,
-		Context: &UsageContext{Tokens: i64p(45_000), Window: 100_000, CacheHit: f64p(92.5)},
-		Limits:  []UsageLimit{{Kind: LimitSevenDay, Percent: 17, ResetsAt: 9_000}, {Kind: LimitFiveHour, Percent: 42, ResetsAt: 8_000}},
-		Cost:    &UsageCost{USD: 1.5},
+		Context:    &UsageContext{Tokens: i64p(45_000), Window: 100_000, CacheHit: f64p(92.5)},
+		Limits:     []UsageLimit{{Kind: LimitSevenDay, Percent: 17, ResetsAt: 9_000}, {Kind: LimitFiveHour, Percent: 42, ResetsAt: 8_000}},
+		LimitsAsOf: 900,
+		Cost:       &UsageCost{USD: 1.5},
 	}, 1_000)
 	if !res.Changed || res.Urgent {
 		t.Fatalf("status result = %+v, want changed and not urgent", res)
@@ -611,14 +612,18 @@ func TestStatusEventReplacesUsage(t *testing.T) {
 	if len(u.Limits) != 2 || u.Limits[0].Kind != LimitFiveHour || u.Limits[1].Kind != LimitSevenDay || u.Limits[0].ResetsAt != 8_000 {
 		t.Fatalf("limits = %+v, want the 5-hour limit first", u.Limits)
 	}
+	if u.LimitsAsOf != 900 {
+		t.Fatalf("limitsAsOf = %d, want 900", u.LimitsAsOf)
+	}
 	if u.Cost == nil || u.Cost.USD != 1.5 || u.Cost.Estimate {
 		t.Fatalf("cost = %+v", u.Cost)
 	}
 
 	same := Event{Kind: KindStatus,
-		Context: &UsageContext{Tokens: i64p(45_000), Window: 100_000, CacheHit: f64p(92.5)},
-		Limits:  []UsageLimit{{Kind: LimitFiveHour, Percent: 42, ResetsAt: 8_000}, {Kind: LimitSevenDay, Percent: 17, ResetsAt: 9_000}},
-		Cost:    &UsageCost{USD: 1.5},
+		Context:    &UsageContext{Tokens: i64p(45_000), Window: 100_000, CacheHit: f64p(92.5)},
+		Limits:     []UsageLimit{{Kind: LimitFiveHour, Percent: 42, ResetsAt: 8_000}, {Kind: LimitSevenDay, Percent: 17, ResetsAt: 9_000}},
+		LimitsAsOf: 900,
+		Cost:       &UsageCost{USD: 1.5},
 	}
 	if res := mustApply(t, st, same, 2_000); res.Changed {
 		t.Fatal("an identical status event reported a change")

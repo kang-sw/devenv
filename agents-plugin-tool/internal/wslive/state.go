@@ -122,7 +122,10 @@ type Event struct {
 	// under a "status" key, which is an agent's status above.
 	Context *UsageContext `json:"context,omitempty"`
 	Limits  []UsageLimit  `json:"limits,omitempty"`
-	Cost    *UsageCost    `json:"cost,omitempty"`
+	// LimitsAsOf is the host observation time for Limits, not this status
+	// event's delivery time. It is absent for legacy producers.
+	LimitsAsOf int64      `json:"limitsAsOf,omitempty"`
+	Cost       *UsageCost `json:"cost,omitempty"`
 	// Task counts are sent only when intake advertises task_counts as well as status.
 	Background *int `json:"background,omitempty"`
 	Monitors   *int `json:"monitors,omitempty"`
@@ -1076,7 +1079,7 @@ func (st *State) Snapshot(now int64) Snapshot {
 			AgentKind:     a.kind,
 			Harness:       a.harness,
 
-			Observed:      st.observed[a.id].clone(),
+			Observed:        st.observed[a.id].clone(),
 			Model:           a.model,
 			Effort:          a.effort,
 			ContextTokens:   a.contextTokens,
@@ -1333,7 +1336,7 @@ func normalizeTokens(raw json.RawMessage) *TokenUsage {
 // is dropped (the last of a kind wins, the 5-hour limit first), and nil when
 // nothing is left.
 func normalizeUsage(ev Event) *Usage {
-	u := &Usage{Background: taskCount(ev.Background), Monitors: taskCount(ev.Monitors)}
+	u := &Usage{Background: taskCount(ev.Background), Monitors: taskCount(ev.Monitors), LimitsAsOf: max(ev.LimitsAsOf, 0)}
 	if c := ev.Context; c != nil {
 		ctx := &UsageContext{Window: max(c.Window, 0)}
 		if c.Tokens != nil && *c.Tokens >= 0 {
@@ -1388,7 +1391,7 @@ func (u *Usage) clone() *Usage {
 	if u == nil {
 		return nil
 	}
-	out := &Usage{Limits: append([]UsageLimit(nil), u.Limits...), Background: taskCount(u.Background), Monitors: taskCount(u.Monitors)}
+	out := &Usage{Limits: append([]UsageLimit(nil), u.Limits...), LimitsAsOf: u.LimitsAsOf, Background: taskCount(u.Background), Monitors: taskCount(u.Monitors)}
 	if u.Context != nil {
 		c := *u.Context
 		if c.Tokens != nil {

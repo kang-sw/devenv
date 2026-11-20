@@ -121,7 +121,7 @@
   }
   var chartSerial = 0;
   window.WsUsage = { sorted: sorted, level: level, age: age, active: active, trend: trend, weeklyAxis: weeklyAxis, mount: function (doc, host) {
-    var data = { entries: [], warnPercent: 80, critPercent: 95 }, pending = null, forceQueued = false, popover = null, shown = false, place = function () {}, followUps = [];
+    var data = { entries: [], warnPercent: 80, critPercent: 95 }, pending = null, forceQueued = false, popover = null, shown = false, place = function () {}, followUps = [], resetTimer = null;
     function el(tag, cls, text) {
       var n = doc.createElement(tag); n.className = cls || "";
       if (text !== undefined) n.textContent = text;
@@ -153,6 +153,22 @@
       var hand = doc.createElementNS("http://www.w3.org/2000/svg", "path");
       hand.setAttribute("d", "M8 4.8V8l2.2 1.4"); svg.appendChild(hand);
       return svg;
+    }
+    function armReset() {
+      if (resetTimer !== null) window.clearTimeout(resetTimer);
+      resetTimer = null;
+      var now = Date.now(), nearest = 0;
+      data.entries.forEach(function (entry) {
+        active(entry, now).forEach(function (w) {
+          if (w.resetsAt > now && (!nearest || w.resetsAt < nearest)) nearest = w.resetsAt;
+        });
+      });
+      if (!nearest) return;
+      resetTimer = window.setTimeout(function () {
+        resetTimer = null;
+        drawFooter(); drawPopover();
+        if (!doc.hidden) refresh(false);
+      }, nearest - now + 100);
     }
     function drawFooter() {
       var button = host.querySelector(".usage-toggle"); if (!button) return;
@@ -203,6 +219,7 @@
         button.appendChild(group); rendered++;
       });
       if (!rendered) button.appendChild(el("span", "usage-empty", "Plan usage"));
+      armReset();
     }
     function svgNode(tag, attrs, text) {
       var n = doc.createElementNS("http://www.w3.org/2000/svg", tag);
@@ -436,7 +453,10 @@
         var windows = active(entry, now);
         var w5 = windows.filter(function (v) { return v.kind === "five_hour"; })[0] || null;
         var w7 = windows.filter(function (v) { return v.kind === "seven_day"; })[0] || null;
-        var groupAt = entry.asOf || (w5 && w5.asOf) || (w7 && w7.asOf) || 0;
+        var groupAt = windows.reduce(function (oldest, w) {
+          var at = observation(w, entry);
+          return at && (!oldest || at < oldest) ? at : oldest;
+        }, 0);
 
         var vhead = el("div", "usage-vhead" + (inBracket ? "" : " usage-vhead-tall"));
         var head = el("div", "usage-heading");
@@ -485,6 +505,7 @@
       });
       list.appendChild(grid);
       place();
+      armReset();
     }
     function refresh(force) {
       if (pending) {

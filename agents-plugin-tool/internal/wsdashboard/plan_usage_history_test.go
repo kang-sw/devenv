@@ -168,10 +168,10 @@ func TestPlanUsageHistoryClaudeAcceptanceAndCacheRereads(t *testing.T) {
 	push(now+2, 10, reset)
 	push(now-1, 30, reset)
 	push(now+3, 50, reset-1)
-	if got := s.history(now); len(got.Samples) != 1 || got.Samples[0].AsOf != now {
-		t.Fatalf("rejected snapshot entered history: %+v", got)
+	if got := s.history(now); len(got.Samples) != 4 || got.Samples[3].AsOf != now+3 || got.Samples[3].Percent != 50 {
+		t.Fatalf("latest-wins history omitted an accepted snapshot or kept the older one: %+v", got)
 	}
-	push(now, 25, reset) // accepted equal-time value replaces the same real observation
+	push(now+3, 55, reset-1) // accepted equal-time value replaces the same real observation
 	push(now+4, 5, reset+1)
 	before := historyBytes(t, s)
 	restored := newPlanUsageStore(s.dir, s.home, s.getenv)
@@ -179,10 +179,10 @@ func TestPlanUsageHistoryClaudeAcceptanceAndCacheRereads(t *testing.T) {
 		_ = restored.entries()
 		_ = restored.history(now)
 	}
-	if !bytes.Equal(before, historyBytes(t, s)) || len(restored.history(now).Samples) != 2 {
+	if !bytes.Equal(before, historyBytes(t, s)) || len(restored.history(now).Samples) != 5 {
 		t.Fatal("cache reread synthesized observations")
 	}
-	if restored.history(now).Samples[0].Percent != 25 {
+	if restored.history(now).Samples[3].Percent != 55 {
 		t.Fatal("equal-time upsert did not retain last accepted value")
 	}
 }
