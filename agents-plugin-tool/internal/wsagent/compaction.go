@@ -18,6 +18,18 @@ import (
 // may wait without a harness response before stopping the stalled process.
 const compactCommandTimeout = 10 * time.Minute
 
+// RestoreCause identifies why the same transient hosted-state bundle is being
+// delivered. It is runtime-only and is never written to a conversation record.
+type RestoreCause string
+
+const (
+	RestoreCompaction RestoreCause = "compaction"
+	RestoreRestart    RestoreCause = "restart"
+
+	compactionRestoreMarker = "\x00ws-restore:compaction\x00"
+	restartRestoreMarker    = "\x00ws-restore:restart\x00"
+)
+
 func (r BackendRegistration) CompactionProtocol() CompactionProtocol {
 	if r.NativeCompaction != nil {
 		return *r.NativeCompaction
@@ -404,8 +416,19 @@ func (c *conv) compactIdle() bool {
 		return true
 	}
 	if c.compactResume && c.compactNote != "" && c.proc != nil {
-		text := c.compactNote + "\nContinue the work that was pending."
+		text := c.renderRestoreNote(c.compactNote) + "\nContinue the work that was pending."
 		c.compactResume = false
+		if err := c.proc.Send(text); err != nil {
+			c.setStatus(func() { c.lastErr = err.Error() })
+			c.releaseHeld()
+			return false
+		}
+		c.compactNote = ""
+		c.beginTurn(false)
+		return true
+	}
+	if strings.HasPrefix(c.compactNote, restartRestoreMarker) && c.proc != nil {
+		text := c.renderRestoreNote(c.compactNote)
 		if err := c.proc.Send(text); err != nil {
 			c.setStatus(func() { c.lastErr = err.Error() })
 			c.releaseHeld()
@@ -474,7 +497,7 @@ func (c *conv) compactEvent(ev wslive.Event) {
 		c.compactAwaitTurn = true
 		c.compactPrevTokens = 0
 		c.compactAdvised, c.compactM1Issued, c.compactM2Issued, c.compactHardIssued, c.compactUsageFresh = false, false, false, false, false
-		c.compactNote = fmt.Sprintf("Your ws session key is `%s`. Context was compacted. Fresh session state is available through the lead-only ws workflow_state tool. Keep using this same key.\n", c.rec.WSKey)
+		c.queueRestore(RestoreCompaction)
 		if !c.r.opts.Backends[c.rec.Backend].CompactionProtocol().PromptPersists {
 			if c.rec.Lead {
 				c.compactNote += c.leadManual(c.record())
@@ -496,6 +519,51 @@ func (c *conv) compactInput(text string) string {
 	if c.compactNote == "" {
 		return text
 	}
-	text = strings.TrimSpace(c.compactNote) + "\n\n" + text
+	text = strings.TrimSpace(c.renderRestoreNote(c.compactNote)) + "\n\n" + text
 	return text
+}
+
+func (c *conv) queueRestore(cause RestoreCause) {
+	marker := compactionRestoreMarker
+	if cause == RestoreRestart {
+		marker = restartRestoreMarker
+	}
+	if c.r == nil || c.r.opts.RestoreBundle == nil {
+		if cause == RestoreCompaction {
+			c.compactNote = fmt.Sprintf("Your ws session key is `%s`. Context was compacted. Fresh session state is available through the lead-only ws workflow_state tool. Keep using this same key.\n", c.rec.WSKey)
+		}
+		return
+	}
+	c.compactNote = marker
+}
+
+// renderRestoreNote resolves the marker at the last possible point before a
+// send. The marker stays in compactNote until that send succeeds, so a failed
+// send retries with newly read state instead of caching a partial bundle.
+func (c *conv) renderRestoreNote(note string) string {
+	cause, tail := RestoreCause(""), ""
+	switch {
+	case strings.HasPrefix(note, compactionRestoreMarker):
+		cause, tail = RestoreCompaction, strings.TrimPrefix(note, compactionRestoreMarker)
+	case strings.HasPrefix(note, restartRestoreMarker):
+		cause, tail = RestoreRestart, strings.TrimPrefix(note, restartRestoreMarker)
+	default:
+		return note
+	}
+	rec := c.record()
+	cfg := c.r.opts.Config
+	cfg.RepoRoot = rec.Root
+	caller := LeadCaller(rec.ReplyID, rec.Root, rec.Backend, cfg)
+	if !rec.Lead {
+		caller = c.r.holderCaller(rec)
+	}
+	bundle, err := c.r.opts.RestoreBundle(rec.Backend, rec.workDir(), rec.WSKey, cause, c.r.AgentList(caller))
+	if err != nil {
+		fmt.Fprintf(c.r.opts.Log, "agent %s: restore bundle: %v\n", rec.ReplyID, err)
+		bundle = fmt.Sprintf("Your ws session key is `%s`. The hosted session-state restore bundle could not be rendered after %s: %v. Call workflow_state with this same key before continuing.", rec.WSKey, cause, err)
+	}
+	if strings.TrimSpace(tail) != "" {
+		bundle = strings.TrimSpace(bundle) + "\n\n" + strings.TrimSpace(tail)
+	}
+	return bundle
 }

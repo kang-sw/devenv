@@ -150,6 +150,12 @@ type Options struct {
 	// daemon supplies the function; nil, or an error, leaves the prompt
 	// with the key sentence alone.
 	LeadManual func(backend, dir, key string) (string, error)
+	// RestoreBundle renders fresh hosted session state at the point it is
+	// delivered after compaction or daemon restart. children is the caller's
+	// direct agent.list projection; the daemon owns the renderer so this
+	// package does not read the ws session store itself. Nil keeps the Phase 1
+	// key-bearing pointer note and disables restart restore.
+	RestoreBundle func(backend, dir, key string, cause RestoreCause, children []AgentChild) (string, error)
 	// PlaybookCommands lists the lead playbooks a hosted lead of a backend
 	// with BackendRegistration.PlaybookCommands offers as dashboard
 	// commands. The runner reads it once and keeps the list for its
@@ -412,6 +418,7 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 		// No holder to wait for.
 		r.markScanned()
 		r.rejoinOnce.Do(func() { close(r.rejoined) })
+		r.queueRestartRestore()
 		return
 	}
 	r.wg.Add(1)
@@ -421,7 +428,35 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 		r.markScanned()
 		r.holdersScanned()
 		r.rejoinOnce.Do(func() { close(r.rejoined) })
+		r.queueRestartRestore()
 	}()
+}
+
+// queueRestartRestore marks every open conversation only after the initial
+// holder scan. A rejoining process still waits for replayDone through canKick;
+// a sleeping conversation is not woken and consumes the marker on its next
+// ordinary input.
+func (r *Runner) queueRestartRestore() {
+	if r.opts.RestoreBundle == nil {
+		return
+	}
+	r.mu.Lock()
+	convs := make([]*conv, 0, len(r.convs))
+	for _, c := range r.convs {
+		convs = append(convs, c)
+	}
+	r.mu.Unlock()
+	for _, c := range convs {
+		c.do(func() {
+			if c.closed || c.foreignRow.Load() {
+				return
+			}
+			c.queueRestore(RestoreRestart)
+			if c.proc != nil {
+				c.kick()
+			}
+		})
+	}
 }
 
 // loadClosed lists closed (or handed-off) record rec at Start.

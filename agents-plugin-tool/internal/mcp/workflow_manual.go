@@ -155,6 +155,65 @@ func renderSessionState(rec sessionRecord) string {
 	return sb.String()
 }
 
+func renderHostedRestoreBundle(key, cause string, rec sessionRecord, children []HostedChild) string {
+	var sb strings.Builder
+	sb.WriteString("## Hosted Session Restore\n\n")
+	fmt.Fprintf(&sb, "Your ws session key is `%s`. ", key)
+	if cause == "compaction" {
+		sb.WriteString("Context was compacted. ")
+	} else {
+		sb.WriteString("The daemon restarted. ")
+	}
+	sb.WriteString("This state was rendered immediately before delivery; keep using the same key.\n\n")
+	sb.WriteString(renderSessionState(rec))
+	sb.WriteString("\n## Work Target\n")
+	sb.WriteString(renderHostedWorkTarget(rec.Agenda["implement"]))
+	sb.WriteString("\n## Direct Children\n")
+	if len(children) == 0 {
+		sb.WriteString("none\n")
+	} else {
+		for _, child := range children {
+			fmt.Fprintf(&sb, "- %s", child.Address)
+			if child.Label != "" {
+				fmt.Fprintf(&sb, " (%s)", child.Label)
+			}
+			fmt.Fprintf(&sb, ": %s; tier=%s; authority=%s", child.State, child.Tier, child.Authority)
+			if child.LastReport != "" {
+				fmt.Fprintf(&sb, "; last=%s", child.LastReport)
+			}
+			if child.Error != "" {
+				fmt.Fprintf(&sb, "; error=%s", child.Error)
+			}
+			sb.WriteString("\n")
+		}
+	}
+	return strings.TrimSpace(sb.String()) + "\n"
+}
+
+func renderHostedWorkTarget(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return "none recorded\n"
+	}
+	var agenda implementAgenda
+	if json.Unmarshal(raw, &agenda) != nil {
+		return "none recorded\n"
+	}
+	target := agenda.Target
+	if target.Kind == "ticket" {
+		pointer := firstNonEmpty(target.TicketPath, target.TicketStem)
+		if pointer != "" {
+			if target.ScopeLabel != "" {
+				return fmt.Sprintf("ticket: %s (%s)\n", pointer, target.ScopeLabel)
+			}
+			return fmt.Sprintf("ticket: %s\n", pointer)
+		}
+	}
+	if target.Kind == "inline" && target.Label != "" {
+		return fmt.Sprintf("plan: %s\n", target.Label)
+	}
+	return "none recorded\n"
+}
+
 // renderWhiteboardSummaries lists each open topic's latest agent line or panel
 // recap. System events never replace the summary. Legacy recaps reach this
 // path only through first-open conversion into agent entries.

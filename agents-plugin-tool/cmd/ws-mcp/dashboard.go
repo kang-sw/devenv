@@ -344,6 +344,9 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged, agyActivity func
 		LeadManual: func(backend, dir, key string) (string, error) {
 			return renderLeadManual(hostedRender(backends[backend]), dir, key)
 		},
+		RestoreBundle: func(backend, dir, key string, cause wsagent.RestoreCause, children []wsagent.AgentChild) (string, error) {
+			return renderHostedRestoreBundle(hostedRender(backends[backend]), dir, key, cause, children)
+		},
 		PlaybookCommands: hostedPlaybookCommands,
 		ExpandCommand: func(backend, dir, key, name string) (string, error) {
 			return renderLeadPlaybook(hostedRender(backends[backend]), dir, key, name)
