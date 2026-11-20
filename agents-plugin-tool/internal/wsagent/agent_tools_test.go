@@ -1505,8 +1505,10 @@ func TestAgentChildMissingPermissionRecordFailsClosed(t *testing.T) {
 		t.Fatalf("wake refusals = %v", got)
 	}
 
-	// Restoring permission.json lets the next delivery wake the child with its authority intact.
-	if err := writePermissionSelection(wsdashboard.SessionDir(h.dir, a), PermissionReadOnly); err != nil {
+	// A pre-provenance permission.json still identifies this internal-profile
+	// child as agent.spawn delegation and lets the next delivery wake it.
+	permissionSelections.Delete(wsdashboard.SessionDir(h.dir, a))
+	if err := os.WriteFile(permPath, []byte("{\n  \"permission_level\": \"read-only\"\n}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.runner.Deliver(a, Delivery{From: "senderreplyid", Text: "wake restored"}); err != nil {

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 )
@@ -130,6 +131,37 @@ func TestPermissionFullUserGate(t *testing.T) {
 		t.Fatalf("native bypass omitted explicit ack: %v", err)
 	}
 	assertPermissionSelection(t, wsdashboard.SessionDir(h.dir, st.ID), PermissionReadOnly, false)
+}
+
+func TestPermissionWorkerFullUserGate(t *testing.T) {
+	h, _ := childHarness(t)
+	before := len(h.runner.List())
+	for name, spec := range map[string]SpawnSpec{
+		"untrusted-ack": {Profile: PiWorkerProfile, Root: h.root, Prompt: "work", PermissionLevel: PermissionFull, PermissionFullAck: true},
+		"user-no-ack":   {Profile: PiWorkerProfile, Root: h.root, Prompt: "work", PermissionLevel: PermissionFull, permissionUser: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if st, err := h.runner.Spawn(spec); err == nil || st.ID != "" {
+				t.Fatalf("generic full worker accepted: %+v %v", st, err)
+			}
+		})
+	}
+	if len(h.runner.List()) != before {
+		t.Fatal("refused generic full worker created a conversation")
+	}
+	st, err := h.runner.Spawn(SpawnSpec{
+		Profile: PiWorkerProfile, Root: h.root, Prompt: "trusted full", PermissionLevel: PermissionFull,
+		PermissionFullAck: true, permissionUser: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec := h.backend.waitProcStart(t, 0); spec.PermissionLevel != PermissionFull {
+		t.Fatalf("trusted full worker input: %+v", spec)
+	}
+	if delegatedPermission(wsdashboard.SessionDir(h.dir, st.ID)) {
+		t.Fatal("generic trusted worker recorded agent.spawn delegation")
+	}
 }
 
 func TestPermissionSelectionLoweringRecovery(t *testing.T) {
@@ -283,6 +315,7 @@ func TestPermissionWorkerInputStateAndControl(t *testing.T) {
 	st, err := h.runner.Spawn(SpawnSpec{
 		Profile: PiWorkerProfile, Root: h.root, Prompt: "work", Tier: "medium",
 		Label: "worker", Parent: &leadParent, PermissionLevel: PermissionWorkdirWrite,
+		delegatedAuthority: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -306,17 +339,21 @@ func TestPermissionWorkerInputStateAndControl(t *testing.T) {
 	if err != nil || lowered.PermissionLevel != PermissionReadOnly || lowered.PermissionSource != "explicit" {
 		t.Fatalf("lower worker: %+v %v", lowered, err)
 	}
+	if !lowered.Process {
+		t.Fatal("active worker stopped before its turn boundary")
+	}
 	if _, err := h.runner.SetPermissionLevel(st.ID, PermissionWorkdirWrite); requestStatus(err) != http.StatusForbidden {
 		t.Fatalf("worker raise: %v", err)
-	}
-	if _, err := h.runner.Stop(st.ID); err != nil {
-		t.Fatal(err)
 	}
 	if _, err := h.runner.Send(st.ID, "again"); err != nil {
 		t.Fatal(err)
 	}
+	h.backend.waitProc(t, 0).reply("done")
 	if next := h.backend.waitProcStart(t, 1); next.PermissionLevel != PermissionReadOnly {
 		t.Fatalf("lowered restart input: %+v", next)
+	}
+	if !h.backend.proc(0).isClosed() {
+		t.Fatal("worker lowering did not replace the prior process at the turn boundary")
 	}
 	root, err := h.runner.Create(PiWorkerProfile, h.root)
 	if err != nil {
@@ -365,12 +402,46 @@ func TestPermissionMissingParentAdmission(t *testing.T) {
 	h, _ := childHarness(t)
 	before := len(h.runner.List())
 	missing := ParentRef{Kind: ParentConversation, ReplyID: "missingparentrecord"}
-	_, err := h.runner.Spawn(SpawnSpec{Profile: AgentWorkerProfile(BackendPi), Root: h.root, Prompt: "work", Parent: &missing, PermissionLevel: PermissionWorkdirWrite})
+	_, err := h.runner.Spawn(SpawnSpec{
+		Profile: AgentWorkerProfile(BackendPi), Root: h.root, Prompt: "work", Parent: &missing,
+		PermissionLevel: PermissionWorkdirWrite, delegatedAuthority: true,
+	})
 	if err == nil || !strings.Contains(err.Error(), "has no record") {
 		t.Fatalf("missing parent admission: %v", err)
 	}
 	if len(h.runner.List()) != before {
 		t.Fatal("missing-parent refusal created a conversation")
+	}
+	missingLead := ParentRef{Kind: ParentLead, ReplyID: "missingleadrecord"}
+	_, err = h.runner.Spawn(SpawnSpec{
+		Profile: PiWorkerProfile, Root: h.root, Prompt: "explicit generic work", Parent: &missingLead,
+		PermissionLevel: PermissionWorkdirWrite,
+	})
+	if err == nil || !strings.Contains(err.Error(), "parent lead") || !strings.Contains(err.Error(), "has no hosted record") {
+		t.Fatalf("missing generic lead admission: %v", err)
+	}
+	if len(h.runner.List()) != before {
+		t.Fatal("missing-lead refusal created a conversation")
+	}
+	legacy, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "legacy work", Parent: &missingLead})
+	if err != nil {
+		t.Fatalf("legacy detached-lead compatibility: %v", err)
+	}
+	if legacy.PermissionLevel != PermissionWorkdirWrite || legacy.PermissionSource != "legacy-derived" {
+		t.Fatalf("legacy detached-lead projection: %+v", legacy)
+	}
+	if _, err := os.Stat(filepath.Join(wsdashboard.SessionDir(h.dir, legacy.ID), "permission.json")); !os.IsNotExist(err) {
+		t.Fatalf("legacy detached-lead spawn wrote permission sidecar: %v", err)
+	}
+	delegated, err := h.runner.Spawn(SpawnSpec{
+		Profile: PiWorkerProfile, Root: h.root, Prompt: "delegated work", Parent: &missingLead,
+		PermissionLevel: PermissionWorkdirWrite, delegatedAuthority: true,
+	})
+	if err != nil {
+		t.Fatalf("agent.spawn detached-lead exception: %v", err)
+	}
+	if !delegatedPermission(wsdashboard.SessionDir(h.dir, delegated.ID)) {
+		t.Fatal("agent.spawn authority provenance was not persisted")
 	}
 	root, err := h.runner.Create(PiWorkerProfile, h.root)
 	if err != nil {
@@ -378,6 +449,82 @@ func TestPermissionMissingParentAdmission(t *testing.T) {
 	}
 	if root.Parent != nil || root.PermissionLevel != PermissionWorkdirWrite || root.PermissionSource != "legacy-derived" {
 		t.Fatalf("root worker admission: %+v", root)
+	}
+}
+
+func TestPermissionConcurrentParentLoweringWorkerStart(t *testing.T) {
+	h, _ := childHarness(t)
+	parent, err := h.runner.Create(PiWorkerProfile, h.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.runner.Send(parent.ID, "establish parent capability snapshot"); err != nil {
+		t.Fatal(err)
+	}
+	h.backend.waitProc(t, 0)
+	if _, err := h.runner.Stop(parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	gate := h.backend.gateStarts(t)
+	parentRef := ParentRef{Kind: ParentConversation, ReplyID: parent.ID}
+	child, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "work", Parent: &parentRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate.awaitEntered(t)
+	lowered := make(chan error, 1)
+	go func() {
+		_, err := h.runner.SetPermissionLevel(parent.ID, PermissionReadOnly)
+		lowered <- err
+	}()
+	select {
+	case err := <-lowered:
+		t.Fatalf("parent lowering acknowledged during child start: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	gate.release()
+	if err := <-lowered; err != nil {
+		t.Fatal(err)
+	}
+	if spec := h.backend.waitProcStart(t, 1); spec.PermissionLevel != PermissionWorkdirWrite {
+		t.Fatalf("serialized child launch: %+v", spec)
+	}
+	if _, err := h.runner.Stop(child.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.runner.Send(child.ID, "wake above lowered parent"); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "post-lowering launch refusal", func() bool {
+		got := h.state(child.ID)
+		return !got.Process && strings.Contains(got.Error, "above the parent's current level read-only")
+	})
+}
+
+func TestPermissionNativeParentLoweringWaitsForAdmission(t *testing.T) {
+	h := permissionHarness(t).start()
+	parent := h.lead(BackendClaude, LeadOptions{
+		PermissionLevel: PermissionFull, PermissionFullAck: true, permissionUser: true,
+	})
+	parentRef := ParentRef{Kind: ParentLead, ReplyID: parent.ID}
+	releaseAdmission := h.runner.holdParentAdmission(&parentRef)
+
+	lowered := make(chan error, 1)
+	go func() {
+		_, err := h.runner.setPermissionMode(parent.ID, "plan", true)
+		lowered <- err
+	}()
+	select {
+	case err := <-lowered:
+		t.Fatalf("native parent lowering acknowledged during child admission: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	releaseAdmission()
+	if err := <-lowered; err != nil {
+		t.Fatal(err)
+	}
+	if got := h.state(parent.ID); got.PermissionLevel != PermissionReadOnly {
+		t.Fatalf("native parent lowering was not persisted: %+v", got)
 	}
 }
 

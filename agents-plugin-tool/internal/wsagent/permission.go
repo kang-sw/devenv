@@ -259,6 +259,10 @@ func (r *Runner) SetPermissionLevel(id string, level PermissionLevel) (State, er
 
 func (c *conv) setPermissionLevel(level PermissionLevel, user, ack bool) error {
 	rec := c.record()
+	detachedLeadFallback := false
+	selection := permissionSlot(c.dir)
+	selection.admission.Lock()
+	defer selection.admission.Unlock()
 	if rec.Lead && !c.r.supportsLeadPermission(rec.Backend, level) {
 		return badRequest("permission_level %q is not supported on %s", level, rec.Backend)
 	}
@@ -274,7 +278,13 @@ func (c *conv) setPermissionLevel(level PermissionLevel, user, ack bool) error {
 		if rp.Definition.Backend != rec.Backend || rp.Definition.Lead {
 			return badRequest("agent profile %q no longer resolves to this worker's %s backend", rec.Profile, rec.Backend)
 		}
-		current, _, err = c.r.workerPermission(rec, rp.Definition, c.dir)
+		var source string
+		current, source, err = c.r.workerPermission(rec, rp.Definition, c.dir)
+		if isAgentWorkerProfile(rec.Profile) && source != "explicit" {
+			return badRequest("permission admission: agent.spawn child has no explicit authority record")
+		}
+		current = c.r.legacyDetachedWorkerLevel(rec.Parent, current, source)
+		detachedLeadFallback = detachedWorkerFallback(c.dir, source)
 	}
 	if err != nil {
 		return err
@@ -286,7 +296,9 @@ func (c *conv) setPermissionLevel(level PermissionLevel, user, ack bool) error {
 		return err
 	}
 	if !rec.Lead && rec.Parent != nil {
-		ceiling, err := c.r.agentCeiling(*rec.Parent)
+		releaseParent := c.r.holdParentAdmission(rec.Parent)
+		defer releaseParent()
+		ceiling, err := c.r.agentCeiling(*rec.Parent, detachedLeadFallback)
 		if err != nil {
 			return badRequest("permission admission: %v", err)
 		}
@@ -303,6 +315,7 @@ func (c *conv) setPermissionLevel(level PermissionLevel, user, ack bool) error {
 			c.dirtyMode, c.reconcileMode = true, false
 		}
 	} else {
+		c.dirtyPermission = true
 		c.setStatus(func() {
 			c.workerPermissionLevel = level
 			c.workerPermissionSource = "explicit"
@@ -320,6 +333,9 @@ func (c *conv) setNativePermissionMode(mode string, user bool) error {
 	if !rec.Lead || len(c.r.opts.Backends[rec.Backend].PermissionModes) == 0 {
 		return categorized(ErrUnsupported, badRequest("the permission mode applies to a claude lead session only"))
 	}
+	selection := permissionSlot(c.dir)
+	selection.admission.Lock()
+	defer selection.admission.Unlock()
 	if rec.Backend == BackendAgy && mode == "bypass" && !rec.agyBypass() && !user {
 		return &requestError{status: http.StatusForbidden, msg: "only the user may enable agy bypass through permission_mode"}
 	}

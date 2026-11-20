@@ -60,6 +60,11 @@ func (c *conv) startProcess() error {
 }
 
 func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
+	releaseAdmission := func() {}
+	if !attach {
+		releaseAdmission = c.r.holdParentAdmission(rec.Parent)
+	}
+	defer releaseAdmission()
 	c.mcpStale = false
 	c.loadCompaction()
 	c.loadModelWait()
@@ -251,7 +256,7 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 			})
 		}
 	}
-	c.dirtyModel, c.dirtyEffort = false, false
+	c.dirtyModel, c.dirtyEffort, c.dirtyPermission = false, false, false
 	if def.ListInIndex != rec.Listed {
 		c.update(func(rec *Record) { rec.Listed = def.ListInIndex })
 		c.writeRegistration()
@@ -479,7 +484,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		c.replaying, c.seq = true, rec.HolderSeq
 		return nil
 	}
-	c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.reconcileMode = false, false, false, false
+	c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.dirtyPermission, c.reconcileMode = false, false, false, false, false
 	c.seq, c.seqDirty, c.live.ringDirty = 0, false, false
 	c.update(func(rec *Record) {
 		rec.HolderID, rec.HostPID, rec.HolderSeq = id, pid, 0

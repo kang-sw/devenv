@@ -894,17 +894,29 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 		return State{}, badRequest("agent profile %q is not a lead profile (lead: true)", rp.Name)
 	}
 	if spawn != nil {
+		releaseAdmission := r.holdParentAdmission(spawn.Parent)
+		defer releaseAdmission()
 		if spawn.Tier != "" && rp.Definition.Backend != BackendPi && !isAgentWorkerProfile(rp.Name) {
 			return State{}, badRequest("pi.spawn: profile %q must be a non-lead Pi profile", rp.Name)
 		}
 		if err := r.checkChildProfile(spawn.Parent, rp.Name, rp.Definition); err != nil {
 			return State{}, err
 		}
-		level, _, err := resolveWorkerPermission(rp.Definition, spawn.PermissionLevel, spawn.PermissionLevel != "", nil)
+		level, source, err := resolveWorkerPermission(rp.Definition, spawn.PermissionLevel, spawn.PermissionLevel != "", nil)
 		if err != nil {
 			return State{}, err
 		}
-		if err := r.admitWorkerLevel(spawn.Parent, level); err != nil {
+		level = r.legacyDetachedWorkerLevel(spawn.Parent, level, source)
+		if spawn.PermissionLevel != "" && !spawn.delegatedAuthority {
+			current := legacyWorkerPermission(rp.Definition)
+			if current.rank() == 0 {
+				return State{}, badRequest("the worker's current permission level is unresolved")
+			}
+			if err := authorizePermission(current, level, spawn.permissionUser, spawn.PermissionFullAck); err != nil {
+				return State{}, err
+			}
+		}
+		if err := r.admitWorkerLevel(spawn.Parent, level, spawn.delegatedAuthority || source == "legacy-derived"); err != nil {
 			return State{}, err
 		}
 	}
@@ -988,7 +1000,11 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 		}
 	}
 	if spawn != nil && spawn.PermissionLevel != "" {
-		if err := writePermissionSelection(dir, spawn.PermissionLevel); err != nil {
+		writer := writeGenericPermissionSelection
+		if spawn.delegatedAuthority {
+			writer = writeDelegatedPermissionSelection
+		}
+		if err := writer(dir, spawn.PermissionLevel); err != nil {
 			return State{}, err
 		}
 	}

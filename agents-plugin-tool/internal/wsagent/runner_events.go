@@ -949,18 +949,21 @@ func (c *conv) setSettings(model, effort *string) error {
 // backend session. A restart ends the session's background work with the
 // process, so it is the last resort.
 func (c *conv) applySettings() {
-	model, effort, mode, reconcile := c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.reconcileMode
+	model, effort, mode, permission, reconcile := c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.dirtyPermission, c.reconcileMode
 	if c.replaying {
 		return
 	}
-	c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.reconcileMode = false, false, false, false
-	if c.proc == nil || (!model && !effort && !mode) {
+	c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.dirtyPermission, c.reconcileMode = false, false, false, false, false
+	if c.proc == nil || (!model && !effort && !mode && !permission) {
 		return
 	}
 	rec := c.record()
 	restart := false
 	controls := controlsFor(c.proc)
-	if model && controls.SetModel(rec.Model) != nil {
+	if permission && !rec.Lead {
+		restart = true
+	}
+	if model && !restart && controls.SetModel(rec.Model) != nil {
 		restart = true
 	}
 	if effort && !restart && controls.SetEffort(rec.Effort) != nil {

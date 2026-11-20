@@ -125,9 +125,10 @@ type conv struct {
 	idle         *time.Timer
 	idleAfter    time.Duration
 	bgGraceTimer *time.Timer
-	dirtyModel   bool
-	dirtyEffort  bool
-	dirtyMode    bool
+	dirtyModel      bool
+	dirtyEffort     bool
+	dirtyMode       bool
+	dirtyPermission bool
 	// reconcileMode marks replay-reconstructed intent, not a new user setting.
 	// Failed reconciliation is advisory; it must not kill an unenforceable lead.
 	reconcileMode bool
@@ -788,8 +789,16 @@ func (c *conv) stateWithKeyCheck(checkKey bool) State {
 	if !c.rec.Lead {
 		st.PermissionLevel = c.workerPermissionLevel
 		st.PermissionSource = c.workerPermissionSource
+		if st.PermissionLevel != "" {
+			st.PermissionEnforcement = permissionQuality(c.rec.Backend, st.PermissionLevel, "")
+		}
 	}
 	st.IsChild = c.r.isChildRecord(c.rec)
+	if !c.rec.Lead {
+		// The loop refreshes worker permission at startup and every launch or
+		// control change. State/List stay memory-only on the interactive path.
+		return st
+	}
 	return c.r.permissionState(st, c.rec, c.dir)
 }
 
