@@ -331,6 +331,9 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 			s.notes.Bind(keyReplyID(sessionKey), root, s.configOptions(), s.stateOptions())
 		}
 	}
+	if s.planUsageActivityEnabled() && s.hostedSessionKey() == "" {
+		s.signalPlanUsageActivity()
+	}
 	if !s.dashboardDeclared() {
 		return // no dashboard manifest loaded: the dashboard is off
 	}

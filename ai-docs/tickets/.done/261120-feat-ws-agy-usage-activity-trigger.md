@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 7097099f051924ab
 sage-review-completeness-reviewed: 7097099f051924ab
+completed: 2026-11-20
 ---
 
 # agy plan usage refreshed on agy activity
@@ -212,7 +213,7 @@ Verification (Go tests):
   the same shape as a popover probe's; the existing cache and history tests
   pass unchanged (Decision 5).
 
-### Result (c946b532) - 2026-11-20
+### Result (1bda53a24) - 2026-11-20
 
 - Added a runner `AgyActivity` callback beside `TrackerChanged`, raised once
   after a live hosted agy child or lead turn settles. Replay, non-agy turns,
@@ -229,8 +230,11 @@ Verification (Go tests):
   existing popover behavior.
 - Lite review found one Important test race: the duplicate-signal assertions
   used a fixed sleep before the activity goroutine necessarily ran. Commit
-  `c946b532` added a package-private completion seam and waits for the handoff
-  plus any admitted probe; the one-pass review has no open findings.
+  `040fbac5e` added a package-private completion seam and waits for the handoff
+  plus any admitted probe; `1bda53a24` closed the remaining activity-trigger
+  test gaps. The Phase 1 implementation is on develop through merge
+  `dec0d7d6a` (`d36a9999b`, `2ca6ff3d4`, `040fbac5e`, `ec250bb5c`,
+  `1bda53a24`).
 - Final verification passed:
   `go test -count=1 -run '^TestAgyActivityCallback' ./internal/wsagent`;
   `go test -count=1 -run '^TestPlanUsageAgy' ./internal/wsdashboard`;
@@ -256,3 +260,53 @@ Verification (Go tests):
   with no daemon host, nor does a hosted agy session's call.
 - The signal adds no file I/O or blocking on the tool-call path, including
   while a probe holds the plan-usage store's lock.
+
+### Result (86bad7ff0) - 2026-11-20
+
+- Verified the conditional identity path: when a connection reports harness
+  `agy` through `ServerOptions.Harness` (or an initialize `clientInfo.name` that
+  normalizes through the registered backend's `ManualHarness`),
+  `currentHarness()` resolves to `agy`. The repository does not establish that
+  a stock user-started agy lead reports either value: nothing here sets
+  `WS_MCP_HARNESS=agy`, and the recorded agy protocol is ACP rather than MCP.
+  The trigger therefore works whenever the connection resolves to agy, but is
+  not proven reachable for stock user-started agy and is likely inert there
+  until follow-up identity plumbing lands.
+- Added `BackendRegistration.PlanUsageActivity` and enabled it only on agy's
+  daemon registration. A keyed top-level lead call resolves that descriptor
+  once, excludes hosted sessions, and invokes the daemon's optional in-memory
+  host capability. The daemon capability reuses Phase 1's asynchronous
+  `AgyActivity` admission path; hostless servers and codex, claude, and pi
+  remain inert. No new agy name check was added to common MCP code.
+- The call path adds no file I/O. Only descriptor-opted connections perform the
+  cached hosted-session check; the daemon method returns before the plan-usage
+  lock, so the existing debounce, in-flight guard, billed-turn latch, auth hold,
+  cache, and history behavior remain unchanged. Compatibility remains T0: no
+  MCP, hello, store, tracker, or manifest shape changed.
+- The implementation landed in `37c4fcc76`. Review found that the signal was
+  below `dashboardDeclared`, skipping an agy connection with a daemon host but
+  no dashboard manifest; `f1ca9d1b1` moved it above that guard while retaining
+  hosted exclusion. `be834f9ae` isolated the regression's dashboard state,
+  `545226868` made the whole MCP suite ignore inherited live cache paths, and
+  `86bad7ff0` exercised production server construction, preserved a late-known
+  harness, asserted the daemon capability at compile time, and made every
+  matrix row mutation-sensitive.
+- Final verification passed (every Go command used
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`):
+  `go test -count=1 -timeout 20m -run '^TestUserStartedAgyActivity$' ./internal/mcp`;
+  `go test -count=1 -timeout 20m -run '^(TestDashboardRegistersATopLevelLeadSessionWithTheKeyOn|TestDashboardSessionScopeTuneOffUnregisters)$' ./internal/mcp`;
+  `go test -count=1 -run '^TestPlanUsageAgy' ./internal/wsdashboard`;
+  `go test -count=1 -run 'Tracker|Asset' ./internal/wsdashboard`;
+  `go test -count=1 -run '^TestAgyActivityCallback' ./internal/wsagent`;
+  `go test -count=1 -run '^TestAgentRunnerCatalogs$' ./cmd/ws-mcp`;
+  native and `GOOS=windows` `go vet` on `./internal/mcp`,
+  `./internal/wsdashboard`, `./internal/wsagent`, and `./cmd/ws-mcp`.
+  The final follow-up also passed `go vet ./internal/mcp` and `go build ./...`.
+
+
+## Resolution (2026-11-20)
+
+Phase 1 refreshes agy plan usage from hosted settled turns. Phase 2 uses the
+same debounced asynchronous probe path for user-started lead tool calls whenever
+that connection's harness resolves to agy; stock user-started agy identity is
+not yet established by repository evidence.
