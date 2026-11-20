@@ -66,6 +66,7 @@
     b.appendChild(el('div', { class: 'tk tk-iwin-back', id: 'tkwin', hidden: '' }, '<div class="iwin" role="dialog" aria-modal="true" tabindex="-1"><div class="iwin-in" id="tkwinbody"></div></div>' +
       '<ul class="tk-mpop" id="tkmpop" role="listbox" aria-label="' + wsT("js.tk.composer.mention.tip") + '" hidden></ul>'));
     b.appendChild(el('dialog', { class: 'tk tk-dlg', id: 'tkdlg' }));
+    b.appendChild(el('dialog', { class: 'tk tk-pm', id: 'tkpm' }));
     b.appendChild(el('dialog', { class: 'tk tk-dlg tk-orged', id: 'tkorged' }, '<div id="tkorged-body"></div>'));
     // a page without the shared toast stack (the tracker mockup) gets the renderer's own
     if (!window.WsToast) b.appendChild(el('div', { class: 'tk tk-toast', id: 'tktoast', hidden: '' }));
@@ -408,7 +409,7 @@
     // a right-click on a row, card, entry, or the item window header opens its menu at the pointer
     document.addEventListener('contextmenu', function (e) {
       var t = e.target;
-      if (!own(t) || t.closest('#tkmenu, #tkdlg, input, textarea, select, a[href]:not([href="#"])')) return;
+      if (!own(t) || t.closest('#tkmenu, #tkdlg, #tkpm, input, textarea, select, a[href]:not([href="#"])')) return;
       var m = t.closest('[data-mitem], [data-item]');
       if (!m) return;
       e.preventDefault();
@@ -432,6 +433,12 @@
     document.addEventListener('keyup', function (e) {
       if (mentionBox(e.target) && /^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key)) mentionSync();
     });
+    // the shared CC / assign picker modal (#tkpm): clicks, search input, IME commit, keyboard, and backdrop/Esc close
+    $('tkpm').addEventListener('click', pmClick);
+    $('tkpm').addEventListener('input', pmInput);
+    $('tkpm').addEventListener('compositionend', pmInput);
+    $('tkpm').addEventListener('keydown', pmKey);
+    $('tkpm').addEventListener('cancel', function (e) { e.preventDefault(); pmClose(true); });
     // the assign popover's rows and chip buttons act on click without taking focus from its search field
     $('tkmenu').addEventListener('mousedown', function (e) { if (e.target.closest('.ap-list .aopt, .ap-chips .ax')) e.preventDefault(); });
     // focus leaving the labels step or the range picker applies the pick (menuFocusOut); focus going
@@ -530,7 +537,7 @@
         return;
       }
       // a host that handled this Esc itself (its own menu, say) marks it defaultPrevented
-      if (e.key !== 'Escape' || e.defaultPrevented || $('tkdlg').open || $('tkorged').open) return;
+      if (e.key !== 'Escape' || e.defaultPrevented || $('tkdlg').open || $('tkorged').open || ($('tkpm') && $('tkpm').open)) return;
       if (ui.win) closeItemWindow();
       else if ((ui.open || ui.page) && mselOn()) { e.preventDefault(); mselClear(); render(); }
       else if (ui.open) collapse();

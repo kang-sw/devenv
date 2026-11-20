@@ -100,7 +100,12 @@
     var n = ed ? ui.ned : ui.nrow[ui.store];
     if (!n) return;
     nrowFill(n);
-    var as = step === 'assign' ? { q: '', sel: n.who.map(function (id) { return { t: 'p', id: id }; }), compl: n.compl, idx: 0, opts: [] } : null;
+    if (step === 'assign') {
+      if (MN) closeMenu(false);
+      openPicker('assign', { draft: true, ed: !!ed }, anchor);
+      return;
+    }
+    var as = null;
     // the label picker edits the draft live: a discard goes back to this snapshot
     openMenu({ kind: 'new', ed: !!ed, step: step, from: null, q: '', as: as, lsnap: step === 'labels' ? (n.labels || []).slice() : null }, anchor);
   }

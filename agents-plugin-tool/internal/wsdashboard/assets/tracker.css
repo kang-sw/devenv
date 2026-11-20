@@ -1447,3 +1447,94 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk .tk-oe-df .btn.primary { font-weight: 700; }
 .tk .tk-oe-df .btn:disabled { opacity: .45; cursor: default; }
 .tk .wk-edit .tb .wk-base { flex: none; }
+
+/* ===== CC & assign picker modal (#tkpm) ===== */
+.tk.tk-pm { padding: 0; border: 0; background: transparent; color: var(--wb-fg); max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); overflow: visible; font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; }
+.tk.tk-pm:not([open]) { display: none; }
+.tk.tk-pm::backdrop { background: var(--tk-backdrop); }
+.tk.tk-pm .pm-dlg { background: var(--wb-bg); border: 1px solid var(--wb-line); border-radius: 12px; box-shadow: var(--wb-shadow-hi); display: flex; flex-direction: column; overflow: hidden; height: min(640px, calc(100vh - 24px)); min-height: min(520px, calc(100vh - 24px)); width: min(560px, calc(100vw - 24px)); }
+.tk.tk-pm.pm-asg .pm-dlg { width: min(520px, calc(100vw - 24px)); }
+.tk.tk-pm .pm-dlg > * { flex: none; }
+.tk.tk-pm .pm-dlg > .pm-body { flex: 1 1 auto; min-height: 260px; overflow: auto; padding: 6px 14px 10px; }
+.tk.tk-pm .pm-dh { display: flex; align-items: center; gap: 8px; padding: 9px 12px 9px 16px; background: var(--wb-muted); }
+.tk.tk-pm .pm-dh h2 { margin: 0; font-size: 14px; font-weight: 700; white-space: nowrap; }
+.tk.tk-pm .pm-dh .pm-sub { color: var(--wb-muted-fg); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tk.tk-pm .pm-dh code { font-family: var(--wb-mono); font-size: 10.5px; color: var(--wb-muted-fg); margin-right: 4px; }
+.tk.tk-pm .pm-x { width: 26px; height: 24px; border: 0; border-radius: 6px; background: none; color: var(--wb-muted-fg); font-size: 16px; line-height: 1; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.tk.tk-pm .pm-x:hover { background: color-mix(in srgb, var(--wb-fg) 8%, transparent); color: var(--wb-fg); }
+.tk.tk-pm .pm-tb { display: flex; gap: 6px; align-items: center; padding: 8px 14px 6px; }
+.tk.tk-pm .pm-tb input[type="search"] { font: inherit; font-size: 12.5px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--wb-line); background: var(--wb-card); color: var(--wb-fg); flex: 1 1 0; min-width: 0; }
+.tk.tk-pm .pm-tb input[type="search"]:focus { outline: none; border-color: var(--wb-primary); }
+.tk.tk-pm .pm-btn { font: inherit; font-size: 12.5px; background: var(--wb-muted); color: var(--wb-fg); border: 0; border-radius: 999px; padding: 3px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.tk.tk-pm .pm-btn:hover:not(:disabled) { filter: brightness(1.06); }
+.tk.tk-pm .pm-btn.mini { font-size: 11.5px; padding: 1px 9px; }
+.tk.tk-pm .pm-btn.mini.on { background: var(--tk-blu-bg); color: var(--tk-blu-fg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tk-blu) 55%, transparent); font-weight: 700; }
+.tk.tk-pm .pm-btn.primary { background: var(--wb-primary); color: var(--wb-primary-fg); font-weight: 700; }
+.tk.tk-pm .pm-btn:disabled { opacity: .5; cursor: not-allowed; }
+.tk.tk-pm .pm-sel { display: flex; align-items: flex-start; gap: 8px; padding: 2px 14px 8px; border-bottom: 1px solid var(--wb-muted); }
+.tk.tk-pm .pm-sel .pm-lab { font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); line-height: 17px; white-space: nowrap; }
+.tk.tk-pm .pm-sel .pm-chips { display: flex; flex-wrap: wrap; gap: 4px; min-height: 17px; max-height: 40px; overflow: auto; }
+.tk.tk-pm .pm-chip { display: inline-flex; align-items: center; height: 17px; font-size: 10.5px; font-weight: 700; padding: 0 6px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; border: 0; font-family: inherit; }
+.tk.tk-pm button.pm-chip { cursor: pointer; }
+.tk.tk-pm button.pm-chip:hover { filter: brightness(1.08); }
+.tk.tk-pm .pm-chip.you { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tk.tk-pm .pm-chip.was { background: none; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.tk.tk-pm .pm-chip.add { background: var(--tk-grn-bg); color: var(--tk-grn); }
+.tk.tk-pm .pm-chip.rm { background: color-mix(in srgb, var(--tk-fail) 16%, var(--wb-card)); color: var(--tk-fail); }
+.tk.tk-pm .pm-chip.pend { background: var(--tk-pur-bg); color: var(--tk-pur-fg); }
+.tk.tk-pm .pm-chip.rule { background: var(--tk-blu-bg); color: var(--tk-blu-fg); }
+.tk.tk-pm .pm-chip.org { background: var(--tk-blu-bg); color: var(--tk-blu-fg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tk-blu) 45%, transparent); }
+.tk.tk-pm .av { margin-left: 0; }
+.tk.tk-pm .pm-ck, .tk.tk-pm .pm-rdo { width: 15px; height: 15px; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-muted-fg) 75%, transparent); display: inline-flex; align-items: center; justify-content: center; flex: none; font-size: 11px; font-weight: 900; line-height: 1; color: var(--wb-primary-fg); cursor: pointer; }
+.tk.tk-pm .pm-ck { border-radius: 4px; }
+.tk.tk-pm .pm-rdo { border-radius: 50%; }
+.tk.tk-pm .on > .pm-ck { background: var(--wb-primary); box-shadow: none; }
+.tk.tk-pm .on > .pm-ck::after { content: "\2713"; }
+.tk.tk-pm .on > .pm-rdo { background: var(--wb-primary-fg); box-shadow: inset 0 0 0 4.5px var(--wb-primary); }
+.tk.tk-pm .cov > .pm-ck { background: color-mix(in srgb, var(--wb-primary) 22%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 35%, transparent); color: color-mix(in srgb, var(--wb-primary) 75%, var(--wb-card)); cursor: not-allowed; }
+.tk.tk-pm .cov > .pm-ck::after { content: "\2713"; }
+.tk.tk-pm .pm-ck.lock, .tk.tk-pm .pm-rdo.lock, .tk.tk-pm .lock > .pm-ck, .tk.tk-pm .lock > .pm-rdo { opacity: .55; cursor: not-allowed; }
+.tk.tk-pm .pm-org, .tk.tk-pm .pm-org ul { list-style: none; margin: 0; padding: 0; }
+.tk.tk-pm .pm-org ul { margin-left: 9px; }
+.tk.tk-pm .pm-org li { position: relative; }
+.tk.tk-pm .pm-org ul > li { padding-left: 14px; }
+.tk.tk-pm .pm-org ul > li::before { content: ""; position: absolute; left: 0; top: 0; width: 11px; height: 13px; border-left: 1.5px solid var(--wb-line); border-bottom: 1.5px solid var(--wb-line); border-bottom-left-radius: 5px; }
+.tk.tk-pm .pm-org ul > li:not(:last-child)::after { content: ""; position: absolute; left: 0; top: 13px; bottom: 0; border-left: 1.5px solid var(--wb-line); }
+.tk.tk-pm li.shut > ul { display: none; }
+.tk.tk-pm .pm-nd { display: grid; grid-template-columns: 14px 15px 20px minmax(0, 1fr) auto; column-gap: 6px; align-items: center; padding: 2px 4px 2px 0; border-radius: 6px; min-height: 26px; }
+.tk.tk-pm .pm-nd:hover { background: color-mix(in srgb, var(--wb-primary) 5%, var(--wb-bg)); }
+.tk.tk-pm .pm-nd.focus { outline: 1.5px solid var(--wb-primary); outline-offset: -1px; }
+.tk.tk-pm .pm-nd.cvr { background: color-mix(in srgb, var(--tk-blu-bg) 35%, var(--wb-bg)); }
+.tk.tk-pm .pm-nd.add { background: color-mix(in srgb, var(--tk-grn-bg) 50%, var(--wb-bg)); }
+.tk.tk-pm .pm-nd.rm { background: color-mix(in srgb, var(--tk-fail) 9%, var(--wb-bg)); }
+.tk.tk-pm .pm-nd.rm .pm-nm { text-decoration: line-through; color: var(--wb-muted-fg); }
+.tk.tk-pm .pm-tg { width: 14px; height: 14px; border: 0; background: none; color: var(--wb-muted-fg); cursor: pointer; padding: 0; font-size: 10px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+.tk.tk-pm li.shut > .pm-nd .pm-tg { transform: rotate(-90deg); }
+.tk.tk-pm .pm-who { min-width: 0; display: flex; align-items: center; gap: 5px; overflow: hidden; white-space: nowrap; cursor: pointer; }
+.tk.tk-pm .pm-who .pm-nm { font-weight: 600; }
+.tk.tk-pm .pm-who .pm-o { color: var(--wb-muted-fg); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.tk.tk-pm .pm-nd[data-lead="1"] .pm-who, .tk.tk-pm .pm-nd.cov .pm-who, .tk.tk-pm .pm-nd.cvr .pm-who, .tk.tk-pm .pm-nd.lock .pm-who { cursor: default; }
+.tk.tk-pm .pm-rt { display: flex; align-items: center; gap: 4px; }
+.tk.tk-pm .pm-opt { font: inherit; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; gap: 5px; height: 20px; border: 0; border-radius: 999px; padding: 0 8px 0 4px; background: none; color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px var(--wb-line); cursor: pointer; white-space: nowrap; }
+.tk.tk-pm .pm-opt .pm-ck { width: 13px; height: 13px; font-size: 10px; }
+.tk.tk-pm .pm-opt.on { color: var(--wb-fg); }
+.tk.tk-pm .pm-opt.grp.on { background: var(--tk-blu-bg); color: var(--tk-blu-fg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tk-blu) 60%, transparent); }
+.tk.tk-pm .pm-opt.cov { cursor: not-allowed; color: color-mix(in srgb, var(--wb-muted-fg) 80%, var(--wb-bg)); }
+.tk.tk-pm .pm-opt.lock { cursor: not-allowed; }
+.tk.tk-pm .pm-unas { margin-top: 8px; border: 1px dashed color-mix(in srgb, var(--tk-amb) 50%, transparent); border-radius: 8px; padding: 2px 6px 4px; }
+.tk.tk-pm .pm-unas h4 { margin: 2px 0; font-size: 11.5px; font-weight: 800; color: var(--tk-amb); display: flex; align-items: center; gap: 6px; }
+.tk.tk-pm .pm-unas .pm-nd { grid-template-columns: 0 15px 20px minmax(0, 1fr) auto; }
+.tk.tk-pm .pm-empty { margin: 24px 0; text-align: center; font-size: 12.5px; color: var(--wb-muted-fg); }
+.tk.tk-pm .pm-note { font-size: 11.5px; color: var(--wb-muted-fg); background: var(--wb-card); border-radius: 8px; padding: 6px 8px; border: 1px solid var(--wb-muted); margin: 8px 14px; }
+.tk.tk-pm .pm-note b { color: var(--wb-fg); }
+.tk.tk-pm .pm-err { margin: 0 14px 8px; padding: 6px 9px; border-radius: 8px; font-size: 12px; background: color-mix(in srgb, var(--tk-fail) 12%, var(--wb-card)); border-left: 3px solid var(--tk-fail); color: var(--tk-fail); }
+.tk.tk-pm .pm-err[hidden] { display: none; }
+.tk.tk-pm .pm-df { border-top: 1px solid var(--wb-line); background: var(--wb-card); padding: 8px 14px 10px; display: flex; flex-direction: column; gap: 6px; }
+.tk.tk-pm .pm-df .pm-row { display: flex; align-items: center; gap: 8px; }
+.tk.tk-pm .pm-sum { font-size: 12px; color: var(--wb-muted-fg); }
+.tk.tk-pm .pm-sum b { color: var(--wb-fg); }
+.tk.tk-pm .pm-cm { display: inline-flex; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--wb-line); overflow: hidden; }
+.tk.tk-pm .pm-cm button { font: inherit; font-size: 11.5px; padding: 2px 9px; border: 0; background: none; color: var(--wb-muted-fg); cursor: pointer; white-space: nowrap; }
+.tk.tk-pm .pm-cm button[hidden] { display: none; }
+.tk.tk-pm .pm-cm button.on { background: var(--wb-muted); color: var(--wb-fg); font-weight: 700; }
+.tk.tk-pm :is(button, [role="checkbox"], [role="radio"]):focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }

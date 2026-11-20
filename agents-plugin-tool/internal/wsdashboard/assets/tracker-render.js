@@ -54,7 +54,7 @@
   function setInert(on) {
     if (!on) { inerted.forEach(function (el) { el.inert = false; }); inerted = []; return; }
     if (inerted.length) return;
-    var keep = [$('tkwin'), $('tkdlg'), $('tkqpop'), $('tktoast'), $('wstoasts'), $('tktip'), $('tkmenu')];
+    var keep = [$('tkwin'), $('tkdlg'), $('tkpm'), $('tkqpop'), $('tktoast'), $('wstoasts'), $('tktip'), $('tkmenu')];
     Array.prototype.forEach.call(document.body.children, function (el) {
       if (keep.indexOf(el) < 0 && !el.inert) { el.inert = true; inerted.push(el); }
     });
