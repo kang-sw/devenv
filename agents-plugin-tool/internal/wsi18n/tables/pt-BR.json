@@ -30,6 +30,7 @@
   "js.usage.age": "valor de {0} min atrás",
   "js.usage.unavailable": "uso indisponível",
   "js.usage.signinrequired": "login necessário",
+  "js.usage.pending": "Verificando o uso…",
   "js.usage.disabled": "desativado",
   "js.usage.no5h": "sem janela de 5 horas",
   "js.usage.noweekly": "sem janela semanal",

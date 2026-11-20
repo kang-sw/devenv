@@ -247,16 +247,22 @@ func TestPlanUsageAgyEmptyStoreDoesNotBlockForcedRefresh(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Entries) != 0 {
-		t.Fatalf("empty store returned entries before first probe completed: %+v", resp.Entries)
+	if len(resp.Entries) != 2 {
+		t.Fatalf("probe-start response returned %d entries, want 2 pending groups: %+v", len(resp.Entries), resp.Entries)
+	}
+	for i, want := range []string{"gemini", "claude_gpt"} {
+		entry := resp.Entries[i]
+		if entry.Harness != "agy" || entry.Group != want || !entry.Pending || len(entry.Windows) != 0 {
+			t.Fatalf("pending entry %d = %+v, want agy/%s with no windows", i, entry, want)
+		}
 	}
 	// Release fake agy and verify the background probe finishes and populates cache.
 	if err := os.WriteFile(gate, []byte("go"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	s.probes.Wait()
-	if got := s.entries(); len(got) != 2 {
-		t.Fatalf("after background probe finished, got %d entries, want 2", len(got))
+	if got := s.entries(); len(got) != 2 || got[0].Pending || got[1].Pending {
+		t.Fatalf("after background probe finished, want 2 non-pending entries, got %+v", got)
 	}
 }
 

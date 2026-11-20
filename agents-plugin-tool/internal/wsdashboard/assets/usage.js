@@ -160,6 +160,7 @@
       button.textContent = "";
       button.appendChild(mini());
       sorted(data.entries).forEach(function (entry) {
+        if (entry.pending) return;
         var windows = active(entry, now), enabled = windows.filter(function (v) { return !v.disabled; });
         if (windows.length && !enabled.length) return;
         var group = el("span", "usage-harness");
@@ -217,6 +218,7 @@
       heading: "js.usage.heading", close: "js.usage.close", legend: "js.usage.legend",
       fiveHour: "js.usage.fivehour", weekly: "js.usage.weekly", age: "js.usage.age",
       unavailable: "js.usage.unavailable", signInRequired: "js.usage.signinrequired", disabled: "js.usage.disabled",
+      pending: "js.usage.pending",
       noFiveHour: "js.usage.no5h", noWeekly: "js.usage.noweekly", modelGroups: "js.usage.modelgroups",
       chart: "js.usage.chart", baseline: "js.usage.baseline",
       unknownReset: "js.usage.unknownreset", stalePace: "js.usage.stalepace", idealTitle: "js.usage.idealtitle",
@@ -326,6 +328,16 @@
     function emptySlot(kind) {
       var slot = el("div", "usage-window-empty", t(kind === "five_hour" ? "noFiveHour" : "noWeekly"));
       slot.setAttribute("data-kind", kind);
+      return slot;
+    }
+    function pendingSlot(kind) {
+      var slot = el("article", "usage-window-card usage-pending-card");
+      slot.setAttribute("data-kind", kind);
+      slot.setAttribute("aria-label", t("pending"));
+      slot.setAttribute("aria-busy", "true");
+      var spinner = el("span", "spin");
+      spinner.setAttribute("aria-hidden", "true");
+      slot.appendChild(spinner);
       return slot;
     }
     function windowCard(entry, w, now) {
@@ -441,7 +453,11 @@
         cRow++;
         cnRow += 2;
 
-        if (!w5 && !w7) {
+        if (entry.pending) {
+          var pending5 = pendingSlot("five_hour"); pending5.className += " usage-slot-5h";
+          var pending7 = pendingSlot("seven_day"); pending7.className += " usage-slot-7d";
+          row.appendChild(pending5); row.appendChild(pending7);
+        } else if (!w5 && !w7) {
           var statusSlot = el("div", "usage-status-slot");
           statusSlot.appendChild(el("p", "usage-status", statusText(entry.status)));
           if (entry.asOf) statusSlot.appendChild(el("div", "usage-meta", observedAge(entry.asOf, now)));
