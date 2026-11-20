@@ -281,6 +281,10 @@ type Runner struct {
 	// rejoined gates nested calls until held-process capabilities are validated.
 	rejoined   chan struct{}
 	rejoinOnce sync.Once
+	// startupLoaded closes after Start installed every open record. Restore
+	// markers may be present before then, but compactIdle sends none until the
+	// complete direct-child projection exists.
+	startupLoaded chan struct{}
 	// playbookCmds is Options.PlaybookCommands' list, read once
 	// (playbookCommands) under playbookMu.
 	playbookMu     sync.Mutex
@@ -332,7 +336,7 @@ func NewRunner(opts Options) *Runner {
 	if opts.Alive == nil {
 		opts.Alive = wsstate.ProcessAlive
 	}
-	r := &Runner{opts: opts, convs: map[string]*conv{}, closed: map[string]Record{}, quit: make(chan struct{}), scanned: make(chan struct{}), rejoined: make(chan struct{}), notify: func(string, string) {}}
+	r := &Runner{opts: opts, convs: map[string]*conv{}, closed: map[string]Record{}, quit: make(chan struct{}), scanned: make(chan struct{}), rejoined: make(chan struct{}), startupLoaded: make(chan struct{}), notify: func(string, string) {}}
 	if opts.Holders != nil {
 		// Before the manager's first scan, so a predecessor's holders are
 		// seen attaching.
@@ -388,6 +392,7 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 	}
 	open = slices.DeleteFunc(open, func(rec Record) bool { return gone[rec.ReplyID] })
 	orphans := orphansAtStart(open)
+	startup := make([]*conv, 0, len(open))
 	for _, rec := range open {
 		if orphans[rec.ReplyID] && r.closeAtStart(rec) {
 			continue
@@ -395,7 +400,11 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 		// A lead whose process may still run under its holder rejoins
 		// it there, before the scan below replays the holder's records.
 		// A turn the last daemon's exit cut off settles there too.
-		r.startConv(rec, nil)
+		startup = append(startup, r.startConvAtStartup(rec, nil))
+	}
+	close(r.startupLoaded)
+	for _, c := range startup {
+		c.do(c.kick)
 	}
 	// All records are loaded now, including children sorted after their lead.
 	for _, st := range r.List() {
@@ -418,7 +427,6 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 		// No holder to wait for.
 		r.markScanned()
 		r.rejoinOnce.Do(func() { close(r.rejoined) })
-		r.queueRestartRestore()
 		return
 	}
 	r.wg.Add(1)
@@ -428,34 +436,18 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 		r.markScanned()
 		r.holdersScanned()
 		r.rejoinOnce.Do(func() { close(r.rejoined) })
-		r.queueRestartRestore()
 	}()
 }
 
-// queueRestartRestore marks every open conversation only after the initial
-// holder scan. A rejoining process still waits for replayDone through canKick;
-// a sleeping conversation is not woken and consumes the marker on its next
-// ordinary input.
-func (r *Runner) queueRestartRestore() {
-	if r.opts.RestoreBundle == nil {
-		return
+func (r *Runner) startupReady() bool {
+	if r == nil || r.startupLoaded == nil {
+		return true
 	}
-	r.mu.Lock()
-	convs := make([]*conv, 0, len(r.convs))
-	for _, c := range r.convs {
-		convs = append(convs, c)
-	}
-	r.mu.Unlock()
-	for _, c := range convs {
-		c.do(func() {
-			if c.closed || c.foreignRow.Load() {
-				return
-			}
-			c.queueRestore(RestoreRestart)
-			if c.proc != nil {
-				c.kick()
-			}
-		})
+	select {
+	case <-r.startupLoaded:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -669,10 +661,14 @@ func (r *Runner) summaryOwner(replyID string) *conv {
 // list the first snapshot shows (lastCommands); a process's own list
 // replaces it.
 func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
-	return r.startConvWith(rec, seed, false, nil)
+	return r.startConvWith(rec, seed, false, nil, false)
 }
 
-func (r *Runner) startConvWith(rec Record, seed []wslive.SlashCommand, spawnPending bool, claimWidth func()) *conv {
+func (r *Runner) startConvAtStartup(rec Record, seed []wslive.SlashCommand) *conv {
+	return r.startConvWith(rec, seed, false, nil, true)
+}
+
+func (r *Runner) startConvWith(rec Record, seed []wslive.SlashCommand, spawnPending bool, claimWidth func(), startupRestore bool) *conv {
 	dir := wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID)
 	c := &conv{
 		r:            r,
@@ -688,6 +684,12 @@ func (r *Runner) startConvWith(rec Record, seed []wslive.SlashCommand, spawnPend
 		mailC:        make(chan struct{}, 1),
 		done:         make(chan struct{}),
 		settleC:      make(chan struct{}),
+	}
+	if startupRestore && r.opts.RestoreBundle != nil {
+		// Install the marker before the loop or any inbox/mail signal can
+		// kick. canKick's scan/replay gates then order delivery after holder
+		// reconciliation without admitting sessions spawned during the scan.
+		c.compactNote = restartRestoreMarker
 	}
 	c.refreshHeld()
 	if rec.Lead {
@@ -1034,7 +1036,7 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 	if spawn != nil {
 		claimWidth = spawn.claimWidth
 	}
-	c := r.startConvWith(rec, seed, claimWidth != nil, claimWidth)
+	c := r.startConvWith(rec, seed, claimWidth != nil, claimWidth, false)
 	if spawn != nil {
 		return r.spawned(c, spawn.Prompt)
 	}

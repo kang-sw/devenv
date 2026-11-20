@@ -343,6 +343,9 @@ func (c *conv) compactIdle() bool {
 	if c.compacting || c.compactCommand {
 		return true
 	}
+	if (strings.HasPrefix(c.compactNote, restartRestoreMarker) || strings.HasPrefix(c.compactNote, compactionRestoreMarker)) && !c.r.startupReady() {
+		return true
+	}
 	if c.compactPending == nil && c.compactUsageFresh {
 		c.refreshCompaction()
 		hard := c.compactHard.Point(c.compactWindow)
@@ -428,6 +431,11 @@ func (c *conv) compactIdle() bool {
 		return true
 	}
 	if strings.HasPrefix(c.compactNote, restartRestoreMarker) && c.proc != nil {
+		if c.restartRestoreHasInput() {
+			// Let the ordinary turn path prepend the bundle instead of opening
+			// a standalone restore turn ahead of input that already waits.
+			return false
+		}
 		text := c.renderRestoreNote(c.compactNote)
 		if err := c.proc.Send(text); err != nil {
 			c.setStatus(func() { c.lastErr = err.Error() })
@@ -439,6 +447,14 @@ func (c *conv) compactIdle() bool {
 		return true
 	}
 	return false
+}
+
+func (c *conv) restartRestoreHasInput() bool {
+	if len(c.rec.Queued) > 0 || len(c.rec.Mail) > 0 || len(c.rec.Reports) > 0 {
+		return true
+	}
+	held, err := wsinbox.Held(c.inbox)
+	return err != nil || len(held) > 0
 }
 
 func (c *conv) compactHoldsReport() bool {

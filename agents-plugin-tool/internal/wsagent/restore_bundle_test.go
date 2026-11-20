@@ -1,14 +1,17 @@
 package wsagent
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 )
 
 type restoreProbeCall struct {
@@ -167,6 +170,48 @@ func TestRestartRestoreActiveRejoinWaitsForIdle(t *testing.T) {
 	}
 }
 
+func TestRestartRestorePrecedesQueuedInputAndExcludesScanSpawn(t *testing.T) {
+	probe := &restoreProbe{state: "restart-order"}
+	h := newLeadHarness(t)
+	h.opts.RestoreBundle = probe.render
+	h.start()
+	id, holder := h.runLead("one")
+	h.holders.out(holder, turnLines("sess-1", "u1", "done")...)
+	h.idle(id)
+
+	h.runner.Close()
+	rec := h.record(id)
+	rec.Queued = []QueuedInput{{Text: "queued while daemon was down"}}
+	if err := writeRecord(wsdashboard.SessionDir(h.dir, id), rec); err != nil {
+		t.Fatal(err)
+	}
+	h.holders.restart()
+	entered, release := h.gateScan()
+	defer release()
+	h.start()
+	wait(t, "restart holder scan", entered)
+
+	spawned := h.lead(BackendClaude, LeadOptions{})
+	h.runner.conv(spawned.ID).do(func() {
+		if note := h.runner.conv(spawned.ID).compactNote; note != "" {
+			t.Fatalf("session spawned during scan inherited restart restore: %q", note)
+		}
+	})
+	if got := len(h.userInputs(holder)); got != 1 {
+		t.Fatalf("queued input crossed the replay gate: %d inputs", got)
+	}
+
+	release()
+	eventually(t, "restore prepended to queued input", func() bool { return len(h.userInputs(holder)) == 2 })
+	text := h.userInputs(holder)[1]
+	if restoreAt, workAt := strings.Index(text, "restore[restart-order]"), strings.Index(text, "queued while daemon was down"); restoreAt < 0 || workAt < 0 || restoreAt > workAt {
+		t.Fatalf("restart restore/queued input ordering = %q", text)
+	}
+	if calls := probe.snapshot(); len(calls) != 1 || calls[0].key != rec.WSKey || calls[0].cause != RestoreRestart {
+		t.Fatalf("restart render calls = %+v", calls)
+	}
+}
+
 func TestRestartRestoreSleepingSessionWaitsForWake(t *testing.T) {
 	h, got := childHarness(t)
 	w := h.spawnWorker("medium")
@@ -234,5 +279,59 @@ func TestRestoreProviderFailureInjectsKeyBearingDiagnostic(t *testing.T) {
 	}
 	if !strings.Contains(h.log.String(), "restore bundle: fixture provider unavailable") {
 		t.Fatalf("provider failure was not logged: %s", h.log.String())
+	}
+}
+
+func TestRestoreBundleT0UsesNoPersistedShapeAcrossNewOldNewStart(t *testing.T) {
+	h, got := childHarness(t)
+	w := h.spawnWorker("medium")
+	p := h.backend.waitProc(t, 0)
+	p.nextSent(t)
+	p.reply("done")
+	eventually(t, "worker report", func() bool { return len(got.lead()) == 1 })
+	h.asleep(w.ID)
+	h.runner.Close()
+
+	dir := wsdashboard.SessionDir(h.config.Dir, w.ID)
+	before, err := os.ReadFile(recordPath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := &restoreProbe{state: "new daemon"}
+	h.config.RestoreBundle = probe.render
+	h.start()
+	h.runner.conv(w.ID).do(func() {
+		if note := h.runner.conv(w.ID).compactNote; !strings.HasPrefix(note, restartRestoreMarker) {
+			t.Fatalf("new daemon did not hold an in-memory restart marker: %q", note)
+		}
+	})
+	afterNew, err := os.ReadFile(recordPath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, afterNew) {
+		t.Fatalf("new daemon rewrote the existing record for restore\nbefore: %s\nafter: %s", before, afterNew)
+	}
+	if bytes.Contains(afterNew, []byte("restore")) || bytes.Contains(afterNew, []byte("bundle")) {
+		t.Fatalf("restore state leaked into persisted record: %s", afterNew)
+	}
+
+	h.runner.Close()
+	h.config.RestoreBundle = nil // an old daemon has no runtime provider
+	h.start()
+	h.runner.conv(w.ID).do(func() {
+		if note := h.runner.conv(w.ID).compactNote; note != "" {
+			t.Fatalf("old daemon behavior observed a new-only marker: %q", note)
+		}
+	})
+	afterOld, err := os.ReadFile(recordPath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, afterOld) {
+		t.Fatalf("old daemon behavior did not see identical persisted bytes\nbefore: %s\nafter: %s", before, afterOld)
+	}
+	if rec, err := readRecord(dir); err != nil || rec.SchemaVersion != recordSchemaVersion || rec.WSKey != h.record(w.ID).WSKey {
+		t.Fatalf("new reopen could not reconstruct the unchanged record: rec=%+v err=%v", rec, err)
 	}
 }
