@@ -1,6 +1,7 @@
 package wsagent
 
 import (
+	"encoding/json"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"testing"
 	"time"
@@ -124,4 +125,58 @@ func TestDowngradeRetirementPersistsSleepingWorker(t *testing.T) {
 		rec := h.record(worker.ID)
 		return rec.HolderID != "" && rec.HolderID != holder && rec.TurnOpen
 	})
+}
+
+func TestWorkerMCPRestoreRequiresExactTuple(t *testing.T) {
+	for _, mutation := range []string{"valid", "holder", "url", "environment", "token"} {
+		t.Run(mutation, func(t *testing.T) {
+			r := NewRunner(Options{Dir: t.TempDir(), Backends: map[string]BackendRegistration{BackendCodex: {WorkerHTTPMCP: true}}})
+			r.SetEndpoint("http://127.0.0.1:1")
+			rec := Record{ReplyID: "child", Backend: BackendCodex, Root: "/root", HolderID: "holder", HostPID: 123, MCPToken: "existing-token", MCPURL: r.mcpURL(), MCPHolder: "holder", MCPEnv: map[string]string{EnvAgentSessionKey: "child-key"}}
+			switch mutation {
+			case "holder":
+				rec.MCPHolder = "foreign"
+			case "url":
+				rec.MCPURL = "http://foreign"
+			case "environment":
+				rec.MCPEnv = nil
+			case "token":
+				rec.MCPToken = ""
+			}
+			c := &conv{r: r, rec: rec}
+			c.restoreWorkerMCP()
+			hello, _, ok := r.ResolveMCPToken("existing-token")
+			if ok != (mutation == "valid") || c.mcpStale == (mutation == "valid") {
+				t.Fatalf("tuple %s: restored=%v stale=%v", mutation, ok, c.mcpStale)
+			}
+			if ok && hello.Env[EnvAgentSessionKey] != "child-key" {
+				t.Fatal("restored hello lost its worker binding")
+			}
+		})
+	}
+}
+
+func TestWorkerOwnershipMismatchNeverStopsForeignHolder(t *testing.T) {
+	h, _ := newFakePiRecoveryHarness(t)
+	worker, holder := spawnRecoveryWorker(t, h)
+	h.runner.Close()
+	h.holders.restart()
+	h.holders.set(func() {
+		var meta holderSession
+		if err := json.Unmarshal(h.holders.holders[holder].session, &meta); err != nil {
+			t.Fatal(err)
+		}
+		meta.Cwd = "/foreign"
+		raw, _ := json.Marshal(meta)
+		h.holders.holders[holder].session = raw
+	})
+	h.start()
+	wait(t, "ownership scan", h.runner.rejoined)
+	eventually(t, "ownership rejected", func() bool { return h.record(worker.ID).HolderID == "" })
+	if h.holders.opCount("stop") != 0 {
+		t.Fatalf("foreign holder stopped: %v", h.holders.opList())
+	}
+	if rec := h.record(worker.ID); rec.HandedOffAt != "" || rec.Capability != "" || rec.TurnOpen {
+		t.Fatal("rejected association retained an active capability or fence")
+	}
 }

@@ -60,6 +60,7 @@ func (c *conv) startProcess() error {
 }
 
 func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
+	c.mcpStale = false
 	c.loadCompaction()
 	c.loadModelWait()
 	// No common worker selection or ceiling is applied in this slice.
@@ -71,8 +72,10 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 			return err
 		}
 	}
-	level := childLevel(c.dir)
-	if !attach {
+	level := PermissionLevel("")
+	if attach {
+		level = childLevel(c.dir)
+	} else {
 		// Every launch re-admits a spawned child's authority against its
 		// parent's current level (agent_tools.go).
 		var err error
@@ -552,6 +555,7 @@ func (c *conv) checkReattach() {
 				var meta holderSession
 				if json.Unmarshal(info.Session, &meta) != nil || !workerHolderMatches(c.rec, meta, info.Child) {
 					// Never stop a holder that failed the ownership check.
+					c.r.holders.reject(id)
 					hp.Detach()
 					c.setStatus(func() { c.proc = nil })
 					c.events = nil

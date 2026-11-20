@@ -18,9 +18,8 @@ import (
 )
 
 // CodexBackend drives one sustained `codex app-server` process over stdio.
-// A hosted lead runs under a holder, which owns its pipes across daemon
-// replacement, as for agy and Claude; a worker is a daemon-owned process
-// with no holder, as for agy.
+// Hosted leads and workers run under a holder, which owns their pipes
+// across daemon replacement, as for agy and Claude.
 type CodexBackend struct {
 	// Command is the Codex executable; empty looks up "codex" on PATH.
 	Command string

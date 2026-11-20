@@ -92,8 +92,9 @@ type holderSession struct {
 
 // holderTable routes the holders' events to the processes they belong to.
 type holderTable struct {
-	mu    sync.Mutex
-	procs map[string]*holderChild
+	mu       sync.Mutex
+	procs    map[string]*holderChild
+	rejected map[string]bool
 }
 
 func (t *holderTable) add(id string, h *holderChild) {
@@ -344,4 +345,21 @@ type holderProcess interface {
 	ReplayUntil(first, target uint64)
 	StopError() error
 	Detach() bool
+}
+
+// reject fences the orphan sweep even when a heartbeat validated the worker
+// before holdersScanned visited it. A mismatched record grants no stop authority.
+func (t *holderTable) reject(id string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.rejected == nil {
+		t.rejected = map[string]bool{}
+	}
+	t.rejected[id] = true
+}
+
+func (t *holderTable) isRejected(id string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.rejected[id]
 }

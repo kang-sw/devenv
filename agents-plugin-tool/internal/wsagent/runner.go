@@ -464,7 +464,10 @@ func orphansAtStart(open []Record) map[string]bool {
 		changed = false
 		for _, rec := range open {
 			id := rec.ReplyID
-			if done[id] || rec.Lead || rec.Parent == nil {
+			// Legacy direct non-Pi children keep their existing next-launch
+			// admission refusal when a parent disappears. Held workers of
+			// every backend use the former Pi orphan cleanup.
+			if done[id] || rec.Lead || rec.Parent == nil || (rec.Backend != BackendPi && rec.HolderID == "") {
 				continue
 			}
 			if rec.Parent.Kind == ParentConversation && !stays(rec.Parent.ReplyID) {
@@ -531,7 +534,7 @@ func (r *Runner) holdersScanned() {
 	}
 	for _, info := range listed {
 		var meta holderSession
-		if json.Unmarshal(info.Session, &meta) != nil || (meta.Kind != holderKindLead && meta.Kind != holderKindPiWorker && meta.Kind != holderKindAgentWorker) || owned[info.ID] {
+		if json.Unmarshal(info.Session, &meta) != nil || (meta.Kind != holderKindLead && meta.Kind != holderKindPiWorker && meta.Kind != holderKindAgentWorker) || owned[info.ID] || r.holders.isRejected(info.ID) {
 			continue
 		}
 		fmt.Fprintf(r.opts.Log, "agent: ending conversation holder %s of %s: no open conversation runs under it\n", info.ID, meta.ReplyID)

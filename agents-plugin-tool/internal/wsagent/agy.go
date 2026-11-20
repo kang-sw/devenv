@@ -20,7 +20,7 @@ import (
 
 // agy.go is the Antigravity backend: `agy acp`, the Agent Client Protocol
 // (v1: JSON-RPC 2.0 over stdio, one message per line). Hosted leads run
-// under a holder; workers are daemon-owned processes using the default
+// under a holder, as do workers using the default
 // agent with their instructions appended to its system prompt.
 //
 // The wire facts it relies on are pinned by agy_fixture_test.go against
