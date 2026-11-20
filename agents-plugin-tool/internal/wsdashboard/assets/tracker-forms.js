@@ -565,6 +565,7 @@
       var fs = f.getAttribute('data-fstore');
       if (fs ? !regKnown(fs) : lost && f.getAttribute('data-kind') !== 'register') closeDialog();
     }
+    if (lost) closeOrgEditor(true);
     GONE_BY_STORE.forEach(function (k) {
       Object.keys(ui[k]).forEach(function (n) {
         if (!gone(n)) return;
@@ -764,6 +765,7 @@
     if (!force && orgEdCloseNeedsConfirm(ed)) {
       if (!window.confirm(wsTn("js.tk.org.discard", orgEdCount(ed)))) return false;
     }
+    hideTip();
     ui.orged = null;
     if (dl && dl.open) dl.close();
     return true;
@@ -773,7 +775,7 @@
     return '<div class="tk-oe-refuse" role="alert">' + wsT("js.tk.org.refuse.cycle", esc(tm ? tm.name : targetId), esc(targetId), esc(dm ? dm.name : dragId), esc(dragId)) + '</div>';
   }
   function renderOrgEditor() {
-    var dl = $('tkorged'), ed = ui.orged;
+    var dl = $('tkorged'), body = $('tkorged-body') || dl, ed = ui.orged;
     if (!dl || !ed || !VS) return;
     var hadSearch = document.activeElement && document.activeElement.id === 'tk-oe-q';
     var selStart = hadSearch ? document.activeElement.selectionStart : null;
@@ -872,7 +874,7 @@
     }).join('') + '</ol>' : '<p class="hint">' + esc(wsT("js.tk.org.empty")) + '</p>';
     var closeTip = nChg ? wsTn("js.tk.org.close.dirty", nChg) : wsT("js.tk.org.close");
     var rolesLink = '<a href="#"' + attr('act', 'oe-roles') + '>' + esc(wsT("js.tk.team.adminbtn")) + '</a>';
-    dl.innerHTML = '<div class="tk-oe-in" role="document">' +
+    body.innerHTML = '<div class="tk-oe-in" role="document">' +
       '<div class="tk-oe-dh"><h2>' + esc(wsT("js.tk.org.title")) + '</h2><span class="sub">' + esc(wsT("js.tk.org.sub")) + '</span><span class="grow"></span>' +
         '<button type="button" class="x"' + attr('act', 'oe-close') + ' aria-label="' + esc(wsT("js.tk.org.close")) + '"' + tipAttr(closeTip) + '>&times;</button></div>' +
       '<div class="tk-oe-db">' +
@@ -908,9 +910,10 @@
     var curVS = AD.view(ui.store) || VS, v = memberOf(viewerOf(ui.store));
     var plan = orgEdPreflightAndBuild(ed, curVS && curVS.members, v);
     // Drop no-op staged changes already reflected in the current store view (Decision 8).
+    var curParent = curVS && curVS.members ? orgTree(curVS.members).parentOf : {};
     plan.dropped.forEach(function (k) {
       var sep = k.indexOf(':'), kind = k.slice(0, sep), id = k.slice(sep + 1);
-      if (kind === 'lead') { delete ed.stagedLeads[id]; ed.baseLeads[id] = (curVS.members[id] && curVS.members[id].leads && curVS.members[id].leads[0]) || ''; }
+      if (kind === 'lead') { delete ed.stagedLeads[id]; ed.baseLeads[id] = curParent[id] || ''; }
       if (kind === 'admin') { delete ed.stagedAdmins[id]; ed.baseAdmins[id] = !!(curVS.members[id] && curVS.members[id].admin); }
       delete ed.errors[k];
     });
@@ -936,7 +939,6 @@
         var mapped = orgEdMapRefusal(plan.indexMap, res && res.refusal);
         ed.errors[mapped.key] = mapped.reason || (res && res.error) || wsT("js.tk.toast.refused");
         renderOrgEditor();
-        toast(esc((res && res.error) || wsT("js.tk.toast.refused")));
         return;
       }
       closeOrgEditor(true);

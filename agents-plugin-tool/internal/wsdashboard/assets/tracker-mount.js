@@ -66,7 +66,7 @@
     b.appendChild(el('div', { class: 'tk tk-iwin-back', id: 'tkwin', hidden: '' }, '<div class="iwin" role="dialog" aria-modal="true" tabindex="-1"><div class="iwin-in" id="tkwinbody"></div></div>' +
       '<ul class="tk-mpop" id="tkmpop" role="listbox" aria-label="' + wsT("js.tk.composer.mention.tip") + '" hidden></ul>'));
     b.appendChild(el('dialog', { class: 'tk tk-dlg', id: 'tkdlg' }));
-    b.appendChild(el('dialog', { class: 'tk tk-dlg tk-orged', id: 'tkorged' }));
+    b.appendChild(el('dialog', { class: 'tk tk-dlg tk-orged', id: 'tkorged' }, '<div id="tkorged-body"></div>'));
     // a page without the shared toast stack (the tracker mockup) gets the renderer's own
     if (!window.WsToast) b.appendChild(el('div', { class: 'tk tk-toast', id: 'tktoast', hidden: '' }));
     b.appendChild(el('div', { class: 'tk tk-tip', id: 'tktip', role: 'tooltip', hidden: '' }));
@@ -186,8 +186,8 @@
         else if (k === 'oe-close') closeOrgEditor(false);
         else if (k === 'oe-expand') { if (ui.orged) { ui.orged.fold = {}; renderOrgEditor(); } }
         else if (k === 'oe-fold') { if (ui.orged && d.who) { ui.orged.fold[d.who] = !ui.orged.fold[d.who]; renderOrgEditor(); } }
-        else if (k === 'oe-adm') { if (ui.orged && d.who) { orgEdToggleAdmin(ui.orged, d.who); renderOrgEditor(); } }
-        else if (k === 'oe-undo') { if (ui.orged) { if (!orgEdUndo(ui.orged, a.getAttribute('data-key'))) toast(esc(wsT("js.tk.org.err.undo.cycle"))); renderOrgEditor(); } }
+        else if (k === 'oe-adm') { if (ui.orged && d.who) { delete ui.orged.errors._batch; orgEdToggleAdmin(ui.orged, d.who); renderOrgEditor(); } }
+        else if (k === 'oe-undo') { if (ui.orged) { delete ui.orged.errors._batch; if (!orgEdUndo(ui.orged, a.getAttribute('data-key'))) ui.orged.errors._batch = wsT("js.tk.org.err.undo.cycle"); renderOrgEditor(); } }
         else if (k === 'oe-undo-all') { if (ui.orged) { orgEdUndoAll(ui.orged); renderOrgEditor(); } }
         else if (k === 'oe-save') orgEdSave();
         else if (k === 'oe-roles') { if (closeOrgEditor(false)) openDialog('admin', {}); }
@@ -565,12 +565,16 @@
       Array.prototype.forEach.call(oed.querySelectorAll('.tk-oe-refuse'), function (n) { n.remove(); });
     }
     oed.addEventListener('cancel', function (e) { e.preventDefault(); closeOrgEditor(false); });
-    oed.addEventListener('input', function (e) {
-      if (e.target && e.target.id === 'tk-oe-q' && ui.orged) { ui.orged.q = e.target.value; renderOrgEditor(); }
-    });
+    function oeSearchInput(e) {
+      if (e.isComposing || !e.target || e.target.id !== 'tk-oe-q' || !ui.orged) return;
+      ui.orged.q = e.target.value; renderOrgEditor();
+    }
+    oed.addEventListener('input', oeSearchInput);
+    oed.addEventListener('compositionend', oeSearchInput);
     oed.addEventListener('change', function (e) {
       var sel = e.target && e.target.closest && e.target.closest('select[data-oe-sel]');
       if (!sel || !ui.orged) return;
+      delete ui.orged.errors._batch;
       orgEdStageLead(ui.orged, sel.getAttribute('data-oe-sel'), sel.value);
       renderOrgEditor();
     });
@@ -623,10 +627,11 @@
       ed.drag = null;
       var z = e.target && e.target.closest && e.target.closest('.tk-oe-rootz');
       var row = e.target && e.target.closest && e.target.closest('.tk-oe-row[data-oe-id]');
-      if (z) orgEdStageLead(ed, dragId, '');
+      if (z) { delete ed.errors._batch; orgEdStageLead(ed, dragId, ''); }
       else if (row) {
         var tid = row.getAttribute('data-oe-id');
         if (tid && tid !== dragId) {
+          delete ed.errors._batch;
           var res = orgEdStageLead(ed, dragId, tid);
           if (!res.ok && res.reason === 'cycle') ed.refuse = { member: dragId, target: tid };
         }

@@ -1314,7 +1314,8 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk.tk-orged { width: min(900px, calc(100vw - 24px)); max-width: 900px; max-height: 92vh; padding: 0; border: 1px solid var(--wb-line); border-radius: 12px; background: var(--wb-bg); color: var(--wb-fg); box-shadow: var(--wb-shadow-hi); overflow: hidden; font-size: 13px; line-height: 1.45; }
 .tk.tk-orged::backdrop { background: rgb(10 11 13 / .72); }
 .tk.tk-orged[open] { display: flex; flex-direction: column; }
-.tk .tk-oe-in { display: flex; flex-direction: column; min-height: 0; max-height: 92vh; }
+.tk.tk-orged > #tkorged-body { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.tk .tk-oe-in { display: flex; flex-direction: column; min-height: 0; max-height: 92vh; flex: 1 1 auto; }
 .tk .tk-oe-dh { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 16px; background: var(--wb-muted); flex: none; }
 .tk .tk-oe-dh h2 { margin: 0; font-size: 14px; }
 .tk .tk-oe-dh .sub { color: var(--wb-muted-fg); font-size: 12px; }
