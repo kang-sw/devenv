@@ -453,9 +453,9 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-20T15:04:57Z",
+        "touched_at": "2026-11-20T15:31:26Z",
         "impl": {
-          "branch": "impl/develop/prize-pupil-anger"
+          "branch": "impl/develop/prompt-assembly-p4"
         }
       }
     },
