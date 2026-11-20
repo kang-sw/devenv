@@ -1038,6 +1038,12 @@ func (s *state) addRule(n *node, item string, x obj, completion string) {
 	ru := &rule{id: id, via: n.id, item: item, by: a, root: root, assignRoot: root, org: x.str("org"), includeRoot: x["include_root"] == true,
 		completion: completion, excluded: map[string]bool{}, state: "live", ts: n.ts}
 	ru.levels, _ = x["levels"].(float64)
+	// A concurrent head change can fold before an assign that was valid at its
+	// causal snapshot. Consent and identity stay on the assign-time root, while
+	// coverage starts at the head visible in this fold.
+	if o := s.liveOrg(ru.org); o != nil && o.head != "" {
+		ru.root = o.head
+	}
 	s.addRuleRec(ru)
 	if root == a || s.below(a, root) {
 		s.extendRule(ru, n, false)

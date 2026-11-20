@@ -274,6 +274,26 @@ func TestOrgAssignCoverageUsesAssignTimeRoot(t *testing.T) {
 		}}), "already covered"), true)
 }
 
+func TestOrgAssignConcurrentHeadChangeUsesFoldHead(t *testing.T) {
+	tm := newTeam(t)
+	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-search", "Search", "lena"))
+	it := tm.do("maya.pc", TypeItemCreate, map[string]any{"kind": "task", "title": "Concurrent head"})
+	tm.goOffline("ada.pc")
+	tm.goOffline("maya.pc")
+	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-search", "Search", "omar"))
+	assign := tm.do("maya.pc", TypeItemAssign, map[string]any{"item": it, "completion": "assigner", "targets": []any{
+		map[string]any{"root": "lena", "org": "o-search", "include_root": true},
+	}})
+	tm.comeOnline("ada.pc")
+	tm.comeOnline("maya.pc")
+
+	v := tm.view("maya.pc")
+	ru := tm.clone("maya.pc").r.S.ruleByID[assign+"~lena"]
+	wantEq(t, "concurrent assign keeps assign-time root", ru.assignRoot, "lena")
+	wantEq(t, "concurrent assign starts at folded head", ru.root, "omar")
+	wantIn(t, "folded head receives assignment immediately", v.Items[it].Assignments, ru.id+">omar")
+}
+
 func TestOrgAssignVacancyRemovalAndTargetChecks(t *testing.T) {
 	tm := newTeam(t)
 	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-platform", "Platform", "maya"))
