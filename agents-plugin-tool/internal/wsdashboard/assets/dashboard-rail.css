@@ -36,7 +36,9 @@
 /* ===== paged docking gallery (cards.js #bgal, gallery.js) =====
    Docked topics and cards stand in the gallery: pages of panes, one page
    shown at a time in a clipped viewport (.gal-viewport); the others stay
-   mounted, translated a page height per position out of it (--gal-off), so
+   mounted, translated a page height and a 24px gap per position out of
+   it (--gal-off; the gap keeps a neighbour from touching the clip edge,
+   which IntersectionObserver still counts as intersecting), so
    intersection observers count them out of view and their frames keep
    their documents (never display, visibility, opacity or
    content-visibility). A vertical dot rail (.gal-rail) left of the
@@ -90,7 +92,7 @@
 .gal-dot.drop { outline: 2px solid #e0a84a; outline-offset: 2px; transform: scale(1.16); box-shadow: 0 0 0 5px rgb(224 168 74 / .24); }
 .bgal[data-dotdrag] .gal-rail { cursor: grabbing; }
 .gal-viewport { flex: 1 1 0; min-width: 0; min-height: 0; position: relative; overflow: hidden; overflow: clip; }
-.gal-page { position: absolute; inset: 0; display: flex; min-width: 0; min-height: 0; transform: translateY(calc(var(--gal-off, 0) * 100%)); }
+.gal-page { position: absolute; inset: 0; display: flex; min-width: 0; min-height: 0; transform: translateY(calc(var(--gal-off, 0) * (100% + 24px))); }
 .gal-page[data-active] { transform: none; transition: transform .22s cubic-bezier(.22, 1, .36, 1); }
 @media (prefers-reduced-motion: reduce) { .gal-page[data-active] { transition: none; } }
 .gal-page.drop:not(.gal-plus) { outline: 2px solid var(--wb-primary); outline-offset: -2px; border-radius: var(--wb-radius); }

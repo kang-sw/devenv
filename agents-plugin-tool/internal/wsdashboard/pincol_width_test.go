@@ -71,9 +71,10 @@ func TestGalleryNoReservedColumnWithoutAPage(t *testing.T) {
 		"  :root[data-pincol] .bgal:not([hidden]) { position: relative; grid-row: 1; grid-column: 2; }",
 		"  :root[data-pincol] .bgal > .bp-edge { display: block; }",
 		"  :root[data-pincol] .bgal:not([hidden]) { grid-column: 3; }",
-		// Inactive pages leave the clipped viewport by transform alone.
+		// Inactive pages leave the clipped viewport by transform alone, a gap
+		// past its edge (an edge-adjacent box still counts as intersecting).
 		".gal-viewport { flex: 1 1 0; min-width: 0; min-height: 0; position: relative; overflow: hidden; overflow: clip; }",
-		".gal-page { position: absolute; inset: 0; display: flex; min-width: 0; min-height: 0; transform: translateY(calc(var(--gal-off, 0) * 100%)); }",
+		".gal-page { position: absolute; inset: 0; display: flex; min-width: 0; min-height: 0; transform: translateY(calc(var(--gal-off, 0) * (100% + 24px))); }",
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("dashboard.css lacks %q", want)
