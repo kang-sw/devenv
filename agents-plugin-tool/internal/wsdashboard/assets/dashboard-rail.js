@@ -260,12 +260,13 @@
       correction.appendChild(line);
     }
     admissionDraft.forEach(function (d) { if (!seen[admissionKey(d)]) correctionRow(d, wsT("js.admission.fix.missing", d.path), null); });
-    var cap = r.querySelector(".rcap"), ap = admissionDraft.filter(function (d) { return d.action === "approve"; }).length;
-    var reject = admissionDraft.filter(function (d) { return d.action === "reject"; }).length;
-    cap.hidden = !admissionDraft.length; railEl.classList.toggle("capon", !!admissionDraft.length);
+    var wsCounts = typeof wsAdmissionDraft === "undefined" ? { approve: 0, reject: 0 } : wsAdmissionSync();
+    var cap = r.querySelector(".rcap"), ap = admissionDraft.filter(function (d) { return d.action === "approve"; }).length + wsCounts.approve;
+    var reject = admissionDraft.filter(function (d) { return d.action === "reject"; }).length + wsCounts.reject;
+    cap.hidden = !(admissionDraft.length + wsCounts.approve + wsCounts.reject); railEl.classList.toggle("capon", !cap.hidden);
     var ok = cap.querySelector(".ok"), no = cap.querySelector(".no");
     ok.hidden = !ap; ok.textContent = wsT("js.admission.cap.approve", ap); no.hidden = !reject; no.textContent = wsT("js.admission.cap.reject", reject);
-    cap.querySelector("[data-admission-apply]").disabled = admissionBusy;
+    cap.querySelector("[data-admission-apply]").disabled = admissionBusy || !!wsAdmissionBusy;
     // A copied prompt needs no notice (Apply toasts it, and the rejected
     // list's header copies it again); only a failed copy stays, until its
     // close, which outlives a reload, or a later successful copy.
@@ -337,7 +338,7 @@
     clearTimeout(rtoastTimer);
     rtoastTimer = setTimeout(function () { rtoastEl.classList.remove("on"); }, 5000);
   }
-  function admissionSubmit(selections) {
+  function admissionSubmit(selections, report) {
     if (admissionBusy || !selections.length) return;
     admissionBusy = true; railSaving++; admissionMessage = wsT("js.admission.applying"); admissionDetail = ""; admissionSync();
     var ctl = window.AbortController ? new AbortController() : null;
@@ -361,7 +362,8 @@
           var n = { approve: 0, reject: 0, undo: 0 };
           selections.forEach(function (s) { n[s.action] = (n[s.action] || 0) + 1; });
           // The rejection is already persisted; the copy comes after it (1101).
-          if (v.prompt) admissionCopy(v.prompt, function (ok) { admissionToast(n, ok); });
+          if (v.prompt) admissionCopy(v.prompt, function (ok) { if (report) report(true); else admissionToast(n, ok); });
+          else if (report) report(true);
           else admissionToast(n, true);
         } else {
           (v.stale || selections).forEach(function (s) {
@@ -373,19 +375,21 @@
           // The route's message is English diagnostics: the title keeps it.
           admissionMessage = wsT(answer.status === 409 ? "js.admission.stale" : answer.status === 400 ? "js.admission.invalid" : "js.admission.notwritten");
           admissionDetail = v.message || "";
+          if (report) report(false);
         }
-      }).catch(function () { admissionMessage = wsT("js.admission.unconfirmed"); admissionDetail = ""; })
+      }).catch(function () { admissionMessage = wsT("js.admission.unconfirmed"); admissionDetail = ""; if (report) report(false); })
       .then(function () { clearTimeout(timer); admissionBusy = false; railSaving--; admissionSync(); railRelease(); });
   }
   function admissionClick(t) {
+    if (wsAdmissionClick(t)) return true;
     var b = t.closest && t.closest("[data-admission-action], [data-admission-clear], [data-admission-apply], [data-admission-copy], [data-admission-copy-all], [data-admission-dismiss], [data-admission-clear-row], [data-admission-reselect], .admission-undo");
     if (!b) return false;
     if (b.hasAttribute("data-admission-dismiss")) { admissionDismiss(); return true; }
     if (admissionBusy) return true;
-    if (b.hasAttribute("data-admission-clear")) { admissionDraft = []; admissionMessage = ""; admissionSave(); }
+    if (b.hasAttribute("data-admission-clear")) { admissionDraft = []; admissionMessage = ""; wsAdmissionClear(); admissionSave(); }
     else if (b.hasAttribute("data-admission-copy")) admissionCopy(admissionPrompt && admissionPrompt.text);
     else if (b.hasAttribute("data-admission-copy-all")) admissionCopy(b.getAttribute("data-copy"));
-    else if (b.hasAttribute("data-admission-apply")) admissionSubmit(admissionDraft.slice());
+    else if (b.hasAttribute("data-admission-apply")) { if (wsAdmissionSelections().length) wsAdmissionApply(admissionDraft.slice()); else admissionSubmit(admissionDraft.slice()); }
     else {
       var row = b.closest(".rwt"), s = admissionEvidence(row, b.getAttribute("data-admission-action") || "undo"), old = admissionFind(s);
       if (b.hasAttribute("data-admission-clear-row")) admissionClear(s);
@@ -529,7 +533,7 @@
       }
       var settings = t.closest && t.closest(".settings-toggle");
       if (settings && gmenu) { e.preventDefault(); railPopOpen("settings", settings); return; }
-      var add = t.closest && t.closest(".radd");
+      var add = t.closest && t.closest(".radd, .rail-empty-add");
       if (add) {
         e.preventDefault();
         railPopOpen(add.getAttribute("data-add"), add);
