@@ -229,6 +229,15 @@ This ticket restricts top-level `#rlist` to explicitly added workspaces (`Stored
   - Unchanged global `Live`/`CountSleep` totals, and `railPooled` exclusion on non-stored repos.
   - (46) regression: `railFactsOf(d.railBaseView(...))` still contains a pending-root session's row, and a layout op on it is accepted, not pruned.
 
+### Result (c6160d4b7) - 2026-11-21
+
+- Added the separate schema-1 `workspace-admission.json` rejection store with unknown-field retention, in-memory rail reads, foreign-write reload, missing-directory pruning, and refusal to overwrite malformed or newer data. `workspaces.json` remains unchanged, preserving the T0 compatibility boundary.
+- Added the guarded batch admission route with whole-batch selection validation, a 256 KiB body limit, immediate rail HTML and layout-generation reply, and rail wake. Store preflight now refuses malformed or newer external edits before any approval write.
+- Kept the full rail inventory for facts, layout, admissions, and worktree pages; the final presentation step partitions stored, pending, and rejected workspaces. Storage-disabled daemons retain their existing visible session roots.
+- Added the two server refusal keys in all 11 locales and regression coverage for store behavior, route validation, partitioning, no-store mode, and malformed-file preflight. Independent review raised two Important findings; both were fixed and covered by tests.
+- Verification: the requested dashboard test selection, `go vet ./internal/wsdashboard/... ./internal/wsi18n/...`, `go build ./cmd/ws-mcp`, and the i18n tests excluding `TestEveryEnglishKeyIsUsed` passed. The full i18n suite still fails on four unused `wb.*` keys (`wb.banner`, `wb.closed.more`, `wb.doc`, `wb.title`) already present in `HEAD` before this phase and unrelated to it.
+- Phase 2 handoff: the template, CSS, JavaScript, and browser fixture still need to render and operate the new pending/rejected fields. Until that panel lands, roots moved out of the top-level rail are not visible in storage-enabled mode; land both phases together.
+
 ### Phase 2: Bottom Collapsible Unregistered Panel UI, Batch JS, 11 Locales, & Playwright Visual Verification
 
 **Depends on:** Phase 1 (`RailView.PendingWorkspaces`, `RailView.RejectedWorkspaces`, `POST /rail/workspaces/admission`).
