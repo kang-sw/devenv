@@ -1327,7 +1327,7 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk .tk-oe-tb { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
 .tk.tk-orged input[type="search"], .tk.tk-orged select { font: inherit; font-size: 12px; padding: 2px 6px; border-radius: 6px; border: 1px solid var(--wb-line); background: var(--wb-card); color: var(--wb-fg); }
 .tk.tk-orged input[type="search"] { width: 170px; }
-.tk .tk-oe-in .hint { color: var(--wb-muted-fg); font-size: 11.5px; }
+.tk .tk-oe-in .hint { color: var(--wb-muted-fg); font-size: 11.5px; padding: 0; border-radius: 0; background: none; }
 .tk .tk-oe-rootz { border: 1.5px dashed var(--wb-line); border-radius: 8px; padding: 5px 10px; color: var(--wb-muted-fg); font-size: 12px; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
 .tk .tk-oe-rootz b { color: var(--wb-fg); }
 .tk .tk-oe-rootz.ok { border-color: var(--tk-blu); background: color-mix(in srgb, var(--tk-blu-bg) 60%, transparent); color: var(--tk-blu-fg); }
@@ -1357,8 +1357,9 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk .tk-oe-row.ok { border-color: var(--tk-blu); background: color-mix(in srgb, var(--tk-blu-bg) 70%, var(--wb-bg)); }
 .tk .tk-oe-row.bad { border-color: var(--tk-fail); background: color-mix(in srgb, var(--tk-fail) 10%, var(--wb-bg)); cursor: no-drop; }
 .tk .tk-oe-refuse { margin: 2px 0 4px 52px; padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, var(--tk-fail) 14%, var(--wb-bg)); color: var(--tk-fail); font-size: 11.5px; border-left: 3px solid var(--tk-fail); }
+.tk .tk-oe-refuse b { color: color-mix(in srgb, var(--tk-fail) 45%, var(--wb-fg)); }
 .tk .tk-oe-adm { font: inherit; font-size: 11px; font-weight: 700; border: 0; border-radius: 999px; padding: 2px 8px; cursor: pointer; white-space: nowrap; justify-self: start; background: transparent; color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px var(--wb-line); }
-.tk .tk-oe-adm:hover:not(:disabled) { color: var(--wb-fg); box-shadow: inset 0 0 0 1px var(--wb-muted-fg); }
+.tk .tk-oe-adm:not(.on):not(.pend):hover:not(:disabled) { color: var(--wb-fg); box-shadow: inset 0 0 0 1px var(--wb-muted-fg); }
 .tk .tk-oe-adm.on { background: var(--tk-pur-bg); color: var(--tk-pur-fg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tk-pur) 60%, transparent); }
 .tk .tk-oe-adm.pend { box-shadow: inset 0 0 0 1.5px var(--tk-amb); color: var(--tk-amb); }
 .tk .tk-oe-adm:disabled { opacity: .55; cursor: not-allowed; pointer-events: none; }
