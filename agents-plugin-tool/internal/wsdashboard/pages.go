@@ -79,6 +79,7 @@ var trackerScriptFiles = []string{
 	"tracker-window.js",
 	"tracker-forms.js",
 	"tracker-menu.js",
+	"tracker-picker.js",
 	"tracker-writes.js",
 	"tracker-render.js",
 	"tracker-mount.js",

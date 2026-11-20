@@ -3,17 +3,18 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const { readAssetSource } = require('./testdata/asset-source.cjs');
 
-const source = readAssetSource('wsdashboard', 'tracker.js');
-function section(start, end) {
-  const a = source.indexOf(start), b = source.indexOf(end, a);
+const trackerSource = readAssetSource('wsdashboard', 'tracker.js');
+const pickerSource = readAssetSource('wsdashboard', 'tracker-picker.js');
+function section(src, start, end) {
+  const a = src.indexOf(start), b = src.indexOf(end, a);
   assert.ok(a >= 0 && b > a, `missing section ${start} .. ${end}`);
-  return source.slice(a, b);
+  return src.slice(a, b);
 }
 
 const ctx = {};
 vm.createContext(ctx);
-vm.runInContext(section('  function orgTree(', '  // Live, doing or blocked'), ctx);
-vm.runInContext(section('  // --- picker modal pure logic', '  // --- end picker modal pure logic'), ctx);
+vm.runInContext(section(trackerSource, '  function orgTree(', '  // Live, doing or blocked'), ctx);
+vm.runInContext(section(pickerSource, '  // --- picker modal pure logic', '  // --- end picker modal pure logic'), ctx);
 const J = v => JSON.parse(JSON.stringify(v));
 
 const MEMBERS = {

@@ -32,6 +32,12 @@
   function itemMenu(id, anchor, pt, opts) {
     if (!VS || !VS.items[id]) return;
     opts = opts || {};
+    if (opts.step === 'cc' || opts.step === 'assign') {
+      var opener = MN && MN.backEl ? MN.backEl : anchor;
+      if (MN) closeMenu(false);
+      openPicker(opts.step, { item: id }, opener);
+      return;
+    }
     if (MN && MN.kind === 'item' && anchor && $('tkmenu').contains(anchor)) {
       MN.from = MN.step; MN.step = opts.step || 'main'; MN.op = opts.op || null; MN.who = opts.who || null; MN.req = opts.req || null; MN.q = ''; MN.as = null; MN.mv = null;
       drawMenu(); return;
@@ -143,11 +149,6 @@
         '<div class="mrow"><input type="text" id="tkmq" data-mi data-autofocus autocomplete="off" spellcheck="false" placeholder="' + wsT("js.tk.menu.search") + '" aria-label="' + wsT("js.tk.menu.search") + '" value="' + esc(MN.q || '') + '"></div>' +
         '<div class="mlist" role="group">' + handoffList(it, hfrom) + '</div>' + noteField(wsT("js.tk.form.note.opt"));
     }
-    if (step === 'cc') {
-      return h + back + '<div class="mtitle">' + wsT("js.tk.dlg.cc.title", esc(it.alias)) + '</div><p class="mintro">' + wsT("js.tk.dlg.cc.intro") + '</p>' +
-        '<div class="mrow"><input type="text" id="tkmq" data-mi data-autofocus autocomplete="off" spellcheck="false" placeholder="' + wsT("js.tk.menu.search") + '" aria-label="' + wsT("js.tk.menu.search") + '" value="' + esc(MN.q || '') + '"></div>' +
-        '<div class="mlist" role="group">' + ccPickList(it) + '</div>';
-    }
     if (step === 'opening') {
       return h + back + '<div class="mtitle">' + wsT("js.tk.dlg.open.title", esc(it.alias)) + '</div><p class="mintro">' + wsT("js.tk.dlg.open.intro") + '</p>' +
         '<div role="group">' + mi('m-opening', esc(wsT("js.tk.open.scope.team")), { scope: 'team' }, { icon: 'team', val: esc(wsT("js.tk.open.scope.team.sub")) }) +
@@ -207,6 +208,7 @@
     // a topic's holder releases it: item.unassign of their own record
     if (mineR && !task && !it.hidden) more.push(mi('unassign', esc(wsT("js.tk.act.release")), { item: it.id, who: v }, { icon: 'withdraw' }));
     if (canAssign(it, v)) more.push(mi('assign', esc(wsT("js.tk.act.assign")), { item: it.id }, { icon: 'assign', sub: 1 }));
+    if (!it.hidden) more.push(mi('cc', esc(wsT("js.tk.pm.cc.menu")), { item: it.id }, { icon: 'plus' }));
     if (canOpen(it)) more.push(mi('opening', esc(wsT("js.tk.act.open")), { item: it.id }, { icon: 'team', sub: 1 }));
     if (canUnopen(it)) more.push(mi('unopen', esc(wsT("js.tk.act.unopen")), { item: it.id }, { icon: 'withdraw' }));
     if (reqTargets(it).length) more.push(mi('request', esc(wsT("js.tk.act.request")), { item: it.id }, { icon: 'handoff', sub: 1 }));
@@ -230,17 +232,8 @@
       return '<button type="button" class="mi" role="menuitem" data-mi' + attr('act', 'm-handoff') + attr('to', id) + '>' + avHtml(id) + '<span class="ml">' + whoName(id) + '</span><span class="mv">' + esc(id) + '</span></button>';
     }).join('');
   }
-  // The CC step's people: every member not removed and not CC'd yet, the viewer included, filtered by the search.
-  function ccPickList(it) {
-    var q = String(MN.q || '').trim().toLowerCase(), cc = listOf(it.cc);
-    var ids = Object.keys(VS.members).filter(function (id) { return !VS.members[id].removed && cc.indexOf(id) < 0 && (!q || (id + ' ' + nmo(id)).toLowerCase().indexOf(q) >= 0); });
-    if (!ids.length) return '<p class="mempty">' + wsT("js.tk.menu.nobody") + '</p>';
-    return ids.map(function (id) {
-      return '<button type="button" class="mi" role="menuitem" data-mi' + attr('act', 'm-cc') + attr('to', id) + '>' + avHtml(id) + '<span class="ml">' + whoName(id) + '</span><span class="mv">' + esc(id) + '</span></button>';
-    }).join('');
-  }
-  // the people list a search box (#tkmq) filters: the CC step's or the handoff step's
-  function mqList(it) { return MN.step === 'cc' ? ccPickList(it) : handoffList(it, MN.who || VS.viewer.member); }
+  // the people list a search box (#tkmq) filters: the handoff step's
+  function mqList(it) { return handoffList(it, MN.who || VS.viewer.member); }
   // "Move to..." (ticket decision 8): the item menu's move step, the keyboard and touch path of the
   // move drag. A searchable tree of the destinations the store takes (moveWhy) plus the top level;
   // an item that takes none shows only as the context line of one that does, so the item's own
@@ -329,227 +322,6 @@
       return ['item.assign', { item: item, targets: people.concat(rules), completion: g.c }];
     });
   }
-  // --- picker modal pure logic
-  // Indexes the output of orgTree(members) for the CC and assign picker modal:
-  // display order (forest preorder, then unplaced, then unreachable), lead flags,
-  // self-inclusive subtrees, strict descendant depth maps, and ancestor chains.
-  function pmIndex(ot) {
-    ot = ot || { roots: [], unplaced: [], removed: [], unreachable: [], parentOf: {}, depthOf: {}, countOf: {} };
-    var order = [], listed = {}, isLead = {}, subtree = {}, desc = {}, ancestors = {}, count = {};
-    var parentOf = ot.parentOf || {};
-    function walk(node, chain) {
-      if (!node || node.cycle || listed[node.id]) return [];
-      var id = node.id;
-      listed[id] = true;
-      order.push(id);
-      ancestors[id] = chain.slice();
-      var sub = [id], dmap = {}, ch = node.children || [], realKids = 0;
-      var nextChain = [id].concat(chain);
-      ch.forEach(function (c) {
-        if (!c || c.cycle || listed[c.id]) return;
-        realKids++;
-        var csub = walk(c, nextChain);
-        csub.forEach(function (cid) { sub.push(cid); });
-        dmap[c.id] = 1;
-        var cd = desc[c.id] || {};
-        Object.keys(cd).forEach(function (did) { dmap[did] = cd[did] + 1; });
-      });
-      if (realKids > 0) isLead[id] = true;
-      subtree[id] = sub;
-      desc[id] = dmap;
-      count[id] = sub.length;
-      return sub;
-    }
-    (ot.roots || []).forEach(function (r) { walk(r, []); });
-    (ot.unplaced || []).concat(ot.unreachable || []).forEach(function (id) {
-      if (listed[id]) return;
-      listed[id] = true;
-      order.push(id);
-      subtree[id] = [id];
-      desc[id] = {};
-      count[id] = 1;
-      var chain = [], seen = {}, cur = parentOf[id];
-      seen[id] = true;
-      while (cur && !seen[cur]) { seen[cur] = true; chain.push(cur); cur = parentOf[cur]; }
-      ancestors[id] = chain;
-    });
-    return { order: order, listed: listed, isLead: isLead, subtree: subtree, desc: desc, ancestors: ancestors, count: count };
-  }
-  // Computes covered state from active group toggles ({ leadId: true }):
-  // - personBy[id]: outermost active group covering id (lead's own "본인" included)
-  // - groupBy[leadId]: outermost strict-ancestor active group covering leadId's group toggle
-  // - topGroups: active leads whose group toggle is not covered by a higher active group
-  function pmCover(idx, groups) {
-    var G = groups || {}, personBy = {}, groupBy = {}, topGroups = [];
-    idx.order.forEach(function (id) {
-      var anc = idx.ancestors[id] || [], up = '';
-      for (var i = anc.length - 1; i >= 0; i--) {
-        if (G[anc[i]]) { up = anc[i]; break; }
-      }
-      if (up) {
-        personBy[id] = up;
-        if (idx.isLead[id]) groupBy[id] = up;
-      } else if (G[id] && idx.isLead[id]) {
-        personBy[id] = id;
-        topGroups.push(id);
-      }
-    });
-    return { personBy: personBy, groupBy: groupBy, topGroups: topGroups };
-  }
-  // Evaluates CC picker state over listed live members only. Unlisted/removed members in origCc
-  // are never placed in removed. Group choices expand to their current subtree snapshot on apply.
-  function pmCcEval(idx, origCc, picks, groups) {
-    var P = picks || {}, G = groups || {}, orig = {};
-    (origCc || []).forEach(function (id) { orig[id] = true; });
-    var cov = pmCover(idx, G);
-    var effective = {}, added = [], removed = [], grpChips = [], addChips = [], rmChips = [], effectiveCount = 0;
-    cov.topGroups.forEach(function (gid) {
-      grpChips.push({ t: 'g', id: gid, n: idx.count[gid] || 1 });
-    });
-    idx.order.forEach(function (id) {
-      var on = !!P[id], covered = !!cov.personBy[id], eff = on || covered, was = !!orig[id];
-      if (eff) { effective[id] = true; effectiveCount++; }
-      if (eff && !was) added.push(id);
-      if (!eff && was) removed.push(id);
-      if (on && !covered) addChips.push({ t: 'p', id: id, wasOrig: was });
-      if (!eff && was) rmChips.push({ t: 'rm', id: id });
-    });
-    return {
-      cov: cov,
-      effective: effective,
-      added: added,
-      removed: removed,
-      chips: grpChips.concat(addChips, rmChips),
-      dirty: added.length > 0 || removed.length > 0,
-      effectiveCount: effectiveCount
-    };
-  }
-  // Builds atomic item.cc / item.uncc event batch for CC picker apply.
-  function pmCcEvents(itemId, idx, origCc, picks, groups) {
-    var ev = pmCcEval(idx, origCc, picks, groups), out = [];
-    ev.added.forEach(function (id) { out.push(['item.cc', { item: itemId, member: id }]); });
-    ev.removed.forEach(function (id) { out.push(['item.uncc', { item: itemId, member: id }]); });
-    return out;
-  }
-  // Whether existing live rule y covers proposed whole-subtree rule {root, include_root: true} (no levels).
-  function pmRuleCovers(idx, y, root) {
-    if (!y || y.levels != null) return false;
-    if (y.root === root) return !!(y.includeRoot || y.include_root);
-    return !!(idx.desc[y.root] && idx.desc[y.root][root] > 0);
-  }
-  // Whether any live rule of viewer on itemId already covers {root, include_root: true}.
-  function pmRuleCovered(idx, rules, itemId, viewer, root) {
-    var list = Array.isArray(rules) ? rules : Object.keys(rules || {}).map(function (k) { return rules[k]; });
-    return list.some(function (y) {
-      return y && y.item === itemId && y.by === viewer && y.state === 'live' && pmRuleCovers(idx, y, root);
-    });
-  }
-  // Pure completion class for a single assign target, matching complClass/asgClass.
-  function pmComplClass(o, viewer, reach) {
-    var id = o.t === 'r' ? o.root : o.id;
-    return (o.t === 'r' && id === viewer) || !!(reach && reach[id]) ? 'assigner' : 'assignee';
-  }
-  function pmAsgClass(o, compl, viewer, reach) {
-    return pmComplClass(o, viewer, reach) === 'assigner' ? 'assigner' : (compl || 'assignee');
-  }
-  // Evaluates assign picker state.
-  // - visCov uses all unlocked active groups (live + pending) for the tree's covered display.
-  // - payCov uses ONLY live active groups (root === viewer or in reach), so picks/sub-groups under
-  //   a pending group remain in payload and keep their own chips (chip band === payload).
-  function pmAssignEval(idx, opts) {
-    opts = opts || {};
-    var viewer = opts.viewer || '', reach = opts.reach || {};
-    var lockedP = opts.lockedPeople || {}, lockedG = opts.lockedGroups || {};
-    var P = opts.picks || {}, G = opts.groups || {};
-    var norule = !!opts.norule, single = !!opts.single, compl = opts.compl || null;
-    function isLive(id) { return id === viewer || !!reach[id]; }
-    var activeG = {}, liveG = {};
-    if (!norule) {
-      idx.order.forEach(function (id) {
-        if (idx.isLead[id] && G[id] && !lockedG[id]) {
-          activeG[id] = true;
-          if (isLive(id)) liveG[id] = true;
-        }
-      });
-    }
-    var visCov = pmCover(idx, activeG);
-    var payCov = pmCover(idx, liveG);
-    var targets = [];
-    idx.order.forEach(function (id) {
-      if (activeG[id] && !payCov.groupBy[id]) {
-        targets.push({ t: 'r', root: id, include_root: true, levels: null, pend: !isLive(id), n: idx.count[id] || 1 });
-      }
-      if (P[id] && !lockedP[id] && !payCov.personBy[id]) {
-        targets.push({ t: 'p', id: id, pend: !isLive(id) });
-      }
-    });
-    if (single && targets.length > 1) targets = [targets[0]];
-    var below = targets.some(function (o) { return pmComplClass(o, viewer, reach) === 'assigner'; });
-    var cseen = {}, ckeys = [];
-    targets.forEach(function (o) {
-      var c = pmAsgClass(o, compl, viewer, reach);
-      if (!cseen[c]) { cseen[c] = true; ckeys.push(c); }
-    });
-    var mode = ckeys.length > 1 ? 'mixed' : ckeys[0] || compl || null;
-    var chips = targets.map(function (o) {
-      return o.t === 'r' ? { t: 'g', id: o.root, n: o.n, pend: o.pend } : { t: 'p', id: o.id, pend: o.pend };
-    });
-    return { visCov: visCov, payCov: payCov, targets: targets, chips: chips, below: below, mode: mode, dirty: targets.length > 0 };
-  }
-  // Builds item.assign event batch from pmAssignEval targets, grouped by completion class.
-  function pmAssignEvents(itemId, targets, compl, viewer, reach) {
-    var groups = [], by = {};
-    (targets || []).forEach(function (o) {
-      var c = pmAsgClass(o, compl, viewer, reach);
-      if (!by[c]) groups.push(by[c] = { c: c, sel: [] });
-      by[c].sel.push(o);
-    });
-    return groups.map(function (g) {
-      var people = g.sel.filter(function (o) { return o.t === 'p'; }).map(function (o) { return o.id; });
-      var rules = g.sel.filter(function (o) { return o.t === 'r'; }).map(function (o) {
-        var r = { root: o.root };
-        if (o.include_root) r.include_root = true;
-        if (o.levels != null) r.levels = o.levels;
-        return r;
-      });
-      return ['item.assign', { item: itemId, targets: people.concat(rules), completion: g.c }];
-    });
-  }
-  // Filters orgTree visibility for search query q and "selected only" mode.
-  // Returns { show: {id: true}, matched: {id: true}, expand: {id: true}, hasAny: bool }.
-  function pmFilter(ot, q, onlySelected, isRowSelected, matchFn) {
-    var qq = String(q || '').trim().toLowerCase(), active = !!qq || !!onlySelected;
-    var show = {}, matched = {}, expand = {}, hasAny = false;
-    function selfHit(id) {
-      if (onlySelected && !isRowSelected(id)) return false;
-      if (qq && !matchFn(id, qq)) return false;
-      return true;
-    }
-    function walk(node) {
-      if (!node || node.cycle) return false;
-      var hit = selfHit(node.id), childHit = false;
-      (node.children || []).forEach(function (c) {
-        if (walk(c)) childHit = true;
-      });
-      if (!active || hit || childHit) {
-        show[node.id] = true;
-        if (hit) { matched[node.id] = true; hasAny = true; }
-        if (active && childHit) expand[node.id] = true;
-        return true;
-      }
-      return false;
-    }
-    (ot && ot.roots || []).forEach(walk);
-    ((ot && ot.unplaced) || []).concat((ot && ot.unreachable) || []).forEach(function (id) {
-      var hit = selfHit(id);
-      if (!active || hit) {
-        show[id] = true;
-        if (hit) { matched[id] = true; hasAny = true; }
-      }
-    });
-    return { show: show, matched: matched, expand: expand, hasAny: active ? hasAny : Object.keys(show).length > 0 };
-  }
-  // --- end picker modal pure logic
   // The completion mode the radio shows: the picks' classes (asgClass); 'mixed' when they fall in
   // both (written as one assign per class); the user's pick, or null, while nothing is picked.
   function asgCompl(S) {
@@ -749,7 +521,6 @@
       case 'm-ledit': return labelDialog({ label: a.getAttribute('data-label') });
       case 'm-lrm': return labelRemove(a.getAttribute('data-label'), function () { if (MN) MN.lab = null; });
       case 'm-ladd': return labelDialog({});
-      case 'm-cc': return commit([['item.cc', { item: id, member: a.getAttribute('data-to') }]]);
       case 'm-handoff': {
         var hp = { item: id, to: a.getAttribute('data-to') }, note = menuNote();
         if (MN.who && MN.who !== VS.viewer.member) hp.assignee = MN.who;
@@ -815,7 +586,7 @@
       if (t.id === 'tkmnote' && MN.step === 'note') { e.preventDefault(); menuAct('m-note-send', t); return; }
       if (t.id === 'tkmnote' && MN.step === 'request') { e.preventDefault(); var p0 = m.querySelector('[data-act="m-request"]'); if (p0) p0.click(); return; }
       if (t.hasAttribute('data-rin')) { e.preventDefault(); menuApplyClose(true); return; }
-      if (t.id === 'tkmq') { e.preventDefault(); var p1 = m.querySelector('[data-act="m-handoff"], [data-act="m-cc"]'); if (p1) p1.click(); return; }
+      if (t.id === 'tkmq') { e.preventDefault(); var p1 = m.querySelector('[data-act="m-handoff"]'); if (p1) p1.click(); return; }
       if (t.id === 'tkmvq') { e.preventDefault(); var p2 = m.querySelector('[data-act="m-move"]'); if (p2) p2.click(); return; }
       return; // a button: its click; a form field: the form's submit
     }
