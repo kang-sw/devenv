@@ -608,7 +608,17 @@
       }
     },
     "261120-bug-ws-rail-heartbeat-starvation": {
-      "registered_at": "2026-11-20T02:41:44Z"
+      "registered_at": "2026-11-20T02:41:44Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-20T06:21:53Z",
+        "impl": {
+          "branch": "impl/develop/frame-conch-twerp"
+        }
+      }
     },
     "261120-bug-ws-sweep-1120-agy-fixes": {
       "registered_at": "2026-11-20T05:18:14Z"
