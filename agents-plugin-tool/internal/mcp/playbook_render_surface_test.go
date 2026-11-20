@@ -599,6 +599,31 @@ func TestRenderGoldenShippedReviewLiteCoversCorrectnessAndTest(t *testing.T) {
 	}
 }
 
+func TestRenderGoldenShippedReviewArtifactsAreReviewerOwned(t *testing.T) {
+	rsrcRoot := shippedRsrcRootForTest()
+	s := newTestServerWithHarness(t, "claude")
+
+	reviewer, _, err := renderPlaybookBody(s, os.DirFS(rsrcRoot), "code-review-lite", nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil, "")
+	if err != nil {
+		t.Fatalf("renderPlaybookBody(code-review-lite): %v", err)
+	}
+	for _, want := range []string{`path.generate(kind: "review"`, `path.write`, "under your own session key", "generated artifact path"} {
+		if !strings.Contains(reviewer, want) {
+			t.Errorf("code-review-lite render missing reviewer-owned artifact contract %q", want)
+		}
+	}
+
+	handler, _, err := renderPlaybookBody(s, os.DirFS(rsrcRoot), "review-handler", nil, wsconfig.Options{CacheHome: t.TempDir()}, "", "", "", nil, "")
+	if err != nil {
+		t.Fatalf("renderPlaybookBody(review-handler): %v", err)
+	}
+	for _, want := range []string{"reviewers' complete", "handler's own graded artifact", "path.write", "reviewer to write the handler's path"} {
+		if !strings.Contains(handler, want) {
+			t.Errorf("review-handler render missing artifact handoff contract %q", want)
+		}
+	}
+}
+
 // --- Phase 1 (260620): capability tier routing — register pass-through to capability vocabulary ---
 
 // TestWithRecommendedTier verifies the render/print return channel: a declared tier

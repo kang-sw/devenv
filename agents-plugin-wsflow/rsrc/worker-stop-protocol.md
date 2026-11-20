@@ -15,8 +15,6 @@ merges belong to the lead after your report.
   `## Constraints` govern; earlier `### Result` entries are context. Act on
   the ticket file, not summaries (applying only explicit lead answers, vouches,
   or `retry_context:`).
-- Call `{{.McpNamespace}}/workflow_manual(session_key: <your key>)` yourself;
-  workflow context quoted by your caller is not a substitute.
 - Declared conventions: if `AGENTS.md` declares `### Implementation
   Conventions` under `## Workflow`, read the manual of every row whose `paths`
   match a file the ticket names or your diff touches, plus every manual cited
@@ -76,6 +74,8 @@ merges belong to the lead after your report.
      delegated playbook). Render each selected wrapper with
      `{{.McpNamespace}}/playbook.render` and spawn by {{.SpawnIdiom}} with the
      rendered path, ticket path, and branch name.
+   - Read the artifact path the reviewer returns; the generated cache artifact
+     is the complete review report.
    - `lite`: one pass, no re-review — fix Critical and Important findings once;
      a Critical you cannot fix → `blocked` (`next: retry`); an Important left
      unfixed → `unresolved:` with the reason.

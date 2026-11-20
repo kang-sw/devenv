@@ -136,6 +136,7 @@ type implementBranchObservation struct {
 	TargetExists         bool
 	MergeRootRefConflict string
 	AheadOfMergeRoot     int
+	BehindMergeRoot      int
 	// TargetAheadOfMergeRoot counts commits the observed target impl branch
 	// carries ahead of its own merge root, measured only when TargetExists.
 	// AheadOfMergeRoot measures the CURRENT branch, which on the create path is
@@ -143,6 +144,7 @@ type implementBranchObservation struct {
 	// leftover target branch; this field is what the create path reads to tell
 	// a fully-landed cleanup remnant (0) from un-landed unique work (>0).
 	TargetAheadOfMergeRoot int
+	TargetBehindMergeRoot  int
 }
 
 type normalizedImplementFacts struct {
@@ -469,24 +471,30 @@ func parseImplementPolicy(raw any) (implementPolicyInput, error) {
 // ahead of mergeRoot's merge-base with currentBranch. Callers must surface an
 // error: treating an unverifiable branch as clean would let unrelated ticket
 // work be mixed precisely when the safety check cannot run.
-func aheadOfMergeRootCount(client wsgit.Client, root, mergeRoot, currentBranch string) (int, error) {
+func branchDivergenceFromMergeRoot(client wsgit.Client, root, mergeRoot, currentBranch string) (ahead, behind int, err error) {
 	// These are local branch identities, not arbitrary revisions. A same-named
 	// tag must not shadow either branch and make unique work look fully landed.
 	mergeRootRef := "refs/heads/" + mergeRoot
 	currentBranchRef := "refs/heads/" + currentBranch
-	result, err := client.MergeBase(context.Background(), root, mergeRootRef, currentBranchRef)
+	out, err := client.Runner.RunGit(context.Background(), root, "rev-list", "--left-right", "--count", currentBranchRef+"..."+mergeRootRef, "--")
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	out, err := client.Runner.RunGit(context.Background(), root, "rev-list", "--count", result.MergeBase+".."+currentBranchRef)
-	if err != nil {
-		return 0, err
+	fields := strings.Fields(string(out))
+	if len(fields) != 2 {
+		return 0, 0, fmt.Errorf("parse branch divergence: invalid commit counts %q", strings.TrimSpace(string(out)))
 	}
-	count, err := strconv.Atoi(strings.TrimSpace(string(out)))
-	if err != nil {
-		return 0, fmt.Errorf("parse ahead count: %w", err)
+	ahead, aheadErr := strconv.Atoi(fields[0])
+	behind, behindErr := strconv.Atoi(fields[1])
+	if aheadErr != nil || behindErr != nil || ahead < 0 || behind < 0 {
+		return 0, 0, fmt.Errorf("parse branch divergence: invalid commit counts %q", strings.TrimSpace(string(out)))
 	}
-	return count, nil
+	return ahead, behind, nil
+}
+
+func aheadOfMergeRootCount(client wsgit.Client, root, mergeRoot, currentBranch string) (int, error) {
+	ahead, _, err := branchDivergenceFromMergeRoot(client, root, mergeRoot, currentBranch)
+	return ahead, err
 }
 
 // Closure never merges. Warn without blocking closure when integration is
@@ -519,11 +527,12 @@ func observeImplementBranch(client wsgit.Client, root string, targetBranch strin
 	if validObservedBranch(obs.CurrentBranch) {
 		mergeRoot := implementMergeRootFor(obs.CurrentBranch)
 		if mergeRoot != "" && mergeRoot != obs.CurrentBranch {
-			count, err := aheadOfMergeRootCount(client, root, mergeRoot, obs.CurrentBranch)
+			count, behind, err := branchDivergenceFromMergeRoot(client, root, mergeRoot, obs.CurrentBranch)
 			if err != nil {
 				return implementBranchObservation{}, fmt.Errorf("verify implementation branch ahead state: %w", err)
 			}
 			obs.AheadOfMergeRoot = count
+			obs.BehindMergeRoot = behind
 		}
 	}
 	if targetBranch != "" {
@@ -535,11 +544,12 @@ func observeImplementBranch(client wsgit.Client, root string, targetBranch strin
 			// exactly like the current-branch check: an unverifiable leftover is
 			// not assumed clean.
 			if mergeRoot := implementMergeRootFor(targetBranch); mergeRoot != "" && mergeRoot != targetBranch {
-				count, err := aheadOfMergeRootCount(client, root, mergeRoot, targetBranch)
+				count, behind, err := branchDivergenceFromMergeRoot(client, root, mergeRoot, targetBranch)
 				if err != nil {
 					return implementBranchObservation{}, fmt.Errorf("verify leftover target branch ahead state: %w", err)
 				}
 				obs.TargetAheadOfMergeRoot = count
+				obs.TargetBehindMergeRoot = behind
 			}
 		}
 		segments := strings.Split(targetBranch, "/")
@@ -930,6 +940,13 @@ func deriveImplementBranchPlan(n normalizedImplementFacts, obs implementBranchOb
 // regardless of which of the 3 deriveImplementBranchPlan paths produced them.
 func finishImplementBranchPlanTail(plan implementBranchPlan, n normalizedImplementFacts, obs implementBranchObservation, targetBranch string) implementBranchPlan {
 	if obs.CurrentBranch == targetBranch {
+		if obs.AheadOfMergeRoot == 0 && obs.BehindMergeRoot > 0 {
+			plan.Action = "stop"
+			plan.Reason = fmt.Sprintf(
+				"current implementation branch %q has no commits outside merge root %q and is %d commit(s) behind it; a pooled caller must re-acquire the worktree, while an in-root caller must switch this root to %q and route again so the create path can recreate the stale branch",
+				obs.CurrentBranch, plan.MergeTarget, obs.BehindMergeRoot, plan.MergeTarget)
+			return plan
+		}
 		plan.Action = "continue"
 		plan.Reason = "current implementation branch matches target scope"
 		return plan

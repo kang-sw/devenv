@@ -297,8 +297,67 @@ func TestConfigListReportsRejectedManifest(t *testing.T) {
 	if len(view.ManifestErrors) != 1 || !strings.Contains(view.ManifestErrors[0], bad) {
 		t.Fatalf("manifest_errors = %v", view.ManifestErrors)
 	}
+	for _, knob := range view.Knobs {
+		if knob.ID == "acme.x" {
+			t.Fatalf("rejected manifest's key must not enter the tune catalog: %+v", knob)
+		}
+	}
+	unknown := keyedCall(t, server, 930403, key, "config.tune", map[string]any{"key": "acme.x", "value": "new"})
+	if !toolIsError(t, unknown) || !strings.Contains(toolText(t, unknown), "call config.list for supported keys") {
+		t.Fatalf("rejected key's error must direct the caller to the manifest diagnostics: %s", unknown)
+	}
 	if got := configGetJSON(t, server, 930402, map[string]any{"key": "acme.limit"}); got.Value != float64(3) {
 		t.Fatalf("accepted manifest must still resolve: %+v", got)
+	}
+}
+
+func TestClaudeCatalogWithoutAgyManifestGatesNewKey(t *testing.T) {
+	server, _, key := manifestServer(t, claudeManifestPath, filepath.Join("..", "..", "..", "agents-plugin", "dashboard-config-manifest.json"))
+	server.observeHarness("hello", "claude")
+	catalog := parseTuningCatalogResponse(t, keyedCall(t, server, 930405, key, "config.list", map[string]any{"format": "json"}))
+	if knob := findTuningKnob(catalog, "agy.model_wait_timeout_seconds"); knob != nil {
+		t.Fatalf("old two-manifest catalog unexpectedly advertises the agy writer: %+v", knob)
+	}
+}
+
+// A Claude hello uses its own three-manifest policy, so the agy key must be
+// discoverable before a project write and readable through the same session.
+func TestClaudeHelloAgyModelWaitProjectTune(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "README.md", "# Test\n")
+	initGit(t, root)
+	paths := []string{
+		claudeManifestPath,
+		agyManifestPath,
+		filepath.Join("..", "..", "..", "agents-plugin", "dashboard-config-manifest.json"),
+	}
+	server := NewServerWithOptions(ServerOptions{
+		Root: root, Version: "test", Harness: "claude",
+		Env: EnvFromMap(map[string]string{
+			envConfigManifests: strings.Join(paths, ";"),
+			"PATH":             os.Getenv("PATH"),
+			"WS_CACHE_HOME":    filepath.Join(t.TempDir(), "cache"),
+			"WS_CONFIG_HOME":   filepath.Join(t.TempDir(), "config"),
+			"WS_RSRC_ROOT":     filepath.Join("..", "..", "..", "agents-plugin", "rsrc"),
+		}),
+	})
+	t.Cleanup(server.Close)
+	key, _ := parseLoginResponse(t, callLogin(t, server, 930410, root, nil))
+	const setting = "agy.model_wait_timeout_seconds"
+	catalog := parseTuningCatalogResponse(t, keyedCall(t, server, 930411, key, "config.list", map[string]any{"format": "json"}))
+	knob := requireTuningKnob(t, catalog, setting)
+	if knob.Writer.Tool != "config.tune" || knob.Writer.FixedArguments["key"] != setting {
+		t.Fatalf("agy catalog writer = %+v", knob.Writer)
+	}
+	if got := configGetJSON(t, server, 930412, map[string]any{"session_key": key, "key": setting}); got.Value != float64(120) || got.Scope != "builtin" {
+		t.Fatalf("agy config.get before tune = %+v", got)
+	}
+	if resp := keyedCall(t, server, 930413, key, "config.tune", map[string]any{"key": setting, "value": "45", "scope": "project"}); toolIsError(t, resp) {
+		t.Fatalf("Claude project tune failed: %s", resp)
+	}
+	if got := configGetJSON(t, server, 930414, map[string]any{"session_key": key, "key": setting}); got.Value != float64(45) || got.Scope != "project" {
+		t.Fatalf("agy config.get after tune = %+v", got)
 	}
 }
 

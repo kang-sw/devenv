@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: f92b32b2745affc9
 sage-review-completeness-reviewed: f92b32b2745affc9
+completed: 2026-11-21
 ---
 
 # Fix ws dogfood context routing gaps
@@ -451,6 +452,18 @@ Acceptance:
 - Compatibility remains T0, or the phase records and settles a revised tier
   before implementation.
 
+### Result (c06d6031a) - 2026-11-21
+
+Spawned-worker context now states that its session key is immutably bound to
+the selected root and directs a moved assignment to use a destination-minted
+key. Explicit `worktree: B` spawn is regressed as minting B's root, while
+same-root behavior remains unchanged. Lead guidance covers direct spawn into B
+and the future legitimate B-key acquisition path without implying key rebind.
+`261116-feat-ws-subagent-worktree-lease` remains in `ready`, so its acquired
+B-key source and regression are deferred exactly as Decision (1924) permits.
+Focused `internal/wsagent` spawn/context tests passed with the required offline
+Go settings. Compatibility remains T0.
+
 ### Phase 2: Pin direct-parent and once-only mailbox delivery
 
 Add an end-to-end regression around the already-landed parent-id prompt and
@@ -464,6 +477,16 @@ Acceptance:
 - A hosted lead receives the message exactly once as an active steer or later
   turn; a subsequent manual `mailbox.recv` does not duplicate it.
 - Compatibility remains T0.
+
+### Result (3d7d4ffed) - 2026-11-21
+
+End-to-end regressions now send from direct and nested children to the exact
+injected direct-parent reply id, exclude worktree-inbox fallback, and prove the
+hosted lead claims the message once as either an active steer or a later turn.
+A subsequent manual receive is empty. The tests exposed no production wording
+ambiguity, so this phase is test-only and remains T0. Focused `internal/mcp`
+mail routing and `internal/wsagent` hosted-delivery tests passed with the MCP
+package using `-timeout 45m`.
 
 ### Phase 3: Retire fully landed canonical implementation branches
 
@@ -503,6 +526,19 @@ Acceptance:
   regression fixture.
 - Compatibility remains T0.
 
+### Result (1565da461) - 2026-11-21
+
+Locked pooled acquisition now classifies an existing canonical target against
+an existing encoded local merge root, preflights every registered checkout,
+and safely recreates only `ahead=0, behind>0` branches by detaching at the
+merge-root ref, non-force deleting, and recreating. Equal, ahead, divergent,
+and legacy `impl/*` names without a local encoded root preserve prior behavior.
+Exact-target routing defensively stops the stale predicate while both existing
+resolver recreation paths remain intact. Real-Git coverage includes the
+permission-profile topology and held-branch no-mutation case. The full focused
+worktree/resolver MCP matrix passed with `-timeout 45m`; compatibility remains
+T0.
+
 ### Phase 4: Lock Claude agy manifest exposure
 
 Turn the current production packaging fix into an exact contract and improve
@@ -527,6 +563,16 @@ Acceptance:
 - Compatibility remains T0 for old calls and stored data; any ungated
   new-caller-to-old-daemon path is recorded as T3 and requires explicit owner
   approval.
+
+### Result (ee8af28ee) - 2026-11-21
+
+Exact ws/wsflow Claude and Codex contracts now require the three shipped
+manifests and their files; the hosted fixture includes the agy manifest. Claude
+hello coverage lists, gets, and project-tunes
+`agy.model_wait_timeout_seconds`, while absent/rejected catalog diagnostics and
+the shipped `config.list` gate are pinned. Targeted `internal/mcp`,
+`cmd/ws-mcp`, ws, and wsflow package tests passed. Old calls and stored data
+remain T0; the caller gate avoids an ungated new-call/old-daemon path.
 
 ### Phase 5: Add a cache-scoped reviewer report writer
 
@@ -573,6 +619,21 @@ Acceptance:
 - Compatibility remains T0 because the tool is additive and its calling
   playbooks ship embedded with the same binary.
 
+### Result (1b0899f66) - 2026-11-21
+
+Added additive `path.write(path, content)` with exact same-key provenance that
+survives per-connection server replacement but is not persisted. Only generated
+review/prompt cache files are eligible; plan/clone, repository, alias,
+cross-session, parent-minted, and symlink-replaced paths are refused. A held
+descriptor closes the parent-symlink race, grants are oldest-first bounded at
+64 and consumed on write, and the transport accepts complete 17 MiB reports
+under a finite 64 MiB request ceiling. Reviewers mint and write their own
+artifacts; the handler separately writes its consolidated report and invokers
+read returned paths. Focused MCP, wsagent, wsstate, resource-mirror, runtime,
+and package tests passed. The live pre-change daemon did not yet expose
+`path.write`, so the required Lite reviewer returned its full findings inline;
+both Important findings were fixed in this result. Compatibility remains T0.
+
 ### Phase 6: Align worker instructions with the spawned-child tool surface
 
 Remove the lead-only bootstrap call from the Worker Protocol and expose the
@@ -594,3 +655,22 @@ Acceptance:
   adopt a lead key.
 - ws/wsflow mirrors stay aligned.
 - Compatibility remains T0.
+
+### Result (c06d6031a) - 2026-11-21
+
+The rendered Worker Protocol no longer requires the intentionally unavailable
+`workflow_manual`. `config.resolve_agent` and `infra.read` are now in the
+harness-neutral child-safe surface inherited by Codex, Claude, agy, and Pi
+agent-worker profiles; `workflow_manual`, config mutation, and lead-key minting
+remain excluded. Render/profile regressions pin the elevated resolver call and
+all four effective profiles. Required wsagent, rendered-playbook, wsflow/Pi
+mirror, and runtime-contract tests passed. Dogfooding reproduced the original
+gap: this worker's pre-change live profile lacked `workflow_manual`,
+`config.resolve_agent`, and `infra.read`, so it proceeded from the rendered
+protocol, ticket, AGENTS guidance, and declared manuals as Decision (1927)
+requires. Compatibility remains T0.
+
+
+## Resolution (2026-11-21)
+
+Implemented all six phases on `impl/develop/stung-sushi-peso`. Immutable root-bound worker keys now carry destination-key guidance; parent mail delivery is pinned exactly once; stale canonical implementation branches are safely recreated under lock; Claude agy manifest exposure is exact; read-only reviewers own bounded cache artifacts through additive `path.write`; and worker instructions match the child-safe tool surface. The lease-dependent acquired-B-key regression remains deferred by Decision (1924) because its prerequisite ticket has not landed.

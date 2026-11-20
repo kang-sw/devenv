@@ -401,6 +401,88 @@ func TestProvisionWorktreeReuseIdle(t *testing.T) {
 	}
 }
 
+func TestProvisionWorktreeClassifiesNameRootedCanonicalTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		targetAhead, rootAhead int
+		wantRecreated          bool
+		wantBehindWarning      bool
+	}{
+		{name: "stale behind", rootAhead: 2, wantRecreated: true},
+		{name: "equal"},
+		{name: "active ahead", targetAhead: 1},
+		{name: "divergent", targetAhead: 1, rootAhead: 2, wantBehindWarning: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, base := worktreeFixture(t)
+			mergeRoot := strings.TrimSpace(string(runGitOutput(t, root, "branch", "--show-current")))
+			target := "impl/" + mergeRoot + "/canonical"
+			runGit(t, root, "branch", target, base)
+			wantTarget := base
+			if tc.targetAhead > 0 {
+				targetWT := filepath.Join(t.TempDir(), "target")
+				runGit(t, root, "worktree", "add", "--detach", targetWT, target)
+				for i := 0; i < tc.targetAhead; i++ {
+					runGit(t, targetWT, "commit", "--allow-empty", "-m", fmt.Sprintf("target %d", i))
+				}
+				wantTarget = strings.TrimSpace(string(runGitOutput(t, targetWT, "rev-parse", "HEAD")))
+				runGit(t, root, "worktree", "remove", targetWT)
+				runGit(t, root, "branch", "-f", target, wantTarget)
+			}
+			for i := 0; i < tc.rootAhead; i++ {
+				runGit(t, root, "commit", "--allow-empty", "-m", fmt.Sprintf("root %d", i))
+			}
+			rootHead := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD")))
+
+			res, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, mergeRoot, target, builtinProfile(t, worktreeProfileFull), acquireTempDir(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := wtBranch(t, res.Path); got != target {
+				t.Fatalf("checked out branch = %q, want %q", got, target)
+			}
+			gotHead := strings.TrimSpace(string(runGitOutput(t, res.Path, "rev-parse", "HEAD")))
+			wantHead := wantTarget
+			if tc.wantRecreated {
+				wantHead = rootHead
+			}
+			if gotHead != wantHead {
+				t.Fatalf("target head = %s, want %s (recreated=%v)", gotHead, wantHead, tc.wantRecreated)
+			}
+			hasBehindWarning := false
+			for _, warning := range res.Warnings {
+				hasBehindWarning = hasBehindWarning || strings.Contains(warning, "behind base")
+			}
+			if hasBehindWarning != tc.wantBehindWarning {
+				t.Fatalf("behind warning = %v, want %v; warnings=%v", hasBehindWarning, tc.wantBehindWarning, res.Warnings)
+			}
+		})
+	}
+}
+
+func TestProvisionWorktreeStaleTargetHeldElsewhereFailsWithoutMutation(t *testing.T) {
+	root, base := worktreeFixture(t)
+	mergeRoot := strings.TrimSpace(string(runGitOutput(t, root, "branch", "--show-current")))
+	target := "impl/" + mergeRoot + "/held-stale"
+	runGit(t, root, "branch", target, base)
+	runGit(t, root, "commit", "--allow-empty", "-m", "merge root advanced")
+	pool := acquireTempDir(t)
+	held := filepath.Join(pool, "held")
+	runGit(t, root, "worktree", "add", held, target)
+	before := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "refs/heads/"+target)))
+
+	_, err := provisionWorktree(context.Background(), wsgit.ExecRunner{}, nil, root, mergeRoot, target, builtinProfile(t, worktreeProfileFull), pool)
+	if err == nil || !strings.Contains(err.Error(), held) || !strings.Contains(err.Error(), "release that checkout and re-acquire") {
+		t.Fatalf("held stale target error = %v", err)
+	}
+	if got := wtBranch(t, held); got != target {
+		t.Fatalf("blocking worktree branch = %q, want %q", got, target)
+	}
+	if after := strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "refs/heads/"+target))); after != before {
+		t.Fatalf("held target moved from %s to %s", before, after)
+	}
+}
+
 func TestProvisionWorktreeSkipBranchCheckedOut(t *testing.T) {
 	root, base := worktreeFixture(t)
 	// res1 stays checked out on a branch (not released → not detached), so it is

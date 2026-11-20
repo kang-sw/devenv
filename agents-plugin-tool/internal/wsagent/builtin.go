@@ -120,14 +120,17 @@ var PiMiniLeadWSTools = append(append([]string{}, PiWorkerWSTools...),
 // tools pre-approved for spawned children: read-only queries, or writes scoped
 // to the ws cache, generated paths, or the child's own mailbox and session
 // todo list, already authority-enforced server-side. Mutating repository,
-// ticket, note, worktree, whiteboard, config, and orchestration tools stay
-// excluded; workdir-write children keep their existing behavior for those.
+// ticket, note, worktree, whiteboard, config mutation, and orchestration tools
+// stay excluded; workdir-write children keep their existing behavior for those.
 var ChildSafeWSTools = []string{
 	"path.generate",
+	"path.write",
 	"tickets.query",
 	"tickets.template",
 	"tickets.checklist",
 	"tickets.verify",
+	"config.resolve_agent",
+	"infra.read",
 	"convention.read",
 	"playbook.read",
 	"note.query",

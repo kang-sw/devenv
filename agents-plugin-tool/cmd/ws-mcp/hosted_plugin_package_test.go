@@ -28,7 +28,7 @@ func hostedPackageFixture(t *testing.T, name string) string {
 	}
 	env := map[string]string{
 		"WS_MCP_CLI_NAME":         name + "-cli",
-		"WS_MCP_CONFIG_MANIFESTS": "${CLAUDE_PLUGIN_ROOT}/config-manifest.json;${CLAUDE_PLUGIN_ROOT}/dashboard-config-manifest.json",
+		"WS_MCP_CONFIG_MANIFESTS": "${CLAUDE_PLUGIN_ROOT}/config-manifest.json;${CLAUDE_PLUGIN_ROOT}/agy-config-manifest.json;${CLAUDE_PLUGIN_ROOT}/dashboard-config-manifest.json",
 	}
 	if name == "wsflow" {
 		env["WS_MCP_NAMESPACE"], env["WS_MCP_NO_AGENT"], env["WS_MCP_SETUP_TOOL"] = name, "1", "setup"
@@ -102,8 +102,18 @@ func TestHostedPackageHellosDoNotSelectHostedInputs(t *testing.T) {
 			if cmd.Args[0] != filepath.Join(cmd.Plugin, "bin", "ws-mcp-launcher.py") || cmd.Plugin == roots[want] || cmd.PluginWarning != "" || cmd.Env["WS_MCP_PROJECT_ROOT"] != workerRoot {
 				t.Fatalf("%s/%s: %+v", starter, selected, cmd)
 			}
-			if cmd.Env["WS_MCP_CLI_NAME"] != want+"-cli" || cmd.Env["WS_SKILLS_ROOT"] != filepath.Join(cmd.Plugin, "skills") || !strings.Contains(cmd.Env["WS_MCP_CONFIG_MANIFESTS"], cmd.Plugin) {
+			manifestPaths := []string{
+				filepath.Join(cmd.Plugin, "config-manifest.json"),
+				filepath.Join(cmd.Plugin, "agy-config-manifest.json"),
+				filepath.Join(cmd.Plugin, "dashboard-config-manifest.json"),
+			}
+			if cmd.Env["WS_MCP_CLI_NAME"] != want+"-cli" || cmd.Env["WS_SKILLS_ROOT"] != filepath.Join(cmd.Plugin, "skills") || cmd.Env["WS_MCP_CONFIG_MANIFESTS"] != strings.Join(manifestPaths, ";") {
 				t.Fatalf("wrong package policy: %v", cmd.Env)
+			}
+			for _, path := range manifestPaths {
+				if _, err := os.Stat(path); err != nil {
+					t.Fatalf("hosted manifest %s: %v", path, err)
+				}
 			}
 			if want == "wsflow" && (cmd.Env["WS_MCP_NAMESPACE"] != want || cmd.Env["WS_MCP_NO_AGENT"] != "1") {
 				t.Fatalf("missing wsflow policy: %v", cmd.Env)
@@ -136,6 +146,7 @@ func TestHostedPackageSelectionLeavesNonHostedHelloPolicy(t *testing.T) {
 			plugin := hostedPackageFixture(t, name)
 			for file, body := range map[string]string{
 				"config-manifest.json":           `{"schema_version":1,"namespace":"fixture.","keys":[{"key":"fixture.owner","type":"string","default":"` + name + `","description":"d"}]}`,
+				"agy-config-manifest.json":       `{"schema_version":1,"namespace":"agy.","keys":[{"key":"agy.model_wait_timeout_seconds","type":"integer","minimum":0,"default":0,"description":"d"}]}`,
 				"dashboard-config-manifest.json": `{"schema_version":1,"namespace":"dashboard.","keys":[{"key":"dashboard.enabled","type":"boolean","default":false,"description":"d"}]}`,
 			} {
 				if err := os.WriteFile(filepath.Join(plugin, file), []byte(body), 0o600); err != nil {
@@ -146,7 +157,7 @@ func TestHostedPackageSelectionLeavesNonHostedHelloPolicy(t *testing.T) {
 			// caller-owned, not the hosted build-owned environment helper.
 			env := map[string]string{
 				"WS_RSRC_ROOT":            filepath.Join(plugin, "rsrc"),
-				"WS_MCP_CONFIG_MANIFESTS": filepath.Join(plugin, "config-manifest.json") + ";" + filepath.Join(plugin, "dashboard-config-manifest.json"),
+				"WS_MCP_CONFIG_MANIFESTS": filepath.Join(plugin, "config-manifest.json") + ";" + filepath.Join(plugin, "agy-config-manifest.json") + ";" + filepath.Join(plugin, "dashboard-config-manifest.json"),
 			}
 			if name == "wsflow" {
 				env["WS_MCP_NAMESPACE"], env["WS_MCP_NO_AGENT"] = name, "1"
