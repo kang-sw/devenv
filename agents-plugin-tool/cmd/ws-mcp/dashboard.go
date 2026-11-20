@@ -319,7 +319,7 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged, agyActivity func
 			"tickets.query", "tickets.move", "git.status", "git.log", "git.commit", "git.merge",
 			"worktree.acquire", "worktree.release", "note.query", "note.write",
 			"config.resolve_agent", "todo.list", "todo.check",
-		}, ToolsAlwaysLoad: true, ManualHarness: wsagent.BackendAgy, PlanUsageActivity: true, PlaybookCommands: true, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendAgy), WorkerHTTPMCP: true, WorkerAutoApprove: true},
+		}, ToolsAlwaysLoad: true, ManualHarness: wsagent.BackendAgy, PlaybookCommands: true, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendAgy), WorkerHTTPMCP: true, WorkerAutoApprove: true},
 	}
 	return wsagent.NewRunner(wsagent.Options{
 		Dir:                        dir,

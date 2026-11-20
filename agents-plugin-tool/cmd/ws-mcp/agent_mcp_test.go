@@ -399,11 +399,6 @@ func TestAgentRunnerCatalogs(t *testing.T) {
 	if !reflect.DeepEqual(regs[wsagent.BackendAgy].Catalog, wsagent.AgyCatalog()) {
 		t.Error("agy must retain its lead and worker catalog")
 	}
-	for backend, reg := range regs {
-		if got, want := reg.PlanUsageActivity, backend == wsagent.BackendAgy; got != want {
-			t.Errorf("%s PlanUsageActivity = %v, want %v", backend, got, want)
-		}
-	}
 	for _, want := range []struct {
 		backend, lead, worker string
 		capable, http, auto   bool
