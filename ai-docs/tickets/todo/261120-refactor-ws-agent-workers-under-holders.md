@@ -26,23 +26,6 @@ its in-flight result to its parent exactly once.
 All source paths below are relative to `agents-plugin-tool/` and were verified
 against `develop` at `5d028ad10`.
 
-## Open Decision Queue
-
-Last ID: (1855)
-
-(1855) [open] [policy] Compatibility tier of the downgrade surface: T2 with an owner-approved exception for aged-row prune, vs T3 with a minor bump.
-- Context: T1 holds only for the fenced child row. The old daemon rewrites a
-  conversation parent's record (release), and with the round-3 rule the new
-  daemon reconciles it on re-upgrade with no duplicate report (T2-like
-  convergence). The old prune deletes the fenced child's session dir after
-  RegistryRetention (7 days); that loss is unrecoverable, so it is not T2
-  under AGENTS.md without an exception.
-- Alternatives: (a) T2 with an explicit owner-approved exception: a downgrade
-  longer than RegistryRetention loses the fenced worker's session history;
-  patch release, no minor bump. (b) T3 with a minor bump.
-> Recommend (a): (1854)=a already accepted the 7-day prune as degradation;
-> (b) locks out previous-minor plugin sessions.
-
 ## Decisions
 
 - **All `agent.spawn` workers are holder-backed (owner, 2026-11-20 17:31
@@ -115,18 +98,31 @@ Last ID: (1855)
 - **(1854)=a, owner 2026-11-20: downgrade treats a holder-backed worker as
   ended, as a documented degradation.** This is the same outcome as today's
   daemon restart: the old daemon sees the fenced child as closed, its
-  `holdsReport`/`openChildOf` no longer holds a done parent turn, and
-  `releaseHeld` publishes and rewrites the parent's record
+  `holdsReport`/`openChildOf` no longer holds a done conversation-parent turn,
+  and `releaseHeld` publishes and rewrites that parent's record
   (`internal/wsagent/children.go:754-807`,
   `internal/wsagent/runner.go:386-394`). After `RegistryRetention`, old
   `PruneRegistrations` deletes the fenced child's session directory
   (`internal/wsdashboard/registry.go:57,386-424,460-464`). This accepts the
-  behavior, not its release tier; (1855) remains open between a T2 exception
-  and T3. Rejected: fencing non-lead parents, which cannot cover lead parents
-  because an old daemon sweeps an unowned lead holder
+  behavior; (1855) settles its release tier below. Rejected: fencing non-lead
+  parents, which cannot cover lead parents because an old daemon sweeps an
+  unowned lead holder
   (`internal/wsagent/runner.go:528-537`).
-- **The fenced child row has T1 behavior while that row exists; (1855) owns
-  the unresolved tier for the whole downgrade surface.** The new daemon keeps
+- **(1855)=a, owner 2026-11-20: the whole downgrade surface is T2 with an
+  explicit owner-approved `RegistryRetention` exception.** The surviving
+  fenced child row is T1 evidence. A conversation-parent rewrite converges on
+  re-upgrade through the timestamp-gated non-publishing update, and a lead
+  parent adopts the child and receives one late report. Exception: if the
+  downgrade lasts longer than `RegistryRetention` (7 days), old
+  `PruneRegistrations` may irrecoverably delete the fenced worker's session
+  history (`internal/wsagent/children.go:754-807`,
+  `internal/wsagent/spawn.go:278-341`,
+  `internal/wsagent/runner.go:386-394,694-708`,
+  `internal/wsdashboard/registry.go:57,386-424,460-464`). Ship this as a patch
+  release with no minor bump. Rejected: T3 with a minor bump, because it locks
+  out previous-minor plugin sessions.
+- **T1 applies only to the fenced child row while that row exists, not to the
+  whole downgrade surface.** The new daemon keeps
   `HandedOffAt` set with `HolderID` for a live new-kind `agent-worker`. The old
   daemon projects that child as closed/ended, starts no loop, watcher, attach,
   or process, never rewrites the child's own record, and cannot stop its
@@ -134,8 +130,8 @@ Last ID: (1855)
   (`internal/wsagent/runner.go:333-358,528-537,1657-1674`,
   `internal/wsagent/record.go:55-63`). That child-row display/read behavior is
   T1. Parent release/rewrite and aged-row deletion are explicitly accepted
-  degradation outside that child-row fact; their release tier awaits (1855).
-  A live legacy `pi-worker` holder keeps the legacy shape so an old daemon
+  outside that child-row fact under (1855)'s T2-plus-exception policy. A live
+  legacy `pi-worker` holder keeps the legacy shape so an old daemon
   rejoins it rather than sweeping it. Only the new daemon interprets non-lead
   + `HolderID` + `HandedOffAt` as a held worker.
 - **Re-upgrade silently retires only a downgrade-fenced open child of a
@@ -228,12 +224,16 @@ Last ID: (1855)
   arrived while no daemon was attached, run the ordinary traced at-most-once
   auto-allow after replay for every `WorkerAutoApprove` worker.
 - Scope the compatibility claim to the fenced child's row while it survives.
-  Downgrade may release and rewrite a held parent and may delete an aged child
-  directory after `RegistryRetention`; both are documented degradation, not
-  T1 behavior, and their whole-surface tier remains open in (1855). On
-  re-upgrade, silently retire only a fenced, open child of a conversation
-  parent when the child's non-zero `TurnStartedAt` strictly predates the
-  parent's terminal `LastTurn` settlement stamp in `LastActiveAt`. Finish that
+  Downgrade may release and rewrite a held conversation parent and may delete
+  an aged child directory after `RegistryRetention`; both are documented
+  degradation, not T1 behavior. Under confirmed Decision (1855), the whole
+  surface is T2 with an explicit owner-approved exception for irrecoverable
+  session-history loss
+  when an old-daemon downgrade exceeds the 7-day `RegistryRetention`; ship as
+  a patch with no minor bump. On re-upgrade, silently retire only a fenced,
+  open child of a conversation parent when the child's non-zero
+  `TurnStartedAt` strictly predates the parent's terminal `LastTurn`
+  settlement stamp in `LastActiveAt`. Finish that
   active turn and clear `TurnOpen`, `HandedOffAt`, and the holder fields in one
   record update without publishing. Otherwise adopt normally. In particular,
   ordinary idle/mail-woken children and children of a lead must survive
@@ -324,7 +324,7 @@ Last ID: (1855)
 
 ## Prior Decisions
 
-- 261113-bug-ws-pi-subagent-turn-dies-on-daemon-restart (2026-11-13, Decisions and Result): "Accepted downgrade consequence: an older daemon interrupts the turn and leaves its held worker process orphaned" and the in-flight interruption "equals today's behaviour" — bearing: supports (1854)'s documented degradation and conversation-parent reconciliation, but does not settle the whole-surface tier now open in (1855)
+- 261113-bug-ws-pi-subagent-turn-dies-on-daemon-restart (2026-11-13, Decisions and Result): "Accepted downgrade consequence: an older daemon interrupts the turn and leaves its held worker process orphaned" and the in-flight interruption "equals today's behaviour" — bearing: supports (1854)'s documented degradation and (1855)'s T2 reconciliation with the owner-approved aged-prune exception
 - 261118-feat-ws-agy-tool-names-and-worker-role (2026-11-18, Decisions 151): "the agy worker is not holder-held, like the Claude worker; a daemon restart ends it" — bearing: constrains
 - 261119-feat-ws-codex-hosted-worker (2026-11-19, Decisions 172): "The Codex worker start path follows the agy worker shape: daemon-owned with no holder and no lead spec" — bearing: constrains
 - 261110-feat-ws-dashboard-headless-lead-sessions (2026-11-11, commit): "run hosted lead sessions under session holders" — bearing: supports
@@ -336,14 +336,14 @@ Last ID: (1855)
 | scope.span | multi-file | agents-plugin-tool/internal/wsagent/holder.go, runner_process.go, runner.go, runner_conv.go, claude.go, codex.go, agy.go, record.go; internal/wsholder/holder.py; ai-docs/manuals/ws-mcp.md |
 | scope.surface | cross-module | wsagent worker lifecycle, wsholder session descriptor and daemon compatibility behavior cross module boundaries |
 | scope.new_public_symbol | no | no new exported API symbol is named; agent-worker is a holder kind and holderSession is internal |
-| scope.new_type_contract | yes | holderSession gains backend ownership metadata; persisted Record.HandedOffAt supplies T1 evidence only for the surviving child row, while the whole downgrade tier remains open in (1855) because conversation-parent release converges on re-upgrade but RegistryRetention deletion does not (internal/wsagent/holder.go#L69-L89; internal/wsagent/record.go#L55-L63) |
+| scope.new_type_contract | yes | holderSession gains backend ownership metadata; persisted Record.HandedOffAt supplies T1 evidence only for the surviving child row; the whole downgrade surface is T2 under (1855), with an owner-approved exception for irrecoverable session-history loss when old prune crosses RegistryRetention (internal/wsagent/holder.go#L69-L89; internal/wsagent/record.go#L55-L63) |
 | scope.test_surface | existing | internal/wsagent/pi_worker_recovery_test.go, codex_worker_test.go, codex_recovery_test.go and lead_recovery_test.go exist; Phase 1 adds a directional old-daemon fixture and Phase 2 adds timestamp-discriminated conversation-parent reconciliation, persistent sleeping-record, normal-replacement negative, and lead-parent adoption coverage |
 | complexity.reuse_points | confirmed | existing Pi holder allocation and reattach, held-lead MCP tuple, childLevel persisted-selection projection, advisory held-lead permission rejoin, and replay reconciliation were read (internal/wsagent/runner_process.go#L184-L190; #L236-L246; #L359-L402; #L511-L625; internal/wsagent/agent_tools.go#L476-L483) |
 | complexity.side_effect_risk | high | daemon replacement, holder lifetime, worker tokens and interrupted-turn settlement change together |
 | risk.correctness | high | normal replacement replay must report exactly once across four backends; re-upgrade may retire only a fenced open child whose turn predates a conversation parent's persisted settlement, must leave a wakeable sleeping record, and must adopt ordinary or lead-parent children |
 | risk.fit | high | one worker holder kind must preserve each backend's launch, cwd and ownership binding; attach mode comes from the child's persisted selection while current-parent ceiling admission waits until all records are loaded |
 | risk.test | high | child-row T1 evidence, documented parent/prune degradation, timestamp discriminator and negative cases, one-update sleeping record plus another restart, lead-parent late-report behavior, four-backend replacement coverage and Windows restart behavior are required |
-| risk.security_or_contract | high | the surviving child row is T1, but the whole downgrade tier is open in (1855) because a conversation-parent rewrite is reconcilable and aged-row deletion is not; token/capability restoration and advisory admission remain authority-sensitive |
+| risk.security_or_contract | high | T1 applies only to the surviving child row; the whole downgrade surface is T2 with the owner-approved aged-prune exception, while token/capability restoration and advisory admission remain authority-sensitive |
 
 ## Phases
 
@@ -382,14 +382,16 @@ Last ID: (1855)
    `agent-worker`. Separately load a live legacy `pi-worker` holder without the
    fence and assert the old daemon rejoins the existing holder without a
    duplicate process or `Stop`. Pin the documented degradation too: a held
-   parent releases, publishes, and rewrites its record when it sees the child
-   closed, and old `PruneRegistrations` deletes the child directory only after
-   `RegistryRetention` (`internal/wsagent/runner.go:386-397,483-537`,
+   conversation parent releases, publishes, and rewrites its record when it
+   sees the child closed, and old `PruneRegistrations` deletes the child
+   directory only after `RegistryRetention`
+   (`internal/wsagent/runner.go:386-397,483-537`,
    `internal/wsagent/children.go:754-807`,
    `internal/wsdashboard/registry.go:57,386-424,460-465`). The fixture
-   establishes T1 only for the surviving fenced child row; the parent and
-   retention assertions document accepted downgrade behavior, and (1855)
-   remains the release-tier gate for the whole surface.
+   establishes T1 only for the surviving fenced child row. The
+   conversation-parent assertion supplies the rewrite side of (1855)'s T2
+   convergence, which Phase 2 completes on re-upgrade; the retention assertion
+   pins its owner-approved 7-day prune exception.
 
 ### Phase 2: Prove replacement continuity and update the operations contract
 
@@ -424,10 +426,10 @@ Last ID: (1855)
    wake and one more daemon restart preserves that wakeable shape. Negative
    cases must prove an idle child and a child mail-woken after its parent
    settled both survive a normal replacement and retain their holder. For a
-   `ParentLead`,
-   prove the rule does not fire: re-upgrade adopts the child, restores the
-   lead's persisted `HeldTurn`, accepts one late child report, and re-releases
-   that held lead turn in memory exactly once. Also cover an old-pruned child
+   `ParentLead`, prove the rule does not fire: re-upgrade adopts the child,
+   restores the lead's persisted `HeldTurn`, accepts one late child report,
+   and re-releases that held lead turn in memory exactly once. Also cover an
+   old-pruned child
    directory: the unowned new-kind holder is retired by the new-daemon orphan
    sweep.
 3. Cover holder-kind, backend, reply-id, cwd, capability, PID, and MCP-tuple
@@ -437,8 +439,8 @@ Last ID: (1855)
 4. Update `ai-docs/manuals/ws-mcp.md` where it describes daemon replacement,
    session holders, and spawned-worker close/hold behavior. State that every
    `agent.spawn` backend is holder-backed, document the surviving child row's
-   T1 behavior, the unresolved whole-surface tier until (1855) settles,
-   accepted downgrade parent/prune degradation, the timestamp-gated
+   T1 behavior and (1855)'s whole-surface T2 policy with the explicit
+   owner-approved 7-day prune exception, the timestamp-gated
    conversation-parent retirement into a wakeable sleeping child, lead-parent
    adoption with one late report, and tuple binding. Keep watchdog re-arm
    explicitly out of scope.
