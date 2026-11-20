@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 	"time"
@@ -28,7 +29,30 @@ const (
 	agyStreamInterrupted = "⚠ The stream was interrupted. Please continue the task you were working on."
 	modelFailureDrain    = time.Second
 	modelWaitCancelGrace = 5 * time.Second
+	modelWaitBackoffBase = time.Second
+	modelWaitBackoffCap  = 30 * time.Second
 )
+
+const (
+	modelWaitBackoffIdle uint32 = iota
+	modelWaitBackoffPending
+	modelWaitBackoffCancelled
+	modelWaitBackoffFiring
+)
+
+// defaultAgyModelWaitBackoff uses equal jitter: each attempt waits between
+// half and all of an exponentially growing ceiling, bounded at 30 seconds.
+func defaultAgyModelWaitBackoff(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	ceiling := modelWaitBackoffBase
+	for i := 1; i < attempt && ceiling < modelWaitBackoffCap; i++ {
+		ceiling = min(ceiling*2, modelWaitBackoffCap)
+	}
+	half := ceiling / 2
+	return half + time.Duration(rand.Int64N(int64(ceiling-half)+1))
+}
 
 func agyReplyTailFailure(reply string) string {
 	line := strings.TrimRight(reply, " \t\r\n")
@@ -148,6 +172,15 @@ func (c *conv) stopModelWaitCancelGrace() {
 	c.modelWaitCancelC, c.modelWaitCancelStop = nil, nil
 }
 
+func (c *conv) stopModelWaitBackoff() {
+	if c.modelWaitBackoffStop != nil {
+		c.modelWaitBackoffStop()
+	}
+	c.modelWaitBackoffC, c.modelWaitBackoffStop = nil, nil
+	c.modelWaitBackoffFailure = ""
+	c.modelWaitBackoffFence.Store(modelWaitBackoffIdle)
+}
+
 func (c *conv) armModelWaitCancelGrace() {
 	c.stopModelWaitCancelGrace()
 	if c.r != nil && c.r.opts.Timer != nil {
@@ -159,6 +192,7 @@ func (c *conv) disarmModelWait() {
 	c.stopModelWaitTimer()
 	c.stopModelFailureDrain()
 	c.stopModelWaitCancelGrace()
+	c.stopModelWaitBackoff()
 	c.modelWaitArmed = false
 	c.modelWaitRetries = 0
 	c.modelWaitPending = 0
@@ -166,6 +200,7 @@ func (c *conv) disarmModelWait() {
 	c.modelWaitFailErr = ""
 	c.modelWaitDiagnostic = ""
 	c.modelWaitExhaustedPublished = false
+	c.modelWaitFailureClasses = nil
 	c.modelWaitFailure = ""
 	c.modelWaitFailureExcluded = false
 }
@@ -243,6 +278,7 @@ func (c *conv) modelFailureDrainTimedOut() {
 		}
 		return
 	}
+	c.noteModelWaitFailure(c.modelWaitFailure)
 	c.modelWaitFailErr = c.modelWaitExhaustedError(c.modelWaitFailure)
 	fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", c.rec.ReplyID, c.modelWaitFailErr)
 	if err := c.proc.Interrupt(); err != nil {
@@ -260,6 +296,7 @@ func (c *conv) modelWaitTimedOut() {
 	if c.modelWaitPending > 0 || len(c.approvals) > 0 {
 		return
 	}
+	c.noteModelWaitFailure("")
 	dur := formatWatchdogDuration(c.modelWaitTimeout)
 	if c.modelWaitRetries < c.modelWaitMaxRetries {
 		c.modelWaitCancelling = true
@@ -327,7 +364,6 @@ func (c *conv) interceptModelWaitTurnEnd(ev Event) bool {
 
 func (c *conv) retryModelWait(failure string) bool {
 	c.stopModelFailureDrain()
-	c.modelWaitRetries++
 	c.modelWaitPending = 0
 	c.modelWaitFailure = ""
 	c.modelWaitFailureExcluded = false
@@ -335,6 +371,45 @@ func (c *conv) retryModelWait(failure string) bool {
 		c.modelWaitDiagnostic = c.reply
 	}
 	c.reply = ""
+	c.modelWaitBackoffFailure = failure
+	c.modelWaitBackoffFence.Store(modelWaitBackoffPending)
+	c.mu.Lock()
+	held := c.held > 0
+	c.mu.Unlock()
+	if held {
+		c.cancelModelWaitBackoffForInput()
+	}
+	if c.modelWaitBackoffFence.Load() == modelWaitBackoffCancelled {
+		c.cancelModelWaitBackoff()
+		return true
+	}
+	attempt := c.modelWaitRetries + 1
+	delay := c.r.opts.AgyModelWaitBackoff(attempt)
+	if delay <= 0 {
+		c.modelWaitBackoffTimedOut()
+		return true
+	}
+	fmt.Fprintf(c.r.opts.Log, "agent %s: waiting %s before automatic continue attempt %d/%d\n", c.rec.ReplyID, formatWatchdogDuration(delay), attempt, c.modelWaitMaxRetries)
+	c.modelWaitBackoffC, c.modelWaitBackoffStop = c.r.opts.Timer(delay)
+	return true
+}
+
+func (c *conv) modelWaitBackoffTimedOut() {
+	failure := c.modelWaitBackoffFailure
+	c.modelWaitBackoffC, c.modelWaitBackoffStop = nil, nil
+	c.modelWaitBackoffFailure = ""
+	if !c.modelWaitBackoffFence.CompareAndSwap(modelWaitBackoffPending, modelWaitBackoffFiring) {
+		if c.modelWaitBackoffFence.Load() == modelWaitBackoffCancelled {
+			c.cancelModelWaitBackoff()
+		}
+		return
+	}
+	defer c.modelWaitBackoffFence.Store(modelWaitBackoffIdle)
+	if !c.modelWaitArmed || !c.turn || c.proc == nil || c.modelWaitFailErr != "" {
+		return
+	}
+	c.noteModelWaitFailure(failure)
+	c.modelWaitRetries++
 	if failure == "" {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: agy model stream stalled for %s; sending automatic continue attempt %d/%d\n", c.rec.ReplyID, formatWatchdogDuration(c.modelWaitTimeout), c.modelWaitRetries, c.modelWaitMaxRetries)
 	} else {
@@ -346,10 +421,25 @@ func (c *conv) retryModelWait(failure string) bool {
 			reason = fmt.Sprintf("agy model failure retry send failed: %v (%s)", err, failure)
 		}
 		c.failModelWaitImmediately(reason)
-		return true
+		return
 	}
 	c.resetModelWaitTimer()
-	return true
+}
+
+func (c *conv) cancelModelWaitBackoffForInput() {
+	c.modelWaitBackoffFence.CompareAndSwap(modelWaitBackoffPending, modelWaitBackoffCancelled)
+}
+
+func (c *conv) cancelModelWaitBackoff() {
+	state := c.modelWaitBackoffFence.Load()
+	if c.modelWaitBackoffC == nil && state != modelWaitBackoffPending && state != modelWaitBackoffCancelled {
+		return
+	}
+	c.stopModelWaitBackoff()
+	c.restoreModelWaitDiagnostic()
+	c.summaryReason = wslive.TurnAborted
+	c.disarmModelWait()
+	c.endTurn("", false)
 }
 
 // modelWaitTurnError returns the TurnFailed error message to apply when a
@@ -366,6 +456,7 @@ func (c *conv) modelWaitTurnError(ev Event) string {
 		return c.modelWaitFailErr
 	}
 	if ev.ModelFailure != "" && c.modelWaitRetries >= c.modelWaitMaxRetries {
+		c.noteModelWaitFailure(ev.ModelFailure)
 		c.modelWaitFailErr = c.modelWaitExhaustedError(ev.ModelFailure)
 		c.publishModelWaitExhaustedDiagnostic()
 		return c.modelWaitFailErr
@@ -384,10 +475,56 @@ func (c *conv) modelWaitExhaustedError(failure string) string {
 }
 
 func (c *conv) modelWaitExhaustedDiagnostic() string {
-	if c.modelWaitRetries == 0 {
-		return "ws: agy stalled; automatic continue retries are disabled (0 attempts configured)."
+	classes := ""
+	if len(c.modelWaitFailureClasses) > 0 {
+		classes = " Failure classes: " + strings.Join(c.modelWaitFailureClasses, ", ") + "."
 	}
-	return fmt.Sprintf("ws: agy stalled; sent %d automatic continue attempts, all failed.", c.modelWaitRetries)
+	if c.modelWaitRetries == 0 {
+		return "ws: agy stalled; automatic continue retries are disabled (0 attempts configured)." + classes
+	}
+	return fmt.Sprintf("ws: agy stalled; sent %d automatic continue attempts, all failed.%s", c.modelWaitRetries, classes)
+}
+
+func (c *conv) noteModelWaitFailure(failure string) {
+	class := agyModelFailureClass(failure)
+	for _, seen := range c.modelWaitFailureClasses {
+		if seen == class {
+			return
+		}
+	}
+	c.modelWaitFailureClasses = append(c.modelWaitFailureClasses, class)
+}
+
+func agyModelFailureClass(failure string) string {
+	if failure == "" {
+		return "no-event silence"
+	}
+	lower := strings.ToLower(failure)
+	switch {
+	case strings.Contains(lower, "no capacity"):
+		if strings.Contains(lower, "503") || strings.Contains(lower, "unavailable") {
+			return "no capacity (503/UNAVAILABLE)"
+		}
+		return "no capacity"
+	case strings.Contains(lower, "unexpected eof"):
+		return "unexpected EOF"
+	case strings.Contains(lower, "stream idle timeout"):
+		return "stream idle timeout"
+	case strings.Contains(lower, "tls handshake timeout"):
+		return "TLS handshake timeout"
+	case strings.Contains(lower, "tls") && strings.Contains(lower, "timeout"):
+		return "TLS timeout"
+	case strings.Contains(lower, "503"):
+		return "HTTP 503"
+	case strings.Contains(lower, "unavailable"):
+		return "UNAVAILABLE"
+	case failure == agyStreamInterrupted:
+		return "stream interrupted"
+	case strings.HasPrefix(failure, agyAPIErrorPrefix):
+		return "API error"
+	default:
+		return "model failure"
+	}
 }
 
 func (c *conv) publishModelWaitExhaustedDiagnostic() {

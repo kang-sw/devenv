@@ -135,6 +135,9 @@ type Options struct {
 	// AgyModelWaitRetries is the selected hosted package's manifest default
 	// for agy.model_wait_retries. Nil uses the ws default.
 	AgyModelWaitRetries *int
+	// AgyModelWaitBackoff returns the delay before automatic continue attempt
+	// n (one-based). Nil uses bounded exponential jitter.
+	AgyModelWaitBackoff func(attempt int) time.Duration
 	// WSMCP is the stdio ws-mcp command serving root, without the runner's
 	// environment; nil refuses profiles that allow ws tools.
 	WSMCP func(root string) (MCPCommand, error)
@@ -299,6 +302,9 @@ func NewRunner(opts Options) *Runner {
 			t := time.NewTimer(d)
 			return t.C, func() { t.Stop() }
 		}
+	}
+	if opts.AgyModelWaitBackoff == nil {
+		opts.AgyModelWaitBackoff = defaultAgyModelWaitBackoff
 	}
 	if opts.Log == nil {
 		opts.Log = io.Discard
@@ -1193,6 +1199,7 @@ func (r *Runner) send(id, text string) (State, error) {
 		c.sends++
 		c.held++
 		c.rec.Sends = c.sends
+		c.cancelModelWaitBackoffForInput()
 		if c.rec.Parent != nil {
 			// Any message resets a spawned child's waiting expiry.
 			c.rec.LastActiveAt = r.opts.Now().UTC().Format(time.RFC3339)

@@ -357,12 +357,24 @@ class RingSkipTest(HolderTestCase):
     def test_only_whole_lines_are_skipped(self):
         pattern = holder_mod.re.compile(b"^drop")
         pieces = [(b"keep", True), (b"drop tail\n", False), (b"drop\n", False), (b"drop cut", True), (b"rest\n", False)]
-        kept, at_start = holder_mod.unskipped(pattern, pieces, True)
+        kept, at_start, skipped = holder_mod.unskipped(pattern, pieces, True)
         self.assertEqual(kept, [(b"keep", True), (b"drop tail\n", False), (b"drop cut", True), (b"rest\n", False)])
         self.assertTrue(at_start)
-        kept, at_start = holder_mod.unskipped(pattern, [(b"drop\n", False)], False)
+        self.assertTrue(skipped)
+        kept, at_start, skipped = holder_mod.unskipped(pattern, [(b"drop\n", False)], False)
         self.assertEqual(kept, [(b"drop\n", False)])
         self.assertTrue(at_start)
+        self.assertFalse(skipped)
+
+    def test_skipped_lines_emit_throttled_content_free_pulse(self):
+        pulse = '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"ws_activity"}}}'
+        holder = self.start_holder(ring_skip="^secret", ring_pulse=pulse, ring_pulse_seconds=60.0)
+        client = self.attached(holder)
+        self.spawn(client, py_child("print('secret thought one')\nprint('secret thought two')\n"), mode="pipe")
+        events = client.events_until(lambda m: m.get("event") == "exit")
+        output = [decode(m) for m in events if m.get("stream") == "stdout"]
+        self.assertEqual(output, [pulse.encode("utf-8") + b"\n"])
+        self.assertNotIn(b"thought", b"".join(output))
 
 
 class IdleExitTest(HolderTestCase):

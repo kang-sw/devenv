@@ -99,6 +99,7 @@ type conv struct {
 	modelWaitFailErr            string
 	modelWaitDiagnostic         string
 	modelWaitExhaustedPublished bool
+	modelWaitFailureClasses     []string
 	modelWaitFailureExcluded    bool
 	modelWaitC                  <-chan time.Time
 	modelWaitStop               func()
@@ -107,6 +108,13 @@ type conv struct {
 	modelWaitDrainStop          func()
 	modelWaitCancelC            <-chan time.Time
 	modelWaitCancelStop         func()
+	modelWaitBackoffC           <-chan time.Time
+	modelWaitBackoffStop        func()
+	modelWaitBackoffFailure     string
+	// modelWaitBackoffFence is the only model-wait field shared with Send:
+	// pending -> cancelled lets a successful inbox write win before it
+	// returns; pending -> firing commits the automatic continue instead.
+	modelWaitBackoffFence atomic.Uint32
 
 	// loop-owned, except registration timing below.
 	events       <-chan Event
@@ -438,6 +446,9 @@ func (c *conv) steerMail(text string) bool {
 // messages, starting the process when needed (kick). It runs in the loop.
 func (c *conv) inboxChanged() {
 	c.refreshHeld()
+	if c.modelWaitBackoffC != nil && c.held > 0 {
+		c.cancelModelWaitBackoff()
+	}
 	c.checkInterrupt()
 	c.steer()
 	c.kick()
@@ -489,6 +500,7 @@ func (c *conv) loop() {
 	defer func() {
 		c.stopCompactWatchdog()
 		c.stopModelWaitTimer()
+		c.stopModelWaitBackoff()
 		if c.spawnTimer != nil {
 			c.spawnTimer.Stop()
 		}
@@ -519,12 +531,13 @@ func (c *conv) loop() {
 		return
 	}
 	for {
-		var idleC, actionC, leverC, compactC, modelWaitC, modelWaitDrainC, modelWaitCancelC, spawnC, bgGraceC <-chan time.Time
+		var idleC, actionC, leverC, compactC, modelWaitC, modelWaitDrainC, modelWaitCancelC, modelWaitBackoffC, spawnC, bgGraceC <-chan time.Time
 		leverC = c.leverC
 		compactC = c.compactC
 		modelWaitC = c.modelWaitC
 		modelWaitDrainC = c.modelWaitDrainC
 		modelWaitCancelC = c.modelWaitCancelC
+		modelWaitBackoffC = c.modelWaitBackoffC
 		if c.spawnTimer != nil {
 			spawnC = c.spawnTimer.C
 		}
@@ -601,6 +614,8 @@ func (c *conv) loop() {
 			c.modelFailureDrainTimedOut()
 		case <-modelWaitCancelC:
 			c.modelWaitCancelTimedOut()
+		case <-modelWaitBackoffC:
+			c.modelWaitBackoffTimedOut()
 		case <-beat.C:
 			c.heartbeat()
 		case <-c.r.quit:
