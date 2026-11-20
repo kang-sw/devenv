@@ -80,6 +80,53 @@ const helpers = () => {
     frames: () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))),
   };
 };
+// Phase 3: the gate's constants (WsGallery.C) the waits follow.
+const G_INERTIA = 170, G_MICRO = 220, G_IDLE = 240, G_LOCK = 420;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const rubber = pct => 26 * (1 - Math.exp(-2.3 * pct));
+// AVOID is what a wheel spot must not stand on: what takes its own wheel or
+// is no pane body (a frame, a card body, the rail, a head, a control).
+const AVOID = 'iframe, .bc-body, .gal-rail, .tophead, button, a, .gal-pullpill';
+// spotIn finds, in the page, a point on sel's element (within the window)
+// whose topmost element is inside it and not in avoid.
+const spotIn = ([sel, avoid]) => {
+  const el = document.querySelector(sel);
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  const x0 = Math.max(r.left, 0), x1 = Math.min(r.right, innerWidth), y0 = Math.max(r.top, 0), y1 = Math.min(r.bottom, innerHeight);
+  if (x1 <= x0 || y1 <= y0) return null;
+  for (const fy of [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8, 0.1, 0.9]) for (const fx of [0.5, 0.35, 0.65, 0.2, 0.8]) {
+    const x = x0 + (x1 - x0) * fx, y = y0 + (y1 - y0) * fy, h = document.elementFromPoint(x, y);
+    if (h && el.contains(h) && !h.closest(avoid)) return { x, y };
+  }
+  return null;
+};
+// In-page readers for the gate: the pill showing (its side, text, fill,
+// state, the marked dots, the band's shift in px and what it moves), and a
+// log of the gallery's position and of dots starting to spring.
+const helpers3 = () => {
+  const g = window.__gal3 = {
+    pill: () => {
+      const s = document.querySelector('#bgal .gal-pullpill.show');
+      if (!s) return null;
+      const pulled = document.querySelector('[data-gal-pull]'), tr = pulled ? (pulled.style.translate || '').split(' ') : [];
+      return { side: s.classList.contains('top') ? 'top' : 'bottom', text: s.querySelector('.gal-pulltxt').textContent, fill: s.querySelector('.gal-pullfill').style.width,
+        ready: s.classList.contains('ready'), damped: s.classList.contains('damped'), target: [...document.querySelectorAll('#bgal .gal-dot.pull-target')].map(b => +b.getAttribute('data-pos')),
+        shift: tr.length > 1 ? parseFloat(tr[1]) : 0, pulled: pulled ? pulled.id || pulled.className : null };
+    },
+    log: [],
+    watch: () => {
+      g.log = [];
+      if (g.mo) g.mo.disconnect();
+      g.mo = new MutationObserver(ms => ms.forEach(m => {
+        const t = performance.now(), n = m.target;
+        if (n.id === 'bgal' && m.attributeName === 'data-pos') g.log.push({ t, pos: n.getAttribute('data-pos') });
+        else if (n.classList.contains('gal-dot') && n.classList.contains('spring') && !(m.oldValue || '').includes('spring')) g.log.push({ t, spring: n.getAttribute('data-pos') });
+      }));
+      g.mo.observe(document.getElementById('bgal'), { subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['data-pos', 'class'] });
+    },
+  };
+};
 async function open(context, id, w, h) {
   const tab = await context.newPage();
   if (w) await tab.setViewportSize({ width: w, height: h });
@@ -593,6 +640,315 @@ async function routeTerminal(context) {
       assert.equal(await page.evaluate(() => document.querySelectorAll('#bgal .gal-page:not(.gal-plus), #bgal .gal-split, #bgal .gal-pane, #bgal .gal-div').length), 0, 'no page, split, pane or divider left');
       done.push('last-pane page removal (pin button and header drag)');
       assert.deepEqual(errors, [], 'no page errors (split, reloaded)');
+      await context.close();
+    }
+
+    // ---- Phase 3 (wide 2400): the bounce-snap gate and spring-loaded dots ----
+    // Motion is on here, so the rubber band's translate shows. Waits follow
+    // the gate's constants: 170ms inertia, 220ms micro-bounce, 240ms idle
+    // spring-back, 420ms lock, 300ms spring.
+    {
+      const context = await browser.newContext({ viewport: { width: 2400, height: 1000 }, locale: 'en-US', reducedMotion: 'no-preference' });
+      await routeTerminal(context);
+      await seed(context, 'livesession', { cards: [], topics: [{ n: 'deep', p: 1, a: 0, b: 0 }, { n: 'beta', p: 2, a: 0, b: 0 }, { n: 'alpha', p: 3, a: 0, b: 0 }],
+        gallery: { v: 1, active: 'p1', pages: [{ id: 'p1', root: { axis: 'row', ratio: 0.5, a: { topic: 'deep' }, b: { topic: 'beta' } } }, { id: 'p2', root: { topic: 'alpha' } }], rev: 2 } });
+      const { tab, page, errors } = await open(context, 'livesession');
+      await until(async () => JSON.stringify(await pages(page)) === '[["deep","beta"],["alpha"]]', 'seeded split page and alpha');
+      await page.evaluate(helpers3);
+      const off = async () => { const b = await tab.locator('iframe.sframe.on').boundingBox(); return { x: b.x, y: b.y }; };
+      const spot = async (sel, avoid) => { const o = await off(); const p = await page.evaluate(spotIn, [sel, avoid || AVOID]); assert(p, 'no wheel spot on ' + sel); return { x: o.x + p.x, y: o.y + p.y }; };
+      const wheel = async (at, dy, n = 1, gap = 0) => { await tab.mouse.move(at.x, at.y); for (let i = 0; i < n; i++) { if (i && gap) await sleep(gap); await tab.mouse.wheel(0, dy); } await page.evaluate(() => window.__gal.frames()); };
+      const pill = () => page.evaluate(() => window.__gal3.pill());
+      const body = n => `#bgal section.topic[data-topic="${n}"] > .gal-pbody`;
+      const scrollTo = (n, where) => page.evaluate(([s, w]) => { const b = document.querySelector(s); b.scrollTop = w === 'end' ? b.scrollHeight : w; return { top: b.scrollTop, max: b.scrollHeight - b.clientHeight }; }, [body(n), where]);
+      assert.equal(await pos(page), 0);
+
+      // First page top (wide Page 1): only the damped micro-bounce, never a
+      // flip or a wrap to +.
+      await scrollTo('deep', 0);
+      const deepAt = await spot(body('deep'));
+      await wheel(deepAt, -125);
+      let pl = await pill();
+      assert.deepEqual([pl.side, pl.damped, pl.ready, pl.fill, pl.target, pl.text, pl.shift], ['top', true, false, '0%', [], '↑ No page in this direction', 5], 'first page top: the damped edge pill at 0%, a 5px bounce');
+      await wheel(deepAt, -125, 8, 60);
+      assert.equal(await pos(page), 0, 'no flip, no wrap at the first page\'s top');
+      await sleep(G_MICRO + 80);
+      assert.equal(await pill(), null, 'the micro-bounce clears after 220ms idle');
+      done.push('first page top: damped micro-bounce only, no flip or wrap');
+
+      // The hovered pane drives the gate: deep still scrolls down (native,
+      // no pull), while beta beside it at its end pulls toward page 2,
+      // ready from 85%, and flips at 100% (4 x 100 of 320).
+      const deepScroll = await scrollTo('deep', 0);
+      assert(deepScroll.max > 200, 'deep\'s pane scrolls: ' + JSON.stringify(deepScroll));
+      await wheel(deepAt, 60, 2, 30);
+      assert.equal(await pill(), null, 'deep scrolls natively: no pull');
+      assert.equal(await pos(page), 0);
+      await until(() => page.evaluate(s => document.querySelector(s).scrollTop > 0, body('deep')), 'deep scrolled by the wheel');
+      await scrollTo('beta', 'end');
+      const betaAt = await spot(body('beta'));
+      await sleep(G_INERTIA + 80);
+      await wheel(betaAt, 100);
+      pl = await pill();
+      assert.deepEqual([pl.side, pl.damped, pl.ready, pl.fill, pl.target, pl.text], ['bottom', false, false, '31%', [1], '↓ 2: alpha (31%)'], 'beta at its end pulls toward page 2');
+      assert(Math.abs(pl.shift + rubber(100 / 320)) < 0.11, 'the rubber band shifts the page up: ' + pl.shift);
+      await wheel(betaAt, 100, 2, 30);
+      pl = await pill();
+      assert.deepEqual([pl.fill, pl.ready, pl.text], ['94%', true, '↓ 2: alpha (94%)'], 'ready from 85%');
+      assert(Math.abs(pl.shift + rubber(300 / 320)) < 0.11 && pl.shift > -26, 'the band eases below 26px: ' + pl.shift);
+      assert.equal(await pos(page), 0, 'no flip below 100%');
+      await wheel(betaAt, 100);
+      const flipped = Date.now();
+      assert.equal(await pos(page), 1, 'the hovered pane\'s pull flips to page 2 at 100%');
+      assert.equal(await pill(), null, 'the flip clears the pull');
+      done.push('hovered pane in a split page drives the flip (the other pane scrolls natively); pill %, target dot, ready from 85%, rubber band');
+
+      // The 420ms lock ignores wheel events after a flip; then a pull below
+      // 100% springs back after 240ms idle.
+      await scrollTo('alpha', 0);
+      const alphaAt = await spot(body('alpha'));
+      await wheel(alphaAt, -100);
+      assert(Date.now() - flipped < G_LOCK - 40, 'the lock probe ran inside the lock: ' + (Date.now() - flipped) + 'ms');
+      assert.equal(await pill(), null, 'wheel events inside the 420ms lock are ignored');
+      await sleep(G_LOCK);
+      await wheel(alphaAt, -100);
+      pl = await pill();
+      assert.deepEqual([pl.side, pl.fill, pl.target, pl.text], ['top', '31%', [0], '↑ 1: deep + beta (31%)'], 'after the lock a pull charges toward page 1');
+      await sleep(G_IDLE + 100);
+      assert.equal(await pill(), null, 'idle 240ms below 100%: springs back');
+      assert.equal(await page.evaluate(() => document.querySelectorAll('[data-gal-pull]').length), 0, 'the band is released');
+      assert.equal(await pos(page), 1, 'and stays on page 2');
+      done.push('420ms refractory lock after a flip; 240ms idle spring-back below 100%');
+
+      // alpha's end flips to +; +'s bottom only micro-bounces (no wrap to
+      // page 1).
+      await scrollTo('alpha', 'end');
+      await sleep(G_INERTIA + 80);
+      await wheel(alphaAt, 100, 4, 30);
+      assert.equal(await pos(page), 2, 'alpha\'s end flips to +');
+      await sleep(G_LOCK);
+      const plusAt = await spot('#bgal .gal-plus');
+      await wheel(plusAt, 125);
+      pl = await pill();
+      assert.deepEqual([pl.side, pl.damped, pl.fill, pl.target, pl.text, pl.shift], ['bottom', true, '0%', [], '↓ No page in this direction', -5], '+ bottom: the damped edge pill');
+      await wheel(plusAt, 125, 8, 60);
+      assert.equal(await pos(page), 2, 'no flip, no wrap past +');
+      await sleep(G_MICRO + 80);
+      assert.equal(await pill(), null);
+      done.push('trailing + bottom: damped micro-bounce only, no flip or wrap');
+
+      // Terminals and frames take their own wheel: a docked terminal and a
+      // topic's doc frame never charge the gate.
+      const term = page.locator('.bcard[data-card]:has(.tm-host)');
+      await until(() => term.count().then(n => n === 1), 'terminal card from the routed list');
+      await term.locator('.bc-pin').click();
+      await until(async () => (await pages(page)).length === 3, 'terminal docked on page 3');
+      await until(() => page.evaluate(() => !!document.querySelector('#bgal .gal-page[data-active] .tm-host .xterm')), 'terminal emulator mounted on the shown page', 15000);
+      assert.equal(await pos(page), 2);
+      await sleep(G_LOCK);
+      const termAt = await spot('#bgal .gal-page[data-active] .xterm', '.gal-rail');
+      for (const dy of [125, -125]) {
+        await wheel(termAt, dy, 6, 40);
+        assert.equal(await pill(), null, 'a terminal\'s wheel never pulls (' + dy + ')');
+        assert.equal(await pos(page), 2, 'a terminal never flips (' + dy + ')');
+      }
+      await dot(page, 1).click();
+      await until(async () => await pos(page) === 1, 'alpha\'s page');
+      await until(() => page.evaluate(() => !!document.querySelector('#bgal section.topic[data-topic="alpha"] iframe.doc-frame')), 'alpha frame mounted', 15000);
+      await scrollTo('alpha', 0);
+      const fr = await page.evaluate(() => { const r = document.querySelector('#bgal section.topic[data-topic="alpha"] iframe.doc-frame').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 40) }; });
+      const fo = await off();
+      const frameAt = { x: fo.x + fr.x, y: fo.y + fr.y };
+      assert.equal(await page.evaluate(([x, y]) => document.elementFromPoint(x, y).tagName, [fr.x, fr.y]), 'IFRAME', 'the spot is on alpha\'s doc frame');
+      await sleep(G_LOCK);
+      for (const dy of [-125, 125]) {
+        await wheel(frameAt, dy, 6, 40);
+        assert.equal(await pill(), null, 'a frame\'s wheel never pulls (' + dy + ')');
+        assert.equal(await pos(page), 1, 'a frame never flips (' + dy + ')');
+      }
+      done.push('terminals and iframes do not charge the gate or flip pages');
+
+      // Handler cost: N synthetic wheel events through the gallery's
+      // listener (the pass path over a pane that still scrolls; the
+      // boundary path alternating a pull and a reset), less the same
+      // dispatch on the board where no gate listens.
+      await dot(page, 0).click();
+      await until(async () => await pos(page) === 0, 'page 1 for the measurement');
+      const mid = await scrollTo('deep', 120);
+      assert(mid.top === 120 && mid.max > 200, 'deep stands mid-pane for the pass path: ' + JSON.stringify(mid));
+      await scrollTo('beta', 'end');
+      // Each path runs back to back (worst case: every event reads the
+      // scroller right after the last one's writes, a forced style and
+      // layout pass) and one event per animation frame (wheel input is
+      // delivered at most about once a frame), the latter timing only the
+      // dispatch, in the task after a frame rendered.
+      const cost = await page.evaluate(async ([dp, bt]) => {
+        const pass = document.querySelector(dp).firstElementChild, edge = document.querySelector(bt).lastElementChild, base = document.querySelector('#r-board > section.topic:not(.closed) .tophead');
+        const ev = (flip, i) => new WheelEvent('wheel', { deltaY: flip && i % 2 ? -100 : 100, bubbles: true, cancelable: true });
+        const burst = (el, flip, N) => { const t0 = performance.now(); for (let i = 0; i < N; i++) el.dispatchEvent(ev(flip, i)); return (performance.now() - t0) * 1000 / N; };
+        // The task after a frame rendered: the page's layout is clean.
+        const frame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+        const framed = async (el, flip, N) => { let t = 0; for (let i = 0; i < N; i++) { await frame(); const e = ev(flip, i), t0 = performance.now(); el.dispatchEvent(e); t += performance.now() - t0; } return t * 1000 / N; };
+        burst(base, false, 200); burst(pass, false, 200);
+        const out = { burst: { base: burst(base, false, 2000), pass: burst(pass, false, 2000) } };
+        out.quiet = !document.querySelector('[data-gal-pull]');
+        out.burst.edge = burst(edge, true, 2000);
+        out.frame = { base: await framed(base, false, 120), pass: await framed(pass, false, 120), edge: await framed(edge, true, 120) };
+        return out;
+      }, [body('deep'), body('beta')]);
+      const us = v => v.toFixed(2);
+      console.log(`wheel handler cost (Chromium, us/event; synthetic events): one per frame (120 each): board baseline ${us(cost.frame.base)}, gallery pass ${us(cost.frame.pass)} (+${us(cost.frame.pass - cost.frame.base)}), gallery boundary micro/pull/pass alternating ${us(cost.frame.edge)} (+${us(cost.frame.edge - cost.frame.base)}); back to back (2000 each, a forced style/layout per event): baseline ${us(cost.burst.base)}, pass ${us(cost.burst.pass)}, boundary ${us(cost.burst.edge)}`);
+      assert.equal(cost.quiet, true, 'the pass path never pulled');
+      await sleep(G_IDLE + 100);
+      assert.equal(await pill(), null, 'the measured pulls spring back');
+      assert.equal(await pos(page), 0, 'the measurement never flipped');
+      done.push('wheel handler cost measured');
+
+      // Spring-loaded hover: a board item held over page 2's dot shows that
+      // page after 300ms mid-drag, and drops in alpha's right zone there.
+      const at = async (name, z) => {
+        const o = await off(), r = await page.evaluate(n => { const b = document.querySelector(`#bgal .gal-pane[data-ref="t:${n}"]`).getBoundingClientRect(); return { left: b.left, top: b.top, width: b.width, height: b.height }; }, name);
+        return { x: o.x + r.left + r.width * (z === 'right' ? 0.92 : 0.5), y: o.y + r.top + r.height * (z === 'bottom' ? 0.92 : 0.5) };
+      };
+      await page.evaluate(() => window.__gal3.watch());
+      const sprung = await drag(tab, await grip(bar(page, 'epsilon')), () => at('alpha', 'right'), async () => {
+        const d = await center(dot(page, 1));
+        await tab.mouse.move(d.x, d.y, { steps: 4 });
+        const early = { pos: await pos(page), spring: await dot(page, 1).evaluate(b => b.classList.contains('spring')) };
+        await until(async () => await pos(page) === 1, 'the 300ms spring shows page 2 mid-drag', 2000);
+        return { early, log: await page.evaluate(() => window.__gal3.log) };
+      });
+      assert.deepEqual(sprung.early, { pos: 0, spring: true }, 'the hovered dot springs, the page not yet shown');
+      const springAt = sprung.log.find(l => l.spring === '1'), shownAt = sprung.log.find(l => l.pos === '1');
+      assert(springAt && shownAt && shownAt.t - springAt.t >= 290 && shownAt.t - springAt.t < 600, 'the page shows 300ms after the hover starts: ' + JSON.stringify(sprung.log));
+      await until(async () => { const p = await pages(page); return p.length === 3 && JSON.stringify(p.slice(0, 2)) === '[["deep","beta"],["alpha","epsilon"]]'; }, 'epsilon drops right of alpha on the sprung page');
+      assert.equal(await pos(page), 1, 'the sprung page stays shown');
+      assert.equal(await page.locator('#bgal .gal-dot.spring').count(), 0, 'no dot left springing');
+      done.push('300ms spring-loaded hover switches pages mid-drag; the drop lands in a zone on the sprung page');
+
+      // A drop on + before 300ms docks a new page; + never showed.
+      await dot(page, 0).click();
+      await until(async () => await pos(page) === 0, 'deep\'s page');
+      await page.evaluate(() => window.__gal3.watch());
+      const g = await grip(bar(page, 'deep'));
+      await tab.mouse.move(g.x, g.y);
+      await tab.mouse.down();
+      await tab.mouse.move(g.x + 14, g.y + 14, { steps: 4 });
+      const pd = await plus(page);
+      await tab.mouse.move(pd.x, pd.y, { steps: 3 });
+      const quick = { pos: await pos(page), spring: await page.locator('#bgal .gal-dot.empty').evaluate(b => b.classList.contains('spring')), log: await page.evaluate(() => window.__gal3.log) };
+      await tab.mouse.up();
+      assert.deepEqual([quick.pos, quick.spring], [0, true], 'over + the dot springs, + not shown yet');
+      assert.equal(quick.log.filter(l => l.pos === '3').length, 0, '+ never showed before the drop');
+      await until(async () => { const p = await pages(page); return p.length === 4 && p[3][0] === 'deep' && p[0][0] === 'beta'; }, 'the drop on + docks deep on a new page');
+      assert.equal(await active(page), 3, 'the new page shows');
+      done.push('drop on + before 300ms creates a new page');
+      assert.deepEqual(errors, [], 'no page errors (gate wide)');
+      await context.close();
+    }
+
+    // ---- Phase 3 (narrow 1400): Page 0's boundaries, spring from the board ----
+    {
+      const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, locale: 'en-US', reducedMotion: 'no-preference' });
+      await seed(context, 'livesession', { cards: [], topics: [{ n: 'alpha', p: 1, a: 0, b: 0 }] });
+      const { tab, page, errors } = await open(context, 'livesession');
+      await until(async () => JSON.stringify(await pages(page)) === '[["alpha"]]', 'one docked page');
+      await page.evaluate(helpers3);
+      if (await pos(page) !== -1) await dot(page, -1).click();
+      await until(async () => await pos(page) === -1, 'Page 0');
+      const off = async () => { const b = await tab.locator('iframe.sframe.on').boundingBox(); return { x: b.x, y: b.y }; };
+      const spot = async sel => { const o = await off(); const p = await page.evaluate(spotIn, [sel, AVOID]); assert(p, 'no wheel spot on ' + sel); return { x: o.x + p.x, y: o.y + p.y }; };
+      const wheel = async (at, dy, n = 1, gap = 0) => { await tab.mouse.move(at.x, at.y); for (let i = 0; i < n; i++) { if (i && gap) await sleep(gap); await tab.mouse.wheel(0, dy); } await page.evaluate(() => window.__gal.frames()); };
+      const pill = () => page.evaluate(() => window.__gal3.pill());
+      const col = v => page.evaluate(w => { const b = document.getElementById('bcol'); b.scrollTop = w === 'end' ? b.scrollHeight : w; return b.scrollTop; }, v);
+
+      // Page 0 top: the damped micro-bounce (no page above the Main Board).
+      await col(0);
+      let boardAt = await spot('#r-board');
+      await wheel(boardAt, -125);
+      let pl = await pill();
+      assert.deepEqual([pl.side, pl.damped, pl.fill, pl.text, pl.shift, pl.pulled], ['top', true, '0%', '↑ No page in this direction', 5, 'r-board'], 'Page 0 top: the damped edge pill, the board bounces');
+      await wheel(boardAt, -125, 6, 60);
+      assert.equal(await pos(page), -1, 'no flip above Page 0');
+      await sleep(G_MICRO + 80);
+      assert.equal(await pill(), null);
+
+      // Page 0's rendered bottom (no auto-load) pulls toward page 1 and flips.
+      await col('end');
+      await page.evaluate(() => window.__gal.frames());
+      boardAt = await spot('#r-board');
+      await sleep(G_INERTIA + 80);
+      await wheel(boardAt, 100);
+      pl = await pill();
+      assert.deepEqual([pl.side, pl.fill, pl.target, pl.text, pl.pulled], ['bottom', '31%', [0], '↓ 1: alpha (31%)', 'r-board'], 'Page 0 bottom pulls toward page 1');
+      await wheel(boardAt, 100, 3, 30);
+      assert.equal(await pos(page), 0, 'Page 0 bottom flips to page 1');
+      assert.equal(await page.evaluate(() => document.getElementById('r-board').style.translate), '', 'the board\'s band is released');
+      done.push('narrow Page 0: top micro-bounce, rendered bottom flips to page 1');
+
+      // Spring from the board: a board topic held over page 1's dot shows
+      // that page after 300ms (the board steps away mid-drag), and drops
+      // at alpha's bottom.
+      await dot(page, -1).click();
+      await until(async () => await pos(page) === -1, 'Page 0 again');
+      await drag(tab, await grip(bar(page, 'beta')), async () => {
+        const o = await off(), r = await page.evaluate(() => { const b = document.querySelector('#bgal .gal-pane[data-ref="t:alpha"]').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height * 0.92 }; });
+        return { x: o.x + r.x, y: o.y + r.y };
+      }, async () => {
+        const d = await center(dot(page, 0));
+        await tab.mouse.move(d.x, d.y, { steps: 4 });
+        await until(async () => await pos(page) === 0, 'the spring shows page 1 over the board mid-drag', 2000);
+      });
+      await until(async () => JSON.stringify(await pages(page)) === '[["alpha","beta"]]', 'beta drops at alpha\'s bottom on the sprung page');
+      done.push('narrow: spring-loaded hover from the Main Board, the drop lands in a zone');
+
+      // Zero docked pages: the gallery and its gate are inert; the board's
+      // wheel is never taken.
+      await bar(page, 'alpha').locator('.tpin').click();
+      await bar(page, 'beta').locator('.tpin').click();
+      await until(async () => JSON.stringify(await pages(page)) === '[]', 'no docked page');
+      assert.equal(await page.locator('#bgal').isHidden(), true);
+      await col('end');
+      await page.evaluate(() => window.__gal.frames());
+      boardAt = await spot('#r-board');
+      await page.evaluate(() => { window.__wheels = []; document.addEventListener('wheel', e => window.__wheels.push(e.defaultPrevented)); });
+      await sleep(G_INERTIA + 80);
+      await wheel(boardAt, 125, 6, 40);
+      const inert = await page.evaluate(() => ({ wheels: window.__wheels, pulled: document.querySelectorAll('[data-gal-pull]').length, hidden: document.getElementById('bgal').hidden }));
+      assert.deepEqual(inert, { wheels: [false, false, false, false, false, false], pulled: 0, hidden: true }, 'zero pages: the Page 0 bottom gate stays inert');
+      done.push('narrow Page 0 bottom inert with zero docked pages');
+      assert.deepEqual(errors, [], 'no page errors (gate narrow)');
+      await context.close();
+    }
+
+    // ---- Phase 3 (touch narrow): touch scrolling never charges ----
+    {
+      const context = await browser.newContext({ viewport: { width: 420, height: 860 }, hasTouch: true, isMobile: true, locale: 'en-US', reducedMotion: 'no-preference' });
+      await seed(context, 'livesession', { cards: [], topics: [{ n: 'alpha', p: 1, a: 0, b: 0 }] });
+      const { tab, page, errors } = await open(context, 'livesession');
+      if (await page.evaluate(() => getComputedStyle(document.getElementById('bcol')).display === 'none')) await page.locator('#tabbar [data-tab="board"]').tap();
+      await until(() => page.locator('#bgal .gal-rail').isVisible(), 'touch rail');
+      if (await pos(page) !== -1) await dot(page, -1).tap();
+      await until(async () => await pos(page) === -1, 'touch Page 0');
+      await page.evaluate(helpers3);
+      await page.evaluate(() => { window.__wheels = 0; document.addEventListener('wheel', () => { window.__wheels++; }, { capture: true }); window.__seenPull = 0; new MutationObserver(() => { if (document.querySelector('[data-gal-pull], #bgal .gal-pullpill.show')) window.__seenPull++; }).observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['data-gal-pull', 'class'] }); });
+      const cdp = await context.newCDPSession(tab);
+      const b = await tab.locator('iframe.sframe.on').boundingBox();
+      const r = await page.evaluate(() => { const c = document.getElementById('bcol').getBoundingClientRect(); return { x: c.left + c.width * 0.6, y: c.top + c.height / 2 }; });
+      const gesture = yDistance => cdp.send('Input.synthesizeScrollGesture', { x: Math.round(b.x + r.x), y: Math.round(b.y + r.y), yDistance, gestureSourceType: 'touch', speed: 1200 });
+      const top0 = await page.evaluate(() => { const c = document.getElementById('bcol'); c.scrollTop = 200; return c.scrollTop; });
+      await gesture(-300);
+      const top1 = await page.evaluate(() => document.getElementById('bcol').scrollTop);
+      assert(top1 > top0 + 50, `the touch gesture scrolls the board (${top0} -> ${top1})`);
+      await page.evaluate(() => { const c = document.getElementById('bcol'); c.scrollTop = c.scrollHeight; });
+      for (let i = 0; i < 3; i++) await gesture(-600);
+      await gesture(1200);
+      await page.evaluate(() => { const c = document.getElementById('bcol'); c.scrollTop = 0; });
+      for (let i = 0; i < 2; i++) await gesture(600);
+      const touch = await page.evaluate(() => ({ wheels: window.__wheels, pulls: window.__seenPull, pos: +document.getElementById('bgal').getAttribute('data-pos') }));
+      assert.deepEqual(touch, { wheels: 0, pulls: 0, pos: -1 }, 'touch overscroll at both ends: no wheel event, no tension, no flip');
+      done.push('touch scroll emulation never charges tension (wheel-only gate)');
+      assert.deepEqual(errors, [], 'no page errors (touch gate)');
       await context.close();
     }
 

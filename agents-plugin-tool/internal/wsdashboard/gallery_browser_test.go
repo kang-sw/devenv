@@ -67,7 +67,14 @@ Frame identity sentinel for %s.</wb:body><wb:panel recap="%s panel">Panel payloa
 // tree (Phase 2): five-zone drops with their preview, pane moves within
 // and across pages, the center swap, divider drags kept across a reload,
 // a split collapsing when one pane unpins, the last pane's page going,
-// and the docked frames never reloading on the way. The
+// and the docked frames never reloading on the way; and Phase 3: the 300ms
+// spring-loaded rail dots during a drag (and a drop on + before then), the
+// wheel bounce-snap gate on the hovered pane of a split page, at the
+// narrow Main Board's top and rendered bottom (inert with no docked page),
+// the damped micro-bounce at the first page's top and +'s bottom, the
+// refractory lock and the idle spring-back, terminals and frames never
+// charging it, touch scrolling never charging it, and the wheel handler's
+// cost. The
 // terminal capability is synthetic (no shell starts); the terminal list
 // and socket are routed in the browser.
 func TestGalleryBrowser(t *testing.T) {
