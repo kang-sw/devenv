@@ -3,6 +3,7 @@ title: 사용자 실행 agy의 MCP clientInfo로 agy 하니스 식별
 related:
   261120-feat-ws-agy-usage-activity-trigger: its Phase 2 (lead-call trigger) is inert for user-started agy until this lands
   261118-refactor-ws-harness-name-branches: umbrella; detection must stay descriptor-driven, not a new name branch
+dropped: 2026-11-20
 ---
 
 # Identify user-started agy from its MCP clientInfo
@@ -57,3 +58,8 @@ Verification:
   and a client name absent from every descriptor still resolves to empty.
 - Existing Codex, Claude and Pi detection tests still pass.
 - `go vet ./internal/mcp`.
+
+
+## Resolution (2026-11-20)
+
+Dropped on the owner's direction (2026-11-20): a user-started, non-hosted agy CLI was never meant to be supported. The agy usage trigger only needs daemon-hosted agy sessions, which 261120-feat-ws-agy-usage-activity-trigger Phase 1 already covers at turn end. The probe finding (agy 1.5.13 sends MCP clientInfo name "antigravity-client") is kept in the Background for reference.
