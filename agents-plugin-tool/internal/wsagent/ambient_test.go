@@ -1,6 +1,7 @@
 package wsagent
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -10,6 +11,20 @@ import (
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
+
+func agyPromptTexts(h *leadHarness, holder string) []string {
+	var out []string
+	for _, raw := range h.holders.acpInputs(holder, "session/prompt") {
+		var params struct {
+			Prompt []struct{ Type, Text string } `json:"prompt"`
+		}
+		_ = json.Unmarshal(raw, &params)
+		if len(params.Prompt) == 1 && params.Prompt[0].Type == "text" {
+			out = append(out, params.Prompt[0].Text)
+		}
+	}
+	return out
+}
 
 type ambientKeyStore struct {
 	value string
@@ -50,6 +65,69 @@ func TestTurnInputAmbientOrderingAndRoles(t *testing.T) {
 	worker := &conv{rec: Record{Backend: BackendCodex}, compactNote: "restore once"}
 	if got := worker.turnInput("ordinary"); got != "restore once\n\nordinary" {
 		t.Fatalf("worker input = %q", got)
+	}
+}
+
+func TestHostedLeadAmbientReachesEveryBackendSend(t *testing.T) {
+	type backendCase struct {
+		name   string
+		new    func(*testing.T) (*leadHarness, func(string))
+		start  func(*leadHarness)
+		inputs func(*leadHarness, string) []string
+	}
+	cases := []backendCase{
+		{
+			name: BackendClaude,
+			new: func(t *testing.T) (*leadHarness, func(string)) {
+				return newLeadHarness(t), func(string) {}
+			},
+			start:  func(h *leadHarness) { h.start() },
+			inputs: (*leadHarness).userInputs,
+		},
+		{
+			name: BackendPi,
+			new: func(t *testing.T) (*leadHarness, func(string)) {
+				return newLeadHarness(t), func(string) {}
+			},
+			start:  func(h *leadHarness) { h.start() },
+			inputs: piPrompts,
+		},
+		{
+			name: BackendCodex,
+			new: func(t *testing.T) (*leadHarness, func(string)) {
+				h, fake := newCodexLeadHarness(t)
+				return h, func(id string) { fake.replyID = id }
+			},
+			start:  func(h *leadHarness) { h.startAt(codexSyntheticEndpoint) },
+			inputs: codexUserInputs,
+		},
+		{
+			name: BackendAgy,
+			new: func(t *testing.T) (*leadHarness, func(string)) {
+				h, fake := newAgyLeadHarness(t)
+				return h, func(id string) { fake.replyID = id }
+			},
+			start:  func(h *leadHarness) { h.startAt("http://127.0.0.1:1") },
+			inputs: agyPromptTexts,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, bind := tc.new(t)
+			resolver := wsconfig.NewResolver(h.opts.Config, nil, nil, nil)
+			if err := resolver.Set(wsconfig.ItemWorkflowLang, "Korean", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeGlobal}); err != nil {
+				t.Fatal(err)
+			}
+			tc.start(h)
+			id := h.lead(tc.name, LeadOptions{}).ID
+			bind(id)
+			h.send(id, "hello")
+			holder := h.holder(id)
+			want := h.envelope("hello") + "\n\n" + ambientBlock(WorkflowLanguageInstruction("Korean"))
+			eventually(t, tc.name+" ambient input", func() bool {
+				return slices.Equal(tc.inputs(h, holder), []string{want})
+			})
+		})
 	}
 }
 
