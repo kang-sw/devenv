@@ -2,11 +2,14 @@ package wswhiteboard
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -194,6 +197,7 @@ func TestBoardDBSentinellessOpenWaitsForLegacyWriter(t *testing.T) {
 		}
 		return nil
 	}})
+	want := board.State()
 	if err := board.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -227,8 +231,11 @@ func TestBoardDBSentinellessOpenWaitsForLegacyWriter(t *testing.T) {
 		board *BoardDB
 		err   error
 	}, 1)
+	var logs []string
 	go func() {
-		next, err := OpenBoardDB(dir, nil, BoardDBOptions{})
+		next, err := OpenBoardDB(dir, nil, BoardDBOptions{Logf: func(format string, args ...any) {
+			logs = append(logs, fmt.Sprintf(format, args...))
+		}})
 		openDone <- struct {
 			board *BoardDB
 			err   error
@@ -257,6 +264,15 @@ func TestBoardDBSentinellessOpenWaitsForLegacyWriter(t *testing.T) {
 			t.Fatal(result.err)
 		}
 		defer result.board.Close()
+		if !reflect.DeepEqual(result.board.State(), want) {
+			t.Fatal("sentinel retry reimported the intervening legacy commit")
+		}
+		joined := strings.Join(logs, "\n")
+		for _, text := range []string{dir, "imported generation 1", "legacy committed generation 2"} {
+			if !strings.Contains(joined, text) {
+				t.Fatalf("waited writer's commit was not logged: %q", joined)
+			}
+		}
 		if has, err := boardHasSentinel(dir); err != nil || !has {
 			t.Fatalf("sentinel = %v, %v", has, err)
 		}
@@ -365,13 +381,15 @@ func TestBoardDBSentinellessPendingIntentLoggedAndOverwritten(t *testing.T) {
 
 func TestBoardDBMissingOrCorruptNeverReimports(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		sentinel bool
-		corrupt  bool
+		name      string
+		sentinel  bool
+		corrupt   bool
+		directory bool
 	}{
 		{name: "missing-under-sentinel", sentinel: true},
 		{name: "corrupt-under-sentinel", sentinel: true, corrupt: true},
 		{name: "corrupt-without-sentinel", corrupt: true},
+		{name: "unreadable-without-sentinel", directory: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -383,6 +401,11 @@ func TestBoardDBMissingOrCorruptNeverReimports(t *testing.T) {
 			}
 			if tc.corrupt {
 				if err := os.WriteFile(filepath.Join(dir, boardDBName), []byte("not sqlite"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.directory {
+				if err := os.Mkdir(filepath.Join(dir, boardDBName), 0o755); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -408,8 +431,12 @@ func TestBoardDBUpdateDeltaUnchangedAndTornTransaction(t *testing.T) {
 		stages = append(stages, stage)
 		mu.Unlock()
 	}})
+	walBefore := folderRead(t, filepath.Join(dir, boardDBName+"-wal"))
 	if err := board.Update(func(*State) error { return nil }); err != nil {
 		t.Fatal(err)
+	}
+	if walAfter := folderRead(t, filepath.Join(dir, boardDBName+"-wal")); !bytes.Equal(walBefore, walAfter) {
+		t.Fatal("unchanged update wrote WAL frames")
 	}
 	mu.Lock()
 	gotStages := append([]string(nil), stages...)
@@ -454,6 +481,11 @@ func TestBoardDBRejectsEntryRewriteOrRemoval(t *testing.T) {
 	}{
 		{name: "rewrite", mutate: func(state *State) { state.Topics[0].Entries[0].Text = "changed" }},
 		{name: "remove", mutate: func(state *State) { state.Topics[0].Entries = state.Topics[0].Entries[1:] }},
+		{name: "move", mutate: func(state *State) {
+			moved := state.Topics[0].Entries[1]
+			state.Topics[0].Entries = state.Topics[0].Entries[:1]
+			state.Topics = append(state.Topics, TopicDoc{Name: "other", Entries: []Entry{moved}})
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -463,6 +495,63 @@ func TestBoardDBRejectsEntryRewriteOrRemoval(t *testing.T) {
 				t.Fatalf("mutation accepted: %v", err)
 			}
 		})
+	}
+}
+
+func TestBoardDBAdoptionPrefersHistoryDirectoryAndReceiptsDoNotRegress(t *testing.T) {
+	dir := t.TempDir()
+	fixture := boardDBFixture()
+	fixture.ClosedTopics = []string{"destination"}
+	makeLegacyBoard(t, dir, fixture)
+	board := openTestBoardDB(t, dir, nil, BoardDBOptions{})
+	sourceDir := board.topicDirs["work"]
+	staleDir := board.topicDirs["destination"]
+	if sourceDir == "" || staleDir == "" || sourceDir == staleDir {
+		t.Fatalf("fixture mappings = %#v", board.topicDirs)
+	}
+	if err := board.Update(func(state *State) error {
+		state.Topics[0].Name = "destination"
+		state.Items[0].Topic = "destination"
+		state.ClosedTopics = nil
+		delete(state.Labels, "work")
+		state.Labels["destination"] = "Work"
+		state.MetadataRevision = 8
+		state.StaleNudgeRevision = "receipt-8"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := board.topicDirs["destination"]; got != sourceDir {
+		t.Fatalf("adoption used %q, want history dir %q (stale %q)", got, sourceDir, staleDir)
+	}
+	if err := board.Update(func(state *State) error {
+		state.MetadataRevision = 1
+		state.StaleNudgeRevision = ""
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := board.State()
+	if got.MetadataRevision != 8 || got.StaleNudgeRevision != "receipt-8" {
+		t.Fatalf("receipt regressed: %s", folderJSON(got))
+	}
+	if err := board.Update(func(state *State) error { state.Seq++; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := board.Close(); err != nil {
+		t.Fatal(err)
+	}
+	board = openTestBoardDB(t, dir, nil, BoardDBOptions{})
+	if err := board.Update(func(state *State) error {
+		state.MetadataRevision = 9
+		state.StaleNudgeRevision = "receipt-9"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := board.db.QueryRow(`SELECT count(*) FROM revision_receipts WHERE metadata_revision IN (8,9)`).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("receipts did not alternate across ordinary update/reopen: count=%d, %v", count, err)
 	}
 }
 
@@ -488,25 +577,57 @@ func TestBoardDBImportCommitWithoutSentinelRecovers(t *testing.T) {
 }
 
 func TestBoardDBLegacyArchiveExportBackupAndLoad(t *testing.T) {
+	originalNow := archiveLoadNow
+	archiveLoadNow = func() time.Time { return time.Date(2026, 11, 20, 12, 1, 0, 0, time.UTC) }
+	t.Cleanup(func() { archiveLoadNow = originalNow })
 	sourceDir := t.TempDir()
 	want := makeLegacyBoard(t, sourceDir, boardDBFixture())
-	sourceZip, err := (FolderStore{Dir: sourceDir}).ExportArchive()
+	for revision := uint64(5); revision <= 6; revision++ {
+		if err := (FolderStore{Dir: sourceDir}).Update(nil, func(state *State) error {
+			state.MetadataRevision = revision
+			state.StaleNudgeRevision = fmt.Sprintf("receipt-%d", revision)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	loadFloorPath := filepath.Join(sourceDir, filepath.FromSlash(folderLoadFloorLog))
+	if err := os.WriteFile(loadFloorPath, append(folderJSON(folderLoadFloor{Generation: 2, LoadedAt: "2026-11-19T01:00:00.001Z"}), folderJSON(folderLoadFloor{Generation: 3, LoadedAt: "2026-11-19T01:00:00.002Z"})...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reopenedSource, err := (FolderStore{Dir: sourceDir}).Open(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	want = reopenedSource
 	board := openTestBoardDB(t, sourceDir, nil, BoardDBOptions{})
 	exported, err := board.ExportArchive()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, wantFiles := zipFiles(t, exported), zipFiles(t, sourceZip); !reflect.DeepEqual(got, wantFiles) {
-		t.Fatalf("export differs\nwant %#v\ngot  %#v", wantFiles, got)
+	assertBoardDBArchiveState(t, exported, board.State())
+	if err := board.Update(func(state *State) error {
+		state.Items[0].Status = StatusAnswered
+		state.Items[0].Answer = "yes"
+		state.Items[0].AnswerQuote = "owner's answer"
+		state.Items[0].AnsweredAt = "2026-11-20T00:00:00Z"
+		state.MetadataRevision++
+		state.StaleNudgeRevision = "updated-receipt"
+		return folderAdd(state)
+	}); err != nil {
+		t.Fatal(err)
 	}
+	want = board.State()
+	exported, err = board.ExportArchive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertBoardDBArchiveState(t, exported, want)
 
 	loadState := boardDBFixture()
-	loadState.Seq = 77
+	loadState.Seq = 1
 	loadDir := t.TempDir()
-	makeLegacyBoard(t, loadDir, loadState)
+	loadState = makeLegacyBoard(t, loadDir, loadState)
 	loadZip, err := (FolderStore{Dir: loadDir}).ExportArchive()
 	if err != nil {
 		t.Fatal(err)
@@ -523,12 +644,51 @@ func TestBoardDBLegacyArchiveExportBackupAndLoad(t *testing.T) {
 	if topics != len(loadState.Topics) || backup == "" {
 		t.Fatalf("load result = %q, %d", backup, topics)
 	}
-	if _, err := (FolderStore{Dir: backup}).Open(nil); err != nil {
-		t.Fatalf("legacy backup unreadable: %v", err)
+	backupState, err := (FolderStore{Dir: backup}).Open(nil)
+	if err != nil || !reflect.DeepEqual(backupState, want) {
+		t.Fatalf("legacy backup mismatch: %v\nwant %s\ngot %s", err, folderJSON(want), folderJSON(backupState))
 	}
 	got := board.State()
-	if got.Seq != loadState.Seq || got.LoadedAt == "" || got.Topics[0].Body != want.Topics[0].Body {
-		t.Fatalf("loaded state = %s", folderJSON(got))
+	loadState.Seq = want.Seq + 1
+	loadState.MetadataRevision = want.MetadataRevision
+	loadState.StaleNudgeRevision = want.StaleNudgeRevision
+	loadState.LoadedAt = "2026-11-20T12:01:00.001Z"
+	if !reflect.DeepEqual(got, loadState) {
+		t.Fatalf("loaded state mismatch\nwant %s\ngot %s", folderJSON(loadState), folderJSON(got))
+	}
+	if err := board.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := openTestBoardDB(t, sourceDir, nil, BoardDBOptions{}).State(); !reflect.DeepEqual(got, loadState) {
+		t.Fatalf("loaded reopen mismatch\nwant %s\ngot %s", folderJSON(loadState), folderJSON(got))
+	}
+}
+
+func TestBoardDBLoadFloorNeverRegresses(t *testing.T) {
+	originalNow := archiveLoadNow
+	archiveLoadNow = func() time.Time { return time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { archiveLoadNow = originalNow })
+	dir := t.TempDir()
+	fixture := boardDBFixture()
+	fixture.LoadedAt = "2026-11-21T12:00:00.000Z"
+	makeLegacyBoard(t, dir, fixture)
+	board := openTestBoardDB(t, dir, nil, BoardDBOptions{})
+
+	loadDir := t.TempDir()
+	makeLegacyBoard(t, loadDir, boardDBFixture())
+	archive, err := (FolderStore{Dir: loadDir}).ExportArchive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	zipPath := filepath.Join(t.TempDir(), "board.zip")
+	if err := os.WriteFile(zipPath, archive, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := board.LoadArchive(zipPath, time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if got := board.State().LoadedAt; got != "2026-11-21T12:00:00.001Z" {
+		t.Fatalf("LoadedAt regressed: %q", got)
 	}
 }
 
@@ -560,9 +720,7 @@ func TestBoardDBCloseCheckpointsAndNoSharedMemory(t *testing.T) {
 	if err := board.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := OpenBoardDB(dir, nil, BoardDBOptions{}); err != nil {
-		t.Fatalf("reopen after close checkpoint: %v", err)
-	}
+	openTestBoardDB(t, dir, nil, BoardDBOptions{})
 }
 
 func TestBoardDBOpenRetriesExclusiveHandoff(t *testing.T) {
@@ -631,4 +789,422 @@ func slicesContains(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func assertBoardDBArchiveState(t *testing.T, archive []byte, want *State) {
+	t.Helper()
+	for name := range zipFiles(t, archive) {
+		if strings.Contains(name, boardDBName) || name == "pending.json" {
+			t.Fatalf("archive contains migration file %q", name)
+		}
+	}
+	zipPath := filepath.Join(t.TempDir(), "board.zip")
+	if err := os.WriteFile(zipPath, archive, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := extractArchive(zipPath, dir); err != nil {
+		t.Fatal(err)
+	}
+	old, err := (FolderStore{Dir: dir}).Open(nil)
+	if err != nil || !reflect.DeepEqual(old, want) {
+		t.Fatalf("legacy archive mismatch: %v\nwant %s\ngot %s", err, folderJSON(want), folderJSON(old))
+	}
+	board := openTestBoardDB(t, dir, nil, BoardDBOptions{})
+	if got := board.State(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("reimport mismatch\nwant %s\ngot %s", folderJSON(want), folderJSON(got))
+	}
+	if err := board.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := openTestBoardDB(t, dir, nil, BoardDBOptions{}).State(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("reimport reopen mismatch\nwant %s\ngot %s", folderJSON(want), folderJSON(got))
+	}
+}
+
+func TestBoardDBImportOnlyChangesLegacyThroughFolderOpen(t *testing.T) {
+	for _, scenario := range []string{"unchanged", "content-and-close-migration", "pending-replay", "v1"} {
+		t.Run(scenario, func(t *testing.T) {
+			dir, control := t.TempDir(), t.TempDir()
+			var legacy *State
+			if scenario == "v1" {
+				legacy = folderFixture()
+			} else {
+				fixture := boardDBFixture()
+				if scenario == "content-and-close-migration" {
+					fixture.ClosedTopics = []string{"work"}
+					fixture.CloseResults = map[string]string{"work": "Completed legacy work."}
+					// Commit pre-migration files directly, bypassing Open.
+					f := FolderStore{Dir: dir}
+					intent, err := f.plan(nil, nil, fixture)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := f.commit(intent); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					makeLegacyBoard(t, dir, fixture)
+				}
+				if scenario == "pending-replay" {
+					f := FolderStore{Dir: dir, Fault: func(stage string) error {
+						if stage == "intent" {
+							return folderCrash
+						}
+						return nil
+					}}
+					if err := f.Update(nil, folderAdd); !errors.Is(err, folderCrash) {
+						t.Fatalf("pending fixture: %v", err)
+					}
+				}
+			}
+			for name, data := range folderTree(t, dir) {
+				path := filepath.Join(control, filepath.FromSlash(name))
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			want := folderOpen(t, control, legacy)
+			wantFiles := folderTree(t, control)
+			board := openTestBoardDB(t, dir, legacy, BoardDBOptions{})
+			if got := board.State(); !reflect.DeepEqual(got, want) {
+				t.Fatalf("import mismatch\nwant %s\ngot %s", folderJSON(want), folderJSON(got))
+			}
+			assertLegacy := func() {
+				t.Helper()
+				gotFiles := folderTree(t, dir)
+				delete(gotFiles, "pending.json")
+				for name := range gotFiles {
+					if strings.HasPrefix(name, boardDBName) {
+						delete(gotFiles, name)
+					}
+				}
+				if !reflect.DeepEqual(gotFiles, wantFiles) {
+					t.Fatal("legacy files differ from FolderStore.Open's replay/migration")
+				}
+			}
+			assertLegacy()
+			if err := board.Update(folderAdd); err != nil {
+				t.Fatal(err)
+			}
+			want = board.State()
+			if err := board.Close(); err != nil {
+				t.Fatal(err)
+			}
+			assertLegacy()
+			reopened := openTestBoardDB(t, dir, nil, BoardDBOptions{})
+			if got := reopened.State(); !reflect.DeepEqual(got, want) {
+				t.Fatalf("updated reopen mismatch\nwant %s\ngot %s", folderJSON(want), folderJSON(got))
+			}
+			assertLegacy()
+		})
+	}
+}
+
+func TestBoardDBProcessKillRecovery(t *testing.T) {
+	if stage := os.Getenv("WS_BOARD_DB_KILL_STAGE"); stage != "" {
+		board, err := OpenBoardDB(os.Getenv("WS_BOARD_DB_KILL_DIR"), nil, BoardDBOptions{Observe: func(got string) {
+			if got == stage {
+				fmt.Println("board-kill-ready")
+				select {} // Parent kills this process without transaction/handle cleanup.
+			}
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer board.Close()
+		if err := board.Update(func(state *State) error {
+			state.Seq += 1000
+			state.Topics[0].BodyTimeProof.Digest = "uncommitted-proof"
+			state.EntrySeq++
+			state.PanelCounter++
+			state.Topics[0].Entries = append(state.Topics[0].Entries, Entry{
+				ID: fmt.Sprintf("e%d", state.EntrySeq), Kind: EntryPanel,
+				PanelID: fmt.Sprintf("p%d", state.PanelCounter), Text: strings.Repeat("uncommitted", 100000),
+			})
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		t.Fatal("child did not reach kill stage")
+	}
+	for _, stage := range []string{"import-committed", "transaction-before-commit"} {
+		t.Run(stage, func(t *testing.T) {
+			dir := t.TempDir()
+			want := makeLegacyBoard(t, dir, boardDBFixture())
+			if stage == "transaction-before-commit" {
+				board := openTestBoardDB(t, dir, nil, BoardDBOptions{})
+				if err := board.Update(folderAdd); err != nil {
+					t.Fatal(err)
+				}
+				want = board.State()
+				if err := board.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			executable, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, executable, "-test.run=^TestBoardDBProcessKillRecovery$")
+			cmd.Env = append(os.Environ(), "WS_BOARD_DB_KILL_STAGE="+stage, "WS_BOARD_DB_KILL_DIR="+dir)
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			ready := false
+			scanner := bufio.NewScanner(stdout)
+			for scanner.Scan() {
+				if scanner.Text() == "board-kill-ready" {
+					ready = true
+					break
+				}
+			}
+			killErr := cmd.Process.Kill()
+			waitErr := cmd.Wait()
+			if !ready || killErr != nil || waitErr == nil {
+				t.Fatalf("child ready=%v kill=%v wait=%v stderr=%s", ready, killErr, waitErr, stderr.String())
+			}
+			if stage == "import-committed" {
+				if has, err := boardHasSentinel(dir); err != nil || has {
+					t.Fatalf("pre-recovery sentinel = %v, %v", has, err)
+				}
+			}
+			reopened := openTestBoardDB(t, dir, nil, BoardDBOptions{})
+			if got := reopened.State(); !reflect.DeepEqual(got, want) {
+				t.Fatalf("killed transaction escaped\nwant %s\ngot %s", folderJSON(want), folderJSON(got))
+			}
+			if has, err := boardHasSentinel(dir); err != nil || !has {
+				t.Fatalf("post-recovery sentinel = %v, %v", has, err)
+			}
+		})
+	}
+}
+
+func TestBoardDBBackgroundCheckpointWaitsForIdleAndWALThreshold(t *testing.T) {
+	dir := t.TempDir()
+	makeLegacyBoard(t, dir, boardDBFixture())
+	board := openTestBoardDB(t, dir, nil, BoardDBOptions{})
+	if board.checkpointTimer == nil {
+		t.Fatal("import did not schedule an idle checkpoint")
+	}
+	before := folderRead(t, board.path)
+	board.mu.Lock()
+	board.checkpointDue = time.Now().Add(-time.Second)
+	board.mu.Unlock()
+	board.backgroundCheckpoint()
+	if after := folderRead(t, board.path); !bytes.Equal(before, after) {
+		t.Fatal("background checkpoint ran below WAL threshold")
+	}
+	if err := board.Update(func(state *State) error {
+		state.EntrySeq++
+		state.PanelCounter++
+		state.Topics[0].Entries = append(state.Topics[0].Entries, Entry{
+			ID: fmt.Sprintf("e%d", state.EntrySeq), Kind: EntryPanel,
+			PanelID: fmt.Sprintf("p%d", state.PanelCounter), Text: strings.Repeat("x", BoardDBCheckpointWALBytes+1),
+		})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(board.path + "-wal")
+	if err != nil || info.Size() < BoardDBCheckpointWALBytes {
+		t.Fatalf("large WAL fixture: %v, %v", info, err)
+	}
+	before = folderRead(t, board.path)
+	board.backgroundCheckpoint() // A stale timer callback after the new write.
+	if after := folderRead(t, board.path); !bytes.Equal(before, after) {
+		t.Fatal("background checkpoint ignored the latest write's idle deadline")
+	}
+	board.mu.Lock()
+	board.checkpointDue = time.Now().Add(-time.Second)
+	board.mu.Unlock()
+	board.backgroundCheckpoint()
+	if after := folderRead(t, board.path); bytes.Equal(before, after) {
+		t.Fatal("idle large WAL was not checkpointed")
+	}
+	want := board.State()
+	if err := board.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openTestBoardDB(t, dir, nil, BoardDBOptions{})
+	if reopened.checkpointTimer == nil || !reflect.DeepEqual(reopened.State(), want) {
+		t.Fatal("reopen lost state or did not schedule idle checkpoint")
+	}
+}
+
+func TestBoardDBBusyOpenIsBoundedWithoutRollbackAdvice(t *testing.T) {
+	dir := t.TempDir()
+	makeLegacyBoard(t, dir, boardDBFixture())
+	first := openTestBoardDB(t, dir, nil, BoardDBOptions{})
+	want := first.State()
+	started := time.Now()
+	second, err := OpenBoardDB(dir, nil, BoardDBOptions{})
+	if second != nil {
+		defer second.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "owning daemon") || strings.Contains(err.Error(), "manual rollback") {
+		t.Fatalf("busy open diagnostic = %v", err)
+	}
+	if elapsed := time.Since(started); elapsed < BoardDBOpenRetryBound-100*time.Millisecond || elapsed > BoardDBOpenRetryBound+3*time.Second {
+		t.Fatalf("busy open elapsed %s, bound %s", elapsed, BoardDBOpenRetryBound)
+	}
+	if !reflect.DeepEqual(first.State(), want) {
+		t.Fatal("busy open changed the owning board")
+	}
+}
+
+func TestBoardDBConcurrentFirstImportRechecksAfterLegacyLock(t *testing.T) {
+	dir := t.TempDir()
+	want := makeLegacyBoard(t, dir, boardDBFixture())
+	holding, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	lockerDone := make(chan error, 1)
+	go func() {
+		lockerDone <- (FolderStore{Dir: dir}).locked(func() error {
+			close(holding)
+			<-release
+			return nil
+		})
+	}()
+	<-holding
+	originalAttempt := folderLockAttempt
+	attempted := make(chan struct{}, 2)
+	folderLockAttempt = func(path string) {
+		originalAttempt(path)
+		if path == dir {
+			select {
+			case attempted <- struct{}{}:
+			default:
+			}
+		}
+	}
+	t.Cleanup(func() { folderLockAttempt = originalAttempt })
+	type result struct {
+		board *BoardDB
+		err   error
+	}
+	done := make(chan result, 2)
+	for range 2 {
+		go func() {
+			board, err := OpenBoardDB(dir, nil, BoardDBOptions{})
+			done <- result{board, err}
+		}()
+	}
+	for range 2 {
+		select {
+		case <-attempted:
+		case <-time.After(2 * time.Second):
+			t.Fatal("both first importers did not reach the legacy lock")
+		}
+	}
+	releaseOnce.Do(func() { close(release) })
+	if err := <-lockerDone; err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		select {
+		case got := <-done:
+			if got.err != nil {
+				t.Fatal(got.err)
+			}
+			if !reflect.DeepEqual(got.board.State(), want) {
+				t.Fatal("concurrent import changed state")
+			}
+			if err := got.board.Close(); err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(BoardDBOpenRetryBound + time.Second):
+			t.Fatal("concurrent opener did not finish after owner close")
+		}
+	}
+}
+
+func TestBoardDBLoadArchiveRejectsRecoveryFiles(t *testing.T) {
+	legacyDir := t.TempDir()
+	makeLegacyBoard(t, legacyDir, boardDBFixture())
+	legacyZip, err := (FolderStore{Dir: legacyDir}).ExportArchive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignDir := t.TempDir()
+	foreign := boardDBFixture()
+	foreign.Seq = 999
+	foreignDB := openTestBoardDB(t, foreignDir, foreign, BoardDBOptions{})
+	if err := foreignDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+	dbBytes := folderRead(t, filepath.Join(foreignDir, boardDBName))
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		t.Run("recovery"+suffix, func(t *testing.T) {
+			files := zipFiles(t, legacyZip)
+			files[boardDBName+suffix] = dbBytes
+			var archive bytes.Buffer
+			zw := zip.NewWriter(&archive)
+			for name, data := range files {
+				writer, err := zw.Create(name)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := writer.Write(data); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := zw.Close(); err != nil {
+				t.Fatal(err)
+			}
+			zipPath := filepath.Join(t.TempDir(), "board.zip")
+			if err := os.WriteFile(zipPath, archive.Bytes(), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			board := openTestBoardDB(t, t.TempDir(), boardDBFixture(), BoardDBOptions{})
+			want := board.State()
+			backup, _, err := board.LoadArchive(zipPath, time.Now())
+			if err == nil || !strings.Contains(err.Error(), "SQLite recovery files") || backup != "" {
+				t.Fatalf("recovery archive accepted or backed up: backup=%q err=%v", backup, err)
+			}
+			if !reflect.DeepEqual(board.State(), want) {
+				t.Fatal("rejected archive changed destination")
+			}
+		})
+	}
+}
+
+func TestBoardDBImportDuplicateLoadFloorsMatchesLegacy(t *testing.T) {
+	dir := t.TempDir()
+	makeLegacyBoard(t, dir, boardDBFixture())
+	path := filepath.Join(dir, filepath.FromSlash(folderLoadFloorLog))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	first := folderLoadFloor{Generation: 1, LoadedAt: "2026-11-19T00:00:00.001Z"}
+	duplicate := folderLoadFloor{Generation: 1, LoadedAt: "2026-11-19T00:00:00.002Z"}
+	if err := os.WriteFile(path, append(folderJSON(first), folderJSON(duplicate)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want := folderOpen(t, dir, nil)
+	if want.LoadedAt != first.LoadedAt {
+		t.Fatalf("legacy duplicate fixture floor = %q", want.LoadedAt)
+	}
+	board := openTestBoardDB(t, dir, nil, BoardDBOptions{})
+	if !reflect.DeepEqual(board.State(), want) {
+		t.Fatal("duplicate floor import disagrees with FolderStore")
+	}
+	if err := board.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(openTestBoardDB(t, dir, nil, BoardDBOptions{}).State(), want) {
+		t.Fatal("duplicate floor reopen disagrees with FolderStore")
+	}
 }

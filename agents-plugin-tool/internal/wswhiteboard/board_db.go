@@ -5,6 +5,7 @@ package wswhiteboard
 // State in memory and writes only row deltas to one held SQLite connection.
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"database/sql"
@@ -59,9 +60,11 @@ type BoardDB struct {
 	state              *State
 	generation         int
 	importedGeneration int
+	revisionSlot       int
 	nextTopic          int
 	topicDirs          map[string]string
 	checkpointTimer    *time.Timer
+	checkpointDue      time.Time
 	closed             bool
 }
 
@@ -84,6 +87,7 @@ type boardDBTopicRow struct {
 type boardDBEntryRow struct {
 	Seq       int
 	ID        string
+	TopicDir  string
 	Data      []byte
 	PanelBody *string
 }
@@ -154,7 +158,7 @@ func OpenBoardDB(dir string, legacy *State, opts BoardDBOptions) (*BoardDB, erro
 	info, statErr := os.Stat(path)
 	dbExists := statErr == nil
 	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-		return nil, statErr
+		return nil, boardDBRollbackError(path, statErr.Error())
 	}
 	if sentinel && !dbExists {
 		return nil, boardDBRollbackError(path, "is missing")
@@ -165,6 +169,9 @@ func OpenBoardDB(dir string, legacy *State, opts BoardDBOptions) (*BoardDB, erro
 	if dbExists {
 		board, err := openBoardDBHandle(dir, opts)
 		if err != nil {
+			if boardSQLiteBusy(err) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, fmt.Errorf("whiteboard board DB %s is busy after %s; retry after the owning daemon releases it: %w", path, BoardDBOpenRetryBound, err)
+			}
 			return nil, boardDBRollbackError(path, err.Error())
 		}
 		if err := board.load(); err != nil {
@@ -174,12 +181,22 @@ func OpenBoardDB(dir string, legacy *State, opts BoardDBOptions) (*BoardDB, erro
 		if !sentinel {
 			board.finishSentinel()
 		}
+		board.armCheckpointLocked()
 		return board, nil
 	}
 
 	legacyStore := FolderStore{Dir: dir}
 	var board *BoardDB
-	err = legacyStore.withGuard(true, func() error {
+	retryOpen := false
+	err = legacyStore.withGuard(true, func() error { return boardLegacyGuard(dir) }, func() error {
+		// Another importer may have committed while this opener waited for
+		// the legacy lock. Re-enter the existing-DB path after releasing it.
+		if _, err := os.Stat(path); err == nil {
+			retryOpen = true
+			return nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return boardDBRollbackError(path, err.Error())
+		}
 		has, err := boardHasSentinel(dir)
 		if err != nil {
 			return err
@@ -187,8 +204,6 @@ func OpenBoardDB(dir string, legacy *State, opts BoardDBOptions) (*BoardDB, erro
 		if has {
 			return boardDBRollbackError(path, "is missing")
 		}
-		return legacyStore.guard()
-	}, func() error {
 		state, meta, err := legacyStore.load(legacy)
 		if err != nil {
 			return err
@@ -200,7 +215,7 @@ func OpenBoardDB(dir string, legacy *State, opts BoardDBOptions) (*BoardDB, erro
 		if err != nil {
 			return err
 		}
-		if err := board.importState(state, meta); err != nil {
+		if err := board.importState(state, meta, legacyStore); err != nil {
 			_ = board.db.Close()
 			return err
 		}
@@ -216,6 +231,10 @@ func OpenBoardDB(dir string, legacy *State, opts BoardDBOptions) (*BoardDB, erro
 	if err != nil {
 		return nil, err
 	}
+	if retryOpen {
+		return OpenBoardDB(dir, legacy, opts)
+	}
+	board.armCheckpointLocked()
 	return board, nil
 }
 
@@ -267,7 +286,7 @@ func openBoardDBHandle(dir string, opts BoardDBOptions) (*BoardDB, error) {
 	return b, nil
 }
 
-func (b *BoardDB) importState(state *State, meta *folderSession) error {
+func (b *BoardDB) importState(state *State, meta *folderSession, legacy FolderStore) error {
 	known := make(map[string]string, len(meta.Topics))
 	for _, ref := range meta.Topics {
 		known[ref.Key] = ref.Dir
@@ -276,6 +295,12 @@ func (b *BoardDB) importState(state *State, meta *folderSession) error {
 	if err != nil {
 		return err
 	}
+	// The board row mirrors meta.json, while load_floors carries the recovery
+	// override separately. Recovery applies the committed receipt and floor rows.
+	metaState := meta.State.clone()
+	metaState.Items, metaState.Topics, metaState.Labels, metaState.CloseResults = nil, nil, nil, nil
+	rows.State = folderJSON(metaState)
+	rows.ItemOrder = folderJSON(meta.ItemOrder)
 	tx, err := b.db.Begin()
 	if err != nil {
 		return err
@@ -284,13 +309,32 @@ func (b *BoardDB) importState(state *State, meta *folderSession) error {
 	if err := boardInsertAll(tx, rows, meta.Generation, meta.Generation); err != nil {
 		return err
 	}
-	if state.MetadataRevision != 0 || state.StaleNudgeRevision != "" {
-		if _, err := tx.Exec(`INSERT INTO revision_receipts(slot,generation,metadata_revision,stale_nudge_revision) VALUES(1,?,?,?)`, meta.Generation, state.MetadataRevision, state.StaleNudgeRevision); err != nil {
+	latestRevisionGeneration := 0
+	for slot := 1; slot <= 2; slot++ {
+		var record folderRevisionFile
+		exists, err := folderDecode(filepath.Join(legacy.Dir, folderRevisionDir, "panels", fmt.Sprintf("e%d.json", slot)), &record)
+		if err != nil {
 			return err
 		}
+		if !exists {
+			continue
+		}
+		if _, err := tx.Exec(`INSERT INTO revision_receipts(slot,generation,metadata_revision,stale_nudge_revision) VALUES(?,?,?,?)`, slot, record.Generation, record.Revision.MetadataRevision, record.Revision.StaleNudgeRevision); err != nil {
+			return err
+		}
+		if record.Generation <= meta.Generation && record.Generation > latestRevisionGeneration {
+			latestRevisionGeneration = record.Generation
+			b.revisionSlot = slot
+		}
 	}
-	if state.LoadedAt != "" {
-		if _, err := tx.Exec(`INSERT INTO load_floors(generation,loaded_at) VALUES(?,?)`, meta.Generation, state.LoadedAt); err != nil {
+	floors, err := boardReadLoadFloors(legacy.Dir)
+	if err != nil {
+		return err
+	}
+	for _, floor := range floors {
+		// FolderStore chooses the first record at a generation. Duplicate
+		// generations are valid legacy input, including identical replay bytes.
+		if _, err := tx.Exec(`INSERT INTO load_floors(generation,loaded_at) VALUES(?,?) ON CONFLICT(generation) DO NOTHING`, floor.Generation, floor.LoadedAt); err != nil {
 			return err
 		}
 	}
@@ -303,6 +347,25 @@ func (b *BoardDB) importState(state *State, meta *folderSession) error {
 	b.nextTopic = rows.NextTopic
 	b.topicDirs = rows.Dirs
 	return nil
+}
+
+func boardReadLoadFloors(dir string) ([]folderLoadFloor, error) {
+	data, _, err := folderReadOptional(filepath.Join(dir, filepath.FromSlash(folderLoadFloorLog)))
+	if err != nil {
+		return nil, err
+	}
+	var out []folderLoadFloor
+	for _, line := range bytes.Split(data, []byte{'\n'}) {
+		if len(line) == 0 {
+			continue
+		}
+		var floor folderLoadFloor
+		if err := json.Unmarshal(line, &floor); err != nil {
+			return nil, err
+		}
+		out = append(out, floor)
+	}
+	return out, nil
 }
 
 func boardInsertAll(tx *sql.Tx, rows boardDBRows, generation, imported int) error {
@@ -368,7 +431,7 @@ func (b *BoardDB) load() error {
 		}
 		storedTopics = append(storedTopics, topic)
 	}
-	if err := rows.Close(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return err
 	}
 	items := map[int]Item{}
@@ -407,7 +470,7 @@ func (b *BoardDB) load() error {
 			}
 			entries = append(entries, entry)
 		}
-		if err := entryRows.Close(); err != nil {
+		if err := errors.Join(entryRows.Err(), entryRows.Close()); err != nil {
 			return err
 		}
 		if topic.Doc != nil {
@@ -452,7 +515,7 @@ func (b *BoardDB) load() error {
 	}
 	var metadata uint64
 	var stale string
-	if err := b.db.QueryRow(`SELECT metadata_revision,stale_nudge_revision FROM revision_receipts WHERE generation<=? ORDER BY generation DESC LIMIT 1`, b.generation).Scan(&metadata, &stale); err == nil {
+	if err := b.db.QueryRow(`SELECT slot,metadata_revision,stale_nudge_revision FROM revision_receipts WHERE generation<=? ORDER BY generation DESC,slot LIMIT 1`, b.generation).Scan(&b.revisionSlot, &metadata, &stale); err == nil {
 		state.MetadataRevision = max(state.MetadataRevision, metadata)
 		if stale != "" {
 			state.StaleNudgeRevision = stale
@@ -492,6 +555,10 @@ func (b *BoardDB) Update(fn func(*State) error) error {
 	if err := fn(work); err != nil {
 		return err
 	}
+	work.MetadataRevision = max(work.MetadataRevision, b.state.MetadataRevision)
+	if work.StaleNudgeRevision == "" {
+		work.StaleNudgeRevision = b.state.StaleNudgeRevision
+	}
 	if reflect.DeepEqual(b.state, work) {
 		return nil
 	}
@@ -511,7 +578,11 @@ func (b *BoardDB) Update(fn func(*State) error) error {
 		return err
 	}
 	defer tx.Rollback()
-	if err := boardWriteDelta(tx, beforeRows, afterRows, b.generation+1, b.importedGeneration, b.state, work); err != nil {
+	nextRevisionSlot := 1
+	if b.revisionSlot == 1 {
+		nextRevisionSlot = 2
+	}
+	if err := boardWriteDelta(tx, beforeRows, afterRows, b.generation+1, b.importedGeneration, nextRevisionSlot, b.state, work); err != nil {
 		return err
 	}
 	if err := b.hit("transaction-before-commit"); err != nil {
@@ -519,6 +590,9 @@ func (b *BoardDB) Update(fn func(*State) error) error {
 	}
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+	if work.MetadataRevision != b.state.MetadataRevision || work.StaleNudgeRevision != b.state.StaleNudgeRevision {
+		b.revisionSlot = nextRevisionSlot
 	}
 	b.generation++
 	b.nextTopic = afterRows.NextTopic
@@ -528,7 +602,7 @@ func (b *BoardDB) Update(fn func(*State) error) error {
 	return nil
 }
 
-func boardWriteDelta(tx *sql.Tx, before, after boardDBRows, generation, imported int, beforeState, afterState *State) error {
+func boardWriteDelta(tx *sql.Tx, before, after boardDBRows, generation, imported, revisionSlot int, beforeState, afterState *State) error {
 	for dir, old := range before.Topics {
 		if _, ok := after.Topics[dir]; !ok {
 			if len(old.Entries) != 0 {
@@ -557,7 +631,7 @@ func boardWriteDelta(tx *sql.Tx, before, after boardDBRows, generation, imported
 			afterEntries[entry.ID] = true
 			prior, exists := oldEntries[entry.ID]
 			if exists {
-				if !bytes.Equal(prior.Data, entry.Data) || (prior.PanelBody == nil) != (entry.PanelBody == nil) || prior.PanelBody != nil && *prior.PanelBody != *entry.PanelBody {
+				if prior.TopicDir != row.Dir || !bytes.Equal(prior.Data, entry.Data) || (prior.PanelBody == nil) != (entry.PanelBody == nil) || prior.PanelBody != nil && *prior.PanelBody != *entry.PanelBody {
 					return fmt.Errorf("whiteboard topic %q: entries are append-only", row.Key)
 				}
 				continue
@@ -587,8 +661,7 @@ func boardWriteDelta(tx *sql.Tx, before, after boardDBRows, generation, imported
 		return err
 	}
 	if afterState.MetadataRevision != beforeState.MetadataRevision || afterState.StaleNudgeRevision != beforeState.StaleNudgeRevision {
-		slot := 1 + generation%2
-		if _, err := tx.Exec(`INSERT INTO revision_receipts(slot,generation,metadata_revision,stale_nudge_revision) VALUES(?,?,?,?) ON CONFLICT(slot) DO UPDATE SET generation=excluded.generation,metadata_revision=excluded.metadata_revision,stale_nudge_revision=excluded.stale_nudge_revision`, slot, generation, afterState.MetadataRevision, afterState.StaleNudgeRevision); err != nil {
+		if _, err := tx.Exec(`INSERT INTO revision_receipts(slot,generation,metadata_revision,stale_nudge_revision) VALUES(?,?,?,?) ON CONFLICT(slot) DO UPDATE SET generation=excluded.generation,metadata_revision=excluded.metadata_revision,stale_nudge_revision=excluded.stale_nudge_revision`, revisionSlot, generation, afterState.MetadataRevision, afterState.StaleNudgeRevision); err != nil {
 			return err
 		}
 	}
@@ -615,14 +688,17 @@ func boardRows(state *State, known map[string]string, nextTopic int, before *Sta
 	entryIDs := map[string]bool{}
 	panelOwners := map[string]string{}
 	for pos, key := range keys {
-		dir := known[key]
-		if dir == "" && before != nil {
+		dir := ""
+		if before != nil {
 			for oldKey, oldDir := range known {
 				if !used[oldDir] && !slices.Contains(keys, oldKey) && before.topicKnown(oldKey) && folderSameTopic(before, state, oldKey, key) {
 					dir = oldDir
 					break
 				}
 			}
+		}
+		if dir == "" {
+			dir = known[key]
 		}
 		if dir == "" {
 			rows.NextTopic++
@@ -670,7 +746,7 @@ func boardRows(state *State, known map[string]string, nextTopic int, before *Sta
 				}
 				panelOwners[entry.PanelID] = key
 			}
-			er := boardDBEntryRow{Seq: seq, ID: entry.ID}
+			er := boardDBEntryRow{Seq: seq, ID: entry.ID, TopicDir: dir}
 			if entry.Kind == EntryPanel {
 				body := entry.Text
 				er.PanelBody = &body
@@ -791,6 +867,7 @@ func boardSQLiteBusy(err error) bool {
 }
 
 func (b *BoardDB) armCheckpointLocked() {
+	b.checkpointDue = time.Now().Add(BoardDBCheckpointIdle)
 	if b.checkpointTimer != nil {
 		b.checkpointTimer.Stop()
 	}
@@ -800,7 +877,9 @@ func (b *BoardDB) armCheckpointLocked() {
 func (b *BoardDB) backgroundCheckpoint() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.closed {
+	// Stop cannot cancel a callback already waiting for mu. A later update
+	// moves this deadline so that callback cannot checkpoint an active board.
+	if b.closed || time.Now().Before(b.checkpointDue) {
 		return
 	}
 	info, err := wsstate.Stat(b.path + "-wal")
@@ -855,17 +934,11 @@ func (b *BoardDB) ExportArchive() ([]byte, error) {
 	}
 	defer os.RemoveAll(tmp)
 	f := FolderStore{Dir: tmp}
-	intent, err := f.plan(nil, nil, b.state)
+	intent, err := b.legacyIntentLocked(f)
 	if err != nil {
 		return nil, err
 	}
-	if b.state.LoadedAt != "" {
-		intent.Logs = append(intent.Logs, folderAppend{Path: folderLoadFloorLog, Data: folderJSON(folderLoadFloor{Generation: intent.Session.Generation, LoadedAt: b.state.LoadedAt})})
-	}
-	if err := f.commit(intent); err != nil {
-		return nil, err
-	}
-	return f.ExportArchive()
+	return boardLegacyArchive(intent)
 }
 
 // BackupLegacy writes the current board as a legacy-layout folder at dir.
@@ -907,6 +980,15 @@ func (b *BoardDB) LoadArchive(zipPath string, now time.Time) (backup string, top
 	if err := extractArchive(zipPath, tmp); err != nil {
 		return "", 0, err
 	}
+	// Archive authority is always the legacy layout. A supplied recovery DB
+	// (or its sidecars) must not bypass the folder's replay and schema checks.
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		if _, err := os.Lstat(filepath.Join(tmp, boardDBName+suffix)); err == nil {
+			return "", 0, fmt.Errorf("the archive contains SQLite recovery files; export a legacy-layout board archive")
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", 0, err
+		}
+	}
 	loaded, err := OpenBoardDB(tmp, nil, BoardDBOptions{})
 	if err != nil {
 		return "", 0, fmt.Errorf("the archive is not a valid board: %w", err)
@@ -918,12 +1000,15 @@ func (b *BoardDB) LoadArchive(zipPath string, now time.Time) (backup string, top
 	if next == nil {
 		return "", 0, fmt.Errorf("the archive holds no board")
 	}
-	next.LoadedAt = time.UnixMilli(now.UnixMilli() + 1).UTC().Format(reaskLayout)
-
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed {
 		return "", 0, fmt.Errorf("whiteboard board DB is closed")
+	}
+	next.Seq = max(next.Seq, b.state.Seq+1)
+	next.MetadataRevision = max(next.MetadataRevision, b.state.MetadataRevision)
+	if next.StaleNudgeRevision == "" {
+		next.StaleNudgeRevision = b.state.StaleNudgeRevision
 	}
 	base := b.dir + ".bak-" + now.Format("060102_1504")
 	for n := 1; ; n++ {
@@ -941,6 +1026,13 @@ func (b *BoardDB) LoadArchive(zipPath string, now time.Time) (backup string, top
 	if err := b.backupLegacyLocked(backup); err != nil {
 		return "", 0, err
 	}
+	// The load floor excludes answers to the old board even when extraction,
+	// the lock wait, or backup took time. now is only the backup-name clock.
+	loadedAt := archiveLoadNow().UnixMilli() + 1
+	if prior, err := time.Parse(time.RFC3339Nano, b.state.LoadedAt); err == nil {
+		loadedAt = max(loadedAt, prior.UnixMilli()+1)
+	}
+	next.LoadedAt = time.UnixMilli(loadedAt).UTC().Format(reaskLayout)
 	rows, err := boardRows(next, nil, b.nextTopic, nil)
 	if err != nil {
 		return backup, 0, err
@@ -969,6 +1061,10 @@ func (b *BoardDB) LoadArchive(zipPath string, now time.Time) (backup string, top
 	if err := tx.Commit(); err != nil {
 		return backup, 0, err
 	}
+	b.revisionSlot = 0
+	if next.MetadataRevision != 0 || next.StaleNudgeRevision != "" {
+		b.revisionSlot = 1
+	}
 	b.generation++
 	b.nextTopic = rows.NextTopic
 	b.topicDirs = rows.Dirs
@@ -984,17 +1080,11 @@ func (b *BoardDB) backupLegacyLocked(dir string) error {
 	}
 	defer os.RemoveAll(tmp)
 	f := FolderStore{Dir: tmp}
-	intent, err := f.plan(nil, nil, b.state)
+	intent, err := b.legacyIntentLocked(f)
 	if err != nil {
 		return err
 	}
-	if b.state.LoadedAt != "" {
-		intent.Logs = append(intent.Logs, folderAppend{Path: folderLoadFloorLog, Data: folderJSON(folderLoadFloor{Generation: intent.Session.Generation, LoadedAt: b.state.LoadedAt})})
-	}
-	if err := f.commit(intent); err != nil {
-		return err
-	}
-	archive, err := f.ExportArchive()
+	archive, err := boardLegacyArchive(intent)
 	if err != nil {
 		return err
 	}
@@ -1015,4 +1105,59 @@ func (b *BoardDB) backupLegacyLocked(dir string) error {
 		return err
 	}
 	return extractArchive(name, dir)
+}
+
+func boardLegacyArchive(intent *folderIntent) ([]byte, error) {
+	files := map[string][]byte{
+		"meta.json":      folderJSON(intent.Session),
+		"committed.json": folderJSON(folderReceipt{SchemaVersion: FolderSchemaVersion, Generation: intent.Session.Generation}),
+	}
+	for _, write := range append(append([]folderWrite(nil), intent.Topics...), intent.Panels...) {
+		files[write.Path] = append([]byte(nil), write.Data...)
+	}
+	for _, log := range intent.Logs {
+		if int64(len(files[log.Path])) != log.Offset {
+			return nil, fmt.Errorf("whiteboard archive log %s: offset mismatch", log.Path)
+		}
+		files[log.Path] = append(files[log.Path], log.Data...)
+	}
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var out bytes.Buffer
+	zw := zip.NewWriter(&out)
+	for _, name := range names {
+		writer, err := zw.Create(name)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := writer.Write(files[name]); err != nil {
+			return nil, err
+		}
+	}
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+// legacyIntentLocked maps the current State to a fresh legacy layout. Load
+// floors live in the reserved log so older State serializers can omit LoadedAt
+// without losing it. The caller holds b.mu and f points at an empty directory.
+func (b *BoardDB) legacyIntentLocked(f FolderStore) (*folderIntent, error) {
+	state := b.state.clone()
+	state.LoadedAt = ""
+	intent, err := f.plan(nil, nil, state)
+	if err != nil {
+		return nil, err
+	}
+	if b.state.LoadedAt != "" {
+		intent.Logs = append(intent.Logs, folderAppend{
+			Path: folderLoadFloorLog,
+			Data: folderJSON(folderLoadFloor{Generation: intent.Session.Generation, LoadedAt: b.state.LoadedAt}),
+		})
+	}
+	return intent, nil
 }
