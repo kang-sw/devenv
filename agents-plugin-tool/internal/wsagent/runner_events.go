@@ -876,7 +876,14 @@ func (c *conv) idleNow() bool {
 // running turn when there is one; with no turn they are dropped.
 func (c *conv) checkInterrupt() {
 	recs, err := wsinbox.DrainInterrupt(c.inbox)
-	if err != nil || len(recs) == 0 || !c.turn || c.proc == nil {
+	if err != nil || len(recs) == 0 {
+		return
+	}
+	if c.modelWaitBackoffC != nil {
+		c.cancelModelWaitBackoff()
+		return
+	}
+	if !c.turn || c.proc == nil {
 		return
 	}
 	c.interruptAsked = true

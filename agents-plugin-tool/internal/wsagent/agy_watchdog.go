@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 	"time"
@@ -28,7 +29,23 @@ const (
 	agyStreamInterrupted = "⚠ The stream was interrupted. Please continue the task you were working on."
 	modelFailureDrain    = time.Second
 	modelWaitCancelGrace = 5 * time.Second
+	modelWaitBackoffBase = time.Second
+	modelWaitBackoffCap  = 30 * time.Second
 )
+
+// defaultAgyModelWaitBackoff uses equal jitter: each attempt waits between
+// half and all of an exponentially growing ceiling, bounded at 30 seconds.
+func defaultAgyModelWaitBackoff(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	ceiling := modelWaitBackoffBase
+	for i := 1; i < attempt && ceiling < modelWaitBackoffCap; i++ {
+		ceiling = min(ceiling*2, modelWaitBackoffCap)
+	}
+	half := ceiling / 2
+	return half + time.Duration(rand.Int64N(int64(ceiling-half)+1))
+}
 
 func agyReplyTailFailure(reply string) string {
 	line := strings.TrimRight(reply, " \t\r\n")
@@ -148,6 +165,14 @@ func (c *conv) stopModelWaitCancelGrace() {
 	c.modelWaitCancelC, c.modelWaitCancelStop = nil, nil
 }
 
+func (c *conv) stopModelWaitBackoff() {
+	if c.modelWaitBackoffStop != nil {
+		c.modelWaitBackoffStop()
+	}
+	c.modelWaitBackoffC, c.modelWaitBackoffStop = nil, nil
+	c.modelWaitBackoffFailure = ""
+}
+
 func (c *conv) armModelWaitCancelGrace() {
 	c.stopModelWaitCancelGrace()
 	if c.r != nil && c.r.opts.Timer != nil {
@@ -159,6 +184,7 @@ func (c *conv) disarmModelWait() {
 	c.stopModelWaitTimer()
 	c.stopModelFailureDrain()
 	c.stopModelWaitCancelGrace()
+	c.stopModelWaitBackoff()
 	c.modelWaitArmed = false
 	c.modelWaitRetries = 0
 	c.modelWaitPending = 0
@@ -330,8 +356,6 @@ func (c *conv) interceptModelWaitTurnEnd(ev Event) bool {
 
 func (c *conv) retryModelWait(failure string) bool {
 	c.stopModelFailureDrain()
-	c.noteModelWaitFailure(failure)
-	c.modelWaitRetries++
 	c.modelWaitPending = 0
 	c.modelWaitFailure = ""
 	c.modelWaitFailureExcluded = false
@@ -339,6 +363,27 @@ func (c *conv) retryModelWait(failure string) bool {
 		c.modelWaitDiagnostic = c.reply
 	}
 	c.reply = ""
+	c.modelWaitBackoffFailure = failure
+	attempt := c.modelWaitRetries + 1
+	delay := c.r.opts.AgyModelWaitBackoff(attempt)
+	if delay <= 0 {
+		c.modelWaitBackoffTimedOut()
+		return true
+	}
+	fmt.Fprintf(c.r.opts.Log, "agent %s: waiting %s before automatic continue attempt %d/%d\n", c.rec.ReplyID, formatWatchdogDuration(delay), attempt, c.modelWaitMaxRetries)
+	c.modelWaitBackoffC, c.modelWaitBackoffStop = c.r.opts.Timer(delay)
+	return true
+}
+
+func (c *conv) modelWaitBackoffTimedOut() {
+	failure := c.modelWaitBackoffFailure
+	c.modelWaitBackoffC, c.modelWaitBackoffStop = nil, nil
+	c.modelWaitBackoffFailure = ""
+	if !c.modelWaitArmed || !c.turn || c.proc == nil || c.modelWaitFailErr != "" {
+		return
+	}
+	c.noteModelWaitFailure(failure)
+	c.modelWaitRetries++
 	if failure == "" {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: agy model stream stalled for %s; sending automatic continue attempt %d/%d\n", c.rec.ReplyID, formatWatchdogDuration(c.modelWaitTimeout), c.modelWaitRetries, c.modelWaitMaxRetries)
 	} else {
@@ -350,10 +395,20 @@ func (c *conv) retryModelWait(failure string) bool {
 			reason = fmt.Sprintf("agy model failure retry send failed: %v (%s)", err, failure)
 		}
 		c.failModelWaitImmediately(reason)
-		return true
+		return
 	}
 	c.resetModelWaitTimer()
-	return true
+}
+
+func (c *conv) cancelModelWaitBackoff() {
+	if c.modelWaitBackoffC == nil {
+		return
+	}
+	c.stopModelWaitBackoff()
+	c.restoreModelWaitDiagnostic()
+	c.summaryReason = wslive.TurnAborted
+	c.disarmModelWait()
+	c.endTurn("", false)
 }
 
 // modelWaitTurnError returns the TurnFailed error message to apply when a

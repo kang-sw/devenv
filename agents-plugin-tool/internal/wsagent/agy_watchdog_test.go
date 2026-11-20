@@ -42,6 +42,7 @@ func agyWatchdogHarnessWithRetries(t *testing.T, timeoutSeconds, retries string)
 	timers := &leverTimers{}
 	got := &reports{}
 	h.config.Timer = timers.start
+	h.config.AgyModelWaitBackoff = func(int) time.Duration { return 0 }
 	h.config.Report = got.add
 	h.start()
 	return h, timers, got
@@ -171,6 +172,7 @@ func TestAgyModelWaitWatchdogPublishesExhaustionToHostedLeadConversation(t *test
 	timers := &leverTimers{}
 	timeout, retries := 45, 1
 	h.opts.Timer = timers.start
+	h.opts.AgyModelWaitBackoff = func(int) time.Duration { return 0 }
 	h.opts.AgyModelWaitTimeoutSeconds = &timeout
 	h.opts.AgyModelWaitRetries = &retries
 	h.startAt("http://127.0.0.1:1")
@@ -390,6 +392,77 @@ func TestAgyModelWaitWatchdogActivityResetsTimer(t *testing.T) {
 	}
 	timers.fire(t, 1)
 	eventually(t, "replacement interval interrupt", func() bool { return procInterrupts(p) == 1 })
+}
+
+func TestAgyModelWaitWatchdogDelaysAutomaticContinue(t *testing.T) {
+	h, timers, _ := agyWatchdogHarness(t, "45")
+	h.runner.opts.AgyModelWaitBackoff = func(attempt int) time.Duration {
+		if attempt != 1 {
+			t.Fatalf("backoff attempt = %d, want 1", attempt)
+		}
+		return 7 * time.Second
+	}
+	_, p := startAgyWatchdogTurn(t, h, false)
+
+	fireWatchdog(t, timers, 0)
+	eventually(t, "retry interrupt", func() bool { return procInterrupts(p) == 1 })
+	p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted}
+	eventually(t, "backoff timer", func() bool {
+		started, _ := timers.counts()
+		return started == 3
+	})
+	if queued := len(p.sent); queued != 0 {
+		t.Fatalf("continue sent before backoff: %d queued", queued)
+	}
+	timers.mu.Lock()
+	delay := timers.durs[2]
+	timers.mu.Unlock()
+	if delay != 7*time.Second {
+		t.Fatalf("backoff delay = %v, want 7s", delay)
+	}
+	timers.fire(t, 2)
+	if sent := p.nextSent(t); sent != "continue" {
+		t.Fatalf("post-backoff prompt = %q", sent)
+	}
+}
+
+func TestAgyModelWaitWatchdogUserActionCancelsBackoff(t *testing.T) {
+	for _, action := range []string{"send", "interrupt", "stop"} {
+		t.Run(action, func(t *testing.T) {
+			h, timers, _ := agyWatchdogHarness(t, "45")
+			h.runner.opts.AgyModelWaitBackoff = func(int) time.Duration { return 7 * time.Second }
+			id, p := startAgyWatchdogTurn(t, h, false)
+			fireWatchdog(t, timers, 0)
+			eventually(t, "retry interrupt", func() bool { return procInterrupts(p) == 1 })
+			p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted}
+			eventually(t, "backoff timer", func() bool {
+				started, _ := timers.counts()
+				return started == 3
+			})
+
+			if action == "send" {
+				if _, err := h.runner.Send(id, "new direction"); err != nil {
+					t.Fatal(err)
+				}
+				if sent := p.nextSent(t); !strings.Contains(sent, "new direction") || strings.Contains(sent, "continue") {
+					t.Fatalf("replacement prompt = %q", sent)
+				}
+			} else if action == "interrupt" {
+				if _, _, err := h.runner.Interrupt(id); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if _, err := h.runner.Stop(id); err != nil {
+					t.Fatal(err)
+				}
+			}
+			timers.fire(t, 2) // a stopped fake timer may still deliver
+			time.Sleep(40 * time.Millisecond)
+			if queued := len(p.sent); queued != 0 {
+				t.Fatalf("%s allowed a delayed continue: %d queued", action, queued)
+			}
+		})
+	}
 }
 
 // A hosted holder replaces private thought lines with the content-free pulse.
