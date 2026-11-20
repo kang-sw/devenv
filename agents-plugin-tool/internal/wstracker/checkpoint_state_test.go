@@ -21,8 +21,9 @@ func checkpointRichState() *state {
 		items: map[string]*item{"i": {id: "i", due: &due, start: &start, placedBy: n, parentBy: n,
 			edited: n, node: n, mentionsAt: n, mentions: []string{"a"}, refs: []string{"ref"},
 			attachments: []attachment{{oid: "oid", name: "file", size: 42}}, labels: labelSet{"l"},
-			open: &opening{node: n, by: "a", scope: ScopeStore, ended: n},
-			cc:   []ccEntry{{member: "a", since: n, personal: true, orgs: map[string]bool{"o": true}}}}},
+			open:       &opening{node: n, by: "a", scope: ScopeStore, ended: n},
+			ccExcluded: map[string]bool{"b": true},
+			cc:         []ccEntry{{member: "a", since: n, personal: true, orgs: map[string]bool{"o": true}}}}},
 		iorder: []string{"i"}, place: []placement{{id: "i", afterSet: true}},
 		asg: map[string]*rec{"r": r}, recs: []*rec{r}, byItem: map[string][]*rec{"i": {r}},
 		rules: []*rule{ru}, ruleByID: map[string]*rule{"rule": ru},
@@ -136,6 +137,7 @@ func TestStateCheckpointMutationIsolation(t *testing.T) {
 			*it.due, *it.start = "changed", "changed"
 			it.open.by = "changed"
 			it.mentions[0], it.refs[0], it.labels[0], it.cc[0].member = "changed", "changed", "changed", "changed"
+			it.ccExcluded["b"] = false
 			it.cc[0].orgs["o"] = false
 			it.attachments[0].name = "changed"
 		},

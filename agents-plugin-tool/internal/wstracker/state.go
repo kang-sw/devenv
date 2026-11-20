@@ -135,10 +135,11 @@ type item struct {
 	mentions           []string
 	attachments        []attachment
 	refs               []string
-	labels             labelSet  // label ids as written; the view drops removed ones
-	open               *opening  // the latest item.open; active while its ended is nil
-	cc                 []ccEntry // the CC'd members, in the order they came to be CC'd
-	mentionsAt         *node     // the body write mentions come from; nil while none
+	labels             labelSet        // label ids as written; the view drops removed ones
+	open               *opening        // the latest item.open; active while its ended is nil
+	cc                 []ccEntry       // the CC'd members, in the order they came to be CC'd
+	ccExcluded         map[string]bool // personal uncc exclusions shared by every org registration
+	mentionsAt         *node           // the body write mentions come from; nil while none
 }
 
 // ccEntry is one CC'd member of an item; since is the add whose register
@@ -1406,7 +1407,7 @@ func (s *state) apply(n *node) {
 			kind = "task"
 		}
 		it := &item{id: n.id, alias: n.alias, kind: kind, title: jsString(p["title"]),
-			parent: p.str("parent"), author: a, ts: n.ts, node: n, priority: s.prio.def}
+			parent: p.str("parent"), author: a, ts: n.ts, node: n, priority: s.prio.def, ccExcluded: map[string]bool{}}
 		it.project = p.str("project")
 		if d, ok := p["due"].(string); ok && d != "" {
 			it.due = &d
@@ -1966,12 +1967,19 @@ func (s *state) applyCC(n *node) {
 	key := "cc:" + it.id + ":" + m
 	on := bool(s.write(key, "CC of "+m+" on "+it.alias, n, ccVal(n.typ == TypeItemCC)).(ccVal))
 	if on {
+		delete(it.ccExcluded, m)
+		for _, reg := range s.ccOrgs {
+			if reg.item == it.id {
+				delete(reg.excluded, m)
+			}
+		}
 		s.addCCSource(it, m, "", true, s.regWinner(key))
 		return
 	}
+	it.ccExcluded[m] = true
 	s.removeCCSource(it, m, "", true)
 	for _, reg := range s.ccOrgs {
-		if reg.active && reg.item == it.id {
+		if reg.item == it.id {
 			reg.excluded[m] = true
 			delete(reg.added, m)
 		}
@@ -2016,7 +2024,7 @@ func (s *state) extendCCOrg(reg *ccOrgReg, n *node) {
 		return
 	}
 	for _, member := range s.orgMembers(o) {
-		if reg.excluded[member] || reg.added[member] {
+		if it.ccExcluded[member] || reg.excluded[member] || reg.added[member] {
 			continue
 		}
 		reg.added[member] = true

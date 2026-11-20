@@ -190,16 +190,24 @@ func TestPersonalUnccExcludesOrgReadds(t *testing.T) {
 	tm.do("raj.pc", TypeItemUncc, map[string]any{"item": it, "member": "lena"})
 	wantNotIn(t, "personal uncc removes org CC", tm.view("maya.pc").Items[it].CC, "lena")
 
-	// A later roles refresh does not re-add the excluded member.
-	tm.do("ada.pc", TypeSetLead, map[string]any{"member": "omar", "leads": []string{"maya"}})
+	// A real newcomer is added, but the excluded member stays out.
+	tm.do("ada.pc", TypeSetLead, map[string]any{"member": "uma", "leads": []string{"maya"}})
+	wantIn(t, "real newcomer is added", tm.view("maya.pc").Items[it].CC, "uma")
 	wantNotIn(t, "excluded member stays out", tm.view("maya.pc").Items[it].CC, "lena")
+
+	// The exclusion belongs to the item, so a different future registration
+	// cannot automatically restore the member.
+	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-nested", "Nested", "lena"))
+	tm.do("raj.pc", TypeItemCCOrg, map[string]any{"item": it, "org": "o-nested"})
+	wantNotIn(t, "future org registration respects item exclusion", tm.view("maya.pc").Items[it].CC, "lena")
 	tm.do("raj.pc", TypeItemCC, map[string]any{"item": it, "member": "lena"})
 	wantIn(t, "personal CC restores member", tm.view("maya.pc").Items[it].CC, "lena")
 
 	tm.view("maya.pc")
 	s := tm.clone("maya.pc").r.S
 	reg := s.ccOrgs[ccOrgKey(it, "o-platform")]
-	wantEq(t, "registration keeps exclusion", reg.excluded["lena"], true)
+	wantEq(t, "personal CC clears item exclusion", s.items[it].ccExcluded["lena"], false)
+	wantEq(t, "personal CC clears existing registration exclusion", reg.excluded["lena"], false)
 	e, _ := ccEntryAt(s.items[it], "lena")
 	wantEq(t, "restored CC is personal only", e.personal && !e.orgs["o-platform"], true)
 }

@@ -56,6 +56,7 @@ func (s *state) checkpoint() *state {
 		v.attachments = slices.Clone(it.attachments)
 		v.refs = slices.Clone(it.refs)
 		v.labels = slices.Clone(it.labels)
+		v.ccExcluded = maps.Clone(it.ccExcluded)
 		v.cc = slices.Clone(it.cc)
 		for i := range v.cc {
 			v.cc[i].orgs = maps.Clone(it.cc[i].orgs)
