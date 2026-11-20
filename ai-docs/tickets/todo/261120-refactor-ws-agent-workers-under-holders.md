@@ -96,6 +96,9 @@ against `develop` at `1820eb1fc`.
 
 ## Constraints
 
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
+- Convention: ai-docs/manuals/performance.md (declared for `agents-plugin-tool/`)
 - Manuals for the touched paths: `ai-docs/manuals/ws-mcp.md`,
   `ai-docs/manuals/release-compatibility.md`,
   `ai-docs/manuals/performance.md`, and
@@ -133,6 +136,29 @@ against `develop` at `1820eb1fc`.
   rejoins an already-running process (`internal/wsagent/claude.go:449-461`).
 - Save and restore the worker MCP tuple through the same validated attach path
   as a held lead; do not add a second token-recovery mechanism.
+
+## Prior Decisions
+
+- 261113-bug-ws-pi-subagent-turn-dies-on-daemon-restart (2026-11-13, commit): "Reuse the existing holder pipe transport and publish/settle path, not a new delivery mechanism. Lead privileges remain independent of holder selection" — bearing: supports
+- 261118-feat-ws-agy-tool-names-and-worker-role (2026-11-18, Decisions 151): "the agy worker is not holder-held, like the Claude worker; a daemon restart ends it" — bearing: constrains
+- 261119-feat-ws-codex-hosted-worker (2026-11-19, Decisions 172): "The Codex worker start path follows the agy worker shape: daemon-owned with no holder and no lead spec" — bearing: constrains
+- 261110-feat-ws-dashboard-headless-lead-sessions (2026-11-11, commit): "run hosted lead sessions under session holders" — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/wsagent/holder.go, runner_process.go, runner.go, runner_conv.go, claude.go, codex.go, agy.go, record.go; internal/wsholder/holder.py; ai-docs/manuals/ws-mcp.md |
+| scope.surface | cross-module | wsagent worker lifecycle, wsholder session descriptor and daemon compatibility behavior cross module boundaries |
+| scope.new_public_symbol | no | no new exported API symbol is named; agent-worker is a holder kind and holderSession is internal |
+| scope.new_type_contract | yes | holderSession gains backend ownership metadata; persisted Record.HandedOffAt becomes the T1 old-daemon fence (internal/wsagent/holder.go#L69-L89; internal/wsagent/record.go#L55-L63) |
+| scope.test_surface | existing | internal/wsagent/pi_worker_recovery_test.go, codex_worker_test.go, codex_recovery_test.go and lead_recovery_test.go exist; Phase 1 adds an old-daemon fixture |
+| complexity.reuse_points | confirmed | existing Pi holder allocation and reattach, held-lead MCP tuple, and replay reconciliation were read (internal/wsagent/runner_process.go#L184-L190; #L359-L402; #L511-L625) |
+| complexity.side_effect_risk | high | daemon replacement, holder lifetime, worker tokens and interrupted-turn settlement change together |
+| risk.correctness | high | replay must settle in-flight work and parent reporting exactly once across four backends |
+| risk.fit | high | one worker holder kind must preserve each backend's launch, authority, cwd and ownership binding |
+| risk.test | high | directional old-daemon fixture, four-backend replacement coverage and Windows restart behavior are required |
+| risk.security_or_contract | high | T1 fence and token/capability restoration affect old-daemon writes and worker authority |
 
 ## Phases
 
