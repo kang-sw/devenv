@@ -496,17 +496,13 @@ func TestRenderRegionsMermaidInBodyAndItems(t *testing.T) {
 	}
 }
 
-// TestImageViewerScriptHooks pins where the image viewer runs: the full page
-// carries it (and the SVG helpers it shares with the frames) with its overlay
-// styles and icons, the embed snapshot does not, a served page's topic-body
-// frame carries the posting side, and the dashboard reuses the script once
-// through PageAssets.
+// TestImageViewerScriptHooks pins where the image viewer runs: the standalone
+// page carries it (and the SVG helpers it shares with the frames) with its
+// overlay styles and icons, a served page's topic-body frame carries the
+// posting side, and the dashboard reuses the script once through PageAssets.
 func TestImageViewerScriptHooks(t *testing.T) {
 	full := render(t, sampleView(LayoutFull))
 	wantAll(t, full, `wbv-stage`, `function wbFlattenSvg(`, `role", "dialog"`, `aria-modal`, `.wbv-stage`, `id="i-zoom-in"`, `id="i-ext"`)
-	embed := render(t, sampleView(LayoutEmbed))
-	wantNone(t, embed, "function wbFlattenSvg(", `createObjectURL`)
-
 	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "doc", Body: "![a](a.png)", Changed: 2}}}
 	regions, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	if err != nil {

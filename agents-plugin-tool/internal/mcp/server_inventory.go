@@ -126,7 +126,7 @@ func (s *Server) callDiscoveryTools(key string, entry sessionEntry, found bool) 
 	var visible []map[string]any
 	for _, tool := range s.filteredTools() {
 		name := aliases.canonical(tool["name"].(string))
-		if s.permissionRefusal(name) != "" {
+		if s.permissionRefusal(name, nil) != "" {
 			continue
 		}
 		if _, refusal := s.sessionToolAccess(name, key, entry); refusal != "" {

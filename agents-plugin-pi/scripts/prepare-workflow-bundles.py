@@ -8,7 +8,7 @@ from pathlib import Path
 import zipfile
 
 TREES = (".claude-plugin", ".codex-plugin", "claude-agents", "hooks", "rsrc", "skills", "bin")
-FILES = (".mcp.json", "runtime.json", "config-manifest.json", "dashboard-config-manifest.json")
+FILES = (".mcp.json", "runtime.json", "config-manifest.json", "agy-config-manifest.json", "dashboard-config-manifest.json")
 PRODUCTS = {"ws": "agents-plugin", "wsflow": "agents-plugin-wsflow"}
 
 

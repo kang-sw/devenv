@@ -9,8 +9,8 @@ import (
 // TestRecapJumpButtonNamesItsLogRow pins the recap's link to the log row it
 // summarizes: on the full page an agent recap's clock chip is a keyboard
 // button and the recap's data-entry is the stream's current agent row. The
-// recap itself is not a button, since its text may hold links. The chat
-// embed has no history rows; panels use the same exact-version jump.
+// recap itself is not a button, since its text may hold links. Panels use the
+// same exact-version jump.
 func TestRecapJumpButtonNamesItsLogRow(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, `<wb:topic name="open"><wb:log>old</wb:log><wb:log>latest [see](https://example.com)</wb:log></wb:topic>`+
@@ -29,11 +29,6 @@ func TestRecapJumpButtonNamesItsLogRow(t *testing.T) {
 		t.Fatalf("full page recap chips = %d, want 2 (one per agent recap)", n)
 	}
 	wantNone(t, full, `class="trecap" data-entry="e3" data-kind="agent" role=`, `class="trecap" data-entry="e4" data-kind="agent" role=`)
-	embed := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
-	wantAll(t, embed, `class="trecap" data-entry="e3" data-kind="agent"><span class="rat" title=`)
-	if strings.Contains(embed, chip) {
-		t.Fatal("embed recap chip must not be a jump button: the embed has no log rows")
-	}
 	css, err := whiteboardTestAsset("page.css")
 	if err != nil {
 		t.Fatal(err)
@@ -55,9 +50,6 @@ func TestPanelRecapJumpNamesExactVersion(t *testing.T) {
 		`class="evi wb-evi-panel" title="Panels">P</span>`,
 		`class="wb-entry panel" id="`+head.ID+`" data-history-anchor="`+head.ID+`" data-entry="`+head.ID+`" data-kind="panel" data-panel="p1"`,
 		`class="rtext md" title="Final [see](https://example.com)">Final <a href="https://example.com"`)
-	embed := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
-	wantAll(t, embed, `class="trecap" data-entry="`+head.ID+`" data-kind="panel"><span class="rat" title=`)
-	wantNone(t, embed, `class="rat" role="button"`)
 }
 
 // TestRecapJumpScriptUnderNode drives the recap-jump block of stream.js

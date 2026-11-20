@@ -18,9 +18,10 @@ const [base, out] = process.argv.slice(2);
      const frame=await (await host.elementHandle()).contentFrame();
      await frame.locator('#r-entries').waitFor();
      if (!(await frame.locator('#convo').isVisible())) await frame.locator('[data-tab="convo"]').first().click();
-     const history=frame.locator('.modelhistory').first();
-     assert.equal(await history.count(),1,'retained model history');
-     await history.evaluate(d=>d.open=true);
+     const history=frame.locator('.modelhistory-trigger').first();
+     assert.equal(await history.count(),1,'retained model history trigger');
+     await history.click();
+     await frame.locator('.modelhistory-popover').waitFor({state:'visible'});
     }
     await page.locator('#r-rail .rs[data-rid="latency0"] .rl').focus();
     await page.locator('.shp').waitFor({state:'visible'});

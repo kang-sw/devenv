@@ -21,9 +21,9 @@ func whiteboardSummaryLines(text string) []string {
 func TestWhiteboardUpdateSummariesPreservePrefixLinesAndEffectiveState(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	text := f.update(t, `<wb:topic name="rollout"><wb:add class="check"><wb:title>Verify</wb:title></wb:add></wb:topic>`)
-	full, embed := resultLine(t, text, "full: "), resultLine(t, text, "embed: ")
-	oldLines := "ids: (01)\nfull: " + full + "\nembed: " + embed + "\n"
-	if !strings.HasPrefix(text, oldLines) || full != "ai-docs/whiteboards/"+f.replyID()+"/index.html" || !strings.HasPrefix(embed, "ai-docs/whiteboards/"+f.replyID()+"-") || !strings.HasSuffix(text, "topic added: rollout (state: discussing, default)\n"+whiteboardAppliedInfo+"\n") {
+	full := resultLine(t, text, "full: ")
+	lines := "ids: (01)\nfull: " + full + "\n"
+	if !strings.HasPrefix(text, lines) || full != "ai-docs/whiteboards/"+f.replyID()+"/index.html" || !strings.HasSuffix(text, "topic added: rollout (state: discussing, default)\n"+whiteboardAppliedInfo+"\n") {
 		t.Fatalf("prefix/value/summary compatibility: %s", text)
 	}
 	for _, tc := range []struct{ commands, want string }{
@@ -36,8 +36,8 @@ func TestWhiteboardUpdateSummariesPreservePrefixLinesAndEffectiveState(t *testin
 		if got := whiteboardSummaryLines(text); !reflect.DeepEqual(got, []string{tc.want}) || strings.Contains(text, "ids: ") {
 			t.Fatalf("summary/conditional IDs: %q", text)
 		}
-		if !strings.HasPrefix(text, "full: "+full+"\nembed: ") {
-			t.Fatalf("old result lines changed: %s", text)
+		if !strings.HasPrefix(text, "full: "+full+"\n") {
+			t.Fatalf("result lines changed: %s", text)
 		}
 	}
 	text = f.update(t, `<wb:topic name="content"><wb:body>No ask</wb:body></wb:topic>`)

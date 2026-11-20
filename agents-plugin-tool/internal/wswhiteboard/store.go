@@ -56,10 +56,6 @@ const (
 	// ArchiveCap bounds the settled items a session keeps; the oldest settled
 	// item is evicted first and is no longer queryable.
 	ArchiveCap = 500
-	// EmbedRetention is how many embed snapshots a session keeps in the
-	// repository whiteboard folder. Embeds written to a host embed folder are
-	// never deleted by the server.
-	EmbedRetention = 5
 )
 
 var (
@@ -130,9 +126,7 @@ type Item struct {
 	AnswerQuote    string   `json:"answer_quote,omitempty"`
 	AnsweredAt     string   `json:"answered_at,omitempty"`
 	Links          []string `json:"links,omitempty"`
-	// Changed is the render sequence of the update that last changed the
-	// item; the embed marks an item new when it changed after the previous
-	// embed.
+	// Changed is the render sequence of the update that last changed the item.
 	Changed int `json:"changed"`
 	// ChangedAt is the wall-clock time (RFC 3339) of that update, which the
 	// stale-topic nudge ages topics by; see stampChanges for a store written
@@ -230,13 +224,6 @@ func (s *State) ReaskTimes() map[int]int64 {
 	return out
 }
 
-// Embed records one embed snapshot written to the repository folder, so
-// retention evicts by render sequence rather than file mtime.
-type Embed struct {
-	Seq  int    `json:"seq"`
-	Name string `json:"name"`
-}
-
 // TopicDoc holds a topic's current content and immutable entry stream.
 // Recap fields remain readable for legacy snapshots; wb:recap is retired.
 type TopicDoc struct {
@@ -316,12 +303,6 @@ type State struct {
 	// entry goes when its topic disappears (pruneLabels); a store written
 	// before the field has every topic stemless.
 	Labels map[string]string `json:"labels,omitempty"`
-	// LastEmbedSeq is the render sequence of the previous embed snapshot.
-	LastEmbedSeq int     `json:"last_embed_seq,omitempty"`
-	Embeds       []Embed `json:"embeds,omitempty"`
-	// EmbedDir is the host embed folder, empty when embeds go to the
-	// repository folder.
-	EmbedDir string `json:"embed_dir,omitempty"`
 	// LastNudgeAt is when an update result last carried the stale-topic
 	// nudge (RFC 3339); empty, as on a store written before the field, is
 	// never.
@@ -341,10 +322,6 @@ type State struct {
 // Env carries the side effects Apply needs, so the store stays testable.
 type Env struct {
 	Now time.Time
-	// IsDir reports whether path is an existing directory (embed_dir).
-	IsDir func(path string) bool
-	// IsAbs reports whether path is absolute on the server's platform.
-	IsAbs func(path string) bool
 	// SourceRoot is the session's project root, the base a wb:panel
 	// src="..." path resolves against and may not leave (ReadPanelSource).
 	// Empty refuses every src.
@@ -789,19 +766,7 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 					work.Counter = floor
 				}
 			case "wb:embed-dir":
-				dir, present := cmd.Attr("path")
-				switch {
-				case !present:
-					p.Add("%s: required (\"\" clears it)", cmd.At("path"))
-				case dir == "":
-					work.EmbedDir = ""
-				case !env.IsAbs(dir):
-					p.Add("%s: must be an absolute path; got %q", cmd.At("path"), dir)
-				case !env.IsDir(dir):
-					p.Add("%s: %s is not an existing directory (the server never creates it)", cmd.At("path"), dir)
-				default:
-					work.EmbedDir = dir
-				}
+				embedDir = true
 			}
 		}
 		if !cmd.IsGroup() && len(cp.List) == 0 {
@@ -847,9 +812,6 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 				}
 			}
 		}
-		if cmd.Tag == "wb:embed-dir" {
-			embedDir = true
-		}
 		for _, id := range withdrawn {
 			closedBy[id] = cmd.Label()
 		}
@@ -858,12 +820,6 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 		updates.recordKinds(cmd, effects)
 		out.Effects = append(out.Effects, effects...)
 		previous = effectSnapshot(work)
-	}
-	if !embedDir && work.EmbedDir != "" && !env.IsDir(work.EmbedDir) {
-		p.Add("embed_dir %s (stored for this session) is no longer an existing directory; send <wb:embed-dir path=\"...\"/> with the host's current folder, or path=\"\" to clear it", work.EmbedDir)
-		// Rendering cannot proceed with this stored prerequisite. No mutation
-		// has committed: retain the whole call for correction, not a partial tree.
-		return state.clone(), Outcome{Unpartitioned: true}, newTopicUpdates(state)
 	}
 	out.Failed = failedCommands(failed, keys)
 	if out.Accepted == 0 && len(p.List) > 0 {
@@ -879,7 +835,7 @@ func applyCommands(state *State, cmds []command, env Env, p *problems, defaults 
 	work.stampChanges(mark, env.Now)
 	work.stampBodyTimeProofs(origins)
 	work.markMetadataRevision(out.Effects)
-	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), work.staleNudge(env.Now), work.transitionNudge(statesBefore), work.structuralWarnings())
+	out.Info = joinInfo(embedDirDeprecatedInfo(embedDir), withdrawnInfo(out.Withdrawn), work.staleNudge(env.Now), work.transitionNudge(statesBefore), work.structuralWarnings())
 	return work, out, updates
 }
 
@@ -927,6 +883,15 @@ func applyClose(p *problems, work *State, cmd command, topicOf topicResolver, ma
 		work.closeStateEvent(topic, now)
 	}
 	return withdrawn
+}
+
+// embedDirDeprecatedInfo returns the deprecation notice when a batch carried
+// wb:embed-dir, "" otherwise.
+func embedDirDeprecatedInfo(seen bool) string {
+	if !seen {
+		return ""
+	}
+	return "wb:embed-dir is deprecated and ignored; embed HTML snapshots are no longer rendered."
 }
 
 // withdrawnInfo is the update result's note on the items a close withdrew,

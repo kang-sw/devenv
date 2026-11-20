@@ -560,8 +560,10 @@ func (d *Daemon) handleFSList(w http.ResponseWriter, r *http.Request, replyID st
 		return
 	}
 	// Resolving a Windows symlink can contact a UNC target before localPath
-	// can reject it. Keep links opaque during automatic directory listing.
-	if localViewer(r) && runtime.GOOS != "windows" {
+	// can reject it, and resolving symlinks outside trusted session roots
+	// (such as $HOME in the workspace picker) can touch OS-protected folders
+	// before the user chooses them. Keep links opaque during those listings.
+	if session && localViewer(r) && runtime.GOOS != "windows" {
 		for i := range entries {
 			e := &entries[i]
 			if !e.Link {

@@ -116,7 +116,7 @@ func TestFolderChangedTopicMeta112(t *testing.T) {
 		}, "t2/meta.json")
 	})
 	t.Run("session-only", func(t *testing.T) {
-		folderCheckMetaWrites(t, f, func(s *State) error { s.Seq++; s.LastEmbedSeq = s.Seq; return nil })
+		folderCheckMetaWrites(t, f, func(s *State) error { s.Seq++; return nil })
 	})
 	t.Run("log-only", func(t *testing.T) {
 		folderCheckMetaWrites(t, f, func(s *State) error {

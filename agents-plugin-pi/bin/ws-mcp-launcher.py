@@ -671,6 +671,35 @@ def local_devenv_build_env(os_name: str) -> dict:
     return build_env
 
 
+CODESIGN_IDENTITY_ENV = "WS_CODESIGN_IDENTITY"
+DARWIN_CODESIGN_IDENTIFIER = "dev.ws.mcp"
+
+
+def darwin_codesign_command(binary: Path, identity: str) -> list[str]:
+    """Build the macOS codesign command for a local build."""
+    return ["codesign", "--force", "-s", identity, "-i", DARWIN_CODESIGN_IDENTIFIER, str(binary)]
+
+
+def codesign_darwin_binary(binary: Path, os_name: str, env: dict | None = None) -> bool:
+    """Sign binary on macOS when WS_CODESIGN_IDENTITY is set; raise RuntimeError on failure."""
+    if os_name != "darwin":
+        return False
+    source_env = os.environ if env is None else env
+    identity = source_env.get(CODESIGN_IDENTITY_ENV, "").strip()
+    if not identity:
+        return False
+    cmd = darwin_codesign_command(binary, identity)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=RUNTIME_BUILD_TIMEOUT, check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"codesign failed for {binary} with identity {identity!r}: {exc}") from exc
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"codesign failed for {binary} with identity {identity!r} (exit={proc.returncode}){suffix}")
+    return True
+
+
 def build_local_devenv_runtime(runtime_dir: Path, binary: Path, contract: dict, local_contract: dict, os_name: str) -> bool:
     tool_dir = local_contract["tool_dir"]
     go_binary = local_contract["go"]
@@ -679,14 +708,20 @@ def build_local_devenv_runtime(runtime_dir: Path, binary: Path, contract: dict, 
     try:
         generate_package_assets(tool_dir)
         identity = source_runtime_metadata(tool_dir)
+        build_env = local_devenv_build_env(os_name)
         proc = subprocess.run(
             [str(go_binary), "build", "-o", str(tmp), "./cmd/ws-mcp"],
             cwd=str(tool_dir),
-            env=local_devenv_build_env(os_name),
+            env=build_env,
             timeout=RUNTIME_BUILD_TIMEOUT,
             check=False,
         )
         if proc.returncode == 0:
+            try:
+                codesign_darwin_binary(tmp, os_name, build_env)
+            except RuntimeError as exc:
+                note(f"local devenv build failed: {exc}")
+                return False
             write_runtime_metadata(tmp, identity)
         if proc.returncode == 0 and runtime_fully_compatible(tmp, contract, runtime_dir, allow_same_minor=True):
             install_tmp_runtime(tmp, binary, contract, runtime_dir, f"built local devenv runtime from {tool_dir}", allow_same_minor=True)

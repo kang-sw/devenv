@@ -84,7 +84,7 @@ func (s *Server) resolveBucketedOverrideRows(resolver *wsconfig.Resolver, sessio
 		if !entry.HarnessBucketed() {
 			continue
 		}
-		rv, _, err := resolveHarnessBucketed(resolver, sessionKey, item.Key, s.currentHarness())
+		rv, _, err := resolveHarnessBucketed(resolver, sessionKey, item.Key, s.playbookHarness())
 		if err != nil {
 			return err
 		}
@@ -343,7 +343,7 @@ func buildTuningCatalog(rsrcRoot fs.FS, resolver *wsconfig.Resolver, sessionKey,
 	appendKnob(whiteboardEntry, tuningKnob{
 		ID:          whiteboardEntry.Key,
 		Kind:        "workflow_preference",
-		Description: "Session whiteboard as the lead's primary channel (builtin off), per harness. on adds a workflow-manual section, from the next workflow-manual load, that puts every item asked of the user and every explanation on a local HTML page the server renders (and on a per-turn embed snapshot for a host that shows HTML inline), leaving the terminal a one-line pointer; off keeps asks and explanations in terminal text. The whiteboard tools work either way, and a session's first successful whiteboard.update turns this on at session scope when it resolves off (an explicit session value stays). A write lands in the session's harness bucket unless harness names another (* for every harness), and in global scope (all of the user's projects) unless scope names another. A read takes the session's harness bucket from any scope first, then the * bucket from any scope. Cost: on needs a browser tab beside the terminal and one whiteboard update per turn; off keeps everything in the terminal.",
+		Description: "Session whiteboard as the lead's primary channel (builtin off), per harness. on adds a workflow-manual section, from the next workflow-manual load, that puts every item asked of the user and every explanation on a local HTML page the server renders, leaving the terminal a one-line pointer; off keeps asks and explanations in terminal text. The whiteboard tools work either way, and a session's first successful whiteboard.update turns this on at session scope when it resolves off (an explicit session value stays). A write lands in the session's harness bucket unless harness names another (* for every harness), and in global scope (all of the user's projects) unless scope names another. A read takes the session's harness bucket from any scope first, then the * bucket from any scope. Cost: on needs a browser tab beside the terminal and one whiteboard update per turn; off keeps everything in the terminal.",
 		Writer:      tuningWriter{Tool: whiteboardEntry.WriterTool, FixedArguments: map[string]string{"key": whiteboardEntry.Key}},
 		Reset: &tuningWriter{
 			Tool:           whiteboardEntry.ResetTool,
@@ -444,7 +444,7 @@ func buildTuningCatalog(rsrcRoot fs.FS, resolver *wsconfig.Resolver, sessionKey,
 		entry := registryEntryByKey(key)
 		rv, _, _ := resolveCompactionValue(resolver, sessionKey, key, harness, registries...)
 		def := wsconfig.CompactionDefaults[key]
-		appendKnob(entry, tuningKnob{ID: key, Kind: "workflow_preference", Description: "Hosted native compaction threshold, checked at idle boundaries. Advisory asks for durable agenda state; hard queues native compaction. Read at process start.", Writer: tuningWriter{Tool: "config.tune", FixedArguments: map[string]string{"key": key}}, Reset: &tuningWriter{Tool: "config.tune", FixedArguments: map[string]string{"key": key, "reset": "true"}}, SelectorFields: entry.SelectorFields, ValueFields: entry.ValueFields, Current: tuningScopedValue{Value: rv.Value, Scope: string(rv.Scope)}, Default: &def})
+		appendKnob(entry, tuningKnob{ID: key, Kind: "workflow_preference", Description: "Hosted native compaction threshold, checked at idle boundaries. Advisory asks for durable agenda state; hard queues native compaction. Read at process start and reloaded on config.tune before the next threshold check.", Writer: tuningWriter{Tool: "config.tune", FixedArguments: map[string]string{"key": key}}, Reset: &tuningWriter{Tool: "config.tune", FixedArguments: map[string]string{"key": key, "reset": "true"}}, SelectorFields: entry.SelectorFields, ValueFields: entry.ValueFields, Current: tuningScopedValue{Value: rv.Value, Scope: string(rv.Scope)}, Default: &def})
 	}
 
 	childWaitingEntry := registryEntryByKey(wsconfig.ItemAgentChildWaitingDays)
@@ -824,7 +824,7 @@ func (s *Server) effectiveConfigValue(entry configKeyEntry, sessionKey string) (
 		return s.compactionValue(&resolver, sessionKey, entry.Key, s.playbookHarness())
 	}
 	if entry.HarnessBucketed() {
-		return resolveHarnessBucketed(&resolver, sessionKey, entry.Key, s.currentHarness())
+		return resolveHarnessBucketed(&resolver, sessionKey, entry.Key, s.playbookHarness())
 	}
 	rv, err := resolver.Get(sessionKey, entry.Key)
 	return rv, entry.Key, err

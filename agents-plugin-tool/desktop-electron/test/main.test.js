@@ -77,6 +77,8 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
           loaded(url.href);
         },
         setZoomFactor: zoom => { this.zoom = zoom; },
+        reload: () => { this.reloads = (this.reloads || 0) + 1; },
+        reloadIgnoringCache: () => { this.forceReloads = (this.forceReloads || 0) + 1; },
         id: renderers.length + 1,
         toggleDevTools: () => { this.devtoolsToggles = (this.devtoolsToggles || 0) + 1; },
         isDevToolsOpened: () => !!this.devtoolsOpen,
@@ -1388,4 +1390,30 @@ test('explicit native menu click copies a login link and sends only success; fai
   assert.equal(f.copied.length, 1);
   assert.equal(sent.length, 1);
   assert.equal(f.ipcMain.listenerCount('werkschaft:login-copy'), 0, 'renderer cannot request a clipboard write');
+});
+test('View Reload and Force Reload target the dashboard webContents on Windows (BaseWindow) and macOS', async () => {
+  const win = await fixture(undefined, 'win32');
+  const [dashboard, bar] = win.views;
+  assert.equal(win.window.constructor, win.Base);
+  assert.equal(win.menus.reload.accelerator, 'F5');
+  assert.equal(win.menus.force_reload.accelerator, 'Ctrl+Shift+R');
+  // Electron passes focusedWindow=undefined for a BaseWindow hosting a WebContentsView.
+  win.menus.reload.click({}, undefined);
+  assert.equal(dashboard.reloads, 1);
+  assert.equal(bar.reloads, undefined);
+  win.menus.force_reload.click({}, undefined);
+  assert.equal(dashboard.forceReloads, 1);
+  assert.equal(bar.forceReloads, undefined);
+  // Safe no-op once the dashboard webContents is destroyed.
+  dashboard.destroyed = true;
+  win.menus.reload.click({}, undefined);
+  win.menus.force_reload.click({}, undefined);
+  assert.equal(dashboard.reloads, 1);
+  assert.equal(dashboard.forceReloads, 1);
+
+  const mac = await fixture(undefined, 'darwin');
+  mac.menus.reload.click({}, mac.window);
+  mac.menus.force_reload.click({}, undefined);
+  assert.equal(mac.window.reloads, 1);
+  assert.equal(mac.window.forceReloads, 1);
 });

@@ -1062,3 +1062,138 @@ func TestCompactionAgyUsageDropAutoDetection(t *testing.T) {
 		t.Fatalf("next turn missing restore note: %s", got)
 	}
 }
+
+func TestCompactionLiveReloadAndSteadyStateMemoryOnly(t *testing.T) {
+	h := newLeadHarness(t)
+	h.opts.Config = wsconfig.Options{CacheHome: t.TempDir(), ConfigHome: t.TempDir()}
+	reg := h.opts.Backends[BackendClaude]
+	reg.Catalog = ClaudeCatalog()
+	h.opts.Backends[BackendClaude] = reg
+
+	// Start with advisory=80%, hard=95% at global scope.
+	cfg := h.opts.Config
+	cfg.RepoRoot = h.root
+	resolver := wsconfig.NewResolver(cfg, nil, nil, nil)
+	if err := resolver.Set("compaction.lead_advisory", "80%", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeGlobal}); err != nil {
+		t.Fatal(err)
+	}
+	if err := resolver.Set("compaction.lead_hard", "95%", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeGlobal}); err != nil {
+		t.Fatal(err)
+	}
+	h.start()
+
+	id, holder := h.runLead("one")
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	h.idle(id)
+	c := h.runner.conv(id)
+
+	// 60% is below initial 80% advisory: no note queued.
+	tokens := int64(60000)
+	c.do(func() {
+		c.observeCompaction(wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &tokens, Window: 100000}})
+		if c.compactIdle() {
+			t.Fatal("unexpected compaction at 60% with hard=95%")
+		}
+		if c.compactNote != "" || c.compactAdvised {
+			t.Fatalf("unexpected advisory at 60%% with advisory=80%%: advised=%v note=%q", c.compactAdvised, c.compactNote)
+		}
+	})
+
+	// Steady-state observations after loadCompaction must perform zero file I/O.
+	before := wsstate.FileIOCounters()
+	c.do(func() {
+		for i := 0; i < 1000; i++ {
+			c.observeCompaction(wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &tokens, Window: 100000}})
+		}
+	})
+	for site, count := range wsstate.FileIOCounters() {
+		if count != before[site] {
+			t.Fatalf("steady-state observation touched files: %s +%d", site, count-before[site])
+		}
+	}
+
+	// Lower advisory to 50% at global scope and notify in memory without restarting.
+	if err := resolver.Set("compaction.lead_advisory", "50%", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeGlobal}); err != nil {
+		t.Fatal(err)
+	}
+	NotifyCompactionConfigChanged()
+
+	c.do(func() {
+		if c.compactIdle() {
+			t.Fatal("advisory started a turn")
+		}
+		if !c.compactAdvised || !strings.Contains(c.compactNote, "advisory point 50000") {
+			t.Fatalf("lowered advisory did not apply live: advised=%v note=%q", c.compactAdvised, c.compactNote)
+		}
+		c.compactNote = ""
+	})
+
+	// Raise advisory to 75% and notify: 60% is now below 75%, so latch clears
+	// and fires again once usage reaches 76%.
+	if err := resolver.Set("compaction.lead_advisory", "75%", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeGlobal}); err != nil {
+		t.Fatal(err)
+	}
+	NotifyCompactionConfigChanged()
+
+	c.do(func() {
+		c.observeCompaction(wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &tokens, Window: 100000}})
+		if c.compactAdvised {
+			t.Fatal("raising advisory above current usage did not clear latch")
+		}
+		higher := int64(76000)
+		c.observeCompaction(wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &higher, Window: 100000}})
+		if c.compactIdle() {
+			t.Fatal("advisory started a turn")
+		}
+		if !c.compactAdvised || !strings.Contains(c.compactNote, "advisory point 75000") {
+			t.Fatalf("raised advisory did not apply at 76%%: advised=%v note=%q", c.compactAdvised, c.compactNote)
+		}
+	})
+
+	// Same holder throughout: no process restart occurred.
+	if got := h.record(id).HolderID; got != holder {
+		t.Fatalf("process restarted during live reload: got %s, want %s", got, holder)
+	}
+}
+
+func TestCompactionLiveReloadProjectShadowsGlobal(t *testing.T) {
+	root := t.TempDir()
+	cfg := wsconfig.Options{CacheHome: t.TempDir(), ConfigHome: t.TempDir(), RepoRoot: root}
+	resolver := wsconfig.NewResolver(cfg, nil, nil, nil)
+	if err := resolver.Set("compaction.lead_hard", "90%", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeProject}); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRunner(Options{
+		Config:   cfg,
+		Keys:     compactionRootKeys{root: root},
+		Backends: map[string]BackendRegistration{BackendClaude: {Catalog: ClaudeCatalog()}},
+	})
+	c := &conv{r: r, rec: Record{Root: root, WSKey: "key", Backend: BackendClaude, Lead: true}}
+	c.loadCompaction()
+	if c.compactHard.Percent != 90 {
+		t.Fatalf("initial hard = %+v, want 90%%", c.compactHard)
+	}
+
+	// Global tune must remain shadowed by project scope on live reload.
+	if err := resolver.Set("compaction.lead_hard", "55%", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeGlobal}); err != nil {
+		t.Fatal(err)
+	}
+	NotifyCompactionConfigChanged()
+
+	tokens := int64(60000)
+	c.observeCompaction(wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &tokens, Window: 100000}})
+	if c.compactHard.Percent != 90 {
+		t.Fatalf("global tune overwrote project scope: got %+v, want 90%%", c.compactHard)
+	}
+
+	// Clearing the project override exposes the global tune on the next check.
+	if err := resolver.Unset("compaction.lead_hard", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeProject}); err != nil {
+		t.Fatal(err)
+	}
+	NotifyCompactionConfigChanged()
+
+	c.observeCompaction(wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &tokens, Window: 100000}})
+	if c.compactHard.Percent != 55 {
+		t.Fatalf("clearing project override did not fall back to global 55%%: got %+v", c.compactHard)
+	}
+}

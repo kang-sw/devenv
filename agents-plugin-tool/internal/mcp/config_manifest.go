@@ -545,7 +545,7 @@ func (s *Server) resolveConfigGet(sessionKey, key string) (configGetResult, erro
 	} else if entry, ok := resolveConfigEntryForKey(key); ok && entry.Key == key && entry.HarnessBucketed() {
 		// A harness-bucketed knob's value lives under its bucket keys; read
 		// the one that applies to this session's harness.
-		rv, _, err = resolveHarnessBucketed(&resolver, sessionKey, key, s.currentHarness())
+		rv, _, err = resolveHarnessBucketed(&resolver, sessionKey, key, s.playbookHarness())
 	} else {
 		rv, err = resolver.Get(sessionKey, key)
 	}

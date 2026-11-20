@@ -33,8 +33,7 @@ func archiveUpdate(t *testing.T, f FolderStore, fn func(*State) error) {
 	}
 }
 
-// archiveSource is a board with topics, a panel, logs, items, and render
-// bookkeeping a load must scrub.
+// archiveSource is a board with topics, a panel, logs, and items.
 func archiveSource(t *testing.T, dir string) FolderStore {
 	t.Helper()
 	f := FolderStore{Dir: dir}
@@ -44,10 +43,6 @@ func archiveSource(t *testing.T, dir string) FolderStore {
 <wb:add class="check"><wb:title>Verify the handoff</wb:title></wb:add>
 </wb:topic>
 <wb:topic name="context" label="Context"><wb:log>Keep this too</wb:log></wb:topic>`))
-	archiveUpdate(t, f, func(s *State) error {
-		s.EmbedDir, s.Embeds, s.LastEmbedSeq = "D:/host/embeds", []Embed{{Seq: 1, Name: "x.html"}}, 1
-		return nil
-	})
 	return f
 }
 
@@ -167,7 +162,6 @@ func TestArchiveExportThenLoadReplacesTheBoardWithABackup(t *testing.T) {
 		t.Fatalf("LoadArchive = %q, %d; want %q, 2", backup, topics, want)
 	}
 	want := folderOpen(t, source.Dir, nil)
-	want.EmbedDir, want.Embeds, want.LastEmbedSeq = "", nil, 0
 	got := folderOpen(t, dest.Dir, nil)
 	if !reflect.DeepEqual(archiveComparable(want), archiveComparable(got)) {
 		t.Fatalf("loaded board differs from the source\nwant %s\ngot  %s", folderJSON(archiveComparable(want)), folderJSON(archiveComparable(got)))
@@ -267,7 +261,7 @@ func TestArchiveLoadIntoNoBoardMakesNoBackup(t *testing.T) {
 	if got := backups(t, dest.Dir); len(got) != 0 {
 		t.Fatalf("backups %v", got)
 	}
-	if got := folderOpen(t, dest.Dir, nil); got == nil || len(got.Topics) != 2 || got.EmbedDir != "" {
+	if got := folderOpen(t, dest.Dir, nil); got == nil || len(got.Topics) != 2 {
 		t.Fatalf("loaded board %s", folderJSON(got))
 	}
 }

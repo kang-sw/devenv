@@ -1,7 +1,7 @@
 ;(function () {
   // Updated-ago: each topic bar's latest change as relative time, refreshed
   // with the topic-state clock. The full page and the served page write the change time as
-  // data-at (Unix ms) beside a local HH:MM fallback; the embed, a frozen
+  // data-at (Unix ms) beside a local HH:MM fallback; a frozen
   // snapshot, writes the HH:MM alone and does not run this. The dashboard
   // re-runs this after every board swap, so it keeps a single timer. Body
   // ages share this refresh; opaque frames load their own copy for tooltips.

@@ -11,6 +11,24 @@ import (
 )
 
 func isCompactionKey(key string) bool { _, ok := wsconfig.CompactionDefaults[key]; return ok }
+func isCompactionTuneKey(key string) bool {
+	if isCompactionKey(key) {
+		return true
+	}
+	switch key {
+	case "claude.compaction_advisory_enabled",
+		"claude.compaction_advisory_percent",
+		"pi.compaction_advisory_percent",
+		"pi.compaction_hard_percent":
+		return true
+	}
+	return false
+}
+func notifyCompactionTune(key string) {
+	if isCompactionTuneKey(key) {
+		wsagent.NotifyCompactionConfigChanged()
+	}
+}
 func compactionKeyEntry(key string) configKeyEntry {
 	return configKeyEntry{Key: key, WriterTool: "config.tune", ResetTool: "config.tune", ResolverBacked: true, HarnessApplicable: true, NoAgentVisible: true,
 		SelectorFields: []tuningField{{Name: "harness", Description: "Harness override; * writes the shared layer value.", Enum: []string{"claude", "codex", "pi", "agy", "*"}}, {Name: "scope", Enum: wsconfig.ScopeSchemaEnum()}},

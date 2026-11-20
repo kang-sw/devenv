@@ -88,7 +88,7 @@ if(bad.length)throw Error(bad.join('\n'));
 
 func TestPanelUpdatedMarkIsProminentAndLatestOnly(t *testing.T) {
 	st := streamFixture()
-	for _, layout := range []Layout{LayoutFull, LayoutEmbed} {
+	for _, layout := range []Layout{LayoutFull} {
 		out := markup(render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"})))
 		if layout == LayoutFull {
 			if strings.Count(out, `class="wb-panel-updated" hidden`) != 4 {

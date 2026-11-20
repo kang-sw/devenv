@@ -105,7 +105,7 @@ func TestWhiteboardPublicationDirectoryAndMermaidFailuresRepairWithoutDuplicateE
 			if f.stamp(t) != "wbStamp(\"3\");\n" || !strings.Contains(f.fullPage(t), "committed-marker") {
 				t.Fatal("render-only retry did not repair the page and stamp")
 			}
-			for _, page := range []string{f.pagePath(), filepath.Join(f.root, resultLine(t, text, "embed: "))} {
+			for _, page := range []string{f.pagePath()} {
 				if got := readFileForTest(t, filepath.Join(filepath.Dir(page), assetName)); len(got) != len(assetData) {
 					t.Fatalf("repaired page %s lacks its complete Mermaid asset", page)
 				}

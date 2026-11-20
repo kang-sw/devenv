@@ -828,7 +828,7 @@ func buildOverrideLookup(s *Server, sessionKey string) (overrideLookupFn, error)
 	if err := resolver.Check(); err != nil {
 		return nil, err
 	}
-	preferences, haveSlots, err := preferenceOverride(&resolver, capturedKey, s.currentHarness())
+	preferences, haveSlots, err := preferenceOverride(&resolver, capturedKey, s.playbookHarness())
 	if err != nil {
 		return nil, err
 	}

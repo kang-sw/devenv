@@ -401,9 +401,11 @@
   // runs on load and after each entries swap.
   function syncChead() {
     var slot = chead && chead.querySelector(".csum"), sum = doc.querySelector("#r-entries > .thead > .sum");
-    if (!slot || !sum) return;
-    slot.textContent = "";
-    slot.appendChild(sum);
+    if (slot && sum) {
+      slot.textContent = "";
+      slot.appendChild(sum);
+    }
+    modelHistorySync();
   }
   syncChead();
   function tabShown(t) { return visible($(PANE[t])) || (t === "convo" && visible(fpane)); }

@@ -45,6 +45,8 @@ func sessionHover(reg Registration, snap *wslive.Snapshot, live bool, now time.T
 		}
 		if rate != nil && rate.OutputTps != nil && *rate.OutputTps > 0 {
 			h.Rate, h.RateAt = max(int64(math.Round(*rate.OutputTps)), 1), rate.At
+		} else if h.Observed == nil && snap.Lead.OutputRate != nil && snap.Lead.OutputRate.OutputTps > 0 && snap.Lead.OutputRate.At > 0 {
+			h.Rate, h.RateAt = max(int64(math.Round(snap.Lead.OutputRate.OutputTps)), 1), snap.Lead.OutputRate.At
 		}
 	}
 	return h

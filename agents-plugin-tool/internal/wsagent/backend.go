@@ -377,6 +377,9 @@ type Event struct {
 	// boundaries and user messages itself; a backend never sends
 	// turn_start, turn_end, user, or reset.
 	Live *wslive.Event
+	// LiveCoalescesTurnEnd marks a live status immediately followed by this
+	// mapper's TurnEnd. File-only recovery can persist both in one snapshot.
+	LiveCoalescesTurnEnd bool
 	// ReasoningSummary is a validated lead-only widget projection, never an
 	// extension-supplied lifecycle/usage/key command.
 	ReasoningSummary *wslive.ReasoningSummary
@@ -396,10 +399,19 @@ type Event struct {
 	// it for resume.
 	SessionID string
 	// TurnEnd ends the running turn; TurnError describes a turn that ended
-	// in an error (a refusal, an interrupt).
-	TurnEnd    bool
-	TurnError  string
-	TurnReason string
+	// in an error (a refusal, an interrupt). ModelFailure (with TurnEnd) carries
+	// an in-band API/stream failure that remained at the reply tail through the
+	// end. ModelFailureUpdate is an internal-only change to that terminal-tail
+	// candidate; an empty value clears a candidate after later model output.
+	TurnEnd            bool
+	TurnError          string
+	TurnReason         string
+	ModelFailure       string
+	ModelFailureUpdate *string
+	// ModelActivity is an internal-only signal that a raw stream update arrived
+	// during a turn, carrying the count of currently pending tool calls
+	// (including daemon commands) so the model-wait watchdog can reset or pause.
+	ModelActivity *int
 	// CompactRequested (with TurnEnd): the ending turn carried a successful
 	// compaction lever call (a *__request_compaction tool call whose result
 	// is not an error) and was not interrupted. The runner holds queued

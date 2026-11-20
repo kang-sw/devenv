@@ -4,6 +4,7 @@ parent: 261114-epic-ws-common-session-foundation
 related:
   261117-feat-ws-hosted-antigravity-adapter: "mapped agy's context usage (usage_update) but no plan or rate-limit usage"
   261118-feat-ws-agy-tool-names-and-worker-role: "agy worker role; more agy usage makes the plan quota visible-worthy"
+completed: 2026-11-20
 ---
 
 # agy plan-usage source for the dashboard usage gutter
@@ -39,9 +40,20 @@ a research ticket and run it after the agy worker role lands, through Pi.
 
 ## Outcome
 
-Superseded by `261119-feat-ws-agy-plan-usage-display` (`todo/`), which captures
-the live `agy -p /usage --output-format json` probe, Orca prior art, and
-owner-confirmed decisions (D1–D5) resolving `## Questions`.
+Superseded by `261119-feat-ws-agy-plan-usage-display` (now `.done/`), which
+captures the live `agy -p /usage --output-format json` probe, Orca prior art,
+and owner-confirmed decisions resolving `## Questions`; it shipped to
+`develop`.
+
+- Q1: agy exposes plan quota through the CLI `/usage` prompt (JSON output: two
+  model groups, each with 5-hour and weekly buckets carrying
+  `remaining_fraction` and `reset_time`); ACP carries only the context window.
+- Q2: not cheap enough for a refresh or render path; the shipped design spawns
+  the probe only on user action (popover open or refresh) with a 10-minute
+  debounce and billed/auth latches.
+- Q3: two new `agy` gutter entries, one per model group, persisted in separate
+  `plan-usage-agy.json` / `plan-usage-agy-history.json` files (T0: an old
+  daemon never reads them).
 
 ## Outcome Ledger
 
@@ -59,6 +71,11 @@ owner-confirmed decisions (D1–D5) resolving `## Questions`.
 
 ### Open Questions
 
-- Questions 1-3 above.
+- None: Questions 1-3 are answered in `## Outcome`.
 
 ### Rejected Alternatives
+
+
+## Resolution (2026-11-20)
+
+Answered by 261119-feat-ws-agy-plan-usage-display, merged to develop; see `## Outcome`.

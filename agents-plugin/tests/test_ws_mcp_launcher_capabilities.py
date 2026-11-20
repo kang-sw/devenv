@@ -399,6 +399,96 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
                 self.assertFalse(launcher.build_local_devenv_runtime(root, binary, self.capability_contract(), local, "linux"))
             self.assertEqual(launcher.read_runtime_metadata(binary)["version"], "0.18.9-dev")
 
+    def test_darwin_codesign_command_and_local_build_integration(self):
+        launcher = load_launcher()
+        sample = Path("/tmp/ws-mcp-sample")
+        self.assertEqual(
+            launcher.darwin_codesign_command(sample, "Local Dev Code Sign"),
+            ["codesign", "--force", "-s", "Local Dev Code Sign", "-i", "dev.ws.mcp", str(sample)],
+        )
+        # Unset or non-darwin: completely inert, never invokes subprocess.run.
+        with mock.patch.object(launcher.subprocess, "run", side_effect=AssertionError("unexpected codesign")):
+            self.assertFalse(launcher.codesign_darwin_binary(sample, "darwin", {}))
+            self.assertFalse(launcher.codesign_darwin_binary(sample, "darwin", {"WS_CODESIGN_IDENTITY": "   "}))
+            self.assertFalse(launcher.codesign_darwin_binary(sample, "linux", {"WS_CODESIGN_IDENTITY": "DevCert"}))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            tool = root / "tool"
+            (tool / "cmd" / "ws-mcp").mkdir(parents=True)
+            (tool / "internal" / "mcp").mkdir(parents=True)
+            (tool / "cmd" / "ws-mcp" / "main.go").write_text('var version = "0.18.9-dev"\nvar sourceCommit = "source"\n')
+            (tool / "internal" / "mcp" / "server.go").write_text('const ProtocolVersion = "2025-03-26"\n')
+            local = {"tool_dir": tool, "go": root / "go"}
+            binary = root / "ws-mcp"
+
+            # 1. WS_CODESIGN_IDENTITY unset on darwin: byte-for-byte unchanged (no codesign call).
+            def fake_unsigned(argv, **kwargs):
+                if argv[:2] == [launcher.sys.executable, str(tool / "scripts/generate-package-assets.py")]:
+                    return subprocess.CompletedProcess(argv, 0)
+                if argv[:3] == [str(local["go"]), "build", "-o"]:
+                    Path(argv[3]).write_bytes(b"unsigned build")
+                    return subprocess.CompletedProcess(argv, 0)
+                raise AssertionError(f"unexpected subprocess call: {argv}")
+
+            with mock.patch.dict(os.environ, {"WS_CODESIGN_IDENTITY": ""}, clear=False), \
+                 mock.patch.object(launcher.subprocess, "run", side_effect=fake_unsigned) as run:
+                self.assertTrue(launcher.build_local_devenv_runtime(root, binary, self.capability_contract(), local, "darwin"))
+            self.assertEqual(run.call_count, 2)
+            self.assertEqual(binary.read_bytes(), b"unsigned build")
+            self.assertEqual(launcher.read_runtime_metadata(binary)["binary_sha256"], hashlib.sha256(b"unsigned build").hexdigest())
+
+            # 2. WS_CODESIGN_IDENTITY set on darwin: codesign runs after go build and BEFORE metadata SHA-256.
+            events = []
+            def fake_signed(argv, **kwargs):
+                if argv[:2] == [launcher.sys.executable, str(tool / "scripts/generate-package-assets.py")]:
+                    events.append("generate")
+                    return subprocess.CompletedProcess(argv, 0)
+                if argv[:3] == [str(local["go"]), "build", "-o"]:
+                    events.append("build")
+                    Path(argv[3]).write_bytes(b"raw build")
+                    return subprocess.CompletedProcess(argv, 0)
+                if argv[0] == "codesign":
+                    events.append(argv)
+                    self.assertEqual(argv[:6], ["codesign", "--force", "-s", "DevCert-SHA1", "-i", "dev.ws.mcp"])
+                    # Mutate the binary as real codesign does; metadata must hash the signed bytes.
+                    Path(argv[6]).write_bytes(b"signed build bytes")
+                    return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+                raise AssertionError(f"unexpected subprocess call: {argv}")
+
+            with mock.patch.dict(os.environ, {"WS_CODESIGN_IDENTITY": "DevCert-SHA1"}, clear=False), \
+                 mock.patch.object(launcher.subprocess, "run", side_effect=fake_signed):
+                self.assertTrue(launcher.build_local_devenv_runtime(root, binary, self.capability_contract(), local, "darwin"))
+            self.assertEqual(events[:2], ["generate", "build"])
+            self.assertEqual(len(events), 3)
+            self.assertEqual(binary.read_bytes(), b"signed build bytes")
+            self.assertEqual(
+                launcher.read_runtime_metadata(binary)["binary_sha256"],
+                hashlib.sha256(b"signed build bytes").hexdigest(),
+            )
+
+            # 3. Signing failure fails the build step cleanly and never installs unsigned bytes.
+            binary.unlink()
+            launcher.runtime_metadata_path(binary).unlink()
+            def fake_sign_fail(argv, **kwargs):
+                if argv[:2] == [launcher.sys.executable, str(tool / "scripts/generate-package-assets.py")]:
+                    return subprocess.CompletedProcess(argv, 0)
+                if argv[:3] == [str(local["go"]), "build", "-o"]:
+                    Path(argv[3]).write_bytes(b"must not install unsigned")
+                    return subprocess.CompletedProcess(argv, 0)
+                if argv[0] == "codesign":
+                    return subprocess.CompletedProcess(argv, 1, stdout="", stderr="no identity found")
+                raise AssertionError(f"unexpected subprocess call: {argv}")
+
+            notes = []
+            with mock.patch.dict(os.environ, {"WS_CODESIGN_IDENTITY": "MissingCert"}, clear=False), \
+                 mock.patch.object(launcher, "note", side_effect=notes.append), \
+                 mock.patch.object(launcher.subprocess, "run", side_effect=fake_sign_fail):
+                self.assertFalse(launcher.build_local_devenv_runtime(root, binary, self.capability_contract(), local, "darwin"))
+            self.assertFalse(binary.exists())
+            self.assertFalse(launcher.runtime_metadata_path(binary).exists())
+            self.assertTrue(any("codesign failed" in msg and "no identity found" in msg for msg in notes), notes)
+
     def test_bootstrap_url_carries_verified_metadata(self):
         launcher = load_launcher()
         with tempfile.TemporaryDirectory() as temp_dir:

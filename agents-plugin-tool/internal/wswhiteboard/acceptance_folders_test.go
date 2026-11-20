@@ -90,9 +90,12 @@ func TestCommandAcceptanceDirectionalOldSourceReopen(t *testing.T) {
 		t.Skip("build testdata/compat-old in pinned pre-feature source and set WS_WHITEBOARD_COMPAT_OLD")
 	}
 	type result struct {
-		State         *State
-		Problems      []string
-		Display, Page string
+		State                    *State
+		Problems                 []string
+		Display, Page, EmbedPage string
+		LastEmbedSeq             int
+		EmbedDir                 string
+		EmbedCount               int
 	}
 	old := func(t *testing.T, dir, commands string) result {
 		t.Helper()
@@ -106,6 +109,40 @@ func TestCommandAcceptanceDirectionalOldSourceReopen(t *testing.T) {
 		}
 		return r
 	}
+	t.Run("retired-embed-state", func(t *testing.T) {
+		dir := t.TempDir()
+		store := FolderStore{Dir: dir}
+		if err := store.Update(nil, func(s *State) error {
+			mustApply(t, s, addXML(ClassTechnical, "t", "new writer"))
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		read := old(t, dir, "read")
+		if len(read.Problems) > 0 || read.LastEmbedSeq != 0 || read.EmbedDir != "" || read.EmbedCount != 0 {
+			t.Fatalf("old reader did not see absent embed state: %+v", read)
+		}
+		if !strings.Contains(read.EmbedPage, `class="chip fresh"`) {
+			t.Fatal("old reader did not degrade to marking new content fresh")
+		}
+
+		legacyDir := t.TempDir()
+		written := old(t, legacyDir, `<wb:embed-dir path="/stale-host"/>`)
+		if len(written.Problems) > 0 || written.EmbedDir != "/stale-host" {
+			t.Fatalf("old writer did not persist embed state: %+v", written)
+		}
+		legacyStore := FolderStore{Dir: legacyDir}
+		if err := legacyStore.Update(nil, func(s *State) error {
+			mustApply(t, s, addXML(ClassTechnical, "t", "new reader"))
+			return nil
+		}); err != nil {
+			t.Fatalf("new reader refused old embed state: %v", err)
+		}
+		got := folderOpen(t, legacyDir, nil)
+		if len(got.Items) != 1 || got.Items[0].Title != "new reader" {
+			t.Fatalf("new reader lost update after old embed state: %+v", got)
+		}
+	})
 	t.Run("old-statuses-and-history", func(t *testing.T) {
 		dir := t.TempDir()
 		var commands strings.Builder
@@ -133,7 +170,6 @@ func TestCommandAcceptanceDirectionalOldSourceReopen(t *testing.T) {
 			store := FolderStore{Dir: dir}
 			if err := store.Update(nil, func(s *State) error {
 				mustApply(t, s, addXML(ClassPolicy, "t", "Pick", "One", "Two")+`<wb:answer id="1" value="">verbatim &amp; <b>note</b></wb:answer>`)
-				s.LastEmbedSeq = s.Seq
 				return nil
 			}); err != nil {
 				t.Fatal(err)
@@ -169,7 +205,7 @@ func TestCommandAcceptanceDirectionalOldSourceReopen(t *testing.T) {
 				t.Fatal(written.Problems)
 			}
 			reopened := folderOpen(t, dir, nil)
-			if !reflect.DeepEqual(reopened, written.State) || reopened.Seq != before.Seq+1 || reopened.LastEmbedSeq != before.LastEmbedSeq {
+			if !reflect.DeepEqual(reopened, written.State) || reopened.Seq != before.Seq+1 {
 				t.Fatal("new reopen reconstructed or lost old data")
 			}
 			it := item(t, reopened, 1)

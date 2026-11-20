@@ -242,3 +242,91 @@ func TestPanelSrcIsOptionalAndHiddenFromNoOneElse(t *testing.T) {
 	mustApply(t, st, panelXML("t", "Inline", "body"))
 	wantProblems(t, refused(t, &State{}, `<wb:topic name="t"><wb:panel recap="x" path="a.md">b</wb:panel></wb:topic>`), "unknown attribute path", "src")
 }
+
+func TestPanelSrcTOCTOUSymlinkSwapRefused(t *testing.T) {
+	t.Run("final file swapped with outside symlink before open", func(t *testing.T) {
+		b := newSrcBoard(t)
+		outside := t.TempDir()
+		secret := filepath.Join(outside, "secret.md")
+		if err := os.WriteFile(secret, []byte("secret-outside"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		target := b.write(t, "sub/m.md", "inside-safe")
+
+		// Probe symlink support before arming the hook.
+		probe := filepath.Join(b.root, "probe.md")
+		if err := os.Symlink(secret, probe); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		_ = os.Remove(probe)
+
+		orig := panelSrcBeforeOpen
+		panelSrcBeforeOpen = func() {
+			_ = os.Remove(target)
+			_ = os.Symlink(secret, target)
+		}
+		t.Cleanup(func() { panelSrcBeforeOpen = orig })
+
+		got, err := ReadPanelSource(b.root, "sub/m.md")
+		if err == nil {
+			t.Fatalf("ReadPanelSource succeeded after final-file symlink swap: got %q", got)
+		}
+		if strings.Contains(got, "secret") {
+			t.Fatalf("leaked outside content: %q", got)
+		}
+	})
+
+	t.Run("parent directory swapped with outside symlink before open", func(t *testing.T) {
+		b := newSrcBoard(t)
+		outside := t.TempDir()
+		if err := os.WriteFile(filepath.Join(outside, "m.md"), []byte("secret-outside-dir"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		b.write(t, "sub/m.md", "inside-safe")
+		subDir := filepath.Join(b.root, "sub")
+		parkedDir := filepath.Join(b.root, "sub-parked")
+
+		probe := filepath.Join(b.root, "probe-dir")
+		if err := os.Symlink(outside, probe); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		_ = os.Remove(probe)
+
+		orig := panelSrcBeforeOpen
+		panelSrcBeforeOpen = func() {
+			if err := os.Rename(subDir, parkedDir); err == nil {
+				_ = os.Symlink(outside, subDir)
+			}
+		}
+		t.Cleanup(func() { panelSrcBeforeOpen = orig })
+
+		got, err := ReadPanelSource(b.root, "sub/m.md")
+		if err == nil {
+			t.Fatalf("ReadPanelSource succeeded after parent-dir symlink swap: got %q", got)
+		}
+		if strings.Contains(got, "secret") {
+			t.Fatalf("leaked outside content: %q", got)
+		}
+	})
+
+	t.Run("file replaced before open fails SameFile check", func(t *testing.T) {
+		b := newSrcBoard(t)
+		target := b.write(t, "sub/m.md", "original")
+		replacement := filepath.Join(b.root, "sub", "other.tmp")
+		if err := os.WriteFile(replacement, []byte("swapped"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		orig := panelSrcBeforeOpen
+		panelSrcBeforeOpen = func() {
+			_ = os.Remove(target)
+			_ = os.Rename(replacement, target)
+		}
+		t.Cleanup(func() { panelSrcBeforeOpen = orig })
+
+		got, err := ReadPanelSource(b.root, "sub/m.md")
+		if err == nil {
+			t.Fatalf("ReadPanelSource succeeded after file replacement: got %q", got)
+		}
+	})
+}

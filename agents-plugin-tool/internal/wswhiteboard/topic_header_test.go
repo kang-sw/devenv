@@ -22,9 +22,9 @@ func TestClosedTopicRendersLatestRecap(t *testing.T) {
 }
 
 // TestTopicBarShowsItsLatestChange pins the updated time: the newest change
-// among a topic's items and body; the full page writes it for the script to
-// show as relative time (data-at, Unix ms) over a local HH:MM, the embed
-// writes the HH:MM alone, and a topic without change times shows none.
+// among a topic's items and body. The page writes it for the script to show
+// as relative time (data-at, Unix ms) over a local HH:MM, and a topic without
+// change times shows none.
 func TestTopicBarShowsItsLatestChange(t *testing.T) {
 	st := &State{}
 	applyAt(t, st, addXML(ClassTechnical, "t", "x"), testNow)
@@ -37,11 +37,7 @@ func TestTopicBarShowsItsLatestChange(t *testing.T) {
 	wantAll(t, full, fmt.Sprintf(`<time class="tago" datetime="2026-11-04T10:35:00Z" title="last change" data-at="%d">19:35</time>`, later.UnixMilli()))
 	wantNone(t, full, `class="tdoc"`) // Body is now an immutable panel, not a duplicate Doc.
 	wantNone(t, full, `class="body-age"`, `변경 시각 모름`)
-	embed := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r", Location: tz}))
-	wantAll(t, embed, `<time class="tago" datetime="2026-11-04T10:35:00Z" title="last change">19:35</time>`)
-	wantNone(t, embed, "data-at=", "class=\"body-age\"", "data-body-at=")
-
-	for name, out := range map[string]string{"full": full, "embed": embed} {
+	for name, out := range map[string]string{"full": full} {
 		start := strings.Index(out, `<span class="tname" title="old">old</span>`)
 		if start < 0 {
 			t.Fatalf("%s: topic old missing", name)
@@ -52,10 +48,8 @@ func TestTopicBarShowsItsLatestChange(t *testing.T) {
 			t.Errorf("%s: a topic without change times shows one: %s", name, bar)
 		}
 	}
-	// The full page carries the script that turns data-at into relative
-	// time; the embed, a frozen snapshot, does not.
+	// The page carries the script that turns data-at into relative time.
 	wantAll(t, full, `querySelectorAll("time.tago[data-at]")`)
-	wantNone(t, embed, `time.tago[data-at]`)
 }
 
 // TestTopicBarCarriesANotePen pins the topic note's markup: every topic bar
@@ -162,9 +156,9 @@ func TestClosedTopicsAreCapped(t *testing.T) {
 	}
 }
 
-// TestClosedTopicCapRenders pins what each page shows past the cap: the file
-// page and the embed name how many closed topics they leave out, the served
-// board ends with a show-more control naming the next index, and the
+// TestClosedTopicCapRenders pins what the page shows past the cap: the file
+// page names how many closed topics it leaves out, the served board ends with
+// a show-more control naming the next index, and the
 // show-more answer renders the rest with no further control.
 func TestClosedTopicCapRenders(t *testing.T) {
 	st := closedBoard(t, 35)
@@ -236,8 +230,8 @@ func TestStemmedTopicPageNamesItsKey(t *testing.T) {
 
 // TestTopicCountChipsAreBulkButtonsOnTheDashboard pins where a topic bar's
 // count chips answer everything they count: on the dashboard board
-// (RenderRegions) each is a button naming its action; the static page and
-// the embed keep them plain counts with no bulk control.
+// (RenderRegions) each is a button naming its action; the static page keeps
+// them as plain counts with no bulk control.
 func TestTopicCountChipsAreBulkButtonsOnTheDashboard(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, `<wb:topic name="t"><wb:add class="policy"><wb:title>p</wb:title><wb:option>x</wb:option><wb:option>y</wb:option><wb:recommend>b</wb:recommend></wb:add></wb:topic>`+addXML(ClassTechnical, "t", "a"))

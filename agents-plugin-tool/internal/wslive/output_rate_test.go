@@ -1,0 +1,296 @@
+package wslive
+
+import (
+	"bytes"
+	"encoding/json"
+	"math"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
+)
+
+func TestOutputRateApplyResetRetentionAndValidation(t *testing.T) {
+	st := NewState("test-session")
+
+	// Invalid rates are ignored without changing state or requesting persistence.
+	for _, bad := range []*OutputRate{
+		{OutputTps: 0, At: 100},
+		{OutputTps: -5, At: 100},
+		{OutputTps: MaxOutputTps + 1, At: 100},
+		{OutputTps: math.NaN(), At: 100},
+		{OutputTps: math.Inf(1), At: 100},
+		{OutputTps: 42, At: 0},
+		{OutputTps: 42, At: -1},
+	} {
+		res, err := st.Apply(Event{Kind: KindStatus, OutputRate: bad}, 1000)
+		if err != nil || res.Changed || res.OutputRate != nil {
+			t.Fatalf("bad rate %+v accepted: res=%+v err=%v", bad, res, err)
+		}
+	}
+
+	// Lead-level KindAgent rejects OutputRate just like Observed.
+	if _, err := st.Apply(Event{Kind: KindAgent, OutputRate: &OutputRate{OutputTps: 40, At: 100}}, 1000); err == nil {
+		t.Fatal("lead KindAgent accepted OutputRate")
+	}
+
+	// Valid rate updates state, leaves Observed nil, and requests persistence.
+	in := &OutputRate{OutputTps: 41.6, At: 2000}
+	res, err := st.Apply(Event{Kind: KindStatus, OutputRate: in}, 2000)
+	if err != nil || !res.Changed || res.OutputRate == nil || res.OutputRate.OutputTps != 41.6 || res.OutputRate.At != 2000 {
+		t.Fatalf("valid rate apply: res=%+v err=%v", res, err)
+	}
+	in.OutputTps = 999 // caller ownership ends at Apply
+	snap := st.Snapshot(2100)
+	if snap.Lead.Observed != nil || snap.Lead.LastTurnOutput != nil {
+		t.Fatalf("OutputRate fabricated model observation: %+v", snap.Lead)
+	}
+	if snap.Lead.OutputRate == nil || snap.Lead.OutputRate.OutputTps != 41.6 || snap.Lead.OutputRate.At != 2000 {
+		t.Fatalf("snapshot outputRate = %+v", snap.Lead.OutputRate)
+	}
+	snap.Lead.OutputRate.OutputTps = 1 // snapshot must not alias state
+	if st.Snapshot(2200).Lead.OutputRate.OutputTps != 41.6 {
+		t.Fatal("snapshot aliased mutable outputRate")
+	}
+
+	// Duplicate or older rate writes nothing and keeps newer value.
+	res, err = st.Apply(Event{Kind: KindStatus, OutputRate: &OutputRate{OutputTps: 41.6, At: 2000}}, 2300)
+	if err != nil || res.Changed || res.OutputRate != nil {
+		t.Fatalf("duplicate rate changed state: %+v %v", res, err)
+	}
+	res, err = st.Apply(Event{Kind: KindStatus, OutputRate: &OutputRate{OutputTps: 10, At: 1500}}, 2400)
+	if err != nil || res.Changed || res.OutputRate != nil {
+		t.Fatalf("older rate overwrote newer: %+v %v", res, err)
+	}
+
+	// Retained across KindTurnStart, KindTurnEnd without output, and KindReset.
+	_, _ = st.Apply(Event{Kind: KindTurnStart, At: 3000}, 3000)
+	if got := st.Snapshot(3100).Lead.OutputRate; got == nil || got.OutputTps != 41.6 {
+		t.Fatalf("turn start cleared outputRate: %+v", got)
+	}
+	_, _ = st.Apply(Event{Kind: KindTurnEnd, At: 3500}, 3500)
+	if got := st.Snapshot(3600).Lead.OutputRate; got == nil || got.OutputTps != 41.6 {
+		t.Fatalf("ineligible turn end cleared outputRate: %+v", got)
+	}
+	_, _ = st.Apply(Event{Kind: KindReset, At: 4000}, 4000)
+	if got := st.Snapshot(4100).Lead.OutputRate; got == nil || got.OutputTps != 41.6 {
+		t.Fatalf("reset cleared outputRate: %+v", got)
+	}
+}
+
+func TestOutputRateDurableSidecarT2SurvivesLegacySnapshotWriterAndPrune(t *testing.T) {
+	dir := t.TempDir()
+	st := NewState("agy-session")
+	res, err := st.Apply(Event{Kind: KindStatus, OutputRate: &OutputRate{OutputTps: 53.4, At: 5000}}, 5000)
+	if err != nil || res.OutputRate == nil {
+		t.Fatalf("apply: res=%+v err=%v", res, err)
+	}
+	if err := WriteOutputRate(dir, res.OutputRate); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify sidecar carries only rate + timestamp, never model or source.
+	rawSidecar, err := os.ReadFile(OutputRatePath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	lines := bytes.FieldsFunc(rawSidecar, func(r rune) bool { return r == '\n' || r == '\r' })
+	if len(lines) != 1 {
+		t.Fatalf("sidecar records = %d, want 1", len(lines))
+	}
+	if err := json.Unmarshal(lines[0], &fields); err != nil {
+		t.Fatal(err)
+	}
+	if len(fields) != 2 || fields["outputTps"] != 53.4 || fields["at"] != float64(5000) {
+		t.Fatalf("sidecar fields = %v", fields)
+	}
+
+	// New snapshot contains lead.outputRate; an old daemon reading it into a
+	// legacy Snapshot struct ignores the unknown field and sees no Observed/LastTurnOutput.
+	newSnapRaw, err := json.Marshal(st.Snapshot(5100))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacyRead struct {
+		SchemaVersion int    `json:"schemaVersion"`
+		ReplyID       string `json:"replyId"`
+		Lead          struct {
+			Phase          string            `json:"phase"`
+			Observed       *ObservedModel    `json:"observed,omitempty"`
+			LastTurnOutput *ModelObservation `json:"lastTurnOutput,omitempty"`
+		} `json:"lead"`
+	}
+	if err := json.Unmarshal(newSnapRaw, &legacyRead); err != nil {
+		t.Fatalf("legacy reader rejected new snapshot: %v", err)
+	}
+	if legacyRead.Lead.Observed != nil || legacyRead.Lead.LastTurnOutput != nil {
+		t.Fatalf("legacy reader saw model observation: %+v", legacyRead.Lead)
+	}
+
+	// Old daemon rewrites snapshot.json, dropping lead.outputRate.
+	legacyWrite, _ := json.Marshal(legacyRead)
+	if err := os.WriteFile(SnapshotPath(dir), legacyWrite, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Old model-evidence prune touches only model-evidence/, never output-rate.json.
+	pruneObserved(filepath.Join(dir, ObservedDirName))
+
+	// New daemon reopens: reads stripped snapshot + intact output-rate.json.
+	snap, err := ReadSnapshot(SnapshotPath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Lead.OutputRate != nil {
+		t.Fatalf("legacy rewrite unexpectedly retained lead.outputRate: %+v", snap.Lead.OutputRate)
+	}
+	rate, err := ReadOutputRate(dir)
+	if err != nil || rate == nil || rate.OutputTps != 53.4 || rate.At != 5000 {
+		t.Fatalf("ReadOutputRate after legacy rewrite = %+v, %v", rate, err)
+	}
+	OverlayOutputRate(&snap, rate)
+	if snap.Lead.OutputRate == nil || snap.Lead.OutputRate.OutputTps != 53.4 || snap.Lead.Observed != nil {
+		t.Fatalf("overlay after reopen = %+v", snap.Lead)
+	}
+	reopened := NewState("agy-session")
+	reopened.SeedOutputRate(rate)
+	if got := reopened.Snapshot(6000).Lead.OutputRate; got == nil || got.OutputTps != 53.4 || got.At != 5000 {
+		t.Fatalf("reopened state outputRate = %+v", got)
+	}
+}
+
+func TestOutputRateCacheWarmRememberAndForget(t *testing.T) {
+	dir := t.TempDir()
+	var cache OutputRateCache
+	reads := func() int64 { return wsstate.FileIOCounters()["file_io_read_file"] }
+
+	// Absent recovery is negatively cached until intake remembers a value or
+	// session teardown explicitly forgets it.
+	before := reads()
+	if got := cache.Warm(dir); got != nil {
+		t.Fatalf("absent load = %+v", got)
+	}
+	if got := cache.Warm(dir); got != nil {
+		t.Fatalf("cached absent load = %+v", got)
+	}
+	if got := reads() - before; got != 2 {
+		t.Fatalf("absent recovery reads = %d, want 2 bounded segments", got)
+	}
+
+	// A later sidecar write is not discovered by presentation invalidations.
+	// The owning intake path remembers the same value directly in memory.
+	if err := WriteOutputRate(dir, &OutputRate{OutputTps: 25, At: 1000}); err != nil {
+		t.Fatal(err)
+	}
+	if got := cache.Cached(dir); got != nil {
+		t.Fatalf("unremembered sidecar leaked into memory = %+v", got)
+	}
+	cache.Remember(dir, &OutputRate{OutputTps: 25, At: 1000})
+
+	// Cached presentation hits do no filesystem work.
+	before = reads()
+	if got := cache.Cached(dir); got == nil || got.OutputTps != 25 {
+		t.Fatalf("cached hit = %+v", got)
+	}
+	if got := reads() - before; got != 0 {
+		t.Fatalf("cached hit reads = %d, want 0", got)
+	}
+
+	cache.Remember(dir, &OutputRate{OutputTps: 88.5, At: 2000})
+	cache.Remember(dir, &OutputRate{OutputTps: 10, At: 1500})
+	if got := cache.Cached(dir); got == nil || got.OutputTps != 88.5 || got.At != 2000 {
+		t.Fatalf("remembered newest = %+v", got)
+	}
+	if err := WriteOutputRate(dir, &OutputRate{OutputTps: 88.5, At: 2000}); err != nil {
+		t.Fatal(err)
+	}
+	cache.Forget(dir)
+	if got := cache.Warm(dir); got == nil || got.OutputTps != 88.5 {
+		t.Fatalf("load after forget = %+v", got)
+	}
+}
+
+func TestOutputRateLogHeldAppendFileTouchBudget(t *testing.T) {
+	dir := t.TempDir()
+	log := NewOutputRateLog(dir)
+	before := wsstate.FileIOCounters()
+	if err := log.Append(&OutputRate{OutputTps: 25, At: 1000}); err != nil {
+		t.Fatal(err)
+	}
+	if err := log.Append(&OutputRate{OutputTps: 88.5, At: 2000}); err != nil {
+		t.Fatal(err)
+	}
+	after := wsstate.FileIOCounters()
+	want := map[string]int64{"mkdir_all": 1, "open_file": 1, "stat": 1, "write": 2, "atomic_replace": 0, "close": 0}
+	for op, n := range want {
+		if got := after["file_io_"+op] - before["file_io_"+op]; got != n {
+			t.Fatalf("two appends %s operations = %d, want %d", op, got, n)
+		}
+	}
+	if got := after["file_io_open_file"] - before["file_io_open_file"]; got != 1 {
+		t.Fatalf("two appends opened files %d times, want 1 held handle", got)
+	}
+	if got := after["file_io_create_temp"] - before["file_io_create_temp"]; got != 0 {
+		t.Fatalf("append created %d temp files, want 0", got)
+	}
+	if got := after["file_io_atomic_replace"] - before["file_io_atomic_replace"]; got != 0 {
+		t.Fatalf("append replaced files %d times, want 0", got)
+	}
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	closed := wsstate.FileIOCounters()
+	if got := closed["file_io_close"] - after["file_io_close"]; got != 1 {
+		t.Fatalf("graceful log close operations = %d, want 1", got)
+	}
+	if got, err := ReadOutputRate(dir); err != nil || got == nil || got.OutputTps != 88.5 || got.At != 2000 {
+		t.Fatalf("latest appended rate = %+v, %v", got, err)
+	}
+}
+
+func TestOutputRateLogRotatesWholeSegmentsAndRecoversLatest(t *testing.T) {
+	dir := t.TempDir()
+	log := NewOutputRateLog(dir)
+	log.maxBytes = 30
+	before := wsstate.FileIOCounters()
+	for i, rate := range []float64{10, 20, 30, 40} {
+		if err := log.Append(&OutputRate{OutputTps: rate, At: int64(i + 1)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	after := wsstate.FileIOCounters()
+	want := map[string]int64{"mkdir_all": 1, "open_file": 4, "stat": 1, "write": 4, "atomic_replace": 3, "close": 4}
+	for op, n := range want {
+		if got := after["file_io_"+op] - before["file_io_"+op]; got != n {
+			t.Fatalf("four rotating appends %s operations = %d, want %d", op, got, n)
+		}
+	}
+	if got := after["file_io_open_file"] - before["file_io_open_file"]; got != 4 {
+		t.Fatalf("initial + three rotated segment opens = %d, want 4", got)
+	}
+	if got := after["file_io_atomic_replace"] - before["file_io_atomic_replace"]; got != 3 {
+		t.Fatalf("three whole-segment rotations = %d, want 3", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, outputRatePreviousName)); err != nil {
+		t.Fatalf("previous whole segment: %v", err)
+	}
+	if info, err := os.Stat(OutputRatePath(dir)); err != nil || info.Size() > log.maxBytes {
+		t.Fatalf("active segment size = %v, %v", info, err)
+	}
+	if got, err := ReadOutputRate(dir); err != nil || got == nil || got.OutputTps != 40 || got.At != 4 {
+		t.Fatalf("rotated latest rate = %+v, %v", got, err)
+	}
+
+	// A crash after moving active to previous but before creating the next
+	// active file still reopens from the retained whole segment.
+	if err := os.Remove(OutputRatePath(dir)); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ReadOutputRate(dir); err != nil || got == nil || got.OutputTps != 30 || got.At != 3 {
+		t.Fatalf("previous-only recovery = %+v, %v", got, err)
+	}
+}

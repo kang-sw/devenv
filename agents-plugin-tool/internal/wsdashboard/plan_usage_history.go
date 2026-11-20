@@ -21,6 +21,7 @@ const (
 // survive a supported-version round trip, but are never projected to viewers.
 type planUsageSample struct {
 	Harness  string  `json:"harness"`
+	Group    string  `json:"group,omitempty"`
 	Kind     string  `json:"kind"`
 	Source   string  `json:"source"`
 	ResetsAt int64   `json:"resetsAt"`
@@ -40,8 +41,22 @@ type planUsageHistoryFile struct {
 	Fields  map[string]json.RawMessage
 	Records []planUsageHistoryRecord
 }
+type planUsageHistorySpec struct {
+	cacheName    string
+	valid        func(planUsageSample) bool
+	requiredKeys []string
+}
+
+var defaultHistorySpec = planUsageHistorySpec{
+	cacheName:    planUsageHistoryCache,
+	valid:        validPlanUsageSample,
+	requiredKeys: []string{"harness", "kind", "source", "resetsAt", "asOf", "percent"},
+}
 
 func validPlanUsageSample(v planUsageSample) bool {
+	if v.Group != "" {
+		return false
+	}
 	sourceOK := v.Harness == "claude" && v.Source == "Claude push" || v.Harness == "codex" && (v.Source == "via Codex CLI" || v.Source == "via Pi")
 	kindOK := v.Kind == "seven_day" || v.Harness == "claude" && v.Kind == "five_hour"
 	return sourceOK && kindOK && v.AsOf > 0 && v.ResetsAt >= 0 && validUsage(v.Percent)
@@ -94,15 +109,19 @@ func (s *planUsageStore) statHistory(path string) (planUsageHistoryStat, error) 
 // one keeping both size and mtime, goes unnoticed. The result is shared with
 // the memo and must not be mutated. Caller holds s.mu.
 func (s *planUsageStore) readHistoryLocked() (planUsageHistoryFile, error) {
+	return s.readHistoryFileLocked(&s.hist, defaultHistorySpec)
+}
+
+func (s *planUsageStore) readHistoryFileLocked(memo *planUsageHistoryMemo, spec planUsageHistorySpec) (planUsageHistoryFile, error) {
 	empty := planUsageHistoryFile{Fields: map[string]json.RawMessage{}}
-	path := filepath.Join(s.dir, planUsageHistoryCache)
+	path := filepath.Join(s.dir, spec.cacheName)
 	stat, err := s.statHistory(path)
 	if err != nil {
-		s.hist.ok = false
+		memo.ok = false
 		return empty, err
 	}
-	if s.hist.ok && s.hist.stat == stat {
-		return s.hist.file, s.hist.err
+	if memo.ok && memo.stat == stat {
+		return memo.file, memo.err
 	}
 	h, err := empty, error(nil)
 	if !stat.missing {
@@ -116,18 +135,22 @@ func (s *planUsageStore) readHistoryLocked() (planUsageHistoryFile, error) {
 		case readErr != nil:
 			// A transient IO failure (a scanner holding the file) must not pin
 			// "unavailable" until the file next changes.
-			s.hist.ok = false
+			memo.ok = false
 			return empty, readErr
 		default:
-			h, err = parsePlanUsageHistory(raw)
+			h, err = parsePlanUsageHistoryWith(raw, spec)
 		}
 	}
-	s.hist.ok, s.hist.stat, s.hist.file, s.hist.err = true, stat, h, err
-	s.hist.rev++
+	memo.ok, memo.stat, memo.file, memo.err = true, stat, h, err
+	memo.rev++
 	return h, err
 }
 
 func parsePlanUsageHistory(raw []byte) (planUsageHistoryFile, error) {
+	return parsePlanUsageHistoryWith(raw, defaultHistorySpec)
+}
+
+func parsePlanUsageHistoryWith(raw []byte, spec planUsageHistorySpec) (planUsageHistoryFile, error) {
 	h := planUsageHistoryFile{Fields: map[string]json.RawMessage{}}
 	if err := json.Unmarshal(raw, &h.Fields); err != nil {
 		return h, err
@@ -143,11 +166,11 @@ func parsePlanUsageHistory(raw []byte) (planUsageHistoryFile, error) {
 	for _, raw := range records {
 		var v planUsageSample
 		var fields map[string]json.RawMessage
-		if json.Unmarshal(raw, &v) != nil || !validPlanUsageSample(v) || json.Unmarshal(raw, &fields) != nil {
+		if json.Unmarshal(raw, &v) != nil || !spec.valid(v) || json.Unmarshal(raw, &fields) != nil {
 			return h, errors.New("invalid usage history sample")
 		}
-		// All six members are required, including a truthful zero/unknown reset.
-		for _, key := range []string{"harness", "kind", "source", "resetsAt", "asOf", "percent"} {
+		// All required members must be present, including a truthful zero/unknown reset.
+		for _, key := range spec.requiredKeys {
 			if value, ok := fields[key]; !ok || string(value) == "null" {
 				return h, errors.New("incomplete usage history sample")
 			}
@@ -189,6 +212,9 @@ func prunePlanUsageHistory(records []planUsageHistoryRecord, now int64) []planUs
 		if a.Harness != b.Harness {
 			return a.Harness < b.Harness
 		}
+		if a.Group != b.Group {
+			return a.Group < b.Group
+		}
 		if a.Kind != b.Kind {
 			return a.Kind < b.Kind
 		}
@@ -197,10 +223,10 @@ func prunePlanUsageHistory(records []planUsageHistoryRecord, now int64) []planUs
 		}
 		return strconv.FormatInt(a.ResetsAt, 10) < strconv.FormatInt(b.ResetsAt, 10)
 	})
-	counts := map[[2]string]int{}
+	counts := map[[3]string]int{}
 	newest := make([]planUsageHistoryRecord, 0, len(kept))
 	for i := len(kept) - 1; i >= 0; i-- {
-		key := [2]string{kept[i].Sample.Harness, kept[i].Sample.Kind}
+		key := [3]string{kept[i].Sample.Harness, kept[i].Sample.Group, kept[i].Sample.Kind}
 		if counts[key] < planUsageHistoryCap {
 			newest = append(newest, kept[i])
 			counts[key]++
@@ -216,18 +242,22 @@ func prunePlanUsageHistory(records []planUsageHistoryRecord, now int64) []planUs
 // of a read record, withSampleFields for a new or replaced one. The memo is
 // never mutated in place; a successful write becomes the new memo.
 func (s *planUsageStore) appendHistoryLocked(samples []planUsageSample, now int64) {
+	s.appendHistoryFileLocked(&s.hist, defaultHistorySpec, samples, now)
+}
+
+func (s *planUsageStore) appendHistoryFileLocked(memo *planUsageHistoryMemo, spec planUsageHistorySpec, samples []planUsageSample, now int64) {
 	if len(samples) == 0 {
 		return
 	}
-	current, err := s.readHistoryLocked()
+	current, err := s.readHistoryFileLocked(memo, spec)
 	if err != nil {
 		return
 	} // Preserve corrupt/newer files for explicit repair.
 	type identity struct {
-		harness, kind, source string
-		reset, at             int64
+		harness, group, kind, source string
+		reset, at                    int64
 	}
-	key := func(v planUsageSample) identity { return identity{v.Harness, v.Kind, v.Source, v.ResetsAt, v.AsOf} }
+	key := func(v planUsageSample) identity { return identity{v.Harness, v.Group, v.Kind, v.Source, v.ResetsAt, v.AsOf} }
 	h := planUsageHistoryFile{Fields: make(map[string]json.RawMessage, len(current.Fields)+2), Records: append([]planUsageHistoryRecord(nil), current.Records...)}
 	for k, raw := range current.Fields {
 		h.Fields[k] = raw
@@ -238,7 +268,7 @@ func (s *planUsageStore) appendHistoryLocked(samples []planUsageSample, now int6
 	}
 	changed := false
 	for _, v := range samples {
-		if !validPlanUsageSample(v) {
+		if !spec.valid(v) {
 			continue
 		}
 		if i, ok := indices[key(v)]; ok {
@@ -272,18 +302,18 @@ func (s *planUsageStore) appendHistoryLocked(samples []planUsageSample, now int6
 		return
 	}
 	raw, err := json.Marshal(h.Fields)
-	if err != nil || s.write(planUsageHistoryCache, raw) != nil {
+	if err != nil || s.write(spec.cacheName, raw) != nil {
 		return
 	}
 	// Adopt what was just written so the next read costs one stat; without a
 	// stat, drop the memo and let the next read reload.
-	stat, err := s.statHistory(filepath.Join(s.dir, planUsageHistoryCache))
+	stat, err := s.statHistory(filepath.Join(s.dir, spec.cacheName))
 	if err != nil || stat.missing {
-		s.hist.ok = false
+		memo.ok = false
 		return
 	}
-	s.hist.ok, s.hist.stat, s.hist.file, s.hist.err = true, stat, h, nil
-	s.hist.rev++
+	memo.ok, memo.stat, memo.file, memo.err = true, stat, h, nil
+	memo.rev++
 }
 
 // sameHistoryRecords reports whether two record lists hold the same samples in
@@ -303,13 +333,20 @@ func sameHistoryRecords(a, b []planUsageHistoryRecord) bool {
 
 // history is the full pruned history; viewers get historyView.
 func (s *planUsageStore) history(now int64) planUsageHistoryProjection {
+	if s == nil {
+		return planUsageHistoryProjection{SchemaVersion: 1, Status: "empty", Samples: []planUsageSample{}}
+	}
+	return s.historyFile(&s.hist, defaultHistorySpec, now)
+}
+
+func (s *planUsageStore) historyFile(memo *planUsageHistoryMemo, spec planUsageHistorySpec, now int64) planUsageHistoryProjection {
 	p := planUsageHistoryProjection{SchemaVersion: 1, Status: "empty", Samples: []planUsageSample{}}
 	if s == nil {
 		return p
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	h, err := s.readHistoryLocked()
+	h, err := s.readHistoryFileLocked(memo, spec)
 	if err != nil {
 		p.Status = "unavailable"
 		return p
@@ -328,6 +365,20 @@ func (s *planUsageStore) history(now int64) planUsageHistoryProjection {
 // sent in the same response. The encoded JSON is memoized by history
 // revision and entries until the age prune would next drop a sample.
 func (s *planUsageStore) historyView(entries []planUsageEntry, now int64) json.RawMessage {
+	if s == nil {
+		raw, _ := json.Marshal(planUsageHistoryProjection{SchemaVersion: 1, Status: "empty", Samples: []planUsageSample{}})
+		return raw
+	}
+	var filtered []planUsageEntry
+	for _, e := range entries {
+		if e.Harness != "agy" {
+			filtered = append(filtered, e)
+		}
+	}
+	return s.historyFileView(&s.hist, defaultHistorySpec, filtered, now)
+}
+
+func (s *planUsageStore) historyFileView(memo *planUsageHistoryMemo, spec planUsageHistorySpec, entries []planUsageEntry, now int64) json.RawMessage {
 	p := planUsageHistoryProjection{SchemaVersion: 1, Status: "empty", Samples: []planUsageSample{}}
 	if s == nil {
 		raw, _ := json.Marshal(p)
@@ -336,15 +387,14 @@ func (s *planUsageStore) historyView(entries []planUsageEntry, now int64) json.R
 	key, _ := json.Marshal(entries)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	h, err := s.readHistoryLocked()
+	h, err := s.readHistoryFileLocked(memo, spec)
 	if err != nil {
 		p.Status = "unavailable"
 		raw, _ := json.Marshal(p)
 		return raw
 	}
-	m := &s.hist
-	if m.view != nil && m.viewRev == m.rev && m.viewKey == string(key) && now <= m.viewUntil {
-		return m.view
+	if memo.view != nil && memo.viewRev == memo.rev && memo.viewKey == string(key) && now <= memo.viewUntil {
+		return memo.view
 	}
 	pruned := prunePlanUsageHistory(h.Records, now)
 	until := int64(math.MaxInt64)
@@ -360,21 +410,21 @@ func (s *planUsageStore) historyView(entries []planUsageEntry, now int64) json.R
 		raw, _ = json.Marshal(planUsageHistoryProjection{SchemaVersion: 1, Status: "unavailable", Samples: []planUsageSample{}})
 		return raw
 	}
-	m.viewRev, m.viewKey, m.viewUntil, m.view = m.rev, string(key), until, raw
+	memo.viewRev, memo.viewKey, memo.viewUntil, memo.view = memo.rev, string(key), until, raw
 	return raw
 }
 
-// projectPlanUsageHistory keeps, per harness/kind, only what trend() can
+// projectPlanUsageHistory keeps, per harness/group/kind, only what trend() can
 // draw for that group's entry window. trend() draws the samples whose reset
 // equals the window's and links each to the sample sorted directly before it
-// in the whole harness/kind series, so that neighbor is kept even when it
+// in the whole harness/group/kind series, so that neighbor is kept even when it
 // belongs to another window: dropping it would join samples the full series
 // keeps apart. The window's current observation, which trend() inserts
 // itself, keeps its neighbor too. An entry may carry several windows of one
 // kind, and trend() runs once per window. A group without an entry window is
 // never drawn and sends nothing.
 func projectPlanUsageHistory(records []planUsageHistoryRecord, entries []planUsageEntry) []planUsageSample {
-	type group struct{ harness, kind string }
+	type group struct{ harness, grp, kind string }
 	current := map[group][]planUsageSample{}
 	for _, e := range entries {
 		for _, w := range e.Windows {
@@ -382,13 +432,13 @@ func projectPlanUsageHistory(records []planUsageHistoryRecord, entries []planUsa
 			if at == 0 {
 				at = e.AsOf
 			}
-			g := group{e.Harness, w.Kind}
-			current[g] = append(current[g], planUsageSample{Harness: e.Harness, Kind: w.Kind, Source: e.Source, ResetsAt: w.ResetsAt, AsOf: at, Percent: w.Percent})
+			g := group{e.Harness, e.Group, w.Kind}
+			current[g] = append(current[g], planUsageSample{Harness: e.Harness, Group: e.Group, Kind: w.Kind, Source: e.Source, ResetsAt: w.ResetsAt, AsOf: at, Percent: w.Percent})
 		}
 	}
 	series := map[group][]int{}
 	for i, r := range records {
-		if g := (group{r.Sample.Harness, r.Sample.Kind}); len(current[g]) > 0 {
+		if g := (group{r.Sample.Harness, r.Sample.Group, r.Sample.Kind}); len(current[g]) > 0 {
 			series[g] = append(series[g], i)
 		}
 	}
@@ -435,7 +485,7 @@ func usageTrendIdentity(v planUsageSample) string {
 func usageSamples(entry planUsageEntry) []planUsageSample {
 	samples := make([]planUsageSample, 0, len(entry.Windows))
 	for _, w := range entry.Windows {
-		samples = append(samples, planUsageSample{Harness: entry.Harness, Kind: w.Kind, Source: entry.Source, ResetsAt: w.ResetsAt, AsOf: w.AsOf, Percent: w.Percent})
+		samples = append(samples, planUsageSample{Harness: entry.Harness, Group: entry.Group, Kind: w.Kind, Source: entry.Source, ResetsAt: w.ResetsAt, AsOf: w.AsOf, Percent: w.Percent})
 	}
 	return samples
 }

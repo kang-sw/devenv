@@ -89,7 +89,7 @@ func TestLegacyRecapReferencesAndSandbox(t *testing.T) {
 	mustApply(t, st, addXML(ClassTechnical, "t", "target"))
 	st.topicDoc("t").Body = "framed body"
 	legacyRecap(st, "t", "waiting on {{1}}, see {{40}} and {{99}}; `{{1}}` <img src=x onerror=alert(1)>")
-	for _, layout := range []Layout{LayoutFull, LayoutEmbed} {
+	for _, layout := range []Layout{LayoutFull} {
 		view := BuildView(st, ViewInput{Layout: layout, ReplyID: "r"})
 		view.Stored[40] = true
 		wantAll(t, recapBlock(t, render(t, view), "t"), `waiting on <a href="#item-1">(01)</a>, see (40) and {{99}}; <code>{{1}}</code>`)
@@ -115,8 +115,8 @@ func TestLegacyRecapReferencesAndSandbox(t *testing.T) {
 	}
 }
 
-// The page and embed share the display-only head projection, independent of
-// latest-log highlighting and without changing durable state or panel payloads.
+// The page uses a display-only head projection independent of latest-log
+// highlighting and without changing durable state or panel payloads.
 func TestRecapHeadChoosesNewestLogOrPanel(t *testing.T) {
 	const early = "2026-11-04T08:00:00Z"
 	const late = "2026-11-04T09:00:00Z"

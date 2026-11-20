@@ -728,10 +728,6 @@
       if (p.tagName === "DETAILS") p.open = true;
     }
     if (target.tagName === "DETAILS") target.open = true;
-    if (target.matches(".ckrow.done, .ckrow.no") && doc.documentElement.getAttribute("data-ck-hide") === "1") {
-      var toggle = topic.querySelector("button.ckhide[aria-pressed=true]");
-      if (toggle) toggle.click();
-    }
     if (!(o && o.keep)) {
       target.setAttribute("tabindex", "-1");
       target.focus({ preventScroll: true });

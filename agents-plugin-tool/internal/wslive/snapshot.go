@@ -286,6 +286,9 @@ type Lead struct {
 	// LastTurnOutput is the last completed turn's own response evidence;
 	// absent if that turn supplied none. It is not a heartbeat-derived rate.
 	LastTurnOutput *ModelObservation `json:"lastTurnOutput,omitempty"`
+	// OutputRate is the session's completed-response output rate independent of
+	// answering-model evidence (Observed). It carries no observed model or source.
+	OutputRate *OutputRate `json:"outputRate,omitempty"`
 	// TurnStartedAt is the current turn's start; absent while idle.
 	TurnStartedAt int64 `json:"turnStartedAt,omitempty"`
 	// TurnOrigin is what started the current turn (terminal, whiteboard,

@@ -82,16 +82,13 @@ func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 		return l
 	}
 	lanes := []wswhiteboard.PanelLane{lane(wsi18n.T(in.lang, "panel.lane.ready"), ready, "")}
-	count := wsi18n.T(in.lang, "panel.tickets.count", len(ready))
-	if in.layout == wswhiteboard.LayoutFull {
-		count = wsi18n.T(in.lang, "panel.tickets.count.full", len(ready), len(todo))
-		if len(todo) > 0 || in.served {
-			lanes = append(lanes, lane(wsi18n.T(in.lang, "panel.lane.todo"), latestTodoTickets(todo, len(todo)), ""))
-		}
+	count := wsi18n.T(in.lang, "panel.tickets.count.full", len(ready), len(todo))
+	if len(todo) > 0 || in.served {
+		lanes = append(lanes, lane(wsi18n.T(in.lang, "panel.lane.todo"), latestTodoTickets(todo, len(todo)), ""))
 	}
 	// Keep a served card even with no ready/todo, so idea-only boards have
 	// their demand control without scanning idea/ to discover them.
-	if !in.served && len(ready) == 0 && (in.layout != wswhiteboard.LayoutFull || len(todo) == 0) {
+	if !in.served && len(ready) == 0 && len(todo) == 0 {
 		return wswhiteboard.Panel{}, false
 	}
 	return wswhiteboard.Panel{ID: "tickets", Title: wsi18n.T(in.lang, "panel.tickets"), Icon: "board", Count: count, Lanes: lanes}, true
@@ -146,24 +143,15 @@ func latestTodoTickets(tickets []wsdoc.TicketInfo, n int) []wsdoc.TicketInfo {
 	return out
 }
 
-// whiteboardPageDir is the folder the page being rendered is written to:
-// the embed's embed_dir when one is set, else the repository's whiteboard
-// folder.
+// whiteboardPageDir is the folder the page being rendered is written to.
 func whiteboardPageDir(in whiteboardPanelInput) string {
-	if in.layout == wswhiteboard.LayoutEmbed && in.rec.Whiteboard != nil && in.rec.Whiteboard.EmbedDir != "" {
-		return in.rec.Whiteboard.EmbedDir
-	}
 	dir := filepath.Join(in.root, filepath.FromSlash(whiteboardDirRel))
-	if in.layout == wswhiteboard.LayoutFull {
-		return filepath.Join(dir, in.replyID)
-	}
-	return dir
+	return filepath.Join(dir, in.replyID)
 }
 
 // whiteboardFileLink links target from a page in pageDir: a relative path
 // when pageDir lies inside root, so the link survives moving the checkout,
-// and an absolute file: URL otherwise (an embed_dir outside the repository,
-// or another volume).
+// and an absolute file: URL otherwise.
 func whiteboardFileLink(root, pageDir, target string) string {
 	if inside, err := filepath.Rel(root, pageDir); err == nil && inside != ".." && !strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
 		if rel, err := filepath.Rel(pageDir, target); err == nil {
@@ -191,10 +179,9 @@ func whiteboardItemFileLink(root, pageDir string) func(string) string {
 	}
 }
 
-// mailboxPanel shows the session's mailbox. The full page carries the own
-// address, the unread count, whether a wait is armed, the correspondents,
-// and the history ring; the embed carries one line, the address and the
-// unread count. A session with no named address and no history has no panel.
+// mailboxPanel shows the session's own address, unread count, whether a wait
+// is armed, correspondents, and history ring. A session with no named address
+// and no history has no panel.
 func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	named := ""
 	if in.mailbox.owner {
@@ -241,11 +228,6 @@ func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	}
 	panel := wswhiteboard.Panel{ID: "mailbox", Title: wsi18n.T(in.lang, "panel.mailbox"), Icon: "mail", Count: wsi18n.T(in.lang, "panel.mail.unread", unread)}
 	status := wsi18n.T(in.lang, "panel.mail.unread", unread)
-	if in.layout == wswhiteboard.LayoutEmbed {
-		panel.Rows = []wswhiteboard.PanelRow{{Label: address, Text: status}}
-		return panel, true
-	}
-
 	if whiteboardMailboxListening(in.paths, in.sessionKey) {
 		status = wsi18n.T(in.lang, "panel.mail.unread.wait", unread)
 	}

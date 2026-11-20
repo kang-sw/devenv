@@ -124,6 +124,9 @@ type DaemonOptions struct {
 	// before its session is checked, since the nudge's sender may have
 	// written mail any waiter watches. Nil wakes none.
 	MailWake MailWaker
+	// AgyCommand resolves the agy CLI program and leading arguments for
+	// user-triggered /usage probes without spawning. Nil skips agy probes.
+	AgyCommand func() (string, []string, error)
 
 	// bindHost overrides the address the daemon binds, so a test runs LAN
 	// mode on loopback; empty derives it from LAN.
@@ -472,6 +475,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		getenv = func(string) string { return "" }
 	}
 	d.planUsage = newPlanUsageStore(opts.Dir, home, getenv)
+	d.planUsage.resolveAgy = opts.AgyCommand
 	d.cache = newPageCache(d.broker, stats)
 	d.foreign = newForeignSchedule(opts.foreignInterval, opts.MailWake)
 	d.web = newWebRegistry(d.endpoint.Port, d.endpoint.Token, logw)
@@ -550,6 +554,9 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	if err := writeEndpoint(opts.Dir, d.endpoint); err != nil {
 		// A detached daemon's returned error has no reader; the log does.
 		fmt.Fprintf(logw, "dashboard: write endpoint file: %v\n", err)
+		if d.planUsage != nil {
+			d.planUsage.close(context.Background())
+		}
 		if d.agents != nil {
 			d.agents.Close()
 		}
@@ -736,6 +743,9 @@ func (d *Daemon) Close() {
 		// connects, and the hosted sessions drain meanwhile (proxy.go):
 		// the whole stop stays under the successor's lock wait.
 		ctx, cancel := context.WithTimeout(context.Background(), shutdownDeadline)
+		if d.planUsage != nil {
+			d.planUsage.beginClose()
+		}
 		shutdownDone := make(chan struct{})
 		go func() {
 			_ = d.server.Shutdown(ctx)
@@ -743,6 +753,9 @@ func (d *Daemon) Close() {
 		}()
 		d.drainProxy()
 		<-shutdownDone
+		if d.planUsage != nil {
+			d.planUsage.waitClose(ctx)
+		}
 		cancel()
 		// Shutdown closes only the listeners Serve has registered, and Serve
 		// runs on its own goroutine: a Close before that goroutine is

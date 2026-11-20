@@ -242,11 +242,8 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 	if strings.Contains(html, `data-topic="Body only" data-entry="`+entries["Body only"]+`" data-relay`) {
 		t.Errorf("a body without an outside image must list no relay")
 	}
-	// The page written to disk and the embed take no relay.
-	written := append([]string{filepath.Join(f.replyID(), "index.html")}, f.embeds(t, f.dir())...)
-	if len(written) < 2 {
-		t.Fatalf("pages written to disk = %v, want the full page and an embed", written)
-	}
+	// The standalone page written to disk takes no relay.
+	written := []string{filepath.Join(f.replyID(), "index.html")}
 	for _, name := range written {
 		// Shared history code can name the attribute; standalone content
 		// must never carry a relay attribute or a protected image URL.

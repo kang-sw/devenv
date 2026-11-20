@@ -333,14 +333,16 @@ func hostedRowPID(path string) int {
 }
 
 // DropHarnessSessionEnv removes from this process's environment the
-// variables that tie a ws-mcp to one harness session: the hosted-session
-// variables, the harness PID, and a hosted session's ws-mcp credentials.
+// variables that tie a ws-mcp to one harness session or spawned worker:
+// the hosted-session variables, the harness PID, a hosted session's ws-mcp
+// credentials, and a spawned worker's permission level.
 // The dashboard daemon calls it at start. Its environment is that of
 // whichever session's launcher started it, and the conversations it spawns,
 // with the ws-mcp each attaches without a launcher, would otherwise read
-// that session's as their own, or reach its server with its token.
+// that session's as their own, reach its server with its token, or inherit
+// a read-only worker's authority gate.
 func DropHarnessSessionEnv() {
-	for _, name := range []string{envHostedSession, envHostedSessionKey, envHostedSessionRow, envHarnessPID, wsagent.EnvMCPSessionURL, wsagent.EnvMCPSessionToken} {
+	for _, name := range []string{envHostedSession, envHostedSessionKey, envHostedSessionRow, envHarnessPID, wsagent.EnvMCPSessionURL, wsagent.EnvMCPSessionToken, wsagent.EnvPermissionLevel} {
 		_ = os.Unsetenv(name)
 	}
 }

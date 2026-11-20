@@ -153,7 +153,7 @@ under `<cache root>/dashboard/`:
   start is needed. Older daemons ignore it; settled binaries remain available.
   The retired `hosted-plugin-roots.json` registry is ignored, not migrated.
 - `hosted-packages/<ws|wsflow>/<hash>/` - retained launcher plus that package's
-  four embedded manifests. Native Pi's separate content-addressed input stage
+  five embedded manifests. Native Pi's separate content-addressed input stage
   supplies its workflow skills, resources and package-owner manifest.
 - `dashboard.lock` - the single-instance OS file lock; `endpoint.json` - port,
   pid, version, and the shutdown token; `launcher-start.lock` - the persistent
@@ -1889,6 +1889,7 @@ Current launcher inputs:
 | `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.50.8`. |
 | `WS_MCP_RELEASE_BASE_URL` | Override the full release asset base URL; useful for local file or HTTP smoke tests. |
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
+| `WS_CODESIGN_IDENTITY` | macOS local dev builds only: code-signing identity name or SHA-1 passed to `codesign --force -s "$WS_CODESIGN_IDENTITY" -i dev.ws.mcp <binary>` before SHA-256 metadata generation; unset leaves builds untouched, and a signing failure aborts the build. |
 | `WS_MCP_LAUNCHER_DIRECT` | Obsolete; ignored. It never enables executable fallback. |
 | `WS_MCP_PROJECT_ROOT` | Project root default for root-aware tools and CLI commands when no higher-priority root exists. |
 | `WS_RSRC_DEV_CHECKOUT` | Explicit daemon-process-only repository checkout for package inputs (rsrc, workflow skills/templates, manifests and native Pi). Uses the package's canonical directory, logs the override, and permits live playbook edits. Never honored from a connection hello. Production embeds always win over `WS_RSRC_ROOT`. |
@@ -1906,7 +1907,7 @@ Current launcher inputs:
 | `WS_MCP_PI_ENDPOINT` | Set beside `WS_MCP_PI_TOKEN`: the dashboard daemon's loopback base URL, for example `http://127.0.0.1:29417`. |
 | `WS_MCP_NAMESPACE` | MCP namespace and embedded package identity: `wsflow` selects wsflow assets; empty/unset or a custom display namespace selects ws. |
 | `WS_MCP_SETUP_TOOL` | Advertised setup tool name override; empty or unset defaults to `ws.setup`. |
-| `WS_MCP_CONFIG_MANIFESTS` | Adapter config key manifests, separated by the platform path-list separator (`:` POSIX, `;` Windows); `;` is accepted on every platform, which the static launcher configs use. Declared keys become `config.tune`-writable, cataloged by `config.list`, and typed in `config.get`; a rejected manifest is logged to stderr and listed by `config.list`. The ws and wsflow packages each ship their own `config-manifest.json` (namespace `claude.`; the same keys, differing only in `default`, pinned by `TestShippedClaudeManifestsDifferOnlyInDefaults`) and set it in both launch configs: `.mcp.json` (Codex) as `./config-manifest.json`, resolved against `cwd: "."` (the plugin root), and `.claude-plugin/plugin.json` as `${CLAUDE_PLUGIN_ROOT}/config-manifest.json`. Each package (ws, wsflow, Pi) also lists its `dashboard-config-manifest.json` (namespace `dashboard.`: `dashboard.enabled`, default on in every package; `dashboard.port`, default 29417; `dashboard.lan_enabled`, global-only and default off in every package; `dashboard.pi_spawn_enabled`, which gates legacy `pi.*` calls, default on in ws and off in wsflow and Pi) beside its own manifest; the Pi bridge joins the two with the platform separator. A path that does not resolve fails nothing: the keys stay undeclared, so check `config.list` after changing either. |
+| `WS_MCP_CONFIG_MANIFESTS` | Adapter config key manifests, separated by the platform path-list separator (`:` POSIX, `;` Windows); `;` is accepted on every platform, which the static launcher configs use. Declared keys become `config.tune`-writable, cataloged by `config.list`, and typed in `config.get`; a rejected manifest is logged to stderr and listed by `config.list`. The ws and wsflow packages each list three package-local manifests in both launch configs: `config-manifest.json` (namespace `claude.`; the same keys, differing only in `default`, pinned by `TestShippedClaudeManifestsDifferOnlyInDefaults`), `agy-config-manifest.json` (namespace `agy.`; `agy.model_wait_timeout_seconds`, default 45 in ws and 0 in wsflow), and `dashboard-config-manifest.json` (namespace `dashboard.`: `dashboard.enabled`, default on in every package; `dashboard.port`, default 29417; `dashboard.lan_enabled`, global-only and default off in every package; `dashboard.pi_spawn_enabled`, which gates legacy `pi.*` calls, default on in ws and off in wsflow and Pi). Codex paths are relative to `cwd: "."` (the plugin root); Claude paths use `${CLAUDE_PLUGIN_ROOT}`. Pi lists its own config and dashboard manifests, joined with the platform separator. A path that does not resolve fails nothing: the keys stay undeclared, so check `config.list` after changing the list. |
 | `WS_MCP_CLI_NAME` | Declared `ws-cli` / `wsflow-cli` shim or Python launcher command used in printed mailbox wait and re-arm guidance when it matches the supported safe form. The launcher sets it unless already set; an absent or unrecognized value uses an illustrative Python launcher path, never the runtime binary. |
 
 Launcher diagnostics must go to stderr. Stdout belongs to the MCP JSON-RPC
@@ -2114,6 +2115,28 @@ the cache/release path).
 This path exists only for the repository-local Codex or Claude plugin
 development loop. The marker file is gitignored and should not exist in normal
 GitHub release installs, downstream repositories, or Windows installs.
+
+### Stable macOS code signing for local builds
+
+On macOS, `ws-mcp` launches the dashboard daemon from the stable path
+`<cache-root>/dashboard/bin/ws-mcp-dashboard` (hardlinked to the retained
+content-addressed `ws-mcp-dashboard-<sum16>` copy). Ad-hoc linker-signed dev
+rebuilds still rotate their `cdhash` on every compile, which causes macOS TCC
+prompts (for example Desktop folder access) to repeat. To keep one TCC identity
+across local rebuilds:
+
+1. In **Keychain Access**, open **Certificate Assistant → Create a
+   Certificate…**, choose **Self-Signed Root** with **Certificate Type: Code
+   Signing**, and create it in your `login` keychain.
+2. Export `WS_CODESIGN_IDENTITY` to that certificate's name (or SHA-1
+   fingerprint) in your shell profile. When unset, local builds are unchanged.
+3. Rebuild locally (for example `python3 scripts/dev.py rerun daemon --local` or
+   a local-devenv launcher build); `codesign --force -s "$WS_CODESIGN_IDENTITY"
+   -i dev.ws.mcp <binary>` runs before `.metadata.json` SHA-256 generation, and
+   any signing error fails the build step rather than installing an unsigned
+   binary.
+4. Grant **Full Disk Access** once in **System Settings → Privacy & Security →
+   Full Disk Access** to `<cache-root>/dashboard/bin/ws-mcp-dashboard`.
 
 ## Development Verification
 

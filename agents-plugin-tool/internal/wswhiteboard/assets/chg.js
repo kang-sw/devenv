@@ -23,7 +23,7 @@ function wbChangeBars(body) {
     body.parentNode.insertBefore(layer, body.nextSibling);
   }
   // A body whose topic moved on after its edit (chg-stale) keeps its bars,
-  // dimmed. Set here, not in page.css, to keep the embed's stylesheet as is.
+  // dimmed. Set here rather than in page.css because it is runtime state.
   layer.style.opacity = body.classList.contains("chg-stale") ? ".35" : "";
   layer.textContent = "";
   var origin = layer.getBoundingClientRect(), box = body.getBoundingClientRect();

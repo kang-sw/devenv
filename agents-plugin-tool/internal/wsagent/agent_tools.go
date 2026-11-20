@@ -437,26 +437,40 @@ func (r *Runner) agentCeiling(parent ParentRef) (PermissionLevel, error) {
 }
 
 // childAdmission admits rec's explicit authority against its parent's
-// current level; nil for a conversation agent.spawn did not start.
-func (r *Runner) childAdmission(rec Record) error {
-	if rec.Parent == nil || rec.Lead {
-		return nil
+// current level and returns it. Hosted leads and conversations agent.spawn
+// did not start (non-parented conversations and legacy/Pi children) have no
+// explicit authority record and pass with "". An
+// agent.spawn child (agent-worker-*) without a parent or explicit authority
+// record fails closed so it never launches without its authority gate.
+func (r *Runner) childAdmission(rec Record) (PermissionLevel, error) {
+	if rec.Lead {
+		return "", nil
+	}
+	agentWorker := isAgentWorkerProfile(rec.Profile)
+	if rec.Parent == nil {
+		if agentWorker {
+			return "", &admissionRefusal{reason: "permission admission: agent.spawn child has no parent"}
+		}
+		return "", nil
 	}
 	level, explicit, err := refreshPermissionSelection(wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID))
 	if err != nil {
-		return &admissionRefusal{reason: fmt.Sprintf("permission admission: own level unreadable: %v", err)}
+		return "", &admissionRefusal{reason: fmt.Sprintf("permission admission: own level unreadable: %v", err)}
 	}
-	if !explicit {
-		return nil
+	if !explicit || level.rank() == 0 {
+		if agentWorker {
+			return "", &admissionRefusal{reason: "permission admission: agent.spawn child has no explicit authority record"}
+		}
+		return "", nil
 	}
 	ceiling, err := r.agentCeiling(*rec.Parent)
 	if err != nil {
-		return &admissionRefusal{reason: "permission admission: " + err.Error()}
+		return "", &admissionRefusal{reason: "permission admission: " + err.Error()}
 	}
 	if level.rank() > ceiling.rank() {
-		return &admissionRefusal{reason: fmt.Sprintf("permission admission: authority %s is above the parent's current level %s", level, ceiling)}
+		return "", &admissionRefusal{reason: fmt.Sprintf("permission admission: authority %s is above the parent's current level %s", level, ceiling)}
 	}
-	return nil
+	return level, nil
 }
 
 // childLevel is rec's explicit authority, "" for none.
@@ -469,23 +483,26 @@ func childLevel(dir string) PermissionLevel {
 }
 
 // awakeLocked reports an awake child for the width cap and its parent's
-// sleep: a process, a turn or background task, a held done turn, or input
-// or claimed mail it has not taken whose start was not refused. Under mu.
+// sleep: a process, a turn or background task, a held done turn, an initial
+// spawn before its first Send, or input or claimed mail it has not taken
+// whose start was not refused. Under mu.
 func (c *conv) awakeLocked() bool {
-	return !c.closed && (c.proc != nil || c.turn || c.bgTasks != 0 || c.holding ||
+	return !c.closed && (c.proc != nil || c.turn || c.bgTasks != 0 || c.holding || c.spawnPending ||
 		(!c.wakeRefused && (c.sends > max(c.settled.mark, c.voided) || len(c.rec.Mail) > 0)))
 }
 
 // awakeChildren counts parent's open, awake direct children.
 func (r *Runner) awakeChildren(parent ParentRef) int {
 	r.mu.Lock()
-	convs := make([]*conv, 0, len(r.convs))
+	defer r.mu.Unlock()
+	return r.awakeChildrenLocked(parent)
+}
+
+// awakeChildrenLocked counts parent's awake direct children plus in-flight
+// width-checked spawns. Caller holds r.mu.
+func (r *Runner) awakeChildrenLocked(parent ParentRef) int {
+	n := r.pendingSpawns[parent]
 	for _, c := range r.convs {
-		convs = append(convs, c)
-	}
-	r.mu.Unlock()
-	n := 0
-	for _, c := range convs {
 		c.mu.Lock()
 		if c.rec.Parent != nil && *c.rec.Parent == parent && c.awakeLocked() {
 			n++
@@ -493,6 +510,46 @@ func (r *Runner) awakeChildren(parent ParentRef) int {
 		c.mu.Unlock()
 	}
 	return n
+}
+
+// releasePendingSpawnLocked drops one in-flight spawn slot for parent.
+// Caller holds r.mu.
+func (r *Runner) releasePendingSpawnLocked(parent ParentRef) {
+	if r.pendingSpawns[parent] <= 1 {
+		delete(r.pendingSpawns, parent)
+		return
+	}
+	r.pendingSpawns[parent]--
+}
+
+// reserveSpawnWidth checks parent's awake direct children under r.mu and
+// reserves a slot for an in-flight agent.spawn. claimLocked transfers the
+// slot when the conversation is registered in r.convs under r.mu; release
+// drops an unclaimed slot on error.
+func (r *Runner) reserveSpawnWidth(parent ParentRef) (claimLocked func(), release func(), err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if n := r.awakeChildrenLocked(parent); n >= MaxSpawnWidth {
+		return nil, nil, &requestError{status: http.StatusForbidden, msg: fmt.Sprintf("agent.spawn: the spawn width cap is %d awake direct children, and this agent has %d; wait for one to finish (a sleeping child does not count)", MaxSpawnWidth, n)}
+	}
+	if r.pendingSpawns == nil {
+		r.pendingSpawns = map[ParentRef]int{}
+	}
+	r.pendingSpawns[parent]++
+	done := false
+	claimLocked = func() {
+		if done {
+			return
+		}
+		done = true
+		r.releasePendingSpawnLocked(parent)
+	}
+	release = func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		claimLocked()
+	}
+	return claimLocked, release, nil
 }
 
 // depthRefusal is the spawn depth cap's refusal.
@@ -529,9 +586,6 @@ func (r *Runner) AgentSpawn(caller AgentCaller, req AgentSpawnRequest) (AgentSpa
 	}
 	if depth+1 > MaxSpawnDepth {
 		return AgentSpawnResult{}, depthRefusal(tool, depth)
-	}
-	if n := r.awakeChildren(caller.Parent); n >= MaxSpawnWidth {
-		return AgentSpawnResult{}, &requestError{status: http.StatusForbidden, msg: fmt.Sprintf("%s: the spawn width cap is %d awake direct children, and this agent has %d; wait for one to finish (a sleeping child does not count)", tool, MaxSpawnWidth, n)}
 	}
 	harness, bare, mapping, err := r.resolveTier(caller, req.Tier)
 	if err != nil {
@@ -583,6 +637,11 @@ func (r *Runner) AgentSpawn(caller AgentCaller, req AgentSpawnRequest) (AgentSpa
 		label = req.Prompt
 	}
 	parent := caller.Parent
+	claimWidth, releaseWidth, err := r.reserveSpawnWidth(parent)
+	if err != nil {
+		return AgentSpawnResult{}, err
+	}
+	defer releaseWidth()
 	st, err := r.Spawn(SpawnSpec{
 		Profile:      r.opts.Backends[harness].WorkerProfile,
 		Root:         root,
@@ -595,6 +654,7 @@ func (r *Runner) AgentSpawn(caller AgentCaller, req AgentSpawnRequest) (AgentSpa
 		Parent:       &parent,
 		Authority:    level,
 		SystemPrompt: system,
+		claimWidth:   claimWidth,
 	})
 	if err != nil {
 		return AgentSpawnResult{}, err
@@ -721,7 +781,7 @@ func (r *Runner) Deliver(id string, d Delivery) (State, error) {
 		rec := c.rec
 		c.mu.Unlock()
 		if asleep {
-			refusal = r.childAdmission(rec)
+			_, refusal = r.childAdmission(rec)
 		}
 	}
 	st, err := r.Send(id, d.Text)
@@ -775,7 +835,7 @@ func (r *Runner) childWaitingExpiry() time.Duration {
 // input or claimed mail about to start one (a refused wake's does not
 // count). Under mu.
 func (c *conv) childWaitingLocked() bool {
-	return !c.closed && !c.rec.Lead && c.rec.Parent != nil && c.proc == nil && !c.turn &&
+	return !c.closed && !c.rec.Lead && c.rec.Parent != nil && c.proc == nil && !c.turn && !c.spawnPending &&
 		(c.wakeRefused || c.sends <= max(c.settled.mark, c.voided) && len(c.rec.Mail) == 0)
 }
 

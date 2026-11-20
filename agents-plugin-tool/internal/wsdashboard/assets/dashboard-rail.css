@@ -430,17 +430,17 @@ html:not([data-sysopen]) .rail .rsleep { display: none; }
 .rail .qdot { position: absolute; z-index: 2; top: -3px; left: -3px; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-accent-policy); box-shadow: 0 0 0 1.5px var(--wb-card); }
 .rail .rs:hover .qdot { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
 .rail .rs.cur .qdot { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
-/* One-shot attention (mockup B): three flashes, then tint + icon ring.
+/* One-shot attention (mockup B): three flashes, then tint + badge ring.
    The question dot's z-index keeps it above both overlays. Only the node
    first flagged gets .attn-flash; server replacements are settled. */
 .rail .rs.attn::before { content: ""; position: absolute; inset: 0; border-radius: 6px; pointer-events: none; background: var(--wb-accent-policy); opacity: .12; }
-.rail .rs.attn .hiw::after { content: ""; position: absolute; inset: 0; border-radius: 6px; pointer-events: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-accent-policy) 45%, transparent); }
+.rail .rs.attn .hb::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-accent-policy) 45%, transparent); }
 .rail .rs.attn.attn-flash::before { animation: attn-flash .6s ease-in-out 3; }
-.rail .rs.attn.attn-flash .hiw::after { animation: attn-flash-ring .6s ease-in-out 3; }
+.rail .rs.attn.attn-flash .hb::after { animation: attn-flash-ring .6s ease-in-out 3; }
 @keyframes attn-flash { 0% { opacity: 0; } 50% { opacity: .38; } 100% { opacity: .12; } }
 @keyframes attn-flash-ring { 0% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 0 4px var(--wb-accent-policy); } 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-accent-policy) 45%, transparent); } }
 @media (prefers-reduced-motion: reduce) {
-  .rail .rs.attn::before, .rail .rs.attn .hiw::after { animation: none !important; }
+  .rail .rs.attn::before, .rail .rs.attn .hb::after { animation: none !important; }
 }
 @keyframes rail-nudge { 0%, 56%, 100% { transform: none; } 10% { transform: translateY(-3px) rotate(-10deg); } 22% { transform: translateY(0) rotate(10deg); } 34% { transform: translateY(-2px) rotate(-8deg); } 46% { transform: translateY(0) rotate(6deg); } }
 @keyframes rail-blink { 50% { opacity: .25; } }
@@ -491,8 +491,13 @@ html:not([data-sysopen]) .rail .rsleep { display: none; }
 .shp-stat b.tps { color: var(--wb-primary); }
 .shp-stat b.na { color: var(--wb-muted-fg); font-weight: 500; }
 .shp-stat > span { font-size: 10.5px; line-height: 1.25; color: var(--wb-muted-fg); white-space: normal; overflow-wrap: anywhere; }
-.modelhistory { margin: 8px 12px; font-size: 12px; color: var(--wb-muted-fg); }
-.modelhistory > summary { cursor: pointer; }
+.modelhistory-trigger { width: 24px; padding: 0; justify-content: center; border: 0; font: inherit; cursor: pointer; }
+.modelhistory-trigger:hover, .modelhistory-trigger[aria-expanded="true"] { color: var(--wb-fg); background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
+.modelhistory-trigger:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+.modelhistory-popover { width: 360px; }
+.modelhistory { display: grid; gap: 9px; font-size: 12px; color: var(--wb-muted-fg); }
+.modelhistory-agent { display: grid; gap: 3px; min-width: 0; }
+.modelhistory-label { color: var(--wb-fg); font-weight: 700; overflow-wrap: anywhere; }
 /* Observed-model rows carry no leading .mk marker, so drop .brow's 16px marker column here. */
 .modelhistory .brow { grid-template-columns: minmax(0, 1fr) auto; }
 .shp-foot { display: flex; flex-wrap: wrap; gap: 2px 0; font-size: 11.5px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; }

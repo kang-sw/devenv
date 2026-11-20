@@ -82,8 +82,26 @@ type conv struct {
 	compactAdvisory, compactHard                                                 wsconfig.Threshold
 	compactTokens, compactWindow                                                 float64
 	compactPrevTokens, compactPrevWindow                                         int64
+	compactGen                                                                   uint64
+	compactLoaded                                                                bool
 	compactUsageFresh, compactAdvised, compactHardIssued, compactAdvisoryEnabled bool
 	compactAwaitTurn                                                             bool
+
+	// Agy model-wait watchdog state (loop-owned, in-memory only).
+	modelWaitTimeout           time.Duration
+	modelWaitArmed             bool
+	modelWaitRetries           int
+	modelWaitPending           int
+	modelWaitCancelling        bool
+	modelWaitRetryFromAPIError bool
+	modelWaitFailErr           string
+	modelWaitDiagnostic        string
+	modelWaitFailureExcluded   bool
+	modelWaitC                 <-chan time.Time
+	modelWaitStop              func()
+	modelWaitFailure           string
+	modelWaitDrainC            <-chan time.Time
+	modelWaitDrainStop         func()
 
 	// loop-owned.
 	events       <-chan Event
@@ -91,8 +109,8 @@ type conv struct {
 	idleAfter    time.Duration
 	bgGraceTimer *time.Timer
 	dirtyModel   bool
-	dirtyEffort bool
-	dirtyMode   bool
+	dirtyEffort  bool
+	dirtyMode    bool
 	// reconcileMode marks replay-reconstructed intent, not a new user setting.
 	// Failed reconciliation is advisory; it must not kill an unenforceable lead.
 	reconcileMode bool
@@ -189,6 +207,10 @@ type conv struct {
 	// permission admission (childAdmission): the input stays, and the
 	// child counts as asleep. Under mu.
 	wakeRefused bool
+	// spawnPending is true from registration in r.convs until spawned()'s
+	// first Send (or close), so awakeLocked counts a newly registered spawn
+	// with no gap after pendingSpawns handoff. Under mu.
+	spawnPending bool
 
 	// Turn settles (spawn.go). sends counts Runner.Send's messages and
 	// settled is the last settled turn, settleC closed and replaced at each
@@ -454,6 +476,7 @@ func (c *conv) loop() {
 	defer c.live.closeSlot()
 	defer func() {
 		c.stopCompactWatchdog()
+		c.stopModelWaitTimer()
 		if c.spawnTimer != nil {
 			c.spawnTimer.Stop()
 		}
@@ -484,9 +507,11 @@ func (c *conv) loop() {
 		return
 	}
 	for {
-		var idleC, actionC, leverC, compactC, spawnC, bgGraceC <-chan time.Time
+		var idleC, actionC, leverC, compactC, modelWaitC, modelWaitDrainC, spawnC, bgGraceC <-chan time.Time
 		leverC = c.leverC
 		compactC = c.compactC
+		modelWaitC = c.modelWaitC
+		modelWaitDrainC = c.modelWaitDrainC
 		if c.spawnTimer != nil {
 			spawnC = c.spawnTimer.C
 		}
@@ -557,19 +582,12 @@ func (c *conv) loop() {
 			}
 		case <-compactC:
 			c.compactTimedOut()
+		case <-modelWaitC:
+			c.modelWaitTimedOut()
+		case <-modelWaitDrainC:
+			c.modelFailureDrainTimedOut()
 		case <-beat.C:
-			c.live.heartbeatSnapshot()
-			c.persistSeq()
-			if c.replaying {
-				// A holder that attached late (a rescan) is found here.
-				c.checkReattach()
-			}
-			if c.r.opts.Now().Sub(c.lastReg) >= wsdashboard.HeartbeatInterval {
-				c.writeRegistration()
-			} else {
-				c.checkRow()
-			}
-			c.expireIfDue()
+			c.heartbeat()
 		case <-c.r.quit:
 			c.letGo()
 			// The watch's listening marker names this process: left behind,
@@ -583,6 +601,23 @@ func (c *conv) loop() {
 			return
 		}
 	}
+}
+
+func (c *conv) heartbeat() {
+	registrationDue := c.r.opts.Now().Sub(c.lastReg) >= wsdashboard.HeartbeatInterval
+	if registrationDue {
+		c.writeRegistration()
+	}
+	c.live.heartbeatSnapshot()
+	c.persistSeq()
+	if c.replaying {
+		// A holder that attached late (a rescan) is found here.
+		c.checkReattach()
+	}
+	if !registrationDue {
+		c.checkRow()
+	}
+	c.expireIfDue()
 }
 
 // settle follows each step of the loop: a session whose row a terminal
@@ -925,7 +960,18 @@ func (c *conv) dropHeld() {
 // apply applies a wslive event and tells the daemon when it wrote. quiet
 // (a replayed holder record) applies it to the state alone.
 func (c *conv) apply(ev wslive.Event, quiet ...bool) {
-	if len(quiet) == 0 || !quiet[0] {
+	replayed := len(quiet) > 0 && quiet[0]
+	c.applyMode(ev, replayed, false)
+}
+
+// applyCoalesced applies a mapper status whose immediately following TurnEnd
+// is its recovery boundary, avoiding a redundant file-only snapshot rewrite.
+func (c *conv) applyCoalesced(ev wslive.Event, quiet bool) {
+	c.applyMode(ev, quiet, true)
+}
+
+func (c *conv) applyMode(ev wslive.Event, quiet, coalesceTurnEnd bool) {
+	if !quiet {
 		c.observeCompaction(ev)
 	}
 	if ev.Kind == wslive.KindReset {
@@ -951,8 +997,10 @@ func (c *conv) apply(ev wslive.Event, quiet ...bool) {
 			}
 		})
 	}
-	if len(quiet) > 0 && quiet[0] {
+	if quiet {
 		c.live.applyQuiet(ev)
+	} else if coalesceTurnEnd {
+		c.live.applyCoalesced(ev)
 	} else {
 		c.live.apply(ev)
 	}
@@ -1136,12 +1184,22 @@ func (c *conv) kick() {
 	if ordinary {
 		c.compactNote = ""
 		c.compactResume = false
+		c.startModelWait()
 	}
 	c.sendRetried = false
 	c.stopBgGrace()
 	c.turnMark, c.reply = mark, ""
-	// This turn's settle supersedes a done turn held for the children.
-	c.hold(nil)
+	// A child report satisfies an agent worker's hold on the completed turn
+	// that waited for it. Publish that turn before opening the report's
+	// successor. Legacy pi-worker turns, and report-free successors such as
+	// background follow-ups, retain their interim-supersession behavior.
+	if isAgentWorkerProfile(c.rec.Profile) && c.heldRes != nil && len(reports) > 0 {
+		res := *c.heldRes
+		c.hold(nil)
+		c.publish(res)
+	} else {
+		c.hold(nil)
+	}
 	c.update(func(rec *Record) {
 		rec.Queued = rest
 		rec.Drained, rec.TurnMark, rec.Voided = c.drained, mark, c.voided
