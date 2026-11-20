@@ -406,6 +406,13 @@ check("picked options", R.leadBody("/w/r", { harness: "claude", model: "opus", e
 check("pi takes no permission mode", R.leadBody("/w/r", { harness: "pi", model: "m", effort: "off", mode: "auto" }), { root: "/w/r", harness: "pi", plugin_isolation: "default", model: "m", effort: "off" });
 
 check("isolation is always sent", [R.leadBody("/w/r", { harness: "pi", isolation: "isolated" }).plugin_isolation, R.leadBody("/w/r", { harness: "pi" }).plugin_isolation], ["isolated", "default"]);
+// A common permission level replaces the native mode (the selection route
+// rejects both), and only a granted "full" carries the acknowledgement.
+check("a level replaces the native mode", R.leadBody("/w/r", { harness: "claude", mode: "auto", level: "read-only" }), { root: "/w/r", harness: "claude", plugin_isolation: "default", permission_level: "read-only" });
+check("pi sends a level too", R.leadBody("/w/r", { harness: "pi", level: "workdir-write" }), { root: "/w/r", harness: "pi", plugin_isolation: "default", permission_level: "workdir-write" });
+check("granted full is acknowledged", R.leadBody("/w/r", { harness: "claude", level: "full", ack: true }), { root: "/w/r", harness: "claude", plugin_isolation: "default", permission_level: "full", permission_full_ack: true });
+check("full without the grant is not", R.leadBody("/w/r", { harness: "claude", level: "full", ack: "yes" }), { root: "/w/r", harness: "claude", plugin_isolation: "default", permission_level: "full" });
+check("no ack for a lower level", R.leadBody("/w/r", { harness: "claude", level: "read-only", ack: true }), { root: "/w/r", harness: "claude", plugin_isolation: "default", permission_level: "read-only" });
 
 // reviveRoute: a known move of a named session, its id escaped.
 check("takeover route", R.reviveRoute("takeover", "a b"), "/agents/a%20b/takeover");

@@ -699,11 +699,17 @@
   // the form f: the harness, the plugin isolation (always sent), and a model, effort, and permission mode only
   // when one was picked (none leaves the harness's own). The form supplies
   // admitted permission choices; Pi keeps its existing mode-free request.
+  // A common permission level (f.level, for POST /agents/leads/permission)
+  // replaces the native mode, never joins it, and carries
+  // permission_full_ack only for "full" with the warning's grant (f.ack).
   function leadBody(root, f) {
     var body = { root: root, harness: String(f.harness || ""), plugin_isolation: f.isolation === "isolated" ? "isolated" : "default" };
     if (f.model) body.model = String(f.model);
     if (f.effort) body.effort = String(f.effort);
-    if (f.mode && body.harness !== "pi") body.permission_mode = String(f.mode);
+    if (f.level) {
+      body.permission_level = String(f.level);
+      if (body.permission_level === "full" && f.ack === true) body.permission_full_ack = true;
+    } else if (f.mode && body.harness !== "pi") body.permission_mode = String(f.mode);
     return body;
   }
 

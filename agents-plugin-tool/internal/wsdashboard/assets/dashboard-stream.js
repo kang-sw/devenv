@@ -139,6 +139,9 @@
   var sseOn = true;
   function connected(on) {
     sseOn = on;
+    // A drop may be a daemon replaced underneath: the permission support
+    // read before it no longer counts (dashboard-leads.js permStreamSync).
+    if (typeof permStreamSync === "function") permStreamSync(on);
     q(".dwrap > .top #sse").forEach(function (el) {
       el.classList.toggle("off", !on);
       el.title = wsT(on ? "js.sse.title.on" : "js.sse.title.off");
