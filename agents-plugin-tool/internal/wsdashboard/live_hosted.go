@@ -93,12 +93,36 @@ func liveToken(token string) bool {
 // hostedSlots is the daemon's slot ownership: the slot that currently owns
 // each session's copy, and each session's count of hosted ring appends
 // (the rail's message cache keys on it beside the index revision).
+//
+// mu is held only briefly and never across file I/O a writer does under
+// its ownership. ownerLocks holds one mutex per session, created lazily and
+// never deleted (every slot generation of a session shares it): a hosted
+// writer holds its own session's mutex through its write (LockOwner), and a
+// takeover or close of that session waits for it, while other sessions'
+// slots go on. Lock order: ownerLock(id) -> mu.
 type hostedSlots struct {
-	mu     sync.Mutex
-	next   uint64
-	owners map[string]uint64
-	rings  map[string]uint64
-	unpin  map[string]func() error
+	mu         sync.Mutex
+	next       uint64
+	owners     map[string]uint64
+	rings      map[string]uint64
+	unpin      map[string]func() error
+	ownerLocks map[string]*sync.Mutex
+}
+
+// ownerLock returns replyID's slot ownership mutex. mu is released before
+// the caller locks it.
+func (l *hostedSlots) ownerLock(replyID string) *sync.Mutex {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.ownerLocks == nil {
+		l.ownerLocks = map[string]*sync.Mutex{}
+	}
+	m := l.ownerLocks[replyID]
+	if m == nil {
+		m = &sync.Mutex{}
+		l.ownerLocks[replyID] = m
+	}
+	return m
 }
 
 // ringGen is replyID's count of hosted ring appends.
@@ -140,6 +164,10 @@ func (d *Daemon) OpenHostedSlot(sessionDir string) (HostedSlot, bool) {
 		return nil, false
 	default:
 	}
+	// A takeover waits for the replaced slot's write in progress (LockOwner).
+	owner := d.live.ownerLock(replyID)
+	owner.Lock()
+	defer owner.Unlock()
 	d.live.mu.Lock()
 	defer d.live.mu.Unlock()
 	if d.live.owners == nil {
@@ -173,13 +201,20 @@ type daemonLiveSlot struct {
 // FoldsObserved implements ObservedFoldSlot.
 func (s *daemonLiveSlot) FoldsObserved() { s.folded.Store(true) }
 
+// LockOwner holds this session's ownership mutex, not the daemon-wide mu,
+// through the caller's write: one session's stalled ring I/O blocks only a
+// takeover or close of that session.
 func (s *daemonLiveSlot) LockOwner() (func(), bool) {
+	owner := s.d.live.ownerLock(s.replyID)
+	owner.Lock()
 	s.d.live.mu.Lock()
-	if s.closed.Load() || s.d.live.owners[s.replyID] != s.id {
-		s.d.live.mu.Unlock()
+	owned := !s.closed.Load() && s.d.live.owners[s.replyID] == s.id
+	s.d.live.mu.Unlock()
+	if !owned {
+		owner.Unlock()
 		return nil, false
 	}
-	return s.d.live.mu.Unlock, true
+	return owner.Unlock, true
 }
 
 func (s *daemonLiveSlot) Publish(snap wslive.Snapshot) {
@@ -223,6 +258,9 @@ func (s *daemonLiveSlot) Close() {
 		return
 	}
 	d := s.d
+	// Waits for this slot's write in progress (LockOwner), as a takeover does.
+	owner := d.live.ownerLock(s.replyID)
+	owner.Lock()
 	d.live.mu.Lock()
 	owned := d.live.owners[s.replyID] == s.id
 	var unpin func() error
@@ -236,6 +274,7 @@ func (s *daemonLiveSlot) Close() {
 		}
 	}
 	d.live.mu.Unlock()
+	owner.Unlock()
 	if !owned {
 		return
 	}

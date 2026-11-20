@@ -54,8 +54,8 @@ func TestSummaryWriterLockReadsTheRowOnce(t *testing.T) {
 	other := row
 	other.HostPID = 1
 	write(other)
-	if ok, reads := lock(); ok || reads != 1 || c.foreignRow {
-		t.Fatalf("row naming another process: ok=%v reads=%d foreign=%v, want false, 1, false", ok, reads, c.foreignRow)
+	if ok, reads := lock(); ok || reads != 1 || c.isForeign() {
+		t.Fatalf("row naming another process: ok=%v reads=%d foreign=%v, want false, 1, false", ok, reads, c.isForeign())
 	}
 
 	// Simulate an unlocked concurrent read seeing the old row before an external
@@ -68,7 +68,7 @@ func TestSummaryWriterLockReadsTheRowOnce(t *testing.T) {
 	taken := row
 	taken.Hosted, taken.HostPID = false, 0
 	write(taken)
-	if ok, reads := lock(); ok || reads != 1 || !c.foreignRow {
-		t.Fatalf("row a terminal took: ok=%v reads=%d foreign=%v, want false, 1, true", ok, reads, c.foreignRow)
+	if ok, reads := lock(); ok || reads != 1 || !c.isForeign() {
+		t.Fatalf("row a terminal took: ok=%v reads=%d foreign=%v, want false, 1, true", ok, reads, c.isForeign())
 	}
 }

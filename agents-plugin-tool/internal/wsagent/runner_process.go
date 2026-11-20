@@ -285,7 +285,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		c.spawning = true
 		if !c.writeRegistration() {
 			c.spawning = false
-			if c.foreignRow {
+			if c.isForeign() {
 				return errHandedOff
 			}
 			return errors.New("the session's registration could not be written, so no process was started")

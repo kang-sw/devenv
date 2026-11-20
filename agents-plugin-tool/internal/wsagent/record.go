@@ -385,6 +385,9 @@ type liveWriter struct {
 	ringDirty bool
 	// writeSnapshotFile is the atomic writer, replaceable for deterministic IO counts.
 	writeSnapshotFile func(string, []byte, os.FileMode) error
+	// appendRing is the ring appender (wslive.AppendRing), replaceable so a
+	// test can stall one session's ring I/O under its owner locks.
+	appendRing func(string, []wslive.RingEntry) error
 	// outputRates is a lazy held append handle; pendingOutputRate is persisted
 	// only with an existing snapshot recovery flush, never in apply's hot path.
 	outputRates       *wslive.OutputRateLog
@@ -431,6 +434,7 @@ func newLiveWriter(dir, key, adapter string, now func() time.Time, log io.Writer
 	return &liveWriter{
 		dir: dir, st: st, now: now, log: log,
 		writeSnapshotFile: writeFileAtomic,
+		appendRing:        wslive.AppendRing,
 		observedSeeded:    folded,
 		outputRates:       wslive.NewOutputRateLog(dir),
 	}
@@ -530,7 +534,7 @@ func (w *liveWriter) write(res wslive.Result, err error, kind string, coalesceTu
 			// AppendRing can fail after writing part of a batch. Fence that
 			// line too so replay cannot duplicate its successful entries.
 			w.ringDirty = true
-			return wslive.AppendRing(wslive.RingDir(w.dir), res.Ring)
+			return w.appendRing(wslive.RingDir(w.dir), res.Ring)
 		}); err != nil {
 			fmt.Fprintf(w.log, "agent %s: ring write: %v\n", w.st.ReplyID(), err)
 		} else {
