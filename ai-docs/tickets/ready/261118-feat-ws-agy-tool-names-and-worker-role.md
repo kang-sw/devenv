@@ -151,6 +151,9 @@ Two gaps stand in the way:
   (Result deviation (b)). Compatibility T0 expected (an old binary resolves
   no `agy` key); old-binary write preservation is verified per
   `ai-docs/manuals/release-compatibility.md` and recorded.
+  Superseded in part (owner (1869)=a, 2026-11-20, merge `e33fdf27c`): hosted
+  agy connections now report harness `agy` through the backend descriptor's
+  `ManualHarness`; the tier-config key part of this decision stands.
 - **(155)=b, 2026-11-18: builtin agy tier defaults.** Like Claude's builtin
   tiers (`config.go` L640-664), agy ships builtin small..xlarge mappings,
   overridable through `config.tune`; the mapping is (157). Rejected: (a) no
