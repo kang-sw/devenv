@@ -105,6 +105,20 @@
 .tph-c > .sname .sseq { flex: none; font-weight: 500; color: var(--wb-muted-fg); }
 .tph-c > .sname .sinp { height: 17px; box-sizing: border-box; width: 18ch; font-size: 12px; }
 .tph-c > .worktree-branch { display: flex; overflow: hidden; text-overflow: ellipsis; }
+/* parent: the jump to the session that owns this one, left of the identity;
+   a parent no longer served shows as the same pill, muted and inert */
+.tph-parent { gap: 6px; padding: 2px 9px 0 8px; text-decoration: none; overflow: hidden; }
+.tph-parent .tph-c { max-width: 140px; }
+.tph-parent .tph-up { flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; color: var(--wb-primary); }
+.tph-parent .tph-pn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 800 12.5px/1.2 var(--wb-sans); letter-spacing: .02em; color: var(--wb-fg); }
+a.tph-parent { cursor: pointer; }
+a.tph-parent:hover { background: color-mix(in srgb, var(--wb-primary) 9%, var(--wb-card)); }
+a.tph-parent:hover .tph-pn { color: var(--wb-primary); }
+a.tph-parent:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
+.tph-parent.dead { cursor: default; opacity: .62; }
+.tph-parent.dead .tph-up, .tph-parent.dead .tph-pn { color: var(--wb-muted-fg); }
+.tph-parent.dead .tph-pn { font-weight: 600; }
+@media (max-width: 900px) { .tph-parent .tph-c { max-width: 96px; } }
 /* harness: the badge, the process chip (the session menu's button for a
    viewer who holds the controls, dashboard-leads.js leadChip), hosted */
 .tph-hs { padding: 2px 8px 0 10px; }

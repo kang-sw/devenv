@@ -712,6 +712,9 @@ func registration(rec Record, now time.Time) wsdashboard.Registration {
 		reg.Agent, reg.Unlisted = false, false
 		reg.Hosted, reg.HostPID = true, rec.HostPID
 	}
+	if rec.Parent != nil {
+		reg.ParentReplyID = rec.Parent.ReplyID
+	}
 	if rec.ClosedAt != "" {
 		reg.EndedAt = rec.ClosedAt
 	}
