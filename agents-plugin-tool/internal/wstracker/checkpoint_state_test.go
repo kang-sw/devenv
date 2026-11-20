@@ -12,6 +12,8 @@ func checkpointRichState() *state {
 	r := &rec{id: "r", item: "i", to: "a", state: "live", accepted: n, ended: n,
 		restored: n, last: n, start: n, writes: []*node{n}}
 	ru := &rule{id: "rule", item: "i", excluded: map[string]bool{"b": true}}
+	ccReg := &ccOrgReg{item: "i", org: "o", active: true, since: n,
+		added: map[string]bool{"a": true}, excluded: map[string]bool{"b": true}}
 	return &state{
 		hb: func(x, y *node) bool { return x == n && y == n }, marks: true,
 		members: map[string]*member{"a": {id: "a", profile: Profile{Org: "org", Family: "Family", Given: "Given"},
@@ -42,8 +44,7 @@ func checkpointRichState() *state {
 			base: map[string]bodyVal{"base": {lines: []bline{{"base", n}}, atts: []attachment{{oid: "base-oid"}}}}}},
 		labels: map[string]*label{"l": {id: "l", name: "Label", removed: n}}, lorder: []string{"l"},
 		orgs: map[string]*org{"o": {id: "o", name: "Org", head: "a", removed: n}}, oorder: []string{"o"},
-		ccOrgs: map[string]*ccOrgReg{"i:o": {item: "i", org: "o", active: true, since: n,
-			added: map[string]bool{"a": true}, excluded: map[string]bool{"b": true}}}, ccOrder: []string{"i:o"},
+		ccOrgs: map[string]*ccOrgReg{"i:o": ccReg}, ccOrgsByItem: map[string][]*ccOrgReg{"i": {ccReg}}, ccOrder: []string{"i:o"},
 		prio: priority{names: []string{"Low", "High"}, def: 1}, attMax: 1234,
 	}
 }

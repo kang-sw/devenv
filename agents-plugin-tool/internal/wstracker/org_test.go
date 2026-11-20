@@ -525,6 +525,26 @@ func TestEndingOrgRuleByRootReextendsOverlappingRule(t *testing.T) {
 	wantEq(t, "root removal fills gap in same step", asg(t, tm.view("maya.pc"), ev+"~maya>lena").State, "live")
 }
 
+func TestRootUnassignDefersOrgRuleReextension(t *testing.T) {
+	tm := newTeam(t)
+	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-platform", "Platform", "maya"))
+	it := tm.do("maya.pc", TypeItemCreate, map[string]any{"kind": "task", "title": "Root batch overlap"})
+	tm.do("maya.pc", TypeItemAssign, map[string]any{"item": it, "completion": "assigner", "targets": []any{
+		map[string]any{"root": "maya", "org": "o-platform", "levels": 1},
+	}})
+	plainEvent := tm.do("maya.pc", TypeItemAssign, map[string]any{"item": it, "completion": "assigner", "targets": []any{
+		map[string]any{"root": "maya"},
+	}})
+	stray := plainEvent + "~maya>lena"
+	if tm.clone("maya.pc").r.S.asg[stray] != nil {
+		t.Fatalf("wider rule unexpectedly owned lena before removal: %s", stray)
+	}
+	tm.do("maya.pc", TypeItemUnassign, map[string]any{"item": it, "root": "maya"})
+	if tm.clone("maya.pc").r.S.asg[stray] != nil {
+		t.Fatalf("root unassign created stray record %s", stray)
+	}
+}
+
 func TestReturningOrgRuleReextendsOverlappingRule(t *testing.T) {
 	tm := newTeam(t)
 	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-sales", "Sales", "raj"))

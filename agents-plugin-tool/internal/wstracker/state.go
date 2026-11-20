@@ -315,32 +315,33 @@ type state struct {
 	hb    func(x, y *node) bool // x is in y's causal past (x earlier in fold order)
 	marks bool                  // final fold: record concurrent-change markers
 
-	members  map[string]*member
-	morder   []string
-	admins   map[string]bool
-	aorder   []string
-	items    map[string]*item
-	iorder   []string
-	place    []placement
-	asg      map[string]*rec
-	recs     []*rec
-	byItem   map[string][]*rec
-	rules    []*rule
-	ruleByID map[string]*rule
-	comments map[string]*comment
-	corder   []string
-	reqs     map[string]*takeReq
-	rorder   []string // take request ids in fold order
-	reg      map[string][]head
-	bodies   map[string]*bodyFold // item id -> its body as folded (merge.go)
-	labels   map[string]*label
-	lorder   []string // label ids in fold order of their adds
-	orgs     map[string]*org
-	oorder   []string // org ids in fold order of their creation
-	ccOrgs   map[string]*ccOrgReg
-	ccOrder  []string // item/org keys in first-registration order
-	prio     priority
-	attMax   float64 // attachments.max_bytes, the engine's number (posIntOf)
+	members      map[string]*member
+	morder       []string
+	admins       map[string]bool
+	aorder       []string
+	items        map[string]*item
+	iorder       []string
+	place        []placement
+	asg          map[string]*rec
+	recs         []*rec
+	byItem       map[string][]*rec
+	rules        []*rule
+	ruleByID     map[string]*rule
+	comments     map[string]*comment
+	corder       []string
+	reqs         map[string]*takeReq
+	rorder       []string // take request ids in fold order
+	reg          map[string][]head
+	bodies       map[string]*bodyFold // item id -> its body as folded (merge.go)
+	labels       map[string]*label
+	lorder       []string // label ids in fold order of their adds
+	orgs         map[string]*org
+	oorder       []string // org ids in fold order of their creation
+	ccOrgs       map[string]*ccOrgReg
+	ccOrgsByItem map[string][]*ccOrgReg
+	ccOrder      []string // item/org keys in first-registration order
+	prio         priority
+	attMax       float64 // attachments.max_bytes, the engine's number (posIntOf)
 }
 
 // genesis is the parsed roles.json the fold starts from.
@@ -478,7 +479,7 @@ func newState(g *genesis, hb func(x, y *node) bool, marks bool) *state {
 		hb: hb, marks: marks,
 		members: map[string]*member{}, admins: map[string]bool{},
 		items: map[string]*item{}, asg: map[string]*rec{}, byItem: map[string][]*rec{}, ruleByID: map[string]*rule{},
-		comments: map[string]*comment{}, reg: map[string][]head{}, bodies: map[string]*bodyFold{}, labels: map[string]*label{}, orgs: map[string]*org{}, ccOrgs: map[string]*ccOrgReg{}, reqs: map[string]*takeReq{},
+		comments: map[string]*comment{}, reg: map[string][]head{}, bodies: map[string]*bodyFold{}, labels: map[string]*label{}, orgs: map[string]*org{}, ccOrgs: map[string]*ccOrgReg{}, ccOrgsByItem: map[string][]*ccOrgReg{}, reqs: map[string]*takeReq{},
 		prio:   priority{names: append([]string(nil), g.prio.names...), def: g.prio.def},
 		attMax: g.attMax,
 	}
@@ -1598,10 +1599,14 @@ func (s *state) apply(n *node) {
 				s.unassignRule(ru, n)
 			}
 		} else if !p.null("root") {
+			refresh := false
 			for _, ru := range s.openRules(item) {
 				if ru.by == a && ru.assignRoot == p.str("root") {
-					s.unassignRule(ru, n)
+					refresh = s.unassignRuleRecords(ru, n) || refresh
 				}
+			}
+			if refresh {
+				s.refreshItemRules(item, n)
 			}
 		} else if p.truthy("assignee") {
 			who := p.str("assignee")
@@ -1968,21 +1973,17 @@ func (s *state) applyCC(n *node) {
 	on := bool(s.write(key, "CC of "+m+" on "+it.alias, n, ccVal(n.typ == TypeItemCC)).(ccVal))
 	if on {
 		delete(it.ccExcluded, m)
-		for _, reg := range s.ccOrgs {
-			if reg.item == it.id {
-				delete(reg.excluded, m)
-			}
+		for _, reg := range s.ccOrgsByItem[it.id] {
+			delete(reg.excluded, m)
 		}
 		s.addCCSource(it, m, "", true, s.regWinner(key))
 		return
 	}
 	it.ccExcluded[m] = true
 	s.removeCCSource(it, m, "", true)
-	for _, reg := range s.ccOrgs {
-		if reg.item == it.id {
-			reg.excluded[m] = true
-			delete(reg.added, m)
-		}
+	for _, reg := range s.ccOrgsByItem[it.id] {
+		reg.excluded[m] = true
+		delete(reg.added, m)
 	}
 }
 
@@ -1997,6 +1998,7 @@ func (s *state) applyCCOrg(n *node) {
 	if reg == nil {
 		reg = &ccOrgReg{item: it.id, org: orgID, added: map[string]bool{}, excluded: map[string]bool{}}
 		s.ccOrgs[k] = reg
+		s.ccOrgsByItem[it.id] = append(s.ccOrgsByItem[it.id], reg)
 		s.ccOrder = append(s.ccOrder, k)
 	}
 	if on {

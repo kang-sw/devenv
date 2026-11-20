@@ -759,13 +759,6 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 	vw.Items = map[string]ItemView{}
 	status := map[string]string{}
 	visibleChildren := map[string][]*item{}
-	ccOrgsByItem := map[string][]*ccOrgReg{}
-	for _, key := range S.ccOrder {
-		reg := S.ccOrgs[key]
-		if reg != nil && reg.active {
-			ccOrgsByItem[reg.item] = append(ccOrgsByItem[reg.item], reg)
-		}
-	}
 	for _, id := range S.iorder {
 		it := S.items[id]
 		status[id] = r.itemStatus(it)
@@ -823,7 +816,10 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 				iv.CCSources[e.member] = sources
 			}
 		}
-		for _, reg := range ccOrgsByItem[id] {
+		for _, reg := range S.ccOrgsByItem[id] {
+			if !reg.active {
+				continue
+			}
 			entry := OrgCCView{Org: reg.org, Added: []string{}}
 			for _, member := range S.morder {
 				if reg.added[member] {
