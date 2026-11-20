@@ -201,6 +201,13 @@ type label struct {
 	removed         *node
 }
 
+// org is a first-class organization. Removed orgs remain as tombstones so
+// registrations can keep their display identity.
+type org struct {
+	id, name, head string
+	removed        *node
+}
+
 // attachment is attachment metadata as folded; oid is the content's sha256.
 type attachment struct {
 	oid, name, mime string
@@ -312,6 +319,8 @@ type state struct {
 	bodies   map[string]*bodyFold // item id -> its body as folded (merge.go)
 	labels   map[string]*label
 	lorder   []string // label ids in fold order of their adds
+	orgs     map[string]*org
+	oorder   []string // org ids in fold order of their creation
 	prio     priority
 	attMax   float64 // attachments.max_bytes, the engine's number (posIntOf)
 }
@@ -451,7 +460,7 @@ func newState(g *genesis, hb func(x, y *node) bool, marks bool) *state {
 		hb: hb, marks: marks,
 		members: map[string]*member{}, admins: map[string]bool{},
 		items: map[string]*item{}, asg: map[string]*rec{}, byItem: map[string][]*rec{}, ruleByID: map[string]*rule{},
-		comments: map[string]*comment{}, reg: map[string][]head{}, bodies: map[string]*bodyFold{}, labels: map[string]*label{}, reqs: map[string]*takeReq{},
+		comments: map[string]*comment{}, reg: map[string][]head{}, bodies: map[string]*bodyFold{}, labels: map[string]*label{}, orgs: map[string]*org{}, reqs: map[string]*takeReq{},
 		prio:   priority{names: append([]string(nil), g.prio.names...), def: g.prio.def},
 		attMax: g.attMax,
 	}
@@ -491,6 +500,67 @@ func (s *state) removeAdmin(a string) {
 func (s *state) liveMember(id string) bool {
 	m := s.members[id]
 	return m != nil && m.removed == nil
+}
+
+func (s *state) liveOrg(id string) *org {
+	o := s.orgs[id]
+	if o == nil || o.removed != nil {
+		return nil
+	}
+	return o
+}
+
+func (s *state) orgNamed(name, except string) *org {
+	for _, id := range s.oorder {
+		o := s.liveOrg(id)
+		if o != nil && id != except && strings.EqualFold(o.name, name) {
+			return o
+		}
+	}
+	return nil
+}
+
+func (s *state) orgHeadedBy(member, except string) *org {
+	if member == "" {
+		return nil
+	}
+	for _, id := range s.oorder {
+		o := s.liveOrg(id)
+		if o != nil && id != except && o.head == member {
+			return o
+		}
+	}
+	return nil
+}
+
+// nearestOrg is the member's display org: the closest live org head at or
+// above the member in the lead chain. Org registration scope intentionally
+// uses orgMembers instead and includes nested orgs.
+func (s *state) nearestOrg(member string) *org {
+	for cur, n := member, 0; cur != "" && n <= len(s.members); n++ {
+		if o := s.orgHeadedBy(cur, ""); o != nil {
+			return o
+		}
+		m := s.members[cur]
+		if m == nil {
+			return nil
+		}
+		cur = m.lead()
+	}
+	return nil
+}
+
+// orgMembers is the whole live subtree rooted at the org's head, including
+// that head and members whose nearest org is a nested child org.
+func (s *state) orgMembers(o *org) []string {
+	if o == nil || o.removed != nil || !s.liveMember(o.head) {
+		return nil
+	}
+	out := []string{o.head}
+	for _, r := range s.reach(o.head, wholeSubtree) {
+		out = append(out, r.id)
+	}
+	return out
 }
 
 // ---------------------------------------------------------------- org tree
@@ -1623,6 +1693,19 @@ func (s *state) apply(n *node) {
 		if !cycle {
 			m.leads = s.write("lead:"+m.id, "lead of "+m.id, n, leads).([]string)
 		}
+	case TypeOrgSet:
+		id := p.str("org")
+		o := s.orgs[id]
+		if o == nil {
+			o = &org{id: id}
+			s.orgs[id] = o
+			s.oorder = append(s.oorder, id)
+		}
+		o.name, o.head = p.str("name"), p.str("head")
+	case TypeOrgRemove:
+		if o := s.orgs[p.str("org")]; o != nil && o.removed == nil {
+			o.removed, o.head = n, ""
+		}
 	case wsledger.TypeAddAdmin:
 		s.addAdmin(p.str("member"))
 	case wsledger.TypeRemoveAdmin:
@@ -1654,6 +1737,11 @@ func (s *state) apply(n *node) {
 		}
 		m.removed = n
 		s.removeAdmin(id)
+		for _, oid := range s.oorder {
+			if o := s.liveOrg(oid); o != nil && o.head == id {
+				o.head = ""
+			}
+		}
 		for _, x := range append([]*rec(nil), s.recs...) {
 			if x.to == id && s.handedConc(x, n) {
 				s.reverseHanded(x, n)

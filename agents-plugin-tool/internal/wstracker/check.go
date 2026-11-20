@@ -31,6 +31,60 @@ func (s *state) needMember(id string) rejection {
 	return ""
 }
 
+func (s *state) needOrg(id string, live bool) (*org, rejection) {
+	o := s.orgs[id]
+	if o == nil {
+		return nil, rejection(`unknown org "` + id + `"`)
+	}
+	if live && o.removed != nil {
+		return nil, rejection("org " + id + " (" + o.name + ") was removed")
+	}
+	return o, ""
+}
+
+func (s *state) checkOrgName(name, except string) rejection {
+	if strings.TrimSpace(name) == "" {
+		return "name must be a non-blank string"
+	}
+	if strings.TrimSpace(name) != name {
+		return "name has leading or trailing spaces"
+	}
+	if o := s.orgNamed(name, except); o != nil {
+		return rejection(`org "` + name + `" already exists (` + o.id + ")")
+	}
+	return ""
+}
+
+func (s *state) checkOrgSet(p obj) rejection {
+	id, ok := p["org"].(string)
+	if !ok || id == "" || !wsledger.ValidID(id) {
+		return "org must be a valid org id"
+	}
+	name, ok := p["name"].(string)
+	if !ok {
+		return "name must be a non-blank string"
+	}
+	if r := s.checkOrgName(name, id); r != "" {
+		return r
+	}
+	head, ok := p["head"].(string)
+	if !ok {
+		return "head must be a member id or an empty string"
+	}
+	if existing := s.orgs[id]; existing != nil && existing.removed != nil {
+		return rejection("org " + id + " (" + existing.name + ") was removed")
+	}
+	if head != "" {
+		if r := s.needMember(head); r != "" {
+			return r
+		}
+		if held := s.orgHeadedBy(head, id); held != nil {
+			return rejection(head + " already heads org " + held.id + " (" + held.name + ")")
+		}
+	}
+	return ""
+}
+
 // creatorGone (208, 292): an admin stands in for a removed creator on
 // assign, unassign, edit, and hide.
 func (s *state) creatorGone(it *item, a string) bool {
@@ -403,6 +457,23 @@ func (s *state) checkTargets(it *item, a string, p obj) rejection {
 		t := obj(m)
 		if _, ok := t["include_root"].(bool); !ok && !t.null("include_root") {
 			return targetShape
+		}
+		orgID := ""
+		if !t.null("org") {
+			orgID, ok = t["org"].(string)
+			if !ok || orgID == "" {
+				return targetShape
+			}
+			o, r := s.needOrg(orgID, true)
+			if r != "" {
+				return r
+			}
+			if o.head == "" {
+				return rejection("org " + orgID + " (" + o.name + ") is vacant")
+			}
+			if root != o.head {
+				return rejection("org " + orgID + " is headed by " + o.head + ", not " + root)
+			}
 		}
 		ru := &rule{root: root, includeRoot: t["include_root"] == true}
 		if !t.null("levels") {
@@ -1116,6 +1187,26 @@ func (s *state) check(n *node) rejection {
 			return rejection(`unknown member "` + m + `"`)
 		}
 
+	case TypeItemCCOrg, TypeItemUnccOrg:
+		it, r := needIt()
+		if r != "" {
+			return r
+		}
+		if it.hidden {
+			return rejection(it.alias + " is hidden")
+		}
+		orgID, ok := p["org"].(string)
+		if !ok || orgID == "" {
+			return "org must be an org id"
+		}
+		o, r := s.needOrg(orgID, n.typ == TypeItemCCOrg)
+		if r != "" {
+			return r
+		}
+		if n.typ == TypeItemCCOrg && o.head == "" {
+			return rejection("org " + orgID + " (" + o.name + ") is vacant")
+		}
+
 	case TypeItemAccept, TypeItemDecline:
 		it, r := needIt()
 		if r != "" {
@@ -1400,6 +1491,23 @@ func (s *state) check(n *node) rejection {
 			return r
 		}
 		return s.checkLeads(p.disp("member"), p)
+
+	case TypeOrgSet:
+		if r := s.needAdmin(a); r != "" {
+			return r
+		}
+		return s.checkOrgSet(p)
+
+	case TypeOrgRemove:
+		if r := s.needAdmin(a); r != "" {
+			return r
+		}
+		orgID, ok := p["org"].(string)
+		if !ok || orgID == "" {
+			return "org must be an org id"
+		}
+		_, r := s.needOrg(orgID, true)
+		return r
 
 	case TypeSetPriorityLevels:
 		if r := s.needAdmin(a); r != "" {
