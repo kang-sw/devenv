@@ -48,10 +48,13 @@ owns the operation.
   an identity rooted in the original worktree and is correctly refused.
 - **Develop verdict:** **not fixed.** Current source has no live-child transfer
   or rebind operation. Spawning with `worktree: <B>` avoids the conflict.
-- **Minimal fix:** settle (1924). The preferred small contract is to keep keys
-  immutable, require a respawn for a different worktree, and make the mismatch
-  diagnose the required respawn. Test both the refused A-to-B handoff and a
-  successful child spawned directly into B.
+- **Minimal fix:** settle (1924). Keep keys immutable and make a mismatched
+  A-bound key diagnose that the caller needs a key minted for B. That may be a
+  child spawned directly into B or, after
+  `261116-feat-ws-subagent-worktree-lease` lands, the B-bound key returned when
+  the child legitimately acquires B under Decision (1190); respawn is not the
+  only valid path. Test the refused A-key-in-B handoff and both valid B-key
+  sources.
 - **Compatibility:** **T0** for the preferred diagnostic/prompt/workflow fix:
   tool schemas and stored key records do not change, and old calls retain their
   behavior. An additive rebind API could only be T0 with capability gating and
@@ -115,11 +118,20 @@ owns the operation.
   treated as active
   (`agents-plugin-tool/internal/mcp/implement_resolver_test.go:446`,
   `agents-plugin-tool/internal/mcp/implement_resolver_test.go:994`).
-- **Minimal fix:** settle (1925), then classify an existing canonical target
-  against base under the acquisition lock. Recreate a fully landed target at
-  base, preserve/refuse any target with unmerged work, and retain an equal
-  target. Route resolution must also refuse or repair a stale exact target.
-  Regress the merged-behind, active-ahead, equal, and divergent cases.
+- **Minimal fix:** implement (1925) without replacing the resolver behavior
+  vouched by `261116-bug-ws-worktree-acquire-stale-branch-facts` Phase 2
+  (1184): retain the different-target `recreate` action at
+  `implement_resolver.go:951-957` and the create-path `recreate` action at
+  `:872-886`, because an in-root serial worker never calls
+  `worktree.acquire`. In addition, during locked pooled-worktree acquisition,
+  classify an existing name-rooted canonical target against its encoded merge
+  root and non-force delete/recreate it when the target-only count is zero and
+  the merge-root-only count is positive. Preserve/refuse targets with unmerged
+  work and retain an equal target. Route resolution adds only a defensive stop
+  for the exact-target `continue` case at `:932-935`, telling the caller to
+  re-acquire so the locked acquisition path can repair it. Regress the
+  landed-or-empty-behind, active-ahead, equal, divergent, and unchanged
+  in-root serial recreate cases.
 - **Compatibility:** **T0.** The correction can preserve current tool names,
   required arguments, and stored records. Any optional result fact remains an
   additive field that old callers ignore
@@ -220,11 +232,14 @@ owns the operation.
 - **Minimal fix:** implement (1926): add the harness-neutral MCP tool
   `path.write(path, content)`, authorize it only for a cache path that the same
   session key previously minted through `path.generate`, and expose it through
-  `ChildSafeWSTools`. Keep the reviewer read-only with respect to the source
-  tree while allowing its daemon-side MCP call to write the detailed report to
-  the generated findings path; its final response remains only the one-line
-  status. Test clean, ordinary non-clean, oversized, unminted-path, and
-  cross-session attempts.
+  `ChildSafeWSTools`. The read-only reviewer, not its invoker, calls
+  `path.generate`, writes the detailed report through `path.write` with that
+  same key, and returns a one-line status containing the path for the invoker
+  to read. The render-minted child key at
+  `agents-plugin-tool/internal/mcp/playbook_tools.go:1082-1099` or another
+  reviewer key is valid, but one key must perform both calls. Test clean,
+  ordinary non-clean, oversized, unminted-path, cross-session, and
+  parent-minted-path attempts.
 - **Compatibility:** **T0.** `path.write` is an additive tool, and the playbooks
   that call it ship embedded with the same binary. Existing tools, arguments,
   hello data, mailbox records, and persisted-history shapes remain unchanged.
@@ -288,25 +303,49 @@ owns the operation.
 
 ## Decisions
 
-- **(1924) Child worktree binding:** A live child stays bound to its spawn
-  root. Work in a different worktree requires a respawn, and an attempt through
-  the old path receives an actionable error. Rejected: an adopt/rebind
-  lifecycle.
-- **(1925) Stale implementation branch ownership:** Classify and recreate stale
-  canonical implementation branches during locked worktree acquisition; route
-  resolution retains only a defensive stale-target refusal. Rejected:
-  route-owned repair.
+- **(1924) Child worktree binding:** A child key stays bound to the root where
+  it was minted. An attempt to use an A-bound key in B receives an actionable
+  error requiring a B-bound key. The caller may spawn directly into B or, once
+  `261116-feat-ws-subagent-worktree-lease` lands, use the B-bound key returned
+  by a legitimate child acquisition under its Decision (1190); the old key is
+  never rebound. Rejected: an adopt/rebind lifecycle.
+- **(1925) Stale implementation branch ownership:** Preserve both existing
+  resolver-owned `recreate` actions: the vouched different-target action from
+  `261116-bug-ws-worktree-acquire-stale-branch-facts` Phase 2 (1184) at
+  `implement_resolver.go:951-957`, and the create-path action at `:872-886`.
+  They remain necessary for in-root serial workers, which never call
+  `worktree.acquire`; this decision supersedes nothing in `261116` and
+  complements it. Add classify-and-recreate during locked pooled-worktree
+  acquisition. A name-rooted canonical target is stale and safe to recreate
+  only when comparison with its encoded merge root, not an arbitrary caller
+  base, succeeds with target-only `0` and merge-root-only `>0` (ahead `0`,
+  behind `>0`); `0/0` stays equal, and any target-only commits are preserved
+  and refused. This predicate also covers a freshly created empty canonical
+  branch left behind after its merge root advances, so neither classification
+  nor diagnostics may claim it proves previously landed work or work loss. Use
+  non-forced deletion; if another pooled worktree has the branch checked out,
+  acquisition fails
+  actionably, leaves the branch and both worktrees intact, and tells the caller
+  to release that checkout and re-acquire. Route resolution adds no repair: it
+  changes only the exact-target `continue` case at `:932-935` to refuse this
+  stale predicate and tell the caller to re-acquire. Rejected: removing the
+  existing route recreation paths or broad route-owned repair.
 - **(1926) Read-only reviewer artifact write:** Add the harness-neutral ws MCP
   tool `path.write(path, content)`. It writes only to a ws-cache path that the
   same session key previously minted through `path.generate`; it is included in
   `ChildSafeWSTools` so read-only children can call it. The daemon-side write
   runs outside the harness sandbox, while the child retains zero source-tree
-  write authority. The reviewer writes its detailed report to the generated
-  findings path and returns only the one-line status. Compatibility is T0: the
-  tool is additive and the calling playbooks ship embedded with the same
-  binary. Rejected: having the handler persist a bounded handoff; a session
-  allow-list tool (`allowed.edit`), because it creates a new authority path for
-  deciding who sets the list.
+  write authority. The reviewer mints its own findings path with
+  `path.generate` under the key it uses for ws calls, writes the full report
+  with `path.write` under that same key, and returns only a one-line status that
+  includes the path; the invoker does not pre-generate a path and reads it from
+  that line. `playbook_tools.go:1082-1099` may splice a render-minted child key,
+  and a spawn-issued reviewer key may also be used, but path generation and
+  writing must use one identical key. Compatibility is T0: the tool is additive
+  and the calling playbooks ship embedded with the same binary. Rejected:
+  having the handler persist a bounded handoff; authorizing parent-minted paths
+  by session-key lineage; a session allow-list tool (`allowed.edit`), because it
+  creates a new authority path for deciding who sets the list.
 - **(1927) Worker bootstrap context:** Remove the lead-only `workflow_manual`
   requirement from worker instructions; workers rely on the rendered Worker
   Protocol, ticket, AGENTS guidance, and declared manuals. Rejected: a new
@@ -379,14 +418,20 @@ owns the operation.
 
 Implement the settled lifecycle without weakening root authority: retain
 immutable child keys, reject later cross-worktree assignments with a
-respawn-specific diagnostic, and teach lead/child guidance to spawn directly
-into the acquired worktree.
+diagnostic that requires a key minted for the destination, and teach lead/child
+guidance both valid paths: spawn directly into the destination or, after
+`261116-feat-ws-subagent-worktree-lease` lands, use the destination-bound key
+returned by the child's own legitimate acquisition. Do not present respawn as
+the sole remedy.
 
 Acceptance:
 
 - A child spawned in worktree A cannot ws-commit in worktree B and receives an
-  actionable respawn diagnostic.
+  actionable diagnostic to obtain and use a B-bound key.
 - A child spawned with `worktree: B` can use its minted key for B.
+- After `261116-feat-ws-subagent-worktree-lease`, a child that legitimately
+  acquires B can use the returned key for B without privilege escalation under
+  that ticket's Decision (1190).
 - Existing same-root child calls remain unchanged.
 - Compatibility remains T0, or the phase records and settles a revised tier
   before implementation.
@@ -407,18 +452,32 @@ Acceptance:
 
 ### Phase 3: Retire fully landed canonical implementation branches
 
-Make provisioning and route resolution distinguish a retained active branch
-from a canonical branch whose work is wholly contained in base. Perform branch
-recreation under the existing acquisition lock and never discard unmerged
-work.
+Make pooled provisioning and route resolution distinguish a retained active
+branch from a stale canonical branch with no commits outside its encoded merge
+root. Perform pooled branch recreation under the existing acquisition lock,
+retain the resolver's existing recreate instructions for in-root serial work,
+and never discard unmerged work.
 
 Acceptance:
 
-- A canonical target that is behind base with zero commits ahead is recreated
-  at base instead of checked out stale.
+- During pooled-worktree acquisition, a name-rooted canonical target with
+  target-only `0` and merge-root-only `>0` against its encoded merge root is
+  non-force deleted and recreated from that merge root under the acquisition
+  lock instead of being checked out stale. This safe-to-recreate class includes
+  a formerly empty branch after the merge root advances and is not evidence
+  that the branch previously carried landed work.
 - Equal and actively-ahead same-ticket targets retain their intended behavior.
 - Divergent or otherwise unmerged targets are preserved and produce a stop or
   explicit conflict instead of reset.
+- If another pooled worktree checks out the stale target, non-forced deletion
+  fails the acquisition without mutation and the error identifies the blocking
+  checkout and tells the caller to release it and re-acquire.
+- Route resolution retains the existing create-path and vouched
+  different-target `recreate` actions from
+  `261116-bug-ws-worktree-acquire-stale-branch-facts`; regress that an in-root
+  serial worker still receives and can execute those actions. Only an
+  exact-target `continue` that meets the stale predicate becomes a defensive
+  refusal whose message tells the caller to re-acquire.
 - The exact `261115-feat-ws-permission-profile` topology is covered by a
   regression fixture.
 - Compatibility remains T0.
@@ -436,9 +495,12 @@ Acceptance:
 - The hosted-package fixture no longer models the obsolete two-manifest list.
 - A Claude-hello integration test lists, reads, and project-tunes
   `agy.model_wait_timeout_seconds`.
-- A caller checks `config.list` before using the additive key against an
-  unknown daemon version, preserving a T0 old-call path instead of relying on
-  a T3 refusal.
+- The shipped `lead-tune` caller performs `config.list` before using the
+  additive key against an unknown daemon version
+  (`agents-plugin/rsrc/lead-tune/lead-tune.md:29` and its wsflow and Pi
+  mirrors); tests pin that catalog gate before its `config.tune` call. There is
+  no separate agy-key-specific production caller to gate. This preserves a T0
+  old-call path instead of relying on a T3 refusal.
 - An unavailable shipped key points to rejected manifests or the need to
   restart/update the plugin session where that evidence exists.
 - Compatibility remains T0 for old calls and stored data; any ungated
@@ -450,21 +512,34 @@ Acceptance:
 Add `path.write(path, content)` as a harness-neutral daemon-side MCP operation.
 The session key may write only an exact ws-cache path that it previously minted
 through `path.generate`; no repository path or path minted by another session
-is eligible. Include the tool in `ChildSafeWSTools`, pass the generated findings
-path to the read-only Lite reviewer, and keep the reviewer contract: write the
-detailed report there, then return only the one-line status.
+is eligible. Include the tool in `ChildSafeWSTools`. Update
+`agents-plugin/rsrc/code-reviewer.md:45` and its wsflow/Pi mirrors so the
+read-only reviewer mints its own findings path, writes the detailed report, and
+returns only a one-line status containing that path. The current pre-generated
+path invoker inventory is only
+`agents-plugin/rsrc/review-handler/review-handler.md:53,90` and its wsflow/Pi
+mirrors; remove that ownership and make it read the path from reviewer status.
+Also update the Lite invoker in
+`agents-plugin/rsrc/worker-stop-protocol.md:70-84` and its mirrors, which does
+not currently pass a findings path, to read the returned path rather than add a
+parent-generated one.
 
 Acceptance:
 
 - `path.write` accepts an exact generated cache path only when that same session
   key previously obtained it from `path.generate`.
-- Unminted paths, paths minted by another session, repository paths, traversal,
-  aliases, and symlink escapes are refused without modifying a file.
+- Unminted paths, paths minted by another session (including a parent key in
+  the writer's lineage), repository paths, traversal, aliases, and symlink
+  escapes are refused without modifying a file.
 - A read-only child can call `path.write` through every effective
   `ChildSafeWSTools` host surface but receives no source-tree write authority.
 - Non-clean, clean, and oversized Lite reviews each leave a complete non-empty
-  findings artifact, and the reviewer final response contains only the
-  one-line status.
+  reviewer-minted findings artifact; the reviewer final response is one status
+  line containing its path, and each invoker reads the full artifact from that
+  returned path.
+- Whether the reviewer uses the render-minted child key from
+  `playbook_tools.go:1082-1099` or another reviewer key, the same key performs
+  both `path.generate` and `path.write`.
 - The write occurs daemon-side and does not depend on a harness-specific file
   write grant; ws/wsflow mirrors and Pi guidance remain aligned.
 - Compatibility remains T0 because the tool is additive and its calling
