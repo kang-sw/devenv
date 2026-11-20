@@ -394,7 +394,7 @@ func assetID(data pageAssetsData, source string) string {
 // release_repository says the same for the launcher's binary download, but the
 // shared daemon never reads runtime.json, so the value is restated here and a
 // test pins the two together.
-const releaseRepository = "kang-sw/devenv"
+const releaseRepository = "kang-sw/werkschaft"
 
 // pageFuncs is the template FuncMap for one language: the page helpers and
 // the translation funcs t, tn, and tcode, with the Go-built display strings

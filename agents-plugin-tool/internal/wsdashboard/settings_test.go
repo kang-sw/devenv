@@ -48,21 +48,56 @@ func TestSettingsVersionFooterStyleKeepsNoticeAndVersionInline(t *testing.T) {
 	}
 }
 
-// The footer link and the launcher's binary download name one repository: the
-// daemon restates runtime.json's release_repository (see releaseRepository).
-func TestSettingsGitHubLinkMatchesPluginReleaseRepository(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "agents-plugin", "runtime.json"))
-	if err != nil {
-		t.Fatal(err)
+// The footer link, launcher download destinations, and plugin manifest links
+// name one repository: the daemon restates runtime.json's release_repository
+// (see releaseRepository).
+func TestSettingsGitHubLinkMatchesReleaseDestinations(t *testing.T) {
+	repoRoot := filepath.Join("..", "..", "..")
+	const expectedReleaseRepository = "kang-sw/werkschaft"
+	if releaseRepository != expectedReleaseRepository {
+		t.Fatalf("releaseRepository = %q, want %q", releaseRepository, expectedReleaseRepository)
 	}
-	var contract struct {
-		ReleaseRepository string `json:"release_repository"`
+	expectedURL := "https://github.com/" + expectedReleaseRepository
+
+	for _, path := range []string{
+		"agents-plugin/runtime.json",
+		"agents-plugin-wsflow/runtime.json",
+		"agents-plugin-pi/runtime.json",
+	} {
+		raw, err := os.ReadFile(filepath.Join(repoRoot, path))
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		var contract struct {
+			ReleaseRepository string `json:"release_repository"`
+		}
+		if err := json.Unmarshal(raw, &contract); err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		if contract.ReleaseRepository != expectedReleaseRepository {
+			t.Errorf("%s release_repository = %q, want %q", path, contract.ReleaseRepository, expectedReleaseRepository)
+		}
 	}
-	if err := json.Unmarshal(raw, &contract); err != nil {
-		t.Fatal(err)
-	}
-	if contract.ReleaseRepository != releaseRepository {
-		t.Fatalf("releaseRepository = %q, agents-plugin/runtime.json release_repository = %q", releaseRepository, contract.ReleaseRepository)
+
+	for _, path := range []string{
+		"agents-plugin/.codex-plugin/plugin.json",
+		"agents-plugin/.claude-plugin/plugin.json",
+		"agents-plugin-wsflow/.codex-plugin/plugin.json",
+		"agents-plugin-wsflow/.claude-plugin/plugin.json",
+	} {
+		raw, err := os.ReadFile(filepath.Join(repoRoot, path))
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		var manifest struct {
+			Repository string `json:"repository"`
+		}
+		if err := json.Unmarshal(raw, &manifest); err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		if manifest.Repository != expectedURL {
+			t.Errorf("%s repository = %q, want %q", path, manifest.Repository, expectedURL)
+		}
 	}
 }
 
