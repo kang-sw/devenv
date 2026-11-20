@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 53c5ec9fa0c9105a
 sage-review-completeness-reviewed: 53c5ec9fa0c9105a
+completed: 2026-11-20
 ---
 
 # Tracker thread: compact system lines and collapsible runs
@@ -171,3 +172,26 @@ Verification:
   expand-all toggle) and compare it side by side with the
   approved mockup; report differences and fix any that are not justified by
   real data.
+
+### Result (310d17c) - 2026-11-20
+
+Implemented Phase 1 (commits `9aacb95`, `310d17c`) with compatibility tier **T0** (item-window rendering and in-memory fold state only; no event, store, route, or API shape changes).
+
+- **What landed:**
+  - `agents-plugin-tool/internal/wsdashboard/assets/tracker-window.js`: added pure run-grouping and fold-state helpers (`groupThreadEvents`, `runHasAlert`, `runDefaultCollapsed`, `isRunCollapsed`, `setRunCollapsed`, `setAllRunsCollapsed`, `hasCollapsedRun`, `sysGlyph`, `runAuthorsText`, `runKindsText`, `sysLineHtml`, `threadRunHtml`, `threadSectionHtml`), wired `windowHtml` to `threadSectionHtml`, and updated `focusTarget` to expand a collapsed `.tr-run.shut` when jumping to a deep-linked event. Left `tracker.js` and `evLine` untouched so `activityBody` and `tracker-wiki.js` remain unchanged (Decision 8) and merges stay clean with concurrent tracker edits.
+  - `agents-plugin-tool/internal/wsdashboard/assets/tracker-mount.js`: wired `trfold` and `trfold-all` click actions.
+  - `agents-plugin-tool/internal/wsdashboard/assets/tracker.css`: added `--tk-sys` and `--tk-sys-cc` light/dark tokens and `.tr-*` thread styles matching `ai-docs/assets/mockups/261119/tracker-thread-compact/thread.html`, plus status-colored dot emphasis with continuous left rail on `.tr-sl.st-break`.
+  - `agents-plugin-tool/internal/wsi18n/tables/*.json` (all 11 locales): appended 31 `js.tk.tr.*` keys at the end of each table in existing order (`js.tk.tr.k.misc` used as fallback kind label to satisfy `TestPluralKeysComeInPairs`); regenerated `ai-docs/ref/tracker-mockup/i18n-en.js`.
+  - `agents-plugin-tool/internal/wsdashboard/tracker_thread_runs.test.js`: added pure-function Node test suite covering Decisions 1–8.
+- **Verification:**
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -count=1 ./internal/wsi18n`: pass.
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -count=1 -run 'TestDashboardSourceAssembly|TestTrackerMockupI18nIsCurrent' ./internal/wsdashboard`: pass.
+  - `node --test internal/wsdashboard/tracker_thread_runs.test.js internal/wsdashboard/tracker_projection_render.test.js internal/wsdashboard/tracker_draft.test.js`: 18/18 pass.
+  - LOOK captures in headless Chromium against `ai-docs/ref/tracker-mockup/index.html` (existing `team-alpha` fixtures `maya.pc#1`, `maya.pc#5`, `raj.pc#11` covered every required state without mutating `fixtures.js`; Activity tab verified 50 `.ev` rows and 0 `.tr-*` rows; 0 console/page errors):
+    - compared `/tmp/tracker-thread-compact/collapsed.png`, `/tmp/tracker-thread-compact/expanded.png`, `/tmp/tracker-thread-compact/expand-all.png`, `/tmp/tracker-thread-compact/flagged.png`, `/tmp/tracker-thread-compact/status-break.png`, `/tmp/tracker-thread-compact/light-collapsed.png` vs `/tmp/tracker-thread-compact/mockup.png` (`ai-docs/assets/mockups/261119/tracker-thread-compact/thread.html`): match (after fixing a 3px timeline rail gap on `.tr-sl.st-break` in `310d17c`).
+  - `code-review-lite` (`id:decadelunchboxrepeatedthriving`): clean (0 Critical, 0 Important, 2 Minor noted: chip-to-description spacing in `originChip(n.origin) + desc` and deferring `.tr-all` refresh on `focusTarget` auto-expand until next `render()`).
+- **Decisions:**
+  - Used `tr-*` CSS classes instead of `.sl`/`.who`/`.tw` to avoid collisions with existing `tracker.css` selectors.
+  - Lazily initialized `ui.trfold` inside `tracker-window.js` instead of editing `tracker.js`.
+  - Named the fallback kind i18n key `js.tk.tr.k.misc` rather than `.other` because `wsi18n`'s `TestPluralKeysComeInPairs` reserves `.other` for paired plural keys.
+  - Kept `ai-docs/ref/tracker-mockup/fixtures.js` untouched because existing `team-alpha` items (`maya.pc#1`, `maya.pc#5`, `raj.pc#11`) already provide all required LOOK states without disturbing `wstracker` golden fixtures.
