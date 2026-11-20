@@ -83,8 +83,9 @@ func dashboardCommand(args []string) {
 	// makes no store call, so it never takes the ring.
 	wsmailbox.EnablePersistent()
 	// StartDaemon starts the runner before it returns the daemon, so the
-	// runner's tracker-changed callback is bound once the daemon exists.
+	// runner's daemon callbacks are bound once the daemon exists.
 	var trackerChanged lateFunc
+	var agyActivity lateFunc
 	// Bound once the mailbox sweep runs; Close calls it before releasing
 	// the dashboard lock.
 	var exportMailbox lateFunc
@@ -98,7 +99,7 @@ func dashboardCommand(args []string) {
 		Log:    logw,
 		OnExit: persistHolderExit(dir),
 	})
-	agents := newAgentRunner(dir, logw, trackerChanged.call, holders)
+	agents := newAgentRunner(dir, logw, trackerChanged.call, agyActivity.call, holders)
 	nudges := mcp.NewWhiteboardNudges(dir, agents, logw)
 	host := &proxyHost{notes: sessions.Notes, dir: dir, port: *port, lan: *lan, buildTime: *buildTime, contentHash: contentHash, logw: logw, configPath: filepath.Clean(configPath), agents: agents, nudges: nudges}
 	// A store's support conversation runs in the store's clone, so an
@@ -166,6 +167,7 @@ func dashboardCommand(args []string) {
 		wsdashboard.PruneStagedExecutables(dir, exe)
 	}
 	trackerChanged.set(daemon.TrackerChanged)
+	agyActivity.set(daemon.AgyActivity)
 	host.live.Store(daemon)
 	// The hooks read the stores on every change signal the page gets from
 	// the watch and the poll; the watch also sees the daemon's own writes.
@@ -290,8 +292,9 @@ func trackerStoreRoot(h *wstrackerhost.Host, newErr error) func(id string) (stri
 // newAgentRunner is the daemon's agent runner: the claude and pi backends,
 // ws-mcp's key store for conversation keys, and the plugin's Python launcher
 // for the ws-mcp it attaches to a conversation whose profile allows ws tools.
-// trackerChanged runs after a conversation's successful tracker write.
-func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *wsholder.Manager) *wsagent.Runner {
+// trackerChanged runs after a conversation's successful tracker write;
+// agyActivity runs after a hosted agy turn settles.
+func newAgentRunner(dir string, logw io.Writer, trackerChanged, agyActivity func(), holders *wsholder.Manager) *wsagent.Runner {
 	modelWaitSeconds := wsagent.DefaultAgyModelWaitTimeoutSeconds
 	modelWaitRetries := wsagent.DefaultAgyModelWaitRetries
 	if name, _, err := wsagent.ResolveHostedPackage(); err == nil && name == "wsflow" {
@@ -316,7 +319,7 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 			"tickets.query", "tickets.move", "git.status", "git.log", "git.commit", "git.merge",
 			"worktree.acquire", "worktree.release", "note.query", "note.write",
 			"config.resolve_agent", "todo.list", "todo.check",
-		}, ToolsAlwaysLoad: true, ManualHarness: wsagent.BackendAgy, PlaybookCommands: true, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendAgy), WorkerHTTPMCP: true, WorkerAutoApprove: true},
+		}, ToolsAlwaysLoad: true, ManualHarness: wsagent.BackendAgy, PlanUsageActivity: true, PlaybookCommands: true, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendAgy), WorkerHTTPMCP: true, WorkerAutoApprove: true},
 	}
 	return wsagent.NewRunner(wsagent.Options{
 		Dir:                        dir,
@@ -347,6 +350,7 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 		},
 		Log:            logw,
 		TrackerChanged: trackerChanged,
+		AgyActivity:    agyActivity,
 		// A spawned Pi subagent's settled turns go to its lead's mailbox.
 		Report: mcp.PiTurnReporter(logw),
 		// A Pi subagent's own pi.* calls (the token route) need a usable

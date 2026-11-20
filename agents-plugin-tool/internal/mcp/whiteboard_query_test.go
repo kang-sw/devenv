@@ -86,7 +86,7 @@ func TestWhiteboardQueryFreshSessionConversionAndRecoverySmoke(t *testing.T) {
 
 			// Payload retrieval supports full repost, not a panel-targeted edit.
 			f.update(t, `<wb:topic name="`+topic+`"><wb:panel id="p3" recap="full repost">`+"\n"+rawPayload+"\n"+`</wb:panel></wb:topic>`)
-			page := string(readFileForTest(t, f.pagePath()))
+			page := f.servedPage(t)
 			if !strings.Contains(page, "full repost") || !strings.Contains(page, "current agent line") {
 				t.Fatal("committed state did not render")
 			}

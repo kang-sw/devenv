@@ -47,7 +47,7 @@
     if (!t || !t.closest) return "outside";
     if (t.closest(".board-toolbar")) return "toolbar";
     if (t.closest(".tpop:not([hidden]), [popover]:popover-open")) return "popover";
-    if (t.closest("#tkqpop, #tkqs, #shandle, dialog[open], .tk-iwin-back:not([hidden])")) return "palette";
+    if (t.closest("#tkqpop, #tkqs, #shandle, dialog[open], .tk-iwin-back:not([hidden]), .d-tm-back")) return "palette";
     if (t.closest(ITEM) && o.board.contains(t)) return "item";
     return "outside";
   }

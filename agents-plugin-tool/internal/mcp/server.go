@@ -19,6 +19,8 @@ import (
 )
 
 type Server struct {
+	boardOwner bool
+
 	root              string
 	version           string
 	sourceCommit      string
@@ -76,6 +78,10 @@ type Server struct {
 	descriptorMu       sync.Mutex
 	descriptorResolved bool
 	descriptor         connectionDescriptor
+	// planUsageActivity is the detected harness's descriptor opt-in to agy usage
+	// activity, resolved once after the harness becomes known.
+	planUsageActivityOnce sync.Once
+	planUsageActivity     bool
 	// inflight counts the requests being handled; draining refuses new
 	// ones, and inflightDone closes once a draining server goes idle
 	// (Drain).
@@ -343,7 +349,7 @@ func (s *Server) handle(ctx context.Context, req request) response {
 	switch req.Method {
 	case "initialize":
 		s.observePiDaemonAgents(req.Params)
-		s.observeHarness("initialize", detectHarnessFromInitializeParams(req.Params))
+		s.observeHarness("initialize", s.detectHarnessFromInitializeParams(req.Params))
 		// No session/root exists yet at this call: a machine-scope identity
 		// registers immediately (needs no root); a worktree/clone identity
 		// defers until a session-bound root arrives via the owning ferrule

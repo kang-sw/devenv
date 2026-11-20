@@ -59,7 +59,7 @@ func TestWhiteboardTopicStateResponseAndRestart(t *testing.T) {
 	if !strings.Contains(out, `info: discussing_without_open_items: "State"`) {
 		t.Fatalf("missing response-only warning: %s", out)
 	}
-	if page := string(readFileForTest(t, f.pagePath())); strings.Contains(page, "discussing_without_open_items") {
+	if page := f.servedPage(t); strings.Contains(page, "discussing_without_open_items") {
 		t.Fatal("response-only warning leaked onto page")
 	}
 	f.update(t, `<wb:topic name="state"><wb:add class="check"><wb:title>Verify</wb:title></wb:add><wb:state value="implementing" owner="executor" eta_minutes="40"/></wb:topic>`)

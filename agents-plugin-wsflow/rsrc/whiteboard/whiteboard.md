@@ -4,7 +4,8 @@ kind: print
 
 # Whiteboard
 
-The whiteboard is the context a top-level lead shares with its user.
+The whiteboard is the context a top-level lead shares with its user, served
+live by the daemon.
 
 - Topic: one subject of work. Holds panels, a log, items, and a state label.
 - Panel: a card (`pN`). Opinions, drafts, mockups, diagrams. A `state` panel
@@ -40,6 +41,8 @@ The whiteboard is the context a top-level lead shares with its user.
   existing item.
 - Write board text in the conversation language (`workflow.lang` when set).
   IDs, class and status tags, `ok`/`no`, and option letters stay as written.
+- `full:` is the board page's URL, or a short note saying the page is not
+  served yet.
 
 ## Commands
 

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,8 +19,8 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 )
 
-// TestWhiteboardBrowserFixture exports actual file and served renderings for
-// an opt-in static browser gate. It never runs a local daemon or Go binary.
+// TestWhiteboardBrowserFixture exports the actual daemon-served rendering for
+// an opt-in browser gate using an isolated temporary test daemon.
 // The remote test runner fetches only this directory into its scratch folder.
 func TestWhiteboardBrowserFixture(t *testing.T) {
 	dest := os.Getenv("WS_WHITEBOARD_BROWSER_FIXTURE")
@@ -38,8 +39,9 @@ func TestWhiteboardBrowserFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustWrite(t, f.root, "shots/panel.png", encoded.String())
+	mustWrite(t, f.root, "docs/plan.md", "# Browser file action")
 	var commands strings.Builder
-	commands.WriteString(`<wb:topic name="Browser gate"><wb:body><h2>Current content</h2><p>Start with <a id="jump-old" href="#p1">the older panel</a>, the latest {{p2}}, <a id="jump-closed" href="#p7">the archived panel</a>, or item {{1}}.</p></wb:body><wb:add class="policy"><wb:title>Choose the rollout</wb:title><wb:option>Gradual</wb:option><wb:option>Immediate</wb:option></wb:add><wb:panel recap="Old target outside the first history page">old-target-payload</wb:panel><wb:panel recap="Original version of p2">original-version-payload</wb:panel>`)
+	commands.WriteString(`<wb:topic name="Browser gate"><wb:body><h2>Current content</h2><p>Start with <a id="jump-old" href="#p1">the older panel</a>, the latest {{p2}}, <a id="jump-closed" href="#p7">the archived panel</a>, or item {{1}}.</p></wb:body><wb:add class="policy"><wb:title>Choose the rollout [plan](docs/plan.md)</wb:title><wb:option>Gradual</wb:option><wb:option>Immediate</wb:option></wb:add><wb:panel recap="Old target outside the first history page">old-target-payload</wb:panel><wb:panel recap="Original version of p2">original-version-payload</wb:panel>`)
 	for i := 1; i <= 110; i++ {
 		fmt.Fprintf(&commands, "<wb:log>Agent line %03d: a compact **decision** about item {{1}}.</wb:log>", i)
 	}
@@ -91,8 +93,6 @@ func TestWhiteboardBrowserFixture(t *testing.T) {
 		"served/index.html": served,
 		"shots/panel.png":   encoded.Bytes(),
 	}
-	// The full file page resolves image paths from its real nested output
-	// directory. Copy that layout, rather than rewriting generated HTML.
 	for name, data := range files {
 		path := filepath.Join(dest, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -102,19 +102,10 @@ func TestWhiteboardBrowserFixture(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	fileDir := filepath.Join(dest, "ai-docs", "whiteboards", f.replyID())
-	if err := os.MkdirAll(fileDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"index.html", "index.stamp.js"} {
-		if err := os.WriteFile(filepath.Join(fileDir, name), readFileForTest(t, filepath.Join(f.pageDir(), name)), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
 	// Capture the actual SSE region for one later committed update. The
 	// browser gate injects this packet into the real page's transport handler
 	// to exercise disclosure, loaded-history, and viewport restoration.
-	f.update(t, `<wb:topic name="Browser gate"><wb:log>SSE-agent-line-marker</wb:log><wb:panel recap="SSE-panel-marker">SSE panel payload</wb:panel></wb:topic>`)
+	f.update(t, "<wb:topic name=\"Browser gate\"><wb:log>SSE-agent-line-marker</wb:log><wb:panel recap=\"SSE-panel-marker\">SSE panel payload\n\n```mermaid\ngraph LR\nA-->B\n```\n</wb:panel></wb:topic>")
 	if !daemon.Index().Nudge(f.replyID(), f.root) {
 		t.Fatal("fixture update nudge refused")
 	}
@@ -125,7 +116,6 @@ func TestWhiteboardBrowserFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifest, _ := json.MarshalIndent(map[string]any{
-		"file":              filepath.ToSlash(filepath.Join("ai-docs", "whiteboards", f.replyID(), "index.html")),
 		"served":            "served/index.html",
 		"reply_id":          f.replyID(),
 		"topic":             "Browser gate",
@@ -134,4 +124,16 @@ func TestWhiteboardBrowserFixture(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dest, "manifest.json"), manifest, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if script := os.Getenv("WS_WHITEBOARD_BROWSER_SCRIPT"); script != "" {
+		cookie := dashboardCookieForTest(t, daemon)
+		cookieJSON, _ := json.Marshal(map[string]any{"name": cookie.Name, "value": cookie.Value, "url": base})
+		cmd := exec.Command("node", script, base+"/s/"+f.replyID(), dest)
+		cmd.Env = append(os.Environ(), "WS_WHITEBOARD_TEST_COOKIE="+string(cookieJSON))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("browser acceptance: %v\n%s", err, out)
+		} else {
+			t.Logf("%s", out)
+		}
+	}
+
 }

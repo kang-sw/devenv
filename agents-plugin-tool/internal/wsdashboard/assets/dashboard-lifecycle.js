@@ -727,7 +727,7 @@
     }
     // dim is the alpha of the backdrop the page shows over the whole
     // window: a modal dialog's, or an overlay's (the item and git windows,
-    // the image viewer, a maximized card's scrim).
+    // the image viewer, a maximized card's scrim, the ticket map).
     function dim() {
       var a = window.WsOverview && window.WsOverview.active() ? 0.72 : 0;
       q("dialog[open]").forEach(function (d) {
@@ -735,7 +735,7 @@
         try { modal = d.matches(":modal"); } catch (x) { modal = false; }
         if (modal) a = Math.max(a, window.WsShell.alpha(getComputedStyle(d, "::backdrop").backgroundColor));
       });
-      q(".tk-iwin-back:not([hidden]), .gwin-back:not([hidden]), .wbv:not([hidden]), .bc-scrim:not([hidden])").forEach(function (el) {
+      q(".tk-iwin-back:not([hidden]), .gwin-back:not([hidden]), .wbv:not([hidden]), .bc-scrim:not([hidden]), .d-tm-back:not([hidden])").forEach(function (el) {
         if (el.getClientRects().length) a = Math.max(a, window.WsShell.alpha(getComputedStyle(el).backgroundColor));
       });
       return Math.round(a * 100) / 100;

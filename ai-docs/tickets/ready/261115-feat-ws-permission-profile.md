@@ -197,6 +197,20 @@ verification scope.
     behavior and dialog composition using these controls. Worker-profile
     Phase 2 owns its exact selection-bearing hire-approval amendment; it does
     not wait for an undefined permission Phase 5 producer.
+15. **Owner (1875)=a, 2026-11-20 — Phase 2 closeout gaps stay in Phase 2.**
+    The Phase 2 closeout audit (merge `88029f6e8`) found three Phase 2
+    clauses still missing on develop; all three are finished inside Phase 2,
+    not moved to Phase 5 or dropped: (1875) the reusable common permission UI
+    with reconnect-aware positive preflight and the full-warning
+    cancel/confirm flow (the dashboard still reads and sends only native
+    `permission_mode`); (1876) current-parent admission for workers started
+    outside `agent.spawn` (legacy and Pi workers still launch without an
+    explicit common authority); (1877) the exported worker permission input,
+    State/control projection, and an authority-accurate worker launch nudge
+    computed after the stored `agent.spawn` authority is read. Phase 2 gets
+    its whole-phase `### Result` only after these land with the Focused
+    Verification Contract cases. Rejected: moving them to Phase 5 (Decision 14
+    forbids Phase 5 from postponing Phase 2 child checks) or dropping them.
 
 ### Directional compatibility evidence
 

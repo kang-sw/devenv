@@ -4,7 +4,7 @@ parent: 261114-epic-ws-common-session-foundation
 related:
   261117-feat-ws-harness-capability-catalog: "prerequisite; its compaction item grade (native / ws-substitute) selects the fallback; its Decision 6 defers the ws-substitute build to this ticket"
   261117-feat-ws-single-session-holder: "reattach after daemon restart targets the newest harness-session segment"
-  261117-feat-ws-exec-tools: "daemon-owned exec jobs survive compaction; the restore bundle lists them"
+  261117-feat-ws-exec-tools: "daemon-owned exec jobs survive compaction; a later restore-bundle Phase or Edition adds the session's jobs after its Phase 1 read seam lands"
   261117-feat-ws-agent-tools-mailbox-routing: "children and lineage keyed by the ws key; compaction applies to children too"
   261117-feat-ws-hosted-prompt-assembly: "sibling stage-2 child; shares the daemon injection path"
   261116-research-ws-hosted-session-first-tier: "evidence and Confirmed Decisions"
@@ -183,6 +183,39 @@ the existing `/compact` command through the catalog; this ticket owns
     boundary and interrupted no work; each case is tested). Result
     `queued | unsupported | error` plus a reason. Old daemons refuse the unknown
     tool; callers gate on that. Rejected: no target/no resume; no target.
+19. **(1890), owner 2026-11-20:** Phase 2 targets T0 runtime-only by
+    consuming existing persisted shapes and adding no store, hello, tool,
+    argument or manifest shape. The exec-jobs field is deferred by Decision 22;
+    its future read seam is not a Phase 2 condition.
+20. **(1891), owner 2026-11-20:** Restore the caller's direct children, matching
+    `agent.list`, without recursively duplicating descendants in ancestor bundles.
+21. **(1892), owner 2026-11-20:** Add one daemon-internal restore-bundle
+    provider on `wsagent.Options`, render its text in `internal/mcp`, and consume
+    it through the existing compaction-note/idle delivery path without changing
+    the five occupied child/rejoin files. Rejected: direct wsagent-to-store
+    reads, which would move text/store ownership out of `internal/mcp` and
+    bypass the existing `compactInput` consume-once path.
+22. **(1893)=b, owner 2026-11-20:** Supersede Decision 13(d)'s exec-jobs
+    field and start Phase 2 without it;
+    add it in a later Phase or Edition after `261117-feat-ws-exec-tools` Phase 1
+    lands its session-scoped `exec.list` read seam. Rejected: making that seam
+    a Phase 2 prerequisite, which delays Phase 2 behind chunk 5's research;
+    adding a new exec owner/store shape here; listing all root jobs, which
+    conflates sessions sharing a repository.
+23. **(1894), owner 2026-11-20:** Render the typed `implement` agenda target
+    as the ticket/plan pointer when present; otherwise render an explicit
+    "none recorded". Never infer a pointer from arbitrary agenda JSON.
+    Rejected: introducing a conventional work-context agenda blob across
+    lead-run/delegate flows or heuristically scanning arbitrary JSON keys.
+24. **(1895), owner 2026-11-20:** Deliver restart restore as a standalone idle
+    turn only for a successfully rejoined running process; defer an active
+    process until idle and prepend it to a sleeping session's next wake.
+    Rejected: delivery at process start or immediate wake before holder replay
+    completes.
+25. **(1896), owner 2026-11-20:** Reuse the existing `## Session State` render
+    (agenda, whiteboard summaries and todos), then append ticket/plan and all
+    direct children. Rejected: agenda-only output or a second state renderer;
+    the jobs section is deferred by Decision 22.
 
 ## Constraints
 
@@ -212,6 +245,13 @@ the existing `/compact` command through the catalog; this ticket owns
 - Identity, authority, lineage and mailbox delivery ownership are preserved
   across compaction: the compacted session keeps its ws key and never gains
   authority.
+- Deferred (owner (1893)=b, 2026-11-20): Phase 2 omits the exec-jobs field.
+  Add it in a later Phase or Edition only after `261117-feat-ws-exec-tools`
+  Phase 1 lands a session-scoped `exec.list` read seam. Current exec records
+  and SQLite rows identify a root but no owning ws session
+  (`execjob/execjob.go:54-76`, `wsstore/store.go:963-996`); listing all root
+  jobs would conflate parallel sessions. This Phase adds no exec owner/store
+  shape and has no exec-tools prerequisite.
 
 ## Compatibility
 
@@ -239,9 +279,33 @@ writer keeps new `compaction.*` entries; the new resolver reads legacy keys at
 the same layer, so old-key writes still take effect. Phase 1 is T0 on that
 trace; the implementer re-confirms with an old/new round-trip test.
 
-Phase 2 (restore bundle) adds no session-record shape; settle its tier before
-implementation. The segment chain's record-shape tier left with
-`261119-feat-ws-new-session-compaction-segment-chain`.
+**Phase 2 directional verdict: T0 runtime-only.** The new daemon can render
+the bundle from existing shapes and inject only transient prompt text: the
+conversation record already
+persists the ws key (`wsagent/record.go:27-48`); the key store already separates
+`agenda.json` and `todos.json` and retains the legacy reader
+(`mcp/session_layout.go:22-42`); `renderSessionState` already reads and renders
+agenda/todo state (`mcp/workflow_manual.go:108-155`); and the runner already
+rebuilds direct-child state from open and closed conversation records
+(`wsagent/spawn.go:432-465`, `wsagent/agent_tools.go:719-746`). The Phase 1
+completion note is in-memory `conv.compactNote`, consumed once by
+`compactInput` (`wsagent/compaction.go:379-425`). Under the proposed seam, Phase
+2 adds a daemon-internal `Options` provider and no session-record member, store
+column, tracker event, `/mcp` hello member, MCP tool or argument, config/rsrc
+manifest field, or plugin/skill call.
+
+Directionally, an old plugin against the new daemon keeps every old call and
+store writer unchanged and merely receives additive injected text; a new plugin
+against an old daemon makes no new call and receives the old no-bundle behavior.
+An old daemon after a new daemon reads and writes the same existing records, and
+reopening with the new daemon reads those unchanged bytes; there is no Phase 2
+value to overwrite or reconstruct. This is T0 under
+`ai-docs/manuals/release-compatibility.md`'s directional test, not T1/T2. The
+verdict ceases to apply if implementation adds a persisted owner, schema, hello,
+tool, argument or manifest field; re-grade that surface before editing it. The
+segment chain's record-shape tier remains with
+`261119-feat-ws-new-session-compaction-segment-chain`. The exec-jobs field is
+outside this Phase 2 verdict and is deferred in Constraints.
 
 ## Prior Decisions
 
@@ -272,8 +336,7 @@ implementation. The segment chain's record-shape tier left with
 
 ## Phases
 
-Phase 1 is the implementation contract below; Phase 2 is todo-level and staged
-later. Phase 1 delivers native `ws/compact`, detection, the nudge to write the
+Phase 1 delivers native `ws/compact`, detection, the nudge to write the
 agenda, and post-compaction re-injection (Decision 16).
 
 ### Phase 1: Native ws/compact, detection, re-injection and daemon nudge
@@ -383,11 +446,59 @@ Implemented Phase 1 across `agents-plugin-tool/`, `agents-plugin-pi/`, `agents-p
 ### Phase 2: State restore bundle
 
 After compaction and after a daemon restart, the daemon injects a restore
-bundle: ws key, agenda, ticket/plan, children, exec jobs. This replaces the
-`lead-revive` ritual for hosted sessions and applies to children as well as
-leads. Depends on Phase 1's detection and re-injection path, not on a segment
-chain. Settle its compatibility tier before implementation.
+bundle: ws key, the existing `## Session State` render (agenda, whiteboard
+summaries and todos), the typed `implement` ticket/plan target or "none
+recorded", and direct children. This
+replaces the `lead-revive` ritual for hosted sessions and applies to children as
+well as leads. It depends on Phase 1's detection and re-injection path, not on a
+segment chain. Start this Phase before the deferred exec-jobs field.
 
-Verification: tests that a compacted session and a
-restart-recovered session each receive the bundle with every listed field, with
-no `lead-revive` call; CLI-tier `lead-revive` unchanged.
+**Data-source and delivery contract.** Render at delivery time, never cache the
+bundle in a conversation record. Read the ws key from `wsagent.Record.WSKey`;
+read agenda/session state through the same session-store load and
+`renderSessionState` used by `workflow_state`; render the typed `implement`
+agenda target when present, otherwise "none recorded", without guessing from
+arbitrary JSON; and obtain direct children through the existing
+`Runner.AgentList`/`Children` projection. On successful compact end, replace
+the Phase 1 pointer-only note with this provider's text and retain
+`compactInput`'s consume-once ordering before queued ordinary work. At daemon
+start, queue the same provider output only after all open records have loaded;
+the existing holder replay gate prevents delivery until rejoin reconciliation
+finishes. Provider failure must leave a key-bearing diagnostic and log the
+error, not inject partial state as complete.
+
+**Frozen expected file list (Decisions 19-25).** Production:
+`agents-plugin-tool/internal/wsagent/runner.go` (provider option and restart
+queue), `agents-plugin-tool/internal/wsagent/compaction.go` (one bundle helper
+for compact-end and restart), `agents-plugin-tool/cmd/ws-mcp/dashboard.go`
+(provider wiring), `agents-plugin-tool/cmd/ws-mcp/agent_mcp.go` (hosted render
+adapter), `agents-plugin-tool/internal/mcp/hosted_render.go` (exported hosted
+bundle render), and `agents-plugin-tool/internal/mcp/workflow_manual.go` (bundle
+text assembled from the existing state renderer plus supplied direct children).
+Verification:
+`agents-plugin-tool/internal/wsagent/compaction_test.go`, a new focused
+`agents-plugin-tool/internal/wsagent/restore_bundle_test.go`,
+`agents-plugin-tool/cmd/ws-mcp/agent_mcp_test.go`, and
+`agents-plugin-tool/internal/mcp/workflow_manual_state_test.go`. Phase 2 does
+not change `internal/execjob` or `internal/wsstore`. Any expansion beyond this
+list requires a ticket Edition before source edits and a compatibility re-check.
+
+Explicitly, Phase 2 **must not touch** `wsagent/runner_process.go`,
+`wsagent/runner_conv.go`, `wsagent/agent_tools.go`, `wsagent/spawn.go`, or
+`wsagent/children.go`. Existing `Runner.Start`/`replayDone`/`kick`,
+`compactInput`, `AgentList`, and `Children` are the seams; the occupied files do
+not need semantic edits. It also must not touch plugin skills, runtime/config
+manifests, MCP schemas/dispatch, hello, or the CLI-tier `lead-revive` path.
+
+**Verification:** tests prove a compacted lead and child each receive exactly
+one fresh bundle before the next ordinary queued message; duplicate compact-end
+does not duplicate it; a successfully rejoined idle lead and child receive one
+restart bundle only after holder replay; an active rejoin waits for idle; a
+sleeping session receives it on next wake without being woken solely for
+restore. Each case covers ws key, full agreed session-state content,
+typed `implement` ticket/plan present and absent, zero/multiple direct children,
+provider read failure and ordering against queued mail.
+Restart and compact renders use state changed after launch rather than cached
+text. Assert no new record/store/schema/hello/tool/manifest write and no
+per-event file write; old/new directional fixtures confirm the T0 matrix. No
+test calls `lead-revive`; the CLI-tier `lead-revive` behavior remains unchanged.

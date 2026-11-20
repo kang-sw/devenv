@@ -492,7 +492,7 @@ func TestProxyHTTPReplaysInitializeForARestoredToken(t *testing.T) {
 	if got[1] != `{"jsonrpc":"2.0","method":"notifications/initialized"}` || !strings.Contains(got[2], `"method":"tools/call"`) {
 		t.Fatalf("session lines = %q", got)
 	}
-	if replayClientName("pi") != "ws-pi-bridge" || replayClientName("codex") != "codex" || replayClientName("") != "ws-mcp-http-replay" {
+	if replayClientName("pi") != "ws-pi-bridge" || replayClientName("codex") != "codex" || replayClientName("agy") != "agy" || replayClientName("") != "ws-mcp-http-replay" {
 		t.Fatal("replay client names do not map to their harnesses")
 	}
 }

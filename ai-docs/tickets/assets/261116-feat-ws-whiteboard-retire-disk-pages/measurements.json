@@ -1,0 +1,520 @@
+{
+  "before": {
+    "update": {
+      "label": "before",
+      "updates": 5,
+      "first_write": {
+        "median_ns": 163579708,
+        "p95_ns": 163579708
+      },
+      "steady_state": {
+        "median_ns": 80377937,
+        "p95_ns": 96034416
+      },
+      "all": {
+        "median_ns": 94232875,
+        "p95_ns": 163579708
+      },
+      "rows": [
+        {
+          "index": 1,
+          "phase": "first_write",
+          "wall_ns": 163579708,
+          "file_io": {
+            "file_io_atomic_replace": 6,
+            "file_io_create_temp": 6,
+            "file_io_open": 20,
+            "file_io_open_file": 1,
+            "file_io_read_file": 27,
+            "file_io_stat": 39,
+            "file_io_total": 99
+          },
+          "filesystem": {
+            "all_unique": {
+              "created": 8,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 350751
+            },
+            "authoritative_board": {
+              "created": 6,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 981
+            },
+            "derived_pages": {
+              "created": 2,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 349770
+            },
+            "embed_root": {
+              "created": 0,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 0
+            }
+          }
+        },
+        {
+          "index": 2,
+          "phase": "steady_state",
+          "wall_ns": 66523000,
+          "file_io": {
+            "file_io_atomic_replace": 4,
+            "file_io_create_temp": 4,
+            "file_io_open": 16,
+            "file_io_open_file": 1,
+            "file_io_read_file": 44,
+            "file_io_stat": 29,
+            "file_io_total": 98
+          },
+          "filesystem": {
+            "all_unique": {
+              "created": 1,
+              "modified": 5,
+              "removed": 0,
+              "bytes_written": 353556
+            },
+            "authoritative_board": {
+              "created": 1,
+              "modified": 3,
+              "removed": 0,
+              "bytes_written": 1249
+            },
+            "derived_pages": {
+              "created": 0,
+              "modified": 2,
+              "removed": 0,
+              "bytes_written": 352307
+            },
+            "embed_root": {
+              "created": 0,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 0
+            }
+          }
+        },
+        {
+          "index": 3,
+          "phase": "steady_state",
+          "wall_ns": 61077708,
+          "file_io": {
+            "file_io_atomic_replace": 4,
+            "file_io_create_temp": 4,
+            "file_io_open": 16,
+            "file_io_open_file": 1,
+            "file_io_read_file": 44,
+            "file_io_stat": 38,
+            "file_io_total": 107
+          },
+          "filesystem": {
+            "all_unique": {
+              "created": 1,
+              "modified": 5,
+              "removed": 0,
+              "bytes_written": 355915
+            },
+            "authoritative_board": {
+              "created": 1,
+              "modified": 3,
+              "removed": 0,
+              "bytes_written": 1604
+            },
+            "derived_pages": {
+              "created": 0,
+              "modified": 2,
+              "removed": 0,
+              "bytes_written": 354311
+            },
+            "embed_root": {
+              "created": 0,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 0
+            }
+          }
+        },
+        {
+          "index": 4,
+          "phase": "steady_state",
+          "wall_ns": 96034416,
+          "file_io": {
+            "file_io_atomic_replace": 4,
+            "file_io_create_temp": 4,
+            "file_io_open": 16,
+            "file_io_open_file": 1,
+            "file_io_read_file": 44,
+            "file_io_stat": 38,
+            "file_io_total": 107
+          },
+          "filesystem": {
+            "all_unique": {
+              "created": 1,
+              "modified": 5,
+              "removed": 0,
+              "bytes_written": 358285
+            },
+            "authoritative_board": {
+              "created": 1,
+              "modified": 3,
+              "removed": 0,
+              "bytes_written": 1960
+            },
+            "derived_pages": {
+              "created": 0,
+              "modified": 2,
+              "removed": 0,
+              "bytes_written": 356325
+            },
+            "embed_root": {
+              "created": 0,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 0
+            }
+          }
+        },
+        {
+          "index": 5,
+          "phase": "steady_state",
+          "wall_ns": 94232875,
+          "file_io": {
+            "file_io_atomic_replace": 4,
+            "file_io_create_temp": 4,
+            "file_io_open": 16,
+            "file_io_open_file": 1,
+            "file_io_read_file": 44,
+            "file_io_stat": 38,
+            "file_io_total": 107
+          },
+          "filesystem": {
+            "all_unique": {
+              "created": 1,
+              "modified": 5,
+              "removed": 0,
+              "bytes_written": 360654
+            },
+            "authoritative_board": {
+              "created": 1,
+              "modified": 3,
+              "removed": 0,
+              "bytes_written": 2315
+            },
+            "derived_pages": {
+              "created": 0,
+              "modified": 2,
+              "removed": 0,
+              "bytes_written": 358339
+            },
+            "embed_root": {
+              "created": 0,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 0
+            }
+          }
+        }
+      ]
+    },
+    "agenda_set": {
+      "index": 1,
+      "phase": "agenda.set",
+      "wall_ns": 45470667,
+      "file_io": {
+        "file_io_atomic_replace": 4,
+        "file_io_create_temp": 4,
+        "file_io_open": 10,
+        "file_io_read_file": 43,
+        "file_io_stat": 30,
+        "file_io_total": 91
+      },
+      "filesystem": {
+        "all_unique": {
+          "created": 0,
+          "modified": 4,
+          "removed": 0,
+          "bytes_written": 349266
+        },
+        "authoritative_board": {
+          "created": 0,
+          "modified": 2,
+          "removed": 0,
+          "bytes_written": 206
+        },
+        "derived_pages": {
+          "created": 0,
+          "modified": 2,
+          "removed": 0,
+          "bytes_written": 349060
+        },
+        "embed_root": {
+          "created": 0,
+          "modified": 0,
+          "removed": 0,
+          "bytes_written": 0
+        }
+      }
+    }
+  },
+  "after": {
+    "update": {
+      "label": "after",
+      "updates": 5,
+      "first_write": {
+        "median_ns": 104763917,
+        "p95_ns": 104763917
+      },
+      "steady_state": {
+        "median_ns": 58864291,
+        "p95_ns": 70510958
+      },
+      "all": {
+        "median_ns": 61401416,
+        "p95_ns": 104763917
+      },
+      "rows": [
+        {
+          "index": 1,
+          "phase": "first_write",
+          "wall_ns": 104763917,
+          "file_io": {
+            "file_io_atomic_replace": 6,
+            "file_io_create_temp": 6,
+            "file_io_open": 20,
+            "file_io_open_file": 1,
+            "file_io_read_file": 25,
+            "file_io_stat": 38,
+            "file_io_total": 96
+          },
+          "filesystem": {
+            "all_unique": {
+              "created": 6,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 981
+            },
+            "authoritative_board": {
+              "created": 6,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 981
+            },
+            "derived_pages": {
+              "created": 0,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 0
+            },
+            "embed_root": {
+              "created": 0,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 0
+            }
+          }
+        },
+        {
+          "index": 2,
+          "phase": "steady_state",
+          "wall_ns": 61401416,
+          "file_io": {
+            "file_io_atomic_replace": 4,
+            "file_io_create_temp": 4,
+            "file_io_open": 16,
+            "file_io_open_file": 1,
+            "file_io_read_file": 42,
+            "file_io_stat": 27,
+            "file_io_total": 94
+          },
+          "filesystem": {
+            "all_unique": {
+              "created": 1,
+              "modified": 3,
+              "removed": 0,
+              "bytes_written": 1249
+            },
+            "authoritative_board": {
+              "created": 1,
+              "modified": 3,
+              "removed": 0,
+              "bytes_written": 1249
+            },
+            "derived_pages": {
+              "created": 0,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 0
+            },
+            "embed_root": {
+              "created": 0,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 0
+            }
+          }
+        },
+        {
+          "index": 3,
+          "phase": "steady_state",
+          "wall_ns": 70510958,
+          "file_io": {
+            "file_io_atomic_replace": 4,
+            "file_io_create_temp": 4,
+            "file_io_open": 16,
+            "file_io_open_file": 1,
+            "file_io_read_file": 42,
+            "file_io_stat": 36,
+            "file_io_total": 103
+          },
+          "filesystem": {
+            "all_unique": {
+              "created": 1,
+              "modified": 3,
+              "removed": 0,
+              "bytes_written": 1604
+            },
+            "authoritative_board": {
+              "created": 1,
+              "modified": 3,
+              "removed": 0,
+              "bytes_written": 1604
+            },
+            "derived_pages": {
+              "created": 0,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 0
+            },
+            "embed_root": {
+              "created": 0,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 0
+            }
+          }
+        },
+        {
+          "index": 4,
+          "phase": "steady_state",
+          "wall_ns": 56327167,
+          "file_io": {
+            "file_io_atomic_replace": 4,
+            "file_io_create_temp": 4,
+            "file_io_open": 16,
+            "file_io_open_file": 1,
+            "file_io_read_file": 42,
+            "file_io_stat": 36,
+            "file_io_total": 103
+          },
+          "filesystem": {
+            "all_unique": {
+              "created": 1,
+              "modified": 3,
+              "removed": 0,
+              "bytes_written": 1960
+            },
+            "authoritative_board": {
+              "created": 1,
+              "modified": 3,
+              "removed": 0,
+              "bytes_written": 1960
+            },
+            "derived_pages": {
+              "created": 0,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 0
+            },
+            "embed_root": {
+              "created": 0,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 0
+            }
+          }
+        },
+        {
+          "index": 5,
+          "phase": "steady_state",
+          "wall_ns": 55756667,
+          "file_io": {
+            "file_io_atomic_replace": 4,
+            "file_io_create_temp": 4,
+            "file_io_open": 16,
+            "file_io_open_file": 1,
+            "file_io_read_file": 42,
+            "file_io_stat": 36,
+            "file_io_total": 103
+          },
+          "filesystem": {
+            "all_unique": {
+              "created": 1,
+              "modified": 3,
+              "removed": 0,
+              "bytes_written": 2315
+            },
+            "authoritative_board": {
+              "created": 1,
+              "modified": 3,
+              "removed": 0,
+              "bytes_written": 2315
+            },
+            "derived_pages": {
+              "created": 0,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 0
+            },
+            "embed_root": {
+              "created": 0,
+              "modified": 0,
+              "removed": 0,
+              "bytes_written": 0
+            }
+          }
+        }
+      ]
+    },
+    "agenda_set": {
+      "index": 1,
+      "phase": "agenda.set",
+      "wall_ns": 559042,
+      "file_io": {
+        "file_io_atomic_replace": 1,
+        "file_io_create_temp": 1,
+        "file_io_read_file": 5,
+        "file_io_stat": 5,
+        "file_io_total": 12
+      },
+      "filesystem": {
+        "all_unique": {
+          "created": 0,
+          "modified": 0,
+          "removed": 0,
+          "bytes_written": 0
+        },
+        "authoritative_board": {
+          "created": 0,
+          "modified": 0,
+          "removed": 0,
+          "bytes_written": 0
+        },
+        "derived_pages": {
+          "created": 0,
+          "modified": 0,
+          "removed": 0,
+          "bytes_written": 0
+        },
+        "embed_root": {
+          "created": 0,
+          "modified": 0,
+          "removed": 0,
+          "bytes_written": 0
+        }
+      }
+    }
+  },
+  "qualification": "macOS fixture supporting evidence only. Instrumented API counts omit direct os calls and are not syscall counts. No Windows antivirus baseline or privileged syscall trace was obtained."
+}

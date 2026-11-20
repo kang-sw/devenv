@@ -113,13 +113,8 @@ func TestOpenChecksCountAsAsksNotAcks(t *testing.T) {
 		t.Fatalf("an answered check leaves the count: OpenAskCount = %d", n)
 	}
 
-	// The mixed board: one policy item and one open check make the header
-	// and topic chip 2, and the bulk ack box answers only the ack.
+	// The mixed board's bulk ack box answers only the ack.
 	page = render(t, BuildView(checkBoard(t), ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	header := regexp.MustCompile(`<span class="counts">.*?</div>`).FindString(page)
-	if !strings.Contains(header, `</svg>2</span>`) || !strings.Contains(header, `class="chip ok"`) {
-		t.Fatalf("header counts: %s", header)
-	}
 	if !regexp.MustCompile(`id="ack-all"><svg[^>]*><use href="#i-check"/></svg>1</label>`).MatchString(page) {
 		t.Fatalf("the bulk ack box counts the ack alone:\n%s", page)
 	}

@@ -48,8 +48,11 @@ func TestTopicBarShowsItsLatestChange(t *testing.T) {
 			t.Errorf("%s: a topic without change times shows one: %s", name, bar)
 		}
 	}
-	// The page carries the script that turns data-at into relative time.
-	wantAll(t, full, `querySelectorAll("time.tago[data-at]")`)
+	assets, err := PageAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAll(t, string(assets.FormScript), `querySelectorAll("time.tago[data-at]")`)
 }
 
 // TestTopicBarCarriesANotePen pins the topic note's markup: every topic bar
@@ -65,12 +68,17 @@ func TestTopicBarCarriesANotePen(t *testing.T) {
 		pen := `<button class="btn mini tnote-toggle" title="note on this topic"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button></div>`
 		wantAll(t, out, pen,
 			`<textarea class="note tnote" data-topic="say &#34;hi&#34;" rows="1" placeholder="✎" title="note on this topic" hidden></textarea>`,
-			`<textarea class="note tnote" data-topic="asks"`,
-			`topic: n.getAttribute("data-topic"), note: n.value`, `window.wbAnswers = (function () {`)
+			`<textarea class="note tnote" data-topic="asks"`)
 		if strings.Count(out, pen) != 2 {
 			t.Errorf("%s: %d topic pens, want 2", name, strings.Count(out, pen))
 		}
 	}
+	assets, err := PageAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAll(t, string(assets.FormScript)+string(assets.AnswersScript),
+		`topic: n.getAttribute("data-topic"), note: n.value`, `window.wbAnswers = (function () {`)
 	quiet := &State{}
 	mustApply(t, quiet, topicXML("only", "body"))
 	out := render(t, BuildView(quiet, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
@@ -156,17 +164,14 @@ func TestClosedTopicsAreCapped(t *testing.T) {
 	}
 }
 
-// TestClosedTopicCapRenders pins what the page shows past the cap: the file
-// page names how many closed topics it leaves out, the served board ends with
-// a show-more control naming the next index, and the
-// show-more answer renders the rest with no further control.
+// TestClosedTopicCapRenders pins the show-more control and deferred topics.
 func TestClosedTopicCapRenders(t *testing.T) {
 	st := closedBoard(t, 35)
 	for name, layout := range layouts() {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		wantAll(t, out, `<div class="closed-more">5 more closed topics not shown</div>`, `<span class="tname" title="c6">c6</span>`)
+		wantAll(t, out, `<button class="btn closed-more" data-closed-next="30" data-closed-more="5">show more closed topics (5)</button>`, `<span class="tname" title="c6">c6</span>`)
 		active := strings.SplitN(out, `<template data-history-topic`, 2)[0]
-		wantNone(t, active, `<span class="tname" title="c5">c5</span>`, `data-closed-next`)
+		wantNone(t, active, `<span class="tname" title="c5">c5</span>`)
 		if layout == LayoutFull {
 			wantAll(t, out, `<template data-history-topic="c5">`)
 		}
@@ -212,10 +217,10 @@ func TestStemmedTopicPageNamesItsKey(t *testing.T) {
 	for _, layout := range layouts() {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
 		wantAll(t, out,
-			`<section class="topic" id="`+topicAnchor("ship-gate")+`" data-topic="ship-gate" data-open-asks="true" data-state="discussing"><div class="tophead"><div class="tbar"><span class="topic-state dw">`,
+			`<section class="topic" id="`+topicAnchor("ship-gate")+`" data-topic="ship-gate" data-open-asks="true" data-state="discussing"`,
 			`</span><span class="tlead"><span class="tname" title="출시 게이트">출시 게이트</span>`,
 			`<textarea class="note tnote" data-topic="ship-gate"`,
-			`<section class="topic" id="`+topicAnchor("Plain title")+`" data-topic="Plain title" data-open-asks="true" data-state="discussing"><div class="tophead"><div class="tbar"><span class="topic-state dw">`,
+			`<section class="topic" id="`+topicAnchor("Plain title")+`" data-topic="Plain title" data-open-asks="true" data-state="discussing"`,
 			`</span><span class="tlead"><span class="tname" title="Plain title">Plain title</span>`)
 	}
 	// The note line takes the topic from data-topic, not the visible name.
@@ -229,9 +234,7 @@ func TestStemmedTopicPageNamesItsKey(t *testing.T) {
 }
 
 // TestTopicCountChipsAreBulkButtonsOnTheDashboard pins where a topic bar's
-// count chips answer everything they count: on the dashboard board
-// (RenderRegions) each is a button naming its action; the static page keeps
-// them as plain counts with no bulk control.
+// count chips answer everything they count on the daemon board.
 func TestTopicCountChipsAreBulkButtonsOnTheDashboard(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, `<wb:topic name="t"><wb:add class="policy"><wb:title>p</wb:title><wb:option>x</wb:option><wb:option>y</wb:option><wb:recommend>b</wb:recommend></wb:add></wb:topic>`+addXML(ClassTechnical, "t", "a"))
@@ -242,15 +245,6 @@ func TestTopicCountChipsAreBulkButtonsOnTheDashboard(t *testing.T) {
 	wantAll(t, string(regions.Board),
 		`<button type="button" class="chip policy bulk" data-bulk="policy" title="to answer · click: pick every recommendation"><svg class="i" aria-hidden="true"><use href="#i-ask"/></svg>1</button>`,
 		`<button type="button" class="chip ok bulk" data-bulk="ack" title="to acknowledge · click: mark all OK"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>1</button>`)
-	for name, layout := range layouts() {
-		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		wantNone(t, out, `data-bulk=`, `class="chip policy bulk"`)
-		start := strings.Index(out, `<div class="tbar">`)
-		if start < 0 {
-			t.Fatalf("%s: no topic bar", name)
-		}
-		wantAll(t, out[start:], `<span class="chip policy" title="to answer">`, `<span class="chip ok" title="to acknowledge">`)
-	}
 }
 
 // bulkPrelude is a minimal board for form.js under node: elements answer

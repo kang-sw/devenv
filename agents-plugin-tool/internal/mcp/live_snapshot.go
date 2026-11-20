@@ -88,7 +88,7 @@ var (
 		debounce:       250 * time.Millisecond,
 		debounceAgent:  time.Second,
 		heartbeat:      wslive.HeartbeatInterval,
-		writeSnapshot:  writeWhiteboardFile,
+		writeSnapshot:  writeLiveSnapshotFile,
 		appendRing:     wslive.AppendRing,
 		readRepo:       readSessionRepo,
 		now:            time.Now,

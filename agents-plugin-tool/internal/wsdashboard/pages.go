@@ -49,6 +49,10 @@ var dashboardScriptFiles = []string{
 	"dashboard-composer.js",
 	"dashboard-actions.js",
 	"dashboard-drawer.js",
+	"dashboard-ticketmap.js",
+	"dashboard-ticketmap-viewb.js",
+	"dashboard-ticketmap-geom.js",
+	"dashboard-ticketmap-graph.js",
 	"dashboard-frames.js",
 	"dashboard-git.js",
 	"dashboard-tracker.js",
@@ -67,6 +71,7 @@ var dashboardStyleFiles = []string{
 	"dashboard-board.css",
 	"dashboard-layout.css",
 	"dashboard-drawer.css",
+	"dashboard-ticketmap.css",
 	"dashboard-menus.css",
 	"dashboard-rail.css",
 	"dashboard-shell.css",
@@ -1530,6 +1535,8 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		d.handleBoardArchive(w, r, replyID)
 	case sub == "tickets/idea":
 		d.handleTicketIdeas(w, r, replyID)
+	case sub == "tickets/graph":
+		d.handleTicketGraph(w, r, replyID)
 	case sub == "worktrees":
 		d.handleWorktrees(w, r, replyID)
 	case sub == "git/status":

@@ -12,6 +12,8 @@ func checkpointRichState() *state {
 	r := &rec{id: "r", item: "i", to: "a", state: "live", accepted: n, ended: n,
 		restored: n, last: n, start: n, writes: []*node{n}}
 	ru := &rule{id: "rule", item: "i", excluded: map[string]bool{"b": true}}
+	ccReg := &ccOrgReg{item: "i", org: "o", active: true, since: n,
+		added: map[string]bool{"a": true}, excluded: map[string]bool{"b": true}}
 	return &state{
 		hb: func(x, y *node) bool { return x == n && y == n }, marks: true,
 		members: map[string]*member{"a": {id: "a", profile: Profile{Org: "org", Family: "Family", Given: "Given"},
@@ -21,7 +23,9 @@ func checkpointRichState() *state {
 		items: map[string]*item{"i": {id: "i", due: &due, start: &start, placedBy: n, parentBy: n,
 			edited: n, node: n, mentionsAt: n, mentions: []string{"a"}, refs: []string{"ref"},
 			attachments: []attachment{{oid: "oid", name: "file", size: 42}}, labels: labelSet{"l"},
-			open: &opening{node: n, by: "a", scope: ScopeStore, ended: n}, cc: []ccEntry{{"a", n}}}},
+			open:       &opening{node: n, by: "a", scope: ScopeStore, ended: n},
+			ccExcluded: map[string]bool{"b": true},
+			cc:         []ccEntry{{member: "a", since: n, personal: true, orgs: map[string]bool{"o": true}}}}},
 		iorder: []string{"i"}, place: []placement{{id: "i", afterSet: true}},
 		asg: map[string]*rec{"r": r}, recs: []*rec{r}, byItem: map[string][]*rec{"i": {r}},
 		rules: []*rule{ru}, ruleByID: map[string]*rule{"rule": ru},
@@ -30,7 +34,7 @@ func checkpointRichState() *state {
 		corder: []string{"c"}, reqs: map[string]*takeReq{"q": {id: "q", node: n, ended: n}}, rorder: []string{"q"},
 		reg: map[string][]head{
 			"nil": {{n, nil}}, "string": {{n, "text"}}, "bool": {{n, true}}, "int": {{n, 2}},
-			"float": {{n, float64(42)}}, "cc": {{n, ccVal(true)}},
+			"float": {{n, float64(42)}}, "cc": {{n, ccVal(true)}}, "cc-org": {{n, ccOrgVal(true)}},
 			"status": {{n, statusVal{"doing", "note", "a", n}}}, "place": {{n, placeVal{parent: "i"}}},
 			"leads": {{n, []string{"a"}}}, "labels": {{n, labelSet{"l"}}},
 			"priority": {{n, priority{names: []string{"Low", "High"}, def: 1}}},
@@ -39,6 +43,8 @@ func checkpointRichState() *state {
 			val:  bodyVal{lines: []bline{{"text", n}}, atts: []attachment{{oid: "body-oid"}}},
 			base: map[string]bodyVal{"base": {lines: []bline{{"base", n}}, atts: []attachment{{oid: "base-oid"}}}}}},
 		labels: map[string]*label{"l": {id: "l", name: "Label", removed: n}}, lorder: []string{"l"},
+		orgs: map[string]*org{"o": {id: "o", name: "Org", head: "a", removed: n}}, oorder: []string{"o"},
+		ccOrgs: map[string]*ccOrgReg{"i:o": ccReg}, ccOrgsByItem: map[string][]*ccOrgReg{"i": {ccReg}}, ccOrder: []string{"i:o"},
 		prio: priority{names: []string{"Low", "High"}, def: 1}, attMax: 1234,
 	}
 }
@@ -132,6 +138,8 @@ func TestStateCheckpointMutationIsolation(t *testing.T) {
 			*it.due, *it.start = "changed", "changed"
 			it.open.by = "changed"
 			it.mentions[0], it.refs[0], it.labels[0], it.cc[0].member = "changed", "changed", "changed", "changed"
+			it.ccExcluded["b"] = false
+			it.cc[0].orgs["o"] = false
 			it.attachments[0].name = "changed"
 		},
 		"record": func(s *state) { s.recs[0].status = "changed"; s.byItem["i"][0].writes[0] = nil },
@@ -141,6 +149,11 @@ func TestStateCheckpointMutationIsolation(t *testing.T) {
 			c.body, c.mentions[0], c.refs[0], c.attachments[0].oid = "changed", "changed", "changed", "changed"
 		},
 		"request": func(s *state) { s.reqs["q"].state = "changed" },
+		"org state": func(s *state) {
+			s.orgs["o"].name = "changed"
+			s.ccOrgs["i:o"].added["a"] = false
+			s.ccOrgs["i:o"].excluded["b"] = false
+		},
 		"register": func(s *state) {
 			s.reg["leads"][0].v.([]string)[0] = "changed"
 			s.reg["labels"][0].v.(labelSet)[0] = "changed"
@@ -157,6 +170,7 @@ func TestStateCheckpointMutationIsolation(t *testing.T) {
 		},
 		"orders and settings": func(s *state) {
 			s.morder[0], s.aorder[0], s.iorder[0], s.corder[0], s.rorder[0], s.lorder[0] = "x", "x", "x", "x", "x", "x"
+			s.oorder[0], s.ccOrder[0] = "x", "x"
 			s.place[0].id, s.prio.names[0], s.labels["l"].name = "x", "x", "x"
 			s.admins["a"] = false
 		},
@@ -171,6 +185,8 @@ func TestStateCheckpointMutationIsolation(t *testing.T) {
 			delete(s.reg, "nil")
 			delete(s.bodies, "i")
 			delete(s.labels, "l")
+			delete(s.orgs, "o")
+			delete(s.ccOrgs, "i:o")
 		},
 	}
 	for name, mutate := range mutations {

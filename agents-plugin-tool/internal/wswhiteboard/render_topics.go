@@ -100,9 +100,8 @@ func RenderTopicFragments(view View, names []string) ([]TopicFragment, error) {
 		return nil, fmt.Errorf("whiteboard page assets: %w", err)
 	}
 	view.Layout = LayoutFull
-	view.StampFile = ""
 	view.LazyHistory = false
-	p := pageDataBase(view, a, true)
+	p := pageDataBase(view, a)
 	byName := map[string]TopicView{}
 	for _, t := range append(append([]TopicView(nil), view.Topics...), view.DeferredTopics...) {
 		byName[t.Name] = t

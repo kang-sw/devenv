@@ -331,6 +331,9 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 			s.notes.Bind(keyReplyID(sessionKey), root, s.configOptions(), s.stateOptions())
 		}
 	}
+	if s.planUsageActivityEnabled() && s.hostedSessionKey() == "" {
+		s.signalPlanUsageActivity()
+	}
 	if !s.dashboardDeclared() {
 		return // no dashboard manifest loaded: the dashboard is off
 	}
@@ -739,7 +742,7 @@ func (s *Server) recordDashboardNudges(batch []wsdashboard.NudgeBody, port int) 
 // through the daemon. The accepted lag: the answer reflects the previous
 // nudge, so the first update after the daemon dies may still name the URL
 // once, and a session's first update before any of its nudges returned names
-// the file path. The URL never carries a login code: tool results land in
+// a not-yet-served status. The URL never carries a login code: tool results land in
 // transcripts, and a browser without the cookie gets the login gate.
 func (s *Server) dashboardPageURL(sessionKey string) (string, bool) {
 	d := &s.dashboard

@@ -43,7 +43,7 @@ func TestWhiteboardLoadReplacesTheCallersBoard(t *testing.T) {
 		t.Fatalf("the load did not turn the session's board knob on: %q, %v", v, ok)
 	}
 	dir := filepath.Join(f.root, filepath.FromSlash(whiteboardDirRel), wsmailbox.ReplyID(other))
-	if _, err := os.Stat(filepath.Join(dir, "index.html")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "index.html")); !os.IsNotExist(err) {
 		t.Fatalf("the load did not render the page: %v", err)
 	}
 

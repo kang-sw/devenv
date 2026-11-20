@@ -10,7 +10,7 @@ import (
 // path gets what ![](path) gets, keeping its other attributes: an in-root
 // path the inlined DocImageSrc data, an outside path no src but the relay
 // marker, listed on the frame element for the host's fetch. An http(s) or
-// data: src, a tag inside a script, and an unframed body stay as typed.
+// data: src and a tag inside a script stay as typed.
 func TestRawImageTagTakesTheMarkdownImagePath(t *testing.T) {
 	const raw = "<img src=\"/x/out.png\" alt=\"out\" width=\"40\" style=\"border:1px solid\">\n\n" +
 		"in <img src=\"shots/a.png\" alt=\"in\"/> web <img src=\"https://example.com/w.png\"> inline <img src=\"data:image/png;base64,QQ==\">\n\n" +
@@ -57,11 +57,6 @@ func TestRawImageTagTakesTheMarkdownImagePath(t *testing.T) {
 	if n := strings.Count(board, `data-relay="/s/r/image?path=/x/out.png" data-sandbox=`); n != 2 {
 		t.Errorf("frames listing the raw image's relay = %d, want 2 (body and panel)", n)
 	}
-
-	// The page written to disk renders the body unframed, as typed.
-	page := markup(render(t, BuildView(&State{Seq: 2, Topics: []TopicDoc{{Name: "doc", Body: raw, Changed: 2}}}, in)))
-	wantAll(t, page, `<img src="/x/out.png" alt="out"`, `<img src="shots/a.png" alt="in"/>`)
-	wantNone(t, page, "data-relay", "data:image/png;base64,AAA")
 }
 
 // TestRawImagesLeavesOtherHTMLByteIdentical: raw HTML holding no rewritten

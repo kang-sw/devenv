@@ -55,22 +55,22 @@ func devView() View {
 	return BuildView(sampleState(), ViewInput{Layout: LayoutFull})
 }
 
-func TestDevAssetsOffServesTheEmbeddedPage(t *testing.T) {
-	embedded, err := RenderPage(devView())
+func TestDevAssetsOffServesEmbeddedRegions(t *testing.T) {
+	embedded, err := RenderRegions(devView())
 	if err != nil {
 		t.Fatal(err)
 	}
 	devTree(t)
 	// An untouched copy renders byte for byte what the embedded assets do.
-	dev, err := RenderPage(devView())
+	dev, err := RenderRegions(devView())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dev != embedded {
+	if string(dev.Board) != string(embedded.Board) || string(dev.Panels) != string(embedded.Panels) {
 		t.Error("dev assets over an unchanged tree render differently from the embedded copy")
 	}
 	SetDevAssets(nil)
-	if again, _ := RenderPage(devView()); again != embedded {
+	if again, _ := RenderRegions(devView()); string(again.Board) != string(embedded.Board) || string(again.Panels) != string(embedded.Panels) {
 		t.Error("turning dev assets off does not restore the embedded page")
 	}
 }
@@ -83,26 +83,17 @@ func TestDevAssetsShowEditsOnTheNextRender(t *testing.T) {
 	if err != nil || !strings.Contains(string(assets.CSS), "devcss1") {
 		t.Fatalf("a css edit is not served: %v", err)
 	}
-	if page, _ := RenderPage(devView()); !strings.Contains(page, "devcss1") {
-		t.Error("a css edit does not reach the static page")
-	}
 
 	editAsset(t, path("page-sticky.css"), "{", "{/*devcssfragment*/")
 	assets, err = PageAssets()
 	if err != nil || !strings.Contains(string(assets.CSS), "devcssfragment") {
 		t.Fatalf("a css fragment edit is not served: %v", err)
 	}
-	if page, _ := RenderPage(devView()); !strings.Contains(page, "devcssfragment") {
-		t.Error("a css fragment edit does not reach the static page")
-	}
 
 	editAsset(t, path("page.tmpl"), `{{define "board"}}`, `{{define "board"}}<i>devboard</i>`)
 	regions, err := RenderRegions(devView())
 	if err != nil || !strings.Contains(string(regions.Board), "<i>devboard</i>") {
 		t.Fatalf("a template edit is not served: %v", err)
-	}
-	if page, _ := RenderPage(devView()); !strings.Contains(page, "<i>devboard</i>") {
-		t.Error("a template edit does not reach the static page")
 	}
 	for _, lang := range []string{"ko", "en"} {
 		v := devView()
@@ -119,11 +110,8 @@ func TestDevAssetsReportABrokenTemplateAndRecover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path("page.tmpl"), []byte(`{{define "page"}}{{if}}`), 0o644); err != nil {
+	if err := os.WriteFile(path("page.tmpl"), []byte(`{{define "board"}}{{if}}`), 0o644); err != nil {
 		t.Fatal(err)
-	}
-	if _, err := RenderPage(devView()); err == nil {
-		t.Error("a broken template rendered")
 	}
 	if _, err := RenderRegions(devView()); err == nil {
 		t.Error("a broken template rendered regions")
@@ -131,7 +119,7 @@ func TestDevAssetsReportABrokenTemplateAndRecover(t *testing.T) {
 	if err := os.WriteFile(path("page.tmpl"), good, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RenderPage(devView()); err != nil {
+	if _, err := RenderRegions(devView()); err != nil {
 		t.Errorf("the fixed template still fails: %v", err)
 	}
 }
@@ -147,7 +135,7 @@ func TestDevAssetsRequireStyleFragments(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, assetErr := PageAssets()
-		_, pageErr := RenderPage(devView())
+		_, pageErr := RenderRegions(devView())
 		if err := os.WriteFile(path(name), raw, 0o644); err != nil {
 			t.Fatal(err)
 		}

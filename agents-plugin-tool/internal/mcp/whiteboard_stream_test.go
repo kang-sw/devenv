@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -112,6 +111,9 @@ func TestWhiteboardStreamRefreshesPanelLogItemAndRestart(t *testing.T) {
 	}
 	src := newSource()
 	daemon := startWhiteboardDaemonForTest(t, dir, src)
+	f.s.dashboard.dir = src.stateDir
+	f.s.dashboard.sessions = map[string]*dashboardSession{f.key: {replyID: f.replyID(), project: f.root, hosted: true}}
+	t.Cleanup(f.s.Close)
 	stream := openWhiteboardStreamForTest(t, daemon, f.replyID())
 	last := waitWhiteboardRegionForTest(t, stream, "board", "initial item")
 	fingerprint := readFingerprint(t, src, reg)
@@ -123,10 +125,6 @@ func TestWhiteboardStreamRefreshesPanelLogItemAndRestart(t *testing.T) {
 		{"item patch", `<wb:patch id="1"><wb:title>patched-item-marker</wb:title></wb:patch>`, "patched-item-marker"},
 	} {
 		f.update(t, step.commands)
-		if !daemon.Index().Nudge(f.replyID(), f.root) {
-			t.Fatalf("%s nudge refused", step.name)
-		}
-		daemon.Index().Settle()
 		next := waitWhiteboardRegionForTest(t, stream, "board", step.marker)
 		if next.Hash == last.Hash {
 			t.Fatalf("%s kept the board region hash", step.name)
@@ -151,26 +149,22 @@ func TestWhiteboardStreamRefreshesPanelLogItemAndRestart(t *testing.T) {
 	}
 	entriesBefore, _ := json.Marshal(before.Whiteboard.Topics[0].Entries)
 	embedsBefore := f.embeds(t, f.dir())
-	// An auxiliary write refreshes derived output and panels but must not
-	// append a system event or duplicate the stream's agent/panel entries.
+	// The dispatcher must nudge the daemon after an auxiliary write without
+	// bumping the board sequence or appending history to trigger freshness.
 	if resp := f.call(t, "todo.add", map[string]any{"key": "aux", "title": "aux-refresh-marker"}); isToolError(resp) {
 		t.Fatal(resp)
 	}
-	if !daemon.Index().Nudge(f.replyID(), f.root) {
-		t.Fatal("auxiliary nudge refused")
-	}
-	daemon.Index().Settle()
 	waitWhiteboardRegionForTest(t, stream, "panels", "aux-refresh-marker")
 	after, err := newSessionStore().readWhiteboard(f.key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	entriesAfter, _ := json.Marshal(after.Whiteboard.Topics[0].Entries)
-	if string(entriesAfter) != string(entriesBefore) || strings.Join(f.embeds(t, f.dir()), ",") != strings.Join(embedsBefore, ",") {
+	if after.Whiteboard.Seq != before.Whiteboard.Seq || string(entriesAfter) != string(entriesBefore) || strings.Join(f.embeds(t, f.dir()), ",") != strings.Join(embedsBefore, ",") {
 		t.Fatal("implicit auxiliary refresh changed entries or wrote a snapshot")
 	}
-	if !strings.Contains(f.fullPage(t), "aux-refresh-marker") || !strings.Contains(f.stamp(t), fmt.Sprintf("\"%d\"", after.Whiteboard.Seq)) {
-		t.Fatal("implicit refresh did not publish the committed index page and stamp")
+	if !strings.Contains(f.servedPage(t), "aux-refresh-marker") {
+		t.Fatal("served panels missed the update")
 	}
 	daemon.Close()
 	restarted := startWhiteboardDaemonForTest(t, dir, newSource())
@@ -195,7 +189,7 @@ func TestWhiteboardStreamRefreshesPanelLogItemAndRestart(t *testing.T) {
 	}
 }
 
-func TestWhiteboardStreamMetadataSharesFileAndFolderAuthority(t *testing.T) {
+func TestWhiteboardStreamMetadataMatchesFolderAuthority(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	f.update(t, `<wb:topic name="versions"><wb:body>content-marker</wb:body><wb:add class="technical"><wb:title>item-marker</wb:title></wb:add><wb:log>agent-marker</wb:log><wb:panel recap="old-recap">old-payload</wb:panel><wb:panel id="p2" recap="latest-recap">latest-payload</wb:panel></wb:topic>`)
 	rec, err := newSessionStore().readWhiteboard(f.key)
@@ -210,7 +204,6 @@ func TestWhiteboardStreamMetadataSharesFileAndFolderAuthority(t *testing.T) {
 	if len(history) != 1 {
 		t.Fatalf("topic history = %+v", history)
 	}
-	file := f.fullPage(t)
 	// Panel-post system events remain durable, but the panel versions now
 	// represent them in the rendered stream. Pin the fixture independently
 	// of the view's filtering predicate.
@@ -232,7 +225,7 @@ func TestWhiteboardStreamMetadataSharesFileAndFolderAuthority(t *testing.T) {
 		t.Fatalf("stored panel-post events = %v, want both fixture events", panelEvents)
 	}
 	entryTags := regexp.MustCompile(`<[^>]*\bdata-entry="e[0-9]+"[^>]*>`)
-	for name, html := range map[string]string{"file index": file, "dashboard": served} {
+	for name, html := range map[string]string{"dashboard": served} {
 		for _, entry := range rec.Whiteboard.Topics[0].Entries {
 			if omitted[entry.ID] {
 				if strings.Contains(html, `data-entry="`+entry.ID+`"`) {
@@ -265,8 +258,5 @@ func TestWhiteboardStreamMetadataSharesFileAndFolderAuthority(t *testing.T) {
 		if strings.Count(html, `id="p2"`) != 1 || !strings.Contains(html, "latest-recap") || !strings.Contains(html, "old-recap") {
 			t.Errorf("%s lost latest panel target or immutable versions", name)
 		}
-	}
-	if !strings.Contains(file, `data-stamp="index.stamp.js"`) || filepath.Base(f.pagePath()) != "index.html" {
-		t.Fatal("full output no longer names the committed session index")
 	}
 }

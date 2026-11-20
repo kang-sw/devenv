@@ -234,9 +234,8 @@ func TestDocStaleFollowsItemChangesAfterTheBodyEdit(t *testing.T) {
 }
 
 // TestDocStaleClassReachesBothRenderPaths pins the class chg.js dims stale
-// change marks from: a stale body carries chg-stale on the disk page's
-// inline body, and on a served page both on the frame's box and on the body
-// inside the frame, where chg.js runs; a fresh body carries it nowhere.
+// change marks from: a stale body carries chg-stale on the frame's box and
+// on the body inside the frame, where chg.js runs; a fresh body carries none.
 func TestDocStaleClassReachesBothRenderPaths(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassTechnical, "t", "x"))
@@ -250,9 +249,6 @@ func TestDocStaleClassReachesBothRenderPaths(t *testing.T) {
 	stale := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
 	stale.Topics[0].Doc = st.TopicBody("t")
 
-	if page := render(t, stale); !strings.Contains(page, `<div class="doc-body md chg-stale">`) {
-		t.Error("the disk page's stale body lacks chg-stale")
-	}
 	regions, err := RenderRegions(stale)
 	if err != nil {
 		t.Fatal(err)
@@ -267,9 +263,6 @@ func TestDocStaleClassReachesBothRenderPaths(t *testing.T) {
 
 	// The stylesheet and chg.js name the class too, so the checks are on the
 	// body boxes.
-	if page := render(t, fresh); !strings.Contains(page, `<div class="doc-body md">`) || strings.Contains(page, `md chg-stale"`) {
-		t.Error("the disk page marks a fresh body stale")
-	}
 	regions, err = RenderRegions(fresh)
 	if err != nil {
 		t.Fatal(err)

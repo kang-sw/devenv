@@ -243,8 +243,8 @@ func TestWhiteboardEffectsDisabledDashboardWritesNoRing(t *testing.T) {
 	}
 }
 
-func TestWhiteboardEffectsDurableIntentErrorsAndPublicationErrors(t *testing.T) {
-	for _, stage := range []string{"intent-staged", "intent", "log-partial", "complete", "html"} {
+func TestWhiteboardEffectsDurableIntentErrors(t *testing.T) {
+	for _, stage := range []string{"intent-staged", "intent", "log-partial", "complete"} {
 		t.Run(stage, func(t *testing.T) {
 			f := newLiveFixture(t, true)
 			wb := effectsWhiteboardFixture(f)
@@ -262,16 +262,7 @@ func TestWhiteboardEffectsDurableIntentErrorsAndPublicationErrors(t *testing.T) 
 				}
 				return nil
 			}
-			original := whiteboardMkdirAll
-			if stage == "html" {
-				whiteboardMkdirAll = func(path string, mode os.FileMode) error {
-					if path == wb.pageDir() {
-						return injected
-					}
-					return original(path, mode)
-				}
-				t.Cleanup(func() { whiteboardMkdirAll = original })
-			}
+
 			resp := wb.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="decision"><wb:log>Exactly once</wb:log><wb:add class="check"><wb:title>Durable</wb:title></wb:add></wb:topic><wb:answer id="999" value="ok">Rejected</wb:answer>`})
 			if !isToolError(resp) || !strings.Contains(toolText(t, resp), injected.Error()) {
 				t.Fatalf("expected injected error: %s", resp)
@@ -282,7 +273,7 @@ func TestWhiteboardEffectsDurableIntentErrorsAndPublicationErrors(t *testing.T) 
 			}
 			text := toolText(t, resp)
 			if !strings.Contains(text, `<wb:answer id="999" value="ok">Rejected</wb:answer>`) || !strings.Contains(text, "<wb:failed>") || strings.Contains(text, "nothing was applied") {
-				t.Fatal("lost failed payload after persistence/publication error", text)
+				t.Fatal("lost failed payload after persistence error", text)
 			}
 			if committed && !strings.Contains(text, "applied: 2 accepted commands committed") {
 				t.Fatal("committed effects omitted", text)
@@ -294,7 +285,6 @@ func TestWhiteboardEffectsDurableIntentErrorsAndPublicationErrors(t *testing.T) 
 				t.Fatalf("effects after %s: %d", stage, got)
 			}
 			f.server.sessions.boardFault = nil
-			whiteboardMkdirAll = original
 			board, err := f.server.sessions.readWhiteboard(f.keyA)
 			if err != nil {
 				t.Fatal(err)
@@ -303,9 +293,9 @@ func TestWhiteboardEffectsDurableIntentErrorsAndPublicationErrors(t *testing.T) 
 				if board.Whiteboard == nil || len(board.Whiteboard.Items) != 1 || board.Whiteboard.EntrySeq != 3 {
 					t.Fatalf("committed board not recovered once: %+v", board.Whiteboard)
 				}
-				wb.update(t, ``) // repair only the HTML, never resend commands
+				wb.update(t, ``) // no-op update must not replay committed effects
 				if len(effectsRecords(t, f, f.replyA)) != 1 {
-					t.Fatal("recovery/render repair duplicated projection")
+					t.Fatal("recovery duplicated projection")
 				}
 			} else if board.Whiteboard != nil {
 				t.Fatalf("failed intent install committed a board: %+v", board.Whiteboard)
@@ -349,7 +339,7 @@ func TestWhiteboardEffectsAcceptedCommitToRingCrashGap(t *testing.T) {
 		}
 		return nil
 	}, &observed)
-	if err != nil || !observed.Committed || observed.Published {
+	if err != nil || !observed.Committed {
 		t.Fatalf("boundaries: %+v %v", observed, err)
 	}
 	// A new server and render-only call do not reconstruct historical effects.

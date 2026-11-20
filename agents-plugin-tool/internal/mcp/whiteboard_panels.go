@@ -3,7 +3,6 @@ package mcp
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,14 +20,6 @@ import (
 // A change made outside a dirtying tool call (mail from another session, a
 // ticket file edited by hand) shows on the next render.
 
-// whiteboardMailbox resolves, once per render, whether sessionKey holds this
-// process's named inbox. A store that cannot be read reads as not the owner:
-// the panel is descriptive and never fails a render.
-func (s *Server) whiteboardMailbox(sessionKey, root string) whiteboardMailbox {
-	owner, identity, err := s.mailboxOwnerCheck(sessionKey, root)
-	return whiteboardMailbox{owner: owner && err == nil, identity: identity}
-}
-
 // ticketPanel lists ready/ and, on the full page, all todo/ tickets. Each
 // card links to its file, or on a served page carries its repo-relative path.
 // idea/ is read only by the dashboard's on-demand route, never this live panel.
@@ -41,8 +32,8 @@ func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 			in.watch(filepath.Join(in.root, "ai-docs", "tickets", status))
 		}
 	}
-	tickets, err := whiteboardTicketsList(in.root, wsdoc.TicketListOptions{Statuses: statuses, Env: in.env})
-	if err != nil && !(in.served && errors.Is(err, os.ErrNotExist)) {
+	tickets, err := whiteboardTicketsList(in.root, wsdoc.TicketListOptions{Statuses: statuses})
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return wswhiteboard.Panel{}, false
 	}
 	if in.watch != nil {
@@ -59,19 +50,13 @@ func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 			todo = append(todo, t)
 		}
 	}
-	pageDir := whiteboardPageDir(in)
 	card := func(t wsdoc.TicketInfo) wswhiteboard.PanelRow {
 		title, sub := t.Title, t.Stem
 		if title == "" {
 			title, sub = t.Stem, "" // the stem is already the title
 		}
 		row := wswhiteboard.PanelRow{Label: ticketCategory(t.Stem), Text: title, Sub: sub}
-		if in.served {
-			row.Path = filepath.ToSlash(t.Path)
-		} else {
-			target := filepath.Join(in.root, filepath.FromSlash(t.Path))
-			row.Link = whiteboardFileLink(in.root, pageDir, target)
-		}
+		row.Path = filepath.ToSlash(t.Path)
 		return row
 	}
 	lane := func(name string, tickets []wsdoc.TicketInfo, note string) wswhiteboard.PanelLane {
@@ -83,14 +68,8 @@ func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	}
 	lanes := []wswhiteboard.PanelLane{lane(wsi18n.T(in.lang, "panel.lane.ready"), ready, "")}
 	count := wsi18n.T(in.lang, "panel.tickets.count.full", len(ready), len(todo))
-	if len(todo) > 0 || in.served {
-		lanes = append(lanes, lane(wsi18n.T(in.lang, "panel.lane.todo"), latestTodoTickets(todo, len(todo)), ""))
-	}
-	// Keep a served card even with no ready/todo, so idea-only boards have
-	// their demand control without scanning idea/ to discover them.
-	if !in.served && len(ready) == 0 && len(todo) == 0 {
-		return wswhiteboard.Panel{}, false
-	}
+	lanes = append(lanes, lane(wsi18n.T(in.lang, "panel.lane.todo"), latestTodoTickets(todo, len(todo)), ""))
+	// Keep empty lanes so idea-only boards retain their demand control.
 	return wswhiteboard.Panel{ID: "tickets", Title: wsi18n.T(in.lang, "panel.tickets"), Icon: "board", Count: count, Lanes: lanes}, true
 }
 
@@ -143,74 +122,23 @@ func latestTodoTickets(tickets []wsdoc.TicketInfo, n int) []wsdoc.TicketInfo {
 	return out
 }
 
-// whiteboardPageDir is the folder the page being rendered is written to.
-func whiteboardPageDir(in whiteboardPanelInput) string {
-	dir := filepath.Join(in.root, filepath.FromSlash(whiteboardDirRel))
-	return filepath.Join(dir, in.replyID)
-}
-
-// whiteboardFileLink links target from a page in pageDir: a relative path
-// when pageDir lies inside root, so the link survives moving the checkout,
-// and an absolute file: URL otherwise.
-func whiteboardFileLink(root, pageDir, target string) string {
-	if inside, err := filepath.Rel(root, pageDir); err == nil && inside != ".." && !strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
-		if rel, err := filepath.Rel(pageDir, target); err == nil {
-			return filepath.ToSlash(rel)
-		}
-	}
-	p := filepath.ToSlash(target)
-	if !strings.HasPrefix(p, "/") {
-		p = "/" + p // a Windows drive path: file:///C:/...
-	}
-	return (&url.URL{Scheme: "file", Path: p}).String()
-}
-
-// whiteboardItemFileLink resolves a file path an item's markdown link or
-// image names, for a page written to pageDir: a relative path is taken from
-// the session root, and a bare absolute path is used as
-// is; either then follows the panel ticket-row rule of whiteboardFileLink.
-func whiteboardItemFileLink(root, pageDir string) func(string) string {
-	return func(path string) string {
-		path = filepath.FromSlash(path)
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(root, path)
-		}
-		return whiteboardFileLink(root, pageDir, path)
-	}
-}
-
 // mailboxPanel shows the session's own address, unread count, whether a wait
-// is armed, correspondents, and history ring. A session with no named address
-// and no history has no panel.
+// is armed, correspondents, and history ring. A session with no history
+// has no panel.
 func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
-	named := ""
-	if in.mailbox.owner {
-		named = in.mailbox.identity.address()
-	}
 	// The mailbox state is in the memory store, not a watched file: a
 	// served page learns of its changes from the mail print
 	// (DashboardSessionSource.MailPrint) and the store's queue hints.
 	readHistory := in.history
 	if readHistory == nil {
-		readHistory = func() ([]mailboxHistoryRecord, error) { return readMailboxHistory(in.cacheHome, in.sessionKey) }
+		readHistory = func() ([]mailboxHistoryRecord, error) { return readMailboxHistory("", in.sessionKey) }
 	}
 	history, _ := readHistory()
-	if named == "" && len(history) == 0 {
+	if len(history) == 0 {
 		return wswhiteboard.Panel{}, false
 	}
-	address := named
-	if address == "" {
-		address = wsmailbox.ReplyIDPrefix + in.replyID
-	}
-
+	address := wsmailbox.ReplyIDPrefix + in.replyID
 	unread := 0
-	if named != "" {
-		if path, err := in.paths.ForScope(in.mailbox.identity.Scope, in.root); err == nil {
-			if _, _, queue, err := in.paths.Store().NamedQueue(path, in.mailbox.identity.Name); err == nil {
-				unread += len(queue)
-			}
-		}
-	}
 	// A served board's memo keys on the part of the reply registry the
 	// panel shows (replyPrint), so a change for another session or a
 	// heartbeat rebuilds no board.
@@ -218,7 +146,7 @@ func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	readReplies := in.replies
 	if readReplies == nil {
 		readReplies = func() (wsmailbox.ReplyStore, bool) {
-			store, err := in.paths.Store().LoadReply()
+			store, err := (wsmailbox.Paths{}).Store().LoadReply()
 			return store, err == nil
 		}
 	}
@@ -228,7 +156,7 @@ func mailboxPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	}
 	panel := wswhiteboard.Panel{ID: "mailbox", Title: wsi18n.T(in.lang, "panel.mailbox"), Icon: "mail", Count: wsi18n.T(in.lang, "panel.mail.unread", unread)}
 	status := wsi18n.T(in.lang, "panel.mail.unread", unread)
-	if whiteboardMailboxListening(in.paths, in.sessionKey) {
+	if whiteboardMailboxListening(wsmailbox.Paths{}, in.sessionKey) {
 		status = wsi18n.T(in.lang, "panel.mail.unread.wait", unread)
 	}
 	panel.Rows = append(panel.Rows, wswhiteboard.PanelRow{Label: address, Text: status})

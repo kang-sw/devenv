@@ -199,20 +199,13 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		return toolErrorTextResponse(req.ID, refusal)
 	}
 
-	// Once a session's whiteboard exists, a successful write by a tool that
-	// dirties one of its panels re-renders its full page (never an embed);
-	// see whiteboardProviders in whiteboard_tools.go.
-	// Registered before the refresh below, so it runs after it: the nudge
-	// follows the rewritten page.
+	// Successful board and panel writes wake the served page.
 	if dashboardNudgingTool(params.Name) {
 		defer func() {
 			if key, _ := params.Arguments["session_key"].(string); key != "" && !responseIsError(resp) {
 				s.dashboardNudge(key)
 			}
 		}()
-	}
-	if whiteboardDirtyingTool(params.Name) || params.Name == whiteboardLoadTool {
-		defer func() { s.refreshWhiteboardAfter(params.Arguments, resp) }()
 	}
 
 	switch params.Name {

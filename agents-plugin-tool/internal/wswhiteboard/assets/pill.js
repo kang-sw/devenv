@@ -30,27 +30,16 @@
     return !!(el.querySelector('.opt[data-opt][aria-pressed="true"]') || (box && box.checked) || el.hasAttribute("data-no") || noted(el));
   }
   // The dashboard marks an item it already sent, or holds, a reply for with
-  // sent-sent / sent-held; that item is no longer open either. A standalone
-  // page never carries these classes.
+  // sent-sent / sent-held; that item is no longer open either.
   function answered(el) {
     return responded(el) || el.classList.contains("sent-sent") || el.classList.contains("sent-held");
   }
 
-  // The title prefix is the still-open total, whatever is in view. A page
-  // whose html element carries data-wb-titlehost (the dashboard) owns the
-  // title itself: the total goes to its window.wbTitleCount hook instead,
-  // and this script never writes the title there, even before the hook
-  // exists.
-  var html = d.documentElement, hosted = html.hasAttribute("data-wb-titlehost"), base = null;
-  if (!hosted) {
-    base = html.getAttribute("data-wb-title");
-    if (base === null) { base = d.title.replace(/^\(\d+\) /, ""); html.setAttribute("data-wb-title", base); }
-  }
+  // The dashboard owns the document title; report the still-open total to
+  // its hook when one is installed.
   function retitle() {
     var n = items.filter(function (el) { return !answered(el); }).length;
-    if (hosted) { if (window.wbTitleCount) window.wbTitleCount(n); return; }
-    var title = (n ? "(" + n + ") " : "") + base;
-    if (d.title !== title) d.title = title;
+    if (window.wbTitleCount) window.wbTitleCount(n);
   }
 
   // Two zero-height sticky wrappers, first and last in the host, carry the

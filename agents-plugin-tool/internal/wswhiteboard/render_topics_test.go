@@ -39,7 +39,7 @@ func TestTopicUnitsMatchFullRender(t *testing.T) {
 	}
 	for _, lang := range []string{"en", "ko"} {
 		view.Lang = lang
-		eager := newPageData(view, assets, true)
+		eager := newPageData(view, assets)
 		var board, panels bytes.Buffer
 		if err := eager.tmpl.ExecuteTemplate(&board, "board", eager); err != nil {
 			t.Fatal(err)

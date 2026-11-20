@@ -1,5 +1,5 @@
 (function () {
-  // Shared by standalone boards and every dashboard page, not doc-frame.js:
+  // Shared by every dashboard page, not doc-frame.js:
   // sandboxed content and terminals keep their own keyboard handling.
   var doc = document, clicked = null, pointer = null, ignoredSelection = null;
   var blocks = [

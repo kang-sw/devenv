@@ -83,7 +83,6 @@ details.panel .body { container-type: inline-size; }
 .reply { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); padding: 10px 12px; display: grid; grid-template-columns: auto 1fr auto auto; gap: 8px; align-items: center; margin: 4px 0 12px; }
 .reply.solo { grid-template-columns: 1fr auto auto; }
 .reply[hidden] { display: none; }
-.full .reply { position: sticky; bottom: 10px; z-index: 2; }
 .reply textarea { font-family: var(--wb-mono); font-size: 12.5px; color: inherit; background: var(--wb-muted); border: 0; border-radius: 8px; padding: 7px 9px; resize: none; height: 34px; width: 100%; }
 .reply .allok { display: inline-flex; align-items: center; gap: 4px; height: 34px; padding: 0 10px; border-radius: 8px; background: var(--wb-muted); font-size: 12px; font-weight: 700; color: var(--wb-muted-fg); cursor: pointer; user-select: none; }
 .reply .allok input { margin: 0; accent-color: var(--wb-primary); }

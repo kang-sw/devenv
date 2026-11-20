@@ -28,7 +28,7 @@ import (
 func TestCallFallbackRegistrationAndRenderDescriptor(t *testing.T) {
 	holders := wsholder.New(wsholder.Options{Dir: t.TempDir()})
 	defer holders.Close()
-	runner := newAgentRunner(t.TempDir(), io.Discard, nil, holders)
+	runner := newAgentRunner(t.TempDir(), io.Discard, nil, nil, holders)
 	defer runner.Close()
 	for name, reg := range runner.BackendRegistrations() {
 		if reg.CallFallback != (name == wsagent.BackendAgy) {
@@ -113,7 +113,7 @@ func TestAgentMCPHostedWorkerKeepsTokenForwarding(t *testing.T) {
 	}
 	holders := wsholder.New(wsholder.Options{Dir: t.TempDir()})
 	defer holders.Close()
-	runner := newAgentRunner(t.TempDir(), io.Discard, nil, holders)
+	runner := newAgentRunner(t.TempDir(), io.Discard, nil, nil, holders)
 	defer runner.Close()
 	host := &proxyHost{agents: runner, logw: io.Discard}
 	session, err := host.Accept(wsdashboard.ProxyHello{
@@ -199,7 +199,7 @@ func TestAgentMCPHostedWorkerDescriptorThroughProxy(t *testing.T) {
 
 			holders := wsholder.New(wsholder.Options{Dir: t.TempDir()})
 			defer holders.Close()
-			runner := newAgentRunner(dashDir, io.Discard, nil, holders)
+			runner := newAgentRunner(dashDir, io.Discard, nil, nil, holders)
 			defer runner.Close()
 			host := &proxyHost{agents: runner, logw: io.Discard}
 			session, err := host.Accept(wsdashboard.ProxyHello{
@@ -384,7 +384,7 @@ func TestAgentMCPPythonResolution(t *testing.T) {
 func TestAgentRunnerCatalogs(t *testing.T) {
 	holders := wsholder.New(wsholder.Options{Dir: t.TempDir()})
 	defer holders.Close()
-	runner := newAgentRunner(t.TempDir(), io.Discard, nil, holders)
+	runner := newAgentRunner(t.TempDir(), io.Discard, nil, nil, holders)
 	defer runner.Close()
 	regs := runner.BackendRegistrations()
 	if !reflect.DeepEqual(regs[wsagent.BackendClaude].Catalog, wsagent.ClaudeCatalog()) {
@@ -398,6 +398,11 @@ func TestAgentRunnerCatalogs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(regs[wsagent.BackendAgy].Catalog, wsagent.AgyCatalog()) {
 		t.Error("agy must retain its lead and worker catalog")
+	}
+	for backend, reg := range regs {
+		if got, want := reg.PlanUsageActivity, backend == wsagent.BackendAgy; got != want {
+			t.Errorf("%s PlanUsageActivity = %v, want %v", backend, got, want)
+		}
 	}
 	for _, want := range []struct {
 		backend, lead, worker string

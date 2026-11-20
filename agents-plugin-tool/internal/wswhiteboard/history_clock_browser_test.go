@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
 // A check-ask row's clock reads relative time ("방금" / "N분 전") like the lead
@@ -45,10 +47,15 @@ func TestHistoryClockRelativeForEveryRowBrowser(t *testing.T) {
 	}
 	view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "clock", Location: time.Local})
 	view.Lang = "ko"
-	page, err := RenderPage(view)
+	regions, err := RenderRegions(view)
 	if err != nil {
 		t.Fatal(err)
 	}
+	assets, err := PageAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := `<!DOCTYPE html><html><head><style>` + string(assets.CSS) + `</style></head><body>` + string(assets.Sprite) + `<main>` + string(regions.Board) + `</main><aside>` + string(regions.Panels) + `</aside><script>` + string(wsi18n.Script(view.Lang)) + `</script><script>` + string(assets.AnswersScript) + `</script><script>(function(){` + string(assets.FormScript) + `})();</script></body></html>`
 	path := filepath.Join(t.TempDir(), "clock.html")
 	if err := os.WriteFile(path, []byte(page), 0o600); err != nil {
 		t.Fatal(err)

@@ -275,6 +275,15 @@ func (s agentSessions) ReadTicketIdeas(reg Registration) ([]IdeaTicket, bool, er
 	return nil, false, nil
 }
 
+// ReadTicketGraph forwards to the configured source; an agent conversation
+// has no ticket panel.
+func (s agentSessions) ReadTicketGraph(reg Registration) ([]byte, bool, error) {
+	if src, ok := s.inner.(TicketGraphSource); ok && !reg.Agent {
+		return src.ReadTicketGraph(reg)
+	}
+	return nil, false, nil
+}
+
 // ReadClosedTopics forwards to the configured source; an agent conversation
 // has no board.
 func (s agentSessions) ReadClosedTopics(reg Registration, lang string, from, n int) (template.HTML, bool) {

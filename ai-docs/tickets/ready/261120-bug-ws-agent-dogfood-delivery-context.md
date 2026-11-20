@@ -2,6 +2,10 @@
 title: "에이전트 메일·완료 전달 및 워커 컨텍스트 수정"
 related:
   261120-refactor-ws-agent-workers-under-holders: "the observations came from a pre-holder shared daemon; current-source diagnosis must distinguish inherited behavior from holder-migration changes"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-completeness-reviewed: 8b93504a8f77679f
+sage-review-design-reviewed: 8b93504a8f77679f
 ---
 
 # Fix agent mail, completion delivery, and worker context
@@ -46,12 +50,19 @@ citations.
    before inbound mail; relying on parent-side spawn metadata, because the
    child cannot see it. Compatibility estimate: T0 for additive worker context
    that preserves mailbox address syntax.
-4. **(1867) Add `review.marker` and `review.stamp` only to the review-handler
-   profile's loadout.** Keep the existing authority gate, including the
-   read-only refusal. **Rejected:** adding the mutation tools to the common
-   worker loadout, because least privilege limits them to the handler that
-   requires them. Compatibility estimate: T0 because existing tools become
-   discoverable only in the selected profile and no schema changes.
+4. **(1867) Add `review.marker` and `review.stamp` to the common worker
+   loadout (`AgentWSTools`).** The existing authority gate stays the
+   least-privilege boundary: a read-only child is refused `review.stamp` and
+   `review.marker(bootstrap: true)`, while non-bootstrap `review.marker` stays
+   readable
+   (`agents-plugin-tool/internal/mcp/permission_gate.go:18-24`). Owner answer
+   2026-11-20 after design review. **Rejected:** a review-handler-only
+   loadout, because it reverses the one-common-loadout rule (epic (85)=c,
+   `261119-feat-ws-codex-hosted-worker` Decision (174)) and `agent.spawn` has
+   no role signal to select a profile; a new spawn role argument or playbook
+   binding would break the playbook-unaware spawn rule of
+   `261117-feat-ws-hosted-prompt-assembly` Phase 4. Compatibility estimate: T0
+   because existing tools become discoverable with no schema change.
 5. **(1868) Use one shared environment drop set for every worker backend
    launch.** It includes `WS_HOSTED_*` and applies the existing `CLAUDE*` and
    `WS_MAILBOX*` exclusions where their harness boundaries require them.
@@ -202,7 +213,10 @@ citations.
   worker's `claudeEnv` drops only `CLAUDE*` and `WS_MAILBOX*`
   (`agents-plugin-tool/internal/wsagent/claude.go:69-94`). The daemon's hosted
   variables therefore survive into a fresh Claude worker while Codex and agy
-  use the broader lead filter.
+  use the broader lead filter (`agents-plugin-tool/internal/wsagent/codex.go:66`,
+  `agents-plugin-tool/internal/wsagent/agy.go:140`). Pi workers inherit them
+  too: `piEnv` drops only `WS_PI_` and `WS_MAILBOX`
+  (`agents-plugin-tool/internal/wsagent/pi.go:398`).
 - **INFERRED — suspected cause:** Claude worker environment construction
   predates the shared `leadDropEnv` boundary and did not adopt its hosted-
   identity exclusions.
@@ -230,8 +244,11 @@ citations.
   environment (`agents-plugin-tool/cmd/ws-mcp/dashboard.go:40-42`,
   `agents-plugin-tool/internal/mcp/process_env.go:335-347`). It does not remove
   `WS_MAILBOX` or `WS_MAILBOX_AUTO`. The launcher passes the caller environment
-  into daemon startup with only package/resource selection adjustments
-  (`agents-plugin/bin/ws-mcp-launcher.py:1459-1480`), so a daemon started from a
+  into daemon startup while normalizing path-valued entries, selecting package
+  resources where applicable, and setting runtime, harness-PID, and CLI
+  variables (`agents-plugin/bin/ws-mcp-launcher.py#L1320-L1337`,
+  `agents-plugin/bin/ws-mcp-launcher.py#L1459-L1486`,
+  `agents-plugin/bin/ws-mcp-launcher.py#L2326-L2333`), so a daemon started from a
   named-mailbox session can still pass that identity to every terminal.
 - **VERIFIED — a terminal-launched Claude/ws-mcp forwards inherited values:**
   the launcher copies its environment into the proxy hello and only normalizes
@@ -260,22 +277,27 @@ citations.
 
 ## Constraints
 
-- Convention: `ai-docs/manuals/ws-mcp.md` (declared for
-  `agents-plugin-tool/internal/mcp/`).
-- Convention: `ai-docs/manuals/release-compatibility.md` (declared for
-  `agents-plugin-tool/internal/`). Each implementation result must state the
-  directional compatibility tier with source lines for old/new read, write,
-  refusal, and recovery behavior where applicable.
-- Convention: `ai-docs/manuals/performance.md` (declared for
-  `agents-plugin-tool/`). Mail send, claim, steer, and completion delivery must
-  remain memory-first and off per-message file reads; report file-operation
-  deltas for any changed interactive path.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/rsrc/`, `agents-plugin-wsflow/skills/`, `agents-plugin-tool/internal/wsdoc/conventions/`)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin/hooks/`, `agents-plugin-wsflow/`)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for `agents-plugin-tool/internal/mcp/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
+- Convention: ai-docs/manuals/performance.md (declared for `agents-plugin-tool/`)
+- Each implementation result must state the directional compatibility tier with
+  source lines for old/new read, write, refusal, and recovery behavior where
+  applicable.
+- Mail send, claim, steer, and completion delivery must remain memory-first and
+  off per-message file reads; report file-operation deltas for any changed
+  interactive path.
 - Do not expose session keys, process identifiers, bearer tokens, or
   machine-local paths in tests, logs, ticket results, or user-visible error
   text.
 - Preserve direct-child ownership checks, authority ceilings, mailbox return
-  channel semantics, exactly-once completion reporting, and holder survival
-  from `261120-refactor-ws-agent-workers-under-holders`.
+  channel semantics, once-only conversation-parent pending-report delivery, and
+  holder survival from `261120-refactor-ws-agent-workers-under-holders`; external
+  completion mail can duplicate if the daemon dies between append and the
+  reported-turn mark (`agents-plugin-tool/internal/wsagent/spawn.go#L305-L350`,
+  `agents-plugin-tool/internal/wsagent/spawn.go#L355-L365`).
 - Build the shared drop set as an in-memory launch-boundary filter used before
   worker and terminal holder spawn; do not add interactive-path file reads or
   per-message work.
@@ -290,6 +312,31 @@ citations.
   reproduce the current Codex parent/grandchild path or record that the named
   regression passes without a code change.
 
+## Prior Decisions
+
+- 261117-feat-ws-agent-tools-mailbox-routing (2026-11-18, commit): "Lead tests that relied on mail waiting for the turn end now expect a steer, per Decision 4 (every mailbox.send is a steer where supported)." — bearing: supports
+- c6a2d1b3 (2026-11-19, commit): "Defined one harness-neutral allowlist (ChildSafeWSTools in internal/wsagent/builtin.go) and ensured AgentWSTools includes all entries" — bearing: constrains
+- 261112-feat-ws-mcp-pi-spawn-recursion (2026-11-13, commit): "PendingReports is a slice taken atomically under the child's lock, so a report is delivered once even across a parent wait, a steer, and a restart" — bearing: supports
+- 261113-bug-ws-pi-subagent-turn-dies-on-daemon-restart (2026-11-13, Decisions): "a daemon crash exactly between mailbox append and that mark may duplicate one completion mail, explicitly accepted. This is not an exactly-once guarantee." — bearing: constrains
+- 261119-feat-ws-codex-hosted-worker (2026-11-19, Decisions): "Lead-side parity with `pi.*` (turn-end completion mail, follow-up to the same worker, transcript read, interrupt/stop) comes through the existing `agent.*` and mailbox tools" — bearing: supports
+- 261110-feat-ws-dashboard-terminal (2026-11-11, commit): "The shell rule is a pure function of (GOOS, environment, lookup) so the Windows order is tested on any host." — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/wsagent/children.go, agents-plugin-tool/internal/mcp/agent_tools.go, agents-plugin-tool/internal/wsdashboard/terminal_shell.go, agents-plugin/rsrc/review-handler/review-handler.md |
+| scope.surface | cross-module | worker prompts, ws-mcp tool profiles, and dashboard terminal launch environment cross wsagent, mcp, and wsdashboard |
+| scope.new_public_symbol | no | existing agent.spawn, mailbox.send, review.marker, and review.stamp names remain; ## Decisions |
+| scope.new_type_contract | unknown | parent return address is to enter shared worker context, but the phase does not name a type or signature |
+| scope.test_surface | existing | agents-plugin-tool/internal/wsagent/agent_tools_test.go, agents-plugin-tool/internal/wsagent/worker_holder_recovery_test.go, agents-plugin-tool/internal/mcp/mailbox_tools_test.go, agents-plugin-tool/internal/wsdashboard/terminal_routes_test.go; named Item 1–6 regressions are absent from rg -n 'Test(CodexAndAgyWorkerMailSteersIntoRunningTurn|CodexGrandchildCompletionReachesConversationParentExactlyOnce|SpawnedWorkerContextNamesDirectParentReturnAddress|AgentWSToolsIncludeReviewLedgerToolsUnderReadOnlyGate|WorkerBackendsDropInheritedHarnessSessionEnv|SessionTerminalDropsInheritedHarnessSessionEnv)' agents-plugin-tool |
+| complexity.reuse_points | confirmed | existing PendingReports delivery, AgentWSTools, leadDropEnv, and pickShell read at agents-plugin-tool/internal/wsagent/children.go#L533-L568, agents-plugin-tool/internal/wsagent/builtin.go#L170-L188, agents-plugin-tool/internal/wsagent/claude.go#L76-L94, agents-plugin-tool/internal/wsdashboard/terminal_shell.go#L21-L48 |
+| complexity.side_effect_risk | high | mail steer and completion timing, worker authority, and inherited process identity change together |
+| risk.correctness | high | Codex and agy advertise steer but current worker path requires Pi reports control at agents-plugin-tool/internal/wsagent/children.go#L601-L609 |
+| risk.fit | moderate | review ledger tools join the common AgentWSTools and must keep the read-only gate refusing mutation at agents-plugin-tool/internal/wsagent/builtin.go#L170-L188 and agents-plugin-tool/internal/mcp/permission_gate.go#L16-L37 |
+| risk.test | high | holder-backed Codex parent/grandchild delivery and six backend/terminal boundaries require new regressions; current generic test is agents-plugin-tool/internal/wsagent/agent_tools_test.go#L1284-L1308 |
+| risk.security_or_contract | high | parent return address, review ledger mutation authority, and leaked hosted/mailbox identity affect control boundaries |
+
 ## Phases
 
 ### Phase 1: Reproduce each boundary and implement the settled corrections
@@ -298,9 +345,11 @@ citations.
    run against the current holder-backed source; if it passes, preserve the
    no-reproduction result and limit code changes to defects the tests expose.
 2. Implement only the approaches settled in `## Decisions`. Keep existing
-   tool names, mailbox address syntax, session-key authority, completion
-   exactly-once behavior, and holder ownership checks unless a later confirmed
-   decision explicitly changes one.
+   tool names, mailbox address syntax, session-key authority, once-only
+   conversation-parent pending-report delivery, the accepted external-mail
+   crash window, and holder ownership checks unless a later confirmed
+   decision explicitly changes one (`agents-plugin-tool/internal/wsagent/spawn.go#L305-L350`,
+   `agents-plugin-tool/internal/wsagent/spawn.go#L355-L365`).
 3. Run focused offline tests for the affected `internal/wsagent` and
    `internal/mcp` packages, then the repository's configured Go verification.
    Use `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local` for Go commands. Report
@@ -312,7 +361,12 @@ Verification expectations, at least one named regression per dogfood item:
 
 - Item 1: `TestCodexAndAgyWorkerMailSteersIntoRunningTurn` proves parent mail
   reaches active Codex and agy workers through the common worker steer path
-  without interruption, turn end, duplication, or loss.
+  without interruption, turn end, duplication, or loss. Relaxing the Pi-only
+  check in `steerWorker` (`agents-plugin-tool/internal/wsagent/children.go:604-610`)
+  is not enough: Codex and agy must implement the acknowledged, restart-safe
+  `reportSteerer.ClearSteered` contract
+  (`agents-plugin-tool/internal/wsagent/backend.go:194-197`), and the test
+  covers a daemon restart between steer and acknowledgement.
 - Item 2: `TestCodexGrandchildCompletionReachesConversationParentExactlyOnce`
   is holder-backed and proves a Codex grandchild's terminal result reaches its
   Codex conversation parent once and releases the parent's held final in the
@@ -323,15 +377,28 @@ Verification expectations, at least one named regression per dogfood item:
   newly started child can identify the direct parent, not merely the root
   lead, before any follow-up mail; `TestChildMailEnvelopeKeepsParentRelation`
   preserves the later envelope behavior.
-- Item 4: `TestReviewHandlerProfileIncludesReviewLedgerToolsWithWriteAuthority`
-  proves the review handler can discover and call `review.marker` and
-  `review.stamp` at its intended authority, read-only refusal remains, and
-  unrelated worker profiles do not gain the mutation surface.
+- Item 4: `TestAgentWSToolsIncludeReviewLedgerToolsUnderReadOnlyGate`
+  proves every worker backend's common loadout lists `review.marker` and
+  `review.stamp`, a workdir-write child can call them, a read-only child is
+  still refused `review.stamp` and `review.marker(bootstrap: true)`, and a
+  read-only child can still call non-bootstrap `review.marker`. If the
+  `lead-review` fallback sentence for hosts whose subagents "cannot call the
+  handler's tools ... (Pi today)" (`agents-plugin/rsrc/lead-review/lead-review.md:41-42`)
+  no longer describes a real limitation, update it and its wsflow/generated
+  mirrors in the same change.
 - Item 5: `TestWorkerBackendsDropInheritedHarnessSessionEnv` covers every
   worker backend from a contaminated daemon environment and proves each fresh
   worker omits hosted/mailbox/parent-harness identity while retaining its own
   agent session key, allowed tools, permission context, and required
-  backend-specific environment.
+  backend-specific environment. The drop set is the union of `leadDropEnv`
+  (`agents-plugin-tool/internal/wsagent/claude.go:82`) and the dashboard
+  command drop list (`agents-plugin-tool/internal/mcp/process_env.go:335-347`);
+  `claudeKeptEnv` entries stay, and per-launch values (agent session key,
+  permission level, allowed tools, hosted-lead `WS_HOSTED_*` at
+  `agents-plugin-tool/internal/wsagent/runner_process.go:358-366`) are set
+  after the drop. The test also covers the holder rejoin/attach path, which
+  restores a worker with its filtered attach environment (commit `b1668601`),
+  so launch and rejoin agree.
 - Item 6: `TestSessionTerminalDropsInheritedHarnessSessionEnv` proves the
   holder PTY receives no hosted, MCP-session, permission, or mailbox identity
   from a contaminated daemon while retaining `PATH`, home/config, shell, and
