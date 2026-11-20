@@ -91,11 +91,10 @@ Current source establishes the implementation baseline:
 3. **Stable automatic checks, manual canary checks.** Scheduled and ordinary
    manual `Check for updates` calls continue to use `/releases/latest` and
    select stable releases only. The new `Canary 빌드로 업데이트` action reads
-   the release list, considers only non-draft releases whose tag exactly
-   matches `vX.Y.Z-canary.N`, selects the highest eligible canary under Decision
-   4, and sends it through the existing asset selection, checksum verification,
-   extraction, staging, and detached swap path. Rejected: let an automatic
-   check install or prompt for canaries.
+   the release list according to Decision 12, then sends the selected canary
+   through the existing asset selection, checksum verification, extraction,
+   staging, and detached swap path. Rejected: let an automatic check install
+   or prompt for canaries.
 
 4. **Version ordering.** Compare versions as SemVer for this bounded grammar:
    compare `X`, then `Y`, then `Z` numerically; at the same core,
@@ -103,16 +102,19 @@ Current source establishes the implementation baseline:
    core outranks a lower core regardless of channel. Therefore stable
    `X.Y.Z` automatically replaces installed `X.Y.Z-canary.N`, while stable
    `X.Y.(Z-1)` does not replace it. A canary is offered only when it is newer
-   than the installed version by this ordering.
+   than the installed version by this ordering. The explicit stable return in
+   Decision 11 overrides the newer-version gate for its selected stable.
 
 5. **UI placement and capability boundary.** Add one small, visually distinct
    `Canary 빌드로 업데이트` button immediately beside the existing Settings
    `Check for updates` control, not as a replacement for the footer version or
-   stable action. Extend the preload/main IPC boundary with a dedicated manual
-   canary-check action. The dashboard must feature-detect that action and hide
-   the button when attached through an older desktop shell; an older dashboard
-   must ignore the extra bridge member. Rejected: overload the stable check
-   action with a channel flag visible to arbitrary renderer input.
+   stable action. Show a `Back to stable` control only while the packaged app is
+   running a canary. Extend the preload/main IPC boundary with dedicated,
+   payload-free manual canary-check and stable-return actions. The dashboard
+   must feature-detect each action and hide its control when attached through
+   an older desktop shell; an older dashboard must ignore the extra bridge
+   members. Rejected: overload the stable check action with a channel flag
+   visible to arbitrary renderer input.
 
 6. **Accepted shared-daemon consequence.** The owner's test use accepts that a
    canary desktop whose numeric core is higher than the running daemon within
@@ -124,14 +126,24 @@ Current source establishes the implementation baseline:
    updater swap; stable daemon bytes take effect when the canary daemon exits
    and the stable app starts one, when the user invokes the existing explicit
    `Replace daemon (same core)` action, or when a later stable app carries a
-   higher numeric core. Rejected: silently force an equal-core daemon swap as
-   part of every stable app update.
+   higher numeric core. For an explicit return to a **lower-core** stable app,
+   a healthy higher-core canary daemon stays running and the stable app attaches
+   to it; even `Replace daemon (same core)` cannot force that downgrade.
+   `agents-plugin-tool/desktop-electron/daemon-controller.js:91-99` returns on
+   a lower candidate regardless of `replace`, and
+   `agents-plugin-tool/internal/wsdashboard/ensure.go:209-217` keeps a higher
+   running version under `CompareVersions`. If that daemon exits, the stable
+   app can start its bundled stable daemon on its next connection. The
+   stable-return action changes the desktop installation, never drains or
+   downgrades the shared daemon. Rejected: silently force an equal- or
+   lower-core daemon swap as part of a stable app update.
 
 7. **Ship documentation.** Add a separate canary procedure to
    `ai-docs/ship/ws.md`. It must cover tag/core preparation, review and
    compatibility gates, the prerelease/latest flags, artifact verification,
-   installation through the new manual action, stable-return verification, and
-   cleanup. It must not weaken or silently reuse the stable procedure's
+   installation through the new manual action, explicit stable-return and
+   shared-daemon verification, and cleanup. It must not weaken or silently
+   reuse the stable procedure's
    `develop` -> `main` publication authority.
 
 8. **Repository identity side fix.** Change every shipped outbound repository
@@ -152,17 +164,30 @@ Current source establishes the implementation baseline:
      only that endpoint and reject a prerelease response
      (`agents-plugin-tool/desktop-electron/update.js:45-59,418-448`).
    - **Desktop preload/IPC addition: T0 transparent**, conditional on Decision
-     5's two-way capability gating. The new member is additive; a new dashboard
-     paired with an old shell hides the action, while the current dashboard
+     5's two-way capability gating. The new members are additive; a new dashboard
+     paired with an old shell hides the actions, while the current dashboard
      already ignores bridge members it does not call
      (`agents-plugin-tool/internal/wsdashboard/assets/dashboard-lifecycle.js:913-936`).
    - **Desktop update state: T0 transparent**, provided the implementation
-     reuses the existing `update-state.json`/`staged.json` shapes, preserves
-     unknown root fields through the existing merge-write behavior, and proves
-     a pre-feature updater can ignore a canary-valued entry without deleting a
-     verified stage or breaking stable checks
-     (`agents-plugin-tool/desktop-electron/update.js:390-415`). A schema change
-     or destructive old-writer behavior requires a fresh directional grade.
+     retains the existing `update-state.json`/`staged.json` required fields,
+     preserves unknown root fields through the existing merge-write behavior,
+     and proves a pre-feature updater can ignore a canary-valued entry without deleting a
+     verified stage or breaking stable checks. The new updater must also apply
+     an explicitly chosen lower-version stable stage despite the current
+     `isNewer` guards in `staged()`/`apply()`; persist the explicit selection
+     intent with the verified stage if needed and prove old/new reopen behavior
+     in both directions (`agents-plugin-tool/desktop-electron/update.js:390-415,515-536`). A schema
+     change or destructive old-writer behavior requires a fresh directional
+     grade; this T0 verdict is conditional, not permission to discard a stage.
+   - **Explicit stable return: T0 transparent for shared surfaces**, conditional
+     on the state and IPC gates above. It downloads the existing stable release
+     through the same asset and swap path and changes only the desktop app;
+     `agents-plugin-tool/desktop-electron/update.js:2-4,458-536` leaves the
+     daemon running, and `agents-plugin-tool/desktop-electron/daemon-controller.js:91-99`
+     prevents a lower-core daemon replacement. A returned desktop may attach
+     to a higher-core daemon, so the canary payload still requires its own
+     directional compatibility verdict under the final bullet below, including
+     any minor-version boundary.
    - **Release repository value: T0 transparent.** Each launcher reads its own
      package contract and constructs a download URL; no shared store is changed
      (`agents-plugin/bin/ws-mcp-launcher.py:377-385`). The old URL also redirects
@@ -174,6 +199,52 @@ Current source establishes the implementation baseline:
      the highest tier of its actual changes with source-cited old/new read and
      write paths. T3 still requires a minor core and explicit owner approval;
      T4 must not ship. A canary label never waives those gates.
+
+10. **Canary branch and version ownership (1911).** Owner (1911) answer,
+    2026-11-20: choose **a**. Cut an ephemeral canary release branch from a
+    reviewed `develop` commit, apply the normal bump to the next target patch
+    core there, and tag `vX.Y.Z-canary.N`. Do not promote `main` or merge back
+    the canary-only version commit. Rejected **b**: bump `develop` ahead of the
+    stable ship, changing the stable version strategy. Rejected **c**: reuse an
+    already-released stable core, which Decision 4 orders above its canary.
+
+11. **Explicit stable return (1912).** Owner (1911) answer, 2026-11-20:
+    choose **b**. While running a canary, expose `Back to stable`; it selects
+    the current stable from `/releases/latest` and explicitly installs it even
+    when that version orders below the installed canary. It uses the same
+    download, checksum verification, extraction, stage, and detached swap path
+    as other desktop updates. Automatic stable checks keep their normal
+    newer-version rule; only this user action permits a downgrade. Decision 6
+    governs the bundled daemon after the desktop swap. Rejected **a**: defer
+    the action and rely solely on a later stable release outranking the canary;
+    the owner wants a direct return button.
+
+12. **First eligible release in creation order (1913).** Owner (1911) answer,
+    2026-11-20: walk the GitHub REST releases list newest-first, page by page,
+    and stop at the first non-draft release whose tag exactly matches
+    `vX.Y.Z-canary.N` and whose platform zip and combined SUMS assets are
+    present. Then apply Decision 4 to decide whether to offer it; a candidate
+    that is not newer ends the check without scanning older releases. Bound
+    the walk at 10 pages of 30 releases and 1 MiB per response; report no
+    eligible canary within the cap rather than silently claiming the full
+    history was searched. This assumes API order is newest-first by release `created_at` (the tag
+    commit time, not publication time); therefore selection follows creation
+    recency, not the greatest SemVer, and an older-created higher SemVer can be
+    skipped. GitHub's [REST release docs](https://docs.github.com/en/rest/releases/releases)
+    describe list pagination and the `created_at` meaning for latest releases;
+    the list-order premise is an explicit assumption to verify in implementation.
+    Rejected: exhaustive pagination and highest-version selection, because
+    reading accumulated history is wasteful; first-page-only selection, which
+    can miss an eligible canary; GraphQL or page scraping, which would add a
+    second feed format.
+
+13. **Packaged canary identity (1914).** Owner (1911) answer, 2026-11-20:
+    choose **a**. After `validateDaemonRoot` confirms the metadata core equals
+    the runtime contract core, set Electron `appVersion`/`buildVersion` from
+    `selected.metadata.version`, retaining the `-canary.N` suffix. Keep
+    `contract.plugin_version` as the package compatibility core. Rejected
+    **b**: a second channel/version file with Electron left at the stable
+    core; it creates a second identity and complicates updater comparisons.
 
 ## Constraints
 
@@ -195,74 +266,12 @@ Current source establishes the implementation baseline:
   keep release filtering and URL authority in the main process, and retain the
   existing HTTPS/loopback URL policy (`agents-plugin-tool/desktop-electron/update.js:62-89`,
   `agents-plugin-tool/desktop-electron/dashboard-preload.js:1-26`).
-- Resolve every item in the Open Decision Queue before promotion to `ready/`.
-
-## Open Decision Queue
-
-Last ID used: **(1914)**.
-
-### (1911) [open] [policy] Prepare a canary on an ephemeral release branch with the next target patch core
-
-- **Option a (recommended):** cut an ephemeral canary release branch from a
-  reviewed `develop` commit, apply the normal version bump there so the package
-  contracts use the next target `X.Y.Z`, tag it `vX.Y.Z-canary.N`, and do not
-  promote `main` or merge the canary-only version commit back. This makes the
-  canary newer than the installed stable core while preserving stable version
-  ownership.
-- **Option b:** bump `develop` to `X.Y.Z` before the stable ship. This makes the
-  canary flow simpler but changes the settled stable version strategy, where
-  each ship owns its bump (`ai-docs/ship/ws.md:11-31`).
-- **Option c:** tag a canary at the already-released stable core. This passes
-  assembly but cannot be offered over stable `X.Y.Z`, because Decision 4
-  correctly orders `X.Y.Z-canary.N` below `X.Y.Z`.
-
-Recommendation: **a**, because it satisfies updater ordering and manifest-core
-validation without changing stable release authority.
-
-### (1912) [open] [policy] Defer an explicit “Back to stable” action
-
-- **Option a (recommended):** rely on the automatic stable check once stable
-  `X.Y.Z` outranks `X.Y.Z-canary.N`; document the existing same-core daemon
-  consequence from Decision 6.
-- **Option b:** add a separate `Back to stable` action in this ticket, including
-  its UI, release-list selection, and tests.
-
-Recommendation: **a** for the first slice; the owner called this action
-optional, and automatic SemVer return already provides the required path.
-
-### (1913) [open] [technical] Enumerate all GitHub release-list pages and choose the highest eligible canary
-
-- **Option a (recommended):** use GitHub's REST releases list, follow pagination
-  to exhaustion with a bounded response size per page, filter exact canary tags
-  and required assets, then compare candidates with Decision 4.
-- **Option b:** inspect only the first/default page and trust API order. This is
-  simpler but can miss an eligible canary after enough releases.
-- **Option c:** use GraphQL or scrape the releases page. Neither matches the
-  existing REST/JSON updater.
-
-Recommendation: **a**, because “newest” should be a semantic selection rather
-than an assumption about one response page.
-
-### (1914) [open] [technical] Package the Electron app with validated binary metadata version including the canary suffix
-
-- **Option a (recommended):** after `validateDaemonRoot` proves metadata core
-  equals the runtime contract core, set Electron `appVersion`/`buildVersion`
-  from `selected.metadata.version`; keep `contract.plugin_version` as the
-  package compatibility core.
-- **Option b:** add a separate channel/version file to the app and keep Electron
-  at the stable core. This creates a second release identity and complicates
-  updater/state comparisons.
-
-Recommendation: **a**, because the binary metadata is already stamped from the
-tag by `build-release-assets.sh` and validated before packaging
-(`agents-plugin-tool/scripts/build-release-assets.sh:7-16,37-53`,
-`agents-plugin-tool/desktop-electron/daemon-selection.js:103-127`).
 
 ## Phases
 
 ### Phase 1: Publish canary releases and align release identity
 
-Resolve (1911) and (1914), then:
+Implement Decisions 10 and 13:
 
 - Update `.github/workflows/ws-mcp-release.yml` so exact canary tags create a
   prerelease with `--prerelease --latest=false`, while stable tag behavior is
@@ -273,10 +282,12 @@ Resolve (1911) and (1914), then:
   identity according to the settled (1914) answer. Add focused assembly/
   packaging contract tests for matching canary core, mismatched core refusal,
   suffix preservation, and unchanged stable packaging.
-- Add the canary procedure to `ai-docs/ship/ws.md` according to the settled
-  (1911) answer. Include tag collision/counter handling, reviewed commit and
+- Add the canary procedure to `ai-docs/ship/ws.md` using an ephemeral release
+  branch, next target patch core, and no `main` promotion or merge-back of the
+  canary-only bump. Include tag collision/counter handling, reviewed commit and
   compatibility gates, workflow monitoring, asset/SUMS verification, install
-  acceptance, stable return, and cleanup. Keep the stable flow unchanged.
+  acceptance, explicit stable return, shared-daemon behavior, and cleanup. Keep
+  the stable flow unchanged.
 - Change the eight audited outbound release/repository identities in Decision
   8 and extend drift tests so ws, wsflow, Pi, and dashboard destinations cannot
   diverge again. Verify the old redirect but make no runtime dependency on it.
@@ -286,31 +297,45 @@ desktop assembly/packaging tests cover core/suffix behavior; package/runtime
 contract tests cover every repository destination; doc review compares stable
 ship semantics before and after.
 
-### Phase 2: Select and install canaries through the existing updater
+### Phase 2: Select canaries and return to stable through the existing updater
 
-Depends on Phase 1. Resolve (1912) and (1913), then:
+Depends on Phase 1. Implement Decisions 11 and 12:
 
 - Replace the numeric-only helper with the bounded stable/canary SemVer model
   from Decision 4 without admitting arbitrary prerelease grammars.
 - Keep stable `check()` on `/releases/latest`. Add a separately invoked canary
-  list check, exact filtering, deterministic highest-version selection, and
-  required-asset/SUMS validation. Feed the result into the existing
+  list check that walks newest-first across bounded pages and stops at the
+  first non-draft exact-tag canary with the required platform zip and SUMS.
+  Check its version only after selection; if it is not newer, return `current`
+  without scanning farther. Enforce Decision 12's page and byte caps and
+  distinguish a cap-limited miss from a full-list miss. Feed the result into the existing
   `available`/download/verify/stage/swap state machine instead of duplicating it.
+- Add a separately invoked `Back to stable` selection from `/releases/latest`.
+  Accept the selected stable as an explicit downgrade when it orders below the
+  running canary, carry that intent through staging and restart/reopen, and use
+  the same verified download/stage/swap path. Keep ordinary stable checks and
+  automatic updates subject to the newer-version rule; do not drain or replace
+  the shared daemon during the desktop swap.
 - Preserve skip, staged, apply-failure, restart, download-page, URL-policy, and
-  Windows helper behavior for both channels. Make status payloads distinguish
-  stable from canary only where the UI needs it; feature-gate any additive
-  field.
+  Windows helper behavior for both channels and explicit stable return. Make
+  status payloads distinguish the selected action only where the UI needs it;
+  feature-gate any additive field. Recheck Decision 9's directional state/IPC
+  tier if persistent downgrade intent changes a store shape or an old writer
+  can discard it.
 - Test the complete ordering matrix, including numeric `N` (`canary.10` >
   `canary.9`), stable-over-same-core-canary, higher-core canary-over-stable,
-  drafts/malformed tags/missing assets, list pagination, checksum failure,
-  staging/restart, stable automatic return, and the pre-feature state
-  compatibility case from Decision 9.
+  drafts/malformed tags/missing assets, early stop within a page and across
+  pages, bounded-page exhaustion, creation-order versus SemVer disagreement,
+  checksum failure, staging/restart, stable automatic return, explicit
+  back-to-stable downgrade with restart/reopen, lower-core daemon retention,
+  and the pre-feature state compatibility case from Decision 9.
 
 Verification: updater unit/integration tests exercise local stable and releases
 list feeds and assert the same download, checksum, extraction, staging, and
-swap functions serve both channels. No live release is created by tests.
+swap functions serve canary install and stable return. No live release is
+created by tests.
 
-### Phase 3: Add the canary update control
+### Phase 3: Add canary and stable-return controls
 
 Depends on Phase 2. This UI phase must be executed by a **Claude Code worker
 (not Codex)** and independently reviewed after implementation.
@@ -319,16 +344,23 @@ Depends on Phase 2. This UI phase must be executed by a **Claude Code worker
   Settings `Check for updates` control. Retain keyboard access, focus styling,
   localization, narrow-window layout, light/dark themes, and browser/older-shell
   hiding behavior.
-- Add the bounded preload/main IPC action and route it only from the pinned
-  dashboard main frame, following the existing update channel admission.
+- Add `Back to stable` beside the update controls only while the packaged app
+  is running a canary. Present the current stable target and make the explicit
+  downgrade clear before install; hide the control after stable relaunch.
+- Add bounded, payload-free preload/main IPC actions for canary check and stable
+  return; route them only from the pinned dashboard main frame, following the
+  existing update channel admission.
 - Extend the existing desktop update browser fixture and main/preload tests for
-  feature detection, one-click invocation, status/toast behavior, and absence
-  in a browser or older shell.
+  feature detection, invocation of both actions, downgrade status/toast
+  behavior, canary-only visibility of `Back to stable`, and absence in a
+  browser or older shell.
 - Capture **before and after screenshots** at the same desktop viewport in both
   light and dark themes, with the Settings card open and the version/update
-  controls visible. The phase result must link the captures and state the
-  visual comparison outcome.
+  controls visible. Include canary-running screenshots showing `Back to stable`
+  and stable-running screenshots after return showing its absence. The phase
+  result must link the captures and state the visual comparison outcome.
 
 Verification: automated dashboard browser and Electron main/preload tests pass;
 the named non-Codex executor records before/after screenshot evidence and an
-independent reviewer checks placement, distinction, localization, and regressions.
+independent reviewer checks placement, canary-only stable-return visibility,
+distinction, localization, and regressions.
