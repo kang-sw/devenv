@@ -825,7 +825,7 @@
         : isVac ? '<span class="tk-org-vac">' + esc(wsT("js.tk.org.tag.vacant")) + '</span>'
         : '<span class="sz">' + esc(wsTn("js.tk.org.sec.size", oi.sizeOf(o.id))) + '</span>';
       var acts = isDel
-        ? '<button type="button" class="undo"' + attr('act', 'oe-undo') + attr('key', 'org:' + o.id) + '>&#8630; ' + esc(wsT("js.tk.org.undo")) + '</button>'
+        ? '<button type="button" class="btn mini"' + attr('act', 'oe-undo') + attr('key', 'org:' + o.id) + '>&#8630; ' + esc(wsT("js.tk.org.undo")) + '</button>'
         : '<button type="button" class="btn mini"' + attr('act', 'oe-org-ren') + attr('org', o.id) + '>' + esc(wsT("js.tk.org.btn.rename")) + '</button>' +
           '<button type="button" class="btn mini danger"' + attr('act', 'oe-org-del') + attr('org', o.id) + '>' + esc(wsT("js.tk.org.btn.delete")) + '</button>';
       var warn = '';
@@ -849,7 +849,7 @@
     if (goneRef.length || goneUnref.length) {
       goneHtml = '<div class="tk-oe-dz">' + goneRef.map(function (o) {
         var ref = refs[o.id], open = !!ed.goneOpen[o.id], info = orgEventInfo(o.removed);
-        var when = info ? (info.ts ? esc(fmtTs(info.ts).slice(0, 10)) : '') + (info.by ? ' &middot; ' + esc(nm(info.by)) : '') : '';
+        var when = info ? (info.ts ? esc(fmtTs(info.ts).split(' ')[0]) : '') + (info.by ? ' &middot; ' + esc(nm(info.by)) : '') : '';
         var list = open ? '<ul class="tk-oe-rl">' + ref.items.map(function (it) {
           var tags = (it.assign ? '<span class="chip sm">' + esc(wsT("js.tk.org.gone.asg")) + '</span>' : '') +
             (it.cc ? '<span class="chip sm">' + esc(wsT("js.tk.org.gone.cc")) + '</span>' : '');
