@@ -572,7 +572,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-20T14:37:42Z",
         "impl": {
           "branch": "impl/develop/gooey-shock-conch"
