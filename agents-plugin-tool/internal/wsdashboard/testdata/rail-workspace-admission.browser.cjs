@@ -130,6 +130,8 @@ const key = 'ws.dashboard.workspace-admission.drafts';
   await page.evaluate(k=>localStorage.setItem(k,JSON.stringify([{repository:'/tmp/fixture-repo',path:'/tmp/fixture-worktree',revision:'fixture',action:'approve'}])),worktreeKey);
   await page.reload();
   await page.evaluate(()=>document.documentElement.classList.add('rail-open'));
+  await page.locator('.admission-missing').waitFor();
+  assert.equal((await page.evaluate(k=>JSON.parse(localStorage.getItem(k)||'[]'),worktreeKey)).length,1);
   await page.locator('details.rws-unreg > summary').click();
   await second.locator('.tg.ap').click();
   const workspaceResponse=page.waitForResponse(r=>r.url()===base+'/rail/workspaces/admission');
