@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 
@@ -14,6 +15,20 @@ type planUsageActivityProbe struct {
 
 func (h *planUsageActivityProbe) PlanUsageActivity() {
 	h.calls.Add(1)
+}
+
+func resolvedDashboardDir(t *testing.T, path string) string {
+	t.Helper()
+	root := filepath.Dir(filepath.Dir(path))
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(resolvedRoot, rel)
 }
 
 func TestUserStartedAgyActivity(t *testing.T) {
@@ -40,8 +55,18 @@ func TestUserStartedAgyActivity(t *testing.T) {
 		{name: "hosted agy", harness: wsagent.BackendAgy, host: true, hosted: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			isolatedDashboardDir := dashboardSessionEnv(t)
 			s, key, _ := dashboardSessionServer(t, dashboardGitRoot(t), true)
 			t.Cleanup(s.Close)
+			gotDashboardDir, err := s.dashboard.stateDir()
+			if err != nil {
+				t.Fatal(err)
+			}
+			gotDashboardDir = resolvedDashboardDir(t, gotDashboardDir)
+			isolatedDashboardDir = resolvedDashboardDir(t, isolatedDashboardDir)
+			if gotDashboardDir != isolatedDashboardDir {
+				t.Fatalf("dashboard state dir = %q; want isolated %q", gotDashboardDir, isolatedDashboardDir)
+			}
 			s.agentBackendSource = runner
 			s.sessionHarness = tc.harness
 			if tc.noManifest {
