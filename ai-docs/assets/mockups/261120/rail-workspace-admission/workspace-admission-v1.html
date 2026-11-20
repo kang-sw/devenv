@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Session Rail — Explicit Workspaces &amp; Unregistered Admission v1</title>
+  <link rel="stylesheet" href="workspace-admission-v1.css">
+</head>
+<body>
+  <!-- Inline SVG sprite matching wsdashboard/assets/sprite.svg + Lucide strokes -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-repo" viewBox="0 0 16 16"><path d="M3.5 2.5h8.5v9H5a1.5 1.5 0 0 0-1.5 1.5z"/><path d="M3.5 13a1.5 1.5 0 0 0 1.5 1.5h7v-3"/><path d="M6 5h4"/></symbol>
+    <symbol id="i-wsfolder" viewBox="0 0 16 16"><path d="M2 4.5a1 1 0 0 1 1-1h3.2l1.4 1.5H13a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></symbol>
+    <symbol id="i-branch" viewBox="0 0 16 16"><circle cx="4.5" cy="3.6" r="1.5"/><circle cx="4.5" cy="12.4" r="1.5"/><circle cx="11.5" cy="6" r="1.5"/><path d="M4.5 5.1v5.8M11.5 7.5c0 2.6-3.2 2.4-7 3.4"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9"/></symbol>
+    <symbol id="i-x" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>
+    <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.2 8.4l3.1 3.2 6.5-7"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 16 16"><path d="M5.5 3.5L2.8 6.2l2.7 2.7"/><path d="M2.8 6.2h6.7a3.6 3.6 0 0 1 0 7.2H6.5"/></symbol>
+    <symbol id="i-reload" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.3-3.4"/><path d="M13 2.5v2.7h-2.7"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 16 16"><path d="M8 2a4 4 0 0 0 6 6 6 6 0 1 1-6-6z"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.1"/><circle cx="8" cy="8" r="4.6"/><path d="M8 1.5v1.9M8 12.6v1.9M1.5 8h1.9M12.6 8h1.9M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3"/></symbol>
+    <symbol id="i-house" viewBox="0 0 16 16"><path d="M2.5 7.2L8 2.5l5.5 4.7V13.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z"/><path d="M6.2 14.5v-4.8h3.6v4.8"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 16 16"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></symbol>
+    <symbol id="i-hosted" viewBox="0 0 16 16"><rect x="2.5" y="2.8" width="11" height="4.4" rx="1.2"/><rect x="2.5" y="8.8" width="11" height="4.4" rx="1.2"/><path d="M5 5h.01M5 11h.01"/></symbol>
+    <symbol id="i-grip" viewBox="0 0 16 16"><circle cx="5.8" cy="3.6" r=".5"/><circle cx="10.2" cy="3.6" r=".5"/><circle cx="5.8" cy="8" r=".5"/><circle cx="10.2" cy="8" r=".5"/><circle cx="5.8" cy="12.4" r=".5"/><circle cx="10.2" cy="12.4" r=".5"/></symbol>
+    <symbol id="i-archive" viewBox="0 0 16 16"><rect x="1.9" y="2.6" width="12.2" height="3.4" rx="1"/><path d="M3.1 6v6.2a1.3 1.3 0 0 0 1.3 1.3h7.2a1.3 1.3 0 0 0 1.3-1.3V6"/><path d="M6.4 8.9h3.2"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.4"/></symbol>
+    <symbol id="i-chev-right" viewBox="0 0 16 16"><path d="M6 3.5l4.5 4.5L6 12.5"/></symbol>
+    <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.3"/><path d="M10.4 10.4L13.5 13.5"/></symbol>
+  </svg>
+
+  <div class="demo-page">
+    <header class="controls-bar" aria-label="Interactive mockup controls">
+      <div class="ctrl-brand">
+        <span class="ctrl-badge">Rail v1</span>
+        <strong>Workspace Admission</strong>
+        <span class="ctrl-sub">Explicit rail + collapsed bottom unregistered panel</span>
+      </div>
+
+      <div class="ctrl-group" role="group" aria-label="Theme">
+        <button type="button" class="ctrl-btn" data-theme-btn="dark" aria-pressed="true">Dark</button>
+        <button type="button" class="ctrl-btn" data-theme-btn="light" aria-pressed="false">Light</button>
+      </div>
+
+      <label class="ctrl-select-wrap">
+        <span class="ctrl-lbl">Scenario</span>
+        <select id="ctrl-scenario" class="ctrl-select">
+          <option value="flood">Flood 30 junk + 2 explicit</option>
+          <option value="normal">Normal 3 pending + 2 explicit</option>
+          <option value="fresh">Fresh 0 explicit + 4 pending</option>
+        </select>
+      </label>
+
+      <button type="button" class="ctrl-btn ctrl-action" id="ctrl-sim-junk">
+        + Simulate 10 more junk sessions
+      </button>
+
+      <button type="button" class="ctrl-btn ctrl-compare" id="ctrl-compare" aria-pressed="false">
+        Compare: Before (Current Flooded Rail)
+      </button>
+    </header>
+
+    <main class="stage-wrap">
+      <div class="rail-stage">
+        <div id="rail-capture" class="rail-capture">
+          <aside id="rail" class="rail" aria-label="세션 레일">
+            <div class="r-rail" id="r-rail">
+              <div class="rhd">
+                <b class="rtitle">세션</b>
+                <button type="button" class="radd" id="hdr-add-ws" data-add="ws" title="워크스페이스 추가" aria-label="워크스페이스 추가">
+                  <svg class="i" aria-hidden="true"><use href="#i-plus"/></svg>
+                </button>
+                <span class="rsp"></span>
+                <span class="chip" id="hdr-live-chip" title="실행 중인 세션">라이브 4</span>
+                <button type="button" class="rref rsleep" id="railsleep" title="유휴 세션 재우기" aria-label="유휴 세션 재우기">
+                  <svg class="i" aria-hidden="true"><use href="#i-moon"/></svg>
+                </button>
+                <button type="button" class="rref" id="railref" title="새로고침" aria-label="새로고침">
+                  <svg class="i" aria-hidden="true"><use href="#i-reload"/></svg>
+                </button>
+              </div>
+
+              <div class="rlist" id="rlist"></div>
+
+              <div class="rcap" id="rcap" hidden role="toolbar" aria-label="워크스페이스 승인 적용">
+                <button type="button" class="clr" id="cap-clear" aria-label="초기화" title="초기화">
+                  <svg class="i" aria-hidden="true"><use href="#i-x"/></svg>
+                </button>
+                <span class="seg ok" id="cap-ok" hidden></span>
+                <span class="seg no" id="cap-no" hidden></span>
+                <button type="button" class="go" id="cap-apply" title="선택한 승인/거부 적용">
+                  <svg class="i" aria-hidden="true"><use href="#i-check"/></svg>적용
+                </button>
+              </div>
+
+              <div class="rtoast" id="rtoast" role="status" aria-live="polite"></div>
+
+              <div class="rfoot">
+                <button type="button" class="btn gear settings-toggle" id="gear" title="설정" aria-label="설정">
+                  <svg class="i" aria-hidden="true"><use href="#i-gear"/></svg>
+                </button>
+                <button type="button" class="btn gear rail-home" id="rail-home" title="홈" aria-label="홈">
+                  <svg class="i" aria-hidden="true"><use href="#i-house"/></svg>
+                </button>
+              </div>
+            </div>
+          </aside>
+        </div>
+
+        <aside class="inspector-card" id="inspector-card" aria-label="Mockup notes">
+          <div class="insp-head">
+            <span class="insp-pill" id="insp-mode-pill">Redesign (v1)</span>
+            <h2 id="insp-title">Unregistered Workspace Admission</h2>
+          </div>
+          <p class="insp-desc" id="insp-desc">
+            Explicit workspaces stay clean at the top of <code>#rlist</code>. All unregistered session roots (including 30+ temp dirs) collapse into one quiet 32px footer bar until intentionally expanded.
+          </p>
+          <ul class="insp-metrics" id="insp-metrics"></ul>
+          <div class="insp-actions">
+            <button type="button" class="ctrl-btn" id="insp-reset">Reset scenario</button>
+          </div>
+        </aside>
+      </div>
+    </main>
+  </div>
+
+  <script src="workspace-admission-v1.js"></script>
+</body>
+</html>
