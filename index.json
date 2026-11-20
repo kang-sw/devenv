@@ -608,6 +608,9 @@
         }
       }
     },
+    "261120-feat-ws-agy-timeout-process-respawn": {
+      "registered_at": "2026-11-20T14:49:51Z"
+    },
     "261120-feat-ws-dashboard-chat-agent-roster-hud": {
       "registered_at": "2026-11-20T14:14:08Z",
       "lease": {
