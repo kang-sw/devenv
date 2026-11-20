@@ -210,6 +210,27 @@ Verification:
   plus one capture of a fixture 409 refusal shown inline with its reason
   and the selection kept.
 
+### Result
+
+Landed on `impl/develop/paper-puma-plus` (a152cef07..8d9a77b2a, merged with
+develop in ffd2766a6).
+
+- The modal UI and its pure logic live in a new `tracker-picker.js` fragment,
+  registered after `tracker-menu.js` in every tracker fragment list; this
+  keeps `tracker-menu.js` (now 897 lines) and `tracker-render.js` (1000) from
+  growing. The old one-click CC step and its `js.tk.dlg.cc.*` strings are gone.
+- Entry points: the CC card "+", the item menu's new "참조에 추가…" entry, the
+  item menu's assign step, and the new-item draft's assign step (people only).
+- Apply is one `AD.dispatch` batch; a refusal shows the refused event's reason
+  inline and keeps the selection.
+- Verification: the 7 tracker node test files pass (picker 7/7); `go test
+  ./internal/wsi18n` and `./internal/wsdashboard -run 'Tracker|Asset'` pass.
+  The Playwright fixture captures of CC (open, group-covered, add/remove
+  diff, light theme, 409 refusal) and assign (item mode, topic mode) match
+  mockup frames A and B, apart from the Phase 2 org badges and vacant-org row.
+- Keyboard focus ring shows only during arrow-key navigation, not after a
+  pointer toggle (8d9a77b2a).
+
 ### Phase 2: Org targets
 
 After the org-entity ticket lands: Decision 8 — org badges on head rows, org
