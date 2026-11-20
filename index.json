@@ -595,6 +595,9 @@
         }
       }
     },
+    "261120-feat-desktop-canary-release-channel": {
+      "registered_at": "2026-11-20T14:11:51Z"
+    },
     "261120-feat-ws-agy-usage-activity-trigger": {
       "registered_at": "2026-11-20T12:38:30Z",
       "lease": {
