@@ -252,7 +252,7 @@ Frame.prototype.remove = function () { this.removed = true; };
 Frame.prototype.focus = function () {};
 var first = new Frame("/s/a?frame=1");
 first.className = "sframe on";
-var top = { own: false, style: {}, offsetHeight: 40, classList: { toggle: function (c, on) { if (c === "sh-own") top.own = on; } }, addEventListener: function () {} };
+var top = { own: false, style: { setProperty: function (k, v) { top.style[k] = v; } }, offsetHeight: 40, classList: { toggle: function (c, on) { if (c === "sh-own") top.own = on; } }, addEventListener: function () {} };
 var framesBox = { kids: [first], appendChild: function (f) { this.kids.push(f); } };
 var doc = { title: "a - Werkschaft (alpha)",
   querySelector: function (sel) { return sel === "#frames > iframe" ? first : sel === ".dwrap > .top" ? top : null; },

@@ -718,7 +718,7 @@
       var state = el && !el.classList.contains("closed") && el.getAttribute("data-state");
       var states = { implementing: "impl", researching: "research", discussing: "discuss", waiting: "wait", "awaiting-confirmation": "confirm" };
       var glyph = states[state];
-      return { href: glyph ? "#i-st-" + glyph : "#i-chat", state: glyph || "plain" };
+      return { href: glyph ? "#i-st-" + glyph : "#i-chat", state: glyph ? "d-gal-" + glyph : "plain" };
     }
     var c = cards.filter(function (x) { return "c:" + x.id === ref; })[0];
     var use = c && c.icon && c.icon.querySelector("use"), href = use && use.getAttribute("href");

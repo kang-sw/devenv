@@ -28,7 +28,7 @@
   .dwrap > .top > .back { display: none; }
   .dwrap > .top { margin-left: calc(340px + 16px); }
   .dbody > .rail { margin: calc(-1 * var(--toph)) 0 0 -4px; }
-  :root:not([data-pincol]):not([data-gal="empty"]):not([data-gal="drag"]) .dbody > .dgrid { width: 100%; max-width: var(--stagew); margin-inline: auto; }
+  :root:not([data-mode="index"]):not([data-pincol]):not([data-gal="empty"]):not([data-gal="drag"]) .dbody > .dgrid { width: 100%; max-width: var(--stagew); margin-inline: auto; }
   :root:not([data-shell]):not([data-pincol]):not([data-gal="empty"]):not([data-gal="drag"]) .dash:not(.index):not(.tk-paged) > .dwrap { --stage-side: max(0px, (100% - 356px - var(--stagew)) / 2); }
   :root:not([data-shell]):not([data-pincol]):not([data-gal="empty"]):not([data-gal="drag"]) .dash:not(.index):not(.tk-paged) > .dwrap > .top { margin-left: calc(356px + var(--stage-side)); margin-right: var(--stage-side); }
   :root:not([data-shell]):not([data-pincol]):not([data-gal="empty"]):not([data-gal="drag"]) .dash:not(.index):not(.tk-paged) > .dwrap > .top:is(.dr-room, .tk-room) { padding-right: max(0px, calc(var(--drhw, 0px) + var(--tkhw, 0px) + 6px - var(--stage-side, 0px))); }
@@ -53,16 +53,13 @@
    empty page (.gal-plus), and in the narrow view ⌂ the Main Board (Page
    0). The page sets data-gal on the root (dashboard-board.js): "col" from
    1600px with a docked page (with data-pincol: the gallery is the page
-   body's last grid column, its width handle .bp-edge on its left edge
-   and the rail right of it; below 2200px the column takes the session
-   rail's place and the rail overlays as it does below 1600px, the arrow
-   and Ctrl+` opening it; from 2200px both show); "drag" while a drag
-   alone shows it (no docked page: over the window's right edge, the
-   board left where it stands); "narrow" below 1600px or in the "tabs"
-   layout (fixed over the board's column, placed by the page through
+   body's last grid column, its width handle .bp-edge on its left edge,
+   when the right-side space fits the board pane; the session rail stays
+   docked left); "drag" and "empty" use that same wide slot without a
+   docked page; "narrow" uses a paged gallery over the board's column
+   when the wide slot does not fit or the layout is "tabs" (placed by
    --gal-left/top/width/height; data-away moves it off the window while
-   that column is hidden). With no docked page and no drag no column is
-   reserved. The store page (.tk-spage) takes the hidden grid's cell in
+   that column is hidden). The store page (.tk-spage) takes the grid's cell in
    every one of these grids. The board keeps its no-gallery width (--pbw:
    the 1680px page less its paddings, the rail and its gap; the
    board-first page's 900px column), narrowed to leave the column 480px,
@@ -109,11 +106,11 @@
 .gal-dot.page { width: 28px; height: auto; min-height: 28px; padding: 4px 2px; border-radius: 14px; flex-direction: column; gap: 2px; color: var(--wb-muted-fg); }
 .gal-dot.page.active { height: auto; background: color-mix(in srgb, var(--wb-primary) 15%, var(--wb-card)); color: var(--wb-fg); border-color: var(--wb-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-primary) 32%, transparent); }
 .gal-dot-icon { display: block; flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.gal-dot-icon.impl { color: light-dark(#2457c5, #8db8ff); }
-.gal-dot-icon.research { color: light-dark(#7544ac, #c6a5f7); }
-.gal-dot-icon.discuss { color: light-dark(#a64f08, #ffb36b); }
-.gal-dot-icon.confirm { color: light-dark(#1d7348, #7fd6a8); }
-.gal-dot-icon.wait { color: light-dark(#596172, #b9bdc6); }
+.gal-dot-icon.d-gal-impl { color: light-dark(#2457c5, #8db8ff); }
+.gal-dot-icon.d-gal-research { color: light-dark(#7544ac, #c6a5f7); }
+.gal-dot-icon.d-gal-discuss { color: light-dark(#a64f08, #ffb36b); }
+.gal-dot-icon.d-gal-confirm { color: light-dark(#1d7348, #7fd6a8); }
+.gal-dot-icon.d-gal-wait { color: light-dark(#596172, #b9bdc6); }
 .gal-dot-more { display: block; color: var(--wb-fg); font: 700 9px/12px var(--wb-mono); white-space: nowrap; }
 .gal-dot.main { margin-bottom: 8px; border-color: #3fa853; color: #3fa853; font-size: 11px; }
 .gal-dot.main.active { background: #3fa853; color: #0b1910; box-shadow: 0 0 0 3px rgb(63 168 83 / .24); }

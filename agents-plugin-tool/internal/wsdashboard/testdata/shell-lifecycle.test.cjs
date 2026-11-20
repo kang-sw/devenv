@@ -446,7 +446,7 @@ function testHeaderReadiness() {
     c.click('/s/b');
     const b = s.pending();
     b.holdHeader = true;
-    const header = {wsShell: 'head', html: '<b>new</b>', qs: '', pad: 0, top: 40};
+    const header = {wsShell: 'head', html: '<b>new</b>', qs: '', pad: 0, side: 24, top: 40};
     if (headFirst) c.from(b.contentWindow, header); else b.load();
     assert.equal(s.current(), a, 'both document load and header are required');
     assert.equal(c.top.style.minHeight, '40px');
@@ -454,6 +454,7 @@ function testHeaderReadiness() {
     if (headFirst) b.load(); else c.from(b.contentWindow, header);
     assert.equal(s.current(), b);
     assert.equal(c.log.includes('swap:head:<b>new</b>'), true);
+    assert.equal(c.top.style['--sh-stage-side'], '24px');
     assert.equal(a.got.at(-1), 'shown:false');
     assert.equal(c.timerCount(), 0, 'a real header cancels its fallback');
   }
