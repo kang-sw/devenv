@@ -233,7 +233,7 @@ func TestStaleNudgeNeverRenders(t *testing.T) {
 	if out := applyAt(t, st, ``, testNow.Add(61*time.Minute)); nudgeOf(out) == "" {
 		t.Fatalf("stale update must nudge")
 	}
-	for _, layout := range []Layout{LayoutFull, LayoutEmbed} {
+	for _, layout := range []Layout{LayoutFull} {
 		html, err := RenderPage(BuildView(st, ViewInput{Layout: layout}))
 		if err != nil {
 			t.Fatal(err)

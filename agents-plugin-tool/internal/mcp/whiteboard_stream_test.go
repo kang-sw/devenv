@@ -167,7 +167,7 @@ func TestWhiteboardStreamRefreshesPanelLogItemAndRestart(t *testing.T) {
 	}
 	entriesAfter, _ := json.Marshal(after.Whiteboard.Topics[0].Entries)
 	if string(entriesAfter) != string(entriesBefore) || strings.Join(f.embeds(t, f.dir()), ",") != strings.Join(embedsBefore, ",") {
-		t.Fatal("implicit auxiliary refresh changed entries or wrote a new embed")
+		t.Fatal("implicit auxiliary refresh changed entries or wrote a snapshot")
 	}
 	if !strings.Contains(f.fullPage(t), "aux-refresh-marker") || !strings.Contains(f.stamp(t), fmt.Sprintf("\"%d\"", after.Whiteboard.Seq)) {
 		t.Fatal("implicit refresh did not publish the committed index page and stamp")

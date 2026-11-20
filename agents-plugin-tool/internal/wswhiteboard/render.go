@@ -155,17 +155,16 @@ func DevAssetsOn() bool { return devAssets.Load() != nil }
 const devAssetDir = "internal/wswhiteboard/assets"
 
 // trackerKeyPrefix marks the client strings of the dashboard's tracker
-// renderer (tracker.js). A whiteboard page never loads that script, and
-// the strings would bloat every embed page, which is loaded often, so its
-// client table leaves them out.
+// renderer (tracker.js). A whiteboard page never loads that script, so its
+// client table leaves the strings out.
 const trackerKeyPrefix = "js.tk."
 
 // filesKeyPrefix belongs to the dashboard's file explorer (files.js), which
-// standalone and embed boards never load. Keep its growing table off both.
+// standalone boards never load. Keep its growing table off the page.
 const filesKeyPrefix = "js.files."
 
 // gitKeyPrefix belongs to dashboard-git.js, which static boards never load.
-// Its controls must not bloat the standalone or embed translation table.
+// Its controls must not bloat the standalone translation table.
 const gitKeyPrefix = "js.git."
 
 // codeKeyPrefix is the copy button's standalone client subset (code.js).
@@ -306,8 +305,7 @@ func panelActionAttrs(r PanelRow) template.HTMLAttr {
 	return template.HTMLAttr(buf.String())
 }
 
-// RenderPage renders view as one self-contained HTML document: the full page
-// for LayoutFull, the embed snapshot for LayoutEmbed. Item text renders as
+// RenderPage renders view as one self-contained HTML document. Item text renders as
 // markdown with raw HTML escaped (markdown.go); a topic body renders as
 // markdown with its raw HTML written as is (pageData.renderDoc).
 func RenderPage(view View) (string, error) {
@@ -457,10 +455,9 @@ func PageAssets() (SharedAssets, error) {
 // assets and the board-wide counts the header shows.
 type pageData struct {
 	View
-	Full, Embed bool
-	CSS         template.CSS
-	Script      template.JS
-	Sprite      template.HTML
+	CSS    template.CSS
+	Script template.JS
+	Sprite template.HTML
 	// docs holds each topic body rendered by renderDoc on every page render,
 	// or, with DocFramed, the sandboxed frame that holds that rendering,
 	// keyed by topic name.
@@ -486,7 +483,7 @@ type pageData struct {
 	// (relayImage), which framedDoc lists on its frame.
 	relays []string
 
-	CountPolicy, CountAcks, CountFresh int
+	CountPolicy, CountAcks int
 	// CountBulk is how many items the bulk checkbox answers.
 	CountBulk int
 
@@ -531,7 +528,7 @@ const chgWire = "\nArray.prototype.forEach.call(document.querySelectorAll('.doc-
 // BulkChips reports that a topic bar's count chips render as buttons that
 // answer every item they count (form.js, button[data-bulk]): only on the
 // dashboard's board (RenderRegions, the framed render), where a staged answer
-// is sent; the static page and the embed keep them plain counts.
+// is sent; the static page keeps them plain counts.
 func (p *pageData) BulkChips() bool { return p.DocFramed }
 
 // MermaidFile is the shared mermaid script's name, beside the page.
@@ -555,17 +552,9 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 }
 
 func pageDataBase(view View, a *pageAssets, framed bool) *pageData {
-	full := view.Layout != LayoutEmbed
-	script := a.selectAll + a.answers + a.form + a.code + a.deps
-	if full {
-		// The viewer is for the standalone page; the embed is a chat
-		// snapshot with a size budget; it runs the form and dependency popovers.
-		script = a.viewer + script + a.pill + a.rail + a.ago + a.stream + a.live + a.chg + chgWire + a.panelDiff
-	}
+	script := a.viewer + a.selectAll + a.answers + a.form + a.code + a.deps + a.pill + a.rail + a.ago + a.stream + a.live + a.chg + chgWire + a.panelDiff
 	p := &pageData{
 		View:        view,
-		Full:        full,
-		Embed:       !full,
 		CSS:         a.css,
 		Script:      template.JS("(function () {\n" + script + "})();\n"),
 		Sprite:      a.sprite,
@@ -579,17 +568,12 @@ func pageDataBase(view View, a *pageAssets, framed bool) *pageData {
 		tmpl:        a.templateFor(view.Lang),
 		topicUnits:  map[string]TopicUnit{},
 	}
-	if !full {
-		// The embed has no change-signal loader, so it carries no stamp.
-		p.StampFile = ""
-	}
 	for _, t := range view.Topics {
 		for _, panel := range t.PanelRecaps {
 			p.panelOnPage[panel.PanelID] = true
 		}
 		p.CountPolicy += t.AskCount()
 		p.CountAcks += len(t.Acks)
-		p.CountFresh += t.Fresh
 		for _, list := range [][]ItemView{t.Policy, t.Acks, t.Checks, t.Expanded, t.Collapsed} {
 			for _, iv := range list {
 				p.onPage[iv.ID] = true
@@ -607,21 +591,19 @@ func pageDataBase(view View, a *pageAssets, framed bool) *pageData {
 
 // prepareTopic runs only after board-wide reference targets are complete.
 func (p *pageData) prepareTopic(t TopicView, a *pageAssets) {
-	if p.Full {
-		// A lazy render emits only the current bodies of live rows; gap rows
-		// and earlier versions come with the complete topic on demand.
-		live := lazyLiveEntries(t, p.LazyHistory)
-		pages := append([]EntryPage{t.Stream}, t.Older...)
-		for _, page := range pages {
-			for _, run := range page.Runs {
-				e := run.Entry
-				if e.Kind == EntryPanel && e.HasBody() && (live == nil || live[e.ID] && !e.Historical) {
-					p.entries[e.ID] = p.panelHTML(t.Name, e, p.DocFramed, a)
-				}
+	// A lazy render emits only the current bodies of live rows; gap rows
+	// and earlier versions come with the complete topic on demand.
+	live := lazyLiveEntries(t, p.LazyHistory)
+	pages := append([]EntryPage{t.Stream}, t.Older...)
+	for _, page := range pages {
+		for _, run := range page.Runs {
+			e := run.Entry
+			if e.Kind == EntryPanel && e.HasBody() && (live == nil || live[e.ID] && !e.Historical) {
+				p.entries[e.ID] = p.panelHTML(t.Name, e, p.DocFramed, a)
 			}
 		}
 	}
-	if t.Doc == "" || !p.Full {
+	if t.Doc == "" {
 		return
 	}
 	page := p.Mermaid
@@ -953,9 +935,6 @@ func (p *pageData) AskOf(a openAsk) itemData {
 // the reply grammar wraps it back as (nn).
 func (d itemData) Num() string { return strings.TrimSuffix(strings.TrimPrefix(d.Label, "("), ")") }
 
-// IsNew reports whether the item carries the embed's new badge.
-func (d itemData) IsNew() bool { return d.Page.Embed && d.New }
-
 // Void reports a withdrawn or superseded item: settled without an answer.
 func (d itemData) Void() bool {
 	return d.Status == StatusWithdrawn || d.Status == StatusSuperseded
@@ -982,10 +961,9 @@ func (d itemData) AsStatic() itemData {
 }
 
 // TimelineCheck keeps an assumed check's real controls (its veto note) in
-// its history row. An open check's controls stack at the topic's bottom
-// instead; embeds retain their compact list.
+// its history row. An open check's controls stack at the topic's bottom.
 func (d itemData) TimelineCheck() bool {
-	return d.Page != nil && d.Page.Full && d.Class == ClassCheck && d.HistoryAnchor() && d.Assumed()
+	return d.Page != nil && d.Class == ClassCheck && d.HistoryAnchor() && d.Assumed()
 }
 
 // Expandable reports whether a row has controls, options or rationale beyond
@@ -1078,7 +1056,7 @@ func (d itemData) CheckReading() string {
 // Reading is the lead's reading of the answer beyond a picked option: the
 // text after the option letter, or the whole answer when it names none.
 func (d itemData) Reading() string {
-	if d.Page != nil && d.Page.Full && d.Class == ClassCheck {
+	if d.Page != nil && d.Class == ClassCheck {
 		return d.CheckReading()
 	}
 	if d.PickedOption() != nil {
@@ -1165,9 +1143,8 @@ func rationaleLines(s string) []string {
 }
 
 // rowHref trusts a panel row link that is a relative path or a file: URL.
-// html/template rewrites any file: URL to #ZgotmplZ, and an embed written
-// outside the repository can only reach a ticket file through one; every
-// other scheme keeps the template's normal URL filtering.
+// html/template rewrites any file: URL to #ZgotmplZ; every other scheme keeps
+// the template's normal URL filtering.
 func rowHref(link string) any {
 	u, err := url.Parse(link)
 	if err == nil && (u.Scheme == "" || u.Scheme == "file") {

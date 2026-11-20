@@ -3,7 +3,6 @@ package mcp
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -61,7 +60,7 @@ func TestWhiteboardCommandAcceptanceFirstTextRetryAndSequence(t *testing.T) {
 		t.Fatal("retry payload inaccurate", tree)
 	}
 	after := read()
-	if after.Seq != before.Seq+1 || after.LastEmbedSeq != after.Seq || after.Items[0].Changed != after.Items[1].Changed || after.AnswerSeq != after.Seq || after.Items[0].Status != wswhiteboard.StatusCommented || publications != 3 || len(effectsRecords(t, live, live.replyA)) != 2 {
+	if after.Seq != before.Seq+1 || after.Items[0].Changed != after.Items[1].Changed || after.AnswerSeq != after.Seq || after.Items[0].Status != wswhiteboard.StatusCommented || publications != 2 || len(effectsRecords(t, live, live.replyA)) != 2 {
 		t.Fatal("mixed call not one durable/publication unit", publications, after)
 	}
 	publications = 0
@@ -71,14 +70,14 @@ func TestWhiteboardCommandAcceptanceFirstTextRetryAndSequence(t *testing.T) {
 	retry = strings.ReplaceAll(retry, `id="999"`, `id="1"`)
 	f.update(t, retry)
 	retried := read()
-	if retried.Counter != after.Counter || retried.PanelCounter != after.PanelCounter || publications != 3 {
+	if retried.Counter != after.Counter || retried.PanelCounter != after.PanelCounter || publications != 2 {
 		t.Fatal("corrected retry duplicated accepted work")
 	}
 	if retried.Items[0].Rationale != "  full rationale & text  " || !strings.Contains(retried.TopicBody("t"), "  full & <b>replacement</b>  ") {
 		t.Fatal("retry lost raw fields/body")
 	}
 	// Refusals (including an unpartitionable valid prefix) preserve all bytes,
-	// the numeric stamp, embed baseline and conversation projection.
+	// the numeric stamp, and conversation projection.
 	for _, bad := range []string{
 		`<wb:patch id="999"/>`,
 		`<wb:topic name="t"><wb:panel recap="never">prefix</wb:panel></wb:topic><wb:topic name="t"><wb:body>unterminated`,
@@ -100,7 +99,7 @@ func TestWhiteboardCommandAcceptanceFirstTextRetryAndSequence(t *testing.T) {
 		records := len(effectsRecords(t, live, live.replyA))
 		f.update(t, noop)
 		after := read()
-		if after.Seq != before.Seq+1 || after.LastEmbedSeq != after.Seq || after.EntrySeq != before.EntrySeq || publications != 3 || len(effectsRecords(t, live, live.replyA)) != records {
+		if after.Seq != before.Seq+1 || after.EntrySeq != before.EntrySeq || publications != 2 || len(effectsRecords(t, live, live.replyA)) != records {
 			t.Fatal("accepted no-op/empty sequence changed", noop)
 		}
 	}
@@ -108,13 +107,11 @@ func TestWhiteboardCommandAcceptanceFirstTextRetryAndSequence(t *testing.T) {
 	if !strings.Contains(query, "commented 1") || !strings.Contains(query, "comment, not a choice") || !strings.Contains(query, "answered_at:") {
 		t.Fatal(query)
 	}
-	// The last embed and file page expose the same status without a UI redesign.
+	// The file page exposes the status without a UI redesign.
 	st := read()
-	for _, path := range []string{f.pagePath(), filepath.Join(f.dir(), st.Embeds[len(st.Embeds)-1].Name)} {
-		data, err := os.ReadFile(path)
-		if err != nil || !strings.Contains(string(data), "user commented") {
-			t.Fatal("comment label missing", path, err)
-		}
+	data, err := os.ReadFile(f.pagePath())
+	if err != nil || !strings.Contains(string(data), "user commented") {
+		t.Fatal("comment label missing", f.pagePath(), err)
 	}
 	if !reflect.DeepEqual(st.Items[0].Options, []string{"One", "Two"}) {
 		t.Fatal("comment lost choices")

@@ -39,7 +39,7 @@ function fixture(store) {
     if (u.pathname.endsWith('/fs/worktrees')) return Promise.resolve({ ok: true, json: () => ({ roots: [{ path: '/session', branch: 'main', detached: false }, { path: '/other', branch: 'work', detached: false }] }) });
     return Promise.resolve({ ok: true, json: () => ({ root, abs: root + (dir ? '/' + dir : ''), name: root.split('/').pop(), session: root === '/session', sep: '/', entries: dir ? [{ name: 'child.go' }] : [{ name: 'src', dir: true }, { name: 'main.go' }, { name: 'space name.png' }] }) });
   }
-  new Function('document', 'window', 'wsT', 'getComputedStyle', 'requestAnimationFrame', CARDS)(doc, win, wsT, () => ({ overflowY: 'visible' }), () => {});
+  new Function('document', 'window', 'wsT', 'getComputedStyle', 'requestAnimationFrame', 'module', GALLERY + '\n;\n' + CARDS)(doc, win, wsT, () => ({ overflowY: 'visible' }), () => {}, undefined);
   new Function('document', 'window', 'wsT', 'wsTn', 'fetch', FILES)(doc, win, wsT, wsT, fetchFS);
   new Function('document', 'window', MENTION)(doc, win);
   var owners = new Function('doc', 'window', 'root', 'live', 'fpane', 'chead', 'rid', 'post', 'toast', 'copyText', 'load', 'save', 'ctext',

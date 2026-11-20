@@ -120,12 +120,12 @@
 .dgrid.live[data-ctab="files"] > .convo { display: none; }
 /* The split handle (.dcv-edge, cards.js splitHandle) stands in the gap left
    of the board where the conversation and the board stand side by side,
-   styled as the pinned column's handle (.bp-edge). Dragging it sets the
-   conversation's column (--convow with data-convow on the root, kept with
-   the pins), 320px at least and at most what leaves the board 360px: a
+   styled as the gallery column's handle (.bp-edge). Dragging it sets the
+   conversation's column (--convow with data-convow on the root, kept in
+   the card record), 320px at least and at most what leaves the board 360px: a
    width saved on a wider window is clamped to what this one leaves. */
 :root[data-convow] .dgrid.live { --dgrid-cols: minmax(320px, min(var(--convow), 100% - 360px - var(--dgrid-gap))) minmax(0, 1fr); }
-/* Beside the pinned column with a board width set (dashboard-rail.css), the
+/* Beside the gallery column with a board width set (dashboard-rail.css), the
    cell is sized to the two, so the conversation takes its own (--cvw) and
    the board the rest, which is the board's width. */
 :root[data-pincol][data-boardw] .dgrid.live { --dgrid-cols: minmax(320px, min(var(--cvw), 100% - 360px - var(--dgrid-gap))) minmax(0, 1fr); }
@@ -174,8 +174,7 @@ body:has(#toolbar-files[data-max][data-docked]) .board-toolbar .sheet-width { di
 .file-preview-body > .pv-sand, .file-preview-body > .pv-pdf { height: 100%; }
 :root[data-file-preview] .dgrid.live > .bcol,
 :root[data-file-preview] .dgrid.live > .dcv-edge,
-:root[data-file-preview] .bpcol,
-:root[data-file-preview] .bpzone { visibility: hidden; }
+:root[data-file-preview] .bgal { visibility: hidden; }
 
 /* the conversation panel's header with its tabs, and its Files pane
    (files.js). The header is the panel's top: the conversation or the Files

@@ -118,19 +118,23 @@ func TestSemanticEffectsNoopsRefusalAndSettings(t *testing.T) {
 		}
 	}
 	mixed(t, s, `<wb:topic name="same"><wb:log>Accepted</wb:log></wb:topic><wb:patch id="999"/>`, `<wb:topic name="same"><wb:log>Accepted</wb:log></wb:topic>`)
-	env := testEnv()
-	env.IsDir = func(string) bool { return true }
-	env.IsAbs = func(string) bool { return true }
-	out, problems := Apply(s, `<wb:embed-dir path="/external"/>`, env)
+	settingState := &State{}
+	before, _ := json.Marshal(settingState)
+	out, problems := Apply(settingState, `<wb:embed-dir path="/external"/>`, testEnv())
 	if len(problems) != 0 {
 		t.Fatal(problems)
 	}
-	wantEffect(t, out.Effects, "setting", "embed-dir", "", "/external")
-	out, problems = Apply(s, `<wb:embed-dir path=""/>`, env)
-	if len(problems) != 0 {
-		t.Fatal(problems)
+	if len(out.Effects) != 0 || out.Info != embedDirDeprecatedInfo(true) {
+		t.Fatalf("deprecated embed-dir outcome = %+v", out)
 	}
-	wantEffect(t, out.Effects, "setting", "embed-dir", "/external", "")
+	after, _ := json.Marshal(settingState)
+	var beforeState, afterState State
+	_ = json.Unmarshal(before, &beforeState)
+	_ = json.Unmarshal(after, &afterState)
+	beforeState.Seq = afterState.Seq
+	if !reflect.DeepEqual(beforeState, afterState) {
+		t.Fatalf("deprecated embed-dir changed state: before %s after %s", before, after)
+	}
 	// Effects are not a persisted State field or a new store shape.
 	raw, _ := json.Marshal(s)
 	var keys map[string]json.RawMessage

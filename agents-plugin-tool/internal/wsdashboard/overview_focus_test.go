@@ -55,7 +55,7 @@ func TestOverviewEntryPreservesReturnOffset(t *testing.T) {
 	for _, want := range []string{
 		`entry = state || { key: identity(n), offset: (n || o.toolbar).getBoundingClientRect().top - v.top };`,
 		`var shown = n ? Math.max(entry.offset, clearance(n)) : entry.offset;`,
-		`motion(before, flights, true, n || o.toolbar, entry.offset, shown, complete)`,
+		`motion(before, true, n || o.toolbar, entry.offset, shown, complete)`,
 		`keep(n || o.toolbar, shown)`,
 		`boardTarget && restore === boardTarget ? entry.offset`,
 	} {

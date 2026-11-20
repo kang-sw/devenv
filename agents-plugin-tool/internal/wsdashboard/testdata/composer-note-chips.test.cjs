@@ -75,10 +75,10 @@ assert.equal(strip.querySelector('[data-unchip]').getAttribute('data-unchip'), '
 assert.equal(strip.querySelector('[data-tchip]').getAttribute('data-tchip'), 'topic-1');
 assert.equal(context.chipList()[0].note, 'new', 'send/draft state stays synchronous');
 assert.equal(context.topicNotes()[0].value, 'new topic');
-// The wide pin hint must not ask body :has() to scan unrelated mutations.
+// Rules outside the grid read the mirrored layout, never a body :has()
+// scanning unrelated mutations.
 const css = readAssetSource('wsdashboard', 'dashboard.css');
 assert(!css.includes('body:not(.tk-paged):not(:has(#grid'));
-assert(css.includes('body:not(.tk-paged):not([data-dashboard-layout="tabs"]) .bpzone'));
 context.grid = { setAttribute(k, v) { this[k] = v; } };
 context.doc.body = new El('body'); context.live = context.worktree = context.cardBoard = false;
 context.q = () => [];

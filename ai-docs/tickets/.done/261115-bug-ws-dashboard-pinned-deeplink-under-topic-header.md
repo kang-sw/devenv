@@ -2,6 +2,7 @@
 title: "Pinned-column deep link can leave its control under the sticky topic header"
 related:
   261114-feat-ws-whiteboard-unified-whole-history: discovered during comparable baseline acceptance; not a TASK3 regression
+completed: 2026-11-20
 ---
 
 # Pinned-column deep link can leave its control under the sticky topic header
@@ -30,3 +31,8 @@ ownership when the sticky header stack changes. Retain the strict assertion
 and compare the same isolated setup on both production trees. Do not infer a
 complete cause beyond the retained measurements or treat an unexecuted
 precondition as a pass.
+
+
+## Resolution (2026-11-20)
+
+Resolved by construction in 261119-feat-ws-dashboard-paged-docking-gallery Phase 1 per (12)=a: a docked topic's header is a non-scrolling flex header above a dashboard-managed `.gal-pbody` scroller, and `topicScroller` / `navigate` target that scroller. Deep-link verification passed in `TestGalleryBrowser` (8f3533d17): the target lands at 123.3px, below the header's 111.3px bottom.

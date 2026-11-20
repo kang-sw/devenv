@@ -45,7 +45,7 @@ function frameShow() {}
 function frameReveal() {}
 var window = { WsCards: {
   weave: function (w) { return { pins: [], board: w }; },
-  pinList: function () { return null; },
+  docked: function () { return []; }, isDocked: function () { return false; }, wrap: function () {},
   settle: function (el, p) {
     el.childNodes.slice().forEach(function (n) { if (p.board.indexOf(n) < 0) el.removeChild(n); });
     p.board.forEach(function (n) { if (n.parentNode === el && el.moveBefore) el.moveBefore(n, null); else el.appendChild(n); });

@@ -90,7 +90,7 @@ time.tago, time.entry-at[data-at] { display: inline-block; contain: layout style
 .tophead { background: var(--wb-card); box-shadow: 0 -12px 0 var(--wb-bg); }
 .closed-more { display: block; margin: 0 0 16px; font-size: 12.5px; color: var(--wb-muted-fg); }
 button.closed-more { display: flex; margin: 0 auto 16px; }
-.tbar .chip:not(.policy):not(.ok):not(.fresh) { background: rgb(127 127 127 / .28); color: inherit; }
+.tbar .chip:not(.policy):not(.ok) { background: rgb(127 127 127 / .28); color: inherit; }
 .tbody { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .topic.quiet { box-shadow: none; background: transparent; }
 /* A visible body shares one surface with its bar, including framed div.tdoc.
@@ -113,11 +113,9 @@ button.closed-more { display: flex; margin: 0 auto 16px; }
 .cbar .id { font-size: 12px; font-weight: 700; opacity: .85; }
 .cbar .cls { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; opacity: .8; }
 .cbar .title { font-weight: 700; }
-.cbar .new, .ack .new, .ck .new, .srow .new { vertical-align: middle; }
 .cbar .btn { background: rgb(255 255 255 / .16); color: inherit; border: 0; flex: none; }
 .cbody { padding: 8px 10px 10px; }
 .new { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); flex: none; align-self: center; }
-.cbar .new { background: currentColor; }
 .ctx { margin: 0 0 8px; color: var(--wb-muted-fg); font-size: 13px; overflow-wrap: anywhere; }
 /* item block fields hold sanitized HTML whose inline style may still paint
    outside its box (no position, but margins, transforms, shadows): clip each
@@ -294,17 +292,6 @@ label.ck { cursor: pointer; }
 .ckrow[data-no] .ck input { accent-color: var(--wb-muted-fg); opacity: .45; }
 /* a row holding a staged answer or note */
 .ckrow.staged { box-shadow: inset 3px 0 0 var(--wb-primary); }
-/* the hide toggle in an open topic's check pill: form.js keeps its state on
-   <html> as data-ck-hide, so without that script the button stays hidden and
-   every row shows. While it is on, an answered row (no data-id; an open or
-   assumed row keeps one) is hidden, and the first row left visible drops the
-   divider a hidden row above it would have drawn. */
-.ckhide { width: 20px; height: 18px; background: transparent; color: var(--wb-muted-fg); }
-.ckhide[aria-pressed="true"] { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, transparent); }
-html:not([data-ck-hide]) .ckhide { display: none; }
-html[data-ck-hide="1"] .topic:not(.closed) .checks .ckrow:not([data-id]) { display: none; }
-html[data-ck-hide="1"] .topic:not(.closed) .checks .ckrow:nth-child(1 of .ckrow[data-id]) { border-top: 0; }
-
 /* settled: collapsed tonal chip */
 details.settled { font-size: 13px; }
 details.settled > summary, details.more > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 700; padding: 1px 10px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); }
@@ -316,7 +303,7 @@ details.more > summary { padding: 0 8px; background: transparent; box-shadow: in
 details.more[open] > summary { margin-bottom: 2px; }
 .srow { padding: 2px 4px; }
 .srow .id { font-size: 12px; color: var(--wb-muted-fg); }
-.srow .stext > .id, .srow .stext > .amark, .srow .stext > .new { margin-right: 6px; }
+.srow .stext > .id, .srow .stext > .amark { margin-right: 6px; }
 /* assumed: the lead's reading, settled like an answer; a small pill so it separates from the ID and text, not a role fill */
 .srow .amark { display: inline-block; vertical-align: baseline; font-size: 10.5px; font-weight: 700; line-height: 1.5; padding: 0 7px; border-radius: 999px; white-space: nowrap; background: color-mix(in srgb, var(--wb-accent-assumed) 18%, transparent); color: color-mix(in srgb, var(--wb-accent-assumed) 75%, var(--wb-muted-fg)); }
 .srow .stext > b { font-weight: 600; }

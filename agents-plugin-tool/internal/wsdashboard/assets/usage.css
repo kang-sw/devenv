@@ -64,6 +64,8 @@
 .usage-status-slot { grid-column: var(--col); grid-row: 3 / span 2; display: grid; align-content: center; gap: 4px; min-width: 0; padding: 8px; border-radius: 8px; border: 1px dashed var(--wb-line); text-align: center; box-sizing: border-box; }
 .usage-status-note { grid-column: var(--col); grid-row: 5; }
 .usage-window-card { min-width: 0; padding: 6px 7px 4px; border-radius: 8px; background: color-mix(in srgb, var(--wb-bg) 50%, var(--wb-card)); box-sizing: border-box; }
+.usage-pending-card { display: grid; place-items: center; min-height: 88px; aspect-ratio: 1.85; color: var(--wb-primary); }
+.usage-pending-card .spin { width: 14px; height: 14px; }
 .usage-window-card.usage-disabled { opacity: .55; }
 .usage-window-empty { display: grid; place-items: center; min-width: 0; min-height: 88px; padding: 8px; border-radius: 8px; background: none; border: 1px dashed var(--wb-line); color: var(--wb-muted-fg); font-size: 11px; text-align: center; box-sizing: border-box; }
 .usage-disabled-tag { font-size: 10px; font-weight: 600; color: var(--wb-muted-fg); padding: 1px 5px; border-radius: 4px; border: 1px solid var(--wb-line); white-space: nowrap; }

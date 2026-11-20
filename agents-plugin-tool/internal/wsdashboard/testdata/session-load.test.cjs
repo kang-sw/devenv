@@ -91,7 +91,7 @@ function scrollFixture(storage = {}, pathname = '/s/a', hash = '') {
     addEventListener(type, cb) { listeners[type] = cb; }, removeEventListener(type) { delete listeners[type]; }};
   const reloadKey = 'ws.dashboard.board-reload.' + pathname + '?frame=1';
   const c = vm.createContext({ shell: false, framed: true, location: {pathname, hash, search: '?frame=1'}, BOARD_RELOAD: reloadKey,
-    PANES: ['convo', 'bcol', 'r-tree', 'bpins', 'drbody'], convo: nodes.convo, entriesBox: () => box,
+    PANES: ['convo', 'bcol', 'r-tree', 'drbody'], convo: nodes.convo, entriesBox: () => box,
     atBottom: () => nodes.convo.scrollTop + nodes.convo.clientHeight >= nodes.convo.scrollHeight - 24,
     boardBoxes: () => [nodes.bcol], boardLivePanels: () => [panel], boardScroller: () => nodes.bcol, boardWithSnap: fn => fn(),
     boardPanelKey: n => n.id, topicKey: n => n.key, q: () => [topic],

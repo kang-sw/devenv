@@ -109,14 +109,7 @@ func TestWhiteboardEffectsKnownCreationBatchAndLegacySeparation(t *testing.T) {
 				rec.Whiteboard = &wswhiteboard.State{}
 			}
 			var err error
-			outcome, problems = wswhiteboard.Apply(rec.Whiteboard, commands, wswhiteboard.Env{
-				Now: now,
-				IsDir: func(path string) bool {
-					info, statErr := os.Stat(path)
-					return statErr == nil && info.IsDir()
-				},
-				IsAbs: filepath.IsAbs,
-			})
+			outcome, problems = wswhiteboard.Apply(rec.Whiteboard, commands, wswhiteboard.Env{Now: now})
 			if len(problems) > 0 {
 				return errWhiteboardRefused
 			}
@@ -219,38 +212,9 @@ func TestWhiteboardEffectsKnownCreationBatchAndLegacySeparation(t *testing.T) {
 	if afterNoop.Seq != beforeNoop.Seq+1 {
 		t.Fatalf("accepted no-op did not advance render sequence: before=%d after=%d", beforeNoop.Seq, afterNoop.Seq)
 	}
-	if afterNoop.LastEmbedSeq != afterNoop.Seq {
-		t.Fatalf("no-op embed sequence = %d, want current render sequence %d", afterNoop.LastEmbedSeq, afterNoop.Seq)
-	}
-	if len(afterNoop.Embeds) != len(beforeNoop.Embeds)+1 {
-		t.Fatalf("no-op appended %d embeds, want exactly one", len(afterNoop.Embeds)-len(beforeNoop.Embeds))
-	}
-	if !reflect.DeepEqual(afterNoop.Embeds[:len(beforeNoop.Embeds)], beforeNoop.Embeds) {
-		t.Fatalf("no-op changed the prior embed prefix: before=%+v after=%+v", beforeNoop.Embeds, afterNoop.Embeds)
-	}
-	priorEmbed := beforeNoop.Embeds[len(beforeNoop.Embeds)-1]
-	newEmbed := afterNoop.Embeds[len(afterNoop.Embeds)-1]
-	if newEmbed.Seq != afterNoop.Seq || newEmbed.Name == priorEmbed.Name {
-		t.Fatalf("new embed identity/sequence = %+v, prior = %+v", newEmbed, priorEmbed)
-	}
-	if !strings.HasPrefix(newEmbed.Name, f.replyA+"-") || !strings.HasSuffix(newEmbed.Name, ".html") {
-		t.Fatalf("new embed does not follow reply/hash/html naming contract: %q", newEmbed.Name)
-	}
-	hash := strings.TrimSuffix(strings.TrimPrefix(newEmbed.Name, f.replyA+"-"), ".html")
-	if len(hash) != 10 || hash == strings.TrimSuffix(strings.TrimPrefix(priorEmbed.Name, f.replyA+"-"), ".html") {
-		t.Fatalf("new embed hash identity = %q, prior = %q", hash, priorEmbed.Name)
-	}
-	for _, r := range hash {
-		if !strings.Contains("0123456789abcdef", string(r)) {
-			t.Fatalf("new embed hash is not lowercase hexadecimal: %q", hash)
-		}
-	}
 	beforeComparable := *beforeNoop
 	afterComparable := *afterNoop
 	beforeComparable.Seq = afterComparable.Seq
-	beforeComparable.LastEmbedSeq = afterComparable.LastEmbedSeq
-	beforeComparable.Embeds = append([]wswhiteboard.Embed(nil), afterComparable.Embeds...)
-	afterComparable.Embeds = append([]wswhiteboard.Embed(nil), afterComparable.Embeds...)
 	if !reflect.DeepEqual(beforeComparable, afterComparable) || len(effectsRecords(t, f, f.replyA)) != beforeNoopRecords {
 		t.Fatalf("true no-op changed board semantics or effects ring: before=%+v after=%+v records=%d", beforeComparable, afterComparable, len(effectsRecords(t, f, f.replyA)))
 	}

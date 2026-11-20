@@ -33,58 +33,144 @@
   .rscrim { display: block; position: fixed; inset: 0; z-index: 44; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .22s; }
   .rail-open .rscrim { opacity: 1; pointer-events: auto; }
 }
-/* ===== pinned column (cards.js, dashboard.js board cards) =====
-   Pinned topics and cards stand in the pin list (.bpins). It is the board
-   region's first node, a "Pinned" group, unless the pinned column shows:
-   from 1600px, while anything is pinned and the layout menu is not
-   "tabs", the page sets data-pincol on the root and the list moves into
-   the column (.bpcol), the page body's last grid column. Below 2200px the
-   column takes the session rail's place and the rail overlays as it does
-   below 1600px (the arrow and Ctrl+` open it); from 2200px both show, and
-   the column shows with nothing pinned too, so its handle sizes the board
-   before the first pin: its empty pin list is the idle pin zone's quiet
-   "drop here" placeholder (as .bpzone below), lit while a drag runs. The
-   store page (.tk-spage) takes the hidden grid's cell in every one of
-   these grids. The board keeps its no-pin width (--pbw: the 1680px page
-   less its paddings, the rail and its gap; the board-first page's 900px
-   column), narrowed to leave the column 480px, and the column fills the
-   window's remaining width to its right, so the page fills the window. The
-   handle on the column's left edge, in the gap toward the board, drags the
-   board's width (--boardw with data-boardw, kept by cards.js; the column
-   keeps 280px at least: a width saved on a wider window is clamped to what
-   this window leaves, the column's 280px and the gaps). On the live page
+/* ===== paged docking gallery (cards.js #bgal, gallery.js) =====
+   Docked topics and cards stand in the gallery: pages of panes, one page
+   shown at a time in a clipped viewport (.gal-viewport); the others stay
+   mounted, translated a page height and a 24px gap per position out of
+   it (--gal-off; the gap keeps a neighbour from touching the clip edge,
+   which IntersectionObserver still counts as intersecting), so
+   intersection observers count them out of view and their frames keep
+   their documents (never display, visibility, opacity or
+   content-visibility). A vertical dot rail (.gal-rail) left of the
+   viewport lists the pages: each dot shows its pane count, + the trailing
+   empty page (.gal-plus), and in the narrow view ⌂ the Main Board (Page
+   0). The page sets data-gal on the root (dashboard-board.js): "col" from
+   1600px with a docked page (with data-pincol: the gallery is the page
+   body's last grid column, its width handle .bp-edge on its left edge
+   and the rail right of it; below 2200px the column takes the session
+   rail's place and the rail overlays as it does below 1600px, the arrow
+   and Ctrl+` opening it; from 2200px both show); "drag" while a drag
+   alone shows it (no docked page: over the window's right edge, the
+   board left where it stands); "narrow" below 1600px or in the "tabs"
+   layout (fixed over the board's column, placed by the page through
+   --gal-left/top/width/height; data-away moves it off the window while
+   that column is hidden). With no docked page and no drag no column is
+   reserved. The store page (.tk-spage) takes the hidden grid's cell in
+   every one of these grids. The board keeps its no-gallery width (--pbw:
+   the 1680px page less its paddings, the rail and its gap; the
+   board-first page's 900px column), narrowed to leave the column 480px,
+   and the column fills the window's remaining width to its right. The
+   handle drags the board's width (--boardw with data-boardw, kept by
+   cards.js; the column keeps 280px at least: a width saved on a wider
+   window is clamped to what this window leaves). On the live page
    --boardw is the board's own column, not its cell: the cell is the
    conversation's width (--cvw: --convow, else the stylesheet's 5:7 share
    of the board), the grid's 16px gap and the board's, so each handle
    moves only the panel on its left and the column takes the difference.
-   The column scrolls on its own. */
+   A docked unit fills its pane: a card's body flexes (its stored height
+   waits for the board), a topic's head stays put over its body's
+   scroller (.gal-pbody, cards.js wrapTopic), so nothing sticks over what
+   a deep link scrolls to. A page is a split tree: a split (.gal-split,
+   row or col) holds its two children and a 6px divider (.gal-div, a
+   focusable separator) between them; a drag over a docked pane previews
+   its drop zone (.gal-overlay over the viewport: the zone's half of the
+   pane, or all of it for the center). A drag held over a rail dot
+   springs its page into view (.spring, cards.js). Past a pane's scroll
+   limit the wheel pulls (cards.js gate): the page shown, or the narrow
+   Main Board, shifts by its translate property (apart from the slides'
+   transform) while data-gal-pull is set, a pill (.gal-pullpill) at that
+   edge of the viewport reads the target and its percentage, and the
+   target's dot carries .pull-target. */
 :root { --pbw: calc(1680px - 32px - 356px); }
 .dbody:has(> .dgrid.live) { --cvw: var(--convow, calc(var(--boardw) * 5 / 7)); }
 .dash.board { --pbw: 900px; }
-.bpcol { display: none; }
-/* An empty board (no topic or card in it; the placeholder may follow an empty #bpins or a future toolbar card) is a quiet dashed placeholder, as the idle pin zone (.bpzone) is. In the live page it fills its column (.bcol), a scroll box with its own offsets (padding, the .top-classed pill wrapper's margin, the rail wrappers' margins), so it is pinned to the column's padding box rather than sized by height: 100%, which overflowed by those offsets. Elsewhere (no sized column) it stays a short strip. */
-.r-board:not(:has(> .topic, > .bcard)) > .empty { box-sizing: border-box; min-height: 54px; margin: 0; display: grid; place-items: center; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); font-weight: 700; }
-.dgrid.live > .bcol:has(> .r-board > .empty) { position: relative; }
-.dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)):has(> .empty) { position: absolute; inset: 0 4px 0 2px; display: flex; flex-direction: column; }
-.dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)) > .empty { flex: 1 1 0; }
-.bpins:empty { display: none; }
-.r-board > .bpins { margin-bottom: 16px; padding-bottom: 6px; border-bottom: 1px dashed var(--wb-line); }
-.r-board > .bpins::before { content: attr(data-label); display: block; padding: 0 2px 6px; font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); }
-.bpcol > .bpins { flex: 1 1 0; min-height: 0; overflow: auto; overflow-anchor: none; padding: 10px 4px 40px 2px; }
-/* The pinned column has no rail (cards.js), so its topics' bars and cards' headers stick to the top of this scroller by CSS alone, as the board's do. The pin list above the board sits in the rail's host (.wb-rail) and is railed with the board. */
-.bpcol > .bpins .topic { overflow: hidden; overflow: clip; }
-.bpcol > .bpins .topic > .tophead { position: sticky; top: 0; z-index: 2; }
-.bpcol > .bpins .topic:not(.quiet) > .tophead > .tbar { border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
-.bpcol > .bpins .bcard:not([data-max]) .bc-hd { position: sticky; top: 0; z-index: 1; background: var(--wb-card); border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
+.bgal { display: none; }
+:root[data-gal] .bgal:not([hidden]) { display: flex; gap: 6px; min-width: 0; min-height: 0; }
+.bgal > .bp-edge { display: none; }
+.gal-rail { flex: none; width: 34px; display: flex; flex-direction: column; align-items: center; border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-bg) 70%, var(--wb-card)); box-shadow: var(--wb-shadow); cursor: ns-resize; touch-action: none; -webkit-user-select: none; user-select: none; }
+.gal-rail[hidden] { display: none; }
+.gal-rzone { flex: 1 1 0; width: 100%; display: flex; align-items: center; justify-content: center; color: var(--wb-muted-fg); font-size: 10px; opacity: .5; cursor: pointer; transition: background .12s, opacity .12s; }
+.gal-rzone:hover { background: color-mix(in srgb, var(--wb-fg) 6%, transparent); opacity: 1; color: var(--wb-primary); }
+.gal-dots { flex: none; display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 8px 0; }
+.gal-dot { box-sizing: border-box; width: 22px; height: 22px; padding: 0; border-radius: 999px; border: 1.5px solid var(--wb-muted-fg); background: var(--wb-card); color: var(--wb-muted-fg); font: 700 10px var(--wb-mono); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: transform .12s, background .12s, border-color .12s, height .14s; }
+.gal-dot:hover, .gal-dot:focus-visible { border-color: var(--wb-primary); color: var(--wb-fg); transform: scale(1.08); }
+.gal-dot.active { height: 28px; border-color: var(--wb-primary); background: var(--wb-primary); color: var(--wb-card); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-primary) 24%, transparent); }
+.gal-dot.main { margin-bottom: 8px; border-color: #3fa853; color: #3fa853; font-size: 11px; }
+.gal-dot.main.active { background: #3fa853; color: #0b1910; box-shadow: 0 0 0 3px rgb(63 168 83 / .24); }
+.gal-dot.empty { border-style: dashed; background: transparent; font-size: 13px; font-weight: 500; }
+.gal-dot.empty.active { height: 24px; border-style: solid; border-color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 16%, transparent); color: var(--wb-primary); }
+.gal-dot.drop, .gal-dot.spring, .gal-dot.pull-target { outline: 2px solid #e0a84a; outline-offset: 2px; transform: scale(1.16); box-shadow: 0 0 0 5px rgb(224 168 74 / .24); }
+.bgal[data-dotdrag] .gal-rail { cursor: grabbing; }
+.gal-viewport { flex: 1 1 0; min-width: 0; min-height: 0; position: relative; overflow: hidden; overflow: clip; }
+.gal-page { position: absolute; inset: 0; display: flex; min-width: 0; min-height: 0; transform: translateY(calc(var(--gal-off, 0) * (100% + 24px))); }
+.gal-page[data-active] { transform: none; transition: transform .22s cubic-bezier(.22, 1, .36, 1), translate .22s cubic-bezier(.22, 1, .36, 1); }
+.r-board { transition: translate .22s cubic-bezier(.22, 1, .36, 1); }
+.gal-page[data-gal-pull], .r-board[data-gal-pull] { transition: translate .06s linear; }
+@media (prefers-reduced-motion: reduce) { .gal-page[data-active], .r-board { transition: none; } }
+.gal-pullpill { position: absolute; left: 50%; z-index: 6; box-sizing: border-box; min-width: 220px; max-width: calc(100% - 20px); padding: 5px 10px 6px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--wb-primary) 55%, var(--wb-line)); background: color-mix(in srgb, var(--wb-card) 94%, black); box-shadow: 0 6px 20px rgb(0 0 0 / .45); display: flex; flex-direction: column; gap: 4px; pointer-events: none; opacity: 0; transform: translateX(-50%) scale(.94); transition: opacity .14s ease, transform .14s ease; }
+.gal-pullpill.top { top: 8px; }
+.gal-pullpill.bottom { bottom: 8px; }
+.gal-pullpill.lit { opacity: 1; transform: translateX(-50%) scale(1); }
+.gal-pullpill.damped { border-color: var(--wb-line); }
+.gal-pulltxt { font-size: 11px; font-weight: 600; color: var(--wb-fg); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gal-pulltrack { height: 3px; border-radius: 999px; background: var(--wb-muted); overflow: hidden; }
+.gal-pullfill { height: 100%; width: 0%; border-radius: 999px; background: var(--wb-primary); transition: width .06s linear; }
+.gal-pullpill.ready .gal-pullfill { background: #5cc46a; }
+.gal-split { flex: 1 1 0px; min-width: 0; min-height: 0; display: flex; }
+.gal-split.row { flex-direction: row; }
+.gal-split.col { flex-direction: column; }
+.gal-div { flex: none; position: relative; touch-action: none; -webkit-user-select: none; user-select: none; outline: none; }
+.gal-split.row > .gal-div { width: 6px; cursor: col-resize; }
+.gal-split.col > .gal-div { height: 6px; cursor: row-resize; }
+.gal-div::after { content: ""; position: absolute; border-radius: 999px; background: transparent; transition: background .12s; }
+.gal-split.row > .gal-div::after { left: 2px; right: 2px; top: 4px; bottom: 4px; }
+.gal-split.col > .gal-div::after { top: 2px; bottom: 2px; left: 4px; right: 4px; }
+.gal-div:hover::after, .gal-div:focus-visible::after, .gal-div.drag::after { background: var(--wb-primary); }
+.gal-overlay { position: absolute; z-index: 5; box-sizing: border-box; pointer-events: none; background: color-mix(in srgb, var(--wb-primary) 24%, transparent); border: 2px solid var(--wb-primary); border-radius: 6px; }
+.gal-overlay[hidden] { display: none; }
+.gal-pane { flex: 1 1 0px; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.gal-pane > section.topic, .gal-pane > .bcard { flex: 1 1 auto; min-height: 0; margin: 0; display: flex; flex-direction: column; }
+.gal-pane > section.topic { overflow: hidden; overflow: clip; }
+.gal-pane > section.topic > .tophead { flex: none; position: static; }
+.gal-pane > section.topic:not(.quiet) > .tophead > .tbar { border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
+.gal-pbody { flex: 1 1 auto; min-height: 0; overflow: auto; overflow-anchor: none; overscroll-behavior: contain; }
+/* The board's visible-only rendering never skips a docked body: the
+   gallery keeps its pages rendered and off the view by transform alone. */
+.gal-pane > section.topic > .gal-pbody { content-visibility: visible !important; }
+.gal-pane > .bcard > .bc-in { flex: 1 1 auto; min-height: 0; }
+.gal-pane > .bcard > .bc-in > .bc-hd { flex: none; }
+.gal-pane > .bcard:not([data-max]) > .bc-in > .bc-body { flex: 1 1 auto; height: auto !important; }
+.gal-pane > .bcard > .bc-in > .bc-grip { display: none; }
+.gal-plus { box-sizing: border-box; align-items: center; justify-content: center; padding: 16px; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); border-radius: var(--wb-radius); color: var(--wb-muted-fg); font-weight: 700; font-size: 13px; text-align: center; }
+:root[data-bdrag] .gal-plus, .gal-plus.drop { border-color: var(--wb-primary); color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 8%, var(--wb-bg)); }
+.gal-plus.drop { background: color-mix(in srgb, var(--wb-primary) 18%, var(--wb-bg)); }
+/* the narrow view: over the board's column, Page 0 the board itself */
+:root[data-gal="narrow"] .bgal:not([hidden]) { position: fixed; z-index: 35; left: var(--gal-left, 0px); top: var(--gal-top, 0px); width: var(--gal-width, 100vw); height: var(--gal-height, 100vh); pointer-events: none; }
+:root[data-gal="narrow"] .bgal[data-away] { transform: translateX(-200vw); }
+:root[data-gal="narrow"] .bgal > .gal-rail, :root[data-gal="narrow"] .bgal:not([data-pos="-1"]) > .gal-viewport { pointer-events: auto; }
+:root[data-gal="narrow"] .bgal:not([data-pos="-1"]) > .gal-viewport { background: var(--wb-bg); }
+:root[data-gal="narrow"] .dgrid > .bcol { padding-left: 42px; }
+/* While a docked page shows over it (data-gal-away, cards.js), the Main
+   Board stands off the view as an inactive page does: its column's content
+   is translated past the window's left edge, out of the column's clip (a
+   scroller already clips; the board-first page's column clips for this),
+   so intersection observers count it out of view. Only the content moves:
+   the column keeps its box (placeGallery measures it), its scroll offset
+   and its DOM. */
+:root[data-gal-away] .dgrid > .bcol > * { transform: translateX(calc(-100% - 100vw)); }
+:root[data-gal-away] .dgrid.board > .bcol { overflow-x: clip; }
+/* the wide view with no docked page, while a drag runs: over the right edge */
+:root[data-gal="drag"] .bgal:not([hidden]) { position: fixed; z-index: 40; top: 50px; bottom: 12px; right: 16px; width: clamp(140px, calc(100vw - 1696px), 520px); }
 .bp-edge { position: absolute; top: 0; bottom: 0; left: -12px; width: 9px; cursor: col-resize; touch-action: none; z-index: 2; }
 .bp-edge::after, .dcv-edge::after { content: ""; position: absolute; top: 50%; left: 3px; width: 3px; height: 36px; margin-top: -18px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
 .bp-edge:hover::after, .bp-edge.drag::after, .dcv-edge:hover::after, .dcv-edge.drag::after { background: var(--wb-primary); }
 @media (min-width: 1600px) {
-  :root[data-pincol] .bpcol { display: flex; flex-direction: column; position: relative; min-height: 0; min-width: 0; grid-row: 1; grid-column: 2; }
+  :root[data-pincol] .bgal:not([hidden]) { position: relative; grid-row: 1; grid-column: 2; }
+  :root[data-pincol] .bgal > .bp-edge { display: block; }
   :root[data-pincol] .dbody { grid-template-columns: minmax(0, min(var(--boardw, min(var(--pbw), 100% - 496px)), 100% - 296px)) minmax(280px, 1fr); }
   :root[data-pincol][data-boardw] .dbody:has(> .dgrid.live) { grid-template-columns: minmax(0, min(var(--cvw) + 16px + var(--boardw), 100% - 296px)) minmax(280px, 1fr); }
   :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 1; grid-row: 1; }
-  .dash:not(.live):not(.history) .bpcol { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
+  :root[data-pincol] .dash:not(.live):not(.history) .bgal { position: sticky; top: 12px; height: calc(100vh - 24px); height: calc(100dvh - 24px); }
   :root[data-pincol] .dwrap:not(.narrow), :root[data-pincol] .dgrid.board { max-width: none; }
 }
 @media (min-width: 1600px) and (max-width: 2199.98px) {
@@ -104,42 +190,27 @@
   :root[data-pincol][data-boardw] .dbody:has(> .dgrid.live) { grid-template-columns: 340px minmax(0, min(var(--cvw) + 16px + var(--boardw), 100% - 652px)) minmax(280px, 1fr); }
   :root[data-pincol] .dbody > .rail { grid-column: 1; grid-row: 1; }
   :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 2; }
-  :root[data-pincol] .bpcol { grid-column: 3; }
-  :root[data-pincol] body:not(.tk-paged) .bpcol > .bpins:empty { display: grid; place-items: center; padding: 12px; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); border-radius: var(--wb-radius); color: var(--wb-muted-fg); font-weight: 700; font-size: 13px; text-align: center; }
-  :root[data-pincol] .bpcol > .bpins:empty::before { content: attr(data-drop); }
-  :root[data-pincol][data-bdrag] body:not(.tk-paged) .bpcol > .bpins:empty { border-color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 8%, var(--wb-bg)); color: var(--wb-primary); font-weight: 800; }
+  :root[data-pincol] .bgal:not([hidden]) { grid-column: 3; }
 }
+/* An empty board (no topic or card in it; the placeholder may follow a future toolbar card) is a quiet dashed placeholder. In the live page it fills its column (.bcol), a scroll box with its own offsets (padding, the .top-classed pill wrapper's margin, the rail wrappers' margins), so it is pinned to the column's padding box rather than sized by height: 100%, which overflowed by those offsets. Elsewhere (no sized column) it stays a short strip. */
+.r-board:not(:has(> .topic, > .bcard)) > .empty { box-sizing: border-box; min-height: 54px; margin: 0; display: grid; place-items: center; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); font-weight: 700; }
+.dgrid.live > .bcol:has(> .r-board > .empty) { position: relative; }
+.dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)):has(> .empty) { position: absolute; inset: 0 4px 0 2px; display: flex; flex-direction: column; }
+.dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)) > .empty { flex: 1 1 0; }
 /* the pin button in a topic's title bar, and dragging a topic or card by
-   its header: the dragged one dims, a line shows where it lands, and the
-   drop zones show while a drag runs (data-bdrag on the root): the empty
-   pin group atop the board ("group"), or the zone along the right edge
-   where a first pin opens the pinned column ("edge"). The zone fills the
-   strip right of the left-aligned page (1680px wide at most while nothing
-   is pinned), and at least 48px, so it leaves the board column to its own
-   reorder drops; where the strip is narrow its label runs vertically.
-   From 1780px, where the strip is wide, the zone stands there idle while
-   nothing is pinned and the column could show (not the "tabs" layout, not
-   a store page): a quiet placeholder for the column, lit when a drag runs.
-   From 2200px the column itself shows instead (data-pincol), so the zone
-   stays hidden there. */
+   its header: the dragged one dims, a line shows where it lands in the
+   board's flow, and the gallery's rail shows (data-bdrag on the root)
+   with the drop target under the pointer lit (.drop: a rail dot, the +
+   page, a docked page). */
 .tbar .tpin { color: inherit; opacity: .45; }
 .tbar:hover .tpin, .tbar .tpin:focus-visible { opacity: .9; }
 .tbar .tpin[aria-pressed="true"] { opacity: 1; color: var(--wb-primary); }
 .tbar .tpin[aria-pressed="true"] .li, .bc-pin[aria-pressed="true"] .li { fill: color-mix(in srgb, var(--wb-primary) 25%, transparent); }
-.r-board section.topic > .tophead > .tbar, .bpins section.topic > .tophead > .tbar, .bc-hd { cursor: grab; }
+.r-board section.topic > .tophead > .tbar, .bgal section.topic > .tophead > .tbar, .bc-hd { cursor: grab; }
 :root[data-bdrag], :root[data-bdrag] * { cursor: grabbing !important; -webkit-user-select: none; user-select: none; }
 .bdrag { opacity: .4; }
 .bdrop { position: fixed; z-index: 46; height: 3px; border-radius: 2px; background: var(--wb-primary); pointer-events: none; }
 .bdrop[hidden] { display: none; }
-:root[data-bdrag="group"] .r-board > .bpins:empty { display: block; position: sticky; top: var(--wb-rail-inset, 0px); z-index: 5; min-height: 54px; padding: 0; border: 1.5px dashed var(--wb-primary); border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-bg)); }
-:root[data-bdrag="group"] .r-board > .bpins:empty::before { content: attr(data-drop); padding: 18px 12px; text-align: center; color: var(--wb-primary); }
-.bpzone { position: fixed; z-index: 40; top: 50px; bottom: 12px; right: 16px; width: max(48px, calc(100vw - 1696px)); display: none; place-items: center; padding: 12px; border: 2px dashed var(--wb-primary); border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-primary) 8%, var(--wb-bg)); color: var(--wb-primary); font-weight: 800; font-size: 13px; text-align: center; pointer-events: none; }
-:root[data-bdrag="edge"] .bpzone { display: grid; }
-.bpzone.over { background: color-mix(in srgb, var(--wb-primary) 18%, var(--wb-bg)); }
-@media (max-width: 1779.98px) { .bpzone { writing-mode: vertical-rl; padding: 12px 4px; } }
-@media (min-width: 1780px) {
-  :root:not([data-pincol]):not([data-bdrag]) body:not(.tk-paged):not([data-dashboard-layout="tabs"]) .bpzone { display: grid; z-index: 1; border-color: color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); background: transparent; color: var(--wb-muted-fg); font-weight: 700; }
-}
 .rail .rhd { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); }
 .rail .rsp { flex: 1; }
 .rail .chip { height: 18px; font-size: 11px; padding: 0 7px; flex: none; }

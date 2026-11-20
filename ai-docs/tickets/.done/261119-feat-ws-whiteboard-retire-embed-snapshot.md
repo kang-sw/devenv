@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6f1ef5c65ba130a5
 sage-review-completeness-reviewed: 6f1ef5c65ba130a5
+completed: 2026-11-20
 ---
 
 # Retire the whiteboard's per-update embed HTML snapshot
@@ -289,3 +290,66 @@ Verification:
   `261119-refactor-ws-whiteboard-sqlite-board-store` `## Decisions`
   (Measurement). Windows V3 measurement is recorded as deferred.
 - Tests assert behavior, not playbook sentences.
+
+### Result (b0ffcb34e) - 2026-11-20
+
+Commit `cfbfc38c9` removed the per-update embed renderer, publication, result
+line, persisted fields, layout branches, snapshot-only UI and playbook text.
+`wb:embed-dir` remains an accepted no-op with one deprecation sentence;
+`embed-dir` remains a decodable stored effect field; the legacy orphan-file
+matcher remains. The canonical playbook, wsflow mirror, Pi mirror, manifests
+and bundled archives were regenerated. The pinned old-source harness verifies
+both compatibility directions, including stale embed state and the older
+display-only degradation. The highest compatibility tier is T1.
+
+Commit `b0ffcb34e` added the opt-in
+`TestWhiteboardUpdateMeasurement`. With
+`WS_WHITEBOARD_MEASURE_UPDATES=20`, the same harness was run on the same macOS
+machine against an archive of `fbcc01bb0` and against the retired-embed tree.
+Each run used a fresh temporary project and made 20 identical top-level
+`whiteboard.update` calls, each carrying one topic, one named panel and one
+log. The first row is the first write; the other 19 are steady-state writes.
+Wall time covers the tool call only; snapshots and reporting run outside it.
+
+The recursive cross-check has two non-overlapping scopes: the reply folder,
+where authoritative board files and live page publication share a directory,
+and its parent excluding that reply folder, where legacy embed snapshots were
+flat files. `created/modified/removed` and `bytes written` compare final file
+content hashes and sizes. Steady-state filesystem values below are medians;
+after retention filled, the baseline normally created one embed and removed
+one older embed per update.
+
+| per update | before `fbcc01bb0` | after `cfbfc38c9` | change |
+|---|---:|---:|---:|
+| first-write wall time | 128.115 ms | 117.434 ms | -8.3% |
+| steady wall median | 86.596 ms | 85.159 ms | -1.7% |
+| steady wall p95 | 119.336 ms | 110.485 ms | -7.4% |
+| `FileIOCounters`, first write | 99 | 99 | 0 |
+| `FileIOCounters`, steady median | 107 | 107 | 0 |
+| first-write files created/modified/removed | 9 / 0 / 0 | 8 / 0 / 0 | -1 created |
+| first-write final bytes written | 518,035 | 350,109 | -32.4% |
+| steady files created/modified/removed | 2 / 5 / 1 | 1 / 5 / 0 | -1 created, -1 removed |
+| steady final bytes written | 542,469 | 374,270 | -31.0% |
+| steady legacy-embed scope | 1 created, 1 removed, 163,365 B | 0 / 0 / 0, 0 B | removed |
+
+`FileIOCounters` is unchanged because the retired embed path used direct
+`os.*` calls. The directory cross-check exposes that otherwise invisible
+derived-file churn, but remains a lower bound: atomic temporary files created
+and removed within one update are absent from both snapshots, and the method
+does not count `flock`, rename, chmod or bytes rewritten with identical final
+content as distinct operations. `fs_usage` requires root and `dtruss` requires
+additional DTrace privileges on this host, so neither was used and no `sudo`
+was attempted for this measurement.
+
+Focused `wswhiteboard`, `wslive`, `wsi18n`, resource-drift and MCP whiteboard
+tests passed, including the broad MCP whiteboard slice at 100.660 seconds.
+Darwin, Linux and Windows vet passed for the touched packages. Independent
+review's compatibility-test and dead-layout findings were fixed and its second
+pass was clear.
+
+Windows V3 measurement: deferred.
+
+
+## Resolution (2026-11-20)
+
+Phase 1 merged into develop at 0c375a5ee (embed snapshot retired; wb:embed-dir and embed: are accepted no-ops). Remaining disk-page retirement continues in 261116-feat-ws-whiteboard-retire-disk-pages.

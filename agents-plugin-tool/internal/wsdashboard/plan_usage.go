@@ -32,6 +32,7 @@ type planUsageEntry struct {
 	Harness string            `json:"harness"`
 	Group   string            `json:"group,omitempty"`
 	Label   string            `json:"label,omitempty"`
+	Pending bool              `json:"pending,omitempty"`
 	Plan    string            `json:"plan,omitempty"`
 	Source  string            `json:"source,omitempty"`
 	Status  string            `json:"status,omitempty"`

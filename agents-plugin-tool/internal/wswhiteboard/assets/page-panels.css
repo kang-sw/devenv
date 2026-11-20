@@ -53,7 +53,7 @@ details.folded .rows li { color: var(--wb-muted-fg); }
 
 /* kanban lanes (tickets panel): side by side once the panel body is wide
    enough, stacked otherwise; the container query follows the panel's own
-   width, which differs between the side column, a narrow page, and the embed */
+   width, which differs between the side column and a narrow page. */
 details.panel .body { container-type: inline-size; }
 .lanes { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 @container (min-width: 480px) { .lanes { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); } }

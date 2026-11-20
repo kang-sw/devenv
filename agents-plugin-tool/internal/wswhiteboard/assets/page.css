@@ -102,7 +102,7 @@
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"] { color-scheme: dark; }
 * { box-sizing: border-box; }
-/* Scrollbars, for every scroller of the board, its body frames, and the embed: thin,
+/* Scrollbars, for every scroller of the board and its body frames: thin,
    a transparent track, and a thumb of the text colour, a little stronger under the
    pointer, so the OS's wide opaque bars (Windows) read as part of either theme;
    overlay bars (macOS) stay overlay. Standard properties only: Chromium 121+ ignores
@@ -123,7 +123,6 @@ button { font: inherit; color: inherit; }
 a { color: var(--wb-primary); }
 .wrap { margin: 0 auto; padding: 16px; }
 .full .wrap { max-width: 1200px; }
-.embed .wrap { max-width: 780px; padding: 12px; }
 
 /* page header */
 .top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -135,8 +134,6 @@ a { color: var(--wb-primary); }
 .chip { display: inline-flex; align-items: center; gap: 3px; height: 20px; font-size: 12px; font-weight: 700; line-height: 1; padding: 0 9px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
 .chip.policy { background: var(--wb-policy); color: var(--wb-on-policy); }
 .chip.ok { background: var(--wb-technical); color: var(--wb-on-technical); }
-.chip.fresh { background: var(--wb-now); color: var(--wb-on-now); }
-.chip.fresh .new { background: currentColor; }
 /* A topic bar's count chip on the dashboard board is a button that answers
    every item it counts (form.js bulkAnswer). */
 button.chip.bulk { border: 0; cursor: pointer; transition: filter .12s, box-shadow .12s; }

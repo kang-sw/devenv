@@ -243,11 +243,10 @@
         var exact = !!target;
         if (!target) target = topic;
         if (unfold) unfold(target);
+        // A target on a docked page not shown (or, in the narrow view, on
+        // the Main Board while a docked page shows) has its page shown first.
+        if (cards && cards.activate) cards.activate(target);
         for (var p = target; p && inBoard(p); p = p.parentNode) if (p.tagName === "DETAILS") p.open = true;
-        if (target.matches(".ckrow.done, .ckrow.no") && root.getAttribute("data-ck-hide") === "1") {
-          var toggle = topic.querySelector("button.ckhide[aria-pressed=true]");
-          if (toggle) toggle.click();
-        }
         // loadTarget owns lazy-history positioning, including version folds.
         if (!target.closest(".wb-history")) {
           target.scrollIntoView({ block: "start" });

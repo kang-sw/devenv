@@ -16,18 +16,15 @@ import (
 func (p *pageData) topicRevision(t TopicView) string {
 	if p.topicContext == "" {
 		raw, _ := json.Marshal(struct {
-			Lang, ReplyID, FullBoardLink string
-			Stored, OnPage               map[int]bool
-			StoredPanels, PanelOnPage    map[string]bool
-			LazyHistory                  bool
-		}{p.Lang, p.ReplyID, p.FullBoardLink, p.Stored, p.onPage, p.StoredPanels, p.panelOnPage, p.LazyHistory})
+			Lang, ReplyID             string
+			Stored, OnPage            map[int]bool
+			StoredPanels, PanelOnPage map[string]bool
+			LazyHistory               bool
+		}{p.Lang, p.ReplyID, p.Stored, p.onPage, p.StoredPanels, p.panelOnPage, p.LazyHistory})
 		sum := sha256.Sum256(raw)
 		p.topicContext = hex.EncodeToString(sum[:])
 	}
-	raw, _ := json.Marshal(struct {
-		Topic       TopicView
-		FullHistory bool
-	}{t, t.fullHistory})
+	raw, _ := json.Marshal(t)
 	h := sha256.New()
 	h.Write([]byte(p.topicContext))
 	h.Write(raw)

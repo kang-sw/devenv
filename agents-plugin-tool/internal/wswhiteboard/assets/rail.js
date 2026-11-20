@@ -9,7 +9,7 @@
   // what the previous run attached; the two capsule wrappers sit outside the
   // board region and are reused.
   var d = document;
-  if (d.body.classList.contains("embed") || !window.requestAnimationFrame) return;
+  if (!window.requestAnimationFrame) return;
   // host carries the rail class (the dashboard's board column, the full
   // page's wrapper, the same element pill.js puts its wrappers in); box
   // holds the topics and the wrappers. The rail's offsets go on the

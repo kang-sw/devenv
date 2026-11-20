@@ -8,8 +8,8 @@ import (
 )
 
 // ClosedCap is how many closed topics a page shows, the most recently closed
-// first. The served page fetches more through ClosedWindow; the file page and
-// the embed name how many they leave out. A closed topic still waiting on the
+// first. The served page fetches more through ClosedWindow; the file page
+// names how many it leaves out. A closed topic still waiting on the
 // user is never capped, and the store keeps every topic.
 const ClosedCap = 30
 
@@ -19,8 +19,6 @@ type Layout int
 const (
 	// LayoutFull is the current-state dashboard the user keeps open.
 	LayoutFull Layout = iota
-	// LayoutEmbed is the point-in-time snapshot a host shows in its chat.
-	LayoutEmbed
 )
 
 // View is everything a page template reads. BuildView derives it from a
@@ -30,8 +28,8 @@ type View struct {
 	Layout  Layout
 	ReplyID string
 	Seq     int
-	// StampFile is the change-signal script the full page polls, a bare
-	// file name beside the page. Empty for the embed.
+	// StampFile is the change-signal script the page polls, a bare file name
+	// beside the page.
 	StampFile string
 	Topics    []TopicView
 	// DeferredTopics are capped closed topics, carried inert for explicit
@@ -59,8 +57,6 @@ type View struct {
 	Stored map[int]bool
 	// StoredPanels holds board-wide stable pN targets, including older pages.
 	StoredPanels map[string]bool
-	// FullBoardLink is the embed's link to the full board, relative by default.
-	FullBoardLink string
 	// FileLink turns a file path a markdown link or image names (relative
 	// to the session root, or absolute) into the href the page uses from
 	// the folder it is written to. Nil keeps the path as written.
@@ -143,9 +139,6 @@ type FileAction struct {
 
 // TopicView is one topic block.
 type TopicView struct {
-	// fullHistory distinguishes the unified full-page history from the
-	// compact embed's existing recap/check/settled presentation.
-	fullHistory bool
 	// Name is the topic's key (its stem, else its label), which page-to-lead
 	// lines carry (data-topic) so the lead can address the topic with it;
 	// Label is the name the page shows.
@@ -156,8 +149,7 @@ type TopicView struct {
 	Waiters      []DependencyView
 	// Doc is the topic's body, markdown with inline HTML written as is; empty
 	// when it has none. It renders above the items: open unless the topic is
-	// closed on the full page, and open on the embed only when it changed
-	// since the previous embed (DocNew).
+	// closed.
 	Doc string
 	// DocMarks are the change marks of the body's latest edit, in the block
 	// numbering of bodyUnits.
@@ -171,11 +163,9 @@ type TopicView struct {
 	// the body's Changed; a recap change does not count). The marks stay,
 	// dimmed, until the next body edit.
 	DocStale bool
-	// DocNew marks a body changed since the previous embed (embed only).
-	DocNew bool
 	// Recap is the topic's recap, rendered by the item block-field rule;
 	// empty when it has none. It shows at the top of the topic, above the
-	// body, on both layouts while the topic is open (RecapOpen), and folds
+	// body, while the topic is open (RecapOpen), and folds
 	// with the body once the topic is closed (RecapFolded). RecapAt,
 	// RecapMs, and RecapClock are its update time as UpdatedAt, UpdatedMs,
 	// and UpdatedClock are the topic's; RecapStamp is its local date and
@@ -192,15 +182,15 @@ type TopicView struct {
 	Head *Entry
 	// Stream/Older retain the complete, internally chunked entry projection
 	// (Older nearest first). Timeline selects anchors across these chunks;
-	// PanelRecaps lists latest distinct panels for the embed.
+	// PanelRecaps lists latest distinct panels for header counts and references.
 	Stream      EntryPage
 	Older       []EntryPage
 	PanelRecaps []EntryView
 	// Timeline carries live anchors and inert gaps over the complete stream.
 	Timeline []timelinePart
-	// Asks are the full page's open asks in creation order, stacked at the
+	// Asks are the open asks in creation order, stacked at the
 	// bottom of the topic after the history (the timeline keeps only their
-	// ask-time lines). The embed keeps its Policy/Acks/Checks lists.
+	// ask-time lines).
 	Asks []askGroup
 	// Policy and Acks are the topic's items waiting on the user; they never
 	// collapse.
@@ -213,9 +203,8 @@ type TopicView struct {
 	// any other. In a closed topic the list folds with the settled items.
 	Checks []ItemView
 	// Expanded holds settled items shown inside the block (an assumed item
-	// among them, ordered by its settle order like the rest): on the full page
-	// the topic's share of the most recent settled items board-wide, on the
-	// embed the settled items new since the previous embed. Newest first.
+	// among them, ordered by its settle order like the rest): the topic's
+	// share of the most recent settled items board-wide. Newest first.
 	Expanded []ItemView
 	// Collapsed holds every other settled item, behind the topic's settled
 	// count chip. Newest first.
@@ -236,12 +225,10 @@ type TopicView struct {
 	// UTC), empty when none has one. Label and tickets are metadata and do
 	// not count. UpdatedMs
 	// is the same instant in Unix milliseconds for the page script, and
-	// UpdatedClock its local HH:MM, which the embed shows.
+	// UpdatedClock its local HH:MM.
 	UpdatedAt    string
 	UpdatedMs    int64
 	UpdatedClock string
-	// Fresh counts the items new since the previous embed (embed only).
-	Fresh int
 	// Tickets are the topic's linked tickets, in the order the lead wrote
 	// them, each with the status ViewInput.Tickets resolved at render time.
 	// The bar shows them as one ticket icon whose popover lists each stem.
@@ -330,13 +317,10 @@ func ticketBadges(stems []string, resolve TicketResolver, seen map[string]string
 	return out
 }
 
-// HeadSummary reports whether the topic's head carries its summary line: an
-// topic with a latest agent line or panel recap, or open checks on the embed.
-// The line holds that summary (never a legacy recap or system event) and, on the
-// embed only, the check pill heading its in-flow check list; the full page
-// stacks open checks at the bottom and carries no pill.
+// HeadSummary reports whether the topic's head carries its summary line: a
+// topic with a latest agent line or panel recap.
 func (t TopicView) HeadSummary() bool {
-	return t.Head != nil || (!t.Closed && len(t.Checks) > 0 && !t.fullHistory)
+	return t.Head != nil
 }
 
 // LegacyRecapOpen reports whether an open topic shows an unconverted legacy
@@ -344,11 +328,8 @@ func (t TopicView) HeadSummary() bool {
 func (t TopicView) LegacyRecapOpen() bool { return t.RecapOpen() && t.Head == nil }
 
 // DocOpen reports whether the topic's body renders open.
-func (t TopicView) DocOpen(embed bool) bool {
-	if t.Doc == "" || t.Closed {
-		return false
-	}
-	return !embed || t.DocNew
+func (t TopicView) DocOpen() bool {
+	return t.Doc != "" && !t.Closed
 }
 
 // RecapOpen reports whether the recap shows at the top of the topic: it has
@@ -381,10 +362,9 @@ func (t TopicView) SettledCount() int {
 	return n
 }
 
-// ChecksShown reports whether the check list shows under the recap: the
-// topic has checks and is open.
+// ChecksShown reports whether the topic has open checks while open.
 func (t TopicView) ChecksShown() bool {
-	return !t.Closed && len(t.Checks) > 0 && (!t.fullHistory || t.OpenChecks() > 0)
+	return !t.Closed && t.OpenChecks() > 0
 }
 
 // OpenChecks counts the topic's checks still waiting on the user.
@@ -401,19 +381,6 @@ func (t TopicView) OpenChecks() int {
 // AnsweredChecks counts the topic's checks the user answered, or the lead
 // assumed an answer for: the check list's progress count.
 func (t TopicView) AnsweredChecks() int { return len(t.Checks) - t.OpenChecks() }
-
-// HideableChecks counts the checks the open check list's hide toggle folds
-// away: those the user answered. An assumed check stays, since the user can
-// still veto it.
-func (t TopicView) HideableChecks() int {
-	n := 0
-	for _, c := range t.Checks {
-		if c.Status == StatusAnswered {
-			n++
-		}
-	}
-	return n
-}
 
 // AskCount is the topic bar's amber "answer needed" count: its open policy
 // items and open checks.
@@ -444,8 +411,6 @@ type ItemView struct {
 	// Links are the item's link strings; a page resolves their {{nn}}
 	// references as it does the other lead-authored text.
 	Links []string
-	// New marks an item changed since the previous embed (embed only).
-	New bool
 }
 
 // OptionView is one lettered policy option.
@@ -557,10 +522,9 @@ func withActions(panels []Panel, fileActions func(string) FileAction) []Panel {
 
 // ViewInput is what BuildView needs beyond the State.
 type ViewInput struct {
-	Layout        Layout
-	ReplyID       string
-	Panels        []Panel
-	FullBoardLink string
+	Layout  Layout
+	ReplyID string
+	Panels  []Panel
 	// FileLink, FileText, ImageSrc, DocImageSrc, FileActions, and
 	// OutsideImage are copied to the View.
 	FileLink     func(path string) string
@@ -591,23 +555,19 @@ type ClosedWindow struct {
 // BuildView derives a page view from state.
 func BuildView(state *State, in ViewInput) View {
 	view := View{
-		Layout:        in.Layout,
-		ReplyID:       in.ReplyID,
-		Seq:           state.Seq,
-		Panels:        in.Panels,
-		Stored:        map[int]bool{},
-		StoredPanels:  map[string]bool{},
-		FullBoardLink: in.FullBoardLink,
-		FileLink:      in.FileLink,
-		FileText:      in.FileText,
-		ImageSrc:      in.ImageSrc,
-		DocImageSrc:   in.DocImageSrc,
-		FileActions:   in.FileActions,
-		OutsideImage:  in.OutsideImage,
-		LazyHistory:   in.LazyHistory,
-	}
-	if view.FullBoardLink == "" {
-		view.FullBoardLink = in.ReplyID + "/index.html"
+		Layout:       in.Layout,
+		ReplyID:      in.ReplyID,
+		Seq:          state.Seq,
+		Panels:       in.Panels,
+		Stored:       map[int]bool{},
+		StoredPanels: map[string]bool{},
+		FileLink:     in.FileLink,
+		FileText:     in.FileText,
+		ImageSrc:     in.ImageSrc,
+		DocImageSrc:  in.DocImageSrc,
+		FileActions:  in.FileActions,
+		OutsideImage: in.OutsideImage,
+		LazyHistory:  in.LazyHistory,
 	}
 	for _, doc := range state.Topics {
 		for _, entry := range doc.Entries {
@@ -622,15 +582,11 @@ func BuildView(state *State, in ViewInput) View {
 	for _, item := range state.Items {
 		view.Stored[item.ID] = true
 	}
-	if in.Layout == LayoutFull {
-		view.StampFile = in.ReplyID + ".stamp.js"
-	}
+	view.StampFile = in.ReplyID + ".stamp.js"
 
 	expanded := map[int]bool{}
-	if in.Layout == LayoutFull {
-		for _, id := range recentSettled(state) {
-			expanded[id] = true
-		}
+	for _, id := range recentSettled(state) {
+		expanded[id] = true
 	}
 
 	topicStates := state.TopicStates()
@@ -645,7 +601,6 @@ func BuildView(state *State, in ViewInput) View {
 			block = &TopicView{
 				Name: topic, Label: state.TopicLabel(topic), Closed: state.topicClosed(topic),
 				State: current.State, StateDiagnostic: current.Diagnostic,
-				fullHistory: in.Layout == LayoutFull,
 			}
 			blocks[topic] = block
 			order = append(order, topic)
@@ -656,12 +611,8 @@ func BuildView(state *State, in ViewInput) View {
 		block := blockOf(item.Topic)
 		iv := itemView(item)
 		itemsChanged[item.Topic] = max(itemsChanged[item.Topic], item.Changed)
-		if in.Layout == LayoutFull && item.Status != StatusOpen {
+		if item.Status != StatusOpen {
 			historyItems[item.Topic] = append(historyItems[item.Topic], iv)
-		}
-		if in.Layout == LayoutEmbed && item.Changed > state.LastEmbedSeq {
-			iv.New = true
-			block.Fresh++
 		}
 		switch {
 		case inCheckList(item):
@@ -671,11 +622,7 @@ func BuildView(state *State, in ViewInput) View {
 		case item.Status == StatusOpen:
 			block.Acks = append(block.Acks, iv)
 		default:
-			show := expanded[item.ID]
-			if in.Layout == LayoutEmbed {
-				show = iv.New && !block.Closed
-			}
-			if show {
+			if expanded[item.ID] {
 				block.Expanded = append(block.Expanded, iv)
 			} else {
 				block.Collapsed = append(block.Collapsed, iv)
@@ -696,17 +643,12 @@ func BuildView(state *State, in ViewInput) View {
 		block.DocMarks = doc.Marks
 		block.BodyUpdatedAt = doc.validatedBodyTime()
 		block.DocStale = itemsChanged[doc.Name] > doc.Changed
-		block.DocNew = in.Layout == LayoutEmbed && doc.Body != "" && doc.Changed > state.LastEmbedSeq
 		block.Recap = doc.Recap
 		block.Head = doc.LatestSummary()
 		if latest, ok := doc.LatestAgent(); ok {
 			block.LatestAgent = &latest
 		}
 		block.PanelRecaps, block.Stream, block.Older = streamView(doc, block.Closed, in.Location, historyItems[doc.Name])
-		if in.Layout == LayoutEmbed {
-			block.Doc, block.DocMarks, block.DocNew = "", nil, false
-			block.Stream, block.Older = EntryPage{}, nil
-		}
 	}
 	// Legacy item-only topics have no TopicDoc/event ledger. They still get
 	// the same history component, with explicitly unknown event times.
@@ -716,12 +658,10 @@ func BuildView(state *State, in ViewInput) View {
 			block.PanelRecaps, block.Stream, block.Older = streamView(TopicDoc{Name: name}, block.Closed, in.Location, items)
 		}
 	}
-	if in.Layout == LayoutFull {
-		inputs := boardInputs(state)
-		for _, name := range order {
-			block := blocks[name]
-			block.Timeline, block.Asks = timelineView(*block, state.Items, inputs, in.Location)
-		}
+	inputs := boardInputs(state)
+	for _, name := range order {
+		block := blocks[name]
+		block.Timeline, block.Asks = timelineView(*block, state.Items, inputs, in.Location)
 	}
 	stampUpdated(state, blocks, in.Location)
 
@@ -732,13 +672,12 @@ func BuildView(state *State, in ViewInput) View {
 	newestFirst := func(list []ItemView) {
 		sort.SliceStable(list, func(i, j int) bool { return settledOrder[list[i].ID] > settledOrder[list[j].ID] })
 	}
-	// Quiet follows what the page shows, so an unread body that stays folded
-	// (the embed, an unchanged body) does not make a topic look active.
+	// Quiet follows what the page shows, so a topic with nothing visible collapses.
 	quiet := func(t *TopicView) bool {
-		if t.fullHistory && t.StreamTotal() > 0 {
+		if t.StreamTotal() > 0 {
 			return false
 		}
-		return !t.waiting() && len(t.Expanded) == 0 && !t.ChecksShown() && !t.DocOpen(in.Layout == LayoutEmbed) && !t.RecapOpen() && (t.Closed || len(t.PanelRecaps) == 0)
+		return !t.waiting() && len(t.Expanded) == 0 && !t.ChecksShown() && !t.DocOpen() && !t.RecapOpen() && (t.Closed || len(t.PanelRecaps) == 0)
 	}
 	for _, name := range order {
 		block := blocks[name]
@@ -828,7 +767,7 @@ func BuildView(state *State, in ViewInput) View {
 	for _, name := range shown {
 		view.Topics = append(view.Topics, *blocks[name])
 	}
-	if in.Closed == nil && in.Layout == LayoutFull {
+	if in.Closed == nil {
 		for _, name := range capped[end:] {
 			view.DeferredTopics = append(view.DeferredTopics, *blocks[name])
 		}

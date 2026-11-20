@@ -102,7 +102,7 @@ func TestRawTextOpenAfter(t *testing.T) {
 
 // TestPanelMaximizeOnlyOnDashboardBoard: a panel with a body carries its
 // maximize and back buttons on the dashboard's board (the framed render,
-// whose page script drives them), and neither the static page nor the embed
+// whose page script drives them), and the static page
 // carries a button that would do nothing there; a panel without a body
 // carries none anywhere.
 func TestPanelMaximizeOnlyOnDashboardBoard(t *testing.T) {
@@ -117,7 +117,7 @@ func TestPanelMaximizeOnlyOnDashboardBoard(t *testing.T) {
 		t.Errorf("framed board carries %d maximize buttons, want 1 (the panel with a body):\n%s", n, board)
 	}
 	wantAll(t, board, `class="ibtn d-min"`, `href="#l-maximize-2"`, `href="#l-minimize-2"`)
-	for _, layout := range []Layout{LayoutFull, LayoutEmbed} {
+	for _, layout := range []Layout{LayoutFull} {
 		page, err := RenderPage(BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
 		if err != nil {
 			t.Fatal(err)

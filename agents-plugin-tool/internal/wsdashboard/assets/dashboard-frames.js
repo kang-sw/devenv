@@ -160,10 +160,14 @@
     if (window.ResizeObserver) (topicRO || (topicRO = new ResizeObserver(topicResized))).observe(t);
   }
   // topicBand takes a band report for topic t. A report with no box (a
-  // hidden board column, a topic taken off the page) tells no distance.
+  // hidden board column, a topic taken off the page) tells no distance. A
+  // docked topic (cards.js) on a gallery page not shown reports far, but
+  // stays mounted: switching pages never reloads a frame. So does a board
+  // topic while the narrow view's Main Board stands off the view behind a
+  // docked page (the root's data-gal-away).
   function topicBand(t, r, near) {
     if (!r.rect || (!r.rect.width && !r.rect.height)) return;
-    if (!near) { if (!r.visible) unmountFrames(t); return; }
+    if (!near) { if (!r.visible && !root.hasAttribute("data-gal-away") && !(window.WsCards && window.WsCards.isDocked && window.WsCards.isDocked(t))) unmountFrames(t); return; }
     t.wbNear = r.visible;
     topicNear[t.getAttribute("data-topic")] = r.visible;
     if (r.visible) mountFramesPaced(t);
@@ -245,10 +249,14 @@
     });
     return any;
   }
-  // topicScroller is the element scrolling topic t: the pinned column or
-  // the board column where it scrolls, else the document.
+  // topicScroller is the element scrolling topic t: a docked topic's body
+  // (its pane's .gal-pbody, under a head that does not stick, so a deep
+  // link lands unobstructed) or the board column where it scrolls, else
+  // the document.
   function topicScroller(t) {
-    var list = [t.closest(".bpins"), $("bcol")];
+    var body = window.WsCards && window.WsCards.isDocked && window.WsCards.isDocked(t) ? Array.prototype.filter.call(t.children, function (n) { return n.classList.contains("gal-pbody"); })[0] : null;
+    if (body) return body;
+    var list = [$("bcol")];
     for (var i = 0; i < list.length; i++) {
       var s = list[i];
       if (s && s.contains(t) && s.scrollHeight > s.clientHeight && /auto|scroll/.test(getComputedStyle(s).overflowY)) return s;
@@ -288,6 +296,7 @@
     if (isTopic && (target.tagName !== "SECTION" || !target.hasAttribute("data-topic"))) return;
     function reveal() {
       if (unfoldTopic) unfoldTopic(target);
+      if (window.WsCards && window.WsCards.activate) window.WsCards.activate(target);
       for (var p = target; p && inBoard(p); p = p.parentNode) if (p.tagName === "DETAILS") p.open = true;
       // History targets were anchored by the loader; never scroll their clip.
       if (!target.closest(".wb-history")) {
