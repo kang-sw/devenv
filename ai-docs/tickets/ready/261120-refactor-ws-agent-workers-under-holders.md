@@ -495,3 +495,66 @@ against `develop` at `a858d67b0`.
    repository's configured Go verification. Report startup/rejoin and
    steady-state file-operation deltas; measure on the Windows antivirus
    baseline only if counts change.
+
+## Implementation checkpoint - 2026-11-20
+
+Branch `impl/develop/argue-shove-coil`, implementation range
+`f2234e573..db600b926`, contains the common holder descriptor and lifecycle,
+validated pre-protocol-replay ownership gate, original worker HTTP-MCP tuple
+restoration, downgrade retirement, four-backend replacement tests, the pinned
+old-source downgrade fixture, and operations documentation. The shared daemon
+and live holders have not been replaced or stopped. No phase is marked complete
+while the following contract conflict remains unresolved.
+
+**Performance contract conflict.** Generalizing the existing Pi applied-cursor
+path to previously direct workers adds whole `agent.json` replacements:
+`runner_process.go:769-785` persists the cursor on ring-producing lines, and
+`runner_conv.go:638-644` persists a dirty cursor at heartbeat. The existing
+`TestTranscriptStreamingOnlyPersistsRingLineCursor` pins that behavior. Direct
+workers previously supplied sequence zero, which bypassed those writes.
+Reusing this path satisfies the replay decision but conflicts with the
+constraint against added per-message/per-timer/per-turn whole-file rewrites
+and performance manual Rules 2 and 8. Removing durable cursor writes without a
+replacement recovery design would weaken replay deduplication. The lead must
+resolve the conflict through an owner-approved exception or a revised durable
+cursor design; neither is assumed here.
+
+Instrumented fixture measurements (macOS, no antivirus baseline):
+
+| Action | Before | After | Scope |
+|---|---:|---:|---|
+| Pi launch | 71 | 71 | Instrumented file operations, fake holder |
+| Pi rejoin | 25 | 29 | Instrumented file operations, fake holder |
+| 100 status/kick checks | 0 | 0 | Instrumented file operations |
+| 200 snapshot-only output lines | 0 | 0 | Direct sequence zero versus held sequence, file operations |
+| One final transcript ring line | 3 | 5 | Same direct/held comparison; record replacements 0 to 1 |
+| Dirty-cursor heartbeat | 0 | 2 | Same direct/held comparison; record replacements 0 to 1 |
+
+The direct/held diagnostic used a temporary Go overlay around the real
+`conv.handle`, `lineEnd`, and `persistSeq` path, with snapshot writes stubbed
+as in the existing hot-path test. Counters measure instrumented APIs, not all
+OS syscalls or holder-process I/O. The startup/rejoin fixture avoids disk
+polling and is tracked in `worker_holder_io_test.go`. These results do not
+establish Windows antivirus cost or latency; that required baseline remains
+unavailable.
+
+Verification read so far, with `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`:
+
+- Full `internal/wsagent`: pass (145.550s); focused replacement, downgrade,
+  ownership, lifecycle, approval, and nested Pi race tests: pass (2.729s).
+- Full `internal/mcp -timeout 45m`: pass (1022.289s) on an earlier core
+  checkpoint. Later core edits require a final rerun before closure.
+- `internal/wsholder`: pass (9.321s); `internal/execjob`: pass (24.135s);
+  `internal/wsstate`: pass (5.114s); dashboard retention test: pass. An initial
+  process test command named nonexistent `internal/wsproc`; the corrected
+  process package is `internal/execjob`.
+- Windows cross-target vet of wsagent, wsdashboard, wsholder, execjob, and
+  wsstate: pass. This is not Windows execution evidence.
+- `go build -o /tmp/ws-worker-holders-validation ./cmd/ws-mcp`: pass; the
+  binary was neither installed nor executed.
+- Directional old-source fixture at `f2234e573`: pass for fenced child
+  non-attachment/non-rewrite/non-stop, parent release, aged pruning, and
+  legacy Pi adoption.
+
+One allocated lite review is in progress. Its findings and any resulting fixes
+will be recorded before the worker reports. The ticket remains in `ready/`.
