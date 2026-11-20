@@ -582,7 +582,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-20T09:23:06Z"
+        "touched_at": "2026-11-20T09:24:26Z",
+        "impl": {
+          "branch": "impl/develop/disk-tusk-phony"
+        }
       }
     },
     "261120-refactor-ws-agent-workers-under-holders": {
