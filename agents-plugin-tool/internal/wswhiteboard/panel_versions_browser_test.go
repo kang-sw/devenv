@@ -2,9 +2,12 @@ package wswhiteboard
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,9 +72,23 @@ func TestPanelVersionsHistoryBrowser(t *testing.T) {
 	if err != nil {
 		t.Skip("node not installed")
 	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(page))
+			return
+		}
+		if data, kind, ok := FrameAsset(strings.TrimPrefix(r.URL.Path, "/")); ok {
+			w.Header().Set("Content-Type", kind)
+			_, _ = w.Write(data)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, node, "testdata/panel-versions.browser.cjs", path, os.Getenv("WS_PANEL_VERSIONS_SHOTS"))
+	cmd := exec.CommandContext(ctx, node, "testdata/panel-versions.browser.cjs", srv.URL, os.Getenv("WS_PANEL_VERSIONS_SHOTS"))
 	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
 	t.Logf("%s", out)
