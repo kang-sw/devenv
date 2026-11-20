@@ -88,22 +88,23 @@ type conv struct {
 	compactAwaitTurn                                                             bool
 
 	// Agy model-wait watchdog state (loop-owned, in-memory only).
-	modelWaitTimeout           time.Duration
-	modelWaitArmed             bool
-	modelWaitRetries           int
-	modelWaitPending           int
-	modelWaitCancelling        bool
-	modelWaitRetryFromAPIError bool
-	modelWaitFailErr           string
-	modelWaitDiagnostic        string
-	modelWaitFailureExcluded   bool
-	modelWaitC                 <-chan time.Time
-	modelWaitStop              func()
-	modelWaitFailure           string
-	modelWaitDrainC            <-chan time.Time
-	modelWaitDrainStop         func()
-	modelWaitCancelC           <-chan time.Time
-	modelWaitCancelStop        func()
+	modelWaitTimeout            time.Duration
+	modelWaitMaxRetries         int
+	modelWaitArmed              bool
+	modelWaitRetries            int
+	modelWaitPending            int
+	modelWaitCancelling         bool
+	modelWaitFailErr            string
+	modelWaitDiagnostic         string
+	modelWaitExhaustedPublished bool
+	modelWaitFailureExcluded    bool
+	modelWaitC                  <-chan time.Time
+	modelWaitStop               func()
+	modelWaitFailure            string
+	modelWaitDrainC             <-chan time.Time
+	modelWaitDrainStop          func()
+	modelWaitCancelC            <-chan time.Time
+	modelWaitCancelStop         func()
 
 	// loop-owned.
 	events       <-chan Event

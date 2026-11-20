@@ -132,6 +132,9 @@ type Options struct {
 	// AgyModelWaitTimeoutSeconds is the selected hosted package's manifest
 	// default for agy.model_wait_timeout_seconds. Nil uses the ws default.
 	AgyModelWaitTimeoutSeconds *int
+	// AgyModelWaitRetries is the selected hosted package's manifest default
+	// for agy.model_wait_retries. Nil uses the ws default.
+	AgyModelWaitRetries *int
 	// WSMCP is the stdio ws-mcp command serving root, without the runner's
 	// environment; nil refuses profiles that allow ws tools.
 	WSMCP func(root string) (MCPCommand, error)
