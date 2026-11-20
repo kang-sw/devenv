@@ -20,7 +20,7 @@ import (
 
 // agy.go is the Antigravity backend: `agy acp`, the Agent Client Protocol
 // (v1: JSON-RPC 2.0 over stdio, one message per line). Hosted leads run
-// under a holder; workers are daemon-owned processes using the default
+// under a holder, as do workers using the default
 // agent with their instructions appended to its system prompt.
 //
 // The wire facts it relies on are pinned by agy_fixture_test.go against
@@ -147,9 +147,6 @@ func agyEnv(spec StartSpec) []string {
 func (b AgyBackend) Start(ctx context.Context, spec StartSpec) (Process, error) {
 	if spec.Lead != nil && spec.Holder == nil {
 		return nil, errors.New("agy backend: a hosted lead requires a session holder")
-	}
-	if spec.Lead == nil && spec.Holder != nil {
-		return nil, errors.New("agy backend: workers are not holder-held")
 	}
 	attach := spec.Holder != nil && spec.Holder.id != ""
 	if !attach && spec.MCPSession == nil {

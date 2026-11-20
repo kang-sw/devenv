@@ -657,7 +657,12 @@ func (c *conv) processGone() {
 		hp.Detach()
 	}
 	c.setStatus(func() { c.proc = nil })
-	c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0 })
+	c.update(func(rec *Record) {
+		rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0
+		if !rec.Lead {
+			rec.HandedOffAt = ""
+		}
+	})
 	c.writeRegistration()
 	c.replaying, c.replayAsked = false, false
 	c.interrupted()
@@ -747,7 +752,12 @@ func (c *conv) releaseHolder(proc Process) {
 		return
 	}
 	c.seqDirty, c.live.ringDirty = false, false
-	c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0 })
+	c.update(func(rec *Record) {
+		rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0
+		if !rec.Lead {
+			rec.HandedOffAt = ""
+		}
+	})
 	c.writeRegistration()
 }
 

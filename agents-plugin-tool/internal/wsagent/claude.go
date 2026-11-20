@@ -449,13 +449,13 @@ func (b ClaudeBackend) Start(ctx context.Context, spec StartSpec) (Process, erro
 	// Read before the start, which fills the holder id for a spawn too.
 	attach := spec.Holder != nil && spec.Holder.id != ""
 	var args []string
-	if spec.Lead == nil || !attach {
+	if !attach {
 		args, err = claudeArgs(spec)
 		if err != nil {
 			return nil, err
 		}
 	}
-	// A lead rejoin attaches to an already-running process; startChild
+	// A rejoin attaches to an already-running process; startChild
 	// ignores this command. Its launch-time settings and bundle may have
 	// changed since launch and must not block recovery of that process.
 	cmd := exec.Command(command, append(pre, args...)...)

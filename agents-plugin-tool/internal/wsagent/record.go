@@ -54,7 +54,8 @@ type Record struct {
 
 	// HandedOffAt is when a lead session was handed to a terminal harness
 	// (conv.release): the daemon serves it no more, as it serves no closed
-	// one, until a takeover clears it.
+	// one, until a takeover clears it. A non-lead with HolderID uses this
+	// field as an old-daemon fence; heldWorker keeps it live in this daemon.
 	HandedOffAt string `json:"handed_off_at,omitempty"`
 
 	// Lead marks a hosted lead session (Profile.Lead when it was opened):
@@ -150,7 +151,7 @@ type Record struct {
 	TurnMark         uint64 `json:"turn_mark,omitempty"`
 	TurnStartedAt    int64  `json:"turn_started_at,omitempty"`
 
-	// MCPToken is a held lead process's ws-mcp session token
+	// MCPToken is a held process's ws-mcp session token
 	// (mcp_session.go), kept so a later daemon rejoining the process
 	// accepts the token it still sends. MCPURL is the route the process
 	// sends it to, which that daemon may no longer serve; MCPEnv the ws-mcp
@@ -729,4 +730,12 @@ func registration(rec Record, now time.Time) wsdashboard.Registration {
 		reg.EndedAt = rec.ClosedAt
 	}
 	return reg
+}
+
+func (rec Record) heldWorker() bool {
+	return wsdashboard.HeldAgentWorker(rec.Lead, rec.HolderID, rec.HandedOffAt)
+}
+
+func (rec Record) handedOff() bool {
+	return rec.HandedOffAt != "" && !rec.heldWorker()
 }

@@ -49,7 +49,7 @@ func (r *Runner) CancelHireLead(requestID string) error {
 	if err != nil || rec == nil {
 		return err
 	}
-	if rec.ClosedAt != "" || rec.HandedOffAt != "" {
+	if rec.ClosedAt != "" || rec.handedOff() {
 		return nil
 	}
 	_, err = r.CloseConversation(rec.ReplyID)

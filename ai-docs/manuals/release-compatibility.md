@@ -129,6 +129,16 @@ this sheet.
 1. **Patches may carry T0–T2.** Retain legacy call behavior and cite any T2
    overwrite/reopen reconstruction before settling the tier. Whole-file loss
    without that reconstruction needs preservation or a T3 boundary.
+   **Owner exception, 2026-11-20, (1855)=a:** the workers-under-holders
+   surface ships as T2 in a patch. Conversation-parent convergence on re-upgrade
+   retires the downgrade-fenced child into a wakeable sleeping record rather
+   than restoring its pre-downgrade held state. An old-daemon downgrade beyond
+   the 7-day `RegistryRetention` may irrecoverably lose that child's session
+   history. The owner explicitly accepted both outcomes. T1 describes only
+   the surviving fenced child row; it does not cover parent rewrites or pruning.
+   See `261120-refactor-ws-agent-workers-under-holders` and the daemon replacement
+   section of `ws-mcp.md` for the directional evidence and recovery guards.
+
 2. **T3 requires a minor bump and explicit owner approval.** Raise the affected
    protocol or store schema where that enforces the boundary. Verify the old
    side actually refuses before damaging writes; merely adding a schema number
