@@ -11,7 +11,7 @@ related:
 
 ## Background
 
-Five dogfood surprises observed on 2026-11-21 share a boundary problem: a
+Six dogfood surprises observed on 2026-11-21 share a boundary problem: a
 caller-visible identity or delivery contract is either implicit, stale, or
 split between host-specific and host-neutral paths. This ticket records the
 source diagnosis against `develop` at `596109dbe` and groups the independent
@@ -131,19 +131,20 @@ owns the operation.
   `agents-plugin/agy-config-manifest.json:1`). Commit `114f104d4` added that
   third manifest on 2026-11-20; the preceding Claude launcher listed only the
   core and dashboard manifests.
-- **VERIFIED:** manifest knowledge is connection-scoped. The server loads only
-  paths supplied in the caller's hello environment
-  (`agents-plugin-tool/internal/mcp/config_manifest.go:18`,
-  `agents-plugin-tool/internal/mcp/config_manifest.go:99`), and the proxy
-  preserves the caller-owned path list
-  (`agents-plugin-tool/cmd/ws-mcp/proxy.go:146`). An external connection does
-  not inherit the daemon's hosted package policy
-  (`agents-plugin-tool/cmd/ws-mcp/hosted_plugin_package_test.go:127`).
-- **INFERRED:** the observed lead used a pre-update or not-yet-restarted Claude
-  launcher/session, or its manifest failed to load. A daemon predating the
-  manifest is not independently sufficient to explain the error because the
-  generic loader already consumes the connection's supplied paths; daemon age
-  cannot be established from repository evidence.
+- **VERIFIED:** a hosted Claude lead uses the daemon build's embedded package
+  policy to construct its launcher, and each hosted connection passes that
+  launcher's manifest paths to a new server that loads them at construction
+  (`agents-plugin-tool/internal/wsagent/hosted_plugins.go:14`,
+  `agents-plugin-tool/cmd/ws-mcp/agent_mcp.go:19`,
+  `agents-plugin-tool/cmd/ws-mcp/proxy.go:75`,
+  `agents-plugin-tool/internal/mcp/process_env.go:159`).
+- **INFERRED:** for the reported hosted lead, a daemon built before
+  `114f104d4` would embed a Claude launcher that omits the agy path: “daemon
+  predates the manifest” and “launcher omits the manifest” are then the same
+  build-staleness cause. A daemon that can receive the current path is not
+  independently unable to parse it. The live daemon build, selected package,
+  and manifest rejection diagnostics were not inspected, so the particular
+  refusal cannot be marked verified.
 - **Develop verdict:** **production packaging fixed, regression coverage
   incomplete.** The hosted package fixture still models only two manifests and
   does not assert the exact shipped Claude list
@@ -154,11 +155,15 @@ owns the operation.
   and add a focused integration test proving that a Claude hello can list/get
   and project-tune the agy timeout. Make unknown-key diagnostics identify
   rejected manifests or a required plugin-session restart where available.
-- **Compatibility:** **T0.** A separate schema-1 manifest path is additive and
-  leaves old calls and existing manifest/store shapes intact. The loader's
-  strict unknown-field validation is precisely why the new namespace remains
-  separate
-  (`agents-plugin-tool/internal/mcp/config_manifest.go:172`,
+- **Compatibility:** **T0 for old calls and persisted data** because the
+  separate schema-1 manifest path is additive and project overrides use the
+  existing generic key map. However, a new caller sending the agy key to a
+  pre-manifest hosted build receives `unknown config key` before any write;
+  that direction is a **T3 old-version boundary unless the caller gates the
+  attempt on `config.list` or requires an updated daemon**
+  (`agents-plugin-tool/internal/mcp/config_manifest.go:106`,
+  `agents-plugin-tool/internal/mcp/config_manifest.go:172`,
+  `agents-plugin-tool/internal/mcp/server_dispatch.go:411`,
   `ai-docs/manuals/release-compatibility.md:73`).
 
 ### 5. A read-only Lite reviewer cannot own the required findings artifact
@@ -186,6 +191,18 @@ owns the operation.
   explicitly says it has already been received through `mailbox.recv`, so a
   later manual receive must not duplicate it
   (`agents-plugin-tool/internal/mcp/lead_mail.go:353`).
+- **VERIFIED:** ws persists a settled child's complete `TurnResult` in its
+  pending-report record and `ReportText` appends the final message without an
+  explicit source-side truncation cap
+  (`agents-plugin-tool/internal/wsagent/record.go:242`,
+  `agents-plugin-tool/internal/wsagent/spawn.go:307`,
+  `agents-plugin-tool/internal/wsagent/children.go:1002`).
+- **INFERRED:** the canary worker's truncated reports therefore do not have a
+  demonstrated truncation point in this ws delivery path. The fact that all
+  three findings were recovered through compact follow-ups proves that a
+  single large final report is not a sufficient durable-artifact protocol,
+  but does not distinguish harness output truncation from host presentation
+  truncation.
 - **INFERRED:** the empty artifact is the direct consequence of assigning its
   write to a read-only common child. A successful direct send followed by an
   empty manual `mailbox.recv` is not evidence of loss when the hosted lead has
@@ -194,18 +211,64 @@ owns the operation.
   and worker steering, but the host-neutral reviewer artifact ownership remains
   broken. The prior ticket itself left this recheck forward
   (`ai-docs/tickets/.done/261120-bug-ws-agent-dogfood-delivery-context.md:451`).
-- **Minimal fix:** settle (1926). Prefer returning full findings from the
-  read-only reviewer and making the write-capable handler own the generated
-  artifact. Test non-clean and clean Lite runs for a non-empty artifact, no
-  reviewer source writes, direct-parent delivery exactly once, and no duplicate
-  manual receive after auto-claim.
+- **Minimal fix:** settle (1926). Prefer making the write-capable handler own
+  the generated artifact and requiring a bounded, completeness-checked
+  findings handoff from the read-only reviewer rather than assuming one final
+  report is untruncated. Test clean, ordinary non-clean, and oversized
+  multi-finding Lite runs for a complete non-empty artifact, no reviewer source
+  writes, direct-parent delivery exactly once, and no duplicate manual receive
+  after auto-claim.
 - **Compatibility:** **T0** for moving artifact persistence to the existing
   handler and clarifying current mailbox semantics. No tool, hello, mailbox
   record, or persisted-history shape changes.
 
+### 6. The worker playbook requires tools its child profile withholds
+
+- **VERIFIED:** the shared Worker Protocol tells every ticket worker to call
+  `workflow_manual`, while the elevated ticket-worker playbook tells it to
+  call `config.resolve_agent` before delegated leaves
+  (`agents-plugin/rsrc/worker-stop-protocol.md:18`,
+  `agents-plugin/rsrc/ticket-worker-elevated/ticket-worker-elevated.md:49`).
+- **VERIFIED:** `workflow_manual` is intentionally a lead-key-minting tool that
+  agent profiles may never name, and child-surface tests explicitly require it
+  to remain excluded
+  (`agents-plugin-tool/internal/wsagent/profile.go:67`,
+  `agents-plugin-tool/internal/wsagent/child_safe_mcp_tools_test.go:29`). A
+  spawned child receives its key and direct-parent address in its system
+  instructions, but not a lead workflow manual
+  (`agents-plugin-tool/internal/wsagent/runner_process.go:796`).
+- **VERIFIED:** `config.resolve_agent` is a read-only tool that the server
+  deliberately authorizes for delegate keys because worker playbooks use it
+  before spawning
+  (`agents-plugin-tool/internal/mcp/server_schemas.go:352`,
+  `agents-plugin-tool/internal/mcp/server_inventory.go:229`,
+  `agents-plugin-tool/internal/mcp/session_auth_test.go:514`). Despite that
+  contract, it is absent from both `ChildSafeWSTools` and the lists that build
+  `AgentWSTools`
+  (`agents-plugin-tool/internal/wsagent/builtin.go:119`,
+  `agents-plugin-tool/internal/wsagent/builtin.go:171`). Codex filters all
+  spawned children to the child-safe subset, and Claude does the same for
+  read-only children
+  (`agents-plugin-tool/internal/wsagent/codex.go:258`,
+  `agents-plugin-tool/internal/wsagent/claude.go:224`).
+- **Develop verdict:** **not fixed.** The canary worker's missing tools match
+  the current playbook/profile mismatch exactly.
+- **Minimal fix:** settle (1927) and (1928). Remove the impossible
+  `workflow_manual` call
+  from worker instructions and treat the rendered Worker Protocol, ticket,
+  AGENTS guidance, and declared manuals as the worker's context. Add the
+  already-authorized `config.resolve_agent` to the harness-neutral child-safe
+  and agent-worker surfaces. Regress every worker playbook's required ws tool
+  references against the effective Codex, Claude, agy, and Pi child profiles.
+- **Compatibility:** **T0.** This exposes an existing read-only tool to a role
+  that the server already authorizes and removes a bad instruction; it changes
+  no MCP schema, argument, hello, or persisted record. `workflow_manual`
+  remains excluded, so no child gains a lead-key mint path
+  (`ai-docs/manuals/release-compatibility.md:73`).
+
 ## Open Decision Queue
 
-Last ID: (1926)
+Last ID: (1928)
 
 - (1924) [open] [policy] Should a live child remain permanently bound to its
   spawn root, requiring respawn for a different worktree (recommended), or
@@ -215,10 +278,18 @@ Last ID: (1926)
   classified and recreated during locked worktree acquisition, with route
   resolution retaining a defensive stale-target refusal (recommended), or
   should route resolution own all repair before acquisition?
-- (1926) [open] [technical] Should the write-capable review handler persist the
-  full report returned by a read-only reviewer (recommended), or should common
-  `agent.spawn` gain a narrowly scoped review-artifact write capability across
-  every host?
+- (1926) [open] [technical] Should the write-capable review handler persist a
+  bounded, completeness-checked findings handoff from the read-only reviewer
+  (recommended), or should common `agent.spawn` gain a narrowly scoped
+  review-artifact write capability across every host?
+- (1927) [open] [technical] Should worker instructions stop requiring the
+  lead-key-minting `workflow_manual` and rely on the rendered Worker Protocol,
+  ticket, AGENTS guidance, and declared manuals (recommended), or should ws
+  introduce a new child-safe workflow-context tool?
+- (1928) [open] [technical] Should the child surface expose the existing
+  read-only `config.resolve_agent` that the server already authorizes for
+  delegates (recommended), or should every host's worker delegation contract
+  be redesigned to avoid separate tier resolution?
 
 ## Constraints
 
@@ -236,7 +307,8 @@ Last ID: (1926)
   resources.
 - Read `ai-docs/manuals/ws-mcp.md` before changing MCP code.
 - Read `ai-docs/manuals/release-compatibility.md` before changing internal
-  cross-version surfaces, and preserve the T0 verdicts or reopen the tier.
+  cross-version surfaces, and preserve the documented verdicts and gates or
+  reopen the tier.
 - Read `ai-docs/manuals/performance.md` before changing tooling paths; keep
   interactive resolution and delivery off avoidable file I/O.
 - Run narrow Go tests with
@@ -306,21 +378,30 @@ Acceptance:
 - The hosted-package fixture no longer models the obsolete two-manifest list.
 - A Claude-hello integration test lists, reads, and project-tunes
   `agy.model_wait_timeout_seconds`.
+- A caller checks `config.list` before using the additive key against an
+  unknown daemon version, preserving a T0 old-call path instead of relying on
+  a T3 refusal.
 - An unavailable shipped key points to rejected manifests or the need to
   restart/update the plugin session where that evidence exists.
-- Compatibility remains T0.
+- Compatibility remains T0 for old calls and stored data; any ungated
+  new-caller-to-old-daemon path is recorded as T3 and requires explicit owner
+  approval.
 
 ### Phase 5: Give Lite review artifacts one write-capable owner
 
 After (1926) settles, remove the contradiction between a read-only reviewer and
-mandatory durable findings. Under the recommended contract, require complete
-findings in the reviewer result and let the handler generate and write the
-artifact, including the clean-report case.
+mandatory durable findings. Under the recommended contract, let the handler
+generate and write the artifact, and use a bounded handoff with an explicit
+finding count or equivalent completeness check instead of trusting one large
+final report, including the clean-report case.
 
 Acceptance:
 
 - A non-clean read-only Lite review produces a non-empty findings artifact
   containing every returned finding.
+- An oversized multi-finding review remains complete when one host-visible
+  report would be truncated; the handler detects a missing chunk or count
+  before reporting success.
 - A clean Lite review produces a non-empty clean report.
 - The reviewer receives no source-tree write authority.
 - The direct-parent report reaches the hosted lead exactly once without
@@ -328,3 +409,25 @@ Acceptance:
 - ws/wsflow mirrors and Pi compatibility guidance remain aligned.
 - Compatibility remains T0, or any proposed `agent.spawn` API addition is
   separately tiered and settled before implementation.
+
+### Phase 6: Align worker instructions with the spawned-child tool surface
+
+After (1927) and (1928) settle, remove the lead-only bootstrap call from the
+Worker Protocol and expose the existing read-only tier resolver that elevated
+workers actually need for delegation. Keep all lead-key mint paths unavailable
+to children.
+
+Acceptance:
+
+- Rendered ticket-worker instructions do not tell spawned children to call
+  `workflow_manual` or any other intentionally unavailable lead-only tool.
+- `config.resolve_agent` is visible and callable with a delegate key under the
+  effective Codex, Claude, agy, and Pi agent-worker profiles, including the
+  Codex child-safe MCP map.
+- A contract test compares required ws tool references in worker playbooks
+  against each effective child surface and fails on another prose/exposure
+  drift.
+- Leaf keys retain their current config restrictions, and no child can mint or
+  adopt a lead key.
+- ws/wsflow mirrors stay aligned.
+- Compatibility remains T0.
