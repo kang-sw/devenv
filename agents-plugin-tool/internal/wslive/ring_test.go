@@ -729,3 +729,240 @@ func TestRingFileIOCountersAreLive(t *testing.T) {
 		t.Fatalf("unpinned AppendRing recorded atomic_replace=%d, want 1 (counter bypassed?)", got)
 	}
 }
+
+// TestRingUnpinnedPagingNonMonotoneSegmentTimestamps verifies that a delayed
+// summary written to a later segment with an earlier reserved timestamp does
+// not cause unpinned ReadRingPage to stop early and skip newer entries in an
+// earlier segment, while monotone newer segments still read only 1 segment.
+func TestRingUnpinnedPagingNonMonotoneSegmentTimestamps(t *testing.T) {
+	t.Run("delayed-summary-across-rotation", func(t *testing.T) {
+		origEntries, origMax := ringSegmentEntries, ringMaxSegments
+		ringSegmentEntries, ringMaxSegments = 3, 16
+		t.Cleanup(func() { ringSegmentEntries, ringMaxSegments = origEntries, origMax })
+
+		dir := filepath.Join(t.TempDir(), "ring")
+		base := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+		entryAt := func(sec int, text string) RingEntry {
+			return RingEntry{
+				ringStamp: base.Add(time.Duration(sec) * time.Second),
+				Kind:      RingUser,
+				Origin:    OriginTerminal,
+				Text:      text,
+			}
+		}
+
+		unpin := PinRing(dir)
+		// seg-1 gets T1, T5, T6 (3 entries -> rotates to seg-2).
+		if err := AppendRing(dir, []RingEntry{
+			entryAt(1, "T1"),
+			entryAt(5, "T5"),
+			entryAt(6, "T6"),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		// seg-2 gets delayed reserved-timestamp summaries T2, T3 plus newer T7.
+		if err := AppendRing(dir, []RingEntry{
+			entryAt(2, "T2"),
+			entryAt(3, "T3"),
+			entryAt(7, "T7"),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := unpin(); err != nil {
+			t.Fatal(err)
+		}
+
+		// Newest 2 entries must be T6, T7 — not T3, T7 from seg-2 alone.
+		p1, err := ReadRingPage(dir, "", 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(p1.Records) != 2 || p1.Records[0].Text != "T6" || p1.Records[1].Text != "T7" || p1.End {
+			t.Fatalf("p1 = %+v (end=%v), want T6,T7 end=false", p1.Records, p1.End)
+		}
+		p2, err := ReadRingPage(dir, p1.Before, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(p2.Records) != 2 || p2.Records[0].Text != "T3" || p2.Records[1].Text != "T5" || p2.End {
+			t.Fatalf("p2 = %+v (end=%v), want T3,T5 end=false", p2.Records, p2.End)
+		}
+		p3, err := ReadRingPage(dir, p2.Before, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(p3.Records) != 2 || p3.Records[0].Text != "T1" || p3.Records[1].Text != "T2" || !p3.End {
+			t.Fatalf("p3 = %+v (end=%v), want T1,T2 end=true", p3.Records, p3.End)
+		}
+
+		// Adding a strictly newer monotone seg-3 (T8, T9, T10) still serves
+		// ReadRingPage(dir, "", 2) with 1 segment read (no extra per-call reads).
+		unpin = PinRing(dir)
+		if err := AppendRing(dir, []RingEntry{
+			entryAt(8, "T8"),
+			entryAt(9, "T9"),
+			entryAt(10, "T10"),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := unpin(); err != nil {
+			t.Fatal(err)
+		}
+		beforeRead := ringIOCount("read_file")
+		pMonotone, err := ReadRingPage(dir, "", 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(pMonotone.Records) != 2 || pMonotone.Records[0].Text != "T9" || pMonotone.Records[1].Text != "T10" || pMonotone.End {
+			t.Fatalf("pMonotone = %+v (end=%v), want T9,T10 end=false", pMonotone.Records, pMonotone.End)
+		}
+		if got := ringIOCount("read_file") - beforeRead; got != 1 {
+			t.Fatalf("monotone seg-3 ReadRingPage(2) made %d read_file calls, want 1", got)
+		}
+	})
+
+	t.Run("old-segments-without-prevMax", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "ring")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		base := time.Date(2026, 11, 19, 13, 0, 0, 0, time.UTC)
+		line := func(sec int, hexID, text string) string {
+			name := base.Add(time.Duration(sec)*time.Second).Format(ringStampLayout) + "-" + hexID + ".json"
+			return fmt.Sprintf(`{"name":%q,"entry":{"kind":"user","text":%q}}`+"\n", name, text)
+		}
+		seg1 := line(1, "0001", "T1") + line(5, "0005", "T5") + line(6, "0006", "T6")
+		seg2 := line(2, "0002", "T2") + line(3, "0003", "T3") + line(7, "0007", "T7")
+		if err := os.WriteFile(filepath.Join(dir, ringSegmentName(1)), []byte(seg1), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ringSegmentName(2)), []byte(seg2), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		page, err := ReadRingPage(dir, "", 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Records) != 2 || page.Records[0].Text != "T6" || page.Records[1].Text != "T7" || page.End {
+			t.Fatalf("old-format non-monotone page = %+v (end=%v), want T6,T7 end=false", page.Records, page.End)
+		}
+	})
+}
+
+// TestRingUnpinnedPagingMixedStoreEnforcesHistoryCap verifies that unpinned
+// ReadRingPage never exposes more than RingHistoryCap entries even when
+// retained segments and legacy .json files together hold > RingHistoryCap.
+func TestRingUnpinnedPagingMixedStoreEnforcesHistoryCap(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ring")
+	base := time.Date(2026, 11, 19, 14, 0, 0, 0, time.UTC)
+
+	// Write RingHistoryCap+50 entries into pinned segments (500/seg -> 5
+	// retained segments holding 2050 entries because 2050-500 < 2000).
+	unpin := PinRing(dir)
+	segEntries := make([]RingEntry, 0, RingHistoryCap+50)
+	for i := 50; i < RingHistoryCap+100; i++ {
+		segEntries = append(segEntries, RingEntry{
+			ringStamp: base.Add(time.Duration(i) * time.Second),
+			Kind:      RingUser,
+			Origin:    OriginTerminal,
+			Text:      fmt.Sprintf("m%d", i),
+		})
+	}
+	if err := AppendRing(dir, segEntries); err != nil {
+		t.Fatal(err)
+	}
+	if err := unpin(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add 50 older legacy .json files (m0..m49) so disk holds 2100 total
+	// entries across retained segments and legacy files.
+	for i := 0; i < 50; i++ {
+		name := base.Add(time.Duration(i)*time.Second).Format(ringStampLayout) + fmt.Sprintf("-%04x.json", i)
+		raw := []byte(fmt.Sprintf(`{"kind":"user","text":"m%d"}`, i))
+		if err := writeLegacyRingRaw(dir, name, raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	names, err := RingNames(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != RingHistoryCap {
+		t.Fatalf("RingNames = %d, want %d", len(names), RingHistoryCap)
+	}
+
+	// Full unpinned page must cap at RingHistoryCap (m100..m2099).
+	all, err := ReadRingPage(dir, "", 1<<30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all.Records) != RingHistoryCap || !all.End {
+		t.Fatalf("unpinned ReadRingPage(all) = %d end=%v, want %d end=true", len(all.Records), all.End, RingHistoryCap)
+	}
+	if all.Records[0].Text != "m100" || all.Records[len(all.Records)-1].Text != fmt.Sprintf("m%d", RingHistoryCap+99) {
+		t.Fatalf("unpinned all range = %q..%q, want m100..m%d", all.Records[0].Text, all.Records[len(all.Records)-1].Text, RingHistoryCap+99)
+	}
+
+	// Cursor-based paging from newest to oldest must yield the exact same
+	// RingHistoryCap entries and stop with End=true at m100.
+	var collected []RingRecord
+	cursor := ""
+	for {
+		page, err := ReadRingPage(dir, cursor, 250)
+		if err != nil {
+			t.Fatal(err)
+		}
+		collected = append(page.Records, collected...)
+		if page.End {
+			break
+		}
+		if page.Before == "" || page.Before == cursor {
+			t.Fatalf("cursor did not advance: %q -> %q", cursor, page.Before)
+		}
+		cursor = page.Before
+		if len(collected) > RingHistoryCap+500 {
+			t.Fatalf("paging exceeded cap without End: got %d", len(collected))
+		}
+	}
+	if len(collected) != RingHistoryCap {
+		t.Fatalf("cursor-paged total = %d, want %d", len(collected), RingHistoryCap)
+	}
+	if collected[0].Text != "m100" || collected[len(collected)-1].Text != fmt.Sprintf("m%d", RingHistoryCap+99) {
+		t.Fatalf("cursor-paged range = %q..%q, want m100..m%d", collected[0].Text, collected[len(collected)-1].Text, RingHistoryCap+99)
+	}
+
+	// Paging right at the cap boundary must return 0 records and End=true.
+	past, err := ReadRingPage(dir, collected[0].Name, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(past.Records) != 0 || !past.End || past.Before != "" {
+		t.Fatalf("page at cap boundary = %+v, want empty End=true", past)
+	}
+
+	// Paging that straddles the cap boundary (20 entries left in cap, asking
+	// for 50) must return only the 20 in-cap entries with End=true.
+	straddle, err := ReadRingPage(dir, collected[20].Name, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(straddle.Records) != 20 || !straddle.End || straddle.Records[0].Text != "m100" || straddle.Records[19].Text != "m119" {
+		t.Fatalf("straddle page = %d (%q..%q) end=%v, want 20 (m100..m119) end=true",
+			len(straddle.Records),
+			func() string {
+				if len(straddle.Records) == 0 {
+					return ""
+				}
+				return straddle.Records[0].Text
+			}(),
+			func() string {
+				if len(straddle.Records) == 0 {
+					return ""
+				}
+				return straddle.Records[len(straddle.Records)-1].Text
+			}(),
+			straddle.End)
+	}
+}
