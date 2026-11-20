@@ -101,11 +101,11 @@ async function editing(page, id, wide) {
       assert.equal(await badge.getAttribute('title'), '즐겨찾기');
       assert.equal(await badge.locator('button').count(), 0, 'badge is display-only');
       const geometry = await badge.evaluate(e => {
-        const b = e.getBoundingClientRect(), i = e.parentNode.querySelector('.hi').getBoundingClientRect();
+        const b = e.getBoundingClientRect(), i = e.parentNode.querySelector('.hb').getBoundingClientRect();
         return [b.width, b.height, b.left - i.left, b.bottom - i.bottom];
       });
       assert.deepEqual(geometry, [10, 10, -4, 4], 'badge matches mockup bottom-left geometry');
-      const gap = id => page.locator(row(id)).evaluate(e => e.querySelector('.rid').getBoundingClientRect().left - e.querySelector('.hi').getBoundingClientRect().right);
+      const gap = id => page.locator(row(id)).evaluate(e => e.querySelector('.rid').getBoundingClientRect().left - e.querySelector('.hb').getBoundingClientRect().right);
       assert.equal(await gap('plainrow'), 6, 'no-count gap equals mockup 6px');
       assert.equal(await gap('kidrow'), 6, 'child no-count gap equals mockup 6px');
       assert.ok(await gap('agentsrow') > 6, 'one-digit count pushes the name');

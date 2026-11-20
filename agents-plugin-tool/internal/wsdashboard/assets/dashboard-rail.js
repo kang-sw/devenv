@@ -1047,8 +1047,10 @@
     doc.addEventListener("pointerup", rdEnd);
     doc.addEventListener("pointercancel", rdEnd);
     // A press the window loses (another window took the focus) ends there,
-    // so a release it never hears does not hold the rail's swaps.
-    window.addEventListener("blur", function () { rdEnd(null); });
+    // so a release it never hears does not hold the rail's swaps. Focusing
+    // a session iframe also blurs the parent window while the document
+    // still has focus; that must not cancel a drag over the rail.
+    window.addEventListener("blur", function () { if (!doc.hasFocus()) rdEnd(null); });
     railEl.addEventListener("click", function (e) { if (rdragged) { e.preventDefault(); e.stopPropagation(); } }, true);
     railEl.addEventListener("dragstart", function (e) { if (e.target.closest && e.target.closest(".rs, .wsbar, .wthd")) e.preventDefault(); });
     // A dragged touch is a drag, not a scroll or the long-press menu.
