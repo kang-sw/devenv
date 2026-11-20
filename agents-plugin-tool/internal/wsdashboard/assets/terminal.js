@@ -46,6 +46,9 @@
   // is in or the wait is over.
   var SYMBOLS = "WsNerdSymbols", FONT_WAIT = 1500;
   var hooks = {}, loading = null, cellH = 0, ui = {}, folders = null, listSeq = 0, listWait = null;
+  var tabIdentity = worktree ? "wt:" + worktree : rid;
+  var TAB_KEY = "ws.dashboard.cterm." + tabIdentity;
+  var tabList = [], activeTabId = null, tabCreating = 0, tabUI = {};
 
   function mk(tag, cls, text) {
     var e = doc.createElement(tag);
@@ -119,6 +122,7 @@
   function retheme() {
     var t = theme();
     cards.list(KIND).forEach(function (c) { if (c.t && c.t.term) c.t.term.options.theme = t; });
+    tabList.forEach(function (tab) { if (tab.t && tab.t.term) tab.t.term.options.theme = t; });
   }
   new MutationObserver(retheme).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
   if (window.matchMedia) {
@@ -280,6 +284,7 @@
   // status writes the header: the folder, and the kind's word, or the
   // card's state while it is not plainly running.
   function status(c) {
+    if (c.isTab) return;
     var s = c.t, word = wsT("js.term.kind");
     if (s.exited) word = wsT("js.term.state.exited");
     else if (s.fails && !(s.ws && s.ws.readyState === 1 && s.live)) word = wsT("js.term.state.wait");
@@ -302,6 +307,34 @@
     if (!s.term) return;
     var t = lastLine(s.term);
     if (s.foldEl.textContent !== t) s.foldEl.textContent = t;
+  }
+
+  function initTermBody(c, onClose) {
+    var s = c.t;
+    c.body.textContent = "";
+    s.gap = mk("div", "tm-gap");
+    s.gap.hidden = true;
+    s.gap.setAttribute("role", "status");
+    s.gap.appendChild(mk("span", null, wsT("js.term.gap.note")));
+    var dismiss = mk("button", "ibtn");
+    dismiss.type = "button";
+    dismiss.innerHTML = cards.icon("x");
+    dismiss.title = wsT("js.term.gap.dismiss");
+    dismiss.setAttribute("aria-label", wsT("js.term.gap.dismiss"));
+    dismiss.addEventListener("click", function () { s.gap.hidden = true; if (s.term) s.term.focus(); });
+    s.gap.appendChild(dismiss);
+    s.host = mk("div", "tm-host");
+    s.end = mk("div", "tm-end");
+    s.end.hidden = true;
+    s.endText = mk("span", "tm-endtx");
+    var close = mk("button", "btn", wsT("js.card.close"));
+    close.type = "button";
+    close.addEventListener("click", onClose);
+    s.end.appendChild(s.endText);
+    s.end.appendChild(close);
+    c.body.appendChild(s.gap);
+    c.body.appendChild(s.host);
+    c.body.appendChild(s.end);
   }
 
   // --- the card ----------------------------------------------------------------
@@ -377,8 +410,8 @@
     measure(term);
     if (s.exited) term.options.disableStdin = true;
     // In the maximize sheet Esc returns the terminal to its card (the
-    // framework's Escape); in the card it reaches the shell.
-    term.attachCustomKeyEventHandler(function (e) { return !(e.key === "Escape" && c.el.hasAttribute("data-max")); });
+    // framework's Escape); in the card or chat tab it reaches the shell.
+    term.attachCustomKeyEventHandler(function (e) { return !(e.key === "Escape" && !c.isTab && c.el.hasAttribute("data-max")); });
     term.onData(function (data) {
       if (s.exited) return;
       // A long paste goes in pieces under the daemon's frame limit, cut
@@ -400,7 +433,7 @@
     window.addEventListener("focus", s.onWinFocus);
     var foldTimer = 0;
     term.onWriteParsed(function () {
-      if (!c.folded || foldTimer) return;
+      if (c.isTab || !c.folded || foldTimer) return;
       foldTimer = setTimeout(function () { foldTimer = 0; foldLine(c); }, 100);
     });
     if (window.ResizeObserver) {
@@ -409,6 +442,7 @@
     }
     fit(c);
     connect(c);
+    if (c.isTab && activeTabId === c.data.tid && shows(c)) term.focus();
   }
   function stop(c) {
     var s = c.t;
@@ -490,7 +524,8 @@
       var known = {};
       (v.terminals || []).concat(v.orphans || []).forEach(function (t) { known[t.id] = t; });
       cards.list(KIND).forEach(function (c) { if (c.t && c.t.born < asked && !known[c.data.tid]) gone(c); });
-      (v.terminals || []).forEach(function (t) { if (!cardFor(t.id)) cards.open(KIND, record(t), t.started_at || undefined); });
+      if (typeof reconcileTabs === "function") reconcileTabs(known, v.terminals || [], asked);
+      (v.terminals || []).forEach(function (t) { if (!cardFor(t.id) && !(typeof isTabTerm === "function" && isTabTerm(t.id))) cards.open(KIND, record(t), t.started_at || undefined); });
     });
   }
   function record(t) { return { tid: t.id, cwd: t.cwd || "" }; }
@@ -669,10 +704,231 @@
     }, true);
   }
 
+  // --- chat pane header terminal tabs (#ctabs) ---------------------------------
+  function tabFor(tid) { return tabList.filter(function (tab) { return tab.data.tid === tid; })[0] || null; }
+  function loadTabStore() {
+    if (!tabUI.ctabs) return [];
+    try {
+      var raw = window.localStorage && window.localStorage.getItem(TAB_KEY);
+      var parsed = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(function (x) { return x && typeof x.id === "string" && x.id && Number.isInteger(x.num) && x.num > 0; });
+    } catch (e) { return []; }
+  }
+  function saveTabStore(removed) {
+    if (!tabUI.ctabs || !window.localStorage) return;
+    try {
+      var data = tabList.map(function (tab) { return { id: tab.data.tid, num: tab.num }; });
+      var have = {};
+      data.forEach(function (x) { have[x.id] = true; });
+      loadTabStore().forEach(function (x) { if (!have[x.id] && (!removed || removed.indexOf(x.id) < 0)) data.push(x); });
+      if (data.length) window.localStorage.setItem(TAB_KEY, JSON.stringify(data));
+      else window.localStorage.removeItem(TAB_KEY);
+    } catch (e) { /* full or denied */ }
+  }
+  function isTabTerm(tid) {
+    if (tabFor(tid)) return true;
+    return loadTabStore().some(function (x) { return x.id === tid; });
+  }
+  function nextTabNum() {
+    var max = 0;
+    tabList.forEach(function (tab) { if (tab.num > max) max = tab.num; });
+    loadTabStore().forEach(function (x) { if (x.num > max) max = x.num; });
+    return max + 1;
+  }
+  function guessTabCols() {
+    var openTab = tabList.filter(function (tab) { return tab.t && tab.t.term; })[0];
+    if (openTab) return openTab.t.term.cols;
+    var box = doc.getElementById("convo") || doc.getElementById("chead");
+    var w = box ? box.clientWidth : 0;
+    return w > 0 ? Math.max(20, Math.min(400, Math.floor((w - 20) / 7.8))) : guessCols();
+  }
+  function activateTab(tid) {
+    var target = tabFor(tid);
+    if (!target) return;
+    activeTabId = tid;
+    tabList.forEach(function (tab) {
+      var on = tab.data.tid === tid;
+      tab.tabEl.toggleAttribute("data-active", on);
+      tab.btnEl.setAttribute("aria-pressed", String(on));
+      tab.paneEl.toggleAttribute("data-active", on);
+    });
+    if (hooks.setCtab) hooks.setCtab("term");
+    if (target.tabEl.scrollIntoView) target.tabEl.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (!hooks.setCtab && target.t.term && shows(target)) {
+      fit(target);
+      target.t.term.focus();
+    }
+  }
+  function syncCtab(isTerm, panesVisible) {
+    if (!isTerm) {
+      tabList.forEach(function (tab) {
+        tab.tabEl.removeAttribute("data-active");
+        tab.btnEl.setAttribute("aria-pressed", "false");
+        tab.paneEl.removeAttribute("data-active");
+      });
+      return;
+    }
+    var cur = tabFor(activeTabId) || tabList[0] || null;
+    if (!cur) return;
+    activeTabId = cur.data.tid;
+    tabList.forEach(function (tab) {
+      var on = tab.data.tid === activeTabId;
+      tab.tabEl.toggleAttribute("data-active", on);
+      tab.btnEl.setAttribute("aria-pressed", String(on));
+      tab.paneEl.toggleAttribute("data-active", on);
+    });
+    if (panesVisible && cur.t.term && shows(cur)) {
+      fit(cur);
+      cur.t.term.focus();
+    }
+  }
+  function removeTab(tid) {
+    var idx = -1;
+    for (var i = 0; i < tabList.length; i++) {
+      if (tabList[i].data.tid === tid) { idx = i; break; }
+    }
+    if (idx < 0) return;
+    var tab = tabList[idx];
+    stop(tab);
+    if (tab.tabEl && tab.tabEl.parentNode) tab.tabEl.parentNode.removeChild(tab.tabEl);
+    if (tab.paneEl && tab.paneEl.parentNode) tab.paneEl.parentNode.removeChild(tab.paneEl);
+    tabList.splice(idx, 1);
+    saveTabStore([tid]);
+    if (activeTabId === tid) {
+      activeTabId = null;
+      var grid = doc.getElementById("grid");
+      if (grid && grid.getAttribute("data-ctab") === "term") {
+        var next = tabList[idx] || tabList[idx - 1] || null;
+        if (next) activateTab(next.data.tid);
+        else if (hooks.setCtab) hooks.setCtab("convo");
+      }
+    }
+  }
+  function closeTab(tid) {
+    var tab = tabFor(tid);
+    if (!tab || tab.closing || !hooks.post) return;
+    if (!tab.t.exited && !window.confirm(wsT("js.term.confirm"))) return;
+    tab.closing = true;
+    tab.closeBtn.disabled = true;
+    hooks.post("terminals/" + encodeURIComponent(tid) + "/close", {}, function (ok, v) {
+      if (ok || /unknown terminal/.test(v)) removeTab(tid);
+      else {
+        tab.closing = false;
+        tab.closeBtn.disabled = false;
+        toast(wsT("js.term.closefail", v));
+      }
+    });
+  }
+  function openTab(t, num, shouldActivate) {
+    if (!tabUI.ctabs || !tabUI.panes || !t || !t.id) return null;
+    var existing = tabFor(t.id);
+    if (existing) {
+      if (shouldActivate) activateTab(existing.data.tid);
+      return existing;
+    }
+    var label = wsT("js.term.tab.label", num);
+    var closeLabel = wsT("js.term.tab.close", label);
+    var wrap = mk("span", "d-ctab-term");
+    wrap.setAttribute("data-ctab-tid", t.id);
+    var btn = mk("button", "d-ctab-btn");
+    btn.type = "button";
+    btn.setAttribute("data-ctab-term", t.id);
+    btn.setAttribute("aria-pressed", "false");
+    btn.title = t.cwd || label;
+    btn.innerHTML = cards.icon("square-terminal");
+    btn.appendChild(mk("span", "d-ctab-label", label));
+    var closeBtn = mk("button", "d-ctab-close");
+    closeBtn.type = "button";
+    closeBtn.setAttribute("data-ctab-close", t.id);
+    closeBtn.setAttribute("aria-label", closeLabel);
+    closeBtn.title = closeLabel;
+    closeBtn.innerHTML = cards.icon("x");
+    wrap.appendChild(btn);
+    wrap.appendChild(closeBtn);
+    tabUI.ctabs.insertBefore(wrap, tabUI.addBtn);
+
+    var pane = mk("div", "d-tpane");
+    pane.setAttribute("data-tid", t.id);
+    tabUI.panes.appendChild(pane);
+
+    var tab = {
+      isTab: true,
+      num: num,
+      folded: false,
+      data: { tid: t.id, cwd: t.cwd || "" },
+      el: pane,
+      body: pane,
+      tabEl: wrap,
+      btnEl: btn,
+      closeBtn: closeBtn,
+      paneEl: pane,
+      close: function () { removeTab(t.id); }
+    };
+    tab.t = { last: 0, fails: 0, gaps: 0, live: false, exited: null, gone: false, ws: null, term: null, born: Date.now() };
+    initTermBody(tab, function () { closeTab(t.id); });
+    tabList.push(tab);
+    saveTabStore();
+    if (shouldActivate) activateTab(t.id);
+    activate(tab);
+    return tab;
+  }
+  function reconcileTabs(known, terminals, asked) {
+    if (!tabUI.ctabs) return;
+    var liveById = {};
+    terminals.forEach(function (t) { liveById[t.id] = t; });
+    tabList.slice().forEach(function (tab) {
+      if (tab.t && tab.t.born < asked && !known[tab.data.tid]) removeTab(tab.data.tid);
+    });
+    var stored = loadTabStore(), pruned = [];
+    stored.forEach(function (entry) {
+      var info = liveById[entry.id];
+      if (!info) {
+        if (!tabFor(entry.id)) pruned.push(entry.id);
+        return;
+      }
+      if (!tabFor(entry.id)) openTab(info, entry.num, false);
+    });
+    if (pruned.length) saveTabStore(pruned);
+  }
+  function addTabFromButton() {
+    if (!tabUI.addBtn || tabUI.addBtn.disabled) return;
+    if (!hooks.post) { toast(wsT("js.post.nobrowser")); return; }
+    tabCreating++;
+    tabUI.addBtn.disabled = true;
+    var req = { folder: worktree ? "path" : "worktree", path: worktree || "", rows: ROWS, cols: guessTabCols() };
+    hooks.post("terminals", req, function (ok, v) {
+      tabCreating--;
+      tabUI.addBtn.disabled = false;
+      if (!ok) { toast(REFUSAL[v] ? wsT(REFUSAL[v]) : wsT("js.term.err.failed", v)); return; }
+      openTab(v, nextTabNum(), true);
+    });
+  }
+  function mountTabs() {
+    var ctabs = doc.getElementById("ctabs"), addBtn = ctabs && ctabs.querySelector("[data-ctab-add-term]"), grid = doc.getElementById("grid");
+    if (!ctabs || !addBtn || !grid || tabUI.ctabs) return;
+    var panes = doc.createElement("div");
+    panes.id = "cterm-panes";
+    panes.className = "d-tpanes";
+    grid.appendChild(panes);
+    tabUI = { ctabs: ctabs, addBtn: addBtn, panes: panes };
+    addBtn.addEventListener("click", addTabFromButton);
+    ctabs.addEventListener("click", function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      var closeEl = t.closest("[data-ctab-close]");
+      if (closeEl) { closeTab(closeEl.getAttribute("data-ctab-close")); return; }
+      var selEl = t.closest("[data-ctab-term]");
+      if (selEl) activateTab(selEl.getAttribute("data-ctab-term"));
+    });
+  }
+
   window.WsTerm = {
-    // A late list/create result can introduce an active runtime after a
-    // shell cache check. Never admit the page while either is in flight.
-    cacheSafe: function () { return !listWait && !creating; },
+    // A late list/create result or an open chat terminal tab keeps the frame
+    // uncached so its live PTY/scrollback state is never frozen.
+    cacheSafe: function () { return !listWait && !creating && !tabCreating && !tabList.length; },
+    hasTabs: function () { return tabList.length > 0; },
+    syncCtab: syncCtab,
     // setup hands the kind the page's own pieces: post (a session write
     // route, which passes a refusal's text through) and toast.
     setup: function (h) { hooks = h || {}; },
@@ -684,11 +940,13 @@
       ui.col = col;
       button();
       if (!ui.btn) return;
+      mountTabs();
       reconcile();
       doc.addEventListener("visibilitychange", function () {
         if (doc.hidden) return;
         reconcile();
         cards.list(KIND).forEach(function (c) { if (c.t && c.t.term && !c.t.ws && !c.t.gone) connect(c); });
+        tabList.forEach(function (tab) { if (tab.t && tab.t.term && !tab.t.ws && !tab.t.gone) connect(tab); });
       });
     },
     create: create,

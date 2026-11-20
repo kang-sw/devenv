@@ -408,7 +408,7 @@
     modelHistorySync();
   }
   syncChead();
-  function tabShown(t) { return visible($(PANE[t])) || (t === "convo" && visible(fpane)); }
+  function tabShown(t) { return visible($(PANE[t])) || (t === "convo" && (visible(fpane) || visible($("cterm-panes")))); }
   function tabDot(t) { var b = doc.querySelector('#tabbar [data-tab="' + t + '"]'); return b && b.querySelector(".tdot"); }
   function ctabDot() { return doc.querySelector('#ctabs [data-ctab="convo"] .tdot'); }
   function revealPanes() {
@@ -431,6 +431,7 @@
       else filesTab.hidden();
     }
     filesSeen = fs;
+    if (window.WsTerm && window.WsTerm.syncCtab) window.WsTerm.syncCtab(!!(grid && grid.getAttribute("data-ctab") === "term"), visible($("cterm-panes")));
   }
   function setLayout(v) {
     if (v !== "split" && v !== "tabs") v = "auto";
@@ -461,10 +462,14 @@
     q("#tabbar [data-tab]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-tab") === t)); });
     revealPanes();
   }
-  // setCtab switches the conversation column between the conversation and
-  // the Files pane; it is not kept across a reload.
+  // setCtab switches the conversation column between the conversation, the
+  // Files pane, and chat-header terminal tabs; it is not kept across a reload.
   function setCtab(t) {
-    if (t !== "files" || !fpane || !window.WsFiles) t = "convo";
+    if (t === "term") {
+      if (!window.WsTerm || !window.WsTerm.hasTabs || !window.WsTerm.hasTabs()) t = "convo";
+    } else if (t !== "files" || !fpane || !window.WsFiles) {
+      t = "convo";
+    }
     grid.setAttribute("data-ctab", t);
     q("#ctabs [data-ctab]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-ctab") === t)); });
     revealPanes();
