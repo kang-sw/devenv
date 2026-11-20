@@ -589,7 +589,14 @@
       }
     },
     "261120-refactor-ws-agent-workers-under-holders": {
-      "registered_at": "2026-11-20T08:34:03Z"
+      "registered_at": "2026-11-20T08:34:03Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-20T11:10:02Z"
+      }
     }
   }
 }
