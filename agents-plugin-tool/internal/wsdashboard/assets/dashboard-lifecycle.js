@@ -582,12 +582,13 @@
     }
     if (qs && qs.innerHTML !== (m ? m.qs : "")) qs.innerHTML = m ? m.qs : "";
     shTop.style.paddingRight = m ? m.pad + "px" : "";
+    var side = m && typeof m.side === "number" && isFinite(m.side) && m.side > 0 ? m.side : 0;
+    shTop.style.setProperty("--sh-stage-side", side ? side + "px" : "");
     // Headerless fallback clears stale session controls, not their box.
     if (m) shTop.style.minHeight = m.top + "px";
     railRenameNew();
   }
-  // shLayout takes the shown frame's pinned column (the rail overlays
-  // beside it below 2200px) and its backdrop's dim.
+  // shLayout takes the shown frame's pinned column and its backdrop's dim.
   function shLayout(ent) {
     if (ent.pincol !== root.hasAttribute("data-pincol")) {
       if (ent.pincol) root.setAttribute("data-pincol", ""); else root.removeAttribute("data-pincol");
@@ -748,9 +749,11 @@
       if (headDirty) {
         headDirty = false;
         var top = doc.querySelector(".dwrap > .top"), h = region("head"), qs = $("qsslot");
+        var topCS = top ? getComputedStyle(top) : null;
         head = top ? {
           html: h ? h.innerHTML : null, qs: qs ? inline(qs) : "",
-          pad: (parseFloat(getComputedStyle(top).paddingRight) || 0) + Math.max(0, window.innerWidth - root.clientWidth),
+          pad: (parseFloat(topCS.paddingRight) || 0) + Math.max(0, window.innerWidth - root.clientWidth),
+          side: Math.round((parseFloat(topCS.marginRight) || 0) * 100) / 100,
           top: top.offsetHeight
         } : null;
       }
@@ -773,6 +776,7 @@
     doc.addEventListener("ws-overview", queue);
     var top = doc.querySelector(".dwrap > .top");
     if (window.ResizeObserver && top) new ResizeObserver(queueHead).observe(top);
+    window.addEventListener("resize", queueHead);
     if (window.MutationObserver) {
       var mo = new MutationObserver(queue);
       if (top) new MutationObserver(queueHead).observe(top, { subtree: true, childList: true, attributes: true, characterData: true });

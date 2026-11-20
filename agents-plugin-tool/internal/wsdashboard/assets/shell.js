@@ -20,10 +20,11 @@
   // shape):
   //
   //   frame to shell
-  //     head    {html, qs, pad, top}  the header the shell shows for the
-  //             frame: html its head region's markup (null when the page
+  //     head    {html, qs, pad, top, side?}  the header the shell shows for
+  //             the frame: html its head region's markup (null when the page
   //             keeps its own header), qs its search slot's markup, pad its
-  //             header's right padding and top its header's height (px)
+  //             header's right padding, top its header's height (px), and side
+  //             its centered-stage horizontal inset when any
   //     title   {title}               the frame's tab title
   //     nav     {href}                a page the shell frames was picked in
   //                                   the frame (a link, the palette, a
@@ -35,8 +36,7 @@
   //                                   shell's open rail popover or menu
   //                                   closes (a click in a frame never
   //                                   reaches the shell's own listeners)
-  //     layout  {pincol, dim, popover?} the frame shows the pinned column
-  //                                   (the rail then overlays below 2200px),
+  //     layout  {pincol, dim, popover?} the frame shows the pinned column,
   //                                   and the alpha of the backdrop it shows
   //                                   over the whole window (0: none), which
   //                                   the shell's rail and header take too;

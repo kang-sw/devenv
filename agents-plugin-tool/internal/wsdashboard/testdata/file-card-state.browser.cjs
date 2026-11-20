@@ -10,7 +10,7 @@ const route = '/w/' + root.replace(/^\//, '').split('/').map(encodeURIComponent)
   fs.mkdirSync(evidence, { recursive: true });
   const browser = await chromium.launch({ headless: true });
   try {
-    const context = await browser.newContext({ viewport: { width: 1700, height: 1000 }, locale: 'en-US', reducedMotion: 'reduce' });
+    const context = await browser.newContext({ viewport: { width: 2560, height: 1000 }, locale: 'en-US', reducedMotion: 'reduce' });
     const tab = await context.newPage(), errors = [];
     tab.on('pageerror', e => errors.push(e.message));
     let page;
@@ -113,8 +113,8 @@ const route = '/w/' + root.replace(/^\//, '').split('/').map(encodeURIComponent)
       await page.waitForTimeout(100);
       await tab.screenshot({ path: path.join(evidence, filename) });
     }
-    await capture('dark', 1700, 'after-dark.png');
-    await capture('light', 1700, 'after-light.png');
+    await capture('dark', 2560, 'after-dark.png');
+    await capture('light', 2560, 'after-light.png');
     await capture('dark', 700, 'after-narrow.png');
     const placement = await page.evaluate(() => {
       const cards = window.WsCards.list('preview'), preview = cards.find(c => c.preview), board = document.querySelector('[data-region="board"]');
@@ -122,12 +122,12 @@ const route = '/w/' + root.replace(/^\//, '').split('/').map(encodeURIComponent)
     });
     assert.deepEqual(placement, { first: true, noPinColumn: true, italic: 'italic', outline: 'dashed' });
     fs.writeFileSync(path.join(evidence, 'placement.json'), JSON.stringify(placement, null, 2));
-    for (const width of [1599, 1600]) {
+    for (const width of [2000, 2560]) {
       await tab.setViewportSize({ width, height: 1000 });
-      await page.waitForFunction(wide => document.documentElement.hasAttribute('data-pincol') === (wide && window.WsCards.docked().length > 0), width >= 1600);
+      await page.waitForFunction(band4 => document.documentElement.hasAttribute('data-pincol') === (band4 && window.WsCards.docked().length > 0), width >= 2560);
     }
     // Both existing link entry points keep their default preview semantics.
-    await tab.setViewportSize({ width: 1700, height: 1000 });
+    await tab.setViewportSize({ width: 2560, height: 1000 });
     await tab.goto(base + '/s/livesession');
     await active();
     await page.evaluate(() => {

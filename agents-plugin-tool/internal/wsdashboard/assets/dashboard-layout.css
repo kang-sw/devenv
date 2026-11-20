@@ -128,7 +128,7 @@
 /* Beside the gallery column with a board width set (dashboard-rail.css), the
    cell is sized to the two, so the conversation takes its own (--cvw) and
    the board the rest, which is the board's width. */
-:root[data-pincol][data-boardw] .dgrid.live { --dgrid-cols: minmax(320px, min(var(--cvw), 100% - 360px - var(--dgrid-gap))) minmax(0, 1fr); }
+:root[data-boardw] .dgrid:is(.live, .history) { --dgrid-cols: minmax(320px, min(var(--cvw), 100% - 360px - var(--dgrid-gap))) minmax(0, 1fr); }
 .dgrid.live > .dcv-edge { display: none; grid-area: board; justify-self: start; position: relative; z-index: 2; width: 9px; margin-left: -12px; cursor: col-resize; touch-action: none; }
 @media (min-width: 760px) {
   .dgrid.live[data-layout="split"] { grid-template-columns: var(--dgrid-cols); grid-template-rows: auto minmax(96px, 1fr) auto;
@@ -420,7 +420,6 @@ body:has(.bcard[data-kind="explorer"][data-max]) > .fmenu { z-index: calc(var(--
    height compensation: native document anchoring must not add it again. */
 :root[data-mode="board"] { overflow-anchor: none; }
 .dgrid.board { display: block; max-width: 900px; margin: 0 auto; }
-@media (min-width: 1600px) { .dgrid.board { margin: 0; } }
 
 /* A changed topic's next body frame loads over the frame it replaces,
    unseen and out of the layout, until it has loaded and drawn (the page

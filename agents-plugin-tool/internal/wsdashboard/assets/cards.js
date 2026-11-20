@@ -85,7 +85,7 @@
   // the column as the user dragged it, convow the conversation's beside
   // the board (0: the stylesheet's).
   var gal = null, lay = null, galEl = null, railEl = null, dotsEl = null, viewEl = null, plusEl = null;
-  var pageEls = {}, paneEls = {}, splitEls = {}, divEls = {}, dotEls = {}, railLast = -Infinity, rg = null, railMoved = false;
+  var pageEls = {}, paneEls = {}, splitEls = {}, divEls = {}, dotEls = {}, railLast = -Infinity, rg = null, railMoved = false, resizeBound = false;
   var boardw = 0, convow = 0;
   var toolbar = null, overviewOn = false;
   var stateFilter = "all", stateUI = null;
@@ -1129,14 +1129,38 @@
     homeEl = col;
     if (col) col.addEventListener("wheel", onHomeWheel, { passive: false });
   }
+  // canFitFourCol activates the 4-column layout (rail + stage + gallery
+  // column) iff !tabs, viewport >= WIDE, and spare right width >= board width.
+  function canFitFourCol(vw, tabs) {
+    if (tabs || !(vw >= G.C.WIDE)) return false;
+    var stageW = vw - 32 - 356, gap = 16;
+    var split = !!(opt && (opt.split || (board && board.closest && board.closest(".dgrid.live, .dgrid.history"))));
+    var worktree = !!(board && board.closest && board.closest(".dgrid.worktree"));
+    var gridW, boardW;
+    if (worktree) {
+      gridW = boardw || 1292;
+      boardW = (gridW - gap) * 7 / 12;
+    } else if (!split) {
+      boardW = boardw || 900;
+      gridW = boardW;
+    } else if (boardw) {
+      boardW = boardw;
+      gridW = (convow || (boardw * 5 / 7)) + gap + boardW;
+    } else {
+      gridW = 1292;
+      boardW = convow ? (gridW - gap - Math.max(CONVW_MIN, Math.min(convow, gridW - gap - SPLITB_MIN))) : ((gridW - gap) * 7 / 12);
+    }
+    return stageW - gridW - gap >= boardW;
+  }
   // relayout asks the page what it shows (opt.mode: its width and whether
   // the layout menu shows one column at a time), maps that to the
   // gallery's shape (WsGallery.layout, plus pages and dragging) and tells
   // the page when it changes (opt.layout).
   function relayout() {
     if (!opt || !galEl) return;
-    var m = opt.mode ? opt.mode() : null, n = gal.pages.length, drag = !!(dg && dg.on);
-    var s = G.layout({ width: m ? +m.width || 0 : 0, tabs: !!(m && m.tabs), pages: n, dragging: drag });
+    var m = opt.mode ? opt.mode() : null, vw = m ? +m.width || 0 : 0, tabs = !!(m && m.tabs);
+    var n = gal.pages.length, drag = !!(dg && dg.on);
+    var s = G.layout({ width: vw, tabs: tabs, fourCol: canFitFourCol(vw, tabs), pages: n, dragging: drag });
     s.pages = n;
     s.dragging = drag;
     if (lay && lay.narrow === s.narrow && lay.column === s.column && lay.overlay === s.overlay && lay.rail === s.rail && !lay.empty === !s.empty && !lay.pages === !n && lay.dragging === drag) return;
@@ -2139,10 +2163,10 @@
       e.preventDefault();
     });
     edge.addEventListener("pointermove", function (e) { if (from) move(from, e.clientX - x0); });
-    function end() { if (!from) return; from = null; edge.classList.remove("drag"); persist(); }
+    function end() { if (!from) return; from = null; edge.classList.remove("drag"); relayout(); persist(); }
     edge.addEventListener("pointerup", end);
     edge.addEventListener("pointercancel", end);
-    edge.addEventListener("dblclick", function () { reset(); persist(); });
+    edge.addEventListener("dblclick", function () { reset(); relayout(); persist(); });
     return edge;
   }
   // fetchMissing finds the docked topics the served board lacks (closed
@@ -2258,6 +2282,10 @@
       doc.addEventListener("click", function (e) { if (dragged) { e.preventDefault(); e.stopPropagation(); } }, true);
       // A held touch is a drag, not a scroll.
       doc.addEventListener("touchmove", function (e) { if ((dg && dg.on) || (rg && rg.on)) e.preventDefault(); }, { passive: false });
+      if (!resizeBound && typeof window !== "undefined" && window.addEventListener) {
+        resizeBound = true;
+        window.addEventListener("resize", function () { if (board) relayout(); });
+      }
       floatToolbar();
       fetchMissing();
     },

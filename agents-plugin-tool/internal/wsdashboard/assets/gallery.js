@@ -11,8 +11,7 @@
 
   // The constants are the approved prototype's (paged-docking-gallery v4).
   var C = {
-    WIDE: 1600,          // px: the wide view (Main Board fixed left, gallery right)
-    SLOT: 2200,          // px: from here the session rail docks beside a gallery
+    WIDE: 1600,          // px: minimum viewport where 4-column docking may activate
     SNAP: 320,           // flip tension that is 100%
     TENSION_MAX: 125,    // tension one wheel event adds at most
     RUBBER_PX: 26,       // rubber band translation at 100%
@@ -318,14 +317,15 @@
   // layout maps the viewport to the gallery's shape. o: width (px), tabs
   // (the layout menu says one column at a time), pages (docked pages), and
   // dragging (a card or topic drag runs). narrow: the Main Board is Page 0
-  // of one paged view. column: the wide view shows the gallery column beside
-  // the board (never an empty one, save while a drag runs). overlay: the
-  // session rail overlays (below SLOT, beside a gallery). rail: the
-  // gallery's dot rail shows. empty: from SLOT with no docked pages and no
-  // drag, the idle dashed slot placeholder shows.
+  // of one paged view (viewport < WIDE, tabs mode, or spare width narrower
+  // than the board pane). column: the 4-column wide view shows the gallery
+  // column beside the board (never an empty one, save while a drag runs).
+  // overlay: legacy field kept false for shape stability. rail: the
+  // gallery's dot rail shows. empty: in 4-column mode with no docked pages
+  // and no drag, the idle dashed slot placeholder shows.
   function layout(o) {
-    var narrow = !!o.tabs || !(o.width >= C.WIDE), any = o.pages > 0, drag = !!o.dragging;
-    return { narrow: narrow, column: !narrow && (any || drag), overlay: !narrow && any && o.width < C.SLOT, rail: any || drag, empty: !narrow && !any && !drag && o.width >= C.SLOT };
+    var four = !o.tabs && o.width >= C.WIDE && !!o.fourCol, any = o.pages > 0, drag = !!o.dragging;
+    return { narrow: !four, column: four && (any || drag), overlay: false, rail: any || drag, empty: four && !any && !drag };
   }
 
   // --- drops ---------------------------------------------------------------

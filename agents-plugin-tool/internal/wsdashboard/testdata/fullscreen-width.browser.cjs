@@ -163,8 +163,9 @@ async function shot(page, name) {
   await page.locator('.board-files').click();
   near((await rect(page,'.fpane[data-max]')).width,columnWidth,'Files main column width');
   near((await rect(page,'.fpane[data-max]')).left,(await rect(page,'#bcol')).left,'Files over the main column');
+  await page.setViewportSize({width:2560,height:900});
   await page.locator('.board-toolbar .sheet-width').click();
-  await geometry(page,'.fpane[data-max]',2400,2368,'Files extended');
+  await geometry(page,'.fpane[data-max]',2560,2528,'Files extended');
   await page.locator('.board-toolbar .sheet-width').click();
   await page.locator('.board-files').click();
   assert(await page.locator('.board-files').evaluate(n=>document.activeElement===n));
@@ -172,16 +173,16 @@ async function shot(page, name) {
   await page.evaluate(()=>{window.term=W.open('terminal',{});});
   const boardWidth=(await rect(page,'#r-board')).width;
   await cardClick(page, 'term', '.bc-max');
-  await geometry(page,'.bcard[data-max] .bc-in',2400,Math.min(1920,boardWidth),'Terminal owning board');
+  await geometry(page,'.bcard[data-max] .bc-in',2560,Math.min(1920,boardWidth),'Terminal owning board');
   await page.setViewportSize({width:800,height:900});
   await geometry(page,'.bcard[data-max] .bc-in',800,Math.min(768,boardWidth,1920),'resize clamp');
-  await page.setViewportSize({width:2400,height:900});
-  await geometry(page,'.bcard[data-max] .bc-in',2400,Math.min(1920,boardWidth),'original snapshot after resize');
+  await page.setViewportSize({width:2560,height:900});
+  await geometry(page,'.bcard[data-max] .bc-in',2560,Math.min(1920,boardWidth),'original snapshot after resize');
   await cardClick(page, 'term', '.bc-min'); await cardClick(page, 'term', '.bc-pin');
   const pinnedWidth=(await rect(page,'#bgal .gal-viewport')).width;
   assert(pinnedWidth > 0, 'fixture exposes the real gallery column');
   await cardClick(page, 'term', '.bc-max');
-  await geometry(page,'.bcard[data-max] .bc-in',2400,Math.min(1920,pinnedWidth),'Terminal owning pinned column');
+  await geometry(page,'.bcard[data-max] .bc-in',2560,Math.min(1920,pinnedWidth),'Terminal owning pinned column');
   await cardClick(page, 'term', '.bc-min'); await cardClick(page, 'term', '.bc-pin');
   // Overview hands off before maximizing rather than admitting a second owner.
   await page.evaluate(()=>{overviewHeld=true;}); await cardClick(page, 'term', '.bc-max');
@@ -215,7 +216,7 @@ async function shot(page, name) {
   assert.equal(await page.locator('.bcard[data-max] .sheet-width').isVisible(),false,'ineffective extension absent at wide clamped width');
   await page.keyboard.press('Escape');
   // Reopen and reload never remember extension; content is not remounted by width.
-  await page.setViewportSize({width:2400,height:900});
+  await page.setViewportSize({width:2560,height:900});
   await cardClick(page, 'term', '.bc-max'); await page.locator('.bcard[data-max] .sheet-width').click();
   await page.locator('.bc-scrim').click({position:{x:1,y:1}});
   await cardClick(page, 'term', '.bc-max');
