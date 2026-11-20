@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
@@ -77,6 +78,34 @@ func fireWatchdog(t *testing.T, timers *leverTimers, index int) {
 		return started > index
 	})
 	timers.fire(t, index)
+}
+
+func exhaustSingleAgyWatchdogRetry(t *testing.T, timers *leverTimers, p *fakeProc) {
+	t.Helper()
+	fireWatchdog(t, timers, 0)
+	eventually(t, "retry interrupt", func() bool { return procInterrupts(p) == 1 })
+	p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted}
+	if sent := p.nextSent(t); sent != "continue" {
+		t.Fatalf("retry prompt = %q, want continue", sent)
+	}
+	fireWatchdog(t, timers, 2)
+	eventually(t, "exhaustion interrupt", func() bool { return procInterrupts(p) == 2 })
+}
+
+func agyWatchdogDiagnosticCount(t *testing.T, h *harness, id, diagnostic string) int {
+	t.Helper()
+	c := h.runner.conv(id)
+	c.do(func() {})
+	records := readEventually(t, "watchdog diagnostic in the ring", func() ([]wslive.RingRecord, error) {
+		return wslive.ReadRing(wslive.RingDir(wsdashboard.SessionDir(h.dir, id)))
+	})
+	count := 0
+	for _, record := range records {
+		if record.Kind == wslive.RingReply && record.Text == diagnostic {
+			count++
+		}
+	}
+	return count
 }
 
 // The built-in retry budget is spent inside one logical turn. Each silent
@@ -209,6 +238,70 @@ func TestAgyModelWaitWatchdogForceStopsWhenInterruptIsIgnored(t *testing.T) {
 	}
 	if rec := h.record(id); rec.TurnOpen || rec.ReportID == "" || rec.ReportID != rec.LastReportedTurn {
 		t.Fatalf("late EOF/TurnEnd unsettled or duplicated the child report: %+v", rec)
+	}
+}
+
+func TestAgyModelWaitWatchdogExhaustionPublishesDiagnosticOnEOF(t *testing.T) {
+	h, timers, got := agyWatchdogHarness(t, "45")
+	id, p := startAgyWatchdogTurn(t, h, true)
+	exhaustSingleAgyWatchdogRetry(t, timers, p)
+
+	// The exhausted prompt exits without TurnEnd after accepting the interrupt.
+	p.exit()
+	eventually(t, "failed parent report", func() bool { return len(got.lead()) == 1 })
+
+	const diagnostic = "ws: agy stalled; sent 1 automatic continue attempts, all failed."
+	report := got.lead()[0]
+	if report.Result.Status != TurnFailed || report.Result.Error != "agy model stream stalled for 45s after 1 automatic continue attempts" {
+		t.Fatalf("EOF exhaustion result = %+v", report.Result)
+	}
+	if count := strings.Count(report.Result.Message, diagnostic); count != 1 {
+		t.Fatalf("EOF exhaustion message contains diagnostic %d times: %q", count, report.Result.Message)
+	}
+
+	// A buffered TurnEnd after EOF must not publish or report the turn again.
+	c := h.runner.conv(id)
+	c.do(func() { c.handle(Event{TurnEnd: true, TurnReason: wslive.TurnAborted}) })
+	if reports := got.lead(); len(reports) != 1 {
+		t.Fatalf("EOF plus late TurnEnd produced %d parent reports: %+v", len(reports), reports)
+	}
+	if count := agyWatchdogDiagnosticCount(t, h, id, diagnostic); count != 1 {
+		t.Fatalf("EOF plus late TurnEnd published %d exhaustion diagnostics", count)
+	}
+}
+
+func TestAgyModelWaitWatchdogExhaustionPublishesDiagnosticOnGraceForceStop(t *testing.T) {
+	h, timers, got := agyWatchdogHarness(t, "45")
+	id, p := startAgyWatchdogTurn(t, h, true)
+	exhaustSingleAgyWatchdogRetry(t, timers, p)
+
+	// The exhausted prompt ignores the interrupt, so the bounded grace force-
+	// stops it without a TurnEnd from the backend.
+	fireWatchdog(t, timers, 3)
+	eventually(t, "force-stopped exhausted process", p.isClosed)
+	eventually(t, "failed parent report", func() bool { return len(got.lead()) == 1 })
+
+	const diagnostic = "ws: agy stalled; sent 1 automatic continue attempts, all failed."
+	report := got.lead()[0]
+	if report.Result.Status != TurnFailed || report.Result.Error != "agy model stream stalled for 45s after 1 automatic continue attempts and did not stop within 5s after interrupt" {
+		t.Fatalf("grace exhaustion result = %+v", report.Result)
+	}
+	if count := strings.Count(report.Result.Message, diagnostic); count != 1 {
+		t.Fatalf("grace exhaustion message contains diagnostic %d times: %q", count, report.Result.Message)
+	}
+
+	// EOF and a buffered TurnEnd may still arrive after stopProcess settled the
+	// report; both must remain idempotent.
+	c := h.runner.conv(id)
+	c.do(func() {
+		c.processExited()
+		c.handle(Event{TurnEnd: true, TurnReason: wslive.TurnAborted})
+	})
+	if reports := got.lead(); len(reports) != 1 {
+		t.Fatalf("grace force-stop plus late events produced %d parent reports: %+v", len(reports), reports)
+	}
+	if count := agyWatchdogDiagnosticCount(t, h, id, diagnostic); count != 1 {
+		t.Fatalf("grace force-stop plus late events published %d exhaustion diagnostics", count)
 	}
 }
 
