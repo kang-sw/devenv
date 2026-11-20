@@ -127,6 +127,10 @@
       if (text !== undefined) n.textContent = text;
       return n;
     }
+    function setVar(node, name, value) {
+      if (node.style && typeof node.style.setProperty === "function") node.style.setProperty(name, String(value));
+      else if (node.style) node.style[name] = String(value);
+    }
     function icon(entry, small) { var n = el("span", small ? "hb sm" : "hb"); n.setAttribute("data-h", String(entry.harness || "")); return n; }
     // mini is the compact trigger the handle steps down to where the header
     // runs short (rail.js topFit): a gauge, the handle's label its tooltip.
@@ -213,6 +217,7 @@
       heading: "js.usage.heading", close: "js.usage.close", legend: "js.usage.legend",
       fiveHour: "js.usage.fivehour", weekly: "js.usage.weekly", age: "js.usage.age",
       unavailable: "js.usage.unavailable", signInRequired: "js.usage.signinrequired", disabled: "js.usage.disabled",
+      noFiveHour: "js.usage.no5h", noWeekly: "js.usage.noweekly", modelGroups: "js.usage.modelgroups",
       chart: "js.usage.chart", baseline: "js.usage.baseline",
       unknownReset: "js.usage.unknownreset", stalePace: "js.usage.stalepace", idealTitle: "js.usage.idealtitle",
       nowTitle: "js.usage.nowtitle", now: "js.usage.now", estimatedTitle: "js.usage.estimatedtitle",
@@ -312,21 +317,35 @@
       });
       return { el: chart, geometry: geometry };
     }
+    function shortReset(w) {
+      if (!w.resetsAt) return t("unknown");
+      var date = new Date(w.resetsAt);
+      if (w.kind === "five_hour") return date.toLocaleTimeString(locale(), { hour: "numeric", minute: "2-digit" });
+      return new Intl.DateTimeFormat(locale(), { weekday: "short", hour: "numeric", minute: "2-digit" }).format(date);
+    }
+    function emptySlot(kind) {
+      var slot = el("div", "usage-window-empty", t(kind === "five_hour" ? "noFiveHour" : "noWeekly"));
+      slot.setAttribute("data-kind", kind);
+      return slot;
+    }
     function windowCard(entry, w, now) {
       var at = observation(w, entry), old = stale(at, now), isDisabled = !!w.disabled, delta = at ? pace(w, old ? at : now) : null;
       var comparison = delta === null ? "—" : (delta > 0 ? "+" : delta < 0 ? "−" : "") + Math.abs(delta) + "%";
       var card = el("article", "usage-window-card" + (old ? " usage-stale" : "") + (isDisabled ? " usage-disabled" : ""));
+      card.setAttribute("data-kind", w.kind);
       var head = el("div", "usage-window");
       head.appendChild(el("span", "usage-window-name", windowLabel(w.kind)));
-      if (isDisabled) head.appendChild(el("span", "usage-disabled-tag", t("disabled")));
       head.appendChild(el("b", "usage-number", Math.round(w.percent) + "%"));
       head.appendChild(el("span", "usage-pace" + (delta > 0 ? " over" : delta < 0 ? " under" : ""), "(" + comparison + ")"));
+      if (isDisabled) head.appendChild(el("span", "usage-disabled-tag", t("disabled")));
       if (old) head.appendChild(clock());
+      var fullReset = t("resets", w.resetsAt ? new Date(w.resetsAt).toLocaleString(locale()) : t("unknown"));
+      var resetEl = el("span", "usage-reset", "\u21bb " + shortReset(w));
+      resetEl.title = fullReset;
+      head.appendChild(resetEl);
       card.appendChild(head);
-      card.appendChild(el("div", "usage-meta", t("resets", w.resetsAt ? new Date(w.resetsAt).toLocaleString(locale()) : t("unknown"))));
       var chart = drawChart(entry, w, old, now); card.appendChild(chart.el);
       var observed = observedAge(at, now) + (old ? "; " + t("stalePace") : "");
-      card.appendChild(el("div", "usage-observed usage-meta", observed));
       card.setAttribute("aria-label", t("card", windowLabel(w.kind), Math.round(w.percent), comparison, observed) + (isDisabled ? "; " + t("disabled") : ""));
       var history = entryHistory(entry), note;
       if (!history || history.schema_version !== 1 || history.status === "unavailable") note = t("historyUnavailable");
@@ -340,21 +359,111 @@
     function drawPopover() {
       if (!popover || !shown) return;
       var list = popover.querySelector(".usage-details"); list.textContent = "";
-      if (!data.entries.length) list.appendChild(el("p", "usage-status", t("notLoggedIn")));
-      sorted(data.entries).forEach(function (entry) {
-        var row = el("section", "usage-account"), head = el("div", "usage-heading");
+      var now = Date.now(), entries = sorted(data.entries);
+      popover.setAttribute("data-cols", String(entries.length));
+      if (!entries.length) {
+        list.appendChild(el("p", "usage-status", t("notLoggedIn")));
+        place();
+        return;
+      }
+      var agyIdx = [];
+      entries.forEach(function (entry, idx) {
+        if (entry.harness === "agy" && entry.group) agyIdx.push(idx);
+      });
+      var hasBracket = agyIdx.length >= 2 && agyIdx[agyIdx.length - 1] - agyIdx[0] === agyIdx.length - 1;
+      var agyStart = hasBracket ? agyIdx[0] : -1, agyEnd = hasBracket ? agyIdx[agyIdx.length - 1] : -1;
+
+      var grid = el("div", "usage-layout" + (hasBracket ? " usage-has-bracket" : ""));
+      setVar(grid, "--usage-cols", entries.length);
+
+      [["five_hour", "5 h"], ["seven_day", "7 d"]].forEach(function (item) {
+        var lab = el("div", "usage-row-label");
+        lab.setAttribute("data-kind", item[0]);
+        lab.appendChild(el("span", "", windowLabel(item[0])));
+        lab.appendChild(el("small", "", item[1]));
+        grid.appendChild(lab);
+      });
+      ["five_hour", "seven_day"].forEach(function (kind) {
+        var colh = el("div", "usage-col-head", windowLabel(kind));
+        colh.setAttribute("data-kind", kind);
+        grid.appendChild(colh);
+      });
+
+      var cRow = 2, cnRow = 2;
+      entries.forEach(function (entry, idx) {
+        var inBracket = hasBracket && idx >= agyStart && idx <= agyEnd;
+        if (hasBracket && idx === agyStart) {
+          var bracket = el("div", "usage-vendor-bracket");
+          setVar(bracket, "--b-col", agyStart + 2);
+          setVar(bracket, "--b-span", agyIdx.length);
+          setVar(bracket, "--c-row", cRow);
+          setVar(bracket, "--cn-row", cnRow);
+          bracket.appendChild(icon(entry));
+          bracket.appendChild(el("b", "", "Antigravity"));
+          bracket.appendChild(el("span", "usage-vendor-sub", "\u00b7 " + t("modelGroups", agyIdx.length)));
+          grid.appendChild(bracket);
+          cRow++; cnRow++;
+        } else if (idx > 0) {
+          var sep = el("div", "usage-c-sep");
+          setVar(sep, "--c-row", cRow);
+          setVar(sep, "--cn-row", cnRow);
+          grid.appendChild(sep);
+          cRow++; cnRow++;
+        }
+
+        var row = el("section", "usage-account" + (inBracket ? " usage-in-bracket" : ""));
+        setVar(row, "--col", idx + 2);
+        setVar(row, "--c-row", cRow);
+        setVar(row, "--cn-row", cnRow);
+        setVar(row, "--cn-cards-row", cnRow + 1);
+
+        var windows = active(entry, now);
+        var w5 = windows.filter(function (v) { return v.kind === "five_hour"; })[0] || null;
+        var w7 = windows.filter(function (v) { return v.kind === "seven_day"; })[0] || null;
+        var groupAt = entry.asOf || (w5 && w5.asOf) || (w7 && w7.asOf) || 0;
+
+        var vhead = el("div", "usage-vhead" + (inBracket ? "" : " usage-vhead-tall"));
+        var head = el("div", "usage-heading");
         head.appendChild(icon(entry));
         head.appendChild(el("b", "", entryName(entry)));
-        if (entry.plan) head.appendChild(el("span", "usage-plan", entry.plan));
-        row.appendChild(head);
-        var windows = active(entry, Date.now());
-        windows.sort(function (a, b) { return (a.kind === "five_hour" ? 0 : 1) - (b.kind === "five_hour" ? 0 : 1); }).forEach(function (w) {
-          row.appendChild(windowCard(entry, w, Date.now()));
-        });
-        if (entry.status || !windows.length) row.appendChild(el("p", "usage-status", statusText(entry.status)));
-        if (!windows.length && entry.asOf) row.appendChild(el("div", "usage-meta", observedAge(entry.asOf, Date.now())));
-        list.appendChild(row);
+        vhead.appendChild(head);
+        var vmeta = el("div", "usage-vmeta");
+        if (entry.plan) vmeta.appendChild(el("span", "usage-plan", entry.plan));
+        if (entry.plan && groupAt) vmeta.appendChild(el("span", "usage-vdot", "\u00b7"));
+        if (groupAt) {
+          var ageEl = el("span", "usage-vage", shortAge(groupAt, now));
+          ageEl.title = observedAge(groupAt, now);
+          vmeta.appendChild(ageEl);
+        }
+        if (vmeta.children.length) vhead.appendChild(vmeta);
+        row.appendChild(vhead);
+
+        cRow++;
+        cnRow += 2;
+
+        if (!w5 && !w7) {
+          var statusSlot = el("div", "usage-status-slot");
+          statusSlot.appendChild(el("p", "usage-status", statusText(entry.status)));
+          if (entry.asOf) statusSlot.appendChild(el("div", "usage-meta", observedAge(entry.asOf, now)));
+          row.appendChild(statusSlot);
+        } else {
+          var slot5 = w5 ? windowCard(entry, w5, now) : emptySlot("five_hour");
+          slot5.className += " usage-slot-5h";
+          var slot7 = w7 ? windowCard(entry, w7, now) : emptySlot("seven_day");
+          slot7.className += " usage-slot-7d";
+          row.appendChild(slot5);
+          row.appendChild(slot7);
+          if (entry.status) {
+            var note = el("p", "usage-status usage-status-note", statusText(entry.status));
+            setVar(note, "--c-status-row", cRow);
+            setVar(note, "--cn-status-row", cnRow);
+            row.appendChild(note);
+            cRow++; cnRow++;
+          }
+        }
+        grid.appendChild(row);
       });
+      list.appendChild(grid);
       place();
     }
     function refresh(force) {

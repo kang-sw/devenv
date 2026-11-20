@@ -270,7 +270,10 @@ test('footer and popover show detected harnesses, age, reset and safe text but h
   const pop = mounted.makePopover(() => {}, () => {}); pop.open(); pop.focus(); await flush();
   const text = pop.el.textContent;
   assert.ok(text.indexOf('Claude') < text.indexOf('Codex / GPT'));
-  for (const s of ['96%', 'Weekly', '5-hour', 'value from 0 min ago', 'Resets ', '<fake-plan>', 'Pi token expired']) assert.ok(text.includes(s), s);
+  for (const s of ['96%', 'Weekly', '5-hour', '0m ago', '<fake-plan>', 'Pi token expired']) assert.ok(text.includes(s), s);
+  const resetEl = pop.el.querySelector('.usage-reset');
+  assert.ok(resetEl.textContent.startsWith('↻ '));
+  assert.ok(resetEl.title.startsWith('Resets '));
   for (const source of ['via Pi', 'Claude push']) assert.ok(!text.includes(source), source);
   assert.equal(pop.el.attributes.role, 'dialog');
   assert.equal(pop.el.focused, true);
@@ -483,7 +486,8 @@ test('the header handle keeps one row: small badge marks clear of the columns, a
   assert.match(rule('.dwrap > .top.tu .tcen > .usage-toggle'), /width: 34px/);
   assert.match(rule('.dwrap > .top.tu .tcen > .usage-toggle > :not(.usage-mini)'), /display: none/);
   assert.match(rule('.dwrap > .top.tu .tcen > .usage-toggle > .usage-mini'), /display: inline-flex/);
-  assert.doesNotMatch(css, /overflow:\s*hidden|text-overflow:\s*ellipsis/);
+  const handleCss = css.slice(0, css.indexOf('.rpop.usage-pop'));
+  assert.doesNotMatch(handleCss, /overflow:\s*hidden|text-overflow:\s*ellipsis/);
 });
 
 test('the handle marks each harness with the small badge and leads with the compact trigger', async () => {
@@ -623,5 +627,33 @@ test('popover and gutter follow fixed vendor order with adjacent agy groups rega
   const pop = mounted.makePopover(() => {}, () => {}); pop.open(); await flush();
   const popTitles = nodes(pop.el, '.usage-account').map(s => s.querySelector('.usage-heading').textContent);
   assert.deepEqual(popTitles, ['Claude', 'Codex / GPT', 'Gemini Models', 'Claude and GPT models']);
+  pop.close();
+});
+
+test('popover uses window rows, transposed container rules and a localized missing-window slot', async () => {
+  const at = Date.UTC(2026, 10, 19, 12, 0), reset = at + 3 * 3600000, env = environment(at);
+  const window = (kind, percent) => ({ kind, percent, asOf: at, resetsAt: reset });
+  env.set({ entries: [
+    { harness: 'claude', plan: 'max', asOf: at, windows: [window('five_hour', 5), window('seven_day', 10)] },
+    { harness: 'codex', plan: 'pro', asOf: at, windows: [window('seven_day', 20)] },
+    { harness: 'agy', group: 'gemini', label: 'Gemini Models', asOf: at, windows: [window('five_hour', 30), window('seven_day', 40)] },
+    { harness: 'agy', group: 'claude_gpt', label: 'Claude and GPT models', asOf: at, windows: [window('five_hour', 50), window('seven_day', 60)] }
+  ] });
+  const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
+  const pop = mounted.makePopover(() => {}, () => {}); pop.open(); await flush();
+  assert.equal(pop.el.attributes['data-cols'], '4');
+  const grid = pop.el.querySelector('.usage-details').querySelector('.usage-layout');
+  assert.equal(grid.tagName, 'div');
+  assert.deepEqual(nodes(pop.el, '.usage-row-label').map(n => n.textContent), ['5-hour5 h', 'Weekly7 d']);
+  assert.deepEqual(nodes(pop.el, '.usage-col-head').map(n => n.textContent), ['5-hour', 'Weekly']);
+  assert.equal(nodes(pop.el, '.usage-vendor-bracket')[0].textContent, 'Antigravity· 2 model groups');
+  const empty = nodes(pop.el, '.usage-window-empty');
+  assert.equal(empty.length, 1);
+  assert.equal(empty[0].attributes['data-kind'], 'five_hour');
+  assert.equal(empty[0].textContent, 'no 5-hour window');
+  const css = fs.readFileSync(__dirname + '/assets/usage.css', 'utf8');
+  assert.match(css, /@container usage-pop \(max-width: 956px\)/);
+  assert.match(css, /@container usage-pop \(max-width: 600px\)/);
+  assert.match(css, /@container usage-pop \(max-width: 336px\)/);
   pop.close();
 });

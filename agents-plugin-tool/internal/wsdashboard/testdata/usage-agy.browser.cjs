@@ -116,7 +116,39 @@ const payload = {
       assert.equal(await pop.locator('.usage-window-card.usage-disabled').count(), 1);
       const disabledOpacity = await pop.locator('.usage-window-card.usage-disabled').evaluate(e => parseFloat(getComputedStyle(e).opacity));
       assert.ok(disabledOpacity < 0.7, `${theme}: disabled card dimmed (${disabledOpacity})`);
+      assert.equal(await pop.locator('.usage-window-empty').count(), 1);
+      assert.equal(await pop.locator('.usage-window-empty').textContent(), 'no 5-hour window');
+      const wideLayout = await pop.evaluate(el => ({
+        width: el.getBoundingClientRect().width,
+        rows: getComputedStyle(el.querySelector('.usage-row-label')).display,
+        columns: getComputedStyle(el.querySelector('.usage-col-head')).display,
+      }));
+      assert.ok(wideLayout.width <= 988 && wideLayout.width > 980, `${theme}: wide popover width ${wideLayout.width}`);
+      assert.notEqual(wideLayout.rows, 'none', `${theme}: wide B row labels visible`);
+      assert.equal(wideLayout.columns, 'none', `${theme}: wide B column labels hidden`);
       await pop.screenshot({ path: path.join(output, `agy-popover-${theme}.png`) });
+
+      await page.setViewportSize({ width: 420, height: 2200 });
+      await page.evaluate(() => window.dispatchEvent(new Event('resize')));
+      const narrowLayout = await pop.evaluate(el => {
+        const percentRows = [...el.querySelectorAll('.usage-window')];
+        return {
+          width: el.getBoundingClientRect().width,
+          rows: getComputedStyle(el.querySelector('.usage-row-label')).display,
+          columns: getComputedStyle(el.querySelector('.usage-col-head')).display,
+          vendorColumn: getComputedStyle(el.querySelector('.usage-vhead')).gridColumn,
+          overflow: percentRows.some(n => n.scrollWidth > n.clientWidth),
+          pageWidth: document.documentElement.scrollWidth,
+          viewportWidth: window.innerWidth,
+        };
+      });
+      assert.ok(narrowLayout.width <= 404, `${theme}: narrow popover width ${narrowLayout.width}`);
+      assert.equal(narrowLayout.rows, 'none', `${theme}: narrow B row labels hidden`);
+      assert.notEqual(narrowLayout.columns, 'none', `${theme}: narrow C column labels visible`);
+      assert.equal(narrowLayout.vendorColumn, '1 / -1', `${theme}: narrow vendor head above cards`);
+      assert.equal(narrowLayout.overflow, false, `${theme}: percent rows stay inside their cards`);
+      assert.ok(narrowLayout.pageWidth <= narrowLayout.viewportWidth, `${theme}: no horizontal page scroll`);
+      await pop.screenshot({ path: path.join(output, `agy-popover-narrow-${theme}.png`) });
 
       assert.deepEqual(requests, [], `${theme}: no network requests`);
       assert.deepEqual(errors, [], `${theme}: runtime errors`);

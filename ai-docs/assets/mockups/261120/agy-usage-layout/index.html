@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Plan usage popover — layout mockup (261120)</title>
+<style>
+/* Theme tokens copied from login-gate.css / dashboard.css (dark + light). */
+.t-dark {
+  --wb-bg:#141518; --wb-fg:#e7e7e4; --wb-card:#1e2024; --wb-muted:#2b2d32; --wb-muted-fg:#a2a6ad; --wb-primary:#7aa2ff;
+  --wb-ok:#6cc39a; --wb-fail:#f0797e; --wb-warn-ink:#e0a36c;
+  --wb-shadow-hi:0 4px 18px rgb(0 0 0 / .55); color-scheme:dark;
+}
+.t-light {
+  --wb-bg:#f3f3f0; --wb-fg:#1b1d21; --wb-card:#fff; --wb-muted:#e9e8e3; --wb-muted-fg:#5f646b; --wb-primary:#2b62d9;
+  --wb-ok:#1d7348; --wb-fail:#c0262d; --wb-warn-ink:#a35f00;
+  --wb-shadow-hi:0 4px 18px rgb(0 0 0 / .14); color-scheme:light;
+}
+.t-dark, .t-light {
+  --wb-line:color-mix(in srgb,var(--wb-fg) 16%,transparent);
+  --wb-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --wb-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;
+  background:var(--wb-bg); color:var(--wb-fg);
+}
+html, body { margin:0; }
+body { font:13px/1.45 var(--wb-sans); padding:20px 24px 40px; }
+h1 { font-size:17px; margin:0 0 4px; }
+h2 { font-size:14px; margin:0 0 3px; }
+.intro { color:var(--wb-muted-fg); max-width:1000px; margin:0 0 6px; }
+.toolbar { display:flex; gap:10px; align-items:center; margin:8px 0 18px; }
+.toolbar button { font:inherit; padding:3px 10px; border-radius:6px; border:1px solid var(--wb-line); background:var(--wb-card); color:var(--wb-fg); cursor:pointer; }
+.variant { margin:0 0 30px; }
+.variant > .note { color:var(--wb-muted-fg); max-width:1000px; margin:0 0 10px; font-size:12px; }
+.variant > .note b { color:var(--wb-fg); }
+.size { font:600 11px var(--wb-mono); color:var(--wb-primary); }
+.row { display:flex; flex-wrap:wrap; gap:24px; align-items:flex-start; }
+.frame-label { font-size:11px; color:var(--wb-muted-fg); margin:0 0 5px; }
+.light-box { padding:14px; border-radius:10px; }
+
+/* ---- Popover chrome (.rpop) ---- */
+.pop { box-sizing:border-box; display:grid; gap:10px; background:var(--wb-card); color:var(--wb-fg); border-radius:10px;
+  box-shadow:var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); padding:10px 12px; font-size:12.5px; width:max-content; }
+.pop-head { display:flex; align-items:center; gap:7px; }
+.pop-head .help { width:17px; height:17px; border:1px solid var(--wb-line); border-radius:50%; color:var(--wb-muted-fg); display:inline-grid; place-items:center; font-size:11px; }
+.pop-head .close { margin-left:auto; color:var(--wb-muted-fg); }
+
+/* ---- Harness badge (.hb, dashboard.css) ---- */
+.hb { display:inline-flex; align-items:center; justify-content:center; flex:none; box-sizing:border-box; width:24px; height:15px; border-radius:4.5px;
+  font:800 10px/1 ui-rounded,"Arial Rounded MT Bold",sans-serif; background:#3a3b3f; color:#9a9a9a; }
+.hb[data-h=claude] { background:#d97757; color:#fff; } .hb[data-h=claude]::before { content:"Cl"; }
+.hb[data-h=codex] { background:#f2f2f2; color:#1e1f22; } .hb[data-h=codex]::before { content:"Co"; }
+.hb[data-h=agy] { background:#3b7be8; color:#fff; } .hb[data-h=agy]::before { content:"Ag"; }
+.t-light .hb[data-h=codex] { box-shadow:inset 0 0 0 1px #0002; }
+
+/* ---- Card + chart (usage.css) ---- */
+.vhead { display:flex; align-items:center; gap:7px; min-width:0; white-space:nowrap; }
+.vhead b { overflow:hidden; text-overflow:ellipsis; }
+.plan, .meta { color:var(--wb-muted-fg); }
+.plan { margin-left:auto; font-size:11px; }
+.age { font:10px var(--wb-sans); color:var(--wb-muted-fg); font-variant-numeric:tabular-nums; }
+.card { min-width:0; padding:8px; border-radius:8px; background:color-mix(in srgb,var(--wb-bg) 50%,var(--wb-card)); box-sizing:border-box; }
+.card.disabled { opacity:.55; }
+.card.empty { display:grid; place-items:center; background:none; border:1px dashed var(--wb-line); color:var(--wb-muted-fg); font-size:11px; }
+.whead { display:flex; align-items:baseline; gap:6px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.wname { margin-right:auto; font-size:12px; font-weight:700; }
+.num { font:700 20px/1.2 var(--wb-mono); letter-spacing:-.035em; }
+.pace { font:600 10px/1.2 var(--wb-mono); letter-spacing:-.025em; padding:2px 4px; border-radius:4px; }
+.pace.under { color:var(--wb-ok); } .pace.over { color:var(--wb-fail); }
+.tag { font-size:10px; font-weight:600; color:var(--wb-muted-fg); padding:1px 5px; border-radius:4px; border:1px solid var(--wb-line); }
+.card > .meta { margin-top:4px; font-size:10px; }
+.observed { border-top:1px solid var(--wb-line); padding-top:5px; }
+.chart { display:block; width:100%; height:auto; margin-top:3px; }
+.chart text { font:9px var(--wb-sans); fill:var(--wb-muted-fg); }
+.grid { stroke:var(--wb-line); stroke-width:.7; }
+.dgrid { stroke:var(--wb-line); stroke-width:.5; opacity:.35; }
+.ideal { stroke:var(--wb-muted-fg); stroke-width:1.2; fill:none; opacity:.75; }
+.nowl { stroke:var(--wb-line); stroke-width:1; }
+.actual { fill:none; stroke-linecap:round; stroke-linejoin:round; }
+.area { stroke:none; opacity:.14; } .excess { stroke:none; opacity:.22; }
+.point { stroke:var(--wb-card); stroke-width:2; }
+
+/* compact card (B, C) */
+.card.compact { padding:6px 7px 4px; }
+.card.compact .num { font-size:18px; }
+.card.compact .reset { margin-left:auto; font-size:10px; color:var(--wb-muted-fg); }
+.card.compact .wname { margin-right:0; font-size:11px; }
+
+/* ---- A: vendor columns, full cards ---- */
+.lay-a { display:grid; grid-template-columns:repeat(4, 262px); column-gap:10px; row-gap:7px; }
+.lay-a .vhead { grid-row:2; padding-bottom:2px; border-bottom:1px solid var(--wb-line); padding-bottom:6px; }
+.lay-a .vend { grid-row:1; font-size:11px; color:var(--wb-muted-fg); display:flex; align-items:center; gap:6px; }
+.lay-a .vend.span { grid-column:3 / span 2; border-bottom:2px solid #3b7be8; padding-bottom:2px; }
+
+/* ---- B: window rows x vendor columns, compact ---- */
+.lay-b { display:grid; grid-template-columns:44px repeat(4, 222px); gap:7px 8px; align-items:stretch; }
+.lay-b .vhead { align-self:end; border-bottom:1px solid var(--wb-line); padding-bottom:5px; }
+.lay-b .rowlab { font-size:11px; font-weight:700; padding-top:8px; color:var(--wb-fg); }
+.lay-b .rowlab small { display:block; font-weight:400; font-size:10px; color:var(--wb-muted-fg); }
+.vend { font-size:11px; color:var(--wb-muted-fg); display:flex; align-items:center; gap:6px; white-space:nowrap; }
+.lay-b .vend.span { grid-column:4 / span 2; grid-row:1; border-bottom:2px solid #3b7be8; padding-bottom:2px; }
+.lay-b .tall { grid-row:1 / span 2; }
+
+/* ---- C: vendor rows x window columns, compact ---- */
+.lay-c { display:grid; grid-template-columns:118px 222px 222px; gap:7px 8px; }
+.lay-c .colh { font-size:11px; font-weight:700; padding:0 2px 2px; border-bottom:1px solid var(--wb-line); }
+.lay-c .vhead { flex-direction:column; align-items:flex-start; gap:2px; padding-top:6px; white-space:normal; }
+.lay-c .vhead .top { display:flex; align-items:center; gap:6px; }
+.lay-c .vhead b { font-size:12px; line-height:1.2; }
+.lay-c .vend.span { grid-column:1 / -1; border-bottom:2px solid #3b7be8; padding:6px 0 2px; }
+.lay-c .sep { grid-column:1 / -1; border-top:1px solid var(--wb-line); }
+/* C narrow: vendor heading on its own line, cards 2-up (1-up below ~360px) */
+.lay-c.narrow { grid-template-columns:1fr 1fr; width:396px; }
+.lay-c.narrow .colh:first-child { display:none; }
+.lay-c.narrow .vhead { grid-column:1 / -1; flex-direction:row; align-items:center; padding-top:2px; }
+.lay-c.narrow .vhead .age { margin-left:auto; }
+</style>
+</head>
+<body class="t-dark" id="page">
+<h1>Plan usage popover — layout variants</h1>
+<p class="intro">Today: one 340px column, <span class="size">340 × ~1690 px</span>, vendor order follows "tightest window first" so the agy groups split around Claude/Codex.
+All variants keep the chart exactly (0/100 axis, dashed pace diagonal, Now marker, tinted line + area, current dot), the percent/delta typography and the Cl/Co/Ag badges,
+and use one fixed vendor order matching the gutter: <b>Claude → Codex → Antigravity (Gemini, Claude&amp;GPT)</b>. Sample values are from the usage-agy capture; "now" = Thu 11/19 9:00 PM.
+Sizes in <span class="size">blue</span> are measured from this page.</p>
+<div class="toolbar"><button id="theme">Toggle light / dark</button><span class="meta">Variant B is also shown in light theme at the bottom.</span></div>
+
+<section class="variant">
+  <h2>A. Vendor columns — full-size cards stacked per vendor</h2>
+  <p class="note">One column per vendor group, today's card unchanged inside (5-hour on top, Weekly below; Codex keeps an empty 5-hour slot so the rows line up). The two agy groups sit under one "Antigravity" bracket.
+  Popover <span class="size" data-measure="pop-a"></span>. <b>Narrow:</b> <code>repeat(auto-fit, minmax(262px,1fr))</code> → 2×2 below ~1110px (≈ 560 × 1010), one column below ~580px (back to today's height). Largest charts, but the widest popover and it wraps early.</p>
+  <div class="pop" id="pop-a"></div>
+</section>
+
+<section class="variant">
+  <h2>B. Window rows × vendor columns — compact cards</h2>
+  <p class="note">Rows are 5-hour / Weekly, columns are vendor groups; the row label replaces the per-card window name, the reset time moves onto the percent line, and "N min ago" moves to the column head (it is per group, like the gutter). Chart geometry is identical, just a shorter plot (≈ 222px wide at 1:1 text scale).
+  Popover <span class="size" data-measure="pop-b"></span>. <b>Narrow:</b> under ~980px container width it switches to C (transposed); reading across a row compares vendors on the same window, same as the gutter.</p>
+  <div class="pop" id="pop-b"></div>
+</section>
+
+<section class="variant">
+  <h2>C. Vendor rows × window columns — compact cards (narrow-friendly)</h2>
+  <p class="note">B transposed: one row per vendor group, 5-hour and Weekly side by side. Width is fixed at two cards, so it fits a narrow dashboard; height grows with the number of groups instead of windows.
+  Popover <span class="size" data-measure="pop-c"></span>. <b>Narrow (&lt; ~600px):</b> vendor head moves above its row, the 5-hour/Weekly header stays once at the top, cards stay 2-up (right frame, <span class="size" data-measure="pop-cn"></span>); below ~360px cards go 1-up.</p>
+  <div class="row">
+    <div><div class="frame-label">wide</div><div class="pop" id="pop-c"></div></div>
+    <div><div class="frame-label">narrow (≈ 420px container)</div><div class="pop" id="pop-cn"></div></div>
+  </div>
+</section>
+
+<section class="variant t-light light-box">
+  <h2>Light theme — Variant B</h2>
+  <div class="pop" id="pop-bl"></div>
+</section>
+
+<script>
+"use strict";
+const NOW = { };
+const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const DATA = [
+  { h:"claude", name:"Claude", plan:"max", age:0, windows:[
+    { kind:"5h", pct:22, reset:"11/20/2026, 12:15:00 AM", rs:"12:15 AM", start:"07:15 PM", end:"12:15 AM", now:.35, hist:[[.12,10],[.2,13],[.28,18],[.35,22]] },
+    { kind:"wk", pct:51, reset:"11/22/2026, 9:28:48 AM", rs:"Sun 9:28 AM", rh:9.48, dow:0, now:.64, hist:[[.64,51]] } ] },
+  { h:"codex", name:"Codex / GPT", plan:"pro", age:0, windows:[ null,
+    { kind:"wk", pct:37, reset:"11/23/2026, 5:24:00 PM", rs:"Mon 5:24 PM", rh:17.4, dow:1, now:.45, hist:[[.32,30],[.38,33],[.45,37]] } ] },
+  { h:"agy", vendor:"Antigravity", name:"Gemini Models", age:12, windows:[
+    { kind:"5h", pct:42, reset:"11/19/2026, 11:33:00 PM", rs:"11:33 PM", start:"06:33 PM", end:"11:33 PM", now:.49, hist:[[.25,20],[.33,27],[.40,35],[.45,42]] },
+    { kind:"wk", pct:58, reset:"11/23/2026, 5:26:24 AM", rs:"Mon 5:26 AM", rh:5.44, dow:1, now:.521, hist:[[.24,30],[.35,40],[.45,50],[.52,58]] } ] },
+  { h:"agy", vendor:"Antigravity", name:"Claude and GPT models", age:12, windows:[
+    { kind:"5h", pct:84, disabled:true, reset:"11/19/2026, 10:48:00 PM", rs:"10:48 PM", start:"05:48 PM", end:"10:48 PM", now:.64, hist:[[.60,84]] },
+    { kind:"wk", pct:29, reset:"11/24/2026, 1:36:00 AM", rs:"Tue 1:36 AM", rh:1.6, dow:2, now:.40, hist:[[.12,12],[.2,16],[.3,22],[.399,29]] } ] },
+];
+const FULL = { W:288, H:113, L:24, R:270, T:12, B:88, LY:106 };
+const MID  = { W:246, H:100, L:22, R:236, T:12, B:76, LY:93 };
+const COMPACT = { W:208, H:82, L:20, R:204, T:11, B:62, LY:77 };
+let serial = 0;
+const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");
+function tint(delta) {
+  if (!delta) return "var(--wb-muted-fg)";
+  return `color-mix(in srgb, var(--wb-muted-fg), var(${delta > 0 ? "--wb-fail" : "--wb-ok"}) ${Math.min(100, Math.abs(delta))}%)`;
+}
+function chart(w, g) {
+  const id = "clip" + (++serial), x = e => g.L + e * (g.R - g.L), y = p => g.B - p / 100 * (g.B - g.T), mid = (g.T + g.B) / 2;
+  let s = `<svg class="chart" viewBox="0 0 ${g.W} ${g.H}" role="img">`;
+  if (w.kind === "wk") {
+    const h0 = 24 - w.rh; let right = -1e9;
+    for (let k = 0; k <= 7; k++) {
+      const day = (h0 + 24 * (k - 1)) / 168, next = (h0 + 24 * k) / 168;
+      if (day > 0 && day < 1) s += `<line class="dgrid" x1="${x(day)}" x2="${x(day)}" y1="${g.T}" y2="${g.B}"/>`;
+      const c = x(day + 12 / 168), t = DAYS[(w.dow + k) % 7], wd = 17, l = c - wd / 2;
+      if (l >= g.L && c + wd / 2 <= g.R && l >= right + 3) { s += `<text x="${c}" y="${g.LY}" text-anchor="middle">${t}</text>`; right = c + wd / 2; }
+    }
+  }
+  [g.T, mid, g.B].forEach(v => s += `<line class="grid" x1="${g.L}" x2="${g.R}" y1="${v}" y2="${v}"/>`);
+  s += `<text x="0" y="${g.T + 3}">100</text><text x="5" y="${g.B + 3}">0</text>`;
+  s += `<path class="ideal" d="M${g.L} ${g.B}L${g.R} ${g.T}" stroke-dasharray="4 4"/>`;
+  if (w.kind === "5h") s += `<text x="${g.L}" y="${g.LY}">${w.start}</text><text x="${g.R}" y="${g.LY}" text-anchor="end">${w.end}</text>`;
+  const nx = x(w.now);
+  s += `<line class="nowl" x1="${nx}" x2="${nx}" y1="${g.T}" y2="${g.B}" stroke-dasharray="2 3"/><text x="${nx}" y="${g.T - 2}" text-anchor="middle">Now</text>`;
+  const pts = w.hist.map(([e, p]) => ({ x: x(e), y: y(p), d: p - e * 100 })), last = pts[pts.length - 1], col = tint(Math.round(last.d));
+  s += `<defs><clipPath id="${id}"><polygon points="${g.L},${g.B} ${g.R},${g.T} ${g.R},0 ${g.L},0"/></clipPath></defs>`;
+  if (pts.length > 1) {
+    const d = pts.map((p, i) => (i ? "L" : "M") + p.x.toFixed(1) + " " + p.y.toFixed(1)).join(""), area = d + `L${last.x.toFixed(1)} ${g.B}L${pts[0].x.toFixed(1)} ${g.B}Z`;
+    s += `<path class="area" d="${area}" fill="${col}"/><path class="excess" d="${area}" fill="var(--wb-fail)" clip-path="url(#${id})"/>`;
+    s += `<path class="actual" d="${d}" stroke="${col}" stroke-width="2"/>`;
+  }
+  s += `<circle class="point" cx="${last.x}" cy="${last.y}" r="4" fill="${col}"/></svg>`;
+  return s;
+}
+function delta(w) { return Math.round(w.pct - w.now * 100); }
+function paceHtml(w) {
+  const d = delta(w), txt = (d > 0 ? "+" : d < 0 ? "−" : "") + Math.abs(d) + "%";
+  return `<span class="pace ${d > 0 ? "over" : d < 0 ? "under" : ""}">(${txt})</span>`;
+}
+const wlabel = k => k === "5h" ? "5-hour" : "Weekly";
+function fullCard(v, w, g) {
+  if (!w) return `<div class="card empty">no 5-hour window</div>`;
+  return `<article class="card${w.disabled ? " disabled" : ""}"><div class="whead"><span class="wname">${wlabel(w.kind)}</span>${w.disabled ? '<span class="tag">disabled</span>' : ""}<b class="num">${w.pct}%</b>${paceHtml(w)}</div>
+    <div class="meta">Resets ${w.reset}</div>${chart(w, g)}<div class="meta observed">value from ${v.age} min ago</div></article>`;
+}
+function compactCard(v, w, withLabel) {
+  if (!w) return `<div class="card compact empty">no 5-hour window</div>`;
+  return `<article class="card compact${w.disabled ? " disabled" : ""}" title="${wlabel(w.kind)} · resets ${w.reset} · value from ${v.age} min ago"><div class="whead">${withLabel ? `<span class="wname">${wlabel(w.kind)}</span>` : ""}<b class="num">${w.pct}%</b>${paceHtml(w)}${w.disabled ? '<span class="tag">disabled</span>' : ""}<span class="reset">↻ ${w.rs}</span></div>${chart(w, COMPACT)}</article>`;
+}
+const head = () => `<div class="pop-head"><b>Plan usage</b><span class="help">?</span><span class="close">✕</span></div>`;
+const ageTxt = v => `${v.age}m ago`;
+const agyBracket = cls => `<div class="vend span ${cls || ""}"><span class="hb" data-h="agy"></span><b style="color:var(--wb-fg)">Antigravity</b><span>· 2 model groups</span></div>`;
+const short = v => v.h === "agy" ? (v.name === "Gemini Models" ? "Gemini models" : "Claude &amp; GPT models") : v.name;
+
+function layA() {
+  let s = `<div class="lay-a"><div class="vend"></div><div class="vend"></div>${agyBracket()}`;
+  DATA.forEach((v, i) => s += `<div class="vhead" style="grid-column:${i + 1}"><span class="hb" data-h="${v.h}"></span><b>${short(v)}</b><span class="plan">${v.plan || ageTxt(v)}</span></div>`);
+  [0, 1].forEach(r => DATA.forEach((v, i) => s += `<div style="grid-column:${i + 1};grid-row:${r + 3};display:grid">${fullCard(v, v.windows[r], MID)}</div>`));
+  return head() + s + "</div>";
+}
+function layB() {
+  let s = `<div class="lay-b"><div class="tall"></div>`;
+  DATA.slice(0, 2).forEach(v => s += `<div class="vhead tall"><span class="hb" data-h="${v.h}"></span><b>${v.name}</b><span class="plan">${v.plan} · ${ageTxt(v)}</span></div>`);
+  s += agyBracket();
+  DATA.slice(2).forEach(v => s += `<div class="vhead" style="grid-row:2"><b>${short(v)}</b><span class="plan">${ageTxt(v)}</span></div>`);
+  [0, 1].forEach(r => {
+    s += `<div class="rowlab">${r ? "Weekly" : "5-hour"}<small>${r ? "7 d" : "5 h"}</small></div>`;
+    DATA.forEach(v => s += compactCard(v, v.windows[r], false));
+  });
+  return head() + s + "</div>";
+}
+function layC(narrow) {
+  let s = `<div class="lay-c${narrow ? " narrow" : ""}"><div class="colh"></div><div class="colh">5-hour</div><div class="colh">Weekly</div>`;
+  DATA.forEach((v, i) => {
+    if (i === 2) s += agyBracket();
+    else if (i && narrow) s += `<div class="sep"></div>`;
+    else if (i) s += `<div class="sep"></div>`;
+    s += narrow
+      ? `<div class="vhead"><span class="hb" data-h="${v.h}"></span><b>${short(v)}</b>${v.plan ? `<span class="plan" style="margin-left:4px">${v.plan}</span>` : ""}<span class="age">${ageTxt(v)}</span></div>`
+      : `<div class="vhead"><span class="top"><span class="hb" data-h="${v.h}"></span>${v.plan ? `<span class="plan" style="margin-left:0">${v.plan}</span>` : ""}</span><b>${short(v)}</b><span class="age">${ageTxt(v)}</span></div>`;
+    v.windows.forEach(w => s += compactCard(v, w, false));
+  });
+  return head() + s + "</div>";
+}
+document.getElementById("pop-a").innerHTML = layA();
+document.getElementById("pop-b").innerHTML = layB();
+document.getElementById("pop-bl").innerHTML = layB();
+document.getElementById("pop-c").innerHTML = layC(false);
+document.getElementById("pop-cn").innerHTML = layC(true);
+function measure() {
+  document.querySelectorAll("[data-measure]").forEach(n => {
+    const r = document.getElementById(n.dataset.measure).getBoundingClientRect();
+    n.textContent = Math.round(r.width) + " × " + Math.round(r.height) + " px";
+  });
+}
+measure();
+document.getElementById("theme").onclick = () => {
+  const p = document.getElementById("page");
+  p.className = p.className === "t-dark" ? "t-light" : "t-dark";
+};
+</script>
+</body>
+</html>
