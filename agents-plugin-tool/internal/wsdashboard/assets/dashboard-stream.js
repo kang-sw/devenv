@@ -139,6 +139,12 @@
   var sseOn = true;
   function connected(on) {
     sseOn = on;
+    // A drop may be a daemon replaced underneath: the permission support
+    // read before it no longer counts (dashboard-leads.js permLevels), and
+    // an open lead or session popover reads it again once the stream is back.
+    if (!on) permEpoch++;
+    var sp = rp.P && (rp.P.permSync ? rp.P : rp.P.sess && rp.P.sess.permSync ? rp.P.sess : null);
+    if (sp) sp.permSync(on);
     q(".dwrap > .top #sse").forEach(function (el) {
       el.classList.toggle("off", !on);
       el.title = wsT(on ? "js.sse.title.on" : "js.sse.title.off");

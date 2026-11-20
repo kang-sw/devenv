@@ -733,6 +733,57 @@ html:not([data-sysopen]) .rail .drarch { display: none; }
 .bgbadge[hidden] { display: none; }
 .bgbadge .i { width: 13px; height: 13px; flex: none; }
 .rpop .spact[hidden] { display: none; }
+/* common permission level (dashboard-leads.js permSeg / permState /
+   permFullAsk / permChip): the level segment spans the popover; a level
+   derived from older settings is dashed and tagged, not checked */
+.rpop .pmseg { width: 100%; box-sizing: border-box; display: flex; flex-wrap: nowrap; }
+.rpop .pmseg button { flex: 1 1 auto; padding: 3px 6px; white-space: nowrap; font-size: 11.5px; }
+.rpop .pmseg button.derived { outline: 1.5px dashed color-mix(in srgb, var(--wb-muted-fg) 70%, transparent); outline-offset: -2px; }
+.rpop .pmseg button.full[aria-checked="true"] { color: var(--wb-fail); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-fail) 50%, transparent); }
+.pmtag { margin-left: 4px; font-size: 9.5px; font-weight: 700; padding: 0 4px; border-radius: 4px; background: var(--wb-card); color: var(--wb-muted-fg); vertical-align: 1px; }
+/* the native mode, kept editable behind a disclosure */
+.rpop .pmadv { display: grid; gap: 3px; min-width: 0; }
+.rpop .pmadv > summary { display: flex; align-items: center; gap: 5px; cursor: pointer; list-style: none; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); }
+.rpop .pmadv > summary::-webkit-details-marker { display: none; }
+.rpop .pmadv > summary::before { content: "\25b8"; font-size: 10px; transition: transform .12s; }
+.rpop .pmadv[open] > summary::before { transform: rotate(90deg); }
+.rpop .pmadv > summary:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; border-radius: 3px; }
+.rpop .pmadv .pmown { font-size: 10.5px; font-weight: 700; padding: 0 6px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-fg); text-transform: none; letter-spacing: 0; }
+/* what the picked level asks for, then how this harness carries it */
+.rpop .pmwhat { margin: 2px 0 0; font-size: 11.5px; color: var(--wb-fg); }
+.rpop .pmmap { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 6px; margin: 0; font-size: 11.5px; color: var(--wb-muted-fg); }
+.rpop .pmmap code, .pmstate code, .rdeldlg .pmc, .chip.pmhead code { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-fg); background: var(--wb-muted); padding: 0 5px; border-radius: 4px; }
+.rpop .pmfine { margin: 0; font-size: 11px; color: var(--wb-muted-fg); }
+/* evidence quality pills; there is deliberately no "enforced" style */
+.pmq { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 700; padding: 0 7px; border-radius: 999px; line-height: 17px; white-space: nowrap; }
+.pmq.partial { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 13%, var(--wb-card)); }
+.pmq.advisory { color: color-mix(in srgb, var(--wb-warn-ink) 80%, var(--wb-fg)); background: color-mix(in srgb, var(--wb-warn) 16%, var(--wb-card)); }
+.pmq.pending { color: var(--wb-muted-fg); background: var(--wb-muted); }
+.pmq.mismatch { color: var(--wb-fail); background: color-mix(in srgb, var(--wb-fail) 12%, var(--wb-card)); }
+/* a session's permission state: intent, native mode and evidence, apart */
+.rpop .pmstate { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; align-items: baseline; padding: 8px 10px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.pmstate .k { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); white-space: nowrap; }
+.pmstate .v { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 6px; min-width: 0; }
+.pmstate .v b { font-weight: 700; }
+.pmstate .pmsrc { font-size: 11px; color: var(--wb-muted-fg); }
+.pmstate .pmnote { grid-column: 1 / -1; margin: 0; font-size: 11.5px; color: var(--wb-muted-fg); }
+.rpop .pmchg { display: grid; gap: 5px; }
+/* unsupported and refused */
+.rpop .pmoff { margin: 0; padding: 6px 9px; border-radius: 8px; background: var(--wb-muted); font-size: 11.5px; color: var(--wb-muted-fg); }
+.rpop .pmerr { margin: 0; padding: 7px 10px; border-radius: 8px; background: color-mix(in srgb, var(--wb-fail) 12%, var(--wb-card)); color: var(--wb-fail); font-size: 11.5px; display: grid; gap: 2px; }
+.rpop .pmerr span { color: color-mix(in srgb, var(--wb-fail) 70%, var(--wb-fg)); }
+/* the full-permission warning: the delete dialog's frame and parts */
+.rdeldlg .rdhd .i.pmlock { color: var(--wb-fail); }
+.rdeldlg .pmack { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 8px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-fail) 45%, transparent); cursor: pointer; font-weight: 600; }
+.rdeldlg .pmack input { margin: 2px 0 0; accent-color: var(--wb-fail); flex: none; }
+/* the head chip beside the harness chip */
+.chip.pmhead { display: inline-flex; align-items: center; gap: 4px; height: 20px; box-sizing: border-box; margin-left: 6px; padding: 0 7px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-fg); font-size: 11.5px; font-weight: 700; white-space: nowrap; flex: none; }
+.chip.pmhead .i { width: 11px; height: 11px; }
+.chip.pmhead .pmq { line-height: 15px; padding: 0 5px; margin-right: -4px; }
+.chip.pmhead .pmtag { background: var(--wb-card); }
+.chip.pmhead[role="button"] { cursor: pointer; }
+.chip.pmhead[role="button"]:hover { background: color-mix(in srgb, var(--wb-primary) 16%, var(--wb-muted)); }
+.chip.pmhead:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) {
   .rail, .rail-open .rail, .rscrim { transition: none; }
   .bgbadge { animation: none; }

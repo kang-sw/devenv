@@ -42,14 +42,225 @@
   // daemon's lists change while the page lives (a CLI update adds models). A
   // list already held answers at once, and refresh runs when the newer one
   // arrives.
+  // A list read here is stamped with the connection epoch it was read in;
+  // only a list of the current epoch can offer common permission levels.
   function leadChoices(done, refresh) {
-    var held = !!supChoices && !supChoices.error;
+    var held = !!supChoices && !supChoices.error, epoch = permEpoch;
     if (held) done();
     tkFetch("/support/choices", undefined, function (status, v) {
-      if (status === 200 && Array.isArray(v.harnesses)) supChoices = v;
+      if (status === 200 && Array.isArray(v.harnesses)) { v.wsEpoch = epoch; supChoices = v; }
+      else if (supChoices) supChoices.wsEpoch = -1;
       if (!held) done();
       else if (refresh) refresh();
     });
+  }
+
+  // --- common permission level ------------------------------------------------
+  // A hosted lead may carry a common permission level (read-only,
+  // workdir-write, full) beside its native permission mode. The level is
+  // intent, not a sandbox: the state reports how it is carried (partial,
+  // advisory) apart from the native mode the harness reports. A level is
+  // offered and sent only on positive support from the current daemon: the
+  // harness's permission_levels in a /support/choices list read since the
+  // live stream last (re)connected (permEpoch counts the drops; a daemon
+  // replaced underneath drops the stream). Every selection-bearing request
+  // re-reads the list first, goes only to a /permission route, and a refusal
+  // is shown, never resent on a legacy route. Without support the native
+  // controls work as before, and nothing selects a level for the user.
+  var PERM_LEVELS = ["read-only", "workdir-write", "full"];
+  var PERM_LABEL = { "": "js.perm.level.default", "read-only": "js.perm.level.readonly", "workdir-write": "js.perm.level.workdir", full: "js.perm.level.full" };
+  var PERM_WHAT = { "": "js.perm.what.default", "read-only": "js.perm.what.readonly", "workdir-write": "js.perm.what.workdir", full: "js.perm.what.full" };
+  var PERM_Q = { partial: "js.perm.q.partial", advisory: "js.perm.q.advisory", pending: "js.perm.q.pending", enforced: "js.perm.q.enforced" };
+  // The native mode the daemon maps each level to, where it has one.
+  var PERM_NATIVE = { claude: { "read-only": "plan", "workdir-write": "acceptEdits", full: "bypassPermissions" } };
+  var permEpoch = 0, permDlg = null;
+  function permHarness(k) { return k === "claude" ? "Claude" : k === "pi" ? "Pi" : k; }
+  // permLevels is harness's offered levels in order: null while unknown (no
+  // list of the current epoch), empty when the daemon offers none.
+  function permLevels(harness) {
+    if (!supChoices || supChoices.error || supChoices.wsEpoch !== permEpoch) return null;
+    var h = supHarness(harness), have = h && Array.isArray(h.permission_levels) ? h.permission_levels : [];
+    return PERM_LEVELS.filter(function (l) { return have.indexOf(l) >= 0; });
+  }
+  // permPreflight re-reads the choices and answers whether the daemon that
+  // answers now offers level on harness.
+  function permPreflight(harness, level, done) {
+    var epoch = permEpoch;
+    tkFetch("/support/choices", undefined, function (status, v) {
+      if (status === 200 && Array.isArray(v.harnesses)) { v.wsEpoch = epoch; supChoices = v; }
+      else if (supChoices) supChoices.wsEpoch = -1;
+      done((permLevels(harness) || []).indexOf(level) >= 0);
+    });
+  }
+  // permRefused reports a selection route the daemon does not have: an
+  // older daemon answers 404 or 405 before any creation or change.
+  function permRefused(status) { return status === 404 || status === 405; }
+  function permQ(kind) {
+    var k = String(kind || "");
+    return mk("span", "pmq " + (PERM_Q[k] ? k : "pending"), PERM_Q[k] ? wsT(PERM_Q[k]) : k);
+  }
+  // permCoded appends text to el with its \u0001 marker replaced by the
+  // harness name and the native mode as code.
+  function permCoded(el, text, harness, mode) {
+    text.split("\u0001").forEach(function (part, i) {
+      if (i) { el.appendChild(mk("span", null, permHarness(harness))); el.appendChild(mk("code", null, mode)); }
+      if (part.trim()) el.appendChild(mk("span", null, part.trim()));
+    });
+  }
+  // permMap fills el with how harness carries level: the native mode it
+  // runs in (mode; for no level the native pick) and the quality to expect.
+  // Pi has no native mode, so every level is advisory there.
+  function permMap(el, harness, level, mode, change) {
+    el.textContent = "";
+    if (harness === "pi") {
+      el.appendChild(mk("span", null, wsT("js.perm.map.pi", permHarness(harness))));
+      el.appendChild(permQ("advisory"));
+    } else if (PERM_NATIVE[harness] && mode) {
+      permCoded(el, wsT(!level ? "js.perm.map.default" : change ? "js.perm.map.switch" : "js.perm.map.run", "\u0001"), harness, mode);
+      if (level) {
+        el.appendChild(mk("span", null, "·"));
+        el.appendChild(permQ(level === "read-only" ? "partial" : "advisory"));
+        if (level === "read-only") el.appendChild(mk("span", null, wsT("js.perm.map.partial")));
+      }
+    }
+    el.hidden = !el.children.length;
+  }
+  // permSeg is the level segment under box; picked(level) runs on a click.
+  // set shows levels (a leading "" is the default), cur checked, derived
+  // dashed and tagged (a level derived from older settings, not chosen).
+  function permSeg(box, picked) {
+    var S = { el: box.appendChild(mk("div", "spseg pmseg")), sig: null, btn: {} };
+    S.el.setAttribute("role", "radiogroup");
+    S.el.setAttribute("aria-label", wsT("js.perm.title"));
+    S.el.addEventListener("click", function (e) {
+      var b = e.target && e.target.closest && e.target.closest("[data-level]");
+      if (b && !b.disabled) picked(b.getAttribute("data-level"));
+    });
+    S.set = function (levels, cur, derived, off) {
+      var sig = levels.join("\n") + "\n" + derived;
+      if (S.sig !== sig) {
+        S.sig = sig;
+        S.el.textContent = "";
+        S.btn = {};
+        levels.forEach(function (l) {
+          var b = S.btn[l] = S.el.appendChild(rpBtn([l === "full" ? "full" : "", l === derived ? "derived" : ""].join(" ").trim(), wsT(PERM_LABEL[l])));
+          b.setAttribute("role", "radio");
+          b.setAttribute("data-level", l);
+          if (l === derived) b.appendChild(mk("span", "pmtag", wsT("js.perm.tag.derived")));
+        });
+      }
+      levels.forEach(function (l) {
+        S.btn[l].setAttribute("aria-checked", String(l === cur));
+        S.btn[l].disabled = !!off;
+      });
+    };
+    return S;
+  }
+  // permFullAsk opens the full-permission warning for harness (o.path
+  // names the target; o.change a running session's change). Its grant
+  // enables only once the box is ticked; ok runs on that grant, no on
+  // cancel (button, Escape), which sends nothing.
+  function permFullAsk(o, ok, no) {
+    var D = permDlg;
+    if (!D) {
+      D = permDlg = { el: mk("dialog", "rdeldlg pmdlg"), ok: null, no: null };
+      var dl = D.el, hd = dl.appendChild(mk("h2", "rdhd"));
+      hd.id = rpId();
+      dl.setAttribute("aria-labelledby", hd.id);
+      hd.appendChild(gIcon("lock")).setAttribute("class", "i pmlock");
+      D.title = hd.appendChild(mk("span"));
+      D.path = dl.appendChild(mk("div", "rdpath"));
+      D.facts = dl.appendChild(mk("div", "rdfacts"));
+      var ack = dl.appendChild(mk("label", "pmack"));
+      D.box = ack.appendChild(mk("input"));
+      D.box.type = "checkbox";
+      ack.appendChild(mk("span", null, wsT("js.perm.full.ack")));
+      var row = dl.appendChild(mk("div", "rdrow"));
+      D.cancel = row.appendChild(rpBtn("pbtn", wsT("js.rail.cancel")));
+      D.go = row.appendChild(rpBtn("pbtn danger"));
+      D.box.addEventListener("change", function () { D.go.disabled = !D.box.checked; });
+      D.cancel.addEventListener("click", function () { D.end(false); });
+      dl.addEventListener("cancel", function (e) { e.preventDefault(); D.end(false); });
+      D.go.addEventListener("click", function () { if (D.box.checked) D.end(true); });
+      D.end = function (yes) {
+        var f = yes ? D.ok : D.no;
+        D.ok = D.no = null;
+        if (D.el.open) D.el.close();
+        if (f) f();
+      };
+    }
+    function fact(cls, icon, text, mode) {
+      var f = D.facts.appendChild(mk("div", "rdfact" + (cls ? " " + cls : "")));
+      f.appendChild(gIcon(icon));
+      var s = f.appendChild(mk("span"));
+      if (!mode) { s.textContent = text; return; }
+      text.split("\u0001").forEach(function (part, i) {
+        if (i) s.appendChild(mk("span", "pmc", mode));
+        if (part) s.appendChild(mk("span", null, part));
+      });
+    }
+    if (D.no) D.end(false);
+    D.facts.textContent = "";
+    var native = PERM_NATIVE[o.harness] && PERM_NATIVE[o.harness].full;
+    if (native) fact("bad", "lock", wsT("js.perm.full.native", permHarness(o.harness), "\u0001"), native);
+    else fact("bad", "lock", wsT("js.perm.full.plain", permHarness(o.harness)));
+    fact("warn", "folder", wsT("js.perm.full.outside"));
+    fact("", "wrench", wsT("js.perm.full.caps"));
+    fact("", "agents", wsT("js.perm.full.agents"));
+    D.title.textContent = wsT(o.change ? "js.perm.full.title.change" : "js.perm.full.title");
+    D.path.textContent = o.path || "";
+    D.path.hidden = !o.path;
+    D.go.textContent = wsT(o.change ? "js.perm.full.go.change" : "js.perm.full.go");
+    D.box.checked = false;
+    D.go.disabled = true;
+    D.ok = ok;
+    D.no = no;
+    if (!D.el.parentNode) doc.body.appendChild(D.el);
+    if (!D.el.open) D.el.showModal();
+    D.cancel.focus();
+  }
+  // permFullOpen reports the warning open; permFullDrop cancels it.
+  function permFullOpen() { return !!(permDlg && permDlg.el.open); }
+  function permFullDrop() { if (permDlg && (permDlg.el.open || permDlg.no)) permDlg.end(false); }
+  // permObserved reports whether st carries a native mode the running
+  // harness reported; a harness without native modes has none to report.
+  function permObserved(st) { return !!(st.process && st.active_mode); }
+  // permEvidence is the quality pill's kind for st: pending while a native
+  // mode is asked for but not yet reported, else the daemon's own grade.
+  function permEvidence(st) {
+    return st.permission_mode && !permObserved(st) ? "pending" : String(st.permission_enforcement || "");
+  }
+  // permState fills box with st's permission state: the intent and its
+  // source, the native mode (asked for, or as reported), and the evidence,
+  // never merged into one claim. note is a closing line (may be empty).
+  function permState(box, st, note) {
+    box.textContent = "";
+    var level = st && String(st.permission_level || "");
+    box.hidden = !level;
+    if (!level) return;
+    var harness = String(st.backend || ""), explicit = st.permission_source === "explicit";
+    function row(key) {
+      box.appendChild(mk("span", "k", wsT(key)));
+      return box.appendChild(mk("span", "v"));
+    }
+    var v = row("js.perm.k.intent");
+    v.appendChild(mk("b", null, PERM_LABEL[level] ? wsT(PERM_LABEL[level]) : level));
+    v.appendChild(mk("span", "pmsrc", wsT(explicit ? "js.perm.src.explicit" : "js.perm.src.derived")));
+    v = row("js.perm.k.native");
+    var asked = String(st.permission_mode || ""), seen = permObserved(st) ? String(st.active_mode) : "";
+    if (!asked && !seen) v.appendChild(mk("span", "pmsrc", wsT("js.perm.native.none", permHarness(harness))));
+    else {
+      v.appendChild(mk("span", null, permHarness(harness)));
+      v.appendChild(mk("code", null, seen || asked));
+      if (seen && asked && seen !== asked) v.appendChild(mk("span", "pmq mismatch", wsT("js.perm.native.asked", asked)));
+      else v.appendChild(mk("span", "pmsrc", wsT(seen ? "js.perm.native.reported" : st.process ? "js.perm.native.next" : "js.perm.native.waiting")));
+    }
+    v = row("js.perm.k.evidence");
+    var q = permEvidence(st);
+    v.appendChild(permQ(q));
+    var why = q === "pending" ? "js.perm.ev.pending" : seen && asked && seen !== asked ? "js.perm.ev.mismatch" : q === "partial" ? "js.perm.ev.partial" : !asked && !seen ? "js.perm.ev.plain" : "js.perm.ev.advisory";
+    if (q === "pending" || q === "partial" || q === "advisory") v.appendChild(mk("span", "pmsrc", wsT(why, permHarness(harness))));
+    if (note) box.appendChild(mk("p", "pmnote", note));
   }
   // Older daemons have no lead markers; retain their Claude/Pi controls.
   function leadHarnesses() {
@@ -86,9 +297,12 @@
   }
   // leadRows builds, under box, the three option rows the spawn popover and
   // the session menu share (model, permission mode, effort; label left,
-  // control right); changed(select) runs on a pick.
-  function leadRows(box, changed) {
-    var R = {};
+  // control right); changed(select) runs on a pick. With adv (the advanced
+  // disclosure) inline(false) moves the native mode row there; own(mode,
+  // note) shows the mode a permission level decides, the row then fixed,
+  // and free() is the user's own native pick either way.
+  function leadRows(box, changed, adv) {
+    var R = {}, own = "", ownNote = "", free = "", extra = "", inline = true, busyNow = false, cur = { harness: "", active: "", modes: [] };
     function row(label, cls) {
       var r = box.appendChild(mk("div", "sprc")), l = r.appendChild(mk("label", null, label)), s = r.appendChild(mk("select", "spsm" + (cls ? " " + cls : "")));
       s.id = rpId();
@@ -104,9 +318,39 @@
     pd.id = rpId();
     p.sel.setAttribute("aria-describedby", pd.id);
     R.model = m.sel; R.mode = p.sel; R.effort = e.sel;
+    R.inline = function (on) {
+      if (!adv || inline === on) return;
+      inline = on;
+      if (on) { box.insertBefore(p.row, e.row); box.insertBefore(pd, e.row); }
+      else { adv.appendChild(p.row); adv.appendChild(pd); }
+    };
+    R.own = function (mode, note) {
+      mode = mode || "";
+      note = note || "";
+      if (mode === own && note === ownNote) return;
+      if (mode && !own) free = p.sel.value;
+      else if (!mode && own) p.sel.value = free;
+      own = mode;
+      ownNote = note;
+      if (own) {
+        if (cur.modes.indexOf(own) < 0) { p.sel.appendChild(mk("option", null, own)).value = own; p.sel.wsSig = null; }
+        p.sel.value = own;
+      }
+      if (R.disable) R.disable(busyNow);
+      R.notes(cur.harness, cur.active);
+    };
+    R.free = function () { return own ? free : p.sel.disabled ? "" : p.sel.value; };
+    // mark adds text to the native mode's line.
+    R.mark = function (text) {
+      if ((text || "") === extra) return;
+      extra = text || "";
+      R.notes(cur.harness, cur.active);
+    };
     // set shows harness's choices with v's model, effort, and mode picked.
     R.set = function (harness, v) {
       var h = supHarness(harness), models = leadModels(harness), efforts = leadEfforts(harness), modes = leadModes(harness);
+      own = ownNote = extra = "";
+      cur.modes = modes;
       leadOptions(m.sel, models, v.model);
       leadOptions(e.sel, efforts, v.effort);
       var sig = modes.join("\n");
@@ -120,9 +364,10 @@
       p.sel.value = modes.indexOf(v.mode) >= 0 ? v.mode : initial;
       R.disable = function (busy) {
         var unavailable = !!h && (h.lead === true ? h.available !== true : h.available === false);
+        busyNow = !!busy;
         m.sel.disabled = busy || unavailable || !models.length;
         e.sel.disabled = busy || unavailable || !efforts.length;
-        p.sel.disabled = busy || unavailable || !modes.length;
+        p.sel.disabled = busy || unavailable || !modes.length || !!own;
       };
       R.disable(false);
       R.notes(harness, v.active);
@@ -131,21 +376,31 @@
     // mode a running harness reported, named when it is not the picked one.
     R.notes = function (harness, active) {
       var claude = harness === "claude", mode = p.sel.value;
+      cur.harness = harness;
+      cur.active = active || "";
       pd.hidden = !mode && harness !== "pi";
-      pd.textContent = !mode ? (harness === "pi" ? wsT("js.lead.mode.pi") : "") : (claude && LEAD_MODE_NOTE[mode] ? wsT(LEAD_MODE_NOTE[mode]) : mode) + (active && active !== mode ? " " + wsT("js.lead.mode.active", active) : "");
-      pd.classList.toggle("warn", claude && mode === "bypassPermissions");
+      pd.textContent = own ? ownNote : (!mode ? (harness === "pi" ? wsT("js.lead.mode.pi") : "") : (claude && LEAD_MODE_NOTE[mode] ? wsT(LEAD_MODE_NOTE[mode]) : mode) + (active && active !== mode ? " " + wsT("js.lead.mode.active", active) : "")) + (extra && !own ? " " + extra : "");
+      pd.classList.toggle("warn", !own && claude && mode === "bypassPermissions");
       ed.textContent = e.sel.value ? (claude ? "--effort " : harness === "pi" ? "--thinking " : "") + e.sel.value : wsT("js.lead.effort.default");
     };
     return R;
   }
 
   // The spawn popover for one worktree or plain folder: the target as one
-  // read-only line (workspace, branch, path), the harness, and the option
-  // rows. Start spawns the session and opens its page; the first message
-  // is sent from that page's composer. A refused or failed spawn shows in
-  // the popover's error line and keeps it open.
+  // read-only line (workspace, branch, path), the harness, the permission
+  // level, and the option rows. Start spawns the session and opens its
+  // page; the first message is sent from that page's composer. A refused or
+  // failed spawn shows in the popover's error line and keeps it open.
+  // The level starts at the default (today's behaviour: the legacy route
+  // with the native mode, under Advanced, no level sent). A picked level
+  // decides the native mode; Start re-reads the daemon's support, and
+  // "full" first opens the warning, whose grant alone carries
+  // permission_full_ack. A re-read that finds no support sends nothing and
+  // says so (P.dropped): the user may then start on a native mode by hand.
+  // A daemon that refuses the selection route (P.refused) is shown, and
+  // Start becomes a re-check; nothing is resent on the legacy route.
   function rpLeadMake() {
-    var P = { gen: 0, busy: false, root: "", harness: "claude", iso: "default" };
+    var P = { gen: 0, busy: false, root: "", harness: "claude", iso: "default", level: "", dropped: "", refused: 0 };
     var settingsKey = "ws.dashboard.newSession", saved = {}, picks = Object.create(null);
     function readSettings() {
       try {
@@ -161,9 +416,10 @@
       var v = pick(k), models = leadModels(k), efforts = leadEfforts(k);
       rows.set(k, { model: models.indexOf(v.model) >= 0 ? v.model : "", effort: efforts.indexOf(v.effort) >= 0 ? v.effort : "", mode: v.mode });
       P.iso = v.iso === "isolated" ? "isolated" : "default";
+      permDraw();
     }
     function currentPick() {
-      return { model: rows.model.disabled ? "" : rows.model.value, mode: rows.mode.disabled ? "" : rows.mode.value, effort: rows.effort.disabled ? "" : rows.effort.value, iso: P.iso };
+      return { model: rows.model.disabled ? "" : rows.model.value, mode: rows.free(), effort: rows.effort.disabled ? "" : rows.effort.value, iso: P.iso };
     }
     var el = P.el = rpPop(wsT("js.lead.title"));
     el.appendChild(mk("div", "sphd", wsT("js.lead.title")));
@@ -180,7 +436,7 @@
         seg.textContent = "";
         hbtn = Object.create(null);
         hs.forEach(function (h) {
-          var k = h.harness, b = hbtn[k] = rpBtn("", k === "claude" ? "Claude" : k === "pi" ? "Pi" : k);
+          var k = h.harness, b = hbtn[k] = rpBtn("", permHarness(k));
           b.setAttribute("role", "radio");
           b.setAttribute("data-harness", k);
           seg.appendChild(b);
@@ -190,7 +446,21 @@
         P.harness = hs.filter(function (h) { return !off(h.harness); }).map(function (h) { return h.harness; })[0] || hs[0].harness;
       }
     }
-    var rows = leadRows(el.appendChild(mk("div", "spopts")), edited);
+    // The permission level: its segment, what the pick asks for and how
+    // this harness carries it, or why no level can be picked here.
+    var psec = el.appendChild(mk("div", "spsec pmsec"));
+    psec.appendChild(mk("div", "splbl", wsT("js.perm.title")));
+    var pseg = permSeg(psec, function (level) {
+      if (P.busy || P.level === level) return;
+      P.level = level;
+      P.refused = 0;
+      edited();
+    });
+    var pwhat = psec.appendChild(mk("p", "pmwhat")), pmap = psec.appendChild(mk("p", "pmmap")), poff = psec.appendChild(mk("p", "pmoff"));
+    var opts = el.appendChild(mk("div", "spopts"));
+    var adv = el.appendChild(mk("details", "pmadv")), advSum = adv.appendChild(mk("summary", null, wsT("js.perm.adv")));
+    var advOwn = advSum.appendChild(mk("span", "pmown", wsT("js.perm.adv.owned")));
+    var rows = leadRows(opts, edited, adv);
     // Plugin isolation: which plugins the hosted session loads. The pick goes
     // out as plugin_isolation; Pi's standalone binary supports only isolated.
     var isec = el.appendChild(mk("div", "spsec"));
@@ -201,6 +471,9 @@
     var ibtn = { "default": rpBtn("", wsT("js.lead.iso.default")), isolated: rpBtn("", wsT("js.lead.iso.isolated")) };
     Object.keys(ibtn).forEach(function (k) { ibtn[k].setAttribute("role", "radio"); ibtn[k].setAttribute("data-iso", k); iseg.appendChild(ibtn[k]); });
     var idesc = isec.appendChild(mk("p", "spdesc"));
+    var pfine = el.appendChild(mk("p", "pmfine", wsT("js.perm.fine.intent")));
+    var perr = el.appendChild(mk("p", "pmerr")), perrHd = perr.appendChild(mk("b"));
+    perr.appendChild(mk("span", null, wsT("js.perm.refused.create")));
     var err = el.appendChild(mk("p", "spnote err"));
     err.setAttribute("aria-live", "polite");
     var row = el.appendChild(mk("div", "sprow"));
@@ -211,6 +484,38 @@
     function off(k) {
       var h = supHarness(k);
       return !hbtn[k] || (!!h && (h.lead === true ? h.available !== true : h.available === false));
+    }
+    // dropped is the level a re-read found unsupported (or that the daemon
+    // no longer offers): it is not sent, and the form says so.
+    function dropped() {
+      var levels = permLevels(P.harness);
+      return P.dropped || (P.level && levels && levels.indexOf(P.level) < 0 ? P.level : "");
+    }
+    function permDraw() {
+      var levels = permLevels(P.harness), supported = !!(levels && levels.length), modes = leadModes(P.harness).length > 0;
+      var gone = dropped(), level = gone ? "" : P.level;
+      // A level picked before support became unknown stays visible.
+      var show = !gone && (supported || (!levels && !!P.level));
+      pseg.el.hidden = !show;
+      if (show) pseg.set([""].concat(supported ? levels : PERM_LEVELS), level, "", P.busy || !supported);
+      var offText = gone ? wsT("js.perm.off.again", wsT(PERM_LABEL[gone])) : show ? "" : !levels ? wsT("js.perm.checking") : modes ? wsT("js.perm.off.create") : wsT("js.perm.off.plain", permHarness(P.harness));
+      poff.textContent = offText;
+      poff.hidden = !offText;
+      pwhat.textContent = show ? wsT(PERM_WHAT[level]) : "";
+      pwhat.hidden = !show;
+      var mapped = level && PERM_NATIVE[P.harness] ? PERM_NATIVE[P.harness][level] || "" : "";
+      if (show) permMap(pmap, P.harness, level, level ? mapped : rows.free(), false);
+      else pmap.hidden = true;
+      var owned = show && modes ? mapped : "";
+      rows.own(owned, owned ? wsT("js.perm.adv.owned.note", wsT(PERM_LABEL[level])) : "");
+      advOwn.hidden = !owned;
+      rows.inline(!supported || !!gone);
+      adv.hidden = !(supported && !gone && modes);
+      pfine.hidden = !supported;
+      rows.mark(gone && modes ? wsT("js.perm.native.own") : "");
+      perr.hidden = !P.refused;
+      perrHd.textContent = P.refused ? wsT("js.perm.refused", P.refused) : "";
+      start.textContent = wsT(P.refused ? "js.perm.recheck" : gone ? (modes ? "js.perm.start.native" : "js.perm.start.plain") : level === "full" ? "js.perm.start.full" : "js.lead.start");
     }
     function sync() {
       Object.keys(hbtn).forEach(function (k) {
@@ -227,6 +532,7 @@
     function edited() {
       if (!P.busy) setErr("");
       rows.notes(P.harness);
+      permDraw();
       sync();
       railPopPlace();
     }
@@ -234,19 +540,56 @@
       if (P.harness === k) return;
       picks[P.harness] = currentPick();
       P.harness = k;
+      P.level = P.dropped = "";
+      P.refused = 0;
       showPick(k);
       edited();
+    }
+    function locText() {
+      return [loc.wsName, loc.wsBranch, permHarness(P.harness)].filter(Boolean).join(" · ");
     }
     function submit() {
       sync();
       if (start.disabled) return;
+      if (P.refused) { recheck(); return; }
+      var level = dropped() ? "" : P.level;
+      if (level === "full") {
+        var gen = P.gen;
+        permFullAsk({ harness: P.harness, path: locText() }, function () { if (rpLive(P, gen)) launch("full", true); }, function () {});
+        return;
+      }
+      launch(level, false);
+    }
+    // launch spawns with level (none: the legacy route, as before); ack is
+    // the full warning's grant.
+    function launch(level, ack) {
       notifAsk();
       var gen = P.gen, chosenHarness = P.harness, chosen = currentPick();
+      var form = { harness: P.harness, model: rows.model.disabled ? "" : rows.model.value, effort: rows.effort.disabled ? "" : rows.effort.value, mode: level ? "" : rows.mode.disabled ? "" : rows.mode.value, isolation: P.iso, level: level, ack: ack };
       P.busy = true;
       setErr("");
-      status.textContent = wsT("js.lead.starting");
+      status.textContent = wsT(level ? "js.perm.checking" : "js.lead.starting");
+      permDraw();
       sync();
-      railPost("/agents/leads", WsRail.leadBody(P.root, { harness: P.harness, model: rows.model.disabled ? "" : rows.model.value, effort: rows.effort.disabled ? "" : rows.effort.value, mode: rows.mode.disabled ? "" : rows.mode.value, isolation: P.iso }), function (st, v, s) {
+      if (!level) { post(gen, chosenHarness, chosen, "/agents/leads", form); return; }
+      permPreflight(chosenHarness, level, function (ok) {
+        if (!rpLive(P, gen)) { P.busy = false; return; }
+        if (!ok) {
+          P.busy = false;
+          status.textContent = "";
+          P.dropped = level;
+          permDraw();
+          sync();
+          railPopPlace();
+          return;
+        }
+        status.textContent = wsT("js.lead.starting");
+        post(gen, chosenHarness, chosen, "/agents/leads/permission", form);
+      });
+    }
+    function post(gen, chosenHarness, chosen, route, form) {
+      var perm = !!form.level;
+      railPost(route, WsRail.leadBody(P.root, form), function (st, v, s) {
         P.busy = false;
         status.textContent = "";
         sync();
@@ -262,13 +605,43 @@
           go("/s/" + encodeURIComponent(String(v.id)));
           return;
         }
+        // A daemon without the selection route created nothing: say so and
+        // offer a re-check; the legacy route is never tried instead.
+        if (perm && permRefused(st)) {
+          if (supChoices) supChoices.wsEpoch = -1;
+          if (!rpLive(P, gen)) { toast(wsT("js.perm.refused", st)); return; }
+          P.refused = st;
+          permDraw();
+          sync();
+          railPopPlace();
+          return;
+        }
         if (!rpLive(P, gen)) { toast(leadErr(st, s)); return; }
+        permDraw();
         setErr(leadErr(st, s));
         sync();
         railPopPlace();
         // A spawn answers at once (the process starts on the first send), so
         // a request still open after 20s fails instead of staying busy.
       }, 20000);
+    }
+    // recheck re-reads the daemon's support after a refusal; it sends
+    // nothing. Support back clears the refusal, none drops the level.
+    function recheck() {
+      var gen = P.gen, level = P.level;
+      P.busy = true;
+      status.textContent = wsT("js.perm.checking");
+      sync();
+      permPreflight(P.harness, level, function (ok) {
+        P.busy = false;
+        status.textContent = "";
+        if (!rpLive(P, gen)) return;
+        P.refused = 0;
+        if (!ok) P.dropped = level;
+        permDraw();
+        sync();
+        railPopPlace();
+      });
     }
     iseg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-iso]"); if (b) { P.iso = b.getAttribute("data-iso"); sync(); } });
     seg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-harness]"); if (b && !b.disabled) setHarness(b.getAttribute("data-harness")); });
@@ -278,6 +651,8 @@
       var gen = ++P.gen, name = btn.getAttribute("data-name") || label, branch = btn.getAttribute("data-branch") || "";
       P.busy = false;
       P.root = key;
+      P.level = P.dropped = "";
+      P.refused = 0;
       saved = readSettings();
       picks = Object.create(null);
       if (saved.harnesses && typeof saved.harnesses === "object" && !Array.isArray(saved.harnesses)) {
@@ -287,6 +662,8 @@
       P.iso = "default";
       P.loading = true;
       loc.textContent = "";
+      loc.wsName = name;
+      loc.wsBranch = branch;
       loc.appendChild(gIcon(branch ? "repo" : "wsfolder"));
       loc.appendChild(mk("span", null, name));
       if (branch) { loc.appendChild(gIcon("branch")); loc.appendChild(mk("b", null, branch)); }
@@ -295,6 +672,7 @@
       status.textContent = "";
       harnessButtons();
       rows.set(P.harness, { model: "", effort: "", mode: "" });
+      permDraw();
       sync();
       leadChoices(function () {
         if (!rpLive(P, gen)) return;
@@ -315,8 +693,15 @@
         railPopPlace();
       });
     };
+    // permSync redraws the level after the live stream dropped (support is
+    // unknown until a new read) and re-reads the choices once it is back.
+    P.permSync = function (read) {
+      var gen = P.gen, redraw = function () { if (rpLive(P, gen) && !P.loading) { permDraw(); sync(); railPopPlace(); } };
+      redraw();
+      if (read) leadChoices(redraw, redraw);
+    };
     P.focus = function () { (hbtn[P.harness].disabled ? cancel : hbtn[P.harness]).focus(); };
-    P.close = function () {};
+    P.close = function () { permFullDrop(); };
     return P;
   }
 
@@ -348,13 +733,26 @@
       el.setAttribute("aria-label", wsT("js.lead.menu"));
     }
     el.appendChild(mk("div", "sphd", wsT("js.lead.menu")));
-    var rows = leadRows(el.appendChild(mk("div", "spopts")), function (sel) {
+    // The session's permission state, then (a lead on a daemon that offers
+    // levels for its harness) the level to change it to: a pick re-reads
+    // the support and posts to settings/permission at once; "full" first
+    // opens the warning, and its cancel leaves the session as it was.
+    var pst = el.appendChild(mk("div", "pmstate"));
+    var pchg = el.appendChild(mk("div", "spsec pmchg"));
+    pchg.appendChild(mk("div", "splbl", wsT("js.perm.title")));
+    var pseg = permSeg(pchg, pickLevel);
+    var pwhat = pchg.appendChild(mk("p", "pmwhat")), pmap = pchg.appendChild(mk("p", "pmmap")), pfine = pchg.appendChild(mk("p", "pmfine"));
+    var opts = el.appendChild(mk("div", "spopts"));
+    var adv = el.appendChild(mk("details", "pmadv")), advSum = adv.appendChild(mk("summary", null, wsT("js.perm.adv")));
+    var advOwn = advSum.appendChild(mk("span", "pmown", wsT("js.perm.adv.owned")));
+    adv.open = true;
+    var rows = leadRows(opts, function (sel) {
       var body = {};
       if (sel === rows.model) body.model = sel.value;
       else if (sel === rows.effort) body.effort = sel.value;
       else body.permission_mode = sel.value;
       act("settings", body);
-    });
+    }, adv);
     el.appendChild(mk("p", "spnote", wsT("js.lead.menu.note")));
     var acts = el.appendChild(mk("div", "spacts"));
     function actBtn(icon, cls, title) {
@@ -392,11 +790,46 @@
           return;
         }
         var msg = action === "hide" || action === "unhide" ? archErr(action, st, s) : leadErr(st, s);
+        // A daemon without the selection route changed nothing; its support
+        // is read again, and nothing is resent on the legacy route.
+        var refused = action === "settings/permission" && permRefused(st);
+        if (refused) {
+          msg = wsT("js.perm.refused", st) + " " + wsT("js.perm.refused.settings");
+          if (supChoices) supChoices.wsEpoch = -1;
+        }
         if (P.live(gen)) failed = msg;
         else toast(msg);
         P.redraw();
         P.fetch();
+        if (refused) P.permSync(true);
       });
+    }
+    // pickLevel changes the session's level after a fresh support read.
+    function pickLevel(level) {
+      var st = state();
+      if (P.busy || !st || (st.permission_source === "explicit" && st.permission_level === level)) return;
+      var harness = String(st.backend || ""), gen = P.gen;
+      function send(ack) {
+        if (!P.live(gen)) return;
+        P.busy = true;
+        failed = "";
+        P.draw();
+        permPreflight(harness, level, function (ok) {
+          P.busy = false;
+          if (!ok) {
+            if (P.live(gen)) failed = wsT("js.perm.unsent");
+            else toast(wsT("js.perm.unsent"));
+            P.redraw();
+            return;
+          }
+          if (!P.live(gen)) return;
+          var body = { permission_level: level };
+          if (ack) body.permission_full_ack = true;
+          act("settings/permission", body);
+        });
+      }
+      if (level !== "full") { send(false); return; }
+      permFullAsk({ harness: harness, change: true, path: [String(st.label || P.rid || ""), permHarness(harness)].filter(Boolean).join(" · ") }, function () { send(true); }, function () { if (P.live(gen)) P.draw(); });
     }
     // live reports the menu still open as it was when gen was taken;
     // redraw shows a new state (the head's own menu redraws with the
@@ -460,6 +893,7 @@
       if (!st) return;
       var text = failed || (st.error ? String(st.error) : "");
       rows.set(String(st.backend || ""), { model: String(st.model || ""), effort: String(st.effort || ""), mode: String(st.permission_mode || ""), active: st.process ? String(st.active_mode || "") : "" });
+      permDraw(st);
       rows.disable(P.busy);
       stop.b.disabled = P.busy || !st.process;
       stop.note.textContent = wsT(st.process ? "js.lead.stop.note" : "js.lead.stopped");
@@ -494,8 +928,39 @@
       leadChoices(redraw, redraw);
       P.fetch();
     };
+    // permDraw shows st's permission state and, for a lead whose harness
+    // the current daemon offers levels for, the change segment. A worker
+    // keeps its state line alone: no worker selection support is offered.
+    function permDraw(st) {
+      var harness = String(st.backend || ""), lead = !!st.lead && !st.is_child, levels = lead ? permLevels(harness) : [];
+      var supported = !!(levels && levels.length), level = String(st.permission_level || ""), explicit = st.permission_source === "explicit";
+      permState(pst, st, lead && levels && !levels.length && level ? wsT("js.perm.off.settings") : "");
+      pchg.hidden = !supported;
+      var cur = explicit ? level : "", modes = leadModes(harness).length > 0;
+      if (supported) {
+        pseg.set(levels, cur, explicit ? "" : level, P.busy);
+        pwhat.textContent = cur ? wsT(cur === "full" ? "js.perm.what.full.set" : PERM_WHAT[cur]) : "";
+        pwhat.hidden = !cur;
+        if (cur) permMap(pmap, harness, cur, String(st.permission_mode || ""), true);
+        else pmap.hidden = true;
+        pfine.textContent = wsT(cur ? "js.perm.fine.explicit" : "js.perm.fine.derived");
+      }
+      var owned = supported && cur && modes ? String(st.permission_mode || "") : "";
+      rows.own(owned, owned ? wsT("js.perm.adv.owned.note", wsT(PERM_LABEL[cur])) : "");
+      advOwn.hidden = !owned;
+      rows.inline(!supported);
+      adv.hidden = !(supported && modes);
+    }
+    // permSync redraws after the live stream dropped or a refusal (support
+    // unknown) and re-reads the choices when read is set.
+    P.permSync = function (read) {
+      var gen = P.gen, redraw = function () { if (P.live(gen)) { P.draw(); railPopPlace(); } };
+      redraw();
+      if (read) leadChoices(redraw, redraw);
+    };
     P.focus = function () { rows.model.focus(); };
     P.close = function () {
+      permFullDrop();
       if (!inRow) return;
       P.gen++;
       el.hidden = true;
@@ -527,6 +992,7 @@
   // viewer who holds the controls. The head region is replaced on every
   // update, so this runs again after each.
   function leadChip() {
+    permChip();
     var h = region("head"), chip = h && h.querySelector(".host.sse"), can = leadCan();
     if (!chip || can === chip.classList.contains("hbtn")) return;
     chip.classList.toggle("hbtn", can);
@@ -541,6 +1007,40 @@
       ["role", "tabindex", "aria-haspopup", "aria-label", "aria-expanded"].forEach(function (a) { chip.removeAttribute(a); });
       q("svg", chip).forEach(function (s) { s.remove(); });
     }
+  }
+  // permChip keeps the head's permission chip beside the harness chip: the
+  // session's level (tagged when derived from older settings) and its
+  // evidence, never the native mode. For a viewer who holds the controls
+  // it opens the session menu, as the harness chip does.
+  function permChip() {
+    var h = region("head"), host = h && h.querySelector(".host.sse"), st = lead.st;
+    if (!host) return;
+    var chip = h.querySelector(".pmhead"), level = st && !leadGone(st) ? String(st.permission_level || "") : "";
+    if (!level) { if (chip) chip.remove(); return; }
+    if (!chip) {
+      chip = mk("span", "chip pmhead");
+      chip.addEventListener("click", function () {
+        var c = region("head"), hb = c && c.querySelector(".host.hbtn");
+        if (hb && leadCan() && (railEl || framed) && WsRail) railPopOpen("sess", hb);
+      });
+      chip.addEventListener("keydown", function (e) {
+        if ((e.key === "Enter" || e.key === " ") && chip.getAttribute("role") === "button") { e.preventDefault(); chip.click(); }
+      });
+    }
+    if (chip.previousSibling !== host) host.parentNode.insertBefore(chip, host.nextSibling);
+    var derived = st.permission_source !== "explicit", q = permEvidence(st), sig = [level, derived, q].join("\n");
+    if (chip.wsSig !== sig) {
+      chip.wsSig = sig;
+      chip.textContent = "";
+      chip.appendChild(gIcon("lock"));
+      chip.appendChild(mk("span", null, PERM_LABEL[level] ? wsT(PERM_LABEL[level]) : level));
+      if (derived) chip.appendChild(mk("span", "pmtag", wsT("js.perm.tag.derived")));
+      chip.appendChild(permQ(q));
+      chip.title = wsT("js.perm.title");
+    }
+    var can = leadCan();
+    if (can) { chip.setAttribute("role", "button"); chip.setAttribute("tabindex", "0"); }
+    else { chip.removeAttribute("role"); chip.removeAttribute("tabindex"); }
   }
   // apCard builds the card of approval request a: the tool, the request's
   // description, a readable preview of the input, and Allow and Deny (Deny
