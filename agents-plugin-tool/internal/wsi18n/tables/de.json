@@ -29,6 +29,8 @@
   "js.usage.weekly": "Wöchentlich",
   "js.usage.age": "Wert von vor {0} Min.",
   "js.usage.unavailable": "Nutzung nicht verfügbar",
+  "js.usage.signinrequired": "Anmeldung erforderlich",
+  "js.usage.disabled": "deaktiviert",
   "js.usage.chart": "{0}: beobachtete kumulierte Nutzung; {1}",
   "js.usage.baseline": "gestrichelte Basislinie ist idealer Verbrauch, keine Prognose",
   "js.usage.unknownreset": "Zurücksetzung unbekannt, nur einzelne Beobachtungen",

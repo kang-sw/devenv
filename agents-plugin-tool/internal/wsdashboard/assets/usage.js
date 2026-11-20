@@ -5,13 +5,33 @@
     return (entry.windows || []).filter(function (w) { return !w.resetsAt || w.resetsAt > now; });
   }
   function tightest(entry, now) {
-    return active(entry, now).reduce(function (n, w) { return Math.max(n, w.percent); }, -1);
+    return active(entry, now).reduce(function (n, w) { return w.disabled ? n : Math.max(n, w.percent); }, -1);
   }
   function sorted(entries, now) {
     return entries.slice().sort(function (a, b) { return tightest(b, now) - tightest(a, now); });
   }
   function level(percent, warn, crit) { return percent >= crit ? "critical" : percent >= warn ? "warning" : "normal"; }
   function age(at, now) { return at ? "value from " + Math.max(0, Math.floor((now - at) / 60000)) + " min ago" : "usage unavailable"; }
+  function shortAge(at, now) {
+    if (!at) return "";
+    var mins = Math.max(0, Math.floor((now - at) / 60000));
+    if (mins < 60) return mins + "m ago";
+    var hours = Math.floor(mins / 60);
+    if (hours < 24) return hours + "h ago";
+    return Math.floor(hours / 24) + "d ago";
+  }
+  function entryName(entry) {
+    if (entry.harness === "claude") return "Claude";
+    if (entry.harness === "codex") return "Codex / GPT";
+    if (entry.harness === "agy") return entry.label || "Antigravity";
+    return entry.label || String(entry.harness || "");
+  }
+  function footerGroupLabel(entry) {
+    if (entry.harness !== "agy" || !entry.label) return "";
+    if (entry.group === "gemini") return "Gemini";
+    if (entry.group === "claude_gpt") return "Claude/GPT";
+    return entry.label;
+  }
   function label(kind) { return kind === "five_hour" ? "5-hour" : "Weekly"; }
   function observation(w, entry) { return w.asOf || entry.asOf; }
   function stale(at, now) { return !!at && now - at > 30 * 60000; }
@@ -35,12 +55,13 @@
       if (indices[key] !== undefined) samples[indices[key]] = s;
       else { indices[key] = samples.length; samples.push(s); }
     }
+    var entryGroup = entry.group || "";
     if (history && history.schema_version === 1 && history.status === "ok" && Array.isArray(history.samples)) {
       history.samples.forEach(function (s) {
-        if (s.harness === entry.harness && s.kind === w.kind && valid(s) && s.asOf <= at) upsert(s);
+        if (s.harness === entry.harness && (s.group || "") === entryGroup && s.kind === w.kind && valid(s) && s.asOf <= at) upsert(s);
       });
     }
-    var current = { harness: entry.harness, kind: w.kind, source: entry.source || "", resetsAt: reset, asOf: at, percent: w.percent };
+    var current = { harness: entry.harness, group: entryGroup, kind: w.kind, source: entry.source || "", resetsAt: reset, asOf: at, percent: w.percent };
     if (valid(current)) upsert(current);
     samples.sort(function (a, b) {
       return a.asOf - b.asOf || (identity(a) < identity(b) ? -1 : identity(a) > identity(b) ? 1 : 0);
@@ -124,17 +145,29 @@
     }
     function drawFooter() {
       var button = host.querySelector(".usage-toggle"); if (!button) return;
-      var now = Date.now();
+      var now = Date.now(), rendered = 0;
       button.textContent = "";
       button.appendChild(mini());
-      if (!data.entries.length) button.appendChild(el("span", "usage-empty", "Plan usage"));
       data.entries.forEach(function (entry) {
-        var group = el("span", "usage-harness"), windows = active(entry, now);
+        var windows = active(entry, now), enabled = windows.filter(function (v) { return !v.disabled; });
+        if (windows.length && !enabled.length) return;
+        var group = el("span", "usage-harness");
         var mark = el("span", "usage-mark"), columns = el("span", "usage-columns"), hasStale = false;
-        var name = entry.harness === "claude" ? "Claude" : "Codex / GPT";
+        var name = entryName(entry), groupLabel = footerGroupLabel(entry);
         mark.appendChild(icon(entry, true)); group.appendChild(mark);
+        if (groupLabel) {
+          var meta = el("span", "usage-group");
+          meta.appendChild(el("span", "usage-group-label", groupLabel));
+          var groupAt = entry.asOf || (enabled[0] && enabled[0].asOf) || 0;
+          if (groupAt) {
+            var ageEl = el("span", "usage-group-age", shortAge(groupAt, now));
+            ageEl.title = age(groupAt, now);
+            meta.appendChild(ageEl);
+          }
+          group.appendChild(meta);
+        }
         ["five_hour", "seven_day"].forEach(function (kind) {
-          var w = windows.filter(function (v) { return v.kind === kind; })[0];
+          var w = enabled.filter(function (v) { return v.kind === kind; })[0];
           if (!w) return;
           var at = observation(w, entry), old = stale(at, now);
           // Once stale, compare at the last observation, never at an advancing
@@ -154,9 +187,10 @@
         if (hasStale) mark.appendChild(clock());
         group.title = name;
         if (columns.children.length) group.appendChild(columns);
-        else group.appendChild(el("span", "usage-empty", "usage unavailable"));
-        button.appendChild(group);
+        else group.appendChild(el("span", "usage-empty", entry.status === "sign-in required" ? t("signInRequired") : "usage unavailable"));
+        button.appendChild(group); rendered++;
       });
+      if (!rendered) button.appendChild(el("span", "usage-empty", "Plan usage"));
     }
     function svgNode(tag, attrs, text) {
       var n = doc.createElementNS("http://www.w3.org/2000/svg", tag);
@@ -171,7 +205,8 @@
     var keys = {
       heading: "js.usage.heading", close: "js.usage.close", legend: "js.usage.legend",
       fiveHour: "js.usage.fivehour", weekly: "js.usage.weekly", age: "js.usage.age",
-      unavailable: "js.usage.unavailable", chart: "js.usage.chart", baseline: "js.usage.baseline",
+      unavailable: "js.usage.unavailable", signInRequired: "js.usage.signinrequired", disabled: "js.usage.disabled",
+      chart: "js.usage.chart", baseline: "js.usage.baseline",
       unknownReset: "js.usage.unknownreset", stalePace: "js.usage.stalepace", idealTitle: "js.usage.idealtitle",
       nowTitle: "js.usage.nowtitle", now: "js.usage.now", estimatedTitle: "js.usage.estimatedtitle",
       interval: "js.usage.interval", current: "js.usage.current", stale: "js.usage.stale",
@@ -185,8 +220,14 @@
     function locale() { return window.wsI18n.lang; }
     function windowLabel(kind) { return t(kind === "five_hour" ? "fiveHour" : "weekly"); }
     function observedAge(at, now) { return at ? t("age", Math.max(0, Math.floor((now - at) / 60000))) : t("unavailable"); }
+    function statusText(status) {
+      if (status === "sign-in required") return t("signInRequired");
+      if (!status || status === "usage unavailable") return t("unavailable");
+      return status;
+    }
+    function entryHistory(entry) { return entry.harness === "agy" ? (data.agyHistory || data.history) : data.history; }
     function drawChart(entry, w, old, now) {
-      var geometry = trend(entry, w, data.history), id = "usage-chart-" + (++chartSerial);
+      var geometry = trend(entry, w, entryHistory(entry)), id = "usage-chart-" + (++chartSerial);
       var chart = svgNode("svg", { "class": "usage-chart", viewBox: "0 0 288 113", role: "img", "aria-label": t("chart", windowLabel(w.kind), t(geometry.knownReset ? "baseline" : "unknownReset")) });
       chart.appendChild(svgNode("title", {}, windowLabel(w.kind) + ": " + Math.round(w.percent) + "%; " + observedAge(geometry.at, now) + (old ? "; " + t("stalePace") : "")));
       var axis = null;
@@ -265,11 +306,12 @@
       return { el: chart, geometry: geometry };
     }
     function windowCard(entry, w, now) {
-      var at = observation(w, entry), old = stale(at, now), delta = at ? pace(w, old ? at : now) : null;
+      var at = observation(w, entry), old = stale(at, now), isDisabled = !!w.disabled, delta = at ? pace(w, old ? at : now) : null;
       var comparison = delta === null ? "—" : (delta > 0 ? "+" : delta < 0 ? "−" : "") + Math.abs(delta) + "%";
-      var card = el("article", "usage-window-card" + (old ? " usage-stale" : ""));
+      var card = el("article", "usage-window-card" + (old ? " usage-stale" : "") + (isDisabled ? " usage-disabled" : ""));
       var head = el("div", "usage-window");
       head.appendChild(el("span", "usage-window-name", windowLabel(w.kind)));
+      if (isDisabled) head.appendChild(el("span", "usage-disabled-tag", t("disabled")));
       head.appendChild(el("b", "usage-number", Math.round(w.percent) + "%"));
       head.appendChild(el("span", "usage-pace" + (delta > 0 ? " over" : delta < 0 ? " under" : ""), "(" + comparison + ")"));
       if (old) head.appendChild(clock());
@@ -278,8 +320,8 @@
       var chart = drawChart(entry, w, old, now); card.appendChild(chart.el);
       var observed = observedAge(at, now) + (old ? "; " + t("stalePace") : "");
       card.appendChild(el("div", "usage-observed usage-meta", observed));
-      card.setAttribute("aria-label", t("card", windowLabel(w.kind), Math.round(w.percent), comparison, observed));
-      var history = data.history, note;
+      card.setAttribute("aria-label", t("card", windowLabel(w.kind), Math.round(w.percent), comparison, observed) + (isDisabled ? "; " + t("disabled") : ""));
+      var history = entryHistory(entry), note;
       if (!history || history.schema_version !== 1 || history.status === "unavailable") note = t("historyUnavailable");
       else if (history.status === "empty") note = t("historyEmpty");
       else note = t(chart.geometry.points.length > 1 ? "historyRecorded" : "historyEarlier");
@@ -295,14 +337,14 @@
       sorted(data.entries, Date.now()).forEach(function (entry) {
         var row = el("section", "usage-account"), head = el("div", "usage-heading");
         head.appendChild(icon(entry));
-        head.appendChild(el("b", "", entry.harness === "claude" ? "Claude" : "Codex / GPT"));
+        head.appendChild(el("b", "", entryName(entry)));
         if (entry.plan) head.appendChild(el("span", "usage-plan", entry.plan));
         row.appendChild(head);
         var windows = active(entry, Date.now());
         windows.sort(function (a, b) { return (a.kind === "five_hour" ? 0 : 1) - (b.kind === "five_hour" ? 0 : 1); }).forEach(function (w) {
           row.appendChild(windowCard(entry, w, Date.now()));
         });
-        if (entry.status || !windows.length) row.appendChild(el("p", "usage-status", entry.status && entry.status !== "usage unavailable" ? entry.status : t("unavailable")));
+        if (entry.status || !windows.length) row.appendChild(el("p", "usage-status", statusText(entry.status)));
         if (!windows.length && entry.asOf) row.appendChild(el("div", "usage-meta", observedAge(entry.asOf, Date.now())));
         list.appendChild(row);
       });
@@ -335,12 +377,17 @@
       });
       return pending;
     }
-    // A forced refresh answers from the daemon's cache while its probe runs in
-    // the background (upstream timeout 10 s), so refetch while the popover is
-    // open to show the probe's result instead of waiting for the next poll.
-    function followUp() {
+    // A forced refresh answers from the daemon's cache while background probes
+    // run (Codex HTTP up to 10 s, agy CLI up to 30 s), so refetch cache-only
+    // while the popover stays open and clear every timer on close.
+    function clearFollowUps() {
       followUps.forEach(function (id) { window.clearTimeout(id); });
-      followUps = [2000, 11000].map(function (ms) {
+      followUps = [];
+    }
+    function followUp() {
+      clearFollowUps();
+      if (!shown) return;
+      followUps = [2000, 11000, 32000].map(function (ms) {
         return window.setTimeout(function () { if (shown && !doc.hidden) refresh(false); }, ms);
       });
     }
@@ -364,7 +411,7 @@
       });
       help.appendChild(legend);
       box.appendChild(el("div", "usage-details")); popover = box;
-      return { el: box, open: function () { shown = true; drawPopover(); refresh(true); }, close: function () { shown = false; }, focus: function () { box.focus(); } };
+      return { el: box, open: function () { shown = true; drawPopover(); refresh(true); }, close: function () { shown = false; clearFollowUps(); }, focus: function () { box.focus(); } };
     }
     refresh(false);
     // Only connected, visible pages trigger periodic queries. The daemon

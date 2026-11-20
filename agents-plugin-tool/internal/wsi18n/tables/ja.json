@@ -29,6 +29,8 @@
   "js.usage.weekly": "週間",
   "js.usage.age": "{0}分前の値",
   "js.usage.unavailable": "使用量を取得できません",
+  "js.usage.signinrequired": "サインインが必要",
+  "js.usage.disabled": "無効",
   "js.usage.chart": "{0}の観測累積使用量; {1}",
   "js.usage.baseline": "破線は理想的な消費の基準であり予測ではありません",
   "js.usage.unknownreset": "リセット時刻不明のため個別の観測値のみ表示",

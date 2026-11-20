@@ -29,6 +29,8 @@
   "js.usage.weekly": "Semanal",
   "js.usage.age": "valor de hace {0} min",
   "js.usage.unavailable": "uso no disponible",
+  "js.usage.signinrequired": "inicio de sesión requerido",
+  "js.usage.disabled": "desactivado",
   "js.usage.chart": "{0}: uso acumulado observado; {1}",
   "js.usage.baseline": "la línea discontinua es el consumo ideal, no una predicción",
   "js.usage.unknownreset": "reinicio desconocido, solo observaciones aisladas",
