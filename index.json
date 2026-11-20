@@ -602,7 +602,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-20T14:34:22Z"
+        "touched_at": "2026-11-20T14:35:44Z",
+        "impl": {
+          "branch": "impl/develop/okay-sleek-karma"
+        }
       }
     },
     "261120-feat-ws-dashboard-chat-agent-roster-hud": {
