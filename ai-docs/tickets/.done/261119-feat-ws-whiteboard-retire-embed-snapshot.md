@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6f1ef5c65ba130a5
 sage-review-completeness-reviewed: 6f1ef5c65ba130a5
+completed: 2026-11-20
 ---
 
 # Retire the whiteboard's per-update embed HTML snapshot
@@ -347,3 +348,8 @@ review's compatibility-test and dead-layout findings were fixed and its second
 pass was clear.
 
 Windows V3 measurement: deferred.
+
+
+## Resolution (2026-11-20)
+
+Phase 1 merged into develop at 0c375a5ee (embed snapshot retired; wb:embed-dir and embed: are accepted no-ops). Remaining disk-page retirement continues in 261116-feat-ws-whiteboard-retire-disk-pages.
