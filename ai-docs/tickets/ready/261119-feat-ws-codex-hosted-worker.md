@@ -457,3 +457,11 @@ Review hardening before merge:
 - Still in Forward: the missing-file early return skips the session-report
   recheck; reattach stored-mode check; `codexChoices.at` uses `time.Now`
   rather than the injected clock.
+
+#### Edition (5587cd363) - 2026-11-20
+
+Decision (172)'s daemon-owned Codex-worker shape is superseded by
+`261120-refactor-ws-agent-workers-under-holders`. Pending live acceptance and
+remaining follow-up in this ticket must use the holder-backed rejoin,
+authority, approval, and persisted HTTP-MCP tuple contracts from that ticket,
+not the daemon-owned shape recorded above.
