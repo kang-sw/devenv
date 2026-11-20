@@ -462,10 +462,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		harness = strings.ToLower(strings.TrimSpace(harness))
 		if entry.HarnessApplicable {
 			if harness == "" {
-				harness = s.currentHarness()
-				if isCompactionKey(entry.Key) {
-					harness = s.playbookHarness()
-				}
+				harness = s.playbookHarness()
 			}
 			if harnessEnum := fieldEnum(entry.SelectorFields, "harness"); len(harnessEnum) > 0 {
 				if harness == "" && enumContains(harnessEnum, "default") {

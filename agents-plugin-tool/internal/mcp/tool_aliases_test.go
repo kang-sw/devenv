@@ -371,3 +371,119 @@ func TestRegistrationToolNameSchemes(t *testing.T) {
 		t.Fatal("an unknown scheme must not apply")
 	}
 }
+
+// TestHostedAgyConnectionTunesAndReadsOwnBuckets: a hosted agy lead has no
+// detected harness (s.currentHarness() == ""), yet config.tune and config.get
+// resolve and write its own agy bucket for harness-bucketed workflow and
+// prompt keys, both when harness is omitted and when harness is "agy".
+func TestHostedAgyConnectionTunesAndReadsOwnBuckets(t *testing.T) {
+	s, _ := hostedBackendConnection(t, wsagent.BackendAgy, descriptorRegistrations())
+	if got := s.currentHarness(); got != "" {
+		t.Fatalf("detected harness = %q, want empty", got)
+	}
+	if got := s.playbookHarness(); got != "agy" {
+		t.Fatalf("playbook harness = %q, want agy", got)
+	}
+
+	// Seed the shared "*" (all) bucket first so reads prove agy's own bucket
+	// shadows the shared bucket rather than falling back to it.
+	if resp := callToolOnce(t, s, 1, "config.tune", map[string]any{
+		"key": "workflow.whiteboard_enabled", "harness": "*", "value": "off",
+	}); toolIsError(t, resp) {
+		t.Fatalf("seed shared whiteboard bucket: %s", resp)
+	}
+
+	// Omitted harness defaults to agy, writes global scope, and echoes agy without shadowing.
+	resp := callToolOnce(t, s, 2, "config.tune", map[string]any{
+		"key": "workflow.whiteboard_enabled", "value": "on",
+	})
+	if toolIsError(t, resp) {
+		t.Fatalf("config.tune omitted harness on hosted agy: %s", resp)
+	}
+	if text := toolText(t, resp); !strings.Contains(text, "workflow.whiteboard_enabled.agy: on [scope:global]") || strings.Contains(text, "shadowed") {
+		t.Fatalf("unexpected whiteboard tune echo: %s", text)
+	}
+
+	// config.get reads the agy bucket rather than the shared all bucket.
+	resp = callToolOnce(t, s, 3, "config.get", map[string]any{
+		"key": "workflow.whiteboard_enabled", "format": "json",
+	})
+	if toolIsError(t, resp) {
+		t.Fatalf("config.get whiteboard on hosted agy: %s", resp)
+	}
+	var got struct {
+		Value string `json:"value"`
+		Scope string `json:"scope"`
+	}
+	if err := json.Unmarshal([]byte(toolText(t, resp)), &got); err != nil {
+		t.Fatalf("decode config.get whiteboard: %v\n%s", err, resp)
+	}
+	if got.Value != "on" || got.Scope != "global" {
+		t.Fatalf("config.get whiteboard = %+v, want on/global from agy bucket", got)
+	}
+
+	// Explicit harness "agy" works for workflow.profile as well.
+	resp = callToolOnce(t, s, 4, "config.tune", map[string]any{
+		"key": "workflow.profile", "harness": "agy", "value": "orchestrate",
+	})
+	if toolIsError(t, resp) {
+		t.Fatalf("config.tune explicit harness=agy: %s", resp)
+	}
+	if text := toolText(t, resp); !strings.Contains(text, "workflow.profile.agy: orchestrate [scope:global]") {
+		t.Fatalf("unexpected workflow.profile tune echo: %s", text)
+	}
+	resp = callToolOnce(t, s, 5, "config.get", map[string]any{
+		"key": "workflow.profile", "format": "json",
+	})
+	if toolIsError(t, resp) {
+		t.Fatalf("config.get workflow.profile on hosted agy: %s", resp)
+	}
+	if err := json.Unmarshal([]byte(toolText(t, resp)), &got); err != nil {
+		t.Fatalf("decode config.get workflow.profile: %v\n%s", err, resp)
+	}
+	if got.Value != "orchestrate" || got.Scope != "global" {
+		t.Fatalf("config.get workflow.profile = %+v, want orchestrate/global from agy bucket", got)
+	}
+
+	// Prompt override: omitted harness writes the agy bucket, config.get reads it,
+	// and explicit harness="agy" reset clears it.
+	resp = callToolOnce(t, s, 6, "config.tune", map[string]any{
+		"key": "prompt.UserPreferenceSection", "value": "agy-specific preference",
+	})
+	if toolIsError(t, resp) {
+		t.Fatalf("config.tune prompt omitted harness on hosted agy: %s", resp)
+	}
+	if text := toolText(t, resp); !strings.Contains(text, "prompt override set: UserPreferenceSection/agy") {
+		t.Fatalf("unexpected prompt set echo: %s", text)
+	}
+	resp = callToolOnce(t, s, 7, "config.get", map[string]any{
+		"key": "prompt.UserPreferenceSection", "format": "json",
+	})
+	if toolIsError(t, resp) {
+		t.Fatalf("config.get prompt on hosted agy: %s", resp)
+	}
+	if err := json.Unmarshal([]byte(toolText(t, resp)), &got); err != nil {
+		t.Fatalf("decode config.get prompt: %v\n%s", err, resp)
+	}
+	if got.Value != "agy-specific preference" {
+		t.Fatalf("config.get prompt = %+v, want agy-specific preference", got)
+	}
+	resp = callToolOnce(t, s, 8, "config.tune", map[string]any{
+		"key": "prompt.UserPreferenceSection", "harness": "agy", "reset": true,
+	})
+	if toolIsError(t, resp) {
+		t.Fatalf("config.tune prompt reset harness=agy: %s", resp)
+	}
+	if text := toolText(t, resp); !strings.Contains(text, "prompt override cleared: UserPreferenceSection/agy") {
+		t.Fatalf("unexpected prompt reset echo: %s", text)
+	}
+
+	// config.list reflects agy's own bucketed values in both resolved overrides and catalog.
+	resp = callToolOnce(t, s, 9, "config.list", map[string]any{"format": "json"})
+	if toolIsError(t, resp) {
+		t.Fatalf("config.list on hosted agy: %s", resp)
+	}
+	if text := toolText(t, resp); !strings.Contains(text, `"workflow.whiteboard_enabled.agy"`) || !strings.Contains(text, `"key":"workflow.whiteboard_enabled","value":"on","scope":"global"`) {
+		t.Fatalf("config.list missing agy bucketed override:\n%s", text)
+	}
+}

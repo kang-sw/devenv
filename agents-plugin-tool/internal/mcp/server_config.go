@@ -84,7 +84,7 @@ func (s *Server) resolveBucketedOverrideRows(resolver *wsconfig.Resolver, sessio
 		if !entry.HarnessBucketed() {
 			continue
 		}
-		rv, _, err := resolveHarnessBucketed(resolver, sessionKey, item.Key, s.currentHarness())
+		rv, _, err := resolveHarnessBucketed(resolver, sessionKey, item.Key, s.playbookHarness())
 		if err != nil {
 			return err
 		}
@@ -824,7 +824,7 @@ func (s *Server) effectiveConfigValue(entry configKeyEntry, sessionKey string) (
 		return s.compactionValue(&resolver, sessionKey, entry.Key, s.playbookHarness())
 	}
 	if entry.HarnessBucketed() {
-		return resolveHarnessBucketed(&resolver, sessionKey, entry.Key, s.currentHarness())
+		return resolveHarnessBucketed(&resolver, sessionKey, entry.Key, s.playbookHarness())
 	}
 	rv, err := resolver.Get(sessionKey, entry.Key)
 	return rv, entry.Key, err

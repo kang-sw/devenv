@@ -675,3 +675,64 @@ func TestClaudeLeadStaleRouteFailedRestart(t *testing.T) {
 		t.Fatalf("the new process is on the new route: %+v", rec)
 	}
 }
+
+// TestClaudeLeadRejoinBrokenMCPCurrentRouteWaitsForIdlePoint: a rejoined
+// process whose ws-mcp route is still current (mcpStale == false) does not
+// restart at replayDone for an existing broken MCP server; it takes held input
+// on the rejoined process and restarts at the usual post-turn idle point.
+func TestClaudeLeadRejoinBrokenMCPCurrentRouteWaitsForIdlePoint(t *testing.T) {
+	shortStartWait(t)
+	bundle := leadBundledFixture(t, "wsflow")
+	h := newLeadHarness(t)
+	var calls atomic.Int32
+	h.opts.WSMCP = leadLauncher(bundle, &calls)
+	const endpoint = "http://127.0.0.1:1"
+	h.startAt(endpoint)
+	id, holder := h.runLead("one")
+	h.holders.out(holder, mcpTurn("u1", MCPConnected)...)
+	h.idle(id)
+
+	h.runner.Close()
+	h.holders.restart()
+	entered, release := h.gateScan()
+	defer release()
+	h.startAt(endpoint)
+	wait(t, "the gated rejoin scan", entered)
+
+	// Mark an MCP server broken on the rejoining conv before replayDone runs
+	// while the ws-mcp route is still current, and hold a user message. Use a
+	// server name not reported connected by turn 1's replay so mcpBroken stays
+	// set when replayDone runs.
+	const brokenServer = "broken-mcp"
+	c := h.runner.conv(id)
+	var stale bool
+	c.do(func() {
+		stale = c.mcpStale
+		c.setStatus(func() { c.mcpBroken = []string{brokenServer} })
+	})
+	if stale {
+		t.Fatal("same-endpoint rejoin must not mark the ws-mcp route stale")
+	}
+	h.send(id, "two")
+	release()
+
+	// Because the route is current, replayDone must not restart ahead of input:
+	// the held message goes to the rejoined holder first.
+	eventually(t, "rejoined holder takes held input", func() bool {
+		return slices.Equal(h.userInputs(holder), h.envelopes("one", "two"))
+	})
+	if h.holders.opCount("stop") != 0 || h.holders.opCount("launch") != 1 || h.holder(id) != holder {
+		t.Fatalf("broken MCP on current route restarted at rejoin instead of waiting for idle: %v", h.holders.opList())
+	}
+
+	// Once that turn ends at its usual idle point, the broken MCP server
+	// triggers the deferred restart.
+	h.holders.out(holder, stateLine(HarnessRunning), replyLine("u2", "ok"), resultLine(), stateLine(HarnessIdle))
+	eventually(t, "deferred restart at post-turn idle point", func() bool {
+		return h.holders.opCount("stop "+holder) == 1 && h.holders.opCount("launch") == 2
+	})
+	eventually(t, "replacement process running", func() bool {
+		st := h.state(id)
+		return st.Process && h.holder(id) != holder
+	})
+}

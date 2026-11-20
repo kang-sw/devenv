@@ -21,7 +21,7 @@ var (
 	sageReviewEnum        = []string{"off", "ask", "auto"}
 	reviewPhaseEnum       = []string{"off", "lite", "full"}
 	agentsTierEnum        = []string{"small", "medium", "large", "xlarge"}
-	promptHarnessEnum     = []string{"claude", "codex", "pi", "*"}
+	promptHarnessEnum     = []string{"claude", "codex", "pi", "agy", "*"}
 	agentsTierHarnessEnum = []string{"claude", "codex", "pi", "agy", "default"}
 	agentsTierScopeEnum   = []string{"project", "global"}
 )
@@ -125,7 +125,7 @@ func (e configKeyEntry) RepoScoped() bool {
 
 // RepoKey is the key a committed repo-scope file stores this knob under. A
 // harness-bucketed knob stores one entry per harness bucket, so its key names
-// the bucket set (claude|codex|pi|all, where all applies to every harness).
+// the bucket set (claude|codex|pi|agy|all, where all applies to every harness).
 func (e configKeyEntry) RepoKey() string {
 	if e.HarnessBucketed() {
 		return e.Key + ".<" + strings.Join(harnessBuckets, "|") + ">"
@@ -148,7 +148,7 @@ func (e configKeyEntry) HarnessStored() bool { return e.HarnessApplicable && e.R
 // harnessBuckets is the fixed set of harness buckets a harness-bucketed knob
 // stores values under, in listing order. "all" is the stored spelling of the
 // caller-facing "*" and applies to every harness.
-var harnessBuckets = []string{"claude", "codex", "pi", "all"}
+var harnessBuckets = []string{"claude", "codex", "pi", "agy", "all"}
 
 // orchestrateHarnessWhitelist is the set of harness names verified to support
 // the nested spawn chain lead -> sub-lead -> worker -> delegate -> explore that

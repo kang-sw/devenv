@@ -354,7 +354,7 @@ func TestConfigListReportsRepoScopeFields(t *testing.T) {
 	// and absent where the repo scope does not apply.
 	wantRepoKey := map[string]string{
 		"sage_review_design":           "sage_review_design",
-		"prompt.UserPreferenceSection": "prompt.UserPreferenceSection.<claude|codex|pi|all>",
+		"prompt.UserPreferenceSection": "prompt.UserPreferenceSection.<claude|codex|pi|agy|all>",
 		"agents.tier":                  "",
 		"bootstrap_alarm":              "",
 	}

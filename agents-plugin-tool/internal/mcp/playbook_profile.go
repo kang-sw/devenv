@@ -18,7 +18,7 @@ import (
 // which must be built with builtinConfigDefaults. An unrecognized stored value
 // selects the base files rather than failing the load.
 func (s *Server) resolvedPlaybookProfile(resolver *wsconfig.Resolver, key string) (string, error) {
-	rv, _, err := resolveHarnessBucketed(resolver, key, wsconfig.ItemWorkflowProfile, s.currentHarness())
+	rv, _, err := resolveHarnessBucketed(resolver, key, wsconfig.ItemWorkflowProfile, s.playbookHarness())
 	if err != nil {
 		return "", fmt.Errorf("resolve %s: %w", wsconfig.ItemWorkflowProfile, err)
 	}

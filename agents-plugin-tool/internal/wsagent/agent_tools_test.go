@@ -1012,6 +1012,81 @@ func TestChildWaitingExpiryReadsItsConfig(t *testing.T) {
 	}
 }
 
+// TestChildWaitingExpiryRetriesAfterFailedClose: when expire's CloseConversation
+// fails with a non-errClosed error, expire resets c.expiring so a later
+// heartbeat retries and deletes the expired child.
+func TestChildWaitingExpiryRetriesAfterFailedClose(t *testing.T) {
+	clk := newTestClock()
+	var logBuf logBuffer
+	h, _ := agentHarness(t, func(o *Options) {
+		o.Now = clk.Now
+		o.ChildWaitingDays = 2
+		o.Log = &logBuf
+	})
+	a, b := settledPair(t, h)
+	// b was active after a, so a expires first and closes b before closing a.
+	h.runner.conv(b).update(func(rec *Record) { rec.LastActiveAt = clk.Now().Add(day).UTC().Format(time.RFC3339) })
+
+	// Inject a transient non-errClosed failure on CloseConversation(a): when
+	// CloseConversation(a) finishes closing descendant b, remove a from r.convs
+	// once so closeOne(a) returns errUnknown instead of closing a.
+	var mu sync.Mutex
+	var saved *conv
+	injected := false
+	stop := h.runner.Watch(func(st State) {
+		if st.ID != b || st.Status != StatusClosed {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if injected {
+			return
+		}
+		injected = true
+		h.runner.mu.Lock()
+		saved = h.runner.convs[a]
+		delete(h.runner.convs, a)
+		h.runner.mu.Unlock()
+	})
+	defer stop()
+
+	// Advance 2.5 days so a (age 2.5d >= 2d) expires while b (age 1.5d < 2d)
+	// does not expire on its own and only closes inside CloseConversation(a).
+	clk.advance(2*day + 12*time.Hour)
+	eventually(t, "the failed expiry close is logged", func() bool {
+		return strings.Contains(logBuf.String(), "agent "+a+": expire:")
+	})
+	mu.Lock()
+	c := saved
+	mu.Unlock()
+	if c == nil {
+		t.Fatal("failed-close injection did not capture parent conv")
+	}
+	// expire must clear c.expiring after the non-errClosed failure so the
+	// heartbeat can retry.
+	eventually(t, "expiring flag cleared for heartbeat retry", func() bool {
+		var expiring bool
+		if !c.do(func() { expiring = c.expiring }) {
+			return false
+		}
+		return !expiring
+	})
+	if gone(h, a) {
+		t.Fatal("child directory deleted despite failed close")
+	}
+
+	// Restore a into r.convs and let the next heartbeat retry expiry.
+	h.runner.mu.Lock()
+	h.runner.convs[a] = c
+	h.runner.mu.Unlock()
+	eventually(t, "heartbeat retried expiry and deleted child", func() bool {
+		return gone(h, a)
+	})
+	if len(h.runner.AgentList(h.leadCaller())) != 0 {
+		t.Fatal("the lead still lists the retried expired child")
+	}
+}
+
 // agentLeadHarness runs hosted leads (claude with common permission levels,
 // and a lead-only "codex" backend) whose agent.spawn children are Pi workers
 // under fake holders.
