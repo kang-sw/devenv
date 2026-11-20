@@ -60,8 +60,8 @@ function wbChangeBars(body) {
         document.body.appendChild(tip);
         layer.wbTip = tip;
       }
-      // Same validated view value: the unframed topic body metadata, or the
-      // frame's own metadata. Never read overall topic activity or parent.
+      // Use the frame's validated metadata, never overall topic activity or
+      // the parent document.
       var root = body.closest(".topic") || document;
       var source = root.querySelector(".tdoc[data-body-at], meta[name=wb-body-at]");
       var at = source ? source.getAttribute("data-body-at") : "";

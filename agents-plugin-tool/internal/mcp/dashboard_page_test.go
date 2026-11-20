@@ -93,30 +93,13 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 	if !page.HasBoard || page.Seq == 0 || page.Board.Board == "" || page.Board.Panels == "" {
 		t.Fatalf("board page = %+v", page)
 	}
-	static := f.fullPage(t)
-	// The stamp is transport metadata, not board content. Even a board
-	// without images carries the empty dependency stamp on the served page;
-	// the standalone page has no image route or lazy-history fetch to refresh.
 	servedBoard := string(page.Board.Board)
 	imageStamp := `<template data-history-images="` + boardWatchStamp(nil) + `"></template>`
 	if !strings.HasSuffix(servedBoard, imageStamp) {
 		t.Fatal("served board lacks the empty history image stamp")
 	}
-	if strings.Contains(static, `<template data-history-images=`) {
-		t.Error("static page carries a served-only history image stamp")
-	}
-	if !strings.Contains(static, wswhiteboard.StaticCountChips(strings.TrimSuffix(servedBoard, imageStamp))) {
-		t.Errorf("the static page does not hold the served board:\n%.600s", page.Board.Board)
-	}
-	// The served drawer keeps an empty ticket card for the idea demand
-	// control; the standalone file still omits empty ticket panels.
-	servedPanels := string(page.Board.Panels)
-	emptyTickets := panelHTML(servedPanels, "tickets")
-	if emptyTickets == "" {
+	if panelHTML(string(page.Board.Panels), "tickets") == "" {
 		t.Fatal("served page lacks the idea-only ticket entry point")
-	}
-	if !strings.Contains(static, strings.Replace(servedPanels, emptyTickets, "", 1)) {
-		t.Errorf("the static page does not hold the other served panels:\n%.600s", page.Board.Panels)
 	}
 
 	// File targets and ticket rows are action links under the served rule.
@@ -241,15 +224,6 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 	}
 	if strings.Contains(html, `data-topic="Body only" data-entry="`+entries["Body only"]+`" data-relay`) {
 		t.Errorf("a body without an outside image must list no relay")
-	}
-	// The standalone page written to disk takes no relay.
-	written := []string{filepath.Join(f.replyID(), "index.html")}
-	for _, name := range written {
-		// Shared history code can name the attribute; standalone content
-		// must never carry a relay attribute or a protected image URL.
-		if page := readPage(t, filepath.Join(f.dir(), name)); strings.Contains(page, `data-relay="`) || strings.Contains(page, "/image?path=") {
-			t.Errorf("%s carries a relay or the image route", name)
-		}
 	}
 	if !strings.Contains(docs["Body only"], "second-marker") {
 		t.Errorf("a topic with a body and no items must render its frame: %v", docs)
@@ -633,7 +607,7 @@ func TestDashboardPointerLineFollowsTheLastNudge(t *testing.T) {
 	root := dashboardGitRoot(t)
 	s, key, _ := dashboardSessionServer(t, root, true)
 	replyID := wsmailbox.ReplyID(key)
-	path := "ai-docs/whiteboards/" + replyID + "/index.html"
+	path := "page unavailable"
 	update := func(s *Server, key string) string {
 		t.Helper()
 		resp := dashCall(t, s, "whiteboard.update", map[string]any{"session_key": key, "commands": ""})
@@ -675,7 +649,7 @@ func TestDashboardPointerLineFollowsTheLastNudge(t *testing.T) {
 	startFakeDaemon(t, dir, http.StatusNoContent, false)
 	sOff, keyOff, _ := dashboardSessionServer(t, root, false)
 	dashCall(t, sOff, "todo.list", map[string]any{"session_key": keyOff})
-	if got := update(sOff, keyOff); got != "ai-docs/whiteboards/"+wsmailbox.ReplyID(keyOff)+"/index.html" {
+	if got := update(sOff, keyOff); got != "page unavailable" {
 		t.Fatalf("full: of a key-off session = %q", got)
 	}
 }

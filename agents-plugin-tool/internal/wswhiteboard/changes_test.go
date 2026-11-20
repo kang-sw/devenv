@@ -199,10 +199,11 @@ func TestRenderDocWritesMarksAsComments(t *testing.T) {
 	// Pin the retained unmigrated Doc renderer's mark comments; migrated
 	// topics use dated panel snapshots instead of this duplicate projection.
 	view.Topics[0].Doc = st.TopicBody("t")
-	page, err := RenderPage(view)
+	regions, err := RenderRegions(view)
 	if err != nil {
 		t.Fatal(err)
 	}
+	page := frameDocs(t, string(regions.Board))["t"]
 	for _, want := range []string{"<ul>\n<li>a</li>\n<li>b</li>\n<!--wbchg:new-->\n<li>c</li>", "<!--wbchg:mod-->\n<div>RAW</div>", "<!--wbchg:delafter-->"} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("page lacks %q", want)
@@ -212,18 +213,13 @@ func TestRenderDocWritesMarksAsComments(t *testing.T) {
 		t.Fatal("the page must carry exactly the new and the modified mark beside the delafter one")
 	}
 
-	// A framed body (the dashboard) carries them inside its frame document.
-	regions, err := RenderRegions(view)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if !strings.Contains(string(regions.Board), "wbchg:new") {
 		t.Fatal("a framed body must carry its change marks")
 	}
 
 	// A mark past the body's blocks (stale) renders nothing and fails nothing.
 	st.Topics[0].Marks = marks(99, MarkMod)
-	if _, err := RenderPage(BuildView(st, ViewInput{Layout: LayoutFull})); err != nil {
+	if _, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull})); err != nil {
 		t.Fatal(err)
 	}
 }

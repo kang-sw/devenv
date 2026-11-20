@@ -431,28 +431,3 @@ func TestLegacyContentThroughV050Writer(t *testing.T) {
 
 // Render only: a caller may retain this production page for a separate local
 // browser capture. This test never starts a browser or a ws executable.
-func TestLegacyContentCapture(t *testing.T) {
-	st := folderOpen(t, t.TempDir(), &State{Seq: 2, Topics: []TopicDoc{{
-		Name: "Migration example", Body: "## Current status\n\nPending implementation.\n\nRetained legacy content with [an exact reference](#e1).",
-		Changed: 2, ChangedAt: "2026-11-01T01:02:03Z",
-	}}})
-	applyBodyTimeAt(t, st, `<wb:topic name="Migration example"><wb:edit><wb:old>Pending implementation.</wb:old><wb:new>Implementation complete; validation pending.</wb:new></wb:edit><wb:log>Reviewing the migrated snapshot and its later edit.</wb:log></wb:topic>`, testNow)
-	view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "legacy-content", Location: time.UTC})
-	if len(view.Topics) != 1 || view.Topics[0].Doc != "" || len(legacyVersions(t, st, "Migration example")) != 2 {
-		t.Fatal("capture fixture does not show a migrated/edited panel-only stream")
-	}
-	page, err := RenderPage(view)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if dir := os.Getenv("WS_LEGACY_CONTENT_CAPTURE_DIR"); dir != "" {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			t.Fatal(err)
-		}
-		path := filepath.Join(dir, "legacy-content.html")
-		if err := os.WriteFile(path, []byte(page), 0644); err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("legacy content capture: %s", path)
-	}
-}

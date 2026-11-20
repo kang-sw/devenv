@@ -67,13 +67,6 @@ func MermaidAsset() (name string, data []byte) {
 	return mermaidName, mermaidJS
 }
 
-// UsesMermaid reports whether a rendered page loads the shared mermaid
-// script, so the page writer stores it beside the page.
-func UsesMermaid(page string) bool {
-	name, _ := MermaidAsset()
-	return strings.Contains(page, `<script src="`+name+`">`)
-}
-
 // markdown holds a page's goldmark pipelines; all resolve item references
 // and link targets against that page.
 type markdown struct {
@@ -380,10 +373,9 @@ func (t target) isAction() bool { return t.action.Href != "" || t.action.Abs != 
 // paths, file: URLs, http(s) URLs, and fragment-only in-page anchors; images
 // accept relative paths and file: URLs only, so a page never fetches from the
 // network. A relative path resolves against the session root and a bare
-// absolute path is a file path; both, and every file: URL, go through the
-// page's FileLink, which links them from wherever the page is written. On a
-// page with FileText a file target instead comes back as path text, with an
-// empty href, and on a page with FileActions also as an action link. An
+// absolute path is a file path. On a page with FileText a file target comes
+// back as path text, with an empty href, and on a page with FileActions also
+// as an action link. An
 // image file target on a page with ImageSrc comes back as the src ImageSrc
 // returns, unless it returns empty (see fileTarget). An attachment:<oid>
 // image comes back as the src attachmentSrc returns, when that is a daemon
@@ -582,20 +574,15 @@ func daemonPath(href string) bool {
 }
 
 // pathURLEscaper keeps a decoded "#" or "?" in a file name from starting a
-// fragment or query; a file: URL from FileLink already has them escaped.
+// fragment or query.
 var pathURLEscaper = strings.NewReplacer("#", "%23", "?", "%3F")
 
-// fileHref links a file path through FileLink and checks the href it gets
-// back, not only the destination it started from: a relative result whose
-// first segment holds a colon ("javascript:alert(1)", for a file of that
-// name beside the page, or a decoded "javascript%3A...") would read as a
-// scheme, so it is anchored with "./". Only a scheme-less href or a file:
-// URL leaves here as is.
+// fileHref checks a file path before using it as an href: a relative path
+// whose first segment holds a colon ("javascript:alert(1)", for example)
+// would read as a scheme, so it is anchored with "./". Only a scheme-less
+// href or a file: URL leaves here as is.
 func (p *pageData) fileHref(path, suffix string) string {
 	href := filepath.ToSlash(path)
-	if p.FileLink != nil {
-		href = p.FileLink(path)
-	}
 	href = pathURLEscaper.Replace(href)
 	if u, err := url.Parse(href); err != nil || (u.Scheme != "" && !strings.EqualFold(u.Scheme, "file")) {
 		href = "./" + href

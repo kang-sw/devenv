@@ -40,12 +40,8 @@ Object.defineProperty(document, "title", { get: function () { return title; }, s
 var window = { IntersectionObserver: IntersectionObserver, innerHeight: 800, addEventListener: function () {}, removeEventListener: function () {} };
 `
 
-// TestPillTitleDefersToTheDashboard pins the open-question pill's title
-// write: a standalone page gets its own "(N) " prefix over the recorded base,
-// and a page whose html element carries data-wb-titlehost (the dashboard)
-// keeps its title, even on a run before the page's hook exists, while the
-// count goes to window.wbTitleCount. The cases execute under node when it is
-// installed.
+// TestPillTitleDefersToTheDashboard pins that the open-question pill never
+// writes the title and reports its count through window.wbTitleCount.
 func TestPillTitleDefersToTheDashboard(t *testing.T) {
 	data, err := assetFS.ReadFile("assets/pill.js")
 	if err != nil {
@@ -57,10 +53,6 @@ func TestPillTitleDefersToTheDashboard(t *testing.T) {
 	}
 	pill := string(data)
 	for name, script := range map[string]string{
-		"standalone": pillPrelude + pill + `
-check("standalone: own prefix", title, "(2) Board - x");
-check("standalone: base kept", html.getAttribute("data-wb-title"), "Board - x");
-process.stdout.write(bad.join("\n"));`,
 		"hosted": pillPrelude + `
 html.attrs["data-wb-titlehost"] = "";
 var got = [];

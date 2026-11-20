@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
 // openAsksState is one topic whose history folds around an answered policy
@@ -45,10 +47,15 @@ func openAsksState(t *testing.T) *State {
 // 806 and 420 px.
 func TestOpenAsksStackAtTheCardBottomBrowser(t *testing.T) {
 	view := BuildView(openAsksState(t), ViewInput{Layout: LayoutFull, ReplyID: "open-asks", Location: time.UTC})
-	page, err := RenderPage(view)
+	regions, err := RenderRegions(view)
 	if err != nil {
 		t.Fatal(err)
 	}
+	assets, err := PageAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := `<!DOCTYPE html><html><head><style>` + string(assets.CSS) + `</style></head><body>` + string(assets.Sprite) + `<main>` + string(regions.Board) + `</main><aside>` + string(regions.Panels) + `</aside><script>` + string(wsi18n.Script(view.Lang)) + `</script><script>` + string(assets.AnswersScript) + `</script><script>(function(){` + string(assets.FormScript) + `})();</script></body></html>`
 	path := os.Getenv("WS_OPEN_ASKS_PAGE")
 	if path == "" {
 		path = filepath.Join(t.TempDir(), "open-asks.html")

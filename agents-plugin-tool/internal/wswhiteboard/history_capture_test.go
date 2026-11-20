@@ -182,8 +182,7 @@ func TestHistoryCaptureFixtures(t *testing.T) {
 		t.Fatal("initial DENSITY must have exactly three distinct panels, including p2")
 	}
 	type specimen struct {
-		Standalone string `json:"standalone"`
-		Board      string `json:"board"`
+		Board string `json:"board"`
 	}
 	type stage struct {
 		Name         string              `json:"name"`
@@ -219,11 +218,7 @@ func TestHistoryCaptureFixtures(t *testing.T) {
 		}
 		for _, lang := range []string{"en", "ko"} {
 			view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "history-capture", Location: time.UTC})
-			view.Lang, view.StampFile = lang, ""
-			standalone, err := RenderPage(view)
-			if err != nil {
-				t.Fatal(err)
-			}
+			view.Lang = lang
 			regions, err := RenderRegions(view)
 			if err != nil {
 				t.Fatal(err)
@@ -231,7 +226,7 @@ func TestHistoryCaptureFixtures(t *testing.T) {
 			if regions.CountPolicy != 2 {
 				t.Fatalf("%s/%s: open policy/check count = %d, want 2", name, lang, regions.CountPolicy)
 			}
-			for host, output := range map[string]string{"standalone": standalone, "regions": string(regions.Board)} {
+			for host, output := range map[string]string{"regions": string(regions.Board)} {
 				for key, id := range itemIDs {
 					if !strings.Contains(output, fmt.Sprintf(`id="item-%d"`, id)) {
 						t.Fatalf("%s/%s/%s missing %s item %d", name, lang, host, key, id)
@@ -253,10 +248,8 @@ func TestHistoryCaptureFixtures(t *testing.T) {
 					}
 				}
 			}
-			file := name + "-" + lang + ".html"
-			write(file, []byte(standalone))
-			s.Languages[lang] = specimen{Standalone: file, Board: string(regions.Board)}
-			t.Logf("%s: %s (%d bytes), regions board %d bytes", name, filepath.Join(dir, file), len(standalone), len(regions.Board))
+			s.Languages[lang] = specimen{Board: string(regions.Board)}
+			t.Logf("%s/%s: regions board %d bytes", name, lang, len(regions.Board))
 		}
 		if string(marshal(st)) != before {
 			t.Fatalf("%s: rendering mutated fixture state", name)
@@ -288,5 +281,5 @@ func TestHistoryCaptureFixtures(t *testing.T) {
 		t.Fatal(err)
 	}
 	write("fixtures.json", append(data, '\n'))
-	t.Logf("manifest: %s; %d stages, %d standalone files, %d legacy items, %d retained creation logs", filepath.Join(dir, "fixtures.json"), len(manifest.Stages), 2*len(manifest.Stages), len(legacyIDs), len(legacyDoc.Entries))
+	t.Logf("manifest: %s; %d stages, %d board fragments, %d legacy items, %d retained creation logs", filepath.Join(dir, "fixtures.json"), len(manifest.Stages), len(manifest.Stages), len(legacyIDs), len(legacyDoc.Entries))
 }

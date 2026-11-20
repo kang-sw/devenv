@@ -59,10 +59,6 @@ func TestDependencyPopoverRenderStates(t *testing.T) {
 						wantAll(t, out, `class="tname" title="Work">Work</span><span class="dw">`)
 					}
 				}
-				out := render(t, view)
-				if n := strings.Count(out, "if (d._wbDeps) return;"); n != 1 {
-					t.Fatalf("standalone dependency script count: %d", n)
-				}
 			}
 		})
 	}

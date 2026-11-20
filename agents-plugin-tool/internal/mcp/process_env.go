@@ -36,6 +36,10 @@ import (
 
 // ServerOptions configures a Server for one caller process.
 type ServerOptions struct {
+	// BoardOwner identifies daemon-owned servers even before the dashboard binds.
+	// Raw diagnostic servers leave it false; board writes still commit.
+	BoardOwner bool
+
 	// Root is the repository root the server resolves tool roots from.
 	Root string
 	// Version is the ws-mcp version reported to the client.
@@ -149,6 +153,8 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 	s.inflightDone = make(chan struct{})
 	s.drainCtx, s.drainCancel = context.WithCancel(context.Background())
 	s.sessions = newSessionStore()
+	s.boardOwner = opts.BoardOwner
+	s.sessions.boardOwner = opts.BoardOwner
 	s.sessions.cacheHome = s.getenv(wsstate.EnvCacheHome)
 	s.declared = loadDeclaredConfig(s.getenv(envConfigManifests))
 	for _, rejected := range s.declared.rejected {

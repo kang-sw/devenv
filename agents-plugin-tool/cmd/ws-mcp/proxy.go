@@ -86,6 +86,7 @@ func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySessi
 			root = hello.Cwd
 		}
 		opts := mcp.ServerOptions{
+			BoardOwner:   true,
 			Root:         root,
 			Notes:        h.notes,
 			Version:      version,

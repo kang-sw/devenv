@@ -449,7 +449,6 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			// too, or its own ambient self-address announcement below would
 			// promise a channel this session was never actually bound to.
 			s.rebindMailboxOwnerAtFerrule(mintedKey, "", roleLead, canonical)
-			s.maybeCollectWhiteboards(canonical)
 			s.startTrackerSessionCheck()
 			body = stripModeGatedRegion(body, false)
 			body = injectWorktreeProfiles(body, profilesBlock)
@@ -506,7 +505,6 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			body = injectSkepticalPosture(body)
 		}
 		if rec.Root != "" {
-			s.maybeCollectWhiteboards(rec.Root)
 			if skillsRoot, srErr := s.skillsRoot(); srErr == nil {
 				warningAdapter := sessionConfigAdapter{s: s.sessions}
 				warningResolver := wsconfig.NewResolver(s.configOptions(), builtinConfigDefaults(), warningAdapter, warningAdapter)

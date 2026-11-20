@@ -18,31 +18,25 @@ func TestBodyTimeRenderSharesTheValidatedViewValue(t *testing.T) {
 				BodyUpdatedAt: at, DocStale: stale,
 				UpdatedAt: activity, UpdatedMs: 1794661200000, UpdatedClock: "13:00",
 			}}}
-			page := render(t, view)
 			regions, err := RenderRegions(view)
 			if err != nil {
 				t.Fatal(err)
 			}
 			board := string(regions.Board)
 			frame := frameDocs(t, board)["body"]
-			for _, out := range []string{markup(page), board} {
-				wantAll(t, out, `class="tago" datetime="`+activity+`"`)
-				if at != "" {
-					wantAll(t, out, `data-body-at="`+bodyAt+`"`)
-				} else {
-					wantAll(t, out, `data-body-at=""`)
-				}
-				wantNone(t, out, `data-body-at="`+activity+`"`, `class="body-age"`, `>변경 시각 모름</span>`, "body_time_proof")
+			wantAll(t, board, `class="tago" datetime="`+activity+`"`)
+			if at != "" {
+				wantAll(t, board, `data-body-at="`+bodyAt+`"`)
+			} else {
+				wantAll(t, board, `data-body-at=""`)
 			}
+			wantNone(t, board, `data-body-at="`+activity+`"`, `class="body-age"`, `>변경 시각 모름</span>`, "body_time_proof")
 			wantAll(t, frame, frameJSTag(t), `<!--wbchg:new-->`, `<!--wbchg:mod-->`, `<!--wbchg:del-->`, `<!--wbchg:delafter-->`)
 			if at == "" {
 				wantNone(t, frame, `name="wb-body-at"`, `data-body-at=`)
-				wantAll(t, markup(page), `data-body-at=""`)
+				wantAll(t, board, `data-body-at=""`)
 			} else {
 				wantAll(t, frame, `<meta name="wb-body-at" data-body-at="`+bodyAt+`">`)
-				if strings.Count(markup(page), `data-body-at=`) != 1 {
-					t.Fatal("unframed body time must come from its one body metadata value")
-				}
 			}
 			if stale {
 				wantAll(t, frame, `class="doc-body md chg-stale"`)

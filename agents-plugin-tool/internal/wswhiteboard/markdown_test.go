@@ -9,13 +9,12 @@ import (
 )
 
 // mdBoard renders a one-topic board whose items are the given ones plus a
-// target item (90) the references point at, with a FileLink that marks
-// every resolved file path, so a test sees what reached the link rule.
+// target item (90) the references point at.
 func mdBoard(t *testing.T, layout Layout, items ...Item) string {
 	t.Helper()
 	st := &State{Seq: 2, SettleSeq: 1}
 	st.Items = append(items, Item{ID: 90, Class: ClassTechnical, Topic: "t", Title: "target", Status: StatusOpen})
-	return render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r", FileLink: func(p string) string { return "L/" + p }}))
+	return render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
 }
 
 func wantAll(t *testing.T, out string, wants ...string) {
@@ -49,7 +48,7 @@ func TestMarkdownTitleIsInlineOnly(t *testing.T) {
 				Item{ID: 5, Class: ClassTechnical, Topic: "t", Title: "[x]: not-a-definition", Status: StatusOpen},
 			)
 			wantAll(t, out,
-				`<span class="title"><strong>bold</strong> <em>it</em> <code>code</code> <a href="L/docs/a.md">doc</a> shot</span>`,
+				`<span class="title"><strong>bold</strong> <em>it</em> <code>code</code> <a href="docs/a.md">doc</a> shot</span>`,
 				`<span class="title">- not a list</span>`,
 				`<span class="title"># not a heading</span>`,
 				`<span class="title"><code>mermaid fence</code></span>`,
@@ -72,7 +71,7 @@ func TestMarkdownBlockFields(t *testing.T) {
 		"<ul>\n<li>one</li>\n<li>two</li>\n</ul>",
 		`<pre><code class="language-go">x := 1`+"\n</code></pre>",
 		"<th>k</th>", "<td>1</td>",
-		`<img src="L/img/d.png" alt="diagram"/>`,
+		`<img src="img/d.png" alt="diagram"/>`,
 		`<div class="rec-line md" title="recommendation"><b>`,
 		`<div class="ctx md">`,
 	)
@@ -116,7 +115,7 @@ func TestMarkdownItemFieldHTML(t *testing.T) {
 					case "recommendation":
 						keptOut, droppedOut = between(t, out, `id="item-2"`, `<div class="rec-line md"`, "\n  <textarea"), between(t, out, `id="item-1"`, `<div class="rec-line md"`, "\n  <textarea")
 					}
-					wantAll(t, keptOut, `<img src="L/shots/k.png" alt="kimg"/>`, "<table><tbody><tr><td>cell</td></tr></tbody></table>",
+					wantAll(t, keptOut, `<img src="shots/k.png" alt="kimg"/>`, "<table><tbody><tr><td>cell</td></tr></tbody></table>",
 						"<details><summary>more</summary>hidden</details>", `<svg viewBox="0 0 10 10">`, `<marker id="wbr-`, `marker-end="url(#wbr-`)
 					wantNone(t, keptOut, "onerror", "onclick", `id="m"`, "url(#m)")
 					wantAll(t, droppedOut, "<b>bold</b> <a>js</a>")
@@ -124,25 +123,25 @@ func TestMarkdownItemFieldHTML(t *testing.T) {
 				})
 			}
 			wantAll(t, optionHTML(t, out, 1, "c"), `a<b>open</b>`)
-			wantAll(t, optionHTML(t, out, 1, "d"), `see <a href="#item-90">(90)</a> and <img src="L/shots/m.png" alt="md"/>`, "<pre class=\"mermaid\">graph TD\nA--&gt;B\n</pre>")
-			if !UsesMermaid(out) {
-				t.Errorf("a mermaid fence in an option does not load mermaid")
-			}
+			wantAll(t, optionHTML(t, out, 1, "d"), `see <a href="#item-90">(90)</a> and <img src="shots/m.png" alt="md"/>`, "<pre class=\"mermaid\">graph TD\nA--&gt;B\n</pre>")
 			// The stray closing tags close nothing outside option c: option d
 			// follows it inside the same stack.
 			wantAll(t, out, `a<b>open</b></div></div><div class="opt" role="button" tabindex="0" data-opt="d"`)
 			wantAll(t, out, `<span class="title">Option&lt;T&gt; &lt;u&gt;bold&lt;/u&gt;</span>`,
 				`<span class="why">&lt;img src=a.png&gt; &lt;u&gt;u&lt;/u&gt;</span>`, `<span class="why"><strong>ok</strong></span>`)
 			wantNone(t, out, "<u>bold", `<img src="a.png"`, "<u>u</u>")
-			css := out[strings.Index(out, "<style>"):strings.Index(out, "</style>")]
-			wantAll(t, css, ".opt, .ctx, .rec-line { contain: paint; }")
+			assets, err := PageAssets()
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantAll(t, string(assets.CSS), ".opt, .ctx, .rec-line { contain: paint; }")
 		})
 	}
 }
 
 // TestMarkdownItemFieldCannotPoseAsAControl pins the split the answer
-// scripts rely on: an item field keeps its class attribute, so form.js,
-// live.js, and pill.js select their controls only by what a field cannot
+// scripts rely on: an item field keeps its class attribute, so form.js and
+// pill.js select their controls only by what a field cannot
 // carry (data-* and aria-pressed attributes, textarea, button, and label
 // elements), and a field that copies a control's class gets none of them.
 func TestMarkdownItemFieldCannotPoseAsAControl(t *testing.T) {
@@ -153,7 +152,7 @@ func TestMarkdownItemFieldCannotPoseAsAControl(t *testing.T) {
 		wantAll(t, field, `<div class="note opt card policy arow ack tnote wbv">`)
 		wantNone(t, field, `data-opt="z"`, "data-id", "data-topic", `aria-pressed="true"`, "<textarea", "<button", "<label")
 	}
-	for _, name := range []string{"form.js", "live.js", "pill.js"} {
+	for _, name := range []string{"form.js", "pill.js"} {
 		js, err := embeddedAsset(name)
 		if err != nil {
 			t.Fatal(err)
@@ -245,7 +244,11 @@ func TestMarkdownInlineTagAllowlist(t *testing.T) {
 		Recommendation: "a: <strong>why</strong>",
 		Rationale:      "<i>context</i> <span style=\"x\">s</span>",
 		Status:         StatusOpen}}
-	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	regions, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(regions.Board) + frameDocs(t, string(regions.Board))["t"]
 	wantAll(t, out,
 		"<code>a</code><br/>next",
 		"<li><em>item</em></li>",
@@ -267,7 +270,7 @@ func TestMarkdownItemReferences(t *testing.T) {
 	wantAll(t, out,
 		"<strong>see "+anchor+"</strong> <code>{{90}}</code>",
 		"<li>item "+anchor+"</li>",
-		`<a href="L/docs/x.md">link (90)</a>`,
+		`<a href="docs/x.md">link (90)</a>`,
 		"code <code>{{90}}</code>",
 		"<pre><code>block {{90}}\n</code></pre>",
 		"{{99}} stays",
@@ -308,19 +311,19 @@ func TestMarkdownLinkAndImageTargets(t *testing.T) {
 			"![fragimg](#item-90)",
 		}, "\n")})
 	wantAll(t, out,
-		`<a href="L/docs/a%20b.md#sec">rel</a>`,
-		`<a href="L//srv/notes.md">abs</a>`,
-		`<a href="L//srv/f.md">fileurl</a>`,
+		`<a href="docs/a%20b.md#sec">rel</a>`,
+		`<a href="/srv/notes.md">abs</a>`,
+		`<a href="/srv/f.md">fileurl</a>`,
 		`<a href="https://example.com/x?a=1&amp;b=2" target="_blank" rel="noopener noreferrer">web</a>`,
 		`<a href="#item-90">frag</a>`,
-		`<a href="L/docs/q.md" title="t&#34; onmouseover=&#34;x">quote</a>`,
-		`<a href="L/docs/a_b.md">esc</a>`,
+		`<a href="docs/q.md" title="t&#34; onmouseover=&#34;x">quote</a>`,
+		`<a href="docs/a_b.md">esc</a>`,
 		"<br/>\njs<br/>\njsmixed<br/>\njsentity<br/>\ndata<br/>\nvb<br/>\nnet<br/>\nremotefile<br/>\n",
 		`<a href="https://auto.example/" target="_blank" rel="noopener noreferrer">https://auto.example/</a>`,
 		"javascript:alert(2)", "mailto:a@b.c", "a@b.c",
-		`<img src="L/shots/a.png" alt="imgrel"/>`,
-		`<img src="L//srv/b.png" alt="imgabs"/>`,
-		`<img src="L//srv/c.png" alt="imgfile"/>`,
+		`<img src="shots/a.png" alt="imgrel"/>`,
+		`<img src="/srv/b.png" alt="imgabs"/>`,
+		`<img src="/srv/c.png" alt="imgfile"/>`,
 		"<br/>\nremote<br/>\ndataimg<br/>\nfragimg",
 	)
 	wantNone(t, out, "javascript:alert(1)", `href="javascript`, `href="JaVa`, `href="data:`, `href="vbscript`, "evil.example",
@@ -329,23 +332,20 @@ func TestMarkdownLinkAndImageTargets(t *testing.T) {
 
 // TestMarkdownFileHrefCannotBecomeAScheme pins the check on the href a file
 // path resolves to: a relative result whose first segment holds a colon
-// would read as a scheme, so it is anchored with "./", whatever FileLink
-// returned; a decoded "#" or "?" in a file name stays part of the path.
+// would read as a scheme, so it is anchored with "./"; a decoded "#" or
+// "?" in a file name stays part of the path.
 func TestMarkdownFileHrefCannotBecomeAScheme(t *testing.T) {
 	rationale := "[a](./javascript:alert(1))\n[b](javascript%3Aalert%282%29)\n![c](javascript%3Ax.png)\n[d](notes%231.md#top)\n[e](q%3F.md)"
-	for name, link := range map[string]func(string) string{
-		"nil":  nil,
-		"bare": func(p string) string { return strings.TrimPrefix(p, "./") }, // a page in the same folder
-	} {
-		t.Run(name, func(t *testing.T) {
-			st := &State{Seq: 2}
-			st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "q", Options: []string{"x", "y"}, Rationale: rationale, Status: StatusOpen}}
-			out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r", FileLink: link}))
-			wantNone(t, out, `href="javascript`, `src="javascript`)
-			wantAll(t, out, `">a</a>`, `href="./javascript:alert(2)">b</a>`, `src="./javascript:x.png"`,
-				`href="notes%231.md#top">d</a>`, `href="q%3F.md">e</a>`)
-		})
+	st := &State{Seq: 2}
+	st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "q", Options: []string{"x", "y"}, Rationale: rationale, Status: StatusOpen}}
+	regions, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	if err != nil {
+		t.Fatal(err)
 	}
+	out := string(regions.Board)
+	wantNone(t, out, `href="javascript`, `src="javascript`)
+	wantAll(t, out, `">a</a>`, `href="./javascript:alert(2)">b</a>`, `src="./javascript:x.png"`,
+		`href="notes%231.md#top">d</a>`, `href="q%3F.md">e</a>`)
 }
 
 // TestMarkdownRationaleHardWraps pins the line breaks of a block field: each
@@ -395,7 +395,11 @@ func TestMarkdownOptionStacking(t *testing.T) {
 	}
 	st := &State{Seq: 2}
 	st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "inline", Options: inline, Status: StatusOpen}}
-	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	regions, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(regions.Board)
 	wantAll(t, out, `<div class="opts"><button class="opt" data-opt="a" aria-pressed="false"><span class="k">a</span><span>plain</span></button>`,
 		`<span>two<br/>`+"\nlines</span></button>")
 	wantNone(t, out, "opts stack", `role="button" tabindex`)
@@ -443,11 +447,9 @@ func TestMarkdownPickedChipShowsFirstLine(t *testing.T) {
 	wantAll(t, out, `<div class="sbody"><div class="opts stack"><div class="opt static picked">`)
 }
 
-// TestMarkdownMermaidBlock pins a mermaid block: its source sits escaped in
-// <pre class="mermaid">, readable when the script cannot load; the page then
-// loads the shared script by its bare relative name and runs the theme
-// script, which resolves the --wb-* colours with getComputedStyle before
-// mermaid.initialize. A page without a mermaid block loads neither.
+// TestMarkdownMermaidBlock pins a host-page mermaid block: its source sits
+// escaped in the board fragment, the region result advertises it, and the
+// shared assets carry the theme initializer. A plain board advertises none.
 func TestMarkdownMermaidBlock(t *testing.T) {
 	name, data := MermaidAsset()
 	if !strings.HasPrefix(name, "wb-mermaid-") || !strings.HasSuffix(name, ".js") || len(data) < 1<<20 {
@@ -456,42 +458,43 @@ func TestMarkdownMermaidBlock(t *testing.T) {
 	if again, _ := MermaidAsset(); again != name {
 		t.Fatalf("asset name is not stable: %q then %q", name, again)
 	}
-	for layoutName, layout := range layouts() {
-		t.Run(layoutName, func(t *testing.T) {
-			// A policy card shows its rationale as blocks; an ack row's
-			// reasons are inline only.
-			out := mdBoard(t, layout, Item{ID: 1, Class: ClassPolicy, Topic: "t", Title: "diagram", Options: []string{"x", "y"}, Status: StatusOpen,
-				Rationale: "```mermaid\ngraph LR\n  A[\"<b>lead</b>\"] --> B:::store\n```"})
-			wantAll(t, out,
-				"<pre class=\"mermaid\">graph LR\n  A[&#34;&lt;b&gt;lead&lt;/b&gt;&#34;] --&gt; B:::store\n</pre>",
-				`<script src="`+name+`"></script>`,
-			)
-			if !UsesMermaid(out) {
-				t.Errorf("UsesMermaid is false for a page with a mermaid block")
-			}
-			if strings.Index(out, `<pre class="mermaid">`) > strings.Index(out, `<script src="`) {
-				t.Errorf("the mermaid script loads before the block it draws")
-			}
-			init := out[strings.Index(out, `<script src="`+name+`"></script>`):]
-			wantAll(t, init,
-				"getComputedStyle(probe).color",
-				`c("--wb-card")`, `c("--wb-fg")`, `c("--wb-muted")`, `c("--wb-muted-fg")`, `c("--wb-now")`,
-				"m.initialize(", `theme: "base"`, `securityLevel: "strict"`, "themeVariables:", "themeCSS:",
-				".node.store rect", "var(--wb-now)", `m.run({ querySelector: "pre.mermaid" })`,
-				"if (!m) return;",
-			)
-			if strings.Index(init, "getComputedStyle(probe)") > strings.Index(init, "m.initialize(") {
-				t.Errorf("colours must resolve before mermaid.initialize")
-			}
-			if strings.Count(out, "<script") != 4 {
-				t.Errorf("want the string table, the page script, the shared mermaid script, and the theme script, got %d", strings.Count(out, "<script"))
-			}
+	st := &State{Seq: 2, SettleSeq: 1, Items: []Item{
+		{ID: 1, Class: ClassPolicy, Topic: "t", Title: "diagram", Options: []string{"x", "y"}, Status: StatusOpen,
+			Rationale: "```mermaid\ngraph LR\n  A[\"<b>lead</b>\"] --> B:::store\n```"},
+		{ID: 90, Class: ClassTechnical, Topic: "t", Title: "target", Status: StatusOpen},
+	}}
+	regions, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(regions.Board)
+	wantAll(t, out, "<pre class=\"mermaid\">graph LR\n  A[&#34;&lt;b&gt;lead&lt;/b&gt;&#34;] --&gt; B:::store\n</pre>")
+	if !regions.Mermaid {
+		t.Error("regions do not advertise a board mermaid block")
+	}
+	assets, err := PageAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	init := string(assets.MermaidInit)
+	wantAll(t, init,
+		"getComputedStyle(probe).color",
+		`c("--wb-card")`, `c("--wb-fg")`, `c("--wb-muted")`, `c("--wb-muted-fg")`, `c("--wb-now")`,
+		"m.initialize(", `theme: "base"`, `securityLevel: "strict"`, "themeVariables:", "themeCSS:",
+		".node.store rect", "var(--wb-now)", `m.run({ querySelector: "pre.mermaid" })`,
+		"if (!m) return;",
+	)
+	if strings.Index(init, "getComputedStyle(probe)") > strings.Index(init, "m.initialize(") {
+		t.Error("colours must resolve before mermaid.initialize")
+	}
 
-			plain := mdBoard(t, layout, Item{ID: 1, Class: ClassPolicy, Topic: "t", Title: "no diagram", Options: []string{"x", "y"}, Rationale: "```go\nx\n```", Status: StatusOpen})
-			if UsesMermaid(plain) || strings.Contains(plain, `class="mermaid"`) || strings.Contains(plain, "<script src=") || strings.Contains(plain, "m.initialize(") {
-				t.Errorf("a page without a mermaid block mentions mermaid")
-			}
-		})
+	st.Items[0].Rationale = "```go\nx\n```"
+	plain, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.Mermaid || strings.Contains(string(plain.Board), `class="mermaid"`) {
+		t.Error("a board without a mermaid block advertises mermaid")
 	}
 }
 
@@ -576,7 +579,11 @@ func TestMarkdownBareURLs(t *testing.T) {
 	st.Items = []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "see https://title.example/a.", Status: StatusOpen,
 		Options:   []string{"(https://opt.example/x_(y))", "b"},
 		Rationale: "`https://span.example/` and\n\n```\nhttps://fence.example/\n```\n\nwww.www.example and a@mail.example"}}
-	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	regions, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(regions.Board) + frameDocs(t, string(regions.Board))["t"]
 	wantAll(t, out,
 		`see `+anchor("https://title.example/a")+`.`,
 		`(`+anchor("https://opt.example/x_(y)")+`)`,
@@ -609,15 +616,18 @@ func TestMarkdownBarePaths(t *testing.T) {
 					Title: "and/or a/b x1.5/2.5 ~/home/a.md `ai-docs/c.md` a/b.go:note (ai-docs/x.md) docs/q.md:3:4: C:\\Users\\a.txt"},
 			)
 			wantAll(t, out,
-				`fix <a href="L/internal/a/b.go">internal/a/b.go:12</a>, then <a href="L//srv/notes/x">/srv/notes/x</a>.`,
-				`and/or a/b x1.5/2.5 <a href="L/~/home/a.md">~/home/a.md</a> <a href="L/ai-docs/c.md"><code>ai-docs/c.md</code></a> a/b.go:note (<a href="L/ai-docs/x.md">ai-docs/x.md</a>) <a href="L/docs/q.md">docs/q.md:3:4</a>: <a href="L/C:%5CUsers%5Ca.txt">C:\Users\a.txt</a>`,
+				`fix <a href="internal/a/b.go">internal/a/b.go:12</a>, then <a href="/srv/notes/x">/srv/notes/x</a>.`,
+				`and/or a/b x1.5/2.5`, `~/home/a.md`,
+				`<a href="ai-docs/c.md"><code>ai-docs/c.md</code></a>`, `a/b.go:note`,
+				`(<a href="ai-docs/x.md">ai-docs/x.md</a>)`, `<a href="docs/q.md">docs/q.md:3:4</a>:`,
+				`<a href="./C:%5CUsers%5Ca.txt">C:\Users\a.txt</a>`,
 			)
 		})
 	}
 	out := mdBoard(t, LayoutFull, Item{ID: 1, Class: ClassPolicy, Topic: "t", Title: "q", Options: []string{"a", "b"}, Status: StatusOpen,
 		Rationale: "/abs/at/head and x/y.go\n\n```\nsrc/in/fence.go\n```"})
-	wantAll(t, out, `<a href="L//abs/at/head">/abs/at/head</a> and <a href="L/x/y.go">x/y.go</a>`, "<pre><code>src/in/fence.go\n</code></pre>")
-	wantNone(t, out, `href="L/src`, `href="L/home`, `href="L//home`)
+	wantAll(t, out, `<a href="/abs/at/head">/abs/at/head</a> and <a href="x/y.go">x/y.go</a>`, "<pre><code>src/in/fence.go\n</code></pre>")
+	wantNone(t, out, `href="src`, `href="home`, `href="/home`)
 }
 
 // TestMarkdownCodeSpanPaths pins a code span whose whole content, trimmed,
@@ -632,13 +642,13 @@ func TestMarkdownCodeSpanPaths(t *testing.T) {
 		Rationale: "open `ai-docs/paged/x/document.html` and ` docs/q.md:3 `, not `see a/b.md` or `https://x.example/a` " +
 			"or [`in/label.md`](https://y.example/) or `bad/a%zz.md`\n\n```\nsrc/in/fence.go\n```"})
 	wantAll(t, out,
-		`open <a href="L/ai-docs/paged/x/document.html"><code>ai-docs/paged/x/document.html</code></a> and <a href="L/docs/q.md"><code>docs/q.md:3</code></a>, not <code>see a/b.md</code> or <code>https://x.example/a</code>`,
+		`open <a href="ai-docs/paged/x/document.html"><code>ai-docs/paged/x/document.html</code></a> and <a href="docs/q.md"><code>docs/q.md:3</code></a>, not <code>see a/b.md</code> or <code>https://x.example/a</code>`,
 		`<code>in/label.md</code></a> or <code>bad/a%zz.md</code>`,
 		"<pre><code>src/in/fence.go\n</code></pre>",
 	)
-	wantNone(t, out, `href="L/see`, `href="L/a/b.md`, `href="L/in`, `href="L/bad`, `href="L/src`, `href="https://x.example`)
+	wantNone(t, out, `href="see`, `href="a/b.md`, `href="in`, `href="bad`, `href="src`, `href="https://x.example`)
 
-	page := &pageData{View: View{FileLink: func(p string) string { return "L/" + p }}}
+	page := &pageData{}
 	actions := TextTargets{
 		FileText:    func(p string) string { return p },
 		FileActions: func(p string) FileAction { return FileAction{Href: "/s/r/file?path=" + p, Rel: p, Abs: "/root/" + p} },
@@ -680,7 +690,7 @@ func TestMarkdownBareLinksMatchWrittenLinks(t *testing.T) {
 		"/etc/hosts":                    "[/etc/hosts](/etc/hosts)",
 		"C:/work/a.txt":                 "[C:/work/a.txt](C:/work/a.txt)",
 	}
-	page := &pageData{View: View{FileLink: func(p string) string { return "L/" + p }}}
+	page := &pageData{}
 	actions := TextTargets{
 		FileText:    func(p string) string { return p },
 		FileActions: func(p string) FileAction { return FileAction{Href: "/s/r/file?path=" + p, Rel: p, Abs: "/root/" + p} },

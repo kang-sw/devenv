@@ -1,0 +1,14 @@
+{
+  "reviewer": "id:resistantachinessreaffirmsled",
+  "tier": "codex.large",
+  "scope": "Lite correctness and test integrity",
+  "range": "f2234e573..cc76ef0b5",
+  "observed_via": "ws agent.list, then delayed reviewer mailbox and root-lead forwarding",
+  "state_at_verdict_read": "waiting",
+  "last_report": "done: clean",
+  "detailed_report_visible_in_worker": true,
+  "recovery_requested": "Copy existing report to shared ticket assets and send directly to the root lead; do not re-review.",
+  "post_review_test_only_commit": "6b30df09a",
+  "note": "Complete reviewer text recovered after continuation; original filesystem write was rejected by the read-only sandbox. No re-review was run.",
+  "detailed_report": "review.md"
+}

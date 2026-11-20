@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
 // Uses cached browser dependencies only; no daemon, server or download.
@@ -32,10 +34,15 @@ func TestHistoryItemTextWidthBrowser(t *testing.T) {
 	mustApply(t, st, `<wb:answer id="1" value="a">Use this computer</wb:answer><wb:answer id="2" value="looks right">Confirmed the file explorer card</wb:answer>`)
 	view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "widthfixture", Location: time.UTC})
 	view.Lang = "ko"
-	page, err := RenderPage(view)
+	regions, err := RenderRegions(view)
 	if err != nil {
 		t.Fatal(err)
 	}
+	assets, err := PageAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := `<!DOCTYPE html><html><head><style>` + string(assets.CSS) + `</style></head><body>` + string(assets.Sprite) + `<main>` + string(regions.Board) + `</main><aside>` + string(regions.Panels) + `</aside><script>` + string(wsi18n.Script(view.Lang)) + `</script><script>` + string(assets.AnswersScript) + `</script><script>(function(){` + string(assets.FormScript) + `})();</script></body></html>`
 	fixture := filepath.Join(t.TempDir(), "history.html")
 	if err := os.WriteFile(fixture, []byte(page), 0600); err != nil {
 		t.Fatal(err)

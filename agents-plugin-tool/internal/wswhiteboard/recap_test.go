@@ -68,17 +68,14 @@ func TestLegacyRecapRemainsReadableOnBothLayouts(t *testing.T) {
 		if layout == LayoutFull {
 			itemContainer = `class="topic-stream"`
 		}
-		recap, doc, items := strings.Index(block, `<div class="trecap">`), strings.Index(block, `<details class="tdoc"`), strings.Index(block, itemContainer)
+		recap, doc, items := strings.Index(block, `<div class="trecap">`), strings.Index(block, `<div class="tdoc"`), strings.Index(block, itemContainer)
 		if recap < 0 || (doc >= 0 && recap > doc) || recap > items {
 			t.Fatalf("%s: recap %d, doc %d, items %d", name, recap, doc, items)
 		}
 		wantAll(t, block, `<div class="rtext md" title="**READY**`, `"><strong>READY</strong> · see <img`, `shot.png`, `<u>kept</u>`, `datetime="2026-11-04T09:00:00Z"`)
 		wantNone(t, block, "<script>alert")
 		shut := recapBlock(t, out, "shut")
-		fold := docTag.FindStringIndex(shut)
-		if fold == nil || strings.HasSuffix(shut[fold[0]:fold[1]], " open>") || strings.Index(shut, `<div class="trecap">`) < fold[1] {
-			t.Fatalf("%s: closed legacy recap is not folded: %s", name, shut)
-		}
+		wantAll(t, shut, `<div class="tdoc"`, `<div class="trecap">`)
 		wantNone(t, shut, `class="tresult"`)
 		wantAll(t, recapBlock(t, out, "lone"), `<div class="rtext md" title="only a recap">only a recap</div>`)
 	}

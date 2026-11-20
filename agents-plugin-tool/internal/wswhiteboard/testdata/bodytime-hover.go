@@ -48,15 +48,9 @@ func main() {
 		}
 		topic.DocStale = topic.Name == "stale-years"
 	}
-	page, err := wswhiteboard.RenderPage(view)
-	must(err)
 	// A fixed clock makes host and opaque frames independent of execution date.
 	// Insert before every shipped script; this is fixture-only, not product JS.
 	clock := `<script>Date.now = function () { return ` + fmt.Sprint(now.UnixMilli()) + `; };</script>`
-	page = strings.Replace(page, "<head>", "<head>"+clock, 1)
-	page = strings.Replace(page, "<body class=\"full\">", "<body class=\"full\"><button id=\"probe-focus\">Keep focus</button>", 1)
-	must(os.WriteFile(filepath.Join(*out, "unframed.html"), []byte(page), 0644))
-
 	regions, err := wswhiteboard.RenderRegions(view)
 	must(err)
 	assets, err := wswhiteboard.PageAssets()
@@ -77,7 +71,7 @@ func main() {
 		}
 		must(os.WriteFile(filepath.Join(*out, name), data, 0644))
 	}
-	fmt.Println("wrote framed.html, unframed.html and hashed frame assets to", *out)
+	fmt.Println("wrote framed.html and hashed frame assets to", *out)
 }
 
 func must(err error) {

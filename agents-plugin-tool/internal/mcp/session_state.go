@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsreview"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
@@ -603,8 +605,7 @@ func (s *sessionStore) mutateRecord(sessionKey string, write recordPart, fn func
 }
 
 // mutateRecordParts is mutateRecord for an fn that also reads parts it does
-// not write (the whiteboard render reads the agenda and todos for its
-// panels): read and write are both loaded, only write is persisted.
+// not write: read and write are both loaded, only write is persisted.
 //
 // A legacy record's first mutation migrates its session metadata, preserving
 // its original board-bearing representations. Whiteboard writes use the
@@ -618,11 +619,10 @@ func (s *sessionStore) mutateRecordParts(sessionKey string, read, write recordPa
 // independent of the callback's success and the enclosing mutation's error.
 type boardMutationObservation struct {
 	Committed bool
-	Published bool
 }
 
-// mutateRecordPartsObserved observes this call's durable board decision and
-// derived publication separately. Project to another store only after return,
+// mutateRecordPartsObserved observes durable board intent independently of
+// replay success. Project to another store only after return,
 // outside the session and folder locks. Recovery does not produce observations.
 func (s *sessionStore) mutateRecordPartsObserved(sessionKey string, read, write recordPart, fn func(*sessionRecord) error, observation *boardMutationObservation) error {
 	d, err := s.dirs()
@@ -649,6 +649,7 @@ func (s *sessionStore) mutateRecordPartsObserved(sessionKey string, read, write 
 	if write&partWhiteboard != 0 {
 		folder := whiteboardFolder(record.Root, sessionKey)
 		folder.Fault = s.boardFault
+		firstBoard := record.Whiteboard == nil
 		var committed func()
 		if observation != nil {
 			committed = func() { observation.Committed = true }
@@ -661,18 +662,11 @@ func (s *sessionStore) mutateRecordPartsObserved(sessionKey string, read, write 
 			if record.Whiteboard != board && record.Whiteboard != nil {
 				*board = *record.Whiteboard
 			}
-			return nil
-		}, committed, func() error {
-			if record.boardOutput != nil {
-				if err := record.boardOutput.publish(); err != nil {
-					return err
-				}
-				if observation != nil {
-					observation.Published = true
-				}
+			if firstBoard {
+				return registerWhiteboardExclude(wsgit.ExecRunner{}, record.Root, filepath.Dir(folder.Dir))
 			}
 			return nil
-		})
+		}, committed, nil)
 	} else {
 		err = fn(&record)
 	}

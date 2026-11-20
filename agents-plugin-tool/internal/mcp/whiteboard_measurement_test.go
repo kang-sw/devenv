@@ -121,12 +121,19 @@ func TestWhiteboardUpdateMeasurement(t *testing.T) {
 
 func whiteboardMeasurementScopes(t *testing.T, rootDir, pageDir string) map[string]map[string]whiteboardMeasurementFile {
 	t.Helper()
+	stored, derived := map[string]whiteboardMeasurementFile{}, map[string]whiteboardMeasurementFile{}
+	for path, file := range whiteboardMeasurementSnapshot(t, pageDir, "") {
+		name := filepath.Base(path)
+		if name == "index.html" || name == "index.stamp.js" || strings.HasPrefix(name, "wb-mermaid-") {
+			derived[path] = file
+		} else {
+			stored[path] = file
+		}
+	}
 	return map[string]map[string]whiteboardMeasurementFile{
-		// The folder store and live index publication share this reply folder.
-		"board_publication": whiteboardMeasurementSnapshot(t, pageDir, ""),
-		// Legacy embeds are flat children of rootDir; exclude the reply folder so
-		// the two reported scopes and their union do not double count files.
-		"embed_root": whiteboardMeasurementSnapshot(t, rootDir, pageDir),
+		"authoritative_board": stored,
+		"derived_pages":       derived,
+		"embed_root":          whiteboardMeasurementSnapshot(t, rootDir, pageDir),
 	}
 }
 
@@ -223,4 +230,29 @@ func whiteboardMeasurementLatencyOf(samples []int64) whiteboardMeasurementLatenc
 	}
 	p95 := ordered[(95*len(ordered)+99)/100-1]
 	return whiteboardMeasurementLatency{MedianNS: median, P95NS: p95}
+}
+
+// Run alongside the update harness to isolate a panel-only action's cost.
+func TestWhiteboardPanelActionMeasurement(t *testing.T) {
+	if os.Getenv("WS_WHITEBOARD_MEASURE_UPDATES") == "" {
+		t.Skip("opt-in measurement")
+	}
+	f := newWhiteboardFixture(t)
+	f.update(t, `<wb:topic name="measurement"><wb:log>board</wb:log></wb:topic>`)
+	before := whiteboardMeasurementScopes(t, f.dir(), f.pageDir())
+	counters := wsstate.FileIOCounters()
+	start := time.Now()
+	resp := f.call(t, "agenda.set", map[string]any{"key": "measurement", "value": map[string]any{"step": 1}})
+	elapsed := time.Since(start)
+	if isToolError(resp) {
+		t.Fatal(resp)
+	}
+	afterCounters := wsstate.FileIOCounters()
+	after := whiteboardMeasurementScopes(t, f.dir(), f.pageDir())
+	row := whiteboardMeasurementRow{Index: 1, Phase: "agenda.set", WallNS: elapsed.Nanoseconds(), FileIO: whiteboardMeasurementCounterDelta(counters, afterCounters), Filesystem: whiteboardMeasurementScopeDelta(before, after)}
+	data, err := json.Marshal(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("WHITEBOARD_PANEL_MEASUREMENT %s", data)
 }

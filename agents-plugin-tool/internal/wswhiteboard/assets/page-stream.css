@@ -1,8 +1,8 @@
 /* topic recap: author and time lead the body's first line inline; inside a
    closed topic's fold it sits above the body. */
 .trecap { margin: 10px 10px 0; padding: 7px 10px; font-size: 13px; background: var(--wb-wash); border-left: 3px solid var(--wb-accent-policy); border-radius: 0 8px 8px 0; }
-/* last in its box (a closed fold's summary takes no room): keep the gutter below */
-.trecap:last-child, .trecap:has(+ details.tdoc:not([open]):last-child) { margin-bottom: 10px; }
+/* last in its box keeps the gutter below */
+.trecap:last-child { margin-bottom: 10px; }
 /* the recap is an item block field: clipped like .opt, .ctx, and .rec-line */
 .trecap { contain: paint; }
 /* Clamp topic recaps, never panel-card titles or stored text. */
@@ -211,15 +211,7 @@
 @media (prefers-reduced-motion: reduce) {
   .entry-panel:not(.msg) > summary { transition: none; }
 }
-/* topic body: block markdown above the topic's items, folded under its own summary */
-/* The summary is the topic bar's button: it is taken out of the details' flow
-   and pinned to the bar's right end (the bar reserves room for it), so the body
-   opens as a full-width block under the bar. */
 .topic { position: relative; }
-.topic.has-doc > .tophead > .tbar { padding-right: 46px; }
-details.tdoc > summary { position: absolute; top: 5px; right: 12px; cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 9px; border-radius: 999px; background: rgb(127 127 127 / .28); color: var(--wb-on-topic); }
-details.tdoc > summary::-webkit-details-marker { display: none; }
-.topic.quiet details.tdoc > summary { color: var(--wb-muted-fg); }
 .doc-body { padding: 10px 14px 12px; overflow-x: auto; overflow-wrap: anywhere; }
 .doc-body > :first-child { margin-top: 0; }
 .doc-body > :last-child { margin-bottom: 0; }
