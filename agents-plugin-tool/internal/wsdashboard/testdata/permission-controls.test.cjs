@@ -321,6 +321,43 @@ for (const [level, native] of [['read-only', 'plan'], ['workdir-write', 'acceptE
   v.fail();
   assert.equal(v.posts.length, 0);
 }
+{
+  // Mid-request stream drop: a /support/choices response started before
+  // the drop arrives after it with positive levels; its older epoch must
+  // not count as current support, neither on open nor for Start preflight
+  // nor for the session menu's preflight.
+  const w = world();
+  const p = w.ctx.rpLeadMake();
+  p.open('/repo', 'repo', new Node('button'));
+  p.el.hidden = false;
+  w.ctx.rp.P = p;
+  assert.equal(w.fetches.length, 1);
+  w.ctx.connected(false);
+  assert.equal(w.ctx.permEpoch, 1);
+  w.choices(choices());
+  assert.equal(w.ctx.permLevels('claude'), null, 'pre-drop open response must not satisfy current epoch');
+  assert.equal(shown(byCls(p.el, 'pmseg')), false);
+  assert.equal(byCls(p.el, 'pmoff').textContent, 'js.perm.checking');
+  w.ctx.connected(true);
+  assert.equal(w.fetches.length, 1, 'reconnect triggers a fresh choices read');
+  w.choices(choices());
+  assert.deepEqual(plain(w.ctx.permLevels('claude')), LEVELS);
+  assert.equal(shown(byCls(p.el, 'pmseg')), true);
+
+  const v = world(), g = creation(v);
+  v.ctx.rp.P = g.p;
+  g.level('read-only');
+  g.start.click();
+  assert.equal(v.fetches.length, 1);
+  assert.equal(v.posts.length, 0);
+  v.ctx.connected(false);
+  v.choices(choices());
+  assert.equal(v.ctx.permLevels('claude'), null, 'pre-drop preflight response must not satisfy current epoch');
+  assert.equal(v.posts.length, 0, 'mid-preflight stream drop blocks sending /agents/leads/permission');
+  assert.equal(g.p.busy, false);
+  assert.equal(shown(g.seg), false);
+  assert.equal(g.off.textContent, 'js.perm.off.again(js.perm.level.readonly)');
+}
 
 // 6. A daemon without the selection route (old router: 404/405) created
 // nothing: the refusal is shown, Start becomes a re-check that sends
@@ -442,5 +479,16 @@ const rowsOf = m => m.state.children.map(n => n.textContent);
   n.level('read-only');
   v.choices(choices(null, null));
   assert.equal(v.posts.length, 0);
+  // A mid-preflight stream drop before a positive response also blocks
+  // posting /settings/permission and shows js.perm.unsent.
+  const u = world(), q = menu(u, { ...base, permission_mode: 'auto', permission_level: 'workdir-write', permission_source: 'legacy-derived', permission_enforcement: 'advisory' });
+  q.level('read-only');
+  assert.equal(u.fetches.length, 1);
+  u.ctx.connected(false);
+  u.choices(choices());
+  assert.equal(u.ctx.permLevels('claude'), null);
+  assert.equal(u.posts.length, 0, 'mid-preflight stream drop blocks /settings/permission');
+  assert.equal(q.p.busy, false);
+  assert.equal(byCls(q.p.el, 'err').textContent, 'js.perm.unsent');
 }
 console.log('permission control cases passed');
