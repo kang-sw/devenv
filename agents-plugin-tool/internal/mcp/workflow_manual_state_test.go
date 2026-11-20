@@ -705,3 +705,92 @@ func TestWorkflowStateToolSchema(t *testing.T) {
 		t.Fatalf("workflow_state schema missing session_key property: %#v", properties)
 	}
 }
+
+func TestHostedRestoreBundleSessionStateTargetsAndChildren(t *testing.T) {
+	ticketTarget := json.RawMessage(`{"target":{"kind":"ticket","ticket_stem":"260101-feat-example","ticket_path":"ai-docs/tickets/ready/260101-feat-example.md","scope_label":"Phase 2"}}`)
+	inlineTarget := json.RawMessage(`{"target":{"kind":"inline","label":"Inline restore plan"}}`)
+	noTarget := json.RawMessage(`{"target":{"kind":"ticket","ticket_path":"must-not-be-inferred.md"}}`)
+	todos := []todoItem{{Key: "restore", Title: "Restore state", Status: todoPending}}
+	children := []HostedChild{
+		{Address: "id:child-a", Label: "alpha", Tier: "pi.small", Authority: "read-only", State: "running", LastReport: "done: alpha"},
+		{Address: "id:child-b", Label: "beta", Tier: "codex.large", Authority: "workdir-write", State: "waiting", Error: "fixture stopped"},
+	}
+	for _, tc := range []struct {
+		name       string
+		agenda     map[string]json.RawMessage
+		children   []HostedChild
+		wantTarget string
+		wantChild  []string
+	}{
+		{
+			name: "typed ticket and multiple direct children",
+			agenda: map[string]json.RawMessage{
+				"implement": ticketTarget,
+				"scratch":   json.RawMessage(`{"note":"state rendered through the existing renderer"}`),
+			},
+			children: children, wantTarget: "ticket: ai-docs/tickets/ready/260101-feat-example.md (Phase 2)",
+			wantChild: []string{"id:child-a (alpha): running; tier=pi.small; authority=read-only; last=done: alpha", "id:child-b (beta): waiting; tier=codex.large; authority=workdir-write; error=fixture stopped"},
+		},
+		{
+			name:       "typed inline plan and zero children",
+			agenda:     map[string]json.RawMessage{"implement": inlineTarget},
+			wantTarget: "plan: Inline restore plan", wantChild: []string{"## Direct Children\nnone"},
+		},
+		{
+			name:       "absent typed target does not infer arbitrary agenda",
+			agenda:     map[string]json.RawMessage{"scratch": noTarget},
+			wantTarget: "none recorded", wantChild: []string{"## Direct Children\nnone"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := renderHostedRestoreBundle("session-key", "compaction", sessionRecord{Agenda: tc.agenda, Todos: todos}, tc.children)
+			for _, want := range []string{
+				"Your ws session key is `session-key`", "Context was compacted", "## Session State",
+				"### Todos\n- [ ] {restore} Restore state", "## Work Target\n" + tc.wantTarget,
+			} {
+				if !strings.Contains(got, want) {
+					t.Fatalf("restore bundle lacks %q:\n%s", want, got)
+				}
+			}
+			for _, want := range tc.wantChild {
+				if !strings.Contains(got, want) {
+					t.Fatalf("restore bundle lacks child projection %q:\n%s", want, got)
+				}
+			}
+			if tc.wantTarget == "none recorded" && strings.Contains(got, "must-not-be-inferred.md") && strings.Contains(got, "## Work Target\nticket:") {
+				t.Fatalf("work target was inferred from arbitrary agenda:\n%s", got)
+			}
+		})
+	}
+}
+
+func TestRenderHostedRestoreBundleReadsStateAtEachDelivery(t *testing.T) {
+	setupWorkflowManualNoteEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+	key, err := NewAgentKeyStore().MintLead(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newSessionStore()
+	if err := store.setAgenda(key, "freshness", json.RawMessage(`{"version":"at-launch"}`)); err != nil {
+		t.Fatal(err)
+	}
+	first, err := RenderHostedRestoreBundle(os.Environ(), root, HostedRender{Harness: "claude"}, key, "compaction", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(first, `"version": "at-launch"`) {
+		t.Fatalf("first restore did not read launch state:\n%s", first)
+	}
+	if err := store.setAgenda(key, "freshness", json.RawMessage(`{"version":"after-launch-before-delivery"}`)); err != nil {
+		t.Fatal(err)
+	}
+	second, err := RenderHostedRestoreBundle(os.Environ(), root, HostedRender{Harness: "claude"}, key, "restart", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(second, `"version": "after-launch-before-delivery"`) || strings.Contains(second, `"version": "at-launch"`) {
+		t.Fatalf("second restore reused cached state:\n%s", second)
+	}
+}
