@@ -24,7 +24,7 @@ normal daemon replacement, rejoins through its existing holder, and reports
 its in-flight result to its parent exactly once.
 
 All source paths below are relative to `agents-plugin-tool/` and were verified
-against `develop` at `5d028ad10`.
+against `develop` at `a858d67b0`.
 
 ## Decisions
 
@@ -111,9 +111,11 @@ against `develop` at `5d028ad10`.
 - **(1855)=a, owner 2026-11-20: the whole downgrade surface is T2 with an
   explicit owner-approved `RegistryRetention` exception.** The surviving
   fenced child row is T1 evidence. A conversation-parent rewrite converges on
-  re-upgrade through the timestamp-gated non-publishing update, and a lead
-  parent adopts the child and receives one late report. Exception: if the
-  downgrade lasts longer than `RegistryRetention` (7 days), old
+  re-upgrade through the guarded non-publishing update: it retires the live
+  child into an ordinary sleeping record rather than restoring the
+  pre-downgrade held state, and (1855)=a accepts that convergence. A lead
+  parent instead adopts the child and receives one late report. Exception: if
+  the downgrade lasts longer than `RegistryRetention` (7 days), old
   `PruneRegistrations` may irrecoverably delete the fenced worker's session
   history (`internal/wsagent/children.go:754-807`,
   `internal/wsagent/spawn.go:278-341`,
@@ -140,15 +142,26 @@ against `develop` at `5d028ad10`.
   the child is non-lead, has `HolderID` and `HandedOffAt`, has a
   `ParentConversation`, and has `TurnOpen` with non-zero `TurnStartedAt`; the
   restored parent has `TurnOpen == false`, `HeldTurn == nil`, and a terminal
-  `LastTurn`; and the child's `TurnStartedAt` strictly predates the parent's
-  parsed `LastActiveAt`, which `publish` writes in the same update as
-  `LastTurn` (`internal/wsagent/record.go:106-115,125-151,166-170`,
+  `LastTurn`; the parent has no newer activity evidence—`Sends <=
+  LastTurn.Mark` and both `Mail` and `Queued` are empty; and the child's
+  `TurnStartedAt` strictly predates the parent's parsed `LastActiveAt`.
+  `LastActiveAt` is not settlement-only: a Send and held mail also rewrite it,
+  so those activity guards are required to attribute it to the `publish` that
+  wrote `LastTurn` (`internal/wsagent/record.go:97-104,125-151,241-248`,
+  `internal/wsagent/runner.go:1195-1206`,
+  `internal/wsagent/runner_conv.go:348-355`,
   `internal/wsagent/spawn.go:305-341`,
   `internal/wsagent/children.go:754-795`). A current daemon cannot create that
   ordering: `holdsReport` sees an open child and holds the parent's done turn.
-  Missing or non-ordered evidence adopts the holder normally; an idle child
-  and a child mail-woken after its parent settled therefore survive an
-  ordinary replacement.
+  Missing, newer-activity, or non-ordered evidence adopts the holder normally;
+  an idle child, a child mail-woken after its parent settled, and a running
+  child whose parent has a pending message therefore survive an ordinary
+  replacement. `LastActiveAt` uses second-precision RFC3339 while
+  `TurnStartedAt` uses Unix milliseconds; equal or same-second cases adopt,
+  which is the safe direction for this precision mismatch
+  (`internal/wsagent/record.go:125-151`,
+  `internal/wsagent/runner_conv.go:1202,1264-1268`,
+  `internal/wsagent/spawn.go:339`).
 
   For the matching downgrade case, detach the in-memory adapter and event
   route, retire the holder through the existing holder-stop path, and make one
@@ -233,9 +246,14 @@ against `develop` at `5d028ad10`.
   a patch with no minor bump. On re-upgrade, silently retire only a fenced,
   open child of a conversation parent when the child's non-zero
   `TurnStartedAt` strictly predates the parent's terminal `LastTurn`
-  settlement stamp in `LastActiveAt`. Finish that
-  active turn and clear `TurnOpen`, `HandedOffAt`, and the holder fields in one
-  record update without publishing. Otherwise adopt normally. In particular,
+  settlement stamp in `LastActiveAt`, `Sends <= LastTurn.Mark`, and the
+  parent's `Mail` and `Queued` are empty. Any newer parent send/mail/queue
+  evidence, parse failure, equal timestamp, or same-second ambiguity adopts
+  the child. `LastActiveAt` has RFC3339 second precision and `TurnStartedAt`
+  has Unix-millisecond precision, so adoption is the conservative precision
+  rule. Finish a matched active turn and clear `TurnOpen`, `HandedOffAt`, and
+  the holder fields in one record update without publishing. Otherwise adopt
+  normally. In particular,
   ordinary idle/mail-woken children and children of a lead must survive
   replacement; a lead parent restores its held turn and receives one late
   child report.
@@ -262,19 +280,30 @@ against `develop` at `5d028ad10`.
   legacy holder (`internal/wsagent/runner_process.go:515-542`).
 - Use the child fence/open-turn stamp and the restored conversation parent's
   settlement as the pre-replay downgrade reconciliation seam. `startConv`
-  restores `TurnOpen`, `TurnStartedAt`, `HeldTurn`, `LastTurn`, and
-  `LastActiveAt` before the first holder scan, while `checkReattach` does not
-  request replay until that scan. `publish` writes a conversation's terminal
-  `LastTurn` and `LastActiveAt` together; a current daemon cannot do so while
-  an older-open child exists because `holdsReport`/`openChildOf` sees the
-  child's `TurnOpen`. Require the fenced child's non-zero `TurnStartedAt` to
-  be strictly earlier than that parent settlement stamp; absent, equal, or
-  later evidence rejoins normally
+  restores `TurnOpen`, `TurnStartedAt`, `HeldTurn`, `LastTurn`,
+  `LastActiveAt`, `Sends`, `Mail`, and `Queued` before the first holder scan,
+  while `checkReattach` does not request replay until that scan. `publish`
+  writes a conversation's terminal `LastTurn` and `LastActiveAt` together,
+  but `LastActiveAt` alone is not a settlement stamp: every Send updates it
+  after incrementing `Sends`, and held mail updates it with `Mail`. Require
+  `Sends <= LastTurn.Mark` and empty `Mail`/`Queued` before treating it as the
+  settlement stamp (`internal/wsagent/record.go:97-104,125-151,241-247`,
+  `internal/wsagent/runner.go:1195-1206`,
+  `internal/wsagent/runner_conv.go:348-355`,
+  `internal/wsagent/spawn.go:305-341`). A current daemon cannot publish that
+  parent while an older-open child exists because
+  `holdsReport`/`openChildOf` sees the child's `TurnOpen`. Require the fenced
+  child's non-zero `TurnStartedAt` to be strictly earlier than the attributed
+  parent settlement stamp. Parsing failure, newer parent activity, equal time,
+  or later time rejoins normally
   (`internal/wsagent/record.go:106-115,125-151,166-170`,
-  `internal/wsagent/spawn.go:305-341`,
   `internal/wsagent/children.go:754-795`,
   `internal/wsagent/runner.go:386-401,483-517,694-708`,
-  `internal/wsagent/runner_process.go:511-565`). For a match, reuse holder-stop
+  `internal/wsagent/runner_process.go:511-565`). Because `LastActiveAt` is
+  formatted with second-precision `time.RFC3339` while `TurnStartedAt` comes
+  from `UnixMilli`, same-second cases do not satisfy strict ordering and adopt
+  (`internal/wsagent/runner_conv.go:1202,1264-1268`,
+  `internal/wsagent/spawn.go:339`). For a match, reuse holder-stop
   mechanics but replace the field-only `retireHolder` write with one update
   that calls `finishActiveTurn` and clears `TurnOpen`, `HandedOffAt`,
   `HolderID`, `HostPID`, and `HolderSeq`; emit no settlement or report
@@ -333,17 +362,17 @@ against `develop` at `5d028ad10`.
 
 | fact | value | evidence |
 |---|---|---|
-| scope.span | multi-file | agents-plugin-tool/internal/wsagent/holder.go, runner_process.go, runner.go, runner_conv.go, claude.go, codex.go, agy.go, record.go; internal/wsholder/holder.py; ai-docs/manuals/ws-mcp.md |
+| scope.span | multi-file | agents-plugin-tool/internal/wsagent/holder.go, runner_process.go, runner.go, runner_conv.go, claude.go, codex.go, agy.go, record.go; internal/wsholder/holder.py; ai-docs/manuals/ws-mcp.md; ai-docs/manuals/release-compatibility.md |
 | scope.surface | cross-module | wsagent worker lifecycle, wsholder session descriptor and daemon compatibility behavior cross module boundaries |
 | scope.new_public_symbol | no | no new exported API symbol is named; agent-worker is a holder kind and holderSession is internal |
 | scope.new_type_contract | yes | holderSession gains backend ownership metadata; persisted Record.HandedOffAt supplies T1 evidence only for the surviving child row; the whole downgrade surface is T2 under (1855), with an owner-approved exception for irrecoverable session-history loss when old prune crosses RegistryRetention (internal/wsagent/holder.go#L69-L89; internal/wsagent/record.go#L55-L63) |
-| scope.test_surface | existing | internal/wsagent/pi_worker_recovery_test.go, codex_worker_test.go, codex_recovery_test.go and lead_recovery_test.go exist; Phase 1 adds a directional old-daemon fixture and Phase 2 adds timestamp-discriminated conversation-parent reconciliation, persistent sleeping-record, normal-replacement negative, and lead-parent adoption coverage |
+| scope.test_surface | existing | internal/wsagent/pi_worker_recovery_test.go, codex_worker_test.go, codex_recovery_test.go and lead_recovery_test.go exist; Phase 1 adds a directional old-daemon fixture and Phase 2 adds parent-activity-attributed timestamp reconciliation, persistent sleeping-record, pending-parent-message and same-second negatives, and lead-parent adoption coverage |
 | complexity.reuse_points | confirmed | existing Pi holder allocation and reattach, held-lead MCP tuple, childLevel persisted-selection projection, advisory held-lead permission rejoin, and replay reconciliation were read (internal/wsagent/runner_process.go#L184-L190; #L236-L246; #L359-L402; #L511-L625; internal/wsagent/agent_tools.go#L476-L483) |
 | complexity.side_effect_risk | high | daemon replacement, holder lifetime, worker tokens and interrupted-turn settlement change together |
-| risk.correctness | high | normal replacement replay must report exactly once across four backends; re-upgrade may retire only a fenced open child whose turn predates a conversation parent's persisted settlement, must leave a wakeable sleeping record, and must adopt ordinary or lead-parent children |
+| risk.correctness | high | normal replacement replay must report exactly once across four backends; re-upgrade may retire only when Sends/LastTurn.Mark and empty Mail/Queued attribute LastActiveAt to the conversation parent's settlement and the child timestamp strictly predates it, must leave a wakeable sleeping record, and must adopt ambiguous, ordinary, or lead-parent children |
 | risk.fit | high | one worker holder kind must preserve each backend's launch, cwd and ownership binding; attach mode comes from the child's persisted selection while current-parent ceiling admission waits until all records are loaded |
-| risk.test | high | child-row T1 evidence, documented parent/prune degradation, timestamp discriminator and negative cases, one-update sleeping record plus another restart, lead-parent late-report behavior, four-backend replacement coverage and Windows restart behavior are required |
-| risk.security_or_contract | high | T1 applies only to the surviving child row; the whole downgrade surface is T2 with the owner-approved aged-prune exception, while token/capability restoration and advisory admission remain authority-sensitive |
+| risk.test | high | child-row T1 evidence, documented parent/prune degradation, parent activity and timestamp-precision discriminator negatives, one-update sleeping record plus another restart, lead-parent late-report behavior, four-backend replacement coverage and Windows restart behavior are required |
+| risk.security_or_contract | high | T1 applies only to the surviving child row; the whole downgrade surface is T2 with the owner-approved aged-prune exception that must be recorded beside release rule 1, while token/capability restoration and advisory admission remain authority-sensitive |
 
 ## Phases
 
@@ -415,8 +444,9 @@ against `develop` at `5d028ad10`.
    conversation parent whose turn the old daemon already released. Before
    replay, require a fenced child with `TurnOpen`, non-zero `TurnStartedAt`,
    and `ParentConversation`; require the parent to have
-   `TurnOpen == false`, `HeldTurn == nil`, and a terminal `LastTurn`; and prove
-   the child's start strictly predates the parent's parsed `LastActiveAt`
+   `TurnOpen == false`, `HeldTurn == nil`, a terminal `LastTurn`,
+   `Sends <= LastTurn.Mark`, and empty `Mail` and `Queued`; and prove the
+   child's start strictly predates the parent's parsed `LastActiveAt`
    settlement stamp. Retire that holder without
    `processEnded`/`settleTurn`/`publish`, and in one record update call
    `finishActiveTurn`, clear `TurnOpen`, `TurnStartedAt`, `HandedOffAt`,
@@ -424,14 +454,17 @@ against `develop` at `5d028ad10`.
    `LastTurn` unchanged, and assert no second terminal status or duplicate
    parent report. Prove the child is an ordinary sleeping record that mail can
    wake and one more daemon restart preserves that wakeable shape. Negative
-   cases must prove an idle child and a child mail-woken after its parent
-   settled both survive a normal replacement and retain their holder. For a
-   `ParentLead`, prove the rule does not fire: re-upgrade adopts the child,
-   restores the lead's persisted `HeldTurn`, accepts one late child report,
+   cases must prove an idle child, a child mail-woken after its parent settled,
+   and a running child whose parent has a pending send, held `Mail`, or
+   `Queued` input all survive a normal replacement and retain their holder.
+   Also prove equal and same-second parent/child timestamps adopt because
+   second-precision `LastActiveAt` cannot strictly order millisecond
+   `TurnStartedAt`. For a `ParentLead`, prove the rule does not fire:
+   re-upgrade adopts the child, restores the lead's persisted `HeldTurn`,
+   accepts one late child report,
    and re-releases that held lead turn in memory exactly once. Also cover an
-   old-pruned child
-   directory: the unowned new-kind holder is retired by the new-daemon orphan
-   sweep.
+   old-pruned child directory: the unowned new-kind holder is retired by the
+   new-daemon orphan sweep.
 3. Cover holder-kind, backend, reply-id, cwd, capability, PID, and MCP-tuple
    mismatches; legacy direct-worker startup; authority/profile and delegation
    behavior; interrupt versus idle/stop/close; and restart-safe versus
@@ -440,10 +473,17 @@ against `develop` at `5d028ad10`.
    session holders, and spawned-worker close/hold behavior. State that every
    `agent.spawn` backend is holder-backed, document the surviving child row's
    T1 behavior and (1855)'s whole-surface T2 policy with the explicit
-   owner-approved 7-day prune exception, the timestamp-gated
-   conversation-parent retirement into a wakeable sleeping child, lead-parent
-   adoption with one late report, and tuple binding. Keep watchdog re-arm
-   explicitly out of scope.
+   owner-approved 7-day prune exception, the parent-activity-attributed and
+   precision-safe conversation-parent retirement into a wakeable sleeping
+   child, lead-parent adoption with one late report, and tuple binding. Keep
+   watchdog re-arm explicitly out of scope. Also append a dated 2026-11-20
+   exception note under `## Release Rules`, immediately after rule 1, in
+   `ai-docs/manuals/release-compatibility.md`: record the
+   owner-approved exception that an old-daemon downgrade beyond the 7-day
+   `RegistryRetention` may irrecoverably lose the fenced worker's session
+   history, and state that conversation-parent T2 convergence retires the
+   child into a wakeable sleeping record rather than restoring its
+   pre-downgrade held state; (1855)=a explicitly covers both outcomes.
 5. Run focused holder, runner, backend, MCP, and process-control tests plus the
    repository's configured Go verification. Report startup/rejoin and
    steady-state file-operation deltas; measure on the Windows antivirus
