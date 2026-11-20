@@ -287,6 +287,74 @@ above carry (123) and (124)).
     embedded text, which would drop the profile for an old plugin under a new
     daemon.
 
+## Open Decision Queue
+
+Last ID: (1903)
+
+(1900) [open] [policy] Phase 3 hosted-backend scope now that Codex is registered.
+
+- Context: Decision 15 excluded Codex because it was not a hosted backend then,
+  but `cmd/ws-mcp/dashboard.go` now registers `BackendCodex` for hosted leads and
+  workers. Leaving Decision 15 unchanged would make the phase's backend matrix
+  knowingly incomplete.
+- a. Supersede Decision 15 for Phase 3 only: cover hosted Claude, Codex, agy, and
+  Pi.
+- b. Keep Decision 15: inventory Codex, but do not inject ambient context into
+  it in this ticket.
+
+> recommendation: a - the new unit sits at the backend-neutral send boundary,
+> and excluding a registered hosted backend would create an avoidable prompt
+> contract split.
+
+(1901) [open] [policy] Meaning of "needs no plugin hooks" for hosted Pi.
+
+- Context: Decision 21 deliberately keeps Pi's native extension manual
+  injection. Pi also applies its lead bootstrap and model-prompt blocks from
+  `before_agent_start` on every turn. Moving those features into the daemon is
+  a larger Pi-extension retirement and would reverse Decision 21; keeping them
+  means Phase 3 cannot literally remove every hosted Pi prompt hook.
+- a. Preserve Decision 21. Narrow Phase 3's promise to daemon-owned ambient
+  input; Pi's native lead-bootstrap/model-prompt hooks remain enumerated
+  exceptions.
+- b. Supersede Decision 21 and migrate all Pi per-turn prompt blocks into the
+  daemon in this phase.
+
+> recommendation: a - the existing Pi blocks include live skill discovery,
+> model-specific user configuration, and fork inheritance; those are not the
+> same concern as a short backend-neutral turn reminder.
+
+(1902) [open] [policy] Content and role of the new daemon ambient block.
+
+- Context: ws ships no `UserPromptSubmit` hook. The owner's user-level Claude
+  hook currently appends `(응답 언어: 한국어)`, while ws already has the
+  layered `workflow.lang` key and a canonical language instruction used by
+  manual/playbook rendering. The separate
+  `261113-feat-ws-configurable-per-turn-lead-reminder` idea proposes arbitrary
+  reminder text and has unresolved scope choices of its own.
+- a. Inject only the canonical instruction resolved from `workflow.lang`, and
+  only for hosted leads. Leave arbitrary reminders and arbitrary user hooks to
+  the idea ticket/host configuration.
+- b. Add `lead.turn_reminder` here and inject both language and arbitrary
+  reminder text for hosted leads.
+- c. Attempt to mirror host user-hook output generically for every hosted role.
+
+> recommendation: a - it replaces the observed response-language use case from
+> an existing ws-owned config value without inventing a second config contract
+> or leaking lead-mode reminders into workers.
+
+(1903) [open] [policy] Recommended bare tier for the renderable explore brief.
+
+- Context: `explore/explore.md` is already renderable but has no `tier`, so
+  `playbook.render` returns no recommendation. The brief is read-only,
+  evidence-gathering work; the embedded `explore` profile deliberately leaves
+  model and effort tier-selected by its caller.
+- a. `small`.
+- b. `medium`.
+
+> recommendation: a - exploration is the bounded read-only workload the small
+> tier is intended to cover, while callers can still override the returned
+> recommendation.
+
 ## Constraints
 
 - Go tests run on remote w5090 only, never local `go test`.
@@ -634,34 +702,176 @@ Forward:
 
 ### Phase 3: Per-turn ambient injection replacing plugin hooks
 
-The daemon injects the per-turn ambient context that plugin hooks supply today,
-driven from stream events, so a hosted session needs no plugin hooks. Which
-hooks are replaced is enumerated in planning from the plugin's hook inventory
-(the claude-mod's per-turn injections); the SessionStart(compact) revive nudge
-in `agents-plugin/hooks/hooks.json` is excluded, because
-`261117-feat-ws-hosted-compaction-lifecycle` owns it. The injected text rides
-the harness's per-turn input, since `StartSpec.Instructions` applies only at
-process start, with no new injection layer (Decision 16).
+The daemon adds one backend-neutral ambient block to each hosted lead turn's
+input. The recommended settlement of (1900)-(1902) makes that block the
+canonical instruction resolved from `workflow.lang`; an unset value adds
+nothing. It does not copy arbitrary user hooks or introduce
+`lead.turn_reminder`. `StartSpec.Instructions` remains launch-only (Decision
+16), and Pi's native prompt hooks remain the enumerated Decision 21 exception
+rather than being retired by this phase (1901).
 
-Verification: tests on remote w5090 per replaced hook (injected content
-equivalent to the hook's; no duplicate where a harness still loads a ws
-package); measured syscalls/s shows no new per-turn file writes.
+#### Current hook and ambient inventory
+
+| source | what reaches model context | hosted recipients today | Phase 3 disposition |
+|---|---|---|---|
+| `agents-plugin/hooks/hooks.json` | The only command hook is the `SessionStart` matcher for `compact`, which prints the revive nudge. | No plugin-less hosted Claude lead; the ws/wsflow CLI plugin only. | Explicitly excluded; `261117-feat-ws-hosted-compaction-lifecycle` owns it. |
+| `agents-plugin/hooks/claude-mod/register.ts` manual/preload rewrites | A keyed workflow-manual row on lead-skill expansion, repeat-read collapse, and manual adoption notices around `workflow_manual` / `playbook_read`. | None in hosted Claude after Phase 1 removed the plugin. | Already replaced by Phases 1-2, not Phase 3 ambient. |
+| `register.ts` mailbox/dashboard steering | Mail and promoted dashboard text can be appended at a main-thread tool boundary; prompt/turn hooks otherwise observe the stream for feed, captions, status, compaction, and reconnect state. Hosted mode disables the mailbox watcher and dashboard feed (`register.ts#L984-L993`, `#L1217-L1223`). | No hosted backend receives this mod injection. | No text to reproduce. The daemon already joins claimed mail and child reports into the next ordinary input (`runner_conv.go#L1129-L1133`, `#L1212-L1219`). UI/feed observers are not model ambient. |
+| owner user-level Claude hooks | `UserPromptSubmit` and main-agent `PostToolUse` add `(응답 언어: 한국어)` as `additionalContext` in the current owner settings. These are user hooks, not shipped ws hooks. | Hosted Claude, because the plugin-less launch still keeps user settings. | Do not inspect or emulate arbitrary user hook output. Under (1902)=a, `workflow.lang` becomes the ws-owned replacement and the owner can remove the duplicate local hook. |
+| `agents-plugin/.codex-plugin/hooks.json` | A `Stop` command can block completion and ask the model to drain unread mail from its named `WS_MAILBOX` inbox. | The Codex plugin may stay loaded (`codex.go#L224-L248`), but hosted processes remove `WS_MAILBOX`/`WS_MAILBOX_AUTO` (`runner_process.go#L355-L357`) and the daemon owns mail delivery; no response-language or other per-turn ws ambient is supplied. | No replacement text. Include Codex in the new backend-neutral language block only if (1900)=a. User Codex hooks remain host-owned. |
+| agy adapter | No plugin/hook ambient facility. `_meta.antigravity.systemPrompt.append` carries launch-time instructions, and later `Send` calls pass turn text directly (`agy.go#L296-L311`, `#L364-L378`). | Hosted agy. | New ambient block rides the common turn input; no agy-specific file. |
+| Pi `lead-bootstrap.ts` | Every lead/fork `before_agent_start` appends the static manual snapshot, session-state pointer, Pi guide, live `<available_skills>`, and Pi agent-compat guide (`lead-bootstrap.ts#L1-L28`, `#L304-L350`). | Native-extension hosted Pi leads and forks; not worker/explore roles. | Preserve under (1901)=a / Decision 21. It is not duplicated in the daemon ambient block. |
+| Pi `model-prompts.ts` | Every turn replaces a length-framed `<ws-model-prompts>` block with user-configured general and lead-only text for the selected model (`model-prompts.ts#L9-L31`, `#L68-L103`). | Native-extension hosted Pi leads/forks, subject to role/model config. | Preserve under (1901)=a; model-specific and fork-inheritance semantics stay extension-owned. |
+| Pi generated bridge | `before_agent_start` appends extension-health/version warnings; only the fallback path also appends hosted identity and the daemon-rendered manual (`pi_lead_bridge.mjs#L46-L59`, `pi_lead.go#L146-L171`). | Hosted Pi; identity/manual only when the native extension failed and MCP fallback is active. | Preserve. Warnings and fallback identity/manual are not language ambient. |
+| Pi active-tool hook | `index.ts#L547-L554` filters the active tool set before each turn. | Hosted Pi roles with delegation policy. | Not model context and outside this phase. |
+
+There is no shipped Codex, agy, or Claude `UserPromptSubmit` response-language
+equivalent to remove. The owner's user hook is the observed use case; the
+daemon must own only the equivalent ws configuration, not undiscoverable host
+configuration. SessionStart(compact) remains excluded throughout this phase.
+
+#### Daemon seam and ambient unit
+
+`conv.kick` is the only ordinary hosted-turn send seam. It drains dashboard
+input, child reports, and claimed mail, then sends either their joined text at
+`runner_conv.go#L1212-L1215` or an expanded playbook body at `#L1215-L1219`.
+Both paths currently call `compactInput`; `compaction.go#L420-L425` prepends and
+consumes a queued restore/advisory note once. Adapter `Process.Send` methods then
+translate that one string into their native turn APIs. The dashboard user row
+is built later from the original parts (`runner_conv.go#L1281-L1297`), so a
+model-only wrapper does not create a fake visible user message.
+
+Add `internal/wsagent/ambient.go` with one `turnInput` composition unit and use
+it at both `Process.Send` calls. The unit must:
+
+- apply to hosted leads only, after the ordinary/playbook body is chosen;
+- preserve `compactInput`'s one-shot prefix, then append one delimiter-framed
+  ambient block so the response-language instruction remains last and salient;
+- resolve `workflow.lang` through the conversation's existing rooted/session
+  config view, use the same canonical instruction text as playbook/manual
+  rendering, and cache the rendered block in memory when the conversation is
+  restored/created, outside `Process.Send`;
+- refresh affected open conversations from the successful `config.tune`
+  set/reset path and publish their fully rendered blocks into the Runner in
+  memory before the next turn. The turn path never resolves config, polls a
+  generation, reads/writes a file, or starts an adapter subprocess; an external
+  file edit takes effect on daemon restart unless it goes through
+  `config.tune`;
+- keep the original turn text for page/history events and retries, and avoid a
+  block entirely when the resolved value is empty;
+- add no record, event, MCP argument, manifest field, or on-disk shape. This is
+  T0 in both directions: an old daemon keeps sending the unwrapped input, and a
+  new daemon stores no state an old daemon can drop.
+
+Frozen file list under the recommended (1900)-(1902) answers:
+
+- `agents-plugin-tool/internal/wsagent/runner_conv.go` - yes: add loop-owned
+  ambient cache fields and route both send sites through `turnInput`.
+- `agents-plugin-tool/internal/wsagent/ambient.go` - new: resolver, canonical
+  language instruction, cache invalidation, and composition.
+- `agents-plugin-tool/internal/wsagent/ambient_test.go` - new: backend/role,
+  ordinary/playbook, compaction ordering, empty value, retry, and no-reread
+  cases.
+- `agents-plugin-tool/internal/wsagent/runner.go` - yes: seed the in-memory
+  ambient cache as each conversation is restored/created.
+- `agents-plugin-tool/internal/mcp/playbook_tools.go` - use the ambient unit's
+  canonical language formatter so playbook/manual and turn text cannot drift.
+- `agents-plugin-tool/internal/mcp/agent_backends.go` - add the narrow optional
+  in-memory ambient refresh capability exposed by the daemon Runner.
+- `agents-plugin-tool/internal/mcp/server_dispatch.go` - signal ambient-cache
+  refresh after successful `workflow.lang` set/reset, on the tune path rather
+  than the next turn.
+- `agents-plugin-tool/internal/mcp/config_workflow_lang_test.go` - cover live
+  set/reset invalidation through the real `config.tune` path.
+
+`runner_process.go` is **not touched** (launch-time instructions are the wrong
+seam); `children.go` is **not touched** (its reports already enter the joined
+turn); `agent_tools.go` is **not touched**; no `rsrc/manifest.json` or other
+manifest is touched. A (1901)=b answer reopens this list and additionally needs
+the Pi extension/bridge and their generated package artifacts; implementation
+must not silently take that branch.
+
+Verification: remote w5090 Go tests exercise each of Claude, Codex (if
+(1900)=a), agy, and Pi through ordinary and expanded-playbook turns; lead versus
+worker; set, reset, and empty `workflow.lang`; a compaction note plus ambient
+block exactly once and in order; retries without duplicated ambient text; and
+the unchanged dashboard-visible user text. The Windows baseline records file
+operations and send-to-processing latency before/after: steady-state turns add
+zero file operations and no writes. Live smoke confirms the response language
+without the owner's duplicate hook enabled.
 
 ### Phase 4: Renderable agent-facing playbooks for `agent.spawn`
 
 No rendering happens inside `agent.spawn` (playbook-unaware, owner 18:56).
 `agent.spawn` delivers `system_prompt_path`/`system_prompt` as an appended system
 prompt and resolves tier server-side ((39), (44), (38)=d); that surface is owned
-by `261117-feat-ws-agent-tools-mailbox-routing` (phase 1). This phase makes the
-agent-facing builtin profile instructions (explore.md) renderable playbooks so
-`playbook.render` can supply their path and recommended tier ((52)=a), using
-only variables older binaries know; the embedded profile text stays the
-fallback (Decision 25), and the native-subagent steer arrives through the
-daemon-injected child prompt (Decision 24), not the playbook. Recommendations
-use bare tiers only (49). Depends on `261117-feat-ws-agent-tools-mailbox-routing#phase1`.
+by `261117-feat-ws-agent-tools-mailbox-routing` (phase 1). The production paths
+already exist:
 
-Verification: tests on remote w5090 that `playbook.render` for each agent-facing
-playbook returns a path and bare-tier recommendation, that a child spawned with
-that path and tier receives the rendered text as appended system prompt, with
-tier-rank and authority caps still applied, and that a daemon without the
-plugin's playbook falls back to the embedded profile text.
+- `agents-plugin/rsrc/explore/explore.md` is already `kind: render`, declares
+  only the established `ExploreAgent`, `SpawnIdiom`, and `ContinueIdiom`
+  variables, and has exact wsflow and Pi rsrc mirrors. What it lacks is a
+  frontmatter `tier`, so `playbook.render` omits the recommendation.
+- `internal/wsagent/builtin.go#L194-L212` embeds
+  `internal/wsagent/instructions/explore.md` and maps it to `ExploreProfile`;
+  the builtin profile selects `builtin:explore` at `builtin.go#L290-L299`.
+  `runner_process.go#L791-L825` already appends builtin/profile instructions
+  and caller `system_prompt_path`/`system_prompt` at process start.
+- `agent_tools_test.go#L653-L675` already pins one-time relative-path reading,
+  cached delivery across restarts, and mutual exclusion with inline prompt;
+  the same suite pins tier-rank and authority caps. `playbook.render` already
+  returns path plus recommended tier/model/effort when a tier exists
+  (`playbook_tools.go#L531-L565`).
+
+Therefore this phase adds only the chosen bare `tier` to the shipped explore
+playbook and closes the cross-surface contract tests. Under (1903)=a the value
+is `small`. The embedded one-line profile remains unchanged as the legacy
+profile path when a caller/plugin has no renderable playbook. "Fallback" does
+not mean that a failed `playbook.render` silently loads builtin text; the two
+paths remain independent, which is the T0 behavior Decision 25 approved. The
+native-subagent steer still comes from daemon-composed child instructions
+(Decision 24), not this playbook. Depends on
+`261117-feat-ws-agent-tools-mailbox-routing#phase1`.
+
+Frozen file list (the resource regeneration is mandatory):
+
+- Authoritative/mirrored rsrc: `agents-plugin/rsrc/explore/explore.md`,
+  `agents-plugin/rsrc/manifest.json`,
+  `agents-plugin-wsflow/rsrc/explore/explore.md`,
+  `agents-plugin-wsflow/rsrc/manifest.json`,
+  `agents-plugin-pi/rsrc/explore/explore.md`, and
+  `agents-plugin-pi/rsrc/manifest.json`. All three manifests regenerate because
+  the content hash changes; the two mirrors remain byte-identical to ws.
+- Pi workflow bundles: `agents-plugin-pi/workflow-bundles/manifest.json`,
+  `agents-plugin-pi/workflow-bundles/ws.zip`, and
+  `agents-plugin-pi/workflow-bundles/wsflow.zip`.
+- Native-Pi first-party copies and inventories:
+  `agents-plugin/native-pi/first-party/workflow-bundles/manifest.json`,
+  `agents-plugin/native-pi/first-party/workflow-bundles/ws.zip`,
+  `agents-plugin/native-pi/first-party/workflow-bundles/wsflow.zip`,
+  `agents-plugin/native-pi/first-party-manifest.json`,
+  `agents-plugin-wsflow/native-pi/first-party/workflow-bundles/manifest.json`,
+  `agents-plugin-wsflow/native-pi/first-party/workflow-bundles/ws.zip`,
+  `agents-plugin-wsflow/native-pi/first-party/workflow-bundles/wsflow.zip`,
+  and `agents-plugin-wsflow/native-pi/first-party-manifest.json`. These are the
+  required outputs of `prepare-workflow-bundles.py` followed by
+  `prepare-native-payload.py --first-party-only`, not optional release noise.
+- Tests: `agents-plugin-tool/internal/mcp/playbook_render_surface_test.go`
+  (shipped explore render returns path plus bare tier/model/effort) and
+  `agents-plugin-tool/internal/wsagent/agent_tools_test.go` (the rendered file's
+  exact body reaches the child while tier/authority caps still apply).
+
+`runner_conv.go`, `runner_process.go`, `children.go`, and `agent_tools.go` are
+**not touched** by Phase 4; the delivery and cap code already exists. Only
+`agent_tools_test.go` changes in that package. `builtin.go` and
+`builtin_test.go` are also not touched: the existing builtin test already pins
+the embedded fallback's evidence requirements. No config manifest regenerates;
+only the three rsrc manifests and the listed Pi bundle/native inventories do.
+
+Verification: remote w5090 tests prove the real shipped `explore` render returns
+a path and the selected bare-tier recommendation plus config-resolved model and
+effort; spawning with that path and tier delivers its exact rendered body as
+the appended system prompt, with tier-rank and authority caps unchanged; the
+existing builtin-profile test still passes with the shipped playbook hidden.
+Run the ws/wsflow/Pi rsrc mirror and manifest drift guards and both Pi bundle
+freshness checks after regeneration.
