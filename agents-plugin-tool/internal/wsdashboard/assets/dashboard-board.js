@@ -76,6 +76,7 @@
     var treeFocus = name === "tree" ? doc.activeElement : null;
     var panelReader = name === "panels" ? panelReaderState(el) : null;
     var answers = board ? boardRead(readAnswers) : null;
+    if (name === "rail") wsAdmissionCapture();
     var railTop = name === "rail" ? railScrollTop() : null, railFoc = name === "rail" ? railFocus() : null;
     var frameH = board ? boardRead(frameHeights) : null;
     var history = board ? captureBoardHistory() : null;

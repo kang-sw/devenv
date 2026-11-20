@@ -31,9 +31,10 @@ const railRoute = "/rail/refresh"
 // (handleRailEvents).
 const railEventsRoute = "/rail/events"
 
-// railView reads what the rail shows: railBaseView, ordered by the rail
-// layout (orderRailView), with each workspace's memo count.
-func (d *Daemon) railView(r pageReader) RailView {
+// railOrderedView reads the full rail inventory before presentation
+// partitioning: railBaseView ordered by the rail layout, archived splits,
+// worktree admissions, and memo counts.
+func (d *Daemon) railOrderedView(r pageReader) RailView {
 	view := d.railBaseView(r)
 	layout, gen := d.layout.current()
 	orderRailView(&view, layout, railFactsOf(view))
@@ -46,6 +47,18 @@ func (d *Daemon) railView(r pageReader) RailView {
 		if err == nil {
 			view.Workspaces[i].MemoCount = len(doc.memos())
 		}
+	}
+	return view
+}
+
+// railView reads what the rail shows: railOrderedView partitioned into
+// explicit Workspaces, PendingWorkspaces, and RejectedWorkspaces.
+func (d *Daemon) railView(r pageReader) RailView {
+	view := d.railOrderedView(r)
+	// Without a workspace store there is no admission route or explicit-add
+	// path. Keep the original rail inventory visible in that mode.
+	if d.workspaces != nil {
+		partitionRailWorkspaces(&view, d.wsAdmission.rejected())
 	}
 	return view
 }
@@ -231,7 +244,8 @@ func (d *Daemon) railSource(pages pageReader, lang, theme string) pageSource {
 			}
 			stamp, ok := pages.indexStamp()
 			gen := d.layout.generationSince(d.foreign.filesSince())
-			return stamp + "/" + strconv.FormatUint(gen, 10), ok
+			admGen := d.wsAdmission.generation()
+			return stamp + "/" + strconv.FormatUint(gen, 10) + "/" + strconv.FormatUint(admGen, 10), ok
 		},
 	}
 }

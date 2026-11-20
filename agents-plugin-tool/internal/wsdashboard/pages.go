@@ -60,6 +60,7 @@ var dashboardScriptFiles = []string{
 	"dashboard-selection.js",
 	"dashboard-stream.js",
 	"dashboard-rail.js",
+	"dashboard-workspace-admission.js",
 	"dashboard-rail-popovers.js",
 	"dashboard-leads.js",
 	"dashboard-session-view.js",

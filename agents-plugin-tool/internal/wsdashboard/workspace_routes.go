@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsi18n"
@@ -43,14 +44,16 @@ import (
 // in the page's language, for the popover or a toast.
 
 const (
-	workspacePreviewRoute = "/rail/workspaces/preview"
-	workspaceAddRoute     = "/rail/workspaces/add"
-	workspaceForgetRoute  = "/rail/workspaces/forget"
-	worktreeOptionsRoute  = "/rail/worktrees/options"
-	worktreeAddRoute      = "/rail/worktrees/add"
+	workspacePreviewRoute   = "/rail/workspaces/preview"
+	workspaceAddRoute       = "/rail/workspaces/add"
+	workspaceForgetRoute    = "/rail/workspaces/forget"
+	workspaceAdmissionRoute = "/rail/workspaces/admission"
+	worktreeOptionsRoute    = "/rail/worktrees/options"
+	worktreeAddRoute        = "/rail/worktrees/add"
 
 	// workspaceBodyLimit bounds a workspace route's body.
-	workspaceBodyLimit = 16 << 10
+	workspaceBodyLimit          = 16 << 10
+	workspaceAdmissionBodyLimit = 256 << 10
 )
 
 // workspaceRoutes registers the routes on mux.
@@ -58,6 +61,7 @@ func (d *Daemon) workspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc(workspacePreviewRoute, d.handleWorkspacePreview)
 	mux.HandleFunc(workspaceAddRoute, d.handleWorkspaceAdd)
 	mux.HandleFunc(workspaceForgetRoute, d.handleWorkspaceForget)
+	mux.HandleFunc(workspaceAdmissionRoute, d.handleWorkspaceAdmission)
 	mux.HandleFunc(workspaceGitInitRoute, d.handleWorkspaceGitInit)
 	mux.HandleFunc(worktreeOptionsRoute, d.handleWorktreeOptions)
 	mux.HandleFunc(worktreeAddRoute, d.handleWorktreeAdd)
@@ -68,6 +72,10 @@ func (d *Daemon) workspaceRoutes(mux *http.ServeMux) {
 // workspaceBody runs the routes' shared checks and decodes the body into
 // into. On a refusal it has answered the request and ok is false.
 func workspaceBody(w http.ResponseWriter, r *http.Request, into any) (ok bool) {
+	return readWorkspaceBody(w, r, workspaceBodyLimit, into)
+}
+
+func readWorkspaceBody(w http.ResponseWriter, r *http.Request, limit int64, into any) (ok bool) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return false
@@ -76,7 +84,7 @@ func workspaceBody(w http.ResponseWriter, r *http.Request, into any) (ok bool) {
 		http.Error(w, "cross-origin request refused", http.StatusForbidden)
 		return false
 	}
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, workspaceBodyLimit))
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 	if err != nil {
 		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 		return false
@@ -250,6 +258,138 @@ func (d *Daemon) handleWorkspaceForget(w http.ResponseWriter, r *http.Request) {
 	}
 	d.broker.wake(railListRepoKey)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type workspaceAdmissionSelection struct {
+	Path   string `json:"path"`
+	Action string `json:"action"` // approve, reject, or undo
+}
+
+type workspaceAdmissionRequest struct {
+	Selections []workspaceAdmissionSelection `json:"selections"`
+}
+
+type workspaceAdmissionReply struct {
+	Applied bool   `json:"applied"`
+	Gen     uint64 `json:"gen,omitempty"`
+	Message string `json:"message,omitempty"`
+	HTML    string `json:"html,omitempty"`
+}
+
+// handleWorkspaceAdmission serves POST /rail/workspaces/admission. It validates
+// the whole batch before writing either workspaces.json or
+// workspace-admission.json.
+func (d *Daemon) handleWorkspaceAdmission(w http.ResponseWriter, r *http.Request) {
+	var req workspaceAdmissionRequest
+	if !readWorkspaceBody(w, r, workspaceAdmissionBodyLimit, &req) {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	lang, _ := requestLang(r)
+	if len(req.Selections) == 0 || len(req.Selections) > 500 {
+		writeJSON(w, http.StatusBadRequest, workspaceAdmissionReply{Message: wsi18n.T(lang, "rail.ws.admission.invalid")})
+		return
+	}
+	seen := make(map[string]bool, len(req.Selections))
+	for _, s := range req.Selections {
+		if s.Path == "" || strings.ContainsAny(s.Path, "\x00\r\n") || !filepath.IsAbs(s.Path) || filepath.Clean(s.Path) != s.Path {
+			writeJSON(w, http.StatusBadRequest, workspaceAdmissionReply{Message: wsi18n.T(lang, "rail.ws.admission.invalid")})
+			return
+		}
+		if s.Action != "approve" && s.Action != "reject" && s.Action != "undo" {
+			writeJSON(w, http.StatusBadRequest, workspaceAdmissionReply{Message: wsi18n.T(lang, "rail.ws.admission.invalid")})
+			return
+		}
+		k := admissionPathKey(s.Path)
+		if seen[k] {
+			writeJSON(w, http.StatusBadRequest, workspaceAdmissionReply{Message: wsi18n.T(lang, "rail.ws.admission.invalid")})
+			return
+		}
+		seen[k] = true
+	}
+	if d.workspaces == nil || d.wsAdmission == nil {
+		writeJSON(w, http.StatusInternalServerError, workspaceAdmissionReply{Message: wsi18n.T(lang, "rail.ws.storefailed")})
+		return
+	}
+	if err := d.workspaces.preflight(); err != nil {
+		fmt.Fprintf(d.log, "dashboard: workspace admission preflight: %v\n", err)
+		writeJSON(w, http.StatusInternalServerError, workspaceAdmissionReply{Message: wsi18n.T(lang, "rail.ws.storefailed")})
+		return
+	}
+	if err := d.wsAdmission.preflight(); err != nil {
+		fmt.Fprintf(d.log, "dashboard: workspace admission preflight: %v\n", err)
+		writeJSON(w, http.StatusInternalServerError, workspaceAdmissionReply{Message: wsi18n.T(lang, "rail.ws.storefailed")})
+		return
+	}
+	stored := make(map[string]bool)
+	for _, ws := range d.workspaces.workspaces() {
+		stored[admissionPathKey(ws.Path)] = true
+	}
+	view := d.railView(d.pagesIn(lang))
+	pendingOrRejected := make(map[string]bool, len(view.PendingWorkspaces)+len(view.RejectedWorkspaces))
+	for _, ws := range view.PendingWorkspaces {
+		pendingOrRejected[admissionPathKey(ws.Path)] = true
+	}
+	for _, ws := range view.RejectedWorkspaces {
+		pendingOrRejected[admissionPathKey(ws.Path)] = true
+	}
+	var approvePaths, rejectPaths, undoPaths []string
+	for _, s := range req.Selections {
+		k := admissionPathKey(s.Path)
+		switch s.Action {
+		case "approve":
+			if stored[k] || !pendingOrRejected[k] {
+				writeJSON(w, http.StatusConflict, workspaceAdmissionReply{Message: wsi18n.T(lang, "rail.ws.admission.stale")})
+				return
+			}
+			if _, refusal := readWorkspaceFolder(s.Path, d.pathHost); refusal != "" {
+				writeJSON(w, http.StatusConflict, workspaceAdmissionReply{Message: wsi18n.T(lang, "rail.ws.admission.stale")})
+				return
+			}
+			approvePaths = append(approvePaths, s.Path)
+		case "reject":
+			if stored[k] || !pendingOrRejected[k] {
+				writeJSON(w, http.StatusConflict, workspaceAdmissionReply{Message: wsi18n.T(lang, "rail.ws.admission.stale")})
+				return
+			}
+			rejectPaths = append(rejectPaths, s.Path)
+		case "undo":
+			if !d.wsAdmission.isRejected(s.Path) {
+				writeJSON(w, http.StatusConflict, workspaceAdmissionReply{Message: wsi18n.T(lang, "rail.ws.admission.stale")})
+				return
+			}
+			undoPaths = append(undoPaths, s.Path)
+		}
+	}
+
+	removePaths := append([]string(nil), undoPaths...)
+	for _, p := range approvePaths {
+		a, err := d.workspaces.add(p, false)
+		if err != nil {
+			fmt.Fprintf(d.log, "dashboard: approve workspace: %v\n", err)
+			writeJSON(w, http.StatusInternalServerError, workspaceAdmissionReply{Message: wsi18n.T(lang, "rail.ws.storefailed")})
+			return
+		}
+		removePaths = append(removePaths, p)
+		if a.Root != "" && a.Root != p {
+			removePaths = append(removePaths, a.Root)
+		}
+	}
+	if len(rejectPaths) > 0 || len(removePaths) > 0 {
+		if _, err := d.wsAdmission.apply(rejectPaths, removePaths); err != nil {
+			fmt.Fprintf(d.log, "dashboard: apply workspace admission: %v\n", err)
+			writeJSON(w, http.StatusInternalServerError, workspaceAdmissionReply{Message: wsi18n.T(lang, "rail.ws.storefailed")})
+			return
+		}
+	}
+
+	d.broker.wake(railListRepoKey)
+	nextView := d.railView(d.pagesIn(lang))
+	reply := workspaceAdmissionReply{Applied: true, Gen: nextView.LayoutGen}
+	if region, err := renderRailRegion(nextView, lang); err == nil {
+		reply.HTML = string(region.HTML)
+	}
+	writeJSON(w, http.StatusOK, reply)
 }
 
 // railRepository is the repository workspace path names when the rail shows

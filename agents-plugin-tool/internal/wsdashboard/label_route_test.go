@@ -40,7 +40,7 @@ func (f *pageFixture) waitLabel(t *testing.T, id, label string) {
 // a live adapter takes a label too. An empty label removes the file and
 // shows the reply-id again.
 func TestLabelRouteSavesShowsAndResets(t *testing.T) {
-	f := startPageFixture(t)
+	f := startStoredRailFixture(t)
 
 	// No label file: the head, title, and rail show the reply-id.
 	_, page := get(t, f.base+"/s/livesession")

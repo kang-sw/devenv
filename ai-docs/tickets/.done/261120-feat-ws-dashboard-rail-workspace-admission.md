@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 96c18e354b8f4dc3
 sage-review-completeness-reviewed: 96c18e354b8f4dc3
+completed: 2026-11-21
 ---
 
 # Explicit-Only Session Rail Workspaces & Bottom Collapsible Unregistered Workspace Admission
@@ -229,6 +230,15 @@ This ticket restricts top-level `#rlist` to explicitly added workspaces (`Stored
   - Unchanged global `Live`/`CountSleep` totals, and `railPooled` exclusion on non-stored repos.
   - (46) regression: `railFactsOf(d.railBaseView(...))` still contains a pending-root session's row, and a layout op on it is accepted, not pruned.
 
+### Result (c6160d4b7) - 2026-11-21
+
+- Added the separate schema-1 `workspace-admission.json` rejection store with unknown-field retention, in-memory rail reads, foreign-write reload, missing-directory pruning, and refusal to overwrite malformed or newer data. `workspaces.json` remains unchanged, preserving the T0 compatibility boundary.
+- Added the guarded batch admission route with whole-batch selection validation, a 256 KiB body limit, immediate rail HTML and layout-generation reply, and rail wake. Store preflight now refuses malformed or newer external edits before any approval write.
+- Kept the full rail inventory for facts, layout, admissions, and worktree pages; the final presentation step partitions stored, pending, and rejected workspaces. Storage-disabled daemons retain their existing visible session roots.
+- Added the two server refusal keys in all 11 locales and regression coverage for store behavior, route validation, partitioning, no-store mode, and malformed-file preflight. Independent review raised two Important findings; both were fixed and covered by tests.
+- Verification: the requested dashboard test selection, `go vet ./internal/wsdashboard/... ./internal/wsi18n/...`, `go build ./cmd/ws-mcp`, and the i18n tests excluding `TestEveryEnglishKeyIsUsed` passed. The full i18n suite still fails on four unused `wb.*` keys (`wb.banner`, `wb.closed.more`, `wb.doc`, `wb.title`) already present in `HEAD` before this phase and unrelated to it.
+- Phase 2 handoff: the template, CSS, JavaScript, and browser fixture still need to render and operate the new pending/rejected fields. Until that panel lands, roots moved out of the top-level rail are not visible in storage-enabled mode; land both phases together.
+
 ### Phase 2: Bottom Collapsible Unregistered Panel UI, Batch JS, 11 Locales, & Playwright Visual Verification
 
 **Depends on:** Phase 1 (`RailView.PendingWorkspaces`, `RailView.RejectedWorkspaces`, `POST /rail/workspaces/admission`).
@@ -291,6 +301,14 @@ This ticket restricts top-level `#rlist` to explicitly added workspaces (`Stored
   3. **Intentional expand, filter (`> 10`), `모두 거부` toggle, inline `/s/<id>` expansion & navigation**: verify filtering retains focus/scroll, toggling session pill reveals `/s/<id>` links and navigates cleanly.
   4. **`.rcap` batch approve / reject / clear & `.unreg-undo` & SSE open-state retention**: verify approve promotes root to top-level `.rws`, reject moves it to `details.rrej`, undo returns it to pending (when sessions exist) with no page error, a swap rendering without a drafted row keeps that draft stored but out of the `.rcap` counts and the Apply body, and the worktree-admission draft store (`admissionStore`, `dashboard-rail.js:208`) unchanged, `.rtoast` sits cleanly above `.rfoot`/`.rcap`, and SSE rail swap preserves `details.rws-unreg` open state when intentionally expanded.
   5. **Visual comparison**: capture production light/dark rail captures side-by-side with the same states rendered from `ai-docs/assets/mockups/261120/rail-workspace-admission/workspace-admission-v1.html` (collapsed flood, expanded panel with filter, rejected fold open, empty guide). Pass criterion: every mockup structural element (`.rail-empty-guide`, `summary.unreg-sum` parts, `.unreg-toolbar`, `.unreg-filter-wrap`, `.unreg-row` parts, `.unreg-sessions`, `details.rrej` rows, `.rcap`) is present in the same order and grouping, with zero horizontal overflow; pixel identity is not required. Attach the capture paths to the phase `### Result`.
+
+### Result (127688fdc) - 2026-11-21
+
+- Added the empty-rail guidance card and bottom collapsed unregistered-workspace panel with bounded pending rows, filtering, inline session links, a rejected fold, Undo, and theme-aware styling. Explicit workspaces remain the only top-level rail sections.
+- Added browser-local workspace drafts and combined workspace/worktree capsule counts. Apply submits the workspace batch first, preserves refused and row-less drafts, then submits worktree drafts only after workspace success. Clear removes both draft stores. A timed workspace request releases the rail gate on failure.
+- Added 11-locale labels and messages, asset assembly, and an isolated production-renderer Playwright fixture. Captures in `/tmp/rawshots-p2/`: `rail-pending-{dark,light}.png`, `rail-expanded-{dark,light}.png`, `rail-expanded-700-light.png`, `rail-expanded-280-light.png`, `rail-rejected-expanded-dark.png`, `rail-empty-{dark,light}.png`, and `mockup-{pending-dark,expanded-light}.png`. Visual inspection found no overlap or clipping; the panel matches the approved mockup's structure and grouping.
+- Verification passed: the requested targeted dashboard Go tests, `TestCSSClassesDoNotCollideAcrossModules`, `TestDashboardSourceAssembly`, new and existing worktree-admission Playwright tests, `go vet ./...`, and `go build ./cmd/ws-mcp` (temporary binary removed). The full i18n run reports only four pre-existing unused keys (`wb.banner`, `wb.closed.more`, `wb.doc`, `wb.title`), all present on base `596109dbe`; all other i18n tests, including key parity and placeholders, pass.
+- Independent `codex.medium` code-review-lite found two Important issues: false mixed-Apply feedback on workspace refusal and a workspace POST without a timeout. Both were fixed; browser acceptance covers workspace and worktree batch refusals, retained drafts, changed-hash SSE swaps, viewport bounds, and toast placement. A follow-up test assertion for the retained hidden worktree-draft correction landed in `a0ee9806a`.
 
 ## Verification
 

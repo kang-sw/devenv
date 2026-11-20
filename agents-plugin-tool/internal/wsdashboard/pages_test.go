@@ -476,7 +476,7 @@ func TestBoardFirstPageHasNoLayoutControl(t *testing.T) {
 }
 
 func TestRootKeepsSessionsInTheRailOnly(t *testing.T) {
-	f := startPageFixture(t)
+	f := startStoredRailFixture(t)
 	code, body := get(t, f.base+"/?frame=1")
 	if code != http.StatusOK {
 		t.Fatalf("GET /?frame=1 = %d", code)

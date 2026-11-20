@@ -845,7 +845,7 @@ func (f *railFakeSource) ReadRepoWorktrees(repo string, regs []Registration) (Re
 // needs an open page.
 func TestSessionPagesShareOneRailRender(t *testing.T) {
 	src := &railFakeSource{railFakeRead{reads: map[string]int{}}}
-	f := startPageFixture(t, func(o *DaemonOptions) { o.Worktrees = src })
+	f := startPageFixture(t, withWorkspaces(t), func(o *DaemonOptions) { o.Worktrees = src })
 	repo := t.TempDir()
 	if err := WriteRegistration(f.dir, Registration{ReplyID: "reposession", Project: repo, Harness: "pi",
 		RegisteredAt: stampFor(time.Now()), HeartbeatAt: stampFor(time.Now()), GitCommonDir: filepath.Join(repo, ".git")}); err != nil {
@@ -853,6 +853,11 @@ func TestSessionPagesShareOneRailRender(t *testing.T) {
 	}
 	other := t.TempDir()
 	f.addSession(t, "lonersession", other, "alone")
+	for _, dir := range []string{f.project, repo, other} {
+		if _, err := f.d.workspaces.add(dir, false); err != nil {
+			t.Fatal(err)
+		}
+	}
 	waitFor(t, "reposession to be indexed", func() bool { _, ok := f.d.Index().Session("reposession"); return ok })
 
 	code, _, body := postJSON(t, f.base+railRoute, f.base, "")
@@ -1338,5 +1343,121 @@ func TestRailMarkupTree(t *testing.T) {
 		if !strings.Contains(string(css), rule) {
 			t.Errorf("dashboard.css lacks %q", rule)
 		}
+	}
+}
+
+func TestRailPartitionPendingRejectedAndFactsPreserved(t *testing.T) {
+	now := time.Now()
+	storedDir := mkDir(t, filepath.Join(t.TempDir(), "explicit-ws"))
+	pendOlder := mkDir(t, filepath.Join(t.TempDir(), "pend-b"))
+	pendTieA := mkDir(t, filepath.Join(t.TempDir(), "pend-tie-a"))
+	pendTieB := mkDir(t, filepath.Join(t.TempDir(), "pend-tie-b"))
+	pendNewest := mkDir(t, filepath.Join(t.TempDir(), "pend-newest"))
+	rejWithSess := mkDir(t, filepath.Join(t.TempDir(), "rej-with-sess"))
+	rejSessionless := mkDir(t, filepath.Join(t.TempDir(), "rej-sessionless"))
+	_, pooledOnlyRepo := worktreeRepo(t)
+	pooledOnlyWT := filepath.Join(filepath.Dir(pooledOnlyRepo), ".ws-worktrees", filepath.Base(pooledOnlyRepo), "p1")
+	gitRun(t, pooledOnlyRepo, "worktree", "add", "-q", "-b", "p1", pooledOnlyWT)
+
+	baseView := buildRailView([]railInput{
+		{Session: railSession("s-explicit", storedDir, now.Add(-10*time.Minute), time.Time{})},
+		{Session: railSession("s-older", pendOlder, now.Add(-5*time.Minute), time.Time{})},
+		{Session: railSession("s-tie-b", pendTieB, now.Add(-2*time.Minute), time.Time{})},
+		{Session: railSession("s-tie-a", pendTieA, now.Add(-2*time.Minute), time.Time{})},
+		{Session: railSession("s-newest-parent", pendNewest, now.Add(-3*time.Minute), time.Time{})},
+		{Session: railSession("s-newest-child", pendNewest, now.Add(-1*time.Minute), time.Time{})},
+		{Session: railSession("s-rej", rejWithSess, now.Add(-4*time.Minute), time.Time{})},
+		{Session: railSession("s-pooled", pooledOnlyWT, now.Add(-time.Minute), time.Time{}), Repo: pooledOnlyRepo, Linked: true},
+	}, nil, []storedWorkspace{{Path: storedDir}}, now)
+	doc := emptyLayout()
+	doc.Workspaces[pendNewest] = &railLayoutWS{Children: map[string][]string{"s-newest-parent": {"s-newest-child"}}}
+	orderRailView(&baseView, doc, railFactsOf(baseView))
+	splitRailArchived(&baseView)
+	partitionRailWorkspaces(&baseView, []string{rejWithSess, rejSessionless, storedDir})
+
+	if len(baseView.Workspaces) != 1 || baseView.Workspaces[0].Path != storedDir {
+		t.Fatalf("Workspaces = %+v, want explicit only %s", baseView.Workspaces, storedDir)
+	}
+	wantPend := []string{pendNewest, pendTieA, pendTieB, pendOlder}
+	var gotPend []string
+	for _, w := range baseView.PendingWorkspaces {
+		gotPend = append(gotPend, w.Path)
+	}
+	if strings.Join(gotPend, ",") != strings.Join(wantPend, ",") {
+		t.Fatalf("PendingWorkspaces = %v, want %v", gotPend, wantPend)
+	}
+	if baseView.PendingWorkspaces[0].SessionCount() != 2 || len(baseView.PendingWorkspaces[0].AllSessions()) != 2 {
+		t.Fatalf("AllSessions/SessionCount missed nested child: %+v", baseView.PendingWorkspaces[0].AllSessions())
+	}
+	if wantParent := filepath.Dir(pendNewest) + string(filepath.Separator); baseView.PendingWorkspaces[0].ParentPath() != wantParent {
+		t.Fatalf("ParentPath = %q, want %q", baseView.PendingWorkspaces[0].ParentPath(), wantParent)
+	}
+	wantRej := []string{rejSessionless, rejWithSess}
+	if rejWithSess < rejSessionless {
+		wantRej = []string{rejWithSess, rejSessionless}
+	}
+	var gotRej []string
+	for _, w := range baseView.RejectedWorkspaces {
+		gotRej = append(gotRej, w.Path)
+	}
+	if strings.Join(gotRej, ",") != strings.Join(wantRej, ",") {
+		t.Fatalf("RejectedWorkspaces = %v, want %v (stored path must be excluded)", gotRej, wantRej)
+	}
+	if baseView.Live != 7 {
+		t.Fatalf("global Live = %d, want 7 (pooled excluded, pending+rejected preserved)", baseView.Live)
+	}
+
+	// 0-explicit + 30 temp roots isolation + (46) railFactsOf/layout preservation.
+	f := startPageFixture(t, withWorkspaces(t))
+	for i := 0; i < 30; i++ {
+		dir := mkDir(t, filepath.Join(t.TempDir(), "temp-root"))
+		f.addSession(t, "tmproot"+strconvUint(uint64(i)), dir, "tmp")
+	}
+	waitFor(t, "30 temp sessions indexed", func() bool { _, ok := f.d.Index().Session("tmproot29"); return ok })
+	view := f.d.railView(f.d.pages())
+	if len(view.Workspaces) != 0 || len(view.PendingWorkspaces) != 31 {
+		t.Fatalf("0-explicit view: Workspaces=%d Pending=%d, want 0 and 31", len(view.Workspaces), len(view.PendingWorkspaces))
+	}
+	reg, err := renderRailRegion(view, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(reg.HTML), `class="rws"`) {
+		t.Fatalf("0-explicit render emitted top-level .rws:\n%s", reg.HTML)
+	}
+	facts := railFactsOf(f.d.railBaseView(f.d.pages()))
+	if _, ok := facts.rows["tmproot0"]; !ok {
+		t.Fatal("(46) railFactsOf missing pending-root session tmproot0")
+	}
+	code, _, raw := postJSON(t, f.base+railLayoutRoute, f.base, `{"op":"star","rid":"tmproot0"}`)
+	if code != http.StatusOK || !strings.Contains(raw, `"applied":true`) {
+		t.Fatalf("(46) star on pending-root session = %d %s", code, raw)
+	}
+	// A subsequent layout write with Loaded()==true must not prune tmproot0's star.
+	if code, _, raw := postJSON(t, f.base+railLayoutRoute, f.base, `{"op":"star","rid":"livesession"}`); code != http.StatusOK || !strings.Contains(raw, `"applied":true`) {
+		t.Fatalf("second layout star = %d %s", code, raw)
+	}
+	ordered := f.d.railOrderedView(f.d.pages())
+	starred := false
+	for _, ws := range ordered.Workspaces {
+		for _, r := range ws.AllSessions() {
+			if r.ReplyID == "tmproot0" && r.Starred {
+				starred = true
+			}
+		}
+	}
+	if !starred {
+		t.Fatal("(46) star on pending-root session was lost/pruned")
+	}
+}
+
+func TestRailViewWithoutWorkspaceStoreKeepsSessionRoots(t *testing.T) {
+	f := startPageFixture(t)
+	if f.d.workspaces != nil || f.d.wsAdmission != nil {
+		t.Fatal("fixture unexpectedly enabled workspace storage")
+	}
+	view := f.d.railView(f.d.pages())
+	if len(view.Workspaces) != 1 || view.Workspaces[0].Path != f.project || len(view.PendingWorkspaces) != 0 {
+		t.Fatalf("storage-disabled rail hid session root: %+v", view)
 	}
 }

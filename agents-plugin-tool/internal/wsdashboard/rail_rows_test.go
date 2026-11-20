@@ -56,10 +56,19 @@ func TestRailRowsDiff(t *testing.T) {
 	}
 }
 
+func startStoredRailFixture(t *testing.T) *pageFixture {
+	t.Helper()
+	f := startPageFixture(t, withWorkspaces(t))
+	if _, err := f.d.workspaces.add(f.project, false); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
 // No session revision moves: only the injected clock crosses the adapter's
 // stale boundary. The next rail wake must render and ship that row.
 func TestRailRowsClockOnlyLiveness(t *testing.T) {
-	f := startPageFixture(t)
+	f := startStoredRailFixture(t)
 	now := time.Now()
 	writeSnapshot(t, f.dir, "livesession", &wslive.Snapshot{SchemaVersion: 1, Adapter: "pi", UpdatedAt: now.UnixMilli(), HeartbeatMs: 30000, Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseThinking}}})
 	pages := f.d.pagesIn("en")
@@ -118,7 +127,7 @@ func TestRailRowsInvisibleWakesReuseRender(t *testing.T) {
 }
 
 func TestRailRowsSourceRechecksClockAndHover(t *testing.T) {
-	f := startPageFixture(t)
+	f := startStoredRailFixture(t)
 	now := time.Now()
 	pages := f.d.pagesIn("en")
 	pages.now = func() time.Time { return now }
@@ -205,7 +214,7 @@ func TestRailRowsFailedSendAndUncertainBaseline(t *testing.T) {
 }
 
 func TestRailRowsRenderedParity(t *testing.T) {
-	f := startPageFixture(t)
+	f := startStoredRailFixture(t)
 	view := f.d.railView(f.d.pagesIn("en"))
 	for _, lang := range []string{"en", "ko"} {
 		region, err := renderRailRegion(view, lang)
@@ -235,7 +244,7 @@ func TestRailRowsRenderedParity(t *testing.T) {
 }
 
 func TestRailRowsStreams(t *testing.T) {
-	f := startPageFixture(t)
+	f := startStoredRailFixture(t)
 	path := "/rail/events?railrows=1"
 	sse := openSSE(t, f.base+path)
 	ws := openWS(t, f.base, path, f.base, true).events

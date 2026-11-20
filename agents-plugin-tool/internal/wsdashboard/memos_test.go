@@ -64,7 +64,10 @@ func TestMemoStoreOptionalRoundTripAndSchema(t *testing.T) {
 }
 
 func TestMemoRoutesAndRailBadge(t *testing.T) {
-	f := startPageFixture(t)
+	f := startPageFixture(t, withWorkspaces(t))
+	if _, err := f.d.workspaces.add(f.project, false); err != nil {
+		t.Fatal(err)
+	}
 	var data struct {
 		Memos    []memo `json:"memos"`
 		Writable bool   `json:"writable"`
