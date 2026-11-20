@@ -170,8 +170,10 @@ func TestAgyModelWaitWatchdogPublishesExhaustionToHostedLeadConversation(t *test
 }
 
 func TestAgyModelWaitWatchdogForceStopsWhenInterruptIsIgnored(t *testing.T) {
-	h, timers, got := agyWatchdogHarness(t, "45")
-	_, p := startAgyWatchdogTurn(t, h, true)
+	// Exercise the shipped default-three budget: a cancellation that never
+	// lands must still fail on its own grace timer before any retry can start.
+	h, timers, got := agyWatchdogHarnessWithRetries(t, "45", "")
+	id, p := startAgyWatchdogTurn(t, h, true)
 
 	fireWatchdog(t, timers, 0)
 	eventually(t, "first interrupt", func() bool { return procInterrupts(p) == 1 })
@@ -192,6 +194,21 @@ func TestAgyModelWaitWatchdogForceStopsWhenInterruptIsIgnored(t *testing.T) {
 	eventually(t, "failed parent report", func() bool { return len(got.lead()) == 1 })
 	if result := got.lead()[0].Result; result.Status != TurnFailed || result.Error != "agy model stream did not stop within 5s after interrupt" {
 		t.Fatalf("cancel-grace result = %+v", result)
+	}
+
+	// A holder may still deliver its EOF and an already-buffered cancelled
+	// TurnEnd after stopProcess settled the child. Run those exact handlers in
+	// order and prove the report fence makes both stale events idempotent.
+	c := h.runner.conv(id)
+	c.do(func() {
+		c.processExited()
+		c.handle(Event{TurnEnd: true, TurnReason: wslive.TurnAborted})
+	})
+	if reports := got.lead(); len(reports) != 1 {
+		t.Fatalf("late EOF/TurnEnd produced %d parent reports: %+v", len(reports), reports)
+	}
+	if rec := h.record(id); rec.TurnOpen || rec.ReportID == "" || rec.ReportID != rec.LastReportedTurn {
+		t.Fatalf("late EOF/TurnEnd unsettled or duplicated the child report: %+v", rec)
 	}
 }
 
