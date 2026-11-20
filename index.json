@@ -602,9 +602,9 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-20T12:51:27Z",
+        "touched_at": "2026-11-20T13:42:28Z",
         "impl": {
-          "branch": "impl/develop/juror-zap-blush"
+          "branch": "impl/develop/agy-usage-phase2"
         }
       }
     },
