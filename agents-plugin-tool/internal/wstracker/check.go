@@ -499,7 +499,14 @@ func (s *state) checkTargets(it *item, a string, p obj) rejection {
 			return rejection("nobody is " + within + "below " + root)
 		}
 		for _, y := range s.liveRules(it.id) {
-			if y.by == a && s.ruleCovers(y, ru) {
+			// An org rule's current root follows its head for extension, but
+			// existing-rule overlap is judged from the assign-time shape that an
+			// old reader sees. Keep old and new binaries on the same verdict.
+			existing := *y
+			if existing.assignRoot != "" {
+				existing.root = existing.assignRoot
+			}
+			if y.by == a && s.ruleCovers(&existing, ru) {
 				return rejection("the rule rooted at " + root + " is already covered by " + alias(y.id))
 			}
 		}

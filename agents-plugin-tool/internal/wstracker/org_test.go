@@ -254,6 +254,26 @@ func TestOrgAssignFollowsHeadAndKeepsAssignRoot(t *testing.T) {
 	wantEq(t, "assign-time root ends rerooted rule", tm.view("maya.pc").Rules[rid].State, "ended")
 }
 
+func TestOrgAssignCoverageUsesAssignTimeRoot(t *testing.T) {
+	tm := newTeam(t)
+	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-search", "Search", "lena"))
+	it := tm.do("maya.pc", TypeItemCreate, map[string]any{"kind": "task", "title": "Old-shape overlap"})
+	tm.do("maya.pc", TypeItemAssign, map[string]any{"item": it, "completion": "assigner", "targets": []any{
+		map[string]any{"root": "lena", "org": "o-search", "include_root": true},
+	}})
+	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-search", "Search", "omar"))
+
+	// The old-shape reader still sees the existing rule at lena. A new plain
+	// rule at the current head therefore does not overlap that legacy shape.
+	tm.do("maya.pc", TypeItemAssign, map[string]any{"item": it, "completion": "assigner", "targets": []any{
+		map[string]any{"root": "omar", "include_root": true},
+	}})
+	wantEq(t, "assign-time root remains covered",
+		strings.Contains(tm.refused("maya.pc", TypeItemAssign, map[string]any{"item": it, "completion": "assigner", "targets": []any{
+			map[string]any{"root": "lena", "include_root": true},
+		}}), "already covered"), true)
+}
+
 func TestOrgAssignVacancyRemovalAndTargetChecks(t *testing.T) {
 	tm := newTeam(t)
 	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-platform", "Platform", "maya"))
