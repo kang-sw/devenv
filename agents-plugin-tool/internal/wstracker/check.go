@@ -963,10 +963,14 @@ func (s *state) check(n *node) rejection {
 				return rejection("nobody is within " + jsNum(levels) + " levels below " + a)
 			}
 			for _, x := range s.liveRules(it.id) {
-				if x.by != a || !s.ruleCovers(x, &rule{root: a, levels: levels}) {
+				existing := *x
+				if existing.assignRoot != "" {
+					existing.root = existing.assignRoot
+				}
+				if x.by != a || !s.ruleCovers(&existing, &rule{root: a, levels: levels}) {
 					continue
 				}
-				if x.root == a && x.levels != 0 {
+				if existing.root == a && existing.levels != 0 {
 					return rejection("already assigned to everyone within " + jsNum(x.levels) + " levels (" + alias(x.id) + ")")
 				}
 				return rejection("the rule rooted at " + a + " is already covered by " + alias(x.id))

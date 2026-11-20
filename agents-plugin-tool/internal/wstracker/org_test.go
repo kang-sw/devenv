@@ -366,6 +366,27 @@ func TestOrgAssignCoverageUsesAssignTimeRoot(t *testing.T) {
 		}}), "already covered"), true)
 }
 
+func TestOrgAssignModeAllCoverageUsesAssignTimeRoot(t *testing.T) {
+	for _, moveHead := range []bool{false, true} {
+		name := "before head move"
+		if moveHead {
+			name = "after head move"
+		}
+		t.Run(name, func(t *testing.T) {
+			tm := newTeam(t)
+			tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-search", "Search", "lena"))
+			it := tm.do("maya.pc", TypeItemCreate, map[string]any{"kind": "task", "title": "Mode all parity"})
+			tm.do("maya.pc", TypeItemAssign, map[string]any{"item": it, "completion": "assigner", "targets": []any{
+				map[string]any{"root": "lena", "org": "o-search", "include_root": true},
+			}})
+			if moveHead {
+				tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-search", "Search", "ada"))
+			}
+			tm.do("maya.pc", TypeItemAssign, map[string]any{"item": it, "mode": "all", "levels": 1, "completion": "assigner"})
+		})
+	}
+}
+
 func TestOrgAssignConcurrentHeadChangeUsesFoldHead(t *testing.T) {
 	tm := newTeam(t)
 	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-search", "Search", "lena"))
