@@ -57,8 +57,8 @@ async function build({ platform = process.platform, arch = process.arch, daemonI
       fs.copyFileSync(path.join(root, 'icons', file), path.join(source, 'icons', file));
     }
     const selected = copyPackage(daemonInput, path.join(source, 'daemon'), 'bundled', platform);
-    // The bundled runtime is the release authority, not the shell's source manifest.
-    const appVersion = selected.contract.plugin_version;
+    // Validation matched the metadata core to the runtime contract; retain its release suffix.
+    const appVersion = selected.metadata.version;
     fs.writeFileSync(path.join(source, 'package.json'), JSON.stringify({
       name: pkg.name, productName: 'Werkschaft', version: appVersion, main: pkg.main, author: pkg.author,
     }));
