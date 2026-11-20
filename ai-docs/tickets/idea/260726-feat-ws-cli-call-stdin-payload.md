@@ -2,15 +2,16 @@
 title: "ws-cli call: accept JSON payload from stdin"
 sage-review-design: required
 related:
-  260726-feat-ws-cli-lenient-tool-name-resolution: sibling CLI-fallback ergonomics ticket from the same MCP-down dogfooding session
+  260726-feat-ws-cli-lenient-tool-name-resolution: sibling daemon-hosted CLI ergonomics ticket from the same host-MCP-down, daemon-available dogfooding session
 ---
 
 # ws-cli call: accept JSON payload from stdin
 
 ## Background
 
-During MCP-down recovery dogfooding, the CLI fallback path
-(`ws-cli` -> `ws-mcp call`) proved workable for reads and bootstrap, but
+During recovery dogfooding where the host MCP connection was down but the
+daemon remained available, the daemon-hosted CLI path (`ws-cli` -> launcher ->
+daemon `hostedCLI.mcpCommand`) proved workable for reads and bootstrap, but
 complex root-aware **write** payloads are painful: the payload must be
 inline-quoted in the shell. Multi-line bodies with embedded double quotes are
 the concrete pain case — `git.commit` messages carrying a `## AI Context`
@@ -20,13 +21,16 @@ extra failure modes.
 
 Verified current behavior:
 
-- `callCommand` at `agents-plugin-tool/cmd/ws-mcp/main.go:1000` hard-requires
-  exactly two args: `if len(args) != 2` -> `usage: ws-mcp call <name> '<json>'`
-  and `os.Exit(2)`.
-- It then reads `rawArguments := args[1]` and `json.Unmarshal`s that string
-  directly.
-- There is **no** `os.Stdin` read and **no** `-` / `@file` sentinel handling on
-  this path.
+- The launcher captures stdin only for `mailbox codex-stop-hook` and `git
+  commit --description-file=-`; `call <name> -` is not included
+  (`agents-plugin/bin/ws-mcp-launcher.py:2424-2431`).
+- Captured one-shot input is carried as the CLI hello's optional `stdin` field
+  (`ws-mcp-launcher.py:2242-2248`;
+  `internal/wsdashboard/proxy.go:54-64`).
+- The daemon's `hostedCLI.mcpCommand` hard-requires two call args and
+  unmarshals `args[1]` directly (`cmd/ws-mcp/hosted_cli.go:527-539`). Although
+  `hostedCLI.input()` can read the hello's stdin (`hosted_cli.go:40-46`),
+  `mcpCommand` does not use it and has no `-` / `@file` sentinel handling.
 
 Consequence: `echo '{...}' | ws-cli call git.commit` fails with the usage
 error, because the payload argument is simply absent.
@@ -66,27 +70,31 @@ JSON
 ## Prior Art
 
 - `260726-feat-ws-cli-lenient-tool-name-resolution` — sibling ticket from the
-  same dogfooding session, also improving CLI-fallback ergonomics on the
-  `ws-mcp call` path. Coordinate touch points in `callCommand` if both land
-  near each other; do not fold the two scopes together.
-- `agents-plugin/bin/ws-mcp-launcher.py:208` `run_binary` already demonstrates
-  the pattern of feeding a payload to the Go binary over stdin
-  (`input=input_text`), so the receiving side is the only missing half.
+  same dogfooding session, also improving daemon-hosted CLI ergonomics on the
+  `ws-mcp call` path. Coordinate touch points in `hostedCLI.mcpCommand` if both
+  land near each other; do not fold the two scopes together.
+- The launcher and proxy hello already carry stdin for selected one-shot
+  commands (`agents-plugin/bin/ws-mcp-launcher.py:2242-2248,2424-2431`), and
+  `hostedCLI.input()` already consumes that field (`hosted_cli.go:40-46`). The
+  missing pieces are selecting `call <name> -` for capture and reading it in
+  `mcpCommand`.
 
 ## Phases
 
-### Phase 1: stdin payload source in callCommand
+### Phase 1: stdin payload source in hostedCLI.mcpCommand
 
-Teach `callCommand` (`agents-plugin-tool/cmd/ws-mcp/main.go:1000`) to resolve
-its payload from stdin when `args[1] == "-"`.
+Teach `hostedCLI.mcpCommand`
+(`agents-plugin-tool/cmd/ws-mcp/hosted_cli.go:527-539`) to resolve its payload
+from `c.input()` when `args[1] == "-"`.
 
 Goals:
 
 - Keep the `len(args) != 2` guard and the two-arg shape untouched.
-- Read all of `os.Stdin` when the payload arg is exactly `-`, then feed the
-  resulting bytes into the existing `json.Unmarshal` probe and
-  `request.Params.Arguments` assignment. The downstream request-building,
-  `runMCPLine`, and error-surfacing code should not need to change.
+- Read all of `c.input()` when the payload arg is exactly `-`, then feed the
+  resulting bytes into the existing `json.Unmarshal` probe and `tools/call`
+  arguments. The downstream `mcpLine` and error-surfacing code should not need
+  to change. The same code works for the daemon hello field and direct-binary
+  `main.go` path, which supplies `os.Stdin` as `hostedCLI.stdin`.
 - Update the usage string to advertise both forms, e.g.
   `usage: ws-mcp call <name> '<json>'|-`.
 - Error legibility: empty/whitespace-only stdin gets its own message (payload
@@ -96,7 +104,7 @@ Goals:
 
 Constraints:
 
-- No new dependencies; `io.ReadAll(os.Stdin)` is sufficient.
+- No new dependencies; `io.ReadAll(c.input())` is sufficient.
 - Do not add a read timeout. A blocked read with no stdin attached is the
   standard unix behavior for `-` and should not be papered over.
 
@@ -104,37 +112,31 @@ Rejected alternative: adding a `--payload-file` / `--stdin` flag. It expands
 the arg arity, forces flag parsing into a deliberately flag-free command, and
 would break the `len(args) != 2` invariant that keeps this path trivial.
 
-### Phase 2: verify stdin pass-through across the shim and launcher
+### Phase 2: capture stdin into the daemon CLI hello
 
-The `ws-cli` / `wsflow-cli` bin shims delegate through
-`ws-mcp-launcher.py tools` / `call`, so Phase 1 is only reachable if stdin
-survives that hop. Treat this as an explicit phase concern, not an assumption —
-it is the real risk point.
+The `ws-cli` / `wsflow-cli` shims delegate to the launcher, and product commands
+run in the daemon. Phase 1 is reachable only if the launcher reads stdin for
+`call <name> -` and puts the exact text in the CLI hello before connecting.
 
 Anchors to verify:
 
-- `agents-plugin/bin/ws-cli:6` — `exec python3 "$script_dir/ws-mcp-launcher.py" "$@"`.
-  `exec` preserves fd 0; confirm no shim variant wraps or redirects stdin.
-- `agents-plugin/bin/ws-mcp-launcher.py:900` — `os.execvpe(str(binary), args, os.environ)`
-  on POSIX; `:896` `subprocess.call(args)` on Windows. Both should inherit fd 0
+- `agents-plugin/bin/ws-mcp-launcher.py:2424-2431` — extend `reads_stdin` to
+  include exactly `call <name> -`, then read stdin once as UTF-8.
+- `ws-mcp-launcher.py:2242-2248` — `proxy_cli` puts captured text in
+  `hello["stdin"]`; preserve this one-shot transport and its no-replay rule.
+- `agents-plugin-tool/internal/wsdashboard/proxy.go:54-64` and
+  `cmd/ws-mcp/hosted_cli.go:40-46` — the optional hello field reaches
+  `hostedCLI.input()`; older hellos and commands that do not read stdin remain
   unchanged.
-- **Probe subprocesses that run before the handoff and inherit fd 0 because
-  `run_binary` is called without `input_text`, leaving `subprocess.run(input=None)`
-  to inherit the launcher's stdin**: `ws-mcp-launcher.py:272` (commands
-  compatibility), `:680` (`runtime capabilities`), `:719` (`version`). If any
-  probe reads stdin, the heredoc payload is drained before the `execvpe`
-  handoff and Phase 1 silently receives an empty payload. Also check
-  `:599` (local `go build`, stdin inherited, no capture) on the
-  local-devenv rebuild path.
 
 Goals:
 
-- Determine whether any pre-handoff subprocess can consume stdin; if so, pass
-  an explicit empty stdin (`input=""` or `stdin=subprocess.DEVNULL`) to the
-  probes so the operator payload is preserved for the real invocation.
-- Verify end to end on both the cached-runtime fast path and a path that
-  triggers install/repair or a local-devenv rebuild, since those paths run more
-  probes before the handoff.
+- Capture stdin only after daemon/runtime preparation, at the existing
+  `reads_stdin` site, so preparation cannot drain the operator payload.
+- Verify end to end with the host MCP connection down and the daemon available:
+  launcher capture -> hello `stdin` -> daemon `hostedCLI.mcpCommand` ->
+  `tools/call`. Also cover direct raw-binary invocation, which injects
+  `os.Stdin` into the same `hostedCLI` core (`cmd/ws-mcp/main.go:50-55`).
 
 Verification: exercise the target usage with a real write tool and a payload
 containing a multi-line body with embedded double quotes, confirming the tool
@@ -155,12 +157,9 @@ this phase `[dropped]` rather than renumbering.
 
 Depends on Phase 1.
 
-## Spec Impact
+## Contract Impact
 
-Not required at `todo/`. Before this ticket is promoted to `ready/`, address the
-caller-visible CLI contract change (payload sources for `ws-mcp call`) against
-the MCP/plugin-runtime spec area — `ai-docs/spec/mcp-tools.md` or
-`ai-docs/spec/plugin-runtime.md`, whichever owns the `ws-mcp` command surface.
-Expected caller-visible change: `ws-mcp call <name>` accepts `-` as the payload
-argument to read JSON from stdin, in addition to the existing inline JSON
-string. Contract-first spec: no.
+This repository has no spec layer. Before promotion to `ready/`, make the
+caller-visible contract explicit in the phase verification and tests:
+`ws-mcp call <name> -` reads JSON from stdin through the launcher CLI hello and
+daemon-hosted `mcpCommand`, in addition to the existing inline JSON string.

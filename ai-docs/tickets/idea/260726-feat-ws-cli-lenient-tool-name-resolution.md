@@ -8,18 +8,20 @@ sage-review-design: required
 ## Background
 
 `ws-cli` / `ws-mcp` `call` and `tools` currently require the exact registered
-tool name. During a real MCP-down recovery, an agent driving the CLI fallback
-confused separator styles: it transliterated `ws/project_tree` to `project.tree`
-and hit `unknown tool` on the FIRST call. This is high-stakes — the CLI fallback
-is the fatal-recovery lever when the MCP surface is down, and it failed at step
-one on a trivial naming variant.
+tool name. During a recovery where the host MCP connection was down but the
+daemon remained available, an agent driving the daemon-hosted CLI confused
+separator styles: it transliterated `ws/project_tree` to `project.tree` and hit
+`unknown tool` on the first call. This is high-stakes — the daemon CLI is the
+recovery lever when the host MCP surface is down, and it failed at step one on
+a trivial naming variant.
 
-The registered tool names themselves already mix separators (`runtime.info` uses
-a dot; `project_tree` uses an underscore — see `internal/mcp/server.go:529`
-switch labels and the `tools/list` builder around `internal/mcp/server.go:3890`),
-so an agent has no reliable way to guess the exact separator. Resolution should
-be lenient about separator style and an optional `ws/` prefix, while the
-canonical names surfaced in the `tools` listing stay unchanged.
+The current server inventory already mixes separators (`runtime.read` uses a
+dot and `project_tree` an underscore in
+`internal/mcp/server_schemas.go:31,549`). `tools/list` serves the live filtered
+inventory (`server.go:365-374`; `server_inventory.go:71-114`), so an agent has
+no reliable way to guess the exact separator. Resolution should be lenient
+about separator style and an optional `ws/` prefix, while the canonical names
+surfaced in the `tools` listing stay unchanged.
 
 ## Decisions
 
@@ -28,7 +30,7 @@ canonical names surfaced in the `tools` listing stay unchanged.
   interchangeable. All of `ws/project_tree`, `ws/project.tree`, `project_tree`,
   and `project.tree` must resolve to the same tool.
 - **Only RESOLUTION becomes lenient.** The canonical names emitted by the
-  `tools` listing (`listMCPTools()` output) are unchanged; leniency applies to
+  server's filtered `tools/list` inventory are unchanged; leniency applies to
   how an inbound name is matched against that registered set, not to what is
   advertised.
 - **Never silently mis-route (hard constraint).** Lenient matching must never
@@ -37,27 +39,28 @@ canonical names surfaced in the `tools` listing stay unchanged.
 
 ## Constraints
 
-- Both the MCP `tools/call` path and the CLI `call` path funnel through
-  `Server.callTool` (`internal/mcp/server.go:485`), but the CLI `tools`
-  subcommand does its own local lookup over `listMCPTools()` and does NOT go
-  through the server (`cmd/ws-mcp/main.go:951`). The normalization function must
-  be shared so both the server dispatch and the CLI-local lookup resolve
-  identically.
+- The daemon CLI's `hostedCLI.mcpCommand` sends `call` through `tools/call`, but
+  its `tools <name>` form does an exact local match over the live `tools/list`
+  response (`cmd/ws-mcp/hosted_cli.go:527-590`). The normalization function must
+  be shared so `Server.callTool` and that CLI lookup resolve identically against
+  the current server inventory.
 - Do not renumber or rewrite existing switch case labels; canonicalize the
   inbound name to the exact registered name before the switch instead.
 
 ## Prior Art
 
-- Resolution site (server): `Server.callTool` `switch params.Name`
-  (`internal/mcp/server.go:529`); the unmatched `default:` returns
-  `errorResponse(..., -32602, "unknown tool: %s")` at `internal/mcp/server.go:1720`.
-- Registered-name source of truth: `listMCPTools()`
-  (`cmd/ws-mcp/main.go:934`) and the `tools/list` builder around
-  `internal/mcp/server.go:3890` (e.g. `"name": "project_tree"`).
-- CLI entry points: `toolsCommand` (`cmd/ws-mcp/main.go:951`, iterates
-  `listMCPTools()` matching `toolName != name`, fatals `tool not found`) and
-  `callCommand` (`cmd/ws-mcp/main.go:1000`, sets `request.Params.Name = name`
-  verbatim).
+- Resolution site (server): `Server.callTool` parses `params.Name` and applies
+  only descriptor aliases before the dispatch switch
+  (`internal/mcp/server_dispatch.go:22-38,218`; unknown names are rejected at
+  `:189-192` on schema lookup or by the dispatch default).
+- Registered-name source of truth: `tools()` in
+  `internal/mcp/server_schemas.go` (including `runtime.read` at `:31` and
+  `project_tree` at `:549`), augmented with session-hire, Pi and agent
+  definitions at `:1183-1185`, then filtered for the connection by
+  `server_inventory.go:71-114` and served at `server.go:365-374`.
+- CLI entry point: `hostedCLI.mcpCommand`
+  (`cmd/ws-mcp/hosted_cli.go:527-590`) passes the call name to `tools/call` and
+  matches `tools <name>` exactly against the returned inventory.
 
 ## Phases
 
@@ -68,15 +71,16 @@ canonical names surfaced in the `tools` listing stay unchanged.
   separator, producing the lookup key.
 - Add a resolver that maps an inbound name to the exact registered tool name by
   comparing normalized keys against the registered set derived from
-  `listMCPTools()`. On a unique match, substitute the canonical registered name;
-  on no match, preserve today's `unknown tool` behavior.
+  the current server inventory. On a unique match, substitute the canonical
+  registered name; on no match, preserve today's `unknown tool` behavior.
 - Apply the resolver at the server chokepoint: canonicalize `params.Name` in
-  `Server.callTool` (`internal/mcp/server.go:485`) BEFORE the `switch params.Name`
-  at `internal/mcp/server.go:529`, so the existing mixed-separator case labels
-  receive the exact canonical string and stay untouched.
-- Apply the same shared normalization at the CLI-local lookup in `toolsCommand`
-  (`cmd/ws-mcp/main.go:951`) so `ws-mcp tools <name>` resolves leniently too;
-  `callCommand` inherits the fix through the server path but should be verified.
+  `Server.callTool` (`internal/mcp/server_dispatch.go:22-38`) before the dispatch
+  switch, so existing mixed-separator case labels receive the exact canonical
+  string and stay untouched.
+- Apply the same shared normalization to the exact `tools <name>` match in
+  `hostedCLI.mcpCommand` (`cmd/ws-mcp/hosted_cli.go:566-588`). `call` inherits
+  the server fix through `tools/call`, but verify both forms end to end through
+  the daemon-hosted CLI.
 - **Open sub-point:** case handling. Existing registered names appear to be all
   lowercase; match that convention. If normalization also case-folds, confirm no
   case-based collisions and note the choice explicitly. Decide during
@@ -85,8 +89,9 @@ canonical names surfaced in the `tools` listing stay unchanged.
 ### Phase 2: normalized-uniqueness test guard
 
 - Add a mandatory test that computes `normalizeToolKey` for EVERY registered
-  tool (enumerated via `listMCPTools()` / the server tool registry) and fails
-  the build if any two DISTINCT registered tools collide under normalization.
+  tool in the server's canonical `tools()` inventory, including the appended
+  session-hire, Pi and agent definitions, and fails the build if any two
+  DISTINCT registered tools collide under normalization.
 - This guard is the safety net for the hard constraint: mixed-separator
   registered names (e.g. `spec_stem.generate` alongside dot/underscore siblings)
   make normalized collisions plausible, so the test must run over the live

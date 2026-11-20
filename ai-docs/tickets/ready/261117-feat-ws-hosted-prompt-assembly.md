@@ -622,6 +622,16 @@ Forward:
 - Record the live hosted turn, and measure a command run's file operations on the Windows baseline.
 - A hosted lead on the stdio ws-mcp fallback (no daemon runner) has no descriptor `playbookCommands`, so its own `playbook.read` still renders package names. The daemon expansion is unaffected.
 
+#### Edition (this-commit) - 2026-11-20
+
+- Supersedes the second Forward item above: there is no hosted-lead stdio
+  fallback. The launchers are daemon proxies and explicitly never select a
+  second server when the peer is missing, incompatible, or hung
+  (`agents-plugin/bin/ws-mcp-launcher.py:952-984`, verified on `develop` at
+  `06e615956`). Direct `ws-mcp serve --stdio` is an unsupported raw-binary
+  diagnostic case, not a hosted lead; its lack of descriptor
+  `playbookCommands` does not describe a supported hosted prompt path.
+
 ### Phase 3: Per-turn ambient injection replacing plugin hooks
 
 The daemon injects the per-turn ambient context that plugin hooks supply today,
