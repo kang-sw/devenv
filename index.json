@@ -609,6 +609,9 @@
     },
     "261120-bug-ws-rail-heartbeat-starvation": {
       "registered_at": "2026-11-20T02:41:44Z"
+    },
+    "261120-bug-ws-sweep-1120-agy-fixes": {
+      "registered_at": "2026-11-20T05:18:14Z"
     }
   }
 }
