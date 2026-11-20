@@ -85,7 +85,7 @@
   // the column as the user dragged it, convow the conversation's beside
   // the board (0: the stylesheet's).
   var gal = null, lay = null, galEl = null, railEl = null, dotsEl = null, viewEl = null, plusEl = null;
-  var pageEls = {}, paneEls = {}, splitEls = {}, divEls = {}, dotEls = {}, railLast = -Infinity, rg = null, railMoved = false;
+  var pageEls = {}, paneEls = {}, splitEls = {}, divEls = {}, dotEls = {}, railLast = -Infinity, rg = null, railMoved = false, resizeBound = false;
   var boardw = 0, convow = 0;
   var toolbar = null, overviewOn = false;
   var stateFilter = "all", stateUI = null;
@@ -712,8 +712,38 @@
     var c = cards.filter(function (x) { return "c:" + x.id === ref; })[0];
     return c ? c.name.textContent || c.kind : ref.slice(2);
   }
-  // paintGallery draws the rail (the narrow view's home dot, a dot per page
-  // showing its pane count, the + dot; real buttons, kept across repaints)
+  function pageIcon(ref) {
+    if (ref.slice(0, 2) === "t:") {
+      var topic = topics[ref.slice(2)], el = topic && topic.el;
+      var state = el && !el.classList.contains("closed") && el.getAttribute("data-state");
+      var states = { implementing: "impl", researching: "research", discussing: "discuss", waiting: "wait", "awaiting-confirmation": "confirm" };
+      var glyph = states[state];
+      return { href: glyph ? "#i-st-" + glyph : "#i-chat", state: glyph || "plain" };
+    }
+    var c = cards.filter(function (x) { return "c:" + x.id === ref; })[0];
+    var use = c && c.icon && c.icon.querySelector("use"), href = use && use.getAttribute("href");
+    if (!href || !/^#l-[a-z0-9-]+$/.test(href)) {
+      var kinds = { explorer: "folder-open", terminal: "square-terminal", preview: "file", web: "globe" };
+      href = "#l-" + (c && kinds[c.kind] || "file");
+    }
+    return { href: href, state: "card" };
+  }
+  function pageCapsule(b, refs) {
+    b.textContent = "";
+    b.setAttribute("data-count", String(refs.length));
+    refs.slice(0, 5).forEach(function (ref) {
+      var icon = pageIcon(ref), svg = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", "gal-dot-icon " + icon.state);
+      svg.setAttribute("aria-hidden", "true");
+      var use = doc.createElementNS("http://www.w3.org/2000/svg", "use");
+      use.setAttribute("href", icon.href);
+      svg.appendChild(use);
+      b.appendChild(svg);
+    });
+    if (refs.length > 5) b.appendChild(mk("span", "gal-dot-more", "+" + (refs.length - 5)));
+  }
+  // paintGallery draws the rail (the narrow view's home dot, a capsule per
+  // page with up to five item icons, the + dot; real buttons kept across repaints)
   // and shows the current page. dir (+1 down, -1 up) animates the flip.
   function paintGallery(dir) {
     if (!galEl) return;
@@ -726,13 +756,13 @@
         b.type = "button";
       }
       seen[k] = true;
-      b.className = "gal-dot" + (k === "main" ? " main" : k === G.PLUS ? " empty" : "") + (p === pos ? " active" : "");
+      b.className = "gal-dot" + (k === "main" ? " main" : k === G.PLUS ? " empty" : " page") + (p === pos ? " active" : "");
       b.setAttribute("data-pos", String(p));
-      if (k === "main") { b.textContent = "⌂"; label = wsT("tab.board"); }
-      else if (k === G.PLUS) { b.textContent = "+"; label = wsT("js.pins.drop"); }
+      if (k === "main") { b.removeAttribute("data-count"); b.textContent = "⌂"; label = wsT("tab.board"); }
+      else if (k === G.PLUS) { b.removeAttribute("data-count"); b.textContent = "+"; label = wsT("js.pins.drop"); }
       else {
         var refs = G.leaves(gal.pages[p].root);
-        b.textContent = String(refs.length);
+        pageCapsule(b, refs);
         label = (p + 1) + ": " + refs.map(refName).join(" + ");
       }
       b.title = label;
@@ -753,6 +783,12 @@
     if (narrow) galEl.setAttribute("data-narrow", ""); else galEl.removeAttribute("data-narrow");
     gal.pages.forEach(function (pg, i) { slide(pageEls[pg.id], i - pos, dir); });
     slide(plusEl, n - pos, dir);
+    var activeDot = dotEls[dotKey(pos)];
+    if (activeDot && dotsEl.scrollHeight > dotsEl.clientHeight) {
+      var listBox = dotsEl.getBoundingClientRect(), dotBox = activeDot.getBoundingClientRect();
+      if (dotBox.top < listBox.top) dotsEl.scrollTop += dotBox.top - listBox.top;
+      else if (dotBox.bottom > listBox.bottom) dotsEl.scrollTop += dotBox.bottom - listBox.bottom;
+    }
     away(rail && narrow && pos >= 0);
     homeWheel(rail && narrow && n > 0);
   }
@@ -1129,14 +1165,38 @@
     homeEl = col;
     if (col) col.addEventListener("wheel", onHomeWheel, { passive: false });
   }
+  // canFitFourCol activates the 4-column layout (rail + stage + gallery
+  // column) iff !tabs, viewport >= WIDE, and spare right width >= board width.
+  function canFitFourCol(vw, tabs) {
+    if (tabs || !(vw >= G.C.WIDE)) return false;
+    var stageW = vw - 32 - 356, gap = 16;
+    var split = !!(opt && (opt.split || (board && board.closest && board.closest(".dgrid.live, .dgrid.history"))));
+    var worktree = !!(board && board.closest && board.closest(".dgrid.worktree"));
+    var gridW, boardW;
+    if (worktree) {
+      gridW = boardw || 1292;
+      boardW = (gridW - gap) * 7 / 12;
+    } else if (!split) {
+      boardW = boardw || 900;
+      gridW = boardW;
+    } else if (boardw) {
+      boardW = boardw;
+      gridW = (convow || (boardw * 5 / 7)) + gap + boardW;
+    } else {
+      gridW = 1292;
+      boardW = convow ? (gridW - gap - Math.max(CONVW_MIN, Math.min(convow, gridW - gap - SPLITB_MIN))) : ((gridW - gap) * 7 / 12);
+    }
+    return stageW - gridW - gap >= boardW;
+  }
   // relayout asks the page what it shows (opt.mode: its width and whether
   // the layout menu shows one column at a time), maps that to the
   // gallery's shape (WsGallery.layout, plus pages and dragging) and tells
   // the page when it changes (opt.layout).
   function relayout() {
     if (!opt || !galEl) return;
-    var m = opt.mode ? opt.mode() : null, n = gal.pages.length, drag = !!(dg && dg.on);
-    var s = G.layout({ width: m ? +m.width || 0 : 0, tabs: !!(m && m.tabs), pages: n, dragging: drag });
+    var m = opt.mode ? opt.mode() : null, vw = m ? +m.width || 0 : 0, tabs = !!(m && m.tabs);
+    var n = gal.pages.length, drag = !!(dg && dg.on);
+    var s = G.layout({ width: vw, tabs: tabs, fourCol: canFitFourCol(vw, tabs), pages: n, dragging: drag });
     s.pages = n;
     s.dragging = drag;
     if (lay && lay.narrow === s.narrow && lay.column === s.column && lay.overlay === s.overlay && lay.rail === s.rail && !lay.empty === !s.empty && !lay.pages === !n && lay.dragging === drag) return;
@@ -2131,10 +2191,10 @@
       e.preventDefault();
     });
     edge.addEventListener("pointermove", function (e) { if (from) move(from, e.clientX - x0); });
-    function end() { if (!from) return; from = null; edge.classList.remove("drag"); persist(); }
+    function end() { if (!from) return; from = null; edge.classList.remove("drag"); relayout(); persist(); }
     edge.addEventListener("pointerup", end);
     edge.addEventListener("pointercancel", end);
-    edge.addEventListener("dblclick", function () { reset(); persist(); });
+    edge.addEventListener("dblclick", function () { reset(); relayout(); persist(); });
     return edge;
   }
   // fetchMissing finds the docked topics the served board lacks (closed
@@ -2250,6 +2310,10 @@
       doc.addEventListener("click", function (e) { if (dragged) { e.preventDefault(); e.stopPropagation(); } }, true);
       // A held touch is a drag, not a scroll.
       doc.addEventListener("touchmove", function (e) { if ((dg && dg.on) || (rg && rg.on)) e.preventDefault(); }, { passive: false });
+      if (!resizeBound && typeof window !== "undefined" && window.addEventListener) {
+        resizeBound = true;
+        window.addEventListener("resize", function () { if (board) relayout(); });
+      }
       floatToolbar();
       fetchMissing();
     },

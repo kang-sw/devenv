@@ -222,21 +222,21 @@ test('neighbors: edges are false, inert without pages in both views', () => {
   assert.deepEqual(G.neighbors(one, 1, false), { prev: true, next: false });
 });
 
-test('layout mode mapping: tabs, below 1600, 1600-2199, from 2200', () => {
-  const L = o => G.layout(Object.assign({ tabs: false, pages: 0, dragging: false }, o));
-  // tabs is narrow at any width
-  assert.deepEqual(L({ width: 3000, tabs: true, pages: 2 }), { narrow: true, column: false, overlay: false, rail: true, empty: false });
-  assert.deepEqual(L({ width: 3000, tabs: true }), { narrow: true, column: false, overlay: false, rail: false, empty: false });
-  // below 1600 is narrow; its rail hides with no pages unless a drag runs
-  assert.deepEqual(L({ width: 1599 }), { narrow: true, column: false, overlay: false, rail: false, empty: false });
+test('layout mode mapping: tabs, Band 1-3 narrow gallery, Band 4 dynamic 4-col', () => {
+  const L = o => G.layout(Object.assign({ tabs: false, fourCol: false, pages: 0, dragging: false }, o));
+  // tabs or !fourCol is narrow at any width
+  assert.deepEqual(L({ width: 3000, tabs: true, fourCol: true, pages: 2 }), { narrow: true, column: false, overlay: false, rail: true, empty: false });
+  assert.deepEqual(L({ width: 3000, tabs: true, fourCol: true }), { narrow: true, column: false, overlay: false, rail: false, empty: false });
+  // below 1600 is narrow even if fourCol were passed
+  assert.deepEqual(L({ width: 1599, fourCol: true }), { narrow: true, column: false, overlay: false, rail: false, empty: false });
   assert.deepEqual(L({ width: 1200, dragging: true }), { narrow: true, column: false, overlay: false, rail: true, empty: false });
-  // 1600-2199: a docked page shows the column and the session rail overlays
-  assert.deepEqual(L({ width: 1600, pages: 1 }), { narrow: false, column: true, overlay: true, rail: true, empty: false });
-  assert.deepEqual(L({ width: 2199, pages: 1 }), { narrow: false, column: true, overlay: true, rail: true, empty: false });
-  assert.deepEqual(L({ width: 1800 }), { narrow: false, column: false, overlay: false, rail: false, empty: false });
-  // from 2200: empty slot placeholder at rest with 0 pages; the rail docks beside a gallery
-  assert.deepEqual(L({ width: 2200 }), { narrow: false, column: false, overlay: false, rail: false, empty: true });
-  assert.deepEqual(L({ width: 2400, pages: 1 }), { narrow: false, column: true, overlay: false, rail: true, empty: false });
-  // a drag opens the column with zero pages so + can take a first dock
-  assert.deepEqual(L({ width: 2400, dragging: true }), { narrow: false, column: true, overlay: false, rail: true, empty: false });
+  // Bands 2-3 (>= 1600 without enough spare width for 4-col): stays fused narrow, rail never overlays
+  assert.deepEqual(L({ width: 1640, fourCol: false, pages: 1 }), { narrow: true, column: false, overlay: false, rail: true, empty: false });
+  assert.deepEqual(L({ width: 2000, fourCol: false, pages: 1 }), { narrow: true, column: false, overlay: false, rail: true, empty: false });
+  assert.deepEqual(L({ width: 2000, fourCol: false }), { narrow: true, column: false, overlay: false, rail: false, empty: false });
+  assert.deepEqual(L({ width: 2000, fourCol: false, dragging: true }), { narrow: true, column: false, overlay: false, rail: true, empty: false });
+  // Band 4 (fourCol = true, >= 1600): empty slot at rest with 0 pages; column on page/drag
+  assert.deepEqual(L({ width: 2560, fourCol: true }), { narrow: false, column: false, overlay: false, rail: false, empty: true });
+  assert.deepEqual(L({ width: 2560, fourCol: true, pages: 1 }), { narrow: false, column: true, overlay: false, rail: true, empty: false });
+  assert.deepEqual(L({ width: 2560, fourCol: true, dragging: true }), { narrow: false, column: true, overlay: false, rail: true, empty: false });
 });

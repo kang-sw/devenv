@@ -25,7 +25,6 @@
   var rdrag = null, railSaving = 0, railMinGen = 0;
   var railGate = WsRail ? WsRail.swapGate(function () { return !!rdrag || railEditing() || railSaving > 0; }) : null;
   var RAIL_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null;
-  var RAIL_XWIDE = window.matchMedia ? window.matchMedia("(min-width: 2200px)") : null;
   var RAIL_SCROLL_KEY = "ws.dashboard.railscroll";
   var RENAME_NEW = "ws.dashboard.renameNew", renameNewFrame = null;
   // Reload must not replay an unconsumed creation intent. Frames share the
@@ -44,7 +43,7 @@
   // popover; a framed page's header stays an invisible placeholder.
   var topEl = doc.querySelector(".dwrap > .top");
   var usageGutter = railEl && topEl && window.WsUsage ? window.WsUsage.mount(doc, topEl) : null;
-  function railWide() { return !!(RAIL_WIDE && RAIL_WIDE.matches) && (!root.hasAttribute("data-pincol") || !!(RAIL_XWIDE && RAIL_XWIDE.matches)); }
+  function railWide() { return !!(RAIL_WIDE && RAIL_WIDE.matches); }
   function railShown() { return root.classList.contains("rail-open"); }
   // Ctrl+` toggles rail + memos in overlay mode, memos alone beside a column;
   // a framed page hands it to the shell, which holds the rail.
@@ -509,7 +508,7 @@
       e.preventDefault();
       railKey();
     });
-    [RAIL_WIDE, RAIL_XWIDE].forEach(function (m) { if (m && m.addEventListener) m.addEventListener("change", function () { railOpen(false); }); });
+    if (RAIL_WIDE && RAIL_WIDE.addEventListener) RAIL_WIDE.addEventListener("change", function () { railOpen(false); });
     if (topEl) {
       topEl.addEventListener("click", function (e) {
         var usage = e.target.closest && e.target.closest(".usage-toggle");

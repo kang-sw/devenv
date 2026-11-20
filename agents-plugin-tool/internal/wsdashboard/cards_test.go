@@ -416,6 +416,7 @@ function Doc() {
 }
 Doc.prototype = {
   createElement: function (t) { return new El(t, this); },
+  createElementNS: function (_, t) { return new El(t, this); },
   addEventListener: function (t, fn) { (this.listeners[t] = this.listeners[t] || []).push(fn); },
   getElementById: function (id) { return this.documentElement.querySelector('[id="' + id + '"]'); }
 };
@@ -448,14 +449,14 @@ function reply() { var r = mk("div.reply"); r.label = "reply"; return r; }
 function label(n) { return n.label || (n.hasAttribute("data-card") ? n.card || "card" : n.classList.contains("board-toolbar") ? "TOOLBAR" : n.tagName); }
 function names(el) { return el.children.map(label); }
 // boot loads gallery.js and cards.js into a fresh page whose board region
-// holds served, over store (a reload keeps it), wide (1800px) or narrow
+// holds served, over store (a reload keeps it), wide (2560px) or narrow
 // (1000px; page.width changes it before a relayout), and with split a grid
 // for the split handle (its resolved columns: page.gridCols). page.layouts
 // records each change of whether the gallery shows as a column beside
 // the board, page.states every layout state the framework hands the page.
 function boot(store, served, o) {
   o = o || {};
-  page = { doc: null, store: store, layouts: [], states: [], closedCalls: [], adopted: [], gridCols: "none", width: o.wide ? 1800 : 1000, tabs: false };
+  page = { doc: null, store: store, layouts: [], states: [], closedCalls: [], adopted: [], gridCols: "none", width: o.wide ? 2560 : 1000, tabs: false };
   page.doc = new Doc();
   var dbody = page.dbody = page.doc.body.appendChild(new El("div", page.doc));
   page.board = dbody.appendChild(new El("div", page.doc));
@@ -679,7 +680,7 @@ func TestBoardGallery(t *testing.T) {
 function rec() { return JSON.parse(page.store.cards); }
 function leavesOf(g) { return g.pages.map(function (p) { return page.G.leaves(p.root); }); }
 function dots() { return page.W.gallery().querySelectorAll(".gal-dot"); }
-function dotTexts() { return dots().map(function (b) { return [b.getAttribute("data-pos"), b.textContent, b.classList.contains("active")]; }); }
+function dotTexts() { return dots().map(function (b) { return [b.getAttribute("data-pos"), b.getAttribute("data-count") || b.textContent, b.classList.contains("active")]; }); }
 function shown() { var a = page.W.gallery().querySelectorAll(".gal-page").filter(function (p) { return p.hasAttribute("data-active"); }); return a.map(function (p) { return p.getAttribute("data-page"); }); }
 function pageIds() { return galOf().pages.map(function (p) { return p.id; }); }
 function clickDot(pos) { var b = dots().filter(function (d) { return d.getAttribute("data-pos") === String(pos); })[0]; page.W.gallery().querySelector(".gal-dots").fire("click", { target: b }); }
@@ -811,7 +812,7 @@ var paneC = paneOf(c.el), paneT = paneOf(T), moved = [], ins = El.prototype.inse
 El.prototype.insertBefore = function (n, ref) { if (n === c.el || n === T || (n.hasAttribute && (n.hasAttribute("data-page") || n.classList.contains("gal-pane")))) moved.push(label(n)); return ins.call(this, n, ref); };
 clickDot(0); clickDot(1); clickDot(-1); clickDot(2); clickDot(0);
 check("page switches move no node, only transforms", [moved, paneOf(c.el) === paneC, paneOf(T) === paneT], [[], true, true]);
-page.width = 1800; page.W.relayout(); page.width = 1000; page.W.relayout();
+page.width = 2560; page.W.relayout(); page.width = 1000; page.W.relayout();
 check("a width crossing moves no node", [moved, page.layouts], [[], [true, false]]);
 swap([T, A, reply()]);
 var A2 = topic("a", 900);

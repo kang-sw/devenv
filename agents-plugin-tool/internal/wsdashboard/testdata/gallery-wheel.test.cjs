@@ -11,8 +11,8 @@ const atBottom = (dy, now, o = {}) => Object.assign({ dy, now, canUp: true, canD
 
 test('constants are the prototype v4 values', () => {
   assert.deepEqual(
-    [C.SNAP, C.TENSION_MAX, C.RUBBER_PX, C.READY, C.IDLE_MS, C.INERTIA_MS, C.MICRO_PX, C.MICRO_MS, C.LOCK_MS, C.OVERSHOOT_PX, C.SPRING_MS, C.RAIL_WHEEL_MS, C.EPS, C.WIDE, C.SLOT],
-    [320, 125, 26, 0.85, 240, 170, 5, 220, 420, 28, 300, 140, 2, 1600, 2200]);
+    [C.SNAP, C.TENSION_MAX, C.RUBBER_PX, C.READY, C.IDLE_MS, C.INERTIA_MS, C.MICRO_PX, C.MICRO_MS, C.LOCK_MS, C.OVERSHOOT_PX, C.SPRING_MS, C.RAIL_WHEEL_MS, C.EPS, C.WIDE],
+    [320, 125, 26, 0.85, 240, 170, 5, 220, 420, 28, 300, 140, 2, 1600]);
 });
 
 test('tension accumulates min(125, |dy|) and snaps at 320 (100%)', () => {

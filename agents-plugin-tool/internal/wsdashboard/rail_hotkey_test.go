@@ -10,10 +10,9 @@ import (
 // the frame hands the key to the host as {wbDoc: "rail"} (wswhiteboard
 // TestDocFrameHandsRailKey), and the host's frame listener, which answers
 // only its own body frames (docFrame), runs railKey, the page keydown's own
-// path: it toggles rail + memos below 1600px, and below 2200px while
-// the pinned column takes the rail's place (data-pincol on the root), and
-// memos alone beside a permanent column. The cases execute under node when it
-// is installed.
+// path: it toggles rail + memos below 1600px, and memos alone beside a
+// permanent column from 1600px regardless of pincol. The cases execute under
+// node when it is installed.
 func TestRailKeyFromDocFrame(t *testing.T) {
 	js := mustAsset(t, "dashboard.js")
 	if !strings.Contains(js, "e.shiftKey || e.isComposing) return;\n      e.preventDefault();\n      railKey();") {
@@ -42,7 +41,7 @@ var root = { classList: { contains: function (c) { return !!cls[c]; }, toggle: f
 var memoCalls = [], memoPad = { open: function (on, wide) { memoCalls.push([on, wide]); } };
 var railEl = {}, railBtn = { setAttribute: function () {} }, WsRail = {};
 var framed = false;
-var RAIL_WIDE = { matches: false }, RAIL_XWIDE = { matches: false };
+var RAIL_WIDE = { matches: false };
 var frameWin = {}, otherWin = {}, frameEl = { tag: "iframe.doc-frame", getAttribute: function () { return "topic:body"; } };
 function docFrame(win) { return win === frameWin ? frameEl : undefined; }
 var handler = null;
@@ -63,11 +62,7 @@ check("at 1600px and up the key opens memos", memoCalls[memoCalls.length - 1], [
 send(frameWin, { wbDoc: "rail" });
 attrs["data-pincol"] = true;
 send(frameWin, { wbDoc: "rail" });
-check("at 1800px with a pin the key opens the overlay", !!cls["rail-open"], true);
-send(frameWin, { wbDoc: "rail" });
-RAIL_XWIDE.matches = true;
-send(frameWin, { wbDoc: "rail" });
-check("from 2200px memos open beside the column, pin or not", memoCalls[memoCalls.length - 1], [true, true]);
+check("from 1600px even with a pin the rail stays docked and memos open beside it", [!!cls["rail-open"], memoCalls[memoCalls.length - 1]], [true, [true, true]]);
 process.stdout.write(bad.join("\n"));
 `)
 }

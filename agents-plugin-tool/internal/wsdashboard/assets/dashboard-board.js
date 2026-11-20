@@ -241,16 +241,14 @@
   // composer's chips (web picks, below).
   // The paged docking gallery (cards.js #bgal, joining the page body) has
   // its shape from WsGallery.layout (gallery.js) over this page's width
-  // and layout menu (mode), and the page maps it (layout): in the wide view
-  // (from 1600px, not "tabs") with a docked page it is the page body's last
-  // column (data-pincol on the root, carried to the stylesheet and the
-  // session rail, railWide: below 2200px the column takes the rail's place
-  // and the rail overlays); with none no column is reserved, and a drag
-  // alone shows it over the right edge (data-gal="drag"). In the narrow
-  // view the Main Board is Page 0 of the same rail: the gallery overlays
-  // the board's column (data-gal="narrow", placed by placeGallery), its
-  // pages sliding off to show the board. On the live grid the split handle
-  // sizes the conversation's column beside the board (split).
+  // and layout menu (mode), and the page maps it (layout): from 1600px
+  // (not "tabs"), the session rail stays permanently docked left while the
+  // 4-column gallery (empty slot, drag slot, or data-pincol column) opens
+  // only when the right-side spare width fits at least the board's width;
+  // otherwise (or below 1600px / in tabs), the Main Board is Page 0 and
+  // the gallery overlays the board's column (data-gal="narrow", placed by
+  // placeGallery). On the live grid the split handle sizes the
+  // conversation's column beside the board (split).
   // A board swap waits while a card or topic is dragged (boardDragHeld), and
   // lands at the drag's end.
   var filePreview = null, filePreviewBack = null;
@@ -362,14 +360,11 @@
   }
   var cardBoard = mode !== "index" && window.WsCards ? region("board") : null;
   var PIN_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null, boardDragHeld = null, boardOverviewHeld = null;
-  var PIN_SLOT = window.matchMedia ? window.matchMedia("(min-width: 2200px)") : null;
   function afterOverview(fn) { if (window.WsOverview) window.WsOverview.after(fn); else fn(); }
-  // galMode is what the gallery's layout reads: the width, held to the
-  // side of each breakpoint the stylesheet's media queries take, and
+  // galMode is what the gallery's layout reads: the viewport width and
   // whether the layout menu shows one column at a time.
   function galMode() {
-    var w = window.innerWidth || 0, wide = !!(PIN_WIDE && PIN_WIDE.matches), slot = !!(PIN_SLOT && PIN_SLOT.matches);
-    return { width: slot ? Math.max(w, 2200) : wide ? Math.min(Math.max(w, 1600), 2199) : Math.min(w, 1599),
+    return { width: window.innerWidth || 0,
       tabs: !!(live && (grid.getAttribute("data-layout") || load(LAYOUT_KEY)) === "tabs") };
   }
   // placeGallery lays the narrow view's gallery over the board's column:
@@ -500,7 +495,7 @@
     }
     if (window.WsTerm) window.WsTerm.mount($("bcol"));
     if (window.WsWeb) window.WsWeb.mount($("bcol"));
-    [PIN_WIDE, PIN_SLOT].forEach(function (m) { if (m && m.addEventListener) m.addEventListener("change", function () { window.WsCards.relayout(); }); });
+    if (PIN_WIDE && PIN_WIDE.addEventListener) PIN_WIDE.addEventListener("change", function () { window.WsCards.relayout(); });
     doc.addEventListener("scroll", queueGallery, { capture: true, passive: true });
     window.addEventListener("resize", queueGallery);
     if (window.ResizeObserver) new ResizeObserver(queueGallery).observe($("bcol") || cardBoard);

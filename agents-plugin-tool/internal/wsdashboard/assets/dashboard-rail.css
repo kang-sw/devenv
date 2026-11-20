@@ -17,6 +17,8 @@
 .rail > .r-rail { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .rscrim { display: none; }
 @media (min-width: 1600px) {
+  .dwrap:not(.narrow) { max-width: none; }
+  .dlanding { --dl-r: var(--dl-x); }
   .dbody { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 0 16px; align-items: start; }
   .dash.live .dbody, .dash.history .dbody { flex: 1 1 0; min-height: 0; align-items: stretch; }
   .dash.live .dbody > .dgrid.live, .dash.history .dbody > .dgrid.history { min-height: 0; }
@@ -26,6 +28,11 @@
   .dwrap > .top > .back { display: none; }
   .dwrap > .top { margin-left: calc(340px + 16px); }
   .dbody > .rail { margin: calc(-1 * var(--toph)) 0 0 -4px; }
+  :root:not([data-pincol]):not([data-gal="empty"]):not([data-gal="drag"]) .dbody > .dgrid { width: 100%; max-width: var(--stagew); margin-inline: auto; }
+  :root:not([data-shell]):not([data-pincol]):not([data-gal="empty"]):not([data-gal="drag"]) .dash:not(.index):not(.tk-paged) > .dwrap { --stage-side: max(0px, (100% - 356px - var(--stagew)) / 2); }
+  :root:not([data-shell]):not([data-pincol]):not([data-gal="empty"]):not([data-gal="drag"]) .dash:not(.index):not(.tk-paged) > .dwrap > .top { margin-left: calc(356px + var(--stage-side)); margin-right: var(--stage-side); }
+  :root:not([data-shell]):not([data-pincol]):not([data-gal="empty"]):not([data-gal="drag"]) .dash:not(.index):not(.tk-paged) > .dwrap > .top:is(.dr-room, .tk-room) { padding-right: max(0px, calc(var(--drhw, 0px) + var(--tkhw, 0px) + 6px - var(--stage-side, 0px))); }
+  :root[data-shell] .dwrap > .top { margin-left: calc(356px + var(--sh-stage-side, 0px)); margin-right: var(--sh-stage-side, 0px); }
 }
 @media (max-width: 1599.98px) {
   .rail { position: fixed; z-index: 45; top: 12px; bottom: 12px; left: 12px; width: 340px; max-width: calc(100vw - 24px); box-shadow: var(--wb-shadow-hi); transform: translateX(calc(-100% - 20px)); visibility: hidden; transition: transform .22s cubic-bezier(.2, .7, .3, 1), visibility 0s linear .22s; }
@@ -82,8 +89,11 @@
    edge of the viewport reads the target and its percentage, and the
    target's dot carries .pull-target. */
 :root { --pbw: calc(1680px - 32px - 356px); }
-.dbody:has(> .dgrid.live) { --cvw: var(--convow, calc(var(--boardw) * 5 / 7)); }
+.dash { --stagew: var(--pbw); }
 .dash.board { --pbw: 900px; }
+.dash:has(> .dwrap .dgrid:is(.live, .history)) { --cvw: var(--convow, calc(var(--boardw) * 5 / 7)); }
+:root[data-boardw] .dash.board { --stagew: var(--boardw); }
+:root[data-boardw] .dash:has(> .dwrap .dgrid:is(.live, .history)) { --stagew: calc(var(--cvw) + 16px + var(--boardw)); }
 .bgal { display: none; }
 :root[data-gal] .bgal:not([hidden]) { display: flex; gap: 6px; min-width: 0; min-height: 0; }
 .bgal > .bp-edge { display: none; }
@@ -91,10 +101,20 @@
 .gal-rail[hidden] { display: none; }
 .gal-rzone { flex: 1 1 0; width: 100%; display: flex; align-items: center; justify-content: center; color: var(--wb-muted-fg); font-size: 10px; opacity: .5; cursor: pointer; transition: background .12s, opacity .12s; }
 .gal-rzone:hover { background: color-mix(in srgb, var(--wb-fg) 6%, transparent); opacity: 1; color: var(--wb-primary); }
-.gal-dots { flex: none; display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 8px 0; }
+.gal-dots { flex: 0 1 auto; min-height: 0; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 8px 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.gal-dots::-webkit-scrollbar { display: none; }
 .gal-dot { box-sizing: border-box; width: 22px; height: 22px; padding: 0; border-radius: 999px; border: 1.5px solid var(--wb-muted-fg); background: var(--wb-card); color: var(--wb-muted-fg); font: 700 10px var(--wb-mono); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: transform .12s, background .12s, border-color .12s, height .14s; }
 .gal-dot:hover, .gal-dot:focus-visible { border-color: var(--wb-primary); color: var(--wb-fg); transform: scale(1.08); }
 .gal-dot.active { height: 28px; border-color: var(--wb-primary); background: var(--wb-primary); color: var(--wb-card); box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-primary) 24%, transparent); }
+.gal-dot.page { width: 28px; height: auto; min-height: 28px; padding: 4px 2px; border-radius: 14px; flex-direction: column; gap: 2px; color: var(--wb-muted-fg); }
+.gal-dot.page.active { height: auto; background: color-mix(in srgb, var(--wb-primary) 15%, var(--wb-card)); color: var(--wb-fg); border-color: var(--wb-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-primary) 32%, transparent); }
+.gal-dot-icon { display: block; flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.gal-dot-icon.impl { color: light-dark(#2457c5, #8db8ff); }
+.gal-dot-icon.research { color: light-dark(#7544ac, #c6a5f7); }
+.gal-dot-icon.discuss { color: light-dark(#a64f08, #ffb36b); }
+.gal-dot-icon.confirm { color: light-dark(#1d7348, #7fd6a8); }
+.gal-dot-icon.wait { color: light-dark(#596172, #b9bdc6); }
+.gal-dot-more { display: block; color: var(--wb-fg); font: 700 9px/12px var(--wb-mono); white-space: nowrap; }
 .gal-dot.main { margin-bottom: 8px; border-color: #3fa853; color: #3fa853; font-size: 11px; }
 .gal-dot.main.active { background: #3fa853; color: #0b1910; box-shadow: 0 0 0 3px rgb(63 168 83 / .24); }
 .gal-dot.empty { border-style: dashed; background: transparent; font-size: 13px; font-weight: 500; }
@@ -166,34 +186,17 @@
 .bp-edge::after, .dcv-edge::after { content: ""; position: absolute; top: 50%; left: 3px; width: 3px; height: 36px; margin-top: -18px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
 .bp-edge:hover::after, .bp-edge.drag::after, .dcv-edge:hover::after, .dcv-edge.drag::after { background: var(--wb-primary); }
 @media (min-width: 1600px) {
-  :root[data-pincol] .bgal:not([hidden]) { position: relative; grid-row: 1; grid-column: 2; }
+  /* Band 4 (dynamic four-column dock): rail, stage, and gallery column all show */
+  :root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dwrap:not(.narrow),
+  :root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dgrid.board { max-width: none; margin: 0; }
+  :root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dbody { grid-template-columns: 340px minmax(0, min(var(--boardw, min(var(--pbw), 100% - 852px)), 100% - 652px)) minmax(280px, 1fr); }
+  :root[data-pincol][data-boardw]:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dbody:has(> .dgrid:is(.live, .history)) { grid-template-columns: 340px minmax(0, min(var(--cvw) + 16px + var(--boardw), 100% - 652px)) minmax(280px, 1fr); }
+  :root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dbody > .rail { grid-column: 1; grid-row: 1; }
+  :root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dbody > .dgrid,
+  :root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dbody > .tk-spage { grid-column: 2; grid-row: 1; }
+  :root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .bgal:not([hidden]) { position: relative; z-index: auto; top: auto; bottom: auto; right: auto; width: auto; grid-column: 3; grid-row: 1; }
+  :root:is([data-gal="col"], [data-gal="empty"], [data-gal="drag"]) .dash:not(.live):not(.history) .bgal:not([hidden]) { position: sticky; top: 12px; height: calc(100vh - 24px); height: calc(100dvh - 24px); }
   :root[data-pincol] .bgal > .bp-edge { display: block; }
-  :root[data-pincol] .dbody { grid-template-columns: minmax(0, min(var(--boardw, min(var(--pbw), 100% - 496px)), 100% - 296px)) minmax(280px, 1fr); }
-  :root[data-pincol][data-boardw] .dbody:has(> .dgrid.live) { grid-template-columns: minmax(0, min(var(--cvw) + 16px + var(--boardw), 100% - 296px)) minmax(280px, 1fr); }
-  :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 1; grid-row: 1; }
-  :root[data-pincol] .dash:not(.live):not(.history) .bgal { position: sticky; top: 12px; height: calc(100vh - 24px); height: calc(100dvh - 24px); }
-  :root[data-pincol] .dwrap:not(.narrow), :root[data-pincol] .dgrid.board { max-width: none; }
-}
-@media (min-width: 1600px) and (max-width: 2199.98px) {
-  /* the column takes the rail's place, and the rail overlays */
-  :root[data-pincol] .rail { position: fixed; z-index: 45; top: 12px; bottom: 12px; left: 12px; width: 340px; max-width: calc(100vw - 24px); max-height: none; box-shadow: var(--wb-shadow-hi); transform: translateX(calc(-100% - 20px)); visibility: hidden; transition: transform .22s cubic-bezier(.2, .7, .3, 1), visibility 0s linear .22s; }
-  :root[data-pincol].rail-open .rail { transform: none; visibility: visible; transition: transform .22s cubic-bezier(.2, .7, .3, 1); }
-  :root[data-pincol] .rscrim { display: block; position: fixed; inset: 0; z-index: 44; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .22s; }
-  :root[data-pincol].rail-open .rscrim { opacity: 1; pointer-events: auto; }
-  :root[data-pincol] .rail .rkids { margin-left: 10px; }
-  :root[data-pincol] .dwrap > .top > .back { display: inline-flex; }
-  :root[data-pincol] .dwrap > .top { margin-left: 0; }
-  :root[data-pincol] .dbody > .rail { margin: 0; }
-}
-@media (min-width: 2200px) {
-  /* rail and column (or idle/drag slot) all show */
-  :root:is([data-pincol], [data-gal="empty"], [data-gal="drag"]) .dwrap:not(.narrow), :root:is([data-pincol], [data-gal="empty"], [data-gal="drag"]) .dgrid.board { max-width: none; }
-  :root:is([data-pincol], [data-gal="empty"], [data-gal="drag"]) .dbody { grid-template-columns: 340px minmax(0, min(var(--boardw, min(var(--pbw), 100% - 852px)), 100% - 652px)) minmax(280px, 1fr); }
-  :root[data-pincol][data-boardw] .dbody:has(> .dgrid.live) { grid-template-columns: 340px minmax(0, min(var(--cvw) + 16px + var(--boardw), 100% - 652px)) minmax(280px, 1fr); }
-  :root:is([data-pincol], [data-gal="empty"], [data-gal="drag"]) .dbody > .rail { grid-column: 1; grid-row: 1; }
-  :root:is([data-pincol], [data-gal="empty"], [data-gal="drag"]) .dbody > .dgrid, :root:is([data-pincol], [data-gal="empty"], [data-gal="drag"]) .dbody > .tk-spage { grid-column: 2; grid-row: 1; }
-  :root:is([data-pincol], [data-gal="empty"], [data-gal="drag"]) .bgal:not([hidden]) { position: relative; z-index: auto; top: auto; bottom: auto; right: auto; width: auto; grid-column: 3; grid-row: 1; }
-  :root:is([data-pincol], [data-gal="empty"], [data-gal="drag"]) .dash:not(.live):not(.history) .bgal:not([hidden]) { position: sticky; top: 12px; height: calc(100vh - 24px); height: calc(100dvh - 24px); }
 }
 /* An empty board (no topic or card in it; the placeholder may follow a future toolbar card) is a quiet dashed placeholder. In the live page it fills its column (.bcol), a scroll box with its own offsets (padding, the .top-classed pill wrapper's margin, the rail wrappers' margins), so it is pinned to the column's padding box rather than sized by height: 100%, which overflowed by those offsets. Elsewhere (no sized column) it stays a short strip. */
 .r-board:not(:has(> .topic, > .bcard)) > .empty { box-sizing: border-box; min-height: 54px; margin: 0; display: grid; place-items: center; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); font-weight: 700; }

@@ -66,7 +66,7 @@ const helpers = () => {
       return i < 0 ? null : i;
     },
     pos: () => +document.getElementById('bgal').getAttribute('data-pos'),
-    dots: () => [...document.querySelectorAll('#bgal .gal-dot')].map(b => b.textContent + (b.classList.contains('active') ? '*' : '')),
+    dots: () => [...document.querySelectorAll('#bgal .gal-dot')].map(b => (b.dataset.count || b.textContent) + (b.classList.contains('active') ? '*' : '')),
     // seen tells, per element, whether a fresh IntersectionObserver
     // (root: the viewport) reports it intersecting.
     seen: els => new Promise(done => {
@@ -349,7 +349,7 @@ async function routeTerminal(context) {
 
     // ---- closed and missing docked topics (wide, column) ----
     {
-      const context = await browser.newContext({ viewport: { width: 1800, height: 900 }, locale: 'en-US', reducedMotion: 'reduce' });
+      const context = await browser.newContext({ viewport: { width: 2560, height: 900 }, locale: 'en-US', reducedMotion: 'reduce' });
       await seed(context, 'livesession', { cards: [], topics: [{ n: 'archive000', p: 1, a: 0, b: 0 }, { n: 'ghost', p: 2, a: 0, b: 0 }, { n: 'gamma', p: 3, a: 0, b: 0 }] });
       const closedCalls = [];
       context.on('request', r => { const u = new URL(r.url()); if (u.pathname === '/s/livesession/closed') closedCalls.push(u.searchParams.get('from')); });
@@ -375,7 +375,7 @@ async function routeTerminal(context) {
       await context.close();
     }
 
-    // ---- Phase 2 (wide 2400): the 2D split tree ----
+    // ---- Phase 2 (wide 2560): the 2D split tree ----
     // Five-zone drops with their preview, edge splits from the board and
     // from other pages, moves within a page, the center swap of two docked
     // panes, the dividers (drag, clamp, keys, double click, kept across a
@@ -383,7 +383,7 @@ async function routeTerminal(context) {
     // going; the docked topics keep their nodes and frame documents
     // throughout.
     {
-      const context = await browser.newContext({ viewport: { width: 2400, height: 1000 }, locale: 'en-US', reducedMotion: 'reduce' });
+      const context = await browser.newContext({ viewport: { width: 2560, height: 1000 }, locale: 'en-US', reducedMotion: 'reduce' });
       await seed(context, 'livesession', { cards: [], topics: [{ n: 'alpha', p: 1, a: 0, b: 0 }, { n: 'beta', p: 2, a: 0, b: 0 }, { n: 'deep', p: 3, a: 0, b: 0 }] });
       let { tab, page, errors } = await open(context, 'livesession');
       await until(async () => JSON.stringify(await pages(page)) === '[["alpha"],["beta"],["deep"]]', 'three seeded pages');
@@ -647,12 +647,12 @@ async function routeTerminal(context) {
       await context.close();
     }
 
-    // ---- Phase 3 (wide 2400): the bounce-snap gate and spring-loaded dots ----
+    // ---- Phase 3 (wide 2560): the bounce-snap gate and spring-loaded dots ----
     // Motion is on here, so the rubber band's translate shows. Waits follow
     // the gate's constants: 170ms inertia, 220ms micro-bounce, 240ms idle
     // spring-back, 420ms lock, 300ms spring.
     {
-      const context = await browser.newContext({ viewport: { width: 2400, height: 1000 }, locale: 'en-US', reducedMotion: 'no-preference' });
+      const context = await browser.newContext({ viewport: { width: 2560, height: 1000 }, locale: 'en-US', reducedMotion: 'no-preference' });
       await routeTerminal(context);
       await seed(context, 'livesession', { cards: [], topics: [{ n: 'deep', p: 1, a: 0, b: 0 }, { n: 'beta', p: 2, a: 0, b: 0 }, { n: 'alpha', p: 3, a: 0, b: 0 }],
         gallery: { v: 1, active: 'p1', pages: [{ id: 'p1', root: { axis: 'row', ratio: 0.5, a: { topic: 'deep' }, b: { topic: 'beta' } } }, { id: 'p2', root: { topic: 'alpha' } }], rev: 2 } });
@@ -937,12 +937,12 @@ async function routeTerminal(context) {
       await context.close();
     }
 
-    // ---- Phase 3 (wide 2400): a docked explorer's list is the scroller ----
+    // ---- Phase 3 (wide 2560): a docked explorer's list is the scroller ----
     // The gate reads the nearest scrolling ancestor of the wheel's target
     // within the pane, not the card's body: the explorer's own list scrolls
     // natively, and only its end pulls toward +.
     {
-      const context = await browser.newContext({ viewport: { width: 2400, height: 1000 }, locale: 'en-US', reducedMotion: 'no-preference' });
+      const context = await browser.newContext({ viewport: { width: 2560, height: 1000 }, locale: 'en-US', reducedMotion: 'no-preference' });
       await seed(context, 'livesession', { cards: [{ id: 'gx', kind: 'explorer', pinned: 1, data: {} }], topics: [],
         gallery: { v: 1, active: 'p1', pages: [{ id: 'p1', root: { card: 'gx' } }], rev: 1 } });
       const { tab, page, errors } = await open(context, 'livesession');
@@ -1074,9 +1074,9 @@ async function routeTerminal(context) {
       await context.close();
     }
 
-    // ---- layout modes at real viewports ----
+    // ---- layout modes at real viewports (4-band responsive dock) ----
     {
-      const context = await browser.newContext({ viewport: { width: 2400, height: 1000 }, locale: 'en-US', reducedMotion: 'reduce' });
+      const context = await browser.newContext({ viewport: { width: 2560, height: 1000 }, locale: 'en-US', reducedMotion: 'reduce' });
       await seed(context, 'livesession', {});
       let { tab, page, errors } = await open(context, 'livesession');
       await page.evaluate(helpers3);
@@ -1087,23 +1087,23 @@ async function routeTerminal(context) {
         return { gal: r.getAttribute('data-gal'), pincol: r.hasAttribute('data-pincol'), hidden: g.hidden, cols: getComputedStyle(document.querySelector('.dbody')).gridTemplateColumns.split(' ').length,
           edge: !!edge && getComputedStyle(edge).display !== 'none', railHidden: !rail || rail.hidden || getComputedStyle(rail).display === 'none',
           plusVisible: !plus.hidden && getComputedStyle(plus).display !== 'none' && pb.width > 0 && pb.height > 0,
-          plusWidth: Math.round(pb.width), galWidth: Math.round(gb.width), right: Math.round(b.right), galLeft: Math.round(gb.left), w: innerWidth };
+          plusWidth: Math.round(pb.width), galWidth: Math.round(gb.width), boardWidth: Math.round(b.width), right: Math.round(b.right), galLeft: Math.round(gb.left), w: innerWidth };
       });
       let l = await layout();
-      assert.deepEqual([l.gal, l.pincol, l.hidden, l.railHidden, l.edge, l.plusVisible], ['empty', false, false, true, false, true], '2400 with no page: idle empty slot in Col 3, rail and handle hidden');
-      assert(l.galLeft >= l.right, '2400 idle empty slot stands right of the board');
-      assert(l.plusWidth >= 500 && l.galWidth >= 500, '2400 idle .gal-plus spans full Col 3: ' + JSON.stringify(l));
+      assert.deepEqual([l.gal, l.pincol, l.hidden, l.railHidden, l.edge, l.plusVisible], ['empty', false, false, true, false, true], '2560 with no page: idle empty slot in Col 3, rail and handle hidden');
+      assert(l.galLeft >= l.right, '2560 idle empty slot stands right of the board');
+      assert(l.plusWidth >= l.boardWidth && l.galWidth >= l.boardWidth, '2560 idle .gal-plus spans >= board width: ' + JSON.stringify(l));
       const zeroCols = l.cols;
-      assert.equal(zeroCols, 3, '2400 already uses 3 grid columns at rest');
+      assert.equal(zeroCols, 3, '2560 already uses 3 grid columns at rest');
       const plusBox = await center(page.locator('#bgal .gal-plus'));
       await tab.mouse.move(plusBox.x, plusBox.y);
       await tab.mouse.wheel(0, 125);
       await tab.mouse.wheel(0, -125);
       await page.evaluate(() => window.__gal.frames());
-      assert.equal(await page.evaluate(() => window.__gal3.pill()), null, 'wheeling over idle .gal-plus at 2400 emits no pull pill');
+      assert.equal(await page.evaluate(() => window.__gal3.pill()), null, 'wheeling over idle .gal-plus at 2560 emits no pull pill');
       assert.equal(await page.evaluate(() => document.querySelectorAll('[data-gal-pull]').length), 0, 'wheeling over idle .gal-plus sets no pull transform');
-      await shot(tab, 'layout-2400-zero');
-      // A drag start at 2400 keeps #bgal in Col 3 at the exact same slot width (zero jump) and shows .gal-rail; dropping directly onto .gal-plus docks onto Page 1.
+      await shot(tab, 'layout-2560-zero');
+      // A drag start at 2560 keeps #bgal in Col 3 at the exact same slot width (zero jump) and shows .gal-rail; dropping directly onto .gal-plus docks onto Page 1.
       const wide = await drag(tab, await grip(bar(page, 'beta')), () => center(page.locator('#bgal .gal-plus')), async () => {
         await until(() => page.locator('#bgal .gal-rail').isVisible(), 'wide rail on drag start');
         const p = await center(page.locator('#bgal .gal-plus'));
@@ -1115,18 +1115,20 @@ async function routeTerminal(context) {
             railHidden: !rail || rail.hidden || getComputedStyle(rail).display === 'none', plusDrop: plus.classList.contains('drop') };
         });
       });
-      assert.deepEqual(wide, { gal: 'drag', galWidth: l.galWidth, railHidden: false, plusDrop: true }, '2400 drag keeps exact Col 3 width with rail shown and .gal-plus lit');
+      assert.deepEqual(wide, { gal: 'drag', galWidth: l.galWidth, railHidden: false, plusDrop: true }, '2560 drag keeps exact Col 3 width with rail shown and .gal-plus lit');
       await until(async () => JSON.stringify(await pages(page)) === '[["beta"]]', 'direct drop on .gal-plus docks beta onto Page 1');
       l = await layout();
-      assert.deepEqual([l.gal, l.pincol, l.hidden, l.railHidden, l.edge, l.cols], ['col', true, false, false, true, zeroCols], '2400 with a page: the gallery column with its handle, zero column-count jump');
+      assert.deepEqual([l.gal, l.pincol, l.hidden, l.railHidden, l.edge, l.cols], ['col', true, false, false, true, zeroCols], '2560 with a page: the gallery column with its handle, zero column-count jump');
       assert(l.galLeft >= l.right, 'the gallery stands right of the board');
-      done.push('2400 idle empty slot (no rail/edge/pull pill), zero-jump drag, direct drop onto .gal-plus docks Page 1');
+      done.push('2560 idle empty slot (no rail/edge/pull pill), zero-jump drag, direct drop onto .gal-plus docks Page 1');
+      // Band 3 (1800px): fused narrow gallery on #bcol, permanently docked rail on left, centered stage.
       await tab.setViewportSize({ width: 1800, height: 1000 });
       await until(async () => (await layout()).w === 1800, 'resize 1800');
-      l = await layout();
-      const shellPin = await tab.evaluate(() => document.documentElement.hasAttribute('data-pincol'));
-      assert.deepEqual([l.gal, l.pincol, shellPin], ['col', true, true], '1800 with a page: the column, the session rail overlays (shell data-pincol)');
+      l = await until(async () => { const v = await layout(); return v.gal === 'narrow' ? v : null; }, '1800 Band 3 switches to fused narrow gallery');
+      const shell1800 = await tab.evaluate(() => ({ pincol: document.documentElement.hasAttribute('data-pincol'), railLeft: Math.round(document.getElementById('rail').getBoundingClientRect().left) }));
+      assert.deepEqual([l.gal, l.pincol, shell1800.pincol, shell1800.railLeft], ['narrow', false, false, 12], '1800 Band 3: fused narrow gallery with rail permanently docked at left');
       await shot(tab, 'layout-1800-page');
+      // Band 1 (1400px): overlay rail, fused narrow gallery.
       await tab.setViewportSize({ width: 1400, height: 1000 });
       await until(async () => (await layout()).w === 1400, 'resize 1400');
       l = await layout();
@@ -1137,36 +1139,34 @@ async function routeTerminal(context) {
       await tab.close();
       // tabs: narrow at any width.
       await seed(context, 'livesession', kept, 'tabs');
-      ({ tab, page, errors } = await open(context, 'livesession', 2400, 1000));
+      ({ tab, page, errors } = await open(context, 'livesession', 2560, 1000));
       await until(async () => (await layout()).gal === 'narrow' || (await layout()).gal === null, 'tabs layout');
       if (await page.evaluate(() => getComputedStyle(document.getElementById('bcol')).display === 'none')) await page.locator('#tabbar [data-tab="board"]').click();
-      l = await until(async () => { const v = await layout(); return v.gal === 'narrow' ? v : null; }, 'tabs at 2400 is narrow');
+      l = await until(async () => { const v = await layout(); return v.gal === 'narrow' ? v : null; }, 'tabs at 2560 is narrow');
       assert.equal(l.pincol, false, 'tabs never takes the column');
-      await shot(tab, 'layout-2400-tabs');
-      done.push('layout modes: 1400 narrow, 1800 column + rail overlay, 2400 idle empty slot, tabs narrow at 2400');
+      await shot(tab, 'layout-2560-tabs');
+      done.push('layout modes: 1400 narrow, 1800 docked-rail + fused narrow, 2560 idle empty slot, tabs narrow at 2560');
       assert.deepEqual(errors, []);
       await context.close();
     }
 
-    // ---- 1800x1000 with 0 pages: hidden at rest, drag overlay >= 360px ----
+    // ---- Band 3 (1800x1000) with 0 pages: hidden at rest, fused narrow rail on drag ----
     {
       const context = await browser.newContext({ viewport: { width: 1800, height: 1000 }, locale: 'en-US', reducedMotion: 'reduce' });
       await seed(context, 'livesession', {});
       const { tab, page, errors } = await open(context, 'livesession');
       const rest = await page.evaluate(() => ({ gal: document.documentElement.getAttribute('data-gal'), pincol: document.documentElement.hasAttribute('data-pincol'), hidden: document.getElementById('bgal').hidden }));
-      assert.deepEqual(rest, { gal: null, pincol: false, hidden: true }, '1800 with 0 pages: #bgal hidden at rest');
-      const during = await drag(tab, await grip(bar(page, 'beta')), () => center(page.locator('#bgal .gal-plus')), async () => {
-        await until(() => page.locator('#bgal').isVisible(), '1800 drag shows #bgal');
-        const p = await center(page.locator('#bgal .gal-plus'));
+      assert.deepEqual(rest, { gal: null, pincol: false, hidden: true }, '1800 Band 3 with 0 pages: #bgal hidden at rest');
+      const during = await drag(tab, await grip(bar(page, 'beta')), () => center(page.locator('#bgal .gal-dot.empty')), async () => {
+        await until(() => page.locator('#bgal .gal-rail').isVisible(), '1800 drag shows fused narrow rail');
+        const p = await center(page.locator('#bgal .gal-dot.empty'));
         await tab.mouse.move(p.x, p.y, { steps: 6 });
-        await until(() => page.evaluate(() => document.querySelector('#bgal .gal-plus').classList.contains('drop')), '1800 .gal-plus lights as drop target');
-        return page.evaluate(() => ({ gal: document.documentElement.getAttribute('data-gal'), width: Math.round(document.getElementById('bgal').getBoundingClientRect().width), plusDrop: document.querySelector('#bgal .gal-plus').classList.contains('drop') }));
+        await until(() => page.evaluate(() => document.querySelector('#bgal .gal-dot.empty').classList.contains('drop')), '1800 + dot lights as drop target');
+        return page.evaluate(() => ({ gal: document.documentElement.getAttribute('data-gal'), pincol: document.documentElement.hasAttribute('data-pincol'), drop: document.querySelector('#bgal .gal-dot.empty').classList.contains('drop') }));
       });
-      assert.equal(during.gal, 'drag', '1800 drag sets data-gal="drag"');
-      assert(during.width >= 360, '1800 drag overlay width >= 360px (not 140px): ' + JSON.stringify(during));
-      assert.equal(during.plusDrop, true, '1800 drag over .gal-plus lights it');
-      await until(async () => JSON.stringify(await pages(page)) === '[["beta"]]', '1800 drop onto .gal-plus docks beta onto Page 1');
-      done.push('1800 zero pages: hidden at rest, drag overlay >= 360px, drop onto .gal-plus docks');
+      assert.deepEqual(during, { gal: 'narrow', pincol: false, drop: true }, '1800 Band 3 drag uses fused narrow rail and + dot');
+      await until(async () => JSON.stringify(await pages(page)) === '[["beta"]]', '1800 drop onto + dot docks beta onto Page 1');
+      done.push('1800 Band 3 zero pages: hidden at rest, fused narrow rail on drag, drop onto + dot docks');
       assert.deepEqual(errors, [], 'no page errors (1800 zero pages)');
       await context.close();
     }
@@ -1211,6 +1211,87 @@ async function routeTerminal(context) {
       await context.close();
     }
     // ---- captures for the side-by-side review with mockup v4 (opt-in) ----
+    // Icon capsules keep their page controls while showing state and card
+    // glyphs; a second page exercises the five-icon cap and overflow badge.
+    {
+      await fetch(control + '/open-gamma');
+      const T = n => ({ topic: n }), C = n => ({ card: n });
+      const S = (a, b) => ({ axis: 'col', ratio: 0.5, a, b });
+      const record = { cards: [
+        { id: 'pill-term', kind: 'terminal', pinned: 3, data: { tid: TID, cwd: '/tmp/galterm' } },
+        { id: 'pill-files', kind: 'explorer', pinned: 8, data: {} },
+      ], topics: ['alpha', 'beta', 'deep', 'gamma', 'epsilon', 'zeta'].map((n, i) => ({ n, p: i < 2 ? i + 1 : i + 2, a: 0, b: 0 })),
+        gallery: { v: 1, active: 'p1', pages: [
+          { id: 'p1', root: S(T('alpha'), T('beta')) },
+          { id: 'p2', root: [C('pill-term'), T('deep'), T('gamma'), T('epsilon'), T('zeta'), C('pill-files')].reduceRight((tail, leaf) => tail ? S(leaf, tail) : leaf, null) },
+        ], rev: 1 } };
+      const pillsShots = process.env.WS_GALLERY_PILLS_SHOTS;
+      if (pillsShots) fs.mkdirSync(pillsShots, { recursive: true });
+      for (const theme of ['dark', 'light']) for (const width of [1280, 1640, 1920, 2560]) {
+        const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: theme, locale: 'en-US', reducedMotion: 'reduce' });
+        await routeTerminal(context);
+        await context.addInitScript(({ key, value }) => {
+          try {
+            if (localStorage.getItem('pill-seeded')) return;
+            localStorage.setItem(key, JSON.stringify(value));
+            localStorage.setItem('pill-seeded', '1');
+            localStorage.removeItem('ws.dashboard.layout');
+          } catch (e) { /* sandboxed content frames have opaque origins */ }
+        }, { key: KEY, value: record });
+        const { tab, page, errors } = await open(context, 'livesession');
+        const capsules = page.locator('#bgal .gal-dot.page');
+        await until(async () => await capsules.count() === 2, `two icon capsules ${theme}/${width}: ` + JSON.stringify(await pages(page)));
+        assert.deepEqual(await capsules.first().locator('use').evaluateAll(nodes => nodes.map(n => n.getAttribute('href'))), ['#i-st-research', '#i-st-wait']);
+        const page2Icons = await capsules.nth(1).locator('use').evaluateAll(nodes => nodes.map(n => n.getAttribute('href')));
+        assert.deepEqual(page2Icons.slice(0, 4), ['#l-square-terminal', '#i-st-impl', '#i-st-discuss', '#i-st-confirm']);
+        assert.match(page2Icons[4], /^#i-/);
+        assert.equal(await capsules.nth(1).locator('.gal-dot-more').textContent(), '+1');
+        assert.equal(await capsules.nth(1).locator('.gal-dot-icon').count(), 5);
+        assert.equal(await capsules.first().getAttribute('aria-current'), 'page');
+        const colors = await capsules.evaluateAll(nodes => nodes.map(n => ({ background: getComputedStyle(n).backgroundColor, border: getComputedStyle(n).borderTopColor,
+          icon: getComputedStyle(n.querySelector('.gal-dot-icon')).color, text: getComputedStyle(n).color })));
+        assert.notEqual(colors[0].background, colors[1].background, `${theme}/${width}: active capsule has a tinted surface`);
+        assert.notEqual(colors[0].border, colors[1].border, `${theme}/${width}: active capsule has a primary border`);
+        assert.notEqual(colors[0].icon, colors[0].text, `${theme}/${width}: topic state color survives active styling`);
+        const gal = await page.evaluate(() => document.documentElement.getAttribute('data-gal'));
+        assert.equal(gal, width === 2560 ? 'col' : 'narrow', `${theme}/${width}: responsive gallery band`);
+        const geometry = await page.evaluate(() => {
+          const box = s => { const e = document.querySelector(s), r = e && e.getBoundingClientRect(); return r && { l: r.left, r: r.right, t: r.top, b: r.bottom }; };
+          return { viewport: innerWidth, rail: box('.dbody > .rail'), stage: box('.dbody > .dgrid'), gallery: box('#bgal'), capsule: box('#bgal .gal-dot.page.active') };
+        });
+        assert(geometry.capsule.l >= geometry.gallery.l && geometry.capsule.r <= geometry.gallery.r, `${theme}/${width}: capsule stays inside gallery`);
+        assert(geometry.gallery.l >= 0 && geometry.gallery.r <= width + 1, `${theme}/${width}: gallery stays inside viewport`);
+        if (width >= 1600) assert(geometry.rail.r <= geometry.stage.l + 1, `${theme}/${width}: rail does not overlap stage`);
+        if (width === 2560) assert(geometry.stage.r <= geometry.gallery.l + 1, `${theme}/${width}: pinned gallery does not overlap stage`);
+        await capsules.nth(1).click();
+        await until(async () => await pos(page) === 1, 'icon capsule switches page');
+        assert.equal(await capsules.nth(1).getAttribute('aria-current'), 'page');
+        await capsules.first().focus();
+        await tab.keyboard.press('Enter');
+        await until(async () => await pos(page) === 0, 'keyboard activates icon capsule');
+        if (theme === 'dark' && width === 1920) {
+          const overflow = await page.evaluate(() => {
+            const list = document.querySelector('#bgal .gal-dots'), plus = list.lastElementChild, sample = list.querySelectorAll('.gal-dot.page')[1];
+            const extras = Array.from({ length: 40 }, () => sample.cloneNode(true));
+            extras.forEach(e => list.insertBefore(e, plus));
+            const scrollable = list.scrollHeight > list.clientHeight;
+            list.scrollTop = list.scrollHeight;
+            const a = plus.getBoundingClientRect(), b = list.getBoundingClientRect();
+            const reachable = a.top >= b.top && a.bottom <= b.bottom;
+            extras.forEach(e => e.remove());
+            return { scrollable, reachable, height: list.clientHeight, content: list.scrollHeight };
+          });
+          assert(overflow.scrollable && overflow.reachable, 'many page capsules leave + reachable by scrolling: ' + JSON.stringify(overflow));
+        }
+        if (pillsShots) {
+          await page.waitForTimeout(300);
+          await tab.screenshot({ path: path.join(pillsShots, `${theme}-${width}.png`) });
+        }
+        assert.deepEqual(errors, [], `${theme}/${width}: page errors`);
+        await context.close();
+      }
+      done.push('icon-array capsules: state/card glyphs, five-icon cap, overflow, active theme styling, page controls, four responsive widths');
+    }
     const captures = process.env.WS_GALLERY_CAPTURES, mockup = process.argv[4] || '';
     if (captures) {
       fs.mkdirSync(captures, { recursive: true });
