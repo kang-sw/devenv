@@ -611,6 +611,9 @@
     "261120-research-ws-daemon-supervision-http-attach": {
       "registered_at": "2026-11-20T12:40:36Z"
     },
+    "261121-bug-ws-agy-mcp-session-413-no-reconnect": {
+      "registered_at": "2026-11-20T16:22:31Z"
+    },
     "261121-bug-ws-dogfood-context-routing-gaps": {
       "registered_at": "2026-11-20T15:10:45Z",
       "lease": {
