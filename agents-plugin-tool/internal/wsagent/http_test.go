@@ -165,7 +165,10 @@ func TestRESTRoutesEndToEnd(t *testing.T) {
 	}
 	p.events <- Event{TurnEnd: true}
 
-	if r := d.post("/agents/"+id+"/settings", map[string]string{"model": "sonnet", "effort": "high"}); r.status != http.StatusOK || decodeState(t, r).Model != "sonnet" {
+	if r := d.post("/agents/"+id+"/settings", map[string]string{"model": "sonnet", "effort": "high"}); r.status != http.StatusForbidden {
+		t.Fatalf("settings without dashboard origin = %d %s, want 403", r.status, r.body)
+	}
+	if r := d.do(http.MethodPost, "/agents/"+id+"/settings", d.base, "application/json", map[string]string{"model": "sonnet", "effort": "high"}); r.status != http.StatusOK || decodeState(t, r).Model != "sonnet" {
 		t.Fatalf("settings: %d %s", r.status, r.body)
 	}
 	if r := d.post("/agents/"+id+"/stop", nil); r.status != http.StatusOK || decodeState(t, r).Process {

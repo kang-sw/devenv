@@ -57,6 +57,7 @@ type planUsageStore struct {
 	lifetimeCancel context.CancelFunc
 	closed         bool
 	hist           planUsageHistoryMemo
+	codexHist      planUsageHistoryMemo
 	// agy state is kept separate from Claude/Codex so plan-usage.json and
 	// plan-usage-history.json stay byte-identical (T0). All fields below
 	// except resolveAgy, agyDebounce, agyTimeout, agyEnv, and now are guarded by mu.
@@ -441,6 +442,9 @@ func (d *Daemon) handlePlanUsage(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("history") == "1" {
 		now := d.planUsage.nowTime().UnixMilli()
 		body["history"] = d.planUsage.historyView(entries, now)
+		if codexHist, ok := d.planUsage.codexFiveHourHistoryView(entries, now); ok {
+			body["codexFiveHourHistory"] = codexHist
+		}
 		for _, e := range entries {
 			if e.Harness == "agy" {
 				body["agyHistory"] = d.planUsage.agyHistoryView(entries, now)

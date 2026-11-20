@@ -86,8 +86,8 @@ type conv struct {
 	compactPrevTokens, compactPrevWindow                                         int64
 	compactGen                                                                   uint64
 	compactLoaded                                                                bool
-	compactUsageFresh, compactAdvised, compactHardIssued, compactAdvisoryEnabled bool
-	compactAwaitTurn                                                             bool
+	compactUsageFresh, compactAdvised, compactM1Issued, compactM2Issued, compactHardIssued, compactAdvisoryEnabled bool
+	compactAwaitTurn                                                                                               bool
 
 	// Agy model-wait watchdog state (loop-owned, in-memory only).
 	modelWaitTimeout            time.Duration
@@ -772,6 +772,7 @@ func (c *conv) stateWithKeyCheck(checkKey bool) State {
 		caps := c.caps.clone()
 		st.Capabilities = &caps
 	}
+	st.IsChild = c.r.isChildRecord(c.rec)
 	return c.r.permissionState(st, c.rec, c.dir)
 }
 
@@ -1037,6 +1038,16 @@ func (c *conv) applyCoalesced(ev wslive.Event, quiet bool) {
 func (c *conv) applyMode(ev wslive.Event, quiet, coalesceTurnEnd bool) {
 	if !quiet {
 		c.observeCompaction(ev)
+	}
+	if ev.Kind == wslive.KindStatus && ev.Context != nil && ev.Context.Compaction == nil {
+		if !quiet {
+			c.refreshCompaction()
+		}
+		if comp := c.usageCompaction(ev.Context.Window); comp != nil {
+			ctx := *ev.Context
+			ctx.Compaction = comp
+			ev.Context = &ctx
+		}
 	}
 	if ev.Kind == wslive.KindReset {
 		c.spawnDirty = true

@@ -39,12 +39,21 @@ func TestLucideIconsAreVendoredWithTheirLicense(t *testing.T) {
 		scripts.Write(raw)
 	}
 	js := scripts.String()
+	bandSrc, err := os.ReadFile("pageview_band.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmplSrc, err := os.ReadFile("assets/dashboard.tmpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	allUsed := js + "\n" + string(bandSrc)
 	for _, name := range names {
 		if !strings.Contains(string(sprite), `<symbol id="l-`+name+`" viewBox="0 0 24 24">`+body[name]+`</symbol>`) || body[name] == "" || strings.Contains(body[name], "<svg") {
 			t.Errorf("the sprite lacks a clean symbol for %s", name)
 		}
-		if !strings.Contains(js, `"`+name+`"`) {
-			t.Errorf("the vendored icon %s is drawn by no script", name)
+		if !strings.Contains(allUsed, `"`+name+`"`) && !strings.Contains(string(tmplSrc), `#l-`+name) {
+			t.Errorf("the vendored icon %s is drawn by no script, template, or band renderer", name)
 		}
 	}
 	vendored := map[string]bool{}

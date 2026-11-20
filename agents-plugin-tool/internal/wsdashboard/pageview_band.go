@@ -10,16 +10,15 @@ import (
 )
 
 // The status band around the live page's composer: the context bar above the
-// message box, and the folder, usage limits, and cost on one line below it.
+// message box and its derived session-hover cost. The composer footer below the
+// message box now holds the slim model/effort control strip (r-sline is empty).
 // The figures are the snapshot's usage (what the host adapter last reported)
-// and repo (what ws-mcp read; the band shows only its folder, since the git
-// handle shows the branch); a part with no figure is left out. Times stay epoch milliseconds: the page formats a
-// limit's reset and computes its pace, so the band's HTML changes only when
-// a figure does.
+// and repo (what ws-mcp read for gitbadge follow).
 
 const (
-	// bandWarnPercent and bandCritPercent are where the context bar and a
-	// usage limit turn warning and critical.
+	// bandWarnPercent and bandCritPercent are fallback thresholds for the
+	// context bar when no resolved ws compaction thresholds exist (e.g.
+	// external terminal and handed-off sessions).
 	bandWarnPercent = 80
 	bandCritPercent = 95
 )
@@ -29,66 +28,67 @@ type BandView struct {
 	// Context is the context bar; nil without a context figure.
 	Context *ContextBar
 	// Repo is the snapshot's repo figures; nil before ws-mcp's first read.
-	// The band shows its folder; the stream hands the rest to the git
-	// handle's follow.
 	Repo *wslive.Repo
-	// Limits are the usage limit chips, the 5-hour limit first.
+	// Limits are retained on BandView for snapshot callers, though r-sline no
+	// longer renders footer quota chips.
 	Limits []LimitChip
-	// Cost is the cost chip's text; empty without a cost figure.
+	// Cost is the cost text (used by the rail row hover card).
 	Cost string
 }
 
 // Empty reports a band with nothing to show below the composer.
 func (b BandView) Empty() bool {
-	return (b.Repo == nil || b.Repo.Folder == "") && len(b.Limits) == 0 && b.Cost == ""
+	return true
 }
 
-// ContextBar is the context usage bar.
+// ContextBar is the context usage bar, scaled to ws compaction hard point when
+// available or the native context window otherwise.
 type ContextBar struct {
-	// Known reports a percent; without one the bar shows "?" (the host does
-	// not know its context size, as after a compaction).
+	// Known reports a known current token count; without one the bar shows "?".
 	Known bool
-	// Percent is the rounded percent; Fill the bar's width, clamped to 100.
+	// Percent is the rounded unclamped percent; Fill is clamped 0..100 for
+	// aria-valuenow; FillWidth is the clamped percent formatted for CSS width.
 	Percent, Fill int
-	// Level is "", "warn", or "crit".
+	FillWidth     string
+	// Level is "", "warn", "d-hot", "crit", or "d-unknown".
 	Level string
-	// Tokens is "<tokens> / <window>", either side "?" when unknown.
+	// Tokens is "<current> / <target>" (e.g. "51,293 / 180K" or "? / 180K").
 	Tokens string
-	// Cache is the last response's cache hit rate ("92%"); empty when
-	// unknown.
+	// Native is the optional native window parenthetical (e.g. "1.0M"), omitted
+	// when target == native or native is unknown.
+	Native string
+	// FullTokens is Tokens plus " (<Native>)" when Native is non-empty.
+	FullTokens string
+	// Cache is the last response's cache hit rate ("92%"); empty when unknown.
 	Cache string
+	// Dynamic boundary tick positions in percent (0..100, "%.1f"), empty if absent.
+	SoftPct       string
+	MilestonePcts []string
+	// Floating boundary icon above ONLY the highest crossed threshold.
+	FloatIcon     string
+	FloatLeft     string
+	FloatAtHard   bool
+	FloatColor    string
+	FloatTitleKey string
+	FloatTitleArg string
+	// Tip breakdown values for .ctx-tip.
+	TipCurrent string
+	TipSoft    string
+	TipM1      string
+	TipM2      string
+	TipHard    string
+	TipNative  string
 }
 
-// Flag is the bar's warning word.
-func (c ContextBar) Flag() string {
-	switch c.Level {
-	case "crit":
-		return "near limit"
-	case "warn":
-		return "high"
-	}
-	return ""
-}
-
-// LimitChip is one usage limit chip: "42%/18:00 (+5%)" for the 5-hour
-// limit, "17%/Sun (-72%)" for the weekly one.
+// LimitChip is retained for compatibility with BandView callers.
 type LimitChip struct {
-	// Kind is wslive.LimitFiveHour or wslive.LimitSevenDay; Name is its
-	// words for a title.
 	Kind, Name string
 	Percent    int
 	Level      string
-	// ResetsAt is the reset (epoch ms; 0 unknown) and ResetFormat the page's
-	// format for it: a clock time for the 5-hour limit, a weekday for the
-	// weekly one. ResetText is its fallback text (UTC).
-	ResetsAt               int64
+	ResetsAt   int64
 	ResetFormat, ResetText string
-	// WindowSec is the limit's window, which the page's pace reads.
-	WindowSec int64
-	// Both marks a chip shown beside the other limit's; Hi the one of the
-	// two under more pressure (higher percent, a tie keeping the 5-hour
-	// limit), which alone stays on a narrow band.
-	Both, Hi bool
+	WindowSec  int64
+	Both, Hi   bool
 }
 
 // bandView builds the band from a snapshot.
@@ -132,22 +132,125 @@ func level(pct int) string {
 	return ""
 }
 
+func fmtPct(num, denom int64) string {
+	if denom <= 0 {
+		return ""
+	}
+	p := float64(num) / float64(denom) * 100
+	if p < 0 {
+		p = 0
+	} else if p > 100 {
+		p = 100
+	}
+	return strconv.FormatFloat(p, 'f', 1, 64)
+}
+
 func contextBar(c wslive.UsageContext) *ContextBar {
-	bar := &ContextBar{}
-	if c.Percent != nil {
+	bar := &ContextBar{FillWidth: "0.0", Level: "d-unknown"}
+	comp := c.Compaction
+	var hard, soft int64
+	var m1, m2 int64
+	if comp != nil {
+		soft, hard = comp.Soft, comp.Hard
+		if len(comp.Milestones) >= 2 {
+			m1, m2 = comp.Milestones[0], comp.Milestones[1]
+		}
+	}
+	denom := c.Window
+	if hard > 0 {
+		denom = hard
+	}
+	if denom > 0 {
+		if soft > 0 && soft < denom {
+			bar.SoftPct = fmtPct(soft, denom)
+		}
+		if hard > 0 && m1 > 0 && m2 > 0 && m1 < denom && m2 < denom {
+			bar.MilestonePcts = []string{fmtPct(m1, denom), fmtPct(m2, denom)}
+		}
+	}
+
+	if c.Tokens != nil && denom > 0 {
+		cur := *c.Tokens
+		exactPct := float64(cur) / float64(denom) * 100
+		bar.Known = true
+		bar.Percent = int(math.Round(exactPct))
+		clamped := math.Min(100, math.Max(0, exactPct))
+		bar.Fill = min(max(bar.Percent, 0), 100)
+		bar.FillWidth = strconv.FormatFloat(clamped, 'f', 1, 64)
+		bar.Level = ""
+		if hard > 0 {
+			switch {
+			case cur >= hard:
+				bar.Level = "crit"
+				bar.FloatIcon = "zap"
+				bar.FloatAtHard = true
+				bar.FloatColor = "var(--wb-fail)"
+				bar.FloatTitleKey = "band.ctx.boundary.hard"
+				bar.FloatTitleArg = tokenCount(hard)
+			case m2 > 0 && cur >= m2:
+				bar.Level = "d-hot"
+				bar.FloatIcon = "bell-ring"
+				bar.FloatLeft = fmtPct(m2, denom)
+				bar.FloatColor = "var(--wb-hot)"
+				bar.FloatTitleKey = "band.ctx.boundary.m2"
+				bar.FloatTitleArg = tokenCount(m2)
+			case m1 > 0 && cur >= m1:
+				bar.Level = "warn"
+				bar.FloatIcon = "bell"
+				bar.FloatLeft = fmtPct(m1, denom)
+				bar.FloatColor = "var(--wb-warn)"
+				bar.FloatTitleKey = "band.ctx.boundary.m1"
+				bar.FloatTitleArg = tokenCount(m1)
+			case soft > 0 && cur >= soft:
+				bar.Level = "warn"
+				bar.FloatIcon = "info"
+				bar.FloatLeft = fmtPct(soft, denom)
+				bar.FloatColor = "var(--wb-warn)"
+				bar.FloatTitleKey = "band.ctx.boundary.soft"
+				bar.FloatTitleArg = tokenCount(soft)
+			}
+		} else {
+			bar.Level = level(bar.Percent)
+		}
+		bar.TipCurrent = commafy(cur)
+	} else if c.Tokens != nil && c.Percent != nil {
 		bar.Known = true
 		bar.Percent = int(math.Round(*c.Percent))
 		bar.Fill = min(max(bar.Percent, 0), 100)
+		bar.FillWidth = strconv.FormatFloat(float64(bar.Fill), 'f', 1, 64)
 		bar.Level = level(bar.Percent)
+		bar.TipCurrent = commafy(*c.Tokens)
 	}
-	tokens, window := "?", "?"
+
+	curText, targetText := "?", "?"
 	if c.Tokens != nil {
-		tokens = commafy(*c.Tokens)
+		curText = commafy(*c.Tokens)
+	}
+	if denom > 0 {
+		targetText = tokenCount(denom)
+	}
+	bar.Tokens = curText + " / " + targetText
+	if c.Window > 0 && denom > 0 && denom != c.Window {
+		bar.Native = tokenCount(c.Window)
+		bar.FullTokens = bar.Tokens + " (" + bar.Native + ")"
+	} else {
+		bar.FullTokens = bar.Tokens
+	}
+	if soft > 0 {
+		bar.TipSoft = tokenCount(soft)
+	}
+	if m1 > 0 && m2 > 0 {
+		bar.TipM1 = tokenCount(m1)
+		bar.TipM2 = tokenCount(m2)
+	}
+	if hard > 0 {
+		bar.TipHard = tokenCount(hard)
 	}
 	if c.Window > 0 {
-		window = tokenCount(c.Window)
+		bar.TipNative = tokenCount(c.Window)
+	} else if denom > 0 {
+		bar.TipNative = tokenCount(denom)
 	}
-	bar.Tokens = tokens + " / " + window
 	if c.CacheHit != nil {
 		bar.Cache = strconv.Itoa(int(math.Round(*c.CacheHit))) + "%"
 	}
@@ -205,12 +308,12 @@ func commafy(n int64) string {
 	return string(out)
 }
 
-// tokenCount is a window size: "300K", "1M", "1.5M", or the plain number
-// when it is not a round thousand.
+// tokenCount is a window or threshold size: "180K", "1.0M", "1.5M", or the
+// comma-formatted number when it is not a round thousand.
 func tokenCount(n int64) string {
 	switch {
 	case n >= 1_000_000 && n%1_000_000 == 0:
-		return strconv.FormatInt(n/1_000_000, 10) + "M"
+		return strconv.FormatInt(n/1_000_000, 10) + ".0M"
 	case n >= 1_000_000:
 		return strconv.FormatFloat(float64(n)/1_000_000, 'f', 1, 64) + "M"
 	case n >= 1_000 && n%1_000 == 0:

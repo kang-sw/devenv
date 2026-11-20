@@ -252,5 +252,14 @@ func cloneUsageContext(ctx *wslive.UsageContext) *wslive.UsageContext {
 		v := *ctx.CacheHit
 		c.CacheHit = &v
 	}
+	if ctx.Compaction != nil {
+		comp := *ctx.Compaction
+		if len(comp.Milestones) > 0 {
+			comp.Milestones = append([]int64(nil), comp.Milestones...)
+		} else {
+			comp.Milestones = nil
+		}
+		c.Compaction = &comp
+	}
 	return &c
 }

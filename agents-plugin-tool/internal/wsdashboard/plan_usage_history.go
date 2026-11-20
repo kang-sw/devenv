@@ -9,12 +9,15 @@ import (
 	"sort"
 	"strconv"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 const (
-	planUsageHistoryCache = "plan-usage-history.json"
-	planUsageHistoryAge   = 14 * 24 * time.Hour
-	planUsageHistoryCap   = 5000
+	planUsageHistoryCache      = "plan-usage-history.json"
+	planUsageCodexHistoryCache = "plan-usage-codex-history.json"
+	planUsageHistoryAge        = 14 * 24 * time.Hour
+	planUsageHistoryCap        = 5000
 )
 
 // Only these fields cross the viewer boundary. Extensions in the private file
@@ -51,6 +54,20 @@ var defaultHistorySpec = planUsageHistorySpec{
 	cacheName:    planUsageHistoryCache,
 	valid:        validPlanUsageSample,
 	requiredKeys: []string{"harness", "kind", "source", "resetsAt", "asOf", "percent"},
+}
+
+var codexFiveHourHistorySpec = planUsageHistorySpec{
+	cacheName:    planUsageCodexHistoryCache,
+	valid:        validCodexFiveHourSample,
+	requiredKeys: []string{"harness", "kind", "source", "resetsAt", "asOf", "percent"},
+}
+
+func validCodexFiveHourSample(v planUsageSample) bool {
+	if v.Group != "" {
+		return false
+	}
+	sourceOK := v.Harness == "codex" && (v.Source == "via Codex CLI" || v.Source == "via Pi")
+	return sourceOK && v.Kind == wslive.LimitFiveHour && v.AsOf > 0 && v.ResetsAt >= 0 && validUsage(v.Percent)
 }
 
 func validPlanUsageSample(v planUsageSample) bool {
@@ -376,6 +393,47 @@ func (s *planUsageStore) historyView(entries []planUsageEntry, now int64) json.R
 		}
 	}
 	return s.historyFileView(&s.hist, defaultHistorySpec, filtered, now)
+}
+
+func (s *planUsageStore) codexFiveHourHistory(now int64) planUsageHistoryProjection {
+	if s == nil {
+		return planUsageHistoryProjection{SchemaVersion: 1, Status: "empty", Samples: []planUsageSample{}}
+	}
+	return s.historyFile(&s.codexHist, codexFiveHourHistorySpec, now)
+}
+
+// codexFiveHourHistoryView returns the projected ?history=1 member for Codex
+// five-hour windows, and reports whether any non-expired Codex five-hour
+// samples exist in the separate history file.
+func (s *planUsageStore) codexFiveHourHistoryView(entries []planUsageEntry, now int64) (json.RawMessage, bool) {
+	if s == nil {
+		return nil, false
+	}
+	var filtered []planUsageEntry
+	for _, e := range entries {
+		if e.Harness != "codex" {
+			continue
+		}
+		var windows []planUsageWindow
+		for _, w := range e.Windows {
+			if w.Kind == wslive.LimitFiveHour {
+				windows = append(windows, w)
+			}
+		}
+		if len(windows) > 0 {
+			copyEntry := e
+			copyEntry.Windows = windows
+			filtered = append(filtered, copyEntry)
+		}
+	}
+	s.mu.Lock()
+	h, err := s.readHistoryFileLocked(&s.codexHist, codexFiveHourHistorySpec)
+	hasSamples := err == nil && len(prunePlanUsageHistory(h.Records, now)) > 0
+	s.mu.Unlock()
+	if !hasSamples {
+		return nil, false
+	}
+	return s.historyFileView(&s.codexHist, codexFiveHourHistorySpec, filtered, now), true
 }
 
 func (s *planUsageStore) historyFileView(memo *planUsageHistoryMemo, spec planUsageHistorySpec, entries []planUsageEntry, now int64) json.RawMessage {
