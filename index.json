@@ -599,7 +599,14 @@
       "registered_at": "2026-11-20T12:21:26Z"
     },
     "261120-feat-ws-agy-usage-activity-trigger": {
-      "registered_at": "2026-11-20T12:38:30Z"
+      "registered_at": "2026-11-20T12:38:30Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-20T12:50:22Z"
+      }
     },
     "261120-feat-ws-dashboard-composer-controls-and-context-meter": {
       "registered_at": "2026-11-20T11:46:21Z",
