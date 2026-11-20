@@ -207,6 +207,18 @@ against `develop` at `a858d67b0`.
   (`internal/wsagent/runner_events.go:754-802,875-894,977-1027`). Rejected:
   making interrupt kill the held process.
 
+- **(1862)=a, owner 2026-11-20: inherited cursor writes are approved for this
+  merge under performance manual Rule 8.** Newly held workers inherit the
+  held-lead per-entry and dirty-heartbeat `HolderSeq` whole-record writes.
+  The measured extra cost is one `agent.json` replacement per final ring
+  line and one per dirty heartbeat; snapshot-only streaming adds none.
+  Removal is tracked in the `261119-epic-ws-daemon-sqlite-storage` metadata
+  bundle (`agent.json` to SQLite), rather than adding a separate cursor store
+  here. Rejected: an append-only recovery-cursor redesign in this ticket,
+  which broadens storage design and delays the priority continuity change.
+  The lead authorized deferring the Windows antivirus baseline to its
+  post-merge smoke-host measurement before the next ship.
+
 ## Constraints
 
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
@@ -266,7 +278,8 @@ against `develop` at `a858d67b0`.
   child report.
 - A configured holder failure refuses launch; it must not silently fall back
   to daemon ownership. Keep steady-state handling memory-first and add no
-  per-message, per-timer, or per-turn whole-file rewrite.
+  per-message, per-timer, or per-turn whole-file rewrite beyond the inherited
+  cursor behavior explicitly approved in Decision (1862).
 - Preserve the bounded holder ring and agy's existing thought-chunk filter.
   Windows survival remains conditional on the holder being restart-safe; a
   non-restart-safe holder must settle honestly rather than claim survival.
@@ -429,6 +442,31 @@ against `develop` at `a858d67b0`.
    convergence, which Phase 2 completes on re-upgrade; the retention assertion
    pins its owner-approved 7-day prune exception.
 
+### Result (db600b926) - 2026-11-20
+
+All four worker backends use the common `agent-worker` descriptor and held
+lifecycle; live legacy `pi-worker` descriptors remain accepted and unfenced.
+Ownership validation gates protocol consumption and capability/HTTP-MCP
+restoration. Attach uses the child's persisted authority; parent admission
+runs after loading records and governs only the next launch. One shared held
+predicate protects startup/status/projection and registration pruning.
+
+The directional fixture runs real old-source runner/registry code from
+`f2234e573` in an isolated extraction with fake holders. It passed: the old
+reader does not attach, rewrite, or stop the fenced child; it releases and
+rewrites a held conversation parent, prunes only past seven-day retention,
+and rejoins an unfenced legacy Pi worker without duplicate launch or stop.
+Current ownership-mismatch fixtures cover descriptor fields and PID and keep
+foreign holders alive even when replay contains oversized protocol output.
+
+Compatibility remains Decision (1855): T1 only for the surviving child row;
+T2 convergence for the whole surface with the explicit aged-history-loss
+exception. Old read/write sites are pinned by the fixture; current readers
+are `Record.handedOff`, `HeldAgentWorker`, and `holdersScanned`; guarded
+recovery is `downgradeSettledChild`/`retireDowngradedWorker`. Existing direct
+non-Pi sleeping workers retain their next-launch missing-parent refusal;
+orphan cleanup generalization applies to held workers.
+
 ### Phase 2: Prove replacement continuity and update the operations contract
 
 1. Add provider-free replacement coverage for Claude, Codex, agy, and Pi.
@@ -496,65 +534,24 @@ against `develop` at `a858d67b0`.
    steady-state file-operation deltas; measure on the Windows antivirus
    baseline only if counts change.
 
-## Implementation checkpoint - 2026-11-20
 
-Branch `impl/develop/argue-shove-coil`, implementation range
-`f2234e573..db600b926`, contains the common holder descriptor and lifecycle,
-validated pre-protocol-replay ownership gate, original worker HTTP-MCP tuple
-restoration, downgrade retirement, four-backend replacement tests, the pinned
-old-source downgrade fixture, and operations documentation. The shared daemon
-and live holders have not been replaced or stopped. No phase is marked complete
-while the following contract conflict remains unresolved.
+## Verification checkpoint - 2026-11-20
 
-**Performance contract conflict.** Generalizing the existing Pi applied-cursor
-path to previously direct workers adds whole `agent.json` replacements:
-`runner_process.go:769-785` persists the cursor on ring-producing lines, and
-`runner_conv.go:638-644` persists a dirty cursor at heartbeat. The existing
-`TestTranscriptStreamingOnlyPersistsRingLineCursor` pins that behavior. Direct
-workers previously supplied sequence zero, which bypassed those writes.
-Reusing this path satisfies the replay decision but conflicts with the
-constraint against added per-message/per-timer/per-turn whole-file rewrites
-and performance manual Rules 2 and 8. Removing durable cursor writes without a
-replacement recovery design would weaken replay deduplication. The lead must
-resolve the conflict through an owner-approved exception or a revised durable
-cursor design; neither is assumed here.
+Implementation and fixes are committed through `8609a54dc`; Phase 2 awaits
+its final full MCP and worker-suite results before closure. The single lite
+review's Stop-error defect is fixed, its early-bearer finding is disproved by
+control-flow and gated-scan tests, and its performance finding is accepted in
+Decision (1862). The lead's delta-review queued-mail finding is fixed by
+re-signaling input after retirement succeeds, with a no-restart regression.
+Focused retirement/mail tests passed (0.820s). Full worker validation at the
+previous test checkpoint passed (249.088s), but both full suites are rerunning
+on the final production input. The shared daemon and live holders remain
+untouched.
 
-Instrumented fixture measurements (macOS, no antivirus baseline):
-
-| Action | Before | After | Scope |
-|---|---:|---:|---|
-| Pi launch | 71 | 71 | Instrumented file operations, fake holder |
-| Pi rejoin | 25 | 29 | Instrumented file operations, fake holder |
-| 100 status/kick checks | 0 | 0 | Instrumented file operations |
-| 200 snapshot-only output lines | 0 | 0 | Direct sequence zero versus held sequence, file operations |
-| One final transcript ring line | 3 | 5 | Same direct/held comparison; record replacements 0 to 1 |
-| Dirty-cursor heartbeat | 0 | 2 | Same direct/held comparison; record replacements 0 to 1 |
-
-The direct/held diagnostic used a temporary Go overlay around the real
-`conv.handle`, `lineEnd`, and `persistSeq` path, with snapshot writes stubbed
-as in the existing hot-path test. Counters measure instrumented APIs, not all
-OS syscalls or holder-process I/O. The startup/rejoin fixture avoids disk
-polling and is tracked in `worker_holder_io_test.go`. These results do not
-establish Windows antivirus cost or latency; that required baseline remains
-unavailable.
-
-Verification read so far, with `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`:
-
-- Full `internal/wsagent`: pass (145.550s); focused replacement, downgrade,
-  ownership, lifecycle, approval, and nested Pi race tests: pass (2.729s).
-- Full `internal/mcp -timeout 45m`: pass (1022.289s) on an earlier core
-  checkpoint. Later core edits require a final rerun before closure.
-- `internal/wsholder`: pass (9.321s); `internal/execjob`: pass (24.135s);
-  `internal/wsstate`: pass (5.114s); dashboard retention test: pass. An initial
-  process test command named nonexistent `internal/wsproc`; the corrected
-  process package is `internal/execjob`.
-- Windows cross-target vet of wsagent, wsdashboard, wsholder, execjob, and
-  wsstate: pass. This is not Windows execution evidence.
-- `go build -o /tmp/ws-worker-holders-validation ./cmd/ws-mcp`: pass; the
-  binary was neither installed nor executed.
-- Directional old-source fixture at `f2234e573`: pass for fenced child
-  non-attachment/non-rewrite/non-stop, parent release, aged pruning, and
-  legacy Pi adoption.
-
-One allocated lite review is in progress. Its findings and any resulting fixes
-will be recorded before the worker reports. The ticket remains in `ready/`.
+Windows AV baseline is deferred to a lead-owned post-merge measurement on the
+Windows smoke host before the next ship. The instrumented macOS fixture
+counts are launch 71 to 71, rejoin 25 to 29, and 100 idle status/kick checks
+0 to 0. Direct versus held streaming: 25 final ring lines change 0 to 25
+record replacements and 75 to 125 instrumented operations; one dirty cursor
+heartbeat changes 0 to 1 replacements and 0 to 2 operations; 200 snapshot
+lines remain zero. Real-holder spawn filesystem cost is outside the fixture.
