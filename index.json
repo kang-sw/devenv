@@ -635,7 +635,14 @@
       "registered_at": "2026-11-20T11:31:45Z"
     },
     "261120-feat-ws-dashboard-rail-workspace-admission": {
-      "registered_at": "2026-11-20T14:22:04Z"
+      "registered_at": "2026-11-20T14:22:04Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-20T15:17:35Z"
+      }
     },
     "261120-feat-ws-pi-common-interface-rebuild": {
       "registered_at": "2026-11-20T14:10:37Z"
