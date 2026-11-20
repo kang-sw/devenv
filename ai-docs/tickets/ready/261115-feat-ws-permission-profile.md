@@ -849,6 +849,79 @@ summary while leaving that artifact empty. A fresh workdir-write reviewer
 recovered the review. Separately, `workflow_manual` was unavailable from the ws
 tool surface, so this run used the repository manuals and rendered playbooks.
 
+#### Edition (1a11694a5) - 2026-11-21
+
+**Decision 15 post-merge review closeout — common permission UI remains open.**
+
+The delayed lite review of the merged (1876)/(1877) backend slice found three
+Critical defects and one Important lifecycle defect. Commit `1a11694a5` fixes
+all four without completing Phase 2: (1875)'s common dashboard control,
+reconnect-aware positive preflight and full-warning cancel/confirm flow remain
+open on the separate UI branch, so this ticket stays `ready/` without a
+whole-Phase 2 Result.
+
+- Agent-created children now persist immutable delegation provenance beside
+  their explicit selection in `permission.json`. New generic explicit workers
+  persist `delegated_authority:false`; `agent.spawn` persists `true`; and an
+  absent member remains the pre-provenance compatibility state. An internal
+  agent child with no explicit authority record fails closed, while an old
+  sidecar without the member reopens with its original bounded detached-lead
+  behavior. Omitted legacy top-level `pi.spawn` calls retain their historical
+  workdir-write/advisory projection without sidecar writeback; new explicit
+  generic workers with a missing/unresolved lead parent are refused.
+- Generic `SpawnSpec.PermissionLevel` is authorized against the profile-derived
+  current level before any conversation is created. Supplying
+  `PermissionFullAck` is not user authority: generic `full` additionally needs
+  the trusted package-owned user provenance, while `agent.spawn` keeps its
+  separately bounded delegation exception.
+- A per-session admission RW lock now holds the parent's current selection
+  stable through child creation and every fresh `Backend.Start`. Common-level
+  and native-mode changes take the exclusive side, so a lowering cannot race a
+  higher-authority child process start.
+- Lowering a running worker marks its current process dirty. The active turn
+  finishes on that process, which is then stopped before queued input starts a
+  replacement under the lowered level. Worker State/List projection uses the
+  loop-owned permission fields and performs no permission-sidecar read on the
+  interactive listing path.
+
+Compatibility remains **T0**. `delegated_authority` is an optional member of
+the existing private, unknown-member-preserving `permission.json`; no Record,
+Profile, registration, key, MCP argument, HTTP route or manifest shape changed.
+Pinned old Record/registration/label writers retain the sidecar bytes, the old
+sidecar writer preserves the unknown member during a permission update, and the
+new reader recovers both the level and provenance. Absence is deliberately
+read as the pre-provenance state, so reopening an existing `agent.spawn` child
+does not lose its accepted detached-lead ceiling. New generic false provenance
+survives later lowering, and omitted legacy Pi spawns still write no sidecar.
+
+The correction also fixed two regressions exposed by the expanded package bar:
+open worker State/List again performs zero file operations, and replay approval
+handling reads its Record under the existing lock instead of racing `Send`.
+The fresh independent lite reviewer reported two additional Critical
+compatibility findings: pre-provenance agent sidecars and omitted top-level Pi
+spawns. Both were fixed in the single allowed correction pass; per lite policy
+no re-review ran. No Critical or Important finding remains open.
+
+Verification from `agents-plugin-tool/`, with complete local output read:
+
+```sh
+GOCACHE=/private/tmp/ws-permission-closeout-cache GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go vet ./internal/wsagent
+GOCACHE=/private/tmp/ws-permission-closeout-cache GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -race -count=1 -run '^TestPermission'
+GOCACHE=/private/tmp/ws-permission-closeout-cache GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -race -count=1 -run '^(TestAgentSpawn|TestRefusedWake|TestHeldWorker|TestRecordUnknownMembersRoundTrip|TestLeadRejoin|TestPiRevive|TestPiWorkerRecovery|TestProfileSpawn|TestSpawn|TestWorkerHolder)'
+```
+
+All three passed. Focused race selectors also passed the missing-authority,
+pre-provenance reopen, legacy detached-lead, generic full-user gate, concurrent
+parent lowering, native-mode locking, turn-boundary worker replacement,
+custom-profile Pi spawn and zero-file-I/O regressions. The worker sandbox
+denied loopback listeners, so the lead ran the final tree with loopback:
+`go test ./internal/mcp -count=1 -run '^TestAgent'` passed (2.19 s), the real
+Pi-forward and hosted CLI token integration selectors passed, and
+`go test ./internal/wsagent -count=1` passed every test except the known
+pre-existing `TestPiMaterializerSourceDriftDoesNotDisplacePreparedBundle`
+payload-drift failure that also fails on develop. No provider, live harness,
+daemon replacement, dashboard UI, network service, push or merge ran.
+
 ### Phase 3: Add the Codex per-run permission launch path
 
 Deferred until the Codex adapter provides its settled exact-version launch

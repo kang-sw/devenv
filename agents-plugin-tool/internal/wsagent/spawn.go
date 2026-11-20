@@ -92,6 +92,14 @@ type SpawnSpec struct {
 	// keeps legacy derivation with no writeback. Every child is re-admitted
 	// against its parent's current level at creation and process start.
 	PermissionLevel PermissionLevel
+	// PermissionFullAck accompanies a trusted user's explicit full choice.
+	// It is not authority by itself; only the package's trusted control owner
+	// may set permissionUser.
+	PermissionFullAck bool
+	permissionUser    bool
+	// delegatedAuthority is set only by agent.spawn, whose authority is an
+	// already-bounded delegation rather than a generic worker raise.
+	delegatedAuthority bool
 	// SystemPrompt is appended to the harness's system prompt at every
 	// process start; empty is none.
 	SystemPrompt string
