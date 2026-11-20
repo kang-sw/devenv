@@ -284,6 +284,7 @@ type Runner struct {
 	// startupLoaded closes after Start installed every open record. Restore
 	// markers may be present before then, but compactIdle sends none until the
 	// complete direct-child projection exists.
+	startupMu     sync.RWMutex
 	startupLoaded chan struct{}
 	// playbookCmds is Options.PlaybookCommands' list, read once
 	// (playbookCommands) under playbookMu.
@@ -353,6 +354,10 @@ func (r *Runner) SetLiveHost(host wsdashboard.LiveHost) { r.opts.LiveHost = host
 // each write to a conversation's stores, so the daemon re-reads it. The
 // daemon calls Start once it holds its lock.
 func (r *Runner) Start(notify func(replyID, project string)) {
+	startupLoaded := make(chan struct{})
+	r.startupMu.Lock()
+	r.startupLoaded = startupLoaded
+	r.startupMu.Unlock()
 	if notify != nil {
 		r.notify = notify
 	}
@@ -402,7 +407,7 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 		// A turn the last daemon's exit cut off settles there too.
 		startup = append(startup, r.startConvAtStartup(rec, nil))
 	}
-	close(r.startupLoaded)
+	close(startupLoaded)
 	for _, c := range startup {
 		c.do(c.kick)
 	}
@@ -440,11 +445,17 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 }
 
 func (r *Runner) startupReady() bool {
-	if r == nil || r.startupLoaded == nil {
+	if r == nil {
+		return true
+	}
+	r.startupMu.RLock()
+	startupLoaded := r.startupLoaded
+	r.startupMu.RUnlock()
+	if startupLoaded == nil {
 		return true
 	}
 	select {
-	case <-r.startupLoaded:
+	case <-startupLoaded:
 		return true
 	default:
 		return false
