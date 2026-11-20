@@ -50,17 +50,18 @@
   // - personBy[id]: outermost active group covering id (lead's own "본인" included)
   // - groupBy[leadId]: outermost strict-ancestor active group covering leadId's group toggle
   // - topGroups: active leads whose group toggle is not covered by a higher active group
-  function pmCover(idx, groups) {
-    var G = groups || {}, personBy = {}, groupBy = {}, topGroups = [];
+  function pmCover(idx, groups, headToOrg) {
+    var G = groups || {}, h2o = headToOrg || {}, personBy = {}, groupBy = {}, topGroups = [];
+    function isGrp(id) { return !!(idx.isLead[id] || h2o[id]); }
     idx.order.forEach(function (id) {
       var anc = idx.ancestors[id] || [], up = '';
       for (var i = anc.length - 1; i >= 0; i--) {
-        if (G[anc[i]]) { up = anc[i]; break; }
+        if (G[anc[i]] && isGrp(anc[i])) { up = anc[i]; break; }
       }
       if (up) {
         personBy[id] = up;
-        if (idx.isLead[id]) groupBy[id] = up;
-      } else if (G[id] && idx.isLead[id]) {
+        if (isGrp(id)) groupBy[id] = up;
+      } else if (G[id] && isGrp(id)) {
         personBy[id] = id;
         topGroups.push(id);
       }
@@ -133,18 +134,19 @@
     var lockedP = opts.lockedPeople || {}, lockedG = opts.lockedGroups || {};
     var P = opts.picks || {}, G = opts.groups || {};
     var norule = !!opts.norule, single = !!opts.single, compl = opts.compl || null;
+    var h2o = opts.headToOrg || {};
     function isLive(id) { return id === viewer || !!reach[id]; }
     var activeG = {}, liveG = {};
     if (!norule) {
       idx.order.forEach(function (id) {
-        if (idx.isLead[id] && G[id] && !lockedG[id]) {
+        if ((idx.isLead[id] || h2o[id]) && G[id] && !lockedG[id]) {
           activeG[id] = true;
           if (isLive(id)) liveG[id] = true;
         }
       });
     }
-    var visCov = pmCover(idx, activeG);
-    var payCov = pmCover(idx, liveG);
+    var visCov = pmCover(idx, activeG, h2o);
+    var payCov = pmCover(idx, liveG, h2o);
     var targets = [];
     idx.order.forEach(function (id) {
       if (activeG[id] && !payCov.groupBy[id]) {
@@ -185,6 +187,64 @@
       });
       return ['item.assign', { item: itemId, targets: people.concat(rules), completion: g.c }];
     });
+  }
+  // Builds atomic retarget batch for replacing an org assign rule (Decision 11 & 8):
+  // emits item.unassign first, then item.assign with org-linked rules for org heads,
+  // plain lead rules for non-org leads, and personal member targets unchanged.
+  function pmRetargetAssignEvents(itemId, retarget, targets, compl, viewer, reach, headToOrg) {
+    var h2o = headToOrg || {};
+    var p = { item: itemId, rule: retarget.rule };
+    if (retarget.root) p.root = retarget.root;
+    var out = [['item.unassign', p]];
+    var groups = [], by = {};
+    (targets || []).forEach(function (o) {
+      var c = pmAsgClass(o, compl, viewer, reach);
+      if (!by[c]) groups.push(by[c] = { c: c, sel: [] });
+      by[c].sel.push(o);
+    });
+    groups.forEach(function (g) {
+      var people = g.sel.filter(function (o) { return o.t === 'p'; }).map(function (o) { return o.id; });
+      var rules = g.sel.filter(function (o) { return o.t === 'r'; }).map(function (o) {
+        var r = { root: o.root, include_root: true };
+        var org = h2o[o.root];
+        if (org && org.id) r.org = org.id;
+        else if (o.levels != null) r.levels = o.levels;
+        return r;
+      });
+      out.push(['item.assign', { item: itemId, targets: people.concat(rules), completion: g.c }]);
+    });
+    return out;
+  }
+  // Builds atomic retarget batch for replacing an org CC registration (Decision 11 & 8):
+  // emits item.uncc_org first, then item.cc_org for org heads, expanded item.cc snapshots for
+  // non-org leads, and item.cc for individual picks. Never emits personal item.uncc.
+  function pmRetargetCcEvents(itemId, retarget, idx, picks, groups, headToOrg) {
+    var h2o = headToOrg || {}, P = picks || {}, G = groups || {};
+    var out = [['item.uncc_org', { item: itemId, org: retarget.org }]];
+    var cov = pmCover(idx, G, h2o), sentMember = {}, sentOrg = {};
+    cov.topGroups.forEach(function (gid) {
+      var org = h2o[gid];
+      if (org && org.id) {
+        if (!sentOrg[org.id]) {
+          sentOrg[org.id] = true;
+          out.push(['item.cc_org', { item: itemId, org: org.id }]);
+        }
+      } else {
+        (idx.subtree[gid] || [gid]).forEach(function (mid) {
+          if (!sentMember[mid]) {
+            sentMember[mid] = true;
+            out.push(['item.cc', { item: itemId, member: mid }]);
+          }
+        });
+      }
+    });
+    idx.order.forEach(function (id) {
+      if (P[id] && !cov.personBy[id] && !sentMember[id]) {
+        sentMember[id] = true;
+        out.push(['item.cc', { item: itemId, member: id }]);
+      }
+    });
+    return out;
   }
   // Filters orgTree visibility for search query q and "selected only" mode.
   // Returns { show: {id: true}, matched: {id: true}, expand: {id: true}, hasAny: bool }.

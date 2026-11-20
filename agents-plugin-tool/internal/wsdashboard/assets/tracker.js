@@ -315,18 +315,274 @@
     var unreachable = liveIds.filter(function (id) { return !seen[id]; });
     return { roots: roots, unplaced: unplaced, removed: removed, unreachable: unreachable, parentOf: parentOf, depthOf: depthOf, countOf: countOf };
   }
-  // Pure state and validation helpers for the admin org-chart editor modal (Decisions 4-8).
-  function orgEdInit(members, viewer) {
+  // Indexes org entities alongside the org tree: live/removed partitions, head lookup,
+  // subtree size, nearest enclosing org for any member, and subtree membership.
+  function orgIndex(orgs, members, leadsOverride) {
+    var M = members || {}, ot = orgTree(M, leadsOverride);
+    var list = Array.isArray(orgs) ? orgs : (orgs ? Object.keys(orgs).map(function (k) { return orgs[k]; }) : []);
+    var byId = {}, live = [], removed = [], headToOrg = {};
+    function isLiveMember(id) { return !!(id && M[id] && !M[id].removed); }
+    list.forEach(function (o) {
+      if (!o || !o.id) return;
+      var rec = { id: o.id, name: o.name || '', head: o.head || '', removed: o.removed || null };
+      byId[rec.id] = rec;
+      if (rec.removed) removed.push(rec);
+      else {
+        live.push(rec);
+        if (rec.head && isLiveMember(rec.head)) headToOrg[rec.head] = rec;
+      }
+    });
+    function sizeOf(id) {
+      var o = byId[id];
+      if (!o || o.removed || !o.head || !isLiveMember(o.head)) return 0;
+      return (ot.countOf[o.head] || 0) + 1;
+    }
+    function nearestOrg(memberId) {
+      if (!isLiveMember(memberId)) return null;
+      var seen = {}, x = memberId;
+      while (x && !seen[x]) {
+        if (headToOrg[x]) return headToOrg[x];
+        seen[x] = true;
+        x = ot.parentOf[x] || '';
+      }
+      return null;
+    }
+    function orgSubtree(id) {
+      var o = byId[id];
+      if (!o || o.removed || !o.head || !isLiveMember(o.head)) return [];
+      var out = [];
+      function walk(node, inside) {
+        if (!node || node.cycle) return;
+        var hit = inside || node.id === o.head;
+        if (hit) out.push(node.id);
+        (node.children || []).forEach(function (c) { walk(c, hit); });
+      }
+      ot.roots.forEach(function (r) { walk(r, false); });
+      if (!out.length) out.push(o.head);
+      return out;
+    }
+    return { tree: ot, byId: byId, live: live, removed: removed, headToOrg: headToOrg, sizeOf: sizeOf, nearestOrg: nearestOrg, orgSubtree: orgSubtree };
+  }
+  // Mints a client-side org id (`o-<4-char base36>`) avoiding every id in existingIds.
+  function orgMintId(existingIds, rng) {
+    var used = {};
+    if (Array.isArray(existingIds)) existingIds.forEach(function (id) { used[id] = true; });
+    else if (existingIds) Object.keys(existingIds).forEach(function (id) { used[id] = true; });
+    var fn = typeof rng === 'function' ? rng : Math.random;
+    var chars = '0123456789abcdefghijklmnopqrstuvwxyz';
+    for (var tries = 0; tries < 256; tries++) {
+      var s = 'o-';
+      for (var i = 0; i < 4; i++) s += chars[Math.floor(fn() * 36) % 36];
+      if (!used[s]) return s;
+    }
+    for (var n = 0; ; n++) {
+      var fb = 'o-' + n.toString(36).padStart(4, '0');
+      if (!used[fb]) return fb;
+    }
+  }
+  // Maps each org id to non-hidden items referencing it via open assign rules or org CC registrations.
+  function orgItemRefs(orgs, items, rules, itemOrder) {
+    var I = items || {}, R = rules || {}, out = {};
+    var ruleList = Array.isArray(R) ? R : Object.keys(R).map(function (k) { return R[k]; });
+    var order = Array.isArray(itemOrder) && itemOrder.length ? itemOrder : Object.keys(I);
+    var rank = {};
+    order.forEach(function (id, i) { rank[id] = i; });
+    function ensure(oid) {
+      if (!out[oid]) out[oid] = { byItem: {}, items: [], assignCount: 0, ccCount: 0, count: 0 };
+      return out[oid];
+    }
+    function touch(oid, itemId, field) {
+      var it = I[itemId];
+      if (!it || it.hidden) return;
+      var slot = ensure(oid), entry = slot.byItem[itemId];
+      if (!entry) {
+        entry = { id: itemId, alias: it.alias || alias(itemId), title: it.title || '', status: it.status || '', assign: false, cc: false };
+        slot.byItem[itemId] = entry;
+        slot.items.push(entry);
+      }
+      if (field === 'assign' && !entry.assign) { entry.assign = true; slot.assignCount++; }
+      if (field === 'cc' && !entry.cc) { entry.cc = true; slot.ccCount++; }
+    }
+    ruleList.forEach(function (ru) {
+      if (!ru || !ru.org || ru.ended) return;
+      touch(ru.org, ru.item, 'assign');
+    });
+    order.forEach(function (id) {
+      var it = I[id];
+      if (!it || it.hidden || !Array.isArray(it.orgCC)) return;
+      it.orgCC.forEach(function (reg) {
+        if (reg && reg.org) touch(reg.org, id, 'cc');
+      });
+    });
+    Object.keys(out).forEach(function (oid) {
+      out[oid].items.sort(function (a, b) {
+        var ra = Object.prototype.hasOwnProperty.call(rank, a.id) ? rank[a.id] : 1e9;
+        var rb = Object.prototype.hasOwnProperty.call(rank, b.id) ? rank[b.id] : 1e9;
+        return ra !== rb ? ra - rb : (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+      });
+      out[oid].count = out[oid].items.length;
+      delete out[oid].byItem;
+    });
+    return out;
+  }
+  // Pure state and validation helpers for the admin org-chart editor modal (Decisions 4-12, 18).
+  function orgEdInit(members, viewer, orgs) {
     var ot = orgTree(members), baseLeads = {}, baseAdmins = {}, M = members || {};
     Object.keys(ot.parentOf).forEach(function (id) {
       baseLeads[id] = ot.parentOf[id] || '';
       baseAdmins[id] = !!(M[id] && M[id].admin);
     });
+    var baseOrgs = {}, baseOrgOrder = [];
+    var olist = Array.isArray(orgs) ? orgs : (orgs ? Object.keys(orgs).map(function (k) { return orgs[k]; }) : []);
+    olist.forEach(function (o) {
+      if (!o || !o.id) return;
+      baseOrgs[o.id] = { id: o.id, name: o.name || '', head: o.head || '', removed: o.removed || null };
+      baseOrgOrder.push(o.id);
+    });
     return {
       viewer: viewer || '', baseLeads: baseLeads, baseAdmins: baseAdmins,
-      stagedLeads: {}, stagedAdmins: {}, fold: {}, q: '',
-      drag: null, over: null, refuse: null, errors: {}, saving: false
+      baseOrgs: baseOrgs, baseOrgOrder: baseOrgOrder,
+      stagedLeads: {}, stagedAdmins: {}, stagedOrgs: {},
+      fold: {}, goneOpen: {}, editingOrg: null, q: '',
+      drag: null, dragKind: null, over: null, refuse: null, lastUndoErr: null, errors: {}, saving: false
     };
+  }
+  function orgEdProjectedOrgs(ed) {
+    var out = {}, bo = ed.baseOrgs || {}, so = ed.stagedOrgs || {};
+    Object.keys(bo).forEach(function (id) {
+      var o = bo[id], st = so[id];
+      if (o.removed) return;
+      if (st && st.op === 'delete') return;
+      if (st && st.op === 'edit') {
+        out[id] = { id: id, name: st.name, head: st.head || '', removed: null, staged: 'edit' };
+      } else {
+        out[id] = { id: id, name: o.name, head: o.head || '', removed: null, staged: null };
+      }
+    });
+    Object.keys(so).forEach(function (id) {
+      var st = so[id];
+      if (st && st.op === 'create') {
+        out[id] = { id: id, name: st.name, head: st.head || '', removed: null, staged: 'create' };
+      }
+    });
+    return out;
+  }
+  function orgEdAllDisplayOrgs(ed) {
+    var out = [], bo = ed.baseOrgs || {}, so = ed.stagedOrgs || {}, seen = {};
+    (ed.baseOrgOrder || Object.keys(bo)).forEach(function (id) {
+      var o = bo[id];
+      if (!o || o.removed) return;
+      seen[id] = true;
+      var st = so[id];
+      if (st && st.op === 'delete') {
+        out.push({ id: id, name: o.name, head: o.head || '', removed: null, staged: 'delete' });
+      } else if (st && st.op === 'edit') {
+        out.push({ id: id, name: st.name, head: st.head || '', removed: null, staged: 'edit' });
+      } else {
+        out.push({ id: id, name: o.name, head: o.head || '', removed: null, staged: null });
+      }
+    });
+    Object.keys(so).forEach(function (id) {
+      if (seen[id]) return;
+      var st = so[id];
+      if (st && st.op === 'create') {
+        out.push({ id: id, name: st.name, head: st.head || '', removed: null, staged: 'create' });
+      }
+    });
+    return out;
+  }
+  function orgEdHeadOf(ed, memberId) {
+    if (!memberId) return null;
+    var proj = orgEdProjectedOrgs(ed), ids = Object.keys(proj);
+    for (var i = 0; i < ids.length; i++) {
+      if (proj[ids[i]].head === memberId) return proj[ids[i]];
+    }
+    return null;
+  }
+  function orgEdNameClash(ed, name, excludeId) {
+    var low = String(name || '').trim().toLowerCase();
+    if (!low) return null;
+    var proj = orgEdProjectedOrgs(ed), ids = Object.keys(proj);
+    for (var i = 0; i < ids.length; i++) {
+      var o = proj[ids[i]];
+      if (o.id !== excludeId && String(o.name || '').trim().toLowerCase() === low) return o;
+    }
+    return null;
+  }
+  function orgEdCreateOrg(ed, name, head, rng) {
+    var trimmed = String(name || '').trim();
+    if (!trimmed) return { ok: false, reason: 'blank_name' };
+    var clash = orgEdNameClash(ed, trimmed, '');
+    if (clash) return { ok: false, reason: 'dup_name', other: clash };
+    var target = head || '';
+    if (target) {
+      if (!Object.prototype.hasOwnProperty.call(ed.baseLeads, target)) return { ok: false, reason: 'unknown_member' };
+      var held = orgEdHeadOf(ed, target);
+      if (held) return { ok: false, reason: 'already_head', other: held };
+    }
+    var used = {};
+    Object.keys(ed.baseOrgs || {}).forEach(function (id) { used[id] = true; });
+    Object.keys(ed.stagedOrgs || {}).forEach(function (id) { used[id] = true; });
+    var id = orgMintId(used, rng);
+    ed.stagedOrgs[id] = { op: 'create', name: trimmed, head: target };
+    delete ed.errors['org:' + id];
+    ed.refuse = null;
+    return { ok: true, id: id };
+  }
+  function orgEdRenameOrg(ed, orgId, newName) {
+    var proj = orgEdProjectedOrgs(ed), cur = proj[orgId];
+    if (!cur) return { ok: false, reason: 'unknown_org' };
+    var trimmed = String(newName || '').trim();
+    if (!trimmed) return { ok: false, reason: 'blank_name' };
+    var clash = orgEdNameClash(ed, trimmed, orgId);
+    if (clash) return { ok: false, reason: 'dup_name', other: clash };
+    var st = ed.stagedOrgs[orgId];
+    if (st && st.op === 'create') {
+      st.name = trimmed;
+    } else {
+      var base = ed.baseOrgs[orgId];
+      if (trimmed === base.name && cur.head === base.head) delete ed.stagedOrgs[orgId];
+      else ed.stagedOrgs[orgId] = { op: 'edit', name: trimmed, head: cur.head };
+    }
+    delete ed.errors['org:' + orgId];
+    return { ok: true };
+  }
+  function orgEdStageOrgHead(ed, orgId, newHead) {
+    var proj = orgEdProjectedOrgs(ed), cur = proj[orgId];
+    if (!cur) return { ok: false, reason: 'unknown_org' };
+    var target = newHead || '';
+    if (target) {
+      if (!Object.prototype.hasOwnProperty.call(ed.baseLeads, target)) return { ok: false, reason: 'unknown_member' };
+      var held = orgEdHeadOf(ed, target);
+      if (held && held.id !== orgId) return { ok: false, reason: 'already_head', other: held };
+    }
+    var st = ed.stagedOrgs[orgId];
+    if (st && st.op === 'create') {
+      st.head = target;
+    } else {
+      var base = ed.baseOrgs[orgId];
+      if (cur.name === base.name && target === base.head) delete ed.stagedOrgs[orgId];
+      else ed.stagedOrgs[orgId] = { op: 'edit', name: cur.name, head: target };
+    }
+    delete ed.errors['org:' + orgId];
+    ed.refuse = null;
+    return { ok: true };
+  }
+  function orgEdDeleteOrg(ed, orgId) {
+    var st = ed.stagedOrgs[orgId];
+    if (st && st.op === 'create') {
+      delete ed.stagedOrgs[orgId];
+      delete ed.errors['org:' + orgId];
+      if (ed.editingOrg === orgId) ed.editingOrg = null;
+      return { ok: true };
+    }
+    var base = ed.baseOrgs && ed.baseOrgs[orgId];
+    if (!base || base.removed) return { ok: false, reason: 'unknown_org' };
+    ed.stagedOrgs[orgId] = { op: 'delete' };
+    delete ed.errors['org:' + orgId];
+    if (ed.editingOrg === orgId) ed.editingOrg = null;
+    ed.refuse = null;
+    return { ok: true };
   }
   function orgEdProjectedLeads(ed) {
     var out = {};
@@ -406,16 +662,61 @@
       }
       return true;
     }
+    if (kind === 'org') {
+      var st = ed.stagedOrgs && ed.stagedOrgs[id];
+      if (!st) return false;
+      ed.lastUndoErr = null;
+      if (st.op === 'create') {
+        delete ed.stagedOrgs[id];
+        delete ed.errors[key];
+        if (ed.editingOrg === id) ed.editingOrg = null;
+        return true;
+      }
+      var base = ed.baseOrgs && ed.baseOrgs[id];
+      if (!base) return false;
+      if (base.head) {
+        var held = orgEdHeadOf(ed, base.head);
+        if (held && held.id !== id) {
+          ed.lastUndoErr = { key: key, reason: 'already_head', other: held, head: base.head };
+          return false;
+        }
+      }
+      var clash = orgEdNameClash(ed, base.name, id);
+      if (clash) {
+        ed.lastUndoErr = { key: key, reason: 'dup_name', other: clash };
+        return false;
+      }
+      delete ed.stagedOrgs[id];
+      delete ed.errors[key];
+      return true;
+    }
     return false;
   }
   function orgEdUndoAll(ed) {
     ed.stagedLeads = {};
     ed.stagedAdmins = {};
+    ed.stagedOrgs = {};
+    ed.editingOrg = null;
     ed.errors = {};
     ed.refuse = null;
+    ed.lastUndoErr = null;
   }
   function orgEdChanges(ed) {
     var list = [];
+    Object.keys(ed.stagedOrgs || {}).sort().forEach(function (id) {
+      var st = ed.stagedOrgs[id], base = ed.baseOrgs && ed.baseOrgs[id];
+      if (st.op === 'create') {
+        list.push({ key: 'org:' + id, kind: 'org_create', org: id, name: st.name, head: st.head || '' });
+      } else if (st.op === 'delete') {
+        list.push({ key: 'org:' + id, kind: 'org_delete', org: id, name: base ? base.name : id, head: base ? (base.head || '') : '' });
+      } else if (st.op === 'edit') {
+        list.push({
+          key: 'org:' + id, kind: 'org_edit', org: id,
+          fromName: base ? base.name : '', toName: st.name,
+          fromHead: base ? (base.head || '') : '', toHead: st.head || ''
+        });
+      }
+    });
     Object.keys(ed.stagedLeads).sort().forEach(function (id) {
       list.push({ key: 'lead:' + id, kind: 'lead', member: id, from: ed.baseLeads[id] || '', to: ed.stagedLeads[id] || '' });
     });
@@ -425,23 +726,28 @@
     return list;
   }
   function orgEdCount(ed) {
-    return Object.keys(ed.stagedLeads).length + Object.keys(ed.stagedAdmins).length;
+    return Object.keys(ed.stagedLeads).length + Object.keys(ed.stagedAdmins).length + Object.keys(ed.stagedOrgs || {}).length;
   }
   function orgEdCloseNeedsConfirm(ed) {
     return !!ed && orgEdCount(ed) > 0;
   }
-  // Save-time pre-flight check and deterministic single-batch event builder (Decisions 7 & 8).
-  // Re-applies staged changes onto currentMembers: drops no-ops, blocks on stale bases and all
-  // invalid changes at once, and emits add_admin -> set_lead (ascending final depth) -> remove_admin
-  // (saving viewer's own removal very last) with an index-to-change-key map for 409 refusals.
-  function orgEdPreflightAndBuild(ed, currentMembers, viewer) {
+  // Save-time pre-flight check and deterministic single-batch event builder (Decisions 7, 8 & 12).
+  // Order: add_admin -> org_remove -> org head releases -> topological org_set (with vacate on
+  // head-swap cycles) -> set_lead (ascending final depth) -> remove_admin (viewer very last).
+  function orgEdPreflightAndBuild(ed, currentMembers, viewer, currentOrgs) {
     var M = currentMembers || {}, who = viewer || ed.viewer || '';
     var me = M[who];
     if (!me || me.removed || !me.admin) {
       return { ok: false, errors: { _viewer: { code: 'not_admin' } }, dropped: [], events: [], indexMap: [] };
     }
     var curTree = orgTree(M), curParent = curTree.parentOf;
-    var errors = {}, dropped = [], activeLeads = {}, activeAdmins = {};
+    var curOrgs = {};
+    var osrc = currentOrgs !== undefined ? currentOrgs : (ed.baseOrgs || {});
+    var olist = Array.isArray(osrc) ? osrc : Object.keys(osrc || {}).map(function (k) { return osrc[k]; });
+    olist.forEach(function (o) {
+      if (o && o.id) curOrgs[o.id] = { id: o.id, name: o.name || '', head: o.head || '', removed: o.removed || null };
+    });
+    var errors = {}, dropped = [], activeLeads = {}, activeAdmins = {}, activeDeletes = [], activeSets = {};
     Object.keys(ed.stagedLeads).sort().forEach(function (id) {
       var key = 'lead:' + id, target = ed.stagedLeads[id] || '', curM = M[id];
       if (!curM || curM.removed) { errors[key] = { code: 'removed_member' }; return; }
@@ -456,6 +762,33 @@
       if (!curM || curM.removed) { errors[key] = { code: 'removed_member' }; return; }
       if (want === !!curM.admin) { dropped.push(key); return; }
       activeAdmins[id] = want;
+    });
+    Object.keys(ed.stagedOrgs || {}).sort().forEach(function (id) {
+      var key = 'org:' + id, st = ed.stagedOrgs[id], cur = curOrgs[id], base = ed.baseOrgs && ed.baseOrgs[id];
+      if (st.op === 'delete') {
+        if (!cur || cur.removed) { dropped.push(key); return; }
+        if (base && (cur.name !== base.name || (cur.head || '') !== (base.head || ''))) {
+          errors[key] = { code: 'stale_base' }; return;
+        }
+        activeDeletes.push(id);
+        return;
+      }
+      var wantName = String(st.name || '').trim(), wantHead = st.head || '';
+      if (st.op === 'create') {
+        if (cur) { errors[key] = { code: 'org_exists' }; return; }
+        if (!wantName) { errors[key] = { code: 'blank_name' }; return; }
+        if (wantHead && (!M[wantHead] || M[wantHead].removed)) { errors[key] = { code: 'removed_head', target: wantHead }; return; }
+        activeSets[id] = { op: 'create', name: wantName, head: wantHead };
+        return;
+      }
+      if (!cur || cur.removed) { errors[key] = { code: 'removed_org' }; return; }
+      if (!wantName) { errors[key] = { code: 'blank_name' }; return; }
+      if (wantHead && (!M[wantHead] || M[wantHead].removed)) { errors[key] = { code: 'removed_head', target: wantHead }; return; }
+      if (cur.name === wantName && (cur.head || '') === wantHead) { dropped.push(key); return; }
+      if (base && (cur.name !== base.name || (cur.head || '') !== (base.head || ''))) {
+        errors[key] = { code: 'stale_base' }; return;
+      }
+      activeSets[id] = { op: 'edit', name: wantName, head: wantHead };
     });
     var finalLeads = {};
     Object.keys(curParent).forEach(function (id) { finalLeads[id] = curParent[id]; });
@@ -478,6 +811,29 @@
         if (activeAdmins[id] === false) errors['admin:' + id] = { code: 'last_admin' };
       });
     }
+    var finalOrgs = {}, delSet = {};
+    activeDeletes.forEach(function (id) { delSet[id] = true; });
+    Object.keys(curOrgs).forEach(function (id) {
+      var o = curOrgs[id];
+      if (!o.removed && !delSet[id]) finalOrgs[id] = { id: id, name: o.name, head: o.head || '' };
+    });
+    Object.keys(activeSets).forEach(function (id) {
+      finalOrgs[id] = { id: id, name: activeSets[id].name, head: activeSets[id].head || '' };
+    });
+    var nameSeen = {}, headSeen = {};
+    Object.keys(finalOrgs).sort().forEach(function (id) {
+      var o = finalOrgs[id], low = o.name.toLowerCase();
+      if (nameSeen[low]) {
+        if (activeSets[id]) errors['org:' + id] = { code: 'dup_name' };
+        if (activeSets[nameSeen[low]]) errors['org:' + nameSeen[low]] = { code: 'dup_name' };
+      } else nameSeen[low] = id;
+      if (o.head) {
+        if (headSeen[o.head]) {
+          if (activeSets[id]) errors['org:' + id] = { code: 'already_head', target: o.head };
+          if (activeSets[headSeen[o.head]]) errors['org:' + headSeen[o.head]] = { code: 'already_head', target: o.head };
+        } else headSeen[o.head] = id;
+      }
+    });
     if (Object.keys(errors).length) {
       return { ok: false, errors: errors, dropped: dropped, events: [], indexMap: [] };
     }
@@ -489,7 +845,89 @@
         indexMap.push('admin:' + id);
       }
     });
-    // 2. roles.set_lead in ascending depth of the final tree
+    // 2. roles.org_remove
+    var simOrgs = {};
+    Object.keys(curOrgs).forEach(function (id) {
+      if (!curOrgs[id].removed) simOrgs[id] = { name: curOrgs[id].name, head: curOrgs[id].head || '' };
+    });
+    activeDeletes.sort().forEach(function (id) {
+      events.push({ type: 'roles.org_remove', payload: { org: id }, origin: 'human' });
+      indexMap.push('org:' + id);
+      delete simOrgs[id];
+    });
+    function headOwner(h) {
+      if (!h) return '';
+      var ids = Object.keys(simOrgs);
+      for (var i = 0; i < ids.length; i++) if (simOrgs[ids[i]].head === h) return ids[i];
+      return '';
+    }
+    function nameOwner(n) {
+      var low = String(n || '').toLowerCase(), ids = Object.keys(simOrgs);
+      for (var i = 0; i < ids.length; i++) if (simOrgs[ids[i]].name.toLowerCase() === low) return ids[i];
+      return '';
+    }
+    // 3. Pure head releases first (frees heads before any take-up)
+    var remaining = Object.keys(activeSets).sort();
+    var nextRem = [];
+    remaining.forEach(function (id) {
+      var want = activeSets[id], sim = simOrgs[id];
+      if (sim && sim.head && !want.head) {
+        var no = nameOwner(want.name);
+        if (!no || no === id) {
+          events.push({ type: 'roles.org_set', payload: { org: id, name: want.name, head: '' }, origin: 'human' });
+          indexMap.push('org:' + id);
+          simOrgs[id] = { name: want.name, head: '' };
+          return;
+        }
+        events.push({ type: 'roles.org_set', payload: { org: id, name: sim.name, head: '' }, origin: 'human' });
+        indexMap.push('org:' + id);
+        simOrgs[id].head = '';
+      }
+      nextRem.push(id);
+    });
+    remaining = nextRem;
+    // 4. Topological org_set (head take-ups, renames, creates), breaking head/name cycles with a vacate event
+    var guard = remaining.length * 3 + 4;
+    while (remaining.length && guard-- > 0) {
+      var ready = [];
+      remaining.forEach(function (id) {
+        var want = activeSets[id];
+        var ho = headOwner(want.head), no = nameOwner(want.name);
+        if ((!ho || ho === id) && (!no || no === id)) ready.push(id);
+      });
+      if (ready.length) {
+        var remSet = {};
+        ready.forEach(function (id) {
+          var want = activeSets[id];
+          events.push({ type: 'roles.org_set', payload: { org: id, name: want.name, head: want.head }, origin: 'human' });
+          indexMap.push('org:' + id);
+          simOrgs[id] = { name: want.name, head: want.head };
+          remSet[id] = true;
+        });
+        remaining = remaining.filter(function (id) { return !remSet[id]; });
+        continue;
+      }
+      var vacId = '';
+      for (var i = 0; i < remaining.length; i++) {
+        var cid = remaining[i];
+        if (simOrgs[cid] && simOrgs[cid].head) { vacId = cid; break; }
+      }
+      if (vacId) {
+        events.push({ type: 'roles.org_set', payload: { org: vacId, name: simOrgs[vacId].name, head: '' }, origin: 'human' });
+        indexMap.push('org:' + vacId);
+        simOrgs[vacId].head = '';
+        continue;
+      }
+      var renId = remaining[0];
+      if (simOrgs[renId]) {
+        var tmp = simOrgs[renId].name + ' #' + renId;
+        while (nameOwner(tmp)) tmp += '_';
+        events.push({ type: 'roles.org_set', payload: { org: renId, name: tmp, head: simOrgs[renId].head }, origin: 'human' });
+        indexMap.push('org:' + renId);
+        simOrgs[renId].name = tmp;
+      }
+    }
+    // 5. roles.set_lead in ascending depth of the final tree
     Object.keys(activeLeads).sort(function (a, b) {
       var da = finalTree.depthOf[a] || 0, db = finalTree.depthOf[b] || 0;
       return da !== db ? da - db : (a < b ? -1 : a > b ? 1 : 0);
@@ -498,7 +936,7 @@
       events.push({ type: 'roles.set_lead', payload: { member: id, leads: target ? [target] : [] }, origin: 'human' });
       indexMap.push('lead:' + id);
     });
-    // 3. roles.remove_admin last, saving viewer's own removal very last
+    // 6. roles.remove_admin last, saving viewer's own removal very last
     var rms = Object.keys(activeAdmins).filter(function (id) { return activeAdmins[id] === false; }).sort(function (a, b) {
       if (a === who && b !== who) return 1;
       if (b === who && a !== who) return -1;
@@ -515,6 +953,120 @@
     var idx = typeof refusal.index === 'number' ? refusal.index : -1;
     var key = idx >= 0 && idx < indexMap.length ? indexMap[idx] : '_batch';
     return { key: key, reason: refusal.reason || '' };
+  }
+  // Pure item-window org helpers (Decisions 10, 11, 19 & 20).
+  function itemOrgRules(it, rules) {
+    if (!it || !rules) return [];
+    var list = Array.isArray(rules) ? rules : Object.keys(rules).map(function (k) { return rules[k]; });
+    return list.filter(function (ru) {
+      return ru && !ru.ended && ru.org && ru.item === it.id;
+    }).sort(function (a, b) {
+      var ta = a.ts || '', tb = b.ts || '';
+      return ta !== tb ? (ta < tb ? -1 : 1) : (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    });
+  }
+  function ruleCoversMember(ru, memberId, ot) {
+    if (!ru || ru.ended || ru.state !== 'live' || !ru.root || !memberId) return false;
+    if (memberId === ru.root) return !!ru.includeRoot;
+    var parentOf = (ot && ot.parentOf) || {};
+    var cur = parentOf[memberId] || '', steps = 1, seen = {};
+    seen[memberId] = true;
+    while (cur && !seen[cur]) {
+      if (cur === ru.root) return ru.levels == null || steps <= ru.levels;
+      seen[cur] = true;
+      cur = parentOf[cur] || '';
+      steps++;
+    }
+    return false;
+  }
+  function itemOrgAssignInfo(it, rules, assignments, orgs, members, viewer, canAssignItem) {
+    if (!it) return [];
+    var M = members || {}, oi = orgIndex(orgs, M), ot = oi.tree;
+    var rlist = Array.isArray(rules) ? rules : Object.keys(rules || {}).map(function (k) { return rules[k]; });
+    var openRules = rlist.filter(function (ru) { return ru && !ru.ended && ru.item === it.id; });
+    var orgRules = itemOrgRules(it, openRules);
+    if (!orgRules.length) return [];
+    var amap = assignments || {};
+    var activeRecs = [];
+    (it.assignments || []).concat(it.pending || []).forEach(function (aid) {
+      var r = typeof aid === 'string' ? amap[aid] : aid;
+      if (r && (r.state === 'live' || r.state === 'pending') && !r.fallback) activeRecs.push(r);
+    });
+    var canAsg = canAssignItem !== undefined ? !!canAssignItem : (!it.hidden && it.author === viewer);
+    return orgRules.map(function (ru) {
+      var org = oi.byId[ru.org] || { id: ru.org, name: ru.org, head: '', removed: 'deleted' };
+      var deleted = !!org.removed;
+      var vacant = !deleted && (!org.head || !(M[org.head] && !M[org.head].removed));
+      var recs = activeRecs.filter(function (r) { return r.rule === ru.id; });
+      var onlyThrough = [], stayed = [];
+      recs.forEach(function (r) {
+        if (r.ruleRequest) { onlyThrough.push(r); return; }
+        var coveredElsewhere = openRules.some(function (o) {
+          return o.id !== ru.id && ruleCoversMember(o, r.to, ot);
+        });
+        if (coveredElsewhere) stayed.push(r);
+        else onlyThrough.push(r);
+      });
+      var canRemove = !it.hidden && ru.by === viewer;
+      return {
+        rule: ru, org: org, orgId: ru.org, deleted: deleted, vacant: vacant,
+        pending: ru.state === 'pending', recs: recs, onlyThrough: onlyThrough, stayed: stayed,
+        canRemove: canRemove, canRetarget: canRemove && canAsg
+      };
+    });
+  }
+  function itemOrgCCInfo(it, orgs, members) {
+    if (!it || !Array.isArray(it.orgCC) || !it.orgCC.length) return [];
+    var M = members || {}, oi = orgIndex(orgs, M), srcs = it.ccSources || {};
+    var ccSet = {};
+    (it.cc || []).forEach(function (m) { ccSet[m] = true; });
+    return it.orgCC.map(function (reg) {
+      var org = oi.byId[reg.org] || { id: reg.org, name: reg.org, head: '', removed: 'deleted' };
+      var deleted = !!org.removed;
+      var vacant = !deleted && (!org.head || !(M[org.head] && !M[org.head].removed));
+      var added = (reg.added || []).filter(function (m) {
+        return M[m] ? !M[m].removed && (!it.cc || ccSet[m]) : true;
+      });
+      var onlyThrough = [], stayed = [];
+      added.forEach(function (m) {
+        var s = srcs[m];
+        var otherOrgs = s && Array.isArray(s.orgs) ? s.orgs.filter(function (oid) { return oid !== reg.org; }) : [];
+        if (s && (s.personal || otherOrgs.length > 0)) stayed.push(m);
+        else onlyThrough.push(m);
+      });
+      return {
+        org: org, orgId: reg.org, deleted: deleted, vacant: vacant,
+        added: added, onlyThrough: onlyThrough, stayed: stayed,
+        canRemove: !it.hidden, canRetarget: !it.hidden
+      };
+    });
+  }
+  function itemDeletedOrgSummary(it, rules, orgs, viewer) {
+    if (!it) return { assignDeletedCount: 0, ccDeletedCount: 0, needsCleanup: false };
+    var oi = orgIndex(orgs, {});
+    function isDel(oid) { var o = oi.byId[oid]; return !o || !!o.removed; }
+    var assignDeletedCount = 0, authorHasDeletedAssign = false;
+    itemOrgRules(it, rules).forEach(function (ru) {
+      if (isDel(ru.org)) {
+        assignDeletedCount++;
+        if (ru.by === viewer) authorHasDeletedAssign = true;
+      }
+    });
+    var ccDeletedCount = 0;
+    (it.orgCC || []).forEach(function (reg) {
+      if (reg && reg.org && isDel(reg.org)) ccDeletedCount++;
+    });
+    var needsCleanup = !it.hidden && (ccDeletedCount > 0 || authorHasDeletedAssign);
+    return { assignDeletedCount: assignDeletedCount, ccDeletedCount: ccDeletedCount, needsCleanup: needsCleanup };
+  }
+  function orgAssignUnassignEvent(itemId, ru) {
+    var p = { item: itemId, rule: ru.id };
+    var root = ru.assignRoot || ru.root;
+    if (root) p.root = root;
+    return ['item.unassign', p];
+  }
+  function orgCCUnccEvent(itemId, orgId) {
+    return ['item.uncc_org', { item: itemId, org: orgId }];
   }
   // Live, doing or blocked, and no status write for this many days: "stale" (the
   // view state carries the flag; the number is for the text).
