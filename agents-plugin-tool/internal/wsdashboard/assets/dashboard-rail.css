@@ -762,9 +762,9 @@ html:not([data-sysopen]) .rail .drarch { display: none; }
 .pmq.mismatch { color: var(--wb-fail); background: color-mix(in srgb, var(--wb-fail) 12%, var(--wb-card)); }
 /* a session's permission state: intent, native mode and evidence, apart */
 .rpop .pmstate { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; align-items: baseline; padding: 8px 10px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); }
-.pmstate .k { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); white-space: nowrap; }
-.pmstate .v { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 6px; min-width: 0; }
-.pmstate .v b { font-weight: 700; }
+.pmstate .pmk { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); white-space: nowrap; }
+.pmstate .pmv { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 6px; min-width: 0; }
+.pmstate .pmv b { font-weight: 700; }
 .pmstate .pmsrc { font-size: 11px; color: var(--wb-muted-fg); }
 .pmstate .pmnote { grid-column: 1 / -1; margin: 0; font-size: 11.5px; color: var(--wb-muted-fg); }
 .rpop .pmchg { display: grid; gap: 5px; }

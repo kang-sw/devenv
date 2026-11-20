@@ -220,6 +220,14 @@
     if (!D.el.open) D.el.showModal();
     D.cancel.focus();
   }
+  // permStreamSync follows the live stream: a drop advances the epoch (the
+  // support read before it no longer counts), and an open lead or session
+  // popover redraws, reading the choices again once the stream is back.
+  function permStreamSync(on) {
+    if (!on) permEpoch++;
+    var sp = rp.P && (rp.P.permSync ? rp.P : rp.P.sess && rp.P.sess.permSync ? rp.P.sess : null);
+    if (sp) sp.permSync(on);
+  }
   // permFullOpen reports the warning open; permFullDrop cancels it.
   function permFullOpen() { return !!(permDlg && permDlg.el.open); }
   function permFullDrop() { if (permDlg && (permDlg.el.open || permDlg.no)) permDlg.end(false); }
@@ -241,8 +249,8 @@
     if (!level) return;
     var harness = String(st.backend || ""), explicit = st.permission_source === "explicit";
     function row(key) {
-      box.appendChild(mk("span", "k", wsT(key)));
-      return box.appendChild(mk("span", "v"));
+      box.appendChild(mk("span", "pmk", wsT(key)));
+      return box.appendChild(mk("span", "pmv"));
     }
     var v = row("js.perm.k.intent");
     v.appendChild(mk("b", null, PERM_LABEL[level] ? wsT(PERM_LABEL[level]) : level));
