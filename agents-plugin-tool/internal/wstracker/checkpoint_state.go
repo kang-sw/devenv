@@ -181,10 +181,12 @@ func (s *state) checkpoint() *state {
 			cp.ccOrgs[key] = &v
 		}
 	}
-	cp.ccOrgsByItem = map[string][]*ccOrgReg{}
-	for _, key := range cp.ccOrder {
-		if reg := cp.ccOrgs[key]; reg != nil {
-			cp.ccOrgsByItem[reg.item] = append(cp.ccOrgsByItem[reg.item], reg)
+	if s.ccOrgsByItem != nil {
+		cp.ccOrgsByItem = map[string][]*ccOrgReg{}
+		for _, key := range cp.ccOrder {
+			if reg := cp.ccOrgs[key]; reg != nil {
+				cp.ccOrgsByItem[reg.item] = append(cp.ccOrgsByItem[reg.item], reg)
+			}
 		}
 	}
 	return &cp
