@@ -578,19 +578,6 @@
     "261119-feat-ws-whiteboard-frame-css-isolation": {
       "registered_at": "2026-11-19T06:59:13Z"
     },
-    "261119-feat-ws-whiteboard-retire-embed-snapshot": {
-      "registered_at": "2026-11-19T14:14:08Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-19T15:24:44Z",
-        "impl": {
-          "branch": "impl/develop/theft-avoid-mangy"
-        }
-      }
-    },
     "261119-refactor-ws-config-drop-candidate-cleanup": {
       "registered_at": "2026-11-19T14:03:33Z"
     },
@@ -622,6 +609,9 @@
     },
     "261120-bug-ws-sweep-1120-agy-fixes": {
       "registered_at": "2026-11-20T05:18:14Z"
+    },
+    "261120-feat-ws-dashboard-ticket-map-view": {
+      "registered_at": "2026-11-20T07:05:30Z"
     }
   }
 }
