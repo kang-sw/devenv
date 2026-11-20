@@ -1889,6 +1889,7 @@ Current launcher inputs:
 | `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.50.8`. |
 | `WS_MCP_RELEASE_BASE_URL` | Override the full release asset base URL; useful for local file or HTTP smoke tests. |
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
+| `WS_CODESIGN_IDENTITY` | macOS local dev builds only: code-signing identity name or SHA-1 passed to `codesign --force -s "$WS_CODESIGN_IDENTITY" -i dev.ws.mcp <binary>` before SHA-256 metadata generation; unset leaves builds untouched, and a signing failure aborts the build. |
 | `WS_MCP_LAUNCHER_DIRECT` | Obsolete; ignored. It never enables executable fallback. |
 | `WS_MCP_PROJECT_ROOT` | Project root default for root-aware tools and CLI commands when no higher-priority root exists. |
 | `WS_RSRC_DEV_CHECKOUT` | Explicit daemon-process-only repository checkout for package inputs (rsrc, workflow skills/templates, manifests and native Pi). Uses the package's canonical directory, logs the override, and permits live playbook edits. Never honored from a connection hello. Production embeds always win over `WS_RSRC_ROOT`. |
@@ -2114,6 +2115,28 @@ the cache/release path).
 This path exists only for the repository-local Codex or Claude plugin
 development loop. The marker file is gitignored and should not exist in normal
 GitHub release installs, downstream repositories, or Windows installs.
+
+### Stable macOS code signing for local builds
+
+On macOS, `ws-mcp` launches the dashboard daemon from the stable path
+`<cache-root>/dashboard/bin/ws-mcp-dashboard` (hardlinked to the retained
+content-addressed `ws-mcp-dashboard-<sum16>` copy). Ad-hoc linker-signed dev
+rebuilds still rotate their `cdhash` on every compile, which causes macOS TCC
+prompts (for example Desktop folder access) to repeat. To keep one TCC identity
+across local rebuilds:
+
+1. In **Keychain Access**, open **Certificate Assistant → Create a
+   Certificate…**, choose **Self-Signed Root** with **Certificate Type: Code
+   Signing**, and create it in your `login` keychain.
+2. Export `WS_CODESIGN_IDENTITY` to that certificate's name (or SHA-1
+   fingerprint) in your shell profile. When unset, local builds are unchanged.
+3. Rebuild locally (for example `python3 scripts/dev.py rerun daemon --local` or
+   a local-devenv launcher build); `codesign --force -s "$WS_CODESIGN_IDENTITY"
+   -i dev.ws.mcp <binary>` runs before `.metadata.json` SHA-256 generation, and
+   any signing error fails the build step rather than installing an unsigned
+   binary.
+4. Grant **Full Disk Access** once in **System Settings → Privacy & Security →
+   Full Disk Access** to `<cache-root>/dashboard/bin/ws-mcp-dashboard`.
 
 ## Development Verification
 

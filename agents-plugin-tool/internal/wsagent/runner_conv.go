@@ -82,6 +82,8 @@ type conv struct {
 	compactAdvisory, compactHard                                                 wsconfig.Threshold
 	compactTokens, compactWindow                                                 float64
 	compactPrevTokens, compactPrevWindow                                         int64
+	compactGen                                                                   uint64
+	compactLoaded                                                                bool
 	compactUsageFresh, compactAdvised, compactHardIssued, compactAdvisoryEnabled bool
 	compactAwaitTurn                                                             bool
 
@@ -205,6 +207,10 @@ type conv struct {
 	// permission admission (childAdmission): the input stays, and the
 	// child counts as asleep. Under mu.
 	wakeRefused bool
+	// spawnPending is true from registration in r.convs until spawned()'s
+	// first Send (or close), so awakeLocked counts a newly registered spawn
+	// with no gap after pendingSpawns handoff. Under mu.
+	spawnPending bool
 
 	// Turn settles (spawn.go). sends counts Runner.Send's messages and
 	// settled is the last settled turn, settleC closed and replaced at each
@@ -581,18 +587,7 @@ func (c *conv) loop() {
 		case <-modelWaitDrainC:
 			c.modelFailureDrainTimedOut()
 		case <-beat.C:
-			c.live.heartbeatSnapshot()
-			c.persistSeq()
-			if c.replaying {
-				// A holder that attached late (a rescan) is found here.
-				c.checkReattach()
-			}
-			if c.r.opts.Now().Sub(c.lastReg) >= wsdashboard.HeartbeatInterval {
-				c.writeRegistration()
-			} else {
-				c.checkRow()
-			}
-			c.expireIfDue()
+			c.heartbeat()
 		case <-c.r.quit:
 			c.letGo()
 			// The watch's listening marker names this process: left behind,
@@ -606,6 +601,23 @@ func (c *conv) loop() {
 			return
 		}
 	}
+}
+
+func (c *conv) heartbeat() {
+	registrationDue := c.r.opts.Now().Sub(c.lastReg) >= wsdashboard.HeartbeatInterval
+	if registrationDue {
+		c.writeRegistration()
+	}
+	c.live.heartbeatSnapshot()
+	c.persistSeq()
+	if c.replaying {
+		// A holder that attached late (a rescan) is found here.
+		c.checkReattach()
+	}
+	if !registrationDue {
+		c.checkRow()
+	}
+	c.expireIfDue()
 }
 
 // settle follows each step of the loop: a session whose row a terminal

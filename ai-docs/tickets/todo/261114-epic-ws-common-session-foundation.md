@@ -128,16 +128,18 @@ Stage 3 (tier-1 harnesses; each prerequisite: the catalog ticket):
 
 Stage 4 (extensions):
 
-- `261114-feat-ws-conversation-audit-event-store` - reuse the existing backend
-  ticket; the foundation gate (interface Phase 2, 682) is satisfied. Backend
-  Phase 1 captures/stores events and ring call IDs; Phase 2 serves the API,
-  including additive UTC selection (681).
-- `261114-feat-ws-dashboard-conversation-audit-view` - reuse the existing UI
-  ticket, after `261114-feat-ws-conversation-audit-event-store#phase2`.
+- `261119-epic-ws-conversation-audit` - conversation audit sub-epic ((1331)=a,
+  2026-11-19): policy and envelope, pre-filter capture and per-harness
+  adapters, SQLite store (after `261119-epic-ws-daemon-sqlite-storage`),
+  query API, dashboard view. It supersedes the dropped
+  `261114-feat-ws-conversation-audit-event-store` and
+  `261114-feat-ws-dashboard-conversation-audit-view` and carries approvals
+  545, 546, 550, 594-611 and 681. The foundation gate (interface Phase 2, 682)
+  is satisfied.
 - Planned (not yet authored): authority/permission UI, voice, live reasoning,
   `ws/agent.*` session lightweighting.
-- Candidates ((28)=a), no ticket yet: F, daemon-owned fork/rewind; G, audit
-  unification (the two audit tickets above).
+- Candidates ((28)=a), no ticket yet: F, daemon-owned fork/rewind. G, audit
+  unification, is now `261119-epic-ws-conversation-audit`.
 
 Independent:
 
@@ -168,8 +170,8 @@ Foundation prerequisite for every extension below is already met
 | Additional harnesses | Codex, then Antigravity, then Pi (stage 3) | `261117-feat-ws-harness-capability-catalog`; Codex's first implementation also needs its settled range-based contract and separate execution approval |
 | Voice | Not yet authored | No additional prerequisite settled |
 | Live reasoning | Not yet authored | No additional prerequisite settled |
-| Audit backend | `261114-feat-ws-conversation-audit-event-store` | Backend Phase 2 follows its Phase 1 store/mapping/call IDs (682) |
-| Audit UI | `261114-feat-ws-dashboard-conversation-audit-view` | `261114-feat-ws-conversation-audit-event-store#phase2` is the exact dispatch gate |
+| Audit (capture, store, API) | `261119-epic-ws-conversation-audit` children 1-4 | Store: `261119-epic-ws-daemon-sqlite-storage` precedent ((1331)=a); order inside the sub-epic |
+| Audit UI | `261119-feat-ws-dashboard-audit-view` | `261119-feat-ws-audit-query-api` and `261119-feat-ws-audit-capture-harness-adapters#phase1` |
 | Exec | `261117-feat-ws-exec-tools` | `261117-feat-ws-single-session-holder` |
 
 ## Cross-Child Decisions

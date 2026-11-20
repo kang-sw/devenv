@@ -84,7 +84,7 @@ func (s *Server) resolveBucketedOverrideRows(resolver *wsconfig.Resolver, sessio
 		if !entry.HarnessBucketed() {
 			continue
 		}
-		rv, _, err := resolveHarnessBucketed(resolver, sessionKey, item.Key, s.currentHarness())
+		rv, _, err := resolveHarnessBucketed(resolver, sessionKey, item.Key, s.playbookHarness())
 		if err != nil {
 			return err
 		}
@@ -444,7 +444,7 @@ func buildTuningCatalog(rsrcRoot fs.FS, resolver *wsconfig.Resolver, sessionKey,
 		entry := registryEntryByKey(key)
 		rv, _, _ := resolveCompactionValue(resolver, sessionKey, key, harness, registries...)
 		def := wsconfig.CompactionDefaults[key]
-		appendKnob(entry, tuningKnob{ID: key, Kind: "workflow_preference", Description: "Hosted native compaction threshold, checked at idle boundaries. Advisory asks for durable agenda state; hard queues native compaction. Read at process start.", Writer: tuningWriter{Tool: "config.tune", FixedArguments: map[string]string{"key": key}}, Reset: &tuningWriter{Tool: "config.tune", FixedArguments: map[string]string{"key": key, "reset": "true"}}, SelectorFields: entry.SelectorFields, ValueFields: entry.ValueFields, Current: tuningScopedValue{Value: rv.Value, Scope: string(rv.Scope)}, Default: &def})
+		appendKnob(entry, tuningKnob{ID: key, Kind: "workflow_preference", Description: "Hosted native compaction threshold, checked at idle boundaries. Advisory asks for durable agenda state; hard queues native compaction. Read at process start and reloaded on config.tune before the next threshold check.", Writer: tuningWriter{Tool: "config.tune", FixedArguments: map[string]string{"key": key}}, Reset: &tuningWriter{Tool: "config.tune", FixedArguments: map[string]string{"key": key, "reset": "true"}}, SelectorFields: entry.SelectorFields, ValueFields: entry.ValueFields, Current: tuningScopedValue{Value: rv.Value, Scope: string(rv.Scope)}, Default: &def})
 	}
 
 	childWaitingEntry := registryEntryByKey(wsconfig.ItemAgentChildWaitingDays)
@@ -824,7 +824,7 @@ func (s *Server) effectiveConfigValue(entry configKeyEntry, sessionKey string) (
 		return s.compactionValue(&resolver, sessionKey, entry.Key, s.playbookHarness())
 	}
 	if entry.HarnessBucketed() {
-		return resolveHarnessBucketed(&resolver, sessionKey, entry.Key, s.currentHarness())
+		return resolveHarnessBucketed(&resolver, sessionKey, entry.Key, s.playbookHarness())
 	}
 	rv, err := resolver.Get(sessionKey, entry.Key)
 	return rv, entry.Key, err

@@ -13,8 +13,9 @@ related:
 ## Background
 
 Dogfooding the `track/agent-v2` hosted-session stack (agy lead/worker, Codex,
-compaction, and ticket-index caching) surfaced eleven workflow/runtime surprises
-plus two concrete compaction regressions in agy (`CommandEndConfirms /compact`
+compaction, and ticket-index caching) surfaced fourteen workflow/runtime surprises
+(items 1-11 from the original capture, items 12-14 added from the 2026-11-19
+child-spawn dogfood) plus two concrete compaction regressions in agy (`CommandEndConfirms /compact`
 badge clearing and `beginTurn` ending `bgResumeGrace` early).
 
 This ticket captures all items in `todo/` under
@@ -122,6 +123,47 @@ timing only; no stored shape or protocol change).
      worker toolset consistently across harnesses (or, if either tool is
      intentionally excluded from worker profiles, the worker tool contract and
      playbooks align so callers are not instructed to call absent tools).
+   - **Update 2026-11-19:** the same gap was reported for `codex.*` children
+     and Claude `workdir-write`/`read-only` children; see Item 12, which
+     carries the fix status and the remaining gap.
+
+6. **Item 12 — Child tool surface: `convention.read`, `tickets.template`, Codex approvals, and sage gate/stamp *(partly fixed on develop)*:**
+   - **Observed symptom (2026-11-19):** `codex.*` and Claude
+     `workdir-write`/`read-only` children lacked `convention.read` and
+     `tickets.template`, and Codex children were refused `path.generate` and
+     `mailbox.send` by the never-approve policy. Separately, a `claude.large`
+     child spawned via `agent.spawn` with authority `workdir-write`,
+     worktree-bound, had no `tickets.sage_gate` / `tickets.sage_stamp` in its
+     tool list, so a ticket-promotion handler could not stamp and the lead
+     stamped instead.
+   - **Evidence:** the dogfood report of 2026-11-19 (child tool lists and the
+     Codex refusal observed in the child-spawn dogfood); fix for
+     the first part is commit `2240464a4` on `develop`.
+   - **Status:** first part **fixed on develop** by `2240464a4` (child-safe
+     allowlist: Codex per-tool `approval_mode=approve` for workers; Claude
+     read-only children restricted to the same set), **pending daemon rebuild**
+     before it is observable in a running daemon. **Remaining gap:** the sage
+     gate/stamp tools for `workdir-write` children.
+   - **Expected behavior:** either `tickets.sage_gate` / `tickets.sage_stamp`
+     are exposed to `workdir-write` children carrying the worker key, or the
+     ticket-promotion playbook states that the lead stamps and never instructs
+     a child to call them.
+   - **Verification direction:** after the daemon rebuild, a `workdir-write`
+     child of each harness lists `convention.read` and `tickets.template`, and
+     a Codex child's `path.generate` / `mailbox.send` succeed; the remaining
+     gap is covered by a tool-list test for the chosen option.
+
+7. **Item 13 — Rendered delegate playbook carries a different child session key than the spawn harness appended *(Diagnosis needed)*:**
+   - **Observed symptom (2026-11-19):** a rendered delegate playbook embedded
+     one child session key while the spawn harness appended another to the
+     child's prompt; the worker had to guess and used the appended one.
+   - **Evidence:** the dogfood report of 2026-11-19 (the worker saw two
+     differing keys and used the harness-appended one); related to Item 3 (keys minted by
+     `playbook.render`).
+   - **Expected behavior:** exactly one child session key is present in a
+     delegated child's prompt, and it is the key the child's tool calls are
+     accepted under; diagnose whether render-minted and spawn-minted keys
+     should be unified or the spawn append dropped.
 
 ### Phase 3: Harness tool-result size limits and output truncation
 
@@ -155,6 +197,22 @@ timing only; no stored shape or protocol change).
    - **Expected behavior:** An active agy turn silent for >30 s (for example
      during model thinking or long tool/command work) remains open after
      `--replace` until the harness reports turn completion or failure.
+
+3. **Item 14 — agy child turn ends with only a stream-idle API error as its final report *(fix in progress)*:**
+   - **Observed symptom (2026-11-19):** an agy child's turn can end with only
+     `⚠ API error (attempt 1): request failed: stream idle timeout (10m0s)`
+     as the final report, with no work summary.
+   - **Evidence:** the dogfood report of 2026-11-19 (final report text of an agy
+     child as received by the lead).
+   - **Status:** a watchdog fix is in progress on branch
+     `impl/develop/agy-model-wait-watchdog`; this ticket tracks the symptom
+     only and takes no implementation from that branch.
+   - **Expected behavior:** a stream-idle timeout is retried or reported as a
+     turn failure that the lead can distinguish from a completed report, never
+     as the final report of a finished turn.
+   - **Verification direction:** settle once the watchdog branch lands: a
+     simulated stream-idle timeout yields a failed or retried turn state, not
+     a final report.
 
 ### Phase 5: Codex `git_commit` branch mismatch and ticket-index cache staleness
 

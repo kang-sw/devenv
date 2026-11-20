@@ -194,6 +194,7 @@ func TestCodexWorkerLaunchAuthorityAndApproval(t *testing.T) {
 				!strings.Contains(string(config), `"enabled":false`) || !strings.Contains(string(config), server.URL) {
 				t.Fatalf("thread/start: %v", params)
 			}
+			assertCodexWorkerSafeTools(t, "thread/start", params)
 			text, _ := params["developerInstructions"].(string)
 			for _, want := range []string{"WORKER-SPINE", "spawn_agent", "agent.spawn", rec.WSKey} {
 				if !strings.Contains(text, want) {
@@ -230,7 +231,28 @@ func TestCodexWorkerLaunchAuthorityAndApproval(t *testing.T) {
 			if len(resumed) != 1 || resumed[0]["threadId"] != "codex-worker-session" || resumed[0]["sandbox"] != tc.sandbox || resumed[0]["approvalPolicy"] != tc.policy {
 				t.Fatalf("thread/resume: %v", resumed)
 			}
+			assertCodexWorkerSafeTools(t, "thread/resume", resumed[0])
 		})
+	}
+}
+
+func assertCodexWorkerSafeTools(t *testing.T, method string, params map[string]any) {
+	t.Helper()
+	cfg, _ := params["config"].(map[string]any)
+	servers, _ := cfg["mcp_servers"].(map[string]any)
+	ws, _ := servers["ws"].(map[string]any)
+	tools, _ := ws["tools"].(map[string]any)
+	if len(tools) != len(ChildSafeWSTools) {
+		t.Fatalf("%s ws.tools len = %d, want %d", method, len(tools), len(ChildSafeWSTools))
+	}
+	for _, name := range ChildSafeWSTools {
+		entry, _ := tools[name].(map[string]any)
+		if entry["approval_mode"] != "approve" {
+			t.Errorf("%s ws.tools[%q] = %v, want approval_mode=approve", method, name, tools[name])
+		}
+	}
+	if _, ok := tools["git.commit"]; ok {
+		t.Errorf("%s ws.tools must exclude mutating tool git.commit", method)
 	}
 }
 

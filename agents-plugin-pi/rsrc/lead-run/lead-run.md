@@ -8,65 +8,63 @@ variables:
 
 # Run
 
-One ticket per cycle: pick it, spawn one worker, act on its report, end on
-a verdict line. The worker implements and verifies; you edit no source.
+One ticket per cycle: pick it, spawn one worker, act on its report, end on a
+verdict line. The worker implements and verifies; you edit no source.
 
-- A trivial ticket (no open decision, no new structure, files named, one
+- Trivial ticket (no open decision, no new structure, files named, one
   commit) → you may propose `{{.SkillNamespace}}:lead-delegate` instead; on
-  the user's yes, delegate it and close the ticket citing the commit.
+  yes, delegate it and close the ticket citing the commit.
 
 ## Select
 
-- A ticket named in the invocation wins. Otherwise render
-  `ticket-selector`, spawn it at its recommended tier, and use its one
-  `selection:` result. Pass a `not-assigned` argument through to it: it
-  then considers tickets assigned to other contributors; without it, your
-  own.
-- `selection: ready/ empty` → tell the user, relay its `backlog:` and
-  `backlog_omitted:` lines, propose `{{.SkillNamespace}}:lead-ticket`, end
-  the turn.
+- A ticket named in the invocation wins. Otherwise render `ticket-selector`,
+  spawn it at its recommended tier, and use its `selection:` result (pass
+  `not-assigned` through when given).
+- `selection: ready/ empty` → relay `backlog:` and `backlog_omitted:`,
+  propose `{{.SkillNamespace}}:lead-ticket`, end the turn.
 - `selection: stop: <reason>` → relay the reason, end the turn.
 
 ## Spawn
 
 1. `{{.McpNamespace}}/tickets.query(ticket_stem: "<stem>", format: "json")`:
    - `dispatch_blocked` → report the blocking stem, end the turn.
-   - `blocked_headings` on a queue-selected ticket → read that
-     `## Blocked` section. Still current → drop the ticket from this cycle
-     and return to Select. None remains →
-     report each ticket's blocker, end the turn.
-   - `blocked_headings` on a ticket named in the invocation → report its
-     current blocker, end the turn.
-   - Assigned to another contributor → surface the warning and get the
-     user's confirmation before dispatching, unless the run passed
-     `not-assigned`.
-   - Route Facts absent, or a worker reported them incomplete → render and
-     spawn `ticket-fact-populator` on the ticket once, commit its edit,
-     query again; still absent → report the ticket, end the turn.
-2. Read the whole ticket body and grade its risk with the Risk Rubric
-   below; the query's `risk.*` rows are a hint, not a verdict. The grade
-   picks the row: its body's own frontmatter tier, or the `tier_override`
-   the row pairs with it. The tier sets the worker's model; the worker's
-   route sets review breadth.
+   - `blocked_headings` → read that `## Blocked` section. Still current →
+     for a queue-selected ticket, drop it from this cycle and return to
+     Select (none left → report each blocker, end the turn); for a named
+     ticket, report its blocker and end the turn.
+   - Assigned to another contributor → warn and get confirmation before
+     dispatching, unless `not-assigned` was passed.
+   - Route Facts absent or reported incomplete → render and spawn
+     `ticket-fact-populator` once, commit its edit, re-query; still absent or
+     incomplete → report the ticket, end the turn.
+2. Assign the worker tier:
+   - You already hold this ticket's context in this session → grade its risk
+     directly with the Risk Rubric below (`risk.*` rows are hints, not a
+     verdict).
+   - You lack its context (e.g., an older `ready/` ticket or a parallel
+     batch) → render and spawn `ticket-classifier` at its recommended tier
+     with `Ticket: <ticket path> (stem <stem>).` (in parallel for a batch).
+     Use its `tier:` to pick the worker row and its `brief:` for user-facing
+     context without reading the ticket body yourself; if `flags:` names a
+     current blocker or contradiction, report it and end the turn (if it
+     reports missing Route Facts, run step 1's populator path).
 
-   | Tier | Worker playbook | Retry after stop (e) or (f) |
+   | Tier | Worker playbook | Retry on `next: retry` |
    |---|---|---|
    | medium | `ticket-worker` | `ticket-worker-elevated` |
    | large | `ticket-worker-elevated` | `ticket-worker-elevated`, `tier_override: xlarge` |
-   | xlarge | `ticket-worker-elevated`, `tier_override: xlarge` | none: its (e) or (f) goes to the user |
+   | xlarge | `ticket-worker-elevated`, `tier_override: xlarge` | none (goes to user) |
 
-3. `{{.McpNamespace}}/tickets.acquire(ticket_stem: "<stem>")` from the
-   branch the worker branches off, so the lease's track is the one its
-   impl branch merges into. Refusal or error → report it, dispatch
-   nothing, end the turn. Set `dangerously_override_lease_status`, with the
-   user's words as `reason`, only when the user explicitly told you to take
-   the ticket over.
-4. `{{.McpNamespace}}/playbook.render(name: <the row's worker playbook>,
-   session_key: <your key>)`, plus `tier_override: xlarge` when the row
-   pairs it (the elevated body's own tier is large). Do not read the file.
-5. Spawn one worker at the tier the render recommends, in a form that can
-   itself spawn children ({{.SpawnIdiom}}), with this task block and
-   nothing else beyond the lines **Handle the report** adds:
+3. `{{.McpNamespace}}/tickets.acquire(ticket_stem: "<stem>")` from the base
+   branch; refusal or error → report it, dispatch nothing, end the turn. Set
+   `dangerously_override_lease_status` (with the user's words as `reason`)
+   only on explicit user takeover instruction.
+4. `{{.McpNamespace}}/playbook.render(name: <row's playbook>, session_key:
+   <your key>)`, plus `tier_override: xlarge` when the row pairs it. Do not
+   read the file.
+5. Spawn one worker at the returned tier in a form that can spawn children
+   ({{.SpawnIdiom}}), with this task block (plus any line **Handle the
+   report** adds):
 
    ```text
    Read <rendered-path> as your system prompt.
@@ -74,102 +72,71 @@ a verdict line. The worker implements and verifies; you edit no source.
    ```
 
 6. Wait for the host's completion notification; do not poll. Meanwhile do
-   not edit the worker's ticket or move `HEAD` in its checkout;
-   housekeeping that cannot wait uses the sparse worktree in the workflow
-   manual's `### Git`, released before you merge.
+   not edit the worker's ticket or move `HEAD` in its checkout (urgent
+   housekeeping uses the manual's `housekeeping` worktree, released before
+   merge).
 
 ## Handle the report
 
-- The worker ends with its protocol's report block. Missing, unknown, or
-  incompatible values, or `completion: ad_hoc` (invalid in this
-  ticket-only run) → protocol mismatch: show the raw report, end the
-  invocation.
-- Otherwise digest it for the user in their language: status, what
-  landed, the decisions that matter, unresolved items, verification.
-  Relay `tell_user` and `ask` in the user's language, adding and dropping
-  nothing.
-- Before a HEAD-relative write of your own (a ticket edit, a follow-up
-  dispatch) → `{{.McpNamespace}}/git.status`, since the worker's checkout
-  outlives its turn. The write belongs to a continuing ticket → stack on
-  the impl branch; unrelated, or you leave the ticket blocked → check out
-  the branch you were invoked on, committing or stashing a dirty tree
-  first. Branch-explicit calls need no check.
+- Missing or malformed report block → show the raw report, end the turn.
+- Digest for the user in their language: status, what landed, key decisions,
+  unresolved items, verification. Relay `tell_user` and `ask` in the user's
+  language without adding or dropping anything.
+- Before a HEAD-relative write of your own → `{{.McpNamespace}}/git.status`
+  (the worker's checkout outlives its turn): stack on the impl branch for
+  the continuing ticket; otherwise check out your starting branch first
+  (committing or stashing a dirty tree).
 
-**Merging is yours.**
+**Act on `status` and `next`:**
 
-- `merge_confirm: skip` → call `{{.McpNamespace}}/git.merge` with the impl
-  branch. `ask` or absent → show the report and merge on the user's
-  approval.
-- A conflict → `{{.SkillNamespace}}:lead-delegate` as a bounded resolution
-  task.
-- `target_held_elsewhere` → the target is checked out in another worktree.
-  A merge stop, not a conflict: keep the impl branch and `HEAD`, report the holder's path, end
-  the turn; the next invocation merges once it is released.
-
-**By outcome.**
-
-- `completion: phase` → do not merge: it deletes the impl branch the next
-  phase stacks on. Leave the checkout on that branch (the route continues
-  only from it), and check it back out if a write of yours moved `HEAD`.
-  Merge mid-ticket only when a dependent ticket needs the landing, through
-  the same gate. Then **End the turn**.
-- `completion: ticket` → merge the impl branch. The ticket was an epic's
-  last open child → surface the epic for a close decision. Then **End the
-  turn**.
-- (a) merge into a `main`-class branch → ask the user for approval; on
-  approval call `{{.McpNamespace}}/git.merge` with that target.
-- (b) unresolved decision:
-  - a branch-identity safety stop → judge ownership from cross-ticket
-    context or a bounded explore. The unmerged work belongs to the target
-    ticket → re-invoke its route with a vouch matching the observed branch
-    and ticket; otherwise leave the stop in place.
-  - any other → the ticket or its sources already answer `ask` → resume
-    the worker with the answer and its source; otherwise put `ask` to the
-    user and resume with the answer.
-- (c) contract broken → `{{.SkillNamespace}}:lead-ticket` (operation
-  `revise`) with `proposed_resolution:`, the tier, and the impl branch;
-  `done` → resume the worker; `blocked` → the user.
-- (d) irreversible action → put `ask` to the user; resume with the answer.
-- (e) Critical open after the fix round → repeat Spawn steps 4–6 with the
-  row's retry cell (its body and any `tier_override`), on the same branch,
-  adding the report's open Critical `unresolved:` line to the task block.
-- (f) non-convergence → the same retry, adding the failing
-  `verification:` line instead.
-- One retry per ticket run across (e) and (f); the next (e) or (f) goes to
+- `done` + `next: merge` → merge `branch` with `{{.McpNamespace}}/git.merge`
+  (automatically on `merge_confirm: skip`, else on user approval). Conflict
+  → `{{.SkillNamespace}}:lead-delegate`. If `tickets.query` showed a `parent:`
+  epic and this was its last open child → surface the epic for a close
+  decision.
+- `done` + `next: keep-branch` → do not merge (later phases stack on
+  `branch`); leave `HEAD` on `branch` (merge mid-ticket only if a dependent
+  ticket needs it, through the same gate).
+- `ask-user` → if the ticket or its sources already settle `ask`, resume the
+  worker with the answer and source; otherwise put `ask` to the user and act
+  on the reply (`next: resume` → resume worker; `next: merge` → run the
+  `done` + `next: merge` merge, conflict, and epic-close handling on
+  approval).
+- `blocked` + `next: retry` → once per ticket run across all retries, repeat
+  Spawn 4–6 with the row's retry cell on the same branch, adding
+  `retry_context:` to the task block; a second retry (or `xlarge`) goes to
   the user.
+- `blocked` + `next: revise` → `{{.SkillNamespace}}:lead-ticket` (`revise`)
+  with `proposed_resolution:`, the worker's tier, and `branch`; `done` →
+  resume worker, `blocked` → user.
+- `blocked` + `next: vouch` → judge branch ownership from cross-ticket
+  context or a bounded explore; if it belongs to this ticket, resume with a
+  vouch matching branch and ticket, else leave stopped.
+- `blocked` + `next: stop` → report `blocker` and `tell_user` to the user.
 
-Resume through the host's continuation mechanism. It has none, or the
-agent is gone → re-spawn with the same task block plus:
-`Resume: branch <branch> at <head>; your last report is in the ticket's ### Result
-and the branch log.`
+Resume through the host's continuation mechanism; if none or the agent is
+gone, re-spawn with the same task block plus:
+`Resume: branch <branch> (at <head> when committed); <answer, vouch, or revision>; inspect the branch log and ticket for prior state.`
 
 ## Parallel route (opt-in)
 
-- This route runs the workflow manual's `#### Parallel mode` over ready
-  tickets and needs one user approval per run; a user instruction to work
-  in worktree or parallel mode is that approval. The approved batch is the concurrency cap.
-- Render `ticket-batch-selector` at its recommended tier; it owns the
-  parallel-safety read. Present its `batch:` with the approval request, or
-  report it and proceed when the instruction already approved.
-- Per ticket: provision by the manual's `### Worktree-based work mode`,
-  render its worker with `root_override: <worktree path>`, and put the
-  acquired branch on the Branch line. A route verdict other than
-  `continue` is followed as reported, not re-provisioned.
-- Handle each report by **Handle the report** as it arrives.
+- Runs the workflow manual's `#### Parallel mode` over ready tickets and
+  needs one user approval per run (a worktree/parallel instruction counts as
+  that approval; the batch is the concurrency cap).
+- Render `ticket-batch-selector` and spawn it at its recommended tier;
+  present its `batch:` for approval, or report and proceed when already
+  approved.
+- Per ticket: provision per the manual's `### Worktree-based work mode`,
+  render the worker with `root_override: <worktree path>`, put the acquired
+  branch on `Branch:`. Follow any route verdict other than `continue` as
+  reported. Handle each report as it arrives.
 
 ## End the turn
 
-- A stop that reached the user and is unanswered → a dated
-  `## Blocked (YYYY-MM-DD)` note on the ticket, or the next selection
-  re-picks it.
-- Whatever re-invokes this skill reads the transcript's last line, so make
-  it exactly one of these, chosen by the queue state after that note. A
-  stop that reached the user, a protocol mismatch, and a dispatch block
-  end the same way:
-
-- `Active ticket <stem> has phases remaining on its retained impl branch — next cycle: {{.SkillNamespace}}:lead-run continues it.`
-- `Ready queue still has advanceable tickets — next cycle: {{.SkillNamespace}}:lead-run.`
-- `Ready queue is empty — prepare a todo or idea ticket with {{.SkillNamespace}}:lead-ticket before re-invoking {{.SkillNamespace}}:lead-run.`
-
-Write nothing after it, and keep `finished`, `complete`, and `done` out of
-a continuing turn.
+- Unanswered stop that reached the user → add a dated `## Blocked
+  (YYYY-MM-DD)` note on the ticket so the next selection skips it.
+- End on exactly one verdict line matching queue state (nothing after it;
+  keep `finished`, `complete`, and `done` out of a continuing turn):
+  - `Active ticket <stem> has phases remaining on its retained impl branch — next cycle: {{.SkillNamespace}}:lead-run continues it.`
+  - `Ready queue still has advanceable tickets — next cycle: {{.SkillNamespace}}:lead-run.`
+  - `Ready queue is empty — prepare a todo or idea ticket with {{.SkillNamespace}}:lead-ticket before re-invoking {{.SkillNamespace}}:lead-run.`

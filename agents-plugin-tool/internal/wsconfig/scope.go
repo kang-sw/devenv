@@ -41,7 +41,7 @@ const (
 	// section, which makes the session whiteboard the lead's primary channel
 	// to the user. It gates only that text: the whiteboard tools work in
 	// every lead session. It is harness-bucketed: values are stored under
-	// ItemWorkflowWhiteboardEnabled+"."+<claude|codex|pi|all>, and a value
+	// ItemWorkflowWhiteboardEnabled+"."+<claude|codex|pi|agy|all>, and a value
 	// under this bare key is a legacy value read in the all position.
 	// Builtin default: off, held on the bare key only.
 	ItemWorkflowWhiteboardEnabled = "workflow.whiteboard_enabled"
@@ -52,7 +52,7 @@ const (
 	// every top-level lead session, and the background poll and the
 	// lead-session-start check ignore it. It is harness-bucketed like
 	// ItemWorkflowWhiteboardEnabled: values are stored under
-	// ItemWorkflowTrackerEnabled+"."+<claude|codex|pi|all>, and a value
+	// ItemWorkflowTrackerEnabled+"."+<claude|codex|pi|agy|all>, and a value
 	// under this bare key is a legacy value read in the all position.
 	// Builtin default: off, held on the bare key only.
 	ItemWorkflowTrackerEnabled = "workflow.tracker_enabled"
@@ -61,7 +61,7 @@ const (
 	// base playbooks, orchestrate selects the <name>.orchestrate.md profile
 	// variants where present, for top-level lead keys only. It is
 	// harness-bucketed like ItemWorkflowWhiteboardEnabled: values are stored
-	// under ItemWorkflowProfile+"."+<claude|codex|pi|all>, and a value under
+	// under ItemWorkflowProfile+"."+<claude|codex|pi|agy|all>, and a value under
 	// this bare key is a legacy value read in the all position.
 	// Builtin default: direct, held on the bare key only.
 	ItemWorkflowProfile = "workflow.profile"
@@ -212,19 +212,19 @@ func init() {
 	// Its harness bucket keys carry the same default, or a scope-less bucket
 	// write would land in the unregistered-key default (project).
 	RegisterDefaultScope(ItemWorkflowWhiteboardEnabled, ScopeGlobal)
-	for _, bucket := range []string{"claude", "codex", "pi", "all"} {
+	for _, bucket := range []string{"claude", "codex", "pi", "agy", "all"} {
 		RegisterDefaultScope(ItemWorkflowWhiteboardEnabled+"."+bucket, ScopeGlobal)
 	}
 	// workflow.tracker_enabled is the same cross-project habit, so it takes
 	// the same global default on the bare key and every bucket key.
 	RegisterDefaultScope(ItemWorkflowTrackerEnabled, ScopeGlobal)
-	for _, bucket := range []string{"claude", "codex", "pi", "all"} {
+	for _, bucket := range []string{"claude", "codex", "pi", "agy", "all"} {
 		RegisterDefaultScope(ItemWorkflowTrackerEnabled+"."+bucket, ScopeGlobal)
 	}
 	// workflow.profile is the same cross-project habit, so it takes the same
 	// global default on the bare key and every bucket key.
 	RegisterDefaultScope(ItemWorkflowProfile, ScopeGlobal)
-	for _, bucket := range []string{"claude", "codex", "pi", "all"} {
+	for _, bucket := range []string{"claude", "codex", "pi", "agy", "all"} {
 		RegisterDefaultScope(ItemWorkflowProfile+"."+bucket, ScopeGlobal)
 	}
 	RegisterGlobalOnly(ItemWorkflowSkepticalPosture)

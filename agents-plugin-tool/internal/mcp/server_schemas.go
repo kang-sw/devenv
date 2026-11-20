@@ -324,7 +324,7 @@ func tools() []map[string]any {
 					"key":         stringProperty("Knob key, e.g. workflow.prefer_subagent, agents.tier, prompt.<pointId>, worktree.profile.<name>."),
 					"value":       stringOrObjectProperty("New value (see the description)."),
 					"scope":       enumStringProperty("Storage scope; defaults to the key's declared scope.", wsconfig.ScopeSchemaEnum()),
-					"harness":     stringProperty("For keys that vary by harness: claude, codex, pi, or *. Defaults to this session's harness."),
+					"harness":     stringProperty("For keys that vary by harness: claude, codex, pi, agy, or *. Defaults to this session's harness."),
 					"reset":       boolProperty("Drop the override back to the default; agents.tier also takes value {tier}, other keys no value."),
 					"session_key": stringProperty("Your ws session key; required for lead-authority and prompt.* keys and for scope session."),
 				},

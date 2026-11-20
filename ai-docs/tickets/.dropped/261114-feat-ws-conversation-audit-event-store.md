@@ -4,6 +4,7 @@ blocked-by: 261114-refactor-ws-common-session-interface#phase2
 related:
   261114-epic-ws-common-session-foundation: "foundation map; not a whole-epic prerequisite"
   261114-refactor-ws-common-session-interface: "exact producer: Phase 2 current context/state parity adoption (682), no store rewrite"
+dropped: 2026-11-19
 ---
 
 # Conversation audit event store
@@ -252,3 +253,14 @@ lower/exclusive upper UTC bounds, omitted/equal/invalid/reversed bounds,
 combined kinds and event-ID cursors, and more than 500 equal-nanosecond
 events across pages without gaps or duplicates. Confirm existing requests
 without UTC bounds retain their contract and call lookup remains ID-based.
+
+
+## Resolution (2026-11-19)
+
+Superseded by `261119-epic-ws-conversation-audit` (owner (1331)=a, 2026-11-19). The concept changed. Capture must tap ahead of the holder ring-skip filter. All four harness adapters exist. Storage moved from per-session JSONL segments plus a sidecar index to SQLite (after `261119-epic-ws-daemon-sqlite-storage`). Phase 1 was oversized. Still-valid decisions are carried with their board IDs:
+- (545), (546), (595), (598) and the envelope-level parts of (599) go to `261119-feat-ws-audit-policy-event-envelope`.
+- (601), the (598) boundary sources and the non-blocking capture constraint go to `261119-feat-ws-audit-capture-harness-adapters`.
+- The (594) rationale, (596), the (597) byte cap, file modes and the schema version go to `261119-feat-ws-audit-sqlite-store`.
+- (599) and (681) go to `261119-feat-ws-audit-query-api`.
+
+The (597) 7-day time rule is re-asked as (1733).

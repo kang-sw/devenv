@@ -379,7 +379,7 @@ func TestReadOnlyAgentRefusesMutatingTools(t *testing.T) {
 	setupMailboxTestEnv(t)
 	root := t.TempDir()
 	initGit(t, root)
-	mutating := []string{"git.commit", "tickets.create_empty", "tickets.acquire", "tickets.release", "tickets.close", "tickets.move"}
+	mutating := []string{"git.commit", "tickets.create_empty", "tickets.acquire", "tickets.release", "tickets.close", "tickets.move", "review.stamp"}
 	servers := map[string]func(t *testing.T, level string) *Server{
 		"process env": func(t *testing.T, level string) *Server {
 			t.Setenv(wsagent.EnvPermissionLevel, level)
@@ -404,9 +404,47 @@ func TestReadOnlyAgentRefusesMutatingTools(t *testing.T) {
 						t.Fatalf("%s refusal names the level and its chooser: %s", tool, raw)
 					}
 				}
+				bootRaw := callToolOnce(t, s, 2, "review.marker", map[string]any{"session_key": "k", "bootstrap": true})
+				if refused, want := strings.Contains(bootRaw, "permission denied"), level == "read-only"; refused != want {
+					t.Fatalf("review.marker(bootstrap:true) at %q: refused %v, want %v: %s", level, refused, want, bootRaw)
+				}
+				for _, args := range []map[string]any{{"session_key": "k"}, {"session_key": "k", "bootstrap": false}} {
+					if raw := callToolOnce(t, s, 3, "review.marker", args); strings.Contains(raw, "permission denied") {
+						t.Fatalf("non-bootstrap review.marker(%v) at %q was refused: %s", args, level, raw)
+					}
+				}
 				s.Close()
 			}
 		})
+	}
+	t.Setenv(wsagent.EnvPermissionLevel, "read-only")
+	s := NewServer(root, "test")
+	defer s.Close()
+	key := mailboxLogin(t, s, 10, root)
+	if out := callToolWithKey(t, s, 11, key, "review.marker", nil); strings.Contains(out, "permission denied") || !strings.Contains(out, "review ledger has no entry yet") {
+		t.Fatalf("read-only review.marker read = %q", out)
+	}
+	if raw := callToolOnce(t, s, 12, "review.marker", map[string]any{"session_key": key, "bootstrap": true}); !strings.Contains(raw, "permission denied") {
+		t.Fatalf("read-only review.marker(bootstrap:true) = %s", raw)
+	}
+	if raw := callToolOnce(t, s, 13, "review.stamp", map[string]any{"session_key": key, "base": "a", "head": "b", "verdict": "pass"}); !strings.Contains(raw, "permission denied") {
+		t.Fatalf("read-only review.stamp = %s", raw)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ai-docs", ".review-ledger.md")); !os.IsNotExist(err) {
+		t.Fatalf("read-only review calls touched review ledger: stat err = %v", err)
+	}
+	entry, found := s.lookupSession(key)
+	hasStamp, hasMarker := false, false
+	for _, tool := range s.callDiscoveryTools(key, entry, found) {
+		switch tool["name"].(string) {
+		case "review.stamp":
+			hasStamp = true
+		case "review.marker":
+			hasMarker = true
+		}
+	}
+	if hasStamp || !hasMarker {
+		t.Fatalf("read-only callDiscoveryTools: review.stamp=%v review.marker=%v", hasStamp, hasMarker)
 	}
 }
 

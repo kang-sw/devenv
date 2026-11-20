@@ -488,13 +488,11 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       { label: 'File', submenu: [{ role: 'close' }] },
       { role: 'editMenu' },
       { label: 'View', submenu: [
-        { id: 'reload', label: 'Reload', accelerator: 'F5', click: (_item, focusedWindow) => {
-          const contents = focusedWindow === window ? wc : focusedWindow?.webContents;
-          if (contents && !contents.isDestroyed()) contents.reload();
+        { id: 'reload', label: 'Reload', accelerator: 'F5', click: () => {
+          if (!wc.isDestroyed()) wc.reload();
         } },
-        { id: 'force_reload', label: 'Force Reload', accelerator: 'Ctrl+Shift+R', click: (_item, focusedWindow) => {
-          const contents = focusedWindow === window ? wc : focusedWindow?.webContents;
-          if (contents && !contents.isDestroyed()) contents.reloadIgnoringCache();
+        { id: 'force_reload', label: 'Force Reload', accelerator: 'Ctrl+Shift+R', click: () => {
+          if (!wc.isDestroyed()) wc.reloadIgnoringCache();
         } },
         { type: 'separator' },
         { role: 'togglefullscreen' },

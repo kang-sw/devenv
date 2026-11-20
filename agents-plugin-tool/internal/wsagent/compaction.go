@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
@@ -125,8 +126,30 @@ func (c *conv) compactUnsupported() string {
 	return ""
 }
 
-// loadCompaction runs at process start, never on token/turn observations.
+// compactionConfigGen is bumped in memory whenever config.tune writes or resets
+// a compaction key so running conversations re-resolve thresholds lazily at the
+// next threshold check without file polling or watchers.
+var compactionConfigGen atomic.Uint64
+
+// NotifyCompactionConfigChanged signals running conversations to re-resolve
+// compaction thresholds on their next threshold check.
+func NotifyCompactionConfigChanged() {
+	compactionConfigGen.Add(1)
+}
+
+// loadCompaction runs at process start, loading thresholds and resetting
+// process-scoped usage observations.
 func (c *conv) loadCompaction() {
+	c.loadCompactionThresholds()
+	c.compactLoaded = true
+	c.compactUsageFresh = false
+	c.compactPrevTokens, c.compactPrevWindow = 0, 0
+}
+
+func (c *conv) loadCompactionThresholds() {
+	// Capture generation before reading config so a concurrent tune during the
+	// read leaves compactGen behind and triggers one more reload next check.
+	gen := compactionConfigGen.Load()
 	cfg := c.r.opts.Config
 	cfg.RepoRoot = c.rec.Root
 	if roots, ok := c.r.opts.Keys.(interface{ Root(string) (string, bool) }); ok {
@@ -160,8 +183,28 @@ func (c *conv) loadCompaction() {
 			*slot.to = wsconfig.Threshold{}
 		}
 	}
-	c.compactUsageFresh = false
-	c.compactPrevTokens, c.compactPrevWindow = 0, 0
+	c.compactGen = gen
+}
+
+// refreshCompaction lazily reloads thresholds when config.tune has modified a
+// compaction key since this conversation last loaded them. Steady-state checks
+// perform only an atomic load with zero file I/O.
+func (c *conv) refreshCompaction() {
+	if !c.compactLoaded || c.r == nil {
+		return
+	}
+	if compactionConfigGen.Load() == c.compactGen {
+		return
+	}
+	c.loadCompactionThresholds()
+	if c.compactUsageFresh && !c.compacting {
+		if c.compactTokens < c.compactAdvisory.Point(c.compactWindow) {
+			c.compactAdvised = false
+		}
+		if c.compactTokens < c.compactHard.Point(c.compactWindow) {
+			c.compactHardIssued = false
+		}
+	}
 }
 
 func (c *conv) observeCompaction(ev wslive.Event) {
@@ -178,6 +221,7 @@ func (c *conv) observeCompaction(ev wslive.Event) {
 	}
 	c.compactTokens, c.compactWindow = float64(*ctx.Tokens), float64(ctx.Window)
 	c.compactUsageFresh = true
+	c.refreshCompaction()
 	if c.compactTokens < c.compactAdvisory.Point(c.compactWindow) {
 		c.compactAdvised = false
 	}
@@ -238,6 +282,7 @@ func (c *conv) compactIdle() bool {
 		return true
 	}
 	if c.compactPending == nil && c.compactUsageFresh {
+		c.refreshCompaction()
 		if c.compactTokens >= c.compactHard.Point(c.compactWindow) && !c.compactHardIssued {
 			c.compactHardIssued, c.compactAdvised = true, true
 			if why := c.compactUnsupported(); why == "" {

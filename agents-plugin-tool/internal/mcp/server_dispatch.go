@@ -102,7 +102,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	if !s.toolAllowed(params.Name) {
 		return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", s.runtimeNamespace(), params.Name))
 	}
-	if refusal := s.permissionRefusal(params.Name); refusal != "" {
+	if refusal := s.permissionRefusal(params.Name, params.Arguments); refusal != "" {
 		return toolErrorTextResponse(req.ID, refusal)
 	}
 	// Keyed capability gate: when a session_key is present and maps to a known
@@ -462,10 +462,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		harness = strings.ToLower(strings.TrimSpace(harness))
 		if entry.HarnessApplicable {
 			if harness == "" {
-				harness = s.currentHarness()
-				if isCompactionKey(entry.Key) {
-					harness = s.playbookHarness()
-				}
+				harness = s.playbookHarness()
 			}
 			if harnessEnum := fieldEnum(entry.SelectorFields, "harness"); len(harnessEnum) > 0 {
 				if harness == "" && enumContains(harnessEnum, "default") {
@@ -547,6 +544,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if err := resolver.Unset(storeKey, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
+			notifyCompactionTune(entry.Key)
 			// The echo reads through the session-anchored resolver so a reset
 			// reports the value that now applies (a committed repo value
 			// included). The reset already happened, so an echo load failure is
@@ -637,6 +635,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			if err := resolver.Set(storeKey, value, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
 			}
+			notifyCompactionTune(entry.Key)
 			resolvedScope := explicitScope
 			if resolvedScope == "" {
 				resolvedScope = entry.DefaultScope()

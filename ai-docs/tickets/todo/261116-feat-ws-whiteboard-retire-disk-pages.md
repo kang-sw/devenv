@@ -31,12 +31,12 @@ The update result reports `full:` as the daemon URL when a daemon serves the ses
 
 Code that exists only for the disk pages:
 
-- `RenderPage` (`internal/wswhiteboard/render.go:308`) and the `.Full`/`.Embed` branches of `internal/wswhiteboard/assets/page.tmpl` (lines 1-12 onward).
+- `RenderPage` (`internal/wswhiteboard/render.go:308`) and the `.Full` branches of `internal/wswhiteboard/assets/page.tmpl` (lines 1-12 onward). The `.Embed` branches of `page.tmpl` moved to `261119-feat-ws-whiteboard-retire-embed-snapshot` (`(1818)`, `(1821)`); only that ticket claims their deletion.
 - `live.js` stamp polling and the standalone viewer/change-mark script bundle (`render.go:550-554`, `chgWire` at `:524`).
 - `StampFile`, `FileLink`, `FullBoardLink` (`internal/wswhiteboard/view.go:33-60`; `fileHref`, `markdown.go:577-585`).
 - The unframed branches under `DocFramed=false` (`render.go:607,617-626`, `:825`).
 - The `served:false` panel variants (`whiteboard_tools.go:105-114`).
-- Embed eviction and orphan GC (`evictWhiteboardEmbeds`, `:642`; `whiteboardGCCadence` and the once-a-day marker, `:39-43,741`).
+- Orphan GC (`whiteboardGCCadence` and the once-a-day marker, `:39-43,741`). The embed decision `(1820)=a` in `261119-feat-ws-whiteboard-retire-embed-snapshot` relies on this GC and its `<reply-id>-<hash>.html` pattern to remove leftover embed files, so retiring the GC must keep or replace that cleanup. Embed eviction (`evictWhiteboardEmbeds`, `:642`) moved to `261119-feat-ws-whiteboard-retire-embed-snapshot` (`(1818)`, `(1821)`); only that ticket claims its deletion.
 - i18n subsetting for static pages (`render.go:154-176`).
 - About 19 `wswhiteboard` test files call `RenderPage`.
 
@@ -56,13 +56,10 @@ Shipped docs describe `full:`, `embed:`, the host embed folder and the `wb:embed
 None is decided; each settles through the Open Decision Queue before `ready/`.
 
 - What `full:` returns when no daemon serves the session: an error, or an auto-start of the daemon.
-- The fate of the `wb:embed-dir` command and the `embed:` line in `whiteboard.update`: accepted no-op (deprecated) or refused. Sets the compatibility tier.
-- Old plugin and skill text that tells leads to emit the host's embed line: how long it keeps being sent and what an old lead sees.
-- Host or Orca embed users: none were found in code at drafting; confirm before removing.
-- The takeover recipe in the shipped playbook relies on copying the folder and on `wb:embed-dir` (`whiteboard.md` around line 40): what replaces it.
+- The embed slice (`embed:` line, `wb:embed-dir`, host embed users, old embed text, takeover-recipe dependence on `wb:embed-dir`) moved to `261119-feat-ws-whiteboard-retire-embed-snapshot` (`(1818)`).
 - Whether the authoritative board folder store stays (expected yes; only rendered pages retire).
 - Whether existing `ai-docs/whiteboards/**/*.html` files are deleted by a migration, left in place, or ignored by git.
-- Whether the shared template and renderer split so the daemon page no longer carries the `.Full`/`.Embed` branches, and what the ~19 `RenderPage` tests become.
+- Whether the shared template and renderer split so the daemon page no longer carries the full-page disk branches, and what the ~19 `RenderPage` tests become (the embed layout branches go with `261119-feat-ws-whiteboard-retire-embed-snapshot`).
 
 ## Phases
 

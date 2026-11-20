@@ -97,3 +97,55 @@ func TestRegistrationHeartbeatFailureAndLiveness(t *testing.T) {
 		t.Fatal("terminal handoff was overwritten")
 	}
 }
+
+func TestHeartbeatRegistrationPrecedesBlockedSnapshot(t *testing.T) {
+	base := t.TempDir()
+	now := time.Unix(1000, 0).UTC()
+	r := NewRunner(Options{Dir: base, Now: func() time.Time { return now }, Log: io.Discard})
+	rec := Record{
+		ReplyID: "hosted",
+		Root:    t.TempDir(),
+		Backend: BackendPi,
+		Lead:    true,
+		HostPID: 42,
+	}
+	c := &conv{r: r, rec: rec}
+	c.live = newLiveWriter(wsdashboard.SessionDir(base, rec.ReplyID), rec.ReplyID, rec.Backend, r.opts.Now, io.Discard)
+	c.live.setSlot(&idleSnapshotSlot{})
+	c.live.owner = c.lockSummaryWriter
+	r.summaryOwners = map[string]*conv{rec.ReplyID: c}
+
+	snapshotStarted := make(chan struct{})
+	c.live.beforeSnapshot = func() { close(snapshotStarted) }
+	r.summaryMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			r.summaryMu.Unlock()
+		}
+	}()
+	done := make(chan struct{})
+	go func() {
+		c.heartbeat()
+		close(done)
+	}()
+	select {
+	case <-snapshotStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("heartbeat did not reach snapshot publication")
+	}
+	row, err := wsdashboard.ReadRegistration(base, rec.ReplyID)
+	r.summaryMu.Unlock()
+	locked = false
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("heartbeat did not finish after summary writer was released")
+	}
+	if err != nil {
+		t.Fatalf("registration was not refreshed before blocked snapshot publication: %v", err)
+	}
+	if row.HeartbeatAt != now.Format(time.RFC3339) {
+		t.Fatalf("registration heartbeat = %q, want %q", row.HeartbeatAt, now.Format(time.RFC3339))
+	}
+}

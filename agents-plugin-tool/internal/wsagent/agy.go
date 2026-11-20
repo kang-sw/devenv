@@ -1164,11 +1164,18 @@ func (m *agyMapper) endTurn(msg agyMessage, now int64) []Event {
 	return append(out, ev)
 }
 
-// agyMCPToolName is a tool's name under agy's MCP naming, which keeps
-// the tool's own name whole: the tool "tracker.update" of server "ws" is
-// mcp_ws_tracker.update (seen on 1.5.10).
+// agyMCPToolName is a tool's current name under agy's MCP naming: the
+// sanitized tool name prefixed by its server, so ws tracker.update is
+// mcp_ws_tracker_update.
 func agyMCPToolName(server, tool string) string {
-	return "mcp_" + server + "_" + tool
+	sanitized, _ := ApplyToolNameScheme(ToolNameSchemeSanitize, tool)
+	return "mcp_" + server + "_" + sanitized
+}
+
+// agyMCPToolNameMatches also accepts the dotted spelling reported by agy
+// connections created before ws began advertising sanitized aliases.
+func agyMCPToolNameMatches(name, server, tool string) bool {
+	return name == agyMCPToolName(server, tool) || name == "mcp_"+server+"_"+tool
 }
 
 type agyUpdate struct {
@@ -1338,7 +1345,7 @@ func (m *agyMapper) toolStatus(u agyUpdate, replaying bool, now int64) []Event {
 		n := len(m.bgCalls)
 		out = append(out, Event{BackgroundTasks: &n})
 	}
-	if !failed && u.Name == agyMCPToolName(ReservedMCPServer, TrackerWriteTool) {
+	if !failed && agyMCPToolNameMatches(u.Name, ReservedMCPServer, TrackerWriteTool) {
 		out = append(out, resultEvents(TrackerWriteTool, "")...)
 	}
 	m.armWakeIfReadyLocked(replaying)

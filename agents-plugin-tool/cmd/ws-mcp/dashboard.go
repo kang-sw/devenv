@@ -447,6 +447,10 @@ func serveDashboard(server *mcp.Server) {
 		if err != nil {
 			return err
 		}
+		exe, err = wsdashboard.LaunchExecutable(exe, dir)
+		if err != nil {
+			return err
+		}
 		return wsdashboard.SpawnDetached(exe, args, dir)
 	}
 	startDashboard(context.Background(), settings, dir, buildTime, contentHash, spawn, os.Stderr)

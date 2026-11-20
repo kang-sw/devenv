@@ -43,7 +43,7 @@ func TestWorkflowProfileKnobRegistration(t *testing.T) {
 		t.Fatalf("profile entry must be harness-bucketed, lead-only, agentless-visible, resolver-backed: %+v", entry)
 	}
 	assertFieldEnum(t, entry.ValueFields, "value", []string{"direct", "orchestrate"})
-	for _, k := range []string{profileKnobKey, profileKnobKey + ".claude", profileKnobKey + ".codex", profileKnobKey + ".pi", profileKnobKey + ".all"} {
+	for _, k := range []string{profileKnobKey, profileKnobKey + ".claude", profileKnobKey + ".codex", profileKnobKey + ".pi", profileKnobKey + ".agy", profileKnobKey + ".all"} {
 		if got := wsconfig.DefaultScope(k); got != wsconfig.ScopeGlobal {
 			t.Fatalf("default scope of %s = %q, want global", k, got)
 		}
@@ -55,14 +55,14 @@ func TestWorkflowProfileKnobRegistration(t *testing.T) {
 	catalog := parseTuningCatalogResponse(t, f.call(t, "config.list", map[string]any{"format": "json"}))
 	knob := requireTuningKnob(t, catalog, profileKnobKey)
 	assertFieldEnum(t, knob.ValueFields, "value", []string{"direct", "orchestrate"})
-	assertFieldEnum(t, knob.SelectorFields, "harness", []string{"claude", "codex", "pi", "*"})
+	assertFieldEnum(t, knob.SelectorFields, "harness", []string{"claude", "codex", "pi", "agy", "*"})
 	if got := mustMarshalJSON(t, knob.Current); !strings.Contains(got, `"value":"direct"`) || !strings.Contains(got, `"scope":"builtin"`) {
 		t.Fatalf("catalog current value must be the builtin direct: %s", got)
 	}
 }
 
 func TestWorkflowProfileKnobWriteEachValue(t *testing.T) {
-	withOrchestrateWhitelist(t, "claude", "codex", "pi")
+	withOrchestrateWhitelist(t, "claude", "codex", "pi", "agy")
 	f := newWhiteboardFixture(t)
 	for _, value := range []string{"orchestrate", "direct"} {
 		resp := toolText(t, f.call(t, "config.tune", map[string]any{"key": profileKnobKey, "value": value, "harness": "codex"}))
@@ -87,7 +87,7 @@ func TestOrchestrateWhitelistWarningHelper(t *testing.T) {
 	}
 	for _, bucket := range []string{"*", "all"} {
 		got = orchestrateWhitelistWarning(bucket)
-		if !strings.Contains(got, "for claude, codex, pi, which are not verified") || !strings.Contains(got, "sessions on them may fail") {
+		if !strings.Contains(got, "for claude, codex, pi, agy, which are not verified") || !strings.Contains(got, "sessions on them may fail") {
 			t.Fatalf("%s warning must name every harness off the whitelist: %q", bucket, got)
 		}
 	}
@@ -96,11 +96,11 @@ func TestOrchestrateWhitelistWarningHelper(t *testing.T) {
 	if got = orchestrateWhitelistWarning("claude"); got != "" {
 		t.Fatalf("whitelisted harness must not warn: %q", got)
 	}
-	if got = orchestrateWhitelistWarning("*"); !strings.Contains(got, "for codex, pi, which are") || strings.Contains(got, "claude") {
+	if got = orchestrateWhitelistWarning("*"); !strings.Contains(got, "for codex, pi, agy, which are") || strings.Contains(got, "claude") {
 		t.Fatalf("* must name only the harnesses off the whitelist: %q", got)
 	}
 
-	withOrchestrateWhitelist(t, "claude", "codex", "pi")
+	withOrchestrateWhitelist(t, "claude", "codex", "pi", "agy")
 	if got = orchestrateWhitelistWarning("*"); got != "" {
 		t.Fatalf("fully whitelisted * must not warn: %q", got)
 	}
@@ -119,7 +119,7 @@ func TestWorkflowProfileTuneWarning(t *testing.T) {
 		t.Fatalf("off-whitelist single harness must warn exactly once: %s", resp)
 	}
 	resp = tune(map[string]any{"value": "orchestrate", "harness": "*"})
-	if !strings.Contains(resp, "for claude, codex, pi, which are not verified") || countWarningLines(resp) != 1 {
+	if !strings.Contains(resp, "for claude, codex, pi, agy, which are not verified") || countWarningLines(resp) != 1 {
 		t.Fatalf("* with harnesses off the whitelist must warn exactly once: %s", resp)
 	}
 	for _, args := range []map[string]any{
@@ -137,11 +137,11 @@ func TestWorkflowProfileTuneWarning(t *testing.T) {
 		t.Fatalf("whitelisted harness must not warn: %s", resp)
 	}
 	resp = tune(map[string]any{"value": "orchestrate", "harness": "*"})
-	if !strings.Contains(resp, "for claude, pi, which are") || countWarningLines(resp) != 1 {
+	if !strings.Contains(resp, "for claude, pi, agy, which are") || countWarningLines(resp) != 1 {
 		t.Fatalf("* must warn for the remaining harnesses only: %s", resp)
 	}
 
-	withOrchestrateWhitelist(t, "claude", "codex", "pi")
+	withOrchestrateWhitelist(t, "claude", "codex", "pi", "agy")
 	if resp = tune(map[string]any{"value": "orchestrate", "harness": "*"}); countWarningLines(resp) != 0 {
 		t.Fatalf("fully whitelisted * must not warn: %s", resp)
 	}
