@@ -1013,7 +1013,7 @@ func (s *Server) enableWhiteboardKnobForSession(sessionKey string) error {
 // for this server's session harness. resolver must be built with
 // builtinConfigDefaults so the bare key's builtin applies.
 func (s *Server) bucketedKnobOn(resolver *wsconfig.Resolver, sessionKey, item string) (bool, error) {
-	rv, _, err := resolveHarnessBucketed(resolver, sessionKey, item, s.currentHarness())
+	rv, _, err := resolveHarnessBucketed(resolver, sessionKey, item, s.playbookHarness())
 	if err != nil {
 		return false, fmt.Errorf("resolve %s: %w", item, err)
 	}
@@ -1034,7 +1034,7 @@ func (s *Server) enableBucketedKnobForSession(sessionKey, item string) error {
 	if on {
 		return nil
 	}
-	harness := s.currentHarness()
+	harness := s.playbookHarness()
 	buckets := harnessBucketReadOrder(harness)
 	storeKeys := []string{item}
 	for _, bucket := range buckets {

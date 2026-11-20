@@ -805,7 +805,7 @@ func TestWhiteboardKnobWriteDefaultsAndCatalog(t *testing.T) {
 	if !entry.HarnessBucketed() || !entry.RequiresLeadAuthority || !entry.RepoScoped() {
 		t.Fatalf("whiteboard entry must be harness-bucketed, lead-only, and repo-scoped: %+v", entry)
 	}
-	if got, want := entry.RepoKey(), "workflow.whiteboard_enabled.<claude|codex|pi|all>"; got != want {
+	if got, want := entry.RepoKey(), "workflow.whiteboard_enabled.<claude|codex|pi|agy|all>"; got != want {
 		t.Fatalf("RepoKey = %q, want %q", got, want)
 	}
 	// agents.tier is harness-applicable but keeps its own structured writer.
@@ -817,12 +817,12 @@ func TestWhiteboardKnobWriteDefaultsAndCatalog(t *testing.T) {
 	catalog := parseTuningCatalogResponse(t, f.call(t, "config.list", map[string]any{"format": "json"}))
 	knob := requireTuningKnob(t, catalog, "workflow.whiteboard_enabled")
 	assertFieldEnum(t, knob.ValueFields, "value", []string{"on", "off"})
-	assertFieldEnum(t, knob.SelectorFields, "harness", []string{"claude", "codex", "pi", "*"})
+	assertFieldEnum(t, knob.SelectorFields, "harness", []string{"claude", "codex", "pi", "agy", "*"})
 	assertFieldEnum(t, knob.SelectorFields, "scope", wsconfig.ScopeSchemaEnum())
 	if got := mustMarshalJSON(t, knob.Current); !strings.Contains(got, `"value":"off"`) || !strings.Contains(got, `"scope":"builtin"`) {
 		t.Fatalf("catalog current value must be the builtin off: %s", got)
 	}
-	if !knob.RepoScope || knob.RepoKey != "workflow.whiteboard_enabled.<claude|codex|pi|all>" {
+	if !knob.RepoScope || knob.RepoKey != "workflow.whiteboard_enabled.<claude|codex|pi|agy|all>" {
 		t.Fatalf("catalog must offer the repo scope under the bucket keys: %+v", knob)
 	}
 
