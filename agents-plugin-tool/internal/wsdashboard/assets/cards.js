@@ -745,15 +745,16 @@
       if (dotEls[k].parentNode) dotEls[k].parentNode.removeChild(dotEls[k]);
       delete dotEls[k];
     });
-    var shown = !!(lay && lay.rail);
+    var rail = !!(lay && lay.rail), empty = !!(lay && lay.empty), shown = rail || empty;
     galEl.hidden = !shown;
+    railEl.hidden = !rail;
     galEl.setAttribute("data-pos", String(pos));
     galEl.setAttribute("data-pages", String(n));
     if (narrow) galEl.setAttribute("data-narrow", ""); else galEl.removeAttribute("data-narrow");
     gal.pages.forEach(function (pg, i) { slide(pageEls[pg.id], i - pos, dir); });
     slide(plusEl, n - pos, dir);
-    away(shown && narrow && pos >= 0);
-    homeWheel(shown && narrow && n > 0);
+    away(rail && narrow && pos >= 0);
+    homeWheel(rail && narrow && n > 0);
   }
   // away stands the narrow view's Main Board (Page 0) off the view while a
   // docked page shows over it, as slide does an inactive page: the root's
@@ -1138,7 +1139,7 @@
     var s = G.layout({ width: m ? +m.width || 0 : 0, tabs: !!(m && m.tabs), pages: n, dragging: drag });
     s.pages = n;
     s.dragging = drag;
-    if (lay && lay.narrow === s.narrow && lay.column === s.column && lay.overlay === s.overlay && lay.rail === s.rail && !lay.pages === !n && lay.dragging === drag) return;
+    if (lay && lay.narrow === s.narrow && lay.column === s.column && lay.overlay === s.overlay && lay.rail === s.rail && !lay.empty === !s.empty && !lay.pages === !n && lay.dragging === drag) return;
     lay = s;
     paintGallery();
     if (opt.layout) opt.layout(s);

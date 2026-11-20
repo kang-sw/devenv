@@ -437,7 +437,7 @@
       host: dbody || doc.body, mode: galMode, split: grid && grid.classList.contains("live") ? grid : null,
       leading: function (c) { return worktree && c.preview && !(PIN_WIDE && PIN_WIDE.matches); },
       layout: function (s) {
-        var col = s.column && s.pages > 0, mode = s.narrow ? (s.rail ? "narrow" : null) : s.column ? (col ? "col" : "drag") : null;
+        var col = s.column && s.pages > 0, mode = s.narrow ? (s.rail ? "narrow" : null) : s.column ? (col ? "col" : "drag") : s.empty ? "empty" : null;
         if (col !== root.hasAttribute("data-pincol")) {
           if (col) root.setAttribute("data-pincol", ""); else root.removeAttribute("data-pincol");
           railOpen(false);
