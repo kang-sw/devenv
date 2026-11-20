@@ -458,10 +458,12 @@ Review hardening before merge:
   recheck; reattach stored-mode check; `codexChoices.at` uses `time.Now`
   rather than the injected clock.
 
-#### Edition (5587cd363) - 2026-11-20
+#### Edition (bf037d642) - 2026-11-20
 
 Decision (172)'s daemon-owned Codex-worker shape is superseded by
-`261120-refactor-ws-agent-workers-under-holders`. Pending live acceptance and
-remaining follow-up in this ticket must use the holder-backed rejoin,
-authority, approval, and persisted HTTP-MCP tuple contracts from that ticket,
-not the daemon-owned shape recorded above.
+`261120-refactor-ws-agent-workers-under-holders`. Pending live acceptance items
+1, 3, and 6 do not exercise rejoin and may run on the current daemon-owned
+build. Only rejoin-specific acceptance or follow-up waits for the refactor;
+once it lands, rejoin uses that ticket's holder-backed authority, approval,
+and persisted HTTP-MCP tuple contracts rather than the daemon-owned shape
+recorded above.
