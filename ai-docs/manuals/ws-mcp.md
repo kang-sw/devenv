@@ -729,10 +729,9 @@ conversation for good; later writes get 409), and `/settings {model?,
 effort?}` (from the next turn). Every POST needs a JSON body
 (`Content-Type: application/json`) and either no `Origin` (a client on this
 machine) or the daemon's own, so no other web page can drive an agent. After
-a daemon restart or replace, hosted leads (Claude or Pi) and non-lead Pi
-conversations reattach to their surviving session holders, keeping the same
-process and running turn. Non-lead Claude conversations, and Pi conversations
-run without a holder manager, instead start a process at their next send.
+a daemon restart or replace, process continuity follows the ownership matrix
+in Daemon replacement and process ownership below.
+
 An attached ws-mcp gets
 `WS_MCP_ALLOWED_TOOLS` (the profile's ws tools) and `WS_MCP_NO_DASHBOARD`,
 and no mailbox identity. Its command is Python plus the selected build-owned
@@ -1063,7 +1062,7 @@ from a support conversation:
   agy's `WorkerAutoApprove` answers requests through `AnswerApproval`,
   preserving the permission trace. Its workers use the default agent with
   an appended instruction to use `agent.spawn`, never native subagents;
-  unlike hosted leads, they end with the daemon and are not holder-held.
+  see Daemon replacement and process ownership for worker lifetime.
   agy tier models are base ids with separate effort: launch uses
   `thought_level` when offered, otherwise a suffixed model id, and logs the
   mechanism honored. An unhonored worker effort refuses the launch.
@@ -1512,13 +1511,35 @@ actual replacement attempts. Third-party flock and directory-entry `Info`
 operations are not included. Counts are process-lifetime and never reset by
 reading the route; compare two samples over the same observation interval.
 
+### Daemon replacement and process ownership
+
+For a graceful replace, the process owner determines whether an in-flight turn
+continues (`internal/wsagent/runner_events.go` L804-818).
+
+| Child kind | Owner | Survives graceful replace? | What to do |
+|---|---|---|---|
+| Hosted Claude, Pi, agy, or Codex lead | Session holder (`internal/wsagent/runner_process.go` L229-258, L294-312) | Yes, while holder and child survive | Replace; check rejoin if progress stalls. |
+| Production Pi `agent.spawn` worker; other Pi conversations with a holder manager | Session holder (`internal/wsagent/runner_process.go` L184-190; `cmd/ws-mcp/dashboard.go` L321-331) | Yes, while holder and child survive | Replace; check rejoin if progress stalls. |
+| Codex, Claude, or agy `agent.spawn` worker; other non-lead Claude conversations | Daemon subprocess (`internal/wsagent/runner_process.go` L178-190; `internal/wsagent/stream.go` L108-166) | No; shutdown stops it (`internal/wsagent/backend.go` L466-491) | Send a new message after replace to resume. |
+
+Do not delay a replace for healthy held leads or Pi workers. Delay it only when
+a direct Codex, Claude, or agy worker's in-flight turn must finish; otherwise
+accept its `interrupted` settlement ("the dashboard daemon exited while the
+turn ran") and send a new message. The consumed prompt is not replayed
+(`internal/wsagent/spawn.go` L368-381; `internal/wsagent/runner_conv.go` L509-517).
+Held continuity still needs a rejoinable holder and child; a 32 MiB ring wrap
+can delay turn-state recovery (`internal/wsagent/holder.go` L74-79;
+`internal/wsagent/runner_process.go` L567-625).
+MCP calls during drain may receive 503, and a Windows holder marked not
+restart-safe may die with its starter's job object (Daemon-Hosted MCP and
+Session holders below).
+
 Session holders: a holder is a small Python process (standard library only,
 3.10 or newer) that owns one child process, over pipes or a PTY (ConPTY on
 Windows), and outlives the daemon, so the child survives a daemon restart
 or replace while the holder and child remain alive (Windows holders marked
-not restart-safe have no such guarantee). Hosted leads of either backend,
-non-lead Pi conversations including `pi.spawn` subagents, and dashboard
-terminals use holders; non-lead Claude conversations do not.
+not restart-safe have no such guarantee). Dashboard terminals also use holders;
+see Daemon replacement and process ownership above for lead and worker ownership.
 The script is embedded in `ws-mcp` (`internal/wsholder/holder.py`, whose
 module docstring is the descriptor and protocol reference) and staged to
 `<dashboard dir>/holders/bin/holder-<content hash>.py` before a holder
