@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 90648c8a78eda6ef
 sage-review-completeness-reviewed: 90648c8a78eda6ef
+completed: 2026-11-20
 ---
 
 # Move agent.spawn workers under session holders
@@ -535,23 +536,104 @@ orphan cleanup generalization applies to held workers.
    baseline only if counts change.
 
 
-## Verification checkpoint - 2026-11-20
+### Result (8609a54dc) - 2026-11-20
 
-Implementation and fixes are committed through `8609a54dc`; Phase 2 awaits
-its final full MCP and worker-suite results before closure. The single lite
-review's Stop-error defect is fixed, its early-bearer finding is disproved by
-control-flow and gated-scan tests, and its performance finding is accepted in
-Decision (1862). The lead's delta-review queued-mail finding is fixed by
-re-signaling input after retirement succeeds, with a no-restart regression.
-Focused retirement/mail tests passed (0.820s). Full worker validation at the
-previous test checkpoint passed (249.088s), but both full suites are rerunning
-on the final production input. The shared daemon and live holders remain
-untouched.
+Provider-free Runner fixtures cover Claude/Codex/agy/Pi replacement, same
+holder/PID, one completion report including completion during daemon absence,
+original MCP token/URL/environment/holder restoration, queued mail, pending
+approval replay, Codex authority modes, and child-before-parent loading with
+advisory lowered ceilings. Lifecycle fixtures cover launch refusal without
+fallback, turn-scoped interrupt, close/token revocation, and pruned-holder
+cleanup. Existing real-holder Pi restart/nesting and holder breakaway tests
+supply process-level coverage; physical Windows execution was not performed.
 
-Windows AV baseline is deferred to a lead-owned post-merge measurement on the
-Windows smoke host before the next ship. The instrumented macOS fixture
-counts are launch 71 to 71, rejoin 25 to 29, and 100 idle status/kick checks
-0 to 0. Direct versus held streaming: 25 final ring lines change 0 to 25
-record replacements and 75 to 125 instrumented operations; one dirty cursor
-heartbeat changes 0 to 1 replacements and 0 to 2 operations; 200 snapshot
-lines remain zero. Real-holder spawn filesystem cost is outside the fixture.
+Downgrade fixtures pin strict parent settlement attribution and conservative
+adoption for idle/later/equal/same-second/new-input cases. Silent retirement
+preserves a sleeping record across another restart and later mail wake.
+A transient Stop error keeps its validated detached association and retries
+before ordinary holder-gone settlement; tests cover both a successful retry
+and an already-gone holder without duplicate report. Successful retirement
+re-signals retained inbox input; a regression sends while Stop fails, consumes
+that signal under the replay fence, and then proves heartbeat retry launches
+a fresh holder/turn without another message or daemon restart.
+The ParentLead fixture
+restores a persisted held result, adopts the child, receives one late report,
+and checks an idempotent in-memory `releaseHeld` without rewriting the lead's
+persisted result. ParentLead uses the external report callback; this fixture
+invokes the release transition explicitly rather than claiming a hosted
+conversation-queue delivery.
+
+The operations manual documents common ownership, tuple restoration,
+downgrade behavior, wakeable retirement, lead adoption, and the agy watchdog
+exclusion. The release manual records the dated (1855) exception after rule 1.
+The shared daemon and live holders were never replaced or stopped; the
+validation binary was not installed or run.
+
+**Independent review:** one medium lite pass reviewed `db600b926` against
+`f2234e573`; no rereview or separate doc-only audit was performed. The Critical
+Stop-error stranded-state finding was fixed in `b5ac01550` with retry/gone
+regressions. The Important early-MCP-bearer finding was disproved: the attach
+branch in `startWorker` excludes the launch `else if` containing `attachMCP`.
+New gated-scan tests for all HTTP backends prove both token tables stay empty
+before validation and after ownership rejection. The Important cursor-write
+finding is accepted by owner (1862)=a. The read-only reviewer could not save
+its external findings file; the complete finding dispositions are preserved
+here and were sent inline to the lead. The lead's bounded delta review verified
+the Critical fix and bearer disproof, then found that mail received during a
+Stop failure could remain asleep after success. That Important was fixed in
+`8609a54dc` with the consumed-signal/no-restart wake regression.
+
+**Known inherited cost:** performance exception approved by owner (1862)=a;
+removal tracked in `261119-epic-ws-daemon-sqlite-storage` metadata bundle.
+Held workers inherit held-lead per-entry `HolderSeq` record rewrites.
+
+| Instrumented action | Before | After |
+|---|---:|---:|
+| Pi launch, fake holder | 71 operations | 71 operations |
+| Pi rejoin, fake holder | 25 operations | 29 operations |
+| 100 status/kick checks | 0 operations | 0 operations |
+| 200 snapshot-only lines, direct versus held | 0 operations / 0 replacements | 0 operations / 0 replacements |
+| 25 final transcript ring lines, direct versus held | 75 operations / 0 replacements | 125 operations / 25 replacements |
+| Dirty-cursor heartbeat, direct versus held | 0 operations / 0 replacements | 2 operations / 1 replacement |
+
+The tracked cursor fixture exercises the real non-Pi live-writer/conv path,
+using sequence zero for the predecessor's direct-worker path and positive
+sequences for held output. Counter sites measure instrumented file APIs, not
+all OS syscalls. The startup/rejoin fixture avoids disk polling; real-holder
+spawn filesystem cost is outside it. **Windows AV baseline: deferred to lead
+post-merge smoke-host measurement before the next ship.** No Windows latency
+claim is made from macOS fixture timing.
+
+Final verification used `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`:
+
+- Full `go test ./internal/wsagent -count=1 -timeout 15m`: pass (129.987s).
+- Separate full `go test ./internal/mcp -count=1 -timeout 45m`: pass (1086.078s).
+- Focused review regressions and cursor metric: pass (3.213s); focused
+  recovery/ownership/downgrade/nested-Pi race: pass (2.906s); added ParentLead
+  race regression: pass (1.823s); queued-wake/mail regression: pass (0.820s), with its
+  focused race result pass (2.380s).
+- Pinned old-source downgrade fixture: pass (0.758s); `internal/wsholder`:
+  pass (9.321s); `internal/execjob`: pass (24.135s); `internal/wsstate`: pass
+  (5.114s); focused dashboard retention test: pass.
+- Windows cross-target vet for wsagent/wsdashboard/wsholder/execjob/wsstate:
+  pass. Validation build `go build -o /tmp/ws-worker-holders-validation
+  ./cmd/ws-mcp`: pass. Production and test inputs remained unchanged after `8609a54dc`.
+- `git diff --check`: pass. No separate Markdown validation command is
+  configured for these manual/ticket edits.
+
+Follow-up reported to lead: fresh Claude worker hello already inherits the
+daemon's `WS_HOSTED_SESSION`/`WS_HOSTED_SESSION_KEY` in the existing fixture;
+rejoin preserves that baseline. This pre-existing environment-filter issue
+was not broadened into the holder change and needs the lead's next-merge
+ready-ticket or whiteboard handling under the dogfood rule.
+
+A second dogfood observation was reported to the lead: mailbox updates were
+surfaced together only after a user interruption, with host annotations that
+they had already been received. The delayed delta-review finding forced a
+final verification rerun. Message-delivery visibility needs separate triage;
+this implementation makes no claim about its cause.
+
+
+## Resolution (2026-11-20)
+
+Both phases completed and independently reviewed once; Critical Stop retry and lead-delta queued-input wake fixes verified. Final offline wsagent and MCP suites passed on 8609a54dc. Owner (1862)=a approves inherited cursor cost, with removal in the SQLite metadata bundle; Windows AV measurement is lead-deferred until post-merge before the next ship. Branch retained for lead merge confirmation; shared daemon and live holders untouched.
