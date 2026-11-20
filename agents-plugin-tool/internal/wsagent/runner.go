@@ -409,7 +409,15 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 	}
 	close(startupLoaded)
 	for _, c := range startup {
-		c.do(c.kick)
+		c.do(func() {
+			// Re-run only startup work whose earlier signal may have been
+			// consumed by the all-records-loaded barrier. A held inbox send on
+			// a processless conversation remains lazy until a new wake, as it
+			// did before restart restore existed.
+			if c.proc != nil || len(c.rec.Queued) > 0 || len(c.rec.Mail) > 0 || len(c.rec.Reports) > 0 {
+				c.kick()
+			}
+		})
 	}
 	// All records are loaded now, including children sorted after their lead.
 	for _, st := range r.List() {
