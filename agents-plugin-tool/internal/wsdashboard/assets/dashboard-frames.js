@@ -282,26 +282,32 @@
   // Only existing board items, stream entries, stable panels and topic anchors
   // may be navigated. Topic chips never materialize unloaded closed topics.
   function boardJump(id) {
-    if (typeof id !== "string" || !/^(?:item-[0-9]{1,6}|[pe][1-9][0-9]*|topic-(?:[0-9a-f]{2})+)$/.test(id)) return;
+    if (typeof id !== "string" || !/^(?:(?:item|check)-[0-9]{1,6}|[pe][1-9][0-9]*|topic-(?:[0-9a-f]{2})+)$/.test(id)) return;
     if (window.wbPill && window.wbPill.apply && !window.wbPill.apply(function () { boardJump(id); })) return true;
+    if (doc.body.classList.contains("tk-paged") && tkApi) tkApi.leavePage();
+    if (grid && !tabShown("board")) setTab("board");
     var isTopic = id.indexOf("topic-") === 0;
+    var alternate = id.replace(/^(item|check)-/, function (s) { return s === "item-" ? "check-" : "item-"; });
     var target = null, unfoldTopic = window.WsCards && window.WsCards.unfoldTopic;
-    if (!isTopic && window.wbHistory) boardBoxes().some(function (b) { target = window.wbHistory.loadTarget(b, id, unfoldTopic); return !!target; });
+    if (!isTopic && window.wbHistory) boardBoxes().some(function (b) { target = window.wbHistory.loadTarget(b, id, unfoldTopic) || (alternate !== id && window.wbHistory.loadTarget(b, alternate, unfoldTopic)); return !!target; });
+    var loaded = !!target;
     // A target in history the page has not fetched yet jumps once its topic
     // arrives (a second miss starts no further wait: its fetch fills nothing).
-    var waiting = !target && !isTopic && window.wbHistory && window.wbHistory.loading && window.wbHistory.loading(id);
-    if (waiting) { waiting.then(function (ok) { if (ok) boardJump(id); }); return true; }
-    if (!target) target = $(id);
-    if (!target || target.id !== id || !inBoard(target)) return;
+    var waiting = !target && !isTopic && window.wbHistory && window.wbHistory.loading &&
+      [window.wbHistory.loading(id), alternate !== id && window.wbHistory.loading(alternate)].filter(Boolean);
+    if (waiting && waiting.length) { Promise.all(waiting).then(function (results) { if (results.some(Boolean)) boardJump(id); }); return true; }
+    if (!target) target = $(id) || (alternate !== id && $(alternate));
+    if (!target || (target.id !== id && target.id !== alternate) || !inBoard(target)) return;
     if (isTopic && (target.tagName !== "SECTION" || !target.hasAttribute("data-topic"))) return;
     function reveal() {
       if (unfoldTopic) unfoldTopic(target);
-      if (window.WsCards && window.WsCards.activate) window.WsCards.activate(target);
       for (var p = target; p && inBoard(p); p = p.parentNode) if (p.tagName === "DETAILS") p.open = true;
+      var w = window.wbHistory;
+      if (!loaded && w && w.navigate) w.navigate(target);
+      else if (!loaded && window.WsCards && window.WsCards.activate) window.WsCards.activate(target);
       // History targets were anchored by the loader; never scroll their clip.
       if (!target.closest(".wb-history")) {
-        target.scrollIntoView({ block: "start" });
-        var w = window.wbHistory;
+        if (!loaded && (!w || !w.navigate)) target.scrollIntoView({ block: "start" });
         if (w && w.bands && w.keep) w.keep(target);
       }
     }
@@ -315,7 +321,7 @@
   // Native fragments also need to materialize paged panels and open folds.
   doc.addEventListener("click", function (e) {
     var a = e.target.closest && e.target.closest("a[href]");
-    if (!a || !inBoard(a) || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (e.defaultPrevented || !a || !inBoard(a) || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     var href = a.getAttribute("href") || "";
     if (href.charAt(0) !== "#" || !boardJump(href.slice(1))) return;
     e.preventDefault();

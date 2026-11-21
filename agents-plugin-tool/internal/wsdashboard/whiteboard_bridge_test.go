@@ -36,6 +36,7 @@ func TestBoardEntryFrameBridgeStaysNarrow(t *testing.T) {
 	}
 	runNode(t, "entry frame bridge", `
 var bad = [];
+var doc = { body: { classList: { contains: function () { return false; } } } }, grid = null, tkApi = null;
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
 var calls = [], jumps = [], reveals = [], pending = null, mpend = null, cchips = {}, handler, menus = [];
 // node defines a getter-only global navigator that a top-level var cannot replace.
@@ -62,6 +63,7 @@ var window = { WsCards: { unfoldTopic: function (n) { if (n.owned) { n.folded = 
     check("history receives the named owner", beforeGeometry === window.WsCards.unfoldTopic, true);
     if (beforeGeometry) beforeGeometry(n);
     check("owner reveals before loader geometry " + id, n.folded, false);
+    if (!n.history) n.scrollIntoView();
   }
   return n;
 } }, addEventListener: function (kind, fn) { if (kind === "message") handler = fn; } };
@@ -293,6 +295,7 @@ function bandBoard(n){log.push("band:"+n.name);}
 function restoreOpen(n){log.push("open:"+n.name);}
 function fmtTimes(n){log.push("times:"+n.name);}
 function sweepOutImgs(n){log.push("images:"+n.name);}
+function syncSpinnerPhases(){}
 function setFrameHeights(n,h){check("captured heights",h,"heights");log.push("heights:"+n.name);}
 function mountFrames(n){log.push("frames:"+n.name);}
 function writeAnswers(n,a){check("captured answers",a,"answers");log.push("answers:"+n.name);}

@@ -44,7 +44,7 @@ function flush(){var batch=frames.splice(0);batch.forEach(function(fn){fn();});}
 function CustomEvent(type,opt){this.type=type;Object.assign(this,opt||{});}
 E.prototype.dispatchEvent=function(e){e.target=this;for(var p=this;p;p=e.bubbles?p.parent:null)(p.on[e.type]||[]).slice().forEach(function(fn){fn(e);});if(e.type==='wbhistoryload')loads++;};
 fire=function(n,type){n.dispatchEvent(new CustomEvent(type,{bubbles:true}));};
-var watches=[];window.historyKit={seen:function(){return null;},pin:function(){return {apply:function(){}};},watch:function(n,opt){watches.push([n,opt]);return {unwatch:function(){}};},idle:function(){return true;},keep:function(n,opt){if(opt&&opt.capture===false)return {scroller:n.closest('.test-scroller')||root};var k={applied:0,apply:function(){this.applied++;}};keeps.push(k);return k;},jump:function(n,opt){jumps.push([n.id,opt.offset]);}};
+var watches=[];window.historyKit={seen:function(){return null;},pin:function(){return {apply:function(){}};},watch:function(n,opt){watches.push([n,opt]);return {unwatch:function(){}};},idle:function(){return true;},keep:function(n,opt){if(opt&&opt.capture===false)return {scroller:n.closest('.test-scroller')||root};var k={applied:0,apply:function(){this.applied++;}};keeps.push(k);return k;},jump:function(n,opt){jumps.push([n.id,opt.centerVisible,opt.clearance()]);}};
 function ResizeObserver(fn){this.fn=fn;};ResizeObserver.prototype.observe=function(){};ResizeObserver.prototype.disconnect=function(){};
 function row(i,height,body){return '<div class="timeline-row" data-row="e'+i+'" data-count="1" data-from="10:00" data-to="10:01" data-height="'+height+'">'+(body||'<article class="wb-entry agent" id="e'+i+'" data-entry="e'+i+'">line</article>')+'</div>';}
 function rows(from,to,height){var s='';for(var i=from;i<=to;i++)s+=row(i,height);return s;}
@@ -68,7 +68,7 @@ h.closest('.topic').setAttribute('data-size','fold');guard=true;
 function reveal(n){n.closest('.topic').setAttribute('data-size','base');}
 var target=window.wbHistory.loadTarget(document,'e17',reveal);guard=false;
 check('jump materializes target window not intervening prefix',[target.id,!!h.querySelector('[id="e16"]'),!!h.querySelector('[id="e20"]')],['e17',false,false]);
-check('jump goes through scroll owner',jumps.at(-1),['e17',12]);
+check('jump goes through scroll owner',jumps.at(-1),['e17',true,0]);
 check('known target consumed minimum whole-row window',liveIDs(h).filter(function(id){return ['e17','e18','e19'].includes(id);}),['e17','e18','e19']);
 var saved=window.wbHistory.capture(document),before=liveIDs(h);
 h=board(gap(rows(1,10,400),true)+row(11,50)+gap(rows(12,24,400),false)+row(25,50)+row(26,50));
@@ -110,7 +110,7 @@ h._wbHistoryObserver.fn();flush();
 check('initial fill still reaches bottom 1000px after navigation',[h._wbHistoryPending.length,h._wbHistoryFilling,liveIDs(h)],[0,false,['e9','e10','e12','e14']]);
 // Panel IDs and item anchors share validation and unfolding before geometry.
 h=board(gap(row(12,1400,panel),true)+row(14,50));window.wbHistory.init(document);var p=window.wbHistory.loadTarget(document,'p1');check('oversized panel is one whole window',[p.id,p.open,liveIDs(h)],['p1',true,['e12','e14']]);
-h=board(row(1,20,'<article class="wb-entry system" id="e1" data-entry="e1"><div class="card" id="item-3"></div></article>'));window.wbHistory.init(document);check('question target uses same owner',window.wbHistory.loadTarget(document,'item-3').id,'item-3');check('question owner jump',jumps.at(-1),['item-3',12]);
+h=board(row(1,20,'<article class="wb-entry system" id="e1" data-entry="e1"><div class="card" id="item-3"></div></article>'));window.wbHistory.init(document);check('question target uses same owner',window.wbHistory.loadTarget(document,'item-3').id,'item-3');check('question owner jump',jumps.at(-1),['item-3',true,0]);
 // A system fold may absorb the former latest event after an append. Restore
 // by durable contained entries, not just the fold's first-entry row key.
 h=board(row(5,20,'<details class="system-run" open><article class="wb-entry system" id="e5" data-entry="e5"></article></details>'));window.wbHistory.init(document);var foldSnapshot=window.wbHistory.capture(document);

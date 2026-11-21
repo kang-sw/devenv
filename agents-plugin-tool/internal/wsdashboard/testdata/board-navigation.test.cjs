@@ -16,9 +16,10 @@ function environment(pending) {
     const n = { id, tagName: id.startsWith('topic-') ? 'SECTION' : 'DIV', isConnected: true,
       hasAttribute: key => key === 'data-topic', getAttribute: () => 'topic',
       closest(selector) { return selector === '.wb-history' ? null : topic || n; },
-      matches: selector => id.startsWith('item-') && selector.includes('.card.policy[data-id]'), querySelector: () => null,
+      matches: selector => /^(item|check)-/.test(id) && selector.includes('.card.policy[data-id]'),
+      querySelector: selector => { const match = /^\[id="([^"]+)"\]$/.exec(selector); return match ? nodes[match[1]] || null : null; },
       classList: { remove() {}, add() {}, toggle() {}, contains() { return false; } },
-      scrollIntoView() { assert.equal(nodes[id], n, 'scroll the applied live node'); events.push('scroll:' + id); },
+      scrollIntoView() { assert.equal(nodes[n.id], n, 'scroll the applied live node'); events.push('scroll:' + n.id); },
       setAttribute() {}, focus() { events.push('focus:' + id); }
     };
     return n;
@@ -48,7 +49,7 @@ function environment(pending) {
   vm.runInContext(['boardPendingNames', 'boardPendingBadge', 'boardApplyPending', 'boardFlushViewed', 'boardJump', 'effectTopic', 'effectJump', 'palettePick', 'focusTopicNote'].map(name => func(dashboard, name)).join('') + '\nboardPendingBadge();', context);
   context.window.wbHistory = { loadTarget(root, id) {
     assert.equal(Object.keys(context.boardPending).length, 0, 'apply before materialization');
-    events.push('load:' + id); return nodes[id] || null;
+    events.push('load:' + id); if (nodes[id]) nodes[id].scrollIntoView(); return nodes[id] || null;
   } };
   return { context, nodes, oldNodes, events };
 }
@@ -86,6 +87,69 @@ for (const pending of [false, true]) test('palette and topic-note navigation use
     assert.ok(events.includes('scroll:topic-aa'));
     if (pending) assert.equal(events[0], 'apply');
   }
+});
+
+for (const entry of ['fragment', 'effect', 'palette']) test(entry + ' delegates its resolved target to board navigation after selecting the board', () => {
+  const { context, nodes, events } = environment(false);
+  context.grid = {}; context.live = true;
+  context.tabShown = () => false;
+  context.setTab = tab => events.push('tab:' + tab);
+  context.window.wbHistory.navigate = node => { events.push('navigate:' + node.id); return node; };
+  if (entry === 'fragment') context.boardJump('topic-aa');
+  else if (entry === 'effect') context.effectJump('topic-aa', 'topic-aa');
+  else context.palettePick({ kind: 'board-item', topic: 'topic', id: '44' });
+  const id = entry === 'palette' ? 'item-44' : 'topic-aa';
+  assert.ok(events.includes('navigate:' + id));
+  assert.ok(!events.includes('scroll:' + id), 'the helper owns landing geometry');
+  if (entry !== 'fragment') assert.ok(events.indexOf('tab:board') < events.indexOf('navigate:' + id));
+});
+
+test('palette retained entry relies on history materialization and preserves palette focus', () => {
+  const { context, events } = environment(false);
+  context.window.wbHistory.navigate = node => { events.push('navigate:' + node.id); return node; };
+  context.palettePick({ kind: 'board-entry', topic: 'topic', entry: 'p33' }, { keep: true });
+  assert.ok(events.includes('load:p33'));
+  assert.ok(!events.includes('navigate:p33'), 'loadTarget already navigates');
+  assert.ok(!events.includes('focus:p33'));
+});
+
+for (const entry of ['fragment', 'effect']) test(entry + ' selects the board before materializing and resolves item/check aliases', () => {
+  const { context, nodes, events } = environment(false);
+  nodes['check-44'] = nodes['item-44']; nodes['check-44'].id = 'check-44'; delete nodes['item-44'];
+  context.grid = {}; context.tabShown = () => false;
+  context.setTab = tab => events.push('tab:' + tab);
+  context.window.wbHistory.navigate = node => { events.push('navigate:' + node.id); return node; };
+  if (entry === 'fragment') context.boardJump('item-44');
+  else context.effectJump('topic-aa', 'item-44');
+  assert.equal(events[0], 'tab:board');
+  assert.ok(events.includes('navigate:check-44') || events.includes('load:check-44'));
+});
+
+for (const entry of ['fragment', 'effect']) test(entry + ' waits for a lazy check alias before landing', async () => {
+  const { context, nodes, events } = environment(false);
+  const target = nodes['item-44']; target.id = 'check-44'; delete nodes['item-44'];
+  let finish, loaded = false;
+  const pending = new Promise(resolve => { finish = resolve; });
+  context.window.wbHistory.loadTarget = (root, id) => {
+    events.push('load:' + id);
+    if (id === 'check-44' && loaded) { nodes[id] = target; events.push('land:' + id); return target; }
+    return null;
+  };
+  context.window.wbHistory.loading = id => id === 'check-44' && !loaded ? pending : null;
+  context.loadClosed = () => { throw Error('alias lookup must not fetch closed topics'); };
+  const results = [];
+  if (entry === 'fragment') assert.equal(context.boardJump('item-44'), true);
+  else context.effectJump('topic-aa', 'item-44', (topic, exact) => results.push([topic, exact]));
+  assert.deepEqual(results, []);
+  assert.ok(!events.includes('land:check-44'));
+  loaded = true; finish(true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(events.includes('land:check-44'));
+  if (entry === 'effect') assert.deepEqual(results, [[true, true]]);
+});
+
+test('a consumed board link is not handled a second time', () => {
+  assert.match(dashboard, /if \(e\.defaultPrevented \|\| !a \|\| !inBoard\(a\)/);
 });
 
 test('explicit recap resolves its applied topic before materializing the target', () => {

@@ -17,7 +17,7 @@
     if (root.matches && root.matches('.wb-history')) out.unshift(root);
     return out;
   }
-  function valid(id) { return /^(?:(?:p|e)[1-9][0-9]*|item-[1-9][0-9]*)$/.test(id || ''); }
+  function valid(id) { return /^(?:(?:p|e)[1-9][0-9]*|(?:item|check)-[1-9][0-9]*)$/.test(id || ''); }
   function find(root, id) {
     if (!valid(id)) return null;
     var node = root.querySelector('[id="' + id + '"]');

@@ -35,6 +35,7 @@ func TestWaitingOnTopicFragmentBridge(t *testing.T) {
 	src := whiteboardBridgeFunctions(t, string(mustAsset(t, "dashboard.js")), "boardJump")
 	runNode(t, "waiting-on fragment bridge", `
 var bad=[],loaded=[],scrolled=[],revealed=[],after;
+var doc={body:{classList:{contains:function(){return false;}}}},grid=null,tkApi=null;
 function check(label,got,want){if(JSON.stringify(got)!==JSON.stringify(want))bad.push(label+': '+JSON.stringify(got));}
 var target={id:'topic-6162',tagName:'SECTION',owned:true,hasAttribute:function(k){return k==='data-topic';},closest:function(){return null;},scrollIntoView:function(){scrolled.push(this.id);}};
 var targets={'topic-6162':target,'topic-6163':{id:'topic-6163',tagName:'DIV',owned:true},'topic-6164':{id:'topic-6164',tagName:'SECTION',owned:false}};

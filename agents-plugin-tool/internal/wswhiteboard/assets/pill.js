@@ -293,7 +293,7 @@
         if (!el) return;
       }
       var w = window.wbHistory;
-      if (w && w.jump) w.jump(el, { block: "center", behavior: "smooth" });
+      if (w && w.navigate) w.navigate(el, { behavior: "smooth" });
       else el.scrollIntoView({ block: "center", behavior: window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
     };
   }

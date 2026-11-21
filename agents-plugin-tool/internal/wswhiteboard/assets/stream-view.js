@@ -106,7 +106,7 @@
     function scrollerOf(node) {
       for (var p = node && node.parentElement; p && p !== doc.body && p !== doc.documentElement; p = p.parentElement) {
         var oy = win.getComputedStyle(p).overflowY;
-        if ((oy === "auto" || oy === "scroll" || oy === "overlay") && p.scrollHeight > p.clientHeight) return p;
+        if ((oy === "auto" || oy === "scroll" || oy === "overlay") && (p.scrollHeight > p.clientHeight || p.classList.contains("gal-pbody"))) return p;
       }
       return docScroller();
     }
@@ -373,6 +373,13 @@
         function measure() {
           if (typeof opt.top === 'number') return opt.top;
           var r = node.getBoundingClientRect();
+          if (opt.centerVisible) {
+            var view = viewport(scroller), clearance = typeof opt.clearance === "function" ? opt.clearance() : opt.clearance || 0;
+            var top = Math.max(view.top, scrollerTop(scroller) + clearance);
+            var height = Math.max(0, view.bottom - top);
+            var desired = r.height > height ? top : top + (height - r.height) / 2;
+            return Math.max(0, Math.min(scroller.scrollHeight - scroller.clientHeight, scroller.scrollTop + r.top - desired));
+          }
           var offset = typeof opt.readingOffset === 'number' ? viewport(scroller).top + 1 - scrollerTop(scroller) + opt.readingOffset :
             typeof opt.offset === 'number' ? opt.offset : block === "center" ? (scroller.clientHeight - r.height) / 2 : 0;
           return r.top - scrollerTop(scroller) + scroller.scrollTop - offset;
@@ -403,7 +410,7 @@
           raf = win.requestAnimationFrame(frame);
         }
         function land(behavior) {
-          if (typeof opt.top === 'number' || typeof opt.offset === 'number' || typeof opt.readingOffset === 'number') scroller.scrollTo({ top: measure(), behavior: behavior });
+          if (opt.centerVisible || typeof opt.top === 'number' || typeof opt.offset === 'number' || typeof opt.readingOffset === 'number') scroller.scrollTo({ top: measure(), behavior: behavior });
           else node.scrollIntoView({ block: block, behavior: behavior });
           o.wrote = scroller.scrollTop;
         }
@@ -438,7 +445,7 @@
           if (under.has(p)) { found = under.get(p); break; }
           chain.push(p);
           var oy = win.getComputedStyle(p).overflowY;
-          if ((oy === "auto" || oy === "scroll" || oy === "overlay") && p.scrollHeight > p.clientHeight) { found = p; break; }
+          if ((oy === "auto" || oy === "scroll" || oy === "overlay") && (p.scrollHeight > p.clientHeight || p.classList.contains("gal-pbody"))) { found = p; break; }
         }
         if (!found) found = docScroller();
         chain.forEach(function (c) { under.set(c, found); });

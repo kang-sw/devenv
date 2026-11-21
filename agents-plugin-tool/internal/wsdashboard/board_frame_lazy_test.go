@@ -155,6 +155,8 @@ func TestBoardFramesMountLazily(t *testing.T) {
 	src := dashboardFuncs(t, "boardBands", "frameNear", "frameShown", "mountFrame", "mountFrames", "frameToggle", "isPeer", "isPanel", "openKey", "restoreOpenOne", "restoreOpen", "boardJump", "frameGraft", "frameNext")
 	runNode(t, "lazy frame mount", frameDOM+src+`
 var openState = {}, PEER_KEY = "p.";
+doc.body = { classList: { contains: function () { return false; } } };
+var grid = null, tkApi = null;
 function load() { return null; }
 function shutId() { return ""; }
 function shutHas() { return false; }

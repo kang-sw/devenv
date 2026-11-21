@@ -79,9 +79,9 @@ check("arrows", [top.children[0].textContent, bot.children[0].textContent], ["â†
 press(top, "open"); press(top, "ans"); press(top, "nt"); press(bot, "open"); press(bot, "ans");
 check("jumps", jumped, ["a3", "a2", "a2", "b2", "b1"]);
 var followed = [];
-window.wbHistory = { jump: function (el, opt) { followed.push([el.attrs.id, opt.block, opt.behavior]); } };
+window.wbHistory = { navigate: function (el) { followed.push(el.attrs.id); } };
 press(top, "open"); press(top, "ans"); press(top, "nt"); press(bot, "open"); press(bot, "ans");
-check("every badge segment shares bounded jump following", followed, [["a3", "center", "smooth"], ["a2", "center", "smooth"], ["a2", "center", "smooth"], ["b2", "center", "smooth"], ["b1", "center", "smooth"]]);
+check("every badge segment shares bounded jump following", followed, ["a3", "a2", "a2", "b2", "b1"]);
 check("delegated navigation does not scroll twice", jumped.length, 5);
 window.wbHistory = null;
 // A delayed visibility report cannot overrule the current positions.

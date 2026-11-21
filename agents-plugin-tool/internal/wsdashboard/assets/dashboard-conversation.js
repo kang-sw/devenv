@@ -203,7 +203,7 @@
   }
   function effectJump(topicID, id, done) {
     if (typeof topicID !== "string" || !/^topic-(?:[0-9a-f]{2})+$/.test(topicID) ||
-        typeof id !== "string" || (id !== topicID && !/^(?:item-[1-9][0-9]{0,5}|[ep][1-9][0-9]*)$/.test(id))) return;
+        typeof id !== "string" || (id !== topicID && !/^(?:(?:item|check)-[1-9][0-9]{0,5}|[ep][1-9][0-9]*)$/.test(id))) return;
     var epoch = ++effectJumpEpoch, seen = Object.create(null), waited = false;
     if (doc.body.classList.contains("tk-paged") && tkApi) tkApi.leavePage();
     if (grid && !tabShown("board")) setTab("board");
@@ -229,27 +229,33 @@
         if (epoch !== effectJumpEpoch) return;
         // SSE may have replaced the topic while overview/filter restore ran.
         if (effectTopic(topicID) !== topic) { step(); return; }
-        var target = topic;
+        var target = topic, loaded = false;
         if (id !== topicID) {
-          if (window.wbHistory && window.wbHistory.loadTarget) target = window.wbHistory.loadTarget(topic, id, unfold);
+          var alternate = id.replace(/^(item|check)-/, function (s) { return s === "item-" ? "check-" : "item-"; });
+          if (window.wbHistory && window.wbHistory.loadTarget) target = window.wbHistory.loadTarget(topic, id, unfold) || (alternate !== id && window.wbHistory.loadTarget(topic, alternate, unfold));
           else target = /^item-/.test(id) ? topic.querySelector('[id="' + id + '"]') : null;
-          if (!target || target.id !== id || !inBoard(target) || target.closest("section.topic[data-topic]") !== topic ||
-              (/^item-/.test(id) && !target.matches(".card.policy[data-id], .arow[data-id], .ckrow[data-id], .srow"))) target = null;
+          loaded = !!target && !!(window.wbHistory && window.wbHistory.loadTarget);
+          if (!target && alternate !== id) target = topic.querySelector('[id="' + alternate + '"]');
+          if (!target || (target.id !== id && target.id !== alternate) || !inBoard(target) || target.closest("section.topic[data-topic]") !== topic ||
+              (/^(?:item|check)-/.test(id) && !target.matches(".card.policy[data-id], .arow[data-id], .ckrow[data-id], .srow"))) target = null;
+          if (!target) loaded = false;
           // A target in history the page has not fetched yet: decide once
           // its topic arrives.
-          var waiting = !target && !waited && window.wbHistory && window.wbHistory.loading && window.wbHistory.loading(id);
-          if (waiting) { waited = true; waiting.then(reveal); return; }
+          var waiting = !target && !waited && window.wbHistory && window.wbHistory.loading &&
+            [window.wbHistory.loading(id), alternate !== id && window.wbHistory.loading(alternate)].filter(Boolean);
+          if (waiting && waiting.length) { waited = true; Promise.all(waiting).then(reveal); return; }
         }
         var exact = !!target;
         if (!target) target = topic;
         if (unfold) unfold(target);
         // A target on a docked page not shown (or, in the narrow view, on
         // the Main Board while a docked page shows) has its page shown first.
-        if (cards && cards.activate) cards.activate(target);
         for (var p = target; p && inBoard(p); p = p.parentNode) if (p.tagName === "DETAILS") p.open = true;
+        if (!loaded && window.wbHistory && window.wbHistory.navigate) window.wbHistory.navigate(target);
+        else if (!loaded && cards && cards.activate) cards.activate(target);
         // loadTarget owns lazy-history positioning, including version folds.
         if (!target.closest(".wb-history")) {
-          target.scrollIntoView({ block: "start" });
+          if (!loaded && (!window.wbHistory || !window.wbHistory.navigate)) target.scrollIntoView({ block: "start" });
           if (window.wbHistory && window.wbHistory.keep) window.wbHistory.keep(target);
           // Entry/item flashes belong to loadTarget; topic-only navigation
           // (including an absent element's fallback) uses the existing pulse.

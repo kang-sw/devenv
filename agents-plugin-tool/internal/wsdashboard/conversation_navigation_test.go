@@ -38,7 +38,7 @@ function keydown(k){return {target:target(),key:k,preventDefault:function(){this
  check('item and retained log/panel share topic-scoped ID-chip loader',loads,[[a.id,'e7'],[a.id,'p4'],[a.id,'item-42']]);
  check('topic-only navigation restarts the existing brief pulse',flashes.slice(0,2),[['remove',a.id,'palette-flash'],['add',a.id,'palette-flash']]);
  timers.shift()();check('topic pulse is removed after timeout',flashes[flashes.length-1],['remove',a.id,'palette-flash']);
- check('history geometry stays owned by loader',scrolls,[a.id,'item-42']);
+ check('history geometry stays owned by loader',scrolls,[a.id]);
  check('keyboard focus does not create another scroll',focused,[[a.id,true],['e7',true],['p4',true],['item-42',true]]);
  check('exact successes',results,[[true,true],[true,true],[true,true],[true,true]]);
  var count=loads.length,tabCount=tabs.length;

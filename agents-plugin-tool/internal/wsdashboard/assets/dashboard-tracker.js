@@ -732,7 +732,8 @@
       target.setAttribute("tabindex", "-1");
       target.focus({ preventScroll: true });
     }
-    target.scrollIntoView({ block: "center" });
+    if (window.wbHistory && window.wbHistory.navigate) window.wbHistory.navigate(target);
+    else target.scrollIntoView({ block: "center" });
     target.classList.remove("palette-flash");
     void target.offsetWidth;
     target.classList.add("palette-flash");

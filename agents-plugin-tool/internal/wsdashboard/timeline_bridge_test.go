@@ -5,6 +5,7 @@ import "testing"
 func TestBoardTimelineAnswerJumpUsesHistoryOwner(t *testing.T) {
 	runNode(t, "timeline answer navigation", dashboardFuncs(t, "boardJump")+`
 var bad=[],calls=[],fallback=0,board={},target={id:'e17',parentNode:null,closest:function(){return board;}};
+var doc={body:{classList:{contains:function(){return false;}}}},grid=null,tkApi=null;
 function check(what,got,want){if(JSON.stringify(got)!==JSON.stringify(want))bad.push(what);}
 function boardBoxes(){return [board];}
 function inBoard(n){return n===target;}
