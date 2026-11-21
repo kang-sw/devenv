@@ -107,7 +107,14 @@
       "registered_at": "2026-11-06T07:33:45Z"
     },
     "261106-feat-whiteboard-policy-answer-user-alternative": {
-      "registered_at": "2026-11-06T04:42:55Z"
+      "registered_at": "2026-11-06T04:42:55Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-21T09:41:55Z"
+      }
     },
     "261107-bug-pi-source-tests-fetch-release-runtime": {
       "registered_at": "2026-11-06T15:40:06Z"
