@@ -6,6 +6,8 @@ compile_error!("Werkschaft supports macOS and Windows");
 #[cfg(any(windows, test))]
 mod accelerator;
 mod close;
+mod daemon;
+mod daemon_package;
 mod endpoint;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -24,6 +26,7 @@ use tauri::{
     AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 
+use daemon::Intent;
 use navigation::{destination, Destination};
 use shell::Connection;
 
@@ -35,6 +38,7 @@ const USER_AGENT: &str = concat!(
 
 fn build_window(app: &AppHandle, connection: Arc<Connection>) -> tauri::Result<()> {
     let state = connection.clone();
+    let notice = connection.clone();
     let popup_app = app.clone();
     let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("Werkschaft — Connecting…")
@@ -42,6 +46,14 @@ fn build_window(app: &AppHandle, connection: Arc<Connection>) -> tauri::Result<(
         .min_inner_size(760.0, 520.0)
         .disable_drag_drop_handler()
         .devtools(true)
+        .on_page_load(move |window, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Finished
+                && destination(payload.url(), notice.pinned_url().as_ref())
+                    == Destination::Dashboard
+            {
+                notice.show_refusal(&window);
+            }
+        })
         .on_new_window(move |url, _features| {
             let pin = state.pinned_url();
             match destination(&url, pin.as_ref()) {
@@ -105,6 +117,13 @@ fn build_window(app: &AppHandle, connection: Arc<Connection>) -> tauri::Result<(
 fn install_menu(app: &AppHandle) -> tauri::Result<()> {
     let menu = Menu::default(app)?;
     let retry = MenuItem::with_id(app, "retry", "Retry", true, Some("CmdOrCtrl+R"))?;
+    let replace = MenuItem::with_id(
+        app,
+        "replace_daemon",
+        "Replace daemon (same core)",
+        true,
+        None::<&str>,
+    )?;
     let copy = MenuItem::with_id(
         app,
         "copy_login",
@@ -116,7 +135,7 @@ fn install_menu(app: &AppHandle) -> tauri::Result<()> {
         app,
         "Connection",
         true,
-        &[&retry, &copy],
+        &[&retry, &replace, &copy],
     )?)?;
 
     #[cfg(target_os = "macos")]
@@ -167,7 +186,8 @@ fn menu_action(window: WebviewWindow, state: &Arc<Connection>, id: &str) {
             #[cfg(windows)]
             state.webview_failed(window);
         }
-        "retry" => state.connect(window, true),
+        "retry" => state.connect(window, Intent::Connect),
+        "replace_daemon" => state.connect(window, Intent::Replace),
         "copy_login" => state.copy_login_link(window),
         "devtools" | "devtools_f12" => {
             #[cfg(target_os = "macos")]

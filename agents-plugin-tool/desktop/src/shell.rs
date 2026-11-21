@@ -14,14 +14,16 @@ use tauri::{
 use url::Url;
 
 use crate::{
-    endpoint::{self, BrowserCookie, Daemon},
+    daemon::{self, Intent},
+    endpoint::{BrowserCookie, Daemon},
     navigation::{self, destination, Destination, CONNECT_VIEW, PYTHON_VIEW},
-    python,
 };
 
 #[derive(Default)]
 pub struct Connection {
     daemon: Mutex<Option<Daemon>>,
+    refusal: Mutex<Option<(usize, &'static str)>>,
+    next_refusal: AtomicUsize,
     recovery: Mutex<Option<(Instant, u8)>>,
     connecting: AtomicBool,
     copying: AtomicBool,
@@ -54,6 +56,7 @@ impl Connection {
 
     fn show_local(&self, window: &WebviewWindow, page: &str, reason: &str) {
         *self.daemon.lock().unwrap() = None;
+        *self.refusal.lock().unwrap() = None;
         let _ = window.set_title(&format!("Werkschaft — {reason} — Connection → Retry"));
         if window.navigate(navigation::local_view(page)).is_err() {
             eprintln!("Werkschaft: Could not load the bundled recovery view");
@@ -77,35 +80,50 @@ impl Connection {
 
     pub fn start(self: &Arc<Self>, window: WebviewWindow) {
         *self.hooks.lock().unwrap() = Hooks::Ready;
-        self.connect(window, false);
+        self.connect(window, Intent::Connect);
     }
 
-    pub fn connect(self: &Arc<Self>, window: WebviewWindow, manual: bool) {
+    pub fn connect(self: &Arc<Self>, window: WebviewWindow, intent: Intent) {
         if *self.hooks.lock().unwrap() != Hooks::Ready {
             return;
         }
         if self.closing.load(Ordering::Acquire) || self.connecting.swap(true, Ordering::AcqRel) {
             return;
         }
-        if manual {
+        if intent != Intent::Recover {
             *self.recovery.lock().unwrap() = None;
         }
-        let _ = window.set_title("Werkschaft — Connecting…");
+        let retained = self.daemon();
+        if retained.is_none() {
+            let _ = window.set_title("Werkschaft — Connecting…");
+        }
         let epoch = self.window_epoch();
         let state = self.clone();
         thread::spawn(move || {
-            let result = match endpoint::discover() {
-                Ok(daemon) => {
-                    let cookie = daemon.browser_cookie();
-                    if daemon.is_current() {
-                        Ok((daemon, cookie))
-                    } else {
-                        Err((CONNECT_VIEW, "Dashboard changed during connection"))
-                    }
+            let paths = window.app_handle().path();
+            let result = daemon::connect(
+                paths
+                    .resource_dir()
+                    .map_err(|_| "Could not locate app resources"),
+                paths
+                    .app_local_data_dir()
+                    .map_err(|_| "Could not locate user data"),
+                intent,
+            )
+            .and_then(|answer| {
+                let keep_document =
+                    answer.refusal.is_some() && retained.as_ref() == Some(&answer.daemon);
+                let cookie = if keep_document {
+                    Ok(None)
+                } else {
+                    answer.daemon.browser_cookie()
+                };
+                if answer.daemon.is_current() {
+                    Ok((answer, keep_document, cookie))
+                } else {
+                    Err("Dashboard changed during connection".into())
                 }
-                Err(reason) if python::available() => Err((CONNECT_VIEW, reason)),
-                Err(_) => Err((PYTHON_VIEW, "Python 3 is required")),
-            };
+            });
 
             let target = window.clone();
             let ui_state = state.clone();
@@ -116,10 +134,28 @@ impl Connection {
                     }
                     if !ui_state.closing.load(Ordering::Acquire) {
                         match result {
-                            Ok((daemon, cookie)) => ui_state.attach(&target, daemon, cookie),
-                            Err((page, reason)) => {
-                                eprintln!("Werkschaft: {reason}");
-                                ui_state.show_local(&target, page, reason);
+                            Ok((answer, keep_document, cookie)) => {
+                                let reason = answer.refusal;
+                                *ui_state.refusal.lock().unwrap() = reason.map(|reason| {
+                                    (
+                                        ui_state.next_refusal.fetch_add(1, Ordering::Relaxed),
+                                        reason,
+                                    )
+                                });
+                                if keep_document {
+                                    ui_state.show_refusal(&target);
+                                } else {
+                                    ui_state.attach(&target, answer.daemon, cookie, reason);
+                                }
+                            }
+                            Err(error) => {
+                                let page = if error.python_required {
+                                    PYTHON_VIEW
+                                } else {
+                                    CONNECT_VIEW
+                                };
+                                eprintln!("Werkschaft: {}", error.reason);
+                                ui_state.show_local(&target, page, error.reason);
                             }
                         }
                     }
@@ -133,11 +169,48 @@ impl Connection {
         });
     }
 
+    pub fn show_refusal(self: &Arc<Self>, window: &WebviewWindow) {
+        let Some(pin) = self.pinned_url() else { return };
+        let Some((sequence, reason)) = *self.refusal.lock().unwrap() else {
+            return;
+        };
+        let _ = window.set_title(&format!("Werkschaft — {reason}"));
+        if !window
+            .url()
+            .is_ok_and(|url| destination(&url, Some(&pin)) == Destination::Dashboard)
+        {
+            return;
+        }
+        let epoch = self.window_epoch();
+        let script = refusal_script(&pin, reason);
+        let state = self.clone();
+        let target = window.clone();
+        let _ = window.eval_with_callback(script, move |value| {
+            if value != "1" {
+                return;
+            }
+            let result = target.clone();
+            let state = state.clone();
+            let pin = pin.clone();
+            let _ = target.run_on_main_thread(move || {
+                if state.window_epoch() != epoch || state.pinned_url() != Some(pin) {
+                    return;
+                }
+                let mut refusal = state.refusal.lock().unwrap();
+                if *refusal == Some((sequence, reason)) {
+                    *refusal = None;
+                    let _ = result.set_title("Werkschaft");
+                }
+            });
+        });
+    }
+
     fn attach(
         &self,
         window: &WebviewWindow,
         daemon: Daemon,
         cookie: Result<Option<BrowserCookie>, &'static str>,
+        refusal: Option<&'static str>,
     ) {
         let root = &daemon.url;
         let target = window
@@ -170,7 +243,11 @@ impl Connection {
             return;
         }
         *self.daemon.lock().unwrap() = Some(daemon);
-        let _ = window.set_title("Werkschaft");
+        let title = refusal.map_or_else(
+            || "Werkschaft".to_owned(),
+            |reason| format!("Werkschaft — {reason}"),
+        );
+        let _ = window.set_title(&title);
         if window.navigate(target).is_err() {
             self.show_local(window, CONNECT_VIEW, "Could not open the dashboard");
         }
@@ -197,7 +274,7 @@ impl Connection {
         }
         eprintln!("Werkschaft: {reason}");
         if self.allow_recovery(Instant::now()) {
-            self.connect(window, false);
+            self.connect(window, Intent::Recover);
         } else {
             self.show_local(&window, CONNECT_VIEW, "Lost connection to the dashboard");
         }
@@ -212,6 +289,7 @@ impl Connection {
             // A dead WebView2 browser process invalidates its controllers.
             // RunEvent keeps the application alive until the replacement exists.
             *self.daemon.lock().unwrap() = None;
+            *self.refusal.lock().unwrap() = None;
             *self.hooks.lock().unwrap() = Hooks::Installing;
             self.window_epoch.fetch_add(1, Ordering::AcqRel);
             self.connecting.store(false, Ordering::Release);
@@ -308,6 +386,12 @@ impl Connection {
             }
         });
     }
+}
+
+fn refusal_script(pin: &Url, reason: &str) -> String {
+    let origin = serde_json::to_string(&pin.origin().ascii_serialization()).expect("string");
+    let reason = serde_json::to_string(reason).expect("string");
+    format!("({})({origin}, {reason})", include_str!("daemon-notice.js"))
 }
 
 #[cfg(test)]

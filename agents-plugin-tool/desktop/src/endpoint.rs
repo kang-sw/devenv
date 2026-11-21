@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{
     ffi::OsStr,
     fs::File,
@@ -30,11 +31,14 @@ struct Health {
     port: Option<u16>,
     #[serde(default)]
     started_at: Option<Value>,
+    #[serde(default)]
+    version: String,
 }
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Daemon {
     pub url: Url,
+    pub version: String,
     root: PathBuf,
     endpoint: Endpoint,
     started_at: Option<Value>,
@@ -94,7 +98,7 @@ fn agent(timeout: u64) -> ureq::Agent {
         .into()
 }
 
-fn check_health(ep: &Endpoint) -> Result<(Url, Option<Value>)> {
+fn check_health(ep: &Endpoint) -> Result<(Url, Health)> {
     let root = Url::parse(&format!("http://127.0.0.1:{}/", ep.port))
         .map_err(|_| "Invalid dashboard URL")?;
     let mut response = agent(2)
@@ -116,24 +120,25 @@ fn check_health(ep: &Endpoint) -> Result<(Url, Option<Value>)> {
     {
         return Err("Health response is not from the recorded dashboard daemon");
     }
-    Ok((root, health.started_at))
+    Ok((root, health))
 }
 
 pub fn discover_at(root: &Path) -> Result<Daemon> {
     let ep = read_endpoint(root)?;
-    let (url, started_at) = check_health(&ep)?;
+    let (url, health) = check_health(&ep)?;
     if read_endpoint(root)? != ep {
         return Err("Dashboard endpoint changed; retry discovery");
     }
     Ok(Daemon {
         url,
+        version: health.version,
         root: root.to_path_buf(),
         endpoint: ep,
-        started_at,
+        started_at: health.started_at,
     })
 }
 
-pub fn discover() -> Result<Daemon> {
+pub fn active_cache_root() -> Result<PathBuf> {
     let cwd = std::env::current_dir().map_err(|_| "Cannot resolve working directory")?;
     let home = std::env::var_os("HOME")
         .filter(|value| !value.is_empty())
@@ -144,17 +149,18 @@ pub fn discover() -> Result<Daemon> {
                 None
             }
         });
-    let root = cache_root(
+    cache_root(
         std::env::var_os("WS_CACHE_HOME").as_deref(),
         home.as_deref(),
         &cwd,
-    )?;
-    discover_at(&root)
+    )
 }
 
 impl Daemon {
     pub fn is_healthy(&self) -> bool {
-        check_health(&self.endpoint).is_ok_and(|(_, started_at)| started_at == self.started_at)
+        check_health(&self.endpoint).is_ok_and(|(_, health)| {
+            health.started_at == self.started_at && health.version == self.version
+        })
     }
 
     pub fn is_current(&self) -> bool {
@@ -162,9 +168,8 @@ impl Daemon {
             && read_endpoint(&self.root).is_ok_and(|endpoint| endpoint == self.endpoint)
     }
 
-    fn auth_json(&self, route: &str, body: Value) -> Result<Option<Value>> {
-        let initial = read_endpoint(&self.root)?;
-        let token = initial
+    fn token(&self) -> Result<&str> {
+        self.endpoint
             .token
             .as_ref()
             .and_then(Value::as_str)
@@ -173,7 +178,23 @@ impl Daemon {
                     && s.bytes()
                         .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
             })
-            .ok_or("Dashboard identity or credential changed; retry")?;
+            .ok_or("Dashboard identity or credential changed; retry")
+    }
+
+    pub fn predecessor(&self) -> Result<Value> {
+        let hash = format!("{:x}", Sha256::digest(self.token()?.as_bytes()));
+        Ok(json!({
+            "port": self.endpoint.port,
+            "pid": self.endpoint.pid,
+            "started_at": self.started_at.as_ref().and_then(Value::as_str).unwrap_or_default(),
+            "version": self.version,
+            "token_sha256": hash,
+        }))
+    }
+
+    fn auth_json(&self, route: &str, body: Value) -> Result<Option<Value>> {
+        let initial = read_endpoint(&self.root)?;
+        let token = self.token()?;
         if initial != self.endpoint {
             return Err("Dashboard identity or credential changed; retry");
         }

@@ -1,10 +1,24 @@
 # Werkschaft Tauri shell
 
-The macOS and Windows shell attaches to the dashboard at its verified
-`http://127.0.0.1:<port>/` origin. It discovers the endpoint under
-`WS_CACHE_HOME` or the default ws cache root. Use **Connection → Retry**
-(`Cmd+R` on macOS, `Ctrl+R` on Windows) after starting the dashboard or
-changing the endpoint. Closing the shell leaves the daemon running.
+Werkschaft opens the dashboard at its verified `http://127.0.0.1:<port>/`
+origin. It discovers the endpoint under `WS_CACHE_HOME` or the default ws
+cache root and starts the bundled daemon when needed. A newer numeric core
+replaces an older daemon, including across minors. **Connection → Replace
+daemon (same core)** also allows an equal-core swap. **Connection → Retry**
+(`Cmd+R` on macOS, `Ctrl+R` on Windows) repeats discovery and connection.
+Update and restart plugins on the previous minor after a cross-minor swap.
+
+macOS requires Python 3 for daemon start and replacement. Windows prefers an
+independent daemon process and retries inside the containing Windows job if
+the OS reports access denied for breakaway. Closing the shell leaves the
+daemon running. A job-lifetime daemon ends when its containing job is torn
+down.
+
+For development, set `WERKSCHAFT_DAEMON_ROOT` to an absolute path to a prepared
+candidate directory before launching Tauri. It has the same layout as the
+bundled input and needs the current daemon starter. A development candidate
+may differ from its runtime contract by patch version. The override belongs
+to the Tauri launch environment.
 
 ## Build and run
 
@@ -57,6 +71,8 @@ belong to Phase 3. Raw Cargo and Tauri builds do not prepare a packaged daemon;
 use `build:package` for the validated resource layout.
 
 Run the packaging checks with `node --test scripts/test-package.cjs`.
+Run the notice browser test with `WS_PLAYWRIGHT_MODULE` pointing to
+Playwright and `node --test scripts/test-daemon-notice.cjs`.
 
 `scripts/build-slot.py` remains the bounded debug build runner from the
 attach-only research. Its process-group regressions can run without Cargo:
