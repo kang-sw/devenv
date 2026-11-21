@@ -885,7 +885,7 @@
   // keeps scrolling while the pointer stays there.
   function rdOver(x, y) {
     var d = rdrag, list = $("rlist");
-    if (!d || !d.on) return;
+    if (!d || !d.on || d.releaseTimer) return;
     d.x = x;
     d.y = y;
     var lr = list ? list.getBoundingClientRect() : null;
@@ -919,7 +919,7 @@
   function rdScroll() {
     rdRaf = 0;
     var d = rdrag, list = $("rlist");
-    if (!d || !d.on || !d.edge || !list) return;
+    if (!d || !d.on || d.releaseTimer || !d.edge || !list) return;
     var was = list.scrollTop;
     list.scrollTop += d.edge * 8;
     if (list.scrollTop === was) return;
@@ -960,8 +960,14 @@
   function rdMove(e) {
     var d = rdrag;
     if (!d || e.pointerId !== d.id) return;
-    // A mouse move with the button up is a release this page never heard.
-    if (e.pointerType === "mouse" && e.buttons !== undefined && (e.buttons & 1) === 0) { rdEnd(null); return; }
+    // Trackpads can clear the button bit just before delivering pointerup.
+    if (e.pointerType === "mouse" && e.buttons !== undefined && (e.buttons & 1) === 0) {
+      if (!d.on) { rdEnd(null); return; }
+      if (!d.releaseTimer) d.releaseTimer = setTimeout(function () { if (rdrag === d) rdEnd(null); }, 100);
+      return;
+    }
+    clearTimeout(d.releaseTimer);
+    d.releaseTimer = 0;
     if (!d.on) {
       if (Math.abs(e.clientX - d.x0) <= RD_SLOP && Math.abs(e.clientY - d.y0) <= RD_SLOP) return;
       // A touch on a bar that moves before its hold is a scroll.
@@ -983,6 +989,8 @@
   function rdEnd(e) {
     var d = rdrag;
     if (!d || (e && e.pointerId !== d.id)) return;
+    clearTimeout(d.releaseTimer);
+    d.releaseTimer = 0;
     if (d.on && !d.item.isConnected) rdOver(d.x, d.y);
     rdrag = null;
     clearTimeout(d.timer);
@@ -1045,6 +1053,7 @@
     doc.addEventListener("pointermove", rdMove);
     doc.addEventListener("pointerup", rdEnd);
     doc.addEventListener("pointercancel", rdEnd);
+    doc.addEventListener("keydown", function (e) { if (e.key === "Escape") rdEnd(null); });
     // A press the window loses (another window took the focus) ends there,
     // so a release it never hears does not hold the rail's swaps. Focusing
     // a session iframe also blurs the parent window while the document

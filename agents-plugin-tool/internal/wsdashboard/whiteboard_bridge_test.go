@@ -243,6 +243,7 @@ func TestBoardHistoryHooksSurroundSSESwap(t *testing.T) {
 	// Tree deltas and full fallbacks must use their own lifecycle, never history.
 	runNode(t, "board and tree swap ordering", animationFrameHarness+`
 var bad = [], log = [];
+function syncSpinnerPhases() {}
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
 var main = {scrollTop:400, wbScrollOwner:true}, pins = {scrollTop:500, wbScrollOwner:true}, outer = {scrollTop:40}, treePane = {scrollTop:80};
 var oldMain = {name:"old-main", scroller:main}, oldPin = {name:"old-pin", scroller:pins};

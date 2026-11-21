@@ -310,6 +310,7 @@ html:not([data-sysopen]) .rail .rsleep { display: none; }
 .rail .rs, .rail .wsbar, .rail .wthd { -webkit-touch-callout: none; }
 .rail .rs.rdrag, .rail .rwt.rdrag, .rail .rws.rdrag { opacity: .45; }
 .rdragging, .rdragging * { cursor: grabbing !important; }
+.rdragging #rail, .rdragging #rlist, .rdragging #rail .rs { touch-action: none; user-select: none; }
 .rdrop { position: fixed; z-index: 46; height: 2px; border-radius: 1px; background: var(--wb-primary); pointer-events: none; }
 /* a live row's grip, the only part of a row that drags (the rest is its
    link): shown while the row is hovered or focused, always on a touch

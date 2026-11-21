@@ -73,7 +73,7 @@ async function indicator(page) {
 // (x, y) given by at() (read after the press, as rows do not move during a
 // drag), optionally holds, checks the indicator, shoots, and releases. It
 // answers the indicator and the layout post's answer (null: none posted).
-async function drag(page, from, { grip = false, at, hold = 60, shot = '' }) {
+async function drag(page, from, { grip = false, at, hold = 60, shot = '', releaseMove = false, lost = false, cancel = '' }) {
   const fb = await box(page, row(from) + (grip ? ' .drgrip' : ' .rid'));
   const sx = fb.x + fb.width / 2, sy = fb.y + Math.min(fb.height / 2, 10);
   await page.mouse.move(sx, sy);
@@ -84,9 +84,18 @@ async function drag(page, from, { grip = false, at, hold = 60, shot = '' }) {
   await page.mouse.move(tx, ty, { steps: 10 });
   await page.waitForTimeout(hold);
   const ind = await indicator(page);
+  const styles = await page.evaluate(() => ['#rail', '#rlist', '#r-rail .rs'].map(s => { const c = getComputedStyle(document.querySelector(s)); return [c.touchAction, c.userSelect]; }));
+  assert.deepEqual(styles, [['none', 'none'], ['none', 'none'], ['none', 'none']], 'active drag suppresses selection and touch gestures');
   if (shot && shots) await page.screenshot({ path: path.join(shots, shot) });
   const h1 = await page.evaluate(() => window.__swaps || 0);
   const resp = page.waitForResponse((r) => r.url().endsWith('/rail/layout') && r.request().method() === 'POST', { timeout: 1500 }).then((r) => r.json()).catch(() => null);
+  if (releaseMove) {
+    await page.evaluate(() => document.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, pointerType: 'mouse', buttons: 0, clientX: 0, clientY: 0, bubbles: true })));
+    assert.deepEqual(await indicator(page), ind, 'release transition keeps the visible target');
+  }
+  if (lost) await page.waitForTimeout(180);
+  if (cancel === 'escape') await page.keyboard.press('Escape');
+  if (cancel === 'pointercancel') await page.evaluate(() => document.dispatchEvent(new PointerEvent('pointercancel', { pointerId: 1, pointerType: 'mouse', bubbles: true })));
   await page.mouse.up();
   const v = await resp;
   await page.waitForTimeout(250);
@@ -110,6 +119,24 @@ async function main() {
   await showRail(page);
   await reset(page);
 
+  // A trackpad's button-up move can precede pointerup; the last line wins.
+  let track = await drag(page, 'discuss', { at: at(page, 'cirow', 0.75), releaseMove: true });
+  assert.equal(track.post && track.post.applied, true, 'release transition commits');
+  assert.equal(await order(page), `mainlead ${KIDS} cirow discuss sosterm`);
+  await reset(page);
+  await watchSwaps(page);
+  track = await drag(page, 'discuss', { at: at(page, 'cirow', 0.75), releaseMove: true, lost: true });
+  assert.equal(track.post, null, 'missing pointerup cancels');
+  assert.equal(await order(page), BASELINE);
+  assert.equal(await page.locator('html').evaluate(e => e.classList.contains('rdragging')), false, 'fallback releases drag');
+
+  for (const cancel of ['pointercancel', 'escape']) {
+    track = await drag(page, 'discuss', { at: at(page, 'cirow', 0.75), releaseMove: true, cancel });
+    assert.equal(track.post, null, `${cancel} does not drop`);
+    await showRail(page);
+    assert.equal(await order(page), BASELINE, `${cancel} leaves order intact`);
+  }
+
   // Downward: the first row after the third top-level row (cirow's lower
   // half), by the grip. The line is at cirow's bottom, where it lands.
   const cb = await box(page, row('cirow'));
@@ -120,6 +147,16 @@ async function main() {
   assert.equal(r.post && r.post.applied, true, 'down drop posted and applied');
   assert.equal(await order(page), `mainlead ${KIDS} cirow discuss sosterm`, 'down: first lands after the third');
   if (shots) await page.screenshot({ path: path.join(shots, 'after-drop-down.png') });
+
+  if (shots) {
+    for (const theme of ['dark', 'light']) {
+      await page.locator('.settings-toggle').first().click();
+      await page.locator(`.gmenu [data-theme-set="${theme}"]`).click();
+      await page.locator('#settings-close').click();
+      await reset(page);
+      await drag(page, 'discuss', { at: at(page, 'cirow', 0.75), shot: `drag-line-${theme}.png` });
+    }
+  }
 
   // Upward: the last row before the first (discuss's upper half).
   await reset(page);
@@ -135,10 +172,19 @@ async function main() {
   r = await drag(page, 'discuss', { at: async () => { const b = await box(page, row('sosterm')); return [b.x + b.width / 2, b.y + 0.5]; } });
   assert.equal(r.post && r.post.applied, true, 'boundary drop applied');
   assert.equal(await order(page), `mainlead ${KIDS} cirow discuss sosterm`, 'boundary: lands between cirow and sosterm');
+  // Exercise an actual empty seam beneath the expanded children, rather than
+  // just a boundary pixel that still hits a row.
+  await reset(page);
+  await page.addStyleTag({ content: '#r-rail .rkids { margin-bottom: 4px !important }' });
+  r = await drag(page, 'discuss', { at: async () => { const b = await box(page, row('cirow')); return [b.x + b.width / 2, b.y - 2]; } });
+  assert.notEqual(r.ind.line, null, 'gap retains a visible insertion line');
+  assert.equal(r.post && r.post.applied, true, 'gap drop applied');
+  assert.equal(await order(page), `mainlead ${KIDS} discuss cirow sosterm`, 'gap lands after the expanded unit');
+  await reset(page);
   // Below the last row, in the group's empty space: after the last.
   r = await drag(page, 'mainlead', { at: async () => { const b = await box(page, row('sosterm')); return [b.x + b.width / 2, b.y + b.height + 6]; } });
   assert.equal(r.post && r.post.applied, true, 'below-last drop applied');
-  assert.equal(await order(page), `cirow discuss sosterm mainlead ${KIDS}`, 'below the last row: lands last, children along');
+  assert.equal(await order(page), `discuss cirow sosterm mainlead ${KIDS}`, 'below the last row: lands last, children along');
 
   // From the row body, not the grip; a drop over the row itself or its
   // own slot (the row above's lower half) posts nothing.
@@ -227,6 +273,11 @@ async function live(browser) {
   await showRail(page);
   await reset(page);
   await watchSwaps(page);
+  const beforeLost = await page.evaluate(() => window.__swaps);
+  const lost = await drag(page, 'discuss', { at: at(page, 'cirow', 0.75), releaseMove: true, lost: true });
+  assert.equal(lost.post, null, 'lost release cancels under live churn');
+  await page.waitForTimeout(700);
+  assert.ok(await page.evaluate(() => window.__swaps) > beforeLost, 'fallback releases held rail swaps');
   const M = `mainlead ${KIDS}`;
   // Each step aims at a place between two top-level units as the owner
   // sees it, and starts from the order the step before leaves. Steps 1 and
