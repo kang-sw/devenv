@@ -1,8 +1,13 @@
 package wspackage
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +18,12 @@ func TestDevCheckout(t *testing.T) {
 	checkout := t.TempDir()
 	t.Setenv(EnvDevCheckout, checkout)
 	t.Setenv("WS_RSRC_ROOT", t.TempDir()) // Never a fallback or selector.
+	if err := os.MkdirAll(filepath.Join(checkout, "agents-plugin-pi"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "agents-plugin-pi", ConfigManifestFile), []byte("pi"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	for name, dir := range map[string]string{"ws": "agents-plugin", "wsflow": "agents-plugin-wsflow"} {
 		root := filepath.Join(checkout, dir)
 		if err := os.MkdirAll(root, 0755); err != nil {
@@ -28,6 +39,10 @@ func TestDevCheckout(t *testing.T) {
 		data, err := fs.ReadFile(got, "runtime.json")
 		if err != nil || string(data) != name {
 			t.Fatalf("%s: %q, %v", name, data, err)
+		}
+		data, err = fs.ReadFile(got, PiConfigManifestFile)
+		if err != nil || string(data) != "pi" {
+			t.Fatalf("%s pi: %q, %v", name, data, err)
 		}
 	}
 	for _, name := range []string{"", "pi", "../ws", "WS"} {
@@ -48,6 +63,70 @@ func TestDevCheckout(t *testing.T) {
 	_, want := embedded(assets, "ws")
 	if (got == nil) != (want == nil) {
 		t.Fatalf("override affected Embedded: %v / %v", got, want)
+	}
+}
+
+func TestManifestAssetsStandalone(t *testing.T) {
+	if os.Getenv("WS_PACKAGE_MANIFEST_CHILD") == "1" {
+		var expected map[string]string
+		if err := json.Unmarshal([]byte(os.Getenv("WS_PACKAGE_MANIFEST_HASHES")), &expected); err != nil {
+			t.Fatal(err)
+		}
+		for _, product := range []string{"ws", "wsflow"} {
+			root, err := Open(product)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{ConfigManifestFile, AgYConfigManifestFile, DashboardConfigManifestFile, PiConfigManifestFile} {
+				data, err := fs.ReadFile(root, name)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := fmt.Sprintf("%x", sha256.Sum256(data)); got != expected[product+"/"+name] {
+					t.Fatalf("%s/%s: hash %s", product, name, got)
+				}
+			}
+		}
+		return
+	}
+	if _, err := fs.Stat(assets, "generated/inventory.json"); err != nil {
+		t.Skip("package assets not generated")
+	}
+	expected := make(map[string]string)
+	for product, dir := range map[string]string{"ws": "agents-plugin", "wsflow": "agents-plugin-wsflow"} {
+		for _, name := range []string{ConfigManifestFile, AgYConfigManifestFile, DashboardConfigManifestFile, PiConfigManifestFile} {
+			sourceDir, sourceName := dir, name
+			if name == PiConfigManifestFile {
+				sourceDir, sourceName = "agents-plugin-pi", ConfigManifestFile
+			}
+			data, err := os.ReadFile(filepath.Join("..", "..", "..", sourceDir, sourceName))
+			if err != nil {
+				t.Fatal(err)
+			}
+			root, err := Embedded(product)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := fs.ReadFile(root, name)
+			if err != nil || !bytes.Equal(got, data) {
+				t.Fatalf("%s/%s differs from canonical input: %v", product, name, err)
+			}
+			expected[product+"/"+name] = fmt.Sprintf("%x", sha256.Sum256(data))
+		}
+	}
+	hashes, err := json.Marshal(expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(executable, "-test.run=^TestManifestAssetsStandalone$")
+	cmd.Dir = t.TempDir()
+	cmd.Env = append(os.Environ(), EnvDevCheckout+"=", "WS_PACKAGE_MANIFEST_CHILD=1", "WS_PACKAGE_MANIFEST_HASHES="+string(hashes))
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("standalone: %v\n%s", err, output)
 	}
 }
 
