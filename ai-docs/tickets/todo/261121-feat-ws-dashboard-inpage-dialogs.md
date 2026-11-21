@@ -2,6 +2,8 @@
 title: "ws 대시보드 확인 대화상자와 초안 보호의 페이지 내 전환"
 related:
   261117-research-werkschaft-tauri-shell-revisit: "Shell viability research and the later Tauri migration decision"
+sage-review-design: blocked
+sage-review-completeness: blocked
 ---
 
 # Move dashboard confirmations and draft protection into the page
@@ -116,6 +118,25 @@ inventory was checked at `1b8605ab4`.
 | risk.test | high | Mixed shell/daemon versions, async navigation races, and packaged platform entry points require broad coverage. |
 | risk.security_or_contract | high | Login credentials, pinned-origin messaging, mixed-version persistence, and action contracts must remain safe. |
 
+## Open Decision Queue
+
+Last ID: (2046)
+
+(2046) [open] [policy] After reopen, how is a send whose POST outcome is unknown recovered?
+
+- The draft writer keeps the pre-send snapshot while an outbox entry is
+  pending; the daemon returns an ID only after creating the inbox entry, so an
+  accepted send with a lost reply and a lost POST look identical. Applies to
+  normal sends and slash-command POSTs; later queued or unsent input is kept
+  either way. (Design review 2026-11-21, issue resolution: missing.)
+- a. Keep the attempt visible in the composer marked as delivery-unknown, with
+  no automatic replay; the user resends or discards. Client-only, T0.
+- b. Add a per-send idempotency key the daemon deduplicates, and replay
+  automatically on reopen. An old daemon ignores the key, so mixed versions can
+  still duplicate.
+> Recommend a: prevents both duplicate and lost sends without an inbox API
+> change; b still duplicates against an old daemon.
+
 ## Phases
 
 ### Phase 1: Replace browser confirmation calls with one in-page dialog
@@ -212,3 +233,18 @@ Settings controls, and replacement feedback. Verify that release builds still
 open DevTools through their menu and shortcuts, the Copy Browser Login Link menu
 item still exists and mints usable login links, and refusal feedback reaches
 users in mixed-version operation.
+
+## Blocked (2026-11-21)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | Windows packaged acceptance still requires the retired dialog | critical | autonomous |
+| 2 | An accepted send and a lost POST look identical after reopen | important | missing |
+| 3 | Gate native close retirement on the loaded renderer | important | autonomous |
+
+### Completeness Reviewer — pass
+
+| # | Title | Severity |
+|---|-------|----------|
