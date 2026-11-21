@@ -42,9 +42,8 @@ acknowledgment) and is carried forward over the per-session audit ring.
      head plus tail of an oversized body. The full-envelope route returns
      `stored_trunc` unchanged. `range` offsets address the stored bytes, so
      they page through head, marker and tail, and never reach the omitted
-     middle. A summary's `in_bytes`/`out_bytes` states whether it reports
-     the stored or the original length, fixed in Phase 1 (the original length
-     is available from `stored_trunc`).
+     middle. (2011) records the lead's choice for the summary fields
+     `in_bytes` and `out_bytes`. `stored_trunc` carries the original length.
    - `GET /s/<id>/audit/search?q=<text>&regex=0|1&case=0|1&kinds=&n=` searches
      the stored `in` and `out` of the whole conversation, newest first. It
      returns `{hits: [{event_id, kind, field, line_no, line, call_id,
@@ -106,18 +105,11 @@ acknowledgment) and is carried forward over the per-session audit ring.
 
 ## Open Decision Queue
 
-(2011) [open] [product] Which byte lengths should event summaries return in
-`in_bytes` and `out_bytes` for bodies with `stored_trunc` (Decision 1)?
+Last ID: (2012)
 
-- a. Stored lengths, which describe the bytes available to `range`.
-- b. Original lengths, which describe the full pre-cap bodies.
+(2011) [open] [technical] The lead chose stored lengths over original lengths in `in_bytes` and `out_bytes` - the fields describe what `range` can read, and `stored_trunc` flags truncation.
 
-(2012) [open] [product] When a session still has retained audit data, how
-should event or search paging handle a cursor whose position has been
-evicted under (1970)=a?
-
-- a. Return a stale-cursor response and have the caller restart paging.
-- b. Resume at the nearest retained boundary in the requested direction.
+(2012) [open] [technical] For an evicted event or search cursor when the session still has audit data ((1970)=a), the lead chose a stale-cursor response and caller restart over resuming at the nearest retained boundary - an explicit failure avoids silent gaps in an audit read.
 
 ## Phases
 

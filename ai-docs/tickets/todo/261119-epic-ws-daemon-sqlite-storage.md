@@ -105,7 +105,7 @@ file-touch and complexity gains:
 
 Child execution order is **not yet decided** (see `## Open questions`):
 
-- Planned: `wslive` (`snapshot.json`, `model-evidence/`, and optional `ring/` unification — transcript ring is already RAM plus append-only segments in `07843a2f2`, so remaining gain is `snapshot.json` and `model-evidence/` writes) -> SQLite
+- Planned: `wslive` (`snapshot.json`, `model-evidence/`) -> SQLite. Session transcripts use their Type 1 segment ring ((1960)=a).
 - Planned: `wsinbox` (`inbox/`, `drained/`, `answer-pending/`; `attachments/` kept as blob files) -> SQLite
 - Planned: `wswhiteboard` (2PC WAL folder -> one SQLite DB per board/session, lazily opened and idle-closed)
 - Planned: `wswhiteboard` embed HTML snapshot retirement (stop rendering `ai-docs/whiteboards/<id>-<hash>.html` per update; updates shipped whiteboard playbook embed rule and `whiteboard.update` `embed:` result field; mechanism open)
