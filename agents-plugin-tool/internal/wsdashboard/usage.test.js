@@ -62,7 +62,7 @@ async function chartFixture({ history = 'ok', resetKnown = true, stale = false, 
   return { env, pop, payload };
 }
 
-test('compact cards reuse crossing geometry, continuous endpoint gradients and excess-only fill', async () => {
+test('compact cards draw continuous paths, clipped excess and a current marker', async () => {
   const { pop } = await chartFixture({ weekly: true });
   const cards = nodes(pop.el, '.usage-window-card');
   assert.equal(cards.length, 2);
@@ -73,28 +73,17 @@ test('compact cards reuse crossing geometry, continuous endpoint gradients and e
   assert.equal(chart.attributes.role, 'img');
   assert.match(chart.attributes['aria-label'], /not prediction/);
   assert.equal(nodes(chart, '.usage-ideal')[0].attributes['stroke-dasharray'], '4 4');
-  const gradients = nodes(chart, 'linearGradient'), lines = nodes(chart, '.usage-actual');
-  assert.equal(gradients.length, 2); assert.equal(lines.length, 2);
-  const colors = gradients.map(g => g.children.map(s => s.attributes['stop-color']));
-  assert.deepEqual(colors, [
-    ['color-mix(in srgb, var(--wb-muted-fg), var(--wb-ok) 10%)', 'var(--wb-muted-fg)'],
-    ['var(--wb-muted-fg)', 'color-mix(in srgb, var(--wb-muted-fg), var(--wb-fail) 20%)']
-  ]);
-  gradients.forEach((g, i) => {
-    assert.equal(g.attributes.gradientUnits, 'userSpaceOnUse');
-    assert.equal(lines[i].attributes.stroke, 'url(#' + g.attributes.id + ')');
-    assert.equal(lines[i].attributes['stroke-width'], '2.3');
-    assert.equal(lines[i].attributes['stroke-dasharray'], '4 3');
-    assert.equal(nodes(lines[i], 'title')[0].textContent, 'no record (estimated)');
-  });
-  const polygons = nodes(chart, 'polygon'); assert.equal(polygons.length, 1);
-  assert.equal(polygons[0].attributes.fill, 'var(--wb-fail)');
-  assert.equal(polygons[0].attributes.opacity, '0.09');
-  const vertices = polygons[0].attributes.points.split(' ').map(p => p.split(',').map(Number));
-  assert.equal(vertices[0][0], vertices[3][0]); assert.equal(vertices[1][0], vertices[2][0]);
-  assert.equal(vertices[2][1], 88 - .4 * 76);
-  assert.notEqual(vertices[2][1], 88); // closes against ideal, never the zero axis
-  assert.equal(nodes(chart, '.usage-point').length, 2); // crossing is not a real dot
+  const lines = nodes(chart, '.usage-actual');
+  assert.ok(lines.length >= 1);
+  assert.ok(lines.every(line => line.tagName === 'path' && line.attributes.d.startsWith('M')));
+  assert.equal(nodes(chart, 'linearGradient').length, 0);
+  const clip = nodes(chart, 'clipPath')[0];
+  assert.equal(nodes(clip, 'polygon')[0].attributes.points, '24,88 270,12 270,0 24,0');
+  for (const area of nodes(chart, '.usage-excess')) {
+    assert.equal(area.attributes.fill, 'var(--wb-fail)');
+    assert.equal(area.attributes['clip-path'], 'url(#' + clip.attributes.id + ')');
+  }
+  assert.equal(nodes(chart, '.usage-point').length, 1);
   assert.equal(nodes(chart, '.usage-point-current')[0].attributes.r, '4');
   assert.ok(!pop.el.textContent.includes('<safe-source>'));
 });
@@ -107,9 +96,9 @@ test('legend and current-time guide explain the chart without advancing stale ob
   const start = Date.UTC(2026, 10, 15), duration = 5 * 3600000;
   const assertGuide = now => {
     const chart = pop.el.querySelector('.usage-chart'), guide = chart.querySelector('.usage-now');
-    assert.equal(nodes(chart, '.usage-point').length, 2);
+    assert.equal(nodes(chart, '.usage-point').length, 1);
     assert.equal(chart.querySelector('.usage-point-current').attributes.cx, String(24 + .4 * 246));
-    assert.equal(nodes(chart, '.usage-actual').at(-1).attributes.x2, String(24 + .4 * 246));
+    assert.match(nodes(chart, '.usage-actual').at(-1).attributes.d, /L122\.4 42\.4$/);
     const x = Number(guide.attributes.x1);
     assert.ok(Math.abs(x - (24 + (now - start) / duration * 246)) < 1e-9);
     assert.equal(guide.attributes.x2, guide.attributes.x1);
@@ -173,15 +162,18 @@ test('all eleven locales localize popup labels, chart titles, accessible text an
   assert.match(css, /\.usage-help:hover \.usage-chart-legend, \.usage-help:focus-within \.usage-chart-legend \{ display: grid; \}/);
 });
 
-test('baseline equality is muted, below-baseline charts have no excess fill, and short intervals are solid', async () => {
+test('baseline equality is muted, excess is clipped to above baseline, and short intervals are solid', async () => {
   for (const percents of [[20, 40], [10, 20], [40, 60]]) {
     const { env, pop, payload } = await chartFixture({ percents });
     const chart = pop.el.querySelector('.usage-chart');
-    assert.equal(nodes(chart, '.usage-excess').length, percents[0] === 40 ? 1 : 0);
-    if (percents[0] === 20) assert.ok(nodes(chart, 'stop').every(s => s.attributes['stop-color'] === 'var(--wb-muted-fg)'));
+    const clip = nodes(chart, 'clipPath')[0];
+    assert.ok(nodes(chart, '.usage-excess').every(area => area.attributes['clip-path'] === 'url(#' + clip.attributes.id + ')'));
+    if (percents[0] === 20) assert.ok(nodes(chart, '.usage-actual').every(line => line.attributes.stroke === 'var(--wb-muted-fg)'));
     payload.history.samples[0].asOf = payload.entries[0].asOf - 600000;
     env.ticks[0].fn(); await flush();
     assert.ok(nodes(pop.el, '.usage-actual').every(n => !n.attributes['stroke-dasharray']));
+    assert.ok(nodes(pop.el, '.usage-excess').length > 0);
+    assert.ok(nodes(pop.el, '.usage-excess').every(area => area.attributes['clip-path']));
   }
 });
 
@@ -190,7 +182,7 @@ test('missing, empty and unavailable history are truthful current-only fallbacks
     const { pop } = await chartFixture({ history });
     assert.equal(nodes(pop.el, '.usage-point').length, 1);
     assert.equal(nodes(pop.el, '.usage-actual').length, 0);
-    assert.equal(nodes(pop.el, 'polygon').length, 0);
+    assert.equal(nodes(pop.el, '.usage-excess').length, 0);
     assert.equal(nodes(pop.el, '.usage-ideal').length, 1);
     assert.equal(pop.el.querySelector('.usage-history-state'), null);
     const card = pop.el.querySelector('.usage-window-card');
@@ -200,11 +192,12 @@ test('missing, empty and unavailable history are truthful current-only fallbacks
   }
 });
 
-test('unknown resets have isolated real dots without baseline, gradients or connected lines', async () => {
+test('unknown resets show only the current dot without baseline or connected lines', async () => {
   const { pop } = await chartFixture({ resetKnown: false });
-  assert.equal(nodes(pop.el, '.usage-point').length, 2);
-  for (const selector of ['.usage-ideal', '.usage-actual', '.usage-now', '.usage-now-label', 'linearGradient', 'polygon']) assert.equal(nodes(pop.el, selector).length, 0);
-  assert.match(pop.el.textContent, /Resets unknown/);
+  assert.equal(nodes(pop.el, '.usage-point').length, 1);
+  for (const selector of ['.usage-ideal', '.usage-actual', '.usage-now', '.usage-now-label', 'linearGradient', '.usage-excess']) assert.equal(nodes(pop.el, selector).length, 0);
+  assert.equal(pop.el.querySelector('.usage-reset').textContent, '↻ unknown');
+  assert.match(pop.el.querySelector('.usage-reset').title, /Resets unknown/);
   assert.match(pop.el.querySelector('.usage-window-card').title, /reset unknown, isolated observations only/);
 });
 
@@ -219,7 +212,7 @@ test('gradient ids remain unique across cards, redraws and repeated mounts', asy
   const all = [...first, ...second, ...third]; assert.equal(new Set(all).size, all.length);
 });
 
-test('stale cards neutralize only the current marker and freeze pace without recoloring history', async () => {
+test('stale cards neutralize the current run and freeze pace', async () => {
   const { env, pop } = await chartFixture({ stale: true, percents: [10, 20] });
   const card = pop.el.querySelector('.usage-window-card');
   assert.ok(card.className.includes('usage-stale'));
@@ -227,11 +220,11 @@ test('stale cards neutralize only the current marker and freeze pace without rec
   assert.equal(card.querySelector('.usage-pace').textContent, '(−20%)');
   assert.match(card.attributes['aria-label'], /stale, pace at last observation/);
   assert.equal(card.querySelector('.usage-point-current').attributes.fill, 'var(--wb-muted-fg)');
-  assert.match(nodes(card, 'stop')[0].attributes['stop-color'], /--wb-ok/);
+  assert.ok(nodes(card, '.usage-actual').every(line => line.attributes.stroke === 'var(--wb-muted-fg)'));
   env.now(Date.UTC(2026, 10, 15) + 3 * 3600000); env.ticks[0].fn(); await flush();
   assert.equal(pop.el.querySelector('.usage-pace').textContent, '(−20%)');
   const css = fs.readFileSync(__dirname + '/assets/usage.css', 'utf8');
-  assert.match(css, /\.usage-pop \{ width: 340px;/);
+  assert.match(css, /\.usage-pop \{[^}]*width: min\(988px, calc\(100vw - 16px\)\)/);
   assert.match(css, /\.usage-stale \.usage-number \{ text-decoration: underline dotted;/);
   assert.match(css, /\.usage-stale, \.usage-stale \.usage-pace \{ color: var\(--wb-muted-fg\); \}/);
 });
