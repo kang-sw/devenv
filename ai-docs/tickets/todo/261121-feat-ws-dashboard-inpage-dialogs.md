@@ -77,19 +77,9 @@ Last ID: (2025)
 
 > Recommendation: a, once recovery is verified for all current guard cases. It gives browser and desktop users the same recoverable drafts and removes the shell's close-confirmation dependency.
 
-(2021) [open] [policy] Should packaged release builds expose an Electron DevTools toggle?
+(2021) [open] [announced] Remove the release-build DevTools menu entry and shortcuts, and keep development tooling. Owner direction on the whiteboard (1955) named DevTools among the shell clutter to clear.
 
-- a. Remove the release View menu entry and associated shortcuts, keep development tooling, and use the browser dashboard for ordinary inspection.
-- b. Keep the release menu entry and shortcuts behind an opt-in setting that defaults off, and retain the macOS and Windows handling while enabled.
-
-> Recommendation: a. It removes the release shell's menu and shortcut handling, and the dashboard's browser login link provides an inspection path.
-
-(2022) [open] [policy] Where should the explicit daemon-replacement refusal appear?
-
-- a. Keep the Electron warning modal with its Keep connection action.
-- b. Show an in-page toast or status that explains the refusal and that the existing connection was kept. Deliver it where the result is visible, including across reconnect or when the dashboard cannot render it.
-
-> Recommendation: b. The daemon controller already keeps the connection on refusal, so the warning can communicate the outcome without blocking it.
+(2022) [open] [technical] Use an in-page toast or status for daemon-replacement refusal over the Electron warning modal. The controller already keeps the connection, so the notice reports the outcome without gating it and can carry forward to Tauri.
 
 (2023) [open] [policy] Does removing the native Copy Browser Login Link menu item count as removing functionality?
 
@@ -98,12 +88,7 @@ Last ID: (2025)
 
 > Recommendation: a. Both actions mint login links, and only the native action has the observed machine-authenticated root fallback.
 
-(2024) [open] [policy] What should protect drafts on reloads or top-level navigation outside the iframe swap path?
-
-- a. Retain the ordinary browser `beforeunload` fallback and preserve Electron draft protection for reload or navigation through the approved close design, including mixed-version pages.
-- b. Retire the fallback for those paths with the iframe dependency after verifying equivalent draft recovery on reload and navigation.
-
-> Recommendation: a. The approved in-page swap can ship while existing browser protection is still needed by callers outside that path.
+(2024) [open] [technical] Keep the browser `beforeunload` fallback for reloads and top-level navigation outside the iframe swap over retiring it. It protects callers outside the swap path, and retirement requires a separate draft-recovery proof.
 
 (2025) [open] [technical] Use the existing `rdeldlg` styling for the shared confirmation helper over introducing a separate modal style. The worktree-delete dialog already provides a labeled shell-independent modal and handles focus around rail redraws (`agents-plugin-tool/internal/wsdashboard/assets/dashboard-rail-popovers.js:875-895`, `agents-plugin-tool/internal/wsdashboard/assets/dashboard-rail-popovers.js:1017-1034`, `agents-plugin-tool/internal/wsdashboard/assets/dashboard-rail.css:560-565`).
 
@@ -191,13 +176,13 @@ Use the release DevTools, daemon notice, and login-link decisions in
   duplicate. Preserve existing link and clipboard credential boundaries and
   compatibility with the old optional login-copied hook.
 - **Daemon replacement refusal.** `main.js:366-376` shows the synchronous
-  warning for explicit replacement and logs automatic notices. If the owner
-  chooses in-page status, replace that warning with the settled presentation,
-  preserving the current connection and refusal reason when replacement is
-  unavailable. Test refusal while retaining the incumbent, successful
-  replacement, and automatic startup/recovery. Keep the existing pinned-origin
-  boundary if a shell-to-page signal is needed (`main.js:431-432`,
-  `dashboard-preload.js:4-32`).
+  warning for explicit replacement and logs automatic notices. Apply (2022)
+  after acknowledgement. Preserve the current connection and refusal reason
+  when replacement is unavailable, including when the dashboard reconnects
+  or cannot render the notice. Test refusal while retaining the incumbent,
+  successful replacement, and automatic startup/recovery. Keep the existing
+  pinned-origin boundary if a shell-to-page signal is needed
+  (`main.js:431-432`, `dashboard-preload.js:4-32`).
 
 Compare before/after screenshots of the affected View and Connection menus,
 Settings controls, and replacement feedback. Verify that the approved copy
