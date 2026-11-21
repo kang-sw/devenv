@@ -2545,8 +2545,6 @@
   "js.hud.state.idle": "Leerlauf (aktiv)",
   "js.hud.state.permission": "Freigabe",
   "js.hud.state.failed": "Fehlgeschlagen",
-  "js.hud.summary": "Fertig {0} · Peers {1}",
-  "js.hud.done": "Fertig {0}",
   "js.hud.deeper": "+{0} tiefer",
   "js.hud.hint.link": "Klick: /s/{0} öffnen",
   "js.hud.hint.details": "Klick: Baumdetails öffnen",

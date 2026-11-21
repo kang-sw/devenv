@@ -2545,8 +2545,6 @@
   "js.hud.state.idle": "대기 중",
   "js.hud.state.permission": "승인 대기",
   "js.hud.state.failed": "실패",
-  "js.hud.summary": "완료 {0} · 피어 {1}",
-  "js.hud.done": "완료 {0}",
   "js.hud.deeper": "+{0} 하위",
   "js.hud.hint.link": "클릭: 세션 이동 /s/{0}",
   "js.hud.hint.details": "클릭: 트리 상세 열기",

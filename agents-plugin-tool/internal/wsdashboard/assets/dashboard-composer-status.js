@@ -90,7 +90,6 @@
   // The streamed tree is authoritative; the compact HUD and full popover
   // project from it without moving tree nodes, preserving disclosure state.
   var agpop = $("agpop"), agpin = $("agpin"), agisland = $("agisland"), agcompact = $("agcompact"), agidle = $("agidle");
-  var agExpand = agcompact ? agcompact.querySelector(".hud-expand-btn") : null;
   var AGPIN_KEY = "ws.dashboard.agpop.pin", agFull = {}, agRunning = 0, agSeen = false, agDismissed = false;
   function agSize() {
     if (!agisland || agisland.hidden) return;
@@ -126,7 +125,7 @@
       agisland.hidden = !open && !agSeen;
       agisland.setAttribute("data-mode", open ? "full" : agRunning ? "compact" : "idle");
     }
-    [sbadge, agExpand, agidle].forEach(function (el) { if (el) el.setAttribute("aria-expanded", open ? "true" : "false"); });
+    [sbadge, agcompact, agidle].forEach(function (el) { if (el) el.setAttribute("aria-expanded", open ? "true" : "false"); });
     agSize();
     if (!open && agRunning && typeof hudScheduleConnectors === "function") hudScheduleConnectors();
   }

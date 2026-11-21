@@ -2545,8 +2545,6 @@
   "js.hud.state.idle": "待機中",
   "js.hud.state.permission": "承認待ち",
   "js.hud.state.failed": "失敗",
-  "js.hud.summary": "完了 {0} · ピア {1}",
-  "js.hud.done": "完了 {0}",
   "js.hud.deeper": "+{0} 下位",
   "js.hud.hint.link": "クリック: セッションを開く /s/{0}",
   "js.hud.hint.details": "クリック: ツリー詳細を開く",

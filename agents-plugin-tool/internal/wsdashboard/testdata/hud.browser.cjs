@@ -135,7 +135,6 @@ async function checkKeyedRebuild(frame) {
           rootsGap: rts.gap, kidsGap: ks.gap, kidsTop: ks.paddingTop,
           strokeWidth: ps.strokeWidth, pathD: path.getAttribute('d'),
           idleOpacity: Number(getComputedStyle(idleNode).opacity).toFixed(2),
-          summary: document.querySelector('#agcompact .hud-summary-text').textContent.trim(),
           nodeCount: document.querySelectorAll('#agcompact .hud-node').length,
           harnesses: [...new Set([...document.querySelectorAll('#agcompact .hud-emblem')].map(x => x.getAttribute('data-h')))].sort(),
           states: [...new Set([...document.querySelectorAll('#agcompact .hud-node')].map(x => x.getAttribute('data-state')))].sort()
@@ -150,12 +149,45 @@ async function checkKeyedRebuild(frame) {
       assert.equal(geom.strokeWidth, '1.15px');
       assert(geom.pathD.includes('M') && geom.pathD.includes('V') && geom.pathD.includes('H'), 'orthogonal SVG connector');
       assert.equal(geom.idleOpacity, '0.42');
-      assert.equal(geom.summary, '완료 2 · 피어 1');
       assert.equal(geom.nodeCount, 12);
       assert.deepEqual(geom.harnesses, ['agy', 'claude', 'codex', 'pi']);
       assert.deepEqual(geom.states, ['failed', 'holding', 'idle', 'permission', 'thinking', 'tool']);
+      const flat = await frame.evaluate(() => {
+        const panel = document.getElementById('agisland'), compact = document.getElementById('agcompact');
+        return { shadow: getComputedStyle(panel).boxShadow, border: getComputedStyle(panel).borderWidth,
+          background: getComputedStyle(panel).backgroundColor, footer: !!compact.querySelector('.hud-footer'),
+          expand: !!compact.querySelector('.hud-expand-btn'), text: compact.textContent };
+      });
+      assert.equal(flat.shadow, 'none'); assert.equal(flat.border, '0px');
+      assert.match(flat.background, /^color\(|^rgba\(/);
+      assert.equal(flat.footer, false); assert.equal(flat.expand, false); assert(!flat.text.includes('완료'));
+      if (shots) await frame.locator('#agisland').screenshot({ path: `${shots}/hud-compact-${scheme}.png` });
+      await frame.click('#agcompact', { position: { x: 2, y: 2 } });
+      await frame.locator('#agisland[data-mode="full"]').waitFor();
+      assert.equal(await frame.getAttribute('#agcompact', 'aria-expanded'), 'true');
+      if (shots && scheme === 'dark') await tab.screenshot({ path: `${shots}/hud-expanded-dark.png` });
+      await frame.click('#agclose');
+      await frame.locator('#agisland[data-mode="compact"]').waitFor();
+      await frame.locator('#agcompact').focus();
+      await frame.locator('#agcompact').press('Enter');
+      await frame.locator('#agisland[data-mode="full"]').waitFor();
+      await frame.click('#agclose');
+      await frame.locator('#agisland[data-mode="compact"]').waitFor();
       if (shots) await tab.screenshot({ path: `${shots}/compact-${scheme}.png` });
       if (shots) await frame.locator('#agcompact').screenshot({ path: `${shots}/hud-${scheme}.png` });
+
+      // Node and close controls keep their own actions in each theme.
+      await frame.click('#agcompact .hud-node[data-id="h3"]');
+      await frame.locator('#agisland[data-mode="full"]').waitFor();
+      assert.equal(await frame.locator('#agpop details[data-key="agent-h3"]').evaluate(el => el.open), true);
+      await frame.click('#agclose');
+      await frame.locator('#agisland[data-mode="compact"]').waitFor();
+      await frame.locator('#agcompact .hud-node[data-id="h2"]').hover();
+      await frame.locator('#agcompact .node-slot:has(.hud-node[data-id="h2"]) .hud-close').click();
+      const closeDialog = frame.locator('dialog.rdeldlg[open]');
+      await closeDialog.waitFor();
+      assert.equal(await frame.getAttribute('#agisland', 'data-mode'), 'compact');
+      await closeDialog.locator('.pbtn:not(.danger)').click();
 
       if (process.env.WS_SUBAGENT_SHOTS) {
         const dir = process.env.WS_SUBAGENT_SHOTS;
@@ -186,7 +218,7 @@ async function checkKeyedRebuild(frame) {
         await tab.screenshot({ path: `${dir}/close-modal-${scheme}.png` });
         await dialog.locator('.pbtn:not(.danger)').click();
         assert.equal(closes, 0, 'cancel sends no request');
-        await frame.locator('.hud-expand-btn').click();
+        await frame.click('#agcompact', { position: { x: 2, y: 2 } });
         await frame.locator('#agpop details[data-key="agent-h1"] > summary').click();
         await frame.waitForTimeout(500);
         const row = frame.locator('#agpop .agent:has(> details[data-key="agent-h2"])');
@@ -293,7 +325,7 @@ async function checkKeyedRebuild(frame) {
     }
 
     // 4. Idle pill when all agents are asleep/closed
-    {
+    for (const scheme of ['dark', 'light']) {
       await fetch(`${switcher}?s=idle`);
       const ctx = await b.newContext({ viewport: { width: 1280, height: 840 }, colorScheme: 'dark', locale: 'ko-KR' });
       await ctx.addCookies([{ name: 'ws_dashboard_lang', value: 'ko', url: base }]);
@@ -302,7 +334,13 @@ async function checkKeyedRebuild(frame) {
       const frame = await (await tab.locator('iframe.sframe.on').elementHandle()).contentFrame();
       await frame.locator('#agisland[data-mode="idle"]:not([hidden])').waitFor();
       await frame.waitForTimeout(250);
-      assert.equal(await frame.textContent('#agidle .agidle-label'), '완료 2');
+      await chooseTheme(tab, frame, scheme);
+      const idleStyle = await frame.evaluate(() => ({ shadow: getComputedStyle(document.getElementById('agisland')).boxShadow,
+        border: getComputedStyle(document.getElementById('agisland')).borderWidth, text: document.getElementById('agidle').textContent }));
+      assert.equal(idleStyle.shadow, 'none'); assert.equal(idleStyle.border, '0px'); assert(!idleStyle.text.includes('완료'));
+      if (shots) await frame.locator('#agisland').screenshot({ path: `${shots}/hud-idle-${scheme}.png` });
+      await frame.click('#agidle');
+      await frame.locator('#agisland[data-mode="full"]').waitFor();
       if (shots) await tab.screenshot({ path: `${shots}/idle-dark.png` });
       await ctx.close();
     }

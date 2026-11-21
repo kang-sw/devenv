@@ -2545,8 +2545,6 @@
   "js.hud.state.idle": "Простой (активен)",
   "js.hud.state.permission": "Разрешение",
   "js.hud.state.failed": "Ошибка",
-  "js.hud.summary": "Готово {0} · Пиры {1}",
-  "js.hud.done": "Готово {0}",
   "js.hud.deeper": "+{0} глубже",
   "js.hud.hint.link": "Клик: открыть /s/{0}",
   "js.hud.hint.details": "Клик: открыть детали дерева",

@@ -99,13 +99,11 @@ function node(tag = 'div', cls = '', text = '') {
 const pop = node('div', 'agpop'), pin = node('button', 'agpin'), island = node('div', 'agisland');
 const compact = node('div', 'agcompact'), idle = node('div', 'agidle'), badge = node('button', 'sbadge'), close = node('button', 'agclose');
 const hudCanvas = node('div', 'hud-canvas'), hudLines = node('svg', 'hud-lines'), hudRoots = node('div', 'hud-roots');
-const expandBtn = node('button', 'hud-expand-btn'), summaryText = node('span', 'hud-summary-text');
 const tooltip = node('div', 'hud-tooltip'), convo = node('div', 'convo');
 tooltip.hidden = true; pop.hidden = true;
 convo.getBoundingClientRect = () => ({ left: 0, top: 0, right: 640, bottom: 480, width: 640, height: 480 });
-expandBtn.appendChild(summaryText);
 hudCanvas.appendChild(hudLines); hudCanvas.appendChild(hudRoots);
-compact.appendChild(hudCanvas); compact.appendChild(expandBtn);
+compact.appendChild(hudCanvas);
 
 const els = { agpop: pop, agpin: pin, agisland: island, agcompact: compact, agidle: idle, sbadge: badge, agclose: close, 'hud-tooltip': tooltip, convo };
 let hudPayload = { lead: 'coordinator', completed: 0, peers: 0, roots: [] };
@@ -181,7 +179,6 @@ assert.equal(island.hidden, false);
 assert.equal(island.attrs['data-mode'], 'compact', 'holding/alive-idle forest opens compact HUD');
 assert.equal(island.style.height, '56px');
 assert.equal(island.style['--ag-cw'], '140px', 'agSize uses measured natural width, not fixed 320px');
-assert.equal(summaryText.textContent, 'js.hud.summary:2,5');
 const buttons = [];
 (function walk(el) { if (el.classList?.contains('hud-node')) buttons.push(el); (el.children || []).forEach(walk); })(hudRoots);
 assert.equal(buttons.length, 4);
@@ -195,11 +192,10 @@ assert.equal(tooltip.hidden, false);
 assert.equal(tooltip.querySelector('.tt-task').textContent, 'Read foo.go');
 assert.equal(tooltip.querySelector('.tt-hint').textContent, 'js.hud.hint.details');
 
-// Container click on #agcompact does NOT open #agpop; expand button and unlinked node DO
-assert.equal((compact.listeners.click || []).length, 0, '#agcompact container has no click handler');
-expandBtn.listeners.click[0]();
+// Background click opens the full popover.
+compact.listeners.click[0]({ target: compact });
 assert.equal(island.attrs['data-mode'], 'full');
-assert.equal(expandBtn.attrs['aria-expanded'], 'true');
+assert.equal(compact.attrs['aria-expanded'], 'true');
 assert.equal(tooltip.hidden, true, 'opening full view hides compact tooltip');
 doc.listeners.keydown[0]({ key: 'Escape', defaultPrevented: false });
 assert.equal(island.attrs['data-mode'], 'compact');
@@ -262,7 +258,7 @@ assert.equal(oldRing.style.animationDelay, stableDelay, 'unmoved sibling is not 
 hudPayload = { lead: 'coord', completed: 4, peers: 2, roots: [] };
 ctx.agSwapped();
 assert.equal(island.attrs['data-mode'], 'idle');
-assert.equal(idle.querySelector('.agidle-label').textContent, 'js.hud.done:4');
+assert.equal(idle.querySelector('.agidle-label'), null);
 
 // Preserve drawerWait and tlPerms exclusions of .ag-source
 const drawerSrc = readAssetSource('wsdashboard', 'dashboard-drawer.js');
