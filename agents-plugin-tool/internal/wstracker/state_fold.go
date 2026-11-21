@@ -104,9 +104,9 @@ func (s *state) apply(n *node) {
 			}
 		}
 		it.edited = n
-	case TypeItemHide:
+	case TypeItemHide, TypeItemUnhide:
 		if it := s.items[p.str("item")]; it != nil {
-			it.hidden = s.write("it:"+it.id+":hidden", it.alias+" hidden", n, true).(bool)
+			it.hidden = s.write("it:"+it.id+":hidden", it.alias+" hidden", n, n.typ == TypeItemHide).(bool)
 		}
 	case TypeItemMove:
 		s.applyMove(n)
@@ -342,6 +342,10 @@ func (s *state) apply(n *node) {
 		if c := s.comments[p.str("comment")]; c != nil {
 			c.hidden, c.hiddenBy = true, n
 		}
+	case TypeCommentUnhide:
+		if c := s.comments[p.str("comment")]; c != nil {
+			c.hidden, c.hiddenBy = false, nil
+		}
 	case wsledger.TypeMemberJoin:
 		// A joined member is a root with no lead. A join declaring a key the
 		// id already holds is a no-op.
@@ -483,7 +487,7 @@ func (s *state) apply(n *node) {
 		s.settleAll(n)
 	case n.typ == TypeItemCreate:
 		s.settle(n.id, n)
-	case strings.HasPrefix(n.typ, "item."):
+	case strings.HasPrefix(n.typ, "item.") && n.typ != TypeItemUnhide:
 		s.settle(p.str("item"), n)
 	}
 }

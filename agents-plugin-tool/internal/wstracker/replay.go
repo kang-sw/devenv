@@ -103,6 +103,7 @@ type replayed struct {
 
 	rolesPos, assignPos   []int
 	structPos             []int // item.create and item.move: the item tree
+	visibilityPos         []int // item.hide and item.unhide: the parent visibility check
 	threadPos, commentPos map[string][]int
 	rolesOnly             bool // judge and fold only roles and identity events
 	memo                  *foldMemo
@@ -249,7 +250,7 @@ func (r *replayed) linearize(all []*node, streams map[string]map[int]*node) {
 }
 
 func (r *replayed) indexOrder() {
-	r.rolesPos, r.assignPos, r.structPos = nil, nil, nil
+	r.rolesPos, r.assignPos, r.structPos, r.visibilityPos = nil, nil, nil, nil
 	r.threadPos, r.commentPos = map[string][]int{}, map[string][]int{}
 	for _, n := range r.order {
 		switch {
@@ -258,8 +259,11 @@ func (r *replayed) indexOrder() {
 		case n.typ == TypeItemAssign:
 			r.assignPos = append(r.assignPos, n.pos)
 		}
-		if n.typ == TypeItemCreate || n.typ == TypeItemMove {
+		switch n.typ {
+		case TypeItemCreate, TypeItemMove:
 			r.structPos = append(r.structPos, n.pos)
+		case TypeItemHide, TypeItemUnhide:
+			r.visibilityPos = append(r.visibilityPos, n.pos)
 		}
 		if n.typ == TypeItemCreate {
 			r.threadPos[n.id] = append(r.threadPos[n.id], n.pos)
@@ -343,8 +347,9 @@ func (r *replayed) verdictsFrom(all []*node, start int) {
 // roles and identity events, the threads and comments n names (its refs
 // included), and every item.assign as a trigger of the live rules on those
 // threads; an item.move also reads the whole item tree (every create and
-// move) for its subtree rule and after anchor. Nothing else can change what
-// check reads, so this equals folding the whole past. A label add or rename
+// move) for its subtree rule and after anchor. An item.unhide reads the
+// tree and item visibility to check the child's current parent. Nothing else
+// can change what check reads, so this equals folding the whole past. A label add or rename
 // flagged only by the fold-order name clash folds here too: n's writer saw
 // it, and only the list drops it.
 func (r *replayed) stateBefore(n *node) *state {
@@ -359,8 +364,11 @@ func (r *replayed) stateBeforeMode(n *node, causal bool) *state {
 	rel := map[string]bool{}
 	var lists [][]int
 	lists = append(lists, r.rolesPos, r.assignPos)
-	if n.typ == TypeItemMove {
+	switch n.typ {
+	case TypeItemMove:
 		lists = append(lists, r.structPos)
+	case TypeItemUnhide:
+		lists = append(lists, r.structPos, r.visibilityPos)
 	}
 	ids := []string{n.p.str("item"), n.p.str("parent")}
 	for _, x := range n.p.strList("refs") {

@@ -121,6 +121,10 @@ func TestGoldenParity(t *testing.T) {
 				entry := item.(map[string]any)
 				delete(entry, "ccSources")
 				delete(entry, "orgCC")
+				delete(entry, "canUnhide") // unhide permissions are outside reference-engine parity
+			}
+			for _, comment := range got["comments"].(map[string]any) {
+				delete(comment.(map[string]any), "canUnhide")
 			}
 			for _, rule := range got["rules"].(map[string]any) {
 				entry := rule.(map[string]any)
