@@ -46,6 +46,9 @@ func TestFramedSessionAssets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !strings.HasPrefix(a.files[a.data.FrameScriptFile].body, string(a.data.ConfirmScript)+"\n;\n") {
+		t.Fatal("frame shortcuts must load after the confirmation dialog's Escape handler")
+	}
 	for _, lang := range wsi18n.Languages() {
 		t.Run(lang.Code, func(t *testing.T) {
 			req, _ := http.NewRequest("GET", f.base+"/s/livesession?frame=1", nil)

@@ -796,6 +796,7 @@
   // session's routes, and the section shows only while its state says
   // this viewer holds the controls. A change to the viewed session updates
   // the page's own state (lead.st) too.
+  var leadActions = new Set();
   function rpSessMake(inRow) {
     var P = { gen: 0, busy: false, rid: rid, st: null };
     var el = P.el = inRow ? mk("div", "rmsess") : rpPop(wsT("js.lead.menu"));
@@ -848,16 +849,18 @@
     err.setAttribute("aria-live", "polite");
     var failed = "";
     function act(action, body) {
-      if (P.busy) return;
-      var gen = P.gen;
+      var target = P.rid, gen = P.gen;
+      if (P.busy || leadActions.has(target)) return;
+      leadActions.add(target);
       P.busy = true;
       failed = "";
       P.draw();
-      railPost("/agents/" + encodeURIComponent(P.rid) + "/" + action, body, function (st, v, s) {
-        P.busy = false;
+      railPost("/agents/" + encodeURIComponent(target) + "/" + action, body, function (st, v, s) {
+        leadActions.delete(target);
+        if (P.rid === target) P.busy = false;
         if (st === 200 && v.id) {
           if (inRow && gen === P.gen) P.st = v;
-          if (!inRow || (P.rid === rid && (hostedPage || handedPage))) lead.st = v;
+          if (rid === target && (hostedPage || handedPage)) lead.st = v;
           P.redraw();
           return;
         }
@@ -922,13 +925,24 @@
         P.draw();
       });
     };
-    // Each action button is a one-shot: the menu closes on the click, before
-    // any confirmation opens (the state it reads stays in P.st / lead.st),
-    // so a refusal reaches the user as a toast instead of the menu's line.
+    // The menu closes before asking, so return focus to the menu's opener.
+    async function confirmAction(action, button, message, n) {
+      var target = P.rid, opener = railPopBtn() || button, page = rid, st = state();
+      if (button.disabled || leadGone(st) || !st.can_control || leadActions.has(target) || (!inRow && target !== page)) return;
+      railPopClose(false);
+      var gen = P.gen;
+      if (message) {
+        if (!(await window.wsConfirm(message, { opener: opener }))) return;
+        st = state();
+        if (P.gen !== gen || P.rid !== target || rid !== page || !opener.isConnected ||
+            leadGone(st) || !st.can_control || bgTasks() > n || (action === "stop" && !st.process) ||
+            (action === "close" && st.is_child)) return;
+      }
+      act(action, {});
+    }
     stop.b.addEventListener("click", function () {
       var n = bgTasks();
-      railPopClose(false);
-      if (n < 1 || window.confirm(wsTn("js.lead.stop.confirm", n))) act("stop", {});
+      confirmAction("stop", stop.b, n > 0 ? wsTn("js.lead.stop.confirm", n) : "", n);
     });
     archive.b.addEventListener("click", function () {
       var st = state();
@@ -937,21 +951,19 @@
     });
     restart.b.addEventListener("click", function () {
       var n = bgTasks();
-      railPopClose(false);
-      if (n < 1 || window.confirm(wsTn("js.lead.restart.confirm", n))) act("restart", {});
+      confirmAction("restart", restart.b, n > 0 ? wsTn("js.lead.restart.confirm", n) : "", n);
     });
     handoff.b.addEventListener("click", function () {
       var n = bgTasks();
-      railPopClose(false);
-      if (n < 1 || window.confirm(wsTn("js.lead.handoff.confirm", n))) act("handoff", {});
+      confirmAction("handoff", handoff.b, n > 0 ? wsTn("js.lead.handoff.confirm", n) : "", n);
     });
     close.b.addEventListener("click", function () {
       var st = state(), n = bgTasks(), target = P.rid;
-      railPopClose(false);
       if (st && st.is_child) {
+        railPopClose(false);
         var phase = st.approvals && st.approvals.length ? "permission" : st.holding ? "holding" : st.status === "running" ? "thinking" : "idle";
         subagentClose(target, st.label || target, phase, close.b);
-      } else if (window.confirm(n > 0 ? wsTn("js.lead.close.confirm.bg", n) : wsT("js.lead.close.confirm"))) act("close", {});
+      } else confirmAction("close", close.b, n > 0 ? wsTn("js.lead.close.confirm.bg", n) : wsT("js.lead.close.confirm"), n);
     });
     // draw shows the session's state; it runs when the menu opens and after
     // every read of the state while it is open.

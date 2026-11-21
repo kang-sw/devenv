@@ -11,7 +11,7 @@ function fn(src, name) {
   assert.ok(m, name); return m[0];
 }
 // The outbox section a message send hands its message to, through outboxSync.
-const outbox = dash.match(/\n  \/\/ --- outbox:[^]*?\n  function outboxSync\([^]*?\n  \}\n/);
+const outbox = dash.match(/\n  \/\/ --- outbox [^]*?\n  function outboxSync\([^]*?\n  \}\n/);
 assert.ok(outbox, 'outbox section');
 class El {
   constructor(tag = 'div', cls = '') { this.tagName = tag.toUpperCase(); this.nodeType = 1; this.className = cls; this.children = []; this.attrs = {}; this.value = ''; this.listeners = {}; }
@@ -36,7 +36,7 @@ class El {
 }
 const ctext = new El('textarea'), cchips = new El(), board = new El(), pins = new El();
 const doc = { activeElement: null, querySelector: () => null, createElement: t => new El(t), createTextNode: s => { const n = new El(); n.textContent = s; return n; }, getElementById: id => id === 'ctext' ? ctext : null, addEventListener: (_, f) => { context.click = f; } };
-const context = vm.createContext({ console, doc, document: doc, ctext, cchips, board, pins, galEl: pins, topics: {}, maxed: null, window: {}, closeRequests: [], bmentions: [], bselections: [], mpend: null, cimgs: null, wpicks: [], wconsoles: [], sending: false, cmdSel: null, imgs: [], boardOwn: {}, posted: [], warns: [], draftSaves: 0 });
+const context = vm.createContext({ console, doc, document: doc, ctext, cchips, board, pins, galEl: pins, topics: {}, maxed: null, window: {}, closeRequests: [], bmentions: [], bselections: [], mpend: null, cimgs: null, wpicks: [], wconsoles: [], restoring: false, draftStore: null, draftDetached: false, cmdSel: null, imgs: [], boardOwn: {}, posted: [], warns: [], draftSaves: 0 });
 const noop = () => {};
 Object.assign(context, {
   wsT: (k, topic) => topic === undefined ? k : `${k}:${topic}`,
@@ -53,6 +53,7 @@ Object.assign(context, {
 });
 vm.runInContext(fs.readFileSync(path.join(root, 'dashboard-bundles.js'), 'utf8'), context);
 vm.runInContext(['mk', 'licon', 'ibtn', 'decorate'].map(n => fn(cards, n)).join('\n') + ['validCloseRequests', 'focusCloseRequest', 'addCloseRequest', 'removeCloseRequest', 'renderChips', 'renderSelectionChips', 'sendMessage', 'restoreHeld', 'restoreHeldNow'].map(n => fn(dash, n)).join('\n') + outbox[0], context);
+context.persistOutbox = done => done(true);
 // Only the production delegated click block: the rest owns unrelated menus.
 vm.runInContext(dash.slice(dash.indexOf('  doc.addEventListener("click", function (e) {', dash.indexOf('// --- clicks:')), dash.indexOf('  // --- link actions:')), context);
 function topic(key, closed, host = board) {

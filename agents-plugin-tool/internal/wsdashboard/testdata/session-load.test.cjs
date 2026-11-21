@@ -198,6 +198,8 @@ test('framed main script uses one shared content-addressed static request', () =
   assert(pageRoutes.includes('file, ok := a.files[rest]'));
   new vm.Script(read('wsdashboard', 'dashboard.js'));
   const lifecycle = read('wsdashboard', 'dashboard-lifecycle.js');
-  assert(lifecycle.indexOf('wsSaveSessionView();') < lifecycle.indexOf('location.replace("about:blank")'));
+  const drop = lifecycle.match(/function shDrop\(ent, leaving\) \{[^]*?ent\.el\.remove\(\);/)[0];
+  assert(drop.indexOf('wsSaveSessionView();') < drop.indexOf('ent.el.remove();'));
+  assert(!lifecycle.includes('location.replace("about:blank")'));
   assert(lifecycle.includes('  restoreSessionView();\n  nearTop();'));
 });

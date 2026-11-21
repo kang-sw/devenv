@@ -234,7 +234,8 @@ function swap() {}
 function tlHold() {}
 function syncBadge() {}
 function banner(text) { log.push("banner:" + text); }
-var ctext = { value: "" }, cmdSel = null, imgs = [], closeRequests = [];
+var ctext = { value: "" }, cmdSel = null, imgs = [], closeRequests = [], pendingDelivery = false;
+function outboxUnsent() { return pendingDelivery; }
 function boardAnswers() { return false; }
 function topicNotes() { return []; }
 var mine = "aaa";
@@ -280,6 +281,12 @@ check("removing the last close request releases the draft guard", holdsDraft(), 
 s.msg("assets", { id: "close-assets" });
 modeChanged("live");
 check("assets and modes can reload after removing the request", log, ["save-board", "reload", "reload"]);
+log = [];
+pendingDelivery = true;
+s.msg("assets", { id: "delivery-assets" });
+modeChanged("live");
+check("pending delivery keeps the composer across automatic reload attempts", log, ["banner:js.banner.updated", "banner:js.banner.appeared"]);
+pendingDelivery = false;
 log = [];
 mine = null;
 s.msg("assets", { id: "eee" });

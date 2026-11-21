@@ -520,7 +520,10 @@
       }
       case 'm-ltog': MN.lab = a.getAttribute('data-label'); MN.lset = labelFlip(MN.lset, labelBase(it), MN.lab); return labelStepRedraw();
       case 'm-ledit': return labelDialog({ label: a.getAttribute('data-label') });
-      case 'm-lrm': return labelRemove(a.getAttribute('data-label'), function () { if (MN) MN.lab = null; });
+      case 'm-lrm': {
+        var menu = MN;
+        return labelRemove(a.getAttribute('data-label'), a, function () { if (MN === menu) MN.lab = null; });
+      }
       case 'm-ladd': return labelDialog({});
       case 'm-handoff': {
         var hp = { item: id, to: a.getAttribute('data-to') }, note = menuNote();
@@ -892,7 +895,7 @@
   // arrow, a panel opening) has no new target and is not a focus loss.
   function menuFocusOut(e) {
     var to = e.relatedTarget;
-    if (!MN || !to || menuHas(to) || (MN.backEl && MN.backEl.contains(to))) return;
+    if (!MN || !to || menuHas(to) || to.closest('.ws-confirm') || (MN.backEl && MN.backEl.contains(to))) return;
     if ((MN.kind === 'item' && MN.step === 'labels') || ((MN.kind === 'item' || MN.kind === 'new') && MN.step === 'due')) menuApplyClose(false);
   }
 

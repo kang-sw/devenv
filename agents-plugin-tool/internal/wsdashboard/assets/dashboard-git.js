@@ -160,6 +160,7 @@
       hdlist.appendChild(box);
     }).catch(function () {});
   }
+  var hdTermClosing = new Set();
   function hdTermRow(t) {
     var row = mk("div", "wtrow hdrow hdterm"), meta = mk("span", "hdmeta"), acts = mk("span", "hdbtns");
     row.title = t.id;
@@ -183,12 +184,18 @@
     var b = mk("button", "btn hdstop", wsT("js.hd.stop"));
     b.type = "button";
     b.title = wsT("js.hd.term.stop.title");
-    b.addEventListener("click", function () {
-      if (b.disabled || (t.state !== "exited" && !window.confirm(wsT("js.term.confirm")))) return;
+    b.addEventListener("click", async function () {
+      var target = t.id, page = rid, key = JSON.stringify([page, target]);
+      if (hdTermClosing.has(key)) return;
+      if (t.state !== "exited" && !(await window.wsConfirm(wsT("js.term.confirm"), { opener: b }))) return;
+      if (hdTermClosing.has(key) || !b.isConnected || rid !== page) return;
+      hdTermClosing.add(key);
       b.disabled = true;
       if (hdnote) hdnote.textContent = "";
-      post("terminals/" + encodeURIComponent(t.id) + "/close", {}, function (ok, res) {
+      post("terminals/" + encodeURIComponent(target) + "/close", {}, function (ok, res) {
+        hdTermClosing.delete(key);
         b.disabled = false;
+        if (rid !== page) return;
         if (!ok) { if (hdnote) hdnote.textContent = wsT("js.hd.stopfail", res); return; }
         hdLoad();
       });

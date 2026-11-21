@@ -15,8 +15,9 @@
   //     base: 260,            // the body's base height in px, or a function
   //                           // of the card that returns it (optional)
   //     open(card) {},        // build card.body, call card.title(...)
-  //     closing(card) {},     // the close button was pressed: false keeps
-  //                           // the card, and the kind may close it later
+  //     closing(card, opener) {}, // the close button was pressed: false
+  //                           // (or a promise for false) keeps the card,
+  //                           // and the kind may close it later
   //                           // (optional)
   //     close(card) {},       // the card is going away (optional)
   //     folded(card) {},      // a node shown under a folded header, or null (optional)
@@ -1479,7 +1480,9 @@
     c.raiseBtn.addEventListener("click", function () { raise(c); });
     c.maxBtn.addEventListener("click", function () { maximize(c); });
     c.minBtn.addEventListener("click", function () { maximize(null); });
-    c.closeBtn.addEventListener("click", function () { if (!c.k.closing || c.k.closing(c) !== false) c.close(); });
+    c.closeBtn.addEventListener("click", async function () {
+      if (!c.k.closing || (await c.k.closing(c, c.closeBtn)) !== false) c.close();
+    });
     c.wireGrip();
     c.paint();
   };

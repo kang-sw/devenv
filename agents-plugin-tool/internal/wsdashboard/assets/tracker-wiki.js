@@ -437,9 +437,17 @@
   function wkDirty(ed) { return !!ed && ed.text !== (ed.seed !== undefined ? ed.seed : ed.orig); }
   // Asked before a navigation that drops the wiki edit; false keeps the editor, draft, and page.
   // Cancel, Esc, and taking theirs drop the draft on purpose and do not ask.
-  function wkLeaveOk() { return !wkDirty(wk().edit) || window.confirm(wsT("js.tk.wk.leave")); }
-  function wkOpenPage(name, path) {
-    if (wkLeaveOk()) wkGoPage(name, path);
+  async function wkLeaveOk(opener) {
+    var store = ui.store, open = ui.open, page = ui.page, st = wk(), ed = st.edit;
+    if (!wkDirty(ed)) return true;
+    var text = ed.text, path = ed.newPath, mode = st.mode, selected = tabState().narrow, conflict = st.conflict;
+    if (!(await window.wsConfirm(wsT("js.tk.wk.leave"), { opener: opener }))) return false;
+    return ui.store === store && ui.open === open && ui.page === page && wk() === st &&
+      st.mode === mode && tabState().narrow === selected && st.conflict === conflict &&
+      st.edit === ed && ed.text === text && ed.newPath === path;
+  }
+  async function wkOpenPage(name, path, opener) {
+    if (await wkLeaveOk(opener)) wkGoPage(name, path);
   }
   function wkGoPage(name, path) {
     var st = wk();
@@ -453,9 +461,10 @@
     wkShow();
     render();
   }
-  function wkOpenLink(name, path) {
-    if (!wkLeaveOk()) return; // declining leaves the item window open too
-    if (ui.win) closeItemWindow();
+  async function wkOpenLink(name, path, opener) {
+    var win = ui.win, item = ui.item;
+    if (!(await wkLeaveOk(opener)) || ui.win !== win || ui.item !== item) return;
+    if (win) closeItemWindow();
     wkGoPage(name, path);
   }
   function wkStartEdit(path, isNew, newWiki) {
@@ -484,11 +493,11 @@
     else if (ed.isNew) { st.page = wkHas(st, 'index') ? 'index' : (st.pages && st.pages.paths[0]) || null; st.doc = null; }
     render();
   }
-  function wkCreate() {
+  function wkCreate(opener) {
     var st = wk(), name = ($('wk-wname') ? $('wk-wname').value : st.wname).trim(), first = ($('wk-wfirst') ? $('wk-wfirst').value : st.wfirst).trim().replace(/^\/+|\/+$/g, '') || 'index';
     st.wname = name; st.wfirst = first;
     if (!WK_NAME.test(name) || name.length > WK_NAME_MAX) return toast(esc(wsT("js.tk.wk.toast.name")));
-    if (st.list && st.list.some(function (w) { return w.name === name; })) { st.creating = false; wkOpenPage(name, first); return; }
+    if (st.list && st.list.some(function (w) { return w.name === name; })) return wkOpenPage(name, first, opener);
     st.name = name; st.pages = { paths: [], commit: '' }; st.page = first; st.doc = null; st.docErr = null;
     wkStartEdit(first, true, true);
   }
@@ -516,15 +525,26 @@
       toast(esc(wsT("js.tk.wk.toast.fail", res.error))); render();
     });
   }
-  function wkAct(k, a) {
+  async function wkAct(k, a) {
     var st = wk();
     if (k === 'wk-mode') { st.mode = a.getAttribute('data-mode'); st.pick = st.more = false; render(); }
     else if (k === 'wk-pickopen') { st.pick = !st.pick; st.more = false; render(); }
-    else if (k === 'wk-pick') { st.pick = false; var nm2 = a.getAttribute('data-wiki'); if (nm2 !== st.name && wkLeaveOk()) { st.name = nm2; st.pages = null; st.page = null; st.doc = null; st.docErr = null; st.edit = null; st.conflict = null; st.q = ''; st.creating = false; } render(); }
-    else if (k === 'wk-newwiki') { st.pick = false; if (!wkLeaveOk()) { render(); return; } st.creating = true; st.edit = null; st.conflict = null; st.wname = ''; render(); if ($('wk-wname')) $('wk-wname').focus(); }
+    else if (k === 'wk-pick') {
+      var name = a.getAttribute('data-wiki');
+      if (name !== st.name) {
+        if (!(await wkLeaveOk(a))) return;
+        st.name = name; st.pages = null; st.page = null; st.doc = null; st.docErr = null; st.edit = null; st.conflict = null; st.q = ''; st.creating = false;
+      }
+      st.pick = false; render();
+    }
+    else if (k === 'wk-newwiki') {
+      if (!(await wkLeaveOk(a))) return;
+      st.pick = false; st.creating = true; st.edit = null; st.conflict = null; st.wname = '';
+      render(); if ($('wk-wname')) $('wk-wname').focus();
+    }
     else if (k === 'wk-cancelnew') { st.creating = false; render(); }
-    else if (k === 'wk-create') wkCreate();
-    else if (k === 'wk-open') wkOpenPage(st.name, a.getAttribute('data-path'));
+    else if (k === 'wk-create') return wkCreate(a);
+    else if (k === 'wk-open') return wkOpenPage(st.name, a.getAttribute('data-path'), a);
     else if (k === 'wk-fold') { var fk = st.name + ':' + a.getAttribute('data-dir'); st.closed[fk] = !st.closed[fk]; render(); }
     else if (k === 'wk-tree') { st.tree = !st.tree; render(); }
     else if (k === 'wk-ntree') { st.ntree = !st.ntree; render(); }

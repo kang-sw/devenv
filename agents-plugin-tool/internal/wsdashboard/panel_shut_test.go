@@ -84,7 +84,7 @@ var draftStore = { load: function (id) {
   return { open: { "k:entry:draft-folded": true, "k:entry:draft-control": true, "k:history:obsolete": true } };
 } };
 var draftControl = panel("entry:draft-control", false); doc.appendChild(draftControl);
-restoreDraft();
+restoreDraft(draftStore.load(rid));
 check("a stored draft cannot reopen a hand-folded entry panel", !draftFolded.open && !openState["k:entry:draft-folded"]);
 check("a stored draft opens an entry panel not in the shut list", draftControl.open && openState["k:entry:draft-control"]);
 check("whole-history state is ignored without dropping descendant keys", !openState["k:history:obsolete"] && openKey(new El("details", { "data-key": "history:obsolete" })) === null);

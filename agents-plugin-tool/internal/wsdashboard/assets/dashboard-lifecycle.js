@@ -88,17 +88,61 @@
   }
 
   // --- per-session drafts ---------------------------------------------------------
-  // What the user typed or picked on this session's page and has not sent,
-  // and the page's view state around it, is kept per session in storage
-  // (rail.js drafts), so switching sessions in the rail and coming back
-  // finds it: the composer's text, mentions, and selection, its slash
-  // command selection, the board answers and topic notes, the answer chips, the web picks, the images that reference
-  // written attachments, the open details, and the tab. Pasted images are
-  // not kept: their markers leave the composer text and the notes, a
-  // restored draft says so, and while the page holds one, leaving it asks
-  // first (the browser's leave-page confirmation).
-  // The shell holds no draft: its frames keep their own.
-  var draftStore = WsRail && rid && !shell && mode !== "history" ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false, draftUnsaved = false;
+  // Keep the legacy text projection readable by older dashboard pages.
+  // Blobs and delivery records live separately in browser-owned IndexedDB.
+  var draftStore = WsRail && rid && !shell && mode !== "history" ? WsRail.drafts(railStore) : null;
+  var draftTimer = null, restoring = false, draftUnsaved = false, draftDetached = false;
+  var draftDB = null, draftReady = null, draftLoaded = false;
+  var draftLegacy = null, draftCommitted = null, draftWrite = null, draftWriteKey = "";
+  var draftDeliveryState = new Map(), draftRetained = null, draftRetainedImages = [];
+
+  function draftDatabase() {
+    return new Promise(function (resolve) {
+      var request;
+      try { request = window.indexedDB.open("ws.dashboard.recovery", 1); }
+      catch (e) { resolve(null); return; }
+      request.onupgradeneeded = function () { request.result.createObjectStore("drafts"); };
+      request.onerror = request.onblocked = function () { resolve(null); };
+      request.onsuccess = function () { resolve(request.result); };
+    });
+  }
+  function draftTransaction(write, update) {
+    return new Promise(function (resolve, reject) {
+      var tx = draftDB.transaction("drafts", write ? "readwrite" : "readonly");
+      var store = tx.objectStore("drafts"), request = store.get(rid), result;
+      request.onsuccess = function () {
+        result = request.result || null;
+        if (!write) return;
+        try {
+          result = update(result);
+          if (result) store.put(result, rid);
+          else store.delete(rid);
+        } catch (e) { tx.abort(); }
+      };
+      tx.oncomplete = function () { resolve(result); };
+      tx.onabort = function () { reject(tx.error || new Error("Draft transaction aborted")); };
+    });
+  }
+  function draftProjection(d) { return WsRail.emptyDraft(d) ? null : JSON.stringify(d); }
+  function savedImage(p) { return { n: p.n, name: p.name, ref: p.ref, blob: p.blob }; }
+  function loadDraftImage(p) {
+    return p.ref ? { n: p.n, name: p.name, ref: p.ref, url: attachSrc(p.ref), data: null } :
+      { n: p.n, name: p.name, ref: "", blob: p.blob, url: URL.createObjectURL(p.blob), data: null };
+  }
+  function imageData(blob) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { var value = String(reader.result); resolve(value.slice(value.indexOf(",") + 1)); };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+  function saveLegacyDraft(d, projection) {
+    if (projection === draftLegacy) return true;
+    if (draftStore.save(rid, d) === false) return false;
+    draftLegacy = projection;
+    return true;
+  }
   function readDraft() {
     var b = region("board"), open = {};
     Object.keys(openState).forEach(function (k) { if (openState[k] && k.indexOf("k:history:") !== 0) open[k] = true; });
@@ -123,28 +167,151 @@
       tab: live ? grid.getAttribute("data-tab") || "" : ""
     };
     if (ctext && d.text) d.sel = [ctext.selectionStart + prefix.length, ctext.selectionEnd + prefix.length];
+    // A board-only view still edits answers and open details. Its DOM
+    // cannot represent composer fields from this session's live draft.
+    if (!ctext && draftRetained) {
+      return Object.assign({}, draftRetained, { boardIncarnation: d.boardIncarnation, answers: d.answers, open: d.open });
+    }
     return d;
   }
-  // While a send is unanswered the saved draft stays the one from before
-  // it, so a page lost meanwhile restores the message rather than drop it.
+  function draftRecoveryKey(record, states) {
+    var images = record ? record.images : [];
+    return JSON.stringify([record && record.projection, images.map(function (p) { return [p.n, p.name]; }), [...states]]);
+  }
   function saveDraft() {
-    if (!draftStore || restoring || outboxUnsent()) return;
+    if (!draftStore || !draftLoaded || restoring || draftDetached) return Promise.resolve(!draftUnsaved);
     clearTimeout(draftTimer);
     draftTimer = null;
-    var d = readDraft();
-    // View state alone is not unsent content requiring a native prompt.
-    var saved = draftStore.save(rid, d);
-    draftUnsaved = saved === false && !WsRail.emptyDraft(Object.assign({}, d, { open: {}, tab: "" }));
+    var d = readDraft(), projection = draftProjection(d), previous = draftLegacy;
+    var images = ctext ? imgs.filter(function (p) { return !p.ref && p.blob; }).map(savedImage) : draftRetainedImages;
+    var deliveries = outbox.filter(function (m) { return !m.acked; }).map(function (m) {
+      var body = Object.assign({}, m.body);
+      delete body.images;
+      return { id: m.recoveryID, state: m.recoveryState === "queued" ? "queued" : "unknown",
+        body: body, back: m.back, pics: m.pics.map(savedImage) };
+    });
+    // Keep the old pre-send projection until the recovery record commits.
+    // A POST starts only after this transaction (including its mirror).
+    // A completed send may be the last IndexedDB record for this session.
+    // Confirm the new legacy projection before dropping that recovery copy.
+    var mirrorNow = !deliveries.length;
+    var textSaved = mirrorNow && saveLegacyDraft(d, projection);
+    var missingBlob = (d.lost || []).some(function (number) {
+      return !images.some(function (image) { return image.n === number; });
+    });
+    var hasDraft = !WsRail.emptyDraft(Object.assign({}, d, { open: {}, tab: "" }));
+    var rich = !!(images.length || deliveries.length || mirrorNow && !textSaved && hasDraft);
+    var record = rich ? {
+      base: previous, projection: projection, draft: d, images: images
+    } : null;
+    var states = new Map(deliveries.map(function (m) { return [m.id, m.state]; }));
+    var key = draftRecoveryKey(record, states);
+    var clean = draftRecoveryKey(null, new Map());
+    if (key === draftCommitted && !draftWrite) {
+      draftUnsaved = missingBlob || !(textSaved || rich || !hasDraft || saveLegacyDraft(d, projection));
+      return Promise.resolve(!draftUnsaved);
+    }
+    if (draftWrite) {
+      if (key === draftWriteKey) return draftWrite;
+      return draftWrite.then(saveDraft);
+    }
+    if (key === clean && draftCommitted === null && !draftWrite) {
+      draftUnsaved = missingBlob || !textSaved && hasDraft;
+      return Promise.resolve(!draftUnsaved);
+    }
+    draftUnsaved = true;
+    if (!draftDB) return Promise.resolve(false);
+    var before = draftDeliveryState, conflicts = [];
+    draftDeliveryState = states;
+    var write = draftTransaction(true, function (existing) {
+      var merged = Object.assign({}, existing && existing.deliveries);
+      before.forEach(function (state, id) {
+        if (!states.has(id) && merged[id] && merged[id].state === state) delete merged[id];
+      });
+      deliveries.forEach(function (m) {
+        var previous = before.get(m.id);
+        if (m.state === previous) return;
+        // Another renderer may have started or already finished this queued
+        // request. Only one transaction may claim its shared queued row.
+        if (previous === "queued" && (!merged[m.id] || merged[m.id].state !== "queued")) {
+          conflicts.push(m.id);
+          states.delete(m.id);
+          return;
+        }
+        merged[m.id] = m;
+      });
+      return record || Object.keys(merged).length ? { active: record, deliveries: merged } : null;
+    }).then(function () {
+      if (draftWrite !== write) return true;
+      draftWrite = null;
+      conflicts.forEach(function (id) {
+        var delivery = outbox.find(function (m) { return m.recoveryID === id; });
+        if (delivery) delivery.recoveryConflict = true;
+      });
+      draftCommitted = draftRecoveryKey(record, states);
+      draftUnsaved = missingBlob || !saveLegacyDraft(d, projection) && !rich && hasDraft;
+      return !draftUnsaved;
+    }, function () {
+      if (draftWrite === write) {
+        draftWrite = null;
+        draftDeliveryState = before;
+      }
+      return false;
+    });
+    draftWrite = write;
+    draftWriteKey = key;
+    return write;
   }
   function queueDraft() {
-    if (!draftStore || restoring) return;
+    if (!draftStore || restoring || draftDetached) return;
     clearTimeout(draftTimer);
     draftTimer = setTimeout(saveDraft, 400);
   }
-  function clearDraft() {
+  function restoreDraftMarkers(nums) {
+    if (!nums.length) return;
+    var start = ctext.selectionStart, end = ctext.selectionEnd, length = ctext.value.length;
+    ctext.setSelectionRange(length, length);
+    insertMarkers(nums);
+    ctext.setSelectionRange(start, end);
+  }
+  function startDraftRecovery() {
     if (!draftStore) return;
-    draftStore.clear(rid);
-    queueDraft();
+    var legacy = draftStore.load(rid);
+    draftLegacy = draftProjection(legacy);
+    if (grid) grid.inert = true;
+    draftReady = draftDatabase().then(function (db) {
+      draftDB = db;
+      return db ? draftTransaction(false).catch(function () { draftDB = null; return null; }) : null;
+    }).then(function (record) {
+      var active = record && record.active;
+      var useActive = active && (draftLegacy === active.base || draftLegacy === active.projection);
+      var prepared = useActive ? active.draft : legacy;
+      if (!ctext) {
+        draftRetained = prepared && boardDraft(JSON.parse(JSON.stringify(prepared)));
+        draftRetainedImages = active ? active.images : [];
+      }
+      restoreDraft(prepared, useActive ? active.images : []);
+      if (active && !useActive && ctext) {
+        // An older page used the legacy draft in the meantime. Keep its
+        // current text and put the retained blobs back under new markers.
+        var nums = active.images.map(function (p) {
+          var image = loadDraftImage(p);
+          image.n = nextNum();
+          imgs.push(image);
+          return image.n;
+        });
+        restoreDraftMarkers(nums);
+        renderImgs();
+      }
+      var deliveries = ctext ? Object.values(record && record.deliveries || {}) : [];
+      deliveries.forEach(function (m) { draftDeliveryState.set(m.id, m.state); });
+      restoreDeliveries(deliveries);
+      if (record) draftCommitted = draftRecoveryKey(active || null, draftDeliveryState);
+    }).finally(function () {
+      draftLoaded = true;
+      if (grid) grid.inert = false;
+      if (!draftDetached && ctext) saveDraft();
+    });
   }
   function boardDraft(d) {
     if (d && typeof d.boardIncarnation === "string" && d.boardIncarnation !== boardIncarnation) {
@@ -160,12 +327,15 @@
     }
     return d;
   }
-  function restoreDraft() {
-    var d = draftStore && boardDraft(draftStore.load(rid));
+  function restoreDraft(saved, recoveredImages) {
+    var d = boardDraft(saved);
+    recoveredImages = recoveredImages || [];
     if (!d) return;
     restoring = true;
     try {
-      var lost = Array.isArray(d.lost) ? d.lost : [], named = "";
+      var available = new Set(recoveredImages.map(function (p) { return p.n; }));
+      var lost = (Array.isArray(d.lost) ? d.lost : []).filter(function (n) { return !available.has(n); });
+      var named = "";
       // Keep bundles in existing text storage. Extract before stripping lost
       // markers so quoted source and memo markers are never touched.
       var split = splitSelectionText(typeof d.text === "string" ? d.text : "");
@@ -247,6 +417,17 @@
           imgs.push({ name: p.name || p.ref, url: attachSrc(p.ref), data: null, ref: p.ref, n: p.n });
           imgSeq = Math.max(imgSeq, p.n);
         });
+        var loose = [];
+        recoveredImages.forEach(function (p) {
+          var image = loadDraftImage(p), occupied = imgs.some(function (other) { return other.n === p.n; });
+          if (occupied) image.n = nextNum();
+          // A paste may still belong to an open selection editor. Reattach
+          // unreferenced blobs to the composer when restoring the session.
+          if (occupied || !markerNums(named)[p.n]) loose.push(image.n);
+          imgs.push(image);
+          imgSeq = Math.max(imgSeq, image.n);
+        });
+        restoreDraftMarkers(loose);
         imgs.sort(function (a, b) { return a.n - b.n; });
         renderImgs();
       }
@@ -262,23 +443,24 @@
     doc.addEventListener("visibilitychange", function () { if (doc.hidden) saveDraft(); });
     window.addEventListener("beforeunload", WsRail.leaveGuard(function () {
       saveDraft();
-      var unsaved = imgs.some(function (p) { return !p.ref; }) || draftUnsaved || outboxUnsent();
-      if (unsaved && framed && typeof window.wsShellLeave === "number") {
-        var attempt = window.wsShellLeave;
-        // Survival suggests cancellation, but is not proof: an accepted
-        // blank load remains authoritative if this timer races navigation.
-        setTimeout(function () { shPost("stay", { attempt: attempt }); }, 0);
-      }
-      return unsaved;
+      return draftUnsaved;
     }));
   }
   if (framed) {
     window.wsSaveSessionDraft = saveDraft;
+    window.wsPrepareSessionLeave = async function () {
+      await draftReady;
+      await saveDraft();
+      return draftUnsaved || outboxInFlight();
+    };
+    window.wsFinishSessionLeave = function () {
+      draftDetached = true;
+      clearTimeout(draftTimer);
+    };
     window.wsCanCacheSession = function () {
       saveDraft();
-      // Arbitrary web/tool runtimes cannot be frozen by ordinary page code.
-      // Keep their existing guarded fresh navigation instead of caching them.
-      return !!rid && !draftUnsaved && !outboxUnsent() && !imgs.some(function (p) { return !p.ref; }) &&
+      // Tool runtimes cannot be frozen by ordinary page code.
+      return !!rid && draftLoaded && !draftUnsaved && !outboxInFlight() &&
         !q('iframe:not(.doc-frame), .bcard, .fpane[data-max]').length && !visible(fpane) && !tkBusy &&
         (!window.WsTerm || (window.WsTerm.cacheSafe && window.WsTerm.cacheSafe())) && !Object.keys(supChats).length;
     };
@@ -286,8 +468,7 @@
 
   // --- iframe shell -------------------------------------------------------------
   // Safe, loaded session pages are retained up to shell.js's code bound.
-  // Unsafe/tool/non-session pages still navigate through their native leave
-  // guard; a cancelled destructive leave keeps the current page. The
+  // Unsafe/tool/non-session pages are replaced after their draft decision. The
   // address bar names the shown page (pushState; popstate shows the page it
   // goes back to). The shell's header mirrors the shown frame's (the head
   // message): its head region, its search button, and the header's padding
@@ -298,7 +479,7 @@
   // and every link it would load as a page to the shell (go); shell.js
   // lists the messages.
   var shFrames = [], shOn = null, shWant = null, shLeaving = null, shHeadHtml = null, shSeq = 0, shTrackerRev = null;
-  var shIndex = 0, shRestoring = null, shRestoreNav = null, shRestoreTimer = null, shLeaveSeq = 0;
+  var shIndex = 0, shRestoring = null, shRestoreNav = null, shRestoreTimer = null;
   var shTop = doc.querySelector(".dwrap > .top"), shBody = doc.querySelector(".dwrap > .dbody");
   function shHistoryIndex() { return history.state && Number.isSafeInteger(history.state.wsShellIndex) ? history.state.wsShellIndex : shIndex; }
   function shPush(f) {
@@ -321,21 +502,13 @@
     var delta = index - shHistoryIndex();
     if (delta) history.go(delta);
   }
-  function shStay(ent, attempt) {
-    var leave = shLeaving;
-    if (!leave || leave.ent !== ent || leave.attempt !== attempt) return;
-    leave.stayed = true;
-    ent.el.inert = false;
-    shLeaving = null;
+  function shStay(leave) {
+    leave.ent.el.inert = false;
+    if (leave.focus && leave.focus.isConnected) leave.focus.focus({ preventScroll: true });
     shIndex = leave.from;
-    // A ready but never-shown destination has no reader edits. Do not keep
-    // its runtime after Stay; ent.leave still lets an accepted blank win.
-    if (shWant && shWant !== ent) shDrop(shWant);
-    // Back has already moved history. Restore the position, never its URL:
-    // replaceState here would erase the destination entry from Back/Forward.
-    if (shHistoryIndex() !== leave.from) {
-      shRestoreTo(leave.from);
-    }
+    if (shWant && shWant !== leave.ent) shDrop(shWant);
+    // Back has already traversed history. Restore the original position.
+    if (shHistoryIndex() !== leave.from) shRestoreTo(leave.from);
   }
   // shPost sends a framed page's message of kind to its shell.
   function shPost(kind, m) {
@@ -387,13 +560,14 @@
   }
   function shEnt(win) { return shFrames.filter(function (x) { return x.el.contentWindow === win; })[0] || null; }
   function shCacheable(ent) {
-    if (!window.WsShell.cacheLimit || !ent || !ent.loaded || !ent.f.rid || ent.leave) return false;
+    if (!window.WsShell.cacheLimit || !ent || !ent.loaded || !ent.f.rid) return false;
     try { return !!(ent.el.contentWindow.wsCanCacheSession && ent.el.contentWindow.wsCanCacheSession()); } catch (e) { return false; }
   }
-  function shDrop(ent) {
+  function shDrop(ent, leaving) {
     clearTimeout(ent.headTimer); ent.headTimer = null;
     try {
-      if (ent.el.contentWindow.wsSaveSessionDraft) ent.el.contentWindow.wsSaveSessionDraft();
+      if (leaving && ent.el.contentWindow.wsFinishSessionLeave) ent.el.contentWindow.wsFinishSessionLeave();
+      else if (ent.el.contentWindow.wsSaveSessionDraft) ent.el.contentWindow.wsSaveSessionDraft();
       if (ent.el.contentWindow.wsSaveSessionView) ent.el.contentWindow.wsSaveSessionView();
     } catch (e) { /* only safe or never-shown documents are discarded */ }
     shFrames.splice(shFrames.indexOf(ent), 1);
@@ -408,34 +582,10 @@
       shDrop(old);
     }
   }
-  // A blank navigation fires load only after the existing beforeunload
-  // confirmation accepted it. Removing an iframe directly would bypass that
-  // guard. Late loads/messages from a removed frame have no shell authority.
   function shAdd(el, f) {
     var ent = { el: el, f: f, head: null, title: "", pincol: false, dim: 0, y: 0, loaded: false };
     el.addEventListener("load", function () {
       if (shFrames.indexOf(ent) < 0) return;
-      // Retain the latest attempt on the frame even after a tentative Stay.
-      // If its blank navigation commits, acceptance wins over that signal.
-      if (ent.leave) {
-        var blank = false;
-        try { blank = el.contentWindow.location.href === "about:blank"; } catch (x) { /* navigating */ }
-        if (blank) {
-          var next = ent.leave;
-          ent.leave = null; shLeaving = null;
-          clearTimeout(ent.headTimer); ent.headTimer = null;
-          shFrames.splice(shFrames.indexOf(ent), 1);
-          if (shOn === ent) shOn = null;
-          if (shWant === ent) shWant = null;
-          el.remove();
-          if (!next.push) shIndex = next.index;
-          shStart(next.f, next.push);
-          // A tentative Stay may already have restored (or be restoring)
-          // Back's position. Reconcile it with the accepted destination.
-          if (!next.push && next.stayed && (shRestoring !== null || shHistoryIndex() !== next.index)) shRestoreTo(next.index);
-          return;
-        }
-      }
       ent.loaded = true;
       shSettings(ent);
       if (shWant === ent) shShow(ent);
@@ -452,11 +602,19 @@
     if (shRestoring !== null) { shRestoreNav = { href: href, push: push }; return; }
     var u = new URL(href, location.href), f = window.WsShell.framed(u, location.origin);
     if (!f) { location.href = u.href; return; }
+    if (shLeaving) {
+      // An in-progress decision belongs to its original destination. A
+      // subsequent traversal or pick gets its own decision.
+      if (f.path !== shLeaving.f.path || f.hash !== shLeaving.f.hash || push !== shLeaving.push ||
+          shHistoryIndex() !== shLeaving.index) shLeaving.next = { href: href, push: push };
+      else shLeaving.next = null;
+      return;
+    }
     // A destination that never became visible owns no reader edits. A rapid
     // pick supersedes it without parking an extra loading document.
     if (window.WsShell.cacheLimit && shOn && shWant && shWant !== shOn) shDrop(shWant);
     var ent = shOn || shWant;
-    if (ent && ent.f.path === f.path && !shLeaving) {
+    if (ent && ent.f.path === f.path) {
       ent.el.inert = false;
       if (push && location.pathname + location.hash !== f.path + f.hash) shPush(f);
       if (!push) shIndex = shHistoryIndex();
@@ -467,12 +625,6 @@
       return;
     }
     if (!ent) { shStart(f, push); return; }
-    if (shLeaving && shLeaving.ent === ent) {
-      // A rapid second Back/rail pick replaces only the destination, not the
-      // history entries or the native navigation already awaiting acceptance.
-      shLeaving.f = f; shLeaving.push = push; shLeaving.index = shHistoryIndex();
-      return;
-    }
     if (shCacheable(ent)) {
       try { if (ent.el.contentWindow.wsSaveSessionView) ent.el.contentWindow.wsSaveSessionView(); } catch (e) {}
       // The outgoing page may remain painted during a cold load, but cannot
@@ -484,23 +636,48 @@
     }
     shLeave(ent, f, push);
   }
-  function shLeave(ent, f, push, from) {
-    ent.el.inert = false;
-    shLeaving = { ent: ent, f: f, push: push, from: from === undefined ? shIndex : from, index: shHistoryIndex(), attempt: ++shLeaveSeq };
-    ent.leave = shLeaving;
-    // Save even a draft whose debounce has not fired. The native navigation,
-    // not a custom confirm or a remove(), asks before losing pasted images.
+  async function shLeave(ent, f, push, from) {
+    var leave = { ent: ent, f: f, push: push, from: from === undefined ? shIndex : from, index: shHistoryIndex() };
+    shLeaving = leave;
+    if (doc.activeElement === ent.el) {
+      try { leave.focus = ent.el.contentDocument.activeElement; } catch (e) { /* unavailable */ }
+    }
+    // Freeze editing while a pending write settles or the user decides.
+    ent.el.inert = true;
+    var needsDecision = false;
     try {
-      if (ent.el.contentWindow.wsSaveSessionDraft) ent.el.contentWindow.wsSaveSessionDraft();
-      if (ent.el.contentWindow.wsSaveSessionView) ent.el.contentWindow.wsSaveSessionView();
-      ent.el.contentWindow.wsShellLeave = shLeaving.attempt;
-      ent.el.contentWindow.location.replace("about:blank");
-    } catch (x) { ent.leave = null; shLeaving = null; }
+      var source = ent.el.contentWindow;
+      if (source.wsPrepareSessionLeave) needsDecision = await source.wsPrepareSessionLeave();
+      else if (source.wsHoldsDraft) needsDecision = source.wsHoldsDraft();
+    } catch (e) { needsDecision = true; }
+    var accepted = !needsDecision;
+    if (!leave.next && needsDecision) {
+      accepted = await window.wsConfirm(wsT("js.draft.leave"), {
+        accept: wsT("js.draft.leave.accept"), cancel: wsT("js.draft.leave.stay")
+      });
+    }
+    if (shLeaving !== leave) return;
+    shLeaving = null;
+    if ((shOn || shWant) !== ent) return;
+    if (leave.next) {
+      // Preserve the history entry reached by a later Back/Forward.
+      ent.el.inert = false;
+      if (leave.next.push && shHistoryIndex() !== leave.from) {
+        shRestoreNav = leave.next;
+        shStay(leave);
+      } else shOpen(leave.next.href, leave.next.push);
+      return;
+    }
+    if (!accepted || shHistoryIndex() !== leave.index) { shStay(leave); return; }
+    shDrop(ent, true);
+    if (shOn === ent) shOn = null;
+    if (shWant && shWant.f.path !== f.path) shDrop(shWant);
+    shStart(f, push);
   }
   function shStart(f, push, from) {
     if (push && location.pathname + location.hash !== f.path + f.hash) shPush(f);
     if (!push) shIndex = shHistoryIndex();
-    var cached = window.WsShell.cacheLimit && shFrames.filter(function (x) { return x.loaded && x.f.rid && x.f.path === f.path && !x.leave; })[0];
+    var cached = window.WsShell.cacheLimit && shFrames.filter(function (x) { return x.loaded && x.f.rid && x.f.path === f.path; })[0];
     if (cached) {
       if (cached.f.hash !== f.hash) try { cached.el.contentWindow.location.hash = f.hash; } catch (e) {}
       cached.f = f;
@@ -511,6 +688,7 @@
     var el = doc.createElement("iframe");
     el.className = shOn ? "sframe" : "sframe on";
     el.title = doc.title;
+    if (shWant) shDrop(shWant);
     shWant = shAdd(el, f);
     shWant.from = from;
     el.src = window.WsShell.src(f);
@@ -543,9 +721,9 @@
     }
     clearTimeout(ent.headTimer); ent.headTimer = null;
     var was = shOn;
-    if (was === ent) return;
+    if (was === ent || shLeaving && shLeaving.ent === was) return;
     // Async tool/draft callbacks can change eligibility during a cold load.
-    // Keep the ready destination, but obtain native leave acceptance before
+    // Keep the ready destination, but settle the draft decision before
     // hiding or destroying an outgoing document that is no longer safe.
     if (was && !shCacheable(was)) {
       shSend(ent, "shown", { shown: false });
@@ -667,7 +845,6 @@
           break;
         case "title": ent.title = m.title; if (on) doc.title = m.title; break;
         case "nav": if (on) shOpen(m.href, true); break;
-        case "stay": shStay(ent, m.attempt); break;
         case "key":
           if (!on) break;
           if (m.key === "rail") railKey();
@@ -908,7 +1085,7 @@
   if (cardBoard) mountBoardOverview();
   boardRestoreReload();
   applySent();
-  restoreDraft();
+  startDraftRecovery();
   tlCount();
   apScan(region(mode === "index" ? "sessions" : "rail"));
   if (hostedPage) { lead.key = leadKey(); leadFetch(); }

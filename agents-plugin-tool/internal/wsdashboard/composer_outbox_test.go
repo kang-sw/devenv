@@ -163,35 +163,35 @@ process.stdout.write(bad.join("\n"));
 `)
 }
 
-// TestComposerOutboxPersistsImmediateSend exercises the real draft reader and
-// writer before the input debounce has fired, while the POST remains unanswered.
+// The request boundary only runs after the recovery write succeeds.
 func TestComposerOutboxPersistsImmediateSend(t *testing.T) {
 	src := mustAsset(t, "dashboard.js")
-	var draftFns strings.Builder
-	for _, name := range []string{"readDraft", "saveDraft", "queueDraft", "clearDraft"} {
-		draftFns.WriteString(composerFunc(t, src, name))
-	}
-	runNode(t, "composer immediate send draft", selectionCodecSource(t)+composerToastPrelude+"var sending = false;\n"+composerSendSource(t, src)+outboxDOM+draftFns.String()+`
-var rid = "session", restoring = false, draftTimer = null, draftUnsaved = false;
-var openState = {}, mentions = [], live = false, saved = null, cleared = 0;
-var draftStore = {
-  save: function (id, d) { saved = JSON.parse(JSON.stringify(d)); return true; },
-  clear: function () { saved = null; cleared++; }
+	runNode(t, "composer immediate send draft", selectionCodecSource(t)+composerToastPrelude+composerSendSource(t, src)+outboxDOM+`
+var commit, pendingPost, requests = 0, returned = [];
+function noteOk() {}
+restoreHeld = function (list) { returned.push(list[0].text); };
+persistOutbox = function (done) { commit = done; };
+post = function (route, body, done) {
+  pendingPost = done;
+  requests++;
+  check("the persisted payload is what posts", body.text, "typed and sent immediately");
 };
-function region() { return null; }
-var pendingPost;
-post = function (route, body, done) { pendingPost = done; };
 ctext.value = "typed and sent immediately";
-queueDraft(); // do not let the 400 ms timer run
 sendMessage();
-check("composer cleared immediately", ctext.value, "");
-check("POST still unanswered", outboxUnsent(), true);
-check("draft survives renderer loss before acceptance", saved && saved.text, "typed and sent immediately");
-saveDraft(); // a lifecycle save must not overwrite it with the empty composer
-check("pending send keeps saved draft", saved && saved.text, "typed and sent immediately");
+check("composer clears immediately", ctext.value, "");
+check("request awaits its recovery record", typeof pendingPost, "undefined");
+check("the recovery row records posting", outbox[0].recoveryState, "posting");
+commit(true);
+check("the POST starts after commit", typeof pendingPost, "function");
 pendingPost(true, { id: "h1" });
-check("acceptance clears sent draft", cleared, 1);
-clearTimeout(draftTimer);
+check("acknowledged send leaves the recovery queue", outboxUnsent(), false);
+ctext.value = "cancel during the write";
+sendMessage();
+var cancelCommit = commit;
+outboxCancel(outbox.find(function (m) { return !m.acked; }));
+cancelCommit(true);
+check("Cancel before the POST preserves its contents", returned, ["cancel during the write"]);
+check("an eventual durable write cannot send after Cancel", requests, 1);
 process.stdout.write(bad.join("\n"));
 `)
 }

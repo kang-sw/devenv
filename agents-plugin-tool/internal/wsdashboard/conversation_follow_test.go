@@ -33,6 +33,7 @@ func TestConversationSendRearmsBottomFollow(t *testing.T) {
 		oneLineDashboardFunc(t, src, "pinned"),
 		oneLineDashboardFunc(t, src, "pinConvo"),
 		oneLineDashboardFunc(t, src, "followConvo"),
+		composerFunc(t, src, "submitCommand"),
 		composerFunc(t, src, "sendCommand"),
 		composerSendSource(t, src),
 	}, "\n")

@@ -291,11 +291,11 @@ function click(href, mods) {
 // address's path and hash (a query such as a LAN token is not the page's),
 // trusts a message only from one of its frames on its own origin, shows a
 // page once its fresh frame loaded (pushState on a pick, none on popstate),
-// saves drafts before native-guarded teardown, retains the current page on
+// saves drafts before a destructive swap, retains the current page on
 // cancellation, and ignores removed frames. The same cases run directly with
 // node --test, without a daemon or a Go-built fixture.
 func TestShellSwitchesFramesThroughItsGlue(t *testing.T) {
-	runNode(t, "shell lifecycle", `require("./testdata/shell-lifecycle.test.cjs")();`)
+	runNode(t, "shell lifecycle", `require("./testdata/shell-lifecycle.test.cjs")().then(() => {}, error => { throw error; });`)
 }
 
 // TestShellHotkeyForwarderLeavesSearchKeysToTerminals pins the shell

@@ -111,6 +111,16 @@
   if (desktopLogin && typeof desktopLogin.onCopied === "function") {
     desktopLogin.onCopied(function () { toast(wsT("js.login.copied")); });
   }
+  var desktopDaemon = window.werkschaftDesktop && window.werkschaftDesktop.daemon;
+  if (window === window.top && desktopDaemon && typeof desktopDaemon.onNotice === "function") {
+    var daemonToast = null;
+    desktopDaemon.onNotice(function (reason) {
+      if (!window.WsToast || typeof window.WsToast.show !== "function") return false;
+      if (daemonToast) daemonToast.close();
+      daemonToast = window.WsToast.show(reason, { kind: "warn" });
+      return !!daemonToast && typeof daemonToast.close === "function";
+    });
+  }
   // --- session label: the head's name -----------------------------------------
   // The head's name (sname, dashboard.tmpl) shows the session's display
   // label, or its reply-id when it has none; a click on it copies the

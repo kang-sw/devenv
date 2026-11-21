@@ -26,6 +26,7 @@ var doc = typeof doc !== "undefined" ? doc : { querySelector: function () { retu
 var q = typeof q !== "undefined" ? q : function () { return []; };
 var marker = typeof marker !== "undefined" ? marker : function (n) { return "[Image #" + n + "]"; };
 var queueDraft = typeof queueDraft !== "undefined" ? queueDraft : function () {};
+var restoring = false, draftDetached = false, draftLoaded = true, draftStore = null;
 var saveDraft = typeof saveDraft !== "undefined" ? saveDraft : function () {};
 var restoreHeld = typeof restoreHeld !== "undefined" ? restoreHeld : function () {};
 var boardOwn = typeof boardOwn !== "undefined" ? boardOwn : {};
@@ -38,11 +39,13 @@ function inlineRows() { return []; }
 // message send to, behind outboxDefaults.
 func composerSendSource(t *testing.T, src string) string {
 	t.Helper()
-	outbox := regexp.MustCompile(`(?s)\n  // --- outbox:.*?\n  function outboxSync\(\) \{.*?\n  \}\n`).FindString(src)
+	outbox := regexp.MustCompile(`(?s)\n  // --- outbox .*?\n  function outboxSync\(\) \{.*?\n  \}\n`).FindString(src)
 	if outbox == "" {
 		t.Fatal("dashboard.js holds no outbox section ending in outboxSync")
 	}
-	return outboxDefaults + composerFunc(t, src, "sendMessage") + outbox
+	return outboxDefaults + composerFunc(t, src, "sendMessage") + outbox + `
+persistOutbox = function (done) { done(true); };
+`
 }
 
 // composerToastPrelude stubs what the composer's send, cancel, steer and

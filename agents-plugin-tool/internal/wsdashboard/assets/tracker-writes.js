@@ -165,8 +165,10 @@
     } else if (k === 'm-ladd' || k === 'm-ledit') {
       closeMenu(false);
       return openDialog('slabel', k === 'm-ledit' ? { label: a.getAttribute('data-label') } : {});
-    } else if (k === 'm-lrm') return labelRemove(a.getAttribute('data-label'), function () { newLabelsRedraw(null); });
-    else return;
+    } else if (k === 'm-lrm') {
+      var menu = MN;
+      return labelRemove(a.getAttribute('data-label'), a, function () { if (MN === menu) newLabelsRedraw(null); });
+    } else return;
     newPicked();
   }
   // the label picker after a toggle or a removal: the row's chip and the open picker redraw, and

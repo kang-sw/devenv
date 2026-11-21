@@ -34,6 +34,7 @@ func (a *dashboardAssets) buildFrameFiles() {
 	// Preserve the former classic scripts' source order and existing wrappers.
 	// The explicit separator also protects a trailing line comment/ASI site.
 	d.FrameScriptFile = add(strings.Join([]string{
+		string(d.ConfirmScript),
 		string(d.AnswersScript),
 		"window.wbForm = function () {\n" + string(d.FormScript) + "};\nwindow.wbMermaid = function () {\n" + string(d.MermaidInit) + "};\nwindow.wbMermaidFile = " + string(mermaid) + ";",
 		string(d.ViewerScript), string(d.ToastScript), string(d.TrackerScript),

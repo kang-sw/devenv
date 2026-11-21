@@ -12,23 +12,31 @@ process.on('exit', () => fs.rmSync(userData, { recursive: true, force: true }));
 const preload = path.resolve(__dirname, '../dashboard-preload.js');
 const { fixture: daemonFixture } = require('./daemon-fixture.cjs');
 const { connectDaemon: realConnectDaemon } = require('../daemon-controller');
+const defaultURL = 'http://127.0.0.1:39418/';
+const connected = (url = defaultURL, pid = 100) => ({ url, endpoint: { port: Number(new URL(url).port), pid } });
 
-async function fixture(discover = async () => 'http://127.0.0.1:39418/', platform = 'darwin', roots = {}) {
+async function fixture(discover = async () => defaultURL, platform = 'darwin', roots = {}) {
   // Replace only main-process lifecycle dependency; never a renderer bridge.
   const controller = require('../daemon-controller');
   const original = controller.connectDaemon;
-  controller.connectDaemon = discover;
+  controller.connectDaemon = async (...args) => {
+    const result = await discover(...args);
+    return typeof result === 'string' ? connected(result) : result;
+  };
   const python = require('../python'), originalPython = python.pythonAvailable;
   python.pythonAvailable = roots.pythonAvailable || (async () => true);
   const endpoint = require('../endpoint'), originalInspect = endpoint.inspect, originalRoot = endpoint.cacheRoot;
-  endpoint.inspect = roots.endpointRoot ? originalInspect : async () => { throw new Error('No test endpoint'); };
+  const originalLoginLink = endpoint.browserLoginLink;
+  endpoint.inspect = roots.inspect || (roots.endpointRoot ? originalInspect : async () => { throw new Error('No test endpoint'); });
   endpoint.cacheRoot = roots.endpointRoot ? () => roots.endpointRoot : originalRoot;
+  endpoint.browserLoginLink = roots.browserLoginLink || originalLoginLink;
   delete require.cache[require.resolve('../main')];
   const { start } = require('../main');
   controller.connectDaemon = original;
   python.pythonAvailable = originalPython;
   endpoint.inspect = originalInspect;
   endpoint.cacheRoot = originalRoot;
+  endpoint.browserLoginLink = originalLoginLink;
   const app = Object.assign(new EventEmitter(), { setName() {}, requestSingleInstanceLock: () => true, quit() { this.quitCalled = true; }, whenReady: () => Promise.resolve(), getVersion: () => '0.1.0', isPackaged: !!roots.packaged, getPath: () => roots.userData || userData, setPath: (key, value) => { app.paths[key] = value; }, paths: {}, getAppPath: () => roots.appRoot || path.resolve(__dirname, '..') });
   const crashReporter = { start(options) { this.options = options; } };
   let focusedContents = null;
@@ -60,7 +68,7 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
   }
   class Window extends Base {
     constructor(options) {
-      super(options); this.loads = [];
+      super(options); this.loads = []; this.frameMessages = [];
       const loaded = url => {
         this.webContents.emit('did-navigate', {}, url);
         this.webContents.emit('did-finish-load');
@@ -91,7 +99,7 @@ async function fixture(discover = async () => 'http://127.0.0.1:39418/', platfor
         close: options => { this.closeOptions = options; },
         send: (channel, value) => { this.state = { channel, value }; },
         session: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, webRequest: { onBeforeRequest: handler => { this.request = handler; } } },
-        mainFrame: {},
+        mainFrame: { send: (...args) => this.frameMessages.push(args) },
       });
       renderers.push(this.webContents);
       if (new.target === Window) this.webContents.focus();
@@ -435,40 +443,122 @@ test('session request guard allows internal DevTools schemes without ownership m
   }
   assert.deepEqual(request('devtools-evil://devtools/bundled/devtools_app.html', undefined), { cancel: true });
 });
-test('native same-core action is one explicit attempt, never renderer IPC; refusal retains connection', async () => {
-  const requests = [];
-  const f = await fixture(async (options, deps) => {
-    requests.push(options.replace);
-    if (options.replace) deps.onNotice('Replacement preflight failed; the incumbent was not drained. Retry later.');
-    return 'http://127.0.0.1:39418/';
-  });
-  await f.menus.replace_daemon.click();
-  assert.deepEqual(requests, [false, true]);
-  assert.equal(f.window.currentURL, 'http://127.0.0.1:39418/');
-  assert.equal(f.window.title, 'Werkschaft');
-  await f.menus.retry.click();
-  assert.deepEqual(requests, [false, true, false]);
-  assert.equal(f.ipcMain.listenerCount('werkschaft:replace-daemon'), 0);
+const NOTICE_SUBSCRIBE = 'werkschaft:daemon-notice-subscribe';
+const NOTICE_SHOWN = 'werkschaft:daemon-notice-shown';
+const NOTICE = 'werkschaft:daemon-notice';
+const refusal = 'Replacement preflight failed before draining the incumbent. Retry later.';
+test('packaged replacement refusal retains the incumbent document and exposes the reason in existing chrome', async () => {
+  for (const platform of ['darwin', 'win32']) {
+    const requests = [], events = [];
+    const f = await fixture(async options => {
+      requests.push(options.replace);
+      return { ...connected(), refusal: options.replace ? refusal : undefined };
+    }, platform, { packaged: true, events, inspect: async () => { events.push('inspect'); throw Error('No test endpoint'); } });
+    const content = f.views[0] || f.window, wc = content.webContents;
+    const url = wc.mainFrame.url = defaultURL + 's/current#/board';
+    wc.emit('page-title-updated', { preventDefault() {} }, 'My document');
+    f.onDialog(() => assert.fail('replacement refusal must not open a modal'));
+    events.length = 0;
+    await f.menus.replace_daemon.click();
+    assert.deepEqual(requests, [false, true]);
+    assert.deepEqual(events, [], 'a known refusal does not fetch a cookie or navigate');
+    assert.equal(wc.mainFrame.url, url);
+    assert.deepEqual(content.frameMessages, [], 'old assets cannot subscribe');
+    assert.equal(f.window.title, `${refusal} — My document`);
+    wc.emit('page-title-updated', { preventDefault() {} }, 'Updated document');
+    assert.equal(f.window.title, `${refusal} — Updated document`);
+    if (platform === 'win32') assert.equal(f.views[1].state.value.title, f.window.title);
+    assert.equal(f.ipcMain.listenerCount('werkschaft:replace-daemon'), 0);
+    f.window.emit('closed');
+  }
 });
-test('automatic upgrade notices go to the shell log, never a modal; menu replace keeps the dialog', async t => {
+test('refusal delivery needs a pinned subscribing main frame, resets on commit and accepts only the current receipt', async () => {
+  const f = await fixture(async options => ({ ...connected(), refusal: options.replace ? refusal : undefined }), 'win32');
+  const [content, bar] = f.views, wc = content.webContents;
+  const main = { sender: wc, senderFrame: wc.mainFrame };
+  const subframe = { sender: wc, senderFrame: { url: defaultURL, send: () => assert.fail('subframe notice') } };
+  const foreign = { sender: bar.webContents, senderFrame: wc.mainFrame };
+  await f.menus.replace_daemon.click();
+  for (const event of [subframe, foreign]) f.ipcMain.emit(NOTICE_SUBSCRIBE, event);
+  wc.mainFrame.url = 'https://untrusted.example/';
+  f.ipcMain.emit(NOTICE_SUBSCRIBE, main);
+  assert.deepEqual(content.frameMessages, []);
+  wc.mainFrame.url = defaultURL;
+  f.ipcMain.emit(NOTICE_SUBSCRIBE, main);
+  const [channel, first, reason] = content.frameMessages[0];
+  assert.equal(channel, NOTICE);
+  assert.equal(reason, refusal);
+  for (const event of [subframe, foreign]) f.ipcMain.emit(NOTICE_SHOWN, event, first);
+  f.ipcMain.emit(NOTICE_SHOWN, main, first + 1);
+  assert.match(f.window.title, /preflight failed/, 'a missing or broken renderer leaves the fallback up');
+  f.ipcMain.emit(NOTICE_SHOWN, main, first);
+  assert.equal(f.window.title, 'Werkschaft');
+  wc.emit('did-start-navigation', {}, defaultURL + '#board', true, true);
+  wc.emit('did-start-navigation', {}, defaultURL + 'iframe', false, false);
+  await f.menus.replace_daemon.click();
+  assert.equal(content.frameMessages.length, 2, 'same-document and subframe navigation keep the subscriber');
+  f.ipcMain.emit(NOTICE_SHOWN, main, first, 'ignored');
+  assert.match(f.window.title, /preflight failed/);
+  // A reconnect loads a fresh document even though the daemon itself was kept.
+  await f.menus.retry.click();
+  assert.equal(content.loads.length, 2);
+  assert.equal(content.frameMessages.length, 2, 'an old subscriber cannot receive the replay');
+  f.ipcMain.emit(NOTICE_SHOWN, main, content.frameMessages[1][1]);
+  assert.match(f.window.title, /preflight failed/);
+  f.ipcMain.emit(NOTICE_SUBSCRIBE, main);
+  f.ipcMain.emit(NOTICE_SUBSCRIBE, main);
+  assert.equal(content.frameMessages.length, 3, 'one replay per document');
+  assert.equal(content.frameMessages[2][2], refusal);
+  f.ipcMain.emit(NOTICE_SHOWN, main, content.frameMessages[2][1]);
+  assert.equal(f.window.title, 'Werkschaft');
+  f.window.emit('closed');
+});
+test('automatic startup retains a reason and renderer recovery replays it until a same-port successor connects', async t => {
   const root = fs.mkdtempSync(path.join(userData, 'notice-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  let dialogs = 0;
+  let calls = 0;
   const f = await fixture(async (options, deps) => {
-    deps.onNotice(options.replace ? 'menu notice' : 'Replacement did not drain the incumbent: starter failed.');
-    return 'http://127.0.0.1:39418/';
+    if (++calls === 1) {
+      deps.onNotice('Replacement did not drain the incumbent: starter failed.');
+      return { ...connected(), refusal };
+    }
+    return connected(defaultURL, options.replace ? 101 : 100);
   }, 'win32', { userData: root });
-  f.onDialog(() => { dialogs++; });
-  assert.equal(dialogs, 0, 'startup connect must not block on a modal');
-  await f.menus.retry.click();
-  assert.equal(dialogs, 0, 'recovery connect must not block on a modal');
-  assert.equal(f.views[0].loads.at(-1), 'http://127.0.0.1:39418/');
+  t.after(() => f.window.emit('closed'));
+  const content = f.views[0], wc = content.webContents;
+  f.onDialog(() => assert.fail('automatic and explicit attempts must not prompt'));
+  const main = { sender: wc, senderFrame: wc.mainFrame };
+  f.ipcMain.emit(NOTICE_SUBSCRIBE, main);
+  const [, id, first] = content.frameMessages[0];
+  assert.equal(first, refusal);
+  f.ipcMain.emit(NOTICE_SHOWN, main, id);
+  wc.getURL = () => wc.mainFrame.url;
+  wc.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 1 });
+  assert.match(f.window.title, /preflight failed/, 'the lost renderer cannot show the toast');
+  await until(() => content.loads.length === 2);
+  assert.equal(calls, 2);
+  assert.equal(content.frameMessages.length, 1);
+  f.ipcMain.emit(NOTICE_SUBSCRIBE, main);
+  assert.equal(content.frameMessages[1][2], refusal);
+  await f.menus.replace_daemon.click();
+  assert.equal(content.loads.length, 3, 'replacement uses a real load even when the port stays the same');
+  assert.equal(f.window.title, 'Werkschaft');
+  f.ipcMain.emit(NOTICE_SUBSCRIBE, main);
+  assert.equal(content.frameMessages.length, 2, 'a healthy successor must not inherit the refusal');
   const lines = fs.readFileSync(path.join(root, 'logs', 'shell.log'), 'utf8').trim().split('\n').map(JSON.parse)
     .filter(line => line.event === 'daemon-notice');
-  assert.equal(lines.length, 2);
+  assert.equal(lines.length, 1);
   assert.match(lines[0].message, /did not drain the incumbent/);
-  await f.menus.replace_daemon.click();
-  assert.equal(dialogs, 1, 'explicit replace keeps its dialog');
+});
+test('a same-port successor observed before navigation does not inherit the discovered refusal', async () => {
+  const incumbent = connected(defaultURL, 100);
+  const successor = connected(defaultURL, 101);
+  const f = await fixture(async () => ({ ...incumbent, refusal }), 'win32', { inspect: async () => successor });
+  const content = f.views[0], wc = content.webContents;
+  await until(() => content.loads.length === 1);
+  assert.equal(f.window.title, 'Werkschaft');
+  f.ipcMain.emit(NOTICE_SUBSCRIBE, { sender: wc, senderFrame: wc.mainFrame });
+  assert.deepEqual(content.frameMessages, [], 'the authenticated successor must not receive the incumbent refusal');
 });
 test('overlapping retries are ignored and rediscovery replaces the pin', async () => {
   let finish, calls = 0;
@@ -1131,6 +1221,29 @@ test('Windows owner closure explicitly releases both view contents', async () =>
   f.window.close = () => { assert.fail('view cleanup must not close a destroyed owner'); };
   f.views[0].webContents.emit('destroyed');
 });
+test('Windows BaseWindow completes close without a prompt when the dashboard permits unload', async () => {
+  const f = await fixture(undefined, 'win32', { packaged: true });
+  const [dashboard, bar] = f.views;
+  const wc = dashboard.webContents;
+  f.onDialog(() => assert.fail('a recovery-capable page permits unload'));
+  wc.close = options => {
+    assert.deepEqual(options, { waitForBeforeUnload: true });
+    // A renderer with recovery permits beforeunload. Electron then destroys
+    // the dashboard contents and the owner can finish its own close.
+    dashboard.destroyed = true;
+    wc.emit('destroyed');
+  };
+  const closes = [];
+  f.window.close = () => {
+    let deferred = false;
+    f.window.emit('close', { preventDefault() { deferred = true; } });
+    closes.push(deferred);
+    if (!deferred) f.window.emit('closed');
+  };
+  f.window.close();
+  assert.deepEqual(closes, [false, true], 'outer close delegates to the view; the destruction callback closes the owner');
+  assert.ok('closeOptions' in bar, 'the owner tears down the titlebar view');
+});
 test('title changes and connection failure titles remain correct on both content layouts', async () => {
   for (const platform of ['darwin', 'linux', 'win32']) {
     let unavailable = false;
@@ -1427,6 +1540,49 @@ test('explicit native menu click copies a login link and sends only success; fai
   assert.equal(f.copied.length, 1);
   assert.equal(sent.length, 1);
   assert.equal(f.ipcMain.listenerCount('werkschaft:login-copy'), 0, 'renderer cannot request a clipboard write');
+});
+test('packaged macOS and Windows keep the Connection login menu and its machine-authenticated root fallback', async t => {
+  const root = fs.mkdtempSync(path.join(userData, 'native-login-menu-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const platform of ['darwin', 'win32']) {
+    const current = connected(), minted = defaultURL + 's/current?login=one-use#/board';
+    const authorityCalls = [];
+    let fail = false;
+    const f = await fixture(undefined, platform, { packaged: true, endpointRoot: root,
+      inspect: async target => {
+        assert.equal(target, root);
+        return current;
+      },
+      browserLoginLink: async (...args) => {
+        authorityCalls.push(args);
+        if (fail) throw Error('Unable to mint link');
+        return minted;
+      },
+    });
+    const wc = (f.views[0] || f.window).webContents;
+    await until(() => wc.mainFrame.url === defaultURL);
+    const item = f.menus.copy_browser_login;
+    assert(f.template.find(entry => entry.label === 'Connection').submenu.includes(item));
+    assert.equal(item.label, 'Copy Browser Login Link to Clipboard');
+    const sent = [];
+    wc.send = (...args) => sent.push(args);
+    wc.mainFrame.url = defaultURL + 's/current?view=board#/board';
+    await item.click();
+    assert.deepEqual(authorityCalls, [[root, current, '/s/current?view=board#/board']]);
+    assert.deepEqual(f.copied, [minted]);
+    assert.deepEqual(sent, [['werkschaft:login-copied']]);
+    wc.mainFrame.url = 'file:///unrelated.html';
+    await item.click();
+    assert.deepEqual(authorityCalls.at(-1), [root, current, '/']);
+    assert.deepEqual(f.copied, [minted, minted]);
+    assert.equal(sent.length, 1, 'non-dashboard documents receive no login notification');
+    fail = true;
+    await item.click();
+    assert.deepEqual(f.copied, [minted, minted]);
+    assert.equal(sent.length, 1);
+    assert.equal(f.ipcMain.listenerCount('werkschaft:login-copy'), 0);
+    f.window.emit('closed');
+  }
 });
 test('View Reload and Force Reload target the dashboard webContents on Windows (BaseWindow) and macOS', async () => {
   const win = await fixture(undefined, 'win32');

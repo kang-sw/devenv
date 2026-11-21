@@ -45,7 +45,8 @@
     growCtext();
   }
   // post sends a write route's JSON body; done(ok, answer) gets the parsed
-  // answer, or the server's refusal text. A route is the session's own
+  // answer, or the server's refusal text. The third argument is true when
+  // transport failed before a full response. A route is the session's own
   // unless it starts with "/", a daemon-wide route.
   function post(route, body, done) {
     if (route === "steer" && typeof boardIncarnation === "string") body.boardIncarnation = boardIncarnation;
@@ -66,6 +67,6 @@
         var v = {};
         try { v = JSON.parse(s); } catch (e) { v = {}; }
         done(true, v);
-      });
-    }, function () { done(false, wsT("js.post.unreachable")); });
+      }, function () { done(false, wsT("js.post.unreachable"), true); });
+    }, function () { done(false, wsT("js.post.unreachable"), true); });
   }

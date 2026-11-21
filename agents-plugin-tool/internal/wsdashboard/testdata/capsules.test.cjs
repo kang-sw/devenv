@@ -197,9 +197,10 @@ context.chipList = () => []; context.topicNotes = () => []; context.boardOwn = {
 context.inlineEditor = () => null;
 // A message send goes through the outbox section; this fixture has no conversation.
 Object.assign(context, { doc: { createElement: n => new El(n), querySelector: () => null }, q: () => [], dropImg: () => {}, release: () => {}, imgTrash: {}, imgSeq: 0, queueDraft: () => {}, saveDraft: () => {}, restoreHeld: () => {}, marker: n => '[Image #' + n + ']' });
-const dashSrc = readAssetSource('wsdashboard', 'dashboard.js'), outbox = dashSrc.match(/\n  \/\/ --- outbox:[^]*?\n  function outboxSync\([^]*?\n  \}\n/);
+const dashSrc = readAssetSource('wsdashboard', 'dashboard.js'), outbox = dashSrc.match(/\n  \/\/ --- outbox [^]*?\n  function outboxSync\([^]*?\n  \}\n/);
 assert.ok(outbox, 'outbox section');
-vm.runInContext(fn('sendInlineCommand') + '\n' + fn('sendMessage') + outbox[0], context);
+vm.runInContext(fn('submitCommand') + '\n' + fn('sendInlineCommand') + '\n' + fn('sendMessage') + outbox[0], context);
+Object.assign(context, { restoring: false, draftStore: null, draftDetached: false, persistOutbox: done => done(true) });
 f.value = '/lrv'; f.wsc.insert('skill', 'lead-review', 'lead-review', { start: 0, end: 4 }); f.setRangeText('check [composer-ux]', f.value.length, f.value.length);
 context.sendMessage(); assert.deepEqual(context.posted, [{ command: 'lead-review', args: 'check [composer-ux]' }]);
 f.value = 'Please /lrv'; f.wsc.insert('skill', 'lead-review', 'lead-review', { start: 7, end: 11 });

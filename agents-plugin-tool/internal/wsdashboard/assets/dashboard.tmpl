@@ -35,6 +35,7 @@
 <script src="/s/{{.Assets.FrameWebFile}}"></script>{{end}}
 <script src="/s/{{.Assets.FrameSelectFile}}"></script>
 {{else}}<script>{{i18n}}</script>
+<script>{{.Assets.ConfirmScript}}</script>
 <script>{{.Assets.AnswersScript}}</script>
 <script>window.wbForm = function () {
 {{.Assets.FormScript}}};
@@ -94,6 +95,7 @@ until then. */}}
 {{template "memopad"}}</div></div>
 {{template "settings" .}}
 <script>{{i18n}}</script>
+<script>{{.Assets.ConfirmScript}}</script>
 <script>{{.Assets.ToastScript}}</script>
 <script>{{.Assets.MentionScript}}</script>
 <script>{{.Assets.MemoScript}}</script>
@@ -398,6 +400,7 @@ line, the head's failure chip, and a rail row's error ring title. */}}
 </div>
 {{if not .Frame}}{{template "settings" .}}{{end}}
 <script>{{i18n}}</script>
+<script>{{.Assets.ConfirmScript}}</script>
 <script>{{.Assets.ToastScript}}</script>
 <script>{{.Assets.TrackerScript}}</script>
 <script>{{.Assets.MentionScript}}</script>
