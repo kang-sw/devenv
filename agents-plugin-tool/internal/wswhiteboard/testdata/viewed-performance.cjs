@@ -6,9 +6,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const { chromium } = require(process.env.WS_VIEWED_PERF_PLAYWRIGHT);
+const { readAssetSource } = require('../../wsdashboard/testdata/asset-source.cjs');
 const assets = path.join(__dirname, '../assets');
 assert(process.argv.length === 2 || (process.argv.length === 4 && process.argv[2] === '--source'));
-let source = fs.readFileSync(process.argv[3] || path.join(assets, 'stream.js'), 'utf8');
+let source = process.argv[3] ? fs.readFileSync(process.argv[3], 'utf8') : readAssetSource('wswhiteboard', 'stream.js');
 function instrument(needle, replacement) {
   assert.equal(source.split(needle).length, 2, `unique instrumentation site: ${needle}`);
   source = source.replace(needle, replacement);

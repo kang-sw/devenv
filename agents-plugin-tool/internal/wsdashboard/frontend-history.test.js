@@ -4,13 +4,14 @@ const fs = require('node:fs');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const path = require('node:path');
+const { readAssetSource } = require('./testdata/asset-source.cjs');
 const wb = path.join(__dirname, '../wswhiteboard');
 const prelude = fs.readFileSync(path.join(wb, 'check_form_test.go'), 'utf8').split('const formPrelude = `')[1].split('`')[0];
 const contract = fs.readFileSync(path.join(wb, 'stream_script_test.go'), 'utf8');
 const rawSetup = contract.split('script := `')[1].split('` + string(asset) + `')[0];
 const setup = rawSetup.slice(rawSetup.indexOf('\nObject.defineProperty'));
 const regression = contract.split('` + string(asset) + `')[1].split('\n`')[0];
-const asset = fs.readFileSync(path.join(wb, 'assets/stream.js'), 'utf8').replace('var kit = viewKit(window);', 'var kit = window.historyKit;');
+const asset = readAssetSource('wswhiteboard', 'stream.js').replace('var kit = viewKit(window);', 'var kit = window.historyKit;');
 function run(source) { vm.runInNewContext(source, { console }, { timeout: 10000 }); }
 
 test('history retains gap, pending-height, navigation, restore and auto-fold contracts', () => {
