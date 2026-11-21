@@ -570,17 +570,7 @@
       "registered_at": "2026-11-21T01:02:36Z"
     },
     "261121-feat-werkschaft-tauri-shell-return": {
-      "registered_at": "2026-11-21T11:06:46Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "active",
-        "touched_at": "2026-11-21T12:37:51Z",
-        "impl": {
-          "branch": "impl/develop/basin-spray-cider"
-        }
-      }
+      "registered_at": "2026-11-21T11:06:46Z"
     },
     "261121-feat-ws-board-command-slots": {
       "registered_at": "2026-11-21T09:21:23Z"
