@@ -238,6 +238,26 @@ hudPayload.roots[0].state = 'idle';
 ctx.agSwapped();
 assert.equal(oldRing.style.animationDelay, '', 'leaving an animated state clears its delay');
 
+// Reordering an existing animated wrapper detaches and remounts it in Chromium.
+// Its delay must advance to the current clock; the sibling shifted by the
+// insertion remains mounted and keeps its original delay.
+doc.timeline = { currentTime: 500 };
+hudPayload.roots[0].state = 'tool';
+hudPayload.roots[2].state = 'thinking';
+ctx.agSwapped();
+const movedRing = buttons[3].querySelector('.hud-ring');
+const movedDelay = movedRing.style.animationDelay;
+const stableDelay = oldRing.style.animationDelay;
+doc.timeline.currentTime = 700;
+hudPayload.roots = [hudPayload.roots[2], hudPayload.roots[0], hudPayload.roots[1]];
+ctx.agSwapped();
+assert.equal(hudRoots.children[0].firstElementChild.firstElementChild, buttons[3]);
+assert.equal(buttons[3].querySelector('.hud-ring'), movedRing);
+assert.notEqual(movedRing.style.animationDelay, movedDelay, 'moved ring is restamped');
+assert.equal(movedRing.style.animationDelay,
+  (-((700 + ctx.animationPhaseOffset('a4', 1150)) % 1150)).toFixed(1) + 'ms');
+assert.equal(oldRing.style.animationDelay, stableDelay, 'unmoved sibling is not restamped');
+
 // Empty visible HUD forest falls back to idle pill using HUD.Completed
 hudPayload = { lead: 'coord', completed: 4, peers: 2, roots: [] };
 ctx.agSwapped();

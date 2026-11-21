@@ -15,9 +15,9 @@
     if (doc.timeline && typeof doc.timeline.currentTime === "number") return doc.timeline.currentTime;
     return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
   }
-  function animationPhaseDelay(el, periodMs, seedKey, stateKey) {
+  function animationPhaseDelay(el, periodMs, seedKey, stateKey, force) {
     var stamp = stateKey + "|" + seedKey + "|" + periodMs;
-    if (el.wsAnimationStamp === stamp) return;
+    if (!force && el.wsAnimationStamp === stamp) return;
     var now = animationTimelineNow(), offset = animationPhaseOffset(seedKey, periodMs);
     var phase = ((now + offset) % periodMs + periodMs) % periodMs;
     el.style.animationDelay = (-phase).toFixed(1) + "ms";

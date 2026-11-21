@@ -54,7 +54,7 @@
     wrap.appendChild(slot);
     return wrap;
   }
-  function hudUpdateNode(wrap, node, ownTasks) {
+  function hudUpdateNode(wrap, node, ownTasks, moved) {
     var slot = wrap.firstElementChild, btn = slot.firstElementChild;
     var ring = btn.querySelector(".hud-ring"), emb = btn.querySelector(".hud-emblem");
     var state = node.state || "idle", harness = node.harness || "", label = node.label || node.id || "";
@@ -66,7 +66,7 @@
     btn.setAttribute("aria-label", label + " (" + (HUD_HARNESS_NAME[harness] || harness || "?") + ", " + hudStateText(state) + ")");
     if (harness) emb.setAttribute("data-h", harness); else emb.removeAttribute("data-h");
     emb.textContent = HUD_HARNESS_LABEL[harness] || "??";
-    if (ANIMATION_PERIOD_MS[state]) animationPhaseDelay(ring, ANIMATION_PERIOD_MS[state], node.id || "", state);
+    if (ANIMATION_PERIOD_MS[state]) animationPhaseDelay(ring, ANIMATION_PERIOD_MS[state], node.id || "", state, moved);
     else if (oldState !== state) { ring.style.animationDelay = ""; ring.wsAnimationStamp = ""; }
     var badge = btn.querySelector(".hud-badge"), badgeClass = state === "permission" ? "perm" : state === "failed" ? "fail" : "";
     if (badgeClass) {
@@ -93,8 +93,9 @@
   function hudReconcile(parent, nodes, existing, ownTasks, parentId, seen) {
     nodes.forEach(function (node, i) {
       var wrap = existing[node.id] || hudBuildNode();
-      if (parent.children[i] !== wrap) parent.insertBefore(wrap, parent.children[i] || null);
-      hudUpdateNode(wrap, node, ownTasks);
+      var moved = parent.children[i] !== wrap;
+      if (moved) parent.insertBefore(wrap, parent.children[i] || null);
+      hudUpdateNode(wrap, node, ownTasks, moved);
       seen[node.id] = true;
       if (parentId) hudEdges.push([parentId, node.id]);
       var children = Array.isArray(node.children) ? node.children : [];
