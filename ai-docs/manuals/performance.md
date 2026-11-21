@@ -1,5 +1,5 @@
 ---
-summary: Required before changing how native tooling or the daemon touches files or spawns processes - memory-first state, delta appends, whole-file retention, held handles, I/O-free interactive paths, and per-action file-operation measurement
+summary: Required before changing how native tooling or the daemon stores data, touches files, or spawns processes - the five storage types (ring, SQLite, files), memory-first state, delta appends, whole-file retention, held handles, I/O-free interactive paths, and per-action file-operation measurement
 ---
 
 # Performance
@@ -10,6 +10,9 @@ file syscall costs 10-100x what it costs on a clean machine. The goal is the
 fewest file touches per user action.
 
 ## Rules
+
+New or changed persisted data first names its type from `## Storage Types`
+and uses that type's store; the rules below then apply to that store.
 
 1. **Memory is the source of truth; files are for recovery.** Reads come from
    memory only; files are read once, at startup. Why: a per-call or per-event
@@ -38,6 +41,39 @@ fewest file touches per user action.
 7. **Decide by measurement.** Follow `## Measuring`.
 8. **Exceptions need the owner's approval.** A change that breaks a rule above
    states which rule, why, and its measured cost, and waits for that approval.
+
+## Storage Types
+
+Classify data by how it grows and how it is read, not by which feature owns
+it.
+
+| Type | Shape | Store | Examples |
+|---|---|---|---|
+| 1. Append-only log | Grows by appending; read back by recent range or replay; never queried by field | Segment ring: append to the newest segment, in-memory index, drop the oldest segment whole | Session transcripts, mailbox, audit events |
+| 2. Small mutable state | Few records changed in place | SQLite | Agent records, permission and support records, dashboard UI state, tracker cursors, session key store, live snapshots |
+| 3. Queue | Enqueued, claimed, removed | SQLite | Dashboard inbox |
+| 4. Queried structured history | Kept and queried by field, filter, or aggregate | SQLite | Whiteboard boards, usage numbers |
+| 5. Blob or Git-tracked file | Opaque content, or a file people or Git read directly | Plain file | Attachments, tickets, notes, config files |
+
+- **Type 1 capacity.** Every ring has a per-session byte cap (drop the oldest
+  segment), a per-store total cap that evicts whole sessions in
+  least-recently-used order, and a time retention after a session's last
+  activity. All three are knobs; segment size is an implementation choice.
+- **Types 2-4 share one SQLite discipline.** Open the database once and hold
+  the connection (Rule 4); serve reads from memory where the data fits
+  (Rule 1); one change is one WAL commit, which stands in for Rule 2's
+  appended line; an unchanged state commits nothing.
+- **Type 5 stays a file** because something outside the daemon reads it. Do
+  not move a file another process reads raw into SQLite without changing
+  that reader first.
+- **Unsure between 1 and 4** → type 1 unless a caller filters or aggregates
+  by field over the whole history; search over a ring scans the in-memory
+  index.
+
+Measured on the whiteboard board store (ticket
+`261119-refactor-ws-whiteboard-sqlite-board-store`, macOS): moving one board
+from a per-record folder to SQLite took a steady update from 103 to 19
+wrapper file operations, and p50 latency from 63.7 ms to 1.25 ms.
 
 ## Worked Example: Mailbox Store
 
