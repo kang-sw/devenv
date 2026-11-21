@@ -429,7 +429,14 @@
       "registered_at": "2026-11-17T05:39:55Z"
     },
     "261117-bug-ws-dashboard-pwa-renderer-crash-content-visibility": {
-      "registered_at": "2026-11-17T07:15:28Z"
+      "registered_at": "2026-11-17T07:15:28Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-21T09:41:38Z"
+      }
     },
     "261117-feat-role-scoped-workflow-context": {
       "registered_at": "2026-11-17T05:54:39Z"
