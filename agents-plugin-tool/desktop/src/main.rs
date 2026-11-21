@@ -3,6 +3,8 @@
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 compile_error!("Werkschaft supports macOS and Windows");
 
+#[cfg(any(windows, test))]
+mod accelerator;
 mod close;
 mod endpoint;
 #[cfg(target_os = "macos")]
@@ -19,7 +21,7 @@ use std::sync::{atomic::Ordering, Arc, Mutex};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     webview::NewWindowResponse,
-    AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+    AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 
 use navigation::{destination, Destination};
@@ -153,12 +155,47 @@ fn install_menu(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+struct ZoomLevel(Mutex<f64>);
+
+fn menu_action(window: WebviewWindow, state: &Arc<Connection>, id: &str) {
+    match id {
+        "retry" if state.retry_hooks() => {
+            #[cfg(target_os = "macos")]
+            if macos::install(&window, state.clone()).is_err() {
+                state.setup_failed(&window);
+            }
+            #[cfg(windows)]
+            state.webview_failed(window);
+        }
+        "retry" => state.connect(window, true),
+        "copy_login" => state.copy_login_link(window),
+        "devtools" | "devtools_f12" => {
+            #[cfg(target_os = "macos")]
+            if window.is_devtools_open() {
+                window.close_devtools();
+                return;
+            }
+            window.open_devtools();
+        }
+        _ => {
+            if let Some(step) = zoom::Step::from_menu_id(id) {
+                let zoom = window.state::<ZoomLevel>();
+                let mut level = zoom.0.lock().unwrap();
+                let target = zoom::next(*level, step);
+                if window.set_zoom(target).is_ok() {
+                    *level = target;
+                }
+            }
+        }
+    }
+}
+
 fn main() {
     let state = Arc::new(Connection::default());
     let menu_state = state.clone();
     let setup_state = state.clone();
-    let zoom = Mutex::new(1.0_f64);
     tauri::Builder::default()
+        .manage(ZoomLevel(Mutex::new(1.0)))
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
@@ -168,38 +205,8 @@ fn main() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .on_menu_event(move |app, event| {
-            let Some(window) = app.get_webview_window("main") else {
-                return;
-            };
-            let id = event.id().as_ref();
-            match id {
-                "retry" if menu_state.retry_hooks() => {
-                    #[cfg(target_os = "macos")]
-                    if macos::install(&window, menu_state.clone()).is_err() {
-                        menu_state.setup_failed(&window);
-                    }
-                    #[cfg(windows)]
-                    menu_state.webview_failed(window);
-                }
-                "retry" => menu_state.connect(window, true),
-                "copy_login" => menu_state.copy_login_link(window),
-                "devtools" | "devtools_f12" => {
-                    #[cfg(target_os = "macos")]
-                    if window.is_devtools_open() {
-                        window.close_devtools();
-                        return;
-                    }
-                    window.open_devtools();
-                }
-                _ => {
-                    if let Some(step) = zoom::Step::from_menu_id(id) {
-                        let mut level = zoom.lock().unwrap();
-                        let target = zoom::next(*level, step);
-                        if window.set_zoom(target).is_ok() {
-                            *level = target;
-                        }
-                    }
-                }
+            if let Some(window) = app.get_webview_window("main") {
+                menu_action(window, &menu_state, event.id().as_ref());
             }
         })
         .setup(move |app| {

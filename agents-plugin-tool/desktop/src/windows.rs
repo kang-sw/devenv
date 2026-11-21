@@ -2,18 +2,24 @@ use std::sync::Arc;
 
 use tauri::WebviewWindow;
 use webview2_com::{
-    take_pwstr, Microsoft::Web::WebView2::Win32::*, NavigationCompletedEventHandler,
-    NavigationStartingEventHandler, PermissionRequestedEventHandler, ProcessFailedEventHandler,
+    take_pwstr, AcceleratorKeyPressedEventHandler, Microsoft::Web::WebView2::Win32::*,
+    NavigationCompletedEventHandler, NavigationStartingEventHandler,
+    PermissionRequestedEventHandler, ProcessFailedEventHandler,
 };
-use windows::core::{Interface, BOOL, HSTRING, PWSTR};
+use windows::{
+    core::{Interface, BOOL, HSTRING, PWSTR},
+    Win32::UI::Input::KeyboardAndMouse::{
+        GetKeyState, VIRTUAL_KEY, VK_0, VK_ADD, VK_CONTROL, VK_F12, VK_I, VK_LWIN, VK_MENU,
+        VK_OEM_MINUS, VK_OEM_PLUS, VK_R, VK_RWIN, VK_SHIFT, VK_SUBTRACT,
+    },
+};
 
-use crate::{navigation, shell::Connection};
+use crate::{accelerator, menu_action, navigation, shell::Connection};
 
 pub fn install(window: &WebviewWindow, connection: Arc<Connection>) -> tauri::Result<()> {
     let window = window.clone();
     window.clone().with_webview(move |platform| {
-        let result =
-            unsafe { install_hooks(&platform.controller().CoreWebView2(), &window, &connection) };
+        let result = unsafe { install_hooks(&platform.controller(), &window, &connection) };
         match result {
             Ok(()) => queue(&window, move |target| connection.start(target)),
             Err(_) => {
@@ -37,11 +43,11 @@ fn queue(window: &WebviewWindow, action: impl FnOnce(WebviewWindow) + Send + 'st
 }
 
 unsafe fn install_hooks(
-    webview: &windows::core::Result<ICoreWebView2>,
+    controller: &ICoreWebView2Controller,
     window: &WebviewWindow,
     connection: &Arc<Connection>,
 ) -> windows::core::Result<()> {
-    let webview = webview.as_ref().map_err(Clone::clone)?;
+    let webview = controller.CoreWebView2()?;
     let mut token = 0;
     let frames = connection.clone();
     webview.add_FrameNavigationStarting(
@@ -160,5 +166,59 @@ unsafe fn install_hooks(
     let default_agent = take_pwstr(raw);
     let agent = format!("{default_agent} Werkschaft/{}", env!("CARGO_PKG_VERSION"));
     settings.SetUserAgent(&HSTRING::from(agent))?;
-    Ok(())
+    install_accelerators(controller, window.clone(), connection.clone())
+}
+
+unsafe fn install_accelerators(
+    controller: &ICoreWebView2Controller,
+    window: WebviewWindow,
+    connection: Arc<Connection>,
+) -> windows::core::Result<()> {
+    let epoch = connection.window_epoch();
+    let mut token = 0;
+    controller.add_AcceleratorKeyPressed(
+        &AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else { return Ok(()) };
+            let mut kind = COREWEBVIEW2_KEY_EVENT_KIND::default();
+            args.KeyEventKind(&mut kind)?;
+            if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN {
+                return Ok(());
+            }
+            let mut raw = 0;
+            args.VirtualKey(&mut raw)?;
+            let key = match VIRTUAL_KEY(raw as u16) {
+                VK_R => accelerator::Key::R,
+                VK_I => accelerator::Key::I,
+                VK_F12 => accelerator::Key::F12,
+                VK_0 => accelerator::Key::Zero,
+                VK_OEM_PLUS | VK_ADD => accelerator::Key::Plus,
+                VK_OEM_MINUS | VK_SUBTRACT => accelerator::Key::Minus,
+                _ => return Ok(()),
+            };
+            if [VK_MENU, VK_LWIN, VK_RWIN].into_iter().any(key_down) {
+                return Ok(());
+            }
+            if let Some(id) = accelerator::menu_id(key, key_down(VK_CONTROL), key_down(VK_SHIFT)) {
+                args.SetHandled(true)?;
+                let mut status = COREWEBVIEW2_PHYSICAL_KEY_STATUS::default();
+                args.PhysicalKeyStatus(&mut status)?;
+                if !status.WasKeyDown.as_bool() {
+                    // WebView2 blocks the browser process during this callback.
+                    // Dispatch after returning so Retry can safely navigate.
+                    let connection = connection.clone();
+                    queue(&window, move |target| {
+                        if connection.window_epoch() == epoch {
+                            menu_action(target, &connection, id);
+                        }
+                    });
+                }
+            }
+            Ok(())
+        })),
+        &mut token,
+    )
+}
+
+fn key_down(key: VIRTUAL_KEY) -> bool {
+    unsafe { GetKeyState(i32::from(key.0)) < 0 }
 }
