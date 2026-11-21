@@ -46,17 +46,13 @@ front-end only: no server, MCP, or store-shape change.
   (1482)=a). Rejected: clearing on any topic update (a progress log line
   would drop holds almost immediately).
 
-## Open Decision Queue
-
-Last ID: (1484)
-
-(1483) [open] [technical] Persist holds in `localStorage` keyed by board
-identity + item ID, storing a fingerprint of the item's content at hold time,
-over `sessionStorage` - holds must survive a reload, and the fingerprint is
-what detects an agent edit without any server help.
-(1484) [open] [technical] A custom in-card find bar over the native browser
-find - native find cannot be scoped to one card and is unavailable as an API
-in a plain browser page.
+- Holds persist in `localStorage` keyed by board identity + item ID, with a
+  fingerprint of the item's content at hold time; the fingerprint is how an
+  agent edit is detected without server help ((1483), owner ok 18:12).
+  Rejected: `sessionStorage` (holds must survive a reload).
+- In-card find is a custom find bar scoped to one card ((1484), owner ok
+  18:12). Rejected: the native browser find (cannot be scoped to one card and
+  has no page API).
 
 ## Constraints
 
