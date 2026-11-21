@@ -40,6 +40,15 @@
   // Shared by the child header, tree, and HUD. Keep a pending/closed set so
   // repeated clicks cannot send two close requests while a stream catches up.
   var subagentClosing = Object.create(null), subagentDialog = null;
+  function markChildCloseButton(el) {
+    var closed = wsT("js.subagent.closed");
+    el.disabled = true;
+    el.title = closed;
+    el.setAttribute("aria-label", closed);
+    var lbl = el.querySelector && el.querySelector(".tph-close-lbl");
+    if (lbl) lbl.textContent = closed;
+    else el.textContent = closed;
+  }
   function subagentClose(replyId, label, state, trigger) {
     if (!root.hasAttribute("data-can-control") || !replyId || subagentClosing[replyId]) return;
     subagentClosing[replyId] = true;
@@ -56,7 +65,7 @@
           document.querySelectorAll("[data-reply-id]").forEach(function (el) {
             if (el.getAttribute("data-reply-id") === replyId) {
               el.setAttribute("data-subagent-closed", "1");
-              if (el.hasAttribute("data-child-close")) { el.disabled = true; el.textContent = wsT("js.subagent.closed"); }
+              if (el.hasAttribute("data-child-close")) markChildCloseButton(el);
             }
           });
           subagentClosing[replyId] = "closed";
@@ -1325,7 +1334,7 @@
   function leadSwapped(name) {
     if (name === "head") {
       document.querySelectorAll("[data-child-close]").forEach(function (b) {
-        if (subagentClosing[b.getAttribute("data-reply-id")] === "closed") { b.disabled = true; b.textContent = wsT("js.subagent.closed"); }
+        if (subagentClosing[b.getAttribute("data-reply-id")] === "closed") markChildCloseButton(b);
       });
     }
     if (handedPage && !hostedPage) {

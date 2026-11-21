@@ -156,6 +156,13 @@ a.tph-parent:focus-visible { outline: 1.5px solid var(--wb-primary); outline-off
 .tph-chips > .counts:empty { display: none; }
 .tph-chips .chip, .tph-chips .nolive, .tph-chips .ended-chip, .tph-chips .worktree-path { flex: none; font-size: 11px; line-height: 18px; }
 .tph-chips .worktree-path { flex: 0 1 auto; min-width: 0; max-width: 32ch; }
+/* child close: hanging danger action pill, visible only to viewers who hold controls */
+.tph.child-close { display: none; }
+html[data-can-control] .tph.child-close { display: inline-flex; gap: 5px; margin: 0; color: var(--wb-fail); cursor: pointer; }
+.tph-close .tph-x { flex: none; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+html[data-can-control] .tph.child-close:hover:not(:disabled) { background: color-mix(in srgb, var(--wb-fail) 10%, var(--wb-card)); }
+html[data-can-control] .tph.child-close:focus-visible { outline: 1.5px solid var(--wb-fail); outline-offset: -2px; }
+html[data-can-control] .tph.child-close:disabled { opacity: .5; cursor: default; }
 /* center: centered in the strip's free width, never under 14px from a side */
 .tcen { flex: none; display: inline-flex; align-items: flex-start; gap: 6px; margin: 0 auto; padding: 0 8px; }
 .talert[hidden], .talert:empty { display: none; }
@@ -169,6 +176,8 @@ a.tph-parent:focus-visible { outline: 1.5px solid var(--wb-primary); outline-off
 .dwrap > .top.tmeas .tph-id { flex-shrink: 0; }
 .dwrap > .top.tch .tph-hs > .hosted, .dwrap > .top.tch .tph-chips > :not(.fail):not(.mcpbad) { display: none; }
 .dwrap > .top.tch .tph-chips:not(:has(> .fail, > .mcpbad)) { display: none; }
+.dwrap > .top.tch .tph-close { width: 34px; padding: 2px 0 0; justify-content: center; }
+.dwrap > .top.tch .tph-close-lbl { display: none; }
 /* the session name: the display label or reply-id as a copy button, the
    rename pencil beside it, and the inline rename input in its place */
 .sname { display: inline-flex; align-items: center; gap: 2px; min-width: 0; white-space: nowrap; }
@@ -531,9 +540,3 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .rail .admission-missing { overflow-wrap: anywhere; margin: 5px 0; color: var(--wb-fail); }
 .rail .rcap[hidden], .rail .rcap .seg[hidden], .rail .admission-feedback[hidden], .rail .admission-copy[hidden], .rail .admission-row-correction[hidden], .rail .admission-status[hidden], .rail .afx[hidden] { display: none; }
 .rail [data-admission-apply]:disabled { opacity: .5; cursor: progress; }
-
-
-/* Session controls are visible only to viewers on the daemon host. */
-.child-close { display: none; }
-html[data-can-control] .child-close { display: inline-flex; align-items: center; margin: 0 8px; padding: 5px 9px; border: 1px solid var(--wb-line); border-radius: 6px; background: var(--wb-card); color: var(--wb-fail); cursor: pointer; font: inherit; }
-.child-close:disabled { opacity: .5; cursor: default; }
