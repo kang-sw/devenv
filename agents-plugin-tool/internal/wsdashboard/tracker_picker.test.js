@@ -798,7 +798,10 @@ function parseMiniDom(html) {
   const re = /<(\/)?([a-zA-Z0-9-]+)([^>]*)>|([^<]+)/g;
   let m;
   while ((m = re.exec(String(html || '')))) {
-    if (m[4]) continue;
+    if (m[4]) {
+      stack[stack.length - 1].textContent += m[4];
+      continue;
+    }
     const closing = !!m[1], tag = m[2].toLowerCase(), rawAttrs = m[3] || '';
     if (closing) {
       while (stack.length > 1 && stack[stack.length - 1].tag !== tag) stack.pop();
@@ -1421,5 +1424,88 @@ test('Phase 2 round-4 review: plain-lead CC subtree member CC source/exclusion d
     assert.equal(byId['tkpm-err'].hidden, false);
     assert.equal(c.PM.busy, false);
     assert.equal(c.PM.picks['oh-sj'], true);
+  }
+});
+
+test('Phase 2 polish: org-badge rows omit org name from subtitle and stale notice disables Apply while keeping Cancel/close working', () => {
+  const depts = {
+    'kim-hn': 'SW개발실',
+    'lee-dy': 'SW개발1팀',
+    'choi-jw': 'SW개발1팀',
+    'park-sy': 'SW개발2팀',
+    'oh-sj': '',
+  };
+  const makeVs = () => ({
+    viewer: { member: 'kim-hn', reach: { 'lee-dy': 1, 'choi-jw': 2, 'jung-mj': 2, 'kang-yr': 2, 'park-sy': 1, 'yoon-th': 2, 'han-sa': 2 } },
+    members: J(MEMBERS),
+    orgs: J(ORGS),
+    items: {
+      i1: {
+        id: 'i1', alias: 'k-1', kind: 'task', title: 'Polish test', hidden: false,
+        cc: ['choi-jw'], orgCC: [],
+        ccSources: { 'choi-jw': { personal: true, orgs: [] } },
+        ccExcluded: [],
+        assignments: [], pending: [],
+      },
+    },
+    rules: {},
+    assignments: {},
+    events: [],
+  });
+
+  for (const kind of ['cc', 'assign']) {
+    const { c, byId, dispatched } = makePickerDomHarness(makeVs());
+    c.orgOf = id => depts[id] || '';
+    c.openPicker(kind, { item: 'i1' });
+
+    // Org-badged lead rows omit org name from subtitle (badge + id only)
+    const leeRow = byId['tkpm-body'].querySelector('.pm-nd[data-id="lee-dy"]');
+    assert.ok(leeRow.querySelector('.tk-org-badge'), `${kind}: lee-dy renders org badge`);
+    assert.equal(leeRow.querySelector('.pm-o').textContent, 'lee-dy', `${kind}: badged lead subtitle is id only`);
+
+    const kimRow = byId['tkpm-body'].querySelector('.pm-nd[data-id="kim-hn"]');
+    assert.ok(kimRow.querySelector('.tk-org-badge'), `${kind}: kim-hn renders org badge`);
+    assert.equal(kimRow.querySelector('.pm-o').textContent, 'kim-hn', `${kind}: badged root lead subtitle is id only`);
+
+    // Rows without an org badge keep "<dept> · <id>" when dept exists, or "<id>" when empty
+    const parkRow = byId['tkpm-body'].querySelector('.pm-nd[data-id="park-sy"]');
+    assert.equal(parkRow.querySelector('.tk-org-badge'), null, `${kind}: plain lead has no org badge`);
+    assert.equal(parkRow.querySelector('.pm-o').textContent, 'SW개발2팀 &middot; park-sy', `${kind}: plain lead keeps dept · id`);
+
+    const choiRow = byId['tkpm-body'].querySelector('.pm-nd[data-id="choi-jw"]');
+    assert.equal(choiRow.querySelector('.tk-org-badge'), null, `${kind}: regular member has no org badge`);
+    assert.equal(choiRow.querySelector('.pm-o').textContent, 'SW개발1팀 &middot; choi-jw', `${kind}: regular member keeps dept · id`);
+
+    const ohRow = byId['tkpm-body'].querySelector('.pm-nd[data-id="oh-sj"]');
+    assert.equal(ohRow.querySelector('.pm-o').textContent, 'oh-sj', `${kind}: member without dept shows id only`);
+
+    // Stage org target -> Apply is enabled before drift
+    const sw1Btn = byId['tkpm-body'].querySelector('[data-pm="grp"][data-id="lee-dy"]');
+    c.pmClick({ target: sw1Btn, stopPropagation() {} });
+    const applyBefore = byId['tkpm-foot'].querySelector('#tkpm-apply');
+    assert.ok(applyBefore);
+    assert.equal(applyBefore.getAttribute('disabled'), null, `${kind}: Apply enabled before stale`);
+
+    // Concurrent org vacancy -> stale apply disables Apply while notice shows, Cancel stays enabled and closes
+    c.VS.orgs = c.VS.orgs.map(o => (o.id === 'o-sw1' ? Object.assign({}, o, { head: '' }) : o));
+    c.pmApply();
+    assert.equal(dispatched.length, 0, `${kind}: stale apply sends nothing`);
+    assert.equal(byId['tkpm'].open, true, `${kind}: modal stays open on stale`);
+    assert.equal(byId['tkpm-err'].textContent, 'js.tk.pm.stale');
+    assert.equal(byId['tkpm-err'].hidden, false);
+    const applyAfter = byId['tkpm-foot'].querySelector('#tkpm-apply');
+    assert.ok(applyAfter);
+    assert.notEqual(applyAfter.getAttribute('disabled'), null, `${kind}: Apply is disabled while stale notice is showing`);
+
+    // Keyboard Cmd/Ctrl+Enter while stale also sends nothing
+    c.pmKey({ key: 'Enter', metaKey: true, target: byId['tkpmq'], stopPropagation() {}, preventDefault() {} });
+    assert.equal(dispatched.length, 0);
+
+    // Cancel button remains enabled and closes the modal
+    const cancelBtn = byId['tkpm-foot'].querySelector('[data-pm="close"]');
+    assert.ok(cancelBtn);
+    assert.equal(cancelBtn.getAttribute('disabled'), null, `${kind}: Cancel stays enabled while stale`);
+    c.pmClick({ target: cancelBtn, stopPropagation() {} });
+    assert.equal(byId['tkpm'].open, false, `${kind}: Cancel closes stale modal`);
   }
 });

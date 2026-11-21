@@ -1027,7 +1027,7 @@
       picks: picks, unpicks: unpicks, groups: groups,
       lockedP: lockedP, lockedOrder: lockedOrder, lockedG: lockedG,
       norule: norule, single: single, compl: compl,
-      shut: {}, q: '', only: false, focusId: null, err: '', busy: false,
+      shut: {}, q: '', only: false, focusId: null, err: '', stale: false, busy: false,
       backEl: opener || null, back: opener ? returnSel(opener) : null
     };
     hideTip();
@@ -1171,7 +1171,7 @@
     var col2 = showGrp ? '<span></span>' : PM.single
       ? '<span class="pm-rdo' + (locked ? ' lock' : '') + '" data-pm="self" data-id="' + esc(id) + '" role="radio" aria-checked="' + (on || locked ? 'true' : 'false') + '"' + (locked ? ' aria-disabled="true"' : '') + rowTip + '></span>'
       : '<span class="pm-ck' + (locked ? ' lock' : '') + '" data-pm="self" data-id="' + esc(id) + '" role="checkbox" aria-checked="' + (on || covered || locked ? 'true' : 'false') + '"' + (locked || covered ? ' aria-disabled="true"' : '') + rowTip + '></span>';
-    var subTxt = (!showGrp && covered) ? pmAsgCovText(covBy, true) : pmRowSub(id);
+    var subTxt = (!showGrp && covered) ? pmAsgCovText(covBy, true) : pmRowSub(id, !!org);
     var orgTag = org ? '<span class="tk-org-badge">' + esc(org.name) + '</span>' : '';
     var who = '<span class="pm-who"' + (showGrp ? '' : ' data-pm="self" data-id="' + esc(id) + '"') + rowTip + '><span class="pm-nm">' + esc(nm(id)) + '</span>' +
       orgTag + (id === v ? '<span class="pm-chip you">' + wsT("js.tk.pm.you") + '</span>' : '') + '<span class="pm-o">' + subTxt + '</span></span>';
@@ -1216,7 +1216,8 @@
     }).join('');
   }
 
-  function pmRowSub(id) {
+  function pmRowSub(id, hasOrgBadge) {
+    if (hasOrgBadge) return esc(id);
     var o = orgOf(id);
     return o ? esc(o) + ' &middot; ' + esc(id) : esc(id);
   }
@@ -1241,7 +1242,7 @@
     var orgTag = org ? '<span class="tk-org-badge">' + esc(org.name) + '</span>' : '';
     var who = '<span class="pm-who"' + (showGrp ? '' : ' data-pm="self" data-id="' + esc(id) + '"') + covTip + '><span class="pm-nm">' + esc(nm(id)) + '</span>' +
       orgTag + (id === v ? '<span class="pm-chip you">' + wsT("js.tk.pm.you") + '</span>' : '') +
-      '<span class="pm-o">' + pmRowSub(id) + '</span></span>';
+      '<span class="pm-o">' + pmRowSub(id, !!org) + '</span></span>';
     var rt = '';
     if (was && eff) rt += '<span class="pm-chip was">' + wsT("js.tk.pm.cc.was") + '</span>';
     else if (!was && eff && !covered) rt += '<span class="pm-chip add">' + wsT("js.tk.pm.cc.add") + '</span>';
@@ -1298,7 +1299,7 @@
         : (cnt ? wsTn("js.tk.pm.asg.apply.n", cnt) : wsT("js.tk.pm.asg.apply")));
     return '<div class="pm-row">' + left + '<span class="grow"></span>' +
       '<button type="button" class="pm-btn" data-pm="close">' + wsT("js.tk.dlg.cancel") + '</button>' +
-      '<button type="button" class="pm-btn primary" id="tkpm-apply" data-pm="apply"' + (!ev.dirty || PM.busy ? ' disabled' : '') + '>' + applyLbl + '</button></div>';
+      '<button type="button" class="pm-btn primary" id="tkpm-apply" data-pm="apply"' + (!ev.dirty || PM.busy || PM.stale ? ' disabled' : '') + '>' + applyLbl + '</button></div>';
   }
 
   function pmDraw() {
@@ -1318,7 +1319,7 @@
       var ccSumTxt = PM.retarget ? wsTn("js.tk.pm.retarget.cc.sum", ev.effectiveCount) : wsT("js.tk.pm.cc.sum", ev.effectiveCount, ev.added.length, ev.removed.length);
       footHtml = '<div class="pm-row"><span class="pm-sum">' + ccSumTxt +
         '</span><span class="grow"></span><button type="button" class="pm-btn" data-pm="close">' + wsT("js.tk.dlg.cancel") + '</button>' +
-        '<button type="button" class="pm-btn primary" id="tkpm-apply" data-pm="apply"' + (!ev.dirty || PM.busy ? ' disabled' : '') + '>' +
+        '<button type="button" class="pm-btn primary" id="tkpm-apply" data-pm="apply"' + (!ev.dirty || PM.busy || PM.stale ? ' disabled' : '') + '>' +
         ccApplyLbl + '</button></div>';
     } else {
       ev = pmAssignEvalCur();
@@ -1359,6 +1360,7 @@
     var ev = pmCcEvalCur();
     if (ev.cov.personBy[id]) return false;
     PM.err = '';
+    PM.stale = false;
     if (ev.effective[id]) {
       delete PM.picks[id];
       if (ev.retained[id]) PM.unpicks[id] = true;
@@ -1379,6 +1381,7 @@
     } else {
       if (PM.lockedP[id] || pmAssignEvalCur().visCov.personBy[id]) return;
       PM.err = '';
+      PM.stale = false;
       if (PM.single) {
         if (PM.picks[id]) delete PM.picks[id];
         else { PM.picks = {}; PM.picks[id] = true; }
@@ -1396,6 +1399,7 @@
       if (PM.lockedG[id] || pmAssignEvalCur().visCov.groupBy[id]) return;
     }
     PM.err = '';
+    PM.stale = false;
     pmTogMap(PM.groups, id);
     PM.focusId = null;
     pmDraw();
@@ -1408,7 +1412,7 @@
   }
 
   function pmApply() {
-    if (!PM || PM.busy) return;
+    if (!PM || PM.busy || PM.stale) return;
     var cur = PM;
     if (cur.kind === 'assign' && cur.draft) {
       var ev = pmAssignEvalCur();
@@ -1424,6 +1428,7 @@
     }
     var plan = pmBuildApplyEvents(cur, VS);
     if (plan.stale) {
+      cur.stale = true;
       cur.err = wsT("js.tk.pm.stale");
       pmDraw();
       return;
@@ -1431,6 +1436,7 @@
     var events = plan.events;
     if (!events.length) return;
     cur.busy = true;
+    cur.stale = false;
     cur.err = '';
     pmDraw();
     AD.dispatch(cur.store, events.map(function (ev) {
@@ -1476,6 +1482,7 @@
       if (sep < 0) return;
       var kind = k.slice(0, sep), cid = k.slice(sep + 1);
       PM.err = '';
+      PM.stale = false;
       if (kind === 'g') delete PM.groups[cid];
       else if (kind === 'rmg') PM.groups[cid] = true;
       else if (kind === 'p') {
