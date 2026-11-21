@@ -2,8 +2,10 @@
 title: "ws 대시보드 확인 대화상자와 초안 보호의 페이지 내 전환"
 related:
   261117-research-werkschaft-tauri-shell-revisit: "Shell viability research and the later Tauri migration decision"
-sage-review-design: blocked
-sage-review-completeness: blocked
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 2816c5dfa74b0067
+sage-review-completeness-reviewed: 2816c5dfa74b0067
 ---
 
 # Move dashboard confirmations and draft protection into the page
@@ -26,8 +28,9 @@ inventory was checked at `1b8605ab4`.
 
 - Reuse one in-page HTML `<dialog>` confirmation helper across the ten browser
   confirmation sites. Use it for the draft decision before a destructive
-  iframe swap in Phase 2. Retire the Electron main-process Stay/Leave dialog
-  through the approved close policy in (2020).
+  iframe swap in Phase 2. Under the approved close policy in (2020), skip the
+  Electron main-process Stay/Leave dialog when the loaded renderer establishes
+  draft recovery; keep it as the fallback for legacy renderers that cannot.
 - Target **T0 (transparent, patch-safe)** for the presentation changes. The
   daemon serves its own dashboard bundle (`agents-plugin-tool/internal/wsdashboard/pages.go:27`,
   `agents-plugin-tool/internal/wsdashboard/page_routes.go:98-113`). Old and new
@@ -171,7 +174,7 @@ closures and label deletion, verify that acceptance issues one action and
 cancellation issues none. Inventory the assets again for remaining native
 confirmation calls and capture the before/after comparisons.
 
-### Phase 2: Protect unsaved drafts before iframe swaps and remove the native Stay/Leave dialog
+### Phase 2: Protect unsaved drafts before iframe swaps and bypass the native Stay/Leave dialog for recovery-capable renderers
 
 Build on the Phase 1 helper. Resolve the active frame's draft decision before
 changing or discarding it. The current guard attempts a draft save and then
@@ -234,7 +237,7 @@ open DevTools through their menu and shortcuts, the Copy Browser Login Link menu
 item still exists and mints usable login links, and refusal feedback reaches
 users in mixed-version operation.
 
-## Blocked (2026-11-21)
+## Sage Review Round 1 (2026-11-21)
 
 ### Design Reviewer — block
 
