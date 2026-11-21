@@ -86,7 +86,7 @@
   // the column as the user dragged it, convow the conversation's beside
   // the board (0: the stylesheet's).
   var gal = null, lay = null, galEl = null, railEl = null, dotsEl = null, viewEl = null, plusEl = null;
-  var pageEls = {}, paneEls = {}, splitEls = {}, divEls = {}, dotEls = {}, railLast = -Infinity, rg = null, railMoved = false, resizeBound = false;
+  var pageEls = {}, paneEls = {}, splitEls = {}, divEls = {}, dotEls = {}, railWheel = new G.RailWheel(), rg = null, railMoved = false, resizeBound = false;
   var boardw = 0, convow = 0;
   var toolbar = null, overviewOn = false;
   var stateFilter = "all", stateUI = null;
@@ -902,10 +902,8 @@
     down.addEventListener("click", function () { if (!railMoved) step(1); });
     railEl.addEventListener("wheel", function (e) {
       if (e.preventDefault) e.preventDefault();
-      var now = Date.now(), dy = +e.deltaY || 0;
-      if (!dy || !G.railStep(railLast, now)) return;
-      railLast = now;
-      step(dy > 0 ? 1 : -1);
+      var dir = railWheel.wheel({ dy: +e.deltaY || 0, deltaMode: e.deltaMode || 0, now: Date.now() });
+      if (dir) step(dir);
     }, { passive: false });
     viewEl.addEventListener("wheel", function (e) { gateWheel(e, false); }, { passive: false });
     railEl.addEventListener("pointerdown", function (e) {
