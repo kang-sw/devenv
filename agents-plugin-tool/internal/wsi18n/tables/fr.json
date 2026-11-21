@@ -2960,5 +2960,20 @@
   "js.settings.proposal.discard": "Annuler le brouillon",
   "js.settings.bucket.overridden_in": "Surchargé dans : {0}",
   "js.settings.bucket.tag": "Compartiment harness",
-  "js.settings.layer_major_tag": "Compartiment couche d'abord"
+  "js.settings.layer_major_tag": "Compartiment couche d'abord",
+  "js.tk.pm.grp.org.one": "Tout {1} ({0})",
+  "js.tk.pm.grp.org.other": "Tout {1} ({0})",
+  "js.tk.pm.cov.org.tip": "Inclus dans tout {0}",
+  "js.tk.pm.asg.cov.org": "Inclus dans la règle de {0}",
+  "js.tk.pm.asg.grp.org.pend.tip": "Crée une règle d’organisation pour {0} (en attente : {1} accepte)",
+  "js.tk.pm.asg.org.locked.tip": "Déjà attribué — seul {0} peut retirer cette règle d’organisation",
+  "js.tk.pm.chip.cc.org.one": "{1} · {0}",
+  "js.tk.pm.chip.cc.org.other": "{1} · {0}",
+  "js.tk.pm.chip.asg.org.one": "{1} · règle ({0})",
+  "js.tk.pm.chip.asg.org.other": "{1} · règle ({0})",
+  "js.tk.pm.chip.asg.org.pend.one": "{1} · en attente ({0})",
+  "js.tk.pm.chip.asg.org.pend.other": "{1} · en attente ({0})",
+  "js.tk.pm.vac.tip": "Les organisations sans responsable ne peuvent pas être sélectionnées",
+  "js.tk.pm.vac.hint": "Un administrateur doit désigner un responsable pour sélectionner",
+  "js.tk.pm.stale": "Modifié ailleurs. Veuillez rouvrir."
 }

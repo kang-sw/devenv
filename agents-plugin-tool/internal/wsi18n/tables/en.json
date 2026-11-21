@@ -2960,5 +2960,20 @@
   "js.settings.proposal.discard": "Discard draft",
   "js.settings.bucket.overridden_in": "Overridden in: {0}",
   "js.settings.bucket.tag": "Harness bucket",
-  "js.settings.layer_major_tag": "Layer-first bucket"
+  "js.settings.layer_major_tag": "Layer-first bucket",
+  "js.tk.pm.grp.org.one": "All of {1} ({0})",
+  "js.tk.pm.grp.org.other": "All of {1} ({0})",
+  "js.tk.pm.cov.org.tip": "Included in all of {0}",
+  "js.tk.pm.asg.cov.org": "Included in {0}’s rule",
+  "js.tk.pm.asg.grp.org.pend.tip": "Creates an org rule for {0} (pending: {1} accepts)",
+  "js.tk.pm.asg.org.locked.tip": "Already assigned — only {0} can remove this org rule",
+  "js.tk.pm.chip.cc.org.one": "{1} · {0}",
+  "js.tk.pm.chip.cc.org.other": "{1} · {0}",
+  "js.tk.pm.chip.asg.org.one": "{1} · rule ({0})",
+  "js.tk.pm.chip.asg.org.other": "{1} · rule ({0})",
+  "js.tk.pm.chip.asg.org.pend.one": "{1} · pending ({0})",
+  "js.tk.pm.chip.asg.org.pend.other": "{1} · pending ({0})",
+  "js.tk.pm.vac.tip": "Orgs without a head cannot be selected",
+  "js.tk.pm.vac.hint": "Admin must assign a head to select",
+  "js.tk.pm.stale": "Changed elsewhere. Please reopen."
 }

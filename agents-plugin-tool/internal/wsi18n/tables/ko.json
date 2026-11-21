@@ -2960,5 +2960,20 @@
   "js.settings.proposal.discard": "초안 취소",
   "js.settings.bucket.overridden_in": "오버라이드됨: {0}",
   "js.settings.bucket.tag": "하네스 버킷",
-  "js.settings.layer_major_tag": "레이어 우선 버킷"
+  "js.settings.layer_major_tag": "레이어 우선 버킷",
+  "js.tk.pm.grp.org.one": "{1} 전체 ({0}명)",
+  "js.tk.pm.grp.org.other": "{1} 전체 ({0}명)",
+  "js.tk.pm.cov.org.tip": "{0} 전체에 포함",
+  "js.tk.pm.asg.cov.org": "{0} 규칙에 포함",
+  "js.tk.pm.asg.grp.org.pend.tip": "클릭하면 {0} 규칙 (대기: {1}이(가) 수락)",
+  "js.tk.pm.asg.org.locked.tip": "이미 배정된 조직 — {0}만 해제할 수 있습니다",
+  "js.tk.pm.chip.cc.org.one": "{1} · {0}명",
+  "js.tk.pm.chip.cc.org.other": "{1} · {0}명",
+  "js.tk.pm.chip.asg.org.one": "{1} · 규칙 {0}명",
+  "js.tk.pm.chip.asg.org.other": "{1} · 규칙 {0}명",
+  "js.tk.pm.chip.asg.org.pend.one": "{1} · 대기 {0}명",
+  "js.tk.pm.chip.asg.org.pend.other": "{1} · 대기 {0}명",
+  "js.tk.pm.vac.tip": "헤드가 없는 조직은 선택할 수 없습니다",
+  "js.tk.pm.vac.hint": "관리자가 헤드를 지정해야 선택 가능",
+  "js.tk.pm.stale": "다른 곳에서 변경되었습니다. 다시 열어 주세요."
 }

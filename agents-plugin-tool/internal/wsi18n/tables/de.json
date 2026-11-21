@@ -2960,5 +2960,20 @@
   "js.settings.proposal.discard": "Entwurf verwerfen",
   "js.settings.bucket.overridden_in": "Überschrieben in: {0}",
   "js.settings.bucket.tag": "Harness-Bucket",
-  "js.settings.layer_major_tag": "Ebenen-zuerst-Bucket"
+  "js.settings.layer_major_tag": "Ebenen-zuerst-Bucket",
+  "js.tk.pm.grp.org.one": "Alle in {1} ({0})",
+  "js.tk.pm.grp.org.other": "Alle in {1} ({0})",
+  "js.tk.pm.cov.org.tip": "Enthalten in allen Mitgliedern von {0}",
+  "js.tk.pm.asg.cov.org": "In der Regel von {0} enthalten",
+  "js.tk.pm.asg.grp.org.pend.tip": "Erstellt eine Organisationsregel für {0} (ausstehend: {1} nimmt an)",
+  "js.tk.pm.asg.org.locked.tip": "Bereits zugewiesen — nur {0} kann diese Organisationsregel entfernen",
+  "js.tk.pm.chip.cc.org.one": "{1} · {0}",
+  "js.tk.pm.chip.cc.org.other": "{1} · {0}",
+  "js.tk.pm.chip.asg.org.one": "{1} · Regel ({0})",
+  "js.tk.pm.chip.asg.org.other": "{1} · Regel ({0})",
+  "js.tk.pm.chip.asg.org.pend.one": "{1} · Ausstehend ({0})",
+  "js.tk.pm.chip.asg.org.pend.other": "{1} · Ausstehend ({0})",
+  "js.tk.pm.vac.tip": "Organisationen ohne Leitung können nicht ausgewählt werden",
+  "js.tk.pm.vac.hint": "Admin muss eine Leitung zuweisen, um auszuwählen",
+  "js.tk.pm.stale": "Anderswo geändert. Bitte erneut öffnen."
 }

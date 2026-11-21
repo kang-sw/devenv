@@ -2960,5 +2960,20 @@
   "js.settings.proposal.discard": "取消草稿",
   "js.settings.bucket.overridden_in": "已覆盖：{0}",
   "js.settings.bucket.tag": "Harness 桶",
-  "js.settings.layer_major_tag": "层级优先桶"
+  "js.settings.layer_major_tag": "层级优先桶",
+  "js.tk.pm.grp.org.one": "{1} 全体 ({0}人)",
+  "js.tk.pm.grp.org.other": "{1} 全体 ({0}人)",
+  "js.tk.pm.cov.org.tip": "已包含在 {0} 全体中",
+  "js.tk.pm.asg.cov.org": "已包含在 {0} 的规则中",
+  "js.tk.pm.asg.grp.org.pend.tip": "为 {0} 创建组织规则（待确认：{1} 接受）",
+  "js.tk.pm.asg.org.locked.tip": "已分配 — 仅 {0} 可移除此组织规则",
+  "js.tk.pm.chip.cc.org.one": "{1} · {0}人",
+  "js.tk.pm.chip.cc.org.other": "{1} · {0}人",
+  "js.tk.pm.chip.asg.org.one": "{1} · 规则 ({0}人)",
+  "js.tk.pm.chip.asg.org.other": "{1} · 规则 ({0}人)",
+  "js.tk.pm.chip.asg.org.pend.one": "{1} · 待确认 ({0}人)",
+  "js.tk.pm.chip.asg.org.pend.other": "{1} · 待确认 ({0}人)",
+  "js.tk.pm.vac.tip": "无负责人的组织无法选择",
+  "js.tk.pm.vac.hint": "需管理员指定负责人后才可选择",
+  "js.tk.pm.stale": "已在别处更改，请重新打开。"
 }

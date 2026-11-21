@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: b7dd96a88b1e08f3
 sage-review-completeness-reviewed: b7dd96a88b1e08f3
+completed: 2026-11-22
 ---
 
 # Tracker CC and assign: shared checkbox picker modal over the org tree
@@ -159,7 +160,7 @@ Approved mockup (owner check (1390)=ok, 2026-11-19 10:40, v2):
 ## Prior Decisions
 
 - 261119-feat-ws-tracker-org-chart-editor (2026-11-19, Decisions): "\"미배치 (리드 없음)\" group = live members with no lead and no followers, shown in a separate dashed group under the tree." — bearing: constrains
-- 261119-feat-ws-tracker-org-entity (2026-11-19, Decisions): "Org CC = new event types, T1. `item.cc_org {item, org}` / `item.uncc_org {item, org}`. Org CC is dynamic and additive, like assign rules" — bearing: constrains
+- 261119-feat-ws-tracker-org-entity (2026-11-19, Decisions): "Org CC = new event types with provenance, T1. `item.cc_org {item, org}` / `item.uncc_org {item, org}`. Org CC is dynamic and revokes on removal: `item.uncc_org` removes people who came only through that registration." — bearing: constrains
 - 261119-feat-ws-tracker-org-entity (2026-11-19, Decisions): "Org assign = hybrid `item.assign` target, T1. `{root: <current head>, org: <id>, include_root, levels}`." — bearing: constrains
 - 261111-feat-ws-tracker-cc-field (2026-11-11, Decisions): "Removing a CC is open to everyone too, symmetric with adding (technical, (279)): CC carries no duty" — bearing: constrains
 - 261111-feat-ws-tracker-assignee-edit-and-body-merge (2026-11-11, Decisions): "`item.hide` and `item.assign` stay creator-only." — bearing: constrains
@@ -210,7 +211,7 @@ Verification:
   plus one capture of a fixture 409 refusal shown inline with its reason
   and the selection kept.
 
-### Result
+### Result (8d9a77b) - 2026-11-20
 
 Landed on `impl/develop/paper-puma-plus` (a152cef07..8d9a77b2a, merged with
 develop in ffd2766a6).
@@ -240,3 +241,71 @@ defines, vacant orgs as disabled rows.
 Verification:
 - Node tests for org-target event building and vacant-org handling.
 - LOOK: fixture captures compared side by side with the full v2 mockup.
+
+### Result (7d959cb) - 2026-11-21
+
+- Enabled org targets in the ordinary CC and assign pickers (`tracker-picker.js`,
+  `tracker.css`): heads of live orgs (including 1-person orgs) show the org
+  badge, `<org> 전체 (N명)` group toggle, org-aware covered/pending tooltips,
+  and org chips in the selection band; leads without an org keep Phase 1
+  behavior (CC member snapshot, plain assign rule).
+- CC picker (`pmCcInit`, `pmCcEval`, `pmCcEvents`): selecting an org emits
+  `item.cc_org`, existing live org CC registrations open checked, and unchecking
+  emits `item.uncc_org` without emitting personal `item.uncc` on only-through
+  members (preserving personal CCs and respecting item exclusions per org-entity
+  Decision 5).
+- Assign picker (`pmAssignOrgInit`, `pmAssignLocks`, `pmAssignEval`,
+  `pmAssignEvents`): org heads emit `{root, include_root: true, org}` rule
+  targets (shared with `pmRetargetAssignEvents`); existing open org rules open
+  checked and unchecking emits `item.unassign {item, rule, root}` before new
+  `item.assign` events only for the rule author (`ru.by === viewer`, org-entity
+  Decisions 11 & 20), locking other authors' rules and preserving `assignRoot`
+  overlap locking until unchecked.
+- Vacant orgs (`pmVacantOrgs`, `pmVacantRowHtml`): live orgs with no live head
+  render as disabled rows (`공석`, `관리자가 헤드를 지정해야 선택 가능`),
+  searchable by name/id and hidden in `norule` (draft/topic) and CC
+  selected-only modes.
+- Added 14 `js.tk.pm.*` keys across all 11 locale tables under
+  `internal/wsi18n/tables/` and regenerated `ai-docs/ref/tracker-mockup/i18n-en.js`.
+  No Go code under `internal/wstracker` was modified (T1 compatibility
+  inherited, Decision 10). Updated the stale `## Prior Decisions` org-entity CC
+  quote to match settled Decision 5.
+- Verification:
+  - `node --test agents-plugin-tool/internal/wsdashboard/tracker_picker.test.js agents-plugin-tool/internal/wsdashboard/tracker_org_entity.test.js agents-plugin-tool/internal/wsdashboard/tracker_draft.test.js`: 28/28 passed (picker 12/12).
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -count=1 ./internal/wsi18n`: pass (2.078s).
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test -count=1 -run 'TestTrackerItemWindowCC|TestTrackerMockupI18nIsCurrent|TestTrackerAssignee|TestTrackerQuickAdd|Asset' ./internal/wsdashboard`: pass (10.876s). Note: broader `-run 'Tracker|Asset'` hits pre-existing `TestTrackerRelatedScope` failure (`ReferenceError: showHidden is not defined` in `listRelated` from `f49b634e4` on `develop`, untouched here).
+  - Headless Chromium captures (dark + light, untracked under `ai-docs/assets/captures/261121/picker-org-targets/`: `cc-org-dark.png`, `cc-org-light.png`, `assign-org-dark.png`, `assign-org-light.png`, `assign-existing-uncheck-dark.png`, `assign-existing-uncheck-light.png`) verified side by side against `ai-docs/assets/mockups/261119/tracker-picker-modal/picker.html` (match, with live DOM dispatch assertions passing for `item.cc_org`, org `item.assign`, and `item.unassign`).
+
+#### Edition (f192daf) - 2026-11-21
+
+- Fixed CC picker per-source provenance (`pmCcInit`, `pmCcEval`, `pmCcRowHtml`, `pmToggleCcPerson`): members CC'd solely via org sources (including moved-out members and deleted/vacant orgs) are no longer auto-picked as personal, so unchecking an org emits only `item.uncc_org` without fabricating personal `item.cc` or destructive `item.uncc` across surviving org sources.
+- Derived item-wide CC exclusions from applied `item.uncc` events (`pmCcExcluded`) so globally excluded members reached by a newly selected org do not render as covered or added, stay personally toggleable, and emit `item.cc` when re-picked.
+- Updated plain-lead CC snapshots to emit `item.cc` for every listed subtree member lacking a personal source, including members currently CC'd only via an org.
+- Matched server assign rule overlap and surviving-rule coverage (`pmRawChildren`, `pmReaches`, `pmRuleCovers`, `pmRuleCovered`, `pmLiveRuleCoversMember`, `pmAssignLocks`, `pmRetargetLockedPeople`) by traversing live members' `leads[]` from `assignRoot` even when the assign-time head was removed, and kept viewer-authored removable org rules unlocked with their removal chip when covered by a broader plain rule.
+- Added `pmBuildApplyEvents(cur, vs)` so apply re-derives live org/head mappings, rules, and CC state against concurrent rehead, vacate, or delete instead of using open-time `headToOrg`, and guarded search-box Enter against stale `focusId` when filtered to vacant org rows.
+- Expanded `tracker_picker.test.js` (19/19 pass) with pure and DOM click/keyboard tests for moved-member org CC provenance, global exclusion under a parent org, plain-lead snapshot over org-only members, removed-head assign overlap, author-owned org rules under a plain rule, live-state apply mutations, and vacant-row click/keyboard handling; updated `tracker_cc_test.go` apply pin. All other `tracker_*.test.js` (52/52) and `go test ./internal/wsdashboard -run 'TestTracker' -count=1` (77/77) pass.
+
+#### Edition (f848f7a) - 2026-11-21
+
+- Projected `ItemView.CCExcluded` (`json:"ccExcluded,omitempty"`, T0 transparent additive field: older dashboards ignore it, omitted when empty) in `wstracker/view.go` from live members in `it.ccExcluded` (`state_cc.go`) and read it directly in `pmCcExcluded` instead of replaying `VS.events`, so excluded members stay uncovered and re-addable even on unhydrated projected list rows (`events: []`); added `TestItemViewCCExcludedProjection` and excluded `items[].ccExcluded` in `golden_test.go`.
+- Replaced live-apply state rebasing in `tracker-picker.js` (`pmSnapshot`, `pmBuildApplyEvents`, `pmApply`) with open-time snapshot staging plus targeted dependency stale checks (org id <-> head mapping for staged/removed orgs and plain lead groups, removed rule ids, and CC personal/org/excluded sources for batch-touched members only). On drift, apply sends nothing, keeps the modal open without mutating snapshot state, and displays `js.tk.pm.stale` across all 11 `wsi18n` locale tables and `ai-docs/ref/tracker-mockup/i18n-en.js`.
+- Verified: `tracker_picker.test.js` (20/20), all other `tracker_*.test.js` (52/52), `go test ./internal/wsdashboard ./internal/wstracker -run 'TestTracker|TestItemViewCCExcludedProjection' -count=1` (77/77 wsdashboard, 1/1 wstracker, plus `TestPersonalUnccExcludesOrgReadds` and `TestGoldenParity`), and `go test ./internal/wsi18n -count=1`.
+
+#### Edition (2c45021) - 2026-11-21
+
+- Refined `pmBuildApplyEvents` stale checks: deleted-org CC retarget selecting an org already registered at open compares open vs live registration state (no longer rejected as stale when unchanged), staged plain-lead CC groups validate their open vs live subtree member sets (`openIdx.subtree` vs `liveIdx.subtree`), and assign mode compares an item-scoped state signature (`pmAssignStateSig`: current assignees + open rule ids/states on this item only, unaffected by other items).
+- Optimized `ItemView.CCExcluded` projection in `wstracker/view.go` to iterate `it.ccExcluded` directly (skipping empty sets and sorting for determinism) rather than scanning every member per item. Compatibility note (T0 transparent): older dashboards ignore `ccExcluded`; when empty, the field may be omitted (`ItemView` JSON `omitempty`) or `null` (reflective summary path `cmd/ws-mcp/tracker_projection.go`), and `pmCcExcluded` treats `null`/missing as empty.
+- Verified: `tracker_picker.test.js` (21/21), all other `tracker_*.test.js` (52/52), and `go test ./internal/wsdashboard ./internal/wstracker -run 'TestTracker|TestItemViewCCExcludedProjection|TestPersonalUnccExcludesOrgReadds|TestGoldenParity' -count=1` (77/77 wsdashboard, 3/3 wstracker).
+
+#### Edition (2bb133e) - 2026-11-22
+
+- Added every member of each staged plain-lead CC group's subtree to `touchedMembers` in `pmBuildApplyEvents` so concurrent CC source/exclusion changes on a subtree member (e.g., a peer unCCing a member who was personally CC'd at open) trigger `js.tk.pm.stale` and send nothing instead of leaving that member unCC'd/excluded.
+- Verified `pmApply`'s dispatch-failure path for server-authoritative refusals without adding further client-side coverage logic: added DOM tests pinning 409 `refusal.reason` and non-409 `res.error` handling (modal stays open, `#tkpm-err` displays the server error, `PM.busy` clears and Apply re-enables, selection is preserved, and `wrote()` is not called).
+- Verified: `tracker*.test.js` (74/74: `tracker_picker.test.js` 22/22, other `tracker_*.test.js` 52/52) and `go test ./internal/wsdashboard ./internal/wstracker -run 'TestTracker|TestItemViewCCExcludedProjection|TestPersonalUnccExcludesOrgReadds|TestGoldenParity' -count=1` (77/77 wsdashboard, 3/3 wstracker).
+
+#### Edition (671690a) - 2026-11-22
+
+- Merged current `develop` (`7104dff6c`, keeping both sides' keys across all 11 `internal/wsi18n/tables/*.json` tables).
+- Unified badged lead row subtitles in `tracker-picker.js` (`pmRowSub(id, !!org)`): rows displaying an org badge omit the org/dept prefix and show `badge + id` only, while non-badged rows keep `<dept> · <id>`.
+- Added `PM.stale` state in `tracker-picker.js` so `#tkpm-apply` is disabled (and `pmApply()` / Cmd+Enter guarded) while `js.tk.pm.stale` is shown, while Cancel/close continue to work; added DOM tests in `tracker_picker.test.js` covering both CC and assign modes.
+- Verified: `tracker*.test.js` (75/75), `go test ./internal/wsi18n -count=1` (20/20), `go test ./internal/wsdashboard ./internal/wstracker -run 'TestTracker|TestItemViewCCExcludedProjection|TestPersonalUnccExcludesOrgReadds|TestGoldenParity' -count=1` (77/77 wsdashboard, 3/3 wstracker), and headless Chromium recaptures under `ai-docs/assets/captures/261121/picker-org-targets/` (`cc-org-{dark,light}.png`, `stale-notice-{dark,light}.png`).

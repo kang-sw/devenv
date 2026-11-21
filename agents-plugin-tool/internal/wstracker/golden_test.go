@@ -82,6 +82,7 @@ var goldenExcluded = map[string]string{
 	"orgs":               "the reference engine does not yet implement org entities",
 	"items[].ccSources":  "the reference engine does not yet implement org CC provenance",
 	"items[].orgCC":      "the reference engine does not yet implement org CC registrations",
+	"items[].ccExcluded": "the reference engine does not yet project item CC exclusions",
 	"rules[].org":        "the reference engine does not yet implement org assignment rules",
 	"rules[].assignRoot": "the reference engine does not yet project assign-time rule roots",
 }
@@ -121,6 +122,7 @@ func TestGoldenParity(t *testing.T) {
 				entry := item.(map[string]any)
 				delete(entry, "ccSources")
 				delete(entry, "orgCC")
+				delete(entry, "ccExcluded")
 				delete(entry, "canUnhide") // unhide permissions are outside reference-engine parity
 			}
 			for _, comment := range got["comments"].(map[string]any) {

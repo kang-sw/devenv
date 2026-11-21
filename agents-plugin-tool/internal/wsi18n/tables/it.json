@@ -2960,5 +2960,20 @@
   "js.settings.proposal.discard": "Scarta bozza",
   "js.settings.bucket.overridden_in": "Sostituito in: {0}",
   "js.settings.bucket.tag": "Bucket harness",
-  "js.settings.layer_major_tag": "Bucket per livello"
+  "js.settings.layer_major_tag": "Bucket per livello",
+  "js.tk.pm.grp.org.one": "Tutto {1} ({0})",
+  "js.tk.pm.grp.org.other": "Tutto {1} ({0})",
+  "js.tk.pm.cov.org.tip": "Incluso in tutto {0}",
+  "js.tk.pm.asg.cov.org": "Incluso nella regola di {0}",
+  "js.tk.pm.asg.grp.org.pend.tip": "Crea una regola di organizzazione per {0} (in attesa: {1} accetta)",
+  "js.tk.pm.asg.org.locked.tip": "Già assegnato — solo {0} può rimuovere questa regola di organizzazione",
+  "js.tk.pm.chip.cc.org.one": "{1} · {0}",
+  "js.tk.pm.chip.cc.org.other": "{1} · {0}",
+  "js.tk.pm.chip.asg.org.one": "{1} · regola ({0})",
+  "js.tk.pm.chip.asg.org.other": "{1} · regola ({0})",
+  "js.tk.pm.chip.asg.org.pend.one": "{1} · in attesa ({0})",
+  "js.tk.pm.chip.asg.org.pend.other": "{1} · in attesa ({0})",
+  "js.tk.pm.vac.tip": "Le organizzazioni senza responsabile non possono essere selezionate",
+  "js.tk.pm.vac.hint": "Un amministratore deve assegnare un responsabile per selezionare",
+  "js.tk.pm.stale": "Modificato altrove. Riapri la finestra."
 }

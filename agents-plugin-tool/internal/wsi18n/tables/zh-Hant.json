@@ -2960,5 +2960,20 @@
   "js.settings.proposal.discard": "取消草稿",
   "js.settings.bucket.overridden_in": "已覆寫：{0}",
   "js.settings.bucket.tag": "Harness 桶",
-  "js.settings.layer_major_tag": "層級優先桶"
+  "js.settings.layer_major_tag": "層級優先桶",
+  "js.tk.pm.grp.org.one": "{1} 全體 ({0}人)",
+  "js.tk.pm.grp.org.other": "{1} 全體 ({0}人)",
+  "js.tk.pm.cov.org.tip": "已包含在 {0} 全體中",
+  "js.tk.pm.asg.cov.org": "已包含在 {0} 的規則中",
+  "js.tk.pm.asg.grp.org.pend.tip": "為 {0} 建立組織規則（待確認：{1} 接受）",
+  "js.tk.pm.asg.org.locked.tip": "已指派 — 僅 {0} 可移除此組織規則",
+  "js.tk.pm.chip.cc.org.one": "{1} · {0}人",
+  "js.tk.pm.chip.cc.org.other": "{1} · {0}人",
+  "js.tk.pm.chip.asg.org.one": "{1} · 規則 ({0}人)",
+  "js.tk.pm.chip.asg.org.other": "{1} · 規則 ({0}人)",
+  "js.tk.pm.chip.asg.org.pend.one": "{1} · 待確認 ({0}人)",
+  "js.tk.pm.chip.asg.org.pend.other": "{1} · 待確認 ({0}人)",
+  "js.tk.pm.vac.tip": "無負責人的組織無法選取",
+  "js.tk.pm.vac.hint": "需管理員指定負責人後才可選取",
+  "js.tk.pm.stale": "已在別處變更，請重新開啟。"
 }

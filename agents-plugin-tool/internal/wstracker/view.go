@@ -166,10 +166,12 @@ type ItemView struct {
 	Requests  []string  `json:"requests"`
 	// CC are the CC'd members who are not removed, in the order they came
 	// to be CC'd. CCSources distinguishes personal and org provenance; OrgCC
-	// keeps each active org registration and everyone it added.
-	CC        []string                `json:"cc"`
-	CCSources map[string]CCSourceView `json:"ccSources"`
-	OrgCC     []OrgCCView             `json:"orgCC"`
+	// keeps each active org registration and everyone it added; CCExcluded
+	// lists live members excluded from org CC by personal uncc.
+	CC         []string                `json:"cc"`
+	CCSources  map[string]CCSourceView `json:"ccSources"`
+	OrgCC      []OrgCCView             `json:"orgCC"`
+	CCExcluded []string                `json:"ccExcluded,omitempty"`
 }
 
 type CCSourceView struct {
@@ -819,6 +821,14 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 				}
 				iv.CCSources[e.member] = sources
 			}
+		}
+		if len(it.ccExcluded) > 0 {
+			for member, excluded := range it.ccExcluded {
+				if excluded && S.liveMember(member) {
+					iv.CCExcluded = append(iv.CCExcluded, member)
+				}
+			}
+			sort.Strings(iv.CCExcluded)
 		}
 		for _, reg := range S.ccOrgsByItem[id] {
 			if !reg.active {

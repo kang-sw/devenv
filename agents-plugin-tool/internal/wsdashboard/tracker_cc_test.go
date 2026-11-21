@@ -76,6 +76,7 @@ func TestTrackerRelatedScope(t *testing.T) {
 var VS, FILT = false, HIDE = {}, closed = [], ps = {};
 function listOf(x) { return Array.isArray(x) ? x : []; }
 function keepItem(id) { return !HIDE[id]; }
+function showHidden() { return false; }
 function closeTs(it) { return it.ts; }
 function addClosed(ts, n, html) { closed.push([ts, n, html]); }
 function irow(o) { return 'row(' + o.rk + (o.closed ? ',closed' : '') + ')'; }
@@ -176,7 +177,7 @@ func TestTrackerItemWindowCC(t *testing.T) {
 		"openPicker(opts.step, { item: id }, opener);",
 		"out.push(['item.cc', { item: itemId, member: id }]);",
 		"out.push(['item.uncc', { item: itemId, member: id }]);",
-		"pmCcEvents(cur.item, cur.idx, cur.origCc, cur.picks, cur.groups)",
+		"pmBuildApplyEvents(cur, VS)",
 		"case 'item.cc': return wsT(\"js.tk.ev.cc\", esc(p.member), ref(p.item));",
 		"case 'item.uncc': return wsT(\"js.tk.ev.uncc\", esc(p.member), ref(p.item));",
 	} {
