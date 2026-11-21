@@ -365,16 +365,6 @@
     "261115-ws-dashboard-worktree-detection-approval": {
       "registered_at": "2026-11-15T02:27:24Z"
     },
-    "261116-bug-ws-dashboard-rail-drag-drop-unreliable": {
-      "registered_at": "2026-11-21T11:40:08Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-21T11:40:08Z"
-      }
-    },
     "261116-bug-ws-native-pi-release-payload-staleness": {
       "registered_at": "2026-11-16T00:52:49Z"
     },
@@ -402,16 +392,6 @@
     },
     "261116-feat-ws-subagent-worktree-lease": {
       "registered_at": "2026-11-19T07:51:11Z"
-    },
-    "261116-feat-ws-whiteboard-commented-status-display": {
-      "registered_at": "2026-11-21T11:40:16Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-21T11:40:16Z"
-      }
     },
     "261116-research-ws-polling-minimization-event-ledger": {
       "registered_at": "2026-11-16T04:15:13Z"
