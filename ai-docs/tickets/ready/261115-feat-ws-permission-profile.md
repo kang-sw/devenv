@@ -1043,6 +1043,61 @@ Follow-up Minor review items left unfixed in this slice:
   closes while preflight is in flight.
 - Three synthetic JS harness test-fidelity gaps vs full browser DOM.
 
+### Result (e0d793991) - 2026-11-21
+
+Phase 2 is complete through `e0d793991`. The root-lead/backend contract and
+recovery corrections landed in `fc40c36d9`, `3ac89f37c` and `c5f54ed4b`;
+worker input, State, current-parent admission and conservative launch reporting
+landed through `e9ba42f29` and `1a11694a5`; the reusable dashboard controls,
+full warning and reconnect/refusal behavior landed through `fca18b571`.
+`e0d793991` closes the final acceptance gap found by the whole-phase audit:
+the fresh selection preflight now requires the requested level on a harness
+that is also currently `lead:true` and `available:true`. Creation and settings
+fixtures prove that unavailable and non-lead responses which still advertise
+levels send no selection-bearing request.
+
+The final UI path keeps the existing refusal/re-check behavior and strings. The
+reviewed dark 1440 capture at
+`ai-docs/assets/captures/261121/permission-unavailable/lead-popover-dark-1440.png`
+shows the lead popover after a selected level becomes unavailable: the common
+level is not sent, the native control is restored, and the action is explicitly
+relabelled. No provider, account, global harness config or live daemon was used.
+
+Compatibility remains **T0**. The closeout changes only current-server UI
+admission and fixtures. The phase's explicit selection remains in the private,
+unknown-member-preserving `permission.json` writer
+(`internal/wsagent/permission_store.go:120-140,185-209`), legacy omission writes
+no sidecar, and optional State fields remain `omitempty`
+(`internal/wsagent/runner_state.go:75-77`). No MCP tool/argument, HTTP route,
+Record, Profile, registration, key-store or manifest shape changed. Old callers
+retain their legacy URLs and native controls; current clients refuse unsupported
+selection locally with no fallback write.
+
+Final verification from `agents-plugin-tool/`, with complete output read:
+
+```sh
+node internal/wsdashboard/testdata/permission-controls.test.cjs
+node internal/wsdashboard/testdata/lead-popover.test.cjs
+node --test internal/wsdashboard/new-session.test.js
+node internal/wsdashboard/testdata/board-home-ack.test.cjs
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsdashboard -count=1 -run '^(TestLeadPopoverLaunchBehavior|TestLeadPopoverIsolationWiring|TestRailScript|TestCSSClassesDoNotCollideAcrossModules|TestHiddenFrameHoldsItsUpdatesUntilShown)$'
+PLAYWRIGHT_BROWSERS_PATH=/Users/kang-sw/Library/Caches/ms-playwright WS_PLAYWRIGHT_MODULE=/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsdashboard -v -count=1 -run '^TestPermissionUIBrowser$'
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsi18n -count=1 -run '^(TestOtherTablesHoldEveryEnglishKey|TestPlaceholdersMatchEnglish)$'
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -count=1 -run '^TestPermission(PinnedRouter|Support|SidecarOldWriteNewReopen)$'
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -count=1 -run '^TestPermission'
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go vet ./internal/wsdashboard
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go build ./...
+```
+
+All commands passed. The full isolated Chromium run covered dark/light at 1440
+and 420 and completed in 59.08 s; the first sandboxed attempt could not bind its
+temporary loopback listener, and the identical command passed with local
+loopback permission. Independent lite review of
+`da8930600..e0d793991` was clean (0 Critical, 0 Important, 0 Minor):
+`/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@d3adad41/review-paths/47204522-01-findings.md`.
+The remaining Minor UI notes in the preceding Edition do not violate Phase 2
+acceptance and remain forward observations rather than blockers.
+
 ### Phase 3: Add the Codex per-run permission launch path
 
 Deferred until the Codex adapter provides its settled exact-version launch
