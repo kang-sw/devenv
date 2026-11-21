@@ -31,11 +31,13 @@ The develop lead reported five tool surprises on 2026-11-21. This ticket retains
 - `agents-plugin-tool/` edits read `ai-docs/manuals/shipped-surface-boundary.md` and `ai-docs/manuals/performance.md` first.
 - `agents-plugin-tool/internal/` edits read `ai-docs/manuals/release-compatibility.md` first.
 - `agents-plugin-tool/internal/mcp/` edits also read `ai-docs/manuals/ws-mcp.md` first.
+6. **Release refused by children from earlier leases.** **INFERRED (peer lead observation, 2026-11-21):** `worktree.release` of a clean pooled worktree refused without `force` because about 44 non-closed children (all waiting or idle) from earlier reuses of that worktree by other sessions were still bound to it. The bound-child check from item 4 does not distinguish children spawned under the current lease from children left by earlier leases. Proposed by the reporter: ignore bound children whose binding predates the current lease. Settle together with Phase 2's stale-lease policy, since acquisition and release must agree on which bindings count.
 - Keep the completed release guard and agy tune work in `261121-bug-ws-dogfood-tune-agy-release-route-gaps`; verify the remaining hosted Pi follow-up there rather than re-opening it here.
 
 ## Open Decision Queue
 
 - [technical] For an existing lease with no live bound child, should acquisition always skip the checkout or support an explicit stale-lease takeover path?
+- [technical] Should release's bound-child check count only children bound under the current lease (item 6), and does acquisition use the same rule?
 - [product] Where should `path.generate(kind: "report")` allocate files, and which callers may write them? Settle this before changing the schema or dispatcher.
 
 ## Phases
