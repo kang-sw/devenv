@@ -86,6 +86,9 @@ current packaged shell's daemon lifecycle and distribution behavior.
 
 ## Constraints
 
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
+- Convention: ai-docs/manuals/performance.md (declared for `agents-plugin-tool/`)
 - Electron keeps shipping until Phase 4 passes; release the P3 bridge only
   after that gate. Retirement or deletion of
   `agents-plugin-tool/desktop-electron/`, and removal of shipped
@@ -131,6 +134,29 @@ current packaged shell's daemon lifecycle and distribution behavior.
   and skills with the matching daemon. `.github/workflows/ws-mcp-release.yml`
   builds the darwin-arm64 and win32-x64 Electron archives and publishes
   stable and canary assets for the native and desktop builds.
+
+## Prior Decisions
+
+- 0fcecf155 (2026-11-21, commit): "IndexedDB recovery preserves blob and delivery state through the old renderer's whole-record localStorage writes." — bearing: constrains
+- 261117-research-werkschaft-tauri-shell-revisit (2026-11-17, Confirmed Decisions): "(1279)=a, 2026-11-17: keep Electron for now. Prioritize performance and the auto-updater, then use this research to decide whether to return to Tauri." — bearing: supports
+- 261115-feat-ws-daemon-release-auto-update (2026-11-15, Decisions): "The user's apply click is the single exception" — bearing: contradiction-candidate
+- 261113-feat-werkschaft-thin-tauri-shell (2026-11-15, Resolution): "This ticket's unimplemented Phases 2-4 were re-homed to 261115-feat-werkschaft-electron-shell as its Phases 2-4, rewritten for Electron" — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/desktop/, agents-plugin-tool/desktop-electron/, .github/workflows/ws-mcp-release.yml |
+| scope.surface | cross-module | Tauri host, daemon contracts, dashboard update bridge and release pipeline |
+| scope.new_public_symbol | unknown | Optional shell update bridge is planned but its exported names are not specified |
+| scope.new_type_contract | unknown | Update bridge operations and migration contracts are not specified as signatures |
+| scope.test_surface | existing | agents-plugin-tool/desktop/scripts/test_build_slot.py, agents-plugin-tool/desktop-electron/test/, agents-plugin-tool/internal/wsdashboard/testdata/desktop-update.browser.cjs |
+| complexity.reuse_points | confirmed | agents-plugin-tool/desktop/README.md; agents-plugin-tool/desktop-electron/endpoint.js and scripts/assemble-daemon-input.cjs |
+| complexity.side_effect_risk | high | Daemon replacement and installed-app migration affect live processes and user data |
+| risk.correctness | high | Cross-platform lifecycle, update recovery and migration must preserve existing sessions and data |
+| risk.fit | high | The retained attach-only host must match the packaged Electron shell and established dashboard behavior |
+| risk.test | high | Packaged macOS and Windows acceptance, runtime-absent images and paired measurements are required |
+| risk.security_or_contract | high | Authenticated loopback, frame isolation, signed updates and cross-version daemon boundaries are involved |
 
 ## Phases
 
