@@ -612,7 +612,7 @@
   // `prep(results)` runs on success before the re-render (the composer drafts clear only then).
   function commit(events, then, prep, fail) {
     AD.dispatch(ui.store, events.map(function (e) { return { type: e[0], payload: e[1], origin: e[2] || 'human' }; }), function (res) {
-      if (!res || !res.ok) { toast(esc((res && res.error) || wsT("js.tk.toast.refused"))); if (fail) fail(); return; }
+      if (!res || !res.ok) { toast(esc((res && ((res.refusal && res.refusal.reason) || res.error)) || wsT("js.tk.toast.refused"))); if (fail) fail(); return; }
       if (prep) prep(res.results || []);
       wrote(res.results || []);
       if (then) then(res.results || []);
@@ -721,7 +721,9 @@
       case 'uncc': put([['item.uncc', { item: item, member: who }]]); break;
       case 'uncc-org': put([['item.uncc_org', { item: item, org: a.getAttribute('data-org') }]]); break;
       case 'ihide': put([['item.hide', { item: item }]]); break;
+      case 'iunhide': put([['item.unhide', { item: item }]]); break;
       case 'chide': put([['comment.hide', { comment: cid }]]); break;
+      case 'cunhide': put([['comment.unhide', { comment: cid }]]); break;
       case 'comment': {
         if (!box || !box.value.trim()) return toast(wsT("js.tk.toast.nocomment"));
         var cp = { item: item, body: box.value.trim() };

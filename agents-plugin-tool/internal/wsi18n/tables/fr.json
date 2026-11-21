@@ -2661,5 +2661,13 @@
   "js.tk.pm.retarget.cc.note": "Retire <b>{0}</b> des CC et enregistre les nouvelles cibles en un seul lot. Les autres CC restent inchangées.",
   "js.tk.pm.retarget.cc.sum.one": "Nouvelle cible : {0} personne",
   "js.tk.pm.retarget.cc.sum.other": "Nouvelle cible : {0} personnes",
-  "js.tk.pm.retarget.cc.title": "Changer la cible CC de {0}"
+  "js.tk.pm.retarget.cc.title": "Changer la cible CC de {0}",
+  "js.tk.act.unhide": "Afficher l'élément",
+  "js.tk.act.unhide.admin": "Afficher l'élément (admin)",
+  "js.tk.cmt.unhide": "Afficher",
+  "js.tk.ev.cunhide": "a réaffiché le commentaire {0}",
+  "js.tk.ev.unhide": "a réaffiché{0}",
+  "js.tk.panel.showhidden": "Afficher masqués",
+  "js.tk.panel.showhidden.tip.off": "Afficher sur place les éléments et commentaires masqués",
+  "js.tk.panel.showhidden.tip.on": "Masquer de nouveau les éléments et commentaires masqués"
 }

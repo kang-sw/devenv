@@ -47,6 +47,7 @@
     '<symbol id="tki-history" viewBox="0 0 16 16"><path d="M2.8 8a5.2 5.2 0 1 0 1.6-3.8"/><path d="M2.6 2.6v2.6h2.6M8 5.2V8l2 1.4"/></symbol>' +
     '<symbol id="tki-link" viewBox="0 0 16 16"><path d="M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2-2a2.6 2.6 0 0 0-3.7-3.7l-.8.8M9.2 6.8a2.6 2.6 0 0 0-3.7 0l-2 2a2.6 2.6 0 0 0 3.7 3.7l.8-.8"/></symbol>' +
     '<symbol id="tki-reload" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M12 2v2.8H9.2"/></symbol>' +
+    '<symbol id="tki-eye" viewBox="0 0 16 16"><path d="M1.6 8s2.4-4 6.4-4 6.4 4 6.4 4-2.4 4-6.4 4-6.4-4-6.4-4z"/><circle cx="8" cy="8" r="1.8"/></symbol>' +
     '</svg>';
 
   function el(tag, props, html) {
@@ -281,6 +282,7 @@
         else if (k === 'trfold') { toggleThreadRun(a.getAttribute('data-run')); }
         else if (k === 'trfold-all') { toggleThreadAll(a.getAttribute('data-all') === 'open'); }
         else if (k === 'psearch-clear') { panelState().q = ''; render(); if ($('psearch')) $('psearch').focus(); }
+        else if (k === 'show-hidden') { var sh = panelState(); sh.showHidden = !sh.showHidden; ui.sel = null; render(); }
         else if (k === 'cmode') { (ui.cmodes[ui.store] = ui.cmodes[ui.store] || {})[a.getAttribute('data-card')] = a.getAttribute('data-mode'); dsSave('card.modes', ui.cmodes); render(); }
         else if (k === 'cal') { ui.calMonth[a.getAttribute('data-card')] = a.getAttribute('data-month'); render(); }
         else if (k === 'sync') { syncNow(ui.store, false, function () { render(); }); }

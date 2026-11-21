@@ -2661,5 +2661,13 @@
   "js.tk.pm.retarget.cc.note": "在同一批次中移除 <b>{0}</b> 的抄送并注册新目标。其他抄送保持不变。",
   "js.tk.pm.retarget.cc.sum.one": "新目标：{0}人",
   "js.tk.pm.retarget.cc.sum.other": "新目标：{0}人",
-  "js.tk.pm.retarget.cc.title": "更改 {0} 的抄送目标"
+  "js.tk.pm.retarget.cc.title": "更改 {0} 的抄送目标",
+  "js.tk.act.unhide": "取消隐藏条目",
+  "js.tk.act.unhide.admin": "取消隐藏条目 (管理员)",
+  "js.tk.cmt.unhide": "取消隐藏",
+  "js.tk.ev.cunhide": "取消隐藏了评论 {0}",
+  "js.tk.ev.unhide": "取消隐藏了{0}",
+  "js.tk.panel.showhidden": "显示已隐藏",
+  "js.tk.panel.showhidden.tip.off": "在原位置显示已隐藏的条目和评论",
+  "js.tk.panel.showhidden.tip.on": "再次隐藏已隐藏的条目和评论"
 }

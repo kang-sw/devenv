@@ -3,6 +3,9 @@ package wstracker
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/kang-sw/devenv/internal/wsledger"
 )
 
 // Sibling order (528), item refs (531), and assignment rules (490)-(492),
@@ -75,6 +78,127 @@ func TestSiblingOrder(t *testing.T) {
 	wantEq(t, "Z last", r[len(r)-1], z)
 
 	wantEq(t, "after a number", tm.refused("maya.pc", TypeItemCreate, task("x", "after", 3)), "after must be a sibling item id")
+}
+
+func TestItemUnhide(t *testing.T) {
+	tm := newTeam(t)
+	parent := tm.do("maya.pc", TypeItemCreate, ItemCreate{Kind: "task", Title: "Parent"})
+	item := tm.do("maya.pc", TypeItemCreate, ItemCreate{Kind: "task", Title: "Child", Parent: parent})
+	pr, ir := ItemRef{Item: parent}, ItemRef{Item: item}
+	wantEq(t, "visible item refusal", tm.refused("maya.pc", TypeItemUnhide, ir), alias(item)+" is not hidden")
+
+	assign := tm.do("maya.pc", TypeItemAssign, ItemAssign{Item: item, Targets: []AssignTarget{{Person: "lena"}}, Completion: "assigner"})
+	tm.do("maya.pc", TypeItemUnassign, ItemRef{Item: item, Assignee: "lena"})
+	tm.do("maya.pc", TypeItemHide, ir)
+	tm.do("maya.pc", TypeItemHide, pr)
+
+	v := tm.view("maya.pc")
+	wantIn(t, "hidden child remains listed in place", v.Items[parent].Children, item)
+	wantEq(t, "parent can be unhidden", v.Items[parent].CanUnhide, true)
+	wantEq(t, "child blocked by hidden parent", v.Items[item].CanUnhide, false)
+	wantEq(t, "hidden parent refusal", tm.refused("maya.pc", TypeItemUnhide, ir), "unhide the parent first")
+
+	tm.do("maya.pc", TypeItemUnhide, pr)
+	wantEq(t, "child can be unhidden", tm.view("maya.pc").Items[item].CanUnhide, true)
+	unhide := tm.do("maya.pc", TypeItemUnhide, ir)
+	v = tm.view("maya.pc")
+	wantEq(t, "child unhide applied", event(t, v, unhide).Status, "applied")
+	wantEq(t, "child visible", v.Items[item].Hidden, false)
+	wantEq(t, "visible child cannot be unhidden", v.Items[item].CanUnhide, false)
+	wantEq(t, "assignment stays ended", asg(t, v, assign+">lena").State, "unassigned")
+}
+
+func TestItemUnhideReplay(t *testing.T) {
+	const item, parent = "maya.pc#2", "maya.pc#3"
+	steps := []step{
+		{"maya.pc", TypeItemCreate, ItemCreate{Kind: "task", Title: "Old parent"}},
+		{"maya.pc", TypeItemCreate, ItemCreate{Kind: "task", Title: "Child", Parent: "maya.pc#1"}},
+		{"maya.pc", TypeItemCreate, ItemCreate{Kind: "task", Title: "New parent"}},
+		{"maya.pc", TypeItemMove, ItemMove{Item: item, Parent: nz(parent)}},
+		{"maya.pc", TypeItemHide, ItemRef{Item: item}},
+		{"maya.pc", TypeItemHide, ItemRef{Item: parent}},
+		{"maya.pc", TypeItemUnhide, ItemRef{Item: item}},
+		{"maya.pc", TypeItemUnhide, ItemRef{Item: parent}},
+		{"maya.pc", TypeItemUnhide, ItemRef{Item: item}},
+		{"maya.pc", TypeItemEdit, ItemEdit{"item": item, "title": "Edited after unhide"}},
+	}
+	v := Derive(newMemSource(loadReasonCases(t).Genesis, "maya.pc", history(steps)), "maya.pc", time.Time{}, 0)
+	for _, e := range v.Events {
+		if e.ID == "maya.pc#7" {
+			wantEq(t, "unhide under the current hidden parent", e.Status, "flagged")
+			wantEq(t, "reason", deref(e.Reason), "unhide the parent first")
+		} else {
+			wantEq(t, e.ID+" "+e.Type, e.Status, "applied")
+		}
+	}
+	wantEq(t, "edited title", v.Items[item].Title, "Edited after unhide")
+}
+
+func TestItemUnhideConcurrentWithHide(t *testing.T) {
+	for _, tc := range []struct {
+		origin string
+		hidden bool
+	}{{OriginHuman, false}, {OriginAgent, true}} {
+		t.Run(tc.origin, func(t *testing.T) {
+			item := ItemRef{Item: "maya.pc#1"}
+			v := topicView(t, "maya.pc", []step{
+				{"maya.pc", TypeItemCreate, ItemCreate{Kind: "task", Title: "Item"}},
+				{"maya.pc", TypeItemHide, item},
+				{"maya.pc", TypeItemUnhide, item},
+				{"maya.pc", TypeItemHide, item},
+				{"maya.lap", TypeItemUnhide, item, tc.origin, map[string]int{"maya.pc": 2}},
+			})
+			wantEq(t, "visibility register winner", v.Items[item.Item].Hidden, tc.hidden)
+		})
+	}
+}
+
+func TestUnhideRemovedCreatorFallback(t *testing.T) {
+	tm := newTeam(t)
+	item := tm.do("lena.pc", TypeItemCreate, ItemCreate{Kind: "task", Title: "Item"})
+	comment := tm.do("lena.pc", TypeCommentAdd, CommentAdd{Item: item, Body: "Comment"})
+	cr, ir := CommentRef{Comment: comment}, ItemRef{Item: item}
+	tm.do("lena.pc", TypeCommentHide, cr)
+	tm.do("lena.pc", TypeItemHide, ir)
+	denied := "only the creator (lena) unhides " + alias(item)
+	wantEq(t, "admin cannot replace live creator", tm.refused("ada.pc", TypeItemUnhide, ir), denied)
+
+	tm.do("ada.pc", wsledger.TypeRemoveMember, wsledger.MemberPayload{Member: "lena"})
+	v := tm.view("ada.pc")
+	wantEq(t, "admin can replace removed creator", v.Items[item].CanUnhide, true)
+	wantEq(t, "admin cannot replace removed comment author", v.Comments[comment].CanUnhide, false)
+	wantEq(t, "other member cannot replace removed creator", tm.refused("maya.pc", TypeItemUnhide, ir), denied)
+	wantEq(t, "comment has no admin fallback", tm.refused("ada.pc", TypeCommentUnhide, cr), "only the comment author (lena) unhides it")
+	v = tm.view("lena.pc")
+	wantEq(t, "removed viewer cannot unhide item", v.Items[item].CanUnhide, false)
+	wantEq(t, "removed viewer cannot unhide comment", v.Comments[comment].CanUnhide, false)
+	tm.do("ada.pc", TypeItemUnhide, ir)
+}
+
+func TestCommentUnhide(t *testing.T) {
+	tm := newTeam(t)
+	item := tm.do("maya.pc", TypeItemCreate, ItemCreate{Kind: "task", Title: "Item"})
+	comment := tm.do("lena.pc", TypeCommentAdd, CommentAdd{Item: item, Body: "Original"})
+	ref := CommentRef{Comment: comment}
+	wantEq(t, "visible comment refusal", tm.refused("lena.pc", TypeCommentUnhide, ref), "comment is not hidden")
+
+	hide := tm.do("lena.pc", TypeCommentHide, ref)
+	v := tm.view("lena.pc")
+	wantIn(t, "hidden comment remains in thread", v.Items[item].Thread, comment)
+	wantEq(t, "hide event remains on comment", deref(v.Comments[comment].Hidden), hide)
+	wantEq(t, "author can unhide comment", v.Comments[comment].CanUnhide, true)
+	wantEq(t, "item creator cannot unhide comment", tm.view("maya.pc").Comments[comment].CanUnhide, false)
+	wantEq(t, "comment author refusal", tm.refused("maya.pc", TypeCommentUnhide, ref), "only the comment author (lena) unhides it")
+
+	unhide := tm.do("lena.pc", TypeCommentUnhide, ref)
+	edit := tm.do("lena.pc", TypeCommentEdit, CommentRef{Comment: comment, Body: "Edited"})
+	reply := tm.do("maya.pc", TypeCommentAdd, CommentAdd{Item: item, Body: "Reply", ReplyTo: comment})
+	v = tm.view("maya.pc")
+	wantEq(t, "comment visibility cleared", v.Comments[comment].Hidden == nil, true)
+	wantEq(t, "comment edit visible", v.Comments[comment].Body, "Edited")
+	for _, id := range []string{unhide, edit, reply} {
+		wantEq(t, id, event(t, v, id).Status, "applied")
+	}
 }
 
 func TestItemRefsAndBackrefs(t *testing.T) {

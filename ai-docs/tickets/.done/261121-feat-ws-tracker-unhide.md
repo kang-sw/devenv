@@ -1,5 +1,6 @@
 ---
 title: "tracker: 숨긴 항목·댓글 되돌리기"
+completed: 2026-11-21
 ---
 
 # Tracker: unhide hidden items and comments
@@ -39,12 +40,24 @@ back (owner, board (1478)=c, 2026-11-21). Verified on develop 872a7833b:
   parent first" ((1491), owner ok).
   Rejected: allowing it (the child would stay unreachable under the hidden
   parent).
-- Compatibility T1, to be confirmed against source in Phase 1: an older binary
-  rejects the unknown `*.unhide` event on replay (`check.go:1591`), so on that
-  binary the item simply stays hidden; no data changes and the new binary
-  shows it again. Before settling, verify that a rejected event does not
-  disturb the fold of later events; if it does, stop and report ((1492),
-  owner ok).
+- Compatibility T1 (owner (1492) ok; scope widened by (1494)=a,
+  2026-11-21 18:45). An older binary rejects the unknown `*.unhide` event on
+  replay (`check.go:1590-1591`), so on that binary the item stays hidden and
+  later edits, comments, and replies on it are shown flagged, because causal
+  replay skips the rejected event (`replay.go:401-419`; `check.go:846-857,
+  1447-1474`). Those verdicts are computed in memory at replay and never
+  written (`replay.go:295-321`, `view.go:594`), and the new binary replays
+  all of it correctly: display-degraded for the older reader.
+  One older-writer case remains: `item.status` does not test hidden
+  (`check.go:647-651, 1340-1368`), so an older member may still append a
+  status change on a target it sees as hidden; if the item was reassigned
+  after the unhide, the new binary flags that event on replay
+  (`state_rules.go:176-204`). The event stays in the append-only log and
+  nothing is overwritten; it is the same outcome as a same-version write made
+  concurrently with the reassignment, so it adds no new failure class and
+  stays within T1 (lead, as a consequence of (1494)=a, 2026-11-21).
+  Rejected: a T3 boundary with a minor bump (locks out every previous-minor
+  install for a downgrade-only symptom); deferring the feature.
 - Entry point: a "show hidden" toggle on the tracker list. When on, hidden
   items and comments render dimmed in place, and those allowed to unhide see
   an "unhide" action on them ((1493)=a, owner 2026-11-21 18:41).
@@ -79,3 +92,21 @@ Verification:
 - A compatibility check that replays a log containing `item.unhide` through
   the pre-change fold (or reasons it from source with line citations) for
   the T1 verdict.
+
+### Result (f49b634e4) - 2026-11-21
+
+- Backend (`eacd19d33`, codex.large): `item.unhide` / `comment.unhide` with
+  hide-mirroring permissions (creator, or admin once the creator is gone;
+  comment author), refusal of visible targets and of a child under a hidden
+  parent (`unhide the parent first`), the shared `it:<id>:hidden` register,
+  and `canUnhide` view fields. Tests cover permissions, a hidden parent after
+  a move, the concurrent register, and edits/replies after unhide.
+- Dashboard (`f49b634e4`, agy.large): a "Show hidden" toggle in the Items
+  panel header (page-lifetime browser state per store, off by default);
+  hidden items and comments render dimmed in place with an unhide action
+  gated by `canUnhide`; 409 refusal reasons surface through the existing
+  toast; 8 new strings in all 11 locales.
+- Verified: `go test ./internal/wstracker/...`, `go test ./internal/wsi18n/...`,
+  narrow `./internal/wsdashboard` runs including the tracker browser test,
+  tracker Node tests, and headless captures of the toggle, the row menu, and
+  a hidden comment.

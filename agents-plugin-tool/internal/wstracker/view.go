@@ -138,6 +138,7 @@ type ItemView struct {
 	Author        string   `json:"author"`
 	TS            string   `json:"ts"`
 	Hidden        bool     `json:"hidden"`
+	CanUnhide     bool     `json:"canUnhide,omitempty"`
 	Edited        *Ref     `json:"edited"`
 	Status        *string  `json:"status"` // nil for topics
 	Counted       bool     `json:"counted"`
@@ -277,14 +278,15 @@ type RuleView struct {
 }
 
 type CommentView struct {
-	ID      string  `json:"id"`
-	Item    string  `json:"item"`
-	Author  string  `json:"author"`
-	Body    string  `json:"body"`
-	ReplyTo *string `json:"reply_to"`
-	TS      string  `json:"ts"`
-	Edited  *Ref    `json:"edited"`
-	Hidden  *string `json:"hidden"` // the comment.hide event id
+	ID        string  `json:"id"`
+	Item      string  `json:"item"`
+	Author    string  `json:"author"`
+	Body      string  `json:"body"`
+	ReplyTo   *string `json:"reply_to"`
+	TS        string  `json:"ts"`
+	Edited    *Ref    `json:"edited"`
+	Hidden    *string `json:"hidden"` // the comment.hide event id
+	CanUnhide bool    `json:"canUnhide,omitempty"`
 	// Mentions, Attachments, and Refs follow the shown text write.
 	Mentions    []string         `json:"mentions"`
 	Attachments []AttachmentView `json:"attachments"`
@@ -577,6 +579,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 	S := r.S
 	v := memberOf(stream)
 	me := S.members[v]
+	isMember := S.liveMember(v)
 	R := reachMap(S.reach(v, 99))
 	children := S.children()
 	nowStr := ""
@@ -799,7 +802,8 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 		iv := ItemView{ID: id, Alias: it.alias, Kind: it.kind, Title: it.title, Body: it.body, BodyRev: S.bodyRev(id), Project: it.project, Labels: S.liveLabels(it.labels),
 			Due: viewCopy(it.due), Start: viewCopy(it.start), Priority: it.priority, PriorityLevel: lv, PriorityName: S.prio.names[lv], Author: it.author,
 			TS: ts(it.ts), Hidden: it.hidden, Edited: ref(it.edited), Status: nz(status[id]),
-			Counted: r.counted(it, status[id]), Children: []string{}, Assignments: orEmpty(recIDs), Pending: orEmpty(pend),
+			CanUnhide: it.hidden && isMember && S.canSetItemHidden(it, v) && !S.itemParentHidden(it),
+			Counted:   r.counted(it, status[id]), Children: []string{}, Assignments: orEmpty(recIDs), Pending: orEmpty(pend),
 			Thread: orEmpty(threads[id]), Depth: len(chain) - 1,
 			Mentions: append([]string{}, it.mentions...), Attachments: attachmentViews(it.attachments),
 			Refs: append([]string{}, it.refs...), Backrefs: orEmpty(backrefs[id]), Requests: []string{}, CC: []string{},
@@ -919,6 +923,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 			Refs: append([]string{}, q.refs...)}
 		if q.hiddenBy != nil {
 			cv.Hidden = viewCopy(&q.hiddenBy.id)
+			cv.CanUnhide = isMember && q.author == v
 		}
 		vw.Comments[id] = cv
 	}
@@ -955,7 +960,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 	}
 
 	vw.Viewer = Viewer{Member: v, Stream: stream, Name: v, Admin: S.admins[v], Followers: orEmpty(append([]string(nil), children[v]...)),
-		Reach: R, IsMember: me != nil && me.removed == nil}
+		Reach: R, IsMember: isMember}
 	if me != nil {
 		vw.Viewer.Name = me.profile.DisplayName()
 		pr := me.profile

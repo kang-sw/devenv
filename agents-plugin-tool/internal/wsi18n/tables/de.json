@@ -2661,5 +2661,13 @@
   "js.tk.pm.retarget.cc.note": "Entfernt <b>{0}</b> aus CC und registriert die neuen Ziele in einem Batch. Andere CCs bleiben unverändert.",
   "js.tk.pm.retarget.cc.sum.one": "Neues Ziel: {0} Person",
   "js.tk.pm.retarget.cc.sum.other": "Neues Ziel: {0} Personen",
-  "js.tk.pm.retarget.cc.title": "CC für {0} umstellen"
+  "js.tk.pm.retarget.cc.title": "CC für {0} umstellen",
+  "js.tk.act.unhide": "Eintrag einblenden",
+  "js.tk.act.unhide.admin": "Eintrag einblenden (Admin)",
+  "js.tk.cmt.unhide": "Einblenden",
+  "js.tk.ev.cunhide": "hat Kommentar {0} eingeblendet",
+  "js.tk.ev.unhide": "hat{0} eingeblendet",
+  "js.tk.panel.showhidden": "Ausgeblendete zeigen",
+  "js.tk.panel.showhidden.tip.off": "Ausgeblendete Einträge und Kommentare an Ort und Stelle anzeigen",
+  "js.tk.panel.showhidden.tip.on": "Ausgeblendete Einträge und Kommentare wieder ausblenden"
 }

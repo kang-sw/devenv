@@ -86,10 +86,19 @@ func (s *state) checkOrgSet(p obj) rejection {
 }
 
 // creatorGone (208, 292): an admin stands in for a removed creator on
-// assign, unassign, edit, and hide.
+// assign, unassign, edit, hide, and unhide.
 func (s *state) creatorGone(it *item, a string) bool {
 	cr := s.members[it.author]
 	return s.admins[a] && cr != nil && cr.removed != nil
+}
+
+func (s *state) canSetItemHidden(it *item, a string) bool {
+	return it.author == a || s.creatorGone(it, a)
+}
+
+func (s *state) itemParentHidden(it *item) bool {
+	par := s.items[it.parent]
+	return par != nil && par.hidden
 }
 
 // needCreatorOrAssignee is the creator-or-live-assignee rule: a holds it
@@ -905,7 +914,7 @@ func (s *state) check(n *node) rejection {
 		if r != "" {
 			return r
 		}
-		if it.author != a && !s.creatorGone(it, a) {
+		if !s.canSetItemHidden(it, a) {
 			return rejection("only the creator (" + it.author + ") hides " + it.alias)
 		}
 		if it.hidden {
@@ -919,6 +928,21 @@ func (s *state) check(n *node) rejection {
 		}
 		if len(open) > 0 {
 			return rejection("unassign the open assignments first (" + strings.Join(open, ", ") + ")")
+		}
+
+	case TypeItemUnhide:
+		it, r := needIt()
+		if r != "" {
+			return r
+		}
+		if !s.canSetItemHidden(it, a) {
+			return rejection("only the creator (" + it.author + ") unhides " + it.alias)
+		}
+		if !it.hidden {
+			return rejection(it.alias + " is not hidden")
+		}
+		if s.itemParentHidden(it) {
+			return "unhide the parent first"
 		}
 
 	case TypeItemMove:
@@ -1457,17 +1481,26 @@ func (s *state) check(n *node) rejection {
 			}
 		}
 
-	case TypeCommentEdit, TypeCommentHide:
+	case TypeCommentEdit, TypeCommentHide, TypeCommentUnhide:
 		q := s.comments[p.disp("comment")]
 		if q == nil {
 			return rejection("comment " + alias(p.disp("comment")) + " is not in the state its author had seen")
 		}
 		if q.author != a {
 			verb := "hides"
-			if n.typ == TypeCommentEdit {
+			switch n.typ {
+			case TypeCommentEdit:
 				verb = "edits"
+			case TypeCommentUnhide:
+				verb = "unhides"
 			}
 			return rejection("only the comment author (" + q.author + ") " + verb + " it")
+		}
+		if n.typ == TypeCommentUnhide {
+			if !q.hidden {
+				return "comment is not hidden"
+			}
+			break
 		}
 		if q.hidden {
 			return "comment is already hidden"

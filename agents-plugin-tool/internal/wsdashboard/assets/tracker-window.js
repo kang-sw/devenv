@@ -33,12 +33,13 @@
     var cols = KCOLS[key === 'all' ? 'items' : 'assign'], buckets = {};
     cols.forEach(function (c) { buckets[c] = []; });
     if (key === 'all') {
+      var sh = showHidden();
       VS.itemOrder.forEach(function (id) {
         var it = VS.items[id];
         // the columns already are the statuses, so the status filter would only empty them: kind filter only
-        if (it.hidden || it.kind === 'topic' || !buckets[it.status] || !kindFilter(it) || !keepItem(id)) return;
+        if ((!sh && it.hidden) || it.kind === 'topic' || !buckets[it.status] || !kindFilter(it) || !keepItem(id)) return;
         var mineR = it.assignments.map(A).filter(function (r) { return r.to === v && r.state === 'live'; })[0];
-        buckets[it.status].push({ item: id, drag: mineR && !wrapped(mineR.status) ? id : null,
+        buckets[it.status].push({ item: id, drag: !it.hidden && mineR && !wrapped(mineR.status) ? id : null,
           sub: (it.assignments.map(A).filter(function (r) { return r.state === 'live' || r.state === 'pending'; }).map(function (r) { return r.to + (r.state === 'pending' ? '?' : ''); }).join(', ') || wsT("js.tk.common.nobody")) });
       });
     } else {
@@ -61,8 +62,8 @@
         buckets[c].map(function (x) {
           // quiet cards: title, then initials (the record's assignee off "mine"), priority, due; the source on hover
           var it = VS.items[x.item];
-          return '<div class="kcard' + (x.drag ? ' drag' : '') + '"' + (x.drag ? ' draggable="true"' + attr('drag', x.drag) : '') + attr('item', x.item) + attr('rk', 'k:' + c + ':' + (x.rec ? x.rec.id : x.item)) + tipHtml(x.sub) + '>' +
-            '<div class="kc-t">' + titleRef(x.item) + '</div>' + moreBtn(x.item, 'kmore', true) + '<div class="kc-m">' + warnHtml(it) + dotHtml(it) + (x.who ? '<span class="who">' + avHtml(x.who) + '</span>' : whoHtml(it)) +
+          return '<div class="kcard' + (x.drag ? ' drag' : '') + (it.hidden ? ' tk-hidden' : '') + '"' + (x.drag ? ' draggable="true"' + attr('drag', x.drag) : '') + attr('item', x.item) + attr('rk', 'k:' + c + ':' + (x.rec ? x.rec.id : x.item)) + tipHtml(x.sub) + '>' +
+            '<div class="kc-t">' + titleRef(x.item) + (it.hidden ? ' <span class="chip hid">' + wsT("js.tk.chip.hidden") + '</span>' : '') + '</div>' + moreBtn(x.item, 'kmore', true) + '<div class="kc-m">' + warnHtml(it) + dotHtml(it) + (x.who ? '<span class="who">' + avHtml(x.who) + '</span>' : whoHtml(it)) +
             '<span class="grow"></span>' + priHtml(it) + dueHtml(it, x.rec ? stKey(it, x.rec) : c) + '</div></div>';
         }).join('') + '</div>';
     }).join('');
@@ -105,7 +106,8 @@
   // with the record's own state and, off "mine", the assignee. Render keys must
   // include that record's identity: several siblings can represent one item.
   function dueRows(key, v) {
-    function dated(it) { return it && it.due && !it.hidden && it.kind !== 'topic'; }
+    var sh = showHidden();
+    function dated(it) { return it && it.due && (!it.hidden || sh) && it.kind !== 'topic'; }
     if (key === 'all') return VS.itemOrder.map(function (id) { return VS.items[id]; }).filter(function (it) { return dated(it) && itemFilter(it) && keepItem(it.id); })
       .map(function (it) { return { item: it.id, status: it.status, rec: null, who: '' }; });
     return assignRecs(key, v).filter(function (r) { return dated(VS.items[r.item]); }).map(function (r) {
@@ -146,7 +148,7 @@
     // x: the dueRows entry of a match, null for a context row; c: the fold control; sm: draw the summary bar
     function row(e, x, c, sm) {
       var it = VS.items[e.id], st = x ? x.status : stKey(it), r = own(e.id), s = sm && e.n ? sub(e.id) : null, over = it.due && it.due < today() && !wrapped(st);
-      return '<div class="grow-row click' + (ENDED[st] ? ' ended' : '') + (x ? '' : ' ctx') + '"' + attr('item', it.id) + attr('rk', 'g:' + it.id + (x && x.rec ? ':a:' + x.rec.id : '')) + '><div class="glabel" style="--ind:' + e.depth + '">' + c.tw + stBtn(st, it, x && x.rec) + titleRef(it.id) + c.sub + (x ? whoTag(x) : '') + priHtml(it) + moreBtn(it.id, 'gmore', true) + '</div>' +
+      return '<div class="grow-row click' + (ENDED[st] ? ' ended' : '') + (x ? '' : ' ctx') + (it.hidden ? ' tk-hidden' : '') + '"' + attr('item', it.id) + attr('rk', 'g:' + it.id + (x && x.rec ? ':a:' + x.rec.id : '')) + '><div class="glabel" style="--ind:' + e.depth + '">' + c.tw + stBtn(st, it, x && x.rec) + titleRef(it.id) + (it.hidden ? '<span class="chip hid">' + wsT("js.tk.chip.hidden") + '</span>' : '') + c.sub + (x ? whoTag(x) : '') + priHtml(it) + moreBtn(it.id, 'gmore', true) + '</div>' +
         '<div class="gtrack"><span class="gnow" style="left:' + pct(t0) + '"></span>' +
         (r ? '<span class="gbar st-' + esc(st) + (over ? ' over' : '') + '" style="left:' + pct(r[0]) + ';width:' + wid(r) + '" title="' +
           esc(it.start ? wsT("js.tk.gantt.bar.start", it.start, it.due) : wsT(it.started ? "js.tk.gantt.bar.started" : "js.tk.gantt.bar.created", String(it.started || it.ts).slice(0, 10), it.due)) + '">' + esc(it.due.slice(5)) + '</span>' : '') +
@@ -179,8 +181,9 @@
     for (var d = 1; d <= days; d++) {
       var ds = m + '-' + (d < 10 ? '0' : '') + d, list = byDay[ds] || [];
       h += '<div class="cday' + (ds === today() ? ' now' : '') + '"' + attr('day', ds) + '><div class="cnum">' + d + '</div>' + list.map(function (x) {
-        return '<div class="citem click' + (ENDED[x.status] ? ' ended' : '') + '"' + attr('item', x.item) + attr('rk', 'c:' + ds + ':' + x.item + (x.rec ? ':a:' + x.rec.id : '')) + tipHtml(SI.info(x.status).label + ' · ' + VS.items[x.item].priorityName + (x.who ? ' · ' + esc(x.who) : '')) + '>' +
-          stBtn(x.status, VS.items[x.item], x.rec) + titleRef(x.item) + moreBtn(x.item, 'cmore', true) + '</div>';
+        var xit = VS.items[x.item];
+        return '<div class="citem click' + (ENDED[x.status] ? ' ended' : '') + (xit && xit.hidden ? ' tk-hidden' : '') + '"' + attr('item', x.item) + attr('rk', 'c:' + ds + ':' + x.item + (x.rec ? ':a:' + x.rec.id : '')) + tipHtml(SI.info(x.status).label + ' · ' + xit.priorityName + (x.who ? ' · ' + esc(x.who) : '')) + '>' +
+          stBtn(x.status, xit, x.rec) + titleRef(x.item) + moreBtn(x.item, 'cmore', true) + '</div>';
       }).join('') + '</div>';
     }
     return h + '</div>';
@@ -344,24 +347,27 @@
   // ------------------------------------------------------------ item window
 
   function commentHtml(n, v, it) {
-    var p = n.payload, c = VS.comments[n.id] || {}, body = c.body != null ? c.body : p.body, reply = '';
+    var p = n.payload, c = VS.comments[n.id] || {}, body = c.body != null ? c.body : p.body, reply = '', sh = showHidden(), hidShown = !!(c.hidden && sh);
     if (p.reply_to) {
       var q = VS.comments[p.reply_to] || (EV[p.reply_to] && { author: EV[p.reply_to].member, body: EV[p.reply_to].payload.body });
-      reply = '<div class="quote"' + tipAttr(alias(p.reply_to)) + '>&#8617; ' + (q ? '<b>' + whoName(q.author) + '</b>: ' + (q.hidden ? '<i>' + wsT("js.tk.cmt.hiddenq") + '</i>' : esc(String(q.body).slice(0, 90))) : '') + '</div>';
+      reply = '<div class="quote"' + tipAttr(alias(p.reply_to)) + '>&#8617; ' + (q ? '<b>' + whoName(q.author) + '</b>: ' + (q.hidden && !sh ? '<i>' + wsT("js.tk.cmt.hiddenq") + '</i>' : esc(String(q.body).slice(0, 90))) : '') + '</div>';
     }
     var acts = '';
     if (n.status === 'applied' && !c.hidden && !it.hidden) {
       acts += btn('reply', wsT("js.tk.cmt.reply"), { cid: n.id });
       if (n.member === v) acts += btn('cedit', wsT("js.tk.cmt.edit"), { cid: n.id }) + btn('chide', wsT("js.tk.cmt.hide"), { cid: n.id });
+    } else if (hidShown && n.status === 'applied' && c.canUnhide) {
+      acts += btn('cunhide', wsT("js.tk.cmt.unhide"), { cid: n.id }, 'tk-unhide');
     }
     var live = n.status === 'applied' && !!VS.comments[n.id], ed = ui.cedit && ui.cedit.cid === n.id && live && !c.hidden;
     if (ed) acts = '';
     // an own comment being edited in place (ui.cedit): Cmd/Ctrl+Enter saves, Esc cancels
     var txt = ed ? '<div class="cedit">' + editorHtml('tkcedit', { value: ui.cedit.body, rows: 3, label: wsT("js.tk.cmt.edit"), pv: 'ctext' }) + '<div class="tb">' +
-      btn('cedit-save', wsT("js.tk.dlg.save"), {}, 'primary') + btn('cedit-x', wsT("js.tk.dlg.cancel"), {}) + '<span class="muted">' + wsT("js.tk.cedit.hint", MAC ? '⌘Enter' : 'Ctrl+Enter') + '</span></div></div>' + mentionChips(c.mentions) + attChips(c.attachments, true) : c.hidden ? '<div class="hiddenc">' + wsT("js.tk.cmt.hidden", esc(alias(c.hidden))) + '<details><summary>' + wsT("js.tk.cmt.history") + '</summary>' + esc(body) + '</details></div>' :
+      btn('cedit-save', wsT("js.tk.dlg.save"), {}, 'primary') + btn('cedit-x', wsT("js.tk.dlg.cancel"), {}) + '<span class="muted">' + wsT("js.tk.cedit.hint", MAC ? '⌘Enter' : 'Ctrl+Enter') + '</span></div></div>' + mentionChips(c.mentions) + attChips(c.attachments, true) : (c.hidden && !sh) ? '<div class="hiddenc">' + wsT("js.tk.cmt.hidden", esc(alias(c.hidden))) + '<details><summary>' + wsT("js.tk.cmt.history") + '</summary>' + esc(body) + '</details></div>' :
       textBlock('ctext', 'comments', n.id, body) + mentionChips(live ? c.mentions : p.mentions) + attChips(live ? c.attachments : p.attachments, live);
-    return '<li class="cmt' + (n.status !== 'applied' ? ' ' + n.status : '') + (n.markers.length ? ' concm' : '') + (n.member === v ? ' mine' : '') + '"' + attr('ev', n.id) + tipAttr(n.alias) + '>' +
+    return '<li class="cmt' + (n.status !== 'applied' ? ' ' + n.status : '') + (n.markers.length ? ' concm' : '') + (n.member === v ? ' mine' : '') + (hidShown ? ' tk-hidden' : '') + '"' + attr('ev', n.id) + tipAttr(n.alias) + '>' +
       '<div class="ch"><b>' + whoName(n.member) + '</b>' + originChip(n.origin) + '<span class="when">' + esc(fmtTs(n.ts)) + '</span>' +
+      (hidShown ? '<span class="chip hid">' + wsT("js.tk.chip.hidden") + '</span>' : '') +
       (c.edited ? '<span class="chip">' + wsT("js.tk.cmt.edited") + '</span>' : '') + flags(n) + '<span class="grow"></span>' + acts + '</div>' + reply + txt +
       (n.reason ? '<span class="reason">' + esc(n.reason) + '</span>' : '') + markerHtml(n) + supHtml(n) + '</li>';
   }
@@ -384,7 +390,7 @@
     if (!e) return null;
     var p = e.payload || {}, by = function (sel, id) { return root.querySelector('[' + sel + '="' + CSS.escape(id) + '"]'); }, holders = root.querySelector('[data-focus="holders"]'), el = null;
     if (e.type === 'comment.add') el = by('data-ev', e.id);
-    else if (e.type === 'comment.edit' || e.type === 'comment.hide') el = by('data-ev', p.comment);
+    else if (e.type === 'comment.edit' || e.type === 'comment.hide' || e.type === 'comment.unhide') el = by('data-ev', p.comment);
     else if (STATUS_EV[e.type]) el = by('data-hmember', assigneeOf(e)) || holders;
     else if (e.type === 'item.assign' || e.type === 'item.handoff' || e.type === 'item.claim' || e.type === 'item.approve') el = holders;
     else if (e.type === 'item.request' || e.type === 'item.deny' || e.type === 'item.unrequest') el = by('data-req', e.type === 'item.request' ? e.id : p.request);
@@ -683,19 +689,21 @@
   // inline row here); a topic without children and without that right draws nothing.
   function subtasksHtml(it) {
     var add = ui.sub && ui.sub.rk === 'iw:' + it.id ? subRowHtml(0) : ''; // "add subtask" (header, menu, or the section's "+"): the input row tops the list
-    var can = canSplit(it);
-    if (!it.children.length && !add && !can && it.kind === 'topic') return '';
+    var can = canSplit(it), sh = showHidden();
+    function kids(id) { return (VS.items[id] ? VS.items[id].children : []).filter(function (k) { return VS.items[k] && (!VS.items[k].hidden || sh); }); }
+    var topKids = kids(it.id);
+    if (!topKids.length && !add && !can && it.kind === 'topic') return '';
     function rows(id, depth) {
-      return VS.items[id].children.map(function (k) {
-        var ki = VS.items[k], key = ui.store + '|' + k, open = !!ki.children.length && (key in ui.wfold ? ui.wfold[key] : depth === 0);
-        var c = foldCtl({ id: k, n: ki.children.length, open: open, to: '' }, 'wfold', 'w:');
-        return '<div class="srow' + (wrapped(ki.status) ? ' gone' : '') + '"' + attr('item', k) + attr('rk', 'w:' + k) + ' style="--ind:' + depth + '">' + c.tw + stBtn(stKey(ki), ki) + titleRef(k) + c.sub + (ki.hidden ? '<span class="chip hid">' + wsT("js.tk.chip.hidden") + '</span>' : '') +
-          '<span class="grow"></span>' + rollupHtml(ki) + whoHtml(ki) + '</div>' + (open ? rows(k, depth + 1) : '');
+      return kids(id).map(function (k) {
+        var ki = VS.items[k], key = ui.store + '|' + k, subKids = kids(k), open = !!subKids.length && (key in ui.wfold ? ui.wfold[key] : depth === 0);
+        var c = foldCtl({ id: k, n: subKids.length, open: open, to: '' }, 'wfold', 'w:');
+        return '<div class="srow' + (wrapped(ki.status) ? ' gone' : '') + (ki.hidden ? ' tk-hidden' : '') + '"' + attr('item', k) + attr('rk', 'w:' + k) + ' style="--ind:' + depth + '">' + c.tw + stBtn(stKey(ki), ki) + titleRef(k) + c.sub + (ki.hidden ? '<span class="chip hid">' + wsT("js.tk.chip.hidden") + '</span>' : '') +
+          '<span class="grow"></span>' + (ki.hidden ? moreBtn(k, '', true) : '') + rollupHtml(ki) + whoHtml(ki) + '</div>' + (open ? rows(k, depth + 1) : '');
       }).join('');
     }
     var plus = can ? '<span class="grow"></span><button type="button" class="ia"' + attr('act', 'hsub') + attr('item', it.id) + ' aria-label="' + esc(wsT("js.tk.menu.sub")) + '"' + tipAttr(wsT("js.tk.menu.sub")) + '><svg class="i"><use href="#tki-plus"/></svg></button>' : '';
-    return '<section class="iw-sub"><h3 class="prom">' + wsT("js.tk.win.subtasks") + ' <span class="cnt">' + it.children.length + '</span>' + rollupHtml(it) + plus + '</h3>' +
-      (add || it.children.length ? '<div class="srows">' + add + rows(it.id, 0) + '</div>' : '') + '</section>';
+    return '<section class="iw-sub"><h3 class="prom">' + wsT("js.tk.win.subtasks") + ' <span class="cnt">' + topKids.length + '</span>' + rollupHtml(it) + plus + '</h3>' +
+      (add || topKids.length ? '<div class="srows">' + add + rows(it.id, 0) + '</div>' : '') + '</section>';
   }
   // "Referenced by" (531): the items, then the comments, whose text references this one with a
   // #<alias> token (view backrefs), drawn only when there are any. An item row opens that item;
@@ -723,7 +731,7 @@
     'item.request': "js.tk.tr.k.request", 'item.approve': "js.tk.tr.k.request", 'item.deny': "js.tk.tr.k.request", 'item.unrequest': "js.tk.tr.k.request",
     'item.close': "js.tk.tr.k.close", 'item.confirm': "js.tk.tr.k.confirm", 'item.reject': "js.tk.tr.k.reject", 'item.reopen': "js.tk.tr.k.reopen",
     'item.hide': "js.tk.tr.k.hide", 'item.unhide': "js.tk.tr.k.hide", 'item.move': "js.tk.tr.k.move",
-    'comment.add': "js.tk.tr.k.comment", 'comment.edit': "js.tk.tr.k.comment", 'comment.hide': "js.tk.tr.k.comment"
+    'comment.add': "js.tk.tr.k.comment", 'comment.edit': "js.tk.tr.k.comment", 'comment.hide': "js.tk.tr.k.comment", 'comment.unhide': "js.tk.tr.k.comment"
   };
   function isThreadComment(n, itemId) { return n.type === 'comment.add' && n.thread === itemId; }
   function isThreadStatusBreak(n) { return n.type === 'item.status'; }
@@ -918,6 +926,7 @@
     }
     if (canSplit(it)) h += '<button type="button" class="ia"' + attr('act', 'hsub') + attr('item', it.id) + ' aria-label="' + esc(wsT("js.tk.menu.sub")) + '"' + tipAttr(wsT("js.tk.menu.sub")) + '><svg class="i"><use href="#tki-plus"/></svg></button>';
     if (mine && !wrapped(mine.status) && !mine.fallback) h += '<button type="button" class="ia"' + attr('act', 'handoff') + attr('item', it.id) + ' aria-haspopup="menu" aria-label="' + esc(wsT("js.tk.act.handoff")) + '"' + tipAttr(wsT("js.tk.act.handoff")) + '><svg class="i"><use href="#tki-handoff"/></svg></button>';
+    if (canUnhide(it)) h += btn('iunhide', esc(it.author === VS.viewer.member ? wsT("js.tk.act.unhide") : wsT("js.tk.act.unhide.admin")), { item: it.id }, 'primary');
     return h ? '<div class="iw-acts">' + h + '</div>' : '';
   }
   // The item window's id button: "<kind> ID" copies the item's id (its tooltip) and says so for a moment.

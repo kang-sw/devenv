@@ -2661,5 +2661,13 @@
   "js.tk.pm.retarget.cc.note": "Removes <b>{0}</b> from CC and registers the new target(s) in one batch. Other CC entries stay untouched.",
   "js.tk.pm.retarget.cc.sum.one": "New target: {0} person",
   "js.tk.pm.retarget.cc.sum.other": "New target: {0} people",
-  "js.tk.pm.retarget.cc.title": "Retarget {0} CC"
+  "js.tk.pm.retarget.cc.title": "Retarget {0} CC",
+  "js.tk.act.unhide": "Unhide item",
+  "js.tk.act.unhide.admin": "Unhide item (admin)",
+  "js.tk.cmt.unhide": "Unhide",
+  "js.tk.ev.cunhide": "unhid comment {0}",
+  "js.tk.ev.unhide": "unhid{0}",
+  "js.tk.panel.showhidden": "Show hidden",
+  "js.tk.panel.showhidden.tip.off": "Show hidden items and comments in place",
+  "js.tk.panel.showhidden.tip.on": "Hide hidden items and comments again"
 }

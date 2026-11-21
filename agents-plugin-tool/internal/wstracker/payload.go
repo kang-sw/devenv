@@ -15,6 +15,7 @@ const (
 	TypeItemCreate        = "item.create"
 	TypeItemEdit          = "item.edit"
 	TypeItemHide          = "item.hide"
+	TypeItemUnhide        = "item.unhide"
 	TypeItemMove          = "item.move"
 	TypeItemAssign        = "item.assign"
 	TypeItemHandoff       = "item.handoff"
@@ -30,6 +31,7 @@ const (
 	TypeCommentAdd        = "comment.add"
 	TypeCommentEdit       = "comment.edit"
 	TypeCommentHide       = "comment.hide"
+	TypeCommentUnhide     = "comment.unhide"
 	TypeSetLead           = "roles.set_lead"
 	TypeOrgSet            = "roles.org_set"
 	TypeOrgRemove         = "roles.org_remove"
@@ -143,7 +145,7 @@ type ItemHandoff struct {
 	Note     string `json:"note,omitempty"`
 }
 
-// ItemRef is the payload of item.hide, item.accept, item.decline,
+// ItemRef is the payload of item.hide, item.unhide, item.accept, item.decline,
 // item.close, item.unassign, item.return, item.confirm, item.reject, and
 // item.reopen (Assignee and Note where the event takes them; Root, the root
 // of the rules to end, on item.unassign only).
@@ -256,7 +258,7 @@ type CommentAdd struct {
 }
 
 // CommentRef is the payload of comment.edit (Body, Mentions, Attachments,
-// Refs) and comment.hide.
+// Refs), comment.hide, and comment.unhide.
 type CommentRef struct {
 	Comment     string       `json:"comment"`
 	Body        string       `json:"body,omitempty"`

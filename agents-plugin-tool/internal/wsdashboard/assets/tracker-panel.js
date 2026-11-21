@@ -167,7 +167,7 @@
   // today and drill (a team head's count) are display state too, never stored.
   function panelState() {
     var n = ui.store;
-    return (ui.panel[n] = ui.panel[n] || { scope: 'mine', modes: (ui.pmodes[n] = ui.pmodes[n] || {}), today: null, drill: null, q: '', closedOpen: ui.closedOpen[n] !== false, treeOpen: {} });
+    return (ui.panel[n] = ui.panel[n] || { scope: 'mine', modes: (ui.pmodes[n] = ui.pmodes[n] || {}), today: null, drill: null, q: '', closedOpen: ui.closedOpen[n] !== false, treeOpen: {}, showHidden: false });
   }
   function scopeList() { return SCOPES.filter(function (x) { return x[0] !== 'team' || VS.my.team.length; }); }
   function scopeOf() { var s = panelState().scope; return scopeList().some(function (x) { return x[0] === s; }) ? s : 'mine'; }
@@ -328,7 +328,7 @@
   // The kids of a node are its non-hidden children (opt.kids replaces that), in item order.
   // A match's chain of ancestors stops below the first hidden one, or the first opt.keep(id) refuses
   // (the "all" scope's kind filter), so neither shows as a context row; the match then roots there.
-  function kidsShown(id) { var it = VS.items[id]; return it ? it.children.filter(function (k) { return VS.items[k] && !VS.items[k].hidden; }) : []; }
+  function kidsShown(id) { var it = VS.items[id], sh = showHidden(); return it ? it.children.filter(function (k) { return VS.items[k] && (!VS.items[k].hidden || sh); }) : []; }
   function foldOf(id) { return ui.tfold[ui.store + '|' + id] || ''; }
   // rows: the scope's matches in its own order, each an irow option object ({ rk, item, rec?, more?, closed? }).
   // Returns the entries in display order: { k: 'node', id, depth, rows (the node's matches; none for a context
@@ -337,12 +337,12 @@
   // Roots are ordered by their first match in `rows`, children by item order.
   function ctxTree(rows, opt) {
     opt = opt || {};
-    var kidsOf = opt.kids || kidsShown, byItem = {}, rank = {}, pos = {}, spine = {}, out = [];
+    var kidsOf = opt.kids || kidsShown, byItem = {}, rank = {}, pos = {}, spine = {}, out = [], sh = showHidden();
     VS.itemOrder.forEach(function (id, i) { pos[id] = i; });
     rows.forEach(function (r, i) {
       (byItem[r.item] = byItem[r.item] || []).push(r);
       for (var cur = r.item, n = 0; cur && VS.items[cur] && n < 50; cur = VS.items[cur].parent, n++) {
-        if (cur !== r.item && (VS.items[cur].hidden || (opt.keep && !opt.keep(cur)))) break;
+        if (cur !== r.item && ((!sh && VS.items[cur].hidden) || (opt.keep && !opt.keep(cur)))) break;
         if (!(cur in rank)) rank[cur] = i;
       }
     });
@@ -396,9 +396,23 @@
   function listMine() {
     var mine = VS.my.assignments.map(A).filter(keepRec), open = mine.filter(function (r) { return !wrapped(r.status); }), done = mine.filter(function (r) { return wrapped(r.status); });
     var created = VS.my.created.filter(keepItem);
+    var rows = open.map(function (r) { return { rk: 'mine:' + r.id, item: r.item, rec: r }; });
+    if (showHidden()) {
+      var seen = {};
+      rows.forEach(function (x) { seen[x.item] = true; });
+      done.forEach(function (r) { seen[r.item] = true; });
+      created.forEach(function (id) { seen[id] = true; });
+      VS.itemOrder.forEach(function (id) {
+        var it = VS.items[id];
+        if (!it || !it.hidden || seen[id] || !keepItem(id)) return;
+        var r = mineLive(it);
+        if (r && keepRec(r)) { seen[id] = true; rows.push({ rk: 'mine:' + r.id, item: id, rec: r }); }
+        else if (isCreator(it) || it.canUnhide) { seen[id] = true; rows.push({ rk: 'mine:h:' + id, item: id }); }
+      });
+    }
     done.forEach(function (r) { addClosed(String(r.lastUpdate), 1, irow({ rk: 'mine:' + r.id, item: r.item, rec: r, closed: true }), recentlyClosed(r.item, r)); });
-    if (FILT && !mine.length && !created.length) return filterEmpty();
-    var h = open.length ? treeRows(open.map(function (r) { return { rk: 'mine:' + r.id, item: r.item, rec: r }; }), 'mine:') : TF ? '' : SQ ? (created.length ? '' : '<p class="muted">' + wsT("js.tk.list.nomatch") + '</p>') : '<p class="muted">' + wsT("js.tk.list.mine.none") + '</p>';
+    if (FILT && !rows.length && !done.length && !created.length) return filterEmpty();
+    var h = rows.length ? treeRows(rows, 'mine:') : TF ? '' : SQ ? (created.length ? '' : '<p class="muted">' + wsT("js.tk.list.nomatch") + '</p>') : '<p class="muted">' + wsT("js.tk.list.mine.none") + '</p>';
     if (created.length) h += sub(wsT("js.tk.list.mine.created"), created.length) + treeRows(created.map(function (id) { return { rk: 'mine:c:' + id, item: id }; }), 'mine:c:');
     return h;
   }
@@ -428,6 +442,17 @@
   // would hold (related.closed) go to the recently-closed section like any scope's closed rows.
   function listRelated() {
     var R = VS.my.related || {}, cc = listOf(R.cc).filter(keepItem), mn = listOf(R.mentioned).filter(keepItem);
+    if (showHidden()) {
+      var v = VS.viewer.member, seenCC = {}, seenMn = {};
+      cc.forEach(function (id) { seenCC[id] = true; });
+      mn.forEach(function (id) { seenMn[id] = true; });
+      VS.itemOrder.forEach(function (id) {
+        var it = VS.items[id];
+        if (!it || !it.hidden || !keepItem(id)) return;
+        if (!seenCC[id] && listOf(it.cc).indexOf(v) >= 0) { seenCC[id] = true; cc.push(id); }
+        if (!seenMn[id] && listOf(it.mentions).indexOf(v) >= 0) { seenMn[id] = true; mn.push(id); }
+      });
+    }
     listOf(R.closed).filter(keepItem).forEach(function (id) { addClosed(closeTs(VS.items[id]), 1, irow({ rk: 'rel:x:' + id, item: id, closed: true }), recentlyClosed(id)); });
     if (FILT && !cc.length && !mn.length) return filterEmpty();
     return relSecHtml('cc', wsT("js.tk.list.rel.cc"), cc, wsT("js.tk.list.rel.cc.none")) + relSecHtml('mentioned', wsT("js.tk.list.rel.mentioned"), mn, wsT("js.tk.list.rel.mentioned.none"));
@@ -540,7 +565,7 @@
     }).join('');
     return h || (FILT && VS.my.team.length ? filterEmpty() : '<div class="empty">' + wsT("js.tk.team.nobody") + '</div>');
   }
-  function allRows(kanban) { return VS.itemOrder.map(function (id) { return VS.items[id]; }).filter(kanban ? function (it) { return !it.hidden && kindFilter(it); } : itemFilter); }
+  function allRows(kanban) { var sh = showHidden(); return VS.itemOrder.map(function (id) { return VS.items[id]; }).filter(kanban ? function (it) { return (!it.hidden || sh) && kindFilter(it); } : itemFilter); }
   // The tree and closed items. Under the default "open" status, a done item never
   // leaves its place silently: a closed child among open siblings folds into one "closed N"
   // row under its parent (a click expands it); a closed parent with an open descendant stays in
@@ -555,12 +580,12 @@
       var rows = allRows().filter(function (it) { return keepItem(it.id); });
       return bar + (rows.length ? treeRows(rows.map(function (it) { return { rk: 'all:' + it.id, item: it.id }; }), 'all:', { keep: keepKind }) : FILT ? filterEmpty() : '<div class="empty">' + wsT("js.tk.list.all.nomatch") + '</div>');
     }
-    var base = {}, order = [], kids = {}, openBelow = {};
-    VS.itemOrder.forEach(function (id) { var it = VS.items[id]; if (!it.hidden && kindFilter(it)) { base[id] = it; order.push(id); } });
+    var base = {}, order = [], kids = {}, openBelow = {}, sh = showHidden();
+    VS.itemOrder.forEach(function (id) { var it = VS.items[id]; if ((!it.hidden || sh) && kindFilter(it)) { base[id] = it; order.push(id); } });
     order.forEach(function (id) { var par = base[id].parent; if (par && base[par]) (kids[par] = kids[par] || []).push(id); });
     function kidsOf(id) { return kids[id] || []; }
-    function isOpen(id) { return itemFilter(base[id]); }
-    function isClosed(id) { return base[id].kind !== 'topic' && wrapped(base[id].status); }
+    function isOpen(id) { return base[id].hidden || itemFilter(base[id]); }
+    function isClosed(id) { return !base[id].hidden && base[id].kind !== 'topic' && wrapped(base[id].status); }
     function hasOpen(id) { if (!(id in openBelow)) openBelow[id] = kidsOf(id).some(function (k) { return isOpen(k) || hasOpen(k); }); return openBelow[id]; }
     function inTree(id) { return isOpen(id) || (isClosed(id) && hasOpen(id)); }   // open, or closed with something open below
     function isUnit(id) { return isClosed(id) && !hasOpen(id); }                  // closed, and so is everything below
@@ -632,6 +657,9 @@
     }).join('') + '</span>' : '';
     var search = '<span class="psearch"><svg class="i"><use href="#tki-search"/></svg><input id="psearch" type="text" role="searchbox" autocomplete="off" spellcheck="false" value="' + esc(q) + '" placeholder="' + wsT("js.tk.panel.search") + '" aria-label="' + wsT("js.tk.panel.search.aria") + '">' +
       (q ? '<button type="button" class="psx"' + attr('act', 'psearch-clear') + ' aria-label="' + wsT("js.tk.panel.clearsearch") + '"' + tipAttr(wsT("js.tk.panel.clearsearch.tip")) + '><svg class="i"><use href="#tki-x"/></svg></button>' : '') + '</span>';
+    var sh = showHidden();
+    var hidToggle = '<button type="button" class="phid' + (sh ? ' on' : '') + '" aria-pressed="' + sh + '"' + attr('act', 'show-hidden') + attr('fk', 'show-hidden') +
+      tipAttr(wsT(sh ? "js.tk.panel.showhidden.tip.on" : "js.tk.panel.showhidden.tip.off")) + '><svg class="i"><use href="#tki-eye"/></svg><span>' + esc(wsT("js.tk.panel.showhidden")) + '</span></button>';
     // a new item: the hover insert between list rows (insShow), or the "+" that ends the panel, which
     // opens the input row in its place (the keyboard path; an empty list keeps only this one)
     var n = ui.nrow[ui.store], body = panelBody(s, m, v) + (n && !n.at ? newRowHtml() : newBtn()), closed = closedHtml();
@@ -644,7 +672,7 @@
     var nsel = mselIds().length, mbar = nsel ? '<div class="mselbar" role="status"><span class="chip mselc">' + esc(wsTn("js.tk.sel.n", nsel)) + '<button type="button" class="psx"' + attr('act', 'msel-clear') + ' aria-label="' + wsT("js.tk.sel.clear") + '"' +
       tipAttr(wsT("js.tk.sel.clear")) + '><svg class="i"><use href="#tki-x"/></svg></button></span></div>' : '';
     TF = null; SQ = ''; SIDS = null; SERR = ''; FILT = false; CLOSED = null; MSEEN = null;
-    return { title: wsT("js.tk.tab.items"), tools: scopes + '<span class="chip">' + esc(scopeChip(s)) + '</span><div class="prow2">' + modes + search + '</div>' + serr, body: mbar + '<div class="plist">' + body + '</div>' + closed, id: 'card-items', cls: 'panel',
+    return { title: wsT("js.tk.tab.items"), tools: scopes + '<span class="chip">' + esc(scopeChip(s)) + '</span><div class="prow2">' + modes + search + hidToggle + '</div>' + serr, body: mbar + '<div class="plist">' + body + '</div>' + closed, id: 'card-items', cls: 'panel',
       attrs: attr('scope', s) + attr('view', m) + (nsel ? attr('msel', nsel) : '') };
   }
   // With the adapter's wiki, the title is the Items | Wiki switch (wkSwitch); the Today bar belongs to the items

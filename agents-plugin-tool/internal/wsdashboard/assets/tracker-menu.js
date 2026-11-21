@@ -220,6 +220,7 @@
     if (edit) last.push(mi('edit', esc(it.author === v || mineLive(it) ? wsT("js.tk.act.edit") : wsT("js.tk.act.edit.admin")), { item: it.id }, { icon: 'pen' }));
     if (!(ui.win && ui.item === it.id)) last.push(mi('m-open', esc(wsT("js.tk.menu.open")), { item: it.id }, { icon: 'page' }));
     if (canHide(it)) last.push(mi('ihide', esc(it.author === v ? wsT("js.tk.act.hide") : wsT("js.tk.act.hide.admin")), { item: it.id }, { icon: 'x', cls: 'danger' }));
+    if (canUnhide(it)) last.push(mi('iunhide', esc(it.author === v ? wsT("js.tk.act.unhide") : wsT("js.tk.act.unhide.admin")), { item: it.id }, { icon: 'eye', cls: 'go' }));
     if (last.length) parts.push(last.join(''));
     return h + (parts.length ? parts.join(msep()) : '<p class="mempty">' + wsT("js.tk.win.noacts", esc(nm(v))) + '</p>');
   }

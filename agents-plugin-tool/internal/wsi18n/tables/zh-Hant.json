@@ -2661,5 +2661,13 @@
   "js.tk.pm.retarget.cc.note": "在同一批次中移除 <b>{0}</b> 的副本並註冊新目標。其他副本維持不變。",
   "js.tk.pm.retarget.cc.sum.one": "新目標：{0}人",
   "js.tk.pm.retarget.cc.sum.other": "新目標：{0}人",
-  "js.tk.pm.retarget.cc.title": "變更 {0} 的副本目標"
+  "js.tk.pm.retarget.cc.title": "變更 {0} 的副本目標",
+  "js.tk.act.unhide": "取消隱藏項目",
+  "js.tk.act.unhide.admin": "取消隱藏項目 (管理員)",
+  "js.tk.cmt.unhide": "取消隱藏",
+  "js.tk.ev.cunhide": "取消隱藏了留言 {0}",
+  "js.tk.ev.unhide": "取消隱藏了{0}",
+  "js.tk.panel.showhidden": "顯示已隱藏",
+  "js.tk.panel.showhidden.tip.off": "在原位置顯示已隱藏的項目與留言",
+  "js.tk.panel.showhidden.tip.on": "再次隱藏已隱藏的項目與留言"
 }

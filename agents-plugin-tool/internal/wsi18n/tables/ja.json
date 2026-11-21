@@ -2661,5 +2661,13 @@
   "js.tk.pm.retarget.cc.note": "<b>{0}</b> の組織CCを解除し、新しい対象を1つのバッチで登録します。他のCCは変更されません。",
   "js.tk.pm.retarget.cc.sum.one": "新しい対象: {0}名",
   "js.tk.pm.retarget.cc.sum.other": "新しい対象: {0}名",
-  "js.tk.pm.retarget.cc.title": "{0} のCC対象を変更"
+  "js.tk.pm.retarget.cc.title": "{0} のCC対象を変更",
+  "js.tk.act.unhide": "項目を再表示",
+  "js.tk.act.unhide.admin": "項目を再表示 (管理者)",
+  "js.tk.cmt.unhide": "再表示",
+  "js.tk.ev.cunhide": "コメント {0} を再表示",
+  "js.tk.ev.unhide": "再表示{0}",
+  "js.tk.panel.showhidden": "非表示を表示",
+  "js.tk.panel.showhidden.tip.off": "非表示の項目とコメントを元の位置に表示",
+  "js.tk.panel.showhidden.tip.on": "非表示の項目とコメントを再び隠す"
 }

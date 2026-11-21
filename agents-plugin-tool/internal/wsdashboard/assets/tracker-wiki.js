@@ -648,8 +648,8 @@
     if (!kindFilter(it)) return false;
     var s = it.status;
     if (ui.status === 'hidden') return it.hidden;
-    if (it.hidden) return false;
-    if (ui.status === 'open') return !wrapped(s);
+    if (it.hidden && !showHidden()) return false;
+    if (ui.status === 'open') return it.hidden || !wrapped(s);
     if (ui.status === 'done' || ui.status === 'in-review' || ui.status === 'dropped') return s === ui.status;
     if (ui.status === 'blocked') return s === 'blocked' || it.rollup.blocked.length;
     if (ui.status === 'idea') return s === 'idea';
