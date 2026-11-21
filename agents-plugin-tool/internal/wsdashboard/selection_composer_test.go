@@ -105,7 +105,20 @@ func selectionProductionRuntime(t *testing.T) string {
 	source += storageInit
 	source += selectionActualSource(t, read("dashboard-board.js"), []string{"boardSeen =", "boardOwn =", "boardChanges ="}, []string{"boardFlushViewed"}, false)
 	source += read("dashboard-bundles.js")
-	source += selectionActualSource(t, read("dashboard-composer.js"), nil, nil, true)
+	var composer strings.Builder
+	collectComposer := false
+	for _, name := range dashboardScriptFiles {
+		if name == "dashboard-composer.js" {
+			collectComposer = true
+		}
+		if name == "dashboard-actions.js" {
+			break
+		}
+		if collectComposer {
+			composer.WriteString(mustAsset(t, name))
+		}
+	}
+	source += selectionActualSource(t, composer.String(), nil, nil, true)
 	source += selectionActualSource(t, read("dashboard-tracker.js"), []string{"capsuleTopicLoad ="}, []string{"paletteText", "capsuleTopics"}, false)
 	source += selectionActualSource(t, read("dashboard-rail.js"), []string{"railEl =", "railStore ="}, nil, false)
 	source += selectionDraftSource(t)

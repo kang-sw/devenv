@@ -269,7 +269,7 @@ always reachable. */}}
 {{/* agpop is the session's agents popover: the agents region (r-tree) over
 the conversation, above the subagent badge that opens it. Its pin and close
 controls and its hint sit outside the region so a region swap never takes
-their focus or state; the page script (dashboard-composer.js) opens, closes
+their focus or state; the page script (dashboard-composer-status.js) opens, closes
 and pins it. */}}
 {{define "agpop"}}<div class="agpop" id="agpop" role="dialog" aria-label="{{t "tree.agents"}}" hidden>{{region . "tree"}}<div class="agctl"><button type="button" class="agpin" id="agpin" aria-pressed="false" title="{{t "agpop.pin"}}" aria-label="{{t "agpop.pin"}}"><svg class="li" aria-hidden="true"><use href="#l-pin"/></svg></button><button type="button" class="agclose" id="agclose" title="{{t "agpop.close"}}" aria-label="{{t "agpop.close"}}">×</button></div><div class="agfoot">{{t "agpop.hint"}}</div></div>{{end}}
 

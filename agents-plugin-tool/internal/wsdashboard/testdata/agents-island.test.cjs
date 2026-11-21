@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const { readAssetSource } = require('./asset-source.cjs');
 const hudSrc = readAssetSource('wsdashboard', 'dashboard-hud.js');
-const compSrc = readAssetSource('wsdashboard', 'dashboard-composer.js');
+const compSrc = readAssetSource('wsdashboard', 'dashboard.js');
 const code = hudSrc + '\n' + compSrc.slice(compSrc.indexOf('  // --- agents island'), compSrc.indexOf('  function interruptTurn()'));
 assert(code.includes('function hudProject(') && code.includes('function agProject()'));
 

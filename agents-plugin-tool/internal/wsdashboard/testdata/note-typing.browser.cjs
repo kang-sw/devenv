@@ -8,7 +8,8 @@ const { chromium } = require(process.env.WS_PLAYWRIGHT_MODULE);
 const { readAssetSource } = require('./asset-source.cjs');
 const assets = path.join(__dirname, '../assets');
 const baseline = process.env.WS_NOTE_BASELINE;
-const composer = fs.readFileSync(path.join(baseline || assets, 'dashboard-composer.js'), 'utf8');
+const source = baseline ? fs.readFileSync(path.join(baseline, 'dashboard-composer.js'), 'utf8') : readAssetSource('wsdashboard', 'dashboard.js');
+const composer = source.slice(source.indexOf('  // --- composer:'));
 function func(name) {
   const match = composer.match(new RegExp('\\n  function ' + name + '\\([^\\n]*\\{[^\\n]*\\}\\n|\\n  function ' + name + '\\([\\s\\S]*?\\n  \\}\\n'));
   assert(match, 'missing production function ' + name);
