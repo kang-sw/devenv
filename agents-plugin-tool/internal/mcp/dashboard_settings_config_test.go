@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsconfigservice"
@@ -51,5 +52,24 @@ func TestDashboardSettingsCatalog(t *testing.T) {
 				t.Errorf("dashboard.pi_spawn_enabled default for %s = %v", pkg, entry.Default)
 			}
 		})
+	}
+}
+
+func TestDashboardPromptSeedsFollowPlaybookMarkers(t *testing.T) {
+	source := fstest.MapFS{"one.md": &fstest.MapFile{Data: []byte(`<!-- ws:override:Outer desc="outer" -->
+opening
+<!-- ws:override:Inner -->
+inner contents
+<!-- ws:/override:Inner -->
+closing
+<!-- ws:/override:Outer -->
+<!-- ws:override:Empty -->
+<!-- ws:/override:Empty -->`)}}
+	points, seeds, err := scanOverridePointsAndSeeds(source)
+	if err != nil || len(points) != 3 || seeds["Outer"] != "opening\ninner contents\nclosing" || seeds["Inner"] != "inner contents" {
+		t.Fatalf("seed discovery = %#v, %#v, %v", points, seeds, err)
+	}
+	if empty, ok := seeds["Empty"]; !ok || empty != "" {
+		t.Fatalf("empty point = %q, %t", empty, ok)
 	}
 }

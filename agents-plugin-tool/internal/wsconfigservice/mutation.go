@@ -2,6 +2,7 @@ package wsconfigservice
 
 import (
 	"encoding/json"
+	"maps"
 	"slices"
 	"strings"
 
@@ -145,27 +146,12 @@ func (m Mutation) Apply(scope wsconfig.Scope, opts wsconfig.Options, sessionKey 
 }
 
 func (m Mutation) writeTier(scope wsconfig.Scope, opts wsconfig.Options) error {
-	tier, harness := m.Selectors["tier"], m.Selectors["harness"]
-	if m.Action == "reset" {
-		unset := wsconfig.UnsetAgentsTierForHarness
-		if scope == wsconfig.ScopeGlobal {
-			unset = wsconfig.UnsetGlobalAgentsTierForHarness
-		}
-		_, _, err := unset(opts, tier, harness)
-		return err
+	fields := map[string]any{"tier": m.Selectors["tier"]}
+	reset := m.Action == "reset"
+	if !reset {
+		maps.Copy(fields, m.Value.(map[string]any))
 	}
-	fields := m.Value.(map[string]any)
-	backend, _ := fields["backend"].(string)
-	model, _ := fields["model"].(string)
-	var efforts []string
-	if effort, present := fields["effort"].(string); present {
-		efforts = append(efforts, effort)
-	}
-	set := wsconfig.SetAgentsTierForHarness
-	if scope == wsconfig.ScopeGlobal {
-		set = wsconfig.SetGlobalAgentsTierForHarness
-	}
-	_, err := set(opts, tier, backend, model, harness, efforts...)
+	_, _, err := WriteTier(opts, fields, m.Selectors["harness"], scope, reset)
 	return err
 }
 

@@ -41,7 +41,7 @@ const [base, emptyBase] = process.argv.slice(2);
       await dialog.waitFor({ state: 'visible' });
     }
     async function rootIsEmpty() {
-      await current().locator('#grid').waitFor();
+      await current().locator('#grid > .dlanding').waitFor();
       assert.equal(await page.locator('html').getAttribute('data-rid'), '');
       assert.equal(await page.locator('.rs.cur').count(), 0);
       // The empty main panel holds only the landing lockup (d2921cf02 puts

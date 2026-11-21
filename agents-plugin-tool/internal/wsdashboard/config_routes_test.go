@@ -181,3 +181,35 @@ func mustProjectConfigPath(t *testing.T, opts wsconfig.Options) string {
 	}
 	return path
 }
+
+func TestSettingsTierResetTargetsOnlyTheSelectedHarnessAndTier(t *testing.T) {
+	d := authFixture(t)
+	d.config = settingsTestBackend(t)
+	own := "http://127.0.0.1:43210"
+	for _, leaf := range []struct{ tier, harness, model string }{
+		{"small", "codex", "target"}, {"small", "default", "same-tier"}, {"medium", "codex", "same-harness"},
+	} {
+		body, err := json.Marshal(map[string]any{"scope": "global", "key": "agents.tier",
+			"selectors": map[string]string{"tier": leaf.tier, "harness": leaf.harness},
+			"value":     map[string]string{"backend": "codex", "model": leaf.model},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := settingsRequest(t, d, http.MethodPost, "/api/config/set", string(body), own); got.Code != 200 {
+			t.Fatalf("set tier = %d %s", got.Code, got.Body)
+		}
+	}
+	body := `{"scope":"global","key":"agents.tier","selectors":{"tier":"small","harness":"codex"}}`
+	if got := settingsRequest(t, d, http.MethodPost, "/api/config/reset", body, own); got.Code != 200 {
+		t.Fatalf("reset tier = %d %s", got.Code, got.Body)
+	}
+	files, err := wsconfig.FileLayers(d.config.Options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tiers := files[wsconfig.ScopeGlobal].Agents.ModelAliases
+	if _, found := tiers["small"]["codex"]; found || tiers["small"]["default"].Model != "same-tier" || tiers["medium"]["codex"].Model != "same-harness" {
+		t.Errorf("reset targeted the wrong leaf: %+v", tiers)
+	}
+}

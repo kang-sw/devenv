@@ -88,7 +88,6 @@
   var search = view.querySelector("[data-settings-search]");
   var count = view.querySelector("[data-settings-count]");
 
-  function t(name, ...args) { return window.wsT("js.settings." + name, ...args); }
   var tr = window.wsT;
 
   function el(tag, cls, text) {
@@ -390,6 +389,24 @@
       return {node: append(el("div", "ctl-row"), toggle, word), read: function () { return typedBoolean ? on : on ? "on" : "off"; }};
     }
     var choices = entry.enum || (spec.control === "toggle" && entry.type === "boolean" ? [true, false] : []);
+    if (spec.control === "choice" && choices.length <= 3 && choices.includes(value)) {
+      var current = value;
+      var segment = el("div", "seg settings-choice");
+      segment.setAttribute("role", "group");
+      segment.setAttribute("aria-label", label);
+      for (const choice of choices) {
+        const option = button("", shownValue(choice), function () {
+          current = choice;
+          for (const other of segment.children) other.setAttribute("aria-pressed", String(other === option));
+          segment.dispatchEvent(new Event("input", {bubbles: true}));
+        });
+        option.dataset.settingsOption = String(choice);
+        option.disabled = disabled;
+        option.setAttribute("aria-pressed", String(choice === current));
+        segment.append(option);
+      }
+      return {node: segment, read: function () { return current; }};
+    }
     if (choices.length) {
       var select = el("select", "sel mono");
       select.setAttribute("aria-label", label);
@@ -495,7 +512,7 @@
     }
     ctl.append(status, ...renderWarnings(entry));
     row.append(meta, form, provenance(entry, canEdit, function () { submit("reset"); }));
-    if (extension.renderRow) extension.renderRow({entry, spec, selection, row, control: ctl, form, submit, editable: canEdit, t});
+    if (extension.renderRow) extension.renderRow({entry, spec, selection, row, control: ctl, form, submit, editable: canEdit});
     return row;
   }
 
@@ -646,12 +663,17 @@
   }
 
   function syncCard() {
-    var toggle = button("fchip", tr("js.settings.sync.disabled"));
+    var toggle = button("tg", "");
     toggle.disabled = true;
+    toggle.setAttribute("role", "switch");
+    toggle.setAttribute("aria-checked", "false");
+    toggle.setAttribute("aria-label", tr("js.settings.sync.title"));
+    var sync = button("fchip", tr("js.settings.sync.disabled"));
+    sync.disabled = true;
     return append(el("div", "sync-card"), append(el("div", "sync-card-left"),
-      el("strong", "sync-card-title", tr("js.settings.sync.title")),
-      append(el("div", "sync-card-desc", tr("js.settings.sync.description") + " "), el("code", "", "261119-feat-ws-config-git-sync"))),
-    toggle);
+      append(el("div", "sync-card-title"), el("strong", "", tr("js.settings.sync.title")), badge(tr("js.settings.sync.planned"))),
+      el("div", "sync-card-desc", tr("js.settings.sync.description"))),
+      append(el("div", "settings-sync-actions"), toggle, sync));
   }
 
   function renderContent() {
@@ -670,8 +692,8 @@
     }
     var heading = append(el("header", "sec-head"), el("h2", "", sectionName(activeSection)),
       el("p", "", tr(sectionNotes[activeSection])));
-    content.append(heading);
     if (activeSection === "workflow" && scope === "global") content.append(syncCard());
+    content.append(heading);
     if (activeSection === "adapters") {
       var tabs = append(el("div", "subtabs"), ...adapters.map(function (name) {
         var tab = button("subtab", sectionName(name), function () {
@@ -711,6 +733,7 @@
         if (selectedRow && matches(selectedRow, spec)) list.append(renderRow(selectedRow, spec));
       }
     }
+    if (extension.afterRender) extension.afterRender({section: activeSection, list});
     content.append(list.children.length ? list : el("p", "info-note", tr("js.settings.no_results")));
   }
 
@@ -731,7 +754,7 @@
     renderCounts();
     renderContent();
     if (extension.mount && snapshot) extension.mount({
-      proposal: view.querySelector("[data-settings-proposal]"), selection, snapshot, t
+      proposal: view.querySelector("[data-settings-proposal]"), selection, snapshot, rerender: renderContent
     });
   }
 

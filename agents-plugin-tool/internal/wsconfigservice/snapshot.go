@@ -105,6 +105,7 @@ func buildEntry(rule Rule, selectors map[string]string, scope wsconfig.Scope, la
 	e.DisabledReason = rule.scopeReason(scope)
 	e.Editable = e.DisabledReason == ""
 	e.SourceScope = wsconfig.ScopeBuiltin
+	e.Seed = rule.Seed
 	harness := selectors["harness"]
 	if seed, ok := layers.Seeds[rule.Key]; ok {
 		e.Seed = &seed
@@ -130,6 +131,9 @@ func buildEntry(rule Rule, selectors map[string]string, scope wsconfig.Scope, la
 	}
 
 	e.Default = rule.display(rule.Default)
+	if e.Seed != nil && rule.Default == "" {
+		e.Default = *e.Seed
+	}
 	if rule.Structured {
 		e.Default = safeStructured(rule.Key, layers.Structured[rule.Key])
 	}

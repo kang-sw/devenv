@@ -36,20 +36,22 @@ func InspectTier(files map[Scope]Config, tier, harness string) TierInspection {
 	result := TierInspection{Scope: ScopeBuiltin, Layers: make(map[Scope]AgentTier, 2)}
 	result.Default, _, _ = resolveAliasMapping(effectiveAgentConfig(), tier, "", harness)
 	result.Value, result.Bucket, _ = resolveAliasMapping(effectiveAgentConfig(global, project), tier, "", harness)
-	for _, scope := range []Scope{ScopeProject, ScopeGlobal} {
+	scopes := []Scope{ScopeProject, ScopeGlobal}
+	for _, scope := range scopes {
 		stored := files[scope]
 		if leaf, ok := stored.Agents.ModelAliases[tier][harness]; ok {
 			result.Layers[scope] = leaf
 		}
-		if result.Scope != ScopeBuiltin {
-			continue
-		}
-		if _, ok := stored.Agents.ModelAliases[tier][result.Bucket]; ok {
+		if _, ok := stored.Agents.ModelAliases[tier][result.Bucket]; ok && result.Scope == ScopeBuiltin {
 			result.Scope = scope
-			continue
 		}
-		if legacy, ok := stored.Agents.Tiers[tier]; ok && (result.Bucket == "tiers" || legacy == result.Value) {
-			result.Scope = scope
+	}
+	if result.Scope == ScopeBuiltin {
+		for _, scope := range scopes {
+			if _, ok := files[scope].Agents.Tiers[tier]; ok {
+				result.Scope = scope
+				break
+			}
 		}
 	}
 	return result

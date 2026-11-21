@@ -60,6 +60,7 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc("/api/config/snapshot", d.handleConfigSnapshot)
 	mux.HandleFunc("/api/config/set", d.handleConfigMutation)
 	mux.HandleFunc("/api/config/reset", d.handleConfigMutation)
+	mux.HandleFunc("/api/config/proposal", d.handleConfigProposal)
 	mux.HandleFunc(railRoute, d.handleRailRefresh)
 	mux.HandleFunc(railLayoutRoute, d.handleRailLayout)
 	mux.HandleFunc(railAdmissionRoute, d.handleRailAdmission)

@@ -19,6 +19,7 @@ var (
 type Rule struct {
 	Key, Type        string
 	Default          string
+	Seed             *string
 	Enum             []string
 	Minimum, Maximum *int64
 	Harnesses        []string

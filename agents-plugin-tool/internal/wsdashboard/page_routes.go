@@ -281,12 +281,7 @@ func (d *Daemon) serveShellStatus(w http.ResponseWriter, r *http.Request, view *
 		var html string
 		if html, err = renderShellPage(page, view); err == nil {
 			w.Header().Set("Content-Security-Policy", sessionPageCSP(false))
-			if status != http.StatusOK {
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				w.Header().Set("X-Content-Type-Options", "nosniff")
-				w.WriteHeader(status)
-			}
-			writeHTML(w, html)
+			writeHTMLStatus(w, status, html)
 			return
 		}
 	}

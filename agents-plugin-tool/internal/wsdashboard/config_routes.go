@@ -24,6 +24,7 @@ type ConfigBackend struct {
 	Seeds              map[string]string
 	Session            func(Registration) (map[string]string, wsconfig.SessionWriter, string, bool)
 	OrchestrateWarning func(string) string
+	IsLead             func(Registration) bool
 	Changed            func(string)
 }
 
@@ -114,6 +115,7 @@ type configResolved struct {
 	path          *string
 	session       Registration
 	targetSession Registration
+	targetRoot    string
 }
 
 type configWorktree struct {
@@ -189,6 +191,7 @@ func (d *Daemon) resolveConfig(selection configSelection) (configResolved, confi
 		if !ok {
 			return result, configTargetMissing
 		}
+		result.targetRoot = worktree.path
 		target := result.opts
 		target.RepoRoot = worktree.path
 		path, _ = wsconfig.RepoPath(target)
@@ -261,6 +264,15 @@ func (d *Daemon) handleSettings(w http.ResponseWriter, r *http.Request) {
 		writeConfigError(w, configForbidden)
 		return
 	}
+	sel, ok := queryConfigSelection(r)
+	failure := badConfigRequest
+	if ok {
+		_, failure = d.resolveConfig(sel)
+	}
+	if failure.status != 0 && !loginNavigationRequest(r) {
+		writeConfigError(w, failure)
+		return
+	}
 	if framedRequest(r) {
 		lang, _ := requestLang(r)
 		html, err := renderSettingsPage(lang, requestTheme(r))
@@ -269,16 +281,11 @@ func (d *Daemon) handleSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		admitShellFrame(w, sessionPageCSP(true))
-		writeHTML(w, html)
-		return
-	}
-	sel, ok := queryConfigSelection(r)
-	failure := badConfigRequest
-	if ok {
-		_, failure = d.resolveConfig(sel)
-	}
-	if failure.status != 0 && !loginNavigationRequest(r) {
-		writeConfigError(w, failure)
+		status := http.StatusOK
+		if failure.status != 0 {
+			status = failure.status
+		}
+		writeHTMLStatus(w, status, html)
 		return
 	}
 	src := r.URL.Query()

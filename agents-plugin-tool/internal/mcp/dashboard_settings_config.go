@@ -96,12 +96,15 @@ func dashboardConfigCatalog(pkg, rsrc fs.FS) (*wsconfigservice.Catalog, error) {
 	add(preferenceKnobEntry("preference.*"))
 	add(worktreeProfileKnobEntry("*"))
 	add(agentProfileKnobEntry("*"))
-	points, err := scanOverridePoints(rsrc)
+	points, seeds, err := scanOverridePointsAndSeeds(rsrc)
 	if err != nil {
 		return nil, err
 	}
 	for _, point := range points {
 		add(promptKnobEntry(point.PointId))
+		if seed, ok := seeds[point.PointId]; ok {
+			rules[len(rules)-1].Seed = &seed
+		}
 	}
 	namespaces := make(map[string]string)
 	for _, name := range []string{wspackage.ConfigManifestFile, wspackage.AgYConfigManifestFile, wspackage.DashboardConfigManifestFile, wspackage.PiConfigManifestFile} {
@@ -133,6 +136,7 @@ func DashboardConfigBackend(packageName string, opts wsconfig.Options, src *Dash
 	return &wsdashboard.ConfigBackend{
 		Catalog: catalog, Options: opts, Structured: structured,
 		Session:            src.settingsSession,
+		IsLead:             src.settingsLead,
 		OrchestrateWarning: orchestrateWhitelistWarning,
 		Changed: func(key string) {
 			notifyCompactionTune(key)
@@ -194,4 +198,24 @@ func dashboardAdapterReadLimits(key string) (noRepo, noSession bool) {
 		return true, true
 	}
 	return false, false
+}
+
+func (src *DashboardSessionSource) settingsLead(reg wsdashboard.Registration) bool {
+	d, err := src.store.dirs()
+	if err != nil {
+		return false
+	}
+	keys, err := src.keysFor(d, reg.ReplyID, false)
+	if err != nil {
+		return false
+	}
+	src.store.mu.Lock()
+	defer src.store.mu.Unlock()
+	for _, key := range keys {
+		record, ok := src.store.readRecord(d, key, partKey)
+		if ok && record.Root == reg.Project && record.Parent == "" && record.Scope == string(roleLead) {
+			return true
+		}
+	}
+	return false
 }
