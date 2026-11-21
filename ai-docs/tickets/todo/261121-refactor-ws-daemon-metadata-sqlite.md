@@ -17,8 +17,8 @@ child (board (1953)=a, 2026-11-21). The candidate set is Scope item 4 of
 `261119-epic-ws-daemon-sqlite-storage`. The child absorbs the conversation
 record delta work and must eliminate whole-record writes made solely to
 record an applied holder sequence. The source shows that some candidates are
-shared across processes or depend on file-change detection. Their eligibility
-and cutover requirements are open below.
+shared across processes or depend on file-change detection. Their scope and
+cutover requirements are settled below.
 
 Source citations are pinned to `e29019758`. Go paths are relative to
 `agents-plugin-tool/internal/` unless they start with `cmd/`, which is relative
@@ -164,7 +164,105 @@ that snapshot of the code and machine.
   close after a long idle (about 30 minutes). **Rejected there:** a shared
   board database and a board-only append journal. The embed snapshot is a
   separate epic child. These decisions provide the structural precedent for
-  this draft. Metadata DB topology and lifetime are open below.
+  this draft. Metadata DB topology is settled below; handle lifetime remains
+  subject to measurement.
+
+- **(1980) Agent records:** Move `agent.json` authority into SQLite in this
+  bundle. First route direct Go record readers, including tracker auth,
+  session unregister and registration pruning, through the daemon. Retain
+  only legacy file behavior required by the selected compatibility tier.
+  Rejected: leave the shared file authoritative and only remove holder
+  whole-file rewrites.
+- **(1981) Workspaces:** Leave `workspaces.json` outside the bundle: its
+  config root is shared across processes and it has no cursor-driven rewrite.
+  Rejected: include it and add a shared-ownership contract.
+- **(1982) Tracker seen:** Leave `ui-seen.json` outside the bundle: the tracker
+  config root can be shared across daemons. Rejected: include seen marks and
+  add a shared-ownership contract.
+- **(1983) Permission selection:** Edits go only through the daemon's
+  authorized entry point; read the old file only for compatibility and
+  import. Preserve fail-closed behavior and origin validation. Rejected:
+  continue accepting direct live file edits.
+- **(1984) Rail layout:** Dashboard actions are the only live write path;
+  update fixtures to test dashboard actions and legacy import separately.
+  Preserve ordering, generation and wake behavior. Rejected: continue
+  accepting live direct file edits.
+- **(1985) Usage history repair:** Preserve schema and error protection on
+  legacy import and document an offline SQLite recovery path. Rejected: keep
+  the file as the live out-of-process recovery source.
+- **(1986) Direct callers:** Route affected `ws-mcp call` and `serve --stdio`
+  operations through authenticated daemon requests; specify behavior when no
+  daemon is running. These direct entry paths remain compatibility paths;
+  the daemon handles the work. Prove predecessor drain, writer shutdown and
+  successor startup during replacement. Rejected: multi-process SQLite WAL
+  access; refuse direct calls as a T3 boundary.
+- **(1987) Compatibility:** Target T0–T2 per store and return any T3 boundary
+  to the owner as a new decision. Rejected: settling T3 without owner approval.
+- **(1988) Topology:** Use one shared daemon state DB for cache-rooted stores;
+  revisit only if measurements show contention. Rejected: per-store DBs with
+  multiplied handles and checkpoints.
+- **(1989) Import:** Use transactional, repeatable legacy import. Choose the
+  discovery point, completion marker and authority handoff; keep invalid or
+  future data and unknown fields available for recovery. Rejected: request-path
+  fallback and continuous dual writes.
+- **(1990) Legacy files:** Keep legacy files through this child, following the
+  whiteboard rollback precedent (1816)=a. Rejected: remove them in this child.
+- **(1991) Conversation state:** Use reply-ID keyed state and bounded recovery
+  deltas; decide snapshot/compaction and legacy unknown-field representation.
+  Rejected: rewrite the whole record on every mutation.
+- **(1992) Applied sequence:** Use a delta keyed by conversation and holder
+  identity. Prove replay with partial ring append, cursor write failure, holder
+  change and process death between stores. Rejected: persist a whole-record
+  image or delay sequence persistence by time alone.
+- **(1993) Permissions:** Use reply-ID keyed explicit permission records with
+  presence-sensitive provenance and preservation of unknown members. Keep
+  invalid and absent legacy inputs distinguishable. Rejected: infer selection
+  from conversation settings.
+- **(1994) Support:** Separate last selection from store-to-conversation keyed
+  mappings; preserve replacement and unregister recovery. Rejected: rewrite
+  one support document for a single mapping change.
+- **(1995) Pi probes:** Key probe records by fingerprint and kind; preserve
+  success-only admission, freshness and invalidation. Decide whether to import
+  legacy cache hits or re-probe as part of (1989). Rejected: merge both probe
+  kinds into runner or support state.
+- **(1996) Rail storage:** Use workspace-scoped layout changes and an in-memory
+  generation; preserve ordering, legacy extra fields and consumer wake.
+  Rejected: a monolithic layout rewrite or DB-file polling.
+- **(1997) Latest usage:** Key projections by source/group; preserve the wire
+  projection, fallback and debounce behavior. Rejected: rewrite the shared
+  current usage document.
+- **(1998) Usage samples:** Use keyed samples with existing history identity
+  and retention; prove shared, Codex five-hour and agy projections, including
+  unknown legacy fields. Rejected: serialize the entire history on append.
+- **(1999) Memos:** Use keyed records with stable order and preservation of
+  legacy document/item fields; retain or resolve the workspace hash on import.
+  Rejected: rewrite every memo for a one-item edit.
+- **(2000) Labels:** Key labels by reply ID and delete on clear; preserve index
+  publication and newly hired lead behavior. Rejected: persist an empty value.
+- **(2001) Answer checks:** Use a guarded reply-ID keyed marker; preserve the
+  interrupt/check race and trace marker update before inbox nudge. Rejected:
+  an unguarded batched cursor advance.
+- **(2002) Hiring:** Key metadata by reply ID with request identity available
+  to retry; decide recovery after partial label, hiring and record publication.
+  Rejected: embed hiring flags in registration.
+- **(2004) Tracker hooks:** Scope cursors by registration nonce and use keyed
+  processed/due updates; preserve queue/receipt order and catch-up policy.
+  Rejected: replace all hook state every scan.
+- **(2006) Durability:** Define requirements per write class and evaluate
+  `PRAGMA synchronous` against recovery and measured cost, especially for
+  holder cursors and consumed input. Rejected: one immediate flush rule for
+  every metadata update.
+- **(2007) Checkpoints:** Measure WAL checkpoint cadence outside interactive
+  actions; set handle lifetime, checkpoint method and idle/shutdown drain from
+  topology and Windows evidence. Rejected: assume default auto-checkpoint is
+  cheaper.
+- **(2008) Staging:** Use the whiteboard precedent: an unwired store/import
+  phase, an authority switch, and a measured result. Rejected: switch authority
+  without the staged import and measurement.
+- **(2009) Baseline:** Capture the pinned baseline before wiring authority and
+  compare on the target Windows AhnLab V3 machine before release. Rejected:
+  gate the switch on a WAL prototype; the wired comparison supplies the needed
+  evidence for the chosen topology.
 
 ## Constraints
 
@@ -192,6 +290,10 @@ that snapshot of the code and machine.
   `wsagent/record.go:324-357,525-555`, `wsagent/runner_events.go:827-847`,
   `wsagent/runner_conv.go:318-365,1209-1230,1284-1313`,
   `wsagent/children.go:654-679,744-775`, `wsdashboard/registry.go:448-467`.
+- Route permission edits through the authorized daemon entry point and rail
+  layout writes through dashboard actions. Their legacy files are compatibility
+  and import inputs, not live edit paths. Preserve usage history import
+  schema/error protection and document offline SQLite recovery.
 - Preserve the current permission error/omission distinction, unknown fields,
   and presence-sensitive delegation provenance. Preserve hook catch-up, due
   and retry semantics, and seen-mark identity across unregister/re-register.
@@ -202,7 +304,8 @@ that snapshot of the code and machine.
   `wsdashboard/plan_usage_history.go:17-20,216-250,265-332` (14 days and
   5,000 samples per harness/group/kind), `wstrackerhook/runner.go:447-480`
   (a failed hook run is logged).
-- Keep the scope of neighboring stores as set by the epic. Session-key
+- Keep `workspaces.json` and tracker `ui-seen.json` outside this bundle.
+  Keep the scope of neighboring stores as set by the epic. Session-key
   metadata, wslive snapshots and rings, inbox, whiteboard, tracker synced
   data and tracker host registry/sync files have their own owners. Adjacent
   `workspace-admission.json`, `hire-proposals.json` and `visibility.json`
@@ -219,142 +322,24 @@ code route. **INFERRED** denotes implementation or verification scope.
 |---|---|---|
 | scope.span | multi-file | VERIFIED. Inventory spans `wsagent`, `wsdashboard`, `wstrackerhook`, `wstrackerhost`, `mcp` and `cmd/ws-mcp`. |
 | scope.surface | cross-module | VERIFIED. Record read paths extend to direct MCP, dashboard ownership and registration pruning. See process and ownership boundaries. |
-| scope.new_public_symbol | open | INFERRED. Store API and consumer routing depend on (1980), (1986) and (1988). |
-| scope.new_type_contract | yes | INFERRED. SQLite recovery shapes and downgrade behavior are decisions for the Open Decision Queue. |
+| scope.new_public_symbol | open | INFERRED. The store API and authenticated daemon routing require implementation design under (1980), (1986) and (1988). |
+| scope.new_type_contract | yes | INFERRED. SQLite recovery shapes and downgrade behavior require implementation design under the settled decisions. |
 | scope.test_surface | multi-package | INFERRED. Startup and mixed-version recovery, raw CLI, holder replay, route behavior and the rail scratch fixture cross package boundaries. |
 | complexity.reuse_points | confirmed | VERIFIED. `wsstore/store.go:145-162,209-230` and `wsstore/retry.go:22-48` provide SQLite setup, and legacy readers are listed above. |
 | complexity.side_effect_risk / risk.correctness | high | INFERRED. A stale authority read can alter admission or prune a live directory. Cursor/recovery ordering can drop or replay held output. |
 | risk.fit / risk.test | high | INFERRED. Shared roots and direct callers constrain cutover. Performance needs comparable Windows AV traces. |
 | risk.security_or_contract | high | INFERRED. Record-based tracker admission, permission provenance, and stored MCP token/holder data require explicit preservation. `mcp/tracker_support.go:41-64`, `wsagent/permission_store.go:148-161,217-237`, `wsagent/runner_process.go:247-255,489-496`. |
 
-## Open Decision Queue
-
-Last ID: (2009)
-
-(1980) [confirmed] [policy] Owner answer 2026-11-21: a. Is `agent.json` eligible for an authoritative SQLite cutover in this child?
-
-- The bundle must remove its sequence-only rewrites. Raw Go MCP uses
-  the record for authorization, ownership, playbook/alias selection and pruning. Removing the file
-  before moving those readers could deny tracker support or delete Pi history.
-- a. Bring the dependent Go readers under a defined daemon access contract
-  before cutover. Where compatibility requires it, keep only the legacy file
-  behavior that the selected tier needs.
-- b. Leave the shared record file in place and move sequence-only recovery
-  off its rewrite path. Defer record authority cutover until callers can move.
-- Recommend a, conditioned on a proven access and compatibility
-  design in (1986) and (1987). Use b if that prerequisite cannot fit the
-  bundle. Either answer must remove the cursor-triggered whole-file writes.
-
-(1981) [open] [technical] Leave `workspaces.json` out of this bundle over including it. It is cross-process config-root state with no cursor-driven rewrite, and moving it would add a shared-ownership contract this child does not need.
-
-- (2003) is withdrawn by consequence.
-
-(1982) [open] [technical] Leave tracker seen state in `ui-seen.json` over including it. The tracker config root can be shared across daemons, and moving its seen marks would add a shared-ownership contract this child does not need.
-
-- (2005) is withdrawn by consequence.
-
-(1983) [open] [policy] Does permission selection continue accepting direct edits to its legacy file after cutover?
-
-- `Runner.Get` detects foreign writes, and launch/admission rereads
-  the selection; malformed input is security-sensitive. No production
-  editor was identified in tracked source.
-- a. Treat direct edits as a live contract and retain file authority until a
-  supported edit path preserves the existing authorization and error checks.
-- b. Use the authorized daemon entry points after cutover and read legacy
-  files through the chosen compatibility and import path.
-- Recommend b only after confirming no supported file writer depends
-  on the current behavior. Preserve the fail-closed and provenance invariants
-  under either answer.
-
-(1984) [open] [policy] Does rail layout continue accepting direct file edits during daemon operation?
-
-- The production reload path detects them and the scratch headless
-  fixture exercises that behavior. No production file editor was identified.
-- a. Keep live file replacement as a contract and defer this store's authority
-  switch pending a compatible mechanism.
-- b. Use dashboard operations as the live write interface and update the
-  fixture to exercise those operations and legacy import separately.
-- Recommend b after checking for a supported external writer. Keep
-  ordering, generation and wake behavior covered through the dashboard.
-
-(1985) [open] [policy] Does usage history keep live out-of-process file repair after cutover?
-
-- History distinguishes a foreign replacement or repaired file and
-  refuses to overwrite unreadable or future schemas.
-- a. Keep the file repair contract live, retaining file authority until an
-  equivalent controlled mechanism exists.
-- b. Keep schema and error protection in legacy import and use a documented
-  offline repair path for SQLite.
-- Recommend b if current file repair is an operator escape hatch. The
-  default daemon read path can then serve the memory projection.
-
-(1986) [open] [policy] How do raw `ws-mcp call` and `serve --stdio` reach converted state?
-
-- The direct binary bypasses the launcher and has proven record
-  reads. `daemon-start --replace` may spawn a Windows successor before
-  draining the predecessor (`cmd/ws-mcp/proxy.go:375-439`).
-- a. Route affected operations through an authenticated daemon owner, with
-  specified behavior when it is unavailable.
-- b. Permit explicitly scoped concurrent WAL access with freshness,
-  lifecycle, authorization and replacement guarantees.
-- c. Refuse the affected direct operations before they touch state and
-  grade the resulting caller break as a compatibility boundary.
-- Recommend a where the route can preserve ownership and tool behavior.
-  Consider c only with explicit boundary approval. Prove predecessor drain,
-  writer shutdown and successor startup for the selected policy.
-
-(1987) [open] [announced] Target T0–T2 per store and return any T3 boundary to the owner as a new decision item. `AGENTS.md` Compatibility Tiers prefers T0–T2 and requires owner approval for T3.
-
-(1988) [open] [technical] Use one shared daemon state DB for the cache-rooted stores over per-store DBs. With (1981) and (1982), the remaining stores share one cache owner and lifetime, and separate DBs multiply handles and checkpoints (performance Rule 4). Revisit only if measurements show contention.
-
-(1989) [open] [technical] Prefer transactional, repeatable legacy import over request-path fallback or continuous dual writes. Choose the discovery point, completion marker and authority handoff after (1987)-(1988). Keep invalid/future data and unknown fields available for recovery.
-
-(1990) [open] [announced] Keep legacy files through this child, following the rollback precedent in the whiteboard child (1816)=a.
-
-(1991) [open] [technical] Prefer reply-ID keyed conversation state and bounded recovery deltas over a whole-record rewrite on every mutation. Decide snapshot/compaction and the legacy unknown-field representation after (1980) and (1987).
-
-(1992) [open] [technical] Prefer an applied-sequence delta keyed by conversation and holder identity over persisting a new whole-record image or delaying the sequence by time alone. Prove replay behavior when the ring append is partial, the cursor write fails, the holder changes, or the process dies between the two stores.
-
-(1993) [open] [technical] Prefer a reply-ID keyed explicit permission record with presence-sensitive provenance and a way to preserve unknown members over inferring selection from conversation settings. Keep invalid and absent legacy inputs distinguishable.
-
-(1994) [open] [technical] Prefer separate last selection and store-to-conversation keyed mappings over rewriting one support document for a single mapping change. Preserve replacement and unregister recovery.
-
-(1995) [open] [technical] Prefer a probe record keyed by fingerprint and probe kind over merging both probe kinds into runner or support state. Keep success-only admission, freshness and invalidation semantics. Decide in (1989) whether to import legacy cache hits or re-probe.
-
-(1996) [open] [technical] Prefer workspace-scoped rail layout changes and an in-memory generation over a monolithic layout rewrite or DB-file polling. Preserve ordering, legacy extra fields and the consumer wake.
-
-(1997) [open] [technical] Prefer keyed latest usage projections by source/group over rewriting the shared current usage document. Preserve their wire projection and current fallback and debounce behavior.
-
-(1998) [open] [technical] Prefer keyed usage samples with the existing history identity and retention over serializing the entire history on append. Prove the shared, Codex five-hour and agy projections, including unknown legacy fields.
-
-(1999) [open] [technical] Prefer keyed memo records with stable order and a way to preserve legacy document/item fields over rewriting every memo for a one-item edit. Retain or resolve the workspace hash during import.
-
-(2000) [open] [technical] Prefer reply-ID keyed labels with deletion on clear over an empty persisted value. Preserve publication to the index and behavior for a newly hired lead.
-
-(2001) [open] [technical] Prefer a reply-ID keyed answer-check marker with guarded update over an unguarded batched cursor advance. Preserve the interrupt/check race and trace the order of marker update and inbox nudge.
-
-(2002) [open] [technical] Prefer reply-ID keyed hiring metadata with request identity available to the retry path over embedding hiring flags in registration. Decide how label, hiring and record publication recover after a partial creation.
-
-(2004) [open] [technical] Prefer a registration-nonce scoped hook cursor and keyed processed/due updates over replacing all hook state every scan. Preserve the queue/receipt order and catch-up policy.
-
-(2006) [open] [technical] Prefer explicit durability requirements per write class over a single immediate flush rule for every metadata update. Evaluate `PRAGMA synchronous` against required recovery and measured cost, especially holder cursor and consumed input.
-
-(2007) [open] [technical] Prefer measuring WAL checkpoint cadence outside interactive actions over assuming default auto-checkpoint behavior is cheaper. Set the handle lifetime, checkpoint method and idle/shutdown drain after (1988) and Windows evidence.
-
-(2008) [open] [announced] Use the whiteboard precedent's staged shape below, with an unwired store/import phase, an authority switch, and a measured result, subject to settlement. Source: `261119-refactor-ws-whiteboard-sqlite-board-store`, Phases 1–3.
-
-(2009) [open] [technical] Capture the pinned baseline before wiring authority and compare on the target Windows AhnLab V3 machine before release over gating the switch on a WAL prototype. With the topology set by (1988), the prototype adds no evidence beyond the wired comparison.
-
 ## Phases
 
-Proposed sequence under (2008). The Open Decision Queue controls which stores,
-interfaces, release tier and rollout mechanisms can appear in the ready plan.
+Sequence under (2008). Resolve the remaining implementation details and grade
+compatibility under (1987) before the ready plan.
 
 ### Phase 1: Build the store and legacy import without wiring callers
 
-- After settlement, implement the selected store and import for eligible
-  metadata. Use fixtures from the listed old formats and keep active callers
-  on their existing paths during this phase.
+- Implement the shared store and repeatable import for eligible metadata. Use
+  fixtures from the listed old formats and keep active callers on their
+  existing paths during this phase.
 - Verify old-data import, restart and retry after interruption, unknown
   fields and invalid/future inputs, and registration or holder ID isolation.
   Capture a comparable legacy baseline and record the directional
@@ -363,15 +348,20 @@ interfaces, release tier and rollout mechanisms can appear in the ready plan.
 ### Phase 2: Switch authority and remove the holder sequence rewrites
 
 - Depends on Phase 1. Wire the agreed reader, writer and daemon lifecycle
-  paths, including raw Go readers where selected and the existing
-  registration/cleanup behavior. The holder's sequence-only writes for a
-  final ring line and a dirty heartbeat cease replacing the whole record.
+  paths. Route direct Go readers through the daemon before agent record cutover,
+  including tracker auth, session unregister and registration pruning. The
+  holder's sequence-only writes for a final ring line and a dirty heartbeat
+  cease replacing the whole record.
 - Verify hard-kill/rejoin and graceful replacement for held leads and
   workers, including interrupted ring append and pending consumed input.
   Exercise tracker authorization, terminal ownership/pruning, permission
   provenance, dashboard refresh/notifications and the hook registration
-  boundaries. Verify the chosen old/new cutover contract on the old binary
-  as well as the new one.
+  boundaries. Exercise authenticated direct calls and stdio with the daemon
+  available and unavailable, and replacement drain. Test authorized permission
+  edits, fail-closed origin validation, dashboard-only layout actions, and
+  legacy imports separately. Verify schema/error protection and the documented
+  offline SQLite recovery path. Verify the old/new cutover contract on the old
+  binary as well as the new one.
 
 ### Phase 3: Record the measured result
 
@@ -379,7 +369,7 @@ interfaces, release tier and rollout mechanisms can appear in the ready plan.
   heavy-AV baseline. Trace cold open/import and warm actions separately.
   Include held final ring lines and dirty/clean heartbeats, permission polls,
   representative UI reads/mutations and hook scans for the stores included
-  at settlement.
+  in the bundle; workspace and tracker seen files remain excluded.
 - Record syscall counts and action-to-visible-effect latency, including WAL,
   SHM, sync, checkpoint, replacement and shutdown bursts, against the prior
   paths. Verify the two cursor-driven whole-file writes are absent in the
