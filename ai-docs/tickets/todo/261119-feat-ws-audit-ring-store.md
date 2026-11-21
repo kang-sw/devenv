@@ -54,9 +54,11 @@ Verified findings (codex.large read-only research, 2026-11-19):
    default 256 MiB) drops the oldest whole segment first, because one runaway
    tool output could fill the disk within any time window. (597)'s time rule
    is settled in Decision 6 ((1733)=d). The per-store total byte cap is a
-   separate config knob. It evicts whole sessions' audit rings in
-   least-recently-used order. Its default is open in (2010). Segment size is
-   an implementation choice.
+   separate config knob, default 4 GiB ((2010)=a, owner 2026-11-21). It
+   evicts whole sessions' audit rings in least-recently-used order. Segment
+   size is an implementation choice.
+   - Rejected: b, 1 GiB, and c, 8 GiB. The 4 GiB default keeps more recent
+     sessions than 1 GiB with half the maximum disk use of 8 GiB.
 4. **Compatibility tier T0, with its own schema version.** A new store with no
    older reader. The on-disk ring format carries its schema version. A daemon
    refuses to open a newer version for writing, in line with
@@ -158,19 +160,6 @@ Verified findings (codex.large read-only research, 2026-11-19):
 - Release-gate file-touch rule (parent epic): append not rewrite, no
   heartbeat writes, no per-event O(N) rereads.
 
-## Open Decision Queue
-
-(2010) [confirmed] [policy] Owner answer 2026-11-21: a (4 GiB). What is the default total byte cap across the audit
-store's session rings ((1970)=a)?
-
-- a. 4 GiB, equivalent to 16 sessions at the default 256 MiB per-session cap.
-- b. 1 GiB, equivalent to 4 sessions at the default per-session cap.
-- c. 8 GiB, equivalent to 32 sessions at the default per-session cap.
-
-> recommendation: a. It keeps more recent sessions than the 1 GiB option
-> with half the maximum disk use of the 8 GiB option. Owners can tune the cap
-> to local disk capacity and audit volume.
-
 ## Phases
 
 ### Phase 1: Store, writer and redaction
@@ -197,8 +186,8 @@ event before/after per `performance.md`.
 Depends on Phase 1. Implement the retention knob (default 7 days after the
 session was last seen, Decision 6) and the per-session byte cap (Decision 3)
 dropping the oldest whole segment first. Implement least-recently-used
-whole-session audit eviction under the per-store total cap (Decision 3).
-Resolve the total cap default in (2010). Session deletion removes the
+whole-session audit eviction under the per-store total cap (default 4 GiB,
+Decision 3). Session deletion removes the
 session's ring (Decision 8). There is no purge action (Decision 7).
 
 Verification: the per-session cap drops the oldest whole segments and keeps
