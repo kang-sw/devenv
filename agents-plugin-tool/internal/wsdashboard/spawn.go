@@ -61,21 +61,26 @@ func DaemonExecutable(exe, dir string) (string, error) {
 // retains settled copies until their process-use and rollback safety can be
 // established (PruneStagedExecutables). The launcher stages the same names.
 func StageExecutable(exe, binDir string) (string, error) {
+	target, _, err := stageExecutable(exe, binDir)
+	return target, err
+}
+
+func stageExecutable(exe, binDir string) (string, string, error) {
 	sum, err := fileSHA256(exe)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		return "", err
+		return "", "", err
 	}
 	name := "ws-mcp-dashboard-" + sum[:16] + strings.ToLower(filepath.Ext(exe))
 	target := filepath.Join(binDir, name)
 	if existing, err := fileSHA256(target); err != nil || existing != sum {
 		if err := copyExecutable(exe, target); err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
-	return target, nil
+	return target, sum, nil
 }
 
 // PruneStagedExecutables currently retains every settled artifact. Holding
