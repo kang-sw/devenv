@@ -48,3 +48,12 @@ body.tk-paged .ixmain { display: none; }
 :root[data-frame] .dash.index { --tkml: 0px; --tkmaxw: initial; }
 @media (min-width: 1600px) { :root[data-frame] .dash.index { --tkmaxw: none; } }
 :root[data-frame] .rail-ph { visibility: hidden; box-shadow: none; background: none; }
+
+@media (min-width: 1120px) {
+  :root[data-settings-shell] .dash > .dwrap { box-sizing: border-box; padding-top: 12px; }
+  :root[data-settings-shell] .dwrap > .top { display: none; }
+  :root[data-settings-shell] #rail {
+    height: calc(100dvh - 24px);
+    margin-top: 0;
+  }
+}

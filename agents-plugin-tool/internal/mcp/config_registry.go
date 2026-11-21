@@ -707,3 +707,44 @@ func validateEnumValue(toolName string, fields []tuningField, fieldName, value s
 	}
 	return fmt.Errorf("%s: value must be one of %s; got %q", toolName, strings.Join(enum, ", "), value)
 }
+
+// normalizeTuneScalar is shared by MCP config.tune and the dashboard's local
+// control plane. Both persist the same canonical scalar representation.
+func normalizeTuneScalar(entry configKeyEntry, value string, hasValue bool) (string, error) {
+	key := entry.Key
+	if entry.Declared != nil {
+		if !hasValue {
+			return "", fmt.Errorf("config.tune: %s value is required unless reset is true", key)
+		}
+		normalized, err := entry.Declared.normalize(value)
+		if err != nil {
+			return "", fmt.Errorf("config.tune: %s value %w", key, err)
+		}
+		value = normalized
+	} else if wsconfig.ValidPreferenceKey(entry.Key) {
+		if !hasValue {
+			return "", fmt.Errorf("config.tune: %s value is required unless reset is true", key)
+		}
+		// Preserve text verbatim; an explicit empty string clears the slot.
+	} else if len(fieldEnum(entry.ValueFields, "value")) == 0 {
+		// Free-form knob (workflow.lang): keep the caller's case. An empty
+		// value would store a blank override; reset is the unset path.
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return "", fmt.Errorf("config.tune: %s value is required unless reset is true", key)
+		}
+		if entry.Normalize != nil {
+			normalized, err := entry.Normalize(value)
+			if err != nil {
+				return "", fmt.Errorf("config.tune: %w", err)
+			}
+			value = normalized
+		}
+	} else {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if err := validateEnumValue("config.tune", entry.ValueFields, "value", value); err != nil {
+			return "", err
+		}
+	}
+	return value, nil
+}

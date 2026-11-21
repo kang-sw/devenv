@@ -45,8 +45,12 @@ func (a *dashboardAssets) buildFrameFiles() {
 	d.FrameTermFile = add(string(d.TerminalScript), "js")
 	d.FrameWebFile = add(string(d.WebScript), "js")
 	d.FrameSelectFile = add(string(d.SelectAllScript), "js")
+	d.SettingsCSSFile = add(string(d.SettingsCSS), "css")
+	d.SettingsScriptFile = add(string(d.ShellScript)+"\n;\nwindow.WsSettingsCatalog = "+string(d.SettingsCatalog)+";\n"+string(d.SettingsScript), "js")
 	d.FrameI18nFiles = map[string]string{}
+	d.SettingsI18nFiles = map[string]string{}
 	for _, lang := range wsi18n.Languages() {
-		d.FrameI18nFiles[lang.Code] = add(string(wsi18n.Script(lang.Code)), "js")
+		d.FrameI18nFiles[lang.Code] = add(string(wsi18n.ScriptExcept(lang.Code, "js.settings.")), "js")
+		d.SettingsI18nFiles[lang.Code] = add(string(wsi18n.SubsetScript(lang.Code, "js.settings.")), "js")
 	}
 }

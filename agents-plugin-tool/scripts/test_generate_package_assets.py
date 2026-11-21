@@ -40,6 +40,22 @@ class GenerationTests(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes((product + tree).encode())
         self.source = self.repo / 'agents-plugin/rsrc/asset.txt'
+        pi = self.repo / 'agents-plugin-pi/config-manifest.json'
+        pi.parent.mkdir(parents=True)
+        pi.write_bytes(b'canonical pi manifest')
+
+    def test_manifest_inputs_and_pi_drift(self):
+        self.generate()
+        for product, folder in generator.PACKAGES.items():
+            for name in ('config-manifest.json', 'agy-config-manifest.json', 'dashboard-config-manifest.json'):
+                self.assertEqual((self.output / product / name).read_bytes(), (self.repo / folder / name).read_bytes())
+            self.assertEqual((self.output / product / 'pi-config-manifest.json').read_bytes(),
+                             (self.repo / 'agents-plugin-pi/config-manifest.json').read_bytes())
+        (self.repo / 'agents-plugin-pi/config-manifest.json').write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, 'pi-config-manifest.json'):
+            self.generate(check=True)
+        self.generate()
+        self.generate(check=True)
 
     def generate(self, check=False):
         generator.generate(self.repo, self.output, check)

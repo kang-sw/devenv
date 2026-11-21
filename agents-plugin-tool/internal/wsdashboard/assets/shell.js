@@ -103,6 +103,7 @@
   // index.
   function framed(u, origin) {
     if (!u || u.origin !== origin) return null;
+    if (u.pathname === "/settings") return { path: pagePath(u), hash: u.hash || "", rid: "" };
     var search = u.search || "";
     if (search && search !== "?" && search !== "?frame=1") return null;
     if (u.pathname === "/") return { path: "/", hash: u.hash || "", rid: "" };
@@ -114,7 +115,40 @@
 
   // src is the frame's path for a framed page: its path, ?frame=1, and its
   // hash.
-  function src(f) { return f.path + "?frame=1" + (f.hash || ""); }
+  function src(f) { return f.path + (f.path.includes("?") ? "&" : "?") + "frame=1" + (f.hash || ""); }
+
+  // Preserve the settings context in shell history while leaving unrelated
+  // queries (for example a LAN token on an index URL) out of frames.
+  function pagePath(loc) {
+    if (loc.pathname !== "/settings") return loc.pathname;
+    var query = new URLSearchParams(loc.search);
+    query.delete("frame");
+    return "/settings" + (query.size ? "?" + query.toString() : "");
+  }
+
+  function settingsHref(scope, target, worktree, session) {
+    var query = new URLSearchParams({scope: scope});
+    if (target) query.set("target", target);
+    if (worktree) query.set("worktree", worktree);
+    if (session) query.set("session", session);
+    return "/settings?" + query.toString();
+  }
+
+  function settingsScopeHref(scope, selection, projectForWorktree, rememberedProject) {
+    var ctx = selection.context;
+    var project = ctx.worktree ? projectForWorktree(ctx.worktree) :
+      selection.scope === "project" ? selection.target : rememberedProject;
+    var target = {project: project, repo: ctx.worktree, session: ctx.session}[scope];
+    if (scope === selection.scope && selection.target) target = selection.target;
+    if (["project", "repo", "session"].includes(scope) && !target) return "";
+    var href = settingsHref(scope, target, ctx.worktree, ctx.session);
+    // A project-origin selection carries no inspection context. Its edit
+    // target stays in browser history until the next rail entry replaces it.
+    if (project && !ctx.worktree && scope !== "project") {
+      href += "#" + new URLSearchParams({project: project}).toString();
+    }
+    return href;
+  }
 
   // alpha reads a computed CSS colour's alpha: 1 for rgb(), the fourth
   // component for rgba() or rgb(... / a), 0 for anything else (transparent,
@@ -128,5 +162,5 @@
     return isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
   }
 
-  window.WsShell = { message: message, framed: framed, src: src, alpha: alpha, cacheLimit: CACHE_LIMIT };
+  window.WsShell = { message: message, framed: framed, src: src, pagePath: pagePath, settingsHref: settingsHref, settingsScopeHref: settingsScopeHref, alpha: alpha, cacheLimit: CACHE_LIMIT };
 })();

@@ -10,6 +10,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsconfigservice"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 )
 
@@ -636,46 +637,13 @@ type agentsTierTuneResult struct {
 }
 
 func tuneAgentsTier(opts wsconfig.Options, value any, harness string, scope wsconfig.Scope, reset bool) (agentsTierTuneResult, error) {
-	fields, ok := value.(map[string]any)
-	if !ok {
-		return agentsTierTuneResult{}, fmt.Errorf("config.tune: agents.tier value must be an object with tier/backend/model/effort fields (only tier when reset is true)")
-	}
-	// Tier validation belongs to wsconfig: it accepts legacy synonyms as well
-	// as canonical tiers, matching the CLI and the former writer.
-	tier, _ := fields["tier"].(string)
-	if reset {
-		if len(fields) != 1 {
-			return agentsTierTuneResult{}, fmt.Errorf("config.tune: agents.tier reset value must contain only tier (no backend, model, or effort)")
-		}
-	}
-	global := scope == wsconfig.ScopeGlobal
-	var cfg wsconfig.Config
-	var err error
-	removed := false
-	if reset {
-		if global {
-			cfg, removed, err = wsconfig.UnsetGlobalAgentsTierForHarness(opts, tier, harness)
-		} else {
-			cfg, removed, err = wsconfig.UnsetAgentsTierForHarness(opts, tier, harness)
-		}
-	} else {
-		backend, _ := fields["backend"].(string)
-		model, _ := fields["model"].(string)
-		if effort, ok := fields["effort"].(string); ok {
-			if global {
-				cfg, err = wsconfig.SetGlobalAgentsTierForHarness(opts, tier, backend, model, harness, effort)
-			} else {
-				cfg, err = wsconfig.SetAgentsTierForHarness(opts, tier, backend, model, harness, effort)
-			}
-		} else if global {
-			cfg, err = wsconfig.SetGlobalAgentsTierForHarness(opts, tier, backend, model, harness)
-		} else {
-			cfg, err = wsconfig.SetAgentsTierForHarness(opts, tier, backend, model, harness)
-		}
-	}
+	cfg, removed, err := wsconfigservice.WriteTier(opts, value, harness, scope, reset)
 	if err != nil {
 		return agentsTierTuneResult{}, err
 	}
+	fields := value.(map[string]any)
+	tier, _ := fields["tier"].(string)
+	global := scope == wsconfig.ScopeGlobal
 	result := agentsTierTuneResult{Config: cfg, Warnings: []string{}}
 	if reset && !removed {
 		result.Warnings = append(result.Warnings, "agents.tier leaf was absent in the selected scope; reset made no change")
