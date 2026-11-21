@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -21,23 +23,26 @@ import (
 // Tests control turn completion, approvals, EOF and recovery independently
 // of control acknowledgements, as the recorded app-server protocol requires.
 type codexFake struct {
-	h           *leadHarness
-	mu          sync.Mutex
-	replyID     string
-	nextTurn    int
-	rowPIDs     []int
-	tokens      []string
-	recovery    string
-	openError   string
-	steerError  string
-	readGate    <-chan struct{}
-	readStarted chan struct{}
+	h                    *leadHarness
+	mu                   sync.Mutex
+	replyID              string
+	nextTurn             int
+	rowPIDs              []int
+	tokens               []string
+	recovery             string
+	openError            string
+	steerError           string
+	omitPermissionReport bool
+	reportedSandbox      string
+	reportedPolicy       string
+	readGate             <-chan struct{}
+	readStarted          chan struct{}
 }
 
 func newCodexLeadHarness(t *testing.T) (*leadHarness, *codexFake) {
 	t.Helper()
 	h := newLeadHarness(t)
-	h.opts.Backends[BackendCodex] = BackendRegistration{Backend: CodexBackend{Command: "/opt/harness/codex"}, LeadProfile: LeadProfileCodex, PermissionModes: CodexPermissionModes, Catalog: CodexCatalog()}
+	h.opts.Backends[BackendCodex] = BackendRegistration{Backend: CodexBackend{Command: "/opt/harness/codex"}, LeadProfile: LeadProfileCodex, PermissionModes: CodexPermissionModes, PermissionLevels: LeadPermissionLevels(), Catalog: CodexCatalog()}
 	h.opts.WSMCP = func(root string) (MCPCommand, error) {
 		return MCPCommand{Command: "/opt/harness/python3", Env: map[string]string{"WS_MCP_PROJECT_ROOT": root}}, nil
 	}
@@ -51,6 +56,11 @@ func (f *codexFake) answer(holder, method string, params json.RawMessage) (strin
 	case "initialize":
 		return `{"codexHome":"/synthetic/codex-home"}`, "", true
 	case "thread/start", "thread/resume":
+		var requested struct {
+			ApprovalPolicy string `json:"approvalPolicy"`
+			Sandbox        string `json:"sandbox"`
+		}
+		_ = json.Unmarshal(params, &requested)
 		spawn := f.h.holders.spawned(holder)
 		token := spawn.Env[EnvMCPSessionToken]
 		f.mu.Lock()
@@ -72,14 +82,47 @@ func (f *codexFake) answer(holder, method string, params json.RawMessage) (strin
 		if session == "" {
 			session = "codex-s1"
 		}
-		return jsonLine(map[string]any{"thread": map[string]any{"id": session, "cliVersion": "0.160.0", "model": "synthetic-model"}, "approvalPolicy": "on-request", "sandbox": map[string]any{"type": "readOnly"}}), "", true
+		result := map[string]any{"thread": map[string]any{"id": session, "cliVersion": "0.160.0", "model": "synthetic-model"}}
+		if !f.omitPermissionReport && requested.ApprovalPolicy != "" && requested.Sandbox != "" {
+			sandbox, policy := requested.Sandbox, requested.ApprovalPolicy
+			if f.reportedSandbox != "" {
+				sandbox = f.reportedSandbox
+			}
+			if f.reportedPolicy != "" {
+				policy = f.reportedPolicy
+			}
+			result["approvalPolicy"] = policy
+			result["sandbox"] = map[string]any{"type": codexSandboxKind(sandbox)}
+		}
+		return jsonLine(result), "", true
 	case "model/list":
 		return `{"data":[{"model":"synthetic-model","supportedReasoningEfforts":[{"reasoningEffort":"low"},{"reasoningEffort":"high"}]}]}`, "", true
 	case "turn/start":
+		var requested struct {
+			ThreadID       string `json:"threadId"`
+			ApprovalPolicy string `json:"approvalPolicy"`
+			SandboxPolicy  struct {
+				Type string `json:"type"`
+			} `json:"sandboxPolicy"`
+		}
+		_ = json.Unmarshal(params, &requested)
 		f.mu.Lock()
 		f.nextTurn++
 		turn := fmt.Sprintf("t%d", f.nextTurn)
 		f.mu.Unlock()
+		if !f.omitPermissionReport && requested.ApprovalPolicy != "" && requested.SandboxPolicy.Type != "" {
+			kind, policy := requested.SandboxPolicy.Type, requested.ApprovalPolicy
+			if f.reportedSandbox != "" {
+				kind = codexSandboxKind(f.reportedSandbox)
+			}
+			if f.reportedPolicy != "" {
+				policy = f.reportedPolicy
+			}
+			f.h.holders.out(holder, codexSyntheticNotification("thread/settings/updated", map[string]any{
+				"threadId":       requested.ThreadID,
+				"threadSettings": map[string]any{"approvalPolicy": policy, "sandboxPolicy": map[string]any{"type": kind}},
+			}))
+		}
 		f.h.holders.out(holder, codexSyntheticNotification("turn/started", map[string]any{"threadId": "codex-s1", "turn": map[string]any{"id": turn, "status": "inProgress"}}))
 		return jsonLine(map[string]any{"turn": map[string]any{"id": turn, "status": "inProgress"}}), "", true
 	case "turn/steer":
@@ -106,6 +149,118 @@ func (f *codexFake) answer(holder, method string, params json.RawMessage) (strin
 		return recovery, "", true
 	}
 	return "", "", false
+}
+
+func codexSandboxKind(mode string) string {
+	return map[string]string{"read-only": "readOnly", "workspace-write": "workspaceWrite", "danger-full-access": "dangerFullAccess"}[mode]
+}
+
+func TestPermissionCodexLeadPerRun(t *testing.T) {
+	for _, tc := range []struct {
+		level   PermissionLevel
+		sandbox string
+		kind    string
+		policy  string
+		quality string
+	}{
+		{PermissionReadOnly, "read-only", "readOnly", "on-request", "partial"},
+		{PermissionWorkdirWrite, "workspace-write", "workspaceWrite", "on-request", "advisory"},
+		{PermissionFull, "danger-full-access", "dangerFullAccess", "never", "advisory"},
+	} {
+		t.Run(string(tc.level), func(t *testing.T) {
+			h, f := newCodexLeadHarness(t)
+			h.startAt(codexSyntheticEndpoint)
+			st := h.lead(BackendCodex, LeadOptions{
+				PermissionLevel: tc.level, PermissionFullAck: tc.level == PermissionFull, permissionUser: true,
+			})
+			f.replyID = st.ID
+			h.send(st.ID, "exercise per-run settings")
+			holder := h.holder(st.ID)
+			eventually(t, "reported Codex permission settings", func() bool {
+				got := h.state(st.ID)
+				return got.ActiveMode == tc.sandbox && got.PermissionEnforcement == tc.quality
+			})
+
+			open := h.holders.acpInputs(holder, "thread/start")
+			turns := h.holders.acpInputs(holder, "turn/start")
+			if len(open) != 1 || jsonAt(open[0], "sandbox") != tc.sandbox || jsonAt(open[0], "approvalPolicy") != tc.policy {
+				t.Fatalf("thread/start settings: %s", open)
+			}
+			if jsonAt(open[0], "config", "sandbox") != nil || jsonAt(open[0], "config", "approvalPolicy") != nil || jsonAt(open[0], "config", "approval_policy") != nil {
+				t.Fatalf("per-run permission leaked into global Codex config: %s", open[0])
+			}
+			if len(turns) != 1 || jsonAt(turns[0], "sandboxPolicy", "type") != tc.kind || jsonAt(turns[0], "approvalPolicy") != tc.policy {
+				t.Fatalf("turn/start settings: %s", turns)
+			}
+			got := h.state(st.ID)
+			if got.PermissionLevel != tc.level || got.PermissionSource != "explicit" || got.PermissionMode != tc.sandbox || got.ActiveMode != tc.sandbox || got.PermissionEnforcement != tc.quality {
+				t.Fatalf("configured and observed permission state: %+v", got)
+			}
+			assertPermissionSelection(t, wsdashboard.SessionDir(h.dir, st.ID), tc.level, false)
+			if !strings.Contains(h.log.String(), "Permission "+string(tc.level)+" is advisory on codex") {
+				t.Fatalf("launch nudge missing: %s", h.log.String())
+			}
+		})
+	}
+
+	t.Run("reported settings differ", func(t *testing.T) {
+		h, f := newCodexLeadHarness(t)
+		f.reportedSandbox, f.reportedPolicy = "read-only", "never"
+		h.startAt(codexSyntheticEndpoint)
+		st := h.lead(BackendCodex, LeadOptions{PermissionLevel: PermissionReadOnly, permissionUser: true})
+		f.replyID = st.ID
+		h.send(st.ID, "observe actual settings")
+		h.holder(st.ID)
+		eventually(t, "mismatched reported approval policy", func() bool {
+			got := h.state(st.ID)
+			return got.ActiveMode == "read-only (approval never)" && got.PermissionEnforcement == "advisory"
+		})
+		got := h.state(st.ID)
+		if got.PermissionLevel != PermissionReadOnly || got.PermissionMode != "read-only" {
+			t.Fatalf("requested intent changed by observation: %+v", got)
+		}
+	})
+
+	t.Run("unavailable observation", func(t *testing.T) {
+		h, f := newCodexLeadHarness(t)
+		f.omitPermissionReport = true
+		h.startAt(codexSyntheticEndpoint)
+		st := h.lead(BackendCodex, LeadOptions{PermissionLevel: PermissionReadOnly, permissionUser: true})
+		f.replyID = st.ID
+		h.send(st.ID, "no reported settings")
+		h.holder(st.ID)
+		eventually(t, "pending Codex observation", func() bool { return h.state(st.ID).Process })
+		got := h.state(st.ID)
+		if got.PermissionLevel != PermissionReadOnly || got.PermissionMode != "read-only" || got.ActiveMode != "" || got.PermissionEnforcement != "advisory" {
+			t.Fatalf("unavailable observation must stay advisory: %+v", got)
+		}
+	})
+
+	t.Run("legacy omission and child ceiling", func(t *testing.T) {
+		h, f := newCodexLeadHarness(t)
+		h.startAt(codexSyntheticEndpoint)
+		legacy := h.lead(BackendCodex, LeadOptions{})
+		f.replyID = legacy.ID
+		h.send(legacy.ID, "keep native defaults")
+		holder := h.holder(legacy.ID)
+		if open := h.holders.acpInputs(holder, "thread/start"); len(open) != 1 || jsonAt(open[0], "sandbox") != nil || jsonAt(open[0], "approvalPolicy") != nil {
+			t.Fatalf("legacy omission changed Codex defaults: %s", open)
+		}
+		if _, err := os.Stat(filepath.Join(wsdashboard.SessionDir(h.dir, legacy.ID), "permission.json")); !os.IsNotExist(err) {
+			t.Fatalf("legacy omission wrote a sidecar: %v", err)
+		}
+
+		parent := h.lead(BackendCodex, LeadOptions{PermissionLevel: PermissionReadOnly, permissionUser: true})
+		parentRef := ParentRef{Kind: ParentLead, ReplyID: parent.ID}
+		before := len(h.runner.List())
+		_, err := h.runner.Spawn(SpawnSpec{
+			Profile: PiWorkerProfile, Root: h.root, Prompt: "above parent", Parent: &parentRef,
+			PermissionLevel: PermissionWorkdirWrite, delegatedAuthority: true,
+		})
+		if err == nil || !strings.Contains(err.Error(), "above the parent's current level read-only") || len(h.runner.List()) != before {
+			t.Fatalf("Codex parent ceiling: %v", err)
+		}
+	})
 }
 
 func codexSyntheticNotification(method string, params any) string {
@@ -265,7 +420,7 @@ func TestCodexLeadSyntheticCreateControlsAndResume(t *testing.T) {
 	if _, err := h.runner.SetSettings(id, &model, &effort); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.runner.SetPermissionMode(id, "danger-full-access"); err != nil {
+	if _, err := h.runner.setPermissionMode(id, "danger-full-access", true); err != nil {
 		t.Fatal(err)
 	}
 	h.holders.out(holder, codexSyntheticEnd("t1", "first", "completed"))

@@ -72,7 +72,10 @@
   var PERM_WHAT = { "": "js.perm.what.default", "read-only": "js.perm.what.readonly", "workdir-write": "js.perm.what.workdir", full: "js.perm.what.full" };
   var PERM_Q = { partial: "js.perm.q.partial", advisory: "js.perm.q.advisory", pending: "js.perm.q.pending", enforced: "js.perm.q.enforced" };
   // The native mode the daemon maps each level to, where it has one.
-  var PERM_NATIVE = { claude: { "read-only": "plan", "workdir-write": "acceptEdits", full: "bypassPermissions" } };
+  var PERM_NATIVE = {
+    claude: { "read-only": "plan", "workdir-write": "acceptEdits", full: "bypassPermissions" },
+    codex: { "read-only": "read-only", "workdir-write": "workspace-write", full: "danger-full-access" }
+  };
   var permEpoch = 0, permDlg = null;
   function permHarness(k) { return k === "claude" ? "Claude" : k === "pi" ? "Pi" : k; }
   // permLevels is harness's offered levels in order: null while unknown (no

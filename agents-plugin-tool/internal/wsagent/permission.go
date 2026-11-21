@@ -38,41 +38,69 @@ func (level PermissionLevel) rank() int {
 }
 
 func nativePermissionMode(backend string, level PermissionLevel) string {
-	if backend != BackendClaude {
-		return ""
-	}
-	switch level {
-	case PermissionReadOnly:
-		return "plan"
-	case PermissionWorkdirWrite:
-		return "acceptEdits"
-	case PermissionFull:
-		return "bypassPermissions"
+	switch backend {
+	case BackendClaude:
+		switch level {
+		case PermissionReadOnly:
+			return "plan"
+		case PermissionWorkdirWrite:
+			return "acceptEdits"
+		case PermissionFull:
+			return "bypassPermissions"
+		}
+	case BackendCodex:
+		switch level {
+		case PermissionReadOnly:
+			return "read-only"
+		case PermissionWorkdirWrite:
+			return "workspace-write"
+		case PermissionFull:
+			return "danger-full-access"
+		}
 	}
 	return ""
 }
 
 func legacyLeadPermission(rec Record) PermissionLevel {
-	if rec.Backend == BackendPi {
+	switch rec.Backend {
+	case BackendPi:
 		return PermissionWorkdirWrite
-	}
-	if rec.Backend != BackendClaude {
+	case BackendClaude:
+		switch rec.PermissionMode {
+		case "plan":
+			return PermissionReadOnly
+		case "bypassPermissions":
+			return PermissionFull
+		case "", "auto", "default", "acceptEdits", "dontAsk":
+			return PermissionWorkdirWrite
+		}
+	case BackendCodex:
+		switch rec.PermissionMode {
+		case "read-only":
+			return PermissionReadOnly
+		case "workspace-write":
+			return PermissionWorkdirWrite
+		case "danger-full-access":
+			return PermissionFull
+		}
+	default:
 		return ""
-	}
-	switch rec.PermissionMode {
-	case "plan":
-		return PermissionReadOnly
-	case "bypassPermissions":
-		return PermissionFull
-	case "", "auto", "default", "acceptEdits", "dontAsk":
-		return PermissionWorkdirWrite
 	}
 	return ""
 }
 
 func permissionQuality(backend string, level PermissionLevel, active string) string {
-	if backend == BackendClaude && level == PermissionReadOnly && active == "plan" {
-		return "partial"
+	if level == PermissionReadOnly {
+		switch backend {
+		case BackendClaude:
+			if active == "plan" {
+				return "partial"
+			}
+		case BackendCodex:
+			if active == "read-only" {
+				return "partial"
+			}
+		}
 	}
 	return "advisory"
 }
@@ -94,7 +122,7 @@ func authorizePermission(current, next PermissionLevel, user, ack bool) error {
 
 func (r *Runner) supportsLeadPermission(backend string, level PermissionLevel) bool {
 	reg := r.opts.Backends[backend]
-	return reg.Backend != nil && reg.LeadProfile != "" && (backend == BackendClaude || backend == BackendPi) && slices.Contains(reg.PermissionLevels, level)
+	return reg.Backend != nil && reg.LeadProfile != "" && slices.Contains(reg.PermissionLevels, level)
 }
 
 func (r *Runner) leadPermission(rec Record, dir string) (PermissionLevel, string, error) {
@@ -232,7 +260,7 @@ func (c *conv) permissionNudge(level PermissionLevel, worker bool, active string
 	rec := c.record()
 	quality := permissionQuality(rec.Backend, level, active)
 	limit := "filesystem, network and other tool effects are not proven confined"
-	if active == "" && rec.Backend == BackendClaude {
+	if active == "" && (rec.Backend == BackendClaude || rec.Backend == BackendCodex) {
 		limit = "native mode observation is pending; confinement is unproved"
 	}
 	if worker {
@@ -331,7 +359,7 @@ func (c *conv) setPermissionLevel(level PermissionLevel, user, ack bool) error {
 func (c *conv) setNativePermissionMode(mode string, user bool) error {
 	rec := c.record()
 	if !rec.Lead || len(c.r.opts.Backends[rec.Backend].PermissionModes) == 0 {
-		return categorized(ErrUnsupported, badRequest("the permission mode applies to a claude lead session only"))
+		return categorized(ErrUnsupported, badRequest("the permission mode applies to a supported lead session only"))
 	}
 	selection := permissionSlot(c.dir)
 	selection.admission.Lock()
@@ -381,7 +409,7 @@ func (c *conv) reconcileLeadPermission() {
 	// The loop owns permission state, but Send updates the shared record
 	// concurrently. Copy it under mu before passing it by value.
 	rec := c.record()
-	if !rec.Lead || rec.Backend != BackendClaude || c.dirtyMode {
+	if !rec.Lead || nativePermissionMode(rec.Backend, PermissionReadOnly) == "" || c.dirtyMode {
 		return
 	}
 	level, source, err := c.r.leadPermission(rec, c.dir)

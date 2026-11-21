@@ -435,3 +435,33 @@ func TestCodexStreamFactsFixture(t *testing.T) {
 		t.Fatalf("ws server starts %d times on the shadowed thread, want 1", starting)
 	}
 }
+
+func TestCodexPermissionSettingsFixture(t *testing.T) {
+	msgs := readCodexFixture(t, "codex-0.160.0-hosted-lead.jsonl")
+	open, update := "", ""
+	for _, m := range msgs {
+		if !m.in && m.Method == "" && len(m.Result) > 0 {
+			var result struct {
+				ApprovalPolicy json.RawMessage `json:"approvalPolicy"`
+				Sandbox        json.RawMessage `json:"sandbox"`
+			}
+			if json.Unmarshal(m.Result, &result) == nil && codexPresent(result.Sandbox) {
+				open = codexPermissionObservation(result.Sandbox, result.ApprovalPolicy, false)
+			}
+		}
+		if !m.in && m.Method == "thread/settings/updated" {
+			var params struct {
+				ThreadSettings struct {
+					ApprovalPolicy json.RawMessage `json:"approvalPolicy"`
+					SandboxPolicy  json.RawMessage `json:"sandboxPolicy"`
+				} `json:"threadSettings"`
+			}
+			if json.Unmarshal(m.Params, &params) == nil {
+				update = codexPermissionObservation(params.ThreadSettings.SandboxPolicy, params.ThreadSettings.ApprovalPolicy, false)
+			}
+		}
+	}
+	if open != "read-only" || update != "read-only" {
+		t.Fatalf("0.160.0 configured/turn reports = %q/%q", open, update)
+	}
+}

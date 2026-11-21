@@ -80,7 +80,8 @@ const MODES = ['auto', 'default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermi
 function choices(levels = LEVELS, piLevels = LEVELS, claude = {}) {
   return { harnesses: [
     { harness: 'claude', lead: true, available: true, models: [{ id: 'opus' }], efforts: ['high'], permission_modes: MODES, ...(levels ? { permission_levels: levels } : {}), ...claude },
-    { harness: 'pi', lead: true, available: true, models: [{ id: 'pi-model' }], efforts: ['off'], permission_modes: [], ...(piLevels ? { permission_levels: piLevels } : {}) }
+    { harness: 'pi', lead: true, available: true, models: [{ id: 'pi-model' }], efforts: ['off'], permission_modes: [], ...(piLevels ? { permission_levels: piLevels } : {}) },
+    { harness: 'codex', lead: true, available: true, models: [{ id: 'codex-model' }], efforts: ['high'], permission_modes: ['read-only', 'workspace-write', 'danger-full-access'], ...(levels ? { permission_levels: levels } : {}) }
   ] };
 }
 
@@ -221,6 +222,20 @@ for (const [level, native] of [['read-only', 'plan'], ['workdir-write', 'acceptE
   f.start.click();
   w.choices(choices());
   assert.deepEqual(w.posts[0].body, { root: '/repo', harness: 'pi', plugin_isolation: 'default', permission_level: 'workdir-write' });
+}
+{
+  // Codex: common intent owns the app-server's per-run sandbox selection;
+  // reported quality remains conservative because user MCP paths are outside it.
+  const w = world(), f = creation(w);
+  f.harness('codex');
+  f.level('workdir-write');
+  assert.equal(f.mode.value, 'workspace-write');
+  assert.equal(f.mode.disabled, true);
+  assert(f.map.textContent.includes('workspace-write'));
+  f.start.click();
+  w.choices(choices());
+  assert.equal(w.posts[0].route, '/agents/leads/permission');
+  assert.deepEqual(w.posts[0].body, { root: '/repo', harness: 'codex', plugin_isolation: 'default', permission_level: 'workdir-write' });
 }
 
 // 4. Full: Start opens the warning and sends nothing; cancel leaves the
