@@ -148,8 +148,9 @@ func TestCompactionConfigTuneLiveReloadsRunningConversation(t *testing.T) {
 		}
 	}
 
-	// Start conversation with global hard threshold X = 80%.
-	tune(1, map[string]any{"key": "compaction.lead_hard", "value": "80%", "harness": "*", "scope": "global"})
+	// Keep 60% below advisory so this test exercises the hard threshold.
+	tune(1, map[string]any{"key": "compaction.lead_advisory", "value": "70%", "harness": "*", "scope": "global"})
+	tune(2, map[string]any{"key": "compaction.lead_hard", "value": "80%", "harness": "*", "scope": "global"})
 	runner, backend := startCompactionTestRunner(t, s)
 	st, err := runner.CreateLead(wsagent.BackendClaude, root, wsagent.LeadOptions{})
 	if err != nil {
@@ -173,7 +174,7 @@ func TestCompactionConfigTuneLiveReloadsRunningConversation(t *testing.T) {
 	}
 
 	// Tune global hard threshold to Y = 55% via config.tune without restarting.
-	tune(2, map[string]any{"key": "compaction.lead_hard", "value": "55%", "harness": "*", "scope": "global"})
+	tune(3, map[string]any{"key": "compaction.lead_hard", "value": "55%", "harness": "*", "scope": "global"})
 
 	// Next threshold check uses Y=55% and queues /compact on the same running process.
 	backend.emit(wsagent.Event{Live: &wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &tokens, Window: 100000}}})
@@ -197,8 +198,9 @@ func TestCompactionConfigTuneProjectShadowsGlobalLiveReload(t *testing.T) {
 		}
 	}
 
-	// Project-scope hard threshold 90% set before conversation starts.
-	tune(1, map[string]any{"key": "compaction.lead_hard", "value": "90%", "harness": "*", "scope": "project"})
+	// Keep 60% below advisory so this test exercises the hard threshold.
+	tune(1, map[string]any{"key": "compaction.lead_advisory", "value": "70%", "harness": "*", "scope": "global"})
+	tune(2, map[string]any{"key": "compaction.lead_hard", "value": "90%", "harness": "*", "scope": "project"})
 	runner, backend := startCompactionTestRunner(t, s)
 	st, err := runner.CreateLead(wsagent.BackendClaude, root, wsagent.LeadOptions{})
 	if err != nil {
@@ -218,7 +220,7 @@ func TestCompactionConfigTuneProjectShadowsGlobalLiveReload(t *testing.T) {
 	})
 
 	// Global tune to 55% must still be shadowed by project scope 90%.
-	tune(2, map[string]any{"key": "compaction.lead_hard", "value": "55%", "harness": "*", "scope": "global"})
+	tune(3, map[string]any{"key": "compaction.lead_hard", "value": "55%", "harness": "*", "scope": "global"})
 	if _, err := runner.Send(st.ID, "second"); err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +241,7 @@ func TestCompactionConfigTuneProjectShadowsGlobalLiveReload(t *testing.T) {
 	})
 
 	// Resetting the project override via config.tune exposes the global 55% live.
-	tune(3, map[string]any{"key": "compaction.lead_hard", "reset": true, "harness": "*", "scope": "project"})
+	tune(4, map[string]any{"key": "compaction.lead_hard", "reset": true, "harness": "*", "scope": "project"})
 	backend.emit(wsagent.Event{Live: &wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &tokens60, Window: 100000}}})
 	lifecycleEventually(t, "compact sent after project reset exposes global 55%", func() bool {
 		_, sends := backend.counts()

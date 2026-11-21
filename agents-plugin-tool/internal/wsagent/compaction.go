@@ -41,8 +41,15 @@ func (r BackendRegistration) CompactionProtocol() CompactionProtocol {
 }
 
 type compactRequest struct {
-	resume bool
-	err    error
+	resume   bool
+	internal bool
+	err      error
+}
+
+type compactionNudge struct {
+	text       string
+	level      int // 1 for soft, 2 and 3 for the two milestones
+	standalone bool
 }
 
 // CompactResult is the additive compact tool's result. Queued does not claim
@@ -99,7 +106,7 @@ func (r *Runner) Compact(callerKey, target string, resume *bool) CompactResult {
 			out = CompactResult{"queued", "compaction already pending"}
 			return
 		}
-		req := &compactRequest{resume: again}
+		req := &compactRequest{resume: again, internal: dest.compactInternalTurn}
 		dest.compactPending = req
 		out = CompactResult{"queued", "native compaction waits for the idle boundary"}
 		dest.kick()
@@ -351,6 +358,7 @@ func (c *conv) compactIdle() bool {
 		hard := c.compactHard.Point(c.compactWindow)
 		if c.compactTokens >= hard && !c.compactHardIssued {
 			c.compactHardIssued, c.compactAdvised, c.compactM1Issued, c.compactM2Issued = true, true, true, true
+			c.compactNudge = compactionNudge{}
 			if why := c.compactUnsupported(); why == "" {
 				c.compactPending = &compactRequest{}
 			} else {
@@ -359,40 +367,8 @@ func (c *conv) compactIdle() bool {
 					c.compactNote += fmt.Sprintf("Context usage is %.0f tokens (%.0f%%); hard point %.0f tokens (%.0f%%). Native compaction is unsupported: %s. Write durable state to your agenda before compacting.\n", c.compactTokens, c.compactTokens/c.compactWindow*100, hard, hard/c.compactWindow*100, why)
 				}
 			}
-		} else if c.compactAdvisoryEnabled && !c.compactAdvised && c.compactTokens >= c.compactAdvisory.Point(c.compactWindow) {
-			c.compactAdvised = true
-			if m1, m2, ok := c.compactMilestones(c.compactWindow); ok {
-				if c.compactTokens >= m1 {
-					c.compactM1Issued = true
-				}
-				if c.compactTokens >= m2 {
-					c.compactM2Issued = true
-				}
-			}
-			point := c.compactAdvisory.Point(c.compactWindow)
-			if !math.IsInf(point, 0) {
-				if c.compactUnsupported() == "" {
-					c.compactNote += fmt.Sprintf("\nContext usage is %.0f tokens (%.0f%%); advisory point %.0f tokens (%.0f%%). Write durable state to your agenda, then call ws/compact at a safe boundary before continuing. No summary prose is requested.\n", c.compactTokens, c.compactTokens/c.compactWindow*100, point, point/c.compactWindow*100)
-				} else {
-					c.compactNote += fmt.Sprintf("\nContext usage is %.0f tokens (%.0f%%); advisory point %.0f tokens (%.0f%%). Write durable state to your agenda before compacting. No summary prose is requested.\n", c.compactTokens, c.compactTokens/c.compactWindow*100, point, point/c.compactWindow*100)
-				}
-			}
-		} else if m1, m2, ok := c.compactMilestones(c.compactWindow); ok {
-			which, point := 0, 0.0
-			if c.compactTokens >= m2 && !c.compactM2Issued {
-				c.compactM1Issued, c.compactM2Issued = true, true
-				which, point = 2, m2
-			} else if c.compactTokens >= m1 && !c.compactM1Issued {
-				c.compactM1Issued = true
-				which, point = 1, m1
-			}
-			if which > 0 {
-				if c.compactUnsupported() == "" {
-					c.compactNote += fmt.Sprintf("\nContext usage is %.0f tokens (%.0f%%); compaction reminder %d/3 (%.0f tokens, hard point %.0f tokens). Write durable state to your agenda, then call ws/compact at a safe boundary before continuing. No summary prose is requested.\n", c.compactTokens, c.compactTokens/c.compactWindow*100, which, point, hard)
-				} else {
-					c.compactNote += fmt.Sprintf("\nContext usage is %.0f tokens (%.0f%%); compaction reminder %d/3 (%.0f tokens, hard point %.0f tokens). Write durable state to your agenda before compacting. No summary prose is requested.\n", c.compactTokens, c.compactTokens/c.compactWindow*100, which, point, hard)
-				}
-			}
+		} else {
+			c.stageCompactionNudge(hard)
 		}
 	}
 	if req := c.compactPending; req != nil {
@@ -404,6 +380,7 @@ func (c *conv) compactIdle() bool {
 		}
 		c.compactPending = nil
 		c.compactResume, c.compactCommand = req.resume, true
+		c.compactResumeInternal = req.resume && req.internal
 		c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactStart})
 		c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactStart, Trigger: wslive.TriggerManual})
 		if err := c.runCommand(wsinbox.Command{Name: "compact"}); err != nil {
@@ -422,11 +399,13 @@ func (c *conv) compactIdle() bool {
 		text := c.renderRestoreNote(c.compactNote) + "\nContinue the work that was pending."
 		c.compactResume = false
 		if err := c.proc.Send(text); err != nil {
+			c.compactResumeInternal = false
 			c.setStatus(func() { c.lastErr = err.Error() })
 			c.releaseHeld()
 			return false
 		}
 		c.compactNote = ""
+		c.compactInternalTurn, c.compactResumeInternal = c.compactResumeInternal, false
 		c.beginTurn(false)
 		return true
 	}
@@ -447,6 +426,79 @@ func (c *conv) compactIdle() bool {
 		return true
 	}
 	return false
+}
+
+// stageCompactionNudge prepares the note and the levels its delivery covers.
+// A jump from below soft still uses the first advisory's wording.
+func (c *conv) stageCompactionNudge(hard float64) {
+	soft := c.compactAdvisory.Point(c.compactWindow)
+	level := 0
+	var point float64
+	if c.compactAdvisoryEnabled && c.compactTokens >= soft {
+		level, point = 1, soft
+		if m1, m2, ok := c.compactMilestones(c.compactWindow); ok {
+			switch {
+			case c.compactTokens >= m2:
+				level, point = 3, m2
+			case c.compactTokens >= m1:
+				level, point = 2, m1
+			}
+		}
+	}
+	if level == 0 || c.compactAdvised && (level == 1 || level == 2 && c.compactM1Issued || level == 3 && c.compactM2Issued) {
+		c.compactNudge = compactionNudge{}
+		return
+	}
+	standalone := c.compactUnsupported() == ""
+	if c.compactNudge.level == level && c.compactNudge.standalone == standalone {
+		return
+	}
+	usage := fmt.Sprintf("Context usage is %.0f tokens (%.0f%%); ", c.compactTokens, c.compactTokens/c.compactWindow*100)
+	if c.compactAdvised {
+		usage += fmt.Sprintf("compaction reminder %d/3 (%.0f tokens, hard point %.0f tokens). ", level-1, point, hard)
+	} else {
+		usage += fmt.Sprintf("advisory point %.0f tokens (%.0f%%). ", soft, soft/c.compactWindow*100)
+	}
+	action := "Write durable state to your agenda before compacting."
+	if standalone {
+		action = "Write durable state to your agenda, then call ws/compact at a safe boundary before continuing."
+	}
+	c.compactNudge = compactionNudge{usage + action + " No summary prose is requested.", level, standalone}
+}
+
+func (c *conv) consumeCompactionNudge() {
+	if level := c.compactNudge.level; level > 0 {
+		c.compactAdvised = true
+		c.compactM1Issued = c.compactM1Issued || level >= 2
+		c.compactM2Issued = c.compactM2Issued || level >= 3
+		c.compactNudge = compactionNudge{}
+	}
+}
+
+func (c *conv) compactionNudgeReady() bool {
+	return c.compactNudge.standalone && c.compactUsageFresh && c.proc != nil &&
+		!c.compacting && !c.compactCommand && c.compactPending == nil &&
+		c.bgTasks == 0 && c.bgGraceTimer == nil
+}
+
+func (c *conv) sendCompactionNudge() {
+	if !c.compactionNudgeReady() || c.hasActiveDescendants() {
+		return
+	}
+	c.releaseHeld()
+	if c.heldRes != nil {
+		return
+	}
+	if err := c.proc.Send(c.compactNudge.text); err != nil {
+		// Keep the note for ordinary input. A failed internal send has no
+		// queued work to restart the harness for.
+		c.setStatus(func() { c.lastErr = "send compaction advisory: " + err.Error() })
+		c.stopProcess("")
+		return
+	}
+	c.consumeCompactionNudge()
+	c.compactInternalTurn = true
+	c.beginTurn(false)
 }
 
 func (c *conv) restartRestoreHasInput() bool {
@@ -499,9 +551,11 @@ func (c *conv) compactEvent(ev wslive.Event) {
 		c.stopIdle()
 		c.compacting = true
 		c.compactUsageFresh = false
+		c.compactNudge = compactionNudge{}
 		c.compactAdvised, c.compactM1Issued, c.compactM2Issued, c.compactHardIssued = true, true, true, true
 	case wslive.CompactFailed:
 		c.compacting, c.compactResume = false, false
+		c.compactResumeInternal = false
 	case wslive.CompactEnd:
 		// Duplicate ends carry neither a second note nor another continue turn.
 		if !c.compacting {
@@ -532,10 +586,12 @@ func (c *conv) compactEvent(ev wslive.Event) {
 }
 
 func (c *conv) compactInput(text string) string {
-	if c.compactNote == "" {
-		return text
+	if c.compactNudge.text != "" {
+		text = c.compactNudge.text + "\n\n" + text
 	}
-	text = strings.TrimSpace(c.renderRestoreNote(c.compactNote)) + "\n\n" + text
+	if c.compactNote != "" {
+		text = strings.TrimSpace(c.renderRestoreNote(c.compactNote)) + "\n\n" + text
+	}
 	return text
 }
 

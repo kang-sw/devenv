@@ -69,7 +69,13 @@ func (c *conv) handle(ev Event) {
 		if !quiet && ev.Live.Kind == wslive.KindStatus {
 			c.checkUsageDropCompaction(*ev.Live)
 			if c.canKick() {
-				c.compactIdle()
+				// Pi can report usage after settlement. Check the inbox on
+				// a new advisory crossing, rather than on every sample.
+				previous := c.compactNudge
+				if !c.compactIdle() && (c.compactNudge.level != previous.level || !previous.standalone) &&
+					c.compactionNudgeReady() && !c.hasActiveDescendants() {
+					c.kickInput()
+				}
 			}
 		}
 		if !quiet && ev.Live.Kind == wslive.KindCompact && ev.Live.Phase != wslive.CompactStart {
@@ -239,6 +245,7 @@ func (c *conv) handle(ev Event) {
 					if c.bgGraceTimer == nil {
 						c.armIdle()
 						c.restartIfDue()
+						c.kickCompactionNudge()
 					}
 				}
 			}
@@ -303,7 +310,7 @@ func (c *conv) beginTurn(quiet bool) {
 		// Not the runner's send: the turn holds no new message, so it
 		// keeps the last turn's mark.
 		c.reply = ""
-		if !c.compactCommand {
+		if !c.compactCommand && !c.compactInternalTurn {
 			c.hold(nil)
 			if c.rec.Parent != nil {
 				c.update(func(rec *Record) {
@@ -360,7 +367,13 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 	if turnErr != "" {
 		c.setStatus(func() { c.lastErr = turnErr })
 	}
-	if ran && !c.replaying && !compactCommand {
+	if c.compactInternalTurn {
+		c.compactInternalTurn = false
+		c.reply = ""
+		c.watched()
+	} else if ran && !c.replaying && !compactCommand && (c.rec.Parent == nil || c.rec.TurnOpen) {
+		// A replayed internal turn can be running without a reportable
+		// child turn open in the record.
 		status := TurnDone
 		if turnErr != "" {
 			status = TurnFailed
@@ -617,6 +630,7 @@ func (c *conv) processExited() {
 		c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
 	}
 	c.compactPending, c.compactCommand, c.compactResume = nil, false, false
+	c.compactResumeInternal = false
 	c.stopCompactWatchdog()
 	rejoining, proc := c.replaying, c.proc
 	c.events = nil
@@ -704,6 +718,8 @@ func (c *conv) processEnded() {
 	c.stopBgGrace()
 	c.wrapHold = false
 	hadTurn := c.turn
+	internal := c.compactInternalTurn
+	c.compactInternalTurn = false
 	if c.turn {
 		var reason string
 		c.setStatus(func() {
@@ -717,8 +733,12 @@ func (c *conv) processEnded() {
 		// A turn the process took with it. A close settles none (its
 		// parent ended it), and the daemon's exit leaves it to the next
 		// daemon (interrupted).
-		if !c.closed && !c.quitting {
+		if !c.closed && !c.quitting && !internal && (c.rec.Parent == nil || c.rec.TurnOpen) {
 			c.settleTurn(TurnFailed, c.lastError(), c.turnMark)
+		}
+		if internal {
+			c.reply = ""
+			c.watched()
 		}
 	}
 	c.r.revokeToken(c.rec.ReplyID)
@@ -800,6 +820,7 @@ func (c *conv) stopProcess(reason string) {
 		c.apply(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed})
 	}
 	c.compactPending, c.compactCommand, c.compactResume = nil, false, false
+	c.compactResumeInternal = false
 	c.stopCompactWatchdog()
 	c.stopIdle()
 	if c.proc == nil {
