@@ -39,12 +39,17 @@ back (owner, board (1478)=c, 2026-11-21). Verified on develop 872a7833b:
   parent first" ((1491), owner ok).
   Rejected: allowing it (the child would stay unreachable under the hidden
   parent).
-- Compatibility T1, to be confirmed against source in Phase 1: an older binary
-  rejects the unknown `*.unhide` event on replay (`check.go:1591`), so on that
-  binary the item simply stays hidden; no data changes and the new binary
-  shows it again. Before settling, verify that a rejected event does not
-  disturb the fold of later events; if it does, stop and report ((1492),
-  owner ok).
+- Compatibility T1 (owner (1492) ok; scope widened by (1494)=a,
+  2026-11-21 18:45). An older binary rejects the unknown `*.unhide` event on
+  replay (`check.go:1590-1591`), so on that binary the item stays hidden and
+  later edits, comments, and replies on it are shown flagged, because causal
+  replay skips the rejected event (`replay.go:401-419`; `check.go:846-857,
+  1447-1474`). Those verdicts are computed in memory at replay and never
+  written (`replay.go:295-321`, `view.go:594`), the older binary refuses its
+  own new writes to the still-hidden target, and the new binary replays all
+  of it correctly: display-degraded, no data change.
+  Rejected: a T3 boundary with a minor bump (locks out every previous-minor
+  install for a downgrade-only symptom); deferring the feature.
 - Entry point: a "show hidden" toggle on the tracker list. When on, hidden
   items and comments render dimmed in place, and those allowed to unhide see
   an "unhide" action on them ((1493)=a, owner 2026-11-21 18:41).
