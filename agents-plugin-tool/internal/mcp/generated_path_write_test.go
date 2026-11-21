@@ -3,11 +3,14 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/mcpframe"
 )
 
 func TestPathWriteRequiresSameSessionGeneratedCachePath(t *testing.T) {
@@ -235,12 +238,38 @@ func TestServeStdioRejectsPathWriteBeyondRequestLimit(t *testing.T) {
 		"session_key": key, "kind": "review", "stems": []any{"limit"},
 	})
 	path := strings.TrimSpace(toolText(t, generated))
-	line := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"path.write","arguments":{"session_key":` +
-		fmt.Sprintf("%q", key) + `,"path":` + fmt.Sprintf("%q", path) + `,"content":"` + strings.Repeat("x", maxMCPRequestBytes) + `"}}}`
+	oversize := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"path.write","arguments":{"session_key":` +
+		fmt.Sprintf("%q", key) + `,"path":` + fmt.Sprintf("%q", path) + `,"content":"` + strings.Repeat("x", mcpframe.MaxRequestBytes) + `"}}}`
+	followUp := `{"jsonrpc":"2.0","id":3,"method":"ping"}`
 	var out bytes.Buffer
-	err = s.ServeStdio(context.Background(), strings.NewReader(line), &out)
-	if err == nil || !strings.Contains(err.Error(), "token too long") {
+	err = s.ServeStdio(context.Background(), strings.NewReader(oversize+"\n"+followUp+"\n"), &out)
+	if err != nil {
 		t.Fatalf("ServeStdio oversized request error = %v, output = %.200q", err, out.String())
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("ServeStdio produced %d responses, want 2: %q", len(lines), out.String())
+	}
+	var errResp struct {
+		ID    json.RawMessage `json:"id"`
+		Error *rpcError       `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &errResp); err != nil {
+		t.Fatalf("decode oversize response: %v (%q)", err, lines[0])
+	}
+	if string(errResp.ID) != "2" || errResp.Error == nil || errResp.Error.Code != -32600 || errResp.Error.Message != mcpframe.TooLargeMessage(mcpframe.MaxRequestBytes) {
+		t.Fatalf("oversize response = %s, want id=2 -32600 %q", lines[0], mcpframe.TooLargeMessage(mcpframe.MaxRequestBytes))
+	}
+	var pingResp struct {
+		ID     json.RawMessage `json:"id"`
+		Result map[string]any  `json:"result"`
+		Error  *rpcError       `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &pingResp); err != nil {
+		t.Fatalf("decode follow-up ping response: %v (%q)", err, lines[1])
+	}
+	if string(pingResp.ID) != "3" || pingResp.Error != nil || pingResp.Result == nil {
+		t.Fatalf("follow-up response = %s, want id=3 ok result", lines[1])
 	}
 	if got, readErr := os.ReadFile(path); readErr != nil || len(got) != 0 {
 		t.Fatalf("rejected oversized request changed artifact: bytes=%d err=%v", len(got), readErr)

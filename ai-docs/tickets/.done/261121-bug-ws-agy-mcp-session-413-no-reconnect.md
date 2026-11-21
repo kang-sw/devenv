@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 1dfa4d29d0136321
 sage-review-completeness-reviewed: 1dfa4d29d0136321
+completed: 2026-11-21
 ---
 
 # Large MCP requests return 413 and hosted agy lacks MCP recovery
@@ -72,8 +73,42 @@ Matching `AGENTS.md` Implementation Conventions rows (paths are relative to the 
 
 Implement Decision 1. A representative `whiteboard.update` or equivalent tool call with a payload above 64 KiB (and below the shared bound) must succeed over both transports. A request above the shared bound must receive a per-request JSON-RPC error without terminating the session; a following ordinary call on the same session must succeed. Update `proxy_http_test.go`'s 413 assertion and `TestServeStdioRejectsPathWriteBeyondRequestLimit` (now a per-request error plus continued serving, not `token too long`), and add a stdio regression that exercises the real serving loop, not only the parser. Re-confirm the compatibility tier against the final diff.
 
+### Result (aeaaf4e76) - 2026-11-21
+
+- **Landed:**
+  - Added zero-project-import leaf package `agents-plugin-tool/internal/mcpframe` (`mcpframe.go`, `mcpframe_test.go`) exporting `MaxRequestBytes = 64 << 20` (64 MiB), `TooLargeMessage`, `ReadLine`, and `ExtractID`.
+  - Updated `agents-plugin-tool/internal/wsdashboard/proxy_http.go` to replace `httpMCPBodyLimit` with `mcpframe.MaxRequestBytes`, read at most `MaxRequestBytes+1` bytes, and reply to oversized POST bodies with HTTP 200 JSON-RPC `-32600` (recovering top-level `id` from the bounded prefix via `mcpframe.ExtractID`, else `null`) without forwarding to or ending the session; avoided redundant `json.Valid`/`json.Compact` passes on single-line JSON requests while preserving bearer-token, Origin, loopback, and unrelated `/agents` limits.
+  - Updated `agents-plugin-tool/internal/mcp/server.go` to remove `maxMCPRequestBytes` and replace `bufio.Scanner` in `ServeStdio` with `mcpframe.ReadLine` over `bufio.Reader`, discarding oversized line remainders through newline/EOF without unbounded allocation, returning the same per-request JSON-RPC `-32600` error (with recovered `id` or `null`), and keeping the serve loop alive while preserving `wslive.SummaryFrameBytes` v1 checks.
+  - Updated `TestProxyHTTPBodyLimitsAndShapes` (`agents-plugin-tool/internal/wsdashboard/proxy_http_test.go`) and `TestServeStdioRejectsPathWriteBeyondRequestLimit` (`agents-plugin-tool/internal/mcp/generated_path_write_test.go`), and added `TestServeStdioFramingHandlesLargeToolAndSurvivesOversize` (`agents-plugin-tool/internal/mcp/server_framing_test.go`) covering >64 KiB `whiteboard.update` SVG payloads, oversized requests (recoverable and unrecoverable `id`), and subsequent ordinary calls on the same session over both HTTP and stdio.
+- **Compatibility tier:** Re-confirmed **T0 (patch eligible)** against the final diff (`internal/mcpframe`, `internal/wsdashboard/proxy_http.go`, `internal/mcp/server.go`): `/mcp/session` route, JSON-RPC methods/arguments, and stored shapes are unchanged, old callers sending previously accepted requests receive the identical success path, and no cross-version data overwrite occurs.
+- **File-touch budget:** 0 added file operations per MCP request (pure in-memory framing and prefix parsing).
+- **Verification:** `go test -race ./internal/mcpframe`, `go test -race ./internal/wsdashboard -run TestProxyHTTP`, `go test -race ./internal/mcp -run 'TestServeStdioFramingHandlesLargeToolAndSurvivesOversize|TestServeStdioRejectsPathWriteBeyondRequestLimit|TestPathWriteRefusesSymlinkReplacementAndAcceptsOversizedContent'`, `go vet`, and `go build ./...` all passed; full `go test -timeout 45m ./internal/mcp/...` passed every framing, `ServeStdio`, `path.write`, and `whiteboard` test (failing only 4 unrelated pre-existing `playbook_golden_test.go` explore-playbook golden tests on base `d8f25d4b3`).
+
 ### Phase 2: Hosted agy MCP recovery
 
 Implement Decision 2. Record the already-run probe (command, agy version, observed wire behavior, path a/b outcomes) in this phase's Result. Add a regression: a fake agy lead whose rejoined process is marked `mcpStale` (moved route) is restarted at replay completion as a fresh process that opens with `session/resume` on the recorded session ID; no new production code unless that regression fails, in which case fix the seam it exposes and say so in the Result. Do not add `ws/reload_harness`.
 
+### Result (96ccdba05) - 2026-11-21
+
+- **Recorded ACP probe:**
+  - **Command & version:** `agy acp --process-per-session` (`agy --version`: `1.5.13`; ACP `agentInfo.version`: `"1.5.13"`) against a loopback mock HTTP MCP server named `ws` exposing `probe_echo` (`mcp_ws_probe_echo`).
+  - **Observed wire behavior:**
+    - Signal (i) (ACP MCP server status): none emitted on init, normal calls, tool error (`isError: true`), HTTP 413, HTTP 401, HTTP 503, TCP EOF, or server shutdown.
+    - Signal (ii) (`tool_call`/`tool_call_update` error distinction): identical ACP wire frame across tool-level `isError: true` (HTTP 200) and transport failures (HTTP 413, 401, 503, TCP EOF) — `{"sessionUpdate":"tool_call_update","toolCallId":"...","name":"mcp_ws_probe_echo","args":{...},"status":"failed","kind":"other","title":"Run mcp_ws_probe_echo","rawInput":{...}}` with no `content`, `rawOutput`, or error text on the ACP wire (error text is delivered only internally to the model).
+    - Drop behavior: a single HTTP 413 did not kill the `ws` server on `agy 1.5.13` (a subsequent HTTP 200 call succeeded), whereas HTTP 401 followed by server shutdown caused `agy` to silently unregister `mcp_ws_probe_echo` with no ACP event (later calls failed internally as unknown tool and emitted no ACP `tool_call`/`tool_call_update`).
+  - **Path (a) vs path (b):**
+    - Path (a) (second `session/resume` on the live process): connects to the new MCP server, but registers a hash-suffixed server (`ws_<8-hex>`, e.g. `mcp_ws_<hex>_probe_echo`) while leaving `mcp_ws_*` unregistered; rejected.
+    - Path (b) (fresh `agy acp --process-per-session` process + `session/resume`): cleanly re-registers `ws` (`mcp_ws_probe_echo`), preserves conversation history, and restores `tools/call`.
+- **Landed:**
+  - Added `TestAgyLeadRejoinOfMovedRouteRestartsWithSessionResume` in `agents-plugin-tool/internal/wsagent/agy_lead_test.go`, verifying that a hosted `agy` lead rejoining a daemon whose MCP HTTP route moved (`mcpStale`) is restarted at replay completion as a fresh process that opens with `session/resume` on the recorded `sessionId` and a new bearer token for the new route, revokes the stale token, and serves subsequent turns cleanly.
+  - No production code changes were required because the regression passed against the existing `mcpStale` / `restartIfDue` path. `ws/reload_harness` was not added (Decision 3).
+  - **Known limit:** A silent agy-side MCP drop with no daemon-side route or start cause is not detectable from ACP or the daemon on `agy 1.5.13` and remains covered by the existing manual lead restart.
+- **File-touch budget:** 0 added file operations (reuses the existing `restartProcess` path with no new controller or polling).
+- **Verification:** `go test -race ./internal/wsagent -run TestAgyLeadRejoinOfMovedRouteRestartsWithSessionResume` passed; full `go test -count=1 ./internal/wsagent/...` passed (146.667s); `code-review-lite` finished `clean` (`Remaining: none`).
+
 Recommended implementation tier: **large** for both phases (Phase 1 crosses the HTTP proxy and stdio framing; Phase 2 crosses hosted agy ACP behavior and recovery).
+
+
+## Resolution (2026-11-21)
+
+Completed Phase 1 (shared 64 MiB MCP request framing across HTTP and stdio via internal/mcpframe with per-request JSON-RPC -32600 oversize rejection and continued serving, confirmed T0) and Phase 2 (recorded agy 1.5.13 ACP probe and pinned hosted agy stale-route rejoin restart via session/resume with no production change required); lite review passed clean.

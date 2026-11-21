@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/mcpframe"
 )
 
 // tokenAgents is a test AgentHost that issues per-session MCP tokens.
@@ -265,7 +267,7 @@ func mcpPost(t *testing.T, ctx context.Context, d *Daemon, method, token, body s
 	for i := 0; i+1 < len(headers); i += 2 {
 		req.Header.Set(headers[i], headers[i+1])
 	}
-	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	client := &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: nil}}
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, err.Error(), nil
@@ -570,20 +572,48 @@ func TestProxyHTTPBodyLimitsAndShapes(t *testing.T) {
 	if status, body, _ := mcpPost(t, context.Background(), d, http.MethodPost, "tok-a", initializeBody); status != http.StatusOK {
 		t.Fatalf("initialize: %d %s", status, body)
 	}
-	// A body of exactly the limit reaches the session as one line (the
-	// limit leaves room for its newline in the session's line reader); one
-	// byte more is refused.
+	// A representative tool call above the old 64 KiB scanner limit (and below
+	// the shared 64 MiB bound) succeeds over the HTTP route.
+	largeSVG := `<wb:topic name="diagram"><wb:body><svg>` + strings.Repeat(`<rect width="10" height="10"/>`, 3000) + `</svg></wb:body></wb:topic>`
+	largeCall, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      11,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "whiteboard.update",
+			"arguments": map[string]any{"commands": largeSVG},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(largeCall) <= 64<<10 {
+		t.Fatalf("largeCall len = %d, want > 64 KiB", len(largeCall))
+	}
+	status, body, _ := mcpPost(t, context.Background(), d, http.MethodPost, "tok-a", string(largeCall))
+	if r := decodeReply(t, body); status != http.StatusOK || string(r.ID) != "11" || r.Result.Method != "tools/call" {
+		t.Fatalf("large whiteboard.update: %d %.200s, want HTTP 200 answer", status, body)
+	}
+	// A body of exactly the shared bound reaches the session as one line; one
+	// byte more gets HTTP 200 with a JSON-RPC -32600 error (recovering id when
+	// parseable from the bounded prefix, else null) without ending the session.
 	padded := func(n int) string {
 		head, tail := `{"jsonrpc":"2.0","id":2,"method":"ping","params":{"pad":"`, `"}}`
 		return head + strings.Repeat("x", n-len(head)-len(tail)) + tail
 	}
-	status, body, _ := mcpPost(t, context.Background(), d, http.MethodPost, "tok-a", padded(httpMCPBodyLimit))
+	status, body, _ = mcpPost(t, context.Background(), d, http.MethodPost, "tok-a", padded(mcpframe.MaxRequestBytes))
 	if r := decodeReply(t, body); status != http.StatusOK || string(r.ID) != "2" || r.Result.Method != "ping" {
 		t.Fatalf("at the limit: %d %.200s, want the session's answer", status, body)
 	}
-	status, body, _ = mcpPost(t, context.Background(), d, http.MethodPost, "tok-a", padded(httpMCPBodyLimit+1))
-	if r := decodeReply(t, body); status != http.StatusRequestEntityTooLarge || r.Error == nil || string(r.ID) != "null" {
-		t.Fatalf("too large: %d %s, want 413 with an id-null error", status, body)
+	status, body, _ = mcpPost(t, context.Background(), d, http.MethodPost, "tok-a", padded(mcpframe.MaxRequestBytes+1))
+	if r := decodeReply(t, body); status != http.StatusOK || r.Error == nil || r.Error.Code != -32600 || r.Error.Message != mcpframe.TooLargeMessage(mcpframe.MaxRequestBytes) || string(r.ID) != "2" {
+		t.Fatalf("too large with recoverable id: %d %s, want HTTP 200 -32600 with id=2", status, body)
+	}
+	tailIDHead, tailIDTail := `{"jsonrpc":"2.0","method":"ping","params":{"pad":"`, `"},"id":22}`
+	tailIDBody := tailIDHead + strings.Repeat("x", mcpframe.MaxRequestBytes+1-len(tailIDHead)-len(tailIDTail)) + tailIDTail
+	status, body, _ = mcpPost(t, context.Background(), d, http.MethodPost, "tok-a", tailIDBody)
+	if r := decodeReply(t, body); status != http.StatusOK || r.Error == nil || r.Error.Code != -32600 || r.Error.Message != mcpframe.TooLargeMessage(mcpframe.MaxRequestBytes) || string(r.ID) != "null" {
+		t.Fatalf("too large with unrecoverable id: %d %s, want HTTP 200 -32600 with id=null", status, body)
 	}
 	status, body, _ = mcpPost(t, context.Background(), d, http.MethodPost, "tok-a", `[{"jsonrpc":"2.0","id":3,"method":"ping"}]`)
 	if r := decodeReply(t, body); status != http.StatusBadRequest || r.Error == nil || r.Error.Code != -32600 || r.Error.Message != "batches are not supported" {
@@ -594,17 +624,20 @@ func TestProxyHTTPBodyLimitsAndShapes(t *testing.T) {
 		t.Fatalf("parse error: %d %s", status, body)
 	}
 	// Newlines between tokens and an escaped one in a string arrive as one
-	// compact line.
+	// compact line, proving the session stayed alive after the rejected bodies.
 	status, body, _ = mcpPost(t, context.Background(), d, http.MethodPost, "tok-a", "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 4,\n  \"method\": \"echo\",\n  \"params\": {\"text\": \"a\\nb\"}\n}\n")
 	if r := decodeReply(t, body); status != http.StatusOK || string(r.ID) != "4" || r.Result.Method != "echo" {
 		t.Fatalf("multi-line body: %d %s", status, body)
+	}
+	if h.count() != 1 {
+		t.Fatalf("sessions = %d, want 1 (oversize errors never terminate the session)", h.count())
 	}
 	got := h.session(t, 0).lines()
 	if last := got[len(got)-1]; last != `{"jsonrpc":"2.0","id":4,"method":"echo","params":{"text":"a\nb"}}` {
 		t.Fatalf("session line = %q", last)
 	}
-	if len(got) != 3 {
-		t.Fatalf("session saw %d lines, want 3 (refused bodies never forwarded)", len(got))
+	if len(got) != 4 {
+		t.Fatalf("session saw %d lines, want 4 (refused bodies never forwarded)", len(got))
 	}
 	// A duplicate in-flight id is refused without reaching the session.
 	held := make(chan string, 1)
@@ -612,7 +645,7 @@ func TestProxyHTTPBodyLimitsAndShapes(t *testing.T) {
 		_, body, _ := mcpPost(t, context.Background(), d, http.MethodPost, "tok-a", `{"jsonrpc":"2.0","id":5,"method":"hold"}`)
 		held <- body
 	}()
-	h.session(t, 0).waitLines(t, 4)
+	h.session(t, 0).waitLines(t, 5)
 	status, body, _ = mcpPost(t, context.Background(), d, http.MethodPost, "tok-a", `{"jsonrpc":"2.0","id":5,"method":"ping"}`)
 	if r := decodeReply(t, body); status != http.StatusOK || r.Error == nil || r.Error.Code != -32600 || r.Error.Message != "request id already in flight" {
 		t.Fatalf("duplicate id: %d %s", status, body)
@@ -621,8 +654,8 @@ func TestProxyHTTPBodyLimitsAndShapes(t *testing.T) {
 	if r := decodeReply(t, <-held); r.Result.How != "released" {
 		t.Fatalf("held request answer = %+v", r)
 	}
-	if n := len(h.session(t, 0).lines()); n != 5 {
-		t.Fatalf("session saw %d lines, want 5 (the duplicate is never forwarded)", n)
+	if n := len(h.session(t, 0).lines()); n != 6 {
+		t.Fatalf("session saw %d lines, want 6 (the duplicate is never forwarded)", n)
 	}
 }
 
