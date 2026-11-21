@@ -140,6 +140,7 @@ func dashboardCommand(args []string) {
 		Tracker:        &dashboardTracker{h: tracker, err: trackerErr, unregistered: func() { support.CloseUnregistered() }},
 		Holders:        holders,
 		Support:        support,
+		ScratchCapture: os.Getenv("WS_MCP_DASHBOARD_SCRATCH_CAPTURE") == "1",
 		BeforeUnlock: func() {
 			if err := boards.Close(); err != nil {
 				fmt.Fprintf(logw, "dashboard: whiteboard close: %v\n", err)

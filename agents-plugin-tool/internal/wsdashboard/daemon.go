@@ -37,6 +37,8 @@ type DaemonOptions struct {
 	// config search roots. Empty uses os.UserHomeDir and config environment
 	// overrides; an explicit home uses only that home's .claude/.codex/.pi.
 	Home string
+	// ScratchCapture serves synthetic picker roots and empty account usage.
+	ScratchCapture bool
 	// Port is the preferred port; 0 asks the OS for one. A taken port falls
 	// back to the port the last daemon bound (last-port file), then to an
 	// OS-assigned one, so a restart keeps its origin while the preferred

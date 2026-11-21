@@ -35,12 +35,12 @@
 // empty layout (resetLayout).
 
 import { execFileSync, spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { fixtureReplyID as replyID, scratchCookie, scratchEnv } from "./headless-scratch.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..");
@@ -81,21 +81,6 @@ async function until(what, fn, ms = 8000) {
   }
 }
 
-// ------------------------------------------------------------ reply-ids --
-// replyID is wsmailbox.ReplyID: four words of the EFF list, each picked by
-// the first 8 bytes (big-endian) of sha256("<key>#<i>") modulo the list, run
-// together (wskey.DeriveFull without its hyphens).
-const WORDS = fs.readFileSync(path.join(TOOL, "internal/wskey/eff_large_wordlist.txt"), "utf8")
-  .split("\n").map((s) => s.trim()).filter(Boolean);
-function replyID(key) {
-  let out = "";
-  for (let i = 0; i < 4; i++) {
-    const d = createHash("sha256").update(`${key}#${i}`).digest();
-    out += WORDS[Number(d.readBigUInt64BE(0) % BigInt(WORDS.length))];
-  }
-  return out;
-}
-
 // --------------------------------------------------------------- fixture --
 // The seeded sessions. ws: the folder (alpha, beta, and gamma are
 // repositories, alpha-feat alpha's linked worktree on feat/x, notes a plain
@@ -123,17 +108,17 @@ const SESSIONS = [
 ];
 const LABELS = { "rail-a-02": "Build bot", "rail-a-05": LONG };
 
-function git(cwd, ...args) {
-  execFileSync("git", ["-c", "user.name=rail", "-c", "user.email=rail@example.invalid", "-c", "commit.gpgsign=false", ...args], { cwd, stdio: "pipe" });
-}
 function writeJSON(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(value, null, 2) + "\n");
 }
 function stamp(ms) { return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z"); }
 
-function seed(root) {
-  const work = path.join(root, "work"), cache = path.join(root, "cache");
+function seed(root, env) {
+  const git = (cwd, ...args) => {
+    execFileSync("git", ["-c", "user.name=rail", "-c", "user.email=rail@example.invalid", "-c", "commit.gpgsign=false", ...args], { cwd, env, stdio: "pipe" });
+  };
+  const work = path.join(root, "work"), cache = env.WS_CACHE_HOME;
   const dirs = { alpha: path.join(work, "alpha"), "alpha-feat": path.join(work, "alpha-feat"), beta: path.join(work, "beta"), gamma: path.join(work, "gamma"), notes: path.join(work, "notes") };
   for (const name of ["alpha", "beta", "gamma"]) {
     fs.mkdirSync(dirs[name], { recursive: true });
@@ -145,8 +130,18 @@ function seed(root) {
   git(dirs.alpha, "worktree", "add", "-q", "-b", "empty", dirs["alpha-empty"]);
   fs.mkdirSync(path.join(dirs.alpha, "sub"), { recursive: true });
   fs.mkdirSync(dirs.notes, { recursive: true });
+  writeJSON(path.join(env.WS_CONFIG_HOME, "dashboard", "workspaces.json"), {
+    version: 1, workspaces: ["alpha", "beta", "gamma", "notes"].map((name) => ({ path: dirs[name] })),
+  });
   const common = { alpha: path.join(dirs.alpha, ".git"), "alpha-feat": path.join(dirs.alpha, ".git"), beta: path.join(dirs.beta, ".git"), gamma: path.join(dirs.gamma, ".git"), notes: "" };
   const now = Date.now(), fx = { root, work, cache, dirs, rid: {}, project: {}, label: {}, live: [], ended: [] };
+  fx.initialLayout = {
+    schema_version: 1,
+    worktree_admission: [["alpha-feat", "feat/x"], ["alpha-empty", "empty"]].map(([name, branch]) => ({
+      repository: dirs.alpha, path: dirs[name], origin: "user", state: "admitted", branch,
+    })),
+  };
+  writeJSON(path.join(cache, "dashboard", "rail-layout.json"), fx.initialLayout);
   SESSIONS.forEach((s, i) => {
     const rid = replyID(s.key), project = s.sub ? path.join(dirs[s.ws], s.sub) : dirs[s.ws];
     fx.rid[s.key] = rid;
@@ -192,27 +187,14 @@ function killDaemon() {
 process.on("exit", killDaemon);
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { killDaemon(); process.exit(130); });
 
-async function startDaemon(root, fx) {
+async function startDaemon(root, env) {
   const bin = path.join(root, "bin", process.platform === "win32" ? "ws-mcp.exe" : "ws-mcp");
   console.log("building ws-mcp from this checkout ...");
   execFileSync("go", ["build", "-o", bin, "./cmd/ws-mcp"], { cwd: TOOL, stdio: "inherit" });
-  const env = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    // Nothing of the caller's ws session or XDG dirs reaches the instance.
-    if (!k.startsWith("WS_") && !k.startsWith("XDG_")) env[k] = v;
-  }
-  Object.assign(env, {
-    HOME: path.join(root, "home"),
-    WS_CACHE_HOME: fx.cache,
-    WS_CONFIG_HOME: path.join(root, "config"),
-    WS_MCP_DASHBOARD_DEV_SOURCE: TOOL,
-  });
-  fs.mkdirSync(env.HOME, { recursive: true });
-  fs.mkdirSync(env.WS_CONFIG_HOME, { recursive: true });
   const log = fs.openSync(path.join(root, "daemon.log"), "a");
   daemon = spawn(bin, ["dashboard", "--port", "0"], { cwd: root, env, stdio: ["ignore", log, log] });
   daemon.on("exit", (code, sig) => { if (!stopping) console.error(`rail-headless: the daemon exited early (${code ?? sig}); see ${path.join(root, "daemon.log")}`); });
-  const endpoint = path.join(fx.cache, "dashboard", "endpoint.json");
+  const endpoint = path.join(env.WS_CACHE_HOME, "dashboard", "endpoint.json");
   const ep = await until("the daemon's endpoint file", () => {
     try {
       const v = JSON.parse(fs.readFileSync(endpoint, "utf8"));
@@ -221,24 +203,22 @@ async function startDaemon(root, fx) {
   }, 20000);
   const base = `http://127.0.0.1:${ep.port}`;
   await until("the daemon's health", async () => { try { return (await fetch(base + "/health")).ok; } catch { return false; } }, 20000);
-  return base;
+  return { base, cookie: await scratchCookie(ep) };
 }
 // layoutOp posts one rail layout op as a dashboard page would (with the
 // daemon's own Origin) and answers the HTTP status and the reply.
-async function layoutOp(base, body) {
-  const r = await fetch(base + "/rail/layout", { method: "POST", headers: { "Content-Type": "application/json", Origin: base }, body: JSON.stringify(body) });
+async function layoutOp(base, cookie, body) {
+  const headers = { "Content-Type": "application/json", Origin: base, Cookie: `${cookie.name}=${cookie.value}` };
+  const r = await fetch(base + "/rail/layout", { method: "POST", headers, body: JSON.stringify(body) });
   return { status: r.status, reply: await r.json().catch(() => ({})) };
 }
-// resetLayout empties the daemon's rail layout: its file goes, then a star
-// and an unstar through the route (each one a wake) make the daemon render
-// the rail again, so no page is sent a cached rail with the last scenario's
-// order or stars. With no file there is nothing to reset.
+// Restore the fixture's admitted worktrees and clear the previous scenario's
+// order and stars. A star and an unstar wake the daemon's cached rail.
 async function resetLayout(base, fx) {
   const file = path.join(fx.cache, "dashboard", "rail-layout.json");
-  if (!fs.existsSync(file)) return;
-  fs.rmSync(file);
+  writeJSON(file, fx.initialLayout);
   for (const op of ["star", "unstar"]) {
-    const a = await layoutOp(base, { op, rid: fx.rid[fx.live[0]] });
+    const a = await layoutOp(base, fx.cookie, { op, rid: fx.rid[fx.live[0]] });
     assert(a.status === 200 && a.reply.applied === true, `resetting the layout (${op}): HTTP ${a.status} ${JSON.stringify(a.reply)}`);
   }
 }
@@ -286,6 +266,7 @@ async function makeContext(browser, base, fx, o = {}) {
     permissions: ["clipboard-read", "clipboard-write"],
     hasTouch: !!o.hasTouch,
   });
+  await context.addCookies([{ ...fx.cookie, url: base }]);
   const page = await context.newPage();
   const t = {
     page, context, base, fx,
@@ -456,7 +437,7 @@ const RENAME = "Rename (shown on this dashboard only)", COPY = "Copy mailbox add
 
 // All setup operations use the isolated daemon, never a caller registration.
 async function applied(t, body) {
-  const a = await layoutOp(t.base, body);
+  const a = await layoutOp(t.base, t.fx.cookie, body);
   assert(a.status === 200 && a.reply.applied === true, `setup ${JSON.stringify(body)}: HTTP ${a.status} ${JSON.stringify(a.reply)}`);
 }
 async function swapped(t, label) {
@@ -1023,7 +1004,7 @@ const SCENARIOS = [
       const g = await t.group("rail-a-04"), ws = await t.wsOrder();
       // The daemon's layout: a star and a workspace order.
       for (const body of [{ op: "star", rid: t.rid("rail-a-06") }, { op: "wsmove", path: ws[ws.length - 1], before: ws[0] }]) {
-        const a = await layoutOp(t.base, body);
+        const a = await layoutOp(t.base, t.fx.cookie, body);
         assert(a.status === 200 && a.reply.applied === true, `${body.op}: HTTP ${a.status} ${JSON.stringify(a.reply)}`);
       }
       const want = [t.rid("rail-a-06"), ...g.filter((r) => r !== t.rid("rail-a-06"))];
@@ -1709,12 +1690,14 @@ async function main() {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rail-headless-")));
   let failed = 0, browser = null;
   try {
-    const fx = seed(root);
-    const base = await startDaemon(root, fx);
+    const env = { ...scratchEnv(root), WS_MCP_DASHBOARD_DEV_SOURCE: TOOL };
+    const fx = seed(root, env);
+    const { base, cookie } = await startDaemon(root, env);
+    fx.cookie = cookie;
     console.log(`isolated daemon ${base} (pid ${daemon.pid}), fixture ${root}`);
     browser = await launchBrowser();
-    for (const s of picked) {
-      await resetLayout(base, fx);
+    for (const [i, s] of picked.entries()) {
+      if (i > 0) await resetLayout(base, fx);
       const t = await makeContext(browser, base, fx, (s.contexts && s.contexts[0]) || {});
       const start = Date.now();
       try {

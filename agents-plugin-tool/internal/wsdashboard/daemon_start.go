@@ -125,16 +125,24 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	if d.clipboard == nil {
 		d.clipboard = newNativeClipboardWriter()
 	}
-	home, getenv := opts.Home, os.Getenv
-	if home == "" {
-		home, _ = os.UserHomeDir()
+	if opts.ScratchCapture {
+		if d.browseRoots == nil {
+			d.browseRoots = func() browseRoots {
+				return browseRoots{Host: "scratch", Home: d.pathHost.Home, Volumes: []string{}}
+			}
+		}
 	} else {
-		// Explicit embedding/fixture homes must not escape through inherited
-		// CLAUDE_CONFIG_DIR or CODEX_HOME overrides.
-		getenv = func(string) string { return "" }
+		home, getenv := opts.Home, os.Getenv
+		if home == "" {
+			home, _ = os.UserHomeDir()
+		} else {
+			// Explicit embedding/fixture homes must not escape through inherited
+			// CLAUDE_CONFIG_DIR or CODEX_HOME overrides.
+			getenv = func(string) string { return "" }
+		}
+		d.planUsage = newPlanUsageStore(opts.Dir, home, getenv)
+		d.planUsage.resolveAgy = opts.AgyCommand
 	}
-	d.planUsage = newPlanUsageStore(opts.Dir, home, getenv)
-	d.planUsage.resolveAgy = opts.AgyCommand
 	d.cache = newPageCache(d.broker, stats)
 	d.foreign = newForeignSchedule(opts.foreignInterval, opts.MailWake)
 	d.web = newWebRegistry(d.endpoint.Port, d.endpoint.Token, logw)

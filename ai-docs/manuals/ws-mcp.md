@@ -1488,6 +1488,21 @@ record. Give their launchers the same isolated environment so they restart
 only the probe daemon. External harness/plugin tests retain their own runtime
 path. Use an explicit scratch bootstrap binary for those.
 
+The repository's `scripts/{board,rail,palette,webcard}-headless.mjs` capture
+helpers start their daemons with scratch home, XDG, and ws state directories.
+Their launch environment allows Git for the fixture repositories and sets
+`WS_MCP_DASHBOARD_SCRATCH_CAPTURE=1`. The daemon then serves empty usage with
+no provider lookup and offers only the scratch home in its folder picker.
+The Go build and Playwright still use the runner's toolchain and browser
+caches. Generate the embedded package assets before running the captures with
+`python3 agents-plugin-tool/scripts/generate-package-assets.py` from the repo
+root.
+
+For a board capture, pass the URL and `--endpoint FILE` printed by
+`node scripts/board-headless.mjs serve` to the scenario command so the
+browser can authenticate to that scratch daemon. For standalone captures,
+pass an existing HTML fixture to `--url`.
+
 Profiling: with `WS_MCP_DASHBOARD_PPROF=1` (also `true`/`yes`/`on`) in the
 environment of `ws-mcp dashboard`, the daemon serves `net/http/pprof` under
 `/debug/pprof/` to loopback viewers only; a LAN-mode request carrying the LAN
