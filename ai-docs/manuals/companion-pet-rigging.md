@@ -4,7 +4,7 @@ summary: Living production spec for the Werkschaft lead companion (desktop pet) 
 
 # Werkschaft Lead Companion: Scenario Spec & Paper-Doll Cutout Rigging Manual
 
-Living specification and asset-production manual for the opt-in Werkschaft lead companion (desktop pet) engine. Revise this manual directly as Stage 1–3 asset design and live rigging details evolve. For exploratory prototyping data and rejected approaches, see research ticket `261121-research-werkschaft-lead-companion-wasu-rig`.
+Living specification and asset-production manual for the opt-in Werkschaft lead companion (desktop pet) engine. Revise this manual directly as Stage 1–3 asset design and live rigging details evolve. For exploratory prototyping data and rejected approaches, see research ticket `261121-research-werkschaft-lead-companion-rig`.
 
 ## Production Workflow (Engine-First Order)
 
