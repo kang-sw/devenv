@@ -2187,8 +2187,8 @@ GitHub release installs, downstream repositories, or Windows installs.
 ### Stable macOS code signing for local builds
 
 On macOS, `ws-mcp` launches the dashboard daemon from the stable path
-`<cache-root>/dashboard/bin/ws-mcp-dashboard` (hardlinked to the retained
-content-addressed `ws-mcp-dashboard-<sum16>` copy). Ad-hoc linker-signed dev
+`<cache-root>/dashboard/bin/ws-mcp-dashboard`. This executable is a separate
+copy of the retained `ws-mcp-dashboard-<sum16>` file. Ad-hoc linker-signed dev
 rebuilds still rotate their `cdhash` on every compile, which causes macOS TCC
 prompts (for example Desktop folder access) to repeat. To keep one TCC identity
 across local rebuilds:
