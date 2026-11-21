@@ -94,7 +94,7 @@
   var draftTimer = null, restoring = false, draftUnsaved = false, draftDetached = false;
   var draftDB = null, draftReady = null, draftLoaded = false;
   var draftLegacy = null, draftCommitted = null, draftWrite = null, draftWriteKey = "";
-  var draftDeliveryState = new Map();
+  var draftDeliveryState = new Map(), draftRetained = null, draftRetainedImages = [];
 
   function draftDatabase() {
     return new Promise(function (resolve) {
@@ -167,6 +167,11 @@
       tab: live ? grid.getAttribute("data-tab") || "" : ""
     };
     if (ctext && d.text) d.sel = [ctext.selectionStart + prefix.length, ctext.selectionEnd + prefix.length];
+    // A board-only view still edits answers and open details. Its DOM
+    // cannot represent composer fields from this session's live draft.
+    if (!ctext && draftRetained) {
+      return Object.assign({}, draftRetained, { boardIncarnation: d.boardIncarnation, answers: d.answers, open: d.open });
+    }
     return d;
   }
   function draftRecoveryKey(record, states) {
@@ -178,7 +183,7 @@
     clearTimeout(draftTimer);
     draftTimer = null;
     var d = readDraft(), projection = draftProjection(d), previous = draftLegacy;
-    var images = imgs.filter(function (p) { return !p.ref && p.blob; }).map(savedImage);
+    var images = ctext ? imgs.filter(function (p) { return !p.ref && p.blob; }).map(savedImage) : draftRetainedImages;
     var deliveries = outbox.filter(function (m) { return !m.acked; }).map(function (m) {
       var body = Object.assign({}, m.body);
       delete body.images;
@@ -187,9 +192,13 @@
     });
     // Keep the old pre-send projection until the recovery record commits.
     // A POST starts only after this transaction (including its mirror).
-    var mirrorNow = !deliveries.length && !draftDeliveryState.size;
+    // A completed send may be the last IndexedDB record for this session.
+    // Confirm the new legacy projection before dropping that recovery copy.
+    var mirrorNow = !deliveries.length;
     var textSaved = mirrorNow && saveLegacyDraft(d, projection);
-    var missingBlob = (d.lost || []).length !== images.length;
+    var missingBlob = (d.lost || []).some(function (number) {
+      return !images.some(function (image) { return image.n === number; });
+    });
     var hasDraft = !WsRail.emptyDraft(Object.assign({}, d, { open: {}, tab: "" }));
     var rich = !!(images.length || deliveries.length || mirrorNow && !textSaved && hasDraft);
     var record = rich ? {
@@ -212,17 +221,34 @@
     }
     draftUnsaved = true;
     if (!draftDB) return Promise.resolve(false);
-    var before = draftDeliveryState;
+    var before = draftDeliveryState, conflicts = [];
     draftDeliveryState = states;
     var write = draftTransaction(true, function (existing) {
       var merged = Object.assign({}, existing && existing.deliveries);
-      before.forEach(function (_, id) { if (!states.has(id)) delete merged[id]; });
-      deliveries.forEach(function (m) { if (m.state !== before.get(m.id)) merged[m.id] = m; });
+      before.forEach(function (state, id) {
+        if (!states.has(id) && merged[id] && merged[id].state === state) delete merged[id];
+      });
+      deliveries.forEach(function (m) {
+        var previous = before.get(m.id);
+        if (m.state === previous) return;
+        // Another renderer may have started or already finished this queued
+        // request. Only one transaction may claim its shared queued row.
+        if (previous === "queued" && (!merged[m.id] || merged[m.id].state !== "queued")) {
+          conflicts.push(m.id);
+          states.delete(m.id);
+          return;
+        }
+        merged[m.id] = m;
+      });
       return record || Object.keys(merged).length ? { active: record, deliveries: merged } : null;
     }).then(function () {
       if (draftWrite !== write) return true;
       draftWrite = null;
-      draftCommitted = key;
+      conflicts.forEach(function (id) {
+        var delivery = outbox.find(function (m) { return m.recoveryID === id; });
+        if (delivery) delivery.recoveryConflict = true;
+      });
+      draftCommitted = draftRecoveryKey(record, states);
       draftUnsaved = missingBlob || !saveLegacyDraft(d, projection) && !rich && hasDraft;
       return !draftUnsaved;
     }, function () {
@@ -259,7 +285,12 @@
     }).then(function (record) {
       var active = record && record.active;
       var useActive = active && (draftLegacy === active.base || draftLegacy === active.projection);
-      restoreDraft(useActive ? active.draft : legacy, useActive ? active.images : []);
+      var prepared = useActive ? active.draft : legacy;
+      if (!ctext) {
+        draftRetained = prepared && boardDraft(JSON.parse(JSON.stringify(prepared)));
+        draftRetainedImages = active ? active.images : [];
+      }
+      restoreDraft(prepared, useActive ? active.images : []);
       if (active && !useActive && ctext) {
         // An older page used the legacy draft in the meantime. Keep its
         // current text and put the retained blobs back under new markers.
@@ -279,7 +310,7 @@
     }).finally(function () {
       draftLoaded = true;
       if (grid) grid.inert = false;
-      if (!draftDetached) saveDraft();
+      if (!draftDetached && ctext) saveDraft();
     });
   }
   function boardDraft(d) {
@@ -386,21 +417,17 @@
           imgs.push({ name: p.name || p.ref, url: attachSrc(p.ref), data: null, ref: p.ref, n: p.n });
           imgSeq = Math.max(imgSeq, p.n);
         });
+        var loose = [];
         recoveredImages.forEach(function (p) {
-          if (markerNums(named)[p.n]) {
-            imgs.push(loadDraftImage(p));
-            imgSeq = Math.max(imgSeq, p.n);
-          }
+          var image = loadDraftImage(p), occupied = imgs.some(function (other) { return other.n === p.n; });
+          if (occupied) image.n = nextNum();
+          // A paste may still belong to an open selection editor. Reattach
+          // unreferenced blobs to the composer when restoring the session.
+          if (occupied || !markerNums(named)[p.n]) loose.push(image.n);
+          imgs.push(image);
+          imgSeq = Math.max(imgSeq, image.n);
         });
-        // A paste may still belong to an open selection editor. Reattach
-        // those blobs to the composer when restoring the session.
-        var loose = recoveredImages.filter(function (p) {
-          return !imgs.some(function (image) { return image.n === p.n; });
-        });
-        if (loose.length) {
-          loose.forEach(function (p) { imgs.push(loadDraftImage(p)); imgSeq = Math.max(imgSeq, p.n); });
-          restoreDraftMarkers(loose.map(function (p) { return p.n; }));
-        }
+        restoreDraftMarkers(loose);
         imgs.sort(function (a, b) { return a.n - b.n; });
         renderImgs();
       }

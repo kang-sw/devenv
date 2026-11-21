@@ -281,6 +281,7 @@
         if (!m.paused || outbox.indexOf(m) < 0) return;
         m.paused = false;
         m.cancel = false;
+        m.sent = false;
         if (m.recoveryState !== "queued") m.recoveryID = nextDeliveryID();
         m.user = lastUserEntry();
         showRecoveredDeliveries();
@@ -308,14 +309,14 @@
     showRecoveredDeliveries();
     saveDraft();
   }
-  function postDelivery(m, done, canPost) {
+  function prepareDelivery(m, submit, fail) {
     var uploads = m.pics.filter(function (p) { return !p.ref; });
-    if (!uploads.length) { post("message", m.body, done); return; }
+    if (!uploads.length) { submit(m.body); return; }
     Promise.all(uploads.map(async function (p) {
       return { name: p.name, data: p.data === null ? await imageData(p.blob) : p.data, n: p.n };
     })).then(function (images) {
-      if (canPost()) post("message", Object.assign({}, m.body, { images: images }), done);
-    }, function () { done(false, wsT("js.send.reading")); });
+      submit(Object.assign({}, m.body, { images: images }));
+    }, function () { fail(false, wsT("js.send.reading")); });
   }
   function persistOutbox(done) { saveDraft().then(done); }
   function outboxPump() {
@@ -323,34 +324,49 @@
     var m = outbox.find(function (x) { return !x.acked && !x.paused; });
     if (!m) return;
     outboxPosting = true;
-    var previous = m.recoveryState;
+    var previous = m.recoveryState, settled = false, wait = null;
     m.recoveryState = "posting";
+    m.cancelPreparation = function () {
+      settled = true;
+      outboxPosting = false;
+      outboxPump();
+    };
+    function settle(ok, res, unknown) {
+      if (settled || draftDetached) return;
+      settled = true;
+      clearTimeout(wait);
+      outboxPosting = false;
+      if (unknown || !ok && previous !== "queued") {
+        pauseDeliveries(m, "unknown");
+        if (!unknown) noteWarn(wsT("js.send.fail", res));
+        return;
+      }
+      if (!ok) { outboxFail(res); return; }
+      outboxAcked(m, res && res.id ? String(res.id) : "");
+      outboxPump();
+    }
     persistOutbox(function (saved) {
-      if (draftDetached) return;
+      if (settled || draftDetached) return;
+      if (m.recoveryConflict) {
+        outboxUnrow(m);
+        outboxDrop(m);
+        releaseTopics(m);
+        saveDraft();
+        m.cancelPreparation();
+        return;
+      }
       if (!saved) {
         outboxPosting = false;
         pauseDeliveries(m, previous);
         noteWarn(wsT("js.delivery.savefailed"));
         return;
       }
-      m.sent = true;
-      var settled = false;
-      var settle = function (ok, res, unknown) {
+      prepareDelivery(m, function (body) {
         if (settled || draftDetached) return;
-        settled = true;
-        clearTimeout(wait);
-        outboxPosting = false;
-        if (unknown || !ok && previous !== "queued") {
-          pauseDeliveries(m, "unknown");
-          if (!unknown) noteWarn(wsT("js.send.fail", res));
-          return;
-        }
-        if (!ok) { outboxFail(res); return; }
-        outboxAcked(m, res && res.id ? String(res.id) : "");
-        outboxPump();
-      };
-      var wait = setTimeout(function () { settle(false, wsT("js.post.unreachable"), true); }, OUTBOX_WAIT);
-      postDelivery(m, settle, function () { return !settled && !draftDetached; });
+        m.sent = true;
+        wait = setTimeout(function () { settle(false, wsT("js.post.unreachable"), true); }, OUTBOX_WAIT);
+        post("message", body, settle);
+      }, settle);
     });
   }
   function outboxAcked(m, id) {
@@ -392,12 +408,15 @@
   }
   // outboxReturn takes unanswered sends out of the outbox and back into the
   // composer, in order, ahead of what was typed since.
+  function releaseTopics(m) {
+    m.own.forEach(function (k) { if (!outbox.some(function (o) { return o.own.indexOf(k) >= 0; })) delete boardOwn[k]; });
+  }
   function outboxReturn(back) {
     back.forEach(function (m) { outbox.splice(outbox.indexOf(m), 1); });
     back.forEach(function (m) {
       outboxUnrow(m);
       // A topic a send still in the outbox names stays its own.
-      m.own.forEach(function (k) { if (!outbox.some(function (o) { return o.own.indexOf(k) >= 0; })) delete boardOwn[k]; });
+      releaseTopics(m);
       m.pics.forEach(function (p) { if (imgs.indexOf(p) < 0) imgs.push(p); });
     });
     restoreHeld(back.map(function (m) { return m.back; }));
@@ -409,8 +428,9 @@
   // comes back with the failure if the post fails.
   function outboxCancel(m) {
     if (m.acked || m.cancel || outbox.indexOf(m) < 0) return;
-    if (m.sent || m.recoveryState === "posting") { m.cancel = true; outboxUnrow(m); return; }
+    if (m.sent) { m.cancel = true; outboxUnrow(m); return; }
     outboxReturn([m]);
+    if (m.cancelPreparation) m.cancelPreparation();
     noteOk(wsT("js.cancel.ok"));
     ctext.focus();
   }

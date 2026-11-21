@@ -35,8 +35,17 @@ func TestDashboardDraftRecoveryBrowser(t *testing.T) {
 	}
 	if os.Getenv("WS_DRAFT_CAPTURE_BEFORE") == "" {
 		held := f.held(t)
-		if len(held) != 2 {
-			t.Fatalf("the two accepted but unacknowledged POSTs should each be held once, got %d: %+v", len(held), held)
+		if len(held) != 4 {
+			t.Fatalf("expected four independently accepted POSTs, got %d: %+v", len(held), held)
+		}
+		var queued int
+		for _, msg := range held {
+			if inboxBody(t, msg.Entry) == "Queued exactly once across tabs" {
+				queued++
+			}
+		}
+		if queued != 1 {
+			t.Fatalf("queued send count across the two tabs = %d, want 1", queued)
 		}
 	}
 }

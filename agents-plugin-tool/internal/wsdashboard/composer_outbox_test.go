@@ -167,10 +167,13 @@ process.stdout.write(bad.join("\n"));
 func TestComposerOutboxPersistsImmediateSend(t *testing.T) {
 	src := mustAsset(t, "dashboard.js")
 	runNode(t, "composer immediate send draft", selectionCodecSource(t)+composerToastPrelude+composerSendSource(t, src)+outboxDOM+`
-var commit, pendingPost;
+var commit, pendingPost, requests = 0, returned = [];
+function noteOk() {}
+restoreHeld = function (list) { returned.push(list[0].text); };
 persistOutbox = function (done) { commit = done; };
 post = function (route, body, done) {
   pendingPost = done;
+  requests++;
   check("the persisted payload is what posts", body.text, "typed and sent immediately");
 };
 ctext.value = "typed and sent immediately";
@@ -182,6 +185,13 @@ commit(true);
 check("the POST starts after commit", typeof pendingPost, "function");
 pendingPost(true, { id: "h1" });
 check("acknowledged send leaves the recovery queue", outboxUnsent(), false);
+ctext.value = "cancel during the write";
+sendMessage();
+var cancelCommit = commit;
+outboxCancel(outbox.find(function (m) { return !m.acked; }));
+cancelCommit(true);
+check("Cancel before the POST preserves its contents", returned, ["cancel during the write"]);
+check("an eventual durable write cannot send after Cancel", requests, 1);
 process.stdout.write(bad.join("\n"));
 `)
 }

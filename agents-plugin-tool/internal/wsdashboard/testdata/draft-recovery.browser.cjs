@@ -166,13 +166,30 @@ async function recoverImage(browser) {
     frame = await frameFor(page);
     const thumbnail = frame.locator('#cimgs img[alt="draft.png"]');
     await thumbnail.waitFor();
-    const imageBytes = async () => thumbnail.evaluate(async image => {
+    const imageBytes = async () => frame.locator('#cimgs img[alt="draft.png"]').evaluate(async image => {
       const blob = await (await fetch(image.src)).blob();
       return Array.from(new Uint8Array(await blob.arrayBuffer()));
     });
     assert.deepEqual(await imageBytes(), [...Buffer.from(png64, 'base64')]);
     assert.match(await frame.locator('#ctext').inputValue(), /Image draft/);
     assert.deepEqual(native, []);
+
+    // A stale adapter can render the same session's board without the
+    // composer. Use the served board-only template with the same draft key.
+    await page.route('**/s/livesession?frame=1', async route => {
+      const response = await context.request.get(base + '/s/boardsession?frame=1');
+      const body = (await response.text()).replaceAll('boardsession', 'livesession');
+      await route.fulfill({ body, contentType: 'text/html' });
+    }, { times: 1 });
+    await page.reload();
+    frame = await frameFor(page);
+    assert.equal(await frame.locator('#ctext').count(), 0);
+    await frame.evaluate(() => window.wsSaveSessionDraft());
+    await page.reload();
+    frame = await frameFor(page);
+    await frame.locator('#cimgs img[alt="draft.png"]').waitFor();
+    assert.deepEqual(await imageBytes(), [...Buffer.from(png64, 'base64')]);
+    assert.match(await frame.locator('#ctext').inputValue(), /Image draft/);
 
     // An older page can rewrite its legacy projection. Newer-only bytes
     // still belong to this session after returning to the recovery-capable page.
@@ -235,6 +252,91 @@ async function failedStorage(browser) {
   } finally { await context.close(); }
 }
 
+async function ackWithUnavailableLegacyStorage(browser) {
+  const context = await browser.newContext();
+  try {
+    await context.addInitScript(() => {
+      const set = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (key.startsWith('ws.dashboard.draft.')) throw new DOMException('Draft quota fixture', 'QuotaExceededError');
+        return set.call(this, key, value);
+      };
+    });
+    const page = await context.newPage();
+    let received, delivered;
+    const receivedPost = new Promise(resolve => { received = resolve; });
+    const reply = new Promise(resolve => { delivered = resolve; });
+    await page.route('**/s/livesession/message', async route => {
+      received();
+      await reply;
+      await route.fulfill({ json: { id: 'legacy-quota-ack' } });
+    });
+    await page.goto(base + session);
+    let frame = await frameFor(page);
+    await type(frame, 'This send will be acknowledged');
+    await send(frame, false);
+    await receivedPost;
+    await type(frame, 'Keep this later input after the acknowledgement');
+    await frame.evaluate(() => window.wsSaveSessionDraft());
+    delivered();
+    await frame.locator('#r-convlive [data-entry="legacy-quota-ack"]').waitFor();
+    assert.equal(await frame.evaluate(() => window.wsSaveSessionDraft()), true);
+    const next = await context.newPage();
+    await next.goto(base + session);
+    frame = await frameFor(next);
+    assert.equal(await frame.locator('#ctext').inputValue(), 'Keep this later input after the acknowledgement');
+    assert.equal(await frame.locator('.d-outbox-recovery .d-outbox-row').count(), 0);
+  } finally { await context.close(); }
+}
+
+async function queueAcrossTabs(browser) {
+  const context = await browser.newContext();
+  let releaseFirst;
+  const firstReply = new Promise(resolve => { releaseFirst = resolve; });
+  try {
+    await context.addCookies([{ name: 'ws_dashboard_lang', value: 'en', url: base }]);
+    const requests = [];
+    let firstPosted;
+    const firstRequest = new Promise(resolve => { firstPosted = resolve; });
+    await context.route('**/s/livesession/message', async route => {
+      const { text } = route.request().postDataJSON();
+      requests.push(text);
+      if (text === 'First tab in-flight') {
+        firstPosted();
+        await firstReply;
+      }
+      const response = await route.fetch();
+      assert.equal(response.ok(), true, await response.text());
+      await route.fulfill({ response });
+    });
+    const original = await context.newPage();
+    await original.goto(base + session);
+    const first = await frameFor(original);
+    await type(first, 'First tab in-flight');
+    await send(first, false);
+    await firstRequest;
+    const queued = 'Queued exactly once across tabs';
+    await type(first, queued);
+    await send(first, false);
+    await first.evaluate(() => window.wsSaveSessionDraft());
+    const reopened = await context.newPage();
+    await reopened.goto(base + session);
+    const second = await frameFor(reopened);
+    const row = second.locator('.d-outbox-recovery .d-outbox-row').filter({ hasText: queued });
+    const sent = reopened.waitForResponse(response => /\/message$/.test(response.url()));
+    await row.getByRole('button', { name: 'Send' }).click();
+    const { id: queuedID } = await (await sent).json();
+    await second.locator(`#r-convlive [data-entry="${queuedID}"]`).first().waitFor();
+    await second.evaluate(() => window.wsSaveSessionDraft());
+    const acknowledged = original.waitForResponse(response => /\/message$/.test(response.url()));
+    releaseFirst();
+    const { id: firstID } = await (await acknowledged).json();
+    await first.locator(`#r-convlive [data-entry="${firstID}"]`).first().waitFor();
+    await first.locator('.d-outbox-row').filter({ hasText: queued }).waitFor({ state: 'hidden' });
+    assert.deepEqual(requests, ['First tab in-flight', queued], 'the original queue cannot replay the already claimed item');
+  } finally { releaseFirst(); await context.close(); }
+}
+
 (async () => {
   if (shots) fs.mkdirSync(shots, { recursive: true });
   const browser = await chromium.launch({ headless: true });
@@ -244,7 +346,9 @@ async function failedStorage(browser) {
       for (const accepted of [false, true]) await delivery(browser, { theme: 'dark', accepted, command: true });
       await recoverImage(browser);
       await failedStorage(browser);
+      await ackWithUnavailableLegacyStorage(browser);
+      await queueAcrossTabs(browser);
     }
-    console.log(before ? 'baseline captures complete' : 'normal and command POST recovery, rail decisions and image recovery passed');
+    console.log(before ? 'baseline captures complete' : 'normal and command POST recovery, frame and storage safeguards, and cross-tab send claim passed');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
