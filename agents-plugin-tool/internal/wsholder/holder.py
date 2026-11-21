@@ -63,12 +63,16 @@ Attach protocol, version 1. Newline-delimited JSON objects, UTF-8, both ways.
   Child status: {"state": "none"} | {"state": "running", "pid", "mode"} |
   {"state": "exited", "pid", "mode", "exit_code", "signal"}.
 
-  Records (sequenced from 1, kept in a 4 MiB ring, streamed after replay):
+  Records (sequenced from 1, streamed after replay):
 
     {"event": "output", "seq": n, "stream": "stdout" | "stderr" | "pty",
      "data": "<base64>"}   plus "partial": true when a pipe line was cut at
                            the record limit and continues in the next record.
     {"event": "exit", "seq": n, "exit_code": <int|null>, "signal": <int|null>}
+
+  The output ring retains 4 MiB by default. A holder started with
+  --ring-ceiling-bytes can keep a backlog above --ring-bytes until it sends
+  the records or reaches the ceiling and evicts the oldest records.
 
   A pipe child's output is one record per line (the newline included); a PTY
   child's output is one record per read. A holder started with --ring-skip
@@ -192,8 +196,10 @@ class Record:
 class Ring:
     """Sequenced records bounded by a byte budget; the newest always stays."""
 
-    def __init__(self, capacity: int) -> None:
+    def __init__(self, capacity: int, ceiling: int | None = None) -> None:
         self.capacity = capacity
+        self.ceiling = capacity if ceiling is None else max(capacity, ceiling)
+        self.delivered_before = 0
         self.items: list[Record] = []
         self.head = 0
         self.size = 0
@@ -209,14 +215,26 @@ class Ring:
         self.next_seq += 1
         self.items.append(rec)
         self.size += rec.cost()
-        while self.size > self.capacity and len(self.items) - self.head > 1:
-            self.size -= self.items[self.head].cost()
+        self._trim()
+        return rec
+
+    def set_delivered_before(self, seq: int) -> None:
+        """Reclaim sent records above the retained budget. Replay can rewind seq."""
+        self.delivered_before = seq
+        if self.size > self.capacity and self.first_seq() < seq:
+            self._trim(compact_to_base=True)
+
+    def _trim(self, compact_to_base: bool = False) -> None:
+        while self.size > self.capacity and self.head < len(self.items) - 1:
+            oldest = self.items[self.head]
+            if self.size <= self.ceiling and oldest.seq >= self.delivered_before:
+                break
+            self.size -= oldest.cost()
             self.items[self.head] = None
             self.head += 1
-        if self.head > 1024 and self.head > len(self.items) // 2:
-            del self.items[: self.head]
+        if (compact_to_base and self.size <= self.capacity) or (self.head > 1024 and self.head > len(self.items) // 2):
+            self.items = self.items[self.head :]
             self.head = 0
-        return rec
 
     def batch(self, seq: int, max_records: int, max_bytes: int) -> list[Record]:
         """Records from seq on (seq is at least first_seq), bounded."""
@@ -733,6 +751,7 @@ class Attachment:
         if from_seq <= 0:
             from_seq = ring.first_seq()
         self.cursor = min(from_seq, ring.next_seq)
+        ring.set_delivered_before(min(ring.delivered_before, self.cursor))
         self.streaming = True
         self.holder.cond.notify_all()
 
@@ -773,6 +792,7 @@ class Attachment:
                     holder.cond.wait()
                 messages = self.control
                 self.control = []
+                sent_before = 0
                 if pending:
                     first = ring.first_seq()
                     if self.cursor < first:
@@ -780,17 +800,26 @@ class Attachment:
                         self.cursor = first
                     records = ring.batch(self.cursor, SEND_BATCH_RECORDS, SEND_BATCH_BYTES)
                     self.cursor += len(records)
+                    if ring.ceiling > ring.capacity:
+                        sent_before = self.cursor
                 else:
                     records = []
                 last = self.closing and not (self.drain and self.streaming and self.cursor < ring.next_seq)
             try:
                 payload = b"".join(encode_line(m) for m in messages)
                 payload += b"".join(encode_line(r.message()) for r in records)
+                del records
                 if payload:
                     self.sock.sendall(payload)
             except OSError:
                 self.kill()
                 return
+            del payload
+            if sent_before:
+                with holder.cond:
+                    if holder.attachment is self or self.drain:
+                        # Replay can rewind the cursor while sendall is in flight.
+                        ring.set_delivered_before(min(sent_before, self.cursor))
             if last:
                 self.kill()
                 return
@@ -813,6 +842,7 @@ class Holder:
         idle_exit: float = IDLE_EXIT_SECONDS,
         descriptor_check: float = DESCRIPTOR_CHECK_SECONDS,
         ring_bytes: int = RING_BYTES,
+        ring_ceiling_bytes: int | None = None,
         ring_skip: str | None = None,
         ring_pulse: str | None = None,
         ring_pulse_seconds: float = RING_PULSE_SECONDS,
@@ -830,7 +860,7 @@ class Holder:
         self.token = secrets.token_hex(32)
         self.script_hash = _file_sha256(script_path or __file__)
         self.max_record = max(1, min(MAX_RECORD_BYTES, ring_bytes))
-        self.ring = Ring(ring_bytes)
+        self.ring = Ring(ring_bytes, ring_ceiling_bytes)
         self.ring_skip = re.compile(ring_skip.encode("utf-8")) if ring_skip else None
         self.ring_pulse = ring_pulse.encode("utf-8") + b"\n" if ring_pulse else None
         self.ring_pulse_seconds = ring_pulse_seconds
@@ -1056,6 +1086,7 @@ class Holder:
             if self.exit_event.is_set():
                 return None
             old, self.attachment = self.attachment, att
+            self.ring.set_delivered_before(0)
             if old is not None:
                 old.push({"event": "detached", "reason": "replaced"})
                 old.finish()
@@ -1085,6 +1116,7 @@ class Holder:
         with self.cond:
             if self.attachment is att:
                 self.attachment = None
+                self.ring.set_delivered_before(0)
                 self.idle_since = time.monotonic()
 
     def _handle_line(self, att: Attachment, line: bytes) -> None:
@@ -1341,6 +1373,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--idle-exit-seconds", type=float, default=IDLE_EXIT_SECONDS)
     parser.add_argument("--descriptor-check-seconds", type=float, default=DESCRIPTOR_CHECK_SECONDS)
     parser.add_argument("--ring-bytes", type=int, default=RING_BYTES)
+    parser.add_argument("--ring-ceiling-bytes", type=int)
     parser.add_argument("--ring-skip", default=None, help="a regular expression; the pipe child's stdout lines it matches stay out of the ring")
     parser.add_argument("--ring-pulse", default=None, help="a content-free line emitted at a bounded rate while ring-skip drops lines")
     parser.add_argument("--stop-grace-seconds", type=float, default=STOP_GRACE_SECONDS)
@@ -1360,6 +1393,7 @@ def main(argv: list[str] | None = None) -> int:
         idle_exit=args.idle_exit_seconds,
         descriptor_check=args.descriptor_check_seconds,
         ring_bytes=args.ring_bytes,
+        ring_ceiling_bytes=args.ring_ceiling_bytes,
         ring_skip=args.ring_skip,
         ring_pulse=args.ring_pulse,
         stop_grace=args.stop_grace_seconds,

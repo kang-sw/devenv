@@ -704,19 +704,18 @@ func TestRefusedBreakawayStartsAHolderMarkedNotRestartSafe(t *testing.T) {
 	}
 }
 
-// TestLaunchRingBytes pins the ring size a start asks of a holder: a
-// launch's own RingBytes, else the manager's, else none (the holder's own
-// default).
+// TestLaunchRingBytes pins the retained size and optional per-launch ceiling.
 func TestLaunchRingBytes(t *testing.T) {
 	for _, tc := range []struct {
-		name          string
-		manager, spec int
-		want          string
+		name                   string
+		manager, spec, ceiling int
+		want, wantCeiling      string
 	}{
-		{"holder default", 0, 0, ""},
-		{"manager default", 512, 0, "512"},
-		{"per launch", 512, 4096, "4096"},
-		{"per launch only", 0, 4096, "4096"},
+		{"holder default", 0, 0, 0, "", ""},
+		{"manager default", 512, 0, 0, "512", ""},
+		{"per launch", 512, 4096, 0, "4096", ""},
+		{"per launch only", 0, 4096, 0, "4096", ""},
+		{"per launch with ceiling", 0, 32 << 20, 1 << 30, "33554432", "1073741824"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var got []string
@@ -732,17 +731,26 @@ func TestLaunchRingBytes(t *testing.T) {
 				},
 			})
 			t.Cleanup(m.Close)
-			if _, err := m.LaunchWith(LaunchSpec{RingBytes: tc.spec}); err == nil {
+			if _, err := m.LaunchWith(LaunchSpec{RingBytes: tc.spec, RingCeilingBytes: tc.ceiling}); err == nil {
 				t.Fatal("LaunchWith with a failing start succeeded")
 			}
-			ring := ""
+			ring, ceiling := "", ""
 			for i, arg := range got {
-				if arg == "--ring-bytes" && i+1 < len(got) {
+				if i+1 == len(got) {
+					break
+				}
+				switch arg {
+				case "--ring-bytes":
 					ring = got[i+1]
+				case "--ring-ceiling-bytes":
+					ceiling = got[i+1]
 				}
 			}
 			if ring != tc.want {
 				t.Fatalf("--ring-bytes = %q, want %q (args %q)", ring, tc.want, got)
+			}
+			if ceiling != tc.wantCeiling {
+				t.Fatalf("--ring-ceiling-bytes = %q, want %q (args %q)", ceiling, tc.wantCeiling, got)
 			}
 		})
 	}
