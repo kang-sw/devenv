@@ -177,7 +177,7 @@ func TestTrackerItemWindowCC(t *testing.T) {
 		"openPicker(opts.step, { item: id }, opener);",
 		"out.push(['item.cc', { item: itemId, member: id }]);",
 		"out.push(['item.uncc', { item: itemId, member: id }]);",
-		"pmCcEvents(cur.item, cur.idx, cur.origCc, cur.picks, cur.groups, cur.headToOrg, { origOrgCc: cur.origOrgCc, ccSources: cur.ccSources })",
+		"pmBuildApplyEvents(cur, VS)",
 		"case 'item.cc': return wsT(\"js.tk.ev.cc\", esc(p.member), ref(p.item));",
 		"case 'item.uncc': return wsT(\"js.tk.ev.uncc\", esc(p.member), ref(p.item));",
 	} {

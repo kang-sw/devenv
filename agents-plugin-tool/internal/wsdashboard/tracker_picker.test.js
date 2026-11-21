@@ -314,15 +314,23 @@ test('Phase 2: existing CC org registrations open checked, unchecking emits item
 
   const init = J(ctx.pmCcInit(idx, it, h2o));
   assert.deepEqual(init.groups, { 'lee-dy': true });
-  assert.deepEqual(init.picks, { 'choi-jw': true, 'han-sa': true });
+  // Only personal sources start in picks; org-only han-sa (via deleted o-plat) is NOT auto-picked as personal.
+  assert.deepEqual(init.picks, { 'choi-jw': true });
 
-  // No-op on open: dirty is false, kang-yr (excluded) stays uncovered and unchecked
+  // No-op on open: dirty is false, han-sa stays effective via o-plat, kang-yr (excluded) stays uncovered and unchecked
   const orgCtx = { origOrgCc: init.origOrgCc, ccSources: init.ccSources };
   const evOpen = J(ctx.pmCcEval(idx, init.origCc, init.picks, init.groups, h2o, orgCtx));
   assert.equal(evOpen.dirty, false);
   assert.equal(evOpen.effectiveCount, 4);
+  assert.equal(evOpen.effective['han-sa'], true);
+  assert.equal(evOpen.retained['han-sa'], true);
   assert.equal(evOpen.cov.personBy['kang-yr'], undefined);
   assert.deepEqual(J(ctx.pmCcEvents('i1', idx, init.origCc, init.picks, init.groups, h2o, orgCtx)), []);
+
+  // Explicitly unpicking org-only han-sa emits personal item.uncc(han-sa)
+  assert.deepEqual(J(ctx.pmCcEvents('i1', idx, init.origCc, init.picks, init.groups, h2o, Object.assign({}, orgCtx, { unpicks: { 'han-sa': true } }))), [
+    ['item.uncc', { item: 'i1', member: 'han-sa' }],
+  ]);
 
   // Re-checking excluded kang-yr emits personal item.cc to clear exclusion
   const picksReadd = Object.assign({}, init.picks, { 'kang-yr': true });
@@ -482,5 +490,576 @@ test('Phase 2: re-headed org assign rule attaches to current head, emits assignR
   }));
   assert.deepEqual(J(ctx.pmAssignEvents('i1', evDrop.targets, 'assignee', 'kim-hn', {}, h2o, evDrop.removedRules)), [
     ['item.unassign', { item: 'i1', rule: 'r-re', root: 'lee-dy' }],
+  ]);
+});
+
+// ----- Phase 2 review regressions -----
+
+test('Phase 2 review: moved member with retained org CC (sole source A; A+B provenance) never fabricates personal CC or uncc', () => {
+  const orgsAB = [
+    { id: 'o-dev', name: 'SW개발실', head: 'kim-hn', removed: null },
+    { id: 'o-sw1', name: 'SW개발1팀', head: 'lee-dy', removed: null },
+    { id: 'o-sw2', name: 'SW개발2팀', head: 'park-sy', removed: null },
+  ];
+  const oi = J(ctx.orgIndex(orgsAB, MEMBERS));
+  const idx = J(ctx.pmIndex(oi.tree));
+  const h2o = oi.headToOrg;
+
+  // Case A: han-sa moved out of o-sw1 (now under park-sy / o-sw2), still CC'd ONLY via o-sw1 (sole source A)
+  const itSole = {
+    id: 'i1',
+    cc: ['lee-dy', 'choi-jw', 'jung-mj', 'kang-yr', 'han-sa'],
+    orgCC: [{ org: 'o-sw1', added: ['lee-dy', 'choi-jw', 'jung-mj', 'kang-yr', 'han-sa'] }],
+    ccSources: {
+      'lee-dy': { personal: false, orgs: ['o-sw1'] },
+      'choi-jw': { personal: false, orgs: ['o-sw1'] },
+      'jung-mj': { personal: false, orgs: ['o-sw1'] },
+      'kang-yr': { personal: false, orgs: ['o-sw1'] },
+      'han-sa': { personal: false, orgs: ['o-sw1'] },
+    },
+  };
+  const initSole = J(ctx.pmCcInit(idx, itSole, h2o));
+  assert.deepEqual(initSole.picks, {}); // han-sa NOT auto-picked as personal
+  assert.deepEqual(initSole.groups, { 'lee-dy': true });
+  const ctxSole = { origOrgCc: initSole.origOrgCc, ccSources: initSole.ccSources, ccExcluded: initSole.ccExcluded };
+  // On open: han-sa is retained & effective, 0 events
+  const evSoleOpen = J(ctx.pmCcEval(idx, initSole.origCc, initSole.picks, initSole.groups, h2o, ctxSole));
+  assert.equal(evSoleOpen.dirty, false);
+  assert.equal(evSoleOpen.effective['han-sa'], true);
+  assert.equal(evSoleOpen.retained['han-sa'], true);
+  // Unchecking o-sw1 emits ONLY item.uncc_org(o-sw1) — never item.cc(han-sa) and never item.uncc(han-sa)
+  const evSoleUncheck = J(ctx.pmCcEval(idx, initSole.origCc, initSole.picks, {}, h2o, ctxSole));
+  assert.equal(evSoleUncheck.effective['han-sa'], undefined);
+  assert.ok(evSoleUncheck.removed.includes('han-sa'));
+  assert.deepEqual(J(ctx.pmCcEvents('i1', idx, initSole.origCc, initSole.picks, {}, h2o, ctxSole)), [
+    ['item.uncc_org', { item: 'i1', org: 'o-sw1' }],
+  ]);
+
+  // Case B: han-sa has A+B provenance (o-sw1 + o-sw2); oh-sj also moved out of both and has A+B provenance
+  const itAB = {
+    id: 'i1',
+    cc: ['lee-dy', 'choi-jw', 'jung-mj', 'kang-yr', 'park-sy', 'yoon-th', 'han-sa', 'oh-sj'],
+    orgCC: [
+      { org: 'o-sw1', added: ['lee-dy', 'choi-jw', 'jung-mj', 'kang-yr', 'han-sa', 'oh-sj'] },
+      { org: 'o-sw2', added: ['park-sy', 'yoon-th', 'han-sa', 'oh-sj'] },
+    ],
+    ccSources: {
+      'lee-dy': { personal: false, orgs: ['o-sw1'] },
+      'choi-jw': { personal: false, orgs: ['o-sw1'] },
+      'jung-mj': { personal: false, orgs: ['o-sw1'] },
+      'kang-yr': { personal: false, orgs: ['o-sw1'] },
+      'park-sy': { personal: false, orgs: ['o-sw2'] },
+      'yoon-th': { personal: false, orgs: ['o-sw2'] },
+      'han-sa': { personal: false, orgs: ['o-sw1', 'o-sw2'] },
+      'oh-sj': { personal: false, orgs: ['o-sw1', 'o-sw2'] },
+    },
+  };
+  const initAB = J(ctx.pmCcInit(idx, itAB, h2o));
+  assert.deepEqual(initAB.picks, {});
+  assert.deepEqual(initAB.groups, { 'lee-dy': true, 'park-sy': true });
+  const ctxAB = { origOrgCc: initAB.origOrgCc, ccSources: initAB.ccSources, ccExcluded: initAB.ccExcluded };
+  // Unchecking o-sw1 while keeping o-sw2 emits ONLY item.uncc_org(o-sw1); han-sa and oh-sj stay effective via o-sw2
+  const evABUncheckA = J(ctx.pmCcEval(idx, initAB.origCc, initAB.picks, { 'park-sy': true }, h2o, ctxAB));
+  assert.equal(evABUncheckA.effective['han-sa'], true);
+  assert.equal(evABUncheckA.effective['oh-sj'], true);
+  assert.equal(evABUncheckA.retained['oh-sj'], true);
+  assert.deepEqual(J(ctx.pmCcEvents('i1', idx, initAB.origCc, initAB.picks, { 'park-sy': true }, h2o, ctxAB)), [
+    ['item.uncc_org', { item: 'i1', org: 'o-sw1' }],
+  ]);
+  // Unchecking BOTH o-sw1 and o-sw2 still never emits item.uncc(han-sa) or item.uncc(oh-sj)
+  assert.deepEqual(J(ctx.pmCcEvents('i1', idx, initAB.origCc, initAB.picks, {}, h2o, ctxAB)), [
+    ['item.uncc_org', { item: 'i1', org: 'o-sw1' }],
+    ['item.uncc_org', { item: 'i1', org: 'o-sw2' }],
+  ]);
+});
+
+test('Phase 2 review: global exclusion stays uncovered when selecting a parent org and can be personally re-added', () => {
+  const oi = J(ctx.orgIndex(ORGS, MEMBERS));
+  const idx = J(ctx.pmIndex(oi.tree));
+  const h2o = oi.headToOrg;
+
+  // han-sa was previously CC'd and unCC'd (global exclusion on i1); no orgs registered yet
+  const it = { id: 'i1', cc: [], orgCC: [], ccSources: {} };
+  const events = [
+    { type: 'item.cc', status: 'applied', ignored: false, payload: { item: 'i1', member: 'han-sa' } },
+    { type: 'item.uncc', status: 'applied', ignored: false, payload: { item: 'i1', member: 'han-sa' } },
+  ];
+  const init = J(ctx.pmCcInit(idx, it, h2o, events));
+  assert.equal(init.ccExcluded['han-sa'], true);
+  const orgCtx = { origOrgCc: init.origOrgCc, ccSources: init.ccSources, ccExcluded: init.ccExcluded };
+
+  // Selecting parent org o-dev (kim-hn, 8 members) must NOT cover or preview-add excluded han-sa
+  const evParent = J(ctx.pmCcEval(idx, init.origCc, {}, { 'kim-hn': true }, h2o, orgCtx));
+  assert.equal(evParent.cov.personBy['han-sa'], undefined);
+  assert.equal(evParent.effective['han-sa'], undefined);
+  assert.equal(evParent.added.includes('han-sa'), false);
+  assert.equal(evParent.effectiveCount, 7); // 8 in o-dev minus excluded han-sa
+  assert.deepEqual(J(ctx.pmCcEvents('i1', idx, init.origCc, {}, { 'kim-hn': true }, h2o, orgCtx)), [
+    ['item.cc_org', { item: 'i1', org: 'o-dev' }],
+  ]);
+
+  // Personally toggling han-sa while o-dev is selected emits item.cc(han-sa) alongside item.cc_org(o-dev)
+  const evReadd = J(ctx.pmCcEval(idx, init.origCc, { 'han-sa': true }, { 'kim-hn': true }, h2o, orgCtx));
+  assert.equal(evReadd.effective['han-sa'], true);
+  assert.equal(evReadd.added.includes('han-sa'), true);
+  assert.equal(evReadd.effectiveCount, 8);
+  assert.deepEqual(J(ctx.pmCcEvents('i1', idx, init.origCc, { 'han-sa': true }, { 'kim-hn': true }, h2o, orgCtx)), [
+    ['item.cc_org', { item: 'i1', org: 'o-dev' }],
+    ['item.cc', { item: 'i1', member: 'han-sa' }],
+  ]);
+});
+
+test('Phase 2 review: plain-lead snapshot emits item.cc for every listed subtree member lacking a personal source, including org-only members', () => {
+  const oi = J(ctx.orgIndex(ORGS, MEMBERS));
+  const idx = J(ctx.pmIndex(oi.tree));
+  const h2o = oi.headToOrg;
+
+  // park-sy has NO org; subtree is [park-sy, yoon-th, han-sa].
+  // park-sy: CC'd only via o-dev; yoon-th: personal + o-dev; han-sa: CC'd only via deleted o-plat.
+  const it = {
+    id: 'i1',
+    cc: ['park-sy', 'yoon-th', 'han-sa'],
+    orgCC: [{ org: 'o-plat', added: ['han-sa'] }],
+    ccSources: {
+      'park-sy': { personal: false, orgs: ['o-plat'] },
+      'yoon-th': { personal: true, orgs: ['o-plat'] },
+      'han-sa': { personal: false, orgs: ['o-plat'] },
+    },
+  };
+  const init = J(ctx.pmCcInit(idx, it, h2o));
+  assert.deepEqual(init.picks, { 'yoon-th': true });
+  const orgCtx = { origOrgCc: init.origOrgCc, ccSources: init.ccSources, ccExcluded: init.ccExcluded };
+
+  // Turning on plain-lead park-sy "이하 전체" emits item.cc for park-sy and han-sa (lacking personal), skips yoon-th (already personal)
+  const ev = J(ctx.pmCcEval(idx, init.origCc, init.picks, { 'park-sy': true }, h2o, orgCtx));
+  assert.equal(ev.dirty, true);
+  assert.deepEqual(ev.ccMembers, ['park-sy', 'han-sa']);
+  assert.deepEqual(J(ctx.pmCcEvents('i1', idx, init.origCc, init.picks, { 'park-sy': true }, h2o, orgCtx)), [
+    ['item.cc', { item: 'i1', member: 'park-sy' }],
+    ['item.cc', { item: 'i1', member: 'han-sa' }],
+  ]);
+});
+
+test('Phase 2 review: removed-head assign overlap locks descendants reachable from removed assignRoot', () => {
+  // boss was removed, but lee-dy still carries leads: ['boss'] (server state_fold.go:421-449 keeps leads[]).
+  // Display tree drops the boss -> lee-dy edge, so idx.desc['boss'] is absent, yet server check.go refuses rules below boss.
+  const membersRemovedHead = {
+    'boss': { leads: [], children: [], removed: 'ev-rm-boss' },
+    'kim-hn': { leads: [], children: ['park-sy'], removed: false },
+    'lee-dy': { leads: ['boss'], children: ['choi-jw', 'jung-mj'], removed: false },
+    'choi-jw': { leads: ['lee-dy'], children: [], removed: false },
+    'jung-mj': { leads: ['lee-dy'], children: [], removed: false },
+    'park-sy': { leads: ['kim-hn'], children: ['han-sa'], removed: false },
+    'han-sa': { leads: ['park-sy'], children: [], removed: false },
+  };
+  const orgs = [
+    { id: 'o-old', name: '구개발실', head: '', removed: null }, // vacated when boss was removed
+    { id: 'o-sw1', name: 'SW개발1팀', head: 'lee-dy', removed: null },
+    { id: 'o-sw2', name: 'SW개발2팀', head: 'park-sy', removed: null },
+  ];
+  const oi = J(ctx.orgIndex(orgs, membersRemovedHead));
+  const idx = J(ctx.pmIndex(oi.tree));
+  const h2o = oi.headToOrg;
+  assert.equal(idx.desc['boss'], undefined); // confirm display tree dropped removed lead
+
+  const it = { id: 'i1', hidden: false, assignments: [], pending: [] };
+  const rules = {
+    'r-boss': { id: 'r-boss', item: 'i1', by: 'kim-hn', root: 'boss', assignRoot: 'boss', org: 'o-old', includeRoot: true, levels: null, state: 'live', ended: null, ts: '2026-11-20T01:00:00Z' },
+  };
+  assert.equal(ctx.pmRuleCovered(idx, rules, 'i1', 'kim-hn', 'lee-dy', membersRemovedHead), true);
+  assert.equal(ctx.pmRuleCovered(idx, rules, 'i1', 'kim-hn', 'choi-jw', membersRemovedHead), true);
+  assert.equal(ctx.pmRuleCovered(idx, rules, 'i1', 'kim-hn', 'park-sy', membersRemovedHead), false);
+
+  const locks = J(ctx.pmAssignLocks(idx, it, rules, {}, orgs, membersRemovedHead, 'kim-hn', h2o, {}, {}, null, false));
+  assert.equal(!!locks.lockedG['lee-dy'], true); // cannot offer/emit item.assign for lee-dy / o-sw1
+  assert.equal(!!locks.lockedG['park-sy'], false); // unrelated branch stays selectable
+
+  const ev = J(ctx.pmAssignEval(idx, {
+    viewer: 'kim-hn', reach: { 'lee-dy': 1, 'park-sy': 1 },
+    lockedPeople: locks.lockedP, lockedGroups: locks.lockedG,
+    picks: {}, groups: { 'lee-dy': true, 'park-sy': true },
+    headToOrg: h2o,
+  }));
+  assert.deepEqual(ev.targets.map(t => t.root), ['park-sy']);
+});
+
+test('Phase 2 review: author-owned org rule stays unlocked with removal chip even under a broader plain rule', () => {
+  const oi = J(ctx.orgIndex(ORGS, MEMBERS));
+  const idx = J(ctx.pmIndex(oi.tree));
+  const h2o = oi.headToOrg;
+  const it = { id: 'i1', hidden: false, assignments: ['a-lee', 'a-choi'], pending: [] };
+  const rules = {
+    'r-plain': { id: 'r-plain', item: 'i1', by: 'kim-hn', root: 'kim-hn', assignRoot: 'kim-hn', org: null, includeRoot: true, levels: null, state: 'live', ended: null, ts: '2026-11-20T01:00:00Z' },
+    'r-sw1': { id: 'r-sw1', item: 'i1', by: 'kim-hn', root: 'lee-dy', assignRoot: 'lee-dy', org: 'o-sw1', includeRoot: true, levels: null, state: 'live', ended: null, ts: '2026-11-20T02:00:00Z' },
+  };
+  const assignments = {
+    'a-lee': { id: 'a-lee', item: 'i1', to: 'lee-dy', state: 'live', rule: 'r-sw1' },
+    'a-choi': { id: 'a-choi', item: 'i1', to: 'choi-jw', state: 'live', rule: 'r-sw1' },
+  };
+
+  const init = J(ctx.pmAssignOrgInit(idx, it, rules, h2o, 'kim-hn'));
+  assert.equal(init.origOrgAssign['lee-dy'].canRemove, true);
+  assert.deepEqual(init.groups, { 'lee-dy': true });
+
+  // Broader r-plain locks kim-hn & park-sy, but viewer-authored o-sw1 (lee-dy) stays unlocked!
+  const locksOpen = J(ctx.pmAssignLocks(idx, it, rules, assignments, ORGS, MEMBERS, 'kim-hn', h2o, init.origOrgAssign, init.groups, null, false));
+  assert.equal(!!locksOpen.lockedG['kim-hn'], true);
+  assert.equal(!!locksOpen.lockedG['park-sy'], true);
+  assert.equal(!!locksOpen.lockedG['lee-dy'], false);
+
+  // Unchecking o-sw1 keeps lee-dy & choi-jw locked (r-plain still covers them), shows removal chip, and emits item.unassign {rule}
+  const locksRm = J(ctx.pmAssignLocks(idx, it, rules, assignments, ORGS, MEMBERS, 'kim-hn', h2o, init.origOrgAssign, {}, null, false));
+  assert.equal(!!locksRm.lockedG['lee-dy'], false);
+  assert.equal(!!locksRm.lockedP['lee-dy'], true);
+  assert.equal(!!locksRm.lockedP['choi-jw'], true);
+  const evRm = J(ctx.pmAssignEval(idx, {
+    viewer: 'kim-hn', reach: { 'lee-dy': 1, 'choi-jw': 2 },
+    lockedPeople: locksRm.lockedP, lockedGroups: locksRm.lockedG,
+    picks: {}, groups: {}, headToOrg: h2o, origOrgAssign: init.origOrgAssign,
+  }));
+  assert.equal(evRm.dirty, true);
+  assert.ok(evRm.chips.some(c => c.t === 'rmg' && c.org === 'o-sw1'));
+  assert.deepEqual(J(ctx.pmAssignEvents('i1', evRm.targets, 'assignee', 'kim-hn', { 'lee-dy': 1 }, h2o, evRm.removedRules)), [
+    ['item.unassign', { item: 'i1', rule: 'r-sw1', root: 'lee-dy' }],
+  ]);
+});
+
+test('Phase 2 review: pmBuildApplyEvents re-derives live org/head mapping at apply on concurrent rehead, vacate, and delete', () => {
+  const oiOpen = J(ctx.orgIndex(ORGS, MEMBERS));
+  const idxOpen = J(ctx.pmIndex(oiOpen.tree));
+  const openH2o = oiOpen.headToOrg;
+
+  // 1. Assign: user selects o-sw1 (head lee-dy at open), then o-sw1 is concurrently re-headed to park-sy
+  const curAsg = {
+    kind: 'assign', item: 'i1', draft: false, norule: false, single: false, compl: 'assignee',
+    headToOrg: openH2o, origOrgAssign: {}, picks: {}, groups: { 'lee-dy': true },
+  };
+  const liveRehead = {
+    viewer: { member: 'kim-hn', reach: { 'lee-dy': 1, 'park-sy': 1 } },
+    members: MEMBERS,
+    orgs: [
+      { id: 'o-dev', name: 'SW개발실', head: 'kim-hn', removed: null },
+      { id: 'o-sw1', name: 'SW개발1팀', head: 'park-sy', removed: null },
+    ],
+    items: { i1: { id: 'i1', hidden: false, assignments: [], pending: [] } },
+    rules: {}, assignments: {},
+  };
+  assert.deepEqual(J(ctx.pmBuildApplyEvents(curAsg, liveRehead)), [
+    ['item.assign', { item: 'i1', targets: [{ root: 'park-sy', include_root: true, org: 'o-sw1' }], completion: 'assigner' }],
+  ]);
+
+  // 2. Assign: o-sw1 concurrently vacated -> dropped rather than sending refused org target; live person pick still sent
+  const curAsgVac = Object.assign({}, curAsg, { picks: { 'oh-sj': true } });
+  const liveVacated = Object.assign({}, liveRehead, {
+    orgs: [
+      { id: 'o-dev', name: 'SW개발실', head: 'kim-hn', removed: null },
+      { id: 'o-sw1', name: 'SW개발1팀', head: '', removed: null },
+    ],
+  });
+  assert.deepEqual(J(ctx.pmBuildApplyEvents(curAsgVac, liveVacated)), [
+    ['item.assign', { item: 'i1', targets: ['oh-sj'], completion: 'assignee' }],
+  ]);
+
+  // 3. CC: user checks o-sw1 (new) + unchecks o-dev (existing); concurrently o-sw1 is deleted and o-dev is vacated
+  const curCc = {
+    kind: 'cc', item: 'i1', draft: false, headToOrg: openH2o,
+    origCc: ['kim-hn'], origOrgCc: [{ org: 'o-dev', added: ['kim-hn'] }],
+    ccSources: { 'kim-hn': { personal: false, orgs: ['o-dev'] } },
+    origOrgByHead: { 'kim-hn': 'o-dev' },
+    picks: { 'oh-sj': true }, unpicks: {}, groups: { 'lee-dy': true },
+  };
+  const liveCcMutated = {
+    viewer: { member: 'kim-hn', reach: {} },
+    members: MEMBERS,
+    orgs: [
+      { id: 'o-dev', name: 'SW개발실', head: '', removed: null },
+      { id: 'o-sw1', name: 'SW개발1팀', head: '', removed: 'ev-del' },
+    ],
+    items: {
+      i1: {
+        id: 'i1', hidden: false, cc: ['kim-hn'],
+        orgCC: [{ org: 'o-dev', added: ['kim-hn'] }],
+        ccSources: { 'kim-hn': { personal: false, orgs: ['o-dev'] } },
+      },
+    },
+    events: [],
+  };
+  // Deleted o-sw1 is omitted (never sends refused item.cc_org), vacated o-dev still unCC'd, oh-sj still CC'd
+  assert.deepEqual(J(ctx.pmBuildApplyEvents(curCc, liveCcMutated)), [
+    ['item.uncc_org', { item: 'i1', org: 'o-dev' }],
+    ['item.cc', { item: 'i1', member: 'oh-sj' }],
+  ]);
+});
+
+// Minimal HTML tree parser for driving real picker DOM click + keyboard handlers in Node.
+function parseMiniDom(html) {
+  const VOID = new Set(['input', 'br', 'hr', 'img', 'meta', 'link']);
+  const root = makeEl('div', {});
+  const stack = [root];
+  const re = /<(\/)?([a-zA-Z0-9-]+)([^>]*)>|([^<]+)/g;
+  let m;
+  while ((m = re.exec(String(html || '')))) {
+    if (m[4]) continue;
+    const closing = !!m[1], tag = m[2].toLowerCase(), rawAttrs = m[3] || '';
+    if (closing) {
+      while (stack.length > 1 && stack[stack.length - 1].tag !== tag) stack.pop();
+      if (stack.length > 1) stack.pop();
+      continue;
+    }
+    const attrs = {};
+    const are = /([a-zA-Z0-9_:-]+)(?:\s*=\s*"([^"]*)")?/g;
+    let am;
+    while ((am = are.exec(rawAttrs))) attrs[am[1]] = am[2] !== undefined ? am[2] : '';
+    const el = makeEl(tag, attrs);
+    const parent = stack[stack.length - 1];
+    el.parentNode = parent;
+    parent.children.push(el);
+    if (!VOID.has(tag) && !rawAttrs.trim().endsWith('/')) stack.push(el);
+  }
+  return root;
+
+  function makeEl(tag, attrs) {
+    const el = {
+      tag,
+      attrs,
+      id: attrs.id || '',
+      parentNode: null,
+      children: [],
+      scrollTop: 0,
+      textContent: '',
+      hidden: Object.prototype.hasOwnProperty.call(attrs, 'hidden'),
+      classList: { toggle() {}, add() {}, remove() {} },
+      getAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null; },
+      setAttribute(k, v) { this.attrs[k] = String(v); },
+      focus() {},
+      scrollIntoView() {},
+      matches(sel) {
+        return sel.split(',').some(part => matchSimple(this, part.trim()));
+      },
+      closest(sel) {
+        let cur = this;
+        while (cur) {
+          if (cur.matches(sel)) return cur;
+          cur = cur.parentNode;
+        }
+        return null;
+      },
+      querySelectorAll(sel) {
+        const out = [];
+        (function walk(n) {
+          for (const c of n.children) {
+            if (c.matches(sel)) out.push(c);
+            walk(c);
+          }
+        })(this);
+        return out;
+      },
+      querySelector(sel) { return this.querySelectorAll(sel)[0] || null; },
+    };
+    return el;
+  }
+
+  function matchSimple(el, sel) {
+    if (!el || !sel) return false;
+    let rest = sel;
+    const tagM = rest.match(/^([a-zA-Z0-9-]+)/);
+    if (tagM) {
+      if (el.tag !== tagM[1].toLowerCase()) return false;
+      rest = rest.slice(tagM[0].length);
+    }
+    const idM = rest.match(/^#([a-zA-Z0-9_-]+)/);
+    if (idM) {
+      if (el.id !== idM[1]) return false;
+      rest = rest.slice(idM[0].length);
+    }
+    while (rest.length) {
+      if (rest[0] === '.') {
+        const cm = rest.match(/^\.([a-zA-Z0-9_-]+)/);
+        if (!cm) return false;
+        const cls = String(el.attrs.class || '').split(/\s+/);
+        if (!cls.includes(cm[1])) return false;
+        rest = rest.slice(cm[0].length);
+      } else if (rest[0] === '[') {
+        const bm = rest.match(/^\[([a-zA-Z0-9_:-]+)(?:="([^"]*)")?\]/);
+        if (!bm) return false;
+        if (!Object.prototype.hasOwnProperty.call(el.attrs, bm[1])) return false;
+        if (bm[2] !== undefined && el.attrs[bm[1]] !== bm[2]) return false;
+        rest = rest.slice(bm[0].length);
+      } else {
+        return false;
+      }
+    }
+    return true;
+  }
+}
+
+function makePickerDomHarness(vsInit) {
+  const dispatched = [];
+  const byId = {};
+  function makeHost(id) {
+    let html = '', tree = parseMiniDom('');
+    const h = {
+      id,
+      open: false,
+      className: '',
+      value: '',
+      scrollTop: 0,
+      hidden: false,
+      textContent: '',
+      classList: { toggle() {}, add() {}, remove() {} },
+      setAttribute() {},
+      focus() {},
+      showModal() { this.open = true; },
+      close() { this.open = false; },
+      get innerHTML() { return html; },
+      set innerHTML(v) {
+        html = String(v || '');
+        tree = parseMiniDom(html);
+        tree.querySelectorAll('[id]').forEach(n => {
+          if (!byId[n.id]) byId[n.id] = makeHost(n.id);
+        });
+      },
+      querySelector(sel) { return tree.querySelector(sel); },
+      querySelectorAll(sel) { return tree.querySelectorAll(sel); },
+      closest(sel) { return sel === '#' + id ? this : null; },
+    };
+    byId[id] = h;
+    return h;
+  }
+  makeHost('tkpm');
+  makeHost('tkpmq');
+  makeHost('tkpm-chips');
+  makeHost('tkpm-body');
+  makeHost('tkpm-foot');
+  makeHost('tkpm-err');
+  makeHost('tkpm-only');
+
+  const c = {
+    VS: J(vsInit),
+    ui: { store: 's', nrow: {}, ned: null },
+    AD: {
+      dispatch(store, events, cb) {
+        dispatched.push({ store, events: J(events) });
+        cb({ ok: true, results: [] });
+      },
+    },
+    $: id => byId[id] || null,
+    CSS: { escape: s => String(s) },
+    document: { querySelector: () => null },
+    esc: s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
+    wsT: (k, ...a) => (a.length ? `${k}:${a.join('|')}` : k),
+    wsTn: (k, n, ...a) => `${k}:${n}${a.length ? '|' + a.join('|') : ''}`,
+    nm: id => id,
+    orgOf: () => '',
+    orgNameOf: id => id,
+    avHtml: id => `<i class="av">${id}</i>`,
+    complText: c => c,
+    hideTip: () => {},
+    returnSel: () => null,
+    listOf: x => (Array.isArray(x) ? x : []),
+    wrote: () => {},
+    render: () => {},
+  };
+  vm.createContext(c);
+  vm.runInContext(section(trackerSource, '  function orgTree(', '  // Live, doing or blocked'), c);
+  vm.runInContext(section(pickerSource, '  // --- picker modal pure logic', '  // --- end picker modal state & renderer'), c);
+  return { c, byId, dispatched };
+}
+
+test('Phase 2 review: vacant-org row ignores click and keyboard navigation/Enter, and excluded/author-lock UI interactions work end-to-end', () => {
+  const vs = {
+    viewer: { member: 'kim-hn', reach: { 'lee-dy': 1, 'choi-jw': 2, 'jung-mj': 2, 'kang-yr': 2, 'park-sy': 1, 'yoon-th': 2, 'han-sa': 2 } },
+    members: MEMBERS,
+    orgs: ORGS,
+    items: {
+      i1: {
+        id: 'i1', alias: 'k-1', kind: 'task', title: 'Test', hidden: false,
+        cc: [], orgCC: [], ccSources: {},
+        assignments: ['a-lee'], pending: [],
+      },
+    },
+    rules: {
+      'r-plain': { id: 'r-plain', item: 'i1', by: 'kim-hn', root: 'kim-hn', assignRoot: 'kim-hn', org: null, includeRoot: true, levels: null, state: 'live', ended: null, ts: '2026-11-20T01:00:00Z' },
+      'r-sw1': { id: 'r-sw1', item: 'i1', by: 'kim-hn', root: 'lee-dy', assignRoot: 'lee-dy', org: 'o-sw1', includeRoot: true, levels: null, state: 'live', ended: null, ts: '2026-11-20T02:00:00Z' },
+    },
+    assignments: {
+      'a-lee': { id: 'a-lee', item: 'i1', to: 'lee-dy', state: 'live', rule: 'r-sw1' },
+    },
+    events: [
+      { type: 'item.cc', status: 'applied', ignored: false, payload: { item: 'i1', member: 'han-sa' } },
+      { type: 'item.uncc', status: 'applied', ignored: false, payload: { item: 'i1', member: 'han-sa' } },
+    ],
+  };
+
+  // 1. Vacant row click + keyboard in CC modal
+  const { c, byId, dispatched } = makePickerDomHarness(vs);
+  c.openPicker('cc', { item: 'i1' });
+  const body = byId['tkpm-body'];
+  const vacLi = body.querySelector('li[data-vac-org="o-qa"]');
+  assert.ok(vacLi, 'vacant org o-qa should render');
+  const vacRow = vacLi.querySelector('.pm-nd.vac');
+  assert.equal(vacRow.getAttribute('aria-disabled'), 'true');
+
+  // Clicking checkbox, avatar, label, row, and li on vacant org must do nothing
+  for (const target of [vacRow.querySelector('.pm-ck'), vacRow.querySelector('.av'), vacRow.querySelector('.pm-who'), vacRow, vacLi]) {
+    c.pmClick({ target, stopPropagation() {} });
+  }
+  assert.deepEqual(J(c.PM.picks), {});
+  assert.deepEqual(J(c.PM.groups), {});
+
+  // Keyboard ArrowDown / ArrowUp cycles ONLY live member rows and never lands on vacant orgs
+  const visited = [];
+  for (let i = 0; i < IDX.order.length + 2; i++) {
+    c.pmKey({ key: 'ArrowDown', target: byId['tkpmq'], stopPropagation() {}, preventDefault() {} });
+    visited.push(c.PM.focusId);
+  }
+  assert.equal(visited.includes('o-qa'), false);
+  assert.equal(visited.includes('o-gone-head'), false);
+  assert.equal(visited[0], 'kim-hn');
+
+  // Filter search down to ONLY vacant org "qa": ArrowDown + Enter in search box must NOT toggle previous focusId (kim-hn) or vacant row
+  byId['tkpmq'].value = 'qa';
+  c.pmInput({ target: byId['tkpmq'], isComposing: false });
+  assert.ok(byId['tkpm-body'].querySelector('li[data-vac-org="o-qa"]'));
+  assert.equal(byId['tkpm-body'].querySelectorAll('.pm-nd[data-id]').length, 0);
+  c.pmKey({ key: 'ArrowDown', target: byId['tkpmq'], stopPropagation() {}, preventDefault() {} });
+  c.pmKey({ key: 'Enter', target: byId['tkpmq'], stopPropagation() {}, preventDefault() {} });
+  c.pmKey({ key: 'Enter', metaKey: true, target: byId['tkpmq'], stopPropagation() {}, preventDefault() {} });
+  assert.deepEqual(J(c.PM.picks), {});
+  assert.deepEqual(J(c.PM.groups), {});
+  assert.equal(dispatched.length, 0);
+
+  // 2. Excluded han-sa under newly selected parent org o-dev stays enabled & clickable in DOM
+  byId['tkpmq'].value = '';
+  c.pmInput({ target: byId['tkpmq'], isComposing: false });
+  const devGrpBtn = byId['tkpm-body'].querySelector('[data-pm="grp"][data-id="kim-hn"]');
+  c.pmClick({ target: devGrpBtn, stopPropagation() {} });
+  const hanRow = byId['tkpm-body'].querySelector('.pm-nd[data-id="han-sa"]');
+  const hanCk = hanRow.querySelector('[data-pm="self"][data-id="han-sa"]');
+  assert.equal(hanRow.matches('.cvr'), false);
+  assert.equal(hanRow.matches('.add'), false);
+  assert.equal(hanCk.getAttribute('aria-disabled'), null);
+  assert.equal(hanCk.getAttribute('aria-checked'), 'false');
+  c.pmClick({ target: hanCk, stopPropagation() {} });
+  assert.equal(c.PM.picks['han-sa'], true);
+  c.pmKey({ key: 'Enter', metaKey: true, target: byId['tkpmq'], stopPropagation() {}, preventDefault() {} });
+  assert.equal(dispatched.length, 1);
+  assert.deepEqual(dispatched[0].events.map(e => [e.type, e.payload]), [
+    ['item.cc_org', { item: 'i1', org: 'o-dev' }],
+    ['item.cc', { item: 'i1', member: 'han-sa' }],
+  ]);
+
+  // 3. Author-owned org rule (r-sw1) under broader plain rule (r-plain) keeps clickable checkbox & removal chip in assign modal
+  c.openPicker('assign', { item: 'i1' });
+  const sw1Btn = byId['tkpm-body'].querySelector('[data-pm="grp"][data-id="lee-dy"]');
+  assert.equal(sw1Btn.matches('.lock'), false);
+  assert.equal(sw1Btn.getAttribute('aria-disabled'), null);
+  c.pmClick({ target: sw1Btn, stopPropagation() {} });
+  const rmChip = byId['tkpm-chips'].querySelector('[data-pm="chip"][data-k="rmg:lee-dy"]');
+  assert.ok(rmChip, 'removal chip rmg:lee-dy should render after unchecking author-owned org rule');
+  c.pmKey({ key: 'Enter', metaKey: true, target: byId['tkpmq'], stopPropagation() {}, preventDefault() {} });
+  assert.equal(dispatched.length, 2);
+  assert.deepEqual(dispatched[1].events.map(e => [e.type, e.payload]), [
+    ['item.unassign', { item: 'i1', rule: 'r-sw1', root: 'lee-dy' }],
   ]);
 });

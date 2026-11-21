@@ -83,16 +83,42 @@
       return an !== bn ? an.localeCompare(bn) : (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     });
   }
-  // Derives initial CC picker picks and checked org groups from item view state.
-  // Live headed orgs registered in it.orgCC start checked in groups; individuals who are
-  // CC'd personally, via a non-toggleable (deleted/vacant) org, or outside any checked
-  // org's current subtree start checked in picks.
-  function pmCcInit(idx, it, headToOrg) {
+  // Derives the item's globally excluded CC members (matching wstracker state_cc.go:49-70):
+  // a member excluded by an applied item.uncc stays excluded until a winning item.cc puts
+  // them back in it.cc. Also honors an explicit it.ccExcluded map/list if present.
+  function pmCcExcluded(it, events) {
+    var out = {}, orig = {};
+    if (!it) return out;
+    (Array.isArray(it.cc) ? it.cc : []).forEach(function (id) { orig[id] = true; });
+    if (it.ccExcluded) {
+      if (Array.isArray(it.ccExcluded)) {
+        it.ccExcluded.forEach(function (id) { if (id && !orig[id]) out[id] = true; });
+      } else {
+        Object.keys(it.ccExcluded).forEach(function (id) { if (it.ccExcluded[id] && !orig[id]) out[id] = true; });
+      }
+    }
+    var itemId = it.id;
+    if (itemId && Array.isArray(events)) {
+      events.forEach(function (e) {
+        if (!e || e.ignored || e.type !== 'item.uncc') return;
+        if (e.status && e.status !== 'applied') return;
+        var p = e.payload;
+        if (p && p.item === itemId && p.member && !orig[p.member]) out[p.member] = true;
+      });
+    }
+    return out;
+  }
+  // Derives initial CC picker picks and checked org groups from server per-source CC state.
+  // Live headed orgs registered in it.orgCC start checked in groups; ONLY members with a
+  // personal CC source start in picks. Members CC'd solely via org sources (including
+  // moved-out members or deleted/vacant orgs) are never auto-picked as personal.
+  function pmCcInit(idx, it, headToOrg, events) {
     var origCc = (it && Array.isArray(it.cc)) ? it.cc.slice() : [];
     var origOrgCc = (it && Array.isArray(it.orgCC)) ? it.orgCC.slice() : [];
     var ccSources = (it && it.ccSources) || {};
+    var ccExcluded = pmCcExcluded(it, events);
     var h2o = headToOrg || {};
-    var origOrgSet = {}, toggleOrgSet = {}, origOrgByHead = {}, groups = {}, picks = {};
+    var origOrgSet = {}, origOrgByHead = {}, origPersonal = {}, groups = {}, picks = {};
     origOrgCc.forEach(function (reg) {
       var oid = typeof reg === 'string' ? reg : (reg && reg.org);
       if (oid) origOrgSet[oid] = true;
@@ -101,33 +127,33 @@
       var o = h2o[id];
       if (o && o.id && origOrgSet[o.id]) {
         groups[id] = true;
-        toggleOrgSet[o.id] = true;
         origOrgByHead[id] = o.id;
       }
     });
-    var cov = pmCover(idx, groups, h2o);
     var hasSources = Object.keys(ccSources).length > 0;
     origCc.forEach(function (id) {
       if (!idx.listed[id]) return;
       var src = hasSources ? ccSources[id] : null;
       var personal = src ? !!src.personal : !hasSources;
-      var hasFixedOrg = !!(src && Array.isArray(src.orgs) && src.orgs.some(function (oid) {
-        return origOrgSet[oid] && !toggleOrgSet[oid];
-      }));
-      if (personal || hasFixedOrg || !cov.personBy[id]) picks[id] = true;
+      if (personal) {
+        picks[id] = true;
+        origPersonal[id] = true;
+      }
     });
     return {
-      origCc: origCc, origOrgCc: origOrgCc, ccSources: ccSources,
-      origOrgByHead: origOrgByHead, picks: picks, groups: groups
+      origCc: origCc, origOrgCc: origOrgCc, ccSources: ccSources, ccExcluded: ccExcluded,
+      origOrgByHead: origOrgByHead, origPersonal: origPersonal, picks: picks, unpicks: {}, groups: groups
     };
   }
-  // Evaluates CC picker state over listed live members and live headed orgs.
-  // Unlisted/removed members in origCc are never placed in removed. Org heads emit
-  // item.cc_org / item.uncc_org (dynamic & revocable); leads without an org keep the
-  // per-member snapshot expansion. Unchecking an org revokes its only-through members
-  // via item.uncc_org without emitting personal item.uncc (which would exclude them).
+  // Evaluates CC picker state from per-source CC state (personal vs org sources vs global
+  // exclusion, matching wstracker state_cc.go:49-70, 113-119).
+  // - Org heads emit item.cc_org / item.uncc_org without touching members' personal provenance.
+  // - Globally excluded members are never covered by any org (existing or newly selected) and
+  //   stay personally re-addable via item.cc.
+  // - Plain leads (no org) emit personal item.cc for every listed subtree member lacking a
+  //   personal source (including members currently CC'd only via an org).
   function pmCcEval(idx, origCc, picks, groups, headToOrg, orgCtx) {
-    var P = picks || {}, G = groups || {}, h2o = headToOrg || {}, orig = {};
+    var P = picks || {}, U = (orgCtx && orgCtx.unpicks) || {}, G = groups || {}, h2o = headToOrg || {}, orig = {};
     (origCc || []).forEach(function (id) { orig[id] = true; });
     var origOrgSet = {}, origToggleOrgByHead = {};
     ((orgCtx && orgCtx.origOrgCc) || []).forEach(function (entry) {
@@ -138,13 +164,29 @@
       var o = h2o[id];
       if (o && o.id && origOrgSet[o.id]) origToggleOrgByHead[id] = o.id;
     });
+    var excluded = {};
+    var rawExcl = orgCtx && orgCtx.ccExcluded;
+    if (rawExcl) {
+      if (Array.isArray(rawExcl)) {
+        rawExcl.forEach(function (id) { if (id && !orig[id]) excluded[id] = true; });
+      } else {
+        Object.keys(rawExcl).forEach(function (id) { if (rawExcl[id] && !orig[id]) excluded[id] = true; });
+      }
+    }
+    // Any live member inside an already-registered live org's subtree who is absent from
+    // origCc was excluded on the server (fallback when event history is omitted).
+    Object.keys(origToggleOrgByHead).forEach(function (hid) {
+      (idx.subtree[hid] || [hid]).forEach(function (mid) {
+        if (!orig[mid]) excluded[mid] = true;
+      });
+    });
     var rawCov = pmCover(idx, G, h2o);
     var cov = { personBy: {}, groupBy: rawCov.groupBy, topGroups: rawCov.topGroups };
     idx.order.forEach(function (id) {
       var gid = rawCov.personBy[id];
       if (!gid) return;
-      // An already-registered org does not cover a member who was personally excluded from it.
-      if (origToggleOrgByHead[gid] && !orig[id]) return;
+      var isOrgGrp = !!(h2o[gid] && h2o[gid].id);
+      if (isOrgGrp && excluded[id]) return;
       cov.personBy[id] = gid;
     });
     var addedOrgs = [], addedOrgSet = {}, removedOrgs = [], removedOrgSet = {};
@@ -153,6 +195,12 @@
       if (o && o.id && !origOrgSet[o.id] && !addedOrgSet[o.id]) {
         addedOrgSet[o.id] = true;
         addedOrgs.push({ head: gid, org: o.id, name: o.name, n: idx.count[gid] || 1 });
+      }
+    });
+    ((orgCtx && orgCtx.extraRemovedOrgs) || []).forEach(function (r) {
+      if (r && r.org && !removedOrgSet[r.org]) {
+        removedOrgSet[r.org] = true;
+        removedOrgs.push(r);
       }
     });
     idx.order.forEach(function (id) {
@@ -164,7 +212,7 @@
     });
     var srcs = (orgCtx && orgCtx.ccSources) || null;
     var hasSources = !!(srcs && Object.keys(srcs).length > 0);
-    var effective = {}, added = [], removed = [], ccMembers = [], unccMembers = [];
+    var effective = {}, retained = {}, added = [], removed = [], ccMembers = [], unccMembers = [];
     var grpChips = [], addChips = [], rmOrgChips = [], rmChips = [], effectiveCount = 0;
     cov.topGroups.forEach(function (gid) {
       var o = h2o[gid];
@@ -175,26 +223,35 @@
       rmOrgChips.push({ t: 'rmg', id: r.head, org: r.org, name: r.name, n: r.n });
     });
     idx.order.forEach(function (id) {
-      var on = !!P[id], covBy = cov.personBy[id] || '', covered = !!covBy, eff = on || covered, was = !!orig[id];
+      var on = !!P[id], unpicked = !!U[id], covBy = cov.personBy[id] || '', covered = !!covBy;
+      var covOrg = covBy ? h2o[covBy] : null;
+      var coveredByOrg = !!(covOrg && covOrg.id);
+      var coveredByPlainLead = !!(covered && !coveredByOrg);
+      var was = !!orig[id];
       var src = hasSources ? srcs[id] : null;
       var hadPersonal = was && (src ? !!src.personal : !hasSources);
       var hasSurvivingOrg = !!(was && src && Array.isArray(src.orgs) && src.orgs.some(function (oid) {
-        return origOrgSet[oid] && !removedOrgSet[oid];
+        return !removedOrgSet[oid];
       }));
-      var covOrg = covBy ? h2o[covBy] : null;
-      var hasNewOrg = !!(covOrg && covOrg.id && addedOrgSet[covOrg.id]);
+      var retainedByOrg = hasSurvivingOrg && !unpicked;
+      var eff = on || covered || retainedByOrg;
+      var wantsPersonal = (on && !coveredByOrg) || coveredByPlainLead;
+      var shouldUncc = !eff && (hadPersonal || (unpicked && hasSurvivingOrg));
       if (eff) { effective[id] = true; effectiveCount++; }
+      if (retainedByOrg) retained[id] = true;
       if (eff && !was) added.push(id);
       if (!eff && was) removed.push(id);
-      if (eff && !hadPersonal && !hasSurvivingOrg && !hasNewOrg) ccMembers.push(id);
-      if (!eff && was && (hadPersonal || hasSurvivingOrg)) unccMembers.push(id);
-      if (on && !covered) addChips.push({ t: 'p', id: id, wasOrig: was });
-      if (!eff && was && (hadPersonal || hasSurvivingOrg)) rmChips.push({ t: 'rm', id: id });
+      if (wantsPersonal && !hadPersonal) ccMembers.push(id);
+      if (shouldUncc) unccMembers.push(id);
+      if ((on || retainedByOrg) && !covered) addChips.push({ t: 'p', id: id, wasOrig: was });
+      if (shouldUncc) rmChips.push({ t: 'rm', id: id });
     });
     var eventCount = removedOrgs.length + addedOrgs.length + ccMembers.length + unccMembers.length;
     return {
       cov: cov,
       effective: effective,
+      retained: retained,
+      excluded: excluded,
       added: added,
       removed: removed,
       addedOrgs: addedOrgs,
@@ -216,22 +273,78 @@
     ev.unccMembers.forEach(function (id) { out.push(['item.uncc', { item: itemId, member: id }]); });
     return out;
   }
+  // Maps each lead (including removed leads still referenced in live members' leads[])
+  // to its live direct followers, matching wstracker state.go:children().
+  function pmRawChildren(members) {
+    var M = members || {}, c = {};
+    Object.keys(M).forEach(function (id) {
+      var m = M[id];
+      if (!m || m.removed) return;
+      (m.leads || []).forEach(function (l) {
+        if (!l) return;
+        (c[l] = c[l] || []).push(id);
+      });
+    });
+    return c;
+  }
+  // Whether `target` is strictly below `from` within maxDepth hops in the server's reach
+  // graph (state.go:reach), following live members' leads[] even when `from` is removed.
+  function pmReaches(rawChildren, from, target, maxDepth) {
+    if (!rawChildren || !from || !target || from === target) return false;
+    var lim = (maxDepth != null && maxDepth !== 0) ? maxDepth : Infinity;
+    var seen = {}, frontier = [from];
+    seen[from] = true;
+    for (var depth = 1; depth <= lim && frontier.length; depth++) {
+      var next = [];
+      for (var i = 0; i < frontier.length; i++) {
+        var kids = rawChildren[frontier[i]] || [];
+        for (var j = 0; j < kids.length; j++) {
+          var k = kids[j];
+          if (k === target) return true;
+          if (!seen[k]) { seen[k] = true; next.push(k); }
+        }
+      }
+      frontier = next;
+    }
+    return false;
+  }
   // Whether existing live rule y covers proposed whole-subtree rule {root, include_root: true} (no levels).
-  // Matches wstracker/check.go: overlap is judged from the assign-time root (assignRoot || root),
-  // including live rules whose org was later deleted or vacated.
-  function pmRuleCovers(idx, y, root) {
-    if (!y || y.levels != null) return false;
+  // Matches wstracker/check.go:510-519 & state.go:589-629,780-797: overlap is judged from the
+  // assign-time root (assignRoot || root) over live members' raw leads[] (even if assignRoot is removed).
+  function pmRuleCovers(idx, y, root, members) {
+    if (!y || (y.levels != null && y.levels !== 0)) return false;
     var yRoot = y.assignRoot || y.root;
     if (!yRoot) return false;
     if (yRoot === root) return !!(y.includeRoot || y.include_root);
+    if (members) return pmReaches(pmRawChildren(members), yRoot, root, null);
     return !!(idx.desc[yRoot] && idx.desc[yRoot][root] > 0);
   }
   // Whether any live rule of viewer on itemId already covers {root, include_root: true}.
-  function pmRuleCovered(idx, rules, itemId, viewer, root) {
+  function pmRuleCovered(idx, rules, itemId, viewer, root, members) {
     var list = Array.isArray(rules) ? rules : Object.keys(rules || {}).map(function (k) { return rules[k]; });
+    var rawC = members ? pmRawChildren(members) : null;
     return list.some(function (y) {
-      return y && !y.ended && y.item === itemId && y.by === viewer && y.state === 'live' && pmRuleCovers(idx, y, root);
+      if (!y || y.ended || y.item !== itemId || y.by !== viewer || y.state !== 'live') return false;
+      if (y.levels != null && y.levels !== 0) return false;
+      var yRoot = y.assignRoot || y.root;
+      if (!yRoot) return false;
+      if (yRoot === root) return !!(y.includeRoot || y.include_root);
+      return rawC ? pmReaches(rawC, yRoot, root, null) : !!(idx.desc[yRoot] && idx.desc[yRoot][root] > 0);
     });
+  }
+  // Whether a live rule currently covers memberId per wstracker state.go:coveredBy (uses live
+  // org head for org rules, and follows live members' raw leads[] even when non-org root is removed).
+  function pmLiveRuleCoversMember(ru, memberId, oi, members, rawC) {
+    if (!ru || ru.ended || ru.state !== 'live' || !memberId) return false;
+    var M = members || {}, root = ru.root || '';
+    if (ru.org && oi) {
+      var o = oi.byId && oi.byId[ru.org];
+      if (!o || o.removed || !o.head || (members && (!M[o.head] || M[o.head].removed))) return false;
+      root = o.head;
+    }
+    if (!root) return false;
+    if (memberId === root) return !!(ru.includeRoot && (!members || (M[root] && !M[root].removed)));
+    return pmReaches(rawC || pmRawChildren(M), root, memberId, ru.levels != null && ru.levels !== 0 ? ru.levels : null);
   }
   // Pure completion class for a single assign target, matching complClass/asgClass.
   function pmComplClass(o, viewer, reach) {
@@ -272,11 +385,17 @@
     return { origOrgAssign: origOrgAssign, groups: groups };
   }
   // Computes current locked people and locked groups in assign/retarget mode, accounting for
-  // rules being removed in the same batch (retarget rule or unchecked removable org rules).
-  function pmAssignLocks(idx, it, rules, assignments, orgs, members, viewer, headToOrg, origOrgAssign, groups, retarget, norule) {
+  // rules being removed in the same batch (retarget rule, unchecked removable org rules, or
+  // extraSkipRules). A viewer-authored removable org rule stays unlocked even when a broader
+  // plain rule covers it, since check.go:1307-1323 lets the author item.unassign {rule}.
+  function pmAssignLocks(idx, it, rules, assignments, orgs, members, viewer, headToOrg, origOrgAssign, groups, retarget, norule, extraSkipRules) {
     var h2o = headToOrg || {}, origO = origOrgAssign || {}, G = groups || {};
     var skipSet = {};
     if (retarget && retarget.rule) skipSet[retarget.rule] = true;
+    (extraSkipRules || []).forEach(function (ru) {
+      var rid = typeof ru === 'string' ? ru : (ru && ru.id);
+      if (rid) skipSet[rid] = true;
+    });
     var activeRemOwner = {};
     Object.keys(origO).forEach(function (hid) {
       var info = origO[hid];
@@ -298,6 +417,7 @@
         if (!(idx.isLead[id] || h2o[id])) return;
         var info = origO[id];
         if (info && !info.canRemove) { lockedG[id] = true; return; }
+        if (info && info.canRemove) return;
         var ancSet = {};
         ancSet[id] = true;
         (idx.ancestors[id] || []).forEach(function (a) { ancSet[a] = true; });
@@ -305,7 +425,7 @@
           var own = activeRemOwner[ru.id];
           return !(own && ancSet[own]);
         });
-        if (pmRuleCovered(idx, checkRules, it.id, viewer, id)) lockedG[id] = true;
+        if (pmRuleCovered(idx, checkRules, it.id, viewer, id, members)) lockedG[id] = true;
       });
     }
     return { lockedP: lockedP, lockedOrder: lockedOrder, lockedG: lockedG };
@@ -334,12 +454,23 @@
     }
     var visCov = pmCover(idx, activeG, h2o);
     var payCov = pmCover(idx, liveG, h2o);
-    var targets = [], removedRules = [], origOrgChips = [], rmOrgChips = [];
+    var targets = [], removedRules = [], remSeen = {}, origOrgChips = [], rmOrgChips = [];
+    (opts.extraRemovedRules || []).forEach(function (ru) {
+      if (ru && ru.id && !remSeen[ru.id]) {
+        remSeen[ru.id] = true;
+        removedRules.push(ru);
+      }
+    });
     idx.order.forEach(function (id) {
       var oinfo = !norule ? origO[id] : null;
       if (oinfo && oinfo.canRemove) {
         if (!G[id]) {
-          oinfo.removable.forEach(function (ru) { removedRules.push(ru); });
+          oinfo.removable.forEach(function (ru) {
+            if (ru && ru.id && !remSeen[ru.id]) {
+              remSeen[ru.id] = true;
+              removedRules.push(ru);
+            }
+          });
           rmOrgChips.push({ t: 'rmg', id: id, org: oinfo.org, name: oinfo.name, n: idx.count[id] || 1 });
         } else if (activeG[id] && !payCov.groupBy[id]) {
           origOrgChips.push({ t: 'og', id: id, org: oinfo.org, name: oinfo.name, n: idx.count[id] || 1, pend: !!oinfo.pending });
@@ -417,11 +548,19 @@
   // Builds atomic retarget batch for replacing an org CC registration (Decision 11 & 8):
   // emits item.uncc_org first, then item.cc_org for org heads, expanded item.cc snapshots for
   // non-org leads, and item.cc for individual picks. Never emits personal item.uncc.
-  function pmRetargetCcEvents(itemId, retarget, idx, picks, groups, headToOrg) {
-    var h2o = headToOrg || {}, P = picks || {}, G = groups || {};
+  function pmRetargetCcEvents(itemId, retarget, idx, picks, groups, headToOrg, ccExcluded) {
+    var h2o = headToOrg || {}, P = picks || {}, G = groups || {}, excl = ccExcluded || {};
     var out = [['item.uncc_org', { item: itemId, org: retarget.org }]];
-    var cov = pmCover(idx, G, h2o), sentMember = {}, sentOrg = {};
-    cov.topGroups.forEach(function (gid) {
+    var rawCov = pmCover(idx, G, h2o), sentMember = {}, sentOrg = {};
+    var covPersonBy = {};
+    idx.order.forEach(function (id) {
+      var gid = rawCov.personBy[id];
+      if (!gid) return;
+      var isOrgGrp = !!(h2o[gid] && h2o[gid].id);
+      if (isOrgGrp && excl[id]) return;
+      covPersonBy[id] = gid;
+    });
+    rawCov.topGroups.forEach(function (gid) {
       var org = h2o[gid];
       if (org && org.id) {
         if (!sentOrg[org.id]) {
@@ -438,7 +577,7 @@
       }
     });
     idx.order.forEach(function (id) {
-      if (P[id] && !cov.personBy[id] && !sentMember[id]) {
+      if (P[id] && !covPersonBy[id] && !sentMember[id]) {
         sentMember[id] = true;
         out.push(['item.cc', { item: itemId, member: id }]);
       }
@@ -492,7 +631,7 @@
       Object.keys(skipRule).forEach(function (k) { if (skipRule[k]) skipSet[k] = true; });
     }
     var hasSkip = Object.keys(skipSet).length > 0;
-    var amap = assignments || {}, M = members || {}, oi = orgIndex(orgs, M), ot = oi.tree;
+    var amap = assignments || {}, M = members || {}, oi = orgIndex(orgs, M), rawC = hasSkip ? pmRawChildren(M) : null;
     var rlist = Array.isArray(rules) ? rules : Object.keys(rules || {}).map(function (k) { return rules[k]; });
     var surviving = hasSkip ? rlist.filter(function (ru) {
       return ru && !ru.ended && ru.state === 'live' && ru.item === it.id && !skipSet[ru.id];
@@ -504,12 +643,173 @@
       seen[r.id] = true;
       if (r.state !== 'live' && r.state !== 'pending') return;
       if (hasSkip && r.rule && skipSet[r.rule]) {
-        if (surviving.some(function (ru) { return ruleCoversMember(ru, r.to, ot, oi, M); })) lockedP[r.to] = true;
+        if (surviving.some(function (ru) { return pmLiveRuleCoversMember(ru, r.to, oi, M, rawC); })) lockedP[r.to] = true;
         return;
       }
       lockedP[r.to] = true;
     });
     return lockedP;
+  }
+  // Builds the atomic event batch at apply time by re-deriving org/head mappings, live rules,
+  // and per-source CC state from live view state `vs` so concurrent rehead/vacate/delete
+  // cannot produce a refused batch (wstracker check.go:476-485, 510-521, 1237-1242).
+  function pmBuildApplyEvents(cur, vs) {
+    if (!cur || !vs || cur.draft || !cur.item) return [];
+    var liveIt = vs.items && vs.items[cur.item];
+    if (!liveIt) return [];
+    var liveMembers = vs.members || {};
+    var liveOrgs = vs.orgs || [];
+    var liveOi = orgIndex(liveOrgs, liveMembers);
+    var liveIdx = pmIndex(liveOi.tree);
+    var liveH2o = liveOi.headToOrg;
+    var openH2o = cur.headToOrg || {};
+    var openGroups = cur.groups || {};
+    var openPicks = cur.picks || {};
+    var openUnpicks = cur.unpicks || {};
+
+    function mapNewGroups(skipOpenHead) {
+      var g = {};
+      Object.keys(openGroups).forEach(function (hid) {
+        if (!openGroups[hid]) return;
+        if (skipOpenHead && skipOpenHead[hid]) return;
+        var openOrg = openH2o[hid];
+        if (openOrg && openOrg.id) {
+          var liveOrg = liveOi.byId[openOrg.id];
+          if (liveOrg && !liveOrg.removed && liveOrg.head && liveH2o[liveOrg.head] && liveH2o[liveOrg.head].id === openOrg.id) {
+            g[liveOrg.head] = true;
+          }
+          return;
+        }
+        if (liveIdx.listed[hid] && (liveIdx.isLead[hid] || liveH2o[hid])) {
+          g[hid] = true;
+        }
+      });
+      return g;
+    }
+
+    var livePicks = {};
+    Object.keys(openPicks).forEach(function (id) {
+      if (openPicks[id] && liveIdx.listed[id]) livePicks[id] = true;
+    });
+
+    if (cur.kind === 'cc') {
+      var liveExcluded = pmCcExcluded(liveIt, vs.events);
+      if (!Array.isArray(vs.events) && cur.ccExcluded) {
+        var liveCcCheck = {};
+        (Array.isArray(liveIt.cc) ? liveIt.cc : []).forEach(function (id) { liveCcCheck[id] = true; });
+        Object.keys(cur.ccExcluded).forEach(function (id) {
+          if (cur.ccExcluded[id] && !liveCcCheck[id]) liveExcluded[id] = true;
+        });
+      }
+      if (cur.retarget) {
+        var rtGroups = mapNewGroups(null);
+        if (!Object.keys(rtGroups).length && !Object.keys(livePicks).length) return [];
+        return pmRetargetCcEvents(cur.item, cur.retarget, liveIdx, livePicks, rtGroups, liveH2o, liveExcluded);
+      }
+      var liveOrigCc = Array.isArray(liveIt.cc) ? liveIt.cc.slice() : [];
+      var liveOrigOrgCc = Array.isArray(liveIt.orgCC) ? liveIt.orgCC.slice() : [];
+      var liveCcSources = liveIt.ccSources || {};
+      var liveOrigOrgSet = {};
+      liveOrigOrgCc.forEach(function (reg) {
+        var oid = typeof reg === 'string' ? reg : (reg && reg.org);
+        if (oid) liveOrigOrgSet[oid] = true;
+      });
+      var openOrigOrgByHead = cur.origOrgByHead || {};
+      var uncheckedOrigOrgs = {};
+      Object.keys(openOrigOrgByHead).forEach(function (oldHead) {
+        var oid = openOrigOrgByHead[oldHead];
+        if (oid && !openGroups[oldHead]) uncheckedOrigOrgs[oid] = oldHead;
+      });
+      var liveGroups = mapNewGroups(openOrigOrgByHead);
+      var extraRemovedOrgs = [];
+      Object.keys(uncheckedOrigOrgs).forEach(function (oid) {
+        if (!liveOrigOrgSet[oid]) return;
+        var liveOrg = liveOi.byId[oid];
+        var head = (liveOrg && liveOrg.head && liveH2o[liveOrg.head] && liveH2o[liveOrg.head].id === oid) ? liveOrg.head : uncheckedOrigOrgs[oid];
+        extraRemovedOrgs.push({ head: head, org: oid, name: (liveOrg && liveOrg.name) || oid, n: liveIdx.count[head] || 1 });
+      });
+      liveIdx.order.forEach(function (id) {
+        var o = liveH2o[id];
+        if (o && o.id && liveOrigOrgSet[o.id] && !uncheckedOrigOrgs[o.id]) {
+          liveGroups[id] = true;
+        }
+      });
+      var openOrigPersonal = {};
+      if (cur.origPersonal) {
+        Object.keys(cur.origPersonal).forEach(function (id) { if (cur.origPersonal[id]) openOrigPersonal[id] = true; });
+      } else {
+        var openSrcs = cur.ccSources || {}, hasOpenSources = Object.keys(openSrcs).length > 0;
+        (cur.origCc || []).forEach(function (id) {
+          var s = hasOpenSources ? openSrcs[id] : null;
+          if (s ? !!s.personal : !hasOpenSources) openOrigPersonal[id] = true;
+        });
+      }
+      var hasLiveSources = Object.keys(liveCcSources).length > 0;
+      liveOrigCc.forEach(function (id) {
+        if (!liveIdx.listed[id] || openOrigPersonal[id] || openUnpicks[id]) return;
+        var src = hasLiveSources ? liveCcSources[id] : null;
+        var personal = src ? !!src.personal : !hasLiveSources;
+        if (personal) livePicks[id] = true;
+      });
+      return pmCcEvents(cur.item, liveIdx, liveOrigCc, livePicks, liveGroups, liveH2o, {
+        origOrgCc: liveOrigOrgCc,
+        ccSources: liveCcSources,
+        ccExcluded: liveExcluded,
+        unpicks: openUnpicks,
+        extraRemovedOrgs: extraRemovedOrgs
+      });
+    }
+
+    var liveViewer = (vs.viewer && vs.viewer.member) || '';
+    var liveReach = (vs.viewer && vs.viewer.reach) || {};
+    var liveRules = vs.rules || {};
+    var liveRlist = Array.isArray(liveRules) ? liveRules : Object.keys(liveRules).map(function (k) { return liveRules[k]; });
+    var liveRuleById = {};
+    liveRlist.forEach(function (ru) { if (ru && ru.id) liveRuleById[ru.id] = ru; });
+    var norule = !!cur.norule;
+    var single = !!cur.single;
+
+    var liveOrigOrgAssign = (!cur.retarget && !norule)
+      ? pmAssignOrgInit(liveIdx, liveIt, liveRules, liveH2o, liveViewer).origOrgAssign
+      : {};
+    var openOrigOrgAssign = cur.origOrgAssign || {};
+    var skipOpenHead = {}, extraRemovedRules = [], uncheckedOrgIds = {};
+    Object.keys(openOrigOrgAssign).forEach(function (oldHead) {
+      var info = openOrigOrgAssign[oldHead];
+      if (!info || !info.canRemove) return;
+      skipOpenHead[oldHead] = true;
+      if (!openGroups[oldHead]) {
+        uncheckedOrgIds[info.org] = true;
+        (info.removable || []).forEach(function (ru) {
+          var liveRu = ru && ru.id && liveRuleById[ru.id];
+          if (liveRu && !liveRu.ended && liveRu.item === cur.item && liveRu.by === liveViewer && !liveIt.hidden) {
+            extraRemovedRules.push(liveRu);
+          }
+        });
+      }
+    });
+    var liveAsgGroups = mapNewGroups(skipOpenHead);
+    Object.keys(liveOrigOrgAssign).forEach(function (hid) {
+      var info = liveOrigOrgAssign[hid];
+      if (info && info.canRemove && !uncheckedOrgIds[info.org]) {
+        liveAsgGroups[hid] = true;
+      }
+    });
+    var liveLocks = pmAssignLocks(liveIdx, liveIt, liveRules, vs.assignments, liveOrgs, liveMembers, liveViewer, liveH2o, liveOrigOrgAssign, liveAsgGroups, cur.retarget, norule, extraRemovedRules);
+    var liveEv = pmAssignEval(liveIdx, {
+      viewer: liveViewer, reach: liveReach,
+      lockedPeople: liveLocks.lockedP, lockedGroups: liveLocks.lockedG,
+      picks: livePicks, groups: liveAsgGroups,
+      norule: norule, single: single, compl: cur.compl,
+      headToOrg: liveH2o, origOrgAssign: liveOrigOrgAssign,
+      extraRemovedRules: extraRemovedRules
+    });
+    if (cur.retarget) {
+      if (!liveEv.targets.length) return [];
+      return pmRetargetAssignEvents(cur.item, cur.retarget, liveEv.targets, cur.compl, liveViewer, liveReach, liveH2o);
+    }
+    if (!liveEv.dirty) return [];
+    return pmAssignEvents(cur.item, liveEv.targets, cur.compl, liveViewer, liveReach, liveH2o, liveEv.removedRules);
   }
   // --- end picker modal pure logic
 
@@ -531,18 +831,23 @@
     if (ctx.draft && !draftObj) return;
     var retarget = ctx.retarget || null;
     var oi = orgIndex(VS.orgs, VS.members), ot = oi.tree, idx = pmIndex(ot);
-    var picks = {}, groups = {}, origCc = [], origOrgCc = [], ccSources = {}, origOrgByHead = {};
+    var picks = {}, unpicks = {}, groups = {}, origCc = [], origOrgCc = [], ccSources = {}, ccExcluded = {}, origOrgByHead = {}, origPersonal = {};
     var origOrgAssign = {}, lockedP = {}, lockedOrder = [], lockedG = {};
     var norule = false, single = false, compl = null;
     if (kind === 'cc') {
       if (!retarget) {
-        var ccInit = pmCcInit(idx, it, oi.headToOrg);
+        var ccInit = pmCcInit(idx, it, oi.headToOrg, VS.events);
         origCc = ccInit.origCc;
         origOrgCc = ccInit.origOrgCc;
         ccSources = ccInit.ccSources;
+        ccExcluded = ccInit.ccExcluded;
         origOrgByHead = ccInit.origOrgByHead;
+        origPersonal = ccInit.origPersonal;
         picks = ccInit.picks;
+        unpicks = ccInit.unpicks;
         groups = ccInit.groups;
+      } else {
+        ccExcluded = pmCcExcluded(it, VS.events);
       }
     } else if (kind === 'assign') {
       if (ctx.draft) {
@@ -566,9 +871,9 @@
     PM = {
       kind: kind, item: ctx.item || null, draft: !!ctx.draft, ed: !!ctx.ed, store: ui.store,
       retarget: retarget, oi: oi, headToOrg: oi.headToOrg,
-      ot: ot, idx: idx, origCc: origCc, origOrgCc: origOrgCc, ccSources: ccSources,
-      origOrgByHead: origOrgByHead, origOrgAssign: origOrgAssign,
-      picks: picks, groups: groups,
+      ot: ot, idx: idx, origCc: origCc, origOrgCc: origOrgCc, ccSources: ccSources, ccExcluded: ccExcluded,
+      origOrgByHead: origOrgByHead, origPersonal: origPersonal, origOrgAssign: origOrgAssign,
+      picks: picks, unpicks: unpicks, groups: groups,
       lockedP: lockedP, lockedOrder: lockedOrder, lockedG: lockedG,
       norule: norule, single: single, compl: compl,
       shut: {}, q: '', only: false, focusId: null, err: '', busy: false,
@@ -625,7 +930,9 @@
   }
 
   function pmCcEvalCur() {
-    var orgCtx = PM.retarget ? null : { origOrgCc: PM.origOrgCc, ccSources: PM.ccSources };
+    var orgCtx = PM.retarget
+      ? { ccExcluded: PM.ccExcluded }
+      : { origOrgCc: PM.origOrgCc, ccSources: PM.ccSources, ccExcluded: PM.ccExcluded, unpicks: PM.unpicks };
     return pmCcEval(PM.idx, PM.origCc, PM.picks, PM.groups, PM.headToOrg, orgCtx);
   }
 
@@ -767,7 +1074,7 @@
     var showGrp = isLead || !!org;
     var covBy = ev.cov.personBy[id] || '';
     var covered = !!covBy;
-    var on = !!PM.picks[id], eff = on || covered, was = !!origMap[id];
+    var eff = !!ev.effective[id], retained = !!ev.retained[id], on = !!PM.picks[id] || retained, was = !!origMap[id];
     var cls = 'pm-nd';
     if (covered) cls += ' cvr';
     if (!showGrp && on && !covered) cls += ' on';
@@ -895,12 +1202,27 @@
     if (map[id]) delete map[id]; else map[id] = true;
   }
 
+  function pmToggleCcPerson(id) {
+    var ev = pmCcEvalCur();
+    if (ev.cov.personBy[id]) return false;
+    PM.err = '';
+    if (ev.effective[id]) {
+      delete PM.picks[id];
+      if (ev.retained[id]) PM.unpicks[id] = true;
+    } else if (PM.unpicks[id]) {
+      delete PM.unpicks[id];
+      if (PM.origPersonal && PM.origPersonal[id]) PM.picks[id] = true;
+      if (!pmCcEvalCur().effective[id]) PM.picks[id] = true;
+    } else {
+      PM.picks[id] = true;
+    }
+    return true;
+  }
+
   function pmToggleSelf(id, fromKey) {
     if (!PM || !id) return;
     if (PM.kind === 'cc') {
-      if (pmCcEvalCur().cov.personBy[id]) return;
-      PM.err = '';
-      pmTogMap(PM.picks, id);
+      if (!pmToggleCcPerson(id)) return;
     } else {
       if (PM.lockedP[id] || pmAssignEvalCur().visCov.personBy[id]) return;
       PM.err = '';
@@ -934,27 +1256,30 @@
 
   function pmApply() {
     if (!PM || PM.busy) return;
-    var cur = PM, events;
-    if (cur.kind === 'cc') {
-      events = cur.retarget ? pmRetargetCcEvents(cur.item, cur.retarget, cur.idx, cur.picks, cur.groups, cur.headToOrg) : pmCcEvents(cur.item, cur.idx, cur.origCc, cur.picks, cur.groups, cur.headToOrg, { origOrgCc: cur.origOrgCc, ccSources: cur.ccSources });
-    } else {
+    var cur = PM;
+    if (cur.kind === 'assign' && cur.draft) {
       var ev = pmAssignEvalCur();
-      if (cur.draft) {
-        if (!ev.targets.length) return;
-        var n = cur.ed ? ui.ned : ui.nrow[cur.store];
-        if (n) { n.who = ev.targets.map(function (o) { return o.id; }); n.compl = cur.compl; }
-        var backId = cur.backEl && cur.backEl.id, ed = cur.ed;
-        pmClose(false);
-        render();
-        var el = (backId && $(backId)) || $(ed ? 'tkned' : 'tknew');
-        if (el) el.focus({ preventScroll: true });
-        return;
-      }
-      if (!ev.dirty) return;
-      events = cur.retarget ? pmRetargetAssignEvents(cur.item, cur.retarget, ev.targets, cur.compl, VS.viewer.member, VS.viewer.reach || {}, cur.headToOrg)
-        : pmAssignEvents(cur.item, ev.targets, cur.compl, VS.viewer.member, VS.viewer.reach || {}, cur.headToOrg, ev.removedRules);
+      if (!ev.targets.length) return;
+      var n = cur.ed ? ui.ned : ui.nrow[cur.store];
+      if (n) { n.who = ev.targets.map(function (o) { return o.id; }); n.compl = cur.compl; }
+      var backId = cur.backEl && cur.backEl.id, ed = cur.ed;
+      pmClose(false);
+      render();
+      var el = (backId && $(backId)) || $(ed ? 'tkned' : 'tknew');
+      if (el) el.focus({ preventScroll: true });
+      return;
     }
-    if (!events.length) return;
+    var events = pmBuildApplyEvents(cur, VS);
+    if (!events.length) {
+      if (VS) {
+        cur.oi = orgIndex(VS.orgs, VS.members);
+        cur.headToOrg = cur.oi.headToOrg;
+        cur.ot = cur.oi.tree;
+        cur.idx = pmIndex(cur.ot);
+        pmDraw();
+      }
+      return;
+    }
     cur.busy = true;
     cur.err = '';
     pmDraw();
@@ -1003,7 +1328,10 @@
       PM.err = '';
       if (kind === 'g') delete PM.groups[cid];
       else if (kind === 'rmg') PM.groups[cid] = true;
-      else if (kind === 'p') pmTogMap(PM.picks, cid);
+      else if (kind === 'p') {
+        if (PM.kind === 'cc') pmToggleCcPerson(cid);
+        else pmTogMap(PM.picks, cid);
+      }
       pmDraw();
       return;
     }
@@ -1046,7 +1374,8 @@
     }
     if (k === 'Enter' && t && t.id === 'tkpmq') {
       e.preventDefault();
-      var targetId = PM.focusId || pmVisibleIds()[0];
+      var visIds = pmVisibleIds();
+      var targetId = (PM.focusId && visIds.indexOf(PM.focusId) >= 0) ? PM.focusId : visIds[0];
       if (targetId) pmToggleSelf(targetId, true);
     }
   }
