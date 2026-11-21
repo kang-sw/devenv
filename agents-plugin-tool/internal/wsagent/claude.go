@@ -24,6 +24,31 @@ type ClaudeBackend struct {
 	Command string
 }
 
+func (b ClaudeBackend) registration() (string, BackendRegistration) {
+	return BackendClaude, BackendRegistration{
+		Backend:          b,
+		LeadProfile:      LeadProfileClaude,
+		PermissionModes:  LeadPermissionModes,
+		PermissionLevels: LeadPermissionLevels(),
+		Catalog:          ClaudeCatalog(),
+		ManualHarness:    BackendClaude,
+		PlaybookCommands: true,
+		WorkerCapable:    true,
+		WorkerProfile:    AgentWorkerProfile(BackendClaude),
+		WorkerHTTPMCP:    true,
+		PlaybookTerminology: PlaybookTerminology{
+			ExploreAgent:  "the Explore agent",
+			ContinueIdiom: "SendMessage(to: <agentId>)",
+		},
+		Profiles: []BuiltinProfileRegistration{
+			supportBuiltinProfile(SupportProfileClaude, BackendClaude, SupportClaudeTools),
+			agentWorkerBuiltinProfile(BackendClaude, AgentClaudeTools),
+			searchAnswerBuiltinProfile(SearchAnswerProfileClaude, BackendClaude, []string{"Read", "Grep", "Glob"}),
+			leadBuiltinProfile(LeadProfileClaude, BackendClaude, DefaultLeadPermissionMode),
+		},
+	}
+}
+
 // claudeModelAliases are the models the claude backend offers: the CLI's
 // version-less aliases, passed verbatim to --model so each always loads the
 // latest model of its family. The CLI has no model-list command, and a

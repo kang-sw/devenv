@@ -37,13 +37,6 @@ const supportFileName = "support.json"
 
 const supportSchemaVersion = 1
 
-// supportProfiles are the support profiles in default order: the first
-// available harness is the default selection.
-var supportProfiles = []struct{ name, backend string }{
-	{SupportProfileClaude, BackendClaude},
-	{SupportProfilePi, BackendPi},
-}
-
 // choicesTTL is how long a harness's listed choices are reused.
 const choicesTTL = 5 * time.Minute
 
@@ -243,7 +236,7 @@ type SupportHarness struct {
 func (s *Support) harnesses() []SupportHarness {
 	var out []SupportHarness
 	seen := map[string]bool{}
-	for _, sp := range supportProfiles {
+	for _, sp := range builtinSupportProfiles() {
 		h := SupportHarness{Harness: sp.backend, Profile: sp.name, Models: []ModelChoice{}, Efforts: []string{}}
 		rp, err := ResolveProfile(s.opts.Config, "", sp.name, s.opts.Runner.opts.Backends)
 		if err == nil {

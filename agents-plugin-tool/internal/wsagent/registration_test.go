@@ -6,9 +6,75 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
+
+func TestBuiltinBackendRegistrationDefaults(t *testing.T) {
+	registrations := BuiltinBackendRegistrations()
+	if len(registrations) != 4 {
+		t.Fatalf("builtin registrations = %v", registrations)
+	}
+	wants := []struct {
+		backend, lead string
+		profiles      []string
+		catalog       bool
+		compaction    CompactionProtocol
+	}{
+		{BackendClaude, LeadProfileClaude, []string{SupportProfileClaude, AgentWorkerProfile(BackendClaude), SearchAnswerProfileClaude, LeadProfileClaude}, true, ClaudeCatalog().Compaction},
+		{BackendPi, LeadProfilePi, []string{SupportProfilePi, PiWorkerProfile, PiMiniLeadProfile, AgentWorkerProfile(BackendPi), ExploreProfile, SearchAnswerProfilePi, LeadProfilePi}, false, *PiCompaction()},
+		{BackendCodex, LeadProfileCodex, []string{AgentWorkerProfile(BackendCodex), LeadProfileCodex}, true, CodexCatalog().Compaction},
+		{BackendAgy, LeadProfileAgy, []string{AgentWorkerProfile(BackendAgy), LeadProfileAgy}, true, AgyCatalog().Compaction},
+	}
+	for _, want := range wants {
+		t.Run(want.backend, func(t *testing.T) {
+			reg, ok := registrations[want.backend]
+			if !ok || reg.Backend == nil || reg.LeadProfile != want.lead || (reg.Catalog != nil) != want.catalog {
+				t.Fatalf("descriptor = %+v, present=%v", reg, ok)
+			}
+			var names []string
+			for _, profile := range reg.Profiles {
+				names = append(names, profile.Name)
+				if profile.Definition.Backend != want.backend {
+					t.Errorf("profile %s backend = %q", profile.Name, profile.Definition.Backend)
+				}
+			}
+			if !slices.Equal(names, want.profiles) {
+				t.Errorf("profiles = %v, want %v", names, want.profiles)
+			}
+			if got := BuiltinCompaction(want.backend); got != want.compaction || got != reg.CompactionProtocol() {
+				t.Errorf("compaction = %+v, want %+v", got, want.compaction)
+			}
+		})
+	}
+	if got := BuiltinCompaction("unknown"); got != (CompactionProtocol{}) {
+		t.Errorf("unknown harness compaction = %+v", got)
+	}
+	if names := BuiltinHarnessNames(); !slices.Equal(names, []string{BackendClaude, BackendCodex, BackendPi, BackendAgy}) {
+		t.Errorf("builtin harness order = %v", names)
+	}
+}
+
+func TestBuiltinBackendRegistrationsDefensiveCopies(t *testing.T) {
+	changed := BuiltinBackendRegistrations()
+	changed[BackendClaude].Profiles[0].Definition.Tools[0] = "changed"
+	changed[BackendClaude].PermissionModes[0] = "changed"
+	for _, entry := range changed[BackendClaude].Catalog.Entries {
+		if len(entry.Values) != 0 {
+			entry.Values[0] = "changed"
+		}
+	}
+	changed[BackendPi].NativeCompaction.PromptPersists = false
+	fresh := BuiltinBackendRegistrations()
+	if got := fresh[BackendClaude]; got.Profiles[0].Definition.Tools[0] != "Agent" ||
+		got.PermissionModes[0] != "auto" || !reflect.DeepEqual(got.Catalog, ClaudeCatalog()) {
+		t.Errorf("caller changed the builtin Claude descriptor: %+v", got)
+	}
+	if got := fresh[BackendPi].NativeCompaction; *got != *PiCompaction() {
+		t.Errorf("caller changed the builtin Pi compaction descriptor: %+v", got)
+	}
+}
 
 func TestPermissionModesLegacyFallback(t *testing.T) {
 	registry := map[string]BackendRegistration{

@@ -177,16 +177,36 @@ func TestRegistrationChoicesOrderingAndSupportDefaults(t *testing.T) {
 func TestRegistrationChoicesBackendRegistrationsDefensiveCopies(t *testing.T) {
 	backend := &fakeBackend{}
 	r := NewRunner(Options{Backends: map[string]BackendRegistration{
-		"fixture": {Backend: backend, LeadProfile: "fixture-lead", PermissionModes: []string{"review", "run"}},
-		"bare":    {Backend: backend},
+		"fixture": {
+			Backend: backend, LeadProfile: "fixture-lead",
+			PermissionModes:  []string{"review", "run"},
+			PermissionLevels: []PermissionLevel{PermissionReadOnly},
+			DirectTools:      []string{"tickets.query"},
+			Profiles: []BuiltinProfileRegistration{{Name: "fixture-worker", Definition: Profile{
+				Backend: "fixture", Tools: []string{"read"}, WSTools: []string{"git.status"},
+			}}},
+		},
+		"bare": {Backend: backend},
 	}})
 	got := r.BackendRegistrations()
 	got["fixture"].PermissionModes[0] = "changed"
+	got["fixture"].PermissionLevels[0] = PermissionFull
+	got["fixture"].DirectTools[0] = "changed"
+	got["fixture"].Profiles[0].Name = "changed"
+	got["fixture"].Profiles[0].Definition.Tools[0] = "changed"
+	got["fixture"].Profiles[0].Definition.WSTools[0] = "changed"
 	got["fixture"] = BackendRegistration{LeadProfile: "changed-lead"}
 	delete(got, "bare")
 	got["injected"] = BackendRegistration{}
 	fresh := r.BackendRegistrations()
-	if len(fresh) != 2 || fresh["fixture"].Backend != backend || fresh["fixture"].LeadProfile != "fixture-lead" || !reflect.DeepEqual(fresh["fixture"].PermissionModes, []string{"review", "run"}) {
+	fixture := fresh["fixture"]
+	if len(fresh) != 2 || fixture.Backend != backend || fixture.LeadProfile != "fixture-lead" ||
+		!reflect.DeepEqual(fixture.PermissionModes, []string{"review", "run"}) ||
+		!reflect.DeepEqual(fixture.PermissionLevels, []PermissionLevel{PermissionReadOnly}) ||
+		!reflect.DeepEqual(fixture.DirectTools, []string{"tickets.query"}) ||
+		len(fixture.Profiles) != 1 || fixture.Profiles[0].Name != "fixture-worker" ||
+		!reflect.DeepEqual(fixture.Profiles[0].Definition.Tools, []string{"read"}) ||
+		!reflect.DeepEqual(fixture.Profiles[0].Definition.WSTools, []string{"git.status"}) {
 		t.Fatalf("caller mutations reached registry: %+v", fresh)
 	}
 	if reg, ok := fresh["bare"]; !ok || reg.Backend != backend || reg.PermissionModes != nil {

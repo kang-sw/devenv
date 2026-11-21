@@ -3,8 +3,11 @@ package wsagent
 import (
 	"encoding/json"
 	"errors"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // BackendRegistration is the admission descriptor of one registered backend.
@@ -58,6 +61,127 @@ type BackendRegistration struct {
 	// its sessions names that server and those commands instead of the
 	// package's tool and skill namespace.
 	PlaybookCommands bool
+	// Profiles are this backend's runtime-owned builtin profile definitions.
+	// They feed the config floor but are not fields of the persisted Profile
+	// shape. Support marks the profiles offered by tracker support, in order.
+	Profiles []BuiltinProfileRegistration
+	// PlaybookTerminology supplies static harness wording for playbook renders.
+	PlaybookTerminology PlaybookTerminology
+}
+
+// PlaybookTerminology holds static native-tool idioms. Model, effort, and
+// namespace-dependent bindings are resolved when a playbook is rendered.
+type PlaybookTerminology struct {
+	ExploreAgent, SpawnIdiom, ContinueIdiom string
+}
+
+// BuiltinProfileRegistration is one builtin profile owned by a backend's
+// registration. Definition is serialized into the existing Profile shape;
+// Support is runtime-only descriptor data.
+type BuiltinProfileRegistration struct {
+	Name       string
+	Definition Profile
+	Support    bool
+}
+
+type namedBackendRegistration struct {
+	name string
+	reg  BackendRegistration
+}
+
+// builtinRegistrations is the immutable descriptor floor. Its order preserves
+// the advertised config selectors and tracker-support preference.
+var builtinRegistrations = sync.OnceValue(func() []namedBackendRegistration {
+	backends := []registrationBackend{ClaudeBackend{}, CodexBackend{}, PiBackend{}, AgyBackend{}}
+	out := make([]namedBackendRegistration, 0, len(backends))
+	for _, backend := range backends {
+		name, reg := backend.registration()
+		out = append(out, namedBackendRegistration{name: name, reg: cloneBackendRegistration(reg)})
+	}
+	return out
+})
+
+func builtinRegistration(name string) BackendRegistration {
+	for _, value := range builtinRegistrations() {
+		if value.name == name {
+			return value.reg
+		}
+	}
+	return BackendRegistration{}
+}
+
+// BuiltinHarnessNames returns the built-in harness names in config listing
+// order. Callers can append their selector or storage sentinel to the result.
+func BuiltinHarnessNames() []string {
+	values := builtinRegistrations()
+	names := make([]string, 0, len(values))
+	for _, value := range values {
+		names = append(names, value.name)
+	}
+	return names
+}
+
+// BuiltinPlaybookTerminology returns the built-in static bindings, or zero
+// values when the harness uses the host-neutral wording.
+func BuiltinPlaybookTerminology(harness string) PlaybookTerminology {
+	return builtinRegistration(harness).PlaybookTerminology
+}
+
+// BuiltinBackendRegistrations returns fresh runtime descriptors for every
+// built-in harness. Callers may mutate the returned map and values.
+func BuiltinBackendRegistrations() map[string]BackendRegistration {
+	values := builtinRegistrations()
+	out := make(map[string]BackendRegistration, len(values))
+	for _, value := range values {
+		reg := cloneBackendRegistration(value.reg)
+		if reg.Catalog != nil {
+			catalog := *reg.Catalog
+			catalog.Entries = slices.Clone(catalog.Entries)
+			for i := range catalog.Entries {
+				catalog.Entries[i].Values = slices.Clone(catalog.Entries[i].Values)
+			}
+			reg.Catalog = &catalog
+		}
+		if reg.NativeCompaction != nil {
+			protocol := *reg.NativeCompaction
+			reg.NativeCompaction = &protocol
+		}
+		out[value.name] = reg
+	}
+	return out
+}
+
+func cloneProfile(p Profile) Profile {
+	p.Tools = slices.Clone(p.Tools)
+	p.WSTools = slices.Clone(p.WSTools)
+	p.Plugins = slices.Clone(p.Plugins)
+	if p.MCPServers != nil {
+		p.MCPServers = maps.Clone(p.MCPServers)
+		for name, raw := range p.MCPServers {
+			p.MCPServers[name] = slices.Clone(raw)
+		}
+	}
+	if p.IdleTimeoutSeconds != nil {
+		seconds := *p.IdleTimeoutSeconds
+		p.IdleTimeoutSeconds = &seconds
+	}
+	return p
+}
+
+func cloneBuiltinProfiles(in []BuiltinProfileRegistration) []BuiltinProfileRegistration {
+	out := slices.Clone(in)
+	for i := range out {
+		out[i].Definition = cloneProfile(out[i].Definition)
+	}
+	return out
+}
+
+func cloneBackendRegistration(reg BackendRegistration) BackendRegistration {
+	reg.PermissionModes = slices.Clone(reg.PermissionModes)
+	reg.PermissionLevels = slices.Clone(reg.PermissionLevels)
+	reg.DirectTools = slices.Clone(reg.DirectTools)
+	reg.Profiles = cloneBuiltinProfiles(reg.Profiles)
+	return reg
 }
 
 // ToolNameSchemeSanitize spells a dotted ws tool name the way the Pi bridge
@@ -86,10 +210,7 @@ func ApplyToolNameScheme(scheme, raw string) (name string, ok bool) {
 func (r *Runner) BackendRegistrations() map[string]BackendRegistration {
 	out := make(map[string]BackendRegistration, len(r.opts.Backends))
 	for name, reg := range r.opts.Backends {
-		reg.PermissionModes = append([]string(nil), reg.PermissionModes...)
-		reg.PermissionLevels = append([]PermissionLevel(nil), reg.PermissionLevels...)
-		reg.DirectTools = append([]string(nil), reg.DirectTools...)
-		out[name] = reg
+		out[name] = cloneBackendRegistration(reg)
 	}
 	return out
 }
@@ -116,14 +237,7 @@ func profileBackends(registries []map[string]BackendRegistration) []string {
 			names = append(names, name)
 		}
 	} else {
-		seen := map[string]bool{}
-		for _, raw := range BuiltinProfiles() {
-			var p Profile
-			if json.Unmarshal(raw, &p) == nil && !seen[p.Backend] {
-				seen[p.Backend] = true
-				names = append(names, p.Backend)
-			}
-		}
+		names = BuiltinHarnessNames()
 	}
 	sort.Strings(names)
 	return names
@@ -138,15 +252,7 @@ func permissionModes(backend string, registries []map[string]BackendRegistration
 	if len(registries) > 0 {
 		return registries[0][backend].PermissionModes
 	}
-	switch backend {
-	case BackendClaude:
-		return LeadPermissionModes
-	case BackendAgy:
-		return AgyPermissionModes
-	case BackendCodex:
-		return CodexPermissionModes
-	}
-	return nil
+	return builtinRegistration(backend).PermissionModes
 }
 
 func profilePermissionModes(registries []map[string]BackendRegistration) []string {

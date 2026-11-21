@@ -236,6 +236,109 @@ Compatibility verification ((1883)): show that additions are runtime-only and
 invisible to MCP/config/store readers (T0). If a directional old/new
 reader-writer trace reveals T1+ behavior, split it into its own ticket.
 
+### Result (2c2ee3478) - 2026-11-21
+
+- **VERIFIED — prerequisite (1882).** The parent epic's Child Tickets and
+  Extension dependency map leave the promotion list at one item,
+  `261115-feat-ws-permission-profile#phase3`. Its implementation (`090d72e04`)
+  and observation correction (`53349aeb5`) landed in develop merge
+  `66c7792d3`, an ancestor of `684b2c834`. Codex's registration advertises
+  the landed levels (`cmd/ws-mcp/dashboard.go:311` at the baseline,
+  `internal/wsagent/codex.go:33-38` after Phase 1). Permission Phases 4–5
+  and the gated Agy probes remain follow-ons. The exec and child-session
+  work uses the existing seam, and live reasoning remains stage 4
+  (`261114-epic-ws-common-session-foundation`, Child Tickets).
+- **VERIFIED — inventory refresh at `684b2c834`.** Rechecked the 70 grouped
+  decisions in the non-test Go scope using a name scan and the diff from
+  `da8930600`. The Codex prerequisite expands the mode mapping
+  (`permission.go:40-90`) and quality/nudge cluster (`permission.go:92-105,265-270`).
+  Lead permission admission and reconciliation now read the registration or
+  mapping (`permission.go:123-125,414-420`), removing two direct name checks.
+  Two backend-behavior sites replace those rows: live-only Codex default
+  projection (`permission.go:204-209`) and preserving an omitted next-launch
+  mode when Codex reports an active mode (`runner_events.go:169-176`).
+  Agy settlement moves to `runner_events.go:365-366`. The grouped totals
+  at the refreshed baseline are 8 descriptor, 37 behavior, 20 candidate
+  legacy, and 5 adapter-owned. Codex's omission policy remains a behavior
+  migration candidate under (1881).
+- **VERIFIED — implementation.** The adapter descriptor method
+  (`internal/wsagent/backend.go:32-37`) feeds one ordered, in-memory floor
+  (`registration.go:92-151`) and the daemon assembler
+  (`cmd/ws-mcp/dashboard.go:304-310`). The eight declarative sites now
+  derive from it: daemon registration, search-answer tools, built-in profile
+  rows, tracker-support order, keyless compaction, static playbook terms,
+  config harness selectors/buckets, and the compaction selector
+  (`builtin.go:221-246`, `support.go:236-247`, `catalog.go:568-572`,
+  `internal/mcp/playbook_terminology.go:44-60`,
+  `internal/mcp/config_registry.go:24-25,151`, `internal/mcp/compaction.go:31-37`).
+  Keyless lead and permission defaults also derive from the floor. The Pi
+  permission mode reader retains the existing legacy acceptance with
+  `TestPermissionModesLegacyFallback` coverage (`registration.go:246-255`).
+  Dynamic Claude terminology and runner policy remain assigned to the
+  later phases. The new descriptor builders and lookups use memory only
+  and introduce zero file operations on the affected paths by source
+  inspection. No syscall trace was collected.
+
+**VERIFIED — T0, in both directions.** The baseline and Phase 1 write and
+read the same structured override bytes through `config_structured.go:146-168`
+and `wsconfig/structured.go:27-64,118-138` at both commits. The new floor
+marshals only `BuiltinProfileRegistration.Definition` as the `Profile`
+that old and new `profile.go:80-132,222-239` decode. Opening an old
+config on Phase 1 and opening a Phase 1 config after a baseline write
+resolve project, repo, global, and built-in in the same order
+(`profile.go:378-425`, `wsconfig/structured.go:69-100`). Bucketed knobs
+write and reopen under the same keys at both commits
+(`mcp/server_dispatch.go:481-495`, `mcp/config_registry.go:203-239`).
+Both sides read and write the same `Record`, including any embedded
+`*Profile`, on reopen (`record.go:30-38,309-335`). The new descriptor
+fields live on the in-process registration (`registration.go:64-75`).
+An old caller talking to Phase 1 and a Phase 1 caller talking to the baseline
+see the same schemas and run the existing dispatch/argument checks
+(`mcp/server.go:386-406`, `mcp/tool_arguments.go:65-128` at both commits).
+A Go-overlay probe against `684b2c834` compared all built-in profile
+JSON, keyless defaults, pre-existing daemon descriptor fields and capability
+catalogs, `tools()` JSON, selector order, and terminology for `ws` and
+`wsflow`. All three package snapshots were byte-identical.
+
+**VERIFIED — local checks.** Commands run from `agents-plugin-tool/` with
+a writable temporary Go cache. Build, vet, formatting, and the focused
+suites passed. The two full-suite commands reached tests and stopped at
+the sandbox's loopback bind restriction.
+
+```sh
+go build ./...
+go vet ./internal/wsagent ./internal/mcp ./cmd/ws-mcp
+git diff 684b2c834 --relative --name-only -z -- '*.go' | xargs -0 gofmt -l
+go test ./internal/wsagent -count=1 -run 'Test(Builtin|LeadProfileForBuiltinFallback|RegistrationChoices|PermissionModesLegacyFallback|RegisteredPermissionMode|.*(Catalog|StreamFacts)Fixture)'
+go test ./internal/wsagent -count=1 -run 'Test(ClaudeCatalogValues|CodexCatalog|AgyCatalogValues|BuiltinSupportProfilesResolve|BuiltinAgentWorkerProfiles|BuiltinLeadProfilesResolve|BuiltinSupportProfileOverriddenWhole|SupportLastChoiceIsTheDefaultAndPersists|SupportDefaultSkipsAnUnavailableHarness|SupportChoicesListEachHarness|PermissionModesLegacyFallback|BuiltinBackendRegistration.*|RegistrationChoicesBackendRegistrationsDefensiveCopies)$'
+go test ./cmd/ws-mcp -count=1 -run 'Test(AgentRunnerCatalogs|CallFallbackRegistrationAndRenderDescriptor|HostedCLIExistingShapesAndOldHello)$'
+go test ./internal/mcp -count=1 -timeout 45m -run 'Test(CompactionRegistryManifestParity|CompactionConfigGetTuneAndLegacy|ConfigRegisteredAgentProfile.*|ConfigTuneAgentProfile|ConfigListAgentProfileKnob|ConfigTuningCatalogProjectsPromptAndSchemaKnobs|ConfigPrompt.*|Config.*Harness.*|ConfigCatalogAgentsTierResetWriter|ServeStdioConfigAgentsTier.*|TerminologyTableCoverage|TermsDifferThreeWay|ReservedToolVarNamesContainsRequiredNames|PlaybookTerminology.*|PlaybookRenderUnrecordedCallerKeepsHarnessRow|PlaybookPrint(Claude|Codex|Unknown|Pi)Harness.*|PlaybookPrintGoldenDelegateSample.*Harness)$'
+go test ./internal/wsagent -count=1
+go test ./cmd/ws-mcp -count=1
+```
+
+The full suites stopped at `TestAgyWorkerLaunchApprovalAndResume`
+(`internal/wsagent/agy_worker_test.go:157`) and
+`TestAgentMCPHostedWorkerKeepsTokenForwarding`
+(`cmd/ws-mcp/agent_mcp_test.go:137`) respectively. Both reported
+`listen tcp6 [::1]:0: bind: operation not permitted`. The hosted-launcher
+asset test was not reached in that run.
+
+The focused source search combined these patterns across
+`internal/wsagent/{builtin,catalog,registration,support}.go`,
+`internal/mcp/{compaction,config_registry,playbook_terminology}.go`, and
+`cmd/ws-mcp/dashboard.go`:
+
+```sh
+rg -n 'builtinRegistration|BuiltinBackendRegistrations|BuiltinHarnessNames|Backend(Claude|Codex|Agy|Pi)|"(claude|codex|agy|pi)"' \
+  internal/wsagent/{builtin,catalog,registration,support}.go \
+  internal/mcp/{compaction,config_registry,playbook_terminology}.go cmd/ws-mcp/dashboard.go
+```
+
+It found one ordered built-in registration floor, the derived daemon
+map and enum projections, the legacy Pi mode check, and the existing MCP
+Claude and Pi behavior checks.
+
 ### Phase 2: Migrate runner, process, permission, and lifecycle behavior
 
 Replace common name checks with Phase 1 data/methods across

@@ -31,7 +31,7 @@ func notifyCompactionTune(key string) {
 }
 func compactionKeyEntry(key string) configKeyEntry {
 	return configKeyEntry{Key: key, WriterTool: "config.tune", ResetTool: "config.tune", ResolverBacked: true, HarnessApplicable: true, NoAgentVisible: true,
-		SelectorFields: []tuningField{{Name: "harness", Description: "Harness override; * writes the shared layer value.", Enum: []string{"claude", "codex", "pi", "agy", "*"}}, {Name: "scope", Enum: wsconfig.ScopeSchemaEnum()}},
+		SelectorFields: []tuningField{{Name: "harness", Description: "Harness override; * writes the shared layer value.", Enum: promptHarnessEnum}, {Name: "scope", Enum: wsconfig.ScopeSchemaEnum()}},
 		ValueFields:    []tuningField{{Name: "value", Description: "Percent (1-100), tokens (150k, 1.5m), or one of each joined by |; whichever occurs first."}},
 		Normalize:      func(value string) (string, error) { _, err := wsconfig.ParseThreshold(value); return value, err },
 	}

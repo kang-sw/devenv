@@ -45,13 +45,6 @@ const (
 	SearchAnswerProfilePi     = "search-answer-pi"
 )
 
-func searchAnswerTools(backend string) []string {
-	if backend == BackendClaude {
-		return []string{"Read", "Grep", "Glob"}
-	}
-	return []string{"read", "grep", "find", "ls"}
-}
-
 // Lead profiles: one builtin profile per harness for the hosted lead
 // sessions the dashboard spawns (Profile.Lead). A project or global
 // definition of the same name replaces one whole, as for any profile.
@@ -68,19 +61,7 @@ func LeadProfileFor(backend string, registries ...map[string]BackendRegistration
 	if len(registries) > 0 {
 		return registries[0][backend].LeadProfile
 	}
-	profiles := BuiltinProfiles()
-	names := make([]string, 0, len(profiles))
-	for name := range profiles {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		var p Profile
-		if json.Unmarshal(profiles[name], &p) == nil && p.Backend == backend && p.Lead {
-			return strings.TrimPrefix(name, ProfilePrefix)
-		}
-	}
-	return ""
+	return builtinRegistration(backend).LeadProfile
 }
 
 // PiWorkerProfile is the builtin profile of a Pi subagent a session spawns
@@ -239,93 +220,72 @@ func builtinInstructionName(value string) (string, bool) {
 // replaces one whole.
 func BuiltinProfiles() map[string]json.RawMessage {
 	out := map[string]json.RawMessage{}
-	for name, backend := range map[string]string{SupportProfileClaude: BackendClaude, SupportProfilePi: BackendPi} {
-		var tools []string
-		if backend == BackendClaude {
-			tools = SupportClaudeTools
+	for _, value := range builtinRegistrations() {
+		for _, profile := range value.reg.Profiles {
+			raw, err := json.Marshal(profile.Definition)
+			if err != nil {
+				panic(err)
+			}
+			out[ProfilePrefix+profile.Name] = raw
 		}
-		raw, err := json.Marshal(Profile{
+	}
+	return out
+}
+
+// builtinSupportProfiles returns support profiles in registration order: the
+// first available harness remains the default selection.
+func builtinSupportProfiles() []struct{ name, backend string } {
+	var out []struct{ name, backend string }
+	for _, value := range builtinRegistrations() {
+		for _, profile := range value.reg.Profiles {
+			if profile.Support {
+				out = append(out, struct{ name, backend string }{profile.Name, value.name})
+			}
+		}
+	}
+	return out
+}
+
+func supportBuiltinProfile(name, backend string, tools []string) BuiltinProfileRegistration {
+	return BuiltinProfileRegistration{
+		Name: name,
+		Definition: Profile{
 			Description:  fmt.Sprintf("Tracker store support agent (%s): talks with the user about one tracker store from the store's chat card; reads the user's stores and local git repositories, and writes to its own store only when asked.", backend),
 			Backend:      backend,
 			Tools:        tools,
 			WSTools:      SupportWSTools,
 			Instructions: BuiltinInstructionsPrefix + supportInstructions,
-		})
-		if err != nil {
-			panic(err)
-		}
-		out[ProfilePrefix+name] = raw
+		},
+		Support: true,
 	}
-	raw, err := json.Marshal(Profile{
-		Description: "Pi subagent (pi): a headless Pi worker a session spawns with a prompt and steers by its id; it reads, edits, and runs commands in its working directory, commits through ws, and may spawn Pi subagents of its own within the daemon's depth and tier caps.",
-		Backend:     BackendPi,
-		Tools:       PiWorkerTools,
-		WSTools:     PiWorkerWSTools,
-	})
-	if err != nil {
-		panic(err)
+}
+
+func agentWorkerBuiltinProfile(backend string, tools []string) BuiltinProfileRegistration {
+	p := Profile{
+		Description: fmt.Sprintf("Agent worker (%s): the internal profile of a child agent.spawn starts on this harness; its tier picks the model, its system prompt the instructions, and its authority the permission level.", backend),
+		Backend:     backend,
+		Tools:       tools,
+		WSTools:     AgentWSTools,
 	}
-	out[ProfilePrefix+PiWorkerProfile] = raw
-	raw, err = json.Marshal(Profile{
-		Description: "Pi mini-lead: a non-lead coding worker with bounded ticket workflow tools; may spawn only profiles within its launched tool set.",
-		Backend:     BackendPi,
-		Tools:       PiWorkerTools,
-		WSTools:     PiMiniLeadWSTools,
-	})
-	if err != nil {
-		panic(err)
+	if _, ok := builtinInstructionTexts[AgentWorkerProfile(backend)]; ok {
+		p.Instructions = BuiltinInstructionsPrefix + AgentWorkerProfile(backend)
 	}
-	out[ProfilePrefix+PiMiniLeadProfile] = raw
-	for backend, tools := range map[string][]string{BackendClaude: AgentClaudeTools, BackendPi: PiWorkerTools, BackendAgy: nil, BackendCodex: nil} {
-		p := Profile{
-			Description: fmt.Sprintf("Agent worker (%s): the internal profile of a child agent.spawn starts on this harness; its tier picks the model, its system prompt the instructions, and its authority the permission level.", backend),
-			Backend:     backend,
-			Tools:       tools,
-			WSTools:     AgentWSTools,
-		}
-		if _, ok := builtinInstructionTexts[AgentWorkerProfile(backend)]; ok {
-			p.Instructions = BuiltinInstructionsPrefix + AgentWorkerProfile(backend)
-		}
-		raw, err := json.Marshal(p)
-		if err != nil {
-			panic(err)
-		}
-		out[ProfilePrefix+AgentWorkerProfile(backend)] = raw
-	}
-	raw, err = json.Marshal(Profile{
-		Description:  "Local read-only Pi researcher reporting evidence from project files.",
-		Backend:      BackendPi,
-		Tools:        searchAnswerTools(BackendPi),
-		Instructions: BuiltinInstructionsPrefix + ExploreProfile,
-	})
-	if err != nil {
-		panic(err)
-	}
-	out[ProfilePrefix+ExploreProfile] = raw
-	for name, backend := range map[string]string{SearchAnswerProfileClaude: BackendClaude, SearchAnswerProfilePi: BackendPi} {
-		raw, err := json.Marshal(Profile{
-			Description: fmt.Sprintf("Search answer agent (%s): reads the session board snapshot and project files; no shell, write, or network tools. Project-root confinement is best effort, not a sandbox.", backend),
-			Backend:     backend,
-			Tools:       searchAnswerTools(backend),
-		})
-		if err != nil {
-			panic(err)
-		}
-		out[ProfilePrefix+name] = raw
-	}
-	for name, p := range map[string]Profile{
-		LeadProfileClaude: {Backend: BackendClaude, PermissionMode: DefaultLeadPermissionMode},
-		LeadProfilePi:     {Backend: BackendPi},
-		LeadProfileAgy:    {Backend: BackendAgy},
-		LeadProfileCodex:  {Backend: BackendCodex},
-	} {
-		p.Lead = true
-		p.Description = fmt.Sprintf("Hosted lead session (%s): a headless session the dashboard spawns on a worktree, with the user's own harness setup.", p.Backend)
-		raw, err := json.Marshal(p)
-		if err != nil {
-			panic(err)
-		}
-		out[ProfilePrefix+name] = raw
-	}
-	return out
+	return BuiltinProfileRegistration{Name: AgentWorkerProfile(backend), Definition: p}
+}
+
+func searchAnswerBuiltinProfile(name, backend string, tools []string) BuiltinProfileRegistration {
+	return BuiltinProfileRegistration{Name: name, Definition: Profile{
+		Description: fmt.Sprintf("Search answer agent (%s): reads the session board snapshot and project files; no shell, write, or network tools. Project-root confinement is best effort, not a sandbox.", backend),
+		Backend:     backend,
+		Tools:       tools,
+	}}
+}
+
+func leadBuiltinProfile(name, backend, permissionMode string) BuiltinProfileRegistration {
+	return BuiltinProfileRegistration{Name: name, Definition: Profile{
+		Description:    fmt.Sprintf("Hosted lead session (%s): a headless session the dashboard spawns on a worktree, with the user's own harness setup.", backend),
+		Backend:        backend,
+		Lead:           true,
+		PermissionMode: permissionMode,
+	}}
 }
