@@ -201,6 +201,12 @@ func (r *Runner) permissionState(st State, rec Record, dir string) State {
 		st.Error = appendDiagnostic(st.Error, err.Error())
 		return st
 	}
+	// A Codex launch with no selection keeps the user's native defaults. Its
+	// reported mode can derive the common display while the process is live,
+	// but remains observation rather than a next-launch setting.
+	if level == "" && rec.Lead && rec.Backend == BackendCodex && source == "legacy-derived" && st.Process {
+		level = legacyLeadPermission(Record{Lead: true, Backend: BackendCodex, PermissionMode: st.ActiveMode})
+	}
 	if level == "" {
 		return st
 	}

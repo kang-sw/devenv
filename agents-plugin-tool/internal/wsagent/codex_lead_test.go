@@ -33,6 +33,7 @@ type codexFake struct {
 	openError            string
 	steerError           string
 	omitPermissionReport bool
+	reportDefaults       bool
 	reportedSandbox      string
 	reportedPolicy       string
 	readGate             <-chan struct{}
@@ -83,8 +84,11 @@ func (f *codexFake) answer(holder, method string, params json.RawMessage) (strin
 			session = "codex-s1"
 		}
 		result := map[string]any{"thread": map[string]any{"id": session, "cliVersion": "0.160.0", "model": "synthetic-model"}}
-		if !f.omitPermissionReport && requested.ApprovalPolicy != "" && requested.Sandbox != "" {
-			sandbox, policy := requested.Sandbox, requested.ApprovalPolicy
+		sandbox, policy := requested.Sandbox, requested.ApprovalPolicy
+		if f.reportDefaults && sandbox == "" {
+			sandbox, policy = "workspace-write", "on-request"
+		}
+		if !f.omitPermissionReport && policy != "" && sandbox != "" {
 			if f.reportedSandbox != "" {
 				sandbox = f.reportedSandbox
 			}
@@ -110,8 +114,11 @@ func (f *codexFake) answer(holder, method string, params json.RawMessage) (strin
 		f.nextTurn++
 		turn := fmt.Sprintf("t%d", f.nextTurn)
 		f.mu.Unlock()
-		if !f.omitPermissionReport && requested.ApprovalPolicy != "" && requested.SandboxPolicy.Type != "" {
-			kind, policy := requested.SandboxPolicy.Type, requested.ApprovalPolicy
+		kind, policy := requested.SandboxPolicy.Type, requested.ApprovalPolicy
+		if f.reportDefaults && kind == "" {
+			kind, policy = "workspaceWrite", "on-request"
+		}
+		if !f.omitPermissionReport && policy != "" && kind != "" {
 			if f.reportedSandbox != "" {
 				kind = codexSandboxKind(f.reportedSandbox)
 			}
@@ -236,8 +243,35 @@ func TestPermissionCodexLeadPerRun(t *testing.T) {
 		}
 	})
 
+	t.Run("new process invalidates old observation", func(t *testing.T) {
+		h, f := newCodexLeadHarness(t)
+		h.startAt(codexSyntheticEndpoint)
+		st := h.lead(BackendCodex, LeadOptions{PermissionLevel: PermissionReadOnly, permissionUser: true})
+		f.replyID = st.ID
+		h.send(st.ID, "reported settings")
+		holder := h.holder(st.ID)
+		eventually(t, "first process observation", func() bool { return h.state(st.ID).ActiveMode == "read-only" })
+		h.holders.out(holder, codexSyntheticEnd("t1", "done", "completed"))
+		h.idle(st.ID)
+		h.holders.exit(holder, 0)
+		eventually(t, "first process exit", func() bool { return !h.state(st.ID).Process })
+		c := h.runner.convs[st.ID]
+		c.mu.Lock()
+		c.activeMode = "read-only" // Model stale evidence at the new-process boundary.
+		c.mu.Unlock()
+		f.omitPermissionReport = true
+		h.send(st.ID, "no new report")
+		h.holder(st.ID)
+		eventually(t, "second process without observation", func() bool { return h.state(st.ID).Process })
+		got := h.state(st.ID)
+		if got.ActiveMode != "" || got.PermissionEnforcement != "advisory" {
+			t.Fatalf("new process retained stale evidence: %+v", got)
+		}
+	})
+
 	t.Run("legacy omission and child ceiling", func(t *testing.T) {
 		h, f := newCodexLeadHarness(t)
+		f.reportDefaults = true
 		h.startAt(codexSyntheticEndpoint)
 		legacy := h.lead(BackendCodex, LeadOptions{})
 		f.replyID = legacy.ID
@@ -248,6 +282,23 @@ func TestPermissionCodexLeadPerRun(t *testing.T) {
 		}
 		if _, err := os.Stat(filepath.Join(wsdashboard.SessionDir(h.dir, legacy.ID), "permission.json")); !os.IsNotExist(err) {
 			t.Fatalf("legacy omission wrote a sidecar: %v", err)
+		}
+		eventually(t, "legacy default observation", func() bool {
+			got := h.state(legacy.ID)
+			return got.ActiveMode == "workspace-write" && got.PermissionLevel == PermissionWorkdirWrite && got.PermissionSource == "legacy-derived"
+		})
+		if rec := h.record(legacy.ID); rec.PermissionMode != "" {
+			t.Fatalf("legacy observation became a launch override: %+v", rec)
+		}
+		h.holders.out(holder, codexSyntheticEnd("t1", "done", "completed"))
+		h.idle(legacy.ID)
+		h.holders.exit(holder, 0)
+		eventually(t, "legacy process exit", func() bool { return !h.state(legacy.ID).Process })
+		h.send(legacy.ID, "keep defaults on resume")
+		fresh := h.holder(legacy.ID)
+		resume := h.holders.acpInputs(fresh, "thread/resume")
+		if len(resume) != 1 || jsonAt(resume[0], "sandbox") != nil || jsonAt(resume[0], "approvalPolicy") != nil {
+			t.Fatalf("legacy observation froze the resumed defaults: %s", resume)
 		}
 
 		parent := h.lead(BackendCodex, LeadOptions{PermissionLevel: PermissionReadOnly, permissionUser: true})

@@ -477,7 +477,9 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		c.r.revokeToken(rec.ReplyID)
 		return fmt.Errorf("the %s backend did not start the process under a session holder", rec.Backend)
 	}
-	c.setStatus(func() { c.proc = proc })
+	// A process-scoped observation cannot carry into a new process or holder
+	// attach. Replay/open reports repopulate it; silence stays unknown.
+	c.setStatus(func() { c.proc, c.activeMode = proc, "" })
 	c.events = proc.Events()
 	c.idleAfter = def.IdleTimeout()
 	if attach {
