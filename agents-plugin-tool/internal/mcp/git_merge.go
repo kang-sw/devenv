@@ -237,6 +237,7 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 	// as a merge stop naming the holding worktree — never remove, switch, or
 	// force it. This runs once here and not inside checkWorktree, whose
 	// post-switch pass could only ever match the session root itself.
+	var sourceWorktree string
 	checkTargetHeld := func() {
 		entries, err := listWorktrees(ctx, runner, root)
 		if err != nil {
@@ -248,6 +249,9 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 			sessionRoot = filepath.Clean(root)
 		}
 		for _, e := range entries {
+			if e.Branch == "refs/heads/"+branch && filepath.Clean(e.Path) != sessionRoot && !e.Prunable && underAnyPool(poolRoots, e.Path) {
+				sourceWorktree = e.Path
+			}
 			if e.Branch != "refs/heads/"+mergeRoot || filepath.Clean(e.Path) == sessionRoot {
 				continue
 			}
@@ -393,6 +397,16 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 			Reason:         fmt.Sprintf("Merge landed; you are now on %q (git.merge does not switch back); %d dirty working-tree %s remain here.", mergeRoot, n, entries),
 			Resolution:     "Verify these leftover changes belong on the target branch; commit, stash, or move them as needed.",
 		})
+	}
+	if sourceWorktree != "" {
+		if lease, leaseErr := readWorktreeLease(ctx, runner, sourceWorktree); leaseErr == nil && lease != nil {
+			result.Diagnostics = append(result.Diagnostics, implMergeDiagnostic{
+				Code:           "worktree_release",
+				Classification: "advisory",
+				Reason:         fmt.Sprintf("Merged branch %q is checked out in leased worktree %q.", branch, sourceWorktree),
+				Resolution:     fmt.Sprintf("Call worktree.release for %q using the key bound to that worktree now that the branch is merged.", sourceWorktree),
+			})
+		}
 	}
 	if !isImpl && !strings.HasPrefix(branch, "goal/") {
 		// Generic promotion (develop -> main) carries no size warnings: they
