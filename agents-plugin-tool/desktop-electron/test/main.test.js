@@ -550,6 +550,16 @@ test('automatic startup retains a reason and renderer recovery replays it until 
   assert.equal(lines.length, 1);
   assert.match(lines[0].message, /did not drain the incumbent/);
 });
+test('a same-port successor observed before navigation does not inherit the discovered refusal', async () => {
+  const incumbent = connected(defaultURL, 100);
+  const successor = connected(defaultURL, 101);
+  const f = await fixture(async () => ({ ...incumbent, refusal }), 'win32', { inspect: async () => successor });
+  const content = f.views[0], wc = content.webContents;
+  await until(() => content.loads.length === 1);
+  assert.equal(f.window.title, 'Werkschaft');
+  f.ipcMain.emit(NOTICE_SUBSCRIBE, { sender: wc, senderFrame: wc.mainFrame });
+  assert.deepEqual(content.frameMessages, [], 'the authenticated successor must not receive the incumbent refusal');
+});
 test('overlapping retries are ignored and rediscovery replaces the pin', async () => {
   let finish, calls = 0;
   const f = await fixture(() => { calls++; return new Promise(resolve => { finish = resolve; }); });

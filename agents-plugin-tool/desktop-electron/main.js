@@ -328,6 +328,12 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       noticeTarget = null;
       renderTitle();
     }
+    function reconcileDaemonNotice(daemon) {
+      if (!daemon.refusal && (!pendingNotice || daemonMatches(pendingNotice, daemon))) return;
+      pendingNotice = daemon.refusal ? daemon : null;
+      if (noticeTarget) { noticeTarget.shown = false; noticeTarget.delivery = null; }
+      renderTitle();
+    }
     function sendDaemonNotice() {
       if (!pendingNotice || !noticeTarget || !isDashboardFrame(noticeTarget.frame) ||
           !daemonMatches(retained.daemon, pendingNotice)) return;
@@ -416,11 +422,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
         }
         if (!isCurrent(attempt)) return;
         const { url, refusal } = daemon;
-        if (refusal || (pendingNotice && !daemonMatches(pendingNotice, daemon))) {
-          pendingNotice = refusal ? daemon : null;
-          if (noticeTarget) { noticeTarget.shown = false; noticeTarget.delivery = null; }
-          renderTitle();
-        }
+        reconcileDaemonNotice(daemon);
         if (refusal && dashboardDocument && isDashboardFrame(wc.mainFrame) && daemonMatches(retained.daemon, daemon)) {
           setTitle(retained.title);
           sendDaemonNotice();
@@ -429,6 +431,11 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
         }
         try {
           const { root, observed } = await observeConnection(url);
+          if (!isCurrent(attempt)) return;
+          // Discovery and authentication can observe different daemon
+          // lifetimes at one port. Attribute the next document to this one.
+          daemon = observed;
+          reconcileDaemonNotice(daemon);
           const cookie = await browserCookie(root, observed);
           if (!isCurrent(attempt)) return;
           if (cookie) await session.defaultSession.cookies.set({
