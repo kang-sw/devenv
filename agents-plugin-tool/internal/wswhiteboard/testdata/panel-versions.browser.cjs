@@ -97,7 +97,23 @@ async function tab(b, width) {
           name: q(a, '.pfname').textContent, events: document.body.textContent.includes('re-posted'),
         };
       }, [v1.id, v2.id]);
-      assert.deepEqual(meta, { ver: ['v1', 'v2'], newer: ['→ v2 · 09:55', '#' + v2.id], exact: '#' + v1.id, latest: '#p1', prev: ['이전 버전 v1 · 09:05 ↑', '#' + v1.id], name: 'implementation', events: false });
+      assert.deepEqual(meta, { ver: ['v1/2', 'v2/2'], newer: ['→ v2 · 09:55', '#' + v2.id], exact: '#' + v1.id, latest: '#p1', prev: ['이전 버전 v1 · 09:05 ↑', '#' + v1.id], name: 'implementation', events: false });
+      const rowLayout = await p.evaluate(([a, b]) => [a, b].map(id => {
+        const sum = document.getElementById(id).querySelector('summary');
+        const recap = sum.querySelector('.entry-recap').getBoundingClientRect();
+        const pmeta = sum.querySelector('.pmeta').getBoundingClientRect();
+        return {
+          id,
+          recapWidth: recap.width,
+          recapBottom: recap.bottom,
+          pmetaTop: pmeta.top,
+          overflowX: sum.scrollWidth - sum.clientWidth,
+        };
+      }), [v1.id, v2.id]);
+      for (const item of rowLayout) {
+        assert(item.pmetaTop >= item.recapBottom - 1, `pmeta must sit on row 2 below entry-recap (${JSON.stringify(item)})`);
+        assert(item.overflowX <= 1, `summary must not overflow horizontally (${JSON.stringify(item)})`);
+      }
       await shot(p, `mixed-dark-${width}`);
 
       // Expanding the earlier version recovers its own payload in place.

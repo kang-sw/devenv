@@ -33,7 +33,10 @@ func TestRecapDisplayPanelTitleIsNotClipped(t *testing.T) {
 		t.Fatal(err)
 	}
 	css := string(data)
-	wantAll(t, css, `.entry-panel > summary > .entry-recap { grid-column: 2; grid-row: 1; line-height: 24px; }`)
+	wantAll(t, css,
+		`.entry-recap { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 700; line-height: 22px; word-break: keep-all; overflow-wrap: break-word; }`,
+		`.entry-panel > summary > .entry-recap { grid-column: 2; grid-row: 1; }`,
+	)
 	rules := regexp.MustCompile(`(?m)^([^{}\n]+)\{([^{}]*)\}`).FindAllStringSubmatch(css, -1)
 	clipping := regexp.MustCompile(`(?:^|;)\s*(?:(?:-webkit-)?line-clamp\s*:\s*[1-9]|overflow(?:-x|-y)?\s*:\s*(?:hidden|clip)|text-overflow\s*:\s*ellipsis|(?:max-)?height\s*:)`)
 	for _, rule := range rules {
@@ -50,10 +53,10 @@ func TestPanelHeaderCapAndResponsiveMetaFold(t *testing.T) {
 	}
 	css := string(data)
 	wantAll(t, css,
-		`.entry-panel:not(.msg) > summary { padding: 5px 8px 5px 10px; border-left: 3px solid var(--wb-primary); border-radius: 8px;`,
+		`.entry-panel:not(.msg) > summary { padding: 6px 8px 5px 10px; border-left: 3px solid var(--wb-primary); border-radius: 8px;`,
 		`.entry-panel[open]:not(.msg) > summary { border-radius: 8px 8px 0 0;`,
 		`.entry-panel > .entry-body.doc-body { margin: 0; padding: 9px 0 4px 12px; border-left: 3px solid color-mix(in srgb, var(--wb-primary) 26%, var(--wb-line));`,
-		`@container (max-width: 660px)`,
+		`.pmeta { grid-column: 2 / -1; grid-row: 2;`,
 		`@container (max-width: 440px)`,
 		`word-break: keep-all;`,
 	)
