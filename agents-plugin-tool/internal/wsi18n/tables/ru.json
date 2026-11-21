@@ -2692,5 +2692,19 @@
   "js.find.placeholder": "Поиск в карточке…",
   "js.find.prev": "Предыдущее совпадение (Shift+Enter)",
   "js.find.next": "Следующее совпадение (Enter)",
-  "js.find.close": "Закрыть панель поиска (Esc)"
+  "js.find.close": "Закрыть панель поиска (Esc)",
+  "js.tk.pm.grp.org.one": "Все в {1} ({0})",
+  "js.tk.pm.grp.org.other": "Все в {1} ({0})",
+  "js.tk.pm.cov.org.tip": "Включено во все подразделение {0}",
+  "js.tk.pm.asg.cov.org": "Включено в правило {0}",
+  "js.tk.pm.asg.grp.org.pend.tip": "Создаёт правило организации для {0} (ожидание: принимает {1})",
+  "js.tk.pm.asg.org.locked.tip": "Уже назначено — только {0} может удалить это правило",
+  "js.tk.pm.chip.cc.org.one": "{1} · {0}",
+  "js.tk.pm.chip.cc.org.other": "{1} · {0}",
+  "js.tk.pm.chip.asg.org.one": "{1} · правило ({0})",
+  "js.tk.pm.chip.asg.org.other": "{1} · правило ({0})",
+  "js.tk.pm.chip.asg.org.pend.one": "{1} · ожидание ({0})",
+  "js.tk.pm.chip.asg.org.pend.other": "{1} · ожидание ({0})",
+  "js.tk.pm.vac.tip": "Нельзя выбрать организацию без руководителя",
+  "js.tk.pm.vac.hint": "Администратор должен назначить руководителя"
 }

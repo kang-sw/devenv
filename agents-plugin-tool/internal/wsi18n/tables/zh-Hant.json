@@ -2692,5 +2692,19 @@
   "js.find.placeholder": "在卡片內尋找…",
   "js.find.prev": "上一個相符項目 (Shift+Enter)",
   "js.find.next": "下一個相符項目 (Enter)",
-  "js.find.close": "關閉尋找列 (Esc)"
+  "js.find.close": "關閉尋找列 (Esc)",
+  "js.tk.pm.grp.org.one": "{1} 全體 ({0}人)",
+  "js.tk.pm.grp.org.other": "{1} 全體 ({0}人)",
+  "js.tk.pm.cov.org.tip": "已包含在 {0} 全體中",
+  "js.tk.pm.asg.cov.org": "已包含在 {0} 的規則中",
+  "js.tk.pm.asg.grp.org.pend.tip": "為 {0} 建立組織規則（待確認：{1} 接受）",
+  "js.tk.pm.asg.org.locked.tip": "已指派 — 僅 {0} 可移除此組織規則",
+  "js.tk.pm.chip.cc.org.one": "{1} · {0}人",
+  "js.tk.pm.chip.cc.org.other": "{1} · {0}人",
+  "js.tk.pm.chip.asg.org.one": "{1} · 規則 ({0}人)",
+  "js.tk.pm.chip.asg.org.other": "{1} · 規則 ({0}人)",
+  "js.tk.pm.chip.asg.org.pend.one": "{1} · 待確認 ({0}人)",
+  "js.tk.pm.chip.asg.org.pend.other": "{1} · 待確認 ({0}人)",
+  "js.tk.pm.vac.tip": "無負責人的組織無法選取",
+  "js.tk.pm.vac.hint": "需管理員指定負責人後才可選取"
 }

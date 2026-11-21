@@ -1503,7 +1503,9 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk.tk-pm .pm-chip.pend { background: var(--tk-pur-bg); color: var(--tk-pur-fg); }
 .tk.tk-pm .pm-chip.rule { background: var(--tk-blu-bg); color: var(--tk-blu-fg); }
 .tk.tk-pm .pm-chip.org { background: var(--tk-blu-bg); color: var(--tk-blu-fg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tk-blu) 45%, transparent); }
+.tk.tk-pm .pm-chip.vac { background: none; color: var(--tk-amb); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tk-amb) 60%, transparent); }
 .tk.tk-pm .av { margin-left: 0; }
+.tk.tk-pm .av.org { border-radius: 6px; background: var(--tk-blu-bg); color: var(--tk-blu-fg); font-size: 11px; font-style: normal; }
 .tk.tk-pm .pm-ck, .tk.tk-pm .pm-rdo { width: 15px; height: 15px; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-muted-fg) 75%, transparent); display: inline-flex; align-items: center; justify-content: center; flex: none; font-size: 11px; font-weight: 900; line-height: 1; color: var(--wb-primary-fg); cursor: pointer; }
 .tk.tk-pm .pm-ck { border-radius: 4px; }
 .tk.tk-pm .pm-rdo { border-radius: 50%; }
@@ -1540,6 +1542,12 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk.tk-pm .pm-opt.grp.on { background: var(--tk-blu-bg); color: var(--tk-blu-fg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tk-blu) 60%, transparent); }
 .tk.tk-pm .pm-opt.cov { cursor: not-allowed; color: color-mix(in srgb, var(--wb-muted-fg) 80%, var(--wb-bg)); }
 .tk.tk-pm .pm-opt.lock { cursor: not-allowed; }
+.tk.tk-pm .pm-nd.vac { cursor: not-allowed; box-shadow: inset 0 0 0 1px var(--wb-muted); margin-top: 6px; }
+.tk.tk-pm .pm-nd.vac:hover { background: none; }
+.tk.tk-pm .pm-nd.vac .pm-ck { cursor: not-allowed; opacity: .55; }
+.tk.tk-pm .pm-nd.vac .av, .tk.tk-pm .pm-nd.vac .pm-nm { opacity: .55; }
+.tk.tk-pm .pm-nd.vac .pm-who { cursor: not-allowed; }
+.tk.tk-pm .pm-rt .pm-hint { font-size: 11px; color: var(--tk-amb); white-space: nowrap; }
 .tk.tk-pm .pm-unas { margin-top: 8px; border: 1px dashed color-mix(in srgb, var(--tk-amb) 50%, transparent); border-radius: 8px; padding: 2px 6px 4px; }
 .tk.tk-pm .pm-unas h4 { margin: 2px 0; font-size: 11.5px; font-weight: 800; color: var(--tk-amb); display: flex; align-items: center; gap: 6px; }
 .tk.tk-pm .pm-unas .pm-nd { grid-template-columns: 0 15px 20px minmax(0, 1fr) auto; }

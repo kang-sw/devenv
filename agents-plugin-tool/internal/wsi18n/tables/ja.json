@@ -2692,5 +2692,19 @@
   "js.find.placeholder": "カード内を検索…",
   "js.find.prev": "前の一致 (Shift+Enter)",
   "js.find.next": "次の一致 (Enter)",
-  "js.find.close": "検索バーを閉じる (Esc)"
+  "js.find.close": "検索バーを閉じる (Esc)",
+  "js.tk.pm.grp.org.one": "{1} 全体 ({0}名)",
+  "js.tk.pm.grp.org.other": "{1} 全体 ({0}名)",
+  "js.tk.pm.cov.org.tip": "{0} 全体に含まれています",
+  "js.tk.pm.asg.cov.org": "{0} のルールに含まれています",
+  "js.tk.pm.asg.grp.org.pend.tip": "{0} の組織ルールを作成 (保留: {1} が承諾)",
+  "js.tk.pm.asg.org.locked.tip": "割り当て済み — {0} のみこの組織ルールを解除できます",
+  "js.tk.pm.chip.cc.org.one": "{1} · {0}名",
+  "js.tk.pm.chip.cc.org.other": "{1} · {0}名",
+  "js.tk.pm.chip.asg.org.one": "{1} · ルール ({0}名)",
+  "js.tk.pm.chip.asg.org.other": "{1} · ルール ({0}名)",
+  "js.tk.pm.chip.asg.org.pend.one": "{1} · 保留 ({0}名)",
+  "js.tk.pm.chip.asg.org.pend.other": "{1} · 保留 ({0}名)",
+  "js.tk.pm.vac.tip": "ヘッドがない組織は選択できません",
+  "js.tk.pm.vac.hint": "管理者がヘッドを指定すると選択可能"
 }
