@@ -569,7 +569,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-21T10:10:06Z"
+        "touched_at": "2026-11-21T10:10:51Z",
+        "impl": {
+          "branch": "impl/develop/grain-tux-rover"
+        }
       }
     },
     "261121-feat-ws-tracker-unhide": {
