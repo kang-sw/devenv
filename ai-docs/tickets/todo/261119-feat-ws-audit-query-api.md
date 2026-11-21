@@ -42,8 +42,10 @@ acknowledgment) and is carried forward over the per-session audit ring.
      head plus tail of an oversized body. The full-envelope route returns
      `stored_trunc` unchanged. `range` offsets address the stored bytes, so
      they page through head, marker and tail, and never reach the omitted
-     middle. (2011) records the lead's choice for the summary fields
-     `in_bytes` and `out_bytes`. `stored_trunc` carries the original length.
+     middle. `stored_trunc` carries the original length. The summary fields
+     `in_bytes` and `out_bytes` report stored lengths ((2011), owner
+     acknowledged 2026-11-21), describing what `range` can read.
+     Rejected: reporting original lengths in those summary fields.
    - `GET /s/<id>/audit/search?q=<text>&regex=0|1&case=0|1&kinds=&n=` searches
      the stored `in` and `out` of the whole conversation, newest first. It
      returns `{hits: [{event_id, kind, field, line_no, line, call_id,
@@ -88,6 +90,10 @@ acknowledgment) and is carried forward over the per-session audit ring.
    child's own session. A session with no audit data (a non-hosted session,
    data removed by capacity eviction or time retention, or nothing captured yet)
    returns an empty page, not an error.
+6. **Evicted cursors are stale ((2012), owner acknowledged 2026-11-21).**
+   An evicted event or search cursor while the session still has audit data
+   returns a stale-cursor response; the caller restarts. Rejected: resuming
+   at the nearest retained boundary, which would silently leave gaps.
 
 ## Constraints
 
@@ -103,14 +109,6 @@ acknowledgment) and is carried forward over the per-session audit ring.
   paths never wait on file I/O beyond the query itself (parent epic
   file-touch rule).
 
-## Open Decision Queue
-
-Last ID: (2012)
-
-(2011) [open] [technical] The lead chose stored lengths over original lengths in `in_bytes` and `out_bytes` - the fields describe what `range` can read, and `stored_trunc` flags truncation.
-
-(2012) [open] [technical] For an evicted event or search cursor when the session still has audit data ((1970)=a), the lead chose a stale-cursor response and caller restart over resuming at the nearest retained boundary - an explicit failure avoids silent gaps in an audit read.
-
 ## Phases
 
 ### Phase 1: Events, event, call lookup and search routes
@@ -121,8 +119,10 @@ Decision 2.
 
 Verification: route tests on a fixture store, including paging boundaries,
 a truncated large body with its range follow-up, a `stored_trunc` body (its
-marker returned, range offsets within the stored bytes, search missing the
-omitted middle), a session with no audit data returning an empty page, no
+marker returned, summary byte lengths matching stored bytes, range offsets
+within the stored bytes, search missing the omitted middle), stale responses
+for evicted event and search cursors with retained audit data, a session with
+no audit data returning an empty page, no
 mutating route registered, and a search hit's line
 number and `call_id`. Cover inclusive-lower/exclusive-upper UTC bounds;
 omitted, equal, invalid and reversed bounds; kinds and event-ID cursors
