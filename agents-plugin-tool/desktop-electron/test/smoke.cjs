@@ -9,6 +9,7 @@ const { spawn, execFileSync } = require('node:child_process');
 const { once } = require('node:events');
 const root = path.resolve(__dirname, '..');
 const { builtPaths, processes, launchedRoot, descendants, signalIfCurrent } = require('./host.cjs');
+const { draftFrame, attachImageDraft, assertImageDraft, openLegacyGuard } = require('./draft-close.cjs');
 const { executablePath, daemonPath } = builtPaths(root);
 const evidence = process.env.WS_ELECTRON_EVIDENCE || path.join(root, 'dist/evidence');
 fs.mkdirSync(evidence, { recursive: true });
@@ -28,6 +29,10 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-smoke-'));
 const daemonRoot = path.join(temp, 'daemon'), shellRoot = path.join(temp, 'shell');
 fs.mkdirSync(path.join(shellRoot, 'dashboard'), { recursive: true });
 const endpoint = path.join(shellRoot, 'dashboard/endpoint.json');
+const isolatedHome = path.join(temp, 'home');
+fs.mkdirSync(isolatedHome);
+const fixtureEnv = { ...process.env, HOME: isolatedHome, WS_CONFIG_HOME: path.join(temp, 'config') };
+for (const name of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'PI_CODING_AGENT_DIR']) delete fixtureEnv[name];
 const owned = new Map(), checks = [];
 let application, daemon, applicationIdentity, daemonIdentity, dimensions;
 const targetRequests = [];
@@ -73,7 +78,7 @@ async function main(fn, arg) { return application.evaluate(fn, arg); }
 async function launch() {
   const launchedAt = Date.now();
   fs.appendFileSync(electronAppLog, `\nLaunch at ${new Date(launchedAt).toISOString()}\n`);
-  const env = { ...process.env, WS_CACHE_HOME: shellRoot, WS_CONFIG_HOME: path.join(temp, 'config'),
+  const env = { ...fixtureEnv, WS_CACHE_HOME: shellRoot,
     ELECTRON_ENABLE_LOGGING: '1', ELECTRON_ENABLE_STACK_DUMPING: '1' };
   delete env.ELECTRON_RUN_AS_NODE;
   try {
@@ -103,7 +108,7 @@ async function run() {
   const log = fs.openSync(path.join(evidence, 'daemon.log'), 'w');
   const daemonLaunchedAt = Date.now();
   daemon = spawn(daemonPath, [], {
-    env: { ...process.env, WS_CACHE_HOME: daemonRoot, WS_CONFIG_HOME: path.join(temp, 'config'), GOPROXY: 'off', GOSUMDB: 'off', GOTOOLCHAIN: 'local' },
+    env: { ...fixtureEnv, WS_CACHE_HOME: daemonRoot, GOPROXY: 'off', GOSUMDB: 'off', GOTOOLCHAIN: 'local' },
     stdio: ['ignore', log, log],
   });
   daemonIdentity = recordLaunch(daemon, daemonLaunchedAt);
@@ -144,13 +149,14 @@ async function run() {
   });
   dimensions = { size, workArea };
   console.log(JSON.stringify({ dimensions }));
-  assert.deepEqual(security, { isolation: true, sandbox: true, node: false, preload: '', webview: false, min: [760, 520] });
+  assert.equal(path.basename(security.preload), 'dashboard-preload.js');
+  assert.deepEqual({ ...security, preload: undefined }, { isolation: true, sandbox: true, node: false, preload: undefined, webview: false, min: [760, 520] });
   assert.equal(size[0], 1280);
   assert.equal(size[1], Math.min(860, workArea.height));
   assert.deepEqual(await page.evaluate(() => [typeof window.require, typeof window.process]), ['undefined', 'undefined']);
   assert.match(await page.evaluate(() => navigator.userAgent), / Werkschaft\/0\.1\.0$/);
   assert(!JSON.stringify(await page.evaluate(() => ({ url: location.href, local: { ...localStorage }, session: { ...sessionStorage }, html: document.documentElement.outerHTML }))).includes('SHELL-TOKEN'));
-  checks.push('zero renderer authority, no preload, UA, dimensions and credential exclusion');
+  checks.push('isolated dashboard preload, UA, dimensions and credential exclusion');
   await main(({ shell, dialog, BrowserWindow }) => {
     global.smokeExternal = []; global.smokeDialogs = []; global.smokeChoice = 0; global.smokeFocus = 0;
     global.smokeFailures = [];
@@ -278,27 +284,14 @@ async function run() {
   await waitFor(() => Promise.resolve(requests.length === 1), 'open with system fs/act request');
   assert.deepEqual(requests[0].body, { action: 'open', root: path.join(daemonRoot, 'project'), path: 'fixture.md' });
   checks.push('real dashboard desktop file-link menu sends fs/act open (request intercepted before OS launch)');
-  await dashboard.locator('#ctext').fill('preserve this draft');
-  await dashboard.locator('#ctext').click();
-  await dashboard.evaluate(() => {
-    const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ9kAAAAASUVORK5CYII='), c => c.charCodeAt(0));
-    const transfer = new DataTransfer(); transfer.items.add(new File([png], 'draft.png', { type: 'image/png' }));
-    document.getElementById('ctext').dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }));
-  });
-  await waitFor(() => dashboard.locator('#ctext').inputValue().then(value => value.includes('[Image #1]')), 'unreferenced pasted image marker');
-  await main(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
-  await waitFor(() => main(() => global.smokeDialogs.length === 1), 'X-close leave/stay dialog');
-  assert.equal(await main(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
-  fs.writeFileSync(path.join(evidence, 'close-dialog.json'), JSON.stringify(await main(() => global.smokeDialogs[0]), null, 2));
-  assert.match(await dashboard.locator('#ctext').inputValue(), /preserve this draft.*\[Image #1\]/s);
+  await attachImageDraft(page.frameLocator('iframe.sframe.on'));
   await page.screenshot({ path: path.join(evidence, 'electron-dashboard-draft.png') });
-  checks.push('real dashboard image guard: X-close Stay keeps window and draft');
 
   // Second launch shares only this test's profile, focuses the first, and exits.
   await main(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].minimize());
   const secondLog = fs.openSync(path.join(evidence, 'second-launch.log'), 'w');
   const secondLaunchedAt = Date.now();
-  const secondEnv = { ...process.env, WS_CACHE_HOME: shellRoot };
+  const secondEnv = { ...fixtureEnv, WS_CACHE_HOME: shellRoot };
   delete secondEnv.ELECTRON_RUN_AS_NODE;
   const second = spawn(executablePath, [`--user-data-dir=${path.join(temp, 'profile')}`], { env: secondEnv, stdio: ['ignore', secondLog, secondLog] });
   recordLaunch(second, secondLaunchedAt);
@@ -310,24 +303,40 @@ async function run() {
   checks.push('built second launch exits and restores/focuses the existing sole window');
   remember(applicationIdentity);
   const firstProcess = application.process();
-  await main(({ BrowserWindow }) => { global.smokeChoice = 1; BrowserWindow.getAllWindows()[0].close(); }).catch(() => {});
-  await waitFor(() => Promise.resolve(firstProcess.exitCode !== null || firstProcess.signalCode !== null), 'Leave closes the app');
+  // The stub would choose Stay if the durable renderer still raised a veto.
+  await main(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close()).catch(() => {});
+  await waitFor(() => Promise.resolve(firstProcess.exitCode !== null || firstProcess.signalCode !== null), 'recovery-capable X-close without a prompt');
   application = null;
   assert.equal((await (await fetch(origin + '/health')).json()).pid, ep.pid);
   assert.deepEqual(fs.readFileSync(endpoint), endpointBefore);
-  checks.push('Leave closes and daemon survives; endpoint unchanged');
-  scan('guarded app exited');
+  checks.push('committed image draft closes immediately and leaves the daemon running');
+  scan('recovery-capable app exited');
 
   page = await launch();
   await page.waitForURL(origin + '/');
   assert(Math.abs(await factor() - 1) < 0.001);
+  await assertImageDraft(await draftFrame(page, origin));
+  await page.screenshot({ path: path.join(evidence, 'electron-dashboard-restored.png') });
+  checks.push('same profile restores draft text and the original image bytes');
+
+  await openLegacyGuard(page, origin);
+  await main(({ dialog }) => {
+    global.smokeDialogs = []; global.smokeChoice = 0;
+    dialog.showMessageBoxSync = (_window, options) => { global.smokeDialogs.push(options); return global.smokeChoice; };
+  });
+  await main(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
+  await waitFor(() => main(() => global.smokeDialogs.length === 1), 'legacy X-close Stay/Leave dialog');
+  assert.equal(await main(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
+  fs.writeFileSync(path.join(evidence, 'close-dialog.json'), JSON.stringify(await main(() => global.smokeDialogs[0]), null, 2));
+  assert.match(await page.locator('textarea').inputValue(), /unpersisted image/);
   remember(applicationIdentity);
   const freshProcess = application.process();
-  await main(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close()).catch(() => {});
-  await waitFor(() => Promise.resolve(freshProcess.exitCode !== null || freshProcess.signalCode !== null), 'clean app close');
+  await main(({ BrowserWindow }) => { global.smokeChoice = 1; BrowserWindow.getAllWindows()[0].close(); }).catch(() => {});
+  await waitFor(() => Promise.resolve(freshProcess.exitCode !== null || freshProcess.signalCode !== null), 'legacy Leave closes the app');
   application = null;
   assert.equal((await (await fetch(origin + '/health')).json()).pid, ep.pid);
-  checks.push('no image draft: immediate X-close; fresh process zoom resets; daemon survives');
+  checks.push('legacy renderer keeps the native Stay/Leave fallback for a held image');
+
 }
 (async () => {
   let failure;

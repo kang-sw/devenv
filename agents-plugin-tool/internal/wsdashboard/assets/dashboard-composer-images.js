@@ -124,7 +124,7 @@
       if (!IMG_TYPES[f.type]) { refused = wsT("js.img.type", f.name || wsT("js.img.thefile")); return; }
       if (f.size > IMG_BYTES) { refused = wsT("js.img.big", f.name || wsT("js.img.theimage")); return; }
       if (imgs.length >= IMG_MAX) { refused = wsT("js.img.max", IMG_MAX); return; }
-      var it = { name: f.name || "pasted image", url: URL.createObjectURL(f), data: null, ref: "", n: nextNum() };
+      var it = { name: f.name || "pasted image", url: URL.createObjectURL(f), data: null, ref: "", blob: f, n: nextNum() };
       imgs.push(it);
       added.push(it.n);
       if (owner) owner.images.push(it.n);

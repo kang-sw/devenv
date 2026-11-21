@@ -151,7 +151,7 @@ vm.runInContext(`+quoted(selectionRuntimeEnvironment)+`,host.context);
 vm.runInContext(`+quoted(selectionProductionRuntime(t))+`,host.context);
 // These cases retain the separate-chip fallback path; the browser suite
 // exercises the live inline editor and its ordered capsule delivery.
-vm.runInContext('inlineEditor = function(){ return null; };',host.context);
+vm.runInContext('inlineEditor = function(){ return null; }; draftLoaded = true; persistOutbox = function (done) { done(true); };',host.context);
 Promise.resolve(vm.runInContext(`+quoted("(async function(){\n"+body+"\n})()")+`,host.context)).catch(e=>{console.error(e);process.exitCode=1;});
 `)
 }
@@ -334,17 +334,17 @@ bselections = [first]; imgs = [{n:1,name:"one",data:"QUJD",ref:"",url:"blob:one"
 placeMention({ms:[{topic:"plan",entry:"e8",text:"pending"}],x:1,y:1});
 addFiles([file("popup-only")],mnote);
 check("attachment alone has no network action",sent,0);
-sendMessage();
+sendMessage(); await new Promise(setImmediate);
 check("explicit send excludes popup-only image", [bodies[0].images.map(function(p){return p.n;}),splitSelectionText(bodies[0].text).groups], [[1],[first]]);
 await respond(false,"refused");
 check("failure gives back the group and every local image", [bselections.map(function(s){return [s.mentions,s.comment,s.images];}),imgs.map(function(p){return p.n;})], [[[first.mentions,first.comment,first.images]],[1,2]]);
-sendMessage();
+sendMessage(); await new Promise(setImmediate);
 check("a send leaves the composer before the daemon answers; the popup keeps its image", [bselections.length,imgs.map(function(p){return p.n;})], [0,[2]]);
 hideMention(); placeMention({ms:[{topic:"plan",entry:"e9",text:"new push"}],x:1,y:1});
 mnote.value = "later"; addFiles([file("later")],mnote); addMention();
 await respond(true,{});
 check("a push added while sending stays for the next send", bselections.map(function(s){return [s.comment,s.images];}), [["later",[3]]]);
-sendMessage(); await respond(true,{});
+sendMessage(); await new Promise(setImmediate); await respond(true,{});
 check("next explicit send clears only its snapshot", [bselections.length,imgs.length], [0,0]);
 
 // Two independent held messages may each name image 1. Only their real
@@ -355,7 +355,7 @@ ctext.value = ""; imgSeq = 0;
 restoreHeld([{text:selectionPrefix([a]),images:["written-a.png"],nums:[1]},{text:selectionPrefix([b]),images:["written-b.png"],nums:[1]}]);
 check("independent image-1 collisions remap actual refs only", bselections.map(function(s){return [s.mentions[0].text,s.comment,s.images];}), [["a [Image #1]","memo [Image #1]",[1]],["b [Image #1]","other [Image #1]",[2]]]);
 check("written references survive cancel", imgs.map(function(p){return [p.n,p.ref];}), [[1,"written-a.png"],[2,"written-b.png"]]);
-sendMessage();
+sendMessage(); await new Promise(setImmediate);
 check("resend uses written refs with local numbers", [bodies[bodies.length-1].refs,bodies[bodies.length-1].refNums], [["written-a.png","written-b.png"],[1,2]]);
 await respond(true,{});
 check("successful resend releases restored groups", bselections.length,0);
@@ -380,15 +380,15 @@ check("rich capsule and legacy mention offsets shift with prefix", [saved.capsul
 saveDraft();
 // Another session sees neither this group's source nor its references.
 rid = "sess2"; bselections=[]; ctext.value=""; imgs=[]; mentions=[];
-restoreDraft(); check("session isolation", [bselections.length,ctext.value,imgs.length], [0,"",0]);
-rid = "sess1"; restoreDraft();
+restoreDraft(draftStore.load(rid)); check("session isolation", [bselections.length,ctext.value,imgs.length], [0,"",0]);
+rid = "sess1"; restoreDraft(draftStore.load(rid));
 require('assert').deepStrictEqual(bselections.map(selectionValue), [{mentions:group.mentions,comment:group.comment,images:[1]}], "reload loses only unsent image tails");
 check("source and memo marker-like text survive loss", [bselections[0].mentions[0].text,bselections[0].comment], ["source [Image #2] <literal>","memo [Image #2] &amp;"]);
 check("written refs and ordinary text restore", [imgs.map(function(p){return [p.n,p.ref];}),ctext.value,toastTexts()], [[[1,"written.png"]],"@bob ordinary",["js.draft.imgslost:1"]]);
 check("rich ranges and caret restore without prefix offsets", [ctext.wsc.snapshot(),mentions,[ctext.selectionStart,ctext.selectionEnd]], [rich,[{start:0,end:4,text:"@bob"}],[2,4]]);
 // Legacy persisted drafts still have precisely the old text/range shape.
 bselections=[]; ctext.value=""; imgs=[]; mentions=[];
-draftStore.save(rid,{text:"legacy text",mentions:[],sel:[3,3]}); restoreDraft();
+draftStore.save(rid,{text:"legacy text",mentions:[],sel:[3,3]}); restoreDraft(draftStore.load(rid));
 check("old text shape remains ordinary", [ctext.value,bselections,[ctext.selectionStart,ctext.selectionEnd]], ["legacy text",[],[3,3]]);
 process.stdout.write(bad.join("\n"));
 `)

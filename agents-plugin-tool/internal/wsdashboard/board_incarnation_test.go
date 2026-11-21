@@ -187,7 +187,7 @@ func TestComposerBoardIncarnation(t *testing.T) {
 var sending = false, boardIncarnation = "rendered-old", rid = "session", draftTimer = null;
 function inlineEditor() { return null; }
 var saves = 0, reloads = 0, postedBody;
-saveDraft = function () { saves++; };
+saveDraft = function () { saves++; return Promise.resolve(true); };
 window.location = { reload: function () { reloads++; } };
 function noteWarn() {}
 chipList = function () { return [{ id: "01", answer: "ok" }]; };
@@ -197,6 +197,7 @@ post = function (route, body, done) { postedBody = body; reply = done; };
 ctext.value = "answer"; sendMessage();
 check("send carries rendered incarnation", postedBody.boardIncarnation, "rendered-old");
 reply(false, "board-replaced");
+setImmediate(function () {
 check("stale response reloads page", reloads, 1);
 check("failed send saved before reload", saves, 2);
 check("refused send never acknowledged", outbox.filter(function (m) { return m.acked; }).length, 0);
@@ -205,6 +206,7 @@ var restored = boardDraft({ boardIncarnation: "rendered-old", text: "keep my tex
 check("saved old-incarnation chips are not restored onto replacement", restored.chips, []);
 check("free text survives replacement reload", restored.text, "keep my text");
 process.stdout.write(bad.join("\n"));
+});
 `)
 	if !strings.Contains(src, `var boardIncarnation = root.getAttribute("data-board-incarnation")`) {
 		t.Fatal("incarnation must be frozen from the rendered page, not live-swapped markup")

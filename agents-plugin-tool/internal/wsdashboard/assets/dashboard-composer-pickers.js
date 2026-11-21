@@ -174,20 +174,19 @@
       renderCmd();
     } else clearCommand();
   }
-  // sendCommand posts the selection; what else the composer holds stays.
+  function submitCommand(name, args, clearText) {
+    saveDraft();
+    if (cmdSel) clearCommand();
+    if (clearText) { ctext.value = ""; grow(); clearMentions(); }
+    var typed = "/" + name + (args ? " " + args : "");
+    outboxAdd({ body: { command: name, args: args }, pics: [], own: [],
+      back: { text: typed, command: { name: name, args: args } } });
+  }
+  // A command with fixed arguments leaves unrelated composer input intact.
   function sendCommand() {
     var sel = cmdSel, fixed = typeof sel.args === "string";
     if (!fixed && imgs.length) { noteWarn(wsT("js.cmd.images")); return; }
-    var raw = ctext.value, args = fixed ? sel.args : sendText().trim();
-    followConvo();
-    sending = true;
-    post("message", { command: sel.name, args: args }, function (ok, res) {
-      sending = false;
-      if (!ok) { noteWarn(wsT("js.send.fail", res)); return; }
-      if (cmdSel === sel) clearCommand();
-      if (!fixed && ctext.value === raw) { ctext.value = ""; grow(); clearMentions(); }
-      clearDraft();
-    });
+    submitCommand(sel.name, fixed ? sel.args : sendText().trim(), !fixed);
   }
   if (ctext && rid && ccmd && window.wsMention) {
     slash = window.wsMention.attach(ctext, {
@@ -206,14 +205,7 @@
   }
   function sendInlineCommand(sel) {
     if (imgs.length) { noteWarn(wsT("js.cmd.images")); return; }
-    var raw = ctext.value, args = sendText().slice(sel.end).trim();
-    followConvo(); sending = true;
-    post("message", { command: sel.name, args: args }, function (ok, res) {
-      sending = false;
-      if (!ok) { noteWarn(wsT("js.send.fail", res)); return; }
-      if (ctext.value === raw) { ctext.value = ""; grow(); clearMentions(); }
-      clearDraft();
-    });
+    submitCommand(sel.name, sendText().slice(sel.end).trim(), true);
   }
   // Topic-only editors keep their textarea owner and canonical [stem] strings.
   function bindCapsuleNotes() {

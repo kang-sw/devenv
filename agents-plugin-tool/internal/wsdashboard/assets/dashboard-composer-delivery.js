@@ -1,5 +1,4 @@
 // Composer sends and outbox delivery.
-  var sending = false;
   // topicNotes are the board's non-empty topic notes. A send carries them
   // as its topics, which the delivered message's answer block lists after
   // the item answers; they are no item's answer, so they are no answer
@@ -38,11 +37,11 @@
     return { text: selectionPrefix(legacy) + text.trim(), notes: notes, mentions: said.concat(bmentions), picks: picks.concat(wpicks), consoles: consoles.concat(wconsoles) };
   }
   function sendMessage() {
-    if (sending) return;
+    if (restoring || draftStore && !draftLoaded) return;
     var inline = !cmdSel && window.WsCapsules && window.WsCapsules.command(ctext);
     // A command waits until the queued messages before it are held, so the
     // inbox keeps the order typed.
-    if ((cmdSel || inline) && outboxUnsent()) return;
+    if ((cmdSel || inline) && outboxInFlight()) return;
     if (cmdSel) { sendCommand(); return; }
     if (inline) { sendInlineCommand(inline); return; }
     var groups = bselections.slice(), inlineData = inlineEditor() ? inlineSend() : null;
@@ -53,14 +52,13 @@
     var wp = inlineData ? inlineData.picks : wpicks.slice(), wc = inlineData ? inlineData.consoles : wconsoles.slice();
     var closing = closeRequests.map(function (r) { return { ref: r, topic: r.topic, reason: r.reason }; });
     if (!t && !list.length && !pics.length && !notes.length && !said.length && !wp.length && !wc.length && !closing.length) { noteWarn(wsT("js.send.empty")); return; }
-    if (pics.some(function (p) { return !p.ref && p.data === null; })) { noteWarn(wsT("js.send.reading")); return; }
+    if (pics.some(function (p) { return !p.ref && !p.blob && p.data === null; })) { noteWarn(wsT("js.send.reading")); return; }
     var body = { utcOffsetMinutes: -new Date().getTimezoneOffset(), text: t, chips: list, topics: notes.map(function (n) { return { topic: n.topic, note: n.value.trim() }; }), mentions: said };
     if (typeof boardIncarnation === "string") body.boardIncarnation = boardIncarnation;
     if (closing.length) body.closeRequests = closing.map(function (r) { return { topic: r.topic, reason: r.reason }; });
     if (wp.length) body.picks = wp;
     if (wc.length) body.consoles = wc;
-    var up = pics.filter(function (p) { return !p.ref; }), refs = pics.filter(function (p) { return !!p.ref; });
-    if (up.length) body.images = up.map(function (p) { return { name: p.name, data: p.data, n: p.n }; });
+    var refs = pics.filter(function (p) { return !!p.ref; });
     if (refs.length) {
       body.refs = refs.map(function (p) { return p.ref; });
       body.refNums = refs.map(function (p) { return p.n; });
@@ -70,17 +68,8 @@
     var ownTopics = notes.map(function (n) { return n.topic; });
     list.forEach(function (c) { var item = boardItem(c.id), topic = item && item.closest("section.topic[data-topic]"); if (topic) ownTopics.push(topicKey(topic)); });
     ownTopics.forEach(function (k) { boardOwn[k] = true; });
-    // The composer hands the whole send to the outbox now, which keeps it
-    // until the daemon answers: a failed post gives it back (outboxFail),
-    // and the saved draft stays the one from before the send until every
-    // queued send is held (saveDraft, outboxAcked). The sent images
-    // leave first, so emptying the notes trashes none, and keep their
-    // thumbnails until the post settles: a failure puts them back under the
-    // same numbers, so no fresh draft renumbers from 1 while a send is
-    // unsent (outboxAcked). Drop every sent chip before clearing any card,
-    // since clearing one re-syncs the rest.
-    // Flush the debounced draft while the composer still owns the send.
-    // Once it enters the outbox, saveDraft intentionally leaves it untouched.
+    // Save the active draft before handing it off. Its recovery record
+    // commits before the POST can start.
     saveDraft();
     var inlineBack = inlineEditor() ? { text: ctext.value, capsules: inlineEditor().snapshot(), selections: bselections.map(function (s) { return { key: s.key, mentions: s.mentions, comment: s.comment, images: s.images }; }) } : null;
     pics.forEach(dropImg);
@@ -102,28 +91,12 @@
       back: { text: t, chips: list, topics: body.topics, mentions: said, closeRequests: body.closeRequests, picks: wp, consoles: wc, inline: inlineBack, sentAt: Date.now() }
     });
   }
-  // --- outbox: a message shows the moment the daemon holds it ----------------
-  // A send leaves the composer at once (sendMessage) into the outbox: a
-  // dimmed row with a spinner above the message box while its post is
-  // unanswered. Posts go one at a time in send order, so the inbox holds
-  // them as typed. Only the daemon's OK makes a message look sent: the row
-  // then becomes a held bubble in the conversation, without waiting for the
-  // stream's render, where the server's held bubble will show (after the
-  // held ones in the convlive region). A convlive swap replaces the
-  // region's nodes, so each swap puts back the bubbles still unmatched
-  // (outboxSync): a render from before the inbox read the message must not
-  // drop it. A bubble leaves when a render shows the held bubble with the
-  // id its post returned, when the conversation shows a newer user entry
-  // than the one before the send (the session received it before any
-  // render held it), or, as a last resort, at the first swap OUTBOX_LINGER
-  // after the OK (a swap, not a timer: a page whose stream is down keeps
-  // what the daemon confirmed). A post that fails, or stays unanswered for
-  // OUTBOX_WAIT, takes back its message and every later queued one into the
-  // composer, in order, ahead of what was typed since; none showed as sent.
-  // A row and a bubble each carry the held bubble's cancel (outboxCancel,
-  // cancelEntry); a bubble also its steer.
-  var outbox = [], outboxPosting = false, outboxRows = null, OUTBOX_LINGER = 30000, OUTBOX_WAIT = 30000;
+  // --- outbox -------------------------------------------------------------------
+  // Only an acknowledged POST gets a held bubble. Restored deliveries stay
+  // in the composer until the user chooses to send or discard each one.
+  var outbox = [], outboxPosting = false, outboxRows = null, recoveredRows = null, deliverySequence = 0, OUTBOX_LINGER = 30000, OUTBOX_WAIT = 30000;
   function outboxUnsent() { return outbox.some(function (m) { return !m.acked; }); }
+  function outboxInFlight() { return outbox.some(function (m) { return !m.acked && !m.paused; }); }
   // A batch (sends the session read in one turn) carries its key on its
   // .user-batch wrapper; the bubbles inside it carry none.
   function lastUserEntry() {
@@ -165,7 +138,7 @@
       row.parentNode.insertBefore(outboxRows, row);
     }
     if (!outboxRows) return;
-    outbox.forEach(function (m) { if (!m.acked && !m.cancel && m.row.parentNode !== outboxRows) outboxRows.appendChild(m.row); });
+    outbox.forEach(function (m) { if (!m.acked && !m.paused && !m.cancel && m.row.parentNode !== outboxRows) outboxRows.appendChild(m.row); });
     outboxRows.hidden = !outboxRows.firstChild;
   }
   function outboxUnrow(m) {
@@ -249,31 +222,136 @@
     if (bub.firstChild) el.appendChild(bub);
     return el;
   }
+  function nextDeliveryID() {
+    return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2) + "-" + ++deliverySequence;
+  }
   function outboxAdd(m) {
+    m.recoveryID = nextDeliveryID();
+    m.recoveryState = "queued";
     m.row = outboxRow(m);
     outbox.push(m);
     outboxShowRows();
     followConvo();
-    outboxPump();
+    if (outboxPosting) saveDraft();
+    else outboxPump();
   }
+  function restoreDeliveries(deliveries) {
+    if (!ctext || !deliveries.length) return;
+    deliveries.forEach(function (m) {
+      m.pics = m.pics.map(loadDraftImage);
+      m.pics.forEach(function (p) { imgSeq = Math.max(imgSeq, p.n); });
+      outbox.push({ recoveryID: m.id, recoveryState: m.state, body: m.body,
+        pics: m.pics, back: m.back, own: [], user: lastUserEntry(), paused: true, row: outboxRow(m) });
+    });
+    showRecoveredDeliveries();
+  }
+  function showRecoveredDeliveries() {
+    var paused = outbox.filter(function (m) { return m.paused; });
+    if (!recoveredRows && !paused.length) return;
+    if (!recoveredRows) {
+      var row = ctext.closest(".crow");
+      if (!row) return;
+      recoveredRows = doc.createElement("div");
+      recoveredRows.className = "d-outbox d-outbox-recovery";
+      row.parentNode.insertBefore(recoveredRows, row);
+    }
+    recoveredRows.replaceChildren();
+    recoveredRows.hidden = !paused.length;
+    paused.forEach(function (m) {
+      var row = doc.createElement("div"), title = doc.createElement("strong"), text = doc.createElement("span");
+      row.className = "d-outbox-row";
+      title.textContent = wsT(m.recoveryState === "queued" ? "js.delivery.unsent" : "js.delivery.unknown");
+      text.className = "d-outbox-text";
+      text.textContent = m.back.text || m.pics.map(function (p) { return marker(p.n); }).join(" ") ||
+        (m.back.chips || []).map(function (c) { return c.note || c.answer || c.id; }).join(" · ") ||
+        (m.back.topics || []).map(function (n) { return n.note || n.topic; }).join(" · ");
+      row.append(title, text);
+      function action(label, click) {
+        var button = doc.createElement("button");
+        button.type = "button";
+        button.textContent = wsT(label);
+        button.addEventListener("click", click);
+        row.appendChild(button);
+      }
+      action(m.recoveryState === "queued" ? "js.delivery.send" : "js.delivery.resend", async function () {
+        if (!m.paused || outbox.indexOf(m) < 0) return;
+        if (m.recoveryState !== "queued" && !await window.wsConfirm(wsT("js.delivery.confirm"), {
+          accept: wsT("js.delivery.resend"), opener: doc.activeElement
+        })) return;
+        if (!m.paused || outbox.indexOf(m) < 0) return;
+        m.paused = false;
+        m.cancel = false;
+        if (m.recoveryState !== "queued") m.recoveryID = nextDeliveryID();
+        m.user = lastUserEntry();
+        showRecoveredDeliveries();
+        outboxShowRows();
+        outboxPump();
+        ctext.focus();
+      });
+      action("js.delivery.discard", function () {
+        if (!m.paused || outbox.indexOf(m) < 0) return;
+        outboxDrop(m);
+        showRecoveredDeliveries();
+        saveDraft();
+        ctext.focus();
+      });
+      recoveredRows.appendChild(row);
+    });
+  }
+  function pauseDeliveries(m, state) {
+    m.recoveryState = state;
+    outbox.forEach(function (entry) {
+      if (entry.acked) return;
+      entry.paused = true;
+      outboxUnrow(entry);
+    });
+    showRecoveredDeliveries();
+    saveDraft();
+  }
+  function postDelivery(m, done, canPost) {
+    var uploads = m.pics.filter(function (p) { return !p.ref; });
+    if (!uploads.length) { post("message", m.body, done); return; }
+    Promise.all(uploads.map(async function (p) {
+      return { name: p.name, data: p.data === null ? await imageData(p.blob) : p.data, n: p.n };
+    })).then(function (images) {
+      if (canPost()) post("message", Object.assign({}, m.body, { images: images }), done);
+    }, function () { done(false, wsT("js.send.reading")); });
+  }
+  function persistOutbox(done) { saveDraft().then(done); }
   function outboxPump() {
-    if (outboxPosting) return;
-    var m = outbox.filter(function (x) { return !x.acked; })[0];
+    if (outboxPosting || draftDetached) return;
+    var m = outbox.find(function (x) { return !x.acked && !x.paused; });
     if (!m) return;
     outboxPosting = true;
-    m.sent = true;
-    var wait = 0, settled = false;
-    var settle = function (ok, res) {
-      if (settled) return;
-      settled = true;
-      clearTimeout(wait);
-      outboxPosting = false;
-      if (!ok) { outboxFail(res); return; }
-      outboxAcked(m, res && res.id ? String(res.id) : "");
-      outboxPump();
-    };
-    wait = setTimeout(function () { settle(false, wsT("js.post.unreachable")); }, OUTBOX_WAIT);
-    post("message", m.body, settle);
+    var previous = m.recoveryState;
+    m.recoveryState = "posting";
+    persistOutbox(function (saved) {
+      if (draftDetached) return;
+      if (!saved) {
+        outboxPosting = false;
+        pauseDeliveries(m, previous);
+        noteWarn(wsT("js.delivery.savefailed"));
+        return;
+      }
+      m.sent = true;
+      var settled = false;
+      var settle = function (ok, res, unknown) {
+        if (settled || draftDetached) return;
+        settled = true;
+        clearTimeout(wait);
+        outboxPosting = false;
+        if (unknown || !ok && previous !== "queued") {
+          pauseDeliveries(m, "unknown");
+          if (!unknown) noteWarn(wsT("js.send.fail", res));
+          return;
+        }
+        if (!ok) { outboxFail(res); return; }
+        outboxAcked(m, res && res.id ? String(res.id) : "");
+        outboxPump();
+      };
+      var wait = setTimeout(function () { settle(false, wsT("js.post.unreachable"), true); }, OUTBOX_WAIT);
+      postDelivery(m, settle, function () { return !settled && !draftDetached; });
+    });
   }
   function outboxAcked(m, id) {
     m.acked = true;
@@ -284,14 +362,15 @@
     // id leaves nothing to cancel, so the bubble shows.
     if (!id) m.cancel = false;
     outboxUnrow(m);
-    m.el = outboxBubble(m);
-    boardFlushViewed(false);
+    if (m.body.command) outboxDrop(m);
+    else {
+      m.el = outboxBubble(m);
+      boardFlushViewed(false);
+    }
     // A fresh draft numbers its images from 1 again once nothing, sent or
     // not, could name a number.
     if (!outboxUnsent() && !imgs.length && !ctext.value && !chipList().length && !topicNotes().length) imgSeq = 0;
-    // The sent draft is gone once nothing queued could need it back; what
-    // was typed since is saved again as the next draft.
-    if (!outboxUnsent()) clearDraft();
+    saveDraft();
     outboxSync();
     followConvo();
     if (m.cancel) cancelEntry(id, function () { m.cancel = false; outboxSync(); followConvo(); });
@@ -300,17 +379,15 @@
     var i = outbox.indexOf(m);
     if (i < 0) return;
     outbox.splice(i, 1);
-    if (m.el.parentNode) m.el.parentNode.removeChild(m.el);
+    if (m.el && m.el.parentNode) m.el.parentNode.removeChild(m.el);
     m.pics.forEach(function (p) { if (imgs.indexOf(p) < 0 && imgTrash[p.n] !== p) release(p); });
   }
   function outboxFail(res) {
-    outboxReturn(outbox.filter(function (m) { return !m.acked; }));
+    var saved = outboxReturn(outbox.filter(function (m) { return !m.acked && !m.paused; }));
     noteWarn(wsT("js.send.fail", res));
     if (res === "board-replaced") {
       // Preserve returned text; boardDraft strips stale IDs after reload.
-      saveDraft();
-      clearTimeout(draftTimer);
-      window.location.reload();
+      saved.then(function (ok) { if (ok && !draftDetached) window.location.reload(); });
     }
   }
   // outboxReturn takes unanswered sends out of the outbox and back into the
@@ -324,7 +401,7 @@
       m.pics.forEach(function (p) { if (imgs.indexOf(p) < 0) imgs.push(p); });
     });
     restoreHeld(back.map(function (m) { return m.back; }));
-    queueDraft();
+    return Promise.resolve(saveDraft());
   }
   // outboxCancel is an unanswered send's cancel: one not posted yet comes
   // straight back into the composer; one whose post is out leaves its row
@@ -332,7 +409,7 @@
   // comes back with the failure if the post fails.
   function outboxCancel(m) {
     if (m.acked || m.cancel || outbox.indexOf(m) < 0) return;
-    if (m.sent) { m.cancel = true; outboxUnrow(m); return; }
+    if (m.sent || m.recoveryState === "posting") { m.cancel = true; outboxUnrow(m); return; }
     outboxReturn([m]);
     noteOk(wsT("js.cancel.ok"));
     ctext.focus();

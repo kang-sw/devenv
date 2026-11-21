@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn, execFileSync } = require('node:child_process');
 const { processes, launchedRoot, descendants, signalIfCurrent } = require('./host.cjs');
+const { draftFrame, attachImageDraft, assertImageDraft, openLegacyGuard } = require('./draft-close.cjs');
 if (process.platform !== 'win32') throw new Error('Windows acceptance only');
 process.env.DEBUG = [process.env.DEBUG, 'pw:browser*'].filter(Boolean).join(',');
 const { _electron } = require(process.env.WS_PLAYWRIGHT);
@@ -14,6 +15,10 @@ const evidence = path.join(root, 'evidence');
 fs.mkdirSync(evidence, { recursive: true });
 const fixture = path.join(root, 'fixture');
 const cache = path.join(fixture, 'cache');
+const isolatedHome = path.join(fixture, 'home');
+fs.mkdirSync(isolatedHome, { recursive: true });
+const fixtureEnv = { ...process.env, HOME: isolatedHome, WS_CACHE_HOME: cache, WS_CONFIG_HOME: path.join(fixture, 'config') };
+for (const name of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'PI_CODING_AGENT_DIR']) delete fixtureEnv[name];
 const checks = [], unverified = [], failures = [], owned = new Map();
 let application, daemon, failure;
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -57,8 +62,7 @@ async function capture(name) {
   try {
     const log = fs.openSync(path.join(evidence, 'daemon.log'), 'w');
     let time = Date.now();
-    daemon = spawn(path.join(root, 'smoke-daemon.exe'), [], { env: { ...process.env, WS_CACHE_HOME: cache,
-      WS_CONFIG_HOME: path.join(fixture, 'config'), GOPROXY: 'off', GOSUMDB: 'off', GOTOOLCHAIN: 'local' }, stdio: ['ignore', log, log] });
+    daemon = spawn(path.join(root, 'smoke-daemon.exe'), [], { env: { ...fixtureEnv, GOPROXY: 'off', GOSUMDB: 'off', GOTOOLCHAIN: 'local' }, stdio: ['ignore', log, log] });
     daemonIdentity = remember(daemon, time);
     const endpoint = path.join(cache, 'dashboard/endpoint.json');
     await until(() => fs.existsSync(endpoint), 'isolated endpoint');
@@ -67,7 +71,7 @@ async function capture(name) {
     const origin = `http://127.0.0.1:${ep.port}`;
     assert.equal((await (await fetch(origin + '/health')).json()).pid, daemon.pid);
     const executablePath = path.resolve(__dirname, '../dist/Werkschaft-win32-x64/Werkschaft.exe');
-    const env = { ...process.env, WS_CACHE_HOME: cache }; delete env.ELECTRON_RUN_AS_NODE;
+    const env = { ...fixtureEnv }; delete env.ELECTRON_RUN_AS_NODE;
     time = Date.now();
     application = await _electron.launch({ executablePath, args: [`--user-data-dir=${path.join(fixture, 'profile')}`], env, timeout: 60000 });
     appIdentity = remember(application.process(), time);
@@ -90,7 +94,7 @@ async function capture(name) {
     });
     fs.writeFileSync(path.join(evidence, 'layout.json'), JSON.stringify(layout, null, 2));
     assert.equal(layout.visible, false); assert.equal(layout.views[0].bounds.y, 36);
-    assert.equal(layout.views[0].prefs.preload || '', '');
+    assert.equal(path.basename(layout.views[0].prefs.preload), 'dashboard-preload.js');
     assert.equal(layout.views[0].prefs.contextIsolation, true); assert.equal(layout.views[0].prefs.sandbox, true);
     assert.equal(layout.views[0].prefs.nodeIntegration, false);
     checks.push('bar visible with icon, hamburger and centered document title; native menu hidden; isolated dashboard sibling below bar');
@@ -202,18 +206,51 @@ async function capture(name) {
     checks.push('dashboard light/dark theme-color recolors bar and Windows overlay');
     });
 
-    await checkpoint('X-close confirmation', async () => {
-    await main(({ dialog }) => { global.tbDialogs = []; dialog.showMessageBoxSync = (_w, options) => { global.tbDialogs.push(options); return 0; }; });
-    // Use a dashboard-owned beforeunload guard and physical X, not window.destroy.
-    await dashboard.evaluate(() => { window.addEventListener('beforeunload', event => { event.preventDefault(); event.returnValue = ''; }); });
-    await dashboard.locator('body').click({ position: { x: 200, y: 200 } });
-    before = await state();
-    await physical('click', ['-X', before.bounds.x + before.bounds.width - 23, '-Y', before.bounds.y + 18]);
-    await until(() => main(() => global.tbDialogs.length === 1), 'X close confirmation');
-    assert.equal(await main(({ BaseWindow }) => BaseWindow.getAllWindows().length), 1);
-    await capture('close-stay');
-    checks.push('physical Windows X reaches dashboard beforeunload confirmation; Stay retains window');
-    unverified.push('Close guard is a test-injected dashboard listener; real pasted-image guard was not armed in this focused run.');
+    await checkpoint('physical X-close and draft recovery', async () => {
+      await main(({ dialog }) => {
+        global.tbDialogs = []; global.tbChoice = 0;
+        dialog.showMessageBoxSync = (_w, options) => { global.tbDialogs.push(options); return global.tbChoice; };
+      });
+      await attachImageDraft(await draftFrame(dashboard, origin));
+      await capture('close-recovery-before');
+      const inputs = await main(() => global.tbInputs || []);
+      fs.writeFileSync(path.join(evidence, 'inputs.json'), JSON.stringify(inputs, null, 2));
+      family(appIdentity);
+      const first = application.process();
+      before = await state();
+      await physical('click', ['-X', before.bounds.x + before.bounds.width - 23, '-Y', before.bounds.y + 18]);
+      await until(() => first.exitCode !== null || first.signalCode !== null, 'physical X closes a recovery-capable renderer');
+      application = null;
+
+      time = Date.now();
+      application = await _electron.launch({ executablePath, args: [`--user-data-dir=${path.join(fixture, 'profile')}`], env, timeout: 60000 });
+      appIdentity = remember(application.process(), time);
+      await until(() => application.context().pages().some(page => page.url() === origin + '/'), 'reopened dashboard view');
+      const reopened = application.context().pages().find(page => page.url() === origin + '/');
+      reopened.on('dialog', () => {});
+      await assertImageDraft(await draftFrame(reopened, origin));
+      await capture('close-recovery-restored');
+      checks.push('physical Windows X closes without a native prompt and the profile restores the image draft');
+
+      await openLegacyGuard(reopened, origin);
+      await main(({ dialog }) => {
+        global.tbDialogs = []; global.tbChoice = 0;
+        dialog.showMessageBoxSync = (_w, options) => { global.tbDialogs.push(options); return global.tbChoice; };
+      });
+      before = await state();
+      const close = ['-X', before.bounds.x + before.bounds.width - 23, '-Y', before.bounds.y + 18];
+      await physical('click', close);
+      await until(() => main(() => global.tbDialogs.length === 1), 'legacy X-close Stay/Leave dialog');
+      assert.equal(await main(({ BaseWindow }) => BaseWindow.getAllWindows().length), 1);
+      await capture('close-stay');
+      await main(() => { global.tbChoice = 1; });
+      family(appIdentity);
+      const second = application.process();
+      await physical('click', close);
+      await until(() => second.exitCode !== null || second.signalCode !== null, 'legacy Leave closes the app');
+      application = null;
+      assert.equal((await (await fetch(origin + '/health')).json()).pid, daemon.pid);
+      checks.push('physical Windows X keeps a legacy renderer on Stay and closes it on Leave');
     });
     if (failures.length) failure = failures.join('\n');
   } catch (error) { failure = error.stack; console.error(failure); }
@@ -222,7 +259,7 @@ async function capture(name) {
     if (daemonIdentity) family(daemonIdentity);
     if (application) {
       const inputs = await main(() => global.tbInputs || []).catch(() => []);
-      fs.writeFileSync(path.join(evidence, 'inputs.json'), JSON.stringify(inputs, null, 2));
+      if (inputs.length) fs.writeFileSync(path.join(evidence, 'inputs.json'), JSON.stringify(inputs, null, 2));
       await application.evaluate(({ app }) => app.exit()).catch(() => {}); await application.close().catch(() => {});
     }
     if (daemonIdentity) signalIfCurrent(daemonIdentity);

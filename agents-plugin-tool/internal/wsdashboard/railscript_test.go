@@ -513,9 +513,8 @@ function wsT(k, n) { return k + ":" + n; }
 // node: an edit saves the draft after the debounce; a reload restores the
 // composer text, mentions, selection, the reference images, the board
 // answers, the chips, the board mentions, the open details, and the board tab; a pasted image is
-// not kept, its marker is stripped, and the restore says so; the leave
-// guard asks only while a pasted image is held; a send clears the draft
-// once the daemon holds it.
+// not in the recovery store has its marker stripped. A held image whose
+// blob is missing still triggers the browser guard.
 func TestRailDraftRestore(t *testing.T) {
 	rail, err := dashboardFS.ReadFile("assets/rail.js")
 	if err != nil {
@@ -531,13 +530,9 @@ func TestRailDraftRestore(t *testing.T) {
 		t.Fatal("dashboard.js holds no per-session drafts block ending before the iframe shell block")
 	}
 	block = strings.TrimSuffix(block, "// --- iframe shell")
-	if !regexp.MustCompile(`(?s)\n  function outboxAcked\(m, id\) \{\n.*?\n    if \(!outboxUnsent\(\)\) clearDraft\(\);\n.*?\n  \}\n`).MatchString(src) {
-		t.Error("the daemon's OK for the last queued send no longer clears the draft")
-	}
-	if !strings.Contains(src, "\n  function saveDraft() {\n    if (!draftStore || restoring || outboxUnsent()) return;\n") {
-		t.Error("an unanswered send no longer keeps the saved draft from before it")
-	}
 	runNode(t, "draft restore", selectionCodecSource(t)+railJSHarness+string(rail)+railDraftPrelude+composerFunc(t, src, "validCloseRequests")+boardBoxSrc(t, src)+block+`
+draftLoaded = true;
+var outbox = [];
 // type, pick, open, and switch tab; the debounce saves it
 ctext.value = "hi @bob see [Image #1] and [Image #2] end";
 ctext.selectionStart = ctext.selectionEnd = 6;
@@ -563,7 +558,7 @@ check("the guard asks while a pasted image is held", (function () { var e = { pr
 
 // a reload of the page: empty composer and state, then the restore
 ctext.value = ""; mentions = []; imgs = []; chips = {}; items = {}; openState = {}; boardAnswers = {}; bmentions = []; closeRequests = []; wpicks = []; wconsoles = []; grid.setAttribute("data-tab", "convo");
-restoreDraft();
+restoreDraft(draftStore.load(rid));
 check("the board mentions come back", bmentions, [{ topic: "plan", id: "3", entry: "e7", text: "picked text" }]);
 check("close requests survive reload without needing their topics", closeRequests, [{ topic: "gone", reason: "" }, { topic: "plan", reason: "done" }]);
 closeRequests = [];
@@ -578,7 +573,7 @@ check("no guard once only reference images are held", (function () { var e = { p
 check("the restore itself saved nothing", timers.length, 0);
 
 // a typed composer is not overwritten by a later restore
-ctext.value = "typed"; restoreDraft();
+ctext.value = "typed"; restoreDraft(draftStore.load(rid));
 check("a non-empty composer keeps its text", ctext.value, "typed");
 
 // a slash command selection alone is a draft, kept with its arguments
@@ -587,7 +582,7 @@ ctext.value = ""; imgs = []; chips = {}; boardAnswers = {}; openState = {}; bmen
 cmdSel = { name: "compact", args: "keep the plan" };
 listeners.input(); advance(400);
 check("the saved command", JSON.parse(railStore.load("ws.dashboard.draft.sess1")).cmd, { name: "compact", args: "keep the plan" });
-cmdSel = null; restoreDraft();
+cmdSel = null; restoreDraft(draftStore.load(rid));
 check("the command comes back as the selection", cmdSel, { name: "compact", args: "keep the plan" });
 cmdSel = null;
 
@@ -599,7 +594,7 @@ chips = { "4": { id: "4", answer: "", note: "see [Image #1] and [Image #2]" } };
 boardAnswers = { "4": { note: "see [Image #1] and [Image #2]", noteOpen: true }, "t:plan": { note: "[Image #3] look", noteOpen: true } };
 notes = []; listeners.input(); advance(400);
 ctext.value = ""; imgs = []; chips = {}; items = {}; boardAnswers = {};
-restoreDraft();
+restoreDraft(draftStore.load(rid));
 check("lost markers leave the notes and the chip", [boardAnswers["4"].note, boardAnswers["t:plan"].note, chips["4"].note], ["see [Image #1] and ", "look", "see [Image #1] and "]);
 check("a note's reference image comes back", imgs.map(function (p) { return [p.n, p.ref]; }), [[1, "00aa-1.png"]]);
 check("the restore counts every lost image", notes, ["js.draft.imgslost:2"]);
@@ -608,7 +603,7 @@ ctext.value = ""; imgs = []; chips = {}; items = {}; boardAnswers = {};
 // a send clears the draft; what is left is saved again as the next draft
 closeRequests = [];
 ctext.value = ""; imgs = []; chips = {}; boardAnswers = {}; openState = {}; bmentions = []; wpicks = []; wconsoles = []; grid.setAttribute("data-tab", "convo");
-clearDraft();
+saveDraft();
 check("cleared at once", railStore.load("ws.dashboard.draft.sess1"), null);
 advance(400);
 check("an empty page saves no draft", [railStore.load("ws.dashboard.draft.sess1"), railStore.load("ws.dashboard.drafts")], [null, null]);

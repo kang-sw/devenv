@@ -437,6 +437,11 @@ button.sbadge:focus-visible { outline: 1.5px solid var(--wb-primary); outline-of
 .d-outbox-row { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--wb-muted-fg); opacity: .75; }
 .d-outbox-row .spin { width: 10px; height: 10px; color: var(--wb-primary); }
 .d-outbox-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.d-outbox-recovery .d-outbox-row { flex-wrap: wrap; gap: 4px 8px; padding: 6px 8px; border-radius: 8px; background: var(--wb-muted); opacity: 1; }
+.d-outbox-recovery strong { color: var(--wb-fg); }
+.d-outbox-recovery .d-outbox-text { flex: 1 1 160px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.d-outbox-recovery button { cursor: pointer; border: 0; border-radius: 6px; padding: 3px 7px; font: inherit; background: var(--wb-card); color: var(--wb-fg); }
+.d-outbox-recovery button:focus-visible { outline: 2px solid var(--wb-primary); }
 .cchips:empty { display: none; }
 .achip { display: inline-flex; align-items: baseline; gap: 4px; max-width: 100%; font-size: 12px; padding: 2px 4px 2px 9px; border-radius: 999px; background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 35%, transparent); }
 .achip b { font-variant-numeric: tabular-nums; }

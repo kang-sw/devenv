@@ -70,13 +70,16 @@ function pops() { return document.body.children.filter(function (c) { return c.c
 // dashboard.js: the cmds region, the capsule, the post, the toasts, and the
 // composer helpers.
 const slashPrelude = `
-var doc = document, rid = "sess1", sending = false, imgs = [], toasts = [], posted = [], answer = [true, { id: "h1", merged: false }];
+var doc = document, rid = "sess1", imgSeq = 0, imgs = [], toasts = [], posted = [], answer = [true, { id: "h1", merged: false }];
 var cmds = new El("div"), crow = new El("div"), ccmd = new El("span"), cname = new El("b"), cargs = new El("span");
 cname.className = "ccmd-name"; cargs.className = "ccmd-args"; ccmd.hidden = true;
 ccmd.appendChild(cname); ccmd.appendChild(cargs); crow.appendChild(ccmd);
 function $(id) { return id === "ccmd" ? ccmd : null; }
 function region(name) { return name === "cmds" ? cmds : null; }
-function q(sel, el) { return el.children.filter(function (c) { return c.tag === "i"; }); }
+doc.querySelector = function () { return null; };
+function q(sel, el) { return el ? el.children.filter(function (c) { return c.tag === "i"; }) : []; }
+function chipList() { return []; }
+function topicNotes() { return []; }
 function setCommands(list) {
   cmds.children = [];
   list.forEach(function (c) { var i = new El("i"); i.setAttribute("data-name", c[0]); if (c[1]) i.setAttribute("data-desc", c[1]); if (c[2]) i.setAttribute("data-src", c[2]); if (c[3]) i.setAttribute("data-layer", c[3]); cmds.appendChild(i); });
