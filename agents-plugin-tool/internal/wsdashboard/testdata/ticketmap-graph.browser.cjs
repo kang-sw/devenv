@@ -263,6 +263,28 @@ async function viewC(browser, theme, W, H) {
   assert.equal(c.lb, 0, `${tag}: zero ticket titles at Fit`);
   assert.ok(c.sk >= Math.max(20, 2 * clusterIds.length), `${tag}: soup ${c.sk} >= max(20, 2 x ${clusterIds.length})`);
   clean(col, `${tag} Fit`);
+  // Legend and node status icons: every status has matching SVG icon paths.
+  const icons0 = await fr.evaluate(() => {
+    const statuses = ['ready', 'todo', 'idea', 'done', 'dropped'];
+    const leg = {}, nodes = {};
+    statuses.forEach(st => {
+      const p = document.querySelector(`#tmlegend .d-tm-clg.d-tm-st-${st} svg path.d-tm-cico.d-tm-cico-${st}`);
+      leg[st] = p ? { d: p.getAttribute('d') || '', disp: getComputedStyle(p).display, box: p.getBoundingClientRect().width } : null;
+      const list = [...document.querySelectorAll(`#tmworld .d-tm-cnd.d-tm-st-${st}`)];
+      nodes[st] = {
+        total: list.length,
+        ok: list.filter(g => {
+          const ic = g.querySelector(`path.d-tm-cico.d-tm-cico-${st}`);
+          return ic && ic.getAttribute('d') === (leg[st] && leg[st].d) && getComputedStyle(ic).pointerEvents === 'none';
+        }).length
+      };
+    });
+    return { leg, nodes };
+  });
+  for (const stName of ['ready', 'todo', 'idea', 'done', 'dropped']) {
+    assert.ok(icons0.leg[stName] && icons0.leg[stName].d.length > 0 && icons0.leg[stName].disp !== 'none' && icons0.leg[stName].box > 0, `${tag}: legend swatch icon for ${stName}`);
+    assert.ok(icons0.nodes[stName].total > 0 && icons0.nodes[stName].ok === icons0.nodes[stName].total, `${tag}: node icons for ${stName} (${JSON.stringify(icons0.nodes[stName])})`);
+  }
   await shot(page, `c-soup-${theme}-${W}x${H}`);
 
   // 3. The soup sits on its centroid, recomputed from the payload.
@@ -484,6 +506,31 @@ async function viewC(browser, theme, W, H) {
   await setCam(fr, { k: 1.45, x: s.vp.w / 2 - cx * 1.45, y: s.vp.h / 2 - cy * 1.45 });
   await raf2(fr);
   clean(await collide(fr), `${tag} c-zoom`);
+  const zoomIcons = await fr.evaluate(() => {
+    const out = {};
+    ['ready', 'todo', 'idea', 'done', 'dropped'].forEach(st => {
+      const list = [...document.querySelectorAll(`#tmworld .d-tm-cnd.d-tm-st-${st}`)];
+      out[st] = list.every(g => {
+        const ic = g.querySelector(`path.d-tm-cico.d-tm-cico-${st}`);
+        const r = ic && ic.getBoundingClientRect();
+        return !g.classList.contains('d-tm-micro') && ic && getComputedStyle(ic).display !== 'none' && r.width > 0 && r.height > 0;
+      });
+    });
+    return out;
+  });
+  for (const stName of ['ready', 'todo', 'idea', 'done', 'dropped']) {
+    assert.equal(zoomIcons[stName], true, `${tag}: all ${stName} icons visible at k=1.45`);
+  }
+  await setCam(fr, { k: 0.25, x: s.vp.w / 2 - cx * 0.25, y: s.vp.h / 2 - cy * 0.25 });
+  await raf2(fr);
+  const microHidden = await fr.evaluate(() => {
+    const done = document.querySelector('#tmworld .d-tm-cnd.d-tm-st-done');
+    const ic = done && done.querySelector('path.d-tm-cico');
+    return !!done && done.classList.contains('d-tm-micro') && !!ic && getComputedStyle(ic).display === 'none';
+  });
+  assert.equal(microHidden, true, `${tag}: micro-zoom (r < 6px) hides tiny icons cleanly`);
+  await setCam(fr, { k: 1.45, x: s.vp.w / 2 - cx * 1.45, y: s.vp.h / 2 - cy * 1.45 });
+  await raf2(fr);
   await shot(page, `c-zoom-${theme}-${W}x${H}`);
 
   // 14. The Ego Ring on the epic: a double click, Esc, E.
@@ -530,6 +577,14 @@ async function viewC(browser, theme, W, H) {
   assert.deepEqual([c.view, c.sel], ['C', epicI], `${tag}: 2 shows C with B's selection`);
   assert.ok(c.cam.k >= 0.95, `${tag}: the camera centers it at k >= .95`);
   assert.deepEqual(framed, [true, true, '1px'], `${tag}: the selected title is framed`);
+  const selFade = await fr.evaluate(i => {
+    const sel = document.querySelector(`#tmworld .d-tm-cnd[data-i="${i}"]`);
+    const dim = document.querySelector('#tmworld .d-tm-cnd:not(.d-tm-nb):not(.d-tm-sel)');
+    return { hasSel: document.getElementById('tmsvg').classList.contains('d-tm-hassel'), selOp: sel && +getComputedStyle(sel).opacity, dimOp: dim && +getComputedStyle(dim).opacity };
+  }, epicI);
+  assert.equal(selFade.hasSel, true, `${tag}: selection marks d-tm-hassel`);
+  assert.equal(selFade.selOp, 1, `${tag}: selected node stays opaque`);
+  assert.ok(selFade.dimOp > 0 && selFade.dimOp < 0.3, `${tag}: non-connected node dims with its icon (${selFade.dimOp})`);
   s.vp = await fr.evaluate(() => window.__tmt.vp());
   const other = (await fr.evaluate(() => window.__tmt.nodes())).find(n => n.i !== epicI);
   assert.ok(other, `${tag}: another star to click`);
