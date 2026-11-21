@@ -7,6 +7,10 @@ related:
   261121-feat-ws-dashboard-inpage-dialogs: "Completed pre-Tauri work and existing close, DevTools, login-link, and refusal decisions"
   261115-feat-ws-daemon-release-auto-update: "Separate release-download daemon updater"
   261120-feat-desktop-canary-release-channel: "Shipped stable, canary opt-in, and stable-return behavior"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: cc5b4b3b24146e2e
+sage-review-completeness-reviewed: cc5b4b3b24146e2e
 ---
 
 # Return the Werkschaft desktop shell to Tauri
@@ -110,8 +114,11 @@ current packaged shell's daemon lifecycle and distribution behavior.
   delivered launcher payload installs exactly its bundled Tauri version,
   including a downgrade, so Electron's Back to stable works even with a newer
   Tauri canary installed (`desktop-electron/test/update-canary.test.js:141-171`).
-  A small marker next to the launcher records the bundled version after a
-  successful install, allowing a failed install to be retried. Every later
+  A small per-user marker, keyed by the launcher payload and stored under the
+  current user's profile (not beside the shared portable launcher), records
+  the bundled version after a successful install, allowing a failed install
+  to be retried; another Windows account running the same portable launcher
+  therefore still gets its own per-user install. Every later
   run only launches the installed app, preserving
   updates installed by Tauri's own updater. Rejected: open any equal-or-newer
   installed build, which defeats Back to stable.
@@ -352,7 +359,8 @@ against Questions 1–6 in
    a canary Electron, verify the update button swaps to Tauri and relaunches.
    On Windows verify first migration launch installs exactly the bundled
    version, including Electron canary Back to stable with a newer Tauri
-   canary already installed; verify the marker and separately verify routine
+   canary already installed; verify the per-user marker, including a second
+   Windows account launching the same portable launcher folder, and separately verify routine
    old-shortcut launches preserve a later Tauri self-update. Verify the
    installer installs WebView2 on a machine or VM without it. From a populated
    Electron profile verify Tauri first launch uses default window settings and
