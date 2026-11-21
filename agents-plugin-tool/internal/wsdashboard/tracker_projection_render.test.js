@@ -5,7 +5,8 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const panel = fs.readFileSync(path.join(__dirname, 'assets/tracker-panel.js'), 'utf8');
-const tracker = fs.readFileSync(path.join(__dirname, 'assets/tracker.js'), 'utf8');
+const { readAssetSource } = require('./testdata/asset-source.cjs');
+const tracker = readAssetSource('wsdashboard', 'tracker.js');
 function harness() {
   const c = vm.createContext({
     VS: { now: '2026-11-18T12:00:00Z', items: {}, assignments: {}, members: {} },
