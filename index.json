@@ -406,6 +406,16 @@
     "261116-feat-ws-dashboard-generalized-mentions": {
       "registered_at": "2026-11-16T13:07:35Z"
     },
+    "261116-feat-ws-dashboard-localhost-token": {
+      "registered_at": "2026-11-21T09:41:22Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-21T09:41:22Z"
+      }
+    },
     "261116-feat-ws-session-outside-git-folder": {
       "registered_at": "2026-11-16T12:11:42Z"
     },
