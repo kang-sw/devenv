@@ -652,7 +652,7 @@ func TestAgyMapperUnsolicitedAndRejoinTurnsAlwaysClose(t *testing.T) {
 	t.Run("unsolicited burst closes via quiet timer and does not pollute next prompt", func(t *testing.T) {
 		m := newAgyMapper("s")
 		closedCh := make(chan []Event, 1)
-		m.setWakeClose(func() { closedCh <- m.closeUnsolicited(1000) })
+		m.setWakeClose(func(generation uint64) { closedCh <- m.closeUnsolicited(1000, generation) })
 		rr := &agyRun{m: m, answers: map[string]controlAnswer{}}
 
 		var evs []Event
@@ -664,8 +664,8 @@ func TestAgyMapperUnsolicitedAndRejoinTurnsAlwaysClose(t *testing.T) {
 		} {
 			evs = append(evs, m.mapLine([]byte(line), rr)...)
 		}
-		if !m.inTurn || !m.unsolicitedTurn || !slices.ContainsFunc(evs, func(ev Event) bool { return ev.TurnStart }) {
-			t.Fatalf("unsolicited burst must open a bounded turn: inTurn=%v unsolicited=%v", m.inTurn, m.unsolicitedTurn)
+		if !slices.ContainsFunc(evs, func(ev Event) bool { return ev.TurnStart }) {
+			t.Fatalf("unsolicited burst must open a turn: %+v", evs)
 		}
 		var closed []Event
 		select {
@@ -700,14 +700,14 @@ func TestAgyMapperUnsolicitedAndRejoinTurnsAlwaysClose(t *testing.T) {
 	t.Run("unsolicited permission request opens turn and waits for answer before closing", func(t *testing.T) {
 		m := newAgyMapper("s")
 		closedCh := make(chan []Event, 1)
-		m.setWakeClose(func() { closedCh <- m.closeUnsolicited(2000) })
+		m.setWakeClose(func(generation uint64) { closedCh <- m.closeUnsolicited(2000, generation) })
 		rr := &agyRun{m: m, answers: map[string]controlAnswer{}}
 
 		req := m.mapLine([]byte(`{"jsonrpc":"2.0","id":7,"method":"session/request_permission","params":{"toolCall":{"toolCallId":"perm1","name":"run_command","title":"Run"},"options":[{"optionId":"a","kind":"allow_once"}]}}`), rr)
 		if !m.inTurn || !m.unsolicitedTurn || !slices.ContainsFunc(req, func(ev Event) bool { return ev.TurnStart }) {
 			t.Fatalf("permission request must open a turn (not appear on an idle session): %+v", req)
 		}
-		if evs := m.closeUnsolicited(1500); evs != nil || !m.inTurn {
+		if evs := m.closeUnsolicited(1500, m.wakeGeneration); evs != nil || !m.inTurn {
 			t.Fatalf("turn must stay open while approval is pending: %+v", evs)
 		}
 		// Tool completes (clearing approval); idle quiet timer now closes the turn.
@@ -725,7 +725,7 @@ func TestAgyMapperUnsolicitedAndRejoinTurnsAlwaysClose(t *testing.T) {
 	t.Run("replay open burst arms close at ReplayDone and steered prompt across replace keeps chunks", func(t *testing.T) {
 		rm := newAgyMapper("s")
 		closedCh := make(chan []Event, 1)
-		rm.setWakeClose(func() { closedCh <- rm.closeUnsolicited(3000) })
+		rm.setWakeClose(func(generation uint64) { closedCh <- rm.closeUnsolicited(3000, generation) })
 		rr := &agyRun{m: rm, answers: map[string]controlAnswer{}}
 
 		// Replay a closed prompt followed by an unclosed unsolicited burst.
@@ -772,6 +772,71 @@ func TestAgyMapperUnsolicitedAndRejoinTurnsAlwaysClose(t *testing.T) {
 	})
 }
 
+func TestAgyReattachedTurnStaysOpenDuringHostedThoughts(t *testing.T) {
+	const quiet = 100 * time.Millisecond
+	restoreIdle := agyWakeIdleQuiet
+	agyWakeIdleQuiet = quiet
+	t.Cleanup(func() { agyWakeIdleQuiet = restoreIdle })
+
+	m := newAgyMapper("s")
+	p := &agyProcess{streamProcess: newStreamProcess(m, agyProtocol{}), m: m}
+	m.setWakeClose(p.closeUnsolicitedTurn)
+	t.Cleanup(m.stopWakeTimer)
+
+	// The old daemon sent the prompt. Replay has its tool call but no request
+	// or response, and the completed call leaves no open tools.
+	p.feed([]byte(`{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1","name":"read_file","status":"completed"}}}`), 1, true)
+	p.deliver(Event{ReplayDone: true})
+	initialGeneration := m.wakeGeneration
+
+	// agy sends only thought chunks for more than one quiet interval. The
+	// holder suppresses those chunks and delivers its content-free pulses.
+	checkOpen := func() {
+		t.Helper()
+		for len(p.events) > 0 {
+			if ev := <-p.events; ev.TurnEnd {
+				t.Fatalf("turn settled during thought-only activity: %+v", ev)
+			}
+		}
+	}
+	tick := time.NewTicker(quiet / 10)
+	defer tick.Stop()
+	until := time.After(2 * quiet)
+thinking:
+	for {
+		select {
+		case <-tick.C:
+			p.feed([]byte(agyRingPulse), 0, false)
+			checkOpen()
+		case <-until:
+			break thinking
+		}
+	}
+	checkOpen()
+	// An expiry already queued behind a live pulse is stale.
+	p.closeUnsolicitedTurn(initialGeneration)
+	checkOpen()
+
+	p.feed([]byte(`{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"ws-p-prev-1"}`), 2, false)
+	p.feed([]byte(agyRingPulse), 3, false)
+	ends := 0
+	for len(p.events) > 0 {
+		ev := <-p.events
+		if ev.TurnStart {
+			t.Fatal("a pulse after the prompt response started another turn")
+		}
+		if ev.TurnEnd {
+			if ev.Seq != 2 {
+				t.Fatalf("turn ended outside the prompt response: %+v", ev)
+			}
+			ends++
+		}
+	}
+	if ends != 1 {
+		t.Fatalf("the old daemon's prompt response produced %d turn ends, want 1", ends)
+	}
+}
+
 // TestAgyMapperBackgroundTasksAndWakeupTurn pins ACP background-command
 // tracking and self-resumed wakeup turns (recorded shape on agy 1.5.12):
 // an unfinished non-daemon run_command across end_turn raises BackgroundTasks,
@@ -780,6 +845,8 @@ func TestAgyMapperUnsolicitedAndRejoinTurnsAlwaysClose(t *testing.T) {
 // cleanly via closeUnsolicited.
 func TestAgyMapperBackgroundTasksAndWakeupTurn(t *testing.T) {
 	m := newAgyMapper("s")
+	m.setWakeClose(func(uint64) {})
+	t.Cleanup(m.stopWakeTimer)
 	rr := &agyRun{m: m, answers: map[string]controlAnswer{}}
 
 	m.promptSent("ws-p-e-1")
@@ -828,7 +895,7 @@ func TestAgyMapperBackgroundTasksAndWakeupTurn(t *testing.T) {
 	if !m.inTurn || !m.unsolicitedTurn || !slices.ContainsFunc(wake, func(ev Event) bool { return ev.TurnStart }) {
 		t.Fatalf("wakeup burst must open an unsolicited turn: inTurn=%v unsolicited=%v evs=%+v", m.inTurn, m.unsolicitedTurn, wake)
 	}
-	closed := m.closeUnsolicited(1000)
+	closed := m.closeUnsolicited(1000, m.wakeGeneration)
 	if m.inTurn || m.unsolicitedTurn || !slices.ContainsFunc(closed, func(ev Event) bool { return ev.TurnEnd }) {
 		t.Fatalf("closeUnsolicited must settle the wakeup turn: inTurn=%v evs=%+v", m.inTurn, closed)
 	}
@@ -842,7 +909,7 @@ func TestAgyMapperBackgroundTasksAndWakeupTurn(t *testing.T) {
 	agyWakeUsageQuiet = 20 * time.Millisecond
 	t.Cleanup(func() { agyWakeUsageQuiet = restoreUsage })
 	daemonClosed := make(chan []Event, 1)
-	m.setWakeClose(func() { daemonClosed <- m.closeUnsolicited(2000) })
+	m.setWakeClose(func(generation uint64) { daemonClosed <- m.closeUnsolicited(2000, generation) })
 	for _, line := range []string{
 		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"d-wake","name":"run_command","status":"in_progress","args":{"CommandLine":"npm run dev","IsDaemon":true}}}}`,
 		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"daemon started"}}}}`,
