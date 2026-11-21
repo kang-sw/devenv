@@ -260,6 +260,56 @@ model. Exercise the approved release DevTools and close behavior on
 both platforms. Prove that failed health or cookie checks leave a
 usable retry or login surface and that close leaves the daemon running.
 
+### Result (4706360a9) - 2026-11-21
+
+The Tauri release shell attaches on macOS and targets Windows x64. It
+discovers the existing daemon, pins the health-checked origin, sets the
+browser cookie natively, and preserves the login gate when cookie setup is
+unavailable. Connection Retry, the Python guide, the native browser login
+link action, release DevTools and zoom, single-instance restore, and bounded
+failure recovery are implemented. The native navigation delegates gate
+top-level and subframe navigation separately. The WKWebView and WebView2
+paths admit the platform's bundled pages only at the top level. The
+dashboard and bundled pages have zero native command permissions.
+
+- T0. The daemon's existing machine authentication and browser-cookie route
+  remain the writers of auth state
+  (`agents-plugin-tool/internal/wsdashboard/localhost_auth.go:352,395`).
+  The shell reads and verifies the existing endpoint and health, requests
+  the existing credential or browser login link, and keeps the bearer
+  native (`agents-plugin-tool/desktop/src/endpoint.rs:122,165,204,244`).
+  A legacy shell ignores the optional renderer close-readiness function.
+  A new shell can show a native close fallback with a legacy renderer
+  (`agents-plugin-tool/desktop/src/close.rs:66-86` and
+  `agents-plugin-tool/internal/wsdashboard/assets/dashboard-lifecycle.js:1106-1119`).
+  The existing cross-minor boundary stays T3.
+- The shell introduces no persistent store. The existing shared endpoint
+  remains a Type 5 file. A successful authenticated attach or Retry makes
+  seven bounded logical reads of that file across discovery, auth and final
+  revalidation. Polling the cached identity uses HTTP health only. Native
+  browser-link copying makes four endpoint reads. Shell diagnostics write
+  to standard error and include fixed messages. Draft saves reuse the
+  dashboard's existing webview-local stores.
+- macOS passed 15 Rust tests and bundled the unsigned arm64 release app.
+  An MSVC x64 cross-target check of the Windows code and tests passed.
+  Five build-slot regressions and focused Go/Chromium asset, auth,
+  login-gate and draft-recovery checks passed. The Chromium checks exercised
+  ready and failed draft persistence through the new optional hook.
+- Lite review found that initialization failure could strand Retry.
+  `4706360a9` fixed that path and fenced callbacks from retired WebView2
+  instances. The 15 Rust tests include the hook-retry regression.
+- Headless connection, Python, login and draft screenshots are under
+  `/private/tmp/werkschaft-phase1.GoFgYN/captures/`. An earlier disposable
+  WKWebView smoke observed local views, authenticated attach, a single
+  instance, release DevTools and unchanged shared-daemon health. Native
+  acceptance on the final head is pending on both platforms, including
+  menu and fallback-dialog screenshots, actual accelerators, external and
+  frame behavior, native clipboard and drop, renderer recovery, and X-close
+  with a recoverable draft and with legacy or failed recovery. Windows
+  runtime execution awaits the smoke host. The native checklist and Windows
+  build commands are in
+  `/private/tmp/werkschaft-phase1.GoFgYN/native-checklist.md`.
+
 ### Phase 2: Port the bundled daemon lifecycle to Rust
 
 Build on Phase 1's discovery, authentication and recovery. Assemble
