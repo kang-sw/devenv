@@ -47,6 +47,11 @@ type HostedSlot interface {
 	Close()
 }
 
+// InboxMutationSlot reports a hosted agent's removal of held inbox entries.
+type InboxMutationSlot interface {
+	InboxMutated()
+}
+
 // ObservedFoldSlot is optional on a HostedSlot. A writer whose state seeded
 // from the session's whole evidence directory (wslive.ReadObservedFold
 // reported it complete) before it opened the slot calls FoldsObserved before
@@ -251,6 +256,11 @@ func (s *daemonLiveSlot) RingAppended() {
 	d.stats.WakeLive.Add(1)
 	d.broker.wake(ringDep(s.replyID))
 	d.acks.poke(s.replyID)
+}
+
+func (s *daemonLiveSlot) InboxMutated() {
+	s.d.stats.WakeInbox.Add(1)
+	s.d.broker.wake(inboxDep(s.replyID))
 }
 
 func (s *daemonLiveSlot) Close() {

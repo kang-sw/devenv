@@ -476,6 +476,18 @@ func (c *conv) inboxChanged() {
 	c.kick()
 }
 
+// inboxMutated wakes readers only after an actual inbox mutation.
+func (c *conv) inboxMutated(n int) {
+	if n == 0 {
+		return
+	}
+	if slot, ok := c.live.currentSlot().(wsdashboard.InboxMutationSlot); ok {
+		slot.InboxMutated()
+	} else {
+		c.r.notify(c.rec.ReplyID, c.rec.Root)
+	}
+}
+
 // steer writes steered messages to the process while a turn runs:
 // the user marked them to reach the harness now, not at the turn's end.
 // They join the running turn, so no turn starts. Messages not marked stay
@@ -498,6 +510,7 @@ func (c *conv) steer() {
 	recs, _ := wsinbox.DrainSteer(c.inbox)
 	c.held = max(0, c.held-len(recs))
 	c.mu.Unlock()
+	c.inboxMutated(len(recs))
 	var parts []string
 	for _, rec := range recs {
 		if text := strings.TrimSpace(rec.Entry.Text()); text != "" {
@@ -1047,11 +1060,15 @@ func (c *conv) dropHeld() {
 	if len(c.rec.Queued) > 0 {
 		c.update(func(rec *Record) { rec.Queued = nil })
 	}
+	removed := 0
 	if held, err := wsinbox.Held(c.inbox); err == nil {
 		for _, rec := range held {
-			_, _ = wsinbox.Cancel(c.inbox, rec.Name)
+			if _, err := wsinbox.Cancel(c.inbox, rec.Name); err == nil {
+				removed++
+			}
 		}
 	}
+	c.inboxMutated(removed)
 	_, _ = wsinbox.DrainInterrupt(c.inbox)
 	c.setStatus(func() { c.held = 0 })
 }
@@ -1236,6 +1253,7 @@ func (c *conv) kickInput() {
 	c.held = max(0, c.held-len(recs))
 	covered := c.sends
 	c.mu.Unlock()
+	c.inboxMutated(len(recs))
 	from := c.drained
 	c.drained = covered
 	queue := slices.Clone(c.rec.Queued)

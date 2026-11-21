@@ -342,7 +342,11 @@
         return;
       }
       if (!ok) { outboxFail(res); return; }
-      outboxAcked(m, res && res.id ? String(res.id) : "");
+      if (!res || typeof res.id !== "string" || !/^[0-9]{8}T[0-9]{6}\.[0-9]{9}Z-[0-9a-f]{8}$/.test(res.id)) {
+        pauseDeliveries(m, "unknown");
+        return;
+      }
+      outboxAcked(m, res.id);
       outboxPump();
     }
     persistOutbox(function (saved) {
@@ -364,6 +368,7 @@
       prepareDelivery(m, function (body) {
         if (settled || draftDetached) return;
         m.sent = true;
+        m.live = doc.querySelector("#r-convlive .clive");
         wait = setTimeout(function () { settle(false, wsT("js.post.unreachable"), true); }, OUTBOX_WAIT);
         post("message", body, settle);
       }, settle);
@@ -373,14 +378,18 @@
     m.acked = true;
     m.id = id;
     m.at = Date.now();
-    // A row cancelled while its post was out cancels now that it has an
-    // id; its bubble shows only if the cancel is refused. An OK without an
-    // id leaves nothing to cancel, so the bubble shows.
-    if (!id) m.cancel = false;
     outboxUnrow(m);
     if (m.body.command) outboxDrop(m);
     else {
-      m.el = outboxBubble(m);
+      var live = doc.querySelector("#r-convlive .clive");
+      // A replacement empty live region already reflects an authoritative
+      // render; do not resurrect the held message after that render.
+      var emptyRender = m.live && live && m.live !== live && !Array.prototype.some.call(live.children, function (el) { return el.classList.contains("held"); });
+      if (lastUserEntry() !== m.user || emptyRender) outboxDrop(m);
+      else {
+        m.el = outboxBubble(m);
+        m.lingerTimer = setTimeout(function () { outboxDrop(m); }, OUTBOX_LINGER);
+      }
       boardFlushViewed(false);
     }
     // A fresh draft numbers its images from 1 again once nothing, sent or
@@ -395,6 +404,7 @@
     var i = outbox.indexOf(m);
     if (i < 0) return;
     outbox.splice(i, 1);
+    clearTimeout(m.lingerTimer);
     if (m.el && m.el.parentNode) m.el.parentNode.removeChild(m.el);
     m.pics.forEach(function (p) { if (imgs.indexOf(p) < 0 && imgTrash[p.n] !== p) release(p); });
   }
