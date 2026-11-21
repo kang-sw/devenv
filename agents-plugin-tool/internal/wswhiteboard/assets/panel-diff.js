@@ -41,6 +41,9 @@
     ops.reverse().forEach(function (op) {
       for (var i = list.length - 1; i >= 0; i--) {
         var n = list[i], from = offsets[i], to = from + n.length;
+        // Keep structural whitespace in the offsets, but never put phrasing
+        // elements under a table or list container (they create layout boxes).
+        if (n.parentNode.matches('table,thead,tbody,tfoot,tr,colgroup,ul,ol,dl')) continue;
         if (op.start === op.end) {
           if (op.start < from || op.start > to) continue;
           var at = n.splitText(op.start - from), gone = d.createElement('del');
