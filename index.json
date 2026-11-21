@@ -365,6 +365,16 @@
     "261115-ws-dashboard-worktree-detection-approval": {
       "registered_at": "2026-11-15T02:27:24Z"
     },
+    "261116-bug-ws-dashboard-rail-drag-drop-unreliable": {
+      "registered_at": "2026-11-21T11:40:08Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-21T11:40:08Z"
+      }
+    },
     "261116-bug-ws-native-pi-release-payload-staleness": {
       "registered_at": "2026-11-16T00:52:49Z"
     },
@@ -555,16 +565,6 @@
     },
     "261121-feat-werkschaft-tauri-shell-return": {
       "registered_at": "2026-11-21T11:06:46Z"
-    },
-    "261121-feat-ws-board-chat-small-ux": {
-      "registered_at": "2026-11-21T09:00:06Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-21T11:06:51Z"
-      }
     },
     "261121-feat-ws-board-command-slots": {
       "registered_at": "2026-11-21T09:21:23Z"
