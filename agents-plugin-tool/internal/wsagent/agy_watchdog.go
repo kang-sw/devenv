@@ -25,9 +25,12 @@ const (
 // marker across chunks, and later reply text means the stream recovered.
 const agyAPIErrorPrefix = "⚠ API error"
 
+const agyStreamInterrupted = "⚠ The stream was interrupted. Please continue the task you were working on."
+
 const (
-	agyStreamInterrupted = "⚠ The stream was interrupted. Please continue the task you were working on."
-	modelFailureDrain    = time.Second
+	// agy's native retry starts about 4s after an attempt-1 idle timeout.
+	// Allow up to 15s for its output before interrupting the open prompt.
+	modelFailureDrain    = 15 * time.Second
 	modelWaitCancelGrace = 5 * time.Second
 	modelWaitBackoffBase = time.Second
 	modelWaitBackoffCap  = 30 * time.Second
@@ -234,7 +237,7 @@ func (c *conv) onModelActivity(pending int) {
 	c.resetModelWaitTimer()
 }
 
-// onModelFailure starts a short drain when an anchored failure line becomes
+// onModelFailure starts a recovery wait when an anchored failure line becomes
 // the accumulated reply tail. Later model output clears it and restores the
 // ordinary silence timer; only a still-terminal failure is cancelled.
 func (c *conv) onModelFailure(failure string) {
@@ -360,7 +363,7 @@ func (c *conv) interceptModelWaitTurnEnd(ev Event) bool {
 		}
 		return c.retryModelWait(failure)
 	}
-	if ev.ModelFailure != "" && c.modelWaitFailErr == "" && c.modelWaitRetries < c.modelWaitMaxRetries {
+	if ev.ModelFailure != "" && ev.TurnError == "" && ev.TurnReason != wslive.TurnAborted && c.modelWaitFailErr == "" && c.modelWaitRetries < c.modelWaitMaxRetries {
 		return c.retryModelWait(ev.ModelFailure)
 	}
 	return false
@@ -401,14 +404,16 @@ func (c *conv) retryModelWait(failure string) bool {
 func (c *conv) modelWaitBackoffTimedOut() {
 	failure := c.modelWaitBackoffFailure
 	c.modelWaitBackoffC, c.modelWaitBackoffStop = nil, nil
-	c.modelWaitBackoffFailure = ""
 	if !c.modelWaitBackoffFence.CompareAndSwap(modelWaitBackoffPending, modelWaitBackoffFiring) {
 		if c.modelWaitBackoffFence.Load() == modelWaitBackoffCancelled {
 			c.cancelModelWaitBackoff()
 		}
 		return
 	}
-	defer c.modelWaitBackoffFence.Store(modelWaitBackoffIdle)
+	defer func() {
+		c.modelWaitBackoffFailure = ""
+		c.modelWaitBackoffFence.Store(modelWaitBackoffIdle)
+	}()
 	if !c.modelWaitArmed || !c.turn || c.proc == nil || c.modelWaitFailErr != "" {
 		return
 	}
@@ -439,11 +444,17 @@ func (c *conv) cancelModelWaitBackoff() {
 	if c.modelWaitBackoffC == nil && state != modelWaitBackoffPending && state != modelWaitBackoffCancelled {
 		return
 	}
+	failure := c.modelWaitBackoffFailure
 	c.stopModelWaitBackoff()
 	c.restoreModelWaitDiagnostic()
 	c.summaryReason = wslive.TurnAborted
+	turnErr := ""
+	if failure != "" {
+		turnErr = agyTerminalFailureError(failure, "")
+		c.summaryReason = "error"
+	}
 	c.disarmModelWait()
-	c.endTurn("", false)
+	c.endTurn(turnErr, false)
 }
 
 // modelWaitTurnError returns the TurnFailed error message to apply when a
@@ -459,13 +470,22 @@ func (c *conv) modelWaitTurnError(ev Event) string {
 		c.publishModelWaitExhaustedDiagnostic()
 		return c.modelWaitFailErr
 	}
-	if ev.ModelFailure != "" && c.modelWaitRetries >= c.modelWaitMaxRetries {
+	if ev.ModelFailure != "" && ev.TurnError == "" && ev.TurnReason != wslive.TurnAborted && c.modelWaitRetries >= c.modelWaitMaxRetries {
 		c.noteModelWaitFailure(ev.ModelFailure)
 		c.modelWaitFailErr = c.modelWaitExhaustedError(ev.ModelFailure)
 		c.publishModelWaitExhaustedDiagnostic()
 		return c.modelWaitFailErr
 	}
 	return ""
+}
+
+// agyTerminalFailureError carries the failure class through the same error
+// field as other failed turns, including persisted results and parent reports.
+func agyTerminalFailureError(failure, detail string) string {
+	if detail == "" {
+		detail = failure
+	}
+	return fmt.Sprintf("[%s] %s", agyModelFailureClass(failure), detail)
 }
 
 func (c *conv) modelWaitExhaustedError(failure string) string {
@@ -553,12 +573,6 @@ func (c *conv) restoreModelWaitDiagnostic() {
 }
 
 func (c *conv) failModelWaitImmediately(reason string) {
-	if c.modelWaitFailErr != "" && c.modelWaitRetries >= c.modelWaitMaxRetries {
-		c.publishModelWaitExhaustedDiagnostic()
-	} else {
-		c.restoreModelWaitDiagnostic()
-	}
-	c.disarmModelWait()
 	c.setStatus(func() { c.lastErr = reason })
 	fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", c.rec.ReplyID, reason)
 	c.stopProcess("")

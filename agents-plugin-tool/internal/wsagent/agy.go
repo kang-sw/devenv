@@ -1279,7 +1279,7 @@ func (m *agyMapper) endTurn(msg agyMessage, now int64) []Event {
 	m.wakeSawUsage = false
 	m.stopWakeTimerLocked()
 	m.rate.dropUntracked()
-	ev := Event{TurnEnd: true}
+	ev := Event{TurnEnd: true, ModelFailure: modelFailure}
 	switch {
 	case msg.Error != nil:
 		ev.TurnError = "agy: " + msg.Error.Message
@@ -1287,8 +1287,6 @@ func (m *agyMapper) endTurn(msg agyMessage, now int64) []Event {
 		ev.TurnReason = wslive.TurnAborted
 	case r.StopReason != "" && r.StopReason != "end_turn":
 		ev.TurnError = "agy stopped the turn: " + r.StopReason
-	case modelFailure != "":
-		ev.ModelFailure = modelFailure
 	}
 	return append(out, ev)
 }

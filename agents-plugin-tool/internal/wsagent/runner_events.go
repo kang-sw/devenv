@@ -130,6 +130,10 @@ func (c *conv) handle(ev Event) {
 			c.holdForLever(ev.CompactRequested && !c.interruptAsked)
 			c.interruptAsked = false
 		}
+		if ev.ModelFailure != "" {
+			ev.TurnError = agyTerminalFailureError(ev.ModelFailure, ev.TurnError)
+			ev.TurnReason = "error"
+		}
 		c.summaryReason = ev.TurnReason
 		c.live.summaryNaturalEnd = true
 		c.endTurn(ev.TurnError, quiet)
@@ -682,6 +686,10 @@ func (c *conv) processGone() {
 // processEnded settles what ends with a process: its turn, its waiting
 // prompts, and what it last reported.
 func (c *conv) processEnded() {
+	failure := c.modelWaitBackoffFailure
+	if c.modelWaitCancelling || c.modelWaitFailErr != "" {
+		failure = c.modelWaitFailure
+	}
 	// A process loss after retry exhaustion must publish the same visible
 	// diagnostic as TurnEnd before disarming the watchdog. Earlier losses still
 	// restore the failed attempt's saved reply when no final reply followed.
@@ -697,8 +705,15 @@ func (c *conv) processEnded() {
 	c.wrapHold = false
 	hadTurn := c.turn
 	if c.turn {
-		c.setStatus(func() { c.turn = false })
-		c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
+		var reason string
+		c.setStatus(func() {
+			c.turn = false
+			if failure != "" {
+				c.lastErr = agyTerminalFailureError(failure, c.lastErr)
+				reason = "error"
+			}
+		})
+		c.apply(wslive.Event{Kind: wslive.KindTurnEnd, Reason: reason})
 		// A turn the process took with it. A close settles none (its
 		// parent ended it), and the daemon's exit leaves it to the next
 		// daemon (interrupted).
