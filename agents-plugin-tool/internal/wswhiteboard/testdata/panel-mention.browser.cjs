@@ -3,8 +3,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { chromium } = require(process.env.WS_PLAYWRIGHT_MODULE);
+const { readAssetSource } = require('../../wsdashboard/testdata/asset-source.cjs');
 const dash = path.resolve(__dirname, '../../wsdashboard');
-const composer = fs.readFileSync(path.join(dash, 'assets/dashboard-composer.js'), 'utf8');
+const composer = readAssetSource('wsdashboard', 'dashboard.js');
 function fn(name) {
   const m = composer.match(new RegExp('\\n  function ' + name + '\\([^]*?\\n  \\}\\n'));
   assert(m, name); return m[0];
