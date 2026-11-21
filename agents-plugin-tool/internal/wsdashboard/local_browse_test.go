@@ -192,22 +192,17 @@ func TestFSActLocalBrowseAnchorRequiresRootAndTrust(t *testing.T) {
 }
 
 func TestLocalBrowseRootsRoute(t *testing.T) {
-	f := startPageFixture(t, lanMode)
+	f := startPageFixture(t, lanMode, withBrowseRootsFixture(t))
 	local, lan := fsViewers(t, f)
 	target := "/s/" + LocalBrowseAnchor + "/fs/roots"
 	rec := serve(f.d, local, http.MethodGet, target, "")
 	var roots browseRoots
-	host, _ := os.Hostname()
-	if err := json.Unmarshal(rec.Body.Bytes(), &roots); err != nil || rec.Code != http.StatusOK || roots.Host != host || roots.Home != daemonPathHost().Home || roots.Volumes == nil {
-		t.Fatalf("discovery = %d %+v (%v)", rec.Code, roots, err)
+	want := browseRoots{Host: "fixture-host", Home: "/fixture-home", Volumes: []string{"/", "/Volumes/mac"}}
+	if err := json.Unmarshal(rec.Body.Bytes(), &roots); err != nil || rec.Code != http.StatusOK || !reflect.DeepEqual(roots, want) {
+		t.Fatalf("discovery = %d %+v (%v), want %+v", rec.Code, roots, err, want)
 	}
 	if rec.Header().Get("Cache-Control") != "no-store" {
 		t.Error("discovery must not be cached")
-	}
-	for _, dir := range roots.Volumes {
-		if _, err := os.ReadDir(dir); err != nil {
-			t.Errorf("discovered unreadable volume %q: %v", dir, err)
-		}
 	}
 	for _, v := range []viewer{lan, {peer: local.peer, host: lan.host, cookie: lan.cookie}, {peer: lan.peer, host: local.host, cookie: lan.cookie}} {
 		if rec := serve(f.d, v, http.MethodGet, target, ""); rec.Code != http.StatusNotFound || rec.Body.String() != "404 page not found\n" {
@@ -227,9 +222,20 @@ func TestLocalBrowseRootsRoute(t *testing.T) {
 	}
 }
 
-func TestLocalBrowseRootsEveryOSAndUnreadableVolumes(t *testing.T) {
-	// Virtual OS paths map to real fixture directories. Permission errors
-	// are injected rather than depending on the test user's uid or chmod.
+func withBrowseRootsFixture(t *testing.T) func(*DaemonOptions) {
+	t.Helper()
+	readDir := browseRootsFixture(t)
+	return func(o *DaemonOptions) {
+		o.browseRoots = func() browseRoots {
+			return discoverBrowseRoots("darwin", "fixture-host", "/fixture-home", readDir)
+		}
+	}
+}
+
+// browseRootsFixture maps virtual OS paths to scratch directories and
+// supplies deterministic permission errors.
+func browseRootsFixture(t *testing.T) func(string) ([]os.DirEntry, error) {
+	t.Helper()
 	base := t.TempDir()
 	for _, dir := range []string{"Volumes/mac", "Volumes/locked", "mnt/c", "mnt/linux", "mnt/locked", "media/user/usb", "run/media/user/disk", "driveC", "driveD", "driveZ"} {
 		if err := os.MkdirAll(filepath.Join(base, filepath.FromSlash(dir)), 0o755); err != nil {
@@ -237,7 +243,7 @@ func TestLocalBrowseRootsEveryOSAndUnreadableVolumes(t *testing.T) {
 		}
 	}
 	writeFile(t, filepath.Join(base, "Volumes", "not-a-volume.txt"), "file")
-	readDir := func(dir string) ([]os.DirEntry, error) {
+	return func(dir string) ([]os.DirEntry, error) {
 		if strings.HasSuffix(dir, "/locked") || dir == `Z:\` {
 			return nil, os.ErrPermission
 		}
@@ -246,6 +252,10 @@ func TestLocalBrowseRootsEveryOSAndUnreadableVolumes(t *testing.T) {
 		}
 		return os.ReadDir(filepath.Join(base, filepath.FromSlash(strings.TrimPrefix(dir, "/"))))
 	}
+}
+
+func TestLocalBrowseRootsEveryOSAndUnreadableVolumes(t *testing.T) {
+	readDir := browseRootsFixture(t)
 	for _, c := range []struct {
 		goos string
 		want []string

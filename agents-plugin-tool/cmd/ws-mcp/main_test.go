@@ -29,22 +29,76 @@ func TestMain(m *testing.M) {
 	os.Exit(runTestMain(m))
 }
 
-// runTestMain points WS_CONFIG_HOME at an empty temp dir so CLI tests that
-// assert builtin defaults (the config view's agent tiers) never read the
-// developer's ~/.ws/config.json; spawned binaries inherit it via os.Environ.
-// It is unconditional: an inherited WS_CONFIG_HOME is a real config just the
-// same. Tests that need a config home set their own.
+// runTestMain gives CLI tests and their subprocesses a disposable home and ws
+// state. Resolve the effective Go caches before moving HOME so nested builds
+// can find the dependencies of the outer go test.
 func runTestMain(m *testing.M) int {
-	configHome, err := os.MkdirTemp("", "ws-mcp-cmd-test-config-")
+	out, err := exec.Command("go", "env", "-json", "GOCACHE", "GOMODCACHE").Output()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "TestMain: create temp config home: %v\n", err)
+		fmt.Fprintf(os.Stderr, "TestMain: resolve Go caches: %v\n", err)
 		return 1
 	}
-	defer os.RemoveAll(configHome)
-	_ = os.Setenv("WS_CONFIG_HOME", configHome)
-	// Hosted package lookup must not consult the developer's daemon registry.
-	_ = os.Setenv("WS_CACHE_HOME", filepath.Join(configHome, "cache"))
+	var goCaches map[string]string
+	if err := json.Unmarshal(out, &goCaches); err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: decode Go caches: %v\n", err)
+		return 1
+	}
+	for key, value := range goCaches {
+		_ = os.Setenv(key, value)
+	}
+	home, err := os.MkdirTemp("", "ws-mcp-cmd-test-home-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: create temp home: %v\n", err)
+		return 1
+	}
+	defer os.RemoveAll(home)
+	for key, value := range testHomeOverrides(home) {
+		if value == "" {
+			_ = os.Unsetenv(key)
+		} else {
+			_ = os.Setenv(key, value)
+		}
+	}
 	return m.Run()
+}
+
+// testHomeOverrides replaces user state paths and removes inherited harness
+// overrides. Absolute PATH entries preserve the runner's tools across cwd
+// changes. Go caches and PLAYWRIGHT_BROWSERS_PATH stay in the environment.
+func testHomeOverrides(home string) map[string]string {
+	path := slices.DeleteFunc(filepath.SplitList(os.Getenv("PATH")), func(dir string) bool {
+		return !filepath.IsAbs(dir)
+	})
+	overrides := map[string]string{
+		"HOME":                home,
+		"WS_CACHE_HOME":       filepath.Join(home, "cache"),
+		"WS_CONFIG_HOME":      filepath.Join(home, "config"),
+		"PATH":                strings.Join(path, string(os.PathListSeparator)),
+		"CLAUDE_CONFIG_DIR":   "",
+		"CODEX_HOME":          "",
+		"PI_CODING_AGENT_DIR": "",
+		"ZDOTDIR":             "",
+	}
+	if goruntime.GOOS == "windows" {
+		overrides["USERPROFILE"] = home
+		overrides["APPDATA"] = filepath.Join(home, "AppData", "Roaming")
+		overrides["LOCALAPPDATA"] = filepath.Join(home, "AppData", "Local")
+		overrides["HOMEDRIVE"], overrides["HOMEPATH"] = "", ""
+	}
+	for _, entry := range os.Environ() {
+		if key := testEnvKey(entry); strings.HasPrefix(key, "XDG_") {
+			overrides[key] = ""
+		}
+	}
+	return overrides
+}
+
+func testEnvKey(entry string) string {
+	key, _, _ := strings.Cut(entry, "=")
+	if goruntime.GOOS == "windows" {
+		return strings.ToUpper(key)
+	}
+	return key
 }
 
 func TestDefaultRootUsesExplicitRoot(t *testing.T) {

@@ -1477,14 +1477,16 @@ vendored Mermaid bundle stays embedded. A running daemon keeps its mode, so shut
 half-edited template answers 500 (the error is in `dashboard.log`) and the next
 request retries.
 
-An isolated probe daemon needs both `WS_CACHE_HOME` (state directory, session
-keys, mailboxes) and `WS_CONFIG_HOME` (global config, the stored workspace
-list, which sits beside the config file) pointed at scratch directories, and
-its own `-port`: with only the cache home moved, the rail's workspace routes
-write the real `~/.ws/dashboard/workspaces.json`. Hosted harnesses use the probe daemon's embedded packages and retained restart
-record. Keep their cache/config environment isolated too, so their staged
-launcher restarts only the probe daemon. External harness/plugin tests retain
-their own runtime path; use an explicit scratch bootstrap binary for those.
+An isolated probe daemon needs a disposable `HOME`, scratch `WS_CACHE_HOME`
+(state directory, session keys, mailboxes) and `WS_CONFIG_HOME` (global config,
+workspace list), and its own `-port`. `WS_CONFIG_HOME` directs the rail's
+workspace routes away from the default `~/.ws/dashboard/workspaces.json`.
+Unset `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`, all `XDG_*`
+overrides, and `ZDOTDIR` so the daemon and its children use the scratch home.
+Hosted harnesses use the probe daemon's embedded packages and retained restart
+record. Give their launchers the same isolated environment so they restart
+only the probe daemon. External harness/plugin tests retain their own runtime
+path. Use an explicit scratch bootstrap binary for those.
 
 Profiling: with `WS_MCP_DASHBOARD_PPROF=1` (also `true`/`yes`/`on`) in the
 environment of `ws-mcp dashboard`, the daemon serves `net/http/pprof` under

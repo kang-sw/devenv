@@ -77,7 +77,13 @@ func (d *Daemon) handleBrowseRoots(w http.ResponseWriter, r *http.Request) {
 	if !readMethod(w, r) {
 		return
 	}
-	host, _ := os.Hostname()
+	discover := d.browseRoots
+	if discover == nil {
+		discover = func() browseRoots {
+			host, _ := os.Hostname()
+			return discoverBrowseRoots(runtime.GOOS, host, daemonPathHost().Home, os.ReadDir)
+		}
+	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, discoverBrowseRoots(runtime.GOOS, host, daemonPathHost().Home, os.ReadDir))
+	writeJSON(w, http.StatusOK, discover())
 }
