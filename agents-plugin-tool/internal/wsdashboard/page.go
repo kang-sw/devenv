@@ -48,9 +48,8 @@ type BoardInputSource interface {
 	LockBoardIncarnation(Registration, string) (unlock func(), ok bool)
 }
 
-// BoardArchiveSource is a PageSource that also exports a session's board
-// folder as a zip (wswhiteboard.FolderStore.ExportArchive), for the board
-// toolbar's download. ok is false when the session has no board.
+// BoardArchiveSource exports a session's board as a legacy-layout zip for
+// the board toolbar's download. ok is false when the session has no board.
 type BoardArchiveSource interface {
 	BoardArchive(reg Registration) (zip []byte, ok bool, err error)
 }

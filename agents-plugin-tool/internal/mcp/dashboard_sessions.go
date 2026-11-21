@@ -23,7 +23,6 @@ import (
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wsnote"
 	"github.com/kang-sw/devenv/internal/wsstate"
-	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 // The ws-mcp side of the dashboard session index: registering the top-level
@@ -581,11 +580,10 @@ func (s *Server) startDashboardHeartbeat(ctx context.Context) <-chan struct{} {
 	return done
 }
 
-// dashboardNudgingTool reports whether a successful call to name writes a
-// store the dashboard renders: the whiteboard and the tools that dirty one
-// of its panels.
+// dashboardNudgingTool identifies writes to stores the board's panels render.
+// The board DB notifies the dashboard directly when its own revision advances.
 func dashboardNudgingTool(name string) bool {
-	return name == "whiteboard.update" || name == whiteboardLoadTool || whiteboardDirtyingTool(name)
+	return whiteboardDirtyingTool(name)
 }
 
 // dashboardNudge tells the daemon, fire and forget, that a store of the
@@ -861,9 +859,6 @@ func (src *DashboardSessionSource) ForgetSession(replyID string) {
 	src.boards.forget(replyID)
 	if d, err := src.store.dirs(); err == nil {
 		for _, key := range keys {
-			if identity, _, err := loadRecordWith(d, key, partKey, nil, src.readRecordFile); err == nil {
-				wswhiteboard.SharedFolderCache.Forget(whiteboardFolder(identity.Root, key).Dir)
-			}
 			src.records.ForgetUnder(d.keyDir(key))
 			src.records.ForgetUnder(d.legacyPath(key))
 		}
@@ -886,8 +881,12 @@ func (src *DashboardSessionSource) ClearLiveSnapshot(stateDir, replyID string) {
 }
 
 // NewDashboardSessionSource returns a source over this machine's key store.
-func NewDashboardSessionSource() *DashboardSessionSource {
-	return &DashboardSessionSource{store: newSessionStore(), Notes: wsnote.NewCache()}
+func NewDashboardSessionSource(boards ...*WhiteboardStores) *DashboardSessionSource {
+	store := newSessionStore()
+	if len(boards) != 0 {
+		store.boards = boards[0]
+	}
+	return &DashboardSessionSource{store: store, Notes: wsnote.NewCache()}
 }
 
 // dashboardRescanAfter bounds how stale the reply-id map may be before a
@@ -915,7 +914,7 @@ func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (ws
 		src.nonLiveRead("record")
 		src.nonLiveRead("board")
 	}
-	key, raw, record, ok, err := src.lookupRecord(reg)
+	key, raw, record, ok, err := src.lookupRecordWithActivity(reg, false)
 	if !ok || err != nil {
 		return wsdashboard.SessionData{}, false, err
 	}
@@ -1028,6 +1027,11 @@ func ticketBoardPrint(h io.Writer, root string) {
 // and the decoded record with every part. readErr preserves transient
 // failures separately from a genuinely absent or mismatched identity.
 func (src *DashboardSessionSource) lookupRecord(reg wsdashboard.Registration) (key string, raw []byte, record sessionRecord, ok bool, readErr error) {
+	return src.lookupRecordWithActivity(reg, true)
+}
+
+// Index polling reads the same snapshot without renewing a board's idle lease.
+func (src *DashboardSessionSource) lookupRecordWithActivity(reg wsdashboard.Registration, activity bool) (key string, raw []byte, record sessionRecord, ok bool, readErr error) {
 	d, err := src.store.dirs()
 	if err != nil {
 		return "", nil, sessionRecord{}, false, err
@@ -1046,7 +1050,9 @@ func (src *DashboardSessionSource) lookupRecord(reg wsdashboard.Registration) (k
 				return "", nil, sessionRecord{}, false, nil
 			}
 			var buf bytes.Buffer
-			record, _, err := loadRecordWithBoard(d, key, partAll, &buf, src.readRecordFile, src.openWhiteboard)
+			record, _, err := loadRecordWithBoard(d, key, partAll, &buf, src.readRecordFile, func(rec *sessionRecord, key string, raw io.Writer, legacy legacyBoardReader) error {
+				return src.store.snapshotWhiteboard(rec, key, raw, legacy, activity)
+			})
 			if err != nil {
 				if errors.Is(err, errSessionUnreadable) || !errors.Is(err, errSessionNotFound) {
 					readErr = err

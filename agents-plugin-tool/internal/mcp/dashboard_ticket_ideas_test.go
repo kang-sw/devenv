@@ -12,7 +12,7 @@ import (
 
 func TestDashboardTicketIdeasAbsentBoardIsEmpty(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	rows, ok, err := src.ReadTicketIdeas(wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root})
 	if !ok || err != nil || len(rows) != 0 {
 		t.Fatalf("absent board demand = %+v %v %v", rows, ok, err)
@@ -27,7 +27,7 @@ func TestDashboardTicketIdeasOnlyOnDemand(t *testing.T) {
 		writeTicket(t, f.root, "todo", "261117-feat-todo-"+strings.Repeat("x", day), "Todo")
 	}
 	f.update(t, ``)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	original := whiteboardTicketsList
 	var reads [][]string

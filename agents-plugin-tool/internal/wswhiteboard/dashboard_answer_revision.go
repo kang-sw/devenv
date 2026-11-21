@@ -41,27 +41,41 @@ func (f FolderStore) RecordDashboardAnswer(inboxID string, now time.Time) error 
 		if err != nil || before == nil {
 			return err
 		}
-		// An admitted send may wait in the journal while load replaces its
-		// board. Never attach that old arrival marker to the new incarnation.
-		if loaded, err := time.Parse(time.RFC3339Nano, before.LoadedAt); err == nil && now.UnixMilli() < loaded.UnixMilli() {
-			return nil
-		}
-		for _, doc := range before.Topics {
-			for _, entry := range doc.Entries {
-				if entry.Kind == EntrySystem && entry.Text == marker {
-					return nil
-				}
-			}
-		}
-		if len(before.Topics) == 0 {
-			return nil
-		}
 		work := before.clone()
-		work.appendEntry(work.Topics[0].Name, Entry{Kind: EntrySystem, Text: marker}, now)
+		if !recordDashboardAnswer(work, marker, now) {
+			return nil
+		}
 		intent, err := f.plan(meta, before, work)
 		if err != nil {
 			return err
 		}
 		return f.commit(intent)
 	})
+}
+
+func (b *BoardDB) RecordDashboardAnswer(inboxID string, now time.Time) error {
+	if strings.TrimSpace(inboxID) == "" {
+		return fmt.Errorf("whiteboard: empty dashboard answer ID")
+	}
+	encoded, _ := json.Marshal(inboxID)
+	marker := dashboardAnswerRevisionPrefix + string(encoded)
+	return b.Update(func(work *State) error { recordDashboardAnswer(work, marker, now); return nil })
+}
+
+func recordDashboardAnswer(work *State, marker string, now time.Time) bool {
+	if loaded, err := time.Parse(time.RFC3339Nano, work.LoadedAt); err == nil && now.UnixMilli() < loaded.UnixMilli() {
+		return false
+	}
+	for _, doc := range work.Topics {
+		for _, entry := range doc.Entries {
+			if entry.Kind == EntrySystem && entry.Text == marker {
+				return false
+			}
+		}
+	}
+	if len(work.Topics) == 0 {
+		return false
+	}
+	work.appendEntry(work.Topics[0].Name, Entry{Kind: EntrySystem, Text: marker}, now)
+	return true
 }

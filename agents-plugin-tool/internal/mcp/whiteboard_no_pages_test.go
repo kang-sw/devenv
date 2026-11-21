@@ -28,7 +28,7 @@ func TestWhiteboardUpdatesCommitWithoutDerivedFiles(t *testing.T) {
 		t.Fatal("refused first update changed the git exclusion")
 	}
 	text := f.update(t, "<wb:topic name=\"t\"><wb:panel recap=\"diagram\">```mermaid\ngraph LR\nA-->B\n```</wb:panel></wb:topic>")
-	if resultLine(t, text, "full: ") != "page unavailable" {
+	if resultLine(t, text, "full: ") != "page not yet served" {
 		t.Fatal(text)
 	}
 	if excludeEntries(t, f.root) != 1 {
@@ -52,7 +52,8 @@ func TestWhiteboardMailboxWritesKeepBoardBytesAndRefreshServedView(t *testing.T)
 	if !ok {
 		t.Fatal("missing session")
 	}
-	f := &whiteboardFixture{s: hf.serverB, key: hf.keyB, root: entry.root}
+	server := newTestBoardOwner(t, entry.root, "test")
+	f := &whiteboardFixture{s: server, key: hf.keyB, root: entry.root}
 	f.update(t, `<wb:topic name="t"><wb:log>retained</wb:log></wb:topic>`)
 	_ = f.servedPage(t)
 	before := whiteboardTreeForTest(t, f.pageDir())
@@ -74,7 +75,7 @@ func TestWhiteboardPanelWritesKeepBoardBytesAndRefreshServedView(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	f.update(t, `<wb:topic name="t"><wb:log>board</wb:log></wb:topic>`)
 	swept := make(chan struct{})
-	f.source = dashboardPageSource(t, nil)
+	f.source = dashboardPageSource(t, nil, f.s.sessions.boards)
 	f.source.store.boardRetirement = &whiteboardRetirement{sweep: func(dir string, live func() (map[string]bool, bool)) {
 		sweepRetiredWhiteboardPages(dir, live)
 		close(swept)

@@ -87,13 +87,15 @@ func TestWhiteboardRetirementFirstOpenIsAsyncAndShared(t *testing.T) {
 	}}
 	f.s.sessions.boardRetirement = r
 	// Raw diagnostic calls do not own the cleanup.
-	if _, err := f.s.sessions.readWhiteboard(f.key); err != nil {
+	raw := NewServer(f.root, "raw")
+	defer raw.Close()
+	raw.sessions.boardRetirement = r
+	if _, err := raw.sessions.readWhiteboard(f.key); err != nil {
 		t.Fatal(err)
 	}
 	if scans.Load() != 0 {
 		t.Fatal("raw process scheduled cleanup")
 	}
-	f.s.sessions.boardOwner = true
 	readDone := make(chan error, 1)
 	go func() { _, err := f.s.sessions.readWhiteboard(f.key); readDone <- err }()
 	select {
@@ -109,7 +111,7 @@ func TestWhiteboardRetirementFirstOpenIsAsyncAndShared(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("first board open did not schedule cleanup")
 	}
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	// The daemon reader inherits the environment while a hosted caller supplies
 	// that same cache explicitly; both must share one cleanup guard.
 	f.s.sessions.cacheHome = os.Getenv("WS_CACHE_HOME")
@@ -133,17 +135,15 @@ func TestWhiteboardRetirementFirstOpenIsAsyncAndShared(t *testing.T) {
 func TestWhiteboardFullResultUsesConstructionOwnership(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		owner  bool
 		served bool
 		want   string
 	}{
-		{"raw", false, false, "page unavailable"},
-		{"daemon-before-registration", true, false, "page not yet served"},
-		{"daemon-served", true, true, "http://127.0.0.1:12345/s/"},
+		{"daemon-before-registration", false, "page not yet served"},
+		{"daemon-served", true, "http://127.0.0.1:12345/s/"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newWhiteboardFixture(t)
-			s := NewServerWithOptions(ServerOptions{Root: f.root, Version: "test", BoardOwner: tc.owner})
+			s := newTestBoardOwner(t, f.root, "test")
 			defer s.Close()
 			s.sessionHarness = "claude"
 			f.s = s

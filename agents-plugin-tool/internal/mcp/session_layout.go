@@ -17,6 +17,7 @@ import (
 	"github.com/gofrs/flock"
 
 	"github.com/kang-sw/devenv/internal/wsstate"
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 // session_layout.go owns the session key store's on-disk layout. Each key has
@@ -206,18 +207,12 @@ func (d sessionDirs) legacyPath(key string) string { return filepath.Join(d.lega
 // legacy file is errSessionUnreadable (also matching errSessionNotFound for
 // legacy callers), and an unparsable part file is its own error. raw, when not
 // nil, receives every file read, for a change fingerprint.
-func (s *sessionStore) loadRecord(d sessionDirs, key string, parts recordPart, raw io.Writer) (record sessionRecord, legacy bool, err error) {
+func (s *sessionStore) loadRecord(d sessionDirs, key string, parts recordPart, raw io.Writer) (sessionRecord, bool, error) {
 	read := s.readFile
 	if read == nil {
 		read = readRecordFile
 	}
-	return loadRecordWithBoard(d, key, parts, raw, read, func(rec *sessionRecord, key string, raw io.Writer) error {
-		err := openWhiteboard(rec, key, raw)
-		if err == nil && s.boardOwner {
-			s.retireWhiteboardPages(rec.Root)
-		}
-		return err
-	})
+	return loadRecordWithBoard(d, key, parts, raw, read, s.openWhiteboard)
 }
 
 // recordFileReader reads one record file and decodes it into a value
@@ -270,12 +265,12 @@ func (s *sessionStore) readOnlyReader() recordFileReader {
 // cache), so the record's slices, maps, and whiteboard may be shared: a
 // caller of such a reader only reads them.
 func loadRecordWith(d sessionDirs, key string, parts recordPart, raw io.Writer, read recordFileReader) (sessionRecord, bool, error) {
-	return loadRecordWithBoard(d, key, parts, raw, read, openWhiteboard)
+	return loadRecordWithBoard(d, key, parts, raw, read, nil)
 }
 
-// loadRecordWithBoard lets the dashboard reuse its in-process folder reads;
-// every other caller retains the uncached writer/read boundary.
-func loadRecordWithBoard(d sessionDirs, key string, parts recordPart, raw io.Writer, read recordFileReader, openBoard func(*sessionRecord, string, io.Writer) error) (record sessionRecord, legacy bool, err error) {
+// loadRecordWithBoard reads the legacy board part only when the board owner
+// asks for it during import. A held or existing DB ignores the rollback copy.
+func loadRecordWithBoard(d sessionDirs, key string, parts recordPart, raw io.Writer, read recordFileReader, openBoard func(*sessionRecord, string, io.Writer, legacyBoardReader) error) (record sessionRecord, legacy bool, err error) {
 	if !sessionKeyFilenamePattern.MatchString(key) {
 		return sessionRecord{}, false, errSessionNotFound
 	}
@@ -292,8 +287,10 @@ func loadRecordWithBoard(d sessionDirs, key string, parts recordPart, raw io.Wri
 		if raw != nil {
 			raw.Write(data)
 		}
-		if parts&partWhiteboard != 0 {
-			if err := openBoard(&record, key, raw); err != nil {
+		if parts&partWhiteboard != 0 && openBoard != nil {
+			snapshot := record.Whiteboard
+			legacy := func() (*wswhiteboard.State, error) { return snapshot, nil }
+			if err := openBoard(&record, key, raw, legacy); err != nil {
 				return sessionRecord{}, true, err
 			}
 		}
@@ -308,7 +305,7 @@ func loadRecordWithBoard(d sessionDirs, key string, parts recordPart, raw io.Wri
 	}
 	writeRawPart(raw, partKey, data)
 	for _, part := range recordParts {
-		if part == partKey || parts&part == 0 {
+		if part == partKey || part == partWhiteboard || parts&part == 0 {
 			continue
 		}
 		data, v, err := read(d.partPath(key, part), func() any { return reflect.New(reflect.TypeOf(record.partValue(part)).Elem()).Interface() })
@@ -321,8 +318,18 @@ func loadRecordWithBoard(d sessionDirs, key string, parts recordPart, raw io.Wri
 		reflect.ValueOf(record.partValue(part)).Elem().Set(reflect.ValueOf(v).Elem())
 		writeRawPart(raw, part, data)
 	}
-	if parts&partWhiteboard != 0 {
-		if err := openBoard(&record, key, raw); err != nil {
+	if parts&partWhiteboard != 0 && openBoard != nil {
+		legacy := func() (*wswhiteboard.State, error) {
+			_, v, err := read(d.partPath(key, partWhiteboard), func() any { return new(*wswhiteboard.State) })
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil, nil
+			}
+			if err != nil {
+				return nil, fmt.Errorf("read session %s: %w", partWhiteboard.fileName(), err)
+			}
+			return *v.(**wswhiteboard.State), nil
+		}
+		if err := openBoard(&record, key, raw, legacy); err != nil {
 			return sessionRecord{}, false, err
 		}
 	}

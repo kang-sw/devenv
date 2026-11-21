@@ -1208,3 +1208,181 @@ func TestBoardDBImportDuplicateLoadFloorsMatchesLegacy(t *testing.T) {
 		t.Fatal("duplicate floor reopen disagrees with FolderStore")
 	}
 }
+
+func TestBoardDBFreshPrimitives(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "board")
+	if _, err := OpenBoardDB(dir, nil, BoardDBOptions{}); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("absent: %v", err)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("open created directory: %v", err)
+	}
+	initial := boardDBFixture()
+	b, err := CreateBoardDB(dir, initial, BoardDBOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	if _, err := CreateBoardDB(dir, initial, BoardDBOptions{}); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("create existing: %v", err)
+	}
+	for _, name := range []string{"meta.json", "committed.json", "t1"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("unexpected legacy artifact %s: %v", name, err)
+		}
+	}
+	if has, err := boardHasSentinel(dir); err != nil || !has {
+		t.Fatalf("sentinel: %v %v", has, err)
+	}
+	snap, rev := b.Snapshot()
+	if rev != 1 || !reflect.DeepEqual(snap, initial) {
+		t.Fatalf("snapshot %d %s", rev, folderJSON(snap))
+	}
+	snap.Seq++
+	if b.Revision() != rev || b.State().Seq == snap.Seq {
+		t.Fatal("snapshot aliases state")
+	}
+	if err := b.RecordDashboardAnswer("id", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.RecordDashboardAnswer("id", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if b.Revision() != rev+1 {
+		t.Fatalf("answer revision %d", b.Revision())
+	}
+	if unlock, ok := LockBoardIncarnation(dir, initial.LoadedAt); !ok {
+		t.Fatal("open did not register incarnation")
+	} else {
+		unlock()
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	reopened, err := OpenBoardDBLazy(dir, func() (*State, error) { calls++; return nil, errors.New("bad legacy") }, BoardDBOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if calls != 0 {
+		t.Fatal("read obsolete snapshot")
+	}
+}
+
+func TestBoardDBNewLoadAndFailedReplacementIncarnation(t *testing.T) {
+	root := t.TempDir()
+	src, err := CreateBoardDB(filepath.Join(root, "src"), boardDBFixture(), BoardDBOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := src.ExportArchive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = src.Close()
+	zipPath := filepath.Join(root, "board.zip")
+	if err := os.WriteFile(zipPath, archive, 0600); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "dst")
+	fail := false
+	b, n, err := LoadNewBoardDB(dir, zipPath, BoardDBOptions{Fault: func(stage string) error {
+		if fail && stage == "transaction-before-commit" {
+			return errors.New("injected")
+		}
+		return nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	state, rev := b.Snapshot()
+	if n != len(state.Topics) || state.LoadedAt == "" {
+		t.Fatal("missing load floor")
+	}
+	if matches, _ := filepath.Glob(dir + ".bak-*"); len(matches) != 0 {
+		t.Fatal("new load made backup")
+	}
+	fail = true
+	if _, _, err := b.LoadArchive(zipPath, time.Now()); err == nil {
+		t.Fatal("expected replacement failure")
+	}
+	after, afterRev := b.Snapshot()
+	if !reflect.DeepEqual(after, state) || afterRev != rev {
+		t.Fatal("failed replacement changed board")
+	}
+	if unlock, ok := LockBoardIncarnation(dir, state.LoadedAt); !ok {
+		t.Fatal("failed load lost admission")
+	} else {
+		unlock()
+	}
+	if _, ok := LockBoardIncarnation(dir, "stale"); ok {
+		t.Fatal("stale token admitted")
+	}
+}
+
+func TestBoardDBLoadBlocksStaleAdmission(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "board")
+	reached, release := make(chan struct{}), make(chan struct{})
+	block := false
+	b, err := CreateBoardDB(dir, boardDBFixture(), BoardDBOptions{Observe: func(stage string) {
+		if block && stage == "transaction-before-commit" {
+			close(reached)
+			<-release
+		}
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	archive, err := b.ExportArchive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	zipPath := filepath.Join(root, "archive.zip")
+	if err := os.WriteFile(zipPath, archive, 0600); err != nil {
+		t.Fatal(err)
+	}
+	old := b.State().LoadedAt
+	block = true
+	done := make(chan error, 1)
+	go func() { _, _, err := b.LoadArchive(zipPath, time.Now()); done <- err }()
+	select {
+	case <-reached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("load did not reach commit")
+	}
+	if unlock, ok := LockBoardIncarnation(dir, old); ok {
+		unlock()
+		close(release)
+		t.Fatal("old token admitted during load")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if unlock, ok := LockBoardIncarnation(dir, old); ok {
+		unlock()
+		t.Fatal("old token admitted after load")
+	}
+	if unlock, ok := LockBoardIncarnation(dir, b.State().LoadedAt); !ok {
+		t.Fatal("new token rejected")
+	} else {
+		unlock()
+	}
+}
+
+func TestBoardDBLazyAbsentAndConversionError(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "board")
+	marker := errors.New("parse failure")
+	calls := 0
+	_, err := OpenBoardDBLazy(dir, func() (*State, error) { calls++; return nil, marker }, BoardDBOptions{})
+	if !errors.Is(err, marker) || calls != 1 {
+		t.Fatalf("callback %d error %v", calls, err)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed open created artifacts: %v", err)
+	}
+}

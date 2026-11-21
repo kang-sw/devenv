@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"os"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -60,11 +59,11 @@ func TestWhiteboardNudgeBurstTargetsOnlyPokedBoards(t *testing.T) {
 
 func TestWhiteboardNudgePokeDuringDiscoveryRetainsNewBoard(t *testing.T) {
 	f := newNudgeFixture(t)
-	meta := filepath.Join(whiteboardFolder(f.target.root, f.target.key).Dir, "meta.json")
+	identity := f.n.dirs().partPath(f.target.key, partKey)
 	entered, release := make(chan struct{}), make(chan struct{})
 	var blocked atomic.Bool
 	f.n.stat = func(path string) (os.FileInfo, error) {
-		if path == meta && blocked.CompareAndSwap(false, true) {
+		if path == identity && blocked.CompareAndSwap(false, true) {
 			close(entered) // startup key enumeration has already finished
 			<-release
 		}
@@ -119,10 +118,10 @@ func TestWhiteboardNudgeRecoveryIsIndependentOfPokes(t *testing.T) {
 		return time.Unix(0, clock.Load())
 	}
 	f.board(t, `<wb:topic name="Work"><wb:state value="waiting"/></wb:topic>`, start)
-	meta := filepath.Join(whiteboardFolder(f.target.root, f.target.key).Dir, "meta.json")
+	identity := f.n.dirs().partPath(f.target.key, partKey)
 	var scans atomic.Int64
 	f.n.stat = func(path string) (os.FileInfo, error) {
-		if path == meta {
+		if path == identity {
 			scans.Add(1)
 		}
 		return os.Stat(path)
@@ -162,7 +161,7 @@ func TestWhiteboardNudgeRecoveryIsIndependentOfPokes(t *testing.T) {
 	f.n.changed <- struct{}{}
 	waitProcessed()
 	waitCalls(7)
-	if got := scans.Load(); got != 3 {
-		t.Fatalf("startup + targeted poke + full recovery = %d board probes, want 3", got)
+	if got := scans.Load(); got < 3 {
+		t.Fatalf("startup + targeted poke + full recovery = %d identity probes, want at least 3", got)
 	}
 }

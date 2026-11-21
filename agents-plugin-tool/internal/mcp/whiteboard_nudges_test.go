@@ -50,6 +50,7 @@ func newNudgeFixture(t *testing.T) *nudgeFixture {
 		t.Fatal(err)
 	}
 	f := &nudgeFixture{n: NewWhiteboardNudges(dir, nil, io.Discard), target: nudgeTarget{"nudge-terminal-lead", t.TempDir()}}
+	t.Cleanup(f.n.Close)
 	f.record = sessionKeyRecord{SchemaVersion: 2, Scope: string(roleLead), Root: f.target.root, Harness: "pi", HarnessSession: "native-session", HarnessCwd: f.target.root}
 	f.row = wsdashboard.Registration{SchemaVersion: 1, ReplyID: wsmailbox.ReplyID(f.target.key), Project: f.target.root, Harness: "pi", HarnessPID: os.Getpid(), HeartbeatAt: "2000-01-01T00:00:00Z", EndedAt: "2000-01-01T00:00:00Z"}
 	f.save(t)
@@ -66,12 +67,14 @@ func (f *nudgeFixture) save(t *testing.T) {
 }
 func (f *nudgeFixture) board(t *testing.T, commands string, now time.Time) {
 	t.Helper()
-	if err := whiteboardFolder(f.target.root, f.target.key).Update(nil, func(s *wswhiteboard.State) error {
-		_, p := wswhiteboard.Apply(s, commands, wswhiteboard.Env{Now: now})
-		if len(p) > 0 {
-			return errors.New(strings.Join(p, "; "))
-		}
-		return nil
+	if err := f.n.stores.use(f.target.root, f.target.key, &wswhiteboard.State{}, true, func(slot *whiteboardSlot) error {
+		return slot.board.Update(func(s *wswhiteboard.State) error {
+			_, p := wswhiteboard.Apply(s, commands, wswhiteboard.Env{Now: now})
+			if len(p) > 0 {
+				return errors.New(strings.Join(p, "; "))
+			}
+			return nil
+		})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +124,7 @@ func TestWhiteboardNudgeDiscoveryBothLayoutsWithoutTouchOrResurrection(t *testin
 		}
 		nudgeWriteJSON(t, f.n.dirs().partPath(key, partKey), r)
 	}
-	want := map[nudgeTarget]time.Time{f.target: {}, legacy: {}}
+	want := map[nudgeTarget]time.Time{f.target: {}, legacy: {}, {"missing-board-nudge", f.target.root}: {}}
 	if got := f.n.discover(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("discovered: %+v", got)
 	}
@@ -131,7 +134,7 @@ func TestWhiteboardNudgeDiscoveryBothLayoutsWithoutTouchOrResurrection(t *testin
 	}
 	// An invalid split identity cannot fall back to a stale valid legacy record.
 	nudgeWriteJSON(t, f.n.dirs().partPath(legacy.key, partKey), sessionKeyRecord{SchemaVersion: 999, Root: f.target.root, Scope: string(roleLead)})
-	if len(f.n.discover()) != 1 {
+	if len(f.n.discover()) != 2 {
 		t.Fatal("unsupported split key fell back to legacy")
 	}
 	if err := os.Remove(path); err != nil {
@@ -153,6 +156,24 @@ func TestWhiteboardNudgeDiscoveryBothLayoutsWithoutTouchOrResurrection(t *testin
 	}
 	if _, err := os.Stat(empty.cache); !os.IsNotExist(err) {
 		t.Fatal("discovery created cache/key roots")
+	}
+}
+
+func TestWhiteboardNudgeAbsentBoardDoesNotBlockCreation(t *testing.T) {
+	f := newNudgeFixture(t)
+	target := nudgeTarget{"new-board-after-discovery", f.target.root}
+	nudgeWriteJSON(t, f.n.dirs().partPath(target.key, partKey), f.record)
+	f.n.process(target, nudgeNow)
+	if _, err := os.Stat(whiteboardFolder(target.root, target.key).Dir); !os.IsNotExist(err) {
+		t.Fatalf("processing absent board created its directory: %v", err)
+	}
+	if err := f.n.stores.use(target.root, target.key, &wswhiteboard.State{}, true, func(slot *whiteboardSlot) error {
+		if slot.board == nil {
+			return errors.New("absent nudge retained a negative cache entry")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -287,7 +308,8 @@ func TestWhiteboardNudgeRestartResumeIsolationAndCopy(t *testing.T) {
 	if len(f.queue(t)) != 1 || !next.IsZero() {
 		t.Fatal("catch-up accounting", next)
 	}
-	restarted := NewWhiteboardNudges(f.n.dir, nil, io.Discard)
+	restarted := NewWhiteboardNudges(f.n.dir, nil, io.Discard, f.n.stores)
+	defer restarted.Close()
 	restarted.process(f.target, nudgeNow.Add(16*time.Hour))
 	if len(f.queue(t)) != 1 {
 		t.Fatal("restart replayed missed intervals on an unchanged board")
@@ -318,8 +340,13 @@ func TestWhiteboardNudgeRestartResumeIsolationAndCopy(t *testing.T) {
 	if len(q.Queues[row.ReplyID]) != 1 {
 		t.Fatal("destination catch-up repeated")
 	}
-	a, _ := whiteboardFolder(dest.root, dest.key).Open(nil)
-	b, _ := whiteboardFolder(f.target.root, f.target.key).Open(nil)
+	var a, b *wswhiteboard.State
+	if err := f.n.stores.use(dest.root, dest.key, nil, false, func(slot *whiteboardSlot) error { a = slot.board.State(); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.n.stores.use(f.target.root, f.target.key, nil, false, func(slot *whiteboardSlot) error { b = slot.board.State(); return nil }); err != nil {
+		t.Fatal(err)
+	}
 	if !reflect.DeepEqual(a.TopicStates()["Work"].State.Run, b.TopicStates()["Work"].State.Run) {
 		t.Fatal("copy changed original execution deadline")
 	}
@@ -370,7 +397,7 @@ func TestWhiteboardNudgeActualMailboxWatchDrainAndManualRecv(t *testing.T) {
 	f.row.Harness = "codex"
 	f.save(t)
 	f.n.process(f.target, nudgeNow.Add(2*time.Hour))
-	s := NewServer(f.target.root, "test")
+	s := NewServerWithOptions(ServerOptions{Root: f.target.root, Version: "test", BoardOwner: true, Boards: f.n.stores})
 	defer s.Close()
 	text := toolText(t, callToolOnce(t, s, 1, "mailbox.recv", map[string]any{"session_key": f.target.key}))
 	if !strings.Contains(text, "Whiteboard lead nudge") || !strings.Contains(text, "system: Whiteboard lead nudge") || len(f.queue(t)) != 0 {
@@ -427,12 +454,12 @@ func TestWhiteboardNudgeSuccessfulUpdatePokesWithoutDashboard(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	defer f.s.Close()
 	var called int
-	f.s.whiteboardChanged = func(cache, root, key string) {
+	f.s.sessions.boards.SetChanged(func(root, key string) {
 		called++
-		if cache != os.Getenv("WS_CACHE_HOME") || root != f.root || key != f.key {
+		if root != f.root || key != f.key {
 			t.Error("wrong poke association")
 		}
-	}
+	})
 	f.update(t, `<wb:topic name="work"><wb:log>active</wb:log><wb:state value="implementing" owner="executor" eta_minutes="40"/><wb:eta minutes="60" reason="scope"/></wb:topic>`)
 	if called != 1 {
 		t.Fatal("successful update did not poke")

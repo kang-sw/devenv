@@ -24,7 +24,7 @@ func topicRenderCounts(src *DashboardSessionSource) map[string]int {
 func TestDashboardBoardTopicCacheRetainsImageWatch(t *testing.T) {
 	t.Setenv("WS_MCP_NO_DASHBOARD", "1")
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	src.boards.topicRenders = map[string]int{}
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	mustWrite(t, f.root, "shots/a.png", "image-one")
@@ -65,7 +65,7 @@ func TestDashboardBoardTopicCacheRetainsImageWatch(t *testing.T) {
 func TestDashboardBoardTopicCache(t *testing.T) {
 	t.Setenv("WS_MCP_NO_DASHBOARD", "1")
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	src.boards.topicRenders = map[string]int{}
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	if err := whiteboardFolder(f.root, f.key).Update(nil, func(s *wswhiteboard.State) error {
@@ -127,15 +127,16 @@ func TestDashboardBoardTopicCache(t *testing.T) {
 	}
 	change(`<wb:topic name="topic-000"><wb:body>Small edit</wb:body></wb:topic>`, "topic-000")
 	change(`<wb:topic name="topic-000"><wb:state value="waiting" on="topic:topic-001"/></wb:topic>`, "topic-000", "topic-001")
-	// The folder writer can rewrite metadata for every topic; file identity is
-	// not the topic revision. A sequence-only write changes no topic output.
+	// A sequence-only DB write changes no topic output.
 	before = topicRenderCounts(src)
-	if err := whiteboardFolder(f.root, f.key).Update(nil, func(s *wswhiteboard.State) error { s.Seq++; return nil }); err != nil {
+	if err := f.s.sessions.boards.use(f.root, f.key, nil, true, func(slot *whiteboardSlot) error {
+		return slot.board.Update(func(s *wswhiteboard.State) error { s.Seq++; return nil })
+	}); err != nil {
 		t.Fatal(err)
 	}
 	readPageOK(t, src, reg)
 	if !reflect.DeepEqual(before, topicRenderCounts(src)) {
-		t.Fatal("sequence/file identities invalidated unrelated topics")
+		t.Fatal("sequence-only DB change invalidated unrelated topics")
 	}
 	// Shared watched inputs conservatively invalidate every topic.
 	settle()

@@ -172,11 +172,23 @@ func TestSplitLayoutMintLookupChildrenAndMtime(t *testing.T) {
 	}
 }
 
+func newBoardSessionStoreForTest(t *testing.T) *sessionStore {
+	t.Helper()
+	s := newSessionStore()
+	s.boards = NewWhiteboardStores(nil)
+	t.Cleanup(func() {
+		if err := s.boards.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return s
+}
+
 // Reading a legacy record leaves its session layout alone. Opening its board
 // converts the board authority, without changing the inline rollback bytes.
 func TestLegacyRecordServesWithoutMigrating(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	s := newSessionStore()
+	s := newBoardSessionStoreForTest(t)
 	root := t.TempDir()
 	writeSessionRecordForTest(t, s, "split-lead-00", root, roleLead, "")
 	want := fullLegacyRecord(root, "split-lead-00")
@@ -266,7 +278,7 @@ func TestLegacyRecordMigratesOnFirstWrite(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-			s := newSessionStore()
+			s := newBoardSessionStoreForTest(t)
 			const key = "legacy-lead-00"
 			want := fullLegacyRecord(t.TempDir(), "")
 			legacyPath := writeLegacyRecordForTest(t, s, key, want)
@@ -320,7 +332,7 @@ func TestLegacyRecordMigratesOnFirstWrite(t *testing.T) {
 func TestCrashShapedLayouts(t *testing.T) {
 	t.Run("both layouts", func(t *testing.T) {
 		t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-		s := newSessionStore()
+		s := newBoardSessionStoreForTest(t)
 		const key = "both-layouts-00"
 		legacyPath := writeLegacyRecordForTest(t, s, key, fullLegacyRecord(t.TempDir(), ""))
 		original := readFileForTest(t, legacyPath)
@@ -348,7 +360,7 @@ func TestCrashShapedLayouts(t *testing.T) {
 	})
 	t.Run("parts without key.json", func(t *testing.T) {
 		t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-		s := newSessionStore()
+		s := newBoardSessionStoreForTest(t)
 		const key = "half-moved-00"
 		want := fullLegacyRecord(t.TempDir(), "")
 		want.Todos = nil
@@ -386,7 +398,7 @@ func TestCrashShapedLayouts(t *testing.T) {
 // part files.
 func TestPartWritesAreIndependent(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
-	s := newSessionStore()
+	s := newBoardSessionStoreForTest(t)
 	root := t.TempDir()
 	key, err := s.mint(root, roleLead, "")
 	if err != nil {
@@ -409,7 +421,7 @@ func TestPartWritesAreIndependent(t *testing.T) {
 	d, _ := s.dirs()
 	partPath := func(part recordPart) string {
 		if part == partWhiteboard {
-			return filepath.Join(whiteboardFolder(root, key).Dir, "meta.json")
+			return filepath.Join(whiteboardFolder(root, key).Dir, ".board.sqlite-wal")
 		}
 		return d.partPath(key, part)
 	}
@@ -600,7 +612,7 @@ func TestClaimKeyRefusesTakenCandidates(t *testing.T) {
 func TestDashboardSourceSeesBothLayouts(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	project := t.TempDir()
-	src := &DashboardSessionSource{store: newSessionStore(), stateDir: func() (string, error) { return t.TempDir(), nil }}
+	src := &DashboardSessionSource{store: newBoardSessionStoreForTest(t), stateDir: func() (string, error) { return t.TempDir(), nil }}
 	s := src.store
 
 	splitKey, err := s.mint(project, roleLead, "")

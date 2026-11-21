@@ -12,7 +12,7 @@ func TestDashboardIncarnationAdmissionUsesMemory(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	defer f.s.Close()
 	f.update(t, `<wb:topic name="topic"><wb:body>initial</wb:body></wb:topic>`)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	page, ok, err := src.ReadPage(reg)
 	if err != nil || !ok {

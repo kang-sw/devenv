@@ -269,44 +269,10 @@ func (f FolderStore) Notify(reply string, now time.Time, eligible func() bool, e
 			dirs[ref.Key] = ref.Dir
 		}
 		work := before.clone()
-		p := work.planNotice(reply, dirs, now)
-		next = p.next
-		var resolver TicketResolver
-		if len(tickets) > 0 {
-			resolver = tickets[0]
-		}
-		unblocked := work.planUnblocked(reply, dirs, resolver)
-		send := func(message string) (bool, error) {
-			if message == "" || !eligible() {
-				return false, nil
-			}
-			if err := enqueue(message); err != nil {
-				return false, err
-			}
-			wake() // nonblocking; the reply lock has already been released
-			return true, f.hit("notice-enqueued")
-		}
-		changed := false
-		if sent, err := send(p.message); err != nil {
+		var changed bool
+		next, changed, err = mutateBoardNotice(work, dirs, reply, now, eligible, enqueue, wake, f.hit, tickets...)
+		if err != nil || !changed {
 			return err
-		} else if sent {
-			data, err := json.Marshal(p.receipt)
-			if err != nil {
-				return err
-			}
-			work.appendEntry(p.topic, Entry{Kind: EntrySystem, Text: "Lead nudge sent: " + strings.Join(p.receipt.Reasons, ", "), BoardNotice: data}, now)
-			changed = true
-		}
-		for _, ready := range unblocked {
-			if sent, err := send(ready.message); err != nil {
-				return err
-			} else if sent {
-				work.appendUnblocked(ready, now)
-				changed = true
-			}
-		}
-		if !changed {
-			return nil
 		}
 		intent, err := f.plan(meta, before, work)
 		if err != nil {
@@ -319,4 +285,60 @@ func (f FolderStore) Notify(reply string, now time.Time, eligible func() bool, e
 		return nil
 	})
 	return next, err
+}
+
+func (b *BoardDB) Notify(reply string, now time.Time, eligible func() bool, enqueue func(string) error, wake func(), tickets ...TicketResolver) (next time.Time, err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return next, fmt.Errorf("whiteboard board DB is closed")
+	}
+	err = b.updateLocked(func(work *State) error {
+		var changed bool
+		next, changed, err = mutateBoardNotice(work, b.topicDirs, reply, now, eligible, enqueue, wake, b.hit, tickets...)
+		if err == nil && changed {
+			next = work.planNotice(reply, b.topicDirs, now).next
+		}
+		return err
+	})
+	return next, err
+}
+
+func mutateBoardNotice(work *State, dirs map[string]string, reply string, now time.Time, eligible func() bool, enqueue func(string) error, wake func(), hit func(string) error, tickets ...TicketResolver) (next time.Time, changed bool, err error) {
+	p := work.planNotice(reply, dirs, now)
+	next = p.next
+	var resolver TicketResolver
+	if len(tickets) > 0 {
+		resolver = tickets[0]
+	}
+	unblocked := work.planUnblocked(reply, dirs, resolver)
+	send := func(message string) (bool, error) {
+		if message == "" || !eligible() {
+			return false, nil
+		}
+		if err := enqueue(message); err != nil {
+			return false, err
+		}
+		wake()
+		return true, hit("notice-enqueued")
+	}
+	if sent, e := send(p.message); e != nil {
+		return next, false, e
+	} else if sent {
+		data, e := json.Marshal(p.receipt)
+		if e != nil {
+			return next, false, e
+		}
+		work.appendEntry(p.topic, Entry{Kind: EntrySystem, Text: "Lead nudge sent: " + strings.Join(p.receipt.Reasons, ", "), BoardNotice: data}, now)
+		changed = true
+	}
+	for _, ready := range unblocked {
+		if sent, e := send(ready.message); e != nil {
+			return next, false, e
+		} else if sent {
+			work.appendUnblocked(ready, now)
+			changed = true
+		}
+	}
+	return next, changed, nil
 }

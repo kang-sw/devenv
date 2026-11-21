@@ -39,7 +39,7 @@ func countTicketLists(t *testing.T) *atomic.Int64 {
 func TestDashboardFingerprintReadsNoTicket(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	now := time.Now()
-	src := dashboardPageSource(t, &now)
+	src := dashboardPageSource(t, &now, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	writeTicket(t, f.root, "ready", "261101-feat-one", "One")
 	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>a question</wb:title></wb:add></wb:topic>`)
@@ -132,7 +132,7 @@ func TestDashboardFingerprintReadsNoTicket(t *testing.T) {
 // session.
 func TestDashboardPageServesHistoryFromStore(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>a question</wb:title></wb:add></wb:topic>`)
 	appendEntries := func(n int) {
@@ -191,7 +191,7 @@ func TestDashboardPageServesHistoryFromStore(t *testing.T) {
 // links remain queryable.
 func TestDashboardTopicTicketMoveInvalidatesTheBoard(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	writeTicket(t, f.root, "idea", "261101-feat-linked", "Linked")
 	f.update(t, `<wb:topic name="t" tickets="261101-feat-linked"><wb:log>working</wb:log></wb:topic>`)

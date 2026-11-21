@@ -76,10 +76,8 @@ func (c *hostedCLI) server(root string) *mcp.Server {
 		Env: c.env, OwnerPID: c.hello.OwnerPID, Harness: c.hello.Harness, Diag: c.stderr}
 	if c.host != nil {
 		opts.BoardOwner = true
+		opts.Boards = c.host.boards
 		opts.Notes = c.host.notes
-		if c.host.nudges != nil {
-			opts.WhiteboardChanged = c.host.nudges.Poke
-		}
 		if c.host.agents != nil {
 			if source, ok := c.host.agents.(mcp.AgentBackendRegistry); ok {
 				opts.AgentBackends = source

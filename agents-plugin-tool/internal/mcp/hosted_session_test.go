@@ -380,7 +380,7 @@ func TestHostedSessionNudgesTheDaemonAndNamesItsPage(t *testing.T) {
 	_, key, loginRoot := dashboardSessionServer(t, root, true)
 	replyID := wsmailbox.ReplyID(key)
 	hostedSessionEnv(t, key)
-	s := NewServer(root, "test")
+	s := newTestBoardOwner(t, root, "test")
 
 	dashCall(t, s, "todo.list", map[string]any{"session_key": key})
 	waitForNudge(t, fake, replyID)

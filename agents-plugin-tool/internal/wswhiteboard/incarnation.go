@@ -36,7 +36,12 @@ func (f FolderStore) rememberIncarnation(token string) {
 // LockIncarnation admits a tagged send until unlock, including its inbox
 // enqueue. A replacing or not-yet-opened board fails closed without file I/O.
 func (f FolderStore) LockIncarnation(token string) (unlock func(), ok bool) {
-	g := f.incarnation()
+	return LockBoardIncarnation(f.Dir, token)
+}
+
+// LockBoardIncarnation admits a send for a currently open board incarnation.
+func LockBoardIncarnation(dir, token string) (func(), bool) {
+	g := (FolderStore{Dir: dir}).incarnation()
 	g.mu.Lock()
 	if !g.ready || g.loading || token != g.token {
 		g.mu.Unlock()

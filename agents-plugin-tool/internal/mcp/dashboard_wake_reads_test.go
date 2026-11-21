@@ -56,7 +56,7 @@ func TestDashboardStampReadsFollowTheMemoryStore(t *testing.T) {
 func TestDashboardFolderSharedReadsDuringUpdateAndRender(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	f.update(t, `<wb:topic name="topic"><wb:body>original body</wb:body></wb:topic>`)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	_, _, record, ok, err := src.lookupRecord(reg)
 	if !ok || err != nil {

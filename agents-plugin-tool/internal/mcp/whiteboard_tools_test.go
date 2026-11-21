@@ -17,6 +17,29 @@ import (
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
+func whiteboardFolder(root, key string) wswhiteboard.FolderStore {
+	return wswhiteboard.FolderStore{Dir: whiteboardBoardDir(root, key)}
+}
+
+func newTestBoardOwner(t *testing.T, root, version string) *Server {
+	t.Helper()
+	boards := NewWhiteboardStores(nil)
+	t.Cleanup(func() {
+		if err := boards.Close(); err != nil {
+			t.Errorf("close boards: %v", err)
+		}
+	})
+	return NewServerWithOptions(ServerOptions{Root: root, Version: version, BoardOwner: true, Boards: boards})
+}
+
+func restartTestBoardOwner(t *testing.T, old *Server, root, version string) *Server {
+	t.Helper()
+	if err := old.sessions.boards.Close(); err != nil {
+		t.Fatalf("close boards for restart: %v", err)
+	}
+	return newTestBoardOwner(t, root, version)
+}
+
 // whiteboardFixture is one lead session in a fresh git repository, with the
 // shipped rsrc tree so refusals and manual renders read the real playbook.
 type whiteboardFixture struct {
@@ -37,7 +60,7 @@ func newWhiteboardFixture(t *testing.T) *whiteboardFixture {
 	root := t.TempDir()
 	mustWrite(t, root, "ai-docs/_index.md", "# Index\n")
 	initGit(t, root)
-	s := NewServer(root, "test")
+	s := newTestBoardOwner(t, root, "test")
 	// The harness the knob's bucket defaults to; tests switch it to model
 	// another harness's server.
 	s.sessionHarness = "claude"

@@ -145,7 +145,11 @@ func renderSessionState(rec sessionRecord) string {
 		}
 	}
 
-	sb.WriteString(renderWhiteboardSummaries(rec.Whiteboard))
+	if rec.boardUnavailable {
+		sb.WriteString("\nOpen-board summaries require the ws dashboard daemon, which owns the board.\n")
+	} else {
+		sb.WriteString(renderWhiteboardSummaries(rec.Whiteboard))
+	}
 
 	// Todo summary.
 	sb.WriteString("\n### Todos\n")

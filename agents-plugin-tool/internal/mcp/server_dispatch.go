@@ -77,6 +77,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			params.Arguments = map[string]any{"session_key": params.Arguments["session_key"]}
 		}
 	}
+	if !schemaOnly && (isWhiteboardTool(params.Name) || params.Name == whiteboardLoadTool) && (!s.boardOwner || s.sessions.boards == nil) {
+		return toolTextResponse(req.ID, "", errWhiteboardOwner)
+	}
 	// A hosted lead connection's session_key: omitted is the connection's
 	// own, and any key but its own or a descendant's is refused. It runs
 	// first, so everything below reads the key the call resolves to.

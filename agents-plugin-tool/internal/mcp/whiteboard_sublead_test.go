@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"encoding/json"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +9,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
-	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -90,7 +89,7 @@ func TestSubleadWritesStatusOntoTopLevelLeadBoardWithKnobOff(t *testing.T) {
 	mid := mintSublead(t, f.s, f.root, f.key, "ticket-review")
 	sub := mintSublead(t, f.s, f.root, mid, "ticket-runner")
 	var changed []string
-	f.s.whiteboardChanged = func(_, _, key string) { changed = append(changed, key) }
+	f.s.sessions.boards.SetChanged(func(_, key string) { changed = append(changed, key) })
 
 	resp := f.call(t, "whiteboard.update", map[string]any{"session_key": sub, "commands": `<wb:topic name="work"><wb:log>phase 1 green</wb:log><wb:panel name="report" recap="Phase 1">done</wb:panel></wb:topic>`})
 	if isToolError(resp) {
@@ -218,38 +217,35 @@ func TestSubleadMarkerSurvivesKeyRecordRewrite(t *testing.T) {
 }
 
 func TestSubleadWriteNudgesTopLevelLeadDashboard(t *testing.T) {
-	dir := dashboardSessionEnv(t)
-	fake := startFakeDaemon(t, dir, http.StatusNoContent, false)
-	root := dashboardGitRoot(t)
-	s, key, loginRoot := dashboardSessionServer(t, root, true)
-	if resp := dashCall(t, s, "todo.list", map[string]any{"session_key": key}); isToolError(resp) {
-		t.Fatalf("register: %s", resp)
+	f := newWhiteboardFixture(t)
+	seedLeadBoard(t, f.s, f.key, subleadSeed)
+	sub := mintSublead(t, f.s, f.root, f.key, "ticket-runner")
+
+	dir := t.TempDir()
+	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root, HeartbeatAt: time.Now().UTC().Format(time.RFC3339)}
+	if err := wsdashboard.WriteRegistration(dir, reg); err != nil {
+		t.Fatal(err)
 	}
-	// Registration nudges asynchronously; take the baseline only after that
-	// nudge arrived and the stream went quiet, so a late registration nudge
-	// cannot stand in for the one the sub-lead write must send.
-	waitForNudge(t, fake, wsmailbox.ReplyID(key))
-	seedLeadBoard(t, s, key, subleadSeed)
-	sub := mintSublead(t, s, loginRoot, key, "ticket-runner")
-	before := quietNudgeCount(fake)
-	if resp := dashCall(t, s, "whiteboard.update", map[string]any{"session_key": sub, "commands": `<wb:topic name="work"><wb:log>status</wb:log></wb:topic>`}); isToolError(resp) {
-		t.Fatalf("sub-lead write: %s", resp)
+	src := NewDashboardSessionSource(f.s.sessions.boards)
+	index := wsdashboard.NewIndex(wsdashboard.IndexOptions{Dir: dir, Source: src})
+	index.Refresh()
+	before, ok := index.Session(reg.ReplyID)
+	if !ok || !before.HasBoard {
+		t.Fatal("initial lead board was not indexed")
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		got := fake.received()
-		if len(got) > before {
-			for _, n := range got[before:] {
-				if n.ReplyID != wsmailbox.ReplyID(key) {
-					t.Fatalf("nudge %+v; want the top-level lead's reply id", n)
-				}
-			}
+	f.s.sessions.boards.SetChanged(func(_, key string) {
+		if key != f.key {
+			t.Errorf("nudge key %q, want top-level lead's key", key)
 			return
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("a sub-lead write sent no dashboard nudge for its lead")
-		}
-		time.Sleep(10 * time.Millisecond)
+		index.Reread(reg.ReplyID)
+	})
+	if resp := f.call(t, "whiteboard.update", map[string]any{"session_key": sub, "commands": `<wb:topic name="work"><wb:log>status</wb:log></wb:topic>`}); isToolError(resp) {
+		t.Fatalf("sub-lead write: %s", resp)
+	}
+	index.Settle()
+	if after, ok := index.Session(reg.ReplyID); !ok || after.Rev != before.Rev+1 {
+		t.Fatalf("lead board did not refresh: before=%+v, after=%+v", before, after)
 	}
 }
 
@@ -283,17 +279,4 @@ func TestRenderSubleadPlaybookMintsMarkedLeadKey(t *testing.T) {
 	if _, ok := s.sessions.subleadPlaybook(extractSplicedKey(t, workerBody)); ok {
 		t.Fatal("a role: worker render must not mark its key")
 	}
-}
-
-// quietNudgeCount waits until no nudge has arrived for 200ms and returns the
-// count received so far.
-func quietNudgeCount(fake *fakeDaemon) int {
-	n := len(fake.received())
-	for stable := time.Now(); time.Since(stable) < 200*time.Millisecond; {
-		time.Sleep(10 * time.Millisecond)
-		if m := len(fake.received()); m != n {
-			n, stable = m, time.Now()
-		}
-	}
-	return n
 }

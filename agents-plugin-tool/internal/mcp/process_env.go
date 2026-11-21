@@ -37,8 +37,10 @@ import (
 // ServerOptions configures a Server for one caller process.
 type ServerOptions struct {
 	// BoardOwner identifies daemon-owned servers even before the dashboard binds.
-	// Raw diagnostic servers leave it false; board writes still commit.
+	// Only the daemon and its internal servers admit board tools.
 	BoardOwner bool
+	// Boards is the daemon's shared whiteboard authority.
+	Boards *WhiteboardStores
 
 	// Root is the repository root the server resolves tool roots from.
 	Root string
@@ -80,9 +82,6 @@ type ServerOptions struct {
 	WorktreeChildren WorktreeChildrenReader
 	// Notes is the daemon's shared presentation cache; nil on standalone servers.
 	Notes *wsnote.Cache
-	// WhiteboardChanged invalidates daemon timers after a successful board write,
-	// even when this session has no dashboard page. It must not block.
-	WhiteboardChanged func(cacheHome, root, key string)
 }
 
 // procEnv is a snapshot of one process's environment.
@@ -157,7 +156,9 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 	s.drainCtx, s.drainCancel = context.WithCancel(context.Background())
 	s.sessions = newSessionStore()
 	s.boardOwner = opts.BoardOwner
-	s.sessions.boardOwner = opts.BoardOwner
+	if opts.BoardOwner {
+		s.sessions.boards = opts.Boards
+	}
 	s.sessions.cacheHome = s.getenv(wsstate.EnvCacheHome)
 	s.declared = loadDeclaredConfig(s.getenv(envConfigManifests))
 	s.agentBackendSource = opts.AgentBackends
@@ -168,7 +169,6 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 	if opts.Harness != "" {
 		s.observeHarness("hello", opts.Harness)
 	}
-	s.whiteboardChanged = opts.WhiteboardChanged
 	s.pi.agents = opts.Agents
 	s.pi.worktreeChildren = opts.WorktreeChildren
 	if s.pi.worktreeChildren == nil && opts.Agents != nil {

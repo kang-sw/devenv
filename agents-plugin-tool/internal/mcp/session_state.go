@@ -5,14 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"io"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
-	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsreview"
-	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 // session_state.go implements the session state machine layered onto the
@@ -608,8 +606,8 @@ func (s *sessionStore) mutateRecord(sessionKey string, write recordPart, fn func
 // not write: read and write are both loaded, only write is persisted.
 //
 // A legacy record's first mutation migrates its session metadata, preserving
-// its original board-bearing representations. Whiteboard writes use the
-// folder transaction, never the legacy cache part. fn returning
+// its original board-bearing representations. Whiteboard writes go to the
+// board DB and leave the legacy cache part as a recovery snapshot. fn returning
 // errRecordUnchanged writes nothing, migration included.
 func (s *sessionStore) mutateRecordParts(sessionKey string, read, write recordPart, fn func(*sessionRecord) error) error {
 	return s.mutateRecordPartsObserved(sessionKey, read, write, fn, nil)
@@ -621,9 +619,9 @@ type boardMutationObservation struct {
 	Committed bool
 }
 
-// mutateRecordPartsObserved observes durable board intent independently of
-// replay success. Project to another store only after return,
-// outside the session and folder locks. Recovery does not produce observations.
+// mutateRecordPartsObserved observes a successfully applied board mutation
+// independently of any session migration error. Project to other stores
+// after returning, outside the session and board locks.
 func (s *sessionStore) mutateRecordPartsObserved(sessionKey string, read, write recordPart, fn func(*sessionRecord) error, observation *boardMutationObservation) error {
 	d, err := s.dirs()
 	if err != nil {
@@ -639,35 +637,25 @@ func (s *sessionStore) mutateRecordPartsObserved(sessionKey string, read, write 
 		return err
 	}
 	defer unlock()
-	record, legacy, err := s.loadRecord(d, sessionKey, read|write, nil)
+	openBoard := s.openWhiteboard
+	if write&partWhiteboard != 0 {
+		openBoard = func(record *sessionRecord, key string, _ io.Writer, legacy legacyBoardReader) error {
+			err := s.mutateWhiteboard(record, key, legacy, fn)
+			if err == nil && observation != nil {
+				observation.Committed = true
+			}
+			return err
+		}
+	}
+	readFile := s.readFile
+	if readFile == nil {
+		readFile = readRecordFile
+	}
+	record, legacy, err := loadRecordWithBoard(d, sessionKey, read|write, nil, readFile, openBoard)
 	if errors.Is(err, errSessionNotFound) {
 		return fmt.Errorf("session key not found: %s", sessionKey)
 	}
-	if err != nil {
-		return err
-	}
-	if write&partWhiteboard != 0 {
-		folder := whiteboardFolder(record.Root, sessionKey)
-		folder.Fault = s.boardFault
-		firstBoard := record.Whiteboard == nil
-		var committed func()
-		if observation != nil {
-			committed = func() { observation.Committed = true }
-		}
-		err = folder.UpdateAndPublishObserved(record.Whiteboard, func(board *wswhiteboard.State) error {
-			record.Whiteboard = board
-			if err := fn(&record); err != nil {
-				return err
-			}
-			if record.Whiteboard != board && record.Whiteboard != nil {
-				*board = *record.Whiteboard
-			}
-			if firstBoard {
-				return registerWhiteboardExclude(wsgit.ExecRunner{}, record.Root, filepath.Dir(folder.Dir))
-			}
-			return nil
-		}, committed, nil)
-	} else {
+	if err == nil && write&partWhiteboard == 0 {
 		err = fn(&record)
 	}
 	if err != nil {
@@ -704,7 +692,7 @@ func (s *sessionStore) readStateWithError(sessionKey string, parts recordPart) (
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	record, _, err := loadRecordWith(d, sessionKey, parts, nil, s.readOnlyReader())
+	record, _, err := loadRecordWithBoard(d, sessionKey, parts, nil, s.readOnlyReader(), s.openWhiteboard)
 	if err != nil {
 		return sessionRecord{}, err
 	}

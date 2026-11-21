@@ -147,6 +147,11 @@ var boardDBSchema = []string{
 // folder lock through the DB commit and schema-3 sentinel write. legacy is the
 // old session snapshot accepted by FolderStore.Open when no folder exists.
 func OpenBoardDB(dir string, legacy *State, opts BoardDBOptions) (*BoardDB, error) {
+	return OpenBoardDBLazy(dir, func() (*State, error) { return legacy, nil }, opts)
+}
+
+// OpenBoardDBLazy consults the legacy snapshot only when no folder or DB authority exists.
+func OpenBoardDBLazy(dir string, legacy func() (*State, error), opts BoardDBOptions) (*BoardDB, error) {
 	if dir == "" {
 		return nil, fmt.Errorf("whiteboard board DB: empty directory")
 	}
@@ -182,10 +187,27 @@ func OpenBoardDB(dir string, legacy *State, opts BoardDBOptions) (*BoardDB, erro
 			board.finishSentinel()
 		}
 		board.armCheckpointLocked()
+		(FolderStore{Dir: dir}).rememberIncarnation(board.state.LoadedAt)
 		return board, nil
 	}
 
 	legacyStore := FolderStore{Dir: dir}
+	present, err := boardAuthorityPresent(dir)
+	if err != nil {
+		return nil, err
+	}
+	var legacyState *State
+	if !present {
+		if legacy != nil {
+			legacyState, err = legacy()
+			if err != nil {
+				return nil, err
+			}
+		}
+		if legacyState == nil {
+			return nil, os.ErrNotExist
+		}
+	}
 	var board *BoardDB
 	retryOpen := false
 	err = legacyStore.withGuard(true, func() error { return boardLegacyGuard(dir) }, func() error {
@@ -204,7 +226,7 @@ func OpenBoardDB(dir string, legacy *State, opts BoardDBOptions) (*BoardDB, erro
 		if has {
 			return boardDBRollbackError(path, "is missing")
 		}
-		state, meta, err := legacyStore.load(legacy)
+		state, meta, err := legacyStore.load(legacyState)
 		if err != nil {
 			return err
 		}
@@ -232,10 +254,95 @@ func OpenBoardDB(dir string, legacy *State, opts BoardDBOptions) (*BoardDB, erro
 		return nil, err
 	}
 	if retryOpen {
-		return OpenBoardDB(dir, legacy, opts)
+		return OpenBoardDBLazy(dir, legacy, opts)
 	}
 	board.armCheckpointLocked()
+	(FolderStore{Dir: dir}).rememberIncarnation(board.state.LoadedAt)
 	return board, nil
+}
+
+// boardAuthorityPresent checks only authoritative files; a directory or lock
+// alone does not constitute a board.
+func boardAuthorityPresent(dir string) (bool, error) {
+	for _, name := range []string{boardDBName, "meta.json", "pending.json", "committed.json"} {
+		if _, err := os.Lstat(filepath.Join(dir, name)); err == nil {
+			return true, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return false, err
+		}
+	}
+	return false, nil
+}
+
+// CreateBoardDB installs initial state directly, refusing existing authority.
+func CreateBoardDB(dir string, initial *State, opts BoardDBOptions) (*BoardDB, error) {
+	if dir == "" || initial == nil {
+		return nil, fmt.Errorf("whiteboard board DB: directory and initial state are required")
+	}
+	f := FolderStore{Dir: dir}
+	var b *BoardDB
+	err := f.withGuard(true, func() error {
+		present, err := boardAuthorityPresent(dir)
+		if err != nil {
+			return err
+		}
+		if present {
+			return fmt.Errorf("whiteboard board already exists: %w", os.ErrExist)
+		}
+		return nil
+	}, func() error {
+		rows, err := boardRows(initial, nil, 0, nil)
+		if err != nil {
+			return err
+		}
+		cleanup := func() {
+			for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+				_ = os.Remove(filepath.Join(dir, boardDBName+suffix))
+			}
+		}
+		b, err = openBoardDBHandle(dir, opts)
+		if err != nil {
+			cleanup()
+			return err
+		}
+		tx, err := b.db.Begin()
+		if err != nil {
+			_ = b.db.Close()
+			cleanup()
+			return err
+		}
+		defer tx.Rollback()
+		if err = boardInsertAll(tx, rows, 1, 0); err == nil && (initial.MetadataRevision != 0 || initial.StaleNudgeRevision != "") {
+			_, err = tx.Exec(`INSERT INTO revision_receipts(slot,generation,metadata_revision,stale_nudge_revision) VALUES(1,1,?,?)`, initial.MetadataRevision, initial.StaleNudgeRevision)
+			b.revisionSlot = 1
+		}
+		if err == nil && initial.LoadedAt != "" {
+			_, err = tx.Exec(`INSERT INTO load_floors(generation,loaded_at) VALUES(1,?)`, initial.LoadedAt)
+		}
+		if err == nil {
+			err = b.hit("transaction-before-commit")
+		}
+		if err == nil {
+			err = tx.Commit()
+		}
+		if err != nil {
+			_ = tx.Rollback()
+			_ = b.db.Close()
+			cleanup()
+			return err
+		}
+		b.state, b.generation, b.nextTopic, b.topicDirs = initial.clone(), 1, rows.NextTopic, rows.Dirs
+		if err := b.writeSentinel(f); err != nil {
+			b.logf("whiteboard board DB %s: write migration sentinel: %v", dir, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	f.rememberIncarnation(b.state.LoadedAt)
+	b.armCheckpointLocked()
+	return b, nil
 }
 
 func openBoardDBHandle(dir string, opts BoardDBOptions) (*BoardDB, error) {
@@ -534,6 +641,17 @@ func (b *BoardDB) load() error {
 }
 
 // State returns a detached copy of the complete in-memory board.
+func (b *BoardDB) Snapshot() (*State, uint64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.state == nil {
+		return nil, uint64(b.generation)
+	}
+	return b.state.clone(), uint64(b.generation)
+}
+
+func (b *BoardDB) Revision() uint64 { b.mu.Lock(); defer b.mu.Unlock(); return uint64(b.generation) }
+
 func (b *BoardDB) State() *State {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -551,6 +669,10 @@ func (b *BoardDB) Update(fn func(*State) error) error {
 	if b.closed {
 		return fmt.Errorf("whiteboard board DB is closed")
 	}
+	return b.updateLocked(fn)
+}
+
+func (b *BoardDB) updateLocked(fn func(*State) error) error {
 	work := b.state.clone()
 	if err := fn(work); err != nil {
 		return err
@@ -972,34 +1094,22 @@ func (b *BoardDB) BackupLegacy(dir string) error {
 // conversion, and all folder consistency checks are the same as first open.
 // The previous board is backed up as a legacy-layout folder.
 func (b *BoardDB) LoadArchive(zipPath string, now time.Time) (backup string, topics int, err error) {
-	tmp, err := os.MkdirTemp("", "ws-whiteboard-db-load-*")
+	next, err := readBoardArchive(zipPath)
 	if err != nil {
 		return "", 0, err
 	}
-	defer os.RemoveAll(tmp)
-	if err := extractArchive(zipPath, tmp); err != nil {
-		return "", 0, err
-	}
-	// Archive authority is always the legacy layout. A supplied recovery DB
-	// (or its sidecars) must not bypass the folder's replay and schema checks.
-	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
-		if _, err := os.Lstat(filepath.Join(tmp, boardDBName+suffix)); err == nil {
-			return "", 0, fmt.Errorf("the archive contains SQLite recovery files; export a legacy-layout board archive")
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return "", 0, err
+	finish := (FolderStore{Dir: b.dir}).beginIncarnationLoad()
+	b.mu.Lock()
+	oldToken := b.state.LoadedAt
+	b.mu.Unlock()
+	committed := false
+	defer func() {
+		if committed {
+			finish(next.LoadedAt, nil)
+		} else {
+			finish(oldToken, nil)
 		}
-	}
-	loaded, err := OpenBoardDB(tmp, nil, BoardDBOptions{})
-	if err != nil {
-		return "", 0, fmt.Errorf("the archive is not a valid board: %w", err)
-	}
-	next := loaded.State()
-	if err := loaded.Close(); err != nil {
-		return "", 0, err
-	}
-	if next == nil {
-		return "", 0, fmt.Errorf("the archive holds no board")
-	}
+	}()
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed {
@@ -1058,6 +1168,9 @@ func (b *BoardDB) LoadArchive(zipPath string, now time.Time) (backup string, top
 	if _, err := tx.Exec(`INSERT INTO load_floors(generation,loaded_at) VALUES(?,?)`, b.generation+1, next.LoadedAt); err != nil {
 		return backup, 0, err
 	}
+	if err := b.hit("transaction-before-commit"); err != nil {
+		return backup, 0, err
+	}
 	if err := tx.Commit(); err != nil {
 		return backup, 0, err
 	}
@@ -1065,12 +1178,59 @@ func (b *BoardDB) LoadArchive(zipPath string, now time.Time) (backup string, top
 	if next.MetadataRevision != 0 || next.StaleNudgeRevision != "" {
 		b.revisionSlot = 1
 	}
+	committed = true
 	b.generation++
 	b.nextTopic = rows.NextTopic
 	b.topicDirs = rows.Dirs
 	b.state = next.clone()
 	b.armCheckpointLocked()
 	return backup, len(next.Topics), nil
+}
+
+func readBoardArchive(zipPath string) (*State, error) {
+	tmp, err := os.MkdirTemp("", "ws-whiteboard-db-load-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmp)
+	if err := extractArchive(zipPath, tmp); err != nil {
+		return nil, err
+	}
+	// Archive authority is always the legacy layout. A supplied recovery DB
+	// (or its sidecars) must not bypass the folder's replay and schema checks.
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		if _, err := os.Lstat(filepath.Join(tmp, boardDBName+suffix)); err == nil {
+			return nil, fmt.Errorf("the archive contains SQLite recovery files; export a legacy-layout board archive")
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+	}
+	loaded, err := OpenBoardDB(tmp, nil, BoardDBOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("the archive is not a valid board: %w", err)
+	}
+	next := loaded.State()
+	if err := loaded.Close(); err != nil {
+		return nil, err
+	}
+	if next == nil {
+		return nil, fmt.Errorf("the archive holds no board")
+	}
+	return next, nil
+}
+
+// LoadNewBoardDB validates a legacy archive and installs it without a backup.
+func LoadNewBoardDB(dir, zipPath string, opts BoardDBOptions) (*BoardDB, int, error) {
+	next, err := readBoardArchive(zipPath)
+	if err != nil {
+		return nil, 0, err
+	}
+	next.LoadedAt = time.UnixMilli(archiveLoadNow().UnixMilli() + 1).UTC().Format(reaskLayout)
+	b, err := CreateBoardDB(dir, next, opts)
+	if err != nil {
+		return nil, 0, err
+	}
+	return b, len(next.Topics), nil
 }
 
 func (b *BoardDB) backupLegacyLocked(dir string) error {

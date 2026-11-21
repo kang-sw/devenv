@@ -18,7 +18,7 @@ func TestDashboardHydratedHistoryRetainsImageInvalidation(t *testing.T) {
 		t.Run(route, func(t *testing.T) {
 			t.Setenv("WS_MCP_NO_DASHBOARD", "1")
 			f := newWhiteboardFixture(t)
-			src := dashboardPageSource(t, nil)
+			src := dashboardPageSource(t, nil, f.s.sessions.boards)
 			reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 			path := filepath.Join(f.root, "shots", "closed.png")
 			mustWrite(t, f.root, "shots/closed.png", "first-image")
@@ -98,7 +98,7 @@ func TestDashboardHydratedHistoryRetainsImageInvalidation(t *testing.T) {
 			// Dependencies and the marker must be reproducible after daemon
 			// replacement, even if the client reconnects without another fetch.
 			current := readPageOK(t, src, reg)
-			fresh := readPageOK(t, dashboardPageSource(t, nil), reg)
+			fresh := readPageOK(t, dashboardPageSource(t, nil, f.s.sessions.boards), reg)
 			if !slices.Contains(fresh.Watch, path) || fresh.Board != current.Board {
 				t.Error("replacement source lost image dependencies or changed the deterministic stamp")
 			}

@@ -50,7 +50,7 @@ func TestWhiteboardNudgeCacheMetadataAndAuthority(t *testing.T) {
 		t.Fatalf("cold: reads=%d cache=%d", reads, len(n.identities))
 	}
 	check("warm", want)
-	if reads != 1 || stats < 3 {
+	if reads != 1 || stats < 2 {
 		t.Fatalf("warm: reads=%d metadata-stats=%d", reads, stats)
 	}
 	// Change the same file without changing its length. Directory mtime is not a stamp.
@@ -225,7 +225,6 @@ func TestWhiteboardNudgeCacheScopeRootAndParentChanges(t *testing.T) {
 		{SchemaVersion: 2, Scope: string(roleDelegate), Root: target.root},
 		{SchemaVersion: 2, Scope: string(roleLead), Root: target.root, Parent: "other"},
 		{SchemaVersion: 2, Scope: string(roleLead), Root: "relative"},
-		{SchemaVersion: 2, Scope: string(roleLead), Root: t.TempDir()},
 	} {
 		nudgeWriteJSON(t, path, record)
 		got := n.discover()

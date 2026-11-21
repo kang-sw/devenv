@@ -51,7 +51,7 @@ func newLiveFixture(t *testing.T, enabled bool) liveFixture {
 	t.Setenv(envConfigManifests, pkg.own+";"+pkg.dashboard)
 	root := t.TempDir()
 	initGit(t, root)
-	s := NewServer(root, "test")
+	s := newTestBoardOwner(t, root, "test")
 	keyA := mailboxLogin(t, s, 1, root)
 	keyB := mailboxLogin(t, s, 2, root)
 	return liveFixture{root: root, stateDir: stateDir, server: s, keyA: keyA, keyB: keyB, replyA: wsmailbox.ReplyID(keyA), replyB: wsmailbox.ReplyID(keyB)}

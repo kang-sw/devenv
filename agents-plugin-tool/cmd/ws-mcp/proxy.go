@@ -65,7 +65,7 @@ type proxyHost struct {
 	// tools spawn its Pi subagents (mcp.ServerOptions.Agents); nil leaves
 	// them refusing.
 	agents mcp.PiAgents
-	nudges *mcp.WhiteboardNudges
+	boards *mcp.WhiteboardStores
 	notes  *wsnote.Cache
 }
 
@@ -87,6 +87,7 @@ func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySessi
 		}
 		opts := mcp.ServerOptions{
 			BoardOwner:   true,
+			Boards:       h.boards,
 			Root:         root,
 			Notes:        h.notes,
 			Version:      version,
@@ -95,9 +96,6 @@ func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySessi
 			OwnerPID:     hello.OwnerPID,
 			Harness:      hello.Harness,
 			Diag:         prefixedWriter{w: h.logw, prefix: fmt.Sprintf("dashboard: session pid %d: ", hello.OwnerPID)},
-		}
-		if h.nudges != nil {
-			opts.WhiteboardChanged = h.nudges.Poke
 		}
 		if d := h.live.Load(); d != nil {
 			opts.Live = d

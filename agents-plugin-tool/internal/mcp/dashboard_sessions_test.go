@@ -226,7 +226,9 @@ func TestDashboardKeyOffAndKeyOnServersOnOneRoot(t *testing.T) {
 	fake := startFakeDaemon(t, dir, http.StatusNoContent, false)
 	root := dashboardGitRoot(t)
 	sOff, keyOff, _ := dashboardSessionServer(t, root, false)
-	sOn, keyOn, loginRoot := dashboardSessionServer(t, root, true)
+	_, keyOn, loginRoot := dashboardSessionServer(t, root, true)
+	sOn := newTestBoardOwner(t, root, "test")
+	sOn.sessionHarness = "claude"
 
 	for _, c := range []struct {
 		s   *Server
@@ -252,7 +254,7 @@ func TestDashboardKeyOffAndKeyOnServersOnOneRoot(t *testing.T) {
 
 	// The daemon's index, read through the real session source, lists only
 	// the key-on session, even though it has no board yet.
-	idx := wsdashboard.NewIndex(wsdashboard.IndexOptions{Dir: dir, Source: NewDashboardSessionSource()})
+	idx := wsdashboard.NewIndex(wsdashboard.IndexOptions{Dir: dir, Source: dashboardPageSource(t, nil, sOn.sessions.boards)})
 	idx.Refresh()
 	sessions := idx.Sessions()
 	if len(sessions) != 1 || sessions[0].ReplyID != wsmailbox.ReplyID(keyOn) || sessions[0].HasBoard || !sessions[0].Live {

@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -9,6 +10,79 @@ import (
 	"testing"
 	"time"
 )
+
+func TestWhiteboardNudgeAbsentMemoryAndPoke(t *testing.T) {
+	n := NewWhiteboardNudges(filepath.Join(t.TempDir(), "dashboard"), nil, io.Discard)
+	defer n.Close()
+	target := nudgeTarget{"absent-memory-lead", t.TempDir()}
+	nudgeWriteJSON(t, n.dirs().partPath(target.key, partKey), sessionKeyRecord{SchemaVersion: 2, Scope: string(roleLead), Root: target.root})
+	start := time.Now()
+	var clock, calls atomic.Int64
+	clock.Store(start.UnixNano())
+	turns := make(chan int64, 16)
+	n.now = func() time.Time { turns <- calls.Add(1); return time.Unix(0, clock.Load()) }
+	processed := make(chan struct{}, 8)
+	n.tickets = func(string) wswhiteboard.TicketResolver { processed <- struct{}{}; return nil }
+	waitTurn := func(want int64) {
+		t.Helper()
+		for {
+			select {
+			case got := <-turns:
+				if got >= want {
+					return
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("scheduler did not finish turn")
+			}
+		}
+	}
+	n.Start()
+	waitTurn(3)
+	select {
+	case <-processed:
+	default:
+		t.Fatal("cold identity was not probed")
+	}
+	if _, err := whiteboardFolder(target.root, target.key).Open(&wswhiteboard.State{}); err != nil {
+		t.Fatal(err)
+	}
+	clock.Store(start.Add(whiteboardNudgeRecoveryInterval).UnixNano())
+	n.changed <- struct{}{}
+	waitTurn(5)
+	select {
+	case <-processed:
+		t.Fatal("recovery reprobed known absent board")
+	default:
+	}
+	n.Poke(n.cache, target.root, target.key)
+	waitTurn(7)
+	select {
+	case <-processed:
+	default:
+		t.Fatal("poke did not reprobe absent board")
+	}
+	if err := n.stores.use(target.root, target.key, nil, false, func(slot *whiteboardSlot) error {
+		if slot.board == nil {
+			t.Error("poke did not open newly present board")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWhiteboardNudgeProbeErrorRemainsUnknown(t *testing.T) {
+	n := NewWhiteboardNudges(filepath.Join(t.TempDir(), "dashboard"), nil, io.Discard)
+	defer n.Close()
+	if err := n.stores.Close(); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	next, presence := n.processBoard(nudgeTarget{"error-lead", t.TempDir()}, now)
+	if presence != nudgeUnknown || !next.Equal(now.Add(n.interval)) {
+		t.Fatalf("failed probe: presence=%v next=%v", presence, next)
+	}
+}
 
 func TestWhiteboardNudgeSafetyScanCadenceAndMissedPoke(t *testing.T) {
 	f := newNudgeFixture(t)
@@ -57,70 +131,14 @@ func TestWhiteboardNudgeSafetyScanCadenceAndMissedPoke(t *testing.T) {
 	t.Log("idle discovery cadence: 10 scans / 5 minutes -> 1; exact deadlines and explicit pokes remain separate")
 }
 
-func TestWhiteboardNudgeReconcileStampsAndDeadlines(t *testing.T) {
-	n, target, _ := nudgeCacheFixture(t)
-	meta := filepath.Join(whiteboardFolder(target.root, target.key).Dir, "meta.json")
-	old := time.Now().Add(-time.Hour)
-	if err := os.Chtimes(meta, old, old); err != nil {
-		t.Fatal(err)
-	}
-	found := n.discover()
-	deadline := time.Now().Add(17 * time.Minute)
-	boards := map[nudgeTarget]time.Time{target: deadline}
-	stamps := n.boardStamps
-	found = n.discover()
-	boards, stamps = nudgeReconcile(boards, stamps, found, n.boardStamps, false)
-	if !boards[target].Equal(deadline) {
-		t.Fatal("unchanged scan lost precise deadline", boards[target])
-	}
-	// A transaction replaces session metadata, even when its size is equal.
-	replacement := meta + ".new"
-	if err := os.WriteFile(replacement, []byte("{}"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(replacement, old.Add(time.Second), old.Add(time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(replacement, meta); err != nil {
-		t.Fatal(err)
-	}
-	found = n.discover()
-	boards, stamps = nudgeReconcile(boards, stamps, found, n.boardStamps, false)
-	if !boards[target].IsZero() {
-		t.Fatal("replacement did not invalidate schedule")
-	}
-	boards[target] = deadline
-	found = n.discover()
-	boards, stamps = nudgeReconcile(boards, stamps, found, n.boardStamps, true)
-	if !boards[target].IsZero() {
-		t.Fatal("recovery did not revisit unchanged board")
-	}
-	// A missing session meta but surviving pending intent has no safe stamp.
-	if err := os.Remove(meta); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(filepath.Dir(meta), "pending.json"), []byte("{}"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	boards[target] = deadline
-	found = n.discover()
-	boards, _ = nudgeReconcile(boards, stamps, found, n.boardStamps, false)
-	if !boards[target].IsZero() {
-		t.Fatal("pending-only board reused schedule")
-	}
-}
-
-func TestWhiteboardNudgeReconcileRecentAndRemoved(t *testing.T) {
-	n, target, _ := nudgeCacheFixture(t)
-	found := n.discover()
-	stamps := n.boardStamps
-	boards := map[nudgeTarget]time.Time{target: time.Now().Add(time.Hour)}
-	found, _ = nudgeReconcile(boards, stamps, found, stamps, false)
-	if !found[target].IsZero() {
-		t.Fatal("recent metadata trusted")
-	}
-	found, _ = nudgeReconcile(boards, stamps, map[nudgeTarget]time.Time{}, nil, false)
-	if len(found) != 0 {
-		t.Fatal("removed board retained")
+func TestWhiteboardNudgeRefreshUsesLiveBoard(t *testing.T) {
+	f := newNudgeFixture(t)
+	start := time.Now().Truncate(time.Second)
+	f.board(t, `<wb:topic name="Work"><wb:state value="waiting"/><wb:state value="implementing" owner="first" eta_minutes="10"/></wb:topic>`, start)
+	first := f.n.process(f.target, start)
+	f.board(t, `<wb:topic name="Work"><wb:state value="waiting"/><wb:state value="implementing" owner="second" eta_minutes="1"/></wb:topic>`, start)
+	second := f.n.process(f.target, start)
+	if !first.Equal(start.Add(10*time.Minute)) || !second.Equal(start.Add(time.Minute)) {
+		t.Fatalf("live board deadlines: first=%v second=%v", first, second)
 	}
 }

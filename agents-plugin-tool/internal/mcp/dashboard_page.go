@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"html/template"
 	"os"
@@ -228,10 +227,8 @@ func boardMemoBase(key string, record sessionRecord, lang string, reasked map[in
 	h := sha256.New()
 	fmt.Fprint(h, boardMemoSharedBase(key, record, lang, reasked, replies))
 	fmt.Fprintf(h, "seq\x00%d\x00", record.Whiteboard.Seq)
-	// Folder metadata, logs, and panel versions are authoritative inputs too;
-	// equal render sequences must not hide changed on-disk content. The folder
-	// cache assigns a fresh identity whenever its authoritative read changes.
-	fmt.Fprintf(h, "folder\x00%d\x00", record.boardRevision)
+	// Board writes can change content without advancing the render sequence.
+	fmt.Fprintf(h, "board\x00%d\x00", record.boardRevision)
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -286,8 +283,6 @@ func (src *DashboardSessionSource) renderBoardTopics(key string, record sessionR
 	for _, path := range images {
 		watch(path)
 	}
-	folder := whiteboardFolder(record.Root, key).Dir
-	watchWhiteboardFiles(folder, func(path string) { out.watch = append(out.watch, path) })
 	in := servedViewInput(record, replyID)
 	in.Tickets = &whiteboardTickets{root: record.Root, watch: watch}
 	docImageSrc := in.DocImageSrc
@@ -375,16 +370,22 @@ func (src *DashboardSessionSource) ReadClosedTopics(reg wsdashboard.Registration
 
 var _ wsdashboard.BoardArchiveSource = (*DashboardSessionSource)(nil)
 
-// BoardArchive zips the session's board folder for the dashboard's board
-// download; false when the session has no board. The folder is the one
-// whiteboardFolder names: the reply-id under the registered root.
+// BoardArchive returns the registered board in the legacy ZIP layout.
 func (src *DashboardSessionSource) BoardArchive(reg wsdashboard.Registration) ([]byte, bool, error) {
-	folder := wswhiteboard.FolderStore{Dir: filepath.Join(reg.Project, filepath.FromSlash(whiteboardDirRel), reg.ReplyID)}
-	data, err := folder.ExportArchive()
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, false, nil
+	if src.store.boards == nil {
+		return nil, false, errWhiteboardOwner
 	}
-	return data, err == nil, err
+	dir := filepath.Join(reg.Project, filepath.FromSlash(whiteboardDirRel), reg.ReplyID)
+	var data []byte
+	err := src.store.boards.useDirectory(dir, reg.Project, "", nil, true, func(slot *whiteboardSlot) error {
+		if slot.board == nil {
+			return nil
+		}
+		var err error
+		data, err = slot.board.ExportArchive()
+		return err
+	})
+	return data, data != nil && err == nil, err
 }
 
 var _ wsdashboard.TopicHistorySource = (*DashboardSessionSource)(nil)

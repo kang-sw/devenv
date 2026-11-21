@@ -372,7 +372,9 @@ func TestDashboardSessionFingerprintTracksTheInbox(t *testing.T) {
 	if !ok {
 		t.Fatal("no registration")
 	}
-	src := &DashboardSessionSource{store: newSessionStore(), stateDir: func() (string, error) { return f.stateDir, nil }, now: time.Now}
+	src := dashboardPageSource(t, nil)
+	src.stateDir = func() (string, error) { return f.stateDir, nil }
+	src.now = time.Now
 	read := func() string {
 		t.Helper()
 		data, ok, err := src.ReadSession(reg)

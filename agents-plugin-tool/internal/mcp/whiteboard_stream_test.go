@@ -107,10 +107,11 @@ func TestWhiteboardStreamRefreshesPanelLogItemAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	newSource := func() *DashboardSessionSource {
-		return &DashboardSessionSource{store: newSessionStore(), stateDir: func() (string, error) { return dir, nil }}
+		return &DashboardSessionSource{store: f.s.sessions, stateDir: func() (string, error) { return dir, nil }}
 	}
 	src := newSource()
 	daemon := startWhiteboardDaemonForTest(t, dir, src)
+	f.s.sessions.boards.SetChanged(func(root, _ string) { daemon.Index().Nudge(f.replyID(), root) })
 	f.s.dashboard.dir = src.stateDir
 	f.s.dashboard.sessions = map[string]*dashboardSession{f.key: {replyID: f.replyID(), project: f.root, hosted: true}}
 	t.Cleanup(f.s.Close)
@@ -143,7 +144,7 @@ func TestWhiteboardStreamRefreshesPanelLogItemAndRestart(t *testing.T) {
 			t.Fatalf("%s unchanged re-read missed the board memo", step.name)
 		}
 	}
-	before, err := newSessionStore().readWhiteboard(f.key)
+	before, err := f.s.sessions.readWhiteboard(f.key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +156,7 @@ func TestWhiteboardStreamRefreshesPanelLogItemAndRestart(t *testing.T) {
 		t.Fatal(resp)
 	}
 	waitWhiteboardRegionForTest(t, stream, "panels", "aux-refresh-marker")
-	after, err := newSessionStore().readWhiteboard(f.key)
+	after, err := f.s.sessions.readWhiteboard(f.key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,6 +168,7 @@ func TestWhiteboardStreamRefreshesPanelLogItemAndRestart(t *testing.T) {
 		t.Fatal("served panels missed the update")
 	}
 	daemon.Close()
+	f.s = restartTestBoardOwner(t, f.s, f.root, "restart-stream")
 	restarted := startWhiteboardDaemonForTest(t, dir, newSource())
 	reconnected := openWhiteboardStreamForTest(t, restarted, f.replyID())
 	region := waitWhiteboardRegionForTest(t, reconnected, "board", "patched-item-marker")
@@ -179,7 +181,7 @@ func TestWhiteboardStreamRefreshesPanelLogItemAndRestart(t *testing.T) {
 	if frags, ok := newSource().ReadTopicHistory(reg, "", []string{"stream"}, ""); !ok || len(frags) != 1 || !strings.Contains(string(frags[0].HTML), `data-panel="p1"`) {
 		t.Fatal(`restart lost committed stream marker data-panel="p1" from the topic's history`)
 	}
-	loaded, err := newSessionStore().readWhiteboard(f.key)
+	loaded, err := f.s.sessions.readWhiteboard(f.key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,15 +191,15 @@ func TestWhiteboardStreamRefreshesPanelLogItemAndRestart(t *testing.T) {
 	}
 }
 
-func TestWhiteboardStreamMetadataMatchesFolderAuthority(t *testing.T) {
+func TestWhiteboardStreamMetadataMatchesDBAuthority(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	f.update(t, `<wb:topic name="versions"><wb:body>content-marker</wb:body><wb:add class="technical"><wb:title>item-marker</wb:title></wb:add><wb:log>agent-marker</wb:log><wb:panel recap="old-recap">old-payload</wb:panel><wb:panel id="p2" recap="latest-recap">latest-payload</wb:panel></wb:topic>`)
-	rec, err := newSessionStore().readWhiteboard(f.key)
+	rec, err := f.s.sessions.readWhiteboard(f.key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
-	servedSrc := dashboardPageSource(t, nil)
+	servedSrc := dashboardPageSource(t, nil, f.s.sessions.boards)
 	served := string(readPageOK(t, servedSrc, reg).Board.Board)
 	// An earlier panel version's frame comes with the topic's lazy history.
 	history, _ := servedSrc.ReadTopicHistory(reg, "", []string{"versions"}, "")
