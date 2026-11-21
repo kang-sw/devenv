@@ -553,6 +553,9 @@
     "261121-bug-ws-dogfood-tool-surprises": {
       "registered_at": "2026-11-21T01:02:36Z"
     },
+    "261121-feat-werkschaft-tauri-shell-return": {
+      "registered_at": "2026-11-21T11:06:46Z"
+    },
     "261121-feat-ws-board-chat-small-ux": {
       "registered_at": "2026-11-21T09:00:06Z"
     },
@@ -561,19 +564,6 @@
     },
     "261121-feat-ws-board-search-ranking": {
       "registered_at": "2026-11-21T09:35:55Z"
-    },
-    "261121-feat-ws-dashboard-inpage-dialogs": {
-      "registered_at": "2026-11-21T08:39:14Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-21T10:10:51Z",
-        "impl": {
-          "branch": "impl/develop/grain-tux-rover"
-        }
-      }
     },
     "261121-refactor-ws-daemon-metadata-sqlite": {
       "registered_at": "2026-11-21T08:27:21Z"
