@@ -1,4 +1,12 @@
 /* ===== conversation ===== */
+.d-jump-wrap { position: sticky; top: 8px; height: 0; z-index: 3; pointer-events: none; }
+.d-jump-btn { position: absolute; left: 8px; top: 0; pointer-events: auto; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 999px; background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); cursor: pointer; transition: background-color .15s, color .15s; }
+.d-jump-btn[hidden] { display: none; }
+.d-jump-btn .i { width: 14px; height: 14px; stroke-width: 2; transition: transform .15s; }
+.d-jump-btn[data-dir="down"] .i { transform: rotate(180deg); }
+.d-jump-btn:hover { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); color: var(--wb-primary); }
+.d-jump-btn:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .d-jump-btn, .d-jump-btn .i { transition: none; } }
 .conv { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; }
 .conv.clive { padding-top: 0; }
 .user-batch { display: flex; flex-direction: column; gap: 10px; }

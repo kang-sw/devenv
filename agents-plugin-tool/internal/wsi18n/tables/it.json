@@ -2679,5 +2679,18 @@
   "js.tk.ev.unhide": "ha mostrato di nuovo{0}",
   "js.tk.panel.showhidden": "Mostra nascosti",
   "js.tk.panel.showhidden.tip.off": "Mostra sul posto gli elementi e i commenti nascosti",
-  "js.tk.panel.showhidden.tip.on": "Nascondi di nuovo gli elementi e i commenti nascosti"
+  "js.tk.panel.showhidden.tip.on": "Nascondi di nuovo gli elementi e i commenti nascosti",
+  "wb.hold": "Metti in sospeso",
+  "js.pill.held": "in sospeso",
+  "js.pill.upheld": "scorri fino all’elemento in sospeso più vicino sopra",
+  "js.pill.downheld": "scorri fino all’elemento in sospeso più vicino sotto",
+  "js.pill.hold": "Metti in sospeso",
+  "js.pill.unhold": "Rimuovi sospensione",
+  "js.convo.jump.up": "Vai al tuo ultimo messaggio sopra",
+  "js.convo.jump.down": "Vai al tuo ultimo messaggio sotto",
+  "js.find.label": "Cerca nella scheda",
+  "js.find.placeholder": "Cerca nella scheda…",
+  "js.find.prev": "Risultato precedente (Shift+Enter)",
+  "js.find.next": "Risultato successivo (Enter)",
+  "js.find.close": "Chiudi barra di ricerca (Esc)"
 }

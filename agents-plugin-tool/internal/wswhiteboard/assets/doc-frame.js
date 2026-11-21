@@ -111,12 +111,75 @@
     };
     r.readAsDataURL(b);
   }
+  var findMarks = [];
+  function clearFind() {
+    var parents = new Set();
+    findMarks.forEach(function (m) {
+      var p = m.parentNode;
+      if (!p) return;
+      parents.add(p);
+      while (m.firstChild) p.insertBefore(m.firstChild, m);
+      p.removeChild(m);
+    });
+    parents.forEach(function (p) { if (p.normalize) p.normalize(); });
+    findMarks = [];
+  }
+  function runFind(query) {
+    clearFind();
+    if (!query) return 0;
+    var needle = String(query).toLowerCase(), len = needle.length;
+    if (!len || !d.createTreeWalker) return 0;
+    var nodes = [], walker = d.createTreeWalker(body, 4, {
+      acceptNode: function (node) {
+        var p = node.parentElement;
+        if (!p || !node.nodeValue || !node.nodeValue.trim()) return 2;
+        if (p.closest && p.closest("script, style, template, textarea, input, select, svg, [hidden]")) return 2;
+        for (var a = p; a && a !== body; a = a.parentElement) {
+          if (a.parentElement && a.parentElement.tagName === "DETAILS" && !a.parentElement.open && a.tagName !== "SUMMARY") return 2;
+        }
+        return 1;
+      }
+    });
+    var n;
+    while ((n = walker.nextNode())) nodes.push(n);
+    nodes.forEach(function (node) {
+      var val = node.nodeValue, lower = val.toLowerCase(), idx = lower.indexOf(needle);
+      if (idx < 0) return;
+      var frag = d.createDocumentFragment(), pos = 0;
+      while (idx >= 0) {
+        if (idx > pos) frag.appendChild(d.createTextNode(val.slice(pos, idx)));
+        var mark = d.createElement("mark");
+        mark.className = "wb-find-hit";
+        mark.textContent = val.slice(idx, idx + len);
+        frag.appendChild(mark);
+        findMarks.push(mark);
+        pos = idx + len;
+        idx = lower.indexOf(needle, pos);
+      }
+      if (pos < val.length) frag.appendChild(d.createTextNode(val.slice(pos)));
+      if (node.parentNode) node.parentNode.replaceChild(frag, node);
+    });
+    return findMarks.length;
+  }
+  function focusFind(index, seq, scroll) {
+    findMarks.forEach(function (m) { m.classList.remove("wb-find-cur"); });
+    var cur = index >= 0 && index < findMarks.length ? findMarks[index] : null;
+    if (!cur) return;
+    cur.classList.add("wb-find-cur");
+    if (scroll) {
+      var r = cur.getBoundingClientRect();
+      post({ wbDoc: "find-scroll", seq: seq, top: r.top, height: r.height });
+    }
+  }
   window.addEventListener("message", function (e) {
     if (e.source !== window.parent || !e.data || e.data.docKey !== docKey) return;
     if (e.data.wbDoc === "size") { last = -1; size(); askRelays(); }
     else if (e.data.wbDoc === "theme") theme(e.data.theme);
     else if (e.data.wbDoc === "img") relayed(e.data);
     else if (e.data.wbDoc === "unsel" && window.getSelection) window.getSelection().removeAllRanges();
+    else if (e.data.wbDoc === "find") post({ wbDoc: "find-res", seq: e.data.seq, count: runFind(e.data.query) });
+    else if (e.data.wbDoc === "find-focus") focusFind(e.data.index, e.data.seq, e.data.scroll);
+    else if (e.data.wbDoc === "find-clear") clearFind();
   });
 
   // The selection: its text and where its end stands in this frame, "" once
@@ -231,4 +294,21 @@
     e.preventDefault();
     post({ wbDoc: "overview" });
   });
+  // Ctrl/Cmd+F inside a framed card opens the host's in-card find bar.
+  d.addEventListener("keydown", function (e) {
+    if (e.defaultPrevented || e.isComposing || e.keyCode === 229 || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || (e.key || "").toLowerCase() !== "f") return;
+    e.preventDefault();
+    post({ wbDoc: "find-open" });
+  });
+  // Report pointer hover so host-focused Ctrl/Cmd+F knows when the pointer
+  // is over this framed card.
+  var hovered = false;
+  function setHover(on) {
+    if (hovered === on) return;
+    hovered = on;
+    post({ wbDoc: "hover", on: on });
+  }
+  d.addEventListener("pointermove", function () { setHover(true); }, { passive: true });
+  d.addEventListener("pointerleave", function () { setHover(false); });
+  window.addEventListener("blur", function () { setHover(false); });
 })();

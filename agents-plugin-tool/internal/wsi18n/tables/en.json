@@ -2679,5 +2679,18 @@
   "js.tk.ev.unhide": "unhid{0}",
   "js.tk.panel.showhidden": "Show hidden",
   "js.tk.panel.showhidden.tip.off": "Show hidden items and comments in place",
-  "js.tk.panel.showhidden.tip.on": "Hide hidden items and comments again"
+  "js.tk.panel.showhidden.tip.on": "Hide hidden items and comments again",
+  "wb.hold": "Hold for later",
+  "js.pill.held": "held",
+  "js.pill.upheld": "scroll to the nearest held item above",
+  "js.pill.downheld": "scroll to the nearest held item below",
+  "js.pill.hold": "Hold for later",
+  "js.pill.unhold": "Release hold",
+  "js.convo.jump.up": "Jump to your latest message above",
+  "js.convo.jump.down": "Jump to your latest message below",
+  "js.find.label": "Find in card",
+  "js.find.placeholder": "Find in card…",
+  "js.find.prev": "Previous match (Shift+Enter)",
+  "js.find.next": "Next match (Enter)",
+  "js.find.close": "Close find bar (Esc)"
 }

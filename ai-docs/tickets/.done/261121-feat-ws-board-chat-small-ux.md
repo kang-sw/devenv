@@ -2,6 +2,7 @@
 title: "보드·채팅 작은 UX 3건: 내 최근 메시지 점프, 카드 안 Ctrl+F, 질문 보류 표시"
 related:
   261114-bug-ws-dashboard-search-palette-minors: sibling board-search work from the same idea triage (kept separate)
+completed: 2026-11-21
 ---
 
 # Board and chat small UX: jump to my latest message, in-card find, local hold on open asks
@@ -91,3 +92,21 @@ Verification:
 - Headless Chromium capture of the chat view with the arrow, a card with the
   find bar open, and the pill showing a held count, for the owner to compare
   against this ticket.
+
+### Result (8666743ce) - 2026-11-21
+
+- Chat jump arrow at the top-left of the conversation view: targets the latest
+  off-screen own message, points up or down, hides when that message is
+  visible, scrolls it to center on click.
+- In-card Ctrl/Cmd+F find bar (`card-find.js`): intercepts only while focus
+  or the pointer is inside a non-terminal board card, including sandboxed
+  doc-frame bodies via authenticated `postMessage`; Enter / Shift+Enter step,
+  Esc closes and restores text nodes.
+- Browser-local ask hold: `localStorage` keyed by board identity + item ID
+  with a content fingerprint; auto-clears on edit or re-ask, dropped on
+  answered/sent/withdrawn; held asks leave the open count and tab title and
+  get a **held** pill category. 13 new strings in all 11 locales. T0.
+- Worker: agy.large. Verified: Node tests (pill hold, user jump, scroll,
+  interaction) 16/16; `go test ./internal/wsi18n`; narrow `./internal/wswhiteboard`
+  and `./internal/wsdashboard` runs including a light + dark Chromium
+  acceptance test; light/dark before/after captures reviewed by the lead.

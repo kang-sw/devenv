@@ -2679,5 +2679,18 @@
   "js.tk.ev.unhide": "a réaffiché{0}",
   "js.tk.panel.showhidden": "Afficher masqués",
   "js.tk.panel.showhidden.tip.off": "Afficher sur place les éléments et commentaires masqués",
-  "js.tk.panel.showhidden.tip.on": "Masquer de nouveau les éléments et commentaires masqués"
+  "js.tk.panel.showhidden.tip.on": "Masquer de nouveau les éléments et commentaires masqués",
+  "wb.hold": "Mettre en attente",
+  "js.pill.held": "en attente",
+  "js.pill.upheld": "faire défiler vers l’élément en attente le plus proche au-dessus",
+  "js.pill.downheld": "faire défiler vers l’élément en attente le plus proche en dessous",
+  "js.pill.hold": "Mettre en attente",
+  "js.pill.unhold": "Lever l’attente",
+  "js.convo.jump.up": "Aller à votre dernier message au-dessus",
+  "js.convo.jump.down": "Aller à votre dernier message en dessous",
+  "js.find.label": "Rechercher dans la carte",
+  "js.find.placeholder": "Rechercher dans la carte…",
+  "js.find.prev": "Occurrence précédente (Shift+Enter)",
+  "js.find.next": "Occurrence suivante (Enter)",
+  "js.find.close": "Fermer la barre de recherche (Esc)"
 }

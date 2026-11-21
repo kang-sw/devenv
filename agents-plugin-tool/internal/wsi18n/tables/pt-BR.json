@@ -2679,5 +2679,18 @@
   "js.tk.ev.unhide": "reexibiu{0}",
   "js.tk.panel.showhidden": "Mostrar ocultos",
   "js.tk.panel.showhidden.tip.off": "Mostrar itens e comentários ocultos no lugar",
-  "js.tk.panel.showhidden.tip.on": "Ocultar novamente itens e comentários ocultos"
+  "js.tk.panel.showhidden.tip.on": "Ocultar novamente itens e comentários ocultos",
+  "wb.hold": "Deixar em espera",
+  "js.pill.held": "em espera",
+  "js.pill.upheld": "rolar para o item em espera mais próximo acima",
+  "js.pill.downheld": "rolar para o item em espera mais próximo abaixo",
+  "js.pill.hold": "Deixar em espera",
+  "js.pill.unhold": "Liberar espera",
+  "js.convo.jump.up": "Ir para sua última mensagem acima",
+  "js.convo.jump.down": "Ir para sua última mensagem abaixo",
+  "js.find.label": "Localizar no cartão",
+  "js.find.placeholder": "Localizar no cartão…",
+  "js.find.prev": "Correspondência anterior (Shift+Enter)",
+  "js.find.next": "Próxima correspondência (Enter)",
+  "js.find.close": "Fechar barra de busca (Esc)"
 }

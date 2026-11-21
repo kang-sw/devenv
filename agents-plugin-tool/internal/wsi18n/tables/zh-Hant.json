@@ -2679,5 +2679,18 @@
   "js.tk.ev.unhide": "取消隱藏了{0}",
   "js.tk.panel.showhidden": "顯示已隱藏",
   "js.tk.panel.showhidden.tip.off": "在原位置顯示已隱藏的項目與留言",
-  "js.tk.panel.showhidden.tip.on": "再次隱藏已隱藏的項目與留言"
+  "js.tk.panel.showhidden.tip.on": "再次隱藏已隱藏的項目與留言",
+  "wb.hold": "暫緩處理",
+  "js.pill.held": "暫緩",
+  "js.pill.upheld": "捲動至上方最近的暫緩項目",
+  "js.pill.downheld": "捲動至下方最近的暫緩項目",
+  "js.pill.hold": "暫緩處理",
+  "js.pill.unhold": "取消暫緩",
+  "js.convo.jump.up": "跳至上方我最近的訊息",
+  "js.convo.jump.down": "跳至下方我最近的訊息",
+  "js.find.label": "在卡片內尋找",
+  "js.find.placeholder": "在卡片內尋找…",
+  "js.find.prev": "上一個相符項目 (Shift+Enter)",
+  "js.find.next": "下一個相符項目 (Enter)",
+  "js.find.close": "關閉尋找列 (Esc)"
 }

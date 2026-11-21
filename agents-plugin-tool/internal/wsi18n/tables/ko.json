@@ -2679,5 +2679,18 @@
   "js.tk.ev.unhide": "숨김 해제{0}",
   "js.tk.panel.showhidden": "숨긴 항목 보기",
   "js.tk.panel.showhidden.tip.off": "숨긴 항목과 댓글을 원래 자리에 흐리게 표시",
-  "js.tk.panel.showhidden.tip.on": "숨긴 항목과 댓글을 다시 숨기기"
+  "js.tk.panel.showhidden.tip.on": "숨긴 항목과 댓글을 다시 숨기기",
+  "wb.hold": "보류",
+  "js.pill.held": "보류",
+  "js.pill.upheld": "위쪽에서 가장 가까운 보류 항목으로 스크롤",
+  "js.pill.downheld": "아래쪽에서 가장 가까운 보류 항목으로 스크롤",
+  "js.pill.hold": "보류",
+  "js.pill.unhold": "보류 해제",
+  "js.convo.jump.up": "위의 내 최근 메시지로 이동",
+  "js.convo.jump.down": "아래의 내 최근 메시지로 이동",
+  "js.find.label": "카드 안에서 찾기",
+  "js.find.placeholder": "카드 안에서 찾기…",
+  "js.find.prev": "이전 일치 항목 (Shift+Enter)",
+  "js.find.next": "다음 일치 항목 (Enter)",
+  "js.find.close": "찾기 닫기 (Esc)"
 }
