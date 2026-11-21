@@ -21,46 +21,40 @@ Evidence at `develop`: `agents-plugin-tool/internal/wsdashboard/daemon_http.go:1
 
 ## Decisions
 
-- Window close leaves the desktop app resident in the tray. The tray right-click menu offers "닫기" and "완전 종료"; full quit stops all holders and the daemon, ending all asynchronous sessions.
+- Owner decisions (2026-11-22 01:08 KST):
+  - (2085)=a: Tray "닫기" exits only the desktop app; the daemon and holders continue running. Rejected: stopping the daemon or holders on "닫기".
+  - (2086)=a: Window X-close hides the app to the tray. This supersedes the Tauri prerequisite's Phase 1 close behavior and its Phase 4 Windows check for this subsequent feature; Phase 2's daemon-survival requirement remains. Rejected: exiting the app on X-close.
+  - (2087)=a: Check for unsent drafts and confirm only on real app exit via "닫기" or "완전 종료", not on hide. Preserve draft recovery and make check or exit failures recoverable. Rejected: prompting on hide.
+  - (2088)=a: "완전 종료" confirms only when sessions are running and displays their count. Cancellation leaves the app, daemon and holders running; an incomplete stop must be reported rather than represented as a successful full quit. Rejected: unconditional full-quit confirmation.
+  - (2089) confirmed (technical): Add a full-stop route alongside the existing bearer-authenticated `/shutdown`; stop all holders before the daemon and report remaining holders on partial failure. Keep ordinary `/shutdown` and daemon replacement behavior. Establish the directional compatibility tier from evidence; T0 is a proposal, not a settled verdict.
+  - (2090)=a, with owner refinement: Notify on a question to the user and on session completion only once the session is fully idle: "정확히는, 모든 자식이나 백그라운드 태스크가 종료되어서 완전 idle이 된 시점이요." Do not notify for each child completion. Use native notifications inside the app without duplicate browser notifications. Rejected: per-child completion notifications and duplicate browser delivery.
+  - (2091) confirmed (technical): Measure macOS unsigned-app notification permission and Windows portable AppUserModelID in the Phase 4 package build; fall back to browser notifications if either platform's native notification path fails.
+  - (2092)=a: Tray left-click restores and focuses the window; on macOS follow menu-bar convention and open the menu. Rejected: leaving the window unrestored on other platforms.
+  - (2093)=a: Implement this feature for Tauri only; Electron is slated for retirement and is not updated. Rejected: Electron parity.
 - Present two user-facing lifecycle tiers: the app and the background daemon. Holders are a daemon implementation detail, not a third user-facing lifetime.
-- Provide native notifications. The event selection and fallback mapping remain open.
 
 ## Constraints
 
 - Apply `ai-docs/manuals/shipped-surface-boundary.md` for `agents-plugin-tool/`, `ai-docs/manuals/performance.md` for `agents-plugin-tool/`, `ai-docs/manuals/release-compatibility.md` for `agents-plugin-tool/internal/`, and `ai-docs/manuals/ws-mcp.md` if `agents-plugin-tool/internal/mcp/` is touched, per AGENTS.md Implementation Conventions. Select a storage type before adding persisted data; account for interactive file operations and Windows antivirus costs.
 - A new route and any other cross-version surface require a directional compatibility verdict backed by old/new readers, writers, and recovery evidence. T0 is only a proposal in (2089); T3 requires explicit owner approval and a minor bump; T4 cannot ship.
-- Settle the open decisions before promotion. Preserve the existing authenticated and origin boundaries; design and test the authorization and failure semantics of any full-stop route. Test destructive lifecycle operations only against isolated, owned test processes and profiles.
-
-## Open Decision Queue
-
-Last ID: (2093)
-
-- (2085) [policy, open] Does tray "닫기" quit only the desktop app while leaving the daemon and holders running? This is the lead's assumed reading and needs owner confirmation.
-- (2086) [policy, open] Confirm that X-close hides to tray, superseding the prior approved CloseRequested and draft-recovery close behavior exercised by the Tauri prerequisite (its Phase 1 close contract and Phase 4 Windows check; Phase 2 requires daemon survival).
-- (2087) [policy, open] Should the draft check run on an actual app quit, and not when merely hiding the window to the tray? Specify recovery and failure behavior.
-- (2088) [policy, open] When asynchronous sessions are running, should full quit show their count and require confirmation? Define cancellation and incomplete-stop behavior.
-- (2089) [technical, open] What route and authentication contract should stop all holders plus the daemon, including ordering, races and partial failures? An additive route with T0 compatibility is proposed; establish the actual directional tier with evidence before deciding.
-- (2090) [policy, open] Which events raise native notifications, including questions awaiting the user and child completion, and how should they map to the dashboard's existing browser-notification fallback without duplicates?
-- (2091) [technical, open] How should macOS unsigned-app notification permission risk and Windows AppUserModelID for portable launches be handled and verified?
-- (2092) [policy, open] What should a tray left-click do, including restoring and focusing the app?
-- (2093) [policy, open] Should this behavior be Tauri-only after adoption, or also have Electron parity while Electron remains supported?
+- Preserve the existing authenticated and origin boundaries; design and test the authorization, ordering, race and failure semantics of the full-stop route. Test destructive lifecycle operations only against isolated, owned test processes and profiles.
 
 ## Phases
 
-The phases describe provisional work boundaries; implement only after the prerequisite adoption decision and this queue are settled. Later phases depend on the preceding phase's landed Result.
+Implement only after the prerequisite Phase 4 Result records the owner decision adopting Tauri. Later phases depend on the preceding phase's landed Result.
 
 ### Phase 1: Full-stop daemon contract
 
-Implement the settled daemon-and-holders full-stop contract and its authorization. Test holder discovery and termination, daemon shutdown, running asynchronous sessions, races, failures and the chosen compatibility behavior. Preserve ordinary daemon replacement and its surviving holders.
+Implement the authenticated full-stop route: discover and stop all holders before stopping the daemon, and report remaining holders on partial failure. Design for concurrent starts and stop races. Test authorization and origin boundaries, discovery, termination, daemon shutdown, running sessions, races, partial failures and the evidenced directional compatibility tier. Preserve ordinary `/shutdown`, daemon replacement and surviving holders.
 
 ### Phase 2: Tray and desktop lifecycle
 
-Build on Phase 1 to add tray residency, the right-click actions and the settled close, draft and confirmation behavior. Verify hide, the chosen restore and quit actions, full quit, cancellation and failure paths against an isolated daemon; expose only the agreed two user-facing tiers.
+Build on Phase 1 for Tauri: X hides to tray without a draft prompt; "닫기" exits only the app; "완전 종료" stops holders and daemon. Check unsent drafts on real exit, and confirm full quit only for running sessions, showing their count. Left-click restores and focuses except on macOS, where it opens the menu. Verify hide and restore, both exit actions, draft recovery and check failures, zero and nonzero session counts, cancellation, and incomplete-stop reporting against an isolated daemon; expose only the agreed two user-facing tiers.
 
 ### Phase 3: Native notifications
 
-Implement the settled native notification events, permissions and browser-fallback mapping. Verify event selection, no duplicate delivery, denied permissions and the agreed platform identity handling.
+Implement native notifications for user questions and session completion at full idle after all children and background tasks finish. Map native failure to browser fallback without duplicate delivery. Verify questions, child completion while work remains, final idle, permissions, denied or failed native delivery and fallback.
 
 ### Phase 4: Packaged macOS and Windows verification
 
-Exercise the complete lifecycle and notification flow on packaged macOS and Windows builds, including running session counts and cancellation, draft recovery, daemon and holder termination, notification permission and identity, and the selected Electron parity scope. Record platform versions, signing and launch conditions, evidence and remaining limitations.
+Exercise the complete Tauri lifecycle and notification flow on packaged macOS and Windows builds, including running session counts and cancellation, draft recovery, daemon and holder termination, full-idle event selection and duplicate-free fallback. Measure notification permission on unsigned macOS and AppUserModelID on portable Windows; verify browser fallback if the native path fails. Record platform versions, signing and launch conditions, evidence and remaining limitations. Electron is outside this feature's scope.
