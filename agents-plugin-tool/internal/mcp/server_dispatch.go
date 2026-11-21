@@ -596,39 +596,9 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			// scalar resolver-backed knob (subagent / bootstrap_alarm).
 			// Resolver.Set enforces global-only + session-key.
 			value, hasValue := params.Arguments["value"].(string)
-			if entry.Declared != nil {
-				if !hasValue {
-					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %s value is required unless reset is true", key))
-				}
-				normalized, err := entry.Declared.normalize(value)
-				if err != nil {
-					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %s value %w", key, err))
-				}
-				value = normalized
-			} else if wsconfig.ValidPreferenceKey(entry.Key) {
-				if !hasValue {
-					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %s value is required unless reset is true", key))
-				}
-				// Preserve text verbatim; an explicit empty string clears the slot.
-			} else if len(fieldEnum(entry.ValueFields, "value")) == 0 {
-				// Free-form knob (workflow.lang): keep the caller's case. An empty
-				// value would store a blank override; reset is the unset path.
-				value = strings.TrimSpace(value)
-				if value == "" {
-					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %s value is required unless reset is true", key))
-				}
-				if entry.Normalize != nil {
-					normalized, err := entry.Normalize(value)
-					if err != nil {
-						return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %w", err))
-					}
-					value = normalized
-				}
-			} else {
-				value = strings.ToLower(strings.TrimSpace(value))
-				if err := validateEnumValue("config.tune", entry.ValueFields, "value", value); err != nil {
-					return toolTextResponse(req.ID, "", err)
-				}
+			value, err := normalizeTuneScalar(entry, value, hasValue)
+			if err != nil {
+				return toolTextResponse(req.ID, "", err)
 			}
 			resolver := wsconfig.NewResolver(writeOpts, builtinConfigDefaults(), adapter, adapter)
 			if err := resolver.Set(storeKey, value, wsconfig.SetOptions{ExplicitScope: explicitScope, SessionKey: sessionKey}); err != nil {

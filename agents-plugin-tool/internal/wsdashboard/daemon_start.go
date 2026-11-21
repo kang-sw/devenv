@@ -81,6 +81,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		listener:        listener,
 		log:             logw,
 		agents:          opts.Agents,
+		config:          opts.Config,
 		cardBound:       opts.CardBound,
 		leadNudges:      opts.LeadNudges,
 		beforeUnlock:    opts.BeforeUnlock,
