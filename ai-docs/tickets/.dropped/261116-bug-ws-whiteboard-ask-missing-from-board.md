@@ -1,5 +1,6 @@
 ---
 title: "저장소에는 있으나 whiteboard 페이지에서 ask 1205가 누락된 문제"
+dropped: 2026-11-21
 ---
 
 # Whiteboard ask 1205 was absent from the board page despite existing in the store
@@ -68,3 +69,8 @@ legitimate visibility rules and the ask's identity/history. Verify that the
 same eligible stored ask appears on initial load and after live updates, with
 controls for intentionally filtered/closed items. Which layer omitted item
 1205, and under what page state? The coordinator authorized a bounded diagnosis and a fix only if a concrete cause appeared. That pass found no demonstrated cause; the ticket remains `todo/`, needs live capture, with no completed implementation phase.
+
+
+## Resolution (2026-11-21)
+
+Obsolete pre-SQLite historical incident with no captured source trace. Audit of current memory-first SQLite `BoardDB` (`board_db.go:96-241`), `view.go:567-648`, and `timeline_view.go:106-197` found no omission path where a stored open ask fails to render. Dropped per ticket's own no-guess-fix guardrail; reopen only if reproduced with a live board/daemon capture.

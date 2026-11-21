@@ -5,6 +5,7 @@ related:
   261117-feat-ws-agent-tools-mailbox-routing: "prerequisite; agent.spawn children and lineage are what the dashboard lists"
   261117-feat-ws-harness-capability-catalog: "per-harness steer and resume items decide how chat/steer behaves in an entered child"
   261116-research-ws-hosted-session-first-tier: "evidence and Confirmed Decisions"
+completed: 2026-11-21
 ---
 
 # Hosted child session entry
@@ -55,3 +56,8 @@ unsupported; how children across a compaction segment chain (see
 Verification: Go tests on remote w5090 for child session addressing and
 chat/steer delivery for each harness available at that time; a dashboard
 check entering a Claude child and a Pi child end to end.
+
+
+## Resolution (2026-11-21)
+
+Generic hosted child session entry is live across harnesses on `develop` (`e82eaeb90`, `5a0cd8500`, `f3cdbb7b9`, `a85bcbe50`, `7fcc46a24`, `0d3d43fe9`, `419de9aa5`): `pageview_session.go:415-423`, `dashboard.tmpl:233`, and `dashboard-composer-input.js` link every served `ws/agent.spawn` child session (`/s/<reply-id>`) with transcript, chat/steer, and harness badges, covered by `pageview_test.go` and `pageview_agents_test.go`. Owner confirmed live behavior works; closed to `.done/`.

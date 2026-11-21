@@ -5,6 +5,7 @@ related:
   261115-feat-werkschaft-electron-daemon-override: "Electron daemon launch shipping in the same release (1227)"
   261115-feat-werkschaft-electron-shell: "Electron shell whose navigation gets the native cookie"
   261112-feat-ws-mixed-version-compat-guards: "tier vocabulary; old-client behavior against a new daemon"
+completed: 2026-11-21
 ---
 
 # Require a browser credential on localhost dashboard access
@@ -662,3 +663,8 @@ and `TestLoginGateBrowser` passes (17.3 seconds). Added explicit foreign-navigat
 flood, retained same-origin limit, authenticated/cookieless HEAD preview, localized
 bold-label and two-line footer assertions. No machine route, shared store,
 protocol, Electron behavior or clipboard-action semantics changed.
+
+
+## Resolution (2026-11-21)
+
+All three phases landed on `develop` (`4720b63d8`, `688470a44`, `27723bd6f` and follow-up fixes) with recorded Phase 1–3 Results, live localhost auth/cookie/login-link implementation (`localhost_auth.go`, `desktop-electron/endpoint.js`, `main.js`), and Node/Chromium test coverage. Closed to `.done/` after code verification and owner confirmation.

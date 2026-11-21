@@ -1,5 +1,6 @@
 ---
 title: "보드 ask 클릭 시 dashboard 렌더러 크래시(STATUS_BREAKPOINT) 및 content-visibility 트리거 라이브 이분 추적"
+completed: 2026-11-21
 ---
 
 # Dashboard renderer crash (STATUS_BREAKPOINT) on board ask click, live-bisecting content-visibility triggers
@@ -116,3 +117,8 @@ Constraints:
   must not be released, because the live daemon reads assets from it.
 - Dev-assets mode re-reads assets per request. That adds file I/O, so it is
   temporary and must be removed at the end.
+
+
+## Resolution (2026-11-21)
+
+V1 fix (`eb29c9997`, merged `f1b4e1866`) dropped `:not(:focus-within)` from board topic-part `content-visibility` in `dashboard-board.css:91-99` with `ResizeObserver` / double-rAF unskip handling in `dashboard-frames.js:122-152`. Owner confirmed on 2026-11-21 that the Edge/PWA renderer crash is resolved in live use; closed to `.done/`.

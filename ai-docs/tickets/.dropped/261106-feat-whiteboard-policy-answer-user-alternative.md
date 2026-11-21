@@ -1,5 +1,6 @@
 ---
 title: "사용자가 직접 대안을 제시하는 whiteboard 정책 응답"
+dropped: 2026-11-21
 ---
 
 # Whiteboard policy answer that proposes the user's own alternative
@@ -77,3 +78,8 @@ note-only/commented state, option amendment/answer ordering, atomic failure,
 replay and old-write/new-reopen preservation. Preserve existing policy answers
 and the owner's literal intent. No whiteboard mutation, build or test occurs
 during this docs capture.
+
+
+## Resolution (2026-11-21)
+
+Superseded by policy note-only comments (`StatusCommented`, commit `e8cfa2167`, `wswhiteboard/store.go:37-49,1013-1070`). Owner confirmed on 2026-11-21 that the existing note/comment workflow sufficiently covers this need; dropped per owner direction.
