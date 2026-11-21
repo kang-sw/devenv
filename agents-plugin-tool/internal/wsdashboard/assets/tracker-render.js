@@ -347,6 +347,7 @@
     if ((AD.stores() || []).indexOf(storeId) < 0) return false;
     var sv = AD.view(storeId);
     if (!sv || !sv.items[itemId]) return false;
+    if (sv.items[itemId].hidden && !showHidden(storeId)) return false;
     var switching = !ui.win || ui.store !== storeId || ui.item !== itemId;
     if (switching) { keepItemDraft(); ui.iedit = null; }
     if (ui.page && ui.page !== storeId) { history.pushState(null, '', '#/' + encodeURIComponent(storeId)); applyRoute(); } // on a store page: go to the item's store page
@@ -378,7 +379,12 @@
     else render();
     return true;
   }
-  function showItem(id, opener, focus) { openItemWindow(ui.store, id, { opener: opener, focus: focus }); }
+  function showItem(id, opener, focus) {
+    if (!openItemWindow(ui.store, id, { opener: opener, focus: focus })) {
+      var sv = AD.view(ui.store);
+      if (sv && sv.items && sv.items[id] && sv.items[id].hidden) toast(wsT("js.tk.toast.hiddenitem"));
+    }
+  }
   // uiCommand performs a store support chat's UI command (h.uiCommand) on store id's view,
   // as the user's own operation would: search puts cmd.arg in the Items search box and
   // sends it at once (no typing debounce to wait out; searchFor), focus opens the item whose alias is cmd.arg
@@ -460,7 +466,7 @@
     var r = ui.routeItem, sv = r && AD.view(r.store);
     if (!sv) return;
     ui.routeItem = null;
-    if (sv.items[r.item] && ui.page === r.store) openItemWindow(r.store, r.item);
+    if (sv.items[r.item] && ui.page === r.store && !openItemWindow(r.store, r.item) && sv.items[r.item].hidden) toast(wsT("js.tk.toast.hiddenitem"));
   }
   function applyRoute() {
     var ri = routeItem();
@@ -990,7 +996,7 @@
   function placeShownMore() { Array.prototype.forEach.call(document.querySelectorAll('.tk .irow:hover, .tk .irow:focus-within, .tk .irow.sel'), placeMore); }
   var lastPointer = 'mouse', lastInput = 'pointer'; // the focused row is restored after a re-render only for keyboard use
 
-  var QUICK = { confirm: 1, unassign: 1, accept: 1, ihide: 1, chide: 1, comment: 1, claim: 1, unopen: 1, approve: 1, unrequest: 1, uncc: 1, 'uncc-org': 1 };
+  var QUICK = { confirm: 1, unassign: 1, accept: 1, ihide: 1, iunhide: 1, chide: 1, cunhide: 1, comment: 1, claim: 1, unopen: 1, approve: 1, unrequest: 1, uncc: 1, 'uncc-org': 1 };
   // the item menu's steps an action button opens (in the menu, or a menu anchored to the button)
   var STEPS = { note: 1, handoff: 1, assign: 1, pri: 1, due: 1, labels: 1, move: 1, opening: 1, request: 1, wrap: 1, cc: 1 };
 

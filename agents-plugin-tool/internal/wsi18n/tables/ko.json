@@ -2655,5 +2655,13 @@
   "js.tk.pm.retarget.cc.note": "<b>{0}</b> 조직 참조를 해제하고 새 대상을 한 묶음으로 등록합니다. 다른 참조 항목은 그대로 유지됩니다.",
   "js.tk.pm.retarget.cc.sum.one": "새 대상: {0}명",
   "js.tk.pm.retarget.cc.sum.other": "새 대상: {0}명",
-  "js.tk.pm.retarget.cc.title": "{0} 참조 대상 바꾸기"
+  "js.tk.pm.retarget.cc.title": "{0} 참조 대상 바꾸기",
+  "js.tk.act.unhide": "항목 숨김 해제",
+  "js.tk.act.unhide.admin": "항목 숨김 해제 (관리자)",
+  "js.tk.cmt.unhide": "숨김 해제",
+  "js.tk.ev.cunhide": "댓글 {0} 숨김 해제",
+  "js.tk.ev.unhide": "숨김 해제{0}",
+  "js.tk.panel.showhidden": "숨긴 항목 보기",
+  "js.tk.panel.showhidden.tip.off": "숨긴 항목과 댓글을 원래 자리에 흐리게 표시",
+  "js.tk.panel.showhidden.tip.on": "숨긴 항목과 댓글을 다시 숨기기"
 }

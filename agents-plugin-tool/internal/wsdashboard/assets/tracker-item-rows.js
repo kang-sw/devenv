@@ -278,6 +278,7 @@
   // assignee (an admin too once the creator was removed). Hiding stays the creator's (canHide).
   function canEdit(it) { return (isCreator(it) || !!mineLive(it)) && !it.hidden; }
   function canHide(it) { return isCreator(it) && !it.hidden; }
+  function canUnhide(it) { return !!it && !!it.hidden && !!it.canUnhide; }
   // The creator, or an admin once the creator was removed (check.go creatorGone).
   function isCreator(it) {
     var gone = VS.viewer.admin && VS.members[it.author] && VS.members[it.author].removed;
@@ -487,10 +488,10 @@
     var it = VS.items[o.item], r = o.rec, st = stKey(it, r), ms = mselHas(it.id), ed = canEdit(it) && it.kind !== 'topic';
     if (MSEEN) MSEEN[it.id] = true;
     if (ui.ned && ui.ned.item === it.id && ui.ned.rk === o.rk) return editRowHtml(o); // the row is being edited in place
-    return '<div class="irow' + (ui.sel === o.rk ? ' sel' : '') + (ms ? ' msel' : '') + (o.closed ? ' closed' : '') + (o.ctx ? ' ctx' : '') + '" tabindex="0"' + (ms || canMove(it) ? ' draggable="true"' : '') +
+    return '<div class="irow' + (ui.sel === o.rk ? ' sel' : '') + (ms ? ' msel' : '') + (o.closed ? ' closed' : '') + (o.ctx ? ' ctx' : '') + (it.hidden ? ' tk-hidden' : '') + '" tabindex="0"' + (ms || canMove(it) ? ' draggable="true"' : '') +
       attr('item', it.id) + attr('rk', o.rk) + (r ? attr('rec', r.id) : '') +
       (o.depth ? ' style="--ind:' + o.depth + '"' : '') + '><div class="ir-main">' + mcbHtml(it, ms) + (o.tw != null ? o.tw : o.depth ? '<span class="ind">&#8627;</span>' : '') + stBtn(st, it, r) +
-      '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + titleEdHtml(it) + (o.tsub || '') + openChip(it) + labelChips(it, 'lsearch') + warnHtml(it) + dotHtml(it) + labelEdHtml(it) + '<span class="grow"></span>' +
+      '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + titleEdHtml(it) + (o.tsub || '') + (it.hidden ? '<span class="chip hid">' + wsT("js.tk.chip.hidden") + '</span>' : '') + openChip(it) + labelChips(it, 'lsearch') + warnHtml(it) + dotHtml(it) + labelEdHtml(it) + '<span class="grow"></span>' +
       '<span class="ir-acts">' + moreBtn(it.id, '', true) + '</span>' + whoHtml(it, canAssign(it, VS.viewer.member)) + priHtml(it, ed) + dueHtml(it, st, ed) + '</div>' +
       '<div class="ir-more">' + detailsHtml(it, r, o.more) + '</div></div>';
   }

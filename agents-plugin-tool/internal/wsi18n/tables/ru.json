@@ -2655,5 +2655,13 @@
   "js.tk.pm.retarget.cc.note": "Убирает <b>{0}</b> из копии и регистрирует новые цели одним пакетом. Остальные копии не меняются.",
   "js.tk.pm.retarget.cc.sum.one": "Новая цель: {0} участник",
   "js.tk.pm.retarget.cc.sum.other": "Новая цель: {0} участников",
-  "js.tk.pm.retarget.cc.title": "Сменить цель копии {0}"
+  "js.tk.pm.retarget.cc.title": "Сменить цель копии {0}",
+  "js.tk.act.unhide": "Показать элемент",
+  "js.tk.act.unhide.admin": "Показать элемент (администратор)",
+  "js.tk.cmt.unhide": "Показать",
+  "js.tk.ev.cunhide": "возвращён комментарий {0}",
+  "js.tk.ev.unhide": "возвращено{0}",
+  "js.tk.panel.showhidden": "Показать скрытые",
+  "js.tk.panel.showhidden.tip.off": "Показать скрытые элементы и комментарии на их местах",
+  "js.tk.panel.showhidden.tip.on": "Снова скрыть скрытые элементы и комментарии"
 }

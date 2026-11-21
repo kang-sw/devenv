@@ -119,6 +119,10 @@
   function $(id) { return document.getElementById(id); }
   function attr(k, v) { return ' data-' + k + '="' + esc(v) + '"'; }
   function vals(o) { return Object.keys(o).map(function (k) { return o[k]; }); }
+  function showHidden(store) {
+    var n = store || (typeof ui !== 'undefined' && ui.store);
+    return !!(n && typeof ui !== 'undefined' && ui.panel && ui.panel[n] && ui.panel[n].showHidden);
+  }
 
   // ------------------------------------------------------------- small views
 
@@ -320,6 +324,7 @@
           return wsT("js.tk.ev.field", fieldName(f), esc(v == null ? wsT("js.tk.ev.none") : String(v).slice(0, 80)));
         }).join(', ')) + extrasTxt(p);
       case 'item.hide': return wsT("js.tk.ev.hide", ref(p.item));
+      case 'item.unhide': return wsT("js.tk.ev.unhide", ref(p.item));
       case 'item.move': return p.parent ? wsT("js.tk.ev.move", ref(p.item), itemRef(p.parent)) : wsT("js.tk.ev.move.top", ref(p.item));
       case 'item.assign':
         // a topic's assignment names its holder; the store keeps no completion for it
@@ -357,6 +362,7 @@
       case 'comment.add': return wsT("js.tk.ev.comment", ref(p.item)) + (inThread ? '' : tail(String(p.body || '').slice(0, 90))) + extrasTxt(p);
       case 'comment.edit': return wsT("js.tk.ev.cedit", esc(alias(p.comment)), inThread ? '' : ref(n.thread || '')) + extrasTxt(p);
       case 'comment.hide': return wsT("js.tk.ev.chide", esc(alias(p.comment)));
+      case 'comment.unhide': return wsT("js.tk.ev.cunhide", esc(alias(p.comment)));
       case 'member.profile': {
         var pr = p.profile || {}, ch = PROFILE_FIELDS.filter(function (f) { return f in pr; }).map(function (f) { return wsT("js.tk.ev.field", fieldName(f), esc(pr[f])); }).join(', ');
         return p.member && p.member !== n.member ? wsT("js.tk.ev.profile.admin", esc(p.member), ch) : wsT("js.tk.ev.profile", ch);

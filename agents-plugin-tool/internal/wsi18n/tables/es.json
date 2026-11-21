@@ -2655,5 +2655,13 @@
   "js.tk.pm.retarget.cc.note": "Quita <b>{0}</b> de CC y registra los nuevos destinos en un solo lote. Las demás CC no cambian.",
   "js.tk.pm.retarget.cc.sum.one": "Nuevo destino: {0} persona",
   "js.tk.pm.retarget.cc.sum.other": "Nuevo destino: {0} personas",
-  "js.tk.pm.retarget.cc.title": "Cambiar destino de CC de {0}"
+  "js.tk.pm.retarget.cc.title": "Cambiar destino de CC de {0}",
+  "js.tk.act.unhide": "Mostrar elemento",
+  "js.tk.act.unhide.admin": "Mostrar elemento (admin)",
+  "js.tk.cmt.unhide": "Mostrar",
+  "js.tk.ev.cunhide": "volvió a mostrar el comentario {0}",
+  "js.tk.ev.unhide": "volvió a mostrar{0}",
+  "js.tk.panel.showhidden": "Mostrar ocultos",
+  "js.tk.panel.showhidden.tip.off": "Mostrar elementos y comentarios ocultos en su lugar",
+  "js.tk.panel.showhidden.tip.on": "Volver a ocultar los elementos y comentarios ocultos"
 }

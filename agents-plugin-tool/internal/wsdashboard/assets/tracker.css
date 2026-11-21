@@ -454,6 +454,13 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .psearch-err { flex: 1 0 100%; min-width: 0; color: var(--tk-fail); font-size: 12px; font-weight: 400; overflow-wrap: anywhere; }
 .tk .ptools .vmodes { background: var(--wb-muted); }
 .tk .ptools .psearch:focus-within { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+.tk .phid { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 9px; border: 0; border-radius: 999px; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px var(--wb-line); font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.tk .phid .i { width: 14px; height: 14px; }
+.tk .phid:hover { color: var(--wb-fg); box-shadow: inset 0 0 0 1px var(--wb-muted-fg); }
+.tk .phid.on { background: color-mix(in srgb, var(--wb-primary) 16%, var(--wb-card)); color: var(--wb-primary); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 50%, transparent); }
+.tk .phid:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.tk .ptools .phid { background: var(--wb-muted); box-shadow: none; }
+.tk .ptools .phid.on { background: color-mix(in srgb, var(--wb-primary) 16%, var(--wb-card)); color: var(--wb-primary); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 50%, transparent); }
 
 /* the Items panel body: the list on top, the "recently closed" section pinned to the bottom of the panel's height */
 .tk .card.panel > .cbody { display: flex; flex-direction: column; }
@@ -469,6 +476,15 @@ body.tk-paged .tk-drawer { display: none; }
 /* closed rows: greyed, but the actions and the detail preview stay as they are */
 .tk .irow.closed > .ir-main > :not(.ir-acts) { opacity: .55; }
 .tk .irow.closed > .ir-main .title { text-decoration: none; }
+/* hidden items and comments when "show hidden" is on: dimmed in place, actions stay crisp */
+.tk .irow.tk-hidden > .ir-main > :not(.ir-acts) { opacity: .5; }
+.tk .irow.tk-hidden > .ir-main .title { font-style: italic; color: var(--wb-muted-fg); }
+.tk .kcard.tk-hidden { opacity: .55; }
+.tk .grow-row.tk-hidden .glabel, .tk .grow-row.tk-hidden .gbar { opacity: .5; }
+.tk .citem.tk-hidden { opacity: .5; }
+.tk .srow.tk-hidden > :not(.mbtn) { opacity: .5; }
+.tk .srow.tk-hidden .title { font-style: italic; color: var(--wb-muted-fg); }
+.tk .srow:is(:hover, :focus-within) .mbtn { opacity: 1; }
 /* the tree's "closed N" row under a parent */
 .tk .csum { display: flex; align-items: center; gap: 5px; width: 100%; min-height: 24px; padding: 1px 4px 1px calc(4px + var(--ind, 0) * 16px); border: 0; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 12px; cursor: pointer; text-align: left; border-radius: 6px; }
 .tk .csum:hover { background: color-mix(in srgb, var(--wb-muted) 60%, transparent); color: var(--wb-fg); }
@@ -715,6 +731,9 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .quote { font-size: 12px; color: var(--wb-muted-fg); border-left: 3px solid var(--wb-line); padding: 1px 8px; margin: 0 0 3px; }
 .tk .hiddenc { font-size: 12px; font-style: italic; color: var(--wb-muted-fg); }
 .tk .hiddenc summary { cursor: pointer; font-style: normal; }
+.tk .timeline .cmt.tk-hidden::before { background: var(--wb-muted-fg); }
+.tk .timeline .cmt.tk-hidden > .ch > :not(.tk-unhide) { opacity: .65; }
+.tk .timeline .cmt.tk-hidden > .ctext, .tk .timeline .cmt.tk-hidden > .quote, .tk .timeline .cmt.tk-hidden > .mentions, .tk .timeline .cmt.tk-hidden > .atts { opacity: .55; }
 .tk .composer2 { position: sticky; bottom: 0; margin: 4px -18px 0; padding: 8px 18px 14px; background: var(--wb-bg); box-shadow: 0 -4px 10px rgb(0 0 0 / .06); display: flex; flex-direction: column; gap: 6px; }
 .tk .composer2 .replying { font-size: 12px; background: var(--wb-muted); border-radius: 8px; padding: 3px 8px; }
 /* the comment box follows the dashboard chat input: the field and its bottom bar in one box,
