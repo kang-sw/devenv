@@ -384,19 +384,6 @@
         }
       }
     },
-    "261116-feat-ws-dashboard-config-settings-ui": {
-      "registered_at": "2026-11-21T12:23:41Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-21T12:27:55Z",
-        "impl": {
-          "branch": "impl/develop/thong-trio-judo"
-        }
-      }
-    },
     "261116-feat-ws-dashboard-generalized-mentions": {
       "registered_at": "2026-11-16T13:07:35Z"
     },
@@ -562,6 +549,9 @@
     },
     "261120-research-ws-daemon-supervision-http-attach": {
       "registered_at": "2026-11-20T12:40:36Z"
+    },
+    "261121-bug-compaction-advisory-followups": {
+      "registered_at": "2026-11-21T13:31:42Z"
     },
     "261121-bug-ws-agy-reattach-watchdog-sent-input": {
       "registered_at": "2026-11-21T12:39:33Z"
