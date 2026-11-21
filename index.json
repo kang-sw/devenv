@@ -575,18 +575,8 @@
     "261120-research-ws-daemon-supervision-http-attach": {
       "registered_at": "2026-11-20T12:40:36Z"
     },
-    "261121-bug-ws-agy-mcp-session-413-no-reconnect": {
-      "registered_at": "2026-11-20T16:22:31Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-20T18:04:38Z",
-        "impl": {
-          "branch": "impl/develop/rare-scoop-dose"
-        }
-      }
+    "261121-bug-ws-dogfood-tool-surprises": {
+      "registered_at": "2026-11-21T01:02:36Z"
     }
   }
 }
