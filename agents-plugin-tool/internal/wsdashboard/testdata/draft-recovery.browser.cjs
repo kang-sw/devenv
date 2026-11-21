@@ -159,7 +159,8 @@ async function recoverImage(browser) {
     let frame = await frameFor(page);
     await type(frame, 'Image draft');
     await paste(frame);
-    assert.equal(await frame.evaluate(() => window.wsSaveSessionDraft()), true);
+    assert.equal(await frame.evaluate(() => typeof window.wsNativeCloseReady), 'undefined');
+    assert.equal(await page.evaluate(() => window.wsNativeCloseReady()), true);
     const native = [];
     page.on('dialog', async dialog => { native.push(dialog.type()); await dialog.dismiss(); });
     await page.reload();
@@ -234,7 +235,7 @@ async function failedStorage(browser) {
     await frame.locator('.cfield').click();
     await type(frame, 'This draft could not be saved');
     await paste(frame);
-    assert.equal(await frame.evaluate(() => window.wsSaveSessionDraft()), false);
+    assert.equal(await page.evaluate(() => window.wsNativeCloseReady()), false);
     const native = new Promise(resolve => page.once('dialog', async dialog => {
       const type = dialog.type();
       await dialog.dismiss();

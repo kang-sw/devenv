@@ -153,6 +153,15 @@ pub fn discover() -> Result<Daemon> {
 }
 
 impl Daemon {
+    pub fn is_healthy(&self) -> bool {
+        check_health(&self.endpoint).is_ok_and(|(_, started_at)| started_at == self.started_at)
+    }
+
+    pub fn is_current(&self) -> bool {
+        self.is_healthy()
+            && read_endpoint(&self.root).is_ok_and(|endpoint| endpoint == self.endpoint)
+    }
+
     fn auth_json(&self, route: &str, body: Value) -> Result<Option<Value>> {
         let initial = read_endpoint(&self.root)?;
         let token = initial
@@ -242,7 +251,8 @@ impl Daemon {
             .and_then(Value::as_str)
             .and_then(|s| Url::parse(s).ok())
             .ok_or(invalid)?;
-        if url.origin() != self.url.origin()
+        if url.scheme() != self.url.scheme()
+            || url.origin() != self.url.origin()
             || !url.username().is_empty()
             || url.password().is_some()
             || !url
@@ -290,25 +300,31 @@ mod tests {
 
     #[test]
     fn cache_override_default_empty_and_relative() {
-        let cwd = Path::new("/work");
-        let home = Some(OsStr::new("/home/example"));
+        let absolute = if cfg!(windows) {
+            Path::new(r"Q:\werkschaft-test")
+        } else {
+            Path::new("/werkschaft-test")
+        };
+        let cwd = absolute.join("work");
+        let home = absolute.join("home");
+        let override_path = absolute.join("override");
         assert_eq!(
-            cache_root(None, home, cwd).unwrap(),
-            Path::new("/home/example/.cache/ws@kang-sw-devenv")
+            cache_root(None, Some(home.as_os_str()), &cwd).unwrap(),
+            home.join(".cache/ws@kang-sw-devenv")
         );
         assert_eq!(
-            cache_root(Some(OsStr::new("")), home, cwd).unwrap(),
-            cache_root(None, home, cwd).unwrap()
+            cache_root(Some(OsStr::new("")), Some(home.as_os_str()), &cwd).unwrap(),
+            cache_root(None, Some(home.as_os_str()), &cwd).unwrap()
         );
         assert_eq!(
-            cache_root(Some(OsStr::new("relative")), None, cwd).unwrap(),
-            Path::new("/work/relative")
+            cache_root(Some(OsStr::new("relative")), None, &cwd).unwrap(),
+            cwd.join("relative")
         );
         assert_eq!(
-            cache_root(Some(OsStr::new("/override")), None, cwd).unwrap(),
-            Path::new("/override")
+            cache_root(Some(override_path.as_os_str()), None, &cwd).unwrap(),
+            override_path
         );
-        assert!(cache_root(None, None, cwd).is_err());
+        assert!(cache_root(None, None, &cwd).is_err());
     }
 
     #[test]

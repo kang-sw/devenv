@@ -12,17 +12,17 @@
     "security": {
       "capabilities": [{
         "identifier": "no-native-authority",
-        "description": "The connection view and remote dashboard have no native command permissions",
+        "description": "Bundled pages and the dashboard use native menus",
         "local": false,
         "windows": ["main"],
         "permissions": []
       }],
-      "csp": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'"
+      "csp": "default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     }
   },
   "bundle": {
     "active": true,
     "targets": ["app"],
-    "icon": ["icons/icon.png"]
+    "icon": ["icons/icon.png", "icons/icon.ico"]
   }
 }

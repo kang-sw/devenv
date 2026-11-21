@@ -5,7 +5,7 @@ use webview2_com::{
     take_pwstr, Microsoft::Web::WebView2::Win32::*, NavigationCompletedEventHandler,
     NavigationStartingEventHandler, PermissionRequestedEventHandler, ProcessFailedEventHandler,
 };
-use windows::core::{Interface, BOOL, PWSTR};
+use windows::core::{Interface, BOOL, HSTRING, PWSTR};
 
 use crate::{navigation, shell::Connection};
 
@@ -15,7 +15,7 @@ pub fn install(window: &WebviewWindow, connection: Arc<Connection>) -> tauri::Re
         let result =
             unsafe { install_hooks(&platform.controller().CoreWebView2(), &window, &connection) };
         match result {
-            Ok(()) => queue(&window, move |target| connection.connect(target, false)),
+            Ok(()) => queue(&window, move |target| connection.start(target)),
             Err(_) => {
                 eprintln!("Could not install WebView2 hooks");
                 queue(&window, move |target| connection.setup_failed(&target));
@@ -83,11 +83,8 @@ unsafe fn install_hooks(
                     args.Uri(&mut raw)?;
                     let uri = take_pwstr(raw);
                     let allowed = url::Url::parse(&uri).ok().is_some_and(|url| {
-                        url.username().is_empty()
-                            && url.password().is_none()
-                            && permissions
-                                .pinned_url()
-                                .is_some_and(|pin| url.origin() == pin.origin())
+                        navigation::destination(&url, permissions.pinned_url().as_ref())
+                            == navigation::Destination::Dashboard
                     });
                     // A saved grant would bypass future user-gesture and pin checks.
                     if initiated.as_bool() && allowed {
@@ -150,7 +147,14 @@ unsafe fn install_hooks(
         &mut token,
     )?;
 
-    // This disables built-in zoom keys without disabling editing shortcuts.
-    webview.Settings()?.SetIsZoomControlEnabled(false)?;
+    let settings = webview.Settings()?;
+    // Disable the control's built-in zoom keys and retain its Edit shortcuts.
+    settings.SetIsZoomControlEnabled(false)?;
+    let settings = settings.cast::<ICoreWebView2Settings2>()?;
+    let mut raw = PWSTR::null();
+    settings.UserAgent(&mut raw)?;
+    let default_agent = take_pwstr(raw);
+    let agent = format!("{default_agent} Werkschaft/{}", env!("CARGO_PKG_VERSION"));
+    settings.SetUserAgent(&HSTRING::from(agent))?;
     Ok(())
 }

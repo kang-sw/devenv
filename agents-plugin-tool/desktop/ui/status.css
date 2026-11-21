@@ -1,0 +1,18 @@
+:root {
+  color-scheme: light dark;
+  font: 16px system-ui, sans-serif;
+}
+main {
+  max-width: 32rem;
+  margin: 16vh auto;
+  padding: 2rem;
+  line-height: 1.55;
+}
+h1 {
+  font-size: 1.75rem;
+  line-height: 1.25;
+  margin: 0 0 1.25rem;
+}
+p {
+  margin: 0 0 1rem;
+}

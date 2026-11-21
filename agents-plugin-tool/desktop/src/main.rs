@@ -1,231 +1,250 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-#[cfg(not(target_os = "macos"))]
-compile_error!("This first-window slice supports macOS only");
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+compile_error!("Werkschaft supports macOS and Windows");
 
+mod close;
 mod endpoint;
+#[cfg(target_os = "macos")]
+mod macos;
 mod navigation;
+mod python;
+mod shell;
+#[cfg(windows)]
+mod windows;
 mod zoom;
 
-use navigation::{destination, Destination, CONNECT_VIEW};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
-};
+use std::sync::{atomic::Ordering, Arc, Mutex};
+
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     webview::NewWindowResponse,
-    AppHandle, Manager, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
-use url::Url;
 
-// The dashboard keys its desktop-only link behavior (a plain click on a file
-// link opens its menu, Cmd/Ctrl+click previews) on the "Werkschaft/" token.
-// A custom agent replaces WKWebView's default rather than extending it, so
-// the macOS default (frozen by WebKit at 10_15_7) stays ahead of the token.
-// Only a name, never a credential or native capability.
+use navigation::{destination, Destination};
+use shell::Connection;
+
+#[cfg(target_os = "macos")]
 const USER_AGENT: &str = concat!(
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Werkschaft/",
     env!("CARGO_PKG_VERSION")
 );
 
-#[derive(Default)]
-struct Connection {
-    dashboard: Mutex<Option<Url>>,
-    connecting: AtomicBool,
-}
-
-fn open_browser(url: Url) {
-    // Both callers classify first. No shell command string, custom scheme,
-    // credentials, plugin command, or endpoint token reaches the OS opener.
-    std::thread::spawn(move || {
-        if open::that(url.as_str()).is_err() {
-            eprintln!("Could not open the external link in the system browser");
-        }
-    });
-}
-
-fn connect(app: AppHandle, state: Arc<Connection>) {
-    if state.connecting.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.set_title("Werkschaft — Connecting…");
-    }
-    // One bounded health request, off the UI thread. No executable daemon calls.
-    std::thread::spawn(move || {
-        let result = endpoint::discover();
-        let ui_app = app.clone();
-        let ui_state = state.clone();
-        if app
-            .run_on_main_thread(move || {
-                if let Some(window) = ui_app.get_webview_window("main") {
-                    let (url, title) = match result {
-                        Ok(root) => {
-                            eprintln!(
-                                "Werkschaft attached to {}",
-                                root.origin().ascii_serialization()
-                            );
-                            *ui_state.dashboard.lock().unwrap() = Some(root.clone());
-                            (root, "Werkschaft".to_owned())
-                        }
-                        Err(message) => {
-                            *ui_state.dashboard.lock().unwrap() = None;
-                            (
-                                Url::parse(CONNECT_VIEW).unwrap(),
-                                format!("Werkschaft — {message} — ⌘R to retry"),
-                            )
-                        }
-                    };
-                    if window.navigate(url).is_err() {
-                        *ui_state.dashboard.lock().unwrap() = None;
-                        let _ = window.set_title("Werkschaft — Navigation failed — ⌘R to retry");
-                    } else {
-                        let _ = window.set_title(&title);
-                    }
+fn build_window(app: &AppHandle, connection: Arc<Connection>) -> tauri::Result<()> {
+    let state = connection.clone();
+    let popup_app = app.clone();
+    let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+        .title("Werkschaft — Connecting…")
+        .inner_size(1280.0, 860.0)
+        .min_inner_size(760.0, 520.0)
+        .disable_drag_drop_handler()
+        .devtools(true)
+        .on_new_window(move |url, _features| {
+            let pin = state.pinned_url();
+            match destination(&url, pin.as_ref()) {
+                Destination::Dashboard => {
+                    let app = popup_app.clone();
+                    let state = state.clone();
+                    std::thread::spawn(move || {
+                        let target = app.clone();
+                        let _ = app.run_on_main_thread(move || {
+                            if state.pinned_url() == pin {
+                                if let Some(window) = target.get_webview_window("main") {
+                                    let _ = window.navigate(url);
+                                }
+                            }
+                        });
+                    });
                 }
-                ui_state.connecting.store(false, Ordering::SeqCst);
-            })
-            .is_err()
-        {
-            state.connecting.store(false, Ordering::SeqCst);
+                Destination::Browser => navigation::open_browser(url),
+                Destination::Local | Destination::Block => (),
+            }
+            NewWindowResponse::Deny
+        });
+
+    #[cfg(target_os = "macos")]
+    let window = builder.user_agent(USER_AGENT).build()?;
+
+    #[cfg(windows)]
+    let window = {
+        let state = connection.clone();
+        builder
+            .on_navigation(
+                move |url| match destination(url, state.pinned_url().as_ref()) {
+                    Destination::Dashboard | Destination::Local => true,
+                    Destination::Browser => {
+                        navigation::open_browser(url.clone());
+                        false
+                    }
+                    Destination::Block => false,
+                },
+            )
+            .build()?
+    };
+
+    let close_window = window.clone();
+    let close_state = connection.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            close::request(close_window.clone(), close_state.clone());
         }
     });
+
+    #[cfg(target_os = "macos")]
+    macos::install(&window, connection)?;
+    #[cfg(windows)]
+    windows::install(&window, connection)?;
+
+    Ok(())
+}
+
+fn install_menu(app: &AppHandle) -> tauri::Result<()> {
+    let menu = Menu::default(app)?;
+    let retry = MenuItem::with_id(app, "retry", "Retry", true, Some("CmdOrCtrl+R"))?;
+    let copy = MenuItem::with_id(
+        app,
+        "copy_login",
+        "Copy Browser Login Link to Clipboard",
+        true,
+        None::<&str>,
+    )?;
+    menu.append(&Submenu::with_items(
+        app,
+        "Connection",
+        true,
+        &[&retry, &copy],
+    )?)?;
+
+    #[cfg(target_os = "macos")]
+    let (devtools, accelerator) = ("Toggle Developer Tools", "Cmd+Alt+I");
+    #[cfg(windows)]
+    let (devtools, accelerator) = ("Open Developer Tools", "Ctrl+Shift+I");
+    let view = menu.items()?.iter().find_map(|item| {
+        item.as_submenu()
+            .filter(|submenu| submenu.text().ok().as_deref() == Some("View"))
+            .cloned()
+    });
+    let view = match view {
+        Some(view) => view,
+        None => {
+            let view = Submenu::new(app, "View", true)?;
+            menu.append(&view)?;
+            view
+        }
+    };
+    view.append_items(&[
+        &MenuItem::with_id(app, "devtools", devtools, true, Some(accelerator))?,
+        &MenuItem::with_id(app, "devtools_f12", devtools, true, Some("F12"))?,
+        &PredefinedMenuItem::separator(app)?,
+        &MenuItem::with_id(app, "zoom_reset", "Actual Size", true, Some("CmdOrCtrl+0"))?,
+        &MenuItem::with_id(app, "zoom_in", "Zoom In", true, Some("CmdOrCtrl+="))?,
+        &MenuItem::with_id(
+            app,
+            "zoom_in_shifted",
+            "Zoom In",
+            true,
+            Some("CmdOrCtrl+Shift+="),
+        )?,
+        &MenuItem::with_id(app, "zoom_out", "Zoom Out", true, Some("CmdOrCtrl+-"))?,
+    ])?;
+    app.set_menu(menu)?;
+    Ok(())
 }
 
 fn main() {
-    let connection = Arc::new(Connection::default());
-    let menu_state = connection.clone();
-    let zoom_level = Mutex::new(1.0_f64);
+    let state = Arc::new(Connection::default());
+    let menu_state = state.clone();
+    let setup_state = state.clone();
+    let zoom = Mutex::new(1.0_f64);
     tauri::Builder::default()
-        // No invoke_handler, plugins, remote capabilities, or JS initialization.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_dialog::init())
         .on_menu_event(move |app, event| {
-            if event.id().as_ref() == "retry" {
-                connect(app.clone(), menu_state.clone());
-            } else if let Some(step) = zoom::Step::from_menu_id(event.id().as_ref()) {
-                if let Some(window) = app.get_webview_window("main") {
-                    let mut level = zoom_level.lock().unwrap();
-                    let target = zoom::next(*level, step);
-                    if window.set_zoom(target).is_ok() {
-                        *level = target;
+            let Some(window) = app.get_webview_window("main") else {
+                return;
+            };
+            let id = event.id().as_ref();
+            match id {
+                "retry" => menu_state.connect(window, true),
+                "copy_login" => menu_state.copy_login_link(window),
+                "devtools" | "devtools_f12" => {
+                    #[cfg(target_os = "macos")]
+                    if window.is_devtools_open() {
+                        window.close_devtools();
+                        return;
+                    }
+                    window.open_devtools();
+                }
+                _ => {
+                    if let Some(step) = zoom::Step::from_menu_id(id) {
+                        let mut level = zoom.lock().unwrap();
+                        let target = zoom::next(*level, step);
+                        if window.set_zoom(target).is_ok() {
+                            *level = target;
+                        }
                     }
                 }
             }
         })
         .setup(move |app| {
-            let menu = Menu::default(app.handle())?;
-            let retry = MenuItem::with_id(app, "retry", "Retry", true, Some("CmdOrCtrl+R"))?;
-            menu.append(&Submenu::with_items(app, "Connection", true, &[&retry])?)?;
-            // Cmd+= and Cmd+Shift+= (Cmd++) both zoom in, as in browsers;
-            // AppKit matches Shift exactly, so each needs its own item.
-            let zoom_items = [
-                MenuItem::with_id(app, "zoom_reset", "Actual Size", true, Some("CmdOrCtrl+0"))?,
-                MenuItem::with_id(app, "zoom_in", "Zoom In", true, Some("CmdOrCtrl+="))?,
-                MenuItem::with_id(
-                    app,
-                    "zoom_in_shifted",
-                    "Zoom In",
-                    true,
-                    Some("CmdOrCtrl+Shift+="),
-                )?,
-                MenuItem::with_id(app, "zoom_out", "Zoom Out", true, Some("CmdOrCtrl+-"))?,
-            ];
-            let separator = PredefinedMenuItem::separator(app)?;
-            let view = menu.items()?.into_iter().find_map(|item| {
-                item.as_submenu()
-                    .filter(|submenu| submenu.text().ok().as_deref() == Some("View"))
-                    .cloned()
-            });
-            let view = match view {
-                Some(view) => {
-                    view.append(&separator)?;
-                    view
-                }
-                None => {
-                    let view = Submenu::new(app, "View", true)?;
-                    menu.append(&view)?;
-                    view
-                }
-            };
-            for item in &zoom_items {
-                view.append(item)?;
-            }
-            app.set_menu(menu)?;
-
-            let navigation_state = connection.clone();
-            let popup_state = connection.clone();
-            let popup_app = app.handle().clone();
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("Werkschaft — Connecting…")
-                .user_agent(USER_AGENT)
-                .inner_size(1280.0, 860.0)
-                .min_inner_size(760.0, 520.0)
-                .on_navigation(move |url| {
-                    let action =
-                        destination(url, navigation_state.dashboard.lock().unwrap().as_ref());
-                    match action {
-                        Destination::Dashboard
-                        | Destination::ConnectView
-                        | Destination::OpaqueDocument => true,
-                        Destination::Browser => {
-                            open_browser(url.clone());
-                            false
-                        }
-                        Destination::Block => false,
-                    }
-                })
-                .on_new_window(move |url, _features| {
-                    let action = destination(&url, popup_state.dashboard.lock().unwrap().as_ref());
-                    match action {
-                        Destination::Dashboard => {
-                            // Keep same-origin target=_blank/window.open links usable,
-                            // without creating a second ungoverned native window.
-                            let app = popup_app.clone();
-                            let _ = popup_app.run_on_main_thread(move || {
-                                if let Some(window) = app.get_webview_window("main") {
-                                    let _ = window.navigate(url);
-                                }
-                            });
-                        }
-                        Destination::Browser => open_browser(url),
-                        Destination::ConnectView
-                        | Destination::OpaqueDocument
-                        | Destination::Block => (),
-                    }
-                    NewWindowResponse::Deny
-                })
-                .build()?;
-            connect(app.handle().clone(), connection.clone());
+            install_menu(app.handle())?;
+            build_window(app.handle(), setup_state.clone())?;
+            setup_state.watch(app.handle().clone());
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("Unable to run the Werkschaft window");
+        .build(tauri::generate_context!())
+        .expect("Unable to initialize Werkschaft")
+        .run(move |_app, event| match event {
+            RunEvent::ExitRequested { api, .. } if state.rebuilding.load(Ordering::Acquire) => {
+                api.prevent_exit();
+            }
+            #[cfg(windows)]
+            RunEvent::WindowEvent {
+                label,
+                event: WindowEvent::Destroyed,
+                ..
+            } if label == "main" && state.rebuilding.load(Ordering::Acquire) => {
+                let app = _app.clone();
+                let state = state.clone();
+                // Defer until Tauri removes the destroyed window from its manager.
+                std::thread::spawn(move || {
+                    let target = app.clone();
+                    let _ = app.run_on_main_thread(move || {
+                        state.rebuilding.store(false, Ordering::Release);
+                        if build_window(&target, state).is_err() {
+                            eprintln!("Werkschaft: Could not recreate the webview");
+                            target.exit(1);
+                        }
+                    });
+                });
+            }
+            _ => (),
+        });
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
-    fn user_agent_carries_the_dashboard_desktop_token() {
-        // The dashboard tests /\bWerkschaft\// against navigator.userAgent.
-        let token = format!(" Werkschaft/{}", env!("CARGO_PKG_VERSION"));
-        assert!(super::USER_AGENT.ends_with(&token));
-        assert!(super::USER_AGENT.starts_with("Mozilla/5.0 (Macintosh;"));
-        assert!(super::USER_AGENT.contains("AppleWebKit/"));
-    }
-
-    #[test]
-    fn configuration_grants_no_local_or_remote_native_permissions() {
+    fn pages_receive_no_native_command_permissions() {
         let config: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         let app = &config["app"];
         assert_eq!(app["withGlobalTauri"], false);
-        assert!(app["windows"].as_array().unwrap().is_empty());
         let capabilities = app["security"]["capabilities"].as_array().unwrap();
         assert_eq!(capabilities.len(), 1);
-        let capability = &capabilities[0];
-        assert_eq!(capability["local"], false);
-        assert!(capability.get("remote").is_none());
-        assert!(capability["permissions"].as_array().unwrap().is_empty());
-        assert!(config["bundle"].get("externalBin").is_none());
+        assert_eq!(capabilities[0]["local"], false);
+        assert!(capabilities[0].get("remote").is_none());
+        assert!(capabilities[0]["permissions"]
+            .as_array()
+            .unwrap()
+            .is_empty());
     }
 }
