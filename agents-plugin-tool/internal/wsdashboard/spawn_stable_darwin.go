@@ -1,11 +1,10 @@
 package wsdashboard
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 // stableDaemonName is the fixed executable path launched on macOS so TCC
@@ -16,64 +15,50 @@ import (
 const stableDaemonName = "ws-mcp-dashboard"
 
 // LaunchExecutable ensures exe is retained in <dir>/bin and, on macOS,
-// atomically installs a stable launch path (<dir>/bin/ws-mcp-dashboard)
-// pointing at the same executable content so TCC sees one stable binary path.
-// Renaming over the stable path while an older daemon runs from the previous
-// inode is safe on POSIX.
+// atomically installs a separate copy at <dir>/bin/ws-mcp-dashboard. A
+// single-link inode avoids exposing the retained build name as another path
+// to the executable when macOS identifies the daemon for privacy permissions.
 func LaunchExecutable(exe, dir string) (string, error) {
 	binDir := filepath.Join(dir, stagedBinDir)
 	dst := filepath.Join(binDir, stableDaemonName)
-	if dstInfo, err := os.Lstat(dst); err == nil && dstInfo.Mode().IsRegular() {
+	if dstInfo, err := statStableExecutable(dst); err == nil {
 		if srcInfo, err := os.Stat(exe); err == nil && os.SameFile(srcInfo, dstInfo) {
 			return dst, nil
 		}
 	}
-	staged, err := DaemonExecutable(exe, dir)
+	staged, sum, err := stageExecutable(exe, binDir)
 	if err != nil {
 		return "", err
 	}
-	return installStableExecutable(staged, binDir)
-}
-
-// installStableExecutable atomically points <binDir>/ws-mcp-dashboard at src's
-// content, preferring a hardlink (which shares the inode and Mach-O code
-// signature without duplicating bytes) and falling back to an atomic copy when
-// linking is unavailable.
-func installStableExecutable(src, binDir string) (string, error) {
-	realSrc, err := filepath.EvalSymlinks(src)
-	if err != nil {
-		return "", err
-	}
-	srcInfo, err := os.Stat(realSrc)
+	srcInfo, err := os.Stat(staged)
 	if err != nil {
 		return "", err
 	}
 	if !srcInfo.Mode().IsRegular() {
-		return "", fmt.Errorf("stable daemon executable source is not a regular file: %s", realSrc)
+		return "", fmt.Errorf("stable daemon executable source is not a regular file: %s", staged)
 	}
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		return "", err
-	}
-	dst := filepath.Join(binDir, stableDaemonName)
-	if dstInfo, err := os.Lstat(dst); err == nil && dstInfo.Mode().IsRegular() && os.SameFile(srcInfo, dstInfo) {
-		return dst, nil
-	}
-	if srcInfo.Mode().Perm()&0o111 != 0 {
-		var b [6]byte
-		if _, err := rand.Read(b[:]); err != nil {
-			return "", err
-		}
-		tmp := filepath.Join(binDir, fmt.Sprintf(".%s.%d.%s.tmp", stableDaemonName, os.Getpid(), hex.EncodeToString(b[:])))
-		if err := os.Link(realSrc, tmp); err == nil {
-			if err := os.Rename(tmp, dst); err != nil {
-				_ = os.Remove(tmp)
-				return "", err
-			}
+	if dstInfo, err := statStableExecutable(dst); err == nil && dstInfo.Size() == srcInfo.Size() {
+		if dstSum, err := fileSHA256(dst); err == nil && dstSum == sum {
 			return dst, nil
 		}
 	}
-	if err := copyExecutable(realSrc, dst); err != nil {
+	if err := copyExecutable(staged, dst); err != nil {
+		return "", err
+	}
+	// A rename failure with matching bytes can leave the old hardlink in place.
+	if _, err := statStableExecutable(dst); err != nil {
 		return "", err
 	}
 	return dst, nil
+}
+
+func statStableExecutable(path string) (os.FileInfo, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 || info.Sys().(*syscall.Stat_t).Nlink != 1 {
+		return nil, fmt.Errorf("stable daemon executable must be a regular executable with one link: %s", path)
+	}
+	return info, nil
 }

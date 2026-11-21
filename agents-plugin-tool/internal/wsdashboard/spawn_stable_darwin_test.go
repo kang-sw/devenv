@@ -37,8 +37,8 @@ func TestLaunchExecutableInstallsAndReplacesAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatalf("content-addressed staged copy missing: %v", err)
 	}
-	if !os.SameFile(infoStable1, infoStaged1) {
-		t.Fatal("stable launch path is not hardlinked to staged binary")
+	if os.SameFile(infoStable1, infoStaged1) {
+		t.Fatal("stable launch path shares the staged binary's inode")
 	}
 
 	// Idempotent: repeated calls (and self-replace via the stable path itself)
@@ -63,7 +63,7 @@ func TestLaunchExecutableInstallsAndReplacesAtomically(t *testing.T) {
 	defer oldHandle.Close()
 
 	v2 := filepath.Join(srcDir, "ws-mcp-v2")
-	if err := os.WriteFile(v2, []byte("daemon-binary-v2-longer"), 0o755); err != nil {
+	if err := os.WriteFile(v2, []byte("daemon-binary-v2"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	sum2 := ExecutableContentHash(v2)
@@ -81,10 +81,13 @@ func TestLaunchExecutableInstallsAndReplacesAtomically(t *testing.T) {
 	}
 	staged2 := filepath.Join(binDir, "ws-mcp-dashboard-"+sum2[:16])
 	infoStaged2, err := os.Stat(staged2)
-	if err != nil || !os.SameFile(infoStable2, infoStaged2) {
-		t.Fatalf("stable v2 is not hardlinked to staged v2: %v", err)
+	if err != nil {
+		t.Fatalf("content-addressed staged v2 copy missing: %v", err)
 	}
-	if got, err := os.ReadFile(stable2); err != nil || string(got) != "daemon-binary-v2-longer" {
+	if os.SameFile(infoStable2, infoStaged2) {
+		t.Fatal("stable v2 shares the staged v2 inode")
+	}
+	if got, err := os.ReadFile(stable2); err != nil || string(got) != "daemon-binary-v2" {
 		t.Fatalf("stable v2 content = %q, %v", got, err)
 	}
 	// The open handle to the old inode and the retained v1 staged copy remain intact.
@@ -102,6 +105,54 @@ func TestLaunchExecutableInstallsAndReplacesAtomically(t *testing.T) {
 		if strings.HasSuffix(e.Name(), ".tmp") {
 			t.Fatalf("stray temp file left in binDir: %s", e.Name())
 		}
+	}
+}
+
+func TestLaunchExecutableReplacesLegacyHardlink(t *testing.T) {
+	for _, source := range []string{"stable", "staged"} {
+		t.Run(source, func(t *testing.T) {
+			dir := t.TempDir()
+			src := filepath.Join(t.TempDir(), "ws-mcp")
+			const payload = "daemon-payload"
+			if err := os.WriteFile(src, []byte(payload), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			staged, err := DaemonExecutable(src, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stable := filepath.Join(dir, stagedBinDir, stableDaemonName)
+			if err := os.Link(staged, stable); err != nil {
+				t.Fatal(err)
+			}
+			stagedInfo, err := os.Stat(staged)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			exe := stable
+			if source == "staged" {
+				exe = staged
+			}
+			got, err := LaunchExecutable(exe, dir)
+			if err != nil || got != stable {
+				t.Fatalf("LaunchExecutable(%q) = %q, %v; want %q", exe, got, err, stable)
+			}
+			stableInfo, err := os.Lstat(stable)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !stableInfo.Mode().IsRegular() || os.SameFile(stableInfo, stagedInfo) {
+				t.Fatalf("stable executable must be a separate regular file, got %v", stableInfo)
+			}
+			retainedInfo, err := os.Stat(staged)
+			if err != nil || !os.SameFile(stagedInfo, retainedInfo) {
+				t.Fatalf("staged executable was replaced or lost: %v", err)
+			}
+			if got, err := os.ReadFile(stable); err != nil || string(got) != payload {
+				t.Fatalf("stable content = %q, %v; want %q", got, err, payload)
+			}
+		})
 	}
 }
 
@@ -154,22 +205,20 @@ func TestLaunchExecutableReplacesSymlinkAndPreservesRunningExecutableRecord(t *t
 	}
 }
 
-func TestInstallStableExecutableCopyFallbackSetsMode(t *testing.T) {
-	binDir := filepath.Join(t.TempDir(), stagedBinDir)
-	// Non-executable source forces the copyExecutable fallback path.
+func TestLaunchExecutableSetsExecuteMode(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "ws-mcp-noexec")
 	if err := os.WriteFile(src, []byte("payload"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	dst, err := installStableExecutable(src, binDir)
+	dst, err := LaunchExecutable(src, t.TempDir())
 	if err != nil {
-		t.Fatalf("installStableExecutable fallback: %v", err)
+		t.Fatalf("LaunchExecutable: %v", err)
 	}
 	info, err := os.Lstat(dst)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-		t.Fatalf("fallback stable file = %v, %v; want executable regular file", info, err)
+		t.Fatalf("stable file = %v, %v; want executable regular file", info, err)
 	}
 	if data, err := os.ReadFile(dst); err != nil || string(data) != "payload" {
-		t.Fatalf("fallback content = %q, %v", data, err)
+		t.Fatalf("stable content = %q, %v", data, err)
 	}
 }

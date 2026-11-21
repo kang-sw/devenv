@@ -18,11 +18,18 @@
   ticketMap.graph = (function () {
     var tm = ticketMap, geo = ticketMap.geom, S = ticketMap.S, SVGNS = "http://www.w3.org/2000/svg";
     var ST_KEY = { ready: "js.tmap.st.ready", todo: "js.tmap.st.todo", idea: "js.tmap.st.idea", done: "js.tmap.st.done", dropped: "js.tmap.st.dropped" };
+    var ST_ICON = {
+      ready: { d: "M-4.6,-5.8C-4.6,-7.2,-3.3,-7.9,-2.1,-7.2L8.0,-1.3C9.2,-0.6,9.2,0.6,8.0,1.3L-2.1,7.2C-3.3,7.9,-4.6,7.2,-4.6,5.8Z", cls: "d-tm-cico-fill" },
+      todo: { d: "M-7.95,-5.4a1.45,1.45 0 1,0 2.9,0a1.45,1.45 0 1,0 -2.9,0M-2.1,-6.6h8.8a1.2,1.2 0 0,1 0,2.4h-8.8a1.2,1.2 0 0,1 0,-2.4ZM-7.95,0a1.45,1.45 0 1,0 2.9,0a1.45,1.45 0 1,0 -2.9,0M-2.1,-1.2h8.8a1.2,1.2 0 0,1 0,2.4h-8.8a1.2,1.2 0 0,1 0,-2.4ZM-7.95,5.4a1.45,1.45 0 1,0 2.9,0a1.45,1.45 0 1,0 -2.9,0M-2.1,4.2h8.8a1.2,1.2 0 0,1 0,2.4h-8.8a1.2,1.2 0 0,1 0,-2.4Z", cls: "d-tm-cico-fill" },
+      idea: { d: "M-2.5,2.4C-2.5,0.4,-5.4,-0.5,-5.4,-3.0A5.4,5.4 0 1,1 5.4,-3.0C5.4,-0.5,2.5,0.4,2.5,2.4ZM-2.5,5.7H2.5M-1.5,8.7H1.5", cls: "d-tm-cico-stroke d-tm-cico-idea" },
+      done: { d: "M-6.6,0.5L-2.0,5.2L7.0,-4.8", cls: "d-tm-cico-stroke d-tm-cico-done" },
+      dropped: { d: "M-5.6,-5.6L5.6,5.6M5.6,-5.6L-5.6,5.6", cls: "d-tm-cico-stroke d-tm-cico-dropped" }
+    };
     var PRIO = { ready: 6e3, todo: 2.5e3, idea: 1.2e3 };
     var box = null, vp = null, svg = null, world = null, lbl = null, tipEl = null, lay = {}, U = {};
-    var G = null, P = [], Bp = [], R = [], gN = [], lbs = [], cbs = [], soup = [], soupOrder = [], sects = [];
+    var G = null, P = [], Bp = [], R = [], gN = [], gI = [], micro = [], lbs = [], cbs = [], soup = [], soupOrder = [], sects = [];
     var edges = [], sims = [], egoEdges = [], hullPoly = {}, hullTop = {}, hovMarked = [];
-    var cam = S.cam, W = 0, H = 0, frame = 0, anim = 0, tween = 0, ns = 1, ready = false, fitted = false;
+    var cam = S.cam, W = 0, H = 0, frame = 0, anim = 0, tween = 0, ns = 1, lastK = -1, ready = false, fitted = false;
     var stemKey = "", camFor = null, layoutMs = 0, drag = null, lastClick = null, pins = new Map(), pinch = null;
     var hov = null, kwHover = null, kwSet = null, nb = new Set(), stg = 1, soupA = 1, nLabels = 0, nSoup = 0;
     var E = null, pinned = false, egoNext = false, clicking = false, keepCam = false;
@@ -94,6 +101,14 @@
       if (kind === "blocked") g.appendChild(sv("path", { d: "M15 0.5L22 4L15 7.5z" }));
       return g;
     }
+    function iconScale(r, cx, cy) {
+      var s = "scale(" + (r * 0.062).toFixed(4) + ")";
+      return cx !== undefined ? "translate(" + cx + "," + cy + ") " + s : s;
+    }
+    function statusIcon(s, r, cx, cy) {
+      var spec = ST_ICON[s] || ST_ICON.todo;
+      return sv("path", { "class": "d-tm-cico " + spec.cls + " d-tm-cico-" + s, d: spec.d, transform: iconScale(r, cx, cy), "aria-hidden": "true" });
+    }
     // tools builds the overlay controls: the toolbar (edge toggles, the
     // similarity threshold and edge count, the Ego Ring button, the keyword
     // chip), the hint, the ego bar, the legend and the zoom control.
@@ -153,8 +168,10 @@
       U.legend.setAttribute("aria-label", wsT("js.tmap.c.legend"));
       tm.ST.forEach(function (s) {
         var name = wsT(ST_KEY[s]), text = s === "done" || s === "dropped" ? wsT("js.tmap.pill.ref", name) : name;
-        var it = mk(U.legend, "span", "d-tm-clg d-tm-st-" + s), g = sv("svg", { viewBox: "0 0 12 12", "aria-hidden": "true" });
-        g.appendChild(sv("circle", { cx: 6, cy: 6, r: s === "todo" ? 4.6 : s === "ready" ? 4.4 : 4.2 }));
+        var r = s === "todo" ? 6.4 : s === "ready" ? 6.0 : 5.8;
+        var it = mk(U.legend, "span", "d-tm-clg d-tm-st-" + s), g = sv("svg", { viewBox: "0 0 16 16", "aria-hidden": "true" });
+        g.appendChild(sv("circle", { cx: 8, cy: 8, r: r }));
+        g.appendChild(statusIcon(s, r, 8, 8));
         it.appendChild(g);
         mk(it, "span", "", text);
         it.title = text;
@@ -188,8 +205,9 @@
       G = tm.data();
       ["hull", "guide", "edge", "ego", "node"].forEach(function (k) { lay[k].textContent = ""; });
       lbl.textContent = "";
-      P = []; Bp = []; R = []; gN = []; lbs = []; cbs = []; soup = []; sects = []; edges = []; sims = []; egoEdges = [];
+      P = []; Bp = []; R = []; gN = []; gI = []; micro = []; lbs = []; cbs = []; soup = []; sects = []; edges = []; sims = []; egoEdges = [];
       hullPoly = {}; hullTop = {}; hovMarked = []; hov = null; kwHover = null; nb = new Set();
+      lastK = -1;
       ready = false;
       hideTip();
       if (!G) return;
@@ -226,10 +244,15 @@
     }
     function buildNodes() {
       G.nodes.forEach(function (n) {
+        var r = R[n.i] * ns;
         var g = tm.hue(sv("g", { "class": "d-tm-cnd d-tm-st-" + n.status, "data-i": n.i, transform: tr(P[n.i]) }), cl(n.cluster));
-        g.appendChild(sv("circle", { "class": "d-tm-ccore", r: R[n.i].toFixed(2) }));
+        g.appendChild(sv("circle", { "class": "d-tm-ccore", r: r.toFixed(2) }));
+        var ico = statusIcon(n.status, r);
+        g.appendChild(ico);
         lay.node.appendChild(g);
         gN[n.i] = g;
+        gI[n.i] = ico;
+        micro[n.i] = false;
         var lb = el("div", "d-tm-lb");
         lb.setAttribute("data-i", n.i);
         lbl.appendChild(lb);
@@ -501,9 +524,24 @@
       var n2 = geo.nodeScale(cam.k);
       if (Math.abs(n2 - ns) > 0.04) {
         ns = n2;
-        G.nodes.forEach(function (n) { gN[n.i].firstChild.setAttribute("r", (R[n.i] * ns).toFixed(2)); });
+        G.nodes.forEach(function (n) {
+          var r = R[n.i] * ns;
+          gN[n.i].firstChild.setAttribute("r", r.toFixed(2));
+          gI[n.i].setAttribute("transform", iconScale(r));
+        });
         placeEdges();
         placeRings();
+      }
+      if (cam.k !== lastK) {
+        lastK = cam.k;
+        var sk = ns * cam.k;
+        G.nodes.forEach(function (n) {
+          var hide = R[n.i] * sk < 4.2;
+          if (hide !== micro[n.i]) {
+            micro[n.i] = hide;
+            gN[n.i].classList.toggle("d-tm-micro", hide);
+          }
+        });
       }
       labels();
     }

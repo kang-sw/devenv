@@ -1,5 +1,6 @@
 ---
 title: "whiteboard \"commented\" 상태 표시 (승인된 목업)"
+completed: 2026-11-21
 ---
 
 # Display the whiteboard "commented" status (approved mockup)
@@ -31,3 +32,8 @@ recent-settled, history and re-ask states.
 - Acceptance: screenshots at 1440, dark and light, match each mockup state.
   Existing whiteboard view and status tests still pass. The owner checks it
   visually.
+
+
+## Resolution (2026-11-21)
+
+Implemented whiteboard `commented` status display (`c3625b542`, merged onto `develop`) and confirmed live by owner (`(62)=ok`).

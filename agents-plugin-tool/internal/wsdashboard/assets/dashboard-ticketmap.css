@@ -5,6 +5,7 @@
   --d-tm-sim: #6a4bd6; --d-tm-idea: #8a6d2f;
   --d-tm-cl-s: 56%; --d-tm-cl-l: 40%;
   --d-tm-canvas: #ecebe6; --d-tm-cl-a: .10; --d-tm-sk-l: 30%;
+  --d-tm-on-hc: #ffffff;
   --d-tm-scrim: rgb(0 0 0 / .45);
   --d-tm-insp: 340px;
 }
@@ -13,12 +14,14 @@
     --d-tm-sim: #a68cff; --d-tm-idea: #c9a55a;
     --d-tm-cl-s: 62%; --d-tm-cl-l: 66%;
     --d-tm-canvas: #111215; --d-tm-cl-a: .085; --d-tm-sk-l: 80%;
+    --d-tm-on-hc: #0c1424;
   }
 }
 :root[data-theme="dark"] {
   --d-tm-sim: #a68cff; --d-tm-idea: #c9a55a;
   --d-tm-cl-s: 62%; --d-tm-cl-l: 66%;
   --d-tm-canvas: #111215; --d-tm-cl-a: .085; --d-tm-sk-l: 80%;
+  --d-tm-on-hc: #0c1424;
 }
 
 /* the handle: left of the search handle, through drRoom's --thr */
@@ -372,6 +375,17 @@
 .d-tm-cnd.d-tm-st-idea .d-tm-ccore { fill: color-mix(in srgb, var(--d-tm-hc) 42%, var(--d-tm-canvas)); stroke: var(--d-tm-hc); }
 .d-tm-cnd.d-tm-st-done .d-tm-ccore { fill: var(--d-tm-canvas); stroke: var(--wb-muted-fg); }
 .d-tm-cnd.d-tm-st-dropped .d-tm-ccore { fill: var(--d-tm-canvas); stroke: var(--wb-fail); stroke-dasharray: 2 2; opacity: .85; }
+.d-tm-cico { pointer-events: none; transition: opacity .15s; }
+.d-tm-cico-fill { fill: currentColor; stroke: none; }
+.d-tm-cico-stroke { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
+.d-tm-cico-idea { stroke-width: 2.1; }
+.d-tm-cico-done { stroke-width: 2.8; }
+.d-tm-cico-dropped { stroke-width: 2.6; }
+.d-tm-cnd.d-tm-micro .d-tm-cico { display: none; }
+.d-tm-st-ready .d-tm-cico, .d-tm-st-todo .d-tm-cico { color: var(--d-tm-on-hc); }
+.d-tm-st-idea .d-tm-cico { color: var(--wb-fg); }
+.d-tm-st-done .d-tm-cico { color: var(--wb-muted-fg); }
+.d-tm-st-dropped .d-tm-cico { color: var(--wb-fail); }
 .d-tm-hassel .d-tm-cnd:not(.d-tm-nb):not(.d-tm-sel) { opacity: .22; }
 .d-tm-hasq .d-tm-cnd:not(.d-tm-qh) { opacity: .18; }
 .d-tm-cnd.d-tm-qh .d-tm-ccore { stroke: var(--wb-primary); stroke-width: 2.6px; }
@@ -386,11 +400,14 @@
 .d-tm-calm .d-tm-chull { stroke: hsl(var(--d-tm-h, 210) var(--d-tm-cl-s) var(--d-tm-cl-l) / .24); }
 .d-tm-calm .d-tm-ce-parent, .d-tm-calm .d-tm-ce-blocked, .d-tm-calm .d-tm-ce-related { opacity: .28; }
 .d-tm-calm .d-tm-ce-sim { opacity: .22; }
-.d-tm-calm .d-tm-ccore { opacity: .8; }
-.d-tm-calm .d-tm-nb .d-tm-ccore, .d-tm-calm .d-tm-sel .d-tm-ccore, .d-tm-calm .d-tm-hvn .d-tm-ccore, .d-tm-calm .d-tm-kwh .d-tm-ccore { opacity: 1; }
+.d-tm-calm .d-tm-ccore, .d-tm-calm .d-tm-cico { opacity: .8; }
+.d-tm-calm .d-tm-nb .d-tm-ccore, .d-tm-calm .d-tm-nb .d-tm-cico,
+.d-tm-calm .d-tm-sel .d-tm-ccore, .d-tm-calm .d-tm-sel .d-tm-cico,
+.d-tm-calm .d-tm-hvn .d-tm-ccore, .d-tm-calm .d-tm-hvn .d-tm-cico,
+.d-tm-calm .d-tm-kwh .d-tm-ccore, .d-tm-calm .d-tm-kwh .d-tm-cico { opacity: 1; }
 .d-tm-ced.d-tm-hl, .d-tm-ced.d-tm-hv { opacity: 1 !important; }
 .d-tm-ced.d-tm-hv { stroke-width: 2px; }
-.d-tm-hvn .d-tm-ccore { opacity: 1; }
+.d-tm-hvn .d-tm-ccore, .d-tm-hvn .d-tm-cico { opacity: 1; }
 .d-tm-haskw .d-tm-cnd:not(.d-tm-kwh) { opacity: .2; }
 .d-tm-haskw .d-tm-ced:not(.d-tm-hv) { opacity: .1 !important; }
 .d-tm-cnd.d-tm-kwh .d-tm-ccore { stroke: var(--wb-fg); stroke-width: 2.2px; }
@@ -443,9 +460,9 @@
 .d-tm-ego .d-tm-ctool { display: none; }
 .d-tm-clegend { left: 12px; bottom: 12px; padding: 7px 10px; border-radius: 9px; box-shadow: var(--wb-shadow); font-size: 11px; display: flex; gap: 10px; align-items: center; }
 .d-tm-clg { display: flex; gap: 5px; align-items: center; white-space: nowrap; }
-.d-tm-clg > svg { width: 12px; height: 12px; flex: none; }
+.d-tm-clg > svg { width: 16px; height: 16px; flex: none; }
 .d-tm-clg circle { fill: var(--wb-muted-fg); }
-.d-tm-clg.d-tm-st-ready circle { stroke: var(--wb-ok); stroke-width: 2; }
+.d-tm-clg.d-tm-st-ready circle { stroke: var(--wb-ok); stroke-width: 1.8; }
 .d-tm-clg.d-tm-st-idea circle { fill: color-mix(in srgb, var(--wb-muted-fg) 40%, var(--d-tm-canvas)); stroke: var(--wb-muted-fg); stroke-width: 1.4; }
 .d-tm-clg.d-tm-st-done circle { fill: none; stroke: var(--wb-muted-fg); stroke-width: 1.4; }
 .d-tm-clg.d-tm-st-dropped circle { fill: none; stroke: var(--wb-fail); stroke-width: 1.4; stroke-dasharray: 2 2; }

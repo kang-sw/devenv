@@ -2679,5 +2679,18 @@
   "js.tk.ev.unhide": "再表示{0}",
   "js.tk.panel.showhidden": "非表示を表示",
   "js.tk.panel.showhidden.tip.off": "非表示の項目とコメントを元の位置に表示",
-  "js.tk.panel.showhidden.tip.on": "非表示の項目とコメントを再び隠す"
+  "js.tk.panel.showhidden.tip.on": "非表示の項目とコメントを再び隠す",
+  "wb.hold": "保留にする",
+  "js.pill.held": "保留",
+  "js.pill.upheld": "上にある最も近い保留項目へスクロール",
+  "js.pill.downheld": "下にある最も近い保留項目へスクロール",
+  "js.pill.hold": "保留にする",
+  "js.pill.unhold": "保留を解除",
+  "js.convo.jump.up": "上の最新の自分のメッセージへ移動",
+  "js.convo.jump.down": "下の最新の自分のメッセージへ移動",
+  "js.find.label": "カード内を検索",
+  "js.find.placeholder": "カード内を検索…",
+  "js.find.prev": "前の一致 (Shift+Enter)",
+  "js.find.next": "次の一致 (Enter)",
+  "js.find.close": "検索バーを閉じる (Esc)"
 }

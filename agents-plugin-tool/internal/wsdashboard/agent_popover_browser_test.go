@@ -211,6 +211,11 @@ func TestHUDOrgChartBrowser(t *testing.T) {
 			mk("done1", "", "done-a", "claude", wslive.StatusDone, "", "sonnet-4.6", "low", "", 15000, false, false),
 			mk("done2", "", "done-b", "codex", wslive.StatusDone, "", "gpt-5.4", "low", "", 22000, false, false),
 		}}
+	single := wslive.Snapshot{SchemaVersion: 1, Adapter: "claude", UpdatedAt: now, HeartbeatMs: 30000,
+		Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseThinking}},
+		Agents: []wslive.Agent{
+			mk("s1", "", "worker-one", "claude", wslive.StatusRunning, wslive.PhaseTool, "sonnet-4.6", "medium", "rg -n hud", 24000, false, true),
+		}}
 
 	f.d.snapshots.SetLive(f.dir, "livesession", heavy)
 	f.d.broker.wake(liveDep("livesession"))
@@ -223,6 +228,8 @@ func TestHUDOrgChartBrowser(t *testing.T) {
 			next = fanout
 		case "idle":
 			next = idleOnly
+		case "single":
+			next = single
 		default:
 			next = heavy
 		}

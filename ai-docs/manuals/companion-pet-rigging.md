@@ -11,12 +11,24 @@ Living specification and asset-production manual for the opt-in Werkschaft lead 
 Asset production follows three ordered stages so every character pack plugs cleanly into one reusable engine:
 
 1. **Stage 1 — Concept & Static SD Reference Lock**
-   - **Step 1-A (Character Concept):** Lock character silhouette, palette, and personality via clean **Front + Back full-body turnaround illustrations** (no text boxes or cluttered sheet chrome).
-   - **Step 1-B (Target 2.5–3-Head SD References):** Translate the approved character into final target **2.5–3-head SD/chibi** static references (`1:1` square canvas, uniform thick ink outlines, clean 2-step cel shading, clear part boundaries) for every required/selected pose family plus engine-shared props. Never down-scale a non-SD illustration into an SD look.
+   - **Step 1-A (Character Concept — Locked):** Lock character silhouette, palette, and personality via clean **Front + Back full-body turnaround illustrations** (no text boxes or cluttered sheet chrome). Locked default mascot turnaround: `ai-docs/assets/companion-pet/mascot-stage1a-turnaround.png` (see `## Locked Default Mascot (Stage 1-A)` below).
+   - **Step 1-B (Target 2.5–3-Head SD References — In Progress):** Translate the approved character into final target **2.5–3-head SD/chibi** static references (`1:1` square canvas, uniform thick ink outlines, clean 2-step cel shading, clear part boundaries) for every required/selected pose family plus engine-shared props. Never down-scale a non-SD illustration into an SD look.
 2. **Stage 2 — Scenario, Pose-Family, Prop & Socket Contract**
    - Governed by this manual: declares the canonical v1 scenarios, pose families with automatic fallbacks, engine-shared interactive props, attachment sockets, expressions, and passive gaze rules.
 3. **Stage 3 — Same-Canvas Cutout Dissection Pipeline**
    - Run same-canvas image-to-image layer dissection and deterministic post-processing against each approved Stage 1 reference, packing uniform lossless-alpha WebP layers into a `pack.json` bundle.
+
+## Locked Default Mascot (Stage 1-A)
+
+- **Canonical Turnaround:** `ai-docs/assets/companion-pet/mascot-stage1a-turnaround.png` (`1536 × 1024`, Front + Back full-body turnaround, IP-clean original Werkschaft mascot).
+- **Palette Harmony:** Deep midnight navy (`#1E2233`), warm cream ivory (`#F5F2EA`), vermilion-coral (`#E2582C`), and golden amber (`#F0A500`) paired with coral-peach hair and amber-to-magenta sparkling eyes.
+- **Silhouette & Outfit Anchors:**
+  - Voluminous wavy coral-peach twin-tails, curved top ahoge, two small amber side hairpins on the left bangs (viewer's right), cheeky fang grin.
+  - Deep navy twin hair bows featuring a **golden-amber pentagon keystone gem with a subtle vermilion chevron notch on top** and dangling gold diamond-drop charms (consistent front and back).
+  - Off-shoulder cropped cream-ivory hoodie with golden-amber hood lining, golden drawstrings, **circular open-ring gold zipper pull**, deep navy shoulder trim, double vermilion-coral sleeve stripes, navy/amber ribbed cuffs, and a **clean ivory hoodie back**.
+  - Dark midnight-navy inner crop top, suspender straps with gold buckles, cuffed dark navy cargo shorts with amber pocket trim, and a **left-thigh dark navy strap carrying a golden-amber pentagon keystone + dangling circular open metallic ring** (matched on the same leg in front and back views).
+  - Dark navy knee-high socks with amber + vermilion double top stripes and chunky cream/navy/amber/vermilion streetwear sneakers.
+- **CI Integration Rule:** Geometric Werkschaft brand motifs (open rings, pentagon keystone, chevron notch, 4-color palette) are integrated organically as streetwear hardware and trims — never pasted as a literal dark rounded-square app-icon badge.
 
 ## Pose Families & Fallback Matrix
 

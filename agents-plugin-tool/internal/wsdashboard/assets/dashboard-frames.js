@@ -457,6 +457,7 @@
     });
     if (kept) kept.h.apply();
   }
+  window.wbCardFindFrame = { post: postDoc };
   window.addEventListener("message", function (e) {
     var f = docFrame(e.source), m = e.data;
     if (!f || !m || typeof m !== "object") return;
@@ -501,6 +502,15 @@
     } else if (m.wbDoc === "overview") {
       var oa = navigator.userActivation, b = !shHidden && overviewButton(doc);
       if (b && (!oa || oa.isActive)) b.click();
+    } else if (m.wbDoc === "find-open") {
+      var fa = navigator.userActivation;
+      if ((!fa || fa.isActive) && window.wbCardFind && window.wbCardFind.openFor) window.wbCardFind.openFor(f);
+    } else if (m.wbDoc === "find-res") {
+      if (window.wbCardFind && window.wbCardFind.onFrameResult) window.wbCardFind.onFrameResult(f, num(m.seq), num(m.count));
+    } else if (m.wbDoc === "find-scroll") {
+      if (window.wbCardFind && window.wbCardFind.onFrameScroll) window.wbCardFind.onFrameScroll(f, num(m.seq), num(m.top), num(m.height));
+    } else if (m.wbDoc === "hover") {
+      if (window.wbCardFind && window.wbCardFind.setHoveredFrame) window.wbCardFind.setHoveredFrame(m.on ? f : null, f);
     }
   });
   // A swap re-creates a changed topic's frame (or loads its next one beside

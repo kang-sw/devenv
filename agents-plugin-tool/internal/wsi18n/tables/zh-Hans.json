@@ -2679,5 +2679,18 @@
   "js.tk.ev.unhide": "取消隐藏了{0}",
   "js.tk.panel.showhidden": "显示已隐藏",
   "js.tk.panel.showhidden.tip.off": "在原位置显示已隐藏的条目和评论",
-  "js.tk.panel.showhidden.tip.on": "再次隐藏已隐藏的条目和评论"
+  "js.tk.panel.showhidden.tip.on": "再次隐藏已隐藏的条目和评论",
+  "wb.hold": "暂缓处理",
+  "js.pill.held": "暂缓",
+  "js.pill.upheld": "滚动到上方最近的暂缓项",
+  "js.pill.downheld": "滚动到下方最近的暂缓项",
+  "js.pill.hold": "暂缓处理",
+  "js.pill.unhold": "取消暂缓",
+  "js.convo.jump.up": "跳转到上方我最近的消息",
+  "js.convo.jump.down": "跳转到下方我最近的消息",
+  "js.find.label": "在卡片内查找",
+  "js.find.placeholder": "在卡片内查找…",
+  "js.find.prev": "上一个匹配项 (Shift+Enter)",
+  "js.find.next": "下一个匹配项 (Enter)",
+  "js.find.close": "关闭查找栏 (Esc)"
 }
