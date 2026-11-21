@@ -3,7 +3,7 @@ title: "감사 정책과 하네스 공통 이벤트 봉투(envelope)"
 parent: 261119-epic-ws-conversation-audit
 related:
   261119-feat-ws-audit-capture-harness-adapters: "consumer: maps each harness onto this envelope"
-  261119-feat-ws-audit-sqlite-store: "consumer: persists this envelope"
+  261119-feat-ws-audit-ring-store: "consumer: persists this envelope"
   261114-feat-ws-conversation-audit-event-store: "superseded source of (545), (546), (595), (598) and the envelope-level parts of (599)"
 ---
 

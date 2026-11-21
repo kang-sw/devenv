@@ -3,7 +3,6 @@ title: "대화 감사(audit): 도구 호출·숨은 이벤트 수집, 저장, �
 sage-review-design: required
 parent: 261114-epic-ws-common-session-foundation
 related:
-  261119-epic-ws-daemon-sqlite-storage: "storage dependency: the audit store child builds on this epic's SQLite precedent and settled shapes"
   261114-feat-ws-conversation-audit-event-store: "superseded (dropped): its still-valid decisions are carried into children 1-4"
   261114-feat-ws-dashboard-conversation-audit-view: "superseded (dropped): its still-valid decisions and approved mockup are carried into child 5"
   261119-feat-ws-dashboard-shell-topbar-rail-redesign: "landed shell redesign; the audit view's mockup surroundings realign to it"
@@ -27,6 +26,9 @@ Owner decision **(1331)=a** (2026-11-19) created this epic under Stage 4 of
 children below. Both earlier tickets are dropped as superseded. Their
 still-valid decisions are carried into the children with their original
 board IDs, so approvals 545, 546, 550 and 594-611, 681 keep their authority.
+On 2026-11-21, owner decision (1960)=a superseded the SQLite storage choice
+in (1331)=a. `ai-docs/manuals/performance.md` `## Storage Types` places audit
+events in Type 1. Owner decision (1970)=a defines the ring capacity rules.
 
 ## Non-Scope
 
@@ -47,9 +49,9 @@ Order and dependencies:
 2. `261119-feat-ws-audit-capture-harness-adapters`: a capture point ahead
    of the holder ring-skip filter, plus per-harness adapters in the order
    Claude -> Codex -> agy -> Pi, and the ring call ID. Blocked by child 1.
-3. `261119-feat-ws-audit-sqlite-store`: SQLite audit store, redaction before
-   persist, retention. Blocked by child 1. Depends on
-   `261119-epic-ws-daemon-sqlite-storage` for its SQLite precedent and shapes.
+3. `261119-feat-ws-audit-ring-store`: per-session audit segment ring,
+   redaction before persistence, and capacity and time retention. Blocked
+   by child 1.
 4. `261119-feat-ws-audit-query-api`: read/search API over the store. Blocked
    by child 3.
 5. `261119-feat-ws-dashboard-audit-view`: dashboard audit view on the
@@ -74,12 +76,11 @@ otherwise.
   stream delivers, mapped onto one envelope (id, session, harness, time, kind,
   call linkage). No per-harness schema, no API proxy.
 - **Redact before persist ((596)).** Nothing reaches the store unredacted.
-  Redaction is best-effort regex (`wsredact`). Nothing more is done
-  ((1734)=a): the residual risk is documented and there is no purge action
-  ((1734)=d rejected), so retention and session delete are the only removal
-  paths.
-- **The display ring is not the audit store.** The ring is capped and lossy
-  by design. The audit store sits beside it.
+  Redaction is best-effort regex (`wsredact`). User documentation describes
+  the residual risk ((1734)=a). The byte caps, time retention and session
+  deletion remove data. The owner rejected a purge action ((1734)=d).
+- **The audit ring sits beside the display ring.** The display ring keeps a
+  capped, lossy view. The audit ring holds the captured audit envelopes.
 - **Capture scope and sessions ((1730)=b, (1731)=b).** Tool calls plus
   hidden events, as assembled envelopes (`raw` only for `other`), for every
   daemon-hosted session: leads and `ws/agent.*` children, each in its own
@@ -90,11 +91,16 @@ otherwise.
   are lost to the audit.
 - **agy compaction ((1736)=a).** The inferred compaction is the model-seen
   cut, labelled `meta.estimated: true`.
-- **Storage ((1735)=a, (1733)=d, (1737)=b).** One SQLite file per session,
-  deleted with the session. The handle is held open and closed only after
-  about 30 minutes idle (owner (1347)=c). Retention is a config knob, default
-  7 days after the session was last seen. Each body is capped by a config knob
-  keeping head plus tail with a stored-truncation marker.
+- **Storage ((1960)=a, (1735)=a).** Each session has its own append-only
+  segment ring with an in-memory index. Session deletion removes its ring.
+  Search scans that session's audit ring.
+- **Capacity and retention ((1970)=a, (1733)=d, (1737)=b).** The 256 MiB
+  per-session byte cap drops the oldest whole segment. The per-store total
+  byte cap evicts whole audit rings in least-recently-used session order.
+  Time retention expires rings 7 days after the session was last seen. All
+  three are config knobs. The store child owns the open total cap default
+  (2010) and the implementation choice of segment size. A separate per-body
+  knob keeps head plus tail with a stored-truncation marker.
 - **All audit data reaches the UI through the query API ((599)).** The view
   parses no transcript file and adds no route of its own.
 - **History-to-audit join is by call ID ((601)), never by time window.** Rows
@@ -108,8 +114,8 @@ otherwise.
     rule (versioned protocol, new daemon speaks the old holder protocol) and
     must not refuse an old peer, since that would be T3. An old holder only
     loses the skipped-only content.
-  - New config keys ((1733)=d retention, (1737)=b per-body cap, and the
-    existing per-session byte cap) are T0 and not a manifest field change.
+  - New config keys ((1970)=a per-session and per-store byte caps, (1733)=d
+    time retention, and (1737)=b per-body cap) are additive and T0.
     Where declared in a config manifest, `ws` and `wsflow` stay key-identical
     with only `default` differing, including the native-pi first-party and
     dashboard manifest copies.
@@ -134,29 +140,29 @@ coordinates are evidence, not edit targets):
 - The display ring is intentionally lossy and unusable as an audit store.
   Redaction is regex best-effort (`wsredact/redact.go:1-9`).
 - Stale in the old backend ticket: the adapter order Claude -> Pi -> Codex
-  (all four adapters exist now); per-session JSONL plus a separate index
-  (overlaps the display-ring JSONL and the SQLite epic); an oversized Phase 1.
+  (all four adapters exist now) and an oversized Phase 1. The current ring
+  layout and in-memory index follow (1960)=a.
 - Stale in the old UI ticket: a monolithic `dashboard.js` and a standalone
   `audit.js` (the dashboard now assembles ordered fragment files); mockup
   surroundings that predate the topbar/rail redesign.
 
 ## Decision ID Index
 
-All owner questions of this epic are settled (owner 2026-11-19). Each is
-recorded under `## Decisions` in the child named below, with its rejected
-alternatives. Board IDs (1730)-(1737); next free (1738):
+The owner decisions from 2026-11-19 and 2026-11-21 are recorded under
+`## Decisions` in the children named below, with their rejected alternatives.
 
 - (1730)=b capture scope; (1731)=b target sessions:
   `261119-feat-ws-audit-policy-event-envelope`
 - (1732)=a capture point; (1736)=a agy compaction estimate:
   `261119-feat-ws-audit-capture-harness-adapters`
 - (1733)=d retention period; (1734)=a secret handling (purge (1734)=d
-  rejected); (1735)=a DB layout; (1737)=b tool-result body amount:
-  `261119-feat-ws-audit-sqlite-store`
+  rejected); (1735)=a one store per session; (1737)=b tool-result body amount;
+  (1960)=a Type 1 storage; (1970)=a capacity rules:
+  `261119-feat-ws-audit-ring-store`
 
-The query API and dashboard children carry the knock-ons (read-only API,
-`stored_trunc` and empty-state handling, per-session reads) without owning a
-decision of their own.
+The store child tracks the total byte cap default in (2010). The query API
+child carries the approved read-only, per-session contract and tracks the
+open response details in (2011) and (2012).
 
 ## Completion Criteria
 
