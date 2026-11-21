@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn, execFileSync } = require('node:child_process');
 const { processes, launchedRoot, descendants, signalIfCurrent } = require('./host.cjs');
+const { HEIGHT } = require('../titlebar');
 const { draftFrame, attachImageDraft, assertImageDraft, openLegacyGuard } = require('./draft-close.cjs');
 if (process.platform !== 'win32') throw new Error('Windows acceptance only');
 process.env.DEBUG = [process.env.DEBUG, 'pw:browser*'].filter(Boolean).join(',');
@@ -93,7 +94,7 @@ async function capture(name) {
         views: w.contentView.children.map(v => ({ bounds: v.getBounds(), prefs: v.webContents.getLastWebPreferences(), url: v.webContents.getURL() })) };
     });
     fs.writeFileSync(path.join(evidence, 'layout.json'), JSON.stringify(layout, null, 2));
-    assert.equal(layout.visible, false); assert.equal(layout.views[0].bounds.y, 36);
+    assert.equal(layout.visible, false); assert.equal(layout.views[0].bounds.y, HEIGHT);
     assert.equal(path.basename(layout.views[0].prefs.preload), 'dashboard-preload.js');
     assert.equal(layout.views[0].prefs.contextIsolation, true); assert.equal(layout.views[0].prefs.sandbox, true);
     assert.equal(layout.views[0].prefs.nodeIntegration, false);

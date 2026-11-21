@@ -143,18 +143,19 @@ async function run() {
   await titleIncludes('Werkschaft');
   assert.equal(await main(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getTitle()), 'Werkschaft');
   checks.push('built app: missing endpoint, mismatched PID, retry, real dashboard attach and title');
-  const { size, workArea, ...security } = await main(({ BrowserWindow, screen }) => {
+  const { size, workArea, preload, ...security } = await main(({ BrowserWindow, screen }) => {
     const w = BrowserWindow.getAllWindows()[0], p = w.webContents.getLastWebPreferences();
     return { isolation: p.contextIsolation, sandbox: p.sandbox, node: p.nodeIntegration, preload: p.preload || '', webview: p.webviewTag, min: w.getMinimumSize(), size: w.getSize(), workArea: screen.getDisplayMatching(w.getBounds()).workArea };
   });
   dimensions = { size, workArea };
   console.log(JSON.stringify({ dimensions }));
-  assert.equal(path.basename(security.preload), 'dashboard-preload.js');
-  assert.deepEqual({ ...security, preload: undefined }, { isolation: true, sandbox: true, node: false, preload: undefined, webview: false, min: [760, 520] });
+  assert.equal(path.basename(preload), 'dashboard-preload.js');
+  assert.deepEqual(security, { isolation: true, sandbox: true, node: false, webview: false, min: [760, 520] });
   assert.equal(size[0], 1280);
   assert.equal(size[1], Math.min(860, workArea.height));
   assert.deepEqual(await page.evaluate(() => [typeof window.require, typeof window.process]), ['undefined', 'undefined']);
-  assert.match(await page.evaluate(() => navigator.userAgent), / Werkschaft\/0\.1\.0$/);
+  const appVersion = await main(({ app }) => app.getVersion());
+  assert((await page.evaluate(() => navigator.userAgent)).endsWith(` Werkschaft/${appVersion}`));
   assert(!JSON.stringify(await page.evaluate(() => ({ url: location.href, local: { ...localStorage }, session: { ...sessionStorage }, html: document.documentElement.outerHTML }))).includes('SHELL-TOKEN'));
   checks.push('isolated dashboard preload, UA, dimensions and credential exclusion');
   await main(({ shell, dialog, BrowserWindow }) => {
@@ -271,7 +272,7 @@ async function run() {
   const dashboardURL = origin + '/s/electronfixture?frame=1';
   await waitFor(() => Promise.resolve(page.frames().some(frame => frame.url() === dashboardURL)), 'real session frame');
   const dashboard = page.frame({ url: dashboardURL });
-  await dashboard.locator('#ctext').waitFor();
+  await dashboard.locator('#grid:not([inert]) #ctext').waitFor({ state: 'attached' });
   const requests = [];
   // Assert the real dashboard link-menu's HTTP request, not an OS app launch.
   await page.route('**/s/electronfixture/fs/act', async route => { requests.push({ url: route.request().url(), body: route.request().postDataJSON() }); await route.fulfill({ status: 204 }); });
