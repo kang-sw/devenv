@@ -201,14 +201,15 @@ test('unknown resets show only the current dot without baseline or connected lin
   assert.match(pop.el.querySelector('.usage-window-card').title, /reset unknown, isolated observations only/);
 });
 
-test('gradient ids remain unique across cards, redraws and repeated mounts', async () => {
+test('clip-path ids remain unique across cards, redraws and repeated mounts', async () => {
   const { env, pop } = await chartFixture({ weekly: true });
-  const first = nodes(pop.el, 'linearGradient').map(g => g.attributes.id);
+  const first = nodes(pop.el, 'clipPath').map(g => g.attributes.id);
   env.ticks[0].fn(); await flush();
-  const second = nodes(pop.el, 'linearGradient').map(g => g.attributes.id);
+  const second = nodes(pop.el, 'clipPath').map(g => g.attributes.id);
   const mounted = env.window.WsUsage.mount(env.doc, env.top); await flush();
   const another = mounted.makePopover(() => {}, () => {}); another.open(); await flush();
-  const third = nodes(another.el, 'linearGradient').map(g => g.attributes.id);
+  const third = nodes(another.el, 'clipPath').map(g => g.attributes.id);
+  for (const ids of [first, second, third]) assert.ok(ids.length > 0);
   const all = [...first, ...second, ...third]; assert.equal(new Set(all).size, all.length);
 });
 

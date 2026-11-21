@@ -163,10 +163,11 @@ Approved mockups:
     registration, live or deleted, removes the registration together with the
     people who came in only through it: `item.unassign {rule}` for an org
     assign rule, `item.uncc_org` for an org CC (Decision 5). People added
-    personally, or also covered by another registration, stay. "대상 바꾸기…"
-    opens the picker; the chosen new target's registration and the old
-    registration's removal go in one atomic batch. Either way the item leaves
-    the deleted org's "업무 N건".
+    personally, or also covered by another registration, stay. On a deleted
+    org's registration only, "대상 바꾸기…" opens the picker; the chosen new
+    target's registration and the old registration's removal go in one
+    atomic batch. A live org's registration offers "−" alone. Either way a
+    deleted org's registration leaves that org's "업무 N건".
 12. **Save order** inside the one atomic dispatch batch: admin grants → org
     deletions and head releases → org creations and head take-ups → lead
     changes → admin removals, self last. Release before take-up keeps the
