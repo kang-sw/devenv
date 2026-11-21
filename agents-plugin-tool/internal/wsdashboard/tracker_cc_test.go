@@ -76,6 +76,7 @@ func TestTrackerRelatedScope(t *testing.T) {
 var VS, FILT = false, HIDE = {}, closed = [], ps = {};
 function listOf(x) { return Array.isArray(x) ? x : []; }
 function keepItem(id) { return !HIDE[id]; }
+function showHidden() { return false; }
 function closeTs(it) { return it.ts; }
 function addClosed(ts, n, html) { closed.push([ts, n, html]); }
 function irow(o) { return 'row(' + o.rk + (o.closed ? ',closed' : '') + ')'; }
