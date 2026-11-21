@@ -1057,9 +1057,11 @@ phase.
 
 Re-homed from the Tauri ticket's Phase 3 ((859)=a). Add a Windows build of
 the Electron shell and zip delivery with the daemon exe. Verify attach, safe
-missing-daemon start, second-launch focus, external links, writes, close
-survival and the X-close confirmation on Windows, and report platform
-differences explicitly. Signing, installers, an updater, the rename and a
+missing-daemon start, second-launch focus, external links, writes, and close
+survival on Windows. For X-close, a recovery-capable renderer follows
+261121-feat-ws-dashboard-inpage-dialogs decision (2020): no native prompt and
+the draft is recovered; retain the Stay/Leave check for legacy renderers.
+Report platform differences explicitly. Signing, installers, an updater, the rename and a
 built-in agent remain separate later work; carried Decision 4's signing
 boundary holds.
 

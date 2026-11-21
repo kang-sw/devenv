@@ -73,6 +73,17 @@ inventory was checked at `1b8605ab4`.
 - (2041) Persist pasted image blobs in browser IndexedDB keyed by the session
   draft, clearing them on send or discard. Keep the image leave guard until
   restore of held images is verified. Rejected: upload each paste to the daemon.
+- (2046) Owner answered a on 2026-11-21: a send whose POST outcome is unknown
+  at reopen stays visible in the composer marked delivery-unknown, with no
+  automatic replay; the user resends or discards. This applies to normal sends
+  and slash-command POSTs, and preserves later queued or unsent input. Client-only,
+  T0. Rejected: a per-send idempotency key with daemon deduplication and automatic
+  replay; mixed versions with an old daemon still duplicate and it adds an inbox
+  API surface. The current draft writer retains the pre-send snapshot while an
+  outbox entry is pending (`dashboard-lifecycle.js:128-142`); normal and command
+  sends post separately (`dashboard-composer-delivery.js:259-276,306-327`,
+  `dashboard-composer-pickers.js:178-215`), and the inbox returns an ID after
+  sending (`inbox_routes.go:84-111,489-500,567-584`).
 
 ## Constraints
 
@@ -117,25 +128,6 @@ inventory was checked at `1b8605ab4`.
 | risk.fit | moderate | Shared dialogs must work in framed and top-level pages and preserve platform shell behavior. |
 | risk.test | high | Mixed shell/daemon versions, async navigation races, and packaged platform entry points require broad coverage. |
 | risk.security_or_contract | high | Login credentials, pinned-origin messaging, mixed-version persistence, and action contracts must remain safe. |
-
-## Open Decision Queue
-
-Last ID: (2046)
-
-(2046) [open] [policy] After reopen, how is a send whose POST outcome is unknown recovered?
-
-- The draft writer keeps the pre-send snapshot while an outbox entry is
-  pending; the daemon returns an ID only after creating the inbox entry, so an
-  accepted send with a lost reply and a lost POST look identical. Applies to
-  normal sends and slash-command POSTs; later queued or unsent input is kept
-  either way. (Design review 2026-11-21, issue resolution: missing.)
-- a. Keep the attempt visible in the composer marked as delivery-unknown, with
-  no automatic replay; the user resends or discards. Client-only, T0.
-- b. Add a per-send idempotency key the daemon deduplicates, and replay
-  automatically on reopen. An old daemon ignores the key, so mixed versions can
-  still duplicate.
-> Recommend a: prevents both duplicate and lost sends without an inbox API
-> change; b still duplicates against an old daemon.
 
 ## Phases
 
@@ -192,17 +184,25 @@ decision. Preserve the safe cache path and keep the source frame, draft, and
 history position when the user stays. Only the current accepted attempt may
 switch frames.
 
-Implement draft recovery under (2020) and (2041), retaining the browser
-fallback under (2024). Once recovery is verified, remove the native Stay/Leave dialog in
-`agents-plugin-tool/desktop-electron/main.js:287-304` and update the surrounding
-Windows close mediation at `main.js:220-228` as the approved policy requires.
-Preserve draft safety for the supported mix of old/new Electron and daemon
-versions, including an older renderer that still raises `beforeunload`.
+Implement draft recovery under (2020), (2041), and (2046), retaining the browser
+fallback under (2024). Recover unknown-outcome normal and slash-command POSTs
+as delivery-unknown without automatic replay, preserving later queued or unsent
+input. Prompt-free OS close applies only when the loaded renderer establishes
+draft recovery. For an older renderer unable to establish recovery, including one
+that vetoes unload while holding an unpersisted image, preserve the native
+Stay/Leave path in `agents-plugin-tool/desktop-electron/main.js:287-304` and
+Windows BaseWindow WebContents close mediation at `main.js:220-228`. Preserve
+draft safety across supported old/new Electron and daemon versions; the current
+renderer guard is in `dashboard-lifecycle.js:259-273`.
 
 Verify rail selection and Back/Forward for clean and dirty frames, Stay and
 Leave, rapid destination changes, delayed saves, and each existing at-risk
-draft case. Check Electron X-close and reopen, top-level reload/navigation
-under the approved policy, and before/after screenshots for the swap and each
+draft case. Test both accepted-but-reply-lost and lost-POST outcomes: reopening
+shows delivery-unknown, creates no duplicate inbox entry, and keeps later input;
+cover normal and slash-command POSTs. On macOS and Windows, check X-close and
+reopen with a recovery-capable renderer (no prompt, draft recovered) and with a
+legacy renderer (Stay/Leave still works). Check top-level reload/navigation
+under the approved policy and before/after screenshots for the swap and each
 affected close path. Update the affected existing dashboard and Electron
 close/smoke coverage as part of implementation.
 
