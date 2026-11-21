@@ -231,7 +231,7 @@ code route. **INFERRED** denotes implementation or verification scope.
 
 Last ID: (2009)
 
-(1980) [open] [policy] Is `agent.json` eligible for an authoritative SQLite cutover in this child?
+(1980) [confirmed] [policy] Owner answer 2026-11-21: a. Is `agent.json` eligible for an authoritative SQLite cutover in this child?
 
 - The bundle must remove its sequence-only rewrites. Raw Go MCP uses
   the record for authorization, ownership, playbook/alias selection and pruning. Removing the file

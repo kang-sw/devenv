@@ -160,7 +160,7 @@ Verified findings (codex.large read-only research, 2026-11-19):
 
 ## Open Decision Queue
 
-(2010) [open] [policy] What is the default total byte cap across the audit
+(2010) [confirmed] [policy] Owner answer 2026-11-21: a (4 GiB). What is the default total byte cap across the audit
 store's session rings ((1970)=a)?
 
 - a. 4 GiB, equivalent to 16 sessions at the default 256 MiB per-session cap.
