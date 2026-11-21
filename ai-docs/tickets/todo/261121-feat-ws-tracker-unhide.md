@@ -25,28 +25,32 @@ back (owner, board (1478)=c, 2026-11-21). Verified on develop 872a7833b:
 - Replay checks every event and rejects an unknown type
   (`check.go:1590-1591`, `replay.go:305`).
 
-## Open Decision Queue
+## Decisions
 
-Last ID: (1493)
-
-(1489) [open] [announced] Unhide is allowed to whoever may hide: an item's
-creator, or another member when the creator is gone; a comment's author -
-mirrors the existing hide checks (`check.go:903-920, 1460-1473`).
-(1490) [open] [technical] New events `item.unhide` and `comment.unhide` over
-a toggle field on the hide events - the event log stays append-only and
-symmetric, and `item.unhide` can write `false` to the same
-`it:<id>:hidden` register so concurrent hide/unhide resolves by the
-register's existing rule.
-(1491) [open] [technical] Unhiding a child whose parent is still hidden is
-rejected with "unhide the parent first" over allowing it - an unhidden
-child under a hidden parent would still be unreachable.
-(1492) [open] [announced] Compatibility T1, to be confirmed against source
-in the phase: an older binary rejects the unknown `*.unhide` event on replay
-(`check.go:1591`), so on that binary the item simply stays hidden; no data
-changes and the new binary shows it again - same class as earlier
-tracker event additions. Verify that a rejected event does not disturb the
-fold of later events before settling.
-(1493) [open] [policy] Where the user finds hidden items to unhide.
+- Unhide is allowed to whoever may hide: an item's creator, or another member
+  when the creator is gone; a comment's author - mirrors the existing hide
+  checks (`check.go:903-920, 1460-1473`) ((1489), owner ok 2026-11-21).
+- New events `item.unhide` and `comment.unhide`; `item.unhide` writes `false`
+  to the same `it:<id>:hidden` register, so a concurrent hide/unhide resolves
+  by the register's existing rule ((1490), owner ok).
+  Rejected: a toggle field on the hide events (breaks the symmetric,
+  append-only event vocabulary).
+- Unhiding a child whose parent is still hidden is rejected with "unhide the
+  parent first" ((1491), owner ok).
+  Rejected: allowing it (the child would stay unreachable under the hidden
+  parent).
+- Compatibility T1, to be confirmed against source in Phase 1: an older binary
+  rejects the unknown `*.unhide` event on replay (`check.go:1591`), so on that
+  binary the item simply stays hidden; no data changes and the new binary
+  shows it again. Before settling, verify that a rejected event does not
+  disturb the fold of later events; if it does, stop and report ((1492),
+  owner ok).
+- Entry point: a "show hidden" toggle on the tracker list. When on, hidden
+  items and comments render dimmed in place, and those allowed to unhide see
+  an "unhide" action on them ((1493)=a, owner 2026-11-21 18:41).
+  Rejected: a separate hidden-items dialog in the store menu (loses the
+  in-place context); an unhide button only on the "not visible" toast (no way
+  to discover hidden items).
 
 ## Constraints
 
@@ -64,8 +68,8 @@ fold of later events before settling.
 
 - `wstracker`: `item.unhide`, `comment.unhide` payload types, checks, folds,
   view fields; tests next to the existing hide tests.
-- Dashboard: the unhide entry point settled by (1493), an "unhide" action on
-  a hidden item or comment for those allowed, i18n strings.
+- Dashboard: the "show hidden" list toggle, dimmed hidden items and
+  comments, an "unhide" action for those allowed, i18n strings.
 
 Verification:
 - Narrow Go tests for `./internal/wstracker` and the tracker-related
