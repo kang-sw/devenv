@@ -1,9 +1,9 @@
 ---
 title: "감사 조회·검색 API"
 parent: 261119-epic-ws-conversation-audit
-blocked-by: 261119-feat-ws-audit-sqlite-store#phase1
+blocked-by: 261119-feat-ws-audit-ring-store#phase1
 related:
-  261119-feat-ws-audit-sqlite-store: "prerequisite (blocked-by #phase1): the store this API reads"
+  261119-feat-ws-audit-ring-store: "prerequisite (blocked-by #phase1): the store this API reads"
   261119-feat-ws-audit-capture-harness-adapters: "source of the captured events, call IDs and usage behind duration_ms and ctx_after"
   261119-feat-ws-dashboard-audit-view: "consumer: every byte the view shows comes from this API"
   261114-feat-ws-conversation-audit-event-store: "superseded source of (599), (681) and the read-API verification"
@@ -17,8 +17,7 @@ Fourth child of `261119-epic-ws-conversation-audit` ((1331)=a, 2026-11-19).
 It serves the audit store to the dashboard view. The contract below was
 approved under the superseded `261114-feat-ws-conversation-audit-event-store`
 (owner `594..609,611=ok`, recorded 2026-11-14; (600) was the backend group
-acknowledgment) and is carried unchanged except where the storage moved to
-SQLite.
+acknowledgment) and is carried forward over the per-session audit ring.
 
 ## Decisions
 
@@ -43,9 +42,8 @@ SQLite.
      head plus tail of an oversized body. The full-envelope route returns
      `stored_trunc` unchanged. `range` offsets address the stored bytes, so
      they page through head, marker and tail, and never reach the omitted
-     middle. A summary's `in_bytes`/`out_bytes` states whether it reports
-     the stored or the original length, fixed in Phase 1 (the original length
-     is available from `stored_trunc`).
+     middle. (2011) records the lead's choice for the summary fields
+     `in_bytes` and `out_bytes`. `stored_trunc` carries the original length.
    - `GET /s/<id>/audit/search?q=<text>&regex=0|1&case=0|1&kinds=&n=` searches
      the stored `in` and `out` of the whole conversation, newest first. It
      returns `{hits: [{event_id, kind, field, line_no, line, call_id,
@@ -75,23 +73,20 @@ SQLite.
      remain the sole history-call join.
    - Rejected: loading the whole retained log and filtering client-side, or a
      separate ring-to-event-ID resolver.
-3. **Search runs over the SQLite store.** (599)'s note that search is a
-   streaming scan of JSONL segment files with no index is superseded by
-   (1331)=a. The search contract in Decision 1 is unchanged. The layout is
-   one SQLite file per session ((1735)=a), so a search runs inside one
-   session's file and searches stored text only: the omitted middle of a
-   `stored_trunc` body is not searchable. How it runs (scan or a full-text
-   index, with regex still honoured) is a technical choice made at ready
-   promotion.
+3. **Search scans the audit ring ((1960)=a).** Each search scans one
+   session's in-memory index and the stored text from its retained segments
+   ((1735)=a). The search contract in Decision 1 is unchanged, including
+   regex support and excluding the omitted middle of a `stored_trunc` body.
 4. **Compatibility tier T0.** New routes only. Existing routes keep their
    semantics.
 5. **The API is read-only, and covers every audited session ((1734)=a,
    (1731)=b, owner 2026-11-19).** No route deletes or purges an event or a
    session's audit data: the owner rejected a purge action (store child
-   Decision 7), so retention and session delete are the only removal paths.
+   Decision 7). Data can leave the store through capacity eviction
+   ((1970)=a), time retention or session deletion.
    The routes are per session, so a `ws/agent.*` child's audit is read on the
    child's own session. A session with no audit data (a non-hosted session,
-   data removed by retention under (1733)=d, or nothing captured yet)
+   data removed by capacity eviction or time retention, or nothing captured yet)
    returns an empty page, not an error.
 
 ## Constraints
@@ -102,12 +97,19 @@ SQLite.
   `ai-docs/manuals/ws-mcp.md` (only if an MCP surface is ever added).
 - UTC bounds are selection filters only. Call identity and linkage remain
   event/call IDs ((599)/(601)); timestamps never guess joins.
-- Reads go through the session file's held-open handle (store child, owner
-  (1347)=c). With the single-connection SQLite precedent, a long search must
-  not starve the writer: Phase 1 verifies capture keeps up during a search.
+- Reads use the session's audit ring. Phase 1 verifies that capture keeps up
+  during a long search.
 - Reads never block capture or the store writer; the dashboard's interactive
   paths never wait on file I/O beyond the query itself (parent epic
   file-touch rule).
+
+## Open Decision Queue
+
+Last ID: (2012)
+
+(2011) [open] [technical] The lead chose stored lengths over original lengths in `in_bytes` and `out_bytes` - the fields describe what `range` can read, and `stored_trunc` flags truncation.
+
+(2012) [open] [technical] For an evicted event or search cursor when the session still has audit data ((1970)=a), the lead chose a stale-cursor response and caller restart over resuming at the nearest retained boundary - an explicit failure avoids silent gaps in an audit read.
 
 ## Phases
 
@@ -120,10 +122,11 @@ Decision 2.
 Verification: route tests on a fixture store, including paging boundaries,
 a truncated large body with its range follow-up, a `stored_trunc` body (its
 marker returned, range offsets within the stored bytes, search missing the
-omitted middle), a session with no audit file returning an empty page, no
+omitted middle), a session with no audit data returning an empty page, no
 mutating route registered, and a search hit's line
 number and `call_id`. Cover inclusive-lower/exclusive-upper UTC bounds;
 omitted, equal, invalid and reversed bounds; kinds and event-ID cursors
 combined; and more than 500 equal-nanosecond events across pages without
 gaps or duplicates. Confirm requests without UTC bounds keep their contract,
-call lookup stays ID-based, and auth matches `/history`.
+call lookup stays ID-based, and auth matches `/history`. Verify that capture
+keeps up during a long search.

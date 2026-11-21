@@ -7,13 +7,18 @@ sage-review-design: required
 
 ## Scope
 
+Owner decision (1960)=a (2026-11-21) limits this epic to storage types 2-4
+as defined in `ai-docs/manuals/performance.md` `## Storage Types`. Type 1
+transcript and audit event logs use segment rings. The audit storage work
+belongs to `261119-epic-ws-conversation-audit`.
+
 Migrate the daemon-only, non-git-tracked runtime stores identified in the
 2026-11-19 storage audit to SQLite (following the existing `modernc.org/sqlite`
 WAL precedent in `agents-plugin-tool/internal/wsstore/store.go`, `6539b0c01`),
 covering five candidate store groups where the owner expects dramatic
 file-touch and complexity gains:
 
-1. **`wslive` (`snapshot.json`, `ring/`, `model-evidence/`):** `<cache>/dashboard/sessions/<reply-id>/`
+1. **`wslive` (`snapshot.json`, `model-evidence/`):** `<cache>/dashboard/sessions/<reply-id>/`
    ephemeral recovery cache. Daemon-only writer in 0.50+ with no external
    readers. Note: the transcript ring (`ring/`) is already RAM plus append-only
    segments (`07843a2f2`, `261118-feat-ws-display-transcript-memory-first` Phase
@@ -100,7 +105,7 @@ file-touch and complexity gains:
 
 Child execution order is **not yet decided** (see `## Open questions`):
 
-- Planned: `wslive` (`snapshot.json`, `model-evidence/`, and optional `ring/` unification — transcript ring is already RAM plus append-only segments in `07843a2f2`, so remaining gain is `snapshot.json` and `model-evidence/` writes) -> SQLite
+- Planned: `wslive` (`snapshot.json`, `model-evidence/`) -> SQLite. Session transcripts use their Type 1 segment ring ((1960)=a).
 - Planned: `wsinbox` (`inbox/`, `drained/`, `answer-pending/`; `attachments/` kept as blob files) -> SQLite
 - Planned: `wswhiteboard` (2PC WAL folder -> one SQLite DB per board/session, lazily opened and idle-closed)
 - Planned: `wswhiteboard` embed HTML snapshot retirement (stop rendering `ai-docs/whiteboards/<id>-<hash>.html` per update; updates shipped whiteboard playbook embed rule and `whiteboard.update` `embed:` result field; mechanism open)

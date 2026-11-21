@@ -3,7 +3,7 @@ title: "감사 정책과 하네스 공통 이벤트 봉투(envelope)"
 parent: 261119-epic-ws-conversation-audit
 related:
   261119-feat-ws-audit-capture-harness-adapters: "consumer: maps each harness onto this envelope"
-  261119-feat-ws-audit-sqlite-store: "consumer: persists this envelope"
+  261119-feat-ws-audit-ring-store: "consumer: persists this envelope"
   261114-feat-ws-conversation-audit-event-store: "superseded source of (545), (546), (595), (598) and the envelope-level parts of (599)"
 ---
 
@@ -19,13 +19,21 @@ It carries the policy and envelope decisions of the superseded
 
 Verified findings (codex.large read-only research, 2026-11-19):
 
-- All four harnesses (Claude, Codex, agy, Pi) already flow through the same
-  `wsagent` event path (`agents-plugin-tool/internal/wsagent/stream.go:35-38,169-199`),
-  so one envelope fed from that path covers every hosted harness.
-- Tool call IDs and full args/results exist on that path but are reduced to
-  previews for `wslive` display (`stream.go:436-463,535-577`;
-  `wslive/toolsummary.go:9-15`). The envelope must be built before that
-  reduction (child 2 owns where).
+- All four registered harnesses (Claude, Codex, agy, Pi) use `wsagent` line
+  mappers, but holder filtering drops some output before the mapper; full
+  capture needs the pre-filter tap planned in child 2
+  (agents-plugin-tool/internal/wsagent/registration.go#L92-L101,
+  agents-plugin-tool/internal/wsagent/stream.go#L169-L198,
+  agents-plugin-tool/internal/wsagent/claude_protocol.go#L119-L124,
+  agents-plugin-tool/internal/wsagent/agy.go#L122-L125).
+- Tool call IDs and argument and result content appear in harness output;
+  the batch tracker retains IDs but its wire calls omit them, and `wslive`
+  summaries retain argument previews without result content
+  (agents-plugin-tool/internal/wsagent/claude_protocol.go#L240-L251,
+  agents-plugin-tool/internal/wsagent/stream.go#L436-L443,
+  agents-plugin-tool/internal/wsagent/stream.go#L535-L555,
+  agents-plugin-tool/internal/wslive/toolsummary.go#L9-L15). The envelope
+  must be built before that reduction (child 2 owns where).
 
 ## Decisions
 
@@ -47,7 +55,8 @@ Verified findings (codex.large read-only research, 2026-11-19):
      from a per-session directory. The record names its session explicitly
      (the session's reply ID), which keeps it self-describing for export and
      for a ws/agent.* child's own file, even though (1735)=a gives each
-     session its own database file.
+     session its own store (a segment ring under the storage-type rule
+     (1960)=a).
    - `kind` is one of `user`, `assistant_text`, `thinking`, `tool_call`,
      `tool_result`, `hook`, `system_reminder`, `system`, `compaction`
      (summary text in `out`), `subagent`, `other`.
@@ -56,9 +65,10 @@ Verified findings (codex.large read-only research, 2026-11-19):
      ((1730)=b); every mapped kind is an assembled event without `raw`.
    - `call_id` is the harness tool-call ID. It links `tool_call`,
      `tool_result`, attached hooks/reminders and subagent events (`parent_id`).
-     It is the same ID the ring carries under (601) (child 2).
-   - `at` uses the same clock and precision as ring entry stamps (UTC,
-     nanoseconds), so the UI can place hidden events between ring rows
+     It is the same ID the ring carries under (601) (child 2)
+     (pending 261119-feat-ws-audit-capture-harness-adapters).
+   - `at` uses UTC and nanosecond precision like ring entry stamps
+     (agents-plugin-tool/internal/wslive/ring.go#L133-L158), so the UI can place hidden events between ring rows
      ((599) additive field).
    - `seen: {in?: <bytes>, out?: <bytes>}` on the full envelope when the
      harness delivered less to the model than was stored (for example,
@@ -113,7 +123,7 @@ Verified findings (codex.large read-only research, 2026-11-19):
      It makes the audit absent exactly when it is needed afterwards, and adds
      a settings surface.
    - Knock-ons: the policy gate keys on "daemon-hosted" and nothing else.
-     Capture, the per-session store file ((1735)=a) and the per-session read
+     Capture, the per-session ring store ((1735)=a, (1960)=a) and the per-session read
      routes all follow the session ID, so a child's audit is read on the
      child's own session.
 
@@ -126,6 +136,32 @@ Verified findings (codex.large read-only research, 2026-11-19):
   `meta` and `raw`.
 - Point at code by search, not coordinates, in the implementation; the
   coordinates above are research evidence.
+
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for agents-plugin-tool/internal/)
+- Convention: ai-docs/manuals/performance.md (declared for agents-plugin-tool/)
+
+## Prior Decisions
+
+- 261114-feat-ws-conversation-audit-event-store (2026-11-19, Resolution): "(545), (546), (595), (598) and the envelope-level parts of (599) go to `261119-feat-ws-audit-policy-event-envelope`." — bearing: supports
+- 261114-refactor-ws-common-session-interface (2026-11-14, Decisions): "Expose the session/event/adapter boundary audit needs without independently redefining audit's approved envelope, kinds, capture/redaction or call-ID contract (594–601)." — bearing: supports
+- 54b93bfb (2026-11-12, commit): "redaction is implemented now, in wslive, at the single choke point State.argsPreview" — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/wsagent/stream.go and agents-plugin-tool/internal/wslive/toolsummary.go are named; implementation paths are not fixed |
+| scope.surface | cross-module | Phase 1 provides a sink interface for capture and store children |
+| scope.new_public_symbol | yes | sink interface shared with capture and store children; name not specified |
+| scope.new_type_contract | yes | versioned envelope, kinds, policy gate and sink interface |
+| scope.test_surface | new-files | Phase 1 requests unit tests for the new envelope and gate; test paths are unspecified |
+| complexity.reuse_points | confirmed | wsagent line mapper and batch tracker and wslive tool summaries were read |
+| complexity.side_effect_risk | moderate | policy covers all hosted sessions and feeds capture and storage |
+| risk.correctness | high | cut and policy must classify every event and session correctly |
+| risk.fit | high | shared sink must support independently implemented capture and store children |
+| risk.test | high | every kind and hosted and non-hosted session need coverage across adapters |
+| risk.security_or_contract | high | versioned shared envelope carries potentially sensitive tool and hidden-event content |
 
 ## Phases
 

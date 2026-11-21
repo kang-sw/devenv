@@ -139,8 +139,8 @@ Stage 4 (extensions):
 
 - `261119-epic-ws-conversation-audit` - conversation audit sub-epic ((1331)=a,
   2026-11-19): policy and envelope, pre-filter capture and per-harness
-  adapters, SQLite store (after `261119-epic-ws-daemon-sqlite-storage`),
-  query API, dashboard view. It supersedes the dropped
+  adapters, per-session segment ring (`261119-feat-ws-audit-ring-store`,
+  (1960)=a), query API, dashboard view. It supersedes the dropped
   `261114-feat-ws-conversation-audit-event-store` and
   `261114-feat-ws-dashboard-conversation-audit-view` and carries approvals
   545, 546, 550, 594-611 and 681. The foundation gate (interface Phase 2, 682)
@@ -179,7 +179,7 @@ Foundation prerequisite for every extension below is already met
 | Additional harnesses | Codex, then Antigravity, then Pi (stage 3) | `261117-feat-ws-harness-capability-catalog`; Codex's first implementation also needs its settled range-based contract and separate execution approval |
 | Voice | Not yet authored | No additional prerequisite settled |
 | Live reasoning | Not yet authored | No additional prerequisite settled |
-| Audit (capture, store, API) | `261119-epic-ws-conversation-audit` children 1-4 | Store: `261119-epic-ws-daemon-sqlite-storage` precedent ((1331)=a); order inside the sub-epic |
+| Audit (capture, store, API) | `261119-epic-ws-conversation-audit` children 1-4 | The query API depends on `261119-feat-ws-audit-ring-store#phase1`. The sub-epic records the child order. |
 | Audit UI | `261119-feat-ws-dashboard-audit-view` | `261119-feat-ws-audit-query-api` and `261119-feat-ws-audit-capture-harness-adapters#phase1` |
 | Exec | `261117-feat-ws-exec-tools` | No open single-holder prerequisite; starts with per-job holders using the done `261120-refactor-ws-agent-workers-under-holders` pattern |
 

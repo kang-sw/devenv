@@ -3,7 +3,7 @@ title: "감사 수집 지점(필터 이전)과 하네스별 어댑터 (Claude �
 parent: 261119-epic-ws-conversation-audit
 blocked-by: 261119-feat-ws-audit-policy-event-envelope
 related:
-  261119-feat-ws-audit-sqlite-store: "sink: persists what this child captures; may proceed in parallel"
+  261119-feat-ws-audit-ring-store: "sink: persists what this child captures; may proceed in parallel"
   261119-feat-ws-dashboard-audit-view: "consumer of the ring call ID (601), Phase 1"
   261117-feat-ws-harness-capability-catalog: "per-harness@version fixture policy; compaction capability sources"
   261114-feat-ws-conversation-audit-event-store: "superseded source of (598) boundary sources, (601), and the non-blocking writer constraint"
