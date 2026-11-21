@@ -74,6 +74,9 @@ inventory was checked at `1b8605ab4`.
 
 ## Constraints
 
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
+- Convention: ai-docs/manuals/performance.md (declared for `agents-plugin-tool/`)
 - Electron remains the shipping shell. The Windows custom titlebar removal and
   the Tauri runtime, daemon port, updater, packaging, and platform qualification
   belong to later Tauri work. Obtain owner approval before removing any
@@ -90,6 +93,28 @@ inventory was checked at `1b8605ab4`.
   [release-compatibility.md](../../manuals/release-compatibility.md). For any new
   or changed persistence, classify the data under the performance manual's
   Storage Types and account for file operations per affected action.
+
+## Prior Decisions
+
+- 261115-feat-werkschaft-electron-shell (2026-11-15, Decisions): "X-close shows the dashboard's close confirmation exactly as in Chrome" — bearing: constrains; (2020) approves the replacement close policy.
+- 261115-feat-werkschaft-electron-daemon-override (2026-11-16, Decisions): "Replacement never stops, signals or restarts session holders" — bearing: constrains.
+- 261117-research-werkschaft-tauri-shell-revisit (2026-11-17, Confirmed Decisions): "keep Electron for now" — bearing: supports.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | Dashboard assets and `agents-plugin-tool/desktop-electron/main.js` across three phases. |
+| scope.surface | cross-module | Dashboard frames, Electron main and preload integration, and browser draft storage interact. |
+| scope.new_public_symbol | unknown | The helper and optional shell integration do not yet name their exported symbols. |
+| scope.new_type_contract | unknown | The draft persistence and shell-to-page signal designs are not specified. |
+| scope.test_surface | existing | `agents-plugin-tool/internal/wsdashboard/shell_frame_test.go`, `agents-plugin-tool/desktop-electron/test/main.test.js`, and `agents-plugin-tool/desktop-electron/test/smoke.cjs`. |
+| complexity.reuse_points | confirmed | `agents-plugin-tool/internal/wsdashboard/assets/dashboard-rail.css:561-598` styles `rdeldlg`; `dashboard-lifecycle.js:259-284` has draft and cache guards. |
+| complexity.side_effect_risk | high | Close, navigation, persistent drafts, sends, and daemon replacement feedback have cross-process effects. |
+| risk.correctness | high | Stale decisions, failed writes, or unacknowledged sends can lose drafts or duplicate actions. |
+| risk.fit | moderate | Shared dialogs must work in framed and top-level pages and preserve platform shell behavior. |
+| risk.test | high | Mixed shell/daemon versions, async navigation races, and packaged platform entry points require broad coverage. |
+| risk.security_or_contract | high | Login credentials, pinned-origin messaging, mixed-version persistence, and action contracts must remain safe. |
 
 ## Phases
 
@@ -108,10 +133,10 @@ to the initiating control when it is still present.
 | `terminal.js:465` | Close a running terminal card via `closing(c)` |
 | `terminal.js:811` | Close a running terminal tab via `closeTab(tid)` |
 | `dashboard-git.js:187` | Stop a running header/git terminal |
-| `dashboard-leads.js:872` | Stop a lead with background tasks |
-| `dashboard-leads.js:882` | Restart a lead with background tasks |
-| `dashboard-leads.js:887` | Hand off a lead with background tasks |
-| `dashboard-leads.js:892` | Close a lead, including when it has no background tasks |
+| `dashboard-leads.js:931` | Stop a lead with background tasks |
+| `dashboard-leads.js:941` | Restart a lead with background tasks |
+| `dashboard-leads.js:946` | Hand off a lead with background tasks |
+| `dashboard-leads.js:954` | Close a lead, including when it has no background tasks |
 | `tracker-wiki.js:440` | Leave a dirty wiki editor via `wkLeaveOk()` |
 | `tracker-forms.js:774` | Close the admin org-chart modal with staged changes |
 | `tracker-view-helpers.js:191` | Delete a tracker label via `labelRemove` |
