@@ -239,13 +239,19 @@
 
   // --- in-page item links: open the collapsed blocks around the target ---
   function inPageLinks(root) {
-    q('a[href^="#item-"]', root).forEach(function (a) {
+    q('a[href^="#item-"], a[href^="#check-"], a[href^="#p"]', root).forEach(function (a) {
       if (once(a)) a.addEventListener("click", function (e) {
-        var el = doc.getElementById(a.getAttribute("href").slice(1));
+        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        var id = a.getAttribute("href").slice(1);
+        if (!/^(?:item-|check-|p)[1-9][0-9]*$/.test(id)) return;
+        var history = window.wbHistory;
+        if (!history || !history.navigate) return;
+        var el = history.resolveTarget(id);
         if (!el) return;
         e.preventDefault();
+        if (/^p[1-9]/.test(id) && history.loadTarget && history.loadTarget(doc, id)) return;
         for (var d = el.parentElement; d; d = d.parentElement) if (d.tagName === "DETAILS") d.open = true;
-        el.scrollIntoView({ block: "center" });
+        history.navigate(el);
         el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
       });
     });

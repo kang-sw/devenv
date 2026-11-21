@@ -70,22 +70,34 @@
     navigate(node);
     return node;
   }
-  function navigate(node) {
+  function resolveTarget(node) {
+    if (typeof node === 'string') {
+      var id = node.replace(/^#/, ''), alternate = id.replace(/^(item|check)-/, function (prefix) { return prefix === 'item-' ? 'check-' : 'item-'; });
+      node = document.getElementById(id) || (alternate !== id && document.getElementById(alternate));
+    }
+    return node || null;
+  }
+  function navigate(node, options) {
+    node = resolveTarget(node);
+    if (!node) return null;
     // On the dashboard a topic may stand on a docked gallery page that is
     // not shown: that page shows first. A docked topic scrolls in its
     // pane's body (.gal-pbody) under a head that does not stick.
     if (window.WsCards && window.WsCards.activate) window.WsCards.activate(node);
-    var topic = node.closest('.topic'), head = topic && topic.querySelector('.tophead'), offset = 12;
-    var style = head && window.getComputedStyle(head);
-    var sticky = style && style.position === 'sticky';
-    if (sticky) offset += (parseFloat(style.top) || 0) + head.offsetHeight;
-    var host = topic && (topic.closest('.gal-pane') || topic.closest('#bcol') || topic.closest('.wrap'));
-    var wrap = host && host.querySelector('.oq-wrap.wb-oq-top'), pill = wrap && wrap.querySelector('.oq-pill');
-    if (pill && !pill.hidden) {
-      var pillTop = parseFloat(window.getComputedStyle(wrap).top) || 0;
-      offset = Math.max(offset + (sticky ? 10 + pill.offsetHeight : 0), pillTop + pill.offsetHeight + 12);
+    function clearance() {
+      var topic = node.closest('.topic'), head = topic && topic.querySelector('.tophead'), offset = 0;
+      var style = head && window.getComputedStyle(head);
+      var sticky = style && style.position === 'sticky';
+      if (sticky) offset = (parseFloat(style.top) || 0) + head.offsetHeight;
+      var host = topic && (topic.closest('.gal-pane') || topic.closest('#bcol') || topic.closest('.wrap'));
+      var wrap = host && host.querySelector('.oq-wrap.wb-oq-top'), pill = wrap && wrap.querySelector('.oq-pill');
+      if (pill && !pill.hidden) {
+        var pillTop = parseFloat(window.getComputedStyle(wrap).top) || 0;
+        offset = Math.max(offset + (sticky ? 10 + pill.offsetHeight : 0), pillTop + pill.offsetHeight);
+      }
+      return offset;
     }
-    kit.jump(node, { offset: offset });
+    kit.jump(node, { centerVisible: true, clearance: clearance, behavior: options && options.behavior });
     return node;
   }
   function capture(root) {
