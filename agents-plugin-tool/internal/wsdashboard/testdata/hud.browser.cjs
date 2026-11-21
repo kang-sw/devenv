@@ -9,7 +9,7 @@ const shots = process.env.HUD_SHOTS;
 
 async function openSession(b, scenario, { width = 1280, height = 840, scheme = 'dark' } = {}) {
   if (scenario) await fetch(`${switcher}?s=${scenario}`);
-  const ctx = await b.newContext({ viewport: { width, height }, colorScheme: scheme, locale: 'ko-KR' });
+  const ctx = await b.newContext({ viewport: { width, height }, deviceScaleFactor: 2, colorScheme: scheme, locale: 'ko-KR' });
   await ctx.addCookies([{ name: 'ws_dashboard_lang', value: 'ko', url: base }]);
   const tab = await ctx.newPage();
   const errors = [];
@@ -21,12 +21,97 @@ async function openSession(b, scenario, { width = 1280, height = 840, scheme = '
   return { ctx, tab, frame, errors };
 }
 
+async function chooseTheme(tab, frame, theme) {
+  const openedRail = !await tab.locator('#gear').isVisible();
+  if (openedRail) await tab.locator('#railbtn').click();
+  await tab.locator('#gear').click();
+  await tab.locator(`#gmenu [data-theme-set="${theme}"]`).click();
+  await tab.locator(`html[data-theme="${theme}"]`).waitFor();
+  await frame.locator(`html[data-theme="${theme}"]`).waitFor();
+  await tab.keyboard.press('Escape');
+  if (openedRail) {
+    await tab.keyboard.press('Escape');
+    await tab.locator('html:not(.rail-open)').waitFor();
+  }
+}
+
+async function checkKeyedRebuild(frame) {
+  const result = await frame.evaluate(async () => {
+    const tree = document.getElementById('r-tree');
+    const carrier = tree.querySelector('.ag-hud-data');
+    const compact = document.getElementById('agcompact');
+    const idle = document.getElementById('agidle');
+    const pop = document.getElementById('agpop');
+    const original = carrier.textContent;
+    const source = JSON.parse(original);
+    const node = id => compact.querySelector(`.hud-node[data-id="${id}"]`);
+    const project = data => {
+      carrier.textContent = JSON.stringify(data);
+      window.wsHud.project(tree, compact, idle, pop, () => {});
+    };
+    const h3 = node('h3'), h4 = node('h4'), h5 = node('h5');
+    const ring = h3.querySelector('.hud-ring');
+    const animation = ring.getAnimations()[0];
+    const startTime = animation?.currentTime;
+    const delay = id => parseFloat(getComputedStyle(node(id).querySelector('.hud-ring')).animationDelay) * 1000;
+    const stagger = [delay('h3'), delay('h5')];
+    await new Promise(resolve => setTimeout(resolve, 65));
+    project(source);
+    const same = node('h3') === h3 && node('h4') === h4 && node('h5') === h5 &&
+      node('h3').querySelector('.hud-ring') === ring && ring.getAnimations()[0] === animation;
+    const advanced = animation?.currentTime - startTime;
+    const changed = structuredClone(source);
+    const h2 = changed.roots.find(r => r.id === 'h1').children.find(c => c.id === 'h2');
+    h2.children.reverse();
+    h2.children.find(c => c.id === 'h3').state = 'thinking';
+    h2.children.find(c => c.id === 'h3').label = 'sym-extract-updated';
+    project(changed);
+    const reordered = [...node('h2').closest('.tree-node').querySelector('.tree-kids').children]
+      .map(w => w.querySelector('.hud-node').getAttribute('data-id'));
+    const updated = node('h3') === h3 && node('h3').querySelector('.hud-ring') === ring &&
+      node('h3').getAttribute('data-state') === 'thinking' &&
+      node('h3').getAttribute('aria-label').includes('sym-extract-updated') &&
+      node('h4') === h4 && node('h5') === h5;
+    const thinkingDelay = delay('h3');
+    const oldH4Animation = h4.querySelector('.hud-ring').getAnimations()[0];
+    const oldH4Time = oldH4Animation?.currentTime;
+    const oldClock = document.timeline.currentTime;
+    h2.children = h2.children.filter(c => c.id !== 'h4');
+    project(changed);
+    const removed = !node('h4') && node('h3') === h3;
+    project(source);
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const newH4Time = node('h4').querySelector('.hud-ring').getAnimations()[0]?.currentTime;
+    const elapsed = document.timeline.currentTime - oldClock;
+    const period = 1150;
+    const drift = Number.isFinite(oldH4Time) && Number.isFinite(newH4Time)
+      ? Math.abs((((newH4Time - oldH4Time - elapsed) % period) + period * 1.5) % period - period / 2)
+      : null;
+    const remounted = node('h4') !== h4 && node('h3') === h3 && node('h5') === h5;
+    carrier.textContent = original;
+    return { same, advanced, stagger, reordered, updated, thinkingDelay, removed, remounted, drift,
+      animationName: getComputedStyle(ring).animationName };
+  });
+  assert.equal(result.same, true, 'stable keys preserve buttons, rings and running CSS animation');
+  assert(result.advanced > 30 && result.advanced < 300, `animation advances across unchanged rebuild: ${result.advanced}`);
+  assert(result.stagger.every(x => Number.isFinite(x) && x <= 0 && x > -900), `tool delays are bounded: ${result.stagger}`);
+  assert.notEqual(result.stagger[0], result.stagger[1], 'different agent keys stagger equal-period rings');
+  assert.deepEqual(result.reordered, ['h4', 'h3'], 'sibling order follows new source order');
+  assert.equal(result.updated, true, 'state and label update in place while siblings keep identity');
+  assert(result.thinkingDelay <= 0 && result.thinkingDelay > -1150, 'state change restamps within thinking period');
+  assert.equal(result.removed, true, 'removed keyed node disappears');
+  assert.equal(result.remounted, true, 'reappearing node is new while surviving nodes stay mounted');
+  assert(Number.isFinite(result.drift) && result.drift < 80, `remounted ring resumes phase within 80ms: ${result.drift}`);
+  assert.match(result.animationName, /hud-spin-tool/, 'restored state uses tool animation');
+}
+
 (async () => {
   const b = await chromium.launch();
   try {
     // 1. Dark & Light themes + 12-agent 3-level geometry & computed-style checks
     for (const scheme of ['dark', 'light']) {
-      const { ctx, tab, frame, errors } = await openSession(b, 'heavy', { width: 1280, scheme });
+      const { ctx, tab, frame, errors } = await openSession(b, 'heavy', { width: 1280, scheme: scheme === 'dark' ? 'light' : 'dark' });
+      await chooseTheme(tab, frame, scheme);
       const geom = await frame.evaluate(() => {
         const n = document.querySelector('#agcompact .hud-node');
         const e = n.querySelector('.hud-emblem');
@@ -70,8 +155,10 @@ async function openSession(b, scenario, { width = 1280, height = 840, scheme = '
       assert.deepEqual(geom.harnesses, ['agy', 'claude', 'codex', 'pi']);
       assert.deepEqual(geom.states, ['failed', 'holding', 'idle', 'permission', 'thinking', 'tool']);
       if (shots) await tab.screenshot({ path: `${shots}/compact-${scheme}.png` });
+      if (shots) await frame.locator('#agcompact').screenshot({ path: `${shots}/hud-${scheme}.png` });
 
       if (scheme === 'dark') {
+        await checkKeyedRebuild(frame);
         // Tooltip clamp + own-row task from #r-tree
         await frame.locator('#agcompact .hud-node[data-id="h1"]').hover();
         await frame.locator('#hud-tooltip:not([hidden])').waitFor();

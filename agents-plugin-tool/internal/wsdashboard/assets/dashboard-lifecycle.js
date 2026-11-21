@@ -1030,5 +1030,6 @@
   }
   if (!shell) trackerStart();
   desktopUpdate();
+  syncSpinnerPhases(doc);
   connect();
 })();

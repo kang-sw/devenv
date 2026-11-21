@@ -43,50 +43,71 @@
     });
     return tasks;
   }
-  function hudBuildNode(node, ownTasks) {
+  function hudBuildNode() {
     var wrap = doc.createElement("div"); wrap.className = "tree-node";
     var slot = doc.createElement("div"); slot.className = "node-slot";
     var btn = doc.createElement("button"); btn.type = "button"; btn.className = "hud-node";
-    var state = node.state || "idle", harness = node.harness || "", label = node.label || node.id || "";
-    btn.setAttribute("data-id", node.id || "");
-    btn.setAttribute("data-state", state);
-    if (node.replyId) btn.setAttribute("data-reply-id", node.replyId);
-    if (node.linked) btn.setAttribute("data-linked", "1");
-    btn.setAttribute("aria-label", label + " (" + (HUD_HARNESS_NAME[harness] || harness || "?") + ", " + hudStateText(state) + ")");
     var ring = doc.createElement("span"); ring.className = "hud-ring";
     var emb = doc.createElement("span"); emb.className = "hud-emblem";
-    if (harness) emb.setAttribute("data-h", harness);
-    emb.textContent = HUD_HARNESS_LABEL[harness] || "??";
     btn.appendChild(ring); btn.appendChild(emb);
-    if (state === "permission") {
-      var pb = doc.createElement("span"); pb.className = "hud-badge perm"; pb.textContent = "!"; btn.appendChild(pb);
-    } else if (state === "failed") {
-      var fb = doc.createElement("span"); fb.className = "hud-badge fail"; fb.textContent = "\u00d7"; btn.appendChild(fb);
-    }
     slot.appendChild(btn);
-    if (node.overflow > 0) {
-      var ov = doc.createElement("span"); ov.className = "hud-overflow"; ov.textContent = "+" + node.overflow; slot.appendChild(ov);
-    }
     wrap.appendChild(slot);
-    hudRegistry[node.id] = {
-      data: {
+    return wrap;
+  }
+  function hudUpdateNode(wrap, node, ownTasks, moved) {
+    var slot = wrap.firstElementChild, btn = slot.firstElementChild;
+    var ring = btn.querySelector(".hud-ring"), emb = btn.querySelector(".hud-emblem");
+    var state = node.state || "idle", harness = node.harness || "", label = node.label || node.id || "";
+    var oldState = btn.getAttribute("data-state");
+    btn.setAttribute("data-id", node.id || "");
+    if (oldState !== state) btn.setAttribute("data-state", state);
+    if (node.replyId) btn.setAttribute("data-reply-id", node.replyId); else btn.removeAttribute("data-reply-id");
+    if (node.linked) btn.setAttribute("data-linked", "1"); else btn.removeAttribute("data-linked");
+    btn.setAttribute("aria-label", label + " (" + (HUD_HARNESS_NAME[harness] || harness || "?") + ", " + hudStateText(state) + ")");
+    if (harness) emb.setAttribute("data-h", harness); else emb.removeAttribute("data-h");
+    emb.textContent = HUD_HARNESS_LABEL[harness] || "??";
+    if (ANIMATION_PERIOD_MS[state]) animationPhaseDelay(ring, ANIMATION_PERIOD_MS[state], node.id || "", state, moved);
+    else if (oldState !== state) { ring.style.animationDelay = ""; ring.wsAnimationStamp = ""; }
+    var badge = btn.querySelector(".hud-badge"), badgeClass = state === "permission" ? "perm" : state === "failed" ? "fail" : "";
+    if (badgeClass) {
+      if (!badge) { badge = doc.createElement("span"); btn.appendChild(badge); }
+      badge.className = "hud-badge " + badgeClass;
+      badge.textContent = badgeClass === "perm" ? "!" : "\u00d7";
+    } else if (badge) badge.remove();
+    var overflow = slot.querySelector(".hud-overflow");
+    if (node.overflow > 0) {
+      if (!overflow) { overflow = doc.createElement("span"); overflow.className = "hud-overflow"; slot.appendChild(overflow); }
+      overflow.textContent = "+" + node.overflow;
+    } else if (overflow) overflow.remove();
+    var entry = hudRegistry[node.id] || { data: {}, el: btn };
+    Object.assign(entry.data, {
         id: node.id || "", replyId: node.replyId || "", linked: !!node.linked, label: label,
         harness: harness, state: state, model: node.model || "", effort: node.effort || "",
         elapsedMs: Number(node.elapsedMs) || 0, activeSince: Number(node.activeSince) || 0,
         chain: Array.isArray(node.chain) ? node.chain : [],
         task: node.task || ownTasks[node.id] || "", overflow: Number(node.overflow) || 0
-      },
-      el: btn
-    };
-    if (Array.isArray(node.children) && node.children.length > 0) {
-      var kidsEl = doc.createElement("div"); kidsEl.className = "tree-kids";
-      node.children.forEach(function (child) {
-        hudEdges.push([node.id, child.id]);
-        kidsEl.appendChild(hudBuildNode(child, ownTasks));
-      });
-      wrap.appendChild(kidsEl);
+    });
+    entry.el = btn;
+    hudRegistry[node.id] = entry;
+  }
+  function hudReconcile(parent, nodes, existing, ownTasks, parentId, seen) {
+    nodes.forEach(function (node, i) {
+      var wrap = existing[node.id] || hudBuildNode();
+      var moved = parent.children[i] !== wrap;
+      if (moved) parent.insertBefore(wrap, parent.children[i] || null);
+      hudUpdateNode(wrap, node, ownTasks, moved);
+      seen[node.id] = true;
+      if (parentId) hudEdges.push([parentId, node.id]);
+      var children = Array.isArray(node.children) ? node.children : [];
+      var kidsEl = wrap.querySelector(":scope > .tree-kids");
+      if (children.length) {
+        if (!kidsEl) { kidsEl = doc.createElement("div"); kidsEl.className = "tree-kids"; wrap.appendChild(kidsEl); }
+        hudReconcile(kidsEl, children, existing, ownTasks, node.id, seen);
+      } else if (kidsEl) kidsEl.remove();
+    });
+    while (parent.children.length > nodes.length) {
+      parent.lastElementChild.remove();
     }
-    return wrap;
   }
   function hudDrawConnectors(agcompact) {
     var island = $("agisland");
@@ -272,11 +293,16 @@
   function hudProject(tree, agcompact, agidle, agpop, agOpenFn) {
     var hud = hudReadData(tree), ownTasks = hudCollectOwnTasks(tree);
     hudLead = hud.lead || wsT("js.hud.lead");
-    hudRegistry = {}; hudEdges = [];
+    hudEdges = [];
     var rootsEl = agcompact.querySelector(".hud-roots");
     if (rootsEl) {
-      rootsEl.textContent = "";
-      hud.roots.forEach(function (r) { rootsEl.appendChild(hudBuildNode(r, ownTasks)); });
+      var existing = Object.create(null);
+      q(".tree-node > .node-slot > .hud-node", rootsEl).forEach(function (btn) {
+        existing[btn.getAttribute("data-id")] = btn.parentElement.parentElement;
+      });
+      var seen = Object.create(null);
+      hudReconcile(rootsEl, hud.roots, existing, ownTasks, "", seen);
+      Object.keys(hudRegistry).forEach(function (id) { if (!seen[id]) delete hudRegistry[id]; });
     }
     var sumEl = agcompact.querySelector(".hud-summary-text");
     if (sumEl) sumEl.textContent = wsT("js.hud.summary", hud.completed, hud.peers);

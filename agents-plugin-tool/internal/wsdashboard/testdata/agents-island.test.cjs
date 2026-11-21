@@ -2,9 +2,10 @@
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const { readAssetSource } = require('./asset-source.cjs');
+const phaseSrc = readAssetSource('wsdashboard', 'dashboard-animation.js');
 const hudSrc = readAssetSource('wsdashboard', 'dashboard-hud.js');
 const compSrc = readAssetSource('wsdashboard', 'dashboard.js');
-const code = hudSrc + '\n' + compSrc.slice(compSrc.indexOf('  // --- agents island'), compSrc.indexOf('  function interruptTurn()'));
+const code = phaseSrc + '\n' + hudSrc + '\n' + compSrc.slice(compSrc.indexOf('  // --- agents island'), compSrc.indexOf('  function interruptTurn()'));
 assert(code.includes('function hudProject(') && code.includes('function agProject()'));
 
 function node(tag = 'div', cls = '', text = '') {
@@ -14,8 +15,22 @@ function node(tag = 'div', cls = '', text = '') {
     offsetWidth: 140, offsetHeight: 56, childNodes: [], parentNode: null, nextElementSibling: null,
     getBoundingClientRect() { return { left: 100, top: 20, right: 240, bottom: 76, width: 140, height: 56 }; },
     setAttribute(k, v) { this.attrs[k] = String(v); },
+    removeAttribute(k) { delete this.attrs[k]; },
     getAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : ''; },
-    appendChild(x) { x.parentNode = this; if (this.children.length) this.children[this.children.length - 1].nextElementSibling = x; this.children.push(x); return x; },
+    appendChild(x) { return this.insertBefore(x, null); },
+    insertBefore(x, ref) {
+      if (x.parentNode) x.remove();
+      const i = ref ? this.children.indexOf(ref) : this.children.length;
+      this.children.splice(i, 0, x); x.parentNode = this;
+      this.children.forEach((c, j) => { c.nextElementSibling = this.children[j + 1] || null; });
+      return x;
+    },
+    remove() {
+      if (!this.parentNode) return;
+      const siblings = this.parentNode.children;
+      siblings.splice(siblings.indexOf(this), 1);
+      this.parentNode = null;
+    },
     addEventListener(k, f) { (this.listeners[k] ||= []).push(f); },
     contains(x) { return x === this || this.children.some(c => c.contains && c.contains(x)); },
     focus() { n.focused = true; }, scrollIntoView() { n.scrolled = true; },
@@ -28,6 +43,7 @@ function node(tag = 'div', cls = '', text = '') {
       return null;
     },
     querySelector(s) {
+      if (s === ':scope > .tree-kids') return this.children.find(c => c.className === 'tree-kids') || null;
       if (this.map && this.map[s]) return this.map[s];
       const matchPart = (el, part) => {
         if (part.startsWith('.')) {
@@ -67,6 +83,11 @@ function node(tag = 'div', cls = '', text = '') {
     add(k) { n.classList.toggle(k, true); },
     remove(k) { n.classList.toggle(k, false); }
   };
+  Object.defineProperties(n, {
+    firstElementChild: { get() { return this.children[0] || null; } },
+    lastElementChild: { get() { return this.children[this.children.length - 1] || null; } },
+    parentElement: { get() { return this.parentNode; } }
+  });
   let value = text;
   Object.defineProperty(n, 'textContent', {
     get() { return value; },
@@ -109,6 +130,11 @@ const ctx = vm.createContext({
   $: id => els[id] || null, sbadge: badge, doc, window: win, SVGNS: 'http://www.w3.org/2000/svg',
   region: () => tree,
   q(s, el) {
+    if (s === '.tree-node > .node-slot > .hud-node') {
+      const found = [];
+      (function walk(n) { if (n.className === 'hud-node') found.push(n); n.children.forEach(walk); })(el);
+      return found;
+    }
     if (s === 'details[data-key]' && el === tree) return treeDetails;
     if (s === 'details[data-key]' && el === pop) return treeDetails;
     if (s === '.tgroup .agent') return treeAgents;
@@ -188,6 +214,49 @@ doc.listeners.keydown[0]({ key: 'Escape', defaultPrevented: false });
 // Linked node click navigates to /s/<replyId>
 hudRoots.listeners.click[0]({ target: buttons[1] });
 assert.deepEqual(navigated, ['/s/r2']);
+
+// A tree tick keeps keyed buttons, rings and emblems; only the changed state
+// changes their animation phase and badge.
+const oldRing = buttons[0].querySelector('.hud-ring');
+const oldEmblem = buttons[0].querySelector('.hud-emblem');
+const oldDelay = oldRing.style.animationDelay;
+hudPayload.roots[0].state = 'tool';
+hudPayload.roots[0].children[0].state = 'failed';
+hudPayload.roots[1].overflow = 0;
+ctx.agSwapped();
+assert.equal(hudRoots.children[0].firstElementChild.firstElementChild, buttons[0]);
+assert.equal(buttons[0].querySelector('.hud-ring'), oldRing);
+assert.equal(buttons[0].querySelector('.hud-emblem'), oldEmblem);
+assert.equal(buttons[0].getAttribute('data-state'), 'tool');
+assert.notEqual(oldRing.style.animationDelay, oldDelay);
+assert.equal(buttons[1].querySelector('.hud-badge').className, 'hud-badge fail');
+assert.equal(buttons[2].parentNode.querySelector('.hud-overflow'), null);
+const toolDelay = oldRing.style.animationDelay;
+ctx.agSwapped();
+assert.equal(oldRing.style.animationDelay, toolDelay, 'running ring is not restamped on an unchanged tick');
+hudPayload.roots[0].state = 'idle';
+ctx.agSwapped();
+assert.equal(oldRing.style.animationDelay, '', 'leaving an animated state clears its delay');
+
+// Reordering an existing animated wrapper detaches and remounts it in Chromium.
+// Its delay must advance to the current clock; the sibling shifted by the
+// insertion remains mounted and keeps its original delay.
+doc.timeline = { currentTime: 500 };
+hudPayload.roots[0].state = 'tool';
+hudPayload.roots[2].state = 'thinking';
+ctx.agSwapped();
+const movedRing = buttons[3].querySelector('.hud-ring');
+const movedDelay = movedRing.style.animationDelay;
+const stableDelay = oldRing.style.animationDelay;
+doc.timeline.currentTime = 700;
+hudPayload.roots = [hudPayload.roots[2], hudPayload.roots[0], hudPayload.roots[1]];
+ctx.agSwapped();
+assert.equal(hudRoots.children[0].firstElementChild.firstElementChild, buttons[3]);
+assert.equal(buttons[3].querySelector('.hud-ring'), movedRing);
+assert.notEqual(movedRing.style.animationDelay, movedDelay, 'moved ring is restamped');
+assert.equal(movedRing.style.animationDelay,
+  (-((700 + ctx.animationPhaseOffset('a4', 1150)) % 1150)).toFixed(1) + 'ms');
+assert.equal(oldRing.style.animationDelay, stableDelay, 'unmoved sibling is not restamped');
 
 // Empty visible HUD forest falls back to idle pill using HUD.Completed
 hudPayload = { lead: 'coord', completed: 4, peers: 2, roots: [] };

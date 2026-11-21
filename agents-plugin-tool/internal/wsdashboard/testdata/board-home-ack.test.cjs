@@ -4,6 +4,7 @@ const vm = require('node:vm');
 const test = require('node:test');
 const { readAssetSource } = require('./asset-source.cjs');
 const source = readAssetSource('wsdashboard', 'dashboard.js');
+const animation = readAssetSource('wsdashboard', 'dashboard-animation.js');
 function funcs(names) {
   return names.map(name => {
     const found = source.match(new RegExp('\\n  function ' + name + '\\([^\\n]*\\{[^\\n]*\\}\\n|\\n  function ' + name + '\\([\\s\\S]*?\\n  \\}\\n'));
@@ -78,6 +79,7 @@ for (const documentMode of [false, true]) for (const latched of [[], ['T20'], ['
 
 function returningBoard() {
   const c = vm.createContext({ assert });
+  vm.runInContext(animation, c);
   vm.runInContext(`
     var timers = new Map(), nextTimer = 1;
     function setTimeout(fn, ms) { var id = nextTimer++; timers.set(id, { fn: fn, ms: ms }); return id; }
