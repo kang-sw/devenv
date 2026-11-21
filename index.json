@@ -563,6 +563,9 @@
     "261120-research-ws-daemon-supervision-http-attach": {
       "registered_at": "2026-11-20T12:40:36Z"
     },
+    "261121-bug-ws-agy-reattach-watchdog-sent-input": {
+      "registered_at": "2026-11-21T12:39:33Z"
+    },
     "261121-bug-ws-dogfood-tool-surprises": {
       "registered_at": "2026-11-21T01:02:36Z"
     },
