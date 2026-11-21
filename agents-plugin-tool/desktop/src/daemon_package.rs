@@ -1,7 +1,8 @@
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
 const INVALID: &str = "Invalid daemon package";
@@ -15,6 +16,7 @@ pub struct Candidate {
     pub binary: PathBuf,
     pub version: [u64; 3],
     pub config_manifests: Vec<PathBuf>,
+    fingerprints: BTreeMap<PathBuf, [u8; 32]>,
 }
 
 fn safe_relative(value: &str) -> bool {
@@ -84,6 +86,31 @@ fn json(path: &Path) -> Result<Value, &'static str> {
 
 fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
+}
+fn hash_file(path: &Path) -> Result<[u8; 32], &'static str> {
+    if !plain_metadata(path)?.is_file() {
+        return Err(INVALID);
+    }
+    let mut reader = BufReader::new(fs::File::open(path).map_err(|_| INVALID)?);
+    let mut digest = Sha256::new();
+    let mut buffer = [0; 65536];
+    loop {
+        let n = reader.read(&mut buffer).map_err(|_| INVALID)?;
+        if n == 0 {
+            break;
+        }
+        digest.update(&buffer[..n]);
+    }
+    Ok(digest.finalize().into())
+}
+fn fingerprints(
+    root: &Path,
+    names: &BTreeSet<PathBuf>,
+) -> Result<BTreeMap<PathBuf, [u8; 32]>, &'static str> {
+    names
+        .iter()
+        .map(|p| Ok((p.clone(), hash_file(&root.join(p))?)))
+        .collect()
 }
 fn valid_hash(s: &str) -> bool {
     s.len() == 64
@@ -192,6 +219,12 @@ fn validate(root: &Path, development: bool) -> Result<Candidate, &'static str> {
         .into_iter()
         .map(|s| reference(root, s))
         .collect::<Result<Vec<_>, _>>()?;
+    if config_manifests
+        .iter()
+        .any(|p| p.to_str().map_or(true, |s| s.contains(';')))
+    {
+        return Err(INVALID);
+    }
     let contract = json(&root.join("runtime.json"))?;
     if contract["plugin"].as_str() != Some(name) {
         return Err(INVALID);
@@ -225,7 +258,11 @@ fn validate(root: &Path, development: bool) -> Result<Candidate, &'static str> {
         .filter(|s| valid_hash(s))
         .ok_or(INVALID)?;
     if !plain_metadata(&binary)?.is_file()
-        || hash(&fs::read(&binary).map_err(|_| INVALID)?) != digest
+        || hash_file(&binary)?
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+            != digest
     {
         return Err(INVALID);
     }
@@ -262,6 +299,7 @@ fn validate(root: &Path, development: bool) -> Result<Candidate, &'static str> {
         binary,
         version,
         config_manifests,
+        fingerprints: fingerprints(root, &all)?,
     })
 }
 
@@ -275,13 +313,6 @@ impl Candidate {
             return Err(STAGE);
         }
         let result = || -> Result<Self, &'static str> {
-            let selected = validate(&self.root, true)?;
-            if selected.version != self.version
-                || selected.binary != self.binary
-                || selected.config_manifests != self.config_manifests
-            {
-                return Err(INVALID);
-            }
             let container = user_data.join("daemon-stages");
             fs::create_dir_all(&container).map_err(|_| STAGE)?;
             let actual = fs::canonicalize(&container).map_err(|_| STAGE)?;
@@ -296,6 +327,9 @@ impl Candidate {
                 .tempdir_in(&actual)
                 .map_err(|_| STAGE)?;
             let before = files(&self.root)?;
+            if before.iter().ne(self.fingerprints.keys()) {
+                return Err(STAGE);
+            }
             for rel in &before {
                 let source = self.root.join(rel);
                 let target = partial.path().join(rel);
@@ -304,18 +338,26 @@ impl Candidate {
                 fs::set_permissions(&target, plain_metadata(&source)?.permissions())
                     .map_err(|_| STAGE)?;
             }
-            if files(&self.root)? != before || files(partial.path())? != before {
+            let staged = validate(partial.path(), true)?;
+            if staged.version != self.version
+                || staged.fingerprints != self.fingerprints
+                || self.binary.strip_prefix(&self.root).ok()
+                    != staged.binary.strip_prefix(&staged.root).ok()
+                || self
+                    .config_manifests
+                    .iter()
+                    .map(|p| p.strip_prefix(&self.root).ok())
+                    .collect::<Vec<_>>()
+                    != staged
+                        .config_manifests
+                        .iter()
+                        .map(|p| p.strip_prefix(&staged.root).ok())
+                        .collect::<Vec<_>>()
+            {
                 return Err(STAGE);
             }
-            for rel in &before {
-                if fs::read(self.root.join(rel)).map_err(|_| STAGE)?
-                    != fs::read(partial.path().join(rel)).map_err(|_| STAGE)?
-                {
-                    return Err(STAGE);
-                }
-            }
-            let staged = validate(partial.path(), true)?;
-            if staged.version != self.version {
+            let after = files(&self.root)?;
+            if fingerprints(&self.root, &after)? != self.fingerprints {
                 return Err(STAGE);
             }
             let root = partial.keep();
@@ -337,6 +379,7 @@ impl Candidate {
                     .collect::<Result<_, _>>()?,
                 root,
                 version: staged.version,
+                fingerprints: staged.fingerprints,
             })
         };
         result().map_err(|_| STAGE)
@@ -479,6 +522,65 @@ mod tests {
             .unwrap();
         assert!(candidate
             .stage(&temp.path().join("user"), &temp.path().join("app"))
+            .is_err());
+    }
+    #[test]
+    fn rejects_valid_same_core_changes_after_selection() {
+        for change in ["binary", "resource", "contract", "reference"] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().join("app/daemon");
+            fixture(&root, "1.2.3");
+            let candidate = Candidate::select(&root, None).unwrap();
+            match change {
+                "binary" => {
+                    fs::write(&candidate.binary, b"new binary").unwrap();
+                    let meta = root.join(if cfg!(windows) {
+                        "ws-mcp.exe.metadata.json"
+                    } else {
+                        "ws-mcp.metadata.json"
+                    });
+                    let mut value = json(&meta).unwrap();
+                    value["binary_sha256"] = json!(hash(b"new binary"));
+                    fs::write(meta, value.to_string()).unwrap();
+                }
+                "resource" => {
+                    write(&root, "rsrc/x/a.md", b"new content\n");
+                    save(
+                        &root,
+                        "rsrc/manifest.json",
+                        json!({"schema_version":1,"files":{"x/a.md":hash(b"new content\n")}}),
+                    );
+                }
+                "contract" => {
+                    let mut value = json(&root.join("runtime.json")).unwrap();
+                    value["extra"] = json!(true);
+                    save(&root, "runtime.json", value);
+                }
+                _ => save(&root, "extra.json", json!({"new":true})),
+            }
+            assert!(
+                Candidate::select(&root, None).is_ok(),
+                "fixture remains valid: {change}"
+            );
+            assert!(
+                candidate
+                    .stage(&temp.path().join("user"), &temp.path().join("app"))
+                    .is_err(),
+                "{change}"
+            );
+        }
+    }
+    #[test]
+    fn rejects_semicolon_in_manifest_absolute_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("bad;root/daemon");
+        fixture(&root, "1.2.3");
+        assert!(Candidate::select(&root, None).is_err());
+        let root = temp.path().join("app/daemon");
+        fixture(&root, "1.2.3");
+        let candidate = Candidate::select(&root, None).unwrap();
+        assert!(candidate
+            .stage(&temp.path().join("bad;user"), &temp.path().join("app"))
             .is_err());
     }
     #[cfg(unix)]
