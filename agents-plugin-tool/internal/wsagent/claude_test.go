@@ -40,12 +40,12 @@ func TestClaudeArgsAllOffByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, banned := range []string{"--bare", "--system-prompt", "--system-prompt-file", "--no-session-persistence", "--dangerously-skip-permissions"} {
+	for _, banned := range []string{"--bare", "--system-prompt", "--system-prompt-file", "--no-session-persistence", "--dangerously-skip-permissions", "--disable-slash-commands"} {
 		if slices.Contains(args, banned) {
 			t.Fatalf("args must never carry %s: %v", banned, args)
 		}
 	}
-	for _, want := range []string{"-p", "--verbose", "--strict-mcp-config", "--disable-slash-commands"} {
+	for _, want := range []string{"-p", "--verbose", "--strict-mcp-config"} {
 		if !slices.Contains(args, want) {
 			t.Fatalf("args lack %s: %v", want, args)
 		}
@@ -57,6 +57,7 @@ func TestClaudeArgsAllOffByDefault(t *testing.T) {
 		"--tools":           "",
 		"--permission-mode": "dontAsk",
 		"--mcp-config":      `{"mcpServers":{}}`,
+		"--disallowedTools": "Skill",
 	}
 	for flag, want := range checks {
 		if got, ok := flagValue(args, flag); !ok || got != want {
@@ -91,8 +92,8 @@ func TestClaudeArgsFromProfile(t *testing.T) {
 			t.Fatalf("%s = %q, want %q", flag, got, want)
 		}
 	}
-	if slices.Contains(args, "--disable-slash-commands") {
-		t.Fatalf("skills on keeps slash commands")
+	if _, denied := flagValue(args, "--disallowedTools"); denied || slices.Contains(args, "--disable-slash-commands") {
+		t.Fatalf("skills on keeps model invocation and slash commands: %v", args)
 	}
 	i := slices.Index(args, "--allowedTools")
 	if i < 0 {
@@ -136,14 +137,14 @@ func TestClaudeArgsBuiltinSupportProfile(t *testing.T) {
 	if got, _ := flagValue(args, "--tools"); got != "Agent" {
 		t.Fatalf("--tools = %q, want Agent alone", got)
 	}
-	if slices.Contains(args, "--disallowedTools") {
-		t.Fatalf("the support profile's launch disallows a tool: %v", args)
+	if got, _ := flagValue(args, "--disallowedTools"); got != "Skill" {
+		t.Fatalf("the support profile must deny only Skill: %v", args)
 	}
 	i := slices.Index(args, "--allowedTools")
 	if i < 0 {
 		t.Fatalf("no --allowedTools: %v", args)
 	}
-	want := []string{"Agent", "mcp__ws__tracker_query", "mcp__ws__tracker_update", "mcp__ws__tracker_show", "mcp__ws__tracker_ui", "mcp__ws__wiki_query", "mcp__ws__wiki_update", "mcp__ws__git_search", "mcp__ws__playbook_read"}
+	want := []string{"Agent", "mcp__ws__tracker_query", "mcp__ws__tracker_update", "mcp__ws__tracker_show", "mcp__ws__tracker_ui", "mcp__ws__wiki_query", "mcp__ws__wiki_update", "mcp__ws__git_search", "mcp__ws__playbook_read", "mcp__ws__compact"}
 	if allowed := args[i+1:]; !slices.Equal(allowed, want) {
 		t.Fatalf("--allowedTools = %v, want %v", allowed, want)
 	}
@@ -168,8 +169,8 @@ func TestClaudeArgsAgentWorkerRemovesSubagents(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got, ok := flagValue(args, "--disallowedTools"); !ok || got != "Agent,Task" {
-				t.Fatalf("--disallowedTools = %q (present %v), want Agent,Task: %v", got, ok, args)
+			if got, ok := flagValue(args, "--disallowedTools"); !ok || got != "Agent,Task,Skill" {
+				t.Fatalf("--disallowedTools = %q (present %v), want Agent,Task,Skill: %v", got, ok, args)
 			}
 			if got, _ := flagValue(args, "--tools"); got != strings.Join(tools, ",") {
 				t.Fatalf("--tools = %q, want the profile's %v", got, tools)

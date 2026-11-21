@@ -90,7 +90,7 @@ type Profile struct {
 	// parenthesis is made visible and the whole rule is allowed.
 	Tools []string `json:"tools,omitempty"`
 	// WSTools is the ws tool allowlist, by ws tool name ("tickets.query").
-	// Any entry attaches ws-mcp, which advertises and accepts only these.
+	// The runner adds compact to the worker's ws tools at launch.
 	WSTools []string `json:"ws_tools,omitempty"`
 	// MCPServers are further MCP servers the agent may use, by server name;
 	// each value is the harness's server object. Every tool of a listed
@@ -99,7 +99,7 @@ type Profile struct {
 	// Plugins are plugin directories (claude) or extension paths (pi) to
 	// load; a relative path resolves against the working root.
 	Plugins []string `json:"plugins,omitempty"`
-	// Skills keeps the harness's skills and slash commands on.
+	// Skills lets the model invoke the harness's skills.
 	Skills bool `json:"skills,omitempty"`
 	// Instructions is the instruction file appended to the harness's own
 	// system prompt; a relative path resolves against the working root, and
@@ -447,6 +447,11 @@ func excessProfileTools(child, parent Profile) []string {
 		child, parent []string
 	}{{"ws_tools", child.WSTools, parent.WSTools}, {"tools", child.Tools, parent.Tools}} {
 		for _, tool := range pair.child {
+			// Compact is available independently of the parent's profile.
+			// A profile snapshot from before that grant may omit it.
+			if pair.name == "ws_tools" && tool == "compact" {
+				continue
+			}
 			if !slices.Contains(pair.parent, tool) {
 				excess = append(excess, pair.name+"."+tool)
 			}
@@ -480,14 +485,14 @@ func ProfileValueSchema(registries ...map[string]BackendRegistration) map[string
 			"model":       map[string]any{"type": "string", "pattern": modelPattern.String(), "description": "Starting model; absent leaves the harness default."},
 			"effort":      map[string]any{"type": "string", "pattern": effortPattern.String(), "description": "Starting reasoning effort; absent leaves the harness default."},
 			"tools":       stringList("Built-in tool allowlist: tool names, or claude permission rules such as \"Bash(git status)\". Absent allows none; everything not listed is denied without a prompt."),
-			"ws_tools":    stringList("ws tool allowlist by ws tool name (tickets.query). Any entry attaches ws-mcp, which advertises and accepts only these."),
+			"ws_tools":    stringList("Additional ws tools the worker may use, by name (tickets.query). Hosted workers also receive compact."),
 			"mcp_servers": map[string]any{
 				"type":                 "object",
 				"description":          "Further MCP servers the agent may use, by name (not \"ws\"); each value is the harness's server object. Absent allows none. Not allowed in a repo-scope profile.",
 				"additionalProperties": map[string]any{"type": "object"},
 			},
 			"plugins":              stringList("Plugin directories (claude) or extension paths (pi) to load; relative paths resolve against the working root. Absent loads none. Not allowed in a repo-scope profile."),
-			"skills":               map[string]any{"type": "boolean", "description": "Keep the harness's skills and slash commands on; off by default."},
+			"skills":               map[string]any{"type": "boolean", "description": "Let the model invoke the harness's skills. Off by default."},
 			"instructions":         map[string]any{"type": "string", "minLength": 1, "description": "Task instruction file appended to the harness's own system prompt; a relative path resolves against the working root, and builtin:<name> names an instruction text embedded in ws-mcp (" + strings.Join(BuiltinInstructionNames(), ", ") + ")."},
 			"idle_timeout_seconds": map[string]any{"type": "integer", "minimum": 0, "description": "End the sustained process after this many seconds with no running turn, input, background work or active child; 0 never ends it. Absent defaults to 0 for leads and 600 for workers."},
 			"list_in_index":        map[string]any{"type": "boolean", "description": "List this profile's conversations in the dashboard session index; hidden by default."},

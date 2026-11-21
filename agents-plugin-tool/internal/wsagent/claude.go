@@ -161,16 +161,19 @@ func claudeLeadArgs(spec StartSpec) ([]string, error) {
 }
 
 // claudeRemovedTools are the built-in tools spec's launch removes with
-// --disallowedTools, over a worker's --tools and a lead's own settings
-// alike: the native subagent tool under both of its names
-// (claudeInitToolNames) when spec removes subagents. The option is
-// variadic; its list goes as one comma-separated value, which Claude
-// 2.1.326 reads as the two names.
+// --disallowedTools, over a worker's --tools and a lead's own settings.
+// The variadic option receives the list as one comma-separated value.
 func claudeRemovedTools(spec StartSpec) []string {
-	if !spec.RemoveSubagents {
-		return nil
+	var removed []string
+	if spec.RemoveSubagents {
+		removed = append(removed, claudeSubagentTool, claudeInitToolNames[claudeSubagentTool])
 	}
-	return []string{claudeSubagentTool, claudeInitToolNames[claudeSubagentTool]}
+	if spec.Lead == nil && !spec.Profile.Skills {
+		// The slash-command switch disables native /compact. Deny model
+		// invocation through Skill while preserving typed local commands.
+		removed = append(removed, "Skill")
+	}
+	return removed
 }
 
 // claudeArgs is the claude command line for spec, without the executable.
@@ -208,9 +211,6 @@ func claudeArgs(spec StartSpec) ([]string, error) {
 		"--strict-mcp-config", "--mcp-config", mcpConfig,
 		"--tools", strings.Join(bases, ","),
 		"--permission-mode", "dontAsk",
-	}
-	if !p.Skills {
-		args = append(args, "--disable-slash-commands")
 	}
 	for _, dir := range p.PluginPaths(spec.Root) {
 		args = append(args, "--plugin-dir", dir)

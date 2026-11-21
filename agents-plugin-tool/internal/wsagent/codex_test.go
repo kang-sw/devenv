@@ -462,7 +462,7 @@ func TestCodexMapperSyntheticInitShapeAndRecovery(t *testing.T) {
 	if len(events) != 1 || events[0].Notice == "" || events[0].TurnEnd {
 		t.Fatalf("foreign recovery cannot release input: %+v", events)
 	}
-	// Compaction is synthetic: Phase 1 did not record its behavior.
+	// Simulate a cancellation between the native item start and completion.
 	r.feed(`{"method":"turn/started","params":{"threadId":"s","turn":{"id":"compact"}}}`)
 	events = r.feed(`{"method":"item/started","params":{"threadId":"s","turnId":"compact","item":{"id":"c","type":"contextCompaction"}}}`)
 	if len(events) != 1 || events[0].Live == nil || events[0].Live.Phase != wslive.CompactStart {
@@ -471,6 +471,16 @@ func TestCodexMapperSyntheticInitShapeAndRecovery(t *testing.T) {
 	events = r.feed(`{"method":"turn/completed","params":{"threadId":"s","turn":{"id":"compact","status":"interrupted"}}}`)
 	if len(events) != 3 || events[0].Live == nil || events[0].Live.Phase != wslive.CompactFailed || !events[2].TurnEnd {
 		t.Fatalf("interrupted compaction closes before TurnEnd: %+v", events)
+	}
+}
+
+func TestCodexCompactionRequiresNativeCompletion(t *testing.T) {
+	r := newCodexRun("s")
+	r.feed(`{"method":"turn/started","params":{"threadId":"s","turn":{"id":"t"}}}`)
+	r.feed(`{"method":"item/started","params":{"threadId":"s","turnId":"t","item":{"id":"c","type":"contextCompaction"}}}`)
+	events := r.feed(`{"method":"turn/completed","params":{"threadId":"s","turn":{"id":"t","status":"completed"}}}`)
+	if len(events) != 3 || events[0].Live == nil || events[0].Live.Phase != wslive.CompactFailed || !events[2].TurnEnd {
+		t.Fatalf("turn completion without a compact end must fail compaction: %+v", events)
 	}
 }
 

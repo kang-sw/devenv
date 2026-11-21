@@ -88,7 +88,8 @@ func fixtureWorkerSpec(t *testing.T) StartSpec {
 }
 
 // TestClaudeFixturesResolveByVersion: each recorded init resolves at its
-// own version inside the guaranteed range, with nothing demoted; one below
+// own version inside the guaranteed range. Workers recorded with the old
+// launch flags demote compaction. A version below
 // the range (the 2.1.319 worker turns) and one above it run on the nearest
 // bound's grades, marked unverified.
 func TestClaudeFixturesResolveByVersion(t *testing.T) {
@@ -122,10 +123,13 @@ func TestClaudeFixturesResolveByVersion(t *testing.T) {
 			if caps.Version != tc.version || caps.ProfileVersion != tc.at || caps.Unverified != tc.unverified || caps.Role != role {
 				t.Fatalf("resolved %+v, want version %s at %s unverified %v", caps, tc.version, tc.at, tc.unverified)
 			}
-			if len(caps.Demoted) != 0 {
-				t.Fatalf("a recorded init demotes nothing: %v", caps.Demoted)
-			}
 			want := p.Resolve(role, tc.at)
+			if !tc.lead {
+				want.demote([]CapabilityItem{ItemCompaction})
+			}
+			if !slices.Equal(caps.Demoted, want.Demoted) {
+				t.Fatalf("demoted %v, want %v", caps.Demoted, want.Demoted)
+			}
 			for _, item := range CatalogItems {
 				if caps.Grade(item) != want.Grade(item) {
 					t.Errorf("%s = %s, want the bound's %s", item, caps.Grade(item), want.Grade(item))
@@ -174,6 +178,7 @@ func TestClaudeInitShapeDemotes(t *testing.T) {
 
 	worker := func(profile string, edit func(init map[string]any)) Capabilities {
 		init := fixtureInit(t, "claude-worker-turn-2.1.326.jsonl")
+		init["slash_commands"] = []string{"compact"}
 		edit(init)
 		return resolveFixture(t, claudeSpec(t, profile), init)
 	}
@@ -188,7 +193,7 @@ func TestClaudeInitShapeDemotes(t *testing.T) {
 		t.Fatalf("no tool list: demoted %v", got)
 	}
 	if got := worker(`{"backend":"claude","tools":["Read"]}`, func(i map[string]any) { delete(i, "slash_commands") }).Demoted; len(got) != 0 {
-		t.Fatalf("a worker's compaction is already unsupported: demoted %v", got)
+		t.Fatalf("an absent command list leaves compaction alone: demoted %v", got)
 	}
 
 	init := fixtureInit(t, "claude-worker-turn-2.1.326.jsonl")
@@ -229,14 +234,15 @@ func TestClaudeInitShapeSubtractsRemovedTools(t *testing.T) {
 	// A worker profile that lists the subagent tool: the launch's removal
 	// wins, so the init without it is no mismatch, and with it the leak
 	// refuses the launch.
-	worker := claudeSpec(t, `{"backend":"claude","tools":["Read","Agent"]}`)
+	worker := claudeSpec(t, `{"backend":"claude","tools":["Read","Agent","Skill"]}`)
 	worker.RemoveSubagents = true
 	init := fixtureInit(t, "claude-worker-turn-2.1.326.jsonl")
 	init["tools"] = []string{"Read"}
+	init["slash_commands"] = []string{"compact"}
 	if got := resolveFixture(t, worker, init).Demoted; len(got) != 0 {
 		t.Fatalf("a removed profile tool missing from init: demoted %v", got)
 	}
-	for _, leaked := range []string{"Agent", "Task"} {
+	for _, leaked := range []string{"Agent", "Task", "Skill"} {
 		init["tools"] = []string{"Read", leaked}
 		raw, _ := json.Marshal(init)
 		evs := newClaudeMapper(worker).mapLine(raw, nopReplies{})
@@ -250,7 +256,7 @@ func TestClaudeInitShapeSubtractsRemovedTools(t *testing.T) {
 // delegating through agent.spawn, then the turn the child's completion
 // mail woke) and the recorded agent.spawn child, both launched without the
 // native subagent tool, list neither of its names at any init. Under their
-// removal spec nothing is demoted and both removal items stay native. A
+// removal spec both removal items stay native. A
 // lead whose init still lists the tool, as one started before the removal
 // and rejoined after it does, demotes both. The lead's tool list is
 // shortened to its native tools and a few ws tools; ids and paths are
@@ -282,7 +288,11 @@ func TestClaudeSubagentRemovedFixtures(t *testing.T) {
 					t.Fatalf("init tools %v", tools)
 				}
 				caps := resolveFixture(t, tc.spec, init)
-				if caps.Version != "2.1.326" || caps.Unverified || len(caps.Demoted) != 0 {
+				var demoted []CapabilityItem
+				if tc.spec.Lead == nil {
+					demoted = []CapabilityItem{ItemCompaction}
+				}
+				if caps.Version != "2.1.326" || caps.Unverified || !slices.Equal(caps.Demoted, demoted) {
 					t.Fatalf("resolved %+v", caps)
 				}
 				for _, item := range []CapabilityItem{ItemToolRemoval, ItemSubagentRemoval} {
