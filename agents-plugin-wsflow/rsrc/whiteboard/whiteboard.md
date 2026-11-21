@@ -26,9 +26,11 @@ live by the daemon.
   nothing → create and close it in the same update.
 - The user approved a deliverable → build it without re-asking.
 - Text mockups (HTML/SVG) → save under
-  `ai-docs/assets/mockups/YYMMDD/<topic name>/` and include them in your next
-  commit. Write a large mockup as a file there and post it with
-  `wb:panel src="<path>"`; never pass mockup HTML bodies between agents.
+  `ai-docs/assets/mockups/YYMMDD/<topic name>/`; track only text mockups there
+  and include them in your next commit. Keep PNG and other raster images under
+  `ai-docs/assets/mockups/` gitignored and never commit them. Write a large
+  mockup as a file there and post it with `wb:panel src="<path>"`; never pass
+  mockup HTML bodies between agents.
 - Confirmed decisions reach a ticket only through
   `{{.SkillNamespace}}:lead-ticket`, once the user moves to capture.
 

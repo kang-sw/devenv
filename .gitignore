@@ -30,5 +30,11 @@ agents-plugin-tool/dist/
 agents-plugin-tool/internal/wspackage/generated/*
 !agents-plugin-tool/internal/wspackage/generated/PLACEHOLDER
 ai-docs/presentation/
+ai-docs/assets/mockups/**/*.png
+ai-docs/assets/mockups/**/*.jpg
+ai-docs/assets/mockups/**/*.jpeg
+ai-docs/assets/mockups/**/*.webp
+ai-docs/assets/mockups/**/*.gif
+ai-docs/assets/mockups/**/*.avif
 agents-plugin/.claude-plugin/types/
 agents-plugin-wsflow/.claude-plugin/types/
