@@ -245,28 +245,13 @@ Last ID: (2009)
   design in (1986) and (1987). Use b if that prerequisite cannot fit the
   bundle. Either answer must remove the cursor-triggered whole-file writes.
 
-(1981) [open] [policy] Does the config-root workspace list qualify for this bundle?
+(1981) [open] [technical] Leave `workspaces.json` out of this bundle over including it. It is cross-process config-root state with no cursor-driven rewrite, and moving it would add a shared-ownership contract this child does not need.
 
-- The list is intentionally outside the cache. The source and runbook
-  account for a second process seeing or changing it.
-- a. Leave `workspaces.json` out of the daemon-only cutover and retain its
-  existing cross-process behavior.
-- b. Include it with config-root persistence and a proven shared ownership
-  and refresh contract across cache roots.
-- Recommend a unless the owner wants to settle that shared-state
-  contract in this child. A cache-local copy can fork the workspace list.
+- (2003) is withdrawn by consequence.
 
-(1982) [open] [policy] Does tracker seen state qualify for this bundle when cache roots share a tracker config root?
+(1982) [open] [technical] Leave tracker seen state in `ui-seen.json` over including it. The tracker config root can be shared across daemons, and moving its seen marks would add a shared-ownership contract this child does not need.
 
-- `MarkSeen` is dashboard-only in the callers found. Its files belong
-  to tracker registrations, and the lock and cache are per daemon instance.
-- a. Include it with config-root/store-registration scope and a verified
-  cross-daemon rule for union and visibility.
-- b. Leave it in its existing tracker file until that ownership contract can
-  be established.
-- Recommend a only if the ownership and unregister behavior are proved
-  for shared-config operation. Otherwise use b. Moving it into cache scope
-  would change which marks another daemon sees.
+- (2005) is withdrawn by consequence.
 
 (1983) [open] [policy] Does permission selection continue accepting direct edits to its legacy file after cutover?
 
@@ -318,52 +303,13 @@ Last ID: (2009)
   Consider c only with explicit boundary approval. Prove predecessor drain,
   writer shutdown and successor startup for the selected policy.
 
-(1987) [open] [policy] Which compatibility tier applies to each converted store and direct call?
+(1987) [open] [announced] Target T0–T2 per store and return any T3 boundary to the owner as a new decision item. `AGENTS.md` Compatibility Tiers prefers T0–T2 and requires owner approval for T3.
 
-- Old binaries still read shared JSON and some still write whole
-  files. Record and permission preserve unknown JSON members
-  (`wsagent/record.go:187-239`, `wsagent/permission_store.go:201-237`).
-  Memos preserve raw fields but refuse to write a future schema
-  (`wsdashboard/memos.go:32-50,67-83`). Workspace and seen readers decode
-  typed documents and their writers replace completely (`wsdashboard/workspaces.go:77-121`,
-  `wstrackerhost/seen.go:20-25,78-83,113-128`). These facts grade old behavior
-  only after a new write and a reopen path have been specified.
-- a. Target T0-T2 where each affected value, old write and new reopen can be
-  traced, including old-side changes during a downgrade and crashes before
-  export if export is used.
-- b. Use an explicitly owner-approved T3 minor boundary for stores or calls
-  whose old access must be fenced. Show how the old binary actually refuses
-  on every damaging route, including the direct binary where applicable.
-- Recommend a where recovery or transparency is demonstrated. Seek b
-  only for the remaining boundaries. Grade derived Pi successes separately
-  from authoritative records, selections and cursor state. A successful
-  new-version import of old data is required either way.
-
-(1988) [open] [policy] Use one shared daemon state DB or separate DBs by store or ownership root?
-
-- Hot record deltas and cold metadata have different write patterns.
-  Workspace and tracker seen state have different roots from the daemon lock.
-- a. One shared daemon DB, with one ownership and lifetime policy for
-  eligible cache-rooted state.
-- b. Separate DBs by store or ownership root to isolate writer contention
-  and preserve different access and lifetime contracts.
-- Recommend a for stores proven to share one cache owner, subject to
-  measured contention. Choose b for any retained config-root state that
-  needs a separate authority. The whiteboard's 30-minute close is
-  board-specific.
+(1988) [open] [technical] Use one shared daemon state DB for the cache-rooted stores over per-store DBs. With (1981) and (1982), the remaining stores share one cache owner and lifetime, and separate DBs multiply handles and checkpoints (performance Rule 4). Revisit only if measurements show contention.
 
 (1989) [open] [technical] Prefer transactional, repeatable legacy import over request-path fallback or continuous dual writes. Choose the discovery point, completion marker and authority handoff after (1987)-(1988). Keep invalid/future data and unknown fields available for recovery.
 
-(1990) [open] [policy] When can legacy files be deleted if SQLite becomes authoritative?
-
-- Deletion affects manual recovery and older readers. Whiteboard
-  (1816)=a kept that board's former folder as rollback material.
-- a. Keep legacy files through this child under the chosen import and
-  compatibility policy.
-- b. Remove eligible legacy files after a verified cutover and a separately
-  approved recovery and cleanup plan.
-- Recommend a pending the compatibility proof. Retention alone does
-  not make old data current or reconstruct later changes.
+(1990) [open] [announced] Keep legacy files through this child, following the rollback precedent in the whiteboard child (1816)=a.
 
 (1991) [open] [technical] Prefer reply-ID keyed conversation state and bounded recovery deltas over a whole-record rewrite on every mutation. Decide snapshot/compaction and the legacy unknown-field representation after (1980) and (1987).
 
@@ -389,11 +335,7 @@ Last ID: (2009)
 
 (2002) [open] [technical] Prefer reply-ID keyed hiring metadata with request identity available to the retry path over embedding hiring flags in registration. Decide how label, hiring and record publication recover after a partial creation.
 
-(2003) [open] [technical] If (1981) keeps workspaces in scope, prefer ordered canonical workspace entries at config-root scope over a cache-local layout copy. Prove batch preflight and linked-worktree rewrite behavior with the adjacent admission store.
-
 (2004) [open] [technical] Prefer a registration-nonce scoped hook cursor and keyed processed/due updates over replacing all hook state every scan. Preserve the queue/receipt order and catch-up policy.
-
-(2005) [open] [technical] If (1982) keeps seen state in scope, prefer registration-scoped badge/read set union over a whole mark-set replacement. Prove a changed registration cannot inherit old marks or recreate a removed store.
 
 (2006) [open] [technical] Prefer explicit durability requirements per write class over a single immediate flush rule for every metadata update. Evaluate `PRAGMA synchronous` against required recovery and measured cost, especially holder cursor and consumed input.
 
@@ -401,17 +343,7 @@ Last ID: (2009)
 
 (2008) [open] [announced] Use the whiteboard precedent's staged shape below, with an unwired store/import phase, an authority switch, and a measured result, subject to settlement. Source: `261119-refactor-ws-whiteboard-sqlite-board-store`, Phases 1–3.
 
-(2009) [open] [policy] Where does the Windows AhnLab V3 comparison gate the switch?
-
-- The performance manual requires a Windows baseline and before/after
-  evidence. The epic leaves the first-gate timing open.
-- a. Capture the pinned baseline before wiring authority and compare the
-  staged change on the target machine before release.
-- b. Require a representative WAL prototype comparison before any authority
-  change and repeat it on the fully wired workload.
-- Recommend a if isolation preserves access to the old baseline and
-  the chosen compatibility design has an observable recovery proof. Use b
-  when lock contention or checkpoint latency could change the DB topology.
+(2009) [open] [technical] Capture the pinned baseline before wiring authority and compare on the target Windows AhnLab V3 machine before release over gating the switch on a WAL prototype. With the topology set by (1988), the prototype adds no evidence beyond the wired comparison.
 
 ## Phases
 
@@ -437,7 +369,7 @@ interfaces, release tier and rollout mechanisms can appear in the ready plan.
 - Verify hard-kill/rejoin and graceful replacement for held leads and
   workers, including interrupted ring append and pending consumed input.
   Exercise tracker authorization, terminal ownership/pruning, permission
-  provenance, dashboard refresh/notifications and the hook/seen registration
+  provenance, dashboard refresh/notifications and the hook registration
   boundaries. Verify the chosen old/new cutover contract on the old binary
   as well as the new one.
 
@@ -446,8 +378,8 @@ interfaces, release tier and rollout mechanisms can appear in the ready plan.
 - Depends on Phase 2. Compare the same actions and dataset on the Windows
   heavy-AV baseline. Trace cold open/import and warm actions separately.
   Include held final ring lines and dirty/clean heartbeats, permission polls,
-  representative UI reads/mutations, hook scans and seen updates for the
-  stores included at settlement.
+  representative UI reads/mutations and hook scans for the stores included
+  at settlement.
 - Record syscall counts and action-to-visible-effect latency, including WAL,
   SHM, sync, checkpoint, replacement and shutdown bursts, against the prior
   paths. Verify the two cursor-driven whole-file writes are absent in the
