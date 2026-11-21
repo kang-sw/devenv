@@ -133,6 +133,7 @@ func (r *Runner) send(id, text string) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
+	c.inboxMutated(1)
 	// The inbox already owns the text durably. Coverage and the child's
 	// activity stamp ride the next immediate record write or shutdown flush.
 	c.recordDirty = true
@@ -157,6 +158,7 @@ func (r *Runner) Interrupt(id string) (State, []string, error) {
 		if err != nil {
 			return err
 		}
+		c.inboxMutated(len(held))
 		for _, rec := range held {
 			returned = append(returned, rec.Entry.Text())
 		}

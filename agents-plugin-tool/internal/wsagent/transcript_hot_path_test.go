@@ -102,6 +102,13 @@ type transcriptSendProbe struct {
 	send func(string) error
 }
 
+type inboxWakeProbe struct {
+	idleSnapshotSlot
+	wakes int
+}
+
+func (s *inboxWakeProbe) InboxMutated() { s.wakes++ }
+
 func (p transcriptSendProbe) Send(text string) error { return p.send(text) }
 
 func TestTranscriptKickPersistsBothSidesOfSendImmediately(t *testing.T) {
@@ -110,6 +117,8 @@ func TestTranscriptKickPersistsBothSidesOfSendImmediately(t *testing.T) {
 	c := &conv{r: r, dir: dir, inbox: wsinbox.Dir(dir), sends: 1,
 		rec: Record{ReplyID: "kick", WSKey: "key", Root: dir, Sends: 1}}
 	c.live = newLiveWriter(dir, "key", "pi", r.opts.Now, io.Discard)
+	slot := &inboxWakeProbe{}
+	c.live.setSlot(slot)
 	if _, _, err := wsinbox.Send(c.inbox, wsinbox.Entry{Parts: []string{"queued input"}}, r.opts.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -121,6 +130,13 @@ func TestTranscriptKickPersistsBothSidesOfSendImmediately(t *testing.T) {
 		return nil
 	}}
 	c.kick()
+	if slot.wakes != 1 {
+		t.Fatalf("drain inbox wakes = %d, want 1", slot.wakes)
+	}
+	c.inboxMutated(0)
+	if slot.wakes != 1 {
+		t.Fatalf("empty drain woke inbox: %d", slot.wakes)
+	}
 	if rec, err := readRecord(dir); err != nil || len(rec.Queued) != 0 || rec.Drained != 1 || rec.TurnMark != 1 {
 		t.Fatalf("successful Send did not immediately clear replayable input: %+v, %v", rec, err)
 	}

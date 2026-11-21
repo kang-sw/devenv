@@ -7,7 +7,56 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsinbox"
+	"github.com/kang-sw/devenv/internal/wslive"
 )
+
+func TestHostedInboxDrainWakesLiveRender(t *testing.T) {
+	f := startPageFixture(t)
+	live := openStream(t, f.base+"/s/livesession/events")
+	quiet(t, live)
+	dir := SessionDir(f.dir, "livesession")
+	slot, ok := f.d.OpenHostedSlot(dir)
+	if !ok {
+		t.Fatal("hosted slot unavailable")
+	}
+	defer slot.Close()
+	if _, _, err := wsinbox.Send(sessionInbox(f.dir, "livesession"), wsinbox.Entry{Parts: []string{"delivered message"}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	session, _ := f.d.index.Session("livesession")
+	f.d.inboxChanged(session) // The POST's ordinary wake.
+	held := waitRegionHolding(t, live, regionConvLive, "delivered message")
+	if !strings.Contains(held.HTML, `class="msg user held`) {
+		t.Fatalf("initial message was not held: %s", held.HTML)
+	}
+	quiet(t, live)
+	recs, err := wsinbox.Drain(sessionInbox(f.dir, "livesession"))
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("drain = %v, %v", recs, err)
+	}
+	slot.(InboxMutationSlot).InboxMutated()
+	if err := wslive.AppendRing(wslive.RingDir(dir), []wslive.RingEntry{{Kind: wslive.RingUser, Origin: wslive.OriginWhiteboard, Text: "delivered message"}}); err != nil {
+		t.Fatal(err)
+	}
+	slot.RingAppended()
+	seenEntries, seenLive := false, false
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && !(seenEntries && seenLive) {
+		ev, ok := nextRegion(t, live, time.Until(deadline))
+		if !ok {
+			break
+		}
+		if ev.Name == regionEntries && strings.Contains(ev.HTML, "delivered message") {
+			seenEntries = true
+		}
+		if ev.Name == regionConvLive && !strings.Contains(ev.HTML, `class="msg user held`) {
+			seenLive = true
+		}
+	}
+	if !seenEntries || !seenLive {
+		t.Fatalf("delivery render: entries=%v held removed=%v", seenEntries, seenLive)
+	}
+}
 
 func TestInboxLiveRenderRefreshesHeldDrainedAndMixedFallback(t *testing.T) {
 	f := startPageFixture(t)
