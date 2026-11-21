@@ -52,6 +52,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { fixtureCLI, fixtureReplyID, scratchCookie, scratchEnv } from "./headless-scratch.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..");
@@ -250,7 +251,7 @@ function seedProject(proj) {
 // ---------------------------------------------------------------- daemon --
 // One isolated instance at a time; restart() stops it by its own PID and
 // starts the same binary on the same port.
-const inst = { proc: null, bin: "", root: "", env: null, port: 0, stopping: false };
+const inst = { proc: null, bin: "", root: "", env: null, port: 0, ep: null, cookie: null, stopping: false };
 function killDaemon() {
   const d = inst.proc;
   if (d && d.exitCode === null && d.signalCode === null) {
@@ -259,22 +260,6 @@ function killDaemon() {
 }
 process.on("exit", killDaemon);
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { killDaemon(); process.exit(130); });
-
-function isolatedEnv(root, extra) {
-  const env = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    // Nothing of the caller's ws session or XDG dirs reaches the instance.
-    if (!k.startsWith("WS_") && !k.startsWith("XDG_")) env[k] = v;
-  }
-  Object.assign(env, {
-    HOME: path.join(root, "home"),
-    WS_CACHE_HOME: path.join(root, "cache"),
-    WS_CONFIG_HOME: path.join(root, "config"),
-    GIT_AUTHOR_NAME: "webcard", GIT_AUTHOR_EMAIL: "webcard@example.invalid",
-    GIT_COMMITTER_NAME: "webcard", GIT_COMMITTER_EMAIL: "webcard@example.invalid",
-  });
-  return Object.assign(env, extra || {});
-}
 
 function build(root) {
   const bin = path.join(root, "bin", process.platform === "win32" ? "ws-mcp.exe" : "ws-mcp");
@@ -296,8 +281,10 @@ async function startDaemon(port) {
     return v.pid === d.pid && v.port ? v : null;
   }, 20000);
   inst.port = ep.port;
+  inst.ep = ep;
   const base = `http://127.0.0.1:${ep.port}`;
   await until("the daemon's health", async () => (await fetch(base + "/health")).ok, 20000);
+  inst.cookie = await scratchCookie(ep);
   return base;
 }
 async function stopDaemon() {
@@ -314,9 +301,9 @@ async function stopDaemon() {
 // seedSession registers one session at proj with a whiteboard topic linking
 // the fixture and the static page, and makes the daemon index it.
 async function seedSession(fx, base) {
-  const env = isolatedEnv(inst.root, { WS_RSRC_ROOT: path.join(REPO, "agents-plugin", "rsrc"), WS_SKILLS_ROOT: path.join(inst.root, "no-skills"), WS_MCP_NO_DASHBOARD: "1" });
-  const call = (tool, args) => execFileSync(inst.bin, ["call", tool, JSON.stringify(args)], { cwd: fx.proj, env, encoding: "utf8" });
-  const fer = JSON.parse(call("ferrule", { root: fx.proj, format: "json" }));
+  const env = { ...inst.env, WS_SKILLS_ROOT: path.join(inst.root, "no-skills"), WS_MCP_NO_DASHBOARD: "1" };
+  const call = fixtureCLI(inst.ep, fx.proj, env);
+  const fer = JSON.parse(await call("ferrule", { root: fx.proj, format: "json" }));
   const P = fx.up.port;
   const body = [
     `Dev server: [on localhost](http://localhost:${P}/), [on loopback four](http://127.0.0.1:${P}/errors), [on loopback six](http://[::1]:${P}/sandbox).`,
@@ -327,10 +314,8 @@ async function seedSession(fx, base) {
   ].join("\n");
   const board = `<wb:topic name="Web card fixture"><wb:body>${body}</wb:body>` +
     '<wb:add class="check"><wb:title>Check the web card</wb:title></wb:add></wb:topic>';
-  const out = call("whiteboard.update", { session_key: fer.session_key, commands: board });
-  const m = /ai-docs\/whiteboards\/([a-z0-9]+)\/index\.html/.exec(out);
-  if (!m) throw new Error("no whiteboard reply id: " + out.slice(0, 400));
-  fx.rid = m[1];
+  await call("whiteboard.update", { session_key: fer.session_key, commands: board });
+  fx.rid = fixtureReplyID(fer.session_key);
   fx.root = fer.root;
   await beat(fx, base);
 }
@@ -345,7 +330,8 @@ async function beat(fx, base) {
   write(path.join(dir, "snapshot.json"), JSON.stringify({ schemaVersion: 1, replyId: fx.rid, adapter: "pi", updatedAt: now, heartbeatMs: 3600000, lead: { phase: "idle" } }));
   const r = await fetch(base + "/nudge", { method: "POST", body: JSON.stringify({ reply_id: fx.rid, project: fx.root }) });
   if (r.status !== 204) throw new Error(`nudge: HTTP ${r.status}`);
-  await until("the session page", async () => (await fetch(`${base}/s/${fx.rid}`)).ok, 10000);
+  const { name, value } = inst.cookie;
+  await until("the session page", async () => (await fetch(`${base}/s/${fx.rid}`, { headers: { Cookie: `${name}=${value}` } })).ok, 10000);
 }
 
 // ------------------------------------------------------------ playwright --
@@ -420,7 +406,9 @@ async function makeContext(browser, fx, o = {}) {
     note: (s) => console.log(`  (${s})`),
     url: (host = "127.0.0.1") => `http://${host}:${fx.dport()}/s/${fx.rid}`,
     async open(host) {
-      await page.goto(t.url(host));
+      const url = t.url(host);
+      await context.addCookies([{ ...inst.cookie, url: new URL(url).origin }]);
+      await page.goto(url);
       await t.sessionFrame();
       await until("the board's topic", () => t.boardFrame(), 15000);
     },
@@ -1083,7 +1071,7 @@ const SCENARIOS = [
           await sleep(250);
           await snap(card, `web-card-pick-${theme}.png`);
           await t.page.mouse.click(hb.x + 20, hb.y + hb.height / 2);
-          await until("the pick chip", async () => (await t.session.locator("#cchips .pchip").count()) >= 1);
+          await t.session.locator('#composer [data-wsc-kind="pick"]').waitFor({ state: "attached", timeout: 5000 });
           // The errors page: attach, then two more errors so the badge shows
           // beside the chips.
           await card.locator(".wc-url").fill(`http://127.0.0.1:${t.fx.up.port}/errors`);
@@ -1091,13 +1079,14 @@ const SCENARIOS = [
           const badge = card.locator(".wc-badge");
           await until("the badge", async () => (await badge.textContent()) === "3", 6000);
           await card.locator(".bc-acts .wc-att").click();
-          await until("the console chip", async () => (await t.session.locator("#cchips .cchip").count()) >= 1);
+          await t.session.locator('#composer [data-wsc-kind="console"]').waitFor({ state: "attached", timeout: 5000 });
           const g = await t.inner(card, "/errors");
           await g.locator("#more").click();
           await g.locator("#more").click();
           await until("the badge again", async () => !(await badge.isHidden()) && (await badge.textContent()) === "2", 4000);
           await t.page.mouse.move(2, 2);
-          await t.session.locator("#ctext").fill("Why does this heading log errors?");
+          await t.session.locator("#composer .wsc-editor").press("End");
+          await t.page.keyboard.type("Why does this heading log errors?");
           await sleep(200);
           await snap(t.session.locator("#composer"), `composer-chips-${theme}.png`);
           await snap(t.page, `page-card-and-composer-${theme}.png`);
@@ -1122,13 +1111,17 @@ async function main() {
   let failed = 0, browser = null, up = null;
   try {
     inst.root = root;
-    inst.env = isolatedEnv(root, { WS_MCP_DASHBOARD_DEV_SOURCE: TOOL });
-    for (const k of ["HOME", "WS_CONFIG_HOME"]) fs.mkdirSync(inst.env[k], { recursive: true });
+    inst.env = {
+      ...scratchEnv(root),
+      WS_MCP_DASHBOARD_DEV_SOURCE: TOOL,
+      GIT_AUTHOR_NAME: "webcard", GIT_AUTHOR_EMAIL: "webcard@example.invalid",
+      GIT_COMMITTER_NAME: "webcard", GIT_COMMITTER_EMAIL: "webcard@example.invalid",
+    };
     inst.bin = build(root);
     up = await startFixture();
     const proj = path.join(root, "proj");
     seedProject(proj);
-    execFileSync("git", ["init", "-q", "."], { cwd: proj });
+    execFileSync("git", ["init", "-q", "."], { cwd: proj, env: inst.env });
     execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "fixture"], { cwd: proj, env: inst.env });
     let base = await startDaemon(0);
     const fx = { up, proj, base, rid: "", root: "", dport: () => inst.port };

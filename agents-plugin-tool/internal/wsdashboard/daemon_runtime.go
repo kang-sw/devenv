@@ -17,7 +17,7 @@ func (d *Daemon) sessionChanged(replyID string) {
 	if d.index != nil {
 		if session, ok := d.index.Session(replyID); ok {
 			d.scheduleAnswerReplay(session.Registration)
-			if session.Harness == "claude" {
+			if d.planUsage != nil && session.Harness == "claude" {
 				d.planUsage.pushClaude(d.snapshots.snapshotWithoutObserved(d.dir, replyID))
 			}
 		} else {

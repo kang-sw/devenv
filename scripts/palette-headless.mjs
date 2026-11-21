@@ -46,6 +46,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { fixtureCLI, fixtureReplyID, scratchCookie, scratchEnv } from "./headless-scratch.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TOOL_DIR = path.join(REPO, "agents-plugin-tool");
@@ -76,18 +77,6 @@ function playwright() {
 function ver(d) { return JSON.parse(fs.readFileSync(path.join(d, "package.json"), "utf8")).version.split(".").map(Number); }
 function cmpVer(a, b) { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i]; return 0; }
 
-// childEnv: the caller's environment minus every WS_* variable (a ws
-// session's own keys and cache homes must not leak in), plus the isolated
-// homes and a git identity for the seeded repositories.
-function childEnv(tmp, extra) {
-  const env = {};
-  for (const [k, v] of Object.entries(process.env)) if (!k.startsWith("WS_")) env[k] = v;
-  Object.assign(env, {
-    WS_CACHE_HOME: path.join(tmp, "cache"), WS_CONFIG_HOME: path.join(tmp, "config"), HOME: path.join(tmp, "home"),
-    GIT_AUTHOR_NAME: "palette", GIT_AUTHOR_EMAIL: "palette@example.invalid", GIT_COMMITTER_NAME: "palette", GIT_COMMITTER_EMAIL: "palette@example.invalid",
-  });
-  return Object.assign(env, extra || {});
-}
 function run(cmd, argv, opts) {
   const r = spawnSync(cmd, argv, Object.assign({ encoding: "utf8" }, opts));
   if (r.status !== 0) throw new Error(`${cmd} ${argv.join(" ")} failed (${r.status}): ${(r.stderr || "") + (r.stdout || "")}`.slice(0, 4000));
@@ -104,9 +93,14 @@ async function waitFor(fn, ms, what) {
 function write(file, text) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); }
 
 // --- the isolated daemon and its seeded session ----------------------------
-async function serve(tmp) {
-  fs.mkdirSync(path.join(tmp, "home"), { recursive: true });
-  const bin = path.join(tmp, "ws-mcp");
+async function serve(tmp, srv) {
+  const daemonEnv = {
+    ...scratchEnv(tmp),
+    WS_MCP_DASHBOARD_DEV_SOURCE: TOOL_DIR,
+    GIT_AUTHOR_NAME: "palette", GIT_AUTHOR_EMAIL: "palette@example.invalid",
+    GIT_COMMITTER_NAME: "palette", GIT_COMMITTER_EMAIL: "palette@example.invalid",
+  };
+  const bin = path.join(tmp, process.platform === "win32" ? "ws-mcp.exe" : "ws-mcp");
   log("building ws-mcp ...");
   run("go", ["build", "-o", bin, "./cmd/ws-mcp"], { cwd: TOOL_DIR });
   const proj = path.join(tmp, "proj");
@@ -114,28 +108,28 @@ async function serve(tmp) {
   write(path.join(proj, "notes", "palette-guide.md"), "# Palette guide\n\nThe palette streams file and content results.\n");
   write(path.join(proj, "src", "palette_view.go"), "package src\n\n// palette rows render here\nfunc paletteRows() {}\n");
   write(path.join(proj, "src", "other.go"), "package src\n");
-  run("git", ["init", "-q", "."], { cwd: proj });
+  run("git", ["init", "-q", "."], { cwd: proj, env: daemonEnv });
   const listing = path.join(tmp, "listing");
   write(path.join(listing, "food", "inner.txt"), "inside\n");
   write(path.join(listing, "fo.txt"), "fo\n");
   write(path.join(listing, "bar.txt"), "bar\n");
   write(path.join(listing, "xfoy.md"), "x\n");
-  const env = childEnv(tmp, { WS_RSRC_ROOT: path.join(REPO, "agents-plugin", "rsrc"), WS_SKILLS_ROOT: path.join(tmp, "no-skills"), WS_MCP_NO_DASHBOARD: "1" });
-  const fer = JSON.parse(run(bin, ["call", "ferrule", JSON.stringify({ root: proj, format: "json" })], { cwd: proj, env }));
+  const dashDir = path.join(tmp, "cache", "dashboard");
+  const logf = fs.openSync(path.join(tmp, "daemon.log"), "a");
+  const daemon = srv.daemon = spawn(bin, ["dashboard", "--port", "0"], { cwd: tmp, stdio: ["ignore", logf, logf], env: daemonEnv });
+  const ep = await waitFor(() => { const e = JSON.parse(fs.readFileSync(path.join(dashDir, "endpoint.json"), "utf8")); return e.pid === daemon.pid && e.port ? e : null; }, 20000, "the daemon's endpoint file");
+  const base = `http://127.0.0.1:${ep.port}`;
+  await waitFor(async () => (await fetch(base + "/health")).ok, 10000, "/health");
+  const cookie = await scratchCookie(ep);
+  const env = { ...daemonEnv, WS_SKILLS_ROOT: path.join(tmp, "no-skills"), WS_MCP_NO_DASHBOARD: "1" };
+  const call = fixtureCLI(ep, proj, env);
+  const fer = JSON.parse(await call("ferrule", { root: proj, format: "json" }));
   const board = '<wb:topic name="Palette design"><wb:body><p>How the palette streams its slots.</p></wb:body>' +
     '<wb:add class="check"><wb:title>Check the palette width steps</wb:title></wb:add>' +
     '<wb:add class="check"><wb:title>Review streaming states</wb:title></wb:add>' +
     '<wb:add class="check"><wb:title>Path mode listing</wb:title></wb:add></wb:topic>';
-  const out = run(bin, ["call", "whiteboard.update", JSON.stringify({ session_key: fer.session_key, commands: board })], { cwd: proj, env });
-  const m = /ai-docs\/whiteboards\/([a-z0-9]+)\/index\.html/.exec(out);
-  if (!m) throw new Error("no whiteboard reply id: " + out.slice(0, 400));
-  const s = { rid: m[1], root: fer.root };
-  const dashDir = path.join(tmp, "cache", "dashboard");
-  const logf = fs.openSync(path.join(tmp, "daemon.log"), "a");
-  const daemon = spawn(bin, ["dashboard", "--port", "0"], { cwd: tmp, stdio: ["ignore", logf, logf], env: childEnv(tmp, { WS_MCP_DASHBOARD_DEV_SOURCE: TOOL_DIR }) });
-  const ep = await waitFor(() => { const e = JSON.parse(fs.readFileSync(path.join(dashDir, "endpoint.json"), "utf8")); return e.pid === daemon.pid && e.port ? e : null; }, 20000, "the daemon's endpoint file");
-  const base = `http://127.0.0.1:${ep.port}`;
-  await waitFor(async () => (await fetch(base + "/health")).ok, 10000, "/health");
+  await call("whiteboard.update", { session_key: fer.session_key, commands: board });
+  const s = { rid: fixtureReplyID(fer.session_key), root: fer.root };
   const beat = () => {
     const now = new Date(), iso = now.toISOString().replace(/\.\d+Z$/, "Z"), dir = path.join(dashDir, "sessions", s.rid);
     fs.mkdirSync(dir, { recursive: true });
@@ -146,8 +140,9 @@ async function serve(tmp) {
   beat();
   const r = await fetch(base + "/nudge", { method: "POST", body: JSON.stringify({ reply_id: s.rid, project: s.root }) });
   if (r.status !== 204) throw new Error(`nudge: HTTP ${r.status}`);
-  await waitFor(async () => (await fetch(`${base}/s/${s.rid}`)).ok, 10000, "the session page");
-  return { daemon, base, rid: s.rid, listing, timer: setInterval(beat, 60000) };
+  const headers = { Cookie: `${cookie.name}=${cookie.value}` };
+  await waitFor(async () => (await fetch(`${base}/s/${s.rid}`, { headers })).ok, 10000, "the session page");
+  Object.assign(srv, { base, cookie, rid: s.rid, listing, timer: setInterval(beat, 60000) });
 }
 
 // --- page helpers --------------------------------------------------------------
@@ -167,7 +162,7 @@ function state(f) {
     const cur = d.getAttribute("data-step") === "narrow" ? d.querySelector(".tk-qtab.on[data-qslot]") : d.querySelector(".tk-qpane.tk-qfocus[data-pane]");
     const panes = {};
     d.querySelectorAll(".tk-qpane[data-pane]").forEach((p) => { panes[p.getAttribute("data-pane")] = p.innerText; });
-    return { open: d.open, w: Math.round(d.getBoundingClientRect().width), step: d.getAttribute("data-step"), q: inp.value, sel: [inp.selectionStart, inp.selectionEnd],
+    return { open: !d.hidden, w: Math.round(d.getBoundingClientRect().width), step: d.getAttribute("data-step"), q: inp.value, sel: [inp.selectionStart, inp.selectionEnd],
       focus: document.activeElement && document.activeElement.id, cur: cur && (cur.getAttribute("data-pane") || cur.getAttribute("data-qslot")),
       chip: !!d.querySelector("#tkqjump .tk-qchip.on"), panes, text: d.innerText, spin: !!d.querySelector(".tk-qspin"), stale: !!d.querySelector(".tk-qstale") };
   });
@@ -179,7 +174,7 @@ async function openKey(page, f) {
   for (let i = 0; ; i++) {
     await f.evaluate(() => { window.focus(); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); });
     await page.keyboard.press("Control+k");
-    try { await f.waitForFunction(() => document.getElementById("tkqpop").open, null, { timeout: 1500 }); return; } catch (e) { if (i === 3) throw e; }
+    try { await f.waitForFunction(() => !document.getElementById("tkqpop").hidden, null, { timeout: 1500 }); return; } catch (e) { if (i === 3) throw e; }
   }
 }
 async function typeQ(page, f, q) {
@@ -413,23 +408,25 @@ async function main() {
   const only = a.only ? a.only.split(",") : Object.keys(SCENARIOS);
   const { chromium } = playwright();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "palette-headless-"));
-  let srv = null, browser = null;
+  const srv = {};
+  let browser = null;
   try {
-    srv = await serve(tmp);
+    await serve(tmp, srv);
     log(`daemon pid ${srv.daemon.pid} on ${srv.base} (temp ${tmp})`);
     browser = await chromium.launch({ headless: !a.headed });
     const context = await browser.newContext({ viewport: { width: 1240, height: 860 } });
+    await context.addCookies([{ ...srv.cookie, url: srv.base }]);
     // The beta store's view never loads, so its hits come from a store that is not loaded.
     await context.route("**/tracker/stores/beta/view*", (r) => r.abort());
     const page = await context.newPage();
     page.on("pageerror", (e) => { failures++; console.log(`  FAIL page error: ${e.message}`); });
     await page.goto(`${srv.base}/s/${srv.rid}`, { waitUntil: "load" });
     let f = await frameOf(page);
-    await f.waitForSelector("#tkqs", { state: "attached", timeout: 15000 });
+    await f.waitForSelector("#tkqpop", { state: "attached", timeout: 15000 });
     await seedTracker(f);
     await page.reload({ waitUntil: "load" });
     f = await frameOf(page);
-    await f.waitForSelector("#tkqs", { state: "attached", timeout: 15000 });
+    await f.waitForSelector("#tkqpop", { state: "attached", timeout: 15000 });
     await sleep(800);
     const ctx = { page, browser, out: a.out, listing: srv.listing };
     for (const name of only) {
@@ -438,11 +435,14 @@ async function main() {
     }
   } finally {
     if (browser) await browser.close();
-    if (srv) {
-      clearInterval(srv.timer);
+    clearInterval(srv.timer);
+    if (srv.daemon && srv.daemon.exitCode === null && srv.daemon.signalCode === null) {
+      const gone = new Promise((r) => srv.daemon.once("exit", r));
       srv.daemon.kill("SIGTERM");
-      await Promise.race([new Promise((r) => srv.daemon.once("exit", r)), sleep(5000)]);
-      if (srv.daemon.exitCode === null) srv.daemon.kill("SIGKILL");
+      if (!await Promise.race([gone.then(() => true), sleep(5000).then(() => false)])) {
+        srv.daemon.kill("SIGKILL");
+        await gone;
+      }
     }
     if (!a["keep-tmp"]) fs.rmSync(tmp, { recursive: true, force: true }); else log(`kept ${tmp}`);
   }

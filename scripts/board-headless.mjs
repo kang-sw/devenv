@@ -145,8 +145,8 @@
 // Navigation height reports arrive <=300ms apart while the existing keep is
 // OPEN. A separate post-end report may move content but must not re-arm it.
 //
-// `serve --history-entries 180` seeds long panel histories and prints the true
-// standalone file URLs too. `history --artifacts <dir>` saves measurements,
+// `serve --history-entries 180` seeds long panel histories.
+// `history --artifacts <dir>` saves measurements,
 // per-frame samples and before/after PNGs. Standalone full pages have unframed
 // entry bodies, so their late-height probe grows that real body, not an invented
 // dashboard iframe. Swaps/keep/observer still require a dashboard stream.
@@ -175,6 +175,7 @@ import { createHash } from 'node:crypto';
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { fixtureCLI, fixtureReplyID, scratchCookie, scratchEnv } from "./headless-scratch.mjs";
 import { scenarioHistoryUnified } from "./board-history-unified.mjs";
 import { createToolbarOverview } from './board-headless/toolbar-overview.mjs';
 import assetSource from '../agents-plugin-tool/internal/wsdashboard/testdata/asset-source.cjs';
@@ -255,17 +256,6 @@ async function loadPlaywright() {
 
 // --- serve: an isolated dev daemon with seeded sessions ----------------------
 
-// childEnv is the environment the isolated ws-mcp processes run with: the
-// caller's, minus every WS_* variable (a ws session's own keys, roots and
-// cache homes must not leak in), plus the isolated homes.
-function childEnv(tmp, extra) {
-  const env = {};
-  for (const [k, v] of Object.entries(process.env)) if (!k.startsWith("WS_")) env[k] = v;
-  env.WS_CACHE_HOME = path.join(tmp, "cache");
-  env.WS_CONFIG_HOME = path.join(tmp, "config");
-  env.HOME = tmp;
-  return Object.assign(env, extra || {});
-}
 function run(cmd, args, opts) {
   const r = spawnSync(cmd, args, Object.assign({ encoding: "utf8", windowsHide: true }, opts));
   if (r.status !== 0) throw new Error(`${cmd} ${args.join(" ")} failed (${r.status}): ${(r.stderr || "") + (r.stdout || "")}`.slice(0, 4000));
@@ -284,42 +274,36 @@ function topicCommands(i, pending = 0) {
 
 // seedSession makes a project with one ws session and a board of n topics,
 // and returns its reply id and canonical root.
-function seedSession(tmp, bin, label, n, historyEntries, mermaid, pending, sharedActions) {
+async function seedSession(tmp, endpoint, daemonEnv, label, n, historyEntries, mermaid, pending, sharedActions) {
   const proj = path.join(tmp, `proj-${label}`);
   fs.mkdirSync(path.join(proj, "ai-docs"), { recursive: true });
   fs.writeFileSync(path.join(proj, "ai-docs", "_index.md"), `# ${label}\n`);
-  run("git", ["init", "-q", "."], { cwd: proj });
-  const env = childEnv(tmp, {
-    WS_RSRC_ROOT: path.join(REPO, "agents-plugin", "rsrc"),
+  run("git", ["init", "-q", "."], { cwd: proj, env: daemonEnv });
+  const env = {
+    ...daemonEnv,
     WS_SKILLS_ROOT: path.join(tmp, "no-skills"),
     WS_MCP_NO_DASHBOARD: "1",
-  });
-  const fer = JSON.parse(run(bin, ["call", "ferrule", JSON.stringify({ root: proj, format: "json" })], { cwd: proj, env }));
-  let rid = null;
+  };
+  const call = fixtureCLI(endpoint, proj, env);
+  const fer = JSON.parse(await call("ferrule", { root: proj, format: "json" }));
+  const update = (commands) => call("whiteboard.update", { session_key: fer.session_key, commands });
   // The mermaid topic is seeded first, so it is the oldest, at the bottom:
   // a body with a mermaid fence and a panel, the bands scenario's jump
   // target.
   if (mermaid) {
     const body = "## MERMAID\n\n```mermaid\ngraph TD; A-->B; B-->C; C-->A\n```\n";
-    const out = run(bin, ["call", "whiteboard.update", JSON.stringify({ session_key: fer.session_key,
-      commands: `<wb:topic name="MERMAID"><wb:body>${body}</wb:body><wb:panel recap="Jump target"><p>Panel under the mermaid topic.</p></wb:panel></wb:topic>` })], { cwd: proj, env });
-    const m = /ai-docs\/whiteboards\/([a-z0-9]+)\/index\.html/.exec(out);
-    if (m) rid = m[1];
+    await update(`<wb:topic name="MERMAID"><wb:body>${body}</wb:body><wb:panel recap="Jump target"><p>Panel under the mermaid topic.</p></wb:panel></wb:topic>`);
   }
   // One update per topic, so each topic has its own last-change time.
   for (let i = 1; i <= n; i++) {
-    const out = run(bin, ["call", "whiteboard.update", JSON.stringify({ session_key: fer.session_key, commands: topicCommands(i, i === n ? pending : 0) })], { cwd: proj, env });
-    const m = /ai-docs\/whiteboards\/([a-z0-9]+)\/index\.html/.exec(out);
-    if (m) rid = m[1];
+    await update(topicCommands(i, i === n ? pending : 0));
   }
-  if (!rid) throw new Error(`no whiteboard reply id for the ${label} session`);
   if (historyEntries) {
     // Real renderer output, including its 50-entry templates and disclosure
     // keys. Distinct panels avoid turning the long history into one log fold.
     const entries = Array.from({ length: historyEntries }, (_, i) =>
       `<wb:panel recap="History panel ${i + 1}"><p>History payload ${i + 1}: delayed content height fixture.</p></wb:panel>`).join("");
-    run(bin, ["call", "whiteboard.update", JSON.stringify({ session_key: fer.session_key,
-      commands: `<wb:topic name="HISTORY">${entries}</wb:topic>` })], { cwd: proj, env });
+    await update(`<wb:topic name="HISTORY">${entries}</wb:topic>`);
     // Renderer-produced closed system-event chips exercise size-neutral page
     // joins: newest 47 chip rows + three visible tail rows; older pages hold
     // whole chips. Log lines stay visible rows, so the chain is alternating
@@ -328,13 +312,11 @@ function seedSession(tmp, bin, label, n, historyEntries, mermaid, pending, share
     for (const [name, count] of [['LOGCHAIN', 200], ['LOGCANCEL', 600]]) {
       const states = Array.from({ length: count - 4 }, (_, i) => `<wb:state value="${i % 2 ? 'discussing' : 'waiting'}"/>`).join('');
       const tail = [1, 2, 3].map((i) => `<wb:log>Visible tail line ${i}</wb:log>`).join('');
-      run(bin, ['call', 'whiteboard.update', JSON.stringify({
-        session_key: fer.session_key, commands: `<wb:topic name="${name}"><wb:log>Opening history line</wb:log>${states}${tail}</wb:topic>`
-      })], { cwd: proj, env });
+      await update(`<wb:topic name="${name}"><wb:log>Opening history line</wb:log>${states}${tail}</wb:topic>`);
     }
     // Keep topics on both sides, so collapse compensation cannot be masked
     // by the document's scroll-range clamp.
-    run(bin, ["call", "whiteboard.update", JSON.stringify({ session_key: fer.session_key, commands: topicCommands(n + 1) })], { cwd: proj, env });
+    await update(topicCommands(n + 1));
   }
   if (sharedActions) {
     fs.mkdirSync(path.join(proj, 'docs'), { recursive: true });
@@ -342,12 +324,9 @@ function seedSession(tmp, bin, label, n, historyEntries, mermaid, pending, share
     const tickets = path.join(proj, 'ai-docs', 'tickets', 'ready');
     fs.mkdirSync(tickets, { recursive: true });
     fs.writeFileSync(path.join(tickets, '261114-feat-card-fixture.md'), '---\ntitle: Card fixture\n---\n\n# Card fixture\n');
-    run(bin, ['call', 'whiteboard.update', JSON.stringify({ session_key: fer.session_key,
-      commands: '<wb:topic name="SHARED" tickets="261114-feat-card-fixture"><wb:body><p>Shared action fixture <a href="docs/a.md">preview A</a></p></wb:body><wb:panel recap="Expanded panel"><p>Panel payload</p></wb:panel><wb:panel recap="Closed panel"><p>Second payload</p></wb:panel><wb:log>History fixture</wb:log><wb:add class="technical"><wb:title>Open question fixture</wb:title><wb:option>Yes</wb:option><wb:option>No</wb:option><wb:link>docs/a.md</wb:link></wb:add></wb:topic>'
-    })], { cwd: proj, env });
+    await update('<wb:topic name="SHARED" tickets="261114-feat-card-fixture"><wb:body><p>Shared action fixture <a href="docs/a.md">preview A</a></p></wb:body><wb:panel recap="Expanded panel"><p>Panel payload</p></wb:panel><wb:panel recap="Closed panel"><p>Second payload</p></wb:panel><wb:log>History fixture</wb:log><wb:add class="technical"><wb:title>Open question fixture</wb:title><wb:option>Yes</wb:option><wb:option>No</wb:option><wb:link>docs/a.md</wb:link></wb:add></wb:topic>');
   }
-  return { rid, root: fer.root, key: fer.session_key,
-    standalone: pathToFileURL(path.join(fer.root, "ai-docs", "whiteboards", rid, "index.html")).href };
+  return { rid: fixtureReplyID(fer.session_key), root: fer.root };
 }
 
 async function waitFor(fn, ms, what) {
@@ -383,29 +362,31 @@ async function serve(args) {
   process.on("SIGTERM", () => stop(0));
   try {
     const bin = path.join(tmp, process.platform === "win32" ? "ws-mcp.exe" : "ws-mcp");
+    const env = scratchEnv(tmp);
+    if (args["dev-assets"]) env.WS_MCP_DASHBOARD_DEV_SOURCE = TOOL_DIR;
     log(`building ws-mcp from ${TOOL_DIR} ...`);
-    run("go", ["build", "-o", bin, "./cmd/ws-mcp"], { cwd: TOOL_DIR, env: childEnv(tmp) });
-    log(`seeding two sessions (${n} topics each) ...`);
-    const adapter = seedSession(tmp, bin, "adapter", n, +(args["history-entries"] || 0), !!args.mermaid, +(args.pending || 0), !!args['shared-actions']);
-    const board = seedSession(tmp, bin, "board", n, +(args["history-entries"] || 0), !!args.mermaid, +(args.pending || 0), !!args['shared-actions']);
+    run("go", ["build", "-o", bin, "./cmd/ws-mcp"], { cwd: TOOL_DIR });
     const dashDir = path.join(tmp, "cache", "dashboard");
+    const endpointFile = path.join(dashDir, "endpoint.json");
     const out = fs.openSync(path.join(tmp, "daemon.log"), "a");
     daemon = spawn(bin, ["dashboard", "--port", "0"], {
       cwd: tmp, stdio: ["ignore", out, out], windowsHide: true,
-      env: childEnv(tmp, args['dev-assets'] ? { WS_MCP_DASHBOARD_DEV_SOURCE: TOOL_DIR } : undefined),
+      env,
     });
     daemon.on("exit", (code) => { if (!stopping) { console.error(`board-headless: daemon exited (${code}); log: ${path.join(tmp, "daemon.log")}`); stop(1); } });
     const ep = await waitFor(() => {
-      const e = JSON.parse(fs.readFileSync(path.join(dashDir, "endpoint.json"), "utf8"));
+      const e = JSON.parse(fs.readFileSync(endpointFile, "utf8"));
       return e.pid === daemon.pid && e.port ? e : null;
     }, 20000, "the daemon's endpoint file");
     const base = `http://127.0.0.1:${ep.port}`;
     await waitFor(async () => (await fetch(base + "/health")).ok, 10000, "/health");
     // Native readiness requests need the same localhost cookie as a browser.
     // /health and /nudge are machine exemptions; session pages are not.
-    const auth = await fetch(base + "/auth/cookie", { method: "POST", headers: { Authorization: "Bearer " + ep.token } });
-    if (!auth.ok) throw new Error(`localhost cookie: HTTP ${auth.status}: ${await auth.text()}`);
-    const credential = await auth.json(), cookie = credential.name + "=" + credential.value;
+    const credential = await scratchCookie(ep);
+    const cookie = `${credential.name}=${credential.value}`;
+    log(`seeding two sessions (${n} topics each) ...`);
+    const adapter = await seedSession(tmp, ep, env, "adapter", n, +(args["history-entries"] || 0), !!args.mermaid, +(args.pending || 0), !!args['shared-actions']);
+    const board = await seedSession(tmp, ep, env, "board", n, +(args["history-entries"] || 0), !!args.mermaid, +(args.pending || 0), !!args['shared-actions']);
     // The registry row (and, for the adapter session, a live snapshot) is
     // what a serving ws-mcp would write; refreshed on a timer so the
     // session stays inside the registry's liveness window.
@@ -435,9 +416,9 @@ async function serve(args) {
       if (hasBar !== wantBar) throw new Error(`/s/${s.rid}: #tabbar ${hasBar ? "present" : "absent"}, expected ${wantBar ? "present" : "absent"}`);
     }
     log(`daemon pid ${daemon.pid} on ${base} (temp ${tmp})`);
+    log(`endpoint file: ${endpointFile}`);
     log(`adapter page: ${base}/s/${adapter.rid}`);
     log(`board page:   ${base}/s/${board.rid}`);
-    log(`standalone:   ${board.standalone}`);
     log("serving; Ctrl-C stops the daemon and removes the temp directory");
   } catch (e) {
     console.error(`board-headless serve: ${e.message}`);
@@ -471,6 +452,12 @@ async function openBoard(ctx) {
     BROWSERS.push(browser);
   }
   const tab = await browser.newPage({ viewport: { width: ctx.width, height: ctx.height }, locale: ctx.language === 'ko' ? 'ko-KR' : undefined });
+  if (ctx.args.endpoint && /^https?:/.test(ctx.args.url)) {
+    const origin = new URL(ctx.args.url).origin;
+    const ep = JSON.parse(fs.readFileSync(ctx.args.endpoint, "utf8"));
+    assert(origin === `http://127.0.0.1:${ep.port}`, "--endpoint must match the scratch server in --url");
+    await tab.context().addCookies([{ ...await scratchCookie(ep), url: origin }]);
+  }
   if (ctx.language && /^https?:/.test(ctx.args.url)) await tab.context().addCookies([{ name: 'ws_dashboard_lang', value: ctx.language, url: new URL(ctx.args.url).origin }]);
   tab.on("pageerror", (e) => ctx.errors.push(String(e)));
   if (ctx.args['menu-hit-targets']) {
@@ -1217,7 +1204,7 @@ async function main() {
   if (name === "serve") return serve(args);
   if (!name || !SCENARIOS[name] || !args.url || args.url === true) {
     console.error("usage: node scripts/board-headless.mjs serve [--topics N] [--pending N] [--history-entries N] [--mermaid] [--keep-tmp] [--dev-assets]");
-    console.error(`       node scripts/board-headless.mjs <${Object.keys(SCENARIOS).join("|")}> --url <session or full file page> [--width W] [--height H] [--headed] [--artifacts DIR]`);
+    console.error(`       node scripts/board-headless.mjs <${Object.keys(SCENARIOS).join("|")}> --url <session or full file page> [--endpoint FILE] [--width W] [--height H] [--headed] [--artifacts DIR]`);
     process.exit(2);
   }
   // check records a failed expectation and lets the scenario go on, so one
