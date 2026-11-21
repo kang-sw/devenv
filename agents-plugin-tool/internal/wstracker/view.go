@@ -822,10 +822,13 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 				iv.CCSources[e.member] = sources
 			}
 		}
-		for _, member := range S.morder {
-			if it.ccExcluded[member] && S.liveMember(member) {
-				iv.CCExcluded = append(iv.CCExcluded, member)
+		if len(it.ccExcluded) > 0 {
+			for member, excluded := range it.ccExcluded {
+				if excluded && S.liveMember(member) {
+					iv.CCExcluded = append(iv.CCExcluded, member)
+				}
 			}
+			sort.Strings(iv.CCExcluded)
 		}
 		for _, reg := range S.ccOrgsByItem[id] {
 			if !reg.active {

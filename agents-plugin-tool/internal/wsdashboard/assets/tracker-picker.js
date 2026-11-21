@@ -667,6 +667,28 @@
     var isExcl = !was && !!excl[mid];
     return (personal ? '1' : '0') + '|' + orgs + '|' + (isExcl ? '1' : '0');
   }
+  // Canonical item-scoped assign state signature: sorted current assignees | sorted open rule ids.
+  function pmAssignStateSig(itemId, it, assignments, rules) {
+    var amap = assignments || {}, aSet = {};
+    if (it) {
+      (it.assignments || []).concat(it.pending || []).forEach(function (aid) {
+        var r = typeof aid === 'string' ? amap[aid] : aid;
+        if (!r) {
+          if (typeof aid === 'string' && aid) aSet['#' + aid] = true;
+          return;
+        }
+        if (r.state !== 'live' && r.state !== 'pending') return;
+        if (r.to) aSet[r.to] = true;
+      });
+    }
+    var rlist = Array.isArray(rules) ? rules : Object.keys(rules || {}).map(function (k) { return rules[k]; });
+    var rSet = {};
+    rlist.forEach(function (ru) {
+      if (!ru || !ru.id || ru.item !== itemId || ru.ended || ru.state === 'ended') return;
+      rSet[ru.id + ':' + (ru.state || 'live')] = true;
+    });
+    return Object.keys(aSet).sort().join(',') + '|' + Object.keys(rSet).sort().join(',');
+  }
   // Captures an isolated open-time snapshot of the item, orgs, members, rules, and
   // assignments so in-place projection updates never shift staged choices or hide drift.
   function pmSnapshot(vs, itemId, oi) {
@@ -787,12 +809,16 @@
       var liveOi = orgIndex(vs.orgs || [], liveMembers);
       var liveOrgMap = pmOrgStateMap(liveOi);
 
-      var liveOrigOrgSet = {};
+      var liveOrigOrgSet = {}, openOrigOrgSet = {};
       (Array.isArray(liveIt.orgCC) ? liveIt.orgCC : []).forEach(function (reg) {
         var oid = typeof reg === 'string' ? reg : (reg && reg.org);
         if (oid) liveOrigOrgSet[oid] = true;
       });
       var openOrigOrgCc = (snap && snap.item && snap.item.orgCC) || cur.origOrgCc || [];
+      openOrigOrgCc.forEach(function (reg) {
+        var oid = typeof reg === 'string' ? reg : (reg && reg.org);
+        if (oid) openOrigOrgSet[oid] = true;
+      });
       var openCcList = (snap && snap.item && snap.item.cc) || cur.origCc || [];
       var openCcSources = (snap && snap.item && snap.item.ccSources) || cur.ccSources || {};
       var openCcExcluded = (snap && snap.item && snap.item.ccExcluded) || cur.ccExcluded || {};
@@ -803,7 +829,7 @@
         if (!lSt || lSt.removed || lSt.head !== ao.head || liveOrgMap.byHead[ao.head] !== ao.org) {
           return { events: [], stale: true };
         }
-        if (liveOrigOrgSet[ao.org]) return { events: [], stale: true };
+        if (!!liveOrigOrgSet[ao.org] !== !!openOrigOrgSet[ao.org]) return { events: [], stale: true };
         (openIdx.subtree[ao.head] || [ao.head]).forEach(function (mid) { touchedMembers[mid] = true; });
       }
       for (var j = 0; j < stagedRemovedOrgs.length; j++) {
@@ -822,9 +848,13 @@
           if (s && Array.isArray(s.orgs) && s.orgs.indexOf(ro.org) >= 0) touchedMembers[mid] = true;
         });
       }
+      var liveIdx = stagedPlainLeads.length ? pmIndex(liveOi.tree) : null;
       for (var k = 0; k < stagedPlainLeads.length; k++) {
         var lid = stagedPlainLeads[k];
         if (liveOrgMap.byHead[lid] || !isLiveMember(liveMembers, lid)) return { events: [], stale: true };
+        var openSub = (openIdx.subtree[lid] || [lid]).slice().sort().join(',');
+        var liveSub = ((liveIdx && liveIdx.subtree[lid]) || []).slice().sort().join(',');
+        if (openSub !== liveSub) return { events: [], stale: true };
       }
       for (var p = 0; p < addedPeople.length; p++) {
         if (!isLiveMember(liveMembers, addedPeople[p])) return { events: [], stale: true };
@@ -883,6 +913,13 @@
     (Array.isArray(liveRules) ? liveRules : Object.keys(liveRules).map(function (rk) { return liveRules[rk]; })).forEach(function (ru) {
       if (ru && ru.id) liveRuleById[ru.id] = ru;
     });
+
+    if (snap && snap.item) {
+      if (pmAssignStateSig(cur.item, snap.item, snap.assignments, snap.rules) !==
+          pmAssignStateSig(cur.item, liveAsgIt, vs.assignments, liveRules)) {
+        return { events: [], stale: true };
+      }
+    }
 
     for (var ri = 0; ri < removedRules.length; ri++) {
       var remRu = removedRules[ri];

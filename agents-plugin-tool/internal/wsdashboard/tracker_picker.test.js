@@ -579,6 +579,8 @@ test('Phase 2 review: global exclusion from projected ccExcluded (with events: [
   const h2o = oi.headToOrg;
 
   // han-sa was previously CC'd and unCC'd (server projects ccExcluded: ['han-sa']); no orgs registered and no hydrated events
+  assert.deepEqual(J(ctx.pmCcExcluded({ id: 'i1', cc: [], ccExcluded: null })), {});
+  assert.deepEqual(J(ctx.pmCcExcluded({ id: 'i1', cc: [] })), {});
   const it = { id: 'i1', cc: [], orgCC: [], ccSources: {}, ccExcluded: ['han-sa'] };
   const init = J(ctx.pmCcInit(idx, it, h2o));
   assert.equal(init.ccExcluded['han-sa'], true);
@@ -1192,5 +1194,125 @@ test('Phase 2 re-review: live apply stale checks (vacancy repeat-click, plain-le
     assert.equal(dispatched.length, 0);
     assert.equal(byId['tkpm'].open, true);
     assert.equal(byId['tkpm-err'].textContent, 'js.tk.pm.stale');
+  }
+});
+
+test('Phase 2 round-3 review: deleted-org CC retarget to existing live org, plain-lead subtree drift, and item-scoped assign state drift', () => {
+  const baseVs = () => ({
+    viewer: { member: 'kim-hn', reach: { 'lee-dy': 1, 'choi-jw': 2, 'jung-mj': 2, 'kang-yr': 2, 'park-sy': 1, 'yoon-th': 2, 'han-sa': 2 } },
+    members: J(MEMBERS),
+    orgs: J(ORGS),
+    items: {
+      i1: {
+        id: 'i1', alias: 'k-1', kind: 'task', title: 'Primary', hidden: false,
+        cc: ['lee-dy', 'choi-jw', 'jung-mj', 'kang-yr', 'han-sa'],
+        orgCC: [
+          { org: 'o-sw1', added: ['lee-dy', 'choi-jw', 'jung-mj', 'kang-yr'] },
+          { org: 'o-plat', added: ['han-sa'] },
+        ],
+        ccSources: {
+          'lee-dy': { personal: false, orgs: ['o-sw1'] },
+          'choi-jw': { personal: false, orgs: ['o-sw1'] },
+          'jung-mj': { personal: false, orgs: ['o-sw1'] },
+          'kang-yr': { personal: false, orgs: ['o-sw1'] },
+          'han-sa': { personal: false, orgs: ['o-plat'] },
+        },
+        ccExcluded: [],
+        assignments: [], pending: [],
+      },
+      i2: {
+        id: 'i2', alias: 'k-2', kind: 'task', title: 'Other item', hidden: false,
+        cc: [], orgCC: [], ccSources: {}, ccExcluded: [],
+        assignments: [], pending: [],
+      },
+    },
+    rules: {},
+    assignments: {},
+    events: [],
+  });
+
+  // 1. Deleted-org CC retarget selecting an org already registered live on the item (no concurrency) must succeed (not stale)
+  {
+    const { c, byId, dispatched } = makePickerDomHarness(baseVs());
+    c.openPicker('cc', { item: 'i1', retarget: { org: 'o-plat' } });
+    const sw1Btn = byId['tkpm-body'].querySelector('[data-pm="grp"][data-id="lee-dy"]');
+    c.pmClick({ target: sw1Btn, stopPropagation() {} });
+    c.pmApply();
+    assert.equal(dispatched.length, 1);
+    assert.deepEqual(dispatched[0].events.map(e => [e.type, e.payload]), [
+      ['item.uncc_org', { item: 'i1', org: 'o-plat' }],
+      ['item.cc_org', { item: 'i1', org: 'o-sw1' }],
+    ]);
+  }
+  // If that existing org was concurrently unregistered before apply -> stale
+  {
+    const { c, byId, dispatched } = makePickerDomHarness(baseVs());
+    c.openPicker('cc', { item: 'i1', retarget: { org: 'o-plat' } });
+    const sw1Btn = byId['tkpm-body'].querySelector('[data-pm="grp"][data-id="lee-dy"]');
+    c.pmClick({ target: sw1Btn, stopPropagation() {} });
+    c.VS.items.i1.orgCC = [{ org: 'o-plat', added: ['han-sa'] }];
+    c.pmApply();
+    assert.equal(dispatched.length, 0);
+    assert.equal(byId['tkpm'].open, true);
+    assert.equal(byId['tkpm-err'].textContent, 'js.tk.pm.stale');
+  }
+
+  // 2. Plain-lead CC group (park-sy, no org): follower added OR follower moved out before Apply -> stale notice, sends nothing
+  for (const mutate of [
+    vs => { vs.members['oh-sj'].leads = ['park-sy']; vs.members['park-sy'].children.push('oh-sj'); },
+    vs => { vs.members['han-sa'].leads = ['lee-dy']; vs.members['park-sy'].children = ['yoon-th']; },
+  ]) {
+    const { c, byId, dispatched } = makePickerDomHarness(baseVs());
+    c.openPicker('cc', { item: 'i1' });
+    const parkBtn = byId['tkpm-body'].querySelector('[data-pm="grp"][data-id="park-sy"]');
+    c.pmClick({ target: parkBtn, stopPropagation() {} });
+    mutate(c.VS);
+    c.pmApply();
+    assert.equal(dispatched.length, 0);
+    assert.equal(byId['tkpm'].open, true);
+    assert.equal(byId['tkpm-err'].textContent, 'js.tk.pm.stale');
+  }
+
+  // 3a. Assign mode: concurrent same-author rule on i1 covering staged target -> stale notice, sends nothing
+  {
+    const { c, byId, dispatched } = makePickerDomHarness(baseVs());
+    c.openPicker('assign', { item: 'i1' });
+    const sw1Btn = byId['tkpm-body'].querySelector('[data-pm="grp"][data-id="lee-dy"]');
+    c.pmClick({ target: sw1Btn, stopPropagation() {} });
+    c.VS.rules['r-cov'] = { id: 'r-cov', item: 'i1', by: 'kim-hn', root: 'kim-hn', assignRoot: 'kim-hn', org: 'o-dev', includeRoot: true, levels: null, state: 'live', ended: null, ts: '2026-11-21T01:00:00Z' };
+    c.pmApply();
+    assert.equal(dispatched.length, 0);
+    assert.equal(byId['tkpm'].open, true);
+    assert.equal(byId['tkpm-err'].textContent, 'js.tk.pm.stale');
+  }
+
+  // 3b. Assign mode: concurrent assignment of the selected person on i1 -> stale notice, sends nothing
+  {
+    const { c, byId, dispatched } = makePickerDomHarness(baseVs());
+    c.openPicker('assign', { item: 'i1' });
+    const ohCk = byId['tkpm-body'].querySelector('[data-pm="self"][data-id="oh-sj"]');
+    c.pmClick({ target: ohCk, stopPropagation() {} });
+    c.VS.assignments['a-oh'] = { id: 'a-oh', item: 'i1', to: 'oh-sj', state: 'live', rule: null };
+    c.VS.items.i1.assignments.push('a-oh');
+    c.pmApply();
+    assert.equal(dispatched.length, 0);
+    assert.equal(byId['tkpm'].open, true);
+    assert.equal(byId['tkpm-err'].textContent, 'js.tk.pm.stale');
+  }
+
+  // 3c. Assign mode: changes to rules/assignments on ANOTHER item (i2) must NOT trigger stale on i1
+  {
+    const { c, byId, dispatched } = makePickerDomHarness(baseVs());
+    c.openPicker('assign', { item: 'i1' });
+    const ohCk = byId['tkpm-body'].querySelector('[data-pm="self"][data-id="oh-sj"]');
+    c.pmClick({ target: ohCk, stopPropagation() {} });
+    c.VS.rules['r-other'] = { id: 'r-other', item: 'i2', by: 'kim-hn', root: 'kim-hn', assignRoot: 'kim-hn', org: 'o-dev', includeRoot: true, levels: null, state: 'live', ended: null, ts: '2026-11-21T01:00:00Z' };
+    c.VS.assignments['a-other'] = { id: 'a-other', item: 'i2', to: 'oh-sj', state: 'live', rule: null };
+    c.VS.items.i2.assignments.push('a-other');
+    c.pmApply();
+    assert.equal(dispatched.length, 1);
+    assert.deepEqual(dispatched[0].events.map(e => [e.type, e.payload]), [
+      ['item.assign', { item: 'i1', targets: ['oh-sj'], completion: 'assignee' }],
+    ]);
   }
 });
