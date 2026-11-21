@@ -83,13 +83,14 @@
     return PERM_LEVELS.filter(function (l) { return have.indexOf(l) >= 0; });
   }
   // permPreflight re-reads the choices and answers whether the daemon that
-  // answers now offers level on harness.
+  // answers now offers level on an available lead-capable harness.
   function permPreflight(harness, level, done) {
     var epoch = permEpoch;
     tkFetch("/support/choices", undefined, function (status, v) {
       if (status === 200 && Array.isArray(v.harnesses)) { v.wsEpoch = epoch; supChoices = v; }
       else if (supChoices) supChoices.wsEpoch = -1;
-      done((permLevels(harness) || []).indexOf(level) >= 0);
+      var h = supHarness(harness);
+      done(!!h && h.lead === true && h.available === true && (permLevels(harness) || []).indexOf(level) >= 0);
     });
   }
   // permRefused reports a selection route the daemon does not have: an

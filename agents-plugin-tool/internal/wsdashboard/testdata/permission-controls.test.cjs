@@ -77,9 +77,9 @@ const selectOf = (root, key) => root.find(n => n.tag === 'select' && n.parentNod
 
 const LEVELS = ['read-only', 'workdir-write', 'full'];
 const MODES = ['auto', 'default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions'];
-function choices(levels = LEVELS, piLevels = LEVELS) {
+function choices(levels = LEVELS, piLevels = LEVELS, claude = {}) {
   return { harnesses: [
-    { harness: 'claude', lead: true, available: true, models: [{ id: 'opus' }], efforts: ['high'], permission_modes: MODES, ...(levels ? { permission_levels: levels } : {}) },
+    { harness: 'claude', lead: true, available: true, models: [{ id: 'opus' }], efforts: ['high'], permission_modes: MODES, ...(levels ? { permission_levels: levels } : {}), ...claude },
     { harness: 'pi', lead: true, available: true, models: [{ id: 'pi-model' }], efforts: ['off'], permission_modes: [], ...(piLevels ? { permission_levels: piLevels } : {}) }
   ] };
 }
@@ -322,6 +322,23 @@ for (const [level, native] of [['read-only', 'plan'], ['workdir-write', 'acceptE
   assert.equal(v.posts.length, 0);
 }
 {
+  // Positive levels are insufficient when the final preflight reports that
+  // the harness is unavailable or no longer lead-capable.
+  const w = world(), f = creation(w);
+  f.level('read-only');
+  f.start.click();
+  w.choices(choices(LEVELS, LEVELS, { available: false }));
+  assert.equal(w.posts.length, 0, 'unavailable harness cannot authorize /agents/leads/permission');
+  assert.equal(f.off.textContent, 'js.perm.off.again(js.perm.level.readonly)');
+
+  const v = world(), g = creation(v);
+  g.level('workdir-write');
+  g.start.click();
+  v.choices(choices(LEVELS, LEVELS, { lead: false }));
+  assert.equal(v.posts.length, 0, 'non-lead harness cannot authorize /agents/leads/permission');
+  assert.equal(g.off.textContent, 'js.perm.off.again(js.perm.level.workdir)');
+}
+{
   // Mid-request stream drop: a /support/choices response started before
   // the drop arrives after it with positive levels; its older epoch must
   // not count as current support, neither on open nor for Start preflight
@@ -490,5 +507,19 @@ const rowsOf = m => m.state.children.map(n => n.textContent);
   assert.equal(u.posts.length, 0, 'mid-preflight stream drop blocks /settings/permission');
   assert.equal(q.p.busy, false);
   assert.equal(byCls(q.p.el, 'err').textContent, 'js.perm.unsent');
+
+  // A final support response that still advertises the level but no longer
+  // marks the harness available/lead-capable cannot authorize settings.
+  const a = world(), r = menu(a, { ...base, permission_mode: 'auto', permission_level: 'workdir-write', permission_source: 'legacy-derived', permission_enforcement: 'advisory' });
+  r.level('read-only');
+  a.choices(choices(LEVELS, LEVELS, { available: false }));
+  assert.equal(a.posts.length, 0, 'unavailable harness cannot authorize /settings/permission');
+  assert.equal(byCls(r.p.el, 'err').textContent, 'js.perm.unsent');
+
+  const b = world(), s = menu(b, { ...base, permission_mode: 'auto', permission_level: 'workdir-write', permission_source: 'legacy-derived', permission_enforcement: 'advisory' });
+  s.level('read-only');
+  b.choices(choices(LEVELS, LEVELS, { lead: false }));
+  assert.equal(b.posts.length, 0, 'non-lead harness cannot authorize /settings/permission');
+  assert.equal(byCls(s.p.el, 'err').textContent, 'js.perm.unsent');
 }
 console.log('permission control cases passed');
