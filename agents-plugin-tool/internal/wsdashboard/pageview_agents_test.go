@@ -187,6 +187,31 @@ func TestPiAgentRowBlinksAPiBadgeAndLinks(t *testing.T) {
 	}
 }
 
+func TestAgentTreeCloseControl(t *testing.T) {
+	now := testNow
+	snap := liveSnap(now, wslive.Lead{},
+		wslive.Agent{ID: "child", ReplyID: "child-session", Label: "worker", Status: wslive.StatusRunning},
+		wslive.Agent{ID: "native", Status: wslive.StatusRunning},
+	)
+	v := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: snap, Now: now})
+	rows := splitTreeRows(renderTree(t, v))
+	if rows == nil {
+		t.Fatal("tree rows did not split")
+	}
+	child := rows.rows["agent-child"].HTML
+	if !strings.Contains(child, `<summary class="ahead">`) || !strings.Contains(child, `class="aclose" hidden data-reply-id="child-session"`) {
+		t.Fatalf("child close control must be hidden by default: %s", child)
+	}
+	if strings.Index(child, `class="aclose"`) > strings.Index(child, `</summary>`) {
+		t.Fatalf("child close control must be inside its summary: %s", child)
+	}
+	for _, key := range []string{"agent-lead", "agent-native"} {
+		if strings.Contains(rows.rows[key].HTML, `class="aclose"`) {
+			t.Errorf("%s must not render a close control: %s", key, rows.rows[key].HTML)
+		}
+	}
+}
+
 // TestAgentRowRendersHarnessBadgeWhenPresent pins that a running agent.spawn
 // child with Harness renders the 2-letter harness badge (.hb.sm) in both the
 // compact roster and full tree instead of the legacy pibadge, while an old

@@ -161,7 +161,8 @@ type pageInputs struct {
 	// was handed to a terminal.
 	HandedOff bool
 	// IsChild marks a spawned worker or card-bound subordinate session.
-	IsChild bool
+	IsChild                                   bool
+	ChildCloseKnown, ChildClosed, ChildActive bool
 	// Model and Effort are the session's configured spawn/selected values.
 	Model, Effort string
 	// Lookup resolves the other sessions this daemon serves that the view
@@ -238,6 +239,9 @@ func buildSessionView(in pageInputs) SessionView {
 		Hosted:           reg.Hosted,
 		HandedOff:        in.HandedOff && !reg.Hosted && !reg.Live(in.Now),
 		IsChild:          in.IsChild || reg.ParentReplyID != "",
+		ChildCloseKnown:  in.ChildCloseKnown,
+		ChildClosed:      in.ChildClosed,
+		ChildActive:      in.ChildActive,
 		Model:            in.Model,
 		Effort:           in.Effort,
 		Version:          in.Version,

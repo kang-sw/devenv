@@ -37,6 +37,65 @@
     return m ? m[1] : name;
   }
   function leadErr(status, text) { return text || (status ? "HTTP " + status : wsT("js.post.unreachable")); }
+  // Shared by the child header, tree, and HUD. Keep a pending/closed set so
+  // repeated clicks cannot send two close requests while a stream catches up.
+  var subagentClosing = Object.create(null), subagentDialog = null;
+  function subagentClose(replyId, label, state, trigger) {
+    if (!root.hasAttribute("data-can-control") || !replyId || subagentClosing[replyId]) return;
+    subagentClosing[replyId] = true;
+    function restore() { if (trigger && trigger.isConnected && trigger.focus) trigger.focus(); }
+    function cancel() { delete subagentClosing[replyId]; restore(); }
+    function send() {
+      if (trigger) trigger.disabled = true;
+      fetch("/agents/" + encodeURIComponent(replyId) + "/close", {
+        method: "POST", credentials: "same-origin", cache: "no-store"
+      }).then(function (r) {
+        return r.text().then(function (body) {
+          if (r.status !== 200) throw new Error(leadErr(r.status, body.trim()));
+          document.querySelectorAll("[data-reply-id]").forEach(function (el) {
+            if (el.getAttribute("data-reply-id") === replyId) {
+              el.setAttribute("data-subagent-closed", "1");
+              if (el.hasAttribute("data-child-close")) { el.disabled = true; el.textContent = wsT("js.subagent.closed"); }
+            }
+          });
+          subagentClosing[replyId] = "closed";
+          document.dispatchEvent(new CustomEvent("ws:subagent-closed", { detail: { replyId: replyId } }));
+        });
+      }).catch(function (err) {
+        delete subagentClosing[replyId];
+        if (trigger && trigger.isConnected) trigger.disabled = false;
+        toast(wsT("js.subagent.close.error", err.message || wsT("js.post.unreachable")));
+      }).then(restore);
+    }
+    if (state === "idle" || state === "done" || state === "failed") { send(); return; }
+    if (subagentDialog && subagentDialog.open) { cancel(); return; }
+    var dl = mk("dialog", "rdeldlg"), title = dl.appendChild(mk("h2", "rdhd"));
+    subagentDialog = dl;
+    title.id = rpId();
+    title.textContent = wsT("js.subagent.close.title", label || replyId);
+    dl.setAttribute("aria-labelledby", title.id);
+    var phase = state === "replying" ? "thinking" : state;
+    var phaseKey = { thinking: "js.hud.state.thinking", tool: "js.hud.state.tool", holding: "js.hud.state.holding", permission: "js.hud.state.permission" }[phase] || "js.hud.state.thinking";
+    dl.appendChild(mk("div", "rdpath", wsT("js.subagent.close.state", wsT(phaseKey))));
+    dl.appendChild(mk("p", "", wsT("js.subagent.close.explain")));
+    var row = dl.appendChild(mk("div", "rdrow"));
+    var no = row.appendChild(rpBtn("pbtn", wsT("js.rail.cancel")));
+    var yes = row.appendChild(rpBtn("pbtn danger", wsT("js.subagent.close")));
+    function end(confirmed) {
+      dl.close(); dl.remove(); subagentDialog = null;
+      if (confirmed) send(); else cancel();
+    }
+    no.addEventListener("click", function () { end(false); });
+    yes.addEventListener("click", function () { end(true); });
+    dl.addEventListener("cancel", function (e) { e.preventDefault(); end(false); });
+    dl.addEventListener("click", function (e) { if (e.target === dl) end(false); });
+    document.body.appendChild(dl); dl.showModal(); no.focus();
+  }
+  if (typeof document !== "undefined") document.addEventListener("click", function (e) {
+    var b = e.target && e.target.closest && e.target.closest("[data-child-close]");
+    if (!b) return;
+    subagentClose(b.getAttribute("data-reply-id"), b.getAttribute("data-label"), b.getAttribute("data-state"), b);
+  });
   // leadChoices reads the harness choices the support chat's popover uses,
   // then runs done. It reads them on every open, as that popover does: the
   // daemon's lists change while the page lives (a CLI update adds models). A
@@ -887,9 +946,12 @@
       if (n < 1 || window.confirm(wsTn("js.lead.handoff.confirm", n))) act("handoff", {});
     });
     close.b.addEventListener("click", function () {
-      var n = bgTasks();
+      var st = state(), n = bgTasks(), target = P.rid;
       railPopClose(false);
-      if (window.confirm(n > 0 ? wsTn("js.lead.close.confirm.bg", n) : wsT("js.lead.close.confirm"))) act("close", {});
+      if (st && st.is_child) {
+        var phase = st.approvals && st.approvals.length ? "permission" : st.holding ? "holding" : st.status === "running" ? "thinking" : "idle";
+        subagentClose(target, st.label || target, phase, close.b);
+      } else if (window.confirm(n > 0 ? wsTn("js.lead.close.confirm.bg", n) : wsT("js.lead.close.confirm"))) act("close", {});
     });
     // draw shows the session's state; it runs when the menu opens and after
     // every read of the state while it is open.
@@ -913,6 +975,8 @@
       var broken = Array.isArray(st.mcp_broken) ? st.mcp_broken.map(String) : [];
       restart.b.hidden = !broken.length;
       restart.b.disabled = P.busy;
+      handoff.b.hidden = !!st.is_child;
+      archive.b.hidden = !!st.is_child;
       handoff.b.disabled = P.busy;
       archive.b.disabled = P.busy;
       if (archive.b.getAttribute("data-hidden") !== String(!!st.hidden)) {
@@ -922,7 +986,7 @@
         archive.note.textContent = wsT(st.hidden ? "js.lead.unarchive.note" : "js.lead.archive.note");
       }
       restart.note.textContent = broken.length ? wsT("js.lead.restart.note", broken.join(", ")) : "";
-      close.b.disabled = P.busy;
+      close.b.disabled = P.busy || subagentClosing[P.rid] === "closed";
       err.textContent = text;
       err.hidden = !text;
     };
@@ -1246,6 +1310,11 @@
   }
   // leadSwapped runs after an update of a region the state follows.
   function leadSwapped(name) {
+    if (name === "head") {
+      document.querySelectorAll("[data-child-close]").forEach(function (b) {
+        if (subagentClosing[b.getAttribute("data-reply-id")] === "closed") { b.disabled = true; b.textContent = wsT("js.subagent.closed"); }
+      });
+    }
     if (handedPage && !hostedPage) {
       if (name === "head") leadFetch();
       return;

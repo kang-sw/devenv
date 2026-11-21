@@ -279,6 +279,15 @@ button.sbadge:focus-visible { outline: 1.5px solid var(--wb-primary); outline-of
   .tree-kids { gap: 5px; padding-top: 9px; }
 }
 .node-slot { position: relative; display: inline-flex; align-items: center; justify-content: center; }
+.hud-close, .aclose { border: 0; border-radius: 50%; background: var(--wb-card); color: var(--wb-muted-fg); cursor: pointer; font: 700 12px/1 var(--wb-sans); box-shadow: 0 0 0 1px var(--wb-line); transition: opacity .12s ease; }
+.hud-close { position: absolute; top: -5px; right: -5px; z-index: 6; width: 14px; height: 14px; padding: 0; opacity: 0; }
+.node-slot:hover .hud-close, .node-slot:focus-within .hud-close { opacity: 1; }
+.hud-close:hover, .hud-close:focus-visible, .aclose:hover, .aclose:focus-visible { color: var(--ring-fail); outline: 2px solid var(--wb-primary); outline-offset: 1px; }
+.agpop .agent { position: relative; }
+.agpop .aclose { position: absolute; top: 4px; right: 2px; z-index: 2; width: 18px; height: 18px; padding: 0; opacity: 0; }
+.agpop .ahead:has(> .aclose:not([hidden])) .am { padding-right: 20px; }
+.agpop .ahead:hover > .aclose, .agpop .ahead:focus-within > .aclose { opacity: 1; }
+.agpop .aclose[hidden] { display: none; }
 @property --hud-spin-a { syntax: "<angle>"; inherits: false; initial-value: 28deg; }
 @property --hud-spin-b { syntax: "<angle>"; inherits: false; initial-value: 145deg; }
 .hud-node { position: relative; width: 24px; height: 24px; border-radius: 7px; padding: 0; border: 0; background: color-mix(in srgb, var(--wb-card) 72%, transparent); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: transform .12s ease, opacity .15s ease; }
@@ -327,7 +336,7 @@ button.sbadge:focus-visible { outline: 1.5px solid var(--wb-primary); outline-of
 .tt-chain { font-size: 10.5px; color: var(--wb-muted-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tt-task { font-size: 11px; color: var(--wb-fg); opacity: .9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tt-hint { font-size: 10.5px; color: var(--wb-primary); font-weight: 700; padding-top: 3px; border-top: 1px solid var(--wb-line); font-family: var(--wb-mono); }
-@media (prefers-reduced-motion: reduce) { .agisland, .agview, .agpop, .hud-node { transition: none !important; } .hud-node[data-state] .hud-ring { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .agisland, .agview, .agpop, .hud-node, .hud-close, .aclose { transition: none !important; } .hud-node[data-state] .hud-ring { animation: none; } }
 /* Keep the hidden full view measurable for the island's size transition;
    data-mode controls its visibility and the hidden attribute remains JS state. */
 .agpop, .agpop[hidden] { width: var(--ag-fw, 500px); max-height: 60vh; max-height: 60dvh; display: flex; flex-direction: column; overflow: hidden; }

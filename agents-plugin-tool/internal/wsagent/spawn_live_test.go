@@ -139,8 +139,14 @@ func TestHostedLeadSpawnRowsSurviveDaemonReplacement(t *testing.T) {
 	h.send(child.ID, "genuine next turn")
 	h.holders.out(h.holder(child.ID), `{"type":"agent_start"}`)
 	waitRows(wslive.StatusRunning, wslive.StatusDone)
+	if meta, ok := h.runner.SessionMeta(child.ID); !ok || !meta.IsChild || !meta.Active || meta.Closed {
+		t.Fatalf("running child SessionMeta = %+v, %v", meta, ok)
+	}
 	if _, err := h.runner.CloseConversation(child.ID); err != nil {
 		t.Fatal(err)
+	}
+	if meta, ok := h.runner.SessionMeta(child.ID); !ok || !meta.IsChild || meta.Active || !meta.Closed {
+		t.Fatalf("closed child SessionMeta = %+v, %v", meta, ok)
 	}
 	waitRows(wslive.StatusDone, wslive.StatusDone)
 }

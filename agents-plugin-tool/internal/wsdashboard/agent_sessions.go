@@ -83,6 +83,8 @@ type AgentForgetter interface {
 type AgentSessionMeta struct {
 	Hosted  bool
 	IsChild bool
+	Closed  bool
+	Active  bool
 	Model   string
 	Effort  string
 }

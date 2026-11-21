@@ -68,7 +68,8 @@ type SessionView struct {
 	HandedOff bool
 	// IsChild marks a spawned worker or card-bound subordinate session whose
 	// composer controls render locked read-only.
-	IsChild bool
+	IsChild                                   bool
+	ChildCloseKnown, ChildClosed, ChildActive bool
 	// CanEditSettings reports whether the viewer may edit model/effort from
 	// the composer footer (hosted non-child session viewed from the host).
 	CanEditSettings bool

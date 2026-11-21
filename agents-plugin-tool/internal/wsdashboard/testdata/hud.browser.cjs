@@ -157,6 +157,53 @@ async function checkKeyedRebuild(frame) {
       if (shots) await tab.screenshot({ path: `${shots}/compact-${scheme}.png` });
       if (shots) await frame.locator('#agcompact').screenshot({ path: `${shots}/hud-${scheme}.png` });
 
+      if (process.env.WS_SUBAGENT_SHOTS) {
+        const dir = process.env.WS_SUBAGENT_SHOTS;
+        let closes = 0;
+        await tab.route('**/agents/boardsession/close', async route => {
+          closes++;
+          await route.fulfill({ status: 200, body: '{}' });
+        });
+        const node = frame.locator('#agcompact .hud-node[data-id="h2"]');
+        await node.hover();
+        const close = frame.locator('#agcompact .node-slot:has(.hud-node[data-id="h2"]) .hud-close');
+        await close.waitFor({ state: 'visible' });
+        await frame.waitForTimeout(250);
+        await tab.screenshot({ path: `${dir}/hud-hover-${scheme}.png` });
+        for (const [id, state] of [['h11', 'failed'], ['h8', 'idle']]) {
+          const target = frame.locator(`#agcompact .hud-node[data-id="${id}"]`);
+          assert.equal(await target.getAttribute('data-state'), state);
+          await target.hover();
+          await frame.locator(`#agcompact .node-slot:has(.hud-node[data-id="${id}"]) .hud-close`).waitFor({ state: 'visible' });
+          await frame.waitForTimeout(250);
+          await tab.screenshot({ path: `${dir}/hud-${state}-hover-${scheme}.png` });
+        }
+        await node.hover();
+        await close.click();
+        const dialog = frame.locator('dialog.rdeldlg[open]');
+        await dialog.waitFor();
+        assert.equal(closes, 0, 'active child waits for confirmation');
+        await tab.screenshot({ path: `${dir}/close-modal-${scheme}.png` });
+        await dialog.locator('.pbtn:not(.danger)').click();
+        assert.equal(closes, 0, 'cancel sends no request');
+        await frame.locator('.hud-expand-btn').click();
+        await frame.locator('#agpop details[data-key="agent-h1"] > summary').click();
+        await frame.waitForTimeout(500);
+        const row = frame.locator('#agpop .agent:has(> details[data-key="agent-h2"])');
+        await row.locator('> details > summary').hover();
+        const rowClose = row.locator('> details > summary > .aclose');
+        await rowClose.waitFor({ state: 'visible' });
+        await frame.waitForTimeout(250);
+        await tab.screenshot({ path: `${dir}/agpop-hover-${scheme}.png` });
+        await rowClose.click();
+        await dialog.waitFor();
+        await dialog.locator('.pbtn.danger').click();
+        await frame.waitForTimeout(150);
+        assert.equal(closes, 1, 'confirmed close sends one request');
+        await tab.unroute('**/agents/boardsession/close');
+        if (await frame.locator('#agclose').isVisible()) await frame.locator('#agclose').click();
+      }
+
       if (scheme === 'dark') {
         await checkKeyedRebuild(frame);
         // Tooltip clamp + own-row task from #r-tree
