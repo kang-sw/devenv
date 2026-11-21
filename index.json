@@ -557,7 +557,14 @@
       "registered_at": "2026-11-21T11:06:46Z"
     },
     "261121-feat-ws-board-chat-small-ux": {
-      "registered_at": "2026-11-21T09:00:06Z"
+      "registered_at": "2026-11-21T09:00:06Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-21T11:06:51Z"
+      }
     },
     "261121-feat-ws-board-command-slots": {
       "registered_at": "2026-11-21T09:21:23Z"
