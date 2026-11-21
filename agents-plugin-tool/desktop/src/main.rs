@@ -14,6 +14,7 @@ mod macos;
 mod navigation;
 mod python;
 mod shell;
+mod updates;
 #[cfg(windows)]
 mod windows;
 mod zoom;
@@ -31,10 +32,8 @@ use navigation::{destination, Destination};
 use shell::Connection;
 
 #[cfg(target_os = "macos")]
-const USER_AGENT: &str = concat!(
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Werkschaft/",
-    env!("CARGO_PKG_VERSION")
-);
+const USER_AGENT: &str =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Werkschaft/";
 
 fn build_window(app: &AppHandle, connection: Arc<Connection>) -> tauri::Result<()> {
     let state = connection.clone();
@@ -52,6 +51,7 @@ fn build_window(app: &AppHandle, connection: Arc<Connection>) -> tauri::Result<(
                     == Destination::Dashboard
             {
                 notice.show_refusal(&window);
+                updates::inject(&window, payload.url());
             }
         })
         .on_new_window(move |url, _features| {
@@ -78,7 +78,9 @@ fn build_window(app: &AppHandle, connection: Arc<Connection>) -> tauri::Result<(
         });
 
     #[cfg(target_os = "macos")]
-    let window = builder.user_agent(USER_AGENT).build()?;
+    let window = builder
+        .user_agent(&format!("{USER_AGENT}{}", app.package_info().version))
+        .build()?;
 
     #[cfg(windows)]
     let window = {
@@ -224,6 +226,7 @@ fn main() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .on_menu_event(move |app, event| {
             if let Some(window) = app.get_webview_window("main") {
                 menu_action(window, &menu_state, event.id().as_ref());
@@ -231,6 +234,7 @@ fn main() {
         })
         .setup(move |app| {
             install_menu(app.handle())?;
+            updates::Controller::start(app.handle(), setup_state.clone());
             build_window(app.handle(), setup_state.clone())?;
             setup_state.watch(app.handle().clone());
             Ok(())

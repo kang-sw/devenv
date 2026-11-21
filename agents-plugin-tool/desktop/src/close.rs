@@ -61,7 +61,7 @@ fn eval(window: &WebviewWindow, script: &str, deadline: Instant) -> Option<Strin
         .ok()
 }
 
-fn draft_ready(window: &WebviewWindow, origin: &str) -> bool {
+pub fn draft_ready(window: &WebviewWindow, origin: &str) -> bool {
     // Evaluation runs in the main frame. The IPC surface stays closed to every
     // page, and the renderer only reports whether its existing store is ready.
     let origin = serde_json::to_string(origin).expect("string");
@@ -93,6 +93,15 @@ fn draft_ready(window: &WebviewWindow, origin: &str) -> bool {
     result.as_deref() == Some("1")
 }
 
+pub fn release_document(window: &WebviewWindow) {
+    let _ = window.eval(
+        "if (window.__werkschaftClose) {
+            document.documentElement.inert = window.__werkschaftClose.wasInert;
+            delete window.__werkschaftClose;
+        }",
+    );
+}
+
 fn confirm_close(window: WebviewWindow, connection: Arc<Connection>) {
     window
         .dialog()
@@ -108,12 +117,7 @@ fn confirm_close(window: WebviewWindow, connection: Arc<Connection>) {
             if result == MessageDialogResult::Custom("Close".into()) {
                 let _ = window.destroy();
             } else {
-                let _ = window.eval(
-                    "if (window.__werkschaftClose) {
-                        document.documentElement.inert = window.__werkschaftClose.wasInert;
-                        delete window.__werkschaftClose;
-                    }",
-                );
+                release_document(&window);
                 connection.closing.store(false, Ordering::Release);
             }
         });

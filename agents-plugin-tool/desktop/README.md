@@ -66,9 +66,9 @@ npm run build:package
 
 The Windows smoke payload is `target/release/phase2-smoke/`, with the
 executable and `daemon/` together. Remove an earlier smoke output before
-rebuilding. These are Phase 2 smoke builds; installers and updater delivery
-belong to Phase 3. Raw Cargo and Tauri builds do not prepare a packaged daemon;
-use `build:package` for the validated resource layout.
+rebuilding. Use `build:package` to prepare the validated resource layout
+for smoke tests. See [Release packaging](RELEASE.md) for signed installers,
+updates, and workflow artifacts.
 
 Run the packaging checks with `node --test scripts/test-package.cjs`.
 Run the notice browser test with `WS_PLAYWRIGHT_MODULE` pointing to
@@ -88,7 +88,7 @@ python3 -m unittest discover -s scripts -p test_build_slot.py -v
   login gate when cookie setup fails. **Copy Browser Login Link to Clipboard**
   mints a path-scoped link and writes it directly to the system clipboard.
 - The app allows its connection and Python guide only as top-level bundled
-  documents. Those pages and the dashboard have no native command permissions.
+  documents. Those pages and the dashboard have no Tauri IPC permissions.
   Approved dashboard frames stay on the pinned origin or use blank/srcdoc
   documents. External HTTP(S) links open in the system browser from top-level
   links and popups. Other schemes are blocked. Popup requests never create a
@@ -100,3 +100,36 @@ python3 -m unittest discover -s scripts -p test_build_slot.py -v
 - The View menu provides zoom and release DevTools
   (`Cmd+Option+I` on macOS, `Ctrl+Shift+I` on Windows, or `F12`).
   Starting a second instance restores the original window.
+
+## Shell updates
+
+Signed installations provide the App update controls in Settings. Ordinary
+checks look for stable releases. **Update to canary** looks for a newer
+canary when clicked. **Back to stable** appears on canary builds and asks
+before downloading the current stable build, including a downgrade.
+The installed build supplies the channel and version.
+
+The shell checks the artifact size, SHA-256, and version-bound signature
+before offering a restart. Restart waits for the dashboard to save its draft.
+Use the existing Connection menu for explicit daemon replacement. The
+shared daemon lifecycle resumes on shell relaunch under the usual version
+ordering.
+
+If download or verification fails, check again from Settings and retry.
+If installation fails, reopen Werkschaft and retry the staged update or
+reinstall from the release page. On Windows, reopen the old Electron
+shortcut to retry a failed first migration install. Reinstalling Electron
+reopens its retained profile. Tauri uses its own WebView profile and starts
+with default window settings.
+
+On a disposable smoke host, point the signed evaluation builds at the
+downloaded dry-run artifacts with:
+
+```sh
+python3 agents-plugin-tool/desktop/scripts/evaluation-feed.py --stable tauri-stable --canary tauri-canary
+```
+
+Use `--fault missing-sha`, `--fault bad-signature`, `--fault bad-bytes`,
+or `--fault interrupted` for refusal and retry tests. For stable to canary
+and lower-stable return in one run, use a canary from an evaluation branch
+with the next patch core in the same minor.

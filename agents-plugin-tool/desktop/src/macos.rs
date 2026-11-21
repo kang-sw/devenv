@@ -7,10 +7,11 @@ use objc2::{
     runtime::{NSObject, ProtocolObject},
     DefinedClass, MainThreadOnly,
 };
-use objc2_foundation::{MainThreadMarker, NSError, NSObjectProtocol};
+use objc2_foundation::{ns_string, MainThreadMarker, NSError, NSObjectProtocol, NSString};
 use objc2_web_kit::{
     WKNavigation, WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate,
-    WKNavigationResponse, WKNavigationResponsePolicy, WKWebView,
+    WKNavigationResponse, WKNavigationResponsePolicy, WKScriptMessage, WKScriptMessageHandler,
+    WKUserContentController, WKWebView,
 };
 use tauri::{AppHandle, Manager, WebviewWindow};
 use url::Url;
@@ -18,6 +19,7 @@ use url::Url;
 use crate::{
     navigation::{self, Destination},
     shell::Connection,
+    updates,
 };
 
 struct NavigationState {
@@ -25,6 +27,41 @@ struct NavigationState {
     connection: std::sync::Weak<Connection>,
     app: AppHandle,
 }
+
+struct UpdateState {
+    app: AppHandle,
+    epoch: usize,
+}
+
+define_class!(
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = UpdateState]
+    struct UpdateMessages;
+
+    unsafe impl NSObjectProtocol for UpdateMessages {}
+
+    unsafe impl WKScriptMessageHandler for UpdateMessages {
+        #[unsafe(method(userContentController:didReceiveScriptMessage:))]
+        fn receive(&self, _: &WKUserContentController, message: &WKScriptMessage) {
+            let frame = unsafe { message.frameInfo() };
+            if !unsafe { frame.isMainFrame() } {
+                return;
+            }
+            let raw = unsafe { frame.request().URL().and_then(|url| url.absoluteString()) };
+            let Some(source) = raw.and_then(|url| Url::parse(&url.to_string()).ok()) else {
+                return;
+            };
+            let Ok(text) = (unsafe { message.body() }).downcast::<NSString>() else {
+                return;
+            };
+            let state = self.ivars();
+            if let Some(window) = state.app.get_webview_window("main") {
+                updates::receive(window, state.epoch, true, source, &text.to_string());
+            }
+        }
+    }
+);
 
 define_class!(
     #[unsafe(super(NSObject))]
@@ -210,6 +247,20 @@ pub fn install(window: &WebviewWindow, connection: Arc<Connection>) -> tauri::Re
                 ffi::OBJC_ASSOCIATION_RETAIN_NONATOMIC,
             );
             webview.setNavigationDelegate(Some(protocol));
+            if target.try_state::<Arc<updates::Controller>>().is_some() {
+                let messages = marker.alloc::<UpdateMessages>().set_ivars(UpdateState {
+                    app: target.app_handle().clone(),
+                    epoch: connection.window_epoch(),
+                });
+                let messages: objc2::rc::Retained<UpdateMessages> =
+                    msg_send![super(messages), init];
+                let controller = webview.configuration().userContentController();
+                controller.removeScriptMessageHandlerForName(ns_string!("werkschaftUpdate"));
+                controller.addScriptMessageHandler_name(
+                    ProtocolObject::from_ref(&*messages),
+                    ns_string!("werkschaftUpdate"),
+                );
+            }
         }
         connection.start(target);
     })

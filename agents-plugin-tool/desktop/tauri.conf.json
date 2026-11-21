@@ -24,5 +24,11 @@
     "active": true,
     "targets": ["app"],
     "icon": ["icons/icon.png", "icons/icon.ico"]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "requireSignedVersion": true
+    }
   }
 }

@@ -6,10 +6,13 @@
 // stable; an older shell's bridge shows neither. With SHOTS set it also
 // writes the review screenshots there (CANARY_SHOTS: the channel captures).
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
 const { chromium } = require(process.env.WS_PLAYWRIGHT_MODULE);
 const [base] = process.argv.slice(2);
 const shots = process.env.SHOTS || '';
+const tauriShots = process.env.TAURI_SHOTS || '';
+const tauriBridge = fs.readFileSync(path.resolve(__dirname, '../../../desktop/src/update-bridge.js'), 'utf8');
 
 // The stub mirrors an older shell's dashboard-preload.js: check/download/
 // skip/restart and onStatus only.
@@ -354,6 +357,79 @@ function channelStub(running) {
       assert.equal(await page.locator('#dupd-stable').isVisible(), false);
       assert.equal(await page.locator('#dupd-canary').isVisible(), true);
       await page.close();
+    }
+    // The Tauri shell injects its real bridge after the verified document
+    // finishes. Use a native-transport stub so Chromium can check both paths.
+    for (const scheme of ['light', 'dark']) {
+      for (const channel of [STABLE, CANARY]) {
+        const page = await browser.newPage({ viewport: { width: 1800, height: 1000 }, locale: 'ko-KR', colorScheme: scheme });
+        page.on('pageerror', e => errors.push(e.message));
+        await page.goto(base + '/');
+        await page.evaluate(transport => {
+          window.__calls = [];
+          const postMessage = value => window.__calls.push(value);
+          if (transport === 'light') window.webkit = { messageHandlers: { werkschaftUpdate: { postMessage } } };
+          else (window.chrome ||= {}).webview = { postMessage };
+        }, scheme);
+        await page.addScriptTag({ content: tauriBridge });
+        await page.evaluate(c => installWerkschaftUpdateBridge('http://127.0.0.1:1', c, {}), channel);
+        assert.equal(await page.evaluate(() => typeof window.werkschaftDesktop), 'undefined');
+        await page.evaluate(c => {
+          installWerkschaftUpdateBridge(location.origin, c, { phase: 'none' });
+          window.dispatchEvent(new Event('werkschaft-update-ready'));
+        }, channel);
+        await page.locator('#gear').click();
+        await page.locator('#dupd-check').waitFor({ state: 'visible' });
+        assert.equal(await page.locator('#dupd-check').count(), 1, 'late and repeated readiness mounts one row');
+        await assertBeside(page, `tauri-${scheme}`);
+        assert.equal(await page.locator('#dupd-stable').isVisible(), channel.canary);
+        const shot = async name => {
+          if (tauriShots) await page.screenshot({ path: path.join(tauriShots, `${name}-${scheme}.png`) });
+        };
+        await shot(channel.canary ? 'after-canary-running' : 'after-stable-running');
+        await page.locator('#dupd-check').click();
+        assert.equal((await calls(page)).at(-1), 'werkschaft:update:check');
+
+        if (channel.canary) {
+          await page.locator('#dupd-stable').click();
+          assert.equal((await calls(page)).at(-1), 'werkschaft:update:stable-return');
+          await page.evaluate(() => window.__werkschaftUpdateStatus({
+            state: 'available', version: '0.51.0', current: '0.52.0-canary.1', action: 'stable-return',
+            phase: { phase: 'available', version: '0.51.0', action: 'stable-return' }
+          }));
+          assert.deepEqual(await page.locator('.wstoast .wst-act').allTextContents(), ['다운그레이드 (v0.51.0)']);
+          await shot('after-stable-return-confirm');
+          await page.locator('.wstoast .wst-act').click();
+          assert.equal((await calls(page)).at(-1), 'werkschaft:update:download');
+          await page.evaluate(() => window.__werkschaftUpdateStatus({
+            state: 'ready', version: '0.51.0', action: 'stable-return',
+            phase: { phase: 'ready', version: '0.51.0', action: 'stable-return' }
+          }));
+          await shot('after-stable-return-ready');
+          await page.locator('.wstoast .wst-act').click();
+          assert.equal((await calls(page)).at(-1), 'werkschaft:update:restart');
+        } else {
+          await page.locator('#dupd-canary').click();
+          assert.equal((await calls(page)).at(-1), 'werkschaft:update:canary');
+          await page.evaluate(() => window.__werkschaftUpdateStatus({
+            state: 'available', version: '0.52.0-canary.1', action: 'canary',
+            phase: { phase: 'available', version: '0.52.0-canary.1', action: 'canary' }
+          }));
+          await shot('after-canary-available');
+          await page.locator('.wstoast .wst-act').nth(1).click();
+          assert.equal((await calls(page)).at(-1), 'werkschaft:update:skip', 'skip never sends a renderer version');
+          assert.equal(await page.evaluate(source => {
+            const iframe = document.createElement('iframe');
+            document.body.append(iframe);
+            iframe.contentWindow.eval(source);
+            iframe.contentWindow.installWerkschaftUpdateBridge(location.origin, {}, {});
+            const installed = Boolean(iframe.contentWindow.werkschaftDesktop);
+            iframe.remove();
+            return installed;
+          }, tauriBridge), false, 'the bridge does not install in child frames');
+        }
+        await page.close();
+      }
     }
     assert.deepEqual(errors, []);
     console.log('desktop update browser acceptance ok');

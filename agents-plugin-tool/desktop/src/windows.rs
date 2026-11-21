@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use tauri::WebviewWindow;
+use tauri::{Manager, WebviewWindow};
 use webview2_com::{
     take_pwstr, AcceleratorKeyPressedEventHandler, Microsoft::Web::WebView2::Win32::*,
     NavigationCompletedEventHandler, NavigationStartingEventHandler,
-    PermissionRequestedEventHandler, ProcessFailedEventHandler,
+    PermissionRequestedEventHandler, ProcessFailedEventHandler, WebMessageReceivedEventHandler,
 };
 use windows::{
     core::{Interface, BOOL, HSTRING, PWSTR},
@@ -14,7 +14,7 @@ use windows::{
     },
 };
 
-use crate::{accelerator, menu_action, navigation, shell::Connection};
+use crate::{accelerator, menu_action, navigation, shell::Connection, updates};
 
 pub fn install(window: &WebviewWindow, connection: Arc<Connection>) -> tauri::Result<()> {
     let window = window.clone();
@@ -107,6 +107,32 @@ unsafe fn install_hooks(
 
     let failed = connection.clone();
     let epoch = failed.window_epoch();
+    if window.try_state::<Arc<updates::Controller>>().is_some() {
+        let target = window.clone();
+        // The core event receives the top-level document only. Frame messages
+        // have a separate WebView2 event, which the shell does not register.
+        webview.add_WebMessageReceived(
+            &WebMessageReceivedEventHandler::create(Box::new(move |_, args| {
+                if let Some(args) = args {
+                    let mut raw = PWSTR::null();
+                    if args.TryGetWebMessageAsString(&mut raw).is_err() {
+                        return Ok(());
+                    }
+                    let message = take_pwstr(raw);
+                    if !message.starts_with("werkschaft:update:") || message.len() > 32 {
+                        return Ok(());
+                    }
+                    let mut raw = PWSTR::null();
+                    args.Source(&mut raw)?;
+                    if let Ok(source) = url::Url::parse(&take_pwstr(raw)) {
+                        updates::receive(target.clone(), epoch, true, source, &message);
+                    }
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+    }
     let failed_window = window.clone();
     webview.add_NavigationCompleted(
         &NavigationCompletedEventHandler::create(Box::new(move |_, args| {
@@ -164,7 +190,10 @@ unsafe fn install_hooks(
     let mut raw = PWSTR::null();
     settings.UserAgent(&mut raw)?;
     let default_agent = take_pwstr(raw);
-    let agent = format!("{default_agent} Werkschaft/{}", env!("CARGO_PKG_VERSION"));
+    let agent = format!(
+        "{default_agent} Werkschaft/{}",
+        window.app_handle().package_info().version
+    );
     settings.SetUserAgent(&HSTRING::from(agent))?;
     install_accelerators(controller, window.clone(), connection.clone())
 }

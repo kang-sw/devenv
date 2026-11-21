@@ -12,13 +12,18 @@ tauri-build = { version = "=2.7.4", features = [] }
 [dependencies]
 arboard = { version = "=3.7.0", default-features = false }
 open = "=5.4.5"
+reqwest = { version = "=0.13.5", default-features = false, features = ["native-tls", "system-proxy", "stream"] }
+rusqlite = { version = "=0.34.0", features = ["bundled"] }
+semver = "=1.0.28"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
 sha2 = "=0.10.9"
 tauri = { version = "=2.12.5", features = ["devtools"] }
 tauri-plugin-dialog = { version = "=2.8.4", default-features = false }
 tauri-plugin-single-instance = { version = "=2.5.5", default-features = false }
+tauri-plugin-updater = { version = "=2.14.1", default-features = false, features = ["native-tls", "zip"] }
 tempfile = "=3.27.0"
+tokio = { version = "=1.54.1", features = ["time"] }
 ureq = { version = "=3.5.2", default-features = false, features = ["json"] }
 url = "=2.5.8"
 
