@@ -145,7 +145,7 @@
       if (fb) { foldStore(fb.getAttribute('data-fold')); return; }
       // a wiki: link in rendered text (the daemon marks it data-wiki / data-page) opens that page in the panel
       var wl = t.closest('a[data-wiki][data-page]');
-      if (wl && AD.wiki) { e.preventDefault(); wkOpenLink(wl.getAttribute('data-wiki'), wl.getAttribute('data-page')); return; }
+      if (wl && AD.wiki) { e.preventDefault(); wkOpenLink(wl.getAttribute('data-wiki'), wl.getAttribute('data-page'), wl); return; }
       // the wiki's menus close on a click elsewhere in the tracker
       if (AD.wiki && ui.store && wk().pick && !t.closest('.wk-pickw')) { wk().pick = false; render(); }
       if (AD.wiki && ui.store && wk().more && !t.closest('.wk-more')) { wk().more = false; render(); }
@@ -172,7 +172,7 @@
         else if (k === 'lsearch') labelSearch(d.label);
         else if (k === 'tedit') startRowEdit(d.item, (a.closest('.irow') || a).getAttribute('data-rk'));
         else if (k === 'claimf') claimableFilter();
-        else if (k === 'slabel-rm') labelRemove(d.label);
+        else if (k === 'slabel-rm') labelRemove(d.label, a);
         else if (k === 'iedit-x' || k === 'iedit-discard') endEdit();
         else if (k === 'cedit') startCedit(d.cid);
         else if (k === 'cedit-save') saveCedit();
@@ -184,7 +184,7 @@
         else if (k === 'mdet') { var mk = ui.store + '|' + d.who; ui.mdet[mk] = !ui.mdet[mk]; render(); }
         else if (k === 'ofold') { var ok = ui.store + '|' + d.who; ui.ofold[ok] = !ui.ofold[ok]; render(); }
         else if (k === 'org-edit') openOrgEditor();
-        else if (k === 'oe-close') closeOrgEditor(false);
+        else if (k === 'oe-close') closeOrgEditor(false, a);
         else if (k === 'oe-expand') { if (ui.orged) { ui.orged.fold = {}; renderOrgEditor(); } }
         else if (k === 'oe-fold') { if (ui.orged && d.who) { ui.orged.fold[d.who] = !ui.orged.fold[d.who]; renderOrgEditor(); } }
         else if (k === 'oe-adm') { if (ui.orged && d.who) { delete ui.orged.errors._batch; orgEdToggleAdmin(ui.orged, d.who); renderOrgEditor(); } }
@@ -202,7 +202,12 @@
         }
         else if (k === 'oe-undo-all') { if (ui.orged) { orgEdUndoAll(ui.orged); renderOrgEditor(); } }
         else if (k === 'oe-save') orgEdSave();
-        else if (k === 'oe-roles') { if (closeOrgEditor(false)) openDialog('admin', {}); }
+        else if (k === 'oe-roles') {
+          var rolesStore = ui.store;
+          closeOrgEditor(false, a).then(function (closed) {
+            if (closed && ui.store === rolesStore) openDialog('admin', {});
+          });
+        }
         else if (k === 'oe-org-new') {
           if (ui.orged) {
             var baseNm = wsT("js.tk.org.new.default"), tryNm = baseNm, nIdx = 2;
@@ -232,7 +237,10 @@
           if (ui.orged) { var goid = a.getAttribute('data-org'); ui.orged.goneOpen[goid] = !ui.orged.goneOpen[goid]; renderOrgEditor(); }
         }
         else if (k === 'oe-gone-open') {
-          if (d.item && closeOrgEditor(false)) showItem(d.item);
+          var itemStore = ui.store;
+          if (d.item) closeOrgEditor(false, a).then(function (closed) {
+            if (closed && ui.store === itemStore) showItem(d.item);
+          });
         }
         else if (k === 'iw-ofold') {
           var fk0 = ui.store + '|' + d.item + '|' + a.getAttribute('data-key');
@@ -573,7 +581,7 @@
         if (id === 'tkcedit') { if (chord) { e.preventDefault(); saveCedit(); } else if (esc1) { e.preventDefault(); endCedit(); } return; }
         if (id === 'wk-ebody') { if (chord) { e.preventDefault(); wkSave(); } else if (esc1) { e.preventDefault(); wkCancel(); } return; }
         if (id === 'wk-epath') { if (plain || chord) { e.preventDefault(); wkSave(); } else if (esc1) { e.preventDefault(); wkCancel(); } return; }
-        if (id === 'wk-wname' || id === 'wk-wfirst') { if (plain) { e.preventDefault(); wkCreate(); } else if (esc1 && wk().creating) { e.preventDefault(); wk().creating = false; render(); } return; }
+        if (id === 'wk-wname' || id === 'wk-wfirst') { if (plain) { e.preventDefault(); wkCreate(t); } else if (esc1 && wk().creating) { e.preventDefault(); wk().creating = false; render(); } return; }
         if (id === 'cbox' && chord) { e.preventDefault(); if ($('tkcsend')) quick('comment', $('tkcsend')); return; }
       }
       // Esc in the search box clears it first; with it empty, Esc goes on to close the window or the drawer

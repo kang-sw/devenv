@@ -259,6 +259,8 @@
   "js.banner.wentaway": "セッションのライブ状態が失われました。再読み込みするとレイアウトが更新されます。",
   "js.cancel.fail": "キャンセルできませんでした: {0}",
   "js.cancel.ok": "キャンセルしました: メッセージは入力欄に戻りました。",
+  "js.confirm.accept": "確認",
+  "js.confirm.cancel": "キャンセル",
   "js.card.close": "閉じる",
   "js.closerequest.add": "トピックを閉じるよう依頼",
   "js.closerequest.label": "[{0}] を閉じる",

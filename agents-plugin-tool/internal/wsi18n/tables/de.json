@@ -259,6 +259,8 @@
   "js.banner.wentaway": "Der Live-Status der Sitzung ist verschwunden. Neu laden, um das Layout zu aktualisieren.",
   "js.cancel.fail": "Nicht abgebrochen: {0}",
   "js.cancel.ok": "Abgebrochen: Die Nachricht ist wieder im Eingabefeld.",
+  "js.confirm.accept": "Bestätigen",
+  "js.confirm.cancel": "Abbrechen",
   "js.card.close": "Schließen",
   "js.closerequest.add": "Schließen des Themas anfragen",
   "js.closerequest.label": "[{0}] schließen",

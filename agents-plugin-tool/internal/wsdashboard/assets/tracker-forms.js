@@ -768,10 +768,13 @@
     renderOrgEditor();
     if (!dl.open) dl.showModal();
   }
-  function closeOrgEditor(force) {
-    var ed = ui.orged, dl = $('tkorged');
+  async function closeOrgEditor(force, opener) {
+    var ed = ui.orged, dl = $('tkorged'), store = ui.store;
+    if (!force && !ed) return false;
     if (!force && orgEdCloseNeedsConfirm(ed)) {
-      if (!window.confirm(wsTn("js.tk.org.discard", orgEdCount(ed)))) return false;
+      var changes = JSON.stringify(orgEdChanges(ed));
+      if (!(await window.wsConfirm(wsTn("js.tk.org.discard", orgEdCount(ed)), { opener: opener }))) return false;
+      if (ui.store !== store || ui.orged !== ed || !dl || !dl.open || JSON.stringify(orgEdChanges(ed)) !== changes) return false;
     }
     hideTip();
     ui.orged = null;

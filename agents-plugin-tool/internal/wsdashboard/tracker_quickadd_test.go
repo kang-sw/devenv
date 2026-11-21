@@ -145,11 +145,7 @@ func TestTrackerPriorityChipAndLabelPicker(t *testing.T) {
 			t.Errorf("newAct lacks %q", want)
 		}
 	}
-	rm := trackerFn(t, `function labelRemove\(id, then\)`, false)
-	if !strings.Contains(rm, `window.confirm(wsT("js.tk.set.labels.confirm", l.name))) commit([['roles.remove_label', { label: l.id }]], then);`) {
-		t.Errorf("labelRemove does not confirm before the remove:\n%s", rm)
-	}
-	if !strings.Contains(trackerBlock(t, `else if \(k === 'slabel-rm'\)`, `\n`), "labelRemove(d.label);") {
+	if !strings.Contains(trackerBlock(t, `else if \(k === 'slabel-rm'\)`, `\n`), "labelRemove(d.label, a);") {
 		t.Error("the store settings' remove does not share labelRemove")
 	}
 }

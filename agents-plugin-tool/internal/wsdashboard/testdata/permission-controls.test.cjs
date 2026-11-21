@@ -16,7 +16,7 @@ const { readAssetSource } = require('./asset-source.cjs');
 const source = readAssetSource('wsdashboard', 'dashboard.js');
 const region = source.match(/  var LEAD_MODES = [\s\S]*?\n  function rpLeadMake\(\) \{[\s\S]*?\n  \}\n/);
 assert(region, 'production lead choices, permission helpers and creation popover exist');
-const sessMaker = source.match(/\n  function rpSessMake\(inRow\) \{[\s\S]*?\n  \}\n/);
+const sessMaker = source.match(/\n  var leadActions = new Set\(\);\n  function rpSessMake\(inRow\) \{[\s\S]*?\n  \}\n/);
 assert(sessMaker, 'production session menu maker exists');
 const gone = source.match(/\n  function leadGone\(st\) \{.*\}\n/);
 const connected = source.match(/\n  function connected\(on\) \{[\s\S]*?\n  \}\n/);
@@ -102,7 +102,7 @@ function world() {
     tkFetch: (route, opt, done) => fetches.push({ route, done }),
     railPost: (route, b, done, timeout) => posts.push({ route, body: plain(b), done, timeout }),
     localStorage: { getItem: () => null, setItem() {} }, sessionStorage: { setItem() {} }, RENAME_NEW: 'rename',
-    window: { confirm: () => true }, Date: { now: () => 1 },
+    window: {}, Date: { now: () => 1 },
     railOpen() {}, railPopPlace() {}, notifAsk() {}, saveDraft() {}, go: href => events.push(['go', href]),
     toast: t => events.push(['toast', t]), railPopClose() { events.push('close'); },
     archErr: (a, st, s) => s, leadDraw() {}, leadFetch() {}, hostedPage: false, handedPage: false,
@@ -538,3 +538,47 @@ const rowsOf = m => m.state.children.map(n => n.textContent);
   assert.equal(byCls(s.p.el, 'err').textContent, 'js.perm.unsent');
 }
 console.log('permission control cases passed');
+
+// Lead actions close the popover, then wait on their own decision. A row
+// opened again while the decision is pending cannot inherit that consent.
+(async function () {
+  const opener = { isConnected: true };
+  const state = { ...base, process: true, mcp_broken: ['server'], background_tasks: 2 };
+  for (const action of ['stop', 'restart', 'handoff', 'close']) {
+    for (const outcome of ['cancel', 'stale', 'accept', 'no-background']) {
+      const w = world(), prompts = [];
+      const m = menu(w, { ...state, background_tasks: outcome === 'no-background' ? 0 : 2 });
+      const button = m.p.el.find(n => n.tag === 'button' && n.textContent.startsWith('js.lead.' + action));
+      w.ctx.railPopBtn = () => opener;
+      w.ctx.railPopClose = () => {
+        if (!w.ctx.rp.P) return;
+        m.p.close();
+        w.ctx.rp.P = null;
+      };
+      let pending = null;
+      w.ctx.window.wsConfirm = (message, options) => {
+        if (pending) return Promise.resolve(false);
+        prompts.push(message);
+        assert.equal(options.opener, opener);
+        return new Promise(resolve => { pending = resolve; });
+      };
+      button.click();
+      if (pending) {
+        const suffix = outcome === 'no-background' ? '' : action === 'close' ? '.bg#2' : '#2';
+        assert.deepEqual(prompts, ['js.lead.' + action + '.confirm' + suffix]);
+        assert.equal(w.posts.length, 0);
+        button.click();
+        if (outcome === 'stale') m.p.open('different');
+        pending(outcome !== 'cancel');
+      } else {
+        assert.equal(outcome, 'no-background');
+        assert.notEqual(action, 'close');
+      }
+      await new Promise(resolve => setImmediate(resolve));
+      const writes = (outcome === 'cancel' || outcome === 'stale') ? [] : ['/agents/s1/' + action];
+      assert.deepEqual(w.posts.map(p => p.route), writes, action + ' ' + outcome);
+      button.click();
+      assert.deepEqual(w.posts.map(p => p.route), writes, 'pending request is sent once');
+    }
+  }
+})();

@@ -259,6 +259,8 @@
   "js.banner.wentaway": "该会话的实时状态已消失。请重新加载以更新布局。",
   "js.cancel.fail": "未能取消：{0}",
   "js.cancel.ok": "已取消：消息已放回输入框。",
+  "js.confirm.accept": "确认",
+  "js.confirm.cancel": "取消",
   "js.card.close": "关闭",
   "js.closerequest.add": "请求关闭主题",
   "js.closerequest.label": "关闭 [{0}]",

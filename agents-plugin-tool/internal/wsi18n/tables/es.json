@@ -259,6 +259,8 @@
   "js.banner.wentaway": "El estado en vivo de la sesión desapareció. Recarga para actualizar el diseño.",
   "js.cancel.fail": "No se canceló: {0}",
   "js.cancel.ok": "Cancelado: el mensaje volvió al cuadro de mensaje.",
+  "js.confirm.accept": "Confirmar",
+  "js.confirm.cancel": "Cancelar",
   "js.card.close": "Cerrar",
   "js.closerequest.add": "Solicitar el cierre del tema",
   "js.closerequest.label": "Cerrar [{0}]",

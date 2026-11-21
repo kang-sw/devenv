@@ -259,6 +259,8 @@
   "js.banner.wentaway": "Lo stato live della sessione è scomparso. Ricarica per aggiornare il layout.",
   "js.cancel.fail": "Non annullato: {0}",
   "js.cancel.ok": "Annullato: il messaggio è tornato nella casella di scrittura.",
+  "js.confirm.accept": "Conferma",
+  "js.confirm.cancel": "Annulla",
   "js.card.close": "Chiudi",
   "js.closerequest.add": "Richiedi la chiusura dell'argomento",
   "js.closerequest.label": "Chiudi [{0}]",

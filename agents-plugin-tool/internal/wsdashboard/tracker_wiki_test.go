@@ -140,7 +140,7 @@ func TestTrackerWikiNavigationAsksBeforeDroppingAnEdit(t *testing.T) {
 	}
 	src := string(data)
 	nav := regexp.MustCompile(`(?s)\n  function wkShow\(\) \{.*?\n  function wkCancel\(\) \{`).FindString(src)
-	act := regexp.MustCompile(`(?s)\n  function wkAct\(k, a\) \{.*?\n  function cardTeam\(v\) \{`).FindString(src)
+	act := regexp.MustCompile(`(?s)\n  async function wkAct\(k, a\) \{.*?\n  function cardTeam\(v\) \{`).FindString(src)
 	if nav == "" || act == "" {
 		t.Fatal("tracker.js holds no wkShow ... wkCancel or wkAct ... cardTeam block")
 	}
@@ -155,7 +155,7 @@ func TestTrackerWikiNavigationAsksBeforeDroppingAnEdit(t *testing.T) {
 	}
 	script := `
 var asked = 0, answer = false, bad = [], closed = 0, st;
-var window = { confirm: function (m) { asked++; if (m !== 'LEAVE') bad.push('prompt text ' + m); return answer; } };
+var window = { wsConfirm: async function (m) { asked++; if (m !== 'LEAVE') bad.push('prompt text ' + m); return answer; } };
 var ui = { layout: 'wide', win: false, edpv: {}, eatt: {} };
 function wsT(k) { return k === 'js.tk.wk.leave' ? 'LEAVE' : k; }
 function wk() { return st; }
@@ -175,62 +175,76 @@ function fresh() {
 }
 function dirty() { wkStartEdit('index', false, false); st.edit.text = 'changed'; }
 var navs = {
-  link: function () { wkOpenLink('w', 'a'); },
-  open: function () { wkAct('wk-open', el({ 'data-path': 'a' })); },
-  pick: function () { wkAct('wk-pick', el({ 'data-wiki': 'v' })); },
-  newwiki: function () { wkAct('wk-newwiki', el({})); }
+  link: function () { return wkOpenLink('w', 'a'); },
+  open: function () { return wkAct('wk-open', el({ 'data-path': 'a' })); },
+  pick: function () { return wkAct('wk-pick', el({ 'data-wiki': 'v' })); },
+  newwiki: function () { return wkAct('wk-newwiki', el({})); }
 };
-Object.keys(navs).forEach(function (n) {
+(async function () {
+for (var n of Object.keys(navs)) {
   fresh(); dirty(); answer = false; var ed = st.edit;
-  navs[n]();
+  await navs[n]();
   check(n + ' declined: asked', asked, 1);
   check(n + ' declined: kept', [st.edit === ed, st.edit.text, st.name, st.page, !!st.creating], [true, 'changed', 'w', 'index', false]);
   fresh(); dirty(); answer = true;
-  navs[n]();
+  await navs[n]();
   check(n + ' accepted: asked', asked, 1);
   check(n + ' accepted: dropped', st.edit, null);
   fresh(); wkStartEdit('index', false, false);
-  navs[n]();
+  await navs[n]();
   check(n + ' clean edit: asked', asked, 0);
   fresh();
-  navs[n]();
+  await navs[n]();
   check(n + ' no edit: asked', asked, 0);
-});
+}
 
 // a new page is clean until its text leaves the seeded heading; its conflict merge base stays ''
 fresh(); wkStartEdit('dir/new-page', true, false);
 check('new page seed', [st.edit.text, st.edit.orig], ['# new page\n\n', '']);
-wkOpenLink('w', 'a');
+await wkOpenLink('w', 'a');
 check('untouched new page: asked', asked, 0);
 fresh(); wkStartEdit('dir/new-page', true, false); st.edit.text += 'body'; answer = false;
-wkOpenLink('w', 'a');
+await wkOpenLink('w', 'a');
 check('typed new page: asked', asked, 1);
 
 // declining a link from an item window leaves the window open; accepting closes it once
 fresh(); dirty(); ui.win = true; answer = false;
-wkOpenLink('w', 'a');
+await wkOpenLink('w', 'a');
 check('declined link from window', [asked, closed, ui.win], [1, 0, true]);
 fresh(); dirty(); ui.win = true; answer = true;
-wkOpenLink('w', 'a');
+await wkOpenLink('w', 'a');
 check('accepted link from window', [asked, closed, ui.win, st.page], [1, 1, false, 'a']);
 
 // a pick of the wiki shown drops nothing and does not ask
 fresh(); dirty();
-wkAct('wk-pick', el({ 'data-wiki': 'w' }));
+await wkAct('wk-pick', el({ 'data-wiki': 'w' }));
 check('pick of the shown wiki', [asked, st.edit && st.edit.text], [0, 'changed']);
 
 // Edit again after a refused save is dirty against the saved "theirs" text
 fresh(); st.conflict = { c: { path: 'index', theirs: 'c2', theirsText: 'theirs' }, mine: 'mine', orig: 'old' };
-wkAct('wk-again', el({})); answer = false;
-wkOpenLink('w', 'a');
+await wkAct('wk-again', el({})); answer = false;
+await wkOpenLink('w', 'a');
 check('edit again: asked', asked, 1);
 
 // the reopen after a save (the save clears the edit) does not ask
 fresh(); dirty(); st.edit = null;
-wkOpenLink('w', 'a');
+await wkOpenLink('w', 'a');
 check('after save: asked', asked, 0);
 
+// A changed edit or item window invalidates the decision already shown.
+fresh(); dirty(); answer = true;
+var draft = navs.open();
+st.edit.text = 'changed while waiting';
+await draft;
+check('changed draft survives', [st.page, st.edit.text], ['index', 'changed while waiting']);
+fresh(); dirty(); ui.win = true; ui.item = 'old';
+var link = navs.link();
+ui.item = 'new';
+await link;
+check('new item window survives', [closed, ui.win, ui.item, st.page], [0, true, 'new', 'index']);
+
 process.stdout.write(bad.join("\n"));
+})();
 `
 	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {
@@ -401,7 +415,7 @@ func TestTrackerWikiHTMLPageEditor(t *testing.T) {
 	helpers := trackerJSBlock(t, "\n  // A page path as the daemon answers it", "\n  // Reads land on the state object")
 	edit := trackerJSBlock(t, "\n  function wkPageEdit() {", "\n  // Line regions of side")
 	nav := trackerJSBlock(t, "\n  function wkShow() {", "\n  function wkCancel() {")
-	save := trackerJSBlock(t, "\n  function wkSave() {", "\n  function wkAct(k, a) {")
+	save := trackerJSBlock(t, "\n  function wkSave() {", "\n  async function wkAct(k, a) {")
 	ed := trackerJSBlock(t, "\n  function editorHtml(id, o) {", "\n  function pvClass(")
 	img := trackerJSBlock(t, "\n  var IMG_TYPES", "\n  // Puts s at box's caret")
 	runTrackerNode(t, "wiki HTML page editor", trackerWikiHTMLStubs+`
@@ -414,7 +428,7 @@ function pvHtml() { return ''; }
 function savedAtts(id, text) { return [{ oid: 'o1' }]; }
 function closeItemWindow() { ui.win = false; }
 function wkHas(s, p) { return !!(s.pages && s.pages.paths.indexOf(wkCanon(p)) >= 0); }
-var window = { confirm: function () { return true; } };
+var window = { wsConfirm: async function () { return true; } };
 `+helpers+edit+nav+save+ed+img+`
 function fresh(over) { ui.wiki.A = state(over || {}); uploads = []; saves = []; toasts = []; renders = 0; ui.edpv = {}; ui.eatt = {}; return ui.wiki.A; }
 var PNG = { name: 'p.png', type: 'image/png', size: 10 };
@@ -473,13 +487,15 @@ wkSave();
 check('a .md path saves canonical', saves[0].path, 'notes/z');
 
 // wiki: links: x.html opens like any page; x.md opens page x.
+(async function () {
 st = fresh({ page: 'index', doc: null });
-wkOpenLink('w', 'g.html');
+await wkOpenLink('w', 'g.html');
 check('link to g.html', [st.page, st.edit, renders > 0], ['g.html', null, true]);
-wkOpenLink('w', 'notes/a.md');
+await wkOpenLink('w', 'notes/a.md');
 check('link to notes/a.md', [st.page, st.edit], ['notes/a', null]);
 
 process.stdout.write(bad.join("\n"));
+})();
 `)
 }
 

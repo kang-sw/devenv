@@ -259,6 +259,8 @@
   "js.banner.wentaway": "세션의 실시간 상태가 사라졌습니다. 새로고침하면 레이아웃이 갱신됩니다.",
   "js.cancel.fail": "취소하지 못함: {0}",
   "js.cancel.ok": "취소됨: 메시지가 입력란으로 돌아왔습니다.",
+  "js.confirm.accept": "확인",
+  "js.confirm.cancel": "취소",
   "js.card.close": "닫기",
   "js.closerequest.add": "주제 닫기 요청",
   "js.closerequest.label": "[{0}] 닫기",

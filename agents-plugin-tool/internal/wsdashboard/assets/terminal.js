@@ -360,7 +360,7 @@
     s.endText = mk("span", "tm-endtx");
     var close = mk("button", "btn", wsT("js.card.close"));
     close.type = "button";
-    close.addEventListener("click", function () { closing(c); });
+    close.addEventListener("click", function () { closing(c, close); });
     s.end.appendChild(s.endText);
     s.end.appendChild(close);
     c.body.appendChild(s.gap);
@@ -459,12 +459,16 @@
   // closing asks before a running shell ends, then closes the terminal
   // through the daemon; the card goes when the daemon has. An exited
   // shell closes without the question (the close removes its holder).
-  function closing(c) {
-    var s = c.t;
+  async function closing(c, opener) {
+    var s = c.t, tid = c.data.tid;
     if (s.gone) return true;
-    if (!s.exited && !window.confirm(wsT("js.term.confirm"))) return false;
-    if (!hooks.post) return false;
-    hooks.post("terminals/" + encodeURIComponent(c.data.tid) + "/close", {}, function (ok, v) {
+    if (s.closing || !hooks.post) return false;
+    if (!s.exited && !(await window.wsConfirm(wsT("js.term.confirm"), { opener: opener }))) return false;
+    if (c.t !== s || s.gone || s.closing || c.data.tid !== tid || !c.el.isConnected) return false;
+    s.closing = true;
+    hooks.post("terminals/" + encodeURIComponent(tid) + "/close", {}, function (ok, v) {
+      if (c.t !== s || s.gone || c.data.tid !== tid) return;
+      s.closing = false;
       if (ok || /unknown terminal/.test(v)) gone(c);
       else toast(wsT("js.term.closefail", v));
     });
@@ -805,13 +809,15 @@
       }
     }
   }
-  function closeTab(tid) {
+  async function closeTab(tid, opener) {
     var tab = tabFor(tid);
     if (!tab || tab.closing || !hooks.post) return;
-    if (!tab.t.exited && !window.confirm(wsT("js.term.confirm"))) return;
+    if (!tab.t.exited && !(await window.wsConfirm(wsT("js.term.confirm"), { opener: opener }))) return;
+    if (tabFor(tid) !== tab || tab.t.gone || tab.closing) return;
     tab.closing = true;
     tab.closeBtn.disabled = true;
     hooks.post("terminals/" + encodeURIComponent(tid) + "/close", {}, function (ok, v) {
+      if (tabFor(tid) !== tab) return;
       if (ok || /unknown terminal/.test(v)) removeTab(tid);
       else {
         tab.closing = false;
@@ -866,7 +872,7 @@
       close: function () { removeTab(t.id); }
     };
     tab.t = { last: 0, fails: 0, gaps: 0, live: false, exited: null, gone: false, ws: null, term: null, born: Date.now() };
-    initTermBody(tab, function () { closeTab(t.id); });
+    initTermBody(tab, function (e) { closeTab(t.id, e.currentTarget); });
     tabList.push(tab);
     saveTabStore();
     if (shouldActivate) activateTab(t.id);
@@ -917,7 +923,7 @@
       var t = e.target;
       if (!t || !t.closest) return;
       var closeEl = t.closest("[data-ctab-close]");
-      if (closeEl) { closeTab(closeEl.getAttribute("data-ctab-close")); return; }
+      if (closeEl) { closeTab(closeEl.getAttribute("data-ctab-close"), closeEl); return; }
       var selEl = t.closest("[data-ctab-term]");
       if (selEl) activateTab(selEl.getAttribute("data-ctab-term"));
     });

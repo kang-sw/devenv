@@ -186,9 +186,21 @@
   }
   // An admin removes a label from the store's list (the store settings and the quick-add picker):
   // it leaves every item, so the viewer confirms first. then runs after the write.
-  function labelRemove(id, then) {
-    var l = labelOf(id);
-    if (l && window.confirm(wsT("js.tk.set.labels.confirm", l.name))) commit([['roles.remove_label', { label: l.id }]], then);
+  var labelRemoving = new Set();
+  async function labelRemove(id, opener, then) {
+    var l = labelOf(id), store = ui.store, key = JSON.stringify([store, id]);
+    if (!l || labelRemoving.has(key)) return;
+    var name = l.name;
+    if (!(await window.wsConfirm(wsT("js.tk.set.labels.confirm", name), { opener: opener }))) return;
+    if (ui.store !== store || !opener.isConnected || !VS || !VS.viewer.admin || labelRemoving.has(key)) return;
+    l = labelOf(id);
+    if (!l || l.name !== name) return;
+    labelRemoving.add(key);
+    function done() { labelRemoving.delete(key); }
+    commit([['roles.remove_label', { label: id }]], function (results) {
+      done();
+      if (then && ui.store === store) then(results);
+    }, null, done);
   }
   function labelChips(it, act) {
     return (it.labels || []).map(labelOf).filter(Boolean).map(function (l) { return labelChip(l, act); }).join('');

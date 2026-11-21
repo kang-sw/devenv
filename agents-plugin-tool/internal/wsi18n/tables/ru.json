@@ -259,6 +259,8 @@
   "js.banner.wentaway": "Живое состояние сессии пропало. Перезагрузите страницу, чтобы обновить макет.",
   "js.cancel.fail": "Не отменено: {0}",
   "js.cancel.ok": "Отменено: сообщение вернулось в поле ввода.",
+  "js.confirm.accept": "Подтвердить",
+  "js.confirm.cancel": "Отмена",
   "js.card.close": "Закрыть",
   "js.closerequest.add": "Запросить закрытие темы",
   "js.closerequest.label": "Закрыть [{0}]",

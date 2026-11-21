@@ -259,6 +259,8 @@
   "js.banner.wentaway": "The session's live state went away. Reload to update the layout.",
   "js.cancel.fail": "Not cancelled: {0}",
   "js.cancel.ok": "Cancelled: the message is back in the composer.",
+  "js.confirm.accept": "Confirm",
+  "js.confirm.cancel": "Cancel",
   "js.card.close": "Close",
   "js.closerequest.add": "Request topic closure",
   "js.closerequest.label": "Close [{0}]",

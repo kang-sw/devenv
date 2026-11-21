@@ -259,6 +259,8 @@
   "js.banner.wentaway": "該工作階段的即時狀態已消失。請重新載入以更新版面配置。",
   "js.cancel.fail": "未能取消：{0}",
   "js.cancel.ok": "已取消：訊息已放回輸入框。",
+  "js.confirm.accept": "確認",
+  "js.confirm.cancel": "取消",
   "js.card.close": "關閉",
   "js.closerequest.add": "請求關閉主題",
   "js.closerequest.label": "關閉 [{0}]",
