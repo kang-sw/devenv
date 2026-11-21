@@ -50,11 +50,13 @@ type hostedDaemon struct {
 func startHostedDaemon(t *testing.T) *hostedDaemon {
 	t.Helper()
 	bin := buildDashboardTestBin(t, "")
-	versionOut, err := exec.Command(bin, "version").Output()
+	env, dir := dashboardTestEnv(t)
+	versionCmd := exec.Command(bin, "version")
+	versionCmd.Env = env
+	versionOut, err := versionCmd.Output()
 	if err != nil {
 		t.Fatal(err)
 	}
-	env, dir := dashboardTestEnv(t)
 	rsrc, err := filepath.Abs(filepath.Join("..", "..", "..", "agents-plugin", "rsrc"))
 	if err != nil {
 		t.Fatal(err)

@@ -242,7 +242,7 @@ func TestLANModeServesTheMermaidScriptToAll(t *testing.T) {
 // Host, need the token like any other request; the token passes by query
 // parameter or cookie, and the endpoint file's shutdown token does not.
 func TestLANModeGuardsEveryRoute(t *testing.T) {
-	f := startPageFixture(t, lanMode, withTracker(newFakeTracker()), withWorkspaces(t), func(o *DaemonOptions) {
+	f := startPageFixture(t, lanMode, withTracker(newFakeTracker()), withWorkspaces(t), withBrowseRootsFixture(t), func(o *DaemonOptions) {
 		o.Worktrees = &fakeWorktrees{}
 		// A real manager over an empty directory: it starts no holder, and
 		// with it the daemon serves the terminal routes.

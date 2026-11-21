@@ -128,6 +128,8 @@ type DaemonOptions struct {
 	// (fs_act_route.go), so a test never opens a window; nil is the host
 	// the daemon runs on.
 	hostFiles *hostFiles
+	// browseRoots supplies local filesystem roots. Nil discovers host roots.
+	browseRoots func() browseRoots
 	// terminalShell replaces the shell a new terminal runs, so a test's
 	// shell does not depend on the machine's; nil picks daemonShell.
 	terminalShell func() terminalShell
@@ -253,7 +255,8 @@ type Daemon struct {
 	openSystem func(target string) error
 	// hostFiles is the host the file browser's host route acts on
 	// (fs_act_route.go).
-	hostFiles *hostFiles
+	hostFiles   *hostFiles
+	browseRoots func() browseRoots
 	// fsCapOnce draws fsCapSecret, the key of the HTML preview's
 	// capabilities (fs_capability.go); fsNow replaces their clock in a test.
 	fsCapOnce   sync.Once

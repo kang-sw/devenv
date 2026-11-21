@@ -100,6 +100,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		proxy:           opts.Proxy,
 		openSystem:      opts.openSystem,
 		hostFiles:       opts.hostFiles,
+		browseRoots:     opts.browseRoots,
 		worktrees:       opts.Worktrees,
 		sizes:           newSizeCache(),
 		files:           newFileListCache(),

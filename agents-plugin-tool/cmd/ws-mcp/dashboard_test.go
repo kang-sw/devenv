@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -104,13 +105,21 @@ func buildDashboardTestBinLD(t *testing.T, ldflags string) string {
 	return bin
 }
 
-// dashboardTestEnv isolates the cache (and so the daemon directory) and the
-// config home, and stops whatever daemon is left there when the test ends.
+// dashboardTestEnv gives a daemon and its children their own home and ws
+// state, and stops the daemon when the test ends.
 func dashboardTestEnv(t *testing.T) (env []string, dir string) {
 	t.Helper()
-	cache := filepath.Join(t.TempDir(), "cache")
-	env = append(os.Environ(), "WS_CACHE_HOME="+cache, "WS_CONFIG_HOME="+t.TempDir())
-	dir, err := wsdashboard.Dir(cache)
+	overrides := testHomeOverrides(t.TempDir())
+	env = slices.DeleteFunc(os.Environ(), func(entry string) bool {
+		_, replaced := overrides[testEnvKey(entry)]
+		return replaced
+	})
+	for key, value := range overrides {
+		if value != "" {
+			env = append(env, key+"="+value)
+		}
+	}
+	dir, err := wsdashboard.Dir(overrides["WS_CACHE_HOME"])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,6 +134,42 @@ func dashboardTestEnv(t *testing.T) (env []string, dir string) {
 		}
 	})
 	return env, dir
+}
+
+func TestDashboardTestEnvIsolatesChildHome(t *testing.T) {
+	outside := t.TempDir()
+	cleared := []string{"CLAUDE_CONFIG_DIR", "CODEX_HOME", "PI_CODING_AGENT_DIR", "XDG_CONFIG_HOME", "XDG_DATA_DIRS", "ZDOTDIR"}
+	for _, key := range cleared {
+		t.Setenv(key, outside)
+	}
+	t.Setenv("HOME", outside)
+	t.Setenv("PATH", "relative"+string(os.PathListSeparator)+outside)
+	for _, key := range []string{"GOCACHE", "GOMODCACHE", "PLAYWRIGHT_BROWSERS_PATH"} {
+		t.Setenv(key, filepath.Join(outside, key))
+	}
+
+	env, _ := dashboardTestEnv(t)
+	home := envValue(t, env, "HOME")
+	if home == outside || !filepath.IsAbs(home) {
+		t.Fatalf("child HOME = %q, want a new absolute scratch directory", home)
+	}
+	for key, want := range map[string]string{
+		"WS_CACHE_HOME":            filepath.Join(home, "cache"),
+		"WS_CONFIG_HOME":           filepath.Join(home, "config"),
+		"PATH":                     outside,
+		"GOCACHE":                  os.Getenv("GOCACHE"),
+		"GOMODCACHE":               os.Getenv("GOMODCACHE"),
+		"PLAYWRIGHT_BROWSERS_PATH": os.Getenv("PLAYWRIGHT_BROWSERS_PATH"),
+	} {
+		if got := envValue(t, env, key); got != want {
+			t.Errorf("child %s = %q, want %q", key, got, want)
+		}
+	}
+	for _, entry := range env {
+		if key := testEnvKey(entry); slices.Contains(cleared, key) {
+			t.Errorf("child inherited %s", key)
+		}
+	}
 }
 
 // waitForEndpoint polls dir until a healthy daemon of the wanted version (any
