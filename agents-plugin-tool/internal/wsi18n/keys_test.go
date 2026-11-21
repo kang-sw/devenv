@@ -1,6 +1,7 @@
 package wsi18n
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,14 +16,14 @@ import (
 // somewhere (a table is not a dumping ground). The call forms it scans are
 // the only forms the sources use: {{t "k"}}, {{tn "k" n}}, {{tcode "k" x}} in
 // templates, wsT("k") and wsTn("k", n) in scripts, and wsi18n.T/Plural(lang,
-// "k") in Go. A key built at run time cannot be seen, so none is built.
+// "k") in Go. The settings catalog also declares translation IDs for its rows.
 var (
 	tmplKey = regexp.MustCompile(`\{\{-?\s*\(?(?:t|tn|tcode)\s+"([^"]+)"`)
 	// A key may also open a parenthesised call inside a pipeline.
 	tmplKeyNested = regexp.MustCompile(`\((?:t|tn|tcode)\s+"([^"]+)"`)
 	// Every client key starts with ClientPrefix, so a quoted literal that
 	// does is a use, whatever expression (a conditional) picks it.
-	jsKey = regexp.MustCompile(`"(js\.[a-z0-9.]+)"`)
+	jsKey = regexp.MustCompile(`"(js\.[a-z0-9_.*]+[a-z0-9_])"`)
 	goKey = regexp.MustCompile(`wsi18n\.(?:T|Plural)\(\s*[A-Za-z_.]+,\s*"([^"]+)"`)
 	// Plural keys name the base; the tables hold ".one" and ".other".
 	pluralCall = regexp.MustCompile(`(?:\{\{-?\s*tn\s+|\bwsTn\(\s*|wsi18n\.Plural\(\s*[A-Za-z_.]+,\s*)"([^"]+)"`)
@@ -49,6 +50,11 @@ func usedKeys(t *testing.T) (keys, plural map[string]string) {
 			case ".tmpl":
 				res = []*regexp.Regexp{tmplKey, tmplKeyNested}
 			case ".js":
+				res = []*regexp.Regexp{jsKey}
+			case ".json":
+				if name != "dashboard-settings-catalog.json" {
+					return nil
+				}
 				res = []*regexp.Regexp{jsKey}
 			case ".go":
 				res = []*regexp.Regexp{goKey}
@@ -200,5 +206,34 @@ func TestPluralKeysComeInPairs(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func checkSettingsStrings(keys, table map[string]string) error {
+	var missing []string
+	for key := range keys {
+		if strings.HasPrefix(key, "js.settings.") && strings.TrimSpace(table[key]) == "" {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	return fmt.Errorf("missing settings strings: %s", strings.Join(missing, ", "))
+}
+
+func TestSettingsStringsAreCompleteWithoutFallback(t *testing.T) {
+	keys, _ := usedKeys(t)
+	for _, lang := range Languages() {
+		table := Table(lang.Code)
+		if err := checkSettingsStrings(keys, table); err != nil {
+			t.Errorf("%s: %v", lang.Code, err)
+		}
+	}
+	table := Table("ko")
+	delete(table, "js.settings.context_missing")
+	if err := checkSettingsStrings(keys, table); err == nil || !strings.Contains(err.Error(), "js.settings.context_missing") {
+		t.Fatalf("missing localized context notice was not reported: %v", err)
 	}
 }

@@ -73,6 +73,12 @@
       var path = hd.closest(".rwt").getAttribute("data-g").replace(/\\/g, "/").replace(/^\//, "");
       hd.classList.toggle("worktree-selected", !!selectedPath && path === selectedPath);
     });
+    var settings = location.pathname === "/settings" ? new URLSearchParams(location.search) : null;
+    q("[data-scope-entry]", r).forEach(function (gear) {
+      var active = settings && gear.dataset.scopeEntry === (settings.get("scope") || "global") &&
+        (gear.dataset.settingsTarget || "") === (settings.get("target") || "");
+      gear.setAttribute("aria-current", active ? "page" : "false");
+    });
     if (memoPad) memoPad.sync(rid);
     WsRail.markRevive(q(".rs", r), revBusy);
     q(".drarch", r).forEach(function (b) {
@@ -118,7 +124,7 @@
   // railRefocus puts it back on the new row after the swap, unless the
   // focus went elsewhere meanwhile. A keyboard move (Alt and an arrow)
   // lands its swap on the row it moved, so the next key still finds it.
-  var RAIL_FOCUS = [".rl", ".kidtog", ".drren", ".drcopy", ".drarch", ".rrev"];
+  var RAIL_FOCUS = [".r-config-gear", ".rl", ".kidtog", ".drren", ".drcopy", ".drarch", ".rrev"];
   function railFocus() {
     var a = doc.activeElement, row = a && railEl && WsRail && railEl.contains(a) && a.closest ? a.closest(".rs") : null;
     if (!row) return null;
@@ -522,6 +528,15 @@
     }
     railEl.addEventListener("click", function (e) {
       var t = e.target;
+      var gear = t.closest && t.closest("[data-scope-entry]");
+      if (gear && root.hasAttribute("data-can-control")) {
+        e.preventDefault();
+        e.stopPropagation();
+        var entry = gear.dataset, scope = entry.scopeEntry;
+        railOpen(false);
+        go(window.WsShell.settingsHref(scope, entry.settingsTarget, entry.settingsWorktree, scope === "session" ? entry.settingsTarget : ""));
+        return;
+      }
       if (admissionClick(t)) { e.preventDefault(); return; }
       var kt = t.closest && t.closest(".kidtog");
       if (kt) {
@@ -933,6 +948,7 @@
     // buttons and its rename field; a touch drags by the grip alone (on
     // the rest of the row it scrolls the list or holds for the row menu).
     var body = !grip && e.pointerType !== "touch" && !t.closest("button, input, textarea, select, [contenteditable]") ? t.closest(".rs") : null;
+    if (t.closest("[data-scope-entry]")) return;
     if (grip || body) {
       item = (grip || body).closest(".rs");
       if (!item || !railEl.contains(item) || item.classList.contains("ended") || item.parentNode.closest(".rended")) return;
