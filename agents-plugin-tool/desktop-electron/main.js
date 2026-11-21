@@ -4,8 +4,10 @@ const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 const { connectDaemon } = require('./daemon-controller');
 const { selectDaemon } = require('./daemon-selection');
-const { cacheRoot, inspect, browserCookie, browserLoginLink } = require('./endpoint');
+const { cacheRoot, inspect, sameDaemon, browserCookie, browserLoginLink } = require('./endpoint');
 const LOGIN_COPIED = 'werkschaft:login-copied';
+const DAEMON_NOTICE = Object.freeze({ subscribe: 'werkschaft:daemon-notice-subscribe',
+  show: 'werkschaft:daemon-notice', shown: 'werkschaft:daemon-notice-shown' });
 const { pythonAvailable } = require('./python');
 const { nextZoom, destination } = require('./policy');
 const { createRecovery, safeURL } = require('./recovery');
@@ -91,8 +93,8 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     app.on('will-quit', () => {
       try { updater.applyOnQuit(relaunch); } catch (error) { console.error(`Update apply at quit failed: ${error.message}`); }
     });
-    // The dashboard preload exposes update controls and a payload-free login
-    // copy notification. Renderer IPC is pinned to the dashboard main frame.
+    // Dashboard IPC for updates, daemon notices and the payload-free login
+    // notification is pinned to the dashboard main frame.
     session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
     session.defaultSession.setPermissionCheckHandler(() => false);
     const Window = platform === 'win32' ? BaseWindow : BrowserWindow;
@@ -111,6 +113,10 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     const dashboardContents = () => dashboardView ? dashboardView.webContents : window.webContents;
     const wc = dashboardContents();
     let bar, applicationMenu, menuOpen = false, dialogOpen = false;
+    let dashboardDocument = false, pendingNotice = null, noticeTarget = null, noticeSequence = 0;
+    const daemonMatches = (a, b) => !!(a?.endpoint && b?.endpoint && sameDaemon(a, b));
+    const isDashboardFrame = frame => !wc.isDestroyed() && !!frame && !frame.detached &&
+      frame === wc.mainFrame && !!pin && destination(frame.url, pin) === 'dashboard';
     function toggleDashboardDevTools() {
       if (!dashboardView) return wc.toggleDevTools();
       if (wc.isDevToolsOpened()) wc.closeDevTools();
@@ -189,6 +195,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       logShell('did-fail-load', { errorCode: code, errorDescription: description, url: safeURL(url), isMainFrame });
       console.error(`Dashboard did-fail-load: code=${code} url=${safeURL(url)} mainFrame=${isMainFrame}`);
       if (!isMainFrame || code === -3 || !pin || destination(url, pin) !== 'dashboard') return;
+      resetNoticeTarget(false);
       recovery.failure(true, code);
       if (navigation?.loading) navigation.failureCode = code;
       // Explicit loads already have a rejection handler. Page-initiated loads do not.
@@ -200,6 +207,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       }
     });
     wc.on('render-process-gone', (_event, details) => {
+      resetNoticeTarget(false);
       logShell('render-process-gone', { reason: details.reason, exitCode: details.exitCode, url: safeURL(wc.getURL()), isMainFrame: true });
       console.error(`Dashboard render-process-gone: reason=${details.reason} url=${safeURL(wc.getURL())}`);
       recovery.gone(details.reason);
@@ -238,7 +246,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       if (pin && typeof value === 'string') {
         setTitle(value);
         retained.title = value;
-      } else window.setTitle(title);
+      } else renderTitle();
     });
     wc.on('will-attach-webview', event => event.preventDefault());
     const openExternal = url => {
@@ -257,6 +265,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       // Rollback belongs to the committed document, never another attempt's
       // provisional pin/title. A late promise settlement cannot advance it.
       if (target && (target.pin ? destination(url, target.pin) === 'dashboard' : isLocalPage(url))) retained = target;
+      resetNoticeTarget(!!pin && destination(url, pin) === 'dashboard');
     });
     session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
       // The DevTools frontend can load before its webContents identity is available.
@@ -304,7 +313,28 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
     });
     function setTitle(value) {
       title = value;
-      if (!window.isDestroyed()) { window.setTitle(title); bar?.setTitle(title); }
+      renderTitle();
+    }
+    function renderTitle() {
+      if (window.isDestroyed()) return;
+      // The Windows titlebar truncates long titles, so put the status first.
+      const caption = pendingNotice && !noticeTarget?.shown ? `${pendingNotice.refusal} — ${title}` : title;
+      window.setTitle(caption);
+      bar?.setTitle(caption);
+    }
+    function resetNoticeTarget(isDashboard) {
+      dashboardDocument = isDashboard;
+      if (!noticeTarget) return;
+      noticeTarget = null;
+      renderTitle();
+    }
+    function sendDaemonNotice() {
+      if (!pendingNotice || !noticeTarget || !isDashboardFrame(noticeTarget.frame) ||
+          !daemonMatches(retained.daemon, pendingNotice)) return;
+      const id = ++noticeSequence;
+      noticeTarget.delivery = id;
+      try { noticeTarget.frame.send(DAEMON_NOTICE.show, id, pendingNotice.refusal); }
+      catch { /* The title retains the reason if the frame goes away during delivery. */ }
     }
     function navigationFailed(attempt, reason) {
       pin = null;
@@ -313,9 +343,10 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       attempt.commitTarget = { pin: null, title: failureTitle };
       return wc.loadFile(path.join(__dirname, 'connection.html'), reason ? { query: { reason } } : undefined).catch(() => {});
     }
-    async function navigate(url, attempt = beginNavigation()) {
+    async function navigate(url, attempt = beginNavigation(), daemon = retained.daemon) {
       if (!isCurrent(attempt)) return;
-      attempt.commitTarget = { pin: `${new URL(url).origin}/`, title: 'Werkschaft' };
+      const origin = `${new URL(url).origin}/`;
+      attempt.commitTarget = { pin: origin, title: 'Werkschaft', daemon: daemon?.url === origin ? daemon : null };
       await loadDocument(attempt, () => wc.loadURL(url));
     }
     async function loadDocument(attempt, load) {
@@ -362,18 +393,9 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
           await loadDocument(attempt, () => wc.loadFile(path.join(__dirname, 'python-missing.html')));
           return;
         }
-        let url;
-        try { url = await connectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform, packaged: app.isPackaged, replace, ...(attachRunning ? { attachRunning: true } : {}) }, {
-          onNotice: message => {
-            // An automatic upgrade runs on every startup and recovery connect;
-            // only the explicit menu replace may block on a modal.
-            if (!replace) { logShell('daemon-notice', { message }); return; }
-            if (window.isDestroyed()) return;
-            dialogOpen = true;
-            try { dialog.showMessageBoxSync(window, {
-              type: 'warning', title: 'Daemon replacement unavailable', message, buttons: ['Keep connection'], noLink: true,
-            }); } finally { dialogOpen = false; focusDashboard(true); }
-          },
+        let daemon;
+        try { daemon = await connectDaemon({ appRoot: app.getAppPath(), userData: app.getPath('userData'), platform, packaged: app.isPackaged, replace, ...(attachRunning ? { attachRunning: true } : {}) }, {
+          onNotice: message => { if (!replace) logShell('daemon-notice', { message }); },
         }); }
         catch (error) {
           if (!isCurrent(attempt)) return;
@@ -393,6 +415,18 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
           return;
         }
         if (!isCurrent(attempt)) return;
+        const { url, refusal } = daemon;
+        if (refusal || (pendingNotice && !daemonMatches(pendingNotice, daemon))) {
+          pendingNotice = refusal ? daemon : null;
+          if (noticeTarget) { noticeTarget.shown = false; noticeTarget.delivery = null; }
+          renderTitle();
+        }
+        if (refusal && dashboardDocument && isDashboardFrame(wc.mainFrame) && daemonMatches(retained.daemon, daemon)) {
+          setTitle(retained.title);
+          sendDaemonNotice();
+          recovery.success();
+          return;
+        }
         try {
           const { root, observed } = await observeConnection(url);
           const cookie = await browserCookie(root, observed);
@@ -405,7 +439,7 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
         if (!isCurrent(attempt)) return;
         pin = url;
         setTitle('Werkschaft');
-        await navigate(url, attempt);
+        await navigate(url, attempt, daemon);
       } catch { if (isCurrent(attempt)) await navigationFailed(attempt); }
       finally {
         connecting = false;
@@ -428,8 +462,18 @@ function start({ app, BaseWindow, BrowserWindow, WebContentsView, ipcMain, nativ
       if (!fromConnectionPage(event) || connecting) return;
       await connect(false, true);
     });
-    const fromDashboard = event => event.sender === wc && event.senderFrame === wc.mainFrame &&
-      !!pin && destination(event.senderFrame.url, pin) === 'dashboard';
+    const fromDashboard = event => event.sender === wc && isDashboardFrame(event.senderFrame);
+    ipcMain.on(DAEMON_NOTICE.subscribe, event => {
+      if (!dashboardDocument || !fromDashboard(event) || noticeTarget?.frame === event.senderFrame) return;
+      noticeTarget = { frame: event.senderFrame };
+      sendDaemonNotice();
+    });
+    ipcMain.on(DAEMON_NOTICE.shown, (event, id) => {
+      if (!dashboardDocument || !fromDashboard(event) || !pendingNotice || !Number.isInteger(id) ||
+          noticeTarget?.frame !== event.senderFrame || noticeTarget.delivery !== id) return;
+      noticeTarget.shown = true;
+      renderTitle();
+    });
     wc.on('did-start-navigation', (_event, url, inPlace, isMainFrame) => {
       if (isMainFrame && !(connecting && navigation?.loading)) {
         logShell('did-start-navigation', { url: safeURL(url), isMainFrame, inPlace });

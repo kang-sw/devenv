@@ -29,6 +29,36 @@ test('login bridge is subscription-only and discards all native event payloads',
   assert.deepEqual(received, []);
 });
 
+test('daemon notice bridge subscribes after readiness and acknowledges only a rendered reason', () => {
+  const ipcRenderer = new EventEmitter(), document = new EventEmitter(), sends = [], received = [];
+  ipcRenderer.send = (...args) => sends.push(args);
+  document.readyState = 'loading';
+  document.addEventListener = (type, callback, { once }) => {
+    assert.equal(once, true);
+    document.once(type, callback);
+  };
+  let bridge;
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../dashboard-preload.js'), 'utf8'), {
+    document, require: () => ({ ipcRenderer, contextBridge: { exposeInMainWorld: (_name, value) => { bridge = value; } } }),
+  });
+  assert.deepEqual(Object.keys(bridge.daemon), ['availability', 'start', 'onNotice']);
+  bridge.daemon.onNotice(null);
+  bridge.daemon.onNotice((...args) => {
+    received.push(args);
+    if (args[0] === 'broken') throw Error('Toast asset failed');
+    return args[0] === 'refusal';
+  }, 'ignored');
+  bridge.daemon.onNotice(() => assert.fail('document already subscribed'));
+  assert.deepEqual(sends, []);
+  document.emit('DOMContentLoaded');
+  assert.deepEqual(sends, [['werkschaft:daemon-notice-subscribe']]);
+  for (const [id, reason] of [[1, 'missing'], [2, 'broken'], [3, 'refusal'], ['invalid', 'ignore'], [4, { reason: 'ignore' }]]) {
+    ipcRenderer.emit('werkschaft:daemon-notice', { sender: 'native-event' }, id, reason, 'never expose');
+  }
+  assert.deepEqual(received, [['missing'], ['broken'], ['refusal']]);
+  assert.deepEqual(sends, [['werkschaft:daemon-notice-subscribe'], ['werkschaft:daemon-notice-shown', 3]]);
+});
+
 test('update bridge adds payload-free canary and stable-return actions beside the stable controls', async () => {
   const ipcRenderer = new EventEmitter(), sends = [], invokes = [];
   ipcRenderer.send = (...args) => sends.push(args);

@@ -79,43 +79,55 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, p
   const select = deps.select || selectDaemon;
   const stage = deps.stage || stageDaemon;
   const notify = deps.onNotice || (() => {});
+  // The user-facing reason is shell-owned text. Keep arbitrary child output
+  // and selection errors in diagnostics rather than crossing into the page.
+  const refuse = (answer, reason, detail = reason) => {
+    notify(detail);
+    return { ...answer, refusal: reason };
+  };
   let running;
   try { running = await find(root); }
   catch { /* An absent or uncertain endpoint is never evidence a process died. */ }
   if (running?.health) {
-    if (attachRunning) return running.url;
+    if (attachRunning) return running;
     let selected;
     try { selected = select({ appRoot, userData, platform, packaged }); }
     catch (error) {
-      if (replace) notify(`Cannot replace daemon: ${error.message}`);
-      return running.url; // Candidate failure never breaks a healthy attachment.
+      if (replace) return refuse(running, 'Cannot select the replacement daemon. Keeping the current connection.',
+        `Cannot replace daemon: ${error.message}`);
+      return running; // Candidate failure never breaks a healthy attachment.
     }
     const relation = version(selected.metadata.version, running.health.version);
     if (relation === null) {
-      notify('Cannot determine daemon core from REST health; keeping the current connection. Update the plugin before retrying.');
-      return running.url;
+      return refuse(running, 'Cannot determine the daemon version. Update the plugin before retrying.');
     }
     // Any newer numeric core (patch, minor or major) replaces automatically;
     // clients of a drained older minor lose the daemon until they update and
     // restart. Never downgrade.
-    if (relation < 0 || relation === 0 && !replace) return running.url;
+    if (relation < 0 && replace) return refuse(running, 'The running daemon is newer than this app. Update Werkschaft before retrying.');
+    if (relation < 0 || relation === 0 && !replace) return running;
     if (!['darwin', 'win32'].includes(platform)) {
-      notify('Replacement is unavailable on this platform; keeping the current daemon.');
-      return running.url;
+      return refuse(running, 'Daemon replacement is unavailable on this platform.');
     }
-    const staged = stage(selected, userData, platform, appRoot);
+    let staged;
+    try { staged = stage(selected, userData, platform, appRoot); }
+    catch (error) {
+      return refuse(running, 'Could not prepare the replacement daemon. Retry later.',
+        `Cannot stage replacement daemon: ${error.message}`);
+    }
     // Stage may be slow. Never drain a newer or different winner discovered
     // while copying; only replace the same observed incumbent once.
     let latest;
     try { latest = await find(root); }
-    catch { notify('Dashboard health became uncertain during staging; keeping the current connection. Retry later.'); return running.url; }
-    if (!sameDaemon(latest, running)) return attachWinner(selected.metadata.version, latest, running, notify);
+    catch { return refuse(running, 'Dashboard health became uncertain during staging. Retry later.'); }
+    if (!sameDaemon(latest, running)) return attachWinner(selected.metadata.version, latest, running, refuse);
     const refreshed = version(selected.metadata.version, latest.health.version);
     if (refreshed === null) {
-      notify('Cannot determine daemon core after staging; keeping the current connection. Retry later.');
-      return latest.url;
+      return refuse(latest, 'Cannot determine the daemon version after staging. Retry later.');
     }
-    if (refreshed < 0) return latest.url;
+    if (refreshed < 0) {
+      return replace ? refuse(latest, 'The running daemon is newer than this app. Update Werkschaft before retrying.') : latest;
+    }
     const options = { cwd: staged.root, env: launchEnv(env, staged, root), logPath: path.join(userData, 'daemon-start.log') };
     if (platform === 'win32') {
       // Go prestart Ensure holds launcher-start.lock and repeats the LAN and
@@ -128,16 +140,15 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, p
       } catch (error) {
         const still = await settle(find, root, deps);
         if (still && sameDaemon(still, latest)) {
-          notify(`Replacement did not drain the incumbent: ${error.message}. Retry after checking daemon health.`);
-          return still.url;
+          return refuse(still, 'The replacement starter failed before draining the incumbent. Retry after checking daemon health.',
+            `Replacement did not drain the incumbent: ${error.message}. Retry after checking daemon health.`);
         }
-        if (still) return attachWinner(selected.metadata.version, still, latest, notify);
+        if (still) return attachWinner(selected.metadata.version, still, latest, refuse);
         throw new Error(`Replacement starter failed after the incumbent changed; availability is uncertain: ${error.message}`);
       }
       const still = await find(root).catch(() => null);
       if (still && sameDaemon(still, latest)) {
-        notify('Replacement was refused by the starter; keeping the current connection. Retry after checking daemon health.');
-        return still.url;
+        return refuse(still, 'The starter refused replacement. Retry after checking daemon health.');
       }
     } else {
       try {
@@ -147,29 +158,29 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, p
           ['dashboard', '--port', String(latest.endpoint.port), '--lock-wait', '8s',
             ...(latest.health.lan ? ['--lan'] : [])]);
       } catch {
-        notify('Replacement preflight failed; the incumbent was not drained. Retry later.');
-        return latest.url;
+        return refuse(latest, 'Replacement preflight failed before draining the incumbent. Retry later.');
       }
       try { await (deps.shutdown || shutdown)(root, latest); }
       catch {
-        notify('Authenticated drain failed or the daemon changed; outcome is uncertain. Check dashboard health before retrying.');
+        const reason = 'Authenticated drain failed or the daemon changed; outcome is uncertain. Check dashboard health before retrying.';
         const still = await find(root).catch(() => null);
-        if (still && sameDaemon(still, latest)) return still.url;
-        if (still) return attachWinner(selected.metadata.version, still, latest, notify);
+        if (still && sameDaemon(still, latest)) return refuse(still, reason);
+        notify(reason);
+        if (still) return attachWinner(selected.metadata.version, still, latest, refuse);
         throw new Error('Authenticated drain outcome uncertain; no daemon can be attached — retry after inspecting health');
       }
     }
     return await waitForDaemon(find, root, deps, latest, selected.metadata.version,
-      selected.metadata.binary_sha256, notify);
+      selected.metadata.binary_sha256, notify, refuse);
   }
-  if (running) return running.url;
+  if (running) return running;
   if (!['darwin', 'win32'].includes(platform)) {
-    try { return (await find(root)).url; } catch { /* A concurrent winner may still attach. */ }
+    try { return await find(root); } catch { /* A concurrent winner may still attach. */ }
     throw new Error('Standalone dashboard start is unavailable on this platform; connect to a running daemon');
   }
   const selected = select({ appRoot, userData, platform, packaged });
   const staged = stage(selected, userData, platform, appRoot);
-  try { return (await find(root)).url; } catch { /* Only a new dashboard may start. */ }
+  try { return await find(root); } catch { /* Only a new dashboard may start. */ }
   try { await (deps.launch || launch)(staged.binary, { cwd: staged.root, env: launchEnv(env, staged, root), logPath: path.join(userData, 'daemon-start.log') },
     platform === 'win32' ? ['daemon-start', '--require-independent-lifetime', '--start-wait', '13s'] : ['dashboard'],
     platform === 'win32'); }
@@ -177,7 +188,7 @@ async function connectDaemon({ appRoot, userData, platform = process.platform, p
     // Nothing was drained here, so any daemon that now answers is what a
     // successful start would have attached (see waitForDaemon).
     const answer = await settle(find, root, deps);
-    if (answer) return answer.url;
+    if (answer) return answer;
     throw new Error(`Cannot start dashboard daemon: ${error.message}`);
   }
   return waitForDaemon(find, root, deps);
@@ -196,19 +207,18 @@ async function settle(find, root, deps) {
   }
   return null;
 }
-function attachWinner(candidate, answer, incumbent, notify) {
+function attachWinner(candidate, answer, incumbent, refuse) {
   const relation = version(candidate, answer.health?.version);
-  if (relation !== null && relation <= 0) return answer.url;
+  if (relation !== null && relation <= 0) return answer;
   // A third daemon at least as new as the incumbent is no downgrade; the
   // bundled core can wait for the next start instead of failing this one.
   const floor = relation === null || !incumbent ? null : version(incumbent.health?.version, answer.health.version);
   if (floor !== null && floor <= 0) {
-    notify?.('A daemon at least as new as the incumbent but older than this app is serving; attaching to it. The bundled daemon is offered again at the next start.');
-    return answer.url;
+    return refuse(answer, 'A daemon at least as new as the incumbent but older than this app is serving. Attaching to it.');
   }
   throw new Error('An older or unidentified daemon won the handoff; retry after inspecting the current connection');
 }
-async function waitForDaemon(find, root, deps, predecessor, candidateVersion, candidateHash, notify) {
+async function waitForDaemon(find, root, deps, predecessor, candidateVersion, candidateHash, notify, refuse) {
   const sleep = deps.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
   const deadline = Date.now() + (predecessor ? 13000 : 10000); // Drain + successor lock + startup.
   for (let i = 0; i < (deps.maxPolls || (predecessor ? 65 : 50)); i++) {
@@ -216,17 +226,17 @@ async function waitForDaemon(find, root, deps, predecessor, candidateVersion, ca
     try { answer = await find(root); }
     catch { /* The old endpoint can disappear during handoff. */ }
     if (answer) {
-      if (!predecessor) return answer.url;
+      if (!predecessor) return answer;
       if (!sameDaemon(answer, predecessor)) {
         // An unrelated plugin may win the lock. Attach only if its numeric
         // core is at least our candidate's; never attribute its bytes to ours.
-        const url = attachWinner(candidateVersion, answer, predecessor, notify);
+        const connected = attachWinner(candidateVersion, answer, predecessor, refuse);
         // A below-candidate winner already carried attachWinner's notice.
         if (version(candidateVersion, answer.health?.version) <= 0 &&
             answer.health?.content_hash && answer.health.content_hash !== candidateHash) {
           notify?.('A different daemon won the handoff; attaching to its verified REST identity, not attributing it to the selected package.');
         }
-        return url;
+        return connected;
       }
     }
     if (Date.now() >= deadline) break;

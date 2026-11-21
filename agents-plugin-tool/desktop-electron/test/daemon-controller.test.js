@@ -4,9 +4,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
-const { connectDaemon, launchEnv } = require('../daemon-controller');
+const { connectDaemon: resolveDaemon, launchEnv } = require('../daemon-controller');
 const { fixture } = require('./daemon-fixture.cjs');
 const URL = 'http://127.0.0.1:39418/'; // Only a value in injected discovery; never bound.
+const connectDaemon = async (...args) => (await resolveDaemon(...args)).url;
 const config = f => ({ appRoot: f.appRoot, userData: f.userData, platform: 'darwin' });
 const env = f => ({ WS_CACHE_HOME: path.join(f.base, 'isolated-cache'), WS_CONFIG_HOME: path.join(f.base, 'config'),
   WS_RSRC_ROOT: '/unrelated/resources', WS_SKILLS_ROOT: '/unrelated/skills',
@@ -94,7 +95,8 @@ test('ordinary connect decision table: a newer core replaces across patch and mi
         launch: async (_binary, _opts, args) => { launches.push(args); if (platform === 'win32') successor(); },
         shutdown: async () => { assert.notEqual(platform, 'win32', 'Windows native starter owns drain'); successor(); } };
       assert.equal(await connectDaemon({ ...config(f), platform, replace }, deps), URL, label);
-      assert.deepEqual(notices, [], label);
+      assert.deepEqual(notices, replace && running === '0.51.0'
+        ? ['The running daemon is newer than this app. Update Werkschaft before retrying.'] : [], label);
       if (want === 'attach') {
         assert.deepEqual(launches, [], label);
         assert.equal(live.pid, 120, label);
@@ -116,7 +118,30 @@ test('macOS detached creation failure leaves incumbent serving before drain', as
     launch: async () => { throw Error('OS refused detached creation'); },
     shutdown: () => assert.fail('no authenticated drain on failed preflight') };
   assert.equal(await connectDaemon({ ...config(f), replace: true }, deps), URL);
-  assert.match(notices.at(-1), /preflight failed.*not drained/);
+  assert.match(notices.at(-1), /preflight failed before draining/);
+});
+test('predrain refusals return the observed incumbent and reserve raw diagnostics for the shell log', async t => {
+  for (const platform of ['darwin', 'win32']) {
+    const f = fixture(t, platform), diagnostics = [];
+    const incumbent = { url: URL, endpoint: { pid: 120, port: 32000 },
+      health: { version: '0.50.0', started_at: 'incumbent' } };
+    const deps = { env: env(f), inspect: async () => incumbent, onNotice: value => diagnostics.push(value),
+      shutdown: () => assert.fail('must never drain'),
+      launch: () => assert.fail('must never launch'),
+      stage: () => { throw Error('disk full, token=private'); } };
+    const refused = await resolveDaemon({ ...config(f), platform }, deps);
+    assert.equal(refused.endpoint, incumbent.endpoint);
+    assert.match(refused.refusal, /could not prepare the replacement daemon/i);
+    assert.match(diagnostics.pop(), /disk full/);
+    assert.doesNotMatch(refused.refusal, /private/);
+    const unavailable = await resolveDaemon({ ...config(f), platform, replace: true }, {
+      ...deps, select: () => { throw Error('bundle unavailable, token=private'); },
+    });
+    assert.equal(unavailable.endpoint, incumbent.endpoint);
+    assert.match(unavailable.refusal, /cannot select the replacement daemon/i);
+    assert.match(diagnostics.pop(), /bundle unavailable/);
+    assert.doesNotMatch(unavailable.refusal, /private/);
+  }
 });
 test('approved OS-accepted macOS creation precedes drain without claiming lock readiness', async t => {
   const f = fixture(t, 'darwin');
@@ -181,7 +206,7 @@ test('Windows ordinary startup keeps the incumbent when the strict starter refus
     launch: async (_binary, _opts, args) => { launches++; assert(!args.includes('--replace')); } };
   assert.equal(await connectDaemon({ ...config(f), platform: 'win32' }, deps), URL);
   assert.equal(launches, 1);
-  assert.match(notice, /refused by the starter; keeping the current connection/);
+  assert.match(notice, /starter refused replacement/);
 });
 test('Windows strict starter attaches a newer cross-minor winner without a second spawn or drain', async t => {
   const f = fixture(t, 'win32');
@@ -203,6 +228,8 @@ test('Windows strict starter attaches a newer cross-minor winner without a secon
   assert.equal(live.version, '0.51.0'); // A plugin may win; never claim it was our successor.
   assert.equal(await connectDaemon({ ...config(f), platform: 'win32', replace: true }, deps), URL);
   assert.equal(calls, 1); // A newer core stays; no downgrade.
+  assert.match(notice, /running daemon is newer than this app/);
+  notice = undefined;
   live = { pid: 120, version: '0.50.1', lan: true, started_at: 'old' };
   assert.equal(await connectDaemon({ ...config(f), platform: 'win32', replace: true }, deps), URL);
   assert.equal(calls, 2);
