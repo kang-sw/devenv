@@ -2698,7 +2698,6 @@
   "js.settings.rail.project": "Ouvrir les paramètres de l’espace de travail",
   "js.settings.rail.repo": "Ouvrir les paramètres de l’arbre de travail",
   "js.settings.rail.session": "Ouvrir les paramètres de la session",
-  "js.settings.scope_label": "Portée des paramètres",
   "js.settings.scope.builtin": "Intégré",
   "js.settings.scope.synced": "Synchronisé",
   "js.settings.scope.global": "Global",
@@ -2954,5 +2953,12 @@
   "js.settings.proposal.reset": "Réinitialisation en brouillon",
   "js.settings.proposal.queued": "Modification en brouillon",
   "js.settings.inherited_session": "Hérité d’une session parente",
-  "js.settings.legacy_tier": "Valeur de niveau historique. La réinitialisation efface la valeur propre à l’environnement."
+  "js.settings.legacy_tier": "Valeur de niveau historique. La réinitialisation efface la valeur propre à l’environnement.",
+  "js.settings.precedence_hint": "La couche de droite remplace celle de gauche",
+  "js.settings.context_missing_short": "non évalué",
+  "js.settings.override_scope": "Surcharge ({0})",
+  "js.settings.proposal.discard": "Annuler le brouillon",
+  "js.settings.bucket.overridden_in": "Surchargé dans : {0}",
+  "js.settings.bucket.tag": "Compartiment harness",
+  "js.settings.layer_major_tag": "Compartiment couche d'abord"
 }

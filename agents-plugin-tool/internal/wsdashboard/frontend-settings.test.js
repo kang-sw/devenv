@@ -81,8 +81,8 @@ test("rail gears preserve native activation and separate it from row actions", (
   const rail = read("dashboard-rail.js");
   assert.match(rail, /gear && root.hasAttribute\("data-can-control"\)\) \{\s+e.preventDefault\(\);\s+e.stopPropagation\(\);/);
   const css = read("dashboard-rail.css");
-  assert.match(css, /\.r-config-gear \{[^}]*opacity: \.32;/);
-  assert.match(css, /\.r-config-gear:focus-visible,\n[^{}]+\.r-config-gear\[aria-current="page"\] \{ opacity: 1; \}/);
+  assert.match(css, /\.r-config-gear \{[^}]*opacity: 0;/);
+  assert.match(css, /\.r-config-gear:hover,\n:root\[data-can-control\] \.rail \.r-config-gear:focus-visible,\n:root\[data-can-control\] \.rail \.r-config-gear\[aria-current="page"\] \{ opacity: 1; \}/);
 });
 
 test("project rail target survives standalone scope traversal without becoming inspection context", () => {

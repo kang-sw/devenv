@@ -2698,7 +2698,6 @@
   "js.settings.rail.project": "ワークスペース設定を開く",
   "js.settings.rail.repo": "ワークツリー設定を開く",
   "js.settings.rail.session": "セッション設定を開く",
-  "js.settings.scope_label": "設定のスコープ",
   "js.settings.scope.builtin": "組み込み",
   "js.settings.scope.synced": "同期",
   "js.settings.scope.global": "グローバル",
@@ -2954,5 +2953,12 @@
   "js.settings.proposal.reset": "リセットの下書き",
   "js.settings.proposal.queued": "変更の下書き",
   "js.settings.inherited_session": "親セッションから継承",
-  "js.settings.legacy_tier": "従来のティア値。リセットはハーネス固有の上書きに適用されます。"
+  "js.settings.legacy_tier": "従来のティア値。リセットはハーネス固有の上書きに適用されます。",
+  "js.settings.precedence_hint": "右のレイヤーが左を上書きします",
+  "js.settings.context_missing_short": "未評価",
+  "js.settings.override_scope": "現在のスコープの上書き ({0})",
+  "js.settings.proposal.discard": "下書きを取り消す",
+  "js.settings.bucket.overridden_in": "上書き済み: {0}",
+  "js.settings.bucket.tag": "ハーネスバケット",
+  "js.settings.layer_major_tag": "レイヤー優先バケット"
 }

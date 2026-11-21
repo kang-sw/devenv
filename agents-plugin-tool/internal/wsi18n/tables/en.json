@@ -2698,7 +2698,6 @@
   "js.settings.rail.project": "Open workspace settings",
   "js.settings.rail.repo": "Open worktree settings",
   "js.settings.rail.session": "Open session settings",
-  "js.settings.scope_label": "Settings scope",
   "js.settings.scope.builtin": "Builtin",
   "js.settings.scope.synced": "Synced",
   "js.settings.scope.global": "Global",
@@ -2954,5 +2953,12 @@
   "js.settings.proposal.reset": "Reset queued",
   "js.settings.proposal.queued": "Change queued",
   "js.settings.inherited_session": "Inherited from a parent session",
-  "js.settings.legacy_tier": "Legacy tier seed. Reset clears only a harness override."
+  "js.settings.legacy_tier": "Legacy tier seed. Reset clears only a harness override.",
+  "js.settings.precedence_hint": "Rightmost layer overrides left",
+  "js.settings.context_missing_short": "unevaluated",
+  "js.settings.override_scope": "Override ({0})",
+  "js.settings.proposal.discard": "Discard draft",
+  "js.settings.bucket.overridden_in": "Overridden in: {0}",
+  "js.settings.bucket.tag": "Harness bucket",
+  "js.settings.layer_major_tag": "Layer-first bucket"
 }

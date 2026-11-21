@@ -2698,7 +2698,6 @@
   "js.settings.rail.project": "開啟工作區設定",
   "js.settings.rail.repo": "開啟工作樹設定",
   "js.settings.rail.session": "開啟工作階段設定",
-  "js.settings.scope_label": "設定範圍",
   "js.settings.scope.builtin": "內建",
   "js.settings.scope.synced": "同步",
   "js.settings.scope.global": "全域",
@@ -2954,5 +2953,12 @@
   "js.settings.proposal.reset": "已暫存重設",
   "js.settings.proposal.queued": "已暫存修改",
   "js.settings.inherited_session": "繼承自父工作階段",
-  "js.settings.legacy_tier": "舊版層級值。重設僅清除特定執行環境的覆寫。"
+  "js.settings.legacy_tier": "舊版層級值。重設僅清除特定執行環境的覆寫。",
+  "js.settings.precedence_hint": "右側層級會覆蓋左側",
+  "js.settings.context_missing_short": "未評估",
+  "js.settings.override_scope": "目前作用域覆寫 ({0})",
+  "js.settings.proposal.discard": "取消草稿",
+  "js.settings.bucket.overridden_in": "已覆寫：{0}",
+  "js.settings.bucket.tag": "Harness 桶",
+  "js.settings.layer_major_tag": "層級優先桶"
 }

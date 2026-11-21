@@ -2698,7 +2698,6 @@
   "js.settings.rail.project": "Открыть настройки рабочей области",
   "js.settings.rail.repo": "Открыть настройки рабочего дерева",
   "js.settings.rail.session": "Открыть настройки сеанса",
-  "js.settings.scope_label": "Область настроек",
   "js.settings.scope.builtin": "Встроенные",
   "js.settings.scope.synced": "Синхронизация",
   "js.settings.scope.global": "Глобальные",
@@ -2954,5 +2953,12 @@
   "js.settings.proposal.reset": "Сброс в черновике",
   "js.settings.proposal.queued": "Изменение в черновике",
   "js.settings.inherited_session": "Унаследовано от родительского сеанса",
-  "js.settings.legacy_tier": "Устаревшее значение уровня. Сброс удаляет переопределение для среды выполнения."
+  "js.settings.legacy_tier": "Устаревшее значение уровня. Сброс удаляет переопределение для среды выполнения.",
+  "js.settings.precedence_hint": "Правый слой переопределяет левый",
+  "js.settings.context_missing_short": "не вычислено",
+  "js.settings.override_scope": "Переопределение ({0})",
+  "js.settings.proposal.discard": "Отменить черновик",
+  "js.settings.bucket.overridden_in": "Переопределено в: {0}",
+  "js.settings.bucket.tag": "Сегмент harness",
+  "js.settings.layer_major_tag": "Сначала слой"
 }

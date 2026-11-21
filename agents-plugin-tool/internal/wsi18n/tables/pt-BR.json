@@ -2698,7 +2698,6 @@
   "js.settings.rail.project": "Abrir configurações do espaço de trabalho",
   "js.settings.rail.repo": "Abrir configurações da árvore de trabalho",
   "js.settings.rail.session": "Abrir configurações da sessão",
-  "js.settings.scope_label": "Escopo das configurações",
   "js.settings.scope.builtin": "Integrado",
   "js.settings.scope.synced": "Sincronizado",
   "js.settings.scope.global": "Global",
@@ -2954,5 +2953,12 @@
   "js.settings.proposal.reset": "Redefinição no rascunho",
   "js.settings.proposal.queued": "Alteração no rascunho",
   "js.settings.inherited_session": "Herdado de uma sessão superior",
-  "js.settings.legacy_tier": "Valor de nível legado. A redefinição limpa a substituição do ambiente."
+  "js.settings.legacy_tier": "Valor de nível legado. A redefinição limpa a substituição do ambiente.",
+  "js.settings.precedence_hint": "A camada à direita substitui a à esquerda",
+  "js.settings.context_missing_short": "não avaliado",
+  "js.settings.override_scope": "Substituição ({0})",
+  "js.settings.proposal.discard": "Descartar rascunho",
+  "js.settings.bucket.overridden_in": "Substituído em: {0}",
+  "js.settings.bucket.tag": "Bucket de harness",
+  "js.settings.layer_major_tag": "Bucket por camada"
 }
