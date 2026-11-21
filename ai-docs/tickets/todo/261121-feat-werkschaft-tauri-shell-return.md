@@ -59,15 +59,11 @@ current packaged shell's daemon lifecycle and distribution behavior.
 - (2056) Use `tauri-plugin-updater` with signed NSIS/MSI and `.app.tar.gz`
   update artifacts; Windows changes from portable zip to installer.
   Rejected: porting the custom zip updater.
-- (2057) Make the last Electron release a bridge so the update button replaces
-  the deployed app automatically. The update action downloads the Tauri
-  installer and runs a per-user silent NSIS install under `%LOCALAPPDATA%`
-  without an admin prompt on Windows, or replaces the `.app` on macOS, then
-  exits. Build the bridge in P3 and release it only after P4 passes. Cover
-  cleanup of the old portable folder and shortcuts and migration of Electron
-  settings/data locations to Tauri's. With (2060)=b, Windows SmartScreen may
-  show a first-run warning the user must accept. Rejected: a separate Tauri
-  install that Electron only points to.
+- (2057) The owner accepted replacing the separate Electron bridge with
+  (2065)=a: the existing Electron updater swaps in Tauri-compatible payloads
+  from each stable release. With (2060)=b, Windows SmartScreen may show a
+  first-run warning the user must accept. Rejected: a separate Tauri install
+  that Electron only points to.
 - (2058) Keep `261115-feat-werkschaft-electron-shell` Phases 2–4 open until
   Tauri passes P4, then re-home overlapping reliability and Windows delivery
   work to Tauri. Its Phase 4 grant remains conditional on a need for new
@@ -84,13 +80,53 @@ current packaged shell's daemon lifecycle and distribution behavior.
 - (2061) P4 records paired measurements and the owner decides from them;
   no thresholds are set now. Rejected: fixed thresholds now.
 
+- (2065)=a [policy, owner-confirmed] Ship no separate Electron bridge release.
+  Every Tauri stable release attaches `Werkschaft-<platform>-<arch>.zip`
+  and `Werkschaft-desktop-SHA256SUMS`, with Tauri payloads. The existing
+  Electron updater reads only `releases/latest` for stable checks and canary
+  stable return (`agents-plugin-tool/desktop-electron/update.js:512-518`,
+  `554-562`), selects named assets using `browser_download_url` (73-92),
+  validates the SHA-256 and extracted `Werkschaft.exe` or
+  `Werkschaft.app/Contents/MacOS/Werkschaft` (185-197), swaps the folder or
+  app and relaunches the executable or opens the app (296, 257). Thus even
+  the first shipped Electron release and canary installs returning to stable
+  migrate in one update click. Rejected: a one-time Electron bridge plus
+  manual reinstall and a no-zip notice in the next Electron release; CI
+  re-uploading the approximately 200 MB bridge zip to each stable release
+  until the next minor, since GitHub has no cross-release asset reference.
+- (2068)=ok [technical, owner-acknowledged] The Windows zip contains a small
+  `Werkschaft.exe` launcher and the Tauri per-user NSIS installer. On every
+  run the launcher checks the installer location for the bundled version or
+  newer, silently installs per-user if missing or older, then launches the
+  installed Tauri app and exits. The NSIS installer's built-in WebView2
+  install mode covers missing runtimes including the (2051) Server, LTSC,
+  and update-blocked scope. Keep the legacy Electron folder as the forwarding
+  launcher so old shortcuts work; the Tauri app carries no migration code.
+  The macOS zip contains the Tauri `Werkschaft.app` directly, using system
+  WKWebView; Tauri's macOS updater also replaces the app in place. Rejected:
+  Tauri self-relocation on first run, which cannot start without WebView2 and
+  breaks old shortcuts.
+- (2066)=a [policy, owner-confirmed] Migrate only shell settings: window
+  bounds, update channel, and daemon override. Do not migrate draft-recovery
+  records, including IndexedDB image blobs and delivery-unknown records
+  (`agents-plugin-tool/internal/wsdashboard/assets/dashboard-lifecycle.js:90-112`,
+  `185-206`): Electron's origin-scoped IndexedDB cannot move to WebView2 or
+  WKWebView. Before swapping, the Electron side should warn about unsent
+  drafts and ask users to send or discard them first, but this warning exists
+  only if a future Electron release adds it. The existing updater performs
+  the (2065) swap without that warning, so installs updating directly from
+  older Electron versions migrate without warning. Retain the Electron
+  profile for rollback and delete it only in a later release; reinstalling
+  Electron reopens the retained profile. Rejected: export/import of draft
+  recovery data; migrating nothing and deleting the profile immediately.
+
 ## Constraints
 
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
 - Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
 - Convention: ai-docs/manuals/performance.md (declared for `agents-plugin-tool/`)
-- Electron keeps shipping until Phase 4 passes; release the P3 bridge only
-  after that gate. Retirement or deletion of
+- Electron keeps shipping until Phase 4 passes; publish the Tauri migration
+  assets after that gate. Retirement or deletion of
   `agents-plugin-tool/desktop-electron/`, and removal of shipped
   functionality, require a separate owner decision.
 - Reuse the daemon-served dashboard and exact verified loopback origin.
@@ -111,10 +147,13 @@ current packaged shell's daemon lifecycle and distribution behavior.
   `handleAuthCookie`, under `agents-plugin-tool/`). P3 targets **T0** for
   parallel artifacts and optional update controls while the Electron
   updater still finds its zip/SUMS and each shell reads its own updater
-  state. The Windows artifact transition and existing-install migration
-  need their own directional verdict. Record the old/new readers and
-  writers, legacy fallback, and reopen outcome with source evidence for
-  the settled design before promotion, then verify the actual result in P4.
+  state. For existing installs, the old Electron updater reads the new stable
+  release zip and SUMS and swaps the payload in place (2065); Windows old
+  shortcuts read the retained launcher, which installs or opens Tauri (2068).
+  The Electron profile remains available when Electron is reinstalled (2066);
+  draft records do not cross webview origins. Record the directional tier and
+  remaining old/new readers, writers and fallback evidence before promotion,
+  then verify the actual result in P4.
   The existing cross-minor hello refusal is **T3**
   (`agents-plugin-tool/internal/wsdashboard/proxy.go`, hello validation).
   A new T3 boundary requires explicit owner approval and a minor bump.
@@ -203,8 +242,11 @@ and explicit-replacement cases. On Windows,
 exercise strict independent-lifetime launch, the
 `WS_DAEMON_BREAKAWAY_DENIED=5` path and retry with
 `WS_MCP_DAEMON_JOB_LIFETIME=1`, and bounded settle under antivirus
-delays. Check that the daemon survives app exit after both launch paths
-and that holders retain their identities across a successful handoff.
+delays. Check that the daemon survives shell exit after both launch paths,
+independently of job teardown. On the fallback path it survives only while
+its containing job lives (owner-approved retry in `062f291f5`;
+`agents-plugin-tool/internal/wsdashboard/spawn_windows.go:30-54`). Check
+that holders retain their identities across a successful handoff.
 
 ### Phase 3: Deliver shell updates and the CI release pipeline
 
@@ -213,13 +255,14 @@ and installer strategy: `tauri-plugin-updater`, signed NSIS/MSI and
 `.app.tar.gz` update artifacts, and the Evergreen bootstrapper. Wire the
 platform artifacts, integrity and authenticity checks, feed metadata and CI
 into the existing release pipeline. Keep update actions in Settings through
-the optional pinned-main-frame bridge. Build the last Electron release as the
-(2057) migration bridge, including per-user silent NSIS installation, macOS
-app replacement, settings/data migration, and portable folder and shortcut
-cleanup. Release the bridge only after P4 passes.
-Keep Electron zip/SUMS and native daemon artifacts available during
-evaluation. Preserve stable tag behavior and demonstrate prerelease
-isolation, opt-in canary and explicit stable return under the settled
+the optional pinned-main-frame bridge. Produce the (2065) Electron-named
+zip and SUMS assets for every Tauri stable release, with the Windows
+forwarding launcher and per-user NSIS installer or the macOS Tauri app as
+specified in (2068). Migrate shell settings and retain the Electron profile
+for rollback under (2066); do not migrate draft-recovery records. Keep native
+daemon artifacts available during evaluation. Preserve stable tag behavior
+and demonstrate prerelease isolation, opt-in canary and explicit stable return
+under the settled
 channel decision. Keep shell update and daemon replacement distinct.
 
 Verify staging and apply of a valid update, refusal on missing or invalid
@@ -227,11 +270,11 @@ integrity data, interruption/retry, relaunch, and the recovery route for
 a failed install or swap. Exercise Windows runtime-present and
 runtime-missing bootstrapper behavior. Use a
 non-publishing pipeline run to check expected output names, platforms,
-versions and metadata before release. Verify the proposed first migration
-from a shipped Electron installation on a disposable profile, including the
-update action, per-user install or app replacement, migrated settings/data,
-cleanup, exit, and recovery after failure. Account for the possible Windows
-SmartScreen first-run warning.
+versions and metadata before release. Verify migration from shipped Electron
+on a disposable profile, including the update action, Windows launcher
+installation or macOS app replacement,
+shell settings, retained profile, exit, and recovery after failure. Account
+for the possible Windows SmartScreen first-run warning.
 
 ### Phase 4: Pass the macOS and Windows verification and benchmark gate
 
@@ -266,7 +309,14 @@ against Questions 1–6 in
    current Electron zip updater and document platform code-signing and
    notarization requirements; OS code signing and notarization are deferred
    to the Electron retirement decision, not required for P4. Test canary
-   opt-in and stable return and the Electron migration bridge.
+   opt-in and stable return. From the oldest shipped Electron release and
+   a canary Electron, verify the update button swaps to Tauri and relaunches.
+   On Windows verify the launcher installs and launches Tauri, old shortcuts
+   still open it, and the installer installs WebView2 on a machine or VM
+   without it. From a populated Electron profile verify settings carry over,
+   the retained profile reopens after reinstalling Electron, and the result
+   of an interrupted swap using the Electron updater's own backup/rollback
+   swap helper. Record the no-warning residual for older Electron versions.
 6. **Porting cost.** Record the native changes and remaining gaps for
    bundled daemon autostart and breakaway, existing-daemon attach,
    DevTools, request/navigation guards, cookie injection, and the
@@ -275,7 +325,8 @@ against Questions 1–6 in
 Windows pass list from pre-study Section D:
 
 - **(a)** Standalone daemon start, breakaway-denied retry and cookie injection
-  succeed. The daemon survives X-close.
+  succeed. The daemon survives X-close independently of job teardown; the
+  fallback daemon survives only while its containing job lives.
 - **(b)** HTML5 drag/drop reaches the dashboard. Copy and paste work,
   including the login clipboard path under WebView2 permissions.
 - **(c)** The local `tauri.localhost` origin and expected subframes work.
