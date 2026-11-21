@@ -656,7 +656,7 @@ func (c *conv) takeReport(text string) {
 }
 
 func (c *conv) takeSteer(text string, mark uint64) {
-	if st := controlsFor(c.proc).reports; st != nil && c.turn && !c.rec.Lead && !c.replaying && !c.wrapHold && !c.compacting && !c.compactCommand {
+	if st := controlsFor(c.proc).reports; st != nil && c.turn && !c.rec.Lead && !c.replaying && !c.wrapHold && !c.compacting && !c.compactCommand && !c.compactInternalTurn {
 		// Persist before the backend write. A holder can accept the steer and
 		// outlive this daemon before its acknowledgement reaches the runner.
 		c.steerSeq++
@@ -873,6 +873,23 @@ func (r *Runner) descendants(id string) []string {
 	}
 	walk(id)
 	return out
+}
+
+func (c *conv) hasActiveDescendants() bool {
+	for _, id := range c.r.descendants(c.rec.ReplyID) {
+		child := c.r.conv(id)
+		if child == nil {
+			continue
+		}
+		child.mu.Lock()
+		active := !child.closed && (child.spawnPending || child.turn || child.rec.TurnOpen || child.bgTasks > 0 || child.holding ||
+			!child.wakeRefused && child.sends > max(child.settled.mark, child.voided))
+		child.mu.Unlock()
+		if active {
+			return true
+		}
+	}
+	return false
 }
 
 // waitChecked, set by tests alone, runs in a wait after its check found no
