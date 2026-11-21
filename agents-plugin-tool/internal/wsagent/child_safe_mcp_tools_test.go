@@ -46,7 +46,7 @@ func TestChildSafeWSToolsAllowlist(t *testing.T) {
 	for _, want := range []string{
 		"path.generate", "path.write", "tickets.query", "tickets.template", "convention.read",
 		"config.resolve_agent", "infra.read", "playbook.read", "note.query", "rationale.query", "git.log", "git.diff",
-		"git.status", "git.merge_base", "api.list", "project_tree", "runtime.read",
+		"git.status", "git.merge_base", "api.list", "project_tree", "runtime.read", "compact",
 		"review.marker",
 		"mailbox.send", "mailbox.recv", "todo.list", "todo.read", "todo.add",
 		"todo.check", "todo.erase", "todo.clear", "todo.reorder",

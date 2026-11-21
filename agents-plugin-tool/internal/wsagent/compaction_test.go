@@ -70,21 +70,21 @@ func TestCompactionAdvisoryOptOutKeepsHardThreshold(t *testing.T) {
 
 func TestCompactionDescriptors(t *testing.T) {
 	for _, tc := range []struct {
-		h                              string
-		p                              CompactionProtocol
-		lead, worker, signals, detects bool
+		h                                              string
+		p                                              CompactionProtocol
+		lead, worker, signals, detects, promptPersists bool
 	}{
-		{BackendClaude, ClaudeCatalog().Compaction, true, false, true, true},
-		{BackendPi, *PiCompaction(), true, true, true, true},
-		{BackendCodex, CodexCatalog().Compaction, true, true, false, false},
-		{BackendAgy, AgyCatalog().Compaction, true, true, false, true},
+		{BackendClaude, ClaudeCatalog().Compaction, true, true, true, true, true},
+		{BackendPi, *PiCompaction(), true, true, true, true, true},
+		{BackendCodex, CodexCatalog().Compaction, true, true, true, true, false},
+		{BackendAgy, AgyCatalog().Compaction, true, true, false, true, true},
 	} {
 		t.Run(tc.h, func(t *testing.T) {
 			if tc.p.LeadCommand != tc.lead || tc.p.WorkerCommand != tc.worker || tc.p.Lifecycle != tc.signals || tc.p.DetectsLifecycle() != tc.detects {
 				t.Fatal(tc.p)
 			}
-			if tc.detects && !tc.p.PromptPersists {
-				t.Fatal("verified appended prompt must survive")
+			if tc.p.PromptPersists != tc.promptPersists {
+				t.Fatalf("appended prompt persistence = %v, want %v", tc.p.PromptPersists, tc.promptPersists)
 			}
 			if tc.p.LegacyKey("compaction.worker_advisory") != "" || tc.p.LegacyKey("compaction.worker_hard") != "" {
 				t.Fatal("lead legacy mapped to worker")
@@ -678,18 +678,18 @@ func TestCompactionNeverWedgesOnPiUnknownEndTurnOrTimeout(t *testing.T) {
 
 func TestCompactionUnsupportedNudgesStayOnOrdinaryInput(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		backend string
-		catalog *HarnessProfile
-		lead    bool
-		tokens  int64
+		name       string
+		backend    string
+		compaction CompactionProtocol
+		lead       bool
+		tokens     int64
 	}{
-		{"claude-worker-advisory", BackendClaude, ClaudeCatalog(), false, 60000},
-		{"codex-advisory", BackendCodex, CodexCatalog(), true, 60000},
-		{"codex-hard-fallback", BackendCodex, CodexCatalog(), true, 90000},
+		{"worker-command-unavailable", BackendClaude, CompactionProtocol{LeadCommand: true, Lifecycle: true}, false, 60000},
+		{"lifecycle-unavailable-advisory", BackendCodex, CompactionProtocol{LeadCommand: true}, true, 60000},
+		{"lifecycle-unavailable-hard", BackendCodex, CompactionProtocol{LeadCommand: true}, true, 90000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := NewRunner(Options{Backends: map[string]BackendRegistration{tc.backend: {Catalog: tc.catalog}}})
+			r := NewRunner(Options{Backends: map[string]BackendRegistration{tc.backend: {NativeCompaction: &tc.compaction}}})
 			c := &conv{
 				r:                      r,
 				rec:                    Record{Backend: tc.backend, Lead: tc.lead, WSKey: "k"},

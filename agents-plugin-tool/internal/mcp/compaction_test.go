@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -11,6 +12,54 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
+
+type compactAccessRunner struct {
+	PiAgents
+	caller string
+}
+
+func (*compactAccessRunner) Watch(func(wsagent.State)) func() { return func() {} }
+
+func (r *compactAccessRunner) Compact(caller, _ string, _ *bool) wsagent.CompactResult {
+	r.caller = caller
+	return wsagent.CompactResult{Status: "queued"}
+}
+
+func TestCompactionToolIsListedAndCallableForBuiltinProfiles(t *testing.T) {
+	setupMailboxTestEnv(t)
+	for name, raw := range wsagent.BuiltinProfiles() {
+		profile, err := wsagent.ParseProfile(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, authority := range []wsagent.PermissionLevel{wsagent.PermissionReadOnly, wsagent.PermissionWorkdirWrite, wsagent.PermissionFull} {
+			t.Run(name+"/"+string(authority), func(t *testing.T) {
+				root := t.TempDir()
+				runner := &compactAccessRunner{}
+				env := append(os.Environ(), envAllowedTools+"="+strings.Join(profile.WSTools, ","), wsagent.EnvPermissionLevel+"="+string(authority))
+				s := NewServerWithOptions(ServerOptions{Root: root, Version: "test", Env: env, Agents: runner})
+				t.Cleanup(s.Close)
+				role := roleDelegate
+				if profile.Lead {
+					role = roleLead
+				} else if len(profile.WSTools) == 0 {
+					t.Fatal("worker profile has no ws attachment")
+				}
+				key, err := s.sessions.mint(root, role, "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !listedToolNames(t, s)["compact"] {
+					t.Fatal("tools/list omitted compact")
+				}
+				resp := keyedCall(t, s, 1, key, "compact", nil)
+				if toolIsError(t, resp) || runner.caller != key {
+					t.Fatalf("compact did not reach the runner: %s", resp)
+				}
+			})
+		}
+	}
+}
 
 func TestCompactionRegistryManifestParity(t *testing.T) {
 	legacy, _ := loadDeclaredConfig(piManifestPath).lookup("pi.compaction_advisory_percent")

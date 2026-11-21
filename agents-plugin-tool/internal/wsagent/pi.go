@@ -51,7 +51,7 @@ func (b PiBackend) registration() (string, BackendRegistration) {
 			agentWorkerBuiltinProfile(BackendPi, PiWorkerTools),
 			{Name: ExploreProfile, Definition: Profile{
 				Description: "Local read-only Pi researcher reporting evidence from project files.",
-				Backend:     BackendPi, Tools: readTools, Instructions: BuiltinInstructionsPrefix + ExploreProfile,
+				Backend:     BackendPi, Tools: readTools, WSTools: []string{"compact"}, Instructions: BuiltinInstructionsPrefix + ExploreProfile,
 			}},
 			searchAnswerBuiltinProfile(SearchAnswerProfilePi, BackendPi, readTools),
 			leadBuiltinProfile(LeadProfilePi, BackendPi, ""),

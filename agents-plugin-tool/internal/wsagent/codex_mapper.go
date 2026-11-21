@@ -442,15 +442,6 @@ func (m *codexMapper) endTurn(turn codexTurn, now int64) []Event {
 			out = append(out, Event{ApprovalDone: id})
 		}
 	}
-	if m.compact {
-		phase := wslive.CompactEnd
-		if turn.Status != "completed" {
-			phase = wslive.CompactFailed
-		}
-		out = append(out, Event{Live: &wslive.Event{Kind: wslive.KindCompact, Phase: phase}})
-		m.compact = false
-	}
-	out = append(out, codexAlert(turn.Error)...)
 	end := Event{TurnEnd: true}
 	switch turn.Status {
 	case "interrupted":
@@ -461,6 +452,13 @@ func (m *codexMapper) endTurn(turn codexTurn, now int64) []Event {
 			end.TurnError = turn.Error.Message
 		}
 	}
+	if m.compact {
+		// A turn can finish without confirming that its compact item
+		// completed. Only an item completion or thread/compacted confirms it.
+		out = append(out, Event{Live: &wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactFailed, Text: end.TurnError}})
+		m.compact = false
+	}
+	out = append(out, codexAlert(turn.Error)...)
 	m.turnID, m.endedTurn, m.retry = "", turn.ID, 0
 	return append(out, Event{RetryEnd: true}, end)
 }

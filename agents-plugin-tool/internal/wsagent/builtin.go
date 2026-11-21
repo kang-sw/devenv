@@ -27,9 +27,9 @@ const (
 
 // SupportWSTools are the ws tools the support profiles allow: the tracker
 // tools (tracker.show and tracker.ui draw in and drive the store's chat),
-// the store's wiki tools, the read-only git search, and playbook.read for
-// the tracker playbook's grammar.
-var SupportWSTools = []string{"tracker.query", "tracker.update", "tracker.show", "tracker.ui", "wiki.query", "wiki.update", "git.search", "playbook.read"}
+// the store's wiki tools, the read-only git search, playbook.read for the
+// tracker playbook's grammar, and session compaction.
+var SupportWSTools = []string{"tracker.query", "tracker.update", "tracker.show", "tracker.ui", "wiki.query", "wiki.update", "git.search", "playbook.read", "compact"}
 
 // SupportClaudeTools are the built-in tools the Claude support profile
 // allows: Agent alone, so the agent may spawn subagents. Claude applies the
@@ -100,9 +100,9 @@ var PiMiniLeadWSTools = append(append([]string{}, PiWorkerWSTools...),
 // ChildSafeWSTools is the single harness-neutral allowlist of harmless ws MCP
 // tools pre-approved for spawned children: read-only queries, or writes scoped
 // to the ws cache, generated paths, or the child's own mailbox and session
-// todo list, already authority-enforced server-side. Mutating repository,
-// ticket, note, worktree, whiteboard, config mutation, and orchestration tools
-// stay excluded; workdir-write children keep their existing behavior for those.
+// todo list, plus native compaction for owned sessions. Mutating repository,
+// ticket, note, worktree, whiteboard, config, and orchestration tools stay
+// excluded; workdir-write children keep their existing behavior for those.
 var ChildSafeWSTools = []string{
 	"path.generate",
 	"path.write",
@@ -124,6 +124,7 @@ var ChildSafeWSTools = []string{
 	"api.list",
 	"project_tree",
 	"runtime.read",
+	"compact",
 	"review.marker",
 	"mailbox.send",
 	"mailbox.recv",
@@ -278,6 +279,7 @@ func searchAnswerBuiltinProfile(name, backend string, tools []string) BuiltinPro
 		Description: fmt.Sprintf("Search answer agent (%s): reads the session board snapshot and project files; no shell, write, or network tools. Project-root confinement is best effort, not a sandbox.", backend),
 		Backend:     backend,
 		Tools:       tools,
+		WSTools:     []string{"compact"},
 	}}
 }
 
