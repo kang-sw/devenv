@@ -66,14 +66,12 @@ test('replacement refusal reaches only the pinned dashboard and keeps its docume
       assert.equal(await toast.count(), 1);
       assert.equal(await toast.textContent(), '<b>New warning</b>');
       assert.equal(await toast.locator('b').count(), 0);
-      if (shots) {
-        await page.setViewportSize({ width: 980, height: 650 });
-        for (const [file, heading] of [['index', 'Connect to your dashboard'], ['python-missing', 'Python 3 is required']]) {
-          await page.goto(pathToFileURL(path.join(desktop, 'ui', file + '.html')).href);
-          assert.equal(await page.locator('h1').innerText(), heading);
-          if (file === 'index') assert.match(await page.locator('main').textContent(), /Retry to start or reconnect/);
-          await capture(page, file + '-' + colorScheme);
-        }
+      await page.setViewportSize({ width: 980, height: 650 });
+      for (const [file, heading] of [['index', 'Connect to your dashboard'], ['python-missing', 'Python 3 is required']]) {
+        await page.goto(pathToFileURL(path.join(desktop, 'ui', file + '.html')).href);
+        assert.equal(await page.locator('h1').innerText(), heading);
+        assert.match(await page.locator('main').textContent(), /Retry to start or reconnect/);
+        await capture(page, file + '-' + colorScheme);
       }
       await page.close();
     }
