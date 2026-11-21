@@ -345,7 +345,77 @@ async function checkKeyedRebuild(frame) {
       await ctx.close();
     }
 
-    // 5. Optional side-by-side mockup capture
+    // 5. Single-agent compact HUD hover expansion & trailing click
+    for (const scheme of ['dark', 'light']) {
+      const { ctx, tab, frame, errors } = await openSession(b, 'single', { width: 1280, scheme: scheme === 'dark' ? 'light' : 'dark' });
+      await chooseTheme(tab, frame, scheme);
+      await tab.mouse.move(1, 1);
+      await frame.waitForTimeout(250);
+      const rest = await frame.evaluate(() => {
+        const panel = document.getElementById('agisland'), compact = document.getElementById('agcompact');
+        const node = compact.querySelector('.hud-node'), convo = document.getElementById('convo');
+        const pr = panel.getBoundingClientRect(), cr = compact.getBoundingClientRect(), nr = node.getBoundingClientRect(), vr = convo.getBoundingClientRect();
+        return {
+          nodes: compact.querySelectorAll('.hud-node').length,
+          mode: panel.getAttribute('data-mode'),
+          shadow: getComputedStyle(panel).boxShadow,
+          border: getComputedStyle(panel).borderWidth,
+          panelW: pr.width, panelR: pr.right,
+          compactW: cr.width, compactH: cr.height, compactR: cr.right,
+          nodeR: nr.right, convoR: vr.right
+        };
+      });
+      assert.equal(rest.nodes, 1);
+      assert.equal(rest.mode, 'compact');
+      assert.equal(rest.shadow, 'none');
+      assert.equal(rest.border, '0px');
+      const convoBox = await frame.locator('#convo').boundingBox();
+      const shotClip = {
+        x: Math.max(0, Math.round(convoBox.x + convoBox.width - 320)),
+        y: Math.max(0, Math.round(convoBox.y - 8)),
+        width: 320,
+        height: 160
+      };
+      if (shots) await tab.screenshot({ path: `${shots}/hud-1agent-rest-${scheme}.png`, clip: shotClip });
+
+      // Hover the single-agent HUD and verify smooth trailing expansion without flicker
+      await frame.locator('#agcompact').hover();
+      await frame.waitForTimeout(250);
+      const hovered = await frame.evaluate(() => {
+        const panel = document.getElementById('agisland'), compact = document.getElementById('agcompact');
+        const node = compact.querySelector('.hud-node'), convo = document.getElementById('convo');
+        const pr = panel.getBoundingClientRect(), cr = compact.getBoundingClientRect(), nr = node.getBoundingClientRect(), vr = convo.getBoundingClientRect();
+        return {
+          isHovered: compact.matches(':hover'),
+          panelW: pr.width, panelR: pr.right,
+          compactW: cr.width, compactH: cr.height, compactR: cr.right, compactT: cr.top, compactB: cr.bottom,
+          nodeR: nr.right, convoR: vr.right,
+          afterOpacity: parseFloat(getComputedStyle(compact, '::after').opacity)
+        };
+      });
+      assert.equal(hovered.isHovered, true, `single-agent HUD stays hovered in ${scheme}`);
+      assert(hovered.compactW >= rest.compactW + 24, `compact width grows on hover (${rest.compactW} -> ${hovered.compactW})`);
+      assert(hovered.panelW >= rest.panelW + 24, `island width grows on hover (${rest.panelW} -> ${hovered.panelW})`);
+      assert(Math.abs(hovered.compactR - rest.compactR) <= 1, 'right edge stays anchored');
+      assert(hovered.panelR <= hovered.convoR + 1, 'no horizontal overflow past #convo');
+      assert(hovered.compactR - hovered.nodeR >= 28, `generous empty trailing space created (${hovered.compactR - hovered.nodeR}px)`);
+      assert(hovered.afterOpacity >= 0.4, `subtle expand cue fades in (opacity=${hovered.afterOpacity})`);
+      if (shots) await tab.screenshot({ path: `${shots}/hud-1agent-hover-${scheme}.png`, clip: shotClip });
+
+      // Click inside the newly expanded trailing space (outside .hud-node) -> opens #agpop
+      const compactBox = await frame.locator('#agcompact').boundingBox();
+      const nodeBox = await frame.locator('#agcompact .hud-node').boundingBox();
+      const clickX = (nodeBox.x + nodeBox.width + compactBox.x + compactBox.width) / 2;
+      const clickY = compactBox.y + compactBox.height / 2;
+      assert(clickX > nodeBox.x + nodeBox.width + 4, 'click target is well outside .hud-node');
+      await tab.mouse.click(clickX, clickY);
+      await frame.locator('#agisland[data-mode="full"]').waitFor();
+      assert.equal(await frame.getAttribute('#agcompact', 'aria-expanded'), 'true');
+      assert.deepEqual(errors, [], `no pageerrors in single-agent ${scheme}`);
+      await ctx.close();
+    }
+
+    // 6. Optional side-by-side mockup capture
     if (shots && mockup) {
       const ctx = await b.newContext({ viewport: { width: 1280, height: 840 }, colorScheme: 'dark' });
       const tab = await ctx.newPage();
