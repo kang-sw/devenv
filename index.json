@@ -385,7 +385,14 @@
       }
     },
     "261116-feat-ws-dashboard-config-settings-ui": {
-      "registered_at": "2026-11-21T12:23:41Z"
+      "registered_at": "2026-11-21T12:23:41Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-21T12:26:21Z"
+      }
     },
     "261116-feat-ws-dashboard-generalized-mentions": {
       "registered_at": "2026-11-16T13:07:35Z"
