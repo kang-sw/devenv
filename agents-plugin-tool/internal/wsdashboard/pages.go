@@ -32,6 +32,7 @@ var dashboardFS embed.FS
 // declaration hoisting, initialization order, CSS cascade and asset identity.
 var dashboardScriptFiles = []string{
 	"dashboard.js",
+	"dashboard-animation.js",
 	"dashboard-board.js",
 	"dashboard-conversation.js",
 	"dashboard-bundles.js",

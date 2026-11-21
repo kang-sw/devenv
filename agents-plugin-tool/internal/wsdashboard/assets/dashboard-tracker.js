@@ -1029,6 +1029,7 @@
       restoreOpen(c.live);
       fmtTimes(c.live);
     } else return;
+    syncSpinnerPhases(name === "entries" ? c.box : c.live);
     supDraw(c);
     if (stick && c.root.isConnected) { c.log.scrollTop = c.log.scrollHeight; c.stick = true; }
     if (st && added && !reset) supActUI(c, added, st);

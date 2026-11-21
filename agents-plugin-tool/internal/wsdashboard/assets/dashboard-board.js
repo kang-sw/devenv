@@ -50,7 +50,7 @@
       if (railMerged !== null) {
         railHoverUpdates = null;
         el.setAttribute("data-h", hash);
-        if (railMerged) { fmtTimes(el); railMarks(); railScrollTo(rowTop); railRefocus(rowFocus); apScan(el); }
+        if (railMerged) { syncSpinnerPhases(el); fmtTimes(el); railMarks(); railScrollTo(rowTop); railRefocus(rowFocus); apScan(el); }
         return;
       }
       html = WsRail.rowInputHTML(html);
@@ -148,6 +148,7 @@
       fmtTimes(el);
       sweepOutImgs(el);
     }
+    syncSpinnerPhases(el);
     el.setAttribute("data-h", hash);
     if (board) {
       indexFrames();
