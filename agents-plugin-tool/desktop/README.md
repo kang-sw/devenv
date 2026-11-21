@@ -16,16 +16,47 @@ cargo test --locked --features custom-protocol
 cargo build --release --locked --features custom-protocol
 ```
 
-To package the macOS release app with the pinned Tauri CLI:
+For a Phase 2 packaged build, first build a daemon for the target platform
+with the current generated inventory embedded and matching version metadata.
+For example, from the repository root on macOS arm64:
 
 ```sh
+cd agents-plugin-tool
+python3 scripts/generate-package-assets.py
+go build -trimpath -ldflags '-s -w -X main.version=0.50.8-dev' -o /tmp/ws-mcp-darwin-arm64 ./cmd/ws-mcp
+python3 scripts/write-runtime-metadata.py /tmp/ws-mcp-darwin-arm64 --version 0.50.8-dev
+node desktop-electron/scripts/assemble-daemon-input.cjs --binary /tmp/ws-mcp-darwin-arm64 --out /tmp/werkschaft-daemon-input --platform darwin
+cd desktop
 npm ci --ignore-scripts --no-audit --no-fund
-npm run tauri -- build --bundles app --ci --no-sign -- --locked
+WERKSCHAFT_DAEMON_INPUT=/tmp/werkschaft-daemon-input npm run build:package
 ```
 
-The result is `target/release/bundle/macos/Werkschaft.app`. The Windows
-smoke binary is `target/release/werkschaft-desktop.exe`. The bundled
-daemon, installers and updater are separate implementation phases.
+Use the checkout's current plugin version in both build and metadata, with
+the same suffix. The assembler requires a fresh output path. The packaging
+entry point validates the full package, binary architecture and embedded
+inventory, then maps every file to `resource_dir/daemon`. It validates the
+resulting app at `target/release/bundle/macos/Werkschaft.app`.
+
+On Windows x64, from `agents-plugin-tool` in PowerShell:
+
+```powershell
+python scripts/generate-package-assets.py
+go build -trimpath -ldflags '-s -w -X main.version=0.50.8-dev' -o "$env:TEMP\ws-mcp-windows-amd64.exe" ./cmd/ws-mcp
+python scripts/write-runtime-metadata.py "$env:TEMP\ws-mcp-windows-amd64.exe" --version 0.50.8-dev
+node desktop-electron/scripts/assemble-daemon-input.cjs --binary "$env:TEMP\ws-mcp-windows-amd64.exe" --out "$env:TEMP\werkschaft-daemon-input" --platform win32
+cd desktop
+npm ci --ignore-scripts --no-audit --no-fund
+$env:WERKSCHAFT_DAEMON_INPUT = "$env:TEMP\werkschaft-daemon-input"
+npm run build:package
+```
+
+The Windows smoke payload is `target/release/phase2-smoke/`, with the
+executable and `daemon/` together. Remove an earlier smoke output before
+rebuilding. These are Phase 2 smoke builds; installers and updater delivery
+belong to Phase 3. Raw Cargo and Tauri builds do not prepare a packaged daemon;
+use `build:package` for the validated resource layout.
+
+Run the packaging checks with `node --test scripts/test-package.cjs`.
 
 `scripts/build-slot.py` remains the bounded debug build runner from the
 attach-only research. Its process-group regressions can run without Cargo:
