@@ -161,6 +161,7 @@ Draft configuration knobs (T0 transparent additions; lead sessions only; off by 
 - **Top-level game-actor stage:** Mount the companion as a top-level viewport overlay receiving external landmark/target positions and reporting actor state, rather than trapping it inside the composer.
 - **Two-speed decision architecture:** Combine a local 60 fps 0-token physics/behavior layer with an optional lightweight sidecar narrative director (plus pluggable lead-only `ws/emotion`).
 - **Lead-only opt-in posture & IP boundary:** Gate behind `lead-tune` / `dashboard-config-manifest.json` knobs defaulting to `off` (T0), support per-harness/model auto-binding via local `~/.ws/companions/` packs, and keep third-party character assets out of the public repository.
+- **Stage 1-A default mascot locked:** Approved `ai-docs/assets/companion-pet/mascot-stage1a-turnaround.png` (original coral-peach twin-tail streetwear mascot integrating Werkschaft CI geometric motifs organically as pentagon-keystone and open-ring hardware with a clean ivory hoodie back); detailed anchors tracked in `ai-docs/manuals/companion-pet-rigging.md`.
 
 ### Proposals
 - Draft `dashboard.companion_mode`, `dashboard.companion_director`, and `dashboard.companion_pack` key names and enum values in `dashboard-config-manifest.json`.
