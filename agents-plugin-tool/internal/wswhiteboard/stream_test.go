@@ -244,10 +244,10 @@ func TestPanelVersionsKeepWriteOrderAndLinks(t *testing.T) {
 		`<article class="wb-entry panel historical" id="`+v1+`"`,
 		// The question it leads cannot reopen an earlier version.
 		`data-key="entry:`+v1+`:history"><summary>`,
-		`<span class="pfname" title="Panel name">plan</span><span class="pfver old" title="Version 1 of 3">v1</span>`,
+		`<span class="pfname" title="Panel name">plan</span><span class="pfver old" title="Version 1 of 3">v1/3</span>`,
 		`<a class="pfnewer" href="#`+v3+`" title="Go to the newer version">→ v3 · 09:20</a><a class="mref pfexact" href="#`+v1+`" title="Link to this version (fixed)">#`+v1+`</a>`,
 		`Earlier version v1 · 09:00. <a href="#`+v3+`">Latest is v3 · 09:20 ↓</a></div>`,
-		`<span class="pfver" title="Version 3 of 3 · latest">v3</span>`,
+		`<span class="pfver" title="Version 3 of 3 · latest">v3/3</span>`,
 		`<a class="mref" href="#p1" title="Link to the latest panel">#p1</a>`,
 		`<div class="pfprev"><a href="#`+v2+`">Earlier version v2 · 09:10 ↑</a></div>`,
 		`data-ver="v1 · 09:00" data-newest="v3 · 09:20"`, `data-ver="v3 · 09:20" data-newest="v3"`,
@@ -355,7 +355,7 @@ func TestStreamRenderMetadataChronologyAndSandbox(t *testing.T) {
 		}
 		previous = index
 	}
-	wantAll(t, board, `data-entry="e1" data-kind="system" data-entry-item="17"`, `System events 2 · `, `data-key="entry:e3:history"><summary`, `data-key="entry:e9" id="p1" open>`, `<span class="pfver old" title="Version 1 of 2">v1</span>`, `data-doc="entry:e3" data-doc-key="entry:e3" data-topic="t" data-entry="e3"`, `data-doc="topic:t/e3" data-doc-key="topic:t/e3" data-topic="t/e3"`)
+	wantAll(t, board, `data-entry="e1" data-kind="system" data-entry-item="17"`, `System events 2 · `, `data-key="entry:e3:history"><summary`, `data-key="entry:e9" id="p1" open>`, `<span class="pfver old" title="Version 1 of 2">v1/2</span>`, `data-doc="entry:e3" data-doc-key="entry:e3" data-topic="t" data-entry="e3"`, `data-doc="topic:t/e3" data-doc-key="topic:t/e3" data-topic="t/e3"`)
 	if strings.Count(board, `id="p1"`) != 1 || strings.Contains(board, `data-id="17"`) {
 		t.Fatal("panel target duplicated or event attribution became an answer control")
 	}

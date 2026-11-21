@@ -111,16 +111,16 @@
 .entry-panel { container-type: inline-size; background: transparent; min-width: 0; }
 /* Native maximize reuses this shell; transparent renderer bodies need a sheet. */
 .entry-panel[data-max] { background: var(--wb-bg); }
-.entry-panel > summary { list-style: none; display: grid; --pcol: calc(var(--h-av, 18px) + var(--h-gap, 8px) + var(--h-time, 64px)); grid-template-columns: var(--pcol) minmax(0, 1fr) auto; column-gap: 8px; row-gap: 0; align-items: start; min-height: 24px; padding: 0; cursor: pointer; }
-/* Dashboard actions are siblings of .pmeta, not children of it. Both share
-   one slot; dashboard.css switches which action is displayed when large. */
-.entry-panel > summary:has(> button) { grid-template-columns: var(--pcol) minmax(0, 1fr) auto auto; }
-.entry-panel > summary > button { grid-column: 4; grid-row: 1; min-width: 24px; min-height: 24px; margin: 0; }
+.entry-panel > summary { list-style: none; display: grid; --pcol: var(--h-av, 18px); grid-template-columns: var(--pcol) minmax(0, 1fr) auto; column-gap: 8px; row-gap: 3px; align-items: start; min-height: 24px; padding: 0; cursor: pointer; }
+/* Standalone whiteboard pages have no dashboard sheet sprite; dashboard-board.css
+   re-enables .d-max and swaps to .d-min/.sheet-width when maximized. */
+:where(.entry-panel > summary > button) { display: none; }
+.entry-panel > summary > button { grid-column: 3; grid-row: 1; min-width: 24px; min-height: 22px; margin: 0; }
 .entry-panel > summary::-webkit-details-marker { display: none; }
 .entry-panel > summary:hover { background: var(--wb-wash); }
 /* Tinted cap header matching conversation panel summaries (.wbupdate-panel):
    rounded pill while folded, top-rounded / bottom-square cap while open. */
-.entry-panel:not(.msg) > summary { padding: 5px 8px 5px 10px; border-left: 3px solid var(--wb-primary); border-radius: 8px; background: color-mix(in srgb, var(--wb-primary) 8%, transparent); transition: background .14s ease, border-radius .14s ease; }
+.entry-panel:not(.msg) > summary { padding: 6px 8px 5px 10px; border-left: 3px solid var(--wb-primary); border-radius: 8px; background: color-mix(in srgb, var(--wb-primary) 8%, transparent); transition: background .14s ease, border-radius .14s ease; }
 .entry-panel:not(.msg) > summary:hover { background: color-mix(in srgb, var(--wb-primary) 13%, transparent); }
 .entry-panel[open]:not(.msg) > summary { border-radius: 8px 8px 0 0; background: color-mix(in srgb, var(--wb-primary) 12%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--wb-primary) 26%, var(--wb-line)); }
 .entry-panel[open]:not(.msg) > summary:hover { background: color-mix(in srgb, var(--wb-primary) 17%, transparent); }
@@ -130,25 +130,31 @@
 .wb-panel-pending > .entry-panel { border-radius: 8px; box-shadow: inset 0 0 0 2px var(--wb-primary); }
 .wb-panel-pending > .entry-panel > summary, .wb-panel-pending > .entry-panel[open]:not(.msg) > summary { background: color-mix(in srgb, var(--wb-primary) 20%, var(--wb-bg)); }
 /* Fold state mark: a closed envelope while the body is folded, an open one
-   while it shows. It sits in the log rows' avatar column and the panel time in
-   their time column, so a card header lines up with the rows around it. */
-.pmark { grid-column: 1; grid-row: 1; display: flex; align-items: center; justify-content: center; width: var(--h-av, 18px); height: 24px; color: var(--wb-muted-fg); }
+   while it shows, aligned to the first line of the title on row 1; the
+   collapse/expand chevron sits at the right edge of row 1. */
+.pmark { grid-column: 1; grid-row: 1; display: flex; align-items: center; justify-content: center; width: var(--h-av, 18px); height: 22px; color: var(--wb-muted-fg); }
 .entry-panel:not(.msg) > summary > .pmark { color: var(--wb-primary); }
 .pmark .i { width: 14px; height: 14px; }
 .pmark .i:last-child, .entry-panel[open] > summary > .pmark .i:first-child { display: none; }
 .entry-panel[open] > summary > .pmark .i:last-child { display: block; }
 .entry-panel.msg > summary > .pmark { display: none; }
-.ptime { grid-column: 1; grid-row: 1; justify-self: start; display: flex; flex-direction: column; min-width: 0; width: var(--h-time, 64px); margin-left: calc(var(--h-av, 18px) + var(--h-gap, 8px)); line-height: 24px; color: var(--wb-muted-fg); }
-.ptime .entry-at { font: 10px/24px var(--wb-mono); opacity: .85; }
+.pchev { grid-column: -2 / -1; grid-row: 1; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 22px; color: var(--wb-muted-fg); opacity: .72; transition: transform .15s ease, opacity .14s ease, color .14s ease; }
+.pchev .i { width: 14px; height: 14px; }
+.entry-panel:not([open]) > summary > .pchev { transform: rotate(-90deg); }
+.entry-panel:not(.msg) > summary:hover > .pchev { opacity: 1; color: var(--wb-fg); }
+.entry-panel.msg > summary > .pchev, .entry-panel[data-max] > summary > .pchev { display: none; }
 .entry-panel > summary:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px; }
-.entry-panel.msg > summary { cursor: default; }
+.entry-panel.msg > summary { grid-template-columns: auto minmax(0, 1fr); cursor: default; }
 .entry-panel.msg > summary:hover { background: transparent; }
-.entry-panel.msg > summary::before { content: ""; width: 3px; align-self: stretch; margin: 2px 4px 2px 0; border-radius: 2px; background: var(--wb-accent-policy); }
-.entry-recap { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 700; word-break: keep-all; overflow-wrap: break-word; }
-.entry-panel > summary > .entry-recap { grid-column: 2; grid-row: 1; line-height: 24px; }
-.entry-panel:not([open]):not(.msg) > summary .entry-recap { font-size: 13px; font-weight: 600; }
-.pmeta { grid-column: 3; grid-row: 1; justify-self: end; display: inline-flex; align-items: center; gap: 8px; height: 24px; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.pmeta a.mref { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; font: 600 11px var(--wb-mono); color: inherit; text-decoration: none; }
+.entry-panel.msg > summary::before { content: ""; grid-column: 1; grid-row: 1 / -1; width: 3px; align-self: stretch; margin: 2px 2px 2px 0; border-radius: 2px; background: var(--wb-accent-policy); }
+.entry-recap { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 700; line-height: 22px; word-break: keep-all; overflow-wrap: break-word; }
+.entry-panel > summary > .entry-recap { grid-column: 2; grid-row: 1; }
+.entry-panel:not([open]):not(.msg) > summary .entry-recap { font-size: 13px; font-weight: 600; line-height: 21px; }
+.pmeta { grid-column: 2 / -1; grid-row: 2; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; min-height: 22px; font-size: 11px; line-height: 18px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; }
+.pmeta .ptime { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--wb-muted-fg); }
+.pmeta .ptime:empty { display: none; }
+.pmeta .ptime .entry-at { font: 10.5px/18px var(--wb-mono); opacity: .85; min-inline-size: 0; }
+.pmeta a.mref { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; min-height: 22px; font: 600 11px var(--wb-mono); color: inherit; text-decoration: none; }
 .pmeta a.mref:hover { color: var(--wb-primary); }
 .entry-body.doc-body { font-size: 13.5px; }
 .entry-panel > .entry-body.doc-body { margin: 0; padding: 9px 0 4px 12px; border-left: 3px solid color-mix(in srgb, var(--wb-primary) 26%, var(--wb-line)); border-radius: 0 0 0 4px; }
@@ -158,16 +164,15 @@
 /* panel versions, each at its own write position: the bound name, a vN
    badge, an earlier version's newer-version and exact links, and the
    link-copy menu stream.js opens */
-.pfname { font: 11px var(--wb-mono); color: var(--wb-muted-fg); }
-@container (max-width: 390px) { .pfname { display: none; } }
+.pfname { font: 11px var(--wb-mono); color: var(--wb-muted-fg); min-width: 0; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pfver { padding: 0 6px; border-radius: 999px; font: 700 10.5px/16px var(--wb-sans); background: color-mix(in srgb, var(--wb-primary) 16%, transparent); color: var(--wb-primary); }
 .pfver.old { background: var(--wb-muted); color: var(--wb-muted-fg); font-weight: 600; }
-.pmeta a.pfnewer { font: 600 11px var(--wb-mono); color: var(--wb-primary); text-decoration: none; }
+.pmeta a.pfnewer { font: 600 11px var(--wb-mono); color: var(--wb-primary); text-decoration: none; white-space: nowrap; }
 .pmeta a.pfnewer:hover { text-decoration: underline; }
 .pmeta .pflink { width: 22px; height: 22px; min-width: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 5px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
 .pmeta .pflink .i { width: 13px; height: 13px; }
 .pmeta .pflink.on, .pmeta .pflink:hover { background: var(--wb-wash); color: var(--wb-fg); }
-.pmeta .pfmention { box-sizing: border-box; width: 22px; height: 22px; min-width: 22px; padding: 0; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--wb-muted-fg); font: 700 14px/20px var(--wb-sans); cursor: pointer; opacity: 0; transition: opacity .14s ease, color .14s ease, background .14s ease; }
+.pmeta .pfmention { box-sizing: border-box; margin-left: auto; width: 22px; height: 22px; min-width: 22px; padding: 0; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--wb-muted-fg); font: 700 14px/20px var(--wb-sans); cursor: pointer; opacity: 0; transition: opacity .14s ease, color .14s ease, background .14s ease; }
 .entry-panel > summary:hover .pfmention, .entry-panel > summary:focus-within .pfmention, .pfmention:focus-visible { opacity: 1; }
 .pmeta .pfmention:hover, .pmeta .pfmention:focus-visible { background: var(--wb-wash); border-color: var(--wb-line); color: var(--wb-primary); }
 .pmeta .pfmention:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 1px; }
@@ -182,7 +187,7 @@
 .pfoldnote .i { width: 12px; height: 12px; flex: none; }
 .pfoldnote a, .pfprev a { color: var(--wb-primary); text-decoration: none; font-weight: 600; }
 .pfprev { margin: 4px 0 2px 15px; font-size: 11.5px; }
-.pfmenu { position: absolute; right: 30px; top: 34px; z-index: 6; width: 268px; max-width: calc(100vw - 40px); padding: 4px; border: 1px solid var(--wb-line); border-radius: 8px; background: var(--wb-card, var(--wb-bg)); box-shadow: var(--wb-shadow-hi); }
+.pfmenu { position: absolute; right: 8px; top: 52px; z-index: 6; width: 268px; max-width: calc(100vw - 40px); padding: 4px; border: 1px solid var(--wb-line); border-radius: 8px; background: var(--wb-card, var(--wb-bg)); box-shadow: var(--wb-shadow-hi); }
 .pfmh { padding: 4px 8px 2px; font-size: 10.5px; font-weight: 700; color: var(--wb-muted-fg); letter-spacing: .02em; }
 .pfmi { display: grid; grid-template-columns: 16px minmax(0, 1fr) 14px; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--wb-fg); text-align: left; font: inherit; cursor: pointer; }
 .pfmi:hover, .pfmi:focus { outline: none; background: var(--wb-wash); }
@@ -197,24 +202,14 @@
   from { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
   to { outline: 2px solid transparent; outline-offset: 2px; }
 }
-/* Query the actual panel width: below 660px fold time and right-hand metadata
-   onto a second row so the title keeps the full width instead of wrapping into
-   a narrow column; below 440px stack metadata onto row 3 so it never collides
-   with the timestamp. */
-@container (max-width: 660px) {
-  .entry-panel:not(.msg):not([data-max]) > summary { --pcol: var(--h-av, 18px); grid-template-columns: var(--pcol) auto minmax(0, 1fr) auto; row-gap: 4px; }
-  .entry-panel:not(.msg):not([data-max]) > summary > .entry-recap { grid-column: 2 / 5; grid-row: 1; }
-  .entry-panel:not(.msg):not([data-max]) > summary:has(> button) > .entry-recap { grid-column: 2 / 4; }
-  .entry-panel:not(.msg):not([data-max]) > summary > button { grid-column: 4; grid-row: 1; }
-  .entry-panel:not(.msg):not([data-max]) > summary > .ptime { grid-column: 2; grid-row: 2; width: auto; margin-left: 0; line-height: 20px; }
-  .entry-panel:not(.msg):not([data-max]) > summary > .ptime .entry-at { line-height: 20px; }
-  .entry-panel:not(.msg):not([data-max]) > summary > .pmeta { grid-column: 3 / 5; grid-row: 2; justify-self: end; height: auto; min-height: 20px; flex-wrap: wrap; gap: 4px 7px; }
-}
+/* Compact padding and bounded panel-name width on narrow docked/split panes. */
 @container (max-width: 440px) {
-  .entry-panel:not(.msg):not([data-max]) > summary > .pmeta { grid-column: 2 / 5; grid-row: 3; justify-self: start; }
+  .entry-panel:not(.msg):not([data-max]) > summary { padding: 5px 6px 4px 8px; column-gap: 6px; }
+  .entry-panel > summary > .pmeta { gap: 3px 6px; }
+  .pfname { max-width: 14ch; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .entry-panel:not(.msg) > summary { transition: none; }
+  .entry-panel:not(.msg) > summary, .pchev { transition: none; }
 }
 .topic { position: relative; }
 .doc-body { padding: 10px 14px 12px; overflow-x: auto; overflow-wrap: anywhere; }
