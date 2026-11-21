@@ -43,7 +43,7 @@ func TestDrawersUseFixedMaximum(t *testing.T) {
 // The standalone runner executes these fixtures without spawning child processes.
 const drawerFixedMaxNode = `
 var fs = require('fs'), vm = require('vm'), bad = [];
-function read(name) { return fs.readFileSync('assets/' + name, 'utf8'); }
+function read(name) { return name === 'tracker.js' ? require('./testdata/asset-source.cjs').readAssetSource('wsdashboard', name) : fs.readFileSync('assets/' + name, 'utf8'); }
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ': got ' + JSON.stringify(got) + ', want ' + JSON.stringify(want)); }
 function funcs(src, names) {
   return names.map(function (name) {
