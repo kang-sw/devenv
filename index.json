@@ -348,9 +348,9 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-20T15:48:49Z",
+        "touched_at": "2026-11-21T02:06:29Z",
         "impl": {
-          "branch": "impl/develop/permission-closeout-review-fixes"
+          "branch": "impl/develop/permission-p3-codex"
         }
       }
     },
