@@ -1,5 +1,6 @@
 ---
 title: "삽입선이 표시되어도 레일 드래그 순서 변경 드롭이 불안정한 문제"
+completed: 2026-11-21
 ---
 
 # Rail drag reorder still drops unreliably even when the insertion line shows
@@ -36,3 +37,8 @@ Observed:
 - Acceptance: an automated browser test does 20 quick drops (no dwell) with
   live updates running. All 20 land in the slot the line showed. The owner
   then checks it visually.
+
+
+## Resolution (2026-11-21)
+
+Fixed trackpad/mouse rail drag-and-drop drop reliability on `develop` (`82cddbbe3`, impl `1234600eb`) and confirmed live by owner (`(61)=ok`).
