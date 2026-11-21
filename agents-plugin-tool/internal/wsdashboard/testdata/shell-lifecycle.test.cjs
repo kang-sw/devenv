@@ -287,6 +287,10 @@ async function testCacheAdmissionExpiry() {
     assert.equal(s.current(), a, 'eligibility is checked again before hiding');
     assert.equal(a.got.includes('shown:false'), false);
     assert.equal(a.inert, true);
+    await tick();
+    a.draft = false;
+    c.from(ready.contentWindow, { wsShell: 'head', html: '<b>ready</b>', qs: '', pad: 0, top: 40 });
+    assert.equal(s.current(), a, 'a late header cannot bypass an open draft decision after a save');
     await answer(c, !cancel);
     if (cancel) {
       assert.equal(c.location.pathname, '/s/a');

@@ -629,14 +629,15 @@
         accept: wsT("js.draft.leave.accept"), cancel: wsT("js.draft.leave.stay")
       });
     }
-    if (shLeaving !== leave || (shOn || shWant) !== ent) return;
+    if (shLeaving !== leave) return;
     shLeaving = null;
+    if ((shOn || shWant) !== ent) return;
     if (leave.next) {
       // Preserve the history entry reached by a later Back/Forward.
       ent.el.inert = false;
       if (leave.next.push && shHistoryIndex() !== leave.from) {
-        shStay(leave);
         shRestoreNav = leave.next;
+        shStay(leave);
       } else shOpen(leave.next.href, leave.next.push);
       return;
     }
@@ -693,7 +694,7 @@
     }
     clearTimeout(ent.headTimer); ent.headTimer = null;
     var was = shOn;
-    if (was === ent) return;
+    if (was === ent || shLeaving && shLeaving.ent === was) return;
     // Async tool/draft callbacks can change eligibility during a cold load.
     // Keep the ready destination, but settle the draft decision before
     // hiding or destroying an outgoing document that is no longer safe.
