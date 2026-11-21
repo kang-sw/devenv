@@ -1,24 +1,24 @@
 ---
-title: "Werkschaft 리드 컴패니언(데스크톱 펫): WASU_ART 종이인형 리깅 파이프라인 및 최상위 게임 액터 아키텍처 리서치"
+title: "Werkschaft 리드 컴패니언(데스크톱 펫): 종이인형 컷아웃 리깅 파이프라인 및 최상위 게임 액터 아키텍처 리서치"
 related:
   261110-epic-ws-dashboard-agent-host: host surface for lead companion overlay
 ---
 
-# Werkschaft Lead Companion (Desktop Pet): WASU_ART Paper-Doll Rigging Pipeline and Top-Level Game-Actor Architecture
+# Werkschaft Lead Companion (Desktop Pet): Layered Paper-Doll Cutout Rigging Pipeline and Top-Level Game-Actor Architecture
 
 ## Background
 
-During exploratory prototyping for an opt-in Werkschaft dashboard companion (a cute chibi character accompanying **lead sessions only**, disabled by default), we tested two visual rigging approaches — pure hand-coded SVG rigs across three harnesses vs. **WASU_ART-style layered paper-cutout sprite rigging** — alongside a top-level game-actor overlay architecture driven by a two-speed decision model.
+During exploratory prototyping for an opt-in Werkschaft dashboard companion (a cute chibi character accompanying **lead sessions only**, disabled by default), we tested two visual rigging approaches — pure hand-coded SVG rigs across three harnesses vs. **layered paper-doll cutout sprite rigging** — alongside a top-level game-actor overlay architecture driven by a two-speed decision model.
 
-This research ticket preserves the empirical findings, the reproducible WASU_ART image-to-layer dissection pipeline, the agreed three-stage asset/scenario workflow, and the live rigging details to watch out for when moving to real asset production and engine implementation.
+This research ticket preserves the empirical findings, the reproducible same-canvas image-to-layer cutout pipeline, the agreed three-stage asset/scenario workflow, and the live rigging details to watch out for when moving to real asset production and engine implementation.
 
-## Prototyping Findings: Pure SVG Rig vs. WASU_ART Layered Paper-Doll
+## Prototyping Findings: Pure SVG Rig vs. Layered Paper-Doll Cutout
 
 ### 1. Three-Harness Pure SVG Rig Showdown
 - Three large-tier agents independently authored animatable, CSS-driven pure SVG rigs (`50–71 KB` each) with pivoted bone groups (`root`, `head`, `twin-tails`, `arms`, `legs`), swappable expression `<defs>`, and continuous clipped pupil-rolling/blinking animations.
 - **Result:** Technically solid and cleanly animated, but hand-traced SVG primitives failed to preserve the organic hand-drawn line weight, shading warmth, and comedic charm of the reference chibi illustration.
 
-### 2. WASU_ART Layered Paper-Doll Dissection Prototype
+### 2. Same-Canvas Layered Paper-Doll Dissection Prototype
 - Instead of hand-tracing vectors or generating disconnected parts from scratch, we started from a single static chibi reference (`1254 × 1254`) and used **same-canvas image-to-image editing** to isolate overlapping anatomical layers while inpainting hidden overlap areas:
   - Back layer: `layer-tails.png` (twin-tails with rounded top anchor bulbs)
   - Lower body: `layer-legs.png` (thighs rounded cleanly at hip joint)
@@ -29,10 +29,10 @@ This research ticket preserves the empirical findings, the reproducible WASU_ART
   - `head-blank` vs. `head-smug` aligned at `(dx=0, dy=0)`; `head-typing` and `head-flustered` at `dx=-1`; `head-gloom` at `dx=-7`.
   - Automated post-processing cleanly separated paired parts (`tail-l/r`, `leg-l/r`, `arm-l/r`), flood-erased ghost sleeves outside the suspender lines on `torso`, extracted a foreground bangs cutout (`head-bangs-fg`) by flood-filling the face skin interior on `head-blank`, and composited alternate facial details (`flustered` blush/sweat/mouth, `gloom` vertical shadow/mouth/sweat) strictly inside the shared `head-blank` face mask — eliminating hair/ribbon contour jitter completely when switching moods.
   - Resizing all 13 transparent parts to `440 × 440` and encoding with `cwebp -q 92 -alpha_q 100 -m 6` yielded **109,606 bytes total (~110 KB)** while remaining 2× Retina crisp at `72–236 px` on dark and light themes.
-- **WASU_ART Sliding Half-Lids + Live Pupils:**
+- **Sliding Half-Lids + Live Pupils Behind Raster Bangs:**
   - Sandwiching an aligned SVG eye layer between `head-blank` (back) and `head-bangs-fg` (front) allowed continuous cursor-tracking/rolling irises and skin-colored sliding upper half-lids (`0%` open -> `44%` half-lidded -> `100%` blink) to tuck naturally behind the real hand-drawn raster bangs, with anime eyebrows rendered on top of `head-bangs-fg`.
 
-## Reproducible WASU_ART Cutout Pipeline (Reference Recipe)
+## Reproducible Same-Canvas Cutout Pipeline (Reference Recipe)
 
 Preserve this pipeline for both official IP-safe packs and user-authored local packs:
 
@@ -62,7 +62,7 @@ Preserve this pipeline for both official IP-safe packs and user-authored local p
      ├── head                  (neck pivot; spring bob & look-at tilt)
      │     ├── head-blank      (shared base hair/head/skin)
      │     ├── face-raster     (optional scenario base: blush hatch, gloom stripes, sweat)
-     │     ├── eyes-svg        (sclera + clipped live irises + WASU_ART sliding half-lids)
+     │     ├── eyes-svg        (sclera + clipped live irises + sliding half-lids)
      │     ├── mouth-layer     (swappable raster/SVG mouth; speech bounce)
      │     ├── head-bangs-fg   (hand-drawn bangs masking upper lid edges)
      │     └── brows-svg       (anime eyebrows drawn over bangs)
@@ -75,7 +75,7 @@ Because we are building a reusable companion **engine** rather than a single har
 
 1. **Stage 1 — Lock actual SD static reference assets:** Produce and approve the final static SD character style & proportions first. (Down-scaling an existing chibi illustration into a smaller SD style altered its aesthetic appeal; the real target SD style must be locked before dissecting layers.)
 2. **Stage 2 — Define canonical engine scenarios:** Before dissecting parts, enumerate the engine's scenario catalog (idle/roam, intense coding/typing `tatata`, attention/pointing at an open ask, startled/poke, failure/gloom, celebration/done, etc.) and declare which body/limb/pose asset swaps each scenario requires.
-3. **Stage 3 — Apply the WASU_ART pipeline per scenario asset:** Run the same-canvas dissection and registration pipeline against the scenario-selected reference assets from Stages 1–2, packing them into the uniform pack format.
+3. **Stage 3 — Apply the same-canvas cutout pipeline per scenario asset:** Run the same-canvas dissection and registration pipeline against the scenario-selected reference assets from Stages 1–2, packing them into the uniform pack format.
 
 ## Live Rigging Detail Notes & Known Prototype Gotchas
 
@@ -114,7 +114,7 @@ Captured from zoomed visual inspection of the prototype so they are addressed du
 
 ### 2. Two-Speed Game AI Decision Model
 - **Fast Path — Local 60 fps 0-Token Utility / Behavior-Tree AI:**
-  - Runs in the browser with zero token cost: WASU_ART second-order spring physics, smooth `look-at` (typing caret, scroll direction/velocity, mouse pointer), obstacle avoidance, idle wandering/perching, click-poke reaction, and instant dashboard HUD state reflection (`thinking`, `tool`, `permission`, `failed`, `idle`).
+  - Runs in the browser with zero token cost: paper-doll second-order spring physics, smooth `look-at` (typing caret, scroll direction/velocity, mouse pointer), obstacle avoidance, idle wandering/perching, click-poke reaction, and instant dashboard HUD state reflection (`thinking`, `tool`, `permission`, `failed`, `idle`).
 - **Slow Path — Lightweight Delta-Cached Sidecar Narrative Director:**
   - Keeps lead session context clean and avoids expensive lead-model tool-call round-trips.
   - Consumes a static cached system/persona/choreography prompt + append-only lead conversation deltas + actor state snapshot + visible landmarks, emitting high-level game commands:
@@ -142,7 +142,7 @@ Draft configuration knobs (T0 transparent additions; lead sessions only; off by 
 - `auto`: resolves a pack by session harness (`agy`, `claude`, `codex`, `pi`) plus optional `model_match` pattern from local user packs under `~/.ws/companions/<pack-id>/pack.json`.
 
 ### 4. Public Repository IP Boundary
-- Public repository ships **only** the companion engine, pack schema, IP-safe original default assets (or BYO starter guide), and the reproducible WASU_ART pack generation recipe.
+- Public repository ships **only** the companion engine, pack schema, IP-safe original default assets (or BYO starter guide), and the reproducible same-canvas cutout pack generation recipe.
 - Third-party or community anime characters (including the local prototyping character used during this exploration) live strictly in local user packs (`~/.ws/companions/`) and are never committed to the public repository.
 
 ## Outcome Ledger
@@ -151,12 +151,12 @@ Draft configuration knobs (T0 transparent additions; lead sessions only; off by 
 - Three independent pure-SVG character rigs (`50–71 KB`, CSS-driven) animated smoothly in headless Chromium, but hand-coded SVG geometry did not preserve the organic hand-drawn charm of the chibi reference.
 - Same-canvas image-to-image layer dissection from a single `1254 × 1254` chibi reference produced usable transparent layers with near-zero registration drift (`0–1 px` on `smug`/`typing`/`flustered`, `7 px` horizontal shift on `gloom` easily corrected by upper-hair alpha correlation).
 - Programmatic post-processing (vertical midline splitting, suspender-guarded sleeve flood-erase on `torso`, `face_skin` flood-fill to extract `head-bangs-fg` and lock all moods onto `head-blank`) eliminated mood-switch silhouette jitter and compressed 13 `440 × 440` transparent WebP layers to **~110 KB total** (`109,606 B`), rendering crisply at `72–236 px` on both dark and light backgrounds.
-- Sandwiching live SVG eyes and sliding skin-tone half-lids between `head-blank` and `head-bangs-fg` reproduced the WASU_ART half-lidded look, smooth blinking, and live cursor tracking while keeping hand-drawn bangs naturally on top.
+- Sandwiching live SVG eyes and sliding skin-tone half-lids between `head-blank` and `head-bangs-fg` achieved a clean half-lidded look, smooth blinking, and live cursor tracking while keeping hand-drawn bangs naturally on top.
 - Zoomed inspection of the live prototype identified concrete rigging pitfalls to solve during real production: slight sclera-vs-skin lid edge erosion at inner eye corners, unwanted drop-shadow halos on interior mouth cutouts, and unnatural posture when reusing idle hands-on-hips arms for keyboard typing.
 
 ### Confirmed Decisions
-- **Visual rigging approach:** Adopt WASU_ART layered paper-cutout sprite rigging (same-canvas dissected raster WebP layers + live sliding half-lids/pupils behind `bangs-fg` + decoupled 2D spring bones) as the primary visual pipeline.
-- **Three-stage engine-first production order:** Execute in order: `(1)` lock actual static SD reference assets -> `(2)` define the engine's canonical scenario catalog -> `(3)` run the WASU_ART dissection pipeline per scenario-selected asset.
+- **Visual rigging approach:** Adopt layered paper-doll cutout sprite rigging (same-canvas dissected raster WebP layers + live sliding half-lids/pupils behind `bangs-fg` + decoupled 2D spring bones) as the primary visual pipeline.
+- **Three-stage engine-first production order:** Execute in order: `(1)` lock actual static SD reference assets -> `(2)` define the engine's canonical scenario catalog -> `(3)` run the same-canvas cutout dissection pipeline per scenario-selected asset.
 - **Scenario-specific body/limb swaps:** Swap body/arm/pose assets per scenario (e.g., dedicated typing body/arms with below-elbow forearm articulation and shoulder bounce) instead of contorting a single idle arm pose.
 - **Top-level game-actor stage:** Mount the companion as a top-level viewport overlay receiving external landmark/target positions and reporting actor state, rather than trapping it inside the composer.
 - **Two-speed decision architecture:** Combine a local 60 fps 0-token physics/behavior layer with an optional lightweight sidecar narrative director (plus pluggable lead-only `ws/emotion`).
@@ -166,7 +166,7 @@ Draft configuration knobs (T0 transparent additions; lead sessions only; off by 
 - Draft `dashboard.companion_mode`, `dashboard.companion_director`, and `dashboard.companion_pack` key names and enum values in `dashboard-config-manifest.json`.
 - Draft actor state snapshot JSON (`pos`, `anchor`, `facing`, `pose`, `mood`, `idle_sec`, `last_event`) and sidecar command JSON (`move_to`, `pose`, `mood`, `quip`).
 - Draft runtime bone stack (`tail-l/r`, `leg-l/r`, `torso`, `arm-l/r` + forearm child, `head` with `head-blank`/`face-raster`/`eyes-svg`/`mouth`/`head-bangs-fg`/`brows-svg`, `comic-fx`).
-- Pack layout under `~/.ws/companions/<pack-id>/pack.json` supporting both WASU_ART WebP cutout packs and optional SVG rigs.
+- Pack layout under `~/.ws/companions/<pack-id>/pack.json` supporting both layered WebP cutout packs and optional SVG rigs.
 
 ### Open Questions
 - **Canonical scenario catalog (Stage 2):** Exact minimal v1 scenario set (e.g., `idle/roam`, `typing/tatata`, `point-at-ask`, `flustered/poke`, `gloom/error`, `celebrate/done`) and which scenarios share vs. swap torso/arm/forearm layers.
