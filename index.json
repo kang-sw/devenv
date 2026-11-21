@@ -576,7 +576,14 @@
       }
     },
     "261121-feat-ws-tracker-unhide": {
-      "registered_at": "2026-11-21T09:34:53Z"
+      "registered_at": "2026-11-21T09:34:53Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-21T10:28:59Z"
+      }
     },
     "261121-refactor-ws-daemon-metadata-sqlite": {
       "registered_at": "2026-11-21T08:27:21Z"
