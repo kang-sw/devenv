@@ -154,13 +154,19 @@ async function checkKeyedRebuild(frame) {
       assert.deepEqual(geom.states, ['failed', 'holding', 'idle', 'permission', 'thinking', 'tool']);
       const flat = await frame.evaluate(() => {
         const panel = document.getElementById('agisland'), compact = document.getElementById('agcompact');
+        const tip = document.getElementById('hud-tooltip'), drawer = document.getElementById('drawer');
         return { shadow: getComputedStyle(panel).boxShadow, border: getComputedStyle(panel).borderWidth,
           background: getComputedStyle(panel).backgroundColor, footer: !!compact.querySelector('.hud-footer'),
-          expand: !!compact.querySelector('.hud-expand-btn'), text: compact.textContent };
+          expand: !!compact.querySelector('.hud-expand-btn'), text: compact.textContent,
+          islandZ: parseInt(getComputedStyle(panel).zIndex, 10),
+          tipZ: parseInt(getComputedStyle(tip).zIndex, 10),
+          drawerZ: parseInt(getComputedStyle(drawer).zIndex, 10) };
       });
       assert.equal(flat.shadow, 'none'); assert.equal(flat.border, '0px');
       assert.match(flat.background, /^color\(|^rgba\(/);
       assert.equal(flat.footer, false); assert.equal(flat.expand, false); assert(!flat.text.includes('완료'));
+      assert(flat.islandZ > 4 && flat.islandZ < flat.drawerZ, `agisland z-index (${flat.islandZ}) > 4 and < drawer (${flat.drawerZ})`);
+      assert(flat.tipZ > 4 && flat.tipZ < flat.drawerZ, `hud-tooltip z-index (${flat.tipZ}) > 4 and < drawer (${flat.drawerZ})`);
       if (shots) await frame.locator('#agisland').screenshot({ path: `${shots}/hud-compact-${scheme}.png` });
       await frame.click('#agcompact', { position: { x: 2, y: 2 } });
       await frame.locator('#agisland[data-mode="full"]').waitFor();
@@ -345,7 +351,7 @@ async function checkKeyedRebuild(frame) {
       await ctx.close();
     }
 
-    // 5. Single-agent compact HUD hover expansion & trailing click
+    // 5. Single-agent compact HUD left-side hover expansion, pixel-locked icon, SSE jitter regression, & left click
     for (const scheme of ['dark', 'light']) {
       const { ctx, tab, frame, errors } = await openSession(b, 'single', { width: 1280, scheme: scheme === 'dark' ? 'light' : 'dark' });
       await chooseTheme(tab, frame, scheme);
@@ -353,16 +359,18 @@ async function checkKeyedRebuild(frame) {
       await frame.waitForTimeout(250);
       const rest = await frame.evaluate(() => {
         const panel = document.getElementById('agisland'), compact = document.getElementById('agcompact');
-        const node = compact.querySelector('.hud-node'), convo = document.getElementById('convo');
-        const pr = panel.getBoundingClientRect(), cr = compact.getBoundingClientRect(), nr = node.getBoundingClientRect(), vr = convo.getBoundingClientRect();
+        const slot = compact.querySelector('.node-slot'), node = compact.querySelector('.hud-node'), convo = document.getElementById('convo');
+        const pr = panel.getBoundingClientRect(), cr = compact.getBoundingClientRect(), sr = slot.getBoundingClientRect(), nr = node.getBoundingClientRect(), vr = convo.getBoundingClientRect();
         return {
           nodes: compact.querySelectorAll('.hud-node').length,
           mode: panel.getAttribute('data-mode'),
           shadow: getComputedStyle(panel).boxShadow,
           border: getComputedStyle(panel).borderWidth,
-          panelW: pr.width, panelR: pr.right,
-          compactW: cr.width, compactH: cr.height, compactR: cr.right,
-          nodeR: nr.right, convoR: vr.right
+          panelL: pr.left, panelW: pr.width, panelH: pr.height, panelR: pr.right,
+          compactL: cr.left, compactW: cr.width, compactH: cr.height, compactR: cr.right,
+          slotX: sr.x, slotY: sr.y, slotW: sr.width, slotH: sr.height,
+          nodeX: nr.x, nodeY: nr.y, nodeW: nr.width, nodeH: nr.height, nodeL: nr.left, nodeR: nr.right,
+          convoR: vr.right
         };
       });
       assert.equal(rest.nodes, 1);
@@ -378,36 +386,96 @@ async function checkKeyedRebuild(frame) {
       };
       if (shots) await tab.screenshot({ path: `${shots}/hud-1agent-rest-${scheme}.png`, clip: shotClip });
 
-      // Hover the single-agent HUD and verify smooth trailing expansion without flicker
-      await frame.locator('#agcompact').hover();
+      // Hover the compact HUD on its left edge so #agcompact expands leftward without hovering .hud-node directly
+      await frame.locator('#agcompact').hover({ position: { x: 4, y: Math.round(rest.compactH / 2) } });
       await frame.waitForTimeout(250);
       const hovered = await frame.evaluate(() => {
         const panel = document.getElementById('agisland'), compact = document.getElementById('agcompact');
-        const node = compact.querySelector('.hud-node'), convo = document.getElementById('convo');
-        const pr = panel.getBoundingClientRect(), cr = compact.getBoundingClientRect(), nr = node.getBoundingClientRect(), vr = convo.getBoundingClientRect();
+        const slot = compact.querySelector('.node-slot'), node = compact.querySelector('.hud-node'), convo = document.getElementById('convo');
+        const pr = panel.getBoundingClientRect(), cr = compact.getBoundingClientRect(), sr = slot.getBoundingClientRect(), nr = node.getBoundingClientRect(), vr = convo.getBoundingClientRect();
+        const before = getComputedStyle(compact, '::before');
         return {
           isHovered: compact.matches(':hover'),
-          panelW: pr.width, panelR: pr.right,
-          compactW: cr.width, compactH: cr.height, compactR: cr.right, compactT: cr.top, compactB: cr.bottom,
-          nodeR: nr.right, convoR: vr.right,
-          afterOpacity: parseFloat(getComputedStyle(compact, '::after').opacity)
+          panelL: pr.left, panelW: pr.width, panelH: pr.height, panelR: pr.right,
+          compactL: cr.left, compactW: cr.width, compactH: cr.height, compactR: cr.right,
+          nodeX: nr.x, nodeY: nr.y, nodeW: nr.width, nodeH: nr.height, nodeL: nr.left, nodeR: nr.right,
+          slotX: sr.x, slotY: sr.y, slotW: sr.width, slotH: sr.height,
+          convoR: vr.right,
+          beforeOpacity: parseFloat(before.opacity),
+          beforeLeft: parseFloat(before.left)
         };
       });
       assert.equal(hovered.isHovered, true, `single-agent HUD stays hovered in ${scheme}`);
       assert(hovered.compactW >= rest.compactW + 24, `compact width grows on hover (${rest.compactW} -> ${hovered.compactW})`);
       assert(hovered.panelW >= rest.panelW + 24, `island width grows on hover (${rest.panelW} -> ${hovered.panelW})`);
+      assert(hovered.panelL <= rest.panelL - 24, `island expands leftward (${rest.panelL} -> ${hovered.panelL})`);
       assert(Math.abs(hovered.compactR - rest.compactR) <= 1, 'right edge stays anchored');
+      assert(Math.abs(hovered.compactH - rest.compactH) <= 0.5, `compact height unchanged (${rest.compactH} -> ${hovered.compactH})`);
       assert(hovered.panelR <= hovered.convoR + 1, 'no horizontal overflow past #convo');
-      assert(hovered.compactR - hovered.nodeR >= 28, `generous empty trailing space created (${hovered.compactR - hovered.nodeR}px)`);
-      assert(hovered.afterOpacity >= 0.4, `subtle expand cue fades in (opacity=${hovered.afterOpacity})`);
+      assert(hovered.nodeL - hovered.compactL >= 28, `generous empty left click-zone created (${hovered.nodeL - hovered.compactL}px)`);
+      assert(hovered.beforeOpacity >= 0.4, `subtle left chevron cue fades in (opacity=${hovered.beforeOpacity})`);
+      assert(hovered.beforeLeft >= 0 && hovered.beforeLeft < 24, `chevron cue sits on the left (${hovered.beforeLeft}px)`);
+      assert(Math.abs(hovered.nodeX - rest.nodeX) <= 0.5, `node X locked on hover (${rest.nodeX} -> ${hovered.nodeX})`);
+      assert(Math.abs(hovered.nodeY - rest.nodeY) <= 0.5, `node Y locked on hover (${rest.nodeY} -> ${hovered.nodeY})`);
+      assert(Math.abs(hovered.nodeW - rest.nodeW) <= 0.5, `node width unchanged (${rest.nodeW} -> ${hovered.nodeW})`);
+      assert(Math.abs(hovered.nodeH - rest.nodeH) <= 0.5, `node height unchanged (${rest.nodeH} -> ${hovered.nodeH})`);
       if (shots) await tab.screenshot({ path: `${shots}/hud-1agent-hover-${scheme}.png`, clip: shotClip });
 
-      // Click inside the newly expanded trailing space (outside .hud-node) -> opens #agpop
+      // Hovering directly on .hud-node also keeps node X/W/H and .node-slot pixel-locked
+      await frame.locator('#agcompact .hud-node').hover();
+      await frame.waitForTimeout(250);
+      const nodeHovered = await frame.evaluate(() => {
+        const panel = document.getElementById('agisland'), slot = document.querySelector('#agcompact .node-slot'), node = document.querySelector('#agcompact .hud-node');
+        const pr = panel.getBoundingClientRect(), sr = slot.getBoundingClientRect(), nr = node.getBoundingClientRect();
+        return { panelW: pr.width, slotX: sr.x, slotY: sr.y, nodeX: nr.x, nodeW: nr.width, nodeH: nr.height };
+      });
+      assert(nodeHovered.panelW >= rest.panelW + 24, 'hovering .hud-node keeps HUD expanded');
+      assert(Math.abs(nodeHovered.nodeX - rest.nodeX) <= 0.5, `node X locked when directly hovered (${rest.nodeX} -> ${nodeHovered.nodeX})`);
+      assert(Math.abs(nodeHovered.slotX - rest.slotX) <= 0.5 && Math.abs(nodeHovered.slotY - rest.slotY) <= 0.5, 'node-slot locked when directly hovered');
+
+      // Critical SSE jitter regression test: keep hovering while 5 live SSE tree updates arrive over ~300ms
+      await frame.locator('#agcompact').hover({ position: { x: 4, y: Math.round(rest.compactH / 2) } });
+      await frame.waitForTimeout(50);
+      await frame.evaluate(() => {
+        window.__hudJitterSamples = [];
+        window.__hudJitterStop = false;
+        const panel = document.getElementById('agisland'), node = document.querySelector('#agcompact .hud-node');
+        function sample() {
+          const pr = panel.getBoundingClientRect(), nr = node.getBoundingClientRect();
+          window.__hudJitterSamples.push({
+            w: pr.width, l: pr.left, nx: nr.x, ny: nr.y,
+            sizing: panel.hasAttribute('data-sizing')
+          });
+          if (!window.__hudJitterStop) requestAnimationFrame(sample);
+        }
+        requestAnimationFrame(sample);
+      });
+      for (let i = 1; i <= 5; i++) {
+        const cap = `sse-jitter-${scheme}-${i}`;
+        await fetch(`${switcher}?s=single&cap=${cap}`);
+        await frame.waitForFunction(c => document.getElementById('r-tree').textContent.includes(c), cap);
+        await frame.waitForTimeout(60);
+      }
+      const jitter = await frame.evaluate(() => {
+        window.__hudJitterStop = true;
+        return window.__hudJitterSamples;
+      });
+      assert(jitter.length >= 8, `captured enough animation frames during SSE updates (${jitter.length})`);
+      assert(jitter.every(s => !s.sizing), 'data-sizing attribute is never set during live SSE updates');
+      const widths = jitter.map(s => s.w), nodeXs = jitter.map(s => s.nx), nodeYs = jitter.map(s => s.ny);
+      const minW = Math.min(...widths), maxW = Math.max(...widths);
+      const maxNodeDX = Math.max(...nodeXs.map(x => Math.abs(x - rest.nodeX)));
+      const maxNodeDY = Math.max(...nodeYs.map(y => Math.abs(y - rest.nodeY)));
+      assert(minW >= rest.panelW + 24, `width never snaps back toward rest during SSE updates (minW=${minW}, restW=${rest.panelW})`);
+      assert(maxW - minW <= 1, `hover width remains stable across SSE updates (minW=${minW}, maxW=${maxW})`);
+      assert(maxNodeDX <= 0.5 && maxNodeDY <= 0.5, `node stays pixel-locked across SSE updates (dx=${maxNodeDX}, dy=${maxNodeDY})`);
+
+      // Click inside the newly expanded LEFT empty space (outside .hud-node) -> opens #agpop
       const compactBox = await frame.locator('#agcompact').boundingBox();
       const nodeBox = await frame.locator('#agcompact .hud-node').boundingBox();
-      const clickX = (nodeBox.x + nodeBox.width + compactBox.x + compactBox.width) / 2;
+      const clickX = (compactBox.x + nodeBox.x) / 2;
       const clickY = compactBox.y + compactBox.height / 2;
-      assert(clickX > nodeBox.x + nodeBox.width + 4, 'click target is well outside .hud-node');
+      assert(clickX < nodeBox.x - 4, `click target (${clickX}) is well left of .hud-node (${nodeBox.x})`);
       await tab.mouse.click(clickX, clickY);
       await frame.locator('#agisland[data-mode="full"]').waitFor();
       assert.equal(await frame.getAttribute('#agcompact', 'aria-expanded'), 'true');

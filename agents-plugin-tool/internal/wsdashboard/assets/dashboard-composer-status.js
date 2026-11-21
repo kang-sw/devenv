@@ -93,26 +93,46 @@
   var AGPIN_KEY = "ws.dashboard.agpop.pin", agFull = {}, agRunning = 0, agSeen = false, agDismissed = false;
   function agSize() {
     if (!agisland || agisland.hidden) return;
+    if (agisland.getClientRects && !agisland.getClientRects().length) return;
     var mode = agisland.getAttribute("data-mode"), view = mode === "full" ? agpop : mode === "compact" ? agcompact : agidle;
+    if (mode === "compact" && view) {
+      // Measure intrinsic rest size from .hud-canvas + .hud-tree-scroll padding
+      // without mutating agisland/agcompact styles or interrupting hover.
+      var scroll = view.querySelector ? view.querySelector(".hud-tree-scroll") : null;
+      var canvas = view.querySelector ? view.querySelector(".hud-canvas") : null;
+      var cs = scroll && typeof getComputedStyle === "function" ? getComputedStyle(scroll) : null;
+      var padX = cs ? (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0) : (scroll ? 16 : 0);
+      var padY = cs ? (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0) : (scroll ? 12 : 0);
+      var cRect = canvas && canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : null;
+      var cw = canvas ? (cRect && cRect.width ? Math.ceil(cRect.width) : canvas.offsetWidth) : view.offsetWidth;
+      var ch = canvas ? (cRect && cRect.height ? Math.ceil(cRect.height) : canvas.offsetHeight) : view.offsetHeight;
+      var naturalW = cw + padX;
+      var convo = $("convo");
+      var availW = convo && convo.getBoundingClientRect ? Math.floor(convo.getBoundingClientRect().width) - 16 : 0;
+      var width = availW > 0 ? Math.min(naturalW, availW) : naturalW;
+      var sbH = scroll && naturalW > width ? Math.max(0, (scroll.offsetHeight || 0) - (scroll.clientHeight || 0)) : 0;
+      var height = ch + padY + sbH;
+      var wPx = width + "px", hPx = height + "px";
+      var prevW = agisland.style.getPropertyValue ? agisland.style.getPropertyValue("--ag-cw") : agisland.style["--ag-cw"];
+      var prevH = agisland.style.getPropertyValue ? agisland.style.getPropertyValue("--ag-ch") : agisland.style["--ag-ch"];
+      if (prevW === wPx && prevH === hPx && agisland.style.width === wPx && agisland.style.height === hPx) return;
+      if (prevW !== wPx) agisland.style.setProperty("--ag-cw", wPx);
+      if (prevH !== hPx) agisland.style.setProperty("--ag-ch", hPx);
+      if (agisland.style.width !== wPx) agisland.style.width = wPx;
+      if (agisland.style.height !== hPx) agisland.style.height = hPx;
+      return;
+    }
     // Measure at the destination width without painting the temporary auto
     // height. Restore the current interpolated box before setting pixel targets,
     // so both dimensions can transition even during a streaming update.
     var box = agisland.getBoundingClientRect(), transition = agisland.style.transition;
     agisland.style.transition = "none";
-    agisland.setAttribute("data-sizing", "1");
-    if (mode === "compact" && view && view.style) view.style.width = "max-content";
     agisland.style.width = mode === "full" ? "500px" : "100%";
     agisland.style.height = "auto";
     var width = agisland.offsetWidth;
     if (mode === "idle") width = Math.min(width, view.offsetWidth);
-    else if (mode === "compact") {
-      width = Math.min(width, view.offsetWidth);
-      if (view && view.style) view.style.width = "";
-      agisland.style.setProperty("--ag-cw", width + "px");
-    } else agisland.style.setProperty("--ag-fw", width + "px");
+    else agisland.style.setProperty("--ag-fw", width + "px");
     var height = view.offsetHeight;
-    if (mode === "compact") agisland.style.setProperty("--ag-ch", height + "px");
-    agisland.removeAttribute("data-sizing");
     agisland.style.width = box.width + "px";
     agisland.style.height = box.height + "px";
     void agisland.offsetWidth;
@@ -123,12 +143,17 @@
   function agOpen(open) {
     if (!agpop) return;
     if (open && typeof hudHideTooltip === "function") hudHideTooltip();
-    agpop.hidden = !open;
+    if (agpop.hidden !== !open) agpop.hidden = !open;
     if (agisland) {
-      agisland.hidden = !open && !agSeen;
-      agisland.setAttribute("data-mode", open ? "full" : agRunning ? "compact" : "idle");
+      var nextHidden = !open && !agSeen;
+      var nextMode = open ? "full" : agRunning ? "compact" : "idle";
+      if (agisland.hidden !== nextHidden) agisland.hidden = nextHidden;
+      if (agisland.getAttribute("data-mode") !== nextMode) agisland.setAttribute("data-mode", nextMode);
     }
-    [sbadge, agcompact, agidle].forEach(function (el) { if (el) el.setAttribute("aria-expanded", open ? "true" : "false"); });
+    var expanded = open ? "true" : "false";
+    [sbadge, agcompact, agidle].forEach(function (el) {
+      if (el && el.getAttribute("aria-expanded") !== expanded) el.setAttribute("aria-expanded", expanded);
+    });
     agSize();
     if (!open && agRunning && typeof hudScheduleConnectors === "function") hudScheduleConnectors();
   }
