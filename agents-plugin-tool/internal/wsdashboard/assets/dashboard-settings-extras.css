@@ -1,6 +1,7 @@
-[data-settings-view] .prompt-card { border-radius: 10px; }
-[data-settings-view] .prompt-card .kctl { grid-column: 1 / -1; width: 100%; }
-[data-settings-view] .prompt-card .kctl form { width: 100%; }
+[data-settings-view] .prompt-card { grid-template-columns: minmax(0, 1fr) 220px; border-radius: 10px; }
+[data-settings-view] .prompt-card .kmeta { grid-column: 1; grid-row: 1; }
+[data-settings-view] .prompt-card .kprov { grid-column: 2; grid-row: 1; }
+[data-settings-view] .prompt-card .kctl { grid-column: 1 / -1; grid-row: 2; width: 100%; }
 .prompt-panes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; width: 100%; }
 .pane-box { display: flex; flex-direction: column; gap: 5px; min-width: 0; width: 100%; }
 .pane-box .ptitle { font-size: 11.5px; font-weight: 800; color: var(--wb-muted-fg); }
@@ -28,20 +29,23 @@
 .diff-line.del { background: color-mix(in srgb, var(--wb-fail) 16%, transparent); }
 .diff-line.ctx { color: var(--wb-muted-fg); }
 
-[data-settings-view] .prof-card { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+[data-settings-view] .prof-card { display: flex; flex-direction: column; align-items: stretch; gap: 9px; }
+[data-settings-view] .prof-card .kctl { display: flex; flex-direction: column; gap: 8px; }
+[data-settings-view] .prof-card .kprov {
+  flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  text-align: left; gap: 6px 10px; padding-top: 8px; margin-top: auto;
+  border-top: 1px solid color-mix(in srgb, var(--wb-muted) 80%, transparent);
+}
+[data-settings-view] .prof-card .config-layers[open] { flex: 1 0 100%; }
 .prof-kv { display: grid; gap: 4px; font-size: 11.5px; }
 .prof-kv-row { display: flex; gap: 8px; }
-.prof-kv-row .k { flex: 0 0 86px; color: var(--wb-muted-fg); font-weight: 700; }
-.prof-kv-row .v { overflow-wrap: anywhere; }
+.prof-kv-row .k { flex: 0 0 86px; color: var(--wb-muted-fg); font-weight: 700; word-break: keep-all; }
+.prof-kv-row .v { font-family: var(--wb-mono); font-size: 11px; overflow-wrap: anywhere; }
 .prof-json-btn {
-  width: fit-content;
-  border: 1px solid var(--wb-line);
-  border-radius: 7px;
-  background: var(--wb-wash);
-  padding: 3px 9px;
-  font-size: 11.5px;
-  font-weight: 700;
-  cursor: pointer;
+  display: inline-flex; align-items: center; height: 26px; width: fit-content;
+  border: 1px solid var(--wb-line); border-radius: 7px;
+  background: var(--wb-wash); padding: 0 9px;
+  font-size: 11.5px; font-weight: 700; cursor: pointer; word-break: keep-all;
 }
 .prof-json { margin-top: 8px; max-height: 360px; overflow: auto; }
 
@@ -78,9 +82,10 @@
 }
 [data-settings-view] .krow[hidden] { display: none; }
 .prompt-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+.prompt-picker .fchip { display: inline-flex; align-items: center; gap: 6px; border-radius: 8px; }
 .settings-profile-family { display: grid; gap: 8px; }
 .settings-profile-family h3 { margin: 0; font-size: 12.5px; }
-.prof-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 10px; }
+.prof-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 10px; }
 
 :root[data-mode="settings"] .dash > .dwrap {
   box-sizing: border-box;
@@ -101,25 +106,8 @@
 }
 [data-settings-view] .sbody { margin: 0; padding: 0; }
 [data-settings-view] .settings-sync-actions { display: flex; align-items: center; gap: 8px; }
-[data-settings-view] .settings-choice { width: 100%; }
 [data-settings-view] .proposal-title code { white-space: nowrap; }
 [data-settings-view] .krow[data-settings-draft] {
   background: color-mix(in srgb, var(--wb-warn) 8%, var(--wb-card));
 }
-[data-settings-view] .proposal-bar .btn {
-  min-height: 30px;
-  padding: 0 12px;
-  border: 1px solid var(--wb-line);
-  border-radius: 8px;
-  background: var(--wb-card);
-  color: var(--wb-fg);
-  font-size: 12px;
-  font-weight: 700;
-}
-[data-settings-view] .proposal-bar .btn.pri {
-  border-color: var(--wb-primary);
-  background: var(--wb-primary);
-  color: var(--wb-primary-fg);
-}
-[data-settings-view] .proposal-bar .btn:disabled { opacity: .58; }
 [data-settings-view] .proposal-bar > .proposal-patch { min-height: 112px; }

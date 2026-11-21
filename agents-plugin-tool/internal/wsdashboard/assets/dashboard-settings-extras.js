@@ -74,24 +74,43 @@
     });
   }
   let refresh = null;
+  let doRerender = null;
   let activePrompt = "prompt.UserPreferenceSection";
 
   function pending(entry, selection) {
     return selection.scope === "repo" && drafts.get(selection.target)?.get(identity(entry));
   }
 
-  function markDraft(row, operation) {
+  function discardEntryDraft(entry, selection) {
+    if (selection.scope !== "repo" || !selection.target) return;
+    drafts.get(selection.target)?.delete(identity(entry));
+    if (doRerender) doRerender();
+    if (refresh) refresh();
+  }
+
+  function markDraft(row, operation, entry, selection) {
     row.toggleAttribute("data-settings-draft", !!operation);
+    const prov = row.querySelector(".kprov");
     let label = row.querySelector(".settings-draft-badge");
+    let discard = row.querySelector(".settings-draft-discard");
     if (!operation) {
       label?.remove();
+      discard?.remove();
       return;
     }
-    if (!label) {
+    if (!label && prov) {
       label = node("span", "prov-pill draft settings-draft-badge");
-      row.querySelector(".kprov")?.prepend(label);
+      prov.prepend(label);
     }
-    label.textContent = tr(operation.action === "reset" ? "js.settings.proposal.reset" : "js.settings.proposal.queued");
+    if (label) {
+      label.textContent = tr(operation.action === "reset" ? "js.settings.proposal.reset" : "js.settings.proposal.queued");
+    }
+    if (!discard && prov && entry && selection) {
+      discard = node("button", "reset-btn settings-draft-discard", tr("js.settings.proposal.discard"));
+      discard.type = "button";
+      discard.addEventListener("click", () => discardEntryDraft(entry, selection));
+      label.after(discard);
+    }
   }
 
   function identity(operation) {
@@ -115,7 +134,9 @@
 
   function renderRow({ entry, selection, row, control }) {
     row.dataset.settingsDraftIdentity = identity(entry);
-    markDraft(row, pending(entry, selection));
+    row._draftEntry = entry;
+    row._draftSelection = selection;
+    markDraft(row, pending(entry, selection), entry, selection);
     if (entry.key.startsWith("prompt.")) {
       const editor = control.querySelector("textarea") || row.querySelector("textarea");
       if (!editor) return;
@@ -189,7 +210,21 @@
     }
   }
 
-  function afterRender({ section, list }) {
+  function syncPromptPointDot(button, key, entries, bucketState, bucketTitle) {
+    button.querySelector(".bdot")?.remove();
+    button.removeAttribute("data-bucket-override");
+    button.removeAttribute("title");
+    if (!entries || !bucketState) return;
+    const st = bucketState(entries.filter(entry => entry.key === key));
+    if (st.kind === "none") return;
+    button.dataset.bucketOverride = st.kind;
+    const dot = node("span", "bdot " + st.kind);
+    dot.setAttribute("aria-hidden", "true");
+    button.append(dot);
+    if (bucketTitle) button.title = bucketTitle(key, st);
+  }
+
+  function afterRender({ section, list, entries, bucketState, bucketTitle }) {
     if (section === "profiles") {
       for (const family of ["worktree", "agent"]) {
         const rows = [...list.children].filter(row => row.dataset.configKey?.startsWith(family + ".profile."));
@@ -215,6 +250,7 @@
       button.type = "button";
       button.dataset.settingsPromptPoint = key;
       button.append(node("code", "", key));
+      syncPromptPointDot(button, key, entries, bucketState, bucketTitle);
       button.addEventListener("click", () => {
         activePrompt = key;
         apply();
@@ -236,7 +272,15 @@
     apply();
   }
 
+  function onMutate({ section, list, entries, bucketState, bucketTitle }) {
+    if (section !== "prompts" || !list) return;
+    for (const button of list.querySelectorAll(".prompt-picker [data-settings-prompt-point]")) {
+      syncPromptPointDot(button, button.dataset.settingsPromptPoint, entries, bucketState, bucketTitle);
+    }
+  }
+
   function mount({ proposal, selection, snapshot, rerender }) {
+    doRerender = rerender;
     if (!proposal || selection.scope !== "repo" || !selection.target) return;
     const target = selection.target;
     const draft = targetDraft(target);
@@ -256,7 +300,7 @@
 
     function render() {
       for (const row of document.querySelectorAll("[data-settings-draft-identity]")) {
-        markDraft(row, draft.get(row.dataset.settingsDraftIdentity));
+        markDraft(row, draft.get(row.dataset.settingsDraftIdentity), row._draftEntry, row._draftSelection);
       }
       proposal.replaceChildren();
       proposal.hidden = !draft.size && !message;
@@ -380,6 +424,7 @@
 
   window.WsSettingsExtension = {
     editable(entry, selection) { return selection.scope === "repo" && !!selection.target && entry.editable; },
+    hasDraft(entry, selection) { return pending(entry, selection); },
     value(entry, selection, value) {
       const draft = pending(entry, selection);
       if (draft?.action === "set") return draft.value;
@@ -388,11 +433,13 @@
     },
     renderRow,
     afterRender,
+    onMutate,
     mount,
     submit(operation, selection) {
       if (selection.scope !== "repo" || !selection.target) return undefined;
       const draft = targetDraft(selection.target);
       draft.set(identity(operation), operation);
+      if (doRerender) doRerender();
       if (refresh) refresh();
       return Promise.resolve({});
     }

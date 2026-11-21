@@ -55,9 +55,22 @@ const snapshot = '/api/config/snapshot';
           {name: 'ws_dashboard_lang', value: 'ko', url: base}]);
         await page.goto(base + '/settings');
         await show('global');
+        assert.equal(await frame().locator('[data-settings-modes]').count(), 0);
+        assert.match(await frame().locator('[data-settings-precedence] .prec-hint').textContent(), /\S/);
+        const repoGear = gear('repo', root);
+        assert.equal(await repoGear.evaluate(el => getComputedStyle(el).opacity), '0');
+        await page.locator('.wthd', { has: repoGear }).hover();
+        assert(Number(await repoGear.evaluate(el => getComputedStyle(el).opacity)) >= 0.7);
+        if (theme === 'dark') {
+          await page.screenshot({path: path.join(captures, 'global-dark-rail-hover.png')});
+          await page.mouse.move(720, 480);
+          assert.equal(await repoGear.evaluate(el => getComputedStyle(el).opacity), '0');
+        }
         await gear('repo', linked).waitFor();
         await row('workflow.whiteboard_enabled').locator('[data-settings-bucket=claude]').click();
+        assert.equal(await row('workflow.whiteboard_enabled').locator('[data-settings-bucket=claude]').getAttribute('data-bucket-override'), 'other');
         await row('workflow.profile').locator('[data-settings-bucket=claude]').click();
+        assert.equal(await row('workflow.profile').locator('[data-settings-bucket=claude]').getAttribute('data-bucket-override'), 'own');
         const profile = row('workflow.profile');
         await profile.locator('[data-settings-option=orchestrate]').click();
         const configured = page.waitForResponse(r => r.url().endsWith('/api/config/set'));
@@ -66,6 +79,27 @@ const snapshot = '/api/config/snapshot';
         await profile.locator('.inline-warn').waitFor();
         assert.doesNotMatch(await profile.locator('.inline-warn').textContent(), /Unverified harness/);
         await page.screenshot({path: path.join(captures, 'implementation-global-' + theme + '.png')});
+        if (theme === 'dark') {
+          for (const sec of ['agents', 'compaction', 'adapters', 'profiles']) {
+            await pickSection(sec);
+            const shot = sec === 'agents' ? 'agents-tiers-dark.png' : sec + '-dark.png';
+            await page.screenshot({path: path.join(captures, shot)});
+          }
+          await pickSection('prompts');
+          const prompt = row('prompt.UserPreferenceSection');
+          await prompt.locator('[data-settings-bucket=claude]').click();
+          await prompt.locator('[data-settings-prompt-editor]').fill('## Claude override\nPrefer concise Korean summaries.');
+          const promptSet = page.waitForResponse(r => r.url().endsWith('/api/config/set'));
+          await prompt.locator('button[type=submit]').click();
+          assert.equal((await promptSet).status(), 200);
+          assert.equal(await prompt.locator('[data-settings-bucket=claude]').getAttribute('data-bucket-override'), 'own');
+          assert.equal(await frame().locator('[data-settings-prompt-point="prompt.UserPreferenceSection"]').getAttribute('data-bucket-override'), 'own');
+          await page.screenshot({path: path.join(captures, 'prompts-dark.png')});
+          const promptReset = page.waitForResponse(r => r.url().endsWith('/api/config/reset'));
+          await prompt.locator('.reset-btn').click();
+          assert.equal((await promptReset).status(), 200);
+          await pickSection('workflow');
+        }
         await reference.goto(pathToFileURL(mockup).href + '?theme=' + theme);
         await reference.locator('#stage .sync-card').waitFor();
         await reference.screenshot({path: path.join(captures, 'reference-global-' + theme + '.png')});

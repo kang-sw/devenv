@@ -2698,7 +2698,6 @@
   "js.settings.rail.project": "Apri le impostazioni dello spazio di lavoro",
   "js.settings.rail.repo": "Apri le impostazioni dell’albero di lavoro",
   "js.settings.rail.session": "Apri le impostazioni della sessione",
-  "js.settings.scope_label": "Ambito delle impostazioni",
   "js.settings.scope.builtin": "Integrato",
   "js.settings.scope.synced": "Sincronizzato",
   "js.settings.scope.global": "Globale",
@@ -2954,5 +2953,12 @@
   "js.settings.proposal.reset": "Ripristino in bozza",
   "js.settings.proposal.queued": "Modifica in bozza",
   "js.settings.inherited_session": "Ereditato da una sessione padre",
-  "js.settings.legacy_tier": "Valore storico del livello. Il ripristino cancella la modifica specifica dell’ambiente."
+  "js.settings.legacy_tier": "Valore storico del livello. Il ripristino cancella la modifica specifica dell’ambiente.",
+  "js.settings.precedence_hint": "Il livello a destra sovrascrive quello a sinistra",
+  "js.settings.context_missing_short": "non valutato",
+  "js.settings.override_scope": "Sostituzione ({0})",
+  "js.settings.proposal.discard": "Scarta bozza",
+  "js.settings.bucket.overridden_in": "Sostituito in: {0}",
+  "js.settings.bucket.tag": "Bucket harness",
+  "js.settings.layer_major_tag": "Bucket per livello"
 }

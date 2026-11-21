@@ -2698,7 +2698,6 @@
   "js.settings.rail.project": "打开工作区设置",
   "js.settings.rail.repo": "打开工作树设置",
   "js.settings.rail.session": "打开会话设置",
-  "js.settings.scope_label": "设置范围",
   "js.settings.scope.builtin": "内置",
   "js.settings.scope.synced": "同步",
   "js.settings.scope.global": "全局",
@@ -2954,5 +2953,12 @@
   "js.settings.proposal.reset": "已暂存重置",
   "js.settings.proposal.queued": "已暂存修改",
   "js.settings.inherited_session": "继承自父会话",
-  "js.settings.legacy_tier": "旧版层级值。重置仅清除特定运行环境的覆盖。"
+  "js.settings.legacy_tier": "旧版层级值。重置仅清除特定运行环境的覆盖。",
+  "js.settings.precedence_hint": "右侧层级会覆盖左侧",
+  "js.settings.context_missing_short": "未评估",
+  "js.settings.override_scope": "当前作用域覆盖 ({0})",
+  "js.settings.proposal.discard": "取消草稿",
+  "js.settings.bucket.overridden_in": "已覆盖：{0}",
+  "js.settings.bucket.tag": "Harness 桶",
+  "js.settings.layer_major_tag": "层级优先桶"
 }

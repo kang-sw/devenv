@@ -10,7 +10,6 @@
   }
 
   var scopes = ["builtin", "synced", "global", "repo", "project", "session"];
-  var modes = ["global", "project", "repo", "session"];
   var sections = ["workflow", "agents", "compaction", "adapters", "profiles", "prompts"];
   var adapters = ["claude", "pi", "agy", "dashboard"];
   var filterLabels = {
@@ -166,19 +165,41 @@
     return name === "repo" ? !selection.context.worktree : !selection.context.session;
   }
 
-  function scopeButton(name, strip) {
+  function svgIcon(name) {
+    var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "i");
+    svg.setAttribute("aria-hidden", "true");
+    var use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    use.setAttribute("href", "#" + name);
+    svg.append(use);
+    return svg;
+  }
+
+  function cloudIcon() {
+    var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "i");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    var path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z");
+    svg.append(path);
+    return svg;
+  }
+
+  function scopeButton(name) {
     var active = name === scope, planned = name === "synced";
     var rememberedProject = new URLSearchParams(window.parent.location.hash.slice(1)).get("project");
     var href = planned ? "" : window.WsShell.settingsScopeHref(name, selection, projectForWorktree, rememberedProject);
-    var cls = strip ? "prec-node" + (planned ? " synced" : "") + (active ? " active " + name + "-mode" : "") : "";
+    var cls = "prec-node" + (planned ? " synced" : "") + (active ? " active " + name + "-mode" : "");
     var node = button(cls, scopeName(name), function () { send("nav", {href: href}); });
     node.dataset.settingsScope = name;
-    node.setAttribute(strip ? "aria-current" : "aria-pressed", active ? (strip ? "page" : "true") : "false");
+    node.setAttribute("aria-current", active ? "page" : "false");
     node.disabled = !href;
     if (planned) node.title = tr("js.settings.sync.planned");
+    else if (contextMissing(name)) node.title = tr("js.settings.context_missing") + (!href ? " · " + tr("js.settings.target_required") : "");
     else if (!href) node.title = tr("js.settings.target_required");
-    if (strip && (planned || contextMissing(name))) {
-      node.append(el("span", "sub", planned ? tr("js.settings.sync.planned") : tr("js.settings.context_missing")));
+    if (planned || contextMissing(name)) {
+      node.append(el("span", "sub", planned ? tr("js.settings.sync.planned") : tr("js.settings.context_missing_short")));
     }
     return node;
   }
@@ -199,11 +220,9 @@
         arrow.setAttribute("aria-hidden", "true");
         strip.append(arrow);
       }
-      strip.append(scopeButton(name, true));
+      strip.append(scopeButton(name));
     });
-    view.querySelector("[data-settings-modes]").replaceChildren(...modes.map(function (name) {
-      return scopeButton(name, false);
-    }));
+    strip.append(el("span", "prec-hint", tr("js.settings.precedence_hint")));
   }
 
   function specFor(key) {
@@ -282,17 +301,28 @@
   function provenance(entry, canEdit, reset) {
     var node = el("div", "kprov");
     var here = selected(entry) !== undefined;
-    var sourceBadge = badge(tr(entry.conditional ? "js.settings.source_conditional" : "js.settings.source", source(entry)));
-    node.append(sourceBadge);
+    var bucketSuffix = entry.selectors.harness && entry.selectors.harness !== "default" ? bucketName(entry.selectors.harness) : "";
     if (scope === "builtin") {
-      node.append(el("span", "hint", tr("js.settings.builtin_value", shownValue(entry.default))));
+      var lock = badge("", "lock");
+      lock.append(svgIcon("i-lock"), document.createTextNode(scopeName("builtin")));
+      node.append(lock);
+    } else if (here) {
+      var target = scopeName(scope) + (bucketSuffix ? " · " + bucketSuffix : "");
+      node.append(badge(tr("js.settings.override_scope", target), "here"));
+    } else {
+      node.append(badge(tr(entry.conditional ? "js.settings.source_conditional" : "js.settings.source", source(entry))));
     }
-    node.append(el("span", "effective-value", tr(entry.conditional ? "js.settings.value_conditional" : "js.settings.value_effective", shownValue(entry.value))));
-    if (here) node.append(badge(tr("js.settings.override", shownValue(selected(entry))), "here"));
     if (shadowed(entry)) node.append(el("span", "shadow-note", tr(entry.conditional ? "js.settings.shadow_conditional" : "js.settings.shadow", source(entry))));
+    if (here && canEdit) node.append(button("reset-btn", tr("js.settings.reset"), reset));
     var layers = el("details", "config-layers");
     layers.append(el("summary", "", tr("js.settings.layers")));
-    var list = append(el("ul"), ...entry.layers.slice().reverse().map(function (layer) {
+    var details = [el("li", "layer-summary", tr(entry.conditional ? "js.settings.value_conditional" : "js.settings.value_effective", shownValue(entry.value)))];
+    if (scope === "builtin") {
+      details.push(el("li", "layer-summary", tr("js.settings.builtin_value", shownValue(entry.default))));
+    } else if (here) {
+      details.push(el("li", "layer-summary", tr("js.settings.override", shownValue(selected(entry)))));
+    }
+    entry.layers.slice().reverse().forEach(function (layer) {
       var value = layer.status === "context_missing" ? tr("js.settings.context_missing") :
         !layer.evaluated ? tr("js.settings.not_applicable") : layer.present ? shownValue(layer.value) : tr("js.settings.no_override");
       var from = layer.inherited ? tr("js.settings.inherited_session") : scopeName(layer.scope);
@@ -301,15 +331,10 @@
       var item = el("li", "", text);
       item.dataset.settingsLayer = layer.scope;
       item.dataset.layerStatus = layer.status;
-      return item;
-    }));
-    layers.append(list);
-    var missing = entry.layers.filter(function (layer) { return layer.status === "context_missing"; });
-    if (missing.length) {
-      layers.firstChild.append(" · " + missing.map(function (layer) { return scopeName(layer.scope); }).join("/") + " — " + tr("js.settings.context_missing"));
-    }
+      details.push(item);
+    });
+    layers.append(append(el("ul"), ...details));
     node.append(layers);
-    if (here && canEdit) node.append(button("reset-btn", tr("js.settings.reset"), reset));
     return node;
   }
 
@@ -341,6 +366,13 @@
           warnings.set(id, result.warnings || []);
           if (row.isConnected) replace(result.entry, hadFocus);
           renderCounts();
+          if (extension.onMutate) extension.onMutate({
+            section: activeSection,
+            list: content.querySelector(".klist"),
+            entries: sectionEntries(activeSection),
+            bucketState: bucketState,
+            bucketTitle: bucketTitle
+          });
         } else {
           queued = !!pending;
           status.textContent = "";
@@ -484,8 +516,7 @@
     var canEdit = editable(entry, spec);
     var row = el("article", "krow" + rowClass(entry, canEdit));
     row.dataset.configKey = entry.key;
-    var form = el("form", "kctl"), ctl = el("div", "kctl");
-    form.append(ctl);
+    var form = el("form", "kctl");
     var status = el("span", "hint");
     status.setAttribute("role", "status");
     var submit = makeSubmit(entry, row, status, function (fresh, moveFocus) {
@@ -497,26 +528,32 @@
       } else row.replaceWith(updated);
     });
     var label = append(el("div", "klabel-line"), el("span", "klabel", window.wsT(spec.label)));
+    if (spec.selectors.includes("harness")) {
+      label.append(el("span", "tag bucket", tr(activeSection === "compaction" ? "js.settings.layer_major_tag" : "js.settings.bucket.tag")));
+    }
     if (!canEdit) label.append(el("span", "tag lock", tr(reasons[rowReason(entry, spec)] || reasons.scope_unsupported)));
-    var meta = append(el("div", "kmeta"), label, append(el("div", "kkey"), el("code", "key-chip", entry.key)),
+    var bucket = entry.selectors.harness;
+    var keySuffix = bucket ? (bucket === "*" ? (entry.key.startsWith("compaction.") ? "" : ".all") : "." + bucket) : "";
+    var meta = append(el("div", "kmeta"), label, append(el("div", "kkey"), el("code", "key-chip", entry.key + keySuffix)),
       el("p", "kdesc", window.wsT(spec.description)));
     if (spec.selectors.includes("harness") && activeSection !== "compaction") {
       var choices = group(entry.key);
-      meta.append(bucketPicker(entry.key, choices, "bucket-bar"));
+      meta.append(append(el("div", "bucket-bar"), el("span", "blbl", tr("js.settings.bucket.label")), bucketPicker(entry.key, choices, "seg bucket-seg")));
     }
+    meta.append(...renderWarnings(entry));
     var value = scope === "builtin" ? entry.default : selected(entry);
     if (value === undefined) value = entry.value;
     if (extension.value) value = extension.value(entry, selection, value);
     if (spec.control === "profile") {
-      ctl.append(el("span", "hint", tr("js.settings.profile_inspection")));
+      form.append(el("span", "hint", tr("js.settings.profile_inspection")));
     } else {
       var field = scalarControl(entry, spec, value, !canEdit);
-      ctl.append(field.node);
-      if (canEdit) bindForm(form, ctl, field.read, submit, status);
+      form.append(field.node);
+      if (canEdit) bindForm(form, form, field.read, submit, status);
     }
-    ctl.append(status, ...renderWarnings(entry));
+    form.append(status);
     row.append(meta, form, provenance(entry, canEdit, function () { submit("reset"); }));
-    if (extension.renderRow) extension.renderRow({entry, spec, selection, row, control: ctl, form, submit, editable: canEdit});
+    if (extension.renderRow) extension.renderRow({entry, spec, selection, row, control: form, form, submit, editable: canEdit});
     return row;
   }
 
@@ -543,35 +580,48 @@
     row.append(append(el("td"), provenance(entry, canEdit, function () { submit("reset"); })));
     var actions = append(el("td"), status, ...renderWarnings(entry));
     actions.colSpan = 5;
+    var save = null;
+    function syncSecondary() {
+      secondary.hidden = !status.textContent && !secondary.querySelector(".inline-warn") && (!save || save.disabled);
+    }
     if (canEdit) {
-      var save = button("save-btn", tr("js.settings.save"), function () {
-        submit("set", Object.fromEntries(fields.map(function (field, i) { return [field, inputs[i].value]; })));
+      save = button("save-btn", tr("js.settings.save"), function () {
+        submit("set", Object.fromEntries(fields.map(function (field, i) { return [field, inputs[i].value]; }))).then(syncSecondary, syncSecondary);
       });
       save.disabled = true;
-      group.addEventListener("input", function () { save.disabled = false; });
+      group.addEventListener("input", function () {
+        save.disabled = false;
+        syncSecondary();
+      });
       actions.prepend(save);
     }
     secondary.append(actions);
-    if (!actions.textContent) secondary.hidden = true;
+    syncSecondary();
     return append(group, row, secondary);
   }
 
   function renderTier(entries, spec) {
-    var card = el("div", "tier-card"), active = activeBucket(spec.key, entries);
+    var card = el("div", "tier-card" + (!entries.some(function (e) { return editable(e, spec); }) ? " disabled" : "")), active = activeBucket(spec.key, entries);
     var heading = append(el("div"), append(el("div", "klabel-line"), el("b", "klabel", window.wsT(spec.label)),
-      el("code", "key-chip", spec.key)), el("p", "kdesc", window.wsT(spec.description)));
+      el("code", "key-chip", spec.key), el("span", "tag bucket", tr("js.settings.bucket.tag"))), el("p", "kdesc", window.wsT(spec.description)));
     var visible = entries.filter(function (entry) { return entry.selectors.harness === active && matches(entry, spec); });
-    var top = append(el("div", "tier-top"), heading, bucketPicker(spec.key, entries, "seg"));
+    var top = append(el("div", "tier-top"), heading, bucketPicker(spec.key, entries, "seg bucket-seg"));
     if (visible.length && !editable(visible[0], spec)) {
       heading.firstChild.append(el("span", "tag lock", tr(reasons[rowReason(visible[0], spec)] || reasons.scope_unsupported)));
     }
     var table = el("table", "tier-tbl");
+    var colgroup = el("colgroup");
+    ["76px", "124px", "", "112px", "212px"].forEach(function (w) {
+      var col = el("col");
+      if (w) col.style.width = w;
+      colgroup.append(col);
+    });
     var headers = ["name", "backend", "model", "effort", "source"].map(function (key) {
       var th = el("th", "", tr(tierLabels[key]));
       th.scope = "col";
       return th;
     });
-    table.append(append(el("thead"), append(el("tr"), ...headers)),
+    table.append(colgroup, append(el("thead"), append(el("tr"), ...headers)),
       ...visible.map(function (entry) { return tierRow(entry, spec); }));
     return append(card, top, append(el("div", "tier-scroll"), table));
   }
@@ -592,12 +642,46 @@
     return choices.includes(active) ? active : choices[0];
   }
 
+  function bucketShort(name) {
+    if (name === "*" || name === "all") return "*";
+    return bucketName(name);
+  }
+
+  function bucketState(entries) {
+    if (scope === "repo" && extension.hasDraft && entries.some(function (e) { return extension.hasDraft(e, selection); })) {
+      return {kind: "draft", scopes: ["repo"]};
+    }
+    if (scope !== "builtin" && entries.some(function (e) { return selected(e) !== undefined; })) {
+      return {kind: "own", scopes: [scope]};
+    }
+    var other = [];
+    for (var e of entries) {
+      for (var layer of e.layers) {
+        if (layer.scope !== "builtin" && layer.scope !== scope && layer.selected !== undefined && !other.includes(layer.scope)) {
+          other.push(layer.scope);
+        }
+      }
+    }
+    return other.length ? {kind: "other", scopes: other} : {kind: "none", scopes: []};
+  }
+
+  function bucketTitle(choice, st) {
+    var base = choice === "*" ? tr("js.settings.bucket.common") : bucketName(choice);
+    if (st.kind === "draft") return base + " · " + tr("js.settings.proposal.queued");
+    if (st.kind === "own" || st.kind === "other") {
+      return base + " · " + tr("js.settings.bucket.overridden_in", st.scopes.map(scopeName).join(", "));
+    }
+    return base;
+  }
+
   function bucketPicker(key, entries, cls) {
-    var strip = el("div", cls), choices = harnessChoices(entries), active = activeBucket(key, entries);
+    var strip = el("div", cls || "seg bucket-seg"), choices = harnessChoices(entries), active = activeBucket(key, entries);
     strip.setAttribute("role", "group");
     strip.setAttribute("aria-label", tr("js.settings.bucket.label"));
     choices.forEach(function (choice) {
-      var node = button("fchip", bucketName(choice), function () {
+      var matching = entries.filter(function (entry) { return entry.selectors.harness === choice; });
+      var st = bucketState(matching);
+      var node = button("", bucketShort(choice), function () {
         buckets.set(key, choice);
         renderContent();
         var match = Array.from(content.querySelectorAll("[data-settings-bucket]")).find(function (other) {
@@ -608,6 +692,13 @@
       node.dataset.settingsBucket = choice;
       node.dataset.bucketKey = key;
       node.setAttribute("aria-pressed", String(choice === active));
+      node.title = bucketTitle(choice, st);
+      if (st.kind !== "none") {
+        node.dataset.bucketOverride = st.kind;
+        var dot = el("span", "bdot " + st.kind);
+        dot.setAttribute("aria-hidden", "true");
+        node.append(dot);
+      }
       strip.append(node);
     });
     return strip;
@@ -672,10 +763,10 @@
     toggle.setAttribute("role", "switch");
     toggle.setAttribute("aria-checked", "false");
     toggle.setAttribute("aria-label", tr("js.settings.sync.title"));
-    var sync = button("fchip", tr("js.settings.sync.disabled"));
+    var sync = button("btn", tr("js.settings.sync.disabled"));
     sync.disabled = true;
     return append(el("div", "sync-card"), append(el("div", "sync-card-left"),
-      append(el("div", "sync-card-title"), el("strong", "", tr("js.settings.sync.title")), badge(tr("js.settings.sync.planned"))),
+      append(el("div", "sync-card-title"), cloudIcon(), el("strong", "", tr("js.settings.sync.title")), badge(tr("js.settings.sync.planned"))),
       el("div", "sync-card-desc", tr("js.settings.sync.description"))),
       append(el("div", "settings-sync-actions"), toggle, sync));
   }
@@ -691,8 +782,12 @@
     if (scope === "project") content.append(el("p", "info-note", tr("js.settings.project_path")));
     if (scope === "repo" || scope === "builtin") {
       var banner = scope + "-banner";
-      content.append(append(el("div", banner), el("b", banner + "-title", tr(scope === "repo" ? "js.settings.repo_title" : "js.settings.builtin_title")),
-        el("span", banner + "-desc", tr(scope === "builtin" ? "js.settings.builtin_description" : extension.editable ? "js.settings.repo_proposal_description" : "js.settings.repo_description"))));
+      var left = el("div", banner + "-left");
+      left.append(
+        append(el("div", banner + "-title"), svgIcon("i-lock"), el("b", "", tr(scope === "repo" ? "js.settings.repo_title" : "js.settings.builtin_title"))),
+        el("span", banner + "-desc", tr(scope === "builtin" ? "js.settings.builtin_description" : extension.editable ? "js.settings.repo_proposal_description" : "js.settings.repo_description"))
+      );
+      content.append(append(el("div", banner), left));
     }
     var heading = append(el("header", "sec-head"), el("h2", "", sectionName(activeSection)),
       el("p", "", tr(sectionNotes[activeSection])));
@@ -715,7 +810,7 @@
     if (activeSection === "compaction") {
       var compaction = entries.filter(function (entry) { return entry.key.startsWith("compaction."); });
       content.append(append(el("div", "info-note compaction-buckets"), el("span", "", tr("js.settings.compaction_precedence")),
-        bucketPicker("compaction", compaction, "seg")));
+        bucketPicker("compaction", compaction, "seg bucket-seg")));
     }
     var byKey = new Map();
     for (var entry of entries) {
@@ -737,7 +832,7 @@
         if (selectedRow && matches(selectedRow, spec)) list.append(renderRow(selectedRow, spec));
       }
     }
-    if (extension.afterRender) extension.afterRender({section: activeSection, list});
+    if (extension.afterRender) extension.afterRender({section: activeSection, list, entries, bucketState, bucketTitle});
     content.append(list.children.length ? list : el("p", "info-note", tr("js.settings.no_results")));
   }
 

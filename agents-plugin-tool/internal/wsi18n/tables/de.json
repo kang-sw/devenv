@@ -2698,7 +2698,6 @@
   "js.settings.rail.project": "Arbeitsbereich-Einstellungen öffnen",
   "js.settings.rail.repo": "Worktree-Einstellungen öffnen",
   "js.settings.rail.session": "Sitzungseinstellungen öffnen",
-  "js.settings.scope_label": "Geltungsbereich",
   "js.settings.scope.builtin": "Integriert",
   "js.settings.scope.synced": "Synchronisiert",
   "js.settings.scope.global": "Global",
@@ -2954,5 +2953,12 @@
   "js.settings.proposal.reset": "Zurücksetzen vorgemerkt",
   "js.settings.proposal.queued": "Änderung vorgemerkt",
   "js.settings.inherited_session": "Von einer übergeordneten Sitzung geerbt",
-  "js.settings.legacy_tier": "Alter Tier-Standard. Zurücksetzen entfernt einzelne Harness-Überschreibungen."
+  "js.settings.legacy_tier": "Alter Tier-Standard. Zurücksetzen entfernt einzelne Harness-Überschreibungen.",
+  "js.settings.precedence_hint": "Rechte Ebene überschreibt linke",
+  "js.settings.context_missing_short": "nicht ausgewertet",
+  "js.settings.override_scope": "Überschreibung ({0})",
+  "js.settings.proposal.discard": "Entwurf verwerfen",
+  "js.settings.bucket.overridden_in": "Überschrieben in: {0}",
+  "js.settings.bucket.tag": "Harness-Bucket",
+  "js.settings.layer_major_tag": "Ebenen-zuerst-Bucket"
 }

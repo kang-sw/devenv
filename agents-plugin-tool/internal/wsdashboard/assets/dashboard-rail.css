@@ -1053,25 +1053,41 @@ html:not([data-sysopen]) .rail .drarch { display: none; }
   padding: 0;
   border: 0;
   border-radius: 5px;
-  color: var(--wb-fg);
+  color: var(--wb-muted-fg);
   background: transparent;
-  opacity: .32;
+  opacity: 0;
   cursor: pointer;
+  transition: opacity .14s, background .12s, color .12s;
 }
+:root[data-can-control] .rail .wsbar .r-config-gear { color: inherit; }
 .rail .r-config-gear .i { width: 13px; height: 13px; }
 .rail .rs .r-config-gear { margin-right: 5px; }
 .rail .rs .dracts { right: 32px; }
 :root:not([data-can-control]) .rail .rs .dracts,
 :root[data-can-control] .rail .rs.ended .dracts,
 :root[data-can-control] .rail .rs.archived .dracts { right: 8px; }
-:root[data-can-control] .rail :is(.wsbar, .wthd, .rs):hover > .r-config-gear,
+:root[data-can-control] .rail :is(.wsbar, .wthd):hover > .r-config-gear,
+:root[data-can-control] .rail :is(.wsbar, .wthd):focus-within > .r-config-gear,
 :root[data-can-control] .rail .rs:hover > .drbody > .s1 > .r-config-gear,
+:root[data-can-control] .rail .rs:focus-within > .drbody > .s1 > .r-config-gear { opacity: .82; }
+:root[data-can-control] .rail .r-config-gear:hover,
 :root[data-can-control] .rail .r-config-gear:focus-visible,
 :root[data-can-control] .rail .r-config-gear[aria-current="page"] { opacity: 1; }
+:root[data-can-control] .rail :is(.wthd, .rs) .r-config-gear:hover {
+  background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card));
+  color: var(--wb-primary);
+}
+:root[data-can-control] .rail .wsbar .r-config-gear:hover { background: rgb(255 255 255 / .22); }
+@media (hover: none) { :root[data-can-control] .rail .r-config-gear { opacity: .5; } }
+@media (prefers-reduced-motion: reduce) { :root[data-can-control] .rail .r-config-gear { transition: none; } }
 .rail [data-scope-entry]:focus-visible, .settings-page-link:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 1px; }
 .rail .r-config-gear[aria-current="page"], .rail .rfoot > .r-config-global[aria-current="page"] {
   background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card));
   color: var(--wb-primary);
+}
+.rail .wsbar .r-config-gear[aria-current="page"] {
+  background: rgb(255 255 255 / .26);
+  color: var(--wb-on-topic);
 }
 .settings-page-link {
   display: flex;

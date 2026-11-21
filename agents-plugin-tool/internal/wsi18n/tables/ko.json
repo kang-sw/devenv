@@ -2698,7 +2698,6 @@
   "js.settings.rail.project": "워크스페이스 설정 열기",
   "js.settings.rail.repo": "워크트리 설정 열기",
   "js.settings.rail.session": "세션 설정 열기",
-  "js.settings.scope_label": "설정 스코프",
   "js.settings.scope.builtin": "내장 기본값",
   "js.settings.scope.synced": "동기화",
   "js.settings.scope.global": "전역",
@@ -2954,5 +2953,12 @@
   "js.settings.proposal.reset": "되돌리기 초안",
   "js.settings.proposal.queued": "편집 제안 초안",
   "js.settings.inherited_session": "상위 세션에서 상속",
-  "js.settings.legacy_tier": "기존 공통 티어 값입니다. 되돌리기는 개별 하네스 오버라이드만 해제합니다."
+  "js.settings.legacy_tier": "기존 공통 티어 값입니다. 되돌리기는 개별 하네스 오버라이드만 해제합니다.",
+  "js.settings.precedence_hint": "오른쪽 레이어가 왼쪽을 덮어씀",
+  "js.settings.context_missing_short": "미평가",
+  "js.settings.override_scope": "현재 스코프 오버라이드 ({0})",
+  "js.settings.proposal.discard": "초안 취소",
+  "js.settings.bucket.overridden_in": "오버라이드됨: {0}",
+  "js.settings.bucket.tag": "하네스 버킷",
+  "js.settings.layer_major_tag": "레이어 우선 버킷"
 }
