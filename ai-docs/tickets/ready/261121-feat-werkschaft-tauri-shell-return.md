@@ -310,6 +310,26 @@ dashboard and bundled pages have zero native command permissions.
   build commands are in
   `/private/tmp/werkschaft-phase1.GoFgYN/native-checklist.md`.
 
+#### Edition (8a398a2b1) - 2026-11-21
+
+On Windows 11 build 26200, the lead smoke-tested `6bd531956` with
+WebView2. Authenticated attach, menu items, F12, mouse-driven zoom,
+second-instance restore and focus, legacy Stay and Close, and unchanged
+daemon PID after close passed. An empty scratch cache showed the
+connection view with a redacted status. Mouse-driven Retry reached the
+dashboard from a token-free endpoint in a profile that already held a
+cookie. The fresh-profile login gate remains pending.
+
+Ctrl+R, Ctrl+= and Ctrl+- failed with WebView2 focused. The controller now
+handles Retry, zoom, and DevTools from physical key-down events and
+dispatches those events through the same Rust actions as the native menus.
+macOS keeps its menu accelerators. The local guides remain in English.
+
+All 18 Rust tests passed on macOS, including three keyboard mapping tests.
+The MSVC x64 cross-target check of the Windows code and tests passed.
+The Windows host rerun remains pending for Ctrl+R, Ctrl+=, Ctrl+Shift+=,
+Ctrl+-, Ctrl+0, Ctrl+Shift+I and F12 with the webview focused.
+
 ### Phase 2: Port the bundled daemon lifecycle to Rust
 
 Build on Phase 1's discovery, authentication and recovery. Assemble
