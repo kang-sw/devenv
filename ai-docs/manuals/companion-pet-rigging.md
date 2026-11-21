@@ -1,8 +1,8 @@
 ---
-summary: Living production spec for the Werkschaft lead companion (desktop pet) — pose families, engine-shared props, 12-scenario catalog, look-at stack, and WASU_ART cutout rigging pipeline
+summary: Living production spec for the Werkschaft lead companion (desktop pet) — pose families, engine-shared props, 12-scenario catalog, look-at stack, and same-canvas cutout rigging pipeline
 ---
 
-# Werkschaft Lead Companion: Scenario Spec & WASU_ART Rigging Manual
+# Werkschaft Lead Companion: Scenario Spec & Paper-Doll Cutout Rigging Manual
 
 Living specification and asset-production manual for the opt-in Werkschaft lead companion (desktop pet) engine. Revise this manual directly as Stage 1–3 asset design and live rigging details evolve. For exploratory prototyping data and rejected approaches, see research ticket `261121-research-werkschaft-lead-companion-wasu-rig`.
 
@@ -15,7 +15,7 @@ Asset production follows three ordered stages so every character pack plugs clea
    - **Step 1-B (Target 2.5–3-Head SD References):** Translate the approved character into final target **2.5–3-head SD/chibi** static references (`1:1` square canvas, uniform thick ink outlines, clean 2-step cel shading, clear part boundaries) for every required/selected pose family plus engine-shared props. Never down-scale a non-SD illustration into an SD look.
 2. **Stage 2 — Scenario, Pose-Family, Prop & Socket Contract**
    - Governed by this manual: declares the canonical v1 scenarios, pose families with automatic fallbacks, engine-shared interactive props, attachment sockets, expressions, and passive gaze rules.
-3. **Stage 3 — WASU_ART Same-Canvas Cutout Pipeline**
+3. **Stage 3 — Same-Canvas Cutout Dissection Pipeline**
    - Run same-canvas image-to-image layer dissection and deterministic post-processing against each approved Stage 1 reference, packing uniform lossless-alpha WebP layers into a `pack.json` bundle.
 
 ## Pose Families & Fallback Matrix
@@ -80,7 +80,7 @@ All front-facing families (**A**, **B**, **C**, **D**) share one anchored `head-
 - **1 Lightweight Overlay:** `wince` (`>_<` ouch eye lines drawn over `head-blank`; falls back to `flustered` if omitted).
 - **Side-Walk Head (`W`):** Single lightweight 3/4-side `side-head` (neutral expression + blink) to keep pack authoring lean.
 
-## WASU_ART Same-Canvas Cutout & Packaging Pipeline
+## Same-Canvas Paper-Doll Cutout & Packaging Pipeline
 
 ### 1. Same-Canvas Image-to-Image Dissection
 Starting from an approved Stage 1 `1:1` SD static reference (`1024–1254 px`), edit the **exact same canvas** for every layer, instructing the generator to erase all other body parts and cleanly inpaint hidden joints/overlaps:
@@ -108,7 +108,7 @@ root (ground position, jump arc, facing scaleX, landing squash-and-stretch)
   ├── head                  (neck pivot; spring bob & look-at micro-tilt; socket:scruff)
   │     ├── head-blank      (shared base hair/head/skin)
   │     ├── face-raster     (optional expression blush/gloom/sweat inside face mask)
-  │     ├── eyes-svg        (sclera + clipped live irises + WASU_ART sliding half-lids / wince)
+  │     ├── eyes-svg        (sclera + clipped live irises + sliding half-lids / wince)
   │     ├── mouth-layer     (swappable raster/SVG mouth; speech bounce)
   │     ├── head-bangs-fg   (hand-drawn bangs masking upper lid edges)
   │     └── brows-svg       (anime eyebrows drawn over bangs)
@@ -127,4 +127,4 @@ root (ground position, jump arc, facing scaleX, landing squash-and-stretch)
 - **Top-level game-actor stage:** `position: fixed; inset: 0; pointer-events: none` viewport overlay (hitbox `pointer-events: auto`) operating over named dashboard landmarks (`composer-top`, `whiteboard-ask`, `hud-roster`, `chat-edge`, `rail-active`, `viewport-floor`).
 - **Two-speed AI:** Local 60 fps 0-token physics/utility/behavior tree + optional delta-cached sidecar narrative director + pluggable lead-only `ws/emotion`.
 - **Lead-only opt-in knobs (T0, default `off`):** `dashboard.companion_mode` (`off | visual | full`), `dashboard.companion_director` (`rules | sidecar | lead-tool`), `dashboard.companion_pack` (`auto | <pack-id>`).
-- **IP & repo boundary:** The public repository ships **only** the engine, pack schema, IP-clean original default assets, and the reproducible WASU_ART pack recipe. Third-party or community packs live strictly outside git in local user packs (`~/.ws/companions/<pack-id>/pack.json`).
+- **IP & repo boundary:** The public repository ships **only** the engine, pack schema, IP-clean original default assets, and the reproducible same-canvas cutout pack recipe. Third-party or community packs live strictly outside git in local user packs (`~/.ws/companions/<pack-id>/pack.json`).
