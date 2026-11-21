@@ -2655,5 +2655,18 @@
   "js.tk.pm.retarget.cc.note": "Removes <b>{0}</b> from CC and registers the new target(s) in one batch. Other CC entries stay untouched.",
   "js.tk.pm.retarget.cc.sum.one": "New target: {0} person",
   "js.tk.pm.retarget.cc.sum.other": "New target: {0} people",
-  "js.tk.pm.retarget.cc.title": "Retarget {0} CC"
+  "js.tk.pm.retarget.cc.title": "Retarget {0} CC",
+  "wb.hold": "Hold for later",
+  "js.pill.held": "held",
+  "js.pill.upheld": "scroll to the nearest held item above",
+  "js.pill.downheld": "scroll to the nearest held item below",
+  "js.pill.hold": "Hold for later",
+  "js.pill.unhold": "Release hold",
+  "js.convo.jump.up": "Jump to your latest message above",
+  "js.convo.jump.down": "Jump to your latest message below",
+  "js.find.label": "Find in card",
+  "js.find.placeholder": "Find in card…",
+  "js.find.prev": "Previous match (Shift+Enter)",
+  "js.find.next": "Next match (Enter)",
+  "js.find.close": "Close find bar (Esc)"
 }

@@ -2655,5 +2655,18 @@
   "js.tk.pm.retarget.cc.note": "在同一批次中移除 <b>{0}</b> 的副本並註冊新目標。其他副本維持不變。",
   "js.tk.pm.retarget.cc.sum.one": "新目標：{0}人",
   "js.tk.pm.retarget.cc.sum.other": "新目標：{0}人",
-  "js.tk.pm.retarget.cc.title": "變更 {0} 的副本目標"
+  "js.tk.pm.retarget.cc.title": "變更 {0} 的副本目標",
+  "wb.hold": "暫緩處理",
+  "js.pill.held": "暫緩",
+  "js.pill.upheld": "捲動至上方最近的暫緩項目",
+  "js.pill.downheld": "捲動至下方最近的暫緩項目",
+  "js.pill.hold": "暫緩處理",
+  "js.pill.unhold": "取消暫緩",
+  "js.convo.jump.up": "跳至上方我最近的訊息",
+  "js.convo.jump.down": "跳至下方我最近的訊息",
+  "js.find.label": "在卡片內尋找",
+  "js.find.placeholder": "在卡片內尋找…",
+  "js.find.prev": "上一個相符項目 (Shift+Enter)",
+  "js.find.next": "下一個相符項目 (Enter)",
+  "js.find.close": "關閉尋找列 (Esc)"
 }

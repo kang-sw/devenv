@@ -2655,5 +2655,18 @@
   "js.tk.pm.retarget.cc.note": "Убирает <b>{0}</b> из копии и регистрирует новые цели одним пакетом. Остальные копии не меняются.",
   "js.tk.pm.retarget.cc.sum.one": "Новая цель: {0} участник",
   "js.tk.pm.retarget.cc.sum.other": "Новая цель: {0} участников",
-  "js.tk.pm.retarget.cc.title": "Сменить цель копии {0}"
+  "js.tk.pm.retarget.cc.title": "Сменить цель копии {0}",
+  "wb.hold": "Отложить",
+  "js.pill.held": "отложено",
+  "js.pill.upheld": "прокрутить к ближайшему отложенному пункту выше",
+  "js.pill.downheld": "прокрутить к ближайшему отложенному пункту ниже",
+  "js.pill.hold": "Отложить",
+  "js.pill.unhold": "Снять отложение",
+  "js.convo.jump.up": "Перейти к вашему последнему сообщению выше",
+  "js.convo.jump.down": "Перейти к вашему последнему сообщению ниже",
+  "js.find.label": "Поиск в карточке",
+  "js.find.placeholder": "Поиск в карточке…",
+  "js.find.prev": "Предыдущее совпадение (Shift+Enter)",
+  "js.find.next": "Следующее совпадение (Enter)",
+  "js.find.close": "Закрыть панель поиска (Esc)"
 }

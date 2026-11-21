@@ -2655,5 +2655,18 @@
   "js.tk.pm.retarget.cc.note": "Entfernt <b>{0}</b> aus CC und registriert die neuen Ziele in einem Batch. Andere CCs bleiben unverändert.",
   "js.tk.pm.retarget.cc.sum.one": "Neues Ziel: {0} Person",
   "js.tk.pm.retarget.cc.sum.other": "Neues Ziel: {0} Personen",
-  "js.tk.pm.retarget.cc.title": "CC für {0} umstellen"
+  "js.tk.pm.retarget.cc.title": "CC für {0} umstellen",
+  "wb.hold": "Zurückstellen",
+  "js.pill.held": "zurückgestellt",
+  "js.pill.upheld": "zum nächsten zurückgestellten Eintrag oben scrollen",
+  "js.pill.downheld": "zum nächsten zurückgestellten Eintrag unten scrollen",
+  "js.pill.hold": "Zurückstellen",
+  "js.pill.unhold": "Zurückstellung aufheben",
+  "js.convo.jump.up": "Zur letzten eigenen Nachricht oben springen",
+  "js.convo.jump.down": "Zur letzten eigenen Nachricht unten springen",
+  "js.find.label": "In Karte suchen",
+  "js.find.placeholder": "In Karte suchen…",
+  "js.find.prev": "Vorheriger Treffer (Shift+Enter)",
+  "js.find.next": "Nächster Treffer (Enter)",
+  "js.find.close": "Suchleiste schließen (Esc)"
 }

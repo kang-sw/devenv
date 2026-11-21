@@ -2655,5 +2655,18 @@
   "js.tk.pm.retarget.cc.note": "<b>{0}</b> の組織CCを解除し、新しい対象を1つのバッチで登録します。他のCCは変更されません。",
   "js.tk.pm.retarget.cc.sum.one": "新しい対象: {0}名",
   "js.tk.pm.retarget.cc.sum.other": "新しい対象: {0}名",
-  "js.tk.pm.retarget.cc.title": "{0} のCC対象を変更"
+  "js.tk.pm.retarget.cc.title": "{0} のCC対象を変更",
+  "wb.hold": "保留にする",
+  "js.pill.held": "保留",
+  "js.pill.upheld": "上にある最も近い保留項目へスクロール",
+  "js.pill.downheld": "下にある最も近い保留項目へスクロール",
+  "js.pill.hold": "保留にする",
+  "js.pill.unhold": "保留を解除",
+  "js.convo.jump.up": "上の最新の自分のメッセージへ移動",
+  "js.convo.jump.down": "下の最新の自分のメッセージへ移動",
+  "js.find.label": "カード内を検索",
+  "js.find.placeholder": "カード内を検索…",
+  "js.find.prev": "前の一致 (Shift+Enter)",
+  "js.find.next": "次の一致 (Enter)",
+  "js.find.close": "検索バーを閉じる (Esc)"
 }

@@ -2655,5 +2655,18 @@
   "js.tk.pm.retarget.cc.note": "Retire <b>{0}</b> des CC et enregistre les nouvelles cibles en un seul lot. Les autres CC restent inchangées.",
   "js.tk.pm.retarget.cc.sum.one": "Nouvelle cible : {0} personne",
   "js.tk.pm.retarget.cc.sum.other": "Nouvelle cible : {0} personnes",
-  "js.tk.pm.retarget.cc.title": "Changer la cible CC de {0}"
+  "js.tk.pm.retarget.cc.title": "Changer la cible CC de {0}",
+  "wb.hold": "Mettre en attente",
+  "js.pill.held": "en attente",
+  "js.pill.upheld": "faire défiler vers l’élément en attente le plus proche au-dessus",
+  "js.pill.downheld": "faire défiler vers l’élément en attente le plus proche en dessous",
+  "js.pill.hold": "Mettre en attente",
+  "js.pill.unhold": "Lever l’attente",
+  "js.convo.jump.up": "Aller à votre dernier message au-dessus",
+  "js.convo.jump.down": "Aller à votre dernier message en dessous",
+  "js.find.label": "Rechercher dans la carte",
+  "js.find.placeholder": "Rechercher dans la carte…",
+  "js.find.prev": "Occurrence précédente (Shift+Enter)",
+  "js.find.next": "Occurrence suivante (Enter)",
+  "js.find.close": "Fermer la barre de recherche (Esc)"
 }

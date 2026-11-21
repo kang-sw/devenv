@@ -2655,5 +2655,18 @@
   "js.tk.pm.retarget.cc.note": "Quita <b>{0}</b> de CC y registra los nuevos destinos en un solo lote. Las demás CC no cambian.",
   "js.tk.pm.retarget.cc.sum.one": "Nuevo destino: {0} persona",
   "js.tk.pm.retarget.cc.sum.other": "Nuevo destino: {0} personas",
-  "js.tk.pm.retarget.cc.title": "Cambiar destino de CC de {0}"
+  "js.tk.pm.retarget.cc.title": "Cambiar destino de CC de {0}",
+  "wb.hold": "Dejar en espera",
+  "js.pill.held": "en espera",
+  "js.pill.upheld": "desplazarse al elemento en espera más cercano arriba",
+  "js.pill.downheld": "desplazarse al elemento en espera más cercano abajo",
+  "js.pill.hold": "Dejar en espera",
+  "js.pill.unhold": "Quitar de espera",
+  "js.convo.jump.up": "Ir a tu último mensaje arriba",
+  "js.convo.jump.down": "Ir a tu último mensaje abajo",
+  "js.find.label": "Buscar en la tarjeta",
+  "js.find.placeholder": "Buscar en la tarjeta…",
+  "js.find.prev": "Coincidencia anterior (Shift+Enter)",
+  "js.find.next": "Siguiente coincidencia (Enter)",
+  "js.find.close": "Cerrar barra de búsqueda (Esc)"
 }

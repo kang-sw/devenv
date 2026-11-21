@@ -2655,5 +2655,18 @@
   "js.tk.pm.retarget.cc.note": "Rimuove <b>{0}</b> da CC e registra le nuove destinazioni in un unico batch. Le altre CC restano invariate.",
   "js.tk.pm.retarget.cc.sum.one": "Nuova destinazione: {0} persona",
   "js.tk.pm.retarget.cc.sum.other": "Nuova destinazione: {0} persone",
-  "js.tk.pm.retarget.cc.title": "Cambia destinazione CC di {0}"
+  "js.tk.pm.retarget.cc.title": "Cambia destinazione CC di {0}",
+  "wb.hold": "Metti in sospeso",
+  "js.pill.held": "in sospeso",
+  "js.pill.upheld": "scorri fino all’elemento in sospeso più vicino sopra",
+  "js.pill.downheld": "scorri fino all’elemento in sospeso più vicino sotto",
+  "js.pill.hold": "Metti in sospeso",
+  "js.pill.unhold": "Rimuovi sospensione",
+  "js.convo.jump.up": "Vai al tuo ultimo messaggio sopra",
+  "js.convo.jump.down": "Vai al tuo ultimo messaggio sotto",
+  "js.find.label": "Cerca nella scheda",
+  "js.find.placeholder": "Cerca nella scheda…",
+  "js.find.prev": "Risultato precedente (Shift+Enter)",
+  "js.find.next": "Risultato successivo (Enter)",
+  "js.find.close": "Chiudi barra di ricerca (Esc)"
 }

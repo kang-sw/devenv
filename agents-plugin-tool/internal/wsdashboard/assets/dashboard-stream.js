@@ -59,7 +59,10 @@
     if (!b) return 0;
     if (live) boardQ(TL_ASK).forEach(function (el) { if (tlDrafted(el)) drafted[el.getAttribute("data-id")] = 1; });
     if (c) q(".sentdata i[data-id]", c).forEach(function (i) { sent[i.getAttribute("data-id")] = 1; });
-    return q(TL_ASK, b).filter(function (el) { var id = el.getAttribute("data-id"); return !drafted[id] && !sent[id]; }).length;
+    return q(TL_ASK, b).filter(function (el) {
+      var id = el.getAttribute("data-id");
+      return !drafted[id] && !sent[id] && !(window.wbPill && window.wbPill.isHeld && window.wbPill.isHeld(el));
+    }).length;
   }
   // The tree's hidden compact roster (.ag-source) does not count: it repeats
   // this tree's running rows outside any .agent and adds linked delegate

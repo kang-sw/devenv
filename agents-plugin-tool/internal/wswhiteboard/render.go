@@ -26,7 +26,7 @@ import (
 // served page's topic-body frames run, the image viewer script, and the icon
 // sprite.
 //
-//go:embed assets/page.tmpl assets/page.css assets/page-*.css assets/stream.js assets/stream-*.js assets/chg.js assets/panel-diff.js assets/answers.js assets/form.js assets/code.js assets/pill.js assets/rail.js assets/ago.js assets/deps.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/select-all.js assets/sprite.svg
+//go:embed assets/page.tmpl assets/page.css assets/page-*.css assets/stream.js assets/stream-*.js assets/chg.js assets/panel-diff.js assets/answers.js assets/form.js assets/code.js assets/pill.js assets/rail.js assets/ago.js assets/deps.js assets/card-find.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/select-all.js assets/sprite.svg
 var assetFS embed.FS
 
 // The dashboard and topic-body frames use this same byte-for-byte stylesheet
@@ -93,6 +93,8 @@ type pageAssets struct {
 	ago string
 	// deps drives dependency popovers in the dashboard.
 	deps string
+	// cardFind provides in-card Ctrl/Cmd+F search on board cards.
+	cardFind string
 	// mermaidInit themes and runs mermaid after the shared script loads.
 	mermaidInit template.JS
 	// chg draws a topic body's change marks (wbChangeBars, wbWatchChanges).
@@ -191,6 +193,7 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 		rail:        get("rail.js"),
 		ago:         ago,
 		deps:        get("deps.js"),
+		cardFind:    get("card-find.js"),
 		mermaidInit: template.JS(get("mermaid-init.js")),
 		docFrame:    svgView + "\n" + ago + "\n" + chg + "\n" + code + "\n" + panelDiff + "\n" + get("doc-frame.js"),
 		chg:         chg,
@@ -414,7 +417,7 @@ func PageAssets() (SharedAssets, error) {
 	if err != nil {
 		return SharedAssets{}, fmt.Errorf("whiteboard page assets: %w", err)
 	}
-	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form + "\n" + a.code + "\n" + a.pill + "\n" + a.rail + "\n" + a.ago + "\n" + a.deps + "\n" + a.stream + "\n" + a.panelDiff), AnswersScript: template.JS(a.answers), SelectAllScript: template.JS(a.selectAll), MermaidInit: a.mermaidInit, ViewerScript: template.JS(a.viewer)}, nil
+	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form + "\n" + a.code + "\n" + a.pill + "\n" + a.rail + "\n" + a.ago + "\n" + a.deps + "\n" + a.stream + "\n" + a.panelDiff + "\n" + a.cardFind), AnswersScript: template.JS(a.answers), SelectAllScript: template.JS(a.selectAll), MermaidInit: a.mermaidInit, ViewerScript: template.JS(a.viewer)}, nil
 }
 
 // pageData is what the fragment templates execute on.

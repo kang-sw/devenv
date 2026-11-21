@@ -440,6 +440,83 @@
   function nearTop() { if (convo && visible(convo) && convo.scrollTop < 160) loadHistory(); }
   if (convo) convo.addEventListener("scroll", nearTop);
 
+  // --- chat jump arrow (top-left of #convo) --------------------------------
+  // Single arrow that jumps to the user's most recent own message not
+  // currently visible in #convo; points up when above, down when below, and
+  // hides when the latest own message is already visible (or none exist).
+  function userJumpTarget(msgs, viewTop, viewBottom) {
+    var latest = null, rect = null;
+    for (var i = msgs.length - 1; i >= 0; i--) {
+      var r = msgs[i].getBoundingClientRect();
+      if (!r || (!r.width && !r.height)) continue;
+      latest = msgs[i];
+      rect = r;
+      break;
+    }
+    if (!latest) return null;
+    if (rect.bottom > viewTop && rect.top < viewBottom) return null;
+    return { el: latest, dir: rect.bottom <= viewTop ? "up" : "down" };
+  }
+  var userJumpBtn = null, userJumpCur = null, userJumpFrame = 0;
+  function ensureUserJump() {
+    if (!convo) return null;
+    if (userJumpBtn && userJumpBtn.isConnected) return userJumpBtn;
+    var wrap = doc.createElement("div");
+    wrap.className = "d-jump-wrap";
+    var btn = doc.createElement("button");
+    btn.type = "button";
+    btn.className = "d-jump-btn";
+    btn.hidden = true;
+    btn.innerHTML = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+    btn.addEventListener("click", function () {
+      if (!userJumpCur || !userJumpCur.el || userJumpCur.el.isConnected === false) return;
+      stick = false;
+      userJumpCur.el.scrollIntoView({ block: "center", behavior: reducedMotion() ? "instant" : "smooth" });
+    });
+    wrap.appendChild(btn);
+    convo.insertBefore(wrap, convo.firstChild);
+    userJumpBtn = btn;
+    return btn;
+  }
+  function updateUserJump() {
+    userJumpFrame = 0;
+    var btn = ensureUserJump();
+    if (!btn) return;
+    if (!visible(convo)) {
+      userJumpCur = null;
+      if (!btn.hidden) btn.hidden = true;
+      return;
+    }
+    var cr = convo.getBoundingClientRect();
+    var hit = userJumpTarget(convo.querySelectorAll(".msg.user"), cr.top, cr.bottom);
+    userJumpCur = hit;
+    var hide = !hit;
+    if (btn.hidden !== hide) btn.hidden = hide;
+    if (!hit) return;
+    if (btn.getAttribute("data-dir") !== hit.dir) btn.setAttribute("data-dir", hit.dir);
+    var tip = hit.dir === "down" ? wsT("js.convo.jump.down") : wsT("js.convo.jump.up");
+    if (btn.title !== tip) btn.title = tip;
+    if (btn.getAttribute("aria-label") !== tip) btn.setAttribute("aria-label", tip);
+  }
+  function scheduleUserJump() {
+    if (!convo || userJumpFrame) return;
+    userJumpFrame = requestAnimationFrame(updateUserJump);
+  }
+  if (convo) {
+    convo.addEventListener("scroll", scheduleUserJump, { passive: true });
+    window.addEventListener("resize", scheduleUserJump);
+    if (window.ResizeObserver) new ResizeObserver(scheduleUserJump).observe(convo);
+    if (window.MutationObserver) {
+      new MutationObserver(function (recs) {
+        if (recs.some(function (r) {
+          var n = r.target;
+          return !(n && n.closest && n.closest(".d-jump-wrap"));
+        })) scheduleUserJump();
+      }).observe(convo, { childList: true, subtree: true });
+    }
+    scheduleUserJump();
+  }
+
   // mermaid draws every undrawn mermaid block, loading the shared script
   // once; a call while it loads is covered by the draw its onload runs, and
   // a failed load (daemon restarting) is retried by the next call. roots

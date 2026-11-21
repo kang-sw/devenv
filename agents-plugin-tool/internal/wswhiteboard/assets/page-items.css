@@ -234,6 +234,20 @@ button.closed-more { display: flex; margin: 0 auto 16px; }
 .cbar .wb-askjump:hover { color: inherit; opacity: 1; background: rgb(255 255 255 / .16); }
 .arow > .wb-askjump, .ckrow > .wb-askjump { margin-top: 7px; }
 
+/* browser-local hold toggle and parked ask appearance (pill.js) */
+.wb-hold-toggle { opacity: .78; transition: opacity .12s, background-color .15s, color .15s; }
+.wb-hold-toggle:hover { opacity: 1; }
+.wb-hold-toggle:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+.arow > .wb-hold-toggle, .ckrow > .wb-hold-toggle { margin-top: 6px; margin-right: 2px; flex: none; background: transparent; color: var(--wb-muted-fg); }
+.wb-hold-toggle[aria-pressed="true"] { opacity: 1; background: color-mix(in srgb, var(--wb-policy) 20%, var(--wb-muted)); color: var(--wb-accent-policy); }
+.card.policy.wb-held .cbar { background: var(--wb-muted); color: var(--wb-muted-fg); }
+.card.policy.wb-held .cbar .wb-hold-toggle { background: color-mix(in srgb, var(--wb-policy) 20%, var(--wb-card)); color: var(--wb-accent-policy); }
+.card.policy.wb-held .cbody { opacity: .66; transition: opacity .15s; }
+.card.policy.wb-held:is(:hover, :focus-within) .cbody { opacity: 1; }
+.arow.wb-held, .ckrow.wb-held { box-shadow: inset 3px 0 0 color-mix(in srgb, var(--wb-policy) 48%, var(--wb-muted-fg)); }
+.arow.wb-held .atext, .ckrow.wb-held .atext { opacity: .62; transition: opacity .15s; }
+.arow.wb-held:is(:hover, :focus-within) .atext, .ckrow.wb-held:is(:hover, :focus-within) .atext { opacity: 1; }
+
 /* acknowledgement rows: a filled class tag leads each row */
 .acks { border-radius: 10px; overflow: hidden; background: var(--wb-bg); }
 .arow { display: flex; flex-wrap: wrap; align-items: flex-start; padding-right: 8px; }
