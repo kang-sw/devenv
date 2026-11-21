@@ -1,5 +1,6 @@
 ---
 title: "tracker: 숨긴 항목·댓글 되돌리기"
+completed: 2026-11-21
 ---
 
 # Tracker: unhide hidden items and comments
@@ -91,3 +92,21 @@ Verification:
 - A compatibility check that replays a log containing `item.unhide` through
   the pre-change fold (or reasons it from source with line citations) for
   the T1 verdict.
+
+### Result (f49b634e4) - 2026-11-21
+
+- Backend (`eacd19d33`, codex.large): `item.unhide` / `comment.unhide` with
+  hide-mirroring permissions (creator, or admin once the creator is gone;
+  comment author), refusal of visible targets and of a child under a hidden
+  parent (`unhide the parent first`), the shared `it:<id>:hidden` register,
+  and `canUnhide` view fields. Tests cover permissions, a hidden parent after
+  a move, the concurrent register, and edits/replies after unhide.
+- Dashboard (`f49b634e4`, agy.large): a "Show hidden" toggle in the Items
+  panel header (page-lifetime browser state per store, off by default);
+  hidden items and comments render dimmed in place with an unhide action
+  gated by `canUnhide`; 409 refusal reasons surface through the existing
+  toast; 8 new strings in all 11 locales.
+- Verified: `go test ./internal/wstracker/...`, `go test ./internal/wsi18n/...`,
+  narrow `./internal/wsdashboard` runs including the tracker browser test,
+  tracker Node tests, and headless captures of the toggle, the row menu, and
+  a hidden comment.
