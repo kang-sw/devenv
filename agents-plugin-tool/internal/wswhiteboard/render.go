@@ -26,7 +26,7 @@ import (
 // served page's topic-body frames run, the image viewer script, and the icon
 // sprite.
 //
-//go:embed assets/page.tmpl assets/page.css assets/page-*.css assets/stream.js assets/chg.js assets/panel-diff.js assets/answers.js assets/form.js assets/code.js assets/pill.js assets/rail.js assets/ago.js assets/deps.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/select-all.js assets/sprite.svg
+//go:embed assets/page.tmpl assets/page.css assets/page-*.css assets/stream.js assets/stream-*.js assets/chg.js assets/panel-diff.js assets/answers.js assets/form.js assets/code.js assets/pill.js assets/rail.js assets/ago.js assets/deps.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/select-all.js assets/sprite.svg
 var assetFS embed.FS
 
 // The dashboard and topic-body frames use this same byte-for-byte stylesheet
@@ -40,12 +40,24 @@ var pageStyleFiles = []string{
 	"page-sticky.css",
 }
 
+// The page and dashboard use this same ordered stream-script assembly.
+var pageStreamFiles = []string{
+	"stream.js",
+	"stream-navigation.js",
+	"stream-view.js",
+	"stream-panels.js",
+	"stream-events.js",
+}
+
 func readPageSource(read func(string) ([]byte, error), name string) ([]byte, error) {
-	if name != "page.css" {
+	files := pageStyleFiles
+	if name == "stream.js" {
+		files = pageStreamFiles
+	} else if name != "page.css" {
 		return read(name)
 	}
 	var source bytes.Buffer
-	for _, file := range pageStyleFiles {
+	for _, file := range files {
 		raw, err := read(file)
 		if err != nil {
 			return nil, err

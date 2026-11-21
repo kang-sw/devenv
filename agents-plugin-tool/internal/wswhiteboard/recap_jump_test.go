@@ -60,7 +60,7 @@ func TestRecapJumpScriptUnderNode(t *testing.T) {
 	if err != nil {
 		t.Skip("node not installed")
 	}
-	asset, err := embeddedAsset("stream.js")
+	asset, err := whiteboardTestAsset("stream.js")
 	if err != nil {
 		t.Fatal(err)
 	}

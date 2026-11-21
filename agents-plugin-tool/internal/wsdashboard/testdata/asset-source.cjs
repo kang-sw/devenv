@@ -9,6 +9,7 @@ function readAssetSource(pkg, name) {
     'wsdashboard/dashboard.css': ['pages.go', 'dashboardStyleFiles'],
     'wsdashboard/tracker.js': ['pages.go', 'trackerScriptFiles'],
     'wswhiteboard/page.css': ['render.go', 'pageStyleFiles'],
+    'wswhiteboard/stream.js': ['render.go', 'pageStreamFiles'],
   };
   const declaration = declarations[pkg + '/' + name];
   if (!declaration) return fs.readFileSync(path.join(root, 'assets', name), 'utf8');
