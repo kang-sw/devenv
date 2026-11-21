@@ -67,8 +67,9 @@ fn draft_ready(window: &WebviewWindow, origin: &str) -> bool {
     let origin = serde_json::to_string(origin).expect("string");
     let start = format!(
         "(() => {{
-            if (window !== window.top || location.origin !== {origin} ||
-                typeof window.wsNativeCloseReady !== 'function') return -1;
+            if (window !== window.top || location.origin !== {origin}) return -1;
+            if (document.documentElement.hasAttribute('data-login-gate')) return 1;
+            if (typeof window.wsNativeCloseReady !== 'function') return -1;
             const attempt = {{ result: 0, wasInert: document.documentElement.inert }};
             window.__werkschaftClose = attempt;
             document.documentElement.inert = true;

@@ -100,6 +100,7 @@ unsafe fn install_hooks(
     )?;
 
     let failed = connection.clone();
+    let epoch = failed.window_epoch();
     let failed_window = window.clone();
     webview.add_NavigationCompleted(
         &NavigationCompletedEventHandler::create(Box::new(move |_, args| {
@@ -112,10 +113,11 @@ unsafe fn install_hooks(
                     && status != COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED
                     && failed.pinned_url().is_some()
                 {
-                    eprintln!("Dashboard navigation failed");
                     let connection = failed.clone();
                     queue(&failed_window, move |target| {
-                        connection.recover(target, "navigation failed")
+                        if connection.window_epoch() == epoch {
+                            connection.recover(target, "Dashboard navigation failed");
+                        }
                     });
                 }
             }
@@ -138,7 +140,9 @@ unsafe fn install_hooks(
                     eprintln!("WebView2 process failed");
                     let connection = failed.clone();
                     queue(&failed_window, move |target| {
-                        connection.webview_failed(target)
+                        if connection.window_epoch() == epoch {
+                            connection.webview_failed(target);
+                        }
                     });
                 }
             }

@@ -173,6 +173,14 @@ fn main() {
             };
             let id = event.id().as_ref();
             match id {
+                "retry" if menu_state.retry_hooks() => {
+                    #[cfg(target_os = "macos")]
+                    if macos::install(&window, menu_state.clone()).is_err() {
+                        menu_state.setup_failed(&window);
+                    }
+                    #[cfg(windows)]
+                    menu_state.webview_failed(window);
+                }
                 "retry" => menu_state.connect(window, true),
                 "copy_login" => menu_state.copy_login_link(window),
                 "devtools" | "devtools_f12" => {

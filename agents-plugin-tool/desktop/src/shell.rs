@@ -1,6 +1,6 @@
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
     },
     thread,
@@ -25,14 +25,25 @@ pub struct Connection {
     recovery: Mutex<Option<(Instant, u8)>>,
     connecting: AtomicBool,
     copying: AtomicBool,
-    hooks_ready: AtomicBool,
-    #[cfg(windows)]
-    webview_dead: AtomicBool,
+    hooks: Mutex<Hooks>,
+    window_epoch: AtomicUsize,
     pub closing: AtomicBool,
     pub rebuilding: AtomicBool,
 }
 
+#[derive(Default, PartialEq, Eq)]
+enum Hooks {
+    #[default]
+    Installing,
+    Ready,
+    Failed,
+}
+
 impl Connection {
+    pub fn window_epoch(&self) -> usize {
+        self.window_epoch.load(Ordering::Acquire)
+    }
+
     fn daemon(&self) -> Option<Daemon> {
         self.daemon.lock().unwrap().clone()
     }
@@ -50,22 +61,27 @@ impl Connection {
     }
 
     pub fn setup_failed(&self, window: &WebviewWindow) {
+        *self.hooks.lock().unwrap() = Hooks::Failed;
         self.show_local(window, CONNECT_VIEW, "Could not initialize the webview");
     }
 
+    pub fn retry_hooks(&self) -> bool {
+        let mut hooks = self.hooks.lock().unwrap();
+        if *hooks != Hooks::Failed {
+            return false;
+        }
+        *hooks = Hooks::Installing;
+        *self.recovery.lock().unwrap() = None;
+        true
+    }
+
     pub fn start(self: &Arc<Self>, window: WebviewWindow) {
-        self.hooks_ready.store(true, Ordering::Release);
+        *self.hooks.lock().unwrap() = Hooks::Ready;
         self.connect(window, false);
     }
 
     pub fn connect(self: &Arc<Self>, window: WebviewWindow, manual: bool) {
-        #[cfg(windows)]
-        if manual && self.webview_dead.swap(false, Ordering::AcqRel) {
-            *self.recovery.lock().unwrap() = None;
-            self.webview_failed(window);
-            return;
-        }
-        if !self.hooks_ready.load(Ordering::Acquire) {
+        if *self.hooks.lock().unwrap() != Hooks::Ready {
             return;
         }
         if self.closing.load(Ordering::Acquire) || self.connecting.swap(true, Ordering::AcqRel) {
@@ -75,6 +91,7 @@ impl Connection {
             *self.recovery.lock().unwrap() = None;
         }
         let _ = window.set_title("Werkschaft — Connecting…");
+        let epoch = self.window_epoch();
         let state = self.clone();
         thread::spawn(move || {
             let result = match endpoint::discover() {
@@ -94,6 +111,9 @@ impl Connection {
             let ui_state = state.clone();
             if window
                 .run_on_main_thread(move || {
+                    if ui_state.window_epoch() != epoch {
+                        return;
+                    }
                     if !ui_state.closing.load(Ordering::Acquire) {
                         match result {
                             Ok((daemon, cookie)) => ui_state.attach(&target, daemon, cookie),
@@ -106,6 +126,7 @@ impl Connection {
                     ui_state.connecting.store(false, Ordering::Release);
                 })
                 .is_err()
+                && state.window_epoch() == epoch
             {
                 state.connecting.store(false, Ordering::Release);
             }
@@ -191,14 +212,15 @@ impl Connection {
             // A dead WebView2 browser process invalidates its controllers.
             // RunEvent keeps the application alive until the replacement exists.
             *self.daemon.lock().unwrap() = None;
-            self.hooks_ready.store(false, Ordering::Release);
+            *self.hooks.lock().unwrap() = Hooks::Installing;
+            self.window_epoch.fetch_add(1, Ordering::AcqRel);
+            self.connecting.store(false, Ordering::Release);
             if window.destroy().is_err() {
                 self.rebuilding.store(false, Ordering::Release);
                 self.setup_failed(&window);
             }
         } else {
             self.rebuilding.store(false, Ordering::Release);
-            self.webview_dead.store(true, Ordering::Release);
             self.setup_failed(&window);
         }
     }
@@ -300,5 +322,16 @@ mod tests {
         assert!(connection.allow_recovery(now + Duration::from_secs(1)));
         assert!(!connection.allow_recovery(now + Duration::from_secs(29)));
         assert!(connection.allow_recovery(now + Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn failed_hooks_can_be_retried_without_duplicate_installation() {
+        let connection = Connection::default();
+        assert!(!connection.retry_hooks());
+        *connection.hooks.lock().unwrap() = Hooks::Failed;
+        assert!(connection.retry_hooks());
+        assert!(!connection.retry_hooks());
+        *connection.hooks.lock().unwrap() = Hooks::Ready;
+        assert!(!connection.retry_hooks());
     }
 }
