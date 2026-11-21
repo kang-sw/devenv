@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: db2079dab866d6c5
 sage-review-completeness-reviewed: db2079dab866d6c5
+completed: 2026-11-21
 ---
 
 # Compact floating toolbar for the whiteboard
@@ -163,3 +164,8 @@ Run the project's applicable tests and production interaction checks, and record
   offset with capsule geometry in `wswhiteboard/assets/stream.js` `navigate()`
   and `assets/rail.js`, T0, no competing scroll writer. Evidence, harness
   command and decisions stay in the folded ticket under `.dropped/`.
+
+
+## Resolution (2026-11-21)
+
+Compact floating whiteboard toolbar landed on `develop` (`19d0e7cc3`, merged `cacd771c1`, plus backing/filter/geometry follow-ups `d02a1c03a`, `9e54abd48`, `b53ff48f5`, `8bbe3320e`; live in `cards.js:112-210` and `dashboard-board.css:223-303`). Owner confirmed on 2026-11-21 that it works well and directed closing as done. Any remaining folded web-popover containment or deep-link offset edge cases can be opened as focused follow-up bugs if reproduced.
