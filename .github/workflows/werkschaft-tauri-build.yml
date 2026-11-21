@@ -1,0 +1,159 @@
+name: Werkschaft Tauri packages
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+      dry_run:
+        type: boolean
+        required: true
+      updater_public_key:
+        type: string
+        required: true
+    secrets:
+      signing_key:
+        required: true
+      signing_password:
+        required: false
+
+jobs:
+  package:
+    name: Package Tauri (${{ matrix.platform }}, ${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: darwin
+            arch: arm64
+            binary: ws-mcp-darwin-arm64
+            target: aarch64-apple-darwin
+            shell: bash
+          - os: windows-latest
+            platform: win32
+            arch: x64
+            binary: ws-mcp-windows-amd64.exe
+            target: x86_64-pc-windows-msvc
+            shell: pwsh
+    defaults:
+      run:
+        working-directory: agents-plugin-tool/desktop
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: agents-plugin-tool/desktop/package-lock.json
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal --target ${{ matrix.target }}
+          rustup default 1.95.0
+
+      - name: Download the native release build's binaries and metadata
+        uses: actions/download-artifact@v5
+        with:
+          name: ws-mcp-assets
+          path: ${{ runner.temp }}/ws-mcp-assets
+
+      - name: Install the pinned Tauri CLI
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Test packaging and release contracts
+        run: node --test scripts/test-package.cjs scripts/test-release.cjs
+
+      - name: Assemble and validate the wsflow daemon input without executing it
+        run: >-
+          node ../desktop-electron/scripts/assemble-daemon-input.cjs
+          --binary "${{ runner.temp }}/ws-mcp-assets/${{ matrix.binary }}"
+          --out "${{ runner.temp }}/tauri-daemon-input"
+          --platform "${{ matrix.platform }}" --package wsflow
+
+      - name: Build and sign updater artifacts without launching the app
+        env:
+          WERKSCHAFT_DAEMON_INPUT: ${{ runner.temp }}/tauri-daemon-input
+          WERKSCHAFT_RELEASE_OUTPUT: ${{ runner.temp }}/tauri-output
+          WERKSCHAFT_EXPECTED_VERSION: ${{ inputs.version }}
+          WERKSCHAFT_UPDATER_PUBLIC_KEY: ${{ inputs.updater_public_key }}
+          WERKSCHAFT_EVALUATION: ${{ inputs.dry_run && '1' || '' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.signing_key }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.signing_password }}
+        run: node scripts/package.cjs --release
+
+      - name: Upload verified platform assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: tauri-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/tauri-output/*
+          if-no-files-found: error
+          compression-level: 0
+
+  combine:
+    name: Verify and combine Tauri release assets
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: tauri-*
+          path: ${{ runner.temp }}/tauri-platforms
+
+      - name: Verify both platforms and generate the updater feed
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          WERKSCHAFT_UPDATER_PUBLIC_KEY: ${{ inputs.updater_public_key }}
+        run: >-
+          node agents-plugin-tool/desktop/scripts/release.cjs
+          --input "$RUNNER_TEMP/tauri-platforms" --output "$RUNNER_TEMP/tauri-release" --version "$RELEASE_VERSION"
+
+      - name: Upload the combined Tauri payload
+        uses: actions/upload-artifact@v7
+        with:
+          name: werkschaft-tauri-assets
+          path: ${{ runner.temp }}/tauri-release/*
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    name: Publish Tauri assets to the native tag release
+    needs: combine
+    if: ${{ !inputs.dry_run && github.ref == format('refs/tags/v{0}', inputs.version) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: werkschaft-tauri-assets
+          path: ${{ runner.temp }}/tauri-release
+
+      - name: Upload the verified payload and its feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP/tauri-release"
+          gh release upload "$GITHUB_REF_NAME" Werkschaft-* --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$GITHUB_REF_NAME" werkschaft-tauri-update.json --repo "$GITHUB_REPOSITORY" --clobber

@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/ws-mcp-release.yml"
+      - ".github/workflows/werkschaft-tauri-build.yml"
       - "package.json"
       - ".agents/plugins/marketplace.json"
       - ".claude-plugin/marketplace.json"
@@ -22,6 +23,11 @@ on:
         default: "0.50.8-dev"
       desktop_dry_run:
         description: "Build both desktop zips as workflow artifacts only; never publish a release"
+        type: boolean
+        required: false
+        default: false
+      tauri_dry_run:
+        description: "Build signed Tauri desktop artifacts without publishing; supply a stable or canary version"
         type: boolean
         required: false
         default: false
@@ -43,6 +49,9 @@ jobs:
   build:
     name: Build ws-mcp assets
     runs-on: ubuntu-latest
+    outputs:
+      tauri_route: ${{ steps.route.outputs.tauri_route }}
+      tauri_version: ${{ steps.route.outputs.tauri_version }}
     # Normal duration ~2 min. Without a cap, a hung step burns runner time while
     # the run still reads as in-progress.
     timeout-minutes: 20
@@ -58,6 +67,34 @@ jobs:
         with:
           go-version-file: agents-plugin-tool/go.mod
           cache-dependency-path: agents-plugin-tool/go.sum
+
+      - name: Select the Tauri build route
+        id: route
+        env:
+          TAURI_DRY_RUN: ${{ inputs.tauri_dry_run }}
+          TAURI_RELEASE: ${{ vars.WERKSCHAFT_TAURI_RELEASE }}
+          DISPATCH_VERSION: ${{ inputs.version }}
+        run: |
+          number='(0|[1-9][0-9]*)'
+          core="$number\.$number\.$number"
+          canary="$core-canary\.$number"
+          if [[ "$TAURI_DRY_RUN" == true ]]; then
+            version=${DISPATCH_VERSION#v}
+            if [[ ! "$version" =~ ^($core|$canary)$ ]]; then
+              echo '::error::Set version to the checkout plugin version or that version followed by -canary.N.'
+              exit 1
+            fi
+            echo "tauri_version=$version" >> "$GITHUB_OUTPUT"
+          elif [[ "$TAURI_RELEASE" == true && "$GITHUB_REF" == refs/tags/* ]]; then
+            if [[ "$GITHUB_REF_NAME" =~ ^v$core$ ]]; then
+              echo 'tauri_route=stable' >> "$GITHUB_OUTPUT"
+            elif [[ "$GITHUB_REF_NAME" =~ ^v$canary$ ]]; then
+              echo 'tauri_route=canary' >> "$GITHUB_OUTPUT"
+            else
+              exit 0
+            fi
+            echo "tauri_version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
 
       # The release does not re-run `go test`: ws-mcp CI already ran the selected
       # ubuntu + windows groups on this exact commit (the ship flow waits for it
@@ -120,9 +157,11 @@ jobs:
         run: python3 scripts/generate-package-assets.py
 
       - name: Build release assets
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            scripts/build-release-assets.sh "${{ inputs.version }}"
+            scripts/build-release-assets.sh "$DISPATCH_VERSION"
           elif [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
             scripts/build-release-assets.sh "${GITHUB_REF_NAME}"
           else
@@ -142,7 +181,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub release assets
-        if: startsWith(github.ref, 'refs/tags/') && !inputs.desktop_dry_run
+        if: startsWith(github.ref, 'refs/tags/') && !inputs.desktop_dry_run && !inputs.tauri_dry_run
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -196,7 +235,7 @@ jobs:
     needs: build
     # Keep ordinary PR/manual native-only builds unchanged. A tag ships desktop;
     # an explicit dry run builds identical archives but cannot publish anything.
-    if: startsWith(github.ref, 'refs/tags/') || inputs.desktop_dry_run
+    if: ${{ !inputs.tauri_dry_run && (inputs.desktop_dry_run || (startsWith(github.ref, 'refs/tags/') && needs.build.outputs.tauri_route != 'stable')) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
@@ -354,7 +393,20 @@ jobs:
           compression-level: 0
 
       - name: Publish desktop assets to the native assets' tag release
-        if: startsWith(github.ref, 'refs/tags/') && !inputs.desktop_dry_run
+        if: startsWith(github.ref, 'refs/tags/') && !inputs.desktop_dry_run && !inputs.tauri_dry_run
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/desktop-release/"* --repo "$GITHUB_REPOSITORY" --clobber
+
+  tauri-desktop:
+    name: Tauri desktop
+    needs: build
+    if: inputs.tauri_dry_run || (!inputs.desktop_dry_run && needs.build.outputs.tauri_route != '')
+    uses: ./.github/workflows/werkschaft-tauri-build.yml
+    with:
+      version: ${{ needs.build.outputs.tauri_version }}
+      dry_run: ${{ inputs.tauri_dry_run || false }}
+      updater_public_key: ${{ (inputs.tauri_dry_run && vars.WERKSCHAFT_EVAL_UPDATER_PUBLIC_KEY) || (!inputs.tauri_dry_run && vars.WERKSCHAFT_UPDATER_PUBLIC_KEY) || '' }}
+    secrets:
+      signing_key: ${{ (inputs.tauri_dry_run && secrets.WERKSCHAFT_EVAL_UPDATER_PRIVATE_KEY) || (!inputs.tauri_dry_run && secrets.TAURI_SIGNING_PRIVATE_KEY) || '' }}
+      signing_password: ${{ (inputs.tauri_dry_run && secrets.WERKSCHAFT_EVAL_UPDATER_KEY_PASSWORD) || (!inputs.tauri_dry_run && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD) || '' }}

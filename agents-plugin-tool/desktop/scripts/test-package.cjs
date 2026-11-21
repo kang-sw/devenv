@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { build, checkBinary, resourceMap, comparePackage } = require('./package.cjs');
+const { build, checkBinary, resourceMap, comparePackage, releaseConfig } = require('./package.cjs');
 
 test('maps dotfiles and nested files to their exact daemon resource paths', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-map-test-'));
@@ -29,4 +29,26 @@ test('rejects missing input and wrong architecture before invoking Tauri', () =>
     assert.throws(() => checkBinary(file, 'darwin'), /darwin-arm64/);
     assert.throws(() => checkBinary(file, 'win32'), /win32-x64/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('release overlays retain the exact updater version and platform installer contracts', () => {
+  const version = '0.50.8-canary.2';
+  const pubkey = 'encoded-public-key';
+  const resources = { '/prepared/daemon/ws-mcp': 'daemon/ws-mcp' };
+  const mac = releaseConfig({ version, pubkey, resources, platform: 'darwin' });
+  const windows = releaseConfig({ version, pubkey, resources, platform: 'win32' });
+  for (const config of [mac, windows]) {
+    assert.equal(config.version, version);
+    assert.deepEqual(config.plugins.updater, { pubkey, requireSignedVersion: true, windows: { installMode: 'passive' } });
+    assert.equal(config.bundle.createUpdaterArtifacts, true);
+    assert.deepEqual(config.bundle.resources, resources);
+  }
+  assert.equal(mac.mainBinaryName, 'Werkschaft');
+  assert.deepEqual(mac.bundle.targets, ['app']);
+  assert.equal(windows.mainBinaryName, undefined);
+  assert.deepEqual(windows.bundle.targets, ['nsis', 'msi']);
+  assert.deepEqual(windows.bundle.windows, {
+    webviewInstallMode: { type: 'embedBootstrapper', silent: true }, nsis: { installMode: 'currentUser' },
+    allowDowngrades: true, wix: { version: '0.50.8' },
+  });
 });
