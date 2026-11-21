@@ -302,3 +302,10 @@ Verification:
 - Added every member of each staged plain-lead CC group's subtree to `touchedMembers` in `pmBuildApplyEvents` so concurrent CC source/exclusion changes on a subtree member (e.g., a peer unCCing a member who was personally CC'd at open) trigger `js.tk.pm.stale` and send nothing instead of leaving that member unCC'd/excluded.
 - Verified `pmApply`'s dispatch-failure path for server-authoritative refusals without adding further client-side coverage logic: added DOM tests pinning 409 `refusal.reason` and non-409 `res.error` handling (modal stays open, `#tkpm-err` displays the server error, `PM.busy` clears and Apply re-enables, selection is preserved, and `wrote()` is not called).
 - Verified: `tracker*.test.js` (74/74: `tracker_picker.test.js` 22/22, other `tracker_*.test.js` 52/52) and `go test ./internal/wsdashboard ./internal/wstracker -run 'TestTracker|TestItemViewCCExcludedProjection|TestPersonalUnccExcludesOrgReadds|TestGoldenParity' -count=1` (77/77 wsdashboard, 3/3 wstracker).
+
+#### Edition (671690a) - 2026-11-22
+
+- Merged current `develop` (`7104dff6c`, keeping both sides' keys across all 11 `internal/wsi18n/tables/*.json` tables).
+- Unified badged lead row subtitles in `tracker-picker.js` (`pmRowSub(id, !!org)`): rows displaying an org badge omit the org/dept prefix and show `badge + id` only, while non-badged rows keep `<dept> · <id>`.
+- Added `PM.stale` state in `tracker-picker.js` so `#tkpm-apply` is disabled (and `pmApply()` / Cmd+Enter guarded) while `js.tk.pm.stale` is shown, while Cancel/close continue to work; added DOM tests in `tracker_picker.test.js` covering both CC and assign modes.
+- Verified: `tracker*.test.js` (75/75), `go test ./internal/wsi18n -count=1` (20/20), `go test ./internal/wsdashboard ./internal/wstracker -run 'TestTracker|TestItemViewCCExcludedProjection|TestPersonalUnccExcludesOrgReadds|TestGoldenParity' -count=1` (77/77 wsdashboard, 3/3 wstracker), and headless Chromium recaptures under `ai-docs/assets/captures/261121/picker-org-targets/` (`cc-org-{dark,light}.png`, `stale-notice-{dark,light}.png`).
