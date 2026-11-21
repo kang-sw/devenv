@@ -13,10 +13,10 @@ const [base, shots, refs] = process.argv.slice(2);
 
 const LEVELS = ['read-only', 'workdir-write', 'full'];
 const MODES = ['auto', 'default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions'];
-function choices(levels) {
+function choices(levels, claude = {}) {
   const extra = levels ? { permission_levels: LEVELS } : {};
   return { harnesses: [
-    { harness: 'claude', lead: true, available: true, models: [{ id: 'opus-4.7' }, { id: 'sonnet-4.6' }], efforts: ['low', 'medium', 'high', 'max'], permission_modes: MODES, ...extra },
+    { harness: 'claude', lead: true, available: true, models: [{ id: 'opus-4.7' }, { id: 'sonnet-4.6' }], efforts: ['low', 'medium', 'high', 'max'], permission_modes: MODES, ...extra, ...claude },
     { harness: 'pi', lead: true, available: true, models: [{ id: 'gpt-5.5' }], efforts: ['off', 'low', 'medium', 'high'], permission_modes: [], ...extra }
   ], last: {} };
 }
@@ -221,6 +221,27 @@ function out(name) { return shots ? path.join(shots, name) : undefined; }
           pop = await menu();
           assert.equal(await pop.locator('.pmchg').isVisible(), false);
           utiles.push({ k: 'C', png: await pop.screenshot() });
+          await closePop();
+
+          // The final preflight must reject positive levels when the harness
+          // became unavailable. Keep this state as the owner-reviewed capture.
+          await load(STATES.derived, choices(true));
+          pop = await create();
+          await pop.locator('.pmseg [data-level="read-only"]').click();
+          S.choices = choices(true, { available: false });
+          await pop.locator('.sprow .pbtn.go').click();
+          await pop.locator('.pmoff:not([hidden])').waitFor();
+          assert.equal(S.posts.length, 0, 'unavailable harness with levels sends no creation request');
+          if (theme === 'dark' && width === 1440) await pop.screenshot({ path: out(name('permission-unavailable')) });
+          await closePop();
+
+          // The same final check owns running-session permission changes.
+          await load(STATES.derived, choices(true));
+          pop = await menu();
+          S.choices = choices(true, { lead: false });
+          await pop.locator('.pmseg [data-level="read-only"]').click();
+          await pop.locator('.err:not(:empty)').waitFor();
+          assert.equal(S.posts.length, 0, 'non-lead harness with levels sends no settings request');
           await closePop();
         });
 

@@ -70,7 +70,7 @@ type StartSpec struct {
 	// PermissionLevel is the explicit authority of this launch: a lead's
 	// selection, or the level an agent.spawn child was spawned with. Empty
 	// keeps legacy native settings. It does not grant tools; a backend reads
-	// it only where it maps the level to its own sandbox (Codex workers).
+	// it only where it maps the level to its own per-run controls (Codex).
 	PermissionLevel PermissionLevel
 	// RemoveSubagents removes the harness's native subagent tool from the
 	// launch whatever the profile or the user's settings allow, so the
@@ -87,7 +87,7 @@ type StartSpec struct {
 type LeadSpec struct {
 	// DaemonVersion is the running daemon's version, not the plugin starter's.
 	DaemonVersion string
-	// PermissionMode is the permission mode to launch in (claude).
+	// PermissionMode is the native permission mode to launch a lead in.
 	PermissionMode string
 	// PluginIsolation is default (replace ws only) or isolated (bundled only).
 	PluginIsolation string

@@ -153,16 +153,20 @@ func (m *codexMapper) mapLine(line []byte, replies lineReplies) []Event {
 	}
 
 	var p struct {
-		ThreadID  string          `json:"threadId"`
-		TurnID    string          `json:"turnId"`
-		Turn      codexTurn       `json:"turn"`
-		Item      codexItem       `json:"item"`
-		ItemID    string          `json:"itemId"`
-		Delta     string          `json:"delta"`
-		Status    codexStatus     `json:"status"`
-		RequestID json.RawMessage `json:"requestId"`
-		Error     codexError      `json:"error"`
-		WillRetry bool            `json:"willRetry"`
+		ThreadID       string          `json:"threadId"`
+		TurnID         string          `json:"turnId"`
+		Turn           codexTurn       `json:"turn"`
+		Item           codexItem       `json:"item"`
+		ItemID         string          `json:"itemId"`
+		Delta          string          `json:"delta"`
+		Status         codexStatus     `json:"status"`
+		RequestID      json.RawMessage `json:"requestId"`
+		Error          codexError      `json:"error"`
+		WillRetry      bool            `json:"willRetry"`
+		ThreadSettings struct {
+			ApprovalPolicy json.RawMessage `json:"approvalPolicy"`
+			SandboxPolicy  json.RawMessage `json:"sandboxPolicy"`
+		} `json:"threadSettings"`
 	}
 	if json.Unmarshal(msg.Params, &p) != nil || m.sessionID == "" || p.ThreadID != m.sessionID {
 		return nil
@@ -184,6 +188,10 @@ func (m *codexMapper) mapLine(line []byte, replies lineReplies) []Event {
 		return m.endTurn(p.Turn, now)
 	case "thread/status/changed":
 		return []Event{{HarnessState: codexHarnessState(p.Status)}}
+	case "thread/settings/updated":
+		if mode := codexPermissionObservation(p.ThreadSettings.SandboxPolicy, p.ThreadSettings.ApprovalPolicy, m.worker); mode != "" {
+			return []Event{{PermissionMode: mode}}
+		}
 	case "serverRequest/resolved":
 		id := string(compactRaw(p.RequestID))
 		if _, ok := m.approvals[id]; !ok {
@@ -284,6 +292,9 @@ func (m *codexMapper) response(msg codexWire, replies lineReplies, now int64) []
 					{Name: "compact", Description: "Compact the conversation"},
 				}}},
 			}
+			if mode := codexPermissionObservation(r.Sandbox, r.ApprovalPolicy, m.worker); mode != "" {
+				out = append(out, Event{PermissionMode: mode})
+			}
 		case "models":
 			codexModels(msg.Result)
 		case "recover":
@@ -304,6 +315,40 @@ func (m *codexMapper) response(msg codexWire, replies lineReplies, now int64) []
 
 func codexPresent(raw json.RawMessage) bool {
 	return len(raw) > 0 && string(raw) != "null"
+}
+
+// codexPermissionObservation turns the app-server's reported per-run settings
+// into the native mode State already exposes. A mismatched approval policy is
+// retained in the observation string so it cannot earn partial quality by
+// looking like the requested sandbox. Empty or unknown reports stay pending.
+func codexPermissionObservation(sandbox, approval json.RawMessage, worker bool) string {
+	var box struct {
+		Type string `json:"type"`
+	}
+	var policy string
+	if json.Unmarshal(sandbox, &box) != nil || json.Unmarshal(approval, &policy) != nil || policy == "" {
+		return ""
+	}
+	mode := map[string]string{
+		"readOnly":         "read-only",
+		"workspaceWrite":   "workspace-write",
+		"dangerFullAccess": "danger-full-access",
+	}[box.Type]
+	if mode == "" {
+		return ""
+	}
+	want := "on-request"
+	if worker {
+		if mode == "read-only" {
+			want = "never"
+		}
+	} else if mode == "danger-full-access" {
+		want = "never"
+	}
+	if policy != want {
+		return fmt.Sprintf("%s (approval %s)", mode, policy)
+	}
+	return mode
 }
 
 func (m *codexMapper) item(turn string, item codexItem, done bool, now int64) []Event {

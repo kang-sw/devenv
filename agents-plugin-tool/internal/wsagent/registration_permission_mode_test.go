@@ -63,7 +63,7 @@ func TestRegisteredPermissionModeSetAdmission(t *testing.T) {
 		},
 		{
 			name: "pi unsupported", backend: BackendPi, profile: LeadProfilePi,
-			mode: "plan", wantErr: ErrUnsupported, wantText: "the permission mode applies to a claude lead session only",
+			mode: "plan", wantErr: ErrUnsupported, wantText: "the permission mode applies to a supported lead session only",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

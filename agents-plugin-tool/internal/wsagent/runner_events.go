@@ -167,7 +167,11 @@ func (c *conv) handle(ev Event) {
 		// left stale by an older writer goes, so that a report of
 		// native default does not revive it without the user.
 		rec := c.record()
-		if rec.Lead && !quiet && !c.dirtyMode && !rec.agyBypass() && ev.PermissionMode != rec.PermissionMode && slices.Contains(permissionModes(rec.Backend, []map[string]BackendRegistration{c.r.opts.Backends}), ev.PermissionMode) {
+		// Codex reports its effective defaults even when the launch omitted a
+		// permission choice. Keep that report in activeMode for projection, but
+		// do not turn an observation into a persisted next-launch override.
+		legacyCodexOmission := rec.Backend == BackendCodex && rec.PermissionMode == ""
+		if rec.Lead && !quiet && !c.dirtyMode && !rec.agyBypass() && !legacyCodexOmission && ev.PermissionMode != rec.PermissionMode && slices.Contains(permissionModes(rec.Backend, []map[string]BackendRegistration{c.r.opts.Backends}), ev.PermissionMode) {
 			c.update(func(rec *Record) { rec.PermissionMode, rec.AgyBypass = ev.PermissionMode, false })
 			c.changed(quiet)
 		}

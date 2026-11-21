@@ -428,6 +428,9 @@ func TestAgentRunnerCatalogs(t *testing.T) {
 	if !reflect.DeepEqual(regs[wsagent.BackendCodex].Catalog, wsagent.CodexCatalog()) {
 		t.Error("codex must retain its lead and worker catalog")
 	}
+	if !reflect.DeepEqual(regs[wsagent.BackendCodex].PermissionLevels, wsagent.LeadPermissionLevels()) {
+		t.Errorf("codex common permission levels = %v", regs[wsagent.BackendCodex].PermissionLevels)
+	}
 	if !reflect.DeepEqual(regs[wsagent.BackendAgy].Catalog, wsagent.AgyCatalog()) {
 		t.Error("agy must retain its lead and worker catalog")
 	}

@@ -302,11 +302,14 @@ func codexWorkerMode(level PermissionLevel) (sandbox, policy string, err error) 
 }
 
 // codexStartMode is the sandbox and approval policy a start opens with: a
-// lead's permission mode, a worker's authority. A lead with no mode keeps
-// Codex's own settings.
+// lead's transient common selection or native permission mode, and a worker's
+// authority. A lead with neither keeps Codex's own settings.
 func codexStartMode(spec StartSpec) (sandbox, policy string, err error) {
 	if spec.Lead == nil {
 		return codexWorkerMode(spec.PermissionLevel)
+	}
+	if spec.PermissionLevel != "" {
+		return codexMode(nativePermissionMode(BackendCodex, spec.PermissionLevel))
 	}
 	if spec.Lead.PermissionMode == "" {
 		return "", "", nil
