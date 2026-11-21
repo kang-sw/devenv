@@ -185,6 +185,114 @@ func fireWatchdog(t *testing.T, timers *leverTimers, index int) {
 	timers.fire(t, index)
 }
 
+const agyIdleTimeoutChunk = `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"\n⚠ API error (attempt 1): stream idle timeout\n"}}}}`
+
+func feedAgyWatchdogLines(m *agyMapper, p *fakeProc, lines ...string) {
+	for _, line := range lines {
+		for _, ev := range m.mapLine([]byte(line), nopReplies{}) {
+			p.events <- ev
+		}
+	}
+}
+
+func TestAgyTerminalFailureSettlesWithoutContinue(t *testing.T) {
+	setLookPath(t, func(file string) (string, error) { return file, nil })
+	for _, tc := range []struct {
+		name, timeout, response, wantError string
+		replay                             bool
+	}{
+		{"unarmed", "0", `"result":{"stopReason":"end_turn"}`, "⚠ API error (attempt 1): stream idle timeout", false},
+		{"replayed", "0", `"result":{"stopReason":"end_turn"}`, "⚠ API error (attempt 1): stream idle timeout", true},
+		{"cancelled", "45", `"result":{"stopReason":"cancelled"}`, "⚠ API error (attempt 1): stream idle timeout", false},
+		{"rpc-error", "45", `"error":{"code":-32603,"message":"provider disconnected"}`, "agy: provider disconnected", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _, got := agyWatchdogHarnessWithSilence(t, tc.timeout, "3", false)
+			id, p := h.agentRunning(h.leadCaller(), AgentSpawnRequest{Prompt: "work", Tier: "agy.small", Authority: "read-only"})
+			m := newAgyMapper("s")
+			response := `{"jsonrpc":"2.0","id":"ws-p-watchdog-1",` + tc.response + `}`
+			if tc.replay {
+				c := h.runner.conv(id)
+				c.do(func() {
+					c.replaying = true
+					for _, line := range []string{agyIdleTimeoutChunk, response} {
+						for _, ev := range m.mapLine([]byte(line), silentReplies{}) {
+							ev.Replay, ev.Seq = true, c.rec.TurnStartSeq+1
+							c.handle(ev)
+						}
+					}
+					c.replayDone(false)
+				})
+			} else {
+				m.promptSent("ws-p-watchdog-1")
+				feedAgyWatchdogLines(m, p, agyIdleTimeoutChunk, response)
+			}
+			eventually(t, "failed parent report", func() bool { return len(got.lead()) == 1 })
+			report := got.lead()[0]
+			wantError := "[stream idle timeout] " + tc.wantError
+			if report.Result.Status != TurnFailed || report.Result.Error != wantError || !strings.Contains(ReportText(report), "turn failed: "+wantError) {
+				t.Fatalf("terminal failure report = %+v (%q)", report.Result, ReportText(report))
+			}
+			dir := wsdashboard.SessionDir(h.dir, id)
+			rec, err := readRecord(dir)
+			if err != nil || rec.TurnOpen || rec.LastTurn == nil || rec.LastTurn.Result.Status != TurnFailed || rec.LastTurn.Result.Error != wantError {
+				t.Fatalf("failed turn was not stored: %+v (error %v)", rec, err)
+			}
+			if len(p.sent) != 0 || procInterrupts(p) != 0 {
+				t.Fatal("terminal failure triggered an interrupt or continue")
+			}
+			if !tc.replay {
+				rows, err := wslive.ReadRing(wslive.RingDir(dir))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !slices.ContainsFunc(rows, func(row wslive.RingRecord) bool { return row.Kind == wslive.RingTurn && row.Reason == "error" }) {
+					t.Fatalf("turn ring has no failed turn: %+v", rows)
+				}
+			}
+		})
+	}
+}
+
+func TestAgyTerminalFailureSurvivesCancelledRetryBackoff(t *testing.T) {
+	h, timers, got := agyWatchdogHarnessWithSilence(t, "45", "3", false)
+	h.runner.Close()
+	h.config.AgyModelWaitBackoff = func(int) time.Duration { return time.Second }
+	h.start()
+	id, p := startAgyWatchdogTurn(t, h, true)
+	m := newAgyMapper("s")
+	m.promptSent("ws-p-watchdog-1")
+	feedAgyWatchdogLines(m, p, agyIdleTimeoutChunk, `{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"ws-p-watchdog-1"}`)
+	eventually(t, "retry backoff timer", func() bool {
+		started, _ := timers.counts()
+		return started == 2
+	})
+	c := h.runner.conv(id)
+	c.do(func() {
+		// The timer may be selected before the loop handles the newer input.
+		c.cancelModelWaitBackoffForInput()
+		c.modelWaitBackoffTimedOut()
+	})
+	eventually(t, "failed parent report", func() bool { return len(got.lead()) == 1 })
+	if result := got.lead()[0].Result; result.Status != TurnFailed || !strings.HasPrefix(result.Error, "[stream idle timeout] ") || len(p.sent) != 0 {
+		t.Fatalf("failure with cancelled backoff = %+v", result)
+	}
+}
+
+func TestAgyTerminalFailureSurvivesInterruptTimeout(t *testing.T) {
+	h, timers, got := agyWatchdogHarnessWithSilence(t, "45", "3", false)
+	_, p := startAgyWatchdogTurn(t, h, true)
+	m := newAgyMapper("s")
+	m.promptSent("ws-p-watchdog-1")
+	feedAgyWatchdogLines(m, p, agyIdleTimeoutChunk)
+	fireWatchdog(t, timers, 0)
+	fireWatchdog(t, timers, 1)
+	eventually(t, "failed parent report", func() bool { return len(got.lead()) == 1 })
+	if result := got.lead()[0].Result; result.Status != TurnFailed || !strings.HasPrefix(result.Error, "[stream idle timeout] ") || !p.isClosed() {
+		t.Fatalf("failure after interrupt timeout = %+v", result)
+	}
+}
+
 func exhaustSingleAgyWatchdogRetry(t *testing.T, timers *leverTimers, p *fakeProc) {
 	t.Helper()
 	fireWatchdog(t, timers, 0)
@@ -507,7 +615,7 @@ func TestAgyModelWaitWatchdogFailureDoesNotRetryPendingToolOrApproval(t *testing
 			if queued := len(p.sent); queued != 0 {
 				t.Fatalf("failure while %s waiting sent continue", wait)
 			}
-			if result := got.lead()[0].Result; result.Status != TurnDone || result.Message != failure {
+			if result := got.lead()[0].Result; result.Status != TurnFailed || result.Error != "[API error] "+failure || result.Message != failure {
 				t.Fatalf("excluded %s failure result = %+v", wait, result)
 			}
 		})
@@ -734,8 +842,8 @@ func TestAgyModelWaitWatchdogDrainsAndStripsSuccessfulAPIErrorRetry(t *testing.T
 	timers.mu.Lock()
 	drainDuration := timers.durs[1]
 	timers.mu.Unlock()
-	if drainDuration != time.Second {
-		t.Fatalf("failure drain = %v, want 1s", drainDuration)
+	if drainDuration != 15*time.Second {
+		t.Fatalf("failure drain = %v, want 15s", drainDuration)
 	}
 	if interrupts := procInterrupts(p); interrupts != 0 {
 		t.Fatalf("failure was interrupted before its drain: %d", interrupts)
@@ -758,42 +866,56 @@ func TestAgyModelWaitWatchdogDrainsAndStripsSuccessfulAPIErrorRetry(t *testing.T
 // If the failed prompt does not end during the drain, cancellation lands
 // first and continue is sent only after its TurnEnd makes steering safe.
 func TestAgyModelWaitWatchdogCancelsOnlyAfterFailureDrain(t *testing.T) {
-	h, timers, _ := agyWatchdogHarness(t, "45")
+	h, timers, _ := agyWatchdogHarnessWithSilence(t, "45", "3", false)
 	_, p := startAgyWatchdogTurn(t, h, false)
-	failure := "⚠ API error (attempt 1): timeout"
-	p.events <- Event{ModelFailureUpdate: &failure}
-	fireWatchdog(t, timers, 1)
+	m := newAgyMapper("s")
+	m.promptSent("ws-p-watchdog-1")
+	feedAgyWatchdogLines(m, p, agyIdleTimeoutChunk)
+	eventually(t, "failure drain timer", func() bool {
+		started, _ := timers.counts()
+		return started == 1
+	})
+	timers.mu.Lock()
+	drainDuration := timers.durs[0]
+	timers.mu.Unlock()
+	if drainDuration != 15*time.Second {
+		t.Fatalf("failure drain = %v, want 15s", drainDuration)
+	}
+	if interrupts := procInterrupts(p); interrupts != 0 {
+		t.Fatalf("failure was interrupted before its drain: %d", interrupts)
+	}
+	timers.fire(t, 0)
 	eventually(t, "failure drain interrupt", func() bool { return procInterrupts(p) == 1 })
 	if queued := len(p.sent); queued != 0 {
 		t.Fatalf("continue steered the still-running failed prompt: %d queued sends", queued)
 	}
-	p.events <- Event{TurnEnd: true, TurnReason: wslive.TurnAborted, ModelFailure: failure}
+	feedAgyWatchdogLines(m, p, `{"jsonrpc":"2.0","result":{"stopReason":"cancelled"},"id":"ws-p-watchdog-1"}`)
 	if sent := p.nextSent(t); sent != "continue" {
 		t.Fatalf("post-cancel retry prompt = %q", sent)
 	}
 }
 
 func TestAgyModelWaitWatchdogLaterReplyCancelsFailureDrain(t *testing.T) {
-	h, timers, got := agyWatchdogHarness(t, "45")
+	h, timers, got := agyWatchdogHarnessWithSilence(t, "45", "3", false)
 	_, p := startAgyWatchdogTurn(t, h, true)
-	failure := "⚠ API error (attempt 1): temporary"
-	p.events <- Event{ModelFailureUpdate: &failure}
+	m := newAgyMapper("s")
+	m.promptSent("ws-p-watchdog-1")
+	feedAgyWatchdogLines(m, p, agyIdleTimeoutChunk)
 	eventually(t, "failure drain timer", func() bool {
 		started, _ := timers.counts()
-		return started == 2
+		return started == 1
 	})
-	cleared := ""
-	p.events <- Event{ModelFailureUpdate: &cleared}
-	eventually(t, "ordinary timer restored", func() bool {
-		started, _ := timers.counts()
-		return started == 3
+	feedAgyWatchdogLines(m, p, `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"OK."}}}}`)
+	eventually(t, "recovery stopped the failure drain", func() bool {
+		_, stopped := timers.counts()
+		return stopped == 1
 	})
-	timers.fire(t, 1) // a stopped drain may still deliver; it is no longer selected
+	timers.fire(t, 0) // a stopped drain may still deliver; it is no longer selected
 	time.Sleep(60 * time.Millisecond)
 	if interrupts := procInterrupts(p); interrupts != 0 {
 		t.Fatalf("recovered failure triggered %d interrupts", interrupts)
 	}
-	p.reply("OK.")
+	feedAgyWatchdogLines(m, p, `{"jsonrpc":"2.0","result":{"stopReason":"end_turn"},"id":"ws-p-watchdog-1"}`)
 	eventually(t, "recovered turn report", func() bool { return len(got.lead()) == 1 })
 	if result := got.lead()[0].Result; result.Status != TurnDone || result.Message != "OK." {
 		t.Fatalf("recovered turn result = %+v", result)
