@@ -11,16 +11,17 @@ Living specification and asset-production manual for the opt-in Werkschaft lead 
 Asset production follows three ordered stages so every character pack plugs cleanly into one reusable engine:
 
 1. **Stage 1 — Concept & Static SD Reference Lock**
-   - **Step 1-A (Character Concept — Locked):** Lock character silhouette, palette, and personality via clean **Front + Back full-body turnaround illustrations** (no text boxes or cluttered sheet chrome). Locked default mascot turnaround: `ai-docs/assets/companion-pet/mascot-stage1a-turnaround.png` (see `## Locked Default Mascot (Stage 1-A)` below).
-   - **Step 1-B (Target 2.5–3-Head SD References — In Progress):** Translate the approved character into final target **2.5–3-head SD/chibi** static references (`1:1` square canvas, uniform thick ink outlines, clean 2-step cel shading, clear part boundaries) for every required/selected pose family plus engine-shared props. Never down-scale a non-SD illustration into an SD look.
+   - **Step 1-A (Character Concept — Locked):** Lock character silhouette, palette, and personality via clean **Front + Back full-body turnaround illustrations** (no text boxes or cluttered sheet chrome). Locked default mascot turnaround: `ai-docs/assets/companion-pet/mascot-stage1a-turnaround.png` (see `## Locked Default Mascot (Stage 1-A & 1-B Style)` below).
+   - **Step 1-B (Target SD Style & Pose References — Style Locked, Poses Next):** Translate the approved character into final target **compact ~2.0-head SD/chibi** static references (`1:1` square canvas, ~44% head-to-height ratio, compact vertical silhouette `aspect ~0.60`, warm thick cocoa-brown outer outlines, glossy 2-step cel shading + soft cheek blush, simplified mitten paws, lace-free chunky sneakers, clear arm/leg cutout gaps) for every required/selected pose family plus engine-shared props. Locked `A. Standing` SD style master: `ai-docs/assets/companion-pet/mascot-stage1b-standing-sd.png`. Never down-scale a non-SD illustration into an SD look.
 2. **Stage 2 — Scenario, Pose-Family, Prop & Socket Contract**
    - Governed by this manual: declares the canonical v1 scenarios, pose families with automatic fallbacks, engine-shared interactive props, attachment sockets, expressions, and passive gaze rules.
 3. **Stage 3 — Same-Canvas Cutout Dissection Pipeline**
    - Run same-canvas image-to-image layer dissection and deterministic post-processing against each approved Stage 1 reference, packing uniform lossless-alpha WebP layers into a `pack.json` bundle.
 
-## Locked Default Mascot (Stage 1-A)
+## Locked Default Mascot (Stage 1-A & 1-B Style)
 
-- **Canonical Turnaround:** `ai-docs/assets/companion-pet/mascot-stage1a-turnaround.png` (`1536 × 1024`, Front + Back full-body turnaround, IP-clean original Werkschaft mascot).
+- **Canonical Turnaround (Stage 1-A):** `ai-docs/assets/companion-pet/mascot-stage1a-turnaround.png` (`1536 × 1024`, Front + Back full-body turnaround, IP-clean original Werkschaft mascot).
+- **Canonical Standing SD Master (Stage 1-B):** `ai-docs/assets/companion-pet/mascot-stage1b-standing-sd.png` (`1024 × 1024`, pure `#FFFFFF` background, ~44% head-to-height compact 2.0-head proportion, `aspect ~0.60`, warm thick cocoa-brown outline, glossy 2-step cel shading + soft cheek blush, rounded mitten paws, simplified lace-free chunky sneakers, paper-doll cutout arm/leg separation). Use this image as the visual style/proportion anchor for all remaining pose families (`W`/`B`/`C`/`D`), engine-shared props, and BYO local packs.
 - **Palette Harmony:** Deep midnight navy (`#1E2233`), warm cream ivory (`#F5F2EA`), vermilion-coral (`#E2582C`), and golden amber (`#F0A500`) paired with coral-peach hair and amber-to-magenta sparkling eyes.
 - **Silhouette & Outfit Anchors:**
   - Voluminous wavy coral-peach twin-tails, curved top ahoge, two small amber side hairpins on the left bangs (viewer's right), cheeky fang grin.
