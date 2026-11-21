@@ -457,6 +457,68 @@ installs the bundled version even over a newer Tauri canary, and subsequent
 shortcut launches preserve a Tauri self-update. Account
 for the possible Windows SmartScreen first-run warning.
 
+#### Phase 3 implementation handoff (17364c3c1) - 2026-11-21
+
+- Settings uses the fixed native update operations on the verified
+  top-level dashboard. Stable checks use GitHub latest. Canary selects the
+  highest eligible version on the first matching page. Explicit stable
+  return can select an older version. The updater verifies size, SHA-256,
+  and a Tauri signature bound to the chosen version before staging. Apply
+  saves the current dashboard draft and delegates install and relaunch to
+  the platform updater. The daemon follows its existing launch policy on
+  shell relaunch.
+- Skip is a Type 2 SQLite preference with one held connection and a WAL
+  commit on change. A verified update is a Type 5 package. A download opens
+  the bounded partial file, writes its header, metadata and payload, then
+  syncs and renames it. Reopen reads the header and the payload once and
+  verifies both. Changing the selected target discards a superseded stage
+  before the new selection appears. Settings reads phase and channel from
+  memory. Windows antivirus measurements remain part of native acceptance.
+- T0. Electron continues to read the same stable latest endpoint, zip and
+  SUMS (`desktop-electron/update.js:73,478,515,559`). With the rollout flag
+  unset, its existing tag and desktop dry-run jobs still write those assets.
+  With the flag set, an exact stable tag includes the same names in the
+  draft-backed complete release (`.github/workflows/ws-mcp-release.yml:184,238`
+  and `.github/workflows/werkschaft-tauri-build.yml:159-180`). Exact canary
+  tags remain prereleases and carry the separate Tauri manifest alongside
+  the Electron assets. The optional renderer event mounts the same update
+  controls (`internal/wsdashboard/assets/dashboard-lifecycle.js:1130,1230`).
+  The Windows forwarder reads and writes only its user-scoped marker and
+  opens the registered app on subsequent runs (`desktop/migration/main.rs:218-258`).
+  Electron's own profile remains available after reinstall. Tauri starts
+  with its own defaults and uses the installed build's channel. The
+  existing cross-minor daemon boundary remains T3.
+- The macOS release build and Windows x64 MSVC type check passed. The
+  launchless arm64 app and updater/migration archive layouts matched the
+  expected app identity and all 113 prepared daemon files. The six updater
+  Rust regressions include the pinned plugin's signed fixture, corrupt and
+  truncated bytes, signature rejection, valid staging, reopen, channel
+  switch and retry. The 32 non-listener Rust tests, six Node packaging
+  tests, five build-slot tests, two launcher tests, 187 Electron tests
+  with four Windows-only skips, Go DashboardSourceAssembly, actionlint,
+  and dry-shell route and publication checks passed.
+- Chromium ran the dashboard update suite against intercepted real
+  renderer assets. Compared captures in
+  `/private/tmp/werkschaft-tauri-phase3.4BB1FT/tauri/` with
+  the approved PNGs recovered from
+  `e33dc16f8:ai-docs/assets/mockups/261120/canary-channel/`.
+  The ten light and dark App update and toast regions match. The paired
+  regions are in `/private/tmp/werkschaft-tauri-phase3.4BB1FT/update-detail/`.
+  Branding and landing-page background differ from the historical captures.
+- The lite review found two state and release hazards. `17364c3c1` fixes
+  the superseded stage on reopen and publishes new stable tags only after
+  the verified native packages and both desktop payloads upload. The
+  signed fixture exercises the actual controller and on-disk stage path.
+  Real signed installer apply still requires the lead's acceptance.
+- Pending lead verification. The five Rust endpoint listener tests and
+  the Go dashboard browser listener test hit a sandbox bind restriction.
+  Run `cargo test --offline --locked --features custom-protocol` from the
+  desktop crate and `go test ./internal/wsdashboard -run '^TestDesktopUpdateBrowser$' -count=1 -v`
+  from the tooling module, with Playwright configured for the browser run.
+  The evaluation signing and non-publishing CI commands and the native
+  installer, channel, migration, bootstrapper, failure and recovery checklist
+  are in `agents-plugin-tool/desktop/RELEASE.md`. Phase 3 awaits that evidence.
+
 ### Phase 4: Pass the macOS and Windows verification and benchmark gate
 
 Run packaged Tauri and Electron on both platforms and record evidence
