@@ -37,3 +37,6 @@ agents-plugin-tool/internal/wswhiteboard/assets/mermaid/mermaid.min.js linguist-
 # Owner (2073)=a 2026-11-21: gallery cards script (2376) and agy watchdog tests (1032) passed their limits; raise their own soft limits.
 /agents-plugin-tool/internal/wsdashboard/assets/cards.js ws-size-guard=2900
 /agents-plugin-tool/internal/wsagent/agy_watchdog_test.go ws-size-guard=1300
+# Owner (2101)=b 2026-11-22: tracker picker modal script (1539) and its test (1511) stay whole; raise their own soft limits.
+/agents-plugin-tool/internal/wsdashboard/assets/tracker-picker.js ws-size-guard=1900
+/agents-plugin-tool/internal/wsdashboard/tracker_picker.test.js ws-size-guard=1900
