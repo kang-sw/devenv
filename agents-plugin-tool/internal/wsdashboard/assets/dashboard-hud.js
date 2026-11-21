@@ -270,9 +270,15 @@
   function hudBindEvents(agcompact, agpop, agOpenFn) {
     if (hudBound || !agcompact) return;
     hudBound = true;
-    var rootsEl = agcompact.querySelector(".hud-roots"), expandBtn = agcompact.querySelector(".hud-expand-btn");
+    var rootsEl = agcompact.querySelector(".hud-roots");
     var canvas = agcompact.querySelector(".hud-canvas"), island = $("agisland");
-    if (expandBtn) expandBtn.addEventListener("click", function () { agOpenFn(true); });
+    agcompact.addEventListener("click", function (e) {
+      if (e.target && e.target.closest && (e.target.closest(".hud-node") || e.target.closest(".hud-close"))) return;
+      agOpenFn(true);
+    });
+    agcompact.addEventListener("keydown", function (e) {
+      if (e.target === agcompact && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); agOpenFn(true); }
+    });
     if (rootsEl) {
       rootsEl.addEventListener("mouseover", function (e) {
         var btn = e.target && e.target.closest && e.target.closest(".hud-node");
@@ -352,11 +358,6 @@
       hudReconcile(rootsEl, hud.roots, existing, ownTasks, "", seen);
       Object.keys(hudRegistry).forEach(function (id) { if (!seen[id]) delete hudRegistry[id]; });
     }
-    var sumEl = agcompact.querySelector(".hud-summary-text");
-    if (sumEl) sumEl.textContent = wsT("js.hud.summary", hud.completed, hud.peers);
-    var idleLabel = agidle.querySelector(".agidle-label");
-    if (!idleLabel) { idleLabel = doc.createElement("span"); idleLabel.className = "agidle-label"; agidle.appendChild(idleLabel); }
-    idleLabel.textContent = wsT("js.hud.done", hud.completed);
     hudBindEvents(agcompact, agpop, agOpenFn);
     if (hudHoveredId) {
       if (hudRegistry[hudHoveredId] && agpop && agpop.hidden) hudShowTooltip(hudHoveredId);

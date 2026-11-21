@@ -129,17 +129,13 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 		t.Errorf("the agents tree is not in the island above the composer badge")
 	}
 	for _, want := range []string{
-		`<div id="agcompact" class="agview agcompact" aria-label="Agents">`,
+		`<div id="agcompact" class="agview agcompact" role="button" tabindex="0" aria-label="Open full agent tree" title="Open full agent tree" aria-controls="agpop" aria-expanded="false">`,
 		`<div class="hud-tree-scroll"><div class="hud-canvas"><svg class="hud-lines" aria-hidden="true"></svg><div class="hud-roots"></div></div></div>`,
-		`<button type="button" class="hud-expand-btn" aria-controls="agpop" aria-expanded="false" title="Open full agent tree">`,
 		`<div id="hud-tooltip" class="hud-tooltip" role="tooltip" hidden></div>`,
 	} {
 		if !strings.Contains(live, want) {
 			t.Errorf("live session page lacks HUD hook %q", want)
 		}
-	}
-	if strings.Contains(live, `<div id="agcompact" class="agview agcompact" role="button"`) {
-		t.Errorf("#agcompact must not be a button container")
 	}
 	if strings.Contains(live, `id="splitter"`) || !strings.Contains(live, `<div id="convo" class="convo"><div id="r-entries"`) {
 		t.Errorf("the conversation wrapper does not hold the entries region without a splitter")

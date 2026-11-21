@@ -2545,8 +2545,6 @@
   "js.hud.state.idle": "Ocioso (ativo)",
   "js.hud.state.permission": "Permissão",
   "js.hud.state.failed": "Falhou",
-  "js.hud.summary": "Concluídos {0} · Pares {1}",
-  "js.hud.done": "Concluídos {0}",
   "js.hud.deeper": "+{0} abaixo",
   "js.hud.hint.link": "Clique: abrir /s/{0}",
   "js.hud.hint.details": "Clique: abrir detalhes da árvore",

@@ -2545,8 +2545,6 @@
   "js.hud.state.idle": "閒置（存活）",
   "js.hud.state.permission": "需要核准",
   "js.hud.state.failed": "失敗",
-  "js.hud.summary": "已完成 {0} · 對等 {1}",
-  "js.hud.done": "已完成 {0}",
   "js.hud.deeper": "+{0} 更深",
   "js.hud.hint.link": "點擊：開啟 /s/{0}",
   "js.hud.hint.details": "點擊：開啟樹狀詳情",

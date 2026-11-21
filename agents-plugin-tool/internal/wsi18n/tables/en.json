@@ -2545,8 +2545,6 @@
   "js.hud.state.idle": "Idle (alive)",
   "js.hud.state.permission": "Permission",
   "js.hud.state.failed": "Failed",
-  "js.hud.summary": "Done {0} · Peers {1}",
-  "js.hud.done": "Done {0}",
   "js.hud.deeper": "+{0} deeper",
   "js.hud.hint.link": "Click: open /s/{0}",
   "js.hud.hint.details": "Click: open tree details",

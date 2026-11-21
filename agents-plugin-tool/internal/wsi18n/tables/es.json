@@ -2545,8 +2545,6 @@
   "js.hud.state.idle": "Inactivo (vivo)",
   "js.hud.state.permission": "Permiso",
   "js.hud.state.failed": "Fallido",
-  "js.hud.summary": "Listos {0} · Pares {1}",
-  "js.hud.done": "Listos {0}",
   "js.hud.deeper": "+{0} más",
   "js.hud.hint.link": "Clic: abrir /s/{0}",
   "js.hud.hint.details": "Clic: abrir detalles del árbol",
