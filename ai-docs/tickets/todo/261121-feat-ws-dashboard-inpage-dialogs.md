@@ -68,9 +68,9 @@ inventory was checked at `1b8605ab4`.
 
 ## Open Decision Queue
 
-Last ID: (2040)
+Last ID: (2041)
 
-(2020) [confirmed] [policy] Owner answer 2026-11-21: a, provided pasted images can be restored (they were deliberately guarded because pasted images are not kept: fda6c7a1e); see (2040). How should an operating-system window close handle unsaved dashboard drafts?
+(2020) [confirmed] [policy] Owner answer 2026-11-21: a, provided pasted images can be restored (they were deliberately guarded because pasted images are not kept: fda6c7a1e); see (2041). How should an operating-system window close handle unsaved dashboard drafts?
 
 - a. Auto-persist and restore the draft, including pasted image blobs and unsent input, so closing the window needs no shell prompt. Define how input survives a failed write and how an unacknowledged send is recovered without duplicate delivery.
 - b. Keep a shell close-requested check that asks the page to resolve in-page Stay/Leave for at-risk input before the shell closes. Keep the native close request pending while the user decides.
@@ -90,7 +90,7 @@ Last ID: (2040)
 
 (2024) [open] [technical] Keep the browser `beforeunload` fallback for reloads and top-level navigation outside the iframe swap over retiring it. It protects callers outside the swap path, and retirement requires a separate draft-recovery proof.
 
-(2040) [open] [technical] Persist pasted image blobs browser-locally in IndexedDB, keyed by the session draft and cleared on send or discard, over uploading each paste to the daemon - keeps paste and restore off daemon file I/O (performance Rule 5) and works in Electron, browsers, WKWebView and WebView2; the image leave guard stays until a restore of held images is verified.
+(2041) [open] [technical] Persist pasted image blobs browser-locally in IndexedDB, keyed by the session draft and cleared on send or discard, over uploading each paste to the daemon - keeps paste and restore off daemon file I/O (performance Rule 5) and works in Electron, browsers, WKWebView and WebView2; the image leave guard stays until a restore of held images is verified.
 
 (2025) [open] [technical] Use the existing `rdeldlg` styling for the shared confirmation helper over introducing a separate modal style. The worktree-delete dialog already provides a labeled shell-independent modal and handles focus around rail redraws (`agents-plugin-tool/internal/wsdashboard/assets/dashboard-rail-popovers.js:875-895`, `agents-plugin-tool/internal/wsdashboard/assets/dashboard-rail-popovers.js:1017-1034`, `agents-plugin-tool/internal/wsdashboard/assets/dashboard-rail.css:560-565`).
 
