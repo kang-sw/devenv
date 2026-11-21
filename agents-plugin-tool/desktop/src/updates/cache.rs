@@ -46,6 +46,13 @@ impl Cache {
         )?;
         Ok(())
     }
+
+    pub fn discard_stage(&self) -> io::Result<()> {
+        match fs::remove_file(&self.stage) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            result => result,
+        }
+    }
 }
 
 pub fn load_header(path: &std::path::Path) -> io::Result<Option<(StagedMetadata, File)>> {

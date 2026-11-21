@@ -146,14 +146,37 @@ jobs:
       contents: write
     steps:
       - uses: actions/download-artifact@v5
+        if: ${{ !contains(inputs.version, '-canary.') }}
+        with:
+          name: ws-mcp-assets
+          path: ${{ runner.temp }}/ws-mcp-assets
+
+      - uses: actions/download-artifact@v5
         with:
           name: werkschaft-tauri-assets
           path: ${{ runner.temp }}/tauri-release
 
-      - name: Upload the verified payload and its feed
+      - name: Publish the complete stable release or add the signed canary assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cd "$RUNNER_TEMP/tauri-release"
-          gh release upload "$GITHUB_REF_NAME" Werkschaft-* --repo "$GITHUB_REPOSITORY" --clobber
-          gh release upload "$GITHUB_REF_NAME" werkschaft-tauri-update.json --repo "$GITHUB_REPOSITORY" --clobber
+          desktop=( "$RUNNER_TEMP/tauri-release/"Werkschaft-* )
+          feed="$RUNNER_TEMP/tauri-release/werkschaft-tauri-update.json"
+          if [[ "$GITHUB_REF_NAME" == *-canary.* ]]; then
+            gh release upload "$GITHUB_REF_NAME" "${desktop[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+            gh release upload "$GITHUB_REF_NAME" "$feed" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            files=( "$RUNNER_TEMP/ws-mcp-assets/"* "${desktop[@]}" "$feed" )
+            if published=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'); then
+              for file in "${files[@]}"; do
+                if ! grep -Fxq -- "${file##*/}" <<< "$published"; then
+                  gh release upload "$GITHUB_REF_NAME" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+                  break
+                fi
+              done
+            else
+              # With attachments gh creates a draft and publishes it only after every upload succeeds.
+              gh release create "$GITHUB_REF_NAME" "${files[@]}" --repo "$GITHUB_REPOSITORY" --verify-tag \
+                --title "$GITHUB_REF_NAME" --notes "Automated ws-mcp release assets for ${GITHUB_REF_NAME}."
+            fi
+          fi

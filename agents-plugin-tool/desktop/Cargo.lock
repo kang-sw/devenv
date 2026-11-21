@@ -4982,6 +4982,7 @@ name = "werkschaft-desktop"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "base64 0.23.1",
  "block2",
  "objc2",
  "objc2-foundation",

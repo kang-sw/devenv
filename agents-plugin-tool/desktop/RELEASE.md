@@ -145,8 +145,11 @@ gh variable set WERKSCHAFT_TAURI_RELEASE --repo kang-sw/werkschaft --body true
 
 Follow the existing release procedure for the CI gate, tagging, release, and
 checks. With the variable set, `vX.Y.Z` ships the
-Tauri signed assets and the Electron-named migration zips. Exact
-`vX.Y.Z-canary.N` tags keep their Electron archives and add the distinct Tauri
+Tauri signed assets and the Electron-named migration zips. GitHub CLI
+publishes a new stable release after the native and desktop jobs finish and
+every attachment uploads to its draft. [GitHub CLI release creation](https://cli.github.com/manual/gh_release_create)
+
+Exact `vX.Y.Z-canary.N` tags keep their Electron archives and add the distinct Tauri
 signed assets to the same prerelease. Check the combined artifact and the
 published feed, and confirm `releases/latest` resolves to a stable release.
 [Release procedure](../../ai-docs/ship/ws.md)
@@ -157,3 +160,40 @@ signing and notarization for macOS distribution, and Windows Authenticode
 signing and trusted timestamping for the app and installers. This phase uses
 updater signatures with OS signing deferred to the Electron retirement
 decision. Plan for the Windows SmartScreen prompt during native acceptance.
+
+## Native acceptance
+
+Use isolated daemon caches and disposable Windows accounts or VM snapshots.
+Download the combined stable and canary dry-run artifacts. Use a canary
+with the next patch core for stable-to-canary opt-in and a lower-version
+stable return. Prepare that core on a separate evaluation ref with
+`agents-plugin-tool/scripts/bump-ws-version.sh <next-patch-core>`, and
+dispatch its `tauri_dry_run` with `version=<next-patch-core>-canary.1`.
+A same-core canary also exercises the MSI equal-core version replacement.
+
+1. Install the stable NSIS and MSI payloads separately. Record the OS and
+   Evergreen versions. Test one runtime-present VM and one supported VM
+   without Evergreen. Confirm the embedded bootstrapper can install the
+   runtime and that the user install opens on its first run.
+2. Run the [evaluation feed](README.md#shell-updates). Confirm a scheduled
+   stable check and the ordinary Settings check ignore canaries. Opt in,
+   stage and restart into the canary. Confirm the running version and
+   **Back to stable**. Pick stable, stage, restart, and confirm stable
+   retains the same or newer running daemon. Check a draft saved through the
+   restart, and record frame and origin refusal on the native transport.
+3. Repeat with missing checksum, bad signature, changed bytes, and an
+   interrupted transfer. Confirm refusal and retry against the valid feed.
+   Stage an update, select the other channel, quit before downloading, and
+   confirm reopen offers no superseded restart. Force an install or swap
+   failure and verify retry or reinstall with the retained profile.
+4. Run the [Windows migration checks](migration/README.md). Exercise an
+   Electron update from a disposable populated profile using the legacy zip
+   and SUMS with the fixture release. Set `WERKSCHAFT_UPDATE_FEED` to
+   `http://127.0.0.1:43137` in the environment that launches Electron.
+   Cover failed file moves and rollback,
+   failed installer and first launch, SmartScreen, the retained profile,
+   default Tauri Settings, exact downgrade over a newer installed canary,
+   and launch-only after a Tauri self-update. Check a shared portable folder
+   under a second account. On macOS, check the same Electron swap using the
+   Tauri app at the zip root, plus relaunch and recovery on the authorized
+   native test host.

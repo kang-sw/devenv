@@ -262,9 +262,9 @@ impl Feed {
             .transpose()
     }
 
-    pub async fn check(
+    pub async fn check<R: tauri::Runtime>(
         &self,
-        app: &AppHandle,
+        app: &AppHandle<R>,
         action: Action,
     ) -> Result<(Option<Offer>, bool), &'static str> {
         let root = format!("{}/repos/{REPO}/releases", self.api);
@@ -318,9 +318,9 @@ impl Feed {
         ))
     }
 
-    pub fn restore(
+    pub fn restore<R: tauri::Runtime>(
         &self,
-        app: &AppHandle,
+        app: &AppHandle<R>,
         metadata: StagedMetadata,
     ) -> Result<Option<Offer>, &'static str> {
         let target = metadata.manifest["version"]
@@ -401,12 +401,110 @@ fn manifest_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::{engine::general_purpose::STANDARD, Engine};
     use serde_json::json;
+    use std::sync::{Arc, Mutex};
+    use tauri::test::{mock_builder, mock_context, noop_assets};
+
+    use crate::shell::Connection;
+    use crate::updates::{cache, Controller, State};
 
     const MAC: Platform = Platform {
         target: "darwin-aarch64",
         asset: "Werkschaft-darwin-arm64.app.tar.gz",
     };
+
+    // Tauri updater 2.14.1's public test vector signs the bytes "test" as 2.0.0.
+    const KEY: &str = "untrusted comment: minisign public key: A49EF4746FA6E6D7\nRWTX5qZvdPSepDGWg2bz8n6ArQnBMwgQK1geVosorcbLzcunD+KJ+cYe";
+    const SIGNATURE: &str = concat!(
+        "untrusted comment: signature from tauri secret key\n",
+        "RUTX5qZvdPSepPF2zsjvP/L/TQtBLRnWRvaq+4omK1UEugtQp/USrGiI1v762sDy3id3aor7bRC9ETyeot6lMHHrWoZ5hjUM1Qc=\n",
+        "trusted comment: timestamp:1791649051\tfile:payload\tversion:2.0.0\n",
+        "DDq2CLOEl5cQmC2eJRHlnZPVViOZsu1CjpPKQoei4A/XBfkDqGO0B+QMrcrHgEQ5qV3mne75tdFWhJpqUXh9AA==",
+    );
+
+    #[test]
+    fn signed_staging_and_interrupted_channel_switch_use_the_same_recovery_state() {
+        let mut context = mock_context(noop_assets());
+        context.package_info_mut().version = version("2.0.1-canary.1").unwrap();
+        context.config_mut().plugins.0.insert(
+            "updater".into(),
+            json!({"pubkey": STANDARD.encode(KEY), "requireSignedVersion": true}),
+        );
+        let app = mock_builder()
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .build(context)
+            .unwrap();
+        let controller = || Controller {
+            connection: Arc::new(Connection::default()),
+            app: app.handle().clone(),
+            feed: Feed::new(MAC).unwrap(),
+            state: Mutex::new(State::default()),
+            cache: Mutex::new(None),
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let stage = directory.path().join("staged-package");
+        let metadata = |version: &str, action, signature: &str| StagedMetadata {
+            action,
+            manifest: json!({
+                "version": version,
+                "platforms": { MAC.target: {
+                    "url": asset_url(GITHUB, &format!("v{version}"), MAC.asset),
+                    "sha256": format!("{:x}", Sha256::digest(b"test")),
+                    "signature": signature,
+                    "size": 4
+                }}
+            }),
+        };
+        let signature = STANDARD.encode(SIGNATURE);
+        let running = controller();
+        running.restore(directory.path().to_owned());
+        let offer = |version, action, signature| {
+            running
+                .feed
+                .restore(app.handle(), metadata(version, action, signature))
+                .unwrap()
+                .unwrap()
+        };
+        let corrupt = offer("2.0.0", Action::StableReturn, "invalid-signature");
+        let signed = offer("2.0.0", Action::StableReturn, &signature);
+        assert!(running.verify_and_stage(&corrupt, b"test").is_err());
+        assert!(running.verify_and_stage(&signed, b"tes").is_err());
+        assert!(running.verify_and_stage(&signed, b"tAst").is_err());
+        assert!(cache::load_header(&stage).unwrap().is_none());
+        running.verify_and_stage(&signed, b"test").unwrap();
+        drop(running);
+
+        let reopened = controller();
+        reopened.restore(directory.path().to_owned());
+        assert_eq!(reopened.state.lock().unwrap().phase()["phase"], "ready");
+        let canary = reopened
+            .feed
+            .restore(
+                app.handle(),
+                metadata("2.0.2-canary.1", Action::Canary, &signature),
+            )
+            .unwrap()
+            .unwrap();
+        assert!(!reopened.accept_offer(canary).unwrap());
+        assert_eq!(reopened.state.lock().unwrap().phase()["action"], "canary");
+        assert!(cache::load_header(&stage).unwrap().is_none());
+        drop(reopened);
+
+        let retried = controller();
+        retried.restore(directory.path().to_owned());
+        assert_eq!(retried.state.lock().unwrap().phase()["phase"], "unchecked");
+        let signed = retried
+            .feed
+            .restore(
+                app.handle(),
+                metadata("2.0.0", Action::StableReturn, &signature),
+            )
+            .unwrap()
+            .unwrap();
+        retried.verify_and_stage(&signed, b"test").unwrap();
+        assert!(cache::load_header(&stage).unwrap().is_some());
+    }
 
     fn release(tag: &str, prerelease: bool, complete: bool) -> Release {
         Release {

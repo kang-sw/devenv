@@ -24,9 +24,9 @@ const FIRST_CHECK: Duration = Duration::from_secs(8);
 const INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const MIN_CHECK_INTERVAL: Duration = Duration::from_secs(2);
 
-pub struct Controller {
+pub struct Controller<R: tauri::Runtime = tauri::Wry> {
     connection: Arc<Connection>,
-    app: AppHandle,
+    app: AppHandle<R>,
     feed: Feed,
     state: Mutex<State>,
     cache: Mutex<Option<cache::Cache>>,
@@ -83,8 +83,8 @@ impl Command {
     }
 }
 
-impl Controller {
-    pub fn start(app: &AppHandle, connection: Arc<Connection>) {
+impl<R: tauri::Runtime> Controller<R> {
+    pub fn start(app: &AppHandle<R>, connection: Arc<Connection>) {
         let configured = app
             .config()
             .plugins
@@ -177,27 +177,55 @@ impl Controller {
         true
     }
 
-    async fn check(&self, action: Action, manual: bool) {
-        let result = self.feed.check(&self.app, action).await;
+    fn accept_offer(&self, offer: Offer) -> Result<bool, &'static str> {
+        let ready = {
+            let state = self.state.lock().unwrap();
+            match state.selected.as_ref().filter(|s| s.bytes.is_some()) {
+                Some(s)
+                    if s.offer.update.version == offer.update.version
+                        && s.offer.action == offer.action =>
+                {
+                    return Ok(true);
+                }
+                Some(_) => true,
+                None => false,
+            }
+        };
+        if ready {
+            let cache = self.cache.lock().unwrap();
+            cache
+                .as_ref()
+                .ok_or("Shell update storage is unavailable.")?
+                .discard_stage()
+                .map_err(|_| "Could not clear the previous shell update.")?;
+        }
+        self.state.lock().unwrap().selected = Some(Selection {
+            offer: Arc::new(offer),
+            bytes: None,
+        });
+        Ok(false)
+    }
+
+    async fn check(self: &Arc<Self>, action: Action, manual: bool) {
+        let result = match self.feed.check(&self.app, action).await {
+            Ok((Some(offer), limited)) => {
+                let version = offer.update.version.clone();
+                let controller = self.clone();
+                async_runtime::spawn_blocking(move || controller.accept_offer(offer))
+                    .await
+                    .unwrap_or(Err("Could not select the shell update."))
+                    .map(|ready| (Some((version, ready)), limited))
+            }
+            Ok((None, limited)) => Ok((None, limited)),
+            Err(message) => Err(message),
+        };
         let current = self.app.package_info().version.to_string();
         let event = {
             let mut state = self.state.lock().unwrap();
             state.busy = false;
             match result {
-                Ok((Some(offer), _)) => {
+                Ok((Some((version, same_ready)), _)) => {
                     state.checked = true;
-                    let version = offer.update.version.clone();
-                    let same_ready = state.selected.as_ref().is_some_and(|s| {
-                        s.bytes.is_some()
-                            && s.offer.update.version == version
-                            && s.offer.action == action
-                    });
-                    if !same_ready {
-                        state.selected = Some(Selection {
-                            offer: Arc::new(offer),
-                            bytes: None,
-                        });
-                    }
                     let skipped = state.skipped.as_deref() == Some(&version)
                         && action != Action::StableReturn;
                     json!({
@@ -225,6 +253,16 @@ impl Controller {
             }
         };
         self.publish(event);
+    }
+
+    fn verify_and_stage(&self, offer: &Offer, bytes: &[u8]) -> Result<(), &'static str> {
+        offer.verify(bytes)?;
+        let cache = self.cache.lock().unwrap();
+        let cache = cache
+            .as_ref()
+            .ok_or("Shell update storage is unavailable.")?;
+        cache::stage(&cache.stage, &offer.metadata, bytes)
+            .map_err(|_| "Could not save the verified shell update.")
     }
 
     fn begin_selection(&self, command: &Command) -> Option<(Arc<Offer>, Option<Arc<Vec<u8>>>)> {
@@ -256,11 +294,7 @@ impl Controller {
                 let updater = self.clone();
                 let selected = offer.clone();
                 async_runtime::spawn_blocking(move || {
-                    selected.verify(&bytes)?;
-                    if let Some(cache) = updater.cache.lock().unwrap().as_ref() {
-                        cache::stage(&cache.stage, &selected.metadata, &bytes)
-                            .map_err(|_| "Could not save the verified shell update.")?;
-                    }
+                    updater.verify_and_stage(&selected, &bytes)?;
                     Ok(bytes)
                 })
                 .await

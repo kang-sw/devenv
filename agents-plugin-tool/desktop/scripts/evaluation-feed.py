@@ -13,6 +13,11 @@ DOWNLOAD = f"/{REPO}/releases/download/"
 RELEASES = f"/repos/{REPO}/releases"
 MANIFEST = "werkschaft-tauri-update.json"
 ADDR = ("127.0.0.1", 43137)
+LEGACY = {
+    "Werkschaft-darwin-arm64.zip",
+    "Werkschaft-win32-x64.zip",
+    "Werkschaft-desktop-SHA256SUMS",
+}
 
 
 def read_release(directory, canary):
@@ -30,6 +35,8 @@ def read_release(directory, canary):
         if name == url or name != Path(name).name:
             raise ValueError(f"Unexpected asset URL in {directory}")
         names.update((name, f"{name}.sig"))
+    if not canary:
+        names.update(LEGACY)
     for name in names:
         if not (directory / name).is_file():
             raise ValueError(f"Missing {directory / name}")
@@ -38,7 +45,14 @@ def read_release(directory, canary):
         "prerelease": canary,
         "draft": False,
         "assets": [
-            {"name": name, "browser_download_url": f"{base}{name}"}
+            {
+                "name": name,
+                "browser_download_url": (
+                    f"http://{ADDR[0]}:{ADDR[1]}{DOWNLOAD}{tag}/{name}"
+                    if name in LEGACY
+                    else f"{base}{name}"
+                ),
+            }
             for name in sorted(names)
         ],
     }, manifest, directory, names
