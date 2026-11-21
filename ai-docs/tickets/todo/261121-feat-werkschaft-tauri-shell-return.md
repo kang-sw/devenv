@@ -81,23 +81,23 @@ current packaged shell's daemon lifecycle and distribution behavior.
 
 ## Open Decision Queue
 
-Last ID used: (??)
+Last ID used: (2061)
 
-(??) [open] [announced] Keep the separate release-download daemon updater on its own ticket. See `261115-feat-ws-daemon-release-auto-update` and `261115-feat-werkschaft-electron-daemon-override` decision (1201).
+(2049) [open] [announced] Keep the separate release-download daemon updater on its own ticket. See `261115-feat-ws-daemon-release-auto-update` and `261115-feat-werkschaft-electron-daemon-override` decision (1201).
 
-(??) [open] [announced] Carry forward the explicit canary opt-in and stable return for shell updates. See `261120-feat-desktop-canary-release-channel` Phases 2–3.
+(2050) [open] [announced] Carry forward the explicit canary opt-in and stable return for shell updates. See `261120-feat-desktop-canary-release-channel` Phases 2–3.
 
-(??) [open] [technical] Prefer including the Evergreen WebView2 bootstrapper if Windows ships an installer, with a supported runtime prerequisite if it stays portable, because some Windows images lack the runtime.
+(2051) [open] [technical] Prefer including the Evergreen WebView2 bootstrapper if Windows ships an installer, with a supported runtime prerequisite if it stays portable, because some Windows images lack the runtime.
 
-(??) [open] [technical] Enable Tauri's `devtools` Cargo feature explicitly in the release build configuration or include it in the default Cargo feature set. On Windows use Open Developer Tools because WebView2 lacks the Wry toggle behavior. Decision (2021) in `261121-feat-ws-dashboard-inpage-dialogs` already requires the release menu and shortcuts.
+(2052) [open] [technical] Enable Tauri's `devtools` Cargo feature explicitly in the release build configuration or include it in the default Cargo feature set. On Windows use Open Developer Tools because WebView2 lacks the Wry toggle behavior. Decision (2021) in `261121-feat-ws-dashboard-inpage-dialogs` already requires the release menu and shortcuts.
 
-(??) [open] [technical] Use Windows `CloseRequested` only to provide a fallback for legacy renderers or failed recovery, rather than leave those cases entirely to the webview. Decision (2020) in `261121-feat-ws-dashboard-inpage-dialogs` already calls for prompt-free close when recovery is available.
+(2053) [open] [technical] Use Windows `CloseRequested` only to provide a fallback for legacy renderers or failed recovery, rather than leave those cases entirely to the webview. Decision (2020) in `261121-feat-ws-dashboard-inpage-dialogs` already calls for prompt-free close when recovery is available.
 
-(??) [open] [technical] Add a narrowly scoped WebView2 subframe navigation hook where the existing sandbox and daemon policy cannot enforce Electron's frame boundary, over relying on Tauri's top-level callback alone.
+(2054) [open] [technical] Add a narrowly scoped WebView2 subframe navigation hook where the existing sandbox and daemon policy cannot enforce Electron's frame boundary, over relying on Tauri's top-level callback alone.
 
-(??) [open] [technical] Keep update actions in Settings through an optional, pinned-main-frame bridge over moving them to native menus, to preserve the existing user flow with a bounded set of operations.
+(2055) [open] [technical] Keep update actions in Settings through an optional, pinned-main-frame bridge over moving them to native menus, to preserve the existing user flow with a bounded set of operations.
 
-(??) [open] [policy] Choose `tauri-plugin-updater` with signed NSIS/MSI and `.app.tar.gz` update artifacts, changing Windows from portable zip to installer, or port the current custom zip updater.
+(2056) [open] [policy] Choose `tauri-plugin-updater` with signed NSIS/MSI and `.app.tar.gz` update artifacts, changing Windows from portable zip to installer, or port the current custom zip updater.
 
 - The existing Windows zip requires no installer. An installer also gives
   the release pipeline a place to handle the Evergreen bootstrapper.
@@ -106,21 +106,21 @@ Last ID used: (??)
 - Prefer the Tauri updater if changing Windows delivery is acceptable. It
   delegates signed package verification and installation to the updater.
 
-(??) [open] [policy] Decide how an existing Electron installation moves to Tauri after P4, through an opt-in migration offered by Electron or an explicit separate Tauri install.
+(2057) [open] [policy] Decide how an existing Electron installation moves to Tauri after P4, through an opt-in migration offered by Electron or an explicit separate Tauri install.
 
 - An Electron offer needs a supported handoff from a zip installation.
   A separate install keeps Electron's existing update feed intact.
 - Prefer a separate install unless a tested handoff preserves the existing
   installation and gives the user a recovery route.
 
-(??) [open] [policy] Decide whether to keep `261115-feat-werkschaft-electron-shell` Phases 2–4 open or re-home the overlapping reliability and Windows delivery work once Tauri passes P4. See that ticket's decision (859)=a and Phases 2–4.
+(2058) [open] [policy] Decide whether to keep `261115-feat-werkschaft-electron-shell` Phases 2–4 open or re-home the overlapping reliability and Windows delivery work once Tauri passes P4. See that ticket's decision (859)=a and Phases 2–4.
 
 - The earlier owner choice moved these phases from Tauri to Electron.
   Phase 4 is conditional on a need for new shell-only HTTP authority.
 - Prefer re-homing only overlapping work after Tauri passes P4 and keeping
   the grant conditional on an actual need for new authority.
 
-(??) [open] [policy] Decide whether Tauri inherits Electron's automatic newer-core bundled-daemon replacement across minors or requires an explicit action at the existing minor boundary. See `261115-feat-werkschaft-electron-daemon-override` decision (1343)=a.
+(2059) [open] [policy] Decide whether Tauri inherits Electron's automatic newer-core bundled-daemon replacement across minors or requires an explicit action at the existing minor boundary. See `261115-feat-werkschaft-electron-daemon-override` decision (1343)=a.
 
 - Current ordinary Electron startup upgrades any older numeric core and
   never downgrades, including at a minor boundary where older plugins
@@ -129,7 +129,7 @@ Last ID used: (??)
   match the current bundled lifecycle. Confirm the owner-facing lockout
   consequence before relying on it.
 
-(??) [open] [policy] Decide whether P4 requires OS signing and macOS notarization or accepts signed updater artifacts and documented OS signing requirements for the candidate.
+(2060) [open] [policy] Decide whether P4 requires OS signing and macOS notarization or accepts signed updater artifacts and documented OS signing requirements for the candidate.
 
 - Updater trust and OS recognition of a signed installer or app are
   separate checks. The Electron release workflow currently packages
@@ -137,7 +137,7 @@ Last ID used: (??)
 - Prefer proving updater trust in P3 and deciding OS signing requirements
   before publishing a Tauri replacement.
 
-(??) [open] [policy] Set P4's size, memory, and interaction-performance pass thresholds or have the owner decide from the paired measurements.
+(2061) [open] [policy] Set P4's size, memory, and interaction-performance pass thresholds or have the owner decide from the paired measurements.
 
 - The research ticket records an expectation of lower size and memory.
   It records no measured Tauri baseline or numeric pass threshold.
