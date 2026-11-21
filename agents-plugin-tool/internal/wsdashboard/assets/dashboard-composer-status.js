@@ -99,6 +99,7 @@
     // so both dimensions can transition even during a streaming update.
     var box = agisland.getBoundingClientRect(), transition = agisland.style.transition;
     agisland.style.transition = "none";
+    agisland.setAttribute("data-sizing", "1");
     if (mode === "compact" && view && view.style) view.style.width = "max-content";
     agisland.style.width = mode === "full" ? "500px" : "100%";
     agisland.style.height = "auto";
@@ -110,6 +111,8 @@
       agisland.style.setProperty("--ag-cw", width + "px");
     } else agisland.style.setProperty("--ag-fw", width + "px");
     var height = view.offsetHeight;
+    if (mode === "compact") agisland.style.setProperty("--ag-ch", height + "px");
+    agisland.removeAttribute("data-sizing");
     agisland.style.width = box.width + "px";
     agisland.style.height = box.height + "px";
     void agisland.offsetWidth;
