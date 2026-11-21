@@ -24,6 +24,41 @@ type PiBackend struct {
 	Command string
 }
 
+func (b PiBackend) registration() (string, BackendRegistration) {
+	readTools := []string{"read", "grep", "find", "ls"}
+	return BackendPi, BackendRegistration{
+		Backend:          b,
+		LeadProfile:      LeadProfilePi,
+		PermissionLevels: LeadPermissionLevels(),
+		NativeCompaction: PiCompaction(),
+		WorkerCapable:    true,
+		WorkerProfile:    AgentWorkerProfile(BackendPi),
+		PlaybookTerminology: PlaybookTerminology{
+			ExploreAgent:  "an exploration agent",
+			SpawnIdiom:    "spawning a subagent",
+			ContinueIdiom: "resuming the agent using its returned id",
+		},
+		Profiles: []BuiltinProfileRegistration{
+			supportBuiltinProfile(SupportProfilePi, BackendPi, nil),
+			{Name: PiWorkerProfile, Definition: Profile{
+				Description: "Pi subagent (pi): a headless Pi worker a session spawns with a prompt and steers by its id; it reads, edits, and runs commands in its working directory, commits through ws, and may spawn Pi subagents of its own within the daemon's depth and tier caps.",
+				Backend:     BackendPi, Tools: PiWorkerTools, WSTools: PiWorkerWSTools,
+			}},
+			{Name: PiMiniLeadProfile, Definition: Profile{
+				Description: "Pi mini-lead: a non-lead coding worker with bounded ticket workflow tools; may spawn only profiles within its launched tool set.",
+				Backend:     BackendPi, Tools: PiWorkerTools, WSTools: PiMiniLeadWSTools,
+			}},
+			agentWorkerBuiltinProfile(BackendPi, PiWorkerTools),
+			{Name: ExploreProfile, Definition: Profile{
+				Description: "Local read-only Pi researcher reporting evidence from project files.",
+				Backend:     BackendPi, Tools: readTools, Instructions: BuiltinInstructionsPrefix + ExploreProfile,
+			}},
+			searchAnswerBuiltinProfile(SearchAnswerProfilePi, BackendPi, readTools),
+			leadBuiltinProfile(LeadProfilePi, BackendPi, ""),
+		},
+	}
+}
+
 // piEfforts are pi's thinking levels (--thinking), lowest first.
 var piEfforts = []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 

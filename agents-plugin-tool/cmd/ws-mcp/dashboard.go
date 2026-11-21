@@ -301,26 +301,7 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged, agyActivity func
 		modelWaitSeconds = 0
 	}
 	keys := mcp.NewAgentKeyStore()
-	backends := map[string]wsagent.BackendRegistration{
-		wsagent.BackendClaude: {Backend: wsagent.ClaudeBackend{}, LeadProfile: wsagent.LeadProfileClaude, PermissionModes: wsagent.LeadPermissionModes, PermissionLevels: wsagent.LeadPermissionLevels(), Catalog: wsagent.ClaudeCatalog(), ManualHarness: "claude", PlaybookCommands: true, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendClaude), WorkerHTTPMCP: true},
-		// Pi stays handle-only outside its native compaction descriptor.
-		wsagent.BackendPi: {NativeCompaction: wsagent.PiCompaction(), Backend: wsagent.PiBackend{}, LeadProfile: wsagent.LeadProfilePi, PermissionLevels: wsagent.LeadPermissionLevels(), WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendPi)},
-		// Codex workers are daemon-owned like agy's: HTTP MCP, auto-approved
-		// inside the sandbox their authority selects (codexWorkerMode). Its
-		// native tool names are already valid, so no name scheme applies.
-		wsagent.BackendCodex: {Backend: wsagent.CodexBackend{}, LeadProfile: wsagent.LeadProfileCodex, PermissionModes: wsagent.CodexPermissionModes, PermissionLevels: wsagent.LeadPermissionLevels(), Catalog: wsagent.CodexCatalog(), ManualHarness: wsagent.BackendCodex, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendCodex), WorkerHTTPMCP: true, WorkerAutoApprove: true},
-		// agy workers use the default agent and auto-allow its permission
-		// requests. It maps no common lead permission level yet. Both
-		// roles use HTTP MCP and underscore tool-name aliases.
-		wsagent.BackendAgy: {Backend: wsagent.AgyBackend{}, LeadProfile: wsagent.LeadProfileAgy, PermissionModes: wsagent.AgyPermissionModes, Catalog: wsagent.AgyCatalog(), ToolNameScheme: wsagent.ToolNameSchemeSanitize, CallFallback: true, DirectTools: []string{
-			"workflow_manual", "workflow_state", "agenda.set", "agenda.list", "agenda.clear",
-			"whiteboard.update", "whiteboard.query", "mailbox.send", "mailbox.recv",
-			"agent.spawn", "agent.interrupt", "agent.list", "playbook.read", "playbook.render",
-			"tickets.query", "tickets.move", "git.status", "git.log", "git.commit", "git.merge",
-			"worktree.acquire", "worktree.release", "note.query", "note.write",
-			"config.resolve_agent", "todo.list", "todo.check",
-		}, ToolsAlwaysLoad: true, ManualHarness: wsagent.BackendAgy, PlaybookCommands: true, WorkerCapable: true, WorkerProfile: wsagent.AgentWorkerProfile(wsagent.BackendAgy), WorkerHTTPMCP: true, WorkerAutoApprove: true},
-	}
+	backends := wsagent.BuiltinBackendRegistrations()
 	return wsagent.NewRunner(wsagent.Options{
 		Dir:                        dir,
 		DaemonVersion:              version,

@@ -51,6 +51,36 @@ type AgyBackend struct {
 	Command string
 }
 
+func (b AgyBackend) registration() (string, BackendRegistration) {
+	return BackendAgy, BackendRegistration{
+		Backend:         b,
+		LeadProfile:     LeadProfileAgy,
+		PermissionModes: AgyPermissionModes,
+		Catalog:         AgyCatalog(),
+		ToolNameScheme:  ToolNameSchemeSanitize,
+		CallFallback:    true,
+		DirectTools: []string{
+			"workflow_manual", "workflow_state", "agenda.set", "agenda.list", "agenda.clear",
+			"whiteboard.update", "whiteboard.query", "mailbox.send", "mailbox.recv",
+			"agent.spawn", "agent.interrupt", "agent.list", "playbook.read", "playbook.render",
+			"tickets.query", "tickets.move", "git.status", "git.log", "git.commit", "git.merge",
+			"worktree.acquire", "worktree.release", "note.query", "note.write",
+			"config.resolve_agent", "todo.list", "todo.check",
+		},
+		ToolsAlwaysLoad:   true,
+		ManualHarness:     BackendAgy,
+		PlaybookCommands:  true,
+		WorkerCapable:     true,
+		WorkerProfile:     AgentWorkerProfile(BackendAgy),
+		WorkerHTTPMCP:     true,
+		WorkerAutoApprove: true,
+		Profiles: []BuiltinProfileRegistration{
+			agentWorkerBuiltinProfile(BackendAgy, nil),
+			leadBuiltinProfile(LeadProfileAgy, BackendAgy, ""),
+		},
+	}
+}
+
 // AgyPermissionModes are the hosted lead choices. bypass is ws-side intent;
 // the process still runs in agy's native default mode.
 var AgyPermissionModes = []string{"default", "accept-edits", "auto", "plan", "bypass"}

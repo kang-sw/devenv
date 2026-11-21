@@ -2,52 +2,18 @@
 package mcp
 
 import (
+	"slices"
+	"strings"
+
 	"github.com/kang-sw/devenv/internal/claudeagents"
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
-	"slices"
-	"strings"
 )
 
-// playbookTerminologyTable is the bundled harness-aware terminology table.
-//
-// Keys are harness names ("claude", "codex", "pi"); "" is the host-neutral fallback for
-// any unrecognized or undetected harness.
-// Values map PascalCase variable names (matching playbook frontmatter declarations)
-// to their harness-specific text.
-//
-// Model names and reasoning efforts are NOT in this table — they are resolved from config at
-// render time via resolveRoleModelVar (playbook's own declared tier) or
-// resolveTierModelVars (the fixed-tier model and effort vars). Only non-model idioms belong here.
-var playbookTerminologyTable = map[string]map[string]string{
-	"claude": {
-		"ExploreAgent": "the Explore agent",
-		// SpawnIdiom is namespace-dependent; terminologyForHarness adds it
-		// from claudeSpawnIdiom.
-		"ContinueIdiom": "SendMessage(to: <agentId>)",
-	},
-	"codex": {
-		"ExploreAgent":  "an explorer subagent",
-		"SpawnIdiom":    "creating a new Codex task",
-		"ContinueIdiom": "resuming the agent using its task id",
-	},
-	"pi": {
-		"ExploreAgent":  "an exploration agent",
-		"SpawnIdiom":    "spawning a subagent",
-		"ContinueIdiom": "resuming the agent using its returned id",
-	},
-	// "" = host-neutral fallback for unknown/undetected harness.
-	"": {
-		"ExploreAgent":  "an exploration agent",
-		"SpawnIdiom":    "spawning a subagent",
-		"ContinueIdiom": "resuming the agent using its returned id",
-	},
-}
-
 // reservedToolVarNames documents the complete set of variable names that the
-// tool layer may inject (from the terminology table, namespace table, or model
+// tool layer may inject (from the terminology bindings, namespace table, or model
 // alias resolution).
 // This variable is a documentation artifact: the "tool-injected wins on
 // collision" invariant is achieved by layer ordering in buildPlaybookVars
@@ -56,49 +22,42 @@ var playbookTerminologyTable = map[string]map[string]string{
 // documented reserved set is complete.
 //
 // Fixed-tier model and reasoning-effort variables are
-// config-resolved like RoleModel, not playbookTerminologyTable entries — they
+// config-resolved like RoleModel. They
 // arrive here via the wsrsrc.ImplicitVariableNames loop below (auto-inject
 // pattern), not an explicit set[...] = true line.
 var reservedToolVarNames = func() map[string]bool {
-	set := map[string]bool{}
-	for _, vars := range playbookTerminologyTable {
-		for name := range vars {
-			set[name] = true
-		}
+	set := map[string]bool{
+		"ExploreAgent":  true,
+		"SpawnIdiom":    true,
+		"ContinueIdiom": true,
+		"RoleModel":     true,
+		"WorkflowLang":  true,
 	}
-	// Explicit because the claude row computes SpawnIdiom at resolve time
-	// rather than declaring it.
-	set["SpawnIdiom"] = true
-	// Tier-derived model var reserved name.
-	set["RoleModel"] = true
-	// workflow.lang language-binding injection.
-	set["WorkflowLang"] = true
 	for _, name := range wsrsrc.ImplicitVariableNames {
 		set[name] = true
 	}
 	return set
 }()
 
-// terminologyForHarness returns the effective terminology for the given harness.
-// If harness is not recognized ("" or any value other than "claude"/"codex"/"pi"),
-// the host-neutral ("") table is returned. For "claude" it returns a fresh copy
-// of the table row with SpawnIdiom computed by claudeSpawnIdiom, because that
-// value depends on the runtime namespace; read terminology through this
-// function, never playbookTerminologyTable directly.
+// terminologyForHarness binds the registered static idioms to playbook
+// variables. A harness without static idioms uses the host-neutral wording.
 func terminologyForHarness(harness, namespace string) map[string]string {
-	table, ok := playbookTerminologyTable[harness]
-	if !ok {
-		return playbookTerminologyTable[""]
-	}
-	if harness == "claude" {
-		resolved := make(map[string]string, len(table))
-		for k, v := range table {
-			resolved[k] = v
+	terms := wsagent.BuiltinPlaybookTerminology(harness)
+	if terms == (wsagent.PlaybookTerminology{}) {
+		terms = wsagent.PlaybookTerminology{
+			ExploreAgent:  "an exploration agent",
+			SpawnIdiom:    "spawning a subagent",
+			ContinueIdiom: "resuming the agent using its returned id",
 		}
-		resolved["SpawnIdiom"] = claudeSpawnIdiom(namespace)
-		return resolved
 	}
-	return table
+	if harness == wsagent.BackendClaude {
+		terms.SpawnIdiom = claudeSpawnIdiom(namespace)
+	}
+	return map[string]string{
+		"ExploreAgent":  terms.ExploreAgent,
+		"SpawnIdiom":    terms.SpawnIdiom,
+		"ContinueIdiom": terms.ContinueIdiom,
+	}
 }
 
 // playbookTerminology selects the daemon agent idioms (agent.spawn and

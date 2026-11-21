@@ -516,8 +516,8 @@ func AgyCatalog() *HarnessProfile {
 			CommandEndConfirms: true,
 			PromptPersists:     true,
 		},
-		Oldest:     "1.5.9",
-		Newest:     "1.5.12",
+		Oldest: "1.5.9",
+		Newest: "1.5.12",
 		Entries: []CapabilityEntry{
 			{Item: ItemSkillList, Role: RoleLead, Grade: GradeUnsupported,
 				Source: "available_commands_update is shown as the command list but not read as a skill list"},
@@ -568,9 +568,5 @@ func PiCompaction() *CompactionProtocol {
 // BuiltinCompaction is the keyless config reader's descriptor floor. Runtime
 // callers prefer their admitted registration, including external backends.
 func BuiltinCompaction(harness string) CompactionProtocol {
-	descriptors := map[string]func() *HarnessProfile{BackendClaude: ClaudeCatalog, BackendCodex: CodexCatalog, BackendAgy: AgyCatalog}
-	if f := descriptors[harness]; f != nil {
-		return f().Compaction
-	}
-	return map[string]CompactionProtocol{BackendPi: *PiCompaction()}[harness]
+	return builtinRegistration(harness).CompactionProtocol()
 }

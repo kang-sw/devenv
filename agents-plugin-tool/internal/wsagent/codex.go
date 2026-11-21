@@ -26,6 +26,30 @@ type CodexBackend struct {
 	Command string
 }
 
+func (b CodexBackend) registration() (string, BackendRegistration) {
+	return BackendCodex, BackendRegistration{
+		Backend:           b,
+		LeadProfile:       LeadProfileCodex,
+		PermissionModes:   CodexPermissionModes,
+		PermissionLevels:  LeadPermissionLevels(),
+		Catalog:           CodexCatalog(),
+		ManualHarness:     BackendCodex,
+		WorkerCapable:     true,
+		WorkerProfile:     AgentWorkerProfile(BackendCodex),
+		WorkerHTTPMCP:     true,
+		WorkerAutoApprove: true,
+		PlaybookTerminology: PlaybookTerminology{
+			ExploreAgent:  "an explorer subagent",
+			SpawnIdiom:    "creating a new Codex task",
+			ContinueIdiom: "resuming the agent using its task id",
+		},
+		Profiles: []BuiltinProfileRegistration{
+			agentWorkerBuiltinProfile(BackendCodex, nil),
+			leadBuiltinProfile(LeadProfileCodex, BackendCodex, ""),
+		},
+	}
+}
+
 // A thread request may connect the user's MCP servers before answering.
 var codexRequestTimeout = 2 * time.Minute
 

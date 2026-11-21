@@ -255,11 +255,7 @@ func TestPlaybookPrintGoldenExploreJunkHarness(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTerminologyTableCoverage(t *testing.T) {
-	for _, harness := range []string{"claude", "codex", "pi", ""} {
-		if _, ok := playbookTerminologyTable[harness]; !ok {
-			t.Errorf("terminology table missing harness entry %q", harness)
-			continue
-		}
+	for _, harness := range []string{"claude", "codex", "pi", "agy", "", "unknown"} {
 		// The effective table: claude's SpawnIdiom is added at resolve time.
 		tbl := terminologyForHarness(harness, RuntimeNamespace())
 		for _, varName := range []string{"ExploreAgent", "SpawnIdiom", "ContinueIdiom"} {

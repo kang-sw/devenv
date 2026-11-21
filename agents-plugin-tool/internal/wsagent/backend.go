@@ -29,6 +29,13 @@ type Backend interface {
 	Start(ctx context.Context, spec StartSpec) (Process, error)
 }
 
+// registrationBackend is the built-in adapter's descriptor provider. Backends
+// registered by a caller can still supply a BackendRegistration directly.
+type registrationBackend interface {
+	Backend
+	registration() (string, BackendRegistration)
+}
+
 // StartSpec is what a backend launches a process from.
 type StartSpec struct {
 	// Root is the conversation's working root: the child's working

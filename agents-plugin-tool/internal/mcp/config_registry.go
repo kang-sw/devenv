@@ -21,8 +21,8 @@ var (
 	sageReviewEnum        = []string{"off", "ask", "auto"}
 	reviewPhaseEnum       = []string{"off", "lite", "full"}
 	agentsTierEnum        = []string{"small", "medium", "large", "xlarge"}
-	promptHarnessEnum     = []string{"claude", "codex", "pi", "agy", "*"}
-	agentsTierHarnessEnum = []string{"claude", "codex", "pi", "agy", "default"}
+	promptHarnessEnum     = append(wsagent.BuiltinHarnessNames(), "*")
+	agentsTierHarnessEnum = append(wsagent.BuiltinHarnessNames(), "default")
 	agentsTierScopeEnum   = []string{"project", "global"}
 )
 
@@ -148,7 +148,7 @@ func (e configKeyEntry) HarnessStored() bool { return e.HarnessApplicable && e.R
 // harnessBuckets is the fixed set of harness buckets a harness-bucketed knob
 // stores values under, in listing order. "all" is the stored spelling of the
 // caller-facing "*" and applies to every harness.
-var harnessBuckets = []string{"claude", "codex", "pi", "agy", "all"}
+var harnessBuckets = append(wsagent.BuiltinHarnessNames(), "all")
 
 // orchestrateHarnessWhitelist is the set of harness names verified to support
 // the nested spawn chain lead -> sub-lead -> worker -> delegate -> explore that

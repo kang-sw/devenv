@@ -169,7 +169,7 @@ func TestBuiltinPiMiniLeadProfileResolves(t *testing.T) {
 func TestBuiltinLeadProfilesResolve(t *testing.T) {
 	opts := testConfig(t)
 	root := t.TempDir()
-	for backend, name := range map[string]string{BackendClaude: LeadProfileClaude, BackendPi: LeadProfilePi} {
+	for backend, name := range map[string]string{BackendClaude: LeadProfileClaude, BackendPi: LeadProfilePi, BackendCodex: LeadProfileCodex, BackendAgy: LeadProfileAgy} {
 		if LeadProfileFor(backend) != name {
 			t.Fatalf("LeadProfileFor(%s) = %q, want %q", backend, LeadProfileFor(backend), name)
 		}
