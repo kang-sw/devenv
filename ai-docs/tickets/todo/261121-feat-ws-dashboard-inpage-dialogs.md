@@ -47,6 +47,31 @@ inventory was checked at `1b8605ab4`.
   with source citations. A T3 boundary needs a minor bump and explicit owner
   approval.
 
+- (2020) Auto-persist and restore drafts, including pasted image blobs and
+  unsent input, so operating-system window close needs no shell prompt, provided
+  pasted images can be restored (see (2041)). Define recovery for failed writes
+  and unacknowledged sends without duplicate delivery. Rejected: hold the native
+  close request while the page asks the user to Stay or Leave.
+- (2021) Keep the DevTools menu entry and shortcuts in release builds on all
+  platforms. A future Tauri shell enables the `devtools` Cargo feature in release
+  builds. Electron restricts release DevTools on no OS; Tauri's macOS private
+  API blocks Mac App Store acceptance, while this product ships GitHub release
+  zips ([Tauri debugging documentation](https://v2.tauri.app/develop/debug/)).
+  Rejected: remove release DevTools only on macOS, or remove them on all
+  platforms as originally announced.
+- (2022) Use an in-page toast or status for daemon-replacement refusal while
+  retaining the connection. Rejected: the Electron warning modal.
+- (2023) Removing the native Copy Browser Login Link menu item counts as
+  functionality removal; keep it outside this ticket's removal scope. Rejected:
+  treat it as duplicate UI and remove it.
+- (2024) Keep the browser `beforeunload` fallback for reloads and top-level
+  navigation outside the iframe swap. Rejected: retire the fallback.
+- (2025) Reuse the existing `rdeldlg` styling for the shared confirmation
+  helper. Rejected: introduce a separate modal style.
+- (2041) Persist pasted image blobs in browser IndexedDB keyed by the session
+  draft, clearing them on send or discard. Keep the image leave guard until
+  restore of held images is verified. Rejected: upload each paste to the daemon.
+
 ## Constraints
 
 - Electron remains the shipping shell. The Windows custom titlebar removal and
@@ -65,34 +90,6 @@ inventory was checked at `1b8605ab4`.
   [release-compatibility.md](../../manuals/release-compatibility.md). For any new
   or changed persistence, classify the data under the performance manual's
   Storage Types and account for file operations per affected action.
-
-## Open Decision Queue
-
-Last ID: (2041)
-
-(2020) [confirmed] [policy] Owner answer 2026-11-21: a, provided pasted images can be restored (they were deliberately guarded because pasted images are not kept: fda6c7a1e); see (2041). How should an operating-system window close handle unsaved dashboard drafts?
-
-- a. Auto-persist and restore the draft, including pasted image blobs and unsent input, so closing the window needs no shell prompt. Define how input survives a failed write and how an unacknowledged send is recovered without duplicate delivery.
-- b. Keep a shell close-requested check that asks the page to resolve in-page Stay/Leave for at-risk input before the shell closes. Keep the native close request pending while the user decides.
-
-> Recommendation: a, once recovery is verified for all current guard cases. It gives browser and desktop users the same recoverable drafts and removes the shell's close-confirmation dependency.
-
-(2021) [open] [announced] Remove the release-build DevTools menu entry and shortcuts, and keep development tooling. Owner direction on the whiteboard (1955) named DevTools among the shell clutter to clear.
-
-(2022) [open] [technical] Use an in-page toast or status for daemon-replacement refusal over the Electron warning modal. The controller already keeps the connection, so the notice reports the outcome without gating it and can carry forward to Tauri.
-
-(2023) [open] [policy] Does removing the native Copy Browser Login Link menu item count as removing functionality?
-
-- a. Count removal of the native entry point as functionality removal and require explicit approval to delete it. It uses machine authentication and can copy a root link when the visible document is outside the pinned dashboard.
-- b. Treat it as duplicate UI and approve removing it once the dashboard Settings action is shown to cover every owner-required copy path, including access from connection or recovery states if those are required.
-
-> Recommendation: a. Both actions mint login links, and only the native action has the observed machine-authenticated root fallback.
-
-(2024) [open] [technical] Keep the browser `beforeunload` fallback for reloads and top-level navigation outside the iframe swap over retiring it. It protects callers outside the swap path, and retirement requires a separate draft-recovery proof.
-
-(2041) [open] [technical] Persist pasted image blobs browser-locally in IndexedDB, keyed by the session draft and cleared on send or discard, over uploading each paste to the daemon - keeps paste and restore off daemon file I/O (performance Rule 5) and works in Electron, browsers, WKWebView and WebView2; the image leave guard stays until a restore of held images is verified.
-
-(2025) [open] [technical] Use the existing `rdeldlg` styling for the shared confirmation helper over introducing a separate modal style. The worktree-delete dialog already provides a labeled shell-independent modal and handles focus around rail redraws (`agents-plugin-tool/internal/wsdashboard/assets/dashboard-rail-popovers.js:875-895`, `agents-plugin-tool/internal/wsdashboard/assets/dashboard-rail-popovers.js:1017-1034`, `agents-plugin-tool/internal/wsdashboard/assets/dashboard-rail.css:560-565`).
 
 ## Phases
 
@@ -149,7 +146,8 @@ decision. Preserve the safe cache path and keep the source frame, draft, and
 history position when the user stays. Only the current accepted attempt may
 switch frames.
 
-After resolving (2020) and (2024), remove the native Stay/Leave dialog in
+Implement draft recovery under (2020) and (2041), retaining the browser
+fallback under (2024). Once recovery is verified, remove the native Stay/Leave dialog in
 `agents-plugin-tool/desktop-electron/main.js:287-304` and update the surrounding
 Windows close mediation at `main.js:220-228` as the approved policy requires.
 Preserve draft safety for the supported mix of old/new Electron and daemon
@@ -171,11 +169,9 @@ Use the release DevTools, daemon notice, and login-link decisions in
 - **Release DevTools.** `main.js:114-134,165,506` implements the View menu
   toggle, F12 and platform inspect accelerators, and the Windows titlebar view's
   shortcut. Exercise every packaged entry point covered by the owner decision.
-- **Browser login link.** `main.js:477-492,518` provides the Connection menu
-  action. The Settings action is `dashboard.tmpl:141` and
-  `dashboard-actions.js:98-113` under the dashboard assets. Establish parity
-  for the paths the owner requires before treating the native entry as
-  duplicate. Preserve existing link and clipboard credential boundaries and
+- **Browser login link.** Keep the Connection menu action at
+  `main.js:477-492,518` under (2023), including its machine-authenticated root
+  fallback. Preserve existing link and clipboard credential boundaries and
   compatibility with the old optional login-copied hook.
 - **Daemon replacement refusal.** `main.js:366-376` shows the synchronous
   warning for explicit replacement and logs automatic notices. Apply (2022)
@@ -187,6 +183,7 @@ Use the release DevTools, daemon notice, and login-link decisions in
   (`main.js:431-432`, `dashboard-preload.js:4-32`).
 
 Compare before/after screenshots of the affected View and Connection menus,
-Settings controls, and replacement feedback. Verify that the approved copy
-paths still mint usable login links and that refusal feedback reaches users
-in mixed-version operation.
+Settings controls, and replacement feedback. Verify that release builds still
+open DevTools through their menu and shortcuts, the Copy Browser Login Link menu
+item still exists and mints usable login links, and refusal feedback reaches
+users in mixed-version operation.
