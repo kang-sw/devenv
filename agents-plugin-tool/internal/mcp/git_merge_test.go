@@ -402,6 +402,51 @@ func mergeMessage() wsgit.CommitOptions {
 	return wsgit.CommitOptions{Title: "merge(test): land implementation", AIContext: []string{"Preserve the implementation boundary."}, UpdatedTickets: []string{"test-ticket"}}
 }
 
+func TestImplMergeWorktreeReleaseAdvisory(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		pooled bool
+		leased bool
+	}{
+		{"leased pool", true, true},
+		{"unleased pool", true, false},
+		{"outside pool", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, branch := mergeFixture(t, "develop")
+			runGit(t, root, "switch", "develop")
+			pool := canonicalWorktreeTestPath(t.TempDir())
+			worktree := filepath.Join(pool, "worker")
+			runGit(t, root, "worktree", "add", worktree, branch)
+			if tc.leased {
+				if err := writeWorktreeLease(context.Background(), wsgit.ExecRunner{}, worktree, worktreeLease{WorkerKey: "worker", ParentKey: "lead"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			roots := []string{pool}
+			if !tc.pooled {
+				roots = []string{canonicalWorktreeTestPath(t.TempDir())}
+			}
+			r, err := mergeImplBranch(context.Background(), root, wsgit.ExecRunner{}, branch, "", mergeMessage(), implMergeAcknowledgement{}, roots, mergeSizeGuard{})
+			if err != nil || r.Status != "merged" {
+				t.Fatalf("result=%+v err=%v", r, err)
+			}
+			if tc.pooled && tc.leased {
+				d := requireMergeDiagnostic(t, r, "worktree_release", "advisory")
+				if !strings.Contains(d.Reason, branch) || !strings.Contains(d.Reason, worktree) || !strings.Contains(d.Resolution, "worktree.release") || !strings.Contains(d.Resolution, "key bound") {
+					t.Fatalf("incomplete release guidance: %+v", d)
+				}
+			} else {
+				for _, d := range r.Diagnostics {
+					if d.Code == "worktree_release" {
+						t.Fatalf("unexpected release advisory: %+v", d)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestImplMergeNoFFAndCleanup(t *testing.T) {
 	for _, explicit := range []bool{false, true} {
 		t.Run(map[bool]string{false: "current", true: "explicit"}[explicit], func(t *testing.T) {
