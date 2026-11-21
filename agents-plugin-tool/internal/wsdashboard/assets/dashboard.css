@@ -532,3 +532,8 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .rail .rcap[hidden], .rail .rcap .seg[hidden], .rail .admission-feedback[hidden], .rail .admission-copy[hidden], .rail .admission-row-correction[hidden], .rail .admission-status[hidden], .rail .afx[hidden] { display: none; }
 .rail [data-admission-apply]:disabled { opacity: .5; cursor: progress; }
 
+
+/* Session controls are visible only to viewers on the daemon host. */
+.child-close { display: none; }
+html[data-can-control] .child-close { display: inline-flex; align-items: center; margin: 0 8px; padding: 5px 9px; border: 1px solid var(--wb-line); border-radius: 6px; background: var(--wb-card); color: var(--wb-fail); cursor: pointer; font: inherit; }
+.child-close:disabled { opacity: .5; cursor: default; }

@@ -27,6 +27,7 @@ type HUDNode struct {
 	Label       string    `json:"label"`
 	Harness     string    `json:"harness"`
 	State       string    `json:"state"`
+	CloseActive bool      `json:"closeActive,omitempty"`
 	Model       string    `json:"model,omitempty"`
 	Effort      string    `json:"effort,omitempty"`
 	ElapsedMs   int64     `json:"elapsedMs,omitempty"`
@@ -166,6 +167,7 @@ func projectHUDNodes(nodes []*hudRawNode, depth int, parentHarness string, chain
 			Label:       label,
 			Harness:     harness,
 			State:       hudNodeState(a),
+			CloseActive: a.Status == wslive.StatusRunning || a.Holding || a.Permission != nil,
 			Model:       an.DisplayModel(),
 			Effort:      a.Effort,
 			ElapsedMs:   max(a.ActiveMs, 0),

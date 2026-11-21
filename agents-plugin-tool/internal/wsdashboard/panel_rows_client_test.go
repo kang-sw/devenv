@@ -20,6 +20,7 @@ function mergePanelRows(n,previous,next){check("canonical previous",previous,pan
 function restoreOpen(n){log.push("open:"+n.name);}
 function fmtTimes(n){log.push("times:"+n.name);}
 function sweepOutImgs(n){log.push("images:"+n.name);}
+function syncSpinnerPhases(){}
 function drawerSync(){log.push("drawer-sync");}
 function restorePanelReader(n,state){check("reader snapshot",[n===el,state],[true,"reader"]);log.push("reader-restore");}
 function restoreScroll(state){check("pane snapshot",state,"panes");log.push("scroll-restore");}

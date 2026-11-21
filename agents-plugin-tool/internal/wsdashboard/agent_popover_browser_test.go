@@ -165,6 +165,10 @@ func TestHUDOrgChartBrowser(t *testing.T) {
 	h5.Batches = []wslive.BatchView{{Seq: 1, StartedAt: now - 5000, Running: &wslive.RunningView{ToolName: "apply_patch", ArgsPreview: "v2.go", StartedAt: now - 5000}}}
 	h7 := mk("h7", "h6", "cycle-detect", "claude", wslive.StatusRunning, wslive.PhaseThinking, "sonnet-4.6", "medium", "Needs approval", 78000, false, true)
 	h7.Permission = &wslive.Permission{ToolName: "bash", ArgsPreview: "git diff", StartedAt: now - 4000}
+	h8 := mk("h8", "h6", "import-lint", "codex", wslive.StatusDone, "", "gpt-5.4", "low", "Standby", 44000, false, true)
+	h8.ReplyID = "boardsession"
+	h11 := mk("h11", "h9", "e2e-smoke", "agy", wslive.StatusFailed, "", "sonnet-4.6", "medium", "exit 1", 37000, false, false)
+	h11.ReplyID = "boardsession"
 	heavy := wslive.Snapshot{SchemaVersion: 1, Adapter: "claude", UpdatedAt: now, HeartbeatMs: 30000,
 		Lead: wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseThinking}},
 		Agents: []wslive.Agent{
@@ -175,10 +179,10 @@ func TestHUDOrgChartBrowser(t *testing.T) {
 			h5,
 			mk("h6", "", "graph-auditor", "claude", wslive.StatusDone, "", "opus-4.6", "high", "Waiting on cycle-detect", 129000, true, true),
 			h7,
-			mk("h8", "h6", "import-lint", "pi", wslive.StatusDone, "", "gpt-5.4", "low", "Standby", 44000, false, true),
+			h8,
 			mk("h9", "", "test-runner", "agy", wslive.StatusDone, "", "gemini-4-h", "high", "Collecting test matrix", 115000, true, true),
 			mk("h10", "h9", "unit-matrix", "codex", wslive.StatusRunning, wslive.PhaseTool, "gpt-5.4", "medium", "go test", 58000, false, true),
-			mk("h11", "h9", "e2e-smoke", "claude", wslive.StatusFailed, "", "sonnet-4.6", "medium", "exit 1", 37000, false, false),
+			h11,
 			mk("h12", "h8", "pkg-edges", "codex", wslive.StatusRunning, wslive.PhaseTool, "gpt-5.4", "medium", "go list -deps", 19000, false, true),
 			mk("hd1", "h1", "cache-warm", "pi", wslive.StatusDone, "", "gpt-5.4", "low", "", 30000, false, false),
 			mk("hd2", "h9", "bench-closed", "agy", wslive.StatusDone, "", "gemini-4-h", "low", "", 40000, false, false),

@@ -105,6 +105,16 @@ func TestHUDProjectionStatePrecedenceVisibilityAndHarness(t *testing.T) {
 			t.Fatalf("node %q = (state=%q, harness=%q), want (%q, %q)", id, n.State, n.Harness, exp[0], exp[1])
 		}
 	}
+	for _, id := range []string{"perm", "fail", "reply", "think", "hold", "grandchild"} {
+		if !byID[id].CloseActive {
+			t.Errorf("node %q should require confirmation", id)
+		}
+	}
+	for _, id := range []string{"alive", "asleep-anc"} {
+		if byID[id].CloseActive {
+			t.Errorf("node %q should close immediately", id)
+		}
+	}
 	if byID["perm"].Task != "bash rm -rf" {
 		t.Fatalf("perm Task = %q, want %q", byID["perm"].Task, "bash rm -rf")
 	}

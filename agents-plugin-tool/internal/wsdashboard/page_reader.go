@@ -232,6 +232,7 @@ func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChan
 			if meta.IsChild {
 				in.IsChild = true
 			}
+			in.ChildCloseKnown, in.ChildClosed, in.ChildActive = meta.IsChild, meta.Closed, meta.Active
 			in.Model, in.Effort = meta.Model, meta.Effort
 		}
 	} else if s.Registration.Agent {

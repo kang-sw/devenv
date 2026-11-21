@@ -306,14 +306,21 @@ func (r *Runner) SessionMeta(replyID string) (wsdashboard.AgentSessionMeta, bool
 	c, open := r.convs[replyID]
 	rec, closed := r.closed[replyID]
 	r.mu.Unlock()
+	active := false
 	if open {
-		rec = c.record()
+		c.mu.Lock()
+		rec = c.rec
+		closed = c.closed
+		active = !closed && (c.turn || c.holding || len(c.approvals) != 0)
+		c.mu.Unlock()
 	} else if !closed {
 		return wsdashboard.AgentSessionMeta{}, false
 	}
 	return wsdashboard.AgentSessionMeta{
 		Hosted:  rec.Lead,
 		IsChild: r.isChildRecord(rec),
+		Closed:  closed,
+		Active:  active,
 		Model:   rec.Model,
 		Effort:  rec.Effort,
 	}, true

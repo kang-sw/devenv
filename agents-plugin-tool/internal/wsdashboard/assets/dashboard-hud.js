@@ -11,6 +11,13 @@
   };
   var hudRegistry = {}, hudEdges = [], hudHoveredId = "", hudLead = "", hudBound = false, hudRO = null, hudRaf = 0;
 
+  function hudCanControl() {
+    return typeof root !== "undefined" && root.hasAttribute("data-can-control");
+  }
+  function hudClosed(replyId) {
+    return typeof subagentClosing !== "undefined" && subagentClosing && subagentClosing[replyId] === "closed";
+  }
+
   function hudStateText(st) {
     return wsT(HUD_STATE_KEYS[st] || "js.hud.state.idle");
   }
@@ -79,10 +86,21 @@
       if (!overflow) { overflow = doc.createElement("span"); overflow.className = "hud-overflow"; slot.appendChild(overflow); }
       overflow.textContent = "+" + node.overflow;
     } else if (overflow) overflow.remove();
+    var close = slot.querySelector(".hud-close");
+    if (node.replyId && hudCanControl() && !hudClosed(node.replyId)) {
+      if (!close) {
+        close = doc.createElement("button"); close.type = "button"; close.className = "hud-close";
+        close.textContent = "\u00d7"; slot.appendChild(close);
+      }
+      var closeLabel = wsT(node.closeActive ? "js.subagent.close.active" : "js.subagent.close.ended", label);
+      close.setAttribute("aria-label", closeLabel);
+      close.setAttribute("title", closeLabel);
+    } else if (close) close.remove();
     var entry = hudRegistry[node.id] || { data: {}, el: btn };
     Object.assign(entry.data, {
         id: node.id || "", replyId: node.replyId || "", linked: !!node.linked, label: label,
         harness: harness, state: state, model: node.model || "", effort: node.effort || "",
+        closeActive: !!node.closeActive,
         elapsedMs: Number(node.elapsedMs) || 0, activeSince: Number(node.activeSince) || 0,
         chain: Array.isArray(node.chain) ? node.chain : [],
         task: node.task || ownTasks[node.id] || "", overflow: Number(node.overflow) || 0
@@ -272,6 +290,19 @@
         if (!e.relatedTarget || !rootsEl.contains(e.relatedTarget)) hudHideTooltip();
       });
       rootsEl.addEventListener("click", function (e) {
+        var close = e.target && e.target.closest && e.target.closest(".hud-close");
+        if (close) {
+          e.preventDefault(); e.stopPropagation();
+          var owner = close.parentNode && close.parentNode.querySelector(".hud-node");
+          var target = owner && hudRegistry[owner.getAttribute("data-id")];
+          if (hudCanControl() && target && target.data.replyId && typeof subagentClose === "function") {
+            hudHideTooltip();
+            var state = target.data.state;
+            if (target.data.closeActive && (state === "failed" || state === "idle")) state = "holding";
+            subagentClose(target.data.replyId, target.data.label, state, close);
+          }
+          return;
+        }
         var btn = e.target && e.target.closest && e.target.closest(".hud-node");
         if (!btn) return;
         var id = btn.getAttribute("data-id"), entry = hudRegistry[id];
@@ -285,6 +316,22 @@
         hudFocusNode(id, agpop, agOpenFn);
       });
     }
+    if (agpop) agpop.addEventListener("click", function (e) {
+      var close = e.target && e.target.closest && e.target.closest(".aclose");
+      if (!close) return;
+      e.preventDefault(); e.stopPropagation();
+      if (hudCanControl() && typeof subagentClose === "function") {
+        subagentClose(close.getAttribute("data-reply-id"), close.getAttribute("data-label"), close.getAttribute("data-state"), close);
+      }
+    });
+    doc.addEventListener("ws:subagent-closed", function (e) {
+      var rid = e.detail && e.detail.replyId;
+      q(".hud-close", rootsEl).forEach(function (el) {
+        var owner = el.parentNode && el.parentNode.querySelector(".hud-node");
+        if (owner && owner.getAttribute("data-reply-id") === rid) el.remove();
+      });
+      q(".aclose", agpop).forEach(function (el) { if (el.getAttribute("data-reply-id") === rid) el.remove(); });
+    });
     if (window.ResizeObserver && canvas) { hudRO = new ResizeObserver(hudScheduleConnectors); hudRO.observe(canvas); }
     if (island) island.addEventListener("transitionend", function (e) {
       if (e.target === island && (e.propertyName === "width" || e.propertyName === "height")) hudScheduleConnectors();
@@ -292,6 +339,7 @@
   }
   function hudProject(tree, agcompact, agidle, agpop, agOpenFn) {
     var hud = hudReadData(tree), ownTasks = hudCollectOwnTasks(tree);
+    q(".aclose", agpop).forEach(function (el) { el.hidden = !hudCanControl() || hudClosed(el.getAttribute("data-reply-id")); });
     hudLead = hud.lead || wsT("js.hud.lead");
     hudEdges = [];
     var rootsEl = agcompact.querySelector(".hud-roots");
