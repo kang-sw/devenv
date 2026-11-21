@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 2816c5dfa74b0067
 sage-review-completeness-reviewed: 2816c5dfa74b0067
+completed: 2026-11-21
 ---
 
 # Move dashboard confirmations and draft protection into the page
@@ -174,6 +175,22 @@ closures and label deletion, verify that acceptance issues one action and
 cancellation issues none. Inventory the assets again for remaining native
 confirmation calls and capture the before/after comparisons.
 
+### Result (5b03befbc) - 2026-11-21
+
+The same asynchronous `rdeldlg` opens in the shell, standalone dashboard,
+and framed pages. All ten confirmations wait for explicit acceptance, and
+the continuations recheck the captured target. Cancel has initial focus,
+Escape dismisses the dialog, and closing restores the connected opener.
+
+- The asset scan found zero `window.confirm()` calls. The Node action and
+  dialog tests passed. The Chromium run passed `TestTerminalChatTabsBrowser`
+  and the three framing, template, and terminal asset tests in the same
+  invocation.
+- The shared dialog was compared in dark and light Chromium captures under
+  `/tmp/inpage-dialogs-captures` using the Phase 2 rail swap. The baseline
+  PNGs show the page under the browser prompt. The companion
+  `before-native-dialog-{dark,light}.json` files record its native events.
+
 ### Phase 2: Protect unsaved drafts before iframe swaps and bypass the native Stay/Leave dialog for recovery-capable renderers
 
 Build on the Phase 1 helper. Resolve the active frame's draft decision before
@@ -209,6 +226,51 @@ under the approved policy and before/after screenshots for the swap and each
 affected close path. Update the affected existing dashboard and Electron
 close/smoke coverage as part of implementation.
 
+### Result (0fcecf1553) - 2026-11-21
+
+The shell waits for a frame's save result before a destructive swap. Stay
+retains the frame and restores the original history position. A later pick
+or Back/Forward event has its own decision. The browser still asks on
+top-level unload when the current draft is at risk.
+
+Pasted images and delivery state recover from IndexedDB. An unacknowledged
+normal or command POST reopens as Delivery unknown with Resend and Discard.
+Later queued sends and unsent input remain available. A queued request is
+claimed in its shared transaction before its POST. Cancel stays local
+through preparation, including during the durability wait. A board-only view
+preserves the saved composer and its blobs.
+
+- T0. The baseline legacy writer replaces only its per-session localStorage
+  JSON and index (`rail.js:72-92` at `a224af3f5`). The new writer keeps
+  that projection and the browser database owns the newer state
+  (`dashboard-lifecycle.js:99-125,181-251`). A legacy write leaves the
+  database intact. The new reader keeps the legacy edit and recovers the
+  retained blobs and deliveries (`dashboard-lifecycle.js:277-310`).
+  The POST routes and payload fields are the existing ones
+  (`dashboard-composer-delivery.js:313-371`, `inbox_routes.go:84-111`).
+- Draft snapshots are small mutable state (Type 2), pending deliveries are
+  queue state (Type 3), and image data is opaque blob content (Type 5). The
+  owner-selected browser store holds them by session. Mount loads the record,
+  an unchanged save performs no browser write, and changes use one
+  read-write transaction over the affected session. Paste adds zero daemon
+  requests and send retains one message POST. Windows syscall counts await
+  the host run.
+- The final Chromium test passed on `ae12709fa`, including accepted-but-lost
+  replies and lost POSTs for normal and slash-command sends, explicit retry,
+  draft storage failures, legacy writes, board-only visits, image recovery
+  and discard, and one real inbox entry for a send raced by two tabs.
+  The Node frame, outbox and composer tests passed, including delayed saves,
+  stale headers, and cancellation before the request starts.
+- Dark and light before/after pairs `{before,after}-inpage-dialog-*.png`
+  and `{before,after}-delivery-unknown-*.png` were compared under
+  `/tmp/inpage-dialogs-captures`.
+- The existing Electron unload veto retains native Stay/Leave when a legacy
+  page or a failed recovery write requires it. A durable draft can close
+  without the veto. Windows WebContents close mediation passed its unit
+  cases. Packaged X-close and reopen with the same profile, legacy Stay and
+  Leave, and native screenshots await the owner macOS and Windows runs
+  using the updated smoke scripts.
+
 ### Phase 3: Prune shell-owned UX after owner decisions
 
 Use the release DevTools, daemon notice, and login-link decisions in
@@ -236,6 +298,45 @@ Settings controls, and replacement feedback. Verify that release builds still
 open DevTools through their menu and shortcuts, the Copy Browser Login Link menu
 item still exists and mints usable login links, and refusal feedback reaches
 users in mixed-version operation.
+
+### Result (5846fb33a) - 2026-11-21
+
+An unavailable replacement leaves the incumbent document in place and
+shows the reason as an in-page toast. The window title carries the reason
+until the current pinned main frame acknowledges rendering it. The shell
+replays the reason on reconnect and clears it for a verified successor,
+including at the same port. The same-port handoff correction landed in
+`d7131cd40`.
+
+- T0. The page subscribes only when the optional preload method exists
+  (`dashboard-actions.js:114-123`). New shells keep the title fallback
+  for old pages (`main.js:318-344,473-484`). The notice carries bounded
+  shell text and a receipt ID, and older shells leave the subscription
+  absent. The native login action continues its machine-authenticated
+  fallback, with the copied value going directly to the clipboard
+  (`main.js:528-541`). Release View, Connection, and DevTools shortcuts
+  remain available.
+- Electron's full unit suite passed 186 cases with four Windows-only skips
+  on the phase commit. The final changed main-process paths passed eight
+  focused cases, including the re-observed daemon identity, DevTools,
+  Windows close mediation, and the native login fallback.
+- Chromium notice, update, and login checks passed. The comparison
+  `settings-before-in-page-notice.png` and
+  `settings-after-in-page-notice.png` in
+  `/tmp/inpage-dialogs-captures` shows the warning while the Settings
+  controls retain their layout. Offline macOS arm64 packaging passed and
+  the package contains its ICNS and application ASAR.
+- Packaged macOS and Windows View and Connection menus, their actual
+  accelerators and clipboard action, and the native fallback caption await
+  the owner and Windows host screenshots.
+
+The independent lite review covered the three implementation phases.
+Its storage, cross-tab, board-only, and cancellation findings were fixed in
+`ae12709fa`. Its daemon identity finding was fixed in `d7131cd40`.
+The native build, focused Go and Node cases, and localization passed.
+The unfiltered dashboard package run stalled at the existing index retry
+test, which passed in isolation on both the baseline and implementation.
+The lead is running the broad dashboard suite with that test isolated.
 
 ## Sage Review Round 1 (2026-11-21)
 
