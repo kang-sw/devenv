@@ -3,6 +3,7 @@ package wswhiteboard
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -311,4 +312,21 @@ func streamView(doc TopicDoc, closed bool, loc *time.Location, items []ItemView)
 		end = from
 	}
 	return latest, stream, older
+}
+
+// CommentQuote decodes the server-written immutable comment event.
+func (e EntryView) CommentQuote() string {
+	prefix := fmt.Sprintf("Item {{%d}} user commented [", e.ItemID)
+	if e.Kind != EntrySystem || e.ItemID <= 0 || !strings.HasPrefix(e.Text, prefix) {
+		return ""
+	}
+	_, quoted, ok := strings.Cut(e.Text, "; owner quote: ")
+	if !ok {
+		return ""
+	}
+	quote, err := strconv.Unquote(quoted)
+	if err != nil {
+		return ""
+	}
+	return quote
 }

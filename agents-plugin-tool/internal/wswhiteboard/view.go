@@ -392,10 +392,11 @@ type ItemView struct {
 	Answer    string
 	// AnswerLetter and AnswerText split a policy answer into its option
 	// letter and the rest.
-	AnswerLetter string
-	AnswerText   string
-	AnswerQuote  string
-	AnsweredAt   string
+	AnswerLetter   string
+	AnswerText     string
+	AnswerQuote    string
+	AnsweredAt     string
+	CommentReasked string
 	// Links are the item's link strings; a page resolves their {{nn}}
 	// references as it does the other lead-authored text.
 	Links []string

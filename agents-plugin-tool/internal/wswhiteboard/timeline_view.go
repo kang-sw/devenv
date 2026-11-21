@@ -49,10 +49,11 @@ type timelinePart struct {
 // that asked it (empty for an eventless converted item), where the card's
 // jump lands.
 type openAsk struct {
-	Item                  ItemView
-	Entry, Clock, Reasked string
-	At, Stamp             string
-	Ms                    int64
+	Item                                     ItemView
+	Entry, Clock, Reasked                    string
+	At, Stamp                                string
+	PreviousID, PreviousQuote, PreviousClock string
+	Ms                                       int64
 }
 
 // askGroup is a run of consecutive open asks of one card kind (policy,
@@ -115,6 +116,7 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 	}
 	all = append(all, timelineEntries(t.Stream)...)
 	firstAsk, lastAnswer := map[int]string{}, map[int]string{}
+	comments := map[int]EntryView{}
 	changed := map[int]bool{}
 	createdAt := map[string][]int{}
 	for _, e := range all {
@@ -125,6 +127,10 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 			}
 		}
 		if e.OwnerAnswer() {
+			delete(comments, e.ItemID)
+			if e.CommentQuote() != "" {
+				comments[e.ItemID] = e
+			}
 			lastAnswer[e.ItemID] = e.ID
 		}
 		if e.Kind == EntryAgent || e.Kind == EntryPanel || e.ItemID > 0 || len(createdAt[e.ID]) > 0 {
@@ -203,6 +209,17 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 		if firstAsk[e.ItemID] == e.ID || e.OwnerAnswer() {
 			if item, ok := byID[e.ItemID]; ok {
 				iv := itemView(item)
+				if quote := e.CommentQuote(); quote != "" {
+					iv.Status, iv.Answer, iv.AnswerQuote = StatusCommented, "", quote
+					iv.AnswerLetter, iv.AnswerText = "", ""
+					if item.Status == StatusOpen {
+						iv.CommentReasked = clock(item.ReaskedAt)
+					}
+					for i := range iv.Options {
+						iv.Options[i].Picked = false
+					}
+					r.Page.Runs[0].Entry.Item = &iv
+				}
 				r.Item, r.Ask, r.Answer = &iv, firstAsk[e.ItemID] == e.ID, e.OwnerAnswer()
 				r.Clock, r.At, r.Reasked = e.Clock, e.At, clock(item.ReaskedAt)
 				r.Ms, r.Stamp = e.Ms, e.Stamp
@@ -274,6 +291,9 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 		kind := askKind(byID[a.Item.ID])
 		if len(groups) == 0 || groups[len(groups)-1].Kind != kind || kind == "policy" {
 			groups = append(groups, askGroup{Kind: kind})
+		}
+		if e, ok := comments[a.Item.ID]; ok && a.Reasked != "" {
+			a.PreviousID, a.PreviousQuote, a.PreviousClock = e.ID, e.CommentQuote(), clock(e.At)
 		}
 		g := &groups[len(groups)-1]
 		g.Asks = append(g.Asks, a)

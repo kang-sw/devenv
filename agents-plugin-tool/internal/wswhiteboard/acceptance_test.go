@@ -481,7 +481,7 @@ func TestPolicyCommentLifecycleBookkeepingAndViews(t *testing.T) {
 		view := BuildView(s, ViewInput{Layout: layout})
 		regions, err := RenderRegions(view)
 		html := string(regions.Board)
-		if err != nil || !strings.Contains(html, "user commented") || !strings.Contains(html, "literal") {
+		if err != nil || !strings.Contains(html, "Commented") || !strings.Contains(html, "literal") {
 			t.Fatalf("comment hidden in %v: %v", layout, err)
 		}
 		if iv := itemView(it); iv.AnswerLetter != "" || iv.Options[0].Picked || iv.Options[1].Picked {
