@@ -43,6 +43,7 @@ test('replacement refusal reaches only the pinned dashboard and keeps its docume
       assert.equal(await invoke(page, origin, message), 0, 'legacy fallback');
       await page.addScriptTag({ path: path.join(assets, 'toast.js') });
       await child.addScriptTag({ path: path.join(assets, 'toast.js') });
+      await page.addStyleTag({ path: path.resolve(assets, '../../wswhiteboard/assets/page.css') });
       await page.addStyleTag({ path: path.join(assets, 'dashboard.css') });
       await page.addStyleTag({ path: path.join(assets, 'dashboard-menus.css') });
       assert.equal(await invoke(child, origin, message), 0, 'subframe denied');

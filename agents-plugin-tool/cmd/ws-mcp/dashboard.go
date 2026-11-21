@@ -35,7 +35,11 @@ func dashboardCommand(args []string) {
 	lan := fs.Bool("lan", false, "listen on every network interface and admit a request from another device only with the LAN access token; the starter (daemon-start, or ws-mcp serve) passes it when the global dashboard.lan_enabled value is on")
 	buildTime := fs.Int64("build-time", 0, "the ws-mcp build time in Unix milliseconds to report in /health; the starter passes the time of the executable it measured, and 0 reads this executable's")
 	lockWait := fs.Duration("lock-wait", wsdashboard.DefaultLockWait, "how long to wait for another daemon to release the single-instance lock")
+	preflight := fs.Bool("desktop-preflight", false, "wait for the desktop starter to authorize startup on stdin")
 	_ = fs.Parse(args)
+	if *preflight && !wsdashboard.AwaitDesktopPreflight(os.Stdin) {
+		return
+	}
 
 	// Before anything reads the environment or spawns from it: the session
 	// that started this daemon is not one it hosts.

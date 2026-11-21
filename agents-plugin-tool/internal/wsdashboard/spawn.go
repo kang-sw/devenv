@@ -39,12 +39,44 @@ func SpawnDetached(exe string, args []string, dir string) error {
 // prestart path. Electron may explicitly retry with job lifetime after a numeric
 // access-denied signal; the retry keeps the same drain/compatibility ordering.
 func SpawnDetachedStrict(exe string, args []string, dir string) error {
-	cmd, err := startDetachedStrict(exe, args, dir)
+	cmd, err := startDetachedStrict(exe, args, dir, nil)
 	if err != nil {
 		return err
 	}
 	go func() { _ = cmd.Wait() }()
 	return nil
+}
+
+// PrepareDetachedSuccessor starts a process with an anonymous stdin pipe. It
+// cannot start serving until the caller releases it after the authenticated
+// drain. Closing the writer denies admission, including when the starter exits.
+func PrepareDetachedSuccessor(exe string, args []string, dir string) (func(bool) error, error) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	cmd, err := startDetachedStrict(exe, args, dir, reader)
+	_ = reader.Close()
+	if err != nil {
+		_ = writer.Close()
+		return nil, err
+	}
+	go func() { _ = cmd.Wait() }()
+	return func(allow bool) error {
+		defer writer.Close()
+		if allow {
+			_, err := writer.Write([]byte{1})
+			return err
+		}
+		return nil
+	}, nil
+}
+
+// AwaitDesktopPreflight runs before a gated dashboard touches shared state.
+func AwaitDesktopPreflight(input io.Reader) bool {
+	var ready [1]byte
+	_, err := io.ReadFull(input, ready[:])
+	return err == nil && ready[0] == 1
 }
 
 // DaemonExecutable returns a retained copy outside the starter's installation.

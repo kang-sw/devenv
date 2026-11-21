@@ -27,13 +27,16 @@ func startDetached(exe string, args []string, dir string) (*exec.Cmd, error) {
 	return startWindowsDetached(exe, args, dir, false)
 }
 
-func startDetachedStrict(exe string, args []string, dir string) (*exec.Cmd, error) {
+func startDetachedStrict(exe string, args []string, dir string, stdin *os.File) (*exec.Cmd, error) {
 	// Electron retries only after the numeric breakaway-denied marker below.
 	// Keep the same Ensure prestart ordering; only process creation mode changes.
 	jobLifetime := os.Getenv("WS_MCP_DAEMON_JOB_LIFETIME") == "1"
 	return startElectronDetachedWith(jobLifetime, func(flags uint32) (*exec.Cmd, error) {
 		cmd := exec.Command(exe, args...)
 		cmd.Dir = dir
+		if stdin != nil {
+			cmd.Stdin = stdin
+		}
 		cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: flags, HideWindow: true}
 		return cmd, cmd.Start()
 	}, func(message string) { fmt.Fprintln(os.Stderr, message) })

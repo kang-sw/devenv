@@ -64,6 +64,9 @@ type EnsureOptions struct {
 	// daemon. A nil Predecessor authorizes a missing-only start.
 	DesktopStart bool
 	Predecessor  *DaemonIdentity
+	// PrepareSuccessor creates a process gated on the returned admission
+	// callback. It is needed only when a desktop start replaces a daemon.
+	PrepareSuccessor func(args []string) (admit func(bool) error, err error)
 	// Port is the configured dashboard.port, passed to a started daemon as
 	// its --port flag.
 	Port int
@@ -193,33 +196,22 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 				}
 				return OutcomeStarted, nil
 			case err == nil:
-				if opts.SpawnBeforeShutdown {
-					if opts.DesktopStart {
-						// Retain the dashboard origin and its webview-local drafts.
-						opts.Port = previous.Port
+				if opts.DesktopStart {
+					if err := replaceFromDesktop(ctx, client, opts, previous); err != nil {
+						return OutcomeUnavailable, err
 					}
+					if !waitForSuccessor(ctx, client, opts, previous.Token, logw) {
+						return OutcomeUnavailable, nil
+					}
+					return OutcomeReplaced, nil
+				}
+				if opts.SpawnBeforeShutdown {
 					// A successful Spawn means OS-accepted independent process creation,
 					// not health readiness; lock wait must cover the drain below.
 					if err := opts.Spawn(DaemonArgs(opts.Port, opts.LAN, opts.BuildTime)); err != nil {
 						return OutcomeUnavailable, fmt.Errorf("dashboard: successor preflight: %w", err)
 					}
 					spawns++
-					if opts.DesktopStart {
-						// Process creation can block under antivirus. Recheck the
-						// endpoint and the REST identity immediately before drain.
-						current, err := ReadEndpoint(opts.Dir)
-						if err != nil {
-							return OutcomeUnavailable, errors.New("dashboard: predecessor endpoint became unreadable")
-						}
-						health, err := Health(ctx, client, current)
-						if err != nil || !opts.Predecessor.matches(current, health) {
-							return OutcomeUnavailable, errors.New("dashboard: predecessor changed before drain")
-						}
-						if rechecked, err := ReadEndpoint(opts.Dir); err != nil || rechecked != current {
-							return OutcomeUnavailable, errors.New("dashboard: predecessor endpoint changed before drain")
-						}
-						previous = current
-					}
 				}
 				if err := RequestShutdown(ctx, client, previous); err != nil {
 					// The older daemon still serves; leave it rather than race it.
@@ -245,9 +237,6 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 			if !waitForSuccessor(ctx, client, opts, previous.Token, logw) {
 				return OutcomeUnavailable, nil
 			}
-			if opts.DesktopStart {
-				return OutcomeReplaced, nil
-			}
 			continue
 		}
 		if spawns >= maxSpawns {
@@ -267,6 +256,44 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Outcome, error) {
 			return OutcomeStarted, nil
 		}
 	}
+}
+
+func replaceFromDesktop(ctx context.Context, client *http.Client, opts EnsureOptions, previous Endpoint) error {
+	if opts.PrepareSuccessor == nil {
+		return errors.New("dashboard: no desktop successor preflight")
+	}
+	// Retain the dashboard origin and its webview-local drafts.
+	admit, err := opts.PrepareSuccessor(DaemonArgs(previous.Port, opts.LAN, opts.BuildTime))
+	if err != nil {
+		return fmt.Errorf("dashboard: successor preflight: %w", err)
+	}
+	allowed := false
+	defer func() {
+		if !allowed {
+			_ = admit(false)
+		}
+	}()
+	// Process creation can block under antivirus. Recheck the endpoint and
+	// REST identity immediately before draining the predecessor.
+	current, err := ReadEndpoint(opts.Dir)
+	if err != nil {
+		return errors.New("dashboard: predecessor endpoint became unreadable")
+	}
+	health, err := Health(ctx, client, current)
+	if err != nil || !opts.Predecessor.matches(current, health) {
+		return errors.New("dashboard: predecessor changed before drain")
+	}
+	if rechecked, err := ReadEndpoint(opts.Dir); err != nil || rechecked != current {
+		return errors.New("dashboard: predecessor endpoint changed before drain")
+	}
+	if err := RequestShutdown(ctx, client, current); err != nil {
+		return fmt.Errorf("dashboard: authenticated drain uncertain: %w", err)
+	}
+	allowed = true
+	if err := admit(true); err != nil {
+		return fmt.Errorf("dashboard: successor release after drain: %w", err)
+	}
+	return nil
 }
 
 // keepRunning reports whether the healthy daemon info describes may stay:

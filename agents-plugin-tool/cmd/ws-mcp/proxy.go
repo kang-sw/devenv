@@ -452,7 +452,7 @@ func daemonStartWithEnsure(args []string, ensure func(context.Context, wsdashboa
 		}
 		return wsdashboard.SpawnDetached(launchExe, args, dir)
 	}
-	outcome, err := ensure(ctx, wsdashboard.EnsureOptions{
+	opts := wsdashboard.EnsureOptions{
 		Dir:                 dir,
 		Version:             version,
 		BuildTime:           *buildTime,
@@ -467,7 +467,13 @@ func daemonStartWithEnsure(args []string, ensure func(context.Context, wsdashboa
 		Spawn:               spawn,
 		StartWait:           *startWait,
 		Log:                 os.Stderr,
-	})
+	}
+	if *desktop && predecessor != nil {
+		opts.PrepareSuccessor = func(args []string) (func(bool) error, error) {
+			return wsdashboard.PrepareDetachedSuccessor(exe, append(args, "--lock-wait", "8s", "--desktop-preflight"), dir)
+		}
+	}
+	outcome, err := ensure(ctx, opts)
 	if err != nil {
 		fatal("daemon-start", err)
 	}

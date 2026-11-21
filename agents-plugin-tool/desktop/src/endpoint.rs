@@ -157,6 +157,21 @@ pub fn active_cache_root() -> Result<PathBuf> {
 }
 
 impl Daemon {
+    #[cfg(test)]
+    pub(crate) fn fixture(pid: u32, version: &str) -> Self {
+        Self {
+            url: Url::parse("http://127.0.0.1:49015/").unwrap(),
+            version: version.to_owned(),
+            root: PathBuf::new(),
+            endpoint: Endpoint {
+                port: 49015,
+                pid,
+                token: Some(json!(format!("{pid:064x}"))),
+            },
+            started_at: Some(json!(format!("start-{pid}"))),
+        }
+    }
+
     pub fn is_healthy(&self) -> bool {
         check_health(&self.endpoint).is_ok_and(|(_, health)| {
             health.started_at == self.started_at && health.version == self.version

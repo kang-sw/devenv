@@ -118,7 +118,14 @@ impl Connection {
                 } else {
                     answer.daemon.browser_cookie()
                 };
-                if answer.daemon.is_current() {
+                let still_matches = if keep_document {
+                    // A failed endpoint read does not evict an already-open
+                    // document whose pinned listener still has this identity.
+                    answer.daemon.is_healthy()
+                } else {
+                    answer.daemon.is_current()
+                };
+                if still_matches {
                     Ok((answer, keep_document, cookie))
                 } else {
                     Err("Dashboard changed during connection".into())

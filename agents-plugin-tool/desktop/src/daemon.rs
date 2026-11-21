@@ -23,6 +23,7 @@ const NEWER_RUNNING: &str =
     "The running daemon is newer than this app. Update Werkschaft before retrying.";
 const REPLACEMENT_FAILED: &str =
     "No healthy replacement was found. Keeping the current connection.";
+const HEALTH_UNCERTAIN: &str = "Could not recheck the daemon after staging. Retry later.";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Intent {
@@ -31,6 +32,7 @@ pub enum Intent {
     Replace,
 }
 
+#[derive(Debug)]
 pub struct ConnectionError {
     pub reason: &'static str,
     pub python_required: bool,
@@ -109,24 +111,97 @@ pub fn connect(
     user_data: Result<PathBuf, &'static str>,
     intent: Intent,
 ) -> Result<ConnectionResult, ConnectionError> {
-    let cache = endpoint::active_cache_root()?;
-    let find = || endpoint::discover_at(&cache).ok();
-    let running = find();
+    connect_with(
+        &NativeLifecycle {
+            cache: endpoint::active_cache_root()?,
+            resource_root,
+            user_data,
+        },
+        intent,
+    )
+}
+
+trait Lifecycle {
+    type Package;
+    fn discover(&self) -> Option<Daemon>;
+    fn select(&self) -> Result<(Self::Package, [u64; 3]), &'static str>;
+    fn stage(&self, package: &Self::Package) -> Result<Self::Package, &'static str>;
+    fn python_available(&self) -> bool;
+    fn still_healthy(&self, daemon: &Daemon) -> bool;
+    fn launch(&self, package: &Self::Package, identity: &Value, replace: bool) -> bool;
+    fn settle(&self) -> Option<Daemon>;
+}
+
+struct NativeLifecycle {
+    cache: PathBuf,
+    resource_root: Result<PathBuf, &'static str>,
+    user_data: Result<PathBuf, &'static str>,
+}
+
+impl Lifecycle for NativeLifecycle {
+    type Package = Candidate;
+
+    fn discover(&self) -> Option<Daemon> {
+        endpoint::discover_at(&self.cache).ok()
+    }
+
+    fn select(&self) -> Result<(Candidate, [u64; 3]), &'static str> {
+        let root = self.resource_root.as_ref().map_err(|error| *error)?;
+        let development = std::env::var_os("WERKSCHAFT_DAEMON_ROOT")
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from);
+        let candidate = Candidate::select(&root.join("daemon"), development.as_deref())?;
+        let core = candidate.version;
+        Ok((candidate, core))
+    }
+
+    fn stage(&self, candidate: &Candidate) -> Result<Candidate, &'static str> {
+        let data = self.user_data.as_ref().map_err(|error| *error)?;
+        let resources = self.resource_root.as_ref().map_err(|error| *error)?;
+        candidate.stage(data, package_boundary(resources))
+    }
+
+    fn python_available(&self) -> bool {
+        python::available()
+    }
+
+    fn still_healthy(&self, daemon: &Daemon) -> bool {
+        daemon.is_healthy()
+    }
+
+    fn launch(&self, package: &Candidate, identity: &Value, replace: bool) -> bool {
+        launch(package, &self.cache, identity, replace)
+    }
+
+    fn settle(&self) -> Option<Daemon> {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let daemon = self.discover();
+            if daemon.is_some() || Instant::now() >= deadline {
+                return daemon;
+            }
+            thread::sleep(Duration::from_millis(200));
+        }
+    }
+}
+
+fn connect_with(
+    lifecycle: &impl Lifecycle,
+    intent: Intent,
+) -> Result<ConnectionResult, ConnectionError> {
+    let running = lifecycle.discover();
     if intent == Intent::Recover {
         if let Some(daemon) = running {
             return Ok(daemon.into());
         }
     }
-    let selected = resource_root
-        .as_ref()
-        .map_err(|error| *error)
-        .and_then(|root| {
-            let development = std::env::var_os("WERKSCHAFT_DAEMON_ROOT")
-                .filter(|path| !path.is_empty())
-                .map(PathBuf::from);
-            Candidate::select(&root.join("daemon"), development.as_deref())
+    if running.is_none() && !lifecycle.python_available() {
+        return Err(ConnectionError {
+            reason: PYTHON_REQUIRED,
+            python_required: true,
         });
-    let selected = match (selected, running.as_ref()) {
+    }
+    let (selected, core) = match (lifecycle.select(), running.as_ref()) {
         (Ok(candidate), _) => candidate,
         (Err(_), Some(daemon)) => {
             return Ok(if intent == Intent::Replace {
@@ -138,18 +213,10 @@ pub fn connect(
                 daemon.clone().into()
             });
         }
-        (Err(reason), None) => {
-            if !python::available() {
-                return Err(ConnectionError {
-                    reason: PYTHON_REQUIRED,
-                    python_required: true,
-                });
-            }
-            return Err(reason.into());
-        }
+        (Err(reason), None) => return Err(reason.into()),
     };
     let identity = if let Some(daemon) = &running {
-        match replacement(selected.version, &daemon.version, intent) {
+        match replacement(core, &daemon.version, intent) {
             Ok(false) => return Ok(daemon.clone().into()),
             Err(reason) => return Ok(refuse(daemon.clone(), reason)),
             Ok(true) => match daemon.predecessor() {
@@ -165,52 +232,38 @@ pub fn connect(
     } else {
         Value::Null
     };
-    if !python::available() {
-        if let Some(daemon) = running {
+    if let Some(daemon) = &running {
+        if !lifecycle.python_available() {
             return Ok(refuse(
-                daemon,
+                daemon.clone(),
                 "Python 3 is required to replace the daemon. Keeping the current connection.",
             ));
         }
-        return Err(ConnectionError {
-            reason: PYTHON_REQUIRED,
-            python_required: true,
-        });
     }
-    let staged =
-        user_data.and_then(|data| selected.stage(&data, package_boundary(&resource_root?)));
-    let staged = match staged {
+    let staged = match lifecycle.stage(&selected) {
         Ok(candidate) => candidate,
         Err(_) if running.is_some() => return Ok(refuse(running.unwrap(), STAGING_FAILED)),
         Err(reason) => return Err(reason.into()),
     };
-    let current = find();
+    let current = lifecycle.discover();
     if current != running {
         return match current {
-            Some(daemon) => attach_winner(daemon, running.as_ref(), selected.version),
-            None => {
-                Err("Dashboard health became uncertain during preparation. Retry later.".into())
-            }
+            Some(daemon) => attach_winner(daemon, running.as_ref(), core),
+            None => running
+                .filter(|daemon| lifecycle.still_healthy(daemon))
+                .map(|daemon| refuse(daemon, HEALTH_UNCERTAIN))
+                .ok_or(HEALTH_UNCERTAIN.into()),
         };
     }
-    let started = launch(&staged, &cache, &identity, intent == Intent::Replace);
-    let settle = Instant::now() + Duration::from_secs(15);
-    loop {
-        if let Some(daemon) = find() {
-            if Some(&daemon) == running.as_ref() {
-                return Ok(refuse(daemon, REPLACEMENT_FAILED));
-            }
-            return attach_winner(daemon, running.as_ref(), selected.version);
+    let started = lifecycle.launch(&staged, &identity, intent == Intent::Replace);
+    match lifecycle.settle() {
+        Some(daemon) if Some(&daemon) == running.as_ref() => Ok(refuse(daemon, REPLACEMENT_FAILED)),
+        Some(daemon) => attach_winner(daemon, running.as_ref(), core),
+        None if running.is_some() => {
+            Err("No healthy daemon was found after replacement. Retry to reconnect.".into())
         }
-        if Instant::now() >= settle {
-            let reason = match (running.is_some(), started) {
-                (true, _) => "No healthy daemon was found after replacement. Retry to reconnect.",
-                (false, true) => "Dashboard did not become healthy. Retry to reconnect.",
-                (false, false) => "Could not start the dashboard daemon. Retry to reconnect.",
-            };
-            return Err(reason.into());
-        }
-        thread::sleep(Duration::from_millis(200));
+        None if started => Err("Dashboard did not become healthy. Retry to reconnect.".into()),
+        None => Err("Could not start the dashboard daemon. Retry to reconnect.".into()),
     }
 }
 
@@ -297,9 +350,7 @@ fn launch(candidate: &Candidate, cache: &Path, identity: &Value, replace: bool) 
     let input = identity.to_string();
     let (success, stderr) = run_starter(&mut command, input.as_bytes());
     if cfg!(windows) && !success && breakaway_denied(&stderr) {
-        eprintln!(
-            "Werkschaft: Independent daemon launch denied; retrying within the containing job"
-        );
+        eprintln!("Werkschaft: WS_DAEMON_BREAKAWAY_DENIED=5. Retrying within the containing job.");
         command.env("WS_MCP_DAEMON_JOB_LIFETIME", "1");
         return run_starter(&mut command, input.as_bytes()).0;
     }
@@ -352,6 +403,177 @@ fn run_starter(command: &mut Command, input: &[u8]) -> (bool, Vec<u8>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{cell::RefCell, collections::VecDeque};
+
+    struct Fixture {
+        observations: RefCell<VecDeque<Option<Daemon>>>,
+        settled: Option<Daemon>,
+        python: bool,
+        healthy: bool,
+        stage_fails: bool,
+        start_succeeds: bool,
+        actions: RefCell<Vec<&'static str>>,
+        start: RefCell<Option<(Value, bool)>>,
+    }
+
+    impl Fixture {
+        fn with(
+            before: Option<Daemon>,
+            after_stage: Option<Daemon>,
+            settled: Option<Daemon>,
+        ) -> Self {
+            Self {
+                observations: RefCell::new([before, after_stage].into()),
+                settled,
+                python: true,
+                healthy: true,
+                stage_fails: false,
+                start_succeeds: true,
+                actions: RefCell::default(),
+                start: RefCell::default(),
+            }
+        }
+    }
+
+    impl Lifecycle for Fixture {
+        type Package = ();
+
+        fn discover(&self) -> Option<Daemon> {
+            self.observations
+                .borrow_mut()
+                .pop_front()
+                .expect("unexpected discovery")
+        }
+        fn select(&self) -> Result<((), [u64; 3]), &'static str> {
+            self.actions.borrow_mut().push("select");
+            Ok(((), [0, 50, 8]))
+        }
+        fn stage(&self, _: &()) -> Result<(), &'static str> {
+            self.actions.borrow_mut().push("stage");
+            if self.stage_fails {
+                Err("staging failed")
+            } else {
+                Ok(())
+            }
+        }
+        fn python_available(&self) -> bool {
+            self.actions.borrow_mut().push("python");
+            self.python
+        }
+        fn still_healthy(&self, _: &Daemon) -> bool {
+            self.actions.borrow_mut().push("health");
+            self.healthy
+        }
+        fn launch(&self, _: &(), identity: &Value, replace: bool) -> bool {
+            self.actions.borrow_mut().push("launch");
+            *self.start.borrow_mut() = Some((identity.clone(), replace));
+            self.start_succeeds
+        }
+        fn settle(&self) -> Option<Daemon> {
+            self.actions.borrow_mut().push("settle");
+            self.settled.clone()
+        }
+    }
+
+    #[test]
+    fn missing_start_and_raced_attachment_require_no_drain() {
+        let winner = Daemon::fixture(31, "0.50.8");
+        let lifecycle = Fixture::with(None, None, Some(winner.clone()));
+        let answer = connect_with(&lifecycle, Intent::Connect).unwrap();
+        assert!(answer.daemon == winner && answer.refusal.is_none());
+        assert_eq!(*lifecycle.start.borrow(), Some((Value::Null, false)));
+        assert_eq!(
+            *lifecycle.actions.borrow(),
+            ["python", "select", "stage", "launch", "settle"]
+        );
+
+        let raced = Fixture::with(None, Some(winner.clone()), None);
+        let answer = connect_with(&raced, Intent::Connect).unwrap();
+        assert!(answer.daemon == winner && answer.refusal.is_none());
+        assert!(raced.start.borrow().is_none());
+    }
+
+    #[test]
+    fn automatic_minor_and_explicit_same_core_replacement_use_the_observed_identity() {
+        let successor = Daemon::fixture(31, "0.50.8");
+        for (running, intent, replace) in [
+            ("0.49.7", Intent::Connect, false),
+            ("0.50.8-dev", Intent::Replace, true),
+        ] {
+            let prior = Daemon::fixture(12, running);
+            let lifecycle =
+                Fixture::with(Some(prior.clone()), Some(prior), Some(successor.clone()));
+            let answer = connect_with(&lifecycle, intent).unwrap();
+            assert!(answer.daemon == successor && answer.refusal.is_none());
+            let data = lifecycle.start.borrow();
+            let (identity, explicit) = data.as_ref().unwrap();
+            assert_eq!(identity["pid"], 12);
+            assert_eq!(identity["version"], running);
+            assert!(identity.get("token").is_none());
+            assert_eq!(*explicit, replace);
+        }
+    }
+
+    #[test]
+    fn newer_daemon_and_recovery_attach_without_staging() {
+        for (version, intent, refusal, actions) in [
+            ("0.51.0", Intent::Connect, None, &["select"][..]),
+            (
+                "0.51.0",
+                Intent::Replace,
+                Some(NEWER_RUNNING),
+                &["select"][..],
+            ),
+            ("0.49.7", Intent::Recover, None, &[][..]),
+        ] {
+            let prior = Daemon::fixture(12, version);
+            let lifecycle = Fixture::with(Some(prior.clone()), None, None);
+            let answer = connect_with(&lifecycle, intent).unwrap();
+            assert!(answer.daemon == prior);
+            assert_eq!(answer.refusal, refusal);
+            assert_eq!(lifecycle.actions.borrow().as_slice(), actions);
+        }
+    }
+
+    #[test]
+    fn staging_refusal_uncertain_endpoint_and_failed_start_keep_the_incumbent() {
+        let prior = Daemon::fixture(12, "0.50.8");
+        let mut failed_stage = Fixture::with(Some(prior.clone()), None, None);
+        failed_stage.stage_fails = true;
+        let uncertain = Fixture::with(Some(prior.clone()), None, None);
+        let mut failed_start = Fixture::with(
+            Some(prior.clone()),
+            Some(prior.clone()),
+            Some(prior.clone()),
+        );
+        failed_start.start_succeeds = false;
+        for (fixture, reason, launched) in [
+            (failed_stage, STAGING_FAILED, false),
+            (uncertain, HEALTH_UNCERTAIN, false),
+            (failed_start, REPLACEMENT_FAILED, true),
+        ] {
+            let answer = connect_with(&fixture, Intent::Replace).unwrap();
+            assert!(answer.daemon == prior);
+            assert_eq!(answer.refusal, Some(reason));
+            assert_eq!(fixture.start.borrow().is_some(), launched);
+        }
+    }
+
+    #[test]
+    fn missing_python_prevents_staging_and_start() {
+        let mut missing = Fixture::with(None, None, None);
+        missing.python = false;
+        let error = connect_with(&missing, Intent::Connect).err().unwrap();
+        assert!(error.python_required);
+        assert_eq!(*missing.actions.borrow(), ["python"]);
+
+        let prior = Daemon::fixture(12, "0.49.7");
+        let mut replacing = Fixture::with(Some(prior.clone()), None, None);
+        replacing.python = false;
+        let answer = connect_with(&replacing, Intent::Connect).unwrap();
+        assert!(answer.daemon == prior && answer.refusal.unwrap().contains("Python 3"));
+        assert_eq!(*replacing.actions.borrow(), ["select", "python"]);
+    }
 
     #[test]
     fn numeric_core_controls_automatic_and_explicit_replacement() {
