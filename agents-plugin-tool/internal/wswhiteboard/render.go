@@ -846,7 +846,8 @@ type itemData struct {
 	AskStamp string
 	// AskEntry is a bottom-stacked open ask's history event: its card links
 	// there (the ask-time line) through the shared fragment navigation.
-	AskEntry string
+	AskEntry                                 string
+	PreviousID, PreviousQuote, PreviousClock string
 }
 
 // ItemOf pairs an item with the page for the item templates.
@@ -854,7 +855,7 @@ func (p *pageData) ItemOf(iv ItemView) itemData { return itemData{ItemView: iv, 
 
 // AskOf is an open ask's bottom card: the item with its ask-time line.
 func (p *pageData) AskOf(a openAsk) itemData {
-	return itemData{ItemView: a.Item, Page: p, AskEntry: a.Entry, AskClock: a.Clock, AskAt: a.At, AskMs: a.Ms, AskStamp: a.Stamp, AskReasked: a.Reasked}
+	return itemData{ItemView: a.Item, Page: p, AskEntry: a.Entry, AskClock: a.Clock, AskAt: a.At, AskMs: a.Ms, AskStamp: a.Stamp, AskReasked: a.Reasked, PreviousID: a.PreviousID, PreviousQuote: a.PreviousQuote, PreviousClock: a.PreviousClock}
 }
 
 // Num is the item's number as its label shows it, without the parentheses;

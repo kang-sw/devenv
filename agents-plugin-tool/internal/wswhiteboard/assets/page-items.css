@@ -371,3 +371,25 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
   .wb-hitem .sbody { margin-left: 29px; padding-left: 10px; }
 }
 
+
+
+/* Comment-only status in settled rows, history, and reopened questions. */
+.cmchip { display: inline-flex; align-items: center; gap: 3px; padding: 0 6px; border: 1px dashed color-mix(in srgb, var(--wb-primary) 60%, transparent); border-radius: 999px; color: var(--wb-primary); font-size: 10.5px; font-weight: 700; line-height: 16px; white-space: nowrap; vertical-align: 1px; }
+.cmchip .i { width: 11px; height: 11px; }
+.cmturn { margin-left: 5px; font-size: 10.5px; font-weight: 600; color: var(--wb-muted-fg); white-space: nowrap; }
+.cmafter { margin-left: 6px; font-size: 10.5px; color: var(--wb-muted-fg); text-decoration: none; white-space: nowrap; }
+.cmafter:hover { color: var(--wb-primary); text-decoration: underline; }
+.wb-hstatus:has(.cmchip) { max-width: none; overflow: visible; }
+.wb-hitem.commented { --wb-haccent: var(--wb-primary); }
+.cmquote { grid-column: 3 / -1; grid-row: 2; margin: 3px 0 2px; padding-left: 8px; border-left: 2px solid color-mix(in srgb, var(--wb-primary) 60%, transparent); font-size: 12.5px; line-height: 18px; color: var(--wb-fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 560px) { .cmquote { grid-column: 1 / -1; grid-row: 3; } }
+.cmnopick { display: inline-flex; align-items: center; gap: 5px; margin: 6px 0 2px; padding: 1px 8px; border-radius: 6px; background: var(--wb-muted); color: var(--wb-muted-fg); font-size: 11.5px; }
+.cmnopick .i { width: 12px; height: 12px; }
+.opts.cm-none .opt.static { opacity: .72; }
+.srow.commented .stext > .cmchip, .srow.commented .stext > span > .cmchip { margin-right: 2px; }
+.srow.commented .stext > span[title] { margin-right: 6px; }
+.srow.commented .quote.cmq { display: block; margin: 3px 0 1px 30px; padding-left: 8px; border-left: 2px solid color-mix(in srgb, var(--wb-primary) 60%, transparent); color: var(--wb-fg); font-size: 12.5px; }
+.cmprev { display: flex; flex-direction: column; gap: 1px; margin: 0 0 8px; padding: 5px 9px; border-left: 2px solid color-mix(in srgb, var(--wb-primary) 60%, transparent); border-radius: 0 6px 6px 0; background: color-mix(in srgb, var(--wb-primary) 8%, transparent); color: var(--wb-fg); text-decoration: none; font-size: 12.5px; }
+.cmprev .lbl { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; color: var(--wb-primary); }
+.cmprev .lbl .i { width: 11px; height: 11px; }
+

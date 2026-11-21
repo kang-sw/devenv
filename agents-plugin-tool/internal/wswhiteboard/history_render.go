@@ -47,7 +47,7 @@ func (d itemData) HistoryStatusLabel() string {
 	case StatusOpen:
 		return StatusOpen
 	case StatusCommented:
-		return "user commented, lead's move"
+		return wsi18n.T(d.Page.Lang, "wb.commented")
 	case StatusAssumed:
 		return wsi18n.T(d.Page.Lang, "wb.history.assumed")
 	case StatusWithdrawn:
@@ -76,6 +76,9 @@ func (d itemData) HistoryQuote() string {
 // A withdrawal/supersession can retain an earlier answer; show that distinct
 // answer time explicitly without calling either timestamp an archive time.
 func (d itemData) HistoryAnswerTime() string {
+	if d.Status == StatusCommented {
+		return ""
+	}
 	// A stamped owner-answer row already shows the actual send time;
 	// the mutable item's agent-apply clock is not another owner answer.
 	if d.History != nil && d.History.OwnerAnswer() && d.History.AnswerSentAt > 0 {
