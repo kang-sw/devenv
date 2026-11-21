@@ -168,7 +168,8 @@
 
   function scopeButton(name, strip) {
     var active = name === scope, planned = name === "synced";
-    var href = planned ? "" : window.WsShell.settingsScopeHref(name, selection, projectForWorktree);
+    var rememberedProject = new URLSearchParams(window.parent.location.hash.slice(1)).get("project");
+    var href = planned ? "" : window.WsShell.settingsScopeHref(name, selection, projectForWorktree, rememberedProject);
     var cls = strip ? "prec-node" + (planned ? " synced" : "") + (active ? " active " + name + "-mode" : "") : "";
     var node = button(cls, scopeName(name), function () { send("nav", {href: href}); });
     node.dataset.settingsScope = name;
@@ -219,7 +220,8 @@
   }
 
   function source(entry) {
-    return scopeName(entry.source_scope) + (entry.source_bucket ? " · " + bucketName(entry.source_bucket) : "");
+    var scopeLabel = entry.source_inherited ? tr("js.settings.inherited_session") : scopeName(entry.source_scope);
+    return scopeLabel + (entry.source_bucket ? " · " + bucketName(entry.source_bucket) : "");
   }
 
   function shadowed(entry) {
@@ -293,7 +295,9 @@
     var list = append(el("ul"), ...entry.layers.slice().reverse().map(function (layer) {
       var value = layer.status === "context_missing" ? tr("js.settings.context_missing") :
         !layer.evaluated ? tr("js.settings.not_applicable") : layer.present ? shownValue(layer.value) : tr("js.settings.no_override");
-      var text = scopeName(layer.scope) + (layer.bucket ? " · " + bucketName(layer.bucket) : "") + " — " + value;
+      var from = layer.inherited ? tr("js.settings.inherited_session") : scopeName(layer.scope);
+      var text = from + (layer.bucket ? " · " + bucketName(layer.bucket) : "") + " — " + value;
+      if (layer.legacy) text += " · " + tr("js.settings.legacy_tier");
       var item = el("li", "", text);
       item.dataset.settingsLayer = layer.scope;
       item.dataset.layerStatus = layer.status;
@@ -332,8 +336,8 @@
         var result = pending ? await pending :
           await request("/api/config/" + action, Object.assign({}, selection, {key: operation.key, selectors: operation.selectors, value: operation.value}));
         if (result.entry) {
-          var index = snapshot.entries.findIndex(function (item) { return entryID(item) === id; });
-          snapshot.entries[index] = result.entry;
+          var affected = new Map((result.affected_entries || [result.entry]).map(item => [entryID(item), item]));
+          snapshot.entries = snapshot.entries.map(item => affected.get(entryID(item)) || item);
           warnings.set(id, result.warnings || []);
           if (row.isConnected) replace(result.entry, hadFocus);
           renderCounts();

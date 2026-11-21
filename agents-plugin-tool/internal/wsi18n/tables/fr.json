@@ -2952,5 +2952,7 @@
   "js.settings.proposal.sent": "Proposition livrée.",
   "js.settings.proposal.copied": "Patch copié.",
   "js.settings.proposal.reset": "Réinitialisation en brouillon",
-  "js.settings.proposal.queued": "Modification en brouillon"
+  "js.settings.proposal.queued": "Modification en brouillon",
+  "js.settings.inherited_session": "Hérité d’une session parente",
+  "js.settings.legacy_tier": "Valeur de niveau historique. La réinitialisation efface la valeur propre à l’environnement."
 }

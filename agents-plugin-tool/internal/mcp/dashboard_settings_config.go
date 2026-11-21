@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"maps"
 	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsagent"
@@ -32,8 +33,8 @@ func dashboardConfigCatalog(pkg, rsrc fs.FS) (*wsconfigservice.Catalog, error) {
 		rule := wsconfigservice.Rule{
 			Key: entry.Key, Type: "string", Default: defaults[entry.Key],
 			GlobalOnly: entry.GlobalOnly(), Structured: entry.Structured,
-			Compaction: isCompactionKey(entry.Key), Preference: wsconfig.ValidPreferenceKey(entry.Key),
-			Enum: fieldEnum(entry.ValueFields, "value"),
+			Compaction: isCompactionKey(entry.Key),
+			Enum:       fieldEnum(entry.ValueFields, "value"),
 			Normalize: func(value string) (string, error) {
 				if strings.HasPrefix(entry.Key, "prompt.") {
 					if strings.TrimSpace(value) == "" {
@@ -149,14 +150,14 @@ func DashboardConfigBackend(packageName string, opts wsconfig.Options, src *Dash
 
 // settingsSession batches the lineage read without touching session activity.
 // Its writer binds the secret key in the daemon and never serializes it.
-func (src *DashboardSessionSource) settingsSession(reg wsdashboard.Registration) (map[string]string, wsconfig.SessionWriter, string, bool) {
+func (src *DashboardSessionSource) settingsSession(reg wsdashboard.Registration) (wsconfigservice.SessionLayer, wsconfig.SessionWriter, string, bool) {
 	d, err := src.store.dirs()
 	if err != nil {
-		return nil, nil, "", false
+		return wsconfigservice.SessionLayer{}, nil, "", false
 	}
 	keys, err := src.keysFor(d, reg.ReplyID, false)
 	if err != nil {
-		return nil, nil, "", false
+		return wsconfigservice.SessionLayer{}, nil, "", false
 	}
 	src.store.mu.Lock()
 	defer src.store.mu.Unlock()
@@ -174,9 +175,9 @@ func (src *DashboardSessionSource) settingsSession(reg wsdashboard.Registration)
 			}
 			return false
 		})
-		return values, sessionConfigAdapter{s: src.store}, key, true
+		return wsconfigservice.SessionLayer{Effective: values, Own: maps.Clone(record.Overrides)}, sessionConfigAdapter{s: src.store}, key, true
 	}
-	return nil, nil, "", false
+	return wsconfigservice.SessionLayer{}, nil, "", false
 }
 
 // Startup-only adapter readers do not have a session key or worktree.

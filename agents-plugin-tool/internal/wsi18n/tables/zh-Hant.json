@@ -2952,5 +2952,7 @@
   "js.settings.proposal.sent": "提案已送達。",
   "js.settings.proposal.copied": "已複製修補程式。",
   "js.settings.proposal.reset": "已暫存重設",
-  "js.settings.proposal.queued": "已暫存修改"
+  "js.settings.proposal.queued": "已暫存修改",
+  "js.settings.inherited_session": "繼承自父工作階段",
+  "js.settings.legacy_tier": "舊版層級值。重設僅清除特定執行環境的覆寫。"
 }

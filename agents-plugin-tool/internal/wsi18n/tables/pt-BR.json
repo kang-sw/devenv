@@ -2952,5 +2952,7 @@
   "js.settings.proposal.sent": "Proposta entregue.",
   "js.settings.proposal.copied": "Patch copiado.",
   "js.settings.proposal.reset": "Redefinição no rascunho",
-  "js.settings.proposal.queued": "Alteração no rascunho"
+  "js.settings.proposal.queued": "Alteração no rascunho",
+  "js.settings.inherited_session": "Herdado de uma sessão superior",
+  "js.settings.legacy_tier": "Valor de nível legado. A redefinição limpa a substituição do ambiente."
 }

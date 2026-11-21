@@ -244,8 +244,16 @@ func (d *Daemon) lanAccessFor(r *http.Request) *LANAccess {
 	if !d.lan || !localViewer(r) {
 		return nil
 	}
-	token, err := d.lanToken()
-	if err != nil {
+	var token string
+	var err error
+	if r.URL.Path == "/settings" {
+		// Settings inspection stays read-only even if the owner removed
+		// the LAN token. The original dashboard access flow rotates it.
+		token, err = d.readSecret(LANTokenFileName)
+	} else {
+		token, err = d.lanToken()
+	}
+	if err != nil || token == "" {
 		return nil
 	}
 	port := strconv.Itoa(d.endpoint.Port)

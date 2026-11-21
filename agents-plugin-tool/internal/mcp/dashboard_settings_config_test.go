@@ -9,6 +9,8 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsconfigservice"
+	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wspackage"
 )
 
@@ -71,5 +73,54 @@ closing
 	}
 	if empty, ok := seeds["Empty"]; !ok || empty != "" {
 		t.Fatalf("empty point = %q, %t", empty, ok)
+	}
+}
+
+func TestDashboardSettingsKeepsParentSessionResolutionSeparateFromItsOwnOverride(t *testing.T) {
+	t.Setenv("WS_CACHE_HOME", t.TempDir())
+	src := NewDashboardSessionSource()
+	root := t.TempDir()
+	parent, err := src.store.mint(root, roleLead, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := src.store.mint(root, roleDelegate, parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := wsconfig.ItemWorkflowLang
+	if err := src.store.setOverride(parent, key, "parent"); err != nil {
+		t.Fatal(err)
+	}
+	reg := wsdashboard.Registration{Project: root, ReplyID: wsmailbox.ReplyID(child)}
+	catalog, err := wsconfigservice.NewCatalog([]wsconfigservice.Rule{{Key: key}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []struct {
+		value string
+		local bool
+	}{
+		{"parent", false},
+		{"child", true},
+		{"parent", false},
+	} {
+		values, writer, resolved, ok := src.settingsSession(reg)
+		if !ok || resolved != child {
+			t.Fatal("child session is unavailable")
+		}
+		entry := catalog.Entry(key, nil, wsconfig.ScopeSession, wsconfigservice.Layers{Session: values, SessionAvailable: true})
+		session := entry.Layers[0]
+		if entry.Value != want.value || entry.SourceInherited == want.local || session.Inherited == want.local || (session.Selected != nil) != want.local {
+			t.Errorf("wrong attribution for %q: %#v", want.value, entry)
+		}
+		if want.local {
+			err = writer.DeleteOverride(resolved, key)
+		} else {
+			err = writer.SetOverride(resolved, key, "child")
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }

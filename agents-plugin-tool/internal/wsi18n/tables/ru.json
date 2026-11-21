@@ -2952,5 +2952,7 @@
   "js.settings.proposal.sent": "Предложение доставлено.",
   "js.settings.proposal.copied": "Патч скопирован.",
   "js.settings.proposal.reset": "Сброс в черновике",
-  "js.settings.proposal.queued": "Изменение в черновике"
+  "js.settings.proposal.queued": "Изменение в черновике",
+  "js.settings.inherited_session": "Унаследовано от родительского сеанса",
+  "js.settings.legacy_tier": "Устаревшее значение уровня. Сброс удаляет переопределение для среды выполнения."
 }

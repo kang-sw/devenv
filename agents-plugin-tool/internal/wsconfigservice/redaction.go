@@ -33,7 +33,7 @@ func redactProfile(value any, masked bool) any {
 				continue
 			}
 			secret := false
-			for _, part := range []string{"token", "apikey", "secret", "password", "authorization", "credential"} {
+			for _, part := range []string{"token", "apikey", "accesskey", "privatekey", "secret", "password", "authorization", "credential"} {
 				secret = secret || strings.Contains(name, part)
 			}
 			node[key] = redactProfile(child, masked || secret)
@@ -103,7 +103,10 @@ func executableName(command string) string {
 		command = strings.Fields(command)[0]
 	}
 	name := path.Base(strings.ReplaceAll(command, "\\", "/"))
-	if strings.Trim(name, ".") == "" || strings.ContainsAny(name, "=?:@") {
+	if strings.Trim(name, ".") == "" || strings.HasPrefix(name, "-") ||
+		strings.IndexFunc(name, func(r rune) bool {
+			return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("._+-", r)
+		}) >= 0 {
 		return redacted
 	}
 	return name

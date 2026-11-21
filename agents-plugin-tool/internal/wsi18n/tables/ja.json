@@ -2952,5 +2952,7 @@
   "js.settings.proposal.sent": "提案を送信しました。",
   "js.settings.proposal.copied": "パッチをコピーしました。",
   "js.settings.proposal.reset": "リセットの下書き",
-  "js.settings.proposal.queued": "変更の下書き"
+  "js.settings.proposal.queued": "変更の下書き",
+  "js.settings.inherited_session": "親セッションから継承",
+  "js.settings.legacy_tier": "従来のティア値。リセットはハーネス固有の上書きに適用されます。"
 }

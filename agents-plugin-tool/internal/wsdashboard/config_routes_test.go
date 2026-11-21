@@ -61,6 +61,16 @@ func TestSettingsRoutesAuthorizationAndWrites(t *testing.T) {
 			t.Errorf("local %s = %d %s", path, got.Code, got.Body)
 		}
 	}
+	tokenPath := filepath.Join(d.dir, LANTokenFileName)
+	if err := os.Remove(tokenPath); err != nil {
+		t.Fatal(err)
+	}
+	if got := settingsRequest(t, d, http.MethodGet, "/settings", "", ""); got.Code != 200 {
+		t.Fatalf("settings after removing LAN token = %d %s", got.Code, got.Body)
+	}
+	if _, err := os.Stat(tokenPath); !os.IsNotExist(err) {
+		t.Fatalf("settings navigation recreated the LAN token: %v", err)
+	}
 	for _, dir := range []string{backend.Options.CacheHome, backend.Options.ConfigHome} {
 		if _, err := os.Stat(dir); !os.IsNotExist(err) {
 			t.Fatalf("read touched settings directory %s: %v", dir, err)
@@ -95,8 +105,8 @@ func TestSettingsRoutesAuthorizationAndWrites(t *testing.T) {
 
 func TestSettingsSnapshotContextAndRedaction(t *testing.T) {
 	backend := settingsTestBackend(t)
-	backend.Session = func(reg Registration) (map[string]string, wsconfig.SessionWriter, string, bool) {
-		return map[string]string{"workflow.profile.all": "session-" + reg.ReplyID}, nil, "never-return-this-session-key", true
+	backend.Session = func(reg Registration) (wsconfigservice.SessionLayer, wsconfig.SessionWriter, string, bool) {
+		return wsconfigservice.SessionLayer{Effective: map[string]string{"workflow.profile.all": "session-" + reg.ReplyID}}, nil, "never-return-this-session-key", true
 	}
 	fixture := startPageFixture(t, func(o *DaemonOptions) { o.Config = backend })
 	d := fixture.d
@@ -106,7 +116,7 @@ func TestSettingsSnapshotContextAndRedaction(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(repo), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	raw := `{"overrides":{"workflow.profile.codex":"repo-specific","workflow.profile.all":"repo-all"},"structured_overrides":{"agent.profile.test":{"backend":"codex","nested":{"Api_Key":{"values":["secret-nested"]}},"mcp_servers":{"run":{"type":"stdio","command":"/private/bin/node --secret","args":["--api-key=secret-123"],"url":"https://user:secret@example.com/mcp?token=abc","env":{"OTHER":"secret-env"},"headers":{"Authorization":"secret-header"},"extra":{"unknown":["secret-other"]}}}}}}`
+	raw := `{"overrides":{"workflow.profile.codex":"repo-specific","workflow.profile.all":"repo-all"},"structured_overrides":{"agent.profile.test":{"backend":"codex","nested":{"Api_Key":{"values":["secret-nested"]}},"mcp_servers":{"run":{"type":"stdio","command":"/private/bin/node --secret","args":["--api-key=secret-123"],"url":"https://user:secret@example.com/mcp?token=abc","env":{"OTHER":"secret-env"},"headers":{"Authorization":"secret-header"},"extra":{"unknown":["secret-other"]}},"quoted":{"command":"\"node --password secret-quoted\""}}}}}`
 	if err := os.WriteFile(repo, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +146,7 @@ func TestSettingsSnapshotContextAndRedaction(t *testing.T) {
 		if result.Code != 200 {
 			t.Fatalf("%s = %d %s", tc.query, result.Code, result.Body)
 		}
-		for _, secret := range []string{"secret-nested", "secret-123", "example.com", "secret-env", "secret-header", "secret-other", "/private/bin", "never-return-this-session-key"} {
+		for _, secret := range []string{"secret-nested", "secret-123", "example.com", "secret-env", "secret-header", "secret-other", "secret-quoted", "/private/bin", "never-return-this-session-key"} {
 			if strings.Contains(result.Body.String(), secret) {
 				t.Fatalf("%s exposed %q", tc.query, secret)
 			}
@@ -211,5 +221,36 @@ func TestSettingsTierResetTargetsOnlyTheSelectedHarnessAndTier(t *testing.T) {
 	tiers := files[wsconfig.ScopeGlobal].Agents.ModelAliases
 	if _, found := tiers["small"]["codex"]; found || tiers["small"]["default"].Model != "same-tier" || tiers["medium"]["codex"].Model != "same-harness" {
 		t.Errorf("reset targeted the wrong leaf: %+v", tiers)
+	}
+}
+
+func TestSettingsMutationRefreshesCommonAndSpecificBucketSiblings(t *testing.T) {
+	d := authFixture(t)
+	d.config = settingsTestBackend(t)
+	own := "http://127.0.0.1:43210"
+	for _, tc := range []struct {
+		action, body, wantCommon, wantCodex string
+	}{
+		{"set", `{"selectors":{"harness":"*"},"value":"common"}`, "common", "common"},
+		{"set", `{"selectors":{"harness":"codex"},"value":"specific"}`, "common", "specific"},
+		{"reset", `{"selectors":{"harness":"*"}}`, "direct", "specific"},
+		{"reset", `{"selectors":{"harness":"codex"}}`, "direct", "direct"},
+	} {
+		payload := `{"scope":"global","key":"workflow.profile",` + tc.body[1:]
+		got := settingsRequest(t, d, http.MethodPost, "/api/config/"+tc.action, payload, own)
+		if got.Code != http.StatusOK {
+			t.Fatalf("%s %s = %d %s", tc.action, payload, got.Code, got.Body)
+		}
+		var result configResult
+		if err := json.Unmarshal(got.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		values := make(map[string]any)
+		for _, entry := range result.Affected {
+			values[entry.Selectors["harness"]] = entry.Value
+		}
+		if len(values) != 2 || values["*"] != tc.wantCommon || values["codex"] != tc.wantCodex {
+			t.Errorf("affected %s values = %#v, want %q/%q", tc.action, values, tc.wantCommon, tc.wantCodex)
+		}
 	}
 }

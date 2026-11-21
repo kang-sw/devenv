@@ -30,7 +30,7 @@ test("settings links and frames keep the exact inspection identifiers", () => {
     assert.equal(src.searchParams.get("worktree"), selection.context.worktree || null);
     assert.equal(src.searchParams.get("session"), selection.context.session || null);
     assert.equal(src.searchParams.get("frame"), "1");
-    assert.equal(shell.pagePath(src), href);
+    assert.equal(shell.pagePath(src) + src.hash, href);
     assert.equal(shell.framed(src, origin).path, frame.path);
     assert.equal(frame.rid, "");
   }
@@ -83,4 +83,15 @@ test("rail gears preserve native activation and separate it from row actions", (
   const css = read("dashboard-rail.css");
   assert.match(css, /\.r-config-gear \{[^}]*opacity: \.32;/);
   assert.match(css, /\.r-config-gear:focus-visible,\n[^{}]+\.r-config-gear\[aria-current="page"\] \{ opacity: 1; \}/);
+});
+
+test("project rail target survives standalone scope traversal without becoming inspection context", () => {
+  const context = {worktree: "", session: ""};
+  const project = {scope: "project", target: "project-a", context};
+  const unbound = {scope: "builtin", target: "", context};
+  const builtin = shell.settingsScopeHref("builtin", project, () => "");
+  assert.equal(builtin, "/settings?scope=builtin#project=project-a");
+  const remembered = new URLSearchParams(new URL(builtin, origin).hash.slice(1)).get("project");
+  assert.equal(shell.settingsScopeHref("global", unbound, () => "", remembered), "/settings?scope=global#project=project-a");
+  assert.equal(shell.settingsScopeHref("project", unbound, () => "", remembered), "/settings?scope=project&target=project-a");
 });

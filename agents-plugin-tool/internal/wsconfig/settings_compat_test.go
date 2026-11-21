@@ -70,3 +70,36 @@ func TestSettingsConfigWritePreservesUnknownMembersAndKnownSiblingLeaves(t *test
 		t.Errorf("new writer lost existing map members: %#v", files)
 	}
 }
+
+func TestSettingsLegacyTierSeedHasProvenanceWithoutASelectedHarnessOverride(t *testing.T) {
+	opts := Options{ConfigHome: t.TempDir(), CacheHome: t.TempDir()}
+	path, err := GlobalPath(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := `{"schema_version":1,"agents":{"tiers":{"small":{"backend":"codex","model":"legacy-small"}}}}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	files, err := FileLayers(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, harness := range []string{"default", "codex", "pi"} {
+		info := InspectTier(files, "small", harness)
+		layer := info.Layers[ScopeGlobal]
+		if info.Scope != ScopeGlobal || info.Value.Model != "legacy-small" || !layer.Legacy || layer.Selected != nil {
+			t.Errorf("legacy seed for %s = %#v", harness, info)
+		}
+	}
+	if info := InspectTier(files, "small", "claude"); info.Scope != ScopeBuiltin || info.Value.Model == "legacy-small" {
+		t.Errorf("legacy mapping replaced Claude's builtin alias: %#v", info)
+	}
+	if _, removed, err := UnsetGlobalAgentsTierForHarness(opts, "small", "codex"); err != nil || removed {
+		t.Errorf("leaf reset removed a legacy tier: removed=%t, err=%v", removed, err)
+	}
+	out, err := os.ReadFile(path)
+	if err != nil || string(out) != raw {
+		t.Errorf("no-op reset changed the legacy file: %s, %v", out, err)
+	}
+}

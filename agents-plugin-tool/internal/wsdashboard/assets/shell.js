@@ -134,16 +134,20 @@
     return "/settings?" + query.toString();
   }
 
-  function settingsScopeHref(scope, selection, projectForWorktree) {
+  function settingsScopeHref(scope, selection, projectForWorktree, rememberedProject) {
     var ctx = selection.context;
-    var target = {
-      project: ctx.worktree ? projectForWorktree(ctx.worktree) : "",
-      repo: ctx.worktree,
-      session: ctx.session
-    }[scope];
+    var project = ctx.worktree ? projectForWorktree(ctx.worktree) :
+      selection.scope === "project" ? selection.target : rememberedProject;
+    var target = {project: project, repo: ctx.worktree, session: ctx.session}[scope];
     if (scope === selection.scope && selection.target) target = selection.target;
     if (["project", "repo", "session"].includes(scope) && !target) return "";
-    return settingsHref(scope, target, ctx.worktree, ctx.session);
+    var href = settingsHref(scope, target, ctx.worktree, ctx.session);
+    // A project-origin selection carries no inspection context. Its edit
+    // target stays in browser history until the next rail entry replaces it.
+    if (project && !ctx.worktree && scope !== "project") {
+      href += "#" + new URLSearchParams({project: project}).toString();
+    }
+    return href;
   }
 
   // alpha reads a computed CSS colour's alpha: 1 for rgb(), the fourth

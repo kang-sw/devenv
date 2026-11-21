@@ -17,32 +17,39 @@ type Layer struct {
 	Present   *bool          `json:"present,omitempty"`
 	Value     any            `json:"value,omitempty"`
 	Selected  any            `json:"selected,omitempty"`
+	Inherited bool           `json:"inherited,omitempty"`
+	Legacy    bool           `json:"legacy,omitempty"`
 }
 
 type Entry struct {
-	Key            string            `json:"key"`
-	Selectors      map[string]string `json:"selectors"`
-	Default        any               `json:"default"`
-	Value          any               `json:"value"`
-	SourceScope    wsconfig.Scope    `json:"source_scope"`
-	SourceBucket   string            `json:"source_bucket"`
-	Conditional    bool              `json:"conditional"`
-	Layers         []Layer           `json:"layers"`
-	Editable       bool              `json:"editable"`
-	DisabledReason string            `json:"disabled_reason"`
-	Type           string            `json:"type"`
-	Enum           []string          `json:"enum,omitempty"`
-	Minimum        *int64            `json:"minimum,omitempty"`
-	Maximum        *int64            `json:"maximum,omitempty"`
-	Seed           *string           `json:"seed,omitempty"`
+	Key             string            `json:"key"`
+	Selectors       map[string]string `json:"selectors"`
+	Default         any               `json:"default"`
+	Value           any               `json:"value"`
+	SourceScope     wsconfig.Scope    `json:"source_scope"`
+	SourceBucket    string            `json:"source_bucket"`
+	SourceInherited bool              `json:"source_inherited,omitempty"`
+	Conditional     bool              `json:"conditional"`
+	Layers          []Layer           `json:"layers"`
+	Editable        bool              `json:"editable"`
+	DisabledReason  string            `json:"disabled_reason"`
+	Type            string            `json:"type"`
+	Enum            []string          `json:"enum,omitempty"`
+	Minimum         *int64            `json:"minimum,omitempty"`
+	Maximum         *int64            `json:"maximum,omitempty"`
+	Seed            *string           `json:"seed,omitempty"`
+}
+
+type SessionLayer struct {
+	Effective map[string]string
+	Own       map[string]string
 }
 
 type Layers struct {
 	Files            map[wsconfig.Scope]wsconfig.Config
-	Session          map[string]string
+	Session          SessionLayer
 	SessionAvailable bool
 	Structured       map[string]json.RawMessage
-	Seeds            map[string]string
 }
 
 var precedence = []wsconfig.Scope{wsconfig.ScopeSession, wsconfig.ScopeProject, wsconfig.ScopeRepo, wsconfig.ScopeGlobal, wsconfig.ScopeBuiltin}
@@ -72,7 +79,7 @@ func (c *Catalog) Entries(scope wsconfig.Scope, layers Layers) []Entry {
 	for key := range layers.Structured {
 		add(key)
 	}
-	for key := range layers.Session {
+	for key := range layers.Session.Effective {
 		if wsconfig.ValidPreferenceKey(key) {
 			add(key)
 		}
@@ -81,23 +88,49 @@ func (c *Catalog) Entries(scope wsconfig.Scope, layers Layers) []Entry {
 
 	out := make([]Entry, 0, len(keys))
 	for _, key := range slices.Sorted(maps.Keys(keys)) {
-		rule, _ := c.rule(key)
-		switch {
-		case key == "agents.tier":
-			for _, tier := range []string{"small", "medium", "large", "xlarge"} {
-				for _, harness := range rule.Harnesses {
-					out = append(out, buildEntry(rule, map[string]string{"tier": tier, "harness": harness}, scope, layers))
-				}
-			}
-		case len(rule.Harnesses) > 0:
-			for _, harness := range rule.Harnesses {
-				out = append(out, buildEntry(rule, map[string]string{"harness": harness}, scope, layers))
-			}
-		default:
-			out = append(out, buildEntry(rule, map[string]string{}, scope, layers))
-		}
+		out = append(out, c.KeyEntries(key, scope, layers)...)
 	}
 	return out
+}
+
+func (c *Catalog) KeyEntries(key string, scope wsconfig.Scope, layers Layers) []Entry {
+	rule, _ := c.rule(key)
+	switch {
+	case key == "agents.tier":
+		var entries []Entry
+		for _, tier := range []string{"small", "medium", "large", "xlarge"} {
+			for _, harness := range rule.Harnesses {
+				entries = append(entries, buildEntry(rule, map[string]string{"tier": tier, "harness": harness}, scope, layers))
+			}
+		}
+		return entries
+	case len(rule.Harnesses) > 0:
+		entries := make([]Entry, 0, len(rule.Harnesses))
+		for _, harness := range rule.Harnesses {
+			entries = append(entries, buildEntry(rule, map[string]string{"harness": harness}, scope, layers))
+		}
+		return entries
+	default:
+		return []Entry{buildEntry(rule, map[string]string{}, scope, layers)}
+	}
+}
+
+// AffectedEntries includes selector siblings and compaction rows whose
+// legacy adapter value can change what the modern setting resolves to.
+func (c *Catalog) AffectedEntries(mutation Mutation, scope wsconfig.Scope, layers Layers) []Entry {
+	entries := c.KeyEntries(mutation.Key, scope, layers)
+	for _, key := range c.keys {
+		rule := c.rules[key]
+		if rule.LegacyKey == nil {
+			continue
+		}
+		for _, harness := range rule.Harnesses {
+			if rule.LegacyKey(harness) == mutation.Key {
+				entries = append(entries, buildEntry(rule, map[string]string{"harness": harness}, scope, layers))
+			}
+		}
+	}
+	return entries
 }
 
 func buildEntry(rule Rule, selectors map[string]string, scope wsconfig.Scope, layers Layers) Entry {
@@ -107,22 +140,21 @@ func buildEntry(rule Rule, selectors map[string]string, scope wsconfig.Scope, la
 	e.SourceScope = wsconfig.ScopeBuiltin
 	e.Seed = rule.Seed
 	harness := selectors["harness"]
-	if seed, ok := layers.Seeds[rule.Key]; ok {
-		e.Seed = &seed
-	}
 	if rule.Key == "agents.tier" {
 		tier := wsconfig.InspectTier(layers.Files, selectors["tier"], harness)
 		e.Default, e.Value, e.SourceScope, e.SourceBucket = tier.Default, tier.Value, tier.Scope, tier.Bucket
 		for _, s := range precedence {
 			leaf, present := tier.Layers[s]
 			layer := layerStatus(rule, s, layers)
-			if s == wsconfig.ScopeBuiltin {
-				leaf, present = tier.Default, true
-			}
 			if layer.Evaluated {
-				layer.set(harness, leaf, present)
-				if present && s != wsconfig.ScopeBuiltin {
-					layer.Selected = leaf
+				if s == wsconfig.ScopeBuiltin {
+					layer.set(harness, tier.Default, true)
+				} else {
+					layer.set(leaf.Bucket, leaf.Value, present)
+					layer.Legacy = leaf.Legacy
+					if leaf.Selected != nil {
+						layer.Selected = *leaf.Selected
+					}
 				}
 			}
 			e.Layers = append(e.Layers, layer)
@@ -145,9 +177,13 @@ func buildEntry(rule Rule, selectors map[string]string, scope wsconfig.Scope, la
 			if s == wsconfig.ScopeBuiltin {
 				layer.set("", e.Default, e.Default != nil)
 			} else {
-				v, _, b, ok, selected := layerValue(rule, s, layers, keys, buckets, harness)
+				v, storedKey, b, ok, selected := layerValue(rule, s, layers, keys, buckets, harness)
 				layer.set(b, v, ok)
 				layer.Selected = selected
+				if ok && s == wsconfig.ScopeSession {
+					_, own := layers.Session.Own[storedKey]
+					layer.Inherited = !own
+				}
 			}
 		}
 		e.Layers = append(e.Layers, layer)
@@ -187,9 +223,13 @@ func buildEntry(rule Rule, selectors map[string]string, scope wsconfig.Scope, la
 			continue
 		}
 		k := candidate.key
-		v, _, b, ok, _ := layerValue(rule, layer.Scope, layers, keys[k:k+1], buckets[k:k+1], harness)
+		v, storedKey, b, ok, _ := layerValue(rule, layer.Scope, layers, keys[k:k+1], buckets[k:k+1], harness)
 		if ok {
 			e.Value, e.SourceScope, e.SourceBucket = v, layer.Scope, b
+			if layer.Scope == wsconfig.ScopeSession {
+				_, own := layers.Session.Own[storedKey]
+				e.SourceInherited = !own
+			}
 			break
 		}
 	}
@@ -255,10 +295,14 @@ func layerValue(r Rule, s wsconfig.Scope, state Layers, keys, buckets []string, 
 	}
 	overrides := state.Files[s].Overrides
 	if s == wsconfig.ScopeSession {
-		overrides = state.Session
+		overrides = state.Session.Effective
 	}
 	var selected any
-	if v, ok := overrides[r.StoreKey(harness)]; ok {
+	selectedOverrides := overrides
+	if s == wsconfig.ScopeSession {
+		selectedOverrides = state.Session.Own
+	}
+	if v, ok := selectedOverrides[r.StoreKey(harness)]; ok {
 		selected = r.display(v)
 	}
 	if (r.GlobalOnly && s != wsconfig.ScopeGlobal) || (s == wsconfig.ScopeBuiltin) {

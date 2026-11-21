@@ -2952,5 +2952,7 @@
   "js.settings.proposal.sent": "Propuesta entregada.",
   "js.settings.proposal.copied": "Parche copiado.",
   "js.settings.proposal.reset": "Restablecimiento en borrador",
-  "js.settings.proposal.queued": "Cambio en borrador"
+  "js.settings.proposal.queued": "Cambio en borrador",
+  "js.settings.inherited_session": "Heredado de la sesión superior",
+  "js.settings.legacy_tier": "Valor de nivel heredado. Restablecer borra solo la preferencia del entorno."
 }

@@ -2952,5 +2952,7 @@
   "js.settings.proposal.sent": "제안을 전송했습니다.",
   "js.settings.proposal.copied": "패치를 복사했습니다.",
   "js.settings.proposal.reset": "되돌리기 초안",
-  "js.settings.proposal.queued": "편집 제안 초안"
+  "js.settings.proposal.queued": "편집 제안 초안",
+  "js.settings.inherited_session": "상위 세션에서 상속",
+  "js.settings.legacy_tier": "기존 공통 티어 값입니다. 되돌리기는 개별 하네스 오버라이드만 해제합니다."
 }

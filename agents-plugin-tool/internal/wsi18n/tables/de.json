@@ -2952,5 +2952,7 @@
   "js.settings.proposal.sent": "Vorschlag zugestellt.",
   "js.settings.proposal.copied": "Patch kopiert.",
   "js.settings.proposal.reset": "Zurücksetzen vorgemerkt",
-  "js.settings.proposal.queued": "Änderung vorgemerkt"
+  "js.settings.proposal.queued": "Änderung vorgemerkt",
+  "js.settings.inherited_session": "Von einer übergeordneten Sitzung geerbt",
+  "js.settings.legacy_tier": "Alter Tier-Standard. Zurücksetzen entfernt einzelne Harness-Überschreibungen."
 }

@@ -2952,5 +2952,7 @@
   "js.settings.proposal.sent": "Proposta consegnata.",
   "js.settings.proposal.copied": "Patch copiata.",
   "js.settings.proposal.reset": "Ripristino in bozza",
-  "js.settings.proposal.queued": "Modifica in bozza"
+  "js.settings.proposal.queued": "Modifica in bozza",
+  "js.settings.inherited_session": "Ereditato da una sessione padre",
+  "js.settings.legacy_tier": "Valore storico del livello. Il ripristino cancella la modifica specifica dell’ambiente."
 }

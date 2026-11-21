@@ -2,7 +2,6 @@ package wsdashboard
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,7 +19,7 @@ import (
 // Run with WS_PLAYWRIGHT_MODULE pointing at an installed Playwright module and
 // its Chromium downloaded. WS_CONFIG_SETTINGS_CAPTURES optionally keeps the
 // global and repo pairs at 1440×960; the default is a disposable directory.
-func TestSettingsInteractionBrowser(t *testing.T) {
+func RunSettingsVisualBrowser(t *testing.T, backend *ConfigBackend) {
 	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
 		t.Skip("set WS_PLAYWRIGHT_MODULE to run the settings Chromium acceptance")
 	}
@@ -57,7 +56,11 @@ func TestSettingsInteractionBrowser(t *testing.T) {
 	if err := resolver.Set("workflow.whiteboard_enabled.claude", "on", wsconfig.SetOptions{ExplicitScope: wsconfig.ScopeProject}); err != nil {
 		t.Fatal(err)
 	}
-	backend := browserSettingsBackend(t, opts)
+	backend.Options = opts
+	backend.IsLead = nil // Session rows below reproduce the mockup's data.
+	backend.Session = func(Registration) (wsconfigservice.SessionLayer, wsconfig.SessionWriter, string, bool) {
+		return wsconfigservice.SessionLayer{Effective: map[string]string{"workflow.lang": "Korean"}}, nil, "never-return-this-session-key", true
+	}
 	dir := filepath.Join(t.TempDir(), "dashboard")
 	src := newPageFake()
 	now := time.Now()
@@ -120,64 +123,5 @@ func TestSettingsInteractionBrowser(t *testing.T) {
 	mail, err := store.ReplyQueue(reg.ReplyID)
 	if err != nil || len(mail) != 1 || !strings.Contains(mail[0].Content, "workflow.lang") {
 		t.Fatalf("expected one patch for the active lead: %#v, %v", mail, err)
-	}
-}
-
-func browserSettingsBackend(t *testing.T, opts wsconfig.Options) *ConfigBackend {
-	t.Helper()
-	raw, err := dashboardFS.ReadFile("assets/dashboard-settings-catalog.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var items []struct {
-		Key, Control string
-		Selectors    []string
-	}
-	if err := json.Unmarshal(raw, &items); err != nil {
-		t.Fatal(err)
-	}
-	rules := make([]wsconfigservice.Rule, 0, len(items)+1)
-	for _, item := range items {
-		rule := wsconfigservice.Rule{Key: item.Key, Type: "string"}
-		if len(item.Selectors) > 0 {
-			rule.Harnesses = []string{"*", "claude", "codex", "pi", "agy"}
-		}
-		switch item.Control {
-		case "toggle":
-			rule.Default = "off"
-			rule.Enum = []string{"on", "off"}
-		case "number":
-			rule.Type = "integer"
-			rule.Default = "0"
-		case "profile":
-			rule.Structured = true
-		case "tier":
-			rule.Harnesses = []string{"default", "claude", "codex", "pi", "agy"}
-		}
-		switch item.Key {
-		case "workflow.profile":
-			rule.Default = "direct"
-			rule.Enum = []string{"direct", "orchestrate"}
-		case "review_phase":
-			rule.Default, rule.Enum = "lite", []string{"off", "lite", "full"}
-		case "sage_review", "sage_review_design":
-			rule.Default, rule.Enum = "off", []string{"off", "ask", "auto"}
-		case "workflow.prefer_subagent", "bootstrap_alarm":
-			rule.GlobalOnly = true
-		case "prompt.*":
-			seed := "## Standing preferences\nReview the requested changes."
-			rule = wsconfigservice.Rule{Key: "prompt.UserPreferenceSection", Type: "string", Seed: &seed, Harnesses: rule.Harnesses}
-		}
-		rules = append(rules, rule)
-	}
-	catalog, err := wsconfigservice.NewCatalog(rules)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &ConfigBackend{Catalog: catalog, Options: opts,
-		Session: func(Registration) (map[string]string, wsconfig.SessionWriter, string, bool) {
-			return map[string]string{"workflow.lang": "Korean"}, nil, "never-return-this-session-key", true
-		},
-		OrchestrateWarning: func(string) string { return "Unverified harness" },
 	}
 }

@@ -21,8 +21,7 @@ type ConfigBackend struct {
 	Catalog            *wsconfigservice.Catalog
 	Options            wsconfig.Options
 	Structured         map[string]json.RawMessage
-	Seeds              map[string]string
-	Session            func(Registration) (map[string]string, wsconfig.SessionWriter, string, bool)
+	Session            func(Registration) (wsconfigservice.SessionLayer, wsconfig.SessionWriter, string, bool)
 	OrchestrateWarning func(string) string
 	IsLead             func(Registration) bool
 	Changed            func(string)
@@ -58,8 +57,9 @@ type configWarning struct {
 }
 
 type configResult struct {
-	Entry    wsconfigservice.Entry `json:"entry"`
-	Warnings []configWarning       `json:"warnings"`
+	Entry    wsconfigservice.Entry   `json:"entry"`
+	Affected []wsconfigservice.Entry `json:"affected_entries"`
+	Warnings []configWarning         `json:"warnings"`
 }
 
 type configError struct {
@@ -238,7 +238,7 @@ func (d *Daemon) configLayers(resolved configResolved) (wsconfigservice.Layers, 
 	if err != nil {
 		return wsconfigservice.Layers{}, nil, "", configUnavailable
 	}
-	layers := wsconfigservice.Layers{Files: files, Structured: d.config.Structured, Seeds: d.config.Seeds}
+	layers := wsconfigservice.Layers{Files: files, Structured: d.config.Structured}
 	var writer wsconfig.SessionWriter
 	var key string
 	if resolved.session.ReplyID != "" {
@@ -396,5 +396,6 @@ func (d *Daemon) handleConfigMutation(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	entry := d.config.Catalog.Entry(mutation.Key, mutation.Selectors, request.Scope, layers)
-	writeJSON(w, http.StatusOK, configResult{entry, warnings})
+	affected := d.config.Catalog.AffectedEntries(mutation, request.Scope, layers)
+	writeJSON(w, http.StatusOK, configResult{Entry: entry, Affected: affected, Warnings: warnings})
 }

@@ -2952,5 +2952,7 @@
   "js.settings.proposal.sent": "Proposal delivered.",
   "js.settings.proposal.copied": "Patch copied.",
   "js.settings.proposal.reset": "Reset queued",
-  "js.settings.proposal.queued": "Change queued"
+  "js.settings.proposal.queued": "Change queued",
+  "js.settings.inherited_session": "Inherited from a parent session",
+  "js.settings.legacy_tier": "Legacy tier seed. Reset clears only a harness override."
 }

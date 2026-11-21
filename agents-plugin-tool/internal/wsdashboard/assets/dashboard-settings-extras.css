@@ -106,3 +106,20 @@
 [data-settings-view] .krow[data-settings-draft] {
   background: color-mix(in srgb, var(--wb-warn) 8%, var(--wb-card));
 }
+[data-settings-view] .proposal-bar .btn {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--wb-line);
+  border-radius: 8px;
+  background: var(--wb-card);
+  color: var(--wb-fg);
+  font-size: 12px;
+  font-weight: 700;
+}
+[data-settings-view] .proposal-bar .btn.pri {
+  border-color: var(--wb-primary);
+  background: var(--wb-primary);
+  color: var(--wb-primary-fg);
+}
+[data-settings-view] .proposal-bar .btn:disabled { opacity: .58; }
+[data-settings-view] .proposal-bar > .proposal-patch { min-height: 112px; }

@@ -29,7 +29,6 @@ type Rule struct {
 	ReadOnly         bool
 	Structured       bool
 	Compaction       bool
-	Preference       bool
 	Normalize        func(string) (string, error)
 	Decode           func(string) (any, error)
 	ValidateName     func(string) error

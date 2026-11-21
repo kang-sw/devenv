@@ -2952,5 +2952,7 @@
   "js.settings.proposal.sent": "提案已送达。",
   "js.settings.proposal.copied": "已复制补丁。",
   "js.settings.proposal.reset": "已暂存重置",
-  "js.settings.proposal.queued": "已暂存修改"
+  "js.settings.proposal.queued": "已暂存修改",
+  "js.settings.inherited_session": "继承自父会话",
+  "js.settings.legacy_tier": "旧版层级值。重置仅清除特定运行环境的覆盖。"
 }

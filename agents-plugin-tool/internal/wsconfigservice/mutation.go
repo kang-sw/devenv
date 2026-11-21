@@ -164,7 +164,7 @@ func (m Mutation) AfterWrite(scope wsconfig.Scope, layers Layers) Layers {
 	file := layers.Files[scope]
 	values := file.Overrides
 	if scope == wsconfig.ScopeSession {
-		values = layers.Session
+		values = layers.Session.Own
 	}
 	if m.Structured != nil || strings.HasSuffix(FamilyKey(m.Key), ".profile.*") {
 		if file.StructuredOverrides == nil {
@@ -185,7 +185,13 @@ func (m Mutation) AfterWrite(scope wsconfig.Scope, layers Layers) Layers {
 			values[m.StoredKey] = m.Scalar
 		}
 		if scope == wsconfig.ScopeSession {
-			layers.Session = values
+			layers.Session.Own = values
+			if m.Action == "set" {
+				if layers.Session.Effective == nil {
+					layers.Session.Effective = make(map[string]string)
+				}
+				layers.Session.Effective[m.StoredKey] = m.Scalar
+			}
 		} else {
 			file.Overrides = values
 		}
