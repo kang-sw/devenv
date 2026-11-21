@@ -573,18 +573,14 @@ test('Phase 2 review: moved member with retained org CC (sole source A; A+B prov
   ]);
 });
 
-test('Phase 2 review: global exclusion stays uncovered when selecting a parent org and can be personally re-added', () => {
+test('Phase 2 review: global exclusion from projected ccExcluded (with events: []) stays uncovered when selecting a parent org and can be personally re-added', () => {
   const oi = J(ctx.orgIndex(ORGS, MEMBERS));
   const idx = J(ctx.pmIndex(oi.tree));
   const h2o = oi.headToOrg;
 
-  // han-sa was previously CC'd and unCC'd (global exclusion on i1); no orgs registered yet
-  const it = { id: 'i1', cc: [], orgCC: [], ccSources: {} };
-  const events = [
-    { type: 'item.cc', status: 'applied', ignored: false, payload: { item: 'i1', member: 'han-sa' } },
-    { type: 'item.uncc', status: 'applied', ignored: false, payload: { item: 'i1', member: 'han-sa' } },
-  ];
-  const init = J(ctx.pmCcInit(idx, it, h2o, events));
+  // han-sa was previously CC'd and unCC'd (server projects ccExcluded: ['han-sa']); no orgs registered and no hydrated events
+  const it = { id: 'i1', cc: [], orgCC: [], ccSources: {}, ccExcluded: ['han-sa'] };
+  const init = J(ctx.pmCcInit(idx, it, h2o));
   assert.equal(init.ccExcluded['han-sa'], true);
   const orgCtx = { origOrgCc: init.origOrgCc, ccSources: init.ccSources, ccExcluded: init.ccExcluded };
 
@@ -724,47 +720,52 @@ test('Phase 2 review: author-owned org rule stays unlocked with removal chip eve
   ]);
 });
 
-test('Phase 2 review: pmBuildApplyEvents re-derives live org/head mapping at apply on concurrent rehead, vacate, and delete', () => {
+test('Phase 2 review: pmBuildApplyEvents validates open-time snapshot dependencies and flags stale instead of silently retargeting', () => {
   const oiOpen = J(ctx.orgIndex(ORGS, MEMBERS));
   const idxOpen = J(ctx.pmIndex(oiOpen.tree));
   const openH2o = oiOpen.headToOrg;
 
-  // 1. Assign: user selects o-sw1 (head lee-dy at open), then o-sw1 is concurrently re-headed to park-sy
+  // 1. Assign: o-sw1 (head lee-dy at open) concurrently re-headed to park-sy -> stale, never silently retargeted
   const curAsg = {
     kind: 'assign', item: 'i1', draft: false, norule: false, single: false, compl: 'assignee',
-    headToOrg: openH2o, origOrgAssign: {}, picks: {}, groups: { 'lee-dy': true },
+    oi: oiOpen, idx: idxOpen, headToOrg: openH2o, origOrgAssign: {}, picks: {}, groups: { 'lee-dy': true },
   };
-  const liveRehead = {
+  const liveUnchanged = {
     viewer: { member: 'kim-hn', reach: { 'lee-dy': 1, 'park-sy': 1 } },
     members: MEMBERS,
+    orgs: ORGS,
+    items: { i1: { id: 'i1', hidden: false, assignments: [], pending: [] } },
+    rules: {}, assignments: {},
+  };
+  assert.deepEqual(J(ctx.pmBuildApplyEvents(curAsg, liveUnchanged)), {
+    events: [['item.assign', { item: 'i1', targets: [{ root: 'lee-dy', include_root: true, org: 'o-sw1' }], completion: 'assigner' }]],
+    stale: false,
+  });
+
+  const liveRehead = Object.assign({}, liveUnchanged, {
     orgs: [
       { id: 'o-dev', name: 'SW개발실', head: 'kim-hn', removed: null },
       { id: 'o-sw1', name: 'SW개발1팀', head: 'park-sy', removed: null },
     ],
-    items: { i1: { id: 'i1', hidden: false, assignments: [], pending: [] } },
-    rules: {}, assignments: {},
-  };
-  assert.deepEqual(J(ctx.pmBuildApplyEvents(curAsg, liveRehead)), [
-    ['item.assign', { item: 'i1', targets: [{ root: 'park-sy', include_root: true, org: 'o-sw1' }], completion: 'assigner' }],
-  ]);
+  });
+  assert.deepEqual(J(ctx.pmBuildApplyEvents(curAsg, liveRehead)), { events: [], stale: true });
 
-  // 2. Assign: o-sw1 concurrently vacated -> dropped rather than sending refused org target; live person pick still sent
+  // 2. Assign: o-sw1 concurrently vacated -> stale, sends nothing even when another person was picked
   const curAsgVac = Object.assign({}, curAsg, { picks: { 'oh-sj': true } });
-  const liveVacated = Object.assign({}, liveRehead, {
+  const liveVacated = Object.assign({}, liveUnchanged, {
     orgs: [
       { id: 'o-dev', name: 'SW개발실', head: 'kim-hn', removed: null },
       { id: 'o-sw1', name: 'SW개발1팀', head: '', removed: null },
     ],
   });
-  assert.deepEqual(J(ctx.pmBuildApplyEvents(curAsgVac, liveVacated)), [
-    ['item.assign', { item: 'i1', targets: ['oh-sj'], completion: 'assignee' }],
-  ]);
+  assert.deepEqual(J(ctx.pmBuildApplyEvents(curAsgVac, liveVacated)), { events: [], stale: true });
 
-  // 3. CC: user checks o-sw1 (new) + unchecks o-dev (existing); concurrently o-sw1 is deleted and o-dev is vacated
+  // 3. CC: staged o-sw1 deleted before apply -> stale, sends nothing
   const curCc = {
-    kind: 'cc', item: 'i1', draft: false, headToOrg: openH2o,
+    kind: 'cc', item: 'i1', draft: false, oi: oiOpen, idx: idxOpen, headToOrg: openH2o,
     origCc: ['kim-hn'], origOrgCc: [{ org: 'o-dev', added: ['kim-hn'] }],
     ccSources: { 'kim-hn': { personal: false, orgs: ['o-dev'] } },
+    ccExcluded: {},
     origOrgByHead: { 'kim-hn': 'o-dev' },
     picks: { 'oh-sj': true }, unpicks: {}, groups: { 'lee-dy': true },
   };
@@ -784,11 +785,7 @@ test('Phase 2 review: pmBuildApplyEvents re-derives live org/head mapping at app
     },
     events: [],
   };
-  // Deleted o-sw1 is omitted (never sends refused item.cc_org), vacated o-dev still unCC'd, oh-sj still CC'd
-  assert.deepEqual(J(ctx.pmBuildApplyEvents(curCc, liveCcMutated)), [
-    ['item.uncc_org', { item: 'i1', org: 'o-dev' }],
-    ['item.cc', { item: 'i1', member: 'oh-sj' }],
-  ]);
+  assert.deepEqual(J(ctx.pmBuildApplyEvents(curCc, liveCcMutated)), { events: [], stale: true });
 });
 
 // Minimal HTML tree parser for driving real picker DOM click + keyboard handlers in Node.
@@ -974,7 +971,7 @@ test('Phase 2 review: vacant-org row ignores click and keyboard navigation/Enter
     items: {
       i1: {
         id: 'i1', alias: 'k-1', kind: 'task', title: 'Test', hidden: false,
-        cc: [], orgCC: [], ccSources: {},
+        cc: [], orgCC: [], ccSources: {}, ccExcluded: ['han-sa'],
         assignments: ['a-lee'], pending: [],
       },
     },
@@ -985,10 +982,7 @@ test('Phase 2 review: vacant-org row ignores click and keyboard navigation/Enter
     assignments: {
       'a-lee': { id: 'a-lee', item: 'i1', to: 'lee-dy', state: 'live', rule: 'r-sw1' },
     },
-    events: [
-      { type: 'item.cc', status: 'applied', ignored: false, payload: { item: 'i1', member: 'han-sa' } },
-      { type: 'item.uncc', status: 'applied', ignored: false, payload: { item: 'i1', member: 'han-sa' } },
-    ],
+    events: [],
   };
 
   // 1. Vacant row click + keyboard in CC modal
@@ -1062,4 +1056,141 @@ test('Phase 2 review: vacant-org row ignores click and keyboard navigation/Enter
   assert.deepEqual(dispatched[1].events.map(e => [e.type, e.payload]), [
     ['item.unassign', { item: 'i1', rule: 'r-sw1', root: 'lee-dy' }],
   ]);
+});
+
+test('Phase 2 re-review: live apply stale checks (vacancy repeat-click, plain-lead gains org, peer unCC, rule replacement, retarget old rule gone)', () => {
+  const baseVs = () => ({
+    viewer: { member: 'kim-hn', reach: { 'lee-dy': 1, 'choi-jw': 2, 'jung-mj': 2, 'kang-yr': 2, 'park-sy': 1, 'yoon-th': 2, 'han-sa': 2 } },
+    members: J(MEMBERS),
+    orgs: J(ORGS),
+    items: {
+      i1: {
+        id: 'i1', alias: 'k-1', kind: 'task', title: 'Stale checks', hidden: false,
+        cc: ['choi-jw'],
+        orgCC: [],
+        ccSources: { 'choi-jw': { personal: true, orgs: [] } },
+        ccExcluded: [],
+        assignments: [], pending: [],
+      },
+    },
+    rules: {},
+    assignments: {},
+    events: [],
+  });
+
+  // 2a. Second Apply after vacancy (CC & Assign): 1st and 2nd Apply both keep modal open, show stale notice, send nothing
+  for (const kind of ['cc', 'assign']) {
+    const { c, byId, dispatched } = makePickerDomHarness(baseVs());
+    c.openPicker(kind, { item: 'i1' });
+    const sw1Btn = byId['tkpm-body'].querySelector('[data-pm="grp"][data-id="lee-dy"]');
+    c.pmClick({ target: sw1Btn, stopPropagation() {} });
+    // Concurrently vacate o-sw1 in live VS
+    c.VS.orgs = c.VS.orgs.map(o => (o.id === 'o-sw1' ? Object.assign({}, o, { head: '' }) : o));
+    c.pmApply();
+    assert.equal(dispatched.length, 0, `${kind}: 1st apply after vacancy sends nothing`);
+    assert.equal(byId['tkpm'].open, true, `${kind}: modal stays open after 1st stale apply`);
+    assert.equal(byId['tkpm-err'].textContent, 'js.tk.pm.stale');
+    assert.equal(byId['tkpm-err'].hidden, false);
+    // Clicking Apply a second time must produce the exact same stale refusal, never falling back to a plain-lead payload
+    c.pmApply();
+    assert.equal(dispatched.length, 0, `${kind}: 2nd apply after vacancy still sends nothing`);
+    assert.equal(byId['tkpm'].open, true, `${kind}: modal stays open after 2nd stale apply`);
+    assert.equal(byId['tkpm-err'].textContent, 'js.tk.pm.stale');
+  }
+
+  // 2b. Plain lead (park-sy) gains an org before Apply (CC & Assign) -> stale notice, no silent org attachment
+  for (const kind of ['cc', 'assign']) {
+    const { c, byId, dispatched } = makePickerDomHarness(baseVs());
+    c.openPicker(kind, { item: 'i1' });
+    const parkBtn = byId['tkpm-body'].querySelector('[data-pm="grp"][data-id="park-sy"]');
+    c.pmClick({ target: parkBtn, stopPropagation() {} });
+    c.VS.orgs = c.VS.orgs.concat([{ id: 'o-sw2', name: 'SW개발2팀', head: 'park-sy', removed: null }]);
+    c.pmApply();
+    assert.equal(dispatched.length, 0, `${kind}: plain lead gaining org sends nothing`);
+    assert.equal(byId['tkpm'].open, true);
+    assert.equal(byId['tkpm-err'].textContent, 'js.tk.pm.stale');
+  }
+
+  // 3a. Peer unCC of an untouched initial personal CC (choi-jw) while user adds oh-sj -> sends ONLY item.cc(oh-sj), never re-adds choi-jw
+  {
+    const { c, byId, dispatched } = makePickerDomHarness(baseVs());
+    c.openPicker('cc', { item: 'i1' });
+    const ohCk = byId['tkpm-body'].querySelector('[data-pm="self"][data-id="oh-sj"]');
+    c.pmClick({ target: ohCk, stopPropagation() {} });
+    // Peer concurrently unCCs untouched choi-jw
+    c.VS.items.i1.cc = [];
+    c.VS.items.i1.ccSources = {};
+    c.VS.items.i1.ccExcluded = ['choi-jw'];
+    c.pmApply();
+    assert.equal(dispatched.length, 1);
+    assert.deepEqual(dispatched[0].events.map(e => [e.type, e.payload]), [
+      ['item.cc', { item: 'i1', member: 'oh-sj' }],
+    ]);
+  }
+
+  // 3b. Peer unCC of a TOUCHED member (user unchecks choi-jw OR adds o-sw1 covering choi-jw) -> stale notice, sends nothing
+  {
+    const { c, byId, dispatched } = makePickerDomHarness(baseVs());
+    c.openPicker('cc', { item: 'i1' });
+    const choiCk = byId['tkpm-body'].querySelector('[data-pm="self"][data-id="choi-jw"]');
+    c.pmClick({ target: choiCk, stopPropagation() {} });
+    c.VS.items.i1.cc = [];
+    c.VS.items.i1.ccSources = {};
+    c.VS.items.i1.ccExcluded = ['choi-jw'];
+    c.pmApply();
+    assert.equal(dispatched.length, 0);
+    assert.equal(byId['tkpm'].open, true);
+    assert.equal(byId['tkpm-err'].textContent, 'js.tk.pm.stale');
+  }
+  {
+    const { c, byId, dispatched } = makePickerDomHarness(baseVs());
+    c.openPicker('cc', { item: 'i1' });
+    const sw1Btn = byId['tkpm-body'].querySelector('[data-pm="grp"][data-id="lee-dy"]');
+    c.pmClick({ target: sw1Btn, stopPropagation() {} });
+    c.VS.items.i1.cc = [];
+    c.VS.items.i1.ccSources = {};
+    c.VS.items.i1.ccExcluded = ['choi-jw'];
+    c.pmApply();
+    assert.equal(dispatched.length, 0);
+    assert.equal(byId['tkpm'].open, true);
+    assert.equal(byId['tkpm-err'].textContent, 'js.tk.pm.stale');
+  }
+
+  // 4. Owned rule r1 replaced by r2 in another window -> stale notice, never unassigns r2
+  {
+    const vs = baseVs();
+    vs.rules = {
+      r1: { id: 'r1', item: 'i1', by: 'kim-hn', root: 'lee-dy', assignRoot: 'lee-dy', org: 'o-sw1', includeRoot: true, levels: null, state: 'live', ended: null, ts: '2026-11-20T01:00:00Z' },
+    };
+    const { c, byId, dispatched } = makePickerDomHarness(vs);
+    c.openPicker('assign', { item: 'i1' });
+    const sw1Btn = byId['tkpm-body'].querySelector('[data-pm="grp"][data-id="lee-dy"]');
+    c.pmClick({ target: sw1Btn, stopPropagation() {} });
+    // Concurrently end r1 and replace with r2
+    c.VS.rules.r1.state = 'ended';
+    c.VS.rules.r1.ended = 'ev-un-r1';
+    c.VS.rules.r2 = { id: 'r2', item: 'i1', by: 'kim-hn', root: 'lee-dy', assignRoot: 'lee-dy', org: 'o-sw1', includeRoot: true, levels: null, state: 'live', ended: null, ts: '2026-11-20T02:00:00Z' };
+    c.pmApply();
+    assert.equal(dispatched.length, 0);
+    assert.equal(byId['tkpm'].open, true);
+    assert.equal(byId['tkpm-err'].textContent, 'js.tk.pm.stale');
+  }
+
+  // 5. Deleted-org assign retarget after concurrent unassign of the old rule -> stale notice, sends nothing
+  {
+    const vs = baseVs();
+    vs.rules = {
+      'r-del': { id: 'r-del', item: 'i1', by: 'kim-hn', root: 'han-sa', assignRoot: 'han-sa', org: 'o-plat', includeRoot: true, levels: null, state: 'live', ended: null, ts: '2026-11-20T01:00:00Z' },
+    };
+    const { c, byId, dispatched } = makePickerDomHarness(vs);
+    c.openPicker('assign', { item: 'i1', retarget: { rule: 'r-del', org: 'o-plat', root: 'han-sa' } });
+    const sw1Btn = byId['tkpm-body'].querySelector('[data-pm="grp"][data-id="lee-dy"]');
+    c.pmClick({ target: sw1Btn, stopPropagation() {} });
+    // Concurrently unassign r-del in another window
+    delete c.VS.rules['r-del'];
+    c.pmApply();
+    assert.equal(dispatched.length, 0);
+    assert.equal(byId['tkpm'].open, true);
+    assert.equal(byId['tkpm-err'].textContent, 'js.tk.pm.stale');
+  }
 });

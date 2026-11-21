@@ -2706,5 +2706,6 @@
   "js.tk.pm.chip.asg.org.pend.one": "{1} · pending ({0})",
   "js.tk.pm.chip.asg.org.pend.other": "{1} · pending ({0})",
   "js.tk.pm.vac.tip": "Orgs without a head cannot be selected",
-  "js.tk.pm.vac.hint": "Admin must assign a head to select"
+  "js.tk.pm.vac.hint": "Admin must assign a head to select",
+  "js.tk.pm.stale": "Changed elsewhere. Please reopen."
 }

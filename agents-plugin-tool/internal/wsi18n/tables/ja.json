@@ -2706,5 +2706,6 @@
   "js.tk.pm.chip.asg.org.pend.one": "{1} · 保留 ({0}名)",
   "js.tk.pm.chip.asg.org.pend.other": "{1} · 保留 ({0}名)",
   "js.tk.pm.vac.tip": "ヘッドがない組織は選択できません",
-  "js.tk.pm.vac.hint": "管理者がヘッドを指定すると選択可能"
+  "js.tk.pm.vac.hint": "管理者がヘッドを指定すると選択可能",
+  "js.tk.pm.stale": "他の場所で変更されました。もう一度開いてください。"
 }

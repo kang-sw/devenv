@@ -2706,5 +2706,6 @@
   "js.tk.pm.chip.asg.org.pend.one": "{1} · 待确认 ({0}人)",
   "js.tk.pm.chip.asg.org.pend.other": "{1} · 待确认 ({0}人)",
   "js.tk.pm.vac.tip": "无负责人的组织无法选择",
-  "js.tk.pm.vac.hint": "需管理员指定负责人后才可选择"
+  "js.tk.pm.vac.hint": "需管理员指定负责人后才可选择",
+  "js.tk.pm.stale": "已在别处更改，请重新打开。"
 }

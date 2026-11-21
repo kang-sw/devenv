@@ -251,6 +251,49 @@ func TestPersonalUnccExcludesOrgReadds(t *testing.T) {
 	wantEq(t, "restored CC is personal only", e.personal && !e.orgs["o-platform"], true)
 }
 
+func TestItemViewCCExcludedProjection(t *testing.T) {
+	tm := newTeam(t)
+	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-platform", "Platform", "maya"))
+	it := tm.do("maya.pc", TypeItemCreate, map[string]any{"kind": "task", "title": "Excluded projection"})
+
+	// Initially no exclusions: slice is empty and omitted from JSON.
+	v := tm.view("maya.pc")
+	wantEq(t, "initial ccExcluded empty", len(v.Items[it].CCExcluded), 0)
+	raw, err := json.Marshal(v.Items[it])
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantEq(t, "ccExcluded omitted when empty", strings.Contains(string(raw), "ccExcluded"), false)
+
+	// Personal cc + uncc (without any org registration yet) projects lena in CCExcluded.
+	tm.do("raj.pc", TypeItemCC, map[string]any{"item": it, "member": "lena"})
+	tm.do("raj.pc", TypeItemUncc, map[string]any{"item": it, "member": "lena"})
+	v = tm.view("maya.pc")
+	wantIDs(t, "personal uncc projected in ccExcluded", v.Items[it].CCExcluded, []string{"lena"})
+	raw, err = json.Marshal(v.Items[it])
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantEq(t, "ccExcluded serialized in JSON", strings.Contains(string(raw), `"ccExcluded":["lena"]`), true)
+
+	// Registering an org covering lena keeps lena out of CC and in CCExcluded.
+	tm.do("raj.pc", TypeItemCCOrg, map[string]any{"item": it, "org": "o-platform"})
+	v = tm.view("maya.pc")
+	wantNotIn(t, "org CC skips excluded member", v.Items[it].CC, "lena")
+	wantIDs(t, "ccExcluded persists after org CC", v.Items[it].CCExcluded, []string{"lena"})
+
+	// Personal CC clears the exclusion from the projection and omits the field again.
+	tm.do("raj.pc", TypeItemCC, map[string]any{"item": it, "member": "lena"})
+	v = tm.view("maya.pc")
+	wantIn(t, "personal CC restores member", v.Items[it].CC, "lena")
+	wantEq(t, "ccExcluded cleared after personal CC", len(v.Items[it].CCExcluded), 0)
+	raw, err = json.Marshal(v.Items[it])
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantEq(t, "ccExcluded omitted again after restore", strings.Contains(string(raw), "ccExcluded"), false)
+}
+
 func TestOrgCCVacancyAndTombstone(t *testing.T) {
 	tm := newTeam(t)
 	tm.do("ada.pc", TypeOrgSet, orgSetPayload("o-platform", "Platform", ""))
