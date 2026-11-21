@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: b7dd96a88b1e08f3
 sage-review-completeness-reviewed: b7dd96a88b1e08f3
+completed: 2026-11-22
 ---
 
 # Tracker CC and assign: shared checkbox picker modal over the org tree
