@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 41988953c096efd7
 sage-review-completeness-reviewed: 41988953c096efd7
+completed: 2026-11-21
 ---
 
 # Dashboard settings: four scopes and builtin inspection
@@ -91,6 +92,24 @@ Add `internal/wsdashboard/config_routes.go` and register routes with the daemon'
 
 Tests: LAN-token viewer gets 403 on both settings and snapshot; snapshot layers and error strings never contain fixture secrets from nested agent profile env, headers, credential keys, an `args` entry `--api-key=secret-123`, or an endpoint `url` `https://user:secret@example.com/mcp?token=abc`, while preserving JSON shape and only exposing allowlisted safe metadata; authenticated local reads and same-origin writes succeed. Exercise direct/no-context, repo-to-builtin and session-to-builtin snapshots, stale and mismatched context, and verify conditional effective/shadow results. Reset one agents.tier harness/tier without changing siblings; orchestrate on an unverified harness emits the warning without blocking save. Also cover table-driven scope/target/selector validation, actual path and precedence including harness-specific bucket versus common scope, session isolation, error/security and repo denial, existing unknown-member preservation, old-writer/new-reader compatible data, and manifest union in an embedded-asset subprocess without source checkout. Verification from repository root: `python3 agents-plugin-tool/scripts/generate-package-assets.py`, `python3 agents-plugin-tool/scripts/generate-package-assets.py --check`, `python3 -m unittest discover -s agents-plugin-tool/scripts -p 'test_generate_package_assets.py'`, `cd agents-plugin-tool && go test ./internal/wsconfig/... ./internal/mcp/... ./internal/wspackage/... ./internal/wsdashboard/...`.
 
+### Result (d347e280f) - 2026-11-21
+
+- Added authenticated settings snapshots and same-origin set/reset. The service
+  exposes evaluated layers, exact overrides, conditional winners, and sanitized
+  profile values. Each snapshot reads applicable file layers once and reads one
+  session lineage without updating its activity. Repo changes use proposals.
+- Embedded the canonical Pi manifest alongside the other adapter manifests in
+  both packages (`2cee6b4bc`). A standalone ws-mcp started without a checkout
+  or a session and returned 12 Claude, 2 AgY, 5 Dashboard, and 15 Pi entries.
+- Package generation, `--check`, and the 10 generator tests passed. The full
+  wsconfig and wspackage suites and the scoped MCP config and dashboard route
+  tests passed. The compatibility test verified unknown member preservation and
+  reopen after a legacy struct writer rewrote the supported shape.
+- The full Go sweep reproduced the Explore delegation-tip and tracker related
+  scope failures on `develop` (`1c180f21a`). The broad MCP run also timed out
+  during a tracker Git fixture. The lead accepted scope-specific verification
+  after the baseline comparison.
+
 ### Phase 2: Settings view, navigation and catalog
 
 Depends on Phase 1. Touch `internal/wsdashboard/pages.go`, `assets/dashboard.tmpl`, `assets/dashboard-rail.js`, `assets/dashboard-rail.css`, new `assets/dashboard-settings.js` and `assets/dashboard-settings.css`, page/route tests, and all 11 `internal/wsi18n/tables/*.json` with `wsi18n` tests. Serve `/settings` inside the existing dashboard shell and support direct navigation, back/forward and contextual reload. The rail opens the selected target scope with its opaque ID, preserving existing row navigation. Give every gear a localized accessible name, native button semantics and visible focus; no row click propagation. Keep the global bottom button persistent, with a clear `/settings` entry alongside the existing footer quick-preferences popover. Preserve layout mode, input behavior, theme, UI language, login link, LAN controls, and their existing handlers; retain the sync staging path under Decision 19.
@@ -98,6 +117,20 @@ Depends on Phase 1. Touch `internal/wsdashboard/pages.go`, `assets/dashboard.tmp
 Maintain an explicit UI catalog mapping every static registry key and every manifest key to a section, control, label/description i18n IDs and selectors; represent dynamic prompt/profile families explicitly. Implement workflow/general, tiers, compaction and all four adapter sections. Use correct types, limits, enums and per-scope edit restrictions from the shared service; unrecognized values remain inspectable, never silently overwritten. Per-key controls expose `data-config-key`, scope selectors `data-settings-scope`, and the page root `data-settings-view`; raw names use `code.key-chip`. Render provenance, selected-layer override and higher-scope shadow badges from backend resolution, including bucket name; builtin is read-only and shows shadows. In both precedence strip and each row, render context-missing layers as localized “컨텍스트 미선택 (미평가)” (not evaluated), never no-override. Show conditional effective values and invalid/missing-context notices, never choose a sibling target. Preserve context in URL and snapshot requests across every scope switch and browser history. Render structured save warnings localized and non-blocking. The planned synced slot and global general sync card are visibly disabled and never issue requests. Show actual target path and machine-wide project explanation. Set/reset updates just the affected entry on success; errors keep the user's input and show a localized message. Save controls do not write on render. Before Phase 3, repo controls are disabled with an explanation rather than writing.
 
 Finish the Go drift guard: compare UI catalog to the registry and four actual embedded manifests in both directions, allow only declared parameterized families, fail on duplicate/missing/extra keys, and verify every referenced label, description, disabled reason and common UI string exists and is nonempty in each of 11 locale tables. Include tests deliberately removing a key and locale translation to prove failure. Test preserved footer-popover controls and handlers, rail hover/focus/active CSS and click routing, direct/no-context and repo/session-origin builtin inspection with context preservation and correct unevaluated markers, scope-specific controls, paths, bad requests and old-daemon 404 fallback. Verification: `cd agents-plugin-tool && go test ./internal/wsdashboard/... ./internal/wsi18n/... ./internal/mcp/... ./internal/wspackage/...` and `node --test internal/wsdashboard/frontend-*.test.js` from `agents-plugin-tool`.
+
+### Result (ed920bb24) - 2026-11-21
+
+- Shipped the scoped settings frame, rail entry points, typed controls, conditional
+  provenance, and catalog drift checks across both packages and all 11 locale
+  tables. The old preferences popover retains its controls and handlers.
+- The worktree pool is read-only in the catalog because it participates in
+  resolution through worktree tools and has no config.tune writer. Review follow-up
+  `ca0597e311` retains the project edit target in browser history and refreshes
+  the other selectors affected by a bucket write.
+- Scoped dashboard settings, shell and rail layout tests passed. The full wsi18n
+  suite and all five settings Node tests passed. The full frontend run passed 31
+  tests and reproduced three existing failures on `develop` in the sheet opener,
+  lifecycle layout, and idle CSS fixtures.
 
 ### Phase 3: Repo proposals, prompts, profiles and visual acceptance
 
@@ -108,6 +141,45 @@ Repo edits are in-memory per target and represented as ordered, deduplicated `{k
 Expose seed plus scoped override data from the same daemon-owned packaged playbook resources and discovery logic as the MCP renderer. Prompt UI shows a read-only original seed, harness selector and editable override, with a live escaped, line-by-line seed-to-override diff updated in memory without losing focus; set/reset obey scope semantics, with repo routed to proposal. Render profile summaries from effective `worktree.profile.*` and `agent.profile.*` data, with accessible collapsible server-redacted raw JSON and no editing affordances, including repo and session views.
 
 Add Playwright E2E using the repository's existing dashboard browser-test harness and isolated temporary homes/cache: test direct and rail navigation, all five inspection modes, write/reset and forbidden origins, project path, disabled scope explanations, repo send/copy/no-write, seed diff, profile expansion, keyboard focus and all adapter namespaces without an active session. Take light/dark captures at the mockup's viewport and compare side-by-side against `ai-docs/assets/mockups/261121/config-settings-ui/mockup.html`, including rail gears, cards, chips, badges and proposal bar; record viewport, capture paths, differences and fixes. Verification: `cd agents-plugin-tool && go test ./internal/wsdashboard/... ./internal/wsconfig/... ./internal/mcp/... ./internal/wsi18n/...` and run the added browser tests with `go test ./internal/wsdashboard -run 'TestSettings.*Browser' -count=1`; run `python3 agents-plugin-tool/scripts/generate-package-assets.py --check` from the repository root. Browser dependencies and capture commands must be documented in the test or phase result; do not mark visual acceptance complete without inspecting both comparisons.
+
+### Result (2cbbee08a) - 2026-11-21
+
+- Delivered in-memory worktree proposals with explicit reset operations, mailbox
+  delivery to the active lead, and copy and manual selection fallback. No repo
+  config file writes occurred. Prompt controls show the packaged seed and an
+  escaped live line diff. Profile cards show server-redacted metadata and JSON.
+- The independent Lite review's findings were addressed in `ca0597e311`. Tests
+  cover common and specific bucket refresh, inherited and local session values,
+  legacy tier seeds and single-leaf reset, project navigation, and Chromium with
+  both the packaged catalog and the production session store.
+- `go vet ./...` passed in `agents-plugin-tool`. Full wsconfig, wspackage, and
+  wsi18n suites passed. Scoped Go tests passed for MCP config and prompts,
+  dashboard settings and rail layout, agent profiles and tiers, and the daemon
+  command. The opt-in legacy empty-root browser fixture reproduced the existing
+  deferred language reload on `develop` when waiting for the active landing
+  frame. The settings-specific browser tests both passed.
+- Browser verification used cached Playwright and Chromium 1223 with
+  `PLAYWRIGHT_BROWSERS_PATH` pointing at the installed browsers. From the module
+  directory, run
+  `WS_PLAYWRIGHT_MODULE=<cached-module> WS_CONFIG_SETTINGS_CAPTURES=/tmp/config-settings-ui-captures go test ./internal/wsdashboard -run '^TestSettings(Interaction|Production)Browser$' -count=1 -v`.
+  Both themes used 1440×960 and the same workflow controls and two repo draft
+  operations. The reference in each pair was rendered from
+  `ai-docs/assets/mockups/261121/config-settings-ui/mockup.html`.
+
+| Scope and theme | Implementation | Reference | Inspected result |
+|---|---|---|---|
+| Global dark | `/tmp/config-settings-ui-captures/implementation-global-dark.png` | `/tmp/config-settings-ui-captures/reference-global-dark.png` | Layout and interaction states match |
+| Global light | `/tmp/config-settings-ui-captures/implementation-global-light.png` | `/tmp/config-settings-ui-captures/reference-global-light.png` | Layout and interaction states match |
+| Repo dark | `/tmp/config-settings-ui-captures/implementation-repo-dark.png` | `/tmp/config-settings-ui-captures/reference-repo-dark.png` | Layout and expanded proposal state match |
+| Repo light | `/tmp/config-settings-ui-captures/implementation-repo-light.png` | `/tmp/config-settings-ui-captures/reference-repo-light.png` | Layout and expanded proposal state match |
+
+The first comparison exposed a collapsed rail, a wrapped target label, and a
+proposal bar below the viewport. The final captures show the full-height rail,
+a single-line target label, the aligned settings stage, and a sticky proposal
+bar with a visible primary action. The live page shows actual paths and session
+rows, retains the quick-preferences entry, and adds the required context and
+conditional provenance. The repo preview renders ordered diff operations. The
+mockup uses a JSON object for the same example edits. Captures remain outside Git.
 
 ## Verification
 
