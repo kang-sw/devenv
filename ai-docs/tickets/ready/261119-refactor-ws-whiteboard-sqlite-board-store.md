@@ -770,6 +770,89 @@ Verification:
 
 Deferred: the measured report.
 
+### Result (d1f6f4448) - 2026-11-21
+
+- VERIFIED. The daemon shares one registry across proxy MCP, its one-shot CLI,
+  dashboard reads and answers, hosted restore rendering, and nudges.
+  `cmd/ws-mcp/dashboard.go:79-110,143-148,357-365`,
+  `cmd/ws-mcp/proxy.go:89-98`, `cmd/ws-mcp/hosted_cli.go:74-82`.
+  Updates, queries, history, notices, and ZIP export and replacement resolve
+  through that registry. `mcp/whiteboard_store.go:46-108`,
+  `mcp/dashboard_page.go:374-418`, `mcp/dashboard_answer_revision.go:19-35`,
+  `mcp/whiteboard_nudges.go:417-447`, `mcp/whiteboard_tools.go:363-425`.
+- VERIFIED. Successful revision changes schedule an in-process index re-read
+  and nudge. Page watches still track external images and tickets. Nudge
+  discovery retains absent-board evidence and checks new or poked identities.
+  Owner reads and writes renew the 30-minute lease. Index polling and
+  unchanged nudge checks leave the current deadline intact. Expiry closes
+  the DB and the next access recovers it. Daemon drain closes all held DBs
+  before unlocking. `mcp/whiteboard_registry.go:14,62-209`,
+  `mcp/dashboard_sessions.go:917,1029-1060`, `mcp/dashboard_page.go:274-290`,
+  `mcp/whiteboard_nudges.go:451-543`, `wsdashboard/daemon_runtime.go:148-168`.
+  Both exclusive-open handoff outcomes and idle reopen passed in
+  `mcp/whiteboard_registry_test.go`. The first-open cleanup still runs
+  asynchronously through `mcp/whiteboard_retirement.go:25-40`.
+- VERIFIED. A direct CLI refuses update, query, and load before creating any
+  board files, then the hosted CLI opens the same board from a daemon-owned
+  registry. This uses the explicit owner option before the dispatcher runs
+  a board handler. The dedicated raw `full: page unavailable` branch is gone.
+  `mcp/server_dispatch.go:80-84`, `mcp/whiteboard_tools.go:281-287`,
+  `cmd/ws-mcp/hosted_cli_notification_test.go:18-64`.
+- **Decision (owner, 2026-11-21).** Raw `workflow_manual` and `workflow_state`
+  retain their agenda and todo output and state that open-board summaries
+  require the owning daemon. Daemon-hosted calls and the hosted restart
+  bundle keep the summaries. VERIFIED by
+  `mcp/whiteboard_registry_test.go:114` through `mcp/whiteboard_store.go:50-57`,
+  `mcp/workflow_manual.go:148-152`, and `mcp/hosted_render.go:52-53,103-113`.
+
+**Directional compatibility**
+
+- VERIFIED, T3. The new side reads the old folder through locked legacy replay
+  and conversion, records its generation, and stamps schema 3 in
+  `pending.json`. `wswhiteboard/board_db.go:188-261,936-941`. The old side's
+  guard sees the newer pending schema before replay or write.
+  `wswhiteboard/folders.go:225-258,304-340`. A binary built from `8cd2566ec`
+  refused both read and update, emitted `newer schema_version 3 (supported 2)`,
+  and left the folder entries and bytes identical. Reopening with the new
+  side recovered the same committed DB state.
+  `wswhiteboard/board_db_compat_test.go:175-203`.
+- VERIFIED, T3. Raw CLI board calls that went through the in-process server at
+  `2d528c09b` now refuse before DB admission. The daemon can still open the
+  board. The approved minor bump stays in the release flow.
+- VERIFIED, T0 ZIP. `8cd2566ec` predates the archive API. A second historical
+  binary built from the pre-switch `2d528c09b` source loaded the new ZIP
+  through its real `FolderStore.LoadArchive`; the new `BoardDB.LoadArchive`
+  loaded that binary's export. Full fixture State matched after accounting
+  for the load sequence and answer floor.
+  `wswhiteboard/board_db_compat_test.go:205-220`.
+
+**Verification on macOS**
+
+- VERIFIED. The merged `2d528c09b` baseline passed `go build ./...` and
+  `go test ./internal/wswhiteboard -count=1` (198.183 s). The implementation
+  passed the same commands (`wswhiteboard` 286.637 s), `go vet
+  ./internal/wswhiteboard ./internal/mcp ./cmd/ws-mcp ./internal/wsdashboard`,
+  and `gofmt -l` on changed Go files with no output. `git diff --check` passed.
+- VERIFIED. `go test ./cmd/ws-mcp -run '^TestWhiteboardCLIAuthority$'
+  -count=1` passed. The opt-in `TestBoardDBHistoricalCompatibility` passed
+  (2.230 s), with historical build instructions in its test source.
+  The MCP whiteboard and workflow selectors passed with the three loopback
+  cases excluded (47.500 s). The registry and concurrent-read race selectors
+  passed, including the separate index-idle test. The dashboard subset without
+  browser/loopback cases and the baseline red below passed (4.080 s).
+- VERIFIED. The requested wider invocations reached sandbox
+  `bind: operation not permitted` on loopback. They need a run with loopback
+  available. `TestBoardHistoryHooksSurroundSSESwap` also fails on the
+  `2d528c09b` baseline with Node's `syncSpinnerPhases is not defined`.
+  Exact commands from `agents-plugin-tool/`:
+
+  ```sh
+  GOCACHE=/tmp/ws-go-cache go test ./internal/mcp -timeout 45m -run 'Whiteboard|BoardArchive|BoardHistory|BoardIncarnation|Dashboard.*(Board|Topic)|Sublead|HostedSessionNudges|DashboardKeyOffAndKeyOn' -count=1
+  PLAYWRIGHT_BROWSERS_PATH="$HOME/Library/Caches/ms-playwright" WS_PLAYWRIGHT_MODULE="$(ls -d ~/.npm/_npx/*/node_modules/playwright | head -1)" GOCACHE=/tmp/ws-go-cache go test ./internal/wsdashboard -run '^Test(Board|Whiteboard)|Whiteboard' -timeout 30m -count=1
+  ```
+
+Windows AhnLab V3 measurement remains deferred.
+
 ### Phase 3: Update-path measured result
 
 Depends on Phase 2 and on `(1815)` (the embed sibling has landed).
