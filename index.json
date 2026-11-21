@@ -441,7 +441,14 @@
       "registered_at": "2026-11-17T08:21:27Z"
     },
     "261117-feat-ws-hosted-child-session-entry": {
-      "registered_at": "2026-11-17T09:49:58Z"
+      "registered_at": "2026-11-17T09:49:58Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-21T09:41:30Z"
+      }
     },
     "261117-feat-ws-single-session-holder": {
       "registered_at": "2026-11-17T08:21:19Z"
