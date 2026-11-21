@@ -150,7 +150,9 @@
 .entry-recap { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 700; line-height: 22px; word-break: keep-all; overflow-wrap: break-word; }
 .entry-panel > summary > .entry-recap { grid-column: 2; grid-row: 1; }
 .entry-panel:not([open]):not(.msg) > summary .entry-recap { font-size: 13px; font-weight: 600; line-height: 21px; }
-.pmeta { grid-column: 2 / -1; grid-row: 2; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; min-height: 22px; font-size: 11px; line-height: 18px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; }
+.pmeta { grid-column: 2 / -1; grid-row: 2; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 22px; font-size: 11px; line-height: 18px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; }
+.pmeta-info { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; }
+.pmeta-actions { flex: 0 0 auto; margin-left: auto; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .pmeta .ptime { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--wb-muted-fg); }
 .pmeta .ptime:empty { display: none; }
 .pmeta .ptime .entry-at { font: 10.5px/18px var(--wb-mono); opacity: .85; min-inline-size: 0; }
@@ -172,7 +174,7 @@
 .pmeta .pflink { width: 22px; height: 22px; min-width: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 5px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
 .pmeta .pflink .i { width: 13px; height: 13px; }
 .pmeta .pflink.on, .pmeta .pflink:hover { background: var(--wb-wash); color: var(--wb-fg); }
-.pmeta .pfmention { box-sizing: border-box; margin-left: auto; width: 22px; height: 22px; min-width: 22px; padding: 0; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--wb-muted-fg); font: 700 14px/20px var(--wb-sans); cursor: pointer; opacity: 0; transition: opacity .14s ease, color .14s ease, background .14s ease; }
+.pmeta .pfmention { box-sizing: border-box; width: 22px; height: 22px; min-width: 22px; padding: 0; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--wb-muted-fg); font: 700 14px/20px var(--wb-sans); cursor: pointer; opacity: 0; transition: opacity .14s ease, color .14s ease, background .14s ease; }
 .entry-panel > summary:hover .pfmention, .entry-panel > summary:focus-within .pfmention, .pfmention:focus-visible { opacity: 1; }
 .pmeta .pfmention:hover, .pmeta .pfmention:focus-visible { background: var(--wb-wash); border-color: var(--wb-line); color: var(--wb-primary); }
 .pmeta .pfmention:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 1px; }
@@ -205,7 +207,7 @@
 /* Compact padding and bounded panel-name width on narrow docked/split panes. */
 @container (max-width: 440px) {
   .entry-panel:not(.msg):not([data-max]) > summary { padding: 5px 6px 4px 8px; column-gap: 6px; }
-  .entry-panel > summary > .pmeta { gap: 3px 6px; }
+  .entry-panel > summary > .pmeta, .pmeta-info { gap: 3px 6px; }
   .pfname { max-width: 14ch; }
 }
 @media (prefers-reduced-motion: reduce) {

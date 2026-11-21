@@ -117,6 +117,17 @@ async function assertTwoRowPanels(page, label, expectDashboardControls) {
       await page.evaluate(t => document.documentElement.setAttribute('data-theme', t), sc.theme);
       await mountFramesAndFoldSecondPanel(page);
       await assertTwoRowPanels(page, sc.name, sc.dash);
+      if (sc.dash) {
+        await page.locator('#p1 > summary').hover();
+        const actions = await page.locator('#p1 > summary').evaluate(sum => {
+          const cite = sum.querySelector('.pfmention').getBoundingClientRect();
+          const link = sum.querySelector('.pflink').getBoundingClientRect();
+          const meta = sum.querySelector('.pmeta').getBoundingClientRect();
+          return { citeTop: cite.top, linkTop: link.top, citeRight: cite.right, linkLeft: link.left, linkRight: link.right, metaRight: meta.right };
+        });
+        assert(Math.abs(actions.citeTop - actions.linkTop) <= 2, `${sc.name}: actions must share a row: ${JSON.stringify(actions)}`);
+        assert(actions.linkLeft >= actions.citeRight - 1 && actions.metaRight - actions.linkRight <= 2, `${sc.name}: actions must remain together at the right edge: ${JSON.stringify(actions)}`);
+      }
 
       // Verify click targets: .pfmention and .pflink do not toggle panel open/close;
       // clicking .entry-recap toggles collapsed panel p2 open and back closed.
