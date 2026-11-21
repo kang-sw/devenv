@@ -357,6 +357,71 @@ its containing job lives (owner-approved retry in `062f291f5`;
 `agents-plugin-tool/internal/wsdashboard/spawn_windows.go:30-54`). Check
 that holders retain their identities across a successful handoff.
 
+### Result (0aeef115b) - 2026-11-21
+
+- The validated package build embeds the matching daemon, metadata, resources,
+  skills and configuration manifests. The unsigned arm64 macOS app contains
+  all 113 input files, compared byte for byte. The Windows x64 daemon was
+  cross-built, stamped and validated. The Windows shell and its tests passed
+  an MSVC x64 cross-target check.
+- Rust selects and checks the prepared bundled or development input and
+  stages an independent copy outside the app. The development selector is
+  the Tauri launch environment's `WERKSCHAFT_DAEMON_ROOT`. Tests cover
+  version, hash, inventory, manifest, link, containment, staging failure and
+  same-core source mutation cases. Stages are Type 5 retained package files.
+  For an N-file package, selection fingerprints N files plus contract checks.
+  A successful stage copies and sets permissions on N files, then reads the
+  N files once from the stage and once from the source for fingerprints,
+  plus staged contract validation and metadata checks. These operations run
+  on a background thread. Windows antivirus tracing remains pending.
+- The connection tests cover missing-only startup, a concurrent winner,
+  newer-daemon attach, automatic previous-minor replacement, explicit
+  equal-core replacement and recovery. Listener tests cover stale endpoint
+  startup, concurrent daemon selection, same-port replacement, and an actual
+  prestarted subprocess whose gate denies startup when the predecessor
+  identity changes. The new starter revalidates before drain and preserves
+  the predecessor's LAN mode and preferred port. Holder and proxy tests
+  exercise unchanged holder and child identities, compatible reconnect and
+  previous-minor refusal.
+- macOS checks Python before launching or replacing. The tests exercise its
+  missing prerequisite and preservation of a healthy incumbent. Replacement
+  failures keep a verified live document and use the pinned dashboard's
+  warning toast, with the reason in the title when the renderer cannot show
+  it. A transient post-staging endpoint read also retains a healthy
+  incumbent. The Chromium test checks main-frame and origin scope, draft
+  preservation, the fallback acknowledgement and both local guides.
+- T0 for the additive starter. Old callers omit the flags and use the
+  original Ensure path. An older candidate that lacks the flag stops during
+  CLI parsing before it touches the daemon (`cmd/ws-mcp/proxy.go:393-417`).
+  The existing daemon writes the endpoint
+  (`internal/wsdashboard/endpoint.go:89`) and mints the browser cookie
+  (`internal/wsdashboard/localhost_auth.go:395`). Tauri reads the endpoint
+  and sends the observed identity and token digest in the starter's private input
+  (`desktop/src/endpoint.rs:74,199`). The guarded starter uses the existing
+  authenticated drain and admits the waiting child only after acceptance
+  (`internal/wsdashboard/ensure.go:261`). It changes no shared schema.
+  The previous-minor hello check remains T3
+  (`internal/wsdashboard/proxy.go:251`).
+- The lead's unrestricted macOS run passed all 31 Rust tests and 23 top-level
+  Go tests across daemon, CLI and holder suites. The Windows-only Go test
+  skipped on macOS. The packaging tests passed 2, build-slot tests passed 5,
+  and the headless Chromium test passed. The lite review's preflight race
+  and two test and recovery findings were fixed in `464771aa4`.
+- Captures and side-by-side comparisons are in
+  `/private/tmp/werkschaft-phase2.9krA6b/captures/`. The refusal toast
+  matches the Electron in-page reference at
+  `/private/tmp/inpage-dialogs-captures/settings-after-in-page-notice.png`.
+  The connection and Python views retain their Phase 1 layouts and now tell
+  the user that Retry can start the dashboard.
+- Windows native checks are assigned to the lead. The checklist is at
+  `/private/tmp/werkschaft-phase2.9krA6b/native-checklist.md` and the
+  prepared x64 daemon input is under its `final/` directory. Native coverage
+  includes packaged start and cookie, version and failure cases, menu and
+  title captures, strict breakaway and access-denied job-lifetime retry,
+  shell exit versus job teardown, antivirus settle and holder identity
+  across a real handoff. Native macOS execution remains for the packaged
+  platform gate.
+
 ### Phase 3: Deliver shell updates and the CI release pipeline
 
 Package Phase 2 for darwin-arm64 and win32-x64 with the settled updater
