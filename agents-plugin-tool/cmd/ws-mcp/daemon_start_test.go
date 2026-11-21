@@ -4,11 +4,28 @@ import (
 	"context"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 )
+
+func TestDesktopPredecessor(t *testing.T) {
+	identity := `{"port":1234,"pid":4321,"started_at":"time","version":"0.50.0","token_sha256":"` +
+		strings.Repeat("a", 64) + `"}`
+	if id, err := desktopPredecessor(strings.NewReader(identity)); err != nil || id.PID != 4321 {
+		t.Fatalf("valid predecessor was refused: %v", err)
+	}
+	if id, err := desktopPredecessor(strings.NewReader("null")); err != nil || id != nil {
+		t.Fatalf("missing-only start was refused: %v", err)
+	}
+	for _, input := range []string{"", "{}", identity + "null", strings.Repeat(" ", 4096) + "null"} {
+		if _, err := desktopPredecessor(strings.NewReader(input)); err == nil {
+			t.Fatal("accepted malformed or oversized handoff")
+		}
+	}
+}
 
 func TestDaemonStartReplaceFlagWiring(t *testing.T) {
 	root := t.TempDir()

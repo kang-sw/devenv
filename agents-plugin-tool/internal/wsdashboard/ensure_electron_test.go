@@ -2,6 +2,8 @@ package wsdashboard
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -10,6 +12,76 @@ import (
 
 	"github.com/gofrs/flock"
 )
+
+func TestEnsureDesktopStartGuardsTheObservedPredecessor(t *testing.T) {
+	t.Run("missing-only start leaves a raced older daemon alone", func(t *testing.T) {
+		dir := t.TempDir()
+		old := startTestDaemon(t, dir, "0.49.0")
+		opts := ensureOpts(dir, "0.50.0", func([]string) error { t.Fatal("unexpected spawn"); return nil })
+		opts.DesktopStart, opts.SpawnBeforeShutdown, opts.PreserveRunningLAN = true, true, true
+		if outcome, err := Ensure(context.Background(), opts); outcome != OutcomeRunning || err != nil {
+			t.Fatalf("Ensure = %s, %v", outcome, err)
+		}
+		if _, err := Health(context.Background(), testClient(), old.Endpoint()); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	for _, mode := range []string{"before spawn", "after spawn", "successful handoff"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			old := startTestDaemon(t, dir, "0.49.0")
+			ep := old.Endpoint()
+			info, err := Health(context.Background(), testClient(), ep)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sum := sha256.Sum256([]byte(ep.Token))
+			expected := &DaemonIdentity{
+				Port: ep.Port, PID: ep.PID, StartedAt: info.StartedAt, Version: info.Version,
+				TokenHash: hex.EncodeToString(sum[:]),
+			}
+			if mode == "before spawn" {
+				expected.TokenHash = strings.Repeat("0", 64)
+			}
+			sp := &inProcessSpawner{t: t, dir: dir, versions: []string{"0.50.0"}}
+			defer sp.closeAll()
+			opts := ensureOpts(dir, "0.50.0", func(args []string) error {
+				switch mode {
+				case "before spawn":
+					t.Fatal("unexpected spawn")
+				case "after spawn":
+					// Same PID, port and health, but the file no longer
+					// authorizes the predecessor that the shell observed.
+					ep.Token = strings.Repeat("0", 64)
+					return writeEndpoint(dir, ep)
+				}
+				return sp.spawn(args)
+			})
+			opts.DesktopStart, opts.SpawnBeforeShutdown, opts.PreserveRunningLAN = true, true, true
+			opts.Predecessor = expected
+			outcome, err := Ensure(context.Background(), opts)
+			if mode == "successful handoff" {
+				if outcome != OutcomeReplaced || err != nil || len(sp.calls) != 1 {
+					t.Fatalf("Ensure = %s, %v, %d spawns", outcome, err, len(sp.calls))
+				}
+				successor, err := ReadEndpoint(dir)
+				if err != nil || successor.Port != ep.Port {
+					t.Fatalf("replacement moved the dashboard origin: port %d, want %d (%v)", successor.Port, ep.Port, err)
+				}
+				waitDone(t, old)
+				return
+			}
+			if mode == "before spawn" && (outcome != OutcomeRunning || err != nil) ||
+				mode == "after spawn" && (outcome != OutcomeUnavailable || err == nil) {
+				t.Fatalf("Ensure = %s, %v", outcome, err)
+			}
+			if _, err := Health(context.Background(), testClient(), old.Endpoint()); err != nil {
+				t.Fatalf("predecessor was drained: %v", err)
+			}
+		})
+	}
+}
 
 func TestEnsureElectronPreflightAndFreshHealth(t *testing.T) {
 	t.Run("strict preflight failure leaves old serving", func(t *testing.T) {
