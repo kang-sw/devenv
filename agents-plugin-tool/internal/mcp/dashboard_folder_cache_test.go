@@ -38,7 +38,8 @@ func TestDashboardFolderIdleCPUFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	src := &DashboardSessionSource{store: newSessionStore(), stateDir: func() (string, error) { return dir, nil }}
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
+	src.stateDir = func() (string, error) { return dir, nil }
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root, HeartbeatAt: time.Now().UTC().Format(time.RFC3339)}
 	if err := wsdashboard.WriteRegistration(dir, reg); err != nil {
 		t.Fatal(err)

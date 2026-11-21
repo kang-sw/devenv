@@ -632,6 +632,92 @@ Verification:
 
 Deferred: wiring and the "after" measurement.
 
+### Result (0bdc5a7b0) - 2026-11-20
+
+Implemented `BoardDB` beside `FolderStore`; no daemon, MCP, dashboard, or
+nudge caller uses it yet. The Phase 1 contract was read from `develop` at
+`692a42368`, including owner `(1837)=a`; this result leaves the worktree's
+existing plan text unchanged.
+
+- VERIFIED: one held SQLite connection with `locking_mode=EXCLUSIVE` before
+  WAL, `synchronous=NORMAL`, `wal_autocheckpoint=0`, and a 256 KiB cache.
+  The board, whole topic documents, append-only entries, immutable panels,
+  revision slots, and load floors recover into a complete in-memory State.
+- VERIFIED: changed updates commit row deltas in one transaction. Unchanged
+  updates open no transaction and leave the WAL bytes unchanged. Entry edits,
+  removal, and moves between unrelated topics are refused; adoption retains
+  the history directory and receipts do not regress. The active receipt slot
+  stays in memory, so updates do not query the DB to choose it.
+- VERIFIED: import holds the legacy lock through replay/conversion, DB commit,
+  and schema-3 sentinel creation, and stores the imported generation.
+  Fixtures compare retained legacy bytes against a control `FolderStore.Open`
+  for unchanged data, content/close-result migration, pending replay, and v1
+  conversion, then verify DB update/close/reopen leaves those files intact.
+- VERIFIED: sentinel write failure logs and still opens the committed DB;
+  reopen retries under the legacy lock. Both committed-generation divergence
+  and an unreplayed pending intent are logged without re-import. A waiting
+  retry sees the intervening legacy commit, and a legacy writer blocked by
+  import refuses after the sentinel appears.
+- VERIFIED: missing/corrupt/unreadable DB fixtures refuse with explicit manual
+  rollback guidance and preserve the legacy files. Healthy owner contention
+  instead gets bounded retry advice; it is not diagnosed as corruption.
+- VERIFIED: process-kill fixtures recover the last committed state when killed
+  before transaction commit and restore the sentinel when killed immediately
+  after import commit. Optional topic proof data survives updates and reopen.
+  Concurrent first importers recheck DB existence under the legacy lock.
+  Duplicate legacy load-floor generations preserve FolderStore's first-record
+  semantics; SQL iteration errors cannot return a partial board.
+- VERIFIED: zip export and load backup reuse `plan(nil, nil, state)`.
+  `LoadedAt` is cleared on the planning clone and carried by the reserved
+  load-floor log. Before and after updates, `FolderStore.Open`, DB re-import,
+  and DB reopen produce the same full State, including answers and panel/log
+  history. Archives contain neither `.board.sqlite` nor `pending.json`.
+  Load refuses zip-supplied SQLite recovery files and sidecars before import,
+  so the legacy files remain the archive's authority.
+  Loading an old-layout zip uses the import path; replacement preserves the
+  render-sequence/receipt rules and captures the answer floor after backup
+  under the lock.
+- VERIFIED: close runs PASSIVE checkpoint. Background checkpoint requires
+  **30 seconds idle and at least 4 MiB WAL**; a callback rechecks the latest
+  idle deadline under the mutex, including when an old timer already fired.
+  Import and reopen arm that timer. Tests exercise both threshold gates with
+  a real WAL larger than 4 MiB. Exclusive-open retry bound: **2 seconds**;
+  both release-within-bound and timeout are covered.
+
+The inherited post-embed macOS baseline (lead-verified handoff, not rerun by
+this continuation) is **122 ms first write, 75 ms steady median, 99 ms steady
+p95; FileIOCounters 99 first / 107 steady**. Its harness is
+`internal/mcp/whiteboard_measurement_test.go`, enabled by
+`WS_WHITEBOARD_MEASURE_UPDATES`, on the post-embed stack ending at `9a0b51449`.
+The harness updates one topic with a panel and log, so these measured values
+are not a validation of the earlier log-only multi-topic derived table.
+Counters and final-file snapshots are supporting lower-bound evidence: direct
+`os.*`, flock, transient files, and SQLite VFS operations are not all counted.
+A complete syscall count is unverified. The "after" measurement and live
+wiring remain Phase 2/3 work. Windows AhnLab V3 measurement is deferred.
+
+Compatibility remains the approved **T3** sentinel boundary, with the minor
+bump deferred to release. The new writer stamps schema 3 in
+`board_db.go:814-818`; the retained old reader/writer checks root schemas in
+`folders.go:327-337` and refuses newer versions at `folders.go:314-315`, before
+the callback can replay or write (`folders.go:225-258`). A new reopen reads
+its unchanged committed DB (`board_db.go:169-185`). The refusal/reopen fixture
+is `board_db_test.go:102-120`. Separate historical-binary verification remains
+in Phase 2. Legacy-layout zip behavior is T0 in both directions under the
+semantic State criterion, exercised by
+`TestBoardDBLegacyArchiveExportBackupAndLoad` and `assertBoardDBArchiveState`.
+
+Validation on the completed code, from `agents-plugin-tool` with
+`GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`:
+
+- `go test ./internal/wswhiteboard ./internal/mcp -run 'Whiteboard|BoardDB|Folder' -count=1`:
+  PASS (`wswhiteboard` 430.443 s; `mcp` 231.894 s).
+- `go test ./internal/wswhiteboard -count=1`: PASS (510.452 s).
+- `GOOS=windows go vet ./internal/wswhiteboard`: PASS.
+- `go test -race ./internal/wswhiteboard -run BoardDB -count=1`: PASS (31.691 s).
+- Independent `codex.medium` review: four findings fixed; final review reports
+  no actionable findings. `git diff --check` passed.
+
 ### Phase 2: Switch board authority to the DB
 
 Depends on Phase 1.
@@ -684,6 +770,89 @@ Verification:
 
 Deferred: the measured report.
 
+### Result (d1f6f4448) - 2026-11-21
+
+- VERIFIED. The daemon shares one registry across proxy MCP, its one-shot CLI,
+  dashboard reads and answers, hosted restore rendering, and nudges.
+  `cmd/ws-mcp/dashboard.go:79-110,143-148,357-365`,
+  `cmd/ws-mcp/proxy.go:89-98`, `cmd/ws-mcp/hosted_cli.go:74-82`.
+  Updates, queries, history, notices, and ZIP export and replacement resolve
+  through that registry. `mcp/whiteboard_store.go:46-108`,
+  `mcp/dashboard_page.go:374-418`, `mcp/dashboard_answer_revision.go:19-35`,
+  `mcp/whiteboard_nudges.go:417-447`, `mcp/whiteboard_tools.go:363-425`.
+- VERIFIED. Successful revision changes schedule an in-process index re-read
+  and nudge. Page watches still track external images and tickets. Nudge
+  discovery retains absent-board evidence and checks new or poked identities.
+  Owner reads and writes renew the 30-minute lease. Index polling and
+  unchanged nudge checks leave the current deadline intact. Expiry closes
+  the DB and the next access recovers it. Daemon drain closes all held DBs
+  before unlocking. `mcp/whiteboard_registry.go:14,62-209`,
+  `mcp/dashboard_sessions.go:917,1029-1060`, `mcp/dashboard_page.go:274-290`,
+  `mcp/whiteboard_nudges.go:451-543`, `wsdashboard/daemon_runtime.go:148-168`.
+  Both exclusive-open handoff outcomes and idle reopen passed in
+  `mcp/whiteboard_registry_test.go`. The first-open cleanup still runs
+  asynchronously through `mcp/whiteboard_retirement.go:25-40`.
+- VERIFIED. A direct CLI refuses update, query, and load before creating any
+  board files, then the hosted CLI opens the same board from a daemon-owned
+  registry. This uses the explicit owner option before the dispatcher runs
+  a board handler. The dedicated raw `full: page unavailable` branch is gone.
+  `mcp/server_dispatch.go:80-84`, `mcp/whiteboard_tools.go:281-287`,
+  `cmd/ws-mcp/hosted_cli_notification_test.go:18-64`.
+- **Decision (owner, 2026-11-21).** Raw `workflow_manual` and `workflow_state`
+  retain their agenda and todo output and state that open-board summaries
+  require the owning daemon. Daemon-hosted calls and the hosted restart
+  bundle keep the summaries. VERIFIED by
+  `mcp/whiteboard_registry_test.go:114` through `mcp/whiteboard_store.go:50-57`,
+  `mcp/workflow_manual.go:148-152`, and `mcp/hosted_render.go:52-53,103-113`.
+
+**Directional compatibility**
+
+- VERIFIED, T3. The new side reads the old folder through locked legacy replay
+  and conversion, records its generation, and stamps schema 3 in
+  `pending.json`. `wswhiteboard/board_db.go:188-261,936-941`. The old side's
+  guard sees the newer pending schema before replay or write.
+  `wswhiteboard/folders.go:225-258,304-340`. A binary built from `8cd2566ec`
+  refused both read and update, emitted `newer schema_version 3 (supported 2)`,
+  and left the folder entries and bytes identical. Reopening with the new
+  side recovered the same committed DB state.
+  `wswhiteboard/board_db_compat_test.go:175-203`.
+- VERIFIED, T3. Raw CLI board calls that went through the in-process server at
+  `2d528c09b` now refuse before DB admission. The daemon can still open the
+  board. The approved minor bump stays in the release flow.
+- VERIFIED, T0 ZIP. `8cd2566ec` predates the archive API. A second historical
+  binary built from the pre-switch `2d528c09b` source loaded the new ZIP
+  through its real `FolderStore.LoadArchive`; the new `BoardDB.LoadArchive`
+  loaded that binary's export. Full fixture State matched after accounting
+  for the load sequence and answer floor.
+  `wswhiteboard/board_db_compat_test.go:205-220`.
+
+**Verification on macOS**
+
+- VERIFIED. The merged `2d528c09b` baseline passed `go build ./...` and
+  `go test ./internal/wswhiteboard -count=1` (198.183 s). The implementation
+  passed the same commands (`wswhiteboard` 286.637 s), `go vet
+  ./internal/wswhiteboard ./internal/mcp ./cmd/ws-mcp ./internal/wsdashboard`,
+  and `gofmt -l` on changed Go files with no output. `git diff --check` passed.
+- VERIFIED. `go test ./cmd/ws-mcp -run '^TestWhiteboardCLIAuthority$'
+  -count=1` passed. The opt-in `TestBoardDBHistoricalCompatibility` passed
+  (2.230 s), with historical build instructions in its test source.
+  The MCP whiteboard and workflow selectors passed with the three loopback
+  cases excluded (47.500 s). The registry and concurrent-read race selectors
+  passed, including the separate index-idle test. The dashboard subset without
+  browser/loopback cases and the baseline red below passed (4.080 s).
+- VERIFIED. The requested wider invocations reached sandbox
+  `bind: operation not permitted` on loopback. They need a run with loopback
+  available. `TestBoardHistoryHooksSurroundSSESwap` also fails on the
+  `2d528c09b` baseline with Node's `syncSpinnerPhases is not defined`.
+  Exact commands from `agents-plugin-tool/`:
+
+  ```sh
+  GOCACHE=/tmp/ws-go-cache go test ./internal/mcp -timeout 45m -run 'Whiteboard|BoardArchive|BoardHistory|BoardIncarnation|Dashboard.*(Board|Topic)|Sublead|HostedSessionNudges|DashboardKeyOffAndKeyOn' -count=1
+  PLAYWRIGHT_BROWSERS_PATH="$HOME/Library/Caches/ms-playwright" WS_PLAYWRIGHT_MODULE="$(ls -d ~/.npm/_npx/*/node_modules/playwright | head -1)" GOCACHE=/tmp/ws-go-cache go test ./internal/wsdashboard -run '^Test(Board|Whiteboard)|Whiteboard' -timeout 30m -count=1
+  ```
+
+Windows AhnLab V3 measurement remains deferred.
+
 ### Phase 3: Update-path measured result
 
 Depends on Phase 2 and on `(1815)` (the embed sibling has landed).
@@ -708,3 +877,98 @@ Verification, on a traced single `whiteboard.update` (the Phase 1 scenario):
 - No fsync on the response path (Rule 5).
 - Every remaining gap is listed per Rule 8 with its measured cost. A gap fails
   the phase unless the owner approves it.
+
+### Result (b83c9b543) - 2026-11-21
+
+VERIFIED on macOS 26.6.2 arm64 with Go 1.26.2. Each run issued ten
+`whiteboard.update` calls using Phase 1's one-topic panel-and-log input. The
+first row is a fresh board and the steady sample has nine updates. The
+before run used an archive of the merged, post-retirement `2d528c09b` source.
+The after run used the implementation at `d1f6f4448` with the expanded harness.
+These runs supplement the original Phase 1 measurement.
+
+| Per action | Before, folder | After, SQLite |
+|---|---:|---:|
+| First update wall time | 91.926 ms | 32.224 ms |
+| Steady wall time p50 / p95 | 63.651 / 76.655 ms | 1.252 / 2.325 ms |
+| First update `wsstate` wrapper operations | 96 | 58 |
+| Steady `wsstate` wrapper operations p50 / p95 | 103 / 103 | 19 / 19 |
+
+- VERIFIED. The per-tool wrapper totals include session-key and other caller
+  I/O. Every SQLite steady action had 7 instrumented reads and 12 stats across
+  the fixture. The standalone changed and unchanged `BoardDB.Update` actions
+  each recorded zero `wsstate` wrapper operations. These counters leave direct
+  Go file operations, flock, SQLite VFS activity, and fsync unmeasured.
+  `wsstate/file_io_counts.go:13-43`, `mcp/whiteboard_measurement_test.go:83,408`.
+- VERIFIED. In the board directory, every steady update added one WAL commit
+  marker. Eight added 7 frames and 28,840 bytes each. The last added 10
+  frames and 41,200 bytes. There were zero WAL header resets in the nine
+  steady actions and no final file changes outside the WAL. The first update
+  added 23 frames and 2 markers, covering SQLite schema and board creation.
+  The separate store mutation added 1 frame, 1 marker and 4,120 bytes.
+  A genuinely unchanged store state added zero frames and bytes. An empty
+  MCP command advanced sequence metadata and added 1 frame. There were no
+  derived page or stamp changes. `mcp/whiteboard_measurement_test.go:83,178,240,408`.
+- VERIFIED. Ten additional paired samples over the same MCP input forced
+  PASSIVE after each steady update. All ten subsequent writes reset the
+  WAL header. Their p50 / p95 were 1.865 / 3.044 ms, compared with
+  1.565 / 2.624 ms for the paired steady writes and 1.252 / 2.325 ms in
+  the primary steady sample. In these samples the slowest reset write was
+  1.31 times the primary steady p95, below the owner's 10-times Forward
+  threshold. This times the whole tool action.
+  `mcp/whiteboard_measurement_test.go:455-491`.
+
+**Performance rules 1–5**
+
+- VERIFIED by source and store test. Rules 1, 3 and 4 use the held memory
+  snapshot, one board DB with WAL, and one exclusive connection for the
+  handle lifetime. The warm store API goes directly to State or the held
+  connection. The store test covers the absence of a shared-memory file.
+  Cold import and the 30-minute idle reopen use filesystem operations,
+  as approved in `(1347)=c`. Exact per-action OS open, flock, and stat
+  syscall counts remain unmeasured.
+  `wswhiteboard/board_db.go:154-261,360-370,644-711`,
+  `wswhiteboard/board_db_test.go:695`, `mcp/whiteboard_registry.go:62-114,150-179`.
+- VERIFIED for Rule 2. One logical append transaction per changed steady
+  update and no transaction for identical state. SQLite writes several
+  WAL frames within some transactions. The syscall count for a physical
+  append remains unmeasured. `wswhiteboard/board_db.go:666-711`.
+- INFERRED from the pinned SQLite source for Rule 5. `synchronous=NORMAL`
+  disables ordinary per-commit WAL sync. The first write into a reused WAL
+  can sync its header after a checkpoint. The Darwin arm64 implementation
+  in `modernc.org/sqlite v1.30.2` sets the sync flags at
+  `lib/sqlite_darwin_arm64.go:41625-41644`, restarts and syncs the header
+  in `_walFrames` at `:48986-49030`, and calls `fsync` in `_full_fsync`
+  at `:29390-29425`. The board runs thresholded idle PASSIVE checkpoints
+  on a background timer. The owner accepted one header sync per reset cycle
+  under Rule 8 on 2026-11-21. The sampled cost includes any sync and other
+  work in the write. It does not isolate sync time or concurrent
+  checkpoint contention. `go.mod:11`,
+  `wswhiteboard/board_db.go:365-367,989-1025`.
+
+The owner limited verification to in-process measurement. macOS refused
+unprivileged `fs_usage`. Exact syscall counts and actual response-path
+fsync counts remain unmeasured in both directions. Windows AhnLab V3
+measurement remains deferred.
+
+VERIFIED commands from the paired source directories, plus `go vet
+./internal/mcp`, `gofmt -l`, and `git diff --check`.
+
+```sh
+# Baseline archive of 2d528c09b, from agents-plugin-tool/
+GOCACHE=/tmp/ws-go-cache WS_WHITEBOARD_MEASURE_UPDATES=10 WS_WHITEBOARD_MEASURE_LABEL=pre-switch-2d528c09b go test ./internal/mcp -run '^TestWhiteboardUpdateMeasurement$' -count=1 -v
+
+# Implementation worktree, from agents-plugin-tool/
+GOCACHE=/tmp/ws-go-cache WS_WHITEBOARD_MEASURE_UPDATES=10 WS_WHITEBOARD_MEASURE_LABEL=sqlite-d1f6f4448 go test ./internal/mcp -run '^TestWhiteboard(UpdateMeasurement|MeasurementWALDelta|StoreMeasurement|CheckpointResetMeasurement)$' -count=1 -v
+```
+
+Both opt-in runs passed, in 1.544 s and 1.060 s respectively. The
+Phase 2 directional T3 boundary and T0 ZIP results still apply.
+Phase 3 changes only the measurement harness and this Result.
+
+Lead-VERIFIED after Phase 2. The two loopback-blocked commands were
+rerun at `22a413c9f` where loopback was available. The MCP suite
+passed in 48.5 s. The dashboard suite reported the same five failures
+as `develop` at `fa3c2a039` (`TestBoardHoldPillBrowser`,
+`TestBoardStateFilterBrowser`, `TestBoardTopicUnitsBrowser`,
+`TestWhiteboardEffectsBrowser`, and `TestBoardHistoryHooksSurroundSSESwap`).

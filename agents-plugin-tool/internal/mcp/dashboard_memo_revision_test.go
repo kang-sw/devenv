@@ -10,18 +10,17 @@ import (
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
-func TestDashboardBoardMemoFolderRevision(t *testing.T) {
+func TestDashboardBoardMemoDBRevision(t *testing.T) {
 	t.Setenv("WS_MCP_NO_DASHBOARD", "1")
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	f.update(t, `<wb:topic name="topic"><wb:body>initial body</wb:body></wb:topic>`)
-	folder := whiteboardFolder(f.root, f.key)
 	read := func() sessionRecord {
 		t.Helper()
 		_, _, rec, ok, err := src.lookupRecord(reg)
 		if err != nil || !ok || rec.Whiteboard == nil || rec.boardRevision == 0 {
-			t.Fatalf("lookup must carry folder read identity: ok=%t revision=%d err=%v", ok, rec.boardRevision, err)
+			t.Fatalf("lookup must carry board revision: ok=%t revision=%d err=%v", ok, rec.boardRevision, err)
 		}
 		return rec
 	}
@@ -42,7 +41,7 @@ func TestDashboardBoardMemoFolderRevision(t *testing.T) {
 		before := boardRenders(src)
 		cached, ok := src.renderBoard(f.key, rec, reg.ReplyID, "en", nil)
 		if !ok || boardRenders(src) != before {
-			t.Fatal("unchanged folder read did not reuse memo")
+			t.Fatal("unchanged board read did not reuse memo")
 		}
 		full, ok := src.renderBoardNow(f.key, rec, reg.ReplyID, "en")
 		if !ok || cached.regions != full.regions || !reflect.DeepEqual(cached.units, full.units) {
@@ -66,7 +65,9 @@ func TestDashboardBoardMemoFolderRevision(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := folder.Update(nil, func(s *wswhiteboard.State) error { tc.change(s); return nil }); err != nil {
+			if err := f.s.sessions.boards.use(f.root, f.key, nil, true, func(slot *whiteboardSlot) error {
+				return slot.board.Update(func(s *wswhiteboard.State) error { tc.change(s); return nil })
+			}); err != nil {
 				t.Fatal(err)
 			}
 			rec := read()
@@ -81,17 +82,11 @@ func TestDashboardBoardMemoFolderRevision(t *testing.T) {
 			previous = rec
 		})
 	}
-	// Forget must change identity; independent dashboard sources now share
-	// one immutable folder read rather than assigning competing revisions.
-	wswhiteboard.SharedFolderCache.Forget(folder.Dir)
-	reopened := read()
-	if base(reopened) == base(previous) {
-		t.Fatal("Forget reused a held memo identity")
-	}
-	other := dashboardPageSource(t, nil)
-	_, _, independent, ok, err := other.lookupRecord(reg)
-	if err != nil || !ok || base(independent) != base(reopened) {
-		t.Fatalf("shared folder cache did not share read identity: %v", err)
+	// Independent dashboard sources share the owner-held board revision.
+	other := dashboardPageSource(t, nil, f.s.sessions.boards)
+	_, _, reopened, ok, err := other.lookupRecord(reg)
+	if err != nil || !ok || base(reopened) != base(previous) {
+		t.Fatalf("shared registry did not share board revision: %v", err)
 	}
 	// The unexported identity must never enter session persistence or raw JSON.
 	raw, err := json.Marshal(reopened)

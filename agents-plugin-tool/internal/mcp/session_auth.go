@@ -111,11 +111,12 @@ type sessionRecord struct {
 	// Nil when empty. See session_state.go.
 	Todos []todoItem `json:"todos,omitempty"`
 	// Whiteboard decodes the legacy snapshot; board-aware loaders replace this
-	// in-memory value with the topic-folder authority. New writes never update
-	// the cache part. Nil means no board.
+	// value with the held DB snapshot. The cache part stays available for
+	// legacy import.
 	Whiteboard *wswhiteboard.State `json:"whiteboard,omitempty"`
-	// Process-local identity of the immutable folder read, never persisted.
-	boardRevision uint64
+	// Presentation metadata supplied with the snapshot.
+	boardRevision    uint64
+	boardUnavailable bool
 }
 
 // sessionRecordSchemaVersion is key.json's schema version. Version 1 was the
@@ -166,7 +167,7 @@ var sessionKeyFilenamePattern = regexp.MustCompile(`^[a-z0-9-]{1,128}$`)
 // presents only the opaque key, never its root, so the record path must be
 // derivable from the key plus the globally-deterministic cache root.
 type sessionStore struct {
-	boardOwner      bool
+	boards          *WhiteboardStores
 	boardRetirement *whiteboardRetirement
 
 	// mu serializes same-process read-modify-write and the mint claim loop.
@@ -181,8 +182,6 @@ type sessionStore struct {
 	// nil means wsstate.AtomicReplaceFile. Both are test seams.
 	lockTimeout time.Duration
 	replace     func(tmp, path string) error
-	// boardFault injects folder transaction failures in isolated tests.
-	boardFault func(stage string) error
 	// cacheHome is the caller process's WS_CACHE_HOME; empty means this
 	// process's.
 	cacheHome string

@@ -26,10 +26,22 @@ import (
 
 // dashboardPageSource is a source over the test's key store whose clock
 // the test sets.
-func dashboardPageSource(t *testing.T, now *time.Time) *DashboardSessionSource {
+func dashboardPageSource(t *testing.T, now *time.Time, boards ...*WhiteboardStores) *DashboardSessionSource {
 	t.Helper()
 	dir := t.TempDir()
-	src := &DashboardSessionSource{store: newSessionStore(), stateDir: func() (string, error) { return dir, nil }}
+	var registry *WhiteboardStores
+	if len(boards) > 0 {
+		registry = boards[0]
+	} else {
+		registry = NewWhiteboardStores(nil)
+		t.Cleanup(func() {
+			if err := registry.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	src := NewDashboardSessionSource(registry)
+	src.stateDir = func() (string, error) { return dir, nil }
 	if now != nil {
 		src.now = func() time.Time { return *now }
 	}
@@ -71,7 +83,7 @@ var hrefPattern = regexp.MustCompile(`(?:href|src)="([^"]*)"`)
 // no session key anywhere in what reaches the browser.
 func TestDashboardReadPageServesTheBoard(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 
 	if _, ok, err := src.ReadPage(wsdashboard.Registration{ReplyID: "nosuchsession", Project: f.root}); ok || err != nil {
@@ -167,7 +179,7 @@ func TestDashboardReadPageServesTheBoard(t *testing.T) {
 func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	now := time.Now()
-	src := dashboardPageSource(t, &now)
+	src := dashboardPageSource(t, &now, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	mustWrite(t, f.root, "shots/a.png", "not-really-a-png")
 	outDir := t.TempDir()
@@ -240,7 +252,7 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 // names nothing. ReadContacts re-reads what ReadPage's Contacts holds.
 func TestDashboardReadPageWatchesUnnudgedFiles(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	if page := readPageOK(t, src, reg); len(page.Watch) != 0 {
 		t.Fatalf("a session without a board watches %v", page.Watch)
@@ -288,6 +300,7 @@ func TestDashboardReadPageWatchesUnnudgedFiles(t *testing.T) {
 // marker, names that process (PageContent.WatchPIDs).
 func TestDashboardReadPageWatchesTheMailboxPanel(t *testing.T) {
 	hf := newHistoryFixture(t, time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC))
+	hf.serverB = newTestBoardOwner(t, hf.root, "test")
 	// A successful URL can contain "error" inside its generated reply ID.
 	// Assert the expected new item instead of searching opaque identifiers.
 	if out := callToolWithKey(t, hf.serverB, 40, hf.keyB, "whiteboard.update", map[string]any{"commands": `<wb:topic name="t"><wb:add class="technical"><wb:title>q</wb:title></wb:add></wb:topic>`}); !strings.HasPrefix(out, "ids: (01)\n") {
@@ -299,7 +312,7 @@ func TestDashboardReadPageWatchesTheMailboxPanel(t *testing.T) {
 		t.Fatal("no record for B")
 	}
 	reg := wsdashboard.Registration{ReplyID: wsmailbox.ReplyID(hf.keyB), Project: recB.Root}
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, hf.serverB.sessions.boards)
 
 	page := readPageOK(t, src, reg)
 	cacheRoot, err := wsstate.CacheRoot(wsstate.Options{})
@@ -497,7 +510,8 @@ func TestDashboardReadPageMailBodies(t *testing.T) {
 	if !ok {
 		t.Fatal("no registration")
 	}
-	src := &DashboardSessionSource{store: newSessionStore(), stateDir: func() (string, error) { return f.stateDir, nil }}
+	src := dashboardPageSource(t, nil)
+	src.stateDir = func() (string, error) { return f.stateDir, nil }
 	page := readPageOK(t, src, reg)
 	if body := page.MailBodies[sent[0].HistoryKey]; !strings.Contains(body, "Status update\nbody line") {
 		t.Fatalf("body for %s = %q (bodies %v)", sent[0].HistoryKey, body, page.MailBodies)
@@ -525,7 +539,8 @@ func TestDashboardMailKeepsSessionKeysFromTheBrowser(t *testing.T) {
 	if !ok {
 		t.Fatal("no registration")
 	}
-	src := &DashboardSessionSource{store: newSessionStore(), stateDir: func() (string, error) { return f.stateDir, nil }}
+	src := dashboardPageSource(t, nil)
+	src.stateDir = func() (string, error) { return f.stateDir, nil }
 	body := readPageOK(t, src, reg).MailBodies[sent[0].HistoryKey]
 	if body == "" || strings.Contains(body, f.keyA) || strings.Contains(body, "other-secret-key") || !strings.Contains(body, "body "+wsmailbox.ReplyIDPrefix+f.replyA) {
 		t.Fatalf("page mail body = %q", body)
@@ -539,7 +554,7 @@ func TestDashboardMailKeepsSessionKeysFromTheBrowser(t *testing.T) {
 func TestDashboardFingerprintCoversPageStores(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	now := time.Now()
-	src := dashboardPageSource(t, &now)
+	src := dashboardPageSource(t, &now, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>a question</wb:title></wb:add></wb:topic>`)
 
@@ -605,9 +620,11 @@ func TestDashboardPointerLineFollowsTheLastNudge(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := dashboardGitRoot(t)
-	s, key, _ := dashboardSessionServer(t, root, true)
+	_, key, _ := dashboardSessionServer(t, root, true)
+	s := newTestBoardOwner(t, root, "test")
+	s.sessionHarness = "claude"
 	replyID := wsmailbox.ReplyID(key)
-	path := "page unavailable"
+	path := "page not yet served"
 	update := func(s *Server, key string) string {
 		t.Helper()
 		resp := dashCall(t, s, "whiteboard.update", map[string]any{"session_key": key, "commands": ""})
@@ -647,9 +664,11 @@ func TestDashboardPointerLineFollowsTheLastNudge(t *testing.T) {
 
 	// A key-off session never names the URL, whatever the daemon answers.
 	startFakeDaemon(t, dir, http.StatusNoContent, false)
-	sOff, keyOff, _ := dashboardSessionServer(t, root, false)
+	_, keyOff, _ := dashboardSessionServer(t, root, false)
+	sOff := newTestBoardOwner(t, root, "test")
+	sOff.sessionHarness = "claude"
 	dashCall(t, sOff, "todo.list", map[string]any{"session_key": keyOff})
-	if got := update(sOff, keyOff); got != "page unavailable" {
+	if got := update(sOff, keyOff); got != "page not yet served" {
 		t.Fatalf("full: of a key-off session = %q", got)
 	}
 }
@@ -661,7 +680,7 @@ func TestDashboardPointerLineFollowsTheLastNudge(t *testing.T) {
 // is the page a disk render shows.
 func TestDashboardReadPageLangTranslatesBoardAndPanelText(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	f.call(t, "todo.add", map[string]any{"key": "step", "title": "a step"})
 	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>a question</wb:title><wb:why>plain reason</wb:why></wb:add></wb:topic>`)
@@ -709,7 +728,7 @@ func TestDashboardReadPageLangTranslatesBoardAndPanelText(t *testing.T) {
 // never re-asked is absent.
 func TestDashboardReadPageCarriesReaskTimes(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>one</wb:title></wb:add><wb:add class="technical"><wb:title>two</wb:title></wb:add></wb:topic>`)
 	if page := readPageOK(t, src, reg); page.Reasked != nil {
@@ -729,7 +748,7 @@ func TestDashboardReadPageCarriesReaskTimes(t *testing.T) {
 // board; a session with no board is empty, and an unknown session is false.
 func TestDashboardBoardItemsReadsOpenItemsAndReaskTimes(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	if items, ok := src.BoardItems(reg); !ok || len(items.Open) != 0 || len(items.Reasked) != 0 {
 		t.Fatalf("no board: BoardItems = %+v, %v; want empty and true", items, ok)
@@ -759,7 +778,7 @@ func TestDashboardBoardItemsReadsOpenItemsAndReaskTimes(t *testing.T) {
 // rule, the most recently closed first.
 func TestDashboardReadClosedTopicsPastTheCap(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	if _, ok := src.ReadClosedTopics(reg, "", 30, 30); ok {
 		t.Fatal("ReadClosedTopics read a session without a board")
@@ -816,7 +835,7 @@ func boardRenders(src *DashboardSessionSource) int {
 // memo hit still returns the render's watched files and processes.
 func TestDashboardBoardMemoKeysEveryBoardInput(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	writeTicket(t, f.root, "ready", "261101-feat-ready-one", "Ready one")
 	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>q one</wb:title></wb:add></wb:topic>`)
@@ -943,6 +962,7 @@ func TestDashboardBoardMemoKeysEveryBoardInput(t *testing.T) {
 func TestDashboardBoardMemoKeepsContactsCurrent(t *testing.T) {
 	t0 := time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC)
 	hf := newHistoryFixture(t, t0)
+	hf.serverB = newTestBoardOwner(t, hf.root, "test")
 	replyA := wsmailbox.ReplyID(hf.keyA)
 	if out := callToolWithKey(t, hf.serverB, 40, hf.keyB, "whiteboard.update", map[string]any{"commands": `<wb:topic name="t"><wb:add class="technical"><wb:title>q</wb:title></wb:add></wb:topic>`}); strings.Contains(out, "error") {
 		t.Fatalf("whiteboard.update: %s", out)
@@ -963,7 +983,7 @@ func TestDashboardBoardMemoKeepsContactsCurrent(t *testing.T) {
 	}
 
 	now := t0.Add(5 * time.Minute)
-	src := dashboardPageSource(t, &now)
+	src := dashboardPageSource(t, &now, hf.serverB.sessions.boards)
 	live := func() bool {
 		t.Helper()
 		for _, c := range readPageOK(t, src, reg).Contacts {
@@ -993,7 +1013,7 @@ func TestDashboardBoardMemoKeepsContactsCurrent(t *testing.T) {
 // are re-read per render, so every read renders the board.
 func TestDashboardBoardMemoOffWithDevAssets(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>q</wb:title></wb:add></wb:topic>`)
 	root, err := wsdevassets.Open(filepath.Join("..", ".."))
@@ -1016,7 +1036,7 @@ func TestDashboardBoardMemoOffWithDevAssets(t *testing.T) {
 // others; only a new key starts the memo over.
 func TestDashboardBoardMemoFullReplacesItsOwnKey(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>q one</wb:title></wb:add></wb:topic>`)
 	readPageOK(t, src, reg)
@@ -1053,7 +1073,7 @@ func TestDashboardBoardMemoFullReplacesItsOwnKey(t *testing.T) {
 // rendering the board.
 func TestDashboardReadSessionCountsOpenAskItems(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	f.update(t, `<wb:topic name="t"><wb:add class="policy"><wb:title>p1</wb:title><wb:option>a</wb:option><wb:option>b</wb:option></wb:add><wb:add class="policy"><wb:title>p2</wb:title><wb:option>a</wb:option><wb:option>b</wb:option></wb:add><wb:add class="technical"><wb:title>q</wb:title></wb:add><wb:add class="check"><wb:title>c1</wb:title></wb:add><wb:add class="check"><wb:title>c2</wb:title></wb:add></wb:topic><wb:answer id="5" value="ok">5=ok</wb:answer>`)
 	before := boardRenders(src)
@@ -1085,7 +1105,7 @@ func TestDashboardReadSessionCountsOpenAskItems(t *testing.T) {
 // unknown session is not read.
 func TestDashboardReadOutsideLinksListsTheBoardsTargetsOutsideTheRoot(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	if _, ok := src.ReadOutsideLinks(wsdashboard.Registration{ReplyID: "nosuchsession", Project: f.root}); ok {
 		t.Fatal("ReadOutsideLinks read an unknown reply-id")

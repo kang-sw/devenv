@@ -59,17 +59,22 @@ func TestBoardPerfServe(t *testing.T) {
 	// each topic is one batch and every row stays live.
 	logBatch, _ := strconv.Atoi(os.Getenv("WS_BOARD_PERF_LOG_BATCH"))
 	f := newWhiteboardFixture(t)
+	if os.Getenv("WS_BOARD_PERF_FRAMED") != "" {
+		f.update(t, "") // create the owner-held DB before fixed-clock writes
+	}
 	apply := func(cmds string) {
 		if os.Getenv("WS_BOARD_PERF_FRAMED") == "" {
 			f.update(t, cmds)
-		} else if err := whiteboardFolder(f.root, f.key).Update(nil, func(s *wswhiteboard.State) error {
-			// Match the normal synthetic shape with a fixed authoring clock;
-			// daemon liveness still uses real time. Never rewrite stored logs.
-			_, problems := wswhiteboard.Apply(s, cmds, wswhiteboard.Env{Now: time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)})
-			if len(problems) != 0 {
-				return fmt.Errorf("fixture: %v", problems)
-			}
-			return nil
+		} else if err := f.s.sessions.boards.use(f.root, f.key, nil, true, func(slot *whiteboardSlot) error {
+			return slot.board.Update(func(s *wswhiteboard.State) error {
+				// Match the normal synthetic shape with a fixed authoring clock;
+				// daemon liveness still uses real time. Never rewrite stored logs.
+				_, problems := wswhiteboard.Apply(s, cmds, wswhiteboard.Env{Now: time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)})
+				if len(problems) != 0 {
+					return fmt.Errorf("fixture: %v", problems)
+				}
+				return nil
+			})
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -144,7 +149,8 @@ func TestBoardPerfServe(t *testing.T) {
 		}
 	}
 	register()
-	src := &DashboardSessionSource{store: newSessionStore(), stateDir: func() (string, error) { return dir, nil }}
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
+	src.stateDir = func() (string, error) { return dir, nil }
 	daemon := startWhiteboardDaemonForTest(t, dir, src)
 	// The session stays live (heartbeat) for as long as the harness runs.
 	stop := make(chan struct{})

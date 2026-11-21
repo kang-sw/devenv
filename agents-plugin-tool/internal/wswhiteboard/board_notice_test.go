@@ -604,3 +604,42 @@ func TestBoardNotifyMailboxTimeoutDoesNotCommitReceipt(t *testing.T) {
 		t.Fatal("mailbox timeout committed watermark")
 	}
 }
+
+func TestBoardDBNotifyWakeFaultAndReceipt(t *testing.T) {
+	s := &State{}
+	noticeTopic(t, s, "A", StateImplementing, 1, stateNow)
+	fault := true
+	b, err := CreateBoardDB(t.TempDir(), s, BoardDBOptions{Fault: func(stage string) error {
+		if fault && stage == "notice-enqueued" {
+			return errors.New("fault")
+		}
+		return nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	var events []string
+	eligible := func() bool { events = append(events, "eligible"); return true }
+	enqueue := func(string) error { events = append(events, "enqueue"); return nil }
+	wake := func() { events = append(events, "wake") }
+	_, rev := b.Snapshot()
+	if _, err := b.Notify("lead", stateNow.Add(2*time.Minute), eligible, enqueue, wake); err == nil {
+		t.Fatal("missing fault")
+	}
+	if !reflect.DeepEqual(events, []string{"eligible", "enqueue", "wake"}) || b.Revision() != rev {
+		t.Fatalf("fault ordering %v rev %d", events, b.Revision())
+	}
+	fault = false
+	events = nil
+	if _, err := b.Notify("lead", stateNow.Add(2*time.Minute), eligible, enqueue, wake); err != nil {
+		t.Fatal(err)
+	}
+	if b.Revision() != rev+1 {
+		t.Fatal("receipt not committed")
+	}
+	events = nil
+	if _, err := b.Notify("lead", stateNow.Add(2*time.Minute), eligible, enqueue, wake); err != nil || len(events) != 0 {
+		t.Fatalf("receipt did not suppress retry: %v %v", events, err)
+	}
+}

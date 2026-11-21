@@ -8,7 +8,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
-func TestWhiteboardQueryCacheHitHasConstantStats(t *testing.T) {
+func TestWhiteboardQueryHeldStoreUsesNoFolderIO(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	defer f.s.Close()
 	var commands strings.Builder
@@ -23,17 +23,15 @@ func TestWhiteboardQueryCacheHitHasConstantStats(t *testing.T) {
 	after := wsstate.FileIOCounters()
 	var stats, boardReads int64
 	for site, count := range after {
-		if strings.HasPrefix(site, "file_io_site:wswhiteboard/folders_cache.go:") && strings.HasSuffix(site, ":stat") {
+		if strings.HasPrefix(site, "file_io_site:wswhiteboard/") && strings.HasSuffix(site, ":stat") {
 			stats += count - before[site]
 		}
 		if strings.HasPrefix(site, "file_io_site:wsstate/replace_file_") && strings.HasSuffix(site, ":read_file") {
 			boardReads += count - before[site]
 		}
 	}
-	// The query gate may open the same board more than once, but each hit
-	// probes only roots. No per-topic reads are permitted on a warm query.
-	if stats == 0 || stats > 8 || boardReads != 0 {
-		t.Fatalf("query hit used %d root stats and %d board reads, want O(1) stats and no reads", stats, boardReads)
+	if stats != 0 || boardReads != 0 {
+		t.Fatalf("held query used %d board stats and %d board reads", stats, boardReads)
 	}
 	f.update(t, `<wb:topic name="topic-0"><wb:body>fresh body</wb:body></wb:topic>`)
 	if got := f.call(t, "whiteboard.query", map[string]any{"session_key": f.key, "payload": map[string]any{"topic": []string{"topic-0"}, "body": true}}); !strings.Contains(got, "fresh body") {

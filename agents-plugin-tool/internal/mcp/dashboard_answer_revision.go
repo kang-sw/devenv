@@ -8,11 +8,10 @@ import (
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
-// LockBoardIncarnation uses trusted index identity and the folder's live gate,
-// not lookupRecord (which would add file reads to interactive admission).
+// LockBoardIncarnation uses the registered board's in-memory admission gate.
 func (src *DashboardSessionSource) LockBoardIncarnation(reg wsdashboard.Registration, token string) (func(), bool) {
-	folder := wswhiteboard.FolderStore{Dir: filepath.Join(reg.Project, filepath.FromSlash(whiteboardDirRel), reg.ReplyID)}
-	return folder.LockIncarnation(token)
+	dir := filepath.Join(reg.Project, filepath.FromSlash(whiteboardDirRel), reg.ReplyID)
+	return wswhiteboard.LockBoardIncarnation(dir, token)
 }
 
 // RecordDashboardAnswer resolves the registered lead using the same identity
@@ -25,5 +24,13 @@ func (src *DashboardSessionSource) RecordDashboardAnswer(reg wsdashboard.Registr
 	if !ok {
 		return wsdashboard.ErrDashboardAnswerIdentity
 	}
-	return whiteboardFolder(record.Root, key).RecordDashboardAnswer(id, at)
+	if src.store.boards == nil {
+		return errWhiteboardOwner
+	}
+	return src.store.boards.use(record.Root, key, nil, true, func(slot *whiteboardSlot) error {
+		if slot.board == nil {
+			return nil
+		}
+		return slot.board.RecordDashboardAnswer(id, at)
+	})
 }

@@ -98,7 +98,7 @@ func TestWhiteboardQueryFreshSessionConversionAndRecoverySmoke(t *testing.T) {
 			}
 
 			// A mention resolves the exact old version/log after daemon restart.
-			f.s = NewServer(f.root, "restart-query")
+			f.s = restartTestBoardOwner(t, f.s, f.root, "restart-query")
 			mentions := []wsinbox.Mention{{Topic: topic, Entry: panel.ID, Text: "selected panel"}, {Topic: topic, Entry: agent.ID, Text: "selected log"}}
 			parsed, rest := wsinbox.ParseMentions(wsinbox.MentionBlock(mentions))
 			if len(parsed) != 2 || rest != "" {

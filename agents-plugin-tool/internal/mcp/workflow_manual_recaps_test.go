@@ -116,7 +116,7 @@ func TestWorkflowStateByteIdenticalToWorkflowManualWithSummaries(t *testing.T) {
 	initGit(t, root)
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	t.Setenv("WS_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
-	server := NewServer(root, "test")
+	server := newTestBoardOwner(t, root, "test")
 	key, _ := parseLoginResponse(t, callLogin(t, server, 5520, root, nil))
 	if err := server.sessions.mutateRecordParts(key, partAll, partWhiteboard, func(r *sessionRecord) error { r.Whiteboard = recapBoard(); return nil }); err != nil {
 		t.Fatal(err)

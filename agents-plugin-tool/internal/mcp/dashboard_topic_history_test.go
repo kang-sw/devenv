@@ -16,7 +16,7 @@ import (
 // target. No fragment carries the session key.
 func TestDashboardReadTopicHistory(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	if _, ok := src.ReadTopicHistory(reg, "", []string{"x"}, ""); ok {
 		t.Fatal("ReadTopicHistory read a session without a board")

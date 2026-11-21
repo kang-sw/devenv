@@ -48,7 +48,7 @@ func panelRows(panel string) []string {
 func (f *whiteboardFixture) servedPage(t *testing.T) string {
 	t.Helper()
 	if f.source == nil {
-		f.source = dashboardPageSource(t, nil)
+		f.source = dashboardPageSource(t, nil, f.s.sessions.boards)
 	}
 	entry, ok := f.s.sessions.lookup(f.key)
 	if !ok {
@@ -208,7 +208,7 @@ func agendaPanelHTML(page string) string {
 // key, and clearing the last key drops the panel.
 func TestWhiteboardAgendaPanelTree(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	served := func() string {
 		page := readPageOK(t, src, reg)

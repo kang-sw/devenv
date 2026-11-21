@@ -18,10 +18,7 @@ import (
 func TestWhiteboardLoadReplacesTheCallersBoard(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	f.update(t, `<wb:topic name="handoff" label="Handoff"><wb:panel recap="Design">payload</wb:panel><wb:log>ready</wb:log><wb:add class="check"><wb:title>Verify</wb:title></wb:add></wb:topic>`)
-	data, err := whiteboardFolder(f.root, f.key).ExportArchive()
-	if err != nil {
-		t.Fatal(err)
-	}
+	data := exportTestWhiteboard(t, f, f.key)
 	zipPath := filepath.Join(t.TempDir(), "board.zip")
 	if err := os.WriteFile(zipPath, data, 0o644); err != nil {
 		t.Fatal(err)
@@ -81,7 +78,7 @@ func TestWhiteboardLoadRefusesASublead(t *testing.T) {
 // at the load, so both see the old answer as answering an earlier ask.
 func TestWhiteboardLoadDetachesAnswersToTheReplacedBoard(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	f.update(t, `<wb:topic name="old"><wb:add class="policy"><wb:title>Approve the old plan?</wb:title><wb:option>yes</wb:option><wb:option>no</wb:option></wb:add></wb:topic>`)
 	if page := readPageOK(t, src, reg); page.Reasked[1] != 0 {
@@ -98,10 +95,7 @@ func TestWhiteboardLoadDetachesAnswersToTheReplacedBoard(t *testing.T) {
 	if resp := f.call(t, "whiteboard.update", map[string]any{"session_key": other, "commands": `<wb:topic name="imported"><wb:add class="policy"><wb:title>Ship the imported change?</wb:title><wb:option>ship</wb:option><wb:option>hold</wb:option></wb:add></wb:topic>`}); isToolError(resp) {
 		t.Fatalf("source board: %s", resp)
 	}
-	data, err := whiteboardFolder(f.root, other).ExportArchive()
-	if err != nil {
-		t.Fatal(err)
-	}
+	data := exportTestWhiteboard(t, f, other)
 	zipPath := filepath.Join(t.TempDir(), "board.zip")
 	if err := os.WriteFile(zipPath, data, 0o644); err != nil {
 		t.Fatal(err)
@@ -123,4 +117,14 @@ func TestWhiteboardLoadDetachesAnswersToTheReplacedBoard(t *testing.T) {
 	if items.Reasked[1] <= sentAt {
 		t.Fatalf("answer-check re-ask floor of the loaded item 1 = %d, want after the old answer at %d", items.Reasked[1], sentAt)
 	}
+}
+
+func exportTestWhiteboard(t *testing.T, f *whiteboardFixture, key string) []byte {
+	t.Helper()
+	src := NewDashboardSessionSource(f.s.sessions.boards)
+	data, found, err := src.BoardArchive(wsdashboard.Registration{Project: f.root, ReplyID: wsmailbox.ReplyID(key)})
+	if err != nil || !found {
+		t.Fatalf("download board: found=%v, %v", found, err)
+	}
+	return data
 }

@@ -44,12 +44,12 @@ func TestWhiteboardPokedDiscoveryIsConstantIO(t *testing.T) {
 	}
 	f.n.discover()
 	before := wsstate.FileIOCounters()
-	if _, ok := f.n.discoverTarget(f.target); !ok {
+	if !f.n.discoverTarget(f.target) {
 		t.Fatal("poked board missing")
 	}
 	after := wsstate.FileIOCounters()
-	if got := after["file_io_stat"] - before["file_io_stat"]; got != 2 {
-		t.Fatalf("poked discovery used %d stats, want identity + board only", got)
+	if got := after["file_io_stat"] - before["file_io_stat"]; got != 1 {
+		t.Fatalf("poked discovery used %d stats, want identity only", got)
 	}
 	if got := after["file_io_read_dir"] - before["file_io_read_dir"]; got != 0 {
 		t.Fatalf("poke enumerated keys: %d directory reads", got)

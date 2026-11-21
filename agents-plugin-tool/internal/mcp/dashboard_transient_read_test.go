@@ -1,24 +1,20 @@
 package mcp
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/gofrs/flock"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 )
 
-func TestDashboardTransientBoardLockRetainsIndexAndCaches(t *testing.T) {
+func TestDashboardDrainingBoardRetainsIndexAndCaches(t *testing.T) {
 	t.Setenv("WS_MCP_NO_DASHBOARD", "1")
 	f := newWhiteboardFixture(t)
 	f.update(t, `<wb:topic name="Plan"><wb:body>intact committed content</wb:body></wb:topic>`)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	now := time.Now().UTC()
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root, HeartbeatAt: now.Format(time.RFC3339)}
 	dir := t.TempDir()
@@ -29,7 +25,7 @@ func TestDashboardTransientBoardLockRetainsIndexAndCaches(t *testing.T) {
 	if err != nil || !ok || !page.HasBoard {
 		t.Fatalf("initial page: %v %v", ok, err)
 	}
-	// Folder lock timeouts must not age the registration while testing recovery.
+	// Keep the registration live while testing owner recovery.
 	idx := wsdashboard.NewIndex(wsdashboard.IndexOptions{Dir: dir, Source: src, Now: func() time.Time { return now }})
 	idx.Refresh()
 	good, ok := idx.Session(reg.ReplyID)
@@ -38,56 +34,32 @@ func TestDashboardTransientBoardLockRetainsIndexAndCaches(t *testing.T) {
 	}
 	before := src.prints[reg.ReplyID]
 	boards := len(src.boards.entries)
-	meta := filepath.Join(whiteboardFolder(f.root, f.key).Dir, "meta.json")
-	committed, err := os.ReadFile(meta)
-	if err != nil {
+	// A draining owner is a transient read failure. It must not evict
+	// the last valid index entry or cached render.
+	if err := f.s.sessions.boards.Close(); err != nil {
 		t.Fatal(err)
 	}
-	lock := flock.New(filepath.Join(filepath.Dir(meta), ".lock"))
-	if err := lock.Lock(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = lock.Unlock() })
-	// The fixture holds only the authoritative folder lock. No partial write
-	// and no daemon process, let alone a daemon replacement, is involved.
-	// Unchanged roots serve the committed board without the lock; a changed
-	// root, as left by a writer still publishing under it, must wait.
-	if held, ok, err := src.ReadPage(reg); !ok || err != nil || held.Board.Board != page.Board.Board {
-		t.Fatalf("unchanged board under a held lock: found=%v err=%v", ok, err)
-	}
-	replaceBoardRootForTest(t, filepath.Dir(meta))
 	idx.Refresh()
 	if got, ok := idx.Session(reg.ReplyID); !ok || got != good {
-		t.Fatalf("lock contention removed/changed index: %+v %v", got, ok)
+		t.Fatalf("draining owner removed/changed index: %+v %v", got, ok)
 	}
-	if _, ok, err := src.ReadPage(reg); ok || err == nil || !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("lock contention not transient: found=%v err=%v", ok, err)
+	if _, ok, err := src.ReadPage(reg); ok || !errors.Is(err, errWhiteboardDraining) {
+		t.Fatalf("draining owner not transient: found=%v err=%v", ok, err)
 	}
 	if src.prints[reg.ReplyID] != before || len(src.boards.entries) != boards {
 		t.Fatal("transient cleared valid source caches")
 	}
-	after, err := os.ReadFile(meta)
-	if err != nil || !bytes.Equal(committed, after) {
-		t.Fatal("contention fixture changed authoritative commit")
-	}
-	if err := lock.Unlock(); err != nil {
-		t.Fatal(err)
-	}
+	f.s = newTestBoardOwner(t, f.root, "test")
+	src.store.boards = f.s.sessions.boards
 	idx.Refresh()
 	got, ok := idx.Session(reg.ReplyID)
-	// Contention invalidates the folder cache. Recovery gets a fresh immutable
-	// read revision, so the fingerprint advances even for unchanged content.
-	if !ok || got.Rev != good.Rev+1 {
-		t.Fatalf("recovery missing fresh read revision: %+v %v", got, ok)
-	}
-	got.Rev = good.Rev
-	if got != good {
-		t.Fatalf("recovery changed session identity/state: %+v", got)
+	if !ok || !got.Live {
+		t.Fatalf("recovery lost session: %+v %v", got, ok)
 	}
 	if recovered, ok, err := src.ReadPage(reg); !ok || err != nil || recovered.Seq != page.Seq || recovered.Board.Board != page.Board.Board {
 		t.Fatalf("recovery lost page content: found=%v err=%v", ok, err)
 	}
-	// A readable identity mismatch wins even while the old board lock is held.
+	// A readable identity mismatch removes the session.
 	d, err := src.store.dirs()
 	if err != nil {
 		t.Fatal(err)
@@ -109,9 +81,6 @@ func TestDashboardTransientBoardLockRetainsIndexAndCaches(t *testing.T) {
 	if err := os.WriteFile(path, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := lock.Lock(); err != nil {
-		t.Fatal(err)
-	}
 	idx.Refresh()
 	if _, ok := idx.Session(reg.ReplyID); ok {
 		t.Fatal("identity mismatch retained stale session")
@@ -123,7 +92,7 @@ func TestDashboardTransientRecordClassification(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			t.Setenv("WS_MCP_NO_DASHBOARD", "1")
 			f := newWhiteboardFixture(t)
-			src := dashboardPageSource(t, nil)
+			src := dashboardPageSource(t, nil, f.s.sessions.boards)
 			reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 			d, err := src.store.dirs()
 			if err != nil {
@@ -176,33 +145,5 @@ func TestDashboardTransientRecordClassification(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// replaceBoardRootForTest replaces committed.json with its own bytes: a new
-// file identity, as every commit leaves, with no content change.
-func replaceBoardRootForTest(t *testing.T, dir string) {
-	t.Helper()
-	path := filepath.Join(dir, "committed.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tmp := path + ".replacement"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// Windows identity is metadata only, and name tunneling can carry the
-	// creation time over: move mtime so the identity change is deterministic.
-	later := info.ModTime().Add(time.Second)
-	if err := os.Chtimes(tmp, later, later); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		t.Fatal(err)
 	}
 }

@@ -1,15 +1,12 @@
 package mcp
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/gofrs/flock"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
@@ -19,7 +16,7 @@ func TestDashboardSearchAnswerSnapshotRetainedHistory(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	f.update(t, `<wb:topic name="open"><wb:body>current open topic</wb:body><wb:add class="technical"><wb:title>retained question</wb:title></wb:add><wb:log>immutable old log</wb:log><wb:panel recap="old panel">old panel payload</wb:panel><wb:panel id="p2" recap="new panel">new panel payload</wb:panel></wb:topic>`)
 	f.update(t, `<wb:topic name="closed"><wb:body>closed topic body</wb:body><wb:log>closed immutable log</wb:log><wb:panel recap="closed panel">closed panel payload</wb:panel><wb:close result="retained close result"/></wb:topic>`)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	root, data, err := src.SearchAnswerSnapshot(reg)
 	if err != nil || root != f.root {
@@ -66,27 +63,25 @@ func TestDashboardSearchAnswerSnapshotRetainedHistory(t *testing.T) {
 	if err != nil || !strings.Contains(string(fresh), "later log") {
 		t.Fatalf("fresh board missing log: %s %v", fresh, err)
 	}
-	// A busy lock over unchanged roots serves the last committed board; a
-	// changed root waits for the lock, rather than reading raw folders around
-	// recovery or serving a board the roots no longer vouch for.
-	lock := flock.New(filepath.Join(whiteboardFolder(f.root, f.key).Dir, ".lock"))
-	if err := lock.Lock(); err != nil {
+	// A draining owner refuses reads; reopening the DB restores the snapshot.
+	if err := f.s.sessions.boards.Close(); err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Unlock()
-	if _, held, err := src.SearchAnswerSnapshot(reg); err != nil || string(held) != string(fresh) {
-		t.Fatalf("unchanged board under a busy lock: %v", err)
+	if _, _, err := src.SearchAnswerSnapshot(reg); !errors.Is(err, errWhiteboardDraining) {
+		t.Fatalf("snapshot bypassed the draining owner: %v", err)
 	}
-	replaceBoardRootForTest(t, whiteboardFolder(f.root, f.key).Dir)
-	if _, _, err := src.SearchAnswerSnapshot(reg); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("snapshot bypassed folder lock: %v", err)
+	f.s = newTestBoardOwner(t, f.root, "test")
+	src.store.boards = f.s.sessions.boards
+	if _, reopened, err := src.SearchAnswerSnapshot(reg); err != nil || string(reopened) != string(fresh) {
+		t.Fatalf("reopened snapshot differs: %v", err)
 	}
+
 }
 
 func TestDashboardSearchAnswerSnapshotIdentityAndAbsentBoard(t *testing.T) {
 	t.Setenv("WS_MCP_NO_DASHBOARD", "1")
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	root, data, err := src.SearchAnswerSnapshot(reg)
 	if err != nil || root != f.root || string(data) != "null" {

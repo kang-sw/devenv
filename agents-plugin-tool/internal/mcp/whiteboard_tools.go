@@ -207,7 +207,6 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any,
 		problems []string
 		outcome  wswhiteboard.Outcome
 		observed boardMutationObservation
-		root     string
 	)
 	err = s.sessions.mutateRecordPartsObserved(key, partWhiteboard, partWhiteboard, func(rec *sessionRecord) error {
 		if rec.Whiteboard == nil {
@@ -222,7 +221,6 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any,
 		if sublead != nil {
 			env.StatusAuthor = sublead.author
 		}
-		root = rec.Root
 		beforeEntry := rec.Whiteboard.EntrySeq
 		outcome, problems = wswhiteboard.Apply(rec.Whiteboard, commands, env)
 		if len(problems) > 0 && (outcome.Accepted == 0 || outcome.Unpartitioned) {
@@ -233,10 +231,8 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any,
 		}
 		return nil
 	}, &observed)
-	// A successful Apply is not a commit. Conversely a failed replay does
-	// not undo a synced intent. This independent
-	// best-effort append accepts the commit-to-ring crash gap: never replay
-	// board commands or manufacture projection entries during recovery.
+	// The board commit and conversation projection are separate. Project
+	// accepted commands once; board recovery never recreates ring entries.
 	if observed.Committed {
 		s.recordWhiteboardEffects(key, outcome.Effects)
 	}
@@ -266,9 +262,6 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any,
 		text += whiteboardFailedRetry(outcome)
 		return toolErrorTextResponse(id, text)
 	}
-	if s.whiteboardChanged != nil {
-		s.whiteboardChanged(s.getenv(wsstate.EnvCacheHome), root, key)
-	}
 	if sublead != nil {
 		return s.subleadWhiteboardResult(id, outcome, problems)
 	}
@@ -283,10 +276,7 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any,
 		}
 		sb.WriteString("ids: " + strings.Join(labels, ", ") + "\n")
 	}
-	full := "page unavailable"
-	if s.boardOwner {
-		full = "page not yet served"
-	}
+	full := "page not yet served"
 	if url, ok := s.dashboardPageURL(key); ok {
 		full = url
 	}
@@ -379,10 +369,8 @@ func (s *Server) handleWhiteboardQuery(id json.RawMessage, args map[string]any) 
 const whiteboardLoadTool = "whiteboard.load"
 
 // handleWhiteboardLoad loads the zip at args' path into the caller's board
-// folder through the store (wswhiteboard.FolderStore.LoadArchive), keeping
-// the previous board as a backup folder beside it. Afterwards it behaves like
-// a successful whiteboard.update: the cached board is dropped, the board knob
-// turns on, and the dispatcher nudges the dashboard.
+// store and keeps the previous board as a backup folder beside it. A
+// successful load turns on the board knob and notifies the daemon.
 func (s *Server) handleWhiteboardLoad(id json.RawMessage, args map[string]any) response {
 	key, err := sessionStateKey(whiteboardLoadTool, args)
 	if err != nil {
@@ -405,17 +393,26 @@ func (s *Server) handleWhiteboardLoad(id json.RawMessage, args map[string]any) r
 	if info, err := os.Stat(path); err != nil || info.IsDir() {
 		return toolTextResponse(id, "", fmt.Errorf("%s: no board zip at %s on the host running ws-mcp", whiteboardLoadTool, path))
 	}
-	folder := whiteboardFolder(rec.Root, key)
-	if err := registerWhiteboardExclude(s.gitRunner(), rec.Root, filepath.Dir(folder.Dir)); err != nil {
+	if _, err := s.sessions.readWhiteboard(key); err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", whiteboardLoadTool, err))
+	}
+	dir := whiteboardBoardDir(rec.Root, key)
+	if err := registerWhiteboardExclude(s.gitRunner(), rec.Root, filepath.Dir(dir)); err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: register %s in the git exclude file: %w", whiteboardLoadTool, whiteboardDirRel, err))
 	}
-	backup, topics, err := folder.LoadArchive(path, time.Now())
-	wswhiteboard.SharedFolderCache.Forget(folder.Dir)
+	var backup string
+	var topics int
+	err = s.sessions.boards.use(rec.Root, key, nil, true, func(slot *whiteboardSlot) error {
+		var err error
+		if slot.board == nil {
+			slot.board, topics, err = wswhiteboard.LoadNewBoardDB(dir, path, s.sessions.boards.options)
+		} else {
+			backup, topics, err = slot.board.LoadArchive(path, time.Now())
+		}
+		return err
+	})
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("%s: %s: %w", whiteboardLoadTool, path, err))
-	}
-	if s.whiteboardChanged != nil {
-		s.whiteboardChanged(s.getenv(wsstate.EnvCacheHome), rec.Root, key)
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "loaded: %d topics from %s\n", topics, path)

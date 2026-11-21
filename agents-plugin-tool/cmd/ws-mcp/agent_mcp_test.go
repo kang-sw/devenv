@@ -28,13 +28,13 @@ import (
 func TestCallFallbackRegistrationAndRenderDescriptor(t *testing.T) {
 	holders := wsholder.New(wsholder.Options{Dir: t.TempDir()})
 	defer holders.Close()
-	runner := newAgentRunner(t.TempDir(), io.Discard, nil, nil, holders)
+	runner := newAgentRunner(t.TempDir(), io.Discard, nil, nil, holders, nil)
 	defer runner.Close()
 	for name, reg := range runner.BackendRegistrations() {
 		if reg.CallFallback != (name == wsagent.BackendAgy) {
 			t.Fatalf("backend %q fallback = %v; only agy opts in", name, reg.CallFallback)
 		}
-		render := hostedRender(reg)
+		render := hostedRender(reg, nil)
 		if render.CallFallback != reg.CallFallback || render.ToolNameScheme != reg.ToolNameScheme {
 			t.Fatalf("backend %q loses fallback or alias data in prompt rendering: %+v", name, render)
 		}
@@ -145,7 +145,7 @@ func TestAgentMCPHostedWorkerKeepsTokenForwarding(t *testing.T) {
 	}
 	holders := wsholder.New(wsholder.Options{Dir: t.TempDir()})
 	defer holders.Close()
-	runner := newAgentRunner(t.TempDir(), io.Discard, nil, nil, holders)
+	runner := newAgentRunner(t.TempDir(), io.Discard, nil, nil, holders, nil)
 	defer runner.Close()
 	host := &proxyHost{agents: runner, logw: io.Discard}
 	session, err := host.Accept(wsdashboard.ProxyHello{
@@ -231,7 +231,7 @@ func TestAgentMCPHostedWorkerDescriptorThroughProxy(t *testing.T) {
 
 			holders := wsholder.New(wsholder.Options{Dir: t.TempDir()})
 			defer holders.Close()
-			runner := newAgentRunner(dashDir, io.Discard, nil, nil, holders)
+			runner := newAgentRunner(dashDir, io.Discard, nil, nil, holders, nil)
 			defer runner.Close()
 			host := &proxyHost{agents: runner, logw: io.Discard}
 			session, err := host.Accept(wsdashboard.ProxyHello{
@@ -416,7 +416,7 @@ func TestAgentMCPPythonResolution(t *testing.T) {
 func TestAgentRunnerCatalogs(t *testing.T) {
 	holders := wsholder.New(wsholder.Options{Dir: t.TempDir()})
 	defer holders.Close()
-	runner := newAgentRunner(t.TempDir(), io.Discard, nil, nil, holders)
+	runner := newAgentRunner(t.TempDir(), io.Discard, nil, nil, holders, nil)
 	defer runner.Close()
 	regs := runner.BackendRegistrations()
 	if !reflect.DeepEqual(regs[wsagent.BackendClaude].Catalog, wsagent.ClaudeCatalog()) {

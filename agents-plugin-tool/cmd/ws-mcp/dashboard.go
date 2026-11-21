@@ -76,7 +76,8 @@ func dashboardCommand(args []string) {
 			_ = tracker.Close()
 		}
 	}
-	sessions := mcp.NewDashboardSessionSource()
+	boards := mcp.NewWhiteboardStores(logw)
+	sessions := mcp.NewDashboardSessionSource(boards)
 	// The daemon serves the mailbox from memory: every store call opens (or
 	// reuses) the cache root's persistent instance, holding its restore
 	// ring for the daemon's life. A daemon that loses the dashboard lock
@@ -99,9 +100,15 @@ func dashboardCommand(args []string) {
 		Log:    logw,
 		OnExit: persistHolderExit(dir),
 	})
-	agents := newAgentRunner(dir, logw, trackerChanged.call, agyActivity.call, holders)
-	nudges := mcp.NewWhiteboardNudges(dir, agents, logw)
-	host := &proxyHost{notes: sessions.Notes, dir: dir, port: *port, lan: *lan, buildTime: *buildTime, contentHash: contentHash, logw: logw, configPath: filepath.Clean(configPath), agents: agents, nudges: nudges}
+	agents := newAgentRunner(dir, logw, trackerChanged.call, agyActivity.call, holders, boards)
+	nudges := mcp.NewWhiteboardNudges(dir, agents, logw, boards)
+	host := &proxyHost{notes: sessions.Notes, dir: dir, port: *port, lan: *lan, buildTime: *buildTime, contentHash: contentHash, logw: logw, configPath: filepath.Clean(configPath), agents: agents, boards: boards}
+	boards.SetChanged(func(root, key string) {
+		if d := host.live.Load(); d != nil {
+			d.Index().Reread(wsmailbox.ReplyID(key))
+		}
+		nudges.Poke(filepath.Dir(dir), root, key)
+	})
 	// A store's support conversation runs in the store's clone, so an
 	// unregister ends it: right after the dashboard's own, and on the store
 	// watch's change for one another process ran (tk:unregister).
@@ -133,7 +140,12 @@ func dashboardCommand(args []string) {
 		Tracker:        &dashboardTracker{h: tracker, err: trackerErr, unregistered: func() { support.CloseUnregistered() }},
 		Holders:        holders,
 		Support:        support,
-		BeforeUnlock:   exportMailbox.call,
+		BeforeUnlock: func() {
+			if err := boards.Close(); err != nil {
+				fmt.Fprintf(logw, "dashboard: whiteboard close: %v\n", err)
+			}
+			exportMailbox.call()
+		},
 	})
 	if errors.Is(err, wsdashboard.ErrLocked) {
 		closeTracker()
@@ -294,7 +306,7 @@ func trackerStoreRoot(h *wstrackerhost.Host, newErr error) func(id string) (stri
 // for the ws-mcp it attaches to a conversation whose profile allows ws tools.
 // trackerChanged runs after a conversation's successful tracker write;
 // agyActivity runs after a hosted agy turn settles.
-func newAgentRunner(dir string, logw io.Writer, trackerChanged, agyActivity func(), holders *wsholder.Manager) *wsagent.Runner {
+func newAgentRunner(dir string, logw io.Writer, trackerChanged, agyActivity func(), holders *wsholder.Manager, boards *mcp.WhiteboardStores) *wsagent.Runner {
 	modelWaitSeconds := wsagent.DefaultAgyModelWaitTimeoutSeconds
 	modelWaitRetries := wsagent.DefaultAgyModelWaitRetries
 	if name, _, err := wsagent.ResolveHostedPackage(); err == nil && name == "wsflow" {
@@ -323,14 +335,14 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged, agyActivity func
 		// and a lead without ws skills runs the package's lead playbooks as
 		// dashboard commands whose turn carries the playbook body.
 		LeadManual: func(backend, dir, key string) (string, error) {
-			return renderLeadManual(hostedRender(backends[backend]), dir, key)
+			return renderLeadManual(hostedRender(backends[backend], boards), dir, key)
 		},
 		RestoreBundle: func(backend, dir, key string, cause wsagent.RestoreCause, children []wsagent.AgentChild) (string, error) {
-			return renderHostedRestoreBundle(hostedRender(backends[backend]), dir, key, cause, children)
+			return renderHostedRestoreBundle(hostedRender(backends[backend], boards), dir, key, cause, children)
 		},
 		PlaybookCommands: hostedPlaybookCommands,
 		ExpandCommand: func(backend, dir, key, name string) (string, error) {
-			return renderLeadPlaybook(hostedRender(backends[backend]), dir, key, name)
+			return renderLeadPlaybook(hostedRender(backends[backend], boards), dir, key, name)
 		},
 		Log:            logw,
 		TrackerChanged: trackerChanged,
@@ -449,6 +461,6 @@ func serveDashboard(server *mcp.Server) {
 
 // hostedRender is what reg says about text the daemon renders for its
 // hosted lead.
-func hostedRender(reg wsagent.BackendRegistration) mcp.HostedRender {
-	return mcp.HostedRender{Harness: reg.ManualHarness, PlaybookCommands: reg.PlaybookCommands, ToolNameScheme: reg.ToolNameScheme, CallFallback: reg.CallFallback, DirectTools: reg.DirectTools}
+func hostedRender(reg wsagent.BackendRegistration, boards *mcp.WhiteboardStores) mcp.HostedRender {
+	return mcp.HostedRender{Harness: reg.ManualHarness, PlaybookCommands: reg.PlaybookCommands, ToolNameScheme: reg.ToolNameScheme, CallFallback: reg.CallFallback, DirectTools: reg.DirectTools, Boards: boards}
 }

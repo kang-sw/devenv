@@ -21,6 +21,7 @@ type HostedRender struct {
 	ToolNameScheme   string
 	CallFallback     bool
 	DirectTools      []string
+	Boards           *WhiteboardStores
 }
 
 // HostedChild is the runner's agent.list projection without an internal/mcp
@@ -47,7 +48,7 @@ func hostedRenderServer(env []string, root string, render HostedRender, key stri
 		}
 		kept = append(kept, kv)
 	}
-	s := NewServerWithOptions(ServerOptions{Root: root, Env: kept, Harness: render.Harness, Diag: io.Discard})
+	s := NewServerWithOptions(ServerOptions{Root: root, Env: kept, Harness: render.Harness, Diag: io.Discard, BoardOwner: render.Boards != nil, Boards: render.Boards})
 	// The harness is declared here, not detected: a name the detection list
 	// does not know (agy) still selects the manual's overlay. leadRender
 	// renders as the daemon-hosted connection, which lists the agent tools.

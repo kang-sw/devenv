@@ -72,7 +72,8 @@ func TestWhiteboardBrowserFixture(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(wsdashboard.SessionDir(dir, f.replyID()), "snapshot.json"), []byte(snapshot), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	src := &DashboardSessionSource{store: newSessionStore(), stateDir: func() (string, error) { return dir, nil }}
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
+	src.stateDir = func() (string, error) { return dir, nil }
 	daemon := startWhiteboardDaemonForTest(t, dir, src)
 	base := fmt.Sprintf("http://127.0.0.1:%d", daemon.Endpoint().Port)
 	req, err := http.NewRequest(http.MethodGet, base+"/s/"+f.replyID(), nil)

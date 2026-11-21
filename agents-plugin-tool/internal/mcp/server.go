@@ -23,17 +23,16 @@ import (
 type Server struct {
 	boardOwner bool
 
-	root              string
-	version           string
-	sourceCommit      string
-	whiteboardChanged func(cacheHome, root, key string)
-	notes             *wsnote.Cache
-	noteBindings      sync.Map // session keys already bound on this connection
-	rootMu            sync.RWMutex
-	sessionHarness    string
-	piDaemonAgents    bool // initialize experimental capability, protected by rootMu
-	sessions          *sessionStore
-	mailbox           mailboxRuntimeState
+	root           string
+	version        string
+	sourceCommit   string
+	notes          *wsnote.Cache
+	noteBindings   sync.Map // session keys already bound on this connection
+	rootMu         sync.RWMutex
+	sessionHarness string
+	piDaemonAgents bool // initialize experimental capability, protected by rootMu
+	sessions       *sessionStore
+	mailbox        mailboxRuntimeState
 	// indexOpts configures the ticket ownership index client; zero values
 	// take the library defaults. Tests inject clocks and timeouts here.
 	indexOpts wsindex.Options

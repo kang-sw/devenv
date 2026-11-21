@@ -70,7 +70,7 @@ func TestWhiteboardInputsActivationRestartAndEventless(t *testing.T) {
 		t.Fatalf("activation stamp %+v", all[0])
 	}
 	floor := all[0].InputsFloor
-	f.s = NewServer(f.root, "restart")
+	f.s = restartTestBoardOwner(t, f.s, f.root, "restart")
 	drain()
 	f.update(t, `<wb:topic name="t"><wb:log>old queued record is below floor</wb:log></wb:topic>`)
 	if lastInput(t, f).Inputs != nil {

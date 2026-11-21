@@ -2,8 +2,7 @@ package mcp
 
 import (
 	"bytes"
-	"os"
-	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -16,7 +15,8 @@ func TestWhiteboardTopicStateResearchingResponseAndRestart(t *testing.T) {
 	if !strings.Contains(out, "topic added: research (state: researching, explicit)") || strings.Contains(out, "discussing_without_open_items") {
 		t.Fatalf("research update: %s", out)
 	}
-	restarted := NewServer(f.root, "restart")
+	f.s = restartTestBoardOwner(t, f.s, f.root, "restart")
+	restarted := f.s
 	rec, err := restarted.sessions.readWhiteboard(f.key)
 	if err != nil {
 		t.Fatal(err)
@@ -36,12 +36,18 @@ func TestWhiteboardTopicStateResearchingResponseAndRestart(t *testing.T) {
 			t.Fatalf("research became timed: %s", text)
 		}
 	}
-	before := whiteboardTreeForTest(t, f.pageDir())
+	before, err := f.s.sessions.readWhiteboard(f.key)
+	if err != nil {
+		t.Fatal(err)
+	}
 	resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="research"><wb:eta minutes="8" reason="invalid research extension"/></wb:topic>`})
 	if !isToolError(resp) || !strings.Contains(toolText(t, resp), "ETA requires known implementing state") {
 		t.Fatalf("research ETA refusal: %s", resp)
 	}
-	assertWhiteboardTreeForTest(t, f.pageDir(), before)
+	after, err := f.s.sessions.readWhiteboard(f.key)
+	if err != nil || !reflect.DeepEqual(before.Whiteboard, after.Whiteboard) {
+		t.Fatalf("refusal changed board: %v", err)
+	}
 	out = f.update(t, `<wb:topic name="research"><wb:state value="researching" owner="second" eta_minutes="9"/></wb:topic>`)
 	if !strings.Contains(out, "topic updated: research (state: researching)") {
 		t.Fatalf("metadata-only research update absent: %s", out)
@@ -63,7 +69,8 @@ func TestWhiteboardTopicStateResponseAndRestart(t *testing.T) {
 		t.Fatal("response-only warning leaked onto page")
 	}
 	f.update(t, `<wb:topic name="state"><wb:add class="check"><wb:title>Verify</wb:title></wb:add><wb:state value="implementing" owner="executor" eta_minutes="40"/></wb:topic>`)
-	restarted := NewServer(f.root, "restart")
+	f.s = restartTestBoardOwner(t, f.s, f.root, "restart")
+	restarted := f.s
 	rec, err := restarted.sessions.readWhiteboard(f.key)
 	if err != nil {
 		t.Fatal(err)
@@ -94,21 +101,26 @@ func TestWhiteboardTopicStateCutoverAndAtomicRefusal(t *testing.T) {
 	if !bytes.Equal(original, readFileForTest(t, legacyPath)) {
 		t.Fatal("state update rewrote rollback snapshot")
 	}
-	logPath := filepath.Join(f.pageDir(), "t2", "log.jsonl")
-	log, err := os.ReadFile(logPath)
+	rec, err := f.s.sessions.readWhiteboard(f.key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines := bytes.Split(bytes.TrimSpace(log), []byte{'\n'})
-	if len(lines) != 2 || bytes.Contains(lines[0], []byte("topic_state")) || !bytes.Contains(lines[1], []byte("topic_state")) {
-		t.Fatalf("state did not follow legacy cutover: %s", log)
+	entries := rec.Whiteboard.Topics[1].Entries
+	if len(entries) != 2 || len(entries[0].TopicState) != 0 || len(entries[1].TopicState) == 0 {
+		t.Fatalf("state did not follow legacy cutover: %+v", entries)
 	}
-	before := whiteboardTreeForTest(t, f.pageDir())
+	before, err := f.s.sessions.readWhiteboard(f.key)
+	if err != nil {
+		t.Fatal(err)
+	}
 	resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="recap only"><wb:state value="implementing" owner="different" eta_minutes="1"/></wb:topic>`})
 	if !isToolError(resp) || !strings.Contains(toolText(t, resp), "implementing owner/ETA differs") {
 		t.Fatalf("expected atomic state refusal: %s", resp)
 	}
-	assertWhiteboardTreeForTest(t, f.pageDir(), before)
+	after, err := f.s.sessions.readWhiteboard(f.key)
+	if err != nil || !reflect.DeepEqual(before.Whiteboard, after.Whiteboard) {
+		t.Fatalf("refusal changed board: %v", err)
+	}
 }
 
 func TestWhiteboardCreateAndCloseInOneBatch(t *testing.T) {

@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -122,7 +121,7 @@ func TestWhiteboardLegacyConversionThroughReadersAndRestart(t *testing.T) {
 						t.Fatalf("legacy query: %s", resp)
 					}
 				case "dashboard":
-					src := dashboardPageSource(t, nil)
+					src := dashboardPageSource(t, nil, f.s.sessions.boards)
 					if page := readPageOK(t, src, reg); !page.HasBoard || page.Seq != 9 {
 						t.Fatalf("legacy dashboard: %+v", page)
 					}
@@ -131,13 +130,13 @@ func TestWhiteboardLegacyConversionThroughReadersAndRestart(t *testing.T) {
 						t.Fatalf("legacy session state: %s", resp)
 					}
 				}
-				if !exists(filepath.Join(f.pageDir(), "meta.json")) {
-					t.Fatal("first read did not convert to authoritative folders")
+				if !exists(filepath.Join(f.pageDir(), ".board.sqlite")) {
+					t.Fatal("first read did not convert to authoritative DB")
 				}
 				if got := readFileForTest(t, legacyPath); !bytes.Equal(got, original) {
 					t.Fatal("conversion changed the old board-bearing file")
 				}
-				rec, err := newSessionStore().readWhiteboard(f.key)
+				rec, err := f.s.sessions.readWhiteboard(f.key)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -182,9 +181,8 @@ func TestWhiteboardLegacyConversionThroughReadersAndRestart(t *testing.T) {
 				}
 
 				// A daemon restart is a fresh server and fresh read caches. Opening
-				// twice must not rewrite files or re-import equal-time recap entries.
-				tree := whiteboardTreeForTest(t, f.pageDir())
-				f.s = NewServer(f.root, "restart")
+				// twice must not re-import equal-time recap entries.
+				f.s = restartTestBoardOwner(t, f.s, f.root, "restart")
 				for i := 0; i < 2; i++ {
 					reopened, err := f.s.sessions.readWhiteboard(f.key)
 					if err != nil {
@@ -196,7 +194,6 @@ func TestWhiteboardLegacyConversionThroughReadersAndRestart(t *testing.T) {
 						t.Fatalf("restart changed imported snapshot: %s, want %s", after, before)
 					}
 				}
-				assertWhiteboardTreeForTest(t, f.pageDir(), tree)
 
 				// An ordinary key write must not invoke destructive legacy migration.
 				if err := f.s.sessions.setOverride(f.key, "test.item", "new metadata"); err != nil {
@@ -259,12 +256,12 @@ func TestWhiteboardLegacyEmptyBoardConvertsOnce(t *testing.T) {
 			f := newWhiteboardFixture(t)
 			path, before := installLegacyWhiteboardForTest(t, f, layout, "{ \"counter\": 0, \"seq\": 2 }\n")
 			for i := 0; i < 2; i++ {
-				rec, err := newSessionStore().readWhiteboard(f.key)
+				rec, err := f.s.sessions.readWhiteboard(f.key)
 				if err != nil || rec.Whiteboard == nil || rec.Whiteboard.Seq != 2 || rec.Whiteboard.EntrySeq != 0 || len(rec.Whiteboard.Topics) != 0 {
 					t.Fatalf("empty board open: %+v, %v", rec.Whiteboard, err)
 				}
 			}
-			if !exists(filepath.Join(f.pageDir(), "meta.json")) || !bytes.Equal(readFileForTest(t, path), before) {
+			if !exists(filepath.Join(f.pageDir(), ".board.sqlite")) || !bytes.Equal(readFileForTest(t, path), before) {
 				t.Fatal("empty board was not durably converted with legacy bytes preserved")
 			}
 		})
@@ -274,38 +271,27 @@ func TestWhiteboardLegacyEmptyBoardConvertsOnce(t *testing.T) {
 func TestWhiteboardNewerSchemaRefusesReadersAndWriters(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	legacyPath, original := installLegacyWhiteboardForTest(t, f, "split", legacyWhiteboardJSON)
-	if _, err := f.s.sessions.readWhiteboard(f.key); err != nil {
+	if err := os.MkdirAll(f.pageDir(), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(f.pageDir(), "meta.json")
-	var meta map[string]json.RawMessage
-	if err := json.Unmarshal(readFileForTest(t, path), &meta); err != nil {
-		t.Fatal(err)
-	}
-	meta["schema_version"] = json.RawMessage(fmt.Sprint(wswhiteboard.FolderSchemaVersion + 1))
-	data, _ := json.Marshal(meta)
+	data := []byte(fmt.Sprintf(`{"schema_version":%d}`, wswhiteboard.FolderSchemaVersion+1))
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	before := whiteboardTreeForTest(t, f.pageDir())
 	for _, tool := range []string{"whiteboard.query", "whiteboard.update"} {
 		resp := f.call(t, tool, map[string]any{})
 		if !isToolError(resp) || !strings.Contains(toolText(t, resp), "newer schema_version") {
-			t.Fatalf("%s must explicitly refuse a newer board schema: %s", tool, resp)
+			t.Fatalf("%s must refuse newer legacy folder schema: %s", tool, resp)
 		}
 	}
 	called := false
-	err := f.s.sessions.mutateRecord(f.key, partWhiteboard, func(r *sessionRecord) error {
-		called = true
-		r.Whiteboard.Seq++
-		return nil
-	})
+	err := f.s.sessions.mutateRecord(f.key, partWhiteboard, func(r *sessionRecord) error { called = true; return nil })
 	if err == nil || !strings.Contains(err.Error(), "newer schema_version") || called {
-		t.Fatalf("generic writer did not guard newer schema before callback: %v, called %v", err, called)
+		t.Fatalf("writer did not guard newer schema: %v, called %v", err, called)
 	}
-	assertWhiteboardTreeForTest(t, f.pageDir(), before)
-	if got := readFileForTest(t, legacyPath); !bytes.Equal(got, original) {
-		t.Fatal("a refused newer-schema write changed the legacy board")
+	if !bytes.Equal(readFileForTest(t, path), data) || !bytes.Equal(readFileForTest(t, legacyPath), original) {
+		t.Fatal("refusal changed legacy data")
 	}
 }
 
@@ -346,57 +332,37 @@ func TestSessionRecordNewerSchemaPreservesLegacyBoard(t *testing.T) {
 	}
 }
 
-func TestWhiteboardFolderChangeInvalidatesDashboardWithoutSeqChange(t *testing.T) {
+func TestWhiteboardDBChangeInvalidatesDashboardWithoutSeqChange(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	f.update(t, `<wb:topic name="t"><wb:body>before-marker</wb:body><wb:panel recap="a panel">payload</wb:panel><wb:log>an agent line</wb:log></wb:topic>`)
-	src := dashboardPageSource(t, nil)
+	f.update(t, `<wb:topic name="t"><wb:add class="check"><wb:title>before-marker</wb:title></wb:add><wb:panel recap="a panel">payload</wb:panel><wb:log>an agent line</wb:log></wb:topic>`)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	first := readPageOK(t, src, reg)
-	readPageOK(t, src, reg) // stabilize the first render's watched-input stamp
+	readPageOK(t, src, reg)
 	beforeRenders := boardRenders(src)
 	fingerprint := readFingerprint(t, src, reg)
 	readPageOK(t, src, reg)
 	if boardRenders(src) != beforeRenders {
-		t.Fatal("unchanged authoritative inputs did not reuse the board memo")
+		t.Fatal("unchanged board missed memo")
 	}
-	// Every commit replaces both roots, so the board folder is stamped by
-	// them alone, never by a walk over its topic files.
-	var watched []string
 	for _, path := range first.Watch {
 		rel, err := filepath.Rel(f.pageDir(), path)
-		if err == nil && !strings.HasPrefix(rel, "..") {
-			watched = append(watched, filepath.ToSlash(rel))
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			t.Fatalf("dashboard watches board authority path: %s", path)
 		}
 	}
-	if !slices.Equal(watched, []string{"meta.json", "committed.json"}) {
-		t.Fatalf("dashboard watches board files %v, want only the commit roots", watched)
-	}
-	// A separate folder writer changes authoritative content without touching
-	// the cached session parts or render sequence. Both fingerprint and memo
-	// must depend on the actual folder state, not stale whiteboard.json.
-	if err := whiteboardFolder(f.root, f.key).Update(nil, func(board *wswhiteboard.State) error {
-		board.Topics[0].Body = "after-marker"
+	if err := f.s.sessions.mutateRecord(f.key, partWhiteboard, func(r *sessionRecord) error {
+		r.Whiteboard.Items[0].Title = "after-marker"
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if readFingerprint(t, src, reg) == fingerprint {
-		t.Fatal("folder-only change kept the dashboard fingerprint")
+		t.Fatal("DB change kept dashboard fingerprint")
 	}
 	next := readPageOK(t, src, reg)
-	if next.Seq != first.Seq || !strings.Contains(string(next.Board.Board), "after-marker") || !strings.Contains(string(next.Board.Board), "before-marker") || boardRenders(src) != beforeRenders+1 {
-		t.Fatalf("equal-sequence folder change did not invalidate the dashboard memo: seq %d, renders %d", next.Seq, boardRenders(src))
-	}
-}
-
-// The board watch list comes from the folder path alone: a render lists no
-// directory and stats no topic file, whatever the folder holds (here nothing).
-func TestWhiteboardBoardWatchListsNoDirectory(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "never-created")
-	var got []string
-	watchWhiteboardFiles(dir, func(path string) { got = append(got, path) })
-	if want := []string{filepath.Join(dir, "meta.json"), filepath.Join(dir, "committed.json")}; !slices.Equal(got, want) {
-		t.Fatalf("watch list = %v, want %v", got, want)
+	if next.Seq != first.Seq || !strings.Contains(string(next.Board.Board), "after-marker") || boardRenders(src) != beforeRenders+1 {
+		t.Fatalf("equal-sequence DB change did not invalidate dashboard memo: seq %d, renders %d", next.Seq, boardRenders(src))
 	}
 }
 
@@ -405,7 +371,7 @@ func TestWhiteboardGenericMutationKeepsEntryLocatorsAfterRestart(t *testing.T) {
 	at := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
 	apply := func(commands string) {
 		t.Helper()
-		if err := newSessionStore().mutateRecord(f.key, partWhiteboard, func(r *sessionRecord) error {
+		if err := f.s.sessions.mutateRecord(f.key, partWhiteboard, func(r *sessionRecord) error {
 			_, problems := wswhiteboard.Apply(r.Whiteboard, commands, wswhiteboard.Env{Now: at})
 			if len(problems) > 0 {
 				return fmt.Errorf("apply: %v", problems)
@@ -416,7 +382,7 @@ func TestWhiteboardGenericMutationKeepsEntryLocatorsAfterRestart(t *testing.T) {
 		}
 	}
 	apply(`<wb:topic name="t"><wb:log>same text</wb:log><wb:log>same text</wb:log><wb:panel recap="version one">first payload</wb:panel></wb:topic>`)
-	first, err := newSessionStore().readWhiteboard(f.key)
+	first, err := f.s.sessions.readWhiteboard(f.key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +395,8 @@ func TestWhiteboardGenericMutationKeepsEntryLocatorsAfterRestart(t *testing.T) {
 		t.Fatalf("default event metadata changed: %+v", entries[1])
 	}
 	apply(`<wb:topic name="t"><wb:panel id="p1" recap="version two">second payload</wb:panel></wb:topic>`)
-	restarted := NewServer(f.root, "restart")
+	f.s = restartTestBoardOwner(t, f.s, f.root, "restart")
+	restarted := f.s
 	rec, err := restarted.sessions.readWhiteboard(f.key)
 	if err != nil {
 		t.Fatal(err)
@@ -452,14 +419,18 @@ func TestWhiteboardGenericMutationKeepsEntryLocatorsAfterRestart(t *testing.T) {
 func TestWhiteboardCommittedStoreNeverFallsBackToLegacy(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	legacyPath, original := installLegacyWhiteboardForTest(t, f, "split", legacyWhiteboardJSON)
-	f.update(t, `<wb:topic name="new"><wb:log>committed folder state</wb:log></wb:topic>`)
-	if err := os.Remove(filepath.Join(f.pageDir(), "meta.json")); err != nil {
+	f.update(t, `<wb:topic name="new"><wb:log>committed DB state</wb:log></wb:topic>`)
+	if err := f.s.sessions.boards.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if resp := f.call(t, "whiteboard.query", map[string]any{}); !isToolError(resp) || !strings.Contains(toolText(t, resp), "refusing legacy fallback") {
-		t.Fatalf("missing committed metadata must not resurrect the old board: %s", resp)
+	if err := os.Remove(filepath.Join(f.pageDir(), ".board.sqlite")); err != nil {
+		t.Fatal(err)
+	}
+	f.s = newTestBoardOwner(t, f.root, "restart")
+	if resp := f.call(t, "whiteboard.query", map[string]any{}); !isToolError(resp) || !strings.Contains(toolText(t, resp), "rollback") {
+		t.Fatalf("missing DB must not resurrect old board: %s", resp)
 	}
 	if !bytes.Equal(readFileForTest(t, legacyPath), original) {
-		t.Fatal("failed recovery changed the rollback snapshot")
+		t.Fatal("failed recovery changed rollback snapshot")
 	}
 }

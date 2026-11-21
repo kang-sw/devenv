@@ -33,7 +33,7 @@ func ageTree(t *testing.T, dir string) {
 // its cached files. The cache counters are served.
 func TestDashboardRecordCacheServesUnchangedParts(t *testing.T) {
 	f := newWhiteboardFixture(t)
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, f.s.sessions.boards)
 	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
 	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>q one</wb:title></wb:add></wb:topic>`)
 	d, err := src.store.dirs()
@@ -94,6 +94,7 @@ func TestDashboardRecordCacheServesUnchangedParts(t *testing.T) {
 // this session's own entry; a contact's own entry is the contacts stamp's.
 func TestDashboardReplyRegistryKeysTheBoardByWhatItShows(t *testing.T) {
 	hf := newHistoryFixture(t, time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC))
+	hf.serverB = newTestBoardOwner(t, hf.root, "test")
 	if out := callToolWithKey(t, hf.serverB, 40, hf.keyB, "whiteboard.update", map[string]any{"commands": `<wb:topic name="t"><wb:add class="technical"><wb:title>q</wb:title></wb:add></wb:topic>`}); strings.Contains(out, "error") {
 		t.Fatalf("whiteboard.update: %s", out)
 	}
@@ -104,7 +105,7 @@ func TestDashboardReplyRegistryKeysTheBoardByWhatItShows(t *testing.T) {
 		t.Fatal("no record for B")
 	}
 	reg := wsdashboard.Registration{ReplyID: replyB, Project: recB.Root}
-	src := dashboardPageSource(t, nil)
+	src := dashboardPageSource(t, nil, hf.serverB.sessions.boards)
 	edit := func(fn func(st *wsmailbox.ReplyStore)) {
 		t.Helper()
 		if err := (wsmailbox.Paths{}).Store().WithReplyLock(func(st *wsmailbox.ReplyStore) error {

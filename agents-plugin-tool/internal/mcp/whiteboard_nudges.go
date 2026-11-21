@@ -50,9 +50,11 @@ type WhiteboardNudges struct {
 	// Discovery is serialized by run; deliveryGate deliberately never uses it.
 	known       map[string]nudgeKeyIdentity // collision evidence retained between recovery scans
 	identities  map[string]nudgeIdentity
-	boardStamps map[nudgeTarget]os.FileInfo
 	stat        func(string) (os.FileInfo, error)
 	read        recordFileReader
+	stores      *WhiteboardStores
+	ownStores   bool
+	storesClose sync.Once
 }
 
 type nudgeIdentity struct {
@@ -67,23 +69,33 @@ type nudgeKeyIdentity struct{ Root, Scope, Parent string }
 // not promote it to cached evidence until its metadata is older than this gap.
 const nudgeIdentityQuietPeriod = 2 * time.Second
 
-func NewWhiteboardNudges(dir string, agents WhiteboardNudgeAgents, log io.Writer) *WhiteboardNudges {
+func NewWhiteboardNudges(dir string, agents WhiteboardNudgeAgents, log io.Writer, stores ...*WhiteboardStores) *WhiteboardNudges {
 	if log == nil {
 		log = io.Discard
 	}
-	return &WhiteboardNudges{cache: filepath.Dir(dir), dir: dir, agents: agents, log: log, now: time.Now, alive: wsstate.ProcessAlive, tickets: func(root string) wswhiteboard.TicketResolver { return &whiteboardTickets{root: root} }, interval: whiteboardReconcileInterval, stop: make(chan struct{}), exited: make(chan struct{}), changed: make(chan struct{}, 1), pending: map[nudgeTarget]bool{}, identities: map[string]nudgeIdentity{}}
+	n := &WhiteboardNudges{cache: filepath.Dir(dir), dir: dir, agents: agents, log: log, now: time.Now, alive: wsstate.ProcessAlive, tickets: func(root string) wswhiteboard.TicketResolver { return &whiteboardTickets{root: root} }, interval: whiteboardReconcileInterval, stop: make(chan struct{}), exited: make(chan struct{}), changed: make(chan struct{}, 1), pending: map[nudgeTarget]bool{}, identities: map[string]nudgeIdentity{}}
+	if len(stores) > 0 && stores[0] != nil {
+		n.stores = stores[0]
+	} else {
+		n.stores, n.ownStores = NewWhiteboardStores(log), true
+	}
+	return n
 }
 
 // Poke is called only after a successful board transaction. A caller attached
 // to another cache root cannot cause discovery or delivery in this daemon.
 func (n *WhiteboardNudges) Poke(cacheHome, root, key string) {
-	cache, err := wsstate.CacheRoot(wsstate.Options{CacheHome: cacheHome})
-	// The cache may not have existed at construction; canonicalization then
-	// could not resolve a symlinked parent (notably macOS /var). Resolve both
-	// sides now, without changing the scheduler's stored paths or authority.
-	ownCache, ownErr := wsstate.CacheRoot(wsstate.Options{CacheHome: n.cache})
-	if err != nil || ownErr != nil || cache != ownCache || !sessionKeyFilenamePattern.MatchString(key) || !filepath.IsAbs(root) {
+	if !sessionKeyFilenamePattern.MatchString(key) || !filepath.IsAbs(root) {
 		return
+	}
+	// The daemon already has the scheduler's cache path. Other callers may
+	// spell it with a symlinked parent, which can only resolve once it exists.
+	if cacheHome != n.cache {
+		cache, err := wsstate.CacheRoot(wsstate.Options{CacheHome: cacheHome})
+		ownCache, ownErr := wsstate.CacheRoot(wsstate.Options{CacheHome: n.cache})
+		if err != nil || ownErr != nil || cache != ownCache {
+			return
+		}
 	}
 	n.mu.Lock()
 	n.pending[nudgeTarget{key, root}] = true
@@ -99,6 +111,9 @@ func (n *WhiteboardNudges) Close() {
 	n.close.Do(func() { close(n.stop) })
 	n.start.Do(func() { close(n.exited) })
 	<-n.exited
+	if n.ownStores {
+		n.storesClose.Do(func() { _ = n.stores.Close() })
+	}
 }
 
 func (n *WhiteboardNudges) dirs() sessionDirs {
@@ -200,15 +215,10 @@ func (n *WhiteboardNudges) discoverRecord(d sessionDirs, key string, prior nudge
 }
 
 // Unlike sessionStore.dirs/listKeys this tolerates either root being absent
-// without creating it. A registry remnant or arbitrary board folder is never
-// an authority to recover/mint a missing key.
+// without creating it. Discovery schedules identities, not evidence that a
+// board exists; process resolves that through the registry without creation.
 func (n *WhiteboardNudges) discover() map[nudgeTarget]time.Time {
 	d := n.dirs()
-	stat := n.stat
-	if stat == nil {
-		stat = wsstate.Stat
-	}
-	n.boardStamps = map[nudgeTarget]os.FileInfo{}
 	keys := map[string]*nudgeListing{}
 	splitOther := map[string]bool{}
 	listing := func(key string) *nudgeListing {
@@ -282,17 +292,7 @@ func (n *WhiteboardNudges) discover() map[nudgeTarget]time.Time {
 			continue
 		}
 		associations[wsmailbox.ReplyID(key)]++
-		t := nudgeTarget{key, r.Root}
-		dir := whiteboardFolder(t.root, t.key).Dir
-		for _, name := range []string{"meta.json", "pending.json", "committed.json"} {
-			if info, err := stat(filepath.Join(dir, name)); err == nil {
-				out[t] = time.Time{}
-				if name == "meta.json" && info.Mode().IsRegular() {
-					n.boardStamps[t] = info
-				}
-				break
-			}
-		}
+		out[nudgeTarget{key, r.Root}] = time.Time{}
 	}
 	nudgeSuppressCollisions(out, associations)
 	return out
@@ -308,14 +308,14 @@ func nudgeSuppressCollisions(out map[nudgeTarget]time.Time, associations map[str
 	}
 }
 
-// discoverTarget checks only a poked identity and board. Collision checks use
+// discoverTarget checks only a poked identity. Collision checks use
 // the in-memory discovery evidence, never an enumeration of unrelated keys.
-func (n *WhiteboardNudges) discoverTarget(t nudgeTarget) (os.FileInfo, bool) {
+func (n *WhiteboardNudges) discoverTarget(t nudgeTarget) bool {
 	r, stamp, ok := n.discoverRecord(n.dirs(), t.key, n.identities[t.key], nil)
 	if !ok {
 		delete(n.identities, t.key)
 		delete(n.known, t.key)
-		return nil, false
+		return false
 	}
 	if n.known == nil {
 		n.known = map[string]nudgeKeyIdentity{}
@@ -327,23 +327,12 @@ func (n *WhiteboardNudges) discoverTarget(t nudgeTarget) (os.FileInfo, bool) {
 		delete(n.identities, t.key)
 	}
 	if r.Scope != string(roleLead) || r.Parent != "" || r.Root != t.root {
-		return nil, false
+		return false
 	}
 	if !n.uniqueTarget(t) {
-		return nil, false
+		return false
 	}
-	stat := n.stat
-	if stat == nil {
-		stat = wsstate.Stat
-	}
-	for _, name := range []string{"meta.json", "pending.json", "committed.json"} {
-		if info, err := stat(filepath.Join(whiteboardFolder(t.root, t.key).Dir, name)); err == nil {
-			return info, true
-		} else if !os.IsNotExist(err) {
-			return nil, false
-		}
-	}
-	return nil, false
+	return true
 }
 
 func (n *WhiteboardNudges) uniqueTarget(t nudgeTarget) bool {
@@ -414,47 +403,57 @@ func (n *WhiteboardNudges) deliveryGate(t nudgeTarget) func() bool {
 }
 
 func (n *WhiteboardNudges) process(t nudgeTarget, now time.Time) time.Time {
+	next, _ := n.processBoard(t, now)
+	return next
+}
+
+type nudgePresence uint8
+
+const (
+	nudgeUnknown nudgePresence = iota
+	nudgeAbsent
+	nudgePresent
+)
+
+func (n *WhiteboardNudges) processBoard(t nudgeTarget, now time.Time) (time.Time, nudgePresence) {
 	gate := n.deliveryGate(t)
 	store := (wsmailbox.Paths{State: wsstate.Options{CacheHome: n.cache}}).Store()
 	var tickets wswhiteboard.TicketResolver
 	if n.tickets != nil {
 		tickets = n.tickets(t.root)
 	}
-	next, err := whiteboardFolder(t.root, t.key).Notify(wsmailbox.ReplyID(t.key), now, gate, func(message string) error {
-		return store.PostSystem(wsmailbox.ReplyID(t.key), wsmailbox.SystemLabel, message, now)
-	}, wswake.Mailbox.Wake, tickets)
+	var next time.Time
+	presence := nudgeAbsent
+	err := n.stores.use(t.root, t.key, nil, false, func(slot *whiteboardSlot) error {
+		if slot.board == nil {
+			return nil
+		}
+		presence = nudgePresent
+		var err error
+		next, err = slot.board.Notify(wsmailbox.ReplyID(t.key), now, gate, func(message string) error {
+			return store.PostSystem(wsmailbox.ReplyID(t.key), wsmailbox.SystemLabel, message, now)
+		}, wswake.Mailbox.Wake, tickets)
+		return err
+	})
 	if err != nil {
 		fmt.Fprintf(n.log, "whiteboard nudges: %s: %v\n", wsmailbox.ReplyID(t.key), err)
 	}
 	// Due-but-ineligible and failed delivery retry at recovery cadence, never
 	// spin a zero timer or advance a receipt. Precise future deadlines stay exact.
 	if err != nil || !next.IsZero() && !next.After(now) {
-		return now.Add(n.interval)
-	}
-	return next
-}
-
-// Reuse discovery's existing meta stat; never use it as delivery authority.
-// Transactions publish session meta last, but a crash with pending intent, a
-// topic-only external edit, or a ticket transition needs the recovery pass.
-func nudgeReconcile(boards map[nudgeTarget]time.Time, stamps map[nudgeTarget]os.FileInfo, found map[nudgeTarget]time.Time, current map[nudgeTarget]os.FileInfo, recovery bool) (map[nudgeTarget]time.Time, map[nudgeTarget]os.FileInfo) {
-	for t := range found {
-		old, known := boards[t]
-		a, b := stamps[t], current[t]
-		// SameFile can open both files on Windows. Size and mtime alone are
-		// only a hint; recovery covers equal-stamp replacements and races.
-		if known && !recovery && a != nil && b != nil && a.Mode() == b.Mode() && a.Size() == b.Size() && a.ModTime().Equal(b.ModTime()) && time.Since(b.ModTime()) > nudgeIdentityQuietPeriod {
-			found[t] = old
+		if err != nil {
+			presence = nudgeUnknown
 		}
+		return now.Add(n.interval), presence
 	}
-	return found, current
+	return next, presence
 }
 
 func (n *WhiteboardNudges) run() {
 	defer close(n.exited)
 	scan := n.now()
 	boards := map[nudgeTarget]time.Time{}
-	stamps := map[nudgeTarget]os.FileInfo{}
+	presence := map[nudgeTarget]nudgePresence{}
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	for {
@@ -479,7 +478,17 @@ func (n *WhiteboardNudges) run() {
 		recovery := !now.Before(scan)
 		if recovery {
 			found := n.discover()
-			boards, stamps = nudgeReconcile(boards, stamps, found, n.boardStamps, true)
+			for t := range presence {
+				if _, ok := found[t]; !ok {
+					delete(presence, t)
+				}
+			}
+			boards = found
+			for t := range boards {
+				if presence[t] == nudgeAbsent && !pending[t] {
+					delete(boards, t)
+				}
+			}
 			scan = now.Add(whiteboardNudgeRecoveryInterval)
 		}
 		for t := range pending {
@@ -489,11 +498,11 @@ func (n *WhiteboardNudges) run() {
 				}
 				continue
 			}
-			if stamp, ok := n.discoverTarget(t); ok {
-				boards[t], stamps[t] = time.Time{}, stamp
+			if n.discoverTarget(t) {
+				boards[t] = time.Time{}
 			} else {
 				delete(boards, t)
-				delete(stamps, t)
+				delete(presence, t)
 			}
 		}
 		// Hash each known identity once, not once for every scheduled board.
@@ -504,7 +513,7 @@ func (n *WhiteboardNudges) run() {
 			// too, not just the newly poked one. Uniqueness is RAM-only.
 			if associations[wsmailbox.ReplyID(t.key)] > 1 {
 				delete(boards, t)
-				delete(stamps, t)
+				delete(presence, t)
 				continue
 			}
 			if due.IsZero() || !now.Before(due) {
@@ -523,7 +532,12 @@ func (n *WhiteboardNudges) run() {
 				return
 			default:
 			}
-			due := n.process(t, now)
+			due, state := n.processBoard(t, now)
+			presence[t] = state
+			if state == nudgeAbsent {
+				delete(boards, t)
+				continue
+			}
 			if due.IsZero() {
 				// Zero means no deadline, not "process again on every wake".
 				due = time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
