@@ -80,16 +80,21 @@ type conv struct {
 	heldKinds map[string]bool
 
 	// Compaction state is loop-owned, never persisted per observation.
-	compactPending                                                               *compactRequest
-	compacting, compactResume, compactCommand                                    bool
-	compactC                                                                     <-chan time.Time
-	compactStop                                                                  func()
-	compactNote                                                                  string
-	compactAdvisory, compactHard                                                 wsconfig.Threshold
-	compactTokens, compactWindow                                                 float64
-	compactPrevTokens, compactPrevWindow                                         int64
-	compactGen                                                                   uint64
-	compactLoaded                                                                bool
+	compactPending                            *compactRequest
+	compacting, compactResume, compactCommand bool
+	compactC                                  <-chan time.Time
+	compactStop                               func()
+	compactNote                               string
+
+	// A nudge and any requested post-compaction continuation have no parent result.
+	compactNudge                               compactionNudge
+	compactInternalTurn, compactResumeInternal bool
+
+	compactAdvisory, compactHard                                                                                   wsconfig.Threshold
+	compactTokens, compactWindow                                                                                   float64
+	compactPrevTokens, compactPrevWindow                                                                           int64
+	compactGen                                                                                                     uint64
+	compactLoaded                                                                                                  bool
 	compactUsageFresh, compactAdvised, compactM1Issued, compactM2Issued, compactHardIssued, compactAdvisoryEnabled bool
 	compactAwaitTurn                                                                                               bool
 
@@ -121,10 +126,10 @@ type conv struct {
 	modelWaitBackoffFence atomic.Uint32
 
 	// loop-owned, except registration timing below.
-	events       <-chan Event
-	idle         *time.Timer
-	idleAfter    time.Duration
-	bgGraceTimer *time.Timer
+	events          <-chan Event
+	idle            *time.Timer
+	idleAfter       time.Duration
+	bgGraceTimer    *time.Timer
 	dirtyModel      bool
 	dirtyEffort     bool
 	dirtyMode       bool
@@ -410,7 +415,7 @@ func (c *conv) tellRefusedWake(mail []ClaimedMail) {
 // through its steer handle, a spawned child through the acknowledged
 // report path (reportSteerer) that keeps its report covering the message.
 func (c *conv) steersMail() bool {
-	if !c.turn || c.proc == nil || c.replaying || c.wrapHold || c.closed || c.hidden || c.compacting || c.compactCommand {
+	if !c.turn || c.proc == nil || c.replaying || c.wrapHold || c.closed || c.hidden || c.compacting || c.compactCommand || c.compactInternalTurn {
 		return false
 	}
 	c.mu.Lock()
@@ -478,7 +483,7 @@ func (c *conv) inboxChanged() {
 // a backend that takes no message mid-turn, or a rejoin that cannot tell
 // whether the turn runs (wrapHold), keeps it held.
 func (c *conv) steer() {
-	if !c.turn || c.proc == nil || c.replaying || c.wrapHold || c.closed || c.hidden || c.compacting || c.compactCommand {
+	if !c.turn || c.proc == nil || c.replaying || c.wrapHold || c.closed || c.hidden || c.compacting || c.compactCommand || c.compactInternalTurn {
 		return
 	}
 	if !c.rec.Lead {
@@ -591,6 +596,7 @@ func (c *conv) loop() {
 			if c.idleNow() {
 				c.armIdle()
 				c.restartIfDue()
+				c.kickCompactionNudge()
 			}
 		case <-spawnC:
 			c.spawnTimer, c.spawnNext = nil, time.Time{}
@@ -622,6 +628,7 @@ func (c *conv) loop() {
 			if !c.turn {
 				c.armIdle()
 				c.restartIfDue()
+				c.kickCompactionNudge()
 			}
 		case <-compactC:
 			c.compactTimedOut()
@@ -1158,6 +1165,28 @@ func (c *conv) kick() {
 	if c.compactIdle() {
 		return
 	}
+	c.kickInput()
+}
+
+func (c *conv) kickCompactionNudge() {
+	if c.compactionNudgeReady() && !c.hasActiveDescendants() {
+		c.kick()
+	}
+}
+
+func (c *conv) kickInput() {
+	if c.compactionNudgeReady() && len(c.rec.Mail) == 0 {
+		// Claim a mailbox wake already queued before deciding there is
+		// no ordinary input. mailChanged kicks when there is claimed mail.
+		select {
+		case <-c.mailC:
+			c.mailChanged()
+			if c.turn || c.proc == nil || len(c.rec.Mail) > 0 {
+				return
+			}
+		default:
+		}
+	}
 	c.mu.Lock()
 	held, err := wsinbox.Held(c.inbox)
 	if err == nil {
@@ -1170,6 +1199,9 @@ func (c *conv) kick() {
 	reports := c.rec.Reports
 	if (err != nil || len(held) == 0) && len(mail) == 0 && len(c.rec.Queued) == 0 && len(reports) == 0 {
 		c.voidCancelled()
+		if err == nil {
+			c.sendCompactionNudge()
+		}
 		return
 	}
 	if c.proc == nil {
@@ -1219,7 +1251,10 @@ func (c *conv) kick() {
 		// A cancel took the message after the start: the process waits for
 		// input like after a turn.
 		c.voidCancelled()
-		c.armIdle()
+		c.sendCompactionNudge()
+		if !c.turn {
+			c.armIdle()
+		}
 		return
 	}
 	if len(recs) > 0 {
@@ -1285,7 +1320,9 @@ func (c *conv) kick() {
 	}
 	if ordinary {
 		c.compactNote = ""
+		c.consumeCompactionNudge()
 		c.compactResume = false
+		c.compactResumeInternal = false
 		c.startModelWait()
 	}
 	c.sendRetried = false

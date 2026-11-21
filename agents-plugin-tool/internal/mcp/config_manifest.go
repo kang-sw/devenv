@@ -174,6 +174,10 @@ func parseConfigManifest(path string, builtinKeys map[string]struct{}, namespace
 	if err != nil {
 		return "", nil, fmt.Errorf("read manifest: %w", err)
 	}
+	return parseConfigManifestBytes(path, data, builtinKeys, namespaces)
+}
+
+func parseConfigManifestBytes(path string, data []byte, builtinKeys map[string]struct{}, namespaces map[string]string) (string, []declaredConfigKey, error) {
 	var file configManifestFile
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()

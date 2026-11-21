@@ -32,6 +32,9 @@ func pageFuncs(lang string, icons map[string]bool) template.FuncMap {
 			}
 			return template.HTML(`<svg class="i" aria-hidden="true"><use href="#i-` + name + `"/></svg>`), nil
 		},
+		"settingsgear": func(scope, target, worktree string) settingsGear {
+			return settingsGear{scope, target, worktree}
+		},
 		"region":   renderRegionElement,
 		"clock":    clockText,
 		"spanText": spanText,
@@ -83,7 +86,7 @@ func pageFuncs(lang string, icons map[string]bool) template.FuncMap {
 		// i18n the inline script giving the page scripts their table.
 		"lang":  func() string { return effectiveLang(lang) },
 		"langs": wsi18n.Languages,
-		"i18n":  func() template.JS { return wsi18n.Script(lang) },
+		"i18n":  func() template.JS { return wsi18n.ScriptExcept(lang, "js.settings.") },
 		// pwa is a page head's manifest link and theme-color metas (pwa.go).
 		"pwa": pwaHead,
 		// repoURL is the Settings footer's link to the ws repository.

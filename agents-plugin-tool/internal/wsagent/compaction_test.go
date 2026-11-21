@@ -1,6 +1,7 @@
 package wsagent
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -69,21 +70,21 @@ func TestCompactionAdvisoryOptOutKeepsHardThreshold(t *testing.T) {
 
 func TestCompactionDescriptors(t *testing.T) {
 	for _, tc := range []struct {
-		h                              string
-		p                              CompactionProtocol
-		lead, worker, signals, detects bool
+		h                                              string
+		p                                              CompactionProtocol
+		lead, worker, signals, detects, promptPersists bool
 	}{
-		{BackendClaude, ClaudeCatalog().Compaction, true, false, true, true},
-		{BackendPi, *PiCompaction(), true, true, true, true},
-		{BackendCodex, CodexCatalog().Compaction, true, true, false, false},
-		{BackendAgy, AgyCatalog().Compaction, true, true, false, true},
+		{BackendClaude, ClaudeCatalog().Compaction, true, true, true, true, true},
+		{BackendPi, *PiCompaction(), true, true, true, true, true},
+		{BackendCodex, CodexCatalog().Compaction, true, true, true, true, false},
+		{BackendAgy, AgyCatalog().Compaction, true, true, false, true, true},
 	} {
 		t.Run(tc.h, func(t *testing.T) {
 			if tc.p.LeadCommand != tc.lead || tc.p.WorkerCommand != tc.worker || tc.p.Lifecycle != tc.signals || tc.p.DetectsLifecycle() != tc.detects {
 				t.Fatal(tc.p)
 			}
-			if tc.detects && !tc.p.PromptPersists {
-				t.Fatal("verified appended prompt must survive")
+			if tc.p.PromptPersists != tc.promptPersists {
+				t.Fatalf("appended prompt persistence = %v, want %v", tc.p.PromptPersists, tc.promptPersists)
 			}
 			if tc.p.LegacyKey("compaction.worker_advisory") != "" || tc.p.LegacyKey("compaction.worker_hard") != "" {
 				t.Fatal("lead legacy mapped to worker")
@@ -675,51 +676,41 @@ func TestCompactionNeverWedgesOnPiUnknownEndTurnOrTimeout(t *testing.T) {
 	})
 }
 
-func TestCompactionNudgesAndMidTurnAutoDoNotStartContinueTurn(t *testing.T) {
-	// 2a & 2b: advisory and hard-limit unsupported fallback queue note without starting a turn,
-	// and a harness lacking Lifecycle is not told to call ws/compact.
+func TestCompactionUnsupportedNudgesStayOnOrdinaryInput(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		backend     string
-		catalog     *HarnessProfile
-		tokens      int64
-		wantCompact bool
+		name       string
+		backend    string
+		compaction CompactionProtocol
+		lead       bool
+		tokens     int64
 	}{
-		{"claude-advisory", BackendClaude, ClaudeCatalog(), 60000, true},
-		{"agy-advisory", BackendAgy, AgyCatalog(), 60000, true},
-		{"codex-advisory", BackendCodex, CodexCatalog(), 60000, false},
-		{"codex-hard-fallback", BackendCodex, CodexCatalog(), 90000, false},
+		{"worker-command-unavailable", BackendClaude, CompactionProtocol{LeadCommand: true, Lifecycle: true}, false, 60000},
+		{"lifecycle-unavailable-advisory", BackendCodex, CompactionProtocol{LeadCommand: true}, true, 60000},
+		{"lifecycle-unavailable-hard", BackendCodex, CompactionProtocol{LeadCommand: true}, true, 90000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := NewRunner(Options{Backends: map[string]BackendRegistration{tc.backend: {Catalog: tc.catalog}}})
+			r := NewRunner(Options{Backends: map[string]BackendRegistration{tc.backend: {NativeCompaction: &tc.compaction}}})
 			c := &conv{
 				r:                      r,
-				rec:                    Record{Backend: tc.backend, Lead: true, WSKey: "k"},
+				rec:                    Record{Backend: tc.backend, Lead: tc.lead, WSKey: "k"},
 				compactAdvisory:        wsconfig.Threshold{Percent: 50},
 				compactHard:            wsconfig.Threshold{Percent: 80},
 				compactAdvisoryEnabled: true,
 			}
-			n := tc.tokens
-			c.observeCompaction(wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &n, Window: 100000}})
-			if c.compactIdle() {
+			usage := compactionUsage(tc.tokens)
+			c.observeCompaction(*usage.Live)
+			if c.compactIdle() || c.compactNudge.standalone || c.compactResume {
 				t.Fatalf("%s started a turn on nudge", tc.name)
 			}
-			if c.compactResume {
-				t.Fatalf("%s set compactResume=true", tc.name)
-			}
-			if c.compactNote == "" {
-				t.Fatalf("%s queued no note", tc.name)
-			}
-			if got := strings.Contains(c.compactNote, "ws/compact"); got != tc.wantCompact {
-				t.Fatalf("%s ws/compact mention = %v, want %v; note=%q", tc.name, got, tc.wantCompact, c.compactNote)
-			}
-			if !strings.Contains(c.compactInput("real turn"), strings.TrimSpace(c.compactNote)) {
-				t.Fatalf("%s note did not ride on next real turn", tc.name)
+			input := c.compactInput("real turn")
+			if !strings.HasPrefix(input, "Context usage is ") || !strings.HasSuffix(input, "\n\nreal turn") || strings.Contains(input, "ws/compact") {
+				t.Fatalf("unsupported input = %q", input)
 			}
 		})
 	}
+}
 
-	// 2c: mid-turn native auto-compaction must not consume compactPending.resume.
+func TestCompactionMidTurnAutoPreservesPendingResume(t *testing.T) {
 	r := NewRunner(Options{Backends: map[string]BackendRegistration{BackendClaude: {Catalog: ClaudeCatalog()}}})
 	c := &conv{r: r, rec: Record{Backend: BackendClaude, Lead: true, WSKey: "k"}, turn: true}
 	c.compactPending = &compactRequest{resume: true}
@@ -730,6 +721,214 @@ func TestCompactionNudgesAndMidTurnAutoDoNotStartContinueTurn(t *testing.T) {
 	c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd, Trigger: wslive.TriggerAuto})
 	if c.compactResume {
 		t.Fatal("mid-turn auto-compaction armed continue turn")
+	}
+}
+
+func compactionUsage(tokens int64) Event {
+	return Event{Live: &wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &tokens, Window: 100000}}}
+}
+
+func TestCompactionAdvisoryTurnAtIdle(t *testing.T) {
+	h := compactionHarness(t)
+	id, holder := h.runLead("one")
+	c := h.runner.conv(id)
+	c.do(func() { c.handle(compactionUsage(55000)) })
+	if got := h.userInputs(holder); len(got) != 1 {
+		t.Fatalf("advisory sent mid-turn: %q", got)
+	}
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	eventually(t, "idle advisory", func() bool { return len(h.userInputs(holder)) == 2 })
+	got := h.userInputs(holder)
+	const advisory = "Context usage is 55000 tokens (55%); advisory point 50000 tokens (50%). Write durable state to your agenda, then call ws/compact at a safe boundary before continuing. No summary prose is requested."
+	if got[1] != advisory {
+		t.Fatalf("advisory turn = %q", got[1])
+	}
+	h.holders.out(holder, turnLines("sess-1", "u2", "advisory handled")...)
+	h.idle(id)
+	c.do(func() {
+		c.handle(compactionUsage(56000))
+		if !c.compactAdvised || c.compactResume {
+			t.Fatalf("advisory not consumed: advised=%v resume=%v", c.compactAdvised, c.compactResume)
+		}
+		c.handle(compactionUsage(75000))
+	})
+	got = h.userInputs(holder)
+	if len(got) != 3 || !strings.Contains(got[2], "compaction reminder 2/3") || strings.Contains(got[2], "Continue the work") {
+		t.Fatalf("expected one milestone turn after advisory: %q", got)
+	}
+	h.holders.out(holder, turnLines("sess-1", "u3", "milestone handled")...)
+	h.idle(id)
+	c.do(func() { c.handle(compactionUsage(76000)) })
+	if got := h.userInputs(holder); len(got) != 3 {
+		t.Fatalf("crossed milestone repeated: %q", got)
+	}
+}
+
+func TestCompactionAdvisoryYieldsToOrdinaryInput(t *testing.T) {
+	h := compactionHarness(t)
+	id, holder := h.runLead("one")
+	c := h.runner.conv(id)
+	c.do(func() { c.handle(compactionUsage(55000)) })
+	h.send(id, "queued ordinary input")
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	eventually(t, "ordinary turn carrying advisory", func() bool { return len(h.userInputs(holder)) == 2 })
+	if got := h.userInputs(holder)[1]; !strings.HasPrefix(got, "Context usage is 55000 tokens") || !strings.Contains(got, "\nqueued ordinary input\n") {
+		t.Fatalf("ordinary turn = %q", got)
+	}
+	h.holders.out(holder, turnLines("sess-1", "u2", "ordinary handled")...)
+	h.idle(id)
+	c.do(func() { c.handle(compactionUsage(56000)) })
+	if got := h.userInputs(holder); len(got) != 2 {
+		t.Fatalf("piggybacked advisory repeated: %q", got)
+	}
+}
+
+func TestCompactionLateAdvisoryYieldsToMailboxWake(t *testing.T) {
+	h := compactionHarness(t)
+	id, holder := h.runLead("one")
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	h.idle(id)
+	c := h.runner.conv(id)
+	c.do(func() {
+		h.mail.deliver(c.rec.WSKey, "mail that was already waiting")
+		c.handle(compactionUsage(55000))
+	})
+	got := h.userInputs(holder)
+	if len(got) != 2 || !strings.HasPrefix(got[1], "Context usage is 55000 tokens") || !strings.HasSuffix(got[1], "mail that was already waiting") {
+		t.Fatalf("advisory did not ride with queued mail: %q", got)
+	}
+}
+
+func TestCompactionAdvisoryYieldsToQueuedCompaction(t *testing.T) {
+	h := compactionHarness(t)
+	id, holder := h.runLead("one")
+	c := h.runner.conv(id)
+	c.do(func() { c.handle(compactionUsage(55000)) })
+	resume := false
+	if out := h.runner.Compact(h.record(id).WSKey, "", &resume); out.Status != "queued" {
+		t.Fatal(out)
+	}
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	eventually(t, "queued native compaction", func() bool { return len(h.userInputs(holder)) == 2 })
+	if got := h.userInputs(holder)[1]; got != "/compact" {
+		t.Fatalf("compaction sent %q", got)
+	}
+	c.do(func() { c.handle(compactionUsage(56000)) })
+	compactBoundary(h, id, holder)
+	h.idle(id)
+	if got := h.userInputs(holder); len(got) != 2 {
+		t.Fatalf("advisory escaped queued compaction: %q", got)
+	}
+}
+
+func TestCompactionFailedAdvisorySendKeepsCrossingUnlatched(t *testing.T) {
+	h := compactionHarness(t)
+	id, holder := h.runLead("one")
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	h.idle(id)
+	h.holders.failInputs("user", 1)
+	c := h.runner.conv(id)
+	c.do(func() {
+		c.handle(compactionUsage(75000))
+		if c.compactAdvised || c.compactM1Issued || c.compactM2Issued || c.compactNudge.text == "" {
+			t.Fatalf("failed send consumed the crossing: %+v", c.compactNudge)
+		}
+		c.kick()
+	})
+	if h.holders.opCount("stop "+holder) != 1 || h.state(id).Process {
+		t.Fatalf("failed advisory left a process or retried: %v", h.holders.opList())
+	}
+	h.send(id, "after failed advisory")
+	newHolder := h.holder(id)
+	if got := h.userInputs(newHolder); len(got) != 1 || !strings.Contains(got[0], "advisory point") || !strings.Contains(got[0], "after failed advisory") {
+		t.Fatalf("next ordinary turn lost the advisory: %q", got)
+	}
+}
+
+func TestCompactionAdvisoryWaitsForBackgroundWork(t *testing.T) {
+	h := compactionHarness(t)
+	id, holder := h.runLead("one")
+	c := h.runner.conv(id)
+	c.do(func() {
+		tasks := 1
+		c.handle(Event{BackgroundTasks: &tasks})
+		c.handle(compactionUsage(55000))
+	})
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	h.idle(id)
+	if got := h.userInputs(holder); len(got) != 1 {
+		t.Fatalf("advisory interrupted background work: %q", got)
+	}
+	c.do(func() { c.handle(Event{BackgroundTasks: new(int)}) })
+	if got := h.userInputs(holder); len(got) != 2 || !strings.Contains(got[1], "advisory point") {
+		t.Fatalf("background clearance did not send advisory: %q", got)
+	}
+}
+
+func TestCompactionAdvisoryWaitsForActiveDescendant(t *testing.T) {
+	h, _ := newFakePiRecoveryHarness(t)
+	reg := h.runner.opts.Backends[BackendClaude]
+	reg.Catalog = ClaudeCatalog()
+	h.runner.opts.Backends[BackendClaude] = reg
+	id, holder := h.runLead("one")
+	child, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "worker task", Tier: "medium", Parent: &ParentRef{Kind: ParentLead, ReplyID: id}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	childHolder := h.holder(child.ID)
+	c := h.runner.conv(id)
+	c.do(func() { c.handle(compactionUsage(55000)) })
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	h.idle(id)
+	if got := h.userInputs(holder); len(got) != 1 {
+		t.Fatalf("advisory interrupted descendant work: %q", got)
+	}
+	h.holders.out(childHolder, recoveryPiReply("worker finished")...)
+	eventually(t, "descendant settled and lead's advisory sent", func() bool {
+		return len(h.userInputs(holder)) == 2
+	})
+}
+
+func TestCompactionWorkerAdvisoryIsInternal(t *testing.T) {
+	h, got := newFakePiRecoveryHarness(t)
+	reg := h.runner.opts.Backends[BackendPi]
+	reg.NativeCompaction = PiCompaction()
+	h.runner.opts.Backends[BackendPi] = reg
+	child, holder := spawnRecoveryWorker(t, h)
+	c := h.runner.conv(child.ID)
+	h.holders.out(holder, recoveryPiReply("settled work")...)
+	eventually(t, "original report settled", func() bool { return len(got.list()) == 1 })
+	h.holders.out(holder, `{"type":"response","command":"get_session_stats","success":true,"data":{"contextUsage":{"tokens":55000,"contextWindow":100000}}}`)
+	eventually(t, "late idle Pi stats triggered advisory", func() bool { return len(h.holders.inputs(holder, "prompt")) == 2 })
+	c.do(func() {
+		if !c.turn || c.rec.TurnOpen || c.rec.LastTurn == nil || c.rec.LastTurn.Result.Message != "settled work" {
+			t.Fatalf("internal turn disturbed the settled result: open=%v result=%+v", c.rec.TurnOpen, c.rec.LastTurn)
+		}
+	})
+	h.holders.out(holder, recoveryPiReply("advisory reply")...)
+	h.idle(child.ID)
+	res, err := h.runner.Wait(context.Background(), child.ID, time.Second)
+	if err != nil || res.Status != TurnDone || res.Message != "settled work" || len(got.list()) != 1 {
+		t.Fatalf("internal turn changed result or parent reports: result=%+v err=%v reports=%+v", res, err, got.list())
+	}
+
+	c.do(func() { c.handle(compactionUsage(75000)) })
+	if out := h.runner.Compact(h.record(child.ID).WSKey, "", nil); out.Status != "queued" {
+		t.Fatal(out)
+	}
+	h.holders.out(holder, recoveryPiReply("compaction requested")...)
+	eventually(t, "native compaction from reminder", func() bool { return len(h.holders.inputs(holder, "compact")) == 1 })
+	h.holders.out(holder,
+		`{"type":"compaction_start","reason":"manual"}`,
+		`{"type":"compaction_end","reason":"manual"}`,
+		`{"type":"response","command":"compact","success":true}`,
+	)
+	eventually(t, "post-compaction continuation", func() bool { return len(h.holders.inputs(holder, "prompt")) == 4 })
+	h.holders.out(holder, recoveryPiReply("continuation handled")...)
+	h.idle(child.ID)
+	res, err = h.runner.Wait(context.Background(), child.ID, time.Second)
+	if err != nil || res.Message != "settled work" || len(got.list()) != 1 {
+		t.Fatalf("compaction continuation changed result or parent reports: result=%+v err=%v reports=%+v", res, err, got.list())
 	}
 }
 
@@ -1213,10 +1412,10 @@ func TestCompactionLiveReloadAndSteadyStateMemoryOnly(t *testing.T) {
 		if c.compactIdle() {
 			t.Fatal("advisory started a turn")
 		}
-		if !c.compactAdvised || !strings.Contains(c.compactNote, "advisory point 50000") {
-			t.Fatalf("lowered advisory did not apply live: advised=%v note=%q", c.compactAdvised, c.compactNote)
+		if !strings.Contains(c.compactNudge.text, "advisory point 50000") {
+			t.Fatalf("lowered advisory did not apply live: note=%q", c.compactNudge.text)
 		}
-		c.compactNote = ""
+		c.consumeCompactionNudge()
 	})
 
 	// Raise advisory to 75% and notify: 60% is now below 75%, so latch clears
@@ -1236,8 +1435,8 @@ func TestCompactionLiveReloadAndSteadyStateMemoryOnly(t *testing.T) {
 		if c.compactIdle() {
 			t.Fatal("advisory started a turn")
 		}
-		if !c.compactAdvised || !strings.Contains(c.compactNote, "advisory point 75000") {
-			t.Fatalf("raised advisory did not apply at 76%%: advised=%v note=%q", c.compactAdvised, c.compactNote)
+		if !strings.Contains(c.compactNudge.text, "advisory point 75000") {
+			t.Fatalf("raised advisory did not apply at 76%%: note=%q", c.compactNudge.text)
 		}
 	})
 
@@ -1321,25 +1520,28 @@ func TestCompactionMilestonesAndUsageContext(t *testing.T) {
 	// Below soft: nothing.
 	observe(51_293)
 	c.compactIdle()
-	if c.compactNote != "" || c.compactAdvised || c.compactM1Issued || c.compactM2Issued {
-		t.Fatalf("unexpected note below soft: %q", c.compactNote)
+	if c.compactNudge.text != "" || c.compactAdvised || c.compactM1Issued || c.compactM2Issued {
+		t.Fatalf("unexpected note below soft: %q", c.compactNudge.text)
+	}
+
+	deliver := func() string {
+		c.compactIdle()
+		text := c.compactNudge.text
+		c.consumeCompactionNudge()
+		return text
 	}
 
 	// Cross soft (118,800): advisory delivered, milestones unlatched.
 	observe(118_800)
-	c.compactIdle()
-	if !c.compactAdvised || c.compactM1Issued || c.compactM2Issued || !strings.Contains(c.compactNote, "advisory point 110000") {
-		t.Fatalf("soft crossing failed: advised=%v m1=%v m2=%v note=%q", c.compactAdvised, c.compactM1Issued, c.compactM2Issued, c.compactNote)
+	if text := deliver(); !c.compactAdvised || c.compactM1Issued || c.compactM2Issued || !strings.Contains(text, "advisory point 110000") {
+		t.Fatalf("soft crossing failed: advised=%v m1=%v m2=%v note=%q", c.compactAdvised, c.compactM1Issued, c.compactM2Issued, text)
 	}
-	c.compactNote = ""
 
 	// Cross m1 (140,400): 1/3 reminder delivered.
 	observe(140_400)
-	c.compactIdle()
-	if !c.compactM1Issued || c.compactM2Issued || !strings.Contains(c.compactNote, "reminder 1/3") || !strings.Contains(c.compactNote, "180000") {
-		t.Fatalf("m1 crossing failed: m1=%v m2=%v note=%q", c.compactM1Issued, c.compactM2Issued, c.compactNote)
+	if text := deliver(); !c.compactM1Issued || c.compactM2Issued || !strings.Contains(text, "reminder 1/3") || !strings.Contains(text, "180000") {
+		t.Fatalf("m1 crossing failed: m1=%v m2=%v note=%q", c.compactM1Issued, c.compactM2Issued, text)
 	}
-	c.compactNote = ""
 
 	// Re-arm m1 on usage drop below m1; soft stays latched.
 	observe(120_000)
@@ -1349,11 +1551,9 @@ func TestCompactionMilestonesAndUsageContext(t *testing.T) {
 
 	// Jump straight past m2 (163,800): only highest pending milestone (2/3) delivered, latching both m1 and m2.
 	observe(163_800)
-	c.compactIdle()
-	if !c.compactM1Issued || !c.compactM2Issued || !strings.Contains(c.compactNote, "reminder 2/3") || strings.Contains(c.compactNote, "reminder 1/3") {
-		t.Fatalf("jump to m2 failed: m1=%v m2=%v note=%q", c.compactM1Issued, c.compactM2Issued, c.compactNote)
+	if text := deliver(); !c.compactM1Issued || !c.compactM2Issued || !strings.Contains(text, "reminder 2/3") || strings.Contains(text, "reminder 1/3") {
+		t.Fatalf("jump to m2 failed: m1=%v m2=%v note=%q", c.compactM1Issued, c.compactM2Issued, text)
 	}
-	c.compactNote = ""
 
 	// CompactStart latches all, CompactEnd clears all.
 	c.compactEvent(wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactStart})

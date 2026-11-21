@@ -291,6 +291,104 @@ class AuthenticationTest(HolderTestCase):
         self.assertEqual(os.stat(holder.dir).st_mode & 0o777, 0o700)
 
 
+class RingTest(unittest.TestCase):
+    def test_undelivered_records_stay_until_sent(self):
+        cost = holder_mod.Record(0, "output", data=b"x").cost()
+        ring = holder_mod.Ring(2 * cost, 4 * cost)
+        for _ in range(4):
+            ring.append("output", "stdout", b"x")
+        self.assertEqual(ring.size, 4 * cost)
+        self.assertEqual(ring.first_seq(), 1)
+
+        ring.set_delivered_before(2)
+        self.assertEqual(ring.size, 3 * cost)
+        self.assertEqual(ring.first_seq(), 2)
+        self.assertIsNone(ring.items[0])
+
+        ring.set_delivered_before(4)
+        self.assertEqual(ring.size, 2 * cost)
+        self.assertEqual([r.seq for r in ring.items], [3, 4])
+        self.assertEqual(ring.head, 0)
+
+        # New output can replace already sent history without growing the ring.
+        ring.append("output", "stdout", b"x")
+        self.assertEqual(ring.size, 2 * cost)
+        self.assertEqual(ring.first_seq(), 4)
+
+    def test_ceiling_evicts_oldest_even_without_delivery(self):
+        cost = holder_mod.Record(0, "output", data=b"x").cost()
+        ring = holder_mod.Ring(cost, 3 * cost)
+        for _ in range(5):
+            ring.append("output", "stdout", b"x")
+        self.assertEqual(ring.size, 3 * cost)
+        self.assertEqual([r.seq for r in ring.batch(3, 10, 10 * cost)], [3, 4, 5])
+
+    def test_replay_reprotects_previously_sent_records(self):
+        cost = holder_mod.Record(0, "output", data=b"x").cost()
+        ring = holder_mod.Ring(cost, 2 * cost)
+        ring.append("output", "stdout", b"x")
+        ring.set_delivered_before(2)
+        ring.set_delivered_before(1)
+        ring.append("output", "stdout", b"x")
+        self.assertEqual(ring.first_seq(), 1)
+        self.assertEqual(ring.size, 2 * cost)
+
+    def test_newest_stays_even_when_it_exceeds_the_budget(self):
+        ring = holder_mod.Ring(64, 128)
+        ring.append("output", "stdout", b"x")
+        newest = ring.append("output", "stdout", b"x" * 128)
+        ring.set_delivered_before(ring.next_seq)
+        self.assertEqual(ring.first_seq(), newest.seq)
+        self.assertEqual(ring.batch(newest.seq, 10, 1024), [newest])
+
+
+class RingStreamTest(unittest.TestCase):
+    def test_large_pipe_line_reaches_a_slow_attachment_without_gaps(self):
+        record_bytes = 1 << 20
+        count = 100
+        base = 32 << 20
+        holder = holder_mod.Holder(".", ring_bytes=base, ring_ceiling_bytes=1 << 30)
+        writer, reader = socket.socketpair()
+        self.addCleanup(reader.close)
+        self.addCleanup(writer.close)
+        writer.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 32 << 10)
+        reader.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 32 << 10)
+        reader.settimeout(TIMEOUT)
+        att = holder_mod.Attachment(holder, writer)
+        with holder.cond:
+            holder.attachment = att
+            att.start_stream(1)
+        att.thread.start()
+        self.addCleanup(att.thread.join, TIMEOUT)
+        self.addCleanup(att.kill)
+
+        # The first socket send is in flight when the rest of the burst arrives.
+        # The reader holds off until the child could have emitted the whole line.
+        holder._append_output("stdout", [(b"x" * record_bytes, True)])
+        self.assertTrue(wait_until(lambda: att.cursor == 2))
+        for _ in range(count - 1):
+            holder._append_output("stdout", [(b"x" * record_bytes, True)])
+        holder._append_output("stdout", [(b"\n", False)])
+        with holder.cond:
+            buffered_size = holder.ring.size
+            self.assertEqual(holder.ring.delivered_before, 0)
+
+        with reader.makefile("rb") as stream:
+            for seq in range(1, count + 2):
+                msg = json.loads(stream.readline())
+                self.assertEqual(msg["event"], "output", msg.get("event"))
+                self.assertEqual(msg["seq"], seq)
+                self.assertEqual(msg.get("partial", False), seq <= count)
+                self.assertEqual(len(decode(msg)), record_bytes if seq <= count else 1)
+
+        self.assertGreater(buffered_size, base)
+        self.assertTrue(wait_until(lambda: holder.ring.delivered_before == count + 2))
+        with holder.cond:
+            self.assertLessEqual(holder.ring.size, base)
+            self.assertEqual(holder.ring.head, 0)
+            self.assertEqual(len(holder.ring.items), holder.ring.next_seq - holder.ring.first_seq())
+
+
 class RingReplayTest(HolderTestCase):
     def _filled_holder(self):
         # 200 lines of 10 bytes cost far more than the 2000-byte ring holds.

@@ -137,7 +137,13 @@ func builtinPromptOverrideDefaults() map[string]string {
 // deduped by pointId (the first non-empty desc wins) sorted by PointId. It is a
 // pure function (root in, data out) so it unit-tests without a Server.
 func scanOverridePoints(rsrcRoot fs.FS) ([]overridePointDecl, error) {
+	points, _, err := scanOverridePointsAndSeeds(rsrcRoot)
+	return points, err
+}
+
+func scanOverridePointsAndSeeds(rsrcRoot fs.FS) ([]overridePointDecl, map[string]string, error) {
 	descByPoint := map[string]string{}
+	seeds := make(map[string]string)
 	err := fs.WalkDir(rsrcRoot, ".", func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -149,7 +155,8 @@ func scanOverridePoints(rsrcRoot fs.FS) ([]overridePointDecl, error) {
 		if err != nil {
 			return err
 		}
-		for _, line := range strings.Split(string(data), "\n") {
+		lines := strings.Split(string(data), "\n")
+		for i, line := range lines {
 			pointId, desc, ok := parseOverrideOpenMarkerDesc(strings.TrimSpace(line))
 			if !ok {
 				continue
@@ -157,18 +164,23 @@ func scanOverridePoints(rsrcRoot fs.FS) ([]overridePointDecl, error) {
 			if existing, seen := descByPoint[pointId]; !seen || (existing == "" && desc != "") {
 				descByPoint[pointId] = desc
 			}
+			if _, seen := seeds[pointId]; !seen {
+				if end := overrideCloseIndex(lines, i); end >= 0 {
+					seeds[pointId] = applyOverrideMarkers(strings.Join(lines[i+1:end], "\n"), "", nil)
+				}
+			}
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	points := make([]overridePointDecl, 0, len(descByPoint))
 	for id, desc := range descByPoint {
 		points = append(points, overridePointDecl{PointId: id, Desc: desc})
 	}
 	sort.Slice(points, func(i, j int) bool { return points[i].PointId < points[j].PointId })
-	return points, nil
+	return points, seeds, nil
 }
 
 // buildOverrideLookup returns an overrideLookupFn backed by the session-anchored
@@ -278,31 +290,7 @@ func applyOverrideMarkers(body, harness string, lookup overrideLookupFn) string 
 			continue
 		}
 
-		// Scan forward for the matching close marker, tracking nesting depth so an
-		// inner same-or-other override block does not prematurely close the outer
-		// one. The close that matches this open is the first close (for any pointId)
-		// encountered at depth 0.
-		seedLines := make([]string, 0)
-		depth := 1
-		closeIdx := -1
-		for j := i + 1; j < len(lines); j++ {
-			jt := strings.TrimSpace(lines[j])
-			if _, openOK := parseOverrideMarkerPointId(jt, overrideOpenPrefix); openOK {
-				depth++
-				seedLines = append(seedLines, lines[j])
-				continue
-			}
-			if _, closeOK := parseOverrideMarkerPointId(jt, overrideClosePrefix); closeOK {
-				depth--
-				if depth == 0 {
-					closeIdx = j
-					break
-				}
-				seedLines = append(seedLines, lines[j])
-				continue
-			}
-			seedLines = append(seedLines, lines[j])
-		}
+		closeIdx := overrideCloseIndex(lines, i)
 
 		// Unclosed open marker: do NOT treat as a block. Emit the open line
 		// unchanged and continue scanning from the next line so no content is lost.
@@ -314,7 +302,7 @@ func applyOverrideMarkers(body, harness string, lookup overrideLookupFn) string 
 
 		// Recursively process the seed so any nested override block inside it is
 		// resolved and its marker lines are stripped (prevents orphaned markers).
-		seed := applyOverrideMarkers(strings.Join(seedLines, "\n"), harness, lookup)
+		seed := applyOverrideMarkers(strings.Join(lines[i+1:closeIdx], "\n"), harness, lookup)
 
 		// Resolve: harness-specific → all → seed.
 		resolved := seed
@@ -337,4 +325,22 @@ func applyOverrideMarkers(body, harness string, lookup overrideLookupFn) string 
 	}
 
 	return strings.Join(result, "\n")
+}
+
+// overrideCloseIndex pairs nested markers the same way for seed inspection
+// and playbook rendering, even when a close marker spells another point.
+func overrideCloseIndex(lines []string, start int) int {
+	depth := 1
+	for index := start + 1; index < len(lines); index++ {
+		line := strings.TrimSpace(lines[index])
+		if _, open := parseOverrideMarkerPointId(line, overrideOpenPrefix); open {
+			depth++
+		} else if _, close := parseOverrideMarkerPointId(line, overrideClosePrefix); close {
+			depth--
+			if depth == 0 {
+				return index
+			}
+		}
+	}
+	return -1
 }

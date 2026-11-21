@@ -793,7 +793,7 @@ func updateConfigFile(path string, mutate func(*Config) error) (Config, error) {
 			return nil, err
 		}
 		cfg.SchemaVersion = schemaVersion
-		payload, err := json.MarshalIndent(cfg, "", "  ")
+		payload, err := preserveConfigMembers(raw, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("encode config: %w", err)
 		}

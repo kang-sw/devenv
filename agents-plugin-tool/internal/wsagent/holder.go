@@ -72,12 +72,12 @@ const holderKindLead = "lead"
 const holderKindPiWorker = "pi-worker"
 const holderKindAgentWorker = "agent-worker"
 
-// leadRingBytes is the output ring of a lead conversation's holder. A
-// rejoin rebuilds the turn state from the ring, so it holds a long turn's
-// output whole: one agentic turn echoing large tool results outgrows the
-// holder's 4 MiB default. The holder fills it as output comes. Terminal
-// holders keep the manager's default.
-const leadRingBytes = 32 << 20
+// Hosted lead and worker holders retain output for rejoin and can grow
+// while the daemon is behind. Terminal holders keep the manager's default.
+const (
+	leadRingBytes        = 32 << 20
+	leadRingCeilingBytes = 1 << 30
+)
 
 // holderSession is the descriptor a lead conversation's holder records.
 type holderSession struct {
@@ -185,7 +185,13 @@ func (h *holderChild) start(p *streamProcess, cmd *exec.Cmd) error {
 	if err != nil {
 		return err
 	}
-	id, err := h.host.LaunchWith(wsholder.LaunchSpec{Session: raw, RingBytes: leadRingBytes, RingSkip: h.ringSkip, RingPulse: h.ringPulse})
+	id, err := h.host.LaunchWith(wsholder.LaunchSpec{
+		Session:          raw,
+		RingBytes:        leadRingBytes,
+		RingCeilingBytes: leadRingCeilingBytes,
+		RingSkip:         h.ringSkip,
+		RingPulse:        h.ringPulse,
+	})
 	if err != nil {
 		return fmt.Errorf("start a session holder: %w", err)
 	}

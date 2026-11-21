@@ -25,6 +25,10 @@
     OVERSHOOT_PX: 28,    // the flip's slide settles from this offset
     SPRING_MS: 300,      // hovering a dragged pane over a rail dot switches pages
     RAIL_WHEEL_MS: 140,  // one wheel tick on the rail is one page, debounced
+    RAIL_WHEEL_IDLE_MS: 180, // silence ends a continuous wheel stream
+    RAIL_WHEEL_MOUSE_PX: 48, // a large initial pixel event is a mouse notch
+    RAIL_WHEEL_STEP: 110, // accumulated touchpad pixels per page
+    RAIL_WHEEL_TOUCH_MS: 320, // cooldown absorbs touchpad momentum
     EPS: 2,              // px: a scroller within this of its limit is at it
     RATIO_MIN: 0.1,      // a split divider's ratio is clamped to this range
     RATIO_MAX: 0.9,
@@ -428,6 +432,37 @@
   // the last one having turned at last.
   function railStep(last, now) { return now - last >= C.RAIL_WHEEL_MS; }
 
+  // RailWheel converts wheel events into page directions without DOM state.
+  function RailWheel() {
+    this.acc = 0; this.last = -Infinity; this.lock = -Infinity;
+    this.continuous = false; this.lastPixelStep = -Infinity;
+  }
+  RailWheel.prototype.wheel = function (e) {
+    var dy = e.dy * (e.deltaMode === 1 ? 32 : e.deltaMode === 2 ? 400 : 1);
+    if (Math.abs(dy) < 1 || !dy) return 0;
+    var now = e.now, idle = now - this.last >= C.RAIL_WHEEL_IDLE_MS;
+    if (idle) { this.acc = 0; this.continuous = false; }
+    this.last = now;
+    if (this.acc && (this.acc > 0) !== (dy > 0)) this.acc = 0;
+    if (e.deltaMode === 0 && Math.abs(dy) < C.RAIL_WHEEL_MOUSE_PX) {
+      if (!idle && !this.continuous) {
+        this.lock = Math.max(this.lock, this.lastPixelStep + C.RAIL_WHEEL_TOUCH_MS);
+      }
+      this.continuous = true;
+    }
+    if (now < this.lock) return 0;
+    if (e.deltaMode !== 0 || (!this.continuous && Math.abs(dy) >= C.RAIL_WHEEL_MOUSE_PX)) {
+      this.acc = 0; this.lock = now + C.RAIL_WHEEL_MS;
+      this.lastPixelStep = e.deltaMode === 0 ? now : -Infinity;
+      return dy > 0 ? 1 : -1;
+    }
+    this.acc += dy;
+    if (Math.abs(this.acc) < C.RAIL_WHEEL_STEP) return 0;
+    var dir = this.acc > 0 ? 1 : -1;
+    this.acc = 0; this.lock = now + C.RAIL_WHEEL_TOUCH_MS;
+    return dir;
+  };
+
   return {
     C: C, PLUS: PLUS,
     refOf: refOf, leaf: leaf, isSplit: isSplit, clampRatio: clampRatio, normalize: normalize,
@@ -436,6 +471,6 @@
     dock: dock, undock: undock, append: append, place: place, swap: swap, movePage: movePage, setRatio: setRatio,
     position: position, activate: activate, neighbors: neighbors,
     reconcile: reconcile, flatPins: flatPins, load: load, record: record, layout: layout, zone: zone,
-    Gate: Gate, Hover: Hover, railStep: railStep, rubber: rubber
+    Gate: Gate, Hover: Hover, RailWheel: RailWheel, railStep: railStep, rubber: rubber
   };
 })());

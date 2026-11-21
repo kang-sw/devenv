@@ -389,9 +389,13 @@ const claudeSubagentTool = "Agent"
 // worker (testdata, claude_code_version).
 func ClaudeCatalog() *HarnessProfile {
 	return &HarnessProfile{
-		Compaction: CompactionProtocol{LeadCommand: true, Lifecycle: true, PromptPersists: true, LegacyAdvisory: "claude.compaction_advisory_percent", AdvisoryEnabled: "claude.compaction_advisory_enabled"},
-		Oldest:     "2.1.322",
-		Newest:     "2.1.327",
+		Compaction: CompactionProtocol{
+			LeadCommand: true, WorkerCommand: true, Lifecycle: true, PromptPersists: true,
+			LegacyAdvisory:  "claude.compaction_advisory_percent",
+			AdvisoryEnabled: "claude.compaction_advisory_enabled",
+		},
+		Oldest: "2.1.322",
+		Newest: "2.1.327",
 		Entries: []CapabilityEntry{
 			{Item: ItemSkillList, Grade: GradeUnsupported,
 				Source: "the init's skills field is not parsed (claudeInit)"},
@@ -399,8 +403,8 @@ func ClaudeCatalog() *HarnessProfile {
 				Source: "Claude Code's own skills: a lead keeps the user's plugins except the ws packages, whose manual arrives in its prompt (claudeLeadPluginArgs, composeLeadInstructions); a worker profile's plugin directories with Skills set (claudeArgs)"},
 			{Item: ItemCompaction, Role: RoleLead, Grade: GradeNative,
 				Source: "the dashboard's /compact reaches the harness as its typed line (processControls.runCommand); the mapper reads the compaction (claudeMapper)"},
-			{Item: ItemCompaction, Role: RoleWorker, Grade: GradeUnsupported,
-				Source: "a worker reports no command list (the initialize ask and leadInit are lead-only), so the dashboard refuses /compact; auto-compaction is the harness's own"},
+			{Item: ItemCompaction, Role: RoleWorker, Grade: GradeNative,
+				Source: "Claude Code 2.1.326 live worker stream-json probe: /compact emits status compacting and a manual compact_boundary with the Skill tool denied"},
 			{Item: ItemRewind, Grade: GradeUnsupported, Source: "no ws wiring"},
 			{Item: ItemToolRemoval, Role: RoleWorker, Grade: GradeNative, Values: []string{CatalogAnyValue},
 				Source: "--tools allowlist of the profile's built-in tools (claudeArgs)"},
@@ -445,13 +449,10 @@ var CodexPermissionModes = []string{"read-only", "workspace-write", "danger-full
 // fixtures (testdata/codex-0.160.0-*.jsonl). A worker shares the lead's
 // wiring except approval, where its write authority is auto-allowed and its
 // read-only authority is refused by Codex itself (codexWorkerMode). Sources
-// name the protocol wiring the adapter must deliver, including the
-// forthcoming compaction mapper.
+// name the protocol wiring the adapter delivers.
 func CodexCatalog() *HarnessProfile {
 	p := &HarnessProfile{
-		// Both live 0.170.0 attempts were refused at thread/start by the
-		// probe MCP override validation. No lifecycle/prompt claim is inferred.
-		Compaction: CompactionProtocol{LeadCommand: true, WorkerCommand: true},
+		Compaction: CompactionProtocol{LeadCommand: true, WorkerCommand: true, Lifecycle: true},
 		Oldest:     "0.160.0",
 		Newest:     "0.170.0",
 		Entries: []CapabilityEntry{
@@ -460,7 +461,7 @@ func CodexCatalog() *HarnessProfile {
 			{Item: ItemSkillInjection, Role: RoleLead, Grade: GradeNative,
 				Source: "Codex plugin skills stay loaded while the plugin's stdio ws MCP entry is shadowed by HTTP MCP"},
 			{Item: ItemCompaction, Role: RoleLead, Grade: GradeNative,
-				Source: "legacy dashboard /compact maps to thread/compact/start; the new lifecycle lever is unsupported until a live probe verifies detection"},
+				Source: "Codex 0.170.0 live app-server probe: thread/compact/start emits item/started and item/completed for contextCompaction before turn/completed"},
 			{Item: ItemRewind, Role: RoleLead, Grade: GradeUnsupported, Source: "no ws wiring"},
 			{Item: ItemToolRemoval, Role: RoleLead, Grade: GradeUnsupported,
 				Source: "the session keeps the user's tool setup"},

@@ -273,7 +273,7 @@ func TestClaudeCatalogValues(t *testing.T) {
 			ItemReasoningStream: GradeUnsupported, ItemUsageQuery: GradeNative,
 		},
 		RoleWorker: {
-			ItemSkillList: GradeUnsupported, ItemSkillInjection: GradeNative, ItemCompaction: GradeUnsupported,
+			ItemSkillList: GradeUnsupported, ItemSkillInjection: GradeNative, ItemCompaction: GradeNative,
 			ItemRewind: GradeUnsupported, ItemToolRemoval: GradeNative, ItemSubagentRemoval: GradeNative,
 			ItemModelEffort: GradeNative, ItemApproval: GradeUnsupported, ItemSteer: GradeUnsupported,
 			ItemInterrupt: GradeNative, ItemFollowUp: GradeSubstitute, ItemResume: GradeNative,

@@ -1575,9 +1575,10 @@ the successor's orphan sweep.
 Interrupt remains turn-scoped. Idle timeout, explicit stop, close, and expiry
 end the holder and revoke its tokens. A legacy direct worker's open turn
 settles `interrupted` once before queued input starts its next held process.
-A lost 32 MiB ring uses existing backend recovery; a backend that cannot
-reconcile the lost turn reports failure honestly. Re-arming agy's model-wait
-watchdog across replacement remains outside this contract, matching held leads.
+Output lost from the holder's ring uses existing backend recovery. A backend
+that cannot reconcile the lost turn reports failure honestly. Re-arming agy's
+model-wait watchdog across replacement remains outside this contract, matching
+held leads.
 MCP calls during drain may receive 503. Windows survival requires a
 restart-safe holder; one still inside its starter's job object may end with it.
 
@@ -1603,11 +1604,14 @@ while the child lives.
 
 The daemon scans the holders directory at start and every 3 minutes,
 attaches to every holder over loopback TCP with the descriptor's token, and
-replays the holder's output ring (sequenced; 4 MiB for a terminal holder,
-32 MiB for a hosted lead or worker's holder, `leadRingBytes`, so a rejoin
-rebuilds a long turn whole; a reattach within one
-daemon process continues after the last sequence it saw, a new daemon
-process replays the whole ring). The newest authenticated attach takes over,
+replays the holder's sequenced output. A terminal holder keeps a fixed
+4 MiB ring. A newly launched hosted lead or worker holder retains 32 MiB
+and can grow to 1 GiB while output waits to be sent. A successful socket
+send lets the holder reclaim the sent records above 32 MiB. At the ceiling
+the oldest records are evicted. Running holders keep their launch settings
+across daemon replacement. A reattach within one daemon process
+continues after the last sequence it saw. A new daemon process replays the
+whole ring. The newest authenticated attach takes over,
 so a replaced daemon and its successor never both write to one child. A
 descriptor whose process is gone is removed with its directory, and so is
 one whose PID now belongs to another process (the endpoint does not answer

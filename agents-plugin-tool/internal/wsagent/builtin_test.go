@@ -99,7 +99,7 @@ func TestBuiltinExploreProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := rp.Definition
-	if rp.Scope != wsconfig.ScopeBuiltin || p.Backend != BackendPi || p.Lead || !slices.Equal(p.Tools, []string{"read", "grep", "find", "ls"}) || len(p.WSTools)+len(p.MCPServers)+len(p.Plugins) != 0 || p.Skills || p.Model != "" || p.Effort != "" {
+	if rp.Scope != wsconfig.ScopeBuiltin || p.Backend != BackendPi || p.Lead || !slices.Equal(p.Tools, []string{"read", "grep", "find", "ls"}) || !slices.Equal(p.WSTools, []string{"compact"}) || len(p.MCPServers)+len(p.Plugins) != 0 || p.Skills || p.Model != "" || p.Effort != "" {
 		t.Fatalf("explore profile is not local read-only and tier-selected: %+v", p)
 	}
 	text, ok := p.BuiltinInstructions()

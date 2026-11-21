@@ -305,7 +305,7 @@ func TestClaudeWorkerRunsOverHTTP(t *testing.T) {
 	}
 	s.Started([]string{"PATH=/bin"}, 777)
 	hello, void, ok := h.runner.ResolveMCPToken(s.Token)
-	if !ok || hello.Env[EnvAllowedTools] != "tickets.query" || hello.Env[EnvNoDashboard] != "1" || hello.OwnerPID != 777 || !sameDir(hello.Cwd, h.root) {
+	if !ok || hello.Env[EnvAllowedTools] != "tickets.query,compact" || hello.Env[EnvNoDashboard] != "1" || hello.OwnerPID != 777 || !sameDir(hello.Cwd, h.root) {
 		t.Fatalf("the token resolves to the worker's ws-mcp context: %+v %v", hello, ok)
 	}
 	raw, err := os.ReadFile(recordPath(wsdashboard.SessionDir(h.dir, c.ID)))

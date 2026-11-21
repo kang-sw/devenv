@@ -84,8 +84,11 @@ func TestSendRunsTurnAndHeldSendsGoAsOneTurn(t *testing.T) {
 		t.Fatalf("first turn = %q", got)
 	}
 	spec := h.backend.start(0)
-	if spec.Root != h.root || spec.Model != "haiku" || spec.SessionID != "" || spec.WSMCP != nil {
-		t.Fatalf("start spec = %+v", spec)
+	if spec.Root != h.root || spec.Model != "haiku" || spec.SessionID != "" {
+		t.Fatalf("start root=%q model=%q session=%q", spec.Root, spec.Model, spec.SessionID)
+	}
+	if spec.WSMCP == nil || spec.WSMCP.Env[EnvAllowedTools] != "compact" {
+		t.Fatal("worker must attach ws-mcp with the compact-only allowlist")
 	}
 	instr, err := os.ReadFile(spec.Instructions)
 	if err != nil || !strings.Contains(string(instr), "Answer questions") {
@@ -222,7 +225,7 @@ func TestRecordSurvivesDaemonRestart(t *testing.T) {
 	if !strings.Contains(string(instr), rec.WSKey) {
 		t.Fatalf("the agent should get its ws session key in its instructions")
 	}
-	if spec.WSMCP == nil || spec.WSMCP.Env[EnvAllowedTools] != "tickets.query" || spec.WSMCP.Env[EnvNoDashboard] != "1" {
+	if spec.WSMCP == nil || spec.WSMCP.Env[EnvAllowedTools] != "tickets.query,compact" || spec.WSMCP.Env[EnvNoDashboard] != "1" {
 		t.Fatalf("ws-mcp should carry the allowlist and the dashboard off: %+v", spec.WSMCP)
 	}
 	for _, name := range []string{"WS_MAILBOX", "WS_MAILBOX_AUTO"} {

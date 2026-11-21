@@ -6,7 +6,9 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"html/template"
+	"io/fs"
 	"regexp"
 	"strings"
 	"sync"
@@ -24,7 +26,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard-*.css assets/dashboard.js assets/dashboard-*.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/tracker-*.js assets/mention.js assets/capsules.js assets/toast.js assets/confirm.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/gallery.js assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js assets/webcard.js assets/webframe.js assets/webinject.js assets/overview.js assets/brand/werkschaft-dark.svg assets/brand/werkschaft-light.svg
+//go:embed assets/dashboard.tmpl assets/dashboard-settings-catalog.json assets/dashboard.css assets/dashboard-*.css assets/dashboard.js assets/dashboard-*.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/tracker-*.js assets/mention.js assets/capsules.js assets/toast.js assets/confirm.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/gallery.js assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js assets/webcard.js assets/webframe.js assets/webinject.js assets/overview.js assets/brand/werkschaft-dark.svg assets/brand/werkschaft-light.svg
 var dashboardFS embed.FS
 
 // These are ordered source fragments, not independently loaded scripts or
@@ -193,6 +195,12 @@ type pageAssetsData struct {
 	FrameWebFile        string
 	FrameSelectFile     string
 	FrameI18nFiles      map[string]string
+	SettingsCSS         template.CSS
+	SettingsScript      template.JS
+	SettingsCatalog     template.JS
+	SettingsCSSFile     string
+	SettingsScriptFile  string
+	SettingsI18nFiles   map[string]string
 	Sprite              template.HTML
 	WhiteboardCSS       template.CSS
 	WhiteboardSprite    template.HTML
@@ -312,6 +320,16 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		raw, err = readDashboardSource(read, name)
 		return string(raw)
 	}
+	optional := func(name string) string {
+		if err != nil {
+			return ""
+		}
+		raw, readErr := read(name)
+		if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+			err = readErr
+		}
+		return string(raw)
+	}
 	wb, werr := wswhiteboard.PageAssets()
 	if werr != nil {
 		return nil, werr
@@ -334,6 +352,9 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		MemoScript:       template.JS(get("memo.js")),
 		UsageScript:      template.JS(get("usage.js")),
 		ShellScript:      template.JS(get("shell.js")),
+		SettingsCSS:      template.CSS(get("dashboard-settings.css") + "\n" + optional("dashboard-settings-extras.css")),
+		SettingsScript:   template.JS(optional("dashboard-settings-extras.js") + "\n;\n" + get("dashboard-settings.js")),
+		SettingsCatalog:  template.JS(get("dashboard-settings-catalog.json")),
 		OverviewScript:   template.JS(get("overview.js")),
 		CardsScript:      template.JS(get("gallery.js") + "\n;\n" + get("cards.js")),
 		PreviewScript:    template.JS(get("preview.js")),
@@ -396,4 +417,25 @@ func assetID(data pageAssetsData, source string) string {
 		h.Write([]byte(wsi18n.Script(l.Code)))
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+type settingsGear struct{ Scope, Target, Worktree string }
+
+type settingsPageData struct {
+	Assets pageAssetsData
+	Theme  string
+}
+
+func renderSettingsPage(lang, theme string) (string, error) {
+	assets, err := loadDashboardAssets()
+	if err != nil {
+		return "", err
+	}
+	var buf bytes.Buffer
+	err = assets.templateFor(lang).ExecuteTemplate(&buf, "config-settings", settingsPageData{assets.data, theme})
+	return buf.String(), err
+}
+
+func (p shellPageData) Settings() bool {
+	return strings.HasPrefix(p.Src, "/settings?")
 }

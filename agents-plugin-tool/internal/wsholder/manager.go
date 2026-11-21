@@ -485,7 +485,7 @@ func (m *Manager) event(id string, ev Event) {
 	sinks := m.sinks
 	m.mu.Unlock()
 	if newlyLost > 0 {
-		m.logf("holder %s lost %d records before %d: they left its ring while no daemon was attached", id, newlyLost, ev.To)
+		m.logf("holder %s lost %d records before %d: they left its ring before the daemon received them", id, newlyLost, ev.To)
 	}
 	for _, sink := range sinks {
 		sink.HolderEvent(id, ev)
@@ -563,9 +563,12 @@ type LaunchSpec struct {
 	// Session is a JSON object the holder records in its descriptor, nil
 	// for none.
 	Session json.RawMessage
-	// RingBytes is the size of this holder's output ring; zero is
+	// RingBytes is the retained size of this holder's output ring; zero is
 	// Options.RingBytes.
 	RingBytes int
+	// RingCeilingBytes caps the ring with output waiting to be sent. Zero
+	// keeps the ring fixed at its retained size.
+	RingCeilingBytes int
 	// RingSkip is a regular expression (the syntax Go and Python share):
 	// the pipe child's whole stdout lines it matches from their start stay
 	// out of the ring, so they take no sequence and reach no client. Empty
@@ -633,6 +636,9 @@ func (m *Manager) launch(spec LaunchSpec) (string, error) {
 	}
 	if ring > 0 {
 		args = append(args, "--ring-bytes", strconv.Itoa(ring))
+	}
+	if spec.RingCeilingBytes > 0 {
+		args = append(args, "--ring-ceiling-bytes", strconv.Itoa(spec.RingCeilingBytes))
 	}
 	if spec.RingSkip != "" {
 		args = append(args, "--ring-skip", spec.RingSkip)

@@ -34,3 +34,6 @@ agents-plugin-tool/internal/wswhiteboard/assets/mermaid/mermaid.min.js linguist-
 /agents-plugin-tool/internal/wsholder/manager_test.go ws-size-guard=1300
 /agents-plugin-tool/internal/wsdashboard/assets/tracker-render.js ws-size-guard=1300
 /agents-plugin-tool/internal/wsdashboard/assets/dashboard-ticketmap-graph.js ws-size-guard=1300
+# Owner (2073)=a 2026-11-21: gallery cards script (2376) and agy watchdog tests (1032) passed their limits; raise their own soft limits.
+/agents-plugin-tool/internal/wsdashboard/assets/cards.js ws-size-guard=2900
+/agents-plugin-tool/internal/wsagent/agy_watchdog_test.go ws-size-guard=1300

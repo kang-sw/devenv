@@ -331,6 +331,9 @@ func (r *Runner) resolve(profile, root string) (ResolvedProfile, error) {
 	if len(rp.Definition.WSTools) > 0 && r.opts.WSMCP == nil {
 		return ResolvedProfile{}, categorized(ErrInvalidProfile, badRequest("agent profile %q allows ws tools, but this daemon cannot attach ws-mcp", rp.Name))
 	}
+	if !rp.Definition.Lead && r.opts.WSMCP != nil && !slices.Contains(rp.Definition.WSTools, "compact") {
+		rp.Definition.WSTools = append(slices.Clone(rp.Definition.WSTools), "compact")
+	}
 	if rp.Definition.Lead && (r.opts.Holders == nil || r.opts.LeadKeys == nil) {
 		return ResolvedProfile{}, categorized(ErrInvalidProfile, badRequest("agent profile %q is a lead profile, but this daemon runs no session holders", rp.Name))
 	}

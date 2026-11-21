@@ -286,13 +286,13 @@ func (p *agyProcess) Close() error {
 
 // closeUnsolicitedTurn settles a self-resumed background-wakeup turn once the
 // stream goes quiet after its final update, serialized with streamProcess.feed.
-func (p *agyProcess) closeUnsolicitedTurn() {
+func (p *agyProcess) closeUnsolicitedTurn(generation uint64) {
 	p.feedMu.Lock()
 	defer p.feedMu.Unlock()
 	if p.finished {
 		return
 	}
-	for _, ev := range p.m.closeUnsolicited(time.Now().UnixMilli()) {
+	for _, ev := range p.m.closeUnsolicited(time.Now().UnixMilli(), generation) {
 		p.emit(ev)
 	}
 }
@@ -645,14 +645,16 @@ type agyMapper struct {
 	openBg          map[string]bool
 	bgCalls         map[string]bool
 	modelFailure    string
-	wakeTimer       *time.Timer
-	onWakeClose     func()
 	turnSeq         int
 	group           int
 	groupCalls      bool
 	reply           strings.Builder
 	replyAt         int64
 	batches         batchTracker
+
+	wakeTimer      *time.Timer
+	wakeGeneration uint64
+	onWakeClose    func(uint64)
 
 	// approvals are the pending permission requests by ApprovalRequest.ID,
 	// approvalOf their ids by tool call.
@@ -682,7 +684,7 @@ func newAgyMapper(sessionID string) *agyMapper {
 	}
 }
 
-func (m *agyMapper) setWakeClose(fn func()) {
+func (m *agyMapper) setWakeClose(fn func(uint64)) {
 	m.mu.Lock()
 	m.onWakeClose = fn
 	m.mu.Unlock()
@@ -706,8 +708,10 @@ func (m *agyMapper) armWakeTimerLocked(d time.Duration) {
 		return
 	}
 	m.stopWakeTimerLocked()
+	m.wakeGeneration++
+	generation := m.wakeGeneration
 	fn := m.onWakeClose
-	m.wakeTimer = time.AfterFunc(d, fn)
+	m.wakeTimer = time.AfterFunc(d, func() { fn(generation) })
 }
 
 func (m *agyMapper) armWakeIfReadyLocked(replaying bool) {
@@ -743,17 +747,19 @@ func (m *agyMapper) replayState(ev Event) []Event {
 	return nil
 }
 
-func (m *agyMapper) closeUnsolicited(now int64) []Event {
+func (m *agyMapper) closeUnsolicited(now int64, generation uint64) []Event {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// A replaced timer may already be waiting to acquire the feed lock.
+	if m.wakeTimer == nil || generation != m.wakeGeneration {
+		return nil
+	}
 	if !m.unsolicitedTurn || !m.inTurn || len(m.outstanding) > 0 || len(m.approvals) > 0 {
 		return nil
 	}
 	if len(m.openCalls) > 0 && !(m.wakeStepHadText && len(m.openCalls) == len(m.openBg)) {
 		return nil
 	}
-	m.wakeTimer = nil
-	m.rate.dropUntracked()
 	return m.endTurn(agyMessage{}, now)
 }
 
@@ -1379,6 +1385,13 @@ func (m *agyMapper) update(params json.RawMessage, replies lineReplies, now int6
 		m.wakeSawUsage = false
 		m.armWakeIfReadyLocked(replaying)
 		return out
+	case "ws_activity":
+		// A holder pulse can trail a prompt response within one read.
+		// Extend an open turn's quiet window without starting a new turn.
+		if m.unsolicitedTurn && !replaying {
+			m.wakeSawUsage = false
+			m.armWakeIfReadyLocked(false)
+		}
 	case "tool_call":
 		out := m.startTurn(nil, replaying)
 		m.stripReplyFailure(m.modelFailure)

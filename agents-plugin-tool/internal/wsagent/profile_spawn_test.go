@@ -90,7 +90,7 @@ func TestPiProfileSubsetRefusalAndOverrides(t *testing.T) {
 		t.Fatalf("a narrower override should be allowed: %d %s", code, body)
 	}
 	spec := h.backend.waitProcStart(t, 1)
-	if !slices.Equal(spec.Profile.Tools, []string{"read"}) || spec.WSMCP.Env[EnvAllowedTools] != "git.diff" {
+	if !slices.Equal(spec.Profile.Tools, []string{"read"}) || spec.WSMCP.Env[EnvAllowedTools] != "git.diff,compact" {
 		t.Fatalf("override not honored: %+v", spec)
 	}
 }
@@ -103,6 +103,7 @@ func TestPiProfileSubsetCapabilities(t *testing.T) {
 		want  []string
 	}{
 		{"subset", parent, nil},
+		{"compact across old snapshot", Profile{WSTools: []string{"compact"}}, nil},
 		{"tool", Profile{Tools: []string{"read", "bash"}}, []string{"tools.bash"}},
 		{"ws", Profile{WSTools: []string{"git.diff", "tickets.close"}}, []string{"ws_tools.tickets.close"}},
 		{"server", Profile{MCPServers: map[string]json.RawMessage{"other": json.RawMessage(`{}`)}}, []string{"mcp_servers.other"}},

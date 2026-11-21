@@ -616,7 +616,7 @@
     var ent = shOn || shWant;
     if (ent && ent.f.path === f.path) {
       ent.el.inert = false;
-      if (push && location.pathname + location.hash !== f.path + f.hash) shPush(f);
+      if (push && window.WsShell.pagePath(location) + location.hash !== f.path + f.hash) shPush(f);
       if (!push) shIndex = shHistoryIndex();
       if (f.hash !== ent.f.hash) {
         try { ent.el.contentWindow.location.hash = f.hash; } catch (x) { /* unloading */ }
@@ -675,7 +675,7 @@
     shStart(f, push);
   }
   function shStart(f, push, from) {
-    if (push && location.pathname + location.hash !== f.path + f.hash) shPush(f);
+    if (push && window.WsShell.pagePath(location) + location.hash !== f.path + f.hash) shPush(f);
     if (!push) shIndex = shHistoryIndex();
     var cached = window.WsShell.cacheLimit && shFrames.filter(function (x) { return x.loaded && x.f.rid && x.f.path === f.path; })[0];
     if (cached) {
@@ -704,6 +704,8 @@
   function shRid(id) {
     rid = id;
     root.setAttribute("data-rid", id);
+    if (location.pathname === "/settings") root.setAttribute("data-settings-shell", "");
+    else root.removeAttribute("data-settings-shell");
     railMarks();
   }
   function shShow(ent, from) {
@@ -867,7 +869,7 @@
         else shRestoreDone();
         return;
       }
-      shOpen(location.pathname + location.hash, false);
+      shOpen(window.WsShell.pagePath(location) + location.hash, false);
     });
     // The shell's hotkeys besides the rail's: the search palette's keys
     // (tracker.js qShortcut) open the shown frame's palette; Ctrl+K,
@@ -1048,7 +1050,7 @@
   // header, in case it posted before this script listened. A frame already
   // loaded fires no load for shAdd to see.
   function shShellInit() {
-    var el = doc.querySelector("#frames > iframe"), f = window.WsShell.framed(new URL(location.pathname + location.hash, location.origin), location.origin);
+    var el = doc.querySelector("#frames > iframe"), f = window.WsShell.framed(new URL(window.WsShell.pagePath(location) + location.hash, location.origin), location.origin);
     if (!el || !f) return;
     shIndex = shHistoryIndex();
     history.replaceState(Object.assign({}, history.state, { wsShellIndex: shIndex }), "", location.href);

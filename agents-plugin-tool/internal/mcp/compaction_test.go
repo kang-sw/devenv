@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -11,6 +12,54 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
+
+type compactAccessRunner struct {
+	PiAgents
+	caller string
+}
+
+func (*compactAccessRunner) Watch(func(wsagent.State)) func() { return func() {} }
+
+func (r *compactAccessRunner) Compact(caller, _ string, _ *bool) wsagent.CompactResult {
+	r.caller = caller
+	return wsagent.CompactResult{Status: "queued"}
+}
+
+func TestCompactionToolIsListedAndCallableForBuiltinProfiles(t *testing.T) {
+	setupMailboxTestEnv(t)
+	for name, raw := range wsagent.BuiltinProfiles() {
+		profile, err := wsagent.ParseProfile(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, authority := range []wsagent.PermissionLevel{wsagent.PermissionReadOnly, wsagent.PermissionWorkdirWrite, wsagent.PermissionFull} {
+			t.Run(name+"/"+string(authority), func(t *testing.T) {
+				root := t.TempDir()
+				runner := &compactAccessRunner{}
+				env := append(os.Environ(), envAllowedTools+"="+strings.Join(profile.WSTools, ","), wsagent.EnvPermissionLevel+"="+string(authority))
+				s := NewServerWithOptions(ServerOptions{Root: root, Version: "test", Env: env, Agents: runner})
+				t.Cleanup(s.Close)
+				role := roleDelegate
+				if profile.Lead {
+					role = roleLead
+				} else if len(profile.WSTools) == 0 {
+					t.Fatal("worker profile has no ws attachment")
+				}
+				key, err := s.sessions.mint(root, role, "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !listedToolNames(t, s)["compact"] {
+					t.Fatal("tools/list omitted compact")
+				}
+				resp := keyedCall(t, s, 1, key, "compact", nil)
+				if toolIsError(t, resp) || runner.caller != key {
+					t.Fatalf("compact did not reach the runner: %s", resp)
+				}
+			})
+		}
+	}
+}
 
 func TestCompactionRegistryManifestParity(t *testing.T) {
 	legacy, _ := loadDeclaredConfig(piManifestPath).lookup("pi.compaction_advisory_percent")
@@ -148,8 +197,9 @@ func TestCompactionConfigTuneLiveReloadsRunningConversation(t *testing.T) {
 		}
 	}
 
-	// Start conversation with global hard threshold X = 80%.
-	tune(1, map[string]any{"key": "compaction.lead_hard", "value": "80%", "harness": "*", "scope": "global"})
+	// Keep 60% below advisory so this test exercises the hard threshold.
+	tune(1, map[string]any{"key": "compaction.lead_advisory", "value": "70%", "harness": "*", "scope": "global"})
+	tune(2, map[string]any{"key": "compaction.lead_hard", "value": "80%", "harness": "*", "scope": "global"})
 	runner, backend := startCompactionTestRunner(t, s)
 	st, err := runner.CreateLead(wsagent.BackendClaude, root, wsagent.LeadOptions{})
 	if err != nil {
@@ -173,7 +223,7 @@ func TestCompactionConfigTuneLiveReloadsRunningConversation(t *testing.T) {
 	}
 
 	// Tune global hard threshold to Y = 55% via config.tune without restarting.
-	tune(2, map[string]any{"key": "compaction.lead_hard", "value": "55%", "harness": "*", "scope": "global"})
+	tune(3, map[string]any{"key": "compaction.lead_hard", "value": "55%", "harness": "*", "scope": "global"})
 
 	// Next threshold check uses Y=55% and queues /compact on the same running process.
 	backend.emit(wsagent.Event{Live: &wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &tokens, Window: 100000}}})
@@ -197,8 +247,9 @@ func TestCompactionConfigTuneProjectShadowsGlobalLiveReload(t *testing.T) {
 		}
 	}
 
-	// Project-scope hard threshold 90% set before conversation starts.
-	tune(1, map[string]any{"key": "compaction.lead_hard", "value": "90%", "harness": "*", "scope": "project"})
+	// Keep 60% below advisory so this test exercises the hard threshold.
+	tune(1, map[string]any{"key": "compaction.lead_advisory", "value": "70%", "harness": "*", "scope": "global"})
+	tune(2, map[string]any{"key": "compaction.lead_hard", "value": "90%", "harness": "*", "scope": "project"})
 	runner, backend := startCompactionTestRunner(t, s)
 	st, err := runner.CreateLead(wsagent.BackendClaude, root, wsagent.LeadOptions{})
 	if err != nil {
@@ -218,7 +269,7 @@ func TestCompactionConfigTuneProjectShadowsGlobalLiveReload(t *testing.T) {
 	})
 
 	// Global tune to 55% must still be shadowed by project scope 90%.
-	tune(2, map[string]any{"key": "compaction.lead_hard", "value": "55%", "harness": "*", "scope": "global"})
+	tune(3, map[string]any{"key": "compaction.lead_hard", "value": "55%", "harness": "*", "scope": "global"})
 	if _, err := runner.Send(st.ID, "second"); err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +290,7 @@ func TestCompactionConfigTuneProjectShadowsGlobalLiveReload(t *testing.T) {
 	})
 
 	// Resetting the project override via config.tune exposes the global 55% live.
-	tune(3, map[string]any{"key": "compaction.lead_hard", "reset": true, "harness": "*", "scope": "project"})
+	tune(4, map[string]any{"key": "compaction.lead_hard", "reset": true, "harness": "*", "scope": "project"})
 	backend.emit(wsagent.Event{Live: &wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &tokens60, Window: 100000}}})
 	lifecycleEventually(t, "compact sent after project reset exposes global 55%", func() bool {
 		_, sends := backend.counts()

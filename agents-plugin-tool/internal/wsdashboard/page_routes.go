@@ -261,6 +261,10 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 // top header, holding view's head when the shell opens on a session; with
 // no view, the root has an empty header and no selected session.
 func (d *Daemon) serveShell(w http.ResponseWriter, r *http.Request, view *SessionView, src string) {
+	d.serveShellStatus(w, r, view, src, http.StatusOK)
+}
+
+func (d *Daemon) serveShellStatus(w http.ResponseWriter, r *http.Request, view *SessionView, src string, status int) {
 	lang, pref := requestLang(r)
 	page := shellPageData{Lang: lang, LangPref: pref, Theme: requestTheme(r), SysOpen: localViewer(r), Src: src, Title: "Werkschaft (alpha)", Version: d.endpoint.Version, LAN: d.lanAccessFor(r)}
 	if view != nil {
@@ -277,7 +281,7 @@ func (d *Daemon) serveShell(w http.ResponseWriter, r *http.Request, view *Sessio
 		var html string
 		if html, err = renderShellPage(page, view); err == nil {
 			w.Header().Set("Content-Security-Policy", sessionPageCSP(false))
-			writeHTML(w, html)
+			writeHTMLStatus(w, status, html)
 			return
 		}
 	}

@@ -150,3 +150,63 @@ test('rail wheel: one tick per page, debounced 140ms', () => {
   assert.equal(G.railStep(0, 139), false);
   assert.equal(G.railStep(0, 140), true);
 });
+
+test('rail wheel: line and page mouse notches fire immediately with 140ms debounce', () => {
+  const w = new G.RailWheel();
+  const event = (dy, now, deltaMode = 1) => w.wheel({ dy, now, deltaMode });
+  assert.equal(event(3, 0), 1);
+  assert.equal(event(3, 139), 0);
+  assert.equal(event(3, 150), 1);
+  assert.equal(event(-3, 300), -1);
+  assert.equal(event(1, 450, 2), 1);
+});
+
+test('rail wheel: large pixel mouse notches remain discrete', () => {
+  const w = new G.RailWheel();
+  assert.deepEqual([100, 53, -100].map((dy, i) => w.wheel({ dy, deltaMode: 0, now: i * 150 })), [1, 1, -1]);
+});
+
+function railTrace(deltas, interval = 16) {
+  const w = new G.RailWheel();
+  return deltas.map((dy, i) => w.wheel({ dy, deltaMode: 0, now: i * interval }));
+}
+
+test('rail wheel: light brush does not turn a page', () => {
+  assert.deepEqual(railTrace([2, 4, 6, 4, 2]), [0, 0, 0, 0, 0]);
+});
+
+test('rail wheel: deliberate swipe and brisk flick each turn exactly one page', () => {
+  for (const trace of [[4, 10, 18, 26, 30, 24, 18, 12, 8, 5, 3, 2, 1], [55, 32, 20, 14, 9, 6, 4, 2, 1]]) {
+    assert.equal(railTrace(trace).filter(Boolean).length, 1);
+  }
+});
+
+test('rail wheel: sustained drag is paced and large events in a stream accumulate', () => {
+  assert.equal(railTrace(Array(41).fill(20)).filter(Boolean).length, 2);
+  assert.deepEqual(railTrace([20, 55, 35]).filter(Boolean), [1]);
+});
+
+test('rail wheel: reversal and idle reset the accumulated pixels', () => {
+  const w = new G.RailWheel();
+  const event = (dy, now) => w.wheel({ dy, deltaMode: 0, now });
+  assert.equal(event(45, 0), 0);
+  assert.equal(event(45, 16), 0);
+  assert.equal(event(-40, 32), 0);
+  assert.equal(event(-40, 48), 0);
+  assert.equal(event(-30, 64), -1);
+  assert.equal(event(40, 400), 0);
+  assert.equal(event(40, 580), 0);
+  assert.equal(event(0.5, 590), 0);
+  assert.equal(event(40, 600), 0);
+  assert.equal(event(30, 616), 1);
+});
+
+test('rail wheel: large initial flick extends lock when small tail arrives', () => {
+  const w = new G.RailWheel();
+  const event = (dy, now) => w.wheel({ dy, deltaMode: 0, now });
+  assert.equal(event(55, 0), 1);
+  assert.equal(event(32, 16), 0);
+  for (let now = 32; now < 320; now += 16) assert.equal(event(20, now), 0);
+  for (let now = 320; now < 400; now += 16) assert.equal(event(20, now), 0);
+  assert.equal(event(20, 400), 1);
+});

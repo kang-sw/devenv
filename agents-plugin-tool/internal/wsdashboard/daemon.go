@@ -71,6 +71,7 @@ type DaemonOptions struct {
 	// Sessions reads registered sessions' stores for the session index; nil
 	// runs the daemon without one (no polling, and /nudge answers 404).
 	Sessions SessionSource
+	Config   *ConfigBackend
 	// PollInterval is the polling backstop period; zero means
 	// DefaultPollInterval.
 	PollInterval time.Duration
@@ -192,6 +193,7 @@ type Daemon struct {
 	log        io.Writer
 	index      *Index
 	source     SessionSource
+	config     *ConfigBackend
 	agents     AgentHost
 	leadNudges interface {
 		Start()
