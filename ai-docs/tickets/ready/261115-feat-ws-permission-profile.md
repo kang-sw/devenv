@@ -1115,6 +1115,90 @@ omission, child admission and T0 callers/storage. Provider-backed sandbox checks
 require separate authorization. Exact adapter methods come from its settled
 contract, not this documentation capture.
 
+### Result (53349aeb5) - 2026-11-21
+
+Phase 3 landed in `090d72e04` with the independent-review corrections in
+`53349aeb5`. The ticket remains `ready/` for Phases 4–5.
+
+- **VERIFIED — per-run mapping and every launch.** Common Codex intent maps
+  `read-only` to `read-only`/`on-request`, `workdir-write` to
+  `workspace-write`/`on-request`, and `full` to
+  `danger-full-access`/`never` (`internal/wsagent/permission.go:40-60`,
+  `internal/wsagent/codex.go:266-274`). The runner rereads the existing
+  selection for each process and passes it transiently in `StartSpec`; Codex
+  puts the pair on `thread/start` or `thread/resume` and every `turn/start`,
+  outside the global `config` object (`internal/wsagent/runner_process.go:441-450`,
+  `internal/wsagent/codex.go:181-219,304-344`). No lead MCP tool is silently
+  pre-approved: the existing tool approval override remains worker-only
+  (`internal/wsagent/codex.go:230-246`).
+- **VERIFIED — actual settings and honest quality.** The 0.160.0 open response
+  and `thread/settings/updated` notification are mapped into `active_mode`
+  (`internal/wsagent/codex_mapper.go:155-194,275-297,320-351`). Exact reported
+  read-only/on-request is `partial`; workdir-write, full, mismatched approval
+  policy, unknown and absent reports stay `advisory`, because MCP and other
+  effects are not proven confined (`internal/wsagent/permission.go:92-105,185-219`).
+  New process and holder-attach boundaries clear process-scoped evidence before
+  replay/open can repopulate it, so a reportless replacement cannot retain old
+  partial quality (`internal/wsagent/runner_process.go:470-487`).
+- **VERIFIED — shared contract and legacy behavior.** Production support now
+  advertises the three already-defined common levels for Codex and the generic
+  dashboard maps them to native modes behind the existing fresh available-lead
+  preflight (`cmd/ws-mcp/dashboard.go:303-315`,
+  `internal/wsdashboard/assets/dashboard-leads.js:70-97`). Explicit choices use
+  the existing unknown-preserving `permission.json` sidecar and optional State
+  projection (`internal/wsagent/permission_store.go:119-140,201-239`,
+  `internal/wsagent/runner_state.go:68-77`). Omission writes no sidecar, sends no
+  sandbox/approval override, derives display from a live reported default only,
+  and does not persist that observation into a later resume
+  (`internal/wsagent/permission.go:64-89,204-218`,
+  `internal/wsagent/runner_events.go:151-176`). Claude and Pi mappings remain
+  unchanged (`internal/wsagent/permission.go:42-50,65-76`).
+- **VERIFIED — fake/protocol coverage.** The synthetic app-server test pins all
+  three request pairs, State, sidecar, nudge, global-config absence, mismatched
+  and unavailable reports, stale-observation invalidation, omission-preserving
+  resume and explicit Codex-parent child refusal
+  (`internal/wsagent/codex_lead_test.go:165-314`). The checked-in 0.160.0
+  transcript independently pins open and per-turn reported settings
+  (`internal/wsagent/codex_fixture_test.go:439-466`). No provider-backed,
+  account-backed, network or live Codex run was used.
+
+**Compatibility tier: T0 transparent (VERIFIED).** This phase adds no MCP/HTTP
+route or argument, hello field, Record member, profile key, manifest key or new
+stored shape. Codex only begins populating the already-optional
+`permission_levels` support member (`internal/wsagent/support.go:225-236,256-264`)
+and reuses the existing optional State members and private sidecar cited above.
+An old daemon omits support, and the current UI's preflight sends no
+selection-bearing request when that member is absent
+(`internal/wsdashboard/assets/dashboard-leads.js:81-97`). Legacy omission is
+also proven not to create storage or freeze a later launch
+(`internal/wsagent/codex_lead_test.go:272-302`). Therefore old callers continue
+on the native Codex path and old storage remains readable without overwrite or
+recovery behavior.
+
+Final verification from `agents-plugin-tool/`:
+
+```sh
+go build ./...
+go vet ./internal/wsagent ./internal/wsdashboard ./cmd/ws-mcp
+test -z "$(gofmt -l cmd/ws-mcp/agent_mcp_test.go cmd/ws-mcp/dashboard.go internal/wsagent/backend.go internal/wsagent/codex.go internal/wsagent/codex_fixture_test.go internal/wsagent/codex_lead_test.go internal/wsagent/codex_mapper.go internal/wsagent/permission.go internal/wsagent/permission_test.go internal/wsagent/registration_permission_mode_test.go internal/wsagent/runner_events.go internal/wsagent/runner_process.go)"
+node internal/wsdashboard/testdata/permission-controls.test.cjs
+go test ./internal/wsagent -count=1
+go test ./internal/mcp -timeout 45m -run '^(TestAgent|TestConfigRegisteredAgentProfile|TestTrackerSupportRegisteredAgentBackend|TestCallAgentlessGate|TestCallDiscoveryRespectsPermissionAndRole)'
+go test ./internal/wsdashboard -run '^TestLeadPopoverLaunchBehavior$' -count=1
+go test ./cmd/ws-mcp -run '^TestAgentRunnerCatalogs$' -count=1
+```
+
+All commands passed; the final full wsagent run took 129.248 s, the focused MCP
+run 4.378 s, the dashboard run 1.332 s and the registration run 0.895 s. An
+earlier full run exposed the now-updated generalized error-string assertion and
+one unrelated Agy watchdog timing failure; each selector passed once in
+isolation, and the complete corrected rerun passed. The first independent
+read-only review of `090d72e04` found one Important stale-observation issue and
+no other findings. `53349aeb5` fixed it and the related legacy-default writeback
+edge; a fresh bounded review of that correction was clean (0 Critical,
+0 Important, 0 Minor). Provider/live behavior and an end-to-end truncated
+holder-replay fixture remain unverified and are not claimed.
+
 ### Phase 4: Add the agy per-run permission launch path
 
 Deferred under the Antigravity adapter's owner-resume/account and exact-version
