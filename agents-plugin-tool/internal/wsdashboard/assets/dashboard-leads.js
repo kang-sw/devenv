@@ -48,7 +48,8 @@
     function send() {
       if (trigger) trigger.disabled = true;
       fetch("/agents/" + encodeURIComponent(replyId) + "/close", {
-        method: "POST", credentials: "same-origin", cache: "no-store"
+        method: "POST", credentials: "same-origin", cache: "no-store",
+        headers: { "Content-Type": "application/json" }, body: "{}"
       }).then(function (r) {
         return r.text().then(function (body) {
           if (r.status !== 200) throw new Error(leadErr(r.status, body.trim()));

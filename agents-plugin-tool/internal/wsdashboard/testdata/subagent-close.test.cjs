@@ -35,6 +35,8 @@ test('idle, done and failed close immediately, once, with encoded id', async () 
     await settled();
     assert.equal(h.requests.length, 1); assert.equal(h.requests[0].url, '/agents/a%2Fb/close');
     assert.equal(h.requests[0].options.method, 'POST'); assert.equal(h.dialogs.length, 0);
+    assert.equal(h.requests[0].options.headers['Content-Type'], 'application/json');
+    assert.equal(h.requests[0].options.body, '{}');
     assert.equal(h.events[0].detail.replyId, 'a/b');
   }
 });
